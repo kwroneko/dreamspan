@@ -61,6 +61,7 @@ This project is made of exactly what Effect is for:
 - **SQLite driver.** `@effect/sql-sqlite-node` v4 is built on `node:sqlite`, not better-sqlite3 (which reference-harness uses).
   - FTS5 works in `node:sqlite` (checked on Node 24.15, SQLite 3.51.3).
   - Node's docs still mark `node:sqlite` as a release candidate.
+  - Turso was evaluated as an alternative engine and deferred: [STORAGE.md](STORAGE.md).
   - **[O]** Choose between `node:sqlite` through the official driver, or better-sqlite3 behind our own `SqlClient` adapter. It also needs checking that extension loading (sqlite-vec, if we use it) and reference-harness's single-writer queue port cleanly.
 - **Agents write v3 code by habit.** Examples: `catchAll` instead of `catch`, `Context.Tag` instead of `Context.Service`, `Either` instead of `Result`, and stale `effect/unstable/*` paths from the beta.
   - Install the official `Effect-TS/skills`.

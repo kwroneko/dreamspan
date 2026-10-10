@@ -22,3 +22,4 @@ Design phase. No code yet.
 - [spec/DATA-MODEL.md](spec/DATA-MODEL.md): the data model (phase 0).
 - [spec/CLIENT-FRAMEWORK.md](spec/CLIENT-FRAMEWORK.md): client framework evaluation, performance harness, design-system timing (phase 0).
 - [spec/EFFECT.md](spec/EFFECT.md): Effect across the stack (phase 0).
+- [spec/STORAGE.md](spec/STORAGE.md): storage engine, SQLite vs Turso (phase 0).

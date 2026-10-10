@@ -47,7 +47,7 @@ Coding agents now make it cheap to build and maintain a replacement, which wasn'
 | Language | TypeScript, across server and client | Decided (Rust considered and deferred: no viable ecosystem today, and hot-loading agent-written plugins is much easier in TS) |
 | LLM providers | `@earendil-works/pi-ai` 1.x | Proposed (also used by reference-harness and by DSH) |
 | Agent loop | `@earendil-works/pi-agent-core` 1.x, with our own persistence, fork and resume, as in reference-harness | Proposed |
-| Storage | SQLite (`better-sqlite3`) with FTS5 | Proposed |
+| Storage | SQLite (`node:sqlite` via Effect's driver) with FTS5; Turso evaluated and deferred ([STORAGE.md](STORAGE.md)) | Proposed |
 | Plugin kernel | Cordis (the kernel under DSH), to be evaluated standalone | Open |
 | Client | React (Decided); Vite + TanStack Router and the rest of the stack Proposed in [CLIENT-FRAMEWORK.md](CLIENT-FRAMEWORK.md) | Decided |
 | Effects, RPC, schemas | Effect 4 on the server and in the client data layer ([EFFECT.md](EFFECT.md)) | Proposed |

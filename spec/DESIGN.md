@@ -353,6 +353,9 @@ These are strategies for mapping history to user and assistant roles:
 - **[P]** Summaries cover **path segments**, so threads and branches share summaries up to their fork.
 - **[P]** Editing a message already covered by a summary marks that summary stale and re-summarizes it lazily. Mechanical edits such as renames are applied to the summaries directly.
 - **[P]** Summaries are **editable**, with versions.
+- **[D]** Memory retrieval of *some* sort will be a feature. LCM is already a form of RAG (owner, 2026-10-10).
+- **[D]** Assume vector search will exist somewhere eventually. Plain embedding search over all messages is of doubtful value on its own (owner, 2026-10-10). sqlite-vec already covers vector search, but only by brute force; an indexed ANN search is a benefit of alternatives such as Turso, not a requirement.
+- **[P]** Search tools combine full-text and vector results with reciprocal rank fusion (RRF). reference-harness's memory retrieval (`spec/MEMORY-RETRIEVAL.md`) and its RRF evaluations are the baseline.
 - **[D]** The UI shows where verbatim context ends and which summaries stand in for older history. **[P]** Three layers:
   1. an always-on **boundary divider** in the stream, which opens the current summaries
   2. an optional **coverage rail** next to the messages, with bars per summary by level, stale marks, and click to open
