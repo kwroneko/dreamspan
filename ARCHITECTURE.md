@@ -457,7 +457,8 @@ It fails with a typed `ProviderError`.
   They're classified from pi's final message, the HTTP status (or the status the SDK left at the start of the message), and pi's overflow and retry checks. A refusal carries Anthropic's category when given.
 - **Retries happen only before the first token:** `rate_limited`, `overloaded` and `network`, with `Retry-After` honored (and paused per connection) or exponential backoff. After output, a failure is never retried; it ends the stream with `afterTokens`.
 - **A per-connection cap** (`max_concurrent`) queues requests.
-- **Every attempt is a ledger row** (§3.12), opened before sending and closed whatever happens. A stopped stream aborts the HTTP request and closes its row as `aborted`.
+- **Every attempt is a ledger row** (§3.12), opened before sending and closed whatever happens: a stopped stream aborts the HTTP request and closes its row as `aborted`, and a call that throws instead of reporting closes it as `failed`.
+- **Secrets never appear in errors.** Error text (including the response bodies quoted in model-list errors) passes through a per-request scrubber before it's stored or shown. The scrubber covers the key, header values and the custom proxy URL with its password, longest first, and skips values under 6 characters.
 - **Google:** pi-ai's adapter rejects a custom `fetch`, so a Google connection whose route is a proxy is refused as `unusable` rather than silently going direct.
 
 **Explicit cache breakpoints** (`breakpoints.ts`, PROVIDERS §8), for Anthropic Messages so far:

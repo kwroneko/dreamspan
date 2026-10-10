@@ -13,6 +13,7 @@ import * as Database from "../src/db/Database.ts"
 import * as Network from "../src/net/Network.ts"
 import { classify, parseRetryAfter } from "../src/providers/errors.ts"
 import * as Providers from "../src/providers/Providers.ts"
+import { makeScrub } from "../src/providers/Providers.ts"
 import { alignTranscript } from "../src/providers/breakpoints.ts"
 import { priceCost } from "../src/providers/usage.ts"
 import { makeSecrets, Secrets } from "../src/secrets.ts"
@@ -267,6 +268,37 @@ describe("failures", () => {
       ).pipe(Effect.flip)
       assert.strictEqual(error.reason, "auth")
       assert.strictEqual(server.requests().filter((r) => r.path.endsWith("/chat/completions")).length, 1)
+    }).pipe(Effect.scoped, Effect.provide(layer()))
+  )
+
+  it.live("never shows the key, even when the provider's error echoes it", () =>
+    Effect.gen(function* () {
+      const key = "sk-live-0123456789abcdef"
+      const server = yield* mock((request, res) =>
+        request.path.endsWith("/models")
+          ? json(res, 200, openAiList([{ id: "m" }]))
+          : json(res, 400, { error: { message: `bad request for key ${key} with header tok-secret-header` } })
+      )
+      const { userId, connection, modelId, providers } = yield* connect("openai-chat", `${server.url}/v1`, key, "m")
+      yield* providers.setHeaders(userId, connection.id, { "X-Token": "tok-secret-header" })
+      const error = yield* collect(
+        providers.stream({
+          userId,
+          connectionId: connection.id,
+          modelId,
+          context,
+          attribution: { purpose: "generation" }
+        })
+      ).pipe(Effect.flip)
+      assert.strictEqual(error.reason, "bad_request")
+      assert.notInclude(error.message, key)
+      assert.notInclude(error.message, "tok-secret-header")
+      assert.include(error.message, "[redacted]")
+
+      server.setHandler((_request, res) => json(res, 401, { error: `unknown key ${key}` }))
+      const listError = yield* providers.refreshModels(userId, connection.id).pipe(Effect.flip)
+      assert.strictEqual(listError.reason, "auth")
+      assert.notInclude(listError.message, key)
     }).pipe(Effect.scoped, Effect.provide(layer()))
   )
 
@@ -708,6 +740,11 @@ describe("pure pieces", () => {
     const long = { ...counts, cacheRead: 250_000 }
     assert.closeTo(priceCost(long, price)!, (1000 * 2 + 250_000 * 0.2 + 60 * 2.5 + 40 * 4 + 10 * 8) / 1e6, 1e-12)
     assert.isNull(priceCost({ ...counts, output: null }, price))
+  })
+
+  it("scrubs every secret, longest first, and leaves short values alone", () => {
+    const scrub = makeScrub(["sk-abcdef123456", "sk-abcdef", "pw", null])
+    assert.strictEqual(scrub("key sk-abcdef123456 and sk-abcdef, pw"), "key [redacted] and [redacted], pw")
   })
 
   it("reads Retry-After as seconds or a date", () => {

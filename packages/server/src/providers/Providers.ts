@@ -127,6 +127,28 @@ interface Prepared {
   readonly apiKey: string | null
   readonly headers: Readonly<Record<string, string>>
   readonly override: ProxyOverride
+  /** Removes this connection's secrets from text that will be stored or shown (PROVIDERS §5). */
+  readonly scrub: (text: string) => string
+}
+
+/** A scrubber for the given secrets: every occurrence becomes "[redacted]". */
+export const makeScrub = (secrets: ReadonlyArray<string | null | undefined>) => {
+  // Short values would redact ordinary words; real keys and tokens are long.
+  const values = [...new Set(secrets.filter((v): v is string => typeof v === "string" && v.length >= 6))].sort(
+    (a, b) => b.length - a.length
+  )
+  return (text: string) => values.reduce((out, value) => out.split(value).join("[redacted]"), text)
+}
+
+/** The secrets in a proxy URL: the whole URL and its password. */
+const proxySecrets = (url: string | null) => {
+  if (url === null) return []
+  try {
+    const parsed = new URL(url)
+    return [url, decodeURIComponent(parsed.password), parsed.href]
+  } catch {
+    return [url]
+  }
 }
 
 const binding = (connectionId: string, field: "api_key" | "headers" | "proxy_url") =>
@@ -259,14 +281,16 @@ export const layer = (policy: RetryPolicy = defaultRetryPolicy) =>
               : connection.proxyMode === "direct"
                 ? { mode: "direct" }
                 : { mode: "inherit" }
+          const headers = headersJson === null ? {} : (JSON.parse(headersJson) as Record<string, string>)
           const prepared: Prepared = {
             connection,
             kind: connection.kind,
             api: info.api,
             baseUrl: connection.baseUrl ?? info.defaultBaseUrl,
             apiKey,
-            headers: headersJson === null ? {} : (JSON.parse(headersJson) as Record<string, string>),
-            override
+            headers,
+            override,
+            scrub: makeScrub([apiKey, ...Object.values(headers), ...proxySecrets(proxyUrl)])
           }
           if (!OWN_FETCH.has(prepared.api)) {
             // Its traffic would bypass our fetch, so it may only go where we'd send it direct anyway.
@@ -280,6 +304,9 @@ export const layer = (policy: RetryPolicy = defaultRetryPolicy) =>
           }
           return prepared
         })
+
+      const scrubbed = (prepared: Prepared, error: ProviderError) =>
+        providerError(error.reason, prepared.scrub(error.message), error)
 
       /** The fetch for a prepared connection's requests, reporting each route. */
       const fetchFor = (prepared: Prepared, onRoute: (description: string) => void) =>
@@ -350,7 +377,7 @@ export const layer = (policy: RetryPolicy = defaultRetryPolicy) =>
           apiKey: prepared.apiKey,
           headers: prepared.headers,
           fetch: fetchFor(prepared, onRoute)
-        }).pipe(Effect.mapError(fromList))
+        }).pipe(Effect.mapError((error) => scrubbed(prepared, fromList(error))))
 
       const refreshModels: ProvidersShape["refreshModels"] = (userId, connectionId) =>
         Effect.gen(function* () {
@@ -504,8 +531,18 @@ export const layer = (policy: RetryPolicy = defaultRetryPolicy) =>
               }
               return await events.result()
             },
-            catch: (error) => providerError("unknown", String(error))
-          })
+            catch: (error) => error
+          }).pipe(
+            // pi-ai reports request failures in the message, but a direct call can also
+            // throw; either way the result is a failed message, so the row still closes.
+            Effect.catch((thrown) =>
+              Effect.succeed<AssistantMessage>({
+                ...aborted(),
+                stopReason: "error",
+                errorMessage: thrown instanceof Error ? thrown.message : String(thrown)
+              })
+            )
+          )
 
           /** Closes the ledger row whatever happened, interruption included. */
           const close = (message: AssistantMessage, error: ProviderError | null) =>
@@ -559,12 +596,13 @@ export const layer = (policy: RetryPolicy = defaultRetryPolicy) =>
             Effect.tap((final) => Effect.sync(() => (state.final = final))),
             Effect.onInterrupt(() => close(aborted(), providerError("aborted", "stopped", { afterTokens: true })))
           )
-          const error = classify(
+          const classified = classify(
             message,
             { status: state.status, retryAfterMs: state.retryAfterMs, category: state.capture.refusalCategory },
             piModel.contextWindow,
             state.firstTokenAt !== null
           )
+          const error = classified === null ? null : scrubbed(prepared, classified)
           const { counts, cost } = yield* close(message, error)
           if (error) return { ok: false, error } satisfies AttemptOutcome
           return { ok: true, event: { type: "done", requestId, message, counts, cost } } satisfies AttemptOutcome
