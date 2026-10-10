@@ -391,7 +391,13 @@ These are strategies for mapping history to user and assistant roles:
 - **[P]** Model choice is a (connection, model) pair, inherited through the same kind of chain as presets but completely separate from them. The summarizer can have its own model.
 - **[P]** Several connections of the same type are allowed.
 - **[P]** API keys are write-only: stored on the server and never sent back to the browser.
-- **[P]** The provider layer's design (connections, model merging, keys, base-URL policy, errors, breakpoints) is in [PROVIDERS.md](PROVIDERS.md).
+- **[D]** A provider kind is an upstream API as that upstream defines it, endpoints included. The base URL moves the whole API; there are no per-endpoint URLs (owner, 2026-10-10).
+- **[D]** Day-one kinds include OpenAI Chat Completions and OpenAI Responses, Anthropic, and DeepSeek at minimum (its reasoning has agentic quirks). OpenAI Chat Completions is the default, listed first, then Anthropic (owner, 2026-10-10).
+- **[D]** The server secret that encrypts keys is generated automatically; setup must be trivial (owner, 2026-10-10).
+- **[D]** An instance-wide outbound proxy (HTTP or SOCKS) for every request the harness makes, LLM calls included, with a bypass list of IP ranges that contains the local ranges by default, and a per-connection override as a collapsed advanced option. Local addresses aren't blocked by default: local models are normal (owner, 2026-10-10).
+- **[D]** Every LLM request is tracked: uncached input, cache reads, cache writes and output, normalized across providers' reporting quirks. Cost is computed from that by formulas: built in for every supported provider, overridable by users, conditional on model, upstream and context size, with a currency label that's only for display (owner, 2026-10-10).
+- **[D]** Later, and deliberately small: connections an admin shares with all or chosen users. Their URL, key and proxy stay hidden; the admin can optionally restrict their models; per-user cost limits are optional. Connections are per user by default (owner, 2026-10-10).
+- **[P]** The provider layer's design is in [PROVIDERS.md](PROVIDERS.md).
 
 ---
 
@@ -454,6 +460,8 @@ These are strategies for mapping history to user and assistant roles:
 ## 11. Security
 
 - **[D]** Avoiding RCEs is the top priority.
+- **[D]** Users are never assumed trusted. One user must never be able to see another user's chats, cards, connections or keys, and that has to be certain (owner, 2026-10-10).
+- **[D]** It must be hard to expose an instance by accident. Without a password, an IP allowlist or an auth proxy, the server doesn't listen beyond localhost. **[O]** The exact rules: ST's may be stricter than needed (owner, 2026-10-10).
 - **[P]** Rules:
   - imported cards, presets and lorebooks never execute code and never grant capabilities
   - model and card HTML renders only in a sandbox

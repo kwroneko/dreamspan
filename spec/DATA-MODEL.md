@@ -382,6 +382,8 @@ Drafts are written continuously (debounced) through the WebSocket. Committing tu
 
 **`models`** `(id, connection_id, model_key, source: fetched|user, display_name, capabilities_json {context, max_output, reasoning, prefill, cache_mode, cache_ttl_s, vision, tools}, hidden, fetched_at)`. Fetched models are merged with pi-ai's metadata, and user edits always override.
 
+[PROVIDERS.md](PROVIDERS.md) proposes changes to both tables (provider kind, split upstream and override columns, proxy override) and a new `llm_requests` usage ledger, in migration `0005_providers`.
+
 **`version_attachments`** `(version_id, ordinal, media_id, kind: image, alt_text)`: images attached to a message version (DESIGN §10.2a). New versions copy the rows they keep, because version content is immutable (§1).
 
 **`media_assets`** `(id, sha256, mime, width, height, path, created_at)`: content-addressed files on disk, **originals kept at full resolution**, deduplicated across users. Thumbnails are derived on request. **`media_refs`** `(media_id, owner_user_id)` controls access: a user can only fetch media they hold a reference to.

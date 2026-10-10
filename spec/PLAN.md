@@ -10,7 +10,8 @@
 - **Data model and schema** (drafted in [DATA-MODEL.md](DATA-MODEL.md); DESIGN §3, §4, §6.2): message graph (slots with parents, threads, path selection), versions with provenance and status, state events, layered entities (base, variant, override, revisions), notes, connections and models, rollouts, summaries over path segments, changesets, drafts with undo history.
 - Server skeleton: typed operations (every UI action is an operation), WebSocket subscriptions, per-entity optimistic concurrency, single-writer SQLite queue (as in reference-harness).
 - Users and auth: separate users with per-user ownership in every query; a trusted reverse-proxy header (Authelia `Remote-User`) mapped to a user, plus built-in login.
-- Provider layer: **pi-ai 1.x (Decided)**, connections with overridable base URLs, model-list fetching, user-defined models with capability fields, write-only keys. **Next up.** Proposed in [PROVIDERS.md](PROVIDERS.md), as a delta from reference-harness; four questions for the owner are in its §13.
+- Provider layer: **pi-ai 1.x (Decided)**, connections with overridable base URLs, model-list fetching, user-defined models with capability fields, write-only keys. **Next up.** Proposed in [PROVIDERS.md](PROVIDERS.md), as a delta from reference-harness, with the owner's decisions recorded: the outbound proxy, and the usage ledger as the base for cost formulas.
+- Exposure safety (DESIGN §11 [D]): the server refuses to listen beyond localhost without protection. The rules are open; the Docker image currently pairs `HOST=0.0.0.0` with `AUTH_MODE=single`.
 
 ## Phase 1: Import and compatibility core
 - Card parsing and export: V1, V2 and V3 as JSON, PNG and CHARX (reference-harness already uses `character-card-utils` and the PNG chunk libraries).
