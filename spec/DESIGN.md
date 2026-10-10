@@ -264,9 +264,9 @@ These are strategies for mapping history to user and assistant roles:
     - **Deleted items:** discrete things with an identity (chats, messages, swipes, branches, cards and other library entities), produced only by an explicit delete.
     - **Recovered text:** text from before a destructive change in a drafting session, saved when the draft is committed, and discarded drafts. It's produced passively during normal editing, so it **never shows a toast**.
   - **[D]** Deleting a single swipe (version), not the whole message, is the normal case, as in ST, and the most readily available delete in the UI. Deleting the whole message is the secondary action (owner, 2026-10-10). Deleting a message's only remaining version deletes the message.
-  - **[P]** Messages, swipes and branches are restored in place: deleting marks them, so restoring puts them back exactly where they were, with their versions. The bin entry also records where an item came from and a preview, so its text can be copied out instead.
-  - **[P]** Permanently deleting a chat or an entity removes it. Permanently deleting a message or branch erases its content but keeps an empty placeholder, so the conversation's structure and any summaries over it stay valid.
-  - **[P]** Default capacities: 10,000 deleted items or 2 GB; 2,000 recovered texts or 200 MB. Large enough that most users never reach them; configurable.
+  - **[D]** Messages, swipes and branches are restored in place: deleting marks them, so restoring puts them back exactly where they were, with their versions. The bin entry also records where an item came from and a preview, so its text can be copied out instead.
+  - **[D]** Permanently deleting a chat or an entity removes it. Permanently deleting a message or branch erases its content but keeps an empty placeholder, so the conversation's structure and any summaries over it stay valid.
+  - **[D]** Default capacities: 10,000 deleted items or 2 GB; 2,000 recovered texts or 200 MB. Large enough that most users never reach them; configurable. (These three confirmed by the owner, 2026-10-10.)
 - **[D]** **The composer belongs to a branch** (owner, 2026-10-10):
   - Each chat, and each branch within it, has its own composer.
   - A half-typed message waits where it was left, even months later, while other chats and branches show their own.
