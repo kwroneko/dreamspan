@@ -142,6 +142,8 @@ Each worker thread is a separate V8 isolate that loads its own copy of every mod
 
 The tests run the core operations against both.
 
+**The server tests run with `--no-wasm-code-gc`** (`vitest.config.ts`). Node's type stripping is WebAssembly, so every source-mode worker runs Wasm. In Node 24's V8, Wasm code GC can free an import wrapper twice while another isolate is tiering it up ([nodejs/node#66366](https://github.com/nodejs/node/issues/66366), fixed upstream in V8 `9b8ca54d5a` and not yet in a 24.x release). The tests create and terminate workers constantly, so without the flag about 1 run in 14 of the database test files died with SIGSEGV or `Check failed: jit_page.has_value()`. With the flag, none did in 70 runs. Node 22 has a V8 version older than the bug. The server isn't exposed in production: its bundled workers run no Wasm, so only the main thread does. In development, the source workers also run Wasm, but they live as long as the server.
+
 Measured whole-server memory with the main thread, the writer and 2 readers: about 380 MB from source, and **188 MB** with bundles (Docker image, idle). The main thread still runs from source.
 
 ### 3.7 Schema
