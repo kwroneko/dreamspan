@@ -117,6 +117,9 @@ export class ConnectionForRequest extends Schema.Class<ConnectionForRequest>("Co
   proxyUrlEnc: Schema.NullOr(Schema.Uint8Array)
 }) {}
 
+/** A position in the ledger's newest-first order; start times alone can tie. */
+export const LedgerCursor = Schema.Struct({ startedAt: Schema.Number, id: Schema.String })
+
 /** Opens a ledger row before a request is sent (PROVIDERS §9.1). */
 export const OpenLlmRequest = Schema.Struct({
   id: LlmRequestId,
@@ -377,9 +380,15 @@ export class WriteOps extends RpcGroup.make(
   // the main thread holds the server secret, the workers only see ciphertext.
   /** The id is chosen by the caller, because secrets are encrypted bound to it. */
   Rpc.make("CreateConnection", {
-    payload: { userId: UserId, connectionId: ConnectionId, kind: ProviderKind, settings: ConnectionSettings },
+    payload: {
+      userId: UserId,
+      connectionId: ConnectionId,
+      kind: ProviderKind,
+      settings: ConnectionSettings,
+      key: Schema.NullOr(EncryptedKey)
+    },
     success: Connection,
-    error: StorageError
+    error: Schema.Union([NotFound, StorageError])
   }),
   Rpc.make("UpdateConnection", {
     payload: {
@@ -695,12 +704,12 @@ export class ReadOps extends RpcGroup.make(
     success: Schema.NullOr(Schema.Unknown),
     error: StorageError
   }),
-  /** The user's requests, newest first. `before` pages back by start time. */
+  /** The user's requests, newest first. `before` is the last row of the previous page. */
   Rpc.make("ListLlmRequests", {
     payload: {
       userId: UserId,
       limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 1000 })),
-      before: Schema.NullOr(Schema.Number)
+      before: Schema.NullOr(LedgerCursor)
     },
     success: Schema.Array(LlmRequest),
     error: StorageError

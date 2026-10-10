@@ -34,7 +34,8 @@ import {
   type WireApi
 } from "@rp/shared/providers.ts"
 import type { Cost, LlmRequestId, RequestPurpose, TokenCounts } from "@rp/shared/usage.ts"
-import { Context, Effect, Layer, Queue, Semaphore, Stream } from "effect"
+import { ServerError } from "@rp/shared/errors.ts"
+import { Cause, Context, Effect, Exit, Layer, Queue, Semaphore, Stream } from "effect"
 import { Reader, Writer } from "../db/Database.ts"
 import { Network, type ProxyOverride } from "../net/Network.ts"
 import { describeRoute, proxyUrlProblem } from "../net/route.ts"
@@ -94,6 +95,8 @@ export interface StreamRequest {
 export type ProviderEvent =
   | { readonly type: "attempt"; readonly attempt: number; readonly requestId: LlmRequestId }
   | { readonly type: "route"; readonly description: string }
+  /** Waiting out a rate limit the provider asked for on this connection, before sending. */
+  | { readonly type: "paused"; readonly delayMs: number }
   | { readonly type: "text"; readonly delta: string }
   | { readonly type: "thinking"; readonly delta: string }
   | {
@@ -160,47 +163,57 @@ export interface ProvidersShape {
     readonly kind: ProviderKind
     readonly settings: ConnectionSettings
     readonly apiKey: string | null
-  }) => Effect.Effect<Connection, ProviderError>
+  }) => Effect.Effect<Connection, ProviderError | ServerError>
   readonly setKey: (
     userId: UserId,
     connectionId: ConnectionId,
     apiKey: string | null
-  ) => Effect.Effect<Connection, ProviderError>
+  ) => Effect.Effect<Connection, ProviderError | ServerError>
   readonly setHeaders: (
     userId: UserId,
     connectionId: ConnectionId,
     headers: Readonly<Record<string, string>> | null
-  ) => Effect.Effect<Connection, ProviderError>
+  ) => Effect.Effect<Connection, ProviderError | ServerError>
   readonly setProxy: (
     userId: UserId,
     connectionId: ConnectionId,
     mode: ProxyMode,
     url: string | null
-  ) => Effect.Effect<Connection, ProviderError>
+  ) => Effect.Effect<Connection, ProviderError | ServerError>
   /** Fetches the upstream's model list and applies it (PROVIDERS §3.3). */
   readonly refreshModels: (
     userId: UserId,
     connectionId: ConnectionId
   ) => Effect.Effect<
     { readonly added: number; readonly updated: number; readonly missing: number; readonly route: string | null },
-    ProviderError
+    ProviderError | ServerError
   >
   /** Checks a connection by fetching its model list; reports the route it took. */
-  readonly testConnection: (userId: UserId, connectionId: ConnectionId) => Effect.Effect<TestResult, ProviderError>
-  readonly stream: (request: StreamRequest) => Stream.Stream<ProviderEvent, ProviderError>
+  readonly testConnection: (
+    userId: UserId,
+    connectionId: ConnectionId
+  ) => Effect.Effect<TestResult, ProviderError | ServerError>
+  readonly stream: (request: StreamRequest) => Stream.Stream<ProviderEvent, ProviderError | ServerError>
 }
 
 export class Providers extends Context.Service<Providers, ProvidersShape>()("rp/Providers") {}
 
-/** Storage failures become provider errors: NotFound means unusable, anything else unknown. */
-const fromStorage = <A, R>(effect: Effect.Effect<A, { readonly _tag: string; readonly message: string }, R>) =>
+/**
+ * Storage outcomes the client can act on become provider errors (NotFound: unusable,
+ * StaleWrite: reload). Anything else is logged and reaches the client only as ServerError.
+ */
+const fromStorage = <A, R>(
+  effect: Effect.Effect<A, { readonly _tag: string; readonly message: string }, R>
+): Effect.Effect<A, ProviderError | ServerError, R> =>
   effect.pipe(
-    Effect.mapError((error) =>
+    Effect.catch((error): Effect.Effect<never, ProviderError | ServerError> =>
       error._tag === "NotFound"
-        ? providerError("unusable", "connection or model not found")
+        ? Effect.fail(providerError("unusable", "connection or model not found"))
         : error._tag === "StaleWrite"
-          ? providerError("bad_request", "the connection changed in another tab; reload it")
-          : providerError("unknown", `storage: ${error.message}`)
+          ? Effect.fail(providerError("bad_request", "the connection changed in another tab; reload it"))
+          : Effect.logError("provider storage operation failed", error).pipe(
+              Effect.andThen(Effect.fail(new ServerError({ message: "storage operation failed" })))
+            )
     )
   )
 
@@ -282,11 +295,16 @@ export const layer = (policy: RetryPolicy = defaultRetryPolicy) =>
                 ? { mode: "direct" }
                 : { mode: "inherit" }
           const headers = headersJson === null ? {} : (JSON.parse(headersJson) as Record<string, string>)
+          const baseUrl = connection.baseUrl ?? info.defaultBaseUrl
+          yield* Effect.try({
+            try: () => new URL(baseUrl),
+            catch: () => providerError("unusable", `${connection.name}'s base URL isn't a valid URL: "${baseUrl}"`)
+          })
           const prepared: Prepared = {
             connection,
             kind: connection.kind,
             api: info.api,
-            baseUrl: connection.baseUrl ?? info.defaultBaseUrl,
+            baseUrl,
             apiKey,
             headers,
             override,
@@ -319,22 +337,26 @@ export const layer = (policy: RetryPolicy = defaultRetryPolicy) =>
         hint: apiKey.slice(-4)
       })
 
-      const createConnection: ProvidersShape["createConnection"] = ({ userId, kind, settings, apiKey }) =>
-        Effect.gen(function* () {
-          const connectionId = uuidv7() as ConnectionId
-          const created = yield* fromStorage(writer.CreateConnection({ userId, connectionId, kind, settings }))
-          if (apiKey === null || apiKey === "") return created
-          return yield* fromStorage(
-            writer.SetConnectionKey({ userId, connectionId, key: encryptKey(connectionId, apiKey.trim()) })
-          )
-        })
+      /** A key as entered: surrounding whitespace dropped, and nothing left means no key. */
+      const keyFor = (connectionId: string, apiKey: string | null) => {
+        const trimmed = apiKey?.trim() ?? ""
+        return trimmed === "" ? null : encryptKey(connectionId, trimmed)
+      }
+
+      const createConnection: ProvidersShape["createConnection"] = ({ userId, kind, settings, apiKey }) => {
+        // The id is chosen here because the key is encrypted bound to it; one write stores both.
+        const connectionId = uuidv7() as ConnectionId
+        return fromStorage(
+          writer.CreateConnection({ userId, connectionId, kind, settings, key: keyFor(connectionId, apiKey) })
+        )
+      }
 
       const setKey: ProvidersShape["setKey"] = (userId, connectionId, apiKey) =>
         fromStorage(
           writer.SetConnectionKey({
             userId,
             connectionId,
-            key: apiKey === null || apiKey.trim() === "" ? null : encryptKey(connectionId, apiKey.trim())
+            key: keyFor(connectionId, apiKey)
           })
         )
 
@@ -376,7 +398,8 @@ export const layer = (policy: RetryPolicy = defaultRetryPolicy) =>
           baseUrl: prepared.baseUrl,
           apiKey: prepared.apiKey,
           headers: prepared.headers,
-          fetch: fetchFor(prepared, onRoute)
+          fetch: fetchFor(prepared, onRoute),
+          scrub: prepared.scrub
         }).pipe(Effect.mapError((error) => scrubbed(prepared, fromList(error))))
 
       const refreshModels: ProvidersShape["refreshModels"] = (userId, connectionId) =>
@@ -417,76 +440,153 @@ export const layer = (policy: RetryPolicy = defaultRetryPolicy) =>
       // Per-connection cap (PROVIDERS §7.3) and the pause a Retry-After asks for.
       const caps = new Map<string, { semaphore: Semaphore.Semaphore; permits: number }>()
       const pausedUntil = new Map<string, number>()
-      const withCap = (connection: Connection) => {
-        if (connection.maxConcurrent === null) return <A, E, R>(effect: Effect.Effect<A, E, R>) => effect
-        let cap = caps.get(connection.id)
-        if (!cap) {
-          cap = { semaphore: Semaphore.makeUnsafe(connection.maxConcurrent), permits: connection.maxConcurrent }
-          caps.set(connection.id, cap)
-        } else if (cap.permits !== connection.maxConcurrent) {
-          Effect.runSync(cap.semaphore.resize(connection.maxConcurrent))
-          cap.permits = connection.maxConcurrent
-        }
-        return cap.semaphore.withPermits(1)
-      }
-      const waitForPause = (connectionId: string) =>
+      const withCap = (connection: Connection) =>
+        Effect.gen(function* () {
+          if (connection.maxConcurrent === null) return <A, E, R>(effect: Effect.Effect<A, E, R>) => effect
+          let cap = caps.get(connection.id)
+          if (!cap) {
+            cap = { semaphore: yield* Semaphore.make(connection.maxConcurrent), permits: connection.maxConcurrent }
+            caps.set(connection.id, cap)
+          } else if (cap.permits !== connection.maxConcurrent) {
+            yield* cap.semaphore.resize(connection.maxConcurrent)
+            cap.permits = connection.maxConcurrent
+          }
+          return cap.semaphore.withPermits(1)
+        })
+
+      /**
+       * Waits out a pause the provider asked for, announcing it. Checked after taking a
+       * permit, so queued requests honor a pause that began while they waited. A pause
+       * longer than the retry policy allows fails instead of stalling silently.
+       */
+      const waitForPause = (connectionId: string, offer: (event: ProviderEvent) => void) =>
         Effect.suspend(() => {
-          const until = pausedUntil.get(connectionId) ?? 0
-          const wait = until - Date.now()
-          return wait > 0 ? Effect.sleep(wait) : Effect.void
+          const wait = (pausedUntil.get(connectionId) ?? 0) - Date.now()
+          if (wait <= 0) return Effect.void
+          if (wait > policy.maxDelayMs) {
+            return Effect.fail(
+              providerError("rate_limited", `the provider asked to wait ${Math.ceil(wait / 1000)} s`, {
+                retryAfterMs: wait
+              })
+            )
+          }
+          offer({ type: "paused", delayMs: wait })
+          return Effect.sleep(wait)
         })
 
       type AttemptOutcome =
         | { readonly ok: true; readonly event: Extract<ProviderEvent, { type: "done" }> }
         | { readonly ok: false; readonly error: ProviderError }
 
+      const emptyUsage = () => ({
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 0,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
+      })
+
       const attempt = (
         prepared: Prepared,
         model: Model,
         piModel: PiModel<Api>,
+        knownContext: number | undefined,
         request: StreamRequest,
         offer: (event: ProviderEvent) => void,
         number: number
-      ) =>
-        Effect.gen(function* () {
-          const requestId = uuidv7() as LlmRequestId
-          const attribution = request.attribution
-          yield* fromStorage(
-            writer.OpenLlmRequest({
-              userId: request.userId,
-              request: {
-                id: requestId,
-                connectionId: prepared.connection.id,
-                modelId: model.id,
-                chatId: attribution.chatId ?? null,
-                rolloutId: attribution.rolloutId ?? null,
-                versionId: attribution.versionId ?? null,
-                purpose: attribution.purpose,
-                api: prepared.api,
-                provider: piModel.provider,
-                modelKey: model.key,
-                startedAt: Date.now()
-              }
-            })
-          )
-          offer({ type: "attempt", attempt: number, requestId })
+      ) => {
+        const requestId = uuidv7() as LlmRequestId
+        const attribution = request.attribution
+        const state = {
+          capture: emptyCapture() as Capture,
+          status: null as number | null,
+          retryAfterMs: null as number | null,
+          firstTokenAt: null as number | null,
+          partial: null as AssistantMessage | null
+        }
+        /** What the request produced so far, for a close after an interruption or a defect. */
+        const partialMessage = (stopReason: "aborted" | "error", errorMessage?: string): AssistantMessage => ({
+          ...(state.partial ?? {
+            role: "assistant",
+            content: [],
+            api: prepared.api,
+            provider: piModel.provider,
+            model: model.key,
+            usage: emptyUsage(),
+            timestamp: Date.now()
+          }),
+          stopReason,
+          ...(errorMessage !== undefined ? { errorMessage } : {})
+        })
 
-          const transcript = normalizeContext(request.context)
-          const state = {
-            capture: emptyCapture() as Capture,
-            status: null as number | null,
-            retryAfterMs: null as number | null,
-            firstTokenAt: null as number | null,
-            partial: null as AssistantMessage | null,
-            final: null as AssistantMessage | null
-          }
+        const writeClose = (message: AssistantMessage, error: ProviderError | null, context: PiContext["messages"]) =>
+          Effect.gen(function* () {
+            const { counts, source } = finalCounts(message, state.capture, context)
+            const cost = recordedCost(counts, state.capture, model.upstream.price ?? null)
+            yield* writer
+              .CloseLlmRequest({
+                userId: request.userId,
+                request: {
+                  id: requestId,
+                  status: error === null ? "complete" : error.reason === "aborted" ? "aborted" : "failed",
+                  endedAt: Date.now(),
+                  firstTokenAt: state.firstTokenAt,
+                  responseModel: message.responseModel ?? (message.model !== model.key ? message.model : null),
+                  upstream: state.capture.upstream,
+                  counts,
+                  usageSource: source,
+                  rawUsage: state.capture.rawUsage,
+                  reportedCost: state.capture.reportedCost,
+                  cost,
+                  error: error === null ? null : { reason: error.reason, message: error.message, status: error.status }
+                }
+              })
+              .pipe(Effect.catch((e) => Effect.logError(`could not close ledger row ${requestId}`, e)))
+            return { counts, cost }
+          })
+
+        const open = fromStorage(
+          writer.OpenLlmRequest({
+            userId: request.userId,
+            request: {
+              id: requestId,
+              connectionId: prepared.connection.id,
+              modelId: model.id,
+              chatId: attribution.chatId ?? null,
+              rolloutId: attribution.rolloutId ?? null,
+              versionId: attribution.versionId ?? null,
+              purpose: attribution.purpose,
+              api: prepared.api,
+              provider: piModel.provider,
+              modelKey: model.key,
+              startedAt: Date.now()
+            }
+          })
+        )
+
+        const use = Effect.gen(function* () {
+          offer({ type: "attempt", attempt: number, requestId })
+          const transcript = yield* Effect.try({
+            try: () => normalizeContext(request.context),
+            catch: (error) => providerError("bad_request", `the request context is invalid: ${String(error)}`)
+          })
           const onRoute = (description: string) => offer({ type: "route", description })
           if (!OWN_FETCH.has(prepared.api)) {
             const route = yield* network.route(new URL(prepared.baseUrl), prepared.override)
             onRoute(describeRoute(route, new URL(prepared.baseUrl)))
           }
+          // pi-ai reports onResponse only for successful responses (the SDKs throw first on
+          // errors), so the status and Retry-After are read here, on every response.
+          const routed = fetchFor(prepared, onRoute)
+          const observed: typeof fetch = async (input, init) => {
+            const response = await routed(input, init)
+            state.status = response.status
+            state.retryAfterMs = parseRetryAfter(response.headers.get("retry-after") ?? undefined)
+            return response
+          }
 
-          const run = Effect.tryPromise({
+          const message = yield* Effect.tryPromise({
             try: async (signal) => {
               const options = request.options ?? {}
               const events = apis[prepared.api].streamSimple(piModel, transcript, {
@@ -496,7 +596,7 @@ export const layer = (policy: RetryPolicy = defaultRetryPolicy) =>
                 maxRetries: 0,
                 signal,
                 headers: prepared.headers,
-                ...(OWN_FETCH.has(prepared.api) ? { fetch: fetchFor(prepared, onRoute) } : {}),
+                ...(OWN_FETCH.has(prepared.api) ? { fetch: observed } : {}),
                 ...(options.reasoning !== undefined ? { reasoning: options.reasoning } : {}),
                 ...(options.maxTokens !== undefined ? { maxTokens: options.maxTokens } : {}),
                 ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
@@ -534,82 +634,51 @@ export const layer = (policy: RetryPolicy = defaultRetryPolicy) =>
             catch: (error) => error
           }).pipe(
             // pi-ai reports request failures in the message, but a direct call can also
-            // throw; either way the result is a failed message, so the row still closes.
+            // throw; either way the result is a failed message.
             Effect.catch((thrown) =>
-              Effect.succeed<AssistantMessage>({
-                ...aborted(),
-                stopReason: "error",
-                errorMessage: thrown instanceof Error ? thrown.message : String(thrown)
-              })
+              Effect.succeed(partialMessage("error", thrown instanceof Error ? thrown.message : String(thrown)))
             )
-          )
-
-          /** Closes the ledger row whatever happened, interruption included. */
-          const close = (message: AssistantMessage, error: ProviderError | null) =>
-            Effect.gen(function* () {
-              const { counts, source } = finalCounts(message, state.capture, transcript.messages)
-              const cost = recordedCost(counts, state.capture, model.upstream.price ?? null)
-              yield* writer
-                .CloseLlmRequest({
-                  userId: request.userId,
-                  request: {
-                    id: requestId,
-                    status: error === null ? "complete" : error.reason === "aborted" ? "aborted" : "failed",
-                    endedAt: Date.now(),
-                    firstTokenAt: state.firstTokenAt,
-                    responseModel: message.responseModel ?? (message.model !== model.key ? message.model : null),
-                    upstream: state.capture.upstream,
-                    counts,
-                    usageSource: source,
-                    rawUsage: state.capture.rawUsage,
-                    reportedCost: state.capture.reportedCost,
-                    cost,
-                    error:
-                      error === null ? null : { reason: error.reason, message: error.message, status: error.status }
-                  }
-                })
-                .pipe(Effect.catch((e) => Effect.logError(`could not close ledger row ${requestId}`, e)))
-              return { counts, cost }
-            })
-
-          const aborted = (): AssistantMessage => ({
-            ...(state.partial ?? {
-              role: "assistant",
-              content: [],
-              api: prepared.api,
-              provider: piModel.provider,
-              model: model.key,
-              usage: {
-                input: 0,
-                output: 0,
-                cacheRead: 0,
-                cacheWrite: 0,
-                totalTokens: 0,
-                cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
-              },
-              timestamp: Date.now()
-            }),
-            stopReason: "aborted"
-          })
-
-          const message = yield* run.pipe(
-            Effect.tap((final) => Effect.sync(() => (state.final = final))),
-            Effect.onInterrupt(() => close(aborted(), providerError("aborted", "stopped", { afterTokens: true })))
           )
           const classified = classify(
             message,
             { status: state.status, retryAfterMs: state.retryAfterMs, category: state.capture.refusalCategory },
-            piModel.contextWindow,
+            knownContext,
             state.firstTokenAt !== null
           )
           const error = classified === null ? null : scrubbed(prepared, classified)
-          const { counts, cost } = yield* close(message, error)
-          if (error) return { ok: false, error } satisfies AttemptOutcome
-          return { ok: true, event: { type: "done", requestId, message, counts, cost } } satisfies AttemptOutcome
+          return { message, error }
         })
 
+        // The row is opened before sending and closed on every exit: success, failure,
+        // interruption at any point, or a defect (PROVIDERS §9.1).
+        return Effect.acquireUseRelease(
+          open,
+          () => use,
+          (_, exit) => {
+            if (Exit.isSuccess(exit)) return Effect.void
+            const interrupted = Cause.hasInterrupts(exit.cause)
+            const detail = prepared.scrub(Cause.pretty(exit.cause))
+            return writeClose(
+              partialMessage(interrupted ? "aborted" : "error", interrupted ? undefined : detail),
+              interrupted
+                ? providerError("aborted", "stopped", { afterTokens: true })
+                : providerError("unknown", detail),
+              request.context.messages
+            ).pipe(Effect.asVoid)
+          }
+        ).pipe(
+          Effect.flatMap(({ message, error }) =>
+            writeClose(message, error, request.context.messages).pipe(
+              Effect.map(({ counts, cost }): AttemptOutcome =>
+                error ? { ok: false, error } : { ok: true, event: { type: "done", requestId, message, counts, cost } }
+              )
+            )
+          )
+        )
+      }
+
       const stream: ProvidersShape["stream"] = (request) =>
-        Stream.callback<ProviderEvent, ProviderError>((queue) =>
+        Stream.callback<ProviderEvent, ProviderError | ServerError>((queue) =>
           Effect.gen(function* () {
             const offer = (event: ProviderEvent) => void Queue.offerUnsafe(queue, event)
             const prepared = yield* prepare(request.userId, request.connectionId)
@@ -618,12 +687,21 @@ export const layer = (policy: RetryPolicy = defaultRetryPolicy) =>
               return yield* providerError("unusable", "that model belongs to another connection")
             }
             const effective = resolveModel(model.key, model.upstream, model.overrides, prepared.connection.compat)
-            const piModel = yield* Effect.promise(() => buildPiModel(prepared, model, effective))
-            const capped = withCap(prepared.connection)
+            const piModel = yield* Effect.tryPromise({
+              try: () => buildPiModel(prepared, model, effective),
+              catch: (error) => providerError("unknown", `could not prepare the model: ${String(error)}`)
+            })
+            // An unknown context gets a default for the request, but overflow is only judged
+            // against a context some source actually reported.
+            const knownContext = effective.context.source === "unknown" ? undefined : effective.context.value
+            const capped = yield* withCap(prepared.connection)
 
             for (let n = 0; ; n++) {
-              yield* waitForPause(prepared.connection.id)
-              const outcome = yield* capped(attempt(prepared, model, piModel, request, offer, n + 1))
+              const outcome = yield* capped(
+                waitForPause(prepared.connection.id, offer).pipe(
+                  Effect.andThen(attempt(prepared, model, piModel, knownContext, request, offer, n + 1))
+                )
+              )
               if (outcome.ok) {
                 offer(outcome.event)
                 yield* Queue.end(queue)
@@ -641,11 +719,22 @@ export const layer = (policy: RetryPolicy = defaultRetryPolicy) =>
                 delayMs <= policy.maxDelayMs
               if (!retry) return yield* error
               offer({ type: "retrying", attempt: n + 1, maxRetries: policy.maxRetries, delayMs, error })
-              yield* Effect.sleep(delayMs)
+              // A pause set by this error is waited out (and announced) before the next attempt.
+              if (pausedUntil.get(prepared.connection.id) === undefined || error.retryAfterMs === null) {
+                yield* Effect.sleep(delayMs)
+              }
             }
           }).pipe(
-            // A failing callback doesn't end the stream by itself; the queue carries the failure.
-            Effect.catch((error: ProviderError) => Queue.fail(queue, error))
+            // The stream ends on every exit: typed failures go through the queue, and a
+            // defect becomes a typed error instead of leaving the stream open forever.
+            Effect.catchCause((cause) => {
+              const failure = Cause.findErrorOption(cause)
+              if (failure._tag === "Some") return Queue.fail(queue, failure.value)
+              if (Cause.hasInterruptsOnly(cause)) return Effect.failCause(cause)
+              return Effect.logError("provider stream defect", cause).pipe(
+                Effect.andThen(Queue.fail(queue, providerError("unknown", "the request failed unexpectedly")))
+              )
+            })
           )
         )
 

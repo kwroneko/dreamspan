@@ -89,8 +89,18 @@ export const finalCounts = (
   capture: Capture,
   context: ReadonlyArray<Message>
 ): { counts: TokenCounts; source: UsageSource } => {
-  if (capture.rawUsage !== null) return { counts: countsFromUsage(message.usage), source: "reported" }
   const text = messageText(message)
+  const finished = message.stopReason === "stop" || message.stopReason === "length" || message.stopReason === "toolUse"
+  if (capture.rawUsage !== null) {
+    const counts = countsFromUsage(message.usage)
+    if (finished) return { counts, source: "reported" }
+    // A stopped or failed request may have reported only its start (Anthropic sends
+    // output_tokens: 1 in message_start), so output is at least what actually arrived.
+    const estimated = estimateTextTokens(text)
+    return estimated > (counts.output ?? 0)
+      ? { counts: { ...counts, output: estimated, reasoning: null }, source: "estimated" }
+      : { counts, source: "reported" }
+  }
   if (text.length === 0 && message.stopReason !== "stop" && message.stopReason !== "length") {
     return { counts: unknownCounts, source: "none" }
   }

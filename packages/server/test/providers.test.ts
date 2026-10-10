@@ -6,7 +6,7 @@ import { assert, describe, it } from "@effect/vitest"
 import type { UserId } from "@rp/shared/domain.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import { type ConnectionId, type ConnectionSettings, resolveModel } from "@rp/shared/providers.ts"
-import { type LlmRequestId, unknownCounts } from "@rp/shared/usage.ts"
+import { type LlmRequest, type LlmRequestId, unknownCounts } from "@rp/shared/usage.ts"
 import { Effect, Exit } from "effect"
 import * as Database from "../src/db/Database.ts"
 
@@ -39,7 +39,8 @@ const setup = Effect.gen(function* () {
       userId,
       connectionId: uuidv7() as ConnectionId,
       kind: "openai-chat",
-      settings: settings(name)
+      settings: settings(name),
+      key: null
     })
   return { writer, reader, ana, bo, create }
 })
@@ -171,6 +172,118 @@ describe("connections", () => {
       const again = yield* writer.DeleteConnection({ userId: ana, connectionId: conn.id })
       yield* writer.PurgeBinItem({ userId: ana, itemId: again.id })
       yield* fails(reader.GetConnection({ userId: ana, connectionId: conn.id }), "NotFound")
+    }).pipe(Effect.provide(database()))
+  )
+})
+
+describe("review regressions", () => {
+  it.effect("refuses another user's preset as an override, without confirming it exists", () =>
+    Effect.gen(function* () {
+      const { writer, ana, bo, create } = yield* setup
+      const preset = yield* writer.CreateEntity({
+        userId: ana,
+        kind: "preset",
+        label: "Ana's preset",
+        subtitle: "",
+        doc: {},
+        schemaVersion: 1,
+        origin: "user",
+        sourcePath: null
+      })
+      const borrowed = { ...settings("Bo's"), presetOverrideRefId: preset.ref.id }
+      yield* fails(
+        writer.CreateConnection({
+          userId: bo,
+          connectionId: uuidv7() as ConnectionId,
+          kind: "openai-chat",
+          settings: borrowed,
+          key: null
+        }),
+        "NotFound"
+      )
+      // A ref id that doesn't exist looks exactly the same.
+      yield* fails(
+        writer.CreateConnection({
+          userId: bo,
+          connectionId: uuidv7() as ConnectionId,
+          kind: "openai-chat",
+          settings: { ...borrowed, presetOverrideRefId: preset.ref.id.replace(/.$/, "0") as typeof preset.ref.id },
+          key: null
+        }),
+        "NotFound"
+      )
+      const bos = yield* create(bo)
+      yield* fails(
+        writer.UpdateConnection({
+          userId: bo,
+          connectionId: bos.id,
+          settings: borrowed,
+          expectedRowVersion: bos.rowVersion
+        }),
+        "NotFound"
+      )
+      // Ana may use her own.
+      const anas = yield* writer.CreateConnection({
+        userId: ana,
+        connectionId: uuidv7() as ConnectionId,
+        kind: "openai-chat",
+        settings: { ...settings("Ana's"), presetOverrideRefId: preset.ref.id },
+        key: null
+      })
+      assert.strictEqual(anas.presetOverrideRefId, preset.ref.id)
+    }).pipe(Effect.provide(database()))
+  )
+
+  it.effect("syncs a model list that repeats a key", () =>
+    Effect.gen(function* () {
+      const { writer, reader, ana, create } = yield* setup
+      const conn = yield* create(ana)
+      const result = yield* writer.SyncFetchedModels({
+        userId: ana,
+        connectionId: conn.id,
+        models: [
+          { key: "m", upstream: { name: "first" } },
+          { key: "m", upstream: { name: "second" } }
+        ],
+        fetchedAt: 1
+      })
+      assert.deepStrictEqual(result, { added: 1, updated: 0, missing: 0 })
+      const [model] = yield* reader.ListModels({ userId: ana, connectionId: conn.id, includeHidden: true })
+      assert.strictEqual(model!.upstream.name, "second")
+    }).pipe(Effect.provide(database()))
+  )
+
+  it.effect("pages the ledger without skipping requests that started in the same millisecond", () =>
+    Effect.gen(function* () {
+      const { writer, reader, ana, create } = yield* setup
+      const conn = yield* create(ana)
+      for (const id of ["a", "b", "c"]) {
+        yield* writer.OpenLlmRequest({
+          userId: ana,
+          request: {
+            id: id as LlmRequestId,
+            connectionId: conn.id,
+            modelId: null,
+            chatId: null,
+            rolloutId: null,
+            versionId: null,
+            purpose: "decision",
+            api: "openai-completions",
+            provider: "openai",
+            modelKey: "m",
+            startedAt: 5_000
+          }
+        })
+      }
+      const seen: Array<string> = []
+      let before: { startedAt: number; id: string } | null = null
+      for (let page = 0; page < 5; page++) {
+        const rows: ReadonlyArray<LlmRequest> = yield* reader.ListLlmRequests({ userId: ana, limit: 1, before })
+        if (rows.length === 0) break
+        seen.push(rows[0]!.id)
+        before = { startedAt: rows[0]!.startedAt, id: rows[0]!.id }
+      }
+      assert.deepStrictEqual(seen, ["c", "b", "a"])
     }).pipe(Effect.provide(database()))
   )
 })

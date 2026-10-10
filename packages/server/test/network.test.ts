@@ -97,7 +97,7 @@ describe("network", () => {
         .setInstance({ proxyUrl: "socks4://old:1080", bypass: ["10.0.0.0/33"] })
         .pipe(Effect.flip)
       assert.strictEqual(result._tag, "InvalidNetworkSettings")
-      assert.strictEqual(result.problems.length, 2)
+      if (result._tag === "InvalidNetworkSettings") assert.strictEqual(result.problems.length, 2)
     }).pipe(Effect.provide(layer(mkdtempSync(join(tmpdir(), "rp-net-")))))
   )
 })

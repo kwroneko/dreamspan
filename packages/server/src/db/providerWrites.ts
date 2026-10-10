@@ -37,6 +37,18 @@ export const makeProviderWriteHandlers = Effect.gen(function* () {
       return yield* reloadConnection(connectionId)
     })
 
+  /**
+   * A preset override must be one of the user's own live refs. Without this check a
+   * connection could point at another user's preset (and probe whether a ref id exists).
+   */
+  const checkPresetRef = (userId: UserId, refId: string | null) =>
+    refId === null
+      ? Effect.void
+      : sql`SELECT 1 FROM entity_refs r JOIN entities e ON e.id = r.entity_id
+            WHERE r.id = ${refId} AND e.owner_user_id = ${userId} AND e.deleted_at IS NULL AND e.purged_at IS NULL`.pipe(
+          Effect.flatMap(([row]) => (row ? Effect.void : Effect.fail(new NotFound({ entity: "ref", id: refId }))))
+        )
+
   /** Optimistic concurrency on a model's edits. */
   const modelAt = (userId: UserId, modelId: string, expected: number) =>
     Effect.gen(function* () {
@@ -48,8 +60,9 @@ export const makeProviderWriteHandlers = Effect.gen(function* () {
     })
 
   const handlers = {
-    CreateConnection: ({ userId, connectionId, kind, settings }) =>
+    CreateConnection: ({ userId, connectionId, kind, settings, key }) =>
       Effect.gen(function* () {
+        yield* checkPresetRef(userId, settings.presetOverrideRefId)
         const now = Date.now()
         yield* sql`INSERT INTO connections ${sql.insert({
           id: connectionId,
@@ -57,6 +70,8 @@ export const makeProviderWriteHandlers = Effect.gen(function* () {
           kind,
           api: providerKinds[kind].api,
           ...settingsColumns(settings),
+          api_key_enc: key?.enc ?? null,
+          key_hint: key?.hint ?? null,
           created_at: now,
           updated_at: now
         })}`
@@ -66,6 +81,7 @@ export const makeProviderWriteHandlers = Effect.gen(function* () {
     UpdateConnection: ({ userId, connectionId, settings, expectedRowVersion }) =>
       Effect.gen(function* () {
         const row = yield* ownedConnection(userId, connectionId)
+        yield* checkPresetRef(userId, settings.presetOverrideRefId)
         if (row.row_version !== expectedRowVersion) {
           return yield* new StaleWrite({
             entity: "connection",
@@ -102,9 +118,11 @@ export const makeProviderWriteHandlers = Effect.gen(function* () {
         const existing = yield* sql<{ id: string; model_key: string; fetched_at: number | null }>`
           SELECT id, model_key, fetched_at FROM models WHERE connection_id = ${connectionId}`
         const byKey = new Map(existing.map((row) => [row.model_key, row]))
+        // An upstream may list a key twice; the last entry wins.
+        const unique = [...new Map(models.map((model) => [model.key, model])).values()]
         let added = 0
         let updated = 0
-        for (const model of models) {
+        for (const model of unique) {
           const known = byKey.get(model.key)
           const upstream = JSON.stringify(model.upstream)
           if (known) {
@@ -126,7 +144,7 @@ export const makeProviderWriteHandlers = Effect.gen(function* () {
         }
         // Models the list stopped reporting are marked, never deleted: versions and the
         // ledger refer to them. Models only ever added by hand were never listed.
-        const listed = new Set(models.map((model) => model.key))
+        const listed = new Set(unique.map((model) => model.key))
         let missing = 0
         for (const row of existing) {
           if (listed.has(row.model_key) || row.fetched_at === null) continue

@@ -13,7 +13,7 @@ import * as Database from "../src/db/Database.ts"
 import * as Network from "../src/net/Network.ts"
 import { classify, parseRetryAfter } from "../src/providers/errors.ts"
 import * as Providers from "../src/providers/Providers.ts"
-import { makeScrub } from "../src/providers/Providers.ts"
+import { makeScrub, ProviderError } from "../src/providers/Providers.ts"
 import { alignTranscript } from "../src/providers/breakpoints.ts"
 import { priceCost } from "../src/providers/usage.ts"
 import { makeSecrets, Secrets } from "../src/secrets.ts"
@@ -69,6 +69,12 @@ const connect = (kind: ProviderKind, baseUrl: string, apiKey: string | null, mod
   })
 
 const collect = <A, E>(stream: Stream.Stream<A, E>) => Stream.runCollect(stream)
+
+/** Narrows a flipped failure to the ProviderError the test expects. */
+const asProviderError = (error: { readonly _tag: string }) => {
+  if (!(error instanceof ProviderError)) throw new Error(`expected a ProviderError, got ${error._tag}`)
+  return error
+}
 
 const openAiList = (models: ReadonlyArray<Record<string, unknown>>) => ({ data: models })
 
@@ -265,7 +271,7 @@ describe("failures", () => {
           context,
           attribution: { purpose: "generation" }
         })
-      ).pipe(Effect.flip)
+      ).pipe(Effect.flip, Effect.map(asProviderError))
       assert.strictEqual(error.reason, "auth")
       assert.strictEqual(server.requests().filter((r) => r.path.endsWith("/chat/completions")).length, 1)
     }).pipe(Effect.scoped, Effect.provide(layer()))
@@ -289,14 +295,16 @@ describe("failures", () => {
           context,
           attribution: { purpose: "generation" }
         })
-      ).pipe(Effect.flip)
+      ).pipe(Effect.flip, Effect.map(asProviderError))
       assert.strictEqual(error.reason, "bad_request")
       assert.notInclude(error.message, key)
       assert.notInclude(error.message, "tok-secret-header")
       assert.include(error.message, "[redacted]")
 
       server.setHandler((_request, res) => json(res, 401, { error: `unknown key ${key}` }))
-      const listError = yield* providers.refreshModels(userId, connection.id).pipe(Effect.flip)
+      const listError = yield* providers
+        .refreshModels(userId, connection.id)
+        .pipe(Effect.flip, Effect.map(asProviderError))
       assert.strictEqual(listError.reason, "auth")
       assert.notInclude(listError.message, key)
     }).pipe(Effect.scoped, Effect.provide(layer()))
@@ -350,7 +358,7 @@ describe("failures", () => {
           context,
           attribution: { purpose: "generation" }
         })
-      ).pipe(Effect.flip)
+      ).pipe(Effect.flip, Effect.map(asProviderError))
       assert.strictEqual(error.reason, "unusable")
       assert.strictEqual(server.requests().length, 0)
     }).pipe(Effect.scoped, Effect.provide(layer()))
@@ -378,7 +386,7 @@ describe("failures", () => {
           context,
           attribution: { purpose: "generation" }
         })
-      ).pipe(Effect.flip)
+      ).pipe(Effect.flip, Effect.map(asProviderError))
       assert.strictEqual(error.reason, "unusable")
       assert.include(error.message, "proxy")
     }).pipe(Effect.scoped, Effect.provide(layer()))
@@ -717,6 +725,193 @@ describe("explicit cache breakpoints", () => {
     ]
     assert.deepStrictEqual(alignTranscript(transcript as never, wire), [0, 1, 2, 2, null, 3])
   })
+})
+
+describe("review regressions", () => {
+  it.live("a long prompt on a model with unknown context completes instead of failing as overflow", () =>
+    Effect.gen(function* () {
+      const server = yield* mock((request, res) =>
+        request.path.endsWith("/models")
+          ? json(res, 200, openAiList([{ id: "local" }]))
+          : sse(res, completionChunks(["Fine."], { prompt_tokens: 20_000, completion_tokens: 2 }))
+      )
+      const { userId, connection, modelId, providers } = yield* connect(
+        "openai-chat",
+        `${server.url}/v1`,
+        null,
+        "local"
+      )
+      const events = yield* collect(
+        providers.stream({
+          userId,
+          connectionId: connection.id,
+          modelId,
+          context,
+          attribution: { purpose: "generation" }
+        })
+      )
+      assert.strictEqual(events.at(-1)!.type, "done")
+    }).pipe(Effect.scoped, Effect.provide(layer()))
+  )
+
+  it.live("honors Retry-After on an error response, and refuses a pause longer than the policy allows", () =>
+    Effect.gen(function* () {
+      let chats = 0
+      let retryAfter = "1"
+      const server = yield* mock((request, res) => {
+        if (request.path.endsWith("/models")) return json(res, 200, openAiList([{ id: "m" }]))
+        chats++
+        if (chats === 1 || retryAfter === "5") {
+          return json(res, 429, { error: { message: "slow down" } }, { "retry-after": retryAfter })
+        }
+        sse(res, completionChunks(["Ok."], { prompt_tokens: 10, completion_tokens: 2 }))
+      })
+      const { userId, connection, modelId, providers } = yield* connect("openai-chat", `${server.url}/v1`, "k", "m")
+      const send = collect(
+        providers.stream({
+          userId,
+          connectionId: connection.id,
+          modelId,
+          context,
+          attribution: { purpose: "generation" }
+        })
+      )
+      const events = yield* send
+      const retrying = events.find((e) => e.type === "retrying")
+      if (retrying?.type !== "retrying") return assert.fail("no retry")
+      assert.strictEqual(retrying.delayMs, 1000)
+      assert.isDefined(events.find((e) => e.type === "paused"))
+      assert.strictEqual(events.at(-1)!.type, "done")
+
+      // Retry-After: 5 s is beyond this test policy's 1 s: no retry, and the next request
+      // on the connection fails fast instead of stalling silently.
+      retryAfter = "5"
+      const first = yield* send.pipe(Effect.flip, Effect.map(asProviderError))
+      assert.strictEqual(first.reason, "rate_limited")
+      const before = server.requests().length
+      const second = yield* send.pipe(Effect.flip, Effect.map(asProviderError))
+      assert.strictEqual(second.reason, "rate_limited")
+      assert.strictEqual(server.requests().length, before, "nothing was sent during the pause")
+    }).pipe(Effect.scoped, Effect.provide(layer()))
+  )
+
+  it.live("an invalid base URL is a typed error, never a hung stream", () =>
+    Effect.gen(function* () {
+      const writer = yield* Database.Writer
+      const providers = yield* Providers.Providers
+      const userId = (yield* writer.EnsureUser({ handle: "ana", displayName: "Ana" })).id as UserId
+      const connection = yield* providers.createConnection({
+        userId,
+        kind: "google",
+        settings: settings(""),
+        apiKey: "g-key-123456"
+      })
+      const model = yield* writer.AddUserModel({ userId, connectionId: connection.id, key: "gemini-x", overrides: {} })
+      const tested = yield* providers
+        .testConnection(userId, connection.id)
+        .pipe(Effect.flip, Effect.map(asProviderError))
+      assert.strictEqual(tested.reason, "unusable")
+      const streamed = yield* collect(
+        providers.stream({
+          userId,
+          connectionId: connection.id,
+          modelId: model.id,
+          context,
+          attribution: { purpose: "generation" }
+        })
+      ).pipe(Effect.timeout("5 seconds"), Effect.flip)
+      assert.strictEqual(streamed._tag, "ProviderError")
+    }).pipe(Effect.scoped, Effect.provide(layer()))
+  )
+
+  it.live("a stopped Anthropic request records the output that arrived, not message_start's placeholder", () =>
+    Effect.gen(function* () {
+      const server = yield* mock((request, res) => {
+        if (request.path.startsWith("/v1/models")) {
+          return json(res, 200, { data: [{ id: "claude-sonnet-5-5" }], has_more: false })
+        }
+        res.writeHead(200, { "content-type": "text/event-stream" })
+        const send = (event: Record<string, unknown>) =>
+          res.write(`event: ${String(event.type)}\ndata: ${JSON.stringify(event)}\n\n`)
+        send({
+          type: "message_start",
+          message: {
+            id: "m",
+            type: "message",
+            role: "assistant",
+            model: "claude-sonnet-5-5",
+            content: [],
+            stop_reason: null,
+            usage: { input_tokens: 100, output_tokens: 1 }
+          }
+        })
+        send({ type: "content_block_start", index: 0, content_block: { type: "text", text: "" } })
+        for (let i = 0; i < 40; i++) {
+          send({
+            type: "content_block_delta",
+            index: 0,
+            delta: { type: "text_delta", text: "The tide keeps rising. " }
+          })
+        }
+      })
+      const { userId, connection, modelId, providers, reader } = yield* connect(
+        "anthropic",
+        server.url,
+        "sk-ant-test",
+        "claude-sonnet-5-5"
+      )
+      let texts = 0
+      yield* collect(
+        providers
+          .stream({ userId, connectionId: connection.id, modelId, context, attribution: { purpose: "generation" } })
+          .pipe(Stream.takeUntil((e) => e.type === "text" && ++texts === 40))
+      )
+      const [row] = yield* reader.ListLlmRequests({ userId, limit: 10, before: null })
+      assert.strictEqual(row!.status, "aborted")
+      assert.strictEqual(row!.usageSource, "estimated")
+      assert.isAbove(row!.counts.output!, 100)
+      assert.strictEqual(row!.counts.inputUncached, 100)
+    }).pipe(Effect.scoped, Effect.provide(layer()))
+  )
+
+  it.live("scrubs a key from an error body before shortening it", () =>
+    Effect.gen(function* () {
+      const key = "sk-live-0123456789abcdef"
+      const server = yield* mock((_request, res) => {
+        res.writeHead(401, { "content-type": "text/plain" })
+        res.end(`${"x".repeat(290)}${key} is not valid`)
+      })
+      const providers = yield* Providers.Providers
+      const writer = yield* Database.Writer
+      const userId = (yield* writer.EnsureUser({ handle: "ana", displayName: "Ana" })).id as UserId
+      const connection = yield* providers.createConnection({
+        userId,
+        kind: "openai-chat",
+        settings: settings(`${server.url}/v1`),
+        apiKey: key
+      })
+      const result = yield* providers.testConnection(userId, connection.id)
+      assert.isFalse(result.ok)
+      assert.notInclude(result.detail, "sk-live")
+    }).pipe(Effect.scoped, Effect.provide(layer()))
+  )
+
+  it.live("treats a whitespace-only key as no key", () =>
+    Effect.gen(function* () {
+      const providers = yield* Providers.Providers
+      const writer = yield* Database.Writer
+      const userId = (yield* writer.EnsureUser({ handle: "ana", displayName: "Ana" })).id as UserId
+      const created = yield* providers.createConnection({
+        userId,
+        kind: "openai-chat",
+        settings: settings("http://127.0.0.1:1/v1"),
+        apiKey: "   "
+      })
+      assert.isFalse(created.hasKey)
+      const set = yield* providers.setKey(userId, created.id, "  sk-padded-key  ")
+      assert.strictEqual(set.keyHint, "-key")
+    }).pipe(Effect.scoped, Effect.provide(layer()))
+  )
 })
 
 describe("pure pieces", () => {

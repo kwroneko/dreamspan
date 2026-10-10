@@ -136,13 +136,14 @@ export class AppApi extends RpcGroup.make(
   Rpc.make("SetNetworkSettings", {
     payload: { proxyUrl: Schema.optionalKey(Schema.NullOr(Schema.String)), bypass: Schema.Array(Schema.String) },
     success: NetworkSettings,
-    error: Schema.Union([Forbidden, InvalidNetworkSettings])
+    error: Schema.Union([Forbidden, InvalidNetworkSettings, ServerError])
   }),
   // --- Usage (PROVIDERS §9).
   Rpc.make("ListLlmRequests", {
     payload: {
       limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 1000 })),
-      before: Schema.NullOr(Schema.Number)
+      /** The last row of the previous page; start times alone can tie. */
+      before: Schema.NullOr(Schema.Struct({ startedAt: Schema.Number, id: Schema.String }))
     },
     success: Schema.Array(LlmRequest),
     error: ServerError

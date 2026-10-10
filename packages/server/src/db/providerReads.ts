@@ -60,7 +60,9 @@ export const makeProviderReadHandlers = Effect.gen(function* () {
 
     ListLlmRequests: ({ userId, limit, before }) =>
       sql<LlmRequestRow>`SELECT * FROM llm_requests
-        WHERE owner_user_id = ${userId} AND started_at < ${before ?? Number.MAX_SAFE_INTEGER}
+        WHERE owner_user_id = ${userId}
+          AND (started_at < ${before?.startedAt ?? Number.MAX_SAFE_INTEGER}
+            OR (started_at = ${before?.startedAt ?? Number.MAX_SAFE_INTEGER} AND id < ${before?.id ?? ""}))
         ORDER BY started_at DESC, id DESC LIMIT ${limit}`.pipe(
         Effect.map((rows) => rows.map(toLlmRequest)),
         query("ListLlmRequests")

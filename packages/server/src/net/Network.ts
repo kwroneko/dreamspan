@@ -3,6 +3,7 @@
 // route taken is reported, never silent. ESLint forbids `fetch` and `undici` elsewhere.
 import { lookup } from "node:dns/promises"
 import { InvalidNetworkSettings } from "@rp/shared/api.ts"
+import { ServerError } from "@rp/shared/errors.ts"
 import { Context, Effect, Layer, Ref, Schema } from "effect"
 import { Agent, type Dispatcher, ProxyAgent, Socks5ProxyAgent, fetch as undiciFetch } from "undici"
 import { Reader, Writer } from "../db/Database.ts"
@@ -48,7 +49,7 @@ export interface NetworkShape {
   readonly setInstance: (settings: {
     readonly proxyUrl: string | null | undefined
     readonly bypass: ReadonlyArray<string>
-  }) => Effect.Effect<NetworkView, InvalidNetworkSettings>
+  }) => Effect.Effect<NetworkView, InvalidNetworkSettings | ServerError>
 }
 
 export class Network extends Context.Service<Network, NetworkShape>()("rp/Network") {}
@@ -155,7 +156,15 @@ export const layer = Layer.effect(
         const nextProxy = proxyUrl === undefined ? before.proxyUrl : proxyUrl
         const proxyUrlEnc =
           nextProxy === null ? null : Buffer.from(secrets.encrypt(nextProxy, PROXY_BINDING)).toString("base64")
-        yield* writer.SetAppSetting({ key: SETTING_KEY, value: { proxyUrlEnc, bypass } }).pipe(Effect.orDie)
+        yield* writer
+          .SetAppSetting({ key: SETTING_KEY, value: { proxyUrlEnc, bypass } })
+          .pipe(
+            Effect.catch((error) =>
+              Effect.logError("saving network settings failed", error).pipe(
+                Effect.andThen(Effect.fail(new ServerError({ message: "saving network settings failed" })))
+              )
+            )
+          )
         yield* Ref.set(current, { proxyUrl: nextProxy, bypassEntries: bypass, bypass: parsed.list })
         return yield* view
       })

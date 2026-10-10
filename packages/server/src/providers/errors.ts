@@ -43,7 +43,8 @@ export const parseRetryAfter = (value: string | undefined, now = Date.now()): nu
 export const classify = (
   message: AssistantMessage,
   seen: { readonly status: number | null; readonly retryAfterMs: number | null; readonly category: string | null },
-  contextWindow: number,
+  /** The model's context, when some source reported it; never a guessed default. */
+  contextWindow: number | undefined,
   afterTokens: boolean
 ): ProviderError | null => {
   const text = message.errorMessage ?? message.rawStopReason ?? "request failed"
@@ -52,10 +53,10 @@ export const classify = (
   if (message.rawStopReason && REFUSAL_STOPS.has(message.rawStopReason)) {
     return providerError("refused", text, extra)
   }
-  if (message.stopReason !== "error") {
-    // Some providers accept an overflowing request and report it only through usage.
-    return isContextOverflow(message, contextWindow) ? providerError("context_overflow", text, extra) : null
-  }
+  // A completed generation is never turned into a failure after the fact. pi-ai can also
+  // flag a "silent" overflow from usage alone, but against a guessed context window that
+  // fails ordinary long requests, and the output is there either way.
+  if (message.stopReason !== "error") return null
   if (isContextOverflow(message, contextWindow)) return providerError("context_overflow", text, extra)
   const status = seen.status ?? Number(/^(\d{3})\b/.exec(text)?.[1] ?? NaN)
   const known = Number.isNaN(status) ? null : status

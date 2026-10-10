@@ -387,6 +387,10 @@ The provider layer's storage (spec/PROVIDERS.md §2, §3.1, §9.1), in migration
   - `InterruptRunningLlmRequests`, for startup
   - `ListLlmRequests`
 - **Ownership:** as in §3.8, everything on another user's connection, model or ledger row is `NotFound` (`test/providers.test.ts` runs every operation as a second user).
+  - A connection's preset override must be one of the user's own live refs. Another user's ref, and a ref that doesn't exist, are the same `NotFound`, so ref ids can't be probed.
+  - A key given at creation is stored in the same transaction as the connection.
+  - `ListLlmRequests` pages by `(started_at, id)`, so requests started in the same millisecond aren't skipped.
+  - A model list that repeats a key keeps the last entry.
 - **Not built yet:** the rollups into `rollouts` and `versions.usage_json`. They arrive with generation (PLAN phase 2).
 
 **Migration guard.** `0005_providers` recreates `connections` and `models` rather than altering them, which is only safe because nothing had written them. The migration refuses to run if either holds rows (`test/migrations.test.ts`).
@@ -455,10 +459,18 @@ It fails with a typed `ProviderError`.
   - `auth`, `rate_limited`, `overloaded`, `context_overflow`, `refused`, `bad_request`, `network`, `aborted`, `unknown`
 
   They're classified from pi's final message, the HTTP status (or the status the SDK left at the start of the message), and pi's overflow and retry checks. A refusal carries Anthropic's category when given.
-- **Retries happen only before the first token:** `rate_limited`, `overloaded` and `network`, with `Retry-After` honored (and paused per connection) or exponential backoff. After output, a failure is never retried; it ends the stream with `afterTokens`.
+- **Retries happen only before the first token:** `rate_limited`, `overloaded` and `network`, with `Retry-After` honored or exponential backoff. After output, a failure is never retried; it ends the stream with `afterTokens`.
+- **Rate limits:**
+  - The status and `Retry-After` are read in our own `fetch` wrapper, because pi-ai's `onResponse` only fires for successful responses (the SDKs throw first).
+  - A `Retry-After` pauses the whole connection. A request waiting on it emits a `paused` event, and the pause is checked after taking a concurrency permit, so queued requests honor it too.
+  - A pause longer than the retry policy's maximum (60 s by default) fails fast as `rate_limited` instead of stalling silently.
+- **Overflow:** a completed generation is never turned into a failure afterwards. An error counts as `context_overflow` only against a context window that some source reported, never against the default used for unknown models.
+- **The stream always ends.** Typed failures go through its queue, and a defect becomes a `ProviderError` (`unknown`) instead of leaving the stream open. An invalid base URL is an `unusable` error.
 - **A per-connection cap** (`max_concurrent`) queues requests.
-- **Every attempt is a ledger row** (§3.12), opened before sending and closed whatever happens: a stopped stream aborts the HTTP request and closes its row as `aborted`, and a call that throws instead of reporting closes it as `failed`.
-- **Secrets never appear in errors.** Error text (including the response bodies quoted in model-list errors) passes through a per-request scrubber before it's stored or shown. The scrubber covers the key, header values and the custom proxy URL with its password, longest first, and skips values under 6 characters.
+- **Every attempt is a ledger row** (§3.12), opened and closed with `acquireUseRelease`, so it closes on every exit:
+  - a stopped stream aborts the HTTP request and closes the row as `aborted`, wherever the interruption lands
+  - a call that throws instead of reporting, and a defect, close it as `failed`
+- **Secrets never appear in errors.** Error text (including the response bodies quoted in model-list errors, scrubbed before they're shortened) passes through a per-request scrubber before it's stored or shown. The scrubber covers the key, header values and the custom proxy URL with its password, longest first, and skips values under 6 characters.
 - **Google:** pi-ai's adapter rejects a custom `fetch`, so a Google connection whose route is a proxy is refused as `unusable` rather than silently going direct.
 
 **Explicit cache breakpoints** (`breakpoints.ts`, PROVIDERS §8), for Anthropic Messages so far:
@@ -472,6 +484,7 @@ It fails with a typed `ProviderError`.
 - **Counts:** pi-ai's normalized usage (uncached input, cache reads, cache writes with Anthropic's 1-hour subset, output, reasoning) when the provider reported usage.
   - The provider's raw usage object is kept with it. OpenRouter's reported cost and routed upstream are read from it.
   - Usage is estimated from the context and the output when the provider produced output without reporting usage, and unknown when nothing came back.
+  - A stopped or failed request records as output at least the tokens of the text that arrived, marked `estimated` when that's more than reported. Anthropic's `message_start` reports only a placeholder output of 1.
 - **Cost:** the provider's reported cost when there is one, otherwise the built-in formula.
   - The formula uses per-million rates from the model's price (catalog or list), with the context-size tier on total input.
   - Long cache writes are priced at twice the input rate.
@@ -491,7 +504,7 @@ It fails with a typed `ProviderError`.
 - **Connections:** `ListConnections`, `CreateConnection`, `UpdateConnection`, `SetConnectionKey`, `SetConnectionHeaders`, `SetConnectionProxy`, `DeleteConnection`, `TestConnection`.
 - **Models:** `RefreshModels`, `ListModels`, `AddUserModel`, `EditModel`, `SetModelHidden`.
 - **Network and usage:** `GetNetworkSettings`/`SetNetworkSettings` (admins only, otherwise `Forbidden`), and `ListLlmRequests`.
-- **Errors keep their tags** (`NotFound`, `StaleWrite`, `ModelKeyTaken`, `ProviderError`, `Forbidden`, from `@rp/shared/errors.ts`). Storage and worker failures are logged on the server and reach the client only as `ServerError`.
+- **Errors keep their tags** (`NotFound`, `StaleWrite`, `ModelKeyTaken`, `ProviderError`, `Forbidden`, from `@rp/shared/errors.ts`). Storage and worker failures are logged on the server and reach the client only as `ServerError`, including from the provider operations and network settings.
 - `test/rpc.test.ts` checks over a real WebSocket that a key never comes back out, that another user gets `NotFound` (or `unusable`) for every operation on someone else's connection, and that only admins see network settings.
 - **At startup,** requests a previous process left `running` are marked `interrupted`.
 
