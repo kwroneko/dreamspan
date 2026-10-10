@@ -49,5 +49,6 @@ Coding agents now make it cheap to build and maintain a replacement, which wasn'
 | Agent loop | `@earendil-works/pi-agent-core` 1.x, with our own persistence, fork and resume, as in reference-harness | Proposed |
 | Storage | SQLite (`better-sqlite3`) with FTS5 | Proposed |
 | Plugin kernel | Cordis (the kernel under DSH), to be evaluated standalone | Open |
-| Client | SvelteKit + Tailwind + bits-ui (as in reference-harness's console) | Open |
+| Client | React (Decided); Vite + TanStack Router and the rest of the stack Proposed in [CLIENT-FRAMEWORK.md](CLIENT-FRAMEWORK.md) | Decided |
+| Effects, RPC, schemas | Effect 4 on the server and in the client data layer ([EFFECT.md](EFFECT.md)) | Proposed |
 | Not built on | DSH as host (alpha, weekly breaking changes, and context assembly is not a plugin point); pi-coding-agent (coding TUI, no web server) | Decided |

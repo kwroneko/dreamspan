@@ -20,3 +20,5 @@ Design phase. No code yet.
 - [spec/DESIGN.md](spec/DESIGN.md): requirements and design decisions by area, each marked decided, proposed or open.
 - [spec/PLAN.md](spec/PLAN.md): phased implementation plan and open questions.
 - [spec/DATA-MODEL.md](spec/DATA-MODEL.md): the data model (phase 0).
+- [spec/CLIENT-FRAMEWORK.md](spec/CLIENT-FRAMEWORK.md): client framework evaluation, performance harness, design-system timing (phase 0).
+- [spec/EFFECT.md](spec/EFFECT.md): Effect across the stack (phase 0).

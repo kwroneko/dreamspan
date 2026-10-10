@@ -413,7 +413,10 @@ These are strategies for mapping history to user and assistant roles:
   - it has no documented auth
 - **[O]** Cordis, DSH's plugin kernel (reversible side effects, declared dependencies, hot reload), is attractive for a harness that extends itself. Its maturity as a standalone library needs evaluating.
 - **[P]** SQLite with FTS5 for the timeline, versions, summaries, rollouts and jobs. JSON files can't handle the version and branch structures.
-- **[O]** Client framework. SvelteKit + Tailwind + bits-ui (reference-harness's console stack) is the default candidate.
+- **[D]** Performance on chats of any length is an absolute priority: very smooth, never buggy, no corners cut. Looks rank below that but matter a lot (screenshots) (owner, 2026-10-10).
+- **[D]** TanStack libraries, Query where it applies (owner, 2026-10-10).
+- **[P]** Effect 4 across the server and the client data layer: [EFFECT.md](EFFECT.md). The owner asked for it to be strongly considered.
+- **[D]** Client framework: **React** (owner, 2026-10-10). This is one of the main stack decisions, because UI quality for real users matters most; reference-harness's console stack is not the default. Evaluation, and the proposed stack around React: [CLIENT-FRAMEWORK.md](CLIENT-FRAMEWORK.md).
 
 ---
 
@@ -440,3 +443,4 @@ These are strategies for mapping history to user and assistant roles:
 - **[L]** Template-bound interactive UI (§10.2).
 - **[L]** Per-character agent memory and private state (§7.1).
 - **[L]** Internal side-by-side panels.
+- **[L]** A native app as a thin client to the user's server (a wrapper around the same frontend, not a standalone app). Low priority, and it must not constrain the design (owner, 2026-10-10).

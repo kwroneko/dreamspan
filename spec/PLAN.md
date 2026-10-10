@@ -83,7 +83,7 @@
 2. Sending into a chat that's still generating: queue or cancel? (§2.2)
 3. How merged threads become one sequence (§3.3). Deferred: not needed until threads are built.
 4. Note identity for "apply to all branches" edits (§3.4).
-5. Client framework, and server HTTP framework (§10.4).
+5. ~~Client framework~~ **Resolved: React** (owner, 2026-10-10; [CLIENT-FRAMEWORK.md](CLIENT-FRAMEWORK.md)). Server HTTP framework: deferred by the owner (2026-10-10); [EFFECT.md](EFFECT.md) proposes Effect's own HTTP server.
 6. Cordis as the plugin kernel: evaluate standalone maturity (§10.4).
 7. Whether intermediate output blocks are real messages (shelved, §7.2).
 8. The project's name.
