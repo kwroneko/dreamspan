@@ -35,3 +35,4 @@ Design documents:
 - [spec/EFFECT.md](spec/EFFECT.md): Effect across the stack (phase 0).
 - [spec/STORAGE.md](spec/STORAGE.md): storage engine, SQLite vs Turso (phase 0).
 - [spec/PROVIDERS.md](spec/PROVIDERS.md): the provider layer on pi-ai 1.x, as a delta from reference-harness (phase 0).
+- [spec/CORDIS.md](spec/CORDIS.md): Cordis evaluated as the plugin kernel (phase 0).

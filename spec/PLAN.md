@@ -3,7 +3,7 @@
 **Status**: Draft, 2026-10-09. The phases are ordered so the owner can **replace ST for daily use as early as possible**, then gain LCM, then agentic features. The data model is designed in full in phase 0, even where the UI comes later. Retrofitting the graph, versions, layers or state events would be far more expensive than building them in from the start.
 
 ## Phase 0: Foundations
-**Progress (2026-10-10):** the scaffold is done (ARCHITECTURE.md): repo, tooling, CI, Docker image, server skeleton with typed RPC over a WebSocket, the database worker architecture, and proxy/single-user auth. Client framework decided (React), server framework implemented on Effect's HTTP server. The full schema with database-enforced invariants, the message-graph operations and the library operations (variants, chat overrides, three-way merge on re-import) drafts with server-side undo history, and the recycle bin followed. The provider layer followed (ARCHITECTURE.md §6): encrypted connection secrets, the outbound proxy with bypass list and per-connection routes, model lists merged with pi-ai's catalog, streaming with typed errors and retries before the first token, the usage ledger with normalized counts and cost, explicit Anthropic breakpoints, and the client RPCs. Remaining: built-in login, the connection settings UI, the Cordis evaluation, and the performance harness.
+**Progress (2026-10-10):** the scaffold is done (ARCHITECTURE.md): repo, tooling, CI, Docker image, server skeleton with typed RPC over a WebSocket, the database worker architecture, and proxy/single-user auth. Client framework decided (React), server framework implemented on Effect's HTTP server. The full schema with database-enforced invariants, the message-graph operations and the library operations (variants, chat overrides, three-way merge on re-import) drafts with server-side undo history, and the recycle bin followed. The provider layer followed (ARCHITECTURE.md §6): encrypted connection secrets, the outbound proxy with bypass list and per-connection routes, model lists merged with pi-ai's catalog, streaming with typed errors and retries before the first token, the usage ledger with normalized counts and cost, explicit Anthropic breakpoints, and the client RPCs. The Cordis evaluation is written ([CORDIS.md](CORDIS.md)). Remaining: built-in login, the connection settings UI, and the performance harness.
 
 - ~~Repo, tooling, CI, Docker image. Node LTS, TypeScript ESM.~~ Done.
 - Settle the open stack questions: ~~client framework~~ (React), ~~server framework~~ (Effect HTTP), a time-boxed Cordis evaluation.
@@ -87,6 +87,6 @@
 3. How merged threads become one sequence (§3.3). Deferred: not needed until threads are built.
 4. Note identity for "apply to all branches" edits (§3.4).
 5. ~~Client framework~~ **Resolved: React** (owner, 2026-10-10; [CLIENT-FRAMEWORK.md](CLIENT-FRAMEWORK.md)). Server HTTP framework: deferred by the owner (2026-10-10); [EFFECT.md](EFFECT.md) proposes Effect's own HTTP server.
-6. Cordis as the plugin kernel: evaluate standalone maturity (§10.4).
+6. Cordis as the plugin kernel: evaluated in [CORDIS.md](CORDIS.md). It proposes not adopting it (an Effect-native host instead); awaiting the owner.
 7. Whether intermediate output blocks are real messages (shelved, §7.2).
 8. The project's name.
