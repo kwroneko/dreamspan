@@ -1,6 +1,6 @@
 # Effect across the stack
 
-**Status**: Proposal, 2026-10-10. The owner wants Effect strongly considered, because "if used properly, it might make the final product substantially more solid in terms of error handling and more reliable". Nothing here is Decided.
+**Status**: Proposal, validated by a spike (§5), 2026-10-10. The owner wants Effect strongly considered, because "if used properly, it might make the final product substantially more solid in terms of error handling and more reliable". Nothing here is Decided.
 **Related**: [CLIENT-FRAMEWORK.md](CLIENT-FRAMEWORK.md), DESIGN §10.4, PLAN phase 0.
 
 ---
@@ -73,15 +73,22 @@ This project is made of exactly what Effect is for:
 
 ---
 
-## 5. Validation before committing
+## 5. Validation: spike results (2026-10-10)
 
-A short spike, carried into the performance harness:
-1. A WebSocket stream RPC delivering token deltas for 6 concurrent generations. Each is interruptible from the client, and an interrupt aborts a fake promise-based provider through its `AbortSignal`.
-2. Per-version atom families on the client feeding a virtualized React list. Measure frame times against a plain external store.
-3. One write path end to end: an RPC with `row_version` optimistic concurrency, rollback on conflict, and a typed error surfaced in the UI.
-4. The SQLite choice from §4, exercised by the same write path.
+The spike is in [spikes/effect-stream](../spikes/effect-stream/README.md). It covers the four points this section originally planned.
+1. **Streaming RPC with cancellation: works.**
+   - 6 concurrent generations ran over a WebSocket stream RPC, with deltas coalesced into one batch per 16 ms.
+   - Stopping one interrupts its fiber. The partial text is persisted (`onExit`), the provider's `AbortSignal` fires, and the provider's iterator is finalized.
+   - Unsubscribing on the client stops delivery.
+   - 16/16 contract checks pass.
+2. **Atoms vs a plain store: no measurable difference.** Both re-render one row per update, and frame times are equal (1×: p95 16.7 ms, under 1.2% of frames over 25 ms). **Atoms stay; no bypass is needed.** The real cost is browser layout and paint of growing messages, which is a chat-view concern (CLIENT-FRAMEWORK §5, §7) and independent of Effect.
+3. **Optimistic write with typed errors: works.** `rowVersion` concurrency, with `StaleWrite` and `NotFound` arriving as tagged errors, and rollback in the UI.
+4. **SQLite: `node:sqlite` through `@effect/sql-sqlite-node` works** (migrations, transactions, `RETURNING`, STRICT). This supports the [STORAGE.md](STORAGE.md) proposal.
 
-If (2) is slower than a plain store, the token-delta path bypasses atoms and everything else stays on Effect.
+Follow-ups the spike surfaced:
+- **[P]** Subscriptions need a per-chat event sequence number, so a client can subscribe from a cursor without losing events between its initial load and subscribing.
+- AtomRpc's `mutation` helper isn't concurrent. Use `runtime.fn` with `concurrent: true` for parallel operations.
+- Components using TanStack Virtual need `"use no memo"` under React Compiler.
 
 ---
 

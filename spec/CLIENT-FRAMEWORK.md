@@ -110,7 +110,8 @@ Ranked on how well each candidate lets us build the hardest parts of this partic
 
 The research points to these as what decides UI quality more than the framework:
 - **Streams don't flow through component state.** The WebSocket client writes token deltas into a normalized store keyed by version id. Rows subscribe to their own version only, and updates are coalesced per animation frame. The server sends **deltas**, never whole messages (Open WebUI #23733).
-- **Incremental markdown.** Only the growing tail of a streaming message is re-parsed. Finished blocks are memoized.
+- **Incremental markdown and layout.** Only the growing tail of a streaming message is re-parsed *and re-laid out*. Finished blocks are separate, memoized elements, and rows use CSS containment. The Effect spike measured this: one growing text node per message dropped about 17% of frames at 1× CPU, and splitting into paragraphs brought that under 1% (spikes/effect-stream).
+- **The streaming row is the remaining cost on slow CPUs**: paint, and the virtualizer re-measuring growing rows every frame. Isolate streaming rows into compositor layers, and throttle their measurement.
 - **Virtualized, bottom-anchored list from day one,** with stable keys (slot ids), measured heights, and prepend without jumps. Tested on iOS Safari early, since that's where both virtua and Open WebUI have trouble.
 - **The server-state store is the only source of truth (R10/R11).** Optimistic writes carry `row_version`, and the server's reply confirms or rolls back. Tab-local state is limited to view state (scroll position, open panels), which can go in the URL.
 - **Sandboxed iframes are virtualized too.** HTML messages render to a placeholder or snapshot when offscreen, with a capped number of live iframes.
@@ -160,7 +161,7 @@ The comparative spike React vs Svelte is therefore **no longer proposed**. It's 
 
 Because performance is an absolute priority **[D]**, the harness comes before the chat UI. Chat work then lands against it.
 - **Synthetic fixtures:** a 100k-message chat with realistic markdown, long and short messages, versions and some HTML messages. Generated, never derived from real chats (CLAUDE.md "Privacy").
-- **Mock server:** the real RPC protocol (EFFECT.md §5) with a fake provider that streams at configurable rates: 6+ concurrent streams, parallel swipes under one slot, bursty and slow streams.
+- **Mock server:** the real RPC protocol (EFFECT.md §5) with a fake provider that streams at configurable rates: 6+ concurrent streams, parallel swipes under one slot, bursty and slow streams. The stress rate is **300 tok/s per stream**, matching the owner's local model (10k tok/s prefill, 300 tok/s decode at batch size 1). The Effect spike's `measure.ts` is the starting point.
 - **Scenarios:**
   - open at the bottom and at a deep slot
   - scroll the full length

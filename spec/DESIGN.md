@@ -398,6 +398,14 @@ These are strategies for mapping history to user and assistant roles:
 - **[P]** Each version has a **display form** and a **context form**: recent turns send the rich form, older ones the compact form (reference-harness's rich/compact split).
 - **[L]** Template-bound UI: a persistent "stage" or widget whose state the model updates through tools, so only small state changes enter the context.
 
+### 10.2a Image input (vision)
+- **[D]** Users can attach images to their messages, as in any chat interface, and vision models see them (owner, 2026-10-10). It's rarely used in RP, but it must work well and feel integrated. The owner's case: sending drawings to a card-making chat as the source for character and costume designs.
+- **[D]** Attaching is direct: drag and drop onto the composer or the chat, paste from the clipboard, and a picker button. ST's "find the right button in a submenu" is the anti-pattern.
+- **[D]** No captioning by another model for text-only models, for now. There's no clear reason to send an image to a text-only model in this app.
+- **[P]** Attachments belong to the version, so editing or writing a new version can keep, add or remove them. Thumbnails show inline in the message, and a click opens a full-size viewer.
+- **[P]** When the chosen model has no vision capability, the composer and the request preview say so before sending, so images are never silently dropped ("Nothing changes silently").
+- **[P]** Images are context like anything else, so their token cost and cache effect show in the context view. Older images may need an LCM policy (keep, summarize as text, or drop beyond the verbatim window). **[O]** Which policy, decided with phase 3.
+
 ### 10.3 Chat-wide edits
 - **[D]** Large edits across a whole conversation, summaries included, such as search and replace to rename a character, and agentic editing to instructions.
 - **[P]** A **changeset** is one atomic batch of new versions across slots and summaries, with a title and one entry in the chat's history.
