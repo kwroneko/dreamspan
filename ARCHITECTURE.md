@@ -510,7 +510,7 @@ It fails with a typed `ProviderError`.
 - `test/rpc.test.ts` checks over a real WebSocket that a key never comes back out, that another user gets `NotFound` (or `unusable`) for every operation on someone else's connection, and that only admins see network settings.
 - **At startup,** requests a previous process left `running` are marked `interrupted`.
 
-**Known issue:** the server test suite crashes intermittently (a fork process dies with V8's `Check failed: jit_page.has_value()`), roughly 1 run in 7 on this host under load. It always hits database-backed test files. It started with the provider work, and neither disabling memory protection keys nor Wasm JIT helps. Rerun on a crash; the investigation is a separate task.
+**Test-suite crashes** (a fork dying with V8's `Check failed: jit_page.has_value()`, worse once the workers loaded more modules) were a V8 bug in Node 24, worked around with `--no-wasm-code-gc` in the tests (§3.6).
 
 ---
 
