@@ -2,7 +2,7 @@
 
 This document describes only what is implemented. Proposals live in `spec/`. When a spec is implemented, its content moves here in the same commit (CLAUDE.md "Design docs").
 
-**State**: Phase 0 (PLAN.md), 2026-10-10. Built: the scaffold, the full schema, the message-graph operations, the library operations, drafts, the recycle bin, and the provider layer's storage: connections, models, encrypted secrets and the usage ledger. Not yet built: built-in login, the provider layer's network and streaming parts, and every chat feature.
+**State**: Phase 0 (PLAN.md), 2026-10-10. Built: the scaffold, the full schema, the message-graph operations, the library operations, drafts, the recycle bin, and the provider layer's storage: connections, models, encrypted secrets and the usage ledger. The provider layer's network module and streaming entry point are built too (§6). Not yet built: built-in login, client RPCs and UI for connections, and every chat feature.
 
 ---
 
@@ -419,7 +419,70 @@ Not built yet: built-in login (PLAN phase 0), and per-user ownership checks, whi
 
 ---
 
-## 6. Deployment
+## 6. Provider layer
+
+`packages/server/src/providers/` (spec/PROVIDERS.md §4, §7, §9). It's the one entry point to models, for the assembler (phase 2) and later the agent loop. It sits on `@earendil-works/pi-ai` 1.0.3, unpatched.
+
+**Calling pi-ai.** The four wire APIs' lazy implementations (`api/*.lazy`) are called directly, never pi-ai's `Models` collection:
+- **Each request gets:**
+  - an explicit key: a placeholder for keyless local servers, since pi's direct calls require one
+  - `env: {}`
+  - `maxRetries: 0`, so retries happen only in our layer and are visible
+  - the fiber's abort signal
+  - our `fetch` (§2, outgoing requests)
+  - `onResponse` for the status and `Retry-After`
+  - `onProviderStreamEvent` for raw usage
+- **The result:** no request can pick up a key from the server's environment.
+- **The pi model** is built per request from the merged description (`resolveModel`). When pi's catalog entry is for the same wire API, it's the base, so its request settings carry over. For example, DeepSeek's `max_tokens` field and reasoning replay come from the catalog (`test/providerStream.test.ts` checks the request body).
+- **Catalogs** (`catalog.ts`) load per provider on first use.
+
+**Connections** (`Providers`):
+- `createConnection`, `setKey`, `setHeaders`, `setProxy`: these encrypt (§2, secrets) and call the storage operations (§3.12).
+- `refreshModels` fetches the upstream's list (`modelLists.ts`; OpenAI-style, Anthropic and Google formats, decoded with Schema) and merges each model over pi's catalog. What the list reports wins: OpenRouter's context length, pricing, modalities and parameters, vLLM's `max_model_len`.
+- `testConnection` fetches the list and reports the route the request took.
+
+**Streaming** (`stream`): a `Stream` of events:
+- `attempt`
+- `route`, e.g. "direct: no proxy configured"
+- `text` and `thinking` deltas
+- `retrying`
+- `done`, with pi's final message, the counts and the cost
+
+It fails with a typed `ProviderError`.
+
+- **Error classes** (`errors.ts`):
+  - `unusable`: no key, an unreadable secret, a route the API can't take
+  - `auth`, `rate_limited`, `overloaded`, `context_overflow`, `refused`, `bad_request`, `network`, `aborted`, `unknown`
+
+  They're classified from pi's final message, the HTTP status (or the status the SDK left at the start of the message), and pi's overflow and retry checks. A refusal carries Anthropic's category when given.
+- **Retries happen only before the first token:** `rate_limited`, `overloaded` and `network`, with `Retry-After` honored (and paused per connection) or exponential backoff. After output, a failure is never retried; it ends the stream with `afterTokens`.
+- **A per-connection cap** (`max_concurrent`) queues requests.
+- **Every attempt is a ledger row** (§3.12), opened before sending and closed whatever happens. A stopped stream aborts the HTTP request and closes its row as `aborted`.
+- **Google:** pi-ai's adapter rejects a custom `fetch`, so a Google connection whose route is a proxy is refused as `unusable` rather than silently going direct.
+
+**Usage and cost** (`usage.ts`):
+- **Counts:** pi-ai's normalized usage (uncached input, cache reads, cache writes with Anthropic's 1-hour subset, output, reasoning) when the provider reported usage.
+  - The provider's raw usage object is kept with it. OpenRouter's reported cost and routed upstream are read from it.
+  - Usage is estimated from the context and the output when the provider produced output without reporting usage, and unknown when nothing came back.
+- **Cost:** the provider's reported cost when there is one, otherwise the built-in formula.
+  - The formula uses per-million rates from the model's price (catalog or list), with the context-size tier on total input.
+  - Long cache writes are priced at twice the input rate.
+  - User formulas aren't built yet.
+
+**Tested** (`test/providerStream.test.ts`) against a scripted provider speaking the real wire formats (`test/support/mockProvider.ts`):
+- OpenRouter streaming with reported cost and upstream, and the built-in cost
+- a 429 retried with each attempt recorded
+- a mid-stream failure kept and not retried, a 401 not retried
+- stopping, a missing key, Google behind a proxy
+- Anthropic's cache split and catalog pricing
+- DeepSeek's dialect
+- a keyless local server
+
+**Known issue:** the server test suite crashes intermittently (a fork process dies with V8's `Check failed: jit_page.has_value()`), roughly 1 run in 7 on this host under load. It always hits database-backed test files. It started with the provider work, and neither disabling memory protection keys nor Wasm JIT helps. Rerun on a crash; the investigation is a separate task.
+
+---
+
+## 7. Deployment
 
 `Dockerfile`: a multi-stage build on `node:24-slim`.
 - The client and the database workers are built in one stage. The final image holds production dependencies, the server and shared sources, the client build and the worker bundles.
