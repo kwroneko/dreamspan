@@ -34,3 +34,4 @@ Design documents:
 - [spec/CLIENT-FRAMEWORK.md](spec/CLIENT-FRAMEWORK.md): client framework evaluation, performance harness, design-system timing (phase 0).
 - [spec/EFFECT.md](spec/EFFECT.md): Effect across the stack (phase 0).
 - [spec/STORAGE.md](spec/STORAGE.md): storage engine, SQLite vs Turso (phase 0).
+- [spec/PROVIDERS.md](spec/PROVIDERS.md): the provider layer on pi-ai 1.x, as a delta from reference-harness (phase 0).

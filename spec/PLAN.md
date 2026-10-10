@@ -10,7 +10,7 @@
 - **Data model and schema** (drafted in [DATA-MODEL.md](DATA-MODEL.md); DESIGN §3, §4, §6.2): message graph (slots with parents, threads, path selection), versions with provenance and status, state events, layered entities (base, variant, override, revisions), notes, connections and models, rollouts, summaries over path segments, changesets, drafts with undo history.
 - Server skeleton: typed operations (every UI action is an operation), WebSocket subscriptions, per-entity optimistic concurrency, single-writer SQLite queue (as in reference-harness).
 - Users and auth: separate users with per-user ownership in every query; a trusted reverse-proxy header (Authelia `Remote-User`) mapped to a user, plus built-in login.
-- Provider layer: **pi-ai 1.x (Decided)**, connections with overridable base URLs, model-list fetching, user-defined models with capability fields, write-only keys. **Next up.** Before designing it, read how reference-harness uses pi-ai, including its pi-ai patch (it's on 0.84.2), and present the design as a delta from that (CLAUDE.md). The `connections` and `models` tables already exist (ARCHITECTURE.md §3.7).
+- Provider layer: **pi-ai 1.x (Decided)**, connections with overridable base URLs, model-list fetching, user-defined models with capability fields, write-only keys. **Next up.** Proposed in [PROVIDERS.md](PROVIDERS.md), as a delta from reference-harness; four questions for the owner are in its §13.
 
 ## Phase 1: Import and compatibility core
 - Card parsing and export: V1, V2 and V3 as JSON, PNG and CHARX (reference-harness already uses `character-card-utils` and the PNG chunk libraries).

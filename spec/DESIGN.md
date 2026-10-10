@@ -391,6 +391,7 @@ These are strategies for mapping history to user and assistant roles:
 - **[P]** Model choice is a (connection, model) pair, inherited through the same kind of chain as presets but completely separate from them. The summarizer can have its own model.
 - **[P]** Several connections of the same type are allowed.
 - **[P]** API keys are write-only: stored on the server and never sent back to the browser.
+- **[P]** The provider layer's design (connections, model merging, keys, base-URL policy, errors, breakpoints) is in [PROVIDERS.md](PROVIDERS.md).
 
 ---
 
