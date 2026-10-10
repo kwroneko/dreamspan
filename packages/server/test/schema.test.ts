@@ -2,7 +2,7 @@
 // connection so no application code is involved.
 import { DatabaseSync } from "node:sqlite"
 import { beforeEach, describe, expect, it } from "vitest"
-import { dataModel, draftHistory, users } from "../src/db/schema/index.ts"
+import { bin, dataModel, draftHistory, providers, users } from "../src/db/schema/index.ts"
 
 let db: DatabaseSync
 let n = 0
@@ -117,7 +117,7 @@ const addVersion = (
 beforeEach(() => {
   db = new DatabaseSync(":memory:")
   db.exec("PRAGMA foreign_keys = ON")
-  for (const statement of [...users, ...dataModel, ...draftHistory]) db.exec(statement)
+  for (const statement of [...users, ...dataModel, ...draftHistory, ...bin, ...providers]) db.exec(statement)
 })
 
 describe("graph shape", () => {
@@ -340,5 +340,126 @@ describe("full-text search", () => {
     db.exec("VACUUM")
     expect(search("bell")).toEqual([a.versionId])
     db.exec(`INSERT INTO versions_fts (versions_fts) VALUES ('integrity-check')`)
+  })
+})
+
+describe("connections and the usage ledger", () => {
+  const connection = (ownerId: string) => {
+    const connectionId = id("conn")
+    run(
+      `INSERT INTO connections (id, owner_user_id, name, kind, api, created_at, updated_at)
+         VALUES (?, ?, 'Local', 'openai-chat', 'openai-completions', 1, 1)`,
+      connectionId,
+      ownerId
+    )
+    return connectionId
+  }
+  const model = (connectionId: string, key = "m") => {
+    const modelId = id("model")
+    run(
+      `INSERT INTO models (id, connection_id, model_key, source, created_at) VALUES (?, ?, ?, 'fetched', 1)`,
+      modelId,
+      connectionId,
+      key
+    )
+    return modelId
+  }
+  const request = (
+    ownerId: string,
+    connectionId: string,
+    attribution: { modelId?: string; chatId?: string; versionId?: string } = {}
+  ) => {
+    const requestId = id("req")
+    run(
+      `INSERT INTO llm_requests (id, owner_user_id, connection_id, model_id, chat_id, version_id, purpose, api, provider, model_key, status, started_at)
+         VALUES (?, ?, ?, ?, ?, ?, 'generation', 'openai-completions', 'openai', 'm', 'running', 1)`,
+      requestId,
+      ownerId,
+      connectionId,
+      attribution.modelId ?? null,
+      attribution.chatId ?? null,
+      attribution.versionId ?? null
+    )
+    return requestId
+  }
+  const close = (requestId: string) =>
+    run(
+      `UPDATE llm_requests SET status = 'complete', ended_at = 2, input_uncached = 10, cache_read = 90, output = 5,
+         usage_source = 'reported', raw_usage_json = '{"prompt_tokens":100}' WHERE id = ?`,
+      requestId
+    )
+
+  it("keeps a connection's secrets consistent", () => {
+    const owner = user()
+    const conn = connection(owner)
+    expect(() => run(`UPDATE connections SET api_key_enc = x'00' WHERE id = ?`, conn)).toThrow(/CHECK/)
+    run(`UPDATE connections SET api_key_enc = x'00', key_hint = 'abcd' WHERE id = ?`, conn)
+    expect(() => run(`UPDATE connections SET proxy_mode = 'custom' WHERE id = ?`, conn)).toThrow(/CHECK/)
+    // A purged connection keeps its row but none of its secrets.
+    expect(() => run(`UPDATE connections SET purged_at = 3 WHERE id = ?`, conn)).toThrow(/CHECK/)
+    run(`UPDATE connections SET purged_at = 3, api_key_enc = NULL, key_hint = NULL WHERE id = ?`, conn)
+  })
+
+  it("never moves a model to another connection", () => {
+    const owner = user()
+    const m = model(connection(owner))
+    const other = connection(owner)
+    expect(() => run(`UPDATE models SET connection_id = ? WHERE id = ?`, other, m)).toThrow(/never moves/)
+    expect(() => run(`UPDATE models SET model_key = 'renamed' WHERE id = ?`, m)).toThrow(/never moves/)
+  })
+
+  it("attributes a request only to its own user's chat and its connection's models", () => {
+    const owner = user()
+    const stranger = user()
+    const conn = connection(owner)
+    const strangersChat = chat(stranger)
+    expect(() => request(owner, conn, { chatId: strangersChat.chatId })).toThrow(/attributed/)
+    expect(() => request(owner, conn, { modelId: model(connection(owner)) })).toThrow(/attributed/)
+    const own = chat(owner)
+    const otherChat = chat(owner)
+    const s = slot(own, null, { writer: "model", status: "generating" })
+    expect(() => request(owner, conn, { chatId: otherChat.chatId, versionId: s.versionId })).toThrow(/attributed/)
+    const r = request(owner, conn, { modelId: model(conn), chatId: own.chatId, versionId: s.versionId })
+    expect(() => run(`UPDATE llm_requests SET chat_id = ? WHERE id = ?`, otherChat.chatId, r)).toThrow(/cleared/)
+  })
+
+  it("is open until closed, and a closed request is a record", () => {
+    const owner = user()
+    const r = request(owner, connection(owner))
+    expect(() => run(`UPDATE llm_requests SET status = 'complete' WHERE id = ?`, r)).toThrow(/CHECK/)
+    close(r)
+    expect(() => run(`UPDATE llm_requests SET output = 6 WHERE id = ?`, r)).toThrow(/record/)
+    expect(() => run(`UPDATE llm_requests SET status = 'failed' WHERE id = ?`, r)).toThrow(/record/)
+    // Only the cost can be recomputed, and it always names its formula.
+    expect(() => run(`UPDATE llm_requests SET cost = 0.01 WHERE id = ?`, r)).toThrow(/CHECK/)
+    run(`UPDATE llm_requests SET cost = 0.01, cost_currency = 'USD', cost_formula = 'builtin' WHERE id = ?`, r)
+  })
+
+  it("outlives a chat deleted for good", () => {
+    const owner = user()
+    const conn = connection(owner)
+    const c = chat(owner)
+    const s = slot(c, null, { writer: "model", status: "generating" })
+    const r = request(owner, conn, { chatId: c.chatId, versionId: s.versionId })
+    close(r)
+    tx(() => run(`DELETE FROM chats WHERE id = ?`, c.chatId))
+    expect(get(`SELECT chat_id, version_id, output FROM llm_requests WHERE id = ?`, r)).toEqual({
+      chat_id: null,
+      version_id: null,
+      output: 5
+    })
+  })
+
+  it("lets connections into the recycle bin, keeping existing items", () => {
+    const fresh = new DatabaseSync(":memory:")
+    fresh.exec("PRAGMA foreign_keys = ON")
+    for (const statement of [...users, ...dataModel, ...draftHistory, ...bin]) fresh.exec(statement)
+    fresh.exec(`INSERT INTO users (id, handle, display_name, role, created_at) VALUES ('u', 'u', 'u', 'admin', 1)`)
+    fresh.exec(`INSERT INTO bin_items (id, user_id, kind, target_id, title, excerpt, origin_json, byte_size, deleted_at)
+      VALUES ('b1', 'u', 'entity', 'e', 'Mira', '', '{}', 10, 1)`)
+    for (const statement of providers) fresh.exec(statement)
+    fresh.exec(`INSERT INTO bin_items (id, user_id, kind, target_id, title, excerpt, origin_json, byte_size, deleted_at)
+      VALUES ('b2', 'u', 'connection', 'c', 'Local', '', '{}', 0, 2)`)
+    expect(fresh.prepare(`SELECT id FROM bin_items ORDER BY id`).all()).toEqual([{ id: "b1" }, { id: "b2" }])
   })
 })

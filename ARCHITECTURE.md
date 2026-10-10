@@ -2,7 +2,7 @@
 
 This document describes only what is implemented. Proposals live in `spec/`. When a spec is implemented, its content moves here in the same commit (CLAUDE.md "Design docs").
 
-**State**: Phase 0 (PLAN.md), 2026-10-10. Built: the scaffold, the full schema, the message-graph operations, the library operations, drafts and the recycle bin. Not yet built: built-in login, the provider layer, and every chat feature.
+**State**: Phase 0 (PLAN.md), 2026-10-10. Built: the scaffold, the full schema, the message-graph operations, the library operations, drafts, the recycle bin, and the provider layer's schema with the usage ledger. Not yet built: built-in login, the rest of the provider layer, and every chat feature.
 
 ---
 
@@ -135,6 +135,8 @@ Migrations (`migrations.ts`) run in the writer through Effect's `SqliteMigrator`
   - `connections`, `models`
   - `media_assets`, `media_refs`
   - `jobs`
+- `0003_draft_history` (§3.10), `0004_recycle_bin` (§3.11)
+- `0005_providers` (§3.12): `connections` and `models` in their final shape, and the `llm_requests` usage ledger
 
 Conventions:
 - **Tables:** all `STRICT`, with JSON columns guarded by `json_valid` CHECKs and timestamps in epoch milliseconds.
@@ -314,6 +316,34 @@ Deleting is deliberate and fundamentally non-destructive (DESIGN §6.2): deletes
 - **Recovered text** (`ListRecoveredTexts`, `GetRecoveredText`, `DeleteRecoveredText`, `ClearRecoveredTexts`): 2,000 texts or 200 MB by default. It's produced passively by draft commits and discards (§3.10), so it never shows a toast.
 - Each entry records where it came from: a title, an excerpt and origin details for deleted items, a source label like `Composer in "Harbor"` for recovered text. So text can be copied out without restoring.
 - Limits are `Database.layer({ binLimits })`.
+
+### 3.12 Connections, models and the usage ledger
+
+The provider layer's storage (spec/PROVIDERS.md §2, §3.1, §9.1), in migration `0005_providers` (`db/schema/providers.ts`). No operations use it yet.
+
+**`connections`**: one provider kind, one wire API, one base URL and one key per row.
+- `kind` and `api` follow pi-ai's catalog, so the shared schema will validate them rather than a CHECK list.
+- **Secrets are columns of their own,** written encrypted:
+  - `api_key_enc`, with `key_hint` (its last 4 characters)
+  - `headers_enc`, with only `header_names_json` in the clear, because header values often carry credentials
+  - `proxy_url_enc`
+- **The database keeps them consistent:**
+  - a key always has a hint
+  - `proxy_mode = 'custom'` always has a proxy URL, and the other modes never do
+  - a purged connection (`purged_at`) holds no key, headers, proxy or base URL; it stays as a tombstone so old messages and ledger rows still name their model
+- `deleted_at` and `bin_item_id` are for the recycle bin, whose `bin_items.kind` now includes `connection`. The table was rebuilt for that, keeping its rows.
+
+**`models`**: what the upstream reports (`upstream_json`, rewritten by every refresh) and what the user edited (`overrides_json`, never touched by a refresh) are separate columns, merged when read. A model the list stops reporting gets `missing_since` instead of being deleted. A model never moves to another connection or key.
+
+**`llm_requests`**: one row per request to a model, retries and failed attempts included.
+- **Opened as `running`** before the request is sent, and closed with its status, timings, normalized token counts (`input_uncached`, `cache_read`, `cache_write` with its long-TTL subset `cache_write_long`, `output` with its `reasoning` subset), the provider's raw usage object, any provider-reported cost, and the computed cost with its currency and formula. `running` exactly when `ended_at` is unset.
+- **Unknown counts are `NULL`, never zero.** Provider-reported numbers have no CHECKs, so a quirky upstream can never make the closing write fail and leave a billed request unrecorded.
+- **A closed request is a record:** only its cost can be recomputed, and a cost always names its currency and formula.
+- **Attribution stays inside the user's data:** a request names only its own user's chat, a rollout and a version of that chat, and a model of its connection. Attribution can be cleared, never moved.
+- **The ledger outlives what it's attributed to:** deleting a chat for good keeps its requests and clears their chat, rollout and version (`ON DELETE SET NULL`, indexed so a large chat deletes quickly).
+- Indexed by user and by connection over time, for totals and later limits.
+
+**Migration guard.** `0005_providers` recreates `connections` and `models` rather than altering them, which is only safe because nothing had written them. The migration refuses to run if either holds rows (`test/migrations.test.ts`).
 
 ---
 

@@ -1,6 +1,6 @@
 # Provider layer
 
-**Status**: Proposed, 2026-10-10, with the owner's decisions of the same day marked **[D]**. Also Decided, in DESIGN.md §9 and §10.4:
+**Status**: Proposed, 2026-10-10, with the owner's decisions of the same day marked **[D]**. **Partially implemented:** the schema (§2, §3.1, §9.1, migration `0005_providers`) is built and documented in ARCHITECTURE.md §3.12. One change from §2: header values are encrypted like the key, with only header names in the clear. Also Decided, in DESIGN.md §9 and §10.4:
 - pi-ai 1.x is the provider layer
 - a connection is one wire type, one provider and one set of settings
 - every provider type has an overridable base URL
