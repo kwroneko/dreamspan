@@ -30,8 +30,6 @@ interface DraftRow {
   readonly row_version: number
   readonly created_at: number
   readonly updated_at: number
-  readonly recovery_text: string | null
-  readonly recovery_at: number | null
   readonly history_length: number
 }
 
@@ -55,13 +53,21 @@ const toDraft = (row: DraftRow) =>
     rowVersion: row.row_version,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-    historyLength: row.history_length,
-    recovery: row.recovery_text !== null ? { content: row.recovery_text, at: row.recovery_at ?? row.updated_at } : null
+    historyLength: row.history_length
   })
 
 const patchOf = (entry: EntryRow): Patch => ({ start: entry.start, removed: entry.removed, inserted: entry.inserted })
 
-export const makeDraftStore = (sql: SqlClient.SqlClient) => {
+/** Where text a commit or discard would lose goes: the bin's recovered-text section. */
+export type RecoverText = (
+  userId: UserId,
+  key: DraftKey,
+  texts: ReadonlyArray<string>,
+  reason: "commit" | "discard"
+) => Effect.Effect<void, unknown>
+
+/** `recover` is only needed where drafts are committed or discarded (the writer). */
+export const makeDraftStore = (sql: SqlClient.SqlClient, recover: RecoverText = () => Effect.void) => {
   const find = (userId: UserId, key: DraftKey) =>
     sql<DraftRow>`
       SELECT d.*, (SELECT count(*) FROM draft_history h WHERE h.draft_id = d.id) AS history_length
@@ -262,34 +268,35 @@ export const makeDraftStore = (sql: SqlClient.SqlClient) => {
       return toDraft((yield* find(userId, key))!)
     })
 
-  /** The text from just before the newest destructive change in the history, if any. */
-  const beforeLastDestructive = (draft: DraftRow) =>
+  /** The text from just before each destructive change in the session, newest first. */
+  const beforeDestructiveChanges = (draft: DraftRow) =>
     Effect.gen(function* () {
+      const found: Array<string> = []
       let after = draft.content
       for (const entry of yield* entries(draft.id)) {
         const patch = patchOf(entry)
         const before = applyPatch(after, invertPatch(patch))
-        if (isDestructive(patch, before)) return before
+        if (isDestructive(patch, before)) found.push(before)
         after = before
       }
-      return null
+      return found
     })
 
   /**
-   * Ends a drafting session. The history has served its purpose, since the committed
-   * text now lives in a version or revision, so it's deleted and the text emptied
-   * (owner, 2026-10-10). Kept: the one text a wipe-then-send would lose, or the
-   * discarded text, as `recovery`.
+   * Ends a drafting session. The committed text now lives in a version or revision, so
+   * the history is deleted and the draft emptied (owner, 2026-10-10). Text that would be
+   * lost goes to the bin's recovered-text section: the text from before each destructive
+   * change in the session (hours of typing wiped, then saved), and a discarded draft.
    */
   const clear = (userId: UserId, key: DraftKey, outcome: "committed" | "discarded", expectedRowVersion: number) =>
     Effect.gen(function* () {
       const draft = yield* get(userId, key)
       yield* checkVersion(draft, expectedRowVersion)
-      const recovery = outcome === "discarded" ? draft.content || null : yield* beforeLastDestructive(draft)
-      const now = Date.now()
+      const lost = yield* beforeDestructiveChanges(draft)
+      if (outcome === "discarded") lost.unshift(draft.content)
+      yield* Effect.orDie(recover(userId, key, lost, outcome === "discarded" ? "discard" : "commit"))
       yield* sql`DELETE FROM draft_history WHERE draft_id = ${draft.id}`
-      yield* sql`UPDATE drafts SET status = ${outcome}, content = '', recovery_text = ${recovery},
-                   recovery_at = ${recovery === null ? null : now}, row_version = row_version + 1, updated_at = ${now}
+      yield* sql`UPDATE drafts SET status = ${outcome}, content = '', row_version = row_version + 1, updated_at = ${Date.now()}
                  WHERE id = ${draft.id}`
       return toDraft((yield* find(userId, key))!)
     })

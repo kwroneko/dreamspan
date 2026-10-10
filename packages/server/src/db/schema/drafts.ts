@@ -6,10 +6,6 @@ export const draftHistory = [
   `ALTER TABLE drafts DROP COLUMN undo_log`,
   `ALTER TABLE drafts ADD COLUMN status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'committed', 'discarded'))`,
   `ALTER TABLE drafts ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0`,
-  // The text from before the last destructive change of the previous session (or the
-  // discarded text), kept through a commit so a wipe-then-send can be undone.
-  `ALTER TABLE drafts ADD COLUMN recovery_text TEXT`,
-  `ALTER TABLE drafts ADD COLUMN recovery_at INTEGER`,
   `CREATE INDEX drafts_active ON drafts(user_id, updated_at DESC) WHERE status = 'active'`,
 
   // Entry `seq` turns the state before it into the state after it: at `start`,

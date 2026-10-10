@@ -2,7 +2,7 @@
 
 This document describes only what is implemented. Proposals live in `spec/`. When a spec is implemented, its content moves here in the same commit (CLAUDE.md "Design docs").
 
-**State**: Phase 0 (PLAN.md), 2026-10-10. Built: the scaffold, the full schema, the message-graph operations, the library operations and drafts. Not yet built: built-in login, the provider layer, and every chat feature.
+**State**: Phase 0 (PLAN.md), 2026-10-10. Built: the scaffold, the full schema, the message-graph operations, the library operations, drafts and the recycle bin. Not yet built: built-in login, the provider layer, and every chat feature.
 
 ---
 
@@ -272,11 +272,11 @@ The first save checks that the target belongs to the user. Drafts are never visi
 
 **Committing.** `AppendMessage`, `AddVersion` and `EditRef` take an optional `commitDraft` (key plus the row version the client sent from) and commit that draft **in the same transaction**, so a reload never shows already-sent text in the composer. If the draft moved on since (another tab kept typing), it stays active with the newer text, and the write returns it. `ClearDraft` commits or discards a draft explicitly.
 
-**History only lives while a draft is being written** (owner, 2026-10-10). Once committed, the text is preserved in a version or revision, so a commit or discard deletes the draft's history and empties its text. The row stays, so other tabs' row versions keep working. What a commit would otherwise lose is kept in `recovery`, one text per draft, replaced at the next commit or discard:
-- **On commit:** the text from just before the session's newest destructive change, if there was one. That's the wipe-then-send case.
-- **On discard:** the discarded text.
+**History only lives while a draft is being written** (owner, 2026-10-10). Once committed, the text is preserved in a version or revision, so a commit or discard deletes the draft's history and empties its text. The row stays, so other tabs' row versions keep working. What a commit or discard would otherwise lose goes to the recycle bin's **recovered-text section** (§3.11):
+- the text from just before **each** destructive change in the session (hours of typing in a card field wiped, then saved)
+- a discarded draft's text
 
-This applies to every kind of draft, not just the composer: what a bad save loses is the editing session (possibly hours of typing in a card or preset field), and the previous version or revision being intact doesn't change that. The next save after a commit starts a fresh session. `ListActiveDrafts` lists drafts with unsent text.
+This applies to every kind of draft: what a bad save loses is the editing session, and the previous version being intact doesn't change that. The next save after a commit starts a fresh session. `ListActiveDrafts` lists drafts with unsent text.
 
 **The composer belongs to a branch** (DESIGN §6.2, owner):
 - Its key is the chat plus the slot the next message goes under (the branch tip), or empty before the first message.
@@ -288,6 +288,32 @@ This applies to every kind of draft, not just the composer: what a bad save lose
 **Cleanup.** Draft targets aren't foreign keys, since one column points into several tables. Triggers delete a draft when its target (chat, slot, version, summary, ref) is deleted (`test/schema.test.ts`).
 
 **Not built yet:** pushing a draft change to the user's other open tabs and devices. That needs the subscription channel; until then, the row version catches the conflict when the other tab saves.
+
+### 3.11 Recycle bin
+
+Deleting is deliberate and fundamentally non-destructive (DESIGN §6.2): deletes go to a per-user bin, from which they can be restored or deleted for good. Schema in migration `0004_recycle_bin`, logic in `db/bin.ts`, handlers in `db/binWrites.ts`, types in `@rp/shared/bin.ts`.
+
+**Deleting marks, it doesn't remove.**
+- A delete creates one `bin_items` row and marks everything it covers with `deleted_at` and that item's id: one slot for a message, a whole subtree for a branch, one version for a swipe, a chat, or an entity.
+- Every read skips marked rows. Paths walk through deleted messages without showing them, so their replies stay where they were. Writes treat deleted things as `NotFound`.
+- Restoring clears the marks, so things come back exactly where they were, with their versions and attached state.
+
+**Deletes need no confirmation:** each returns the bin item for the "deleted, open the bin" toast. The behaviors:
+- **Swipes:** `DeleteVersion` deletes one swipe, the normal delete (owner). If it was showing, the previous swipe shows, as in ST, or the next one if it was the first. Deleting a message's only remaining version deletes the message.
+- **Messages and branches:** `DeleteMessage` deletes one message, and its replies stay. `DeleteBranch` deletes a message and everything below it, as one item.
+- **The active leaf:** if it's deleted, the chat's tip moves to the nearest remaining ancestor, and the composer goes with it unless that tip has text of its own.
+- **Chats and entities:** `DeleteChat` and `DeleteEntity`.
+
+**Deleting for good** (`PurgeBinItem`, `EmptyBin`; the UI confirms these):
+- **A chat** is deleted, with everything in it and its other bin items.
+- **An entity** loses its refs, revisions and tags. The entity row stays, so messages that named it as their speaker still point somewhere.
+- **A message, branch or swipe** has its versions emptied: content, reasoning, display forms, amend history and attachments. Its slots stay as placeholders, so the conversation's structure and any summaries over it remain valid. This is the one exception to model output being frozen: a version marked `purged_at` may be emptied.
+
+**Two independent sections**, each evicting its own oldest entries past its own limits, never the other's:
+- **Deleted items** (`ListBin`): 10,000 items or 2 GB by default. Eviction deletes the oldest for good.
+- **Recovered text** (`ListRecoveredTexts`, `GetRecoveredText`, `DeleteRecoveredText`, `ClearRecoveredTexts`): 2,000 texts or 200 MB by default. It's produced passively by draft commits and discards (§3.10), so it never shows a toast.
+- Each entry records where it came from: a title, an excerpt and origin details for deleted items, a source label like `Composer in "Harbor"` for recovered text. So text can be copied out without restoring.
+- Limits are `Database.layer({ binLimits })`.
 
 ---
 

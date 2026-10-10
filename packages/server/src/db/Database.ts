@@ -7,6 +7,7 @@ import { Worker } from "node:worker_threads"
 import { NodeWorker } from "@effect/platform-node"
 import { Context, Effect, Layer, Schema } from "effect"
 import { RpcClient, type RpcClientError } from "effect/rpc"
+import { type BinLimits, defaultBinLimits } from "@rp/shared/bin.ts"
 import { acquireInstanceLock, checkFilesystem, databaseFile } from "./connection.ts"
 import { ReadOps, WriteOps } from "./ops.ts"
 
@@ -30,6 +31,8 @@ export interface DatabaseOptions {
    * is its own V8 isolate, and a bundle uses about a quarter of the memory.
    */
   readonly workers: "source" | "bundle"
+  /** Recycle bin capacities; defaults when omitted. */
+  readonly binLimits?: BinLimits
 }
 
 export class WorkerBundleMissing extends Schema.TaggedError<WorkerBundleMissing>()("WorkerBundleMissing", {
@@ -48,8 +51,8 @@ const workerEntry = (name: "writer" | "reader", mode: DatabaseOptions["workers"]
         return existsSync(url) ? Effect.succeed(url) : Effect.fail(new WorkerBundleMissing({ path: url.pathname }))
       })
 
-const workers = (entry: URL, dbPath: string) =>
-  NodeWorker.layer(() => new Worker(entry, { workerData: { dbPath }, name: entry.pathname.split("/").pop() }))
+const workers = (entry: URL, workerData: Record<string, unknown>) =>
+  NodeWorker.layer(() => new Worker(entry, { workerData, name: entry.pathname.split("/").pop() }))
 
 export const layer = (options: DatabaseOptions) => {
   const dbPath = databaseFile(options.dataDir)
@@ -67,7 +70,7 @@ export const layer = (options: DatabaseOptions) => {
     Effect.map(workerEntry("writer", options.workers), (entry) =>
       Layer.effect(Writer, RpcClient.make(WriteOps)).pipe(
         Layer.provide(RpcClient.layerProtocolWorker({ size: 1, concurrency: 1 })),
-        Layer.provide(workers(entry, dbPath))
+        Layer.provide(workers(entry, { dbPath, binLimits: options.binLimits ?? defaultBinLimits }))
       )
     )
   )
@@ -80,7 +83,7 @@ export const layer = (options: DatabaseOptions) => {
       const entry = yield* workerEntry("reader", options.workers)
       return Layer.effect(Reader, RpcClient.make(ReadOps)).pipe(
         Layer.provide(RpcClient.layerProtocolWorker({ size: options.readers, concurrency: 1 })),
-        Layer.provide(workers(entry, dbPath))
+        Layer.provide(workers(entry, { dbPath }))
       )
     })
   )

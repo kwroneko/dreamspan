@@ -6,6 +6,7 @@ import { StateEventData } from "@rp/shared/state.ts"
 import { Effect, Schema } from "effect"
 import { SqlClient } from "effect/sql"
 import { toStorageError } from "./connection.ts"
+import { toBinItem, toRecoveredText } from "./bin.ts"
 import { makeDraftStore } from "./drafts.ts"
 import { makeLibraryQueries, toLibraryRef } from "./library.ts"
 import { FoldableStateEvent, NotFound, ReadOps, RefOperationRefused, StorageError } from "./ops.ts"
@@ -30,7 +31,7 @@ export const makeReadHandlers = Effect.gen(function* () {
   const drafts = makeDraftStore(sql)
 
   const ownedChat = (userId: UserId, chatId: ChatId) =>
-    sql<ChatRow>`SELECT * FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId}`.pipe(
+    sql<ChatRow>`SELECT * FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`.pipe(
       Effect.flatMap(([row]) => (row ? Effect.succeed(row) : Effect.fail(new NotFound({ entity: "chat", id: chatId }))))
     )
 
@@ -65,19 +66,26 @@ export const makeReadHandlers = Effect.gen(function* () {
             WHERE p.n < ${limit}
           )
           SELECT s.id AS slot_id, s.lane_id, s.parent_slot_id, s.depth, s.row_version, s.context_excluded,
-            (SELECT count(*) FROM versions c WHERE c.slot_id = s.id) AS version_count,
+            s.deleted_at IS NOT NULL AS slot_deleted,
+            (SELECT count(*) FROM versions c WHERE c.slot_id = s.id AND c.deleted_at IS NULL) AS version_count,
             ${sql.literal(versionColumns("v"))}
           FROM path JOIN slots s ON s.id = path.id JOIN versions v ON v.id = s.selected_version_id
           ORDER BY s.depth`
         if (rows.length === 0) return yield* new NotFound({ entity: "slot", id: leaf })
-        return { entries: rows.map(toPathEntry), hasMore: rows[0]!.parent_slot_id !== null }
+        // Deleted messages are walked through but not shown; their replies stay in place.
+        return {
+          entries: rows.filter((row) => row.slot_deleted === 0).map(toPathEntry),
+          hasMore: rows[0]!.parent_slot_id !== null
+        }
       }).pipe(query("GetPath")),
 
     ListVersions: ({ userId, slotId }) =>
       Effect.gen(function* () {
         const rows = yield* sql<VersionRow>`
           SELECT v.* FROM versions v JOIN slots s ON s.id = v.slot_id JOIN chats c ON c.id = s.chat_id
-          WHERE v.slot_id = ${slotId} AND c.owner_user_id = ${userId} ORDER BY v.ordinal`
+          WHERE v.slot_id = ${slotId} AND c.owner_user_id = ${userId}
+            AND v.deleted_at IS NULL AND s.deleted_at IS NULL AND c.deleted_at IS NULL
+          ORDER BY v.ordinal`
         if (rows.length === 0) return yield* new NotFound({ entity: "slot", id: slotId })
         return rows.map(toVersion)
       }).pipe(query("ListVersions")),
@@ -111,6 +119,34 @@ export const makeReadHandlers = Effect.gen(function* () {
         )
       }).pipe(query("StateEventsAt")),
 
+    ListBin: ({ userId, limit, before }) =>
+      sql<Parameters<typeof toBinItem>[0]>`
+        SELECT * FROM bin_items WHERE user_id = ${userId} AND (${before} IS NULL OR deleted_at < ${before})
+        ORDER BY deleted_at DESC, id DESC LIMIT ${limit}`.pipe(
+        Effect.map((rows) => rows.map(toBinItem)),
+        query("ListBin")
+      ),
+
+    ListRecoveredTexts: ({ userId, source, limit }) =>
+      sql<Parameters<typeof toRecoveredText>[0]>`
+        SELECT * FROM recovered_texts WHERE user_id = ${userId}
+          AND (${source?.targetKind ?? null} IS NULL OR (source_kind = ${source?.targetKind ?? null}
+            AND source_id = ${source?.targetId ?? null} AND source_field = ${source?.field ?? null}))
+        ORDER BY created_at DESC, id DESC LIMIT ${limit}`.pipe(
+        Effect.map((rows) => rows.map((row) => toRecoveredText(row, false))),
+        query("ListRecoveredTexts")
+      ),
+
+    GetRecoveredText: ({ userId, id }) =>
+      sql<
+        Parameters<typeof toRecoveredText>[0]
+      >`SELECT * FROM recovered_texts WHERE id = ${id} AND user_id = ${userId}`.pipe(
+        Effect.flatMap(([row]) =>
+          row ? Effect.succeed(toRecoveredText(row, true)) : Effect.fail(new NotFound({ entity: "recovered text", id }))
+        ),
+        query("GetRecoveredText")
+      ),
+
     GetDraft: ({ userId, key }) =>
       drafts.find(userId, key).pipe(
         Effect.map((row) => (row ? drafts.toDraft(row) : null)),
@@ -131,7 +167,7 @@ export const makeReadHandlers = Effect.gen(function* () {
     ListLibrary: ({ userId, kind, tag, archived }) =>
       lib
         .refsWhere(
-          `e.owner_user_id = ? AND e.kind = ? AND r.ref_kind <> 'chat_override'
+          `e.owner_user_id = ? AND e.kind = ? AND r.ref_kind <> 'chat_override' AND e.deleted_at IS NULL
            AND (e.archived_at IS NOT NULL) = ?
            AND (? IS NULL OR EXISTS (SELECT 1 FROM entity_tags t WHERE t.entity_id = e.id AND t.tag = ?))`,
           [userId, kind, archived ? 1 : 0, tag, tag]
@@ -200,7 +236,10 @@ export const makeReadHandlers = Effect.gen(function* () {
     ListChatOverrides: ({ userId, chatId }) =>
       Effect.gen(function* () {
         yield* ownedChat(userId, chatId)
-        const rows = yield* lib.refsWhere("r.chat_id = ? AND e.owner_user_id = ?", [chatId, userId])
+        const rows = yield* lib.refsWhere("r.chat_id = ? AND e.owner_user_id = ? AND e.deleted_at IS NULL", [
+          chatId,
+          userId
+        ])
         return rows.map(toLibraryRef)
       }).pipe(query("ListChatOverrides")),
 

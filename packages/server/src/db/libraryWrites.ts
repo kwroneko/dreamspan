@@ -5,316 +5,319 @@ import type { Doc, MergeOutcome } from "@rp/shared/library.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
+import type { BinLimits } from "@rp/shared/bin.ts"
+import { makeBin } from "./bin.ts"
 import { makeDraftStore } from "./drafts.ts"
 import { docHash, makeLibraryQueries, type RefRow, searchText, toLibraryRef } from "./library.ts"
 import { FollowerMerge, NotFound, RefChange, RefOperationRefused, StaleWrite, WriteOps } from "./ops.ts"
 import { transaction } from "./tx.ts"
 
-export const makeLibraryWriteHandlers = Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient
-  const lib = makeLibraryQueries(sql)
-  const drafts = makeDraftStore(sql)
+export const makeLibraryWriteHandlers = (binLimits: BinLimits) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const lib = makeLibraryQueries(sql)
+    const drafts = makeDraftStore(sql, makeBin(sql, binLimits).recover)
 
-  const insertRevision = (options: {
-    readonly entityId: string
-    readonly schemaVersion: number
-    readonly doc: Doc
-    readonly parents: ReadonlyArray<string>
-    readonly origin: "import" | "user" | "merge"
-    readonly originRef: string | null
-    readonly message: string | null
-  }) =>
-    Effect.gen(function* () {
-      const id = uuidv7()
-      yield* sql`INSERT INTO entity_revisions ${sql.insert({
-        id,
-        entity_id: options.entityId,
-        parents: JSON.stringify(options.parents),
-        doc_json: JSON.stringify(options.doc),
-        doc_hash: docHash(options.doc),
-        schema_version: options.schemaVersion,
-        origin: options.origin,
-        origin_ref: options.originRef,
-        message: options.message,
-        search_text: searchText(options.doc),
-        created_at: Date.now()
-      })}`
-      return id
-    })
+    const insertRevision = (options: {
+      readonly entityId: string
+      readonly schemaVersion: number
+      readonly doc: Doc
+      readonly parents: ReadonlyArray<string>
+      readonly origin: "import" | "user" | "merge"
+      readonly originRef: string | null
+      readonly message: string | null
+    }) =>
+      Effect.gen(function* () {
+        const id = uuidv7()
+        yield* sql`INSERT INTO entity_revisions ${sql.insert({
+          id,
+          entity_id: options.entityId,
+          parents: JSON.stringify(options.parents),
+          doc_json: JSON.stringify(options.doc),
+          doc_hash: docHash(options.doc),
+          schema_version: options.schemaVersion,
+          origin: options.origin,
+          origin_ref: options.originRef,
+          message: options.message,
+          search_text: searchText(options.doc),
+          created_at: Date.now()
+        })}`
+        return id
+      })
 
-  const reload = (refId: string) => lib.refsWhere("r.id = ?", [refId]).pipe(Effect.map(([row]) => row!))
+    const reload = (refId: string) => lib.refsWhere("r.id = ?", [refId]).pipe(Effect.map(([row]) => row!))
 
-  const moveHead = (refId: string, head: string, mergeBase: string | null) =>
-    sql`UPDATE entity_refs SET head_revision_id = ${head}, merge_base_revision_id = coalesce(${mergeBase}, merge_base_revision_id),
+    const moveHead = (refId: string, head: string, mergeBase: string | null) =>
+      sql`UPDATE entity_refs SET head_revision_id = ${head}, merge_base_revision_id = coalesce(${mergeBase}, merge_base_revision_id),
           row_version = row_version + 1, updated_at = ${Date.now()}
         WHERE id = ${refId}`
 
-  /** The head revision's content hash and document schema version. */
-  const head = (row: RefRow) =>
-    sql<{ doc_hash: string; schema_version: number }>`
+    /** The head revision's content hash and document schema version. */
+    const head = (row: RefRow) =>
+      sql<{ doc_hash: string; schema_version: number }>`
       SELECT doc_hash, schema_version FROM entity_revisions WHERE id = ${row.head_revision_id}`.pipe(
-      Effect.map(([r]) => r!)
-    )
+        Effect.map(([r]) => r!)
+      )
 
-  /** Merges `ref` with the ref it follows, if that needs no help from the user. */
-  const applyMerge = (ref: RefRow) =>
-    Effect.gen(function* () {
-      const plan = yield* lib.planMerge(ref)
-      switch (plan.outcome) {
-        case "fast_forward":
-          yield* moveHead(ref.id, plan.theirsHead, plan.theirsHead)
-          break
-        case "merged": {
+    /** Merges `ref` with the ref it follows, if that needs no help from the user. */
+    const applyMerge = (ref: RefRow) =>
+      Effect.gen(function* () {
+        const plan = yield* lib.planMerge(ref)
+        switch (plan.outcome) {
+          case "fast_forward":
+            yield* moveHead(ref.id, plan.theirsHead, plan.theirsHead)
+            break
+          case "merged": {
+            const followed = yield* reload(ref.follows_ref_id!)
+            const revision = yield* insertRevision({
+              entityId: ref.entity_id,
+              schemaVersion: (yield* head(ref)).schema_version,
+              doc: plan.merged,
+              parents: [ref.head_revision_id, plan.theirsHead],
+              origin: "merge",
+              originRef: followed.id,
+              message: `Merged changes from ${followed.label}`
+            })
+            yield* moveHead(ref.id, revision, plan.theirsHead)
+            break
+          }
+        }
+        return plan.outcome
+      })
+
+    /** Merges every ref that follows `refId`, transitively, and reports each outcome. */
+    const flowToFollowers = (refId: string) =>
+      Effect.gen(function* () {
+        const outcomes: Array<FollowerMerge> = []
+        const queue = [refId]
+        while (queue.length > 0) {
+          const followers = yield* lib.refsWhere("r.follows_ref_id = ?", [queue.shift()!])
+          for (const follower of followers) {
+            const outcome: MergeOutcome = yield* applyMerge(follower)
+            outcomes.push(new FollowerMerge({ refId: toLibraryRef(follower).id, outcome }))
+            // A follower that changed passes the change on to its own followers.
+            if (outcome === "fast_forward" || outcome === "merged") queue.push(follower.id)
+          }
+        }
+        return outcomes
+      })
+
+    const changed = (refId: string) =>
+      Effect.gen(function* () {
+        const followers = yield* flowToFollowers(refId)
+        return new RefChange({ ref: toLibraryRef(yield* reload(refId)), followers })
+      })
+
+    const checkRowVersion = (ref: RefRow, expected: number) =>
+      ref.row_version === expected
+        ? Effect.void
+        : Effect.fail(new StaleWrite({ entity: "ref", id: ref.id, expected, actual: ref.row_version }))
+
+    const handlers = {
+      CreateEntity: ({ userId, kind, label, subtitle, doc, schemaVersion, origin, sourcePath }) =>
+        Effect.gen(function* () {
+          const at = Date.now()
+          const entityId = uuidv7()
+          const refId = uuidv7()
+          yield* sql`INSERT INTO entities ${sql.insert({ id: entityId, owner_user_id: userId, kind, created_at: at })}`
+          const revision = uuidv7()
+          yield* sql`INSERT INTO entity_revisions ${sql.insert({
+            id: revision,
+            entity_id: entityId,
+            doc_json: JSON.stringify(doc),
+            doc_hash: docHash(doc),
+            schema_version: schemaVersion,
+            origin,
+            origin_ref: sourcePath,
+            search_text: searchText(doc),
+            created_at: at
+          })}`
+          yield* sql`INSERT INTO entity_refs ${sql.insert({
+            id: refId,
+            entity_id: entityId,
+            ref_kind: "upstream",
+            head_revision_id: revision,
+            label,
+            subtitle,
+            source_path: sourcePath,
+            created_at: at,
+            updated_at: at
+          })}`
+          return { entityId: entityId as EntityId, ref: toLibraryRef(yield* reload(refId)) }
+        }).pipe(transaction(sql, "CreateEntity")),
+
+      SetEntityTags: ({ userId, entityId, tags }) =>
+        Effect.gen(function* () {
+          const [entity] = yield* sql<{
+            id: string
+          }>`SELECT id FROM entities WHERE id = ${entityId} AND owner_user_id = ${userId}`
+          if (!entity) return yield* new NotFound({ entity: "entity", id: entityId })
+          const unique = [...new Set(tags.map((t) => t.trim()).filter((t) => t.length > 0))].sort()
+          yield* sql`DELETE FROM entity_tags WHERE entity_id = ${entityId}`
+          for (const tag of unique) yield* sql`INSERT INTO entity_tags ${sql.insert({ entity_id: entityId, tag })}`
+          return unique
+        }).pipe(transaction(sql, "SetEntityTags")),
+
+      SetEntityArchived: ({ userId, entityId, archived }) =>
+        Effect.gen(function* () {
+          const rows = yield* sql<{ id: string }>`
+          UPDATE entities SET archived_at = ${archived ? Date.now() : null}
+          WHERE id = ${entityId} AND owner_user_id = ${userId} RETURNING id`
+          if (rows.length === 0) return yield* new NotFound({ entity: "entity", id: entityId })
+        }).pipe(transaction(sql, "SetEntityArchived")),
+
+      EditRef: ({ userId, refId, doc, expectedRowVersion, message, commitDraft }) =>
+        Effect.gen(function* () {
+          const ref = yield* lib.ownedRef(userId, refId)
+          yield* checkRowVersion(ref, expectedRowVersion)
+          // An edit that changes nothing creates no revision.
+          const current = yield* head(ref)
+          if (current.doc_hash === docHash(doc)) return new RefChange({ ref: toLibraryRef(ref), followers: [] })
+          const revision = yield* insertRevision({
+            entityId: ref.entity_id,
+            schemaVersion: current.schema_version,
+            doc,
+            parents: [ref.head_revision_id],
+            origin: "user",
+            originRef: null,
+            message
+          })
+          yield* moveHead(ref.id, revision, null)
+          yield* drafts.commit(userId, commitDraft)
+          return yield* changed(ref.id)
+        }).pipe(transaction(sql, "EditRef")),
+
+      ForkRef: ({ userId, refId, label, subtitle }) =>
+        Effect.gen(function* () {
+          const ref = yield* lib.ownedRef(userId, refId)
+          if (ref.ref_kind === "chat_override") {
+            return yield* new RefOperationRefused({
+              refId,
+              reason: "A chat override can't be forked; promote it to a variant instead."
+            })
+          }
+          const id = uuidv7()
+          const at = Date.now()
+          yield* sql`INSERT INTO entity_refs ${sql.insert({
+            id,
+            entity_id: ref.entity_id,
+            ref_kind: "variant",
+            head_revision_id: ref.head_revision_id,
+            follows_ref_id: ref.id,
+            merge_base_revision_id: ref.head_revision_id,
+            label,
+            subtitle,
+            created_at: at,
+            updated_at: at
+          })}`
+          return toLibraryRef(yield* reload(id))
+        }).pipe(transaction(sql, "ForkRef")),
+
+      CreateChatOverride: ({ userId, refId, chatId }) =>
+        Effect.gen(function* () {
+          const ref = yield* lib.ownedRef(userId, refId)
+          if (ref.ref_kind === "chat_override") {
+            return yield* new RefOperationRefused({ refId, reason: "This is already a chat override." })
+          }
+          const [chat] = yield* sql<{
+            id: string
+          }>`SELECT id FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId}`
+          if (!chat) return yield* new NotFound({ entity: "chat", id: chatId })
+          const id = uuidv7()
+          const at = Date.now()
+          yield* sql`INSERT INTO entity_refs ${sql.insert({
+            id,
+            entity_id: ref.entity_id,
+            ref_kind: "chat_override",
+            head_revision_id: ref.head_revision_id,
+            follows_ref_id: ref.id,
+            merge_base_revision_id: ref.head_revision_id,
+            label: ref.label,
+            subtitle: "",
+            chat_id: chatId,
+            created_at: at,
+            updated_at: at
+          })}`
+          return toLibraryRef(yield* reload(id))
+        }).pipe(transaction(sql, "CreateChatOverride")),
+
+      PromoteOverride: ({ userId, refId, label, subtitle, expectedRowVersion }) =>
+        Effect.gen(function* () {
+          const ref = yield* lib.ownedRef(userId, refId)
+          if (ref.ref_kind !== "chat_override") {
+            return yield* new RefOperationRefused({ refId, reason: "Only chat overrides can be promoted." })
+          }
+          yield* checkRowVersion(ref, expectedRowVersion)
+          yield* sql`UPDATE entity_refs SET ref_kind = 'variant', chat_id = NULL, label = ${label}, subtitle = ${subtitle},
+                     row_version = row_version + 1, updated_at = ${Date.now()}
+                   WHERE id = ${refId}`
+          return toLibraryRef(yield* reload(refId))
+        }).pipe(transaction(sql, "PromoteOverride")),
+
+      ImportUpstream: ({ userId, refId, doc, sourcePath, sourceHash }) =>
+        Effect.gen(function* () {
+          const ref = yield* lib.ownedRef(userId, refId)
+          if (ref.ref_kind !== "upstream") {
+            return yield* new RefOperationRefused({ refId, reason: "Only upstream refs take imports." })
+          }
+          // Re-importing the same content changes nothing.
+          const current = yield* head(ref)
+          if (current.doc_hash === docHash(doc)) return new RefChange({ ref: toLibraryRef(ref), followers: [] })
+          const revision = yield* insertRevision({
+            entityId: ref.entity_id,
+            schemaVersion: current.schema_version,
+            doc,
+            parents: [ref.head_revision_id],
+            origin: "import",
+            originRef: sourcePath,
+            message: null
+          })
+          yield* moveHead(ref.id, revision, null)
+          yield* sql`UPDATE entity_refs SET source_path = coalesce(${sourcePath}, source_path),
+                     source_hash = coalesce(${sourceHash}, source_hash) WHERE id = ${refId}`
+          return yield* changed(ref.id)
+        }).pipe(transaction(sql, "ImportUpstream")),
+
+      MergeFollowed: ({ userId, refId }) =>
+        Effect.gen(function* () {
+          const ref = yield* lib.ownedRef(userId, refId)
+          const outcome = yield* applyMerge(ref)
+          const change =
+            outcome === "fast_forward" || outcome === "merged"
+              ? yield* changed(ref.id)
+              : new RefChange({ ref: toLibraryRef(ref), followers: [] })
+          return { outcome, change }
+        }).pipe(transaction(sql, "MergeFollowed")),
+
+      ResolveMerge: ({ userId, refId, doc, theirsRevisionId, expectedRowVersion }) =>
+        Effect.gen(function* () {
+          const ref = yield* lib.ownedRef(userId, refId)
+          if (ref.followed_head === null) {
+            return yield* new RefOperationRefused({
+              refId,
+              reason: "This ref doesn't follow another, so there's nothing to merge."
+            })
+          }
+          yield* checkRowVersion(ref, expectedRowVersion)
+          if (ref.followed_head !== theirsRevisionId) {
+            return yield* new RefOperationRefused({
+              refId,
+              reason: "What this ref follows changed again since the merge was previewed; preview it again."
+            })
+          }
           const followed = yield* reload(ref.follows_ref_id!)
           const revision = yield* insertRevision({
             entityId: ref.entity_id,
             schemaVersion: (yield* head(ref)).schema_version,
-            doc: plan.merged,
-            parents: [ref.head_revision_id, plan.theirsHead],
+            doc,
+            parents: [ref.head_revision_id, theirsRevisionId],
             origin: "merge",
             originRef: followed.id,
-            message: `Merged changes from ${followed.label}`
+            message: `Merged changes from ${followed.label}, resolved by hand`
           })
-          yield* moveHead(ref.id, revision, plan.theirsHead)
-          break
-        }
-      }
-      return plan.outcome
-    })
-
-  /** Merges every ref that follows `refId`, transitively, and reports each outcome. */
-  const flowToFollowers = (refId: string) =>
-    Effect.gen(function* () {
-      const outcomes: Array<FollowerMerge> = []
-      const queue = [refId]
-      while (queue.length > 0) {
-        const followers = yield* lib.refsWhere("r.follows_ref_id = ?", [queue.shift()!])
-        for (const follower of followers) {
-          const outcome: MergeOutcome = yield* applyMerge(follower)
-          outcomes.push(new FollowerMerge({ refId: toLibraryRef(follower).id, outcome }))
-          // A follower that changed passes the change on to its own followers.
-          if (outcome === "fast_forward" || outcome === "merged") queue.push(follower.id)
-        }
-      }
-      return outcomes
-    })
-
-  const changed = (refId: string) =>
-    Effect.gen(function* () {
-      const followers = yield* flowToFollowers(refId)
-      return new RefChange({ ref: toLibraryRef(yield* reload(refId)), followers })
-    })
-
-  const checkRowVersion = (ref: RefRow, expected: number) =>
-    ref.row_version === expected
-      ? Effect.void
-      : Effect.fail(new StaleWrite({ entity: "ref", id: ref.id, expected, actual: ref.row_version }))
-
-  const handlers = {
-    CreateEntity: ({ userId, kind, label, subtitle, doc, schemaVersion, origin, sourcePath }) =>
-      Effect.gen(function* () {
-        const at = Date.now()
-        const entityId = uuidv7()
-        const refId = uuidv7()
-        yield* sql`INSERT INTO entities ${sql.insert({ id: entityId, owner_user_id: userId, kind, created_at: at })}`
-        const revision = uuidv7()
-        yield* sql`INSERT INTO entity_revisions ${sql.insert({
-          id: revision,
-          entity_id: entityId,
-          doc_json: JSON.stringify(doc),
-          doc_hash: docHash(doc),
-          schema_version: schemaVersion,
-          origin,
-          origin_ref: sourcePath,
-          search_text: searchText(doc),
-          created_at: at
-        })}`
-        yield* sql`INSERT INTO entity_refs ${sql.insert({
-          id: refId,
-          entity_id: entityId,
-          ref_kind: "upstream",
-          head_revision_id: revision,
-          label,
-          subtitle,
-          source_path: sourcePath,
-          created_at: at,
-          updated_at: at
-        })}`
-        return { entityId: entityId as EntityId, ref: toLibraryRef(yield* reload(refId)) }
-      }).pipe(transaction(sql, "CreateEntity")),
-
-    SetEntityTags: ({ userId, entityId, tags }) =>
-      Effect.gen(function* () {
-        const [entity] = yield* sql<{
-          id: string
-        }>`SELECT id FROM entities WHERE id = ${entityId} AND owner_user_id = ${userId}`
-        if (!entity) return yield* new NotFound({ entity: "entity", id: entityId })
-        const unique = [...new Set(tags.map((t) => t.trim()).filter((t) => t.length > 0))].sort()
-        yield* sql`DELETE FROM entity_tags WHERE entity_id = ${entityId}`
-        for (const tag of unique) yield* sql`INSERT INTO entity_tags ${sql.insert({ entity_id: entityId, tag })}`
-        return unique
-      }).pipe(transaction(sql, "SetEntityTags")),
-
-    SetEntityArchived: ({ userId, entityId, archived }) =>
-      Effect.gen(function* () {
-        const rows = yield* sql<{ id: string }>`
-          UPDATE entities SET archived_at = ${archived ? Date.now() : null}
-          WHERE id = ${entityId} AND owner_user_id = ${userId} RETURNING id`
-        if (rows.length === 0) return yield* new NotFound({ entity: "entity", id: entityId })
-      }).pipe(transaction(sql, "SetEntityArchived")),
-
-    EditRef: ({ userId, refId, doc, expectedRowVersion, message, commitDraft }) =>
-      Effect.gen(function* () {
-        const ref = yield* lib.ownedRef(userId, refId)
-        yield* checkRowVersion(ref, expectedRowVersion)
-        // An edit that changes nothing creates no revision.
-        const current = yield* head(ref)
-        if (current.doc_hash === docHash(doc)) return new RefChange({ ref: toLibraryRef(ref), followers: [] })
-        const revision = yield* insertRevision({
-          entityId: ref.entity_id,
-          schemaVersion: current.schema_version,
-          doc,
-          parents: [ref.head_revision_id],
-          origin: "user",
-          originRef: null,
-          message
-        })
-        yield* moveHead(ref.id, revision, null)
-        yield* drafts.commit(userId, commitDraft)
-        return yield* changed(ref.id)
-      }).pipe(transaction(sql, "EditRef")),
-
-    ForkRef: ({ userId, refId, label, subtitle }) =>
-      Effect.gen(function* () {
-        const ref = yield* lib.ownedRef(userId, refId)
-        if (ref.ref_kind === "chat_override") {
-          return yield* new RefOperationRefused({
-            refId,
-            reason: "A chat override can't be forked; promote it to a variant instead."
-          })
-        }
-        const id = uuidv7()
-        const at = Date.now()
-        yield* sql`INSERT INTO entity_refs ${sql.insert({
-          id,
-          entity_id: ref.entity_id,
-          ref_kind: "variant",
-          head_revision_id: ref.head_revision_id,
-          follows_ref_id: ref.id,
-          merge_base_revision_id: ref.head_revision_id,
-          label,
-          subtitle,
-          created_at: at,
-          updated_at: at
-        })}`
-        return toLibraryRef(yield* reload(id))
-      }).pipe(transaction(sql, "ForkRef")),
-
-    CreateChatOverride: ({ userId, refId, chatId }) =>
-      Effect.gen(function* () {
-        const ref = yield* lib.ownedRef(userId, refId)
-        if (ref.ref_kind === "chat_override") {
-          return yield* new RefOperationRefused({ refId, reason: "This is already a chat override." })
-        }
-        const [chat] = yield* sql<{
-          id: string
-        }>`SELECT id FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId}`
-        if (!chat) return yield* new NotFound({ entity: "chat", id: chatId })
-        const id = uuidv7()
-        const at = Date.now()
-        yield* sql`INSERT INTO entity_refs ${sql.insert({
-          id,
-          entity_id: ref.entity_id,
-          ref_kind: "chat_override",
-          head_revision_id: ref.head_revision_id,
-          follows_ref_id: ref.id,
-          merge_base_revision_id: ref.head_revision_id,
-          label: ref.label,
-          subtitle: "",
-          chat_id: chatId,
-          created_at: at,
-          updated_at: at
-        })}`
-        return toLibraryRef(yield* reload(id))
-      }).pipe(transaction(sql, "CreateChatOverride")),
-
-    PromoteOverride: ({ userId, refId, label, subtitle, expectedRowVersion }) =>
-      Effect.gen(function* () {
-        const ref = yield* lib.ownedRef(userId, refId)
-        if (ref.ref_kind !== "chat_override") {
-          return yield* new RefOperationRefused({ refId, reason: "Only chat overrides can be promoted." })
-        }
-        yield* checkRowVersion(ref, expectedRowVersion)
-        yield* sql`UPDATE entity_refs SET ref_kind = 'variant', chat_id = NULL, label = ${label}, subtitle = ${subtitle},
-                     row_version = row_version + 1, updated_at = ${Date.now()}
-                   WHERE id = ${refId}`
-        return toLibraryRef(yield* reload(refId))
-      }).pipe(transaction(sql, "PromoteOverride")),
-
-    ImportUpstream: ({ userId, refId, doc, sourcePath, sourceHash }) =>
-      Effect.gen(function* () {
-        const ref = yield* lib.ownedRef(userId, refId)
-        if (ref.ref_kind !== "upstream") {
-          return yield* new RefOperationRefused({ refId, reason: "Only upstream refs take imports." })
-        }
-        // Re-importing the same content changes nothing.
-        const current = yield* head(ref)
-        if (current.doc_hash === docHash(doc)) return new RefChange({ ref: toLibraryRef(ref), followers: [] })
-        const revision = yield* insertRevision({
-          entityId: ref.entity_id,
-          schemaVersion: current.schema_version,
-          doc,
-          parents: [ref.head_revision_id],
-          origin: "import",
-          originRef: sourcePath,
-          message: null
-        })
-        yield* moveHead(ref.id, revision, null)
-        yield* sql`UPDATE entity_refs SET source_path = coalesce(${sourcePath}, source_path),
-                     source_hash = coalesce(${sourceHash}, source_hash) WHERE id = ${refId}`
-        return yield* changed(ref.id)
-      }).pipe(transaction(sql, "ImportUpstream")),
-
-    MergeFollowed: ({ userId, refId }) =>
-      Effect.gen(function* () {
-        const ref = yield* lib.ownedRef(userId, refId)
-        const outcome = yield* applyMerge(ref)
-        const change =
-          outcome === "fast_forward" || outcome === "merged"
-            ? yield* changed(ref.id)
-            : new RefChange({ ref: toLibraryRef(ref), followers: [] })
-        return { outcome, change }
-      }).pipe(transaction(sql, "MergeFollowed")),
-
-    ResolveMerge: ({ userId, refId, doc, theirsRevisionId, expectedRowVersion }) =>
-      Effect.gen(function* () {
-        const ref = yield* lib.ownedRef(userId, refId)
-        if (ref.followed_head === null) {
-          return yield* new RefOperationRefused({
-            refId,
-            reason: "This ref doesn't follow another, so there's nothing to merge."
-          })
-        }
-        yield* checkRowVersion(ref, expectedRowVersion)
-        if (ref.followed_head !== theirsRevisionId) {
-          return yield* new RefOperationRefused({
-            refId,
-            reason: "What this ref follows changed again since the merge was previewed; preview it again."
-          })
-        }
-        const followed = yield* reload(ref.follows_ref_id!)
-        const revision = yield* insertRevision({
-          entityId: ref.entity_id,
-          schemaVersion: (yield* head(ref)).schema_version,
-          doc,
-          parents: [ref.head_revision_id, theirsRevisionId],
-          origin: "merge",
-          originRef: followed.id,
-          message: `Merged changes from ${followed.label}, resolved by hand`
-        })
-        yield* moveHead(ref.id, revision, theirsRevisionId)
-        return yield* changed(ref.id)
-      }).pipe(transaction(sql, "ResolveMerge"))
-  } satisfies Partial<Parameters<typeof WriteOps.of>[0]>
-  return handlers
-})
+          yield* moveHead(ref.id, revision, theirsRevisionId)
+          return yield* changed(ref.id)
+        }).pipe(transaction(sql, "ResolveMerge"))
+    } satisfies Partial<Parameters<typeof WriteOps.of>[0]>
+    return handlers
+  })

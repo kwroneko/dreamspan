@@ -1,0 +1,50 @@
+// The recycle bin (DESIGN §6.2): two independent sections, each with its own capacity.
+import { Schema } from "effect"
+import { DraftTargetKind } from "./drafts.ts"
+
+export const BinItemKind = Schema.Literals(["chat", "message", "branch", "version", "entity"])
+export type BinItemKind = typeof BinItemKind.Type
+
+/** Something explicitly deleted: a chat, a message, a swipe, a branch, a library entity. */
+export class BinItem extends Schema.Class<BinItem>("BinItem")({
+  id: Schema.String,
+  kind: BinItemKind,
+  targetId: Schema.String,
+  title: Schema.String,
+  excerpt: Schema.String,
+  /** Where it came from (chat, position, branch), so its text can be used without restoring. */
+  origin: Schema.Record(Schema.String, Schema.Unknown),
+  byteSize: Schema.Int,
+  deletedAt: Schema.Number
+}) {}
+
+/** Draft text that would otherwise have been lost, saved passively. */
+export class RecoveredText extends Schema.Class<RecoveredText>("RecoveredText")({
+  id: Schema.String,
+  sourceKind: DraftTargetKind,
+  sourceId: Schema.String,
+  sourceField: Schema.String,
+  /** Where it was typed, e.g. "Mira › description" or "Composer in Harbor". */
+  sourceLabel: Schema.String,
+  /** commit: from before a destructive change in a session that was then saved; discard: a discarded draft. */
+  reason: Schema.Literals(["commit", "discard"]),
+  /** The full text for a single read; an excerpt in lists. */
+  content: Schema.String,
+  length: Schema.Int,
+  createdAt: Schema.Number
+}) {}
+
+/** Each section's capacity. Past either limit, that section's oldest entries go first. */
+export interface BinLimits {
+  readonly deletedItems: number
+  readonly deletedBytes: number
+  readonly recoveredTexts: number
+  readonly recoveredBytes: number
+}
+
+export const defaultBinLimits: BinLimits = {
+  deletedItems: 10_000,
+  deletedBytes: 2 * 1024 ** 3,
+  recoveredTexts: 2_000,
+  recoveredBytes: 200 * 1024 ** 2
+}

@@ -9,7 +9,8 @@
 - A follower with no edits of its own since its last merge fast-forwards to the new revision instead of getting a merge revision.
 - "Update available, conflicts" is derived (followed head ≠ merge base), not stored.
 - Text merges word by word, so edits to different sentences of one prompt combine.
-- Drafts: `undo_log` became the `draft_history` table, with one reversible patch per entry. Drafts gained `status` (active, committed, discarded), `created_at` and a single `recovery_text`, and writes can commit their draft atomically. A commit or discard deletes the history (owner, 2026-10-10).
+- Drafts: `undo_log` became the `draft_history` table, with one reversible patch per entry. Drafts gained `status` (active, committed, discarded), `created_at` and a single `recovery_text`, and writes can commit their draft atomically. A commit or discard deletes the history (owner, 2026-10-10); text it would lose goes to the recycle bin's recovered-text section.
+- The recycle bin (migration 0004): `deleted_at`, `bin_item_id` and `purged_at` on chats, slots, versions and entities, plus `bin_items` and `recovered_texts` (ARCHITECTURE.md §3.11).
 
 Original status: Draft, 2026-10-09. Phase 0 deliverable (see PLAN.md). Everything here is **[P] Proposed** unless marked otherwise. Section references like "DESIGN §3.1" point to [DESIGN.md](DESIGN.md).
 

@@ -7,6 +7,7 @@
 // NotFound, so their existence doesn't leak.
 import { Chat, ChatId, ChatKind, EntityId, NewVersion, PathEntry, SlotId, Version, VersionId } from "@rp/shared/chat.ts"
 import { User, UserId } from "@rp/shared/domain.ts"
+import { BinItem, RecoveredText } from "@rp/shared/bin.ts"
 import { Draft, DraftKey, DraftState } from "@rp/shared/drafts.ts"
 import {
   Doc,
@@ -147,6 +148,66 @@ export class WriteOps extends RpcGroup.make(
     },
     success: Draft,
     error: Schema.Union([NotFound, StaleWrite, StorageError])
+  }),
+  // --- Recycle bin (DESIGN §6.2). Deletes need no confirmation: each returns the bin
+  // item for the "deleted, open the bin" toast, and can be undone from the bin.
+  Rpc.make("DeleteChat", {
+    payload: { userId: UserId, chatId: ChatId },
+    success: BinItem,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** Deletes one message; its replies stay. */
+  Rpc.make("DeleteMessage", {
+    payload: { userId: UserId, slotId: SlotId },
+    success: BinItem,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** Deletes a message and everything after it on every branch below it. */
+  Rpc.make("DeleteBranch", {
+    payload: { userId: UserId, slotId: SlotId },
+    success: BinItem,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * Deletes one swipe: the normal delete (owner, 2026-10-10). If it was showing, the
+   * previous swipe shows. A message's only remaining version takes the message with it.
+   */
+  Rpc.make("DeleteVersion", {
+    payload: { userId: UserId, versionId: VersionId },
+    success: BinItem,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  Rpc.make("DeleteEntity", {
+    payload: { userId: UserId, entityId: EntityId },
+    success: BinItem,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** Puts a deleted item back exactly where it was. */
+  Rpc.make("RestoreBinItem", {
+    payload: { userId: UserId, itemId: Schema.String },
+    success: BinItem,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** Deletes an item for good. The UI confirms this one. */
+  Rpc.make("PurgeBinItem", {
+    payload: { userId: UserId, itemId: Schema.String },
+    success: Schema.Void,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  Rpc.make("EmptyBin", {
+    payload: { userId: UserId },
+    success: Schema.Struct({ purged: Schema.Int }),
+    error: StorageError
+  }),
+  Rpc.make("DeleteRecoveredText", {
+    payload: { userId: UserId, id: Schema.String },
+    success: Schema.Void,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  Rpc.make("ClearRecoveredTexts", {
+    payload: { userId: UserId },
+    success: Schema.Struct({ deleted: Schema.Int }),
+    error: StorageError
   }),
   /** A new library entity with its first revision and its base (upstream) ref. */
   Rpc.make("CreateEntity", {
@@ -386,6 +447,31 @@ export class ReadOps extends RpcGroup.make(
   Rpc.make("GetDraftState", {
     payload: { userId: UserId, key: DraftKey, seq: Schema.Int },
     success: Schema.Struct({ seq: Schema.Int, content: Schema.String }),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** The bin's deleted items, newest first. `before` pages back by deletion time. */
+  Rpc.make("ListBin", {
+    payload: {
+      userId: UserId,
+      limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 500 })),
+      before: Schema.NullOr(Schema.Number)
+    },
+    success: Schema.Array(BinItem),
+    error: StorageError
+  }),
+  /** The bin's recovered text, newest first, with excerpts; optionally only from one draft. */
+  Rpc.make("ListRecoveredTexts", {
+    payload: {
+      userId: UserId,
+      source: Schema.NullOr(DraftKey),
+      limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 500 }))
+    },
+    success: Schema.Array(RecoveredText),
+    error: StorageError
+  }),
+  Rpc.make("GetRecoveredText", {
+    payload: { userId: UserId, id: Schema.String },
+    success: RecoveredText,
     error: Schema.Union([NotFound, StorageError])
   }),
   /** The user's library of one kind: upstream refs and variants, not chat overrides. */

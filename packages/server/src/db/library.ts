@@ -62,7 +62,7 @@ const refSelect = `
 export const makeLibraryQueries = (sql: SqlClient.SqlClient) => {
   const ownedRef = (userId: UserId, refId: string) =>
     sql
-      .unsafe<RefRow>(`${refSelect} WHERE r.id = ? AND e.owner_user_id = ?`, [refId, userId])
+      .unsafe<RefRow>(`${refSelect} WHERE r.id = ? AND e.owner_user_id = ? AND e.deleted_at IS NULL`, [refId, userId])
       .pipe(
         Effect.flatMap(([row]) => (row ? Effect.succeed(row) : Effect.fail(new NotFound({ entity: "ref", id: refId }))))
       )

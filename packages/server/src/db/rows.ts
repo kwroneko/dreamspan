@@ -115,6 +115,7 @@ export interface PathRow {
   readonly depth: number
   readonly row_version: number
   readonly context_excluded: number
+  readonly slot_deleted: number
   readonly version_count: number
 }
 

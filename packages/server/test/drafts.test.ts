@@ -150,7 +150,7 @@ describe("drafts", () => {
       assert.strictEqual(sent.draft?.content, "")
       assert.strictEqual(sent.draft?.historyLength, 0)
       assert.strictEqual(sent.draft?.key.field, sent.slotId)
-      assert.isNull(sent.draft?.recovery)
+      assert.deepStrictEqual(yield* reader.ListRecoveredTexts({ userId, source: null, limit: 10 }), [])
       assert.deepStrictEqual(yield* reader.ListActiveDrafts({ userId }), [])
 
       // Typing again starts a new session with a fresh history.
@@ -169,20 +169,29 @@ describe("drafts", () => {
     }).pipe(Effect.provide(database()))
   )
 
-  it.live("a wipe followed by a send leaves the wiped text recoverable, until the next commit", () =>
+  it.live("text wiped before a save goes to the bin's recovered-text section, from every wipe in the session", () =>
     Effect.gen(function* () {
-      const { type, send } = yield* setup()
-      const long = "A long reply the user spent a while on, about the lighthouse and the storm."
-      yield* type(long)
-      yield* type("x") // select-all plus a stray key...
-      const first = yield* send("x") // ...then Enter
-      assert.strictEqual(first.draft?.recovery?.content, long)
-      assert.strictEqual(first.draft?.historyLength, 0)
+      const { reader, userId, type, send } = yield* setup()
+      const recovered = () =>
+        reader
+          .ListRecoveredTexts({ userId, source: null, limit: 10 })
+          .pipe(Effect.map((texts) => texts.map((t) => [t.reason, t.content])))
+      const hours = "Hours of careful work on this reply, about the lighthouse, the storm and the letter."
+      yield* type(hours)
+      yield* type("x") // an accidental select-all plus a stray key
+      const rewrite = "A second attempt, written from scratch after the slip, also fairly long."
+      yield* type(rewrite)
+      yield* type("Short.") // a deliberate cut
+      yield* send("Short.")
+      assert.deepStrictEqual(yield* recovered(), [
+        ["commit", rewrite],
+        ["commit", hours]
+      ])
 
-      // An ordinary next message replaces the recovery.
+      // An ordinary message adds nothing.
       yield* type("Sorry, that was a slip.")
-      const second = yield* send("Sorry, that was a slip.")
-      assert.isNull(second.draft?.recovery)
+      yield* send("Sorry, that was a slip.")
+      assert.strictEqual((yield* recovered()).length, 2)
     }).pipe(Effect.provide(database()))
   )
 
@@ -261,9 +270,9 @@ describe("drafts", () => {
     }).pipe(Effect.provide(database()))
   )
 
-  it.live("discarding keeps the discarded text as the recovery", () =>
+  it.live("a discarded draft goes to the recovered-text section", () =>
     Effect.gen(function* () {
-      const { writer, userId, composer, type } = yield* setup()
+      const { writer, reader, userId, composer, type } = yield* setup()
       const draft = yield* type("Second thoughts.")
       const discarded = yield* writer.ClearDraft({
         userId,
@@ -272,7 +281,10 @@ describe("drafts", () => {
         expectedRowVersion: draft.rowVersion
       })
       assert.strictEqual(discarded.content, "")
-      assert.strictEqual(discarded.recovery?.content, "Second thoughts.")
+      const [text] = yield* reader.ListRecoveredTexts({ userId, source: composer(), limit: 10 })
+      assert.strictEqual(text?.reason, "discard")
+      assert.strictEqual(text?.content, "Second thoughts.")
+      assert.strictEqual(text?.sourceLabel, "Composer in an untitled chat")
     }).pipe(Effect.provide(database()))
   )
 

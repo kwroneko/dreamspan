@@ -7,16 +7,26 @@ import { RpcServer } from "effect/rpc"
 import { writerConnection } from "./connection.ts"
 import { Migrations } from "./migrations.ts"
 import { WriteOps } from "./ops.ts"
+import { defaultBinLimits, type BinLimits } from "@rp/shared/bin.ts"
+import { makeBinWriteHandlers } from "./binWrites.ts"
 import { makeLibraryWriteHandlers } from "./libraryWrites.ts"
 import { makeWriteHandlers } from "./writes.ts"
 
-const { dbPath } = workerData as { readonly dbPath: string }
+const { dbPath, binLimits = defaultBinLimits } = workerData as {
+  readonly dbPath: string
+  readonly binLimits?: BinLimits
+}
 
 RpcServer.layer(WriteOps, { concurrency: 1 }).pipe(
   Layer.provide(
     WriteOps.toLayer(
-      Effect.map(Effect.all([makeWriteHandlers, makeLibraryWriteHandlers]), ([graph, library]) =>
-        WriteOps.of({ ...graph, ...library })
+      Effect.map(
+        Effect.all([
+          makeWriteHandlers(binLimits),
+          makeLibraryWriteHandlers(binLimits),
+          makeBinWriteHandlers(binLimits)
+        ]),
+        ([graph, library, bin]) => WriteOps.of({ ...graph, ...library, ...bin })
       )
     )
   ),

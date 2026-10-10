@@ -258,7 +258,15 @@ These are strategies for mapping history to user and assistant roles:
 - **[D]** In ST, some fields autosave, some have save buttons, and preset field edits lived in limbo: they survived restarts but vanished on a preset switch.
 - **[D] Principle:** nothing is ever lost, and it's always clear which state you're in. (The earlier "autosave everything, no commits" proposal was rejected because it doesn't work for creating versions.)
 - **[D]** That means **nothing is lost by accident**: edits are non-destructive, and input boxes can be trusted with your life, so nobody keeps a notepad on the side. It doesn't mean nothing can be deleted; deliberate deletion is allowed (owner, 2026-10-10).
-- **[O]** How deliberate deletes are protected against accidents: a trash with a restore window, an undo toast, a confirmation, or a mix by kind.
+- **[D] Recycle bin** (owner, 2026-10-10). Deletes go to a global per-user bin and disappear from where they were; they can be restored from there or deleted permanently. This makes deleting fundamentally non-destructive.
+  - **Every delete shows a toast with a button that opens the bin,** so nobody has to search for it. Because of that, **deleting needs no confirmation anywhere except inside the bin**, which keeps deleting many things fast.
+  - **The bin has two independent sections**, each with its own capacity, oldest evicted first. Overflow in one never evicts items from the other.
+    - **Deleted items:** discrete things with an identity (chats, messages, swipes, branches, cards and other library entities), produced only by an explicit delete.
+    - **Recovered text:** text from before a destructive change in a drafting session, saved when the draft is committed, and discarded drafts. It's produced passively during normal editing, so it **never shows a toast**.
+  - **[D]** Deleting a single swipe (version), not the whole message, is the normal case, as in ST, and the most readily available delete in the UI. Deleting the whole message is the secondary action (owner, 2026-10-10). Deleting a message's only remaining version deletes the message.
+  - **[P]** Messages, swipes and branches are restored in place: deleting marks them, so restoring puts them back exactly where they were, with their versions. The bin entry also records where an item came from and a preview, so its text can be copied out instead.
+  - **[P]** Permanently deleting a chat or an entity removes it. Permanently deleting a message or branch erases its content but keeps an empty placeholder, so the conversation's structure and any summaries over it stay valid.
+  - **[P]** Default capacities: 10,000 deleted items or 2 GB; 2,000 recovered texts or 200 MB. Large enough that most users never reach them; configurable.
 - **[D]** **The composer belongs to a branch** (owner, 2026-10-10):
   - Each chat, and each branch within it, has its own composer.
   - A half-typed message waits where it was left, even months later, while other chats and branches show their own.
@@ -266,7 +274,8 @@ These are strategies for mapping history to user and assistant roles:
   - Switching between existing branches doesn't carry text along: moving text to another branch or chat is copy and paste, which is simpler than a composer that follows you around.
 - **[P]** Anything appended at a branch's tip, such as a model reply, carries that branch's composer forward to the new tip, so text typed meanwhile stays in view.
 - **[D]** Drafts and field-level undo history are **persisted on the server** for every text field. That protects against Ctrl-A plus a stray key and survives refreshes, closing the tab and switching devices.
-- **[D]** The undo history only lives while a draft is being written. A commit ends it: the committed text is preserved in a version or revision, and history tables must not grow indefinitely (owner, 2026-10-10). **[P]** The one exception is the text from just before a destructive change in the session, kept through the commit so a wipe-then-send can be undone; a discard keeps the discarded text the same way.
+- **[D]** The undo history only lives while a draft is being written. A commit ends it: the committed text is preserved in a version or revision, and history tables must not grow indefinitely (owner, 2026-10-10).
+- **[D]** A bad save can lose hours of typing in any field (a card, a preset), whatever happened to the previous version. So when a draft is committed, the text from before **each** destructive change in that session goes to the bin's recovered-text section, and a discarded draft goes there too (owner, 2026-10-10).
 - **[P]** Creating versions or named revisions needs an explicit commit, and a commit is a clear action.
 - **[P]** Every write carries the revision it was based on, so a stale tab can never silently overwrite newer state.
 - **[D]** Search, and search and replace, everywhere: preset prompts, cards and chats.

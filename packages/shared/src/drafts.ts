@@ -45,14 +45,11 @@ export class Draft extends Schema.Class<Draft>("Draft")({
   rowVersion: Schema.Int,
   createdAt: Schema.Number,
   updatedAt: Schema.Number,
-  /** Number of earlier states that can be restored. History is deleted on commit. */
-  historyLength: Schema.Int,
   /**
-   * Text that would otherwise be lost: from just before the last destructive change of
-   * the previous drafting session (a wipe, then send), or what was discarded. Kept until
-   * the next commit or discard.
+   * Number of earlier states that can be restored. History is deleted on commit; text a
+   * commit or discard would lose goes to the bin's recovered-text section.
    */
-  recovery: Schema.NullOr(Schema.Struct({ content: Schema.String, at: Schema.Number }))
+  historyLength: Schema.Int
 }) {}
 
 /** One restorable state in a draft's history. Seq 0 is the text the draft started with. */
