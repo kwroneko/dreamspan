@@ -3,13 +3,15 @@ import { mkdtempSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { DatabaseSync } from "node:sqlite"
-import { assert, describe, it } from "@effect/vitest"
+import { assert, beforeAll, describe, it } from "@effect/vitest"
 import { Cause, Effect, Exit } from "effect"
 import { acquireInstanceLock, classifyFilesystem, databaseFile, InstanceLocked } from "../src/db/connection.ts"
 import * as Database from "../src/db/Database.ts"
+import { buildWorkers } from "../scripts/build-workers.ts"
 
 const freshDir = () => mkdtempSync(join(tmpdir(), "rp-db-"))
-const database = (dataDir: string, readers = 2) => Database.layer({ dataDir, readers, allowNetworkFs: false })
+const database = (dataDir: string, readers = 2, workers: "source" | "bundle" = "source") =>
+  Database.layer({ dataDir, readers, allowNetworkFs: false, workers })
 const range = (n: number) => Array.from({ length: n }, (_, i) => i)
 
 /** Largest gap between 5 ms timer ticks on this thread while `effect` runs. */
@@ -153,6 +155,49 @@ describe("database workers", () => {
         const mode = db.prepare("PRAGMA journal_mode").get() as { journal_mode: string }
         db.close()
         assert.strictEqual(mode.journal_mode, "wal")
+      }),
+    30_000
+  )
+})
+
+describe("bundled workers", () => {
+  beforeAll(() => buildWorkers(), 60_000)
+
+  it.live(
+    "serve the same operations as the source workers",
+    () =>
+      Effect.gen(function* () {
+        const writer = yield* Database.Writer
+        const reader = yield* Database.Reader
+        const users = yield* Effect.forEach(
+          range(100),
+          (i) => writer.EnsureUser({ handle: `b${i}`, displayName: `B ${i}` }),
+          {
+            concurrency: "unbounded"
+          }
+        )
+        assert.strictEqual(new Set(users.map((u) => u.id)).size, 100)
+        assert.strictEqual((yield* reader.FindUserByHandle({ handle: "b99" }))?.displayName, "B 99")
+      }).pipe(Effect.provide(database(freshDir(), 2, "bundle"))),
+    30_000
+  )
+
+  it.live(
+    "stay within the per-worker memory budget",
+    () =>
+      Effect.gen(function* () {
+        const readers = 4
+        const before = process.memoryUsage().rss
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            const reader = yield* Database.Reader
+            // Touch every reader so all of them have loaded and opened their connection.
+            yield* Effect.forEach(range(readers * 4), () => reader.CountTo({ n: 1000 }), { concurrency: "unbounded" })
+            yield* Effect.sleep(500)
+            const perWorkerMb = (process.memoryUsage().rss - before) / 1048576 / (readers + 1)
+            assert.isBelow(perWorkerMb, 40, `bundled worker uses ${perWorkerMb.toFixed(0)} MB`)
+          }).pipe(Effect.provide(database(freshDir(), readers, "bundle")))
+        )
       }),
     30_000
   )

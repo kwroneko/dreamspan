@@ -48,7 +48,12 @@ const StaticRoutes = Layer.unwrap(
 
 const DatabaseLive = Layer.unwrap(
   Effect.map(AppConfig, (config) =>
-    Database.layer({ dataDir: config.dataDir, readers: config.dbReaders, allowNetworkFs: config.dbAllowNetworkFs })
+    Database.layer({
+      dataDir: config.dataDir,
+      readers: config.dbReaders,
+      allowNetworkFs: config.dbAllowNetworkFs,
+      workers: config.dbWorkers
+    })
   )
 )
 

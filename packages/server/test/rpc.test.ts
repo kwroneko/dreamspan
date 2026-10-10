@@ -15,6 +15,7 @@ const testConfig = (overrides: Partial<AppConfigShape> = {}): AppConfigShape => 
   dataDir: mkdtempSync(join(tmpdir(), "rp-rpc-")),
   dbReaders: 1,
   dbAllowNetworkFs: false,
+  dbWorkers: "source",
   authMode: "single",
   authProxyHeader: "remote-user",
   clientDist: join(tmpdir(), "rp-no-client"),

@@ -20,7 +20,8 @@ COPY packages/server/package.json packages/server/
 COPY packages/client/package.json packages/client/
 RUN npm ci --omit=dev
 
-# The server runs its TypeScript directly (Node's type stripping); only the client is built.
+# The server's main thread runs its TypeScript directly (Node's type stripping). The client
+# and the database workers are bundled; production uses the bundles (DB_WORKERS=bundle).
 FROM node:24-slim
 WORKDIR /app
 ENV NODE_ENV=production HOST=0.0.0.0 PORT=8080 DATA_DIR=/data
@@ -29,6 +30,7 @@ COPY package.json ./
 COPY packages/shared packages/shared
 COPY packages/server packages/server
 COPY --from=build /app/packages/client/dist packages/client/dist
+COPY --from=build /app/packages/server/dist packages/server/dist
 RUN mkdir -p /data && chown node:node /data
 USER node
 VOLUME /data

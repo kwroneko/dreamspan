@@ -2,10 +2,10 @@
 // worker holds the only read-write connection, and a pool of reader workers hold
 // read-only connections. See ARCHITECTURE.md "Database" for why this rules out
 // SQLITE_BUSY and keeps queries from blocking the event loop.
-import { mkdirSync } from "node:fs"
+import { existsSync, mkdirSync } from "node:fs"
 import { Worker } from "node:worker_threads"
 import { NodeWorker } from "@effect/platform-node"
-import { Context, Effect, Layer } from "effect"
+import { Context, Effect, Layer, Schema } from "effect"
 import { RpcClient, type RpcClientError } from "effect/rpc"
 import { acquireInstanceLock, checkFilesystem, databaseFile } from "./connection.ts"
 import { ReadOps, WriteOps } from "./ops.ts"
@@ -24,7 +24,29 @@ export interface DatabaseOptions {
   readonly dataDir: string
   readonly readers: number
   readonly allowNetworkFs: boolean
+  /**
+   * source: run the worker TypeScript directly (development and tests).
+   * bundle: run the single-file bundles from `npm run build` (production). Each worker
+   * is its own V8 isolate, and a bundle uses about a quarter of the memory.
+   */
+  readonly workers: "source" | "bundle"
 }
+
+export class WorkerBundleMissing extends Schema.TaggedError<WorkerBundleMissing>()("WorkerBundleMissing", {
+  path: Schema.String
+}) {
+  override get message() {
+    return `Database worker bundle not found at ${this.path}. Run \`npm run build\`, or set DB_WORKERS=source.`
+  }
+}
+
+const workerEntry = (name: "writer" | "reader", mode: DatabaseOptions["workers"]) =>
+  mode === "source"
+    ? Effect.succeed(new URL(`./${name}.ts`, import.meta.url))
+    : Effect.suspend(() => {
+        const url = new URL(`../../dist/workers/${name}.mjs`, import.meta.url)
+        return existsSync(url) ? Effect.succeed(url) : Effect.fail(new WorkerBundleMissing({ path: url.pathname }))
+      })
 
 const workers = (entry: URL, dbPath: string) =>
   NodeWorker.layer(() => new Worker(entry, { workerData: { dbPath }, name: entry.pathname.split("/").pop() }))
@@ -41,9 +63,13 @@ export const layer = (options: DatabaseOptions) => {
     })
   )
 
-  const WriterLive = Layer.effect(Writer, RpcClient.make(WriteOps)).pipe(
-    Layer.provide(RpcClient.layerProtocolWorker({ size: 1, concurrency: 1 })),
-    Layer.provide(workers(new URL("./writer.ts", import.meta.url), dbPath))
+  const WriterLive = Layer.unwrap(
+    Effect.map(workerEntry("writer", options.workers), (entry) =>
+      Layer.effect(Writer, RpcClient.make(WriteOps)).pipe(
+        Layer.provide(RpcClient.layerProtocolWorker({ size: 1, concurrency: 1 })),
+        Layer.provide(workers(entry, dbPath))
+      )
+    )
   )
 
   // Readers open read-only connections, so the file must exist and be migrated first.
@@ -51,9 +77,10 @@ export const layer = (options: DatabaseOptions) => {
     Effect.gen(function* () {
       const writer = yield* Writer
       yield* writer.Ready()
+      const entry = yield* workerEntry("reader", options.workers)
       return Layer.effect(Reader, RpcClient.make(ReadOps)).pipe(
         Layer.provide(RpcClient.layerProtocolWorker({ size: options.readers, concurrency: 1 })),
-        Layer.provide(workers(new URL("./reader.ts", import.meta.url), dbPath))
+        Layer.provide(workers(entry, dbPath))
       )
     })
   )

@@ -18,7 +18,9 @@ npm workspaces, TypeScript, ESM throughout.
 | `spikes/` | Throwaway experiments with their findings (not part of the build). |
 | `spec/` | Proposals and design records. |
 
-**Runtime.** Node 24 runs the server's TypeScript directly through type stripping. There's no server build step, so the code must use erasable syntax only (`erasableSyntaxOnly`). Only the client is bundled.
+**Runtime.** Node 24 runs the server's TypeScript directly through type stripping, so the code must use erasable syntax only (`erasableSyntaxOnly`). The client is bundled, and so are the database workers for production (§3.6). The server's main thread runs from source.
+
+Bun was measured as an alternative (2026-10-10) and not adopted. On this server it gave the same RPC latency and throughput and 13% less memory, but it has no `node:sqlite`, stubs the event-loop delay API, and Effect's Node HTTP layer errors under it. Bundling the workers saves far more memory on Node.
 
 **Toolchain.**
 - TypeScript 6.0 (`tsc --noEmit` per package). TypeScript 7's native compiler isn't used yet, because typescript-eslint doesn't support it.
@@ -48,6 +50,7 @@ npm workspaces, TypeScript, ESM throughout.
 | `DATA_DIR` | `./data` | Database, instance lock, later media |
 | `DB_READERS` | `2` | Reader worker count (§3) |
 | `DB_ALLOW_NETWORK_FS` | `false` | Override the network-filesystem refusal (§3.4) |
+| `DB_WORKERS` | `bundle` in production, else `source` | Worker entry points (§3.6) |
 | `AUTH_MODE` | `single` | `single` or `proxy` (§4) |
 | `AUTH_PROXY_HEADER` | `remote-user` | Identity header in proxy mode |
 | `CLIENT_DIST` | `packages/client/dist` | Static files to serve |
@@ -105,7 +108,19 @@ Other processes are the remaining risk, so they're kept out:
 | Durability | `synchronous = FULL`: a committed transaction survives power loss | n/a |
 | Other | `foreign_keys = ON`, `temp_store = MEMORY`, 64 MiB cache, `journal_size_limit` 64 MiB | `temp_store = MEMORY`, 32 MiB cache |
 
-### 3.6 Schema
+### 3.6 Worker bundles
+
+Each worker thread is a separate V8 isolate that loads its own copy of every module it imports. Loading Effect's module graph from source costs about 85 MB per worker. `npm run build` therefore bundles the two worker entry points into single tree-shaken files with rolldown (`packages/server/scripts/build-workers.ts` writes `packages/server/dist/workers/{writer,reader}.mjs`). A bundled worker costs about 19 MB (measured in `test/database.test.ts`, which fails above 40 MB).
+
+`DB_WORKERS` selects the entry points:
+- `source` is the default outside production, so development never runs a stale bundle.
+- `bundle` is the default when `NODE_ENV=production`. The server refuses to start if the bundles are missing (`WorkerBundleMissing`).
+
+The tests run the core operations against both.
+
+Measured whole-server memory with the main thread, the writer and 2 readers: about 380 MB from source, and **188 MB** with bundles (Docker image, idle). The main thread still runs from source.
+
+### 3.7 Schema
 
 Migrations (`migrations.ts`) run in the writer through Effect's `SqliteMigrator`. So far there's only `users`. The full data model (DATA-MODEL.md) is the next phase-0 step. Tables use `STRICT`. Ids are UUIDv7 (`@rp/shared/id.ts`), so `ORDER BY id` follows creation order.
 
@@ -140,6 +155,6 @@ Not built yet: built-in login (PLAN phase 0), and per-user ownership checks, whi
 ## 6. Deployment
 
 `Dockerfile`: a multi-stage build on `node:24-slim`.
-- The client is built in one stage. The final image holds production dependencies, the server and shared sources, and the client build.
+- The client and the database workers are built in one stage. The final image holds production dependencies, the server and shared sources, the client build and the worker bundles.
 - It runs as the `node` user with `DATA_DIR=/data` as a volume, `HOST=0.0.0.0`, and a health check on `/healthz`.
-- The image is about 325 MB, unoptimized so far: it installs every workspace's production dependencies.
+- The image is about 325 MB on disk, unoptimized so far: it installs every workspace's production dependencies. Memory at idle is about 188 MB.

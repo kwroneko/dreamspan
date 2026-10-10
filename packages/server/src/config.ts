@@ -9,6 +9,10 @@ const AppConfigFromEnv = Config.all({
   dataDir: Config.String("DATA_DIR").pipe(Config.withDefault("./data")),
   dbReaders: Config.Int("DB_READERS").pipe(Config.withDefault(2)),
   dbAllowNetworkFs: Config.Boolean("DB_ALLOW_NETWORK_FS").pipe(Config.withDefault(false)),
+  /** Bundled workers in production (see Database.ts), source everywhere else. */
+  dbWorkers: Config.Literals(["source", "bundle"], "DB_WORKERS").pipe(
+    Config.withDefault(process.env.NODE_ENV === "production" ? ("bundle" as const) : ("source" as const))
+  ),
   /**
    * single: one implicit local user, for running on your own machine.
    * proxy: trust the user name a reverse proxy (e.g. Authelia) puts in `authProxyHeader`.

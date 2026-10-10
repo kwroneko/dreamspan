@@ -21,7 +21,7 @@ The owner's reference-harness (`reference-harness/`; use the most recently modif
 - **SQLite never runs on the main thread.** Add storage operations to `packages/server/src/db/ops.ts` and implement them in the writer or reader worker. A write operation is one synchronous transaction with no non-database work inside.
 - **Client styling uses semantic tokens only** (the default Tailwind palette is removed). Feature code imports UI from `packages/client/src/ui/`, never from Base UI directly.
 - Pin dependencies to exact versions. The owner's machine runs npm through pmg with a 5-day cooldown on new releases.
-- Run `npm run check` before committing.
+- Run `npm run check` before committing. `npm run build` builds the client and the database worker bundles.
 
 ## Privacy
 
