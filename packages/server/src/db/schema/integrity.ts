@@ -3,41 +3,14 @@
 
 const raise = (message: string) => `SELECT RAISE(ABORT, '${message.replaceAll("'", "''")}')`
 
-/** Hard deletes are only for pending chats (garbage collection of lazy chats). */
-const chatIsLive = (chatIdExpr: string) =>
-  `(SELECT status FROM chats WHERE id = ${chatIdExpr}) IN ('active', 'archived')`
-
 export const integrity = [
-  // --- Nothing is ever lost (invariant 1) -----------------------------------------
-
-  `CREATE TRIGGER users_no_delete BEFORE DELETE ON users
-    BEGIN ${raise("users are disabled, never deleted")}; END`,
-
-  `CREATE TRIGGER chats_no_delete BEFORE DELETE ON chats WHEN OLD.status <> 'pending'
-    BEGIN ${raise("only pending chats can be deleted; archive instead")}; END`,
-
-  `CREATE TRIGGER slots_no_delete BEFORE DELETE ON slots WHEN ${chatIsLive("OLD.chat_id")}
-    BEGIN ${raise("slots are never deleted")}; END`,
-
-  `CREATE TRIGGER versions_no_delete BEFORE DELETE ON versions
-    WHEN ${chatIsLive("(SELECT chat_id FROM slots WHERE id = OLD.slot_id)")}
-    BEGIN ${raise("versions are hidden, never deleted")}; END`,
-
-  `CREATE TRIGGER state_events_no_delete BEFORE DELETE ON state_events WHEN ${chatIsLive("OLD.chat_id")}
-    BEGIN ${raise("state events are superseded, never deleted")}; END`,
-
-  `CREATE TRIGGER rollouts_no_delete BEFORE DELETE ON rollouts WHEN ${chatIsLive("OLD.chat_id")}
-    BEGIN ${raise("rollouts are discarded, never deleted")}; END`,
-
-  `CREATE TRIGGER summaries_no_delete BEFORE DELETE ON summaries WHEN ${chatIsLive("OLD.chat_id")}
-    BEGIN ${raise("summaries are superseded, never deleted")}; END`,
+  // --- Edits are non-destructive (invariant 1) ------------------------------------
+  // Changing content creates a new row; the old one stays. Deleting is a deliberate
+  // act and isn't restricted here (owner, 2026-10-10: the point is that nothing gets
+  // lost by accident, not that nothing can be removed).
 
   `CREATE TRIGGER entity_revisions_immutable BEFORE UPDATE ON entity_revisions
     BEGIN ${raise("entity revisions are immutable")}; END`,
-  `CREATE TRIGGER entity_revisions_no_delete BEFORE DELETE ON entity_revisions
-    BEGIN ${raise("entity revisions are never deleted")}; END`,
-  `CREATE TRIGGER entities_no_delete BEFORE DELETE ON entities
-    BEGIN ${raise("entities are archived, never deleted")}; END`,
 
   `CREATE TRIGGER summary_revisions_immutable BEFORE UPDATE ON summary_revisions
     BEGIN ${raise("summary revisions are immutable")}; END`,

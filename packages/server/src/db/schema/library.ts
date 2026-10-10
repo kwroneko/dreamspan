@@ -40,7 +40,7 @@ export const library = [
     merge_base_revision_id TEXT REFERENCES entity_revisions(id),
     label TEXT NOT NULL,
     subtitle TEXT NOT NULL DEFAULT '',
-    chat_id TEXT REFERENCES chats(id) DEFERRABLE INITIALLY DEFERRED,
+    chat_id TEXT REFERENCES chats(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED,
     source_path TEXT,
     source_hash TEXT,
     row_version INTEGER NOT NULL DEFAULT 1,

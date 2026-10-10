@@ -4,7 +4,7 @@ import type { UserId } from "@rp/shared/domain.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
-import type { DraftKey } from "@rp/shared/drafts.ts"
+import { composerKey, type DraftKey } from "@rp/shared/drafts.ts"
 import { makeDraftStore } from "./drafts.ts"
 import { AppendResult, NotFound, StaleWrite, WriteOps } from "./ops.ts"
 import { type ChatRow, toChat, toUser, toVersion, type UserRow, type VersionRow } from "./rows.ts"
@@ -22,7 +22,10 @@ export const makeWriteHandlers = Effect.gen(function* () {
   const draftTarget = (userId: UserId, key: DraftKey) => {
     const query =
       key.targetKind === "composer"
-        ? sql<{ n: number }>`SELECT count(*) AS n FROM chats WHERE id = ${key.targetId} AND owner_user_id = ${userId}`
+        ? key.field === ""
+          ? sql<{ n: number }>`SELECT count(*) AS n FROM chats WHERE id = ${key.targetId} AND owner_user_id = ${userId}`
+          : sql<{ n: number }>`SELECT count(*) AS n FROM slots s JOIN chats c ON c.id = s.chat_id
+              WHERE s.id = ${key.field} AND c.id = ${key.targetId} AND c.owner_user_id = ${userId}`
         : key.targetKind === "version_edit"
           ? sql<{ n: number }>`SELECT count(*) AS n FROM versions v JOIN slots s ON s.id = v.slot_id
               JOIN chats c ON c.id = s.chat_id WHERE v.id = ${key.targetId} AND c.owner_user_id = ${userId}`
@@ -158,6 +161,24 @@ export const makeWriteHandlers = Effect.gen(function* () {
         .save({ userId, key, content, expectedRowVersion, baseRevision, checkTarget: draftTarget(userId, key) })
         .pipe(transaction("SaveDraft")),
 
+    CopyComposer: ({ userId, chatId, fromTipSlotId, toTipSlotId }) =>
+      Effect.gen(function* () {
+        yield* draftTarget(userId, composerKey(chatId, toTipSlotId))
+        const from = yield* drafts.find(userId, composerKey(chatId, fromTipSlotId))
+        if (from === null || from.status !== "active" || from.content === "") return null
+        const to = yield* drafts.find(userId, composerKey(chatId, toTipSlotId))
+        // Never overwrite text already typed on the other branch.
+        if (to !== null && to.status === "active" && to.content !== "") return drafts.toDraft(to)
+        return yield* drafts.save({
+          userId,
+          key: composerKey(chatId, toTipSlotId),
+          content: from.content,
+          expectedRowVersion: to?.row_version ?? null,
+          baseRevision: null,
+          checkTarget: Effect.void
+        })
+      }).pipe(transaction("CopyComposer")),
+
     RestoreDraftState: ({ userId, key, seq, expectedRowVersion }) =>
       drafts.restore(userId, key, seq, expectedRowVersion).pipe(transaction("RestoreDraftState")),
 
@@ -187,8 +208,20 @@ export const makeWriteHandlers = Effect.gen(function* () {
             status = CASE WHEN status = 'pending' THEN 'active' ELSE status END,
             row_version = row_version + 1
           WHERE id = ${chatId} RETURNING *`
-        const draft = yield* drafts.commit(userId, commitDraft)
-        return new AppendResult({ slotId: slotId as SlotId, version: toVersion(row), chat: toChat(chat!), draft })
+        const committed = yield* drafts.commit(userId, commitDraft)
+        // The composer at the old tip moves to the new one: text typed while something
+        // else was appended stays in view, and a send's recovery text goes along with it.
+        yield* sql`UPDATE drafts SET field = ${slotId}, row_version = row_version + 1
+                   WHERE target_kind = 'composer' AND target_id = ${chatId} AND field = ${parentSlotId ?? ""}`
+        const movedComposer =
+          committed !== null && committed.key.targetKind === "composer" && committed.key.targetId === chatId
+        const draft = movedComposer ? yield* drafts.find(userId, composerKey(chatId, slotId)) : null
+        return new AppendResult({
+          slotId: slotId as SlotId,
+          version: toVersion(row),
+          chat: toChat(chat!),
+          draft: draft ? drafts.toDraft(draft) : committed
+        })
       }).pipe(transaction("AppendMessage")),
 
     AddVersion: ({ userId, slotId, version, select, commitDraft }) =>

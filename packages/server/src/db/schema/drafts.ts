@@ -27,14 +27,17 @@ export const draftHistory = [
     PRIMARY KEY (draft_id, seq)
   ) STRICT, WITHOUT ROWID`,
 
-  // A draft goes when its target goes (garbage collection of pending chats). Draft
-  // targets aren't foreign keys, since one column points into several tables.
+  // A draft goes when its target is deleted. Draft targets aren't foreign keys, since one
+  // column points into several tables.
   `CREATE TRIGGER drafts_gc_chat AFTER DELETE ON chats
     BEGIN DELETE FROM drafts WHERE target_kind = 'composer' AND target_id = OLD.id; END`,
   `CREATE TRIGGER drafts_gc_version AFTER DELETE ON versions
     BEGIN DELETE FROM drafts WHERE target_kind = 'version_edit' AND target_id = OLD.id; END`,
   `CREATE TRIGGER drafts_gc_slot AFTER DELETE ON slots
-    BEGIN DELETE FROM drafts WHERE target_kind = 'scratchpad' AND target_id = OLD.id; END`,
+    BEGIN
+      DELETE FROM drafts WHERE target_kind = 'scratchpad' AND target_id = OLD.id;
+      DELETE FROM drafts WHERE target_kind = 'composer' AND target_id = OLD.chat_id AND field = OLD.id;
+    END`,
   `CREATE TRIGGER drafts_gc_summary AFTER DELETE ON summaries
     BEGIN DELETE FROM drafts WHERE target_kind = 'summary_edit' AND target_id = OLD.id; END`,
   `CREATE TRIGGER drafts_gc_ref AFTER DELETE ON entity_refs

@@ -198,7 +198,7 @@ At a **merge slot**, the path covers both incoming lanes. How they're turned int
 | `connection_id`, `model_id` | Recorded per version (DESIGN §3.1) |
 | `error_json` | For `failed`: class (http, context_length, refusal{category}, length, …), status, body |
 | `usage_json` | Tokens, cache read and write, cost |
-| `starred`, `hidden` | Hidden is a soft delete; nothing is ever deleted outright |
+| `starred`, `hidden` | Hiding keeps a version out of the picker. Deleting is also allowed, as a deliberate act (owner, 2026-10-10). |
 | `changeset_id` | If created by a changeset |
 | `created_at`, `updated_at` | |
 
@@ -425,7 +425,7 @@ Linking chats to cards uses ST's folder name, falling back to the card name, the
 ---
 
 ## 15. Invariants (to be tested)
-1. Nothing in `entity_revisions`, `versions.content` (except amending a user-created version, which keeps history), `summary_revisions` or `rollout_payloads` is ever overwritten. Deletion is a soft hide, or archiving.
+1. Nothing in `entity_revisions`, `versions.content` (except amending a user-created version, which keeps history), `summary_revisions` or `rollout_payloads` is ever overwritten: edits are non-destructive. Deleting is a deliberate act and is allowed (owner, 2026-10-10).
 2. A failed or contentless version is never part of an assembled context.
 3. Changing `selected_version_id` never alters any other slot, and never alters state events that don't belong to that slot's versions.
 4. The state at slot S depends only on events at positions on the root→S path, and on the selections of those slots.

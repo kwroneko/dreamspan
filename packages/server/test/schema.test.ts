@@ -175,7 +175,7 @@ describe("graph shape", () => {
   })
 })
 
-describe("nothing is ever lost (invariant 1)", () => {
+describe("edits are non-destructive (invariant 1)", () => {
   it("freezes model output once generation ends", () => {
     const c = chat(user())
     const s = slot(c, null, { writer: "model", status: "generating", content: "" })
@@ -198,28 +198,55 @@ describe("nothing is ever lost (invariant 1)", () => {
     ).toEqual(["first draft", "second draft"])
   })
 
-  it("refuses hard deletes in live chats, and garbage-collects pending chats completely", () => {
-    const owner = user()
-    const live = chat(owner)
-    const s = slot(live, null)
-    expect(() => run(`DELETE FROM versions WHERE id = ?`, s.versionId)).toThrow(/never deleted/)
-    expect(() => run(`DELETE FROM slots WHERE id = ?`, s.slotId)).toThrow(/never deleted/)
-    expect(() => run(`DELETE FROM chats WHERE id = ?`, live.chatId)).toThrow(/pending/)
-
-    const pending = chat(owner, "pending")
-    const greeting = slot(pending, null, { content: "Hello, {{user}}." })
-    run(`DELETE FROM chats WHERE id = ?`, pending.chatId)
-    expect(get<{ n: number }>(`SELECT count(*) AS n FROM versions WHERE id = ?`, greeting.versionId).n).toBe(0)
-    expect(get<{ n: number }>(`SELECT count(*) AS n FROM lanes WHERE chat_id = ?`, pending.chatId).n).toBe(0)
+  it("allows deliberate deletes, keeping references whole", () => {
+    const c = chat(user())
+    const s = slot(c, null, { content: "kept" })
+    const extra = addVersion(s.slotId, 1, { writer: "model", content: "a swipe to delete" })
+    run(`DELETE FROM versions WHERE id = ?`, extra)
+    // A slot can't be left pointing at a deleted version.
+    expect(() => tx(() => run(`DELETE FROM versions WHERE id = ?`, s.versionId))).toThrow(/FOREIGN KEY/)
   })
 
-  it("never changes or deletes an entity revision", () => {
+  it("deletes a chat with everything in it", () => {
+    const owner = user()
+    const c = chat(owner)
+    const root = slot(c, null, { content: "Hello." })
+    const reply = slot(c, root, { writer: "model", content: "Hi." })
+    run(`INSERT INTO entities (id, owner_user_id, kind, created_at) VALUES ('card', ?, 'card', 1)`, owner)
+    run(`INSERT INTO entity_revisions (id, entity_id, doc_json, doc_hash, schema_version, origin, created_at)
+         VALUES ('rev', 'card', '{}', 'h', 1, 'user', 1)`)
+    run(`INSERT INTO entity_refs (id, entity_id, ref_kind, head_revision_id, label, created_at, updated_at)
+         VALUES ('base', 'card', 'upstream', 'rev', 'Card', 1, 1)`)
+    run(
+      `INSERT INTO entity_refs (id, entity_id, ref_kind, head_revision_id, follows_ref_id, merge_base_revision_id, label, chat_id, created_at, updated_at)
+         VALUES ('override', 'card', 'chat_override', 'rev', 'base', 'rev', 'Card', ?, 1, 1)`,
+      c.chatId
+    )
+    run(
+      `INSERT INTO state_events (id, chat_id, slot_id, seq, key, value_json, origin, created_at)
+         VALUES ('ev', ?, ?, 0, 'var.set', '{}', 'user', 1)`,
+      c.chatId,
+      reply.slotId
+    )
+    run(
+      `INSERT INTO drafts (id, user_id, target_kind, target_id, field, content, updated_at) VALUES ('d', ?, 'composer', ?, ?, 'unsent', 1)`,
+      owner,
+      c.chatId,
+      reply.slotId
+    )
+    tx(() => run(`DELETE FROM chats WHERE id = ?`, c.chatId))
+    for (const table of ["slots", "versions", "state_events", "drafts", "lanes"]) {
+      expect(get<{ n: number }>(`SELECT count(*) AS n FROM ${table}`).n).toBe(0)
+    }
+    expect(all<{ id: string }>(`SELECT id FROM entity_refs`).map((r) => r.id)).toEqual(["base"])
+  })
+
+  it("never changes an entity revision", () => {
     const owner = user()
     run(`INSERT INTO entities (id, owner_user_id, kind, created_at) VALUES ('e1', ?, 'card', 1)`, owner)
     run(`INSERT INTO entity_revisions (id, entity_id, doc_json, doc_hash, schema_version, origin, created_at)
          VALUES ('r1', 'e1', '{"name":"Mira"}', 'h1', 1, 'import', 1)`)
     expect(() => run(`UPDATE entity_revisions SET doc_json = '{}' WHERE id = 'r1'`)).toThrow(/immutable/)
-    expect(() => run(`DELETE FROM entity_revisions WHERE id = 'r1'`)).toThrow(/never deleted/)
   })
 
   it("freezes a rollout's context snapshot (invariant 6)", () => {
@@ -238,7 +265,7 @@ describe("nothing is ever lost (invariant 1)", () => {
 })
 
 describe("draft cleanup", () => {
-  it("removes the drafts of a garbage-collected pending chat", () => {
+  it("removes drafts along with their targets", () => {
     const owner = user()
     const pending = chat(owner, "pending")
     const greeting = slot(pending, null, { content: "Hello." })
@@ -251,6 +278,13 @@ describe("draft cleanup", () => {
         target
       )
     draft("composer", pending.chatId)
+    run(
+      `INSERT INTO drafts (id, user_id, target_kind, target_id, field, content, updated_at) VALUES (?, ?, 'composer', ?, ?, 'text', 1)`,
+      id("d"),
+      owner,
+      pending.chatId,
+      greeting.slotId
+    )
     draft("scratchpad", greeting.slotId)
     draft("version_edit", greeting.versionId)
     run(`INSERT INTO draft_history (draft_id, seq, kind, first_at, at, start, removed, inserted)

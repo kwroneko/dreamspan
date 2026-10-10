@@ -114,7 +114,7 @@ Where the owner corrected an earlier proposal, the corrected version is recorded
 - **[D]** **"Write your own version"** on any message, without a sacrificial swipe.
 - **[D]** **Saving an edit of a generated version creates a new version**, recording its source ("edited from #7"). Editing a version the user created **amends** it, with its earlier states kept in its undo history.
 - **[D]** A **composition scratchpad**: the owner generates 10–50 versions of a turn and merges the best parts. Select text in any version, assemble it in the scratchpad, commit it as a new version. The scratchpad persists like a draft.
-- **[P]** The version picker is built for dozens of versions: compact previews, star, hide (soft delete only), side-by-side comparison.
+- **[P]** The version picker is built for dozens of versions: compact previews, star, hide, delete, side-by-side comparison.
 - **[D]** Pressing swipe while a generation is running starts another one. You can move freely between versions that are still generating and finished ones. **The stop button belongs to the version**, not the composer. There's no dedicated "generate ×N" action.
 - **[D]** **Failed generations are versions** with a clear failure style showing the cause: HTTP error, context length, classifier refusal (with its category), or a length cutoff. They never enter the context.
 - **[P]** A stream that dies midway keeps its partial text and offers Continue (§7.5). Refusals offer Retry and "Retry with…" another model.
@@ -257,6 +257,14 @@ These are strategies for mapping history to user and assistant roles:
 ### 6.2 Saving (ST's gripe #1)
 - **[D]** In ST, some fields autosave, some have save buttons, and preset field edits lived in limbo: they survived restarts but vanished on a preset switch.
 - **[D] Principle:** nothing is ever lost, and it's always clear which state you're in. (The earlier "autosave everything, no commits" proposal was rejected because it doesn't work for creating versions.)
+- **[D]** That means **nothing is lost by accident**: edits are non-destructive, and input boxes can be trusted with your life, so nobody keeps a notepad on the side. It doesn't mean nothing can be deleted; deliberate deletion is allowed (owner, 2026-10-10).
+- **[O]** How deliberate deletes are protected against accidents: a trash with a restore window, an undo toast, a confirmation, or a mix by kind.
+- **[D]** **The composer belongs to a branch** (owner, 2026-10-10):
+  - Each chat, and each branch within it, has its own composer.
+  - A half-typed message waits where it was left, even months later, while other chats and branches show their own.
+  - Starting a branch copies the current composer into it.
+  - Switching between existing branches doesn't carry text along: moving text to another branch or chat is copy and paste, which is simpler than a composer that follows you around.
+- **[P]** Anything appended at a branch's tip, such as a model reply, carries that branch's composer forward to the new tip, so text typed meanwhile stays in view.
 - **[D]** Drafts and field-level undo history are **persisted on the server** for every text field. That protects against Ctrl-A plus a stray key and survives refreshes, closing the tab and switching devices.
 - **[D]** The undo history only lives while a draft is being written. A commit ends it: the committed text is preserved in a version or revision, and history tables must not grow indefinitely (owner, 2026-10-10). **[P]** The one exception is the text from just before a destructive change in the session, kept through the commit so a wipe-then-send can be undone; a discard keeps the discarded text the same way.
 - **[P]** Creating versions or named revisions needs an explicit commit, and a commit is a clear action.

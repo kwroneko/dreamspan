@@ -33,7 +33,7 @@ Coding agents now make it cheap to build and maintain a replacement, which wasn'
 
 ## Principles
 
-- **Nothing is ever lost.** Edits create versions. Drafts and field undo history are persisted on the server. Failed generations stay as visible versions. Bulk edits can be reverted.
+- **Nothing is ever lost.** Edits create versions. Drafts and field undo history are persisted on the server. Failed generations stay as visible versions. Bulk edits can be reverted. This means nothing gets lost *by accident*: edits are non-destructive, and you can trust any input box with your life without keeping a notepad on the side. It doesn't mean nothing can be deleted; deleting on purpose is allowed (owner, 2026-10-10).
 - **Nothing changes silently.** Anything that affects the next generation is visible before sending: the speaker, who writes the turn, the active preset and its source, active notes, one-turn direction, and cache state.
 - **One mechanism, many surfaces.** The same layering applies to cards, presets and lorebooks; the same choice of edit scope everywhere; the same state-on-the-graph model for all chat state.
 - **The server is the source of truth.** Clients are views. The agent loop and all generations run on the server.

@@ -143,13 +143,12 @@ Conventions:
 - **Mutual references** (`slots.selected_version_id` ↔ `versions.slot_id`, a summary ↔ its selected revision) use deferred foreign keys. The version row is inserted first, then the slot, in one transaction.
 
 **Invariants enforced by the database** (`schema/integrity.ts`). No code path can break these, and `test/schema.test.ts` checks each one on a bare connection:
-- **Nothing is ever lost.**
+- **Edits are non-destructive.** Changing content creates new rows; it never overwrites. Deliberate deletion is allowed, and foreign keys keep it consistent: for example, a slot can't be left selecting a deleted version, and deleting a chat removes everything in it, its chat-local overrides and drafts included.
   - Model-written versions are frozen once they stop generating.
   - Amending a user-written version copies the previous content into `version_history` automatically.
   - Entity revisions and summary revisions are immutable.
   - A rollout's context snapshot is frozen once written.
   - State events can only be superseded, not changed.
-  - Hard deletes are refused for users, entities, entity revisions, and every chat-scoped row in a live chat. Only pending chats can be deleted, which cascades.
 - **The graph is append-only.**
   - A slot's parent is in the same chat, one level up.
   - A slot never moves.
@@ -250,7 +249,7 @@ The outcomes are returned, so the UI can report what happened.
 Drafts with server-persisted undo history, for every text field (DESIGN §6.2). The patch model and history policy are in `@rp/shared/drafts.ts`, storage in `db/drafts.ts` (shared by the writer and readers), and the history table in migration `0003_draft_history`, which replaced the `drafts.undo_log` blob.
 
 **Keys.** A draft is keyed by user and target:
-- `composer` (a chat)
+- `composer` (a chat, with the branch tip in `field`; `composerKey()` builds it)
 - `version_edit` (a version)
 - `scratchpad` (a slot)
 - `entity_field` (a ref plus a JSON path in `field`)
@@ -279,7 +278,14 @@ The first save checks that the target belongs to the user. Drafts are never visi
 
 Edits of existing content need no recovery: their previous version or revision is immutable. The next save after a commit starts a fresh session. `ListActiveDrafts` lists drafts with unsent text.
 
-**Cleanup.** Draft targets aren't foreign keys, since one column points into several tables. Triggers delete a draft when its target is deleted, which happens only when a pending chat is garbage-collected (`test/schema.test.ts`).
+**The composer belongs to a branch** (DESIGN §6.2, owner):
+- Its key is the chat plus the slot the next message goes under (the branch tip), or empty before the first message.
+- Each chat and each branch has its own composer, and a half-typed message waits where it was left.
+- `AppendMessage` moves the composer at the old tip to the new slot. That way a model reply carries text typed meanwhile forward, and a send's recovery text follows the conversation.
+- `CopyComposer` copies the text to a new branch's tip when a branch is started, never overwriting text already there.
+- Switching between existing branches carries nothing.
+
+**Cleanup.** Draft targets aren't foreign keys, since one column points into several tables. Triggers delete a draft when its target (chat, slot, version, summary, ref) is deleted (`test/schema.test.ts`).
 
 **Not built yet:** pushing a draft change to the user's other open tabs and devices. That needs the subscription channel; until then, the row version catches the conflict when the other tab saves.
 

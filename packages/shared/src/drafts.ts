@@ -17,9 +17,21 @@ export type DraftTargetKind = typeof DraftTargetKind.Type
 export class DraftKey extends Schema.Class<DraftKey>("DraftKey")({
   targetKind: DraftTargetKind,
   targetId: Schema.String,
-  /** For entity fields, a JSON path into the document; empty otherwise. */
+  /**
+   * Composer: the slot the next message goes under (the branch's tip), or empty before
+   * the first message. Entity fields: a JSON path into the document. Otherwise empty.
+   */
   field: Schema.String
 }) {}
+
+/**
+ * The composer belongs to a branch, not just a chat: each branch tip has its own, so
+ * leaving a half-typed message and coming back, even months later, finds it where it
+ * was, and another branch or chat shows its own composer. Anything appended at the tip
+ * carries the composer forward to the new tip; sending commits it.
+ */
+export const composerKey = (chatId: string, tipSlotId: string | null) =>
+  new DraftKey({ targetKind: "composer", targetId: chatId, field: tipSlotId ?? "" })
 
 export const DraftStatus = Schema.Literals(["active", "committed", "discarded"])
 

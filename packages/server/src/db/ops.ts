@@ -116,6 +116,21 @@ export class WriteOps extends RpcGroup.make(
     success: Draft,
     error: Schema.Union([NotFound, StaleWrite, DraftTooLarge, StorageError])
   }),
+  /**
+   * Starting a branch takes the composer along: copies the composer text at one tip to
+   * another, unless the other already has text of its own. Switching between existing
+   * branches doesn't copy (owner, 2026-10-10).
+   */
+  Rpc.make("CopyComposer", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      fromTipSlotId: Schema.NullOr(SlotId),
+      toTipSlotId: Schema.NullOr(SlotId)
+    },
+    success: Schema.NullOr(Draft),
+    error: Schema.Union([NotFound, StaleWrite, DraftTooLarge, StorageError])
+  }),
   /** Restores an earlier state from the draft's history. The restore is itself undoable. */
   Rpc.make("RestoreDraftState", {
     payload: { userId: UserId, key: DraftKey, seq: Schema.Int, expectedRowVersion: Schema.Int },
