@@ -14,6 +14,15 @@ An agentic roleplay harness and web app to replace SillyTavern. Read `README.md`
 
 The owner's reference-harness (`reference-harness/`; use the most recently modified worktree) already implements much of the core: LCM summarization (ARCHITECTURE.md §9b), timeline/rollout separation, session resume and fork (`src/agent/recovery.ts`, `src/agent/fork.ts`), cache breakpoints, decision models (`spec/DECISION-MODEL.md`), and OpenAI prefill (`spec/OPENAI-PREFILL.md`). Before designing any of these, read how reference-harness does it, and present designs as deltas from it.
 
+## Code conventions
+
+- Read `ARCHITECTURE.md` before changing code. It documents what's implemented.
+- **Effect 4.x only.** Agents tend to write Effect 3 APIs. Work from `node_modules/effect/AGENTS.md`, `node_modules/effect/ai-docs/` and the module sources, not from memory or web search.
+- **SQLite never runs on the main thread.** Add storage operations to `packages/server/src/db/ops.ts` and implement them in the writer or reader worker. A write operation is one synchronous transaction with no non-database work inside.
+- **Client styling uses semantic tokens only** (the default Tailwind palette is removed). Feature code imports UI from `packages/client/src/ui/`, never from Base UI directly.
+- Pin dependencies to exact versions. The owner's machine runs npm through pmg with a 5-day cooldown on new releases.
+- Run `npm run check` before committing.
+
 ## Privacy
 
 Never read the owner's chat logs or character card definitions: not in the SillyTavern data directory, not in reference-harness data directories, nowhere. Use synthetic fixtures for tests, and the public ST source for format details.

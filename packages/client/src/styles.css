@@ -1,0 +1,87 @@
+@import "tailwindcss";
+
+/*
+ * Design tokens. Feature code styles by role, never by raw palette value
+ * (CLIENT-FRAMEWORK.md §8). The default Tailwind palette is removed below, so
+ * classes like `bg-zinc-800` don't exist and only these roles can be used.
+ * A future design system changes the values here, not the components.
+ */
+:root {
+  --canvas: oklch(98.5% 0.003 260);
+  --surface: oklch(100% 0 0);
+  --surface-raised: oklch(96.5% 0.005 260);
+  --border: oklch(90% 0.008 260);
+  --text: oklch(22% 0.015 260);
+  --text-muted: oklch(50% 0.015 260);
+  --accent: oklch(55% 0.17 265);
+  --accent-contrast: oklch(99% 0 0);
+  --danger: oklch(57% 0.2 25);
+  --success: oklch(60% 0.14 150);
+  --focus: oklch(65% 0.17 265);
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --canvas: oklch(17% 0.01 260);
+    --surface: oklch(21% 0.012 260);
+    --surface-raised: oklch(25% 0.014 260);
+    --border: oklch(32% 0.014 260);
+    --text: oklch(92% 0.008 260);
+    --text-muted: oklch(68% 0.012 260);
+    --accent: oklch(72% 0.13 265);
+    --accent-contrast: oklch(18% 0.02 265);
+    --danger: oklch(70% 0.16 25);
+    --success: oklch(72% 0.13 150);
+    --focus: oklch(72% 0.13 265);
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme="dark"] {
+  --canvas: oklch(17% 0.01 260);
+  --surface: oklch(21% 0.012 260);
+  --surface-raised: oklch(25% 0.014 260);
+  --border: oklch(32% 0.014 260);
+  --text: oklch(92% 0.008 260);
+  --text-muted: oklch(68% 0.012 260);
+  --accent: oklch(72% 0.13 265);
+  --accent-contrast: oklch(18% 0.02 265);
+  --danger: oklch(70% 0.16 25);
+  --success: oklch(72% 0.13 150);
+  --focus: oklch(72% 0.13 265);
+  color-scheme: dark;
+}
+
+@theme {
+  --color-*: initial;
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-border: var(--border);
+  --color-text: var(--text);
+  --color-muted: var(--text-muted);
+  --color-accent: var(--accent);
+  --color-accent-contrast: var(--accent-contrast);
+  --color-danger: var(--danger);
+  --color-success: var(--success);
+  --color-focus: var(--focus);
+  --color-transparent: transparent;
+
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--canvas);
+  color: var(--text);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}

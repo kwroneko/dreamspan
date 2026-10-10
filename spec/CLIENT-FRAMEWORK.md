@@ -1,6 +1,6 @@
 # Client framework evaluation
 
-**Status**: Proposal, revision 2 (2026-10-10: owner input in §6, with the recommendation revised; performance harness §7; design-system timing §8). **Framework: React [D]** (owner, 2026-10-10). The rest of the stack in §6.3 and the proposals in §5, §7 and §8 are still [P]. Items marked [D] in §6.1 are the owner's statements.
+**Status**: Proposal, revision 2 (2026-10-10: owner input in §6, with the recommendation revised; performance harness §7; design-system timing §8). **Framework: React [D]** (owner, 2026-10-10). **Partially implemented** by the phase 0 scaffold (ARCHITECTURE.md §5): Vite, React Compiler, TanStack Router, the `AtomRpc` data layer, the semantic-token layer with the default Tailwind palette removed, and the `src/ui/` boundary enforced by ESLint. The performance harness (§7) isn't built yet. The rest of the stack in §6.3 and the proposals in §5, §7 and §8 are still [P]. Items marked [D] in §6.1 are the owner's statements.
 **Owner's framing [D]**: UI quality for real users is the most important thing, and the client framework is one of the main stack decisions. reference-harness's console stack (SvelteKit + bits-ui) was a minor choice for an admin monitoring UI, so it isn't the default here.
 
 ---

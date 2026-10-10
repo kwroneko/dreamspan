@@ -14,7 +14,18 @@ It stays compatible with what users already have: ST cards, chat-completion pres
 
 ## Status
 
-Design phase. No code yet.
+Phase 0 (foundations). The scaffold runs: a typed RPC server over WebSocket, SQLite in worker threads, auth, and a placeholder client. [ARCHITECTURE.md](ARCHITECTURE.md) describes what's implemented.
+
+```bash
+npm install
+npm run build        # the client
+npm start            # http://127.0.0.1:8080, data in ./data
+npm run check        # typecheck, lint, format, tests
+```
+
+For development, run `npm run dev:server` and `npm run dev:client` (Vite on :5173, proxying to the server).
+
+Design documents:
 
 - [spec/OVERVIEW.md](spec/OVERVIEW.md): goals, non-goals, principles, stack.
 - [spec/DESIGN.md](spec/DESIGN.md): requirements and design decisions by area, each marked decided, proposed or open.

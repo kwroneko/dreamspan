@@ -1,6 +1,6 @@
 # Effect across the stack
 
-**Status**: Proposal, validated by a spike (§5), 2026-10-10. The owner wants Effect strongly considered, because "if used properly, it might make the final product substantially more solid in terms of error handling and more reliable". Nothing here is Decided.
+**Status**: Partially implemented, 2026-10-10. Validated by a spike (§5). The phase 0 scaffold implements the server shape of §3: Effect HTTP and RPC over a WebSocket, Effect RPC to the database worker threads, services and layers, Schema-based contracts in `@rp/shared`, and the client's `AtomRpc` data layer. See ARCHITECTURE.md §1–§5. Still proposed: the conventions in §4 beyond what CLAUDE.md now states, and the pi-ai and tool-schema boundary (§3). The owner wants Effect strongly considered, because "if used properly, it might make the final product substantially more solid in terms of error handling and more reliable". Nothing here is Decided.
 **Related**: [CLIENT-FRAMEWORK.md](CLIENT-FRAMEWORK.md), DESIGN §10.4, PLAN phase 0.
 
 ---
@@ -49,6 +49,7 @@ This project is made of exactly what Effect is for:
 
 **Schema:**
 - Effect Schema for wire formats, documents and settings.
+- **Implemented:** the server's own HTTP server is `effect/http` with `@effect/platform-node`, which settles the deferred server-HTTP question in practice (ARCHITECTURE.md §2). The owner can still revisit it.
 - pi-ai defines tool parameters with TypeBox. At that boundary we either convert Effect Schema to JSON Schema (`Schema.toJsonSchemaDocument`) and pass it raw, or keep TypeBox just for tool definitions. To be decided when tools are built (phase 4).
 
 ---

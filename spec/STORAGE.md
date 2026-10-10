@@ -1,6 +1,6 @@
 # Storage engine: SQLite vs Turso
 
-**Status**: Proposal, 2026-10-10. The owner asked for Turso Database (the Rust rewrite of SQLite) to be considered before the Effect spike (EFFECT.md §5). The recommendation is **SQLite now, behind a thin database layer, revisiting Turso later**. Nothing here is Decided.
+**Status**: Partially implemented, 2026-10-10. The engine choice (§3: `node:sqlite` through Effect's driver) is implemented and documented in ARCHITECTURE.md §3, together with the connection and locking design that came out of implementing it. The Turso evaluation (§1–§2) stays here as the record for revisiting it. Original status: proposal, 2026-10-10. The owner asked for Turso Database (the Rust rewrite of SQLite) to be considered before the Effect spike (EFFECT.md §5). The recommendation is **SQLite now, behind a thin database layer, revisiting Turso later**. Nothing here is Decided.
 **Related**: DATA-MODEL.md (§12 search), EFFECT.md §4 (driver choice), DESIGN §8 (memory retrieval).
 
 ---
@@ -89,7 +89,7 @@ reference-harness's single-writer pattern carries over: writes are serialized th
 
 ## 4. Open
 
-- **[O]** `node:sqlite` vs better-sqlite3. Proposed: `node:sqlite`, because it has an official Effect 4 driver. Node still labels it a release candidate. better-sqlite3 would need our own `SqlClient` adapter.
+- ~~`node:sqlite` vs better-sqlite3.~~ **Implemented: `node:sqlite`** through `@effect/sql-sqlite-node`, running only in worker threads (ARCHITECTURE.md §3). The owner approved going ahead on this basis (2026-10-10).
 - **[O]** Vector search for memory retrieval: per-chat sqlite-vec (partitioned, quantized with rescoring) is probably enough for single-chat retrieval. Search across chats is where an ANN index would be needed. To be decided when memory retrieval is designed.
 
 Test scripts used for §2 are in the session scratchpad and are not committed.
