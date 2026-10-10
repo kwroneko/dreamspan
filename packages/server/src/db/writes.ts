@@ -1,42 +1,19 @@
 // Write operation handlers. They run inside the writer worker, each as one transaction.
-import { createHash } from "node:crypto"
 import type { ChatId, EntityId, NewVersion, SlotId, VersionId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import { Effect } from "effect"
-import { SqlClient, SqlError } from "effect/sql"
-import { toStorageError } from "./connection.ts"
-import { AppendResult, NotFound, StaleWrite, type StorageError, WriteOps } from "./ops.ts"
+import { SqlClient } from "effect/sql"
+import { AppendResult, NotFound, StaleWrite, WriteOps } from "./ops.ts"
 import { type ChatRow, toChat, toUser, toVersion, type UserRow, type VersionRow } from "./rows.ts"
-import { timed } from "./timed.ts"
+import { transaction as runTransaction } from "./tx.ts"
 
-/** Text extracted from a document for full-text search: every string value in it. */
-const searchText = (doc: unknown): string => {
-  const parts: Array<string> = []
-  const walk = (value: unknown) => {
-    if (typeof value === "string") parts.push(value)
-    else if (Array.isArray(value)) value.forEach(walk)
-    else if (value !== null && typeof value === "object") Object.values(value).forEach(walk)
-  }
-  walk(doc)
-  return parts.join("\n")
-}
-
+type WriteHandlers = Parameters<typeof WriteOps.of>[0]
+/** Graph, chat and user write handlers. Library handlers are in libraryWrites.ts. */
 export const makeWriteHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
 
-  /** Runs `body` as one transaction, with typed storage errors and the slow-op log. */
-  const transaction =
-    (operation: string) =>
-    <A, E, R>(body: Effect.Effect<A, E | SqlError.SqlError, R>) =>
-      sql.withTransaction(body).pipe(
-        Effect.mapError((error): Exclude<E, SqlError.SqlError> | StorageError =>
-          error instanceof SqlError.SqlError
-            ? toStorageError(operation)(error)
-            : (error as Exclude<E, SqlError.SqlError>)
-        ),
-        timed(operation)
-      )
+  const transaction = (operation: string) => runTransaction(sql, operation)
 
   const ownedChat = (userId: UserId, chatId: ChatId) =>
     sql<ChatRow>`SELECT * FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId}`.pipe(
@@ -100,7 +77,7 @@ export const makeWriteHandlers = Effect.gen(function* () {
       return { slotId, version: row }
     })
 
-  return WriteOps.of({
+  const handlers = {
     Ready: () => Effect.void,
 
     EnsureUser: ({ handle, displayName }) =>
@@ -118,36 +95,6 @@ export const makeWriteHandlers = Effect.gen(function* () {
         })} RETURNING *`
         return toUser(row!)
       }).pipe(transaction("EnsureUser")),
-
-    CreateEntity: ({ userId, kind, label, doc, schemaVersion }) =>
-      Effect.gen(function* () {
-        const at = Date.now()
-        const entityId = uuidv7()
-        const revisionId = uuidv7()
-        const refId = uuidv7()
-        const docJson = JSON.stringify(doc)
-        yield* sql`INSERT INTO entities ${sql.insert({ id: entityId, owner_user_id: userId, kind, created_at: at })}`
-        yield* sql`INSERT INTO entity_revisions ${sql.insert({
-          id: revisionId,
-          entity_id: entityId,
-          doc_json: docJson,
-          doc_hash: createHash("sha256").update(docJson).digest("hex"),
-          schema_version: schemaVersion,
-          origin: "user",
-          search_text: searchText(doc),
-          created_at: at
-        })}`
-        yield* sql`INSERT INTO entity_refs ${sql.insert({
-          id: refId,
-          entity_id: entityId,
-          ref_kind: "upstream",
-          head_revision_id: revisionId,
-          label,
-          created_at: at,
-          updated_at: at
-        })}`
-        return { entityId: entityId as EntityId, revisionId, refId }
-      }).pipe(transaction("CreateEntity")),
 
     CreateChat: ({ userId, kind, status, title, participants, greeting }) =>
       Effect.gen(function* () {
@@ -261,5 +208,6 @@ export const makeWriteHandlers = Effect.gen(function* () {
         })}`
         return { id, seq: next!.n }
       }).pipe(transaction("AddStateEvent"))
-  })
+  } satisfies Partial<WriteHandlers>
+  return handlers
 })

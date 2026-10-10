@@ -6,6 +6,7 @@
     "./*": "./src/*"
   },
   "dependencies": {
-    "effect": "4.0.1"
+    "effect": "4.0.1",
+    "node-diff3": "3.2.1"
   }
 }

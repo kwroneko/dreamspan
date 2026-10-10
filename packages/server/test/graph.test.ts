@@ -44,7 +44,16 @@ const setup = (handle = "ana") =>
     const user = yield* writer.EnsureUser({ handle, displayName: handle })
     const card = (name: string) =>
       writer
-        .CreateEntity({ userId: user.id, kind: "card", label: name, doc: { name }, schemaVersion: 1 })
+        .CreateEntity({
+          userId: user.id,
+          kind: "card",
+          label: name,
+          subtitle: "",
+          doc: { name },
+          schemaVersion: 1,
+          origin: "user",
+          sourcePath: null
+        })
         .pipe(Effect.map((e) => e.entityId))
     const mira = yield* card("Mira")
     const me = yield* card("Me")
@@ -120,8 +129,11 @@ describe("message graph", () => {
         userId,
         kind: "note",
         label: "Outfit",
+        subtitle: "",
         doc: { content: "Raincoat" },
-        schemaVersion: 1
+        schemaVersion: 1,
+        origin: "user",
+        sourcePath: null
       })
 
       // Before the fork: visible on both branches. After it, on the main branch only.

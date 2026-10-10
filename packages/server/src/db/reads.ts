@@ -1,11 +1,13 @@
 // Read operation handlers. They run inside the reader workers on read-only connections.
 import type { ChatId, SlotId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
+import { MergePreview, Revision, type RevisionId } from "@rp/shared/library.ts"
 import { StateEventData } from "@rp/shared/state.ts"
 import { Effect, Schema } from "effect"
-import { SqlClient, SqlError } from "effect/sql"
+import { SqlClient } from "effect/sql"
 import { toStorageError } from "./connection.ts"
-import { FoldableStateEvent, NotFound, ReadOps, StorageError } from "./ops.ts"
+import { makeLibraryQueries, toLibraryRef } from "./library.ts"
+import { FoldableStateEvent, NotFound, ReadOps, RefOperationRefused, StorageError } from "./ops.ts"
 import {
   type ChatRow,
   type PathRow,
@@ -17,24 +19,13 @@ import {
   versionColumns,
   type VersionRow
 } from "./rows.ts"
-import { timed } from "./timed.ts"
+import { query } from "./tx.ts"
 
 const decodeStateEvent = Schema.decodeUnknownEffect(StateEventData)
 
 export const makeReadHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
-
-  const query =
-    (operation: string) =>
-    <A, E, R>(body: Effect.Effect<A, E | SqlError.SqlError, R>) =>
-      body.pipe(
-        Effect.mapError((error): Exclude<E, SqlError.SqlError> | StorageError =>
-          error instanceof SqlError.SqlError
-            ? toStorageError(operation)(error)
-            : (error as Exclude<E, SqlError.SqlError>)
-        ),
-        timed(operation)
-      )
+  const lib = makeLibraryQueries(sql)
 
   const ownedChat = (userId: UserId, chatId: ChatId) =>
     sql<ChatRow>`SELECT * FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId}`.pipe(
@@ -117,6 +108,82 @@ export const makeReadHandlers = Effect.gen(function* () {
           )
         )
       }).pipe(query("StateEventsAt")),
+
+    ListLibrary: ({ userId, kind, tag, archived }) =>
+      lib
+        .refsWhere(
+          `e.owner_user_id = ? AND e.kind = ? AND r.ref_kind <> 'chat_override'
+           AND (e.archived_at IS NOT NULL) = ?
+           AND (? IS NULL OR EXISTS (SELECT 1 FROM entity_tags t WHERE t.entity_id = e.id AND t.tag = ?))`,
+          [userId, kind, archived ? 1 : 0, tag, tag]
+        )
+        .pipe(
+          Effect.map((rows) => rows.map(toLibraryRef)),
+          query("ListLibrary")
+        ),
+
+    GetRef: ({ userId, refId }) =>
+      Effect.gen(function* () {
+        const ref = yield* lib.ownedRef(userId, refId)
+        return { ref: toLibraryRef(ref), doc: yield* lib.loadDoc(ref.head_revision_id) }
+      }).pipe(query("GetRef")),
+
+    RefHistory: ({ userId, refId, limit }) =>
+      Effect.gen(function* () {
+        const ref = yield* lib.ownedRef(userId, refId)
+        const rows = yield* sql<{
+          id: string
+          parents: string
+          origin: Revision["origin"]
+          message: string | null
+          doc_hash: string
+          created_at: number
+        }>`
+          WITH RECURSIVE history(id, n) AS (
+            SELECT ${ref.head_revision_id}, 1
+            UNION ALL
+            SELECT json_extract(r.parents, '$[0]'), h.n + 1 FROM entity_revisions r JOIN history h ON r.id = h.id
+            WHERE json_extract(r.parents, '$[0]') IS NOT NULL AND h.n < ${limit}
+          )
+          SELECT r.id, r.parents, r.origin, r.message, r.doc_hash, r.created_at
+          FROM history h JOIN entity_revisions r ON r.id = h.id ORDER BY h.n`
+        return rows.map(
+          (row) =>
+            new Revision({
+              id: row.id as RevisionId,
+              parents: JSON.parse(row.parents) as Array<RevisionId>,
+              origin: row.origin,
+              message: row.message,
+              docHash: row.doc_hash,
+              createdAt: row.created_at
+            })
+        )
+      }).pipe(query("RefHistory")),
+
+    PreviewMerge: ({ userId, refId }) =>
+      Effect.gen(function* () {
+        const ref = yield* lib.ownedRef(userId, refId)
+        if (ref.follows_ref_id === null) {
+          return yield* new RefOperationRefused({
+            refId,
+            reason: "This ref doesn't follow another, so there's nothing to merge."
+          })
+        }
+        const plan = yield* lib.planMerge(ref)
+        return new MergePreview({
+          outcome: plan.outcome,
+          merged: plan.merged,
+          conflicts: plan.conflicts,
+          theirsRevisionId: plan.theirsHead as RevisionId
+        })
+      }).pipe(query("PreviewMerge")),
+
+    ListChatOverrides: ({ userId, chatId }) =>
+      Effect.gen(function* () {
+        yield* ownedChat(userId, chatId)
+        const rows = yield* lib.refsWhere("r.chat_id = ? AND e.owner_user_id = ?", [chatId, userId])
+        return rows.map(toLibraryRef)
+      }).pipe(query("ListChatOverrides")),
 
     CountTo: ({ n }) =>
       sql<{ n: number }>`

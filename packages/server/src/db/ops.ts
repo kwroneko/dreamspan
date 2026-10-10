@@ -7,6 +7,16 @@
 // NotFound, so their existence doesn't leak.
 import { Chat, ChatId, ChatKind, EntityId, NewVersion, PathEntry, SlotId, Version, VersionId } from "@rp/shared/chat.ts"
 import { User, UserId } from "@rp/shared/domain.ts"
+import {
+  Doc,
+  EntityKind,
+  LibraryRef,
+  MergeOutcome,
+  MergePreview,
+  RefId,
+  Revision,
+  RevisionId
+} from "@rp/shared/library.ts"
 import { StateEventData } from "@rp/shared/state.ts"
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
@@ -34,6 +44,23 @@ export class StaleWrite extends Schema.TaggedError<StaleWrite>()("StaleWrite", {
 
 /** The largest path window one GetPath returns. */
 export const MAX_PATH_WINDOW = 1000
+
+/** The operation doesn't apply to this kind of ref (e.g. forking a chat override). */
+export class RefOperationRefused extends Schema.TaggedError<RefOperationRefused>()("RefOperationRefused", {
+  refId: Schema.String,
+  reason: Schema.String
+}) {}
+
+export class FollowerMerge extends Schema.Class<FollowerMerge>("FollowerMerge")({
+  refId: RefId,
+  outcome: MergeOutcome
+}) {}
+
+/** A ref after a change, and what happened to every ref that follows it, transitively. */
+export class RefChange extends Schema.Class<RefChange>("RefChange")({
+  ref: LibraryRef,
+  followers: Schema.Array(FollowerMerge)
+}) {}
 
 export const StateEventOrigin = Schema.Literals(["user", "rollout", "changeset", "import"])
 
@@ -63,13 +90,107 @@ export class WriteOps extends RpcGroup.make(
   Rpc.make("CreateEntity", {
     payload: {
       userId: UserId,
-      kind: Schema.Literals(["card", "preset", "lorebook", "note", "preset_overlay"]),
+      kind: EntityKind,
       label: Schema.String,
-      doc: Schema.Unknown,
-      schemaVersion: Schema.Int
+      subtitle: Schema.String,
+      doc: Doc,
+      schemaVersion: Schema.Int,
+      origin: Schema.Literals(["user", "import"]),
+      sourcePath: Schema.NullOr(Schema.String)
     },
-    success: Schema.Struct({ entityId: EntityId, revisionId: Schema.String, refId: Schema.String }),
+    success: Schema.Struct({ entityId: EntityId, ref: LibraryRef }),
     error: StorageError
+  }),
+  /**
+   * Commits an edit to a ref: a new revision on top of its head (DATA-MODEL §3.2). Refs
+   * that follow it, transitively, merge the change in; their outcomes are returned.
+   */
+  Rpc.make("EditRef", {
+    payload: {
+      userId: UserId,
+      refId: RefId,
+      doc: Doc,
+      expectedRowVersion: Schema.Int,
+      message: Schema.NullOr(Schema.String)
+    },
+    success: RefChange,
+    error: Schema.Union([NotFound, StaleWrite, StorageError])
+  }),
+  /**
+   * Replaces an entity's tags. Tags are folders; the reserved tag "persona" is the
+   * persona folder (DESIGN §2.2).
+   */
+  Rpc.make("SetEntityTags", {
+    payload: { userId: UserId, entityId: EntityId, tags: Schema.Array(Schema.String) },
+    success: Schema.Array(Schema.String),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** Archives or restores an entity. Entities are never deleted. */
+  Rpc.make("SetEntityArchived", {
+    payload: { userId: UserId, entityId: EntityId, archived: Schema.Boolean },
+    success: Schema.Void,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** A new variant following `refId` (an upstream or another variant). */
+  Rpc.make("ForkRef", {
+    payload: { userId: UserId, refId: RefId, label: Schema.String, subtitle: Schema.String },
+    success: LibraryRef,
+    error: Schema.Union([NotFound, RefOperationRefused, StorageError])
+  }),
+  /** Changes for one chat only, following `refId` (DESIGN §4). */
+  Rpc.make("CreateChatOverride", {
+    payload: { userId: UserId, refId: RefId, chatId: ChatId },
+    success: LibraryRef,
+    error: Schema.Union([NotFound, RefOperationRefused, StorageError])
+  }),
+  /** Turns a chat override into a library variant (DESIGN §4). */
+  Rpc.make("PromoteOverride", {
+    payload: {
+      userId: UserId,
+      refId: RefId,
+      label: Schema.String,
+      subtitle: Schema.String,
+      expectedRowVersion: Schema.Int
+    },
+    success: LibraryRef,
+    error: Schema.Union([NotFound, StaleWrite, RefOperationRefused, StorageError])
+  }),
+  /**
+   * A new upstream version (a re-import). Every ref following it merges the change in,
+   * field by field with diff3 for text; conflicting ones are left as they were and
+   * report `conflicts` (DATA-MODEL §3.2).
+   */
+  Rpc.make("ImportUpstream", {
+    payload: {
+      userId: UserId,
+      refId: RefId,
+      doc: Doc,
+      sourcePath: Schema.NullOr(Schema.String),
+      sourceHash: Schema.NullOr(Schema.String)
+    },
+    success: RefChange,
+    error: Schema.Union([NotFound, RefOperationRefused, StorageError])
+  }),
+  /** Merges in what the ref follows, if it can be done without conflicts. */
+  Rpc.make("MergeFollowed", {
+    payload: { userId: UserId, refId: RefId },
+    success: Schema.Struct({ outcome: MergeOutcome, change: RefChange }),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * Commits a merge the user resolved by hand: `doc` merged with `theirsRevisionId`,
+   * which must still be the followed ref's head.
+   */
+  Rpc.make("ResolveMerge", {
+    payload: {
+      userId: UserId,
+      refId: RefId,
+      doc: Doc,
+      theirsRevisionId: RevisionId,
+      expectedRowVersion: Schema.Int
+    },
+    success: RefChange,
+    error: Schema.Union([NotFound, StaleWrite, RefOperationRefused, StorageError])
   }),
   /**
    * A chat starts pending (DESIGN §2.1) unless created active. Participants join at
@@ -169,6 +290,40 @@ export class ReadOps extends RpcGroup.make(
   Rpc.make("StateEventsAt", {
     payload: { userId: UserId, chatId: ChatId, slotId: Schema.NullOr(SlotId) },
     success: Schema.Array(FoldableStateEvent),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** The user's library of one kind: upstream refs and variants, not chat overrides. */
+  Rpc.make("ListLibrary", {
+    payload: {
+      userId: UserId,
+      kind: EntityKind,
+      /** Only entities with this tag, e.g. "persona" for the persona folder. */
+      tag: Schema.NullOr(Schema.String),
+      archived: Schema.Boolean
+    },
+    success: Schema.Array(LibraryRef),
+    error: StorageError
+  }),
+  Rpc.make("GetRef", {
+    payload: { userId: UserId, refId: RefId },
+    success: Schema.Struct({ ref: LibraryRef, doc: Doc }),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** The ref's revisions, newest first, following first parents. */
+  Rpc.make("RefHistory", {
+    payload: { userId: UserId, refId: RefId, limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 500 })) },
+    success: Schema.Array(Revision),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** What merging in the followed ref would produce, for the conflict resolver. */
+  Rpc.make("PreviewMerge", {
+    payload: { userId: UserId, refId: RefId },
+    success: MergePreview,
+    error: Schema.Union([NotFound, RefOperationRefused, StorageError])
+  }),
+  Rpc.make("ListChatOverrides", {
+    payload: { userId: UserId, chatId: ChatId },
+    success: Schema.Array(LibraryRef),
     error: Schema.Union([NotFound, StorageError])
   }),
   /** Diagnostic: a CPU-bound query of `n` steps that touches no table. Used by tests. */

@@ -2,7 +2,7 @@
 
 This document describes only what is implemented. Proposals live in `spec/`. When a spec is implemented, its content moves here in the same commit (CLAUDE.md "Design docs").
 
-**State**: Phase 0 (PLAN.md), 2026-10-10. Built: the scaffold, the full schema, and the message-graph operations. Not yet built: library operations beyond creating an entity, built-in login, the provider layer, and every chat feature.
+**State**: Phase 0 (PLAN.md), 2026-10-10. Built: the scaffold, the full schema, the message-graph operations and the library operations. Not yet built: drafts, built-in login, the provider layer, and every chat feature.
 
 ---
 
@@ -190,6 +190,60 @@ Contracts are in `db/ops.ts`, writes in `db/writes.ts` (writer worker), reads in
 **Known limits:**
 - **`StateEventsAt` walks the whole path to the root,** because state can come from any ancestor. It's linear in chat length: about 10 ms of SQL at 2,000 slots, roughly 180 ms at 20,000. Options before chats get that long: index branch segments so ancestry costs O(branches) instead of O(depth), or cache folded state at checkpoints as DATA-MODEL §5.2 proposes.
 - **Results cost about 0.1 ms per path entry** to encode and decode as Schema classes across the worker boundary, and the decode side runs on the main thread. If large windows show up in the event-loop budget, the transfer types should become plain structs.
+
+### 3.9 Library operations
+
+Layered, versioned documents (DESIGN §4, DATA-MODEL §3) for cards, presets, lorebooks, notes and preset overlays, one mechanism for all of them. Contracts are in `db/ops.ts`, writes in `db/libraryWrites.ts`, reads in `db/reads.ts`, and the logic both share in `db/library.ts`. Domain types are in `@rp/shared/library.ts`; the merge is in `@rp/shared/merge.ts`.
+
+**The model.**
+- **Revisions** are immutable snapshots with parents, like git commits.
+- **Refs** are movable pointers:
+  - an `upstream` ref is the base line (imported, or the original of something the user created)
+  - a `variant` follows another ref
+  - a `chat_override` follows a ref for one chat only
+- A ref that follows another records the revision it last merged from (`merge_base_revision_id`).
+- **"Update available"** is derived, not stored: the followed ref's head differs from the merge base.
+- Documents are any JSON object for now. Per-kind schemas arrive with the importers (PLAN phase 1).
+- A content hash over canonical JSON (sorted keys) means an edit or re-import that changes nothing creates no revision.
+
+**Operations.**
+- **Writes:**
+  - `CreateEntity`
+  - `EditRef`: a new revision on the head, with `expectedRowVersion`
+  - `ForkRef`: a new variant
+  - `CreateChatOverride`
+  - `PromoteOverride`: override to variant
+  - `ImportUpstream`: a new upstream revision
+  - `MergeFollowed`
+  - `ResolveMerge`: commit a hand-resolved merge, refused if the followed ref moved again since the preview
+  - `SetEntityTags`: folders; `persona` is the persona folder
+  - `SetEntityArchived`
+- **Reads:**
+  - `ListLibrary`: by kind, tag and archive state; chat overrides excluded
+  - `GetRef`
+  - `RefHistory`: first-parent chain
+  - `PreviewMerge`: the resolver's view
+  - `ListChatOverrides`
+- **Ownership** is enforced as in §3.8.
+
+**Changes flow to followers.** After any change to a ref (an edit, an import, a merge), every ref following it is merged in turn, transitively: upstream, then variants, then the chat overrides that follow those. Each follower ends as one of:
+- **fast-forward:** it had no edits of its own since the last merge, so it simply moves to the new revision, with no merge revision
+- **merged:** a merge revision with two parents
+- **conflicts:** left exactly as it was, with "update available" set until the user resolves it
+
+The outcomes are returned, so the UI can report what happened.
+
+**Three-way merge** (`merge3`, shared so the server's merge and the resolver's preview always agree):
+- Objects merge per key.
+- **Arrays merge per element when every element has a unique `id`, `identifier` or `uid`.** That covers preset prompts and order, card modules and lorebook entries, so additions on either side survive and deletions apply unless the other side edited the element (then it's a conflict). Order follows ours, with theirs' new elements placed after their predecessor in theirs.
+- Other arrays are atomic.
+- **Text changed on both sides merges word by word** with diff3 (`node-diff3`), keeping whitespace. Edits to different sentences of the same prompt combine; overlapping edits conflict. A conflict keeps ours in the merged value and is reported with its path, e.g. `["prompts", "identifier=main", "content"]`.
+- `test/library.test.ts` and `packages/shared/test/merge.test.ts` run the owner's case from DESIGN §4 end to end: a softened impersonation rule and an added `{{summary}}` prompt survive an upstream re-import that rewrote another sentence of the same prompt, changed a sampler and added a prompt.
+
+**Known limits:**
+- Reordering on both sides isn't detected as a conflict (ours wins).
+- Arrays without element identities, like a card's `alternate_greetings` or `tags`, are atomic: changing them on both sides is a conflict.
+- Not built yet: export (flattening a ref to a V2/V3 card), library search, and "used by N chats".
 
 ---
 
