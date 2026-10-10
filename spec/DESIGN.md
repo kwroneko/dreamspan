@@ -435,7 +435,8 @@ These are strategies for mapping history to user and assistant roles:
   - the Rust LLM crates either own their loop and change often (rig) or are chat-only clients (genai)
   - hot-loading plugins written by an agent is far easier in TS
   - one language lets the macro engine and preset parser run in both browser and server
-- **[P]** pi-agent-core and pi-ai 1.x (Pi reached 1.0 on 2026-10-01), as in reference-harness, which is on 0.84.2 with a pi-ai patch. Pi's experimental durable-execution package isn't needed: surviving a disconnect only requires running the loop on the server.
+- **[D]** The provider layer is pi-ai 1.x (owner, 2026-10-10).
+- **[P]** pi-agent-core 1.x for the agent loop, with pi-ai underneath (Pi reached 1.0 on 2026-10-01), as in reference-harness, which is on 0.84.2 with a pi-ai patch. Pi's experimental durable-execution package isn't needed: surviving a disconnect only requires running the loop on the server.
 - **[D]** Not building on DSH as the host:
   - it's about two months old, with weekly breaking alphas
   - its rule that "model-visible means logged" and its core-service context assembly conflict with separating the timeline from rollouts
