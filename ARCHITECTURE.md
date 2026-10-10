@@ -460,6 +460,13 @@ It fails with a typed `ProviderError`.
 - **Every attempt is a ledger row** (§3.12), opened before sending and closed whatever happens. A stopped stream aborts the HTTP request and closes its row as `aborted`.
 - **Google:** pi-ai's adapter rejects a custom `fetch`, so a Google connection whose route is a proxy is refused as `unusable` rather than silently going direct.
 
+**Explicit cache breakpoints** (`breakpoints.ts`, PROVIDERS §8), for Anthropic Messages so far:
+- **The caller names positions:** `options.breakpoints` lists indices into the request's `context.messages`, most important first.
+- **The `onPayload` step finds their wire messages by alignment, not by index.** It walks the transcript and the payload in order and matches by role and text. pi-ai drops empty user messages, merges consecutive tool results and may append mid-conversation system messages, so positions shift.
+- **The marker** goes on each message's last cacheable block (never a thinking block). It reuses pi-ai's own `cache_control` value, so TTLs match.
+- **Limits:** nothing is added when pi placed no marker (caching off), and the total stays within Anthropic's four.
+- **pi-ai's own markers stay:** the system prompt, the last tool, the last message.
+
 **Usage and cost** (`usage.ts`):
 - **Counts:** pi-ai's normalized usage (uncached input, cache reads, cache writes with Anthropic's 1-hour subset, output, reasoning) when the provider reported usage.
   - The provider's raw usage object is kept with it. OpenRouter's reported cost and routed upstream are read from it.
@@ -475,6 +482,7 @@ It fails with a typed `ProviderError`.
 - a mid-stream failure kept and not retried, a 401 not retried
 - stopping, a missing key, Google behind a proxy
 - Anthropic's cache split and catalog pricing
+- explicit breakpoints through pi-ai's real Anthropic conversion
 - DeepSeek's dialect
 - a keyless local server
 

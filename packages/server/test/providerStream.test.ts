@@ -13,6 +13,7 @@ import * as Database from "../src/db/Database.ts"
 import * as Network from "../src/net/Network.ts"
 import { classify, parseRetryAfter } from "../src/providers/errors.ts"
 import * as Providers from "../src/providers/Providers.ts"
+import { alignTranscript } from "../src/providers/breakpoints.ts"
 import { priceCost } from "../src/providers/usage.ts"
 import { makeSecrets, Secrets } from "../src/secrets.ts"
 import { anthropicSse, completionChunks, json, sse, startMockProvider } from "./support/mockProvider.ts"
@@ -520,6 +521,170 @@ describe("provider quirks", () => {
       assert.strictEqual(events.at(-1)!.type, "done")
     }).pipe(Effect.scoped, Effect.provide(layer()))
   )
+})
+
+describe("explicit cache breakpoints", () => {
+  const anthropicReply = (res: Parameters<typeof anthropicSse>[0]) =>
+    anthropicSse(res, [
+      {
+        type: "message_start",
+        message: {
+          id: "msg_2",
+          type: "message",
+          role: "assistant",
+          model: "claude-sonnet-5-5",
+          content: [],
+          stop_reason: null,
+          usage: { input_tokens: 5, output_tokens: 1 }
+        }
+      },
+      { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+      { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Yes." } },
+      { type: "content_block_stop", index: 0 },
+      { type: "message_delta", delta: { stop_reason: "end_turn", stop_sequence: null }, usage: { output_tokens: 2 } },
+      { type: "message_stop" }
+    ])
+
+  const story: PiContext = {
+    systemPrompt: "You are the narrator.",
+    messages: [
+      { role: "user", content: "<summary>Chapters one to nine.</summary>", timestamp: 1 },
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "The story so far is noted." }],
+        api: "anthropic-messages",
+        provider: "anthropic",
+        model: "claude-sonnet-5-5",
+        usage: {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0,
+          totalTokens: 0,
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
+        },
+        stopReason: "stop",
+        timestamp: 2
+      },
+      // pi-ai drops an empty message, so wire positions shift after it.
+      { role: "user", content: "   ", timestamp: 3 },
+      { role: "user", content: "The harbor at dusk.", timestamp: 4 }
+    ]
+  }
+
+  const markersIn = (body: Record<string, unknown>) => JSON.stringify(body).split('"cache_control"').length - 1
+
+  it.live("lands on the wire messages the caller named, within Anthropic's limit, with pi's TTL", () =>
+    Effect.gen(function* () {
+      const server = yield* mock((request, res) =>
+        request.path.startsWith("/v1/models")
+          ? json(res, 200, { data: [{ id: "claude-sonnet-5-5" }], has_more: false })
+          : anthropicReply(res)
+      )
+      const { userId, connection, modelId, providers } = yield* connect(
+        "anthropic",
+        server.url,
+        "k",
+        "claude-sonnet-5-5"
+      )
+      const send = (breakpoints: ReadonlyArray<number>, cacheRetention?: "none" | "long") =>
+        collect(
+          providers.stream({
+            userId,
+            connectionId: connection.id,
+            modelId,
+            context: story,
+            options: { breakpoints, ...(cacheRetention ? { cacheRetention } : {}) },
+            attribution: { purpose: "generation" }
+          })
+        )
+      const bodies = () =>
+        server
+          .requests()
+          .filter((r) => r.path.startsWith("/v1/messages"))
+          .map((r) => r.body!)
+
+      yield* send([0, 1, 3], "long")
+      const body = bodies().at(-1)!
+      const messages = body.messages as Array<{ role: string; content: Array<Record<string, unknown>> | string }>
+      // The whitespace-only message is gone; pi may append a mid-conversation system message.
+      assert.deepStrictEqual(
+        messages.filter((m) => m.role !== "system").map((m) => m.role),
+        ["user", "assistant", "user"]
+      )
+      const markerOf = (i: number) => {
+        const content = messages[i]!.content
+        return Array.isArray(content) ? content.at(-1)!.cache_control : undefined
+      }
+      // The summary and the reply after it got ours; the last message has pi's.
+      assert.deepStrictEqual(markerOf(0), markerOf(2))
+      assert.deepStrictEqual(markerOf(1), markerOf(2))
+      assert.include(JSON.stringify(markerOf(0)), "1h")
+      assert.isAtMost(markersIn(body), 4)
+
+      // With caching off pi places no markers, and neither do we.
+      yield* send([0, 1], "none")
+      assert.strictEqual(markersIn(bodies().at(-1)!), 0)
+    }).pipe(Effect.scoped, Effect.provide(layer()))
+  )
+
+  it("aligns merged tool results and dropped messages", () => {
+    const usage = {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 0,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
+    }
+    const transcript = [
+      { role: "user", content: "Look around.", timestamp: 1 },
+      {
+        role: "assistant",
+        content: [
+          { type: "toolCall", id: "a", name: "look", arguments: {} },
+          { type: "toolCall", id: "b", name: "listen", arguments: {} }
+        ],
+        api: "anthropic-messages",
+        provider: "anthropic",
+        model: "m",
+        usage,
+        stopReason: "toolUse",
+        timestamp: 2
+      },
+      {
+        role: "toolResult",
+        toolCallId: "a",
+        toolName: "look",
+        content: [{ type: "text", text: "Fog." }],
+        isError: false,
+        timestamp: 3
+      },
+      {
+        role: "toolResult",
+        toolCallId: "b",
+        toolName: "listen",
+        content: [{ type: "text", text: "Bells." }],
+        isError: false,
+        timestamp: 4
+      },
+      { role: "user", content: "", timestamp: 5 },
+      { role: "user", content: "Go on.", timestamp: 6 }
+    ] as const
+    const wire = [
+      { role: "user", content: "Look around." },
+      { role: "assistant", content: [{ type: "tool_use" }, { type: "tool_use" }] },
+      {
+        role: "user",
+        content: [
+          { type: "tool_result", content: [{ type: "text", text: "Fog." }] },
+          { type: "tool_result", content: [{ type: "text", text: "Bells." }] }
+        ]
+      },
+      { role: "user", content: "Go on." }
+    ]
+    assert.deepStrictEqual(alignTranscript(transcript as never, wire), [0, 1, 2, 2, null, 3])
+  })
 })
 
 describe("pure pieces", () => {

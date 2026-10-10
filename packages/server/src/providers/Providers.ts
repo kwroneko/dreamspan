@@ -39,6 +39,7 @@ import { Reader, Writer } from "../db/Database.ts"
 import { Network, type ProxyOverride } from "../net/Network.ts"
 import { describeRoute, proxyUrlProblem } from "../net/route.ts"
 import { Secrets } from "../secrets.ts"
+import { applyAnthropicBreakpoints } from "./breakpoints.ts"
 import { catalogEntry } from "./catalog.ts"
 import { classify, parseRetryAfter, ProviderError, providerError, RETRYABLE } from "./errors.ts"
 import { fetchModelList, type ModelListError } from "./modelLists.ts"
@@ -76,6 +77,11 @@ export interface StreamRequest {
     readonly sampling?: Readonly<Record<string, unknown>>
     readonly sessionId?: string
     readonly cacheRetention?: "none" | "short" | "long"
+    /**
+     * Explicit cache breakpoints (PROVIDERS §8): indices into `context.messages`, most
+     * important first. Applied for Anthropic Messages; pi-ai's own markers stay.
+     */
+    readonly breakpoints?: ReadonlyArray<number>
   }
   readonly attribution: {
     readonly purpose: RequestPurpose
@@ -474,7 +480,19 @@ export const layer = (policy: RetryPolicy = defaultRetryPolicy) =>
                   state.status = response.status
                   state.retryAfterMs = parseRetryAfter(response.headers["retry-after"])
                 },
-                onProviderStreamEvent: (data) => captureEvent(prepared.api, data, state.capture)
+                onProviderStreamEvent: (data) => captureEvent(prepared.api, data, state.capture),
+                ...(prepared.api === "anthropic-messages" && options.breakpoints?.length
+                  ? {
+                      onPayload: (payload: unknown) => {
+                        applyAnthropicBreakpoints(
+                          payload as Record<string, unknown>,
+                          request.context.messages,
+                          options.breakpoints!
+                        )
+                        return payload
+                      }
+                    }
+                  : {})
               })
               for await (const event of events) {
                 if ("partial" in event) state.partial = event.partial
