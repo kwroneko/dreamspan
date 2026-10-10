@@ -2,7 +2,7 @@
 
 This document describes only what is implemented. Proposals live in `spec/`. When a spec is implemented, its content moves here in the same commit (CLAUDE.md "Design docs").
 
-**State**: Phase 0 scaffold (PLAN.md), 2026-10-10. Not yet built: the data model beyond users (DATA-MODEL.md), built-in login, the provider layer, and every chat feature.
+**State**: Phase 0 (PLAN.md), 2026-10-10. Built: the scaffold, the full schema, and the message-graph operations. Not yet built: library operations beyond creating an entity, built-in login, the provider layer, and every chat feature.
 
 ---
 
@@ -122,7 +122,74 @@ Measured whole-server memory with the main thread, the writer and 2 readers: abo
 
 ### 3.7 Schema
 
-Migrations (`migrations.ts`) run in the writer through Effect's `SqliteMigrator`. So far there's only `users`. The full data model (DATA-MODEL.md) is the next phase-0 step. Tables use `STRICT`. Ids are UUIDv7 (`@rp/shared/id.ts`), so `ORDER BY id` follows creation order.
+Migrations (`migrations.ts`) run in the writer through Effect's `SqliteMigrator`. The DDL lives in `db/schema/` as lists of statements, because `node:sqlite` prepares one statement at a time:
+- `0001_users`
+- `0002_data_model`: every table in DATA-MODEL.md
+  - library: `entities`, `entity_revisions`, `entity_refs`, `entity_tags`
+  - message graph: `chats`, `lanes`, `slots`, `slot_parents`, `versions`, `version_history`, `version_attachments`
+  - `state_events`
+  - rollouts: `rollouts`, `rollout_payloads`, `rollout_branches`
+  - summaries: `summaries`, `summary_revisions`, `summary_inputs`, `summary_parents`, `summarization_jobs`
+  - `changesets`, `changeset_items`
+  - per-user data: `drafts`, `user_prefs`, `user_settings`, `app_settings`
+  - `connections`, `models`
+  - `media_assets`, `media_refs`
+  - `jobs`
+
+Conventions:
+- **Tables:** all `STRICT`, with JSON columns guarded by `json_valid` CHECKs and timestamps in epoch milliseconds.
+- **Ids:** UUIDv7 (`@rp/shared/id.ts`), so `ORDER BY id` follows creation order.
+- **Concurrency:** mutable rows carry `row_version` for optimistic concurrency.
+- **Mutual references** (`slots.selected_version_id` ↔ `versions.slot_id`, a summary ↔ its selected revision) use deferred foreign keys. The version row is inserted first, then the slot, in one transaction.
+
+**Invariants enforced by the database** (`schema/integrity.ts`). No code path can break these, and `test/schema.test.ts` checks each one on a bare connection:
+- **Nothing is ever lost.**
+  - Model-written versions are frozen once they stop generating.
+  - Amending a user-written version copies the previous content into `version_history` automatically.
+  - Entity revisions and summary revisions are immutable.
+  - A rollout's context snapshot is frozen once written.
+  - State events can only be superseded, not changed.
+  - Hard deletes are refused for users, entities, entity revisions, and every chat-scoped row in a live chat. Only pending chats can be deleted, which cascades.
+- **The graph is append-only.**
+  - A slot's parent is in the same chat, one level up.
+  - A slot never moves.
+  - A version's slot, writer and origin never change.
+- **References stay inside their chat.**
+  - A slot selects only its own versions, which is what invariant 3 rests on.
+  - A chat's active leaf is one of its slots.
+  - A state event's slot is in its chat, and its version is in that slot.
+  - A summary selects only its own revisions.
+
+**Full-text search** (`schema/search.ts`). FTS5 external-content indexes cover `versions.content`, `summary_revisions.content` and `entity_revisions.search_text`, using `unicode61` with diacritic folding and prefix indexes, and triggers keep them in sync.
+- Each indexed table has an `INTEGER PRIMARY KEY seq` (a rowid alias) next to its public `id`. That's because `VACUUM` can renumber the implicit rowids of TEXT-keyed tables, which would silently corrupt an external-content index.
+- Versions are indexed only once they stop generating, so streaming doesn't churn the index.
+
+### 3.8 Message graph operations
+
+Contracts are in `db/ops.ts`, writes in `db/writes.ts` (writer worker), reads in `db/reads.ts` (readers). Domain types are in `@rp/shared/chat.ts`; state-event keys and the fold are in `@rp/shared/state.ts`.
+
+- **Writes:**
+  - `CreateEntity`: entity, first revision and base ref. Minimal until the library work.
+  - `CreateChat`: pending or active, with participants joined at the initial position and an optional greeting as the root slot.
+  - `AppendMessage`: a new slot under any slot, becoming the active leaf; appending under a slot that has children is a branch. The first message turns a pending chat active.
+  - `AddVersion`: swipe, edit, or write your own, optionally selected.
+  - `SelectVersion`: with `expectedRowVersion`, failing as `StaleWrite` for a stale tab.
+  - `AddStateEvent`: at a position, optionally attached to a version.
+- **Reads:**
+  - `GetChat`
+  - `GetPath`: a window, below.
+  - `ListVersions`
+  - `StateEventsAt`: the events that apply at a slot, in fold order. Version-attached events count only while their version is selected.
+- **Ownership.** Every operation takes the acting user and touches only that user's rows. Anything else is `NotFound`, so another user's data isn't even confirmed to exist. That includes using someone else's card as a speaker or participant.
+- **State events are typed.** `StateEventData` is a Schema union of the keys in DATA-MODEL §5.3, so an unknown key or malformed value is rejected when the RPC payload is decoded, before it reaches the database. `foldState` is a pure function shared by server and client.
+- **Paths are read in windows.** `GetPath` walks up from a leaf and stops after `limit` slots (at most 1000), so its cost depends on the window, not the chat's length. Older history comes from the window ending at the earliest entry's parent.
+  - Measured on a 2,001-slot chat: a 200-slot window takes about 22 ms end to end, and paging back reconstructs the whole path without gaps (`test/graph.test.ts`).
+  - Reading all 2,001 slots in one call took 113 ms, of which the SQL was 13 ms; at 20,000 slots the SQL alone is about 180 ms. Hence the windows.
+- **Append cost.** About 2.6 ms per message end to end, including the RPC hop and a commit with a full flush (`synchronous = FULL`, ZFS).
+
+**Known limits:**
+- **`StateEventsAt` walks the whole path to the root,** because state can come from any ancestor. It's linear in chat length: about 10 ms of SQL at 2,000 slots, roughly 180 ms at 20,000. Options before chats get that long: index branch segments so ancestry costs O(branches) instead of O(depth), or cache folded state at checkpoints as DATA-MODEL §5.2 proposes.
+- **Results cost about 0.1 ms per path entry** to encode and decode as Schema classes across the worker boundary, and the decode side runs on the main thread. If large windows show up in the event-loop budget, the transfer types should become plain structs.
 
 ---
 

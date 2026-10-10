@@ -3,7 +3,7 @@
 **Status**: Draft, 2026-10-09. The phases are ordered so the owner can **replace ST for daily use as early as possible**, then gain LCM, then agentic features. The data model is designed in full in phase 0, even where the UI comes later. Retrofitting the graph, versions, layers or state events would be far more expensive than building them in from the start.
 
 ## Phase 0: Foundations
-**Progress (2026-10-10):** the scaffold is done (ARCHITECTURE.md): repo, tooling, CI, Docker image, server skeleton with typed RPC over a WebSocket, the database worker architecture, and proxy/single-user auth. Client framework decided (React), server framework implemented on Effect's HTTP server. Remaining: the full data model and schema, built-in login, the provider layer, the Cordis evaluation, and the performance harness.
+**Progress (2026-10-10):** the scaffold is done (ARCHITECTURE.md): repo, tooling, CI, Docker image, server skeleton with typed RPC over a WebSocket, the database worker architecture, and proxy/single-user auth. Client framework decided (React), server framework implemented on Effect's HTTP server. The full schema with database-enforced invariants and the message-graph operations followed. Remaining: library operations (variants, overrides, merges), drafts, built-in login, the provider layer, the Cordis evaluation, and the performance harness.
 
 - ~~Repo, tooling, CI, Docker image. Node LTS, TypeScript ESM.~~ Done.
 - Settle the open stack questions: ~~client framework~~ (React), ~~server framework~~ (Effect HTTP), a time-boxed Cordis evaluation.

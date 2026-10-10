@@ -1,6 +1,13 @@
 # Data model
 
-**Status**: Draft, 2026-10-09. Phase 0 deliverable (see PLAN.md). Everything here is **[P] Proposed** unless marked otherwise. Section references like "DESIGN §3.1" point to [DESIGN.md](DESIGN.md).
+**Status**: Partially implemented, 2026-10-10. The schema (every table below) and the message-graph operations are implemented and documented in ARCHITECTURE.md §3.7–§3.8. Not yet implemented: library operations beyond creating an entity (variants, overrides, merges, export), changeset application and revert, drafts, summaries and jobs logic, and the ST import mapping (§14). Implementation deltas from this draft:
+- `rollouts.version_ids` is derived from `versions.rollout_id` instead of stored (principle 2).
+- FTS-indexed tables have an integer `seq` rowid alias.
+- Invariants are enforced by database triggers.
+- `GetPath` returns windows (§4.4).
+- `summary_revisions` has `token_count`, and `media_assets` has `byte_size`.
+
+Original status: Draft, 2026-10-09. Phase 0 deliverable (see PLAN.md). Everything here is **[P] Proposed** unless marked otherwise. Section references like "DESIGN §3.1" point to [DESIGN.md](DESIGN.md).
 
 **Baseline**: reference-harness's storage layer (`src/storage/database.ts`). We reuse its patterns:
 - `agent_sessions` with a separate `agent_session_payloads` blob table holding the frozen context snapshot and transcript
@@ -162,7 +169,7 @@ How the structure maps to concepts:
 - **A merge** is a slot with parents from several lanes, placed in the target lane.
 
 ### 4.4 Paths
-A **path** is the sequence of slots from the root to a leaf, following `parent_slot_id`. Every view, URL and context build works on a path: `/chat/<id>?leaf=<slot>`, defaulting to `active_leaf_slot_id`. It's computed with a recursive CTE over `parent_slot_id` and cached in memory per leaf. Chats with tens of thousands of messages are fine in-process.
+A **path** is the sequence of slots from the root to a leaf, following `parent_slot_id`. Every view, URL and context build works on a path: `/chat/<id>?leaf=<slot>`, defaulting to `active_leaf_slot_id`. It's computed with a recursive CTE over `parent_slot_id`. **Implemented as windows** (2026-10-10): reading a whole long path costs time linear in its length (about 180 ms of SQL at 20,000 slots), so `GetPath` returns at most `limit` slots ending at a leaf, and older history is paged in (ARCHITECTURE.md §3.8).
 
 At a **merge slot**, the path covers both incoming lanes. How they're turned into one sequence is still open (DESIGN §3.3); the data model allows either interleaving by time or a merge-summary block.
 
@@ -425,6 +432,7 @@ Linking chats to cards uses ST's folder name, falling back to the card name, the
 ---
 
 ## 16. Open questions
+0. **[O]** How `StateEventsAt` scales: it walks the path to the root, linear in chat length. Options: branch-segment ancestry, or checkpointed fold caches (§5.2). See ARCHITECTURE.md §3.8 "Known limits".
 1. How a merge is turned into one sequence (interleaving vs. a merge-summary block). **Deferred** (owner: doesn't matter now). The schema allows either.
 2. ~~Whether user-typed text defaults to `template` or `verbatim`.~~ **Resolved: `verbatim`** (owner, 2026-10-09).
 3. ~~ST's per-character prompt order.~~ **Resolved:** not needed. One order per preset (owner, 2026-10-09).
