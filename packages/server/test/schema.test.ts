@@ -237,6 +237,30 @@ describe("nothing is ever lost (invariant 1)", () => {
   })
 })
 
+describe("draft cleanup", () => {
+  it("removes the drafts of a garbage-collected pending chat", () => {
+    const owner = user()
+    const pending = chat(owner, "pending")
+    const greeting = slot(pending, null, { content: "Hello." })
+    const draft = (kind: string, target: string) =>
+      run(
+        `INSERT INTO drafts (id, user_id, target_kind, target_id, field, content, updated_at) VALUES (?, ?, ?, ?, '', 'text', 1)`,
+        id("d"),
+        owner,
+        kind,
+        target
+      )
+    draft("composer", pending.chatId)
+    draft("scratchpad", greeting.slotId)
+    draft("version_edit", greeting.versionId)
+    run(`INSERT INTO draft_history (draft_id, seq, kind, first_at, at, start, removed, inserted)
+         SELECT id, 1, 'edit', 1, 1, 0, '', 'text' FROM drafts`)
+    run(`DELETE FROM chats WHERE id = ?`, pending.chatId)
+    expect(get<{ n: number }>(`SELECT count(*) AS n FROM drafts`).n).toBe(0)
+    expect(get<{ n: number }>(`SELECT count(*) AS n FROM draft_history`).n).toBe(0)
+  })
+})
+
 describe("state events", () => {
   it("must sit on a slot of their chat, with a version of that slot", () => {
     const owner = user()

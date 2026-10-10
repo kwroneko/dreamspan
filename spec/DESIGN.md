@@ -258,6 +258,7 @@ These are strategies for mapping history to user and assistant roles:
 - **[D]** In ST, some fields autosave, some have save buttons, and preset field edits lived in limbo: they survived restarts but vanished on a preset switch.
 - **[D] Principle:** nothing is ever lost, and it's always clear which state you're in. (The earlier "autosave everything, no commits" proposal was rejected because it doesn't work for creating versions.)
 - **[D]** Drafts and field-level undo history are **persisted on the server** for every text field. That protects against Ctrl-A plus a stray key and survives refreshes, closing the tab and switching devices.
+- **[D]** The undo history only lives while a draft is being written. A commit ends it: the committed text is preserved in a version or revision, and history tables must not grow indefinitely (owner, 2026-10-10). **[P]** The one exception is the text from just before a destructive change in the session, kept through the commit so a wipe-then-send can be undone; a discard keeps the discarded text the same way.
 - **[P]** Creating versions or named revisions needs an explicit commit, and a commit is a clear action.
 - **[P]** Every write carries the revision it was based on, so a stale tab can never silently overwrite newer state.
 - **[D]** Search, and search and replace, everywhere: preset prompts, cards and chats.

@@ -9,7 +9,7 @@
 - A follower with no edits of its own since its last merge fast-forwards to the new revision instead of getting a merge revision.
 - "Update available, conflicts" is derived (followed head ≠ merge base), not stored.
 - Text merges word by word, so edits to different sentences of one prompt combine.
-- Drafts: `undo_log` became the `draft_history` table, with one reversible patch per entry. Drafts gained `status` (active, committed, discarded) and `created_at`, and writes can commit their draft atomically.
+- Drafts: `undo_log` became the `draft_history` table, with one reversible patch per entry. Drafts gained `status` (active, committed, discarded), `created_at` and a single `recovery_text`, and writes can commit their draft atomically. A commit or discard deletes the history (owner, 2026-10-10).
 
 Original status: Draft, 2026-10-09. Phase 0 deliverable (see PLAN.md). Everything here is **[P] Proposed** unless marked otherwise. Section references like "DESIGN §3.1" point to [DESIGN.md](DESIGN.md).
 

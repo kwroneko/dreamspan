@@ -271,10 +271,15 @@ The first save checks that the target belongs to the user. Drafts are never visi
 - `RestoreDraftState` moves the draft back to that state, and records the restore as its own entry, so it can be undone too.
 - At most 1000 entries and 1,000,000 changed characters are kept per draft, oldest dropped first.
 
-**Committing.** `AppendMessage`, `AddVersion` and `EditRef` take an optional `commitDraft` (key plus the row version the client sent from) and mark that draft committed **in the same transaction**, so a reload never shows already-sent text in the composer. If the draft moved on since (another tab kept typing), it stays active with the newer text, and the write returns it. `ClearDraft` marks a draft committed or discarded explicitly.
-- A draft's text and history are kept after it's committed or discarded.
-- The next save reopens it, and history continues across the commit.
-- `ListActiveDrafts` lists unsent drafts.
+**Committing.** `AppendMessage`, `AddVersion` and `EditRef` take an optional `commitDraft` (key plus the row version the client sent from) and commit that draft **in the same transaction**, so a reload never shows already-sent text in the composer. If the draft moved on since (another tab kept typing), it stays active with the newer text, and the write returns it. `ClearDraft` commits or discards a draft explicitly.
+
+**History only lives while a draft is being written** (owner, 2026-10-10). Once committed, the text is preserved in a version or revision, so a commit or discard deletes the draft's history and empties its text. The row stays, so other tabs' row versions keep working. What a commit would otherwise lose is kept in `recovery`, one text per draft, replaced at the next commit or discard:
+- **On commit:** the text from just before the session's newest destructive change, if there was one. That's the wipe-then-send case.
+- **On discard:** the discarded text.
+
+Edits of existing content need no recovery: their previous version or revision is immutable. The next save after a commit starts a fresh session. `ListActiveDrafts` lists drafts with unsent text.
+
+**Cleanup.** Draft targets aren't foreign keys, since one column points into several tables. Triggers delete a draft when its target is deleted, which happens only when a pending chat is garbage-collected (`test/schema.test.ts`).
 
 **Not built yet:** pushing a draft change to the user's other open tabs and devices. That needs the subscription channel; until then, the row version catches the conflict when the other tab saves.
 

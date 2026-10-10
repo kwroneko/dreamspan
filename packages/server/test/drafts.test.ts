@@ -3,7 +3,7 @@ import { mkdtempSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { assert, describe, it } from "@effect/vitest"
-import { NewVersion } from "@rp/shared/chat.ts"
+import { NewVersion, type SlotId } from "@rp/shared/chat.ts"
 import { DraftKey } from "@rp/shared/drafts.ts"
 import { Effect } from "effect"
 import * as Database from "../src/db/Database.ts"
@@ -135,14 +135,19 @@ describe("drafts", () => {
         version: say(saved.content),
         commitDraft: { key: composer, expectedRowVersion: saved.rowVersion }
       })
+      // The committed text lives in the message now: the draft is emptied and its
+      // history deleted. Nothing destructive happened, so there's nothing to recover.
       assert.strictEqual(sent.draft?.status, "committed")
+      assert.strictEqual(sent.draft?.content, "")
+      assert.strictEqual(sent.draft?.historyLength, 0)
+      assert.isNull(sent.draft?.recovery)
       sync(sent.draft)
       assert.deepStrictEqual(yield* reader.ListActiveDrafts({ userId }), [])
 
-      // Typing again reopens the draft, and its history carries on.
+      // Typing again starts a new session with a fresh history.
       const reopened = yield* type("And then?")
       assert.strictEqual(reopened.status, "active")
-      assert.isAbove(reopened.historyLength, 0)
+      assert.strictEqual(reopened.historyLength, 1)
 
       // Another tab kept typing after this one sent: the newer text stays as a draft.
       const sentFrom = reopened.rowVersion
@@ -156,6 +161,65 @@ describe("drafts", () => {
       })
       assert.strictEqual(second.draft?.status, "active")
       assert.strictEqual(second.draft?.content, "And then? Tell me more.")
+    }).pipe(Effect.provide(database()))
+  )
+
+  it.live("a wipe followed by a send leaves the wiped text recoverable, until the next commit", () =>
+    Effect.gen(function* () {
+      const { writer, userId, chat, composer, type, sync } = yield* setup()
+      const me = yield* writer.CreateEntity({
+        userId,
+        kind: "card",
+        label: "Me",
+        subtitle: "",
+        doc: { name: "Me" },
+        schemaVersion: 1,
+        origin: "user",
+        sourcePath: null
+      })
+      const send = (content: string, rowVersion: number, parentSlotId: SlotId | null) =>
+        writer.AppendMessage({
+          userId,
+          chatId: chat.id,
+          parentSlotId,
+          version: new NewVersion({
+            speakerEntityId: me.entityId,
+            writer: "human",
+            content,
+            status: "complete",
+            macroMode: "verbatim",
+            origin: "user_written"
+          }),
+          commitDraft: { key: composer, expectedRowVersion: rowVersion }
+        })
+
+      const long = "A long reply the user spent a while on, about the lighthouse and the storm."
+      yield* type(long)
+      const wiped = yield* type("x") // select-all plus a stray key...
+      const first = yield* send("x", wiped.rowVersion, null) // ...then Enter
+      assert.strictEqual(first.draft?.recovery?.content, long)
+      assert.strictEqual(first.draft?.historyLength, 0)
+      sync(first.draft)
+
+      // An ordinary next message replaces the recovery.
+      const next = yield* type("Sorry, that was a slip.")
+      const second = yield* send(next.content, next.rowVersion, first.slotId)
+      assert.isNull(second.draft?.recovery)
+    }).pipe(Effect.provide(database()))
+  )
+
+  it.live("discarding keeps the discarded text as the recovery", () =>
+    Effect.gen(function* () {
+      const { writer, userId, composer, type } = yield* setup()
+      const draft = yield* type("Second thoughts.")
+      const discarded = yield* writer.ClearDraft({
+        userId,
+        key: composer,
+        outcome: "discarded",
+        expectedRowVersion: draft.rowVersion
+      })
+      assert.strictEqual(discarded.content, "")
+      assert.strictEqual(discarded.recovery?.content, "Second thoughts.")
     }).pipe(Effect.provide(database()))
   )
 
