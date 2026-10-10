@@ -2,6 +2,7 @@
 // is routed through the instance proxy, a connection's own proxy, or direct, and the
 // route taken is reported, never silent. ESLint forbids `fetch` and `undici` elsewhere.
 import { lookup } from "node:dns/promises"
+import { InvalidNetworkSettings } from "@rp/shared/api.ts"
 import { Context, Effect, Layer, Ref, Schema } from "effect"
 import { Agent, type Dispatcher, ProxyAgent, Socks5ProxyAgent, fetch as undiciFetch } from "undici"
 import { Reader, Writer } from "../db/Database.ts"
@@ -18,6 +19,7 @@ import {
 } from "./route.ts"
 
 export type { ProxyOverride, Route } from "./route.ts"
+export { InvalidNetworkSettings }
 
 const SETTING_KEY = "network"
 const PROXY_BINDING = "app:network:proxy_url"
@@ -33,10 +35,6 @@ export interface NetworkView {
   readonly proxy: string | null
   readonly bypass: ReadonlyArray<string>
 }
-
-export class InvalidNetworkSettings extends Schema.TaggedError<InvalidNetworkSettings>()("InvalidNetworkSettings", {
-  problems: Schema.Array(Schema.String)
-}) {}
 
 export interface NetworkShape {
   /**

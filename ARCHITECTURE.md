@@ -2,7 +2,7 @@
 
 This document describes only what is implemented. Proposals live in `spec/`. When a spec is implemented, its content moves here in the same commit (CLAUDE.md "Design docs").
 
-**State**: Phase 0 (PLAN.md), 2026-10-10. Built: the scaffold, the full schema, the message-graph operations, the library operations, drafts, the recycle bin, and the provider layer's storage: connections, models, encrypted secrets and the usage ledger. The provider layer's network module and streaming entry point are built too (§6). Not yet built: built-in login, client RPCs and UI for connections, and every chat feature.
+**State**: Phase 0 (PLAN.md), 2026-10-10. Built: the scaffold, the full schema, the message-graph operations, the library operations, drafts, the recycle bin, and the provider layer's storage: connections, models, encrypted secrets and the usage ledger. The provider layer's network module and streaming entry point are built too (§6). Not yet built: built-in login, the connection settings UI, and every chat feature.
 
 ---
 
@@ -38,7 +38,7 @@ Bun was measured as an alternative (2026-10-10) and not adopted. On this server 
 ## 2. Server
 
 `packages/server/src/main.ts` reads configuration from the environment and launches `ServerLive` (`server.ts`). That's one HTTP server with three parts:
-- **`/rpc`:** the RPC endpoint (`AppApi` from `@rp/shared/api.ts`) over a WebSocket, JSON-serialized. Every UI action is meant to become an RPC in this group (DESIGN §7.7). Today it has `Health` and `Whoami`.
+- **`/rpc`:** the RPC endpoint (`AppApi` from `@rp/shared/api.ts`) over a WebSocket, JSON-serialized. Every UI action is meant to become an RPC in this group (DESIGN §7.7). Today it has `Health`, `Whoami`, and the connection, model, network-settings and usage RPCs (§6).
 - **`/healthz`:** a plain-text liveness route, used by the Docker health check.
 - **Everything else:** the client build, served as a single-page app (unknown paths return `index.html`, so deep links work).
 
@@ -477,6 +477,14 @@ It fails with a typed `ProviderError`.
 - Anthropic's cache split and catalog pricing
 - DeepSeek's dialect
 - a keyless local server
+
+**Client RPCs** (`api/providers.ts`, contract in `@rp/shared/api.ts`):
+- **Connections:** `ListConnections`, `CreateConnection`, `UpdateConnection`, `SetConnectionKey`, `SetConnectionHeaders`, `SetConnectionProxy`, `DeleteConnection`, `TestConnection`.
+- **Models:** `RefreshModels`, `ListModels`, `AddUserModel`, `EditModel`, `SetModelHidden`.
+- **Network and usage:** `GetNetworkSettings`/`SetNetworkSettings` (admins only, otherwise `Forbidden`), and `ListLlmRequests`.
+- **Errors keep their tags** (`NotFound`, `StaleWrite`, `ModelKeyTaken`, `ProviderError`, `Forbidden`, from `@rp/shared/errors.ts`). Storage and worker failures are logged on the server and reach the client only as `ServerError`.
+- `test/rpc.test.ts` checks over a real WebSocket that a key never comes back out, that another user gets `NotFound` (or `unusable`) for every operation on someone else's connection, and that only admins see network settings.
+- **At startup,** requests a previous process left `running` are marked `interrupted`.
 
 **Known issue:** the server test suite crashes intermittently (a fork process dies with V8's `Check failed: jit_page.has_value()`), roughly 1 run in 7 on this host under load. It always hits database-backed test files. It started with the provider work, and neither disabling memory protection keys nor Wasm JIT helps. Rerun on a crash; the investigation is a separate task.
 

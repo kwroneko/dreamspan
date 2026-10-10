@@ -9,6 +9,7 @@ import { Chat, ChatId, ChatKind, EntityId, NewVersion, PathEntry, SlotId, Versio
 import { User, UserId } from "@rp/shared/domain.ts"
 import { BinItem, RecoveredText } from "@rp/shared/bin.ts"
 import { Draft, DraftKey, DraftState } from "@rp/shared/drafts.ts"
+import { ModelKeyTaken, NotFound, StaleWrite } from "@rp/shared/errors.ts"
 import {
   Doc,
   EntityKind,
@@ -51,18 +52,8 @@ export class StorageError extends Schema.TaggedError<StorageError>()("StorageErr
   message: Schema.String
 }) {}
 
-export class NotFound extends Schema.TaggedError<NotFound>()("NotFound", {
-  entity: Schema.String,
-  id: Schema.String
-}) {}
-
-/** Optimistic concurrency: the row moved on since the caller read it (DATA-MODEL §10). */
-export class StaleWrite extends Schema.TaggedError<StaleWrite>()("StaleWrite", {
-  entity: Schema.String,
-  id: Schema.String,
-  expected: Schema.Int,
-  actual: Schema.Int
-}) {}
+// Shared with the client, so the tags reach the UI unchanged.
+export { ModelKeyTaken, NotFound, StaleWrite } from "@rp/shared/errors.ts"
 
 /** The largest path window one GetPath returns. */
 export const MAX_PATH_WINDOW = 1000
@@ -109,12 +100,6 @@ export class AppendResult extends Schema.Class<AppendResult>("AppendResult")({
   chat: Chat,
   /** The committed draft, or the draft left active because it moved on; null if none was given. */
   draft: Schema.NullOr(Draft)
-}) {}
-
-/** A model with this key already exists on the connection. */
-export class ModelKeyTaken extends Schema.TaggedError<ModelKeyTaken>()("ModelKeyTaken", {
-  connectionId: Schema.String,
-  key: Schema.String
 }) {}
 
 /** An encrypted secret and what may be shown of it. */

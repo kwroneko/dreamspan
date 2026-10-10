@@ -4,33 +4,9 @@
 import type { AssistantMessage } from "@earendil-works/pi-ai"
 import { isContextOverflow } from "@earendil-works/pi-ai/utils/overflow"
 import { isRetryableAssistantError } from "@earendil-works/pi-ai/utils/retry"
-import { Schema } from "effect"
+import { ProviderError, type ProviderErrorReason } from "@rp/shared/errors.ts"
 
-export const ProviderErrorReason = Schema.Literals([
-  /** The connection can't be used as configured: no key, an unreadable secret, a route the API can't take. */
-  "unusable",
-  "auth",
-  "rate_limited",
-  "overloaded",
-  "context_overflow",
-  "refused",
-  "bad_request",
-  "network",
-  "aborted",
-  "unknown"
-])
-export type ProviderErrorReason = typeof ProviderErrorReason.Type
-
-export class ProviderError extends Schema.TaggedError<ProviderError>()("ProviderError", {
-  reason: ProviderErrorReason,
-  message: Schema.String,
-  status: Schema.NullOr(Schema.Int),
-  retryAfterMs: Schema.NullOr(Schema.Number),
-  /** A refusal's category, where the provider gives one (Anthropic's stop_details). */
-  category: Schema.NullOr(Schema.String),
-  /** Whether the model had already produced output; such failures are never retried. */
-  afterTokens: Schema.Boolean
-}) {}
+export { ProviderError, ProviderErrorReason } from "@rp/shared/errors.ts"
 
 export const providerError = (
   reason: ProviderErrorReason,
