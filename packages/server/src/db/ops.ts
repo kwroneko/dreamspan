@@ -465,6 +465,12 @@ export class WriteOps extends RpcGroup.make(
     success: Model,
     error: Schema.Union([NotFound, StorageError])
   }),
+  /** Instance-wide settings (admin). Callers check the role; storage doesn't know it. */
+  Rpc.make("SetAppSetting", {
+    payload: { key: Schema.String, value: Schema.Unknown },
+    success: Schema.Void,
+    error: StorageError
+  }),
   // --- The usage ledger (PROVIDERS §9.1).
   Rpc.make("OpenLlmRequest", {
     payload: { userId: UserId, request: OpenLlmRequest },
@@ -698,6 +704,11 @@ export class ReadOps extends RpcGroup.make(
     payload: { userId: UserId, modelId: ModelId },
     success: Model,
     error: Schema.Union([NotFound, StorageError])
+  }),
+  Rpc.make("GetAppSetting", {
+    payload: { key: Schema.String },
+    success: Schema.NullOr(Schema.Unknown),
+    error: StorageError
   }),
   /** The user's requests, newest first. `before` pages back by start time. */
   Rpc.make("ListLlmRequests", {

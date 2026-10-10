@@ -1,0 +1,103 @@
+// The network module against real local proxies (spec/PROVIDERS.md §6.2).
+import { mkdtempSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { assert, describe, it } from "@effect/vitest"
+import { Effect, Layer } from "effect"
+import * as Database from "../src/db/Database.ts"
+import { describeRoute } from "../src/net/route.ts"
+import * as Network from "../src/net/Network.ts"
+import { makeSecrets, Secrets } from "../src/secrets.ts"
+import { startHttpProxy, startSocks5Proxy, startTarget } from "./support/proxies.ts"
+
+const layer = (dataDir: string) =>
+  Network.layer.pipe(
+    Layer.provideMerge(Database.layer({ dataDir, readers: 1, allowNetworkFs: false, workers: "source" })),
+    Layer.provide(Layer.succeed(Secrets)(makeSecrets("a server secret for tests")))
+  )
+
+const resource = <A extends { close: () => Promise<void> }>(start: () => Promise<A>) =>
+  Effect.acquireRelease(Effect.promise(start), (r) => Effect.promise(() => r.close()))
+
+describe("network", () => {
+  it.live("goes direct to local targets by default, and through the proxy otherwise", () =>
+    Effect.gen(function* () {
+      const target = yield* resource(() => startTarget(() => ({ json: { ok: true } })))
+      const proxy = yield* resource(startHttpProxy)
+      const network = yield* Network.Network
+      const routes: Array<string> = []
+      const fetch = network.fetchFor({ mode: "inherit" }, (route, url) => routes.push(describeRoute(route, url)))
+
+      yield* network.setInstance({ proxyUrl: proxy.url, bypass: ["localhost", "127.0.0.0/8"] })
+      yield* Effect.promise(() => fetch(`${target.url}/a`).then((r) => r.json()))
+      assert.deepStrictEqual(proxy.tunnels(), [])
+      assert.strictEqual(routes.at(-1), "direct: 127.0.0.1 is in the bypass list")
+
+      // With an empty bypass list, the same target goes through the proxy.
+      yield* network.setInstance({ proxyUrl: undefined, bypass: [] })
+      const body = yield* Effect.promise(() => fetch(`${target.url}/b`).then((r) => r.json()))
+      assert.deepStrictEqual(body, { ok: true })
+      assert.strictEqual(proxy.tunnels().length, 1)
+      assert.match(routes.at(-1)!, /^via proxy http:\/\/127\.0\.0\.1:\d+$/)
+      assert.strictEqual(target.requests(), 2)
+    }).pipe(Effect.scoped, Effect.provide(layer(mkdtempSync(join(tmpdir(), "rp-net-")))))
+  )
+
+  it.live("honors a connection's own SOCKS5 proxy with credentials, and its direct override", () =>
+    Effect.gen(function* () {
+      const target = yield* resource(() => startTarget(() => ({ json: { ok: true } })))
+      const instance = yield* resource(startHttpProxy)
+      const socks = yield* resource(() => startSocks5Proxy({ username: "u", password: "p w" }))
+      const network = yield* Network.Network
+      yield* network.setInstance({ proxyUrl: instance.url, bypass: [] })
+
+      const viaSocks = network.fetchFor({ mode: "custom", url: socks.url.replace("p w", "p%20w") })
+      yield* Effect.promise(() => viaSocks(`${target.url}/socks`).then((r) => r.text()))
+      assert.strictEqual(socks.tunnels().length, 1)
+      assert.deepStrictEqual(instance.tunnels(), [])
+
+      const direct = network.fetchFor({ mode: "direct" })
+      yield* Effect.promise(() => direct(`${target.url}/direct`).then((r) => r.text()))
+      assert.deepStrictEqual(instance.tunnels(), [])
+      assert.strictEqual(socks.tunnels().length, 1)
+      assert.strictEqual(target.requests(), 2)
+    }).pipe(Effect.scoped, Effect.provide(layer(mkdtempSync(join(tmpdir(), "rp-net-")))))
+  )
+
+  it.live("keeps the proxy across restarts, encrypted, and never shows its credentials", () =>
+    Effect.gen(function* () {
+      const dataDir = mkdtempSync(join(tmpdir(), "rp-net-"))
+      const set = Effect.gen(function* () {
+        const network = yield* Network.Network
+        return yield* network.setInstance({ proxyUrl: "socks5://user:secret@vpn.example:1080", bypass: ["10.0.0.0/8"] })
+      }).pipe(Effect.provide(layer(dataDir)))
+      const shown = yield* set
+      assert.deepStrictEqual(shown, { proxy: "socks5://vpn.example:1080", bypass: ["10.0.0.0/8"] })
+
+      const reloaded = yield* Effect.gen(function* () {
+        const network = yield* Network.Network
+        const stored = yield* (yield* Database.Reader).GetAppSetting({ key: "network" })
+        assert.notInclude(JSON.stringify(stored), "secret")
+        const route = yield* network.route(new URL("https://openrouter.ai"), { mode: "inherit" })
+        return { view: yield* network.view, route }
+      }).pipe(Effect.provide(layer(dataDir)))
+      assert.deepStrictEqual(reloaded.view, shown)
+      assert.deepStrictEqual(reloaded.route, {
+        via: "proxy",
+        proxy: "socks5://user:secret@vpn.example:1080",
+        source: "instance"
+      })
+    })
+  )
+
+  it.live("refuses settings it can't use", () =>
+    Effect.gen(function* () {
+      const network = yield* Network.Network
+      const result = yield* network
+        .setInstance({ proxyUrl: "socks4://old:1080", bypass: ["10.0.0.0/33"] })
+        .pipe(Effect.flip)
+      assert.strictEqual(result._tag, "InvalidNetworkSettings")
+      assert.strictEqual(result.problems.length, 2)
+    }).pipe(Effect.provide(layer(mkdtempSync(join(tmpdir(), "rp-net-")))))
+  )
+})

@@ -52,6 +52,12 @@ export const makeProviderReadHandlers = Effect.gen(function* () {
 
     GetModel: ({ userId, modelId }) => ownedModel(userId, modelId).pipe(Effect.map(toModel), query("GetModel")),
 
+    GetAppSetting: ({ key }) =>
+      sql<{ value_json: string }>`SELECT value_json FROM app_settings WHERE key = ${key}`.pipe(
+        Effect.map(([row]) => (row ? (JSON.parse(row.value_json) as unknown) : null)),
+        query("GetAppSetting")
+      ),
+
     ListLlmRequests: ({ userId, limit, before }) =>
       sql<LlmRequestRow>`SELECT * FROM llm_requests
         WHERE owner_user_id = ${userId} AND started_at < ${before ?? Number.MAX_SAFE_INTEGER}

@@ -168,6 +168,13 @@ export const makeProviderWriteHandlers = Effect.gen(function* () {
         return yield* reloadModel(modelId)
       }).pipe(transaction(sql, "SetModelHidden")),
 
+    SetAppSetting: ({ key, value }) =>
+      sql`INSERT INTO app_settings (key, value_json) VALUES (${key}, ${JSON.stringify(value)})
+          ON CONFLICT (key) DO UPDATE SET value_json = excluded.value_json`.pipe(
+        Effect.asVoid,
+        transaction(sql, "SetAppSetting")
+      ),
+
     OpenLlmRequest: ({ userId, request }) =>
       Effect.gen(function* () {
         yield* ownedConnection(userId, request.connectionId)

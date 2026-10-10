@@ -64,6 +64,21 @@ Bun was measured as an alternative (2026-10-10) and not adopted. On this server 
 - **Honest scope:** with the key file next to the database, encryption protects a leaked database or backup on its own, not a copy of the whole data directory.
 - **A changed secret** makes stored secrets unreadable (`SecretUnreadable`), which surfaces as "enter the key again". It never surfaces as a crash.
 
+**Outgoing requests** (`net/`, spec/PROVIDERS.md §6.2). Every request the server sends goes through the `Network` service. ESLint forbids the global `fetch`, `undici` and `node:https` anywhere else in `packages/server/src`, so nothing can skip the proxy by accident.
+- **The instance settings** are an optional proxy (HTTP, HTTPS or SOCKS5) and a bypass list of hostnames, `*.domain` suffixes, IPs and CIDR ranges. Local ranges are on the bypass list by default (loopback, RFC 1918, link-local, CGNAT, IPv6 ULA and link-local).
+  - They're stored in `app_settings`, with the proxy URL encrypted, since it can hold credentials.
+  - The proxy is only ever shown as scheme, host and port.
+  - Unusable settings are refused with `InvalidNetworkSettings`.
+- **Each connection overrides the route** with `inherit`, `direct` or its own proxy. The route for a request (`route.ts`, pure and unit-tested):
+  - the override wins
+  - otherwise a target on the bypass list goes direct, matched by name, by literal IP, or by its resolved addresses (IPv4-mapped IPv6 counts as IPv4)
+  - otherwise the instance proxy is used
+  - a failed DNS lookup leaves the target to the proxy
+- **The route is reported:** `fetchFor(override, onRoute)` gives a `fetch` for one connection's requests and reports each request's route, e.g. "direct: 192.168.1.20 is in the bypass list" or "via proxy socks5://vpn:1080".
+- **One undici dispatcher per route** (`Agent`, `ProxyAgent`, `Socks5ProxyAgent`), reused across requests and closed with the layer. undici marks its SOCKS5 support experimental. SOCKS5 sends the hostname to the proxy, so DNS for proxied targets resolves remotely.
+- `test/network.test.ts` runs real requests through a local HTTP proxy (CONNECT and absolute-URI forwarding) and a SOCKS5 proxy with credentials (`test/support/proxies.ts`), counting the tunnels.
+- **pi-ai:** its Chat Completions, Responses and Anthropic adapters take our `fetch`. Its Google adapter rejects a custom `fetch`, and only its Bedrock and Codex adapters, which we don't use, read `HTTP_PROXY`.
+
 **Event-loop monitoring** (`eventLoop.ts`). The main thread's event-loop delay is sampled continuously. `Health` reports its p99, with the sampling interval subtracted so the number is delay added by work. Anything that blocks the loop delays every live stream, so this is a budgeted metric (CLIENT-FRAMEWORK §7).
 
 ---

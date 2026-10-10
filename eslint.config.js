@@ -33,5 +33,26 @@ export default tseslint.config(
         { patterns: [{ group: ["@base-ui/*"], message: "Import UI from src/ui/ instead of Base UI directly." }] }
       ]
     }
+  },
+  {
+    // Every outgoing request goes through the network module, so none can skip the
+    // instance proxy by accident (spec/PROVIDERS.md §6.2).
+    files: ["packages/server/src/**/*.ts"],
+    ignores: ["packages/server/src/net/**"],
+    rules: {
+      "no-restricted-globals": [
+        "error",
+        { name: "fetch", message: "Outgoing requests go through src/net/ (Network.fetchFor)." }
+      ],
+      "no-restricted-imports": [
+        "error",
+        {
+          paths: [
+            { name: "undici", message: "Outgoing requests go through src/net/." },
+            { name: "node:https", message: "Outgoing requests go through src/net/." }
+          ]
+        }
+      ]
+    }
   }
 )
