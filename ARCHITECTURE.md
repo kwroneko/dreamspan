@@ -2,7 +2,7 @@
 
 This document describes only what is implemented. Proposals live in `spec/`. When a spec is implemented, its content moves here in the same commit (CLAUDE.md "Design docs").
 
-**State**: Phase 0 (PLAN.md), 2026-10-10. Built: the scaffold, the full schema, the message-graph operations and the library operations. Not yet built: drafts, built-in login, the provider layer, and every chat feature.
+**State**: Phase 0 (PLAN.md), 2026-10-10. Built: the scaffold, the full schema, the message-graph operations, the library operations and drafts. Not yet built: built-in login, the provider layer, and every chat feature.
 
 ---
 
@@ -244,6 +244,39 @@ The outcomes are returned, so the UI can report what happened.
 - Reordering on both sides isn't detected as a conflict (ours wins).
 - Arrays without element identities, like a card's `alternate_greetings` or `tags`, are atomic: changing them on both sides is a conflict.
 - Not built yet: export (flattening a ref to a V2/V3 card), library search, and "used by N chats".
+
+### 3.10 Drafts
+
+Drafts with server-persisted undo history, for every text field (DESIGN §6.2). The patch model and history policy are in `@rp/shared/drafts.ts`, storage in `db/drafts.ts` (shared by the writer and readers), and the history table in migration `0003_draft_history`, which replaced the `drafts.undo_log` blob.
+
+**Keys.** A draft is keyed by user and target:
+- `composer` (a chat)
+- `version_edit` (a version)
+- `scratchpad` (a slot)
+- `entity_field` (a ref plus a JSON path in `field`)
+- `summary_edit` (a summary)
+
+The first save checks that the target belongs to the user. Drafts are never visible to other users.
+
+**Saving.**
+- The client saves debounced while the user types (`SaveDraft`). Each save passes the row version it last saw: null to create, and anything else is `StaleWrite` if another tab saved since. So a stale tab can't silently overwrite newer text.
+- The server diffs the new text against the stored text into one reversible patch (`start`, `removed`, `inserted`) and records it in `draft_history`. Patch boundaries never split a surrogate pair, so stored text stays valid UTF-8.
+- History is a row per entry, not a blob, so a save never rewrites the whole history.
+- Text is capped at 1,000,000 characters (`DraftTooLarge`).
+
+**History.**
+- **Typing coalesces.** A save within 5 s of the last entry extends it, until the entry spans 60 s, so continuous typing is one entry per minute rather than one per save.
+- **A destructive change always gets its own entry,** so the text before it is one step back. Destructive means removing more than 200 characters or more than half the text, e.g. select-all plus a stray key.
+- `DraftHistory` lists the restorable states newest first, with lengths and short excerpts. `GetDraftState` returns one state's full text, built by undoing newer entries from the current text.
+- `RestoreDraftState` moves the draft back to that state, and records the restore as its own entry, so it can be undone too.
+- At most 1000 entries and 1,000,000 changed characters are kept per draft, oldest dropped first.
+
+**Committing.** `AppendMessage`, `AddVersion` and `EditRef` take an optional `commitDraft` (key plus the row version the client sent from) and mark that draft committed **in the same transaction**, so a reload never shows already-sent text in the composer. If the draft moved on since (another tab kept typing), it stays active with the newer text, and the write returns it. `ClearDraft` marks a draft committed or discarded explicitly.
+- A draft's text and history are kept after it's committed or discarded.
+- The next save reopens it, and history continues across the commit.
+- `ListActiveDrafts` lists unsent drafts.
+
+**Not built yet:** pushing a draft change to the user's other open tabs and devices. That needs the subscription channel; until then, the row version catches the conflict when the other tab saves.
 
 ---
 

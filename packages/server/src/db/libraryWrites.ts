@@ -5,6 +5,7 @@ import type { Doc, MergeOutcome } from "@rp/shared/library.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
+import { makeDraftStore } from "./drafts.ts"
 import { docHash, makeLibraryQueries, type RefRow, searchText, toLibraryRef } from "./library.ts"
 import { FollowerMerge, NotFound, RefChange, RefOperationRefused, StaleWrite, WriteOps } from "./ops.ts"
 import { transaction } from "./tx.ts"
@@ -12,6 +13,7 @@ import { transaction } from "./tx.ts"
 export const makeLibraryWriteHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   const lib = makeLibraryQueries(sql)
+  const drafts = makeDraftStore(sql)
 
   const insertRevision = (options: {
     readonly entityId: string
@@ -161,7 +163,7 @@ export const makeLibraryWriteHandlers = Effect.gen(function* () {
         if (rows.length === 0) return yield* new NotFound({ entity: "entity", id: entityId })
       }).pipe(transaction(sql, "SetEntityArchived")),
 
-    EditRef: ({ userId, refId, doc, expectedRowVersion, message }) =>
+    EditRef: ({ userId, refId, doc, expectedRowVersion, message, commitDraft }) =>
       Effect.gen(function* () {
         const ref = yield* lib.ownedRef(userId, refId)
         yield* checkRowVersion(ref, expectedRowVersion)
@@ -178,6 +180,7 @@ export const makeLibraryWriteHandlers = Effect.gen(function* () {
           message
         })
         yield* moveHead(ref.id, revision, null)
+        yield* drafts.commit(userId, commitDraft)
         return yield* changed(ref.id)
       }).pipe(transaction(sql, "EditRef")),
 

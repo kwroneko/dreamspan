@@ -4,6 +4,8 @@ import type { UserId } from "@rp/shared/domain.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
+import type { DraftKey } from "@rp/shared/drafts.ts"
+import { makeDraftStore } from "./drafts.ts"
 import { AppendResult, NotFound, StaleWrite, WriteOps } from "./ops.ts"
 import { type ChatRow, toChat, toUser, toVersion, type UserRow, type VersionRow } from "./rows.ts"
 import { transaction as runTransaction } from "./tx.ts"
@@ -14,6 +16,31 @@ export const makeWriteHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
 
   const transaction = (operation: string) => runTransaction(sql, operation)
+  const drafts = makeDraftStore(sql)
+
+  /** A draft's target must belong to the user. */
+  const draftTarget = (userId: UserId, key: DraftKey) => {
+    const query =
+      key.targetKind === "composer"
+        ? sql<{ n: number }>`SELECT count(*) AS n FROM chats WHERE id = ${key.targetId} AND owner_user_id = ${userId}`
+        : key.targetKind === "version_edit"
+          ? sql<{ n: number }>`SELECT count(*) AS n FROM versions v JOIN slots s ON s.id = v.slot_id
+              JOIN chats c ON c.id = s.chat_id WHERE v.id = ${key.targetId} AND c.owner_user_id = ${userId}`
+          : key.targetKind === "scratchpad"
+            ? sql<{ n: number }>`SELECT count(*) AS n FROM slots s JOIN chats c ON c.id = s.chat_id
+                WHERE s.id = ${key.targetId} AND c.owner_user_id = ${userId}`
+            : key.targetKind === "entity_field"
+              ? sql<{ n: number }>`SELECT count(*) AS n FROM entity_refs r JOIN entities e ON e.id = r.entity_id
+                  WHERE r.id = ${key.targetId} AND e.owner_user_id = ${userId}`
+              : sql<{ n: number }>`SELECT count(*) AS n FROM summaries s JOIN chats c ON c.id = s.chat_id
+                  WHERE s.id = ${key.targetId} AND c.owner_user_id = ${userId}`
+    return query.pipe(
+      Effect.orDie,
+      Effect.flatMap(([row]) =>
+        row?.n === 1 ? Effect.void : Effect.fail(new NotFound({ entity: key.targetKind, id: key.targetId }))
+      )
+    )
+  }
 
   const ownedChat = (userId: UserId, chatId: ChatId) =>
     sql<ChatRow>`SELECT * FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId}`.pipe(
@@ -126,7 +153,18 @@ export const makeWriteHandlers = Effect.gen(function* () {
         return toChat(row!)
       }).pipe(transaction("CreateChat")),
 
-    AppendMessage: ({ userId, chatId, parentSlotId, version }) =>
+    SaveDraft: ({ userId, key, content, expectedRowVersion, baseRevision }) =>
+      drafts
+        .save({ userId, key, content, expectedRowVersion, baseRevision, checkTarget: draftTarget(userId, key) })
+        .pipe(transaction("SaveDraft")),
+
+    RestoreDraftState: ({ userId, key, seq, expectedRowVersion }) =>
+      drafts.restore(userId, key, seq, expectedRowVersion).pipe(transaction("RestoreDraftState")),
+
+    ClearDraft: ({ userId, key, outcome, expectedRowVersion }) =>
+      drafts.clear(userId, key, outcome, expectedRowVersion).pipe(transaction("ClearDraft")),
+
+    AppendMessage: ({ userId, chatId, parentSlotId, version, commitDraft }) =>
       Effect.gen(function* () {
         const at = Date.now()
         yield* ownedChat(userId, chatId)
@@ -149,10 +187,11 @@ export const makeWriteHandlers = Effect.gen(function* () {
             status = CASE WHEN status = 'pending' THEN 'active' ELSE status END,
             row_version = row_version + 1
           WHERE id = ${chatId} RETURNING *`
-        return new AppendResult({ slotId: slotId as SlotId, version: toVersion(row), chat: toChat(chat!) })
+        const draft = yield* drafts.commit(userId, commitDraft)
+        return new AppendResult({ slotId: slotId as SlotId, version: toVersion(row), chat: toChat(chat!), draft })
       }).pipe(transaction("AppendMessage")),
 
-    AddVersion: ({ userId, slotId, version, select }) =>
+    AddVersion: ({ userId, slotId, version, select, commitDraft }) =>
       Effect.gen(function* () {
         const at = Date.now()
         yield* ownedSlot(userId, slotId)
@@ -164,6 +203,7 @@ export const makeWriteHandlers = Effect.gen(function* () {
         if (select) {
           yield* sql`UPDATE slots SET selected_version_id = ${row.id}, row_version = row_version + 1 WHERE id = ${slotId}`
         }
+        yield* drafts.commit(userId, commitDraft)
         return toVersion(row)
       }).pipe(transaction("AddVersion")),
 

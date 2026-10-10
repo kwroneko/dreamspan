@@ -45,7 +45,7 @@ const setup = (handle = "ana") =>
     const rowVersion = (refId: RefId) => get(refId).pipe(Effect.map((r) => r.ref.rowVersion))
     const edit = (refId: RefId, d: Doc) =>
       Effect.flatMap(rowVersion(refId), (expectedRowVersion) =>
-        writer.EditRef({ userId, refId, doc: d, expectedRowVersion, message: null })
+        writer.EditRef({ userId, refId, doc: d, expectedRowVersion, message: null, commitDraft: null })
       )
     const reimport = (d: Doc) =>
       writer.ImportUpstream({ userId, refId: imported.ref.id, doc: d, sourcePath: null, sourceHash: null })
@@ -284,7 +284,8 @@ describe("library", () => {
             refId: variant.id,
             doc: { a: 1 },
             expectedRowVersion: 99,
-            message: null
+            message: null,
+            commitDraft: null
           })
         ),
         "StaleWrite"

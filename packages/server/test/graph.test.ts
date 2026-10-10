@@ -66,7 +66,7 @@ const setup = (handle = "ana") =>
       greeting: say(mira, "The harbor bell rings twice.", { origin: "greeting", macroMode: "template" })
     })
     const append = (parentSlotId: SlotId | null, version: NewVersion) =>
-      writer.AppendMessage({ userId: user.id, chatId: chat.id, parentSlotId, version })
+      writer.AppendMessage({ userId: user.id, chatId: chat.id, parentSlotId, version, commitDraft: null })
     const path = (leafSlotId: SlotId | null = null) =>
       reader.GetPath({ userId: user.id, chatId: chat.id, leafSlotId, limit: 1000 }).pipe(Effect.map((w) => w.entries))
     const stateAt = (slotId: SlotId | null) =>
@@ -105,7 +105,8 @@ describe("message graph", () => {
         userId,
         slotId: a.slotId,
         version: generated(mira, "second take"),
-        select: true
+        select: true,
+        commitDraft: null
       })
       const after = yield* path()
 
@@ -180,7 +181,8 @@ describe("message graph", () => {
         userId,
         slotId: turn.slotId,
         version: generated(mira, "Mira leaves."),
-        select: true
+        select: true,
+        commitDraft: null
       })
       // The rollout that wrote "Mira leaves." also marked her absent.
       yield* writer.AddStateEvent({
@@ -223,7 +225,8 @@ describe("message graph", () => {
           ...generated(mira, ""),
           status: "failed",
           error: { class: "refusal", message: "content filter" }
-        })
+        }),
+        commitDraft: null
       })
       const streaming = yield* append(turn.slotId, new NewVersion({ ...generated(mira, ""), status: "generating" }))
       const entries = yield* path(streaming.slotId)
@@ -246,7 +249,8 @@ describe("message graph", () => {
         userId,
         slotId: turn.slotId,
         version: generated(mira, "two"),
-        select: false
+        select: false,
+        commitDraft: null
       })
       const seen = (yield* path()).at(-1)!.rowVersion
 
@@ -287,7 +291,8 @@ describe("message graph", () => {
             userId: bob.userId,
             chatId: ana.chat.id,
             parentSlotId: null,
-            version: say(bob.me, "hi")
+            version: say(bob.me, "hi"),
+            commitDraft: null
           })
         ),
         "NotFound"
@@ -318,7 +323,8 @@ describe("message graph", () => {
         userId,
         chatId: pending.id,
         parentSlotId: pending.activeLeafSlotId,
-        version: say(me, "Hi, Mira.")
+        version: say(me, "Hi, Mira."),
+        commitDraft: null
       })
       assert.strictEqual(sent.chat.status, "active")
       assert.isNotNull(sent.chat.lastMessageAt)

@@ -7,6 +7,7 @@
 // NotFound, so their existence doesn't leak.
 import { Chat, ChatId, ChatKind, EntityId, NewVersion, PathEntry, SlotId, Version, VersionId } from "@rp/shared/chat.ts"
 import { User, UserId } from "@rp/shared/domain.ts"
+import { Draft, DraftKey, DraftState } from "@rp/shared/drafts.ts"
 import {
   Doc,
   EntityKind,
@@ -69,10 +70,24 @@ export class FoldableStateEvent extends Schema.Class<FoldableStateEvent>("Foldab
   data: StateEventData
 }) {}
 
+export class DraftTooLarge extends Schema.TaggedError<DraftTooLarge>()("DraftTooLarge", {
+  length: Schema.Int,
+  max: Schema.Int
+}) {}
+
+/**
+ * Marks the draft a write came from as committed, in the same transaction, so a reload
+ * never shows text that was already sent. If the draft moved on since (another tab kept
+ * typing), it stays active: it holds newer text than what was committed.
+ */
+export const CommitDraft = Schema.NullOr(Schema.Struct({ key: DraftKey, expectedRowVersion: Schema.Int }))
+
 export class AppendResult extends Schema.Class<AppendResult>("AppendResult")({
   slotId: SlotId,
   version: Version,
-  chat: Chat
+  chat: Chat,
+  /** The committed draft, or the draft left active because it moved on; null if none was given. */
+  draft: Schema.NullOr(Draft)
 }) {}
 
 export class WriteOps extends RpcGroup.make(
@@ -84,9 +99,41 @@ export class WriteOps extends RpcGroup.make(
     error: StorageError
   }),
   /**
-   * A new library entity with its first revision and its base ref. Minimal for now:
-   * variants, chat overrides and re-import merges come with the library work.
+   * Saves a draft (debounced by the client while the user types). The first save creates
+   * it, checking the target belongs to the user; later saves pass the row version they
+   * last saw, so a stale tab can't overwrite newer text. Every change is kept as an undo
+   * history entry (DESIGN §6.2).
    */
+  Rpc.make("SaveDraft", {
+    payload: {
+      userId: UserId,
+      key: DraftKey,
+      content: Schema.String,
+      /** Null to create the draft. */
+      expectedRowVersion: Schema.NullOr(Schema.Int),
+      baseRevision: Schema.NullOr(Schema.String)
+    },
+    success: Draft,
+    error: Schema.Union([NotFound, StaleWrite, DraftTooLarge, StorageError])
+  }),
+  /** Restores an earlier state from the draft's history. The restore is itself undoable. */
+  Rpc.make("RestoreDraftState", {
+    payload: { userId: UserId, key: DraftKey, seq: Schema.Int, expectedRowVersion: Schema.Int },
+    success: Draft,
+    error: Schema.Union([NotFound, StaleWrite, StorageError])
+  }),
+  /** Marks a draft committed or discarded. Its text and history are kept. */
+  Rpc.make("ClearDraft", {
+    payload: {
+      userId: UserId,
+      key: DraftKey,
+      outcome: Schema.Literals(["committed", "discarded"]),
+      expectedRowVersion: Schema.Int
+    },
+    success: Draft,
+    error: Schema.Union([NotFound, StaleWrite, StorageError])
+  }),
+  /** A new library entity with its first revision and its base (upstream) ref. */
   Rpc.make("CreateEntity", {
     payload: {
       userId: UserId,
@@ -111,7 +158,8 @@ export class WriteOps extends RpcGroup.make(
       refId: RefId,
       doc: Doc,
       expectedRowVersion: Schema.Int,
-      message: Schema.NullOr(Schema.String)
+      message: Schema.NullOr(Schema.String),
+      commitDraft: CommitDraft
     },
     success: RefChange,
     error: Schema.Union([NotFound, StaleWrite, StorageError])
@@ -214,13 +262,19 @@ export class WriteOps extends RpcGroup.make(
    * The first message turns a pending chat active.
    */
   Rpc.make("AppendMessage", {
-    payload: { userId: UserId, chatId: ChatId, parentSlotId: Schema.NullOr(SlotId), version: NewVersion },
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      parentSlotId: Schema.NullOr(SlotId),
+      version: NewVersion,
+      commitDraft: CommitDraft
+    },
     success: AppendResult,
     error: Schema.Union([NotFound, StorageError])
   }),
   /** A new version in place: a swipe, an edit, or "write your own" (DESIGN §3.1). */
   Rpc.make("AddVersion", {
-    payload: { userId: UserId, slotId: SlotId, version: NewVersion, select: Schema.Boolean },
+    payload: { userId: UserId, slotId: SlotId, version: NewVersion, select: Schema.Boolean, commitDraft: CommitDraft },
     success: Version,
     error: Schema.Union([NotFound, StorageError])
   }),
@@ -290,6 +344,33 @@ export class ReadOps extends RpcGroup.make(
   Rpc.make("StateEventsAt", {
     payload: { userId: UserId, chatId: ChatId, slotId: Schema.NullOr(SlotId) },
     success: Schema.Array(FoldableStateEvent),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  Rpc.make("GetDraft", {
+    payload: { userId: UserId, key: DraftKey },
+    success: Schema.NullOr(Draft),
+    error: StorageError
+  }),
+  /** Drafts with unsent text, most recently edited first. */
+  Rpc.make("ListActiveDrafts", {
+    payload: { userId: UserId },
+    success: Schema.Array(Draft),
+    error: StorageError
+  }),
+  /** The restorable states of a draft, newest first, without their full text. */
+  Rpc.make("DraftHistory", {
+    payload: {
+      userId: UserId,
+      key: DraftKey,
+      limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 1000 }))
+    },
+    success: Schema.Array(DraftState),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** The full text of one earlier state. */
+  Rpc.make("GetDraftState", {
+    payload: { userId: UserId, key: DraftKey, seq: Schema.Int },
+    success: Schema.Struct({ seq: Schema.Int, content: Schema.String }),
     error: Schema.Union([NotFound, StorageError])
   }),
   /** The user's library of one kind: upstream refs and variants, not chat overrides. */

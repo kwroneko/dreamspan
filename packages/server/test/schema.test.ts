@@ -2,7 +2,7 @@
 // connection so no application code is involved.
 import { DatabaseSync } from "node:sqlite"
 import { beforeEach, describe, expect, it } from "vitest"
-import { dataModel, users } from "../src/db/schema/index.ts"
+import { dataModel, draftHistory, users } from "../src/db/schema/index.ts"
 
 let db: DatabaseSync
 let n = 0
@@ -117,7 +117,7 @@ const addVersion = (
 beforeEach(() => {
   db = new DatabaseSync(":memory:")
   db.exec("PRAGMA foreign_keys = ON")
-  for (const statement of [...users, ...dataModel]) db.exec(statement)
+  for (const statement of [...users, ...dataModel, ...draftHistory]) db.exec(statement)
 })
 
 describe("graph shape", () => {

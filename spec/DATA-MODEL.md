@@ -1,6 +1,6 @@
 # Data model
 
-**Status**: Partially implemented, 2026-10-10. The schema (every table below) and the message-graph operations are implemented and documented in ARCHITECTURE.md §3.7–§3.8. The library operations of §3.2 are implemented too (ARCHITECTURE.md §3.9), except export. Not yet implemented: changeset application and revert, drafts, summaries and jobs logic, and the ST import mapping (§14). Implementation deltas from this draft:
+**Status**: Partially implemented, 2026-10-10. The schema (every table below) and the message-graph operations are implemented and documented in ARCHITECTURE.md §3.7–§3.8. The library operations of §3.2 are implemented too (ARCHITECTURE.md §3.9), except export. Drafts are implemented (ARCHITECTURE.md §3.10). Not yet implemented: changeset application and revert, summaries and jobs logic, and the ST import mapping (§14). Implementation deltas from this draft:
 - `rollouts.version_ids` is derived from `versions.rollout_id` instead of stored (principle 2).
 - FTS-indexed tables have an integer `seq` rowid alias.
 - Invariants are enforced by database triggers.
@@ -9,6 +9,7 @@
 - A follower with no edits of its own since its last merge fast-forwards to the new revision instead of getting a merge revision.
 - "Update available, conflicts" is derived (followed head ≠ merge base), not stored.
 - Text merges word by word, so edits to different sentences of one prompt combine.
+- Drafts: `undo_log` became the `draft_history` table, with one reversible patch per entry. Drafts gained `status` (active, committed, discarded) and `created_at`, and writes can commit their draft atomically.
 
 Original status: Draft, 2026-10-09. Phase 0 deliverable (see PLAN.md). Everything here is **[P] Proposed** unless marked otherwise. Section references like "DESIGN §3.1" point to [DESIGN.md](DESIGN.md).
 

@@ -6,6 +6,7 @@ import { StateEventData } from "@rp/shared/state.ts"
 import { Effect, Schema } from "effect"
 import { SqlClient } from "effect/sql"
 import { toStorageError } from "./connection.ts"
+import { makeDraftStore } from "./drafts.ts"
 import { makeLibraryQueries, toLibraryRef } from "./library.ts"
 import { FoldableStateEvent, NotFound, ReadOps, RefOperationRefused, StorageError } from "./ops.ts"
 import {
@@ -26,6 +27,7 @@ const decodeStateEvent = Schema.decodeUnknownEffect(StateEventData)
 export const makeReadHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   const lib = makeLibraryQueries(sql)
+  const drafts = makeDraftStore(sql)
 
   const ownedChat = (userId: UserId, chatId: ChatId) =>
     sql<ChatRow>`SELECT * FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId}`.pipe(
@@ -108,6 +110,23 @@ export const makeReadHandlers = Effect.gen(function* () {
           )
         )
       }).pipe(query("StateEventsAt")),
+
+    GetDraft: ({ userId, key }) =>
+      drafts.find(userId, key).pipe(
+        Effect.map((row) => (row ? drafts.toDraft(row) : null)),
+        query("GetDraft")
+      ),
+
+    ListActiveDrafts: ({ userId }) => drafts.listActive(userId).pipe(query("ListActiveDrafts")),
+
+    DraftHistory: ({ userId, key, limit }) =>
+      Effect.flatMap(drafts.get(userId, key), (draft) => drafts.history(draft, limit)).pipe(query("DraftHistory")),
+
+    GetDraftState: ({ userId, key, seq }) =>
+      Effect.flatMap(drafts.get(userId, key), (draft) => drafts.stateAt(draft, seq)).pipe(
+        Effect.map((content) => ({ seq, content })),
+        query("GetDraftState")
+      ),
 
     ListLibrary: ({ userId, kind, tag, archived }) =>
       lib
