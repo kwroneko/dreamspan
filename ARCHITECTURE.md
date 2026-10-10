@@ -276,7 +276,7 @@ The first save checks that the target belongs to the user. Drafts are never visi
 - **On commit:** the text from just before the session's newest destructive change, if there was one. That's the wipe-then-send case.
 - **On discard:** the discarded text.
 
-Edits of existing content need no recovery: their previous version or revision is immutable. The next save after a commit starts a fresh session. `ListActiveDrafts` lists drafts with unsent text.
+This applies to every kind of draft, not just the composer: what a bad save loses is the editing session (possibly hours of typing in a card or preset field), and the previous version or revision being intact doesn't change that. The next save after a commit starts a fresh session. `ListActiveDrafts` lists drafts with unsent text.
 
 **The composer belongs to a branch** (DESIGN §6.2, owner):
 - Its key is the chat plus the slot the next message goes under (the branch tip), or empty before the first message.
