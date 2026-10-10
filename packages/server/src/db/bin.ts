@@ -282,14 +282,39 @@ export const makeBin = (sql: SqlClient.SqlClient, limits: BinLimits) => {
       return itemId
     })
 
+  const deleteConnection = (userId: UserId, connectionId: string) =>
+    Effect.gen(function* () {
+      const [connection] = yield* sql<{ name: string; kind: string }>`
+        SELECT name, kind FROM connections
+        WHERE id = ${connectionId} AND owner_user_id = ${userId} AND deleted_at IS NULL AND purged_at IS NULL`
+      if (!connection) return yield* notFound("connection", connectionId)
+      const itemId = yield* insertItem({
+        userId,
+        kind: "connection",
+        targetId: connectionId,
+        chatId: null,
+        title: connection.name,
+        excerpt: connection.kind,
+        origin: { connectionId, kind: connection.kind },
+        byteSize: 0
+      })
+      yield* sql`UPDATE connections SET deleted_at = ${Date.now()}, bin_item_id = ${itemId} WHERE id = ${connectionId}`
+      return itemId
+    })
+
   // --- Restoring and deleting for good -----------------------------------------------
 
   const restore = (userId: UserId, itemId: string) =>
     Effect.gen(function* () {
       const item = yield* loadItem(userId, itemId)
-      const table = { chat: "chats", message: "slots", branch: "slots", version: "versions", entity: "entities" }[
-        item.kind
-      ]
+      const table = {
+        chat: "chats",
+        message: "slots",
+        branch: "slots",
+        version: "versions",
+        entity: "entities",
+        connection: "connections"
+      }[item.kind]
       yield* sql.unsafe(`UPDATE ${table} SET deleted_at = NULL, bin_item_id = NULL WHERE bin_item_id = ?`, [itemId])
       yield* sql`DELETE FROM bin_items WHERE id = ${itemId}`
       return toBinItem(item)
@@ -343,6 +368,14 @@ export const makeBin = (sql: SqlClient.SqlClient, limits: BinLimits) => {
           yield* sql`UPDATE entities SET purged_at = ${Date.now()} WHERE id = ${id}`
           break
         }
+        case "connection":
+          // A tombstone without secrets: old messages and ledger rows still name their
+          // model (PROVIDERS §10).
+          yield* sql`UPDATE connections SET purged_at = ${Date.now()}, api_key_enc = NULL, key_hint = NULL,
+                       headers_enc = NULL, header_names_json = '[]', proxy_mode = 'inherit', proxy_url_enc = NULL,
+                       base_url = NULL
+                     WHERE id = ${item.target_id}`
+          break
       }
       yield* sql`DELETE FROM bin_items WHERE id = ${item.id}`
     })
@@ -438,6 +471,7 @@ export const makeBin = (sql: SqlClient.SqlClient, limits: BinLimits) => {
     deleteBranch,
     deleteVersion,
     deleteEntity,
+    deleteConnection,
     restore,
     purge,
     emptyBin,

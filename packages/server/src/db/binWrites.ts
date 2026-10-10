@@ -26,6 +26,8 @@ export const makeBinWriteHandlers = (limits: BinLimits) =>
       DeleteBranch: ({ userId, slotId }) => deleting("DeleteBranch", userId, bin.deleteBranch(userId, slotId)),
       DeleteVersion: ({ userId, versionId }) => deleting("DeleteVersion", userId, bin.deleteVersion(userId, versionId)),
       DeleteEntity: ({ userId, entityId }) => deleting("DeleteEntity", userId, bin.deleteEntity(userId, entityId)),
+      DeleteConnection: ({ userId, connectionId }) =>
+        deleting("DeleteConnection", userId, bin.deleteConnection(userId, connectionId)),
       RestoreBinItem: ({ userId, itemId }) => bin.restore(userId, itemId).pipe(transaction(sql, "RestoreBinItem")),
       PurgeBinItem: ({ userId, itemId }) => bin.purge(userId, itemId).pipe(transaction(sql, "PurgeBinItem")),
       EmptyBin: ({ userId }) =>

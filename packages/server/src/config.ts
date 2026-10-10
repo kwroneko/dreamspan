@@ -20,7 +20,14 @@ const AppConfigFromEnv = Config.all({
    */
   authMode: Config.Literals(["single", "proxy"], "AUTH_MODE").pipe(Config.withDefault("single" as const)),
   authProxyHeader: Config.String("AUTH_PROXY_HEADER").pipe(Config.withDefault("remote-user")),
-  clientDist: Config.String("CLIENT_DIST").pipe(Config.withDefault(defaultClientDist))
+  clientDist: Config.String("CLIENT_DIST").pipe(Config.withDefault(defaultClientDist)),
+  /**
+   * The server secret that encrypts connection secrets (secrets.ts). Optional: without
+   * it, one is generated into DATA_DIR/secret.key at first start.
+   */
+  secretKey: Config.option(Config.Redacted("SECRET_KEY")),
+  /** A file holding the server secret, e.g. a Docker secret. */
+  secretKeyFile: Config.option(Config.String("SECRET_KEY_FILE"))
 })
 
 export type AppConfigShape = Config.Success<typeof AppConfigFromEnv>

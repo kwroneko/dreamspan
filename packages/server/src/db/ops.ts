@@ -19,7 +19,27 @@ import {
   Revision,
   RevisionId
 } from "@rp/shared/library.ts"
+import {
+  Connection,
+  ConnectionId,
+  ConnectionSettings,
+  Model,
+  ModelId,
+  ModelOverrides,
+  ModelUpstream,
+  ProviderKind,
+  ProxyMode
+} from "@rp/shared/providers.ts"
 import { StateEventData } from "@rp/shared/state.ts"
+import {
+  Cost,
+  LlmRequest,
+  LlmRequestId,
+  RequestPurpose,
+  RequestStatus,
+  TokenCounts,
+  UsageSource
+} from "@rp/shared/usage.ts"
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
 
@@ -90,6 +110,58 @@ export class AppendResult extends Schema.Class<AppendResult>("AppendResult")({
   /** The committed draft, or the draft left active because it moved on; null if none was given. */
   draft: Schema.NullOr(Draft)
 }) {}
+
+/** A model with this key already exists on the connection. */
+export class ModelKeyTaken extends Schema.TaggedError<ModelKeyTaken>()("ModelKeyTaken", {
+  connectionId: Schema.String,
+  key: Schema.String
+}) {}
+
+/** An encrypted secret and what may be shown of it. */
+const EncryptedKey = Schema.Struct({ enc: Schema.Uint8Array, hint: Schema.String })
+const EncryptedHeaders = Schema.Struct({ enc: Schema.Uint8Array, names: Schema.Array(Schema.String) })
+
+/**
+ * What the provider layer needs to send a request on a connection, secrets still
+ * encrypted. Never sent to a browser: the main thread decrypts them for one request.
+ */
+export class ConnectionForRequest extends Schema.Class<ConnectionForRequest>("ConnectionForRequest")({
+  connection: Connection,
+  apiKeyEnc: Schema.NullOr(Schema.Uint8Array),
+  headersEnc: Schema.NullOr(Schema.Uint8Array),
+  proxyUrlEnc: Schema.NullOr(Schema.Uint8Array)
+}) {}
+
+/** Opens a ledger row before a request is sent (PROVIDERS §9.1). */
+export const OpenLlmRequest = Schema.Struct({
+  id: LlmRequestId,
+  connectionId: ConnectionId,
+  modelId: Schema.NullOr(ModelId),
+  chatId: Schema.NullOr(ChatId),
+  rolloutId: Schema.NullOr(Schema.String),
+  versionId: Schema.NullOr(VersionId),
+  purpose: RequestPurpose,
+  api: Schema.String,
+  provider: Schema.String,
+  modelKey: Schema.String,
+  startedAt: Schema.Number
+})
+
+/** Closes a ledger row with what the request produced. */
+export const CloseLlmRequest = Schema.Struct({
+  id: LlmRequestId,
+  status: RequestStatus,
+  endedAt: Schema.Number,
+  firstTokenAt: Schema.NullOr(Schema.Number),
+  responseModel: Schema.NullOr(Schema.String),
+  upstream: Schema.NullOr(Schema.String),
+  counts: TokenCounts,
+  usageSource: UsageSource,
+  rawUsage: Schema.NullOr(Schema.Unknown),
+  reportedCost: Schema.NullOr(Schema.Number),
+  cost: Schema.NullOr(Cost),
+  error: Schema.NullOr(Schema.Unknown)
+})
 
 export class WriteOps extends RpcGroup.make(
   /** Answers once the writer has opened the database and run migrations. */
@@ -316,6 +388,99 @@ export class WriteOps extends RpcGroup.make(
     success: RefChange,
     error: Schema.Union([NotFound, StaleWrite, RefOperationRefused, StorageError])
   }),
+  // --- Connections and models (spec/PROVIDERS.md §2, §3). Secrets arrive encrypted:
+  // the main thread holds the server secret, the workers only see ciphertext.
+  /** The id is chosen by the caller, because secrets are encrypted bound to it. */
+  Rpc.make("CreateConnection", {
+    payload: { userId: UserId, connectionId: ConnectionId, kind: ProviderKind, settings: ConnectionSettings },
+    success: Connection,
+    error: StorageError
+  }),
+  Rpc.make("UpdateConnection", {
+    payload: {
+      userId: UserId,
+      connectionId: ConnectionId,
+      settings: ConnectionSettings,
+      expectedRowVersion: Schema.Int
+    },
+    success: Connection,
+    error: Schema.Union([NotFound, StaleWrite, StorageError])
+  }),
+  /** Sets or clears (null) the API key. Nothing ever reads it back out to a client. */
+  Rpc.make("SetConnectionKey", {
+    payload: { userId: UserId, connectionId: ConnectionId, key: Schema.NullOr(EncryptedKey) },
+    success: Connection,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  Rpc.make("SetConnectionHeaders", {
+    payload: { userId: UserId, connectionId: ConnectionId, headers: Schema.NullOr(EncryptedHeaders) },
+    success: Connection,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** The per-connection proxy override (PROVIDERS §6.2); a URL only with `custom`. */
+  Rpc.make("SetConnectionProxy", {
+    payload: {
+      userId: UserId,
+      connectionId: ConnectionId,
+      mode: ProxyMode,
+      urlEnc: Schema.NullOr(Schema.Uint8Array)
+    },
+    success: Connection,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  Rpc.make("DeleteConnection", {
+    payload: { userId: UserId, connectionId: ConnectionId },
+    success: BinItem,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * Applies a fetched model list: new models are added, known ones get the fresh
+   * upstream data, and ones the list no longer reports are marked missing, never
+   * deleted. User edits are never touched.
+   */
+  Rpc.make("SyncFetchedModels", {
+    payload: {
+      userId: UserId,
+      connectionId: ConnectionId,
+      models: Schema.Array(Schema.Struct({ key: Schema.String, upstream: ModelUpstream })),
+      fetchedAt: Schema.Number
+    },
+    success: Schema.Struct({ added: Schema.Int, updated: Schema.Int, missing: Schema.Int }),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** A model added by hand, for endpoints without a list or models the list leaves out. */
+  Rpc.make("AddUserModel", {
+    payload: { userId: UserId, connectionId: ConnectionId, key: Schema.String, overrides: ModelOverrides },
+    success: Model,
+    error: Schema.Union([NotFound, ModelKeyTaken, StorageError])
+  }),
+  /** Replaces the user's edits to a model. */
+  Rpc.make("EditModel", {
+    payload: { userId: UserId, modelId: ModelId, overrides: ModelOverrides, expectedRowVersion: Schema.Int },
+    success: Model,
+    error: Schema.Union([NotFound, StaleWrite, StorageError])
+  }),
+  Rpc.make("SetModelHidden", {
+    payload: { userId: UserId, modelId: ModelId, hidden: Schema.Boolean },
+    success: Model,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  // --- The usage ledger (PROVIDERS §9.1).
+  Rpc.make("OpenLlmRequest", {
+    payload: { userId: UserId, request: OpenLlmRequest },
+    success: Schema.Void,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  Rpc.make("CloseLlmRequest", {
+    payload: { userId: UserId, request: CloseLlmRequest },
+    success: Schema.Void,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** At startup: requests left running by a crash may have been billed, so they're kept as interrupted. */
+  Rpc.make("InterruptRunningLlmRequests", {
+    success: Schema.Struct({ interrupted: Schema.Int }),
+    error: StorageError
+  }),
   /**
    * A chat starts pending (DESIGN §2.1) unless created active. Participants join at
    * the initial position. An optional greeting becomes the root slot.
@@ -507,6 +672,42 @@ export class ReadOps extends RpcGroup.make(
     payload: { userId: UserId, chatId: ChatId },
     success: Schema.Array(LibraryRef),
     error: Schema.Union([NotFound, StorageError])
+  }),
+  Rpc.make("ListConnections", {
+    payload: { userId: UserId },
+    success: Schema.Array(Connection),
+    error: StorageError
+  }),
+  Rpc.make("GetConnection", {
+    payload: { userId: UserId, connectionId: ConnectionId },
+    success: Connection,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** For the provider layer only: the connection with its encrypted secrets. */
+  Rpc.make("ResolveConnection", {
+    payload: { userId: UserId, connectionId: ConnectionId },
+    success: ConnectionForRequest,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  Rpc.make("ListModels", {
+    payload: { userId: UserId, connectionId: ConnectionId, includeHidden: Schema.Boolean },
+    success: Schema.Array(Model),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  Rpc.make("GetModel", {
+    payload: { userId: UserId, modelId: ModelId },
+    success: Model,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** The user's requests, newest first. `before` pages back by start time. */
+  Rpc.make("ListLlmRequests", {
+    payload: {
+      userId: UserId,
+      limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 1000 })),
+      before: Schema.NullOr(Schema.Number)
+    },
+    success: Schema.Array(LlmRequest),
+    error: StorageError
   }),
   /** Diagnostic: a CPU-bound query of `n` steps that touches no table. Used by tests. */
   Rpc.make("CountTo", {

@@ -2,7 +2,7 @@
 
 This document describes only what is implemented. Proposals live in `spec/`. When a spec is implemented, its content moves here in the same commit (CLAUDE.md "Design docs").
 
-**State**: Phase 0 (PLAN.md), 2026-10-10. Built: the scaffold, the full schema, the message-graph operations, the library operations, drafts, the recycle bin, and the provider layer's schema with the usage ledger. Not yet built: built-in login, the rest of the provider layer, and every chat feature.
+**State**: Phase 0 (PLAN.md), 2026-10-10. Built: the scaffold, the full schema, the message-graph operations, the library operations, drafts, the recycle bin, and the provider layer's storage: connections, models, encrypted secrets and the usage ledger. Not yet built: built-in login, the provider layer's network and streaming parts, and every chat feature.
 
 ---
 
@@ -54,6 +54,15 @@ Bun was measured as an alternative (2026-10-10) and not adopted. On this server 
 | `AUTH_MODE` | `single` | `single` or `proxy` (§4) |
 | `AUTH_PROXY_HEADER` | `remote-user` | Identity header in proxy mode |
 | `CLIENT_DIST` | `packages/client/dist` | Static files to serve |
+| `SECRET_KEY`, `SECRET_KEY_FILE` | unset | The server secret (below). Generated into `DATA_DIR/secret.key` when neither is set |
+
+**Secrets** (`secrets.ts`). Connection secrets (API keys, header values, proxy URLs) are encrypted at rest with AES-256-GCM, under a key derived (HKDF-SHA256) from the server secret.
+- **Bound to where they belong.** Each ciphertext is bound to its connection and field (`connection:<id>:api_key`), so it doesn't decrypt anywhere else.
+- **Format:** a version byte, a fresh 12-byte nonce, the tag, then the ciphertext.
+- **Only the main thread holds the secret.** The database workers only ever see ciphertext.
+- **The secret is automatic** (owner, 2026-10-10: setup must be trivial). It comes from `SECRET_KEY` or `SECRET_KEY_FILE` (a Docker secret) when set. Otherwise it's generated at first start into `DATA_DIR/secret.key`, mode 0600 (tightened if a restore loosened it), and never overwritten.
+- **Honest scope:** with the key file next to the database, encryption protects a leaked database or backup on its own, not a copy of the whole data directory.
+- **A changed secret** makes stored secrets unreadable (`SecretUnreadable`), which surfaces as "enter the key again". It never surfaces as a crash.
 
 **Event-loop monitoring** (`eventLoop.ts`). The main thread's event-loop delay is sampled continuously. `Health` reports its p99, with the sampling interval subtracted so the number is delay added by work. Anything that blocks the loop delays every live stream, so this is a budgeted metric (CLIENT-FRAMEWORK §7).
 
@@ -319,7 +328,7 @@ Deleting is deliberate and fundamentally non-destructive (DESIGN §6.2): deletes
 
 ### 3.12 Connections, models and the usage ledger
 
-The provider layer's storage (spec/PROVIDERS.md §2, §3.1, §9.1), in migration `0005_providers` (`db/schema/providers.ts`). No operations use it yet.
+The provider layer's storage (spec/PROVIDERS.md §2, §3.1, §9.1), in migration `0005_providers` (`db/schema/providers.ts`).
 
 **`connections`**: one provider kind, one wire API, one base URL and one key per row.
 - `kind` and `api` follow pi-ai's catalog, so the shared schema will validate them rather than a CHECK list.
@@ -342,6 +351,28 @@ The provider layer's storage (spec/PROVIDERS.md §2, §3.1, §9.1), in migration
 - **Attribution stays inside the user's data:** a request names only its own user's chat, a rollout and a version of that chat, and a model of its connection. Attribution can be cleared, never moved.
 - **The ledger outlives what it's attributed to:** deleting a chat for good keeps its requests and clears their chat, rollout and version (`ON DELETE SET NULL`, indexed so a large chat deletes quickly).
 - Indexed by user and by connection over time, for totals and later limits.
+
+**Operations** (`db/providerWrites.ts`, `db/providerReads.ts`; types in `@rp/shared/providers.ts` and `@rp/shared/usage.ts`):
+- **Connections:**
+  - `CreateConnection`: the caller picks the id, since secrets are encrypted bound to it
+  - `UpdateConnection`: with `expectedRowVersion`
+  - `SetConnectionKey`, `SetConnectionHeaders`, `SetConnectionProxy`
+  - `DeleteConnection`: through the bin. A purge leaves the tombstone described above.
+  - `ListConnections`, `GetConnection`: secrets appear only as `hasKey`, `keyHint` and header names
+  - `ResolveConnection`: the ciphertext, for the provider layer only
+- **Models:**
+  - `SyncFetchedModels`: adds new models, refreshes `upstream_json`, and marks unlisted ones missing. Models only ever added by hand are never marked.
+  - `AddUserModel`
+  - `EditModel`: with `expectedRowVersion`
+  - `SetModelHidden`
+  - `ListModels`, `GetModel`
+  - `resolveModel` (shared) merges the sources, user edits first. It reports each field's source, and fields no source knows as `unknown` with a safe default.
+- **Ledger:**
+  - `OpenLlmRequest`, `CloseLlmRequest`
+  - `InterruptRunningLlmRequests`, for startup
+  - `ListLlmRequests`
+- **Ownership:** as in §3.8, everything on another user's connection, model or ledger row is `NotFound` (`test/providers.test.ts` runs every operation as a second user).
+- **Not built yet:** the rollups into `rollouts` and `versions.usage_json`. They arrive with generation (PLAN phase 2).
 
 **Migration guard.** `0005_providers` recreates `connections` and `models` rather than altering them, which is only safe because nothing had written them. The migration refuses to run if either holds rows (`test/migrations.test.ts`).
 

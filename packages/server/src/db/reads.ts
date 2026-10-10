@@ -43,7 +43,7 @@ export const makeReadHandlers = Effect.gen(function* () {
       SELECT s.id, s.parent_slot_id FROM slots s JOIN path p ON s.id = p.parent_slot_id
     )`
 
-  return ReadOps.of({
+  const handlers = {
     FindUserByHandle: ({ handle }) =>
       sql<UserRow>`SELECT * FROM users WHERE handle = ${handle}`.pipe(
         Effect.map(([row]) => (row ? toUser(row) : null)),
@@ -250,5 +250,6 @@ export const makeReadHandlers = Effect.gen(function* () {
         Effect.map(([row]) => row?.n ?? 0),
         Effect.catchTag("SqlError", (error) => Effect.fail(toStorageError("CountTo")(error)))
       )
-  })
+  } satisfies Partial<Parameters<typeof ReadOps.of>[0]>
+  return handlers
 })

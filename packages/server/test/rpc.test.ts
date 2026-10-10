@@ -3,7 +3,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { assert, describe, it } from "@effect/vitest"
 import { AppApi } from "@rp/shared/api.ts"
-import { Effect, Layer } from "effect"
+import { Effect, Layer, Option } from "effect"
 import { RpcClient, RpcSerialization } from "effect/rpc"
 import { Socket } from "effect/socket"
 import { AppConfig, type AppConfigShape } from "../src/config.ts"
@@ -19,6 +19,8 @@ const testConfig = (overrides: Partial<AppConfigShape> = {}): AppConfigShape => 
   authMode: "single",
   authProxyHeader: "remote-user",
   clientDist: join(tmpdir(), "rp-no-client"),
+  secretKey: Option.none(),
+  secretKeyFile: Option.none(),
   ...overrides
 })
 

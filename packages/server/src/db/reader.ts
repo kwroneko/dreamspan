@@ -2,16 +2,23 @@
 // readers never block the writer and the writer never blocks readers.
 import { workerData } from "node:worker_threads"
 import { NodeRuntime, NodeWorkerRunner } from "@effect/platform-node"
-import { Layer } from "effect"
+import { Effect, Layer } from "effect"
 import { RpcServer } from "effect/rpc"
 import { readerConnection } from "./connection.ts"
 import { ReadOps } from "./ops.ts"
+import { makeProviderReadHandlers } from "./providerReads.ts"
 import { makeReadHandlers } from "./reads.ts"
 
 const { dbPath } = workerData as { readonly dbPath: string }
 
 RpcServer.layer(ReadOps, { concurrency: 1 }).pipe(
-  Layer.provide(ReadOps.toLayer(makeReadHandlers)),
+  Layer.provide(
+    ReadOps.toLayer(
+      Effect.map(Effect.all([makeReadHandlers, makeProviderReadHandlers]), ([core, providers]) =>
+        ReadOps.of({ ...core, ...providers })
+      )
+    )
+  ),
   Layer.provide(readerConnection(dbPath)),
   Layer.provide(RpcServer.layerProtocolWorkerRunner),
   Layer.provide(NodeWorkerRunner.layer),

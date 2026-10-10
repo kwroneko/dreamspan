@@ -10,6 +10,7 @@ import { WriteOps } from "./ops.ts"
 import { defaultBinLimits, type BinLimits } from "@rp/shared/bin.ts"
 import { makeBinWriteHandlers } from "./binWrites.ts"
 import { makeLibraryWriteHandlers } from "./libraryWrites.ts"
+import { makeProviderWriteHandlers } from "./providerWrites.ts"
 import { makeWriteHandlers } from "./writes.ts"
 
 const { dbPath, binLimits = defaultBinLimits } = workerData as {
@@ -24,9 +25,10 @@ RpcServer.layer(WriteOps, { concurrency: 1 }).pipe(
         Effect.all([
           makeWriteHandlers(binLimits),
           makeLibraryWriteHandlers(binLimits),
-          makeBinWriteHandlers(binLimits)
+          makeBinWriteHandlers(binLimits),
+          makeProviderWriteHandlers
         ]),
-        ([graph, library, bin]) => WriteOps.of({ ...graph, ...library, ...bin })
+        ([graph, library, bin, providers]) => WriteOps.of({ ...graph, ...library, ...bin, ...providers })
       )
     )
   ),

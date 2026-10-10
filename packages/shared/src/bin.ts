@@ -2,10 +2,10 @@
 import { Schema } from "effect"
 import { DraftTargetKind } from "./drafts.ts"
 
-export const BinItemKind = Schema.Literals(["chat", "message", "branch", "version", "entity"])
+export const BinItemKind = Schema.Literals(["chat", "message", "branch", "version", "entity", "connection"])
 export type BinItemKind = typeof BinItemKind.Type
 
-/** Something explicitly deleted: a chat, a message, a swipe, a branch, a library entity. */
+/** Something explicitly deleted: a chat, a message, a swipe, a branch, a library entity, a connection. */
 export class BinItem extends Schema.Class<BinItem>("BinItem")({
   id: Schema.String,
   kind: BinItemKind,
