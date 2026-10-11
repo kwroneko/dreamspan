@@ -1,5 +1,6 @@
 // The core features, each registering its routes and slot entries the way a plugin will.
 import * as accounts from "./accounts.tsx"
+import * as chat from "./chat/index.tsx"
 import * as connections from "./connections/index.ts"
 import * as credentials from "./credentials.tsx"
 import * as library from "./library/index.ts"
@@ -13,6 +14,7 @@ export const registerFeatures = () => {
   login.register()
   status.register()
   library.register()
+  chat.register()
   connections.register()
   credentials.register()
   network.register()

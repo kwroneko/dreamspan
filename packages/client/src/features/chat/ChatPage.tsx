@@ -1,0 +1,153 @@
+// A chat (DESIGN §10.1): a URL per chat and per message, the path in a virtualized list
+// anchored at the bottom, and the composer. Nothing here locks while replies generate.
+import { RegistryContext } from "@effect/atom-react"
+import type { ChatId, SlotId } from "@rp/shared/chat.ts"
+import { Link, useParams, useSearch } from "@tanstack/react-router"
+import { useVirtualizer } from "@tanstack/react-virtual"
+import { useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react"
+import { Loading } from "../../ui/Spinner.tsx"
+import { Alert } from "../../ui/Surface.tsx"
+import { useTitle } from "../shell.tsx"
+import { chatTitle } from "./ChatsPage.tsx"
+import { Composer } from "./Composer.tsx"
+import { Message } from "./Message.tsx"
+import { perf } from "./perf.ts"
+import { ChatSession, type ChatView } from "./session.ts"
+
+/** Load more history when the first or last rendered message is this close to the loaded edge. */
+const EDGE = 5
+
+function MessageList({ session, view, anchor }: { session: ChatSession; view: ChatView; anchor: SlotId | null }) {
+  // TanStack Virtual's instance is mutable, which React Compiler's memoization can't see.
+  "use no memo"
+  const parent = useRef<HTMLDivElement>(null)
+  const positioned = useRef(0)
+  const { entries } = view
+  useEffect(() => {
+    perf.listRenders++
+  })
+  // eslint-disable-next-line react-hooks/incompatible-library -- this component opts out of memoization above
+  const virtualizer = useVirtualizer({
+    count: entries.length,
+    getScrollElement: () => parent.current,
+    estimateSize: () => 180,
+    getItemKey: (index) => entries[index]!.slotId,
+    overscan: 4,
+    anchorTo: "end",
+    followOnAppend: view.follow,
+    paddingStart: 16,
+    paddingEnd: 16,
+    gap: 12
+  })
+
+  // A new window opens at the asked-for message, or at the bottom.
+  useLayoutEffect(() => {
+    if (view.opened === positioned.current || entries.length === 0) return
+    positioned.current = view.opened
+    const index = anchor === null ? -1 : entries.findIndex((e) => e.slotId === anchor)
+    if (index >= 0) virtualizer.scrollToIndex(index, { align: "center" })
+    else virtualizer.scrollToEnd()
+  })
+
+  const items = virtualizer.getVirtualItems()
+  const first = items[0]?.index
+  const last = items.at(-1)?.index
+  useEffect(() => {
+    if (positioned.current === 0 || first === undefined || last === undefined) return
+    if (first < EDGE) void session.loadOlder()
+    if (last >= entries.length - EDGE) void session.loadNewer()
+    if (view.newer === null && virtualizer.isAtEnd(48)) session.followAtBottom()
+  })
+
+  return (
+    <div
+      ref={parent}
+      data-testid="messages"
+      className="min-h-0 flex-1 overflow-y-auto overscroll-contain [overflow-anchor:none]"
+    >
+      <div className="relative mx-auto w-full max-w-3xl" style={{ height: virtualizer.getTotalSize() }}>
+        {items.map((item) => {
+          const entry = entries[item.index]!
+          return (
+            <div
+              key={item.key}
+              data-index={item.index}
+              ref={virtualizer.measureElement}
+              className="chat-row absolute top-0 left-0 w-full"
+              style={{ transform: `translateY(${item.start}px)` }}
+            >
+              <Message
+                entry={entry}
+                session={session}
+                highlighted={entry.slotId === anchor}
+                branchLeaf={view.leafSlotId === view.chat?.activeLeafSlotId ? null : view.leafSlotId}
+              />
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function OpenChat({ chatId, leaf, slot }: { chatId: ChatId; leaf: SlotId | null; slot: SlotId | null }) {
+  const registry = useContext(RegistryContext)
+  const [session] = useState(() => new ChatSession(chatId, leaf, registry))
+  // The slot the chat opened at; a deep link within the open chat moves the window instead.
+  const [initialSlot] = useState(slot)
+  useEffect(() => {
+    session.start(initialSlot)
+    return () => session.dispose()
+  }, [session, initialSlot])
+  return <ChatSurface session={session} slot={slot} />
+}
+
+function ChatSurface({ session, slot }: { session: ChatSession; slot: SlotId | null }) {
+  const view = useSyncExternalStore(session.subscribe, session.snapshot)
+  useTitle(view.chat ? chatTitle(view.chat) : "Chat")
+  const lastSlot = useRef(slot)
+  useEffect(() => {
+    if (slot === lastSlot.current) return
+    lastSlot.current = slot
+    void session.open(slot)
+  }, [session, slot])
+  return (
+    <>
+      <header className="mx-auto flex w-full max-w-3xl items-center gap-3 pb-2">
+        <Link to="/chats" className="text-sm text-muted hover:text-text">
+          ← Chats
+        </Link>
+        <h1 className="min-w-0 flex-1 truncate text-lg font-semibold">{view.chat ? chatTitle(view.chat) : "Chat"}</h1>
+        {view.leafSlotId !== null && view.chat !== null && view.leafSlotId !== view.chat.activeLeafSlotId && (
+          <Link to="." search={{}} className="text-sm text-accent hover:underline">
+            Back to the latest branch
+          </Link>
+        )}
+      </header>
+      {view.error && (
+        <div className="mx-auto w-full max-w-3xl">
+          <Alert tone="danger">{view.error}</Alert>
+        </div>
+      )}
+      {view.loading ? (
+        <Loading label="Loading the chat…" />
+      ) : (
+        <MessageList session={session} view={view} anchor={slot} />
+      )}
+      <Composer session={session} view={view} />
+    </>
+  )
+}
+
+/** /chats/$chatId, with `leaf` for a branch other than the active one and `slot` for a message. */
+export function ChatPage() {
+  const { chatId } = useParams({ strict: false }) as { chatId: ChatId }
+  const search = useSearch({ strict: false }) as { leaf?: unknown; slot?: unknown }
+  const leaf = typeof search.leaf === "string" && search.leaf !== "" ? (search.leaf as SlotId) : null
+  const slot = typeof search.slot === "string" ? (search.slot as SlotId) : null
+  return (
+    <div data-fill className="flex min-h-0 flex-1 flex-col">
+      <OpenChat key={`${chatId}/${leaf ?? ""}`} chatId={chatId} leaf={leaf} slot={slot} />
+    </div>
+  )
+}
