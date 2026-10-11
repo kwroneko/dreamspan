@@ -11,7 +11,7 @@
 // Names are only looked up as own keys, so "__proto__" or "constructor" are ordinary names.
 //
 // Unlike ST, a write is refused when the value would be over MAX_VALUE characters: the macro
-// stays as written and nothing is recorded. Reading a value costs work once per value written
+// produces nothing, no effect is recorded, and the refusal is reported instead. Reading a value costs work once per value written
 // (the read and the JSON parse are cached until the next write), so a large value can't be
 // re-read for free.
 
@@ -27,6 +27,14 @@ export interface VariableEffect {
   readonly scope: VarScope
   readonly name: string
   readonly value: VarValue | null
+}
+
+/** A write refused because the value would be over 1 MB. */
+export interface RefusedWrite {
+  readonly scope: VarScope
+  readonly name: string
+  /** The size it would have had, in characters. */
+  readonly size: number
 }
 
 export interface VariableValues {
@@ -69,6 +77,7 @@ export class VariableScope {
   private readonly parsed = new Map<string, Parsed>()
   private readonly scope: VarScope
   private readonly effects: Array<VariableEffect>
+  private readonly refused: Array<RefusedWrite>
   /** Counts characters read, parsed or written against the expansion's work limit. */
   private readonly charge: (size: number) => void
 
@@ -76,6 +85,7 @@ export class VariableScope {
     initial: Readonly<Record<string, unknown>> | undefined,
     scope: VarScope,
     effects: Array<VariableEffect>,
+    refused: Array<RefusedWrite>,
     charge: (size: number) => void
   ) {
     this.values = new Map()
@@ -85,6 +95,7 @@ export class VariableScope {
     }
     this.scope = scope
     this.effects = effects
+    this.refused = refused
     this.charge = charge
   }
 
@@ -130,15 +141,22 @@ export class VariableScope {
     return read(value)
   }
 
-  set(name: string, value: VarValue): void {
+  /** Whether the write was made: one over MAX_VALUE is refused. */
+  set(name: string, value: VarValue): boolean {
     if (!name) throw new Error("Variable name cannot be empty")
     const size = String(value).length
-    if (size > MAX_VALUE) throw new Error("Variable value too large")
+    if (size > MAX_VALUE) return this.refuse(name, size)
     this.charge(size)
     this.values.set(name, value)
     this.reads.delete(name)
     this.parsed.delete(name)
     this.effects.push({ scope: this.scope, name, value })
+    return true
+  }
+
+  private refuse(name: string, size: number): false {
+    this.refused.push({ scope: this.scope, name, size })
+    return false
   }
 
   /** setvarkey: sets a key (an object, created if absent) or an index (an array). */
@@ -153,8 +171,11 @@ export class VariableScope {
     if (typeof container !== "object") return
     const key = numeric ? String(Number(index)) : index
     // An index past the end pads the array with nulls when it's serialized.
-    if (Array.isArray(container) && (Number(key) - container.length) * 5 > MAX_VALUE)
-      throw new Error("Variable value too large")
+    const padding = Array.isArray(container) ? (Number(key) - container.length) * 5 : 0
+    if (padding > MAX_VALUE) {
+      this.refuse(name, padding)
+      return
+    }
     container = Object.assign(container, { [key]: value })
     this.set(name, JSON.stringify(container))
   }
@@ -165,14 +186,13 @@ export class VariableScope {
     const parsed = parseJson(current)
     if (parsed.ok && Array.isArray(parsed.value)) {
       parsed.value.push(value)
-      this.set(name, JSON.stringify(parsed.value))
-      return normalize(parsed.value)
+      const json = JSON.stringify(parsed.value)
+      return this.set(name, json) ? json : ""
     }
     const increment = Number(value)
     if (Number.isNaN(increment) || Number.isNaN(Number(current))) {
       const text = String(current || "") + value
-      this.set(name, text)
-      return text
+      return this.set(name, text) ? text : ""
     }
     const sum = Number(current) + increment
     if (Number.isNaN(sum)) return ""

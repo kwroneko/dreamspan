@@ -78,7 +78,9 @@ describe("ST's value handling (unsure)", () => {
     ['{{setvar::str::"abc"}}{{getvarkey::str::1}}', "b"],
     // A key on a primitive is dropped, as ST's strict-mode assignment is.
     ["{{setvar::num::5}}{{setvarkey::num::k::v}}{{getvar::num}}", "5"],
-    ["{{setglobalvarkey::go::k::v}}{{getglobalvarkey::go::k}}", "v"]
+    ["{{setglobalvarkey::go::k::v}}{{getglobalvarkey::go::k}}", "v"],
+    // A write drops the cached parse of the old value.
+    ['{{setvar::j}}{"a":1}{{/setvar}}{{getvarkey::j::a}}{{setvarkey::j::a::9}}{{getvarkey::j::a}}', "19"]
   ])
 })
 
@@ -318,7 +320,13 @@ describe("effects", () => {
     const template = { kind: "message", macroMode: "template" } as const
     expect(run(text, {}, verbatim)).toMatchObject({ text, effects: [] })
     expect(run(text, {}, verbatim, undefined, { displayRule: false })).toMatchObject({ text, effects: [] })
-    const unchanged = { text: "1", frozen: {}, effects: [], variables: { local: { y: 1 }, global: {} } }
+    const unchanged = {
+      text: "1",
+      frozen: {},
+      effects: [],
+      refusedWrites: [],
+      variables: { local: { y: 1 }, global: {} }
+    }
     expect(run(text, { local: { y: 1 } }, verbatim, undefined, { displayRule: true })).toEqual(unchanged)
     expect(run(text, { local: { y: 1 } }, template, undefined, { displayRule: false })).toEqual(unchanged)
     expect(run(text, {}, template).effects).toHaveLength(1)

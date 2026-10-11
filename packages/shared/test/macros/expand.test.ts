@@ -54,6 +54,7 @@ describe("expansion depends on where the text came from and what it's for", () =
       text: raw,
       frozen: {},
       effects: [],
+      refusedWrites: [],
       variables: { local: {}, global: {} }
     })
   })

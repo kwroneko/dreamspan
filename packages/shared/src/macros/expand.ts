@@ -34,7 +34,14 @@ import { isClosing, type MacroNode, type Node, parse, type VarNode } from "./par
 import type { MacroContext } from "./context.ts"
 import { stringHash } from "./hash.ts"
 import type { MacroCall, MacroEntry, MacroInfo } from "./registry.ts"
-import { normalize, type VariableEffect, VariableScope, type VarScope, type VarValue } from "./variables.ts"
+import {
+  normalize,
+  type RefusedWrite,
+  type VariableEffect,
+  VariableScope,
+  type VarScope,
+  type VarValue
+} from "./variables.ts"
 
 /** What `{{else}}` returns: `{{if}}` splits on it, and any left over is removed at the end. */
 export const ELSE_MARKER = "\u0000\u001FELSE\u001F\u0000"
@@ -570,12 +577,10 @@ class Expansion {
         return vars.has(node.name) ? normalize(current()) : value()
       case "||=":
         if (!falsy(current())) return normalize(current())
-        vars.set(node.name, value())
-        return value()
+        return vars.set(node.name, value()) ? value() : ""
       case "??=":
         if (vars.has(node.name)) return normalize(current())
-        vars.set(node.name, value())
-        return value()
+        return vars.set(node.name, value()) ? value() : ""
       case "==":
         return String(normalize(current()) === value())
       case "!=":
@@ -656,6 +661,8 @@ export interface Expanded {
    * `var.set`, with `value: null` for a deletion.
    */
   readonly effects: ReadonlyArray<VariableEffect>
+  /** Writes refused because the value would be over 1 MB; the macros produced nothing. */
+  readonly refusedWrites: ReadonlyArray<RefusedWrite>
   /** The variables after this text, for the next text expanded at the same position. */
   readonly variables: {
     readonly local: Readonly<Record<string, unknown>>
@@ -679,7 +686,7 @@ const expands = ({ origin, purpose, displayRule }: ExpandRequest) =>
 
 export const expand = (request: ExpandRequest): ExpandResult => {
   const { local = {}, global = {} } = request.context.variables ?? {}
-  const unchanged = { variables: { local, global }, effects: [] }
+  const unchanged = { variables: { local, global }, effects: [], refusedWrites: [] }
   if (!expands(request)) return { _tag: "Expanded", text: request.text, frozen: {}, ...unchanged }
   const result = evaluate(request.text, request)
   if (result instanceof LimitReached)
@@ -696,15 +703,17 @@ const evaluate = (
       readonly text: string
       readonly frozen: FrozenValues
       readonly effects: ReadonlyArray<VariableEffect>
+      readonly refusedWrites: ReadonlyArray<RefusedWrite>
       readonly variables: {
         readonly local: Readonly<Record<string, VarValue>>
         readonly global: Readonly<Record<string, VarValue>>
       }
     } => {
   const effects: Array<VariableEffect> = []
+  const refusedWrites: Array<RefusedWrite> = []
   const { local, global } = options.context.variables ?? {}
   const vars = (initial: Readonly<Record<string, unknown>> | undefined, scope: VarScope) =>
-    new VariableScope(initial, scope, effects, (size) => charge(run, size))
+    new VariableScope(initial, scope, effects, refusedWrites, (size) => charge(run, size))
   const run: Run = {
     registry: options.registry,
     random: options.random,
@@ -730,6 +739,7 @@ const evaluate = (
     text: result,
     frozen: Object.fromEntries(run.drawn),
     effects,
+    refusedWrites,
     variables: { local: run.variables.local.snapshot(), global: run.variables.global.snapshot() }
   }
 }

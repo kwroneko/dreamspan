@@ -134,13 +134,34 @@ describe("variable values", () => {
     context: { ...request("").context, variables: { local }, ...(messages ? { messages } : {}) }
   })
 
-  it("refuses a write over 1 MB: the macro stays as written and nothing is recorded", () => {
+  it("refuses a write over 1 MB: nothing is written or echoed, and the result reports it", () => {
     const over = expanded(request("{{setvar::x::{{space::1000001}}}}[{{getvar::x}}]"))
-    expect(over.effects).toEqual([])
-    expect(over.text.startsWith("{{setvar::x::   ")).toBe(true)
-    expect(over.text.endsWith("}}[]")).toBe(true)
-    expect(expanded(request("{{setvarkey::a::999999999::x}}")).text).toBe("{{setvarkey::a::999999999::x}}")
-    expect(expanded(request("{{setvar::x::{{space::1000000}}}}")).effects).toHaveLength(1)
+    expect(over).toMatchObject({
+      text: "[]",
+      effects: [],
+      refusedWrites: [{ scope: "local", name: "x", size: 1000001 }]
+    })
+    const padded = expanded(request("{{setvarkey::a::999999999::x}}"))
+    expect(padded).toMatchObject({ text: "", effects: [], refusedWrites: [{ name: "a" }] })
+    const big = { x: "y".repeat(1_000_000) }
+    expect(expanded(request("[{{incvar::x}}{{addvar::x::z}}]", withVars(big)))).toMatchObject({
+      text: "[]",
+      refusedWrites: [{ name: "x" }, { name: "x" }]
+    })
+    expect(expanded(request("[{{.n ||= x{{space::1000001}}x}}]"))).toMatchObject({
+      text: "[]",
+      refusedWrites: [{ name: "n" }]
+    })
+    expect(expanded(request("{{setvar::x::{{space::1000000}}}}"))).toMatchObject({ refusedWrites: [] })
+  })
+
+  it("counts reading a large value once per write", () => {
+    const limits = { maxWork: 1_000_000 }
+    const text = "q".repeat(1_200_000)
+    const array = `[${"1,".repeat(600_000)}1]`
+    // Reads that produce little: the concatenation is refused, and the array gives one item.
+    expect(limit("{{incvar::x}}", { ...withVars({ x: text }), limits })).toBe("work")
+    expect(limit("{{getvarkey::x::0}}", { ...withVars({ x: array }), limits })).toBe("work")
   })
 
   it("keeps a value small enough for later text to use it", () => {
