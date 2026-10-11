@@ -11,7 +11,7 @@ describe("GetSession", () => {
   it.live("passwordless, then logged in", () => {
     const config = testConfig()
     return Effect.gen(function* () {
-      const local = yield* client(config)
+      const local = yield* client()
       assert.strictEqual(yield* via(local.GetSession()), "local:local")
 
       const me = yield* local.Whoami()
@@ -19,7 +19,7 @@ describe("GetSession", () => {
       // A password makes login required, so the passwordless connection is now nobody.
       assert.strictEqual(yield* via(local.GetSession()), "Unauthorized")
 
-      const admin = yield* client(config, { cookie: (yield* login(config, "local", "local-password-1")).cookie })
+      const admin = yield* client({ cookie: (yield* login("local", "local-password-1")).cookie })
       assert.strictEqual(yield* via(admin.GetSession()), "local:session")
     }).pipe(Effect.scoped, withServer(config))
   })
@@ -27,7 +27,7 @@ describe("GetSession", () => {
   it.live("LOOPBACK_REQUIRES_LOGIN=false: loopback is the first admin, without a session", () => {
     const config = testConfig({ loopbackRequiresLogin: false })
     return Effect.gen(function* () {
-      const local = yield* client(config)
+      const local = yield* client()
       const me = yield* local.Whoami()
       yield* local.SetPassword({ userId: me.id, currentPassword: null, newPassword: "local-password-1" })
       assert.strictEqual(yield* via(local.GetSession()), "local:loopback")
@@ -37,8 +37,8 @@ describe("GetSession", () => {
   it.live("proxy mode: the header names the user", () => {
     const config = testConfig({ authMode: "proxy" })
     return Effect.gen(function* () {
-      assert.strictEqual(yield* via((yield* client(config, { "Remote-User": "alice" })).GetSession()), "alice:proxy")
-      assert.strictEqual(yield* via((yield* client(config)).GetSession()), "Unauthorized")
+      assert.strictEqual(yield* via((yield* client({ "Remote-User": "alice" })).GetSession()), "alice:proxy")
+      assert.strictEqual(yield* via((yield* client()).GetSession()), "Unauthorized")
     }).pipe(Effect.scoped, withServer(config))
   })
 })

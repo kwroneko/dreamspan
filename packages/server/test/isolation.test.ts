@@ -378,12 +378,12 @@ const seed = Effect.gen(function* () {
       } satisfies Party
     })
 
-  const local = yield* client(config)
+  const local = yield* client()
   const aliceUser = yield* local.Whoami()
   yield* local.SetPassword({ userId: aliceUser.id, currentPassword: null, newPassword: "alice-password" })
-  const aliceApi = yield* client(config, { cookie: (yield* login(config, aliceUser.handle, "alice-password")).cookie })
+  const aliceApi = yield* client({ cookie: (yield* login(aliceUser.handle, "alice-password")).cookie })
   yield* aliceApi.CreateUser({ handle: "bob", displayName: "Bob", role: "user", password: "bob-password" })
-  const bobApi = yield* client(config, { cookie: (yield* login(config, "bob", "bob-password")).cookie })
+  const bobApi = yield* client({ cookie: (yield* login("bob", "bob-password")).cookie })
   return {
     alice: yield* party(aliceApi, aliceUser, "alice-password"),
     bob: yield* party(bobApi, yield* bobApi.Whoami(), "bob-password")

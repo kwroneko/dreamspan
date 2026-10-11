@@ -319,12 +319,15 @@ const HttpServerLive = Layer.unwrap(
   })
 )
 
-/** The whole server, minus configuration. Tests provide their own AppConfig. */
+/**
+ * The whole server, minus configuration. Tests provide their own AppConfig, with port 0,
+ * and read the port the kernel picked from the HttpServer this exposes.
+ */
 export const ServerLive = HttpRouter.serve(
   Layer.mergeAll(RpcRoute, HealthRoute, AuthRoutes, StaticRoutes, InterruptedRequests, RequestGuard)
 ).pipe(
   Layer.provide(ProvidersLive),
-  Layer.provide(HttpServerLive),
+  Layer.provideMerge(HttpServerLive),
   Layer.provideMerge(Accounts.layer),
   Layer.provideMerge(Layer.mergeAll(DatabaseLive, EventLoopMonitor.layer)),
   Layer.provide(InFlightRpcs.layer)

@@ -3,20 +3,21 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { AppApi } from "@rp/shared/api.ts"
 import { Effect, Layer, Option } from "effect"
+import { HttpServer } from "effect/http"
 import { RpcClient, RpcSerialization } from "effect/rpc"
 import { Socket } from "effect/socket"
 import { AppConfig, type AppConfigShape } from "../../src/config.ts"
 import { ServerLive } from "../../src/server.ts"
 
-// Below Linux's ephemeral range (32768+), where outgoing connections could already hold
-// a port. Sequential from a random start, so a file's own servers never collide.
-let port = 20_000 + Math.floor(Math.random() * 12_000)
-const nextPort = () => (port = port >= 32_000 ? 20_000 : port + 1)
-
-/** A server on a free-looking loopback port with a fresh data directory. */
+/**
+ * A server on loopback with a fresh data directory. Port 0 makes the kernel pick a free
+ * port as the server binds, and `serverPort` reads it back. A port picked before binding
+ * could be taken in between: by another test file, another test run on the host, or,
+ * across a restart, by anything at all.
+ */
 export const testConfig = (overrides: Partial<AppConfigShape> = {}): AppConfigShape => ({
   host: "127.0.0.1",
-  port: nextPort(),
+  port: 0,
   dataDir: mkdtempSync(join(tmpdir(), "rp-server-")),
   dbReaders: 1,
   dbAllowNetworkFs: false,
@@ -42,16 +43,24 @@ export const serverLayer = (config: AppConfigShape) => ServerLive.pipe(Layer.pro
 
 export const withServer = (config: AppConfigShape) => Effect.provide(serverLayer(config))
 
+/** The port the enclosing test server listens on. */
+export const serverPort = Effect.map(HttpServer.HttpServer, ({ address }) => {
+  if (address._tag === "UnixPathAddress") throw new Error("the test server listens on a Unix socket")
+  return address.port
+})
+
 /**
- * An RPC client over a real WebSocket, living as long as the enclosing scope.
- * Node's WebSocket accepts handshake headers, which stand in for a reverse proxy or a cookie.
- * Connecting to one of this machine's other addresses makes the connection come from it.
+ * An RPC client over a real WebSocket to the enclosing test server, living as long as the
+ * enclosing scope. Node's WebSocket accepts handshake headers, which stand in for a reverse
+ * proxy or a cookie. Connecting to one of this machine's other addresses makes the
+ * connection come from it.
  */
-export const client = (config: AppConfigShape, headers: Record<string, string> = {}, address = "127.0.0.1") =>
+export const client = (headers: Record<string, string> = {}, address = "127.0.0.1") =>
   Effect.gen(function* () {
+    const port = yield* serverPort
     const protocol = yield* Layer.build(
       RpcClient.layerProtocolSocket().pipe(
-        Layer.provide(Socket.layerWebSocket(`ws://${address}:${config.port}/rpc`)),
+        Layer.provide(Socket.layerWebSocket(`ws://${address}:${port}/rpc`)),
         Layer.provide(
           Layer.succeed(Socket.WebSocketConstructor)(
             (url) => new WebSocket(url, { headers } as unknown as string[]) as unknown as globalThis.WebSocket
@@ -64,18 +73,20 @@ export const client = (config: AppConfigShape, headers: Record<string, string> =
   })
 
 /** An HTTP POST to the test server, as JSON unless the headers say otherwise. */
-export const post = (config: AppConfigShape, path: string, body: unknown, headers: Record<string, string> = {}) =>
-  Effect.promise(() =>
-    fetch(`http://127.0.0.1:${config.port}${path}`, {
-      method: "POST",
-      headers: { "content-type": "application/json", ...headers },
-      body: JSON.stringify(body)
-    })
+export const post = (path: string, body: unknown, headers: Record<string, string> = {}) =>
+  Effect.flatMap(serverPort, (port) =>
+    Effect.promise(() =>
+      fetch(`http://127.0.0.1:${port}${path}`, {
+        method: "POST",
+        headers: { "content-type": "application/json", ...headers },
+        body: JSON.stringify(body)
+      })
+    )
   )
 
 /** Logs in, resolving to the status and the `cookie` header for later requests. */
-export const login = (config: AppConfigShape, handle: string, password: string) =>
-  post(config, "/auth/login", { handle, password }).pipe(
+export const login = (handle: string, password: string) =>
+  post("/auth/login", { handle, password }).pipe(
     Effect.map((response) => {
       const setCookie = response.headers.get("set-cookie") ?? ""
       return { status: response.status, setCookie, cookie: setCookie.split(";")[0]! }
