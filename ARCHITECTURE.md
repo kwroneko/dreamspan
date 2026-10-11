@@ -519,6 +519,8 @@ The provider layer's storage (spec/PROVIDERS.md §2, §3.1, §9.1), in migration
 
 Users are created on first sight (`EnsureUser`): the local user, and proxy identities. The first user of an instance becomes `admin`. A disabled user is refused.
 
+**`GetSession`** returns the caller's user and how they're signed in: `session` (logged in, so logging out applies), `local` (no account has a password), `loopback` (`LOOPBACK_REQUIRES_LOGIN=false`) or `proxy`. It's resolved again from the same upgrade headers as the middleware, so it only ever describes the caller (`session.test.ts`). The client uses it to route to login, and to show the login page's "no login needed" state.
+
 Not built yet: the login page (it waits for its design).
 
 In proxy mode, a WebSocket keeps the identity it opened with until it disconnects, so logging out of the proxy doesn't end an open tab's access. That's deliberate (DESIGN §10.1).

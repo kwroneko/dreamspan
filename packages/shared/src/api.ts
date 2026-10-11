@@ -39,6 +39,20 @@ export class Authentication extends RpcMiddleware.Service<Authentication, { prov
   { error: Unauthorized }
 ) {}
 
+/**
+ * How the caller is signed in (DESIGN §10.1). `session`: logged in, so logging out applies.
+ * `local`: no account has a password, so loopback and ALLOWED_IPS are the local admin
+ * without logging in. `loopback`: LOOPBACK_REQUIRES_LOGIN is off. `proxy`: the reverse proxy
+ * names the user, and signs them out.
+ */
+export const SessionVia = Schema.Literals(["session", "local", "loopback", "proxy"])
+export type SessionVia = typeof SessionVia.Type
+
+export class Session extends Schema.Class<Session>("Session")({
+  user: User,
+  via: SessionVia
+}) {}
+
 export class Health extends Schema.Class<Health>("Health")({
   version: Schema.String,
   uptimeMs: Schema.Number,
@@ -81,6 +95,8 @@ const StorageErrors = [NotFound, ServerError] as const
 export class AppApi extends RpcGroup.make(
   Rpc.make("Health", { success: Health }),
   Rpc.make("Whoami", { success: User }),
+  /** The caller's user and how they're signed in, so the client knows whether login applies. */
+  Rpc.make("GetSession", { success: Session, error: Unauthorized }),
   // --- Accounts (DESIGN §10.1). No sign-up: an admin creates accounts. Login and logout
   // are HTTP (POST /auth/login, /auth/logout), since they set a cookie.
   Rpc.make("ListUsers", { success: Schema.Array(UserAccount), error: Schema.Union([Forbidden, ServerError]) }),

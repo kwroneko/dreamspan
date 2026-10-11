@@ -1,6 +1,6 @@
 // Account RPC handlers (DESIGN §10.1). Managing other users takes an admin; the rules
 // themselves live in auth/Accounts.ts.
-import { type AppApi, CurrentUser } from "@rp/shared/api.ts"
+import { type AppApi, CurrentUser, Session } from "@rp/shared/api.ts"
 import { AccountRejected, Forbidden } from "@rp/shared/errors.ts"
 import { Effect } from "effect"
 import { Accounts } from "../auth/Accounts.ts"
@@ -14,6 +14,8 @@ const admin = Effect.gen(function* () {
 export const makeAccountHandlers = Effect.gen(function* () {
   const accounts = yield* Accounts
   return {
+    // Resolved again from the same headers the middleware saw, to learn how, not just who.
+    GetSession: (_, { headers }) => accounts.resolve(headers).pipe(Effect.map((session) => new Session(session))),
     ListUsers: () => admin.pipe(Effect.andThen(accounts.listUsers())),
     CreateUser: (input) => Effect.flatMap(admin, (actor) => accounts.createUser(actor, input)),
     SetPassword: (input) =>

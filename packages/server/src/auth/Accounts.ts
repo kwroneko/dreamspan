@@ -5,7 +5,7 @@
 //   LOOPBACK_REQUIRES_LOGIN is off, which acts as the oldest enabled admin.
 import { createHash, randomBytes } from "node:crypto"
 import { readFileSync } from "node:fs"
-import { Authentication, CurrentUser, Unauthorized } from "@rp/shared/api.ts"
+import { Authentication, CurrentUser, type Session, Unauthorized } from "@rp/shared/api.ts"
 import type { User, UserAccount, UserId, UserRole } from "@rp/shared/domain.ts"
 import { AccountRejected, Forbidden, NotFound, ServerError } from "@rp/shared/errors.ts"
 import { Context, Data, Effect, Layer, Option, Predicate, Redacted, Semaphore } from "effect"
@@ -104,7 +104,9 @@ export class Accounts extends Context.Service<
   {
     /** Whether an enabled user has a password, which makes login required. */
     readonly configured: () => boolean
-    readonly resolve: (headers: Readonly<Record<string, string | undefined>>) => Effect.Effect<User, Unauthorized>
+    readonly resolve: (
+      headers: Readonly<Record<string, string | undefined>>
+    ) => Effect.Effect<Pick<Session, "user" | "via">, Unauthorized>
     /** A new session's token. */
     readonly login: (
       handle: string,
@@ -190,19 +192,19 @@ export class Accounts extends Context.Service<
             // Node joins a repeated header with ", ": a proxy that added its header next to
             // the client's would otherwise produce a name made of both.
             if (/[,\p{Cc}]/u.test(handle)) return yield* unauthorized(`a malformed ${config.authProxyHeader} header`)
-            return yield* userByHandle(handle)
+            return { user: yield* userByHandle(handle), via: "proxy" as const }
           }
           const token = headers.cookie ? Cookies.parseHeader(headers.cookie)[SESSION_COOKIE] : undefined
           if (token) {
             const user = yield* reader.GetSessionUser({ tokenHash: hashToken(token), now: Date.now() })
-            if (user) return user
+            if (user) return { user, via: "session" as const }
           }
           const peer = headers[PEER_HEADER]
           if (!configured) {
-            if (passwordlessPeer(peer)) return yield* userByHandle(LOCAL_HANDLE)
+            if (passwordlessPeer(peer)) return { user: yield* userByHandle(LOCAL_HANDLE), via: "local" as const }
           } else if (!config.loopbackRequiresLogin && peer !== undefined && inAddresses(loopback, peer)) {
             const first = yield* firstAdmin
-            if (first) return first
+            if (first) return { user: first, via: "loopback" as const }
           }
           return yield* unauthorized("login required")
         }).pipe(storage("loading the user", unauthorized))
@@ -334,7 +336,7 @@ export const AuthenticationLive = Layer.effect(
   Authentication,
   Effect.map(Accounts, (accounts) =>
     Authentication.of((effect, { headers }) =>
-      accounts.resolve(headers).pipe(Effect.flatMap((user) => Effect.provideService(effect, CurrentUser, user)))
+      accounts.resolve(headers).pipe(Effect.flatMap(({ user }) => Effect.provideService(effect, CurrentUser, user)))
     )
   )
 )
