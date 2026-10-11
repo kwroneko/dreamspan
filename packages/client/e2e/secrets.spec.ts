@@ -1,9 +1,26 @@
 // Secrets being typed stay in the input's live value: never in a DOM attribute (where
 // page markup, extensions and serializers see them), and never after the dialog closes.
 import { expect, type Locator, type Page, test } from "@playwright/test"
-import { ADMIN, serverPerFile, withAdmin } from "./support/server.ts"
+import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
 const server = serverPerFile(withAdmin)
+
+test("without CSS masking, a key field is a password field, still opted out of the managers", async ({ page }) => {
+  // Stands in for a browser without -webkit-text-security.
+  await page.addInitScript(() => {
+    const supports = CSS.supports.bind(CSS) as (property: string, value: string) => boolean
+    CSS.supports = ((property: string, value: string) =>
+      property === "-webkit-text-security" ? false : supports(property, value)) as typeof CSS.supports
+  })
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${server().url}/settings/connections/new`)
+  const key = page.getByLabel("Key", { exact: true })
+  await expect(key).toHaveAttribute("type", "password")
+  await expect(key).toHaveAttribute("autocomplete", "off")
+  await expect(key).toHaveAttribute("data-1p-ignore", "")
+  await expect(key).toHaveAttribute("data-lpignore", "true")
+  await expect(key).toHaveAttribute("data-bwignore", "")
+})
 
 /** The page's markup, attributes included, as anything reading the DOM would see it. */
 const markup = (page: Page) => page.evaluate(() => document.documentElement.outerHTML)

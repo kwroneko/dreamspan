@@ -43,14 +43,18 @@ export function Input({ className = "", ...props }: ComponentProps<typeof BaseIn
   return <BaseInput className={`h-9 ${control} ${className}`} {...props} />
 }
 
+/** Whether CSS can mask a text field. Asked at render, so a test can stand in for an old browser. */
+const cssMasks = () => typeof CSS !== "undefined" && CSS.supports("-webkit-text-security", "disc")
+
 /**
  * A secret being typed: an API key, a header value, a proxy URL with a password. Read it
  * from the form's data on submit; `onEmptyChange` reports only whether it's empty.
  * - Uncontrolled, so React never mirrors it into the DOM's `value` attribute.
  * - Plain text, so browsers' password managers don't offer to save it as a password and
  *   later fill it into the login form; the password-manager extensions' own opt-outs too.
- * - `masked` hides the characters with CSS (`-webkit-text-security`), where the browser
- *   supports it; a URL stays readable.
+ * - `masked` hides the characters with CSS (`-webkit-text-security`). A browser without
+ *   it gets a password field instead (opt-outs kept), so a key is never shown in clear.
+ *   A URL stays readable.
  */
 export function SecretInput({
   name,
@@ -68,7 +72,7 @@ export function SecretInput({
   return (
     <BaseInput
       name={name}
-      type="text"
+      type={masked && !cssMasks() ? "password" : "text"}
       autoComplete="off"
       autoCapitalize="none"
       autoCorrect="off"
