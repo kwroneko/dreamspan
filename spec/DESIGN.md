@@ -344,7 +344,8 @@ These are strategies for mapping history to user and assistant roles:
 - **[P]** Permissions:
   - tools with external effects need approval
   - installing a plugin always needs confirmation
-  - **imported content never grants capabilities**, because card text can prompt-inject a workshop agent
+  - **[D]** Content the user loads (a card, a preset) is effectively their own prompt. If it steers the agent, that's user error, not our vulnerability. Agent capabilities don't depend on where content came from, because defending against the user's own prompt would hamstring the agent (owner, 2026-10-11).
+  - **[P]** Import formats never carry capability grants: a card or preset file's own fields can't enable tools, plugins or permissions (Marinara's bug, §11). The user turns those on.
 - **[P]** Every UI action is a typed server operation, so that later it can be exposed as an agent tool.
 
 ---
@@ -464,7 +465,7 @@ These are strategies for mapping history to user and assistant roles:
 - **[D]** Users are never assumed trusted. One user must never be able to see another user's chats, cards, connections or keys, and that has to be certain (owner, 2026-10-10).
 - **[D]** It must be hard to expose an instance by accident. Without a password, an IP allowlist or an auth proxy, the server doesn't listen beyond localhost. **[O]** The exact rules: ST's may be stricter than needed (owner, 2026-10-10).
 - **[P]** Rules:
-  - imported cards, presets and lorebooks never execute code and never grant capabilities
+  - imported cards, presets and lorebooks never execute code, and their fields never grant capabilities (a file can't enable tools or plugins by itself)
   - model and card HTML renders only in a sandbox
   - API keys are write-only
   - tools with external effects need approval

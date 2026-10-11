@@ -28,12 +28,13 @@
 
 CORDIS.md treated "plugins written by the agent itself" as untrusted code that needs an out-of-process sandbox. The premise was wrong (§1). Its evaluation of Cordis (maturity, overlap with Effect) still holds.
 
-**One narrow path from content to agent-written code does exist: prompt injection.**
-- A workshop agent that reads imported card text can be steered by it (DESIGN §7.7) into writing a plugin the user never asked for. That would be content becoming code, which is ours to prevent.
-- **[P] The cheap mitigation:** the agent can write plugin code, but it can never activate it.
-  - Activation is a user action in the UI, outside any agent tool. It shows the code (or its diff) and the capabilities the plugin declares.
-  - DESIGN already says "installing a plugin always needs confirmation". This makes the confirmation unforgeable by the agent.
-  - No sandbox is needed for this.
+**Prompt injection is not ours to defend against [D] (owner, 2026-10-11).**
+- A card the user loads is effectively their prompt. If it steers their agent into writing a harmful plugin, that's user error.
+- Defending against the user's own prompt would hamstring the agent, so agent capabilities don't depend on where content came from.
+
+**What stays on our side:**
+- **Import formats carry no capability grants [P].** A card or preset file's own fields can't enable tools, plugins or permissions; the user does that. This was Marinara's bug: imported agent files granting themselves tool access. It's content becoming configuration, and it doesn't limit the agent at all.
+- **Installing or changing a plugin goes through the normal install confirmation [P]**, whoever wrote it. Agent-written plugins included, that's a UX choice and not an injection defense. **[O]** A setting could let the user's own agent activate plugin changes without asking.
 
 ## 3. Structure: how much is a plugin [P]
 
