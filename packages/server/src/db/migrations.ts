@@ -9,6 +9,7 @@ import {
   dataModel,
   draftHistory,
   graphIntegrity,
+  ownership,
   providers,
   secretBindings,
   users
@@ -55,7 +56,8 @@ export const migrations = {
   "0007_accounts": runAll(accounts),
   "0008_secret_bindings": runAll(secretBindings),
   "0009_bin_index": runAll(binIndex),
-  "0010_graph_integrity": runAll(graphIntegrity)
+  "0010_graph_integrity": runAll(graphIntegrity),
+  "0011_ownership": runAll(ownership)
 }
 
 export const Migrations = SqliteMigrator.layer({ loader: SqliteMigrator.fromRecord(migrations) })

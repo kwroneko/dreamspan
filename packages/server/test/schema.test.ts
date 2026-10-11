@@ -3,12 +3,14 @@
 import { DatabaseSync } from "node:sqlite"
 import { beforeEach, describe, expect, it } from "vitest"
 import {
+  accounts,
   bin,
   binIndex,
   credentials,
   dataModel,
   draftHistory,
   graphIntegrity,
+  ownership,
   providers,
   secretBindings,
   users
@@ -134,9 +136,11 @@ beforeEach(() => {
     ...bin,
     ...providers,
     ...credentials,
+    ...accounts,
     ...secretBindings,
     ...binIndex,
-    ...graphIntegrity
+    ...graphIntegrity,
+    ...ownership
   ])
     db.exec(statement)
 })
@@ -574,6 +578,42 @@ describe("references across chats", () => {
         /never change owner/
       )
     }
+  })
+
+  it("never hands a key, session, draft or bin item to another user, nor a ref to another entity", () => {
+    const owner = user()
+    const stranger = user()
+    run(
+      `INSERT INTO credentials (id, owner_user_id, name, key_enc, key_hint, created_at, updated_at)
+         VALUES ('cred', ?, 'Key', x'00', '', 1, 1)`,
+      owner
+    )
+    run(`INSERT INTO sessions (token_hash, user_id, created_at, expires_at) VALUES ('t', ?, 1, 2)`, owner)
+    const c = chat(owner)
+    run(
+      `INSERT INTO bin_items (id, user_id, kind, target_id, chat_id, title, excerpt, origin_json, byte_size, deleted_at)
+         VALUES ('bin', ?, 'chat', ?, NULL, 'Chat', '', '{}', 0, 1)`,
+      owner,
+      c.chatId
+    )
+    for (const [table, column, key, rowId] of [
+      ["credentials", "owner_user_id", "id", "cred"],
+      ["sessions", "user_id", "token_hash", "t"],
+      ["bin_items", "user_id", "id", "bin"]
+    ] as const) {
+      expect(() => run(`UPDATE ${table} SET ${column} = ? WHERE ${key} = ?`, stranger, rowId), table).toThrow(
+        /never change owner/
+      )
+    }
+    run(`INSERT INTO entities (id, owner_user_id, kind, created_at) VALUES ('mine', ?, 'card', 1)`, owner)
+    run(`INSERT INTO entities (id, owner_user_id, kind, created_at) VALUES ('theirs', ?, 'card', 1)`, stranger)
+    run(`INSERT INTO entity_revisions (id, entity_id, doc_json, doc_hash, schema_version, origin, created_at)
+         VALUES ('rev', 'mine', '{}', 'h', 1, 'user', 1)`)
+    run(`INSERT INTO entity_refs (id, entity_id, ref_kind, head_revision_id, label, created_at, updated_at)
+         VALUES ('ref', 'mine', 'upstream', 'rev', 'Mine', 1, 1)`)
+    expect(() => run(`UPDATE entity_refs SET entity_id = 'theirs' WHERE id = 'ref'`)).toThrow(
+      /never moves to another entity/
+    )
   })
 
   it("keeps a chat override to the chat owner's entities", () => {

@@ -2,7 +2,7 @@
 
 This document describes only what is implemented. Proposals live in `spec/`. When a spec is implemented, its content moves here in the same commit (CLAUDE.md "Design docs").
 
-**State**: Phase 0 (PLAN.md), 2026-10-10. Built: the scaffold, the full schema, the message-graph operations, the library operations, drafts, the recycle bin, and the provider layer's storage: connections, models, encrypted secrets and the usage ledger. The provider layer's network module and streaming entry point are built too (§6). Not yet built: built-in login, the connection settings UI, and every chat feature.
+**State**: Phase 0 (PLAN.md), 2026-10-11. Built: the scaffold, the full schema, the message-graph operations, the library operations, drafts, the recycle bin, the provider layer (§6), exposure safety and built-in login (§4). Not yet built: any UI beyond a status page (the connection settings and the login page included), and every chat feature.
 
 ---
 
@@ -12,7 +12,7 @@ npm workspaces, TypeScript, ESM throughout.
 
 | Path | Contents |
 |---|---|
-| `packages/shared` | Code used by both server and client: domain schemas (`domain.ts`), the client-facing RPC contract (`api.ts`), UUIDv7 ids (`id.ts`). Imported as `@rp/shared/<file>.ts`. |
+| `packages/shared` | Code used by both server and client: the client-facing RPC contract (`api.ts`), its errors (`errors.ts`), and the domain schemas and pure logic (users, chats and state, library and merge, drafts, the bin, providers and usage), plus UUIDv7 ids (`id.ts`). Imported as `@rp/shared/<file>.ts`. |
 | `packages/server` | The Node server: HTTP, RPC over WebSocket, authentication, the database workers. |
 | `packages/client` | The React single-page app, built with Vite and served by the server. |
 | `spikes/` | Throwaway experiments with their findings (not part of the build). |
@@ -38,7 +38,7 @@ Bun was measured as an alternative (2026-10-10) and not adopted. On this server 
 ## 2. Server
 
 `packages/server/src/main.ts` reads configuration from the environment and launches `ServerLive` (`server.ts`). That's one HTTP server with three parts:
-- **`/rpc`:** the RPC endpoint (`AppApi` from `@rp/shared/api.ts`) over a WebSocket, JSON-serialized. Every UI action is meant to become an RPC in this group (DESIGN §7.7). Today it has `Health`, `Whoami`, and the connection, model, network-settings and usage RPCs (§6).
+- **`/rpc`:** the RPC endpoint (`AppApi` from `@rp/shared/api.ts`) over a WebSocket, JSON-serialized. Every UI action is meant to become an RPC in this group (DESIGN §7.7). Today it has `Health`, `Whoami`, the account RPCs (§4), and the provider-kind, connection, credential, model, network-settings and usage RPCs (§6).
 - **`/healthz`:** a plain-text liveness route, used by the Docker health check.
 - **Everything else:** the client build, served as a single-page app (unknown paths return `index.html`, so deep links work).
 
@@ -187,7 +187,9 @@ Migrations (`migrations.ts`) run in the writer through Effect's `SqliteMigrator`
 - `0006_credentials` (§3.12): keys as credentials that connections reference, bound to hosts
 - `0007_accounts` (§4): `users.password_hash`, and `sessions`
 - `0008_secret_bindings` (§3.12): `connections.headers_origin`, `credentials.connection_owned`
+- `0009_bin_index` (§3.11): an index on `bin_items(target_id)`
 - `0010_graph_integrity`: foreign-key indexes, and the triggers below that weren't in `0002` (`schema/graphIntegrity.ts`)
+- `0011_ownership`: every owner column is immutable, as is a ref's entity (`schema/ownership.ts`). One `UPDATE` could otherwise hand a credential, session, draft or bin item to another user.
 
 Conventions:
 - **Tables:** all `STRICT`, with JSON columns guarded by `json_valid` CHECKs and timestamps in epoch milliseconds.
@@ -217,7 +219,7 @@ Conventions:
   - Rollouts (slot, leaf, parent), summaries (first and last slot, rollout), summary inputs (slot, and a version of that slot), summary parents, summarization jobs (slots, summaries), changesets (rollout), versions (rollout, changeset) and superseded state events (changeset) refer only within their chat. A reference into another chat would also block that chat's deletion with a foreign-key error.
   - A chat override is of an entity of the chat's owner.
   - Each holds on insert and on update. Rows others refer to never move to another chat: slots, lanes, state events, rollouts, changesets, summaries, summarization jobs and bin items. A chat override can only stop being one.
-- **What a user owns stays theirs.** Chats, entities and connections never change owner.
+- **What a user owns stays theirs.** Nothing with an owner ever changes owner: chats, entities and connections (0010), and credentials, sessions, drafts, bin items, recovered texts, settings, media references, jobs and ledger rows (0011). A ref never moves to another entity.
 - **Not enforced here:** ownership of the ids inside a state event's value (§3.8), and that a reference points at something not in the recycle bin. The writer checks both.
 
 **Foreign keys are indexed on the referencing side** wherever the referenced row can be deleted; `test/schema.test.ts` fails on a new one without an index. SQLite checks a key from that side, so without the index, every insert or delete of a referenced row scans the referencing table. Measured on a bare connection (`0010` added the missing ones): appending a message with 100,000 slots in the database took 6.2 ms before (a scan of `slots` for `selected_version_id`) and 0.07 ms after; deleting a 2,000-slot chat among 20,000 slots took 6.5 s before and 55 ms after.
@@ -232,7 +234,6 @@ Conventions:
 Contracts are in `db/ops.ts`, writes in `db/writes.ts` (writer worker), reads in `db/reads.ts` (readers). Domain types are in `@rp/shared/chat.ts`; state-event keys and the fold are in `@rp/shared/state.ts`.
 
 - **Writes:**
-  - `CreateEntity`: entity, first revision and base ref. Minimal until the library work.
   - `CreateChat`: pending or active, with participants joined at the initial position and an optional greeting as the root slot.
   - `AppendMessage`: a new slot, becoming the active leaf. The first message turns a pending chat active. A branch is explicit (`branch: true`, any live parent); otherwise the parent must be the active leaf, and a tab that missed a newer message gets `LeafMoved`, with the current leaf, instead of silently forking.
   - `AddVersion`: swipe, edit, or write your own, optionally selected. An edit's `sourceVersionId` must be a live version of the same slot.
@@ -378,7 +379,7 @@ Deleting is deliberate and fundamentally non-destructive (DESIGN §6.2): deletes
 **Deleting for good** (`PurgeBinItem`, `EmptyBin`; the UI confirms these):
 - **A chat** is deleted, with everything in it and its other bin items. A connection whose preset was one of its chat overrides loses that preset.
 - **An entity** loses its refs, revisions and tags. The entity row stays, so messages that named it as their speaker still point somewhere.
-- **A message, branch or swipe** has its versions emptied: content, reasoning, display forms, amend history and attachments. Its slots stay as placeholders, so the conversation's structure and any summaries over it remain valid. This is the one exception to model output being frozen: a version marked `purged_at` may be emptied.
+- **A message, branch or swipe** has its versions emptied: content, reasoning, display forms, amend history and attachments. Its slots stay as placeholders, so the conversation's structure and any summaries over it remain valid. This is the one exception to model output being frozen: a version may be emptied only as part of a purge of its own bin item (§3.7).
 - Purging is set-based: `EmptyBin` runs the same few statements whatever the bin holds.
 
 **Two independent sections**, each evicting its own oldest entries past its own limits, never the other's:
@@ -405,9 +406,10 @@ The provider layer's storage (spec/PROVIDERS.md §2, §3.1, §9.1), in migration
   - **Header values are bound the same way.** `headers_origin` (0008) records the origin they were set for, and they're refused anywhere else until set again. Gateway tokens, Azure's `api-key` and Cloudflare Access secrets live in headers. Headers from before 0008 have no origin and must be set again.
   - **A key typed into a connection** (`SetConnectionKey`) is bound to the base URL of the row version the user saw. A stale form is a `StaleWrite`, so a key isn't bound to a URL someone changed in the meantime. The connection's previous key is deleted if the connection owned it and nothing else uses it, so a rotated (possibly leaked) key doesn't stay at rest. Purging a connection deletes its own key the same way. A credential the user created and attached is never deleted this way.
   - **Redirects stay within the origin** (`Network.fetchFor`). undici strips only `authorization` and cookies on a cross-origin redirect, so `x-api-key`, `x-goog-api-key` and custom headers would follow an open redirect on an allowed host. Same-origin redirects are followed (at most 5), each routed afresh. A redirect to another origin is a `RedirectRefused` error, reported as `unusable` and never retried. Google's adapter uses pi-ai's own fetch, so its redirects aren't covered.
-  - **A connection's own proxy can't carry a key over `http`.** Setting one needs no key, and over `http` the proxy reads every byte. Such a connection is `unusable` until it uses `https` or the instance proxy.- **Why:** keys are money, so making them easy to steal makes the frontend worth attacking. ST is a target for exactly this reason.
-- **Switching it off** is possible only from outside the app: `KEY_HOST_BINDING=false`. Most settings are meant to be changeable from inside, including by the user's agent; security settings are the exception.
-- **Server-side code can still read keys** (spec/PLUGINS.md §6.1). This protects against everything that acts through the browser.
+  - **A connection's own proxy can't carry a key over `http`.** Setting one needs no key, and over `http` the proxy reads every byte. Such a connection is `unusable` until it uses `https` or the instance proxy.
+  - **Why:** keys are money, so making them easy to steal makes the frontend worth attacking. ST is a target for exactly this reason.
+  - **Switching it off** is possible only from outside the app: `KEY_HOST_BINDING=false`. Most settings are meant to be changeable from inside, including by the user's agent; security settings are the exception.
+  - **Server-side code can still read keys** (spec/PLUGINS.md §6.1). This protects against everything that acts through the browser.
 
 **`connections`**: one provider kind, one wire API, one base URL, and at most one credential per row.
 - `kind` and `api` follow pi-ai's catalog, so the shared schema will validate them rather than a CHECK list.
@@ -500,7 +502,6 @@ The provider layer's storage (spec/PROVIDERS.md §2, §3.1, §9.1), in migration
 - **Refused peers** get a bare `403` written to the socket on connect, which is then destroyed before it's read. Ending it isn't enough: the HTTP parser is already attached, and on a half-open socket it would still dispatch the peer's requests (`exposure.test.ts` checks that no handler runs).
 - **At startup,** listening beyond loopback (`HOST` other than `localhost`, `127.0.0.0/8` or `::1`) with nothing beyond loopback allowed is an `UnsafeExposure` error naming the fix. So are entries that aren't IPs or CIDR ranges (a prefix must be 0–3 digits: `Number("")` is `0`, so `10.0.0.0/` would otherwise allow everyone).
 - **`ALLOW_INSECURE_EXPOSURE=true`** serves every address. Combined with `ALLOWED_IPS` or `TRUSTED_PROXIES`, which it would silently undo, it's a startup error.
-- **Not built yet:** the password branch, with built-in login.
 
 **Cross-site requests** (`crossSiteProblem`, a global router middleware). A page from any site can open a WebSocket to the user's loopback, and a page whose domain is re-resolved to `127.0.0.1` (DNS rebinding) is same-origin with itself. So every request gets a `403` unless:
 - **`Origin`**, when present, is in `PUBLIC_ORIGINS`, or names the `Host` the request was sent to. That second route doesn't apply to a public host, so `http://` can't stand in for a public `https://`. Clients that send no `Origin` aren't browsers, so they have no session to borrow.
@@ -636,7 +637,6 @@ It fails with a typed `ProviderError`.
 - `test/rpc.test.ts` checks over a real WebSocket that a key never comes back out, that another user gets `NotFound` (or `unusable`) for every operation on someone else's connection, and that only admins see network settings.
 - **At startup,** requests a previous process left `running` are marked `interrupted`.
 
-**Test-suite crashes** (a fork dying with V8's `Check failed: jit_page.has_value()`, worse once the workers loaded more modules) were a V8 bug in Node 24, worked around with `--no-wasm-code-gc` in the tests (§3.6).
 
 ---
 
@@ -648,7 +648,7 @@ It fails with a typed `ProviderError`.
 - It runs as the `node` user with `DATA_DIR=/data` as a volume, `HOST=0.0.0.0`, and a health check on `/healthz`.
 - **It doesn't start without exposure settings** (§4), since `HOST=0.0.0.0` is beyond loopback. Connections from the host arrive from the bridge gateway (e.g. `172.17.0.1`).
   - Behind a reverse proxy: `AUTH_MODE=proxy`, `TRUSTED_PROXIES` set to the proxy container's address, and `PUBLIC_ORIGINS` set to the public URL.
-  - Built-in login: set `ADMIN_PASSWORD_FILE` (a Docker secret). The server then starts with the admin protected, and no browser needs to reach loopback.
+  - Built-in login: set `ADMIN_PASSWORD_FILE` (a Docker secret). The server then starts with the admin protected, and no browser needs to reach loopback. Until the login page exists, logging in takes a `POST /auth/login` by hand.
   - Single user without a password: publish on loopback only (`-p 127.0.0.1:8080:8080`) and set `ALLOWED_IPS` to the gateway.
   - Publishing beyond loopback (`-p 8080:8080`) makes the gateway allowlist unsafe: where Docker doesn't pass the client's address through (rootless Docker's default port driver, `docker-proxy` for IPv6 clients), outside clients also appear to come from it.
   - **The health check** fetches `127.0.0.1` on `PORT` inside the container. In proxy mode with `TRUSTED_PROXIES` set, add `127.0.0.1` to the list, or the container reports unhealthy. Inside a container, loopback is only the container's own processes, which can read `/data` and the server secret anyway.
