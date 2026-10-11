@@ -1,0 +1,294 @@
+// Your account, and for admins everyone's (DESIGN §10.1). The rules (the last admin,
+// an admin without a password) are the server's: this shows its answers.
+import type { UserAccount, UserId, UserRole } from "@rp/shared/domain.ts"
+import { type FormEvent, useState } from "react"
+import { AsyncView, ErrorAlert, useAction } from "../actions.tsx"
+import { routes } from "../routes.tsx"
+import { AppClient } from "../rpc.ts"
+import { logout, useSession } from "../session.ts"
+import { Button } from "../ui/Button.tsx"
+import { ConfirmDialog, Dialog, DialogActions } from "../ui/Dialog.tsx"
+import { Field, Input } from "../ui/Field.tsx"
+import { Select } from "../ui/Select.tsx"
+import { Alert, Badge, Card, CardHeader } from "../ui/Surface.tsx"
+import { useTitle } from "./shell.tsx"
+
+const usersAtom = AppClient.query("ListUsers", undefined, { reactivityKeys: ["users"] })
+
+const howSignedIn = {
+  session: "You logged in with your password.",
+  local:
+    "No account has a password, so anyone on this machine (or an allowed address) is the admin without logging in. Set a password to require a login.",
+  loopback: "This server lets its own machine in as the admin without logging in.",
+  proxy: "Your reverse proxy signs you in and out, and manages passwords."
+} as const
+
+function OwnPasswordForm() {
+  const session = useSession()
+  const action = useAction()
+  const [current, setCurrent] = useState("")
+  const [next, setNext] = useState("")
+  // With a session you logged in with a password; with "local" nobody has one. Otherwise
+  // it's unknown, so the field is offered and may stay empty.
+  const asksCurrent = session.via !== "local"
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault()
+    const result = await action.run((client) =>
+      client("SetPassword", {
+        userId: session.user.id,
+        currentPassword: asksCurrent && current !== "" ? current : null,
+        newPassword: next
+      })
+    )
+    // Every session of yours ended, this one included.
+    if (result.ok) location.replace("/login?changed=1")
+  }
+
+  return (
+    <form onSubmit={submit} className="flex flex-col gap-4">
+      {asksCurrent && (
+        <Field
+          label="Current password"
+          description={session.via === "session" ? undefined : "Leave empty if you don't have one yet."}
+        >
+          <Input type="password" value={current} onValueChange={setCurrent} autoComplete="current-password" />
+        </Field>
+      )}
+      <Field
+        label="New password"
+        description="At least 8 characters. Every session of yours ends, so you log in again."
+      >
+        <Input type="password" value={next} onValueChange={setNext} autoComplete="new-password" />
+      </Field>
+      <ErrorAlert error={action.error} title="The password wasn't changed" />
+      <div>
+        <Button type="submit" variant="primary" pending={action.pending} disabled={next === ""}>
+          {session.via === "local" ? "Set password" : "Change password"}
+        </Button>
+      </div>
+    </form>
+  )
+}
+
+function AccountPage() {
+  useTitle("Account")
+  const session = useSession()
+  return (
+    <div className="flex flex-col gap-4">
+      <Card>
+        <CardHeader
+          title="Account"
+          actions={session.via === "session" ? <Button onClick={() => void logout()}>Log out</Button> : undefined}
+        />
+        <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-1 text-sm">
+          <dt className="text-muted">Name</dt>
+          <dd>{session.user.displayName}</dd>
+          <dt className="text-muted">Handle</dt>
+          <dd className="font-mono">{session.user.handle}</dd>
+          <dt className="text-muted">Role</dt>
+          <dd>{session.user.role}</dd>
+        </dl>
+        <p className="mt-3 text-sm text-muted">{howSignedIn[session.via]}</p>
+      </Card>
+      {session.via !== "proxy" && (
+        <Card>
+          <CardHeader title="Password" level={2} />
+          <OwnPasswordForm />
+        </Card>
+      )}
+    </div>
+  )
+}
+
+const roleItems = [
+  { value: "user" as const, label: "User" },
+  { value: "admin" as const, label: "Admin" }
+]
+
+function CreateUserDialog({ onOpenChange }: { onOpenChange: (open: boolean) => void }) {
+  const action = useAction()
+  const [handle, setHandle] = useState("")
+  const [displayName, setDisplayName] = useState("")
+  const [role, setRole] = useState<UserRole>("user")
+  const [password, setPassword] = useState("")
+  const submit = async (event: FormEvent) => {
+    event.preventDefault()
+    const result = await action.run(
+      (client) => client("CreateUser", { handle, displayName, role, password }),
+      ["users"]
+    )
+    if (result.ok) onOpenChange(false)
+  }
+  return (
+    <Dialog open onOpenChange={onOpenChange} title="New user" description="They log in with this handle and password.">
+      <form onSubmit={submit} className="flex flex-col gap-4">
+        <Field label="Handle" description="Letters, digits, '.', '_' and '-'.">
+          <Input value={handle} onValueChange={setHandle} autoCapitalize="none" spellCheck={false} autoComplete="off" />
+        </Field>
+        <Field label="Display name" description="Optional.">
+          <Input value={displayName} onValueChange={setDisplayName} autoComplete="off" />
+        </Field>
+        <Field label="Role">
+          <Select items={roleItems} value={role} onValueChange={setRole} />
+        </Field>
+        <Field label="Password" description="At least 8 characters.">
+          <Input type="password" value={password} onValueChange={setPassword} autoComplete="new-password" />
+        </Field>
+        <ErrorAlert error={action.error} title="No user created" />
+        <DialogActions>
+          <Button onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button type="submit" variant="primary" pending={action.pending} disabled={handle === "" || password === ""}>
+            Create user
+          </Button>
+        </DialogActions>
+      </form>
+    </Dialog>
+  )
+}
+
+function SetPasswordDialog({ user, onOpenChange }: { user: UserAccount; onOpenChange: (open: boolean) => void }) {
+  const action = useAction()
+  const [password, setPassword] = useState("")
+  const submit = async (event: FormEvent) => {
+    event.preventDefault()
+    const result = await action.run(
+      (client) => client("SetPassword", { userId: user.id, currentPassword: null, newPassword: password }),
+      ["users"]
+    )
+    if (result.ok) onOpenChange(false)
+  }
+  return (
+    <Dialog
+      open
+      onOpenChange={onOpenChange}
+      title={`Set ${user.displayName}'s password`}
+      description="Their sessions end, so they log in again with the new one."
+    >
+      <form onSubmit={submit} className="flex flex-col gap-4">
+        <Field label="New password" description="At least 8 characters.">
+          <Input type="password" value={password} onValueChange={setPassword} autoComplete="new-password" />
+        </Field>
+        <ErrorAlert error={action.error} title="The password wasn't set" />
+        <DialogActions>
+          <Button onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button type="submit" variant="primary" pending={action.pending} disabled={password === ""}>
+            Set password
+          </Button>
+        </DialogActions>
+      </form>
+    </Dialog>
+  )
+}
+
+function UserRow({ user, self }: { user: UserAccount; self: UserId }) {
+  const toggle = useAction()
+  const [dialog, setDialog] = useState<"password" | "disable" | null>(null)
+  const close = (open: boolean) => {
+    if (!open) setDialog(null)
+  }
+  const setDisabled = async (disabled: boolean) => {
+    const result = await toggle.run((client) => client("SetUserDisabled", { userId: user.id, disabled }), ["users"])
+    if (result.ok) setDialog(null)
+  }
+  return (
+    <li className="flex flex-col gap-2 py-3 first:pt-0 last:pb-0">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex min-w-0 flex-col gap-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-medium">{user.displayName}</span>
+            <span className="font-mono text-sm text-muted">{user.handle}</span>
+            {user.role === "admin" && <Badge tone="accent">admin</Badge>}
+            {user.id === self && <Badge>you</Badge>}
+            {!user.hasPassword && <Badge tone="warning">no password</Badge>}
+            {user.disabled && <Badge tone="danger">disabled</Badge>}
+          </div>
+        </div>
+        {user.id !== self && (
+          <div className="flex flex-wrap gap-2">
+            <Button variant="ghost" onClick={() => setDialog("password")}>
+              Set password
+            </Button>
+            {user.disabled ? (
+              <Button variant="ghost" pending={toggle.pending} onClick={() => void setDisabled(false)}>
+                Enable
+              </Button>
+            ) : (
+              <Button variant="ghost" onClick={() => setDialog("disable")}>
+                Disable
+              </Button>
+            )}
+          </div>
+        )}
+      </div>
+      {dialog === null && <ErrorAlert error={toggle.error} />}
+      {dialog === "password" && <SetPasswordDialog user={user} onOpenChange={close} />}
+      {dialog === "disable" && (
+        <ConfirmDialog
+          open
+          onOpenChange={close}
+          title={`Disable ${user.displayName}?`}
+          description="Their sessions end and they can't log in until enabled again. Their data stays."
+          confirmLabel="Disable"
+          pending={toggle.pending}
+          onConfirm={() => void setDisabled(true)}
+        >
+          <ErrorAlert error={toggle.error} />
+        </ConfirmDialog>
+      )}
+    </li>
+  )
+}
+
+function UsersPage() {
+  useTitle("Users")
+  const session = useSession()
+  const [creating, setCreating] = useState(false)
+  return (
+    <Card>
+      <CardHeader
+        title="Users"
+        description="There's no sign-up: an admin creates each account."
+        actions={
+          session.via === "proxy" ? undefined : (
+            <Button variant="primary" onClick={() => setCreating(true)}>
+              New user
+            </Button>
+          )
+        }
+      />
+      {session.via === "proxy" && (
+        <div className="mb-4">
+          <Alert>Your reverse proxy creates users when they first arrive. You can still disable them here.</Alert>
+        </div>
+      )}
+      <AsyncView atom={usersAtom} loading="Loading users…">
+        {(users) => (
+          <ul className="flex flex-col divide-y divide-border" aria-label="Users">
+            {users.map((user) => (
+              <UserRow key={user.id} user={user} self={session.user.id} />
+            ))}
+          </ul>
+        )}
+      </AsyncView>
+      {creating && <CreateUserDialog onOpenChange={setCreating} />}
+    </Card>
+  )
+}
+
+export const register = () => {
+  routes.register({
+    id: "settings.account",
+    parent: "settings",
+    path: "account",
+    component: AccountPage,
+    nav: { label: "Account", order: 40 }
+  })
+  routes.register({
+    id: "settings.users",
+    parent: "settings",
+    path: "users",
+    component: UsersPage,
+    nav: { label: "Users", order: 50, adminOnly: true }
+  })
+}
