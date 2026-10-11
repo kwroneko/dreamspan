@@ -174,9 +174,11 @@ Because performance is an absolute priority **[D]**, the harness comes before th
 
 ---
 
-## 8. Design system timing [P]
+## 8. Design system timing
 
 The owner's question: build a full design system now (with Claude Design), or build with premade components until the app works, then design?
+
+**[D] Build first, design later** (owner, 2026-10-11): "There's no point in making a custom design for app views before we have most of the functionality." Screens are built on stock components, with no mockup for approval first. Rules 1–3 below keep the later design pass cheap. Rule 4 and the timing of the full design system stay [P].
 
 **Proposal: build first, but keep restyling mechanical from day one.** The owner's reasoning holds: the real surfaces and flows will only be known once they exist, and designing for imagined screens means designing twice. Integrating a design system later costs little **if** these rules hold from the first component:
 1. **A semantic token layer.** All color, spacing, radius, typography and motion come from CSS variables named by role (`--surface-raised`, `--text-muted`, `--accent-workshop`, `--version-failed`…). Feature code never uses raw palette classes (`bg-zinc-800`), and a lint rule enforces this. A redesign then mostly means changing token values.

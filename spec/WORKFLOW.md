@@ -71,7 +71,7 @@ At the end of each phase, or after about ten slices:
 ## 6. Parallel work
 
 **Coding speed isn't the bottleneck.** Three things are:
-- **The owner's decisions:** login is waiting on them, and so is every UI design.
+- **The owner's decisions:** few block work now. UI is built on stock components without a design gate (owner, 2026-10-11; CLIENT-FRAMEWORK §8).
 - **Integration:** a few files every feature touches.
 - **Review:** each stream needs its own reviewed slices.
 
@@ -95,13 +95,12 @@ Only one stream, the main one, edits these. Other streams write their ARCHITECTU
      - They're tested with synthetic fixtures.
      - They don't touch the schema until the importer writes into it, and that step comes back to the main stream.
 3. **The backlog audit, read-only:** fixes it finds go into the main stream's queue, so nothing collides.
-4. **The connection settings UI design, as a proposal:** a mockup for the owner to review, with no code until it's approved.
+4. **The connection settings UI and the login page,** on stock components (owner, 2026-10-11: no custom design until most functionality exists).
+5. **More streams when they don't collide:** the owner wants development speed to pick up (2026-10-11), so independent pure-function work (the macro engine, presets, lorebooks) runs as its own streams.
 
 **Not yet:**
-- UI code before its design is approved: UI quality is the top priority, so rework is likely.
 - Two streams adding migrations.
 - The ST differential harness: it's worth doing, but its first user is the assembler (phase 2).
-- More than two coding streams: review and integration go through one agent, and a third stream would mostly queue.
 
 **Rules for a parallel stream:**
 - It runs in its own git worktree, with its own `npm ci`.
