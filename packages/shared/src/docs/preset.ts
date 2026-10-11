@@ -10,7 +10,8 @@ export const PromptRole = Schema.Literals(["system", "user", "assistant"])
 export type PromptRole = typeof PromptRole.Type
 
 const Json = Schema.Record(Schema.String, Schema.Unknown)
-const NonNegativeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
+/** ST injects at depths 0 to 10000 (`MAX_INJECTION_DEPTH`). */
+const InjectionDepth = Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 10_000 }))
 
 export const PresetPrompt = Schema.Struct({
   identifier: Schema.NonEmptyString,
@@ -28,7 +29,7 @@ export const PresetPrompt = Schema.Struct({
   marker: Schema.Boolean,
   /** `absolute` is ST's "in-chat": inserted into the history at `injection_depth`. */
   injection_position: Schema.Literals(["relative", "absolute"]),
-  injection_depth: NonNegativeInt,
+  injection_depth: InjectionDepth,
   /** Among in-chat prompts at one depth, higher orders end up nearer the end of the history. */
   injection_order: Schema.Finite,
   /** Generation types the prompt is sent for (`normal`, `continue`, `impersonate`, …); empty means all. */
@@ -128,8 +129,8 @@ export const RegexScript = Schema.Struct({
   /** Whether macros in `find_regex` are expanded first, and how (escaped for use in a regex). */
   substitute_regex: Schema.Literals(["none", "raw", "escaped"]),
   /** Message depths the script applies to; null means unbounded. */
-  min_depth: Schema.NullOr(Schema.Int),
-  max_depth: Schema.NullOr(Schema.Int),
+  min_depth: Schema.NullOr(Schema.Finite),
+  max_depth: Schema.NullOr(Schema.Finite),
   unsupported: Schema.optionalKey(Json)
 })
 export type RegexScript = typeof RegexScript.Type
