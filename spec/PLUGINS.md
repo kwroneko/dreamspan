@@ -128,11 +128,13 @@ Plugins attach metadata without changing the kernel's formats:
 - A plugin's manifest lists the registries it uses (providers, context, tools, UI, storage), the services it overrides, and whether it runs server code.
 - **Enforced for honest plugins:** the plugin host gives each plugin handles only to the registries it declared. So an update can't quietly start touching providers without the prompt saying so.
 - **Not enforced against malicious server code:** in-process server code can import anything. So the prompt states plainly whether a plugin runs on the server ("full access to the server, including stored keys"), or only in the browser.
-- **Browser-only plugins are contained in a meaningful way:**
-  - they can't read keys, since keys never reach the browser
-  - they can't send anything anywhere but our server, once the CSP restricts `connect-src` to our origin
-  
-  That makes "client-only" the one category a cautious user can enable from a stranger without real exposure.
+- **Browser-only plugins are contained less than it first seems.**
+  - **What holds:** they can't read keys, since keys never reach the browser. And they can't send anything anywhere but our server, once the CSP restricts `connect-src` to our origin.
+  - **But a plugin that runs in the page acts as the user.** It can call every RPC the user can, and it can click our own buttons, including a consent prompt. So a malicious in-page plugin could:
+    - enable a server-side plugin and approve the prompt itself, which gives it full access
+    - redirect a stored key (§6.1)
+  - **In-page prompts are therefore not a boundary against code already in the page.** Only code that can't reach our page is contained, for example a widget in a sandboxed iframe that talks to the app through a narrow `postMessage` bridge.
+  - **[O]** Whether to make enabling server-side code require something page script can't produce, for example confirming in a separate origin or in the CLI. That's probably too much friction for what it buys.
 - **[O]** If declared surfaces turn out to mislead more than help, drop them and keep only the client/server distinction, which is enforceable.
 
 ## 6. The three lines of attack [P]
@@ -140,9 +142,32 @@ Plugins attach metadata without changing the kernel's formats:
 ### 6.1 Credentials (the most likely target)
 
 - Keys never reach the browser (DESIGN §9), so browser-side plugins can't read them.
-- **A gap independent of plugins: redirecting a stored key.**
-  - Anything that can call our RPCs (a browser plugin, an XSS, a stolen session) can change a connection's base URL. The server then sends the stored key to the new host.
-  - **Proposed fix:** changing a keyed connection's base URL, kind or custom proxy clears its key, so it has to be entered again. That's small and worth doing before the settings UI exists.
+- **A gap independent of plugins: redirecting a stored key.** Anything that can call our RPCs as the user can change a connection's base URL, and the server then sends the stored key to the new host.
+
+**What a fix would protect against:**
+
+| Attacker | Steals keys without a fix | Steals keys with a fix | Why |
+|---|---|---|---|
+| A malicious in-page browser plugin | Yes: redirect the base URL | Only by escalating: enabling a server plugin through the in-page prompt (§5) | It can't read keys or send data off-origin |
+| An XSS in our app (a sandbox escape in rendering) | Yes | The same escalation, if it can reach plugin management | Content becoming code is our responsibility, so this is defense in depth |
+| A stolen session (a leaked cookie or proxy session) | Yes | No, though the attacker can still read chats and spend quota | It never sees a key |
+| A server-side plugin, including request transforms | Yes, trivially | Yes, trivially | It runs in the process: `secret.key`, the outgoing headers, anything |
+| Another user on the same instance | No | No | Ownership: someone else's connection is `NotFound` |
+| A custom proxy to an `https` base URL | No | No | The proxy only sees a TLS tunnel. An `http` base URL exposes the key to any proxy. |
+
+**So the fix is worth something only against a stolen session and an XSS,** plus in-page plugins that don't bother to escalate. It does nothing against server plugins, which remain full access by design. Its benefit is real but modest, so its cost in annoyance has to be small.
+
+**[P] A less annoying shape: stored credentials bound to an origin**, instead of clearing keys on edit. It also addresses the other annoyance, re-pasting the same key for a second endpoint on the same platform:
+- **A key is stored once, as a named credential** (for example "OpenRouter" with hint `…4321`). Connections reference a credential instead of holding their own key.
+  - A second connection on the same platform picks the existing credential from a list, so there's nothing to copy.
+  - Replacing a key once updates every connection that uses it.
+- **A credential remembers the origins it may be sent to** (scheme, host and port), which are recorded when the key is entered.
+  - A path change on the same host (`/v1` to `/api/v1`) needs nothing.
+  - Pointing a connection at a new origin requires typing the key again, once, to bind it there. Code without the key can't do that.
+  - A consent prompt wouldn't work here: in-page code can click it.
+- **The only time a user notices:** moving a key to a different host, which is rare and exactly the case that matters.
+- **The cost:** a `credentials` table and a reference from connections. Today `connections` holds the key directly (migration 0005), and nothing stores real keys yet, so this is a cheap change now.
+- **The alternative is no fix:** accept that a stolen session or an XSS can redirect keys, and say so. That's a defensible choice too, since a stolen session already exposes every chat.
 - **Server plugins run in the server process,** so they can read `secret.key` and decrypt every stored key. In a multi-user instance that means every user's:
   - Server-side plugins are instance-wide code, installable only by an admin.
   - Per-user customization in a multi-user instance means browser-side and declarative plugins.
@@ -184,11 +209,25 @@ The rule that protects the main objective: a registry is added when a core featu
 - **Namespaced chat state keys,** before the first extension needs them (`@rp/shared/state.ts` is a closed union today).
 - **Library documents keep `extensions` as a namespaced object,** matching the card spec, when the importers are built.
 - **The CSP restricts `connect-src` to our origin** from the first client release.
-- **The key-clearing change (§6.1).**
+- **The key decision in §6.1:** origin-bound credentials, or no fix. Cheapest to change before real keys are stored.
 
-## 9. Open questions
+## 9. Later: review, authoring and the public registry
 
-1. The key-clearing change (§6.1): adopt now?
+Written down now, built after the product works (owner, 2026-10-11):
+- **[D] Registry admission:** agents scan every extension that applies to join the registry, including its dependencies, before it's admitted.
+- **[D] A local review skill:** the user can ask their own agent to review an extension, and its dependencies, before enabling it.
+- **[D] Optional GitHub app integration**, so non-developers can author and share:
+  - the user makes a GitHub account and logs in to the harness with OAuth
+  - their agent can then create and push repositories, and apply to the public registry, through a PR or another mechanism
+  - agents review submissions automatically, and may approve them for inclusion
+- **[P] The pieces this reuses:**
+  - every plugin is already a git repo (§4), so publishing is a push
+  - declared surfaces (§5) are what a reviewer agent checks the code against: "declares client-only, but imports a server module" is a finding
+  - the local review skill is the same review the registry runs
+
+## 10. Open questions
+
+1. Key redirection (§6.1): origin-bound credentials, which also remove the re-pasting, or accept the gap?
 2. Applying updates to an enabled plugin: always prompt, prompt with "allow for this session", or a per-plugin "trusted" setting (§5)?
 3. Declared surfaces: keep them, or keep only the client/server distinction (§5)?
 4. Out-of-process server plugins, opt-in later or never (§6.1)?

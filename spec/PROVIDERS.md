@@ -180,6 +180,7 @@ Steps:
 - **The secret is automatic (owner [D]: setup must be trivial).** The server generates one at first start in `DATA_DIR/secret.key`, mode 0600. `SECRET_KEY` (an env var or a Docker secret file) is optional and overrides it.
   - Honest scope: with the key file next to the database, encryption protects against a leaked database or backup on its own, not against someone holding the whole data directory. Keeping `SECRET_KEY` elsewhere closes that gap for those who want it.
 - **Write-only** (DESIGN §9, §11). No RPC returns a key. Reads return `hasKey` and `keyHint`.
+- **[O] Origin-bound credentials** ([PLUGINS.md](PLUGINS.md) §6.1): store each key once as a named credential that connections reference, bound to the origins it was entered for. That removes re-pasting a key for a second endpoint on the same platform (the owner expects write-only keys to annoy users there), and stops anything acting as the user from redirecting a key to a new host.
 - **Decrypted only for a request**, on the main thread, and never logged. Provider error text is shown to the user, so error bodies are scrubbed of the key before they're stored or sent.
 - **Rotating `SECRET_KEY`**: a `rekey` command, later. Until then, a lost secret means re-entering the keys. The connections themselves survive.
 
