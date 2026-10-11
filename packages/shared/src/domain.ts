@@ -1,7 +1,7 @@
 import { Schema } from "effect"
-import { ID_TABLE } from "./id.ts"
+import { idSchema } from "./id.ts"
 
-export const UserId = Schema.String.pipe(Schema.brand("UserId")).annotate({ [ID_TABLE]: "user" })
+export const UserId = idSchema("UserId", "user")
 export type UserId = typeof UserId.Type
 
 export const UserRole = Schema.Literals(["admin", "user"])

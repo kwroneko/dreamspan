@@ -1,16 +1,16 @@
 // The message graph as the rest of the app sees it (DATA-MODEL.md §4).
 import { Schema } from "effect"
-import { ID_TABLE } from "./id.ts"
+import { idSchema } from "./id.ts"
 
-export const ChatId = Schema.String.pipe(Schema.brand("ChatId")).annotate({ [ID_TABLE]: "chat" })
+export const ChatId = idSchema("ChatId", "chat")
 export type ChatId = typeof ChatId.Type
-export const LaneId = Schema.String.pipe(Schema.brand("LaneId")).annotate({ [ID_TABLE]: "lane" })
+export const LaneId = idSchema("LaneId", "lane")
 export type LaneId = typeof LaneId.Type
-export const SlotId = Schema.String.pipe(Schema.brand("SlotId")).annotate({ [ID_TABLE]: "slot" })
+export const SlotId = idSchema("SlotId", "slot")
 export type SlotId = typeof SlotId.Type
-export const VersionId = Schema.String.pipe(Schema.brand("VersionId")).annotate({ [ID_TABLE]: "version" })
+export const VersionId = idSchema("VersionId", "version")
 export type VersionId = typeof VersionId.Type
-export const EntityId = Schema.String.pipe(Schema.brand("EntityId")).annotate({ [ID_TABLE]: "entity" })
+export const EntityId = idSchema("EntityId", "entity")
 export type EntityId = typeof EntityId.Type
 
 export const ChatKind = Schema.Literals(["rp", "workshop"])

@@ -35,6 +35,22 @@ export default tseslint.config(
     }
   },
   {
+    // Id schemas come from idSchema, which annotates their table: a brand alone leaves no
+    // trace in a schema, and code that looks for ids (state.ts) would miss it.
+    files: ["packages/*/src/**/*.{ts,tsx}"],
+    ignores: ["packages/shared/src/id.ts"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector:
+            "CallExpression[callee.property.name=/^(brand|fromBrand)$/], CallExpression[callee.name=/^(brand|fromBrand)$/]",
+          message: "Make id schemas with idSchema (@rp/shared/id.ts)."
+        }
+      ]
+    }
+  },
+  {
     // Every outgoing request goes through the network module, so none can skip the
     // instance proxy by accident (spec/PROVIDERS.md §6.2).
     files: ["packages/server/src/**/*.ts"],

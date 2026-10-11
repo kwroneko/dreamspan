@@ -2,7 +2,7 @@
 // lorebooks, notes and preset overlays. Revisions are immutable snapshots; refs are the
 // movable pointers users pick. One mechanism serves all kinds.
 import { Schema } from "effect"
-import { ID_TABLE } from "./id.ts"
+import { idSchema } from "./id.ts"
 import { ChatId, EntityId } from "./chat.ts"
 
 export const EntityKind = Schema.Literals(["card", "preset", "lorebook", "note", "preset_overlay"])
@@ -16,9 +16,9 @@ export type EntityKind = typeof EntityKind.Type
 export const RefKind = Schema.Literals(["upstream", "variant", "chat_override"])
 export type RefKind = typeof RefKind.Type
 
-export const RefId = Schema.String.pipe(Schema.brand("RefId")).annotate({ [ID_TABLE]: "ref" })
+export const RefId = idSchema("RefId", "ref")
 export type RefId = typeof RefId.Type
-export const RevisionId = Schema.String.pipe(Schema.brand("RevisionId")).annotate({ [ID_TABLE]: "revision" })
+export const RevisionId = idSchema("RevisionId", "revision")
 export type RevisionId = typeof RevisionId.Type
 
 /** A library document: any JSON object. Per-kind schemas arrive with the importers. */

@@ -1,10 +1,19 @@
 // UUIDv7: time-ordered, so `ORDER BY id` approximates creation order (DATA-MODEL §1).
+// Id schemas are made here too.
+import { Schema } from "effect"
 
 /**
  * The annotation every id schema carries, naming the table its values point into. A brand
  * leaves no trace in a schema's AST, so this is how code finds the ids in one (state.ts).
  */
 export const ID_TABLE = "rp/idTable"
+
+/**
+ * An id schema: a branded string annotated with its table. ESLint allows `Schema.brand`
+ * only here, so no id type can be invisible to code that looks for ids.
+ */
+export const idSchema = <const B extends string>(brand: Parameters<typeof Schema.brand<B>>[0], table: string) =>
+  Schema.String.pipe(Schema.brand<B>(brand)).annotate({ [ID_TABLE]: table })
 
 let lastMs = 0
 let sequence = 0

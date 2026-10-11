@@ -72,7 +72,10 @@ describe("state key declarations", () => {
       ]),
       Schema.Struct({ items: Schema.Array(Schema.Struct({ entity: EntityId })) }),
       Schema.Struct({ inner: Schema.Struct({ entity: EntityId }) }),
-      Schema.Record(Schema.String, EntityId)
+      Schema.Record(Schema.String, EntityId),
+      Schema.Struct({ map: Schema.Record(EntityId, Schema.Boolean) }),
+      Schema.Struct({ key: Schema.TemplateLiteral([EntityId, ":", RefId]) }),
+      Schema.Struct({ entity: Schema.suspend(() => EntityId) })
     ]
     expect(holes.map((schema) => stateKeyProblems(schema.ast, none))).toEqual([
       [`entity id at "" isn't in a top-level field`],
@@ -81,7 +84,10 @@ describe("state key declarations", () => {
       [`ref id in "ref" isn't declared`],
       [`entity id at "items[].entity" isn't in a top-level field`],
       [`entity id at "inner.entity" isn't in a top-level field`],
-      [`entity id at ".*" isn't in a top-level field`]
+      [`entity id at ".*" isn't in a top-level field`],
+      [`entity id at "map.<key>" isn't in a top-level field`],
+      [`"key": an id inside a template literal can't be checked`],
+      [`"entity": a suspended schema isn't searched`]
     ])
   })
 

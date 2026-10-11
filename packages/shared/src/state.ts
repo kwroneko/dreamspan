@@ -108,8 +108,13 @@ export const stateKeyIds: { readonly [K in StateEventData["key"]]: StateKeyIds<V
   "author_note.set": { ids: { note: { table: "entity", kind: "note" } } }
 }
 
-/** Where ids sit in a schema: `field`, `field[]`, or deeper, with the table each names. */
-const idPositions = (ast: SchemaAST.AST, path: string): ReadonlyArray<{ path: string; table: string }> => {
+/**
+ * Where ids sit in a schema: `field`, `field[]`, or deeper (`.<key>` for a record's keys),
+ * with the table each names. Where ids can't be found, `hidden` says why.
+ */
+type Position = { readonly path: string; readonly table: string } | { readonly path: string; readonly hidden: string }
+
+const idPositions = (ast: SchemaAST.AST, path: string): ReadonlyArray<Position> => {
   const table = ast.annotations?.[ID_TABLE]
   if (typeof table === "string") return [{ path, table }]
   switch (ast._tag) {
@@ -122,12 +127,19 @@ const idPositions = (ast: SchemaAST.AST, path: string): ReadonlyArray<{ path: st
         ...ast.propertySignatures.flatMap((p) =>
           idPositions(p.type, path === "" ? String(p.name) : `${path}.${String(p.name)}`)
         ),
-        ...ast.indexSignatures.flatMap((index) => idPositions(index.type, `${path}.*`))
+        ...ast.indexSignatures.flatMap((index) => [
+          ...idPositions(index.parameter, `${path}.<key>`),
+          ...idPositions(index.type, `${path}.*`)
+        ])
       ]
     case "Declaration":
       return ast.typeParameters.flatMap((parameter) => idPositions(parameter, path))
+    case "TemplateLiteral":
+      return ast.parts.some((part) => idPositions(part, path).length > 0)
+        ? [{ path, hidden: "an id inside a template literal can't be checked" }]
+        : []
     case "Suspend":
-      return [{ path, table: "unknown (a suspended schema isn't searched)" }]
+      return [{ path, hidden: "a suspended schema isn't searched" }]
     default:
       return []
   }
@@ -145,8 +157,14 @@ export const stateKeyProblems = (
 ): ReadonlyArray<string> => {
   const positions = idPositions(value, "")
   const problems: Array<string> = []
-  for (const { path, table } of positions) {
-    const field = /^[^.[\]*]+(\[\])?$/.test(path) ? path.replace("[]", "") : undefined
+  for (const position of positions) {
+    const { path } = position
+    if ("hidden" in position) {
+      problems.push(`"${path}": ${position.hidden}`)
+      continue
+    }
+    const { table } = position
+    const field = /^[^.[\]*<>]+(\[\])?$/.test(path) ? path.replace("[]", "") : undefined
     const declaration = field === undefined ? undefined : declared.ids[field]
     if (field === undefined) problems.push(`${table} id at "${path}" isn't in a top-level field`)
     else if (declaration === undefined) problems.push(`${table} id in "${field}" isn't declared`)
