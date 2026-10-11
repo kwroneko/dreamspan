@@ -4,6 +4,7 @@ import { SqlClient } from "effect/sql"
 import {
   accounts,
   bin,
+  binIndex,
   credentials,
   dataModel,
   draftHistory,
@@ -51,7 +52,8 @@ export const migrations = {
   "0005_providers": providersMigration,
   "0006_credentials": credentialsMigration,
   "0007_accounts": runAll(accounts),
-  "0008_secret_bindings": runAll(secretBindings)
+  "0008_secret_bindings": runAll(secretBindings),
+  "0009_bin_index": runAll(binIndex)
 }
 
 export const Migrations = SqliteMigrator.layer({ loader: SqliteMigrator.fromRecord(migrations) })

@@ -121,17 +121,19 @@ export const makeReadHandlers = Effect.gen(function* () {
 
     ListBin: ({ userId, limit, before }) =>
       sql<Parameters<typeof toBinItem>[0]>`
-        SELECT * FROM bin_items WHERE user_id = ${userId} AND (${before} IS NULL OR deleted_at < ${before})
+        SELECT * FROM bin_items WHERE user_id = ${userId}
+          AND (${before?.id ?? null} IS NULL OR (deleted_at, id) < (${before?.deletedAt ?? null}, ${before?.id ?? null}))
         ORDER BY deleted_at DESC, id DESC LIMIT ${limit}`.pipe(
         Effect.map((rows) => rows.map(toBinItem)),
         query("ListBin")
       ),
 
-    ListRecoveredTexts: ({ userId, source, limit }) =>
+    ListRecoveredTexts: ({ userId, source, limit, before }) =>
       sql<Parameters<typeof toRecoveredText>[0]>`
         SELECT * FROM recovered_texts WHERE user_id = ${userId}
           AND (${source?.targetKind ?? null} IS NULL OR (source_kind = ${source?.targetKind ?? null}
             AND source_id = ${source?.targetId ?? null} AND source_field = ${source?.field ?? null}))
+          AND (${before?.id ?? null} IS NULL OR (created_at, id) < (${before?.createdAt ?? null}, ${before?.id ?? null}))
         ORDER BY created_at DESC, id DESC LIMIT ${limit}`.pipe(
         Effect.map((rows) => rows.map((row) => toRecoveredText(row, false))),
         query("ListRecoveredTexts")

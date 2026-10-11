@@ -1,16 +1,14 @@
 // Recycle bin write handlers (DESIGN §6.2), in the writer worker.
-import type { BinLimits } from "@rp/shared/bin.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
-import { makeBin, toBinItem } from "./bin.ts"
+import { type Bin, toBinItem } from "./bin.ts"
 import { NotFound, WriteOps } from "./ops.ts"
 import { transaction } from "./tx.ts"
 
-export const makeBinWriteHandlers = (limits: BinLimits) =>
+export const makeBinWriteHandlers = (bin: Bin) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
-    const bin = makeBin(sql, limits)
 
     /** Runs a delete, keeps the section within its limits, and returns the new item. */
     const deleting = <E, R>(operation: string, userId: UserId, del: Effect.Effect<string, E, R>) =>

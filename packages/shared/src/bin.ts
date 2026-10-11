@@ -2,8 +2,7 @@
 import { Schema } from "effect"
 import { DraftTargetKind } from "./drafts.ts"
 
-export const BinItemKind = Schema.Literals(["chat", "message", "branch", "version", "entity", "connection"])
-export type BinItemKind = typeof BinItemKind.Type
+const BinItemKind = Schema.Literals(["chat", "message", "branch", "version", "entity", "connection"])
 
 /** Something explicitly deleted: a chat, a message, a swipe, a branch, a library entity, a connection. */
 export class BinItem extends Schema.Class<BinItem>("BinItem")({
@@ -26,7 +25,10 @@ export class RecoveredText extends Schema.Class<RecoveredText>("RecoveredText")(
   sourceField: Schema.String,
   /** Where it was typed, e.g. "Mira › description" or "Composer in Harbor". */
   sourceLabel: Schema.String,
-  /** commit: from before a destructive change in a session that was then saved; discard: a discarded draft. */
+  /**
+   * commit: from before a destructive change, saved when the session was committed or when
+   * history retention dropped the change; discard: a discarded draft.
+   */
   reason: Schema.Literals(["commit", "discard"]),
   /** The full text for a single read; an excerpt in lists. */
   content: Schema.String,

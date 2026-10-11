@@ -5,18 +5,16 @@ import type { Doc, MergeOutcome, RefId } from "@rp/shared/library.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
-import type { BinLimits } from "@rp/shared/bin.ts"
-import { makeBin } from "./bin.ts"
-import { makeDraftStore } from "./drafts.ts"
+import type { Bin } from "./bin.ts"
 import { docHash, makeLibraryQueries, type RefRow, searchText, toLibraryRef } from "./library.ts"
 import { FollowerMerge, NotFound, RefChange, RefOperationRefused, StaleWrite, WriteOps } from "./ops.ts"
 import { transaction } from "./tx.ts"
 
-export const makeLibraryWriteHandlers = (binLimits: BinLimits) =>
+export const makeLibraryWriteHandlers = (bin: Bin) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const lib = makeLibraryQueries(sql)
-    const drafts = makeDraftStore(sql, makeBin(sql, binLimits).recover)
+    const { drafts } = bin
 
     const insertRevision = (options: {
       readonly entityId: string

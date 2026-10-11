@@ -4,11 +4,13 @@ import { workerData } from "node:worker_threads"
 import { NodeRuntime, NodeWorkerRunner } from "@effect/platform-node"
 import { Effect, Layer } from "effect"
 import { RpcServer } from "effect/rpc"
+import { SqlClient } from "effect/sql"
 import { writerConnection } from "./connection.ts"
 import { Migrations } from "./migrations.ts"
 import { WriteOps } from "./ops.ts"
 import { defaultBinLimits, type BinLimits } from "@rp/shared/bin.ts"
 import { makeAccountWriteHandlers } from "./accounts.ts"
+import { makeBin } from "./bin.ts"
 import { makeBinWriteHandlers } from "./binWrites.ts"
 import { makeLibraryWriteHandlers } from "./libraryWrites.ts"
 import { makeProviderWriteHandlers } from "./providerWrites.ts"
@@ -22,17 +24,18 @@ const { dbPath, binLimits = defaultBinLimits } = workerData as {
 RpcServer.layer(WriteOps, { concurrency: 1 }).pipe(
   Layer.provide(
     WriteOps.toLayer(
-      Effect.map(
-        Effect.all([
-          makeWriteHandlers(binLimits),
-          makeLibraryWriteHandlers(binLimits),
-          makeBinWriteHandlers(binLimits),
+      Effect.gen(function* () {
+        // One bin (and draft store) for every handler group.
+        const bin = makeBin(yield* SqlClient.SqlClient, binLimits)
+        const [graph, library, binOps, providers, accounts] = yield* Effect.all([
+          makeWriteHandlers(bin),
+          makeLibraryWriteHandlers(bin),
+          makeBinWriteHandlers(bin),
           makeProviderWriteHandlers,
           makeAccountWriteHandlers
-        ]),
-        ([graph, library, bin, providers, accounts]) =>
-          WriteOps.of({ ...graph, ...library, ...bin, ...providers, ...accounts })
-      )
+        ])
+        return WriteOps.of({ ...graph, ...library, ...binOps, ...providers, ...accounts })
+      })
     )
   ),
   Layer.provide(Migrations),

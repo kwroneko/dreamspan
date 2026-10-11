@@ -11,7 +11,6 @@ export const DraftTargetKind = Schema.Literals([
   "entity_field",
   "summary_edit"
 ])
-export type DraftTargetKind = typeof DraftTargetKind.Type
 
 /** What a draft is for: the composer of a chat, the edit of a version, a field of a ref... */
 export class DraftKey extends Schema.Class<DraftKey>("DraftKey")({
@@ -33,7 +32,7 @@ export class DraftKey extends Schema.Class<DraftKey>("DraftKey")({
 export const composerKey = (chatId: string, tipSlotId: string | null) =>
   new DraftKey({ targetKind: "composer", targetId: chatId, field: tipSlotId ?? "" })
 
-export const DraftStatus = Schema.Literals(["active", "committed", "discarded"])
+const DraftStatus = Schema.Literals(["active", "committed", "discarded"])
 
 export class Draft extends Schema.Class<Draft>("Draft")({
   id: Schema.String,
@@ -109,10 +108,11 @@ export const isEmptyPatch = (patch: Patch) => patch.removed.length === 0 && patc
 
 /**
  * A change that throws away a lot of text. It always gets its own history entry, so the
- * text before it can be restored in one step.
+ * text before it can be restored in one step. Only lengths matter, so history can be
+ * scanned without rebuilding earlier texts.
  */
-export const isDestructive = (patch: Patch, before: string) =>
-  patch.removed.length > 200 || (before.length >= 20 && patch.removed.length > before.length / 2)
+export const isDestructive = (patch: Patch, beforeLength: number) =>
+  patch.removed.length > 200 || (beforeLength >= 20 && patch.removed.length > beforeLength / 2)
 
 /** History tuning. Saves arrive debounced from the client, roughly once a second while typing. */
 export const DraftHistoryPolicy = {

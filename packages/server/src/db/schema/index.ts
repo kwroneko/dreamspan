@@ -1,5 +1,5 @@
 import { accounts } from "./accounts.ts"
-import { bin } from "./bin.ts"
+import { bin, binIndex } from "./bin.ts"
 import { chats } from "./chats.ts"
 import { credentials } from "./credentials.ts"
 import { draftHistory } from "./drafts.ts"
@@ -24,5 +24,5 @@ export const users = [
 // Tables first, then the triggers that refer across them.
 export const dataModel = [...platform, ...library, ...chats, ...history, ...integrity, ...search]
 
-export { accounts, bin, credentials, draftHistory, providers }
+export { accounts, bin, binIndex, credentials, draftHistory, providers }
 export { secretBindings } from "./credentials.ts"

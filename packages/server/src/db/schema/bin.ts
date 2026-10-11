@@ -57,3 +57,7 @@ export const bin = [
       AND NOT (NEW.purged_at IS NOT NULL AND NEW.content = '')
     BEGIN SELECT RAISE(ABORT, 'model-written versions are immutable once generated; create a new version'); END`
 ]
+
+// Purging a message or branch deletes the swipes binned separately inside it, found by
+// target. Without this index each purge scanned the whole bin.
+export const binIndex = [`CREATE INDEX bin_items_target ON bin_items(target_id)`]

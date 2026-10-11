@@ -5,21 +5,19 @@ import { uuidv7 } from "@rp/shared/id.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { composerKey, type DraftKey } from "@rp/shared/drafts.ts"
-import type { BinLimits } from "@rp/shared/bin.ts"
-import { makeBin } from "./bin.ts"
-import { makeDraftStore } from "./drafts.ts"
+import type { Bin } from "./bin.ts"
 import { AppendResult, NotFound, StaleWrite, WriteOps } from "./ops.ts"
 import { type ChatRow, toChat, toVersion, type VersionRow } from "./rows.ts"
 import { transaction as runTransaction } from "./tx.ts"
 
 type WriteHandlers = Parameters<typeof WriteOps.of>[0]
 /** Graph and chat write handlers. Library handlers are in libraryWrites.ts. */
-export const makeWriteHandlers = (binLimits: BinLimits) =>
+export const makeWriteHandlers = (bin: Bin) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
 
     const transaction = (operation: string) => runTransaction(sql, operation)
-    const drafts = makeDraftStore(sql, makeBin(sql, binLimits).recover)
+    const { drafts } = bin
 
     /** A draft's target must belong to the user. */
     const draftTarget = (userId: UserId, key: DraftKey) => {

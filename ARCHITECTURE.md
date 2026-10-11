@@ -307,8 +307,9 @@ The first save checks that the target belongs to the user. Drafts are never visi
 - **Typing coalesces.** A save within 5 s of the last entry extends it, until the entry spans 60 s, so continuous typing is one entry per minute rather than one per save.
 - **A destructive change always gets its own entry,** so the text before it is one step back. Destructive means removing more than 200 characters or more than half the text, e.g. select-all plus a stray key.
 - `DraftHistory` lists the restorable states newest first, with lengths and short excerpts. `GetDraftState` returns one state's full text, built by undoing newer entries from the current text.
+- Walking history back needs only lengths, since destructiveness depends only on them. Earlier text is rebuilt only as far back as needed, as slices of the current text, so no step copies the whole text.
 - `RestoreDraftState` moves the draft back to that state, and records the restore as its own entry, so it can be undone too.
-- At most 1000 entries and 1,000,000 changed characters are kept per draft, oldest dropped first.
+- At most 1000 entries and 1,000,000 changed characters are kept per draft, oldest dropped first. The text from before a dropped destructive change goes to the recovered-text section first.
 
 **Committing.** `AppendMessage`, `AddVersion` and `EditRef` take an optional `commitDraft` (key plus the row version the client sent from) and commit that draft **in the same transaction**, so a reload never shows already-sent text in the composer. If the draft moved on since (another tab kept typing), it stays active with the newer text, and the write returns it. `ClearDraft` commits or discards a draft explicitly.
 
@@ -331,7 +332,7 @@ This applies to every kind of draft: what a bad save loses is the editing sessio
 
 ### 3.11 Recycle bin
 
-Deleting is deliberate and fundamentally non-destructive (DESIGN §6.2): deletes go to a per-user bin, from which they can be restored or deleted for good. Schema in migration `0004_recycle_bin`, logic in `db/bin.ts`, handlers in `db/binWrites.ts`, types in `@rp/shared/bin.ts`.
+Deleting is deliberate and fundamentally non-destructive (DESIGN §6.2): deletes go to a per-user bin, from which they can be restored or deleted for good. Schema in migrations `0004_recycle_bin` and `0009_bin_index`, logic in `db/bin.ts`, handlers in `db/binWrites.ts`, types in `@rp/shared/bin.ts`. The writer builds one bin, with the draft store it recovers text for, and shares it across its handler groups.
 
 **Deleting marks, it doesn't remove.**
 - A delete creates one `bin_items` row and marks everything it covers with `deleted_at` and that item's id: one slot for a message, a whole subtree for a branch, one version for a swipe, a chat, or an entity.
@@ -341,18 +342,21 @@ Deleting is deliberate and fundamentally non-destructive (DESIGN §6.2): deletes
 **Deletes need no confirmation:** each returns the bin item for the "deleted, open the bin" toast. The behaviors:
 - **Swipes:** `DeleteVersion` deletes one swipe, the normal delete (owner). If it was showing, the previous swipe shows, as in ST, or the next one if it was the first. Deleting a message's only remaining version deletes the message.
 - **Messages and branches:** `DeleteMessage` deletes one message, and its replies stay. `DeleteBranch` deletes a message and everything below it, as one item.
-- **The active leaf:** if it's deleted, the chat's tip moves to the nearest remaining ancestor, and the composer goes with it unless that tip has text of its own.
+- **The active leaf:** if it's deleted, the chat's tip moves to the nearest remaining ancestor, and the composer goes with it unless that tip has text of its own. An empty composer already there is ended as a discard before it's replaced, so text typed and wiped there is recovered.
 - **Chats and entities:** `DeleteChat` and `DeleteEntity`.
 
 **Deleting for good** (`PurgeBinItem`, `EmptyBin`; the UI confirms these):
-- **A chat** is deleted, with everything in it and its other bin items.
+- **A chat** is deleted, with everything in it and its other bin items. A connection whose preset was one of its chat overrides loses that preset.
 - **An entity** loses its refs, revisions and tags. The entity row stays, so messages that named it as their speaker still point somewhere.
 - **A message, branch or swipe** has its versions emptied: content, reasoning, display forms, amend history and attachments. Its slots stay as placeholders, so the conversation's structure and any summaries over it remain valid. This is the one exception to model output being frozen: a version marked `purged_at` may be emptied.
+- Purging is set-based: `EmptyBin` runs the same few statements whatever the bin holds.
 
 **Two independent sections**, each evicting its own oldest entries past its own limits, never the other's:
-- **Deleted items** (`ListBin`): 10,000 items or 2 GB by default. Eviction deletes the oldest for good.
-- **Recovered text** (`ListRecoveredTexts`, `GetRecoveredText`, `DeleteRecoveredText`, `ClearRecoveredTexts`): 2,000 texts or 200 MB by default. It's produced passively by draft commits and discards (§3.10), so it never shows a toast.
+- **Deleted items** (`ListBin`): 10,000 items or 2 GB by default. Eviction deletes the oldest for good, each in a savepoint: a purge that fails is rolled back, logged and skipped, so it never fails the delete that triggered it.
+- Sizes are UTF-8 bytes. A deleted item's is what deleting it for good frees: its versions' text columns, amend history and attachment alt text, or an entity's revisions. Messages and swipes already in the bin count only under their own items.
+- **Recovered text** (`ListRecoveredTexts`, `GetRecoveredText`, `DeleteRecoveredText`, `ClearRecoveredTexts`): 2,000 texts or 200 MB by default. It's produced passively by draft commits, discards and history retention (§3.10), so it never shows a toast.
 - Each entry records where it came from: a title, an excerpt and origin details for deleted items, a source label like `Composer in "Harbor"` for recovered text. So text can be copied out without restoring.
+- Both lists page newest first, with a cursor of the last entry's time and id, so entries from the same millisecond are never skipped.
 - Limits are `Database.layer({ binLimits })`.
 
 ### 3.12 Connections, models and the usage ledger

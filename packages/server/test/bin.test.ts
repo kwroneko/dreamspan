@@ -4,9 +4,11 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { DatabaseSync } from "node:sqlite"
 import { assert, describe, it } from "@effect/vitest"
-import type { BinLimits } from "@rp/shared/bin.ts"
+import type { BinItem, BinLimits, RecoveredText } from "@rp/shared/bin.ts"
 import { NewVersion, type SlotId } from "@rp/shared/chat.ts"
 import { composerKey } from "@rp/shared/drafts.ts"
+import { uuidv7 } from "@rp/shared/id.ts"
+import type { ConnectionId } from "@rp/shared/providers.ts"
 import { Effect } from "effect"
 import { databaseFile } from "../src/db/connection.ts"
 import * as Database from "../src/db/Database.ts"
@@ -60,12 +62,14 @@ const setup = (handle = "ana") =>
         .GetPath({ userId, chatId: chat.id, leafSlotId, limit: 100 })
         .pipe(Effect.map((w) => w.entries.map((e) => e.version.content)))
     const bin = () => reader.ListBin({ userId, limit: 100, before: null })
+    const newChat = (title: string) =>
+      writer.CreateChat({ userId, kind: "rp", status: "active", title, participants: [], greeting: null })
     // root → a → b → c
     const root = yield* append(null, "root")
     const a = yield* append(root.slotId, "a")
     const b = yield* append(a.slotId, "b")
     const c = yield* append(b.slotId, "c")
-    return { writer, reader, userId, card, chat, say, append, path, bin, root, a, b, c }
+    return { writer, reader, userId, card, chat, say, append, path, bin, newChat, root, a, b, c }
   })
 
 describe("recycle bin", () => {
@@ -139,6 +143,31 @@ describe("recycle bin", () => {
       assert.strictEqual(
         (yield* reader.GetDraft({ userId, key: composerKey(chat.id, b.slotId) }))?.content,
         "half-typed"
+      )
+    }).pipe(Effect.provide(database()))
+  )
+
+  it.live("moving the tip back never deletes a composer's history without recovering its text", () =>
+    Effect.gen(function* () {
+      const { writer, reader, userId, chat, b, c, append } = yield* setup()
+      const d = yield* append(b.slotId, "d") // b → {c, d}, at d
+      const key = composerKey(chat.id, d.slotId)
+      const typed = "A long reply typed at d, then wiped by a stray select-all."
+      const draft = yield* writer.SaveDraft({
+        userId,
+        key,
+        content: typed,
+        expectedRowVersion: null,
+        baseRevision: null
+      })
+      yield* writer.SaveDraft({ userId, key, content: "", expectedRowVersion: draft.rowVersion, baseRevision: null })
+      yield* writer.DeleteMessage({ userId, slotId: d.slotId }) // the wiped composer moves to b
+      yield* append(c.slotId, "e")
+      yield* writer.DeleteBranch({ userId, slotId: c.slotId }) // back to b again
+      const texts = yield* reader.ListRecoveredTexts({ userId, source: null, limit: 10, before: null })
+      assert.deepStrictEqual(
+        texts.map((t) => t.content),
+        [typed]
       )
     }).pipe(Effect.provide(database()))
   )
@@ -248,7 +277,7 @@ describe("recycle bin", () => {
         yield* writer.ClearDraft({ userId, key: draft.key, outcome: "discarded", expectedRowVersion: draft.rowVersion })
       }
       assert.deepStrictEqual(
-        (yield* reader.ListRecoveredTexts({ userId, source: null, limit: 10 })).map((t) => t.content),
+        (yield* reader.ListRecoveredTexts({ userId, source: null, limit: 10, before: null })).map((t) => t.content),
         ["three", "two"]
       )
       assert.strictEqual((yield* bin()).length, 2)
@@ -258,6 +287,183 @@ describe("recycle bin", () => {
       )
     )
   )
+
+  it.live("emptying the bin deletes everything in it for good", () => {
+    const dir = mkdtempSync(join(tmpdir(), "rp-bin-"))
+    return Effect.gen(function* () {
+      const { writer, reader, userId, card, say, b, c, path, bin, newChat } = yield* setup()
+      const swipe = yield* writer.AddVersion({
+        userId,
+        slotId: b.slotId,
+        version: say("b, swipe"),
+        select: false,
+        commitDraft: null
+      })
+      yield* writer.DeleteVersion({ userId, versionId: swipe.id })
+      yield* writer.DeleteMessage({ userId, slotId: b.slotId })
+      yield* writer.DeleteVersion({ userId, versionId: c.version.id })
+      const other = yield* newChat("Other")
+      yield* writer.DeleteChat({ userId, chatId: other.id })
+      yield* writer.DeleteEntity({ userId, entityId: card.entityId })
+
+      assert.deepStrictEqual(yield* writer.EmptyBin({ userId }), { purged: 5 })
+      assert.deepStrictEqual(yield* bin(), [])
+      assert.deepStrictEqual(yield* path(), ["root", "a"])
+      const db = new DatabaseSync(databaseFile(dir), { readOnly: true })
+      const versions = db
+        .prepare(`SELECT content FROM versions WHERE purged_at IS NOT NULL ORDER BY content`)
+        .all()
+        .map((r) => r.content)
+      const chats = db.prepare(`SELECT count(*) AS n FROM chats WHERE id = ?`).get(other.id)
+      db.close()
+      assert.deepStrictEqual(versions, ["", "", ""])
+      assert.deepStrictEqual(chats, { n: 0 })
+      assert.deepStrictEqual(yield* reader.ListLibrary({ userId, kind: "card", tag: null, archived: false }), [])
+    }).pipe(Effect.provide(database(dir)))
+  })
+
+  it.live(
+    "a chat holding a connection's preset override can be evicted, and a failed eviction never blocks a delete",
+    () => {
+      const dir = mkdtempSync(join(tmpdir(), "rp-bin-"))
+      return Effect.gen(function* () {
+        const { writer, reader, userId, a, b, bin, newChat, path } = yield* setup()
+        const preset = yield* writer.CreateEntity({
+          userId,
+          kind: "preset",
+          label: "Narrator",
+          subtitle: "",
+          doc: { name: "Narrator" },
+          schemaVersion: 1,
+          origin: "user",
+          sourcePath: null
+        })
+        const story = yield* newChat("Story")
+        const override = yield* writer.CreateChatOverride({ userId, refId: preset.ref.id, chatId: story.id })
+        const connection = yield* writer.CreateConnection({
+          userId,
+          connectionId: uuidv7() as ConnectionId,
+          kind: "openai-chat",
+          api: "openai-completions",
+          settings: {
+            name: "Local",
+            baseUrl: "http://127.0.0.1:8081/v1",
+            compat: {},
+            cacheTtlS: null,
+            maxConcurrent: null,
+            presetOverrideRefId: override.id
+          },
+          credential: { existing: null }
+        })
+        yield* writer.DeleteChat({ userId, chatId: story.id })
+        // The bin holds one item, so this delete evicts the chat for good.
+        yield* writer.DeleteMessage({ userId, slotId: b.slotId })
+        assert.deepStrictEqual(
+          (yield* bin()).map((i) => i.excerpt),
+          ["b"]
+        )
+        const after = yield* reader.GetConnection({ userId, connectionId: connection.id })
+        assert.isNull(after.presetOverrideRefId)
+
+        // A purge that fails at its last step is rolled back whole, skipped and left in the
+        // bin; the delete goes through.
+        const sqlite = (statement: string) => {
+          const db = new DatabaseSync(databaseFile(dir))
+          db.exec(statement)
+          db.close()
+        }
+        sqlite(`CREATE TRIGGER purge_fails BEFORE DELETE ON bin_items BEGIN SELECT RAISE(ABORT, 'injected'); END`)
+        yield* writer.DeleteMessage({ userId, slotId: a.slotId })
+        const items = yield* bin()
+        assert.deepStrictEqual(
+          items.map((i) => i.excerpt),
+          ["a", "b"]
+        )
+        sqlite(`DROP TRIGGER purge_fails`)
+        yield* writer.RestoreBinItem({ userId, itemId: items[1]!.id })
+        assert.deepStrictEqual(yield* path(), ["root", "b", "c"])
+      }).pipe(
+        Effect.provide(database(dir, { deletedItems: 1, deletedBytes: 1e9, recoveredTexts: 10, recoveredBytes: 1e9 }))
+      )
+    }
+  )
+
+  it.live("sizes count bytes of everything a purge frees, and nothing already in the bin twice", () =>
+    Effect.gen(function* () {
+      const { writer, userId, chat, card, a, b } = yield* setup()
+      const cat = "猫".repeat(1000) // 1,000 characters, 3,000 bytes
+      const swipe = yield* writer.AddVersion({
+        userId,
+        slotId: b.slotId,
+        version: new NewVersion({
+          speakerEntityId: card.entityId,
+          writer: "model",
+          content: cat,
+          direction: "terse",
+          status: "complete",
+          macroMode: "verbatim",
+          origin: "generated"
+        }),
+        select: false,
+        commitDraft: null
+      })
+      assert.strictEqual((yield* writer.DeleteVersion({ userId, versionId: swipe.id })).byteSize, 3005)
+      // Each later item leaves out what's already in the bin under an earlier one.
+      assert.strictEqual((yield* writer.DeleteMessage({ userId, slotId: b.slotId })).byteSize, 1) // "b"
+      assert.strictEqual((yield* writer.DeleteBranch({ userId, slotId: a.slotId })).byteSize, 2) // "a", "c"
+      assert.strictEqual((yield* writer.DeleteChat({ userId, chatId: chat.id })).byteSize, 4) // "root"
+    }).pipe(Effect.provide(database()))
+  )
+
+  it.live("pages through items deleted in the same millisecond without skipping any", () => {
+    const dir = mkdtempSync(join(tmpdir(), "rp-bin-"))
+    return Effect.gen(function* () {
+      const { writer, reader, userId, chat, a, b, c } = yield* setup()
+      for (const slot of [a, b, c]) yield* writer.DeleteMessage({ userId, slotId: slot.slotId })
+      for (const text of ["one", "two", "three"]) {
+        const key = composerKey(chat.id, null)
+        const draft = yield* writer.SaveDraft({
+          userId,
+          key,
+          content: text,
+          expectedRowVersion: (yield* reader.GetDraft({ userId, key }))?.rowVersion ?? null,
+          baseRevision: null
+        })
+        yield* writer.ClearDraft({ userId, key, outcome: "discarded", expectedRowVersion: draft.rowVersion })
+      }
+      const db = new DatabaseSync(databaseFile(dir))
+      db.exec(`UPDATE bin_items SET deleted_at = 1000; UPDATE recovered_texts SET created_at = 1000`)
+      db.close()
+
+      // One per page, each page asking for what comes after the last one seen.
+      const items: Array<BinItem> = []
+      for (;;) {
+        const last = items.at(-1)
+        const page = yield* reader.ListBin({
+          userId,
+          limit: 1,
+          before: last ? { deletedAt: last.deletedAt, id: last.id } : null
+        })
+        if (page.length === 0) break
+        items.push(...page)
+      }
+      assert.deepStrictEqual(items.map((i) => i.excerpt).sort(), ["a", "b", "c"])
+
+      const texts: Array<RecoveredText> = []
+      for (;;) {
+        const last = texts.at(-1)
+        const page = yield* reader.ListRecoveredTexts({
+          userId,
+          source: null,
+          limit: 1,
+          before: last ? { createdAt: last.createdAt, id: last.id } : null
+        })
+        if (page.length === 0) break
+        texts.push(...page)
+      }
+      assert.deepStrictEqual(texts.map((t) => t.content).sort(), ["one", "three", "two"])
+    }).pipe(Effect.provide(database(dir)))
+  })
 
   it.live("a user can't see or restore another user's bin", () =>
     Effect.gen(function* () {

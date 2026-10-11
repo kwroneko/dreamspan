@@ -150,7 +150,7 @@ describe("drafts", () => {
       assert.strictEqual(sent.draft?.content, "")
       assert.strictEqual(sent.draft?.historyLength, 0)
       assert.strictEqual(sent.draft?.key.field, sent.slotId)
-      assert.deepStrictEqual(yield* reader.ListRecoveredTexts({ userId, source: null, limit: 10 }), [])
+      assert.deepStrictEqual(yield* reader.ListRecoveredTexts({ userId, source: null, limit: 10, before: null }), [])
       assert.deepStrictEqual(yield* reader.ListActiveDrafts({ userId }), [])
 
       // Typing again starts a new session with a fresh history.
@@ -174,7 +174,7 @@ describe("drafts", () => {
       const { reader, userId, type, send } = yield* setup()
       const recovered = () =>
         reader
-          .ListRecoveredTexts({ userId, source: null, limit: 10 })
+          .ListRecoveredTexts({ userId, source: null, limit: 10, before: null })
           .pipe(Effect.map((texts) => texts.map((t) => [t.reason, t.content])))
       const hours = "Hours of careful work on this reply, about the lighthouse, the storm and the letter."
       yield* type(hours)
@@ -192,6 +192,40 @@ describe("drafts", () => {
       yield* type("Sorry, that was a slip.")
       yield* send("Sorry, that was a slip.")
       assert.strictEqual((yield* recovered()).length, 2)
+    }).pipe(Effect.provide(database()))
+  )
+
+  it.live("every state in the history can be rebuilt", () =>
+    Effect.gen(function* () {
+      const { reader, userId, composer, type, history } = yield* setup()
+      // Each rewrite of the middle removes most of the text, so each is its own entry.
+      const states = ["a", "b", "c", "d", "e"].map((l, i) => `Opening.. ${l.repeat(30 + 5 * i)} ..Closing`)
+      for (const text of states) yield* type(text)
+      const seqs = (yield* history()).map((state) => state.seq)
+      assert.deepStrictEqual(seqs, [4, 3, 2, 1, 0])
+      for (const seq of seqs) {
+        assert.strictEqual((yield* reader.GetDraftState({ userId, key: composer(), seq })).content, states[seq])
+      }
+    }).pipe(Effect.provide(database()))
+  )
+
+  it.live("history retention never drops the text from before a wipe", () =>
+    Effect.gen(function* () {
+      const { reader, userId, type, send } = yield* setup()
+      yield* type("A long chapter. ".repeat(37_500)) // 600,000 characters
+      yield* type("") // wiped
+      // Rewriting past the history's 1,000,000-character budget drops the wipe's entry.
+      yield* type("A new chapter. ".repeat(30_000))
+      yield* send("Sent.")
+      const texts = yield* reader.ListRecoveredTexts({ userId, source: null, limit: 10, before: null })
+      assert.deepStrictEqual(
+        texts.map((t) => [t.reason, t.length]),
+        [["commit", 600_000]]
+      )
+      assert.strictEqual(
+        (yield* reader.GetRecoveredText({ userId, id: texts[0]!.id })).content,
+        "A long chapter. ".repeat(37_500)
+      )
     }).pipe(Effect.provide(database()))
   )
 
@@ -281,7 +315,7 @@ describe("drafts", () => {
         expectedRowVersion: draft.rowVersion
       })
       assert.strictEqual(discarded.content, "")
-      const [text] = yield* reader.ListRecoveredTexts({ userId, source: composer(), limit: 10 })
+      const [text] = yield* reader.ListRecoveredTexts({ userId, source: composer(), limit: 10, before: null })
       assert.strictEqual(text?.reason, "discard")
       assert.strictEqual(text?.content, "Second thoughts.")
       assert.strictEqual(text?.sourceLabel, "Composer in an untitled chat")

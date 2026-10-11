@@ -33,7 +33,7 @@ describe("draft patches", () => {
 
   it("flags destructive changes such as select-all plus a keystroke", () => {
     const text = "A long paragraph the user has been writing for a while."
-    expect(isDestructive(diffPatch(text, "x"), text)).toBe(true)
-    expect(isDestructive(diffPatch(text, text + " More."), text)).toBe(false)
+    expect(isDestructive(diffPatch(text, "x"), text.length)).toBe(true)
+    expect(isDestructive(diffPatch(text, text + " More."), text.length)).toBe(false)
   })
 })

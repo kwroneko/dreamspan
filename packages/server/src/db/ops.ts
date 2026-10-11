@@ -260,7 +260,10 @@ export class WriteOps extends RpcGroup.make(
     success: Draft,
     error: Schema.Union([NotFound, StaleWrite, StorageError])
   }),
-  /** Marks a draft committed or discarded. Its text and history are kept. */
+  /**
+   * Ends a draft's session as committed or discarded: empties its text and deletes its
+   * history, sending text that would be lost to the bin's recovered-text section.
+   */
   Rpc.make("ClearDraft", {
     payload: {
       userId: UserId,
@@ -759,22 +762,26 @@ export class ReadOps extends RpcGroup.make(
     success: Schema.Struct({ seq: Schema.Int, content: Schema.String }),
     error: Schema.Union([NotFound, StorageError])
   }),
-  /** The bin's deleted items, newest first. `before` pages back by deletion time. */
+  /** The bin's deleted items, newest first. `before` pages back from the last item seen. */
   Rpc.make("ListBin", {
     payload: {
       userId: UserId,
       limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 500 })),
-      before: Schema.NullOr(Schema.Number)
+      before: Schema.NullOr(Schema.Struct({ deletedAt: Schema.Number, id: Schema.String }))
     },
     success: Schema.Array(BinItem),
     error: StorageError
   }),
-  /** The bin's recovered text, newest first, with excerpts; optionally only from one draft. */
+  /**
+   * The bin's recovered text, newest first, with excerpts; optionally only from one draft.
+   * `before` pages back from the last text seen.
+   */
   Rpc.make("ListRecoveredTexts", {
     payload: {
       userId: UserId,
       source: Schema.NullOr(DraftKey),
-      limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 500 }))
+      limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 500 })),
+      before: Schema.NullOr(Schema.Struct({ createdAt: Schema.Number, id: Schema.String }))
     },
     success: Schema.Array(RecoveredText),
     error: StorageError
