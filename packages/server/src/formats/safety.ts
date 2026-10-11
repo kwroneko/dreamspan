@@ -2,6 +2,7 @@
 // that can't hand a prototype key, unbounded nesting or millions of objects to the code after
 // it. Imported files are data only: nothing in them is ever executed or rendered.
 import type { ReportBuilder } from "@rp/shared/importReport.ts"
+import { MAX_IMPORT_BYTES } from "@rp/shared/libraryImport.ts"
 import { Effect, Schema } from "effect"
 
 /** A file that can't be imported at all. Recoverable problems are issues in the report instead. */
@@ -40,7 +41,7 @@ export interface Limits {
 const MiB = 1024 * 1024
 
 export const defaultLimits: Limits = {
-  maxFileBytes: 64 * MiB,
+  maxFileBytes: MAX_IMPORT_BYTES,
   // About 2M tokens of text, more than any model's context holds: a bigger card couldn't be used.
   maxCardJsonBytes: 8 * MiB,
   // Lorebooks are scanned, not sent whole, so they can outgrow a context: the entry cap's

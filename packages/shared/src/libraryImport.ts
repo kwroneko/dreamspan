@@ -47,3 +47,6 @@ export const exportFormats: Partial<Record<EntityKind, ReadonlyArray<ExportForma
   lorebook: ["st-world-info"],
   preset: ["st-preset"]
 }
+
+/** The largest file an import takes (ARCHITECTURE.md §8), so the client can say so before uploading. */
+export const MAX_IMPORT_BYTES = 64 * 1024 * 1024

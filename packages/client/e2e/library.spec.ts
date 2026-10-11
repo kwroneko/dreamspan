@@ -1,0 +1,139 @@
+// The import screen and the library list (ARCHITECTURE.md §10): files picked in the
+// browser, uploaded to the real server, their reports read as text, and exports downloaded.
+// Every file here is made up.
+import { readFile, truncate, writeFile } from "node:fs/promises"
+import { join } from "node:path"
+import { crc32, deflateSync } from "node:zlib"
+import { expect, type Page, test } from "@playwright/test"
+import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+
+const server = serverPerFile(withAdmin)
+
+const pngChunk = (type: string, data: Buffer) => {
+  const out = Buffer.alloc(12 + data.byteLength)
+  out.writeUInt32BE(data.byteLength, 0)
+  out.write(type, 4, "latin1")
+  data.copy(out, 8)
+  out.writeUInt32BE(crc32(out.subarray(4, 8 + data.byteLength)), 8 + data.byteLength)
+  return out
+}
+
+/** A 1×1 PNG carrying `card` in a `chara` chunk, as ST writes one. */
+const cardPng = (card: unknown) =>
+  Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    pngChunk("IHDR", Buffer.from([0, 0, 0, 1, 0, 0, 0, 1, 8, 0, 0, 0, 0])),
+    pngChunk("IDAT", deflateSync(Buffer.from([0, 128]))),
+    pngChunk("tEXt", Buffer.from(`chara\0${Buffer.from(JSON.stringify(card)).toString("base64")}`, "latin1")),
+    pngChunk("IEND", Buffer.alloc(0))
+  ])
+
+// File text that would be markup if anything rendered it as Markdown or HTML.
+const NAME = "<b>Wren</b> **bold**"
+
+const card = {
+  spec: "chara_card_v2",
+  spec_version: "2.0",
+  data: {
+    name: NAME,
+    description: "A lighthouse keeper.",
+    first_mes: "The lamp needs oil.",
+    extensions: { depth_prompt: { prompt: "Wren smells of lamp oil.", depth: 2, role: "system" } }
+  }
+}
+
+const preset = (main: string) =>
+  Buffer.from(
+    JSON.stringify({
+      temperature: 1,
+      prompts: [{ identifier: "main", name: "Main Prompt", role: "system", content: main, system_prompt: true }],
+      prompt_order: [{ character_id: 100001, order: [{ identifier: "main", enabled: true }] }]
+    })
+  )
+
+/** At phone and desktop width: nothing scrolls sideways, and with SCREENSHOT_DIR set, saved there. */
+const shoot = async (page: Page, name: string) => {
+  for (const [width, device] of [
+    [390, "phone"],
+    [1280, "desktop"]
+  ] as const) {
+    await page.setViewportSize({ width, height: 844 })
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0)
+    const dir = process.env.SCREENSHOT_DIR
+    if (dir) await page.screenshot({ path: join(dir, `${name}-${device}.png`), fullPage: true })
+  }
+}
+
+test("import files, read their reports as text, export them, and update one from a new version", async ({ page }) => {
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${server().url}/import`)
+  await page.getByLabel("Choose files, or drop them here").setInputFiles([
+    { name: "wren.png", mimeType: "image/png", buffer: cardPng(card) },
+    { name: "narrator.json", mimeType: "application/json", buffer: preset("Write vivid prose.") },
+    { name: "notes.json", mimeType: "application/json", buffer: Buffer.from('{"hello": "world"}') }
+  ])
+  const files = page.getByRole("list", { name: "Imported files" })
+  await expect(page.getByText("Done.")).toBeVisible()
+  const wren = files.locator("li", { hasText: "wren.png" })
+  await expect(wren).toContainText(`Added “${NAME}” to the library as a card.`)
+  await expect(wren).toContainText("The Character's Note became a note on the card.")
+  await expect(wren).toContainText("imported")
+  // The file's text is text: nothing in the page was made from it.
+  await expect(files.locator("b")).toHaveCount(0)
+  const notes = files.locator("li", { hasText: "notes.json" })
+  await expect(notes).toContainText("Nothing was imported.")
+  await expect(notes).toContainText("not imported")
+  await expect(notes.getByRole("list", { name: "Import report" })).toContainText("error")
+  await shoot(page, "import-report")
+
+  await page.getByRole("link", { name: "Back to the library" }).click()
+  await expect(page.getByRole("list", { name: "Cards" })).toContainText(NAME)
+  await expect(page.getByRole("list", { name: "Presets" })).toContainText("narrator")
+  await shoot(page, "library-filled")
+
+  const presetDownload = page.waitForEvent("download")
+  await page.getByRole("button", { name: "Export narrator" }).click()
+  const presetFile = await presetDownload
+  expect(presetFile.suggestedFilename()).toBe("narrator.json")
+  const exported = JSON.parse(await readFile(await presetFile.path(), "utf8"))
+  expect(exported.prompts.find((p: { identifier: string }) => p.identifier === "main").content).toBe(
+    "Write vivid prose."
+  )
+
+  await page.getByRole("combobox", { name: `Export format for ${NAME}` }).click()
+  await page.getByRole("option", { name: "V2 JSON" }).click()
+  const cardDownload = page.waitForEvent("download")
+  await page.getByRole("button", { name: `Export ${NAME}` }).click()
+  const cardFile = JSON.parse(await readFile(await (await cardDownload).path(), "utf8"))
+  expect(cardFile.data.name).toBe(NAME)
+  expect(cardFile.data.extensions.depth_prompt).toEqual({
+    prompt: "Wren smells of lamp oil.",
+    depth: 2,
+    role: "system"
+  })
+
+  await page.getByRole("link", { name: "Update narrator from a file" }).click()
+  await expect(page.getByRole("heading", { name: "Update “narrator”" })).toBeVisible()
+  await page.getByLabel("Choose the new version, or drop it here").setInputFiles({
+    name: "narrator v2.json",
+    mimeType: "application/json",
+    buffer: preset("Write vivid, sensory prose.")
+  })
+  await expect(files.locator("li", { hasText: "narrator v2.json" })).toContainText("Updated “narrator”: updated.")
+})
+
+test("a file larger than the cap is refused before it's sent", async ({ page }) => {
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${server().url}/import`)
+  let uploads = 0
+  page.on("request", (request) => {
+    if (request.url().includes("/library/import")) uploads++
+  })
+  // A sparse file: big on paper, nothing written.
+  const huge = test.info().outputPath("huge.json")
+  await writeFile(huge, "")
+  await truncate(huge, 64 * 1024 * 1024 + 1)
+  await page.getByLabel("Choose files, or drop them here").setInputFiles(huge)
+  await expect(page.getByRole("list", { name: "Imported files" })).toContainText("This file is larger than 64 MB.")
+  expect(uploads).toBe(0)
+})

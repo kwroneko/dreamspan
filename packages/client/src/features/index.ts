@@ -2,6 +2,7 @@
 import * as accounts from "./accounts.tsx"
 import * as connections from "./connections/index.ts"
 import * as credentials from "./credentials.tsx"
+import * as library from "./library/index.ts"
 import * as login from "./login.tsx"
 import * as network from "./network.tsx"
 import * as shell from "./shell.tsx"
@@ -11,6 +12,7 @@ export const registerFeatures = () => {
   shell.register()
   login.register()
   status.register()
+  library.register()
   connections.register()
   credentials.register()
   network.register()
