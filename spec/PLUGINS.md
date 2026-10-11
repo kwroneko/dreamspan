@@ -135,7 +135,13 @@ Plugins attach metadata without changing the kernel's formats:
     - redirect a stored key (§6.1)
   - **In-page prompts are therefore not a boundary against code already in the page.** Only code that can't reach our page is contained, for example a widget in a sandboxed iframe that talks to the app through a narrow `postMessage` bridge.
   - **[O]** Whether to make enabling server-side code require something page script can't produce, for example confirming in a separate origin or in the CLI. That's probably too much friction for what it buys.
-- **[O]** If declared surfaces turn out to mislead more than help, drop them and keep only the client/server distinction, which is enforceable.
+- **[O]** If declared surfaces turn out to mislead more than help, drop them.
+
+**[D] A future sandboxed ("safe") plugin type** (owner, 2026-10-11): plugins that run in a sandbox and reach only certain hooks and APIs, never the main app process directly.
+- This may become the main distinction in the end: full plugins versus sandboxed ones. It isn't needed now.
+- Browser-only plugins resemble it, but their containment is accidental, not designed, and partial (above). **[D]** They aren't a trust category.
+- If a browser-only category turns out not useful enough for its cost, it's dropped in favor of the sandboxed type later. Client-side code keeps existing, as the browser half of a full plugin.
+- **[P] What the sandboxed type would offer:** the hooks that don't need the process, for example display rules, message renderers in iframes, macros, assembler stages working on data passed to them, and tools with declared effects. All through a narrow API (RPC or `postMessage`), with no access to keys, files or the page.
 
 ## 6. The three lines of attack [P]
 
@@ -170,8 +176,8 @@ Plugins attach metadata without changing the kernel's formats:
 - **The alternative is no fix:** accept that a stolen session or an XSS can redirect keys, and say so. That's a defensible choice too, since a stolen session already exposes every chat.
 - **Server plugins run in the server process,** so they can read `secret.key` and decrypt every stored key. In a multi-user instance that means every user's:
   - Server-side plugins are instance-wide code, installable only by an admin.
-  - Per-user customization in a multi-user instance means browser-side and declarative plugins.
-- **[O] Later, possibly out-of-process server plugins:** a separate process that never holds the server secret, reaching the host over RPC, with Node's permission model as a second layer. Overrides and provider plugins would become much harder there, so this would at most be an opt-in per plugin.
+  - Per-user customization in a multi-user instance means declarative plugins now, and sandboxed plugins (§5) later.
+- **Later, the sandboxed plugin type (§5)** covers this: it never holds the server secret and reaches the host only through its API. Full plugins keep in-process power, overrides and provider plugins included.
 - **Supply chain:**
   - The same exposure applies to our own dependencies; pi-ai alone brings the OpenAI, Anthropic, Google and AWS SDKs.
   - In place: exact pins, the cooldown, and decryption only on the main thread.
@@ -229,7 +235,7 @@ Written down now, built after the product works (owner, 2026-10-11):
 
 1. Key redirection (§6.1): origin-bound credentials, which also remove the re-pasting, or accept the gap?
 2. Applying updates to an enabled plugin: always prompt, prompt with "allow for this session", or a per-plugin "trusted" setting (§5)?
-3. Declared surfaces: keep them, or keep only the client/server distinction (§5)?
-4. Out-of-process server plugins, opt-in later or never (§6.1)?
+3. Declared surfaces: keep them as information for honest plugins, or drop them (§5)?
+4. The sandboxed plugin type: its sandbox technology and hook set, when it's built (§5).
 5. How far client overrides go: slots and registries only, or replacing any `ui/` component by id (§3.4)?
 6. Git: the `git` binary or a library (§4)?
