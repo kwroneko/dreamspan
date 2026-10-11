@@ -7,12 +7,13 @@
 import { readFileSync } from "node:fs"
 import { assert, describe, it, layer } from "@effect/vitest"
 import { AppApi } from "@rp/shared/api.ts"
+import type { ChatId, SlotId, VersionId } from "@rp/shared/chat.ts"
 import type { User } from "@rp/shared/domain.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import type { ConnectionSettings, ConnectionId, CredentialId, ModelId } from "@rp/shared/providers.ts"
 import type { RefId } from "@rp/shared/library.ts"
 import type { LlmRequestId } from "@rp/shared/usage.ts"
-import { Context, Effect, Layer } from "effect"
+import { Context, Effect, Layer, Option, Stream } from "effect"
 import type { Rpc, RpcGroup } from "effect/rpc"
 import { Writer } from "../src/db/Database.ts"
 import { client, login, outcome, serverLayer, serverPort, testConfig } from "./support/config.ts"
@@ -33,6 +34,16 @@ interface Party {
   readonly cookie: string
   /** The test server's port, for the HTTP routes. */
   readonly port: number
+  readonly chat: OwnChat
+}
+
+/** A chat with the user's message and a model reply still generating under it. */
+interface OwnChat {
+  readonly chatId: ChatId
+  readonly slotId: SlotId
+  readonly versionId: VersionId
+  readonly replySlotId: SlotId
+  readonly generatingId: VersionId
 }
 
 class Parties extends Context.Service<Parties, { readonly alice: Party; readonly bob: Party }>()(
@@ -72,6 +83,13 @@ const refused = <A, E>(attempt: Effect.Effect<A, E>, expected: string) =>
 /** The owner's connection as they see it now, for a current row version. */
 const ownConnection = (party: Party) =>
   Effect.map(party.api.ListConnections(), (list) => list.find((c) => c.id === party.connectionId)!)
+
+/** The owner's message as they see it now, for a current row version. */
+const ownSlot = (party: Party) =>
+  Effect.map(
+    party.api.ReadPath({ chatId: party.chat.chatId, leafSlotId: null, range: { _tag: "Bottom" }, limit: 10 }),
+    (window) => window.entries.find((e) => e.slotId === party.chat.slotId)!
+  )
 
 const ownModel = (party: Party) =>
   Effect.map(party.api.ListModels({ connectionId: party.connectionId, includeHidden: true }), (list) =>
@@ -335,10 +353,181 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
           owner.refId
         )
       })
+  },
+  // --- Chats
+  ListChats: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const page = { limit: 500, before: null }
+        assert.include(
+          (yield* owner.api.ListChats(page)).map((c) => c.id),
+          owner.chat.chatId
+        )
+        assert.notInclude(
+          (yield* actor.api.ListChats(page)).map((c) => c.id),
+          owner.chat.chatId
+        )
+      })
+  },
+  CreateChat: { createOnly: "starts an empty chat for the caller" },
+  GetChat: { probe: (actor, owner) => refused(actor.api.GetChat({ chatId: owner.chat.chatId }), "NotFound") },
+  ReadPath: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const bottom = { _tag: "Bottom" } as const
+        yield* refused(
+          actor.api.ReadPath({ chatId: owner.chat.chatId, leafSlotId: null, range: bottom, limit: 10 }),
+          "NotFound"
+        )
+        // Someone else's slot as the leaf, or as where to read from, in one's own chat.
+        const mine = actor.chat.chatId
+        yield* refused(
+          actor.api.ReadPath({ chatId: mine, leafSlotId: owner.chat.slotId, range: bottom, limit: 10 }),
+          "NotFound"
+        )
+        for (const range of [
+          { _tag: "Around", slot: owner.chat.slotId },
+          { _tag: "Older", from: owner.chat.slotId },
+          { _tag: "Newer", after: owner.chat.slotId }
+        ] as const) {
+          yield* refused(actor.api.ReadPath({ chatId: mine, leafSlotId: null, range, limit: 10 }), "NotFound")
+        }
+      })
+  },
+  ListVersions: {
+    probe: (actor, owner) => refused(actor.api.ListVersions({ slotId: owner.chat.slotId }), "NotFound")
+  },
+  SendMessage: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        yield* refused(
+          actor.api.SendMessage({
+            chatId: owner.chat.chatId,
+            parentSlotId: owner.chat.replySlotId,
+            branch: false,
+            content: "planted"
+          }),
+          "NotFound"
+        )
+        yield* refused(
+          actor.api.SendMessage({
+            chatId: actor.chat.chatId,
+            parentSlotId: owner.chat.slotId,
+            branch: true,
+            content: "planted"
+          }),
+          "NotFound"
+        )
+      })
+  },
+  Generate: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        yield* refused(
+          actor.api.Generate({ chatId: owner.chat.chatId, parentSlotId: owner.chat.replySlotId, branch: false }),
+          "NotFound"
+        )
+        yield* refused(
+          actor.api.Generate({ chatId: actor.chat.chatId, parentSlotId: owner.chat.slotId, branch: true }),
+          "NotFound"
+        )
+      })
+  },
+  Regenerate: {
+    probe: (actor, owner) =>
+      Effect.flatMap(ownSlot(owner), (theirs) =>
+        refused(actor.api.Regenerate({ slotId: owner.chat.slotId, expectedRowVersion: theirs.rowVersion }), "NotFound")
+      )
+  },
+  StopGeneration: {
+    probe: (actor, owner) => refused(actor.api.StopGeneration({ versionId: owner.chat.generatingId }), "NotFound")
+  },
+  SelectVersion: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const theirs = yield* ownSlot(owner)
+        yield* refused(
+          actor.api.SelectVersion({
+            slotId: owner.chat.slotId,
+            versionId: owner.chat.versionId,
+            expectedRowVersion: theirs.rowVersion
+          }),
+          "NotFound"
+        )
+        const mine = yield* ownSlot(actor)
+        yield* refused(
+          actor.api.SelectVersion({
+            slotId: actor.chat.slotId,
+            versionId: owner.chat.versionId,
+            expectedRowVersion: mine.rowVersion
+          }),
+          "NotFound"
+        )
+      })
+  },
+  EditVersion: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const theirs = yield* ownSlot(owner)
+        yield* refused(
+          actor.api.EditVersion({
+            slotId: owner.chat.slotId,
+            sourceVersionId: owner.chat.versionId,
+            content: "planted",
+            expectedRowVersion: theirs.rowVersion
+          }),
+          "NotFound"
+        )
+        const mine = yield* ownSlot(actor)
+        yield* refused(
+          actor.api.EditVersion({
+            slotId: actor.chat.slotId,
+            sourceVersionId: owner.chat.versionId,
+            content: "planted",
+            expectedRowVersion: mine.rowVersion
+          }),
+          "NotFound"
+        )
+      })
+  },
+  WriteVersion: {
+    probe: (actor, owner) =>
+      Effect.flatMap(ownSlot(owner), (theirs) =>
+        refused(
+          actor.api.WriteVersion({
+            slotId: owner.chat.slotId,
+            content: "planted",
+            expectedRowVersion: theirs.rowVersion
+          }),
+          "NotFound"
+        )
+      )
+  },
+  AmendVersion: {
+    probe: (actor, owner) =>
+      refused(
+        actor.api.AmendVersion({ versionId: owner.chat.versionId, content: "planted", expectedRowVersion: 1 }),
+        "NotFound"
+      )
+  },
+  DeleteChat: { probe: (actor, owner) => refused(actor.api.DeleteChat({ chatId: owner.chat.chatId }), "NotFound") },
+  DeleteMessage: {
+    probe: (actor, owner) => refused(actor.api.DeleteMessage({ slotId: owner.chat.slotId }), "NotFound")
+  },
+  DeleteBranch: {
+    probe: (actor, owner) => refused(actor.api.DeleteBranch({ slotId: owner.chat.slotId }), "NotFound")
+  },
+  DeleteVersion: {
+    probe: (actor, owner) => refused(actor.api.DeleteVersion({ versionId: owner.chat.versionId }), "NotFound")
+  },
+  SubscribeChat: {
+    probe: (actor, owner) =>
+      refused(actor.api.SubscribeChat({ chatId: owner.chat.chatId }).pipe(Stream.runHead), "NotFound")
   }
 }
 
-const config = testConfig()
+/** A generator so slow that the seeded replies are still generating when the probes run. */
+const config = testConfig({ fakeGeneratorTps: Option.some(5), fakeGeneratorTokens: 20_000 })
 
 /** A request to an HTTP route as `party`, from this site. */
 const http = (party: Party, path: string, body: Uint8Array | string, contentType: string) =>
@@ -423,10 +612,20 @@ const seed = Effect.gen(function* () {
           startedAt: Date.now()
         }
       })
+      const chat = yield* api.CreateChat({ title: `${user.handle}'s chat` })
+      const sent = yield* api.SendMessage({ chatId: chat.id, parentSlotId: null, branch: false, content: "hello" })
+      const reply = yield* api.Generate({ chatId: chat.id, parentSlotId: sent.entry.slotId, branch: false })
       return {
         api,
         user,
         password,
+        chat: {
+          chatId: chat.id,
+          slotId: sent.entry.slotId,
+          versionId: sent.entry.version.id,
+          replySlotId: reply.entry.slotId,
+          generatingId: reply.entry.version.id
+        },
         connectionId: connection.id,
         credentialId: credential.id,
         modelId: model.id,
@@ -466,7 +665,21 @@ const snapshot = (owner: Party) =>
     outcome(owner.api.ListLlmRequests({ limit: 1000, before: null }), JSON.stringify),
     outcome(owner.api.ListUsers(), JSON.stringify),
     outcome(owner.api.ListLibrary({ kind: "preset" }), JSON.stringify),
-    outcome(owner.api.GetNetworkSettings(), JSON.stringify)
+    outcome(owner.api.GetNetworkSettings(), JSON.stringify),
+    outcome(owner.api.ListChats({ limit: 500, before: null }), JSON.stringify),
+    // A generating version's saved text grows on its own, so only which one it is counts.
+    outcome(
+      owner.api.ReadPath({ chatId: owner.chat.chatId, leafSlotId: null, range: { _tag: "Bottom" }, limit: 100 }),
+      (window) =>
+        JSON.stringify(
+          window.entries.map((e) =>
+            e.version.status === "generating"
+              ? { slotId: e.slotId, rowVersion: e.rowVersion, versionCount: e.versionCount, version: e.version.id }
+              : e
+          )
+        )
+    ),
+    outcome(owner.api.ListVersions({ slotId: owner.chat.slotId }), JSON.stringify)
   ])
 
 /** Runs a probe, then checks that it changed nothing of the owner's, whatever it returned. */

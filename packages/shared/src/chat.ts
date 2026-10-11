@@ -40,6 +40,9 @@ export class Chat extends Schema.Class<Chat>("Chat")({
   lastMessageAt: Schema.NullOr(Schema.Number)
 }) {}
 
+/** Why a generation failed, shown on its version (DESIGN §3.1). */
+export const VersionError = Schema.Struct({ class: Schema.String, message: Schema.String })
+
 export class Version extends Schema.Class<Version>("Version")({
   id: VersionId,
   slotId: SlotId,
@@ -54,7 +57,14 @@ export class Version extends Schema.Class<Version>("Version")({
   direction: Schema.NullOr(Schema.String),
   hidden: Schema.Boolean,
   starred: Schema.Boolean,
-  createdAt: Schema.Number
+  createdAt: Schema.Number,
+  /** Set on failed versions only. */
+  error: Schema.NullOr(VersionError),
+  /**
+   * Optimistic concurrency for amending a user-written version: one more than the number
+   * of times it was amended, counted from its kept history (version_history).
+   */
+  rowVersion: Schema.Int
 }) {}
 
 /** One position on a path, with the version selected there. */

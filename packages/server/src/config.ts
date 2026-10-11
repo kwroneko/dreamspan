@@ -67,11 +67,27 @@ const AppConfigFromEnv = Config.all({
    * §6.1). A security setting, so it's configurable only here, outside the app: no RPC,
    * setting or agent tool can change it (owner, 2026-10-11).
    */
-  keyHostBinding: Config.Boolean("KEY_HOST_BINDING").pipe(Config.withDefault(true))
+  keyHostBinding: Config.Boolean("KEY_HOST_BINDING").pipe(Config.withDefault(true)),
+  /**
+   * Development, tests and the performance harness only: chats generate synthetic text at
+   * this many tokens a second (chat/fakeGenerator.ts). main.ts refuses it in production.
+   */
+  fakeGeneratorTps: Config.option(Config.Number("FAKE_GENERATOR_TPS")),
+  /** About how many tokens each fake generation has. */
+  fakeGeneratorTokens: Config.Int("FAKE_GENERATOR_TOKENS").pipe(Config.withDefault(400))
 })
 
 export type AppConfigShape = Config.Success<typeof AppConfigFromEnv>
 
 export class AppConfig extends Context.Service<AppConfig, AppConfigShape>()("rp/AppConfig") {
   static readonly layer = Layer.effect(AppConfig, AppConfigFromEnv)
+}
+
+export class FakeGeneratorInProduction extends Schema.TaggedError<FakeGeneratorInProduction>()(
+  "FakeGeneratorInProduction",
+  {}
+) {
+  override get message() {
+    return "FAKE_GENERATOR_TPS is for development, tests and the performance harness, never with NODE_ENV=production."
+  }
 }

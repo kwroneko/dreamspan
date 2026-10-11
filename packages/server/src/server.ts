@@ -17,8 +17,13 @@ import {
 import { RpcSerialization, RpcServer } from "effect/rpc"
 import { makeAccountHandlers } from "./api/accounts.ts"
 import { makeLibraryHandlers } from "./api/library.ts"
+import { makeChatHandlers } from "./api/chats.ts"
 import { makeProviderHandlers } from "./api/providers.ts"
 import { Accounts, AuthenticationLive, PEER_HEADER, SESSION_COOKIE, SESSION_TTL_MS } from "./auth/Accounts.ts"
+import { ChatHub } from "./chat/ChatHub.ts"
+import * as FakeGenerator from "./chat/fakeGenerator.ts"
+import { Generations } from "./chat/Generations.ts"
+import { Generator } from "./chat/Generator.ts"
 import { AppConfig } from "./config.ts"
 import * as Database from "./db/Database.ts"
 import { EventLoopMonitor } from "./eventLoop.ts"
@@ -46,10 +51,12 @@ const Handlers = AppApi.toLayer(
     const providers = yield* makeProviderHandlers
     const accounts = yield* makeAccountHandlers
     const library = yield* makeLibraryHandlers
+    const chats = yield* makeChatHandlers
     return AppApi.of({
       ...providers,
       ...accounts,
       ...library,
+      ...chats,
       Health: () =>
         eventLoop.sample.pipe(
           Effect.map(
@@ -330,15 +337,33 @@ const FormatsLive = Layer.unwrap(
 )
 
 /**
- * The whole server, minus configuration. Tests provide their own AppConfig, with port 0,
- * and read the port the kernel picked from the HttpServer this exposes.
+ * The fake generator when configured (tests, development, the performance harness; main.ts
+ * refuses it in production), otherwise none: the context assembler isn't built yet.
  */
-export const ServerLive = HttpRouter.serve(
-  Layer.mergeAll(RpcRoute, HealthRoute, AuthRoutes, ImportRoutes.layer, StaticRoutes, InterruptedRequests, RequestGuard)
-).pipe(
-  Layer.provide(ProvidersLive),
-  Layer.provideMerge(HttpServerLive),
-  Layer.provideMerge(Accounts.layer),
-  Layer.provideMerge(Layer.mergeAll(DatabaseLive, EventLoopMonitor.layer, FormatsLive)),
-  Layer.provide(InFlightRpcs.layer)
+const GeneratorFromConfig = Layer.unwrap(
+  Effect.map(AppConfig, (config) =>
+    Option.match(config.fakeGeneratorTps, {
+      onNone: () => Generator.none,
+      onSome: (tokensPerSecond) => FakeGenerator.layer({ tokensPerSecond, tokens: config.fakeGeneratorTokens })
+    })
+  )
 )
+
+/**
+ * The whole server with this generator, minus configuration. Tests provide their own
+ * AppConfig, with port 0, and read the port the kernel picked from the HttpServer this exposes.
+ */
+export const serverWith = (generator: Layer.Layer<Generator, never, AppConfig>) =>
+  HttpRouter.serve(
+    Layer.mergeAll(RpcRoute, HealthRoute, AuthRoutes, ImportRoutes.layer, StaticRoutes, InterruptedRequests, RequestGuard)
+  ).pipe(
+    Layer.provide(ProvidersLive),
+    Layer.provide(Generations.layer.pipe(Layer.provideMerge(ChatHub.layer), Layer.provide(generator))),
+    Layer.provideMerge(HttpServerLive),
+    Layer.provideMerge(Accounts.layer),
+    Layer.provideMerge(Layer.mergeAll(DatabaseLive, EventLoopMonitor.layer, FormatsLive)),
+    Layer.provide(InFlightRpcs.layer)
+  )
+
+/** The whole server, minus configuration. */
+export const ServerLive = serverWith(GeneratorFromConfig)

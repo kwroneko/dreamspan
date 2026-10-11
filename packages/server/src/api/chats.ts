@@ -1,0 +1,260 @@
+// Chat RPC handlers (@rp/shared/chatApi.ts). Every handler acts as the authenticated user;
+// storage enforces ownership, so another user's ids are NotFound. Each change is published
+// to the chat's subscribers, from every tab of the user, after it's committed.
+import { type AppApi, CurrentUser } from "@rp/shared/api.ts"
+import type { ChatId, NewVersion, SlotId } from "@rp/shared/chat.ts"
+import { GenerationUnavailable } from "@rp/shared/chatApi.ts"
+import type { UserId } from "@rp/shared/domain.ts"
+import { ServerError } from "@rp/shared/errors.ts"
+import { Effect, Option, Stream } from "effect"
+import { RpcClientError } from "effect/rpc"
+import { ChatHub } from "../chat/ChatHub.ts"
+import { Generations } from "../chat/Generations.ts"
+import { Reader, Writer } from "../db/Database.ts"
+import { StorageError } from "../db/ops.ts"
+
+/** Failures the client can't act on are logged here and reported without internals. */
+const toServerError = (operation: string) => (error: unknown) =>
+  Effect.logError(`${operation} failed`, error).pipe(
+    Effect.andThen(Effect.fail(new ServerError({ message: `${operation} failed` })))
+  )
+
+type Internal = StorageError | RpcClientError.RpcClientError
+
+const isInternal = <E>(error: E): error is Extract<E, Internal> =>
+  error instanceof StorageError || error instanceof RpcClientError.RpcClientError
+
+/** Storage and worker failures become ServerError; every other error keeps its tag. */
+const internal =
+  (operation: string) =>
+  <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, Exclude<E, Internal> | ServerError, R> =>
+    Effect.catchIf(effect, isInternal, toServerError(operation)) as Effect.Effect<
+      A,
+      Exclude<E, Internal> | ServerError,
+      R
+    >
+
+const userText = (content: string, origin: NewVersion["origin"], sourceVersionId?: NewVersion["sourceVersionId"]) => ({
+  speakerEntityId: null,
+  writer: "human" as const,
+  content,
+  status: "complete" as const,
+  macroMode: "verbatim" as const,
+  origin,
+  ...(sourceVersionId ? { sourceVersionId } : {})
+})
+
+const generating = {
+  speakerEntityId: null,
+  writer: "model" as const,
+  content: "",
+  status: "generating" as const,
+  macroMode: "verbatim" as const,
+  origin: "generated" as const
+}
+
+export const makeChatHandlers = Effect.gen(function* () {
+  const reader = yield* Reader
+  const writer = yield* Writer
+  const hub = yield* ChatHub
+  const generations = yield* Generations
+
+  const userId = Effect.map(CurrentUser, (user) => user.id)
+
+  const unavailable = new GenerationUnavailable({
+    message: "This server has nothing to generate with yet: the context assembler isn't built."
+  })
+  const needGenerator = Option.isSome(generations.generator) ? Effect.void : Effect.fail(unavailable)
+
+  /** A slot as it is now, published to its chat. */
+  const publishSlot = (user: UserId, slotId: SlotId) =>
+    Effect.map(reader.GetSlot({ userId: user, slotId }), ({ chatId, entry }) => {
+      hub.publish(chatId, { _tag: "Slot", entry })
+      return entry
+    })
+
+  const publishChat = (user: UserId, chatId: ChatId) =>
+    Effect.map(reader.GetChat({ userId: user, chatId }), (chat) => {
+      hub.publish(chatId, { _tag: "Chat", chat })
+      return chat
+    })
+
+  /** After a delete: reload, the leaf may have moved, and generations under what went are stopped. */
+  const afterDelete = (user: UserId, chatId: ChatId) =>
+    Effect.gen(function* () {
+      hub.publish(chatId, { _tag: "Reload" })
+      const running = generations.runningIn(chatId)
+      const live = new Set(
+        running.length === 0 ? [] : yield* reader.LiveVersions({ userId: user, versionIds: running })
+      )
+      yield* Effect.forEach(running, (versionId) =>
+        live.has(versionId) ? Effect.void : Effect.ignore(generations.stop(user, versionId))
+      )
+      yield* publishChat(user, chatId).pipe(Effect.catchTag("NotFound", () => Effect.void))
+    })
+
+  const append = (
+    user: UserId,
+    chatId: ChatId,
+    parentSlotId: SlotId | null,
+    branch: boolean,
+    version: typeof NewVersion.Type
+  ) =>
+    Effect.gen(function* () {
+      const result = yield* writer.AppendMessage({
+        userId: user,
+        chatId,
+        parentSlotId,
+        branch,
+        version,
+        commitDraft: null
+      })
+      const entry = yield* publishSlot(user, result.slotId)
+      hub.publish(chatId, { _tag: "Chat", chat: result.chat })
+      return { entry, chat: result.chat }
+    })
+
+  const handlers = {
+    ListChats: ({ limit, before }) =>
+      Effect.flatMap(userId, (id) => reader.ListChats({ userId: id, limit, before })).pipe(internal("ListChats")),
+
+    CreateChat: ({ title }) =>
+      Effect.flatMap(userId, (id) =>
+        writer.CreateChat({
+          userId: id,
+          kind: "rp",
+          status: "active",
+          title: title.trim(),
+          participants: [],
+          greeting: null
+        })
+      ).pipe(
+        // No participants or greeting, so nothing it names can be missing.
+        Effect.catchTag("NotFound", toServerError("CreateChat")),
+        internal("CreateChat")
+      ),
+
+    GetChat: ({ chatId }) =>
+      Effect.flatMap(userId, (id) => reader.GetChat({ userId: id, chatId })).pipe(internal("GetChat")),
+
+    ReadPath: ({ chatId, leafSlotId, range, limit }) =>
+      Effect.flatMap(userId, (id) => reader.ReadPath({ userId: id, chatId, leafSlotId, range, limit })).pipe(
+        internal("ReadPath")
+      ),
+
+    ListVersions: ({ slotId }) =>
+      Effect.flatMap(userId, (id) => reader.ListVersions({ userId: id, slotId })).pipe(internal("ListVersions")),
+
+    SendMessage: ({ chatId, parentSlotId, branch, content }) =>
+      Effect.flatMap(userId, (id) => append(id, chatId, parentSlotId, branch, userText(content, "user_written"))).pipe(
+        internal("SendMessage")
+      ),
+
+    Generate: ({ chatId, parentSlotId, branch }) =>
+      Effect.gen(function* () {
+        yield* needGenerator
+        const id = yield* userId
+        const appended = yield* append(id, chatId, parentSlotId, branch, generating)
+        yield* generations.start({
+          userId: id,
+          chatId,
+          slotId: appended.entry.slotId,
+          versionId: appended.entry.version.id
+        })
+        return appended
+      }).pipe(internal("Generate")),
+
+    Regenerate: ({ slotId, expectedRowVersion }) =>
+      Effect.gen(function* () {
+        yield* needGenerator
+        const id = yield* userId
+        const version = yield* writer.AddSelectedVersion({
+          userId: id,
+          slotId,
+          version: generating,
+          expectedRowVersion
+        })
+        const { chatId, entry } = yield* reader.GetSlot({ userId: id, slotId })
+        hub.publish(chatId, { _tag: "Slot", entry })
+        yield* generations.start({ userId: id, chatId, slotId, versionId: version.id })
+        return entry
+      }).pipe(internal("Regenerate")),
+
+    StopGeneration: ({ versionId }) => Effect.flatMap(userId, (id) => generations.stop(id, versionId)),
+
+    SelectVersion: ({ slotId, versionId, expectedRowVersion }) =>
+      Effect.gen(function* () {
+        const id = yield* userId
+        yield* writer.SelectVersion({ userId: id, slotId, versionId, expectedRowVersion })
+        return yield* publishSlot(id, slotId)
+      }).pipe(internal("SelectVersion")),
+
+    EditVersion: ({ slotId, sourceVersionId, content, expectedRowVersion }) =>
+      Effect.gen(function* () {
+        const id = yield* userId
+        const version = userText(content, "edited", sourceVersionId)
+        yield* writer.AddSelectedVersion({ userId: id, slotId, version, expectedRowVersion })
+        return yield* publishSlot(id, slotId)
+      }).pipe(internal("EditVersion")),
+
+    WriteVersion: ({ slotId, content, expectedRowVersion }) =>
+      Effect.gen(function* () {
+        const id = yield* userId
+        const version = userText(content, "user_written")
+        yield* writer.AddSelectedVersion({ userId: id, slotId, version, expectedRowVersion })
+        return yield* publishSlot(id, slotId)
+      }).pipe(internal("WriteVersion")),
+
+    AmendVersion: ({ versionId, content, expectedRowVersion }) =>
+      Effect.gen(function* () {
+        const id = yield* userId
+        const version = yield* writer.AmendVersion({ userId: id, versionId, content, expectedRowVersion })
+        const { chatId } = yield* reader.GetSlot({ userId: id, slotId: version.slotId })
+        hub.publish(chatId, { _tag: "Version", version })
+        return version
+      }).pipe(internal("AmendVersion")),
+
+    DeleteChat: ({ chatId }) =>
+      Effect.gen(function* () {
+        const id = yield* userId
+        const item = yield* writer.DeleteChat({ userId: id, chatId })
+        yield* afterDelete(id, chatId)
+        return item
+      }).pipe(internal("DeleteChat")),
+
+    DeleteMessage: ({ slotId }) =>
+      Effect.gen(function* () {
+        const id = yield* userId
+        const item = yield* writer.DeleteMessage({ userId: id, slotId })
+        yield* afterDelete(id, item.origin.chatId as ChatId)
+        return item
+      }).pipe(internal("DeleteMessage")),
+
+    DeleteBranch: ({ slotId }) =>
+      Effect.gen(function* () {
+        const id = yield* userId
+        const item = yield* writer.DeleteBranch({ userId: id, slotId })
+        yield* afterDelete(id, item.origin.chatId as ChatId)
+        return item
+      }).pipe(internal("DeleteBranch")),
+
+    DeleteVersion: ({ versionId }) =>
+      Effect.gen(function* () {
+        const id = yield* userId
+        const item = yield* writer.DeleteVersion({ userId: id, versionId })
+        yield* afterDelete(id, item.origin.chatId as ChatId)
+        return item
+      }).pipe(internal("DeleteVersion")),
+
+    SubscribeChat: ({ chatId }) =>
+      Stream.unwrap(
+        Effect.gen(function* () {
+          const id = yield* userId
+          yield* reader.GetChat({ userId: id, chatId })
+          const queue = yield* hub.subscribe(chatId, () => ({ _tag: "Hello", live: generations.live(chatId) }))
+          return Stream.fromQueue(queue)
+        }).pipe(internal("SubscribeChat"))
+      )
+  } satisfies Partial<Parameters<typeof AppApi.of>[0]>
+  return handlers
+})

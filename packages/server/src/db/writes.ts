@@ -7,8 +7,9 @@ import { Effect } from "effect"
 import { SqlClient, type SqlError } from "effect/sql"
 import { composerKey, type DraftKey } from "@rp/shared/drafts.ts"
 import type { Bin } from "./bin.ts"
+import { NotAmendable } from "@rp/shared/chatApi.ts"
 import { AppendResult, LeafMoved, NotFound, StaleWrite, WriteOps } from "./ops.ts"
-import { type ChatRow, toChat, toVersion, type VersionRow } from "./rows.ts"
+import { amendCount, type ChatRow, toChat, toVersion, type VersionRow } from "./rows.ts"
 import { checkStateReferences } from "./stateRefs.ts"
 import { transaction as runTransaction } from "./tx.ts"
 
@@ -61,6 +62,18 @@ export const makeWriteHandlers = (bin: Bin) =>
       WHERE s.id = ${slotId} AND c.owner_user_id = ${userId} AND s.deleted_at IS NULL AND c.deleted_at IS NULL`.pipe(
         Effect.flatMap(([row]) =>
           row ? Effect.succeed(row) : Effect.fail(new NotFound({ entity: "slot", id: slotId }))
+        )
+      )
+
+    /** A version of the user's, with its amend count; `live` also refuses one in the bin. */
+    const ownedVersion = (userId: UserId, versionId: VersionId, live: boolean) =>
+      sql<VersionRow>`
+      SELECT v.*, ${sql.literal(amendCount("v"))} FROM versions v JOIN slots s ON s.id = v.slot_id
+        JOIN chats c ON c.id = s.chat_id
+      WHERE v.id = ${versionId} AND c.owner_user_id = ${userId}
+        AND (${live ? 0 : 1} OR (v.deleted_at IS NULL AND s.deleted_at IS NULL AND c.deleted_at IS NULL))`.pipe(
+        Effect.flatMap(([row]) =>
+          row ? Effect.succeed(row) : Effect.fail(new NotFound({ entity: "version", id: versionId }))
         )
       )
 
@@ -303,7 +316,67 @@ export const makeWriteHandlers = (bin: Bin) =>
             )
           }
           return yield* insertStateEvent(userId, chatId, slotId, versionId, scope, data)
-        }).pipe(transaction("AddStateEvent"))
+        }).pipe(transaction("AddStateEvent")),
+
+      // --- Chats
+
+      AddSelectedVersion: ({ userId, slotId, version, expectedRowVersion }) =>
+        Effect.gen(function* () {
+          const slot = yield* ownedSlot(userId, slotId)
+          if (slot.row_version !== expectedRowVersion) {
+            return yield* new StaleWrite({
+              entity: "slot",
+              id: slotId,
+              expected: expectedRowVersion,
+              actual: slot.row_version
+            })
+          }
+          yield* checkSpeaker(userId, version.speakerEntityId)
+          const [next] = yield* sql<{
+            n: number
+          }>`SELECT coalesce(max(ordinal), -1) + 1 AS n FROM versions WHERE slot_id = ${slotId}`
+          const row = yield* insertVersion(slotId, next!.n, version, Date.now())
+          yield* sql`UPDATE slots SET selected_version_id = ${row.id}, row_version = row_version + 1 WHERE id = ${slotId}`
+          return toVersion(row)
+        }).pipe(transaction("AddSelectedVersion")),
+
+      AmendVersion: ({ userId, versionId, content, expectedRowVersion }) =>
+        Effect.gen(function* () {
+          const row = yield* ownedVersion(userId, versionId, true)
+          if (row.writer !== "human" || row.status === "generating") return yield* new NotAmendable({ versionId })
+          const rowVersion = 1 + (row.amend_count ?? 0)
+          if (rowVersion !== expectedRowVersion) {
+            return yield* new StaleWrite({
+              entity: "version",
+              id: versionId,
+              expected: expectedRowVersion,
+              actual: rowVersion
+            })
+          }
+          if (content === row.content) return toVersion(row)
+          // The trigger keeps the previous text in version_history (DESIGN §3.1).
+          yield* sql`UPDATE versions SET content = ${content}, updated_at = ${Date.now()} WHERE id = ${versionId}`
+          return toVersion(yield* ownedVersion(userId, versionId, true))
+        }).pipe(transaction("AmendVersion")),
+
+      SaveGeneration: ({ userId, versionId, content, status, error }) =>
+        Effect.gen(function* () {
+          const row = yield* ownedVersion(userId, versionId, false)
+          if (row.writer !== "model" || row.status !== "generating") {
+            return yield* new NotFound({ entity: "generating version", id: versionId })
+          }
+          yield* sql`UPDATE versions SET content = ${content}, status = ${status},
+            error_json = ${error === null ? null : JSON.stringify(error)}, updated_at = ${Date.now()}
+            WHERE id = ${versionId}`
+          return toVersion(yield* ownedVersion(userId, versionId, false))
+        }).pipe(transaction("SaveGeneration")),
+
+      InterruptGenerations: () =>
+        sql`UPDATE versions SET status = 'interrupted', updated_at = ${Date.now()} WHERE status = 'generating'
+            RETURNING id`.pipe(
+          Effect.map((rows) => ({ interrupted: rows.length })),
+          transaction("InterruptGenerations")
+        )
     } satisfies Partial<WriteHandlers>
     return handlers
   })

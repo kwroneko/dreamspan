@@ -6,6 +6,8 @@
 // owns (DATA-MODEL §1, principle 6). Rows owned by someone else are reported as
 // NotFound, so their existence doesn't leak.
 import { Chat, ChatId, ChatKind, EntityId, NewVersion, PathEntry, SlotId, Version, VersionId } from "@rp/shared/chat.ts"
+import { VersionError, VersionStatus } from "@rp/shared/chat.ts"
+import { NotAmendable, PathRange, PathWindow } from "@rp/shared/chatApi.ts"
 import { User, UserAccount, UserId, UserRole } from "@rp/shared/domain.ts"
 import { BinItem, RecoveredText } from "@rp/shared/bin.ts"
 import { Draft, DraftKey, DraftState } from "@rp/shared/drafts.ts"
@@ -716,7 +718,41 @@ export class WriteOps extends RpcGroup.make(
     },
     success: LibraryImport,
     error: Schema.Union([NotFound, RefOperationRefused, StorageError])
-  })
+  }),
+  // --- Chats: the chat RPCs beyond the graph operations above (writes.ts).
+  /**
+   * A new version of a slot, selected, if the slot is still at the row version the user
+   * saw: a swipe, an edit saved as a new version, or the user's own version.
+   */
+  Rpc.make("AddSelectedVersion", {
+    payload: { userId: UserId, slotId: SlotId, version: NewVersion, expectedRowVersion: Schema.Int },
+    success: Version,
+    error: Schema.Union([NotFound, StaleWrite, StorageError])
+  }),
+  /** Changes a finished user-written version in place; the trigger keeps the earlier text. */
+  Rpc.make("AmendVersion", {
+    payload: { userId: UserId, versionId: VersionId, content: Schema.String, expectedRowVersion: Schema.Int },
+    success: Version,
+    error: Schema.Union([NotFound, StaleWrite, NotAmendable, StorageError])
+  }),
+  /**
+   * A generating version's text so far (status `generating`) or its final text and status.
+   * Only a model version still generating is written; a version in the bin still is, so
+   * restoring it brings its text back.
+   */
+  Rpc.make("SaveGeneration", {
+    payload: {
+      userId: UserId,
+      versionId: VersionId,
+      content: Schema.String,
+      status: VersionStatus,
+      error: Schema.NullOr(VersionError)
+    },
+    success: Version,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** At startup: versions a previous process left generating keep their text as interrupted. */
+  Rpc.make("InterruptGenerations", { success: Schema.Struct({ interrupted: Schema.Int }), error: StorageError })
 ) {}
 
 export class ReadOps extends RpcGroup.make(
@@ -951,6 +987,41 @@ export class ReadOps extends RpcGroup.make(
   /** Every stored file's SHA-256, for the sweep of files no row names. */
   Rpc.make("ListMediaHashes", {
     success: Schema.Array(Schema.String),
+    error: StorageError
+  }),
+  // --- Chats: the chat RPCs beyond the graph operations above (reads.ts).
+  /** The user's chats, most recent first (DESIGN §2.1: by last message, else creation). */
+  Rpc.make("ListChats", {
+    payload: {
+      userId: UserId,
+      limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 500 })),
+      before: Schema.NullOr(Schema.Struct({ at: Schema.Number, id: ChatId }))
+    },
+    success: Schema.Array(Chat),
+    error: StorageError
+  }),
+  /** A window of a path, in either direction from where the client is (chatApi.ts). */
+  Rpc.make("ReadPath", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      leafSlotId: Schema.NullOr(SlotId),
+      range: PathRange,
+      limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: MAX_PATH_WINDOW }))
+    },
+    success: PathWindow,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** One live slot with its selected version, as a path shows it, and its chat. */
+  Rpc.make("GetSlot", {
+    payload: { userId: UserId, slotId: SlotId },
+    success: Schema.Struct({ chatId: ChatId, entry: PathEntry }),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** Which of these versions are the user's and live: not in the bin, nor their message or chat. */
+  Rpc.make("LiveVersions", {
+    payload: { userId: UserId, versionIds: Schema.Array(VersionId) },
+    success: Schema.Array(VersionId),
     error: StorageError
   })
 ) {}

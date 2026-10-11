@@ -957,3 +957,41 @@ The parsers are synchronous and take up to about a second on a hostile file (§8
 - **Files:** the avatar and assets the user holds (§11.1), read from disk by the paths `mediaPath` makes and no other. Only the files the format holds are read: the avatar for a PNG, every file for a CHARX, none for JSON. Each file is read once, however many times the document names it. Their total is capped at 128 MiB, the CHARX reader's own (§8), before anything is read (`422` past it): a document can name the same file any number of times, and the archive holds a copy for each.
 - **A PNG needs a PNG avatar.** A card with none goes into a 1×1 placeholder PNG. A card whose avatar is another image type is refused (`422`), suggesting CHARX, which keeps the image, or JSON, rather than having its avatar silently replaced.
 - **The response** has the file's type, `Content-Disposition: attachment` with the label as the name (an ASCII fallback, and the real name percent-encoded), `nosniff` and `no-store`.
+## 12. Chats
+
+The chat RPCs, live updates and generation. Contract in `@rp/shared/chatApi.ts` (merged into `AppApi`), handlers in `packages/server/src/api/chats.ts`, the services in `packages/server/src/chat/`.
+
+**RPCs.** Every one acts as the caller, and another user's ids are `NotFound` (each has a cross-user probe in the isolation matrix, §4).
+- **Chats:** `ListChats` (most recent first, by last message, else creation; paged by `(time, id)`), `CreateChat` (a title only, for now), `GetChat`, `DeleteChat`.
+- **Reading:** `ReadPath`, below, and `ListVersions` for the version picker.
+- **Writing:**
+  - `SendMessage` and `Generate` add a message under a tip: the user's text, or a model reply that streams. Without `branch` the tip must be the active leaf (`LeafMoved` otherwise); with it, any slot, which starts a branch (DESIGN §3.2).
+  - `Regenerate` is a swipe: a new model version of a slot, selected and streamed. `EditVersion` saves an edit as a new version "edited from" its source, and `WriteVersion` is "write your own". All three check the slot's row version (`StaleWrite`), through the writer's `AddSelectedVersion`.
+  - `SelectVersion` (row version), and `AmendVersion` for a finished user-written version (`NotAmendable` otherwise; DESIGN §3.1). A version's `rowVersion` is one more than the number of times it was amended, counted from `version_history`, since `versions` has no `row_version` column.
+  - `StopGeneration` stops one generation and returns the version as saved.
+  - `DeleteMessage`, `DeleteBranch`, `DeleteVersion`: to the bin (§3.11). Generations under what was deleted are stopped.
+- **`SubscribeChat`:** a stream of event batches, below.
+
+**Windows of a path** (`ReadPath`, `db/reads.ts`). The client never loads a whole chat: it reads windows of up to 500 slots and pages from cursors.
+- `Bottom` and `Older` walk up from a slot, as `GetPath` does (§3.8): the cost is the window.
+- `Newer` walks down from a slot the client already has, towards the leaf. A run of only children needs no check; at a branch, the child towards the leaf is found by walking up from the leaf, which costs its distance from the leaf. A slot that turns out not to be on the path ends the walk there.
+- `Around` opens at a slot (deep links, DESIGN §10.1), about half the window above it. It checks that the slot is on the path, a walk from the leaf to it, once per open. A slot on another path opens the path through it instead, following the newest reply at each step, and `leafSlotId` says which.
+- Deleted messages are walked through but not returned; the cursors (`older`, `newer`) still move on.
+
+**Live updates** (`chat/ChatHub.ts`). Every committed change is published to the chat's subscribers, from any tab of the user:
+- `Slot` (a message added, or its selection or versions changed), `Version` (a generation ended, or an amend), `Chat` (the leaf or last message moved), `Reload` (something was deleted).
+- Streamed text comes as `Delta { versionId, offset, text }`, never as whole messages (CLIENT-FRAMEWORK §5). The offset lets a client tell a repeat from a gap.
+- Each subscriber gets a chat's events in batches at most every 16 ms. Consecutive deltas of a version are merged, and any other event is a barrier, so order holds.
+- **No events are lost between loading and subscribing.** Each subscription starts with `Hello`, which carries the text so far of every version generating in the chat, taken in the same synchronous step that registers the subscriber. A client subscribes first, then reads its windows, and applies events idempotently (by id, row version and offset). A second `Hello` means the socket reconnected: the client reads its windows again. This replaces the per-chat sequence number EFFECT.md §5 proposed: nothing needs replaying, since state comes from reads and live text from `Hello`.
+- Publishing never blocks: events are queued per chat, and one timer sends the batches.
+
+**Generation** (`chat/Generations.ts`). One fiber per generating version, in the service's scope, any number at once and several under one slot.
+- The **generator** (`chat/Generator.ts`) is an interface: given a chat position, a stream of text. The real one will be the context assembler in front of the provider layer (PLAN phase 2). Until then the server has none, and `Generate` and `Regenerate` are refused with `GenerationUnavailable` before anything is written.
+- The text accumulates on the main thread and is published as deltas. Every 2 seconds the text so far is saved (`SaveGeneration`, status still `generating`), so a crash keeps most of it.
+- **How a generation ends:** complete; `stopped` by the user, with its text; `interrupted` when the server stops (the scope closes and the fiber's exit handler saves it); `failed` with the generator's error class and message, and the text so far (DESIGN §3.1). A generation can't be resumed yet (DESIGN §7.5).
+- At startup, versions a crashed process left `generating` become `interrupted` (`InterruptGenerations`).
+- **Nothing blocks the event loop.** Text arrives in chunks, publishing is a queue push, and saving is a message to the writer worker. `test/chats.test.ts` runs six streams at 300 tokens a second and checks the event-loop monitor's maximum stays under 100 ms on this shared host.
+
+**The fake generator** (`chat/fakeGenerator.ts`, `chat/syntheticText.ts`) streams synthetic Markdown (prose, dialogue, lists, quotes, an occasional table), seeded by the version id, at `FAKE_GENERATOR_TPS` tokens a second, about `FAKE_GENERATOR_TOKENS` (400) per generation, in chunks of what's due every 10 ms or more. It's for tests, the development server and the performance harness: `main.ts` refuses to start with `FAKE_GENERATOR_TPS` set and `NODE_ENV=production` (`test/config.test.ts`).
+
+**Open decisions this leaves open:** sending into a chat that's still generating (DESIGN §2.2, [O]): the server allows it, and the client disables Send while the chat's own leaf is generating. "Start over" with a card (DESIGN §2.1, [O]) isn't built.

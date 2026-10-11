@@ -1,6 +1,6 @@
 import { NodeRuntime } from "@effect/platform-node"
-import { Cause, Exit, Layer, Runtime } from "effect"
-import { AppConfig } from "./config.ts"
+import { Cause, Effect, Exit, Layer, Runtime } from "effect"
+import { AppConfig, FakeGeneratorInProduction } from "./config.ts"
 import { ServerLive } from "./server.ts"
 
 /**
@@ -10,4 +10,14 @@ import { ServerLive } from "./server.ts"
 const teardown: Runtime.Teardown = (exit, onExit) =>
   Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause) ? onExit(0) : Runtime.defaultTeardown(exit, onExit)
 
-ServerLive.pipe(Layer.provide(AppConfig.layer), Layer.launch, NodeRuntime.runMain({ teardown }))
+/** The fake generator writes made-up text into chats, so production never runs with it. */
+const refuseFakeGenerator = Effect.suspend(() =>
+  process.env.NODE_ENV === "production" && process.env.FAKE_GENERATOR_TPS !== undefined
+    ? Effect.fail(new FakeGeneratorInProduction())
+    : Effect.void
+)
+
+refuseFakeGenerator.pipe(
+  Effect.andThen(Layer.launch(ServerLive.pipe(Layer.provide(AppConfig.layer)))),
+  NodeRuntime.runMain({ teardown })
+)

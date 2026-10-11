@@ -1,5 +1,6 @@
 // Read operation handlers. They run inside the reader workers on read-only connections.
-import type { ChatId, SlotId } from "@rp/shared/chat.ts"
+import type { ChatId, SlotId, VersionId } from "@rp/shared/chat.ts"
+import { PathWindow } from "@rp/shared/chatApi.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { MergePreview, Revision, type RevisionId } from "@rp/shared/library.ts"
 import { FoldableEvent } from "@rp/shared/state.ts"
@@ -10,6 +11,7 @@ import { makeDraftStore } from "./drafts.ts"
 import { makeLibraryQueries, toLibraryRef } from "./library.ts"
 import { NotFound, ReadOps, RefOperationRefused, StorageError } from "./ops.ts"
 import {
+  amendCount,
   type ChatRow,
   type PathRow,
   toChat,
@@ -33,17 +35,25 @@ const pathCte = (sql: SqlClient.SqlClient, chatId: ChatId, leaf: SlotId, limit: 
     WHERE s.parent_slot_id IS NOT NULL AND (${limit} IS NULL OR p.n < ${limit})
   )`
 
-/** GetPath's query: each slot in the window with its selected version, root first. */
+/** A path entry's columns: the slot's, and its selected version's under their own names. */
+const pathColumns = `v.id, v.slot_id, v.ordinal, v.status, v.speaker_entity_id, v.writer, v.content,
+  v.macro_mode, v.origin, v.source_version_id, v.direction, v.hidden, v.starred, v.created_at, v.error_json,
+  ${amendCount("v")}, s.lane_id, s.parent_slot_id, s.depth, s.row_version, s.context_excluded,
+  s.deleted_at IS NOT NULL AS slot_deleted,
+  (SELECT count(*) FROM versions c WHERE c.slot_id = s.id AND c.deleted_at IS NULL) AS version_count`
+
+/** The window of at most `limit` slots ending at `leaf`, root first, deleted ones included. */
 export const pathWindow = (sql: SqlClient.SqlClient, chatId: ChatId, leaf: SlotId, limit: number) =>
   sql<PathRow>`
     ${pathCte(sql, chatId, leaf, limit)}
-    SELECT v.id, v.slot_id, v.ordinal, v.status, v.speaker_entity_id, v.writer, v.content, v.macro_mode,
-      v.origin, v.source_version_id, v.direction, v.hidden, v.starred, v.created_at,
-      s.lane_id, s.parent_slot_id, s.depth, s.row_version, s.context_excluded,
-      s.deleted_at IS NOT NULL AS slot_deleted,
-      (SELECT count(*) FROM versions c WHERE c.slot_id = s.id AND c.deleted_at IS NULL) AS version_count
+    SELECT ${sql.literal(pathColumns)}
     FROM path JOIN slots s ON s.id = path.id JOIN versions v ON v.id = s.selected_version_id
     ORDER BY s.depth`
+
+interface SlotPosition {
+  readonly id: SlotId
+  readonly depth: number
+}
 
 export const makeReadHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
@@ -54,6 +64,80 @@ export const makeReadHandlers = Effect.gen(function* () {
     sql<ChatRow>`SELECT * FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`.pipe(
       Effect.flatMap(([row]) => (row ? Effect.succeed(row) : Effect.fail(new NotFound({ entity: "chat", id: chatId }))))
     )
+
+  const windowEndingAt = (chatId: ChatId, leaf: SlotId, limit: number) => pathWindow(sql, chatId, leaf, limit)
+
+  /** A slot of this chat, deleted or not: paths walk through deleted messages. */
+  const slotIn = (chatId: ChatId, slotId: SlotId) =>
+    sql<SlotPosition>`SELECT id, depth FROM slots WHERE id = ${slotId} AND chat_id = ${chatId}`.pipe(
+      Effect.flatMap(([row]) => (row ? Effect.succeed(row) : Effect.fail(new NotFound({ entity: "slot", id: slotId }))))
+    )
+
+  /**
+   * The ancestors of `from` at these depths (none above `from.depth`), by depth: one walk
+   * up to the smallest, so it costs the depth difference.
+   */
+  const ancestorsAt = (from: SlotPosition, depths: ReadonlyArray<number>) =>
+    sql<SlotPosition>`
+      WITH RECURSIVE up(id, parent, depth) AS (
+        SELECT id, parent_slot_id, depth FROM slots WHERE id = ${from.id}
+        UNION ALL
+        SELECT s.id, s.parent_slot_id, s.depth FROM slots s JOIN up ON s.id = up.parent
+        WHERE up.depth > ${Math.min(...depths)}
+      )
+      SELECT id, depth FROM up WHERE ${sql.in("depth", depths)}`.pipe(
+      Effect.map((rows) => new Map(rows.map((row) => [row.depth, row.id])))
+    )
+
+  /** The tip below a slot, following its newest live reply at every step. */
+  const latestDescendant = (slotId: SlotId) =>
+    sql<{ id: SlotId }>`
+      WITH RECURSIVE down(id, n) AS (
+        SELECT ${slotId}, 0
+        UNION ALL
+        SELECT (SELECT c.id FROM slots c WHERE c.parent_slot_id = d.id AND c.deleted_at IS NULL ORDER BY c.id DESC LIMIT 1),
+          d.n + 1
+        FROM down d WHERE d.id IS NOT NULL
+      )
+      SELECT id FROM down WHERE id IS NOT NULL ORDER BY n DESC LIMIT 1`.pipe(Effect.map(([row]) => row!.id))
+
+  /**
+   * Walks down from `after` towards `leaf`, at most `limit` slots, and returns the last
+   * slot reached (null for none). `after` comes from a window the client read, so it's on
+   * the path: a run of only children needs no check, and at a branch the child towards
+   * the leaf is found by walking up from it. The cost is the window's length plus, at
+   * each branch, its distance from the leaf. If `after` isn't on the path, the walk stops
+   * where it leaves it.
+   */
+  const walkTowards = (leaf: SlotPosition, after: SlotPosition, limit: number) =>
+    Effect.gen(function* () {
+      let current = after
+      let remaining = limit
+      while (remaining > 0 && current.depth < leaf.depth) {
+        const run = yield* sql<SlotPosition>`
+          WITH RECURSIVE down(id, depth, n) AS (
+            SELECT ${current.id}, ${current.depth}, 0
+            UNION ALL
+            SELECT c.id, c.depth, d.n + 1 FROM down d JOIN slots c ON c.parent_slot_id = d.id
+            WHERE d.n < ${remaining} AND d.id <> ${leaf.id}
+              AND (SELECT count(*) FROM slots x WHERE x.parent_slot_id = d.id) = 1
+          )
+          SELECT id, depth FROM down WHERE n > 0 ORDER BY n`
+        if (run.length > 0) {
+          current = run.at(-1)!
+          remaining -= run.length
+          continue
+        }
+        const next = (yield* ancestorsAt(leaf, [current.depth + 1])).get(current.depth + 1)!
+        const [step] = yield* sql<{
+          parent_slot_id: string | null
+        }>`SELECT parent_slot_id FROM slots WHERE id = ${next}`
+        if (step?.parent_slot_id !== current.id) break
+        current = { id: next, depth: current.depth + 1 }
+        remaining -= 1
+      }
+      return current.id === after.id ? null : current
+    })
 
   const liveSlot = (chatId: ChatId, slotId: SlotId) =>
     sql<{ id: string }>`SELECT id FROM slots WHERE id = ${slotId} AND chat_id = ${chatId} AND deleted_at IS NULL`.pipe(
@@ -86,7 +170,7 @@ export const makeReadHandlers = Effect.gen(function* () {
     ListVersions: ({ userId, slotId }) =>
       Effect.gen(function* () {
         const rows = yield* sql<VersionRow>`
-          SELECT v.* FROM versions v JOIN slots s ON s.id = v.slot_id JOIN chats c ON c.id = s.chat_id
+          SELECT v.*, ${sql.literal(amendCount("v"))} FROM versions v JOIN slots s ON s.id = v.slot_id JOIN chats c ON c.id = s.chat_id
           WHERE v.slot_id = ${slotId} AND c.owner_user_id = ${userId}
             AND v.deleted_at IS NULL AND s.deleted_at IS NULL AND c.deleted_at IS NULL
           ORDER BY v.ordinal`
@@ -248,7 +332,94 @@ export const makeReadHandlers = Effect.gen(function* () {
           userId
         ])
         return rows.map(toLibraryRef)
-      }).pipe(query("ListChatOverrides"))
+      }).pipe(query("ListChatOverrides")),
+
+    // --- Chats
+
+    ListChats: ({ userId, limit, before }) =>
+      sql<ChatRow>`
+        SELECT * FROM chats WHERE owner_user_id = ${userId} AND deleted_at IS NULL
+          AND (${before?.id ?? null} IS NULL
+            OR (coalesce(last_message_at, created_at), id) < (${before?.at ?? null}, ${before?.id ?? null}))
+        ORDER BY coalesce(last_message_at, created_at) DESC, id DESC LIMIT ${limit}`.pipe(
+        Effect.map((rows) => rows.map(toChat)),
+        query("ListChats")
+      ),
+
+    ReadPath: ({ userId, chatId, leafSlotId, range, limit }) =>
+      Effect.gen(function* () {
+        const chat = yield* ownedChat(userId, chatId)
+        const leaf = (leafSlotId ?? chat.active_leaf_slot_id) as SlotId | null
+        if (leaf === null) return new PathWindow({ leafSlotId: null, entries: [], older: null, newer: null })
+        // Deleted messages are walked through but not shown; their replies stay in place.
+        const window = (leafSlotId: SlotId, rows: ReadonlyArray<PathRow>, newer: SlotId | null, withOlder = true) =>
+          new PathWindow({
+            leafSlotId,
+            entries: rows.filter((row) => row.slot_deleted === 0).map(toPathEntry),
+            older: withOlder ? ((rows[0]?.parent_slot_id ?? null) as SlotId | null) : null,
+            newer
+          })
+        const leafSlot = yield* slotIn(chatId, leaf)
+        switch (range._tag) {
+          case "Bottom":
+            return window(leaf, yield* windowEndingAt(chatId, leaf, limit), null)
+          case "Older": {
+            yield* slotIn(chatId, range.from)
+            return window(leaf, yield* windowEndingAt(chatId, range.from, limit), null)
+          }
+          case "Newer": {
+            const after = yield* slotIn(chatId, range.after)
+            const last = yield* walkTowards(leafSlot, after, limit)
+            if (last === null) return window(leaf, [], null, false)
+            const rows = yield* windowEndingAt(chatId, last.id, last.depth - after.depth)
+            return window(leaf, rows, last.id === leaf ? null : last.id, false)
+          }
+          case "Around": {
+            const anchor = yield* slotIn(chatId, range.slot)
+            // The anchor and about half the window above it, the rest below, filled up
+            // from the other side near the root or the leaf.
+            const top = Math.max(0, anchor.depth - Math.ceil(limit / 2) + 1)
+            const lastDepthOn = (leafDepth: number) => Math.min(leafDepth, top + limit - 1)
+            let pathLeaf = leafSlot
+            let lastDepth = lastDepthOn(pathLeaf.depth)
+            let found = anchor.depth <= pathLeaf.depth ? yield* ancestorsAt(pathLeaf, [anchor.depth, lastDepth]) : null
+            if (found?.get(anchor.depth) !== anchor.id) {
+              // A slot on another path opens the path through it, on its latest replies.
+              pathLeaf = yield* slotIn(chatId, yield* latestDescendant(anchor.id))
+              lastDepth = lastDepthOn(pathLeaf.depth)
+              found = yield* ancestorsAt(pathLeaf, [lastDepth])
+            }
+            const end = found.get(lastDepth)!
+            const first = Math.max(0, lastDepth - limit + 1)
+            const rows = yield* windowEndingAt(chatId, end, lastDepth - first + 1)
+            return window(pathLeaf.id, rows, end === pathLeaf.id ? null : end)
+          }
+        }
+      }).pipe(query("ReadPath")),
+
+    GetSlot: ({ userId, slotId }) =>
+      sql<PathRow & { chat_id: ChatId }>`
+        SELECT ${sql.literal(pathColumns)}, s.chat_id
+        FROM slots s JOIN chats c ON c.id = s.chat_id JOIN versions v ON v.id = s.selected_version_id
+        WHERE s.id = ${slotId} AND c.owner_user_id = ${userId} AND s.deleted_at IS NULL AND c.deleted_at IS NULL`.pipe(
+        Effect.flatMap(([row]) =>
+          row
+            ? Effect.succeed({ chatId: row.chat_id, entry: toPathEntry(row) })
+            : Effect.fail(new NotFound({ entity: "slot", id: slotId }))
+        ),
+        query("GetSlot")
+      ),
+
+    LiveVersions: ({ userId, versionIds }) =>
+      (versionIds.length === 0
+        ? Effect.succeed([])
+        : sql<{ id: VersionId }>`
+            SELECT v.id FROM versions v JOIN slots s ON s.id = v.slot_id JOIN chats c ON c.id = s.chat_id
+            WHERE ${sql.in("v.id", versionIds)} AND c.owner_user_id = ${userId}
+              AND v.deleted_at IS NULL AND s.deleted_at IS NULL AND c.deleted_at IS NULL`.pipe(
+            Effect.map((rows) => rows.map((row) => row.id))
+          )
+      ).pipe(query("LiveVersions"))
   } satisfies Partial<Parameters<typeof ReadOps.of>[0]>
   return handlers
 })

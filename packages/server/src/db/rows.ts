@@ -60,6 +60,19 @@ export interface VersionRow {
   readonly hidden: number
   readonly starred: number
   readonly created_at: number
+  readonly error_json: string | null
+  /** How often a user-written version was amended (`amendCount`); absent on a row just inserted. */
+  readonly amend_count?: number
+}
+
+/** The column `toVersion` reads a version's row version from. */
+export const amendCount = (alias: string) =>
+  `(SELECT count(*) FROM version_history h WHERE h.version_id = ${alias}.id) AS amend_count`
+
+const toVersionError = (json: string | null) => {
+  if (json === null) return null
+  const error = JSON.parse(json) as { class?: unknown; message?: unknown }
+  return { class: String(error.class ?? "unknown"), message: String(error.message ?? "") }
 }
 
 export const toVersion = (row: VersionRow) =>
@@ -77,7 +90,9 @@ export const toVersion = (row: VersionRow) =>
     direction: row.direction,
     hidden: row.hidden === 1,
     starred: row.starred === 1,
-    createdAt: row.created_at
+    createdAt: row.created_at,
+    error: toVersionError(row.error_json),
+    rowVersion: 1 + (row.amend_count ?? 0)
   })
 
 /** A slot on a path, with its selected version's columns under their own names. */
