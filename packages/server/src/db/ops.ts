@@ -405,7 +405,8 @@ export class WriteOps extends RpcGroup.make(
    * A new upstream version (a re-import). The upstream ref merges it with the user's own
    * edits to the upstream (`outcome`), then every ref following it merges the change in,
    * field by field with diff3 for text. Conflicting refs are left as they were and
-   * report `conflicts` (DATA-MODEL §3.2).
+   * report `conflicts` (DATA-MODEL §3.2). Until documents can be migrated, one of another
+   * `schemaVersion` than the entity's is refused.
    */
   Rpc.make("ImportUpstream", {
     payload: {

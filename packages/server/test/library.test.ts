@@ -431,36 +431,73 @@ describe("library", () => {
     }).pipe(Effect.provide(database()))
   )
 
-  it.live("documents of different schema versions aren't merged", () =>
+  it.live("an import of another schema version is refused before anything is written", () =>
     Effect.gen(function* () {
-      const { writer, reader, userId, upstream, doc, edit, reimport, rowVersion } = yield* setup()
-      const pristine = yield* writer.ForkRef({ userId, refId: upstream.id, label: "Narrator", subtitle: "as is" })
-      const mine = yield* writer.ForkRef({ userId, refId: upstream.id, label: "Narrator", subtitle: "mine" })
-      yield* edit(mine.id, preset(MAIN, [], 0.7))
-
+      const { writer, reader, userId, upstream, doc, edit, reimport } = yield* setup()
+      const variant = yield* writer.ForkRef({ userId, refId: upstream.id, label: "Narrator", subtitle: "as is" })
+      const history = (refId: RefId) =>
+        reader.RefHistory({ userId, refId, limit: 10 }).pipe(Effect.map((revs) => revs.map((r) => r.id)))
       const v2 = preset(MAIN, [{ identifier: "style", content: "Short paragraphs." }])
-      const { change } = yield* reimport(v2, 2)
+
+      // Untouched upstream: the variant would have fast-forwarded into version 2.
+      assert.strictEqual(yield* tag(reimport(v2, 2)), "RefOperationRefused")
+      assert.deepStrictEqual(yield* history(variant.id), [upstream.headRevisionId])
+
+      // Upstream with its own edits: they'd have been stranded behind an unmergeable import.
+      yield* edit(upstream.id, preset(MAIN, [], 0.7))
+      const before = yield* history(upstream.id)
+      assert.strictEqual(yield* tag(reimport(v2, 2)), "RefOperationRefused")
+      assert.deepStrictEqual(yield* history(upstream.id), before)
+      assert.isFalse((yield* reader.GetRef({ userId, refId: upstream.id })).ref.updateAvailable)
+
+      // The same content at the library's version still merges, and flows on.
+      const accepted = yield* reimport(v2)
+      assert.strictEqual(accepted.outcome, "merged")
       assert.deepStrictEqual(
-        change.followers.map((f) => [f.refId, f.outcome]),
-        [
-          [pristine.id, "fast_forward"],
-          [mine.id, "conflicts"]
-        ]
+        accepted.change.followers.map((f) => f.outcome),
+        ["fast_forward"]
       )
-      assert.deepStrictEqual(yield* doc(mine.id), preset(MAIN, [], 0.7))
-      assert.strictEqual(yield* tag(reader.PreviewMerge({ userId, refId: mine.id })), "RefOperationRefused")
-      assert.strictEqual(
-        yield* tag(
-          writer.ResolveMerge({
-            userId,
-            refId: mine.id,
-            doc: v2,
-            theirsRevisionId: change.ref.headRevisionId,
-            expectedRowVersion: yield* rowVersion(mine.id)
-          })
-        ),
-        "RefOperationRefused"
-      )
+      assert.deepStrictEqual(yield* doc(variant.id), { ...v2, samplers: { temperature: 0.7 } })
+    }).pipe(Effect.provide(database()))
+  )
+
+  it.live("a first import equal to a user-created document only records the import", () =>
+    Effect.gen(function* () {
+      const { writer, reader, userId } = yield* setup()
+      const created = yield* writer.CreateEntity({
+        userId,
+        kind: "card",
+        label: "Mira",
+        subtitle: "",
+        doc: { name: "Mira" },
+        schemaVersion: 1,
+        origin: "user",
+        sourcePath: null
+      })
+      const variant = yield* writer.ForkRef({ userId, refId: created.ref.id, label: "Mira", subtitle: "v" })
+      const reimport = (d: Doc) =>
+        writer.ImportUpstream({
+          userId,
+          refId: created.ref.id,
+          doc: d,
+          schemaVersion: 1,
+          sourcePath: null,
+          sourceHash: null
+        })
+
+      const same = yield* reimport({ name: "Mira" })
+      assert.strictEqual(same.outcome, "up_to_date")
+      assert.deepStrictEqual(same.change.followers, [])
+      assert.isFalse(same.change.ref.updateAvailable)
+      const origins = (refId: RefId) =>
+        reader.RefHistory({ userId, refId, limit: 10 }).pipe(Effect.map((revs) => revs.map((r) => r.origin)))
+      assert.deepStrictEqual(yield* origins(created.ref.id), ["user"])
+      assert.deepStrictEqual(yield* origins(variant.id), ["user"])
+
+      // That import is now the merge base, so the next one merges cleanly.
+      const next = yield* reimport({ name: "Mira Vale" })
+      assert.strictEqual(next.outcome, "merged")
+      assert.deepStrictEqual((yield* reader.GetRef({ userId, refId: variant.id })).doc, { name: "Mira Vale" })
     }).pipe(Effect.provide(database()))
   )
 

@@ -60,21 +60,24 @@ export const makeLibraryWriteHandlers = (binLimits: BinLimits) =>
     const mergeMessage = (ref: RefRow) =>
       ref.followed_label === null ? "Merged a new import" : `Merged changes from ${ref.followed_label}`
 
-    /**
-     * Merges `ref` with what it follows, if that needs no help from the user. Documents
-     * of different schema versions can't be merged, so they count as conflicts.
-     */
+    /** Merges `ref` with what it follows, if that needs no help from the user. */
     const applyMerge = (ref: RefRow) =>
       Effect.gen(function* () {
         const plan = yield* lib.planMerge(ref)
         switch (plan.outcome) {
+          case "up_to_date":
+            // What it follows moved on but brought nothing new, so only the merge base moves.
+            if (ref.followed_head !== null && plan.theirsHead !== ref.merge_base_revision_id) {
+              yield* moveHead(ref.id, ref.head_revision_id, plan.theirsHead)
+            }
+            break
           case "fast_forward":
             yield* moveHead(ref.id, plan.theirsHead, plan.theirsHead)
             break
           case "merged": {
             const merge = yield* insertRevision({
               entityId: ref.entity_id,
-              schemaVersion: plan.schemaVersion!,
+              schemaVersion: (yield* revision(ref.head_revision_id)).schema_version,
               doc: plan.merged,
               parents: [ref.head_revision_id, plan.theirsHead],
               origin: "merge",
@@ -86,7 +89,7 @@ export const makeLibraryWriteHandlers = (binLimits: BinLimits) =>
           }
         }
         return plan.outcome
-      }).pipe(Effect.catchTag("RefOperationRefused", () => Effect.succeed<MergeOutcome>("conflicts")))
+      })
 
     /** Merges every ref that follows `refId`, transitively, and reports each outcome. */
     const flowToFollowers = (refId: string) =>
@@ -118,7 +121,7 @@ export const makeLibraryWriteHandlers = (binLimits: BinLimits) =>
         const change =
           outcome === "fast_forward" || outcome === "merged"
             ? yield* changed(ref.id)
-            : new RefChange({ ref: toLibraryRef(ref), followers: [] })
+            : new RefChange({ ref: toLibraryRef(yield* reload(ref.id)), followers: [] })
         return { outcome, change }
       })
 
@@ -273,11 +276,20 @@ export const makeLibraryWriteHandlers = (binLimits: BinLimits) =>
           if (ref.ref_kind !== "upstream") {
             return yield* new RefOperationRefused({ refId, reason: "Only upstream refs take imports." })
           }
+          // Until per-kind migrations exist, every revision of an entity has one schema
+          // version, so merges never span versions.
+          const current = yield* revision(ref.head_revision_id)
+          if (schemaVersion !== current.schema_version) {
+            return yield* new RefOperationRefused({
+              refId,
+              reason: `This is schema version ${schemaVersion}, but the library holds version ${current.schema_version}, and documents can't be migrated yet.`
+            })
+          }
           // Imports form their own line of revisions, which the upstream ref merges in like
           // a variant merges its upstream, so the user's edits to the upstream survive.
-          const last = ref.followed_head === null ? null : yield* revision(ref.followed_head)
           // Importing what was last imported adds nothing to that line.
-          if (last === null || last.doc_hash !== docHash(doc) || last.schema_version !== schemaVersion) {
+          const last = ref.followed_head === null ? null : yield* revision(ref.followed_head)
+          if (last === null || last.doc_hash !== docHash(doc)) {
             yield* insertRevision({
               entityId: ref.entity_id,
               schemaVersion,
@@ -314,7 +326,7 @@ export const makeLibraryWriteHandlers = (binLimits: BinLimits) =>
           }
           const merge = yield* insertRevision({
             entityId: ref.entity_id,
-            schemaVersion: yield* lib.mergeSchemaVersion(ref, theirsRevisionId),
+            schemaVersion: (yield* revision(ref.head_revision_id)).schema_version,
             doc,
             parents: [ref.head_revision_id, theirsRevisionId],
             origin: "merge",

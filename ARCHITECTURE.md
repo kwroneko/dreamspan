@@ -242,16 +242,16 @@ Layered, versioned documents (DESIGN §4, DATA-MODEL §3) for cards, presets, lo
 - **An upstream ref follows its imports.** Imports form their own line of revisions, each one's parent the previous import. The upstream merges the latest import, and its merge base is the import it last merged. So a re-import merges with edits made on the upstream itself, as a variant's merge does.
 - **"Update available"** is derived, not stored: what the ref follows (for an upstream, its latest import) differs from the merge base.
 - Documents are any JSON object for now. Per-kind schemas arrive with the importers (PLAN phase 1).
-- A content hash over canonical JSON (sorted keys) means an edit or re-import that changes nothing creates no revision.
+- A content hash over canonical JSON (sorted keys) means an edit, re-import or merge that changes nothing creates no revision. A merge that brings nothing new only moves the merge base and reports `up_to_date`.
 
 **Operations.**
 - **Writes:**
   - `CreateEntity`
-  - `EditRef`: a new revision on the head, with `expectedRowVersion`. It keeps the head's schema version, and commits its draft even when it changes nothing.
+  - `EditRef`: a new revision on the head, with `expectedRowVersion`. It commits its draft even when it changes nothing.
   - `ForkRef`: a new variant
   - `CreateChatOverride`
   - `PromoteOverride`: override to variant
-  - `ImportUpstream`: a new import revision stamped with the given `schemaVersion`, merged into the upstream; it returns the upstream's outcome and its followers'
+  - `ImportUpstream`: a new import revision, merged into the upstream; it returns the upstream's outcome and its followers'
   - `MergeFollowed`
   - `ResolveMerge`: commit a hand-resolved merge, refused if the followed ref moved again since the preview
   - `SetEntityTags`: folders; `persona` is the persona folder
@@ -271,7 +271,7 @@ Layered, versioned documents (DESIGN §4, DATA-MODEL §3) for cards, presets, lo
 
 An upstream merging a new import ends the same ways. The outcomes are returned, so the UI can report what happened.
 
-**Schema versions.** There are no per-kind migrations yet, so documents of different schema versions aren't merged: such a merge counts as conflicts, and `PreviewMerge` and `ResolveMerge` refuse it. A fast-forward still applies.
+**Schema versions (interim, until per-kind migrations exist).** Every revision of an entity has the schema version it was created with. `ImportUpstream` refuses a document of another `schemaVersion` before writing anything, so no merge ever spans versions.
 
 **Three-way merge** (`merge3`, shared so the server's merge and the resolver's preview always agree):
 - Objects merge per key. Only own keys count, so `__proto__` or `constructor` are plain data.
