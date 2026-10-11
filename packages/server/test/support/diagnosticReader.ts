@@ -7,7 +7,7 @@ import { SqlClient } from "effect/sql"
 import { readerConnection, toStorageError } from "../../src/db/connection.ts"
 import { DiagnosticOps } from "./diagnostics.ts"
 
-const { dbPath } = workerData as { readonly dbPath: string }
+const { dbPath, gate } = workerData as { readonly dbPath: string; readonly gate: Int32Array }
 
 RpcServer.layer(DiagnosticOps, { concurrency: 1 }).pipe(
   Layer.provide(
@@ -21,7 +21,13 @@ RpcServer.layer(DiagnosticOps, { concurrency: 1 }).pipe(
               SELECT count(*) AS n FROM c`.pipe(
               Effect.map(([row]) => row?.n ?? 0),
               Effect.mapError(toStorageError("CountTo"))
-            )
+            ),
+          Hold: () =>
+            Effect.sync(() => {
+              Atomics.add(gate, 1, 1)
+              Atomics.notify(gate, 1)
+              Atomics.wait(gate, 0, 0)
+            })
         })
       })
     )

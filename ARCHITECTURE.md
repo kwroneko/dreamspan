@@ -121,7 +121,7 @@ SQLite through Node's built-in `node:sqlite` and Effect's driver (`@effect/sql-s
 - Requests queue in arrival order for the first idle reader. A request whose send fails gets a defect, and its reader is released.
 - Tested (`test/readerPool.test.ts`) with a test reader whose requests block like queries: after the interrupted read and after a crash, each light read takes well under 300 ms, and the crashed reader is replaced by a new thread; with readers that die as they start, startup fails, and a read after all readers crashed fails in about a second.
 
-Measured (`test/database.test.ts`): the same CPU-heavy 800 ms query blocks the main event loop for **795 ms** when run on the main thread, and **0.8 ms** when run through a reader worker (a test-only one, `test/support/diagnostics.ts`, with the readers' connection setup). Light reads on another reader finish while it runs.
+Measured: the same CPU-heavy 800 ms query blocks the main event loop for **795 ms** when run on the main thread, and **0.8 ms** when run through a reader worker. `test/database.test.ts` checks this without a clock, through a test-only reader pool with the readers' connection setup (`test/support/diagnostics.ts`). The query on the main thread blocks the loop for over 100 ms. One reader is then held blocked until the test releases it, and 20 light reads through the other reader must finish first. If the blocked reader blocked the main thread, they never would. An earlier version asserted under 30 ms of main-thread lag, which failed at load averages of 40 to 60.
 
 ### 3.2 Storage operations are named commands
 

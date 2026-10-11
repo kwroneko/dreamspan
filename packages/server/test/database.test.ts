@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { DatabaseSync } from "node:sqlite"
 import { assert, beforeAll, describe, it } from "@effect/vitest"
-import { Cause, Effect, Exit, Layer } from "effect"
+import { Cause, Effect, Exit, Fiber, Layer } from "effect"
 import { acquireInstanceLock, databaseFile, InstanceLocked } from "../src/db/connection.ts"
 import * as Database from "../src/db/Database.ts"
 import { buildWorkers } from "../scripts/build-workers.ts"
@@ -119,32 +119,25 @@ describe("database workers", () => {
           )
         )
         direct.close()
+        assert.isAbove(onMain.maxLagMs, 100, `baseline should block: ${onMain.maxLagMs.toFixed(0)} ms`)
 
         const dir = freshDir()
         yield* Effect.provide(
           Effect.flatMap(Database.Writer, (w) => w.Ready()),
           database(dir, 1)
         )
-        const reader = yield* diagnosticReaders(dir, 2)
-        yield* Effect.forEach(range(2), () => reader.CountTo({ n: 1 }), { concurrency: "unbounded" })
-        const offMain = yield* measureMainThreadLag(
-          Effect.all(
-            [
-              reader.CountTo({ n: HEAVY }).pipe(Effect.map((n) => ({ n, doneAt: performance.now() }))),
-              // Light reads go to the other reader and finish while the heavy one runs.
-              Effect.forEach(range(20), () => reader.CountTo({ n: 1 })).pipe(
-                Effect.andThen(Effect.sync(() => performance.now()))
-              )
-            ],
-            { concurrency: "unbounded" }
-          )
-        )
+        const { reader, holding, release } = yield* diagnosticReaders(dir, 2)
+        assert.strictEqual(yield* reader.CountTo({ n: HEAVY }), HEAVY)
 
-        const [heavy, lightDoneAt] = offMain.result
-        assert.strictEqual(heavy.n, HEAVY)
-        assert.isBelow(lightDoneAt, heavy.doneAt, "light reads should not wait behind the heavy one")
-        assert.isAbove(onMain.maxLagMs, 100, `baseline should block: ${onMain.maxLagMs.toFixed(0)} ms`)
-        assert.isBelow(offMain.maxLagMs, 30, `main thread lag with workers: ${offMain.maxLagMs.toFixed(1)} ms`)
+        // One reader is blocked, as by a query that runs until released. Meanwhile the main
+        // thread serves light reads through the other reader. Had the blocked reader blocked
+        // the main thread, neither they nor the release after them could ever run.
+        const held = yield* Effect.forkChild(reader.Hold())
+        yield* holding
+        yield* Effect.forEach(range(20), () => reader.CountTo({ n: 1 }))
+        assert.isUndefined(held.pollUnsafe(), "the reader is still blocked")
+        yield* release
+        yield* Fiber.join(held)
       }).pipe(Effect.scoped),
     30_000
   )
