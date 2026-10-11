@@ -37,16 +37,26 @@ const make = (tag: string, message: string, reason: string | null = null, proble
   problems
 })
 
+/** `useAction` reloads what the write would have changed, so the user sees the latest version. */
+const stale = (entity: string) =>
+  make(
+    "StaleWrite",
+    `This ${entity} changed since you opened it, maybe in another tab. The latest version is loaded: check it, then make your change again.`
+  )
+
 const describeError = (error: unknown): AppError => {
   if (error instanceof Unauthorized) return make("Unauthorized", "Your session has ended. Log in again.")
   if (error instanceof RpcClientError.RpcClientError)
     return make("RpcClientError", "Can't reach the server. Check that it's running.")
   if (error instanceof NotFound) return make("NotFound", `This ${error.entity} doesn't exist any more.`)
-  if (error instanceof StaleWrite) {
-    return make(
-      "StaleWrite",
-      `This ${error.entity} changed since you opened it, maybe in another tab. Load the latest version, then make your change again.`
-    )
+  if (error instanceof StaleWrite) return stale(error.entity)
+  // The provider layer reports a StaleWrite as this bad_request (Providers.ts, fromStorage).
+  if (
+    error instanceof ProviderError &&
+    error.reason === "bad_request" &&
+    /changed in another tab/.test(error.message)
+  ) {
+    return stale("connection")
   }
   if (error instanceof ProviderError) return make("ProviderError", sentence(error.message), error.reason)
   if (error instanceof AccountRejected) return make("AccountRejected", sentence(error.message), error.reason)

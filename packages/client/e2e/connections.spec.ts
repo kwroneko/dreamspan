@@ -49,7 +49,6 @@ test("create, check, edit, route and delete a connection", async ({ page }) => {
   await expect(page.getByText(/Route: direct/)).toBeVisible()
   expect(provider.keys).toContain("sk-fake-key-123456")
 
-  // A save, then a stale write from another tab's point of view.
   await page.getByLabel("Name").fill("Local fake renamed")
   await page.getByRole("button", { name: "Save", exact: true }).click()
   await expect(page.getByRole("heading", { name: "Local fake renamed", level: 1 })).toBeVisible()
@@ -74,6 +73,44 @@ test("create, check, edit, route and delete a connection", async ({ page }) => {
   await page.getByRole("alertdialog").getByRole("button", { name: "Delete" }).click()
   await expect(page).toHaveURL(`${server().url}/settings/connections`)
   await expect(page.getByText("No connections yet")).toBeVisible()
+})
+
+test("two tabs: a change made in the other is loaded, and the next try succeeds", async ({ page, context }) => {
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await createConnection(page, "Two tabs", provider.baseUrl, "sk-two-tabs-key-000111")
+  const second = await context.newPage()
+  await second.goto(page.url())
+
+  // The other tab renames it while this one edits the concurrency.
+  await page.getByLabel("Concurrent requests").fill("3")
+  await second.getByLabel("Name").fill("Renamed in the other tab")
+  await second.getByRole("button", { name: "Save", exact: true }).click()
+  await expect(second.getByRole("heading", { name: "Renamed in the other tab", level: 1 })).toBeVisible()
+
+  await page.getByRole("button", { name: "Save", exact: true }).click()
+  await expect(page.getByRole("alert")).toContainText("changed since you opened it")
+  await page.getByRole("button", { name: "Load the latest" }).click()
+  await expect(page.getByLabel("Name")).toHaveValue("Renamed in the other tab")
+  await page.getByLabel("Concurrent requests").fill("3")
+  await page.getByRole("button", { name: "Save", exact: true }).click()
+  await expect(page.getByLabel("Concurrent requests")).toHaveValue("3")
+  await expect(page.getByRole("alert")).toHaveCount(0)
+
+  // A key typed against an address the other tab has since changed: refused, then reloaded.
+  await second.reload()
+  await second.getByLabel("Name").fill("Renamed again")
+  await second.getByRole("button", { name: "Save", exact: true }).click()
+  await expect(second.getByRole("heading", { name: "Renamed again", level: 1 })).toBeVisible()
+  await page.getByRole("button", { name: "Enter a new key" }).click()
+  const dialog = page.getByRole("dialog")
+  await dialog.getByLabel("Key").fill("sk-two-tabs-key-222333")
+  await dialog.getByRole("button", { name: "Save key" }).click()
+  await expect(dialog.getByRole("alert")).toContainText("changed since you opened it")
+  // Only possible with the reloaded row version.
+  await dialog.getByRole("button", { name: "Save key" }).click()
+  await expect(dialog).toBeHidden()
+  await expect(page.getByText("Key ending in 2333")).toBeVisible()
+  await second.close()
 })
 
 test("a key isn't sent to a new address until it's typed again", async ({ page }) => {

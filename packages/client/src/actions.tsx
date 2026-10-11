@@ -16,7 +16,8 @@ type ActionResult<A> = { readonly ok: true; readonly value: A } | { readonly ok:
 
 /**
  * Runs RPCs as the user. Calls don't cancel each other, unlike a shared mutation atom.
- * `invalidates` names the reactivity keys of the queries a success makes stale.
+ * `invalidates` names the reactivity keys of the queries the write changes. They're
+ * reloaded after a success, and after a StaleWrite, which means they're out of date.
  */
 export function useAction() {
   const registry = useContext(RegistryContext)
@@ -32,15 +33,15 @@ export function useAction() {
     const exit = await Effect.runPromiseExit(
       Effect.gen(function* () {
         const services = yield* AtomRegistry.getResult(registry, AppClient.runtime)
-        const value = yield* call(Context.get(services, AppClient))
         // The runtime holds the same Reactivity instance the queries subscribe to.
-        if (invalidates.length > 0) {
-          Context.get(
-            services as unknown as Context.Context<Reactivity.Reactivity>,
-            Reactivity.Reactivity
-          ).invalidateUnsafe(invalidates)
-        }
-        return value
+        const reactivity = Context.get(
+          services as unknown as Context.Context<Reactivity.Reactivity>,
+          Reactivity.Reactivity
+        )
+        const outcome = yield* Effect.exit(call(Context.get(services, AppClient)))
+        const stale = Exit.isFailure(outcome) && describeCause(outcome.cause).tag === "StaleWrite"
+        if ((Exit.isSuccess(outcome) || stale) && invalidates.length > 0) reactivity.invalidateUnsafe(invalidates)
+        return yield* outcome
       })
     )
     setPending(false)
