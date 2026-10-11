@@ -681,6 +681,7 @@ It fails with a typed `ProviderError`.
 - **ST's top-level copies** of V1 fields and its local state (`chat`, `create_date`, `fav`, `avatar`) aren't kept; other top-level keys are.
 - **The embedded `character_book`** is mapped as ST's `convertCharacterBook` does: ST's World Info fields come out of each entry's `extensions` into the entry, with its defaults; whatever else is in `extensions` stays. Two deliberate differences: the spec's own `case_sensitive` is the fallback when the extension has none (ST ignores it), and ids that aren't unique whole numbers are replaced, with a warning, since the merge matches entries by them. An entry without `enabled` is disabled, as in ST, with a warning.
 - **Card modules** come back from `extensions.rp_harness.modules`, where an export puts them.
+- **PNG** (`png.ts`): the card is base64 JSON in a `tEXt` chunk. As in ST (`src/character-card-parser.js`), `ccv3` wins over `chara`, keywords match in any case, and a bad CRC or a missing IEND rejects the file. The avatar returned is the PNG without its card chunks. V3's `chara-ext-asset_` chunks are skipped with a note (the spec discourages them; ST ignores them).
 
 **Hardening** (`safety.ts`). These parse untrusted files, so every input is capped (`defaultLimits`), and each cap has a test with a crafted file that fails when the check is removed.
 
@@ -689,5 +690,7 @@ It fails with a typed `ProviderError`.
 | File size | 64 MiB | Bounds memory and work for everything below |
 | JSON size | 32 MiB | Also applies to a PNG's card chunk once decoded |
 | JSON nesting | 64 levels | The walk after parsing is recursive; real cards nest about 8 deep |
+| PNG chunks | 16,384 | Bounds the chunk walk |
+| PNG chunk size | 32 MiB | Checked against the declared length before anything is read |
 
 - **Prototype keys** (`__proto__`, `constructor`, `prototype`) are dropped right after `JSON.parse`, with a warning. `JSON.parse` makes them plain own keys, but a later assignment, `Object.assign` or merge can turn one into a prototype change.

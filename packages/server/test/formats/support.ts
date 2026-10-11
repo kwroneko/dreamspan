@@ -1,6 +1,33 @@
 // Synthetic fixtures and helpers for the format parser tests. Every card here is made up.
+import { crc32, deflateSync } from "node:zlib"
 import { Effect } from "effect"
 import type { FormatError } from "../../src/formats/safety.ts"
+
+export const chunk = (type: string, data: Uint8Array = new Uint8Array()) => {
+  const out = Buffer.alloc(12 + data.byteLength)
+  out.writeUInt32BE(data.byteLength, 0)
+  out.write(type, 4, "latin1")
+  out.set(data, 8)
+  out.writeUInt32BE(crc32(out.subarray(4, 8 + data.byteLength)), 8 + data.byteLength)
+  return out
+}
+
+export const textChunk = (keyword: string, text: string) => chunk("tEXt", Buffer.from(`${keyword}\0${text}`, "latin1"))
+
+export const cardChunk = (keyword: string, card: unknown) =>
+  textChunk(keyword, Buffer.from(JSON.stringify(card)).toString("base64"))
+
+export const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+
+/** A 1×1 grey PNG with `extra` chunks before IEND. */
+export const png = (...extra: Array<Uint8Array>) =>
+  Buffer.concat([
+    PNG_SIGNATURE,
+    chunk("IHDR", Buffer.from([0, 0, 0, 1, 0, 0, 0, 1, 8, 0, 0, 0, 0])),
+    chunk("IDAT", deflateSync(Buffer.from([0, 128]))),
+    ...extra,
+    chunk("IEND")
+  ])
 
 export const run = <A>(effect: Effect.Effect<A, FormatError>): A => Effect.runSync(effect)
 
