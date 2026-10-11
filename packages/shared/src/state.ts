@@ -38,7 +38,7 @@ export type StateEventData = typeof StateEventData.Type
 export const FoldableEvent = Schema.Struct({ scope: Schema.NullOr(Schema.String), data: StateEventData })
 export type FoldableEvent = typeof FoldableEvent.Type
 
-export interface Binding {
+interface Binding {
   readonly ref?: string | undefined
   readonly revision?: string | undefined
 }
@@ -66,7 +66,7 @@ export interface ChatState {
   readonly authorNote: string | null
 }
 
-export const emptyChatState: ChatState = {
+const emptyChatState: ChatState = {
   participants: [],
   absent: [],
   playedByMe: [],

@@ -48,12 +48,12 @@ import { type Capture, costOf, emptyCapture, finalCounts } from "./usage.ts"
 export { ProviderError } from "./errors.ts"
 
 /** Retries before the first token (PROVIDERS §7.2). After output, a failure is the user's call. */
-export interface RetryPolicy {
+interface RetryPolicy {
   readonly maxRetries: number
   readonly baseDelayMs: number
   readonly maxDelayMs: number
 }
-export const defaultRetryPolicy: RetryPolicy = { maxRetries: 3, baseDelayMs: 1_000, maxDelayMs: 60_000 }
+const defaultRetryPolicy: RetryPolicy = { maxRetries: 3, baseDelayMs: 1_000, maxDelayMs: 60_000 }
 
 export interface StreamRequest {
   readonly userId: UserId

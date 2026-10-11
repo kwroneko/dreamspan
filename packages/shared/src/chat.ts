@@ -13,12 +13,12 @@ export const EntityId = Schema.String.pipe(Schema.brand("EntityId"))
 export type EntityId = typeof EntityId.Type
 
 export const ChatKind = Schema.Literals(["rp", "workshop"])
-export const ChatStatus = Schema.Literals(["pending", "active", "archived"])
+const ChatStatus = Schema.Literals(["pending", "active", "archived"])
 export const VersionStatus = Schema.Literals(["generating", "complete", "stopped", "failed", "interrupted"])
 export type VersionStatus = typeof VersionStatus.Type
-export const Writer = Schema.Literals(["human", "model"])
-export const MacroMode = Schema.Literals(["template", "verbatim"])
-export const VersionOrigin = Schema.Literals([
+const Writer = Schema.Literals(["human", "model"])
+const MacroMode = Schema.Literals(["template", "verbatim"])
+const VersionOrigin = Schema.Literals([
   "generated",
   "user_written",
   "edited",

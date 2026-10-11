@@ -10,7 +10,7 @@ const KEY_LENGTH = 32
 // scrypt needs 128 * N * r bytes, 32 MiB here, which is exactly Node's default limit.
 const MAX_MEM = 64 * 1024 * 1024
 
-export const MIN_PASSWORD_LENGTH = 8
+const MIN_PASSWORD_LENGTH = 8
 export const MAX_PASSWORD_LENGTH = 1024
 
 /** Why a new password isn't acceptable, or undefined. Length only (NIST SP 800-63B). */

@@ -11,7 +11,7 @@ import type { Message } from "@earendil-works/pi-ai"
 import { Predicate } from "effect"
 
 /** Anthropic accepts at most four cache_control markers per request. */
-export const MAX_ANTHROPIC_BREAKPOINTS = 4
+const MAX_ANTHROPIC_BREAKPOINTS = 4
 
 type Block = Record<string, unknown>
 type WireMessage = { role: string; content: string | Array<Block> }

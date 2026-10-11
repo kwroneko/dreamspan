@@ -36,7 +36,7 @@ export class Forbidden extends Schema.TaggedError<Forbidden>()("Forbidden", {
   message: Schema.String
 }) {}
 
-export const AccountRejectedReason = Schema.Literals([
+const AccountRejectedReason = Schema.Literals([
   "handle_taken",
   "invalid_handle",
   "weak_password",
@@ -49,7 +49,7 @@ export const AccountRejectedReason = Schema.Literals([
   /** Accounts and passwords belong to the reverse proxy in proxy mode. */
   "proxy_mode"
 ])
-export type AccountRejectedReason = typeof AccountRejectedReason.Type
+type AccountRejectedReason = typeof AccountRejectedReason.Type
 
 /** An account change or login that can't be done as asked (DESIGN §10.1). */
 export class AccountRejected extends Schema.TaggedError<AccountRejected>()("AccountRejected", {

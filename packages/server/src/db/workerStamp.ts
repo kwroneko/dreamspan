@@ -6,7 +6,7 @@ import { join, relative, sep } from "node:path"
 import { fileURLToPath } from "node:url"
 
 /** The repository root. Stamped paths are relative to it. */
-export const root = fileURLToPath(new URL("../../../../", import.meta.url))
+const root = fileURLToPath(new URL("../../../../", import.meta.url))
 
 interface Stamp {
   readonly sources: ReadonlyArray<string>

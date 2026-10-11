@@ -114,7 +114,7 @@ export const acquireInstanceLock = (dataDir: string) =>
 const isBusy = (cause: unknown) =>
   typeof cause === "object" && cause !== null && "errcode" in cause && (cause.errcode === 5 || cause.errcode === 6)
 
-export class UnsafeFilesystem extends Schema.TaggedError<UnsafeFilesystem>()("UnsafeFilesystem", {
+class UnsafeFilesystem extends Schema.TaggedError<UnsafeFilesystem>()("UnsafeFilesystem", {
   dataDir: Schema.String,
   filesystem: Schema.String
 }) {

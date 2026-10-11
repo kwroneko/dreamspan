@@ -106,8 +106,8 @@ export const ConnectionSettings = Schema.Struct({
 })
 export type ConnectionSettings = typeof ConnectionSettings.Type
 
-export const Prefill = Schema.Literals(["none", "assistant", "tool_schema"])
-export const CacheBreakpoints = Schema.Literals(["auto", "explicit", "none"])
+const Prefill = Schema.Literals(["none", "assistant", "tool_schema"])
+const CacheBreakpoints = Schema.Literals(["auto", "explicit", "none"])
 
 /** Prices per million tokens, as a source reports them; the input to built-in cost formulas. */
 export const Price = Schema.Struct({
@@ -156,7 +156,7 @@ export const ModelUpstream = Schema.Struct({ ...capabilityFields, price: Schema.
 export type ModelUpstream = typeof ModelUpstream.Type
 
 /** A field's value and where it came from; `unknown` means no source knows it. */
-export type Resolved<A> = { readonly value: A; readonly source: "user" | "upstream" | "unknown" }
+type Resolved<A> = { readonly value: A; readonly source: "user" | "upstream" | "unknown" }
 
 export interface EffectiveModel {
   readonly name: Resolved<string>

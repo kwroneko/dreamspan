@@ -46,7 +46,7 @@ import {
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
 
-export const StorageErrorReason = Schema.Literals(["busy", "constraint", "corrupt", "other"])
+const StorageErrorReason = Schema.Literals(["busy", "constraint", "corrupt", "other"])
 
 /** A disabled user, refused before it can act. */
 export class UserDisabled extends Schema.TaggedError<UserDisabled>()("UserDisabled", { handle: Schema.String }) {}
@@ -61,7 +61,7 @@ export class StorageError extends Schema.TaggedError<StorageError>()("StorageErr
 export { LeafMoved, ModelKeyTaken, NotFound, StaleWrite } from "@rp/shared/errors.ts"
 
 /** The largest path window one GetPath returns. */
-export const MAX_PATH_WINDOW = 1000
+const MAX_PATH_WINDOW = 1000
 
 /** The operation doesn't apply to this kind of ref (e.g. forking a chat override). */
 export class RefOperationRefused extends Schema.TaggedError<RefOperationRefused>()("RefOperationRefused", {
@@ -81,7 +81,7 @@ export class RefChange extends Schema.Class<RefChange>("RefChange")({
 }) {}
 
 /** What merging a ref did, and the change that flowed on from it. */
-export const MergeAndFlow = Schema.Struct({ outcome: MergeOutcome, change: RefChange })
+const MergeAndFlow = Schema.Struct({ outcome: MergeOutcome, change: RefChange })
 
 export class DraftTooLarge extends Schema.TaggedError<DraftTooLarge>()("DraftTooLarge", {
   length: Schema.Int,
@@ -93,7 +93,7 @@ export class DraftTooLarge extends Schema.TaggedError<DraftTooLarge>()("DraftToo
  * never shows text that was already sent. If the draft moved on since (another tab kept
  * typing), it stays active: it holds newer text than what was committed.
  */
-export const CommitDraft = Schema.NullOr(Schema.Struct({ key: DraftKey, expectedRowVersion: Schema.Int }))
+const CommitDraft = Schema.NullOr(Schema.Struct({ key: DraftKey, expectedRowVersion: Schema.Int }))
 
 export class AppendResult extends Schema.Class<AppendResult>("AppendResult")({
   slotId: SlotId,
@@ -137,10 +137,10 @@ export class ConnectionForRequest extends Schema.Class<ConnectionForRequest>("Co
 }) {}
 
 /** A position in the ledger's newest-first order; start times alone can tie. */
-export const LedgerCursor = Schema.Struct({ startedAt: Schema.Number, id: Schema.String })
+const LedgerCursor = Schema.Struct({ startedAt: Schema.Number, id: Schema.String })
 
 /** Opens a ledger row before a request is sent (PROVIDERS §9.1). */
-export const OpenLlmRequest = Schema.Struct({
+const OpenLlmRequest = Schema.Struct({
   id: LlmRequestId,
   connectionId: ConnectionId,
   modelId: Schema.NullOr(ModelId),
@@ -155,7 +155,7 @@ export const OpenLlmRequest = Schema.Struct({
 })
 
 /** Closes a ledger row with what the request produced. */
-export const CloseLlmRequest = Schema.Struct({
+const CloseLlmRequest = Schema.Struct({
   id: LlmRequestId,
   status: RequestStatus,
   endedAt: Schema.Number,

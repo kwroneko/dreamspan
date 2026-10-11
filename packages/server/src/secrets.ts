@@ -15,7 +15,7 @@ const FORMAT_VERSION = 1
 const NONCE_BYTES = 12
 const TAG_BYTES = 16
 
-export class SecretUnreadable extends Schema.TaggedError<SecretUnreadable>()("SecretUnreadable", {
+class SecretUnreadable extends Schema.TaggedError<SecretUnreadable>()("SecretUnreadable", {
   /** What the secret was bound to, e.g. "credential:<id>:key". */
   binding: Schema.String
 }) {
@@ -24,7 +24,7 @@ export class SecretUnreadable extends Schema.TaggedError<SecretUnreadable>()("Se
   }
 }
 
-export class ServerSecretInvalid extends Schema.TaggedError<ServerSecretInvalid>()("ServerSecretInvalid", {
+class ServerSecretInvalid extends Schema.TaggedError<ServerSecretInvalid>()("ServerSecretInvalid", {
   source: Schema.String,
   reason: Schema.String
 }) {

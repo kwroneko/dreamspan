@@ -22,7 +22,6 @@ import {
 } from "./route.ts"
 
 export type { ProxyOverride, Route } from "./route.ts"
-export { InvalidNetworkSettings }
 
 const SETTING_KEY = "network"
 const PROXY_BINDING = "app:network:proxy_url"
@@ -35,7 +34,7 @@ const StoredNetwork = Schema.Struct({
 })
 
 /** The instance's network settings as an admin sees them: credentials never shown. */
-export interface NetworkView {
+interface NetworkView {
   readonly proxy: string | null
   readonly bypass: ReadonlyArray<string>
   /** Non-admins' connections can't go direct or through their own proxy (owner, 2026-10-11). */

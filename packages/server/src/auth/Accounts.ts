@@ -31,7 +31,7 @@ const loopback = parseAddresses(LOOPBACK).list
 export class LoginThrottled extends Data.TaggedError("LoginThrottled")<{ readonly retryAfterMs: number }> {}
 
 /** The environment's admin password can't be used. */
-export class BootstrapFailed extends Data.TaggedError("BootstrapFailed")<{ readonly message: string }> {}
+class BootstrapFailed extends Data.TaggedError("BootstrapFailed")<{ readonly message: string }> {}
 
 const hashToken = (token: string) => createHash("sha256").update(token).digest("hex")
 

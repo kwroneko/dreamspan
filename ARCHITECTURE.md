@@ -26,6 +26,7 @@ Bun was measured as an alternative (2026-10-10) and not adopted. On this server 
 - TypeScript 6.0 (`tsc --noEmit` per package). TypeScript 7's native compiler isn't used yet, because typescript-eslint doesn't support it.
 - ESLint with typescript-eslint, plus `eslint-plugin-react-hooks` including the React Compiler rules.
 - Prettier.
+- knip: fails on unused files, exports and dependencies, the shared package's exports included (`knip.jsonc` says why each exception exists).
 - Vitest with `@effect/vitest`.
 - `npm run check` runs all of them. CI (`.github/workflows/ci.yml`) also builds the client and the workers, and builds the Docker image (without pushing it) and runs it until its health check passes.
 

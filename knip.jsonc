@@ -1,0 +1,17 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema-jsonc.json",
+  // The shared package's package.json exports every file, which would make all of its
+  // exports public API. Only our own packages import it, so an export nobody uses is dead.
+  "includeEntryExports": true,
+  "workspaces": {
+    ".": {
+      // Throwaway experiments, kept for their findings and not part of the build.
+      "project": ["**/*.{js,ts,tsx}", "!spikes/**"]
+    }
+  },
+  "ignoreIssues": {
+    // The report every format parser returns. The phase 1 parser stream builds against it;
+    // drop this once a parser imports it.
+    "packages/shared/src/importReport.ts": ["exports"]
+  }
+}

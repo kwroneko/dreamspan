@@ -56,7 +56,7 @@ export const parseBypass = (entries: ReadonlyArray<string>) => {
 }
 
 /** URL hostnames keep IPv6 brackets; addresses are compared without them. */
-export const bareHost = (hostname: string) =>
+const bareHost = (hostname: string) =>
   hostname
     .toLowerCase()
     .replace(/^\[(.*)\]$/, "$1")
@@ -112,7 +112,7 @@ export const decideRoute = async (options: {
   return { via: "proxy", proxy: instanceProxy, source: "instance" }
 }
 
-export const PROXY_SCHEMES = ["http:", "https:", "socks5:", "socks5h:"]
+const PROXY_SCHEMES = ["http:", "https:", "socks5:", "socks5h:"]
 
 /** A proxy URL's problem, or null if it's usable. */
 export const proxyUrlProblem = (raw: string) => {
