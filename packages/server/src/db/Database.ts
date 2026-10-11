@@ -84,30 +84,41 @@ export const workerThreads = (entry: URL, workerData: Record<string, unknown>, b
 
 /**
  * The writer's protocol over `threads`: Effect's worker pool with one worker, which
- * respawns it every second without logging. Each stop is logged here, as the readers'
- * are (readerPool.ts): a crash, and every respawn that fails.
+ * respawns it every second without logging. Stops are logged here: the first with its
+ * cause, then failed restarts as a count (after 1, 2, 4, 8, … of them), then the recovery.
  */
 export const writerProtocol = (threads: Layer.Layer<Workers.WorkerPlatform | Workers.Spawner>) => {
   const LoggedStops = Layer.effect(
     Workers.WorkerPlatform,
-    Effect.map(Workers.WorkerPlatform, (platform) =>
-      Workers.WorkerPlatform.of({
+    Effect.map(Workers.WorkerPlatform, (platform) => {
+      let stops = 0
+      const stopped = (cause: Cause.Cause<unknown>) => {
+        if (Cause.hasInterruptsOnly(cause)) return Effect.void
+        stops++
+        const failedRestarts = stops - 1
+        if (failedRestarts === 0) return Effect.logError("database writer stopped; restarting it every second", cause)
+        return (failedRestarts & (failedRestarts - 1)) === 0
+          ? Effect.logError(`database writer still down after ${failedRestarts} failed restarts`)
+          : Effect.void
+      }
+      const started = Effect.suspend(() => {
+        const failedRestarts = stops - 1
+        stops = 0
+        return failedRestarts < 0
+          ? Effect.void
+          : Effect.logInfo(`database writer is back after ${failedRestarts} failed restarts`)
+      })
+      return Workers.WorkerPlatform.of({
         spawn: <O, I>(id: number) =>
           Effect.map(platform.spawn<O, I>(id), (worker): Workers.Worker<O, I> => ({
             send: worker.send,
             run: (handler, options) =>
               worker
-                .run(handler, options)
-                .pipe(
-                  Effect.tapCause((cause) =>
-                    Cause.hasInterruptsOnly(cause)
-                      ? Effect.void
-                      : Effect.logError("database writer stopped; restarting it in 1000 ms", cause)
-                  )
-                )
+                .run(handler, { onSpawn: Effect.andThen(started, options?.onSpawn ?? Effect.void) })
+                .pipe(Effect.tapCause(stopped))
           }))
       })
-    )
+    })
   )
   return RpcClient.layerProtocolWorker({ size: 1, concurrency: 1 }).pipe(
     Layer.provide(LoggedStops.pipe(Layer.provideMerge(threads)))

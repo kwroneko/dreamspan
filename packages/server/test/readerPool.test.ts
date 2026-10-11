@@ -4,7 +4,7 @@ import { join } from "node:path"
 import { Worker } from "node:worker_threads"
 import { NodeWorker } from "@effect/platform-node"
 import { assert, beforeAll, describe, it } from "@effect/vitest"
-import { Cause, Context, Effect, Exit, Layer, Logger } from "effect"
+import { Cause, Context, Effect, Exit, Layer, Logger, Schedule } from "effect"
 import { RpcClient, type RpcClientError } from "effect/rpc"
 import { workerThreads, writerProtocol } from "../src/db/Database.ts"
 import * as ReaderPool from "../src/db/readerPool.ts"
@@ -141,32 +141,42 @@ describe("reader pool", () => {
 
 describe("writer worker", () => {
   it.live(
-    "a crash and every failed respawn are logged",
+    "a crash is logged with its cause, then failed restarts as a count, then the recovery",
     () => {
-      const stops: Array<string> = []
+      const logs: Array<string> = []
       const collector = Logger.make((options) => {
         const message = String(options.message)
-        if (message.includes("database writer stopped")) stops.push(message)
+        const caused = options.cause.reasons.length > 0 ? " (cause)" : ""
+        if (message.includes("database writer")) logs.push(message + caused)
       })
+      // The first thread runs, the next six die as they start, the eighth runs.
       let spawns = 0
+      const script = () => {
+        const spawn = spawns++
+        return spawn === 0 || spawn >= 7 ? poolWorker : deadWorker
+      }
       return Effect.gen(function* () {
         const { Count, Crash } = yield* Readers
         yield* Count({ n: 1 })
-        assert.deepStrictEqual(stops, [])
-        // The writer crashes, and every respawn dies as it starts.
         yield* Effect.exit(Crash())
-        yield* Effect.sleep(2500)
-        // The crash, then at least one failed respawn.
-        assert.isAtLeast(stops.length, 2, stops.join("\n"))
+        // Requests fail while the writer is down; this one waits for it to come back.
+        yield* Count({ n: 1 }).pipe(Effect.retry(Schedule.spaced(200)), Effect.timeout(25_000))
+        assert.deepStrictEqual(logs, [
+          "database writer stopped; restarting it every second (cause)",
+          "database writer still down after 1 failed restarts",
+          "database writer still down after 2 failed restarts",
+          "database writer still down after 4 failed restarts",
+          "database writer is back after 6 failed restarts"
+        ])
       }).pipe(
         Effect.provide(
           Layer.effect(Readers, RpcClient.make(PoolOps)).pipe(
-            Layer.provide(writerProtocol(NodeWorker.layer(() => new Worker(spawns++ === 0 ? poolWorker : deadWorker))))
+            Layer.provide(writerProtocol(NodeWorker.layer(() => new Worker(script()))))
           )
         ),
         Effect.provide(Logger.layer([collector]))
       )
     },
-    30_000
+    40_000
   )
 })
