@@ -10,7 +10,7 @@ import { Button } from "../ui/Button.tsx"
 import { Checkbox } from "../ui/Choice.tsx"
 import { ConfirmDialog, Dialog, DialogActions } from "../ui/Dialog.tsx"
 import { Field, Fieldset, formText, Input, SecretInput, Textarea } from "../ui/Field.tsx"
-import { Badge, Card, CardHeader, EmptyState } from "../ui/Surface.tsx"
+import { Alert, Badge, Card, CardHeader, EmptyState } from "../ui/Surface.tsx"
 import { connectionsAtom, credentialsAtom, effectiveOrigin, kindsAtom } from "./connections/data.ts"
 import { useTitle } from "./shell.tsx"
 
@@ -129,15 +129,20 @@ function ReplaceKeyDialog({
   const [extra, setExtra] = useState<ReadonlyArray<string>>([])
   const [typedUrl, setTypedUrl] = useState("")
   const [confirmed, setConfirmed] = useState<ReadonlySet<string>>(new Set())
+  /** The connections the user was warned would stop working, as they were at the warning. */
+  const [warned, setWarned] = useState<string | null>(null)
+  const offered = candidatesFor(credential, connections, kinds)
   const candidates = [
-    ...candidatesFor(credential, connections, kinds),
+    ...offered,
     ...extra
-      .filter(
-        (origin) => !candidatesFor(credential, connections, kinds).some((candidate) => candidate.origin === origin)
-      )
+      .filter((origin) => !offered.some((candidate) => candidate.origin === origin))
       .map((origin) => ({ origin, isNew: !credential.origins.includes(origin), usedBy: [] }))
   ]
   const typedOrigin = originOf(typedUrl.trim())
+  const stranded = candidates
+    .filter((candidate) => candidate.usedBy.length > 0 && !confirmed.has(candidate.origin))
+    .flatMap((candidate) => candidate.usedBy)
+  const strandedKey = stranded.join("\n")
 
   const toggle = (origin: string, checked: boolean) => {
     const next = new Set(confirmed)
@@ -148,6 +153,11 @@ function ReplaceKeyDialog({
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    // Leaving a used address unticked stops its connections: say so once, then go ahead.
+    if (stranded.length > 0 && warned !== strandedKey) {
+      setWarned(strandedKey)
+      return
+    }
     const apiKey = formText(event.currentTarget, "apiKey")
     const result = await action.run(
       (client) =>
@@ -213,11 +223,17 @@ function ReplaceKeyDialog({
             </Button>
           </div>
         </Fieldset>
+        {stranded.length > 0 && warned === strandedKey && (
+          <Alert tone="warning" title="Some connections will stop working">
+            The new key won't be sent to the address of {stranded.join(", ")}. They'll refuse every request until you
+            allow it with the key. Tick their address, or replace the key anyway.
+          </Alert>
+        )}
         <ErrorAlert error={action.error} title="The key wasn't replaced" />
         <DialogActions>
           <Button onClick={() => onOpenChange(false)}>Cancel</Button>
           <Button type="submit" variant="primary" pending={action.pending} disabled={keyEmpty}>
-            Replace key
+            {stranded.length > 0 && warned === strandedKey ? "Replace anyway" : "Replace key"}
           </Button>
         </DialogActions>
       </form>

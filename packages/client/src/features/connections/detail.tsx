@@ -306,8 +306,9 @@ export function KeySection(props: ConnectionSectionProps) {
             title={`This key isn't allowed for ${origin}`}
             actions={<Button onClick={() => setDialog("allow")}>Allow it</Button>}
           >
-            Requests are refused until you type the key again to allow this address. If you didn't change the address,
-            someone else may have: check it first.
+            Requests are refused until you type the key again to allow this address. That happens when the address
+            changes, or when the key is replaced without allowing it. If you made neither change, check the address
+            before you allow it.
           </Alert>
         </div>
       )}

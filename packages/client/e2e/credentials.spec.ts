@@ -87,3 +87,31 @@ test("save, rename, allow, replace and delete a key, which never comes back out"
   )
   expect(connections).toEqual([false])
 })
+
+test("replacing a key without its connections' address warns first, and the connection says why it's blocked", async ({
+  page
+}) => {
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${server().url}/settings/connections/new`)
+  await page.getByLabel("Name").fill("Strandable")
+  await page.getByLabel("Base URL").fill(provider.baseUrl)
+  await page.getByLabel("Key", { exact: true }).fill("sk-strandable-key-0001")
+  await page.getByRole("button", { name: "Create connection" }).click()
+  await expect(page.getByRole("heading", { name: "Strandable", level: 1 })).toBeVisible()
+  const connectionUrl = page.url()
+
+  await page.goto(`${server().url}/settings/keys`)
+  await page.getByRole("button", { name: "Replace key" }).click()
+  const dialog = page.getByRole("dialog")
+  await dialog.getByLabel("New key", { exact: true }).fill("sk-strandable-key-0002")
+  await dialog.getByRole("button", { name: "Replace key" }).click()
+  await expect(dialog.getByRole("status")).toContainText("Some connections will stop working")
+  await expect(dialog.getByRole("status")).toContainText("Strandable")
+  await dialog.getByRole("button", { name: "Replace anyway" }).click()
+  await expect(dialog).toBeHidden()
+
+  await page.goto(connectionUrl)
+  const blocked = page.getByRole("status").filter({ hasText: "isn't allowed for" })
+  await expect(blocked).toContainText("when the key is replaced without allowing it")
+  await expect(blocked).not.toContainText("someone else")
+})
