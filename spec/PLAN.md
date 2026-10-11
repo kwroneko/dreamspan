@@ -6,7 +6,7 @@
 **Progress (2026-10-10):** the scaffold is done (ARCHITECTURE.md): repo, tooling, CI, Docker image, server skeleton with typed RPC over a WebSocket, the database worker architecture, and proxy/single-user auth. Client framework decided (React), server framework implemented on Effect's HTTP server. The full schema with database-enforced invariants, the message-graph operations and the library operations (variants, chat overrides, three-way merge on re-import) drafts with server-side undo history, and the recycle bin followed. The provider layer followed (ARCHITECTURE.md §6): encrypted connection secrets, the outbound proxy with bypass list and per-connection routes, model lists merged with pi-ai's catalog, streaming with typed errors and retries before the first token, the usage ledger with normalized counts and cost, explicit Anthropic breakpoints, and the client RPCs. The Cordis evaluation is written ([CORDIS.md](CORDIS.md)). Remaining: built-in login, the connection settings UI, and the performance harness.
 
 - ~~Repo, tooling, CI, Docker image. Node LTS, TypeScript ESM.~~ Done.
-- Settle the open stack questions: ~~client framework~~ (React), ~~server framework~~ (Effect HTTP), ~~a time-boxed Cordis evaluation~~ ([CORDIS.md](CORDIS.md), awaiting the owner).
+- Settle the open stack questions: ~~client framework~~ (React), ~~server framework~~ (Effect HTTP), ~~a time-boxed Cordis evaluation~~ (not adopted).
 - **Data model and schema** (drafted in [DATA-MODEL.md](DATA-MODEL.md); DESIGN §3, §4, §6.2): message graph (slots with parents, threads, path selection), versions with provenance and status, state events, layered entities (base, variant, override, revisions), notes, connections and models, rollouts, summaries over path segments, changesets, drafts with undo history.
 - Server skeleton: typed operations (every UI action is an operation), WebSocket subscriptions, per-entity optimistic concurrency, single-writer SQLite queue (as in reference-harness).
 - Users and auth: separate users with per-user ownership in every query; a trusted reverse-proxy header (Authelia `Remote-User`) mapped to a user, plus built-in login.
@@ -72,7 +72,7 @@
 - Workshop chat kind, with its template, permissions and capability strip.
 - Meta tools: create, edit and clone cards; settings; chat setup. Agentic chat editing through changesets.
 - The out-of-character side channel docked in RP chats.
-- Plugin system (on Cordis if the evaluation goes well). Plugins written by the agent itself.
+- Plugin system ([PLUGINS.md](PLUGINS.md)): registries the core itself uses, overrides, a GitHub-repo registry. Plugins written by the agent itself, activated only by the user.
 
 ## Phase 7: Advanced RP and release readiness
 - Parallel threads, sending to several threads, merges.
@@ -87,6 +87,6 @@
 3. How merged threads become one sequence (§3.3). Deferred: not needed until threads are built.
 4. Note identity for "apply to all branches" edits (§3.4).
 5. ~~Client framework~~ **Resolved: React** (owner, 2026-10-10; [CLIENT-FRAMEWORK.md](CLIENT-FRAMEWORK.md)). Server HTTP framework: deferred by the owner (2026-10-10); [EFFECT.md](EFFECT.md) proposes Effect's own HTTP server.
-6. Cordis as the plugin kernel: evaluated in [CORDIS.md](CORDIS.md). It proposes not adopting it (an Effect-native host instead); awaiting the owner.
+6. ~~Cordis as the plugin kernel~~: not adopted (owner, 2026-10-11). Plugin structure and threat model proposed in [PLUGINS.md](PLUGINS.md), with its own open questions.
 7. Whether intermediate output blocks are real messages (shelved, §7.2).
 8. The project's name.

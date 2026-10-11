@@ -448,7 +448,7 @@ These are strategies for mapping history to user and assistant roles:
   - it's about two months old, with weekly breaking alphas
   - its rule that "model-visible means logged" and its core-service context assembly conflict with separating the timeline from rollouts
   - it has no documented auth
-- **[O]** Cordis, DSH's plugin kernel (reversible side effects, declared dependencies, hot reload), is attractive for a harness that extends itself. Its maturity as a standalone library needs evaluating. Evaluated in [CORDIS.md](CORDIS.md) (2026-10-10). DSH runs a vendored fork with 23 local patches, not upstream. **[P]** Don't adopt it: build a small Effect-native plugin host with a capability-RPC plugin API, and spike the sandbox technology for agent-written plugins in phase 6.
+- **[D]** No Cordis (owner, 2026-10-11; evaluation in [CORDIS.md](CORDIS.md)). The plugin threat model and structure are in [PLUGINS.md](PLUGINS.md).
 - **[P]** SQLite with FTS5 for the timeline, versions, summaries, rollouts and jobs. JSON files can't handle the version and branch structures.
 - **[D]** Performance on chats of any length is an absolute priority: very smooth, never buggy, no corners cut. Looks rank below that but matter a lot (screenshots) (owner, 2026-10-10).
 - **[D]** TanStack libraries, Query where it applies (owner, 2026-10-10).
@@ -460,6 +460,7 @@ These are strategies for mapping history to user and assistant roles:
 ## 11. Security
 
 - **[D]** Avoiding RCEs is the top priority.
+- **[D]** Running a plugin is the user's conscious choice, and a plugin written by the user's own agent is the user's plugin. Our responsibility is that content (cards, presets, lorebooks, chats, model output) never becomes code. The three lines of attack to weigh: credentials, the user's system, and exfiltrated chats (owner, 2026-10-11; [PLUGINS.md](PLUGINS.md)).
 - **[D]** Users are never assumed trusted. One user must never be able to see another user's chats, cards, connections or keys, and that has to be certain (owner, 2026-10-10).
 - **[D]** It must be hard to expose an instance by accident. Without a password, an IP allowlist or an auth proxy, the server doesn't listen beyond localhost. **[O]** The exact rules: ST's may be stricter than needed (owner, 2026-10-10).
 - **[P]** Rules:

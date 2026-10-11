@@ -48,7 +48,7 @@ Coding agents now make it cheap to build and maintain a replacement, which wasn'
 | LLM providers | `@earendil-works/pi-ai` 1.x | Decided (owner, 2026-10-10; also used by reference-harness and by DSH) |
 | Agent loop | `@earendil-works/pi-agent-core` 1.x, with our own persistence, fork and resume, as in reference-harness | Proposed |
 | Storage | SQLite (`node:sqlite` via Effect's driver) with FTS5; Turso evaluated and deferred ([STORAGE.md](STORAGE.md)) | Proposed |
-| Plugin kernel | Cordis (the kernel under DSH), to be evaluated standalone | Open |
+| Plugin kernel | Not Cordis (owner, 2026-10-11). The core is built from its own registries, so plugins can extend, wrap or replace features ([PLUGINS.md](PLUGINS.md)) | Proposed |
 | Client | React (Decided); Vite + TanStack Router and the rest of the stack Proposed in [CLIENT-FRAMEWORK.md](CLIENT-FRAMEWORK.md) | Decided |
 | Effects, RPC, schemas | Effect 4 on the server and in the client data layer ([EFFECT.md](EFFECT.md)) | Proposed |
 | Not built on | DSH as host (alpha, weekly breaking changes, and context assembly is not a plugin point); pi-coding-agent (coding TUI, no web server) | Decided |

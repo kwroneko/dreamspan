@@ -1,6 +1,6 @@
 # Cordis as the plugin kernel: evaluation
 
-**Status**: Proposed, 2026-10-10. The time-boxed evaluation from PLAN phase 0 (open question 6). Nothing here is Decided; DESIGN §10.4 keeps Cordis **[O]**.
+**Status**: Evaluation, 2026-10-10. The owner decided not to use Cordis (2026-10-11). **The recommendation in §4 and §6 rests on a wrong premise**: that plugins written by the user's agent are untrusted and need a sandbox. They are the user's own plugins. [PLUGINS.md](PLUGINS.md) replaces both sections with the owner's threat model and a proposed structure. The facts about Cordis (§1–§3) still stand.
 
 **Related**: DESIGN §7.7, §10.4, §11; [EFFECT.md](EFFECT.md); PLAN phase 6.
 
