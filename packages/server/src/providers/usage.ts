@@ -10,6 +10,7 @@ import { estimateContextTokens, estimateTextTokens } from "@earendil-works/pi-ai
 import type { Price } from "@rp/shared/providers.ts"
 import { type Cost, type TokenCounts, unknownCounts, type UsageSource } from "@rp/shared/usage.ts"
 import { Predicate } from "effect"
+import type { CostFormula, RequestTarget } from "./registry.ts"
 
 /** What a request's raw provider events told us, beyond pi's normalized message. */
 export interface Capture {
@@ -144,13 +145,37 @@ export const priceCost = (counts: TokenCounts, price: Price): number | null => {
   )
 }
 
-/**
- * The cost to record: the provider's own figure when it reports one (it reflects the
- * actual route and any discount), else the built-in price. User formulas come later.
- */
-export const recordedCost = (counts: TokenCounts, capture: Capture, price: Price | null): Cost | null => {
-  if (capture.reportedCost !== null) return { amount: capture.reportedCost, currency: "USD", formula: "reported" }
-  if (price === null) return null
-  const amount = priceCost(counts, price)
-  return amount === null ? null : { amount, currency: "USD", formula: "builtin" }
+/** The cost to record: the first formula, newest registration first, that returns one. */
+export const costOf = (
+  formulas: ReadonlyArray<CostFormula>,
+  target: RequestTarget & { readonly model: string },
+  input: Parameters<CostFormula["cost"]>[0]
+): Cost | null => {
+  for (const formula of [...formulas].reverse()) {
+    if (!formula.appliesTo(target)) continue
+    const cost = formula.cost(input)
+    if (cost !== null) return { ...cost, formula: formula.id }
+  }
+  return null
 }
+
+/**
+ * The built-in formulas, registered oldest first (builtins.ts): the price table, then the
+ * provider's own figure when it reports one, which reflects the actual route and any
+ * discount and so is tried before the table.
+ */
+export const builtinCostFormulas: ReadonlyArray<CostFormula> = [
+  {
+    id: "builtin",
+    appliesTo: () => true,
+    cost: ({ counts, price }) => {
+      const amount = price === null ? null : priceCost(counts, price)
+      return amount === null ? null : { amount, currency: "USD" }
+    }
+  },
+  {
+    id: "reported",
+    appliesTo: () => true,
+    cost: ({ capture }) => (capture.reportedCost === null ? null : { amount: capture.reportedCost, currency: "USD" })
+  }
+]

@@ -1,5 +1,5 @@
-// The provider registry (spec/PLUGINS.md §3.1, §8): provider kinds, request transforms
-// and response observers. The built-ins register through it like any plugin will, so a
+// The provider registry (spec/PLUGINS.md §3.1, §8): provider kinds, request transforms,
+// response observers and cost formulas. The built-ins register through it like any plugin will, so a
 // plugin can add a provider, change how requests are shaped (cache breakpoints), or
 // replace or disable a built-in.
 import type { Api, Message, Model, ProviderStreams } from "@earendil-works/pi-ai"
@@ -7,6 +7,8 @@ import type { Effect } from "effect"
 import { Context, Layer } from "effect"
 import { makeRegistry, type Registry } from "../registry.ts"
 import type { ListedModel, ListRequest, ModelListError } from "./modelLists.ts"
+import type { Price } from "@rp/shared/providers.ts"
+import type { Cost, TokenCounts } from "@rp/shared/usage.ts"
 import type { Capture } from "./usage.ts"
 
 export type Catalog = Readonly<Record<string, Model<Api>>>
@@ -60,10 +62,26 @@ export interface ResponseObserver {
   readonly observe: (data: unknown, capture: Capture) => void
 }
 
+/**
+ * Prices a finished request for the ledger (PROVIDERS §9.3). Formulas are tried newest
+ * registration first, and the first that returns a cost wins: a user's or a plugin's
+ * formula goes before the built-ins. Returning null passes to the next.
+ */
+export interface CostFormula {
+  readonly id: string
+  readonly appliesTo: (target: RequestTarget & { readonly model: string }) => boolean
+  readonly cost: (input: {
+    readonly counts: TokenCounts
+    readonly capture: Capture
+    readonly price: Price | null
+  }) => Omit<Cost, "formula"> | null
+}
+
 export interface ProviderRegistryShape {
   readonly kinds: Registry<ProviderKindEntry>
   readonly transforms: Registry<RequestTransform>
   readonly observers: Registry<ResponseObserver>
+  readonly costs: Registry<CostFormula>
 }
 
 export class ProviderRegistry extends Context.Service<ProviderRegistry, ProviderRegistryShape>()(
@@ -75,6 +93,7 @@ export const empty = Layer.sync(ProviderRegistry, () =>
   ProviderRegistry.of({
     kinds: makeRegistry<ProviderKindEntry>(),
     transforms: makeRegistry<RequestTransform>(),
-    observers: makeRegistry<ResponseObserver>()
+    observers: makeRegistry<ResponseObserver>(),
+    costs: makeRegistry<CostFormula>()
   })
 )

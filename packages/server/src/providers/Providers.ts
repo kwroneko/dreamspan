@@ -43,7 +43,7 @@ import { catalogEntry } from "./catalog.ts"
 import { classify, parseRetryAfter, ProviderError, providerError, RETRYABLE } from "./errors.ts"
 import type { ModelListError } from "./modelLists.ts"
 import { type ProviderKindEntry, ProviderRegistry, type RequestTarget } from "./registry.ts"
-import { type Capture, emptyCapture, finalCounts, recordedCost } from "./usage.ts"
+import { type Capture, costOf, emptyCapture, finalCounts } from "./usage.ts"
 
 export { ProviderError } from "./errors.ts"
 
@@ -707,7 +707,11 @@ export const layer = (options: ProvidersOptions = {}) =>
         const writeClose = (message: AssistantMessage, error: ProviderError | null, context: PiContext["messages"]) =>
           Effect.gen(function* () {
             const { counts, source } = finalCounts(message, state.capture, context)
-            const cost = recordedCost(counts, state.capture, model.upstream.price ?? null)
+            const cost = costOf(
+              registry.costs.list(),
+              { kind: prepared.kind.id, api: prepared.api, model: model.key },
+              { counts, capture: state.capture, price: model.upstream.price ?? null }
+            )
             yield* writer
               .CloseLlmRequest({
                 userId: request.userId,

@@ -1463,6 +1463,47 @@ describe("provider registry", () => {
     }).pipe(Effect.scoped, Effect.provide(layer()))
   )
 
+  it.live("cost formulas: a registered one goes first, and disabling one falls through to the next", () =>
+    Effect.gen(function* () {
+      const server = yield* mock((request, res) =>
+        request.path === "/api/v1/models"
+          ? json(res, 200, openAiList([{ id: "v/m", pricing: { prompt: "0.000001", completion: "0.000002" } }]))
+          : sse(res, completionChunks(["Hi."], { prompt_tokens: 100, completion_tokens: 5, cost: 0.00042 }))
+      )
+      const registry = yield* ProviderRegistry
+      const { userId, connection, modelId, providers } = yield* connect(
+        "openrouter",
+        `${server.url}/api/v1`,
+        "sk-or-cost-0001",
+        "v/m"
+      )
+      const costOfRun = collect(
+        providers.stream({
+          userId,
+          connectionId: connection.id,
+          modelId,
+          context,
+          attribution: { purpose: "generation" }
+        })
+      ).pipe(Effect.map((events) => (events.at(-1) as { cost: unknown }).cost))
+
+      assert.deepStrictEqual(yield* costOfRun, { amount: 0.00042, currency: "USD", formula: "reported" })
+      const flat = yield* Scope.make()
+      yield* Scope.provide(flat)(
+        registry.costs.register({
+          id: "flat-fee",
+          appliesTo: (target) => target.kind === "openrouter" && target.model === "v/m",
+          cost: () => ({ amount: 1, currency: "EUR" })
+        })
+      )
+      assert.deepStrictEqual(yield* costOfRun, { amount: 1, currency: "EUR", formula: "flat-fee" })
+      yield* Scope.close(flat, Exit.void)
+      // Without the provider's figure, the price table prices it: 100 in, 5 out.
+      yield* registry.costs.disable("reported")
+      assert.deepStrictEqual(yield* costOfRun, { amount: 0.00011, currency: "USD", formula: "builtin" })
+    }).pipe(Effect.scoped, Effect.provide(layer()))
+  )
+
   it("lists built-in kinds in picker order", () =>
     assert.deepStrictEqual(
       ProviderBuiltins.builtinKinds.map((k) => k.id),

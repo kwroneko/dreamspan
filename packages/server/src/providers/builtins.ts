@@ -11,7 +11,7 @@ import { applyAnthropicBreakpoints } from "./breakpoints.ts"
 import { piCatalogs, withCatalog } from "./catalog.ts"
 import { modelListers } from "./modelLists.ts"
 import { empty, ProviderRegistry, type ProviderKindEntry } from "./registry.ts"
-import { usageObservers } from "./usage.ts"
+import { builtinCostFormulas, usageObservers } from "./usage.ts"
 
 const completions = openAICompletionsApi()
 
@@ -115,5 +115,7 @@ export const layer = Layer.effectDiscard(
     for (const [api, observe] of Object.entries(usageObservers)) {
       yield* registry.observers.register({ id: `usage:${api}`, appliesTo: (target) => target.api === api, observe })
     }
+    // Cost formulas (PROVIDERS §9.3): the price table, then the provider's own figure.
+    for (const formula of builtinCostFormulas) yield* registry.costs.register(formula)
   })
 ).pipe(Layer.provideMerge(empty))

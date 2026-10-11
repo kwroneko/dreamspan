@@ -537,14 +537,16 @@ In proxy mode, a WebSocket keeps the identity it opened with until it disconnect
 
 **The provider registry** (`providers/registry.ts`, `providers/builtins.ts`; the generic mechanism is `src/registry.ts`). This is the first registry of the structure in spec/PLUGINS.md §3.1: the core registers its features through the same registries plugins will use.
 - **A registry** holds entries by id. Registering adds an entry or overrides the one with the same id, and `disable` hides one. Each registration lasts as long as its scope, and closing the scope restores whatever it hid, in any order (`test/registry.test.ts`). Wrapping is `get`, then registering a replacement that calls the original.
-- **The `ProviderRegistry` service has three registries:**
+- **The `ProviderRegistry` service has four registries:**
   - **Provider kinds:** label, pi provider id, wire API id and implementation (pi-ai's `ProviderStreams` or the plugin's own), whether it takes our `fetch`, default base URL, whether a key is optional, a model lister, and an optional catalog.
   - **Request transforms:** payload rewrites through pi-ai's `onPayload`, applied in registration order to requests whose kind and API they apply to.
   - **Response observers:** readers of the raw stream events.
+  - **Cost formulas:** each prices a finished request for the ledger, or passes (null). They're tried newest registration first, so a user's or plugin's formula goes before the built-ins. The ledger records the id of the one that priced it.
 - **The built-ins** are registered at startup:
   - the six kinds, in picker order: OpenAI Chat Completions, Anthropic, OpenAI Responses, OpenRouter, DeepSeek, Google
   - the Anthropic explicit breakpoints, as a transform
   - the usage capture, as one observer per wire API
+  - the cost formulas `builtin` (the price table), then `reported` (the provider's own figure), so a reported figure wins
 - **`kind` and `api` are open strings** (`@rp/shared/providers.ts`), checked against the registry where they're used:
   - an unknown kind can't create a connection
   - a connection whose kind is gone, for example its plugin was removed, is `unusable`
@@ -613,7 +615,7 @@ It fails with a typed `ProviderError`.
   - The provider's raw usage object is kept with it. OpenRouter's reported cost and routed upstream are read from it.
   - Usage is estimated from the context and the output when the provider produced output without reporting usage, and unknown when nothing came back.
   - A stopped or failed request records as output at least the tokens of the text that arrived, marked `estimated` when that's more than reported. Anthropic's `message_start` reports only a placeholder output of 1.
-- **Cost:** the provider's reported cost when there is one, otherwise the built-in formula.
+- **Cost:** from the cost-formula registry (above). With the built-ins only: the provider's reported cost when there is one, otherwise the price table.
   - The formula uses per-million rates from the model's price (catalog or list), with the context-size tier on total input.
   - Long cache writes are priced at twice the input rate.
   - User formulas aren't built yet.
