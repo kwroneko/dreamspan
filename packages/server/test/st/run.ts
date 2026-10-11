@@ -12,8 +12,11 @@
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { chromium } from "@playwright/test"
 import { removeOrphans, ST_IMAGE, ST_VERSION, startSt } from "./container.ts"
+import { fixtureSet } from "./fixtures.ts"
 import { startMock } from "./mock.ts"
+import { loadFixtures, writeBaselineSettings } from "./st.ts"
 
 const cleanups: Array<() => void> = []
 const cleanUp = () => {
@@ -44,6 +47,13 @@ const main = async () => {
   console.log(`SillyTavern ${ST_VERSION} (${ST_IMAGE})`)
   const st = await startSt(join(root, "st"), (stop) => cleanups.push(stop))
   console.log(`started ${st.name} at ${st.url}, mock at ${mock.url}`)
+
+  const fixtures = fixtureSet()
+  writeBaselineSettings(st.userDir, mock.url, fixtures)
+  const browser = await chromium.launch()
+  cleanups.push(() => void browser.close())
+  await loadFixtures(browser, st.url, fixtures)
+  console.log("fixtures loaded")
 }
 
 main().then(
