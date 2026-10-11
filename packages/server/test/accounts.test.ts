@@ -8,6 +8,7 @@ import { assert, describe, it } from "@effect/vitest"
 import { AppApi, Authentication } from "@rp/shared/api.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { Effect, Option, Redacted } from "effect"
+import { hashPassword, PasswordCost, verifyPassword } from "../src/auth/passwords.ts"
 import { client, login, outcome, post, serverPort, testConfig, withServer } from "./support/config.ts"
 
 /** A login sent from `from`, so it can come from an address other than loopback. */
@@ -40,6 +41,15 @@ describe("accounts", () => {
       assert.isTrue([...rpc.middlewares].includes(Authentication as never), `${tag} skips authentication`)
     }
   })
+
+  it.live("hashes at full cost unless a test lowers it", () =>
+    Effect.gen(function* () {
+      const hash = yield* hashPassword("a-password", yield* PasswordCost)
+      assert.match(hash, /^scrypt\$32768\$8\$3\$/)
+      assert.isTrue(yield* verifyPassword("a-password", hash))
+      assert.isFalse(yield* verifyPassword("another-one", hash))
+    })
+  )
 
   it.live("from passwordless local use to login, sessions and logout", () => {
     const config = testConfig()

@@ -1,11 +1,24 @@
 // Password hashing with scrypt (node:crypto). It runs on libuv's thread pool, so the event
 // loop stays free; the parameters are OWASP's recommendation (N=2^15, r=8, p=3).
 import { randomBytes, scrypt, timingSafeEqual } from "node:crypto"
-import { Effect } from "effect"
+import { Context, Effect } from "effect"
 
-const N = 2 ** 15
-const R = 8
-const P = 3
+/** scrypt's cost parameters. */
+interface PasswordCostShape {
+  readonly n: number
+  readonly r: number
+  readonly p: number
+}
+
+/**
+ * The cost new hashes are made with. Nothing outside the code sets it. Tests lower it: their
+ * hashes protect nothing, and at full cost the dozen in one test took over 30 s at a load
+ * average of 75.
+ */
+export const PasswordCost = Context.Reference<PasswordCostShape>("rp/PasswordCost", {
+  defaultValue: () => ({ n: 2 ** 15, r: 8, p: 3 })
+})
+
 const KEY_LENGTH = 32
 // scrypt needs 128 * N * r bytes, 32 MiB here, which is exactly Node's default limit.
 const MAX_MEM = 64 * 1024 * 1024
@@ -29,11 +42,11 @@ const derive = (password: string, salt: Buffer, n: number, r: number, p: number)
   })
 
 /** `scrypt$N$r$p$salt$hash`, base64url, so the parameters can change without a migration. */
-export const hashPassword = (password: string) =>
+export const hashPassword = (password: string, { n, r, p }: PasswordCostShape) =>
   Effect.gen(function* () {
     const salt = randomBytes(16)
-    const key = yield* derive(password, salt, N, R, P)
-    return `scrypt$${N}$${R}$${P}$${salt.toString("base64url")}$${key.toString("base64url")}`
+    const key = yield* derive(password, salt, n, r, p)
+    return `scrypt$${n}$${r}$${p}$${salt.toString("base64url")}$${key.toString("base64url")}`
   })
 
 /** Whether `password` matches `encoded`. A malformed hash, parameters included, matches nothing. */
@@ -55,5 +68,6 @@ export const verifyPassword = (password: string, encoded: string) =>
     return key.length === expected.length && timingSafeEqual(key, expected)
   })
 
-/** Spends the same time as a real check, so a missing user can't be told from a wrong password. */
-export const DUMMY_HASH = `scrypt$${N}$${R}$${P}$${randomBytes(16).toString("base64url")}$${randomBytes(KEY_LENGTH).toString("base64url")}`
+/** Checking it spends as long as a real check, so a missing user can't be told from a wrong password. */
+export const dummyHash = ({ n, r, p }: PasswordCostShape) =>
+  `scrypt$${n}$${r}$${p}$${randomBytes(16).toString("base64url")}$${randomBytes(KEY_LENGTH).toString("base64url")}`

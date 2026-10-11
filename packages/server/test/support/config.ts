@@ -6,6 +6,7 @@ import { Effect, Layer, Option } from "effect"
 import { HttpServer } from "effect/http"
 import { RpcClient, RpcSerialization } from "effect/rpc"
 import { Socket } from "effect/socket"
+import { PasswordCost } from "../../src/auth/passwords.ts"
 import { AppConfig, type AppConfigShape } from "../../src/config.ts"
 import { ServerLive } from "../../src/server.ts"
 
@@ -39,7 +40,14 @@ export const testConfig = (overrides: Partial<AppConfigShape> = {}): AppConfigSh
   ...overrides
 })
 
-export const serverLayer = (config: AppConfigShape) => ServerLive.pipe(Layer.provide(Layer.succeed(AppConfig)(config)))
+/**
+ * Cheap password hashes: about a millisecond instead of a second, so a test's time goes to
+ * what it checks. A test with a dozen full-cost hashes took over 30 s at a load average of 75.
+ */
+const testPasswordCost = Layer.succeed(PasswordCost)({ n: 2 ** 10, r: 8, p: 1 })
+
+export const serverLayer = (config: AppConfigShape) =>
+  ServerLive.pipe(Layer.provide([Layer.succeed(AppConfig)(config), testPasswordCost]))
 
 export const withServer = (config: AppConfigShape) => Effect.provide(serverLayer(config))
 

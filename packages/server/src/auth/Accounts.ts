@@ -15,7 +15,14 @@ import { AppConfig } from "../config.ts"
 import { Reader, Writer } from "../db/Database.ts"
 import type { StorageError } from "../db/ops.ts"
 import { inAddresses, LOOPBACK, parseAddresses } from "../net/addresses.ts"
-import { DUMMY_HASH, hashPassword, MAX_PASSWORD_LENGTH, passwordProblem, verifyPassword } from "./passwords.ts"
+import {
+  dummyHash,
+  hashPassword,
+  MAX_PASSWORD_LENGTH,
+  PasswordCost,
+  passwordProblem,
+  verifyPassword
+} from "./passwords.ts"
 
 export const SESSION_COOKIE = "rp_session"
 export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000
@@ -135,6 +142,8 @@ export class Accounts extends Context.Service<
       const writer = yield* Writer
       const reader = yield* Reader
       const proxyMode = config.authMode === "proxy"
+      const cost = yield* PasswordCost
+      const dummy = dummyHash(cost)
 
       yield* bootstrapAdmin
       let configured = yield* reader.AccountsConfigured()
@@ -247,7 +256,7 @@ export class Accounts extends Context.Service<
           if (pairWait > 0) return yield* new LoginThrottled({ retryAfterMs: pairWait })
           perPair.record(pairKey, now)
           const found = yield* reader.GetPasswordHash({ handle: name })
-          const matches = yield* checkPassword(password, found?.passwordHash ?? DUMMY_HASH)
+          const matches = yield* checkPassword(password, found?.passwordHash ?? dummy)
           if (!found?.passwordHash || !matches) return yield* rejected("wrong_password", "wrong handle or password")
           perPair.forgive(pairKey)
           const token = randomBytes(32).toString("base64url")
@@ -276,7 +285,7 @@ export class Accounts extends Context.Service<
             handle,
             displayName: input.displayName.trim() || handle,
             role: input.role,
-            passwordHash: yield* hashPassword(input.password)
+            passwordHash: yield* hashPassword(input.password, cost)
           })
           yield* changed
           return account
@@ -305,7 +314,10 @@ export class Accounts extends Context.Service<
               perPair.forgive(key)
             }
           }
-          yield* writer.SetPasswordHash({ userId: input.userId, passwordHash: yield* hashPassword(input.newPassword) })
+          yield* writer.SetPasswordHash({
+            userId: input.userId,
+            passwordHash: yield* hashPassword(input.newPassword, cost)
+          })
           yield* changed
         }).pipe(storage("setting the password", serverError))
 
@@ -367,7 +379,10 @@ const bootstrapAdmin = Effect.gen(function* () {
   if (handle !== null && !HANDLE_PATTERN.test(handle)) {
     return yield* new BootstrapFailed({ message: `ADMIN_USER isn't a valid handle: ${handle}` })
   }
-  const user = yield* writer.BootstrapAdmin({ handle, passwordHash: yield* hashPassword(password) })
+  const user = yield* writer.BootstrapAdmin({
+    handle,
+    passwordHash: yield* hashPassword(password, yield* PasswordCost)
+  })
   yield* user
     ? Effect.logInfo(`Set the password of ${user.handle} from the environment`)
     : Effect.logInfo("The admin password in the environment is ignored: an admin already has a password")
