@@ -74,3 +74,46 @@ At the end of each phase, or after about ten slices:
 - A trim of specs that the code has made obsolete.
 
 **Backlog:** everything listed as unreviewed in §1 gets a tier A audit, one agent per subsystem, before phase 1 builds on it.
+
+## 6. Parallel work
+
+**Coding speed isn't the bottleneck.** Three things are:
+- **The owner's decisions:** login is waiting on them, and so is every UI design.
+- **Integration:** a few files every feature touches.
+- **Review:** each stream needs its own reviewed slices.
+
+So a parallel stream pays only when it needs none of these: decided already, in files no other stream touches, and with a test oracle of its own.
+
+**Shared files, where parallel streams would collide:**
+- `db/migrations.ts`: migrations are numbered in order.
+- `db/ops.ts`: every storage operation.
+- `shared/api.ts`: every RPC.
+- `ARCHITECTURE.md` and `PLAN.md`.
+
+Only one stream, the main one, edits these. Other streams write their ARCHITECTURE section into a note in their own directory, and it moves in when their work merges.
+
+**Worth running in parallel now:**
+1. **The main stream, sequential:** auth and security. Built-in login once the owner answers. Until then, the guards from §3: the isolation matrix, knip, and the Docker smoke test.
+2. **Phase 1 format parsers, in a worktree:**
+   - What: character cards (V1–V3 as JSON, PNG and CHARX, import and export), then lorebooks and presets, then the macro engine.
+   - Why it fits:
+     - These are pure functions.
+     - Their spec is ST's public source.
+     - They're tested with synthetic fixtures.
+     - They don't touch the schema until the importer writes into it, and that step comes back to the main stream.
+3. **The backlog audit, read-only:** fixes it finds go into the main stream's queue, so nothing collides.
+4. **The connection settings UI design, as a proposal:** a mockup for the owner to review, with no code until it's approved.
+
+**Not yet:**
+- UI code before its design is approved: UI quality is the top priority, so rework is likely.
+- Two streams adding migrations.
+- The ST differential harness: it's worth doing, but its first user is the assembler (phase 2).
+- More than two coding streams: review and integration go through one agent, and a third stream would mostly queue.
+
+**Rules for a parallel stream:**
+- It runs in its own git worktree, with its own `npm ci`.
+- It follows the same slice loop and review tier as the main stream.
+- It rebases onto `master` before every slice.
+- The main stream merges it.
+- Nothing merges with open findings.
+- The host is shared, so test runs use random ports and their own data directories (they already do), and performance numbers are only trusted after checking `uptime`.
