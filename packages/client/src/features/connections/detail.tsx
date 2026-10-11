@@ -158,6 +158,21 @@ export function SettingsSection({ connection, kinds }: ConnectionSectionProps) {
   )
 }
 
+/**
+ * A secret is typed for the address shown when its dialog opened. If a reload (after a
+ * StaleWrite) shows the connection now points elsewhere, the typed secret is dropped and
+ * the user decides again: otherwise one more click would send it where someone else chose.
+ */
+function AddressChanged({ from, to }: { from: string | null; to: string | null }) {
+  if (from === to) return null
+  return (
+    <Alert tone="warning" title="The address changed">
+      The address changed from {from ?? "none"} to {to ?? "none"}. Enter the key again if it should go to{" "}
+      {to ?? "that address"}.
+    </Alert>
+  )
+}
+
 function SetKeyDialog({
   connection,
   origin,
@@ -170,7 +185,9 @@ function SetKeyDialog({
   onOpenChange: (open: boolean) => void
 }) {
   const action = useAction()
-  const [keyEmpty, setKeyEmpty] = useState(true)
+  const [opened] = useState(origin)
+  /** The address the key in the field was typed for; null while it's empty. */
+  const [typedFor, setTypedFor] = useState<string | null>(null)
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     const apiKey = formText(event.currentTarget, "apiKey")
@@ -190,12 +207,19 @@ function SetKeyDialog({
     >
       <form onSubmit={submit} className="flex flex-col gap-4">
         <Field label="Key">
-          <SecretInput name="apiKey" onEmptyChange={setKeyEmpty} />
+          {/* Keyed by the address, so a changed address empties the field. */}
+          <SecretInput key={origin} name="apiKey" onEmptyChange={(empty) => setTypedFor(empty ? null : origin)} />
         </Field>
+        <AddressChanged from={opened} to={origin} />
         <ErrorAlert error={action.error} />
         <DialogActions>
           <Button onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button type="submit" variant="primary" pending={action.pending} disabled={keyEmpty}>
+          <Button
+            type="submit"
+            variant="primary"
+            pending={action.pending}
+            disabled={typedFor === null || typedFor !== origin}
+          >
             Save key
           </Button>
         </DialogActions>
@@ -345,7 +369,8 @@ export function KeySection(props: ConnectionSectionProps) {
 interface HeaderRow {
   readonly id: number
   readonly name: string
-  readonly valueEmpty: boolean
+  /** The address the value in the field was typed for; null while it's empty. */
+  readonly valueFor: string | null
 }
 
 function HeadersDialog({
@@ -362,13 +387,14 @@ function HeadersDialog({
   const action = useAction()
   const [rows, setRows] = useState<ReadonlyArray<HeaderRow>>(() =>
     connection.headerNames.length > 0
-      ? connection.headerNames.map((name, id) => ({ id, name, valueEmpty: true }))
-      : [{ id: 0, name: "", valueEmpty: true }]
+      ? connection.headerNames.map((name, id) => ({ id, name, valueFor: null }))
+      : [{ id: 0, name: "", valueFor: null }]
   )
   const update = (id: number, change: Partial<HeaderRow>) =>
     setRows(rows.map((row) => (row.id === id ? { ...row, ...change } : row)))
   const filled = rows.filter((row) => row.name.trim() !== "")
-  const missingValue = filled.some((row) => row.valueEmpty)
+  const [opened] = useState(origin)
+  const missingValue = filled.some((row) => row.valueFor === null || row.valueFor !== origin)
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -412,7 +438,11 @@ function HeadersDialog({
               />
             </Field>
             <Field label={<span className="sr-only">Header {index + 1} value</span>}>
-              <SecretInput name={`value-${row.id}`} onEmptyChange={(valueEmpty) => update(row.id, { valueEmpty })} />
+              <SecretInput
+                key={origin}
+                name={`value-${row.id}`}
+                onEmptyChange={(empty) => update(row.id, { valueFor: empty ? null : origin })}
+              />
             </Field>
             <Button
               variant="ghost"
@@ -427,12 +457,13 @@ function HeadersDialog({
           <Button
             variant="ghost"
             onClick={() =>
-              setRows([...rows, { id: Math.max(-1, ...rows.map((row) => row.id)) + 1, name: "", valueEmpty: true }])
+              setRows([...rows, { id: Math.max(-1, ...rows.map((row) => row.id)) + 1, name: "", valueFor: null }])
             }
           >
             Add a header
           </Button>
         </div>
+        <AddressChanged from={opened} to={origin} />
         <ErrorAlert error={action.error} />
         <DialogActions>
           <Button onClick={() => onOpenChange(false)}>Cancel</Button>

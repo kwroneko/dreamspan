@@ -33,7 +33,9 @@ export function AllowHostDialog({
   const action = useAction()
   const [keyEmpty, setKeyEmpty] = useState(true)
   const [typedUrl, setTypedUrl] = useState("")
-  const target = url ?? typedUrl.trim()
+  // The address as the dialog opened: the key the user types is for that one.
+  const [shown] = useState(url)
+  const target = shown ?? typedUrl.trim()
   const origin = originOf(target)
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -49,12 +51,12 @@ export function AllowHostDialog({
       open={open}
       onOpenChange={onOpenChange}
       title={
-        url ? `Allow “${credential.name}” for ${origin ?? url}?` : `Allow “${credential.name}” for another address`
+        shown ? `Allow “${credential.name}” for ${origin ?? shown}?` : `Allow “${credential.name}” for another address`
       }
       description="Type the key again to prove it's you. Only allow an address you set up yourself: anyone it points to receives the key."
     >
       <form onSubmit={submit} className="flex flex-col gap-4">
-        {url === null && (
+        {shown === null && (
           <Field
             label="Address"
             description={origin ? `The key may go to ${origin}.` : "A URL such as https://api.example.com/v1."}

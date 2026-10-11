@@ -116,6 +116,54 @@ test("two tabs: a change made in the other is loaded, and the next try succeeds"
   await second.close()
 })
 
+/** Another session points the named connection at another address, behind the page's back. */
+const repoint = (name: string, baseUrl: string) =>
+  asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+    Effect.gen(function* () {
+      const connection = (yield* api.ListConnections()).find((entry) => entry.name === name)!
+      yield* api.UpdateConnection({
+        connectionId: connection.id,
+        expectedRowVersion: connection.rowVersion,
+        settings: { ...connection, baseUrl }
+      })
+    })
+  )
+
+test("a key or header typed for one address isn't sent to the one another session switched to", async ({ page }) => {
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await createConnection(page, "Re-pointed", provider.baseUrl, "sk-repointed-first-0001")
+  const from = new URL(provider.baseUrl).origin
+  const to = new URL(other.baseUrl).origin
+
+  await page.getByRole("button", { name: "Enter a new key" }).click()
+  let dialog = page.getByRole("dialog")
+  await dialog.getByLabel("Key").fill("sk-repointed-victim-0002")
+  await repoint("Re-pointed", other.baseUrl)
+  await dialog.getByRole("button", { name: "Save key" }).click()
+  await expect(dialog.getByRole("alert")).toContainText("changed since you opened it")
+  await expect(dialog.getByRole("status")).toContainText(`The address changed from ${from} to ${to}`)
+  await expect(dialog.getByLabel("Key")).toHaveValue("")
+  await expect(dialog.getByRole("button", { name: "Save key" })).toBeDisabled()
+  await dialog.getByRole("button", { name: "Cancel" }).click()
+  await page.getByRole("button", { name: "Check" }).click()
+  await expect(page.getByText("It doesn't work")).toBeVisible()
+  expect(other.keys).not.toContain("sk-repointed-victim-0002")
+
+  await repoint("Re-pointed", provider.baseUrl)
+  await page.reload()
+  await page.getByRole("button", { name: "Add headers" }).click()
+  dialog = page.getByRole("dialog")
+  await dialog.getByLabel("Header 1 name").fill("X-Token")
+  await dialog.getByLabel("Header 1 value").fill("header-victim-0003")
+  await repoint("Re-pointed", other.baseUrl)
+  await dialog.getByRole("button", { name: "Save headers" }).click()
+  await expect(dialog.getByRole("status")).toContainText(`The address changed from ${from} to ${to}`)
+  await expect(dialog.getByLabel("Header 1 value")).toHaveValue("")
+  await expect(dialog.getByRole("button", { name: "Save headers" })).toBeDisabled()
+  const saved = await asUser(server(), ADMIN.handle, ADMIN.password, (api) => api.ListConnections())
+  expect(saved.find((entry) => entry.name === "Re-pointed")!.headerNames).toEqual([])
+})
+
 test("a key isn't sent to a new address until it's typed again", async ({ page }) => {
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await createConnection(page, "Bound", provider.baseUrl, "sk-bound-key-abcdef")
