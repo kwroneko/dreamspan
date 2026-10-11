@@ -6,24 +6,17 @@
 
 ## 1. Where we are (2026-10-11)
 
-- **Independent review:** of the ~7,400 server lines, only the provider layer (8 commits, 2026-10-10) had a review by a separate agent, and that review found 9 defects (`dedd8cd`). Everything else was built and checked by the agent that wrote it:
-  - the scaffold, server wiring and auth
-  - the schema and message graph
-  - library operations and three-way merge
-  - drafts and the recycle bin
-  - host-bound credentials and the registry
-- **Today's exposure work** (three review rounds by one agent, about 6 minutes in total):
-  - Round 1 found 4 defects, 2 of them security holes, all in code whose tests passed.
-  - Round 2, on the fixes and the new cross-site guard, found 4 more. One broke every nginx-style proxy setup.
-  - Round 3 found a gap: rebinding against a proxy-mode instance.
-  - A mutation check showed that one of my own tests (rebinding) passed against the bug it was meant to catch.
-  - A cross-cutting look found what no single diff contained: any website could drive a local instance's RPC API.
-  - So diff reviews alone aren't enough, and neither are tests that are never checked against the bug they guard.
-- **End-to-end:**
-  - The server is tested at its real boundary: a real server, real database workers, and real sockets and WebSockets.
-  - Providers run against mock servers, never a live one.
-  - The Docker image is built in CI but never run there. It was run by hand once, today.
-  - There's no browser test: the client is a 150-line shell.
+- **Every subsystem has had a tier A audit** by a separate agent, then fixes in four parallel worktrees, each reviewed until clean before merging.
+  - The audit found 44 defects. Review rounds on the fixes found about 20 more.
+  - Several were cross-user holes, the top requirement: any client could become any user in proxy mode; any website could drive a local instance; state events and swipes could reference other users' data; one `UPDATE` could hand rows to another user.
+- **Every fix has a test checked against its bug.** Mutation checks caught three tests of my own that passed against the bug they were meant to guard.
+- **What went wrong in the process:**
+  - An audit agent ran `docker volume prune -f` on the shared host. Every agent prompt now forbids host-wide cleanup.
+  - Agents overwrote each other's scripts in the shared scratchpad, so each agent now keeps its own subdirectory.
+- **Test tiers:**
+  - The server is tested at its real boundary: real server, real database workers, real sockets.
+  - The Docker image is built and run in CI.
+  - No browser tests yet.
 
 ## 2. The slice loop
 
