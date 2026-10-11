@@ -6,9 +6,10 @@ import { Effect, type Scope } from "effect"
 import { characterMacros } from "./builtins/character.ts"
 import { chatMacros } from "./builtins/chat.ts"
 import { utilityMacros } from "./builtins/utility.ts"
+import { variableMacros } from "./builtins/variables.ts"
 import { type MacroRegistry, type MacroSpec, registerMacro } from "./registry.ts"
 
-const builtinMacros: ReadonlyArray<MacroSpec> = [...utilityMacros, ...characterMacros, ...chatMacros]
+const builtinMacros: ReadonlyArray<MacroSpec> = [...utilityMacros, ...characterMacros, ...chatMacros, ...variableMacros]
 
 export const registerBuiltinMacros = (registry: MacroRegistry): Effect.Effect<void, never, Scope.Scope> =>
   Effect.forEach(builtinMacros, (spec) => registerMacro(registry, spec), { discard: true })

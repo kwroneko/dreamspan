@@ -5,6 +5,7 @@
 import { Effect, type Scope } from "effect"
 import { makeRegistry, type Registry } from "../registry.ts"
 import type { MacroContext } from "./context.ts"
+import type { VariableScope } from "./variables.ts"
 
 export type ArgType = "string" | "integer" | "number" | "boolean"
 
@@ -46,6 +47,8 @@ export interface MacroCall {
   readonly random: () => number
   /** True the first time a key is seen in this expansion (for one-shot macros). */
   readonly once: (key: string) => boolean
+  /** The chat's (`local`) and global variables. Writes come back as effects. */
+  readonly variables: { readonly local: VariableScope; readonly global: VariableScope }
 }
 
 export interface MacroInfo {

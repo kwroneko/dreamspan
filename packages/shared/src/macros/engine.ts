@@ -16,10 +16,11 @@
 //   accepts a block, and is then written back as ST writes it: `{{foo}}bar{{/foo}}` →
 //   `{{foo}}bar}}`.
 // - A macro that delays its arguments (`{{if}}`) gets them raw, and a block untrimmed.
-import { isClosing, type MacroNode, type Node, parse } from "./parse.ts"
+import { isClosing, type MacroNode, type Node, parse, type VarNode } from "./parse.ts"
 import type { MacroContext } from "./context.ts"
 import { stringHash } from "./hash.ts"
 import type { MacroCall, MacroEntry, MacroInfo } from "./registry.ts"
+import { normalize, type VariableEffect, VariableScope, type VarValue } from "./variables.ts"
 
 /** What `{{else}}` returns: `{{if}}` splits on it, and any left over is removed at the end. */
 export const ELSE_MARKER = "\u0000\u001FELSE\u001F\u0000"
@@ -278,6 +279,7 @@ interface Run {
   readonly seen: Set<string>
   /** Expanded card fields by scope: ST expands each once per evaluation. */
   readonly templates: Map<string, string>
+  readonly variables: { readonly local: VariableScope; readonly global: VariableScope }
 }
 
 const macroInfo = (text: string, node: Node): MacroInfo | undefined =>
@@ -345,7 +347,7 @@ class Expansion {
         out += text.slice(node.start, node.end)
         cursor = node.end
       } else if (item.close === undefined || node.kind !== "macro") {
-        out += node.kind === "macro" ? this.macro(text, node, base, undefined) : text.slice(node.start, node.end)
+        out += this.node(text, node, base)
         cursor = node.end
       } else {
         const close = nodes[item.close]!
@@ -355,6 +357,10 @@ class Expansion {
       }
     }
     return out + text.slice(cursor, end)
+  }
+
+  private node(text: string, node: Node, base: number): string {
+    return node.kind === "macro" ? this.macro(text, node, base, undefined) : this.variable(text, node, base)
   }
 
   private macro(text: string, node: MacroNode, base: number, block: Block | undefined): string {
@@ -418,7 +424,8 @@ class Expansion {
         if (this.run.seen.has(key)) return false
         this.run.seen.add(key)
         return true
-      }
+      },
+      variables: this.run.variables
     }
     const key = entry.volatile ? this.drawKey(entry, offset, args) : undefined
     const frozen = key !== undefined && Object.hasOwn(this.run.frozen, key) ? this.run.frozen[key] : undefined
@@ -445,6 +452,80 @@ class Expansion {
     return n === 0 ? site : `${site}#${n}`
   }
 
+  /**
+   * ST's variable shorthands (MacroCstWalker#executeVariableOperation): `{{.name}}` reads a
+   * chat variable, `{{$name}}` a global one, and the operators write or compare. The value
+   * after an operator is only expanded when it's needed, then trimmed, and its macros are
+   * evaluated one by one: scoped blocks don't pair inside it.
+   */
+  private variable(text: string, node: VarNode, base: number): string {
+    const vars = this.run.variables[node.global ? "global" : "local"]
+    let expanded: string | undefined
+    const value = () => (expanded ??= this.varValue(text, node, base))
+    const current = () => vars.get(node.name)
+    const number = (a: unknown, b: string, test: (x: number, y: number) => boolean) => {
+      const x = Number(a)
+      const y = Number(b)
+      return String(!Number.isNaN(x) && !Number.isNaN(y) && test(x, y))
+    }
+    const falsy = (v: unknown) => !v || isFalse(normalize(v))
+    switch (node.operator) {
+      case undefined:
+        return normalize(current())
+      case "=":
+        vars.set(node.name, value())
+        return ""
+      case "++":
+        return vars.add(node.name, 1)
+      case "--":
+        return vars.add(node.name, -1)
+      case "+=":
+        vars.add(node.name, value())
+        return ""
+      case "-=": {
+        const n = Number(value())
+        if (!Number.isNaN(n)) vars.add(node.name, -n)
+        return ""
+      }
+      case "||":
+        return falsy(current()) ? value() : normalize(current())
+      case "??":
+        return vars.has(node.name) ? normalize(current()) : value()
+      case "||=":
+        if (!falsy(current())) return normalize(current())
+        vars.set(node.name, value())
+        return value()
+      case "??=":
+        if (vars.has(node.name)) return normalize(current())
+        vars.set(node.name, value())
+        return value()
+      case "==":
+        return String(normalize(current()) === value())
+      case "!=":
+        return String(normalize(current()) !== value())
+      case ">":
+        return number(current(), value(), (x, y) => x > y)
+      case ">=":
+        return number(current(), value(), (x, y) => x >= y)
+      case "<":
+        return number(current(), value(), (x, y) => x < y)
+      case "<=":
+        return number(current(), value(), (x, y) => x <= y)
+    }
+  }
+
+  private varValue(text: string, node: VarNode, base: number): string {
+    const region = node.value
+    if (!region) return ""
+    let out = ""
+    let cursor = region.start
+    for (const nested of region.nodes) {
+      out += text.slice(cursor, nested.start) + this.node(text, nested, base)
+      cursor = nested.end
+    }
+    return (out + text.slice(cursor, region.end)).trim()
+  }
+
   /** ST's baseChatReplace: a separate evaluation of card text, without card fields. */
   private template(text: string, scope: string): string {
     const cached = this.run.templates.get(scope)
@@ -466,9 +547,16 @@ interface EvaluateOptions {
 interface Evaluated {
   readonly text: string
   readonly frozen: FrozenValues
+  readonly effects: ReadonlyArray<VariableEffect>
+  readonly variables: {
+    readonly local: Readonly<Record<string, VarValue>>
+    readonly global: Readonly<Record<string, VarValue>>
+  }
 }
 
 export const evaluateMacros = (text: string, options: EvaluateOptions): Evaluated => {
+  const effects: Array<VariableEffect> = []
+  const { local, global } = options.context.variables ?? {}
   const run: Run = {
     registry: options.registry,
     random: options.random,
@@ -476,8 +564,17 @@ export const evaluateMacros = (text: string, options: EvaluateOptions): Evaluate
     drawn: new Map(),
     sites: new Map(),
     seen: new Set(),
-    templates: new Map()
+    templates: new Map(),
+    variables: {
+      local: new VariableScope(local, "local", effects),
+      global: new VariableScope(global, "global", effects)
+    }
   }
   const result = new Expansion(run, options.context, text, "").evaluate(text, 0)
-  return { text: result, frozen: Object.fromEntries(run.drawn) }
+  return {
+    text: result,
+    frozen: Object.fromEntries(run.drawn),
+    effects,
+    variables: { local: run.variables.local.snapshot(), global: run.variables.global.snapshot() }
+  }
 }

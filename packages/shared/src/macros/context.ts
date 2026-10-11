@@ -1,5 +1,6 @@
 // What macros read: the state at the position of the text being expanded (DESIGN §5.6).
 // The caller builds it from the folded chat state, so expansion itself stays pure.
+import type { VariableValues } from "./variables.ts"
 
 export interface MacroNames {
   /** `{{user}}`: the persona name, or the pinned binding (DESIGN §5.3). */
@@ -52,6 +53,8 @@ export interface ChatMessage {
 
 export interface MacroContext {
   readonly names: MacroNames
+  /** The chat's variables (`vars` in the chat state) and the global ones. */
+  readonly variables?: VariableValues
   readonly card?: CardFields
   /** The messages before the text's position, oldest first. */
   readonly messages?: ReadonlyArray<ChatMessage>

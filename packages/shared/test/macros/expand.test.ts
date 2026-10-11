@@ -40,7 +40,12 @@ describe("expansion depends on where the text came from", () => {
 
   it("leaves verbatim text exactly as it is, escapes included", () => {
     const raw = "\\{\\{x\\}\\} {{trim}} {{random::a::b}}"
-    expect(expand(request(raw, { kind: "model", displayRule: false }))).toEqual({ text: raw, frozen: {} })
+    expect(expand(request(raw, { kind: "model", displayRule: false }))).toEqual({
+      text: raw,
+      frozen: {},
+      effects: [],
+      variables: { local: {}, global: {} }
+    })
   })
 })
 
@@ -91,7 +96,7 @@ describe("freezing", () => {
     const [key] = Object.keys(expand(request("{{random::a::b}}", PRESET)).frozen)
     const frozen = JSON.parse(`{"__proto__": {"polluted": "yes"}, ${JSON.stringify(key)}: 5}`) as Record<string, string>
     const result = expand(request("{{random::a::b}}", PRESET, { frozen, random: () => 0 }))
-    expect(result).toEqual({ text: "a", frozen: { [key!]: "a" } })
+    expect(result).toMatchObject({ text: "a", frozen: { [key!]: "a" } })
     expect(({} as Record<string, unknown>).polluted).toBeUndefined()
     const inherited = Object.create({ [key!]: "b" }) as Record<string, string>
     expect(expand(request("{{random::a::b}}", PRESET, { frozen: inherited, random: () => 0 })).text).toBe("a")
