@@ -693,6 +693,21 @@ It fails with a typed `ProviderError`.
   - **The health check** fetches `127.0.0.1` on `PORT` inside the container. In proxy mode with `TRUSTED_PROXIES` set, add `127.0.0.1` to the list, or the container reports unhealthy. Inside a container, loopback is only the container's own processes, which can read `/data` and the server secret anyway.
 - The image is about 325 MB on disk, unoptimized so far: it installs every workspace's production dependencies. Memory at idle is about 188 MB.
 
+### ST differential harness
+
+`npm run test:st` (`packages/server/test/st/`) checks the compatibility contract (DESIGN §1.2) against a stock SillyTavern. It's opt-in, outside `npm run check` and CI: it needs Docker, and a run takes about 4 minutes on the loaded host.
+- **ST** is the official image at 1.19.0, pinned by digest (`container.ts`). It runs on the host network, listening on 127.0.0.1 at a random port, in whitelist mode with loopback only, as the calling user. Its config and data directories are fresh, under a temporary directory (`ST_DIFF_TMPDIR`, kept with `ST_DIFF_KEEP=1`). It never sees an existing ST install.
+- **Cleanup:** the container and the directory go on any exit, signals included. The container's removal is registered before `docker run`. A container left by a killed run carries our label and its creator's PID, and the next run removes it once that process is gone. Nothing else is ever removed.
+- **The mock endpoint** (`mock.ts`) is an OpenAI-compatible server on loopback. It records every request and answers with a fixed reply, streamed or not, so ST completes the turn.
+- **Fixtures** (`fixtures.ts`) are synthetic. The card goes through our card importer and PNG exporter, and the lorebook through our World Info importer and exporter, so ST parsing them checks those too. The presets are the parser tests' fixtures. They're loaded through ST's HTTP API from a page, as its UI imports files. `settings.json` is written directly: ST's fresh-install settings with the custom source pointed at the mock, auto-connect, the fixture persona, and the presets' regex allowed. `bind_preset_to_connection` is off, so a preset can't switch the connection (connection data is out of scope).
+- **ST builds prompts in the browser**, so the harness drives its UI with Playwright (`st.ts`). A capture opens a fresh page, selects the preset through ST's preset manager, opens the character's chat, and sends a message from the composer. It returns the body the mock received. Capture pages answer ST's write endpoints themselves, so every capture starts from the same files.
+- **Macros run in ST's own engine** through `SillyTavern.getContext().substituteParams(text, { name1Override, name2Override })`, the entry point its prompt building uses. With an options object it runs the new `MacroEngine` when `experimental_macro_engine` is on, as it is in a fresh 1.19 install. The chat is open, the clock is fixed, the page runs in UTC, the variables are set per vector, and `Math.random` is reseeded per vector for `{{roll}}`. `{{random}}` can't be compared: ST draws it from an entropy-seeded generator.
+- **Comparisons** (`comparisons.ts`), each a section of the report, with every difference as a JSON path and both values:
+  - **The exported card, lorebook and chat:** with the baseline settings, ST's request carries their text, macros expanded.
+  - **Macros:** each vector (`macroVectors.ts`) through ST and through ours, comparing the output and the variables after it. `ourMacros.ts` is the seam for our engine; until it merges, a stub that knows only `{{user}}` and `{{char}}`.
+  - **Preset round trips:** each preset file, and its import and export through our format, loaded into ST for the same chat. The two requests must be identical. The file is captured twice, so an unstable capture isn't mistaken for a lossy round trip. A preset whose request equals the baseline's is flagged as not applied.
+- **First results (2026-10-12):** the exported card, lorebook and chat all reach ST's request. The three preset fixtures (`default`, `full`, `legacy`) round-trip with identical requests. Checked against deliberate breakage: a card bound to a missing lorebook, and a round trip with one sampler changed and a space added to one prompt. Both were reported.
+
 ---
 
 ## 8. Import formats: cards and lorebooks

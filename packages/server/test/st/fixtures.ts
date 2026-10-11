@@ -2,10 +2,11 @@
 //
 // Cards and lorebooks go through our own importers and exporters on the way to ST
 // (ARCHITECTURE §8), so ST reading them back also checks those exporters. Presets are the
-// parser tests' fixtures, used as they are.
+// parser tests' fixtures, each with its round trip through our preset format.
 import { readFileSync } from "node:fs"
 import { exportCardPng } from "../../src/formats/cardExport.ts"
 import { importCard } from "../../src/formats/cardImport.ts"
+import { exportStPreset, importStPreset } from "../../src/formats/preset.ts"
 import { exportLorebook, importLorebook } from "../../src/formats/worldInfo.ts"
 import { json, png, run } from "../formats/support.ts"
 
@@ -22,6 +23,13 @@ export interface FixtureSet {
   /** World Info files, as our exporter writes them. ST names a book after its file. */
   readonly lorebooks: ReadonlyArray<{ readonly name: string; readonly file: Uint8Array }>
   readonly presets: ReadonlyArray<{ readonly name: string; readonly data: unknown }>
+  /** Pairs of presets above: a file, and the same file imported and exported by us. */
+  readonly presetRoundTrips: ReadonlyArray<{
+    readonly name: string
+    readonly roundTripName: string
+    /** How many issues our import reported. */
+    readonly issues: number
+  }>
   /** One chat per card, by card name; its greeting comes first. */
   readonly chats: ReadonlyArray<{ readonly card: string; readonly lines: ReadonlyArray<ChatLine> }>
   /**
@@ -35,6 +43,16 @@ const PERSONA = { name: "Tobin", description: "{{user}} is a cartographer who di
 const CARD = "Mira Vance"
 const LORE = "Saltmarsh Lore"
 
+/** The card's text fields, macros unexpanded. */
+export const CARD_TEXT = {
+  description: "{{char}} keeps the tide ledger of Saltmarsh and owes {{user}} a favor.",
+  personality: "Dry, exact, quietly kind.",
+  scenario: "{{user}} arrives at the ledger house during a spring flood.",
+  first_mes: "*{{char}} looks up from the ledger.* You're late, {{user}}.",
+  mes_example: "<START>\n{{user}}: Is the causeway open?\n{{char}}: Until the eleventh bell.",
+  creator_notes: "Synthetic fixture for the ST harness."
+}
+
 const cardPng = () => {
   const { card } = run(
     importCard(
@@ -43,12 +61,7 @@ const cardPng = () => {
         spec_version: "2.0",
         data: {
           name: CARD,
-          description: "{{char}} keeps the tide ledger of Saltmarsh and owes {{user}} a favor.",
-          personality: "Dry, exact, quietly kind.",
-          scenario: "{{user}} arrives at the ledger house during a spring flood.",
-          first_mes: "*{{char}} looks up from the ledger.* You're late, {{user}}.",
-          mes_example: "<START>\n{{user}}: Is the causeway open?\n{{char}}: Until the eleventh bell.",
-          creator_notes: "Synthetic fixture for the ST harness.",
+          ...CARD_TEXT,
           system_prompt: "",
           post_history_instructions: "",
           tags: ["fixture"],
@@ -108,36 +121,53 @@ const lorebook = () => {
   return exportLorebook(lorebook)
 }
 
-const presetFixture = (name: string): unknown =>
-  JSON.parse(readFileSync(new URL(`../fixtures/presets/${name}.json`, import.meta.url), "utf8"))
-
-const PRESET_FIXTURES = ["default", "full", "legacy"] as const
-
-export const fixtureSet = (): FixtureSet => ({
-  persona: PERSONA,
-  cards: [{ name: CARD, png: cardPng() }],
-  lorebooks: [{ name: LORE, file: lorebook() }],
-  presets: PRESET_FIXTURES.map((name) => ({ name, data: presetFixture(name) })),
-  chats: [
-    {
-      card: CARD,
-      lines: [
-        { name: CARD, is_user: false, mes: "*Mira looks up from the ledger.* You're late, Tobin." },
-        { name: PERSONA.name, is_user: true, mes: "The causeway was already under water." },
-        { name: CARD, is_user: false, mes: "Then the tide came early. Write that down... no, I will." },
-        { name: PERSONA.name, is_user: true, mes: "Someone lit a lantern out there." }
-      ]
+/** The parser tests' preset fixtures, each with its round trip (ARCHITECTURE §9). */
+const presetRoundTrips = () =>
+  ["default", "full", "legacy"].map((name) => {
+    const text = readFileSync(new URL(`../fixtures/presets/${name}.json`, import.meta.url), "utf8")
+    const { document, report } = importStPreset(text)
+    if (document === null) throw new Error(`fixture preset ${name} doesn't import`)
+    return {
+      name,
+      original: JSON.parse(text) as unknown,
+      roundTripName: `${name} (round trip)`,
+      roundTrip: exportStPreset(document),
+      issues: report.issues.length
     }
-  ],
-  expectedInPrompt: [
-    "Tobin is a cartographer who distrusts maps drawn by others.",
-    "Mira Vance keeps the tide ledger of Saltmarsh and owes Tobin a favor.",
-    "Dry, exact, quietly kind.",
-    "Tobin arrives at the ledger house during a spring flood.",
-    "Is the causeway open?",
-    "Until the eleventh bell.",
-    "Mira Vance never guesses a tide.",
-    "Saltmarsh floods every spring; the ledger records each tide.",
-    "The green lantern on the causeway is lit only when the tide turns."
-  ]
-})
+  })
+
+export const fixtureSet = (): FixtureSet => {
+  const roundTrips = presetRoundTrips()
+  return {
+    persona: PERSONA,
+    cards: [{ name: CARD, png: cardPng() }],
+    lorebooks: [{ name: LORE, file: lorebook() }],
+    presets: roundTrips.flatMap((preset) => [
+      { name: preset.name, data: preset.original },
+      { name: preset.roundTripName, data: preset.roundTrip }
+    ]),
+    presetRoundTrips: roundTrips.map(({ name, roundTripName, issues }) => ({ name, roundTripName, issues })),
+    chats: [
+      {
+        card: CARD,
+        lines: [
+          { name: CARD, is_user: false, mes: "*Mira looks up from the ledger.* You're late, Tobin." },
+          { name: PERSONA.name, is_user: true, mes: "The causeway was already under water." },
+          { name: CARD, is_user: false, mes: "Then the tide came early. Write that down... no, I will." },
+          { name: PERSONA.name, is_user: true, mes: "Someone lit a lantern out there." }
+        ]
+      }
+    ],
+    expectedInPrompt: [
+      "Tobin is a cartographer who distrusts maps drawn by others.",
+      "Mira Vance keeps the tide ledger of Saltmarsh and owes Tobin a favor.",
+      "Dry, exact, quietly kind.",
+      "Tobin arrives at the ledger house during a spring flood.",
+      "Is the causeway open?",
+      "Until the eleventh bell.",
+      "Mira Vance never guesses a tide.",
+      "Saltmarsh floods every spring; the ledger records each tide.",
+      "The green lantern on the causeway is lit only when the tide turns."
+    ]
+  }
+}

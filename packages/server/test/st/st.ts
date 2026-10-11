@@ -8,15 +8,11 @@ import { readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { png } from "../formats/support.ts"
 import type { FixtureSet } from "./fixtures.ts"
-import { type MacroContextInput, seededRandom } from "./macroVectors.ts"
+import { MACRO_TIME_ZONE, type MacroContextInput, type MacroOutcome, seededRandom } from "./macroVectors.ts"
 import { MOCK_MODEL, type MockEndpoint } from "./mock.ts"
 
-interface StCharacter {
-  readonly name: string
-}
-
 interface StContext {
-  readonly characters: ReadonlyArray<StCharacter>
+  readonly characters: ReadonlyArray<{ readonly name: string }>
   readonly chat: ReadonlyArray<unknown>
   readonly onlineStatus: string
   readonly selectCharacterById: (id: number) => Promise<void>
@@ -25,7 +21,7 @@ interface StContext {
     readonly selectPreset: (value: string) => Promise<void>
   }
   readonly eventSource: { once: (event: string, listener: (...args: ReadonlyArray<unknown>) => void) => void }
-  readonly eventTypes: Record<string, string>
+  readonly eventTypes: { readonly APP_READY: string }
   readonly getRequestHeaders: (options?: { omitContentType?: boolean }) => Record<string, string>
   readonly chatMetadata: { variables?: Record<string, unknown> }
   readonly extensionSettings: { variables: { global: Record<string, unknown> } }
@@ -89,7 +85,7 @@ const WRITES = /\/api\/[^?]*(save|edit|merge-attributes|delete|rename|create|imp
  * clock (timers still run).
  */
 const openPage = async (browser: Browser, url: string, options: { readOnly: boolean; now?: number }) => {
-  const context = await browser.newContext({ timezoneId: "UTC", locale: "en-US" })
+  const context = await browser.newContext({ timezoneId: MACRO_TIME_ZONE, locale: "en-US" })
   if (options.now !== undefined) await context.clock.setFixedTime(options.now)
   if (options.readOnly) {
     await context.route(WRITES, (route) =>
@@ -101,7 +97,7 @@ const openPage = async (browser: Browser, url: string, options: { readOnly: bool
   await page.waitForFunction(() => typeof SillyTavern !== "undefined" && typeof SillyTavern.getContext === "function")
   await page.evaluate(() => {
     const ctx = SillyTavern.getContext()
-    return new Promise((resolve) => ctx.eventSource.once(ctx.eventTypes.APP_READY ?? "app_ready", resolve))
+    return new Promise((resolve) => ctx.eventSource.once(ctx.eventTypes.APP_READY, resolve))
   })
   return page
 }
@@ -252,13 +248,6 @@ export const captureRequest = async (browser: Browser, url: string, mock: MockEn
   } finally {
     await page.context().close()
   }
-}
-
-export interface MacroOutcome {
-  readonly output: string
-  /** The chat's and the global variables after the text. */
-  readonly local: Record<string, unknown>
-  readonly global: Record<string, unknown>
 }
 
 /**

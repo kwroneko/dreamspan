@@ -3,7 +3,7 @@
 //
 // A small local list, until the macro engine's own vectors replace or extend it. ST
 // evaluates every vector with the fixture character's chat open, so card macros read the
-// fixture card. Pages run in UTC.
+// fixture card.
 
 type VarValue = string | number
 
@@ -20,8 +20,18 @@ export interface MacroVector {
   readonly context?: Partial<MacroContextInput>
 }
 
+/** What an engine made of a text. */
+export interface MacroOutcome {
+  readonly output: string
+  /** The chat's and the global variables after the text. */
+  readonly local: Record<string, unknown>
+  readonly global: Record<string, unknown>
+}
+
 /** The fixed clock both engines see: 2026-01-02 15:04:05 UTC, a Friday. */
 export const MACRO_NOW = Date.UTC(2026, 0, 2, 15, 4, 5)
+/** The time zone ST's pages run in (`openPage`). */
+export const MACRO_TIME_ZONE = "UTC"
 /** Seeds `Math.random` before each vector, which `{{roll}}` draws from. */
 export const MACRO_SEED = 1234
 

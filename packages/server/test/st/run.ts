@@ -12,13 +12,13 @@
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { type Browser, chromium } from "@playwright/test"
+import { chromium } from "@playwright/test"
+import { checkFixtures, compareMacros, comparePresetRoundTrips } from "./comparisons.ts"
 import { removeOrphans, ST_IMAGE, ST_VERSION, startSt } from "./container.ts"
-import { type FixtureSet, fixtureSet } from "./fixtures.ts"
-import { DEFAULT_MACRO_CONTEXT, MACRO_NOW, MACRO_SEED, MACRO_VECTORS } from "./macroVectors.ts"
-import { type MockEndpoint, startMock } from "./mock.ts"
+import { fixtureSet } from "./fixtures.ts"
+import { startMock } from "./mock.ts"
 import { printReport, type Section } from "./report.ts"
-import { captureRequest, evaluateMacros, loadFixtures, writeBaselineSettings } from "./st.ts"
+import { loadFixtures, writeBaselineSettings } from "./st.ts"
 
 const cleanups: Array<() => void> = []
 const cleanUp = () => {
@@ -59,52 +59,10 @@ const main = async () => {
 
   const sections: Array<Section> = [
     await checkFixtures(browser, st.url, mock, fixtures),
-    await listStMacros(browser, st.url, fixtures)
+    await compareMacros(browser, st.url, fixtures),
+    await comparePresetRoundTrips(browser, st.url, mock, fixtures)
   ]
   return printReport(sections) === 0 ? 0 : 1
-}
-
-const listStMacros = async (browser: Browser, url: string, fixtures: FixtureSet) => {
-  const vectors = MACRO_VECTORS.map((vector) => ({
-    text: vector.text,
-    context: { ...DEFAULT_MACRO_CONTEXT, ...vector.context }
-  }))
-  const result = await evaluateMacros(browser, url, {
-    character: fixtures.chats[0]!.card,
-    now: MACRO_NOW,
-    engine: "experimental",
-    seed: MACRO_SEED,
-    vectors
-  })
-  return {
-    title: "ST's macro engine",
-    notes: [
-      `new engine on by default: ${result.engineOnByDefault}`,
-      ...result.outcomes.map(
-        (outcome, i) =>
-          `${JSON.stringify(vectors[i]!.text)} → ${JSON.stringify(outcome.output)} ${JSON.stringify(outcome.local)} ${JSON.stringify(outcome.global)}`
-      )
-    ],
-    differences: []
-  }
-}
-
-/**
- * ST reads what we exported: with the baseline settings, the request carries the card's
- * fields, the persona, the lorebook entries the chat triggers, and the chat itself.
- */
-const checkFixtures = async (browser: Browser, url: string, mock: MockEndpoint, fixtures: FixtureSet) => {
-  const message = "Where does the lantern lead?"
-  const body = await captureRequest(browser, url, mock, { preset: null, character: fixtures.chats[0]!.card, message })
-  const sent = JSON.stringify(body)
-  const expected = [...fixtures.expectedInPrompt, ...fixtures.chats[0]!.lines.map((line) => line.mes), message]
-  return {
-    title: "Fixtures in ST's request (baseline settings)",
-    notes: [`${expected.length} texts expected`],
-    differences: expected
-      .filter((text) => !sent.includes(JSON.stringify(text).slice(1, -1)))
-      .map((text) => `missing: ${text}`)
-  }
 }
 
 main().then(
