@@ -13,11 +13,13 @@ const run = (
   text: string,
   variables: Vars = {},
   origin: TextOrigin = { kind: "preset" },
-  card?: MacroContext["card"]
+  card?: MacroContext["card"],
+  display?: { readonly displayRule: boolean }
 ) =>
   expanded({
     text,
     origin,
+    ...(display ? { purpose: "display", ...display } : { purpose: "assembly" }),
     registry,
     context: {
       names: { user: "User", char: "Character" },
@@ -310,17 +312,16 @@ describe("effects", () => {
     expect(result.effects.map((e) => e.name)).toEqual(["seen", "hidden"])
   })
 
-  it("never writes from text that isn't expanded, or through the display rule", () => {
+  it("never writes from text that isn't expanded, or when displaying", () => {
     const text = "{{setvar::x::1}}{{getvar::x}}"
-    expect(run(text, {}, { kind: "user", macroMode: "verbatim" })).toMatchObject({ text, effects: [] })
-    expect(run(text, {}, { kind: "model", displayRule: false })).toMatchObject({ text, effects: [] })
-    expect(run(text, { local: { y: 1 } }, { kind: "model", displayRule: true })).toEqual({
-      text: "1",
-      frozen: {},
-      effects: [],
-      variables: { local: { y: 1 }, global: {} }
-    })
-    expect(run(text, {}, { kind: "user", macroMode: "template" }).effects).toHaveLength(1)
+    const verbatim = { kind: "message", macroMode: "verbatim" } as const
+    const template = { kind: "message", macroMode: "template" } as const
+    expect(run(text, {}, verbatim)).toMatchObject({ text, effects: [] })
+    expect(run(text, {}, verbatim, undefined, { displayRule: false })).toMatchObject({ text, effects: [] })
+    const unchanged = { text: "1", frozen: {}, effects: [], variables: { local: { y: 1 }, global: {} } }
+    expect(run(text, { local: { y: 1 } }, verbatim, undefined, { displayRule: true })).toEqual(unchanged)
+    expect(run(text, { local: { y: 1 } }, template, undefined, { displayRule: false })).toEqual(unchanged)
+    expect(run(text, {}, template).effects).toHaveLength(1)
   })
 })
 

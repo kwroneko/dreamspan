@@ -807,14 +807,15 @@ ST chat-completion presets (DESIGN §1.2). Pure functions with no database acces
 
 `packages/shared/src/macros/` (DESIGN §5.6): a pure engine, for the server's context assembler and for the client when it renders text. It follows SillyTavern's current macro engine (`public/scripts/macros/`, ST's default), read at ST commit `06bde939`.
 
-**Expanding text** (`expand.ts`): `expand({ text, origin, registry, context, frozen?, random, limits? })` returns `Expanded` or `LimitExceeded`.
-- **`origin` is required** and decides whether anything expands:
+**Expanding text** (`expand.ts`): `expand({ text, origin, purpose, displayRule?, registry, context, frozen?, random, limits? })` returns `Expanded` or `LimitExceeded`. It's the module's only way in, so the origin check can't be skipped.
+- **`origin` and `purpose` are required** and decide whether anything expands:
   - card and preset text always does (lorebook entries and notes count as card text)
-  - user-typed text only when its message's macro mode is `template`
-  - model output only through the display rule (`displayRule: true`)
+  - a chat message does when its stored macro mode is `template`, whoever wrote it (DATA-MODEL §15, invariant 7). The defaults stay as DESIGN §5.6 says: greetings are `template`, typed and generated text `verbatim`.
+  - for `purpose: "display"`, the opt-in display rule (`displayRule: true`) expands verbatim messages too
+  - display never changes state: its variable writes are dropped
 - **`context` is the state at the text's position** (`context.ts`): names, the card's fields as stored (unexpanded), the messages before it, the clock and time zone, and whatever else ST's macros read. Card text expanded against it follows the state, so `{{user}}` in a greeting follows a persona change until the message is sent.
 - **Freezing.** Random, roll, pick and the time macros are `volatile`. Each value drawn is keyed by its text (a card field's name, or none), offset, macro, arguments, and repeat count. The result returns them as `frozen`, and passing them back makes a re-expansion identical, whatever the clock or random source. Changed arguments or moved text draw again. Stored entries that aren't strings are ignored.
-- **Variables are effects** (`variables.ts`). `context.variables` holds the chat's variables (`local`: the chat state's `vars`) and the global ones. Macros work on an overlay, and every write comes back, in order, in `effects` as `{ scope, name, value }`, with `value: null` for a deletion. `variables` is the state after the text, to pass to the next text expanded at the same position. The display rule's writes are dropped. The caller records local effects as `var.set` events; global variables have no state key yet.
+- **Variables are effects** (`variables.ts`). `context.variables` holds the chat's variables (`local`: the chat state's `vars`) and the global ones. Macros work on an overlay, and every write comes back, in order, in `effects` as `{ scope, name, value }`, with `value: null` for a deletion. `variables` is the state after the text, to pass to the next text expanded at the same position. The caller records local effects as `var.set` events. Global variables come back as effects too, but nothing persists them yet (DATA-MODEL §16).
 - ST's variable rules are kept: values are stored as given, numeric text reads as a number (`007` → `7`), addvar adds, appends to a JSON array or concatenates, and the shorthands (`{{.name}}`, `{{$name}}`, `=`, `+=`, `-=`, `++`, `--`, `||`, `??`, `||=`, `??=`, comparisons) only expand their value when it's needed. Names are own keys only, so unlike ST `{{hasvar::constructor}}` is false.
 - **Variable values are bounded.** A write that would produce a value over 1 MB is refused: the macro stays as written and no effect is recorded (ST has no cap). Reading a value costs its length once per write, since the read and the JSON parse are cached; a shorthand comparison or test costs the value's length each time, and so does each message the last-message macros and `{{idle_duration}}` look at.
 
@@ -827,7 +828,7 @@ ST chat-completion presets (DESIGN §1.2). Pure functions with no database acces
 - **Expansions:** 10,000 macros evaluated.
 - **Work:** 4,000,000 units, about one per character produced by a macro, read from or written to a variable, or looked at by the parser, one per entry looked at when pairing blocks, and one per die rolled. This bounds the output and the time taken, and stops values that double. Each level pairs its block's content again (as ST does), and that's counted too, so deeply nested blocks can't cost depth × size for free.
 - Handlers count large output before building it (`{{space::N}}`, `{{newline::N}}`, dice, and `{{datetimeformat}}` at 13 characters per format character, its most).
-- **Reaching a limit fails the whole text** with `LimitExceeded`: nothing partial comes back.
+- **Reaching a limit fails the whole text** with `LimitExceeded`: nothing partial comes back. It says which limit, and where: `scope` is `""` for the text itself or the card field it happened in (`card.description`), and `offset` is the innermost macro being evaluated. The caller fails that one piece (a preset prompt, a greeting) with a visible error saying where, not the whole turn.
 - **Linear time:** no regex that backtracks (ST's `{{trim}}` regex, quadratic on runs of newlines, is a scan here); recovery after a name uses a precomputed table; pairing blocks searches square-root blocks of running sums, so many unclosed openers cost about n√n. The parser and the pairing count their steps as work, so the tests assert linear time as a work bound rather than a time.
 - **No code evaluation:** nothing calls `eval`, `Function` or a dynamic import, and a test scans the sources for them.
 - **Untrusted names** are looked up as own keys or in `Map`s: variables, frozen values, outlets, macro names.

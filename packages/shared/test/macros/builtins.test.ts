@@ -44,7 +44,14 @@ const base: MacroContext = {
 }
 
 const run = (text: string, context: Partial<MacroContext> = {}, random: () => number = () => 0.5) =>
-  expanded({ text, origin: { kind: "preset" }, registry, context: { ...base, ...context }, random }).text
+  expanded({
+    text,
+    origin: { kind: "preset" },
+    purpose: "assembly",
+    registry,
+    context: { ...base, ...context },
+    random
+  }).text
 
 const vectors = (cases: ReadonlyArray<readonly [string, string]>, context: Partial<MacroContext> = {}) =>
   it.each(cases)("%j → %j", (input, output) => expect(run(input, context)).toBe(output))

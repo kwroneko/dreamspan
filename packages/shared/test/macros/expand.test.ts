@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { MacroContext } from "../../src/macros/context.ts"
+import * as engine from "../../src/macros/expand.ts"
 import type { ExpandRequest, TextOrigin } from "../../src/macros/expand.ts"
 import { builtinRegistry, expanded, seeded } from "./support.ts"
 
@@ -17,6 +18,7 @@ const context: MacroContext = {
 const request = (text: string, origin: TextOrigin, overrides: Partial<ExpandRequest> = {}): ExpandRequest => ({
   text,
   origin,
+  purpose: "assembly",
   registry,
   context,
   random: seeded(1),
@@ -25,28 +27,40 @@ const request = (text: string, origin: TextOrigin, overrides: Partial<ExpandRequ
 
 const PRESET: TextOrigin = { kind: "preset" }
 
-describe("expansion depends on where the text came from", () => {
+describe("expansion depends on where the text came from and what it's for", () => {
   const text = "Hi {{user}}, I'm {{char}}. <USER>"
-  it.each<readonly [TextOrigin, string]>([
-    [{ kind: "card" }, "Hi Alice, I'm Mira. Alice"],
-    [{ kind: "preset" }, "Hi Alice, I'm Mira. Alice"],
-    [{ kind: "user", macroMode: "verbatim" }, text],
-    [{ kind: "user", macroMode: "template" }, "Hi Alice, I'm Mira. Alice"],
-    [{ kind: "model", displayRule: false }, text],
-    [{ kind: "model", displayRule: true }, "Hi Alice, I'm Mira. Alice"]
-  ])("%j", (origin, output) => {
-    expect(expanded(request(text, origin)).text).toBe(output)
+  const done = "Hi Alice, I'm Mira. Alice"
+  const verbatim: TextOrigin = { kind: "message", macroMode: "verbatim" }
+  const template: TextOrigin = { kind: "message", macroMode: "template" }
+  it.each<readonly [TextOrigin, Partial<ExpandRequest>, string]>([
+    [{ kind: "card" }, {}, done],
+    [{ kind: "preset" }, {}, done],
+    // The stored macro mode decides, whoever wrote the message (DATA-MODEL §15, invariant 7).
+    [verbatim, {}, text],
+    [template, {}, done],
+    [verbatim, { purpose: "display" }, text],
+    [verbatim, { purpose: "display", displayRule: false }, text],
+    [verbatim, { purpose: "display", displayRule: true }, done],
+    // The display rule doesn't apply to assembly.
+    [verbatim, { displayRule: true }, text],
+    [template, { purpose: "display" }, done]
+  ])("%j %j", (origin, overrides, output) => {
+    expect(expanded(request(text, origin, overrides)).text).toBe(output)
   })
 
   it("leaves verbatim text exactly as it is, escapes included", () => {
     const raw = "\\{\\{x\\}\\} {{trim}} {{random::a::b}}"
-    expect(expanded(request(raw, { kind: "model", displayRule: false }))).toEqual({
+    expect(expanded(request(raw, verbatim))).toEqual({
       text: raw,
       frozen: {},
       effects: [],
       variables: { local: {}, global: {} }
     })
   })
+})
+
+it("offers no way to expand without the origin check", () => {
+  expect(Object.keys(engine).filter((name) => /evaluat/i.test(name))).toEqual([])
 })
 
 it("resolves card text against the context at its position, until it's sent", () => {

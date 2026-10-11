@@ -1,7 +1,7 @@
 // ST's core macros (public/scripts/macros/definitions/core-macros.js at 06bde939): text
 // utilities, control flow, randomness. ST's `{{banned}}` (a text-completion ban list) is
 // kept only so it's stripped from prompts, as ST strips it for chat completion.
-import { ELSE_MARKER, isFalse, trimScoped } from "../engine.ts"
+import { ELSE_MARKER, isFalse, trimScoped } from "../expand.ts"
 import { stringHash } from "../hash.ts"
 import type { MacroCall, MacroSpec } from "../registry.ts"
 

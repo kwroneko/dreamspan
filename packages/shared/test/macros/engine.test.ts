@@ -57,6 +57,7 @@ const run = (text: string) =>
   expanded({
     text,
     origin: { kind: "preset" },
+    purpose: "assembly",
     registry,
     context: { names: { user: "User", char: "Character" }, now: 0, timeZone: "UTC" },
     random: Math.random

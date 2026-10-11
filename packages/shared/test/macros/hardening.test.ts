@@ -14,6 +14,7 @@ const registry = builtinRegistry()
 const request = (text: string, overrides: Partial<ExpandRequest> = {}): ExpandRequest => ({
   text,
   origin: { kind: "card" },
+  purpose: "assembly",
   registry,
   context: { names: { user: "User", char: "Character" }, now: 0, timeZone: "UTC" },
   random: () => 0.5,
@@ -51,6 +52,21 @@ describe("nesting depth", () => {
   it("can be changed", () => {
     expect(limit(nested("{{reverse::", "}}", 5), { limits: { maxDepth: 4 } })).toBe("depth")
   })
+})
+
+it("reports where a limit was reached: the card field, and the innermost macro's offset", () => {
+  expect(expand(request("xx" + "{{noop}}".repeat(10_001)))).toEqual({
+    _tag: "LimitExceeded",
+    limit: "expansions",
+    scope: "",
+    offset: 2 + 10_000 * 8
+  })
+  const description = "ab{{setvar::a::xxxxxxxxxx}}" + "{{setvar::a::{{getvar::a}}{{getvar::a}}}}".repeat(40)
+  const result = expand(
+    request("Intro {{description}}", { context: { ...request("").context, card: { description } } })
+  )
+  expect(result).toMatchObject({ _tag: "LimitExceeded", limit: "work", scope: "card.description" })
+  expect(result._tag === "LimitExceeded" && result.offset).toBeGreaterThan(2)
 })
 
 describe("expansion count", () => {
