@@ -2,7 +2,7 @@
 // The caller builds it from the folded chat state, so expansion itself stays pure.
 import type { VariableValues } from "./variables.ts"
 
-export interface MacroNames {
+interface MacroNames {
   /** `{{user}}`: the persona name, or the pinned binding (DESIGN §5.3). */
   readonly user: string
   /** `{{char}}`: the character name, or the pinned binding. */

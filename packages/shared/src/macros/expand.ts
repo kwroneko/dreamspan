@@ -30,7 +30,6 @@
 //   accepts a block, and is then written back as ST writes it: `{{foo}}bar{{/foo}}` →
 //   `{{foo}}bar}}`.
 // - A macro that delays its arguments (`{{if}}`) gets them raw, and a block untrimmed.
-import type { MacroMode } from "../chat.ts"
 import { isClosing, type MacroNode, type Node, parse, type VarNode } from "./parse.ts"
 import type { MacroContext } from "./context.ts"
 import { stringHash } from "./hash.ts"
@@ -628,8 +627,8 @@ class Expansion {
 export type TextOrigin =
   | { readonly kind: "card" }
   | { readonly kind: "preset" }
-  /** A chat message, with its stored macro mode. */
-  | { readonly kind: "message"; readonly macroMode: typeof MacroMode.Type }
+  /** A chat message, with its version's stored `macro_mode`. */
+  | { readonly kind: "message"; readonly macroMode: "template" | "verbatim" }
 
 export interface ExpandRequest {
   readonly text: string

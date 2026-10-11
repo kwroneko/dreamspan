@@ -23,7 +23,7 @@
 // operator in the wrong place), the macro stays literal here; ST's recovery varies with
 // the input and can swallow text after it.
 
-export interface Region {
+interface Region {
   /** Trimmed bounds of the raw text, end exclusive. */
   readonly start: number
   readonly end: number
@@ -44,7 +44,7 @@ export interface MacroNode {
 }
 
 const VAR_OPERATORS = ["++", "--", "??=", "??", "||=", "||", "-=", "==", "!=", ">=", ">", "<=", "<", "+=", "="] as const
-export type VarOperator = (typeof VAR_OPERATORS)[number]
+type VarOperator = (typeof VAR_OPERATORS)[number]
 
 /** A variable shorthand: `{{.name}}` (chat) or `{{$name}}` (global), with an optional operator. */
 export interface VarNode {

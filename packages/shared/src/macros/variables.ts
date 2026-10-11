@@ -18,7 +18,7 @@
 export type VarValue = string | number
 
 /** The longest value a write may produce: 1 MB of text. */
-export const MAX_VALUE = 1_000_000
+const MAX_VALUE = 1_000_000
 
 export type VarScope = "local" | "global"
 

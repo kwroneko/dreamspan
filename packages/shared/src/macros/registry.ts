@@ -7,7 +7,7 @@ import { makeRegistry, type Registry } from "../registry.ts"
 import type { MacroContext } from "./context.ts"
 import type { VariableScope } from "./variables.ts"
 
-export interface ArgSpec {
+interface ArgSpec {
   readonly name: string
   /** Optional arguments must come after the required ones. */
   readonly optional?: boolean
