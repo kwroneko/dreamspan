@@ -413,6 +413,16 @@ export const makeBin = (sql: SqlClient.SqlClient, limits: BinLimits) => {
       yield* run(`DELETE FROM entity_revisions WHERE entity_id IN (${targets("entity")})`)
       yield* run(`UPDATE entities SET purged_at = ? WHERE id IN (${targets("entity")})`, [now])
 
+      // A key typed into a purged connection goes with it, unless another connection
+      // (live or in the bin) uses it. Deleting it clears credential_id (ON DELETE SET NULL).
+      yield* run(
+        `DELETE FROM credentials WHERE connection_owned = 1
+           AND id IN (SELECT credential_id FROM connections WHERE id IN (${targets("connection")}))
+           AND NOT EXISTS (SELECT 1 FROM connections c WHERE c.credential_id = credentials.id
+             AND c.id NOT IN (${targets("connection")}))`,
+        params
+      )
+
       // A connection stays as a tombstone without secrets: old messages and ledger rows
       // still name their model (PROVIDERS §10).
       yield* run(

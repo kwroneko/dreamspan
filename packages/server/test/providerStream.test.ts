@@ -1224,6 +1224,54 @@ describe("secrets stay where they were entered (audit regressions)", () => {
     }).pipe(Effect.scoped, Effect.provide(layer()))
   )
 
+  it.live("purging a connection deletes the key typed into it, unless something else uses it", () =>
+    Effect.gen(function* () {
+      const providers = yield* Providers.Providers
+      const writer = yield* Database.Writer
+      const reader = yield* Database.Reader
+      const userId = yield* user("ana")
+      const purgeConnection = (connectionId: Parameters<typeof writer.DeleteConnection>[0]["connectionId"]) =>
+        Effect.flatMap(writer.DeleteConnection({ userId, connectionId }), (item) =>
+          writer.PurgeBinItem({ userId, itemId: item.id })
+        )
+      const typed = yield* providers.createConnection({
+        userId,
+        kind: "openai-chat",
+        settings: settings("http://127.0.0.1:1/v1"),
+        apiKey: "sk-typed-for-one-1"
+      })
+      // A connection-owned key shared with a second connection stays while that one uses it.
+      const sharer = yield* providers.createConnection({
+        userId,
+        kind: "openai-chat",
+        settings: settings("http://127.0.0.1:1/v1"),
+        credentialId: typed.credentialId!
+      })
+      yield* purgeConnection(typed.id)
+      assert.lengthOf(yield* reader.ListCredentials({ userId }), 1)
+      yield* purgeConnection(sharer.id)
+      assert.lengthOf(yield* reader.ListCredentials({ userId }), 0)
+      // A credential the user created stays after its connection is purged.
+      const named = yield* providers.createCredential({
+        userId,
+        name: "Mine",
+        apiKey: "sk-named-key-02",
+        urls: ["http://127.0.0.1:1"]
+      })
+      const user_ = yield* providers.createConnection({
+        userId,
+        kind: "openai-chat",
+        settings: settings("http://127.0.0.1:1/v1"),
+        credentialId: named.id
+      })
+      yield* purgeConnection(user_.id)
+      assert.deepStrictEqual(
+        (yield* reader.ListCredentials({ userId })).map((c) => c.name),
+        ["Mine"]
+      )
+    }).pipe(Effect.scoped, Effect.provide(layer()))
+  )
+
   it.live("a failed create keeps no key, and short keys get no hint", () =>
     Effect.gen(function* () {
       const providers = yield* Providers.Providers
