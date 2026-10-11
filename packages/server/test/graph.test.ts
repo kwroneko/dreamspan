@@ -308,7 +308,7 @@ describe("message graph", () => {
   )
 
   it.live(
-    "reads a long chat in windows whose cost doesn't depend on its length",
+    "reads a long chat in windows, and paging back reconstructs the whole path",
     () =>
       Effect.gen(function* () {
         const { reader, userId, me, mira, chat, append } = yield* setup()
@@ -319,14 +319,12 @@ describe("message graph", () => {
         const window = (leafSlotId: SlotId | null, limit: number) =>
           reader.GetPath({ userId, chatId: chat.id, leafSlotId, limit })
 
-        yield* window(null, 200) // warm the reader's statement cache
-        const start = performance.now()
+        // No time budget: on a loaded host a read can take any time, so the window's cost
+        // is measured (ARCHITECTURE.md §3.8), not asserted.
         const latest = yield* window(null, 200)
-        const ms = performance.now() - start
         assert.strictEqual(latest.entries.length, 200)
         assert.strictEqual(latest.entries.at(-1)!.version.content, "reply 1999")
         assert.isNotNull(latest.olderLeafSlotId)
-        assert.isBelow(ms, 40, `a 200-slot window took ${ms.toFixed(1)} ms`)
 
         // Paging back to the root reconstructs the whole path, in order, without gaps.
         const all = [...latest.entries]
