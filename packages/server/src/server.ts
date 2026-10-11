@@ -5,7 +5,7 @@ import type { Socket } from "node:net"
 import type { Duplex } from "node:stream"
 import { NodeHttpServer } from "@effect/platform-node"
 import { AppApi, CurrentUser, Health } from "@rp/shared/api.ts"
-import { ByteSize, Effect, Layer, Option, Predicate, Schema } from "effect"
+import { ByteSize, Context, Effect, Layer, Option, Predicate, Schema } from "effect"
 import {
   Headers,
   HttpIncomingMessage,
@@ -64,25 +64,46 @@ const Handlers = AppApi.toLayer(
 )
 
 /**
+ * RPC requests received and not yet answered, so a stop can let their replies go out
+ * first. Once `closing`, new requests are dropped unanswered: nothing starts that the stop
+ * might cut off between its commit and its reply.
+ */
+class InFlightRpcs extends Context.Service<InFlightRpcs, { count: number; closing: boolean }>()(
+  "rp/server/InFlightRpcs"
+) {
+  static readonly layer = Layer.sync(InFlightRpcs, () => ({ count: 0, closing: false }))
+}
+
+/**
  * JSON, minus the headers a client puts in its own messages. The RPC server appends
  * those to the upgrade request's headers, later entries win, and authentication reads
  * the result: a client could otherwise name any user in proxy mode. Identity comes
- * only from the upgrade request.
+ * only from the upgrade request. It also counts requests in and replies (exits) out.
  */
-const TransportHeadersOnly = Layer.succeed(RpcSerialization.RpcSerialization)(
-  RpcSerialization.RpcSerialization.of({
-    ...RpcSerialization.json,
-    makeUnsafe: () => {
-      const parser = RpcSerialization.json.makeUnsafe()
-      return {
-        encode: parser.encode,
-        decode: (data) =>
-          parser
-            .decode(data)
-            .map((message) => (Predicate.isTagged(message, "Request") ? { ...message, headers: [] } : message))
+const TransportHeadersOnly = Layer.effect(
+  RpcSerialization.RpcSerialization,
+  Effect.map(InFlightRpcs, (inFlight) =>
+    RpcSerialization.RpcSerialization.of({
+      ...RpcSerialization.json,
+      makeUnsafe: () => {
+        const parser = RpcSerialization.json.makeUnsafe()
+        return {
+          encode: (response) => {
+            const replies = Array.isArray(response) ? response : [response]
+            inFlight.count -= replies.filter((reply) => Predicate.isTagged(reply, "Exit")).length
+            return parser.encode(response)
+          },
+          decode: (data) =>
+            parser.decode(data).flatMap((message) => {
+              if (!Predicate.isTagged(message, "Request")) return [message]
+              if (inFlight.closing) return []
+              inFlight.count++
+              return [{ ...message, headers: [] }]
+            })
+        }
       }
-    }
-  })
+    })
+  )
 )
 
 const RpcRoute = RpcServer.layerHttp({ group: AppApi, path: "/rpc", protocol: "websocket" }).pipe(
@@ -236,8 +257,10 @@ const InterruptedRequests = Layer.effectDiscard(
 
 /** A server-to-client WebSocket close frame (unmasked) with code 1001, "going away". */
 const WEBSOCKET_GOING_AWAY = Buffer.from([0x88, 0x02, 0x03, 0xe9])
-/** How long requests and sockets get to finish once the server stops. */
-const SHUTDOWN_GRACE_MS = 2000
+/** How long RPCs in flight get to reply once the server stops, before WebSockets are closed. */
+const DRAIN_MS = 2000
+/** How long sockets get to close after that, before they're destroyed. */
+const CLOSE_MS = 1000
 
 /**
  * Refused peers are turned away on connect, before the socket is read, so no route,
@@ -247,6 +270,7 @@ const HttpServerLive = Layer.unwrap(
   Effect.gen(function* () {
     const config = yield* AppConfig
     const accounts = yield* Accounts
+    const inFlight = yield* InFlightRpcs
     const policy = exposurePolicy(config, accounts.configured)
     if (typeof policy === "string") return yield* new UnsafeExposure({ message: policy })
     yield* Effect.logInfo(`Exposure: ${policy.summary}`)
@@ -268,16 +292,25 @@ const HttpServerLive = Layer.unwrap(
         .on("upgrade", (_request, socket) => upgraded.add(socket))
       // close() waits for every connection, and an open tab's WebSocket never ends on its
       // own: a stop would hang until killed, with the database workers mid-flight. So a
-      // close also tells WebSockets the server is going away, ends idle HTTP connections,
-      // and destroys whatever is left after a grace period.
+      // close ends idle HTTP connections, lets the RPCs in flight reply (two quiet checks
+      // in a row, so a reply being written goes out too), then tells WebSockets the server
+      // is going away, and destroys whatever is left. Each wait is bounded.
       const close = server.close.bind(server)
       server.close = ((callback?: (error?: Error) => void) => {
         close(callback)
-        for (const socket of sockets) if (upgraded.has(socket)) socket.end(WEBSOCKET_GOING_AWAY)
+        inFlight.closing = true
         server.closeIdleConnections()
-        setTimeout(() => {
-          for (const socket of sockets) socket.destroy()
-        }, SHUTDOWN_GRACE_MS).unref()
+        const deadline = Date.now() + DRAIN_MS
+        let quiet = 0
+        const drain = setInterval(() => {
+          quiet = inFlight.count <= 0 ? quiet + 1 : 0
+          if (quiet < 2 && Date.now() < deadline) return
+          clearInterval(drain)
+          for (const socket of sockets) if (upgraded.has(socket)) socket.end(WEBSOCKET_GOING_AWAY)
+          setTimeout(() => {
+            for (const socket of sockets) socket.destroy()
+          }, CLOSE_MS).unref()
+        }, 25)
         return server
       }) as typeof server.close
       return server
@@ -293,5 +326,6 @@ export const ServerLive = HttpRouter.serve(
   Layer.provide(ProvidersLive),
   Layer.provide(HttpServerLive),
   Layer.provideMerge(Accounts.layer),
-  Layer.provideMerge(Layer.mergeAll(DatabaseLive, EventLoopMonitor.layer))
+  Layer.provideMerge(Layer.mergeAll(DatabaseLive, EventLoopMonitor.layer)),
+  Layer.provide(InFlightRpcs.layer)
 )

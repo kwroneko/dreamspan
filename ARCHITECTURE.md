@@ -88,7 +88,13 @@ Bun was measured as an alternative (2026-10-10) and not adopted. On this server 
 - `test/network.test.ts` runs real requests through a local HTTP proxy (CONNECT and absolute-URI forwarding) and a SOCKS5 proxy with credentials (`test/support/proxies.ts`), counting the tunnels.
 - **pi-ai:** its Chat Completions, Responses and Anthropic adapters take our `fetch`. Its Google adapter rejects a custom `fetch`, and only its Bedrock and Codex adapters, which we don't use, read `HTTP_PROXY`.
 
-**Stopping** (`SIGTERM`, `docker stop`). Node's `server.close()` waits for every connection, and an open tab's WebSocket never ends on its own, so a stop used to hang until it was killed, with the database workers mid-flight. Closing the server now also sends each WebSocket a close frame with code 1001 ("going away"; the client reconnects), ends idle HTTP connections, and destroys whatever is left after 2 seconds. `shutdown.test.ts` stops a real server with a socket open: it exits within seconds and leaves no WAL behind, the sign that the workers closed the database.
+**Stopping** (`SIGTERM`, `docker stop`). Node's `server.close()` waits for every connection, and an open tab's WebSocket never ends on its own, so a stop used to hang until it was killed, with the database workers mid-flight. Closing the server now:
+- ends idle HTTP connections, and drops RPC requests that arrive from then on, unanswered, so nothing starts that the stop could cut off between its commit and its reply
+- waits up to 2 seconds for the RPCs in flight to reply (the serialization layer counts requests in and exits out)
+- sends each WebSocket a close frame with code 1001 ("going away"; the client reconnects), and destroys whatever is left a second later
+- exits 0: an interruption by signal is how the server is meant to stop, and the default 130 would count as a failure to systemd (`main.ts`)
+
+`shutdown.test.ts` stops a real server with a socket open (it exits 0 within seconds and leaves no WAL behind, the sign that the workers closed the database), and during a burst of writes (every committed write was acknowledged).
 
 **Event-loop monitoring** (`eventLoop.ts`). A 10 ms timer measures how late each tick runs, into one-second buckets. `Health` reports the last minute: the longest single delay (`eventLoopMaxMs`) and the worst one-second p99 (`eventLoopP99Ms`). Reading them resets nothing, so callers don't affect each other. Node's `monitorEventLoopDelay` isn't used: it discards the first interval after a reset, so a 300 ms stall starting just after a bucket change showed as 0.3 ms. Tested: a single 300 ms block shows in the max, including 2, 10 and 25 ms after a bucket change, and still does after another read and a bucket change. Anything that blocks the loop delays every live stream, so this is a budgeted metric (CLIENT-FRAMEWORK §7).
 
