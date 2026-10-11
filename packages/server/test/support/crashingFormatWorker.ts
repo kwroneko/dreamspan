@@ -1,5 +1,5 @@
-// A format worker that dies on a file named "crash", as one would on a file that runs it
-// out of memory, and parses anything else like the real one.
+// A format worker that dies on a file named "crash" and on every export, as one would on a
+// file that runs it out of memory, and parses anything else like the real one.
 import { NodeRuntime, NodeWorkerRunner } from "@effect/platform-node"
 import { Effect, Layer } from "effect"
 import { RpcServer } from "effect/rpc"
@@ -14,7 +14,8 @@ RpcServer.layer(FormatOps, { concurrency: 1 }).pipe(
           Parse: ({ bytes, fileName }) =>
             fileName === "crash"
               ? Effect.sync(() => process.exit(1))
-              : Importers.parseFile(bytes, fileName).pipe(Effect.provideService(Importers.Importers, registry))
+              : Importers.parseFile(bytes, fileName).pipe(Effect.provideService(Importers.Importers, registry)),
+          Export: () => Effect.sync(() => process.exit(1))
         })
       )
     )

@@ -14,6 +14,10 @@ const AppConfigFromEnv = Config.all({
     Config.withDefault(2)
   ),
   dbAllowNetworkFs: Config.Boolean("DB_ALLOW_NETWORK_FS").pipe(Config.withDefault(false)),
+  /** Format workers (importer/Formats.ts): how many uploads are parsed, or exports written, at once. */
+  formatWorkers: Config.schema(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)), "FORMAT_WORKERS").pipe(
+    Config.withDefault(1)
+  ),
   /** Bundled workers in production (see Database.ts), source everywhere else. */
   dbWorkers: Config.Literals(["source", "bundle"], "DB_WORKERS").pipe(
     Config.withDefault(process.env.NODE_ENV === "production" ? ("bundle" as const) : ("source" as const))

@@ -6,23 +6,27 @@ import { Context, Effect, Layer, Schema } from "effect"
 import { RpcClient } from "effect/rpc"
 import { bundleEntry, defaultBundleDir, workerThreads } from "../db/Database.ts"
 import * as ReaderPool from "../db/readerPool.ts"
-import { FormatOps, type ParsedFile } from "./ops.ts"
+import { type ExportRefused, FormatOps, ownBuffer, type ParsedFile } from "./ops.ts"
 
 /** The format worker stopped (it crashed or ran out of memory) while it had the file. */
 export class FormatWorkerFailed extends Schema.TaggedError<FormatWorkerFailed>()("FormatWorkerFailed", {}) {}
+
+type ExportInput = Parameters<RpcClient.FromGroup<typeof FormatOps>["Export"]>[0]
 
 export class Formats extends Context.Service<
   Formats,
   {
     /** Parses a file in a worker. A buffer of its own is transferred, and unusable here afterwards. */
-    readonly parse: (bytes: Uint8Array<ArrayBuffer>, fileName: string) => Effect.Effect<ParsedFile, FormatWorkerFailed>
+    readonly parse: (bytes: Uint8Array, fileName: string) => Effect.Effect<ParsedFile, FormatWorkerFailed>
+    /** Writes a document as a file in a worker. Files' buffers of their own are transferred. */
+    readonly export: (input: ExportInput) => Effect.Effect<Uint8Array, ExportRefused | FormatWorkerFailed>
   }
 >()("rp/importer/Formats") {}
 
 interface FormatsOptions {
   /** The worker entry point: from source, or the `npm run build` bundle. */
   readonly workers: "source" | "bundle"
-  /** How many files are parsed at once. */
+  /** How many files are parsed or written at once. */
   readonly size: number
   readonly bundleDir?: string
   /** A test's own worker script. */
@@ -36,18 +40,8 @@ interface FormatsOptions {
  */
 const MAX_HEAP_MB = 512
 
-/**
- * The bytes with a buffer of their own, which can be transferred. A view into a larger
- * buffer, such as Node's shared pool behind small Buffers, is copied: the pool can't be
- * transferred, and other views would lose their data if it were.
- */
-const transferable = (bytes: Uint8Array<ArrayBuffer>) =>
-  bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength ? bytes : new Uint8Array(bytes)
-
 const failed = (error: unknown) =>
-  Effect.logError("a format worker failed while parsing a file", error).pipe(
-    Effect.andThen(Effect.fail(new FormatWorkerFailed()))
-  )
+  Effect.logError("a format worker failed", error).pipe(Effect.andThen(Effect.fail(new FormatWorkerFailed())))
 
 export const layer = (options: FormatsOptions) =>
   Layer.unwrap(
@@ -61,7 +55,15 @@ export const layer = (options: FormatsOptions) =>
         Effect.map(RpcClient.make(FormatOps), (client) =>
           Formats.of({
             parse: (bytes, fileName) =>
-              client.Parse({ bytes: transferable(bytes), fileName }).pipe(Effect.catchTag("RpcClientError", failed))
+              client.Parse({ bytes: ownBuffer(bytes), fileName }).pipe(Effect.catchTag("RpcClientError", failed)),
+            export: (input) =>
+              client
+                .Export({
+                  ...input,
+                  avatar: input.avatar && { ...input.avatar, bytes: ownBuffer(input.avatar.bytes) },
+                  assets: input.assets.map((asset) => ({ ...asset, bytes: ownBuffer(asset.bytes) }))
+                })
+                .pipe(Effect.catchTag("RpcClientError", failed))
           })
         )
       ).pipe(

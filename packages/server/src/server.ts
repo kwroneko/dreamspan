@@ -16,11 +16,14 @@ import {
 } from "effect/http"
 import { RpcSerialization, RpcServer } from "effect/rpc"
 import { makeAccountHandlers } from "./api/accounts.ts"
+import { makeLibraryHandlers } from "./api/library.ts"
 import { makeProviderHandlers } from "./api/providers.ts"
 import { Accounts, AuthenticationLive, PEER_HEADER, SESSION_COOKIE, SESSION_TTL_MS } from "./auth/Accounts.ts"
 import { AppConfig } from "./config.ts"
 import * as Database from "./db/Database.ts"
 import { EventLoopMonitor } from "./eventLoop.ts"
+import * as Formats from "./importer/Formats.ts"
+import * as ImportRoutes from "./importer/routes.ts"
 import {
   crossSiteProblem,
   exposurePolicy,
@@ -42,9 +45,11 @@ const Handlers = AppApi.toLayer(
     const eventLoop = yield* EventLoopMonitor
     const providers = yield* makeProviderHandlers
     const accounts = yield* makeAccountHandlers
+    const library = yield* makeLibraryHandlers
     return AppApi.of({
       ...providers,
       ...accounts,
+      ...library,
       Health: () =>
         eventLoop.sample.pipe(
           Effect.map(
@@ -319,12 +324,21 @@ const HttpServerLive = Layer.unwrap(
   })
 )
 
+/** Files into and out of the library, parsed and written in format workers (ARCHITECTURE.md §10). */
+const LibraryFileRoutes = ImportRoutes.layer.pipe(
+  Layer.provide(
+    Layer.unwrap(
+      Effect.map(AppConfig, (config) => Formats.layer({ workers: config.dbWorkers, size: config.formatWorkers }))
+    )
+  )
+)
+
 /**
  * The whole server, minus configuration. Tests provide their own AppConfig, with port 0,
  * and read the port the kernel picked from the HttpServer this exposes.
  */
 export const ServerLive = HttpRouter.serve(
-  Layer.mergeAll(RpcRoute, HealthRoute, AuthRoutes, StaticRoutes, InterruptedRequests, RequestGuard)
+  Layer.mergeAll(RpcRoute, HealthRoute, AuthRoutes, LibraryFileRoutes, StaticRoutes, InterruptedRequests, RequestGuard)
 ).pipe(
   Layer.provide(ProvidersLive),
   Layer.provideMerge(HttpServerLive),

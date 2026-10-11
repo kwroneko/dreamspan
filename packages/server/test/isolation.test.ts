@@ -4,6 +4,7 @@
 // the other's data and is refused or sees nothing, and the owner's data is unchanged
 // afterwards. Probes run both ways, so an admin doesn't get into a user's data either,
 // except for admin-only RPCs, where admins may.
+import { readFileSync } from "node:fs"
 import { assert, describe, it, layer } from "@effect/vitest"
 import { AppApi } from "@rp/shared/api.ts"
 import type { User } from "@rp/shared/domain.ts"
@@ -28,6 +29,8 @@ interface Party {
   readonly refId: RefId
   readonly requestId: LlmRequestId
   readonly password: string
+  /** The session cookie, for the HTTP routes. */
+  readonly cookie: string
 }
 
 class Parties extends Context.Service<Parties, { readonly alice: Party; readonly bob: Party }>()(
@@ -317,15 +320,67 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
           owner.requestId
         )
       })
+  },
+  ListLibrary: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        assert.include(
+          (yield* owner.api.ListLibrary({ kind: "preset" })).map((r) => r.id),
+          owner.refId
+        )
+        assert.notInclude(
+          (yield* actor.api.ListLibrary({ kind: "preset" })).map((r) => r.id),
+          owner.refId
+        )
+      })
   }
 }
 
 const config = testConfig()
 
+/** A request to an HTTP route as `party`, from this site. */
+const http = (party: Party, path: string, body: Uint8Array | string, contentType: string) =>
+  Effect.promise(() =>
+    fetch(`http://127.0.0.1:${config.port}${path}`, {
+      method: "POST",
+      headers: { cookie: party.cookie, "content-type": contentType },
+      body
+    })
+  )
+
+const presetFile = readFileSync(new URL("./fixtures/presets/default.json", import.meta.url))
+
+/** The HTTP routes that act on a user's data (ARCHITECTURE.md §10.4), probed the same way. */
+const routes: Record<string, Probe> = {
+  "POST /library/import": (actor, owner) =>
+    Effect.gen(function* () {
+      const into = yield* http(
+        actor,
+        `/library/import?name=p.json&into=${owner.refId}`,
+        presetFile,
+        "application/octet-stream"
+      )
+      assert.strictEqual(into.status, 404)
+      // A new import is the actor's own, and nothing of the owner's changes (run checks).
+      const own = yield* http(actor, "/library/import?name=p.json", presetFile, "application/octet-stream")
+      assert.strictEqual(own.status, 200)
+    }),
+  "POST /library/export": (actor, owner) =>
+    Effect.gen(function* () {
+      const response = yield* http(
+        actor,
+        "/library/export",
+        JSON.stringify({ refId: owner.refId, format: "st-preset" }),
+        "application/json"
+      )
+      assert.strictEqual(response.status, 404)
+    })
+}
+
 /** alice is the instance's admin, bob a user she created; each owns one of everything. */
 const seed = Effect.gen(function* () {
   const writer = yield* Writer
-  const party = (api: Api, user: User, password: string) =>
+  const party = (api: Api, user: User, password: string, cookie: string) =>
     Effect.gen(function* () {
       const credential = yield* api.CreateCredential({
         name: "Mine",
@@ -374,19 +429,22 @@ const seed = Effect.gen(function* () {
         credentialId: credential.id,
         modelId: model.id,
         refId: ref.id,
-        requestId
+        requestId,
+        cookie
       } satisfies Party
     })
 
   const local = yield* client()
   const aliceUser = yield* local.Whoami()
   yield* local.SetPassword({ userId: aliceUser.id, currentPassword: null, newPassword: "alice-password" })
-  const aliceApi = yield* client({ cookie: (yield* login(aliceUser.handle, "alice-password")).cookie })
+  const aliceCookie = (yield* login(aliceUser.handle, "alice-password")).cookie
+  const aliceApi = yield* client({ cookie: aliceCookie })
   yield* aliceApi.CreateUser({ handle: "bob", displayName: "Bob", role: "user", password: "bob-password" })
-  const bobApi = yield* client({ cookie: (yield* login("bob", "bob-password")).cookie })
+  const bobCookie = (yield* login("bob", "bob-password")).cookie
+  const bobApi = yield* client({ cookie: bobCookie })
   return {
-    alice: yield* party(aliceApi, aliceUser, "alice-password"),
-    bob: yield* party(bobApi, yield* bobApi.Whoami(), "bob-password")
+    alice: yield* party(aliceApi, aliceUser, "alice-password", aliceCookie),
+    bob: yield* party(bobApi, yield* bobApi.Whoami(), "bob-password", bobCookie)
   }
 })
 
@@ -404,6 +462,7 @@ const snapshot = (owner: Party) =>
     outcome(owner.api.ListModels({ connectionId: owner.connectionId, includeHidden: true }), JSON.stringify),
     outcome(owner.api.ListLlmRequests({ limit: 1000, before: null }), JSON.stringify),
     outcome(owner.api.ListUsers(), JSON.stringify),
+    outcome(owner.api.ListLibrary({ kind: "preset" }), JSON.stringify),
     outcome(owner.api.GetNetworkSettings(), JSON.stringify)
   ])
 
@@ -446,5 +505,21 @@ layer(Layer.effect(Parties, seed).pipe(Layer.provide(serverLayer(config))), {
         )
       )
     }
+  }
+  for (const [route, probe] of Object.entries(routes)) {
+    it.effect(`${route}: bob on alice's (an admin's)`, () =>
+      run(
+        probe,
+        (p) => p.bob,
+        (p) => p.alice
+      )
+    )
+    it.effect(`${route}: alice (an admin) on bob's`, () =>
+      run(
+        probe,
+        (p) => p.alice,
+        (p) => p.bob
+      )
+    )
   }
 })

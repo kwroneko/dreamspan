@@ -26,6 +26,7 @@ import {
   ProxyMode
 } from "./providers.ts"
 import { LlmRequest } from "./usage.ts"
+import { EntityKind, LibraryRef } from "./library.ts"
 
 export class Unauthorized extends Schema.TaggedError<Unauthorized>()("Unauthorized", {
   message: Schema.String
@@ -257,6 +258,14 @@ export class AppApi extends RpcGroup.make(
       before: Schema.NullOr(Schema.Struct({ startedAt: Schema.Number, id: Schema.String }))
     },
     success: Schema.Array(LlmRequest),
+    error: ServerError
+  }),
+  // --- Library import (ARCHITECTURE.md §10). Files go in and out over HTTP
+  // (POST /library/import, /library/export), since RPC messages are JSON.
+  /** The user's upstream refs and variants of one kind, by label. */
+  Rpc.make("ListLibrary", {
+    payload: { kind: EntityKind },
+    success: Schema.Array(LibraryRef),
     error: ServerError
   })
 ).middleware(Authentication) {}

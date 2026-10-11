@@ -1,6 +1,8 @@
-// Files in and out of the library (ARCHITECTURE.md §10): what importing a file did.
+// Files in and out of the library (ARCHITECTURE.md §10): what importing a file did, and
+// the formats a library document can be exported as.
 import { Schema } from "effect"
-import { LibraryRef, MergeOutcome, RefId } from "./library.ts"
+import { ImportReport } from "./importReport.ts"
+import { type EntityKind, LibraryRef, MergeOutcome, RefId } from "./library.ts"
 
 export class ImportedFollower extends Schema.Class<ImportedFollower>("ImportedFollower")({
   refId: RefId,
@@ -21,3 +23,27 @@ export class LibraryImport extends Schema.Class<LibraryImport>("LibraryImport")(
   /** The card's note made from ST's Character's Note, if the card has one. */
   note: Schema.NullOr(LibraryRef)
 }) {}
+
+/** The answer to one uploaded file. */
+export class ImportResult extends Schema.Class<ImportResult>("ImportResult")({
+  report: ImportReport,
+  /** Null when nothing was imported; the report says why. */
+  library: Schema.NullOr(LibraryImport)
+}) {}
+
+export const ExportFormat = Schema.Literals([
+  "card-v2-json",
+  "card-v3-json",
+  "card-png",
+  "card-charx",
+  "st-world-info",
+  "st-preset"
+])
+export type ExportFormat = typeof ExportFormat.Type
+
+/** The formats each kind exports to, the first being the usual one. */
+export const exportFormats: Partial<Record<EntityKind, ReadonlyArray<ExportFormat>>> = {
+  card: ["card-png", "card-v2-json", "card-v3-json", "card-charx"],
+  lorebook: ["st-world-info"],
+  preset: ["st-preset"]
+}

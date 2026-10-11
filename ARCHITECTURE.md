@@ -39,9 +39,10 @@ Bun was measured as an alternative (2026-10-10) and not adopted. On this server 
 
 ## 2. Server
 
-`packages/server/src/main.ts` reads configuration from the environment and launches `ServerLive` (`server.ts`). That's one HTTP server with three parts:
-- **`/rpc`:** the RPC endpoint (`AppApi` from `@rp/shared/api.ts`) over a WebSocket, JSON-serialized. Every UI action is meant to become an RPC in this group (DESIGN §7.7). Today it has `Health`, `Whoami`, the account RPCs (§4), and the provider-kind, connection, credential, model, network-settings and usage RPCs (§6).
+`packages/server/src/main.ts` reads configuration from the environment and launches `ServerLive` (`server.ts`). That's one HTTP server with these parts:
+- **`/rpc`:** the RPC endpoint (`AppApi` from `@rp/shared/api.ts`) over a WebSocket, JSON-serialized. Every UI action is meant to become an RPC in this group (DESIGN §7.7). Today it has `Health`, `Whoami`, the account RPCs (§4), the provider-kind, connection, credential, model, network-settings and usage RPCs (§6), and `ListLibrary` (§10).
 - **`/healthz`:** a plain-text liveness route, used by the Docker health check.
+- **`/auth/login`, `/auth/logout`** (§4) and **`/library/import`, `/library/export`** (§10.4): plain HTTP, for what a WebSocket message can't do well, a cookie and a file.
 - **Everything else:** the client build, served as a single-page app (unknown paths return `index.html`, so deep links work).
 
 **Configuration** (`config.ts`, environment variables):
@@ -49,10 +50,11 @@ Bun was measured as an alternative (2026-10-10) and not adopted. On this server 
 | Variable | Default | Meaning |
 |---|---|---|
 | `HOST`, `PORT` | `127.0.0.1`, `8080` | Listen address. `PORT=0` takes a free port, which the startup log names |
-| `DATA_DIR` | `./data` | Database, instance lock, later media |
+| `DATA_DIR` | `./data` | Database, instance lock, media files (§10.1) |
 | `DB_READERS` | `2` | Reader worker count, at least 1 (§3) |
+| `FORMAT_WORKERS` | `1` | Format worker count, at least 1: how many uploads are parsed, or exports written, at once (§10.3) |
 | `DB_ALLOW_NETWORK_FS` | `false` | Override the refusal of filesystems not known to be local (§3.4) |
-| `DB_WORKERS` | `bundle` in production, else `source` | Worker entry points (§3.6) |
+| `DB_WORKERS` | `bundle` in production, else `source` | Worker entry points, the format workers' too (§3.6) |
 | `AUTH_MODE` | `single` | `single` or `proxy` (§4) |
 | `AUTH_PROXY_HEADER` | `remote-user` | Identity header in proxy mode |
 | `ALLOWED_IPS` | unset | IPs and CIDR ranges besides loopback that may connect in single mode (§4) |
@@ -488,6 +490,8 @@ The provider layer's storage (spec/PROVIDERS.md §2, §3.1, §9.1), in migration
   - a probe, run both ways between an admin and a user over real sockets: one reads, changes or references the other's connection, credential, model, preset or ledger row, and is refused or sees nothing. Everything the owner can list (and, for an admin, the users and network settings) is the same afterwards.
   - an admin-only probe: a user is `Forbidden`
   - `global` (no user's data) or `createOnly` (names nothing that exists), with the reason
+
+  The HTTP routes that act on a user's data, `/library/import` and `/library/export`, have probes of the same kind, run the same way.
 - **Message headers are dropped** (`TransportHeadersOnly` in `server.ts`). Effect's RPC server appends the headers a client puts in each message after the upgrade request's, and the later entries win. Before this, any client could name any user in proxy mode by sending `remote-user` in a message. The serialization now empties message headers when decoding, so identity can only come from the upgrade request (`rpc.test.ts` checks this).
 - **`AUTH_MODE=single`, built-in login** (DESIGN §10.1):
   - **No account has a password:** loopback and `ALLOWED_IPS` are the implicit local admin `local`, without logging in. That's local use. It's checked on every call, not only when a connection opens: a socket opened from elsewhere while login was required doesn't become the local admin if the last password goes.
@@ -913,3 +917,24 @@ The parsers are synchronous and take up to about a second on a hostile file (§8
 - **Bundled** like the database workers (§3.6): `formats.mjs`, stamped with them, and refused when missing or stale.
 
 **Known limits:** a parse can't be interrupted. A parser bug that never returns would hold its worker for good, and every later import would queue behind it. Terminating a worker after a deadline needs the pool to kill threads, which it doesn't yet.
+
+### 10.4 Upload and export
+
+**Plain HTTP, not RPC** (`importer/routes.ts`). RPC messages are JSON, so a file would cross as base64: a third larger, one WebSocket message held whole, and decoded on the main thread before the format worker could have it. Over HTTP the body arrives as bytes, is capped as it streams, and goes to the worker as it is.
+
+**`POST /library/import?name=<file name>[&into=<upstream ref>]`**, the file as the body:
+- **Who:** the same resolution as an RPC (`Accounts.resolve` on the request's headers: the session cookie, proxy identity or local admin, §4); `401` without one. The cross-site guard of §4 runs first, as for every request.
+- **Only `Content-Type: application/octet-stream`** (`415` otherwise): a cross-site form can't send it, and a cross-site `fetch` with it needs a preflight the server never answers. That's on top of the `Origin` check.
+- **Size:** at most 64 MiB, the parsers' own file cap (§8). A larger `Content-Length` is `413` before anything is read. Without one, or when it lies, reading stops as the body passes the cap and the connection is cut. Uploads wait for a permit before their body is read, two per format worker, so the server holds at most that many bodies; the rest wait in their sockets, where TCP holds the sender back.
+- **The name** is used as the label fallback and the source path, without folders or control characters, at most 255 characters. The format never comes from it (§10.2).
+- **Then:** the format worker parses the file (§10.3), its media are written to disk, and `ImportFile` stores it (§10.1).
+- **The answer** is `ImportResult` (`@rp/shared/libraryImport.ts`) as JSON: the report, and what the file became, or `library: null` with the report saying why. `into` naming another user's ref, or none, is `404`; a variant or another kind `409`; a worker that died while it had the file `500`, with a sentence saying so.
+
+**`POST /library/export`**, JSON `{refId, format}` (at most 4 KiB, `application/json` only): the ref's head as a file.
+- **Formats** (`exportFormats`): a card as `card-png`, `card-v2-json`, `card-v3-json` or `card-charx`; a lorebook as `st-world-info`; a preset as `st-preset`. Another kind's format is `400`, another user's ref `404`.
+- **Written in a format worker** like a parse, since a large lorebook takes as long to write (`importer/exporters.ts`). The document is decoded against its kind's schema first; one that no longer matches (an edit made it invalid) is `422` with a sentence.
+- **The card's note goes back** as ST's `depth_prompt`, unless the note is private.
+- **Files:** the avatar and assets the user holds (§10.1), read from disk by the paths `mediaPath` makes and no other. A card whose avatar isn't a PNG goes into a 1×1 placeholder PNG, since a PNG card needs an image.
+- **The response** has the file's type, `Content-Disposition: attachment` with the label as the name (an ASCII fallback, and the real name percent-encoded), `nosniff` and `no-store`.
+
+**Tests** (`test/libraryImport.test.ts`, a real server with its workers): a card PNG's rows, revision, source hash, stored avatar and note; every card format out and back in, with the Character's Note restored; CHARX assets stored and exported; lorebooks and presets; a re-import merging into a variant the user edited; unrecognized and broken files storing nothing; the content type, `Origin`, declared and streamed size checks; `401` without a session. The streamed cap's test fails with the cap raised; the cross-user probes fail with the ownership checks removed.

@@ -4,7 +4,8 @@ import { NodeRuntime, NodeWorkerRunner } from "@effect/platform-node"
 import { Effect, Layer } from "effect"
 import { RpcServer } from "effect/rpc"
 import * as Importers from "./importers.ts"
-import { FormatOps } from "./ops.ts"
+import { exportFile } from "./exporters.ts"
+import { FormatOps, ownBuffer } from "./ops.ts"
 
 RpcServer.layer(FormatOps, { concurrency: 1 }).pipe(
   Layer.provide(
@@ -12,7 +13,8 @@ RpcServer.layer(FormatOps, { concurrency: 1 }).pipe(
       Effect.map(Importers.Importers, (registry) =>
         FormatOps.of({
           Parse: ({ bytes, fileName }) =>
-            Importers.parseFile(bytes, fileName).pipe(Effect.provideService(Importers.Importers, registry))
+            Importers.parseFile(bytes, fileName).pipe(Effect.provideService(Importers.Importers, registry)),
+          Export: (input) => Effect.map(exportFile(input), ownBuffer)
         })
       )
     )
