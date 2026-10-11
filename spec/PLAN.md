@@ -72,7 +72,7 @@
 - Workshop chat kind, with its template, permissions and capability strip.
 - Meta tools: create, edit and clone cards; settings; chat setup. Agentic chat editing through changesets.
 - The out-of-character side channel docked in RP chats.
-- Plugin system ([PLUGINS.md](PLUGINS.md)): registries the core itself uses, overrides, a GitHub-repo registry. Plugins written by the agent itself, activated only by the user.
+- Plugin system ([PLUGINS.md](PLUGINS.md)): registries the core itself uses, overrides, plugins as git repositories, a GitHub-repo registry, consent prompts for enabling and applying. Plugins written by the agent itself.
 
 ## Phase 7: Advanced RP and release readiness
 - Parallel threads, sending to several threads, merges.
