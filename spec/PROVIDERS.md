@@ -222,7 +222,7 @@ So nobody has to work out from the settings where traffic goes; they're told.
 
 ### 6.3 What this replaces
 
-The earlier proposal refused private addresses for non-admin users. It's withdrawn: it breaks local models by default, and the owner's priority is data isolation, not network policy. **[O]** Whether an admin can force the instance proxy on everyone (no per-connection `direct` for non-admins) is left for the shared-connections work.
+The earlier proposal refused private addresses for non-admin users. It's withdrawn: it breaks local models by default, and the owner's priority is data isolation, not network policy. **[D]** An admin can force the instance proxy on everyone: no per-connection `direct` for non-admins. Going direct sends requests from the admin's machine and IP (owner, 2026-10-11).
 
 ---
 
@@ -406,4 +406,4 @@ Not built until needed:
 ## 14. Open questions
 
 1. ~~**Exposure rules (§6.1)**~~: decided (owner, 2026-10-11; DESIGN §11) and built (ARCHITECTURE.md §4).
-2. **Forcing the proxy (§6.3):** whether an admin can stop non-admins from setting a connection to `direct`. Deferred to shared connections.
+2. ~~**Forcing the proxy (§6.3)**~~: decided, an admin can (owner, 2026-10-11).
