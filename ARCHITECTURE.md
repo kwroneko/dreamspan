@@ -826,7 +826,7 @@ ST chat-completion presets (DESIGN §1.2). Pure functions with no database acces
 - **Depth:** 32 macros inside one another (arguments, blocks, `{{if}}` branches, card fields). The parser enforces it too, so deep nesting can't overflow the stack.
 - **Expansions:** 10,000 macros evaluated.
 - **Work:** 4,000,000 units, about one per character produced by a macro, written to a variable or parsed, and per die rolled. This bounds the output, and stops values that double. Pairing blocks costs 10 per macro, because each level pairs its block's content again (as ST does), so deeply nested blocks would otherwise cost depth × size.
-- Handlers count large output before building it (`{{space::N}}`, `{{newline::N}}`, dice, array padding in `{{setvarkey}}`).
+- Handlers count large output before building it (`{{space::N}}`, `{{newline::N}}`, dice, and `{{datetimeformat}}` at 13 characters per format character, its most).
 - **Reaching a limit fails the whole text** with `LimitExceeded`: nothing partial comes back.
 - **Linear time:** no regex that backtracks (ST's `{{trim}}` regex, quadratic on runs of newlines, is a scan here); recovery after a name uses a precomputed table; pairing blocks searches square-root blocks of running sums, so many unclosed openers can't make it quadratic.
 - **No code evaluation:** nothing calls `eval`, `Function` or a dynamic import, and a test scans the sources for them.

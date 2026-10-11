@@ -82,6 +82,9 @@ describe("work and output size", () => {
     expect(limit("{{newline::99999999999}}")).toBe("work")
     expect(limit("{{roll::100000000d6}}")).toBe("work")
     expect(expanded(request("{{space::5}}{{roll::1000d6}}")).text).toMatch(/^ {5}\d+$/)
+    // "L" becomes ten characters: counted before formatting, not after.
+    expect(limit(`{{datetimeformat::${"L".repeat(300_000)}}}`)).toBe("work")
+    expect(expanded(request("{{datetimeformat::YYYY-MM-DD x}}")).text).toBe("1970-01-01 0")
   })
 
   it("counts what's written to variables", () => {

@@ -182,6 +182,9 @@ const expandLong = (format: string) => {
   return out
 }
 
+/** The most characters one format character can become: "x" is a 13-digit timestamp. */
+export const MAX_FORMAT_GROWTH = 13
+
 /** moment().format(format) in the "en" locale. */
 export const formatMoment = (t: WallTime, format: string): string => {
   const date = new Date(t.wall)

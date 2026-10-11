@@ -2,7 +2,7 @@
 // time-macros.js at 06bde939), over the messages and clock in the context.
 import type { ChatMessage } from "../context.ts"
 import type { MacroCall, MacroSpec } from "../registry.ts"
-import { atOffset, formatMoment, humanize, inZone, parseMoment } from "../time.ts"
+import { atOffset, formatMoment, humanize, inZone, MAX_FORMAT_GROWTH, parseMoment } from "../time.ts"
 
 /** The last message passing the filter. Each message looked at costs work. */
 const lastIndex = (call: MacroCall, filter?: (message: ChatMessage) => boolean) => {
@@ -79,7 +79,15 @@ export const chatMacros: ReadonlyArray<MacroSpec> = [
   { name: "weekday", volatile: true, handler: (call) => now(call, "dddd") },
   { name: "isotime", volatile: true, handler: (call) => now(call, "HH:mm") },
   { name: "isodate", volatile: true, handler: (call) => now(call, "YYYY-MM-DD") },
-  { name: "datetimeformat", args: [{ name: "format" }], volatile: true, handler: (call) => now(call, call.args[0]!) },
+  {
+    name: "datetimeformat",
+    args: [{ name: "format" }],
+    volatile: true,
+    handler: (call) => {
+      call.charge(call.args[0]!.length * MAX_FORMAT_GROWTH)
+      return now(call, call.args[0]!)
+    }
+  },
   { name: "idleDuration", aliases: ["idle_duration"], volatile: true, handler: idleDuration },
   {
     name: "timeDiff",
