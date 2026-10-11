@@ -215,17 +215,29 @@ export const makeDraftStore = (
    */
   const retain = (draft: DraftRow, content: string) =>
     Effect.gen(function* () {
-      const sizes = yield* sql<{ seq: number; n: number }>`
-        SELECT seq, length(removed) + length(inserted) AS n FROM draft_history WHERE draft_id = ${draft.id} ORDER BY seq DESC`
+      const sizes = yield* sql<{ seq: number; removed: number; inserted: number }>`
+        SELECT seq, length(removed) AS removed, length(inserted) AS inserted
+        FROM draft_history WHERE draft_id = ${draft.id} ORDER BY seq DESC`
       let total = 0
       const cut = sizes.findIndex((row, index) => {
-        total += row.n
+        total += row.removed + row.inserted
         return index >= DraftHistoryPolicy.maxEntries || (index > 0 && total > DraftHistoryPolicy.maxHistoryChars)
       })
       if (cut < 0) return
       const cutSeq = sizes[cut]!.seq
-      const lost = beforeDestructive(content, yield* entries(draft.id), (seq) => seq <= cutSeq)
-      yield* recover(draft.user_id, toDraft(draft).key, lost, "commit")
+      // The text is only loaded if a dropped entry may be destructive. SQLite counts code
+      // points, so a UTF-16 length is between one and two times the count. Starting from a
+      // lower bound on the text's length and doubling what was removed can only flag
+      // more entries than isDestructive would, never fewer.
+      let before = content.length / 2
+      const mayLoseText = sizes.some((row, index) => {
+        before = before - row.inserted + row.removed
+        return index >= cut && (2 * row.removed > 200 || 2 * row.removed > before / 2)
+      })
+      if (mayLoseText) {
+        const lost = beforeDestructive(content, yield* entries(draft.id), (seq) => seq <= cutSeq)
+        yield* recover(draft.user_id, toDraft(draft).key, lost, "commit")
+      }
       yield* sql`DELETE FROM draft_history WHERE draft_id = ${draft.id} AND seq <= ${cutSeq}`
     })
 

@@ -388,6 +388,51 @@ describe("recycle bin", () => {
     }
   )
 
+  it.live("eviction never takes the item just deleted, and takes nothing if it can't make room", () => {
+    const dir = mkdtempSync(join(tmpdir(), "rp-bin-"))
+    return Effect.gen(function* () {
+      const { writer, userId, root, a, b, c, bin } = yield* setup()
+      const excerpts = () => bin().pipe(Effect.map((items) => items.map((i) => i.excerpt)))
+      const sqlite = (statement: string) => {
+        const db = new DatabaseSync(databaseFile(dir))
+        db.exec(statement)
+        db.close()
+      }
+      yield* writer.DeleteMessage({ userId, slotId: b.slotId })
+      sqlite(`CREATE TRIGGER b_stuck BEFORE UPDATE OF purged_at ON slots WHEN OLD.id = '${b.slotId}'
+              BEGIN SELECT RAISE(ABORT, 'injected'); END`)
+      // b can't go, and the new item stays: the bin is left over its one-item limit.
+      yield* writer.DeleteMessage({ userId, slotId: a.slotId })
+      assert.deepStrictEqual(yield* excerpts(), ["a", "b"])
+      // Taking a would still leave b and c, so nothing goes.
+      yield* writer.DeleteMessage({ userId, slotId: c.slotId })
+      assert.deepStrictEqual(yield* excerpts(), ["c", "a", "b"])
+      // Once b can go, the next delete evicts oldest first down to the limit.
+      sqlite(`DROP TRIGGER b_stuck`)
+      yield* writer.DeleteMessage({ userId, slotId: root.slotId })
+      assert.deepStrictEqual(yield* excerpts(), ["root"])
+    }).pipe(
+      Effect.provide(database(dir, { deletedItems: 1, deletedBytes: 1e9, recoveredTexts: 10, recoveredBytes: 1e9 }))
+    )
+  })
+
+  it.live("an item over the byte limit on its own is kept, and evicts nothing", () =>
+    Effect.gen(function* () {
+      const { writer, userId, a, c, append, bin } = yield* setup()
+      yield* writer.DeleteMessage({ userId, slotId: a.slotId })
+      const long = yield* append(c.slotId, "A message longer than the limit.")
+      yield* writer.DeleteMessage({ userId, slotId: long.slotId })
+      assert.deepStrictEqual(
+        (yield* bin()).map((i) => i.excerpt),
+        ["A message longer than the limit.", "a"]
+      )
+    }).pipe(
+      Effect.provide(
+        database(undefined, { deletedItems: 10, deletedBytes: 3, recoveredTexts: 10, recoveredBytes: 1e9 })
+      )
+    )
+  )
+
   it.live("sizes count bytes of everything a purge frees, and nothing already in the bin twice", () =>
     Effect.gen(function* () {
       const { writer, userId, chat, card, a, b } = yield* setup()
@@ -411,9 +456,39 @@ describe("recycle bin", () => {
       // Each later item leaves out what's already in the bin under an earlier one.
       assert.strictEqual((yield* writer.DeleteMessage({ userId, slotId: b.slotId })).byteSize, 1) // "b"
       assert.strictEqual((yield* writer.DeleteBranch({ userId, slotId: a.slotId })).byteSize, 2) // "a", "c"
-      assert.strictEqual((yield* writer.DeleteChat({ userId, chatId: chat.id })).byteSize, 4) // "root"
+      // "root", and the state event that made the card a participant
+      const joined = JSON.stringify({ entity: card.entityId }).length
+      assert.strictEqual((yield* writer.DeleteChat({ userId, chatId: chat.id })).byteSize, 4 + joined)
     }).pipe(Effect.provide(database()))
   )
+
+  it.live("a chat's size counts its agent runs and state, and an entity's its search text", () => {
+    const dir = mkdtempSync(join(tmpdir(), "rp-bin-"))
+    return Effect.gen(function* () {
+      const { writer, userId, card, newChat } = yield* setup()
+      const story = yield* newChat("Story") // no messages
+      const db = new DatabaseSync(databaseFile(dir))
+      db.prepare(
+        `INSERT INTO rollouts (id, chat_id, kind, status, role, request_class, error, created_at, updated_at)
+         VALUES ('r1', ?, 'generation', 'failed', 'narrator', 'interactive', 'oops', 0, 0)`
+      ).run(story.id)
+      db.exec(`INSERT INTO rollout_payloads VALUES ('r1', '{"a":1}', '["猫"]')`)
+      db.prepare(
+        `INSERT INTO state_events (id, chat_id, seq, key, value_json, origin, created_at)
+         VALUES ('e1', ?, 1, 'var.set', '"雨"', 'user', 0)`
+      ).run(story.id)
+      const [entityBytes] = db
+        .prepare(
+          `SELECT sum(length(CAST(doc_json AS BLOB)) + length(CAST(search_text AS BLOB))) AS n
+           FROM entity_revisions WHERE entity_id = ?`
+        )
+        .all(card.entityId)
+      db.close()
+      // "oops", {"a":1}, ["猫"] and "雨"
+      assert.strictEqual((yield* writer.DeleteChat({ userId, chatId: story.id })).byteSize, 4 + 7 + 7 + 5)
+      assert.strictEqual((yield* writer.DeleteEntity({ userId, entityId: card.entityId })).byteSize, entityBytes!.n)
+    }).pipe(Effect.provide(database(dir)))
+  })
 
   it.live("pages through items deleted in the same millisecond without skipping any", () => {
     const dir = mkdtempSync(join(tmpdir(), "rp-bin-"))

@@ -14,7 +14,7 @@ export const makeBinWriteHandlers = (bin: Bin) =>
     const deleting = <E, R>(operation: string, userId: UserId, del: Effect.Effect<string, E, R>) =>
       Effect.gen(function* () {
         const itemId = yield* del
-        yield* bin.evictDeleted(userId)
+        yield* bin.evictDeleted(userId, itemId)
         return toBinItem(yield* bin.loadItem(userId, itemId))
       }).pipe(transaction(sql, operation))
 

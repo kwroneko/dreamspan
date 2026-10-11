@@ -352,8 +352,8 @@ Deleting is deliberate and fundamentally non-destructive (DESIGN §6.2): deletes
 - Purging is set-based: `EmptyBin` runs the same few statements whatever the bin holds.
 
 **Two independent sections**, each evicting its own oldest entries past its own limits, never the other's:
-- **Deleted items** (`ListBin`): 10,000 items or 2 GB by default. Eviction deletes the oldest for good, each in a savepoint: a purge that fails is rolled back, logged and skipped, so it never fails the delete that triggered it.
-- Sizes are UTF-8 bytes. A deleted item's is what deleting it for good frees: its versions' text columns, amend history and attachment alt text, or an entity's revisions. Messages and swipes already in the bin count only under their own items.
+- **Deleted items** (`ListBin`): 10,000 items or 2 GB by default. Eviction deletes the oldest for good, never the item the delete just made, each in a savepoint: a purge that fails is rolled back, logged and skipped, so it never fails the delete that triggered it. If what can go can't make room, nothing goes and the bin stays over its limits (DESIGN §6.2, proposed).
+- Sizes are UTF-8 bytes. A deleted item's is what deleting it for good frees: its versions' text columns, amend history and attachment alt text; for a chat also its rollouts and their payloads, summaries, state events and changesets; for an entity its revisions and their search text. Messages and swipes already in the bin count only under their own items.
 - **Recovered text** (`ListRecoveredTexts`, `GetRecoveredText`, `DeleteRecoveredText`, `ClearRecoveredTexts`): 2,000 texts or 200 MB by default. It's produced passively by draft commits, discards and history retention (§3.10), so it never shows a toast.
 - Each entry records where it came from: a title, an excerpt and origin details for deleted items, a source label like `Composer in "Harbor"` for recovered text. So text can be copied out without restoring.
 - Both lists page newest first, with a cursor of the last entry's time and id, so entries from the same millisecond are never skipped.

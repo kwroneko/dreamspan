@@ -6,7 +6,7 @@ import { BinItem, type BinLimits, RecoveredText } from "@rp/shared/bin.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { composerKey, type DraftKey, excerpt } from "@rp/shared/drafts.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
-import { Effect } from "effect"
+import { Data, Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import { makeDraftStore } from "./drafts.ts"
 import { NotFound } from "./ops.ts"
@@ -59,6 +59,9 @@ export const toRecoveredText = (row: RecoveredRow, full: boolean) =>
     createdAt: row.created_at
   })
 
+/** Eviction can't bring the bin within its limits. */
+class NoRoom extends Data.TaggedError("NoRoom") {}
+
 const chatName = (title: string | null | undefined) => (title ? `"${title}"` : "an untitled chat")
 
 const bytes = (column: string) => `coalesce(length(CAST(${column} AS BLOB)), 0)`
@@ -72,6 +75,19 @@ const versionBytes = (v: string) =>
     `(SELECT coalesce(sum(${bytes("h.content")}), 0) FROM version_history h WHERE h.version_id = ${v}.id)`,
     `(SELECT coalesce(sum(${bytes("a.alt_text")}), 0) FROM version_attachments a WHERE a.version_id = ${v}.id)`
   ].join(" + ")
+
+/** What deleting a chat for good frees besides its versions, each part selected by chat id. */
+const chatRecordBytes = [
+  `SELECT ${bytes("value_json")} AS n FROM state_events WHERE chat_id = ?`,
+  `SELECT ${bytes("error")} + ${bytes("cache_observed_json")} FROM rollouts WHERE chat_id = ?`,
+  `SELECT ${bytes("p.context_snapshot_json")} + ${bytes("p.transcript_json")}
+   FROM rollout_payloads p JOIN rollouts r ON r.id = p.rollout_id WHERE r.chat_id = ?`,
+  `SELECT ${bytes("b.messages_json")} FROM rollout_branches b JOIN rollouts r ON r.id = b.rollout_id WHERE r.chat_id = ?`,
+  `SELECT ${bytes("v.content")} FROM summary_revisions v JOIN summaries s ON s.id = v.summary_id WHERE s.chat_id = ?`,
+  `SELECT ${bytes("best_effort_draft")} + ${bytes("error")} FROM summarization_jobs WHERE chat_id = ?`,
+  `SELECT ${bytes("i.before_json")} + ${bytes("i.after_json")}
+   FROM changeset_items i JOIN changesets c ON c.id = i.changeset_id WHERE c.chat_id = ?`
+]
 
 export const makeBin = (sql: SqlClient.SqlClient, limits: BinLimits) => {
   const insertItem = (item: {
@@ -270,6 +286,10 @@ export const makeBin = (sql: SqlClient.SqlClient, limits: BinLimits) => {
           (SELECT v2.content FROM chats c2 JOIN slots s2 ON s2.id = c2.active_leaf_slot_id
              JOIN versions v2 ON v2.id = s2.selected_version_id WHERE c2.id = ${chatId}) AS last
         FROM slots s JOIN versions v ON v.slot_id = s.id WHERE s.chat_id = ${chatId}`
+      const [records] = yield* sql.unsafe<{ n: number }>(
+        `SELECT coalesce(sum(n), 0) AS n FROM (${chatRecordBytes.join(" UNION ALL ")})`,
+        chatRecordBytes.map(() => chatId)
+      )
       const itemId = yield* insertItem({
         userId,
         kind: "chat",
@@ -278,7 +298,7 @@ export const makeBin = (sql: SqlClient.SqlClient, limits: BinLimits) => {
         title: chat.title || "Untitled chat",
         excerpt: stats?.last ?? "",
         origin: { chatId, messages: stats?.messages ?? 0 },
-        byteSize: stats?.bytes ?? 0
+        byteSize: (stats?.bytes ?? 0) + records!.n
       })
       yield* sql`UPDATE chats SET deleted_at = ${Date.now()}, bin_item_id = ${itemId} WHERE id = ${chatId}`
       return itemId
@@ -289,7 +309,7 @@ export const makeBin = (sql: SqlClient.SqlClient, limits: BinLimits) => {
       const [entity] = yield* sql<{ id: string; kind: string; label: string | null; bytes: number }>`
         SELECT e.id, e.kind,
           (SELECT label FROM entity_refs WHERE entity_id = e.id AND ref_kind = 'upstream' LIMIT 1) AS label,
-          (SELECT coalesce(sum(${sql.literal(bytes("doc_json"))}), 0) FROM entity_revisions WHERE entity_id = e.id) AS bytes
+          (SELECT coalesce(sum(${sql.literal(`${bytes("doc_json")} + ${bytes("search_text")}`)}), 0) FROM entity_revisions WHERE entity_id = e.id) AS bytes
         FROM entities e WHERE e.id = ${entityId} AND e.owner_user_id = ${userId} AND e.deleted_at IS NULL`
       if (!entity) return yield* new NotFound({ entity: "entity", id: entityId })
       const itemId = yield* insertItem({
@@ -416,30 +436,44 @@ export const makeBin = (sql: SqlClient.SqlClient, limits: BinLimits) => {
     })
 
   /**
-   * Keeps the deleted-items section within its limits, deleting the oldest for good. Each
-   * purge runs in a savepoint: one that fails is rolled back, logged and skipped, so it
-   * never fails the delete that made room for it.
+   * Keeps the deleted-items section within its limits by deleting the oldest items for
+   * good, never `created`, the item the delete just made. Each purge runs in its own
+   * savepoint: one that fails is rolled back, logged and skipped. If the items that can
+   * go can't make room, nothing goes: the bin stays over its limits rather than losing
+   * everything else to one delete, and later deletes or emptying it bring it back.
    */
-  const evictDeleted = (userId: UserId) =>
+  const evictDeleted = (userId: UserId, created: string) =>
     Effect.gen(function* () {
-      let after = { deleted_at: -1, id: "" }
-      for (;;) {
-        const [usage] = yield* sql<{ n: number; bytes: number }>`
-          SELECT count(*) AS n, coalesce(sum(byte_size), 0) AS bytes FROM bin_items WHERE user_id = ${userId}`
-        if (usage!.n <= limits.deletedItems && usage!.bytes <= limits.deletedBytes) return
-        const [oldest] = yield* sql<BinRow>`
-          SELECT * FROM bin_items WHERE user_id = ${userId} AND (deleted_at, id) > (${after.deleted_at}, ${after.id})
-          ORDER BY deleted_at, id LIMIT 1`
-        if (!oldest) return
-        after = oldest
-        yield* sql
-          .withTransaction(purgeWhere("id = ?", [oldest.id]))
-          .pipe(
-            Effect.catch((error) =>
-              Effect.logWarning(`bin eviction skipped ${oldest.kind} item ${oldest.id}`, error.reason.cause)
-            )
-          )
-      }
+      const fits = sql<{ n: number; bytes: number }>`
+        SELECT count(*) AS n, coalesce(sum(byte_size), 0) AS bytes FROM bin_items WHERE user_id = ${userId}`.pipe(
+        Effect.map(([usage]) => usage!.n <= limits.deletedItems && usage!.bytes <= limits.deletedBytes)
+      )
+      if (yield* fits) return
+      const [newest] = yield* sql<{ byte_size: number }>`SELECT byte_size FROM bin_items WHERE id = ${created}`
+      // Not even evicting everything else would make room.
+      if (limits.deletedItems < 1 || newest!.byte_size > limits.deletedBytes) return
+      yield* sql
+        .withTransaction(
+          Effect.gen(function* () {
+            let after = { deleted_at: -1, id: "" }
+            while (!(yield* fits)) {
+              const [oldest] = yield* sql<BinRow>`
+                SELECT * FROM bin_items
+                WHERE user_id = ${userId} AND id <> ${created} AND (deleted_at, id) > (${after.deleted_at}, ${after.id})
+                ORDER BY deleted_at, id LIMIT 1`
+              if (!oldest) return yield* new NoRoom()
+              after = oldest
+              yield* sql
+                .withTransaction(purgeWhere("id = ?", [oldest.id]))
+                .pipe(
+                  Effect.catch((error) =>
+                    Effect.logWarning(`bin eviction skipped ${oldest.kind} item ${oldest.id}`, error.reason.cause)
+                  )
+                )
+            }
+          })
+        )
+        .pipe(Effect.catchTag("NoRoom", () => Effect.logWarning(`bin over capacity for ${userId}: nothing can go`)))
     })
 
   // --- Recovered text ------------------------------------------------------------------

@@ -267,6 +267,7 @@ These are strategies for mapping history to user and assistant roles:
   - **[D]** Messages, swipes and branches are restored in place: deleting marks them, so restoring puts them back exactly where they were, with their versions. The bin entry also records where an item came from and a preview, so its text can be copied out instead.
   - **[D]** Permanently deleting a chat or an entity removes it. Permanently deleting a message or branch erases its content but keeps an empty placeholder, so the conversation's structure and any summaries over it stay valid.
   - **[D]** Default capacities: 10,000 deleted items or 2 GB; 2,000 recovered texts or 200 MB. Large enough that most users never reach them; configurable. (These three confirmed by the owner, 2026-10-10.)
+  - **[P]** Eviction never deletes the item a delete just made. If deleting everything else that can go still wouldn't bring the section within its limits (one item bigger than the whole section, or old items that fail to delete), nothing is evicted: the delete goes through and the bin stays over capacity rather than one delete emptying it. Later deletes or emptying the bin bring it back within its limits.
 - **[D]** **The composer belongs to a branch** (owner, 2026-10-10):
   - Each chat, and each branch within it, has its own composer.
   - A half-typed message waits where it was left, even months later, while other chats and branches show their own.
