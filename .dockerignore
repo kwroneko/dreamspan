@@ -1,6 +1,12 @@
 **/node_modules
 **/dist
-data
+**/data
+**/*.db*
+**/secret.key
+**/instance.lock
+**/.env
+**/.env.*
+**/coverage
+.claude
 spikes
 .git
-*.db*

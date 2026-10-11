@@ -18,7 +18,7 @@ Phase 0 (foundations). The scaffold runs: a typed RPC server over WebSocket, SQL
 
 ```bash
 npm install
-npm run build        # the client
+npm run build        # the client and the database worker bundles
 npm start            # http://127.0.0.1:8080, data in ./data
 npm run check        # typecheck, lint, format, tests
 ```

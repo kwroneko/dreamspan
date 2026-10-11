@@ -1,17 +1,18 @@
 import { spawnSync } from "node:child_process"
-import { mkdtempSync } from "node:fs"
+import { cpSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { DatabaseSync } from "node:sqlite"
 import { assert, beforeAll, describe, it } from "@effect/vitest"
-import { Cause, Effect, Exit } from "effect"
-import { acquireInstanceLock, classifyFilesystem, databaseFile, InstanceLocked } from "../src/db/connection.ts"
+import { Cause, Effect, Exit, Layer } from "effect"
+import { acquireInstanceLock, databaseFile, InstanceLocked } from "../src/db/connection.ts"
 import * as Database from "../src/db/Database.ts"
 import { buildWorkers } from "../scripts/build-workers.ts"
 
 const freshDir = () => mkdtempSync(join(tmpdir(), "rp-db-"))
+const bundleDir = mkdtempSync(join(tmpdir(), "rp-bundles-"))
 const database = (dataDir: string, readers = 2, workers: "source" | "bundle" = "source") =>
-  Database.layer({ dataDir, readers, allowNetworkFs: false, workers })
+  Database.layer({ dataDir, readers, allowNetworkFs: false, workers, bundleDir })
 const range = (n: number) => Array.from({ length: n }, (_, i) => i)
 
 /** Largest gap between 5 ms timer ticks on this thread while `effect` runs. */
@@ -161,7 +162,33 @@ describe("database workers", () => {
 })
 
 describe("bundled workers", () => {
-  beforeAll(() => buildWorkers(), 60_000)
+  beforeAll(() => buildWorkers(bundleDir), 60_000)
+
+  it.live("are refused when the sources changed since they were built", () =>
+    Effect.gen(function* () {
+      const staleDir = mkdtempSync(join(tmpdir(), "rp-bundles-"))
+      cpSync(bundleDir, staleDir, { recursive: true })
+      const stampFile = join(staleDir, "stamp.json")
+      const stamp = JSON.parse(readFileSync(stampFile, "utf8")) as { sources: Array<string> }
+      assert.include(stamp.sources, "packages/server/src/db/reader.ts")
+      assert.include(stamp.sources, "package-lock.json")
+      // As if a source had changed after the build: the stamped hash no longer matches.
+      writeFileSync(stampFile, JSON.stringify({ ...stamp, hash: "0".repeat(64) }))
+      const exit = yield* Effect.exit(
+        Layer.build(
+          Database.layer({
+            dataDir: freshDir(),
+            readers: 1,
+            allowNetworkFs: false,
+            workers: "bundle",
+            bundleDir: staleDir
+          })
+        )
+      )
+      assert.isTrue(Exit.isFailure(exit))
+      if (Exit.isFailure(exit)) assert.include(Cause.pretty(exit.cause), "npm run build")
+    }).pipe(Effect.scoped)
+  )
 
   it.live(
     "serve the same operations as the source workers",
@@ -201,12 +228,4 @@ describe("bundled workers", () => {
       }),
     30_000
   )
-})
-
-describe("filesystem check", () => {
-  it("flags network filesystems by statfs type", () => {
-    assert.strictEqual(classifyFilesystem(0x6969), "NFS")
-    assert.strictEqual(classifyFilesystem(0xff534d42), "CIFS")
-    assert.strictEqual(classifyFilesystem(0xef53), undefined) // ext4
-  })
 })

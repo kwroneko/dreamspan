@@ -7,7 +7,9 @@ const AppConfigFromEnv = Config.all({
   host: Config.String("HOST").pipe(Config.withDefault("127.0.0.1")),
   port: Config.Port("PORT").pipe(Config.withDefault(8080)),
   dataDir: Config.String("DATA_DIR").pipe(Config.withDefault("./data")),
-  dbReaders: Config.Int("DB_READERS").pipe(Config.withDefault(2)),
+  dbReaders: Config.schema(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)), "DB_READERS").pipe(
+    Config.withDefault(2)
+  ),
   dbAllowNetworkFs: Config.Boolean("DB_ALLOW_NETWORK_FS").pipe(Config.withDefault(false)),
   /** Bundled workers in production (see Database.ts), source everywhere else. */
   dbWorkers: Config.Literals(["source", "bundle"], "DB_WORKERS").pipe(

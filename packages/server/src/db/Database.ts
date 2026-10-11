@@ -1,8 +1,7 @@
-// Main-thread access to the database. SQLite never runs on the main thread: one writer
-// worker holds the only read-write connection, and a pool of reader workers hold
-// read-only connections. See ARCHITECTURE.md "Database" for why this rules out
-// SQLITE_BUSY and keeps queries from blocking the event loop.
+// Main-thread access to the database workers. ARCHITECTURE.md §3.1 and §3.6.
 import { existsSync, mkdirSync } from "node:fs"
+import { join } from "node:path"
+import { fileURLToPath, pathToFileURL } from "node:url"
 import { Worker } from "node:worker_threads"
 import { NodeWorker } from "@effect/platform-node"
 import { Context, Effect, Layer, Schema } from "effect"
@@ -10,6 +9,8 @@ import { RpcClient, type RpcClientError } from "effect/rpc"
 import { type BinLimits, defaultBinLimits } from "@rp/shared/bin.ts"
 import { acquireInstanceLock, checkFilesystem, databaseFile } from "./connection.ts"
 import { ReadOps, WriteOps } from "./ops.ts"
+import * as ReaderPool from "./readerPool.ts"
+import { stampMatches } from "./workerStamp.ts"
 
 export class Writer extends Context.Service<
   Writer,
@@ -21,21 +22,19 @@ export class Reader extends Context.Service<
   RpcClient.FromGroup<typeof ReadOps, RpcClientError.RpcClientError>
 >()("rp/db/Reader") {}
 
-export interface DatabaseOptions {
+interface DatabaseOptions {
   readonly dataDir: string
   readonly readers: number
   readonly allowNetworkFs: boolean
-  /**
-   * source: run the worker TypeScript directly (development and tests).
-   * bundle: run the single-file bundles from `npm run build` (production). Each worker
-   * is its own V8 isolate, and a bundle uses about a quarter of the memory.
-   */
+  /** source: the worker TypeScript (development and tests). bundle: the `npm run build` bundles. */
   readonly workers: "source" | "bundle"
+  /** Where the bundles are; `packages/server/dist/workers` when omitted. */
+  readonly bundleDir?: string
   /** Recycle bin capacities; defaults when omitted. */
   readonly binLimits?: BinLimits
 }
 
-export class WorkerBundleMissing extends Schema.TaggedError<WorkerBundleMissing>()("WorkerBundleMissing", {
+class WorkerBundleMissing extends Schema.TaggedError<WorkerBundleMissing>()("WorkerBundleMissing", {
   path: Schema.String
 }) {
   override get message() {
@@ -43,13 +42,30 @@ export class WorkerBundleMissing extends Schema.TaggedError<WorkerBundleMissing>
   }
 }
 
-const workerEntry = (name: "writer" | "reader", mode: DatabaseOptions["workers"]) =>
-  mode === "source"
-    ? Effect.succeed(new URL(`./${name}.ts`, import.meta.url))
-    : Effect.suspend(() => {
-        const url = new URL(`../../dist/workers/${name}.mjs`, import.meta.url)
-        return existsSync(url) ? Effect.succeed(url) : Effect.fail(new WorkerBundleMissing({ path: url.pathname }))
-      })
+class WorkerBundleStale extends Schema.TaggedError<WorkerBundleStale>()("WorkerBundleStale", {
+  path: Schema.String
+}) {
+  override get message() {
+    return `The database worker bundles in ${this.path} were built from other sources than this server's. Run \`npm run build\`.`
+  }
+}
+
+const defaultBundleDir = fileURLToPath(new URL("../../dist/workers", import.meta.url))
+
+/** The writer's and readers' entry points. Bundles must exist and match the sources. */
+const workerEntries = (options: DatabaseOptions) =>
+  Effect.gen(function* () {
+    if (options.workers === "source") {
+      return { writer: new URL("./writer.ts", import.meta.url), reader: new URL("./reader.ts", import.meta.url) }
+    }
+    const dir = options.bundleDir ?? defaultBundleDir
+    const [writer, reader] = [join(dir, "writer.mjs"), join(dir, "reader.mjs")]
+    for (const path of [writer, reader]) {
+      if (!existsSync(path)) return yield* new WorkerBundleMissing({ path })
+    }
+    if (!stampMatches(dir)) return yield* new WorkerBundleStale({ path: dir })
+    return { writer: pathToFileURL(writer), reader: pathToFileURL(reader) }
+  })
 
 const workers = (entry: URL, workerData: Record<string, unknown>) =>
   NodeWorker.layer(() => new Worker(entry, { workerData, name: entry.pathname.split("/").pop() }))
@@ -66,27 +82,26 @@ export const layer = (options: DatabaseOptions) => {
     })
   )
 
-  const WriterLive = Layer.unwrap(
-    Effect.map(workerEntry("writer", options.workers), (entry) =>
-      Layer.effect(Writer, RpcClient.make(WriteOps)).pipe(
+  const Workers = Layer.unwrap(
+    Effect.map(workerEntries(options), (entries) => {
+      const WriterLive = Layer.effect(Writer, RpcClient.make(WriteOps)).pipe(
         Layer.provide(RpcClient.layerProtocolWorker({ size: 1, concurrency: 1 })),
-        Layer.provide(workers(entry, { dbPath, binLimits: options.binLimits ?? defaultBinLimits }))
+        Layer.provide(workers(entries.writer, { dbPath, binLimits: options.binLimits ?? defaultBinLimits }))
       )
-    )
-  )
-
-  // Readers open read-only connections, so the file must exist and be migrated first.
-  const ReaderLive = Layer.unwrap(
-    Effect.gen(function* () {
-      const writer = yield* Writer
-      yield* writer.Ready()
-      const entry = yield* workerEntry("reader", options.workers)
-      return Layer.effect(Reader, RpcClient.make(ReadOps)).pipe(
-        Layer.provide(RpcClient.layerProtocolWorker({ size: options.readers, concurrency: 1 })),
-        Layer.provide(workers(entry, { dbPath }))
+      // Readers open read-only connections, so the file must exist and be migrated first.
+      const ReaderLive = Layer.unwrap(
+        Effect.gen(function* () {
+          const writer = yield* Writer
+          yield* writer.Ready()
+          return Layer.effect(Reader, RpcClient.make(ReadOps)).pipe(
+            Layer.provide(ReaderPool.layer(options.readers)),
+            Layer.provide(workers(entries.reader, { dbPath }))
+          )
+        })
       )
+      return ReaderLive.pipe(Layer.provideMerge(WriterLive))
     })
   )
 
-  return ReaderLive.pipe(Layer.provideMerge(WriterLive), Layer.provide(Guards))
+  return Workers.pipe(Layer.provide(Guards))
 }

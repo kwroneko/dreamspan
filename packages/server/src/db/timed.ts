@@ -4,7 +4,7 @@ import { Effect } from "effect"
  * Logs storage operations that run longer than the budget. A write holds the writer
  * for its whole duration, so a slow one delays every other write.
  */
-export const SLOW_OPERATION_MS = 25
+const SLOW_OPERATION_MS = 25
 
 export const timed =
   (operation: string) =>

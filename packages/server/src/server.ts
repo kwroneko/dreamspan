@@ -44,13 +44,14 @@ const Handlers = AppApi.toLayer(
       ...providers,
       ...accounts,
       Health: () =>
-        eventLoop.sampleP99Ms.pipe(
+        eventLoop.sample.pipe(
           Effect.map(
-            (eventLoopP99Ms) =>
+            (delay) =>
               new Health({
                 version: VERSION,
                 uptimeMs: Date.now() - startedAt,
-                eventLoopP99Ms,
+                eventLoopP99Ms: delay.p99Ms,
+                eventLoopMaxMs: delay.maxMs,
                 readers: config.dbReaders
               })
           )

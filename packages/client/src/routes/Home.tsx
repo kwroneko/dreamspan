@@ -56,6 +56,8 @@ export function Home() {
               <dd>{Math.round(value.uptimeMs / 1000)} s</dd>
               <dt className="text-muted">Event loop p99</dt>
               <dd className={value.eventLoopP99Ms > 50 ? "text-danger" : "text-success"}>{value.eventLoopP99Ms} ms</dd>
+              <dt className="text-muted">Event loop max</dt>
+              <dd className={value.eventLoopMaxMs > 50 ? "text-danger" : "text-success"}>{value.eventLoopMaxMs} ms</dd>
               <dt className="text-muted">Database readers</dt>
               <dd>{value.readers}</dd>
             </dl>

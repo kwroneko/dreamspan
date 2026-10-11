@@ -42,8 +42,10 @@ export class Authentication extends RpcMiddleware.Service<Authentication, { prov
 export class Health extends Schema.Class<Health>("Health")({
   version: Schema.String,
   uptimeMs: Schema.Number,
-  /** p99 event-loop delay on the server's main thread over the last sampling window. */
+  /** Event-loop delay on the server's main thread over the last minute: the worst one-second p99. */
   eventLoopP99Ms: Schema.Number,
+  /** The longest single event-loop delay over the last minute. */
+  eventLoopMaxMs: Schema.Number,
   readers: Schema.Int
 }) {}
 
