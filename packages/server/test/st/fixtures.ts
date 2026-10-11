@@ -24,6 +24,11 @@ export interface FixtureSet {
   readonly presets: ReadonlyArray<{ readonly name: string; readonly data: unknown }>
   /** One chat per card, by card name; its greeting comes first. */
   readonly chats: ReadonlyArray<{ readonly card: string; readonly lines: ReadonlyArray<ChatLine> }>
+  /**
+   * Text from the card, persona and lorebook that ST's request must carry, macros expanded,
+   * when the chat's last message mentions the lantern.
+   */
+  readonly expectedInPrompt: ReadonlyArray<string>
 }
 
 const PERSONA = { name: "Tobin", description: "{{user}} is a cartographer who distrusts maps drawn by others." }
@@ -123,5 +128,16 @@ export const fixtureSet = (): FixtureSet => ({
         { name: PERSONA.name, is_user: true, mes: "Someone lit a lantern out there." }
       ]
     }
+  ],
+  expectedInPrompt: [
+    "Tobin is a cartographer who distrusts maps drawn by others.",
+    "Mira Vance keeps the tide ledger of Saltmarsh and owes Tobin a favor.",
+    "Dry, exact, quietly kind.",
+    "Tobin arrives at the ledger house during a spring flood.",
+    "Is the causeway open?",
+    "Until the eleventh bell.",
+    "Mira Vance never guesses a tide.",
+    "Saltmarsh floods every spring; the ledger records each tide.",
+    "The green lantern on the causeway is lit only when the tide turns."
   ]
 })

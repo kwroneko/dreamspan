@@ -12,11 +12,12 @@
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { chromium } from "@playwright/test"
+import { type Browser, chromium } from "@playwright/test"
 import { removeOrphans, ST_IMAGE, ST_VERSION, startSt } from "./container.ts"
-import { fixtureSet } from "./fixtures.ts"
-import { startMock } from "./mock.ts"
-import { loadFixtures, writeBaselineSettings } from "./st.ts"
+import { type FixtureSet, fixtureSet } from "./fixtures.ts"
+import { type MockEndpoint, startMock } from "./mock.ts"
+import { printReport, type Section } from "./report.ts"
+import { captureRequest, loadFixtures, writeBaselineSettings } from "./st.ts"
 
 const cleanups: Array<() => void> = []
 const cleanUp = () => {
@@ -54,10 +55,31 @@ const main = async () => {
   cleanups.push(() => void browser.close())
   await loadFixtures(browser, st.url, fixtures)
   console.log("fixtures loaded")
+
+  const sections: Array<Section> = [await checkFixtures(browser, st.url, mock, fixtures)]
+  return printReport(sections) === 0 ? 0 : 1
+}
+
+/**
+ * ST reads what we exported: with the baseline settings, the request carries the card's
+ * fields, the persona, the lorebook entries the chat triggers, and the chat itself.
+ */
+const checkFixtures = async (browser: Browser, url: string, mock: MockEndpoint, fixtures: FixtureSet) => {
+  const message = "Where does the lantern lead?"
+  const body = await captureRequest(browser, url, mock, { preset: null, character: fixtures.chats[0]!.card, message })
+  const sent = JSON.stringify(body)
+  const expected = [...fixtures.expectedInPrompt, ...fixtures.chats[0]!.lines.map((line) => line.mes), message]
+  return {
+    title: "Fixtures in ST's request (baseline settings)",
+    notes: [`${expected.length} texts expected`],
+    differences: expected
+      .filter((text) => !sent.includes(JSON.stringify(text).slice(1, -1)))
+      .map((text) => `missing: ${text}`)
+  }
 }
 
 main().then(
-  () => process.exit(0),
+  (code) => process.exit(code),
   (error: unknown) => {
     console.error(error)
     process.exit(1)

@@ -3,21 +3,26 @@
 //
 // Functions passed to `page.evaluate` run in the page, where `SillyTavern.getContext()` is
 // ST's public extension API; `StContext` types only the parts used here.
-import type { Browser } from "@playwright/test"
+import type { Browser, Page } from "@playwright/test"
 import { readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { png } from "../formats/support.ts"
 import type { FixtureSet } from "./fixtures.ts"
-import { MOCK_MODEL } from "./mock.ts"
+import { MOCK_MODEL, type MockEndpoint } from "./mock.ts"
 
 interface StCharacter {
   readonly name: string
-  readonly avatar: string
-  readonly chat: string
 }
 
 interface StContext {
   readonly characters: ReadonlyArray<StCharacter>
+  readonly chat: ReadonlyArray<unknown>
+  readonly onlineStatus: string
+  readonly selectCharacterById: (id: number) => Promise<void>
+  readonly getPresetManager: (apiId: string) => {
+    readonly findPreset: (name: string) => string | undefined
+    readonly selectPreset: (value: string) => Promise<void>
+  }
   readonly eventSource: { once: (event: string, listener: (...args: ReadonlyArray<unknown>) => void) => void }
   readonly eventTypes: Record<string, string>
   readonly getRequestHeaders: (options?: { omitContentType?: boolean }) => Record<string, string>
@@ -178,6 +183,57 @@ export const loadFixtures = async (browser: Browser, url: string, fixtures: Fixt
         chats: fixtures.chats
       }
     )
+  } finally {
+    await page.context().close()
+  }
+}
+
+export interface Capture {
+  /** A preset loaded into ST, by name, or null for the baseline settings. */
+  readonly preset: string | null
+  readonly character: string
+  /** What the user sends. */
+  readonly message: string
+}
+
+const selectPreset = (page: Page, name: string) =>
+  page.evaluate(async (name) => {
+    const manager = SillyTavern.getContext().getPresetManager("openai")
+    const value = manager.findPreset(name)
+    if (value === undefined) throw new Error(`no preset ${name}`)
+    await manager.selectPreset(value)
+  }, name)
+
+/**
+ * Opens the character's chat in a fresh page, selects the preset, sends the message and
+ * returns the request body the mock received. The page saves nothing, so every capture
+ * starts from the same chat and settings.
+ */
+export const captureRequest = async (browser: Browser, url: string, mock: MockEndpoint, capture: Capture) => {
+  const page = await openPage(browser, url, { readOnly: true })
+  const errors: Array<string> = []
+  page.on("pageerror", (error) => errors.push(error.message))
+  try {
+    await page.waitForFunction(() => SillyTavern.getContext().onlineStatus !== "no_connection")
+    if (capture.preset !== null) await selectPreset(page, capture.preset)
+    await page.evaluate(async (name) => {
+      const ctx = SillyTavern.getContext()
+      const id = ctx.characters.findIndex((character) => character.name === name)
+      if (id < 0) throw new Error(`no character ${name}`)
+      await ctx.selectCharacterById(id)
+    }, capture.character)
+    await page.waitForFunction(() => SillyTavern.getContext().chat.length > 0)
+    const next = mock.nextCompletion()
+    await page.fill("#send_textarea", capture.message)
+    await page.click("#send_but")
+    const recorded = await next
+    // The turn completes: the send button comes back once the reply is in.
+    await page.locator("#send_but").waitFor({ state: "visible" })
+    return recorded.body
+  } catch (error) {
+    throw new Error(`capture ${JSON.stringify(capture)} failed; page errors: ${JSON.stringify(errors)}`, {
+      cause: error
+    })
   } finally {
     await page.context().close()
   }
