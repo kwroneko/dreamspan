@@ -692,6 +692,13 @@ It fails with a typed `ProviderError`.
 - **CHARX:** `card.json` (V3), the avatar as `assets/icon/images/main.<ext>` and the main icon, and each embedded asset whose file is given. An embedded asset without a file, or with a path outside the archive's folder, is left out of the card.
 - **Round trips are lossless:** an exported card imports back to the same document, in every format, and keeps every field of the file it came from (`test/formats/cardExport.test.ts`). The exceptions are ST's top-level copies and local state, and private modules.
 
+**Lorebooks** (`worldInfo.ts`, `lorebook.ts`).
+- **ST World Info files** import with `importLorebook` and export with `exportLorebook`. A file must have `entries` (an object keyed by uid, or a list), as ST's import requires. Missing fields take the defaults of ST's `newWorldInfoEntryDefinition`. Entry `extensions` are kept verbatim, as ST keeps them. The book is named after the file unless it names itself. ST's `originalData`, a copy of the card book a World Info file was made from that goes stale with every edit, is dropped with a note.
+- **A card's `character_book` and World Info** convert through the same document, following ST's two conversions (`convertCharacterBook`, `convertWorldInfoToCharacterBook`). What one format has no place for is lost going to the other, as in ST: a card book's settings (description, scan depth, token budget, recursive scanning) and its entries' `name`, `priority` and `use_regex` don't go into World Info, and World Info's character filter doesn't go into a card book.
+- **Our own entry fields** (`decision_hint`, `placement_override`) are written to `extensions.rp_harness` in both formats and read back from there.
+- Round trips are lossless within each format: an export keeps every field of the file it came from (except `originalData`) and imports back to the same document.
+- Not supported: other lorebook formats ST converts (NovelAI, Agnai, RisuAI), and V3's standalone `lorebook_v3`.
+
 **Hardening** (`safety.ts`). These parse untrusted files, so every input is capped (`defaultLimits`), and each cap has a test with a crafted file that fails when the check is removed.
 
 | Cap | Default | Why |
@@ -708,5 +715,9 @@ It fails with a typed `ProviderError`.
 
 - **Inflating stops at the declared size** (`maxOutputLength`), so a header that understates an entry can't make the parser allocate more than the caps allow (`zip.bomb`). Sizes and CRCs are checked after.
 - **Zip paths** must stay inside the archive: no `..` segment, leading `/`, backslash, drive letter or NUL. One bad path, duplicate name or encrypted entry rejects the whole archive, so an importer that later writes files by these names can't be pointed elsewhere.
-
 - **Prototype keys** (`__proto__`, `constructor`, `prototype`) are dropped right after `JSON.parse`, with a warning. `JSON.parse` makes them plain own keys, but a later assignment, `Object.assign` or merge can turn one into a prototype change.
+- **Nothing in a file is executed or rendered.** Scripts in a card (RisuAI's modules, Lua assets) are skipped, never stored.
+
+**Known limits:**
+- The parsers are synchronous. Measured on this host under load (2026-10-11): a 21 MB World Info file with 20,000 entries took 110 to 200 ms, a 20 MB JSON card 40 to 60 ms. The importer that writes to the library should run them off the main thread (§3.1 explains why that matters).
+- Not built yet: the importer itself (storing the document, the avatar and assets, and the report), and registering these formats as importers (PLUGINS §8).

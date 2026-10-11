@@ -8,7 +8,7 @@ import { Fields, isFinite, isString, isStringArray } from "./fields.ts"
 import { lorebookFromCharacterBook, OUR_EXTENSION } from "./lorebook.ts"
 import { fail, type Issues, isObject, type Path } from "./safety.ts"
 
-export type CardVersion = "v1" | "v2" | "v3"
+type CardVersion = "v1" | "v2" | "v3"
 
 const DATA_KEYS = new Set([
   "name",

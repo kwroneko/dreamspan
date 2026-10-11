@@ -91,8 +91,12 @@ export class Fields {
 export const isString = (value: unknown): value is string => typeof value === "string"
 export const isBoolean = (value: unknown): value is boolean => typeof value === "boolean"
 export const isFinite = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value)
-export const isInt = (value: unknown): value is number => Number.isInteger(value)
+const isInt = (value: unknown): value is number => Number.isInteger(value)
 export const isStringArray = (value: unknown): value is Array<string> => Array.isArray(value) && value.every(isString)
+
+/** The fields that have a value: optional fields stay absent when they have none. */
+export const present = (fields: Record<string, unknown>) =>
+  Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== undefined && value !== null))
 
 /** A numeric ST enum read by name: `names[n]` for its value `n`. */
 export const enumByIndex = <A extends string>(fields: Fields, key: string, names: ReadonlyArray<A>, fallback: A): A => {

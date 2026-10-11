@@ -4,7 +4,7 @@
 import { crc32, deflateRawSync, inflateRawSync } from "node:zlib"
 import { fail, type Limits } from "./safety.ts"
 
-export interface ZipEntry {
+interface ZipEntry {
   readonly name: string
   readonly method: number
   readonly crc: number
@@ -86,7 +86,7 @@ export const readZip = (bytes: Uint8Array, limits: Limits): Map<string, ZipEntry
 }
 
 /** Uncompressed bytes extracted so far from one archive, for the total cap. */
-export interface Budget {
+interface Budget {
   used: number
 }
 

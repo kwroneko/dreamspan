@@ -11,13 +11,13 @@ import {
   type SelectiveLogic
 } from "@rp/shared/docs/lorebook.ts"
 import { Schema } from "effect"
-import { enumByIndex, Fields, isBoolean, isFinite, isString } from "./fields.ts"
+import { enumByIndex, Fields, isBoolean, isFinite, isString, present } from "./fields.ts"
 import { type Issues, isObject, type Path } from "./safety.ts"
 
 /** Our namespace in `extensions`, for what a standard card or lorebook has no field for. */
 export const OUR_EXTENSION = "rp_harness"
 
-const POSITIONS: ReadonlyArray<LorePosition> = [
+export const POSITIONS: ReadonlyArray<LorePosition> = [
   "before_char",
   "after_char",
   "an_top",
@@ -27,8 +27,8 @@ const POSITIONS: ReadonlyArray<LorePosition> = [
   "em_bottom",
   "outlet"
 ]
-const LOGICS: ReadonlyArray<SelectiveLogic> = ["and_any", "not_all", "not_any", "and_all"]
-const ROLES: ReadonlyArray<LoreRole> = ["system", "user", "assistant"]
+export const LOGICS: ReadonlyArray<SelectiveLogic> = ["and_any", "not_all", "not_any", "and_all"]
+export const ROLES: ReadonlyArray<LoreRole> = ["system", "user", "assistant"]
 
 const BOOK_KEYS = new Set([
   "name",
@@ -94,7 +94,7 @@ const ST_EXTENSION_KEYS = new Set([
 const isPlacement = Schema.is(PlacementOverride)
 
 /** Our own entry fields, kept in `extensions.rp_harness` by the standard formats. */
-const ourEntryFields = (extensions: Record<string, unknown>, path: Path, issues: Issues) => {
+export const ourEntryFields = (extensions: Record<string, unknown>, path: Path, issues: Issues) => {
   const ours = extensions[OUR_EXTENSION]
   if (!isObject(ours)) return {}
   const fields = new Fields(ours, [...path, "extensions", OUR_EXTENSION], issues)
@@ -105,7 +105,7 @@ const ourEntryFields = (extensions: Record<string, unknown>, path: Path, issues:
 }
 
 /** `extensions` without the keys we lifted out of it. */
-const remainingExtensions = (extensions: Record<string, unknown>, lifted: ReadonlySet<string>) => {
+export const remainingExtensions = (extensions: Record<string, unknown>, lifted: ReadonlySet<string>) => {
   const rest = Object.entries(extensions).filter(([key]) => !lifted.has(key))
   const ours = extensions[OUR_EXTENSION]
   if (isObject(ours)) {
@@ -118,9 +118,9 @@ const remainingExtensions = (extensions: Record<string, unknown>, lifted: Readon
 }
 
 /** Makes uids unique integers: the merge matches entries by them. */
-const uniqueUids = (entries: Array<LorebookEntry>, path: Path, issues: Issues) => {
+export const uniqueUids = (entries: Array<LorebookEntry>, path: Path, issues: Issues) => {
   const seen = new Set<number>()
-  let next = Math.max(-1, ...entries.map((entry) => entry.uid)) + 1
+  let next = entries.reduce((max, entry) => Math.max(max, entry.uid), -1) + 1
   return entries.map((entry, index) => {
     if (!seen.has(entry.uid)) {
       seen.add(entry.uid)
@@ -149,7 +149,7 @@ const cardEntry = (source: unknown, index: number, path: Path, issues: Issues): 
     issues.warn("lorebook.disabled", `Entry ${index} doesn't say it's enabled, so it's disabled, as in ST.`, entryPath)
   }
   if (entry.has("id") && !Number.isInteger(source.id)) {
-    issues.warn("lorebook.duplicate_id", `Entry ${index} had an id that isn't a whole number; it was replaced.`, [
+    issues.warn("lorebook.invalid_id", `Entry ${index} had an id that isn't a whole number; it was replaced.`, [
       ...entryPath,
       "id"
     ])
@@ -213,7 +213,8 @@ const cardEntry = (source: unknown, index: number, path: Path, issues: Issues): 
   }
 }
 
-const isRecursionDelay = (value: unknown): value is boolean | number => isBoolean(value) || Number.isInteger(value)
+export const isRecursionDelay = (value: unknown): value is boolean | number =>
+  isBoolean(value) || Number.isInteger(value)
 
 /** A card's `character_book` as our lorebook document. */
 export const lorebookFromCharacterBook = (source: Record<string, unknown>, path: Path, issues: Issues): LorebookDoc => {
@@ -236,16 +237,12 @@ export const lorebookFromCharacterBook = (source: Record<string, unknown>, path:
 }
 
 /** `extensions` with our own entry fields put back in our namespace. */
-const withOurFields = (entry: LorebookEntry) => {
+export const withOurFields = (entry: LorebookEntry) => {
   const ours = present({ decision_hint: entry.decision_hint, placement_override: entry.placement_override })
   if (Object.keys(ours).length === 0) return entry.extensions
   const existing = entry.extensions[OUR_EXTENSION]
   return { ...entry.extensions, [OUR_EXTENSION]: { ...(isObject(existing) ? existing : {}), ...ours } }
 }
-
-/** The fields that have a value: optional fields stay absent when they have none. */
-export const present = (fields: Record<string, unknown>) =>
-  Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== undefined && value !== null))
 
 /**
  * Our lorebook as a card's `character_book`, as ST's `convertWorldInfoToCharacterBook`
