@@ -64,7 +64,7 @@ export const characterMacros: ReadonlyArray<MacroSpec> = [
   {
     name: "charFirstMessage",
     aliases: ["greeting"],
-    args: [{ name: "index", optional: true, type: "integer" }],
+    args: [{ name: "index", optional: true, integer: true }],
     handler: greeting
   },
   {

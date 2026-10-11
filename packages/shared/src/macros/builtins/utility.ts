@@ -5,7 +5,7 @@ import { ELSE_MARKER, isFalse, trimScoped } from "../engine.ts"
 import { stringHash } from "../hash.ts"
 import type { MacroCall, MacroSpec } from "../registry.ts"
 
-const count = { name: "count", optional: true, type: "integer" } as const
+const count = { name: "count", optional: true, integer: true } as const
 
 const COMMA = "##�COMMA�##"
 

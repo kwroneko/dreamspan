@@ -264,35 +264,14 @@ const pairScopes = (
   return items
 }
 
-const isTrue = (value: string) => ["on", "true", "1"].includes(value.trim().toLowerCase())
 /** ST's isFalseBoolean. */
 export const isFalse = (value: string) => ["off", "false", "0"].includes(value.trim().toLowerCase())
 
-const isOfType = (value: string, type: string) => {
-  const trimmed = value.trim()
-  switch (type) {
-    case "integer":
-      return /^-?\d+$/.test(trimmed)
-    case "number":
-      return Number.isFinite(Number(trimmed))
-    case "boolean":
-      return isTrue(trimmed) || isFalse(trimmed)
-    default:
-      return true
-  }
-}
-
-const arityOk = (entry: MacroEntry, count: number) => {
-  if (!entry.list) return count >= entry.minArgs && count <= entry.maxArgs
-  const { min, max } = entry.list === true ? { min: 0, max: undefined } : entry.list
-  return count >= entry.minArgs + min && (max === undefined || Math.max(0, count - entry.maxArgs) <= max)
-}
-
-const typesOk = (entry: MacroEntry, args: ReadonlyArray<string>) =>
-  args.every((value, i) => {
-    const type = entry.args?.[i]?.type ?? "string"
-    return (typeof type === "string" ? [type] : type).some((t) => isOfType(value, t))
-  })
+/** ST's strict arguments: a call with the wrong number or types of arguments stays as written. */
+const argsOk = (entry: MacroEntry, args: ReadonlyArray<string>) =>
+  args.length >= entry.minArgs &&
+  (entry.list === true || args.length <= entry.maxArgs) &&
+  args.every((value, i) => !entry.args?.[i]?.integer || /^-?\d+$/.test(value.trim()))
 
 interface Block {
   /** The block's text, between the opener and the closer. */
@@ -304,10 +283,10 @@ interface Block {
   readonly nodes: ReadonlyArray<Node>
 }
 
-/** State shared by every evaluation in one expansion, nested ones included. */
 /** Non-deterministic values by where they were drawn (DESIGN §5.6). */
 export type FrozenValues = Readonly<Record<string, string>>
 
+/** State shared by every evaluation in one expansion, nested ones included. */
 interface Run {
   readonly registry: MacroLookup
   readonly random: () => number
@@ -462,10 +441,8 @@ class Expansion {
     const asWritten = `{{${inner}}}`
 
     if (!entry) return asWritten
-    const strict = entry.strictArgs !== false
-    if (strict && !arityOk(entry, args.length)) return asWritten
+    if (!argsOk(entry, args)) return asWritten
     const positional = args.slice(0, entry.maxArgs)
-    if (strict && !typesOk(entry, positional)) return asWritten
     const offset = base + node.start
     const call: MacroCall = {
       name: node.name,

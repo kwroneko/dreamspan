@@ -14,7 +14,7 @@ const specs: ReadonlyArray<MacroSpec> = [
   { name: "group", aliases: ["charIfNotGroup"], handler: (call) => call.context.names.char },
   {
     name: "newline",
-    args: [{ name: "count", optional: true, type: "integer" }],
+    args: [{ name: "count", optional: true, integer: true }],
     handler: (c) => "\n".repeat(Number(c.args[0] ?? 1))
   },
   { name: "reverse", args: [{ name: "value" }], handler: (call) => Array.from(call.args[0]!).reverse().join("") },
@@ -24,15 +24,8 @@ const specs: ReadonlyArray<MacroSpec> = [
     handler: (c) => (c.isScoped ? (c.args[0] ?? "") : "{{trim}}")
   },
   { name: "join", list: true, handler: (call) => call.list.join("|") },
-  {
-    name: "bounded",
-    args: [{ name: "a" }],
-    list: { min: 1, max: 2 },
-    handler: (c) => [...c.args, ...c.list].join("|")
-  },
   { name: "three", args: [{ name: "a" }, { name: "b" }, { name: "c" }], handler: (c) => c.args.join("-") },
-  { name: "strict-int", args: [{ name: "v", type: "integer" }], handler: (c) => `#${c.args[0]}#` },
-  { name: "loose-int", args: [{ name: "v", type: "integer" }], strictArgs: false, handler: (c) => `#${c.args[0]}#` },
+  { name: "strict-int", args: [{ name: "v", integer: true }], handler: (c) => `#${c.args[0]}#` },
   {
     name: "flags",
     handler: (call) => {
@@ -158,12 +151,9 @@ describe("arity and types", () => {
     ["Start {{char::extra}} end.", "Start {{char::extra}} end."],
     ["Result: {{reverse}}", "Result: {{reverse}}"],
     ["Result: {{reverse::a::b}}", "Result: {{reverse::a::b}}"],
-    ["A {{bounded::base}} B {{bounded::base::x::y::z}}", "A {{bounded::base}} B {{bounded::base::x::y::z}}"],
-    ["{{bounded::base::x::y}}", "base|x|y"],
     ["Result: {{user Something {{char}}}}", "Result: {{user Something Character}}"],
     ["Value: {{strict-int::abc}}", "Value: {{strict-int::abc}}"],
     ["Value: {{strict-int:: 12 }}", "Value: #12#"],
-    ["Value: {{loose-int::abc}}", "Value: #abc#"],
     ["{{fails}}", "{{fails}}"]
   ])
 })
@@ -200,6 +190,8 @@ describe("scoped blocks", () => {
     ["{{three::a::b}}c{{/three}}", "a-b-c"],
     ["Before {{/reverse}} After", "Before {{/reverse}} After"],
     ["{{reverse}}ab{{/reverse}}{{/reverse}}", "ba{{/reverse}}"],
+    // A block's content is skipped by later openers, so blocks never cross.
+    ["{{reverse}}ab{{trim}}{{/reverse}}x{{/trim}}", "}}mirt{{bax{{/trim}}"],
     ["{{reverse}}x{{/char}}", "{{reverse}}x{{/char}}"],
     ["{{reverse}}a{{reverse}}bc{{/reverse}}d{{/reverse}}", "dbca"],
     ["{{join}}a{{/join}}", "{{join}}a{{/join}}"],

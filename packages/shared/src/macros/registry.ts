@@ -7,14 +7,12 @@ import { makeRegistry, type Registry } from "../registry.ts"
 import type { MacroContext } from "./context.ts"
 import type { VariableScope } from "./variables.ts"
 
-export type ArgType = "string" | "integer" | "number" | "boolean"
-
 export interface ArgSpec {
   readonly name: string
   /** Optional arguments must come after the required ones. */
   readonly optional?: boolean
-  /** The accepted types; "string" when absent. */
-  readonly type?: ArgType | ReadonlyArray<ArgType>
+  /** Only a whole number is accepted (ST's MacroValueType.INTEGER). */
+  readonly integer?: true
 }
 
 export interface MacroCall {
@@ -69,13 +67,8 @@ export interface MacroSpec {
   readonly name: string
   readonly aliases?: ReadonlyArray<string>
   readonly args?: ReadonlyArray<ArgSpec>
-  /** Accept more arguments after `args`, as a list. */
-  readonly list?: true | { readonly min: number; readonly max?: number }
-  /**
-   * With strict arguments (the default), a call with the wrong number or types of arguments
-   * stays as written. Otherwise the handler runs anyway.
-   */
-  readonly strictArgs?: boolean
+  /** Accept any number of further arguments after `args`, as a list. */
+  readonly list?: true
   /** The handler gets its arguments unexpanded, and expands what it needs with `resolve`. */
   readonly delayArgResolution?: boolean
   /** Non-deterministic: evaluated once, then the value is frozen and reused (DESIGN §5.6). */

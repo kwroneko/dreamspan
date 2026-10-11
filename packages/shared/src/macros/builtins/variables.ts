@@ -4,8 +4,8 @@ import type { MacroCall, MacroSpec } from "../registry.ts"
 import { normalize, type VarScope } from "../variables.ts"
 
 const name = { name: "name" } as const
-const value = { name: "value", type: ["string", "number"] } as const
-const key = { name: "key", type: ["string", "number"] } as const
+const value = { name: "value" } as const
+const key = { name: "key" } as const
 
 const scope = (call: MacroCall, which: VarScope) => call.variables[which]
 
