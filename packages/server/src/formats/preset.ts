@@ -15,7 +15,7 @@ import {
   type PromptOrderEntry,
   type UtilityPrompts
 } from "@rp/shared/docs/preset.ts"
-import { ImportIssue, type ImportIssueLevel, ImportReport } from "@rp/shared/importReport.ts"
+import { type ImportReport, ReportBuilder, shownList, shownText } from "@rp/shared/importReport.ts"
 import { Schema } from "effect"
 
 const ST_PRESET_FORMAT = "st-chat-completion-preset"
@@ -241,43 +241,10 @@ const primitiveOr = (v: unknown, fallback: unknown): unknown => (typeof v === "o
 // regex scripts while keeping an import under a second of CPU.
 export const MAX_PRESET_BYTES = 2 * 1024 * 1024
 export const MAX_JSON_DEPTH = 64
-export const MAX_ISSUES = 200
-// What the report shows of file-supplied text, so its size stays bounded: about 1.5 KB an issue.
-const MAX_SHOWN_CHARS = 40
-const MAX_SHOWN_ITEMS = 10
-const MAX_PATH_SEGMENTS = 16
-
-const shown = (s: string) => (s.length > MAX_SHOWN_CHARS ? `${s.slice(0, MAX_SHOWN_CHARS)}…` : s)
-const listed = (items: ReadonlyArray<string>) =>
-  items.slice(0, MAX_SHOWN_ITEMS).map(shown).join(", ") +
-  (items.length > MAX_SHOWN_ITEMS ? ` and ${items.length - MAX_SHOWN_ITEMS} more` : "")
-const shownPath = (path: Path): Path =>
-  (path.length > MAX_PATH_SEGMENTS ? [...path.slice(0, MAX_PATH_SEGMENTS - 1), "…"] : path).map((s) =>
-    typeof s === "string" ? shown(s) : s
-  )
-
-class Reporter {
-  readonly issues: Array<ImportIssue> = []
-  private more = 0
-  add(level: ImportIssueLevel, code: string, message: string, path?: Path) {
-    if (this.issues.length >= MAX_ISSUES) this.more++
-    else this.issues.push(new ImportIssue({ level, code, message, ...(path ? { path: shownPath(path) } : {}) }))
-  }
-  done(format: string, document: PresetDoc | null): PresetImport {
-    const issues =
-      this.more > 0
-        ? [
-            ...this.issues,
-            new ImportIssue({
-              level: "info",
-              code: "preset.more_issues",
-              message: `${this.more} more issues aren't listed.`
-            })
-          ]
-        : this.issues
-    return { document, report: new ImportReport({ format, issues }) }
-  }
-}
+const done = (r: ReportBuilder, format: string, document: PresetDoc | null): PresetImport => ({
+  document,
+  report: r.build(format)
+})
 
 /** Picks ids nothing in the file uses: `base`, else `base-2`, `base-3`, …; linear over many repeats. */
 class FreshIds {
@@ -323,7 +290,7 @@ const nestsDeeperThan = (text: string, max: number) => {
  * A copy of parsed JSON without `__proto__` keys, which would replace an object's prototype
  * if a later step assigned them. Recursion is bounded by the depth check.
  */
-const withoutProtoKeys = (value: unknown, path: Array<string | number>, r: Reporter): unknown => {
+const withoutProtoKeys = (value: unknown, path: Array<string | number>, r: ReportBuilder): unknown => {
   if (Array.isArray(value)) return value.map((v, i) => withoutProtoKeys(v, [...path, i], r))
   if (!isObject(value)) return value
   const out: Json = {}
@@ -354,46 +321,46 @@ const otherKind = (o: Json): readonly [format: string, label: string] | undefine
  * problem goes in the report, and a file that can't be imported has no document.
  */
 export const importStPreset = (input: string | Uint8Array): PresetImport => {
-  const r = new Reporter()
+  const r = new ReportBuilder()
   const bytes = typeof input === "string" ? Buffer.byteLength(input) : input.byteLength
   if (bytes > MAX_PRESET_BYTES) {
     r.add("error", "preset.too_large", `The file is over the ${MAX_PRESET_BYTES / 1024 / 1024} MB limit for presets.`)
-    return r.done("unknown", null)
+    return done(r, "unknown", null)
   }
   const text = typeof input === "string" ? input.replace(/^\uFEFF/, "") : new TextDecoder().decode(input)
   if (nestsDeeperThan(text, MAX_JSON_DEPTH)) {
     r.add("error", "preset.too_deep", `The file nests more than ${MAX_JSON_DEPTH} levels deep.`)
-    return r.done("unknown", null)
+    return done(r, "unknown", null)
   }
   let json: unknown
   try {
     json = JSON.parse(text)
   } catch {
     r.add("error", "preset.invalid_json", "The file isn't valid JSON.")
-    return r.done("unknown", null)
+    return done(r, "unknown", null)
   }
   const parsed = withoutProtoKeys(json, [], r)
   if (!isObject(parsed)) {
     r.add("error", "preset.unrecognized", "The file isn't a SillyTavern chat-completion preset.")
-    return r.done("unknown", null)
+    return done(r, "unknown", null)
   }
   if (!CHAT_COMPLETION_FIELDS.some((k) => Object.hasOwn(parsed, k))) {
     const other = otherKind(parsed)
     if (!other) {
       r.add("error", "preset.unrecognized", "The file isn't a SillyTavern chat-completion preset.")
-      return r.done("unknown", null)
+      return done(r, "unknown", null)
     }
     r.add(
       "warning",
       "preset.unsupported_format",
       `This is ${other[1]}. Only chat-completion presets are supported, so it wasn't imported.`
     )
-    return r.done(other[0], null)
+    return done(r, other[0], null)
   }
-  return r.done(ST_PRESET_FORMAT, readPreset(parsed, r))
+  return done(r, ST_PRESET_FORMAT, readPreset(parsed, r))
 }
 
-const readPreset = (file: Json, r: Reporter): PresetDoc => {
+const readPreset = (file: Json, r: ReportBuilder): PresetDoc => {
   const src = migrate(file)
   const consumed = new Set<string>()
   const missing: Array<string> = []
@@ -465,7 +432,7 @@ const readPreset = (file: Json, r: Reporter): PresetDoc => {
   const regex = readRegex(extensions.regex_scripts, r)
   delete extensions.regex_scripts
   for (const key of Object.keys(extensions))
-    r.add("info", "preset.extension_kept", `Extension data \`${shown(key)}\` is kept for export but not used.`, [
+    r.add("info", "preset.extension_kept", `Extension data \`${shownText(key)}\` is kept for export but not used.`, [
       "extensions",
       key
     ])
@@ -514,7 +481,7 @@ const readPreset = (file: Json, r: Reporter): PresetDoc => {
     unsupported[key] = src[key]
     if (UI_ONLY.has(key)) continue
     if (!Object.hasOwn(UNMODELED_DEFAULTS, key))
-      r.add("info", "preset.unknown_field", `\`${shown(key)}\` isn't a known preset field. It's kept for export.`, [
+      r.add("info", "preset.unknown_field", `\`${shownText(key)}\` isn't a known preset field. It's kept for export.`, [
         key
       ])
     else if (src[key] !== UNMODELED_DEFAULTS[key])
@@ -529,7 +496,7 @@ const readPreset = (file: Json, r: Reporter): PresetDoc => {
     r.add(
       "info",
       "preset.connection_ignored",
-      `Connection and model settings are ignored and not stored: ${listed(ignored)}.`
+      `Connection and model settings are ignored and not stored: ${shownList(ignored)}.`
     )
   if (missing.length > 0)
     r.add("info", "preset.defaults_applied", `The preset doesn't set ${missing.join(", ")}, so ST's defaults are used.`)
@@ -558,7 +525,7 @@ const migrate = (file: Json): Json => {
 }
 
 /** A text field, reported when the file has something other than text there. */
-const text = (o: Json, key: string, path: Path, what: string, r: Reporter) => {
+const text = (o: Json, key: string, path: Path, what: string, r: ReportBuilder) => {
   const v = o[key]
   if (typeof v === "string") return v
   if (v !== undefined && v !== null)
@@ -566,7 +533,7 @@ const text = (o: Json, key: string, path: Path, what: string, r: Reporter) => {
   return ""
 }
 
-const readPrompts = (raw: unknown, r: Reporter) => {
+const readPrompts = (raw: unknown, r: ReportBuilder) => {
   if (raw !== undefined && !Array.isArray(raw))
     r.add("warning", "preset.invalid_value", "`prompts` isn't a list, so ST's built-in prompts are used.", ["prompts"])
   const list = Array.isArray(raw) ? raw : []
@@ -585,7 +552,7 @@ const readPrompts = (raw: unknown, r: Reporter) => {
       r.add(
         "warning",
         "preset.prompt_duplicate",
-        `A second prompt \`${shown(prompt.identifier)}\` was dropped. ST only ever uses the first.`,
+        `A second prompt \`${shownText(prompt.identifier)}\` was dropped. ST only ever uses the first.`,
         path
       )
       continue
@@ -612,14 +579,14 @@ const whyNeverSent = (p: Json, prompt: PresetPrompt): string | undefined => {
   return "it has no valid role"
 }
 
-const readPrompt = (p: Json, path: Path, ids: FreshIds, r: Reporter): PresetPrompt => {
+const readPrompt = (p: Json, path: Path, ids: FreshIds, r: ReportBuilder): PresetPrompt => {
   let identifier = typeof p.identifier === "string" && p.identifier !== "" ? p.identifier : undefined
   if (identifier === undefined) {
     // ST gives it a random id, which no order entry names, so it's never sent.
     identifier = ids.take(`imported-${path[1]}`)
     r.add("info", "preset.prompt_identifier", `A prompt without an identifier was named \`${identifier}\`.`, path)
   }
-  const what = `Prompt \`${shown(identifier)}\``
+  const what = `Prompt \`${shownText(identifier)}\``
   let role: PromptRole = "system"
   if (isRole(p.role)) role = p.role
   else if (p.role)
@@ -631,7 +598,7 @@ const readPrompt = (p: Json, path: Path, ids: FreshIds, r: Reporter): PresetProm
     if (PROMPT_FIELDS.has(key)) continue
     unsupported[key] = p[key]
     if (!ST_PROMPT_EXTRAS.has(key))
-      r.add("info", "preset.unknown_field", `Prompt field \`${shown(key)}\` isn't known. It's kept for export.`, [
+      r.add("info", "preset.unknown_field", `Prompt field \`${shownText(key)}\` isn't known. It's kept for export.`, [
         ...path,
         key
       ])
@@ -660,7 +627,7 @@ const readOrder = (
   raw: unknown,
   prompts: ReadonlyArray<PresetPrompt>,
   neverSent: ReadonlyMap<string, string>,
-  r: Reporter
+  r: ReportBuilder
 ): Array<PromptOrderEntry> => {
   let entries: ReadonlyArray<unknown> = DEFAULT_ORDER_ENTRIES
   let basePath: Path = []
@@ -677,7 +644,7 @@ const readOrder = (
       r.add(
         "info",
         "preset.prompt_orders_dropped",
-        `ST uses only the global prompt order (${GLOBAL_ORDER_ID}). Other orders were dropped: ${listed(others)}.`,
+        `ST uses only the global prompt order (${GLOBAL_ORDER_ID}). Other orders were dropped: ${shownList(others)}.`,
         ["prompt_order"]
       )
     const global = lists[index] as Json | undefined
@@ -721,7 +688,7 @@ const readOrder = (
       r.add(
         "warning",
         "preset.order_duplicate",
-        `\`${shown(identifier)}\` appears more than once in the prompt order. It's kept once, ${inChat ? "enabled if any entry is" : "as its first entry, as ST reads it"}.`,
+        `\`${shownText(identifier)}\` appears more than once in the prompt order. It's kept once, ${inChat ? "enabled if any entry is" : "as its first entry, as ST reads it"}.`,
         path
       )
       if (enabled && inChat) order.set(identifier, { identifier, enabled })
@@ -732,7 +699,7 @@ const readOrder = (
       r.add(
         "warning",
         "preset.order_repeated",
-        `ST sends \`${shown(identifier)}\` once per enabled entry, ${count} times. Here it's sent once.`,
+        `ST sends \`${shownText(identifier)}\` once per enabled entry, ${count} times. Here it's sent once.`,
         basePath
       )
   for (const entry of order.values()) {
@@ -741,7 +708,7 @@ const readOrder = (
       r.add(
         "warning",
         "preset.prompt_never_sent",
-        `ST never sends prompt \`${shown(entry.identifier)}\`: ${reason}. It's imported disabled.`,
+        `ST never sends prompt \`${shownText(entry.identifier)}\`: ${reason}. It's imported disabled.`,
         basePath
       )
       order.set(entry.identifier, { ...entry, enabled: false })
@@ -755,7 +722,7 @@ const readOrder = (
  * being no bound. An infinite maximum is no bound; an infinite minimum excludes every depth,
  * kept as the largest finite number.
  */
-const regexDepth = (s: Json, key: "minDepth" | "maxDepth", path: Path, r: Reporter): number | null => {
+const regexDepth = (s: Json, key: "minDepth" | "maxDepth", path: Path, r: ReportBuilder): number | null => {
   const v = s[key]
   if (v === null || v === undefined) return null
   const n = Number(primitiveOr(v, NaN))
@@ -772,7 +739,7 @@ const regexDepth = (s: Json, key: "minDepth" | "maxDepth", path: Path, r: Report
   return key === "minDepth" ? Number.MAX_VALUE : null
 }
 
-const readRegex = (raw: unknown, r: Reporter): Array<RegexScript> => {
+const readRegex = (raw: unknown, r: ReportBuilder): Array<RegexScript> => {
   if (raw === undefined || raw === null) return []
   const base = ["extensions", "regex_scripts"]
   if (!Array.isArray(raw)) {
@@ -793,20 +760,22 @@ const readRegex = (raw: unknown, r: Reporter): Array<RegexScript> => {
       r.add(
         "info",
         "preset.regex_id",
-        `A second regex script \`${shown(id)}\` was renamed \`${shown(renamed)}\`.`,
+        `A second regex script \`${shownText(id)}\` was renamed \`${shownText(renamed)}\`.`,
         path
       )
       id = renamed
     }
-    const what = `Regex script \`${shown(id)}\``
+    const what = `Regex script \`${shownText(id)}\``
     const unsupported: Json = {}
     for (const key of Object.keys(s)) {
       if (REGEX_FIELDS.has(key)) continue
       unsupported[key] = s[key]
-      r.add("info", "preset.unknown_field", `Regex script field \`${shown(key)}\` isn't known. It's kept for export.`, [
-        ...path,
-        key
-      ])
+      r.add(
+        "info",
+        "preset.unknown_field",
+        `Regex script field \`${shownText(key)}\` isn't known. It's kept for export.`,
+        [...path, key]
+      )
     }
     scripts.set(id, {
       id,

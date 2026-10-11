@@ -25,12 +25,18 @@ export class ImportReport extends Schema.Class<ImportReport>("ImportReport")({
 /** How much of a file a report can hold, so a hostile file can't make it large. */
 const MAX_ISSUES = 200
 const MAX_SHOWN_CHARS = 40
+const MAX_SHOWN_ITEMS = 10
 const MAX_PATH_SEGMENTS = 16
 
 type Path = ReadonlyArray<string | number>
 
 /** File-supplied text as a report shows it: at most 40 characters. */
 export const shownText = (text: string) => (text.length > MAX_SHOWN_CHARS ? `${text.slice(0, MAX_SHOWN_CHARS)}…` : text)
+
+/** File-supplied names as a report lists them: the first 10, each shortened, then a count. */
+export const shownList = (items: ReadonlyArray<string>) =>
+  items.slice(0, MAX_SHOWN_ITEMS).map(shownText).join(", ") +
+  (items.length > MAX_SHOWN_ITEMS ? ` and ${items.length - MAX_SHOWN_ITEMS} more` : "")
 
 const shownPath = (path: Path) =>
   (path.length > MAX_PATH_SEGMENTS ? [...path.slice(0, MAX_PATH_SEGMENTS - 1), "…"] : path).map((segment) =>

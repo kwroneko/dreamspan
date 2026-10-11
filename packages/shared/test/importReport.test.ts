@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { ReportBuilder, shownText } from "../src/importReport.ts"
+import { ReportBuilder, shownList, shownText } from "../src/importReport.ts"
 
 describe("bounded import reports", () => {
   it("keeps 200 issues, then counts the rest in one truncation issue", () => {
@@ -23,5 +23,16 @@ describe("bounded import reports", () => {
     expect(path).toHaveLength(16)
     expect(path[0]).toBe(`${"b".repeat(40)}…`)
     expect(path[15]).toBe("…")
+  })
+
+  it("lists the first 10 names, each shortened, then counts the rest", () => {
+    expect(shownList(["a", "b"])).toBe("a, b")
+    const names = Array.from({ length: 25 }, (_, i) => `${i}`.padEnd(50, "x"))
+    expect(shownList(names)).toBe(
+      `${names
+        .slice(0, 10)
+        .map((n) => `${n.slice(0, 40)}…`)
+        .join(", ")} and 15 more`
+    )
   })
 })

@@ -675,7 +675,7 @@ It fails with a typed `ProviderError`.
 
 **Parsers** (`packages/server/src/formats/`) are pure functions over bytes: no database, no files. Each returns an `Effect` that fails with `FormatError` when the file can't be imported at all. Everything recoverable becomes an issue in the `ImportReport` (`@rp/shared/importReport.ts`) instead, so one bad field never costs the whole file.
 - **Lenient fields** (`fields.ts`). A missing or null field takes its default quietly, as in ST. A field of the wrong type takes its default too, and the report names its path. Whole numbers must be safe integers (up to 2^53), as `Schema.Int` requires; file values are only converted to text when they are text or numbers, since an object's `toString` can throw.
-- **Bounded reports** (`ReportBuilder`, `@rp/shared/importReport.ts`). At most 200 issues per file, then one `report.truncated` issue with the count. Paths keep 16 segments; file text quoted in a message or path is cut to 40 characters (`shownText`). Stream D's preset report uses the same numbers.
+- **Bounded reports** (`ReportBuilder`, `@rp/shared/importReport.ts`). At most 200 issues per file, then one `report.truncated` issue with the count. Paths keep 16 segments; file text quoted in a message or path is cut to 40 characters (`shownText`), and lists of file-supplied names to the first 10 plus a count (`shownList`). The preset importer (§9) uses the same builder.
 
 **Card import** (`importCard`, `cardImport.ts`, `card.ts`). The format comes from the bytes, never the file name.
 - **JSON:** detection follows ST: any `spec` with a `data` object is V2 or V3 (an unknown spec is read as V3, with a warning), otherwise a `name` means V1. V1 is mapped as ST maps it (its placeholder creator note dropped, comma-separated tags split).
@@ -767,7 +767,7 @@ ST chat-completion presets (DESIGN §1.2). Pure functions with no database acces
 - **Prototype keys:** `__proto__` keys are dropped at any depth right after parsing, each with a warning, so none reaches an object that a later step assigns into. `constructor` keys are kept as data: assigning one creates an own property and reaches no prototype.
 - **Conversions:** `String()` and `Number()` only ever see primitives. An object whose `toString` and `valueOf` aren't functions would make them throw.
 - **Nothing is executed.** Regex scripts are stored as strings and never compiled. **Compiling one later needs a ReDoS guard**: a pattern like `(a+)+$` takes exponential time on some inputs, and a script runs on every message.
-- **The report is bounded** to 200 issues (`MAX_ISSUES`), plus one saying how many more there were, and in size: text from the file is cut to 40 characters, lists to 10 items plus a count, and paths to 16 segments, so an issue is about 1.5 KB at most.
+- **The report is bounded** by the shared `ReportBuilder` (§8): 200 issues, then one `report.truncated`, with file text, lists and paths shortened, so an issue is about 1.5 KB at most.
 - **Every output matches the schema:** a seeded fuzz test mutates the fixtures with hostile values (infinities, wrong types, unconvertible objects) and decodes every document the importer returns against `PresetDoc`.
 - **Linear time:** lookups go through maps and sets, including the renaming of repeated regex ids, which was quadratic at first (30,000 repeats took 46 s).
 - Each limit's test was checked against its bug: with the check disabled, the test fails.

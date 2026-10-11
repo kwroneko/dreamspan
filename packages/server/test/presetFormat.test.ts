@@ -5,7 +5,6 @@ import { describe, expect, it } from "vitest"
 import {
   exportStPreset,
   importStPreset,
-  MAX_ISSUES,
   MAX_JSON_DEPTH,
   MAX_PRESET_BYTES,
   type PresetImport
@@ -408,6 +407,8 @@ describe("exporting to an ST chat-completion preset", () => {
 })
 
 describe("hardening: the file is untrusted", () => {
+  // The shared ReportBuilder's cap on issues.
+  const MAX_ISSUES = 200
   const valid = JSON.stringify(preset({ temperature: 0.5 }))
 
   it("refuses a file over the size cap before parsing it", () => {
@@ -493,7 +494,7 @@ describe("hardening: the file is untrusted", () => {
     const many = Object.fromEntries(Array.from({ length: MAX_ISSUES * 2 }, (_, i) => [`unknown_${i}`, i]))
     const result = load(preset(many))
     expect(result.report.issues).toHaveLength(MAX_ISSUES + 1)
-    expect(result.report.issues.at(-1)?.code).toBe("preset.more_issues")
+    expect(result.report.issues.at(-1)?.code).toBe("report.truncated")
   })
 
   it("keeps the whole report small, however much text the file supplies", () => {
