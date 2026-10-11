@@ -2,7 +2,7 @@
 
 This document describes only what is implemented. Proposals live in `spec/`. When a spec is implemented, its content moves here in the same commit (CLAUDE.md "Design docs").
 
-**State**: Phase 0 (PLAN.md), 2026-10-11. Built: the scaffold, the full schema, the message-graph operations, the library operations, drafts, the recycle bin, the provider layer (§6), exposure safety and built-in login (§4). Not yet built: any UI beyond a status page (the connection settings and the login page included), and every chat feature.
+**State**: Phase 0 done except the performance harness; phase 1 started (PLAN.md), 2026-10-11. Built: the scaffold, the full schema, the message-graph operations, the library operations, drafts, the recycle bin, the provider layer (§6), exposure safety and built-in login (§4), the login page and the settings screens (§5), and the card, lorebook and preset parsers (§8, §9). Not yet built: the importer that writes parsed files into the library, and every chat feature.
 
 ---
 
