@@ -417,6 +417,15 @@ These are strategies for mapping history to user and assistant roles:
 - **[P]** The server owns all state. Clients subscribe over a WebSocket. Writes are per entity with a version check, and no client ever writes back a large settings blob.
 - **[D]** **Separate users**, each with their own library, chats, connections and settings, as in ST's multi-user mode.
 - **[P]** Authentication: works behind a reverse proxy that handles auth, such as Authelia, plus built-in login. Proxy identities map to users.
+- **[D]** Built-in login (owner, 2026-10-11):
+  - **No sign-up:** accounts are created for people, not by them.
+  - **No account, no login:** on loopback, the app works without setting up an account. Most people will use it this way.
+  - **Once an account is configured,** loopback requires login too. A setting turns that off; it's on by default, for security. As a security setting, it's set only outside the app (§11).
+- **[P]** The details of built-in login:
+  - **What counts as configured:** a user with a password.
+  - **Loopback without login, once accounts exist** (with the setting off), acts as the admin.
+  - **Before any account exists,** allowlisted addresses (`ALLOWED_IPS`) work without login too, like loopback. Docker needs this, because there the host's browser connects from the bridge gateway, not loopback.
+  - **The first password** is set from inside the app, over that passwordless access. There's no separate bootstrap mechanism.
 
 ### 10.2 Rendering
 - **[D]** HTML rendering must be possible (ST's HTML "games"). Interactivity will be expanded later, once the harness is agentic.
