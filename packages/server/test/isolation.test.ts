@@ -82,6 +82,15 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
         assert.notStrictEqual(me.id, owner.user.id)
       })
   },
+  // Self-only: it describes the caller's own session, never anyone else's.
+  GetSession: {
+    probe: (actor, owner) =>
+      Effect.map(actor.api.GetSession(), (session) => {
+        assert.strictEqual(session.user.id, actor.user.id)
+        assert.notStrictEqual(session.user.id, owner.user.id)
+        assert.strictEqual(session.via, "session")
+      })
+  },
   ListUsers: { adminOnly: (actor) => refused(actor.api.ListUsers(), "Forbidden") },
   CreateUser: {
     adminOnly: (actor) =>

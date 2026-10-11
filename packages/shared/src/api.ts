@@ -45,8 +45,7 @@ export class Authentication extends RpcMiddleware.Service<Authentication, { prov
  * without logging in. `loopback`: LOOPBACK_REQUIRES_LOGIN is off. `proxy`: the reverse proxy
  * names the user, and signs them out.
  */
-export const SessionVia = Schema.Literals(["session", "local", "loopback", "proxy"])
-export type SessionVia = typeof SessionVia.Type
+const SessionVia = Schema.Literals(["session", "local", "loopback", "proxy"])
 
 export class Session extends Schema.Class<Session>("Session")({
   user: User,

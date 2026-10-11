@@ -3,7 +3,7 @@
 import type { ComponentType } from "react"
 import { makeRegistry, type Registry } from "./registry.ts"
 
-export interface SlotEntry<Props> {
+interface SlotEntry<Props> {
   readonly id: string
   readonly order: number
   readonly component: ComponentType<Props>

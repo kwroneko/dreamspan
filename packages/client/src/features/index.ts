@@ -8,5 +8,11 @@ import * as shell from "./shell.tsx"
 import * as status from "./status.tsx"
 
 export const registerFeatures = () => {
-  for (const feature of [shell, login, status, connections, credentials, network, accounts]) feature.register()
+  shell.register()
+  login.register()
+  status.register()
+  connections.register()
+  credentials.register()
+  network.register()
+  accounts.register()
 }

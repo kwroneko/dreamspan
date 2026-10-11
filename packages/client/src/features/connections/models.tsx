@@ -1,7 +1,7 @@
 // A connection's models: what the provider lists, merged with the user's edits
 // (spec/PROVIDERS.md §3.1). Each field shows where its value came from.
 import type { ModelRefresh } from "@rp/shared/api.ts"
-import { type Model, type ModelOverrides, type Resolved, resolveModel } from "@rp/shared/providers.ts"
+import { type Model, type ModelOverrides, resolveModel } from "@rp/shared/providers.ts"
 import { type FormEvent, useState } from "react"
 import { AsyncView, ErrorAlert, useAction } from "../../actions.tsx"
 import { Button } from "../../ui/Button.tsx"
@@ -16,7 +16,13 @@ import type { ConnectionSectionProps } from "./detail.tsx"
 const tokens = (n: number) => (n >= 1000 ? `${Math.round(n / 100) / 10}k` : String(n))
 
 /** A field's value, marked when no source knows it (the default is shown, never as fact). */
-function Value({ resolved, show }: { resolved: Resolved<number>; show: (n: number) => string }) {
+function Value({
+  resolved,
+  show
+}: {
+  resolved: ReturnType<typeof resolveModel>["context"]
+  show: (n: number) => string
+}) {
   return resolved.source === "unknown" ? (
     <span className="text-muted" title="Unknown: no source reports it, so a safe default is used">
       {show(resolved.value)}?

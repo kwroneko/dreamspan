@@ -3,9 +3,9 @@ import { type Connection, type ConnectionId, originOf, type ProviderKindInfo } f
 import { allOf } from "../../actions.tsx"
 import { AppClient } from "../../rpc.ts"
 
-export const connectionsAtom = AppClient.query("ListConnections", undefined, { reactivityKeys: ["connections"] })
-export const credentialsAtom = AppClient.query("ListCredentials", undefined, { reactivityKeys: ["credentials"] })
-export const kindsAtom = AppClient.query("ListProviderKinds", undefined, { timeToLive: "5 minutes" })
+const connectionsAtom = AppClient.query("ListConnections", undefined, { reactivityKeys: ["connections"] })
+const credentialsAtom = AppClient.query("ListCredentials", undefined, { reactivityKeys: ["credentials"] })
+const kindsAtom = AppClient.query("ListProviderKinds", undefined, { timeToLive: "5 minutes" })
 /** What the connection and key screens need, requested together. */
 export const providerSetupAtom = allOf({ kinds: kindsAtom, connections: connectionsAtom, credentials: credentialsAtom })
 
