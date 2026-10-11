@@ -62,12 +62,16 @@ export const bareHost = (hostname: string) =>
     .replace(/^\[(.*)\]$/, "$1")
     .replace(/\.$/, "")
 
-/** Whether `host` is on the list by name or by address; `resolved` are its DNS answers. */
+/**
+ * Whether `host` is on the list by name or by address; `resolved` are its DNS answers.
+ * By address, every answer must be on the list: a name with one private and one public
+ * address would otherwise go direct and could connect to the public one.
+ */
 export const bypasses = (list: BypassList, host: string, resolved: ReadonlyArray<string> = []) => {
   const name = bareHost(host)
   if (isIP(name) !== 0) return inAddresses(list.addresses, name)
   if (list.hosts.has(name) || list.suffixes.some((suffix) => name.endsWith(suffix))) return true
-  return resolved.some((ip) => inAddresses(list.addresses, ip))
+  return resolved.length > 0 && resolved.every((ip) => inAddresses(list.addresses, ip))
 }
 
 export type ProxyOverride =

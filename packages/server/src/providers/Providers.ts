@@ -36,7 +36,7 @@ import { createHash, timingSafeEqual } from "node:crypto"
 import { ServerError } from "@rp/shared/errors.ts"
 import { Cause, Context, Effect, Exit, Layer, Queue, Semaphore, Stream } from "effect"
 import { Reader, Writer } from "../db/Database.ts"
-import { Network, type ProxyOverride } from "../net/Network.ts"
+import { Network, type ProxyOverride, RedirectRefused } from "../net/Network.ts"
 import { describeRoute, proxyUrlProblem } from "../net/route.ts"
 import { Secrets } from "../secrets.ts"
 import { catalogEntry } from "./catalog.ts"
@@ -179,10 +179,12 @@ export interface ProvidersShape {
     readonly apiKey: string
     readonly urls: ReadonlyArray<string>
   }) => Effect.Effect<Credential, ProviderError | ServerError>
+  /** A new key, with the origins it may go to stated again: approvals for the old key don't carry over. */
   readonly replaceCredentialKey: (
     userId: UserId,
     credentialId: CredentialId,
-    apiKey: string
+    apiKey: string,
+    urls: ReadonlyArray<string>
   ) => Effect.Effect<Credential, ProviderError | ServerError>
   /**
    * Allows a credential's key to be sent to another origin. Takes the key typed again:
@@ -194,16 +196,23 @@ export interface ProvidersShape {
     readonly apiKey: string
     readonly url: string
   }) => Effect.Effect<Credential, ProviderError | ServerError>
-  /** A key typed for a connection: a new credential bound to its origin, or null for none. */
+  /**
+   * A key typed for a connection: a new credential bound to its origin, or null for none.
+   * `expectedRowVersion` is the connection the user saw, so the key isn't bound to a base
+   * URL someone changed in the meantime.
+   */
   readonly setKey: (
     userId: UserId,
     connectionId: ConnectionId,
-    apiKey: string | null
+    apiKey: string | null,
+    expectedRowVersion: number
   ) => Effect.Effect<Connection, ProviderError | ServerError>
+  /** Header values, bound to the connection's current origin like a key. */
   readonly setHeaders: (
     userId: UserId,
     connectionId: ConnectionId,
-    headers: Readonly<Record<string, string>> | null
+    headers: Readonly<Record<string, string>> | null,
+    expectedRowVersion: number
   ) => Effect.Effect<Connection, ProviderError | ServerError>
   readonly setProxy: (
     userId: UserId,
@@ -241,7 +250,7 @@ const fromStorage = <A, R>(
   effect.pipe(
     Effect.catch((error): Effect.Effect<never, ProviderError | ServerError> =>
       error._tag === "NotFound"
-        ? Effect.fail(providerError("unusable", "connection or model not found"))
+        ? Effect.fail(providerError("unusable", `${error.message || "not found"}`))
         : error._tag === "StaleWrite"
           ? Effect.fail(providerError("bad_request", "the connection changed in another tab; reload it"))
           : Effect.logError("provider storage operation failed", error).pipe(
@@ -315,6 +324,13 @@ export const layer = (options: ProvidersOptions = {}) =>
           if (!info) {
             return yield* providerError("unusable", `the provider kind "${connection.kind}" isn't available`)
           }
+          // A plugin may override a kind; it mustn't silently change existing connections' wire API.
+          if (info.api !== connection.api) {
+            return yield* providerError(
+              "unusable",
+              `the provider kind "${connection.kind}" now speaks ${info.api}, not ${connection.api}; create the connection again`
+            )
+          }
           const decryptWith = (blob: Uint8Array | null, bound: string) =>
             blob === null
               ? Effect.succeed(null)
@@ -337,15 +353,40 @@ export const layer = (options: ProvidersOptions = {}) =>
           if (apiKey === null && !info.keyOptional) {
             return yield* providerError("unusable", `${connection.name} has no API key`)
           }
+          // Header values often carry credentials, so they're bound to their origin like a key.
+          if (resolved.headersEnc !== null && bindKeysToOrigins && resolved.headersOrigin !== origin) {
+            return yield* providerError(
+              "unusable",
+              resolved.headersOrigin === null
+                ? `${connection.name}'s custom headers were set before they were bound to a host; set them again`
+                : `${connection.name}'s custom headers were set for ${resolved.headersOrigin}; set them again for ${origin}`
+            )
+          }
           const headersJson = yield* decryptWith(resolved.headersEnc, binding(connectionId, "headers"))
           const proxyUrl = yield* decryptWith(resolved.proxyUrlEnc, binding(connectionId, "proxy_url"))
-          const override: ProxyOverride =
-            connection.proxyMode === "custom" && proxyUrl !== null
+          // An admin may require the instance proxy for everyone else (owner, 2026-10-11).
+          const forced = network.forced() && resolved.ownerRole !== "admin"
+          // Fails closed: setInstance refuses forcing without a proxy, but an unreadable one counts too.
+          if (forced && (yield* network.view).proxy === null) {
+            return yield* providerError("unusable", "the admin requires the instance proxy, but none is set")
+          }
+          const override: ProxyOverride = forced
+            ? { mode: "inherit" }
+            : connection.proxyMode === "custom" && proxyUrl !== null
               ? { mode: "custom", url: proxyUrl }
               : connection.proxyMode === "direct"
                 ? { mode: "direct" }
                 : { mode: "inherit" }
           const headers = headersJson === null ? {} : (JSON.parse(headersJson) as Record<string, string>)
+          // Over http a connection's own proxy reads every byte. Setting one needs no key, so
+          // it would otherwise be a way to collect the key in the clear.
+          const secret = apiKey !== null || Object.keys(headers).length > 0
+          if (override.mode === "custom" && secret && new URL(baseUrl).protocol === "http:") {
+            return yield* providerError(
+              "unusable",
+              `${connection.name} sends its key over http, so its own proxy could read it; use https, or the instance proxy`
+            )
+          }
           const prepared: Prepared = {
             connection,
             kind: info,
@@ -362,7 +403,9 @@ export const layer = (options: ProvidersOptions = {}) =>
             if (route.via === "proxy") {
               return yield* providerError(
                 "unusable",
-                `${info.label} connections can't go through a proxy yet (pi-ai's adapter doesn't take one); set this connection to direct or add the host to the bypass list`
+                forced
+                  ? `${info.label} connections can't go through a proxy yet (pi-ai's adapter doesn't take one), and the admin requires the instance proxy`
+                  : `${info.label} connections can't go through a proxy yet (pi-ai's adapter doesn't take one); set this connection to direct or add the host to the bypass list`
               )
             }
           }
@@ -384,6 +427,20 @@ export const layer = (options: ProvidersOptions = {}) =>
         return trimmed === "" ? null : trimmed
       }
 
+      /** Short keys get no hint: four characters would be most of the key. */
+      const encryptKey = (key: string, credentialId: CredentialId) => ({
+        enc: secrets.encrypt(key, credentialBinding(credentialId)),
+        hint: key.length >= 12 ? key.slice(-4) : ""
+      })
+
+      /** A typed key as a credential owned by a connection, bound to the connection's origin. */
+      const typedCredential = (name: string, key: string, baseUrl: string) =>
+        Effect.gen(function* () {
+          const credentialId = uuidv7() as CredentialId
+          const origins = yield* originsOf([baseUrl])
+          return { credentialId, name, key: encryptKey(key, credentialId), origins }
+        })
+
       const originsOf = (urls: ReadonlyArray<string>) =>
         Effect.forEach(urls, (url) => {
           const origin = originOf(url)
@@ -403,22 +460,19 @@ export const layer = (options: ProvidersOptions = {}) =>
               userId,
               credentialId,
               name,
-              key: { enc: secrets.encrypt(key, credentialBinding(credentialId)), hint: key.slice(-4) },
+              key: encryptKey(key, credentialId),
               origins
             })
           )
         })
 
-      const replaceCredentialKey: ProvidersShape["replaceCredentialKey"] = (userId, credentialId, apiKey) =>
+      const replaceCredentialKey: ProvidersShape["replaceCredentialKey"] = (userId, credentialId, apiKey, urls) =>
         Effect.gen(function* () {
           const key = typedKey(apiKey)
           if (key === null) return yield* providerError("bad_request", "the key is empty")
+          const origins = yield* originsOf(urls)
           return yield* fromStorage(
-            writer.ReplaceCredentialKey({
-              userId,
-              credentialId,
-              key: { enc: secrets.encrypt(key, credentialBinding(credentialId)), hint: key.slice(-4) }
-            })
+            writer.ReplaceCredentialKey({ userId, credentialId, key: encryptKey(key, credentialId), origins })
           )
         })
 
@@ -435,20 +489,6 @@ export const layer = (options: ProvidersOptions = {}) =>
           return yield* fromStorage(writer.AddCredentialOrigin({ userId, credentialId, origin: origin! }))
         })
 
-      /** A typed key for a connection becomes a credential bound to the connection's origin. */
-      const credentialFor = (
-        userId: UserId,
-        name: string,
-        kind: ProviderKind,
-        baseUrl: string | null,
-        apiKey: string
-      ) =>
-        Effect.gen(function* () {
-          const entry = registry.kinds.get(kind)
-          if (!entry) return yield* providerError("bad_request", `unknown provider kind "${kind}"`)
-          return yield* createCredential({ userId, name, apiKey, urls: [baseUrl ?? entry.defaultBaseUrl] })
-        })
-
       const createConnection: ProvidersShape["createConnection"] = ({ userId, kind, settings, apiKey, credentialId }) =>
         Effect.gen(function* () {
           const entry = registry.kinds.get(kind)
@@ -456,8 +496,8 @@ export const layer = (options: ProvidersOptions = {}) =>
           const key = typedKey(apiKey)
           const credential =
             key === null
-              ? (credentialId ?? null)
-              : (yield* credentialFor(userId, settings.name, kind, settings.baseUrl, key)).id
+              ? { existing: credentialId ?? null }
+              : { typed: yield* typedCredential(settings.name, key, settings.baseUrl ?? entry.defaultBaseUrl) }
           return yield* fromStorage(
             writer.CreateConnection({
               userId,
@@ -465,41 +505,60 @@ export const layer = (options: ProvidersOptions = {}) =>
               kind,
               api: entry.api,
               settings,
-              credentialId: credential
+              credential
             })
           )
         })
 
-      const setKey: ProvidersShape["setKey"] = (userId, connectionId, apiKey) =>
+      /** The origin a connection's requests go to now. */
+      const connectionOrigin = (userId: UserId, connectionId: ConnectionId) =>
+        Effect.gen(function* () {
+          const connection = yield* fromStorage(reader.GetConnection({ userId, connectionId }))
+          const entry = registry.kinds.get(connection.kind)
+          if (!entry) return yield* providerError("unusable", `the provider kind "${connection.kind}" isn't available`)
+          return { connection, baseUrl: connection.baseUrl ?? entry.defaultBaseUrl }
+        })
+
+      const setKey: ProvidersShape["setKey"] = (userId, connectionId, apiKey, expectedRowVersion) =>
         Effect.gen(function* () {
           const key = typedKey(apiKey)
-          if (key === null) {
-            return yield* fromStorage(writer.SetConnectionCredential({ userId, connectionId, credentialId: null }))
-          }
-          const connection = yield* fromStorage(reader.GetConnection({ userId, connectionId }))
-          const credential = yield* credentialFor(userId, connection.name, connection.kind, connection.baseUrl, key)
+          const { connection, baseUrl } = yield* connectionOrigin(userId, connectionId)
+          const credential = key === null ? null : yield* typedCredential(connection.name, key, baseUrl)
+          return yield* fromStorage(writer.SetConnectionKey({ userId, connectionId, expectedRowVersion, credential }))
+        })
+
+      const setHeaders: ProvidersShape["setHeaders"] = (userId, connectionId, headers, expectedRowVersion) =>
+        Effect.gen(function* () {
+          const { baseUrl } = yield* connectionOrigin(userId, connectionId)
+          const [origin] = yield* originsOf([baseUrl])
           return yield* fromStorage(
-            writer.SetConnectionCredential({ userId, connectionId, credentialId: credential.id })
+            writer.SetConnectionHeaders({
+              userId,
+              connectionId,
+              expectedRowVersion,
+              headers:
+                headers === null || Object.keys(headers).length === 0
+                  ? null
+                  : {
+                      enc: secrets.encrypt(JSON.stringify(headers), binding(connectionId, "headers")),
+                      names: Object.keys(headers),
+                      origin: origin!
+                    }
+            })
           )
         })
 
-      const setHeaders: ProvidersShape["setHeaders"] = (userId, connectionId, headers) =>
-        fromStorage(
-          writer.SetConnectionHeaders({
-            userId,
-            connectionId,
-            headers:
-              headers === null || Object.keys(headers).length === 0
-                ? null
-                : {
-                    enc: secrets.encrypt(JSON.stringify(headers), binding(connectionId, "headers")),
-                    names: Object.keys(headers)
-                  }
-          })
-        )
-
       const setProxy: ProvidersShape["setProxy"] = (userId, connectionId, mode, url) =>
         Effect.gen(function* () {
+          if (mode !== "inherit" && network.forced()) {
+            const resolved = yield* fromStorage(reader.ResolveConnection({ userId, connectionId }))
+            if (resolved.ownerRole !== "admin") {
+              return yield* providerError(
+                "bad_request",
+                "the admin requires every connection to use the instance proxy"
+              )
+            }
+          }
           if (mode === "custom") {
             const problem = url === null ? "no proxy URL" : proxyUrlProblem(url)
             if (problem) return yield* providerError("bad_request", `proxy: ${problem}`)
@@ -627,7 +686,8 @@ export const layer = (options: ProvidersOptions = {}) =>
           status: null as number | null,
           retryAfterMs: null as number | null,
           firstTokenAt: null as number | null,
-          partial: null as AssistantMessage | null
+          partial: null as AssistantMessage | null,
+          refused: null as string | null
         }
         /** What the request produced so far, for a close after an interruption or a defect. */
         const partialMessage = (stopReason: "aborted" | "error", errorMessage?: string): AssistantMessage => ({
@@ -704,7 +764,12 @@ export const layer = (options: ProvidersOptions = {}) =>
           // errors), so the status and Retry-After are read here, on every response.
           const routed = fetchFor(prepared, onRoute)
           const observed: typeof fetch = async (input, init) => {
-            const response = await routed(input, init)
+            // pi turns a thrown fetch into "Connection error.", which would be retried as a
+            // network failure; a refused redirect is kept and reported as it is.
+            const response = await routed(input, init).catch((error: unknown) => {
+              if (error instanceof RedirectRefused) state.refused = error.message
+              throw error
+            })
             state.status = response.status
             state.retryAfterMs = parseRetryAfter(response.headers.get("retry-after") ?? undefined)
             return response
@@ -769,12 +834,15 @@ export const layer = (options: ProvidersOptions = {}) =>
               Effect.succeed(partialMessage("error", thrown instanceof Error ? thrown.message : String(thrown)))
             )
           )
-          const classified = classify(
-            message,
-            { status: state.status, retryAfterMs: state.retryAfterMs, category: state.capture.refusalCategory },
-            knownContext,
-            state.firstTokenAt !== null
-          )
+          const classified =
+            state.refused !== null
+              ? providerError("unusable", state.refused)
+              : classify(
+                  message,
+                  { status: state.status, retryAfterMs: state.retryAfterMs, category: state.capture.refusalCategory },
+                  knownContext,
+                  state.firstTokenAt !== null
+                )
           const error = classified === null ? null : scrubbed(prepared, classified)
           return { message, error }
         })

@@ -81,7 +81,11 @@ describe("rpc", () => {
       assert.strictEqual(created.keyHint, "4321")
       const listed = yield* alice.ListConnections()
       assert.notInclude(JSON.stringify(listed), "secret-value")
-      yield* alice.SetConnectionHeaders({ connectionId: created.id, headers: { "X-Token": "header-secret" } })
+      yield* alice.SetConnectionHeaders({
+        connectionId: created.id,
+        headers: { "X-Token": "header-secret" },
+        expectedRowVersion: created.rowVersion
+      })
       assert.notInclude(JSON.stringify(yield* alice.ListConnections()), "header-secret")
 
       // Bob can't see, use, change or delete Alice's connection.
@@ -96,14 +100,14 @@ describe("rpc", () => {
           )
         )
       const outcomes = yield* Effect.all([
-        outcome(bob.SetConnectionKey({ connectionId: created.id, apiKey: "sk-bob" })),
+        outcome(bob.SetConnectionKey({ connectionId: created.id, apiKey: "sk-bob", expectedRowVersion: 1 })),
         outcome(bob.TestConnection({ connectionId: created.id })),
         outcome(bob.RefreshModels({ connectionId: created.id })),
         outcome(bob.ListModels({ connectionId: created.id, includeHidden: true })),
         outcome(bob.DeleteConnection({ connectionId: created.id })),
         outcome(bob.SetConnectionCredential({ connectionId: created.id, credentialId: null })),
         outcome(bob.RenameCredential({ credentialId: created.credentialId!, name: "mine" })),
-        outcome(bob.ReplaceCredentialKey({ credentialId: created.credentialId!, apiKey: "sk-bob-key" })),
+        outcome(bob.ReplaceCredentialKey({ credentialId: created.credentialId!, apiKey: "sk-bob-key", urls: [] })),
         outcome(
           bob.AllowCredentialHost({
             credentialId: created.credentialId!,
@@ -132,10 +136,11 @@ describe("rpc", () => {
       assert.strictEqual(refused, "Forbidden")
       const set = yield* alice.SetNetworkSettings({
         proxyUrl: "socks5://user:pw@vpn.example:1080",
-        bypass: ["localhost", "192.168.0.0/16"]
+        bypass: ["localhost", "192.168.0.0/16"],
+        forceProxy: false
       })
       assert.strictEqual(set.proxy, "socks5://vpn.example:1080")
-      const invalid = yield* alice.SetNetworkSettings({ bypass: ["not a host"] }).pipe(
+      const invalid = yield* alice.SetNetworkSettings({ bypass: ["not a host"], forceProxy: false }).pipe(
         Effect.map(() => "allowed"),
         Effect.catch((error) => Effect.succeed(error._tag))
       )

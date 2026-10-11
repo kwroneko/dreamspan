@@ -40,6 +40,7 @@ export interface ConnectionRow {
   readonly credential_name: string | null
   readonly credential_hint: string | null
   readonly headers_enc: Uint8Array | null
+  readonly headers_origin: string | null
   readonly header_names_json: string
   readonly compat_json: string
   readonly cache_ttl_s: number | null

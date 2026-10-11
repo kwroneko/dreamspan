@@ -72,7 +72,7 @@ Bun was measured as an alternative (2026-10-10) and not adopted. On this server 
 - **A changed secret** makes stored secrets unreadable (`SecretUnreadable`), which surfaces as "enter the key again". It never surfaces as a crash.
 
 **Outgoing requests** (`net/`, spec/PROVIDERS.md §6.2). Every request the server sends goes through the `Network` service. ESLint forbids the global `fetch`, `undici` and `node:https` anywhere else in `packages/server/src`, so nothing can skip the proxy by accident.
-- **The instance settings** are an optional proxy (HTTP, HTTPS or SOCKS5) and a bypass list of hostnames, `*.domain` suffixes, IPs and CIDR ranges. Local ranges are on the bypass list by default (loopback, RFC 1918, link-local, CGNAT, IPv6 ULA and link-local).
+- **The instance settings** are an optional proxy (HTTP, HTTPS or SOCKS5) and a bypass list of hostnames, `*.domain` suffixes, IPs and CIDR ranges. Local ranges are on the bypass list by default (loopback, RFC 1918, link-local, CGNAT, IPv6 ULA and link-local). A hostname bypasses by address only if every address it resolves to is on the list, and its connection is then pinned to those addresses (`bypassOnlyLookup`), so a second lookup can't land elsewhere. With `forceProxy`, non-admins can't send direct or through their own proxy (§6).
   - They're stored in `app_settings`, with the proxy URL encrypted, since it can hold credentials.
   - The proxy is only ever shown as scheme, host and port.
   - Unusable settings are refused with `InvalidNetworkSettings`.
@@ -172,6 +172,7 @@ Migrations (`migrations.ts`) run in the writer through Effect's `SqliteMigrator`
 - `0005_providers` (§3.12): `connections` and `models` in their final shape, and the `llm_requests` usage ledger
 - `0006_credentials` (§3.12): keys as credentials that connections reference, bound to hosts
 - `0007_accounts` (§4): `users.password_hash`, and `sessions`
+- `0008_secret_bindings` (§3.12): `connections.headers_origin`, `credentials.connection_owned`
 
 Conventions:
 - **Tables:** all `STRICT`, with JSON columns guarded by `json_valid` CHECKs and timestamps in epoch milliseconds.
@@ -357,13 +358,18 @@ Deleting is deliberate and fundamentally non-destructive (DESIGN §6.2): deletes
 The provider layer's storage (spec/PROVIDERS.md §2, §3.1, §9.1), in migration `0005_providers` (`db/schema/providers.ts`).
 
 **`credentials`** (migration `0006_credentials`): keys, each stored once and used by any number of connections.
-- **The columns:** `key_enc` (encrypted, bound to `credential:<id>:key`), `key_hint` (its last 4 characters), a name, and `origins_json`, the origins (scheme, host and port) the key may be sent to.
+- **The columns:** `key_enc` (encrypted, bound to `credential:<id>:key`), `key_hint` (its last 4 characters; empty for keys under 12, where 4 characters would be most of the key), a name, `origins_json`, the origins (scheme, host and port) the key may be sent to, and `connection_owned` (0008): the credential was made from a key typed into one connection.
 - **The rule** (owner, 2026-10-11): a key is sent only to an origin its credential allows.
   - The origins are recorded when the key is entered.
   - Adding one takes the key typed again (`AllowCredentialHost`). The main thread checks it against the stored key with a constant-time comparison.
   - Code acting as the user without knowing the key (a stolen session, an XSS, a plugin in the page) can edit connections, but can't redirect a key to a new host.
   - Changing a path on the same host needs nothing.
-- **Why:** keys are money, so making them easy to steal makes the frontend worth attacking. ST is a target for exactly this reason.
+  - **Replacing a key states its origins again** (`ReplaceCredentialKey` takes them). Origins approved under the old key don't carry over: otherwise a stolen session could swap in a junk key, approve its own host with it, and wait for the user to re-enter the real one.
+    - **The client must make the user confirm each origin** in the replace-key dialog, starting from the hosts of the connections using the credential. It must not pre-fill and submit the stored list: a stolen session can replace the key and the origins together, and the server can't tell that from the user.
+  - **Header values are bound the same way.** `headers_origin` (0008) records the origin they were set for, and they're refused anywhere else until set again. Gateway tokens, Azure's `api-key` and Cloudflare Access secrets live in headers. Headers from before 0008 have no origin and must be set again.
+  - **A key typed into a connection** (`SetConnectionKey`) is bound to the base URL of the row version the user saw. A stale form is a `StaleWrite`, so a key isn't bound to a URL someone changed in the meantime. The connection's previous key is deleted if the connection owned it and nothing else uses it, so a rotated (possibly leaked) key doesn't stay at rest. A credential the user created and attached is never deleted this way.
+  - **Redirects stay within the origin** (`Network.fetchFor`). undici strips only `authorization` and cookies on a cross-origin redirect, so `x-api-key`, `x-goog-api-key` and custom headers would follow an open redirect on an allowed host. Same-origin redirects are followed (at most 5), each routed afresh. A redirect to another origin is a `RedirectRefused` error, reported as `unusable` and never retried. Google's adapter uses pi-ai's own fetch, so its redirects aren't covered.
+  - **A connection's own proxy can't carry a key over `http`.** Setting one needs no key, and over `http` the proxy reads every byte. Such a connection is `unusable` until it uses `https` or the instance proxy.- **Why:** keys are money, so making them easy to steal makes the frontend worth attacking. ST is a target for exactly this reason.
 - **Switching it off** is possible only from outside the app: `KEY_HOST_BINDING=false`. Most settings are meant to be changeable from inside, including by the user's agent; security settings are the exception.
 - **Server-side code can still read keys** (spec/PLUGINS.md §6.1). This protects against everything that acts through the browser.
 
@@ -393,17 +399,17 @@ The provider layer's storage (spec/PROVIDERS.md §2, §3.1, §9.1), in migration
 - **Connections:**
   - `CreateConnection`: the caller picks the id, since secrets are encrypted bound to it
   - `UpdateConnection`: with `expectedRowVersion`
-  - `SetConnectionCredential`, `SetConnectionHeaders`, `SetConnectionProxy`
+  - `SetConnectionKey` (a typed key or none, with `expectedRowVersion`), `SetConnectionCredential`, `SetConnectionHeaders` (with `expectedRowVersion`), `SetConnectionProxy`
   - `DeleteConnection`: through the bin. A purge leaves the tombstone described above.
   - `ListConnections`, `GetConnection`: secrets appear only as `hasKey`, `keyHint` and header names
   - `ResolveConnection`: the ciphertext and the credential's origins, for the provider layer only
 - **Credentials:**
   - `CreateCredential`, `RenameCredential`
-  - `ReplaceCredentialKey`: updates every connection using it
+  - `ReplaceCredentialKey`: updates every connection using it, with the origins stated again
   - `AddCredentialOrigin`
   - `DeleteCredential`: connections using it are left without a key
   - `ListCredentials`: with how many connections use each
-  - `ResolveCredential`: the ciphertext, for checking a retyped key
+  - `ResolveCredential`: the ciphertext only, for checking a retyped key
 - **Models:**
   - `SyncFetchedModels`: adds new models, refreshes `upstream_json`, and marks unlisted ones missing. Models only ever added by hand are never marked.
   - `AddUserModel`
@@ -555,6 +561,8 @@ It fails with a typed `ProviderError`.
   - a call that throws instead of reporting, and a defect, close it as `failed`
 - **Secrets never appear in errors.** Error text (including the response bodies quoted in model-list errors, scrubbed before they're shortened) passes through a per-request scrubber before it's stored or shown. The scrubber covers the key, header values and the custom proxy URL with its password, longest first, and skips values under 6 characters.
 - **Google:** pi-ai's adapter rejects a custom `fetch`, so a Google connection whose route is a proxy is refused as `unusable` rather than silently going direct.
+- **A kind's wire API is fixed per connection.** If a plugin overrides a kind with another `api`, existing connections become `unusable` rather than silently speaking another API.
+- **Forcing the proxy** (owner, 2026-10-11): with `forceProxy` in the network settings (admin), non-admins' connections ignore `direct` and custom proxies and use the instance proxy, and setting either is refused. The bypass list still applies; the admin sets it. Forcing needs a proxy (`setInstance` refuses it without one), and without a usable one, non-admins' requests are `unusable` rather than direct.
 
 **Explicit cache breakpoints** (`breakpoints.ts`, PROVIDERS §8), for Anthropic Messages so far:
 - **The caller names positions:** `options.breakpoints` lists indices into the request's `context.messages`, most important first.

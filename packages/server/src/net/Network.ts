@@ -1,6 +1,7 @@
 // The one place outgoing HTTP leaves the server (spec/PROVIDERS.md §6.2). Every request
 // is routed through the instance proxy, a connection's own proxy, or direct, and the
 // route taken is reported, never silent. ESLint forbids `fetch` and `undici` elsewhere.
+import { lookup as lookupCallback, type LookupAddress } from "node:dns"
 import { lookup } from "node:dns/promises"
 import { InvalidNetworkSettings } from "@rp/shared/api.ts"
 import { ServerError } from "@rp/shared/errors.ts"
@@ -10,6 +11,7 @@ import { Reader, Writer } from "../db/Database.ts"
 import { Secrets } from "../secrets.ts"
 import {
   type BypassList,
+  bypasses,
   DEFAULT_BYPASS,
   decideRoute,
   displayProxy,
@@ -28,13 +30,16 @@ const PROXY_BINDING = "app:network:proxy_url"
 /** What's stored in app_settings: the proxy URL may hold credentials, so it's encrypted. */
 const StoredNetwork = Schema.Struct({
   proxyUrlEnc: Schema.NullOr(Schema.String),
-  bypass: Schema.Array(Schema.String)
+  bypass: Schema.Array(Schema.String),
+  forceProxy: Schema.optionalKey(Schema.Boolean)
 })
 
 /** The instance's network settings as an admin sees them: credentials never shown. */
 export interface NetworkView {
   readonly proxy: string | null
   readonly bypass: ReadonlyArray<string>
+  /** Non-admins' connections can't go direct or through their own proxy (owner, 2026-10-11). */
+  readonly forceProxy: boolean
 }
 
 export interface NetworkShape {
@@ -44,11 +49,14 @@ export interface NetworkShape {
    */
   readonly fetchFor: (override: ProxyOverride, onRoute?: (route: Route, target: URL) => void) => typeof fetch
   readonly route: (target: URL, override: ProxyOverride) => Effect.Effect<Route>
+  /** Whether non-admins must use the instance proxy. */
+  readonly forced: () => boolean
   readonly view: Effect.Effect<NetworkView>
   /** Replaces the instance settings; `proxyUrl` undefined keeps the stored proxy. */
   readonly setInstance: (settings: {
     readonly proxyUrl: string | null | undefined
     readonly bypass: ReadonlyArray<string>
+    readonly forceProxy: boolean
   }) => Effect.Effect<NetworkView, InvalidNetworkSettings | ServerError>
 }
 
@@ -58,12 +66,44 @@ interface Current {
   readonly proxyUrl: string | null
   readonly bypassEntries: ReadonlyArray<string>
   readonly bypass: BypassList
+  readonly forceProxy: boolean
+}
+
+const MAX_REDIRECTS = 5
+
+/** A redirect to another origin, refused: it would carry the request's secrets there. */
+export class RedirectRefused extends Error {
+  override readonly name = "RedirectRefused"
 }
 
 const resolveHost = async (host: string) => (await lookup(host, { all: true })).map((answer) => answer.address)
 
-const makeDispatcher = (route: Route): Dispatcher => {
-  if (route.via === "direct") return new Agent()
+/**
+ * For targets that go direct because their addresses are on the bypass list: the
+ * connection may only use those addresses. Without this, the socket's own lookup could
+ * answer differently (DNS rebinding) and leave the network the proxy was meant to cover.
+ */
+export const bypassOnlyLookup =
+  (bypass: () => BypassList) =>
+  (
+    hostname: string,
+    options: { readonly all?: boolean; readonly family?: number },
+    callback: (error: Error | null, address: string | ReadonlyArray<LookupAddress>, family?: number) => void
+  ) =>
+    lookupCallback(hostname, { all: true, family: options.family ?? 0 }, (error, answers) => {
+      if (error) return callback(error, [])
+      const allowed = answers.filter((answer) => bypasses(bypass(), answer.address))
+      if (allowed.length === 0) return callback(new Error(`${hostname} no longer resolves to a bypassed address`), [])
+      if (options.all) return callback(null, allowed)
+      callback(null, allowed[0]!.address, allowed[0]!.family)
+    })
+
+const makeDispatcher = (route: Route, bypass: () => BypassList): Dispatcher => {
+  if (route.via === "direct") {
+    return route.reason === "bypass"
+      ? new Agent({ connect: { lookup: bypassOnlyLookup(bypass) as never } })
+      : new Agent()
+  }
   const url = new URL(route.proxy)
   return url.protocol === "socks5:" || url.protocol === "socks5h:"
     ? new Socks5ProxyAgent(url)
@@ -89,7 +129,12 @@ export const layer = Layer.effect(
               // into "no proxy": requests then fail until an admin re-enters it.
               Effect.catchTag("SecretUnreadable", () => Effect.succeed("unreadable://proxy"))
             )
-      return { proxyUrl, bypassEntries, bypass: parseBypass(bypassEntries).list } satisfies Current
+      return {
+        proxyUrl,
+        bypassEntries,
+        bypass: parseBypass(bypassEntries).list,
+        forceProxy: stored?.forceProxy ?? false
+      } satisfies Current
     })
 
     const current = yield* Ref.make(yield* Effect.orDie(load))
@@ -97,10 +142,10 @@ export const layer = Layer.effect(
     // One dispatcher per route, reused so connections pool; closed with the layer.
     const dispatchers = new Map<string, Dispatcher>()
     const dispatcherFor = (route: Route) => {
-      const key = route.via === "direct" ? "direct" : route.proxy
+      const key = route.via === "direct" ? `direct:${route.reason === "bypass" ? "bypass" : "any"}` : route.proxy
       let dispatcher = dispatchers.get(key)
       if (!dispatcher) {
-        dispatcher = makeDispatcher(route)
+        dispatcher = makeDispatcher(route, () => Ref.getUnsafe(current).bypass)
         dispatchers.set(key, dispatcher)
       }
       return dispatcher
@@ -120,18 +165,48 @@ export const layer = Layer.effect(
       })
     }
 
+    /**
+     * Redirects are followed only within the origin. undici strips just `authorization` and
+     * cookies on a cross-origin redirect, so `x-api-key` and custom headers would follow a
+     * redirect anywhere: an open redirect on an allowed host would carry the key off. Each
+     * hop is routed afresh.
+     */
     const fetchFor: NetworkShape["fetchFor"] = (override, onRoute) => {
-      const routed = async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
-        const target = new URL(input instanceof Request ? input.url : input.toString())
-        const route = await routeNow(target, override)
-        if (route.via === "proxy" && proxyUrlProblem(route.proxy) !== null) {
-          throw new Error(`The proxy for this request is unusable: ${proxyUrlProblem(route.proxy)}`)
+      const routed = async (input: Parameters<typeof fetch>[0], init: RequestInit = {}) => {
+        let target = new URL(input instanceof Request ? input.url : input.toString())
+        let request: { input: Parameters<typeof fetch>[0]; init: RequestInit } = { input, init }
+        for (let hop = 0; ; hop++) {
+          const route = await routeNow(target, override)
+          if (route.via === "proxy" && proxyUrlProblem(route.proxy) !== null) {
+            throw new Error(`The proxy for this request is unusable: ${proxyUrlProblem(route.proxy)}`)
+          }
+          onRoute?.(route, target)
+          const response = await undiciFetch(request.input as Parameters<typeof undiciFetch>[0], {
+            ...(request.init as unknown as Parameters<typeof undiciFetch>[1]),
+            redirect: "manual",
+            dispatcher: dispatcherFor(route)
+          })
+          const location = response.headers.get("location")
+          if (response.status < 300 || response.status > 399 || location === null)
+            return response as unknown as Response
+          await response.body?.cancel()
+          const next = new URL(location, target)
+          if (next.origin !== target.origin) {
+            throw new RedirectRefused(`refused a redirect from ${target.origin} to ${next.origin}`)
+          }
+          if (hop >= MAX_REDIRECTS) throw new Error(`more than ${MAX_REDIRECTS} redirects`)
+          if (input instanceof Request) throw new Error("redirects aren't followed for this request")
+          // As fetch does: 303, and 301/302 after a POST, become a GET without a body.
+          const toGet =
+            response.status === 303 ||
+            ((response.status === 301 || response.status === 302) && request.init.method === "POST")
+          const body = request.init.body
+          if (!toGet && body != null && typeof body !== "string" && !(body instanceof Uint8Array)) {
+            throw new Error("a redirect would need the request body sent again")
+          }
+          request = { input: next.href, init: toGet ? { ...request.init, method: "GET", body: null } : request.init }
+          target = next
         }
-        onRoute?.(route, target)
-        return undiciFetch(input as Parameters<typeof undiciFetch>[0], {
-          ...(init as Parameters<typeof undiciFetch>[1]),
-          dispatcher: dispatcherFor(route)
-        })
       }
       return routed as unknown as typeof fetch
     }
@@ -139,17 +214,20 @@ export const layer = Layer.effect(
     const view = Ref.get(current).pipe(
       Effect.map((settings) => ({
         proxy: settings.proxyUrl === null ? null : displayProxy(settings.proxyUrl),
-        bypass: settings.bypassEntries
+        bypass: settings.bypassEntries,
+        forceProxy: settings.forceProxy
       }))
     )
 
-    const setInstance: NetworkShape["setInstance"] = ({ proxyUrl, bypass }) =>
+    const setInstance: NetworkShape["setInstance"] = ({ proxyUrl, bypass, forceProxy }) =>
       Effect.gen(function* () {
         const problems: Array<string> = []
         const proxyProblem = typeof proxyUrl === "string" ? proxyUrlProblem(proxyUrl) : null
         if (proxyProblem) problems.push(`proxy: ${proxyProblem}`)
         const parsed = parseBypass(bypass)
         for (const entry of parsed.invalid) problems.push(`bypass entry not understood: ${entry}`)
+        const nextProxyUrl = proxyUrl === undefined ? Ref.getUnsafe(current).proxyUrl : proxyUrl
+        if (forceProxy && nextProxyUrl === null) problems.push("requiring the proxy needs a proxy to be set")
         if (problems.length > 0) return yield* new InvalidNetworkSettings({ problems })
 
         const before = yield* Ref.get(current)
@@ -157,7 +235,7 @@ export const layer = Layer.effect(
         const proxyUrlEnc =
           nextProxy === null ? null : Buffer.from(secrets.encrypt(nextProxy, PROXY_BINDING)).toString("base64")
         yield* writer
-          .SetAppSetting({ key: SETTING_KEY, value: { proxyUrlEnc, bypass } })
+          .SetAppSetting({ key: SETTING_KEY, value: { proxyUrlEnc, bypass, forceProxy } })
           .pipe(
             Effect.catch((error) =>
               Effect.logError("saving network settings failed", error).pipe(
@@ -165,13 +243,14 @@ export const layer = Layer.effect(
               )
             )
           )
-        yield* Ref.set(current, { proxyUrl: nextProxy, bypassEntries: bypass, bypass: parsed.list })
+        yield* Ref.set(current, { proxyUrl: nextProxy, bypassEntries: bypass, bypass: parsed.list, forceProxy })
         return yield* view
       })
 
     return Network.of({
       fetchFor,
       route: (target, override) => Effect.promise(() => routeNow(target, override)),
+      forced: () => Ref.getUnsafe(current).forceProxy,
       view,
       setInstance
     })

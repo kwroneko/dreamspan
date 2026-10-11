@@ -126,9 +126,8 @@ export interface ListRequest {
   readonly apiKey: string | null
   readonly headers: Readonly<Record<string, string>>
   readonly fetch: typeof fetch
-  readonly signal?: AbortSignal
   /** Removes the connection's secrets; applied before error bodies are shortened. */
-  readonly scrub?: (text: string) => string
+  readonly scrub: (text: string) => string
 }
 
 const joinUrl = (base: string, path: string) => `${base.replace(/\/+$/, "")}/${path.replace(/^\/+/, "")}`
@@ -147,7 +146,7 @@ const getJson = (request: ListRequest, url: string, auth: Record<string, string>
           response.status === 401 || response.status === 403 ? "auth" : response.status === 404 ? "not_found" : "http",
         status: response.status,
         // Scrub first: a key straddling the cut would otherwise survive in part.
-        message: `${response.status} ${response.statusText}${body ? `: ${(request.scrub?.(body) ?? body).slice(0, 300)}` : ""}`
+        message: `${response.status} ${response.statusText}${body ? `: ${request.scrub(body).slice(0, 300)}` : ""}`
       })
     }
     return yield* Effect.tryPromise({

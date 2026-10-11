@@ -69,6 +69,30 @@ export const makeProviderWriteHandlers = Effect.gen(function* () {
           Effect.flatMap(([row]) => (row ? Effect.void : Effect.fail(new NotFound({ entity: "ref", id: refId }))))
         )
 
+  const insertCredential = (
+    userId: UserId,
+    credential: {
+      readonly credentialId: string
+      readonly name: string
+      readonly key: { readonly enc: Uint8Array; readonly hint: string }
+      readonly origins: ReadonlyArray<string>
+    },
+    connectionOwned: boolean
+  ) => {
+    const now = Date.now()
+    return sql`INSERT INTO credentials ${sql.insert({
+      id: credential.credentialId,
+      owner_user_id: userId,
+      name: credential.name,
+      key_enc: credential.key.enc,
+      key_hint: credential.key.hint,
+      origins_json: JSON.stringify([...new Set(credential.origins)]),
+      connection_owned: connectionOwned ? 1 : 0,
+      created_at: now,
+      updated_at: now
+    })}`
+  }
+
   /** Optimistic concurrency on a model's edits. */
   const modelAt = (userId: UserId, modelId: string, expected: number) =>
     Effect.gen(function* () {
@@ -80,10 +104,12 @@ export const makeProviderWriteHandlers = Effect.gen(function* () {
     })
 
   const handlers = {
-    CreateConnection: ({ userId, connectionId, kind, api, settings, credentialId }) =>
+    CreateConnection: ({ userId, connectionId, kind, api, settings, credential }) =>
       Effect.gen(function* () {
         yield* checkPresetRef(userId, settings.presetOverrideRefId)
-        yield* checkCredential(userId, credentialId)
+        const credentialId = "typed" in credential ? credential.typed.credentialId : credential.existing
+        if ("typed" in credential) yield* insertCredential(userId, credential.typed, true)
+        else yield* checkCredential(userId, credentialId)
         const now = Date.now()
         yield* sql`INSERT INTO connections ${sql.insert({
           id: connectionId,
@@ -116,6 +142,26 @@ export const makeProviderWriteHandlers = Effect.gen(function* () {
         return yield* reloadConnection(connectionId)
       }).pipe(transaction(sql, "UpdateConnection")),
 
+    SetConnectionKey: ({ userId, connectionId, expectedRowVersion, credential }) =>
+      Effect.gen(function* () {
+        const row = yield* ownedConnection(userId, connectionId)
+        if (row.row_version !== expectedRowVersion) {
+          return yield* new StaleWrite({
+            entity: "connection",
+            id: connectionId,
+            expected: expectedRowVersion,
+            actual: row.row_version
+          })
+        }
+        if (credential) yield* insertCredential(userId, credential, true)
+        const updated = yield* setSecrets(userId, connectionId, { credential_id: credential?.credentialId ?? null })
+        if (row.credential_id !== null) {
+          yield* sql`DELETE FROM credentials WHERE id = ${row.credential_id} AND connection_owned = 1
+            AND NOT EXISTS (SELECT 1 FROM connections WHERE credential_id = ${row.credential_id})`
+        }
+        return updated
+      }).pipe(transaction(sql, "SetConnectionKey")),
+
     SetConnectionCredential: ({ userId, connectionId, credentialId }) =>
       Effect.gen(function* () {
         yield* checkCredential(userId, credentialId)
@@ -123,20 +169,10 @@ export const makeProviderWriteHandlers = Effect.gen(function* () {
       }).pipe(transaction(sql, "SetConnectionCredential")),
 
     CreateCredential: ({ userId, credentialId, name, key, origins }) =>
-      Effect.gen(function* () {
-        const now = Date.now()
-        yield* sql`INSERT INTO credentials ${sql.insert({
-          id: credentialId,
-          owner_user_id: userId,
-          name,
-          key_enc: key.enc,
-          key_hint: key.hint,
-          origins_json: JSON.stringify([...new Set(origins)]),
-          created_at: now,
-          updated_at: now
-        })}`
-        return yield* reloadCredential(credentialId)
-      }).pipe(transaction(sql, "CreateCredential")),
+      insertCredential(userId, { credentialId, name, key, origins }, false).pipe(
+        Effect.andThen(reloadCredential(credentialId)),
+        transaction(sql, "CreateCredential")
+      ),
 
     RenameCredential: ({ userId, credentialId, name }) =>
       Effect.gen(function* () {
@@ -146,10 +182,11 @@ export const makeProviderWriteHandlers = Effect.gen(function* () {
         return yield* reloadCredential(credentialId)
       }).pipe(transaction(sql, "RenameCredential")),
 
-    ReplaceCredentialKey: ({ userId, credentialId, key }) =>
+    ReplaceCredentialKey: ({ userId, credentialId, key, origins }) =>
       Effect.gen(function* () {
         yield* ownedCredential(userId, credentialId)
-        yield* sql`UPDATE credentials SET key_enc = ${key.enc}, key_hint = ${key.hint}, updated_at = ${Date.now()},
+        yield* sql`UPDATE credentials SET key_enc = ${key.enc}, key_hint = ${key.hint},
+                     origins_json = ${JSON.stringify([...new Set(origins)])}, updated_at = ${Date.now()},
                      row_version = row_version + 1
                    WHERE id = ${credentialId}`
         return yield* reloadCredential(credentialId)
@@ -173,10 +210,22 @@ export const makeProviderWriteHandlers = Effect.gen(function* () {
         yield* sql`DELETE FROM credentials WHERE id = ${credentialId}`
       }).pipe(transaction(sql, "DeleteCredential")),
 
-    SetConnectionHeaders: ({ userId, connectionId, headers }) =>
-      setSecrets(userId, connectionId, {
-        headers_enc: headers?.enc ?? null,
-        header_names_json: JSON.stringify(headers?.names ?? [])
+    SetConnectionHeaders: ({ userId, connectionId, expectedRowVersion, headers }) =>
+      Effect.gen(function* () {
+        const row = yield* ownedConnection(userId, connectionId)
+        if (row.row_version !== expectedRowVersion) {
+          return yield* new StaleWrite({
+            entity: "connection",
+            id: connectionId,
+            expected: expectedRowVersion,
+            actual: row.row_version
+          })
+        }
+        return yield* setSecrets(userId, connectionId, {
+          headers_enc: headers?.enc ?? null,
+          headers_origin: headers?.origin ?? null,
+          header_names_json: JSON.stringify(headers?.names ?? [])
+        })
       }).pipe(transaction(sql, "SetConnectionHeaders")),
 
     SetConnectionProxy: ({ userId, connectionId, mode, urlEnc }) =>

@@ -41,7 +41,7 @@ const setup = Effect.gen(function* () {
       kind: "openai-chat",
       api: "openai-completions",
       settings: settings(name),
-      credentialId: null
+      credential: { existing: null }
     })
   return { writer, reader, ana, bo, create }
 })
@@ -116,7 +116,7 @@ describe("connections", () => {
           kind: "openai-chat",
           api: "openai-completions",
           settings: settings("Bo's"),
-          credentialId: credential.id
+          credential: { existing: credential.id }
         }),
         "NotFound"
       )
@@ -125,7 +125,8 @@ describe("connections", () => {
         writer.ReplaceCredentialKey({
           userId: bo,
           credentialId: credential.id,
-          key: { enc: bytes("y"), hint: "efgh" }
+          key: { enc: bytes("y"), hint: "efgh" },
+          origins: []
         }),
         "NotFound"
       )
@@ -160,7 +161,8 @@ describe("connections", () => {
       const headed = yield* writer.SetConnectionHeaders({
         userId: ana,
         connectionId: conn.id,
-        headers: { enc: bytes("header ciphertext"), names: ["X-Gateway-Token"] }
+        expectedRowVersion: keyed.rowVersion,
+        headers: { enc: bytes("header ciphertext"), names: ["X-Gateway-Token"], origin: "https://gw.example" }
       })
       assert.deepStrictEqual(headed.headerNames, ["X-Gateway-Token"])
       const listed = JSON.stringify(yield* reader.ListConnections({ userId: ana }))
@@ -264,7 +266,7 @@ describe("review regressions", () => {
           kind: "openai-chat",
           api: "openai-completions",
           settings: borrowed,
-          credentialId: null
+          credential: { existing: null }
         }),
         "NotFound"
       )
@@ -276,7 +278,7 @@ describe("review regressions", () => {
           kind: "openai-chat",
           api: "openai-completions",
           settings: { ...borrowed, presetOverrideRefId: preset.ref.id.replace(/.$/, "0") as typeof preset.ref.id },
-          credentialId: null
+          credential: { existing: null }
         }),
         "NotFound"
       )
@@ -297,7 +299,7 @@ describe("review regressions", () => {
         kind: "openai-chat",
         api: "openai-completions",
         settings: { ...settings("Ana's"), presetOverrideRefId: preset.ref.id },
-        credentialId: null
+        credential: { existing: null }
       })
       assert.strictEqual(anas.presetOverrideRefId, preset.ref.id)
     }).pipe(Effect.provide(database()))

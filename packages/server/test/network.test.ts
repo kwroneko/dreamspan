@@ -5,7 +5,7 @@ import { join } from "node:path"
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Layer } from "effect"
 import * as Database from "../src/db/Database.ts"
-import { describeRoute } from "../src/net/route.ts"
+import { describeRoute, parseBypass } from "../src/net/route.ts"
 import * as Network from "../src/net/Network.ts"
 import { makeSecrets, Secrets } from "../src/secrets.ts"
 import { startHttpProxy, startSocks5Proxy, startTarget } from "./support/proxies.ts"
@@ -28,13 +28,13 @@ describe("network", () => {
       const routes: Array<string> = []
       const fetch = network.fetchFor({ mode: "inherit" }, (route, url) => routes.push(describeRoute(route, url)))
 
-      yield* network.setInstance({ proxyUrl: proxy.url, bypass: ["localhost", "127.0.0.0/8"] })
+      yield* network.setInstance({ proxyUrl: proxy.url, bypass: ["localhost", "127.0.0.0/8"], forceProxy: false })
       yield* Effect.promise(() => fetch(`${target.url}/a`).then((r) => r.json()))
       assert.deepStrictEqual(proxy.tunnels(), [])
       assert.strictEqual(routes.at(-1), "direct: 127.0.0.1 is in the bypass list")
 
       // With an empty bypass list, the same target goes through the proxy.
-      yield* network.setInstance({ proxyUrl: undefined, bypass: [] })
+      yield* network.setInstance({ proxyUrl: undefined, bypass: [], forceProxy: false })
       const body = yield* Effect.promise(() => fetch(`${target.url}/b`).then((r) => r.json()))
       assert.deepStrictEqual(body, { ok: true })
       assert.strictEqual(proxy.tunnels().length, 1)
@@ -49,7 +49,7 @@ describe("network", () => {
       const instance = yield* resource(startHttpProxy)
       const socks = yield* resource(() => startSocks5Proxy({ username: "u", password: "p w" }))
       const network = yield* Network.Network
-      yield* network.setInstance({ proxyUrl: instance.url, bypass: [] })
+      yield* network.setInstance({ proxyUrl: instance.url, bypass: [], forceProxy: false })
 
       const viaSocks = network.fetchFor({ mode: "custom", url: socks.url.replace("p w", "p%20w") })
       yield* Effect.promise(() => viaSocks(`${target.url}/socks`).then((r) => r.text()))
@@ -69,10 +69,14 @@ describe("network", () => {
       const dataDir = mkdtempSync(join(tmpdir(), "rp-net-"))
       const set = Effect.gen(function* () {
         const network = yield* Network.Network
-        return yield* network.setInstance({ proxyUrl: "socks5://user:secret@vpn.example:1080", bypass: ["10.0.0.0/8"] })
+        return yield* network.setInstance({
+          proxyUrl: "socks5://user:secret@vpn.example:1080",
+          bypass: ["10.0.0.0/8"],
+          forceProxy: false
+        })
       }).pipe(Effect.provide(layer(dataDir)))
       const shown = yield* set
-      assert.deepStrictEqual(shown, { proxy: "socks5://vpn.example:1080", bypass: ["10.0.0.0/8"] })
+      assert.deepStrictEqual(shown, { forceProxy: false, proxy: "socks5://vpn.example:1080", bypass: ["10.0.0.0/8"] })
 
       const reloaded = yield* Effect.gen(function* () {
         const network = yield* Network.Network
@@ -94,10 +98,33 @@ describe("network", () => {
     Effect.gen(function* () {
       const network = yield* Network.Network
       const result = yield* network
-        .setInstance({ proxyUrl: "socks4://old:1080", bypass: ["10.0.0.0/33"] })
+        .setInstance({ proxyUrl: "socks4://old:1080", bypass: ["10.0.0.0/33"], forceProxy: false })
         .pipe(Effect.flip)
       assert.strictEqual(result._tag, "InvalidNetworkSettings")
       if (result._tag === "InvalidNetworkSettings") assert.strictEqual(result.problems.length, 2)
     }).pipe(Effect.provide(layer(mkdtempSync(join(tmpdir(), "rp-net-")))))
   )
+})
+
+describe("bypass routes are pinned to bypassed addresses", () => {
+  const lookupWith = (entries: ReadonlyArray<string>, all: boolean) =>
+    new Promise<{ error: Error | null; address: unknown }>((resolve) =>
+      Network.bypassOnlyLookup(() => parseBypass(entries).list)("localhost", { all }, (error, address) =>
+        resolve({ error, address })
+      )
+    )
+
+  it("connects only to the answers on the bypass list", async () => {
+    // localhost answers 127.0.0.1 and usually ::1; only the IPv4 range is listed.
+    const pinned = await lookupWith(["127.0.0.0/8"], true)
+    assert.isNull(pinned.error)
+    assert.deepStrictEqual(
+      (pinned.address as ReadonlyArray<{ address: string }>).map((answer) => answer.address),
+      ["127.0.0.1"]
+    )
+    const single = await lookupWith(["127.0.0.0/8"], false)
+    assert.strictEqual(single.address, "127.0.0.1")
+    // A name whose answers left the list is refused, not connected anyway.
+    assert.isNotNull((await lookupWith(["10.0.0.0/8"], true)).error)
+  })
 })

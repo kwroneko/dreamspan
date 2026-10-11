@@ -34,6 +34,9 @@ describe("bypass list", () => {
     expect(bypasses(list, "lan")).toBe(false)
     expect(bypasses(list, "llm.example.com", ["10.8.4.4"])).toBe(true)
     expect(bypasses(list, "llm.example.com", ["10.9.4.4"])).toBe(false)
+    // Every answer must be on the list, or the connection could land on the public one.
+    expect(bypasses(list, "llm.example.com", ["10.8.4.4", "203.0.113.7"])).toBe(false)
+    expect(bypasses(list, "llm.example.com", [])).toBe(false)
   })
 })
 

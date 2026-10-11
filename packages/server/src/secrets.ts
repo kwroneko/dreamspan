@@ -16,7 +16,7 @@ const NONCE_BYTES = 12
 const TAG_BYTES = 16
 
 export class SecretUnreadable extends Schema.TaggedError<SecretUnreadable>()("SecretUnreadable", {
-  /** What the secret was bound to, e.g. "connection:<id>:api_key". */
+  /** What the secret was bound to, e.g. "credential:<id>:key". */
   binding: Schema.String
 }) {
   override get message() {

@@ -65,7 +65,9 @@ export class ModelRefresh extends Schema.Class<ModelRefresh>("ModelRefresh")({
 /** The instance's outbound network settings (spec/PROVIDERS.md §6.2). The proxy never shows credentials. */
 export class NetworkSettings extends Schema.Class<NetworkSettings>("NetworkSettings")({
   proxy: Schema.NullOr(Schema.String),
-  bypass: Schema.Array(Schema.String)
+  bypass: Schema.Array(Schema.String),
+  /** Non-admins' connections can't go direct or through their own proxy. */
+  forceProxy: Schema.Boolean
 }) {}
 
 export class InvalidNetworkSettings extends Schema.TaggedError<InvalidNetworkSettings>()("InvalidNetworkSettings", {
@@ -128,7 +130,8 @@ export class AppApi extends RpcGroup.make(
    * Nothing returns a key: only its last 4 characters show.
    */
   Rpc.make("SetConnectionKey", {
-    payload: { connectionId: ConnectionId, apiKey: Schema.NullOr(Schema.String) },
+    /** The row version is the connection the user saw: the key is bound to its base URL. */
+    payload: { connectionId: ConnectionId, apiKey: Schema.NullOr(Schema.String), expectedRowVersion: Schema.Int },
     success: Connection,
     error: Schema.Union([ProviderError, ServerError])
   }),
@@ -150,8 +153,9 @@ export class AppApi extends RpcGroup.make(
     success: Credential,
     error: Schema.Union([NotFound, ServerError])
   }),
+  /** A new key, with the hosts it may go to stated again: approvals for the old key don't carry over. */
   Rpc.make("ReplaceCredentialKey", {
-    payload: { credentialId: CredentialId, apiKey: Schema.String },
+    payload: { credentialId: CredentialId, apiKey: Schema.String, urls: Schema.Array(Schema.String) },
     success: Credential,
     error: Schema.Union([ProviderError, ServerError])
   }),
@@ -166,8 +170,13 @@ export class AppApi extends RpcGroup.make(
     success: Schema.Void,
     error: Schema.Union([NotFound, ServerError])
   }),
+  /** Header values are bound to the connection's current host, like a key. */
   Rpc.make("SetConnectionHeaders", {
-    payload: { connectionId: ConnectionId, headers: Schema.NullOr(Schema.Record(Schema.String, Schema.String)) },
+    payload: {
+      connectionId: ConnectionId,
+      headers: Schema.NullOr(Schema.Record(Schema.String, Schema.String)),
+      expectedRowVersion: Schema.Int
+    },
     success: Connection,
     error: Schema.Union([ProviderError, ServerError])
   }),
@@ -215,7 +224,11 @@ export class AppApi extends RpcGroup.make(
   Rpc.make("GetNetworkSettings", { success: NetworkSettings, error: Forbidden }),
   /** `proxyUrl` omitted keeps the stored proxy; null removes it. */
   Rpc.make("SetNetworkSettings", {
-    payload: { proxyUrl: Schema.optionalKey(Schema.NullOr(Schema.String)), bypass: Schema.Array(Schema.String) },
+    payload: {
+      proxyUrl: Schema.optionalKey(Schema.NullOr(Schema.String)),
+      bypass: Schema.Array(Schema.String),
+      forceProxy: Schema.Boolean
+    },
     success: NetworkSettings,
     error: Schema.Union([Forbidden, InvalidNetworkSettings, ServerError])
   }),

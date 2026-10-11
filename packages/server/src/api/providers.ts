@@ -58,8 +58,8 @@ export const makeProviderHandlers = Effect.gen(function* () {
       Effect.flatMap(userId, (id) => writer.RenameCredential({ userId: id, credentialId, name })).pipe(
         Effect.catchTag(["StorageError", "RpcClientError"], toServerError("RenameCredential"))
       ),
-    ReplaceCredentialKey: ({ credentialId, apiKey }) =>
-      Effect.flatMap(userId, (id) => providers.replaceCredentialKey(id, credentialId, apiKey)),
+    ReplaceCredentialKey: ({ credentialId, apiKey, urls }) =>
+      Effect.flatMap(userId, (id) => providers.replaceCredentialKey(id, credentialId, apiKey, urls)),
     AllowCredentialHost: ({ credentialId, apiKey, url }) =>
       Effect.flatMap(userId, (id) => providers.allowCredentialOrigin({ userId: id, credentialId, apiKey, url })),
     DeleteCredential: ({ credentialId }) =>
@@ -70,10 +70,10 @@ export const makeProviderHandlers = Effect.gen(function* () {
       Effect.flatMap(userId, (id) =>
         writer.UpdateConnection({ userId: id, connectionId, settings, expectedRowVersion })
       ).pipe(Effect.catchTag(["StorageError", "RpcClientError"], toServerError("UpdateConnection"))),
-    SetConnectionKey: ({ connectionId, apiKey }) =>
-      Effect.flatMap(userId, (id) => providers.setKey(id, connectionId, apiKey)),
-    SetConnectionHeaders: ({ connectionId, headers }) =>
-      Effect.flatMap(userId, (id) => providers.setHeaders(id, connectionId, headers)),
+    SetConnectionKey: ({ connectionId, apiKey, expectedRowVersion }) =>
+      Effect.flatMap(userId, (id) => providers.setKey(id, connectionId, apiKey, expectedRowVersion)),
+    SetConnectionHeaders: ({ connectionId, headers, expectedRowVersion }) =>
+      Effect.flatMap(userId, (id) => providers.setHeaders(id, connectionId, headers, expectedRowVersion)),
     SetConnectionProxy: ({ connectionId, mode, url }) =>
       Effect.flatMap(userId, (id) => providers.setProxy(id, connectionId, mode, url)),
     DeleteConnection: ({ connectionId }) =>
@@ -109,9 +109,9 @@ export const makeProviderHandlers = Effect.gen(function* () {
         Effect.andThen(network.view),
         Effect.map((view) => new NetworkSettings(view))
       ),
-    SetNetworkSettings: ({ proxyUrl, bypass }) =>
+    SetNetworkSettings: ({ proxyUrl, bypass, forceProxy }) =>
       admin.pipe(
-        Effect.andThen(network.setInstance({ proxyUrl, bypass })),
+        Effect.andThen(network.setInstance({ proxyUrl, bypass, forceProxy })),
         Effect.map((view) => new NetworkSettings(view))
       ),
     ListLlmRequests: ({ limit, before }) =>

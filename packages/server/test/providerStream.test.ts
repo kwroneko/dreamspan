@@ -116,7 +116,7 @@ describe("streaming through OpenRouter's Chat Completions", () => {
         "vendor/storyteller"
       )
       assert.strictEqual(connection.keyHint, "9876")
-      yield* providers.setHeaders(userId, connection.id, { "X-Gateway-Tag": "rp" })
+      yield* providers.setHeaders(userId, connection.id, { "X-Gateway-Tag": "rp" }, connection.rowVersion)
 
       const events = yield* collect(
         providers.stream({
@@ -289,7 +289,7 @@ describe("failures", () => {
           : json(res, 400, { error: { message: `bad request for key ${key} with header tok-secret-header` } })
       )
       const { userId, connection, modelId, providers } = yield* connect("openai-chat", `${server.url}/v1`, key, "m")
-      yield* providers.setHeaders(userId, connection.id, { "X-Token": "tok-secret-header" })
+      yield* providers.setHeaders(userId, connection.id, { "X-Token": "tok-secret-header" }, connection.rowVersion)
       const error = yield* collect(
         providers.stream({
           userId,
@@ -370,7 +370,7 @@ describe("failures", () => {
   it.live("refuses to send Google traffic around a proxy that applies to it", () =>
     Effect.gen(function* () {
       const network = yield* Network.Network
-      yield* network.setInstance({ proxyUrl: "http://127.0.0.1:9", bypass: [] })
+      yield* network.setInstance({ proxyUrl: "http://127.0.0.1:9", bypass: [], forceProxy: false })
       const writer = yield* Database.Writer
       const providers = yield* Providers.Providers
       const userId = (yield* writer.EnsureUser({ handle: "ana", displayName: "Ana" })).id as UserId
@@ -911,7 +911,7 @@ describe("review regressions", () => {
         apiKey: "   "
       })
       assert.isFalse(created.hasKey)
-      const set = yield* providers.setKey(userId, created.id, "  sk-padded-key  ")
+      const set = yield* providers.setKey(userId, created.id, "  sk-padded-key  ", created.rowVersion)
       assert.strictEqual(set.keyHint, "-key")
     }).pipe(Effect.scoped, Effect.provide(layer()))
   )
@@ -1009,7 +1009,7 @@ describe("keys bound to hosts", () => {
       })
       assert.strictEqual(a.keyHint, "1111")
       assert.strictEqual(b.keyHint, "1111")
-      yield* providers.replaceCredentialKey(userId, credential.id, "sk-second-key-2222")
+      yield* providers.replaceCredentialKey(userId, credential.id, "sk-second-key-2222", credential.origins)
       for (const connection of [a, b]) {
         yield* providers.refreshModels(userId, connection.id)
       }
@@ -1050,6 +1050,310 @@ describe("keys bound to hosts", () => {
       )
       assert.strictEqual(events.at(-1)!.type, "done")
     }).pipe(Effect.scoped, Effect.provide(layer(false)))
+  )
+})
+
+describe("secrets stay where they were entered (audit regressions)", () => {
+  const listing = (_request: unknown, res: Parameters<Parameters<typeof startMockProvider>[0]>[1]) =>
+    json(res, 200, openAiList([{ id: "m" }]))
+  const user = (handle: string) =>
+    Effect.flatMap(Database.Writer, (writer) => writer.EnsureUser({ handle, displayName: handle })).pipe(
+      Effect.map((u) => u.id as UserId)
+    )
+  const flipped = <A>(effect: Effect.Effect<A, ProviderError | { readonly _tag: string }>) =>
+    effect.pipe(Effect.flip, Effect.map(asProviderError))
+
+  it.live("a replaced key doesn't inherit hosts approved under the old one", () =>
+    Effect.gen(function* () {
+      const good = yield* mock(listing)
+      const evil = yield* mock(listing)
+      const providers = yield* Providers.Providers
+      const userId = yield* user("ana")
+      // A stolen session: swap in a junk key, approve evil with it, wait for the real key.
+      const credential = yield* providers.createCredential({
+        userId,
+        name: "Gateway",
+        apiKey: "sk-real-key-0001",
+        urls: [`${good.url}/v1`]
+      })
+      yield* providers.replaceCredentialKey(userId, credential.id, "junk-key-for-evil", [`${good.url}/v1`])
+      yield* providers.allowCredentialOrigin({
+        userId,
+        credentialId: credential.id,
+        apiKey: "junk-key-for-evil",
+        url: evil.url
+      })
+      const replaced = yield* providers.replaceCredentialKey(userId, credential.id, "sk-real-key-0001", [
+        `${good.url}/v1`
+      ])
+      assert.deepStrictEqual([...replaced.origins], [good.url])
+      const pointed = yield* providers.createConnection({
+        userId,
+        kind: "openai-chat",
+        settings: settings(`${evil.url}/v1`),
+        credentialId: credential.id
+      })
+      assert.strictEqual((yield* flipped(providers.testConnection(userId, pointed.id))).reason, "unusable")
+      assert.lengthOf(evil.requests(), 0)
+    }).pipe(Effect.scoped, Effect.provide(layer()))
+  )
+
+  it.live("header values are bound to the host they were set for", () =>
+    Effect.gen(function* () {
+      const good = yield* mock(listing)
+      const evil = yield* mock(listing)
+      const providers = yield* Providers.Providers
+      const writer = yield* Database.Writer
+      const userId = yield* user("ana")
+      const created = yield* providers.createConnection({
+        userId,
+        kind: "openai-chat",
+        settings: settings(`${good.url}/v1`),
+        apiKey: null
+      })
+      const headed = yield* providers.setHeaders(
+        userId,
+        created.id,
+        { authorization: "Bearer sk-in-a-header" },
+        created.rowVersion
+      )
+      assert.isTrue((yield* providers.testConnection(userId, created.id)).ok)
+      const moved = yield* writer.UpdateConnection({
+        userId,
+        connectionId: created.id,
+        settings: settings(`${evil.url}/v1`),
+        expectedRowVersion: headed.rowVersion
+      })
+      assert.strictEqual((yield* flipped(providers.testConnection(userId, created.id))).reason, "unusable")
+      assert.lengthOf(evil.requests(), 0)
+      // Setting them again, for the host the user now sees, is the way to move them.
+      yield* providers.setHeaders(userId, created.id, { authorization: "Bearer sk-in-a-header" }, moved.rowVersion)
+      assert.isTrue((yield* providers.testConnection(userId, created.id)).ok)
+    }).pipe(Effect.scoped, Effect.provide(layer()))
+  )
+
+  it.live("redirects are followed within the origin, never to another", () =>
+    Effect.gen(function* () {
+      const evil = yield* mock(listing)
+      const redirecting = yield* mock((request, res) => {
+        res.writeHead(307, { location: `${evil.url}${request.path}` })
+        res.end()
+      })
+      const providers = yield* Providers.Providers
+      const userId = yield* user("ana")
+      // Anthropic sends its key as x-api-key, which undici would carry across origins.
+      const connection = yield* providers.createConnection({
+        userId,
+        kind: "anthropic",
+        settings: settings(redirecting.url),
+        apiKey: "sk-ant-key-0001"
+      })
+      yield* flipped(providers.refreshModels(userId, connection.id))
+      assert.lengthOf(evil.requests(), 0)
+
+      const sameOrigin = yield* mock((request, res) => {
+        if (request.path !== "/v1/models") return json(res, 200, openAiList([{ id: "m" }]))
+        res.writeHead(308, { location: "/v1/models/" })
+        res.end()
+      })
+      const followed = yield* providers.createConnection({
+        userId,
+        kind: "openai-chat",
+        settings: settings(`${sameOrigin.url}/v1`),
+        apiKey: "sk-same-origin-01"
+      })
+      assert.isTrue((yield* providers.testConnection(userId, followed.id)).ok)
+    }).pipe(Effect.scoped, Effect.provide(layer()))
+  )
+
+  it.live("a connection's own proxy can't carry its key over http", () =>
+    Effect.gen(function* () {
+      const target = yield* mock(listing)
+      const proxy = yield* mock(listing)
+      const providers = yield* Providers.Providers
+      const userId = yield* user("ana")
+      const connection = yield* providers.createConnection({
+        userId,
+        kind: "openai-chat",
+        settings: settings(`${target.url}/v1`),
+        apiKey: "sk-lan-key-0001"
+      })
+      yield* providers.setProxy(userId, connection.id, "custom", proxy.url)
+      assert.strictEqual((yield* flipped(providers.testConnection(userId, connection.id))).reason, "unusable")
+      assert.lengthOf(proxy.requests(), 0)
+    }).pipe(Effect.scoped, Effect.provide(layer()))
+  )
+
+  it.live("typing a key replaces the connection's own old key, and needs the version the user saw", () =>
+    Effect.gen(function* () {
+      const providers = yield* Providers.Providers
+      const reader = yield* Database.Reader
+      const userId = yield* user("ana")
+      const named = yield* providers.createCredential({
+        userId,
+        name: "Mine",
+        apiKey: "sk-named-key-01",
+        urls: ["http://127.0.0.1:1"]
+      })
+      const created = yield* providers.createConnection({
+        userId,
+        kind: "openai-chat",
+        settings: settings("http://127.0.0.1:1/v1"),
+        apiKey: "sk-first-typed-1"
+      })
+      const second = yield* providers.setKey(userId, created.id, "sk-second-typed", created.rowVersion)
+      const third = yield* providers.setKey(userId, created.id, "sk-third-typed-3", second.rowVersion)
+      assert.deepStrictEqual((yield* reader.ListCredentials({ userId })).map((c) => c.name).sort(), ["Mine", "Test"])
+      // A stale form (an older row version) is refused rather than binding to a changed URL.
+      assert.strictEqual(
+        (yield* flipped(providers.setKey(userId, created.id, "sk-stale-form-1", created.rowVersion))).reason,
+        "bad_request"
+      )
+      // A credential the user named and attached is never deleted by typing a new key.
+      const attached = yield* (yield* Database.Writer).SetConnectionCredential({
+        userId,
+        connectionId: created.id,
+        credentialId: named.id
+      })
+      yield* providers.setKey(userId, created.id, null, attached.rowVersion)
+      assert.include(
+        (yield* reader.ListCredentials({ userId })).map((c) => c.name),
+        "Mine"
+      )
+      assert.strictEqual(third.keyHint, "ed-3")
+    }).pipe(Effect.scoped, Effect.provide(layer()))
+  )
+
+  it.live("a failed create keeps no key, and short keys get no hint", () =>
+    Effect.gen(function* () {
+      const providers = yield* Providers.Providers
+      const reader = yield* Database.Reader
+      const userId = yield* user("ana")
+      yield* flipped(
+        providers.createConnection({
+          userId,
+          kind: "openai-chat",
+          settings: { ...settings("http://127.0.0.1:1/v1"), presetOverrideRefId: "missing" as never },
+          apiKey: "sk-orphan-key-01"
+        })
+      )
+      assert.lengthOf(yield* reader.ListCredentials({ userId }), 0)
+      const short = yield* providers.createConnection({
+        userId,
+        kind: "openai-chat",
+        settings: settings("http://127.0.0.1:1/v1"),
+        apiKey: "abcd"
+      })
+      assert.strictEqual(short.keyHint, "")
+    }).pipe(Effect.scoped, Effect.provide(layer()))
+  )
+
+  it.live("model ids named like Object.prototype members don't break a refresh", () =>
+    Effect.gen(function* () {
+      const server = yield* mock((_r, res) => json(res, 200, openAiList([{ id: "constructor" }, { id: "__proto__" }])))
+      const providers = yield* Providers.Providers
+      const userId = yield* user("ana")
+      const connection = yield* providers.createConnection({
+        userId,
+        kind: "openai-chat",
+        settings: settings(`${server.url}/v1`),
+        apiKey: null
+      })
+      const refreshed = yield* providers.refreshModels(userId, connection.id)
+      assert.strictEqual(refreshed.added, 2)
+    }).pipe(Effect.scoped, Effect.provide(layer()))
+  )
+
+  it.live("a kind overridden with another wire API makes its old connections unusable, not different", () =>
+    Effect.gen(function* () {
+      const server = yield* mock(listing)
+      const registry = yield* ProviderRegistry
+      const providers = yield* Providers.Providers
+      const userId = yield* user("ana")
+      const connection = yield* providers.createConnection({
+        userId,
+        kind: "openai-chat",
+        settings: settings(`${server.url}/v1`),
+        apiKey: null
+      })
+      const builtin = registry.kinds.get("openai-chat")!
+      // register replaces an entry with the same id for as long as its scope lives.
+      yield* registry.kinds.register({ ...builtin, api: "openai-responses" })
+      assert.strictEqual((yield* flipped(providers.testConnection(userId, connection.id))).reason, "unusable")
+    }).pipe(Effect.scoped, Effect.provide(layer()))
+  )
+
+  it.live("a refused redirect during a stream is reported as such, and not retried", () =>
+    Effect.gen(function* () {
+      const evil = yield* mock(listing)
+      const server = yield* mock((request, res) => {
+        if (request.path.endsWith("/models")) return json(res, 200, openAiList([{ id: "m" }]))
+        res.writeHead(307, { location: `${evil.url}/steal` })
+        res.end()
+      })
+      const { userId, connection, modelId, providers } = yield* connect(
+        "openai-chat",
+        `${server.url}/v1`,
+        "sk-stream-key-01",
+        "m"
+      )
+      const error = yield* collect(
+        providers.stream({
+          userId,
+          connectionId: connection.id,
+          modelId,
+          context,
+          attribution: { purpose: "generation" }
+        })
+      ).pipe(Effect.flip, Effect.map(asProviderError))
+      assert.strictEqual(error.reason, "unusable")
+      assert.include(error.message, "refused a redirect")
+      assert.lengthOf(
+        server.requests().filter((r) => r.path.endsWith("/chat/completions")),
+        1
+      )
+      assert.lengthOf(evil.requests(), 0)
+    }).pipe(Effect.scoped, Effect.provide(layer()))
+  )
+
+  it.live("requiring the proxy needs a proxy", () =>
+    Effect.gen(function* () {
+      const network = yield* Network.Network
+      const refused = yield* network.setInstance({ proxyUrl: null, bypass: [], forceProxy: true }).pipe(Effect.flip)
+      assert.strictEqual(refused._tag, "InvalidNetworkSettings")
+    }).pipe(Effect.scoped, Effect.provide(layer()))
+  )
+
+  it.live("an admin can require the instance proxy for everyone else", () =>
+    Effect.gen(function* () {
+      const target = yield* mock(listing)
+      const proxy = yield* mock(listing)
+      const providers = yield* Providers.Providers
+      const network = yield* Network.Network
+      const admin = yield* user("ana")
+      const bo = yield* user("bo")
+      const own = yield* providers.createConnection({
+        userId: bo,
+        kind: "openai-chat",
+        settings: settings(`${target.url}/v1`),
+        apiKey: null
+      })
+      yield* providers.setProxy(bo, own.id, "direct", null)
+      // The target is on loopback, which the default bypass list sends direct; clear it.
+      yield* network.setInstance({ proxyUrl: proxy.url, bypass: [], forceProxy: true })
+      const tested = yield* providers.testConnection(bo, own.id)
+      assert.isTrue(tested.ok)
+      assert.lengthOf(target.requests(), 0)
+      assert.isAbove(proxy.requests().length, 0)
+      assert.strictEqual((yield* flipped(providers.setProxy(bo, own.id, "direct", null))).reason, "bad_request")
+      const admins = yield* providers.createConnection({
+        userId: admin,
+        kind: "openai-chat",
+        settings: settings(`${target.url}/v1`),
+        apiKey: null
+      })
+      yield* providers.setProxy(admin, admins.id, "direct", null)
+    }).pipe(Effect.scoped, Effect.provide(layer()))
   )
 })
 

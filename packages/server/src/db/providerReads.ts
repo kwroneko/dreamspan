@@ -37,6 +37,7 @@ export const makeProviderReadHandlers = Effect.gen(function* () {
     ResolveConnection: ({ userId, connectionId }) =>
       Effect.gen(function* () {
         const row = yield* ownedConnection(userId, connectionId)
+        const [owner] = yield* sql<{ role: "admin" | "user" }>`SELECT role FROM users WHERE id = ${userId}`
         const [credential] =
           row.credential_id === null
             ? []
@@ -52,7 +53,9 @@ export const makeProviderReadHandlers = Effect.gen(function* () {
               }
             : null,
           headersEnc: row.headers_enc,
-          proxyUrlEnc: row.proxy_url_enc
+          headersOrigin: row.headers_origin,
+          proxyUrlEnc: row.proxy_url_enc,
+          ownerRole: owner!.role
         })
       }).pipe(query("ResolveConnection")),
 
@@ -65,7 +68,7 @@ export const makeProviderReadHandlers = Effect.gen(function* () {
 
     ResolveCredential: ({ userId, credentialId }) =>
       ownedCredential(userId, credentialId).pipe(
-        Effect.map((row) => ({ credential: toCredential(row), keyEnc: row.key_enc })),
+        Effect.map((row) => ({ keyEnc: row.key_enc })),
         query("ResolveCredential")
       ),
 

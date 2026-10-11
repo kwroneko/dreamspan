@@ -35,13 +35,15 @@ const catalogOf = (kind: ProviderKindEntry): Promise<Catalog> => {
  * its facts but not its request settings.
  */
 export const catalogEntry = async (kind: ProviderKindEntry, key: string) => {
-  const entry = (await catalogOf(kind))[key]
+  const catalog = await catalogOf(kind)
+  // Model ids come from upstream: "constructor" or "__proto__" mustn't read the prototype.
+  const entry = Object.hasOwn(catalog, key) ? catalog[key] : undefined
   if (!entry) return null
   return { entry, sameApi: entry.api === kind.api }
 }
 
 /** What the catalog knows about a model, in the shape users see and can override. */
-export const upstreamFromCatalog = (entry: Model<Api>, sameApi: boolean): ModelUpstream => ({
+const upstreamFromCatalog = (entry: Model<Api>, sameApi: boolean): ModelUpstream => ({
   name: entry.name,
   context: entry.contextWindow,
   maxOutput: entry.maxTokens,

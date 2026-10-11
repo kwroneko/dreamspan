@@ -25,3 +25,4 @@ export const users = [
 export const dataModel = [...platform, ...library, ...chats, ...history, ...integrity, ...search]
 
 export { accounts, bin, credentials, draftHistory, providers }
+export { secretBindings } from "./credentials.ts"

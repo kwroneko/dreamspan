@@ -109,7 +109,19 @@ export class AppendResult extends Schema.Class<AppendResult>("AppendResult")({
 
 /** An encrypted secret and what may be shown of it. */
 const EncryptedKey = Schema.Struct({ enc: Schema.Uint8Array, hint: Schema.String })
-const EncryptedHeaders = Schema.Struct({ enc: Schema.Uint8Array, names: Schema.Array(Schema.String) })
+/** Header values, encrypted, and the origin they were set for. */
+const EncryptedHeaders = Schema.Struct({
+  enc: Schema.Uint8Array,
+  names: Schema.Array(Schema.String),
+  origin: Schema.String
+})
+/** A key typed into a connection, stored as a credential that connection owns. */
+const NewCredential = Schema.Struct({
+  credentialId: CredentialId,
+  name: Schema.String,
+  key: EncryptedKey,
+  origins: Schema.Array(Schema.String)
+})
 
 /**
  * What the provider layer needs to send a request on a connection, secrets still
@@ -122,7 +134,10 @@ export class ConnectionForRequest extends Schema.Class<ConnectionForRequest>("Co
     Schema.Struct({ id: CredentialId, keyEnc: Schema.Uint8Array, origins: Schema.Array(Schema.String) })
   ),
   headersEnc: Schema.NullOr(Schema.Uint8Array),
-  proxyUrlEnc: Schema.NullOr(Schema.Uint8Array)
+  /** The origin the headers were set for; null for headers from before 0008. */
+  headersOrigin: Schema.NullOr(Schema.String),
+  proxyUrlEnc: Schema.NullOr(Schema.Uint8Array),
+  ownerRole: UserRole
 }) {}
 
 /** A position in the ledger's newest-first order; start times alone can tie. */
@@ -431,10 +446,29 @@ export class WriteOps extends RpcGroup.make(
       /** The kind's wire API, resolved by the provider registry on the main thread. */
       api: Schema.String,
       settings: ConnectionSettings,
-      credentialId: Schema.NullOr(CredentialId)
+      /** An existing credential, or a typed key stored with the connection in one transaction. */
+      credential: Schema.Union([
+        Schema.Struct({ existing: Schema.NullOr(CredentialId) }),
+        Schema.Struct({ typed: NewCredential })
+      ])
     },
     success: Connection,
     error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * A key typed for a connection, or none. The connection's previous key goes if the
+   * connection owned it and nothing else uses it. The row version is the one the user
+   * saw, so a key isn't bound to a base URL someone changed in the meantime.
+   */
+  Rpc.make("SetConnectionKey", {
+    payload: {
+      userId: UserId,
+      connectionId: ConnectionId,
+      expectedRowVersion: Schema.Int,
+      credential: Schema.NullOr(NewCredential)
+    },
+    success: Connection,
+    error: Schema.Union([NotFound, StaleWrite, StorageError])
   }),
   Rpc.make("UpdateConnection", {
     payload: {
@@ -472,7 +506,8 @@ export class WriteOps extends RpcGroup.make(
   }),
   /** A new key for the same credential: every connection using it gets the new one. */
   Rpc.make("ReplaceCredentialKey", {
-    payload: { userId: UserId, credentialId: CredentialId, key: EncryptedKey },
+    /** A new key gets its origins stated again: approvals given for the old key don't carry over. */
+    payload: { userId: UserId, credentialId: CredentialId, key: EncryptedKey, origins: Schema.Array(Schema.String) },
     success: Credential,
     error: Schema.Union([NotFound, StorageError])
   }),
@@ -488,9 +523,14 @@ export class WriteOps extends RpcGroup.make(
     error: Schema.Union([NotFound, StorageError])
   }),
   Rpc.make("SetConnectionHeaders", {
-    payload: { userId: UserId, connectionId: ConnectionId, headers: Schema.NullOr(EncryptedHeaders) },
+    payload: {
+      userId: UserId,
+      connectionId: ConnectionId,
+      expectedRowVersion: Schema.Int,
+      headers: Schema.NullOr(EncryptedHeaders)
+    },
     success: Connection,
-    error: Schema.Union([NotFound, StorageError])
+    error: Schema.Union([NotFound, StaleWrite, StorageError])
   }),
   /** The per-connection proxy override (PROVIDERS §6.2); a URL only with `custom`. */
   Rpc.make("SetConnectionProxy", {
@@ -790,7 +830,7 @@ export class ReadOps extends RpcGroup.make(
   /** For the provider layer only: a credential's encrypted key, to check a retyped one. */
   Rpc.make("ResolveCredential", {
     payload: { userId: UserId, credentialId: CredentialId },
-    success: Schema.Struct({ credential: Credential, keyEnc: Schema.Uint8Array }),
+    success: Schema.Struct({ keyEnc: Schema.Uint8Array }),
     error: Schema.Union([NotFound, StorageError])
   }),
   /** For the provider layer only: the connection with its encrypted secrets. */

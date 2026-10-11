@@ -48,3 +48,13 @@ export const credentials = [
     WHEN NEW.api_key_enc IS NOT NULL OR NEW.key_hint IS NOT NULL
     BEGIN SELECT RAISE(ABORT, 'keys are stored as credentials'); END`
 ]
+
+// Secrets bound to where they were entered (spec/PROVIDERS.md §5, migration 0008):
+// - Custom header values often carry credentials too, so they're sent only to the origin
+//   they were set for. Rows from before have none, and must be set again.
+// - A credential made from a key typed into one connection belongs to it: typing a new
+//   key there deletes the old one, rather than keeping a possibly leaked key at rest.
+export const secretBindings = [
+  `ALTER TABLE connections ADD COLUMN headers_origin TEXT`,
+  `ALTER TABLE credentials ADD COLUMN connection_owned INTEGER NOT NULL DEFAULT 0 CHECK (connection_owned IN (0, 1))`
+]
