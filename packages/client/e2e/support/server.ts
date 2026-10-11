@@ -52,11 +52,9 @@ const startOnce = async (env: Record<string, string>): Promise<TestServer | null
   child.stderr!.on("data", (chunk) => (output += chunk))
   const stop = async () => {
     if (child.exitCode === null && child.signalCode === null) {
-      // A graceful stop waits for open sockets, such as a page's WebSocket.
+      // No SIGKILL fallback: a server that doesn't stop with a page open is a bug to see.
       child.kill("SIGTERM")
-      const killer = setTimeout(() => child.kill("SIGKILL"), 3000)
       await waitForExit(child)
-      clearTimeout(killer)
     }
     rmSync(dataDir, { recursive: true, force: true })
   }

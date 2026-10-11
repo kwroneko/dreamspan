@@ -1,6 +1,8 @@
 // Composition of the HTTP server: the RPC endpoint over a WebSocket, login and logout,
 // a health route, and the client build served as a single-page app.
 import { createServer } from "node:http"
+import type { Socket } from "node:net"
+import type { Duplex } from "node:stream"
 import { NodeHttpServer } from "@effect/platform-node"
 import { AppApi, CurrentUser, Health } from "@rp/shared/api.ts"
 import { ByteSize, Effect, Layer, Option, Predicate, Schema } from "effect"
@@ -232,6 +234,11 @@ const InterruptedRequests = Layer.effectDiscard(
   })
 )
 
+/** A server-to-client WebSocket close frame (unmasked) with code 1001, "going away". */
+const WEBSOCKET_GOING_AWAY = Buffer.from([0x88, 0x02, 0x03, 0xe9])
+/** How long requests and sockets get to finish once the server stops. */
+const SHUTDOWN_GRACE_MS = 2000
+
 /**
  * Refused peers are turned away on connect, before the socket is read, so no route,
  * upgrade or static file is reachable from them.
@@ -243,14 +250,38 @@ const HttpServerLive = Layer.unwrap(
     const policy = exposurePolicy(config, accounts.configured)
     if (typeof policy === "string") return yield* new UnsafeExposure({ message: policy })
     yield* Effect.logInfo(`Exposure: ${policy.summary}`)
-    const make = () =>
-      createServer().on("connection", (socket) => {
-        if (policy.allows(socket.remoteAddress)) return
-        // Destroyed, not just ended: the HTTP parser is already attached, and on a
-        // half-open socket it would still dispatch the peer's requests.
-        socket.write(REFUSED_RESPONSE)
-        socket.destroy()
-      })
+    const make = () => {
+      const sockets = new Set<Socket>()
+      const upgraded = new WeakSet<Duplex>()
+      const server = createServer()
+        .on("connection", (socket) => {
+          if (policy.allows(socket.remoteAddress)) {
+            sockets.add(socket)
+            socket.once("close", () => sockets.delete(socket))
+            return
+          }
+          // Destroyed, not just ended: the HTTP parser is already attached, and on a
+          // half-open socket it would still dispatch the peer's requests.
+          socket.write(REFUSED_RESPONSE)
+          socket.destroy()
+        })
+        .on("upgrade", (_request, socket) => upgraded.add(socket))
+      // close() waits for every connection, and an open tab's WebSocket never ends on its
+      // own: a stop would hang until killed, with the database workers mid-flight. So a
+      // close also tells WebSockets the server is going away, ends idle HTTP connections,
+      // and destroys whatever is left after a grace period.
+      const close = server.close.bind(server)
+      server.close = ((callback?: (error?: Error) => void) => {
+        close(callback)
+        for (const socket of sockets) if (upgraded.has(socket)) socket.end(WEBSOCKET_GOING_AWAY)
+        server.closeIdleConnections()
+        setTimeout(() => {
+          for (const socket of sockets) socket.destroy()
+        }, SHUTDOWN_GRACE_MS).unref()
+        return server
+      }) as typeof server.close
+      return server
+    }
     return NodeHttpServer.layer(make, { host: config.host, port: config.port })
   })
 )
