@@ -12,7 +12,7 @@ import {
 } from "@rp/shared/docs/lorebook.ts"
 import type { ReportBuilder } from "@rp/shared/importReport.ts"
 import { Predicate, Schema } from "effect"
-import { enumByIndex, Fields, isFiniteNumber, isSafeInt, present } from "./fields.ts"
+import { enumByIndex, Fields, hasKeys, isFiniteNumber, isSafeInt, present } from "./fields.ts"
 import { fail, type Limits, type Path } from "./safety.ts"
 
 /** Our namespace in `extensions`, for what a standard card or lorebook has no field for. */
@@ -105,17 +105,19 @@ export const ourEntryFields = (extensions: Record<string, unknown>, path: Path, 
   }
 }
 
-/** `extensions` without the keys we lifted out of it. */
+/**
+ * `extensions` without the keys we lifted out of it. It's the parsed object itself with those
+ * keys deleted, so a huge one isn't copied: call it after every read of `extensions`.
+ */
 export const remainingExtensions = (extensions: Record<string, unknown>, lifted: ReadonlySet<string>) => {
-  const rest = Object.entries(extensions).filter(([key]) => !lifted.has(key))
+  for (const key of lifted) delete extensions[key]
   const ours = extensions[OUR_EXTENSION]
   if (Predicate.isObject(ours)) {
-    const ourRest = Object.entries(ours).filter(([key]) => key !== "decision_hint" && key !== "placement_override")
-    const index = rest.findIndex(([key]) => key === OUR_EXTENSION)
-    if (ourRest.length > 0) rest[index] = [OUR_EXTENSION, Object.fromEntries(ourRest)]
-    else rest.splice(index, 1)
+    delete ours.decision_hint
+    delete ours.placement_override
+    if (!hasKeys(ours)) delete extensions[OUR_EXTENSION]
   }
-  return Object.fromEntries(rest)
+  return extensions
 }
 
 /** An entry before its uid is settled. `id` is the one its file gave it, when usable. */
@@ -188,7 +190,6 @@ const cardEntry = (source: unknown, index: number, path: Path, issues: ReportBui
     )
   }
   const comment = entry.string("comment")
-  const unknown = { ...entry.unknown(ENTRY_KEYS).unknown_fields, ...(invalidId ? { id: source.id } : {}) }
   return {
     id: isSafeInt(source.id) ? source.id : undefined,
     entry: {
@@ -244,7 +245,7 @@ const cardEntry = (source: unknown, index: number, path: Path, issues: ReportBui
       use_regex: entry.boolean("use_regex", false),
       ...ourEntryFields(extensions, entryPath, issues),
       extensions: remainingExtensions(extensions, ST_EXTENSION_KEYS),
-      ...(Object.keys(unknown).length > 0 ? { unknown_fields: unknown } : {})
+      ...entry.unknown(ENTRY_KEYS, invalidId ? { id: source.id } : {})
     }
   }
 }

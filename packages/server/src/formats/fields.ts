@@ -91,11 +91,25 @@ export class Fields {
     return {}
   }
 
-  /** The source's keys outside `known`, verbatim, or nothing when there are none. */
-  unknown(known: ReadonlySet<string>): { unknown_fields?: Record<string, unknown> } {
-    const rest = Object.entries(this.source).filter(([key]) => !known.has(key))
-    return rest.length > 0 ? { unknown_fields: Object.fromEntries(rest) } : {}
+  /**
+   * The source's keys outside `known`, verbatim, plus `extra`, or nothing when there are none.
+   * It's the parsed source itself with the known keys deleted, so a huge object isn't copied:
+   * call it after every read of the source.
+   */
+  unknown(
+    known: ReadonlySet<string>,
+    extra: Record<string, unknown> = {}
+  ): { unknown_fields?: Record<string, unknown> } {
+    for (const key of known) delete this.source[key]
+    Object.assign(this.source, extra)
+    return hasKeys(this.source) ? { unknown_fields: this.source } : {}
   }
+}
+
+/** Whether an object has any own key, without listing them all. */
+export const hasKeys = (value: object) => {
+  for (const key in value) if (Object.hasOwn(value, key)) return true
+  return false
 }
 
 /** The fields that have a value: optional fields stay absent when they have none. */

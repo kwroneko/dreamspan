@@ -5,7 +5,7 @@
 import { CARD_SCHEMA_VERSION, CardAsset, type CardDoc, type CardModule } from "@rp/shared/docs/card.ts"
 import type { ReportBuilder } from "@rp/shared/importReport.ts"
 import { Predicate, Schema } from "effect"
-import { Fields, isFiniteNumber } from "./fields.ts"
+import { Fields, hasKeys, isFiniteNumber } from "./fields.ts"
 import { lorebookFromCharacterBook, OUR_EXTENSION } from "./lorebook.ts"
 import { fail, type Limits, type Path } from "./safety.ts"
 
@@ -93,9 +93,10 @@ const liftModules = (extensions: Record<string, unknown>, dataPath: Path, issues
       ])
     }
   })
-  const { modules: _, ...ourRest } = ours
-  const { [OUR_EXTENSION]: __, ...rest } = extensions
-  return { extensions: Object.keys(ourRest).length > 0 ? { ...rest, [OUR_EXTENSION]: ourRest } : rest, modules }
+  // Deleted in place rather than copied without, so a huge `extensions` isn't copied.
+  delete ours.modules
+  if (!hasKeys(ours)) delete extensions[OUR_EXTENSION]
+  return { extensions, modules }
 }
 
 const fromData = (data: Record<string, unknown>, path: Path, limits: Limits, issues: ReportBuilder): CardDoc => {

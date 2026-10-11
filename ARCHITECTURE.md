@@ -706,11 +706,12 @@ It fails with a typed `ProviderError`.
 |---|---|---|
 | File size | 64 MiB | Bounds memory and work for everything below |
 | Card JSON | 8 MiB | About 2M tokens of text, more than any model's context holds: a bigger card couldn't be used. Applies to a JSON file, a PNG's card chunk once decoded, and a CHARX's `card.json` |
-| World Info JSON | 32 MiB | Lorebooks are scanned, not sent whole, so they can outgrow a context: 20,000 entries of 1 KB fit |
+| World Info JSON | 32 MiB | Lorebooks are scanned, not sent whole, so they can outgrow a context: a full lorebook with 2 KB of content per entry fits. The value cap, not this one, bounds the parse work |
 | JSON nesting | 64 levels | Real cards nest about 8 deep. Counted in the bytes before parsing, which also bounds the recursive walk after it |
-| JSON objects and lists | 250,000 | Counted before parsing: 10M empty objects in 32 MB cost `JSON.parse` 1.1 GB. A 20,000-entry lorebook has about 120,000 |
+| JSON objects and lists | 250,000 | Counted before parsing: 10M empty objects in 32 MB cost `JSON.parse` 1.1 GB. A full lorebook has about 60,000 |
+| JSON values and keys | 1,200,000 | Counted before parsing (every comma and colon): parsing costs about 1 µs each, and a 30 MiB list of zeros took 4 s and 1.1 GB without it. ST writes about 110 per entry, so a full lorebook has 1.1M |
 | Prototype keys | 100 | Each is dropped with a warning; more make the file hostile |
-| Lorebook entries | 20,000 | Each becomes an object of some fifty fields |
+| Lorebook entries | 10,000 | An assumption to revisit with real files: a lorebook of a few thousand entries is already exceptional. 20,000 full ST entries would need 2.2M values, about 2 s of parsing |
 | PNG chunks | 16,384 | Bounds the chunk walk |
 | PNG chunk size | 32 MiB | Checked against the declared length before anything is read |
 | Zip entries | 1,024 | Bounds the directory walk |
@@ -724,5 +725,5 @@ It fails with a typed `ProviderError`.
 - **Nothing in a file is executed or rendered.** Scripts in a card (RisuAI's modules, Lua assets) are skipped, never stored.
 
 **Known limits:**
-- **The importer must run the parsers off the main thread.** They're synchronous: measured on this host under load (2026-10-11), a 21 MB World Info file with 20,000 entries took 110 to 200 ms, and a hostile 8 MB card full of mistyped lorebook fields about 180 ms before the entry cap refused it. On the main thread that would stall every live stream (§3.1).
+- **The importer must run the parsers off the main thread.** They're synchronous: measured on this host under load (2026-10-11, load average 25), the worst file within the caps (one object of 595,000 keys) took 850 ms and 80 MB of heap, a list of 1.19M short strings 460 ms, and a full lorebook (10,000 entries with every ST field and 2 KB of content, 29 MiB) 480 ms. The walk after parsing steps through lists by index and skips scalars, and unknown fields and extensions are kept by deleting the known keys from the parsed objects instead of copying them. On the main thread that would stall every live stream (§3.1).
 - Not built yet: the importer itself (storing the document, the avatar and assets, and the report), and registering these formats as importers (PLUGINS §8).

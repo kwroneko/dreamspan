@@ -21,6 +21,8 @@ export interface Limits {
   readonly maxJsonDepth: number
   /** Objects and lists in one JSON document, counted before it's parsed. */
   readonly maxJsonContainers: number
+  /** Values and keys in one JSON document, counted the same way. */
+  readonly maxJsonValues: number
   /** Prototype keys dropped before a file counts as hostile and is refused. */
   readonly maxForbiddenKeys: number
   readonly maxLorebookEntries: number
@@ -41,14 +43,19 @@ export const defaultLimits: Limits = {
   maxFileBytes: 64 * MiB,
   // About 2M tokens of text, more than any model's context holds: a bigger card couldn't be used.
   maxCardJsonBytes: 8 * MiB,
-  // Lorebooks are scanned, not sent whole, so they can outgrow a context: 20,000 entries of
-  // 1 KB fit with room to spare.
+  // Lorebooks are scanned, not sent whole, so they can outgrow a context: the entry cap's
+  // worth of entries with 2 KB of content each fit.
   maxLorebookJsonBytes: 32 * MiB,
   maxJsonDepth: 64,
-  // A 20,000-entry lorebook has about 120,000: entries, key lists, extensions.
+  // A full lorebook has about 60,000: entries, key lists, extensions.
   maxJsonContainers: 250_000,
+  // ST writes about fifty fields per entry, about 110 values and keys: 1.1M for a full
+  // lorebook. Parsing costs about 1 µs a value or key, so this bounds the work.
+  maxJsonValues: 1_200_000,
   maxForbiddenKeys: 100,
-  maxLorebookEntries: 20_000,
+  // An assumption to revisit with real files: a lorebook of a few thousand entries is
+  // already exceptional, and 20,000 full ST entries would take 2 s to parse on our host.
+  maxLorebookEntries: 10_000,
   maxPngChunks: 16_384,
   maxPngChunkBytes: 32 * MiB,
   maxZipEntries: 1024,
@@ -75,12 +82,15 @@ export const attempt = <A>(parse: () => A): Effect.Effect<A, FormatError> =>
 export type Path = ReadonlyArray<string | number>
 
 /**
- * Counts nesting and containers in the raw bytes, so a document that would cost too much
- * to parse is refused before `JSON.parse` builds it. Invalid JSON is left to the parser.
+ * Counts nesting, containers and values in the raw bytes, so a document that would cost too
+ * much to parse is refused before `JSON.parse` builds it. Every value and key but the first
+ * in a container follows a comma or colon, so those count them (one short per container, as
+ * the containers count themselves). Invalid JSON is left to the parser.
  */
 const scanJson = (bytes: Uint8Array, limits: Limits) => {
   let depth = 0
   let containers = 0
+  let values = 0
   let inString = false
   for (let i = 0; i < bytes.length; i++) {
     const byte = bytes[i]
@@ -95,6 +105,10 @@ const scanJson = (bytes: Uint8Array, limits: Limits) => {
       }
       if (++containers > limits.maxJsonContainers) {
         fail("json.too_many_containers", `The JSON has more than ${limits.maxJsonContainers} objects and lists.`)
+      }
+    } else if (byte === 0x2c || byte === 0x3a) {
+      if (++values > limits.maxJsonValues) {
+        fail("json.too_many_values", `The JSON has more than ${limits.maxJsonValues} values.`)
       }
     } else if (byte === 0x7d || byte === 0x5d) {
       depth--
@@ -120,24 +134,34 @@ export const parseJson = (bytes: Uint8Array, maxBytes: number, limits: Limits, i
   }
   let forbidden = 0
   const path: Array<string | number> = []
-  // The scan bounded the depth, so the recursion is bounded too.
-  const walk = (node: unknown) => {
-    if (typeof node !== "object" || node === null) return
+  // The scan bounded the depth, so the recursion is bounded too. Only objects are walked into.
+  const walk = (node: object) => {
+    if (Array.isArray(node)) {
+      for (let index = 0; index < node.length; index++) {
+        const item: unknown = node[index]
+        if (typeof item !== "object" || item === null) continue
+        path.push(index)
+        walk(item)
+        path.pop()
+      }
+      return
+    }
     const record = node as Record<string, unknown>
     for (const key of Object.keys(record)) {
-      path.push(Array.isArray(node) ? Number(key) : key)
+      const item = record[key]
       if (FORBIDDEN_KEYS.has(key)) {
         if (++forbidden > limits.maxForbiddenKeys) {
           fail("json.forbidden_keys", `The JSON has more than ${limits.maxForbiddenKeys} prototype keys.`)
         }
         delete record[key]
-        issues.add("warning", "json.forbidden_key", `The key "${key}" was dropped.`, path)
-      } else {
-        walk(record[key])
+        issues.add("warning", "json.forbidden_key", `The key "${key}" was dropped.`, [...path, key])
+      } else if (typeof item === "object" && item !== null) {
+        path.push(key)
+        walk(item)
+        path.pop()
       }
-      path.pop()
     }
   }
-  walk(value)
+  if (typeof value === "object" && value !== null) walk(value)
   return value
 }

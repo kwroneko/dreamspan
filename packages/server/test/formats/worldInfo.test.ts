@@ -93,6 +93,19 @@ describe("World Info import", () => {
     expect(failure(importLorebook(padded(defaultLimits.maxLorebookJsonBytes + 1)))).toBe("json.too_large")
   })
 
+  it("counts every value and key before parsing", () => {
+    // Six colons and two commas besides the list's own commas.
+    const file = (zeros: number, end = "]}}}}") =>
+      new TextEncoder().encode(
+        `{"entries":{"0":{"key":["a"],"content":"b","extensions":{"blob":[${Array(zeros).fill("0").join(",")}${end}`
+      )
+    const limit = defaultLimits.maxJsonValues
+    run(importLorebook(file(limit - 7)))
+    expect(failure(importLorebook(file(limit - 6)))).toBe("json.too_many_values")
+    // 30 MiB of zeros, cut short: a parse would fail as invalid JSON, so the scan refused it first.
+    expect(failure(importLorebook(file(15 * 1024 * 1024, "")))).toBe("json.too_many_values")
+  })
+
   it("keeps valid uids when renumbering others", () => {
     const { lorebook, report } = run(
       importLorebook(json({ entries: [{ uid: "a" }, { uid: 0 }, { uid: 0 }, { uid: 1e300 }] }))
