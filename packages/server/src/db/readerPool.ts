@@ -47,7 +47,7 @@ const clientError = (cause: Cause.Cause<WorkerError.WorkerError>) => {
  * Fails to build if every reader dies before any is ready. Afterwards a crashed reader is
  * respawned every second, and while no reader is up, queued reads fail instead of waiting.
  */
-export const layer = (size: number) =>
+export const layer = (size: number, name = "database reader") =>
   Layer.effect(
     RpcClient.Protocol,
     RpcClient.Protocol.make(
@@ -136,7 +136,7 @@ export const layer = (size: number) =>
             diedBeforeStart.add(reader.id)
             if (diedBeforeStart.size === size) Deferred.doneUnsafe(started, Exit.fail(error))
           }
-          return Effect.logError(`database reader ${reader.id} stopped; restarting it in ${RESPAWN_MS} ms`, cause).pipe(
+          return Effect.logError(`${name} ${reader.id} stopped; restarting it in ${RESPAWN_MS} ms`, cause).pipe(
             Effect.andThen(
               Effect.forEach(
                 new Set(failed),

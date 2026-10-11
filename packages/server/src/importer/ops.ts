@@ -3,6 +3,7 @@
 import { ImportReport } from "@rp/shared/importReport.ts"
 import { EntityKind } from "@rp/shared/library.ts"
 import { Schema } from "effect"
+import { Rpc, RpcGroup } from "effect/rpc"
 import { Transferable } from "effect/workers"
 
 export class ParsedMedia extends Schema.Class<ParsedMedia>("ParsedMedia")({
@@ -32,3 +33,10 @@ export class ParsedFile extends Schema.Class<ParsedFile>("ParsedFile")({
   ),
   media: Schema.Array(ParsedMedia)
 }) {}
+
+export class FormatOps extends RpcGroup.make(
+  Rpc.make("Parse", {
+    payload: { bytes: Transferable.Uint8Array, fileName: Schema.String },
+    success: ParsedFile
+  })
+) {}

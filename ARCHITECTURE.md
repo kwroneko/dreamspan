@@ -163,7 +163,7 @@ Other processes are the remaining risk, so they're kept out:
 
 ### 3.6 Worker bundles
 
-Each worker thread is a separate V8 isolate that loads its own copy of every module it imports. Loading Effect's module graph from source costs about 85 MB per worker. `npm run build` therefore bundles the two worker entry points into single tree-shaken files with rolldown (`packages/server/scripts/build-workers.ts` writes `packages/server/dist/workers/{writer,reader}.mjs`). A bundled worker costs about 19 MB (measured in `test/database.test.ts`, which fails above 40 MB).
+Each worker thread is a separate V8 isolate that loads its own copy of every module it imports. Loading Effect's module graph from source costs about 85 MB per worker. `npm run build` therefore bundles the worker entry points into single tree-shaken files with rolldown (`packages/server/scripts/build-workers.ts` writes `packages/server/dist/workers/{writer,reader,formats}.mjs`; the format worker is §10.3). A bundled worker costs about 19 MB (measured in `test/database.test.ts`, which fails above 40 MB).
 
 `DB_WORKERS` selects the entry points:
 - `source` is the default outside production, so development never runs a stale bundle.
@@ -902,3 +902,14 @@ One write operation, `ImportFile` (`db/libraryWrites.ts`), stores a parsed file 
 - **Labels:** a card's name, a lorebook's name, a preset's file name (ST names presets by file), falling back to the file name; control characters removed, at most 200 characters.
 - **ST's Character's Note** leaves the card's `extensions` and becomes the note document, so it lives in one place. ST's defaults apply: depth 4, role `system`. An empty one, which ST writes into every card, stays in the extensions untouched.
 - **Files are copied to buffers of their own** before they cross to the main thread. An extracted asset can be a view into the upload or into Node's shared buffer pool, and transferring that buffer would detach the pool under the worker.
+
+### 10.3 Format workers
+
+The parsers are synchronous and take up to about a second on a hostile file (§8), so they run in worker threads (`importer/worker.ts`), never on the main thread. `Formats` (`importer/Formats.ts`) is the main thread's side.
+- **The pool is the database readers'** (`db/readerPool.ts`, §3.1), with workers of its own. A worker is busy until it answers, so the pool's size is how many files are parsed at once, and the rest queue in order. A worker that dies (a crash, or its heap limit) fails the file it had with `FormatWorkerFailed`, which is logged, and is respawned a second later; the next file parses on the new one (`test/formatWorkers.test.ts`, with a test worker that dies on request).
+- **The heap limit,** 512 MB (`resourceLimits.maxOldGenerationSizeMb`), bounds what one file can cost the server: the worst file within the caps took 80 MB, and a worker from source needs about 85 MB for its modules.
+- **The upload is transferred, not copied,** when its bytes have a buffer of their own. A view into a larger buffer is copied first: small Node Buffers share a pool, which can't be transferred, and transferring the buffer under other views would empty them.
+- **Measured** in the test: an 11 MB lorebook parsed on the main thread blocks it for hundreds of milliseconds. Through a worker, the main thread's longest stall stays under a third of that and under 100 ms. The bounds are loose because the host is shared.
+- **Bundled** like the database workers (§3.6): `formats.mjs`, stamped with them, and refused when missing or stale.
+
+**Known limits:** a parse can't be interrupted. A parser bug that never returns would hold its worker for good, and every later import would queue behind it. Terminating a worker after a deadline needs the pool to kill threads, which it doesn't yet.

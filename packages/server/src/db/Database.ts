@@ -2,7 +2,7 @@
 import { existsSync, mkdirSync } from "node:fs"
 import { join } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
-import { Worker } from "node:worker_threads"
+import { type ResourceLimits, Worker } from "node:worker_threads"
 import { NodeWorker } from "@effect/platform-node"
 import { Cause, Context, Effect, Layer, Schema } from "effect"
 import { RpcClient, type RpcClientError } from "effect/rpc"
@@ -51,9 +51,18 @@ class WorkerBundleStale extends Schema.TaggedError<WorkerBundleStale>()("WorkerB
   }
 }
 
-const defaultBundleDir = fileURLToPath(new URL("../../dist/workers", import.meta.url))
+export const defaultBundleDir = fileURLToPath(new URL("../../dist/workers", import.meta.url))
 
-/** The writer's and readers' entry points. Bundles must exist and match the sources. */
+/** A bundled worker's entry point, `<name>.mjs` in `dir`. It must exist and match the sources. */
+export const bundleEntry = (dir: string, name: string) =>
+  Effect.gen(function* () {
+    const path = join(dir, `${name}.mjs`)
+    if (!existsSync(path)) return yield* new WorkerBundleMissing({ path })
+    if (!stampMatches(dir)) return yield* new WorkerBundleStale({ path: dir })
+    return pathToFileURL(path)
+  })
+
+/** The writer's and readers' entry points. */
 const workerEntries = (options: DatabaseOptions) =>
   Effect.gen(function* () {
     if (options.workers === "source") {
@@ -64,22 +73,26 @@ const workerEntries = (options: DatabaseOptions) =>
       }
     }
     const dir = options.bundleDir ?? defaultBundleDir
-    const [writer, reader] = [join(dir, "writer.mjs"), join(dir, "reader.mjs")]
-    for (const path of [writer, reader]) {
-      if (!existsSync(path)) return yield* new WorkerBundleMissing({ path })
-    }
-    if (!stampMatches(dir)) return yield* new WorkerBundleStale({ path: dir })
-    return { writer: pathToFileURL(writer), reader: pathToFileURL(reader), bundleDir: dir }
+    return { writer: yield* bundleEntry(dir, "writer"), reader: yield* bundleEntry(dir, "reader"), bundleDir: dir }
   })
 
 /**
  * Spawns worker threads. With bundles, every spawn checks the stamp again (about 3 ms),
  * so a crashed worker isn't replaced by code built after this server started.
  */
-export const workerThreads = (entry: URL, workerData: Record<string, unknown>, bundleDir?: string) =>
+export const workerThreads = (
+  entry: URL,
+  workerData: Record<string, unknown>,
+  bundleDir?: string,
+  resourceLimits?: ResourceLimits
+) =>
   NodeWorker.layer(() => {
     if (bundleDir !== undefined && !stampMatches(bundleDir)) throw new WorkerBundleStale({ path: bundleDir })
-    return new Worker(entry, { workerData, name: entry.pathname.split("/").pop() })
+    return new Worker(entry, {
+      workerData,
+      name: entry.pathname.split("/").pop(),
+      ...(resourceLimits ? { resourceLimits } : {})
+    })
   })
 
 /**
