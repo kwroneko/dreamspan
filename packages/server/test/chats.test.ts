@@ -8,6 +8,7 @@ import { Effect, Layer, Option, Stream } from "effect"
 import * as FakeGenerator from "../src/chat/fakeGenerator.ts"
 import { GenerationFailed, Generator } from "../src/chat/Generator.ts"
 import { AppConfig, type AppConfigShape } from "../src/config.ts"
+import { Writer } from "../src/db/Database.ts"
 import { serverWith } from "../src/server.ts"
 import { client, outcome, testConfig } from "./support/config.ts"
 
@@ -201,10 +202,16 @@ describe("chats", () => {
         side.push(parent)
       }
       yield* api.SendMessage({ chatId: chat.id, parentSlotId: slots[1]!, branch: true, content: "m2" })
-      yield* api.DeleteMessage({ slotId: side[1]! })
+      const item = yield* api.DeleteMessage({ slotId: side[1]! })
       const window = yield* read(api, chat.id, { _tag: "Around", slot: side[0]! }, 10)
       assert.strictEqual(window.leafSlotId, side[2])
       assert.deepStrictEqual(contents(window.entries), ["m0", "b1", "b3"])
+      // Still, once it's deleted for good.
+      const writer = yield* Writer
+      const me = yield* api.Whoami()
+      yield* writer.PurgeBinItem({ userId: me.id, itemId: item.id })
+      const purged = yield* read(api, chat.id, { _tag: "Around", slot: side[0]! }, 10)
+      assert.deepStrictEqual(contents(purged.entries), ["m0", "b1", "b3"])
     }).pipe(Effect.scoped, withGenerator(config, Generator.none))
   })
 

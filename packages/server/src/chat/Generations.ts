@@ -102,8 +102,19 @@ export class Generations extends Context.Service<
               if (Date.now() - entry.savedAt < SAVE_EVERY_MS) return Effect.void
               entry.savedAt = Date.now()
               return save(entry, "generating", null).pipe(
-                Effect.tapCause((cause) => Effect.logWarning("saving a generation's text so far failed", cause)),
-                Effect.ignore
+                // Gone for good (purged from the bin): nothing it writes would be kept.
+                Effect.catchTag("NotFound", () =>
+                  Effect.suspend(() => {
+                    entry.stopped = true
+                    return Effect.interrupt
+                  })
+                ),
+                Effect.tapCause((cause) =>
+                  Cause.hasInterruptsOnly(cause)
+                    ? Effect.void
+                    : Effect.logWarning("saving a generation's text so far failed", cause)
+                ),
+                Effect.catchTag(["StorageError", "RpcClientError"], () => Effect.void)
               )
             })
           ),

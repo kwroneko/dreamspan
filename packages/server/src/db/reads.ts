@@ -90,8 +90,9 @@ export const makeReadHandlers = Effect.gen(function* () {
     )
 
   /**
-   * The tip below a slot, following its newest reply at every step: a live one, or one
-   * deleted on its own, whose replies stay in place. A deleted branch is never followed.
+   * The tip below a slot, following its newest reply at every step: a live one, or a
+   * deleted one with a live reply (a message deleted on its own, in the bin or purged,
+   * whose replies stay in place). A deleted branch is never followed.
    */
   const latestDescendant = (slotId: SlotId) =>
     sql<{ id: SlotId }>`
@@ -99,7 +100,8 @@ export const makeReadHandlers = Effect.gen(function* () {
         SELECT ${slotId}, 0
         UNION ALL
         SELECT (SELECT c.id FROM slots c WHERE c.parent_slot_id = d.id
-            AND (c.deleted_at IS NULL OR EXISTS (SELECT 1 FROM bin_items b WHERE b.id = c.bin_item_id AND b.kind = 'message'))
+            AND (c.deleted_at IS NULL OR EXISTS (
+              SELECT 1 FROM slots g WHERE g.parent_slot_id = c.id AND g.deleted_at IS NULL))
             ORDER BY c.id DESC LIMIT 1),
           d.n + 1
         FROM down d WHERE d.id IS NOT NULL
