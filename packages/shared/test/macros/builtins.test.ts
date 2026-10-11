@@ -146,6 +146,16 @@ describe("state", () => {
   vectors([["{{description}}", "{{original}}"]], { original: "ORIG", card: { description: "{{original}}" } })
 })
 
+describe("instruct, system-prompt and context-template macros, as ST with instruct off", () => {
+  vectors([
+    ["[{{instructUserPrefix}}{{instructInput}}{{instructAssistantSuffix}}{{instructStop}}{{instructLastInput}}]", "[]"],
+    ["[{{defaultSystemPrompt}}{{instructSystemPrompt}}]", "[]"],
+    ["{{systemPrompt}}", "Main for Character"],
+    ["{{chatStart}}|{{exampleSeparator}}|{{chatSeparator}}", "***|***|***"]
+  ])
+  vectors([["[{{systemPrompt}}]", "[]"]], { card: {} })
+})
+
 describe("chat", () => {
   vectors([
     ["{{lastMessage}}|{{lastMessageId}}|{{lastUserMessage}}|{{lastCharMessage}}", "latest|2|latest|reply"],

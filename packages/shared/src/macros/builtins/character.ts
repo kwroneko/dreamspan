@@ -12,12 +12,12 @@ const expanded = (call: MacroCall, text: string | undefined, scope: string) => {
   return trimmed ? call.expandTemplate(trimmed, scope).replace(/\r/g, "") : ""
 }
 
-const field = (call: MacroCall, key: TextField) => expanded(call, call.context.card?.[key], `card.${key}`)
+export const cardField = (call: MacroCall, key: TextField) => expanded(call, call.context.card?.[key], `card.${key}`)
 
 const fieldMacro = (name: string, key: TextField, aliases?: ReadonlyArray<string>): MacroSpec => ({
   name,
   ...(aliases ? { aliases } : {}),
-  handler: (call) => field(call, key)
+  handler: (call) => cardField(call, key)
 })
 
 /** ST's parseMesExamples for chat completion: each example block headed by `<START>`. */
@@ -33,7 +33,7 @@ const formatExamples = (raw: string) => {
 
 const greeting = (call: MacroCall) => {
   const index = Number(call.args[0] ?? 0)
-  if (index === 0) return field(call, "firstMessage")
+  if (index === 0) return cardField(call, "firstMessage")
   // ST expands every alternate greeting on first use of any of them.
   const all = (call.context.card?.alternateGreetings ?? []).map((text, i) =>
     expanded(call, text, `card.alternateGreetings.${i}`)
@@ -58,7 +58,7 @@ export const characterMacros: ReadonlyArray<MacroSpec> = [
   fieldMacro("charScenario", "scenario", ["scenario"]),
   fieldMacro("persona", "persona"),
   fieldMacro("mesExamplesRaw", "mesExamples"),
-  { name: "mesExamples", handler: (call) => formatExamples(field(call, "mesExamples")) },
+  { name: "mesExamples", handler: (call) => formatExamples(cardField(call, "mesExamples")) },
   fieldMacro("charDepthPrompt", "depthPrompt"),
   fieldMacro("charCreatorNotes", "creatorNotes", ["creatorNotes"]),
   {

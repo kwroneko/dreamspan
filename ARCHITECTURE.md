@@ -845,7 +845,7 @@ ST chat-completion presets (DESIGN §1.2). Pure functions with no database acces
 - quirks, each with a test: `{{char's}}` resolves like `{{char}}` (Chevrotain drops what can't follow a name); an unknown macro with a block comes back as `{{foo}}bar}}`; a comment's argument is still evaluated; `{{if}}` matches `if` and `else` case-sensitively when splitting
 
 **Deliberately different from ST:**
-- The instruct, system-prompt and context-template macros aren't registered, so they stay as written: text completion is out of scope (DESIGN §1.2).
+- Text completion is out of scope (DESIGN §1.2), so the instruct, system-prompt and context-template macros resolve as in ST with instruct mode off, instead of reaching the model as text (`builtins/prompts.ts`): instruct sequences are empty, `{{systemPrompt}}` is the card's own system prompt or empty (ST falls back to its text-completion system prompt, which doesn't exist here), `{{defaultSystemPrompt}}` is empty, and `{{chatStart}}` and `{{exampleSeparator}}` are ST's default `***`.
 - `{{pick}}` is seeded like ST's but without seedrandom, so it picks differently for the same seed.
 - Where ST's parser recovers from a malformed macro (a bad nested macro, a stray operator), the macro stays literal here and scanning resumes after its `{{`. ST's recovery depends on the input and can swallow text after it.
 - `{{hasExtension}}` is always false: ST extensions don't exist here.
