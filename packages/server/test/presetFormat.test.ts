@@ -622,6 +622,16 @@ describe("cases where ST's behaviour is easy to miss", () => {
     expect(issue(twice, "preset.order_repeated")?.message).toContain("2 times")
   })
 
+  it("reads a relative prompt listed twice by its first entry, as ST does", () => {
+    const prompts = [{ identifier: "x", system_prompt: false, role: "user", content: "rel" }]
+    const off = load({ prompts, prompt_order: order(["x", false], ["x", true]) })
+    expect(off.doc.order).toEqual([{ identifier: "x", enabled: false }])
+    // ST sends it once: the second copy overwrites the first's slot.
+    const on = load({ prompts, prompt_order: order(["x", true], ["x", true]) })
+    expect(on.doc.order).toEqual([{ identifier: "x", enabled: true }])
+    expect(codes(on)).not.toContain("preset.order_repeated")
+  })
+
   it("imports a prompt whose generation types are all invalid as disabled", () => {
     const result = load({
       prompts: [
@@ -669,11 +679,12 @@ describe("cases where ST's behaviour is easy to miss", () => {
   })
 
   it("never takes the regex approval from the file, and never exports it", () => {
-    const result = load(
-      preset({ regex_approved: true, extensions: { regex_approved: true, regex_scripts: [{ id: "r" }] } })
-    )
+    const result = load(preset({ regex_approved: true, extensions: { regex_scripts: [{ id: "r" }] } }))
     expect(result.doc.regex_approved).toBe(false)
-    const approved = { ...result.doc, regex_approved: true, unsupported: {}, extensions: {} }
-    expect(JSON.stringify(exportStPreset(approved))).not.toContain("regex_approved")
+    expect(result.doc.unsupported).not.toHaveProperty("regex_approved")
+    expect(codes(result, "warning")).toContain("preset.approval_ignored")
+    // Whether the file claimed it or the user later approved, the export carries nothing.
+    for (const doc of [result.doc, { ...result.doc, regex_approved: true }])
+      expect(JSON.stringify(exportStPreset(doc))).not.toContain("regex_approved")
   })
 })

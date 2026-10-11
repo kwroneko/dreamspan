@@ -360,7 +360,7 @@ export const importStPreset = (input: string | Uint8Array): PresetImport => {
     r.add("error", "preset.too_large", `The file is over the ${MAX_PRESET_BYTES / 1024 / 1024} MB limit for presets.`)
     return r.done("unknown", null)
   }
-  const text = typeof input === "string" ? input.replace(/^﻿/, "") : new TextDecoder().decode(input)
+  const text = typeof input === "string" ? input.replace(/^\uFEFF/, "") : new TextDecoder().decode(input)
   if (nestsDeeperThan(text, MAX_JSON_DEPTH)) {
     r.add("error", "preset.too_deep", `The file nests more than ${MAX_JSON_DEPTH} levels deep.`)
     return r.done("unknown", null)
@@ -499,6 +499,16 @@ const readPreset = (file: Json, r: Reporter): PresetDoc => {
     if (consumed.has(key)) continue
     if (isConnectionField(key)) {
       ignored.push(key)
+      continue
+    }
+    if (key === "regex_approved") {
+      // Not kept, so no export can carry a file's claim of approval anywhere.
+      r.add(
+        "warning",
+        "preset.approval_ignored",
+        "The file's `regex_approved` was dropped. Only you can allow scripts.",
+        [key]
+      )
       continue
     }
     unsupported[key] = src[key]
@@ -690,6 +700,7 @@ const readOrder = (
       )
   }
   const known = new Set(prompts.map((p) => p.identifier))
+  const inChatIds = new Set(prompts.filter((p) => p.injection_position === "absolute").map((p) => p.identifier))
   const order = new Map<string, PromptOrderEntry>()
   const enabledEntries = new Map<string, number>()
   for (const [i, e] of entries.entries()) {
@@ -700,17 +711,20 @@ const readOrder = (
       r.add("info", "preset.order_entry_dropped", "A prompt order entry names no prompt and was dropped.", path)
       continue
     }
+    // ST injects an in-chat prompt once per enabled entry. A relative prompt is sent at most
+    // once, and only if its first entry is enabled.
+    const inChat = inChatIds.has(identifier)
     const enabled = Boolean((e as Json).enabled)
-    if (enabled) enabledEntries.set(identifier, (enabledEntries.get(identifier) ?? 0) + 1)
+    if (enabled && inChat) enabledEntries.set(identifier, (enabledEntries.get(identifier) ?? 0) + 1)
     if (!order.has(identifier)) order.set(identifier, { identifier, enabled })
     else {
       r.add(
         "warning",
         "preset.order_duplicate",
-        `\`${shown(identifier)}\` appears more than once in the prompt order. It's kept once, enabled if any entry is.`,
+        `\`${shown(identifier)}\` appears more than once in the prompt order. It's kept once, ${inChat ? "enabled if any entry is" : "as its first entry, as ST reads it"}.`,
         path
       )
-      if (enabled) order.set(identifier, { identifier, enabled })
+      if (enabled && inChat) order.set(identifier, { identifier, enabled })
     }
   }
   for (const [identifier, count] of enabledEntries)
