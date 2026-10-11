@@ -820,15 +820,15 @@ ST chat-completion presets (DESIGN §1.2). Pure functions with no database acces
 
 **The registry** (`registry.ts`, `builtins.ts`). Macros register by name and aliases, matched case-insensitively, through the generic registry (`@rp/shared/registry.ts`). The built-ins register through it like a plugin. A definition declares positional arguments with types, an optional list tail, strict arity (the default: a wrong call stays as written), delayed argument resolution (for `{{if}}`), and `volatile`.
 
-**The parser** (`parse.ts`) is a hand-written scanner in place of ST's Chevrotain grammar: no regex that can backtrack, each macro start parsed once, nesting bounded.
+**The parser** (`parse.ts`) is a hand-written scanner in place of ST's Chevrotain grammar: no regex that can backtrack, each macro start parsed once, nested macros parsed with an explicit stack instead of recursion. A macro that's never closed stays text however deep it goes, as in ST.
 
 **Hardening.** Imported card text is untrusted, so one expansion is bounded (`MacroLimits`, overridable per call):
-- **Depth:** 32 macros inside one another (arguments, blocks, `{{if}}` branches, card fields). The parser enforces it too, so deep nesting can't overflow the stack.
+- **Depth:** 32 macros evaluated inside one another (arguments, blocks, `{{if}}` branches, card fields), so deep nesting can't overflow the stack.
 - **Expansions:** 10,000 macros evaluated.
-- **Work:** 4,000,000 units, about one per character produced by a macro, written to a variable or parsed, and per die rolled. This bounds the output, and stops values that double. Pairing blocks costs 10 per macro, because each level pairs its block's content again (as ST does), so deeply nested blocks would otherwise cost depth × size.
+- **Work:** 4,000,000 units, about one per character produced by a macro, read from or written to a variable, or looked at by the parser, one per entry looked at when pairing blocks, and one per die rolled. This bounds the output and the time taken, and stops values that double. Each level pairs its block's content again (as ST does), and that's counted too, so deeply nested blocks can't cost depth × size for free.
 - Handlers count large output before building it (`{{space::N}}`, `{{newline::N}}`, dice, and `{{datetimeformat}}` at 13 characters per format character, its most).
 - **Reaching a limit fails the whole text** with `LimitExceeded`: nothing partial comes back.
-- **Linear time:** no regex that backtracks (ST's `{{trim}}` regex, quadratic on runs of newlines, is a scan here); recovery after a name uses a precomputed table; pairing blocks searches square-root blocks of running sums, so many unclosed openers can't make it quadratic.
+- **Linear time:** no regex that backtracks (ST's `{{trim}}` regex, quadratic on runs of newlines, is a scan here); recovery after a name uses a precomputed table; pairing blocks searches square-root blocks of running sums, so many unclosed openers cost about n√n. The parser and the pairing count their steps as work, so the tests assert linear time as a work bound rather than a time.
 - **No code evaluation:** nothing calls `eval`, `Function` or a dynamic import, and a test scans the sources for them.
 - **Untrusted names** are looked up as own keys or in `Map`s: variables, frozen values, outlets, macro names.
 - **Nothing throws out of an expansion** for bad input: a macro whose handler fails stays as written, as in ST, and so does a variable shorthand whose operation fails (deeply nested JSON, say), where ST gives up on the whole text.

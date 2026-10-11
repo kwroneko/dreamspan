@@ -35,16 +35,15 @@ export interface MacroLimits {
   /** Macros evaluated in all. */
   readonly maxExpansions: number
   /**
-   * Work in all, which bounds the output: about one unit per character produced by a macro,
-   * written to a variable or parsed, and per die rolled. Pairing scoped blocks counts
-   * PAIRING_COST per macro, since a block's content is paired again at each level (as in ST).
+   * Work in all, which bounds the output and the time taken: about one unit per character
+   * produced by a macro, read from or written to a variable, or looked at by the parser, per
+   * entry looked at when pairing blocks (a block's content is paired again at each level, as
+   * in ST), and per die rolled.
    */
   readonly maxWork: number
 }
 
 const DEFAULT_MACRO_LIMITS: MacroLimits = { maxDepth: 32, maxExpansions: 10_000, maxWork: 4_000_000 }
-
-const PAIRING_COST = 10
 
 export type MacroLimit = "depth" | "expansions" | "work"
 
@@ -129,6 +128,8 @@ export const trimScoped = (content: string): string => {
  */
 class ScopeGroup {
   readonly indices: Array<number> = []
+  /** Entries looked at, for the work charge. */
+  steps = 0
   private readonly values: Array<number> = []
   private width = 1
   private sums = new Int32Array(0)
@@ -152,6 +153,7 @@ class ScopeGroup {
     let min = 0
     const end = Math.min(this.values.length, (block + 1) * this.width)
     for (let x = block * this.width; x < end; x++) {
+      this.steps++
       sum += this.values[x]!
       if (sum < min) min = sum
     }
@@ -165,16 +167,19 @@ class ScopeGroup {
     let running = 0
     let block = Math.floor(slot / this.width)
     for (let x = slot + 1; x < Math.min(n, (block + 1) * this.width); x++) {
+      this.steps++
       running += this.values[x]!
       if (running < 0) return x
     }
     for (block++; block < this.sums.length; block++) {
       if (running + this.mins[block]! < 0) {
         for (let x = block * this.width; ; x++) {
+          this.steps++
           running += this.values[x]!
           if (running < 0) return x
         }
       }
+      this.steps++
       running += this.sums[block]!
     }
     return -1
@@ -200,8 +205,9 @@ const pairScopes = (
   nodes: ReadonlyArray<Node>,
   from: number,
   to: number,
-  accepts: (node: MacroNode) => boolean
-): Array<Item> => {
+  accepts: (node: MacroNode) => boolean,
+  charge: (steps: number) => void
+): ReadonlyArray<Item> => {
   const groups = new Map<string, ScopeGroup>()
   const openers: Array<{ index: number; group: ScopeGroup; slot: number; accepts: boolean }> = []
   const closers: Array<number> = []
@@ -221,7 +227,10 @@ const pairScopes = (
       openers.push({ index: k, group, slot, accepts: ok })
     }
   }
-  for (const group of groups.values()) group.build()
+  for (const group of groups.values()) {
+    group.build()
+    charge(group.steps)
+  }
 
   const keepRaw = new Set<number>()
   const matched = new Set<number>()
@@ -229,10 +238,12 @@ const pairScopes = (
   let insideUntil = -1
   for (const opener of openers) {
     if (opener.index < insideUntil) continue
+    const before = opener.group.steps
     const slot = opener.group.findClose(opener.slot)
+    if (slot >= 0) opener.group.clear(slot)
+    charge(opener.group.steps - before)
     if (slot < 0) continue
     const close = opener.group.indices[slot]!
-    opener.group.clear(slot)
     matched.add(close)
     if (opener.accepts) {
       closeOf.set(opener.index, close)
@@ -321,9 +332,8 @@ const charge = (run: Run, size: number) => {
 }
 
 const parseCharged = (run: Run, text: string) => {
-  charge(run, text.length)
-  const nodes = parse(text, run.limits.maxDepth)
-  if (nodes === "depth") throw new LimitReached("depth")
+  const { nodes, steps } = parse(text)
+  charge(run, steps)
   return nodes
 }
 
@@ -382,10 +392,10 @@ class Expansion {
     end: number,
     base: number
   ): string {
-    charge(this.run, PAIRING_COST * (to - from))
     let out = ""
     let cursor = start
-    for (const item of pairScopes(text, nodes, from, to, (node) => this.acceptsBlock(node))) {
+    const accepts = (node: MacroNode) => this.acceptsBlock(node)
+    for (const item of pairScopes(text, nodes, from, to, accepts, (steps) => charge(this.run, steps))) {
       const node = nodes[item.index]!
       out += text.slice(cursor, node.start)
       if (item.keepRaw) {

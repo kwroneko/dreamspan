@@ -234,10 +234,9 @@ describe("legacy syntax", () => {
 describe("parse", () => {
   it("trims arguments and keeps nested macros by position", () => {
     const text = "{{a:: x {{b}} ::y}}"
-    const nodes = parse(text, 8)
-    expect(nodes).not.toBe("depth")
-    const [node] = nodes as ReadonlyArray<{ kind: string; args: ReadonlyArray<{ start: number; end: number }> }>
-    expect(node!.args.map((arg) => text.slice(arg.start, arg.end))).toEqual(["x {{b}}", "y"])
+    const [node] = parse(text).nodes
+    if (node?.kind !== "macro") throw new Error("not a macro")
+    expect(node.args.map((arg) => text.slice(arg.start, arg.end))).toEqual(["x {{b}}", "y"])
   })
 
   it.each([
@@ -248,9 +247,7 @@ describe("parse", () => {
     ["{{.x-=2}}", "x", "-=", "2"],
     ["{{.x ??= {{user}} }}", "x", "??=", "{{user}}"]
   ])("parses the variable shorthand %j", (text, name, operator, value) => {
-    const nodes = parse(text, 8)
-    expect(nodes).not.toBe("depth")
-    const node = (nodes as ReadonlyArray<import("../../src/macros/parse.ts").Node>)[0]!
+    const node = parse(text).nodes[0]!
     expect(node.kind).toBe("var")
     if (node.kind !== "var") return
     expect(node.name).toBe(name)
@@ -259,6 +256,6 @@ describe("parse", () => {
   })
 
   it.each(["{{.x++5}}", "{{.x -- 5}}", "{{.}}", "{{.x ~ 1}}", "{{a:}}", "{{a: }}"])("leaves %j literal", (text) => {
-    expect(parse(text, 8)).toEqual([])
+    expect(parse(text).nodes).toEqual([])
   })
 })

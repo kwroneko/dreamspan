@@ -1,6 +1,7 @@
 // Imported card text is untrusted: macro bombs must hit a limit, and no input may make the
-// scanner superlinear. Each test here was checked against its bug: with the check disabled
-// (or ST's regex restored) it fails or times out.
+// scanner superlinear. Scanning and pairing count their steps as work, so linear time is
+// asserted as a work bound, not a time. Each test here was checked against its bug: with the
+// check disabled (or ST's regex restored) it fails or times out.
 // @ts-expect-error: the shared package has no Node types; its tests run under Node.
 import { readdirSync, readFileSync } from "node:fs"
 import { describe, expect, it, vi } from "vitest"
@@ -38,7 +39,13 @@ describe("nesting depth", () => {
   })
 
   it("stops deep nesting before it can overflow the stack", () => {
-    expect(limit("{{a::".repeat(200_000))).toBe("depth")
+    expect(limit(nested("{{reverse::", "}}", 200_000))).toBe("depth")
+  })
+
+  it("leaves openers that are never closed as text, however deep, as ST does", () => {
+    expect(expanded(request("{{a::".repeat(33))).text).toBe("{{a::".repeat(33))
+    const text = "{{a::".repeat(200_000) + "{{user}}"
+    expect(expanded(request(text)).text).toBe("{{a::".repeat(200_000) + "User")
   })
 
   it("can be changed", () => {
@@ -63,9 +70,7 @@ describe("work and output size", () => {
   })
 
   it("counts pairing blocks at each level, since each level pairs its content again", () => {
-    const start = performance.now()
     expect(limit(nested("{{trim}}", "{{/trim}}", 100_000))).toBe("work")
-    expect(performance.now() - start).toBeLessThan(1500)
   })
 
   it("counts text parsed", () => {
@@ -169,31 +174,31 @@ describe("variable values", () => {
 })
 
 describe("linear time", () => {
-  const fast = (text: string, overrides: Partial<ExpandRequest> = {}) => {
-    const start = performance.now()
-    const result = expand(request(text, overrides))
-    expect(performance.now() - start).toBeLessThan(1500)
-    return result
-  }
+  /** Expands within `perChar` units of work per input character. */
+  const linear = (text: string, perChar: number) =>
+    expand(request(text, { limits: { maxWork: perChar * text.length, maxExpansions: 1_000_000 } }))
 
   it("skips junk after a name in one pass", () => {
     const text = "{{a!".repeat(100_000)
-    expect(fast(text)).toMatchObject({ text })
+    expect(linear(text, 4)).toMatchObject({ text })
   })
 
-  it("pairs many unclosed blocks without rescanning", () => {
-    const text = "{{if x}}".repeat(100_000)
-    expect(fast(text, { limits: { maxExpansions: 1_000_000 } })).toMatchObject({ text })
+  it("pairs many unclosed blocks without rescanning each time", () => {
+    // Square-root blocks make each search about 2√n steps: 9,000 openers cost about 1.7M.
+    const text = "{{if x}}".repeat(9000)
+    expect(expand(request(text))).toMatchObject({ text })
   })
 
   it("removes {{trim}} without backtracking over newlines", () => {
-    expect(fast("\n".repeat(200_000) + "x{{trim}}")).toMatchObject({ text: "\n".repeat(200_000) + "x" })
+    // ST's regex takes minutes on this; the test timeout catches it.
+    const text = "\n".repeat(200_000) + "x{{trim}}"
+    expect(linear(text, 4)).toMatchObject({ text: "\n".repeat(200_000) + "x" })
   })
 
   it("handles runs of braces and failed starts", () => {
-    expect(fast("{".repeat(500_000) + "{{user}}")).toMatchObject({ text: "{".repeat(500_000) + "User" })
-    expect(fast("{{ ".repeat(200_000))).toMatchObject({ text: "{{ ".repeat(200_000) })
-    expect(fast(`{{.a${"-".repeat(500_000)}}}`)).toMatchObject({ _tag: "Expanded" })
+    expect(linear("{".repeat(500_000) + "{{user}}", 4)).toMatchObject({ text: "{".repeat(500_000) + "User" })
+    expect(linear("{{ ".repeat(200_000), 4)).toMatchObject({ text: "{{ ".repeat(200_000) })
+    expect(linear(`{{.a${"-".repeat(500_000)}}}`, 4)).toMatchObject({ _tag: "Expanded" })
   })
 })
 
