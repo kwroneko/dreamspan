@@ -1,8 +1,9 @@
 // The isolation matrix (spec/WORKFLOW.md §3, DESIGN §11): every RPC in AppApi has an
 // entry, and the suite fails on an RPC without one or an entry without its RPC. A probe
 // runs through a real server over real sockets: one user reads, changes or references
-// the other's data and is refused or sees nothing. Probes run both ways, so an admin
-// doesn't get into a user's data either, except for admin-only RPCs, where admins may.
+// the other's data and is refused or sees nothing, and the owner's data is unchanged
+// afterwards. Probes run both ways, so an admin doesn't get into a user's data either,
+// except for admin-only RPCs, where admins may.
 import { assert, describe, it, layer } from "@effect/vitest"
 import { AppApi } from "@rp/shared/api.ts"
 import type { User } from "@rp/shared/domain.ts"
@@ -386,6 +387,27 @@ describe("isolation matrix", () => {
   })
 })
 
+/** Everything the owner can see of their own data and the instance's, as text. */
+const snapshot = (owner: Party) =>
+  Effect.all([
+    outcome(owner.api.ListConnections(), JSON.stringify),
+    outcome(owner.api.ListCredentials(), JSON.stringify),
+    outcome(owner.api.ListModels({ connectionId: owner.connectionId, includeHidden: true }), JSON.stringify),
+    outcome(owner.api.ListLlmRequests({ limit: 1000, before: null }), JSON.stringify),
+    outcome(owner.api.ListUsers(), JSON.stringify),
+    outcome(owner.api.GetNetworkSettings(), JSON.stringify)
+  ])
+
+/** Runs a probe, then checks that it changed nothing of the owner's, whatever it returned. */
+const run = (probe: Probe, actor: (p: Parties["Service"]) => Party, owner: (p: Parties["Service"]) => Party) =>
+  Effect.flatMap(Parties, (p) =>
+    Effect.gen(function* () {
+      const before = yield* snapshot(owner(p))
+      yield* probe(actor(p), owner(p))
+      assert.deepStrictEqual(yield* snapshot(owner(p)), before)
+    })
+  )
+
 layer(Layer.effect(Parties, seed).pipe(Layer.provide(serverLayer(config))), {
   excludeTestServices: true,
   timeout: "60 seconds"
@@ -393,11 +415,27 @@ layer(Layer.effect(Parties, seed).pipe(Layer.provide(serverLayer(config))), {
   for (const [tag, entry] of Object.entries(matrix) as Array<[string, Entry]>) {
     if ("probe" in entry) {
       it.effect(`${tag}: bob on alice's (an admin's)`, () =>
-        Effect.flatMap(Parties, (p) => entry.probe(p.bob, p.alice))
+        run(
+          entry.probe,
+          (p) => p.bob,
+          (p) => p.alice
+        )
       )
-      it.effect(`${tag}: alice (an admin) on bob's`, () => Effect.flatMap(Parties, (p) => entry.probe(p.alice, p.bob)))
+      it.effect(`${tag}: alice (an admin) on bob's`, () =>
+        run(
+          entry.probe,
+          (p) => p.alice,
+          (p) => p.bob
+        )
+      )
     } else if ("adminOnly" in entry) {
-      it.effect(`${tag}: bob, not an admin`, () => Effect.flatMap(Parties, (p) => entry.adminOnly(p.bob, p.alice)))
+      it.effect(`${tag}: bob, not an admin`, () =>
+        run(
+          entry.adminOnly,
+          (p) => p.bob,
+          (p) => p.alice
+        )
+      )
     }
   }
 })
