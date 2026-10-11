@@ -246,6 +246,8 @@ Events made "now" are attached to the **current leaf** of the view where they we
 | `presence.set` | `{entity, present}` (DESIGN §3.5) |
 | `played_by_me.set` | `{entities[]}` |
 | `card.binding` | `{entity, ref?, revision?}`: which variant or override (following its head) or pinned revision a participant uses from here. **Covers non-additive story changes.** |
+| `card.field.set` | **[P]** `{entity, field, value}`: one field of the card a participant uses in this chat, patched on top of its bound revision. Written by agents as a version-attached effect (DESIGN §4.1a). |
+| `agent_edit.set` | **[P]** `{target, editable}`: this chat's override of an item's "agent may edit" flag (a note, a card module or a card field) |
 | `note.activate` / `note.deactivate` | `{note_entity}` |
 | `note.binding` | `{note_entity, revision}`: "from here on" note content |
 | `preset.binding` | `{ref?, revision?}`, with `scope` = role |
@@ -416,7 +418,7 @@ ST's multi-user layout (`data/<handle>/…`): importing a whole ST data root off
 
 | ST | Here |
 |---|---|
-| Character PNG/JSON/CHARX | `entities(card)` + an `upstream` ref + a revision (`origin=import`, `source_path`, `source_hash`). Avatar → `media_assets` (original). Embedded `character_book` kept in the card document. |
+| Character PNG/JSON/CHARX | `entities(card)` + an `upstream` ref + a revision (`origin=import`, `source_path`, `source_hash`). Avatar → `media_assets` (original). Embedded `character_book` kept in the card document. **[P]** `extensions.depth_prompt` (ST's Character's Note) → a card-owned note at its depth and role (DESIGN §4.1a). |
 | Chat JSONL line 0 (header, `chat_metadata`) | `chats` row; `note_prompt`/position/depth/role → a chat-owned note + `note.activate` at the initial position; `variables` → `var.set`; attached world info → `lorebook.attach` |
 | Chat messages | One slot per message in the main lane. `mes` plus `swipes[]` → versions (`swipe_id` → `selected_version_id`). `is_user` → `writer`/speaker. `extra.reasoning` → `reasoning`. `is_system`/hidden → `context_excluded`. ST has a single hidden flag, so hidden-for-summary can't be told apart from hidden for other reasons. If the importer finds a long consecutive run of hidden messages starting at message 0 (the manual-summary pattern), it proposes un-hiding them in the import report, so LCM can take over [D]. `send_date` → `created_at`. `extra.api/model` → model fields where known. |
 | Branch and checkpoint files (`chat_metadata.main_chat`) | Merged into the parent chat's graph. Messages shared with the parent (matched on content and send date) become shared slots; the rest become a child branch from the last shared slot. |

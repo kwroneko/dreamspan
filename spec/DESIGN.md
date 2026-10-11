@@ -194,6 +194,19 @@ Where the owner corrected an earlier proposal, the corrected version is recorded
   - activation per chat (as state events)
   - an exportable or private flag
 
+#### 4.1a State the agent changes during a chat
+- **[D]** Cards often hold things that change over a conversation, such as costumes. Today they stay at the top of the context, and the model works out the latest state by reading the chat. That usually works, because the chat is in causal order (owner, 2026-10-11).
+- **[D]** In agentic RP, the agent should be able to change the card and the notes **for that chat**.
+- **[D]** These changes belong to the message and its history. They're tied to a particular swipe. Swiping resets them, and the next swipe may bring its own changes instead.
+- **[D]** The user decides which items the LLM may and may not change.
+- **[D]** Changing a card freely invalidates the cache on the next turn. Putting cards at the end of the context (§5.2) avoids that, but it's generally not wanted: cards are usually written as a scenario or premise for the start of the prompt. So in practice some card fields go later in the context, as ST's Character's Note does with its depth.
+- **[P]** The mechanism, as deltas on what exists:
+  - **Agent changes are chat-state effects** (§7.3), attached to the version that made them (§3.4). Swiping and branching then reset them with no extra machinery.
+  - **Card changes are field patches**, not whole revisions: a `card.field.set` event sets one field of the card a participant uses in this chat. Patches sit on top of whatever card revision is bound, so upstream fixes still arrive, and the context view can show which fields changed and where. A whole new revision pinned per swipe would stop following the card, and would leave the chat override with no meaningful head, since each branch would point at a different revision.
+  - **State that changes over the story belongs in notes or card modules, not the description.** A costume is a card-owned note at depth, not an edit to the top of the prompt. Card modules get the same placement options notes have (§5.2), so a card can carry several of them at depth.
+  - **An "agent may edit" flag on each note, card module and card field.** It travels with the card, and a chat can override it with a state event. It's off by default. Making an item editable that's placed near the top of the context shows a warning, since each edit there rewrites the cached prefix (§5.5).
+  - **ST's Character's Note** is one `depth_prompt` per card (`data.extensions.depth_prompt`: prompt, depth, role). The importer maps it to a card-owned note at that depth and role. Export writes one note there, and the others go in `extensions.rp_harness`, which ST ignores but which round-trips.
+
 ---
 
 ## 5. Context assembly
@@ -216,6 +229,7 @@ Where the owner corrected an earlier proposal, the corrected version is recorded
   - **card-swap mode:** the active card's definition goes at the **tail**, which helps both caching and instruction-following
   - the user picks the layout, per RP and per model, and it must be easy to change
 - **[P]** A preset's `charDescription` and similar markers become the slot where the combined block goes.
+- **[P]** Placement is per piece, not only per card. The card's fixed definition stays where the layout puts it. Card modules and card-owned notes each have their own placement (top section, depth N or tail), so the parts that change during a chat can sit late in the context (§4.1a).
 
 ### 5.3 `{{user}}`, `{{char}}` and the speaker
 - **[D]** In ST these rebind every turn (to the current speaker and the current persona). That breaks the cache and fights instructions like "don't write for `{{user}}`". Users need to control and pin these bindings, and to edit presets and cards to stop relying on them, which requires search and replace.
@@ -310,7 +324,8 @@ These are strategies for mapping history to user and assistant roles:
 - **[P]** Tool effect classes (reference-harness has a version of this in `tools/side-effects.ts`):
   - **read-only:** lore lookup, summary expansion, search. Freely regenerable.
   - **chat state:** notes, presence, private memory. State events attached to the version, so swiping reverses them.
-  - **external or global:** card, settings, plugin edits. Regenerating warns first, and these tools aren't offered in RP turns.
+  - **chat state** also covers edits to this chat's copy of a card and to notes, within what the user marked editable (§4.1a).
+  - **external or global:** library card edits (the card everywhere), settings, plugin edits. Regenerating warns first, and these tools aren't offered in RP turns.
 
 ### 7.4 Display
 - **[D]** Reasoning, steps and intermediate output stream **live and expanded by default**, then collapse when the final message arrives. If the user collapses or expands them during a run, that becomes the sticky preference (stored per user **[P]**).
