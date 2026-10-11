@@ -56,6 +56,17 @@ export const logout = async () => {
   location.replace("/login")
 }
 
-/** Where to go after login: a path on this site only, so a link can't send the user elsewhere. */
-export const safeNext = (next: unknown) =>
-  typeof next === "string" && next.startsWith("/") && !next.startsWith("//") && !next.startsWith("/\\") ? next : "/"
+/**
+ * Where to go after login: a page on this site only, so a link can't send the user
+ * elsewhere. Resolved the way the browser will (it drops tabs and newlines, and reads
+ * a backslash as a slash), then checked by origin.
+ */
+export const safeNext = (next: unknown) => {
+  if (typeof next !== "string") return "/"
+  try {
+    const url = new URL(next, location.origin)
+    return url.origin === location.origin ? `${url.pathname}${url.search}${url.hash}` : "/"
+  } catch {
+    return "/"
+  }
+}

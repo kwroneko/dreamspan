@@ -41,6 +41,31 @@ test.describe("login required", () => {
     await expect(page).toHaveURL(/\/login/)
   })
 
+  test("after login, next never leaves the site, however it's spelled", async ({ page }) => {
+    // Browsers drop tabs and newlines from URLs and read a backslash as a slash.
+    const tricks = [
+      "/\t/evil.test/x",
+      "/\r/evil.test/x",
+      "/\n/evil.test/x",
+      "/\\evil.test/x",
+      "//evil.test/x",
+      "https://evil.test/x"
+    ]
+    await page.route(
+      (url) => url.hostname === "evil.test",
+      (route) => route.fulfill({ status: 200, contentType: "text/html", body: "phished" })
+    )
+    for (const next of tricks) {
+      await page.context().clearCookies()
+      await page.goto(`${server().url}/login?next=${encodeURIComponent(next)}`)
+      await page.getByLabel("Handle").fill(ADMIN.handle)
+      await page.getByLabel("Password").fill(ADMIN.password)
+      await page.getByRole("button", { name: "Log in" }).click()
+      await expect(page.getByText("Signed in as admin (admin)"), JSON.stringify(next)).toBeVisible()
+      expect(new URL(page.url()).origin, JSON.stringify(next)).toBe(server().url)
+    }
+  })
+
   test("a disabled account can't log in, and a disabled user's open tab is sent to login", async ({ browser }) => {
     await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
       api.CreateUser({ handle: "dora", displayName: "Dora", role: "user", password: "dora-password-1" })
