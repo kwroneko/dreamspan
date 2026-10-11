@@ -4,9 +4,9 @@ import { join } from "node:path"
 import { Worker } from "node:worker_threads"
 import { NodeWorker } from "@effect/platform-node"
 import { assert, beforeAll, describe, it } from "@effect/vitest"
-import { Cause, Context, Effect, Exit, Layer } from "effect"
+import { Cause, Context, Effect, Exit, Layer, Logger } from "effect"
 import { RpcClient, type RpcClientError } from "effect/rpc"
-import { workerThreads } from "../src/db/Database.ts"
+import { workerThreads, writerProtocol } from "../src/db/Database.ts"
 import * as ReaderPool from "../src/db/readerPool.ts"
 import { buildWorkers } from "../scripts/build-workers.ts"
 import { PoolOps } from "./support/poolOps.ts"
@@ -137,4 +137,36 @@ describe("reader pool", () => {
       30_000
     )
   })
+})
+
+describe("writer worker", () => {
+  it.live(
+    "a crash and every failed respawn are logged",
+    () => {
+      const stops: Array<string> = []
+      const collector = Logger.make((options) => {
+        const message = String(options.message)
+        if (message.includes("database writer stopped")) stops.push(message)
+      })
+      let spawns = 0
+      return Effect.gen(function* () {
+        const { Count, Crash } = yield* Readers
+        yield* Count({ n: 1 })
+        assert.deepStrictEqual(stops, [])
+        // The writer crashes, and every respawn dies as it starts.
+        yield* Effect.exit(Crash())
+        yield* Effect.sleep(2500)
+        // The crash, then at least one failed respawn.
+        assert.isAtLeast(stops.length, 2, stops.join("\n"))
+      }).pipe(
+        Effect.provide(
+          Layer.effect(Readers, RpcClient.make(PoolOps)).pipe(
+            Layer.provide(writerProtocol(NodeWorker.layer(() => new Worker(spawns++ === 0 ? poolWorker : deadWorker))))
+          )
+        ),
+        Effect.provide(Logger.layer([collector]))
+      )
+    },
+    30_000
+  )
 })

@@ -4,8 +4,9 @@ import { join } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import { Worker } from "node:worker_threads"
 import { NodeWorker } from "@effect/platform-node"
-import { Context, Effect, Layer, Schema } from "effect"
+import { Cause, Context, Effect, Layer, Schema } from "effect"
 import { RpcClient, type RpcClientError } from "effect/rpc"
+import { Worker as Workers } from "effect/workers"
 import { type BinLimits, defaultBinLimits } from "@rp/shared/bin.ts"
 import { acquireInstanceLock, checkFilesystem, databaseFile } from "./connection.ts"
 import { ReadOps, WriteOps } from "./ops.ts"
@@ -81,6 +82,38 @@ export const workerThreads = (entry: URL, workerData: Record<string, unknown>, b
     return new Worker(entry, { workerData, name: entry.pathname.split("/").pop() })
   })
 
+/**
+ * The writer's protocol over `threads`: Effect's worker pool with one worker, which
+ * respawns it every second without logging. Each stop is logged here, as the readers'
+ * are (readerPool.ts): a crash, and every respawn that fails.
+ */
+export const writerProtocol = (threads: Layer.Layer<Workers.WorkerPlatform | Workers.Spawner>) => {
+  const LoggedStops = Layer.effect(
+    Workers.WorkerPlatform,
+    Effect.map(Workers.WorkerPlatform, (platform) =>
+      Workers.WorkerPlatform.of({
+        spawn: <O, I>(id: number) =>
+          Effect.map(platform.spawn<O, I>(id), (worker): Workers.Worker<O, I> => ({
+            send: worker.send,
+            run: (handler, options) =>
+              worker
+                .run(handler, options)
+                .pipe(
+                  Effect.tapCause((cause) =>
+                    Cause.hasInterruptsOnly(cause)
+                      ? Effect.void
+                      : Effect.logError("database writer stopped; restarting it in 1000 ms", cause)
+                  )
+                )
+          }))
+      })
+    )
+  )
+  return RpcClient.layerProtocolWorker({ size: 1, concurrency: 1 }).pipe(
+    Layer.provide(LoggedStops.pipe(Layer.provideMerge(threads)))
+  )
+}
+
 export const layer = (options: DatabaseOptions) => {
   const dbPath = databaseFile(options.dataDir)
 
@@ -96,9 +129,14 @@ export const layer = (options: DatabaseOptions) => {
   const Workers = Layer.unwrap(
     Effect.map(workerEntries(options), (entries) => {
       const WriterLive = Layer.effect(Writer, RpcClient.make(WriteOps)).pipe(
-        Layer.provide(RpcClient.layerProtocolWorker({ size: 1, concurrency: 1 })),
         Layer.provide(
-          workerThreads(entries.writer, { dbPath, binLimits: options.binLimits ?? defaultBinLimits }, entries.bundleDir)
+          writerProtocol(
+            workerThreads(
+              entries.writer,
+              { dbPath, binLimits: options.binLimits ?? defaultBinLimits },
+              entries.bundleDir
+            )
+          )
         )
       )
       // Readers open read-only connections, so the file must exist and be migrated first.
