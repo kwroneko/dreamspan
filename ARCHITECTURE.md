@@ -541,6 +541,8 @@ In proxy mode, a WebSocket keeps the identity it opened with until it disconnect
   - **Slots:** a named place in a screen that renders its registered entries in order. The first is `connection.sections`: every section of a connection's page is an entry.
   - Registrations happen before the first render. Nothing re-renders when a registry changes later.
   - The core features register through them (`features/index.ts`), as plugins will.
+- **Secrets in forms** (`SecretInput`, `PasswordInput` in `ui/Field.tsx`). Keys, header values, proxy URLs and passwords are uncontrolled inputs read from the form on submit, so React never mirrors them into the DOM's `value` attribute, and dialogs that take them mount only while open, so Cancel forgets them.
+  - **Keys aren't password fields.** Browsers' password managers offer to save any `type="password"` field whatever its `autocomplete`, and a saved key would later be offered on the login form. Key fields are plain text, masked with `-webkit-text-security` where the browser supports it, with `autocomplete="off"` and the opt-outs of 1Password, LastPass, Bitwarden and Dashlane (`data-1p-ignore`, `data-lpignore`, `data-bwignore`, `data-form-type="other"`). Account passwords stay password fields.
 - **Screens** (`features/`), on stock components (CLIENT-FRAMEWORK §8):
   - **Login:** wrong password, `429` with a countdown from `Retry-After`, proxy mode, and "no login needed" when the server signs the caller in without one. A disabled account fails like a wrong password, as the server intends.
   - **Connections:** list, create, and a page per connection: settings (with the row version, so a change made elsewhere is a `StaleWrite` with "load the latest"), key, check, models, custom headers, network route, delete.

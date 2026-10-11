@@ -7,7 +7,7 @@ import { routes } from "../routes.tsx"
 import { AppClient } from "../rpc.ts"
 import { Button } from "../ui/Button.tsx"
 import { RadioGroup, Switch } from "../ui/Choice.tsx"
-import { Field, Fieldset, Input, Textarea } from "../ui/Field.tsx"
+import { Field, Fieldset, formText, SecretInput, Textarea } from "../ui/Field.tsx"
 import { Alert, Card, CardHeader } from "../ui/Surface.tsx"
 import { useTitle } from "./shell.tsx"
 
@@ -17,14 +17,12 @@ type ProxyChange = "keep" | "replace" | "remove"
 
 interface Draft {
   readonly proxy: ProxyChange
-  readonly proxyUrl: string
   readonly bypass: string
   readonly forceProxy: boolean
 }
 
 const draftOf = (settings: NetworkSettings): Draft => ({
   proxy: "keep",
-  proxyUrl: "",
   bypass: settings.bypass.join("\n"),
   forceProxy: settings.forceProxy
 })
@@ -40,8 +38,9 @@ function NetworkForm({ settings }: { settings: NetworkSettings }) {
     setDraft({ ...values, ...change })
   }
 
-  const submit = async (event: FormEvent) => {
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    const proxyUrl = formText(event.currentTarget, "proxyUrl").trim()
     const bypass = values.bypass
       .split("\n")
       .map((line) => line.trim())
@@ -49,7 +48,7 @@ function NetworkForm({ settings }: { settings: NetworkSettings }) {
     const result = await action.run(
       (client) =>
         client("SetNetworkSettings", {
-          ...(values.proxy === "replace" ? { proxyUrl: values.proxyUrl.trim() } : {}),
+          ...(values.proxy === "replace" ? { proxyUrl } : {}),
           ...(values.proxy === "remove" ? { proxyUrl: null } : {}),
           bypass,
           forceProxy: values.forceProxy
@@ -89,13 +88,7 @@ function NetworkForm({ settings }: { settings: NetworkSettings }) {
         />
         {values.proxy === "replace" && (
           <Field label="Proxy URL" description="HTTP, HTTPS or SOCKS5, for example socks5://user:password@vpn:1080.">
-            <Input
-              value={values.proxyUrl}
-              onValueChange={(proxyUrl) => edit({ proxyUrl })}
-              inputMode="url"
-              autoCapitalize="none"
-              spellCheck={false}
-            />
+            <SecretInput name="proxyUrl" masked={false} />
           </Field>
         )}
       </Fieldset>

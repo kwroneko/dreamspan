@@ -10,7 +10,7 @@ import { describeCause } from "../errors.ts"
 import { routes } from "../routes.tsx"
 import { login, type LoginOutcome, logout, safeNext, sessionAtom } from "../session.ts"
 import { Button, buttonClass } from "../ui/Button.tsx"
-import { Field, Input } from "../ui/Field.tsx"
+import { Field, formText, Input, PasswordInput } from "../ui/Field.tsx"
 import { Loading } from "../ui/Spinner.tsx"
 import { Alert, Card } from "../ui/Surface.tsx"
 import { CenteredPage, useTitle } from "./shell.tsx"
@@ -31,16 +31,17 @@ const useCountdown = (until: number | null) => {
 
 function LoginForm({ next, passwordChanged }: { next: string; passwordChanged: boolean }) {
   const [handle, setHandle] = useState("")
-  const [password, setPassword] = useState("")
+  const [passwordEmpty, setPasswordEmpty] = useState(true)
   const [pending, setPending] = useState(false)
   const [outcome, setOutcome] = useState<LoginOutcome | null>(null)
   const [blockedUntil, setBlockedUntil] = useState<number | null>(null)
   const wait = useCountdown(blockedUntil)
 
-  const submit = async (event: FormEvent) => {
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    const form = event.currentTarget
     setPending(true)
-    const result = await login(handle, password)
+    const result = await login(handle, formText(form, "password"))
     setOutcome(result)
     if (result._tag === "LoggedIn") {
       // A full load opens a new WebSocket, which carries the new session cookie.
@@ -49,7 +50,11 @@ function LoginForm({ next, passwordChanged }: { next: string; passwordChanged: b
     }
     setPending(false)
     if (result._tag === "Throttled") setBlockedUntil(Date.now() + result.retryAfterS * 1000)
-    if (result._tag === "WrongPassword") setPassword("")
+    if (result._tag === "WrongPassword") {
+      const field = form.elements.namedItem("password")
+      if (field instanceof HTMLInputElement) field.value = ""
+      setPasswordEmpty(true)
+    }
   }
 
   if (outcome?._tag === "ProxyMode") {
@@ -75,9 +80,13 @@ function LoginForm({ next, passwordChanged }: { next: string; passwordChanged: b
         </Alert>
       )}
       {throttled && (
-        <Alert tone="danger" title="Too many attempts">
-          Wait {formatWait(wait)} before trying again.
-        </Alert>
+        <>
+          <Alert tone="danger" title="Too many attempts">
+            The server asks you to wait before trying again.
+          </Alert>
+          {/* Outside the alert, so screen readers don't announce every second. */}
+          <p className="text-sm text-muted">You can try again in {formatWait(wait)}.</p>
+        </>
       )}
       {outcome?._tag === "Failed" && <Alert tone="danger">{outcome.message}</Alert>}
       <Field label="Handle">
@@ -92,21 +101,9 @@ function LoginForm({ next, passwordChanged }: { next: string; passwordChanged: b
         />
       </Field>
       <Field label="Password">
-        <Input
-          name="password"
-          type="password"
-          autoComplete="current-password"
-          required
-          value={password}
-          onValueChange={setPassword}
-        />
+        <PasswordInput name="password" autoComplete="current-password" onEmptyChange={setPasswordEmpty} />
       </Field>
-      <Button
-        type="submit"
-        variant="primary"
-        pending={pending}
-        disabled={throttled || handle === "" || password === ""}
-      >
+      <Button type="submit" variant="primary" pending={pending} disabled={throttled || handle === "" || passwordEmpty}>
         Log in
       </Button>
     </form>

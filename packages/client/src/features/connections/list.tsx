@@ -6,7 +6,7 @@ import { type FormEvent, useId, useState } from "react"
 import { AsyncView, ErrorAlert, useAction } from "../../actions.tsx"
 import { Button, buttonClass } from "../../ui/Button.tsx"
 import { RadioGroup } from "../../ui/Choice.tsx"
-import { Field, Fieldset, Input } from "../../ui/Field.tsx"
+import { Field, Fieldset, formText, Input, SecretInput } from "../../ui/Field.tsx"
 import { Select } from "../../ui/Select.tsx"
 import { Badge, Card, CardHeader, EmptyState } from "../../ui/Surface.tsx"
 import { useTitle } from "../shell.tsx"
@@ -86,7 +86,7 @@ function NewConnectionForm({
   const [name, setName] = useState("")
   const [baseUrl, setBaseUrl] = useState("")
   const [keyMode, setKeyMode] = useState<KeyMode>("typed")
-  const [apiKey, setApiKey] = useState("")
+  const [keyEmpty, setKeyEmpty] = useState(true)
   const [credentialId, setCredentialId] = useState<CredentialId | null>(credentials[0]?.id ?? null)
   const [maxConcurrent, setMaxConcurrent] = useState("")
   const [submitted, setSubmitted] = useState(false)
@@ -98,14 +98,15 @@ function NewConnectionForm({
   const problems = {
     name: name.trim() === "" ? "Give the connection a name." : null,
     baseUrl: baseUrl.trim() !== "" && origin === null ? "Enter a full URL, such as http://localhost:8000/v1." : null,
-    apiKey: keyMode === "typed" && apiKey.trim() === "" ? "Enter the key, or choose another option." : null,
+    apiKey: keyMode === "typed" && keyEmpty ? "Enter the key, or choose another option." : null,
     maxConcurrent: concurrency.problem
   }
 
-  const submit = async (event: FormEvent) => {
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setSubmitted(true)
     if (Object.values(problems).some((problem) => problem !== null)) return
+    const apiKey = formText(event.currentTarget, "apiKey")
     const result = await action.run(
       (client) =>
         client("CreateConnection", {
@@ -161,7 +162,10 @@ function NewConnectionForm({
         <RadioGroup<KeyMode>
           aria-labelledby={keyModeLabel}
           value={keyMode}
-          onValueChange={setKeyMode}
+          onValueChange={(mode) => {
+            setKeyMode(mode)
+            setKeyEmpty(true)
+          }}
           options={[
             { value: "typed", label: "Enter a key" },
             ...(credentials.length > 0 ? [{ value: "saved" as const, label: "Use a saved key" }] : []),
@@ -178,7 +182,7 @@ function NewConnectionForm({
             }
             error={shown(problems.apiKey)}
           >
-            <Input type="password" value={apiKey} onValueChange={setApiKey} autoComplete="off" spellCheck={false} />
+            <SecretInput name="apiKey" onEmptyChange={setKeyEmpty} />
           </Field>
         )}
         {keyMode === "saved" && (

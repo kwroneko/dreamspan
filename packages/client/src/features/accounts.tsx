@@ -8,7 +8,7 @@ import { AppClient } from "../rpc.ts"
 import { logout, useSession } from "../session.ts"
 import { Button } from "../ui/Button.tsx"
 import { ConfirmDialog, Dialog, DialogActions } from "../ui/Dialog.tsx"
-import { Field, Input } from "../ui/Field.tsx"
+import { Field, formText, Input, PasswordInput } from "../ui/Field.tsx"
 import { Select } from "../ui/Select.tsx"
 import { Alert, Badge, Card, CardHeader } from "../ui/Surface.tsx"
 import { useTitle } from "./shell.tsx"
@@ -26,18 +26,19 @@ const howSignedIn = {
 function OwnPasswordForm() {
   const session = useSession()
   const action = useAction()
-  const [current, setCurrent] = useState("")
-  const [next, setNext] = useState("")
+  const [nextEmpty, setNextEmpty] = useState(true)
   // With a session you logged in with a password; with "local" nobody has one. Otherwise
   // it's unknown, so the field is offered and may stay empty.
   const asksCurrent = session.via !== "local"
 
-  const submit = async (event: FormEvent) => {
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    const current = asksCurrent ? formText(event.currentTarget, "current") : ""
+    const next = formText(event.currentTarget, "next")
     const result = await action.run((client) =>
       client("SetPassword", {
         userId: session.user.id,
-        currentPassword: asksCurrent && current !== "" ? current : null,
+        currentPassword: current !== "" ? current : null,
         newPassword: next
       })
     )
@@ -52,18 +53,18 @@ function OwnPasswordForm() {
           label="Current password"
           description={session.via === "session" ? undefined : "Leave empty if you don't have one yet."}
         >
-          <Input type="password" value={current} onValueChange={setCurrent} autoComplete="current-password" />
+          <PasswordInput name="current" autoComplete="current-password" />
         </Field>
       )}
       <Field
         label="New password"
         description="At least 8 characters. Every session of yours ends, so you log in again."
       >
-        <Input type="password" value={next} onValueChange={setNext} autoComplete="new-password" />
+        <PasswordInput name="next" autoComplete="new-password" onEmptyChange={setNextEmpty} />
       </Field>
       <ErrorAlert error={action.error} title="The password wasn't changed" />
       <div>
-        <Button type="submit" variant="primary" pending={action.pending} disabled={next === ""}>
+        <Button type="submit" variant="primary" pending={action.pending} disabled={nextEmpty}>
           {session.via === "local" ? "Set password" : "Change password"}
         </Button>
       </div>
@@ -111,9 +112,10 @@ function CreateUserDialog({ onOpenChange }: { onOpenChange: (open: boolean) => v
   const [handle, setHandle] = useState("")
   const [displayName, setDisplayName] = useState("")
   const [role, setRole] = useState<UserRole>("user")
-  const [password, setPassword] = useState("")
-  const submit = async (event: FormEvent) => {
+  const [passwordEmpty, setPasswordEmpty] = useState(true)
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    const password = formText(event.currentTarget, "password")
     const result = await action.run(
       (client) => client("CreateUser", { handle, displayName, role, password }),
       ["users"]
@@ -133,12 +135,12 @@ function CreateUserDialog({ onOpenChange }: { onOpenChange: (open: boolean) => v
           <Select items={roleItems} value={role} onValueChange={setRole} />
         </Field>
         <Field label="Password" description="At least 8 characters.">
-          <Input type="password" value={password} onValueChange={setPassword} autoComplete="new-password" />
+          <PasswordInput name="password" autoComplete="new-password" onEmptyChange={setPasswordEmpty} />
         </Field>
         <ErrorAlert error={action.error} title="No user created" />
         <DialogActions>
           <Button onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button type="submit" variant="primary" pending={action.pending} disabled={handle === "" || password === ""}>
+          <Button type="submit" variant="primary" pending={action.pending} disabled={handle === "" || passwordEmpty}>
             Create user
           </Button>
         </DialogActions>
@@ -149,9 +151,10 @@ function CreateUserDialog({ onOpenChange }: { onOpenChange: (open: boolean) => v
 
 function SetPasswordDialog({ user, onOpenChange }: { user: UserAccount; onOpenChange: (open: boolean) => void }) {
   const action = useAction()
-  const [password, setPassword] = useState("")
-  const submit = async (event: FormEvent) => {
+  const [passwordEmpty, setPasswordEmpty] = useState(true)
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    const password = formText(event.currentTarget, "password")
     const result = await action.run(
       (client) => client("SetPassword", { userId: user.id, currentPassword: null, newPassword: password }),
       ["users"]
@@ -167,12 +170,12 @@ function SetPasswordDialog({ user, onOpenChange }: { user: UserAccount; onOpenCh
     >
       <form onSubmit={submit} className="flex flex-col gap-4">
         <Field label="New password" description="At least 8 characters.">
-          <Input type="password" value={password} onValueChange={setPassword} autoComplete="new-password" />
+          <PasswordInput name="password" autoComplete="new-password" onEmptyChange={setPasswordEmpty} />
         </Field>
         <ErrorAlert error={action.error} title="The password wasn't set" />
         <DialogActions>
           <Button onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button type="submit" variant="primary" pending={action.pending} disabled={password === ""}>
+          <Button type="submit" variant="primary" pending={action.pending} disabled={passwordEmpty}>
             Set password
           </Button>
         </DialogActions>

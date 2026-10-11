@@ -9,7 +9,7 @@ import { routes } from "../routes.tsx"
 import { Button } from "../ui/Button.tsx"
 import { Checkbox } from "../ui/Choice.tsx"
 import { ConfirmDialog, Dialog, DialogActions } from "../ui/Dialog.tsx"
-import { Field, Fieldset, Input, Textarea } from "../ui/Field.tsx"
+import { Field, Fieldset, formText, Input, SecretInput, Textarea } from "../ui/Field.tsx"
 import { Badge, Card, CardHeader, EmptyState } from "../ui/Surface.tsx"
 import { connectionsAtom, credentialsAtom, effectiveOrigin, kindsAtom } from "./connections/data.ts"
 import { useTitle } from "./shell.tsx"
@@ -31,21 +31,18 @@ export function AllowHostDialog({
   onOpenChange: (open: boolean) => void
 }) {
   const action = useAction()
-  const [apiKey, setApiKey] = useState("")
+  const [keyEmpty, setKeyEmpty] = useState(true)
   const [typedUrl, setTypedUrl] = useState("")
   const target = url ?? typedUrl.trim()
   const origin = originOf(target)
-  const submit = async (event: FormEvent) => {
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    const apiKey = formText(event.currentTarget, "apiKey")
     const result = await action.run(
       (client) => client("AllowCredentialHost", { credentialId: credential.id, apiKey, url: target }),
       ["credentials", "connections"]
     )
-    if (result.ok) {
-      setApiKey("")
-      setTypedUrl("")
-      onOpenChange(false)
-    }
+    if (result.ok) onOpenChange(false)
   }
   return (
     <Dialog
@@ -72,17 +69,12 @@ export function AllowHostDialog({
           </Field>
         )}
         <Field label="Key" description={keyLabel(credential)}>
-          <Input type="password" value={apiKey} onValueChange={setApiKey} autoComplete="off" spellCheck={false} />
+          <SecretInput name="apiKey" onEmptyChange={setKeyEmpty} />
         </Field>
         <ErrorAlert error={action.error} title="Not allowed" />
         <DialogActions>
           <Button onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button
-            type="submit"
-            variant="primary"
-            pending={action.pending}
-            disabled={apiKey.trim() === "" || origin === null}
-          >
+          <Button type="submit" variant="primary" pending={action.pending} disabled={keyEmpty || origin === null}>
             Allow
           </Button>
         </DialogActions>
@@ -133,7 +125,7 @@ function ReplaceKeyDialog({
   onOpenChange: (open: boolean) => void
 }) {
   const action = useAction()
-  const [apiKey, setApiKey] = useState("")
+  const [keyEmpty, setKeyEmpty] = useState(true)
   const [extra, setExtra] = useState<ReadonlyArray<string>>([])
   const [typedUrl, setTypedUrl] = useState("")
   const [confirmed, setConfirmed] = useState<ReadonlySet<string>>(new Set())
@@ -154,8 +146,9 @@ function ReplaceKeyDialog({
     setConfirmed(next)
   }
 
-  const submit = async (event: FormEvent) => {
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    const apiKey = formText(event.currentTarget, "apiKey")
     const result = await action.run(
       (client) =>
         client("ReplaceCredentialKey", {
@@ -177,7 +170,7 @@ function ReplaceKeyDialog({
     >
       <form onSubmit={submit} className="flex flex-col gap-4">
         <Field label="New key" description="It's never shown again.">
-          <Input type="password" value={apiKey} onValueChange={setApiKey} autoComplete="off" spellCheck={false} />
+          <SecretInput name="apiKey" onEmptyChange={setKeyEmpty} />
         </Field>
         <Fieldset
           legend="Send the new key to"
@@ -223,7 +216,7 @@ function ReplaceKeyDialog({
         <ErrorAlert error={action.error} title="The key wasn't replaced" />
         <DialogActions>
           <Button onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button type="submit" variant="primary" pending={action.pending} disabled={apiKey.trim() === ""}>
+          <Button type="submit" variant="primary" pending={action.pending} disabled={keyEmpty}>
             Replace key
           </Button>
         </DialogActions>
@@ -235,15 +228,16 @@ function ReplaceKeyDialog({
 function CreateCredentialDialog({ onOpenChange }: { onOpenChange: (open: boolean) => void }) {
   const action = useAction()
   const [name, setName] = useState("")
-  const [apiKey, setApiKey] = useState("")
+  const [keyEmpty, setKeyEmpty] = useState(true)
   const [urls, setUrls] = useState("")
   const lines = urls
     .split("\n")
     .map((line) => line.trim())
     .filter((line) => line !== "")
   const bad = lines.filter((line) => originOf(line) === null)
-  const submit = async (event: FormEvent) => {
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    const apiKey = formText(event.currentTarget, "apiKey")
     const result = await action.run(
       (client) => client("CreateCredential", { name: name.trim(), apiKey, urls: lines }),
       ["credentials"]
@@ -262,7 +256,7 @@ function CreateCredentialDialog({ onOpenChange }: { onOpenChange: (open: boolean
           <Input value={name} onValueChange={setName} autoComplete="off" />
         </Field>
         <Field label="Key" description="It's never shown again.">
-          <Input type="password" value={apiKey} onValueChange={setApiKey} autoComplete="off" spellCheck={false} />
+          <SecretInput name="apiKey" onEmptyChange={setKeyEmpty} />
         </Field>
         <Field
           label="Addresses it may be sent to"
@@ -278,7 +272,7 @@ function CreateCredentialDialog({ onOpenChange }: { onOpenChange: (open: boolean
             type="submit"
             variant="primary"
             pending={action.pending}
-            disabled={name.trim() === "" || apiKey.trim() === "" || bad.length > 0}
+            disabled={name.trim() === "" || keyEmpty || bad.length > 0}
           >
             Save key
           </Button>

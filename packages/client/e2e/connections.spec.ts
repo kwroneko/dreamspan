@@ -55,8 +55,8 @@ test("create, check, edit, route and delete a connection", async ({ page }) => {
 
   await page.getByRole("button", { name: "Add headers" }).click()
   const dialog = page.getByRole("dialog")
-  await dialog.getByLabel("Name").fill("X-Gateway-Token")
-  await dialog.getByLabel("Value").fill("header-secret-value")
+  await dialog.getByLabel("Header 1 name").fill("X-Gateway-Token")
+  await dialog.getByLabel("Header 1 value").fill("header-secret-value")
   await dialog.getByRole("button", { name: "Save headers" }).click()
   await expect(dialog).toBeHidden()
   await expect(page.getByRole("list", { name: "Header names" })).toContainText("X-Gateway-Token")

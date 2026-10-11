@@ -43,6 +43,74 @@ export function Input({ className = "", ...props }: ComponentProps<typeof BaseIn
   return <BaseInput className={`h-9 ${control} ${className}`} {...props} />
 }
 
+/**
+ * A secret being typed: an API key, a header value, a proxy URL with a password. Read it
+ * from the form's data on submit; `onEmptyChange` reports only whether it's empty.
+ * - Uncontrolled, so React never mirrors it into the DOM's `value` attribute.
+ * - Plain text, so browsers' password managers don't offer to save it as a password and
+ *   later fill it into the login form; the password-manager extensions' own opt-outs too.
+ * - `masked` hides the characters with CSS (`-webkit-text-security`), where the browser
+ *   supports it; a URL stays readable.
+ */
+export function SecretInput({
+  name,
+  masked = true,
+  onEmptyChange,
+  placeholder,
+  className = ""
+}: {
+  name: string
+  masked?: boolean
+  onEmptyChange?: (empty: boolean) => void
+  placeholder?: string | undefined
+  className?: string
+}) {
+  return (
+    <BaseInput
+      name={name}
+      type="text"
+      autoComplete="off"
+      autoCapitalize="none"
+      autoCorrect="off"
+      spellCheck={false}
+      placeholder={placeholder}
+      data-1p-ignore=""
+      data-lpignore="true"
+      data-bwignore=""
+      data-form-type="other"
+      onValueChange={(value) => onEmptyChange?.(value.trim() === "")}
+      className={`h-9 ${control} ${masked ? "[-webkit-text-security:disc]" : ""} ${className}`}
+    />
+  )
+}
+
+/** An account password: a real password field for password managers, uncontrolled like `SecretInput`. */
+export function PasswordInput({
+  name,
+  autoComplete,
+  onEmptyChange
+}: {
+  name: string
+  autoComplete: "current-password" | "new-password"
+  onEmptyChange?: (empty: boolean) => void
+}) {
+  return (
+    <BaseInput
+      name={name}
+      type="password"
+      autoComplete={autoComplete}
+      onValueChange={(value) => onEmptyChange?.(value === "")}
+      className={`h-9 ${control}`}
+    />
+  )
+}
+
+/** A form field's text, from the form being submitted. */
+export const formText = (form: HTMLFormElement, name: string) => {
+  const value = new FormData(form).get(name)
+  return typeof value === "string" ? value : ""
+}
+
 export function Textarea({ className = "", ...props }: ComponentProps<"textarea">) {
   return <BaseField.Control render={<textarea className={`min-h-24 py-2 ${control} ${className}`} {...props} />} />
 }

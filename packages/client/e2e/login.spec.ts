@@ -115,7 +115,7 @@ test.describe("throttled", () => {
     await page.getByLabel("Password").fill(ADMIN.password)
     await page.getByRole("button", { name: "Log in" }).click()
     await expect(page.getByRole("alert")).toContainText("Too many attempts")
-    await expect(page.getByRole("alert")).toContainText(/Wait 1[45]:\d\d/)
+    await expect(page.getByText(/try again in 1[45]:\d\d/)).toBeVisible()
     await expect(page.getByRole("button", { name: "Log in" })).toBeDisabled()
   })
 })

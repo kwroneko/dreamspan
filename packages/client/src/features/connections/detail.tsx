@@ -9,7 +9,7 @@ import { defineSlot, SlotOutlet } from "../../slots.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { RadioGroup } from "../../ui/Choice.tsx"
 import { ConfirmDialog, Dialog, DialogActions } from "../../ui/Dialog.tsx"
-import { Field, Fieldset, Input } from "../../ui/Field.tsx"
+import { Field, Fieldset, formText, Input, SecretInput } from "../../ui/Field.tsx"
 import { Select } from "../../ui/Select.tsx"
 import { Alert, Badge, Card, CardHeader, EmptyState } from "../../ui/Surface.tsx"
 import { useTitle } from "../shell.tsx"
@@ -177,18 +177,16 @@ function SetKeyDialog({
   onOpenChange: (open: boolean) => void
 }) {
   const action = useAction()
-  const [apiKey, setApiKey] = useState("")
-  const submit = async (event: FormEvent) => {
+  const [keyEmpty, setKeyEmpty] = useState(true)
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    const apiKey = formText(event.currentTarget, "apiKey")
     const result = await action.run(
       (client) =>
         client("SetConnectionKey", { connectionId: connection.id, apiKey, expectedRowVersion: connection.rowVersion }),
       ["connections", "credentials"]
     )
-    if (result.ok) {
-      setApiKey("")
-      onOpenChange(false)
-    }
+    if (result.ok) onOpenChange(false)
   }
   return (
     <Dialog
@@ -199,12 +197,12 @@ function SetKeyDialog({
     >
       <form onSubmit={submit} className="flex flex-col gap-4">
         <Field label="Key">
-          <Input type="password" value={apiKey} onValueChange={setApiKey} autoComplete="off" spellCheck={false} />
+          <SecretInput name="apiKey" onEmptyChange={setKeyEmpty} />
         </Field>
         <ErrorAlert error={action.error} />
         <DialogActions>
           <Button onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button type="submit" variant="primary" pending={action.pending} disabled={apiKey.trim() === ""}>
+          <Button type="submit" variant="primary" pending={action.pending} disabled={keyEmpty}>
             Save key
           </Button>
         </DialogActions>
@@ -313,13 +311,13 @@ export function KeySection(props: ConnectionSectionProps) {
           </Alert>
         </div>
       )}
-      <SetKeyDialog connection={connection} origin={origin} open={dialog === "set"} onOpenChange={close} />
+      {dialog === "set" && <SetKeyDialog connection={connection} origin={origin} open onOpenChange={close} />}
       {dialog === "saved" && <UseSavedKeyDialog {...props} open onOpenChange={close} />}
-      {credential && origin && (
+      {dialog === "allow" && credential && origin && (
         <AllowHostDialog
           credential={credential}
           url={effectiveBaseUrl(connection, kinds) ?? origin}
-          open={dialog === "allow"}
+          open
           onOpenChange={close}
         />
       )}
@@ -349,10 +347,11 @@ export function KeySection(props: ConnectionSectionProps) {
   )
 }
 
+/** A header being typed. Its value stays in the input, read from the form on submit. */
 interface HeaderRow {
   readonly id: number
   readonly name: string
-  readonly value: string
+  readonly valueEmpty: boolean
 }
 
 function HeadersDialog({
@@ -369,17 +368,21 @@ function HeadersDialog({
   const action = useAction()
   const [rows, setRows] = useState<ReadonlyArray<HeaderRow>>(() =>
     connection.headerNames.length > 0
-      ? connection.headerNames.map((name, id) => ({ id, name, value: "" }))
-      : [{ id: 0, name: "", value: "" }]
+      ? connection.headerNames.map((name, id) => ({ id, name, valueEmpty: true }))
+      : [{ id: 0, name: "", valueEmpty: true }]
   )
   const update = (id: number, change: Partial<HeaderRow>) =>
     setRows(rows.map((row) => (row.id === id ? { ...row, ...change } : row)))
   const filled = rows.filter((row) => row.name.trim() !== "")
-  const missingValue = filled.some((row) => row.value === "")
+  const missingValue = filled.some((row) => row.valueEmpty)
 
-  const submit = async (event: FormEvent) => {
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    const headers = filled.length === 0 ? null : Object.fromEntries(filled.map((row) => [row.name.trim(), row.value]))
+    const form = event.currentTarget
+    const headers =
+      filled.length === 0
+        ? null
+        : Object.fromEntries(filled.map((row) => [row.name.trim(), formText(form, `value-${row.id}`)]))
     const result = await action.run(
       (client) =>
         client("SetConnectionHeaders", {
@@ -400,9 +403,13 @@ function HeadersDialog({
       description={`These replace all current headers. Values often hold secrets, so they're never shown again${origin ? `, and they're sent only to ${origin}` : ""}.`}
     >
       <form onSubmit={submit} className="flex flex-col gap-4">
+        <div aria-hidden="true" className="grid grid-cols-[1fr_1fr_2.25rem] gap-2 text-sm font-medium">
+          <span>Name</span>
+          <span>Value</span>
+        </div>
         {rows.map((row, index) => (
-          <div key={row.id} className="grid grid-cols-[1fr_1fr_auto] items-end gap-2">
-            <Field label={index === 0 ? "Name" : <span className="sr-only">Name</span>}>
+          <div key={row.id} className="-mt-2 grid grid-cols-[1fr_1fr_2.25rem] items-end gap-2">
+            <Field label={<span className="sr-only">Header {index + 1} name</span>}>
               <Input
                 value={row.name}
                 onValueChange={(name) => update(row.id, { name })}
@@ -410,17 +417,12 @@ function HeadersDialog({
                 spellCheck={false}
               />
             </Field>
-            <Field label={index === 0 ? "Value" : <span className="sr-only">Value</span>}>
-              <Input
-                type="password"
-                value={row.value}
-                onValueChange={(value) => update(row.id, { value })}
-                autoComplete="off"
-              />
+            <Field label={<span className="sr-only">Header {index + 1} value</span>}>
+              <SecretInput name={`value-${row.id}`} onEmptyChange={(valueEmpty) => update(row.id, { valueEmpty })} />
             </Field>
             <Button
               variant="ghost"
-              aria-label={`Remove header ${row.name || index + 1}`}
+              aria-label={`Remove header ${index + 1}`}
               onClick={() => setRows(rows.filter((other) => other.id !== row.id))}
             >
               ✕
@@ -431,7 +433,7 @@ function HeadersDialog({
           <Button
             variant="ghost"
             onClick={() =>
-              setRows([...rows, { id: Math.max(-1, ...rows.map((row) => row.id)) + 1, name: "", value: "" }])
+              setRows([...rows, { id: Math.max(-1, ...rows.map((row) => row.id)) + 1, name: "", valueEmpty: true }])
             }
           >
             Add a header
@@ -489,12 +491,13 @@ export function RouteSection({ connection }: ConnectionSectionProps) {
   const action = useAction()
   const legend = useId()
   const [mode, setMode] = useState<ProxyMode | null>(null)
-  const [url, setUrl] = useState("")
+  const [urlEmpty, setUrlEmpty] = useState(true)
   const current = mode ?? connection.proxyMode
-  const needsUrl = current === "custom" && url.trim() === ""
+  const needsUrl = current === "custom" && urlEmpty
 
-  const submit = async (event: FormEvent) => {
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    const url = formText(event.currentTarget, "proxyUrl")
     const result = await action.run(
       (client) =>
         client("SetConnectionProxy", {
@@ -506,7 +509,7 @@ export function RouteSection({ connection }: ConnectionSectionProps) {
     )
     if (result.ok) {
       setMode(null)
-      setUrl("")
+      setUrlEmpty(true)
     }
   }
 
@@ -541,7 +544,7 @@ export function RouteSection({ connection }: ConnectionSectionProps) {
                 : "For example socks5://user:password@host:1080."
             }
           >
-            <Input value={url} onValueChange={setUrl} inputMode="url" autoCapitalize="none" spellCheck={false} />
+            <SecretInput name="proxyUrl" masked={false} onEmptyChange={setUrlEmpty} />
           </Field>
         )}
         <ErrorAlert error={action.error} title="The route wasn't changed" />
