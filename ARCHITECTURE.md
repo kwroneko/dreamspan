@@ -324,7 +324,7 @@ An upstream merging a new import ends the same ways. The outcomes are returned, 
 
 **Known limits:**
 - Arrays without element identities, like a card's `alternate_greetings` or `tags`, are atomic: changing them on both sides is a conflict.
-- Not built yet: exporting a ref (the card formats exist, §8), library search, and "used by N chats".
+- Not built yet: library search, and "used by N chats". Importing and exporting files is §11.
 
 ### 3.10 Drafts
 
@@ -873,3 +873,21 @@ ST chat-completion presets (DESIGN §1.2). Pure functions with no database acces
 - Where ST's parser recovers from a malformed macro (a bad nested macro, a stray operator), the macro stays literal here and scanning resumes after its `{{`. ST's recovery depends on the input and can swallow text after it.
 - `{{hasExtension}}` is always false: ST extensions don't exist here.
 - Names inside a card field's macros resolve against the same bindings as the text around them. ST resolves them from the page's persona and character and ignores the call's name overrides. That's the rebinding DESIGN §5.3 moves away from: a card field nested in a prompt follows that prompt's bindings.
+
+---
+
+## 11. Importing
+
+Files into the library and back out (DATA-MODEL §3, §11, §14; PLUGINS §8). The parsers of §8 and §9 do the reading; this section is what stores their output.
+
+### 11.1 Storage
+
+One write operation, `ImportFile` (`db/libraryWrites.ts`), stores a parsed file in one transaction:
+- **A new file** becomes an entity, an `upstream` ref and a revision with `origin = import`. The ref records the file's name (`source_path`) and the SHA-256 of its bytes (`source_hash`), and the revision's `origin_ref` both, as JSON.
+- **A re-import** names the upstream ref (`intoRefId`). It's the same as `ImportUpstream` (§3.9): a new revision on the import line, merged into the upstream and then into everything following it, transitively. The result lists each follower's outcome with its label. Only the user's own upstream of the same kind takes it: another user's ref is `NotFound`, a variant or another kind `RefOperationRefused`.
+- **Documents cross as JSON text.** The parsed document reaches the main thread from a format worker and goes on to the writer as a string, so the main thread copies it but never walks or decodes it.
+- **Media** (`media_assets`, `media_refs`, already in `0002`; no migration was needed). A card's avatar and embedded assets are files under `DATA_DIR/media/<2 hex>/<sha256>`, written before the transaction. The transaction records each file once for everyone (`ON CONFLICT (sha256) DO NOTHING`) and gives the user a reference to it. The card document then names them: `avatar_media_id`, and `asset_media_ids` by each asset's URI (built with `Object.fromEntries`, since a URI comes from the file and could be `__proto__`). A file written for an import whose transaction then fails stays on disk unreferenced; nothing collects those yet.
+- **ST's Character's Note** (`data.extensions.depth_prompt`) becomes the card's first note (DESIGN §4.1a): a note entity whose document (`@rp/shared/docs/note.ts`) has the depth, the role and `owner: {card}`. A re-import of the card updates that note the same way, merged with the user's edits to it. "The card's first note" is the oldest live note whose upstream head names the card (`cardNote` in `db/library.ts`).
+- **The embedded lorebook** stays in the card document (§8).
+
+`ExportSource` (`db/importReads.ts`) reads what an export takes: the ref's head document, the card's first note, and the stored files the document names. **Only files the user holds a reference to come back.** A document is data, and an edit could put any media id in it; another user's file is left out as if it weren't there (`test/importStorage.test.ts`).

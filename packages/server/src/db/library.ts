@@ -112,7 +112,17 @@ export const makeLibraryQueries = (sql: SqlClient.SqlClient) => {
       }
     })
 
-  return { ownedRef, refsWhere, loadDoc, planMerge }
+  /** The upstream ref of the card's first note, the one ST's Character's Note maps to. */
+  const cardNote = (userId: UserId, cardEntityId: string) =>
+    sql<{ id: string }>`
+      SELECT r.id FROM entity_refs r
+      JOIN entities e ON e.id = r.entity_id
+      JOIN entity_revisions h ON h.id = r.head_revision_id
+      WHERE e.owner_user_id = ${userId} AND e.kind = 'note' AND e.deleted_at IS NULL AND r.ref_kind = 'upstream'
+        AND json_extract(h.doc_json, '$.owner.card') = ${cardEntityId}
+      ORDER BY e.id LIMIT 1`.pipe(Effect.flatMap(([row]) => (row ? ownedRef(userId, row.id) : Effect.succeed(null))))
+
+  return { ownedRef, refsWhere, loadDoc, planMerge, cardNote }
 }
 
 /** JSON with object keys sorted, so equal documents hash equally whatever their key order. */

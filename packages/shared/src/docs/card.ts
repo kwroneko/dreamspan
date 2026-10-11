@@ -52,6 +52,8 @@ export const CardDoc = Schema.Struct({
   avatar_media_id: Schema.NullOr(Schema.String),
   /** Absent means V3's default: the avatar as the main icon. */
   assets: Schema.optionalKey(Schema.Array(CardAsset)),
+  /** The stored files of embedded assets, by their `uri`. Set by the importer like the avatar. */
+  asset_media_ids: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
   character_book: Schema.optionalKey(LorebookDoc),
   modules: Schema.Array(CardModule),
   /** The card's `data.extensions`, verbatim, with plugin namespaces (PLUGINS §3.3). */

@@ -1,14 +1,25 @@
 // Library write handlers (DATA-MODEL §3.2). They run in the writer worker, each as one
 // transaction. Every change to a ref flows on to the refs that follow it.
 import type { EntityId } from "@rp/shared/chat.ts"
-import type { Doc, MergeOutcome, RefId } from "@rp/shared/library.ts"
+import { NOTE_SCHEMA_VERSION } from "@rp/shared/docs/note.ts"
+import type { UserId } from "@rp/shared/domain.ts"
+import type { Doc, EntityKind, MergeOutcome, RefId } from "@rp/shared/library.ts"
+import { ImportedFollower, LibraryImport } from "@rp/shared/libraryImport.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import type { Bin } from "./bin.ts"
 import { docHash, makeLibraryQueries, type RefRow, searchText, toLibraryRef } from "./library.ts"
+import { mediaPath } from "./media.ts"
 import { FollowerMerge, NotFound, RefChange, RefOperationRefused, StaleWrite, WriteOps } from "./ops.ts"
 import { transaction } from "./tx.ts"
+
+/** Where an imported revision came from: the file's name and hash. */
+interface ImportSource {
+  readonly originRef: string
+  readonly sourcePath: string
+  readonly sourceHash: string
+}
 
 export const makeLibraryWriteHandlers = (bin: Bin) =>
   Effect.gen(function* () {
@@ -128,37 +139,156 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
         ? Effect.void
         : Effect.fail(new StaleWrite({ entity: "ref", id: ref.id, expected, actual: ref.row_version }))
 
-    const handlers = {
-      CreateEntity: ({ userId, kind, label, subtitle, doc, schemaVersion, origin, sourcePath }) =>
-        Effect.gen(function* () {
-          const at = Date.now()
-          const entityId = uuidv7()
-          const refId = uuidv7()
-          yield* sql`INSERT INTO entities ${sql.insert({ id: entityId, owner_user_id: userId, kind, created_at: at })}`
-          const first = yield* insertRevision({
-            entityId,
-            schemaVersion,
-            doc,
-            parents: [],
-            origin,
-            originRef: sourcePath,
+    /** A new entity with its first revision and its upstream ref. */
+    const createUpstream = (options: {
+      readonly userId: string
+      readonly kind: EntityKind
+      readonly label: string
+      readonly subtitle: string
+      readonly doc: Doc
+      readonly schemaVersion: number
+      readonly origin: "user" | "import"
+      readonly originRef: string | null
+      readonly sourcePath: string | null
+      readonly sourceHash: string | null
+    }) =>
+      Effect.gen(function* () {
+        const at = Date.now()
+        const entityId = uuidv7()
+        const refId = uuidv7()
+        yield* sql`INSERT INTO entities ${sql.insert({ id: entityId, owner_user_id: options.userId, kind: options.kind, created_at: at })}`
+        const first = yield* insertRevision({
+          entityId,
+          schemaVersion: options.schemaVersion,
+          doc: options.doc,
+          parents: [],
+          origin: options.origin,
+          originRef: options.originRef,
+          message: null
+        })
+        yield* sql`INSERT INTO entity_refs ${sql.insert({
+          id: refId,
+          entity_id: entityId,
+          ref_kind: "upstream",
+          head_revision_id: first,
+          // An imported upstream has merged its import (see refSelect in library.ts).
+          merge_base_revision_id: options.origin === "import" ? first : null,
+          label: options.label,
+          subtitle: options.subtitle,
+          source_path: options.sourcePath,
+          source_hash: options.sourceHash,
+          created_at: at,
+          updated_at: at
+        })}`
+        return yield* reload(refId)
+      })
+
+    /** A new import of an upstream ref, merged with the ref's own edits and passed on to its followers. */
+    const importInto = (
+      ref: RefRow,
+      options: {
+        readonly doc: Doc
+        readonly schemaVersion: number
+        readonly originRef: string | null
+        readonly sourcePath: string | null
+        readonly sourceHash: string | null
+      }
+    ) =>
+      Effect.gen(function* () {
+        if (ref.ref_kind !== "upstream") {
+          return yield* new RefOperationRefused({ refId: ref.id, reason: "Only upstream refs take imports." })
+        }
+        // Until per-kind migrations exist, every revision of an entity has one schema
+        // version, so merges never span versions.
+        const current = yield* revision(ref.head_revision_id)
+        if (options.schemaVersion !== current.schema_version) {
+          return yield* new RefOperationRefused({
+            refId: ref.id,
+            reason: `This is schema version ${options.schemaVersion}, but the library holds version ${current.schema_version}, and documents can't be migrated yet.`
+          })
+        }
+        // Imports form their own line of revisions, which the upstream ref merges in like
+        // a variant merges its upstream, so the user's edits to the upstream survive.
+        // Importing what was last imported adds nothing to that line.
+        const last = ref.followed_head === null ? null : yield* revision(ref.followed_head)
+        if (last === null || last.doc_hash !== docHash(options.doc)) {
+          yield* insertRevision({
+            entityId: ref.entity_id,
+            schemaVersion: options.schemaVersion,
+            doc: options.doc,
+            parents: ref.followed_head === null ? [] : [ref.followed_head],
+            origin: "import",
+            originRef: options.originRef,
             message: null
           })
-          yield* sql`INSERT INTO entity_refs ${sql.insert({
-            id: refId,
-            entity_id: entityId,
-            ref_kind: "upstream",
-            head_revision_id: first,
-            // An imported upstream has merged its import (see refSelect in library.ts).
-            merge_base_revision_id: origin === "import" ? first : null,
-            label,
-            subtitle,
-            source_path: sourcePath,
-            created_at: at,
-            updated_at: at
-          })}`
-          return { entityId: entityId as EntityId, ref: toLibraryRef(yield* reload(refId)) }
-        }).pipe(transaction(sql, "CreateEntity")),
+        }
+        yield* sql`UPDATE entity_refs SET source_path = coalesce(${options.sourcePath}, source_path),
+                   source_hash = coalesce(${options.sourceHash}, source_hash) WHERE id = ${ref.id}`
+        return yield* mergeAndFlow(yield* reload(ref.id))
+      })
+
+    /** Records a file in media storage for the user; the same bytes are one row for everyone. */
+    const storeMedia = (
+      userId: string,
+      file: { sha256: string; mime: string; byteSize: number; width: number | null; height: number | null }
+    ) =>
+      Effect.gen(function* () {
+        yield* sql`INSERT INTO media_assets ${sql.insert({
+          id: uuidv7(),
+          sha256: file.sha256,
+          mime: file.mime,
+          width: file.width,
+          height: file.height,
+          byte_size: file.byteSize,
+          path: mediaPath(file.sha256),
+          created_at: Date.now()
+        })} ON CONFLICT (sha256) DO NOTHING`
+        const [row] = yield* sql<{ id: string }>`SELECT id FROM media_assets WHERE sha256 = ${file.sha256}`
+        yield* sql`INSERT INTO media_refs ${sql.insert({ media_id: row!.id, owner_user_id: userId })} ON CONFLICT DO NOTHING`
+        return row!.id
+      })
+
+    /**
+     * ST's Character's Note as the card's first note: a new note, or a new import of the
+     * one an earlier import made, merged with the user's edits to it.
+     */
+    const importNote = (userId: string, cardEntityId: string, noteDocJson: string, source: ImportSource) =>
+      Effect.gen(function* () {
+        const doc: Doc = { ...(JSON.parse(noteDocJson) as Doc), owner: { card: cardEntityId } }
+        const existing = yield* lib.cardNote(userId as UserId, cardEntityId)
+        if (existing !== null) {
+          yield* importInto(existing, { doc, schemaVersion: NOTE_SCHEMA_VERSION, ...source })
+          return yield* reload(existing.id)
+        }
+        return yield* createUpstream({
+          userId,
+          kind: "note",
+          label: "Character's Note",
+          subtitle: "",
+          doc,
+          schemaVersion: NOTE_SCHEMA_VERSION,
+          origin: "import",
+          ...source
+        })
+      })
+
+    const handlers = {
+      CreateEntity: ({ userId, kind, label, subtitle, doc, schemaVersion, origin, sourcePath }) =>
+        createUpstream({
+          userId,
+          kind,
+          label,
+          subtitle,
+          doc,
+          schemaVersion,
+          origin,
+          originRef: sourcePath,
+          sourcePath,
+          sourceHash: null
+        }).pipe(
+          Effect.map((ref) => ({ entityId: ref.entity_id as EntityId, ref: toLibraryRef(ref) })),
+          transaction(sql, "CreateEntity")
+        ),
 
       SetEntityTags: ({ userId, entityId, tags }) =>
         Effect.gen(function* () {
@@ -269,39 +399,9 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
         }).pipe(transaction(sql, "PromoteOverride")),
 
       ImportUpstream: ({ userId, refId, doc, schemaVersion, sourcePath, sourceHash }) =>
-        Effect.gen(function* () {
-          const ref = yield* lib.ownedRef(userId, refId)
-          if (ref.ref_kind !== "upstream") {
-            return yield* new RefOperationRefused({ refId, reason: "Only upstream refs take imports." })
-          }
-          // Until per-kind migrations exist, every revision of an entity has one schema
-          // version, so merges never span versions.
-          const current = yield* revision(ref.head_revision_id)
-          if (schemaVersion !== current.schema_version) {
-            return yield* new RefOperationRefused({
-              refId,
-              reason: `This is schema version ${schemaVersion}, but the library holds version ${current.schema_version}, and documents can't be migrated yet.`
-            })
-          }
-          // Imports form their own line of revisions, which the upstream ref merges in like
-          // a variant merges its upstream, so the user's edits to the upstream survive.
-          // Importing what was last imported adds nothing to that line.
-          const last = ref.followed_head === null ? null : yield* revision(ref.followed_head)
-          if (last === null || last.doc_hash !== docHash(doc)) {
-            yield* insertRevision({
-              entityId: ref.entity_id,
-              schemaVersion,
-              doc,
-              parents: ref.followed_head === null ? [] : [ref.followed_head],
-              origin: "import",
-              originRef: sourcePath,
-              message: null
-            })
-          }
-          yield* sql`UPDATE entity_refs SET source_path = coalesce(${sourcePath}, source_path),
-                     source_hash = coalesce(${sourceHash}, source_hash) WHERE id = ${refId}`
-          return yield* mergeAndFlow(yield* reload(refId))
-        }).pipe(transaction(sql, "ImportUpstream")),
+        Effect.flatMap(lib.ownedRef(userId, refId), (ref) =>
+          importInto(ref, { doc, schemaVersion, originRef: sourcePath, sourcePath, sourceHash })
+        ).pipe(transaction(sql, "ImportUpstream")),
 
       MergeFollowed: ({ userId, refId }) =>
         Effect.flatMap(lib.ownedRef(userId, refId), mergeAndFlow).pipe(transaction(sql, "MergeFollowed")),
@@ -333,7 +433,68 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
           })
           yield* moveHead(ref.id, merge, theirsRevisionId)
           return yield* changed(ref.id)
-        }).pipe(transaction(sql, "ResolveMerge"))
+        }).pipe(transaction(sql, "ResolveMerge")),
+
+      // --- Library import
+      ImportFile: (input) =>
+        Effect.gen(function* () {
+          const { userId, intoRefId, kind } = input
+          const doc = JSON.parse(input.docJson) as Record<string, unknown>
+          if (kind === "card") {
+            const assets: Array<[string, string]> = []
+            doc.avatar_media_id = null
+            for (const file of input.media) {
+              const id = yield* storeMedia(userId, file)
+              if (file.role === "avatar") doc.avatar_media_id = id
+              else assets.push([file.uri, id])
+            }
+            // fromEntries, since a URI comes from the file and could be "__proto__".
+            if (assets.length > 0) doc.asset_media_ids = Object.fromEntries(assets)
+          }
+          const source: ImportSource = {
+            originRef: JSON.stringify({ file: input.sourceName, sha256: input.sourceHash }),
+            sourcePath: input.sourceName,
+            sourceHash: input.sourceHash
+          }
+          let upstream: RefRow
+          let outcome: MergeOutcome | null = null
+          let followers: ReadonlyArray<FollowerMerge> = []
+          if (intoRefId === null) {
+            upstream = yield* createUpstream({
+              userId,
+              kind,
+              label: input.label,
+              subtitle: "",
+              doc,
+              schemaVersion: input.schemaVersion,
+              origin: "import",
+              ...source
+            })
+          } else {
+            const ref = yield* lib.ownedRef(userId, intoRefId)
+            if (ref.kind !== kind) {
+              return yield* new RefOperationRefused({
+                refId: intoRefId,
+                reason: `This file is a ${kind}, not a ${ref.kind}.`
+              })
+            }
+            const merged = yield* importInto(ref, { doc, schemaVersion: input.schemaVersion, ...source })
+            upstream = yield* reload(ref.id)
+            outcome = merged.outcome
+            followers = merged.change.followers
+          }
+          const note =
+            input.noteDocJson === null ? null : yield* importNote(userId, upstream.entity_id, input.noteDocJson, source)
+          return new LibraryImport({
+            created: intoRefId === null,
+            ref: toLibraryRef(upstream),
+            outcome,
+            followers: yield* Effect.forEach(followers, ({ refId, outcome }) =>
+              Effect.map(reload(refId), (ref) => new ImportedFollower({ refId, label: ref.label, outcome }))
+            ),
+            note: note && toLibraryRef(note)
+          })
+        }).pipe(transaction(sql, "ImportFile"))
     } satisfies Partial<Parameters<typeof WriteOps.of>[0]>
     return handlers
   })

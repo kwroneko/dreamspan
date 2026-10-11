@@ -20,6 +20,7 @@ import {
   Revision,
   RevisionId
 } from "@rp/shared/library.ts"
+import { LibraryImport } from "@rp/shared/libraryImport.ts"
 import {
   Connection,
   ConnectionId,
@@ -169,6 +170,34 @@ const CloseLlmRequest = Schema.Struct({
   cost: Schema.NullOr(Cost),
   error: Schema.NullOr(Schema.Unknown)
 })
+
+// --- Library import
+const Sha256 = Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/))
+
+/** A file that came with an imported one, already written to media storage. */
+const ImportedMedia = Schema.Struct({
+  /** The avatar, or an embedded asset named by `uri` in the card's assets. */
+  role: Schema.Literals(["avatar", "asset"]),
+  uri: Schema.String,
+  sha256: Sha256,
+  mime: Schema.String,
+  byteSize: Schema.Int,
+  width: Schema.NullOr(Schema.Int),
+  height: Schema.NullOr(Schema.Int)
+})
+
+/** A stored file, at `path` under the data directory. */
+const StoredFile = Schema.Struct({ path: Schema.String, mime: Schema.String })
+
+export class ExportSource extends Schema.Class<ExportSource>("ExportSource")({
+  kind: EntityKind,
+  label: Schema.String,
+  docJson: Schema.String,
+  noteDocJson: Schema.NullOr(Schema.String),
+  avatar: Schema.NullOr(StoredFile),
+  /** Embedded assets, by the `uri` the card's assets name them with. */
+  assets: Schema.Array(Schema.Struct({ ...StoredFile.fields, uri: Schema.String }))
+}) {}
 
 export class WriteOps extends RpcGroup.make(
   /** Answers once the writer has opened the database and run migrations. */
@@ -674,6 +703,32 @@ export class WriteOps extends RpcGroup.make(
     },
     success: Schema.Struct({ id: Schema.String, seq: Schema.Int }),
     error: Schema.Union([NotFound, StorageError])
+  }),
+  // --- Library import (ARCHITECTURE.md §10). The file was parsed in a format worker;
+  // documents cross as JSON text, which costs the main thread a copy, not a walk.
+  /**
+   * A parsed file into the library: a new entity with an upstream ref, or, with
+   * `intoRefId`, a new import of that upstream, merged into it and its followers. The
+   * file's media are recorded first, so the card document can name them. A card's
+   * Character's Note becomes (or updates) the card's first note.
+   */
+  Rpc.make("ImportFile", {
+    payload: {
+      userId: UserId,
+      intoRefId: Schema.NullOr(RefId),
+      kind: EntityKind,
+      label: Schema.String,
+      docJson: Schema.String,
+      schemaVersion: Schema.Int,
+      /** The uploaded file's name and the SHA-256 of its bytes. */
+      sourceName: Schema.String,
+      sourceHash: Sha256,
+      media: Schema.Array(ImportedMedia),
+      /** A note document without its owner, which is the card. */
+      noteDocJson: Schema.NullOr(Schema.String)
+    },
+    success: LibraryImport,
+    error: Schema.Union([NotFound, RefOperationRefused, StorageError])
   })
 ) {}
 
@@ -883,5 +938,15 @@ export class ReadOps extends RpcGroup.make(
     },
     success: Schema.Array(LlmRequest),
     error: StorageError
+  }),
+  // --- Library import (ARCHITECTURE.md §10).
+  /**
+   * What exporting a ref takes: its head document, its card's first note, and the stored
+   * files the document names that the user holds a reference to.
+   */
+  Rpc.make("ExportSource", {
+    payload: { userId: UserId, refId: RefId },
+    success: ExportSource,
+    error: Schema.Union([NotFound, StorageError])
   })
 ) {}

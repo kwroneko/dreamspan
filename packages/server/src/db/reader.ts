@@ -6,6 +6,7 @@ import { Effect, Layer } from "effect"
 import { RpcServer } from "effect/rpc"
 import { makeAccountReadHandlers } from "./accounts.ts"
 import { readerConnection } from "./connection.ts"
+import { makeImportReadHandlers } from "./importReads.ts"
 import { ReadOps } from "./ops.ts"
 import { makeProviderReadHandlers } from "./providerReads.ts"
 import { makeReadHandlers } from "./reads.ts"
@@ -16,8 +17,8 @@ RpcServer.layer(ReadOps, { concurrency: 1 }).pipe(
   Layer.provide(
     ReadOps.toLayer(
       Effect.map(
-        Effect.all([makeReadHandlers, makeProviderReadHandlers, makeAccountReadHandlers]),
-        ([core, providers, accounts]) => ReadOps.of({ ...core, ...providers, ...accounts })
+        Effect.all([makeReadHandlers, makeProviderReadHandlers, makeAccountReadHandlers, makeImportReadHandlers]),
+        ([core, providers, accounts, imports]) => ReadOps.of({ ...core, ...providers, ...accounts, ...imports })
       )
     )
   ),
