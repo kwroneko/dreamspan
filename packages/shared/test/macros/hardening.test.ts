@@ -7,6 +7,7 @@ import { readdirSync, readFileSync } from "node:fs"
 import { describe, expect, it, vi } from "vitest"
 import type { ChatMessage } from "../../src/macros/context.ts"
 import { expand, type ExpandRequest } from "../../src/macros/expand.ts"
+import { parse } from "../../src/macros/parse.ts"
 import { builtinRegistry, expanded } from "./support.ts"
 
 const registry = builtinRegistry()
@@ -40,13 +41,13 @@ describe("nesting depth", () => {
   })
 
   it("stops deep nesting before it can overflow the stack", () => {
-    expect(limit(nested("{{reverse::", "}}", 200_000))).toBe("depth")
+    expect(limit(nested("{{reverse::", "}}", 60_000))).toBe("depth")
   })
 
   it("leaves openers that are never closed as text, however deep, as ST does", () => {
     expect(expanded(request("{{a::".repeat(33))).text).toBe("{{a::".repeat(33))
-    const text = "{{a::".repeat(200_000) + "{{user}}"
-    expect(expanded(request(text)).text).toBe("{{a::".repeat(200_000) + "User")
+    const text = "{{a::".repeat(150_000) + "{{user}}"
+    expect(expanded(request(text)).text).toBe("{{a::".repeat(150_000) + "User")
   })
 
   it("can be changed", () => {
@@ -86,11 +87,56 @@ describe("work and output size", () => {
   })
 
   it("counts pairing blocks at each level, since each level pairs its content again", () => {
-    expect(limit(nested("{{trim}}", "{{/trim}}", 100_000))).toBe("work")
+    expect(limit(nested("{{trim}}", "{{/trim}}", 50_000))).toBe("work")
   })
 
-  it("counts text parsed", () => {
-    expect(limit("x".repeat(4_000_001))).toBe("work")
+  it("counts text parsed, and stops the parser partway when the work runs out", () => {
+    expect(limit("x".repeat(900_000), { limits: { maxWork: 500_000 } })).toBe("work")
+    // The parser charges as it goes, so a budget that runs out stops it within 64K steps.
+    let charged = 0
+    const stop = new Error("out of work")
+    expect(() =>
+      parse("{{a}}".repeat(190_000), (steps) => {
+        charged += steps
+        if (charged > 100_000) throw stop
+      })
+    ).toThrow(stop)
+    expect(charged).toBeLessThan(100_000 + 70_000)
+  })
+
+  it("refuses a text over 1,000,000 characters before parsing it", () => {
+    expect(expand(request("x".repeat(1_000_001)))).toEqual({
+      _tag: "LimitExceeded",
+      limit: "length",
+      scope: "",
+      offset: 0
+    })
+    expect(limit("x".repeat(1_000_000))).toBe("expanded")
+    const card = { description: "y".repeat(1_000_001) }
+    expect(expand(request("ab {{description}}", { context: { ...request("").context, card } }))).toEqual({
+      _tag: "LimitExceeded",
+      limit: "length",
+      scope: "card.description",
+      offset: 0
+    })
+  })
+
+  // The review's worst inputs under the length cap: each stops within the default limits.
+  it.each([
+    ["unclosed unknown openers", "{{a}}".repeat(199_000), "work"],
+    ["openers then closers", "{{trim}}".repeat(55_000) + "{{/trim}}".repeat(55_000), "work"],
+    [
+      "crossing names",
+      Array.from({ length: 25_000 }, (_, i) => `{{x${i % 300}}}`).join("") +
+        Array.from({ length: 25_000 }, (_, i) => `{{/x${i % 300}}}`).join(""),
+      "work"
+    ],
+    ["unclosed chains", ("{{a::".repeat(30) + "z ").repeat(6_000), "expanded"],
+    ["names with junk", "{{a b".repeat(199_000), "expanded"],
+    ["brace runs", "{{{{{{{{{{x".repeat(90_000), "expanded"]
+  ])("%s", (_name, text, outcome) => {
+    expect(text.length).toBeLessThanOrEqual(1_000_000)
+    expect(limit(text)).toBe(outcome)
   })
 
   it("stops a value that doubles", () => {

@@ -8,7 +8,8 @@
 // - Nested macros are parsed with an explicit stack, not recursion, so nesting can't
 //   overflow the call stack. A macro that's never closed stays text however deep it goes;
 //   evaluation bounds the depth of what did parse.
-// - It counts its steps, which the engine charges as work.
+// - It counts its steps and charges them as work every 64K steps, so a budget that runs out
+//   stops it partway.
 //
 // ST's quirks reproduced here:
 // - `{{a::b}}`, `{{a:b}}` and `{{a b}}` all take arguments. Only the `::` form splits them;
@@ -92,12 +93,25 @@ interface Scan {
   readonly start: number
   /** Whether "::" separates arguments (`{{a::b::c}}`) rather than being part of one. */
   readonly separators: boolean
-  /** Builds the macro from its regions, ending at `end`; null if they don't make one. */
-  readonly finish: (regions: ReadonlyArray<Region>, end: number) => Node | null
-  readonly regions: Array<Region>
+  /** What the raw text is for: a macro's arguments, or a variable shorthand's value. */
+  readonly head:
+    | { readonly kind: "macro"; readonly flags: string; readonly name: string }
+    | { readonly kind: "var"; readonly global: boolean; readonly name: string; readonly operator: VarOperator }
+  /** Allocated when needed: most scans in hostile text never finish. */
+  regions: Array<Region> | undefined
   regionStart: number
   cursor: number
-  nodes: Array<Node>
+  nodes: Array<Node> | undefined
+}
+
+const NO_NODES: ReadonlyArray<Node> = []
+
+/** The macro a finished scan makes, or null: a lone colon with nothing after it is a parse error in ST. */
+const finish = (scan: Scan, regions: ReadonlyArray<Region>, end: number): Node | null => {
+  const { head, start } = scan
+  if (head.kind === "var") return { ...head, start, end, value: regions[0] }
+  if (!scan.separators && regions[0]!.start === regions[0]!.end) return null
+  return { kind: "macro", start, end, flags: head.flags, name: head.name, args: regions }
 }
 
 interface Done {
@@ -118,10 +132,23 @@ class Parser {
   /** For each index, the next index whose character can end an identifier (built on first use). */
   private stops: Int32Array | undefined
   private readonly text: string
-  steps = 0
+  private readonly charge: (steps: number) => void
+  private steps = 0
+  private charged = 0
 
-  constructor(text: string) {
+  constructor(text: string, charge: (steps: number) => void) {
     this.text = text
+    this.charge = charge
+  }
+
+  private count(n: number) {
+    this.steps += n
+    if (this.steps - this.charged >= 0x10000) this.flush()
+  }
+
+  flush() {
+    this.charge(this.steps - this.charged)
+    this.charged = this.steps
   }
 
   document(): Array<Node> {
@@ -130,10 +157,10 @@ class Parser {
     let i = 0
     for (;;) {
       let p = t.indexOf("{{", i)
-      this.steps += (p < 0 ? t.length : p) - i + 1
+      this.count((p < 0 ? t.length : p) - i + 1)
       if (p < 0) return nodes
       while (t.charCodeAt(p + 2) === LBRACE) {
-        this.steps++
+        this.count(1)
         p++
       }
       const node = this.macro(p)
@@ -152,7 +179,7 @@ class Parser {
 
   private skipSpace(i: number) {
     while (isSpace(this.text.charCodeAt(i))) {
-      this.steps++
+      this.count(1)
       i++
     }
     return i
@@ -169,7 +196,8 @@ class Parser {
       } else if (step.kind === "nested") {
         step = this.begin(step.start)
       } else {
-        this.memo.set(step.start, step.node)
+        // Only nested macros can be tried again, after an enclosing one fails.
+        if (step.start !== start) this.memo.set(step.start, step.node)
         if (stack.at(-1)?.start === step.start) stack.pop()
         const parent = stack.at(-1)
         if (!parent) return step.node
@@ -177,7 +205,7 @@ class Parser {
           // A macro whose nested macro fails fails too, as in ST's parser.
           step = done(parent.start, null)
         } else {
-          parent.nodes.push(step.node)
+          ;(parent.nodes ??= []).push(step.node)
           parent.cursor = step.node.end
           step = this.advance(parent)
         }
@@ -197,7 +225,7 @@ class Parser {
     const t = this.text
     let i = scan.cursor
     while (i < t.length) {
-      this.steps++
+      this.count(1)
       const c = t.charCodeAt(i)
       const next = t.charCodeAt(i + 1)
       if (c === LBRACE && next === LBRACE) {
@@ -209,10 +237,11 @@ class Parser {
         let e = i
         while (s < e && isSpace(t.charCodeAt(s))) s++
         while (e > s && isSpace(t.charCodeAt(e - 1))) e--
-        scan.regions.push({ start: s, end: e, nodes: scan.nodes })
-        if (c === RBRACE) return done(scan.start, scan.finish(scan.regions, i + 2))
+        const regions = (scan.regions ??= [])
+        regions.push({ start: s, end: e, nodes: scan.nodes ?? NO_NODES })
+        if (c === RBRACE) return done(scan.start, finish(scan, regions, i + 2))
         scan.regionStart = i + 2
-        scan.nodes = []
+        scan.nodes = undefined
         i += 2
       } else {
         i++
@@ -221,13 +250,17 @@ class Parser {
     return done(scan.start, null)
   }
 
-  private scan(
-    start: number,
-    from: number,
-    separators: boolean,
-    finish: (regions: ReadonlyArray<Region>, end: number) => Node | null
-  ): Scan {
-    return { kind: "scan", start, separators, finish, regions: [], regionStart: from, cursor: from, nodes: [] }
+  private scan(start: number, from: number, separators: boolean, head: Scan["head"]): Scan {
+    return {
+      kind: "scan",
+      start,
+      separators,
+      head,
+      regions: undefined,
+      regionStart: from,
+      cursor: from,
+      nodes: undefined
+    }
   }
 
   /** Everything before a macro's raw text: flags, then a name or a variable shorthand. */
@@ -249,7 +282,7 @@ class Parser {
       if (!isAlpha(c)) return null
       let j = i + 1
       while (isWord(t.charCodeAt(j)) || t.charCodeAt(j) === HYPHEN) {
-        this.steps++
+        this.count(1)
         j++
       }
       return this.afterIdentifier(start, flags, t.slice(i, j), j)
@@ -276,7 +309,7 @@ class Parser {
         const c = t.charCodeAt(k)
         stops[k] = isSpace(c) || c === COLON || c === PIPE || c === RBRACE ? k : stops[k + 1]!
       }
-      this.steps += t.length
+      this.count(t.length)
       this.stops = stops
     }
     return this.stops[i]!
@@ -285,20 +318,10 @@ class Parser {
   private args(start: number, flags: string, name: string, i: number): Node | Scan | null {
     i = this.skipSpace(i)
     if (this.at(i, RBRACE, RBRACE)) return { kind: "macro", start, end: i + 2, flags, name, args: [] }
-    const node = (args: ReadonlyArray<Region>, end: number): MacroNode => ({
-      kind: "macro",
-      start,
-      end,
-      flags,
-      name,
-      args
-    })
-    if (this.at(i, COLON, COLON)) return this.scan(start, i + 2, true, node)
+    const head = { kind: "macro", flags, name } as const
+    if (this.at(i, COLON, COLON)) return this.scan(start, i + 2, true, head)
     if (this.text.charCodeAt(i) === COLON) i++
-    // A lone colon with nothing after it is a parse error in ST.
-    return this.scan(start, i, false, (regions, end) =>
-      regions[0]!.start === regions[0]!.end ? null : node(regions, end)
-    )
+    return this.scan(start, i, false, head)
   }
 
   private variable(start: number, global: boolean, i: number): Node | Scan | null {
@@ -307,7 +330,7 @@ class Parser {
     if (!isAlpha(t.charCodeAt(i))) return null
     let j = i + 1
     while (isWord(t.charCodeAt(j)) || t.charCodeAt(j) === HYPHEN) {
-      this.steps++
+      this.count(1)
       j++
     }
     // A variable name can't end with a hyphen, so `{{.x--}}` is `x` decremented.
@@ -323,7 +346,7 @@ class Parser {
       i = this.skipSpace(i)
       return this.at(i, RBRACE, RBRACE) ? { ...base, end: i + 2, operator, value: undefined } : null
     }
-    return this.scan(start, i, false, (regions, end) => ({ ...base, end, operator, value: regions[0] }))
+    return this.scan(start, i, false, { kind: "var", global, name, operator })
   }
 }
 
@@ -335,9 +358,10 @@ export const isClosing = (text: string, node: MacroNode) =>
   node.flags.includes("/") ||
   (node.name === "//" && node.args[0] !== undefined && text.charCodeAt(node.args[0].start) === SLASH)
 
-/** Parses the top-level macros of a text; `steps` counts the characters looked at. */
-export const parse = (text: string): { readonly nodes: ReadonlyArray<Node>; readonly steps: number } => {
-  const parser = new Parser(text)
+/** Parses the top-level macros of a text, charging each character looked at as work. */
+export const parse = (text: string, charge: (steps: number) => void = () => {}): ReadonlyArray<Node> => {
+  const parser = new Parser(text, charge)
   const nodes = parser.document()
-  return { nodes, steps: parser.steps }
+  parser.flush()
+  return nodes
 }

@@ -62,11 +62,21 @@ export interface MacroLimits {
    * in ST), and per die rolled.
    */
   readonly maxWork: number
+  /** Characters in any one text: the text itself, a card field, an `{{if}}` branch. */
+  readonly maxLength: number
 }
 
-const DEFAULT_MACRO_LIMITS: MacroLimits = { maxDepth: 32, maxExpansions: 10_000, maxWork: 4_000_000 }
+const DEFAULT_MACRO_LIMITS: MacroLimits = {
+  maxDepth: 32,
+  maxExpansions: 10_000,
+  maxWork: 4_000_000,
+  maxLength: 1_000_000
+}
 
-export type MacroLimit = "depth" | "expansions" | "work"
+/** Pairing costs this much per macro, besides its search steps: the maps and sets it builds. */
+const PAIRING_COST = 10
+
+export type MacroLimit = "depth" | "expansions" | "work" | "length"
 
 /** Thrown through the evaluation when a limit is reached; the expansion then fails as a whole. */
 class LimitReached {
@@ -341,9 +351,8 @@ const charge = (run: Run, size: number) => {
 }
 
 const parseCharged = (run: Run, text: string) => {
-  const { nodes, steps } = parse(text)
-  charge(run, steps)
-  return nodes
+  if (text.length > run.limits.maxLength) throw new LimitReached("length")
+  return parse(text, (steps) => charge(run, steps))
 }
 
 const macroInfo = (text: string, node: Node): MacroInfo | undefined =>
@@ -409,6 +418,7 @@ class Expansion {
     let out = ""
     let cursor = start
     const accepts = (node: MacroNode) => this.acceptsBlock(node)
+    charge(this.run, PAIRING_COST * (to - from))
     for (const item of pairScopes(text, nodes, from, to, accepts, (steps) => charge(this.run, steps))) {
       const node = nodes[item.index]!
       out += text.slice(cursor, node.start)

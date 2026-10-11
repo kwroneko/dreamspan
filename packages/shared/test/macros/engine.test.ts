@@ -227,7 +227,7 @@ describe("legacy syntax", () => {
 describe("parse", () => {
   it("trims arguments and keeps nested macros by position", () => {
     const text = "{{a:: x {{b}} ::y}}"
-    const [node] = parse(text).nodes
+    const [node] = parse(text)
     if (node?.kind !== "macro") throw new Error("not a macro")
     expect(node.args.map((arg) => text.slice(arg.start, arg.end))).toEqual(["x {{b}}", "y"])
   })
@@ -240,7 +240,7 @@ describe("parse", () => {
     ["{{.x-=2}}", "x", "-=", "2"],
     ["{{.x ??= {{user}} }}", "x", "??=", "{{user}}"]
   ])("parses the variable shorthand %j", (text, name, operator, value) => {
-    const node = parse(text).nodes[0]!
+    const node = parse(text)[0]!
     expect(node.kind).toBe("var")
     if (node.kind !== "var") return
     expect(node.name).toBe(name)
@@ -249,6 +249,6 @@ describe("parse", () => {
   })
 
   it.each(["{{.x++5}}", "{{.x -- 5}}", "{{.}}", "{{.x ~ 1}}", "{{a:}}", "{{a: }}"])("leaves %j literal", (text) => {
-    expect(parse(text).nodes).toEqual([])
+    expect(parse(text)).toEqual([])
   })
 })
