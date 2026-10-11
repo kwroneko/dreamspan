@@ -9,6 +9,7 @@ import { ServerError } from "@rp/shared/errors.ts"
 import { Effect, Option, Stream } from "effect"
 import { RpcClientError } from "effect/rpc"
 import { ChatHub } from "../chat/ChatHub.ts"
+import { Generator } from "../chat/Generator.ts"
 import { Generations } from "../chat/Generations.ts"
 import { Reader, Writer } from "../db/Database.ts"
 import { StorageError } from "../db/ops.ts"
@@ -58,13 +59,14 @@ export const makeChatHandlers = Effect.gen(function* () {
   const writer = yield* Writer
   const hub = yield* ChatHub
   const generations = yield* Generations
+  const generator = yield* Generator
 
   const userId = Effect.map(CurrentUser, (user) => user.id)
 
   const unavailable = new GenerationUnavailable({
     message: "This server has nothing to generate with yet: the context assembler isn't built."
   })
-  const needGenerator = Option.isSome(generations.generator) ? Effect.void : Effect.fail(unavailable)
+  const needGenerator = Option.isSome(generator) ? Effect.void : Effect.fail(unavailable)
 
   /** A slot as it is now, published to its chat. */
   const publishSlot = (user: UserId, slotId: SlotId) =>
@@ -79,7 +81,10 @@ export const makeChatHandlers = Effect.gen(function* () {
       return chat
     })
 
-  /** After a delete: reload, the leaf may have moved, and generations under what went are stopped. */
+  /**
+   * After a delete: reload, the leaf may have moved, and generations under what went are
+   * stopped. Delete handlers are uninterruptible, so a caller going away can't skip this.
+   */
   const afterDelete = (user: UserId, chatId: ChatId) =>
     Effect.gen(function* () {
       hub.publish(chatId, { _tag: "Reload" })
@@ -150,35 +155,41 @@ export const makeChatHandlers = Effect.gen(function* () {
         internal("SendMessage")
       ),
 
+    // Once the version is written, its generation starts even if the caller has gone:
+    // otherwise it would stay `generating` with nothing behind it.
     Generate: ({ chatId, parentSlotId, branch }) =>
       Effect.gen(function* () {
         yield* needGenerator
         const id = yield* userId
-        const appended = yield* append(id, chatId, parentSlotId, branch, generating)
-        yield* generations.start({
+        const result = yield* writer.AppendMessage({
           userId: id,
           chatId,
-          slotId: appended.entry.slotId,
-          versionId: appended.entry.version.id
+          parentSlotId,
+          branch,
+          version: generating,
+          commitDraft: null
         })
-        return appended
-      }).pipe(internal("Generate")),
+        yield* generations.start({ userId: id, chatId, slotId: result.slotId, versionId: result.version.id })
+        const entry = yield* publishSlot(id, result.slotId)
+        hub.publish(chatId, { _tag: "Chat", chat: result.chat })
+        return { entry, chat: result.chat }
+      }).pipe(Effect.uninterruptible, internal("Generate")),
 
     Regenerate: ({ slotId, expectedRowVersion }) =>
       Effect.gen(function* () {
         yield* needGenerator
         const id = yield* userId
-        const version = yield* writer.AddSelectedVersion({
+        const added = yield* writer.AddSelectedVersion({
           userId: id,
           slotId,
           version: generating,
           expectedRowVersion
         })
-        const { chatId, entry } = yield* reader.GetSlot({ userId: id, slotId })
-        hub.publish(chatId, { _tag: "Slot", entry })
-        yield* generations.start({ userId: id, chatId, slotId, versionId: version.id })
+        yield* generations.start({ userId: id, chatId: added.chatId, slotId, versionId: added.version.id })
+        const { entry } = yield* reader.GetSlot({ userId: id, slotId })
+        hub.publish(added.chatId, { _tag: "Slot", entry })
         return entry
-      }).pipe(internal("Regenerate")),
+      }).pipe(Effect.uninterruptible, internal("Regenerate")),
 
     StopGeneration: ({ versionId }) => Effect.flatMap(userId, (id) => generations.stop(id, versionId)),
 
@@ -220,7 +231,7 @@ export const makeChatHandlers = Effect.gen(function* () {
         const item = yield* writer.DeleteChat({ userId: id, chatId })
         yield* afterDelete(id, chatId)
         return item
-      }).pipe(internal("DeleteChat")),
+      }).pipe(Effect.uninterruptible, internal("DeleteChat")),
 
     DeleteMessage: ({ slotId }) =>
       Effect.gen(function* () {
@@ -228,7 +239,7 @@ export const makeChatHandlers = Effect.gen(function* () {
         const item = yield* writer.DeleteMessage({ userId: id, slotId })
         yield* afterDelete(id, item.origin.chatId as ChatId)
         return item
-      }).pipe(internal("DeleteMessage")),
+      }).pipe(Effect.uninterruptible, internal("DeleteMessage")),
 
     DeleteBranch: ({ slotId }) =>
       Effect.gen(function* () {
@@ -236,7 +247,7 @@ export const makeChatHandlers = Effect.gen(function* () {
         const item = yield* writer.DeleteBranch({ userId: id, slotId })
         yield* afterDelete(id, item.origin.chatId as ChatId)
         return item
-      }).pipe(internal("DeleteBranch")),
+      }).pipe(Effect.uninterruptible, internal("DeleteBranch")),
 
     DeleteVersion: ({ versionId }) =>
       Effect.gen(function* () {
@@ -244,7 +255,7 @@ export const makeChatHandlers = Effect.gen(function* () {
         const item = yield* writer.DeleteVersion({ userId: id, versionId })
         yield* afterDelete(id, item.origin.chatId as ChatId)
         return item
-      }).pipe(internal("DeleteVersion")),
+      }).pipe(Effect.uninterruptible, internal("DeleteVersion")),
 
     SubscribeChat: ({ chatId }) =>
       Stream.unwrap(

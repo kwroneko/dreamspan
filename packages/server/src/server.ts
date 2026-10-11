@@ -358,7 +358,7 @@ export const serverWith = (generator: Layer.Layer<Generator, never, AppConfig>) 
     Layer.mergeAll(RpcRoute, HealthRoute, AuthRoutes, ImportRoutes.layer, StaticRoutes, InterruptedRequests, RequestGuard)
   ).pipe(
     Layer.provide(ProvidersLive),
-    Layer.provide(Generations.layer.pipe(Layer.provideMerge(ChatHub.layer), Layer.provide(generator))),
+    Layer.provide(Generations.layer.pipe(Layer.provideMerge(ChatHub.layer), Layer.provideMerge(generator))),
     Layer.provideMerge(HttpServerLive),
     Layer.provideMerge(Accounts.layer),
     Layer.provideMerge(Layer.mergeAll(DatabaseLive, EventLoopMonitor.layer, FormatsLive)),

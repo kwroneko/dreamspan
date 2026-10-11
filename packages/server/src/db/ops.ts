@@ -726,7 +726,7 @@ export class WriteOps extends RpcGroup.make(
    */
   Rpc.make("AddSelectedVersion", {
     payload: { userId: UserId, slotId: SlotId, version: NewVersion, expectedRowVersion: Schema.Int },
-    success: Version,
+    success: Schema.Struct({ chatId: ChatId, version: Version }),
     error: Schema.Union([NotFound, StaleWrite, StorageError])
   }),
   /** Changes a finished user-written version in place; the trigger keeps the earlier text. */

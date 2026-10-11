@@ -28,8 +28,6 @@ interface Running {
 export class Generations extends Context.Service<
   Generations,
   {
-    /** The generator, if this server has one. */
-    readonly generator: Option.Option<GeneratorShape>
     /** Starts generating into a version that was just created with status `generating`. */
     readonly start: (request: GenerationRequest) => Effect.Effect<void>
     /** Stops one generation and returns its version as saved; NotFound unless it's running and the user's. */
@@ -113,10 +111,9 @@ export class Generations extends Context.Service<
         )
 
       return Generations.of({
-        generator,
         start: (request) =>
           Effect.gen(function* () {
-            if (Option.isNone(generator)) return
+            if (Option.isNone(generator)) return yield* Effect.die(new Error("no generator: refuse before writing"))
             const entry: Running = {
               request,
               text: "",

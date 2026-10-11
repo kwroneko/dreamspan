@@ -974,8 +974,8 @@ The chat RPCs, live updates and generation. Contract in `@rp/shared/chatApi.ts` 
 
 **Windows of a path** (`ReadPath`, `db/reads.ts`). The client never loads a whole chat: it reads windows of up to 500 slots and pages from cursors.
 - `Bottom` and `Older` walk up from a slot, as `GetPath` does (§3.8): the cost is the window.
-- `Newer` walks down from a slot the client already has, towards the leaf. A run of only children needs no check; at a branch, the child towards the leaf is found by walking up from the leaf, which costs its distance from the leaf. A slot that turns out not to be on the path ends the walk there.
-- `Around` opens at a slot (deep links, DESIGN §10.1), about half the window above it. It checks that the slot is on the path, a walk from the leaf to it, once per open. A slot on another path opens the path through it instead, following the newest reply at each step, and `leafSlotId` says which.
+- `Newer` walks down from a slot the client already has, towards the leaf. A run of only children needs no check; at a branch, the child towards the leaf is found by walking up from the leaf, which costs its distance from the leaf. The slot isn't checked against the path (that would cost its distance from the leaf on every page): a slot of the chat that isn't on it walks down its own branch.
+- `Around` opens at a slot (deep links, DESIGN §10.1), about half the window above it. It checks that the slot is on the path, a walk from the leaf to it, once per open. A slot on another path opens the path through it instead, following the newest reply at each step (through a message deleted on its own, never into a deleted branch), and `leafSlotId` says which.
 - Deleted messages are walked through but not returned; the cursors (`older`, `newer`) still move on.
 
 **Live updates** (`chat/ChatHub.ts`). Every committed change is published to the chat's subscribers, from any tab of the user:

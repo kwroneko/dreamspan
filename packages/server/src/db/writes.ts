@@ -67,7 +67,7 @@ export const makeWriteHandlers = (bin: Bin) =>
 
     /** A version of the user's, with its amend count; `live` also refuses one in the bin. */
     const ownedVersion = (userId: UserId, versionId: VersionId, live: boolean) =>
-      sql<VersionRow>`
+      sql<VersionRow & { purged_at: number | null }>`
       SELECT v.*, ${sql.literal(amendCount("v"))} FROM versions v JOIN slots s ON s.id = v.slot_id
         JOIN chats c ON c.id = s.chat_id
       WHERE v.id = ${versionId} AND c.owner_user_id = ${userId}
@@ -337,13 +337,13 @@ export const makeWriteHandlers = (bin: Bin) =>
           }>`SELECT coalesce(max(ordinal), -1) + 1 AS n FROM versions WHERE slot_id = ${slotId}`
           const row = yield* insertVersion(slotId, next!.n, version, Date.now())
           yield* sql`UPDATE slots SET selected_version_id = ${row.id}, row_version = row_version + 1 WHERE id = ${slotId}`
-          return toVersion(row)
+          return { chatId: slot.chat_id as ChatId, version: toVersion(row) }
         }).pipe(transaction("AddSelectedVersion")),
 
       AmendVersion: ({ userId, versionId, content, expectedRowVersion }) =>
         Effect.gen(function* () {
           const row = yield* ownedVersion(userId, versionId, true)
-          if (row.writer !== "human" || row.status === "generating") return yield* new NotAmendable({ versionId })
+          if (row.writer !== "human") return yield* new NotAmendable({ versionId })
           const rowVersion = 1 + (row.amend_count ?? 0)
           if (rowVersion !== expectedRowVersion) {
             return yield* new StaleWrite({
@@ -362,7 +362,8 @@ export const makeWriteHandlers = (bin: Bin) =>
       SaveGeneration: ({ userId, versionId, content, status, error }) =>
         Effect.gen(function* () {
           const row = yield* ownedVersion(userId, versionId, false)
-          if (row.writer !== "model" || row.status !== "generating") {
+          // A version deleted for good stays empty, whatever was still generating into it.
+          if (row.writer !== "model" || row.status !== "generating" || row.purged_at !== null) {
             return yield* new NotFound({ entity: "generating version", id: versionId })
           }
           yield* sql`UPDATE versions SET content = ${content}, status = ${status},

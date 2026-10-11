@@ -89,13 +89,18 @@ export const makeReadHandlers = Effect.gen(function* () {
       Effect.map((rows) => new Map(rows.map((row) => [row.depth, row.id])))
     )
 
-  /** The tip below a slot, following its newest live reply at every step. */
+  /**
+   * The tip below a slot, following its newest reply at every step: a live one, or one
+   * deleted on its own, whose replies stay in place. A deleted branch is never followed.
+   */
   const latestDescendant = (slotId: SlotId) =>
     sql<{ id: SlotId }>`
       WITH RECURSIVE down(id, n) AS (
         SELECT ${slotId}, 0
         UNION ALL
-        SELECT (SELECT c.id FROM slots c WHERE c.parent_slot_id = d.id AND c.deleted_at IS NULL ORDER BY c.id DESC LIMIT 1),
+        SELECT (SELECT c.id FROM slots c WHERE c.parent_slot_id = d.id
+            AND (c.deleted_at IS NULL OR EXISTS (SELECT 1 FROM bin_items b WHERE b.id = c.bin_item_id AND b.kind = 'message'))
+            ORDER BY c.id DESC LIMIT 1),
           d.n + 1
         FROM down d WHERE d.id IS NOT NULL
       )
@@ -106,8 +111,9 @@ export const makeReadHandlers = Effect.gen(function* () {
    * slot reached (null for none). `after` comes from a window the client read, so it's on
    * the path: a run of only children needs no check, and at a branch the child towards
    * the leaf is found by walking up from it. The cost is the window's length plus, at
-   * each branch, its distance from the leaf. If `after` isn't on the path, the walk stops
-   * where it leaves it.
+   * each branch, its distance from the leaf. Checking `after` itself would cost its
+   * distance from the leaf on every page, so it isn't: a slot of this chat that isn't on
+   * the path walks down its own branch instead, which shows the caller only its own chat.
    */
   const walkTowards = (leaf: SlotPosition, after: SlotPosition, limit: number) =>
     Effect.gen(function* () {

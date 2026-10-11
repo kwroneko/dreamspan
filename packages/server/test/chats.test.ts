@@ -188,6 +188,79 @@ describe("chats", () => {
     }).pipe(Effect.scoped, withGenerator(config, Generator.none))
   })
 
+  it.live("the path through a slot on another branch goes through a message deleted on its own", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client(config)
+      const { chat, slots } = yield* linearChat(api, 2)
+      let parent = slots[0]!
+      const side: Array<SlotId> = []
+      for (const content of ["b1", "b2", "b3"]) {
+        const sent = yield* api.SendMessage({ chatId: chat.id, parentSlotId: parent, branch: true, content })
+        parent = sent.entry.slotId
+        side.push(parent)
+      }
+      yield* api.SendMessage({ chatId: chat.id, parentSlotId: slots[1]!, branch: true, content: "m2" })
+      yield* api.DeleteMessage({ slotId: side[1]! })
+      const window = yield* read(api, chat.id, { _tag: "Around", slot: side[0]! }, 10)
+      assert.strictEqual(window.leafSlotId, side[2])
+      assert.deepStrictEqual(contents(window.entries), ["m0", "b1", "b3"])
+    }).pipe(Effect.scoped, withGenerator(config, Generator.none))
+  })
+
+  it.live("a caller going away can't leave a version generating with nothing behind it", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client(config)
+      const { chat, slots } = yield* linearChat(api, 1)
+      const { entry } = yield* api.Generate({ chatId: chat.id, parentSlotId: slots[0]!, branch: false })
+      for (let i = 0; i < 24; i++) {
+        const [current] = (yield* read(api, chat.id, { _tag: "Bottom" }, 1)).entries
+        yield* api
+          .Regenerate({ slotId: entry.slotId, expectedRowVersion: current!.rowVersion })
+          .pipe(Effect.timeoutOption(i % 6))
+      }
+      const versions = yield* Effect.gen(function* () {
+        const deadline = Date.now() + 10_000
+        while (Date.now() < deadline) {
+          const list = yield* api.ListVersions({ slotId: entry.slotId })
+          if (list.every((v) => v.status !== "generating")) return list
+          yield* Effect.sleep(100)
+        }
+        return yield* api.ListVersions({ slotId: entry.slotId })
+      })
+      assert.deepStrictEqual(
+        versions.filter((v) => v.status === "generating").map((v) => v.id),
+        []
+      )
+    }).pipe(Effect.scoped, withGenerator(config, fast))
+  })
+
+  it.live("a delete whose caller goes away still stops what it deleted", () => {
+    const config = testConfig()
+    const slow = FakeGenerator.layer({ tokensPerSecond: 100, tokens: 5000 })
+    return Effect.gen(function* () {
+      const api = yield* client(config)
+      const { chat, slots } = yield* linearChat(api, 1)
+      const events = yield* subscribe(api, chat.id)
+      const { entry } = yield* api.Generate({ chatId: chat.id, parentSlotId: slots[0]!, branch: false })
+      let deleted = 0
+      for (let wait = 0; wait < 8; wait++) {
+        const [current] = (yield* read(api, chat.id, { _tag: "Bottom" }, 1)).entries
+        const swipe = yield* api.Regenerate({ slotId: entry.slotId, expectedRowVersion: current!.rowVersion })
+        yield* api.DeleteVersion({ versionId: swipe.version.id }).pipe(Effect.timeoutOption(wait))
+        yield* Effect.sleep(200)
+        const live = (yield* api.ListVersions({ slotId: entry.slotId })).map((v) => v.id)
+        if (live.includes(swipe.version.id)) continue
+        // Deleted, whether or not the caller waited for the reply: so it's stopped.
+        deleted++
+        yield* eventually(() => finished(events, swipe.version.id) !== undefined)
+        assert.strictEqual(finished(events, swipe.version.id)!.status, "stopped")
+      }
+      assert.isAbove(deleted, 0)
+    }).pipe(Effect.scoped, withGenerator(config, slow))
+  })
+
   it.live("versions: swipes, edits and amends check the row version", () => {
     const config = testConfig()
     return Effect.gen(function* () {
@@ -369,14 +442,28 @@ describe("chats", () => {
         const api = yield* client(config)
         const chats = yield* Effect.forEach([0, 1, 2], () => linearChat(api, 1))
         const events = yield* Effect.forEach(chats, ({ chat }) => subscribe(api, chat.id))
+        // The server runs in this process: a 10 ms timer here sees every stall of its loop
+        // while the streams run, without the startup the Health window would include.
+        const delays: Array<number> = []
+        let last = performance.now()
+        const timer = setInterval(() => {
+          const now = performance.now()
+          delays.push(now - last - 10)
+          last = now
+        }, 10)
         for (const { chat, slots } of chats) {
           const { entry } = yield* api.Generate({ chatId: chat.id, parentSlotId: slots[0]!, branch: false })
           yield* api.Regenerate({ slotId: entry.slotId, expectedRowVersion: entry.rowVersion })
         }
         yield* eventually(() => events.every((list) => list.filter((e) => e._tag === "Version").length === 2), 20_000)
-        const health = yield* api.Health()
-        // A tick is 10 ms; the budget leaves room for this shared host's load.
-        assert.isBelow(health.eventLoopMaxMs, 100, `event loop max ${health.eventLoopMaxMs} ms`)
+        clearInterval(timer)
+        delays.sort((a, b) => a - b)
+        const p99 = delays[Math.floor(delays.length * 0.99)]!
+        const max = delays.at(-1)!
+        // Measured at load 80 on the 48-core host: p99 45 to 53 ms, idle 8 ms. This process
+        // also runs the clients, which decode every batch the browser would.
+        assert.isBelow(p99, 80, `event loop delay p99 ${p99.toFixed(1)} ms`)
+        assert.isBelow(max, 250, `event loop delay max ${max.toFixed(1)} ms`)
       }).pipe(Effect.scoped, withGenerator(config, harness))
     },
     60_000
