@@ -1,7 +1,8 @@
 // Route selection for outgoing requests (spec/PROVIDERS.md §6.2): through the instance
 // proxy, through a connection's own proxy, or direct. Pure, so every rule is testable
 // without a network.
-import { BlockList, isIP, isIPv4 } from "node:net"
+import { BlockList, isIP } from "node:net"
+import { addAddressRange, inAddresses } from "./addresses.ts"
 
 /**
  * Local ranges go direct by default, so local model servers aren't sent through the
@@ -40,18 +41,10 @@ export const parseBypass = (entries: ReadonlyArray<string>) => {
   for (const raw of entries) {
     const entry = raw.trim().toLowerCase()
     if (entry === "") continue
-    const [address, prefix] = entry.split("/")
-    const family = isIP(address!)
-    if (family !== 0) {
-      const type = family === 4 ? "ipv4" : "ipv6"
-      const bits = prefix === undefined ? (family === 4 ? 32 : 128) : Number(prefix)
-      if (!Number.isInteger(bits) || bits < 0 || bits > (family === 4 ? 32 : 128)) {
-        invalid.push(raw)
-        continue
-      }
-      addresses.addSubnet(address!, bits, type)
+    const address = addAddressRange(addresses, entry)
+    if (address === "added") {
       hasAddresses = true
-    } else if (prefix !== undefined || !/^(\*\.|\.)?[a-z0-9-]+(\.[a-z0-9-]+)*\.?$/.test(entry)) {
+    } else if (address === "invalid" || !/^(\*\.|\.)?[a-z0-9-]+(\.[a-z0-9-]+)*\.?$/.test(entry)) {
       invalid.push(raw)
     } else if (entry.startsWith("*.") || entry.startsWith(".")) {
       suffixes.push(entry.slice(entry.indexOf(".")))
@@ -69,19 +62,12 @@ export const bareHost = (hostname: string) =>
     .replace(/^\[(.*)\]$/, "$1")
     .replace(/\.$/, "")
 
-const addressMatches = (list: BypassList, ip: string) => {
-  // An IPv4 address written as IPv6 (::ffff:10.0.0.1) is the IPv4 address.
-  const mapped = ip.toLowerCase().startsWith("::ffff:") ? ip.slice(7) : ip
-  if (isIPv4(mapped)) return list.addresses.check(mapped, "ipv4")
-  return isIP(ip) === 6 && list.addresses.check(ip, "ipv6")
-}
-
 /** Whether `host` is on the list by name or by address; `resolved` are its DNS answers. */
 export const bypasses = (list: BypassList, host: string, resolved: ReadonlyArray<string> = []) => {
   const name = bareHost(host)
-  if (isIP(name) !== 0) return addressMatches(list, name)
+  if (isIP(name) !== 0) return inAddresses(list.addresses, name)
   if (list.hosts.has(name) || list.suffixes.some((suffix) => name.endsWith(suffix))) return true
-  return resolved.some((ip) => addressMatches(list, ip))
+  return resolved.some((ip) => inAddresses(list.addresses, ip))
 }
 
 export type ProxyOverride =

@@ -1,5 +1,5 @@
 import { fileURLToPath } from "node:url"
-import { Config, Context, Layer } from "effect"
+import { Config, Context, Layer, Schema } from "effect"
 
 const defaultClientDist = fileURLToPath(new URL("../../client/dist", import.meta.url))
 
@@ -20,6 +20,18 @@ const AppConfigFromEnv = Config.all({
    */
   authMode: Config.Literals(["single", "proxy"], "AUTH_MODE").pipe(Config.withDefault("single" as const)),
   authProxyHeader: Config.String("AUTH_PROXY_HEADER").pipe(Config.withDefault("remote-user")),
+  /**
+   * Exposure safety (net/exposure.ts). Security settings, so configurable only here.
+   * ALLOWED_IPS: addresses besides loopback that may connect in single mode.
+   * TRUSTED_PROXIES: the only addresses that may connect in proxy mode (loopback when unset).
+   * ALLOW_INSECURE_EXPOSURE: serve every address, without protection.
+   * PUBLIC_ORIGINS: the origins the app is served at besides localhost and IP addresses,
+   * e.g. https://rp.example.com behind a reverse proxy.
+   */
+  allowedIps: Config.Array(Schema.String, "ALLOWED_IPS").pipe(Config.withDefault<ReadonlyArray<string>>([])),
+  trustedProxies: Config.Array(Schema.String, "TRUSTED_PROXIES").pipe(Config.withDefault<ReadonlyArray<string>>([])),
+  allowInsecureExposure: Config.Boolean("ALLOW_INSECURE_EXPOSURE").pipe(Config.withDefault(false)),
+  publicOrigins: Config.Array(Schema.String, "PUBLIC_ORIGINS").pipe(Config.withDefault<ReadonlyArray<string>>([])),
   clientDist: Config.String("CLIENT_DIST").pipe(Config.withDefault(defaultClientDist)),
   /**
    * The server secret that encrypts connection secrets (secrets.ts). Optional: without

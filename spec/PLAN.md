@@ -15,7 +15,7 @@ Session notes are not kept in the repository.
 - Server skeleton: typed operations (every UI action is an operation), WebSocket subscriptions, per-entity optimistic concurrency, single-writer SQLite queue (as in reference-harness).
 - Users and auth: separate users with per-user ownership in every query; a trusted reverse-proxy header (Authelia `Remote-User`) mapped to a user, plus built-in login.
 - ~~Provider layer~~: built (ARCHITECTURE.md §6, [PROVIDERS.md](PROVIDERS.md)). Still to do there: the settings UI, user cost formulas, explicit breakpoints for the non-Anthropic APIs, and ledger rollups (with generation, phase 2).
-- Exposure safety (DESIGN §11 [D]): the server refuses to listen beyond localhost without protection. The rules are open; the Docker image currently pairs `HOST=0.0.0.0` with `AUTH_MODE=single`.
+- ~~Exposure safety~~ (DESIGN §11): built, except the password branch, which comes with built-in login.
 
 ## Phase 1: Import and compatibility core
 - Card parsing and export: V1, V2 and V3 as JSON, PNG and CHARX (reference-harness already uses `character-card-utils` and the PNG chunk libraries).

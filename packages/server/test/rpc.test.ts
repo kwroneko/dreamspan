@@ -1,29 +1,10 @@
-import { mkdtempSync } from "node:fs"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
 import { assert, describe, it } from "@effect/vitest"
 import { AppApi } from "@rp/shared/api.ts"
-import { Effect, Layer, Option } from "effect"
+import { Effect, Layer } from "effect"
 import { RpcClient, RpcSerialization } from "effect/rpc"
 import { Socket } from "effect/socket"
-import { AppConfig, type AppConfigShape } from "../src/config.ts"
-import { ServerLive } from "../src/server.ts"
-
-const testConfig = (overrides: Partial<AppConfigShape> = {}): AppConfigShape => ({
-  host: "127.0.0.1",
-  port: 40_000 + Math.floor(Math.random() * 20_000),
-  dataDir: mkdtempSync(join(tmpdir(), "rp-rpc-")),
-  dbReaders: 1,
-  dbAllowNetworkFs: false,
-  dbWorkers: "source",
-  authMode: "single",
-  authProxyHeader: "remote-user",
-  clientDist: join(tmpdir(), "rp-no-client"),
-  secretKey: Option.none(),
-  secretKeyFile: Option.none(),
-  keyHostBinding: true,
-  ...overrides
-})
+import type { AppConfigShape } from "../src/config.ts"
+import { testConfig, withServer } from "./support/config.ts"
 
 /**
  * An RPC client over a real WebSocket, living as long as the enclosing scope.
@@ -44,9 +25,6 @@ const client = (config: AppConfigShape, headers: Record<string, string> = {}) =>
     )
     return yield* RpcClient.make(AppApi).pipe(Effect.provide(protocol))
   })
-
-const withServer = (config: AppConfigShape) =>
-  Effect.provide(ServerLive.pipe(Layer.provide(Layer.succeed(AppConfig)(config))))
 
 describe("rpc", () => {
   it.live("single-user mode: every connection is the local admin", () => {

@@ -53,6 +53,10 @@ Bun was measured as an alternative (2026-10-10) and not adopted. On this server 
 | `DB_WORKERS` | `bundle` in production, else `source` | Worker entry points (§3.6) |
 | `AUTH_MODE` | `single` | `single` or `proxy` (§4) |
 | `AUTH_PROXY_HEADER` | `remote-user` | Identity header in proxy mode |
+| `ALLOWED_IPS` | unset | IPs and CIDR ranges besides loopback that may connect in single mode (§4) |
+| `TRUSTED_PROXIES` | unset (loopback) | The only addresses that may connect in proxy mode (§4) |
+| `ALLOW_INSECURE_EXPOSURE` | `false` | Serve every address without protection (§4) |
+| `PUBLIC_ORIGINS` | unset | Origins the app is served at by name, e.g. `https://rp.example.com` (§4) |
 | `CLIENT_DIST` | `packages/client/dist` | Static files to serve |
 | `SECRET_KEY`, `SECRET_KEY_FILE` | unset | The server secret (below). Generated into `DATA_DIR/secret.key` when neither is set |
 | `KEY_HOST_BINDING` | `true` | Keys go only to the hosts their credential was entered for (§3.12). A security setting, so it's set only here, never from inside the app |
@@ -424,7 +428,22 @@ The provider layer's storage (spec/PROVIDERS.md §2, §3.1, §9.1), in migration
 `auth.ts` implements the `Authentication` RPC middleware declared in `@rp/shared/api.ts`. It provides `CurrentUser` to every handler. Over the WebSocket, the headers are those of the upgrade request, so the identity applies to the whole connection.
 - **`AUTH_MODE=single`:** every connection is the implicit local user `local`. This is for running on your own machine.
 - **`AUTH_MODE=proxy`:** the user is whoever the reverse proxy names in `AUTH_PROXY_HEADER` (Authelia's `Remote-User`). A missing header is `Unauthorized`.
-  - **This mode trusts the header unconditionally**, so the server must be reachable only through the proxy. That's the reason for the default bind to `127.0.0.1`; in Docker, keep the port on an internal network.
+  - The header is trusted because only the proxy can connect (exposure, below).
+
+**Exposure** (`net/exposure.ts`, DESIGN §11). Who may connect at all, decided per connection from the socket's source address, never from a forwarded header. Configuration is environment-only, as for every security setting.
+- **Single mode:** loopback, plus `ALLOWED_IPS`.
+- **Proxy mode:** `TRUSTED_PROXIES` only, or loopback when it's unset. Anyone else who could connect could send the identity header and be any user. `ALLOWED_IPS` is a startup error here.
+- **Refused peers** get a bare `403` written to the socket on connect, which is then destroyed before it's read. Ending it isn't enough: the HTTP parser is already attached, and on a half-open socket it would still dispatch the peer's requests (`exposure.test.ts` checks that no handler runs).
+- **At startup,** listening beyond loopback (`HOST` other than `localhost`, `127.0.0.0/8` or `::1`) with nothing beyond loopback allowed is an `UnsafeExposure` error naming the fix. So are entries that aren't IPs or CIDR ranges (a prefix must be 0–3 digits: `Number("")` is `0`, so `10.0.0.0/` would otherwise allow everyone).
+- **`ALLOW_INSECURE_EXPOSURE=true`** serves every address. Combined with `ALLOWED_IPS` or `TRUSTED_PROXIES`, which it would silently undo, it's a startup error.
+- **Not built yet:** the password branch, with built-in login.
+
+**Cross-site requests** (`crossSiteProblem`, a global router middleware). A page from any site can open a WebSocket to the user's loopback, and a page whose domain is re-resolved to `127.0.0.1` (DNS rebinding) is same-origin with itself. So every request gets a `403` unless:
+- **`Origin`**, when present, is in `PUBLIC_ORIGINS`, or names the `Host` the request was sent to. That second route doesn't apply to a public host, so `http://` can't stand in for a public `https://`. Clients that send no `Origin` aren't browsers, so they have no session to borrow.
+- **`Host`** is `localhost`, an IP literal (rebinding needs a name), or a public origin's host.
+- **Proxy mode with `TRUSTED_PROXIES` set skips the `Host` check.** Only the named proxies can connect, so no rebound page reaches the server. And proxies often forward their own upstream name (nginx's default `Host` is `$proxy_host`). With `TRUSTED_PROXIES` unset, loopback is trusted, so the check stays. A page rebound to loopback is same-origin and could `fetch()` with its own identity header. A same-host proxy forwards `127.0.0.1` or `localhost`, which pass. Behind a proxy under a domain, set `PUBLIC_ORIGINS` to its public origin. Without it the server warns at startup: browsers are refused unless the proxy forwards the `Host` they used.
+- **`PUBLIC_ORIGINS` entries** must be exact origins (scheme, host, optional port; a trailing slash is allowed). A path, credentials or a wildcard is a startup error, not something silently dropped.
+- Vite's dev proxy keeps `Host` as `localhost:5173`, which matches the page's origin.
 
 Users are created on first sight (`EnsureUser`). The first user of an instance becomes `admin`. Resolved users are cached per process, so authentication doesn't hit the writer on every connection.
 
@@ -558,4 +577,9 @@ It fails with a typed `ProviderError`.
 `Dockerfile`: a multi-stage build on `node:24-slim`.
 - The client and the database workers are built in one stage. The final image holds production dependencies, the server and shared sources, the client build and the worker bundles.
 - It runs as the `node` user with `DATA_DIR=/data` as a volume, `HOST=0.0.0.0`, and a health check on `/healthz`.
+- **It doesn't start without exposure settings** (§4), since `HOST=0.0.0.0` is beyond loopback. Connections from the host arrive from the bridge gateway (e.g. `172.17.0.1`).
+  - Behind a reverse proxy: `AUTH_MODE=proxy`, `TRUSTED_PROXIES` set to the proxy container's address, and `PUBLIC_ORIGINS` set to the public URL.
+  - Single user: publish on loopback only (`-p 127.0.0.1:8080:8080`) and set `ALLOWED_IPS` to the gateway.
+  - Publishing beyond loopback (`-p 8080:8080`) makes the gateway allowlist unsafe: where Docker doesn't pass the client's address through (rootless Docker's default port driver, `docker-proxy` for IPv6 clients), outside clients also appear to come from it.
+  - **The health check** fetches `127.0.0.1` inside the container. In proxy mode with `TRUSTED_PROXIES` set, add `127.0.0.1` to the list, or the container reports unhealthy. Inside a container, loopback is only the container's own processes, which can read `/data` and the server secret anyway.
 - The image is about 325 MB on disk, unoptimized so far: it installs every workspace's production dependencies. Memory at idle is about 188 MB.

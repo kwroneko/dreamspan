@@ -191,7 +191,7 @@ Steps:
 ### 6.1 The priorities (owner [D])
 
 1. **Users are never assumed trusted.** Above everything in this section, one user must never be able to see another user's chats, cards, connections or keys. That has to be certain (DESIGN §11).
-2. **The instance must be hard to expose by accident.** Without a password, an IP allowlist or an auth proxy, the server must not listen on anything but localhost. ST is careful here, and so are we. The exact rules are **[O]**: ST's may be stricter than needed, but accidental exposure must stay hard.
+2. **The instance must be hard to expose by accident.** Without a password, an IP allowlist or an auth proxy, the server must not listen on anything but localhost. ST is careful here, and so are we. The exact rules are decided in DESIGN §11.
 3. **Local addresses are legitimate.** Local models on `127.0.0.1` or the LAN are normal, so connections to private addresses are **not blocked by default**. With several users that's a footgun, but not one that justifies breaking the normal case. An operator who wants isolation does it at the routing level: the container's outgoing traffic goes through a VPN or firewall, with exceptions for the local servers it needs.
 
 ### 6.2 Outbound proxy
@@ -405,5 +405,5 @@ Not built until needed:
 
 ## 14. Open questions
 
-1. **Exposure rules (§6.1):** what counts as protected enough to listen beyond localhost (a password, an IP allowlist, a trusted proxy header from an allowed address), and what the override looks like. **Known gap now:** the Docker image sets `HOST=0.0.0.0` while `AUTH_MODE` defaults to `single`, which is exactly the accidental exposure to rule out. Container networking hides it only as long as the port isn't published.
+1. ~~**Exposure rules (§6.1)**~~: decided (owner, 2026-10-11; DESIGN §11) and built (ARCHITECTURE.md §4).
 2. **Forcing the proxy (§6.3):** whether an admin can stop non-admins from setting a connection to `direct`. Deferred to shared connections.

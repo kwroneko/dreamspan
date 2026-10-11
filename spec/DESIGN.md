@@ -465,7 +465,13 @@ These are strategies for mapping history to user and assistant roles:
 - **[D]** Avoiding RCEs is the top priority.
 - **[D]** Running a plugin is the user's conscious choice, and a plugin written by the user's own agent is the user's plugin. Our responsibility is that content (cards, presets, lorebooks, chats, model output) never becomes code. The three lines of attack to weigh: credentials, the user's system, and exfiltrated chats (owner, 2026-10-11; [PLUGINS.md](PLUGINS.md)).
 - **[D]** Users are never assumed trusted. One user must never be able to see another user's chats, cards, connections or keys, and that has to be certain (owner, 2026-10-10).
-- **[D]** It must be hard to expose an instance by accident. Without a password, an IP allowlist or an auth proxy, the server doesn't listen beyond localhost. **[O]** The exact rules: ST's may be stricter than needed (owner, 2026-10-10).
+- **[D]** It must be hard to expose an instance by accident. Without a password, an IP allowlist or an auth proxy, the server doesn't listen beyond localhost (owner, 2026-10-10).
+- **[D]** The exposure rules (owner, 2026-10-11; built, ARCHITECTURE.md §4):
+  - Listening on loopback is always allowed.
+  - Beyond loopback, the server starts only with protection: an IP allowlist; proxy mode with named trusted proxies, the only addresses that may then connect, so nobody else can send the identity header; or, once built-in login exists, a password on every user. An allowlist alone is enough, without a password.
+  - Peers are checked by each connection's source address, never by a forwarded header, so the check holds in Docker, where the host's requests come from the bridge gateway.
+  - The override, `ALLOW_INSECURE_EXPOSURE`, is set only outside the app, like every security setting.
+- **[P]** Cross-site requests (built, ARCHITECTURE.md §4; found 2026-10-11): browsers let any page open a WebSocket to the user's own loopback, so before this, any site the owner visited could call every RPC of a local instance. Requests are refused when `Origin` names another site, or when `Host` is a name that isn't the instance's (DNS rebinding). Proxy mode with named trusted proxies skips the `Host` check, since only the proxies can connect. Instances served under a domain name list it in `PUBLIC_ORIGINS`.
 - **[P]** Rules:
   - imported cards, presets and lorebooks never execute code, and their fields never grant capabilities (a file can't enable tools or plugins by itself)
   - model and card HTML renders only in a sandbox
