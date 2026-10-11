@@ -106,9 +106,6 @@ export const PostProcessing = Schema.Literals([
 ])
 export type PostProcessing = typeof PostProcessing.Type
 
-/** ST's regex placements; 0 (Markdown display) is deprecated upstream. */
-export const RegexPlacement = { USER_INPUT: 1, AI_OUTPUT: 2, SLASH_COMMAND: 3, WORLD_INFO: 5, REASONING: 6 } as const
-
 /**
  * A regex script from the preset. Stored as data and never compiled at import; compiling
  * one needs a ReDoS guard. `prompt_only` scripts rewrite text only in the assembled prompt;
@@ -121,6 +118,7 @@ export const RegexScript = Schema.Struct({
   find_regex: Schema.String,
   replace_string: Schema.String,
   trim_strings: Schema.Array(Schema.String),
+  /** ST's numbers: 1 user input, 2 AI output, 3 slash commands, 5 world info, 6 reasoning. */
   placement: Schema.Array(Schema.Int),
   disabled: Schema.Boolean,
   markdown_only: Schema.Boolean,

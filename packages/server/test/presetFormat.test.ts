@@ -2,7 +2,14 @@ import { PresetDoc } from "@rp/shared/docs/preset.ts"
 import { Schema } from "effect"
 import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
-import { exportStPreset, importStPreset, type PresetImport } from "../src/formats/preset.ts"
+import {
+  exportStPreset,
+  importStPreset,
+  MAX_ISSUES,
+  MAX_JSON_DEPTH,
+  MAX_PRESET_BYTES,
+  type PresetImport
+} from "../src/formats/preset.ts"
 
 const fixture = (name: string) => readFileSync(new URL(`fixtures/presets/${name}.json`, import.meta.url), "utf8")
 
@@ -397,5 +404,96 @@ describe("exporting to an ST chat-completion preset", () => {
       names_behavior: -1,
       custom_prompt_post_processing: ""
     })
+  })
+})
+
+describe("hardening: the file is untrusted", () => {
+  const valid = JSON.stringify(preset({ temperature: 0.5 }))
+
+  it("refuses a file over the size cap before parsing it", () => {
+    expect(importStPreset(valid.padEnd(MAX_PRESET_BYTES, " ")).document).not.toBeNull()
+    for (const input of [valid.padEnd(MAX_PRESET_BYTES + 1, " "), new Uint8Array(MAX_PRESET_BYTES + 1).fill(32)]) {
+      const result = importStPreset(input)
+      expect(result.document).toBeNull()
+      expect(codes(result)).toEqual(["preset.too_large"])
+    }
+    // Measured in bytes, not characters.
+    const wide = valid.slice(0, -1) + `,"x":"${"é".repeat(MAX_PRESET_BYTES / 2)}"}`
+    expect(codes(importStPreset(wide))).toEqual(["preset.too_large"])
+  })
+
+  it("refuses nesting deeper than the bound, counting only brackets outside strings", () => {
+    const nested = (depth: number) =>
+      JSON.stringify(preset({ extensions: { x: "PLACEHOLDER" } })).replace(
+        '"PLACEHOLDER"',
+        "[".repeat(depth) + "]".repeat(depth)
+      )
+    // The root and `extensions` are two levels.
+    expect(importStPreset(nested(MAX_JSON_DEPTH - 2)).document).not.toBeNull()
+    const result = importStPreset(nested(MAX_JSON_DEPTH - 1))
+    expect(result.document).toBeNull()
+    expect(codes(result)).toEqual(["preset.too_deep"])
+    const brackets = JSON.stringify(preset({ prompts: [{ identifier: "a", content: '\\"' + "[{".repeat(500) }] }))
+    expect(importStPreset(brackets).document).not.toBeNull()
+  })
+
+  it("drops __proto__ and constructor keys at any depth, so none reaches an object", () => {
+    const text = `{
+      "prompts": [{ "identifier": "a", "content": "x", "__proto__": { "system_prompt": false }, "constructor": "c" }],
+      "extensions": { "__proto__": { "polluted": true }, "ok": { "constructor": { "prototype": 1 }, "kept": 1 } },
+      "__proto__": { "temperature": 0.1, "polluted": true }
+    }`
+    const result = importStPreset(text)
+    const doc = result.document!
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined()
+    for (const o of [doc.unsupported, doc.extensions, doc.extensions.ok as object])
+      expect(Object.getPrototypeOf(o)).toBe(Object.prototype)
+    expect(doc.extensions).toEqual({ ok: { kept: 1 } })
+    expect(Object.hasOwn(doc.extensions, "__proto__")).toBe(false)
+    expect(doc.unsupported).toEqual({})
+    expect("polluted" in doc.unsupported).toBe(false)
+    expect(doc.samplers.temperature).toBe(1)
+    expect(prompt(doc, "a")).not.toHaveProperty("unsupported")
+    expect(result.report.issues.filter((i) => i.code === "preset.forbidden_key").map((i) => i.path)).toEqual([
+      ["prompts", 0, "__proto__"],
+      ["prompts", 0, "constructor"],
+      ["extensions", "__proto__"],
+      ["extensions", "ok", "constructor"],
+      ["__proto__"]
+    ])
+  })
+
+  it("stores regex scripts without compiling them", () => {
+    const patterns = ["(", "/(a+)+$/", "/[/g", "/x/zz"]
+    const scripts = patterns.map((findRegex, i) => ({ id: `r${i}`, findRegex }))
+    const doc = load(preset({ extensions: { regex_scripts: scripts } })).doc
+    expect(doc.regex.map((s) => s.find_regex)).toEqual(patterns)
+  })
+
+  it("doesn't throw on values that can't be converted to text or numbers", () => {
+    const hostile = { toString: 1, valueOf: 1 }
+    const result = load({
+      prompts: [{ identifier: "a", injection_order: hostile }],
+      prompt_order: [
+        { character_id: hostile, order: [] },
+        { character_id: 100001, order: [] }
+      ],
+      extensions: { regex_scripts: [{ id: "r", substituteRegex: hostile, minDepth: hostile, maxDepth: hostile }] }
+    })
+    expect(result.doc.regex[0]).toMatchObject({ substitute_regex: "none", min_depth: null, max_depth: null })
+  })
+
+  it("renames many repeated regex ids in linear time", { timeout: 5_000 }, () => {
+    const count = 30_000
+    const scripts = Array.from({ length: count }, () => ({ id: "r", findRegex: "x" }))
+    const ids = new Set(load(preset({ extensions: { regex_scripts: scripts } })).doc.regex.map((s) => s.id))
+    expect(ids.size).toBe(count)
+  })
+
+  it("lists at most a bounded number of issues", () => {
+    const many = Object.fromEntries(Array.from({ length: MAX_ISSUES * 2 }, (_, i) => [`unknown_${i}`, i]))
+    const result = load(preset(many))
+    expect(result.report.issues).toHaveLength(MAX_ISSUES + 1)
+    expect(result.report.issues.at(-1)?.code).toBe("preset.more_issues")
   })
 })

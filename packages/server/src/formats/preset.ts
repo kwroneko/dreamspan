@@ -16,7 +16,7 @@ import {
 } from "@rp/shared/docs/preset.ts"
 import { ImportIssue, type ImportIssueLevel, ImportReport } from "@rp/shared/importReport.ts"
 
-export const ST_PRESET_FORMAT = "st-chat-completion-preset"
+const ST_PRESET_FORMAT = "st-chat-completion-preset"
 
 export interface PresetImport {
   /** Null when the file isn't a chat-completion preset or can't be read. */
@@ -233,14 +233,70 @@ const CHAT_COMPLETION_FIELDS = [
 
 const isObject = (v: unknown): v is Json => typeof v === "object" && v !== null && !Array.isArray(v)
 
+/**
+ * The value if it's a primitive, else the fallback. Converting an object with `String()` or
+ * `Number()` throws when its `toString` and `valueOf` keys aren't functions.
+ */
+const primitiveOr = (v: unknown, fallback: unknown): unknown => (typeof v === "object" && v !== null ? fallback : v)
+
+// Limits for an untrusted file. Real presets are well under a megabyte and a few levels deep.
+export const MAX_PRESET_BYTES = 8 * 1024 * 1024
+export const MAX_JSON_DEPTH = 64
+export const MAX_ISSUES = 200
+/** Keys that could reach an object's prototype if a later step assigned them. */
+const FORBIDDEN_KEYS = new Set(["__proto__", "constructor"])
+
 class Reporter {
   readonly issues: Array<ImportIssue> = []
+  private more = 0
   add(level: ImportIssueLevel, code: string, message: string, path?: Path) {
-    this.issues.push(new ImportIssue({ level, code, message, ...(path ? { path } : {}) }))
+    if (this.issues.length >= MAX_ISSUES) this.more++
+    else this.issues.push(new ImportIssue({ level, code, message, ...(path ? { path } : {}) }))
   }
   done(format: string, document: PresetDoc | null): PresetImport {
-    return { document, report: new ImportReport({ format, issues: this.issues }) }
+    const issues =
+      this.more > 0
+        ? [
+            ...this.issues,
+            new ImportIssue({
+              level: "info",
+              code: "preset.more_issues",
+              message: `${this.more} more issues aren't listed.`
+            })
+          ]
+        : this.issues
+    return { document, report: new ImportReport({ format, issues }) }
   }
+}
+
+/** Whether the JSON text nests deeper than `max`, counting brackets outside strings. */
+const nestsDeeperThan = (text: string, max: number) => {
+  let depth = 0
+  let inString = false
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i)
+    if (inString) {
+      if (c === 0x5c) i++
+      else if (c === 0x22) inString = false
+    } else if (c === 0x22) inString = true
+    else if (c === 0x5b || c === 0x7b) {
+      if (++depth > max) return true
+    } else if (c === 0x5d || c === 0x7d) depth--
+  }
+  return false
+}
+
+/** A copy of parsed JSON without forbidden keys. Recursion is bounded by the depth check. */
+const withoutForbiddenKeys = (value: unknown, path: Array<string | number>, r: Reporter): unknown => {
+  if (Array.isArray(value)) return value.map((v, i) => withoutForbiddenKeys(v, [...path, i], r))
+  if (!isObject(value)) return value
+  const out: Json = {}
+  for (const key of Object.keys(value)) {
+    if (FORBIDDEN_KEYS.has(key))
+      r.add("warning", "preset.forbidden_key", `A field named \`${key}\` was dropped.`, [...path, key])
+    else out[key] = withoutForbiddenKeys(value[key], [...path, key], r)
+  }
+  return out
 }
 
 /** The other kinds of ST JSON file, by ST's own tests where it has them (preset-manager.js). */
@@ -257,18 +313,30 @@ const otherKind = (o: Json): readonly [format: string, label: string] | undefine
   return undefined
 }
 
-const decodeText = (input: string | Uint8Array) =>
-  typeof input === "string" ? input.replace(/^\uFEFF/, "") : new TextDecoder().decode(input)
-
+/**
+ * An ST chat-completion preset file to the document. Never throws on a file's content: every
+ * problem goes in the report, and a file that can't be imported has no document.
+ */
 export const importStPreset = (input: string | Uint8Array): PresetImport => {
   const r = new Reporter()
-  let parsed: unknown
+  const bytes = typeof input === "string" ? Buffer.byteLength(input) : input.byteLength
+  if (bytes > MAX_PRESET_BYTES) {
+    r.add("error", "preset.too_large", `The file is over the ${MAX_PRESET_BYTES / 1024 / 1024} MB limit for presets.`)
+    return r.done("unknown", null)
+  }
+  const text = typeof input === "string" ? input.replace(/^\uFEFF/, "") : new TextDecoder().decode(input)
+  if (nestsDeeperThan(text, MAX_JSON_DEPTH)) {
+    r.add("error", "preset.too_deep", `The file nests more than ${MAX_JSON_DEPTH} levels deep.`)
+    return r.done("unknown", null)
+  }
+  let json: unknown
   try {
-    parsed = JSON.parse(decodeText(input))
+    json = JSON.parse(text)
   } catch {
     r.add("error", "preset.invalid_json", "The file isn't valid JSON.")
     return r.done("unknown", null)
   }
+  const parsed = withoutForbiddenKeys(json, [], r)
   if (!isObject(parsed)) {
     r.add("error", "preset.unrecognized", "The file isn't a SillyTavern chat-completion preset.")
     return r.done("unknown", null)
@@ -535,8 +603,10 @@ const readOrder = (
   let basePath: Path = []
   if (raw !== undefined) {
     const lists = Array.isArray(raw) ? raw : []
-    const index = lists.findIndex((l) => isObject(l) && String(l.character_id) === String(GLOBAL_ORDER_ID))
-    const others = lists.filter((l, i) => i !== index && isObject(l)).map((l) => String((l as Json).character_id))
+    // ST compares ids as strings.
+    const id = (l: unknown) => (isObject(l) ? primitiveOr(l.character_id, "?") : undefined)
+    const index = lists.findIndex((l) => String(id(l)) === String(GLOBAL_ORDER_ID))
+    const others = lists.filter((l, i) => i !== index && isObject(l)).map((l) => String(id(l)))
     if (others.length > 0)
       r.add(
         "info",
@@ -592,7 +662,7 @@ const readOrder = (
 
 const regexDepth = (v: unknown, min: number): number | null => {
   if (v === null || v === undefined) return null
-  const n = Number(v)
+  const n = Number(primitiveOr(v, NaN))
   return Number.isNaN(n) || n < min ? null : n
 }
 
@@ -604,6 +674,8 @@ const readRegex = (raw: unknown, r: Reporter): Array<RegexScript> => {
     return []
   }
   const scripts = new Map<string, RegexScript>()
+  // The next suffix to try per repeated id, so many repeats stay linear.
+  const nextSuffix = new Map<string, number>()
   for (const [i, s] of raw.entries()) {
     const path = [...base, i]
     if (!isObject(s)) {
@@ -612,8 +684,9 @@ const readRegex = (raw: unknown, r: Reporter): Array<RegexScript> => {
     }
     let id = typeof s.id === "string" && s.id !== "" ? s.id : `imported-regex-${i}`
     if (scripts.has(id)) {
-      let n = 2
+      let n = nextSuffix.get(id) ?? 2
       while (scripts.has(`${id}-${n}`)) n++
+      nextSuffix.set(id, n + 1)
       r.add("info", "preset.regex_id", `A second regex script \`${id}\` was renamed \`${id}-${n}\`.`, path)
       id = `${id}-${n}`
     }
@@ -638,7 +711,7 @@ const readRegex = (raw: unknown, r: Reporter): Array<RegexScript> => {
       prompt_only: Boolean(s.promptOnly),
       run_on_edit: Boolean(s.runOnEdit),
       // ST runs an unknown mode as `none`.
-      substitute_regex: SUBSTITUTE_REGEX[Number(s.substituteRegex)] ?? "none",
+      substitute_regex: SUBSTITUTE_REGEX[Number(primitiveOr(s.substituteRegex, NaN))] ?? "none",
       // ST applies a minimum from -1 and a maximum from 0; anything lower is no bound.
       min_depth: regexDepth(s.minDepth, -1),
       max_depth: regexDepth(s.maxDepth, 0),

@@ -757,3 +757,13 @@ ST chat-completion presets (DESIGN §1.2). Pure functions with no database acces
 **Export** (`exportStPreset`): the document as an ST chat-completion preset, with the `unsupported{}` fields and `extensions` back in place and the regex scripts in `extensions.regex_scripts`. The one order is written as the global order, which is the only one ST reads. No connection or model data is written, so ST keeps its current connection when it loads the file. Modelled fields win over an `unsupported{}` entry of the same name.
 - Tested on the fixtures: every field ST reads comes back with the value ST would use, and importing the export gives the same document, with nothing dropped or defaulted the second time.
 - **Differences from the source file** that ST treats the same: missing fields are written with ST's defaults, prompts get all their fields explicitly, numbers written as strings become numbers, and regex depths ST ignores become `null`.
+
+**Hardening** (the file is untrusted, review tier A). `importStPreset` never throws on a file's content; every problem goes in the report.
+- **Size:** a file over 8 MB (`MAX_PRESET_BYTES`, in bytes, before decoding) is refused before parsing.
+- **Depth:** a linear scan refuses JSON nested more than 64 levels (`MAX_JSON_DEPTH`) before parsing. It counts brackets outside strings only. The later steps recurse, and this bounds them.
+- **Prototype keys:** `__proto__` and `constructor` keys are dropped at any depth right after parsing, each with a warning, so none reaches an object that a later step assigns into.
+- **Conversions:** `String()` and `Number()` only ever see primitives. An object whose `toString` and `valueOf` aren't functions would make them throw.
+- **Nothing is executed.** Regex scripts are stored as strings and never compiled. **Compiling one later needs a ReDoS guard**: a pattern like `(a+)+$` takes exponential time on some inputs, and a script runs on every message.
+- **The report is bounded** to 200 issues (`MAX_ISSUES`), plus one saying how many more there were.
+- **Linear time:** lookups go through maps and sets, including the renaming of repeated regex ids, which was quadratic at first (30,000 repeats took 46 s).
+- Each limit's test was checked against its bug: with the check disabled, the test fails.
