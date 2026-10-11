@@ -3,18 +3,20 @@
 // PromptManager.js): its migrations, its defaults for missing fields, and its sanitizing of
 // prompts and the prompt order. Nothing here runs anything from the file.
 import {
+  InjectionDepth,
+  NamesBehavior,
+  PostProcessing,
   PRESET_SCHEMA_VERSION,
-  type NamesBehavior,
-  type PostProcessing,
+  PromptRole,
+  RegexScript,
   type PresetDoc,
   type PresetPrompt,
   type PresetSamplers,
   type PromptOrderEntry,
-  type PromptRole,
-  type RegexScript,
   type UtilityPrompts
 } from "@rp/shared/docs/preset.ts"
 import { ImportIssue, type ImportIssueLevel, ImportReport } from "@rp/shared/importReport.ts"
+import { Schema } from "effect"
 
 const ST_PRESET_FORMAT = "st-chat-completion-preset"
 
@@ -107,31 +109,26 @@ const DEFAULT_ORDER_ENTRIES: ReadonlyArray<PromptOrderEntry> = [
   "jailbreak"
 ].map((identifier) => ({ identifier, enabled: identifier !== "enhanceDefinitions" }))
 
+/** Markers ST sends as `system` when the preset gives them no role (openai.js `systemPrompts`). */
+const SYSTEM_ROLE_MARKERS = new Set([
+  "worldInfoBefore",
+  "worldInfoAfter",
+  "charDescription",
+  "charPersonality",
+  "scenario",
+  "personaDescription"
+])
+
 /** The only prompt order ST's prompt manager uses: its "global" strategy's dummy character. */
 const GLOBAL_ORDER_ID = 100001
 
 const DEFAULT_DEPTH = 4
-const DEFAULT_ORDER = 100
-const MAX_INJECTION_DEPTH = 10_000
-const PROMPT_ROLES: ReadonlyArray<string> = ["system", "user", "assistant"]
-
-const NAMES_BEHAVIOR: ReadonlyArray<readonly [NamesBehavior, number]> = [
-  ["none", -1],
-  ["default", 0],
-  ["completion", 1],
-  ["content", 2]
-]
-const SUBSTITUTE_REGEX = ["none", "raw", "escaped"] as const
-const POSTPROCESS: ReadonlyArray<PostProcessing> = [
-  "none",
-  "merge",
-  "merge_tools",
-  "semi",
-  "semi_tools",
-  "strict",
-  "strict_tools",
-  "single"
-]
+const DEFAULT_INJECTION_ORDER = 100
+const isRole = (v: unknown): v is PromptRole => (PromptRole.literals as ReadonlyArray<unknown>).includes(v)
+const validDepth = Schema.is(InjectionDepth)
+const SUBSTITUTE_REGEX = RegexScript.fields.substitute_regex.literals
+// ST numbers names_behavior from -1, in the order of the document's literals.
+const namesBehavior = (n: number) => NamesBehavior.literals[n + 1]
 
 /** ST preset fields the document doesn't model, with ST's defaults: kept, and reported when set. */
 const UNMODELED_DEFAULTS: Json = {
@@ -239,19 +236,32 @@ const isObject = (v: unknown): v is Json => typeof v === "object" && v !== null 
  */
 const primitiveOr = (v: unknown, fallback: unknown): unknown => (typeof v === "object" && v !== null ? fallback : v)
 
-// Limits for an untrusted file. Real presets are well under a megabyte and a few levels deep.
-export const MAX_PRESET_BYTES = 8 * 1024 * 1024
+// Limits for an untrusted file. ST's bundled default chat-completion preset is 8 KB and its
+// largest bundled JSON file 27 KB, so 2 MB leaves room for presets with long prompts and many
+// regex scripts while keeping an import under a second of CPU.
+export const MAX_PRESET_BYTES = 2 * 1024 * 1024
 export const MAX_JSON_DEPTH = 64
 export const MAX_ISSUES = 200
-/** Keys that could reach an object's prototype if a later step assigned them. */
-const FORBIDDEN_KEYS = new Set(["__proto__", "constructor"])
+// What the report shows of file-supplied text, so its size stays bounded: about 1.5 KB an issue.
+const MAX_SHOWN_CHARS = 40
+const MAX_SHOWN_ITEMS = 10
+const MAX_PATH_SEGMENTS = 16
+
+const shown = (s: string) => (s.length > MAX_SHOWN_CHARS ? `${s.slice(0, MAX_SHOWN_CHARS)}…` : s)
+const listed = (items: ReadonlyArray<string>) =>
+  items.slice(0, MAX_SHOWN_ITEMS).map(shown).join(", ") +
+  (items.length > MAX_SHOWN_ITEMS ? ` and ${items.length - MAX_SHOWN_ITEMS} more` : "")
+const shownPath = (path: Path): Path =>
+  (path.length > MAX_PATH_SEGMENTS ? [...path.slice(0, MAX_PATH_SEGMENTS - 1), "…"] : path).map((s) =>
+    typeof s === "string" ? shown(s) : s
+  )
 
 class Reporter {
   readonly issues: Array<ImportIssue> = []
   private more = 0
   add(level: ImportIssueLevel, code: string, message: string, path?: Path) {
     if (this.issues.length >= MAX_ISSUES) this.more++
-    else this.issues.push(new ImportIssue({ level, code, message, ...(path ? { path } : {}) }))
+    else this.issues.push(new ImportIssue({ level, code, message, ...(path ? { path: shownPath(path) } : {}) }))
   }
   done(format: string, document: PresetDoc | null): PresetImport {
     const issues =
@@ -268,6 +278,29 @@ class Reporter {
     return { document, report: new ImportReport({ format, issues }) }
   }
 }
+
+/** Picks ids nothing in the file uses: `base`, else `base-2`, `base-3`, …; linear over many repeats. */
+class FreshIds {
+  private readonly used: Set<string>
+  private readonly next = new Map<string, number>()
+  constructor(fileIds: Iterable<string>) {
+    this.used = new Set(fileIds)
+  }
+  take(base: string): string {
+    let id = base
+    if (this.used.has(base)) {
+      let n = this.next.get(base) ?? 2
+      while (this.used.has(`${base}-${n}`)) n++
+      this.next.set(base, n + 1)
+      id = `${base}-${n}`
+    }
+    this.used.add(id)
+    return id
+  }
+}
+
+const stringIds = (list: ReadonlyArray<unknown>, key: string) =>
+  list.flatMap((x) => (isObject(x) && typeof x[key] === "string" ? [x[key]] : []))
 
 /** Whether the JSON text nests deeper than `max`, counting brackets outside strings. */
 const nestsDeeperThan = (text: string, max: number) => {
@@ -286,15 +319,18 @@ const nestsDeeperThan = (text: string, max: number) => {
   return false
 }
 
-/** A copy of parsed JSON without forbidden keys. Recursion is bounded by the depth check. */
-const withoutForbiddenKeys = (value: unknown, path: Array<string | number>, r: Reporter): unknown => {
-  if (Array.isArray(value)) return value.map((v, i) => withoutForbiddenKeys(v, [...path, i], r))
+/**
+ * A copy of parsed JSON without `__proto__` keys, which would replace an object's prototype
+ * if a later step assigned them. Recursion is bounded by the depth check.
+ */
+const withoutProtoKeys = (value: unknown, path: Array<string | number>, r: Reporter): unknown => {
+  if (Array.isArray(value)) return value.map((v, i) => withoutProtoKeys(v, [...path, i], r))
   if (!isObject(value)) return value
   const out: Json = {}
   for (const key of Object.keys(value)) {
-    if (FORBIDDEN_KEYS.has(key))
-      r.add("warning", "preset.forbidden_key", `A field named \`${key}\` was dropped.`, [...path, key])
-    else out[key] = withoutForbiddenKeys(value[key], [...path, key], r)
+    if (key === "__proto__")
+      r.add("warning", "preset.forbidden_key", "A field named `__proto__` was dropped.", [...path, key])
+    else out[key] = withoutProtoKeys(value[key], [...path, key], r)
   }
   return out
 }
@@ -324,7 +360,7 @@ export const importStPreset = (input: string | Uint8Array): PresetImport => {
     r.add("error", "preset.too_large", `The file is over the ${MAX_PRESET_BYTES / 1024 / 1024} MB limit for presets.`)
     return r.done("unknown", null)
   }
-  const text = typeof input === "string" ? input.replace(/^\uFEFF/, "") : new TextDecoder().decode(input)
+  const text = typeof input === "string" ? input.replace(/^﻿/, "") : new TextDecoder().decode(input)
   if (nestsDeeperThan(text, MAX_JSON_DEPTH)) {
     r.add("error", "preset.too_deep", `The file nests more than ${MAX_JSON_DEPTH} levels deep.`)
     return r.done("unknown", null)
@@ -336,7 +372,7 @@ export const importStPreset = (input: string | Uint8Array): PresetImport => {
     r.add("error", "preset.invalid_json", "The file isn't valid JSON.")
     return r.done("unknown", null)
   }
-  const parsed = withoutForbiddenKeys(json, [], r)
+  const parsed = withoutProtoKeys(json, [], r)
   if (!isObject(parsed)) {
     r.add("error", "preset.unrecognized", "The file isn't a SillyTavern chat-completion preset.")
     return r.done("unknown", null)
@@ -403,8 +439,7 @@ const readPreset = (file: Json, r: Reporter): PresetDoc => {
   const samplers = mapDefaults(DEFAULT_SAMPLERS)
   const utility_prompts = mapDefaults(DEFAULT_UTILITY_PROMPTS)
 
-  const namesValue = num("names_behavior", 0)
-  let names_behavior = NAMES_BEHAVIOR.find(([, n]) => n === namesValue)?.[0]
+  let names_behavior = namesBehavior(num("names_behavior", 0))
   if (names_behavior === undefined) {
     r.add("warning", "preset.invalid_value", "`names_behavior` has an unknown value, so ST's default is used.", [
       "names_behavior"
@@ -412,7 +447,7 @@ const readPreset = (file: Json, r: Reporter): PresetDoc => {
     names_behavior = "default"
   }
   const postValue = str("custom_prompt_post_processing", "") || "none"
-  let postprocess = POSTPROCESS.find((p) => p === postValue)
+  let postprocess = PostProcessing.literals.find((p) => p === postValue)
   if (postprocess === undefined) {
     r.add(
       "warning",
@@ -423,14 +458,14 @@ const readPreset = (file: Json, r: Reporter): PresetDoc => {
     postprocess = "none"
   }
 
-  const { prompts, unsendable } = readPrompts(field("prompts"), r)
-  const order = readOrder(field("prompt_order"), prompts, unsendable, r)
+  const { prompts, neverSent } = readPrompts(field("prompts"), r)
+  const order = readOrder(field("prompt_order"), prompts, neverSent, r)
   const extensions: Json = isObject(src.extensions) ? { ...src.extensions } : {}
   consumed.add("extensions")
   const regex = readRegex(extensions.regex_scripts, r)
   delete extensions.regex_scripts
   for (const key of Object.keys(extensions))
-    r.add("info", "preset.extension_kept", `Extension data \`${key}\` is kept for export but not used.`, [
+    r.add("info", "preset.extension_kept", `Extension data \`${shown(key)}\` is kept for export but not used.`, [
       "extensions",
       key
     ])
@@ -453,6 +488,8 @@ const readPreset = (file: Json, r: Reporter): PresetDoc => {
       continue_postfix: str("continue_postfix", " ")
     },
     regex,
+    // A file never grants itself permission to run its scripts (DESIGN §11).
+    regex_approved: false,
     extensions,
     unsupported
   }
@@ -467,7 +504,9 @@ const readPreset = (file: Json, r: Reporter): PresetDoc => {
     unsupported[key] = src[key]
     if (UI_ONLY.has(key)) continue
     if (!Object.hasOwn(UNMODELED_DEFAULTS, key))
-      r.add("info", "preset.unknown_field", `\`${key}\` isn't a known preset field. It's kept for export.`, [key])
+      r.add("info", "preset.unknown_field", `\`${shown(key)}\` isn't a known preset field. It's kept for export.`, [
+        key
+      ])
     else if (src[key] !== UNMODELED_DEFAULTS[key])
       r.add(
         "warning",
@@ -480,7 +519,7 @@ const readPreset = (file: Json, r: Reporter): PresetDoc => {
     r.add(
       "info",
       "preset.connection_ignored",
-      `Connection and model settings are ignored and not stored: ${ignored.join(", ")}.`
+      `Connection and model settings are ignored and not stored: ${listed(ignored)}.`
     )
   if (missing.length > 0)
     r.add("info", "preset.defaults_applied", `The preset doesn't set ${missing.join(", ")}, so ST's defaults are used.`)
@@ -508,59 +547,73 @@ const migrate = (file: Json): Json => {
   return src
 }
 
+/** A text field, reported when the file has something other than text there. */
+const text = (o: Json, key: string, path: Path, what: string, r: Reporter) => {
+  const v = o[key]
+  if (typeof v === "string") return v
+  if (v !== undefined && v !== null)
+    r.add("warning", "preset.invalid_value", `${what} has a \`${key}\` that isn't text, so it's empty.`, [...path, key])
+  return ""
+}
+
 const readPrompts = (raw: unknown, r: Reporter) => {
   if (raw !== undefined && !Array.isArray(raw))
     r.add("warning", "preset.invalid_value", "`prompts` isn't a list, so ST's built-in prompts are used.", ["prompts"])
+  const list = Array.isArray(raw) ? raw : []
+  const ids = new FreshIds(stringIds(list, "identifier"))
   const prompts = new Map<string, PresetPrompt>()
-  // In-chat prompts that ST never sends: no usable depth or role.
-  const unsendable = new Set<string>()
-  for (const [i, p] of (Array.isArray(raw) ? raw : []).entries()) {
+  // Prompts ST never sends, with the reason.
+  const neverSent = new Map<string, string>()
+  for (const [i, p] of list.entries()) {
     const path = ["prompts", i]
     if (!isObject(p)) {
       r.add("warning", "preset.prompt_invalid", "A prompt isn't an object and was dropped.", path)
       continue
     }
-    const prompt = readPrompt(p, path, r)
+    const prompt = readPrompt(p, path, ids, r)
     if (prompts.has(prompt.identifier)) {
       r.add(
         "warning",
         "preset.prompt_duplicate",
-        `A second prompt \`${prompt.identifier}\` was dropped. ST only ever uses the first.`,
+        `A second prompt \`${shown(prompt.identifier)}\` was dropped. ST only ever uses the first.`,
         path
       )
       continue
     }
     prompts.set(prompt.identifier, prompt)
-    if (
-      prompt.injection_position === "absolute" &&
-      (!validDepth(p.injection_depth) || !PROMPT_ROLES.includes(p.role as string))
-    )
-      unsendable.add(prompt.identifier)
+    const reason = whyNeverSent(p, prompt)
+    if (reason !== undefined) neverSent.set(prompt.identifier, reason)
   }
   // ST's sanitizing adds any built-in prompt that's missing.
   for (const builtIn of ST_DEFAULT_PROMPTS)
     if (!prompts.has(builtIn.identifier as string))
-      prompts.set(builtIn.identifier as string, readPrompt(builtIn, [], r))
-  return { prompts: [...prompts.values()], unsendable }
+      prompts.set(builtIn.identifier as string, readPrompt(builtIn, [], ids, r))
+  return { prompts: [...prompts.values()], neverSent }
 }
 
-const validDepth = (d: unknown): d is number =>
-  typeof d === "number" && Number.isInteger(d) && d >= 0 && d <= MAX_INJECTION_DEPTH
+const whyNeverSent = (p: Json, prompt: PresetPrompt): string | undefined => {
+  // ST sends a prompt only for the generation types listed; an empty list means all.
+  if (Array.isArray(p.injection_trigger) && p.injection_trigger.length > 0 && prompt.injection_trigger.length === 0)
+    return "none of its generation types is valid"
+  if (prompt.injection_position !== "absolute") return undefined
+  if (!validDepth(p.injection_depth)) return "its in-chat depth isn't an integer from 0 to 10000"
+  if (isRole(p.role) || ((p.role === undefined || p.role === null) && SYSTEM_ROLE_MARKERS.has(prompt.identifier)))
+    return undefined
+  return "it has no valid role"
+}
 
-const readPrompt = (p: Json, path: Path, r: Reporter): PresetPrompt => {
+const readPrompt = (p: Json, path: Path, ids: FreshIds, r: Reporter): PresetPrompt => {
   let identifier = typeof p.identifier === "string" && p.identifier !== "" ? p.identifier : undefined
   if (identifier === undefined) {
     // ST gives it a random id, which no order entry names, so it's never sent.
-    identifier = `imported-${path[1]}`
+    identifier = ids.take(`imported-${path[1]}`)
     r.add("info", "preset.prompt_identifier", `A prompt without an identifier was named \`${identifier}\`.`, path)
   }
+  const what = `Prompt \`${shown(identifier)}\``
   let role: PromptRole = "system"
-  if (PROMPT_ROLES.includes(p.role as string)) role = p.role as PromptRole
+  if (isRole(p.role)) role = p.role
   else if (p.role)
-    r.add("warning", "preset.invalid_value", `Prompt \`${identifier}\` has an unknown role, so \`system\` is used.`, [
-      ...path,
-      "role"
-    ])
+    r.add("warning", "preset.invalid_value", `${what} has an unknown role, so \`system\` is used.`, [...path, "role"])
   const order =
     typeof p.injection_order === "number" || typeof p.injection_order === "string" ? Number(p.injection_order) : NaN
   const unsupported: Json = {}
@@ -568,22 +621,22 @@ const readPrompt = (p: Json, path: Path, r: Reporter): PresetPrompt => {
     if (PROMPT_FIELDS.has(key)) continue
     unsupported[key] = p[key]
     if (!ST_PROMPT_EXTRAS.has(key))
-      r.add("info", "preset.unknown_field", `Prompt field \`${key}\` isn't known. It's kept for export.`, [
+      r.add("info", "preset.unknown_field", `Prompt field \`${shown(key)}\` isn't known. It's kept for export.`, [
         ...path,
         key
       ])
   }
   return {
     identifier,
-    name: typeof p.name === "string" ? p.name : "",
+    name: text(p, "name", path, what, r),
     role,
-    content: typeof p.content === "string" ? p.content : "",
-    // ST sends a prompt from the order only when this is exactly `false`.
+    content: text(p, "content", path, what, r),
+    // ST sends a relative prompt from the order only when this is exactly `false`.
     system_prompt: p.system_prompt !== false,
     marker: Boolean(p.marker),
     injection_position: p.injection_position === 1 ? "absolute" : "relative",
     injection_depth: validDepth(p.injection_depth) ? p.injection_depth : DEFAULT_DEPTH,
-    injection_order: Number.isFinite(order) ? order : DEFAULT_ORDER,
+    injection_order: Number.isFinite(order) ? order : DEFAULT_INJECTION_ORDER,
     injection_trigger: Array.isArray(p.injection_trigger)
       ? p.injection_trigger.filter((t): t is string => typeof t === "string")
       : [],
@@ -596,7 +649,7 @@ const readPrompt = (p: Json, path: Path, r: Reporter): PresetPrompt => {
 const readOrder = (
   raw: unknown,
   prompts: ReadonlyArray<PresetPrompt>,
-  unsendable: ReadonlySet<string>,
+  neverSent: ReadonlyMap<string, string>,
   r: Reporter
 ): Array<PromptOrderEntry> => {
   let entries: ReadonlyArray<unknown> = DEFAULT_ORDER_ENTRIES
@@ -604,30 +657,41 @@ const readOrder = (
   if (raw !== undefined) {
     const lists = Array.isArray(raw) ? raw : []
     // ST compares ids as strings.
-    const id = (l: unknown) => (isObject(l) ? primitiveOr(l.character_id, "?") : undefined)
-    const index = lists.findIndex((l) => String(id(l)) === String(GLOBAL_ORDER_ID))
-    const others = lists.filter((l, i) => i !== index && isObject(l)).map((l) => String(id(l)))
+    const id = (l: unknown) => {
+      const v = isObject(l) ? primitiveOr(l.character_id, undefined) : undefined
+      return v === undefined || v === null ? "?" : String(v)
+    }
+    const index = lists.findIndex((l) => isObject(l) && id(l) === String(GLOBAL_ORDER_ID))
+    const others = lists.filter((l, i) => i !== index && isObject(l)).map(id)
     if (others.length > 0)
       r.add(
         "info",
         "preset.prompt_orders_dropped",
-        `ST uses only the global prompt order (${GLOBAL_ORDER_ID}). Other orders were dropped: ${others.join(", ")}.`,
+        `ST uses only the global prompt order (${GLOBAL_ORDER_ID}). Other orders were dropped: ${listed(others)}.`,
         ["prompt_order"]
       )
     const global = lists[index] as Json | undefined
     if (global && Array.isArray(global.order)) {
       entries = global.order
       basePath = ["prompt_order", index, "order"]
-    } else
+    } else if (global)
       r.add(
         "warning",
         "preset.no_global_order",
-        "The preset has no usable global prompt order, so ST's default order is used, as in ST.",
+        "The global prompt order has no list of prompts, so ST would send none of the preset's prompts. ST's default order is used instead.",
+        ["prompt_order", index]
+      )
+    else
+      r.add(
+        "warning",
+        "preset.no_global_order",
+        "The preset has no global prompt order, so ST's default order is used, as in ST.",
         ["prompt_order"]
       )
   }
   const known = new Set(prompts.map((p) => p.identifier))
   const order = new Map<string, PromptOrderEntry>()
+  const enabledEntries = new Map<string, number>()
   for (const [i, e] of entries.entries()) {
     const path = [...basePath, i]
     const identifier = isObject(e) && typeof e.identifier === "string" ? e.identifier : undefined
@@ -636,34 +700,62 @@ const readOrder = (
       r.add("info", "preset.order_entry_dropped", "A prompt order entry names no prompt and was dropped.", path)
       continue
     }
-    if (order.has(identifier)) {
+    const enabled = Boolean((e as Json).enabled)
+    if (enabled) enabledEntries.set(identifier, (enabledEntries.get(identifier) ?? 0) + 1)
+    if (!order.has(identifier)) order.set(identifier, { identifier, enabled })
+    else {
       r.add(
         "warning",
         "preset.order_duplicate",
-        `\`${identifier}\` appears twice in the prompt order; kept once.`,
+        `\`${shown(identifier)}\` appears more than once in the prompt order. It's kept once, enabled if any entry is.`,
         path
       )
-      continue
+      if (enabled) order.set(identifier, { identifier, enabled })
     }
-    let enabled = Boolean((e as Json).enabled)
-    if (enabled && unsendable.has(identifier)) {
+  }
+  for (const [identifier, count] of enabledEntries)
+    if (count > 1)
+      r.add(
+        "warning",
+        "preset.order_repeated",
+        `ST sends \`${shown(identifier)}\` once per enabled entry, ${count} times. Here it's sent once.`,
+        basePath
+      )
+  for (const entry of order.values()) {
+    const reason = neverSent.get(entry.identifier)
+    if (entry.enabled && reason !== undefined) {
       r.add(
         "warning",
         "preset.prompt_never_sent",
-        `In-chat prompt \`${identifier}\` has no valid depth or role, so ST never sends it. It's imported disabled.`,
-        path
+        `ST never sends prompt \`${shown(entry.identifier)}\`: ${reason}. It's imported disabled.`,
+        basePath
       )
-      enabled = false
+      order.set(entry.identifier, { ...entry, enabled: false })
     }
-    order.set(identifier, { identifier, enabled })
   }
   return [...order.values()]
 }
 
-const regexDepth = (v: unknown, min: number): number | null => {
+/**
+ * A regex depth bound as ST applies it: a minimum from -1 and a maximum from 0, anything lower
+ * being no bound. An infinite maximum is no bound; an infinite minimum excludes every depth,
+ * kept as the largest finite number.
+ */
+const regexDepth = (s: Json, key: "minDepth" | "maxDepth", path: Path, r: Reporter): number | null => {
+  const v = s[key]
   if (v === null || v === undefined) return null
   const n = Number(primitiveOr(v, NaN))
-  return Number.isNaN(n) || n < min ? null : n
+  if (Number.isNaN(n) || n < (key === "minDepth" ? -1 : 0)) return null
+  if (n !== Infinity) return n
+  r.add(
+    "info",
+    "preset.regex_infinite_depth",
+    key === "minDepth"
+      ? "`minDepth` is infinite, so ST never applies this script at a message depth. It's kept as the largest number."
+      : "`maxDepth` is infinite, which ST treats as no limit.",
+    [...path, key]
+  )
+  return key === "minDepth" ? Number.MAX_VALUE : null
 }
 
 const readRegex = (raw: unknown, r: Reporter): Array<RegexScript> => {
@@ -673,37 +765,40 @@ const readRegex = (raw: unknown, r: Reporter): Array<RegexScript> => {
     r.add("warning", "preset.invalid_value", "`regex_scripts` isn't a list, so it was dropped.", base)
     return []
   }
+  const ids = new FreshIds(stringIds(raw, "id"))
   const scripts = new Map<string, RegexScript>()
-  // The next suffix to try per repeated id, so many repeats stay linear.
-  const nextSuffix = new Map<string, number>()
   for (const [i, s] of raw.entries()) {
     const path = [...base, i]
     if (!isObject(s)) {
       r.add("warning", "preset.regex_invalid", "A regex script isn't an object and was dropped.", path)
       continue
     }
-    let id = typeof s.id === "string" && s.id !== "" ? s.id : `imported-regex-${i}`
+    let id = typeof s.id === "string" && s.id !== "" ? s.id : ids.take(`imported-regex-${i}`)
     if (scripts.has(id)) {
-      let n = nextSuffix.get(id) ?? 2
-      while (scripts.has(`${id}-${n}`)) n++
-      nextSuffix.set(id, n + 1)
-      r.add("info", "preset.regex_id", `A second regex script \`${id}\` was renamed \`${id}-${n}\`.`, path)
-      id = `${id}-${n}`
+      const renamed = ids.take(id)
+      r.add(
+        "info",
+        "preset.regex_id",
+        `A second regex script \`${shown(id)}\` was renamed \`${shown(renamed)}\`.`,
+        path
+      )
+      id = renamed
     }
+    const what = `Regex script \`${shown(id)}\``
     const unsupported: Json = {}
     for (const key of Object.keys(s)) {
       if (REGEX_FIELDS.has(key)) continue
       unsupported[key] = s[key]
-      r.add("info", "preset.unknown_field", `Regex script field \`${key}\` isn't known. It's kept for export.`, [
+      r.add("info", "preset.unknown_field", `Regex script field \`${shown(key)}\` isn't known. It's kept for export.`, [
         ...path,
         key
       ])
     }
     scripts.set(id, {
       id,
-      name: typeof s.scriptName === "string" ? s.scriptName : "",
-      find_regex: typeof s.findRegex === "string" ? s.findRegex : "",
-      replace_string: typeof s.replaceString === "string" ? s.replaceString : "",
+      name: text(s, "scriptName", path, what, r),
+      find_regex: text(s, "findRegex", path, what, r),
+      replace_string: text(s, "replaceString", path, what, r),
       trim_strings: Array.isArray(s.trimStrings) ? s.trimStrings.filter((t) => typeof t === "string") : [],
       placement: Array.isArray(s.placement) ? s.placement.filter((p) => Number.isInteger(p)) : [],
       disabled: Boolean(s.disabled),
@@ -712,9 +807,8 @@ const readRegex = (raw: unknown, r: Reporter): Array<RegexScript> => {
       run_on_edit: Boolean(s.runOnEdit),
       // ST runs an unknown mode as `none`.
       substitute_regex: SUBSTITUTE_REGEX[Number(primitiveOr(s.substituteRegex, NaN))] ?? "none",
-      // ST applies a minimum from -1 and a maximum from 0; anything lower is no bound.
-      min_depth: regexDepth(s.minDepth, -1),
-      max_depth: regexDepth(s.maxDepth, 0),
+      min_depth: regexDepth(s, "minDepth", path, r),
+      max_depth: regexDepth(s, "maxDepth", path, r),
       ...(Object.keys(unsupported).length > 0 ? { unsupported } : {})
     })
   }
@@ -722,7 +816,7 @@ const readRegex = (raw: unknown, r: Reporter): Array<RegexScript> => {
     r.add(
       "info",
       "preset.regex_imported",
-      `${scripts.size} regex scripts were imported as data. In ST, a preset's scripts run only after you allow them for that preset.`,
+      `${scripts.size} regex scripts were imported as data. As in ST, none runs until you allow this preset's scripts.`,
       base
     )
   return [...scripts.values()]
@@ -731,7 +825,8 @@ const readRegex = (raw: unknown, r: Reporter): Array<RegexScript> => {
 /**
  * The document as an ST chat-completion preset that ST loads the same way, with the fields
  * kept in `unsupported{}`. Modelled fields win over an `unsupported{}` entry of the same name.
- * There's no connection or model data to write: ST then keeps its current connection.
+ * There's no connection or model data to write: ST then keeps its current connection. The
+ * regex approval isn't written: ST keeps its own.
  */
 export const exportStPreset = (doc: PresetDoc): Json => {
   const prompts = doc.prompts.map((p) => ({
@@ -768,7 +863,7 @@ export const exportStPreset = (doc: PresetDoc): Json => {
     ...doc.unsupported,
     ...doc.samplers,
     ...doc.utility_prompts,
-    names_behavior: NAMES_BEHAVIOR.find(([name]) => name === doc.names_behavior)![1],
+    names_behavior: NamesBehavior.literals.indexOf(doc.names_behavior) - 1,
     squash_system_messages: doc.squash,
     custom_prompt_post_processing: doc.postprocess === "none" ? "" : doc.postprocess,
     use_sysprompt: doc.use_sysprompt,

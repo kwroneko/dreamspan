@@ -11,19 +11,19 @@ export type PromptRole = typeof PromptRole.Type
 
 const Json = Schema.Record(Schema.String, Schema.Unknown)
 /** ST injects at depths 0 to 10000 (`MAX_INJECTION_DEPTH`). */
-const InjectionDepth = Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 10_000 }))
+export const InjectionDepth = Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 10_000 }))
 
-export const PresetPrompt = Schema.Struct({
+const PresetPrompt = Schema.Struct({
   identifier: Schema.NonEmptyString,
   name: Schema.String,
   role: PromptRole,
   /** Ignored for markers whose content the assembler fills (`charDescription`, `chatHistory`, …). */
   content: Schema.String,
   /**
-   * ST's flag for its built-in prompts. A prompt with `false` is sent where the order puts it;
-   * one with `true` is sent only if the assembler knows its identifier (main, nsfw, jailbreak,
-   * enhanceDefinitions and the markers). An imported prompt without the flag is `true`,
-   * because ST treats a missing flag the same way.
+   * ST's flag for its built-in prompts. A relative prompt with `false` is sent where the order
+   * puts it; one with `true` is sent only if the assembler knows its identifier (main, nsfw,
+   * jailbreak, enhanceDefinitions and the markers). In-chat prompts are sent whatever the flag.
+   * An imported prompt without the flag is `true`, because ST treats a missing flag the same way.
    */
   system_prompt: Schema.Boolean,
   marker: Schema.Boolean,
@@ -41,14 +41,14 @@ export const PresetPrompt = Schema.Struct({
 })
 export type PresetPrompt = typeof PresetPrompt.Type
 
-export const PromptOrderEntry = Schema.Struct({
+const PromptOrderEntry = Schema.Struct({
   identifier: Schema.NonEmptyString,
   enabled: Schema.Boolean
 })
 export type PromptOrderEntry = typeof PromptOrderEntry.Type
 
 /** ST's names and values; mapping them to a provider's parameters happens at assembly. */
-export const PresetSamplers = Schema.Struct({
+const PresetSamplers = Schema.Struct({
   temperature: Schema.Finite,
   frequency_penalty: Schema.Finite,
   presence_penalty: Schema.Finite,
@@ -69,7 +69,7 @@ export const PresetSamplers = Schema.Struct({
 export type PresetSamplers = typeof PresetSamplers.Type
 
 /** ST's "utility prompts": text the assembler uses in specific situations. Names are ST's. */
-export const UtilityPrompts = Schema.Struct({
+const UtilityPrompts = Schema.Struct({
   impersonation_prompt: Schema.String,
   new_chat_prompt: Schema.String,
   new_group_chat_prompt: Schema.String,
@@ -91,7 +91,6 @@ export type UtilityPrompts = typeof UtilityPrompts.Type
  * to the text).
  */
 export const NamesBehavior = Schema.Literals(["none", "default", "completion", "content"])
-export type NamesBehavior = typeof NamesBehavior.Type
 
 /** ST's prompt post-processing (`custom_prompt_post_processing`); `none` is ST's empty string. */
 export const PostProcessing = Schema.Literals([
@@ -104,7 +103,6 @@ export const PostProcessing = Schema.Literals([
   "strict_tools",
   "single"
 ])
-export type PostProcessing = typeof PostProcessing.Type
 
 /**
  * A regex script from the preset. Stored as data and never compiled at import; compiling
@@ -126,7 +124,10 @@ export const RegexScript = Schema.Struct({
   run_on_edit: Schema.Boolean,
   /** Whether macros in `find_regex` are expanded first, and how (escaped for use in a regex). */
   substitute_regex: Schema.Literals(["none", "raw", "escaped"]),
-  /** Message depths the script applies to; null means unbounded. */
+  /**
+   * Message depths the script applies to; null means unbounded. ST reads an infinite minimum
+   * as "never at any depth", imported as `Number.MAX_VALUE`.
+   */
   min_depth: Schema.NullOr(Schema.Finite),
   max_depth: Schema.NullOr(Schema.Finite),
   unsupported: Schema.optionalKey(Json)
@@ -173,6 +174,13 @@ export const PresetDoc = Schema.Struct({
     continue_postfix: Schema.String
   }),
   regex: Schema.Array(RegexScript).check(Schema.makeFilter(uniqueBy((r: RegexScript) => r.id, "id"))),
+  /**
+   * The user allowed this preset's regex scripts to run, as ST asks once per preset. No script
+   * from `regex`, prompt or display, runs until this is true. An import always sets it false,
+   * whatever the file says, and export never writes it (DESIGN §11: a file never grants itself
+   * capabilities).
+   */
+  regex_approved: Schema.Boolean,
   /** The preset's other `extensions` entries, namespaced as in ST, kept for export. */
   extensions: Json,
   /** Top-level ST fields this document doesn't model, kept for export. */

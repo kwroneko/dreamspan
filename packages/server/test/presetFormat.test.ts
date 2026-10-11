@@ -437,7 +437,7 @@ describe("hardening: the file is untrusted", () => {
     expect(importStPreset(brackets).document).not.toBeNull()
   })
 
-  it("drops __proto__ and constructor keys at any depth, so none reaches an object", () => {
+  it("drops __proto__ keys at any depth, so none reaches an object, and keeps `constructor` as data", () => {
     const text = `{
       "prompts": [{ "identifier": "a", "content": "x", "__proto__": { "system_prompt": false }, "constructor": "c" }],
       "extensions": { "__proto__": { "polluted": true }, "ok": { "constructor": { "prototype": 1 }, "kept": 1 } },
@@ -446,19 +446,18 @@ describe("hardening: the file is untrusted", () => {
     const result = importStPreset(text)
     const doc = result.document!
     expect(({} as Record<string, unknown>).polluted).toBeUndefined()
-    for (const o of [doc.unsupported, doc.extensions, doc.extensions.ok as object])
+    for (const o of [doc.unsupported, doc.extensions, doc.extensions.ok as object, prompt(doc, "a")!.unsupported!])
       expect(Object.getPrototypeOf(o)).toBe(Object.prototype)
-    expect(doc.extensions).toEqual({ ok: { kept: 1 } })
+    expect(doc.extensions).toEqual({ ok: { constructor: { prototype: 1 }, kept: 1 } })
     expect(Object.hasOwn(doc.extensions, "__proto__")).toBe(false)
     expect(doc.unsupported).toEqual({})
     expect("polluted" in doc.unsupported).toBe(false)
     expect(doc.samplers.temperature).toBe(1)
-    expect(prompt(doc, "a")).not.toHaveProperty("unsupported")
+    expect(prompt(doc, "a")?.system_prompt).toBe(true)
+    expect(prompt(doc, "a")?.unsupported).toEqual({ constructor: "c" })
     expect(result.report.issues.filter((i) => i.code === "preset.forbidden_key").map((i) => i.path)).toEqual([
       ["prompts", 0, "__proto__"],
-      ["prompts", 0, "constructor"],
       ["extensions", "__proto__"],
-      ["extensions", "ok", "constructor"],
       ["__proto__"]
     ])
   })
@@ -495,5 +494,186 @@ describe("hardening: the file is untrusted", () => {
     const result = load(preset(many))
     expect(result.report.issues).toHaveLength(MAX_ISSUES + 1)
     expect(result.report.issues.at(-1)?.code).toBe("preset.more_issues")
+  })
+
+  it("keeps the whole report small, however much text the file supplies", () => {
+    const fill = (unit: string, around: number) => unit.repeat(Math.floor((MAX_PRESET_BYTES - around) / unit.length))
+    const long = "K".repeat(1000)
+    const files = [
+      // Many order lists without ids, each listed in one message.
+      `{"prompt_order":[${fill("{},", 100)}{"character_id":100001,"order":[]}]}`,
+      // A few huge keys.
+      `{"prompt_order":[],${[1, 2, 3, 4].map((i) => `"${"K".repeat(MAX_PRESET_BYTES / 5)}${i}":0`).join(",")}}`,
+      // Many issues, each with a long path of long keys.
+      `{"prompt_order":[],"extensions":${`{"${long}":`.repeat(60)}[${fill('{"__proto__":1},', 70_000)}{}]${"}".repeat(61)}`,
+      // Many repeated long prompt identifiers.
+      `{"prompt_order":[],"prompts":[${fill(`{"identifier":"${long}"},`, 100)}{}]}`
+    ]
+    for (const file of files) {
+      expect(Buffer.byteLength(file)).toBeLessThanOrEqual(MAX_PRESET_BYTES)
+      const result = importStPreset(file)
+      expect(result.document).not.toBeNull()
+      expect(JSON.stringify(result.report).length).toBeLessThanOrEqual(MAX_ISSUES * 2048)
+    }
+    const dropped = issue(importStPreset(files[0]!), "preset.prompt_orders_dropped")?.message
+    expect(dropped).toMatch(/: \?, \?, .* and \d+ more\.$/)
+  })
+
+  it("caps files at 2 MB, room for 250 times ST's own default preset", () => {
+    expect(MAX_PRESET_BYTES).toBe(2 * 1024 * 1024)
+  })
+
+  it("never returns a document the schema refuses, whatever the file holds", () => {
+    // A seeded generator, so a failure reproduces.
+    let seed = 0x5eed
+    const random = () => {
+      seed = (seed + 0x6d2b79f5) | 0
+      let t = Math.imul(seed ^ (seed >>> 15), 1 | seed)
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+    }
+    const pick = <A>(items: ReadonlyArray<A>) => items[Math.floor(random() * items.length)]!
+    const hostile: ReadonlyArray<unknown> = [
+      "INFINITY",
+      "-INFINITY",
+      "Infinity",
+      -1,
+      0,
+      1.5,
+      10_001,
+      "",
+      "x",
+      null,
+      true,
+      [],
+      [7],
+      {},
+      { toString: 1, valueOf: 1 },
+      "__proto__"
+    ]
+    const leaves = (value: unknown, path: Array<string | number> = []): Array<Array<string | number>> =>
+      typeof value === "object" && value !== null
+        ? [path, ...Object.entries(value).flatMap(([k, v]) => leaves(v, [...path, Array.isArray(value) ? +k : k]))]
+        : [path]
+    // Sets the value at the path, unless an earlier mutation replaced a container on it.
+    const set = (root: unknown, path: ReadonlyArray<string | number>, v: unknown): unknown => {
+      const copy = structuredClone(root) as Record<string | number, unknown>
+      let node: unknown = copy
+      for (const key of path.slice(0, -1)) node = (node as Record<string | number, unknown> | undefined)?.[key]
+      if (typeof node === "object" && node !== null) (node as Record<string | number, unknown>)[path.at(-1)!] = v
+      return copy
+    }
+    const inputs: Array<string> = []
+    for (const name of ["default", "full", "legacy"]) {
+      const base = JSON.parse(fixture(name)) as unknown
+      const paths = leaves(base).filter((p) => p.length > 0)
+      inputs.push(JSON.stringify(base))
+      for (let i = 0; i < 400; i++) {
+        let mutated = base
+        for (let j = 0; j < 3; j++) mutated = set(mutated, pick(paths), pick(hostile))
+        inputs.push(JSON.stringify(mutated))
+      }
+    }
+    for (const input of inputs) {
+      // JSON.stringify can't write infinities, so they go in as text.
+      const result = importStPreset(input.replaceAll('"-INFINITY"', "-1e999").replaceAll('"INFINITY"', "1e999"))
+      if (result.document !== null) expect(Schema.decodeUnknownExit(PresetDoc)(result.document)._tag).toBe("Success")
+    }
+  })
+})
+
+describe("cases where ST's behaviour is easy to miss", () => {
+  const order = (...entries: Array<[string, boolean]>) => [
+    { character_id: 100001, order: entries.map(([identifier, enabled]) => ({ identifier, enabled })) }
+  ]
+
+  it("reads infinite regex depths as ST does, and reports them", () => {
+    const text = JSON.stringify(
+      preset({ extensions: { regex_scripts: [{ id: "r", findRegex: "/a/", minDepth: "Infinity", maxDepth: "MAX" }] } })
+    ).replace('"MAX"', "1e999")
+    const result = load(text)
+    expect(result.doc.regex[0]).toMatchObject({ min_depth: Number.MAX_VALUE, max_depth: null })
+    expect(codes(result).filter((c) => c === "preset.regex_infinite_depth")).toHaveLength(2)
+  })
+
+  it("sends an in-chat marker without a role as system, as ST does", () => {
+    const result = load({
+      prompts: [
+        { identifier: "charDescription", system_prompt: true, marker: true, injection_position: 1, injection_depth: 2 },
+        { identifier: "chatHistory", system_prompt: true, marker: true, injection_position: 1, injection_depth: 2 }
+      ],
+      prompt_order: order(["charDescription", true], ["chatHistory", true])
+    })
+    expect(result.doc.order).toEqual([
+      { identifier: "charDescription", enabled: true },
+      { identifier: "chatHistory", enabled: false }
+    ])
+  })
+
+  it("enables a prompt listed twice if any entry is, and warns when ST would send it twice", () => {
+    const prompts = [
+      { identifier: "x", system_prompt: false, role: "system", content: "n", injection_position: 1, injection_depth: 1 }
+    ]
+    const once = load({ prompts, prompt_order: order(["x", false], ["x", true]) })
+    expect(once.doc.order).toEqual([{ identifier: "x", enabled: true }])
+    expect(codes(once)).not.toContain("preset.order_repeated")
+    const twice = load({ prompts, prompt_order: order(["x", true], ["x", true]) })
+    expect(twice.doc.order).toEqual([{ identifier: "x", enabled: true }])
+    expect(issue(twice, "preset.order_repeated")?.message).toContain("2 times")
+  })
+
+  it("imports a prompt whose generation types are all invalid as disabled", () => {
+    const result = load({
+      prompts: [
+        { identifier: "a", system_prompt: false, content: "x", injection_trigger: [7] },
+        { identifier: "b", system_prompt: false, content: "y", injection_trigger: ["normal", 7] }
+      ],
+      prompt_order: order(["a", true], ["b", true])
+    })
+    expect(result.doc.order.map((e) => e.enabled)).toEqual([false, true])
+    expect(prompt(result.doc, "b")?.injection_trigger).toEqual(["normal"])
+    expect(issue(result, "preset.prompt_never_sent")?.message).toContain("generation types")
+  })
+
+  it("generates identifiers and regex ids that nothing in the file uses", () => {
+    const result = load(
+      preset({
+        prompts: [{ content: "generated" }, { identifier: "imported-0", content: "real" }],
+        extensions: { regex_scripts: [{ findRegex: "generated" }, { id: "imported-regex-0", findRegex: "real" }] }
+      })
+    )
+    expect(prompt(result.doc, "imported-0")?.content).toBe("real")
+    expect(prompt(result.doc, "imported-0-2")?.content).toBe("generated")
+    expect(result.doc.regex.map((s) => [s.id, s.find_regex])).toEqual([
+      ["imported-regex-0-2", "generated"],
+      ["imported-regex-0", "real"]
+    ])
+  })
+
+  it("says where a global order without a list differs from ST", () => {
+    const result = load({ prompts: [], prompt_order: [{ character_id: 100001 }] })
+    expect(result.doc.order).toHaveLength(12)
+    expect(issue(result, "preset.no_global_order")?.message).toContain("ST would send none")
+  })
+
+  it("reports text fields that hold something else", () => {
+    const result = load(
+      preset({
+        prompts: [{ identifier: "x", content: 42, name: ["n"] }],
+        extensions: { regex_scripts: [{ id: "r", findRegex: ["/a/"], replaceString: 5, scriptName: {} }] }
+      })
+    )
+    expect(prompt(result.doc, "x")).toMatchObject({ content: "", name: "" })
+    expect(result.doc.regex[0]).toMatchObject({ find_regex: "", replace_string: "", name: "" })
+    expect(codes(result).filter((c) => c === "preset.invalid_value")).toHaveLength(5)
+  })
+
+  it("never takes the regex approval from the file, and never exports it", () => {
+    const result = load(
+      preset({ regex_approved: true, extensions: { regex_approved: true, regex_scripts: [{ id: "r" }] } })
+    )
+    expect(result.doc.regex_approved).toBe(false)
+    const approved = { ...result.doc, regex_approved: true, unsupported: {}, extensions: {} }
+    expect(JSON.stringify(exportStPreset(approved))).not.toContain("regex_approved")
   })
 })

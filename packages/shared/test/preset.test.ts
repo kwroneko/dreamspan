@@ -58,6 +58,7 @@ const doc = {
   use_sysprompt: false,
   prefill: { assistant: "", impersonation: "", continue: false, continue_postfix: " " },
   regex: [],
+  regex_approved: false,
   extensions: {},
   unsupported: {}
 }
