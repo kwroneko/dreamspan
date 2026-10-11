@@ -27,8 +27,8 @@ Bun was measured as an alternative (2026-10-10) and not adopted. On this server 
 - ESLint with typescript-eslint, plus `eslint-plugin-react-hooks` including the React Compiler rules.
 - Prettier.
 - knip: fails on unused files, exports and dependencies, the shared package's exports included (`knip.jsonc` says why each exception exists).
-- Vitest with `@effect/vitest`.
-- `npm run check` runs all of them. CI (`.github/workflows/ci.yml`) also builds the client and the workers, and builds the Docker image (without pushing it). It checks that the image refuses to start without exposure settings, and runs it with an admin password until its health check passes.
+- Vitest with `@effect/vitest`, and Playwright for the browser tests (§5).
+- `npm run check` runs all of them. CI (`.github/workflows/ci.yml`) also builds the client and the workers, runs the browser tests, and builds the Docker image (without pushing it). It checks that the image refuses to start without exposure settings, and runs it with an admin password until its health check passes.
 - `npm run size` prints one line of sizes: code lines in sources and in tests, comment lines, and doc lines (`scripts/size.ts`, tracked files outside `spikes/`). CI prints it too, so growth shows per commit.
 
 **Dependencies are pinned to exact versions.** The owner's machine enforces a 5-day cooldown on newly published packages.
@@ -521,8 +521,6 @@ Users are created on first sight (`EnsureUser`): the local user, and proxy ident
 
 **`GetSession`** returns the caller's user and how they're signed in: `session` (logged in, so logging out applies), `local` (no account has a password), `loopback` (`LOOPBACK_REQUIRES_LOGIN=false`) or `proxy`. It's resolved again from the same upgrade headers as the middleware, so it only ever describes the caller (`session.test.ts`). The client uses it to route to login, and to show the login page's "no login needed" state.
 
-Not built yet: the login page (it waits for its design).
-
 In proxy mode, a WebSocket keeps the identity it opened with until it disconnects, so logging out of the proxy doesn't end an open tab's access. That's deliberate (DESIGN §10.1).
 
 ---
@@ -530,13 +528,33 @@ In proxy mode, a WebSocket keeps the identity it opened with until it disconnect
 ## 5. Client
 
 `packages/client`:
-- **Build and routing:** React 19 with React Compiler 1.0 (Babel plugin), Vite 8, and TanStack Router (code-based routes, `router.tsx`).
+- **Build and routing:** React 19 with React Compiler 1.0 (Babel plugin), Vite 8, and TanStack Router (code-based routes, built from the route registry below).
 - **Server state:** comes through one `AtomRpc` client (`rpc.ts`) over the same WebSocket protocol, with reconnect on transient errors. Components read it with `@effect/atom-react`.
+  - **Queries** render through `AsyncView` (`actions.tsx`): loading, an error with a retry, or the value. Each query names reactivity keys (`connections`, `credentials`, `models`, `network`, `users`).
+  - **Writes** run through `useAction`, which tracks the pending state and the error, and invalidates the keys a success makes stale. It calls the client directly rather than through `AtomRpc.mutation`: that atom is shared per RPC, so a second call would interrupt the first.
+  - **Errors** keep their tags (`errors.ts`) and are shown in a sentence each. The server's own messages, such as the last-admin or own-password-first rejections, are shown as given: the client doesn't repeat the server's rules.
+- **Sessions** (`session.ts`, §4). The app shell reads `GetSession`. `Unauthorized`, from it or from any later call, sends the user to `/login?next=…` (a path on this site only). Login and logout are `fetch` calls to the HTTP endpoints, followed by a full page load, so the WebSocket reopens with the new cookie and nothing cached for the previous user survives.
+- **Registries** (spec/PLUGINS.md §8; `registry.ts`, `routes.tsx`, `slots.tsx`). The same rules as the server's (§6): entries by id, a registration overrides the same id, `disable` hides one, and each returns a function that undoes it, in any order.
+  - **Routes:** each screen registers an id, a parent (a layout entry, or `root`), a path relative to it and a component, and optionally a navigation label and order. The router is built from the registry at startup. A layout's navigation lists its children, admin-only entries for admins (the server still decides).
+  - **Slots:** a named place in a screen that renders its registered entries in order. The first is `connection.sections`: every section of a connection's page is an entry.
+  - Registrations happen before the first render. Nothing re-renders when a registry changes later.
+  - The core features register through them (`features/index.ts`), as plugins will.
+- **Screens** (`features/`), on stock components (CLIENT-FRAMEWORK §8):
+  - **Login:** wrong password, `429` with a countdown from `Retry-After`, proxy mode, and "no login needed" when the server signs the caller in without one. A disabled account fails like a wrong password, as the server intends.
+  - **Connections:** list, create, and a page per connection: settings (with the row version, so a change made elsewhere is a `StaleWrite` with "load the latest"), key, check, models, custom headers, network route, delete.
+  - **Keys:** keys go in and never come out; only the hint shows. A connection whose address its key doesn't allow says so, and allowing it takes the key typed again. Replacing a key lists the origins of the connections using it, then those it allowed before, none ticked, and flags each that the old key didn't allow (§3.12).
+  - **Models:** the merged list per connection, each field marked as the user's, the provider's or unknown. Refresh, hide, edit overrides, add by id.
+  - **Network** (admins): the proxy as the server returns it, the bypass list, `forceProxy`, and `InvalidNetworkSettings` as a list of problems.
+  - **Account** for everyone (password, log out, how you're signed in), and **Users** for admins (create, set passwords, disable).
 - **Styling** (CLIENT-FRAMEWORK §8):
-  - **Semantic tokens only.** `styles.css` defines colors by role (`canvas`, `surface`, `text`, `muted`, `accent`, `danger`, …), for light and dark, with `data-theme` overrides.
+  - **Semantic tokens only.** `styles.css` defines colors by role (`canvas`, `surface`, `text`, `muted`, `accent`, `danger`, `warning`, `success`, `overlay`, …), for light and dark, with `data-theme` overrides.
   - **The default Tailwind palette is removed** (`--color-*: initial`), so a class like `bg-zinc-800` doesn't exist. Only token utilities (`bg-surface`, `text-muted`) can be written. A redesign changes token values, not components.
-  - **One import path for UI components.** Feature code imports from `src/ui/`, never from Base UI directly; ESLint enforces it. Base UI carries behavior and accessibility, and `src/ui/` carries the look.
-- **Development:** `npm run dev:server` and `npm run dev:client`. Vite proxies `/rpc` to the server.
+  - **One import path for UI components.** Feature code imports from `src/ui/`, never from Base UI directly; ESLint enforces it. Base UI carries behavior and accessibility (labels, focus traps, keyboard), and `src/ui/` carries the look: buttons, fields, select, checkbox, switch, radio group, dialogs, cards, badges, alerts.
+  - Inputs use 16 px text on touch screens, so iOS doesn't zoom into them.
+- **Tests:**
+  - `test/` (Vitest): the registries.
+  - `e2e/` (Playwright, `npm run test:browser`, outside `npm run check`): the built client against the real server and its database workers, each file with its own servers on random ports and fresh data directories, and a fake OpenAI-style provider on loopback. One flow per screen, a cross-user check through the UI (another user never sees someone's connections or keys, in a separate tab or after logout in the same one), every screen at phone and desktop width in light and dark with no sideways scrolling, and dialogs from the keyboard. `SCREENSHOT_DIR` saves screenshots. Chromium's headless shell comes from `~/.cache/ms-playwright`; CI installs it.
+- **Development:** `npm run dev:server` and `npm run dev:client`. Vite proxies `/rpc` and `/auth` to the server.
 
 ---
 
@@ -659,7 +677,7 @@ It fails with a typed `ProviderError`.
 - It runs as the `node` user with `DATA_DIR=/data` as a volume, `HOST=0.0.0.0`, and a health check on `/healthz`.
 - **It doesn't start without exposure settings** (§4), since `HOST=0.0.0.0` is beyond loopback; CI checks this. Connections from the host arrive from the bridge gateway (e.g. `172.17.0.1`).
   - Behind a reverse proxy: `AUTH_MODE=proxy`, `TRUSTED_PROXIES` set to the proxy container's address, and `PUBLIC_ORIGINS` set to the public URL.
-  - Built-in login: set `ADMIN_PASSWORD_FILE` (a Docker secret). The server then starts with the admin protected, and no browser needs to reach loopback. Until the login page exists, logging in takes a `POST /auth/login` by hand.
+  - Built-in login: set `ADMIN_PASSWORD_FILE` (a Docker secret). The server then starts with the admin protected, and no browser needs to reach loopback.
   - Single user without a password: publish on loopback only (`-p 127.0.0.1:8080:8080`) and set `ALLOWED_IPS` to the gateway.
   - Publishing beyond loopback (`-p 8080:8080`) makes the gateway allowlist unsafe: where Docker doesn't pass the client's address through (rootless Docker's default port driver, `docker-proxy` for IPv6 clients), outside clients also appear to come from it.
   - **The health check** fetches `127.0.0.1` on `PORT` inside the container. In proxy mode with `TRUSTED_PROXIES` set, add `127.0.0.1` to the list, or the container reports unhealthy. Inside a container, loopback is only the container's own processes, which can read `/data` and the server secret anyway.
