@@ -23,7 +23,7 @@ test.describe("login required", () => {
   const server = serverPerFile(withAdmin)
 
   test("routes to login, refuses a wrong password, then returns to the page asked for", async ({ page }) => {
-    await page.goto(`${server().url}/settings`)
+    await page.goto(`${server().url}/settings/keys`)
     await expect(page).toHaveURL(/\/login\?next=/)
     await page.getByLabel("Handle").fill(ADMIN.handle)
     await page.getByLabel("Password").fill("not-the-password")
@@ -33,7 +33,7 @@ test.describe("login required", () => {
 
     await page.getByLabel("Password").fill(ADMIN.password)
     await page.getByLabel("Password").press("Enter")
-    await expect(page).toHaveURL(`${server().url}/settings`)
+    await expect(page).toHaveURL(`${server().url}/settings/keys`)
 
     await page.getByRole("button", { name: "Log out" }).first().click()
     await expect(page).toHaveURL(`${server().url}/login`)
@@ -59,7 +59,8 @@ test.describe("login required", () => {
       })
     )
 
-    // The status page's next poll finds the session gone.
+    // The next call from the open tab finds the session gone.
+    await dora.getByRole("link", { name: "Settings" }).click()
     await expect(dora).toHaveURL(/\/login\?next=/)
     await dora.getByLabel("Handle").fill("dora")
     await dora.getByLabel("Password").fill("dora-password-1")

@@ -1,0 +1,458 @@
+// Saved keys (ARCHITECTURE §3.12). A key goes in and never comes out, and it's sent only
+// to the origins the user confirmed. Every origin is confirmed by the user, one by one:
+// the server can't tell a stolen session's choices from the user's.
+import type { Connection, Credential, ProviderKindInfo } from "@rp/shared/providers.ts"
+import { originOf } from "@rp/shared/providers.ts"
+import { type FormEvent, useState } from "react"
+import { AsyncView, ErrorAlert, useAction } from "../actions.tsx"
+import { routes } from "../routes.tsx"
+import { Button } from "../ui/Button.tsx"
+import { Checkbox } from "../ui/Choice.tsx"
+import { ConfirmDialog, Dialog, DialogActions } from "../ui/Dialog.tsx"
+import { Field, Fieldset, Input, Textarea } from "../ui/Field.tsx"
+import { Badge, Card, CardHeader, EmptyState } from "../ui/Surface.tsx"
+import { connectionsAtom, credentialsAtom, effectiveOrigin, kindsAtom } from "./connections/data.ts"
+import { useTitle } from "./shell.tsx"
+
+const keyLabel = (credential: Credential) =>
+  credential.keyHint ? `Key ending in ${credential.keyHint}` : "A short key (no hint shown)"
+
+/** Lets a saved key go to one more address. The key is typed again, as proof. */
+export function AllowHostDialog({
+  credential,
+  url,
+  open,
+  onOpenChange
+}: {
+  credential: Credential
+  /** The address to allow; the user types one when it's null. */
+  url: string | null
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}) {
+  const action = useAction()
+  const [apiKey, setApiKey] = useState("")
+  const [typedUrl, setTypedUrl] = useState("")
+  const target = url ?? typedUrl.trim()
+  const origin = originOf(target)
+  const submit = async (event: FormEvent) => {
+    event.preventDefault()
+    const result = await action.run(
+      (client) => client("AllowCredentialHost", { credentialId: credential.id, apiKey, url: target }),
+      ["credentials", "connections"]
+    )
+    if (result.ok) {
+      setApiKey("")
+      setTypedUrl("")
+      onOpenChange(false)
+    }
+  }
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={onOpenChange}
+      title={
+        url ? `Allow “${credential.name}” for ${origin ?? url}?` : `Allow “${credential.name}” for another address`
+      }
+      description="Type the key again to prove it's you. Only allow an address you set up yourself: anyone it points to receives the key."
+    >
+      <form onSubmit={submit} className="flex flex-col gap-4">
+        {url === null && (
+          <Field
+            label="Address"
+            description={origin ? `The key may go to ${origin}.` : "A URL such as https://api.example.com/v1."}
+          >
+            <Input
+              value={typedUrl}
+              onValueChange={setTypedUrl}
+              inputMode="url"
+              autoCapitalize="none"
+              spellCheck={false}
+            />
+          </Field>
+        )}
+        <Field label="Key" description={keyLabel(credential)}>
+          <Input type="password" value={apiKey} onValueChange={setApiKey} autoComplete="off" spellCheck={false} />
+        </Field>
+        <ErrorAlert error={action.error} title="Not allowed" />
+        <DialogActions>
+          <Button onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button
+            type="submit"
+            variant="primary"
+            pending={action.pending}
+            disabled={apiKey.trim() === "" || origin === null}
+          >
+            Allow
+          </Button>
+        </DialogActions>
+      </form>
+    </Dialog>
+  )
+}
+
+interface Candidate {
+  readonly origin: string
+  /** Not among the origins the credential allowed before. */
+  readonly isNew: boolean
+  readonly usedBy: ReadonlyArray<string>
+}
+
+/**
+ * The origins to offer when a key is replaced: those of the connections using it first,
+ * then the ones it allowed before. None is ticked: the user confirms each.
+ */
+const candidatesFor = (
+  credential: Credential,
+  connections: ReadonlyArray<Connection>,
+  kinds: ReadonlyArray<ProviderKindInfo>
+): ReadonlyArray<Candidate> => {
+  const usedBy = new Map<string, Array<string>>()
+  for (const connection of connections) {
+    if (connection.credentialId !== credential.id) continue
+    const origin = effectiveOrigin(connection, kinds)
+    if (origin !== null) usedBy.set(origin, [...(usedBy.get(origin) ?? []), connection.name])
+  }
+  const origins = [...new Set([...usedBy.keys(), ...credential.origins])]
+  return origins.map((origin) => ({
+    origin,
+    isNew: !credential.origins.includes(origin),
+    usedBy: usedBy.get(origin) ?? []
+  }))
+}
+
+function ReplaceKeyDialog({
+  credential,
+  connections,
+  kinds,
+  onOpenChange
+}: {
+  credential: Credential
+  connections: ReadonlyArray<Connection>
+  kinds: ReadonlyArray<ProviderKindInfo>
+  onOpenChange: (open: boolean) => void
+}) {
+  const action = useAction()
+  const [apiKey, setApiKey] = useState("")
+  const [extra, setExtra] = useState<ReadonlyArray<string>>([])
+  const [typedUrl, setTypedUrl] = useState("")
+  const [confirmed, setConfirmed] = useState<ReadonlySet<string>>(new Set())
+  const candidates = [
+    ...candidatesFor(credential, connections, kinds),
+    ...extra
+      .filter(
+        (origin) => !candidatesFor(credential, connections, kinds).some((candidate) => candidate.origin === origin)
+      )
+      .map((origin) => ({ origin, isNew: !credential.origins.includes(origin), usedBy: [] }))
+  ]
+  const typedOrigin = originOf(typedUrl.trim())
+
+  const toggle = (origin: string, checked: boolean) => {
+    const next = new Set(confirmed)
+    if (checked) next.add(origin)
+    else next.delete(origin)
+    setConfirmed(next)
+  }
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault()
+    const result = await action.run(
+      (client) =>
+        client("ReplaceCredentialKey", {
+          credentialId: credential.id,
+          apiKey,
+          urls: candidates.filter((candidate) => confirmed.has(candidate.origin)).map((candidate) => candidate.origin)
+        }),
+      ["credentials", "connections"]
+    )
+    if (result.ok) onOpenChange(false)
+  }
+
+  return (
+    <Dialog
+      open
+      onOpenChange={onOpenChange}
+      title={`Replace the key of “${credential.name}”`}
+      description="A new key starts with no allowed addresses. Tick each address it may be sent to."
+    >
+      <form onSubmit={submit} className="flex flex-col gap-4">
+        <Field label="New key" description="It's never shown again.">
+          <Input type="password" value={apiKey} onValueChange={setApiKey} autoComplete="off" spellCheck={false} />
+        </Field>
+        <Fieldset
+          legend="Send the new key to"
+          description="Addresses marked new weren't allowed for the old key. Make sure you set each of them up yourself."
+        >
+          {candidates.length === 0 && <p className="text-sm text-muted">No addresses yet. Add one below.</p>}
+          {candidates.map((candidate) => (
+            <Checkbox
+              key={candidate.origin}
+              checked={confirmed.has(candidate.origin)}
+              onCheckedChange={(checked) => toggle(candidate.origin, checked)}
+              description={
+                candidate.usedBy.length > 0 ? `Used by ${candidate.usedBy.join(", ")}` : "No connection uses it now"
+              }
+            >
+              <span className="font-mono [overflow-wrap:anywhere]">{candidate.origin}</span>{" "}
+              {candidate.isNew && <Badge tone="warning">new</Badge>}
+            </Checkbox>
+          ))}
+          <div className="flex items-end gap-2">
+            <Field label="Another address" className="flex-1">
+              <Input
+                value={typedUrl}
+                onValueChange={setTypedUrl}
+                inputMode="url"
+                autoCapitalize="none"
+                spellCheck={false}
+              />
+            </Field>
+            <Button
+              disabled={typedOrigin === null}
+              onClick={() => {
+                if (typedOrigin === null) return
+                setExtra([...extra, typedOrigin])
+                toggle(typedOrigin, true)
+                setTypedUrl("")
+              }}
+            >
+              Add
+            </Button>
+          </div>
+        </Fieldset>
+        <ErrorAlert error={action.error} title="The key wasn't replaced" />
+        <DialogActions>
+          <Button onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button type="submit" variant="primary" pending={action.pending} disabled={apiKey.trim() === ""}>
+            Replace key
+          </Button>
+        </DialogActions>
+      </form>
+    </Dialog>
+  )
+}
+
+function CreateCredentialDialog({ onOpenChange }: { onOpenChange: (open: boolean) => void }) {
+  const action = useAction()
+  const [name, setName] = useState("")
+  const [apiKey, setApiKey] = useState("")
+  const [urls, setUrls] = useState("")
+  const lines = urls
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line !== "")
+  const bad = lines.filter((line) => originOf(line) === null)
+  const submit = async (event: FormEvent) => {
+    event.preventDefault()
+    const result = await action.run(
+      (client) => client("CreateCredential", { name: name.trim(), apiKey, urls: lines }),
+      ["credentials"]
+    )
+    if (result.ok) onOpenChange(false)
+  }
+  return (
+    <Dialog
+      open
+      onOpenChange={onOpenChange}
+      title="Save a key"
+      description="Saved once, usable by any number of connections."
+    >
+      <form onSubmit={submit} className="flex flex-col gap-4">
+        <Field label="Name">
+          <Input value={name} onValueChange={setName} autoComplete="off" />
+        </Field>
+        <Field label="Key" description="It's never shown again.">
+          <Input type="password" value={apiKey} onValueChange={setApiKey} autoComplete="off" spellCheck={false} />
+        </Field>
+        <Field
+          label="Addresses it may be sent to"
+          description="One URL per line. Only the scheme, host and port count."
+          error={bad.length > 0 ? `Not a URL: ${bad.join(", ")}` : null}
+        >
+          <Textarea value={urls} onChange={(event) => setUrls(event.target.value)} spellCheck={false} />
+        </Field>
+        <ErrorAlert error={action.error} title="The key wasn't saved" />
+        <DialogActions>
+          <Button onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button
+            type="submit"
+            variant="primary"
+            pending={action.pending}
+            disabled={name.trim() === "" || apiKey.trim() === "" || bad.length > 0}
+          >
+            Save key
+          </Button>
+        </DialogActions>
+      </form>
+    </Dialog>
+  )
+}
+
+function RenameDialog({ credential, onOpenChange }: { credential: Credential; onOpenChange: (open: boolean) => void }) {
+  const action = useAction()
+  const [name, setName] = useState(credential.name)
+  const submit = async (event: FormEvent) => {
+    event.preventDefault()
+    const result = await action.run(
+      (client) => client("RenameCredential", { credentialId: credential.id, name: name.trim() }),
+      ["credentials", "connections"]
+    )
+    if (result.ok) onOpenChange(false)
+  }
+  return (
+    <Dialog open onOpenChange={onOpenChange} title="Rename the key">
+      <form onSubmit={submit} className="flex flex-col gap-4">
+        <Field label="Name">
+          <Input value={name} onValueChange={setName} autoComplete="off" />
+        </Field>
+        <ErrorAlert error={action.error} />
+        <DialogActions>
+          <Button onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button type="submit" variant="primary" pending={action.pending} disabled={name.trim() === ""}>
+            Rename
+          </Button>
+        </DialogActions>
+      </form>
+    </Dialog>
+  )
+}
+
+type Open = { readonly dialog: "rename" | "replace" | "allow" | "delete"; readonly credential: Credential } | null
+
+function CredentialList({
+  credentials,
+  connections,
+  kinds
+}: {
+  credentials: ReadonlyArray<Credential>
+  connections: ReadonlyArray<Connection>
+  kinds: ReadonlyArray<ProviderKindInfo>
+}) {
+  const remove = useAction()
+  const [open, setOpen] = useState<Open>(null)
+  const close = (isOpen: boolean) => {
+    if (!isOpen) setOpen(null)
+  }
+  if (credentials.length === 0) {
+    return (
+      <EmptyState title="No saved keys">
+        <p>Keys typed into a connection are saved here too, under the connection's name.</p>
+      </EmptyState>
+    )
+  }
+  return (
+    <>
+      <ul className="flex flex-col divide-y divide-border">
+        {credentials.map((credential) => (
+          <li key={credential.id} className="flex flex-col gap-2 py-3 first:pt-0 last:pb-0">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+              <div className="flex min-w-0 flex-col gap-1">
+                <p className="font-medium [overflow-wrap:anywhere]">{credential.name}</p>
+                <p className="text-sm text-muted">
+                  {keyLabel(credential)} · used by {credential.usedBy} connection{credential.usedBy === 1 ? "" : "s"}
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button variant="ghost" onClick={() => setOpen({ dialog: "rename", credential })}>
+                  Rename
+                </Button>
+                <Button variant="ghost" onClick={() => setOpen({ dialog: "allow", credential })}>
+                  Allow an address
+                </Button>
+                <Button variant="ghost" onClick={() => setOpen({ dialog: "replace", credential })}>
+                  Replace key
+                </Button>
+                <Button variant="ghost" onClick={() => setOpen({ dialog: "delete", credential })}>
+                  Delete
+                </Button>
+              </div>
+            </div>
+            <ul className="flex flex-wrap gap-1.5" aria-label={`Addresses ${credential.name} may be sent to`}>
+              {credential.origins.length === 0 ? (
+                <li>
+                  <Badge tone="warning">not sent anywhere yet</Badge>
+                </li>
+              ) : (
+                credential.origins.map((origin) => (
+                  <li key={origin}>
+                    <Badge>{origin}</Badge>
+                  </li>
+                ))
+              )}
+            </ul>
+          </li>
+        ))}
+      </ul>
+      {open?.dialog === "rename" && <RenameDialog credential={open.credential} onOpenChange={close} />}
+      {open?.dialog === "replace" && (
+        <ReplaceKeyDialog credential={open.credential} connections={connections} kinds={kinds} onOpenChange={close} />
+      )}
+      {open?.dialog === "allow" && (
+        <AllowHostDialog credential={open.credential} url={null} open onOpenChange={close} />
+      )}
+      {open?.dialog === "delete" && (
+        <ConfirmDialog
+          open
+          onOpenChange={close}
+          title={`Delete “${open.credential.name}”?`}
+          description={
+            open.credential.usedBy > 0
+              ? `${open.credential.usedBy} connection${open.credential.usedBy === 1 ? " uses" : "s use"} it, and will be left without a key.`
+              : "No connection uses it."
+          }
+          confirmLabel="Delete key"
+          pending={remove.pending}
+          onConfirm={async () => {
+            const result = await remove.run(
+              (client) => client("DeleteCredential", { credentialId: open.credential.id }),
+              ["credentials", "connections"]
+            )
+            if (result.ok) setOpen(null)
+          }}
+        >
+          <ErrorAlert error={remove.error} />
+        </ConfirmDialog>
+      )}
+    </>
+  )
+}
+
+function CredentialsPage() {
+  useTitle("Keys")
+  const [creating, setCreating] = useState(false)
+  return (
+    <Card>
+      <CardHeader
+        title="Saved keys"
+        description="Each key is sent only to the addresses you allowed for it."
+        actions={
+          <Button variant="primary" onClick={() => setCreating(true)}>
+            Save a key
+          </Button>
+        }
+      />
+      <AsyncView atom={kindsAtom}>
+        {(kinds) => (
+          <AsyncView atom={connectionsAtom}>
+            {(connections) => (
+              <AsyncView atom={credentialsAtom} loading="Loading keys…">
+                {(credentials) => <CredentialList credentials={credentials} connections={connections} kinds={kinds} />}
+              </AsyncView>
+            )}
+          </AsyncView>
+        )}
+      </AsyncView>
+      {creating && <CreateCredentialDialog onOpenChange={setCreating} />}
+    </Card>
+  )
+}
+
+export const register = () => {
+  routes.register({
+    id: "settings.credentials",
+    parent: "settings",
+    path: "keys",
+    component: CredentialsPage,
+    nav: { label: "Keys", order: 20 }
+  })
+}
