@@ -17,6 +17,7 @@ import {
 } from "@rp/shared/docs/preset.ts"
 import { type ImportReport, ReportBuilder, shownList, shownText } from "@rp/shared/importReport.ts"
 import { Schema } from "effect"
+import { defaultLimits, FormatError, parseJson } from "./safety.ts"
 
 const ST_PRESET_FORMAT = "st-chat-completion-preset"
 
@@ -236,11 +237,10 @@ const isObject = (v: unknown): v is Json => typeof v === "object" && v !== null 
  */
 const primitiveOr = (v: unknown, fallback: unknown): unknown => (typeof v === "object" && v !== null ? fallback : v)
 
-// Limits for an untrusted file. ST's bundled default chat-completion preset is 8 KB and its
-// largest bundled JSON file 27 KB, so 2 MB leaves room for presets with long prompts and many
-// regex scripts while keeping an import under a second of CPU.
+// ST's bundled default chat-completion preset is 8 KB and its largest bundled JSON file 27 KB,
+// so 2 MB leaves room for presets with long prompts and many regex scripts while keeping an
+// import under a second of CPU. The other JSON limits are the shared ones (safety.ts).
 export const MAX_PRESET_BYTES = 2 * 1024 * 1024
-export const MAX_JSON_DEPTH = 64
 const done = (r: ReportBuilder, format: string, document: PresetDoc | null): PresetImport => ({
   document,
   report: r.build(format)
@@ -269,39 +269,6 @@ class FreshIds {
 const stringIds = (list: ReadonlyArray<unknown>, key: string) =>
   list.flatMap((x) => (isObject(x) && typeof x[key] === "string" ? [x[key]] : []))
 
-/** Whether the JSON text nests deeper than `max`, counting brackets outside strings. */
-const nestsDeeperThan = (text: string, max: number) => {
-  let depth = 0
-  let inString = false
-  for (let i = 0; i < text.length; i++) {
-    const c = text.charCodeAt(i)
-    if (inString) {
-      if (c === 0x5c) i++
-      else if (c === 0x22) inString = false
-    } else if (c === 0x22) inString = true
-    else if (c === 0x5b || c === 0x7b) {
-      if (++depth > max) return true
-    } else if (c === 0x5d || c === 0x7d) depth--
-  }
-  return false
-}
-
-/**
- * A copy of parsed JSON without `__proto__` keys, which would replace an object's prototype
- * if a later step assigned them. Recursion is bounded by the depth check.
- */
-const withoutProtoKeys = (value: unknown, path: Array<string | number>, r: ReportBuilder): unknown => {
-  if (Array.isArray(value)) return value.map((v, i) => withoutProtoKeys(v, [...path, i], r))
-  if (!isObject(value)) return value
-  const out: Json = {}
-  for (const key of Object.keys(value)) {
-    if (key === "__proto__")
-      r.add("warning", "preset.forbidden_key", "A field named `__proto__` was dropped.", [...path, key])
-    else out[key] = withoutProtoKeys(value[key], [...path, key], r)
-  }
-  return out
-}
-
 /** The other kinds of ST JSON file, by ST's own tests where it has them (preset-manager.js). */
 const otherKind = (o: Json): readonly [format: string, label: string] | undefined => {
   const has = (...keys: Array<string>) => keys.every((k) => Object.hasOwn(o, k))
@@ -322,24 +289,16 @@ const otherKind = (o: Json): readonly [format: string, label: string] | undefine
  */
 export const importStPreset = (input: string | Uint8Array): PresetImport => {
   const r = new ReportBuilder()
-  const bytes = typeof input === "string" ? Buffer.byteLength(input) : input.byteLength
-  if (bytes > MAX_PRESET_BYTES) {
-    r.add("error", "preset.too_large", `The file is over the ${MAX_PRESET_BYTES / 1024 / 1024} MB limit for presets.`)
-    return done(r, "unknown", null)
-  }
-  const text = typeof input === "string" ? input.replace(/^\uFEFF/, "") : new TextDecoder().decode(input)
-  if (nestsDeeperThan(text, MAX_JSON_DEPTH)) {
-    r.add("error", "preset.too_deep", `The file nests more than ${MAX_JSON_DEPTH} levels deep.`)
-    return done(r, "unknown", null)
-  }
-  let json: unknown
+  let parsed: unknown
   try {
-    json = JSON.parse(text)
-  } catch {
-    r.add("error", "preset.invalid_json", "The file isn't valid JSON.")
+    // A leading byte-order mark is dropped when the bytes are decoded.
+    const bytes = typeof input === "string" ? new TextEncoder().encode(input) : input
+    parsed = parseJson(bytes, MAX_PRESET_BYTES, defaultLimits, r)
+  } catch (error) {
+    if (!(error instanceof FormatError)) throw error
+    r.add("error", error.code, error.message)
     return done(r, "unknown", null)
   }
-  const parsed = withoutProtoKeys(json, [], r)
   if (!isObject(parsed)) {
     r.add("error", "preset.unrecognized", "The file isn't a SillyTavern chat-completion preset.")
     return done(r, "unknown", null)

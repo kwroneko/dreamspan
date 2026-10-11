@@ -2,13 +2,8 @@ import { PresetDoc } from "@rp/shared/docs/preset.ts"
 import { Schema } from "effect"
 import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
-import {
-  exportStPreset,
-  importStPreset,
-  MAX_JSON_DEPTH,
-  MAX_PRESET_BYTES,
-  type PresetImport
-} from "../src/formats/preset.ts"
+import { exportStPreset, importStPreset, MAX_PRESET_BYTES, type PresetImport } from "../src/formats/preset.ts"
+import { defaultLimits } from "../src/formats/safety.ts"
 
 const fixture = (name: string) => readFileSync(new URL(`fixtures/presets/${name}.json`, import.meta.url), "utf8")
 
@@ -416,11 +411,11 @@ describe("hardening: the file is untrusted", () => {
     for (const input of [valid.padEnd(MAX_PRESET_BYTES + 1, " "), new Uint8Array(MAX_PRESET_BYTES + 1).fill(32)]) {
       const result = importStPreset(input)
       expect(result.document).toBeNull()
-      expect(codes(result)).toEqual(["preset.too_large"])
+      expect(codes(result)).toEqual(["json.too_large"])
     }
     // Measured in bytes, not characters.
     const wide = valid.slice(0, -1) + `,"x":"${"é".repeat(MAX_PRESET_BYTES / 2)}"}`
-    expect(codes(importStPreset(wide))).toEqual(["preset.too_large"])
+    expect(codes(importStPreset(wide))).toEqual(["json.too_large"])
   })
 
   it("refuses nesting deeper than the bound, counting only brackets outside strings", () => {
@@ -430,15 +425,15 @@ describe("hardening: the file is untrusted", () => {
         "[".repeat(depth) + "]".repeat(depth)
       )
     // The root and `extensions` are two levels.
-    expect(importStPreset(nested(MAX_JSON_DEPTH - 2)).document).not.toBeNull()
-    const result = importStPreset(nested(MAX_JSON_DEPTH - 1))
+    expect(importStPreset(nested(defaultLimits.maxJsonDepth - 2)).document).not.toBeNull()
+    const result = importStPreset(nested(defaultLimits.maxJsonDepth - 1))
     expect(result.document).toBeNull()
-    expect(codes(result)).toEqual(["preset.too_deep"])
+    expect(codes(result)).toEqual(["json.too_deep"])
     const brackets = JSON.stringify(preset({ prompts: [{ identifier: "a", content: '\\"' + "[{".repeat(500) }] }))
     expect(importStPreset(brackets).document).not.toBeNull()
   })
 
-  it("drops __proto__ keys at any depth, so none reaches an object, and keeps `constructor` as data", () => {
+  it("drops prototype keys at any depth and reports each, so none reaches an object", () => {
     const text = `{
       "prompts": [{ "identifier": "a", "content": "x", "__proto__": { "system_prompt": false }, "constructor": "c" }],
       "extensions": { "__proto__": { "polluted": true }, "ok": { "constructor": { "prototype": 1 }, "kept": 1 } },
@@ -447,18 +442,20 @@ describe("hardening: the file is untrusted", () => {
     const result = importStPreset(text)
     const doc = result.document!
     expect(({} as Record<string, unknown>).polluted).toBeUndefined()
-    for (const o of [doc.unsupported, doc.extensions, doc.extensions.ok as object, prompt(doc, "a")!.unsupported!])
+    for (const o of [doc.unsupported, doc.extensions, doc.extensions.ok as object])
       expect(Object.getPrototypeOf(o)).toBe(Object.prototype)
-    expect(doc.extensions).toEqual({ ok: { constructor: { prototype: 1 }, kept: 1 } })
+    expect(doc.extensions).toEqual({ ok: { kept: 1 } })
     expect(Object.hasOwn(doc.extensions, "__proto__")).toBe(false)
     expect(doc.unsupported).toEqual({})
     expect("polluted" in doc.unsupported).toBe(false)
     expect(doc.samplers.temperature).toBe(1)
     expect(prompt(doc, "a")?.system_prompt).toBe(true)
-    expect(prompt(doc, "a")?.unsupported).toEqual({ constructor: "c" })
-    expect(result.report.issues.filter((i) => i.code === "preset.forbidden_key").map((i) => i.path)).toEqual([
+    expect(prompt(doc, "a")).not.toHaveProperty("unsupported")
+    expect(result.report.issues.filter((i) => i.code === "json.forbidden_key").map((i) => i.path)).toEqual([
       ["prompts", 0, "__proto__"],
+      ["prompts", 0, "constructor"],
       ["extensions", "__proto__"],
+      ["extensions", "ok", "constructor"],
       ["__proto__"]
     ])
   })
@@ -501,12 +498,12 @@ describe("hardening: the file is untrusted", () => {
     const fill = (unit: string, around: number) => unit.repeat(Math.floor((MAX_PRESET_BYTES - around) / unit.length))
     const long = "K".repeat(1000)
     const files = [
-      // Many order lists without ids, each listed in one message.
-      `{"prompt_order":[${fill("{},", 100)}{"character_id":100001,"order":[]}]}`,
+      // Many order lists without ids, each listed in one message (within the container cap).
+      `{"prompt_order":[${"{},".repeat(200_000)}{"character_id":100001,"order":[]}]}`,
       // A few huge keys.
       `{"prompt_order":[],${[1, 2, 3, 4].map((i) => `"${"K".repeat(MAX_PRESET_BYTES / 5)}${i}":0`).join(",")}}`,
-      // Many issues, each with a long path of long keys.
-      `{"prompt_order":[],"extensions":${`{"${long}":`.repeat(60)}[${fill('{"__proto__":1},', 70_000)}{}]${"}".repeat(61)}`,
+      // Issues with long paths of long keys (within the cap on prototype keys).
+      `{"prompt_order":[],"extensions":${`{"${long}":`.repeat(60)}[${'{"__proto__":1},'.repeat(90)}{}]${"}".repeat(61)}`,
       // Many repeated long prompt identifiers.
       `{"prompt_order":[],"prompts":[${fill(`{"identifier":"${long}"},`, 100)}{}]}`
     ]
