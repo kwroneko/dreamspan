@@ -891,3 +891,14 @@ One write operation, `ImportFile` (`db/libraryWrites.ts`), stores a parsed file 
 - **The embedded lorebook** stays in the card document (§8).
 
 `ExportSource` (`db/importReads.ts`) reads what an export takes: the ref's head document, the card's first note, and the stored files the document names. **Only files the user holds a reference to come back.** A document is data, and an edit could put any media id in it; another user's file is left out as if it weren't there (`test/importStorage.test.ts`).
+
+### 10.2 Importers and detection
+
+**The importer registry** (`importer/importers.ts`, PLUGINS §8) is a registry of §6's kind: entries by id, overridden or disabled for the length of a scope. An importer has a format id, a `detect` test and a `parse` from bytes to a document, its report and the files that came with it. The built-ins register in order: `card` (PNG, CHARX, or JSON with a `spec`), `st-world-info` (JSON with `entries`), `st-preset` (any field only ST's preset and template files have, `isStPresetFile` in `formats/preset.ts`, so instruct and context templates reach the preset importer and are reported as unsupported), and `card-v1` (JSON with a `name`, asked last since the key is common). Parsing runs in a format worker (§10.3), so the registry lives there: a plugin's importer will be a module that worker loads.
+
+**Detection reads the bytes, never the name** (`importer/detect.ts`). PNG and zip by their magic bytes; for JSON, the top-level keys, read in one pass without parsing: strings are skipped by their quotes and nesting is a counter, so a hostile file costs a linear scan and can't overflow a stack. The importer that's chosen parses the file properly, under its own caps (§8). A file no importer recognizes, and a file its importer rejects (`FormatError`), become a report with one error and nothing to store.
+
+**What a parse returns** (`parseFile`): the report, the SHA-256 of the file, the document and its label as JSON text, and each file that came with it, with its SHA-256, size and image type from its magic bytes (and a PNG's size from its header).
+- **Labels:** a card's name, a lorebook's name, a preset's file name (ST names presets by file), falling back to the file name; control characters removed, at most 200 characters.
+- **ST's Character's Note** leaves the card's `extensions` and becomes the note document, so it lives in one place. ST's defaults apply: depth 4, role `system`. An empty one, which ST writes into every card, stays in the extensions untouched.
+- **Files are copied to buffers of their own** before they cross to the main thread. An extracted asset can be a view into the upload or into Node's shared buffer pool, and transferring that buffer would detach the pool under the worker.

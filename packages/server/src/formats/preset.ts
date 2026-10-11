@@ -270,18 +270,32 @@ const stringIds = (list: ReadonlyArray<unknown>, key: string) =>
   list.flatMap((x) => (isObject(x) && typeof x[key] === "string" ? [x[key]] : []))
 
 /** The other kinds of ST JSON file, by ST's own tests where it has them (preset-manager.js). */
+const OTHER_KINDS: ReadonlyArray<readonly [keys: ReadonlyArray<string>, format: string, label: string]> = [
+  [["name", "input_sequence", "output_sequence"], "st-instruct-template", "an instruct template"],
+  [["name", "story_string"], "st-context-template", "a context template"],
+  [["name", "content"], "st-system-prompt", "a system prompt template"],
+  [["temp", "top_k", "top_p", "rep_pen"], "st-text-completion-preset", "a text-completion preset"],
+  [["name", "prefix", "suffix", "separator"], "st-reasoning-template", "a reasoning template"],
+  [["max_length", "min_length"], "st-novelai-preset", "a NovelAI preset"]
+]
+/** An Advanced Formatting export has one of these as an object. */
+const MASTER_EXPORT_KEYS = ["instruct", "context", "sysprompt", "preset", "reasoning"]
+
 const otherKind = (o: Json): readonly [format: string, label: string] | undefined => {
-  const has = (...keys: Array<string>) => keys.every((k) => Object.hasOwn(o, k))
-  if (has("name", "input_sequence", "output_sequence")) return ["st-instruct-template", "an instruct template"]
-  if (has("name", "story_string")) return ["st-context-template", "a context template"]
-  if (has("name", "content")) return ["st-system-prompt", "a system prompt template"]
-  if (has("temp", "top_k", "top_p", "rep_pen")) return ["st-text-completion-preset", "a text-completion preset"]
-  if (has("name", "prefix", "suffix", "separator")) return ["st-reasoning-template", "a reasoning template"]
-  if (has("max_length", "min_length")) return ["st-novelai-preset", "a NovelAI preset"]
-  if (["instruct", "context", "sysprompt", "preset", "reasoning"].some((k) => isObject(o[k])))
-    return ["st-master-export", "an Advanced Formatting export"]
+  const kind = OTHER_KINDS.find(([keys]) => keys.every((k) => Object.hasOwn(o, k)))
+  if (kind) return [kind[1], kind[2]]
+  if (MASTER_EXPORT_KEYS.some((k) => isObject(o[k]))) return ["st-master-export", "an Advanced Formatting export"]
   return undefined
 }
+
+/**
+ * Whether a JSON file with these top-level keys is one `importStPreset` should read: a
+ * chat-completion preset, or another ST preset or template it reports as unsupported.
+ */
+export const isStPresetFile = (keys: ReadonlySet<string>) =>
+  CHAT_COMPLETION_FIELDS.some((k) => keys.has(k)) ||
+  OTHER_KINDS.some(([kindKeys]) => kindKeys.every((k) => keys.has(k))) ||
+  MASTER_EXPORT_KEYS.some((k) => keys.has(k))
 
 /**
  * An ST chat-completion preset file to the document. Never throws on a file's content: every
