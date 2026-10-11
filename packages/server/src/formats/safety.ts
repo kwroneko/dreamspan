@@ -1,8 +1,8 @@
 // What every format parser shares: its error, the caps on untrusted input, and JSON parsing
-// that can't hand a prototype key or unbounded nesting to the code after it. Imported files
-// are data only: nothing in them is ever executed or rendered.
+// that can't hand a prototype key, unbounded nesting or millions of objects to the code after
+// it. Imported files are data only: nothing in them is ever executed or rendered.
+import type { ReportBuilder } from "@rp/shared/importReport.ts"
 import { Effect, Schema } from "effect"
-import { ImportIssue } from "@rp/shared/importReport.ts"
 
 /** A file that can't be imported at all. Recoverable problems are issues in the report instead. */
 export class FormatError extends Schema.TaggedError<FormatError>()("FormatError", {
@@ -14,9 +14,16 @@ export class FormatError extends Schema.TaggedError<FormatError>()("FormatError"
 export interface Limits {
   /** Any imported file. */
   readonly maxFileBytes: number
-  /** A JSON document: a card, a lorebook, or a PNG's card chunk once decoded. */
-  readonly maxJsonBytes: number
+  /** A card's JSON: a JSON file, a PNG's card chunk once decoded, or a CHARX's card.json. */
+  readonly maxCardJsonBytes: number
+  /** A World Info file. */
+  readonly maxLorebookJsonBytes: number
   readonly maxJsonDepth: number
+  /** Objects and lists in one JSON document, counted before it's parsed. */
+  readonly maxJsonContainers: number
+  /** Prototype keys dropped before a file counts as hostile and is refused. */
+  readonly maxForbiddenKeys: number
+  readonly maxLorebookEntries: number
   readonly maxPngChunks: number
   readonly maxPngChunkBytes: number
   readonly maxZipEntries: number
@@ -32,8 +39,16 @@ const MiB = 1024 * 1024
 
 export const defaultLimits: Limits = {
   maxFileBytes: 64 * MiB,
-  maxJsonBytes: 32 * MiB,
+  // About 2M tokens of text, more than any model's context holds: a bigger card couldn't be used.
+  maxCardJsonBytes: 8 * MiB,
+  // Lorebooks are scanned, not sent whole, so they can outgrow a context: 20,000 entries of
+  // 1 KB fit with room to spare.
+  maxLorebookJsonBytes: 32 * MiB,
   maxJsonDepth: 64,
+  // A 20,000-entry lorebook has about 120,000: entries, key lists, extensions.
+  maxJsonContainers: 250_000,
+  maxForbiddenKeys: 100,
+  maxLorebookEntries: 20_000,
   maxPngChunks: 16_384,
   maxPngChunkBytes: 32 * MiB,
   maxZipEntries: 1024,
@@ -59,56 +74,70 @@ export const attempt = <A>(parse: () => A): Effect.Effect<A, FormatError> =>
 
 export type Path = ReadonlyArray<string | number>
 
-/** Collects a file's recoverable problems for its import report. */
-export class Issues {
-  readonly list: Array<ImportIssue> = []
-  warn(code: string, message: string, path: Path) {
-    this.list.push(new ImportIssue({ level: "warning", code, message, path: [...path] }))
-  }
-  info(code: string, message: string, path?: Path) {
-    this.list.push(new ImportIssue({ level: "info", code, message, ...(path ? { path: [...path] } : {}) }))
+/**
+ * Counts nesting and containers in the raw bytes, so a document that would cost too much
+ * to parse is refused before `JSON.parse` builds it. Invalid JSON is left to the parser.
+ */
+const scanJson = (bytes: Uint8Array, limits: Limits) => {
+  let depth = 0
+  let containers = 0
+  let inString = false
+  for (let i = 0; i < bytes.length; i++) {
+    const byte = bytes[i]
+    if (inString) {
+      if (byte === 0x5c) i++
+      else if (byte === 0x22) inString = false
+    } else if (byte === 0x22) {
+      inString = true
+    } else if (byte === 0x7b || byte === 0x5b) {
+      if (++depth > limits.maxJsonDepth) {
+        fail("json.too_deep", `The JSON is nested more than ${limits.maxJsonDepth} levels deep.`)
+      }
+      if (++containers > limits.maxJsonContainers) {
+        fail("json.too_many_containers", `The JSON has more than ${limits.maxJsonContainers} objects and lists.`)
+      }
+    } else if (byte === 0x7d || byte === 0x5d) {
+      depth--
+    }
   }
 }
-
-export const isObject = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
 
 const FORBIDDEN_KEYS = new Set(["__proto__", "constructor", "prototype"])
 
 /**
- * Parses untrusted JSON. Keys that could reach an object's prototype (`__proto__`,
- * `constructor`, `prototype`) are dropped and reported, so no later spread, assign or merge
- * can act on them, and nesting deeper than the limit rejects the file.
+ * Parses untrusted JSON of at most `maxBytes`. Keys that could reach an object's prototype
+ * (`__proto__`, `constructor`, `prototype`) are dropped and reported, so no later spread,
+ * assign or merge can act on them; more than a few of them reject the file.
  */
-export const parseJson = (bytes: Uint8Array, limits: Limits, issues: Issues): unknown => {
-  if (bytes.byteLength > limits.maxJsonBytes) {
-    fail("json.too_large", `The JSON is larger than ${limits.maxJsonBytes} bytes.`)
-  }
+export const parseJson = (bytes: Uint8Array, maxBytes: number, limits: Limits, issues: ReportBuilder): unknown => {
+  if (bytes.byteLength > maxBytes) fail("json.too_large", `The JSON is larger than ${maxBytes} bytes.`)
+  scanJson(bytes, limits)
   let value: unknown
   try {
     value = JSON.parse(new TextDecoder().decode(bytes))
   } catch {
     return fail("json.invalid", "The file isn't valid JSON.")
   }
-  const walk = (node: unknown, path: Array<string | number>) => {
+  let forbidden = 0
+  const path: Array<string | number> = []
+  // The scan bounded the depth, so the recursion is bounded too.
+  const walk = (node: unknown) => {
     if (typeof node !== "object" || node === null) return
-    if (path.length >= limits.maxJsonDepth) {
-      fail("json.too_deep", `The JSON is nested more than ${limits.maxJsonDepth} levels deep.`)
-    }
-    if (Array.isArray(node)) {
-      node.forEach((item, index) => walk(item, [...path, index]))
-      return
-    }
     const record = node as Record<string, unknown>
     for (const key of Object.keys(record)) {
+      path.push(Array.isArray(node) ? Number(key) : key)
       if (FORBIDDEN_KEYS.has(key)) {
+        if (++forbidden > limits.maxForbiddenKeys) {
+          fail("json.forbidden_keys", `The JSON has more than ${limits.maxForbiddenKeys} prototype keys.`)
+        }
         delete record[key]
-        issues.warn("json.forbidden_key", `The key "${key}" was dropped.`, [...path, key])
+        issues.add("warning", "json.forbidden_key", `The key "${key}" was dropped.`, path)
       } else {
-        walk(record[key], [...path, key])
+        walk(record[key])
       }
+      path.pop()
     }
   }
-  walk(value, [])
+  walk(value)
   return value
 }

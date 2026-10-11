@@ -4,7 +4,7 @@ import { cardToJson, exportCardCharx, exportCardJson, exportCardPng } from "../.
 import { importCard } from "../../src/formats/cardImport.ts"
 import { decodeText, readChunks } from "../../src/formats/png.ts"
 import { defaultLimits } from "../../src/formats/safety.ts"
-import { cardChunk, cardV3, failure, json, png, run, stCardV2, textChunk } from "./support.ts"
+import { cardChunk, cardV3, failure, json, png, run, stCardV2, textChunk, zip } from "./support.ts"
 
 const imported = (value: unknown) => run(importCard(json(value))).card
 
@@ -47,7 +47,7 @@ describe("card export", () => {
     const data = cardToJson(imported(stCardV2()), "v3").data as { character_book?: { entries: Array<unknown> } }
     const entry = data.character_book!.entries[1]
     expect(entry).toMatchObject({
-      id: 1,
+      id: 8,
       position: "after_char",
       use_regex: false,
       extensions: { position: 1, depth: 4, role: 0, selectiveLogic: 0, probability: 100, useProbability: true }
@@ -131,5 +131,44 @@ describe("CHARX export", () => {
     const result = run(importCard(exportCardCharx(card, { avatar: null, assets: [{ uri, ext: "png", bytes: png() }] })))
     expect(result.card.assets).toEqual([])
     expect(result.report.issues).toEqual([])
+  })
+
+  it("never writes two files under one name, so our import takes every export back", () => {
+    const asset = (type: string, name: string, path: string) => ({ type, name, ext: "png", uri: `embeded://${path}` })
+    const base = imported(cardV3())
+    // The avatar keeps its own path, so an asset at the default avatar path doesn't collide.
+    const charx = zip([
+      {
+        name: "card.json",
+        data: json({
+          ...cardV3(),
+          data: {
+            ...cardV3().data,
+            assets: [asset("icon", "main", "a/1.png"), asset("emotion", "smile", "assets/icon/images/main.png")]
+          }
+        })
+      },
+      { name: "a/1.png", data: png(), method: 0 },
+      { name: "assets/icon/images/main.png", data: png(textChunk("x", "smile")), method: 0 }
+    ])
+    const first = run(importCard(charx))
+    const again = run(importCard(exportCardCharx(first.card, { avatar: first.avatar, assets: first.assets })))
+    expect(again.avatar).toEqual(first.avatar)
+    expect(again.assets).toEqual(first.assets)
+    // An asset named like card.json, or at the path the avatar takes, is left out.
+    const card: CardDoc = {
+      ...base,
+      assets: [asset("other", "x", "card.json"), asset("other", "y", "assets/icon/images/main.png")]
+    }
+    const files = [
+      { uri: "embeded://card.json", ext: "png", bytes: png() },
+      { uri: "embeded://assets/icon/images/main.png", ext: "png", bytes: png() }
+    ]
+    const avatar = { uri: "ccdefault:", ext: "png", bytes: png() }
+    const result = run(importCard(exportCardCharx(card, { avatar, assets: files })))
+    expect(result.card.name).toBe("Moss")
+    expect(result.card.assets).toEqual([
+      { type: "icon", uri: "embeded://assets/icon/images/main.png", name: "main", ext: "png" }
+    ])
   })
 })

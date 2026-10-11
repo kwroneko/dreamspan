@@ -190,3 +190,59 @@ export const zip = (files: ReadonlyArray<ZipFile>) => {
   end.writeUInt32LE(offset, 16)
   return Buffer.concat([...locals, directory, end])
 }
+
+/** An ST World Info file, as ST saves one. */
+export const worldInfo = () => ({
+  entries: {
+    "3": {
+      uid: 3,
+      key: ["harbor"],
+      keysecondary: ["night"],
+      comment: "the harbor",
+      content: "The harbor freezes in winter.",
+      constant: false,
+      vectorized: false,
+      selective: true,
+      selectiveLogic: 2,
+      addMemo: true,
+      order: 20,
+      position: 7,
+      disable: true,
+      ignoreBudget: true,
+      excludeRecursion: true,
+      preventRecursion: false,
+      matchPersonaDescription: true,
+      matchCharacterDescription: false,
+      matchCharacterPersonality: false,
+      matchCharacterDepthPrompt: false,
+      matchScenario: false,
+      matchCreatorNotes: false,
+      delayUntilRecursion: 2,
+      probability: 50,
+      useProbability: false,
+      depth: 6,
+      outletName: "harbor-outlet",
+      group: "places",
+      groupOverride: true,
+      groupWeight: 30,
+      scanDepth: 5,
+      caseSensitive: true,
+      matchWholeWords: false,
+      useGroupScoring: true,
+      automationId: "auto",
+      role: 2,
+      sticky: 1,
+      cooldown: 3,
+      delay: 4,
+      characterFilter: { isExclude: true, names: ["Wren.png"], tags: ["t1"] },
+      triggers: ["continue"],
+      displayIndex: 1,
+      extensions: { "some-plugin": { x: 1 }, rp_harness: { decision_hint: "Is anyone at the harbor?", other: 2 } },
+      someNewStField: "kept"
+    },
+    "9": { key: ["gull"], content: "Gulls nest on the roof." }
+  },
+  extensions: { "some-plugin": "book" },
+  originalData: { name: "Old", scan_depth: 8, entries: [] },
+  topLevelExtra: true
+})

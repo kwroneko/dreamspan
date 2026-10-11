@@ -10,9 +10,10 @@ import {
   PlacementOverride,
   type SelectiveLogic
 } from "@rp/shared/docs/lorebook.ts"
-import { Schema } from "effect"
-import { enumByIndex, Fields, isBoolean, isFinite, isString, present } from "./fields.ts"
-import { type Issues, isObject, type Path } from "./safety.ts"
+import type { ReportBuilder } from "@rp/shared/importReport.ts"
+import { Predicate, Schema } from "effect"
+import { enumByIndex, Fields, isFiniteNumber, isSafeInt, present } from "./fields.ts"
+import { fail, type Limits, type Path } from "./safety.ts"
 
 /** Our namespace in `extensions`, for what a standard card or lorebook has no field for. */
 export const OUR_EXTENSION = "rp_harness"
@@ -94,12 +95,12 @@ const ST_EXTENSION_KEYS = new Set([
 const isPlacement = Schema.is(PlacementOverride)
 
 /** Our own entry fields, kept in `extensions.rp_harness` by the standard formats. */
-export const ourEntryFields = (extensions: Record<string, unknown>, path: Path, issues: Issues) => {
+export const ourEntryFields = (extensions: Record<string, unknown>, path: Path, issues: ReportBuilder) => {
   const ours = extensions[OUR_EXTENSION]
-  if (!isObject(ours)) return {}
+  if (!Predicate.isObject(ours)) return {}
   const fields = new Fields(ours, [...path, "extensions", OUR_EXTENSION], issues)
   return {
-    ...fields.optional("decision_hint", isString, "text"),
+    ...fields.optional("decision_hint", Predicate.isString, "text"),
     ...fields.optional("placement_override", isPlacement, "a placement")
   }
 }
@@ -108,7 +109,7 @@ export const ourEntryFields = (extensions: Record<string, unknown>, path: Path, 
 export const remainingExtensions = (extensions: Record<string, unknown>, lifted: ReadonlySet<string>) => {
   const rest = Object.entries(extensions).filter(([key]) => !lifted.has(key))
   const ours = extensions[OUR_EXTENSION]
-  if (isObject(ours)) {
+  if (Predicate.isObject(ours)) {
     const ourRest = Object.entries(ours).filter(([key]) => key !== "decision_hint" && key !== "placement_override")
     const index = rest.findIndex(([key]) => key === OUR_EXTENSION)
     if (ourRest.length > 0) rest[index] = [OUR_EXTENSION, Object.fromEntries(ourRest)]
@@ -117,108 +118,150 @@ export const remainingExtensions = (extensions: Record<string, unknown>, lifted:
   return Object.fromEntries(rest)
 }
 
-/** Makes uids unique integers: the merge matches entries by them. */
-export const uniqueUids = (entries: Array<LorebookEntry>, path: Path, issues: Issues) => {
-  const seen = new Set<number>()
-  let next = entries.reduce((max, entry) => Math.max(max, entry.uid), -1) + 1
-  return entries.map((entry, index) => {
-    if (!seen.has(entry.uid)) {
-      seen.add(entry.uid)
-      return entry
+/** An entry before its uid is settled. `id` is the one its file gave it, when usable. */
+export interface Candidate {
+  readonly id: number | undefined
+  readonly entry: Omit<LorebookEntry, "uid">
+}
+
+/**
+ * Settles uids, which the merge matches entries by: unique safe integers. Usable ids are kept,
+ * the first one wins, and every other entry gets a number no entry has, after the largest.
+ */
+export const assignUids = (candidates: ReadonlyArray<Candidate>, path: Path, issues: ReportBuilder) => {
+  const taken = new Set<number>()
+  const kept = candidates.map((candidate) => {
+    if (candidate.id === undefined || taken.has(candidate.id)) return false
+    taken.add(candidate.id)
+    return true
+  })
+  let next = 0
+  for (const id of taken) next = Math.max(next, id + 1)
+  if (!Number.isSafeInteger(next)) next = 0
+  return candidates.map((candidate, index): LorebookEntry => {
+    if (kept[index]) return { uid: candidate.id!, ...candidate.entry }
+    while (taken.has(next)) next++
+    taken.add(next)
+    if (candidate.id !== undefined) {
+      issues.add("warning", "lorebook.duplicate_id", `Entry ${index} had a duplicate id; it was given ${next}.`, [
+        ...path,
+        "entries",
+        index
+      ])
     }
-    issues.warn("lorebook.duplicate_id", `Entry ${index} had a duplicate id; it was given ${next}.`, [
-      ...path,
-      "entries",
-      index
-    ])
-    seen.add(next)
-    return { ...entry, uid: next++ }
+    return { uid: next, ...candidate.entry }
   })
 }
 
-const cardEntry = (source: unknown, index: number, path: Path, issues: Issues): LorebookEntry | undefined => {
+/** Caps a lorebook's entries: each becomes an object of some fifty fields. */
+export const checkEntryCount = (count: number, limits: Limits) => {
+  if (count > limits.maxLorebookEntries) {
+    fail("lorebook.too_many_entries", `The lorebook has more than ${limits.maxLorebookEntries} entries.`)
+  }
+}
+
+const cardEntry = (source: unknown, index: number, path: Path, issues: ReportBuilder): Candidate | undefined => {
   const entryPath = [...path, "entries", index]
-  if (!isObject(source)) {
-    issues.warn("lorebook.invalid_entry", `Entry ${index} isn't an object; it was dropped.`, entryPath)
+  if (!Predicate.isObject(source)) {
+    issues.add("warning", "lorebook.invalid_entry", `Entry ${index} isn't an object; it was dropped.`, entryPath)
     return undefined
   }
   const entry = new Fields(source, entryPath, issues)
   const extensions = entry.object("extensions")
   const ext = new Fields(extensions, [...entryPath, "extensions"], issues)
   if (!entry.has("enabled")) {
-    issues.warn("lorebook.disabled", `Entry ${index} doesn't say it's enabled, so it's disabled, as in ST.`, entryPath)
+    issues.add(
+      "warning",
+      "lorebook.disabled",
+      `Entry ${index} doesn't say it's enabled, so it's disabled, as in ST.`,
+      entryPath
+    )
   }
-  if (entry.has("id") && !Number.isInteger(source.id)) {
-    issues.warn("lorebook.invalid_id", `Entry ${index} had an id that isn't a whole number; it was replaced.`, [
-      ...entryPath,
-      "id"
-    ])
+  // An id the merge can't use is replaced, and kept to be written back on export.
+  const invalidId = entry.has("id") && !isSafeInt(source.id)
+  if (invalidId) {
+    issues.add(
+      "warning",
+      "lorebook.invalid_id",
+      `Entry ${index} had an id that isn't a whole number; it was replaced.`,
+      [...entryPath, "id"]
+    )
   }
   const comment = entry.string("comment")
+  const unknown = { ...entry.unknown(ENTRY_KEYS).unknown_fields, ...(invalidId ? { id: source.id } : {}) }
   return {
-    uid: Number.isInteger(source.id) ? (source.id as number) : index,
-    keys: entry.strings("keys", "commas"),
-    secondary_keys: entry.strings("secondary_keys", "commas"),
-    comment,
-    content: entry.string("content"),
-    constant: entry.boolean("constant", false),
-    selective: entry.boolean("selective", false),
-    selective_logic: enumByIndex(ext, "selectiveLogic", LOGICS, "and_any"),
-    enabled: entry.boolean("enabled", false),
-    order: entry.number("insertion_order", 100),
-    position: ext.has("position")
-      ? enumByIndex(ext, "position", POSITIONS, "before_char")
-      : source.position === "before_char"
-        ? "before_char"
-        : "after_char",
-    depth: ext.int("depth", 4),
-    role: enumByIndex(ext, "role", ROLES, "system"),
-    outlet_name: ext.string("outlet_name"),
-    probability: ext.number("probability", 100),
-    use_probability: ext.boolean("useProbability", true),
-    group: ext.string("group"),
-    group_override: ext.boolean("group_override", false),
-    group_weight: ext.number("group_weight", 100),
-    use_group_scoring: ext.nullableBoolean("use_group_scoring"),
-    scan_depth: ext.nullableInt("scan_depth"),
-    // ST reads only the extension; the spec's own field is the fallback.
-    case_sensitive: ext.has("case_sensitive")
-      ? ext.nullableBoolean("case_sensitive")
-      : entry.nullableBoolean("case_sensitive"),
-    match_whole_words: ext.nullableBoolean("match_whole_words"),
-    sticky: ext.nullableInt("sticky"),
-    cooldown: ext.nullableInt("cooldown"),
-    delay: ext.nullableInt("delay"),
-    exclude_recursion: ext.boolean("exclude_recursion", false),
-    prevent_recursion: ext.boolean("prevent_recursion", false),
-    delay_until_recursion: ext.value("delay_until_recursion", false, isRecursionDelay, "true, false or a level"),
-    ignore_budget: ext.boolean("ignore_budget", false),
-    vectorized: ext.boolean("vectorized", false),
-    automation_id: ext.string("automation_id"),
-    triggers: ext.strings("triggers"),
-    match_persona_description: ext.boolean("match_persona_description", false),
-    match_character_description: ext.boolean("match_character_description", false),
-    match_character_personality: ext.boolean("match_character_personality", false),
-    match_character_depth_prompt: ext.boolean("match_character_depth_prompt", false),
-    match_scenario: ext.boolean("match_scenario", false),
-    match_creator_notes: ext.boolean("match_creator_notes", false),
-    add_memo: comment !== "",
-    display_index: ext.int("display_index", index),
-    ...entry.optional("name", isString, "text"),
-    ...entry.optional("priority", isFinite, "a number"),
-    use_regex: entry.boolean("use_regex", false),
-    ...ourEntryFields(extensions, entryPath, issues),
-    extensions: remainingExtensions(extensions, ST_EXTENSION_KEYS),
-    ...entry.unknown(ENTRY_KEYS)
+    id: isSafeInt(source.id) ? source.id : undefined,
+    entry: {
+      keys: entry.strings("keys", "commas"),
+      secondary_keys: entry.strings("secondary_keys", "commas"),
+      comment,
+      content: entry.string("content"),
+      constant: entry.boolean("constant", false),
+      selective: entry.boolean("selective", false),
+      selective_logic: enumByIndex(ext, "selectiveLogic", LOGICS, "and_any"),
+      enabled: entry.boolean("enabled", false),
+      order: entry.number("insertion_order", 100),
+      position: ext.has("position")
+        ? enumByIndex(ext, "position", POSITIONS, "before_char")
+        : source.position === "before_char"
+          ? "before_char"
+          : "after_char",
+      depth: ext.int("depth", 4),
+      role: enumByIndex(ext, "role", ROLES, "system"),
+      outlet_name: ext.string("outlet_name"),
+      probability: ext.number("probability", 100),
+      use_probability: ext.boolean("useProbability", true),
+      group: ext.string("group"),
+      group_override: ext.boolean("group_override", false),
+      group_weight: ext.number("group_weight", 100),
+      use_group_scoring: ext.nullableBoolean("use_group_scoring"),
+      scan_depth: ext.nullableInt("scan_depth"),
+      // ST reads only the extension; the spec's own field is the fallback.
+      case_sensitive: ext.has("case_sensitive")
+        ? ext.nullableBoolean("case_sensitive")
+        : entry.nullableBoolean("case_sensitive"),
+      match_whole_words: ext.nullableBoolean("match_whole_words"),
+      sticky: ext.nullableInt("sticky"),
+      cooldown: ext.nullableInt("cooldown"),
+      delay: ext.nullableInt("delay"),
+      exclude_recursion: ext.boolean("exclude_recursion", false),
+      prevent_recursion: ext.boolean("prevent_recursion", false),
+      delay_until_recursion: ext.value("delay_until_recursion", false, isRecursionDelay, "true, false or a level"),
+      ignore_budget: ext.boolean("ignore_budget", false),
+      vectorized: ext.boolean("vectorized", false),
+      automation_id: ext.string("automation_id"),
+      triggers: ext.strings("triggers"),
+      match_persona_description: ext.boolean("match_persona_description", false),
+      match_character_description: ext.boolean("match_character_description", false),
+      match_character_personality: ext.boolean("match_character_personality", false),
+      match_character_depth_prompt: ext.boolean("match_character_depth_prompt", false),
+      match_scenario: ext.boolean("match_scenario", false),
+      match_creator_notes: ext.boolean("match_creator_notes", false),
+      add_memo: comment !== "",
+      display_index: ext.int("display_index", index),
+      ...entry.optional("name", Predicate.isString, "text"),
+      ...entry.optional("priority", isFiniteNumber, "a number"),
+      use_regex: entry.boolean("use_regex", false),
+      ...ourEntryFields(extensions, entryPath, issues),
+      extensions: remainingExtensions(extensions, ST_EXTENSION_KEYS),
+      ...(Object.keys(unknown).length > 0 ? { unknown_fields: unknown } : {})
+    }
   }
 }
 
 export const isRecursionDelay = (value: unknown): value is boolean | number =>
-  isBoolean(value) || Number.isInteger(value)
+  Predicate.isBoolean(value) || isSafeInt(value)
 
 /** A card's `character_book` as our lorebook document. */
-export const lorebookFromCharacterBook = (source: Record<string, unknown>, path: Path, issues: Issues): LorebookDoc => {
+export const lorebookFromCharacterBook = (
+  source: Record<string, unknown>,
+  path: Path,
+  limits: Limits,
+  issues: ReportBuilder
+): LorebookDoc => {
   const book = new Fields(source, path, issues)
+  const entries = book.list("entries")
+  checkEntryCount(entries.length, limits)
   return {
     schema_version: LOREBOOK_SCHEMA_VERSION,
     name: book.string("name"),
@@ -227,8 +270,8 @@ export const lorebookFromCharacterBook = (source: Record<string, unknown>, path:
     token_budget: book.nullableInt("token_budget"),
     recursive_scanning: book.nullableBoolean("recursive_scanning"),
     extensions: book.object("extensions"),
-    entries: uniqueUids(
-      book.list("entries").flatMap((entry, index) => cardEntry(entry, index, path, issues) ?? []),
+    entries: assignUids(
+      entries.flatMap((entry, index) => cardEntry(entry, index, path, issues) ?? []),
       path,
       issues
     ),
@@ -241,7 +284,7 @@ export const withOurFields = (entry: LorebookEntry) => {
   const ours = present({ decision_hint: entry.decision_hint, placement_override: entry.placement_override })
   if (Object.keys(ours).length === 0) return entry.extensions
   const existing = entry.extensions[OUR_EXTENSION]
-  return { ...entry.extensions, [OUR_EXTENSION]: { ...(isObject(existing) ? existing : {}), ...ours } }
+  return { ...entry.extensions, [OUR_EXTENSION]: { ...(Predicate.isObject(existing) ? existing : {}), ...ours } }
 }
 
 /**
@@ -262,7 +305,8 @@ export const characterBookFromLorebook = (book: LorebookDoc) => ({
   extensions: book.extensions,
   entries: book.entries.map((entry) => ({
     ...entry.unknown_fields,
-    id: entry.uid,
+    // An id the import had to replace goes back as it was.
+    id: entry.unknown_fields?.id ?? entry.uid,
     keys: entry.keys,
     secondary_keys: entry.secondary_keys,
     comment: entry.comment,

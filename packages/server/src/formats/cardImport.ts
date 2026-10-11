@@ -1,12 +1,12 @@
 // Card import: a file's bytes to our card document, the images it carries, and its import
 // report. The format is detected from the bytes, never trusted from the file name.
 import type { CardDoc } from "@rp/shared/docs/card.ts"
-import { ImportReport } from "@rp/shared/importReport.ts"
+import { type ImportReport, ReportBuilder, shownText } from "@rp/shared/importReport.ts"
 import type { Effect } from "effect"
 import { posix } from "node:path"
 import { cardFromJson } from "./card.ts"
 import { ASSET_KEYWORD, decodeText, isPng, readChunks, replaceCardChunks } from "./png.ts"
-import { attempt, defaultLimits, fail, type FormatError, Issues, type Limits, parseJson } from "./safety.ts"
+import { attempt, defaultLimits, fail, type FormatError, type Limits, parseJson } from "./safety.ts"
 import { extract, isZip, readZip } from "./zip.ts"
 
 /** A file that came with the card. `uri` is how the card's `assets` refer to it. */
@@ -28,17 +28,24 @@ export interface CardImport {
  * ST's reading: `ccv3` wins over `chara` when both are there, keywords match in any case,
  * and the first chunk with a keyword counts. The avatar is the PNG without its card chunks.
  */
-const fromPng = (bytes: Uint8Array, limits: Limits, issues: Issues) => {
+const fromPng = (bytes: Uint8Array, limits: Limits, issues: ReportBuilder) => {
   const chunks = readChunks(bytes, limits)
   const texts = chunks.flatMap((chunk) => (chunk.type === "tEXt" ? [{ chunk, ...decodeText(chunk.data) }] : []))
   const named = (keyword: string) => texts.find((text) => text.keyword.toLowerCase() === keyword)
   const source = named("ccv3") ?? named("chara")
   if (!source) return fail("png.no_card", "The PNG has no character card in it.")
   if (texts.some((text) => text.keyword.startsWith(ASSET_KEYWORD))) {
-    issues.info("png.assets_ignored", "Assets in PNG text chunks aren't supported; they were skipped.")
+    issues.add("info", "png.assets_ignored", "Assets in PNG text chunks aren't supported; they were skipped.")
   }
   const avatar: CardFile = { uri: "ccdefault:", ext: "png", bytes: replaceCardChunks(chunks) }
-  return { ...cardFromJson(parseJson(Buffer.from(source.text, "base64"), limits, issues), issues), avatar }
+  return {
+    ...cardFromJson(
+      parseJson(Buffer.from(source.text, "base64"), limits.maxCardJsonBytes, limits, issues),
+      limits,
+      issues
+    ),
+    avatar
+  }
 }
 
 // ST's: RisuAI writes `embeded://`, the spec's spelling; `__asset:` is the PNG chunk form.
@@ -59,7 +66,7 @@ export const embeddedPath = (uri: string) => {
  * `card.json`; the spec puts it at the root, so the root one wins when both exist. The
  * avatar is the main icon, as in ST's `pickCharXIconAsset`.
  */
-const fromCharx = (bytes: Uint8Array, limits: Limits, issues: Issues) => {
+const fromCharx = (bytes: Uint8Array, limits: Limits, issues: ReportBuilder) => {
   const entries = readZip(bytes, limits)
   const names = [...entries.keys()]
   const cardName =
@@ -67,7 +74,11 @@ const fromCharx = (bytes: Uint8Array, limits: Limits, issues: Issues) => {
     names.find((name) => name.endsWith("card.json") && !name.startsWith("__MACOSX"))
   if (cardName === undefined) return fail("charx.no_card", "The archive has no card.json.")
   const budget = { used: 0 }
-  const parsed = cardFromJson(parseJson(extract(bytes, entries.get(cardName)!, limits, budget), limits, issues), issues)
+  const parsed = cardFromJson(
+    parseJson(extract(bytes, entries.get(cardName)!, limits, budget), limits.maxCardJsonBytes, limits, issues),
+    limits,
+    issues
+  )
   if (parsed.version === "v1") fail("charx.no_card", "The archive's card.json has no spec.")
 
   const used = new Set([cardName])
@@ -78,13 +89,18 @@ const fromCharx = (bytes: Uint8Array, limits: Limits, issues: Issues) => {
     const ext = (asset.ext.trim().replace(/^\./, "") || posix.extname(path).slice(1)).toLowerCase()
     const entry = entries.get(path)
     if (entry === undefined) {
-      issues.warn("charx.missing_asset", `The asset "${asset.name}" isn't in the archive.`, ["data", "assets", index])
-    } else if (!IMAGE_EXTS.has(ext)) {
-      issues.info("charx.asset_skipped", `The asset "${asset.name}" isn't an image; it was skipped.`, [
+      issues.add("warning", "charx.missing_asset", `The asset "${shownText(asset.name)}" isn't in the archive.`, [
         "data",
         "assets",
         index
       ])
+    } else if (!IMAGE_EXTS.has(ext)) {
+      issues.add(
+        "info",
+        "charx.asset_skipped",
+        `The asset "${shownText(asset.name)}" isn't an image; it was skipped.`,
+        ["data", "assets", index]
+      )
     } else if (!used.has(path)) {
       used.add(path)
       files.push({
@@ -99,7 +115,7 @@ const fromCharx = (bytes: Uint8Array, limits: Limits, issues: Issues) => {
   const icons = files.filter((file) => file.type.toLowerCase() === "icon")
   const icon = icons.find((file) => file.name.toLowerCase() === "main") ?? icons[0]
   const unused = names.filter((name) => !used.has(name)).length
-  if (unused > 0) issues.info("charx.unused_files", `${unused} files in the archive weren't used.`)
+  if (unused > 0) issues.add("info", "charx.unused_files", `${unused} files in the archive weren't used.`)
   const plain = ({ uri, ext, bytes }: CardFile) => ({ uri, ext, bytes })
   return {
     ...parsed,
@@ -113,9 +129,8 @@ export const importCard = (bytes: Uint8Array, limits: Limits = defaultLimits): E
     if (bytes.byteLength > limits.maxFileBytes) {
       fail("file.too_large", `The file is larger than ${limits.maxFileBytes} bytes.`)
     }
-    const issues = new Issues()
-    const report = (version: string, container: string) =>
-      new ImportReport({ format: `card-${version}-${container}`, issues: issues.list })
+    const issues = new ReportBuilder()
+    const report = (version: string, container: string) => issues.build(`card-${version}-${container}`)
     if (isPng(bytes)) {
       const { card, version, avatar } = fromPng(bytes, limits, issues)
       return { card, avatar, assets: [], report: report(version, "png") }
@@ -124,6 +139,6 @@ export const importCard = (bytes: Uint8Array, limits: Limits = defaultLimits): E
       const { card, version, avatar, assets } = fromCharx(bytes, limits, issues)
       return { card, avatar, assets, report: report(version, "charx") }
     }
-    const { card, version } = cardFromJson(parseJson(bytes, limits, issues), issues)
+    const { card, version } = cardFromJson(parseJson(bytes, limits.maxCardJsonBytes, limits, issues), limits, issues)
     return { card, avatar: null, assets: [], report: report(version, "json") }
   })

@@ -3,10 +3,11 @@
 // `name` means V1. The specs: github.com/malfoyslastname/character-card-spec-v2 and
 // github.com/kwaroran/character-card-spec-v3.
 import { CARD_SCHEMA_VERSION, CardAsset, type CardDoc, type CardModule } from "@rp/shared/docs/card.ts"
-import { Schema } from "effect"
-import { Fields, isFinite, isString, isStringArray } from "./fields.ts"
+import type { ReportBuilder } from "@rp/shared/importReport.ts"
+import { Predicate, Schema } from "effect"
+import { Fields, isFiniteNumber } from "./fields.ts"
 import { lorebookFromCharacterBook, OUR_EXTENSION } from "./lorebook.ts"
-import { fail, type Issues, isObject, type Path } from "./safety.ts"
+import { fail, type Limits, type Path } from "./safety.ts"
 
 type CardVersion = "v1" | "v2" | "v3"
 
@@ -62,20 +63,34 @@ const ROOT_KEYS = new Set([
 ])
 
 const isAsset = Schema.is(CardAsset)
+const isStringArray = (value: unknown): value is Array<string> =>
+  Array.isArray(value) && value.every(Predicate.isString)
+/** Only text and numbers are read as a version: anything else could run code on conversion. */
+const specVersion = (value: unknown) =>
+  Predicate.isString(value) || Predicate.isNumber(value) ? Number.parseFloat(String(value)) : Number.NaN
 const isLanguageMap = (value: unknown): value is Record<string, string> =>
-  isObject(value) && Object.values(value).every(isString)
+  Predicate.isObject(value) && Object.values(value).every(Predicate.isString)
 
 /** Modules a previous export put in `extensions.rp_harness.modules`, back as modules. */
-const liftModules = (extensions: Record<string, unknown>, dataPath: Path, issues: Issues) => {
+const liftModules = (extensions: Record<string, unknown>, dataPath: Path, issues: ReportBuilder) => {
   const ours = extensions[OUR_EXTENSION]
-  if (!isObject(ours) || ours.modules === undefined) return { extensions, modules: [] }
+  if (!Predicate.isObject(ours) || ours.modules === undefined) return { extensions, modules: [] }
   const path = [...dataPath, "extensions", OUR_EXTENSION]
   const modules: Array<CardModule> = []
   new Fields(ours, path, issues).list("modules").forEach((item, index) => {
-    if (isObject(item) && isString(item.id) && isString(item.title) && isString(item.content)) {
+    if (
+      Predicate.isObject(item) &&
+      Predicate.isString(item.id) &&
+      Predicate.isString(item.title) &&
+      Predicate.isString(item.content)
+    ) {
       modules.push({ id: item.id, title: item.title, content: item.content, exportable: true })
     } else {
-      issues.warn("card.invalid_module", `Module ${index} isn't valid; it was dropped.`, [...path, "modules", index])
+      issues.add("warning", "card.invalid_module", `Module ${index} isn't valid; it was dropped.`, [
+        ...path,
+        "modules",
+        index
+      ])
     }
   })
   const { modules: _, ...ourRest } = ours
@@ -83,13 +98,18 @@ const liftModules = (extensions: Record<string, unknown>, dataPath: Path, issues
   return { extensions: Object.keys(ourRest).length > 0 ? { ...rest, [OUR_EXTENSION]: ourRest } : rest, modules }
 }
 
-const fromData = (data: Record<string, unknown>, path: Path, issues: Issues): CardDoc => {
+const fromData = (data: Record<string, unknown>, path: Path, limits: Limits, issues: ReportBuilder): CardDoc => {
   const fields = new Fields(data, path, issues)
   const { extensions, modules } = liftModules(fields.object("extensions"), path, issues)
-  const book = fields.value<Record<string, unknown> | undefined>("character_book", undefined, isObject, "an object")
+  const book = fields.value<Record<string, unknown> | undefined>(
+    "character_book",
+    undefined,
+    Predicate.isObject,
+    "an object"
+  )
   const assets = fields.list("assets")
   if (!assets.every(isAsset)) {
-    issues.warn("field.invalid", "Assets that aren't valid were dropped.", [...path, "assets"])
+    issues.add("warning", "field.invalid", "Assets that aren't valid were dropped.", [...path, "assets"])
   }
   return {
     schema_version: CARD_SCHEMA_VERSION,
@@ -105,16 +125,16 @@ const fromData = (data: Record<string, unknown>, path: Path, issues: Issues): Ca
     post_history_instructions: fields.string("post_history_instructions"),
     creator_notes: fields.string("creator_notes"),
     ...fields.optional("creator_notes_multilingual", isLanguageMap, "texts by language"),
-    ...fields.optional("nickname", isString, "text"),
+    ...fields.optional("nickname", Predicate.isString, "text"),
     ...fields.optional("source", isStringArray, "a list of text"),
     tags: fields.strings("tags", "commas"),
     creator: fields.string("creator"),
     character_version: fields.string("character_version"),
-    ...fields.optional("creation_date", isFinite, "a number"),
-    ...fields.optional("modification_date", isFinite, "a number"),
+    ...fields.optional("creation_date", isFiniteNumber, "a number"),
+    ...fields.optional("modification_date", isFiniteNumber, "a number"),
     avatar_media_id: null,
     ...(fields.has("assets") ? { assets: assets.filter(isAsset) } : {}),
-    ...(book ? { character_book: lorebookFromCharacterBook(book, [...path, "character_book"], issues) } : {}),
+    ...(book ? { character_book: lorebookFromCharacterBook(book, [...path, "character_book"], limits, issues) } : {}),
     modules,
     extensions,
     ...fields.unknown(DATA_KEYS)
@@ -122,7 +142,7 @@ const fromData = (data: Record<string, unknown>, path: Path, issues: Issues): Ca
 }
 
 /** ST's V1 import: the fields it knows, with its placeholder creator note removed. */
-const fromV1 = (root: Record<string, unknown>, issues: Issues): CardDoc => {
+const fromV1 = (root: Record<string, unknown>, limits: Limits, issues: ReportBuilder): CardDoc => {
   const fields = new Fields(root, [], issues)
   const notes = fields.has("creatorcomment") ? fields.string("creatorcomment") : fields.string("creator_notes")
   const card = fromData(
@@ -139,6 +159,7 @@ const fromV1 = (root: Record<string, unknown>, issues: Issues): CardDoc => {
       extensions: fields.has("talkativeness") ? { talkativeness: root.talkativeness } : {}
     },
     [],
+    limits,
     issues
   )
   const { unknown_fields } = fields.unknown(ROOT_KEYS)
@@ -146,27 +167,37 @@ const fromV1 = (root: Record<string, unknown>, issues: Issues): CardDoc => {
 }
 
 /** A parsed card file as our card document. */
-export const cardFromJson = (root: unknown, issues: Issues): { card: CardDoc; version: CardVersion } => {
-  if (!isObject(root)) return fail("card.not_a_card", "The file isn't a character card.")
-  if (root.spec !== undefined && isObject(root.data)) {
+export const cardFromJson = (
+  root: unknown,
+  limits: Limits,
+  issues: ReportBuilder
+): { card: CardDoc; version: CardVersion } => {
+  if (!Predicate.isObject(root)) return fail("card.not_a_card", "The file isn't a character card.")
+  if (root.spec !== undefined && Predicate.isObject(root.data)) {
     const version: CardVersion = root.spec === "chara_card_v2" ? "v2" : "v3"
     if (root.spec !== "chara_card_v2" && root.spec !== "chara_card_v3") {
-      issues.warn("card.unknown_spec", "The card names a spec this app doesn't know; it was read as V3.", ["spec"])
-    } else if (version === "v3" && Number.parseFloat(String(root.spec_version)) > 3) {
-      issues.info(
+      issues.add("warning", "card.unknown_spec", "The card names a spec this app doesn't know; it was read as V3.", [
+        "spec"
+      ])
+    } else if (version === "v3" && specVersion(root.spec_version) > 3) {
+      issues.add(
+        "info",
         "card.newer_spec",
         "The card was made for a newer V3 spec version; newer fields are kept as they are."
       )
     }
-    const card = fromData(root.data, ["data"], issues)
+    const card = fromData(root.data, ["data"], limits, issues)
     const { unknown_fields } = new Fields(root, [], issues).unknown(ROOT_KEYS)
     return { card: unknown_fields ? { ...card, unknown_root_fields: unknown_fields } : card, version }
   }
   if (root.spec !== undefined) {
-    issues.warn("card.missing_data", "The card names a spec but has no data; its top-level fields were read as V1.", [
-      "data"
-    ])
+    issues.add(
+      "warning",
+      "card.missing_data",
+      "The card names a spec but has no data; its top-level fields were read as V1.",
+      ["data"]
+    )
   }
-  if (typeof root.name === "string") return { card: fromV1(root, issues), version: "v1" }
+  if (typeof root.name === "string") return { card: fromV1(root, limits, issues), version: "v1" }
   return fail("card.not_a_card", "The file isn't a character card.")
 }

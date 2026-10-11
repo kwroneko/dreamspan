@@ -21,3 +21,48 @@ export class ImportReport extends Schema.Class<ImportReport>("ImportReport")({
   format: Schema.String,
   issues: Schema.Array(ImportIssue)
 }) {}
+
+/** How much of a file a report can hold, so a hostile file can't make it large. */
+const MAX_ISSUES = 200
+const MAX_SHOWN_CHARS = 40
+const MAX_SHOWN_ITEMS = 10
+const MAX_PATH_SEGMENTS = 16
+
+type Path = ReadonlyArray<string | number>
+
+/** File-supplied text as a report shows it: at most 40 characters. */
+export const shownText = (text: string) => (text.length > MAX_SHOWN_CHARS ? `${text.slice(0, MAX_SHOWN_CHARS)}…` : text)
+
+/** A file-supplied list as a report shows it: the first 10, then how many more. */
+export const shownList = (items: ReadonlyArray<string>) =>
+  items.slice(0, MAX_SHOWN_ITEMS).map(shownText).join(", ") +
+  (items.length > MAX_SHOWN_ITEMS ? ` and ${items.length - MAX_SHOWN_ITEMS} more` : "")
+
+const shownPath = (path: Path) =>
+  (path.length > MAX_PATH_SEGMENTS ? [...path.slice(0, MAX_PATH_SEGMENTS - 1), "…"] : path).map((segment) =>
+    typeof segment === "string" ? shownText(segment) : segment
+  )
+
+/**
+ * Collects a file's issues with the report's size bounded: 200 issues at most, then one
+ * `report.truncated` issue with the count left out. Paths are shortened here; messages
+ * that quote the file should quote it through `shownText` and `shownList`.
+ */
+export class ReportBuilder {
+  private readonly issues: Array<ImportIssue> = []
+  private dropped = 0
+
+  add(level: ImportIssueLevel, code: string, message: string, path?: Path) {
+    if (this.issues.length >= MAX_ISSUES) this.dropped++
+    else this.issues.push(new ImportIssue({ level, code, message, ...(path ? { path: shownPath(path) } : {}) }))
+  }
+
+  build(format: string) {
+    const truncated = new ImportIssue({
+      level: "info",
+      code: "report.truncated",
+      message: `${this.dropped} more issues aren't listed.`
+    })
+    return new ImportReport({ format, issues: this.dropped > 0 ? [...this.issues, truncated] : this.issues })
+  }
+}

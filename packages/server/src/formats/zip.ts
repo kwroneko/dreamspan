@@ -2,6 +2,7 @@
 // Every size is checked against a cap before anything is inflated, and inflating stops at
 // the size the archive declares, so a lying header can't make it allocate more.
 import { crc32, deflateRawSync, inflateRawSync } from "node:zlib"
+import { shownText } from "@rp/shared/importReport.ts"
 import { fail, type Limits } from "./safety.ts"
 
 interface ZipEntry {
@@ -46,7 +47,6 @@ export const readZip = (bytes: Uint8Array, limits: Limits): Map<string, ZipEntry
   }
   if (eocd === -1) return fail("zip.invalid", "The archive is damaged: it has no central directory.")
   const count = view.getUint16(eocd + 10, true)
-  const directorySize = view.getUint32(eocd + 12, true)
   const directoryOffset = view.getUint32(eocd + 16, true)
   if (view.getUint16(eocd + 4, true) !== 0 || count === 0xffff || directoryOffset === 0xffffffff) {
     fail("zip.unsupported", "Multi-part and zip64 archives aren't supported.")
@@ -54,7 +54,6 @@ export const readZip = (bytes: Uint8Array, limits: Limits): Map<string, ZipEntry
   if (count > limits.maxZipEntries) {
     fail("zip.too_many_entries", `The archive has more than ${limits.maxZipEntries} files.`)
   }
-  if (directoryOffset + directorySize > eocd) fail("zip.invalid", "The archive's directory is damaged.")
 
   const entries = new Map<string, ZipEntry>()
   let offset = directoryOffset
@@ -67,9 +66,10 @@ export const readZip = (bytes: Uint8Array, limits: Limits): Map<string, ZipEntry
     if (next > eocd) fail("zip.invalid", "The archive's directory is damaged.")
     const name = new TextDecoder().decode(bytes.subarray(offset + 46, offset + 46 + nameLength))
     if (!isSafePath(name))
-      fail("zip.unsafe_path", `The archive has a file outside its folder: ${JSON.stringify(name)}.`)
+      fail("zip.unsafe_path", `The archive has a file outside its folder: ${JSON.stringify(shownText(name))}.`)
     if (view.getUint16(offset + 8, true) & 1) fail("zip.encrypted", "Encrypted archives aren't supported.")
-    if (entries.has(name)) fail("zip.duplicate_name", `The archive has two files named ${JSON.stringify(name)}.`)
+    if (entries.has(name))
+      fail("zip.duplicate_name", `The archive has two files named ${JSON.stringify(shownText(name))}.`)
     if (!name.endsWith("/")) {
       entries.set(name, {
         name,
@@ -91,7 +91,7 @@ interface Budget {
 }
 
 export const extract = (bytes: Uint8Array, entry: ZipEntry, limits: Limits, budget: Budget): Uint8Array => {
-  const quoted = JSON.stringify(entry.name)
+  const quoted = JSON.stringify(shownText(entry.name))
   if (entry.size > limits.maxZipEntryBytes) {
     fail("zip.entry_too_large", `${quoted} is larger than ${limits.maxZipEntryBytes} bytes uncompressed.`)
   }

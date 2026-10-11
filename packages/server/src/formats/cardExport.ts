@@ -1,12 +1,12 @@
 // Card export: our card document flattened to a standard V2 or V3 card, as JSON, inside a
 // PNG, or as CHARX. Private card modules (DESIGN §4.1) never leave.
 import type { CardAsset, CardDoc } from "@rp/shared/docs/card.ts"
-import type { Effect } from "effect"
+import { type Effect, Predicate } from "effect"
 import { type CardFile, embeddedPath } from "./cardImport.ts"
 import { present } from "./fields.ts"
 import { characterBookFromLorebook, OUR_EXTENSION } from "./lorebook.ts"
 import { cardTextChunk, readChunks, replaceCardChunks } from "./png.ts"
-import { attempt, defaultLimits, type FormatError, isObject, type Limits } from "./safety.ts"
+import { attempt, defaultLimits, type FormatError, type Limits } from "./safety.ts"
 import { isSafePath, writeZip } from "./zip.ts"
 
 export type ExportVersion = "v2" | "v3"
@@ -18,7 +18,7 @@ const extensionsWithModules = (card: CardDoc) => {
     .map(({ id, title, content }) => ({ id, title, content }))
   if (modules.length === 0) return card.extensions
   const ours = card.extensions[OUR_EXTENSION]
-  return { ...card.extensions, [OUR_EXTENSION]: { ...(isObject(ours) ? ours : {}), modules } }
+  return { ...card.extensions, [OUR_EXTENSION]: { ...(Predicate.isObject(ours) ? ours : {}), modules } }
 }
 
 /**
@@ -89,28 +89,35 @@ export const exportCardPng = (
 const isMainIcon = (asset: CardAsset) => asset.type.toLowerCase() === "icon" && asset.name.toLowerCase() === "main"
 
 /**
- * A V3 CHARX: `card.json`, the avatar as the main icon, and the embedded assets whose
- * files are given (matched by URI). Embedded assets without a file are left out of the
- * card, since it would point at nothing.
+ * A V3 CHARX: `card.json`, the avatar as the main icon (at its own path when it came from a
+ * CHARX), and the embedded assets whose files are given (matched by URI). An embedded asset
+ * without a file, or whose path is unsafe or already taken, is left out of the card, since
+ * it would point at nothing; every name in the archive is unique.
  */
 export const exportCardCharx = (card: CardDoc, files: { avatar: CardFile | null; assets: ReadonlyArray<CardFile> }) => {
   const byUri = new Map(files.assets.map((file) => [file.uri, file]))
+  const names = new Set(["card.json"])
   const entries: Array<{ name: string; data: Uint8Array; deflate: boolean }> = []
+  const add = (path: string, data: Uint8Array) => {
+    if (!isSafePath(path) || names.has(path)) return false
+    names.add(path)
+    entries.push({ name: path, data, deflate: false })
+    return true
+  }
   const assets: Array<CardAsset> = []
+  if (files.avatar) {
+    const ext = /^[a-z0-9]{1,10}$/.test(files.avatar.ext) ? files.avatar.ext : "png"
+    const own = embeddedPath(files.avatar.uri)
+    const path = own !== undefined && add(own, files.avatar.bytes) ? own : `assets/icon/images/main.${ext}`
+    if (path !== own) add(path, files.avatar.bytes)
+    assets.push({ type: "icon", uri: `embeded://${path}`, name: "main", ext })
+  }
   for (const asset of card.assets ?? []) {
+    if (files.avatar && isMainIcon(asset)) continue
     const path = embeddedPath(asset.uri)
     const file = byUri.get(asset.uri)
-    if (files.avatar && isMainIcon(asset)) continue
     if (path === undefined) assets.push(asset)
-    else if (file && isSafePath(path) && !entries.some((entry) => entry.name === path)) {
-      assets.push(asset)
-      entries.push({ name: path, data: file.bytes, deflate: false })
-    }
-  }
-  if (files.avatar) {
-    const path = `assets/icon/images/main.${files.avatar.ext}`
-    assets.unshift({ type: "icon", uri: `embeded://${path}`, name: "main", ext: files.avatar.ext })
-    entries.unshift({ name: path, data: files.avatar.bytes, deflate: false })
+    else if (file && add(path, file.bytes)) assets.push(asset)
   }
   const json = cardToJson({ ...card, ...(card.assets || files.avatar ? { assets } : {}) }, "v3")
   return writeZip([

@@ -1,31 +1,23 @@
 // SillyTavern's standalone World Info files, to and from our lorebook document. Entry fields
 // and their defaults are ST's `newWorldInfoEntryDefinition` (public/scripts/world-info.js);
 // a file must have `entries`, as ST's import requires (src/endpoints/worldinfo.js).
-import { LOREBOOK_SCHEMA_VERSION, type LorebookDoc, type LorebookEntry } from "@rp/shared/docs/lorebook.ts"
-import { ImportReport } from "@rp/shared/importReport.ts"
-import type { Effect } from "effect"
-import { enumByIndex, Fields, present } from "./fields.ts"
+import { LOREBOOK_SCHEMA_VERSION, type LorebookDoc } from "@rp/shared/docs/lorebook.ts"
+import { type ImportReport, ReportBuilder, shownText } from "@rp/shared/importReport.ts"
+import { type Effect, Predicate } from "effect"
+import { enumByIndex, Fields, isSafeInt, present } from "./fields.ts"
 import {
+  assignUids,
+  type Candidate,
+  checkEntryCount,
   isRecursionDelay,
   LOGICS,
   ourEntryFields,
   POSITIONS,
   remainingExtensions,
   ROLES,
-  uniqueUids,
   withOurFields
 } from "./lorebook.ts"
-import {
-  attempt,
-  defaultLimits,
-  fail,
-  type FormatError,
-  Issues,
-  isObject,
-  type Limits,
-  parseJson,
-  type Path
-} from "./safety.ts"
+import { attempt, defaultLimits, fail, type FormatError, type Limits, parseJson, type Path } from "./safety.ts"
 
 const BOOK_KEYS = new Set(["entries", "name", "extensions", "originalData"])
 const ENTRY_KEYS = new Set([
@@ -87,63 +79,72 @@ const characterFilter = (entry: Fields) => {
   }
 }
 
-const wiEntry = (key: string, source: unknown, index: number, issues: Issues): LorebookEntry | undefined => {
+const wiEntry = (
+  key: string,
+  keyed: boolean,
+  source: unknown,
+  index: number,
+  issues: ReportBuilder
+): Candidate | undefined => {
   const path: Path = ["entries", key]
-  if (!isObject(source)) {
-    issues.warn("lorebook.invalid_entry", `Entry ${key} isn't an object; it was dropped.`, path)
+  if (!Predicate.isObject(source)) {
+    issues.add("warning", "lorebook.invalid_entry", `Entry ${shownText(key)} isn't an object; it was dropped.`, path)
     return undefined
   }
   const entry = new Fields(source, path, issues)
   const extensions = entry.object("extensions")
-  const uid = Number.isInteger(source.uid) ? (source.uid as number) : /^\d+$/.test(key) ? Number(key) : index
+  // ST keys its entries object by uid; in a list, the position is no id.
+  const keyId = keyed && /^\d+$/.test(key) ? Number(key) : undefined
   return {
-    uid,
-    keys: entry.strings("key", "commas"),
-    secondary_keys: entry.strings("keysecondary", "commas"),
-    comment: entry.string("comment"),
-    content: entry.string("content"),
-    constant: entry.boolean("constant", false),
-    selective: entry.boolean("selective", true),
-    selective_logic: enumByIndex(entry, "selectiveLogic", LOGICS, "and_any"),
-    enabled: !entry.boolean("disable", false),
-    order: entry.number("order", 100),
-    position: enumByIndex(entry, "position", POSITIONS, "before_char"),
-    depth: entry.int("depth", 4),
-    role: enumByIndex(entry, "role", ROLES, "system"),
-    outlet_name: entry.string("outletName"),
-    probability: entry.number("probability", 100),
-    use_probability: entry.boolean("useProbability", true),
-    group: entry.string("group"),
-    group_override: entry.boolean("groupOverride", false),
-    group_weight: entry.number("groupWeight", 100),
-    use_group_scoring: entry.nullableBoolean("useGroupScoring"),
-    scan_depth: entry.nullableInt("scanDepth"),
-    case_sensitive: entry.nullableBoolean("caseSensitive"),
-    match_whole_words: entry.nullableBoolean("matchWholeWords"),
-    sticky: entry.nullableInt("sticky"),
-    cooldown: entry.nullableInt("cooldown"),
-    delay: entry.nullableInt("delay"),
-    exclude_recursion: entry.boolean("excludeRecursion", false),
-    prevent_recursion: entry.boolean("preventRecursion", false),
-    delay_until_recursion: entry.value("delayUntilRecursion", 0, isRecursionDelay, "true, false or a level"),
-    ignore_budget: entry.boolean("ignoreBudget", false),
-    vectorized: entry.boolean("vectorized", false),
-    automation_id: entry.string("automationId"),
-    triggers: entry.strings("triggers"),
-    match_persona_description: entry.boolean("matchPersonaDescription", false),
-    match_character_description: entry.boolean("matchCharacterDescription", false),
-    match_character_personality: entry.boolean("matchCharacterPersonality", false),
-    match_character_depth_prompt: entry.boolean("matchCharacterDepthPrompt", false),
-    match_scenario: entry.boolean("matchScenario", false),
-    match_creator_notes: entry.boolean("matchCreatorNotes", false),
-    add_memo: entry.boolean("addMemo", false),
-    ...(entry.has("displayIndex") ? { display_index: entry.int("displayIndex", index) } : {}),
-    ...characterFilter(entry),
-    use_regex: false,
-    ...ourEntryFields(extensions, path, issues),
-    // ST keeps them verbatim, its own copies of entry fields included.
-    extensions: remainingExtensions(extensions, NOTHING),
-    ...entry.unknown(ENTRY_KEYS)
+    id: isSafeInt(source.uid) ? source.uid : isSafeInt(keyId) ? keyId : undefined,
+    entry: {
+      keys: entry.strings("key", "commas"),
+      secondary_keys: entry.strings("keysecondary", "commas"),
+      comment: entry.string("comment"),
+      content: entry.string("content"),
+      constant: entry.boolean("constant", false),
+      selective: entry.boolean("selective", true),
+      selective_logic: enumByIndex(entry, "selectiveLogic", LOGICS, "and_any"),
+      enabled: !entry.boolean("disable", false),
+      order: entry.number("order", 100),
+      position: enumByIndex(entry, "position", POSITIONS, "before_char"),
+      depth: entry.int("depth", 4),
+      role: enumByIndex(entry, "role", ROLES, "system"),
+      outlet_name: entry.string("outletName"),
+      probability: entry.number("probability", 100),
+      use_probability: entry.boolean("useProbability", true),
+      group: entry.string("group"),
+      group_override: entry.boolean("groupOverride", false),
+      group_weight: entry.number("groupWeight", 100),
+      use_group_scoring: entry.nullableBoolean("useGroupScoring"),
+      scan_depth: entry.nullableInt("scanDepth"),
+      case_sensitive: entry.nullableBoolean("caseSensitive"),
+      match_whole_words: entry.nullableBoolean("matchWholeWords"),
+      sticky: entry.nullableInt("sticky"),
+      cooldown: entry.nullableInt("cooldown"),
+      delay: entry.nullableInt("delay"),
+      exclude_recursion: entry.boolean("excludeRecursion", false),
+      prevent_recursion: entry.boolean("preventRecursion", false),
+      delay_until_recursion: entry.value("delayUntilRecursion", 0, isRecursionDelay, "true, false or a level"),
+      ignore_budget: entry.boolean("ignoreBudget", false),
+      vectorized: entry.boolean("vectorized", false),
+      automation_id: entry.string("automationId"),
+      triggers: entry.strings("triggers"),
+      match_persona_description: entry.boolean("matchPersonaDescription", false),
+      match_character_description: entry.boolean("matchCharacterDescription", false),
+      match_character_personality: entry.boolean("matchCharacterPersonality", false),
+      match_character_depth_prompt: entry.boolean("matchCharacterDepthPrompt", false),
+      match_scenario: entry.boolean("matchScenario", false),
+      match_creator_notes: entry.boolean("matchCreatorNotes", false),
+      add_memo: entry.boolean("addMemo", false),
+      ...(entry.has("displayIndex") ? { display_index: entry.int("displayIndex", index) } : {}),
+      ...characterFilter(entry),
+      use_regex: false,
+      ...ourEntryFields(extensions, path, issues),
+      // ST keeps them verbatim, its own copies of entry fields included.
+      extensions: remainingExtensions(extensions, NOTHING),
+      ...entry.unknown(ENTRY_KEYS)
+    }
   }
 }
 
@@ -161,19 +162,21 @@ export const importLorebook = (
     if (bytes.byteLength > limits.maxFileBytes) {
       fail("file.too_large", `The file is larger than ${limits.maxFileBytes} bytes.`)
     }
-    const issues = new Issues()
-    const root = parseJson(bytes, limits, issues)
-    if (!isObject(root) || !(isObject(root.entries) || Array.isArray(root.entries))) {
+    const issues = new ReportBuilder()
+    const root = parseJson(bytes, limits.maxLorebookJsonBytes, limits, issues)
+    if (!Predicate.isObject(root) || !Predicate.isObjectOrArray(root.entries)) {
       return fail("lorebook.not_a_lorebook", "The file isn't a World Info file: it has no entries.")
     }
     const book = new Fields(root, [], issues)
     if (book.has("originalData")) {
-      issues.info("lorebook.original_dropped", "ST's copy of the card book this came from was dropped.", [
+      issues.add("info", "lorebook.original_dropped", "ST's copy of the card book this came from was dropped.", [
         "originalData"
       ])
     }
-    const entries = Object.entries(root.entries).flatMap(
-      ([key, entry], index) => wiEntry(key, entry, index, issues) ?? []
+    const listed = Object.entries(root.entries)
+    checkEntryCount(listed.length, limits)
+    const entries = listed.flatMap(
+      ([key, entry], index) => wiEntry(key, !Array.isArray(root.entries), entry, index, issues) ?? []
     )
     return {
       lorebook: {
@@ -184,10 +187,10 @@ export const importLorebook = (
         token_budget: null,
         recursive_scanning: null,
         extensions: book.object("extensions"),
-        entries: uniqueUids(entries, [], issues),
+        entries: assignUids(entries, [], issues),
         ...book.unknown(BOOK_KEYS)
       },
-      report: new ImportReport({ format: "st-world-info", issues: issues.list })
+      report: issues.build("st-world-info")
     }
   })
 

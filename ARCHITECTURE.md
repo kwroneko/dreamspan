@@ -671,25 +671,26 @@ It fails with a typed `ProviderError`.
 - **Cards** (`card.ts`): the union of Character Card V2 and V3, in the specs' field names, plus card modules (`modules[]`, DESIGN §4.1).
   - `extensions` is the card's `data.extensions`, verbatim, so `extensions.<plugin-id>` survives (PLUGINS §3.3).
   - Keys the specs don't define are kept verbatim too: `unknown_fields` for those in `data`, `unknown_root_fields` for the top level. They can't go in `extensions`: an export would then write them to a different place, or a plugin's namespace could collide with them.
-- **Lorebooks** (`lorebook.ts`): ST's World Info entry fields in snake_case, the same document for standalone lorebooks and a card's `character_book`. ST's numeric enums are named (`position: "at_depth"`, `role: "system"`, `selective_logic: "and_any"`). Each entry has a unique integer `uid`, so the three-way merge (§3.9) matches entries by it. Our own fields are `decision_hint` and `placement_override`.
+- **Lorebooks** (`lorebook.ts`): ST's World Info entry fields in snake_case, the same document for standalone lorebooks and a card's `character_book`. ST's numeric enums are named (`position: "at_depth"`, `role: "system"`, `selective_logic: "and_any"`). Each entry has a unique safe-integer `uid`, so the three-way merge (§3.9) matches entries by it. On import, usable ids are kept (the first wins), and every other entry, missing, invalid or duplicate, gets a number after the largest, so renumbering never takes an id another entry has. A card book id that isn't a whole number is kept in `unknown_fields` and written back on export. Our own fields are `decision_hint` and `placement_override`.
 
 **Parsers** (`packages/server/src/formats/`) are pure functions over bytes: no database, no files. Each returns an `Effect` that fails with `FormatError` when the file can't be imported at all. Everything recoverable becomes an issue in the `ImportReport` (`@rp/shared/importReport.ts`) instead, so one bad field never costs the whole file.
-- **Lenient fields** (`fields.ts`). A missing or null field takes its default quietly, as in ST. A field of the wrong type takes its default too, and the report names its path.
+- **Lenient fields** (`fields.ts`). A missing or null field takes its default quietly, as in ST. A field of the wrong type takes its default too, and the report names its path. Whole numbers must be safe integers (up to 2^53), as `Schema.Int` requires; file values are only converted to text when they are text or numbers, since an object's `toString` can throw.
+- **Bounded reports** (`ReportBuilder`, `@rp/shared/importReport.ts`). At most 200 issues per file, then one `report.truncated` issue with the count. Paths keep 16 segments; file text quoted in a message or path is cut to 40 characters (`shownText`), and lists to 10 items (`shownList`). Stream D's preset report uses the same numbers.
 
 **Card import** (`importCard`, `cardImport.ts`, `card.ts`). The format comes from the bytes, never the file name.
 - **JSON:** detection follows ST: any `spec` with a `data` object is V2 or V3 (an unknown spec is read as V3, with a warning), otherwise a `name` means V1. V1 is mapped as ST maps it (its placeholder creator note dropped, comma-separated tags split).
 - **ST's top-level copies** of V1 fields and its local state (`chat`, `create_date`, `fav`, `avatar`) aren't kept; other top-level keys are.
-- **The embedded `character_book`** is mapped as ST's `convertCharacterBook` does: ST's World Info fields come out of each entry's `extensions` into the entry, with its defaults; whatever else is in `extensions` stays. Two deliberate differences: the spec's own `case_sensitive` is the fallback when the extension has none (ST ignores it), and ids that aren't unique whole numbers are replaced, with a warning, since the merge matches entries by them. An entry without `enabled` is disabled, as in ST, with a warning.
+- **The embedded `character_book`** is mapped as ST's `convertCharacterBook` does: ST's World Info fields come out of each entry's `extensions` into the entry, with its defaults; whatever else is in `extensions` stays. One deliberate difference: the spec's own `case_sensitive` is the fallback when the extension has none (ST ignores it). An entry without `enabled` is disabled, as in ST, with a warning.
 - **Card modules** come back from `extensions.rp_harness.modules`, where an export puts them.
 - **PNG** (`png.ts`): the card is base64 JSON in a `tEXt` chunk. As in ST (`src/character-card-parser.js`), `ccv3` wins over `chara`, keywords match in any case, and a bad CRC or a missing IEND rejects the file. The avatar returned is the PNG without its card chunks. V3's `chara-ext-asset_` chunks are skipped with a note (the spec discourages them; ST ignores them).
 - **CHARX** (`zip.ts`, our own reader of the central directory; stored and deflated entries only): `card.json` at the root, or else, as in ST, the first entry whose name ends in `card.json`. It must be V2 or V3. Assets come from `embeded://`, `embedded://` and `__asset:` URIs, normalized as ST normalizes them. The avatar is the main icon, as ST picks it. Only ST's image formats are extracted; other assets (audio, Risu modules and scripts) and unreferenced files are reported and skipped. Each returned file keeps the URI the card's `assets` use for it.
 
 **Card export** (`cardExport.ts`) flattens a card document to a standard card.
 - **V2 and V3 carry the same `data`,** V3's fields included, as ST's two PNG chunks do. V2 also has the V1 fields at the top level, for V1 readers. Fields the specs don't define go back where they came from, written first, so they never override a defined field.
-- **The embedded lorebook** is written as ST's `convertWorldInfoToCharacterBook` writes it, our own entry fields in `extensions.rp_harness`. One difference: `use_regex` is false unless the entry says otherwise. ST writes true, but its keys are plain text, which a V3 reader would take as patterns.
+- **The embedded lorebook** is written as ST's `convertWorldInfoToCharacterBook` writes it, our own entry fields in `extensions.rp_harness`. One difference: `use_regex` is false unless the entry says otherwise. ST writes true, but its keys are plain text, which a V3 reader would take as patterns. An imported `true` is kept, though it's usually ST's boilerplate: ST never reads the field. The keyword matcher, when it's built, must decide whether to honor `use_regex` before it lands.
 - **Card modules:** only exportable ones, into `extensions.rp_harness.modules`. Private ones never leave.
 - **PNG:** existing card chunks are removed, then `chara` (V2) and `ccv3` (V3) go in before IEND, as ST writes them. The image must be a valid PNG.
-- **CHARX:** `card.json` (V3), the avatar as `assets/icon/images/main.<ext>` and the main icon, and each embedded asset whose file is given. An embedded asset without a file, or with a path outside the archive's folder, is left out of the card.
+- **CHARX:** `card.json` (V3), the avatar as the main icon (at its own path if it came from a CHARX, otherwise `assets/icon/images/main.<ext>`), and each embedded asset whose file is given. An embedded asset without a file, with a path outside the archive's folder, or with a name already taken (`card.json`, the avatar's, another asset's) is left out of the card, so our own import takes every export back.
 - **Round trips are lossless:** an exported card imports back to the same document, in every format, and keeps every field of the file it came from (`test/formats/cardExport.test.ts`). The exceptions are ST's top-level copies and local state, and private modules.
 
 **Lorebooks** (`worldInfo.ts`, `lorebook.ts`).
@@ -704,8 +705,12 @@ It fails with a typed `ProviderError`.
 | Cap | Default | Why |
 |---|---|---|
 | File size | 64 MiB | Bounds memory and work for everything below |
-| JSON size | 32 MiB | Also applies to a PNG's card chunk once decoded |
-| JSON nesting | 64 levels | The walk after parsing is recursive; real cards nest about 8 deep |
+| Card JSON | 8 MiB | About 2M tokens of text, more than any model's context holds: a bigger card couldn't be used. Applies to a JSON file, a PNG's card chunk once decoded, and a CHARX's `card.json` |
+| World Info JSON | 32 MiB | Lorebooks are scanned, not sent whole, so they can outgrow a context: 20,000 entries of 1 KB fit |
+| JSON nesting | 64 levels | Real cards nest about 8 deep. Counted in the bytes before parsing, which also bounds the recursive walk after it |
+| JSON objects and lists | 250,000 | Counted before parsing: 10M empty objects in 32 MB cost `JSON.parse` 1.1 GB. A 20,000-entry lorebook has about 120,000 |
+| Prototype keys | 100 | Each is dropped with a warning; more make the file hostile |
+| Lorebook entries | 20,000 | Each becomes an object of some fifty fields |
 | PNG chunks | 16,384 | Bounds the chunk walk |
 | PNG chunk size | 32 MiB | Checked against the declared length before anything is read |
 | Zip entries | 1,024 | Bounds the directory walk |
@@ -719,5 +724,5 @@ It fails with a typed `ProviderError`.
 - **Nothing in a file is executed or rendered.** Scripts in a card (RisuAI's modules, Lua assets) are skipped, never stored.
 
 **Known limits:**
-- The parsers are synchronous. Measured on this host under load (2026-10-11): a 21 MB World Info file with 20,000 entries took 110 to 200 ms, a 20 MB JSON card 40 to 60 ms. The importer that writes to the library should run them off the main thread (§3.1 explains why that matters).
+- **The importer must run the parsers off the main thread.** They're synchronous: measured on this host under load (2026-10-11), a 21 MB World Info file with 20,000 entries took 110 to 200 ms, and a hostile 8 MB card full of mistyped lorebook fields about 180 ms before the entry cap refused it. On the main thread that would stall every live stream (§3.1).
 - Not built yet: the importer itself (storing the document, the avatar and assets, and the report), and registering these formats as importers (PLUGINS §8).

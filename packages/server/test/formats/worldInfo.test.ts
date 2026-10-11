@@ -5,63 +5,7 @@ import { cardToJson } from "../../src/formats/cardExport.ts"
 import { importCard } from "../../src/formats/cardImport.ts"
 import { defaultLimits } from "../../src/formats/safety.ts"
 import { exportLorebook, importLorebook } from "../../src/formats/worldInfo.ts"
-import { failure, json, run, stCardV2 } from "./support.ts"
-
-/** An ST World Info file, as ST saves one. */
-const worldInfo = () => ({
-  entries: {
-    "3": {
-      uid: 3,
-      key: ["harbor"],
-      keysecondary: ["night"],
-      comment: "the harbor",
-      content: "The harbor freezes in winter.",
-      constant: false,
-      vectorized: false,
-      selective: true,
-      selectiveLogic: 2,
-      addMemo: true,
-      order: 20,
-      position: 7,
-      disable: true,
-      ignoreBudget: true,
-      excludeRecursion: true,
-      preventRecursion: false,
-      matchPersonaDescription: true,
-      matchCharacterDescription: false,
-      matchCharacterPersonality: false,
-      matchCharacterDepthPrompt: false,
-      matchScenario: false,
-      matchCreatorNotes: false,
-      delayUntilRecursion: 2,
-      probability: 50,
-      useProbability: false,
-      depth: 6,
-      outletName: "harbor-outlet",
-      group: "places",
-      groupOverride: true,
-      groupWeight: 30,
-      scanDepth: 5,
-      caseSensitive: true,
-      matchWholeWords: false,
-      useGroupScoring: true,
-      automationId: "auto",
-      role: 2,
-      sticky: 1,
-      cooldown: 3,
-      delay: 4,
-      characterFilter: { isExclude: true, names: ["Wren.png"], tags: ["t1"] },
-      triggers: ["continue"],
-      displayIndex: 1,
-      extensions: { "some-plugin": { x: 1 }, rp_harness: { decision_hint: "Is anyone at the harbor?", other: 2 } },
-      someNewStField: "kept"
-    },
-    "9": { key: ["gull"], content: "Gulls nest on the roof." }
-  },
-  extensions: { "some-plugin": "book" },
-  originalData: { name: "Old", scan_depth: 8, entries: [] },
-  topLevelExtra: true
-})
+import { failure, json, run, stCardV2, worldInfo } from "./support.ts"
 
 /** Every key and value of `expected` is in `actual`. */
 const expectSuperset = (actual: unknown, expected: unknown, path = "") => {
@@ -134,6 +78,28 @@ describe("World Info import", () => {
     expect(report.issues.map((issue) => issue.code)).toEqual(["json.forbidden_key"])
     expect(failure(importLorebook(new Uint8Array(defaultLimits.maxFileBytes + 1)))).toBe("file.too_large")
   })
+
+  it("refuses more entries, or more JSON, than the caps", () => {
+    const book = (count: number) => json({ entries: Array(count).fill(0) })
+    run(importLorebook(book(defaultLimits.maxLorebookEntries)))
+    expect(failure(importLorebook(book(defaultLimits.maxLorebookEntries + 1)))).toBe("lorebook.too_many_entries")
+    // World Info may be bigger than a card.
+    const padded = (bytes: number) => {
+      const file = new Uint8Array(bytes).fill(0x20)
+      file.set(json({ entries: {} }))
+      return file
+    }
+    run(importLorebook(padded(defaultLimits.maxLorebookJsonBytes)))
+    expect(failure(importLorebook(padded(defaultLimits.maxLorebookJsonBytes + 1)))).toBe("json.too_large")
+  })
+
+  it("keeps valid uids when renumbering others", () => {
+    const { lorebook, report } = run(
+      importLorebook(json({ entries: [{ uid: "a" }, { uid: 0 }, { uid: 0 }, { uid: 1e300 }] }))
+    )
+    expect(lorebook.entries.map((entry) => entry.uid)).toEqual([1, 0, 2, 3])
+    expect(report.issues.map((issue) => issue.code)).toEqual(["lorebook.duplicate_id"])
+  })
 })
 
 describe("character book and World Info", () => {
@@ -163,7 +129,7 @@ describe("character book and World Info", () => {
       triggers: ["normal"],
       extensions: { "some-plugin": { weight: 1 } }
     })
-    expect(entries["1"]).toMatchObject({ uid: 1, position: 1, selective: false, addMemo: false, depth: 4, role: 0 })
+    expect(entries["8"]).toMatchObject({ uid: 8, position: 1, selective: false, addMemo: false, depth: 4, role: 0 })
   })
 
   it("converts World Info to a card book as ST's convertWorldInfoToCharacterBook does", () => {

@@ -1,13 +1,20 @@
 // Lenient reading of fields from an untrusted object. A missing or null field takes its
 // default quietly, as ST does; a field of the wrong type takes it too, with a warning in the
 // import report, so one bad field never costs the whole file.
-import { type Issues, isObject, type Path } from "./safety.ts"
+import type { ReportBuilder } from "@rp/shared/importReport.ts"
+import { Predicate } from "effect"
+import type { Path } from "./safety.ts"
+
+/** A finite number. JSON has no others, but the type guard documents what's accepted. */
+export const isFiniteNumber = (value: unknown): value is number => Number.isFinite(value)
+/** Whole numbers only up to 2^53: past that, `n + 1 === n`, and Schema.Int rejects them. */
+export const isSafeInt = (value: unknown): value is number => Number.isSafeInteger(value)
 
 export class Fields {
   readonly source: Record<string, unknown>
   readonly path: Path
-  readonly issues: Issues
-  constructor(source: Record<string, unknown>, path: Path, issues: Issues) {
+  readonly issues: ReportBuilder
+  constructor(source: Record<string, unknown>, path: Path, issues: ReportBuilder) {
     this.source = source
     this.path = path
     this.issues = issues
@@ -17,7 +24,7 @@ export class Fields {
     const value = this.source[key]
     if (value === undefined || value === null) return fallback
     if (valid(value)) return value
-    this.issues.warn("field.invalid", `"${key}" should be ${expected}; the default was used instead.`, [
+    this.issues.add("warning", "field.invalid", `"${key}" should be ${expected}; the default was used instead.`, [
       ...this.path,
       key
     ])
@@ -29,25 +36,25 @@ export class Fields {
   }
 
   string(key: string, fallback = "") {
-    return this.value(key, fallback, isString, "text")
+    return this.value(key, fallback, Predicate.isString, "text")
   }
   boolean(key: string, fallback: boolean) {
-    return this.value(key, fallback, isBoolean, "true or false")
+    return this.value(key, fallback, Predicate.isBoolean, "true or false")
   }
   number(key: string, fallback: number) {
-    return this.value(key, fallback, isFinite, "a number")
+    return this.value(key, fallback, isFiniteNumber, "a number")
   }
   int(key: string, fallback: number) {
-    return this.value(key, fallback, isInt, "a whole number")
+    return this.value(key, fallback, isSafeInt, "a whole number")
   }
   nullableInt(key: string) {
-    return this.value<number | null>(key, null, isInt, "a whole number")
+    return this.value<number | null>(key, null, isSafeInt, "a whole number")
   }
   nullableBoolean(key: string) {
-    return this.value<boolean | null>(key, null, isBoolean, "true or false")
+    return this.value<boolean | null>(key, null, Predicate.isBoolean, "true or false")
   }
   object(key: string) {
-    return this.value<Record<string, unknown>>(key, {}, isObject, "an object")
+    return this.value<Record<string, unknown>>(key, {}, Predicate.isObject, "an object")
   }
   list(key: string) {
     return this.value<ReadonlyArray<unknown>>(key, [], Array.isArray, "a list")
@@ -65,9 +72,12 @@ export class Fields {
             .filter((part) => part !== "")
     }
     const list = this.list(key)
-    const strings = list.filter(isString)
+    const strings = list.filter(Predicate.isString)
     if (strings.length !== list.length) {
-      this.issues.warn("field.invalid", `Items of "${key}" that weren't text were dropped.`, [...this.path, key])
+      this.issues.add("warning", "field.invalid", `Items of "${key}" that weren't text were dropped.`, [
+        ...this.path,
+        key
+      ])
     }
     return strings
   }
@@ -77,7 +87,7 @@ export class Fields {
     if (!this.has(key)) return {}
     const value = this.source[key]
     if (valid(value)) return { [key]: value }
-    this.issues.warn("field.invalid", `"${key}" should be ${expected}; it was dropped.`, [...this.path, key])
+    this.issues.add("warning", "field.invalid", `"${key}" should be ${expected}; it was dropped.`, [...this.path, key])
     return {}
   }
 
@@ -88,12 +98,6 @@ export class Fields {
   }
 }
 
-export const isString = (value: unknown): value is string => typeof value === "string"
-export const isBoolean = (value: unknown): value is boolean => typeof value === "boolean"
-export const isFinite = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value)
-const isInt = (value: unknown): value is number => Number.isInteger(value)
-export const isStringArray = (value: unknown): value is Array<string> => Array.isArray(value) && value.every(isString)
-
 /** The fields that have a value: optional fields stay absent when they have none. */
 export const present = (fields: Record<string, unknown>) =>
   Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== undefined && value !== null))
@@ -102,9 +106,9 @@ export const present = (fields: Record<string, unknown>) =>
 export const enumByIndex = <A extends string>(fields: Fields, key: string, names: ReadonlyArray<A>, fallback: A): A => {
   const value = fields.source[key]
   if (value === undefined || value === null) return fallback
-  const name = isInt(value) ? names[value] : undefined
+  const name = isSafeInt(value) ? names[value] : undefined
   if (name !== undefined) return name
-  fields.issues.warn("field.invalid", `"${key}" has an unknown value; the default was used instead.`, [
+  fields.issues.add("warning", "field.invalid", `"${key}" has an unknown value; the default was used instead.`, [
     ...fields.path,
     key
   ])
