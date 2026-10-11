@@ -473,6 +473,10 @@ The provider layer's storage (spec/PROVIDERS.md §2, §3.1, §9.1), in migration
 ## 4. Authentication
 
 `auth/Accounts.ts` implements the `Authentication` RPC middleware declared in `@rp/shared/api.ts`. It provides `CurrentUser` to every handler, resolved on every call. Over the WebSocket, the headers are those of the upgrade request. A session is still checked on each call, so a logout reaches connections that are already open. `accounts.test.ts` checks that every RPC in `AppApi` carries the middleware: one added to the group after `.middleware()` would skip it.
+- **The isolation matrix** (`test/isolation.test.ts`) has an entry for every RPC in `AppApi`, and fails on an RPC without one or an entry whose RPC is gone. An entry is one of:
+  - a probe, run both ways between an admin and a user over real sockets: one reads, changes or references the other's connection, credential, model, preset or ledger row, and is refused or sees nothing
+  - an admin-only probe: a user is `Forbidden`
+  - `global` (no user's data) or `createOnly` (names nothing that exists), with the reason
 - **Message headers are dropped** (`TransportHeadersOnly` in `server.ts`). Effect's RPC server appends the headers a client puts in each message after the upgrade request's, and the later entries win. Before this, any client could name any user in proxy mode by sending `remote-user` in a message. The serialization now empties message headers when decoding, so identity can only come from the upgrade request (`rpc.test.ts` checks this).
 - **`AUTH_MODE=single`, built-in login** (DESIGN §10.1):
   - **No account has a password:** loopback and `ALLOWED_IPS` are the implicit local admin `local`, without logging in. That's local use. It's checked on every call, not only when a connection opens: a socket opened from elsewhere while login was required doesn't become the local admin if the last password goes.
@@ -636,7 +640,7 @@ It fails with a typed `ProviderError`.
 - **Models:** `RefreshModels`, `ListModels`, `AddUserModel`, `EditModel`, `SetModelHidden`.
 - **Network and usage:** `GetNetworkSettings`/`SetNetworkSettings` (admins only, otherwise `Forbidden`), and `ListLlmRequests`.
 - **Errors keep their tags** (`NotFound`, `StaleWrite`, `ModelKeyTaken`, `ProviderError`, `Forbidden`, from `@rp/shared/errors.ts`). Storage and worker failures are logged on the server and reach the client only as `ServerError`, including from the provider operations and network settings.
-- `test/rpc.test.ts` checks over a real WebSocket that a key never comes back out, that another user gets `NotFound` (or `unusable`) for every operation on someone else's connection, and that only admins see network settings.
+- `test/rpc.test.ts` checks over a real WebSocket that a key never comes back out. Cross-user access is checked by the isolation matrix (§4).
 - **At startup,** requests a previous process left `running` are marked `interrupted`.
 
 

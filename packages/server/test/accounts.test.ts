@@ -9,25 +9,7 @@ import { AppApi, Authentication } from "@rp/shared/api.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { Effect, Option, Redacted } from "effect"
 import type { AppConfigShape } from "../src/config.ts"
-import { client, testConfig, withServer } from "./support/config.ts"
-
-const post = (config: AppConfigShape, path: string, body: unknown, headers: Record<string, string> = {}) =>
-  Effect.promise(() =>
-    fetch(`http://127.0.0.1:${config.port}${path}`, {
-      method: "POST",
-      headers: { "content-type": "application/json", ...headers },
-      body: JSON.stringify(body)
-    })
-  )
-
-/** Logs in, resolving to the status and the `cookie` header for later requests. */
-const login = (config: AppConfigShape, handle: string, password: string) =>
-  post(config, "/auth/login", { handle, password }).pipe(
-    Effect.map((response) => {
-      const setCookie = response.headers.get("set-cookie") ?? ""
-      return { status: response.status, setCookie, cookie: setCookie.split(";")[0]! }
-    })
-  )
+import { client, login, outcome, post, testConfig, withServer } from "./support/config.ts"
 
 /** A login sent from `from`, so it can come from an address other than loopback. */
 const loginFrom = (config: AppConfigShape, from: string, handle: string, password: string) =>
@@ -49,17 +31,6 @@ const loginFrom = (config: AppConfigShape, from: string, handle: string, passwor
     )
     req.end(body)
   })
-
-/** The outcome of an RPC as a short string: the value's summary, or the error tag and reason. */
-const outcome = <A, E>(effect: Effect.Effect<A, E>, show: (a: A) => string = () => "ok") =>
-  effect.pipe(
-    Effect.map(show),
-    Effect.catch((error: E) =>
-      Effect.succeed(
-        `${(error as { _tag: string })._tag}${(error as { reason?: string }).reason ? `:${(error as { reason: string }).reason}` : ""}`
-      )
-    )
-  )
 
 describe("accounts", () => {
   it("every RPC requires authentication", () => {
