@@ -180,8 +180,21 @@ export const stateKeyProblems = (
   return problems
 }
 
-/** A state event as the fold sees it: its data plus the optional scope (a role, an entity). */
-export const FoldableEvent = Schema.Struct({ scope: Schema.NullOr(Schema.String), data: StateEventData })
+/** The roles an event can be scoped to (DATA-MODEL §5.3). */
+const StateRole = Schema.Literals(["narrator", "summarizer"])
+export const isStateRole = Schema.is(StateRole)
+
+/**
+ * What an event applies to, when not the whole chat: a role, or a participant, which is a
+ * card of the user's. A participant is checked like a value's ids (`scopeIds`).
+ */
+const StateScope = Schema.Union([StateRole, EntityId])
+export const scopeIds: StateKeyIds<{ readonly scope: EntityId }> = {
+  ids: { scope: { table: "entity", kind: "card" } }
+}
+
+/** A state event as the fold sees it: its data plus the optional scope. */
+export const FoldableEvent = Schema.Struct({ scope: Schema.NullOr(StateScope), data: StateEventData })
 export type FoldableEvent = typeof FoldableEvent.Type
 
 interface Binding {

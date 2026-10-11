@@ -2,7 +2,7 @@
 import type { ChatId, EntityId, NewVersion, SlotId, VersionId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
-import type { StateEventData } from "@rp/shared/state.ts"
+import type { FoldableEvent, StateEventData } from "@rp/shared/state.ts"
 import { Effect } from "effect"
 import { SqlClient, type SqlError } from "effect/sql"
 import { composerKey, type DraftKey } from "@rp/shared/drafts.ts"
@@ -132,11 +132,11 @@ export const makeWriteHandlers = (bin: Bin) =>
       chatId: string,
       slotId: string | null,
       versionId: string | null,
-      scope: string | null,
+      scope: FoldableEvent["scope"],
       data: StateEventData
     ) =>
       Effect.gen(function* () {
-        yield* checkStateReferences(sql, userId, chatId, data)
+        yield* checkStateReferences(sql, userId, chatId, data, scope)
         const [next] = yield* sql<{ n: number }>`
           SELECT coalesce(max(seq), -1) + 1 AS n FROM state_events WHERE chat_id = ${chatId} AND slot_id IS ${slotId}`
         const id = uuidv7()

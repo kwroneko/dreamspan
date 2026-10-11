@@ -13,7 +13,7 @@ import type { UserId } from "@rp/shared/domain.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import type { EntityKind, RefId, RevisionId } from "@rp/shared/library.ts"
 import type { ConnectionId, ModelId } from "@rp/shared/providers.ts"
-import { type StateEventData, stateKeyIds } from "@rp/shared/state.ts"
+import { type FoldableEvent, type StateEventData, stateKeyIds } from "@rp/shared/state.ts"
 import { Context, Effect, Layer } from "effect"
 import * as Database from "../src/db/Database.ts"
 
@@ -62,7 +62,7 @@ class Fixture extends Context.Service<
   Fixture,
   {
     /** Adds the event as bob; "ok" or the error tag. */
-    readonly add: (key: string, value: Value) => Effect.Effect<string>
+    readonly add: (key: string, value: Value, scope?: string) => Effect.Effect<string>
     readonly own: Things
     /** bob's too, but other things than `own`: a link from an `own` field fails. */
     readonly second: Things
@@ -126,14 +126,14 @@ const fixture = Layer.effect(
       greeting: null
     })
     return {
-      add: (key: string, value: Value) =>
+      add: (key: string, value: Value, scope?: string) =>
         writer
           .AddStateEvent({
             userId: bob,
             chatId: chat.id,
             slotId: null,
             versionId: null,
-            scope: null,
+            scope: (scope ?? null) as FoldableEvent["scope"],
             data: { key, value } as StateEventData
           })
           .pipe(
@@ -221,6 +221,17 @@ layer(fixture, { excludeTestServices: true, timeout: "60 seconds" })("state key 
       }
     }
   }
+
+  // An event's scope, when it isn't a role, is a participant: a card of the user's.
+  const scoped = (scope: (f: Fixture["Service"]) => string, result: string) =>
+    Effect.flatMap(Fixture, (f) =>
+      Effect.map(f.add("preset.binding", { ref: f.own.preset.ref }, scope(f)), (r) => assert.strictEqual(r, result))
+    )
+  it.effect("scope: a role", () => scoped(() => "narrator", "ok"))
+  it.effect("scope: the user's own card", () => scoped((f) => f.own.card.entity, "ok"))
+  it.effect("scope: another user's card is NotFound", () => scoped((f) => f.theirs.card.entity, "NotFound"))
+  it.effect("scope: a note instead of a card is NotFound", () => scoped((f) => f.own.note.entity, "NotFound"))
+  it.effect("scope: a card in the bin is NotFound", () => scoped((f) => f.deleted.card.entity, "NotFound"))
 })
 
 /** Things with made-up ids, only to tell id fields from the rest. */

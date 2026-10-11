@@ -669,7 +669,7 @@ export class WriteOps extends RpcGroup.make(
       chatId: ChatId,
       slotId: Schema.NullOr(SlotId),
       versionId: Schema.NullOr(VersionId),
-      scope: Schema.NullOr(Schema.String),
+      scope: FoldableEvent.fields.scope,
       data: StateEventData
     },
     success: Schema.Struct({ id: Schema.String, seq: Schema.Int }),

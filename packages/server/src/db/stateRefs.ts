@@ -5,7 +5,14 @@
 // a purge removed for good.
 import type { UserId } from "@rp/shared/domain.ts"
 import type { EntityKind } from "@rp/shared/library.ts"
-import { type FoldableEvent, type StateEventData, type StateKeyIds, stateKeyIds } from "@rp/shared/state.ts"
+import {
+  type FoldableEvent,
+  isStateRole,
+  scopeIds,
+  type StateEventData,
+  type StateKeyIds,
+  stateKeyIds
+} from "@rp/shared/state.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import { NotFound } from "./ops.ts"
@@ -28,10 +35,11 @@ type Reference =
 /** Any key's declaration, core or (later) a plugin's. */
 type Declared = StateKeyIds<Readonly<Record<string, string | ReadonlyArray<string>>>>
 
-const references = (data: StateEventData): ReadonlyArray<Reference> => {
-  const declared: Declared = stateKeyIds[data.key]
-  // A key whose value isn't an object declares no fields, so this is only read for objects.
-  const value = data.value as unknown as Readonly<Record<string, string | ReadonlyArray<string> | undefined>>
+const references = (data: StateEventData) => referencesOf(stateKeyIds[data.key], data.value)
+
+const referencesOf = (declared: Declared, of: unknown): ReadonlyArray<Reference> => {
+  // A value that isn't an object declares no fields, so this is only read for objects.
+  const value = of as Readonly<Record<string, string | ReadonlyArray<string> | undefined>>
   const field = (name: string | undefined) => (name === undefined ? undefined : (value[name] as string | undefined))
   return Object.entries(declared.ids).flatMap(([name, declaration]) => {
     if (declaration === undefined) return []
@@ -64,12 +72,13 @@ export const checkStateReferences = (
   sql: SqlClient.SqlClient,
   userId: UserId,
   chatId: string,
-  data: StateEventData
+  data: StateEventData,
+  scope: FoldableEvent["scope"]
 ) => {
   // Keys that take something out of the state work on deleted and purged things too.
   const live = stateKeyIds[data.key].removes ? 0 : 1
   return Effect.forEach(
-    references(data),
+    [...references(data), ...(scope === null || isStateRole(scope) ? [] : referencesOf(scopeIds, { scope }))],
     (reference) => {
       const count = (() => {
         switch (reference.table) {

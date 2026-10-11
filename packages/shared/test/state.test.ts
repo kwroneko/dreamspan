@@ -3,9 +3,9 @@ import { describe, expect, it } from "vitest"
 import { ChatId, EntityId } from "../src/chat.ts"
 import { RefId, type RevisionId } from "../src/library.ts"
 import type { ConnectionId, ModelId } from "../src/providers.ts"
-import { type FoldableEvent, foldState, StateEventData, stateKeyIds, stateKeyProblems } from "../src/state.ts"
+import { FoldableEvent, foldState, scopeIds, StateEventData, stateKeyIds, stateKeyProblems } from "../src/state.ts"
 
-const e = (data: StateEventData, scope: string | null = null): FoldableEvent => ({ data, scope })
+const e = (data: StateEventData, scope: FoldableEvent["scope"] = null): FoldableEvent => ({ data, scope })
 const mira = "mira" as EntityId
 const tomas = "tomas" as EntityId
 const ref = (id: string) => id as RefId
@@ -58,6 +58,8 @@ describe("state key declarations", () => {
     for (const member of StateEventData.members) {
       expect(stateKeyProblems(member.fields.value.ast, stateKeyIds[member.fields.key.literal])).toEqual([])
     }
+    // An event's scope is checked the same way.
+    expect(stateKeyProblems(Schema.Struct({ scope: FoldableEvent.fields.scope }).ast, scopeIds)).toEqual([])
   })
 
   it("can't miss an id, wherever it sits", () => {
