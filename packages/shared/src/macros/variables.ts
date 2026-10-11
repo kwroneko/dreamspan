@@ -57,8 +57,15 @@ export class VariableScope {
   private readonly values: Map<string, VarValue>
   private readonly scope: VarScope
   private readonly effects: Array<VariableEffect>
+  /** Counts written characters against the expansion's work limit. */
+  private readonly charge: (size: number) => void
 
-  constructor(initial: Readonly<Record<string, unknown>> | undefined, scope: VarScope, effects: Array<VariableEffect>) {
+  constructor(
+    initial: Readonly<Record<string, unknown>> | undefined,
+    scope: VarScope,
+    effects: Array<VariableEffect>,
+    charge: (size: number) => void
+  ) {
     this.values = new Map()
     for (const [name, value] of Object.entries(initial ?? {})) {
       const v = stored(value)
@@ -66,6 +73,7 @@ export class VariableScope {
     }
     this.scope = scope
     this.effects = effects
+    this.charge = charge
   }
 
   has(name: string): boolean {
@@ -93,6 +101,7 @@ export class VariableScope {
 
   set(name: string, value: VarValue): void {
     if (!name) throw new Error("Variable name cannot be empty")
+    this.charge(String(value).length)
     this.values.set(name, value)
     this.effects.push({ scope: this.scope, name, value })
   }
@@ -109,6 +118,8 @@ export class VariableScope {
     // Assigning a string to "__proto__" does nothing in ST either.
     if (index !== "__proto__") {
       const key = numeric ? String(Number(index)) : index
+      // An index past the end pads the array with nulls when it's serialized.
+      if (Array.isArray(container) && Number(key) > container.length) this.charge((Number(key) - container.length) * 5)
       container = Object.assign(container, { [key]: value })
     }
     this.set(name, JSON.stringify(container))

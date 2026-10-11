@@ -49,6 +49,11 @@ export interface MacroCall {
   readonly once: (key: string) => boolean
   /** The chat's (`local`) and global variables. Writes come back as effects. */
   readonly variables: { readonly local: VariableScope; readonly global: VariableScope }
+  /**
+   * Counts work against the expansion's limit before doing it: characters about to be built,
+   * or a die rolled. Past the limit the whole expansion fails.
+   */
+  readonly charge: (size: number) => void
 }
 
 export interface MacroInfo {

@@ -8,9 +8,10 @@
 // Non-deterministic macros are frozen: the result lists the values drawn, and passing them
 // back makes a re-expansion identical, which keeps prompts deterministic and cacheable.
 // Variable writes aren't performed: they come back as effects, in order.
+// A text that hits a limit (MacroLimits) fails as a whole: nothing partial comes back.
 import type { MacroMode } from "../chat.ts"
 import type { MacroContext } from "./context.ts"
-import { evaluateMacros, type FrozenValues, type MacroLookup } from "./engine.ts"
+import { evaluateMacros, type FrozenValues, type MacroLimit, type MacroLimits, type MacroLookup } from "./engine.ts"
 import type { VariableEffect } from "./variables.ts"
 
 export type TextOrigin =
@@ -28,9 +29,11 @@ export interface ExpandRequest {
   readonly frozen?: FrozenValues
   /** The source of new draws, in [0, 1). */
   readonly random: () => number
+  readonly limits?: Partial<MacroLimits>
 }
 
-export interface ExpandResult {
+export interface Expanded {
+  readonly _tag: "Expanded"
   readonly text: string
   /** Every non-deterministic value this expansion used, to store with the message. */
   readonly frozen: FrozenValues
@@ -46,6 +49,13 @@ export interface ExpandResult {
   }
 }
 
+export interface LimitExceeded {
+  readonly _tag: "LimitExceeded"
+  readonly limit: MacroLimit
+}
+
+export type ExpandResult = Expanded | LimitExceeded
+
 const expands = (origin: TextOrigin) => {
   switch (origin.kind) {
     case "card":
@@ -60,7 +70,9 @@ const expands = (origin: TextOrigin) => {
 
 export const expand = (request: ExpandRequest): ExpandResult => {
   const { local = {}, global = {} } = request.context.variables ?? {}
-  if (!expands(request.origin)) return { text: request.text, frozen: {}, effects: [], variables: { local, global } }
+  const unchanged = { variables: { local, global }, effects: [] }
+  if (!expands(request.origin)) return { _tag: "Expanded", text: request.text, frozen: {}, ...unchanged }
   const result = evaluateMacros(request.text, request)
-  return request.origin.kind === "model" ? { ...result, effects: [], variables: { local, global } } : result
+  if (typeof result === "string") return { _tag: "LimitExceeded", limit: result }
+  return { _tag: "Expanded", ...result, ...(request.origin.kind === "model" ? unchanged : {}) }
 }

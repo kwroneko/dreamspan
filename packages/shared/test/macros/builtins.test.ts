@@ -3,9 +3,8 @@
 // macro definitions, and those that rest on behavior ST's tests don't pin are marked unsure.
 import { describe, expect, it } from "vitest"
 import type { MacroContext } from "../../src/macros/context.ts"
-import { expand } from "../../src/macros/expand.ts"
 import { humanize } from "../../src/macros/time.ts"
-import { builtinRegistry } from "./support.ts"
+import { builtinRegistry, expanded } from "./support.ts"
 
 const registry = builtinRegistry()
 
@@ -45,7 +44,7 @@ const base: MacroContext = {
 }
 
 const run = (text: string, context: Partial<MacroContext> = {}, random: () => number = () => 0.5) =>
-  expand({ text, origin: { kind: "preset" }, registry, context: { ...base, ...context }, random }).text
+  expanded({ text, origin: { kind: "preset" }, registry, context: { ...base, ...context }, random }).text
 
 const vectors = (cases: ReadonlyArray<readonly [string, string]>, context: Partial<MacroContext> = {}) =>
   it.each(cases)("%j → %j", (input, output) => expect(run(input, context)).toBe(output))

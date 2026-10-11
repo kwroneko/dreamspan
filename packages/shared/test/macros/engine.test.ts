@@ -2,10 +2,9 @@
 // test macros that behave like ST's, with ST's test names "User" and "Character". Vectors
 // marked "unsure" were derived from reading ST's source rather than from its tests.
 import { describe, expect, it } from "vitest"
-import { expand } from "../../src/macros/expand.ts"
 import { parse } from "../../src/macros/parse.ts"
 import type { MacroSpec } from "../../src/macros/registry.ts"
-import { registryWith } from "./support.ts"
+import { expanded, registryWith } from "./support.ts"
 
 const flagsSeen: Array<string> = []
 const order: Array<string> = []
@@ -62,7 +61,7 @@ const specs: ReadonlyArray<MacroSpec> = [
 ]
 const registry = registryWith(specs)
 const run = (text: string) =>
-  expand({
+  expanded({
     text,
     origin: { kind: "preset" },
     registry,

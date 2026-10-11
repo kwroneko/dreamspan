@@ -1,5 +1,6 @@
 import { Effect, Scope } from "effect"
 import { registerBuiltinMacros } from "../../src/macros/builtins.ts"
+import { expand, type Expanded, type ExpandRequest } from "../../src/macros/expand.ts"
 import { makeMacroRegistry, type MacroRegistry, type MacroSpec, registerMacro } from "../../src/macros/registry.ts"
 
 const withScope = (register: (registry: MacroRegistry) => Effect.Effect<void, never, Scope.Scope>) => {
@@ -20,4 +21,12 @@ export const seeded = (seed: number) => () => {
   let t = Math.imul(seed ^ (seed >>> 15), 1 | seed)
   t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
   return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+}
+
+/** expand(), for tests that expect it to succeed: the result without its tag. */
+export const expanded = (request: ExpandRequest): Omit<Expanded, "_tag"> => {
+  const result = expand(request)
+  if (result._tag !== "Expanded") throw new Error(`Limit exceeded: ${result.limit}`)
+  const { _tag, ...rest } = result
+  return rest
 }

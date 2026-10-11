@@ -807,7 +807,7 @@ ST chat-completion presets (DESIGN §1.2). Pure functions with no database acces
 
 `packages/shared/src/macros/` (DESIGN §5.6): a pure engine, for the server's context assembler and for the client when it renders text. It follows SillyTavern's current macro engine (`public/scripts/macros/`, ST's default), read at ST commit `06bde939`.
 
-**Expanding text** (`expand.ts`): `expand({ text, origin, registry, context, frozen?, random })`.
+**Expanding text** (`expand.ts`): `expand({ text, origin, registry, context, frozen?, random, limits? })` returns `Expanded` or `LimitExceeded`.
 - **`origin` is required** and decides whether anything expands:
   - card and preset text always does (lorebook entries and notes count as card text)
   - user-typed text only when its message's macro mode is `template`
@@ -820,6 +820,18 @@ ST chat-completion presets (DESIGN §1.2). Pure functions with no database acces
 **The registry** (`registry.ts`, `builtins.ts`). Macros register by name and aliases, matched case-insensitively, through the generic registry (`@rp/shared/registry.ts`, a copy of the server's `src/registry.ts`). The built-ins register through it like a plugin. A definition declares positional arguments with types, an optional list tail, strict arity (the default: a wrong call stays as written), delayed argument resolution (for `{{if}}`), and `volatile`.
 
 **The parser** (`parse.ts`) is a hand-written scanner in place of ST's Chevrotain grammar: no regex that can backtrack, each macro start parsed once, nesting bounded.
+
+**Hardening.** Imported card text is untrusted, so one expansion is bounded (`MacroLimits`, overridable per call):
+- **Depth:** 32 macros inside one another (arguments, blocks, `{{if}}` branches, card fields). The parser enforces it too, so deep nesting can't overflow the stack.
+- **Expansions:** 10,000 macros evaluated.
+- **Work:** 4,000,000 units, about one per character produced by a macro, written to a variable or parsed, and per die rolled. This bounds the output, and stops values that double. Pairing blocks costs 10 per macro, because each level pairs its block's content again (as ST does), so deeply nested blocks would otherwise cost depth × size.
+- Handlers count large output before building it (`{{space::N}}`, `{{newline::N}}`, dice, array padding in `{{setvarkey}}`).
+- **Reaching a limit fails the whole text** with `LimitExceeded`: nothing partial comes back.
+- **Linear time:** no regex that backtracks (ST's `{{trim}}` regex, quadratic on runs of newlines, is a scan here); recovery after a name uses a precomputed table; pairing blocks searches square-root blocks of running sums, so many unclosed openers can't make it quadratic.
+- **No code evaluation:** nothing calls `eval`, `Function` or a dynamic import, and a test scans the sources for them.
+- **Untrusted names** are looked up as own keys or in `Map`s: variables, frozen values, outlets, macro names.
+- **Nothing throws out of an expansion** for bad input: a macro whose handler fails stays as written, as in ST, and so does a variable shorthand whose operation fails (deeply nested JSON, say), where ST gives up on the whole text.
+- Each guard's test was checked against its bug: with the check disabled, the test fails or times out.
 
 **ST's behavior reproduced** (vectors in `packages/shared/test/macros/`, most from ST's `tests/frontend/MacroEngine.e2e.js`):
 - arguments as `{{a::b::c}}`, `{{a:b}}` or `{{a b}}`, trimmed; after a single colon or a space the rest is one argument

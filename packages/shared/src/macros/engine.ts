@@ -20,12 +20,41 @@ import { isClosing, type MacroNode, type Node, parse, type VarNode } from "./par
 import type { MacroContext } from "./context.ts"
 import { stringHash } from "./hash.ts"
 import type { MacroCall, MacroEntry, MacroInfo } from "./registry.ts"
-import { normalize, type VariableEffect, VariableScope, type VarValue } from "./variables.ts"
+import { normalize, type VariableEffect, VariableScope, type VarScope, type VarValue } from "./variables.ts"
 
 /** What `{{else}}` returns: `{{if}}` splits on it, and any left over is removed at the end. */
 export const ELSE_MARKER = "\u0000\u001FELSE\u001F\u0000"
 
-const MAX_DEPTH = 32
+/**
+ * Bounds on one expansion. Imported card text is untrusted, and macros can nest, repeat and
+ * grow values (macro bombs).
+ */
+export interface MacroLimits {
+  /** Macros evaluated inside one another: arguments, blocks, `{{if}}` branches, card fields. */
+  readonly maxDepth: number
+  /** Macros evaluated in all. */
+  readonly maxExpansions: number
+  /**
+   * Work in all, which bounds the output: about one unit per character produced by a macro,
+   * written to a variable or parsed, and per die rolled. Pairing scoped blocks counts
+   * PAIRING_COST per macro, since a block's content is paired again at each level (as in ST).
+   */
+  readonly maxWork: number
+}
+
+const DEFAULT_MACRO_LIMITS: MacroLimits = { maxDepth: 32, maxExpansions: 10_000, maxWork: 4_000_000 }
+
+const PAIRING_COST = 10
+
+export type MacroLimit = "depth" | "expansions" | "work"
+
+/** Thrown through the evaluation when a limit is reached; the expansion then fails as a whole. */
+class LimitReached {
+  readonly limit: MacroLimit
+  constructor(limit: MacroLimit) {
+    this.limit = limit
+  }
+}
 
 export interface MacroLookup {
   readonly get: (id: string) => MacroEntry | undefined
@@ -46,8 +75,8 @@ const CR = 0x0d
 const isTrimAt = (t: string, i: number) => t.startsWith("{{", i) && t.slice(i + 2, i + 8).toLowerCase() === "trim}}"
 
 /**
- * ST's `/(?:\r?\n)*{{trim}}(?:\r?\n)*\/gi` replacement, as a scan: the regex is quadratic on
- * long runs of newlines that aren't followed by `{{trim}}`.
+ * ST removes `{{trim}}` and the newlines around it with a regex, which is quadratic on long
+ * runs of newlines not followed by `{{trim}}`. This is the same replacement as a scan.
  */
 const removeTrimMarkers = (t: string) => {
   let out = ""
@@ -280,6 +309,22 @@ interface Run {
   /** Expanded card fields by scope: ST expands each once per evaluation. */
   readonly templates: Map<string, string>
   readonly variables: { readonly local: VariableScope; readonly global: VariableScope }
+  readonly limits: MacroLimits
+  depth: number
+  expansions: number
+  work: number
+}
+
+const charge = (run: Run, size: number) => {
+  run.work += Math.max(0, size)
+  if (run.work > run.limits.maxWork) throw new LimitReached("work")
+}
+
+const parseCharged = (run: Run, text: string) => {
+  charge(run, text.length)
+  const nodes = parse(text, run.limits.maxDepth)
+  if (nodes === "depth") throw new LimitReached("depth")
+  return nodes
 }
 
 const macroInfo = (text: string, node: Node): MacroInfo | undefined =>
@@ -311,8 +356,7 @@ class Expansion {
   evaluate(input: string, base: number): string {
     if (!input) return ""
     const text = preprocess(input)
-    const nodes = parse(text, MAX_DEPTH)
-    if (nodes === "depth") return input
+    const nodes = parseCharged(this.run, text)
     return postprocess(this.level(text, nodes, 0, nodes.length, 0, text.length, base))
   }
 
@@ -338,6 +382,7 @@ class Expansion {
     end: number,
     base: number
   ): string {
+    charge(this.run, PAIRING_COST * (to - from))
     let out = ""
     let cursor = start
     for (const item of pairScopes(text, nodes, from, to, (node) => this.acceptsBlock(node))) {
@@ -352,15 +397,24 @@ class Expansion {
       } else {
         const close = nodes[item.close]!
         const block = { start: node.end, end: close.start, from: item.index + 1, to: item.close, nodes }
-        out += this.macro(text, node, base, block)
+        out += this.node(text, node, base, block)
         cursor = close.end
       }
     }
     return out + text.slice(cursor, end)
   }
 
-  private node(text: string, node: Node, base: number): string {
-    return node.kind === "macro" ? this.macro(text, node, base, undefined) : this.variable(text, node, base)
+  private node(text: string, node: Node, base: number, block?: Block): string {
+    const run = this.run
+    if (++run.expansions > run.limits.maxExpansions) throw new LimitReached("expansions")
+    if (++run.depth > run.limits.maxDepth) throw new LimitReached("depth")
+    try {
+      const out = node.kind === "macro" ? this.macro(text, node, base, block) : this.shorthand(text, node, base)
+      charge(run, out.length)
+      return out
+    } finally {
+      run.depth--
+    }
   }
 
   private macro(text: string, node: MacroNode, base: number, block: Block | undefined): string {
@@ -415,24 +469,23 @@ class Expansion {
       resolve: (t) => this.evaluate(t, offset),
       expandTemplate: (t, scope) => this.template(t, scope),
       lookup: (name) => this.entry(name.trim()),
-      macrosIn: (t) => {
-        const nodes = parse(t, MAX_DEPTH)
-        return nodes === "depth" ? [] : nodes.flatMap((n) => macroInfo(t, n) ?? [])
-      },
+      macrosIn: (t) => parseCharged(this.run, t).flatMap((n) => macroInfo(t, n) ?? []),
       random: this.run.random,
       once: (key) => {
         if (this.run.seen.has(key)) return false
         this.run.seen.add(key)
         return true
       },
-      variables: this.run.variables
+      variables: this.run.variables,
+      charge: (size) => charge(this.run, size)
     }
     const key = entry.volatile ? this.drawKey(entry, offset, args) : undefined
     const frozen = key !== undefined && Object.hasOwn(this.run.frozen, key) ? this.run.frozen[key] : undefined
     let value: string
     try {
       value = typeof frozen === "string" ? frozen : entry.handler(call)
-    } catch {
+    } catch (error) {
+      if (error instanceof LimitReached) throw error
       // ST leaves a macro whose handler fails as written.
       return asWritten
     }
@@ -514,6 +567,16 @@ class Expansion {
     }
   }
 
+  /** A shorthand whose operation fails (deeply nested JSON, say) stays as written, like a macro. */
+  private shorthand(text: string, node: VarNode, base: number): string {
+    try {
+      return this.variable(text, node, base)
+    } catch (error) {
+      if (error instanceof LimitReached) throw error
+      return text.slice(node.start, node.end)
+    }
+  }
+
   private varValue(text: string, node: VarNode, base: number): string {
     const region = node.value
     if (!region) return ""
@@ -542,6 +605,7 @@ interface EvaluateOptions {
   readonly context: MacroContext
   readonly random: () => number
   readonly frozen?: FrozenValues
+  readonly limits?: Partial<MacroLimits>
 }
 
 interface Evaluated {
@@ -554,9 +618,11 @@ interface Evaluated {
   }
 }
 
-export const evaluateMacros = (text: string, options: EvaluateOptions): Evaluated => {
+export const evaluateMacros = (text: string, options: EvaluateOptions): Evaluated | MacroLimit => {
   const effects: Array<VariableEffect> = []
   const { local, global } = options.context.variables ?? {}
+  const vars = (initial: Readonly<Record<string, unknown>> | undefined, scope: VarScope) =>
+    new VariableScope(initial, scope, effects, (size) => charge(run, size))
   const run: Run = {
     registry: options.registry,
     random: options.random,
@@ -565,12 +631,19 @@ export const evaluateMacros = (text: string, options: EvaluateOptions): Evaluate
     sites: new Map(),
     seen: new Set(),
     templates: new Map(),
-    variables: {
-      local: new VariableScope(local, "local", effects),
-      global: new VariableScope(global, "global", effects)
-    }
+    variables: { local: vars(local, "local"), global: vars(global, "global") },
+    limits: { ...DEFAULT_MACRO_LIMITS, ...options.limits },
+    depth: 0,
+    expansions: 0,
+    work: 0
   }
-  const result = new Expansion(run, options.context, text, "").evaluate(text, 0)
+  let result: string
+  try {
+    result = new Expansion(run, options.context, text, "").evaluate(text, 0)
+  } catch (error) {
+    if (error instanceof LimitReached) return error.limit
+    throw error
+  }
   return {
     text: result,
     frozen: Object.fromEntries(run.drawn),

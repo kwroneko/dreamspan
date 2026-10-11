@@ -29,6 +29,7 @@ const roll = (call: MacroCall) => {
   if (!m) return ""
   const dice = Number(m[1] ?? 1)
   const sides = Number(m[2])
+  call.charge(dice)
   let total = Number(m[3] ?? 0)
   for (let i = 0; i < dice; i++) total += 1 + Math.floor(call.random() * sides)
   return String(total)
@@ -79,11 +80,17 @@ const pick = (call: MacroCall) => {
   return items[Math.floor((stringHash(seed) / 2 ** 53) * items.length)]!
 }
 
+const repeat = (call: MacroCall, text: string) => {
+  const n = Number(call.args[0] ?? 1)
+  call.charge(n)
+  return text.repeat(n)
+}
+
 const tokens = (value: number | undefined) => (value === undefined ? "" : String(value))
 
 export const utilityMacros: ReadonlyArray<MacroSpec> = [
-  { name: "space", args: [count], handler: (call) => " ".repeat(Number(call.args[0] ?? 1)) },
-  { name: "newline", args: [count], handler: (call) => "\n".repeat(Number(call.args[0] ?? 1)) },
+  { name: "space", args: [count], handler: (call) => repeat(call, " ") },
+  { name: "newline", args: [count], handler: (call) => repeat(call, "\n") },
   { name: "noop", handler: () => "" },
   {
     // Inline, it's removed with the newlines around it after evaluation; scoped, its block

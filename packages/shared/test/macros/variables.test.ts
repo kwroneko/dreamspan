@@ -2,8 +2,8 @@
 // 06bde939); those derived from reading public/scripts/variables.js are marked unsure.
 import { describe, expect, it } from "vitest"
 import type { MacroContext } from "../../src/macros/context.ts"
-import { expand, type TextOrigin } from "../../src/macros/expand.ts"
-import { builtinRegistry } from "./support.ts"
+import type { TextOrigin } from "../../src/macros/expand.ts"
+import { builtinRegistry, expanded } from "./support.ts"
 
 const registry = builtinRegistry()
 
@@ -15,7 +15,7 @@ const run = (
   origin: TextOrigin = { kind: "preset" },
   card?: MacroContext["card"]
 ) =>
-  expand({
+  expanded({
     text,
     origin,
     registry,
