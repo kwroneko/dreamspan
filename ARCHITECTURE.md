@@ -682,6 +682,7 @@ It fails with a typed `ProviderError`.
 - **The embedded `character_book`** is mapped as ST's `convertCharacterBook` does: ST's World Info fields come out of each entry's `extensions` into the entry, with its defaults; whatever else is in `extensions` stays. Two deliberate differences: the spec's own `case_sensitive` is the fallback when the extension has none (ST ignores it), and ids that aren't unique whole numbers are replaced, with a warning, since the merge matches entries by them. An entry without `enabled` is disabled, as in ST, with a warning.
 - **Card modules** come back from `extensions.rp_harness.modules`, where an export puts them.
 - **PNG** (`png.ts`): the card is base64 JSON in a `tEXt` chunk. As in ST (`src/character-card-parser.js`), `ccv3` wins over `chara`, keywords match in any case, and a bad CRC or a missing IEND rejects the file. The avatar returned is the PNG without its card chunks. V3's `chara-ext-asset_` chunks are skipped with a note (the spec discourages them; ST ignores them).
+- **CHARX** (`zip.ts`, our own reader of the central directory; stored and deflated entries only): `card.json` at the root, or else, as in ST, the first entry whose name ends in `card.json`. It must be V2 or V3. Assets come from `embeded://`, `embedded://` and `__asset:` URIs, normalized as ST normalizes them. The avatar is the main icon, as ST picks it. Only ST's image formats are extracted; other assets (audio, Risu modules and scripts) and unreferenced files are reported and skipped. Each returned file keeps the URI the card's `assets` use for it.
 
 **Hardening** (`safety.ts`). These parse untrusted files, so every input is capped (`defaultLimits`), and each cap has a test with a crafted file that fails when the check is removed.
 
@@ -692,5 +693,12 @@ It fails with a typed `ProviderError`.
 | JSON nesting | 64 levels | The walk after parsing is recursive; real cards nest about 8 deep |
 | PNG chunks | 16,384 | Bounds the chunk walk |
 | PNG chunk size | 32 MiB | Checked against the declared length before anything is read |
+| Zip entries | 1,024 | Bounds the directory walk |
+| Zip entry, uncompressed | 64 MiB | Checked against the declared size before inflating |
+| Zip total, uncompressed | 128 MiB | Over every entry extracted from one archive |
+| Compression ratio | 100 | For entries over 1 MiB; a zip bomb's is in the thousands |
+
+- **Inflating stops at the declared size** (`maxOutputLength`), so a header that understates an entry can't make the parser allocate more than the caps allow (`zip.bomb`). Sizes and CRCs are checked after.
+- **Zip paths** must stay inside the archive: no `..` segment, leading `/`, backslash, drive letter or NUL. One bad path, duplicate name or encrypted entry rejects the whole archive, so an importer that later writes files by these names can't be pointed elsewhere.
 
 - **Prototype keys** (`__proto__`, `constructor`, `prototype`) are dropped right after `JSON.parse`, with a warning. `JSON.parse` makes them plain own keys, but a later assignment, `Object.assign` or merge can turn one into a prototype change.

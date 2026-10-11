@@ -1,5 +1,5 @@
 // Synthetic fixtures and helpers for the format parser tests. Every card here is made up.
-import { crc32, deflateSync } from "node:zlib"
+import { crc32, deflateRawSync, deflateSync } from "node:zlib"
 import { Effect } from "effect"
 import type { FormatError } from "../../src/formats/safety.ts"
 
@@ -142,3 +142,51 @@ export const cardV3 = () => ({
     extensions: {}
   }
 })
+
+export interface ZipFile {
+  readonly name: string
+  readonly data: Uint8Array
+  /** Deflated unless 0. */
+  readonly method?: number
+  /** Lies about the uncompressed size when set. */
+  readonly declaredSize?: number
+  readonly flags?: number
+}
+
+/** A zip archive written by hand, so tests can craft broken or hostile ones. */
+export const zip = (files: ReadonlyArray<ZipFile>) => {
+  const locals: Array<Buffer> = []
+  const centrals: Array<Buffer> = []
+  let offset = 0
+  for (const file of files) {
+    const method = file.method ?? 8
+    const data = method === 8 ? deflateRawSync(file.data) : Buffer.from(file.data)
+    const name = Buffer.from(file.name)
+    const fields = (header: Buffer, at: number) => {
+      header.writeUInt16LE(file.flags ?? 0, at)
+      header.writeUInt16LE(method, at + 2)
+      header.writeUInt32LE(crc32(file.data), at + 8)
+      header.writeUInt32LE(data.byteLength, at + 12)
+      header.writeUInt32LE(file.declaredSize ?? file.data.byteLength, at + 16)
+      header.writeUInt16LE(name.byteLength, at + 20)
+    }
+    const local = Buffer.alloc(30)
+    local.writeUInt32LE(0x04034b50, 0)
+    fields(local, 6)
+    const central = Buffer.alloc(46)
+    central.writeUInt32LE(0x02014b50, 0)
+    fields(central, 8)
+    central.writeUInt32LE(offset, 42)
+    locals.push(local, name, data)
+    centrals.push(central, name)
+    offset += 30 + name.byteLength + data.byteLength
+  }
+  const directory = Buffer.concat(centrals)
+  const end = Buffer.alloc(22)
+  end.writeUInt32LE(0x06054b50, 0)
+  end.writeUInt16LE(files.length, 8)
+  end.writeUInt16LE(files.length, 10)
+  end.writeUInt32LE(directory.byteLength, 12)
+  end.writeUInt32LE(offset, 16)
+  return Buffer.concat([...locals, directory, end])
+}

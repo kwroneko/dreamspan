@@ -4,8 +4,10 @@ import type { CardDoc } from "@rp/shared/docs/card.ts"
 import { ImportReport } from "@rp/shared/importReport.ts"
 import type { Effect } from "effect"
 import { cardFromJson } from "./card.ts"
+import { posix } from "node:path"
 import { decodeText, isPng, readChunks } from "./png.ts"
 import { attempt, defaultLimits, fail, type FormatError, Issues, type Limits, parseJson } from "./safety.ts"
+import { extract, isZip, readZip } from "./zip.ts"
 
 /** A file that came with the card. `uri` is how the card's `assets` refer to it. */
 export interface CardFile {
@@ -45,6 +47,73 @@ const fromPng = (bytes: Uint8Array, limits: Limits, issues: Issues) => {
   return { ...cardFromJson(parseJson(Buffer.from(source.text, "base64"), limits, issues), issues), avatar }
 }
 
+// ST's: RisuAI writes `embeded://`, the spec's spelling; `__asset:` is the PNG chunk form.
+const EMBEDDED_PREFIXES = ["embeded://", "embedded://", "__asset:"]
+// ST's image formats for CHARX assets. Other assets (audio, models, Risu scripts) are skipped.
+const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "webp", "gif", "apng", "avif", "bmp", "jfif"])
+
+/** The archive path an asset URI names, normalized as ST does, or undefined. */
+const embeddedPath = (uri: string) => {
+  const trimmed = uri.trim()
+  const prefix = EMBEDDED_PREFIXES.find((p) => trimmed.toLowerCase().startsWith(p))
+  if (prefix === undefined) return undefined
+  return posix.normalize(trimmed.slice(prefix.length).replace(/^(\.\/)+/, "")).replace(/^\/+/, "")
+}
+
+/**
+ * A zip with `card.json` and its assets. ST takes the first entry whose name ends in
+ * `card.json`; the spec puts it at the root, so the root one wins when both exist. The
+ * avatar is the main icon, as in ST's `pickCharXIconAsset`.
+ */
+const fromCharx = (bytes: Uint8Array, limits: Limits, issues: Issues) => {
+  const entries = readZip(bytes, limits)
+  const names = [...entries.keys()]
+  const cardName =
+    names.find((name) => name === "card.json") ??
+    names.find((name) => name.endsWith("card.json") && !name.startsWith("__MACOSX"))
+  if (cardName === undefined) return fail("charx.no_card", "The archive has no card.json.")
+  const budget = { used: 0 }
+  const parsed = cardFromJson(parseJson(extract(bytes, entries.get(cardName)!, limits, budget), limits, issues), issues)
+  if (parsed.version === "v1") fail("charx.no_card", "The archive's card.json has no spec.")
+
+  const used = new Set([cardName])
+  const files: Array<CardFile & { type: string; name: string }> = []
+  parsed.card.assets?.forEach((asset, index) => {
+    const path = embeddedPath(asset.uri)
+    if (path === undefined) return
+    const ext = (asset.ext.trim().replace(/^\./, "") || posix.extname(path).slice(1)).toLowerCase()
+    const entry = entries.get(path)
+    if (entry === undefined) {
+      issues.warn("charx.missing_asset", `The asset "${asset.name}" isn't in the archive.`, ["data", "assets", index])
+    } else if (!IMAGE_EXTS.has(ext)) {
+      issues.info("charx.asset_skipped", `The asset "${asset.name}" isn't an image; it was skipped.`, [
+        "data",
+        "assets",
+        index
+      ])
+    } else if (!used.has(path)) {
+      used.add(path)
+      files.push({
+        uri: asset.uri,
+        ext,
+        bytes: extract(bytes, entry, limits, budget),
+        type: asset.type,
+        name: asset.name
+      })
+    }
+  })
+  const icons = files.filter((file) => file.type.toLowerCase() === "icon")
+  const icon = icons.find((file) => file.name.toLowerCase() === "main") ?? icons[0]
+  const unused = names.filter((name) => !used.has(name)).length
+  if (unused > 0) issues.info("charx.unused_files", `${unused} files in the archive weren't used.`)
+  const plain = ({ uri, ext, bytes }: CardFile) => ({ uri, ext, bytes })
+  return {
+    ...parsed,
+    avatar: icon ? plain(icon) : null,
+    assets: files.filter((file) => file !== icon).map(plain)
+  }
+}
+
 export const importCard = (bytes: Uint8Array, limits: Limits = defaultLimits): Effect.Effect<CardImport, FormatError> =>
   attempt(() => {
     if (bytes.byteLength > limits.maxFileBytes) {
@@ -56,6 +125,10 @@ export const importCard = (bytes: Uint8Array, limits: Limits = defaultLimits): E
     if (isPng(bytes)) {
       const { card, version, avatar } = fromPng(bytes, limits, issues)
       return { card, avatar, assets: [], report: report(version, "png") }
+    }
+    if (isZip(bytes)) {
+      const { card, version, avatar, assets } = fromCharx(bytes, limits, issues)
+      return { card, avatar, assets, report: report(version, "charx") }
     }
     const { card, version } = cardFromJson(parseJson(bytes, limits, issues), issues)
     return { card, avatar: null, assets: [], report: report(version, "json") }
