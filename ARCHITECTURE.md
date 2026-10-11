@@ -675,7 +675,7 @@ It fails with a typed `ProviderError`.
 
 **Parsers** (`packages/server/src/formats/`) are pure functions over bytes: no database, no files. Each returns an `Effect` that fails with `FormatError` when the file can't be imported at all. Everything recoverable becomes an issue in the `ImportReport` (`@rp/shared/importReport.ts`) instead, so one bad field never costs the whole file.
 - **Lenient fields** (`fields.ts`). A missing or null field takes its default quietly, as in ST. A field of the wrong type takes its default too, and the report names its path. Whole numbers must be safe integers (up to 2^53), as `Schema.Int` requires; file values are only converted to text when they are text or numbers, since an object's `toString` can throw.
-- **Bounded reports** (`ReportBuilder`, `@rp/shared/importReport.ts`). At most 200 issues per file, then one `report.truncated` issue with the count. Paths keep 16 segments; file text quoted in a message or path is cut to 40 characters (`shownText`), and lists to 10 items (`shownList`). Stream D's preset report uses the same numbers.
+- **Bounded reports** (`ReportBuilder`, `@rp/shared/importReport.ts`). At most 200 issues per file, then one `report.truncated` issue with the count. Paths keep 16 segments; file text quoted in a message or path is cut to 40 characters (`shownText`). Stream D's preset report uses the same numbers.
 
 **Card import** (`importCard`, `cardImport.ts`, `card.ts`). The format comes from the bytes, never the file name.
 - **JSON:** detection follows ST: any `spec` with a `data` object is V2 or V3 (an unknown spec is read as V3, with a warning), otherwise a `name` means V1. V1 is mapped as ST maps it (its placeholder creator note dropped, comma-separated tags split).

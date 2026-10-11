@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { ReportBuilder, shownList, shownText } from "../src/importReport.ts"
+import { ReportBuilder, shownText } from "../src/importReport.ts"
 
 describe("bounded import reports", () => {
   it("keeps 200 issues, then counts the rest in one truncation issue", () => {
@@ -14,11 +14,9 @@ describe("bounded import reports", () => {
     expect(small.build("test").issues).toHaveLength(1)
   })
 
-  it("shortens file text, lists and paths", () => {
+  it("shortens file text and paths", () => {
     expect(shownText("a".repeat(41))).toBe(`${"a".repeat(40)}…`)
     expect(shownText("short")).toBe("short")
-    const items = Array.from({ length: 13 }, (_, i) => `k${i}`)
-    expect(shownList(items)).toBe("k0, k1, k2, k3, k4, k5, k6, k7, k8, k9 and 3 more")
     const builder = new ReportBuilder()
     builder.add("warning", "x", "deep", [...Array.from({ length: 30 }, () => "b".repeat(100)), 5])
     const path = builder.build("test").issues[0]!.path!

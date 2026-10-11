@@ -8,10 +8,5 @@
       // Throwaway experiments, kept for their findings and not part of the build.
       "project": ["**/*.{js,ts,tsx}", "!spikes/**"]
     }
-  },
-  "ignoreIssues": {
-    // The report every format parser returns. The phase 1 parser stream builds against it;
-    // drop this once a parser imports it.
-    "packages/shared/src/importReport.ts": ["exports"]
   }
 }
