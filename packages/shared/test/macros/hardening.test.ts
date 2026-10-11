@@ -41,13 +41,13 @@ describe("nesting depth", () => {
   })
 
   it("stops deep nesting before it can overflow the stack", () => {
-    expect(limit(nested("{{reverse::", "}}", 60_000))).toBe("depth")
+    expect(limit(nested("{{reverse::", "}}", 20_000))).toBe("depth")
   })
 
   it("leaves openers that are never closed as text, however deep, as ST does", () => {
     expect(expanded(request("{{a::".repeat(33))).text).toBe("{{a::".repeat(33))
-    const text = "{{a::".repeat(150_000) + "{{user}}"
-    expect(expanded(request(text)).text).toBe("{{a::".repeat(150_000) + "User")
+    const text = "{{a::".repeat(50_000) + "{{user}}"
+    expect(expanded(request(text)).text).toBe("{{a::".repeat(50_000) + "User")
   })
 
   it("can be changed", () => {
@@ -87,11 +87,11 @@ describe("work and output size", () => {
   })
 
   it("counts pairing blocks at each level, since each level pairs its content again", () => {
-    expect(limit(nested("{{trim}}", "{{/trim}}", 50_000))).toBe("work")
+    expect(limit(nested("{{trim}}", "{{/trim}}", 15_000))).toBe("work")
   })
 
   it("counts text parsed, and stops the parser partway when the work runs out", () => {
-    expect(limit("x".repeat(900_000), { limits: { maxWork: 500_000 } })).toBe("work")
+    expect(limit("x".repeat(250_000), { limits: { maxWork: 100_000 } })).toBe("work")
     // The parser charges as it goes, so a budget that runs out stops it within 64K steps.
     let charged = 0
     const stop = new Error("out of work")
@@ -104,15 +104,15 @@ describe("work and output size", () => {
     expect(charged).toBeLessThan(100_000 + 70_000)
   })
 
-  it("refuses a text over 1,000,000 characters before parsing it", () => {
-    expect(expand(request("x".repeat(1_000_001)))).toEqual({
+  it("refuses a text over 256K characters before parsing it", () => {
+    expect(expand(request("x".repeat(262_145)))).toEqual({
       _tag: "LimitExceeded",
       limit: "length",
       scope: "",
       offset: 0
     })
-    expect(limit("x".repeat(1_000_000))).toBe("expanded")
-    const card = { description: "y".repeat(1_000_001) }
+    expect(limit("x".repeat(262_144))).toBe("expanded")
+    const card = { description: "y".repeat(262_145) }
     expect(expand(request("ab {{description}}", { context: { ...request("").context, card } }))).toEqual({
       _tag: "LimitExceeded",
       limit: "length",
@@ -121,21 +121,22 @@ describe("work and output size", () => {
     })
   })
 
-  // The review's worst inputs under the length cap: each stops within the default limits.
+  // The reviews' worst inputs, at full size just under the length cap: each stops within the
+  // default limits, and none takes more than the work budget.
+  const crossing = (n: number) =>
+    Array.from({ length: n }, (_, i) => `{{x${i % 300}}}`).join("") +
+    Array.from({ length: n }, (_, i) => `{{/x${i % 300}}}`).join("")
   it.each([
-    ["unclosed unknown openers", "{{a}}".repeat(199_000), "work"],
-    ["openers then closers", "{{trim}}".repeat(55_000) + "{{/trim}}".repeat(55_000), "work"],
-    [
-      "crossing names",
-      Array.from({ length: 25_000 }, (_, i) => `{{x${i % 300}}}`).join("") +
-        Array.from({ length: 25_000 }, (_, i) => `{{/x${i % 300}}}`).join(""),
-      "work"
-    ],
-    ["unclosed chains", ("{{a::".repeat(30) + "z ").repeat(6_000), "expanded"],
-    ["names with junk", "{{a b".repeat(199_000), "expanded"],
-    ["brace runs", "{{{{{{{{{{x".repeat(90_000), "expanded"]
+    ["unclosed unknown openers", "{{a}}".repeat(52_000), "work"],
+    ["openers then closers", "{{trim}}".repeat(15_000) + "{{/trim}}".repeat(15_000), "work"],
+    ["crossing names", crossing(15_400), "work"],
+    ["closed nested openers", nested("{{a::", "}}", 37_000), "depth"],
+    ["unclosed chains", ("{{a::".repeat(30) + "z ").repeat(1_700), "expanded"],
+    ["names with junk", "{{a b".repeat(52_000), "expanded"],
+    ["brace runs", "{{{{{{{{{{x".repeat(23_500), "expanded"]
   ])("%s", (_name, text, outcome) => {
-    expect(text.length).toBeLessThanOrEqual(1_000_000)
+    expect(text.length).toBeGreaterThan(250_000)
+    expect(text.length).toBeLessThanOrEqual(262_144)
     expect(limit(text)).toBe(outcome)
   })
 
@@ -150,17 +151,17 @@ describe("work and output size", () => {
     expect(limit("{{roll::100000000d6}}")).toBe("work")
     expect(expanded(request("{{space::5}}{{roll::1000d6}}")).text).toMatch(/^ {5}\d+$/)
     // "L" becomes ten characters: counted before formatting, not after.
-    expect(limit(`{{datetimeformat::${"L".repeat(300_000)}}}`)).toBe("work")
+    expect(limit(`{{datetimeformat::${"L".repeat(250_000)}}}`, { limits: { maxWork: 3_000_000 } })).toBe("work")
     expect(expanded(request("{{datetimeformat::YYYY-MM-DD x}}")).text).toBe("1970-01-01 0")
   })
 
   it("counts what's written to variables", () => {
-    const big = "y".repeat(900_000)
-    expect(limit(`{{setvar::a}}${big}{{/setvar}}` + "{{addvar::a::x}}".repeat(10))).toBe("work")
+    const context = { ...request("").context, variables: { local: { a: "y".repeat(900_000) } } }
+    expect(limit("{{addvar::a::x}}".repeat(10), { context })).toBe("work")
   })
 
   it("leaves room for large legitimate text", () => {
-    const description = "word ".repeat(100_000)
+    const description = "word ".repeat(50_000)
     const result = expanded(
       request("{{description}}\n{{description}}", { context: { ...request("").context, card: { description } } })
     )
@@ -262,7 +263,7 @@ describe("linear time", () => {
     expand(request(text, { limits: { maxWork: perChar * text.length, maxExpansions: 1_000_000 } }))
 
   it("skips junk after a name in one pass", () => {
-    const text = "{{a!".repeat(100_000)
+    const text = "{{a!".repeat(60_000)
     expect(linear(text, 4)).toMatchObject({ text })
   })
 
@@ -279,9 +280,9 @@ describe("linear time", () => {
   })
 
   it("handles runs of braces and failed starts", () => {
-    expect(linear("{".repeat(500_000) + "{{user}}", 4)).toMatchObject({ text: "{".repeat(500_000) + "User" })
-    expect(linear("{{ ".repeat(200_000), 4)).toMatchObject({ text: "{{ ".repeat(200_000) })
-    expect(linear(`{{.a${"-".repeat(500_000)}}}`, 4)).toMatchObject({ _tag: "Expanded" })
+    expect(linear("{".repeat(250_000) + "{{user}}", 4)).toMatchObject({ text: "{".repeat(250_000) + "User" })
+    expect(linear("{{ ".repeat(80_000), 4)).toMatchObject({ text: "{{ ".repeat(80_000) })
+    expect(linear(`{{.a${"-".repeat(250_000)}}}`, 4)).toMatchObject({ _tag: "Expanded" })
   })
 })
 

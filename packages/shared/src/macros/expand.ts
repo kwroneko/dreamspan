@@ -62,7 +62,10 @@ export interface MacroLimits {
    * in ST), and per die rolled.
    */
   readonly maxWork: number
-  /** Characters in any one text: the text itself, a card field, an `{{if}}` branch. */
+  /**
+   * Characters in any one text: the text itself, a card field, an `{{if}}` branch. 256K is
+   * about 60K tokens, far above any real card field, lorebook entry or prompt.
+   */
   readonly maxLength: number
 }
 
@@ -70,11 +73,11 @@ const DEFAULT_MACRO_LIMITS: MacroLimits = {
   maxDepth: 32,
   maxExpansions: 10_000,
   maxWork: 4_000_000,
-  maxLength: 1_000_000
+  maxLength: 262_144
 }
 
-/** Pairing costs this much per macro, besides its search steps: the maps and sets it builds. */
-const PAIRING_COST = 10
+/** Pairing costs this much per macro, besides its search steps: measured, pairing a macro (the maps and sets it builds) costs about as much as parsing 40 characters. */
+const PAIRING_COST = 40
 
 export type MacroLimit = "depth" | "expansions" | "work" | "length"
 
