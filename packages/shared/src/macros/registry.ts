@@ -29,8 +29,31 @@ export interface MacroCall {
   /** Where the macro starts in the text being expanded. */
   readonly offset: number
   readonly context: MacroContext
+  /** ST's env.contentHash: a hash of the text being expanded, for `{{pick}}`. */
+  readonly contentHash: number
   /** Expands macros in text with the same context and state (for `delayArgResolution`). */
   readonly resolve: (text: string) => string
+  /**
+   * Expands card-sourced text (a card field) on its own, as ST's baseChatReplace does: card-
+   * field macros inside it read as empty. `scope` names the field, for freezing.
+   */
+  readonly expandTemplate: (text: string, scope: string) => string
+  /** The macro registered under a name, in any case. */
+  readonly lookup: (name: string) => MacroEntry | undefined
+  /** The macros at the top level of a text, as ST's extractMacroInfo reports them. */
+  readonly macrosIn: (text: string) => ReadonlyArray<MacroInfo>
+  /** A number in [0, 1), from the expansion's random source. */
+  readonly random: () => number
+  /** True the first time a key is seen in this expansion (for one-shot macros). */
+  readonly once: (key: string) => boolean
+}
+
+export interface MacroInfo {
+  readonly name: string
+  readonly closing: boolean
+  readonly argCount: number
+  readonly start: number
+  readonly end: number
 }
 
 export interface MacroSpec {

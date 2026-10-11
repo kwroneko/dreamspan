@@ -18,10 +18,11 @@
 // - A macro that delays its arguments (`{{if}}`) gets them raw, and a block untrimmed.
 import { isClosing, type MacroNode, type Node, parse } from "./parse.ts"
 import type { MacroContext } from "./context.ts"
-import type { MacroCall, MacroEntry } from "./registry.ts"
+import { stringHash } from "./hash.ts"
+import type { MacroCall, MacroEntry, MacroInfo } from "./registry.ts"
 
 /** What `{{else}}` returns: `{{if}}` splits on it, and any left over is removed at the end. */
-const ELSE_MARKER = "\u0000\u001FELSE\u001F\u0000"
+export const ELSE_MARKER = "\u0000\u001FELSE\u001F\u0000"
 
 const MAX_DEPTH = 32
 
@@ -79,7 +80,7 @@ const indentOf = (line: string) => {
 }
 
 /** ST's trimScopedContent: trims, and removes the first non-blank line's indentation from every line. */
-const trimScoped = (content: string): string => {
+export const trimScoped = (content: string): string => {
   const lines = content.split("\n")
   const first = lines.find((line) => line.trim() !== "")
   const base = first === undefined ? 0 : indentOf(first)
@@ -223,7 +224,8 @@ const pairScopes = (
 }
 
 const isTrue = (value: string) => ["on", "true", "1"].includes(value.trim().toLowerCase())
-const isFalse = (value: string) => ["off", "false", "0"].includes(value.trim().toLowerCase())
+/** ST's isFalseBoolean. */
+export const isFalse = (value: string) => ["off", "false", "0"].includes(value.trim().toLowerCase())
 
 const isOfType = (value: string, type: string) => {
   const trimmed = value.trim()
@@ -261,13 +263,35 @@ interface Block {
   readonly nodes: ReadonlyArray<Node>
 }
 
-class Expansion {
-  private readonly registry: MacroLookup
-  private readonly context: MacroContext
+/** State shared by every evaluation in one expansion, nested ones included. */
+interface Run {
+  readonly registry: MacroLookup
+  readonly random: () => number
+  readonly seen: Set<string>
+  /** Expanded card fields by scope: ST expands each once per evaluation. */
+  readonly templates: Map<string, string>
+}
 
-  constructor(registry: MacroLookup, context: MacroContext) {
-    this.registry = registry
+const macroInfo = (text: string, node: Node): MacroInfo | undefined =>
+  node.kind === "macro"
+    ? {
+        name: node.name,
+        closing: isClosing(text, node),
+        argCount: node.args.length,
+        start: node.start,
+        end: node.end
+      }
+    : undefined
+
+class Expansion {
+  private readonly run: Run
+  private readonly context: MacroContext
+  private readonly contentHash: number
+
+  constructor(run: Run, context: MacroContext, content: string) {
+    this.run = run
     this.context = context
+    this.contentHash = stringHash(content)
   }
 
   /** ST's MacroEngine.evaluate. `base` is the offset of the text in the outermost one. */
@@ -280,7 +304,7 @@ class Expansion {
   }
 
   private entry(name: string) {
-    return this.registry.get(name.toLowerCase())
+    return this.run.registry.get(name.toLowerCase())
   }
 
   private acceptsBlock(node: MacroNode) {
@@ -370,7 +394,20 @@ class Expansion {
       isScoped: block !== undefined,
       offset,
       context: this.context,
-      resolve: (t) => this.evaluate(t, offset)
+      contentHash: this.contentHash,
+      resolve: (t) => this.evaluate(t, offset),
+      expandTemplate: (t, scope) => this.template(t, scope),
+      lookup: (name) => this.entry(name.trim()),
+      macrosIn: (t) => {
+        const nodes = parse(t, MAX_DEPTH)
+        return nodes === "depth" ? [] : nodes.flatMap((n) => macroInfo(t, n) ?? [])
+      },
+      random: this.run.random,
+      once: (key) => {
+        if (this.run.seen.has(key)) return false
+        this.run.seen.add(key)
+        return true
+      }
     }
     try {
       return entry.handler(call)
@@ -379,12 +416,27 @@ class Expansion {
       return asWritten
     }
   }
+
+  /** ST's baseChatReplace: a separate evaluation of card text, without card fields. */
+  private template(text: string, scope: string): string {
+    const cached = this.run.templates.get(scope)
+    if (cached !== undefined) return cached
+    const { card: _card, original: _original, ...context } = this.context
+    const result = new Expansion(this.run, context, text).evaluate(text, 0)
+    this.run.templates.set(scope, result)
+    return result
+  }
 }
 
 export interface EvaluateOptions {
   readonly registry: MacroLookup
   readonly context: MacroContext
+  readonly random: () => number
 }
 
 export const evaluateMacros = (text: string, options: EvaluateOptions): string =>
-  new Expansion(options.registry, options.context).evaluate(text, 0)
+  new Expansion(
+    { registry: options.registry, random: options.random, seen: new Set(), templates: new Map() },
+    options.context,
+    text
+  ).evaluate(text, 0)

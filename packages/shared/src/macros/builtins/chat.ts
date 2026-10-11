@@ -1,0 +1,84 @@
+// ST's chat and time macros (public/scripts/macros/definitions/chat-macros.js and
+// time-macros.js at 06bde939), over the messages and clock in the context.
+import type { ChatMessage } from "../context.ts"
+import type { MacroCall, MacroSpec } from "../registry.ts"
+import { atOffset, formatMoment, humanize, inZone, parseMoment } from "../time.ts"
+
+const lastIndex = (call: MacroCall, filter?: (message: ChatMessage) => boolean) => {
+  const messages = call.context.messages ?? []
+  for (let i = messages.length - 1; i >= 0; i--) if (!filter || filter(messages[i]!)) return i
+  return undefined
+}
+
+const lastText = (call: MacroCall, filter?: (message: ChatMessage) => boolean) => {
+  const i = lastIndex(call, filter)
+  return i === undefined ? "" : call.context.messages![i]!.text
+}
+
+const optional = (value: number | undefined) => (value === undefined ? "" : String(value))
+
+const now = (call: MacroCall, format: string) => formatMoment(inZone(call.context.now, call.context.timeZone), format)
+
+/** The time since the user's last message before the latest one, as ST measures it. */
+const idleDuration = (call: MacroCall) => {
+  const messages = call.context.messages ?? []
+  let takeNext = false
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i]!
+    if (message.system) continue
+    if (message.fromUser && takeNext)
+      return message.sentAt ? humanize(call.context.now - message.sentAt, false) : "just now"
+    takeNext = true
+  }
+  return "just now"
+}
+
+export const chatMacros: ReadonlyArray<MacroSpec> = [
+  { name: "lastMessage", handler: (call) => lastText(call) },
+  { name: "lastMessageId", handler: (call) => optional(lastIndex(call)) },
+  { name: "lastUserMessage", handler: (call) => lastText(call, (m) => m.fromUser && !m.system) },
+  { name: "lastCharMessage", handler: (call) => lastText(call, (m) => !m.fromUser && !m.system) },
+  { name: "firstIncludedMessageId", handler: (call) => optional(call.context.firstIncludedMessageId) },
+  { name: "firstDisplayedMessageId", handler: (call) => optional(call.context.firstDisplayedMessageId) },
+  {
+    name: "lastSwipeId",
+    handler: (call) => {
+      const i = lastIndex(call)
+      return optional(i === undefined ? undefined : call.context.messages![i]!.versions)
+    }
+  },
+  {
+    name: "currentSwipeId",
+    handler: (call) => {
+      const i = lastIndex(call)
+      const selected = i === undefined ? undefined : call.context.messages![i]!.selectedVersion
+      return optional(selected === undefined ? undefined : selected + 1)
+    }
+  },
+  {
+    name: "allChatRange",
+    handler: (call) => {
+      const length = call.context.messages?.length ?? 0
+      return length === 0 ? "" : `0-${length - 1}`
+    }
+  },
+  {
+    name: "time",
+    args: [{ name: "offset", optional: true }],
+    handler: (call) => {
+      const m = /^UTC([+-]\d+)$/.exec(call.args[0] ?? "")
+      return m ? formatMoment(atOffset(call.context.now, Number.parseInt(m[1]!, 10)), "LT") : now(call, "LT")
+    }
+  },
+  { name: "date", handler: (call) => now(call, "LL") },
+  { name: "weekday", handler: (call) => now(call, "dddd") },
+  { name: "isotime", handler: (call) => now(call, "HH:mm") },
+  { name: "isodate", handler: (call) => now(call, "YYYY-MM-DD") },
+  { name: "datetimeformat", args: [{ name: "format" }], handler: (call) => now(call, call.args[0]!) },
+  { name: "idleDuration", aliases: ["idle_duration"], handler: idleDuration },
+  {
+    name: "timeDiff",
+    args: [{ name: "left" }, { name: "right" }],
+    handler: (call) => humanize(parseMoment(call.args[0]!) - parseMoment(call.args[1]!), true)
+  }
+]

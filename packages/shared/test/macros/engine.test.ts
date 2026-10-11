@@ -62,7 +62,11 @@ const specs: ReadonlyArray<MacroSpec> = [
 ]
 const registry = registryWith(specs)
 const run = (text: string) =>
-  evaluateMacros(text, { registry, context: { names: { user: "User", char: "Character" } } })
+  evaluateMacros(text, {
+    registry,
+    context: { names: { user: "User", char: "Character" }, now: 0, timeZone: "UTC" },
+    random: Math.random
+  })
 
 const vectors = (cases: ReadonlyArray<readonly [string, string]>) =>
   it.each(cases)("%j → %j", (input, output) => expect(run(input)).toBe(output))
