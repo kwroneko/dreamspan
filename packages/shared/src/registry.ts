@@ -1,8 +1,7 @@
 // Registries: how the core assembles its features, and later how plugins extend, wrap,
 // replace or disable them (spec/PLUGINS.md §3.1). The core registers its own features
 // through the same registries plugins will use, so the seams exist where the app has them.
-// This is the same code as packages/server/src/registry.ts, here so that pure features the
-// client also runs (macros) can use it; the server's copy can become a re-export of this one.
+// It lives in shared so that pure features the client also runs (macros) can use it.
 import { Effect, type Scope } from "effect"
 
 /** A registration that hides the entry with its id, for disabling a feature. */
