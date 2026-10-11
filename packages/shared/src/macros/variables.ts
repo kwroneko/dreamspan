@@ -9,8 +9,16 @@
 //   starting value is `read || 0`, so "0" plus "abc" is "abc".
 // - getvarkey on a value that isn't JSON returns the whole value.
 // Names are only looked up as own keys, so "__proto__" or "constructor" are ordinary names.
+//
+// Unlike ST, a write is refused when the value would be over MAX_VALUE characters: the macro
+// stays as written and nothing is recorded. Reading a value costs work once per value written
+// (the read and the JSON parse are cached until the next write), so a large value can't be
+// re-read for free.
 
 export type VarValue = string | number
+
+/** The longest value a write may produce: 1 MB of text. */
+export const MAX_VALUE = 1_000_000
 
 export type VarScope = "local" | "global"
 
@@ -53,11 +61,15 @@ const stored = (value: unknown): VarValue | undefined => {
   return typeof value === "string" || typeof value === "number" ? value : normalize(value)
 }
 
+type Parsed = { readonly ok: true; readonly value: unknown } | { readonly ok: false }
+
 export class VariableScope {
   private readonly values: Map<string, VarValue>
+  private readonly reads = new Map<string, unknown>()
+  private readonly parsed = new Map<string, Parsed>()
   private readonly scope: VarScope
   private readonly effects: Array<VariableEffect>
-  /** Counts written characters against the expansion's work limit. */
+  /** Counts characters read, parsed or written against the expansion's work limit. */
   private readonly charge: (size: number) => void
 
   constructor(
@@ -80,14 +92,33 @@ export class VariableScope {
     return this.values.has(name)
   }
 
+  private size(name: string) {
+    const value = this.values.get(name)
+    return value === undefined ? 0 : String(value).length
+  }
+
   get(name: string): unknown {
-    return read(this.values.get(name))
+    if (!this.reads.has(name)) {
+      this.charge(this.size(name))
+      this.reads.set(name, read(this.values.get(name)))
+    }
+    return this.reads.get(name)
+  }
+
+  private json(name: string): Parsed {
+    let parsed = this.parsed.get(name)
+    if (!parsed) {
+      this.charge(this.size(name))
+      parsed = parseJson(this.values.get(name))
+      this.parsed.set(name, parsed)
+    }
+    return parsed
   }
 
   /** getvarkey: an object key or array index of a JSON value. */
   getAt(name: string, index: string): unknown {
     let value: unknown = this.values.get(name)
-    const parsed = parseJson(value)
+    const parsed = this.json(name)
     // Indexing JSON null throws in ST, which then reads the null itself (as 0).
     if (parsed.ok) value = parsed.value
     if (parsed.ok && value !== null) {
@@ -101,27 +132,30 @@ export class VariableScope {
 
   set(name: string, value: VarValue): void {
     if (!name) throw new Error("Variable name cannot be empty")
-    this.charge(String(value).length)
+    const size = String(value).length
+    if (size > MAX_VALUE) throw new Error("Variable value too large")
+    this.charge(size)
     this.values.set(name, value)
+    this.reads.delete(name)
+    this.parsed.delete(name)
     this.effects.push({ scope: this.scope, name, value })
   }
 
   /** setvarkey: sets a key (an object, created if absent) or an index (an array). */
   setAt(name: string, index: string, value: string): void {
     if (!name) throw new Error("Variable name cannot be empty")
+    this.charge(this.size(name))
     const parsed = parseJson(this.values.get(name) ?? "null")
     if (!parsed.ok) return
     const numeric = !Number.isNaN(Number(index))
     let container = parsed.value ?? (numeric ? [] : {})
     // ST assigns in strict mode: a primitive can't take a key, and the write is dropped.
     if (typeof container !== "object") return
-    // Assigning a string to "__proto__" does nothing in ST either.
-    if (index !== "__proto__") {
-      const key = numeric ? String(Number(index)) : index
-      // An index past the end pads the array with nulls when it's serialized.
-      if (Array.isArray(container) && Number(key) > container.length) this.charge((Number(key) - container.length) * 5)
-      container = Object.assign(container, { [key]: value })
-    }
+    const key = numeric ? String(Number(index)) : index
+    // An index past the end pads the array with nulls when it's serialized.
+    if (Array.isArray(container) && (Number(key) - container.length) * 5 > MAX_VALUE)
+      throw new Error("Variable value too large")
+    container = Object.assign(container, { [key]: value })
     this.set(name, JSON.stringify(container))
   }
 
@@ -148,6 +182,8 @@ export class VariableScope {
 
   delete(name: string): void {
     if (!this.values.delete(name)) return
+    this.reads.delete(name)
+    this.parsed.delete(name)
     this.effects.push({ scope: this.scope, name, value: null })
   }
 

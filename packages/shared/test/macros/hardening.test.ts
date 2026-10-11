@@ -3,7 +3,8 @@
 // (or ST's regex restored) it fails or times out.
 // @ts-expect-error: the shared package has no Node types; its tests run under Node.
 import { readdirSync, readFileSync } from "node:fs"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
+import type { ChatMessage } from "../../src/macros/context.ts"
 import { expand, type ExpandRequest } from "../../src/macros/expand.ts"
 import { builtinRegistry, expanded } from "./support.ts"
 
@@ -84,8 +85,7 @@ describe("work and output size", () => {
   })
 
   it("counts what's written to variables", () => {
-    expect(limit("{{setvarkey::a::999999999::x}}")).toBe("work")
-    const big = "y".repeat(1_000_000)
+    const big = "y".repeat(900_000)
     expect(limit(`{{setvar::a}}${big}{{/setvar}}` + "{{addvar::a::x}}".repeat(10))).toBe("work")
   })
 
@@ -103,6 +103,66 @@ it("keeps a variable operation that fails as written instead of throwing", () =>
   const context = { ...request("").context, variables: { local: { x: deep } } }
   const text = "{{incvar::x}}{{.x++}}{{.x += 1}}"
   expect(expanded(request(text, { context })).text).toBe(text)
+})
+
+describe("variable values", () => {
+  const withVars = (local: Record<string, unknown>, messages?: ReadonlyArray<ChatMessage>) => ({
+    context: { ...request("").context, variables: { local }, ...(messages ? { messages } : {}) }
+  })
+
+  it("refuses a write over 1 MB: the macro stays as written and nothing is recorded", () => {
+    const over = expanded(request("{{setvar::x::{{space::1000001}}}}[{{getvar::x}}]"))
+    expect(over.effects).toEqual([])
+    expect(over.text.startsWith("{{setvar::x::   ")).toBe(true)
+    expect(over.text.endsWith("}}[]")).toBe(true)
+    expect(expanded(request("{{setvarkey::a::999999999::x}}")).text).toBe("{{setvarkey::a::999999999::x}}")
+    expect(expanded(request("{{setvar::x::{{space::1000000}}}}")).effects).toHaveLength(1)
+  })
+
+  it("keeps a value small enough for later text to use it", () => {
+    const first = expanded(request("{{setvar::mood::x{{space::1300000}}x}}"))
+    const second = expanded(request("{{addvar::mood::x{{space::700000}}x}}", withVars(first.variables.local)))
+    expect(limit("Mood: {{getvar::mood}}. Again: {{getvar::mood}}.", withVars(second.variables.local))).toBe("expanded")
+  })
+
+  it("counts each comparison's scan of a value", () => {
+    const x = "z".repeat(300_000)
+    expect(limit("{{.x == a}}".repeat(5), withVars({ x }))).toBe("expanded")
+    expect(limit("{{.x == a}}".repeat(20), withVars({ x }))).toBe("work")
+    expect(limit("{{.x || a}}".repeat(20), withVars({ x }))).toBe("work")
+  })
+
+  it("parses a JSON value once per write", () => {
+    const x = JSON.stringify(Array.from({ length: 1000 }, (_, i) => i))
+    const parse = vi.spyOn(JSON, "parse")
+    try {
+      expect(expanded(request("{{getvarkey::x::5}}".repeat(50), withVars({ x }))).text).toBe("5".repeat(50))
+      expect(parse.mock.calls.filter(([text]) => text === x)).toHaveLength(1)
+    } finally {
+      parse.mockRestore()
+    }
+  })
+
+  it("refuses padding an array past 1 MB before building it", () => {
+    const stringify = vi.spyOn(JSON, "stringify")
+    try {
+      expect(expanded(request("{{setvarkey::a::300000::x}}")).effects).toEqual([])
+      expect(stringify.mock.calls.some(([value]) => Array.isArray(value) && value.length > 200_000)).toBe(false)
+    } finally {
+      stringify.mockRestore()
+    }
+  })
+
+  it("counts setvarkey's parse of the old value", () => {
+    expect(limit("{{setvarkey::x::k::v}}".repeat(20), withVars({ x: "q".repeat(300_000) }))).toBe("work")
+  })
+
+  it("counts the messages scanned", () => {
+    const messages = Array.from({ length: 100_000 }, () => ({ text: "hi", fromUser: false }))
+    expect(limit("{{lastUserMessage}}".repeat(5), withVars({}, messages))).toBe("expanded")
+    expect(limit("{{lastUserMessage}}".repeat(50), withVars({}, messages))).toBe("work")
+    expect(limit("{{idle_duration}}".repeat(50), withVars({}, messages))).toBe("work")
+  })
 })
 
 describe("linear time", () => {

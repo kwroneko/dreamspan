@@ -515,7 +515,12 @@ class Expansion {
     const vars = this.run.variables[node.global ? "global" : "local"]
     let expanded: string | undefined
     const value = () => (expanded ??= this.varValue(text, node, base))
-    const current = () => vars.get(node.name)
+    // Comparing or testing a value scans it, so each use costs its length.
+    const current = () => {
+      const v = vars.get(node.name)
+      if (typeof v === "string") charge(this.run, v.length)
+      return v
+    }
     const number = (a: unknown, b: string, test: (x: number, y: number) => boolean) => {
       const x = Number(a)
       const y = Number(b)

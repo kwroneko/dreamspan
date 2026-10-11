@@ -4,10 +4,13 @@ import type { ChatMessage } from "../context.ts"
 import type { MacroCall, MacroSpec } from "../registry.ts"
 import { atOffset, formatMoment, humanize, inZone, parseMoment } from "../time.ts"
 
+/** The last message passing the filter. Each message looked at costs work. */
 const lastIndex = (call: MacroCall, filter?: (message: ChatMessage) => boolean) => {
   const messages = call.context.messages ?? []
-  for (let i = messages.length - 1; i >= 0; i--) if (!filter || filter(messages[i]!)) return i
-  return undefined
+  let i = messages.length - 1
+  while (i >= 0 && filter && !filter(messages[i]!)) i--
+  call.charge(messages.length - i)
+  return i >= 0 ? i : undefined
 }
 
 const lastText = (call: MacroCall, filter?: (message: ChatMessage) => boolean) => {
@@ -23,6 +26,7 @@ const now = (call: MacroCall, format: string) => formatMoment(inZone(call.contex
 const idleDuration = (call: MacroCall) => {
   const messages = call.context.messages ?? []
   let takeNext = false
+  call.charge(messages.length)
   for (let i = messages.length - 1; i >= 0; i--) {
     const message = messages[i]!
     if (message.system) continue
