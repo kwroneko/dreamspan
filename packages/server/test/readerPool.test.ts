@@ -1,14 +1,14 @@
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs"
+import { cpSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { Worker } from "node:worker_threads"
 import { NodeWorker } from "@effect/platform-node"
-import { assert, beforeAll, describe, it } from "@effect/vitest"
+import { assert, describe, it } from "@effect/vitest"
+import { inject } from "vitest"
 import { Cause, Context, Deferred, Effect, Exit, Fiber, Layer, Logger, Schedule } from "effect"
 import { RpcClient, type RpcClientError } from "effect/rpc"
 import { workerThreads, writerProtocol } from "../src/db/Database.ts"
 import * as ReaderPool from "../src/db/readerPool.ts"
-import { buildWorkers } from "../scripts/build-workers.ts"
 import { PoolOps } from "./support/poolOps.ts"
 
 class Readers extends Context.Service<Readers, RpcClient.FromGroup<typeof PoolOps, RpcClientError.RpcClientError>>()(
@@ -172,8 +172,9 @@ describe("reader pool", () => {
   )
 
   describe("with bundles", () => {
+    // A copy of the run's build (support/bundles.ts), since this test changes it.
     const bundleDir = mkdtempSync(join(tmpdir(), "rp-bundles-"))
-    beforeAll(() => buildWorkers(bundleDir), 60_000)
+    cpSync(inject("bundleDir"), bundleDir, { recursive: true })
 
     it.live(
       "a crashed reader isn't replaced by code from a newer build",

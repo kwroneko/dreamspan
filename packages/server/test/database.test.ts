@@ -3,15 +3,15 @@ import { cpSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { DatabaseSync } from "node:sqlite"
-import { assert, beforeAll, describe, it } from "@effect/vitest"
+import { assert, describe, it } from "@effect/vitest"
+import { inject } from "vitest"
 import { Cause, Effect, Exit, Fiber, Layer } from "effect"
 import { acquireInstanceLock, databaseFile, InstanceLocked } from "../src/db/connection.ts"
 import * as Database from "../src/db/Database.ts"
-import { buildWorkers } from "../scripts/build-workers.ts"
 import { diagnosticReaders } from "./support/diagnostics.ts"
 
 const freshDir = () => mkdtempSync(join(tmpdir(), "rp-db-"))
-const bundleDir = mkdtempSync(join(tmpdir(), "rp-bundles-"))
+const bundleDir = inject("bundleDir")
 const database = (dataDir: string, readers = 2, workers: "source" | "bundle" = "source") =>
   Database.layer({ dataDir, readers, allowNetworkFs: false, workers, bundleDir })
 const range = (n: number) => Array.from({ length: n }, (_, i) => i)
@@ -161,8 +161,6 @@ describe("database workers", () => {
 })
 
 describe("bundled workers", () => {
-  beforeAll(() => buildWorkers(bundleDir), 60_000)
-
   it.live("are refused when the sources changed since they were built", () =>
     Effect.gen(function* () {
       const staleDir = mkdtempSync(join(tmpdir(), "rp-bundles-"))

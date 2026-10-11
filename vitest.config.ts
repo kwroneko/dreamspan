@@ -1,3 +1,4 @@
+import { join } from "node:path"
 import { defineConfig } from "vitest/config"
 
 export default defineConfig({
@@ -16,6 +17,8 @@ export default defineConfig({
           include: ["test/**/*.test.ts"],
           environment: "node",
           testTimeout: 30_000,
+          // Builds the worker bundles once per run (test/support/bundles.ts).
+          globalSetup: [join(import.meta.dirname, "packages/server/test/support/bundles.ts")],
           // Works around a V8 bug in Node 24 (nodejs/node#66366, fixed upstream in V8
           // 9b8ca54d5a but not yet in a 24.x release): Wasm code GC can free an import
           // wrapper twice while another isolate tiers it up. Source-mode database workers
