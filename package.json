@@ -21,7 +21,8 @@
     "test": "vitest run",
     "size": "node scripts/size.ts",
     "check": "npm run typecheck && npm run lint && npm run format:check && npm run knip && npm run test",
-    "test:browser": "npm run build -w @rp/client && playwright test -c packages/client/playwright.config.ts"
+    "test:browser": "npm run build -w @rp/client && playwright test -c packages/client/playwright.config.ts",
+    "test:st": "node packages/server/test/st/run.ts"
   },
   "devDependencies": {
     "@effect/language-service": "0.87.3",
