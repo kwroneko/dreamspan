@@ -53,10 +53,13 @@ export interface ChatMessage {
 
 export interface MacroContext {
   readonly names: MacroNames
-  /** The chat's variables (`vars` in the chat state) and the global ones. */
+  /**
+   * The chat's variables (`vars` in the chat state) and the global ones, as they were before
+   * this text: for a message, before its own `var.set` events.
+   */
   readonly variables?: VariableValues
   readonly card?: CardFields
-  /** The messages before the text's position, oldest first. */
+  /** The messages before the text's position, oldest first, as resolved text (never expanded again). */
   readonly messages?: ReadonlyArray<ChatMessage>
   readonly firstIncludedMessageId?: number
   readonly firstDisplayedMessageId?: number
