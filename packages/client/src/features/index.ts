@@ -2,9 +2,10 @@
 import * as connections from "./connections/index.ts"
 import * as credentials from "./credentials.tsx"
 import * as login from "./login.tsx"
+import * as network from "./network.tsx"
 import * as shell from "./shell.tsx"
 import * as status from "./status.tsx"
 
 export const registerFeatures = () => {
-  for (const feature of [shell, login, status, connections, credentials]) feature.register()
+  for (const feature of [shell, login, status, connections, credentials, network]) feature.register()
 }
