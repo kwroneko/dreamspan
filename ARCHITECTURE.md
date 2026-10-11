@@ -56,6 +56,8 @@ Bun was measured as an alternative (2026-10-10) and not adopted. On this server 
 | `ALLOWED_IPS` | unset | IPs and CIDR ranges besides loopback that may connect in single mode (§4) |
 | `TRUSTED_PROXIES` | unset (loopback) | The only addresses that may connect in proxy mode (§4) |
 | `ALLOW_INSECURE_EXPOSURE` | `false` | Serve every address without protection (§4) |
+| `LOOPBACK_REQUIRES_LOGIN` | `true` | Once an account has a password, loopback needs a login too (§4) |
+| `ADMIN_PASSWORD_FILE`, `ADMIN_PASSWORD`, `ADMIN_USER` | unset | The first admin's password, for headless servers. Applies only while no enabled admin has one (§4) |
 | `PUBLIC_ORIGINS` | unset | Origins the app is served at by name, e.g. `https://rp.example.com` (§4) |
 | `CLIENT_DIST` | `packages/client/dist` | Static files to serve |
 | `SECRET_KEY`, `SECRET_KEY_FILE` | unset | The server secret (below). Generated into `DATA_DIR/secret.key` when neither is set |
@@ -169,6 +171,7 @@ Migrations (`migrations.ts`) run in the writer through Effect's `SqliteMigrator`
 - `0003_draft_history` (§3.10), `0004_recycle_bin` (§3.11)
 - `0005_providers` (§3.12): `connections` and `models` in their final shape, and the `llm_requests` usage ledger
 - `0006_credentials` (§3.12): keys as credentials that connections reference, bound to hosts
+- `0007_accounts` (§4): `users.password_hash`, and `sessions`
 
 Conventions:
 - **Tables:** all `STRICT`, with JSON columns guarded by `json_valid` CHECKs and timestamps in epoch milliseconds.
@@ -425,14 +428,32 @@ The provider layer's storage (spec/PROVIDERS.md §2, §3.1, §9.1), in migration
 
 ## 4. Authentication
 
-`auth.ts` implements the `Authentication` RPC middleware declared in `@rp/shared/api.ts`. It provides `CurrentUser` to every handler. Over the WebSocket, the headers are those of the upgrade request, so the identity applies to the whole connection.
+`auth/Accounts.ts` implements the `Authentication` RPC middleware declared in `@rp/shared/api.ts`. It provides `CurrentUser` to every handler, resolved on every call. Over the WebSocket, the headers are those of the upgrade request. A session is still checked on each call, so a logout reaches connections that are already open. `accounts.test.ts` checks that every RPC in `AppApi` carries the middleware: one added to the group after `.middleware()` would skip it.
 - **Message headers are dropped** (`TransportHeadersOnly` in `server.ts`). Effect's RPC server appends the headers a client puts in each message after the upgrade request's, and the later entries win. Before this, any client could name any user in proxy mode by sending `remote-user` in a message. The serialization now empties message headers when decoding, so identity can only come from the upgrade request (`rpc.test.ts` checks this).
-- **`AUTH_MODE=single`:** every connection is the implicit local user `local`. This is for running on your own machine.
-- **`AUTH_MODE=proxy`:** the user is whoever the reverse proxy names in `AUTH_PROXY_HEADER` (Authelia's `Remote-User`). A missing header is `Unauthorized`.
+- **`AUTH_MODE=single`, built-in login** (DESIGN §10.1):
+  - **No account has a password:** loopback and `ALLOWED_IPS` are the implicit local admin `local`, without logging in. That's local use. It's checked on every call, not only when a connection opens: a socket opened from elsewhere while login was required doesn't become the local admin if the last password goes.
+  - **Once an enabled user has a password,** a session is required. With `LOOPBACK_REQUIRES_LOGIN=false`, loopback skips login and acts as the oldest enabled admin. Loopback is judged by `x-rp-peer`, which `RequestGuard` sets from the socket's address and which replaces any copy the client sends. Behind a reverse proxy on the same host, every client arrives from loopback, so this setting would make everyone the admin.
+  - **Login and logout** are HTTP, since only a response can set a cookie: `POST /auth/login` (JSON `{handle, password}`, at most 4 KiB) and `POST /auth/logout`. A login must be `application/json`, so a cross-site form can't send one, on top of the Origin check. Over plain HTTP beyond loopback, passwords cross the network in the clear: put TLS in front.
+  - **The session cookie** `rp_session` is 32 random bytes, `HttpOnly`, `SameSite=Strict`, `Secure` when the page is on https, and lasts 30 days. The database stores only its SHA-256, so a copy of the database holds no live session.
+  - **Login attempts** count before the password is checked, so a burst can't outrun the count. The limits are 10 per address and handle and 50 per address in 15 minutes, then `429` with `Retry-After`; a success forgives its address and handle.
+    - Keying by address and handle means nobody can lock someone else out by name. Behind a same-host proxy, all clients share one address, so they also share its limits.
+    - At most two password checks run at once. scrypt shares libuv's 4-thread pool with DNS and file reads, so further attempts get `429` instead of queueing.
+    - Malformed handles and over-long passwords fail like a wrong password, before any hashing, and count only against their address.
+    - A check holds its permit until scrypt finishes, even when the client disconnects, since the hash can't be cancelled.
+    - The counts are capped at 10,000 keys: stale ones go first, then the oldest.
+    - An unknown handle takes as long as a wrong password (a dummy scrypt check).
+    - Checking the current password in `SetPassword` is throttled the same way, so a stolen session can't guess at full speed.
+    - The counts are kept in memory.
+  - **Passwords** use scrypt (N=2^15, r=8, p=3) on libuv's thread pool, so the event loop stays free. The hash is stored as `scrypt$N$r$p$salt$hash`. A password needs 8 to 1024 characters, and nothing else (NIST SP 800-63B).
+  - **No sign-up:** an admin creates accounts (`CreateUser`, `SetUserDisabled`). An admin without a password of their own can't: the new account's password would make login required, and the admin couldn't log in. Users set their own password with the current one, if they have one; an admin can set anyone's (`SetPassword`). Changing a password or disabling a user ends that user's sessions, and the last enabled admin can't be disabled.
+  - **Headless servers:** `ADMIN_PASSWORD_FILE` or `ADMIN_PASSWORD` (with an optional `ADMIN_USER`) gives the first admin a password at startup. The account is the named user, else the oldest enabled admin (so the local admin keeps its data), else a new `admin`. It applies only while no enabled admin has a password, so a password changed in the app survives restarts. Proxy mode ignores it, with a warning.
+  - **Caches:** sessions aren't cached, so a revoked one stops working at once. Users are cached per process and cleared on every account change, all of which go through this process. A lookup that started before a change doesn't write its stale answer back.
+- **`AUTH_MODE=proxy`:** the user is whoever the reverse proxy names in `AUTH_PROXY_HEADER` (Authelia's `Remote-User`). A missing header is `Unauthorized`, and so is one containing a comma or a control character. Node joins a repeated header with `, `, so a proxy that added its header next to a client's would otherwise produce a name made of both.
   - The header is trusted because only the proxy can connect (exposure, below).
+  - Login, passwords and account creation don't apply. Disabling a user does.
 
 **Exposure** (`net/exposure.ts`, DESIGN §11). Who may connect at all, decided per connection from the socket's source address, never from a forwarded header. Configuration is environment-only, as for every security setting.
-- **Single mode:** loopback, plus `ALLOWED_IPS`.
+- **Single mode:** loopback, plus `ALLOWED_IPS`. Without `ALLOWED_IPS`, every address may connect while an enabled user has a password, since everyone then has to log in. This is checked per connection, so if the last password goes, access beyond loopback goes with it. An allowlist stays a restriction even with passwords.
 - **Proxy mode:** `TRUSTED_PROXIES` only, or loopback when it's unset. Anyone else who could connect could send the identity header and be any user. `ALLOWED_IPS` is a startup error here.
 - **Refused peers** get a bare `403` written to the socket on connect, which is then destroyed before it's read. Ending it isn't enough: the HTTP parser is already attached, and on a half-open socket it would still dispatch the peer's requests (`exposure.test.ts` checks that no handler runs).
 - **At startup,** listening beyond loopback (`HOST` other than `localhost`, `127.0.0.0/8` or `::1`) with nothing beyond loopback allowed is an `UnsafeExposure` error naming the fix. So are entries that aren't IPs or CIDR ranges (a prefix must be 0–3 digits: `Number("")` is `0`, so `10.0.0.0/` would otherwise allow everyone).
@@ -446,9 +467,11 @@ The provider layer's storage (spec/PROVIDERS.md §2, §3.1, §9.1), in migration
 - **`PUBLIC_ORIGINS` entries** must be exact origins (scheme, host, optional port; a trailing slash is allowed). A path, credentials or a wildcard is a startup error, not something silently dropped.
 - Vite's dev proxy keeps `Host` as `localhost:5173`, which matches the page's origin.
 
-Users are created on first sight (`EnsureUser`). The first user of an instance becomes `admin`. Resolved users are cached per process, so authentication doesn't hit the writer on every connection.
+Users are created on first sight (`EnsureUser`): the local user, and proxy identities. The first user of an instance becomes `admin`. A disabled user is refused.
 
-Not built yet: built-in login (PLAN phase 0), and per-user ownership checks, which arrive with the first owned tables.
+Not built yet: the login page (it waits for its design).
+
+In proxy mode, a WebSocket keeps the identity it opened with until it disconnects, so logging out of the proxy doesn't end an open tab's access. That's deliberate (DESIGN §10.1).
 
 ---
 
@@ -580,7 +603,8 @@ It fails with a typed `ProviderError`.
 - It runs as the `node` user with `DATA_DIR=/data` as a volume, `HOST=0.0.0.0`, and a health check on `/healthz`.
 - **It doesn't start without exposure settings** (§4), since `HOST=0.0.0.0` is beyond loopback. Connections from the host arrive from the bridge gateway (e.g. `172.17.0.1`).
   - Behind a reverse proxy: `AUTH_MODE=proxy`, `TRUSTED_PROXIES` set to the proxy container's address, and `PUBLIC_ORIGINS` set to the public URL.
-  - Single user: publish on loopback only (`-p 127.0.0.1:8080:8080`) and set `ALLOWED_IPS` to the gateway.
+  - Built-in login: set `ADMIN_PASSWORD_FILE` (a Docker secret). The server then starts with the admin protected, and no browser needs to reach loopback.
+  - Single user without a password: publish on loopback only (`-p 127.0.0.1:8080:8080`) and set `ALLOWED_IPS` to the gateway.
   - Publishing beyond loopback (`-p 8080:8080`) makes the gateway allowlist unsafe: where Docker doesn't pass the client's address through (rootless Docker's default port driver, `docker-proxy` for IPv6 clients), outside clients also appear to come from it.
   - **The health check** fetches `127.0.0.1` inside the container. In proxy mode with `TRUSTED_PROXIES` set, add `127.0.0.1` to the list, or the container reports unhealthy. Inside a container, loopback is only the container's own processes, which can read `/data` and the server secret anyway.
 - The image is about 325 MB on disk, unoptimized so far: it installs every workspace's production dependencies. Memory at idle is about 188 MB.

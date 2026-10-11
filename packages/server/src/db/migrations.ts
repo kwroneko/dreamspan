@@ -1,7 +1,7 @@
 import { SqliteMigrator } from "@effect/sql-sqlite-node"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
-import { bin, credentials, dataModel, draftHistory, providers, users } from "./schema/index.ts"
+import { accounts, bin, credentials, dataModel, draftHistory, providers, users } from "./schema/index.ts"
 
 /** node:sqlite prepares one statement at a time, so DDL is kept as a list of statements. */
 const runAll = (statements: ReadonlyArray<string>) =>
@@ -40,7 +40,8 @@ export const migrations = {
   "0003_draft_history": runAll(draftHistory),
   "0004_recycle_bin": runAll(bin),
   "0005_providers": providersMigration,
-  "0006_credentials": credentialsMigration
+  "0006_credentials": credentialsMigration,
+  "0007_accounts": runAll(accounts)
 }
 
 export const Migrations = SqliteMigrator.layer({ loader: SqliteMigrator.fromRecord(migrations) })

@@ -1,30 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
-import { AppApi } from "@rp/shared/api.ts"
-import { Effect, Layer } from "effect"
-import { RpcClient, RpcSerialization } from "effect/rpc"
-import { Socket } from "effect/socket"
-import type { AppConfigShape } from "../src/config.ts"
-import { testConfig, withServer } from "./support/config.ts"
-
-/**
- * An RPC client over a real WebSocket, living as long as the enclosing scope.
- * Node's WebSocket accepts handshake headers, which stand in for a reverse proxy.
- */
-const client = (config: AppConfigShape, headers: Record<string, string> = {}) =>
-  Effect.gen(function* () {
-    const protocol = yield* Layer.build(
-      RpcClient.layerProtocolSocket().pipe(
-        Layer.provide(Socket.layerWebSocket(`ws://${config.host}:${config.port}/rpc`)),
-        Layer.provide(
-          Layer.succeed(Socket.WebSocketConstructor)(
-            (url) => new WebSocket(url, { headers } as unknown as string[]) as unknown as globalThis.WebSocket
-          )
-        ),
-        Layer.provide(RpcSerialization.layerJson)
-      )
-    )
-    return yield* RpcClient.make(AppApi).pipe(Effect.provide(protocol))
-  })
+import { Effect } from "effect"
+import { client, testConfig, withServer } from "./support/config.ts"
 
 describe("rpc", () => {
   it.live("single-user mode: every connection is the local admin", () => {

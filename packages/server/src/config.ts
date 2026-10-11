@@ -31,6 +31,19 @@ const AppConfigFromEnv = Config.all({
   allowedIps: Config.Array(Schema.String, "ALLOWED_IPS").pipe(Config.withDefault<ReadonlyArray<string>>([])),
   trustedProxies: Config.Array(Schema.String, "TRUSTED_PROXIES").pipe(Config.withDefault<ReadonlyArray<string>>([])),
   allowInsecureExposure: Config.Boolean("ALLOW_INSECURE_EXPOSURE").pipe(Config.withDefault(false)),
+  /**
+   * Built-in login (auth/Accounts.ts). Once an account has a password, loopback needs a
+   * login too, unless this is off. A security setting, so configurable only here.
+   */
+  loopbackRequiresLogin: Config.Boolean("LOOPBACK_REQUIRES_LOGIN").pipe(Config.withDefault(true)),
+  /**
+   * The first admin's password, for servers no browser reaches over loopback. Applies only
+   * while no enabled admin has a password. ADMIN_USER names the account (default: the existing
+   * admin, else "admin").
+   */
+  adminUser: Config.option(Config.String("ADMIN_USER")),
+  adminPassword: Config.option(Config.Redacted("ADMIN_PASSWORD")),
+  adminPasswordFile: Config.option(Config.String("ADMIN_PASSWORD_FILE")),
   publicOrigins: Config.Array(Schema.String, "PUBLIC_ORIGINS").pipe(Config.withDefault<ReadonlyArray<string>>([])),
   clientDist: Config.String("CLIENT_DIST").pipe(Config.withDefault(defaultClientDist)),
   /**

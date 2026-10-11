@@ -8,6 +8,7 @@ import { writerConnection } from "./connection.ts"
 import { Migrations } from "./migrations.ts"
 import { WriteOps } from "./ops.ts"
 import { defaultBinLimits, type BinLimits } from "@rp/shared/bin.ts"
+import { makeAccountWriteHandlers } from "./accounts.ts"
 import { makeBinWriteHandlers } from "./binWrites.ts"
 import { makeLibraryWriteHandlers } from "./libraryWrites.ts"
 import { makeProviderWriteHandlers } from "./providerWrites.ts"
@@ -26,9 +27,11 @@ RpcServer.layer(WriteOps, { concurrency: 1 }).pipe(
           makeWriteHandlers(binLimits),
           makeLibraryWriteHandlers(binLimits),
           makeBinWriteHandlers(binLimits),
-          makeProviderWriteHandlers
+          makeProviderWriteHandlers,
+          makeAccountWriteHandlers
         ]),
-        ([graph, library, bin, providers]) => WriteOps.of({ ...graph, ...library, ...bin, ...providers })
+        ([graph, library, bin, providers, accounts]) =>
+          WriteOps.of({ ...graph, ...library, ...bin, ...providers, ...accounts })
       )
     )
   ),

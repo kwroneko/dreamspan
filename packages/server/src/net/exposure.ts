@@ -28,18 +28,20 @@ const isLoopbackHost = (host: string) => {
 }
 
 const FIX =
-  "Set ALLOWED_IPS to the addresses that may connect, use AUTH_MODE=proxy with TRUSTED_PROXIES naming your reverse proxy, " +
-  "or set HOST=127.0.0.1. ALLOW_INSECURE_EXPOSURE=true serves everyone without protection."
+  "Give the admin a password (ADMIN_PASSWORD_FILE or ADMIN_PASSWORD), set ALLOWED_IPS to the addresses that may " +
+  "connect, use AUTH_MODE=proxy with TRUSTED_PROXIES naming your reverse proxy, or set HOST=127.0.0.1. " +
+  "ALLOW_INSECURE_EXPOSURE=true serves everyone without protection."
 
 /**
  * The peers allowed in:
- * - single mode: loopback and ALLOWED_IPS.
+ * - single mode: loopback and ALLOWED_IPS. Without ALLOWED_IPS, everyone while an
+ *   account has a password (`passwords`), since then everyone has to log in.
  * - proxy mode: TRUSTED_PROXIES only (loopback when unset), so the identity header always
  *   comes from the proxy. Anyone else could otherwise send it and be any user.
  * Listening beyond loopback with nothing but loopback allowed is a startup error, not a
  * server that silently refuses everyone. Returns the error message on a bad config.
  */
-export const exposurePolicy = (config: ExposureConfig): ExposurePolicy | string => {
+export const exposurePolicy = (config: ExposureConfig, passwords: () => boolean): ExposurePolicy | string => {
   const clean = (entries: ReadonlyArray<string>) => entries.map((entry) => entry.trim()).filter((entry) => entry !== "")
   const allowedIps = clean(config.allowedIps)
   const trustedProxies = clean(config.trustedProxies)
@@ -58,12 +60,14 @@ export const exposurePolicy = (config: ExposureConfig): ExposurePolicy | string 
   const entries = config.authMode === "proxy" && configured.length > 0 ? configured : [...LOOPBACK, ...configured]
   const { list, invalid } = parseAddresses(entries)
   if (invalid.length > 0) return `${name} has entries that aren't IPs or CIDR ranges: ${invalid.join(", ")}`
-  if (configured.length === 0 && !isLoopbackHost(config.host)) {
+  // Checked on every connection: if the last password goes, so does access beyond loopback.
+  const byPassword = config.authMode === "single" && configured.length === 0
+  if (configured.length === 0 && !isLoopbackHost(config.host) && !(byPassword && passwords())) {
     return `Refusing to listen on ${config.host} without protection. ${FIX}`
   }
   return {
-    allows: (ip) => ip !== undefined && inAddresses(list, ip),
-    summary: `connections accepted from ${entries.join(", ")}`
+    allows: (ip) => ip !== undefined && (inAddresses(list, ip) || (byPassword && passwords())),
+    summary: `connections accepted from ${entries.join(", ")}${byPassword ? ", and from everyone while an account has a password" : ""}`
   }
 }
 

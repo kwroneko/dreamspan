@@ -27,6 +27,27 @@ export class Forbidden extends Schema.TaggedError<Forbidden>()("Forbidden", {
   message: Schema.String
 }) {}
 
+export const AccountRejectedReason = Schema.Literals([
+  "handle_taken",
+  "invalid_handle",
+  "weak_password",
+  "wrong_password",
+  /** The last enabled admin can't be disabled: nobody could manage the instance. */
+  "last_admin",
+  /** An admin without a password of their own creates no accounts: they'd be locked out. */
+  "own_password_first",
+  "throttled",
+  /** Accounts and passwords belong to the reverse proxy in proxy mode. */
+  "proxy_mode"
+])
+export type AccountRejectedReason = typeof AccountRejectedReason.Type
+
+/** An account change or login that can't be done as asked (DESIGN §10.1). */
+export class AccountRejected extends Schema.TaggedError<AccountRejected>()("AccountRejected", {
+  reason: AccountRejectedReason,
+  message: Schema.String
+}) {}
+
 /** Something failed on the server that the client can't act on; details stay in the server log. */
 export class ServerError extends Schema.TaggedError<ServerError>()("ServerError", {
   message: Schema.String

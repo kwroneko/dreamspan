@@ -4,6 +4,7 @@ import { workerData } from "node:worker_threads"
 import { NodeRuntime, NodeWorkerRunner } from "@effect/platform-node"
 import { Effect, Layer } from "effect"
 import { RpcServer } from "effect/rpc"
+import { makeAccountReadHandlers } from "./accounts.ts"
 import { readerConnection } from "./connection.ts"
 import { ReadOps } from "./ops.ts"
 import { makeProviderReadHandlers } from "./providerReads.ts"
@@ -14,8 +15,9 @@ const { dbPath } = workerData as { readonly dbPath: string }
 RpcServer.layer(ReadOps, { concurrency: 1 }).pipe(
   Layer.provide(
     ReadOps.toLayer(
-      Effect.map(Effect.all([makeReadHandlers, makeProviderReadHandlers]), ([core, providers]) =>
-        ReadOps.of({ ...core, ...providers })
+      Effect.map(
+        Effect.all([makeReadHandlers, makeProviderReadHandlers, makeAccountReadHandlers]),
+        ([core, providers, accounts]) => ReadOps.of({ ...core, ...providers, ...accounts })
       )
     )
   ),

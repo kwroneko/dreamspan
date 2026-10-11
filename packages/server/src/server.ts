@@ -1,13 +1,21 @@
-// Composition of the HTTP server: the RPC endpoint over a WebSocket, a health route,
-// and the client build served as a single-page app.
+// Composition of the HTTP server: the RPC endpoint over a WebSocket, login and logout,
+// a health route, and the client build served as a single-page app.
 import { createServer } from "node:http"
 import { NodeHttpServer } from "@effect/platform-node"
 import { AppApi, CurrentUser, Health } from "@rp/shared/api.ts"
-import { Effect, Layer, Predicate } from "effect"
-import { HttpRouter, HttpServerRequest, HttpServerResponse, HttpStaticServer } from "effect/http"
+import { ByteSize, Effect, Layer, Option, Predicate, Schema } from "effect"
+import {
+  Headers,
+  HttpIncomingMessage,
+  HttpRouter,
+  HttpServerRequest,
+  HttpServerResponse,
+  HttpStaticServer
+} from "effect/http"
 import { RpcSerialization, RpcServer } from "effect/rpc"
+import { makeAccountHandlers } from "./api/accounts.ts"
 import { makeProviderHandlers } from "./api/providers.ts"
-import { AuthenticationLive } from "./auth.ts"
+import { Accounts, AuthenticationLive, PEER_HEADER, SESSION_COOKIE, SESSION_TTL_MS } from "./auth/Accounts.ts"
 import { AppConfig } from "./config.ts"
 import * as Database from "./db/Database.ts"
 import { EventLoopMonitor } from "./eventLoop.ts"
@@ -31,8 +39,10 @@ const Handlers = AppApi.toLayer(
     const config = yield* AppConfig
     const eventLoop = yield* EventLoopMonitor
     const providers = yield* makeProviderHandlers
+    const accounts = yield* makeAccountHandlers
     return AppApi.of({
       ...providers,
+      ...accounts,
       Health: () =>
         eventLoop.sampleP99Ms.pipe(
           Effect.map(
@@ -76,8 +86,12 @@ const RpcRoute = RpcServer.layerHttp({ group: AppApi, path: "/rpc", protocol: "w
   Layer.provide([Handlers, AuthenticationLive, TransportHeadersOnly])
 )
 
-/** Refuses requests from other sites' pages and DNS-rebound names (net/exposure.ts). */
-const CrossSiteGuard = HttpRouter.middleware(
+/**
+ * Every request passes here first. It refuses other sites' pages and DNS-rebound names
+ * (net/exposure.ts), and records the socket's address in PEER_HEADER for authentication,
+ * replacing any copy the client sent.
+ */
+const RequestGuard = HttpRouter.middleware(
   Effect.gen(function* () {
     const config = yield* AppConfig
     const { publicOrigins, invalid } = parsePublicOrigins(config.publicOrigins)
@@ -98,13 +112,86 @@ const CrossSiteGuard = HttpRouter.middleware(
       Effect.flatMap(HttpServerRequest.HttpServerRequest, (request) => {
         const headers = { host: request.headers.host, origin: request.headers.origin }
         const problem = crossSiteProblem(headers, publicOrigins, checkHost)
-        return problem === undefined ? httpEffect : Effect.succeed(HttpServerResponse.text(problem, { status: 403 }))
+        if (problem !== undefined) return Effect.succeed(HttpServerResponse.text(problem, { status: 403 }))
+        const withoutPeer = Headers.remove(request.headers, PEER_HEADER)
+        const peered = request.modify({
+          headers: Option.match(request.remoteAddress, {
+            onNone: () => withoutPeer,
+            onSome: (address) => Headers.set(withoutPeer, PEER_HEADER, address)
+          })
+        })
+        return Effect.provideService(httpEffect, HttpServerRequest.HttpServerRequest, peered)
       })
   }),
   { global: true }
 )
 
 const HealthRoute = HttpRouter.add("GET", "/healthz", HttpServerResponse.text("ok"))
+
+const LoginBody = Schema.Struct({ handle: Schema.String, password: Schema.String })
+
+const jsonError = (status: number, message: string) => HttpServerResponse.jsonUnsafe({ error: message }, { status })
+
+/**
+ * Login and logout are plain HTTP, since only a response can set a cookie. The session
+ * cookie is HttpOnly and SameSite=Strict, and Secure when the page is on https. A
+ * WebSocket opened before login doesn't carry it: the client reconnects.
+ */
+const AuthRoutes = Layer.mergeAll(
+  HttpRouter.add(
+    "POST",
+    "/auth/login",
+    Effect.gen(function* () {
+      const accounts = yield* Accounts
+      const request = yield* HttpServerRequest.HttpServerRequest
+      // A cross-site form can't send JSON, on top of the Origin check in RequestGuard.
+      if (!request.headers["content-type"]?.startsWith("application/json")) {
+        return jsonError(415, "expected application/json")
+      }
+      const body = yield* HttpServerRequest.schemaBodyJson(LoginBody).pipe(
+        Effect.provideService(HttpIncomingMessage.MaxBodySize, ByteSize.kibibytes(4)),
+        Effect.option
+      )
+      if (Option.isNone(body)) return jsonError(400, "expected a handle and a password")
+      const token = yield* accounts.login(body.value.handle, body.value.password, request.headers[PEER_HEADER] ?? "")
+      return yield* HttpServerResponse.empty({ status: 204 }).pipe(
+        HttpServerResponse.setCookie(SESSION_COOKIE, token, {
+          httpOnly: true,
+          sameSite: "strict",
+          path: "/",
+          maxAge: `${SESSION_TTL_MS} millis`,
+          secure: request.headers.origin?.startsWith("https://") ?? false
+        }),
+        Effect.orDie
+      )
+    }).pipe(
+      Effect.catchTags({
+        AccountRejected: (error) => Effect.succeed(jsonError(error.reason === "proxy_mode" ? 404 : 401, error.message)),
+        LoginThrottled: (error) =>
+          Effect.succeed(
+            jsonError(429, "too many failed logins").pipe(
+              HttpServerResponse.setHeader("retry-after", String(Math.ceil(error.retryAfterMs / 1000)))
+            )
+          ),
+        ServerError: (error) => Effect.succeed(jsonError(500, error.message))
+      })
+    )
+  ),
+  HttpRouter.add(
+    "POST",
+    "/auth/logout",
+    Effect.gen(function* () {
+      const accounts = yield* Accounts
+      const request = yield* HttpServerRequest.HttpServerRequest
+      const token = request.cookies[SESSION_COOKIE]
+      if (token) yield* accounts.logout(token)
+      return yield* HttpServerResponse.empty({ status: 204 }).pipe(
+        HttpServerResponse.expireCookie(SESSION_COOKIE, { path: "/" }),
+        Effect.orDie
+      )
+    }).pipe(Effect.catchTag("ServerError", (error) => Effect.succeed(jsonError(500, error.message))))
+  )
+)
 
 const StaticRoutes = Layer.unwrap(
   Effect.map(AppConfig, (config) => HttpStaticServer.layer({ root: config.clientDist, spa: true }))
@@ -151,7 +238,8 @@ const InterruptedRequests = Layer.effectDiscard(
 const HttpServerLive = Layer.unwrap(
   Effect.gen(function* () {
     const config = yield* AppConfig
-    const policy = exposurePolicy(config)
+    const accounts = yield* Accounts
+    const policy = exposurePolicy(config, accounts.configured)
     if (typeof policy === "string") return yield* new UnsafeExposure({ message: policy })
     yield* Effect.logInfo(`Exposure: ${policy.summary}`)
     const make = () =>
@@ -168,9 +256,10 @@ const HttpServerLive = Layer.unwrap(
 
 /** The whole server, minus configuration. Tests provide their own AppConfig. */
 export const ServerLive = HttpRouter.serve(
-  Layer.mergeAll(RpcRoute, HealthRoute, StaticRoutes, InterruptedRequests, CrossSiteGuard)
+  Layer.mergeAll(RpcRoute, HealthRoute, AuthRoutes, StaticRoutes, InterruptedRequests, RequestGuard)
 ).pipe(
   Layer.provide(ProvidersLive),
-  Layer.provideMerge(Layer.mergeAll(DatabaseLive, EventLoopMonitor.layer)),
-  Layer.provide(HttpServerLive)
+  Layer.provide(HttpServerLive),
+  Layer.provideMerge(Accounts.layer),
+  Layer.provideMerge(Layer.mergeAll(DatabaseLive, EventLoopMonitor.layer))
 )

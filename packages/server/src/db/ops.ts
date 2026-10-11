@@ -6,10 +6,10 @@
 // owns (DATA-MODEL §1, principle 6). Rows owned by someone else are reported as
 // NotFound, so their existence doesn't leak.
 import { Chat, ChatId, ChatKind, EntityId, NewVersion, PathEntry, SlotId, Version, VersionId } from "@rp/shared/chat.ts"
-import { User, UserId } from "@rp/shared/domain.ts"
+import { User, UserAccount, UserId, UserRole } from "@rp/shared/domain.ts"
 import { BinItem, RecoveredText } from "@rp/shared/bin.ts"
 import { Draft, DraftKey, DraftState } from "@rp/shared/drafts.ts"
-import { ModelKeyTaken, NotFound, StaleWrite } from "@rp/shared/errors.ts"
+import { AccountRejected, ModelKeyTaken, NotFound, StaleWrite } from "@rp/shared/errors.ts"
 import {
   Doc,
   EntityKind,
@@ -47,6 +47,9 @@ import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
 
 export const StorageErrorReason = Schema.Literals(["busy", "constraint", "corrupt", "other"])
+
+/** A disabled user, refused before it can act. */
+export class UserDisabled extends Schema.TaggedError<UserDisabled>()("UserDisabled", { handle: Schema.String }) {}
 
 export class StorageError extends Schema.TaggedError<StorageError>()("StorageError", {
   reason: StorageErrorReason,
@@ -159,11 +162,47 @@ export const CloseLlmRequest = Schema.Struct({
 export class WriteOps extends RpcGroup.make(
   /** Answers once the writer has opened the database and run migrations. */
   Rpc.make("Ready"),
+  /** The user with this handle, created on first sight. A disabled user is refused. */
   Rpc.make("EnsureUser", {
     payload: { handle: Schema.String, displayName: Schema.String },
     success: User,
+    error: Schema.Union([StorageError, UserDisabled])
+  }),
+  // --- Accounts (DESIGN §10.1). Passwords arrive already hashed.
+  Rpc.make("CreateUser", {
+    payload: { handle: Schema.String, displayName: Schema.String, role: UserRole, passwordHash: Schema.String },
+    success: UserAccount,
+    error: Schema.Union([StorageError, AccountRejected])
+  }),
+  /** Sets a password and ends every session of the user. */
+  Rpc.make("SetPasswordHash", {
+    payload: { userId: UserId, passwordHash: Schema.String },
+    success: Schema.Void,
+    error: Schema.Union([StorageError, NotFound])
+  }),
+  /** Disabling ends the user's sessions. The last enabled admin can't be disabled. */
+  Rpc.make("SetUserDisabled", {
+    payload: { userId: UserId, disabled: Schema.Boolean },
+    success: UserAccount,
+    error: Schema.Union([StorageError, NotFound, AccountRejected])
+  }),
+  /**
+   * The first admin's password from the environment, applied only while no enabled admin
+   * has one. Names an existing user, or creates it as admin; with no handle, the oldest
+   * enabled admin, else a new "admin". Returns the user, or null when it didn't apply.
+   */
+  Rpc.make("BootstrapAdmin", {
+    payload: { handle: Schema.NullOr(Schema.String), passwordHash: Schema.String },
+    success: Schema.NullOr(User),
     error: StorageError
   }),
+  /** Also clears expired sessions. */
+  Rpc.make("CreateSession", {
+    payload: { tokenHash: Schema.String, userId: UserId, expiresAt: Schema.Number },
+    success: Schema.Void,
+    error: StorageError
+  }),
+  Rpc.make("DeleteSession", { payload: { tokenHash: Schema.String }, success: Schema.Void, error: StorageError }),
   /**
    * Saves a draft (debounced by the client while the user types). The first save creates
    * it, checking the target belongs to the user; later saves pass the row version they
@@ -592,6 +631,24 @@ export class ReadOps extends RpcGroup.make(
     success: Schema.NullOr(User),
     error: StorageError
   }),
+  // --- Accounts (DESIGN §10.1). Only enabled users can log in or hold a session.
+  /** The enabled user a live session belongs to. */
+  Rpc.make("GetSessionUser", {
+    payload: { tokenHash: Schema.String, now: Schema.Number },
+    success: Schema.NullOr(User),
+    error: StorageError
+  }),
+  /** An enabled user and their password hash, by handle or by id, for checking a password. */
+  Rpc.make("GetPasswordHash", {
+    payload: Schema.Union([Schema.Struct({ handle: Schema.String }), Schema.Struct({ userId: UserId })]),
+    success: Schema.NullOr(Schema.Struct({ user: User, passwordHash: Schema.NullOr(Schema.String) })),
+    error: StorageError
+  }),
+  Rpc.make("ListUsers", { success: Schema.Array(UserAccount), error: StorageError }),
+  /** Whether any enabled user has a password, which makes login required (DESIGN §10.1). */
+  Rpc.make("AccountsConfigured", { success: Schema.Boolean, error: StorageError }),
+  /** The oldest enabled admin: who loopback acts as when it's exempt from login. */
+  Rpc.make("FirstAdmin", { success: Schema.NullOr(User), error: StorageError }),
   Rpc.make("GetChat", {
     payload: { userId: UserId, chatId: ChatId },
     success: Chat,

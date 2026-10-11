@@ -425,7 +425,10 @@ These are strategies for mapping history to user and assistant roles:
   - **What counts as configured:** a user with a password.
   - **Loopback without login, once accounts exist** (with the setting off), acts as the admin.
   - **Before any account exists,** allowlisted addresses (`ALLOWED_IPS`) work without login too, like loopback. Docker needs this, because there the host's browser connects from the bridge gateway, not loopback.
-  - **The first password** is set from inside the app, over that passwordless access. There's no separate bootstrap mechanism.
+  - **The first password** can be set from inside the app, over that passwordless access. (The owner first said there'd be no separate bootstrap mechanism. Their headless-server requirement, below, needs one.)
+- **[D]** No cap on how long a proxy-mode connection keeps its identity: logging out of the proxy needn't end an open tab, because the app isn't used on shared computers (owner, 2026-10-11).
+- **[D]** Headless servers (owner, 2026-10-11): an instance on a server, for example in Docker, must be configurable without browser access to its loopback, and without an SSH tunnel. The typical user still just starts it and uses it on localhost, with nothing to configure.
+- **[P]** For that, an environment variable sets the first admin's password: `ADMIN_PASSWORD_FILE` (a Docker secret) or `ADMIN_PASSWORD`, with an optional `ADMIN_USER`. It only applies while no enabled admin has a password, so a password changed in the app is never overwritten, and an instance whose admins can't log in can be recovered. The server then counts as protected, and can listen beyond loopback without an allowlist.
 
 ### 10.2 Rendering
 - **[D]** HTML rendering must be possible (ST's HTML "games"). Interactivity will be expanded later, once the harness is agentic.
@@ -478,6 +481,7 @@ These are strategies for mapping history to user and assistant roles:
 - **[D]** The exposure rules (owner, 2026-10-11; built, ARCHITECTURE.md §4):
   - Listening on loopback is always allowed.
   - Beyond loopback, the server starts only with protection: an IP allowlist; proxy mode with named trusted proxies, the only addresses that may then connect, so nobody else can send the identity header; or, once built-in login exists, a password on every user. An allowlist alone is enough, without a password.
+  - **[P]** How that's read (built, ARCHITECTURE.md §4): beyond loopback is allowed once an enabled user has a password. Everyone beyond loopback then has to log in, and a user without a password can't log in at all, so no user is reachable from there without one.
   - Peers are checked by each connection's source address, never by a forwarded header, so the check holds in Docker, where the host's requests come from the bridge gateway.
   - The override, `ALLOW_INSECURE_EXPOSURE`, is set only outside the app, like every security setting.
 - **[P]** Cross-site requests (built, ARCHITECTURE.md §4; found 2026-10-11): browsers let any page open a WebSocket to the user's own loopback, so before this, any site the owner visited could call every RPC of a local instance. Requests are refused when `Origin` names another site, or when `Host` is a name that isn't the instance's (DNS rebinding). Proxy mode with named trusted proxies skips the `Host` check, since only the proxies can connect. Instances served under a domain name list it in `PUBLIC_ORIGINS`.

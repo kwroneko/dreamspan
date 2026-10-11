@@ -2,8 +2,16 @@
 import { Context, Schema } from "effect"
 import { Rpc, RpcGroup, RpcMiddleware } from "effect/rpc"
 import { BinItem } from "./bin.ts"
-import { User } from "./domain.ts"
-import { Forbidden, ModelKeyTaken, NotFound, ProviderError, ServerError, StaleWrite } from "./errors.ts"
+import { User, UserAccount, UserId, UserRole } from "./domain.ts"
+import {
+  AccountRejected,
+  Forbidden,
+  ModelKeyTaken,
+  NotFound,
+  ProviderError,
+  ServerError,
+  StaleWrite
+} from "./errors.ts"
 import {
   Connection,
   ConnectionId,
@@ -69,6 +77,29 @@ const StorageErrors = [NotFound, ServerError] as const
 export class AppApi extends RpcGroup.make(
   Rpc.make("Health", { success: Health }),
   Rpc.make("Whoami", { success: User }),
+  // --- Accounts (DESIGN §10.1). No sign-up: an admin creates accounts. Login and logout
+  // are HTTP (POST /auth/login, /auth/logout), since they set a cookie.
+  Rpc.make("ListUsers", { success: Schema.Array(UserAccount), error: Schema.Union([Forbidden, ServerError]) }),
+  Rpc.make("CreateUser", {
+    payload: { handle: Schema.String, displayName: Schema.String, role: UserRole, password: Schema.String },
+    success: UserAccount,
+    error: Schema.Union([Forbidden, AccountRejected, ServerError])
+  }),
+  /**
+   * Your own password, with the current one if you have one; an admin can set anyone's.
+   * Ends every session of that user, the caller's included: log in again with the new one.
+   */
+  Rpc.make("SetPassword", {
+    payload: { userId: UserId, currentPassword: Schema.NullOr(Schema.String), newPassword: Schema.String },
+    success: Schema.Void,
+    error: Schema.Union([Forbidden, NotFound, AccountRejected, ServerError])
+  }),
+  /** Disabling ends the user's sessions. The last enabled admin can't be disabled. */
+  Rpc.make("SetUserDisabled", {
+    payload: { userId: UserId, disabled: Schema.Boolean },
+    success: UserAccount,
+    error: Schema.Union([Forbidden, NotFound, AccountRejected, ServerError])
+  }),
   // --- Connections and models (spec/PROVIDERS.md §2, §3). Keys go in, never out.
   /** The provider kinds a connection can use, built-in and from plugins, in picker order. */
   Rpc.make("ListProviderKinds", { success: Schema.Array(ProviderKindInfo) }),

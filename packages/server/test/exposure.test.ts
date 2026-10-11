@@ -9,28 +9,34 @@ import { crossSiteProblem, type ExposureConfig, exposurePolicy, parsePublicOrigi
 import { ServerLive } from "../src/server.ts"
 import { testConfig, withServer } from "./support/config.ts"
 
-const policy = (overrides: Partial<ExposureConfig>) => {
-  const result = exposurePolicy({
-    host: "127.0.0.1",
-    authMode: "single",
-    allowedIps: [],
-    trustedProxies: [],
-    allowInsecureExposure: false,
-    ...overrides
-  })
+const policy = (overrides: Partial<ExposureConfig>, passwords = false) => {
+  const result = exposurePolicy(
+    {
+      host: "127.0.0.1",
+      authMode: "single",
+      allowedIps: [],
+      trustedProxies: [],
+      allowInsecureExposure: false,
+      ...overrides
+    },
+    () => passwords
+  )
   if (typeof result === "string") throw new Error(result)
   return result
 }
 
 const refusal = (overrides: Partial<ExposureConfig>) => {
-  const result = exposurePolicy({
-    host: "0.0.0.0",
-    authMode: "single",
-    allowedIps: [],
-    trustedProxies: [],
-    allowInsecureExposure: false,
-    ...overrides
-  })
+  const result = exposurePolicy(
+    {
+      host: "0.0.0.0",
+      authMode: "single",
+      allowedIps: [],
+      trustedProxies: [],
+      allowInsecureExposure: false,
+      ...overrides
+    },
+    () => false
+  )
   assert.isString(result)
   return result as string
 }
@@ -89,6 +95,22 @@ describe("exposure policy", () => {
       refusal({ allowInsecureExposure: true, authMode: "proxy", trustedProxies: ["10.0.0.1"] }),
       "can't be combined"
     )
+  })
+
+  it("single mode serves everyone beyond loopback while an account has a password, and only then", () => {
+    let passwords = true
+    const result = exposurePolicy(
+      { host: "0.0.0.0", authMode: "single", allowedIps: [], trustedProxies: [], allowInsecureExposure: false },
+      () => passwords
+    )
+    if (typeof result === "string") throw new Error(result)
+    assert.isTrue(result.allows("203.0.113.9"))
+    passwords = false // the last password went: back to loopback
+    assert.isFalse(result.allows("203.0.113.9"))
+    assert.isTrue(result.allows("127.0.0.1"))
+    // An allowlist stays a restriction; proxy mode never lets passwords widen it.
+    assert.isFalse(policy({ host: "0.0.0.0", allowedIps: ["10.0.0.0/8"] }, true).allows("203.0.113.9"))
+    assert.isFalse(policy({ authMode: "proxy" }, true).allows("203.0.113.9"))
   })
 
   it("ALLOW_INSECURE_EXPOSURE serves everyone", () => {

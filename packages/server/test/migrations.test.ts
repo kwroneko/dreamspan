@@ -9,7 +9,9 @@ import { SqlClient } from "effect/sql"
 import { writerConnection } from "../src/db/connection.ts"
 import { migrations } from "../src/db/migrations.ts"
 
-const { "0005_providers": _providers, "0006_credentials": _credentials, ...beforeProviders } = migrations
+/** The migrations that run before `name`. The migrator skips anything older than the latest it has run. */
+const before = (name: string) => Object.fromEntries(Object.entries(migrations).filter(([key]) => key < name))
+const beforeProviders = before("0005_providers")
 
 describe("0005_providers", () => {
   it.effect("refuses to recreate connections that already hold rows", () =>
@@ -29,7 +31,7 @@ describe("0005_providers", () => {
 })
 
 describe("0006_credentials", () => {
-  const { "0006_credentials": _credentials, ...beforeCredentials } = migrations
+  const beforeCredentials = before("0006_credentials")
 
   it.effect("refuses to retire per-connection keys while a connection holds one", () =>
     Effect.gen(function* () {

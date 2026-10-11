@@ -12,3 +12,13 @@ export class User extends Schema.Class<User>("User")({
   displayName: Schema.String,
   role: UserRole
 }) {}
+
+/** A user as an admin sees them (DESIGN §10.1). */
+export class UserAccount extends Schema.Class<UserAccount>("UserAccount")({
+  id: UserId,
+  handle: Schema.String,
+  displayName: Schema.String,
+  role: UserRole,
+  hasPassword: Schema.Boolean,
+  disabled: Schema.Boolean
+}) {}

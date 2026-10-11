@@ -9,11 +9,11 @@ import type { BinLimits } from "@rp/shared/bin.ts"
 import { makeBin } from "./bin.ts"
 import { makeDraftStore } from "./drafts.ts"
 import { AppendResult, NotFound, StaleWrite, WriteOps } from "./ops.ts"
-import { type ChatRow, toChat, toUser, toVersion, type UserRow, type VersionRow } from "./rows.ts"
+import { type ChatRow, toChat, toVersion, type VersionRow } from "./rows.ts"
 import { transaction as runTransaction } from "./tx.ts"
 
 type WriteHandlers = Parameters<typeof WriteOps.of>[0]
-/** Graph, chat and user write handlers. Library handlers are in libraryWrites.ts. */
+/** Graph and chat write handlers. Library handlers are in libraryWrites.ts. */
 export const makeWriteHandlers = (binLimits: BinLimits) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
@@ -122,22 +122,6 @@ export const makeWriteHandlers = (binLimits: BinLimits) =>
 
     const handlers = {
       Ready: () => Effect.void,
-
-      EnsureUser: ({ handle, displayName }) =>
-        Effect.gen(function* () {
-          const [existing] = yield* sql<UserRow>`SELECT * FROM users WHERE handle = ${handle}`
-          if (existing) return toUser(existing)
-          // The first user of an instance administers it.
-          const [count] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM users`
-          const [row] = yield* sql<UserRow>`INSERT INTO users ${sql.insert({
-            id: uuidv7(),
-            handle,
-            display_name: displayName,
-            role: count?.n === 0 ? "admin" : "user",
-            created_at: Date.now()
-          })} RETURNING *`
-          return toUser(row!)
-        }).pipe(transaction("EnsureUser")),
 
       CreateChat: ({ userId, kind, status, title, participants, greeting }) =>
         Effect.gen(function* () {
