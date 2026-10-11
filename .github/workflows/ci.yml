@@ -26,3 +26,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: docker build --tag rp-harness:ci .
+      # Loopback-only inside the container, so no exposure settings are needed; a
+      # non-default PORT checks that the health check follows it.
+      - name: Run the image until it reports healthy
+        run: |
+          docker run --detach --name rp-harness-ci --health-interval 2s -e HOST=127.0.0.1 -e PORT=3000 rp-harness:ci
+          for _ in $(seq 60); do
+            status=$(docker inspect --format '{{.State.Health.Status}}' rp-harness-ci)
+            if [ "$status" = healthy ] || [ "$(docker inspect --format '{{.State.Running}}' rp-harness-ci)" != true ]; then break; fi
+            sleep 2
+          done
+          docker logs rp-harness-ci
+          echo "health: $status"
+          [ "$status" = healthy ]
+      - if: always()
+        run: docker rm --force rp-harness-ci || true

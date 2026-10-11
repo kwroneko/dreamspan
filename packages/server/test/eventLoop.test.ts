@@ -28,4 +28,22 @@ describe("event-loop monitor", () => {
       }).pipe(Effect.provide(EventLoopMonitor.layer)),
     10_000
   )
+
+  for (const offsetMs of [2, 10, 25]) {
+    it.live(
+      `a block ${offsetMs} ms after a bucket change shows`,
+      () =>
+        Effect.gen(function* () {
+          const start = performance.now()
+          const monitor = yield* EventLoopMonitor
+          // Buckets change every second from when the monitor starts.
+          yield* Effect.sleep(Math.max(0, start + 1000 + offsetMs - performance.now()))
+          yield* block(300)
+          yield* Effect.sleep(50)
+          const delay = yield* monitor.sample
+          assert.isAbove(delay.maxMs, 250, `max ${delay.maxMs} ms`)
+        }).pipe(Effect.provide(EventLoopMonitor.layer)),
+      10_000
+    )
+  }
 })

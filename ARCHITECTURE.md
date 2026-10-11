@@ -27,7 +27,7 @@ Bun was measured as an alternative (2026-10-10) and not adopted. On this server 
 - ESLint with typescript-eslint, plus `eslint-plugin-react-hooks` including the React Compiler rules.
 - Prettier.
 - Vitest with `@effect/vitest`.
-- `npm run check` runs all of them. CI (`.github/workflows/ci.yml`) also builds the client and the workers, and builds the Docker image (without pushing it).
+- `npm run check` runs all of them. CI (`.github/workflows/ci.yml`) also builds the client and the workers, and builds the Docker image (without pushing it) and runs it until its health check passes.
 
 **Dependencies are pinned to exact versions.** The owner's machine enforces a 5-day cooldown on newly published packages.
 
@@ -86,7 +86,7 @@ Bun was measured as an alternative (2026-10-10) and not adopted. On this server 
 - `test/network.test.ts` runs real requests through a local HTTP proxy (CONNECT and absolute-URI forwarding) and a SOCKS5 proxy with credentials (`test/support/proxies.ts`), counting the tunnels.
 - **pi-ai:** its Chat Completions, Responses and Anthropic adapters take our `fetch`. Its Google adapter rejects a custom `fetch`, and only its Bedrock and Codex adapters, which we don't use, read `HTTP_PROXY`.
 
-**Event-loop monitoring** (`eventLoop.ts`). The main thread's event-loop delay is sampled continuously (10 ms resolution) into one-second buckets. `Health` reports the last minute: the longest single delay (`eventLoopMaxMs`) and the worst one-second p99 (`eventLoopP99Ms`), with the sampling interval subtracted so the numbers are delay added by work. Reading them resets nothing, so callers don't affect each other. Tested: a single 300 ms block shows in the max, and still does after another read and a bucket change. Anything that blocks the loop delays every live stream, so this is a budgeted metric (CLIENT-FRAMEWORK §7).
+**Event-loop monitoring** (`eventLoop.ts`). A 10 ms timer measures how late each tick runs, into one-second buckets. `Health` reports the last minute: the longest single delay (`eventLoopMaxMs`) and the worst one-second p99 (`eventLoopP99Ms`). Reading them resets nothing, so callers don't affect each other. Node's `monitorEventLoopDelay` isn't used: it discards the first interval after a reset, so a 300 ms stall starting just after a bucket change showed as 0.3 ms. Tested: a single 300 ms block shows in the max, including 2, 10 and 25 ms after a bucket change, and still does after another read and a bucket change. Anything that blocks the loop delays every live stream, so this is a budgeted metric (CLIENT-FRAMEWORK §7).
 
 ---
 
@@ -105,8 +105,11 @@ SQLite through Node's built-in `node:sqlite` and Effect's driver (`@effect/sql-s
 **The reader pool** (`readerPool.ts`) is our own RPC transport, not Effect's worker pool (`RpcClient.layerProtocolWorker`, still used for the single writer):
 - **A reader is busy until it answers.** `node:sqlite` can't stop a running query. Effect's pool freed a reader as soon as its caller gave up (a timeout, a closed tab), so the next read went to the reader still running the old query. Measured with 2 readers: after a 2 s read timed out at 200 ms, the next light read waited 1,843 ms while the other reader idled. Here an interrupted read is forwarded to its reader, which stops at its next statement at best, and the reader takes nothing new until it answers.
 - **A crashed reader gets nothing until it's back.** Effect's pool kept routing to it until it respawned (a light read waited 1,651 ms). Here it's out of the rotation from the crash until the respawned thread is ready, about a second later; a crash fails the reads in flight at that moment.
-- Requests queue in arrival order for the first idle reader.
-- Tested (`test/readerPool.test.ts`) with a test reader whose requests block like queries: after the interrupted read and after a crash, each light read takes well under 300 ms, and the crashed reader is replaced by a new thread.
+- **Every crash is logged** on the main thread with the worker's error (e.g. its exit code), and the reader is respawned every second.
+- **While no reader is up, queued reads fail** (`RpcClientError`) at each crash or failed respawn, instead of waiting for a respawn that may never succeed. With every respawn failing, a read fails within about a second.
+- **Startup waits for one reader to be ready**, and fails if every reader dies before any is.
+- Requests queue in arrival order for the first idle reader. A request whose send fails gets a defect, and its reader is released.
+- Tested (`test/readerPool.test.ts`) with a test reader whose requests block like queries: after the interrupted read and after a crash, each light read takes well under 300 ms, and the crashed reader is replaced by a new thread; with readers that die as they start, startup fails, and a read after all readers crashed fails in about a second.
 
 Measured (`test/database.test.ts`): the same CPU-heavy 800 ms query blocks the main event loop for **795 ms** when run on the main thread, and **0.8 ms** when run through a reader worker. Light reads on another reader finish while it runs.
 
@@ -136,7 +139,7 @@ Tested (`test/database.test.ts`): 500 concurrent writes and 500 concurrent reads
 
 Other processes are the remaining risk, so they're kept out:
 - **Instance lock.** At startup the main thread takes an exclusive SQLite lock on `DATA_DIR/instance.lock` (`locking_mode = EXCLUSIVE` + `BEGIN EXCLUSIVE`) and holds it for the process lifetime. It's an OS file lock, so the kernel releases it if the process dies; there's no stale lock file to clean up. A second instance on the same data directory exits immediately with `InstanceLocked`, instead of contending for the database. Examples: a second `npm start`, or two containers on one volume. This is tested both in-process and from a separate process.
-- **Only filesystems known to be local are accepted** (`statfs` on Linux): ext2/3/4, XFS, Btrfs, ZFS, F2FS, tmpfs and overlayfs (Docker's container filesystem). Network and FUSE filesystems (NFS, CIFS/SMB, sshfs, rclone, virtiofs, Docker Desktop file sharing, WSL2's 9p `/mnt/c`, Ceph, AFS) may not provide the POSIX locks SQLite relies on, and WAL can corrupt there. Anything else is refused as unrecognized. `DB_ALLOW_NETWORK_FS=1` overrides this.
+- **Only filesystems known to be local are accepted** (`statfs` on Linux): ext2/3/4, XFS, Btrfs, ZFS, F2FS, tmpfs and overlayfs (Docker's container filesystem). Network and FUSE filesystems (NFS, CIFS/SMB, sshfs, rclone, virtiofs, Docker Desktop file sharing, WSL2's 9p `/mnt/c`, Ceph, AFS) may not provide the POSIX locks SQLite relies on, and WAL can corrupt there. Anything else is refused as unrecognized. `DB_ALLOW_NETWORK_FS=1` overrides this, and is also what a local filesystem not on the list needs (e.g. exFAT or NTFS on a USB disk, bcachefs, eCryptfs).
 - **Nothing else should open the live database.** Backups will be done by the app through SQLite's backup API, not by copying the file or opening it from another tool. Not built yet.
 - **Backstop.** If an outside process does take a lock anyway, the workers' 5 s `busy_timeout` applies. It blocks only that worker thread, never the main thread, and anything that still fails surfaces as `StorageError { reason: "busy" }`.
 
@@ -156,7 +159,7 @@ Each worker thread is a separate V8 isolate that loads its own copy of every mod
 - `source` is the default outside production, so development never runs a stale bundle.
 - `bundle` is the default when `NODE_ENV=production`. The server refuses to start if the bundles are missing (`WorkerBundleMissing`) or stale (`WorkerBundleStale`), with a message to run `npm run build`.
 
-**Stale bundles are refused.** The build writes `stamp.json` next to the bundles (`workerStamp.ts`): the repository files among the bundled modules (43 today) plus `package-lock.json`, and a SHA-256 of their contents. At startup the server hashes the same files again, in about 3 ms. Without it, `git pull && npm start` would run new main-thread code against old workers: migrations wouldn't run, and a new operation would fail every in-flight request with "Unknown request tag".
+**Stale bundles are refused.** The build writes `stamp.json` next to the bundles (`workerStamp.ts`): the repository files among the bundled modules (43 today) plus `package-lock.json`, and a SHA-256 of their contents. At startup the server hashes the same files again, in about 3 ms, and again before spawning each worker thread, so a crashed worker isn't replaced by code from an `npm run build` run after the server started (`WorkerBundleStale`; the reader is retried every second, and reads fail meanwhile). Without it, `git pull && npm start` would run new main-thread code against old workers: migrations wouldn't run, and a new operation would fail every in-flight request with "Unknown request tag".
 
 The tests run the core operations against both, and build the bundles into a temporary directory.
 
@@ -625,7 +628,7 @@ It fails with a typed `ProviderError`.
 
 `Dockerfile`: a multi-stage build on `node:24-slim`.
 - The client and the database workers are built in one stage. The final image holds only what runs: production dependencies, the root `package.json` and lockfile (the bundles' stamp includes it), the shared and server packages' `package.json` and `src`, the client build and the worker bundles. No tests or scripts.
-- `.dockerignore` keeps data directories, databases, `secret.key`, `instance.lock` and `.env` files out of the build context at any depth (`**/`). Verified with a throwaway build: files planted in `packages/server/data/` and `packages/server/.env` didn't reach the image.
+- `.dockerignore` keeps data directories, databases (`*.db*`, `*.sqlite*`), `secret.key`, `instance.lock` and `.env` files out of the build context at any depth (`**/`). Verified with throwaway builds: files planted in `packages/server/data/` (including `.sqlite`), `packages/shared/` (`.db-wal`, `.sqlite3`) and `packages/server/.env` didn't reach the image.
 - It runs as the `node` user with `DATA_DIR=/data` as a volume, `HOST=0.0.0.0`, and a health check on `/healthz`.
 - **It doesn't start without exposure settings** (§4), since `HOST=0.0.0.0` is beyond loopback. Connections from the host arrive from the bridge gateway (e.g. `172.17.0.1`).
   - Behind a reverse proxy: `AUTH_MODE=proxy`, `TRUSTED_PROXIES` set to the proxy container's address, and `PUBLIC_ORIGINS` set to the public URL.

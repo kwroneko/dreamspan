@@ -56,7 +56,11 @@ const defaultBundleDir = fileURLToPath(new URL("../../dist/workers", import.meta
 const workerEntries = (options: DatabaseOptions) =>
   Effect.gen(function* () {
     if (options.workers === "source") {
-      return { writer: new URL("./writer.ts", import.meta.url), reader: new URL("./reader.ts", import.meta.url) }
+      return {
+        writer: new URL("./writer.ts", import.meta.url),
+        reader: new URL("./reader.ts", import.meta.url),
+        bundleDir: undefined
+      }
     }
     const dir = options.bundleDir ?? defaultBundleDir
     const [writer, reader] = [join(dir, "writer.mjs"), join(dir, "reader.mjs")]
@@ -64,11 +68,18 @@ const workerEntries = (options: DatabaseOptions) =>
       if (!existsSync(path)) return yield* new WorkerBundleMissing({ path })
     }
     if (!stampMatches(dir)) return yield* new WorkerBundleStale({ path: dir })
-    return { writer: pathToFileURL(writer), reader: pathToFileURL(reader) }
+    return { writer: pathToFileURL(writer), reader: pathToFileURL(reader), bundleDir: dir }
   })
 
-const workers = (entry: URL, workerData: Record<string, unknown>) =>
-  NodeWorker.layer(() => new Worker(entry, { workerData, name: entry.pathname.split("/").pop() }))
+/**
+ * Spawns worker threads. With bundles, every spawn checks the stamp again (about 3 ms),
+ * so a crashed worker isn't replaced by code built after this server started.
+ */
+export const workerThreads = (entry: URL, workerData: Record<string, unknown>, bundleDir?: string) =>
+  NodeWorker.layer(() => {
+    if (bundleDir !== undefined && !stampMatches(bundleDir)) throw new WorkerBundleStale({ path: bundleDir })
+    return new Worker(entry, { workerData, name: entry.pathname.split("/").pop() })
+  })
 
 export const layer = (options: DatabaseOptions) => {
   const dbPath = databaseFile(options.dataDir)
@@ -86,7 +97,9 @@ export const layer = (options: DatabaseOptions) => {
     Effect.map(workerEntries(options), (entries) => {
       const WriterLive = Layer.effect(Writer, RpcClient.make(WriteOps)).pipe(
         Layer.provide(RpcClient.layerProtocolWorker({ size: 1, concurrency: 1 })),
-        Layer.provide(workers(entries.writer, { dbPath, binLimits: options.binLimits ?? defaultBinLimits }))
+        Layer.provide(
+          workerThreads(entries.writer, { dbPath, binLimits: options.binLimits ?? defaultBinLimits }, entries.bundleDir)
+        )
       )
       // Readers open read-only connections, so the file must exist and be migrated first.
       const ReaderLive = Layer.unwrap(
@@ -95,7 +108,7 @@ export const layer = (options: DatabaseOptions) => {
           yield* writer.Ready()
           return Layer.effect(Reader, RpcClient.make(ReadOps)).pipe(
             Layer.provide(ReaderPool.layer(options.readers)),
-            Layer.provide(workers(entries.reader, { dbPath }))
+            Layer.provide(workerThreads(entries.reader, { dbPath }, entries.bundleDir))
           )
         })
       )

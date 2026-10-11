@@ -2,6 +2,7 @@
 **/dist
 **/data
 **/*.db*
+**/*.sqlite*
 **/secret.key
 **/instance.lock
 **/.env

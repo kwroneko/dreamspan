@@ -3,7 +3,7 @@
 // is interrupted and keeps routing to a crashed worker until it respawns. node:sqlite can't
 // stop a running query, so both sent reads to a busy or dead reader while another idled.
 // Here a reader stays busy until it answers, and a crashed reader gets nothing until it's back.
-import { Cause, Effect, Layer, Result, Schedule, Schema } from "effect"
+import { Cause, Deferred, Effect, Exit, Layer, Result, Schedule, Schema } from "effect"
 import { RpcClient, RpcClientError, RpcMessage, type RpcSerialization } from "effect/rpc"
 import { Worker, type WorkerError } from "effect/workers"
 
@@ -16,11 +16,37 @@ interface Job {
 }
 
 interface Reader {
+  readonly id: number
   readonly worker: Worker.Worker<RpcMessage.FromServerEncoded, RpcMessage.FromClientEncoded>
   ready: boolean
   job: Job | undefined
 }
 
+const RESPAWN_MS = 1000
+
+// As in Effect's worker protocol: messages cross by structured clone.
+const codecFor = Schema.toCodecJson as RpcSerialization.CodecFor
+const encodeDefect = Schema.encodeSync(codecFor(Schema.Defect()))
+
+const dieExit = (job: Job, defect: unknown) =>
+  RpcMessage.ResponseExitDieEncoded({
+    requestId: RpcMessage.RequestId(job.request.id),
+    encodedDefect: encodeDefect(defect)
+  })
+
+const clientError = (cause: Cause.Cause<WorkerError.WorkerError>) => {
+  const error = Cause.findError(cause)
+  if (Result.isSuccess(error)) return new RpcClientError.RpcClientError({ reason: error.success.reason })
+  // A defect, e.g. the spawn refused a stale bundle.
+  const defect = Cause.squash(cause)
+  const message = `reader worker failed: ${defect instanceof Error ? defect.message : String(defect)}`
+  return new RpcClientError.RpcClientError({ reason: new RpcClientError.RpcClientDefect({ message, cause: defect }) })
+}
+
+/**
+ * Fails to build if every reader dies before any is ready. Afterwards a crashed reader is
+ * respawned every second, and while no reader is up, queued reads fail instead of waiting.
+ */
 export const layer = (size: number) =>
   Layer.effect(
     RpcClient.Protocol,
@@ -29,19 +55,30 @@ export const layer = (size: number) =>
         const platform = yield* Worker.WorkerPlatform
         const readers: Array<Reader> = []
         const queue: Array<Job> = []
+        const started = Deferred.makeUnsafe<void, RpcClientError.RpcClientError>()
+        const diedBeforeStart = new Set<number>()
 
-        // Uninterruptible, so a reader is never marked busy with a request it wasn't sent.
-        const dispatch = Effect.uninterruptible(
-          Effect.suspend(() => {
-            const sends: Array<Effect.Effect<void, unknown>> = []
-            for (const reader of readers) {
-              if (queue.length === 0) break
-              if (!reader.ready || reader.job !== undefined) continue
+        // Uninterruptible, so a reader is never left reserved for a request it wasn't sent.
+        const dispatch: Effect.Effect<void> = Effect.uninterruptible(
+          Effect.gen(function* () {
+            for (let i = 0; i < readers.length && queue.length > 0;) {
+              const reader = readers[i]!
+              if (!reader.ready || reader.job !== undefined) {
+                i++
+                continue
+              }
               const job = queue.shift()!
+              // Reserved before sending, so a concurrent dispatch can't pick the same reader;
+              // released again if the send fails.
               reader.job = job
-              sends.push(reader.worker.send(job.request, job.transferables))
+              const sent = yield* Effect.exit(reader.worker.send(job.request, job.transferables))
+              if (Exit.isFailure(sent)) {
+                reader.job = undefined
+                yield* writeResponse(job.clientId, dieExit(job, Cause.squash(sent.cause)))
+              } else {
+                i++
+              }
             }
-            return Effect.orDie(Effect.all(sends, { discard: true }))
           })
         )
 
@@ -76,43 +113,61 @@ export const layer = (size: number) =>
             return Effect.void
           }
 
-        const onCrash = (reader: Reader) => (cause: Cause.Cause<WorkerError.WorkerError>) => {
-          reader.ready = false
-          const job = reader.job
-          reader.job = undefined
-          if (job === undefined) return Effect.void
-          const error = Cause.findError(cause)
-          return writeResponse(job.clientId, {
-            _tag: "ClientProtocolError",
-            error: new RpcClientError.RpcClientError({
-              reason: Result.isSuccess(error)
-                ? error.success.reason
-                : new RpcClientError.RpcClientDefect({ message: "reader worker failed", cause: Cause.squash(cause) })
-            })
+        const onStart = (reader: Reader) =>
+          Effect.suspend(() => {
+            reader.ready = true
+            Deferred.doneUnsafe(started, Exit.void)
+            return dispatch
           })
+
+        const onCrash = (reader: Reader) => (cause: Cause.Cause<WorkerError.WorkerError>) => {
+          if (Cause.hasInterruptsOnly(cause)) return Effect.void
+          const wasReady = reader.ready
+          reader.ready = false
+          const error = clientError(cause)
+          const failed: Array<number> = []
+          if (reader.job !== undefined) failed.push(reader.job.clientId)
+          reader.job = undefined
+          // With no reader up, queued reads would wait on a respawn that may never succeed.
+          if (!readers.some((other) => other.ready)) {
+            for (const job of queue.splice(0)) failed.push(job.clientId)
+          }
+          if (!wasReady && !Deferred.isDoneUnsafe(started)) {
+            diedBeforeStart.add(reader.id)
+            if (diedBeforeStart.size === size) Deferred.doneUnsafe(started, Exit.fail(error))
+          }
+          return Effect.logError(`database reader ${reader.id} stopped; restarting it in ${RESPAWN_MS} ms`, cause).pipe(
+            Effect.andThen(
+              Effect.forEach(
+                new Set(failed),
+                (clientId) => writeResponse(clientId, { _tag: "ClientProtocolError", error }),
+                { discard: true }
+              )
+            )
+          )
         }
 
         for (let id = 0; id < size; id++) {
           const reader: Reader = {
+            id,
             worker: yield* platform.spawn<RpcMessage.FromServerEncoded, RpcMessage.FromClientEncoded>(id),
             ready: false,
             job: undefined
           }
           readers.push(reader)
           yield* reader.worker
-            .run(onResponse(reader), {
-              onSpawn: Effect.suspend(() => {
-                reader.ready = true
-                return dispatch
-              })
-            })
+            .run(onResponse(reader), { onSpawn: onStart(reader) })
             .pipe(
               Effect.tapCause(onCrash(reader)),
-              Effect.retry(Schedule.spaced(1000)),
+              Effect.retry(Schedule.spaced(RESPAWN_MS)),
               Effect.interruptible,
               Effect.forkScoped
             )
         }
+        yield* Deferred.await(started)
+
+        const running = (clientId: number, requestId: string | number) =>
+          readers.find((reader) => reader.job?.clientId === clientId && reader.job.request.id === requestId)
 
         const send = (
           clientId: number,
@@ -130,28 +185,18 @@ export const layer = (size: number) =>
                 return Effect.void
               }
               // The reader stops at its next statement at best, and stays busy until it answers.
-              const running = readers.find(
-                (reader) => reader.job?.clientId === clientId && reader.job.request.id === message.requestId
-              )
-              return running ? Effect.orDie(running.worker.send(message)) : Effect.void
+              const reader = running(clientId, message.requestId)
+              return reader ? Effect.orDie(reader.worker.send(message)) : Effect.void
             }
             case "Ack": {
-              const running = readers.find(
-                (reader) => reader.job?.clientId === clientId && reader.job.request.id === message.requestId
-              )
-              return running ? Effect.orDie(running.worker.send(message)) : Effect.void
+              const reader = running(clientId, message.requestId)
+              return reader ? Effect.orDie(reader.worker.send(message)) : Effect.void
             }
           }
           return Effect.void
         }
 
-        return {
-          send,
-          supportsAck: true,
-          supportsTransferables: true,
-          // As in Effect's worker protocol: messages cross by structured clone.
-          codecFor: Schema.toCodecJson as RpcSerialization.CodecFor
-        }
+        return { send, supportsAck: true, supportsTransferables: true, codecFor }
       })
     )
   )
