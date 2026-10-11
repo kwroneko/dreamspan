@@ -212,7 +212,7 @@ The rule that protects the main objective: a registry is added when a core featu
   - the Anthropic breakpoints and the usage capture become a registered request transform and a registered response observer
   - the kind column stays a string, validated against the registry when a connection is used, not by a closed literal list
 
-  That's the first registry, and a small refactor while the code is fresh.
+  **Built** (2026-10-11, ARCHITECTURE.md §6): the generic registry in `src/registry.ts` and the provider registry, with the built-ins registered through it.
 - **Phase 1–2 features register as modules with ids:** assembler stages, macros, importers, display rules, then tools.
 - **The client renders through slot registries** (message view, panels, composer actions). `src/ui/` stays the single import path for components.
 - **Namespaced chat state keys,** before the first extension needs them (`@rp/shared/state.ts` is a closed union today).

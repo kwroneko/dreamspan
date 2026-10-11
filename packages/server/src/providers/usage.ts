@@ -7,7 +7,7 @@
 // drops: OpenRouter's reported cost and routed upstream, Anthropic's refusal category.
 import type { AssistantMessage, Message, Usage } from "@earendil-works/pi-ai"
 import { estimateContextTokens, estimateTextTokens } from "@earendil-works/pi-ai/utils/estimate"
-import type { Price, WireApi } from "@rp/shared/providers.ts"
+import type { Price } from "@rp/shared/providers.ts"
 import { type Cost, type TokenCounts, unknownCounts, type UsageSource } from "@rp/shared/usage.ts"
 import { Predicate } from "effect"
 
@@ -28,39 +28,38 @@ export const emptyCapture = (): Capture => ({
 
 const record = (value: unknown) => (Predicate.isObject(value) ? (value as Record<string, unknown>) : null)
 
-/** Reads one provider stream event (already parsed by the adapter, read-only). */
-export const captureEvent = (api: WireApi, data: unknown, capture: Capture) => {
-  const event = record(data)
-  if (!event) return
-  switch (api) {
-    case "openai-completions": {
-      const usage = record(event.usage)
-      if (usage) {
-        capture.rawUsage = usage
-        if (Predicate.isNumber(usage.cost)) capture.reportedCost = usage.cost
-      }
-      // OpenRouter names the provider it routed to on every chunk.
-      if (Predicate.isString(event.provider)) capture.upstream = event.provider
-      return
+/**
+ * Raw usage readers for the built-in wire APIs, registered as response observers
+ * (registry.ts). They read the provider's parsed stream events, read-only.
+ */
+export const usageObservers: Record<string, (data: unknown, capture: Capture) => void> = {
+  "openai-completions": (data, capture) => {
+    const event = record(data)
+    if (!event) return
+    const usage = record(event.usage)
+    if (usage) {
+      capture.rawUsage = usage
+      if (Predicate.isNumber(usage.cost)) capture.reportedCost = usage.cost
     }
-    case "openai-responses": {
-      const usage = record(record(event.response)?.usage)
-      if (usage) capture.rawUsage = usage
-      return
-    }
-    case "anthropic-messages": {
-      // message_start carries the input side; message_delta the final counts.
-      const usage = record(event.type === "message_start" ? record(event.message)?.usage : event.usage)
-      if (usage) capture.rawUsage = { ...capture.rawUsage, ...usage }
-      const stop = record(record(event.delta)?.stop_details)
-      if (stop && Predicate.isString(stop.category) && stop.category.length > 0) capture.refusalCategory = stop.category
-      return
-    }
-    case "google-generative-ai": {
-      const usage = record(event.usageMetadata)
-      if (usage) capture.rawUsage = usage
-      return
-    }
+    // OpenRouter names the provider it routed to on every chunk.
+    if (Predicate.isString(event.provider)) capture.upstream = event.provider
+  },
+  "openai-responses": (data, capture) => {
+    const usage = record(record(record(data)?.response)?.usage)
+    if (usage) capture.rawUsage = usage
+  },
+  "anthropic-messages": (data, capture) => {
+    const event = record(data)
+    if (!event) return
+    // message_start carries the input side; message_delta the final counts.
+    const usage = record(event.type === "message_start" ? record(event.message)?.usage : event.usage)
+    if (usage) capture.rawUsage = { ...capture.rawUsage, ...usage }
+    const stop = record(record(event.delta)?.stop_details)
+    if (stop && Predicate.isString(stop.category) && stop.category.length > 0) capture.refusalCategory = stop.category
+  },
+  "google-generative-ai": (data, capture) => {
+    const usage = record(record(data)?.usageMetadata)
+    if (usage) capture.rawUsage = usage
   }
 }
 

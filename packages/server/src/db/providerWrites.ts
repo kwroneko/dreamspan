@@ -1,7 +1,7 @@
 // Connection, model and ledger write handlers (spec/PROVIDERS.md §2, §3, §9). They run
 // in the writer worker, each as one transaction. Secrets arrive already encrypted.
 import { uuidv7 } from "@rp/shared/id.ts"
-import { type ConnectionSettings, providerKinds } from "@rp/shared/providers.ts"
+import type { ConnectionSettings } from "@rp/shared/providers.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
@@ -80,7 +80,7 @@ export const makeProviderWriteHandlers = Effect.gen(function* () {
     })
 
   const handlers = {
-    CreateConnection: ({ userId, connectionId, kind, settings, credentialId }) =>
+    CreateConnection: ({ userId, connectionId, kind, api, settings, credentialId }) =>
       Effect.gen(function* () {
         yield* checkPresetRef(userId, settings.presetOverrideRefId)
         yield* checkCredential(userId, credentialId)
@@ -89,7 +89,7 @@ export const makeProviderWriteHandlers = Effect.gen(function* () {
           id: connectionId,
           owner_user_id: userId,
           kind,
-          api: providerKinds[kind].api,
+          api,
           ...settingsColumns(settings),
           credential_id: credentialId,
           created_at: now,

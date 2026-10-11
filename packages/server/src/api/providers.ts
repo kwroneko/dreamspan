@@ -29,6 +29,7 @@ export const makeProviderHandlers = Effect.gen(function* () {
   const userId = Effect.map(CurrentUser, (user) => user.id)
 
   const handlers = {
+    ListProviderKinds: () => Effect.sync(() => providers.kinds()),
     ListConnections: () =>
       Effect.flatMap(userId, (id) => reader.ListConnections({ userId: id })).pipe(
         Effect.catchTag(["StorageError", "RpcClientError"], toServerError("ListConnections"))

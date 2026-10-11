@@ -1,9 +1,8 @@
 // Fetching a connection's model list from its upstream (spec/PROVIDERS.md §3.3). Each
 // kind's API is used as that upstream defines it; the base URL moves the whole API.
 // What a list reports beats pi-ai's catalog, because it describes the endpoint in use.
-import { type ModelListFormat, type ModelUpstream, type ProviderKind, providerKinds } from "@rp/shared/providers.ts"
+import type { ModelUpstream } from "@rp/shared/providers.ts"
 import { Effect, Schema } from "effect"
-import { catalogEntry, upstreamFromCatalog } from "./catalog.ts"
 
 export class ModelListError extends Schema.TaggedError<ModelListError>()("ModelListError", {
   reason: Schema.Literals(["auth", "not_found", "http", "network", "parse"]),
@@ -123,7 +122,6 @@ const fromGoogle = (model: typeof GoogleModel.Type): ModelUpstream =>
 // --- Fetching -----------------------------------------------------------------------
 
 export interface ListRequest {
-  readonly kind: ProviderKind
   readonly baseUrl: string
   readonly apiKey: string | null
   readonly headers: Readonly<Record<string, string>>
@@ -170,7 +168,11 @@ const decode =
 
 const MAX_PAGES = 20
 
-const fetchers: Record<ModelListFormat, (request: ListRequest) => Effect.Effect<Array<ListedModel>, ModelListError>> = {
+/** The list formats the built-in kinds use; a plugin kind brings its own lister. */
+export const modelListers: Record<
+  "openai" | "anthropic" | "google",
+  (request: ListRequest) => Effect.Effect<Array<ListedModel>, ModelListError>
+> = {
   openai: (request) =>
     getJson(
       request,
@@ -222,21 +224,3 @@ const fetchers: Record<ModelListFormat, (request: ListRequest) => Effect.Effect<
       return models
     })
 }
-
-/**
- * The upstream's models, each merged over what pi-ai's catalog knows about it: the
- * list's own fields win, and the catalog fills the rest (price, thinking levels, compat).
- */
-export const fetchModelList = (request: ListRequest) =>
-  Effect.gen(function* () {
-    const listed = yield* fetchers[providerKinds[request.kind].modelList](request)
-    return yield* Effect.forEach(listed, (model) =>
-      Effect.promise(() => catalogEntry(request.kind, model.key)).pipe(
-        Effect.map((found) => {
-          if (!found) return model
-          const catalog = upstreamFromCatalog(found.entry, found.sameApi)
-          return { key: model.key, upstream: { ...catalog, ...model.upstream } satisfies ModelUpstream }
-        })
-      )
-    )
-  })

@@ -449,7 +449,23 @@ Not built yet: built-in login (PLAN phase 0), and per-user ownership checks, whi
 
 `packages/server/src/providers/` (spec/PROVIDERS.md §4, §7, §9). It's the one entry point to models, for the assembler (phase 2) and later the agent loop. It sits on `@earendil-works/pi-ai` 1.0.3, unpatched.
 
-**Calling pi-ai.** The four wire APIs' lazy implementations (`api/*.lazy`) are called directly, never pi-ai's `Models` collection:
+**The provider registry** (`providers/registry.ts`, `providers/builtins.ts`; the generic mechanism is `src/registry.ts`). This is the first registry of the structure in spec/PLUGINS.md §3.1: the core registers its features through the same registries plugins will use.
+- **A registry** holds entries by id. Registering adds an entry or overrides the one with the same id, and `disable` hides one. Each registration lasts as long as its scope, and closing the scope restores whatever it hid, in any order (`test/registry.test.ts`). Wrapping is `get`, then registering a replacement that calls the original.
+- **The `ProviderRegistry` service has three registries:**
+  - **Provider kinds:** label, pi provider id, wire API id and implementation (pi-ai's `ProviderStreams` or the plugin's own), whether it takes our `fetch`, default base URL, whether a key is optional, a model lister, and an optional catalog.
+  - **Request transforms:** payload rewrites through pi-ai's `onPayload`, applied in registration order to requests whose kind and API they apply to.
+  - **Response observers:** readers of the raw stream events.
+- **The built-ins** are registered at startup:
+  - the six kinds, in picker order: OpenAI Chat Completions, Anthropic, OpenAI Responses, OpenRouter, DeepSeek, Google
+  - the Anthropic explicit breakpoints, as a transform
+  - the usage capture, as one observer per wire API
+- **`kind` and `api` are open strings** (`@rp/shared/providers.ts`), checked against the registry where they're used:
+  - an unknown kind can't create a connection
+  - a connection whose kind is gone, for example its plugin was removed, is `unusable`
+  - `ListProviderKinds` gives the client the kinds in effect
+- `test/providerStream.test.ts` registers a gateway kind and a transform in a scope, the way a plugin will. It streams through them, then closes the scope and checks that both are gone.
+
+**Calling pi-ai.** The kinds' wire API implementations (pi-ai's lazy `api/*.lazy` modules for the built-ins) are called directly, never pi-ai's `Models` collection:
 - **Each request gets:**
   - an explicit key: a placeholder for keyless local servers, since pi's direct calls require one
   - `env: {}`
@@ -460,7 +476,7 @@ Not built yet: built-in login (PLAN phase 0), and per-user ownership checks, whi
   - `onProviderStreamEvent` for raw usage
 - **The result:** no request can pick up a key from the server's environment.
 - **The pi model** is built per request from the merged description (`resolveModel`). When pi's catalog entry is for the same wire API, it's the base, so its request settings carry over. For example, DeepSeek's `max_tokens` field and reasoning replay come from the catalog (`test/providerStream.test.ts` checks the request body).
-- **Catalogs** (`catalog.ts`) load per provider on first use.
+- **Catalogs** (`catalog.ts`) belong to their kind and load on first use. pi-ai's per-provider catalogs serve the built-ins.
 
 **Connections** (`Providers`):
 - `createCredential`, `replaceCredentialKey` and `allowCredentialOrigin` (which checks the retyped key) handle credentials, and `setHeaders` and `setProxy` encrypt the other secrets (§2) before calling storage (§3.12).

@@ -1,12 +1,14 @@
 // pi-ai's built-in model catalog, the lowest-precedence source of a model's description
-// (spec/PROVIDERS.md §3.1). Each kind's catalog loads on first use, so a server that
-// never uses a provider never holds its catalog in memory.
+// (spec/PROVIDERS.md §3.1). A kind's catalog loads on first use, so a server that never
+// uses a provider never holds its catalog in memory.
 import type { Api, Model } from "@earendil-works/pi-ai"
-import { type ModelUpstream, type ProviderKind, providerKinds } from "@rp/shared/providers.ts"
+import type { ModelUpstream } from "@rp/shared/providers.ts"
+import { Effect } from "effect"
+import type { ListedModel } from "./modelLists.ts"
+import type { Catalog, ProviderKindEntry } from "./registry.ts"
 
-type Catalog = Readonly<Record<string, Model<Api>>>
-
-const loaders: Record<string, () => Promise<Catalog>> = {
+/** Loaders for pi-ai's per-provider catalogs, by pi provider id. */
+export const piCatalogs: Record<string, () => Promise<Catalog>> = {
   anthropic: () => import("@earendil-works/pi-ai/providers/anthropic.models").then((m) => m.ANTHROPIC_MODELS),
   openai: () => import("@earendil-works/pi-ai/providers/openai.models").then((m) => m.OPENAI_MODELS),
   openrouter: () => import("@earendil-works/pi-ai/providers/openrouter.models").then((m) => m.OPENROUTER_MODELS),
@@ -14,28 +16,28 @@ const loaders: Record<string, () => Promise<Catalog>> = {
   google: () => import("@earendil-works/pi-ai/providers/google.models").then((m) => m.GOOGLE_MODELS)
 }
 
-const loaded = new Map<string, Promise<Catalog>>()
+const loaded = new WeakMap<() => Promise<Catalog>, Promise<Catalog>>()
 
-/** The pi provider's catalog for a kind, or an empty one. */
-export const catalogFor = (kind: ProviderKind): Promise<Catalog> => {
-  const provider = providerKinds[kind].piProvider
-  let catalog = loaded.get(provider)
+const catalogOf = (kind: ProviderKindEntry): Promise<Catalog> => {
+  const load = kind.catalog
+  if (!load) return Promise.resolve({})
+  let catalog = loaded.get(load)
   if (!catalog) {
-    catalog = (loaders[provider]?.() ?? Promise.resolve({})).catch(() => ({}))
-    loaded.set(provider, catalog)
+    catalog = load().catch(() => ({}))
+    loaded.set(load, catalog)
   }
   return catalog
 }
 
 /**
- * A catalog entry usable as the base of a request on this kind's connection. A
- * connection is one wire API (DESIGN §9), so an entry for another API (OpenRouter lists
- * some models under anthropic-messages) lends its facts but not its request settings.
+ * A catalog entry for a model of this kind. A connection is one wire API (DESIGN §9), so
+ * an entry for another API (OpenRouter lists some models under anthropic-messages) lends
+ * its facts but not its request settings.
  */
-export const catalogEntry = async (kind: ProviderKind, key: string) => {
-  const entry = (await catalogFor(kind))[key]
+export const catalogEntry = async (kind: ProviderKindEntry, key: string) => {
+  const entry = (await catalogOf(kind))[key]
   if (!entry) return null
-  return { entry, sameApi: entry.api === providerKinds[kind].api }
+  return { entry, sameApi: entry.api === kind.api }
 }
 
 /** What the catalog knows about a model, in the shape users see and can override. */
@@ -56,3 +58,17 @@ export const upstreamFromCatalog = (entry: Model<Api>, sameApi: boolean): ModelU
     ...(entry.cost.tiers ? { tiers: entry.cost.tiers.map((tier) => ({ ...tier })) } : {})
   }
 })
+
+/**
+ * Listed models merged over what the kind's catalog knows: the list's own fields win,
+ * and the catalog fills the rest (price, thinking levels, compat).
+ */
+export const withCatalog = (kind: ProviderKindEntry, listed: ReadonlyArray<ListedModel>) =>
+  Effect.forEach(listed, (model) =>
+    Effect.promise(() => catalogEntry(kind, model.key)).pipe(
+      Effect.map((found): ListedModel => {
+        if (!found) return model
+        return { key: model.key, upstream: { ...upstreamFromCatalog(found.entry, found.sameApi), ...model.upstream } }
+      })
+    )
+  )

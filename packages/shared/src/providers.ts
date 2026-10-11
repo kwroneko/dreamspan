@@ -5,92 +5,26 @@ import { RefId } from "./library.ts"
 
 /**
  * A provider kind names an upstream API as that upstream defines it, endpoints included;
- * the base URL moves the whole API (owner, 2026-10-10). In picker order: Chat Completions
- * is the default, then Anthropic (owner, 2026-10-10).
+ * the base URL moves the whole API (owner, 2026-10-10). Kinds come from the server's
+ * provider registry, built-in or added by plugins (spec/PLUGINS.md §3.1), so this is an
+ * open string checked against the registry where it's used.
  */
-export const ProviderKind = Schema.Literals([
-  "openai-chat",
-  "anthropic",
-  "openai-responses",
-  "openrouter",
-  "deepseek",
-  "google"
-])
+export const ProviderKind = Schema.NonEmptyString
 export type ProviderKind = typeof ProviderKind.Type
 
-/** The wire APIs pi-ai implements that our kinds use. */
-export const WireApi = Schema.Literals([
-  "openai-completions",
-  "anthropic-messages",
-  "openai-responses",
-  "google-generative-ai"
-])
+/** A wire API id, as pi-ai names them ("openai-completions", "anthropic-messages", …). */
+export const WireApi = Schema.NonEmptyString
 export type WireApi = typeof WireApi.Type
 
-/** How a kind lists its models (PROVIDERS §3.3). */
-export type ModelListFormat = "openai" | "anthropic" | "google"
-
-export interface ProviderKindInfo {
-  readonly label: string
-  /** The provider string pi-ai uses to pick request dialects. */
-  readonly piProvider: string
-  readonly api: WireApi
-  readonly defaultBaseUrl: string
-  readonly modelList: ModelListFormat
+/** A provider kind as the client lists it, in picker order. */
+export class ProviderKindInfo extends Schema.Class<ProviderKindInfo>("ProviderKindInfo")({
+  id: ProviderKind,
+  label: Schema.String,
+  api: WireApi,
+  defaultBaseUrl: Schema.String,
   /** Whether a key is optional (local OpenAI-compatible servers often take none). */
-  readonly keyOptional: boolean
-}
-
-export const providerKinds: Readonly<Record<ProviderKind, ProviderKindInfo>> = {
-  "openai-chat": {
-    label: "OpenAI Chat Completions",
-    piProvider: "openai",
-    api: "openai-completions",
-    defaultBaseUrl: "https://api.openai.com/v1",
-    modelList: "openai",
-    keyOptional: true
-  },
-  anthropic: {
-    label: "Anthropic",
-    piProvider: "anthropic",
-    api: "anthropic-messages",
-    defaultBaseUrl: "https://api.anthropic.com",
-    modelList: "anthropic",
-    keyOptional: false
-  },
-  "openai-responses": {
-    label: "OpenAI Responses",
-    piProvider: "openai",
-    api: "openai-responses",
-    defaultBaseUrl: "https://api.openai.com/v1",
-    modelList: "openai",
-    keyOptional: false
-  },
-  openrouter: {
-    label: "OpenRouter",
-    piProvider: "openrouter",
-    api: "openai-completions",
-    defaultBaseUrl: "https://openrouter.ai/api/v1",
-    modelList: "openai",
-    keyOptional: false
-  },
-  deepseek: {
-    label: "DeepSeek",
-    piProvider: "deepseek",
-    api: "openai-completions",
-    defaultBaseUrl: "https://api.deepseek.com",
-    modelList: "openai",
-    keyOptional: false
-  },
-  google: {
-    label: "Google",
-    piProvider: "google",
-    api: "google-generative-ai",
-    defaultBaseUrl: "https://generativelanguage.googleapis.com/v1beta",
-    modelList: "google",
-    keyOptional: false
-  }
-}
+  keyOptional: Schema.Boolean
+}) {}
 
 export const ConnectionId = Schema.String.pipe(Schema.brand("ConnectionId"))
 export type ConnectionId = typeof ConnectionId.Type

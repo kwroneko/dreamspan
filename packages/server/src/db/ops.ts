@@ -389,6 +389,8 @@ export class WriteOps extends RpcGroup.make(
       userId: UserId,
       connectionId: ConnectionId,
       kind: ProviderKind,
+      /** The kind's wire API, resolved by the provider registry on the main thread. */
+      api: Schema.String,
       settings: ConnectionSettings,
       credentialId: Schema.NullOr(CredentialId)
     },

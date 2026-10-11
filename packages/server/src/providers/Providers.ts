@@ -12,10 +12,6 @@ import type {
   Model as PiModel,
   ThinkingLevel
 } from "@earendil-works/pi-ai"
-import { anthropicMessagesApi } from "@earendil-works/pi-ai/api/anthropic-messages.lazy"
-import { googleGenerativeAIApi } from "@earendil-works/pi-ai/api/google-generative-ai.lazy"
-import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy"
-import { openAIResponsesApi } from "@earendil-works/pi-ai/api/openai-responses.lazy"
 import { normalizeContext } from "@earendil-works/pi-ai/utils/transcript"
 import type { ChatId, VersionId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
@@ -30,11 +26,10 @@ import {
   type Model,
   type ModelId,
   type ProviderKind,
+  ProviderKindInfo,
   type ProxyMode,
   originOf,
-  providerKinds,
-  resolveModel,
-  type WireApi
+  resolveModel
 } from "@rp/shared/providers.ts"
 import type { Cost, LlmRequestId, RequestPurpose, TokenCounts } from "@rp/shared/usage.ts"
 import { createHash, timingSafeEqual } from "node:crypto"
@@ -44,23 +39,13 @@ import { Reader, Writer } from "../db/Database.ts"
 import { Network, type ProxyOverride } from "../net/Network.ts"
 import { describeRoute, proxyUrlProblem } from "../net/route.ts"
 import { Secrets } from "../secrets.ts"
-import { applyAnthropicBreakpoints } from "./breakpoints.ts"
 import { catalogEntry } from "./catalog.ts"
 import { classify, parseRetryAfter, ProviderError, providerError, RETRYABLE } from "./errors.ts"
-import { fetchModelList, type ModelListError } from "./modelLists.ts"
-import { type Capture, captureEvent, emptyCapture, finalCounts, recordedCost } from "./usage.ts"
+import type { ModelListError } from "./modelLists.ts"
+import { type ProviderKindEntry, ProviderRegistry, type RequestTarget } from "./registry.ts"
+import { type Capture, emptyCapture, finalCounts, recordedCost } from "./usage.ts"
 
 export { ProviderError } from "./errors.ts"
-
-const apis: Record<WireApi, ReturnType<typeof openAICompletionsApi>> = {
-  "openai-completions": openAICompletionsApi(),
-  "openai-responses": openAIResponsesApi(),
-  "anthropic-messages": anthropicMessagesApi(),
-  "google-generative-ai": googleGenerativeAIApi()
-}
-
-/** pi-ai's Google adapter rejects a custom fetch, so its traffic can't be routed through a proxy. */
-const OWN_FETCH: ReadonlySet<WireApi> = new Set(["openai-completions", "openai-responses", "anthropic-messages"])
 
 /** Retries before the first token (PROVIDERS §7.2). After output, a failure is the user's call. */
 export interface RetryPolicy {
@@ -128,8 +113,8 @@ export interface TestResult {
 /** Everything a request on a connection needs, secrets decrypted. Lives for one request. */
 interface Prepared {
   readonly connection: Connection
-  readonly kind: ProviderKind
-  readonly api: WireApi
+  readonly kind: ProviderKindEntry
+  readonly api: string
   readonly baseUrl: string
   readonly apiKey: string | null
   readonly headers: Readonly<Record<string, string>>
@@ -240,6 +225,8 @@ export interface ProvidersShape {
     connectionId: ConnectionId
   ) => Effect.Effect<TestResult, ProviderError | ServerError>
   readonly stream: (request: StreamRequest) => Stream.Stream<ProviderEvent, ProviderError | ServerError>
+  /** The provider kinds in effect, built-in and from plugins, in picker order. */
+  readonly kinds: () => ReadonlyArray<ProviderKindInfo>
 }
 
 export class Providers extends Context.Service<Providers, ProvidersShape>()("rp/Providers") {}
@@ -286,7 +273,7 @@ const buildPiModel = async (prepared: Prepared, model: Model, effective: Effecti
     id: model.key,
     name: effective.name.value,
     api: prepared.api,
-    provider: providerKinds[prepared.kind].piProvider,
+    provider: prepared.kind.piProvider,
     baseUrl: prepared.baseUrl,
     reasoning: effective.reasoning.value,
     ...(effective.thinkingLevels.value ? { thinkingLevelMap: { ...effective.thinkingLevels.value } } : {}),
@@ -316,6 +303,7 @@ export const layer = (options: ProvidersOptions = {}) =>
       const writer = yield* Writer
       const secrets = yield* Secrets
       const network = yield* Network
+      const registry = yield* ProviderRegistry
       const policy = options.retry ?? defaultRetryPolicy
       const bindKeysToOrigins = options.bindKeysToOrigins ?? true
 
@@ -323,7 +311,10 @@ export const layer = (options: ProvidersOptions = {}) =>
         Effect.gen(function* () {
           const resolved = yield* fromStorage(reader.ResolveConnection({ userId, connectionId }))
           const connection = resolved.connection
-          const info = providerKinds[connection.kind]
+          const info = registry.kinds.get(connection.kind)
+          if (!info) {
+            return yield* providerError("unusable", `the provider kind "${connection.kind}" isn't available`)
+          }
           const decryptWith = (blob: Uint8Array | null, bound: string) =>
             blob === null
               ? Effect.succeed(null)
@@ -357,7 +348,7 @@ export const layer = (options: ProvidersOptions = {}) =>
           const headers = headersJson === null ? {} : (JSON.parse(headersJson) as Record<string, string>)
           const prepared: Prepared = {
             connection,
-            kind: connection.kind,
+            kind: info,
             api: info.api,
             baseUrl,
             apiKey,
@@ -365,7 +356,7 @@ export const layer = (options: ProvidersOptions = {}) =>
             override,
             scrub: makeScrub([apiKey, ...Object.values(headers), ...proxySecrets(proxyUrl)])
           }
-          if (!OWN_FETCH.has(prepared.api)) {
+          if (!info.acceptsFetch) {
             // Its traffic would bypass our fetch, so it may only go where we'd send it direct anyway.
             const route = yield* network.route(new URL(prepared.baseUrl), override)
             if (route.via === "proxy") {
@@ -451,10 +442,17 @@ export const layer = (options: ProvidersOptions = {}) =>
         kind: ProviderKind,
         baseUrl: string | null,
         apiKey: string
-      ) => createCredential({ userId, name, apiKey, urls: [baseUrl ?? providerKinds[kind].defaultBaseUrl] })
+      ) =>
+        Effect.gen(function* () {
+          const entry = registry.kinds.get(kind)
+          if (!entry) return yield* providerError("bad_request", `unknown provider kind "${kind}"`)
+          return yield* createCredential({ userId, name, apiKey, urls: [baseUrl ?? entry.defaultBaseUrl] })
+        })
 
       const createConnection: ProvidersShape["createConnection"] = ({ userId, kind, settings, apiKey, credentialId }) =>
         Effect.gen(function* () {
+          const entry = registry.kinds.get(kind)
+          if (!entry) return yield* providerError("bad_request", `unknown provider kind "${kind}"`)
           const key = typedKey(apiKey)
           const credential =
             key === null
@@ -465,6 +463,7 @@ export const layer = (options: ProvidersOptions = {}) =>
               userId,
               connectionId: uuidv7() as ConnectionId,
               kind,
+              api: entry.api,
               settings,
               credentialId: credential
             })
@@ -517,14 +516,15 @@ export const layer = (options: ProvidersOptions = {}) =>
         })
 
       const listModels = (prepared: Prepared, onRoute: (description: string) => void) =>
-        fetchModelList({
-          kind: prepared.kind,
-          baseUrl: prepared.baseUrl,
-          apiKey: prepared.apiKey,
-          headers: prepared.headers,
-          fetch: fetchFor(prepared, onRoute),
-          scrub: prepared.scrub
-        }).pipe(Effect.mapError((error) => scrubbed(prepared, fromList(error))))
+        prepared.kind
+          .listModels({
+            baseUrl: prepared.baseUrl,
+            apiKey: prepared.apiKey,
+            headers: prepared.headers,
+            fetch: fetchFor(prepared, onRoute),
+            scrub: prepared.scrub
+          })
+          .pipe(Effect.mapError((error) => scrubbed(prepared, fromList(error))))
 
       const refreshModels: ProvidersShape["refreshModels"] = (userId, connectionId) =>
         Effect.gen(function* () {
@@ -696,7 +696,7 @@ export const layer = (options: ProvidersOptions = {}) =>
             catch: (error) => providerError("bad_request", `the request context is invalid: ${String(error)}`)
           })
           const onRoute = (description: string) => offer({ type: "route", description })
-          if (!OWN_FETCH.has(prepared.api)) {
+          if (!prepared.kind.acceptsFetch) {
             const route = yield* network.route(new URL(prepared.baseUrl), prepared.override)
             onRoute(describeRoute(route, new URL(prepared.baseUrl)))
           }
@@ -713,14 +713,18 @@ export const layer = (options: ProvidersOptions = {}) =>
           const message = yield* Effect.tryPromise({
             try: async (signal) => {
               const options = request.options ?? {}
-              const events = apis[prepared.api].streamSimple(piModel, transcript, {
+              const target: RequestTarget = { kind: prepared.kind.id, api: prepared.api }
+              const transforms = registry.transforms.list().filter((t) => t.appliesTo(target))
+              const observers = registry.observers.list().filter((o) => o.appliesTo(target))
+              const breakpoints = options.breakpoints ?? []
+              const events = prepared.kind.streams.streamSimple(piModel, transcript, {
                 // A keyless local server still needs a value; pi's direct calls require one.
                 apiKey: prepared.apiKey ?? "no-key",
                 env: {},
                 maxRetries: 0,
                 signal,
                 headers: prepared.headers,
-                ...(OWN_FETCH.has(prepared.api) ? { fetch: observed } : {}),
+                ...(prepared.kind.acceptsFetch ? { fetch: observed } : {}),
                 ...(options.reasoning !== undefined ? { reasoning: options.reasoning } : {}),
                 ...(options.maxTokens !== undefined ? { maxTokens: options.maxTokens } : {}),
                 ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
@@ -731,17 +735,19 @@ export const layer = (options: ProvidersOptions = {}) =>
                   state.status = response.status
                   state.retryAfterMs = parseRetryAfter(response.headers["retry-after"])
                 },
-                onProviderStreamEvent: (data) => captureEvent(prepared.api, data, state.capture),
-                ...(prepared.api === "anthropic-messages" && options.breakpoints?.length
+                // Registered observers read the raw events (usage capture, PROVIDERS §9.2).
+                onProviderStreamEvent: (data) => {
+                  for (const observer of observers) observer.observe(data, state.capture)
+                },
+                // Registered transforms rewrite the payload, in registration order.
+                ...(transforms.length > 0
                   ? {
-                      onPayload: (payload: unknown) => {
-                        applyAnthropicBreakpoints(
-                          payload as Record<string, unknown>,
-                          request.context.messages,
-                          options.breakpoints!
+                      onPayload: (payload: unknown) =>
+                        transforms.reduce(
+                          (current, t) =>
+                            t.transform(current, { target, messages: request.context.messages, breakpoints }),
+                          payload as Record<string, unknown>
                         )
-                        return payload
-                      }
                     }
                   : {})
               })
@@ -863,6 +869,17 @@ export const layer = (options: ProvidersOptions = {}) =>
         )
 
       return Providers.of({
+        kinds: () =>
+          registry.kinds.list().map(
+            (entry) =>
+              new ProviderKindInfo({
+                id: entry.id,
+                label: entry.label,
+                api: entry.api,
+                defaultBaseUrl: entry.defaultBaseUrl,
+                keyOptional: entry.keyOptional
+              })
+          ),
         createConnection,
         createCredential,
         replaceCredentialKey,

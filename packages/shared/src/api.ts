@@ -14,6 +14,7 @@ import {
   ModelId,
   ModelOverrides,
   ProviderKind,
+  ProviderKindInfo,
   ProxyMode
 } from "./providers.ts"
 import { LlmRequest } from "./usage.ts"
@@ -69,6 +70,8 @@ export class AppApi extends RpcGroup.make(
   Rpc.make("Health", { success: Health }),
   Rpc.make("Whoami", { success: User }),
   // --- Connections and models (spec/PROVIDERS.md §2, §3). Keys go in, never out.
+  /** The provider kinds a connection can use, built-in and from plugins, in picker order. */
+  Rpc.make("ListProviderKinds", { success: Schema.Array(ProviderKindInfo) }),
   Rpc.make("ListConnections", { success: Schema.Array(Connection), error: ServerError }),
   /**
    * Uses an existing credential, or a key typed for it, which becomes a credential named

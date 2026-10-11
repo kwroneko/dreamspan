@@ -39,6 +39,7 @@ const setup = Effect.gen(function* () {
       userId,
       connectionId: uuidv7() as ConnectionId,
       kind: "openai-chat",
+      api: "openai-completions",
       settings: settings(name),
       credentialId: null
     })
@@ -113,6 +114,7 @@ describe("connections", () => {
           userId: bo,
           connectionId: uuidv7() as ConnectionId,
           kind: "openai-chat",
+          api: "openai-completions",
           settings: settings("Bo's"),
           credentialId: credential.id
         }),
@@ -260,6 +262,7 @@ describe("review regressions", () => {
           userId: bo,
           connectionId: uuidv7() as ConnectionId,
           kind: "openai-chat",
+          api: "openai-completions",
           settings: borrowed,
           credentialId: null
         }),
@@ -271,6 +274,7 @@ describe("review regressions", () => {
           userId: bo,
           connectionId: uuidv7() as ConnectionId,
           kind: "openai-chat",
+          api: "openai-completions",
           settings: { ...borrowed, presetOverrideRefId: preset.ref.id.replace(/.$/, "0") as typeof preset.ref.id },
           credentialId: null
         }),
@@ -291,6 +295,7 @@ describe("review regressions", () => {
         userId: ana,
         connectionId: uuidv7() as ConnectionId,
         kind: "openai-chat",
+        api: "openai-completions",
         settings: { ...settings("Ana's"), presetOverrideRefId: preset.ref.id },
         credentialId: null
       })

@@ -8,10 +8,12 @@ import type { AssistantMessage, Context as PiContext } from "@earendil-works/pi-
 import { assert, describe, it } from "@effect/vitest"
 import type { UserId } from "@rp/shared/domain.ts"
 import type { ConnectionSettings, ModelId, ProviderKind } from "@rp/shared/providers.ts"
-import { Effect, Exit, Layer, Stream } from "effect"
+import { Effect, Exit, Layer, Scope, Stream } from "effect"
 import * as Database from "../src/db/Database.ts"
 import * as Network from "../src/net/Network.ts"
 import { classify, parseRetryAfter } from "../src/providers/errors.ts"
+import * as ProviderBuiltins from "../src/providers/builtins.ts"
+import { ProviderRegistry } from "../src/providers/registry.ts"
 import * as Providers from "../src/providers/Providers.ts"
 import { makeScrub, ProviderError } from "../src/providers/Providers.ts"
 import { alignTranscript } from "../src/providers/breakpoints.ts"
@@ -22,6 +24,7 @@ import { anthropicSse, completionChunks, json, sse, startMockProvider } from "./
 const layer = (bindKeysToOrigins = true) =>
   Providers.layer({ retry: { maxRetries: 2, baseDelayMs: 5, maxDelayMs: 1_000 }, bindKeysToOrigins }).pipe(
     Layer.provideMerge(Network.layer),
+    Layer.provideMerge(ProviderBuiltins.layer),
     Layer.provideMerge(
       Database.layer({
         dataDir: mkdtempSync(join(tmpdir(), "rp-stream-")),
@@ -1048,6 +1051,71 @@ describe("keys bound to hosts", () => {
       assert.strictEqual(events.at(-1)!.type, "done")
     }).pipe(Effect.scoped, Effect.provide(layer(false)))
   )
+})
+
+describe("provider registry", () => {
+  it.live("a plugin can add a provider kind and a request transform, and both go away with its scope", () =>
+    Effect.gen(function* () {
+      const server = yield* mock((request, res) =>
+        request.path.endsWith("/models")
+          ? json(res, 200, openAiList([{ id: "m" }]))
+          : sse(res, completionChunks(["Hi."], { prompt_tokens: 5, completion_tokens: 2 }))
+      )
+      const registry = yield* ProviderRegistry
+      const providers = yield* Providers.Providers
+      const builtin = registry.kinds.get("openai-chat")!
+      const plugin = yield* Scope.make()
+      // A gateway kind that reuses Chat Completions with its own default URL, and a
+      // transform that tags every request it sends.
+      yield* Scope.provide(plugin)(
+        Effect.all([
+          registry.kinds.register({
+            ...builtin,
+            id: "my-gateway",
+            label: "My gateway",
+            defaultBaseUrl: `${server.url}/v1`
+          }),
+          registry.transforms.register({
+            id: "tag-requests",
+            appliesTo: (target) => target.kind === "my-gateway",
+            transform: (payload) => ({ ...payload, user: "rp-harness" })
+          })
+        ])
+      )
+      assert.include(
+        providers.kinds().map((k) => k.id),
+        "my-gateway"
+      )
+      const { userId, connection, modelId } = yield* connect("my-gateway", `${server.url}/v1`, null, "m")
+      const events = yield* collect(
+        providers.stream({
+          userId,
+          connectionId: connection.id,
+          modelId,
+          context,
+          attribution: { purpose: "generation" }
+        })
+      )
+      assert.strictEqual(events.at(-1)!.type, "done")
+      const sent = server.requests().find((r) => r.path.endsWith("/chat/completions"))!
+      assert.strictEqual(sent.body!.user, "rp-harness")
+
+      // Closing the plugin's scope unregisters both; its connection becomes unusable.
+      yield* Scope.close(plugin, Exit.void)
+      assert.notInclude(
+        providers.kinds().map((k) => k.id),
+        "my-gateway"
+      )
+      const gone = yield* providers.testConnection(userId, connection.id).pipe(Effect.flip, Effect.map(asProviderError))
+      assert.strictEqual(gone.reason, "unusable")
+    }).pipe(Effect.scoped, Effect.provide(layer()))
+  )
+
+  it("lists built-in kinds in picker order", () =>
+    assert.deepStrictEqual(
+      ProviderBuiltins.builtinKinds.map((k) => k.id),
+      ["openai-chat", "anthropic", "openai-responses", "openrouter", "deepseek", "google"]
+    ))
 })
 
 describe("pure pieces", () => {

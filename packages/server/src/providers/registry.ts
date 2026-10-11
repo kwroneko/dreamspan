@@ -1,0 +1,80 @@
+// The provider registry (spec/PLUGINS.md §3.1, §8): provider kinds, request transforms
+// and response observers. The built-ins register through it like any plugin will, so a
+// plugin can add a provider, change how requests are shaped (cache breakpoints), or
+// replace or disable a built-in.
+import type { Api, Message, Model, ProviderStreams } from "@earendil-works/pi-ai"
+import type { Effect } from "effect"
+import { Context, Layer } from "effect"
+import { makeRegistry, type Registry } from "../registry.ts"
+import type { ListedModel, ListRequest, ModelListError } from "./modelLists.ts"
+import type { Capture } from "./usage.ts"
+
+export type Catalog = Readonly<Record<string, Model<Api>>>
+
+/** A provider kind: an upstream API as that upstream defines it (DESIGN §9). */
+export interface ProviderKindEntry {
+  readonly id: string
+  readonly label: string
+  /** The provider string pi-ai uses to pick request dialects. */
+  readonly piProvider: string
+  /** The wire API id. */
+  readonly api: string
+  /** The wire API implementation: one of pi-ai's, or the plugin's own. */
+  readonly streams: ProviderStreams
+  /** Whether the implementation takes our `fetch`. One that doesn't can't be routed through a proxy. */
+  readonly acceptsFetch: boolean
+  readonly defaultBaseUrl: string
+  /** Whether a key is optional (local OpenAI-compatible servers often take none). */
+  readonly keyOptional: boolean
+  /** Fetches the upstream's model list. */
+  readonly listModels: (request: ListRequest) => Effect.Effect<ReadonlyArray<ListedModel>, ModelListError>
+  /** Known models' facts (pi-ai's catalog for built-ins), loaded on first use. */
+  readonly catalog?: () => Promise<Catalog>
+}
+
+/** What a transform or observer is looking at: the kind and wire API of the request. */
+export interface RequestTarget {
+  readonly kind: string
+  readonly api: string
+}
+
+/** Rewrites the payload pi-ai built, before it's sent (pi-ai's `onPayload`). */
+export interface RequestTransform {
+  readonly id: string
+  readonly appliesTo: (target: RequestTarget) => boolean
+  /** Returns the payload to send: the same object changed in place, or a new one. */
+  readonly transform: (
+    payload: Record<string, unknown>,
+    request: {
+      readonly target: RequestTarget
+      readonly messages: ReadonlyArray<Message>
+      readonly breakpoints: ReadonlyArray<number>
+    }
+  ) => Record<string, unknown>
+}
+
+/** Reads the provider's raw stream events (pi-ai's `onProviderStreamEvent`), e.g. for usage. */
+export interface ResponseObserver {
+  readonly id: string
+  readonly appliesTo: (target: RequestTarget) => boolean
+  readonly observe: (data: unknown, capture: Capture) => void
+}
+
+export interface ProviderRegistryShape {
+  readonly kinds: Registry<ProviderKindEntry>
+  readonly transforms: Registry<RequestTransform>
+  readonly observers: Registry<ResponseObserver>
+}
+
+export class ProviderRegistry extends Context.Service<ProviderRegistry, ProviderRegistryShape>()(
+  "rp/ProviderRegistry"
+) {}
+
+/** An empty registry; `builtins.ts` provides the layer that fills it. */
+export const empty = Layer.sync(ProviderRegistry, () =>
+  ProviderRegistry.of({
+    kinds: makeRegistry<ProviderKindEntry>(),
+    transforms: makeRegistry<RequestTransform>(),
+    observers: makeRegistry<ResponseObserver>()
+  })
+)

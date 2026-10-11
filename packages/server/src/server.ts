@@ -12,6 +12,7 @@ import { AppConfig } from "./config.ts"
 import * as Database from "./db/Database.ts"
 import { EventLoopMonitor } from "./eventLoop.ts"
 import * as Network from "./net/Network.ts"
+import * as ProviderBuiltins from "./providers/builtins.ts"
 import * as Providers from "./providers/Providers.ts"
 import * as Secrets from "./secrets.ts"
 
@@ -72,7 +73,7 @@ const SecretsLive = Layer.unwrap(
 /** The provider layer and what it needs: the server secret, the network module, storage. */
 const ProvidersLive = Layer.unwrap(
   Effect.map(AppConfig, (config) => Providers.layer({ bindKeysToOrigins: config.keyHostBinding }))
-).pipe(Layer.provideMerge(Network.layer), Layer.provideMerge(SecretsLive))
+).pipe(Layer.provideMerge(Network.layer), Layer.provideMerge(SecretsLive), Layer.provideMerge(ProviderBuiltins.layer))
 
 /**
  * Requests left running by a previous process may have been billed, so they're kept,
