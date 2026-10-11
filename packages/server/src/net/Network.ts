@@ -100,9 +100,7 @@ export const bypassOnlyLookup =
 
 const makeDispatcher = (route: Route, bypass: () => BypassList): Dispatcher => {
   if (route.via === "direct") {
-    return route.reason === "bypass"
-      ? new Agent({ connect: { lookup: bypassOnlyLookup(bypass) as never } })
-      : new Agent()
+    return route.pinned ? new Agent({ connect: { lookup: bypassOnlyLookup(bypass) as never } }) : new Agent()
   }
   const url = new URL(route.proxy)
   return url.protocol === "socks5:" || url.protocol === "socks5h:"
@@ -142,7 +140,7 @@ export const layer = Layer.effect(
     // One dispatcher per route, reused so connections pool; closed with the layer.
     const dispatchers = new Map<string, Dispatcher>()
     const dispatcherFor = (route: Route) => {
-      const key = route.via === "direct" ? `direct:${route.reason === "bypass" ? "bypass" : "any"}` : route.proxy
+      const key = route.via === "direct" ? `direct:${route.pinned ? "pinned" : "any"}` : route.proxy
       let dispatcher = dispatchers.get(key)
       if (!dispatcher) {
         dispatcher = makeDispatcher(route, () => Ref.getUnsafe(current).bypass)

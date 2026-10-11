@@ -78,7 +78,7 @@ describe("route", () => {
         target: target("https://gateway.home.example"),
         override: inherit
       })
-    ).toEqual({ via: "direct", reason: "bypass" })
+    ).toEqual({ via: "direct", reason: "bypass", pinned: true })
     // A failed lookup leaves it to the proxy.
     expect(
       await decideRoute({

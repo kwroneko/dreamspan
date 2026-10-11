@@ -43,6 +43,22 @@ describe("network", () => {
     }).pipe(Effect.scoped, Effect.provide(layer(mkdtempSync(join(tmpdir(), "rp-net-")))))
   )
 
+  it.live("a host bypassed by name goes direct whatever its addresses", () =>
+    Effect.gen(function* () {
+      const target = yield* resource(() => startTarget(() => ({ json: { ok: true } })))
+      const proxy = yield* resource(startHttpProxy)
+      const network = yield* Network.Network
+      // Only the name is listed; pinning to listed addresses would refuse it.
+      yield* network.setInstance({ proxyUrl: proxy.url, bypass: ["localhost"], forceProxy: false })
+      const fetch = network.fetchFor({ mode: "inherit" })
+      const body = yield* Effect.promise(() =>
+        fetch(target.url.replace("127.0.0.1", "localhost") + "/named").then((r) => r.json())
+      )
+      assert.deepStrictEqual(body, { ok: true })
+      assert.deepStrictEqual(proxy.tunnels(), [])
+    }).pipe(Effect.scoped, Effect.provide(layer(mkdtempSync(join(tmpdir(), "rp-net-")))))
+  )
+
   it.live("honors a connection's own SOCKS5 proxy with credentials, and its direct override", () =>
     Effect.gen(function* () {
       const target = yield* resource(() => startTarget(() => ({ json: { ok: true } })))

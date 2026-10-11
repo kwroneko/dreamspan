@@ -78,7 +78,12 @@ export type ProxyOverride =
   { readonly mode: "inherit" } | { readonly mode: "direct" } | { readonly mode: "custom"; readonly url: string }
 
 export type Route =
-  | { readonly via: "direct"; readonly reason: "no_proxy" | "bypass" | "override" }
+  | {
+      readonly via: "direct"
+      readonly reason: "no_proxy" | "bypass" | "override"
+      /** Bypassed because of the addresses a name resolved to: the connection must stay on them. */
+      readonly pinned?: true
+    }
   | { readonly via: "proxy"; readonly proxy: string; readonly source: "instance" | "connection" }
 
 /**
@@ -102,7 +107,7 @@ export const decideRoute = async (options: {
   if (bypass.hasAddresses && isIP(host) === 0) {
     // A failed lookup isn't a reason to go direct: the proxy may resolve what we can't.
     const resolved = await options.resolve(host).catch(() => [])
-    if (bypasses(bypass, host, resolved)) return { via: "direct", reason: "bypass" }
+    if (bypasses(bypass, host, resolved)) return { via: "direct", reason: "bypass", pinned: true }
   }
   return { via: "proxy", proxy: instanceProxy, source: "instance" }
 }
