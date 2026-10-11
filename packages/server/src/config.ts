@@ -27,7 +27,13 @@ const AppConfigFromEnv = Config.all({
    */
   secretKey: Config.option(Config.Redacted("SECRET_KEY")),
   /** A file holding the server secret, e.g. a Docker secret. */
-  secretKeyFile: Config.option(Config.String("SECRET_KEY_FILE"))
+  secretKeyFile: Config.option(Config.String("SECRET_KEY_FILE")),
+  /**
+   * Keys are sent only to the hosts their credential was entered for (spec/PLUGINS.md
+   * §6.1). A security setting, so it's configurable only here, outside the app: no RPC,
+   * setting or agent tool can change it (owner, 2026-10-11).
+   */
+  keyHostBinding: Config.Boolean("KEY_HOST_BINDING").pipe(Config.withDefault(true))
 })
 
 export type AppConfigShape = Config.Success<typeof AppConfigFromEnv>

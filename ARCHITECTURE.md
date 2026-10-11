@@ -55,9 +55,10 @@ Bun was measured as an alternative (2026-10-10) and not adopted. On this server 
 | `AUTH_PROXY_HEADER` | `remote-user` | Identity header in proxy mode |
 | `CLIENT_DIST` | `packages/client/dist` | Static files to serve |
 | `SECRET_KEY`, `SECRET_KEY_FILE` | unset | The server secret (below). Generated into `DATA_DIR/secret.key` when neither is set |
+| `KEY_HOST_BINDING` | `true` | Keys go only to the hosts their credential was entered for (§3.12). A security setting, so it's set only here, never from inside the app |
 
 **Secrets** (`secrets.ts`). Connection secrets (API keys, header values, proxy URLs) are encrypted at rest with AES-256-GCM, under a key derived (HKDF-SHA256) from the server secret.
-- **Bound to where they belong.** Each ciphertext is bound to its connection and field (`connection:<id>:api_key`), so it doesn't decrypt anywhere else.
+- **Bound to where they belong.** Each ciphertext is bound to what it belongs to (`credential:<id>:key`, `connection:<id>:headers`, `connection:<id>:proxy_url`), so it doesn't decrypt anywhere else.
 - **Format:** a version byte, a fresh 12-byte nonce, the tag, then the ciphertext.
 - **Only the main thread holds the secret.** The database workers only ever see ciphertext.
 - **The secret is automatic** (owner, 2026-10-10: setup must be trivial). It comes from `SECRET_KEY` or `SECRET_KEY_FILE` (a Docker secret) when set. Otherwise it's generated at first start into `DATA_DIR/secret.key`, mode 0600 (tightened if a restore loosened it), and never overwritten.
@@ -163,6 +164,7 @@ Migrations (`migrations.ts`) run in the writer through Effect's `SqliteMigrator`
   - `jobs`
 - `0003_draft_history` (§3.10), `0004_recycle_bin` (§3.11)
 - `0005_providers` (§3.12): `connections` and `models` in their final shape, and the `llm_requests` usage ledger
+- `0006_credentials` (§3.12): keys as credentials that connections reference, bound to hosts
 
 Conventions:
 - **Tables:** all `STRICT`, with JSON columns guarded by `json_valid` CHECKs and timestamps in epoch milliseconds.
@@ -347,16 +349,27 @@ Deleting is deliberate and fundamentally non-destructive (DESIGN §6.2): deletes
 
 The provider layer's storage (spec/PROVIDERS.md §2, §3.1, §9.1), in migration `0005_providers` (`db/schema/providers.ts`).
 
-**`connections`**: one provider kind, one wire API, one base URL and one key per row.
+**`credentials`** (migration `0006_credentials`): keys, each stored once and used by any number of connections.
+- **The columns:** `key_enc` (encrypted, bound to `credential:<id>:key`), `key_hint` (its last 4 characters), a name, and `origins_json`, the origins (scheme, host and port) the key may be sent to.
+- **The rule** (owner, 2026-10-11): a key is sent only to an origin its credential allows.
+  - The origins are recorded when the key is entered.
+  - Adding one takes the key typed again (`AllowCredentialHost`). The main thread checks it against the stored key with a constant-time comparison.
+  - Code acting as the user without knowing the key (a stolen session, an XSS, a plugin in the page) can edit connections, but can't redirect a key to a new host.
+  - Changing a path on the same host needs nothing.
+- **Why:** keys are money, so making them easy to steal makes the frontend worth attacking. ST is a target for exactly this reason.
+- **Switching it off** is possible only from outside the app: `KEY_HOST_BINDING=false`. Most settings are meant to be changeable from inside, including by the user's agent; security settings are the exception.
+- **Server-side code can still read keys** (spec/PLUGINS.md §6.1). This protects against everything that acts through the browser.
+
+**`connections`**: one provider kind, one wire API, one base URL, and at most one credential per row.
 - `kind` and `api` follow pi-ai's catalog, so the shared schema will validate them rather than a CHECK list.
-- **Secrets are columns of their own,** written encrypted:
-  - `api_key_enc`, with `key_hint` (its last 4 characters)
+- `credential_id` references the key the connection sends (`ON DELETE SET NULL`). The database allows only the connection owner's credentials.
+- **Other secrets are columns of their own,** written encrypted:
   - `headers_enc`, with only `header_names_json` in the clear, because header values often carry credentials
   - `proxy_url_enc`
 - **The database keeps them consistent:**
-  - a key always has a hint
   - `proxy_mode = 'custom'` always has a proxy URL, and the other modes never do
-  - a purged connection (`purged_at`) holds no key, headers, proxy or base URL; it stays as a tombstone so old messages and ledger rows still name their model
+  - a purged connection (`purged_at`) holds no credential, headers, proxy or base URL; it stays as a tombstone so old messages and ledger rows still name their model
+- **0005's per-connection key columns are retired.** `api_key_enc` and `key_hint` stay in the table, but triggers keep them empty. They go when migrations are squashed for the first release.
 - `deleted_at` and `bin_item_id` are for the recycle bin, whose `bin_items.kind` now includes `connection`. The table was rebuilt for that, keeping its rows.
 
 **`models`**: what the upstream reports (`upstream_json`, rewritten by every refresh) and what the user edited (`overrides_json`, never touched by a refresh) are separate columns, merged when read. A model the list stops reporting gets `missing_since` instead of being deleted. A model never moves to another connection or key.
@@ -373,10 +386,17 @@ The provider layer's storage (spec/PROVIDERS.md §2, §3.1, §9.1), in migration
 - **Connections:**
   - `CreateConnection`: the caller picks the id, since secrets are encrypted bound to it
   - `UpdateConnection`: with `expectedRowVersion`
-  - `SetConnectionKey`, `SetConnectionHeaders`, `SetConnectionProxy`
+  - `SetConnectionCredential`, `SetConnectionHeaders`, `SetConnectionProxy`
   - `DeleteConnection`: through the bin. A purge leaves the tombstone described above.
   - `ListConnections`, `GetConnection`: secrets appear only as `hasKey`, `keyHint` and header names
-  - `ResolveConnection`: the ciphertext, for the provider layer only
+  - `ResolveConnection`: the ciphertext and the credential's origins, for the provider layer only
+- **Credentials:**
+  - `CreateCredential`, `RenameCredential`
+  - `ReplaceCredentialKey`: updates every connection using it
+  - `AddCredentialOrigin`
+  - `DeleteCredential`: connections using it are left without a key
+  - `ListCredentials`: with how many connections use each
+  - `ResolveCredential`: the ciphertext, for checking a retyped key
 - **Models:**
   - `SyncFetchedModels`: adds new models, refreshes `upstream_json`, and marks unlisted ones missing. Models only ever added by hand are never marked.
   - `AddUserModel`
@@ -443,7 +463,9 @@ Not built yet: built-in login (PLAN phase 0), and per-user ownership checks, whi
 - **Catalogs** (`catalog.ts`) load per provider on first use.
 
 **Connections** (`Providers`):
-- `createConnection`, `setKey`, `setHeaders`, `setProxy`: these encrypt (§2, secrets) and call the storage operations (§3.12).
+- `createCredential`, `replaceCredentialKey` and `allowCredentialOrigin` (which checks the retyped key) handle credentials, and `setHeaders` and `setProxy` encrypt the other secrets (§2) before calling storage (§3.12).
+- `createConnection` and `setKey` accept a key typed for a connection: it becomes a credential named after the connection, bound to its origin.
+- **Before a request or a model-list fetch,** the connection's origin is checked against its credential, before the key is even decrypted. An origin the credential doesn't allow is `unusable`: "enter the key again to allow it", and nothing is sent.
 - `refreshModels` fetches the upstream's list (`modelLists.ts`; OpenAI-style, Anthropic and Google formats, decoded with Schema) and merges each model over pi's catalog. What the list reports wins: OpenRouter's context length, pricing, modalities and parameters, vLLM's `max_model_len`.
 - `testConnection` fetches the list and reports the route the request took.
 
@@ -503,7 +525,8 @@ It fails with a typed `ProviderError`.
 - a keyless local server
 
 **Client RPCs** (`api/providers.ts`, contract in `@rp/shared/api.ts`):
-- **Connections:** `ListConnections`, `CreateConnection`, `UpdateConnection`, `SetConnectionKey`, `SetConnectionHeaders`, `SetConnectionProxy`, `DeleteConnection`, `TestConnection`.
+- **Connections:** `ListConnections`, `CreateConnection` (with an existing credential or a typed key), `UpdateConnection`, `SetConnectionKey`, `SetConnectionCredential`, `SetConnectionHeaders`, `SetConnectionProxy`, `DeleteConnection`, `TestConnection`.
+- **Credentials:** `ListCredentials`, `CreateCredential`, `RenameCredential`, `ReplaceCredentialKey`, `AllowCredentialHost` (the key typed again), `DeleteCredential`.
 - **Models:** `RefreshModels`, `ListModels`, `AddUserModel`, `EditModel`, `SetModelHidden`.
 - **Network and usage:** `GetNetworkSettings`/`SetNetworkSettings` (admins only, otherwise `Forbidden`), and `ListLlmRequests`.
 - **Errors keep their tags** (`NotFound`, `StaleWrite`, `ModelKeyTaken`, `ProviderError`, `Forbidden`, from `@rp/shared/errors.ts`). Storage and worker failures are logged on the server and reach the client only as `ServerError`, including from the provider operations and network settings.

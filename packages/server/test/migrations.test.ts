@@ -9,7 +9,7 @@ import { SqlClient } from "effect/sql"
 import { writerConnection } from "../src/db/connection.ts"
 import { migrations } from "../src/db/migrations.ts"
 
-const { "0005_providers": _providers, ...beforeProviders } = migrations
+const { "0005_providers": _providers, "0006_credentials": _credentials, ...beforeProviders } = migrations
 
 describe("0005_providers", () => {
   it.effect("refuses to recreate connections that already hold rows", () =>
@@ -24,6 +24,25 @@ describe("0005_providers", () => {
       assert.isTrue(Exit.isFailure(exit))
       const kept = yield* sql<{ name: string }>`SELECT name FROM connections`
       assert.deepStrictEqual(kept, [{ name: "Kept" }])
+    }).pipe(Effect.provide(writerConnection(join(mkdtempSync(join(tmpdir(), "rp-mig-")), "db.sqlite"))))
+  )
+})
+
+describe("0006_credentials", () => {
+  const { "0006_credentials": _credentials, ...beforeCredentials } = migrations
+
+  it.effect("refuses to retire per-connection keys while a connection holds one", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(beforeCredentials) })
+      yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES ('u', 'u', 'u', 'admin', 1)`
+      yield* sql`INSERT INTO connections (id, owner_user_id, name, kind, api, api_key_enc, key_hint, created_at, updated_at)
+        VALUES ('c', 'u', 'Keyed', 'openai-chat', 'openai-completions', x'00', 'abcd', 1, 1)`
+
+      const exit = yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(migrations) }).pipe(Effect.exit)
+      assert.isTrue(Exit.isFailure(exit))
+      const kept = yield* sql<{ key_hint: string }>`SELECT key_hint FROM connections`
+      assert.deepStrictEqual(kept, [{ key_hint: "abcd" }])
     }).pipe(Effect.provide(writerConnection(join(mkdtempSync(join(tmpdir(), "rp-mig-")), "db.sqlite"))))
   )
 })

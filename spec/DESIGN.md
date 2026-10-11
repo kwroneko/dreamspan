@@ -392,6 +392,8 @@ These are strategies for mapping history to user and assistant roles:
 - **[P]** Model choice is a (connection, model) pair, inherited through the same kind of chain as presets but completely separate from them. The summarizer can have its own model.
 - **[P]** Several connections of the same type are allowed.
 - **[P]** API keys are write-only: stored on the server and never sent back to the browser.
+- **[D]** Keys are stored once as credentials that connections share, and are sent only to the hosts they were entered for. Moving a key to a new host takes typing it again. Keys are protected more than chats because they have economic value: easy key theft makes the frontend worth attacking, as with ST (owner, 2026-10-11).
+- **[D]** Most settings are configurable from inside the app, so the user's agent can change them. Security settings are the exception, changeable only from outside (environment or config); host binding for keys is the first (owner, 2026-10-11).
 - **[D]** A provider kind is an upstream API as that upstream defines it, endpoints included. The base URL moves the whole API; there are no per-endpoint URLs (owner, 2026-10-10).
 - **[D]** Day-one kinds include OpenAI Chat Completions and OpenAI Responses, Anthropic, and DeepSeek at minimum (its reasoning has agentic quirks). OpenAI Chat Completions is the default, listed first, then Anthropic (owner, 2026-10-10).
 - **[D]** The server secret that encrypts keys is generated automatically; setup must be trivial (owner, 2026-10-10).

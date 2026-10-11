@@ -2,7 +2,7 @@
 // connection so no application code is involved.
 import { DatabaseSync } from "node:sqlite"
 import { beforeEach, describe, expect, it } from "vitest"
-import { bin, dataModel, draftHistory, providers, users } from "../src/db/schema/index.ts"
+import { bin, credentials, dataModel, draftHistory, providers, users } from "../src/db/schema/index.ts"
 
 let db: DatabaseSync
 let n = 0
@@ -117,7 +117,8 @@ const addVersion = (
 beforeEach(() => {
   db = new DatabaseSync(":memory:")
   db.exec("PRAGMA foreign_keys = ON")
-  for (const statement of [...users, ...dataModel, ...draftHistory, ...bin, ...providers]) db.exec(statement)
+  for (const statement of [...users, ...dataModel, ...draftHistory, ...bin, ...providers, ...credentials])
+    db.exec(statement)
 })
 
 describe("graph shape", () => {
@@ -391,13 +392,37 @@ describe("connections and the usage ledger", () => {
 
   it("keeps a connection's secrets consistent", () => {
     const owner = user()
+    const stranger = user()
     const conn = connection(owner)
-    expect(() => run(`UPDATE connections SET api_key_enc = x'00' WHERE id = ?`, conn)).toThrow(/CHECK/)
-    run(`UPDATE connections SET api_key_enc = x'00', key_hint = 'abcd' WHERE id = ?`, conn)
+    const credential = (ownerId: string) => {
+      const credentialId = id("cred")
+      run(
+        `INSERT INTO credentials (id, owner_user_id, name, key_enc, key_hint, origins_json, created_at, updated_at)
+           VALUES (?, ?, 'Key', x'00', 'abcd', '[]', 1, 1)`,
+        credentialId,
+        ownerId
+      )
+      return credentialId
+    }
+    // Keys live in credentials; the retired per-connection columns stay empty.
+    expect(() => run(`UPDATE connections SET api_key_enc = x'00', key_hint = 'abcd' WHERE id = ?`, conn)).toThrow(
+      /credentials/
+    )
+    // A connection uses only its owner's credentials.
+    expect(() => run(`UPDATE connections SET credential_id = ? WHERE id = ?`, credential(stranger), conn)).toThrow(
+      /owner's credentials/
+    )
+    const own = credential(owner)
+    run(`UPDATE connections SET credential_id = ? WHERE id = ?`, own, conn)
     expect(() => run(`UPDATE connections SET proxy_mode = 'custom' WHERE id = ?`, conn)).toThrow(/CHECK/)
     // A purged connection keeps its row but none of its secrets.
-    expect(() => run(`UPDATE connections SET purged_at = 3 WHERE id = ?`, conn)).toThrow(/CHECK/)
-    run(`UPDATE connections SET purged_at = 3, api_key_enc = NULL, key_hint = NULL WHERE id = ?`, conn)
+    expect(() => run(`UPDATE connections SET purged_at = 3 WHERE id = ?`, conn)).toThrow(/credential/)
+    run(`UPDATE connections SET purged_at = 3, credential_id = NULL WHERE id = ?`, conn)
+    // Deleting a credential leaves the connections that used it without a key.
+    const other = connection(owner)
+    run(`UPDATE connections SET credential_id = ? WHERE id = ?`, own, other)
+    run(`DELETE FROM credentials WHERE id = ?`, own)
+    expect(get(`SELECT credential_id FROM connections WHERE id = ?`, other)).toEqual({ credential_id: null })
   })
 
   it("never moves a model to another connection", () => {

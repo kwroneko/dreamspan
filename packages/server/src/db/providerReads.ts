@@ -2,8 +2,14 @@
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { ConnectionForRequest, type ReadOps } from "./ops.ts"
+import type { CredentialId } from "@rp/shared/providers.ts"
 import {
+  connectionColumns,
+  connectionFrom,
   type ConnectionRow,
+  credentialColumns,
+  type CredentialRow,
+  toCredential,
   type LlmRequestRow,
   makeProviderQueries,
   type ModelRow,
@@ -15,12 +21,12 @@ import { query } from "./tx.ts"
 
 export const makeProviderReadHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
-  const { ownedConnection, ownedModel } = makeProviderQueries(sql)
+  const { ownedConnection, ownedModel, ownedCredential } = makeProviderQueries(sql)
 
   const handlers = {
     ListConnections: ({ userId }) =>
-      sql<ConnectionRow>`SELECT * FROM connections
-        WHERE owner_user_id = ${userId} AND deleted_at IS NULL AND purged_at IS NULL ORDER BY id`.pipe(
+      sql<ConnectionRow>`SELECT ${sql.literal(connectionColumns)} FROM ${sql.literal(connectionFrom)}
+        WHERE c.owner_user_id = ${userId} AND c.deleted_at IS NULL AND c.purged_at IS NULL ORDER BY c.id`.pipe(
         Effect.map((rows) => rows.map(toConnection)),
         query("ListConnections")
       ),
@@ -29,17 +35,38 @@ export const makeProviderReadHandlers = Effect.gen(function* () {
       ownedConnection(userId, connectionId).pipe(Effect.map(toConnection), query("GetConnection")),
 
     ResolveConnection: ({ userId, connectionId }) =>
-      ownedConnection(userId, connectionId).pipe(
-        Effect.map(
-          (row) =>
-            new ConnectionForRequest({
-              connection: toConnection(row),
-              apiKeyEnc: row.api_key_enc,
-              headersEnc: row.headers_enc,
-              proxyUrlEnc: row.proxy_url_enc
-            })
-        ),
-        query("ResolveConnection")
+      Effect.gen(function* () {
+        const row = yield* ownedConnection(userId, connectionId)
+        const [credential] =
+          row.credential_id === null
+            ? []
+            : yield* sql<{ id: string; key_enc: Uint8Array; origins_json: string }>`
+                SELECT id, key_enc, origins_json FROM credentials WHERE id = ${row.credential_id}`
+        return new ConnectionForRequest({
+          connection: toConnection(row),
+          credential: credential
+            ? {
+                id: credential.id as CredentialId,
+                keyEnc: credential.key_enc,
+                origins: JSON.parse(credential.origins_json) as Array<string>
+              }
+            : null,
+          headersEnc: row.headers_enc,
+          proxyUrlEnc: row.proxy_url_enc
+        })
+      }).pipe(query("ResolveConnection")),
+
+    ListCredentials: ({ userId }) =>
+      sql<CredentialRow>`SELECT ${sql.literal(credentialColumns)} FROM credentials cr
+        WHERE cr.owner_user_id = ${userId} ORDER BY cr.name, cr.id`.pipe(
+        Effect.map((rows) => rows.map(toCredential)),
+        query("ListCredentials")
+      ),
+
+    ResolveCredential: ({ userId, credentialId }) =>
+      ownedCredential(userId, credentialId).pipe(
+        Effect.map((row) => ({ credential: toCredential(row), keyEnc: row.key_enc })),
+        query("ResolveCredential")
       ),
 
     ListModels: ({ userId, connectionId, includeHidden }) =>

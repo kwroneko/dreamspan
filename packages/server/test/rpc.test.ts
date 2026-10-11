@@ -21,6 +21,7 @@ const testConfig = (overrides: Partial<AppConfigShape> = {}): AppConfigShape => 
   clientDist: join(tmpdir(), "rp-no-client"),
   secretKey: Option.none(),
   secretKeyFile: Option.none(),
+  keyHostBinding: true,
   ...overrides
 })
 
@@ -123,8 +124,20 @@ describe("rpc", () => {
         outcome(bob.TestConnection({ connectionId: created.id })),
         outcome(bob.RefreshModels({ connectionId: created.id })),
         outcome(bob.ListModels({ connectionId: created.id, includeHidden: true })),
-        outcome(bob.DeleteConnection({ connectionId: created.id }))
+        outcome(bob.DeleteConnection({ connectionId: created.id })),
+        outcome(bob.SetConnectionCredential({ connectionId: created.id, credentialId: null })),
+        outcome(bob.RenameCredential({ credentialId: created.credentialId!, name: "mine" })),
+        outcome(bob.ReplaceCredentialKey({ credentialId: created.credentialId!, apiKey: "sk-bob-key" })),
+        outcome(
+          bob.AllowCredentialHost({
+            credentialId: created.credentialId!,
+            apiKey: "sk-or-secret-value-4321",
+            url: "https://evil.example"
+          })
+        ),
+        outcome(bob.DeleteCredential({ credentialId: created.credentialId! }))
       ])
+      assert.deepStrictEqual(yield* bob.ListCredentials(), [])
       for (const result of outcomes) assert.oneOf(result, ["NotFound", "ProviderError:unusable"])
       assert.isTrue((yield* alice.ListConnections())[0]!.hasKey)
     }).pipe(Effect.scoped, withServer(config))

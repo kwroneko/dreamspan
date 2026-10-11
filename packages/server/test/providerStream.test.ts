@@ -19,8 +19,8 @@ import { priceCost } from "../src/providers/usage.ts"
 import { makeSecrets, Secrets } from "../src/secrets.ts"
 import { anthropicSse, completionChunks, json, sse, startMockProvider } from "./support/mockProvider.ts"
 
-const layer = () =>
-  Providers.layer({ maxRetries: 2, baseDelayMs: 5, maxDelayMs: 1_000 }).pipe(
+const layer = (bindKeysToOrigins = true) =>
+  Providers.layer({ retry: { maxRetries: 2, baseDelayMs: 5, maxDelayMs: 1_000 }, bindKeysToOrigins }).pipe(
     Layer.provideMerge(Network.layer),
     Layer.provideMerge(
       Database.layer({
@@ -804,7 +804,7 @@ describe("review regressions", () => {
         userId,
         kind: "google",
         settings: settings(""),
-        apiKey: "g-key-123456"
+        apiKey: null
       })
       const model = yield* writer.AddUserModel({ userId, connectionId: connection.id, key: "gemini-x", overrides: {} })
       const tested = yield* providers
@@ -911,6 +911,142 @@ describe("review regressions", () => {
       const set = yield* providers.setKey(userId, created.id, "  sk-padded-key  ")
       assert.strictEqual(set.keyHint, "-key")
     }).pipe(Effect.scoped, Effect.provide(layer()))
+  )
+})
+
+describe("keys bound to hosts", () => {
+  const listAndChat = (request: { path: string }, res: Parameters<typeof json>[0]) =>
+    request.path.endsWith("/models")
+      ? json(res, 200, openAiList([{ id: "m" }]))
+      : sse(res, completionChunks(["Ok."], { prompt_tokens: 5, completion_tokens: 2 }))
+
+  it.live("a key is never sent to a host it wasn't entered for, until it's typed again", () =>
+    Effect.gen(function* () {
+      const home = yield* mock(listAndChat)
+      const elsewhere = yield* mock(listAndChat)
+      const key = "sk-home-key-0123456789"
+      const { userId, connection, modelId, providers, writer } = yield* connect(
+        "openai-chat",
+        `${home.url}/v1`,
+        key,
+        "m"
+      )
+      assert.strictEqual(connection.credentialName, "Test")
+
+      // Something acting as the user points the connection elsewhere.
+      yield* writer.UpdateConnection({
+        userId,
+        connectionId: connection.id,
+        settings: settings(`${elsewhere.url}/v1`),
+        expectedRowVersion: connection.rowVersion
+      })
+      const send = collect(
+        providers.stream({
+          userId,
+          connectionId: connection.id,
+          modelId,
+          context,
+          attribution: { purpose: "generation" }
+        })
+      )
+      const refused = yield* send.pipe(Effect.flip, Effect.map(asProviderError))
+      assert.strictEqual(refused.reason, "unusable")
+      assert.include(refused.message, "enter the key again")
+      assert.isFalse(
+        (yield* providers.testConnection(userId, connection.id).pipe(Effect.flip, Effect.map(asProviderError)))
+          .afterTokens
+      )
+      assert.strictEqual(elsewhere.requests().length, 0, "the other host never saw a request")
+
+      // A wrong key doesn't unlock it; the right one does.
+      const wrong = yield* providers
+        .allowCredentialOrigin({
+          userId,
+          credentialId: connection.credentialId!,
+          apiKey: "sk-guess",
+          url: elsewhere.url
+        })
+        .pipe(Effect.flip, Effect.map(asProviderError))
+      assert.strictEqual(wrong.reason, "auth")
+      const allowed = yield* providers.allowCredentialOrigin({
+        userId,
+        credentialId: connection.credentialId!,
+        apiKey: ` ${key} `,
+        url: `${elsewhere.url}/v1`
+      })
+      assert.sameMembers([...allowed.origins], [home.url, elsewhere.url])
+      assert.strictEqual((yield* send).at(-1)!.type, "done")
+      assert.strictEqual(elsewhere.requests().at(-1)!.headers.authorization, `Bearer ${key}`)
+    }).pipe(Effect.scoped, Effect.provide(layer()))
+  )
+
+  it.live("one credential serves several connections, and replacing its key updates them all", () =>
+    Effect.gen(function* () {
+      const server = yield* mock(listAndChat)
+      const providers = yield* Providers.Providers
+      const writer = yield* Database.Writer
+      const userId = (yield* writer.EnsureUser({ handle: "ana", displayName: "Ana" })).id as UserId
+      const credential = yield* providers.createCredential({
+        userId,
+        name: "Gateway",
+        apiKey: "sk-first-key-1111",
+        urls: [`${server.url}/v1`]
+      })
+      const a = yield* providers.createConnection({
+        userId,
+        kind: "openai-chat",
+        settings: settings(`${server.url}/v1`),
+        credentialId: credential.id
+      })
+      const b = yield* providers.createConnection({
+        userId,
+        kind: "openrouter",
+        settings: settings(`${server.url}/api/v1`),
+        credentialId: credential.id
+      })
+      assert.strictEqual(a.keyHint, "1111")
+      assert.strictEqual(b.keyHint, "1111")
+      yield* providers.replaceCredentialKey(userId, credential.id, "sk-second-key-2222")
+      for (const connection of [a, b]) {
+        yield* providers.refreshModels(userId, connection.id)
+      }
+      const auths = server.requests().map((r) => r.headers.authorization)
+      assert.deepStrictEqual(auths, ["Bearer sk-second-key-2222", "Bearer sk-second-key-2222"])
+      // The path differs between the two connections; the origin is what's bound.
+      assert.deepStrictEqual(
+        [...(yield* (yield* Database.Reader).ListCredentials({ userId }))[0]!.origins],
+        [server.url]
+      )
+    }).pipe(Effect.scoped, Effect.provide(layer()))
+  )
+
+  it.live("can be switched off from outside the app", () =>
+    Effect.gen(function* () {
+      const home = yield* mock(listAndChat)
+      const elsewhere = yield* mock(listAndChat)
+      const { userId, connection, modelId, providers, writer } = yield* connect(
+        "openai-chat",
+        `${home.url}/v1`,
+        "sk-home-key-0123456789",
+        "m"
+      )
+      yield* writer.UpdateConnection({
+        userId,
+        connectionId: connection.id,
+        settings: settings(`${elsewhere.url}/v1`),
+        expectedRowVersion: connection.rowVersion
+      })
+      const events = yield* collect(
+        providers.stream({
+          userId,
+          connectionId: connection.id,
+          modelId,
+          context,
+          attribution: { purpose: "generation" }
+        })
+      )
+      assert.strictEqual(events.at(-1)!.type, "done")
+    }).pipe(Effect.scoped, Effect.provide(layer(false)))
   )
 })
 

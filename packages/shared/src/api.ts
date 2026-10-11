@@ -8,6 +8,8 @@ import {
   Connection,
   ConnectionId,
   ConnectionSettings,
+  Credential,
+  CredentialId,
   Model,
   ModelId,
   ModelOverrides,
@@ -68,8 +70,17 @@ export class AppApi extends RpcGroup.make(
   Rpc.make("Whoami", { success: User }),
   // --- Connections and models (spec/PROVIDERS.md §2, §3). Keys go in, never out.
   Rpc.make("ListConnections", { success: Schema.Array(Connection), error: ServerError }),
+  /**
+   * Uses an existing credential, or a key typed for it, which becomes a credential named
+   * after the connection and bound to its host.
+   */
   Rpc.make("CreateConnection", {
-    payload: { kind: ProviderKind, settings: ConnectionSettings, apiKey: Schema.NullOr(Schema.String) },
+    payload: {
+      kind: ProviderKind,
+      settings: ConnectionSettings,
+      apiKey: Schema.optionalKey(Schema.NullOr(Schema.String)),
+      credentialId: Schema.optionalKey(Schema.NullOr(CredentialId))
+    },
     success: Connection,
     error: Schema.Union([ProviderError, ServerError])
   }),
@@ -78,13 +89,49 @@ export class AppApi extends RpcGroup.make(
     success: Connection,
     error: Schema.Union([NotFound, StaleWrite, ServerError])
   }),
-  /** Sets or clears the API key. Nothing returns it: only its last 4 characters show. */
+  /**
+   * A key typed for a connection: a new credential bound to its host, or null for no key.
+   * Nothing returns a key: only its last 4 characters show.
+   */
   Rpc.make("SetConnectionKey", {
     payload: { connectionId: ConnectionId, apiKey: Schema.NullOr(Schema.String) },
     success: Connection,
     error: Schema.Union([ProviderError, ServerError])
   }),
   /** Replaces the custom headers. Only their names ever come back. */
+  Rpc.make("SetConnectionCredential", {
+    payload: { connectionId: ConnectionId, credentialId: Schema.NullOr(CredentialId) },
+    success: Connection,
+    error: Schema.Union([NotFound, ServerError])
+  }),
+  // --- Credentials (spec/PROVIDERS.md §5): keys stored once, sent only to their hosts.
+  Rpc.make("ListCredentials", { success: Schema.Array(Credential), error: ServerError }),
+  Rpc.make("CreateCredential", {
+    payload: { name: Schema.String, apiKey: Schema.String, urls: Schema.Array(Schema.String) },
+    success: Credential,
+    error: Schema.Union([ProviderError, ServerError])
+  }),
+  Rpc.make("RenameCredential", {
+    payload: { credentialId: CredentialId, name: Schema.String },
+    success: Credential,
+    error: Schema.Union([NotFound, ServerError])
+  }),
+  Rpc.make("ReplaceCredentialKey", {
+    payload: { credentialId: CredentialId, apiKey: Schema.String },
+    success: Credential,
+    error: Schema.Union([ProviderError, ServerError])
+  }),
+  /** Lets a key be sent to another host. Takes the key typed again. */
+  Rpc.make("AllowCredentialHost", {
+    payload: { credentialId: CredentialId, apiKey: Schema.String, url: Schema.String },
+    success: Credential,
+    error: Schema.Union([ProviderError, ServerError])
+  }),
+  Rpc.make("DeleteCredential", {
+    payload: { credentialId: CredentialId },
+    success: Schema.Void,
+    error: Schema.Union([NotFound, ServerError])
+  }),
   Rpc.make("SetConnectionHeaders", {
     payload: { connectionId: ConnectionId, headers: Schema.NullOr(Schema.Record(Schema.String, Schema.String)) },
     success: Connection,

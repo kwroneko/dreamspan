@@ -24,6 +24,8 @@ import {
   Connection,
   ConnectionId,
   ConnectionSettings,
+  Credential,
+  CredentialId,
   Model,
   ModelId,
   ModelOverrides,
@@ -112,7 +114,10 @@ const EncryptedHeaders = Schema.Struct({ enc: Schema.Uint8Array, names: Schema.A
  */
 export class ConnectionForRequest extends Schema.Class<ConnectionForRequest>("ConnectionForRequest")({
   connection: Connection,
-  apiKeyEnc: Schema.NullOr(Schema.Uint8Array),
+  /** The credential's key and the origins it may be sent to. */
+  credential: Schema.NullOr(
+    Schema.Struct({ id: CredentialId, keyEnc: Schema.Uint8Array, origins: Schema.Array(Schema.String) })
+  ),
   headersEnc: Schema.NullOr(Schema.Uint8Array),
   proxyUrlEnc: Schema.NullOr(Schema.Uint8Array)
 }) {}
@@ -385,7 +390,7 @@ export class WriteOps extends RpcGroup.make(
       connectionId: ConnectionId,
       kind: ProviderKind,
       settings: ConnectionSettings,
-      key: Schema.NullOr(EncryptedKey)
+      credentialId: Schema.NullOr(CredentialId)
     },
     success: Connection,
     error: Schema.Union([NotFound, StorageError])
@@ -400,10 +405,45 @@ export class WriteOps extends RpcGroup.make(
     success: Connection,
     error: Schema.Union([NotFound, StaleWrite, StorageError])
   }),
-  /** Sets or clears (null) the API key. Nothing ever reads it back out to a client. */
-  Rpc.make("SetConnectionKey", {
-    payload: { userId: UserId, connectionId: ConnectionId, key: Schema.NullOr(EncryptedKey) },
+  /** Which credential the connection uses, or none. */
+  Rpc.make("SetConnectionCredential", {
+    payload: { userId: UserId, connectionId: ConnectionId, credentialId: Schema.NullOr(CredentialId) },
     success: Connection,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  // --- Credentials (PROVIDERS §5): keys stored once, bound to origins. The key arrives
+  // encrypted; the main thread checks a retyped key before an origin is added.
+  Rpc.make("CreateCredential", {
+    payload: {
+      userId: UserId,
+      credentialId: CredentialId,
+      name: Schema.String,
+      key: EncryptedKey,
+      origins: Schema.Array(Schema.String)
+    },
+    success: Credential,
+    error: StorageError
+  }),
+  Rpc.make("RenameCredential", {
+    payload: { userId: UserId, credentialId: CredentialId, name: Schema.String },
+    success: Credential,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** A new key for the same credential: every connection using it gets the new one. */
+  Rpc.make("ReplaceCredentialKey", {
+    payload: { userId: UserId, credentialId: CredentialId, key: EncryptedKey },
+    success: Credential,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  Rpc.make("AddCredentialOrigin", {
+    payload: { userId: UserId, credentialId: CredentialId, origin: Schema.String },
+    success: Credential,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** Deletes a credential; connections using it are left without a key. */
+  Rpc.make("DeleteCredential", {
+    payload: { userId: UserId, credentialId: CredentialId },
+    success: Schema.Void,
     error: Schema.Union([NotFound, StorageError])
   }),
   Rpc.make("SetConnectionHeaders", {
@@ -681,6 +721,17 @@ export class ReadOps extends RpcGroup.make(
   Rpc.make("GetConnection", {
     payload: { userId: UserId, connectionId: ConnectionId },
     success: Connection,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  Rpc.make("ListCredentials", {
+    payload: { userId: UserId },
+    success: Schema.Array(Credential),
+    error: StorageError
+  }),
+  /** For the provider layer only: a credential's encrypted key, to check a retyped one. */
+  Rpc.make("ResolveCredential", {
+    payload: { userId: UserId, credentialId: CredentialId },
+    success: Schema.Struct({ credential: Credential, keyEnc: Schema.Uint8Array }),
     error: Schema.Union([NotFound, StorageError])
   }),
   /** For the provider layer only: the connection with its encrypted secrets. */

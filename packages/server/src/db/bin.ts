@@ -371,7 +371,7 @@ export const makeBin = (sql: SqlClient.SqlClient, limits: BinLimits) => {
         case "connection":
           // A tombstone without secrets: old messages and ledger rows still name their
           // model (PROVIDERS §10).
-          yield* sql`UPDATE connections SET purged_at = ${Date.now()}, api_key_enc = NULL, key_hint = NULL,
+          yield* sql`UPDATE connections SET purged_at = ${Date.now()}, credential_id = NULL,
                        headers_enc = NULL, header_names_json = '[]', proxy_mode = 'inherit', proxy_url_enc = NULL,
                        base_url = NULL
                      WHERE id = ${item.target_id}`

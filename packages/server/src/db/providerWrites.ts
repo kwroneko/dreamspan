@@ -6,7 +6,18 @@ import type { UserId } from "@rp/shared/domain.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { ModelKeyTaken, NotFound, StaleWrite, WriteOps } from "./ops.ts"
-import { type ConnectionRow, makeProviderQueries, type ModelRow, toConnection, toModel } from "./providers.ts"
+import {
+  connectionColumns,
+  connectionFrom,
+  type ConnectionRow,
+  credentialColumns,
+  type CredentialRow,
+  makeProviderQueries,
+  type ModelRow,
+  toConnection,
+  toCredential,
+  toModel
+} from "./providers.ts"
 import { transaction } from "./tx.ts"
 
 const settingsColumns = (settings: ConnectionSettings) => ({
@@ -20,10 +31,19 @@ const settingsColumns = (settings: ConnectionSettings) => ({
 
 export const makeProviderWriteHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
-  const { ownedConnection, ownedModel } = makeProviderQueries(sql)
+  const { ownedConnection, ownedModel, ownedCredential } = makeProviderQueries(sql)
 
   const reloadConnection = (id: string) =>
-    sql<ConnectionRow>`SELECT * FROM connections WHERE id = ${id}`.pipe(Effect.map(([row]) => toConnection(row!)))
+    sql<ConnectionRow>`SELECT ${sql.literal(connectionColumns)} FROM ${sql.literal(connectionFrom)} WHERE c.id = ${id}`.pipe(
+      Effect.map(([row]) => toConnection(row!))
+    )
+  const reloadCredential = (id: string) =>
+    sql<CredentialRow>`SELECT ${sql.literal(credentialColumns)} FROM credentials cr WHERE cr.id = ${id}`.pipe(
+      Effect.map(([row]) => toCredential(row!))
+    )
+  /** A credential that exists and is the user's, or NotFound. */
+  const checkCredential = (userId: UserId, credentialId: string | null) =>
+    credentialId === null ? Effect.void : Effect.asVoid(ownedCredential(userId, credentialId))
   const reloadModel = (id: string) =>
     sql<ModelRow>`SELECT * FROM models WHERE id = ${id}`.pipe(Effect.map(([row]) => toModel(row!)))
 
@@ -60,9 +80,10 @@ export const makeProviderWriteHandlers = Effect.gen(function* () {
     })
 
   const handlers = {
-    CreateConnection: ({ userId, connectionId, kind, settings, key }) =>
+    CreateConnection: ({ userId, connectionId, kind, settings, credentialId }) =>
       Effect.gen(function* () {
         yield* checkPresetRef(userId, settings.presetOverrideRefId)
+        yield* checkCredential(userId, credentialId)
         const now = Date.now()
         yield* sql`INSERT INTO connections ${sql.insert({
           id: connectionId,
@@ -70,8 +91,7 @@ export const makeProviderWriteHandlers = Effect.gen(function* () {
           kind,
           api: providerKinds[kind].api,
           ...settingsColumns(settings),
-          api_key_enc: key?.enc ?? null,
-          key_hint: key?.hint ?? null,
+          credential_id: credentialId,
           created_at: now,
           updated_at: now
         })}`
@@ -96,10 +116,62 @@ export const makeProviderWriteHandlers = Effect.gen(function* () {
         return yield* reloadConnection(connectionId)
       }).pipe(transaction(sql, "UpdateConnection")),
 
-    SetConnectionKey: ({ userId, connectionId, key }) =>
-      setSecrets(userId, connectionId, { api_key_enc: key?.enc ?? null, key_hint: key?.hint ?? null }).pipe(
-        transaction(sql, "SetConnectionKey")
-      ),
+    SetConnectionCredential: ({ userId, connectionId, credentialId }) =>
+      Effect.gen(function* () {
+        yield* checkCredential(userId, credentialId)
+        return yield* setSecrets(userId, connectionId, { credential_id: credentialId })
+      }).pipe(transaction(sql, "SetConnectionCredential")),
+
+    CreateCredential: ({ userId, credentialId, name, key, origins }) =>
+      Effect.gen(function* () {
+        const now = Date.now()
+        yield* sql`INSERT INTO credentials ${sql.insert({
+          id: credentialId,
+          owner_user_id: userId,
+          name,
+          key_enc: key.enc,
+          key_hint: key.hint,
+          origins_json: JSON.stringify([...new Set(origins)]),
+          created_at: now,
+          updated_at: now
+        })}`
+        return yield* reloadCredential(credentialId)
+      }).pipe(transaction(sql, "CreateCredential")),
+
+    RenameCredential: ({ userId, credentialId, name }) =>
+      Effect.gen(function* () {
+        yield* ownedCredential(userId, credentialId)
+        yield* sql`UPDATE credentials SET name = ${name}, updated_at = ${Date.now()}, row_version = row_version + 1
+                   WHERE id = ${credentialId}`
+        return yield* reloadCredential(credentialId)
+      }).pipe(transaction(sql, "RenameCredential")),
+
+    ReplaceCredentialKey: ({ userId, credentialId, key }) =>
+      Effect.gen(function* () {
+        yield* ownedCredential(userId, credentialId)
+        yield* sql`UPDATE credentials SET key_enc = ${key.enc}, key_hint = ${key.hint}, updated_at = ${Date.now()},
+                     row_version = row_version + 1
+                   WHERE id = ${credentialId}`
+        return yield* reloadCredential(credentialId)
+      }).pipe(transaction(sql, "ReplaceCredentialKey")),
+
+    AddCredentialOrigin: ({ userId, credentialId, origin }) =>
+      Effect.gen(function* () {
+        const row = yield* ownedCredential(userId, credentialId)
+        const origins = new Set(JSON.parse(row.origins_json) as Array<string>)
+        origins.add(origin)
+        yield* sql`UPDATE credentials SET origins_json = ${JSON.stringify([...origins])}, updated_at = ${Date.now()},
+                     row_version = row_version + 1
+                   WHERE id = ${credentialId}`
+        return yield* reloadCredential(credentialId)
+      }).pipe(transaction(sql, "AddCredentialOrigin")),
+
+    DeleteCredential: ({ userId, credentialId }) =>
+      Effect.gen(function* () {
+        yield* ownedCredential(userId, credentialId)
+        // Connections using it are left without a key (ON DELETE SET NULL).
+        yield* sql`DELETE FROM credentials WHERE id = ${credentialId}`
+      }).pipe(transaction(sql, "DeleteCredential")),
 
     SetConnectionHeaders: ({ userId, connectionId, headers }) =>
       setSecrets(userId, connectionId, {

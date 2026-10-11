@@ -163,7 +163,10 @@ Plugins attach metadata without changing the kernel's formats:
 
 **So the fix is worth something only against a stolen session and an XSS,** plus in-page plugins that don't bother to escalate. It does nothing against server plugins, which remain full access by design. Its benefit is real but modest, so its cost in annoyance has to be small.
 
-**[P] A less annoying shape: stored credentials bound to an origin**, instead of clearing keys on edit. It also addresses the other annoyance, re-pasting the same key for a second endpoint on the same platform:
+**[D] Decided and built (owner, 2026-10-11; ARCHITECTURE.md §3.12):** credentials bound to hosts, on by default, switchable only from outside the app (`KEY_HOST_BINDING`). Keys get more protection than chats because they're money, and easy key theft is what makes a frontend worth attacking.
+
+**The design as proposed:**
+, instead of clearing keys on edit. It also addresses the other annoyance, re-pasting the same key for a second endpoint on the same platform:
 - **A key is stored once, as a named credential** (for example "OpenRouter" with hint `…4321`). Connections reference a credential instead of holding their own key.
   - A second connection on the same platform picks the existing credential from a list, so there's nothing to copy.
   - Replacing a key once updates every connection that uses it.
@@ -215,7 +218,6 @@ The rule that protects the main objective: a registry is added when a core featu
 - **Namespaced chat state keys,** before the first extension needs them (`@rp/shared/state.ts` is a closed union today).
 - **Library documents keep `extensions` as a namespaced object,** matching the card spec, when the importers are built.
 - **The CSP restricts `connect-src` to our origin** from the first client release.
-- **The key decision in §6.1:** origin-bound credentials, or no fix. Cheapest to change before real keys are stored.
 
 ## 9. Later: review, authoring and the public registry
 
@@ -233,9 +235,8 @@ Written down now, built after the product works (owner, 2026-10-11):
 
 ## 10. Open questions
 
-1. Key redirection (§6.1): origin-bound credentials, which also remove the re-pasting, or accept the gap?
-2. Applying updates to an enabled plugin: always prompt, prompt with "allow for this session", or a per-plugin "trusted" setting (§5)?
-3. Declared surfaces: keep them as information for honest plugins, or drop them (§5)?
-4. The sandboxed plugin type: its sandbox technology and hook set, when it's built (§5).
-5. How far client overrides go: slots and registries only, or replacing any `ui/` component by id (§3.4)?
-6. Git: the `git` binary or a library (§4)?
+1. Applying updates to an enabled plugin: always prompt, prompt with "allow for this session", or a per-plugin "trusted" setting (§5)?
+2. Declared surfaces: keep them as information for honest plugins, or drop them (§5)?
+3. The sandboxed plugin type: its sandbox technology and hook set, when it's built (§5).
+4. How far client overrides go: slots and registries only, or replacing any `ui/` component by id (§3.4)?
+5. Git: the `git` binary or a library (§4)?

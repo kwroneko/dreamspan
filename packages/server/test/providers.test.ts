@@ -5,7 +5,7 @@ import { join } from "node:path"
 import { assert, describe, it } from "@effect/vitest"
 import type { UserId } from "@rp/shared/domain.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
-import { type ConnectionId, type ConnectionSettings, resolveModel } from "@rp/shared/providers.ts"
+import { type ConnectionId, type ConnectionSettings, type CredentialId, resolveModel } from "@rp/shared/providers.ts"
 import { type LlmRequest, type LlmRequestId, unknownCounts } from "@rp/shared/usage.ts"
 import { Effect, Exit } from "effect"
 import * as Database from "../src/db/Database.ts"
@@ -40,7 +40,7 @@ const setup = Effect.gen(function* () {
       connectionId: uuidv7() as ConnectionId,
       kind: "openai-chat",
       settings: settings(name),
-      key: null
+      credentialId: null
     })
   return { writer, reader, ana, bo, create }
 })
@@ -67,7 +67,10 @@ describe("connections", () => {
       yield* fails(reader.GetConnection({ userId: bo, connectionId: conn.id }), "NotFound")
       yield* fails(reader.ResolveConnection({ userId: bo, connectionId: conn.id }), "NotFound")
       yield* fails(reader.ListModels({ userId: bo, connectionId: conn.id, includeHidden: true }), "NotFound")
-      yield* fails(writer.SetConnectionKey({ userId: bo, connectionId: conn.id, key: null }), "NotFound")
+      yield* fails(
+        writer.SetConnectionCredential({ userId: bo, connectionId: conn.id, credentialId: null }),
+        "NotFound"
+      )
       yield* fails(
         writer.UpdateConnection({ userId: bo, connectionId: conn.id, settings: settings("x"), expectedRowVersion: 1 }),
         "NotFound"
@@ -88,17 +91,69 @@ describe("connections", () => {
     }).pipe(Effect.provide(database()))
   )
 
+  it.effect("credentials are their owner's alone", () =>
+    Effect.gen(function* () {
+      const { writer, reader, ana, bo, create } = yield* setup
+      const credential = yield* writer.CreateCredential({
+        userId: ana,
+        credentialId: uuidv7() as CredentialId,
+        name: "Ana's key",
+        key: { enc: bytes("x"), hint: "abcd" },
+        origins: []
+      })
+      const bos = yield* create(bo)
+      assert.deepStrictEqual(yield* reader.ListCredentials({ userId: bo }), [])
+      yield* fails(reader.ResolveCredential({ userId: bo, credentialId: credential.id }), "NotFound")
+      yield* fails(
+        writer.SetConnectionCredential({ userId: bo, connectionId: bos.id, credentialId: credential.id }),
+        "NotFound"
+      )
+      yield* fails(
+        writer.CreateConnection({
+          userId: bo,
+          connectionId: uuidv7() as ConnectionId,
+          kind: "openai-chat",
+          settings: settings("Bo's"),
+          credentialId: credential.id
+        }),
+        "NotFound"
+      )
+      yield* fails(writer.RenameCredential({ userId: bo, credentialId: credential.id, name: "mine" }), "NotFound")
+      yield* fails(
+        writer.ReplaceCredentialKey({
+          userId: bo,
+          credentialId: credential.id,
+          key: { enc: bytes("y"), hint: "efgh" }
+        }),
+        "NotFound"
+      )
+      yield* fails(
+        writer.AddCredentialOrigin({ userId: bo, credentialId: credential.id, origin: "https://evil.example" }),
+        "NotFound"
+      )
+      yield* fails(writer.DeleteCredential({ userId: bo, credentialId: credential.id }), "NotFound")
+    }).pipe(Effect.provide(database()))
+  )
+
   it.effect("keep secrets write-only: only a hint and header names come back", () =>
     Effect.gen(function* () {
       const { writer, reader, ana, create } = yield* setup
       const conn = yield* create(ana)
-      const keyed = yield* writer.SetConnectionKey({
+      const credential = yield* writer.CreateCredential({
+        userId: ana,
+        credentialId: uuidv7() as CredentialId,
+        name: "Local key",
+        key: { enc: bytes("ciphertext"), hint: "1234" },
+        origins: ["http://127.0.0.1:8081"]
+      })
+      const keyed = yield* writer.SetConnectionCredential({
         userId: ana,
         connectionId: conn.id,
-        key: { enc: bytes("ciphertext"), hint: "1234" }
+        credentialId: credential.id
       })
       assert.isTrue(keyed.hasKey)
       assert.strictEqual(keyed.keyHint, "1234")
+      assert.strictEqual(keyed.credentialName, "Local key")
       assert.strictEqual(keyed.rowVersion, conn.rowVersion + 1)
       const headed = yield* writer.SetConnectionHeaders({
         userId: ana,
@@ -110,8 +165,10 @@ describe("connections", () => {
       assert.notInclude(listed, "ciphertext")
       // The provider layer gets the ciphertext, to decrypt on the main thread.
       const resolved = yield* reader.ResolveConnection({ userId: ana, connectionId: conn.id })
-      assert.strictEqual(new TextDecoder().decode(resolved.apiKeyEnc!), "ciphertext")
-      const cleared = yield* writer.SetConnectionKey({ userId: ana, connectionId: conn.id, key: null })
+      assert.strictEqual(new TextDecoder().decode(resolved.credential!.keyEnc), "ciphertext")
+      assert.deepStrictEqual(resolved.credential!.origins, ["http://127.0.0.1:8081"])
+      assert.notInclude(JSON.stringify(yield* reader.ListCredentials({ userId: ana })), "ciphertext")
+      const cleared = yield* writer.SetConnectionCredential({ userId: ana, connectionId: conn.id, credentialId: null })
       assert.isFalse(cleared.hasKey)
       assert.isNull(cleared.keyHint)
     }).pipe(Effect.provide(database()))
@@ -161,7 +218,14 @@ describe("connections", () => {
     Effect.gen(function* () {
       const { writer, reader, ana, create } = yield* setup
       const conn = yield* create(ana)
-      yield* writer.SetConnectionKey({ userId: ana, connectionId: conn.id, key: { enc: bytes("k"), hint: "abcd" } })
+      const credential = yield* writer.CreateCredential({
+        userId: ana,
+        credentialId: uuidv7() as CredentialId,
+        name: "k",
+        key: { enc: bytes("k"), hint: "abcd" },
+        origins: []
+      })
+      yield* writer.SetConnectionCredential({ userId: ana, connectionId: conn.id, credentialId: credential.id })
       const item = yield* writer.DeleteConnection({ userId: ana, connectionId: conn.id })
       assert.strictEqual(item.kind, "connection")
       assert.strictEqual(item.title, "Local")
@@ -197,7 +261,7 @@ describe("review regressions", () => {
           connectionId: uuidv7() as ConnectionId,
           kind: "openai-chat",
           settings: borrowed,
-          key: null
+          credentialId: null
         }),
         "NotFound"
       )
@@ -208,7 +272,7 @@ describe("review regressions", () => {
           connectionId: uuidv7() as ConnectionId,
           kind: "openai-chat",
           settings: { ...borrowed, presetOverrideRefId: preset.ref.id.replace(/.$/, "0") as typeof preset.ref.id },
-          key: null
+          credentialId: null
         }),
         "NotFound"
       )
@@ -228,7 +292,7 @@ describe("review regressions", () => {
         connectionId: uuidv7() as ConnectionId,
         kind: "openai-chat",
         settings: { ...settings("Ana's"), presetOverrideRefId: preset.ref.id },
-        key: null
+        credentialId: null
       })
       assert.strictEqual(anas.presetOverrideRefId, preset.ref.id)
     }).pipe(Effect.provide(database()))

@@ -7,6 +7,8 @@ import {
   Compat,
   Connection,
   type ConnectionId,
+  Credential,
+  type CredentialId,
   Model,
   type ModelId,
   ModelOverrides,
@@ -33,8 +35,10 @@ export interface ConnectionRow {
   readonly kind: ProviderKind
   readonly api: WireApi
   readonly base_url: string | null
-  readonly api_key_enc: Uint8Array | null
-  readonly key_hint: string | null
+  readonly credential_id: string | null
+  /** Joined from the credential (connectionColumns). */
+  readonly credential_name: string | null
+  readonly credential_hint: string | null
   readonly headers_enc: Uint8Array | null
   readonly header_names_json: string
   readonly compat_json: string
@@ -60,14 +64,50 @@ export const toConnection = (row: ConnectionRow) =>
     kind: row.kind,
     api: row.api,
     baseUrl: row.base_url,
-    hasKey: row.api_key_enc !== null,
-    keyHint: row.key_hint,
+    credentialId: row.credential_id as CredentialId | null,
+    credentialName: row.credential_name,
+    hasKey: row.credential_id !== null,
+    keyHint: row.credential_hint,
     headerNames: decodeNames(JSON.parse(row.header_names_json)),
     compat: decodeCompat(JSON.parse(row.compat_json)),
     cacheTtlS: row.cache_ttl_s,
     maxConcurrent: row.max_concurrent,
     proxyMode: row.proxy_mode,
     presetOverrideRefId: row.preset_override_ref_id as RefId | null,
+    rowVersion: row.row_version,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  })
+
+/** Connection columns with the credential's name and hint joined in; alias the table `c`. */
+export const connectionColumns = `c.*, cr.name AS credential_name, cr.key_hint AS credential_hint`
+export const connectionFrom = `connections c LEFT JOIN credentials cr ON cr.id = c.credential_id`
+
+export interface CredentialRow {
+  readonly id: string
+  readonly owner_user_id: string
+  readonly name: string
+  readonly key_enc: Uint8Array
+  readonly key_hint: string
+  readonly origins_json: string
+  readonly row_version: number
+  readonly created_at: number
+  readonly updated_at: number
+  /** Joined (credentialColumns). */
+  readonly used_by: number
+}
+
+/** Credential columns with the count of live connections using it; alias the table `cr`. */
+export const credentialColumns = `cr.*, (SELECT count(*) FROM connections c
+  WHERE c.credential_id = cr.id AND c.deleted_at IS NULL AND c.purged_at IS NULL) AS used_by`
+
+export const toCredential = (row: CredentialRow) =>
+  new Credential({
+    id: row.id as CredentialId,
+    name: row.name,
+    keyHint: row.key_hint,
+    origins: decodeNames(JSON.parse(row.origins_json)),
+    usedBy: row.used_by,
     rowVersion: row.row_version,
     createdAt: row.created_at,
     updatedAt: row.updated_at
@@ -169,8 +209,8 @@ export const toLlmRequest = (row: LlmRequestRow) =>
  */
 export const makeProviderQueries = (sql: SqlClient.SqlClient) => {
   const ownedConnection = (userId: UserId, connectionId: string) =>
-    sql<ConnectionRow>`SELECT * FROM connections
-      WHERE id = ${connectionId} AND owner_user_id = ${userId} AND deleted_at IS NULL AND purged_at IS NULL`.pipe(
+    sql<ConnectionRow>`SELECT ${sql.literal(connectionColumns)} FROM ${sql.literal(connectionFrom)}
+      WHERE c.id = ${connectionId} AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL AND c.purged_at IS NULL`.pipe(
       Effect.flatMap(([row]) =>
         row ? Effect.succeed(row) : Effect.fail(new NotFound({ entity: "connection", id: connectionId }))
       )
@@ -184,5 +224,13 @@ export const makeProviderQueries = (sql: SqlClient.SqlClient) => {
       )
     )
 
-  return { ownedConnection, ownedModel }
+  const ownedCredential = (userId: UserId, credentialId: string) =>
+    sql<CredentialRow>`SELECT ${sql.literal(credentialColumns)} FROM credentials cr
+      WHERE cr.id = ${credentialId} AND cr.owner_user_id = ${userId}`.pipe(
+      Effect.flatMap(([row]) =>
+        row ? Effect.succeed(row) : Effect.fail(new NotFound({ entity: "credential", id: credentialId }))
+      )
+    )
+
+  return { ownedConnection, ownedModel, ownedCredential }
 }

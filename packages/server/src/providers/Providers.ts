@@ -24,16 +24,20 @@ import {
   type Connection,
   type ConnectionId,
   type ConnectionSettings,
+  type Credential,
+  type CredentialId,
   type EffectiveModel,
   type Model,
   type ModelId,
   type ProviderKind,
   type ProxyMode,
+  originOf,
   providerKinds,
   resolveModel,
   type WireApi
 } from "@rp/shared/providers.ts"
 import type { Cost, LlmRequestId, RequestPurpose, TokenCounts } from "@rp/shared/usage.ts"
+import { createHash, timingSafeEqual } from "node:crypto"
 import { ServerError } from "@rp/shared/errors.ts"
 import { Cause, Context, Effect, Exit, Layer, Queue, Semaphore, Stream } from "effect"
 import { Reader, Writer } from "../db/Database.ts"
@@ -154,16 +158,58 @@ const proxySecrets = (url: string | null) => {
   }
 }
 
-const binding = (connectionId: string, field: "api_key" | "headers" | "proxy_url") =>
-  `connection:${connectionId}:${field}`
+const binding = (connectionId: string, field: "headers" | "proxy_url") => `connection:${connectionId}:${field}`
+const credentialBinding = (credentialId: string) => `credential:${credentialId}:key`
+
+/** Compares two keys without leaking where they differ through timing. */
+const sameKey = (a: string, b: string) =>
+  timingSafeEqual(createHash("sha256").update(a).digest(), createHash("sha256").update(b).digest())
+
+export interface ProvidersOptions {
+  readonly retry?: RetryPolicy
+  /**
+   * Keys are sent only to the origins their credential allows (PLUGINS.md §6.1). On by
+   * default, and switchable only outside the app (KEY_HOST_BINDING), never from the
+   * app or its agent (owner, 2026-10-11).
+   */
+  readonly bindKeysToOrigins?: boolean
+}
 
 export interface ProvidersShape {
+  /**
+   * A new connection, using an existing credential or a key typed for it. A typed key
+   * becomes a credential named after the connection, bound to its origin.
+   */
   readonly createConnection: (input: {
     readonly userId: UserId
     readonly kind: ProviderKind
     readonly settings: ConnectionSettings
-    readonly apiKey: string | null
+    readonly apiKey?: string | null
+    readonly credentialId?: CredentialId | null
   }) => Effect.Effect<Connection, ProviderError | ServerError>
+  /** A credential: a key stored once, sent only to the origins of `urls`. */
+  readonly createCredential: (input: {
+    readonly userId: UserId
+    readonly name: string
+    readonly apiKey: string
+    readonly urls: ReadonlyArray<string>
+  }) => Effect.Effect<Credential, ProviderError | ServerError>
+  readonly replaceCredentialKey: (
+    userId: UserId,
+    credentialId: CredentialId,
+    apiKey: string
+  ) => Effect.Effect<Credential, ProviderError | ServerError>
+  /**
+   * Allows a credential's key to be sent to another origin. Takes the key typed again:
+   * something acting as the user without knowing the key can't redirect it.
+   */
+  readonly allowCredentialOrigin: (input: {
+    readonly userId: UserId
+    readonly credentialId: CredentialId
+    readonly apiKey: string
+    readonly url: string
+  }) => Effect.Effect<Credential, ProviderError | ServerError>
+  /** A key typed for a connection: a new credential bound to its origin, or null for none. */
   readonly setKey: (
     userId: UserId,
     connectionId: ConnectionId,
@@ -262,7 +308,7 @@ const buildPiModel = async (prepared: Prepared, model: Model, effective: Effecti
   } as PiModel<Api>
 }
 
-export const layer = (policy: RetryPolicy = defaultRetryPolicy) =>
+export const layer = (options: ProvidersOptions = {}) =>
   Layer.effect(
     Providers,
     Effect.gen(function* () {
@@ -270,24 +316,38 @@ export const layer = (policy: RetryPolicy = defaultRetryPolicy) =>
       const writer = yield* Writer
       const secrets = yield* Secrets
       const network = yield* Network
+      const policy = options.retry ?? defaultRetryPolicy
+      const bindKeysToOrigins = options.bindKeysToOrigins ?? true
 
       const prepare = (userId: UserId, connectionId: ConnectionId) =>
         Effect.gen(function* () {
           const resolved = yield* fromStorage(reader.ResolveConnection({ userId, connectionId }))
           const connection = resolved.connection
           const info = providerKinds[connection.kind]
-          const decrypt = (blob: Uint8Array | null, field: "api_key" | "headers" | "proxy_url") =>
+          const decryptWith = (blob: Uint8Array | null, bound: string) =>
             blob === null
               ? Effect.succeed(null)
-              : secrets
-                  .decrypt(blob, binding(connectionId, field))
-                  .pipe(Effect.mapError((error) => providerError("unusable", error.message)))
-          const apiKey = yield* decrypt(resolved.apiKeyEnc, "api_key")
+              : secrets.decrypt(blob, bound).pipe(Effect.mapError((error) => providerError("unusable", error.message)))
+          const baseUrl = connection.baseUrl ?? info.defaultBaseUrl
+          const origin = originOf(baseUrl)
+          if (origin === null) {
+            return yield* providerError("unusable", `${connection.name}'s base URL isn't a valid URL: "${baseUrl}"`)
+          }
+          const credential = resolved.credential
+          // The key is checked against its allowed origins before it's even decrypted.
+          if (credential !== null && bindKeysToOrigins && !credential.origins.includes(origin)) {
+            return yield* providerError(
+              "unusable",
+              `the key "${connection.credentialName ?? "?"}" isn't allowed for ${origin}; enter the key again to allow it`
+            )
+          }
+          const apiKey =
+            credential === null ? null : yield* decryptWith(credential.keyEnc, credentialBinding(credential.id))
           if (apiKey === null && !info.keyOptional) {
             return yield* providerError("unusable", `${connection.name} has no API key`)
           }
-          const headersJson = yield* decrypt(resolved.headersEnc, "headers")
-          const proxyUrl = yield* decrypt(resolved.proxyUrlEnc, "proxy_url")
+          const headersJson = yield* decryptWith(resolved.headersEnc, binding(connectionId, "headers"))
+          const proxyUrl = yield* decryptWith(resolved.proxyUrlEnc, binding(connectionId, "proxy_url"))
           const override: ProxyOverride =
             connection.proxyMode === "custom" && proxyUrl !== null
               ? { mode: "custom", url: proxyUrl }
@@ -295,11 +355,6 @@ export const layer = (policy: RetryPolicy = defaultRetryPolicy) =>
                 ? { mode: "direct" }
                 : { mode: "inherit" }
           const headers = headersJson === null ? {} : (JSON.parse(headersJson) as Record<string, string>)
-          const baseUrl = connection.baseUrl ?? info.defaultBaseUrl
-          yield* Effect.try({
-            try: () => new URL(baseUrl),
-            catch: () => providerError("unusable", `${connection.name}'s base URL isn't a valid URL: "${baseUrl}"`)
-          })
           const prepared: Prepared = {
             connection,
             kind: connection.kind,
@@ -332,33 +387,102 @@ export const layer = (policy: RetryPolicy = defaultRetryPolicy) =>
 
       // --- Connection operations that need the secret ------------------------------
 
-      const encryptKey = (connectionId: string, apiKey: string) => ({
-        enc: secrets.encrypt(apiKey, binding(connectionId, "api_key")),
-        hint: apiKey.slice(-4)
-      })
-
       /** A key as entered: surrounding whitespace dropped, and nothing left means no key. */
-      const keyFor = (connectionId: string, apiKey: string | null) => {
+      const typedKey = (apiKey: string | null | undefined) => {
         const trimmed = apiKey?.trim() ?? ""
-        return trimmed === "" ? null : encryptKey(connectionId, trimmed)
+        return trimmed === "" ? null : trimmed
       }
 
-      const createConnection: ProvidersShape["createConnection"] = ({ userId, kind, settings, apiKey }) => {
-        // The id is chosen here because the key is encrypted bound to it; one write stores both.
-        const connectionId = uuidv7() as ConnectionId
-        return fromStorage(
-          writer.CreateConnection({ userId, connectionId, kind, settings, key: keyFor(connectionId, apiKey) })
-        )
-      }
+      const originsOf = (urls: ReadonlyArray<string>) =>
+        Effect.forEach(urls, (url) => {
+          const origin = originOf(url)
+          return origin === null
+            ? Effect.fail(providerError("bad_request", `not a URL: "${url}"`))
+            : Effect.succeed(origin)
+        })
+
+      const createCredential: ProvidersShape["createCredential"] = ({ userId, name, apiKey, urls }) =>
+        Effect.gen(function* () {
+          const key = typedKey(apiKey)
+          if (key === null) return yield* providerError("bad_request", "the key is empty")
+          const origins = yield* originsOf(urls)
+          const credentialId = uuidv7() as CredentialId
+          return yield* fromStorage(
+            writer.CreateCredential({
+              userId,
+              credentialId,
+              name,
+              key: { enc: secrets.encrypt(key, credentialBinding(credentialId)), hint: key.slice(-4) },
+              origins
+            })
+          )
+        })
+
+      const replaceCredentialKey: ProvidersShape["replaceCredentialKey"] = (userId, credentialId, apiKey) =>
+        Effect.gen(function* () {
+          const key = typedKey(apiKey)
+          if (key === null) return yield* providerError("bad_request", "the key is empty")
+          return yield* fromStorage(
+            writer.ReplaceCredentialKey({
+              userId,
+              credentialId,
+              key: { enc: secrets.encrypt(key, credentialBinding(credentialId)), hint: key.slice(-4) }
+            })
+          )
+        })
+
+      const allowCredentialOrigin: ProvidersShape["allowCredentialOrigin"] = ({ userId, credentialId, apiKey, url }) =>
+        Effect.gen(function* () {
+          const [origin] = yield* originsOf([url])
+          const stored = yield* fromStorage(reader.ResolveCredential({ userId, credentialId }))
+          const key = yield* secrets
+            .decrypt(stored.keyEnc, credentialBinding(credentialId))
+            .pipe(Effect.mapError((error) => providerError("unusable", error.message)))
+          if (!sameKey(key, typedKey(apiKey) ?? "")) {
+            return yield* providerError("auth", "that isn't this credential's key")
+          }
+          return yield* fromStorage(writer.AddCredentialOrigin({ userId, credentialId, origin: origin! }))
+        })
+
+      /** A typed key for a connection becomes a credential bound to the connection's origin. */
+      const credentialFor = (
+        userId: UserId,
+        name: string,
+        kind: ProviderKind,
+        baseUrl: string | null,
+        apiKey: string
+      ) => createCredential({ userId, name, apiKey, urls: [baseUrl ?? providerKinds[kind].defaultBaseUrl] })
+
+      const createConnection: ProvidersShape["createConnection"] = ({ userId, kind, settings, apiKey, credentialId }) =>
+        Effect.gen(function* () {
+          const key = typedKey(apiKey)
+          const credential =
+            key === null
+              ? (credentialId ?? null)
+              : (yield* credentialFor(userId, settings.name, kind, settings.baseUrl, key)).id
+          return yield* fromStorage(
+            writer.CreateConnection({
+              userId,
+              connectionId: uuidv7() as ConnectionId,
+              kind,
+              settings,
+              credentialId: credential
+            })
+          )
+        })
 
       const setKey: ProvidersShape["setKey"] = (userId, connectionId, apiKey) =>
-        fromStorage(
-          writer.SetConnectionKey({
-            userId,
-            connectionId,
-            key: keyFor(connectionId, apiKey)
-          })
-        )
+        Effect.gen(function* () {
+          const key = typedKey(apiKey)
+          if (key === null) {
+            return yield* fromStorage(writer.SetConnectionCredential({ userId, connectionId, credentialId: null }))
+          }
+          const connection = yield* fromStorage(reader.GetConnection({ userId, connectionId }))
+          const credential = yield* credentialFor(userId, connection.name, connection.kind, connection.baseUrl, key)
+          return yield* fromStorage(
+            writer.SetConnectionCredential({ userId, connectionId, credentialId: credential.id })
+          )
+        })
 
       const setHeaders: ProvidersShape["setHeaders"] = (userId, connectionId, headers) =>
         fromStorage(
@@ -740,6 +864,9 @@ export const layer = (policy: RetryPolicy = defaultRetryPolicy) =>
 
       return Providers.of({
         createConnection,
+        createCredential,
+        replaceCredentialKey,
+        allowCredentialOrigin,
         setKey,
         setHeaders,
         setProxy,

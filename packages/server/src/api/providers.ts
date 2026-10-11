@@ -33,8 +33,38 @@ export const makeProviderHandlers = Effect.gen(function* () {
       Effect.flatMap(userId, (id) => reader.ListConnections({ userId: id })).pipe(
         Effect.catchTag(["StorageError", "RpcClientError"], toServerError("ListConnections"))
       ),
-    CreateConnection: ({ kind, settings, apiKey }) =>
-      Effect.flatMap(userId, (id) => providers.createConnection({ userId: id, kind, settings, apiKey })),
+    CreateConnection: ({ kind, settings, apiKey, credentialId }) =>
+      Effect.flatMap(userId, (id) =>
+        providers.createConnection({
+          userId: id,
+          kind,
+          settings,
+          apiKey: apiKey ?? null,
+          credentialId: credentialId ?? null
+        })
+      ),
+    SetConnectionCredential: ({ connectionId, credentialId }) =>
+      Effect.flatMap(userId, (id) => writer.SetConnectionCredential({ userId: id, connectionId, credentialId })).pipe(
+        Effect.catchTag(["StorageError", "RpcClientError"], toServerError("SetConnectionCredential"))
+      ),
+    ListCredentials: () =>
+      Effect.flatMap(userId, (id) => reader.ListCredentials({ userId: id })).pipe(
+        Effect.catchTag(["StorageError", "RpcClientError"], toServerError("ListCredentials"))
+      ),
+    CreateCredential: ({ name, apiKey, urls }) =>
+      Effect.flatMap(userId, (id) => providers.createCredential({ userId: id, name, apiKey, urls })),
+    RenameCredential: ({ credentialId, name }) =>
+      Effect.flatMap(userId, (id) => writer.RenameCredential({ userId: id, credentialId, name })).pipe(
+        Effect.catchTag(["StorageError", "RpcClientError"], toServerError("RenameCredential"))
+      ),
+    ReplaceCredentialKey: ({ credentialId, apiKey }) =>
+      Effect.flatMap(userId, (id) => providers.replaceCredentialKey(id, credentialId, apiKey)),
+    AllowCredentialHost: ({ credentialId, apiKey, url }) =>
+      Effect.flatMap(userId, (id) => providers.allowCredentialOrigin({ userId: id, credentialId, apiKey, url })),
+    DeleteCredential: ({ credentialId }) =>
+      Effect.flatMap(userId, (id) => writer.DeleteCredential({ userId: id, credentialId })).pipe(
+        Effect.catchTag(["StorageError", "RpcClientError"], toServerError("DeleteCredential"))
+      ),
     UpdateConnection: ({ connectionId, settings, expectedRowVersion }) =>
       Effect.flatMap(userId, (id) =>
         writer.UpdateConnection({ userId: id, connectionId, settings, expectedRowVersion })

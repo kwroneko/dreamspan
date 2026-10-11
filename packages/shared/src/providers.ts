@@ -96,6 +96,37 @@ export const ConnectionId = Schema.String.pipe(Schema.brand("ConnectionId"))
 export type ConnectionId = typeof ConnectionId.Type
 export const ModelId = Schema.String.pipe(Schema.brand("ModelId"))
 export type ModelId = typeof ModelId.Type
+export const CredentialId = Schema.String.pipe(Schema.brand("CredentialId"))
+export type CredentialId = typeof CredentialId.Type
+
+/**
+ * The origin a key is sent to: scheme, host and port, as the URL standard defines it.
+ * A key is bound to origins, not full URLs, so changing a path never needs the key again.
+ */
+export const originOf = (url: string): string | null => {
+  try {
+    const origin = new URL(url).origin
+    return origin === "null" ? null : origin
+  } catch {
+    return null
+  }
+}
+
+/**
+ * A stored key (spec/PROVIDERS.md §5). Stored once, used by any number of connections,
+ * and sent only to the origins it was entered for. Only the last 4 characters show.
+ */
+export class Credential extends Schema.Class<Credential>("Credential")({
+  id: CredentialId,
+  name: Schema.String,
+  keyHint: Schema.String,
+  origins: Schema.Array(Schema.String),
+  /** How many connections use it. */
+  usedBy: Schema.Int,
+  rowVersion: Schema.Int,
+  createdAt: Schema.Number,
+  updatedAt: Schema.Number
+}) {}
 
 /** Raw pi-ai compat overrides: an escape hatch, passed through as given. */
 export const Compat = Schema.Record(Schema.String, Schema.Unknown)
@@ -112,8 +143,11 @@ export class Connection extends Schema.Class<Connection>("Connection")({
   api: WireApi,
   /** Null: the kind's default. */
   baseUrl: Schema.NullOr(Schema.String),
+  /** The credential whose key the connection sends, if any. */
+  credentialId: Schema.NullOr(CredentialId),
+  credentialName: Schema.NullOr(Schema.String),
   hasKey: Schema.Boolean,
-  /** The key's last 4 characters, so the user can tell which key is stored. */
+  /** The key's last 4 characters, so the user can tell which key is used. */
   keyHint: Schema.NullOr(Schema.String),
   /** Header values often carry credentials, so only names are shown. */
   headerNames: Schema.Array(Schema.String),

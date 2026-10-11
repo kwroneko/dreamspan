@@ -70,7 +70,9 @@ const SecretsLive = Layer.unwrap(
 )
 
 /** The provider layer and what it needs: the server secret, the network module, storage. */
-const ProvidersLive = Providers.layer().pipe(Layer.provideMerge(Network.layer), Layer.provideMerge(SecretsLive))
+const ProvidersLive = Layer.unwrap(
+  Effect.map(AppConfig, (config) => Providers.layer({ bindKeysToOrigins: config.keyHostBinding }))
+).pipe(Layer.provideMerge(Network.layer), Layer.provideMerge(SecretsLive))
 
 /**
  * Requests left running by a previous process may have been billed, so they're kept,
