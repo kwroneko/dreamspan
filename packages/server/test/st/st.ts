@@ -8,6 +8,7 @@ import { readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { png } from "../formats/support.ts"
 import type { FixtureSet } from "./fixtures.ts"
+import { type MacroContextInput, seededRandom } from "./macroVectors.ts"
 import { MOCK_MODEL, type MockEndpoint } from "./mock.ts"
 
 interface StCharacter {
@@ -26,6 +27,11 @@ interface StContext {
   readonly eventSource: { once: (event: string, listener: (...args: ReadonlyArray<unknown>) => void) => void }
   readonly eventTypes: Record<string, string>
   readonly getRequestHeaders: (options?: { omitContentType?: boolean }) => Record<string, string>
+  readonly chatMetadata: { variables?: Record<string, unknown> }
+  readonly extensionSettings: { variables: { global: Record<string, unknown> } }
+  readonly powerUserSettings: { experimental_macro_engine: boolean }
+  /** ST's macro entry point. With an options object it uses the engine `experimental_macro_engine` selects. */
+  readonly substituteParams: (text: string, options: { name1Override: string; name2Override: string }) => string
 }
 
 declare const SillyTavern: { getContext: () => StContext }
@@ -78,9 +84,13 @@ export const writeBaselineSettings = (userDir: string, mockUrl: string, fixtures
 // starts from the same files.
 const WRITES = /\/api\/[^?]*(save|edit|merge-attributes|delete|rename|create|import|upload)/
 
-/** A fresh browser context with ST loaded and initialized. */
-const openPage = async (browser: Browser, url: string, options: { readOnly: boolean }) => {
+/**
+ * A fresh browser context with ST loaded and initialized, in UTC. `now` fixes the page's
+ * clock (timers still run).
+ */
+const openPage = async (browser: Browser, url: string, options: { readOnly: boolean; now?: number }) => {
   const context = await browser.newContext({ timezoneId: "UTC", locale: "en-US" })
+  if (options.now !== undefined) await context.clock.setFixedTime(options.now)
   if (options.readOnly) {
     await context.route(WRITES, (route) =>
       route.fulfill({ status: 200, contentType: "application/json", body: '{"ok":true}' })
@@ -196,6 +206,17 @@ export interface Capture {
   readonly message: string
 }
 
+/** Selects the character, which opens its chat. */
+const openChat = async (page: Page, name: string) => {
+  await page.evaluate(async (name) => {
+    const ctx = SillyTavern.getContext()
+    const id = ctx.characters.findIndex((character) => character.name === name)
+    if (id < 0) throw new Error(`no character ${name}`)
+    await ctx.selectCharacterById(id)
+  }, name)
+  await page.waitForFunction(() => SillyTavern.getContext().chat.length > 0)
+}
+
 const selectPreset = (page: Page, name: string) =>
   page.evaluate(async (name) => {
     const manager = SillyTavern.getContext().getPresetManager("openai")
@@ -216,13 +237,7 @@ export const captureRequest = async (browser: Browser, url: string, mock: MockEn
   try {
     await page.waitForFunction(() => SillyTavern.getContext().onlineStatus !== "no_connection")
     if (capture.preset !== null) await selectPreset(page, capture.preset)
-    await page.evaluate(async (name) => {
-      const ctx = SillyTavern.getContext()
-      const id = ctx.characters.findIndex((character) => character.name === name)
-      if (id < 0) throw new Error(`no character ${name}`)
-      await ctx.selectCharacterById(id)
-    }, capture.character)
-    await page.waitForFunction(() => SillyTavern.getContext().chat.length > 0)
+    await openChat(page, capture.character)
     const next = mock.nextCompletion()
     await page.fill("#send_textarea", capture.message)
     await page.click("#send_but")
@@ -234,6 +249,59 @@ export const captureRequest = async (browser: Browser, url: string, mock: MockEn
     throw new Error(`capture ${JSON.stringify(capture)} failed; page errors: ${JSON.stringify(errors)}`, {
       cause: error
     })
+  } finally {
+    await page.context().close()
+  }
+}
+
+export interface MacroOutcome {
+  readonly output: string
+  /** The chat's and the global variables after the text. */
+  readonly local: Record<string, unknown>
+  readonly global: Record<string, unknown>
+}
+
+/**
+ * Expands each text with ST's own macro engine, through `substituteParams`, the entry point
+ * ST's prompt building uses, with the character's chat open. Before each text the
+ * variables are set from its context and `Math.random` is reseeded (`seededRandom`).
+ * `engine` picks ST's engine; a fresh 1.19 install has the new one on.
+ */
+export const evaluateMacros = async (
+  browser: Browser,
+  url: string,
+  options: {
+    readonly character: string
+    readonly now: number
+    readonly engine: "experimental" | "legacy"
+    readonly seed: number
+    readonly vectors: ReadonlyArray<{ readonly text: string; readonly context: MacroContextInput }>
+  }
+): Promise<{ readonly engineOnByDefault: boolean; readonly outcomes: ReadonlyArray<MacroOutcome> }> => {
+  const page = await openPage(browser, url, { readOnly: true, now: options.now })
+  try {
+    await openChat(page, options.character)
+    return await page.evaluate(
+      ({ vectors, engine, random, seed }) => {
+        const makeRandom = (0, eval)(`(${random})`) as (seed: number) => () => number
+        const ctx = SillyTavern.getContext()
+        const engineOnByDefault = ctx.powerUserSettings.experimental_macro_engine
+        ctx.powerUserSettings.experimental_macro_engine = engine === "experimental"
+        const outcomes = vectors.map(({ text, context }) => {
+          Math.random = makeRandom(seed)
+          ctx.chatMetadata.variables = { ...context.local }
+          ctx.extensionSettings.variables.global = { ...context.global }
+          const output = ctx.substituteParams(text, { name1Override: context.user, name2Override: context.char })
+          return {
+            output,
+            local: { ...ctx.chatMetadata.variables },
+            global: { ...ctx.extensionSettings.variables.global }
+          }
+        })
+        return { engineOnByDefault, outcomes }
+      },
+      { vectors: options.vectors, engine: options.engine, random: String(seededRandom), seed: options.seed }
+    )
   } finally {
     await page.context().close()
   }

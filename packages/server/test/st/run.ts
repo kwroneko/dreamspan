@@ -15,9 +15,10 @@ import { join } from "node:path"
 import { type Browser, chromium } from "@playwright/test"
 import { removeOrphans, ST_IMAGE, ST_VERSION, startSt } from "./container.ts"
 import { type FixtureSet, fixtureSet } from "./fixtures.ts"
+import { DEFAULT_MACRO_CONTEXT, MACRO_NOW, MACRO_SEED, MACRO_VECTORS } from "./macroVectors.ts"
 import { type MockEndpoint, startMock } from "./mock.ts"
 import { printReport, type Section } from "./report.ts"
-import { captureRequest, loadFixtures, writeBaselineSettings } from "./st.ts"
+import { captureRequest, evaluateMacros, loadFixtures, writeBaselineSettings } from "./st.ts"
 
 const cleanups: Array<() => void> = []
 const cleanUp = () => {
@@ -56,8 +57,36 @@ const main = async () => {
   await loadFixtures(browser, st.url, fixtures)
   console.log("fixtures loaded")
 
-  const sections: Array<Section> = [await checkFixtures(browser, st.url, mock, fixtures)]
+  const sections: Array<Section> = [
+    await checkFixtures(browser, st.url, mock, fixtures),
+    await listStMacros(browser, st.url, fixtures)
+  ]
   return printReport(sections) === 0 ? 0 : 1
+}
+
+const listStMacros = async (browser: Browser, url: string, fixtures: FixtureSet) => {
+  const vectors = MACRO_VECTORS.map((vector) => ({
+    text: vector.text,
+    context: { ...DEFAULT_MACRO_CONTEXT, ...vector.context }
+  }))
+  const result = await evaluateMacros(browser, url, {
+    character: fixtures.chats[0]!.card,
+    now: MACRO_NOW,
+    engine: "experimental",
+    seed: MACRO_SEED,
+    vectors
+  })
+  return {
+    title: "ST's macro engine",
+    notes: [
+      `new engine on by default: ${result.engineOnByDefault}`,
+      ...result.outcomes.map(
+        (outcome, i) =>
+          `${JSON.stringify(vectors[i]!.text)} → ${JSON.stringify(outcome.output)} ${JSON.stringify(outcome.local)} ${JSON.stringify(outcome.global)}`
+      )
+    ],
+    differences: []
+  }
 }
 
 /**
