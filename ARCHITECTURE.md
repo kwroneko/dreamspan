@@ -727,3 +727,18 @@ It fails with a typed `ProviderError`.
 **Known limits:**
 - **The importer must run the parsers off the main thread.** They're synchronous: measured on this host under load (2026-10-11, load average 25), the worst file within the caps (one object of 595,000 keys) took 850 ms and 80 MB of heap, a list of 1.19M short strings 460 ms, and a full lorebook (10,000 entries with every ST field and 2 KB of content, 29 MiB) 480 ms. The walk after parsing steps through lists by index and skips scalars, and unknown fields and extensions are kept by deleting the known keys from the parsed objects instead of copying them. On the main thread that would stall every live stream (§3.1).
 - Not built yet: the importer itself (storing the document, the avatar and assets, and the report), and registering these formats as importers (PLUGINS §8).
+
+---
+
+## 9. Import formats: presets
+
+ST chat-completion presets (DESIGN §1.2). Pure functions with no database access; the importer that writes into the library comes later.
+
+**The document** (`@rp/shared/docs/preset.ts`, `PresetDoc`, `schema_version` 1) is ST's chat-completion preset, normalized:
+- `prompts[]`, keyed by `identifier`, with ST's per-prompt fields: role, content, `system_prompt`, `marker`, in-chat injection (`injection_position` `absolute`, at `injection_depth`, by `injection_order`), `injection_trigger` and `forbid_overrides`.
+- `order[]`: one prompt order with enabled flags (DATA-MODEL §16.3). Every entry names a prompt.
+- `samplers{}`, `utility_prompts{}`: ST's names and values. Mapping to a provider happens at assembly.
+- `names_behavior`, `squash`, `postprocess`, `use_sysprompt`, `prefill{assistant, impersonation, continue, continue_postfix}`.
+- `regex[]`, keyed by `id`: ST's regex scripts as data. `prompt_only` scripts apply to the assembled prompt, `markdown_only` ones are display rules.
+- `extensions{}`: the preset's other ST extension data. `unsupported{}`: top-level ST fields the document doesn't model. Both are kept for export.
+- The schema refuses duplicate identifiers and order entries that name no prompt, since the library merge (§3.9) matches array elements by identity.
