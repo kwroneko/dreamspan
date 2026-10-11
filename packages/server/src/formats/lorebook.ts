@@ -206,7 +206,7 @@ const cardEntry = (source: unknown, index: number, path: Path, issues: Issues): 
     display_index: ext.int("display_index", index),
     ...entry.optional("name", isString, "text"),
     ...entry.optional("priority", isFinite, "a number"),
-    ...entry.optional("use_regex", isBoolean, "true or false"),
+    use_regex: entry.boolean("use_regex", false),
     ...ourEntryFields(extensions, entryPath, issues),
     extensions: remainingExtensions(extensions, ST_EXTENSION_KEYS),
     ...entry.unknown(ENTRY_KEYS)
@@ -234,3 +234,82 @@ export const lorebookFromCharacterBook = (source: Record<string, unknown>, path:
     ...book.unknown(BOOK_KEYS)
   }
 }
+
+/** `extensions` with our own entry fields put back in our namespace. */
+const withOurFields = (entry: LorebookEntry) => {
+  const ours = present({ decision_hint: entry.decision_hint, placement_override: entry.placement_override })
+  if (Object.keys(ours).length === 0) return entry.extensions
+  const existing = entry.extensions[OUR_EXTENSION]
+  return { ...entry.extensions, [OUR_EXTENSION]: { ...(isObject(existing) ? existing : {}), ...ours } }
+}
+
+/** The fields that have a value: optional fields stay absent when they have none. */
+export const present = (fields: Record<string, unknown>) =>
+  Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== undefined && value !== null))
+
+/**
+ * Our lorebook as a card's `character_book`, as ST's `convertWorldInfoToCharacterBook`
+ * (src/endpoints/characters.js) writes it. One difference: `use_regex` is false unless the
+ * entry says otherwise. ST writes true, but its keys are plain text, which a V3 reader
+ * would take as patterns.
+ */
+export const characterBookFromLorebook = (book: LorebookDoc) => ({
+  ...book.unknown_fields,
+  ...present({
+    name: book.name || undefined,
+    description: book.description || undefined,
+    scan_depth: book.scan_depth,
+    token_budget: book.token_budget,
+    recursive_scanning: book.recursive_scanning
+  }),
+  extensions: book.extensions,
+  entries: book.entries.map((entry) => ({
+    ...entry.unknown_fields,
+    id: entry.uid,
+    keys: entry.keys,
+    secondary_keys: entry.secondary_keys,
+    comment: entry.comment,
+    content: entry.content,
+    constant: entry.constant,
+    selective: entry.selective,
+    insertion_order: entry.order,
+    enabled: entry.enabled,
+    position: entry.position === "before_char" ? "before_char" : "after_char",
+    use_regex: entry.use_regex,
+    ...present({ name: entry.name, priority: entry.priority, case_sensitive: entry.case_sensitive }),
+    extensions: {
+      ...withOurFields(entry),
+      position: POSITIONS.indexOf(entry.position),
+      exclude_recursion: entry.exclude_recursion,
+      ...present({ display_index: entry.display_index }),
+      probability: entry.probability,
+      useProbability: entry.use_probability,
+      depth: entry.depth,
+      selectiveLogic: LOGICS.indexOf(entry.selective_logic),
+      outlet_name: entry.outlet_name,
+      group: entry.group,
+      group_override: entry.group_override,
+      group_weight: entry.group_weight,
+      prevent_recursion: entry.prevent_recursion,
+      delay_until_recursion: entry.delay_until_recursion,
+      scan_depth: entry.scan_depth,
+      match_whole_words: entry.match_whole_words,
+      use_group_scoring: entry.use_group_scoring,
+      case_sensitive: entry.case_sensitive,
+      automation_id: entry.automation_id,
+      role: ROLES.indexOf(entry.role),
+      vectorized: entry.vectorized,
+      sticky: entry.sticky,
+      cooldown: entry.cooldown,
+      delay: entry.delay,
+      match_persona_description: entry.match_persona_description,
+      match_character_description: entry.match_character_description,
+      match_character_personality: entry.match_character_personality,
+      match_character_depth_prompt: entry.match_character_depth_prompt,
+      match_scenario: entry.match_scenario,
+      match_creator_notes: entry.match_creator_notes,
+      triggers: entry.triggers,
+      ignore_budget: entry.ignore_budget
+    }
+  }))
+})

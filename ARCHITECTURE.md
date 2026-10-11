@@ -316,7 +316,7 @@ An upstream merging a new import ends the same ways. The outcomes are returned, 
 
 **Known limits:**
 - Arrays without element identities, like a card's `alternate_greetings` or `tags`, are atomic: changing them on both sides is a conflict.
-- Not built yet: export (flattening a ref to a V2/V3 card), library search, and "used by N chats".
+- Not built yet: exporting a ref (the card formats exist, §8), library search, and "used by N chats".
 
 ### 3.10 Drafts
 
@@ -683,6 +683,14 @@ It fails with a typed `ProviderError`.
 - **Card modules** come back from `extensions.rp_harness.modules`, where an export puts them.
 - **PNG** (`png.ts`): the card is base64 JSON in a `tEXt` chunk. As in ST (`src/character-card-parser.js`), `ccv3` wins over `chara`, keywords match in any case, and a bad CRC or a missing IEND rejects the file. The avatar returned is the PNG without its card chunks. V3's `chara-ext-asset_` chunks are skipped with a note (the spec discourages them; ST ignores them).
 - **CHARX** (`zip.ts`, our own reader of the central directory; stored and deflated entries only): `card.json` at the root, or else, as in ST, the first entry whose name ends in `card.json`. It must be V2 or V3. Assets come from `embeded://`, `embedded://` and `__asset:` URIs, normalized as ST normalizes them. The avatar is the main icon, as ST picks it. Only ST's image formats are extracted; other assets (audio, Risu modules and scripts) and unreferenced files are reported and skipped. Each returned file keeps the URI the card's `assets` use for it.
+
+**Card export** (`cardExport.ts`) flattens a card document to a standard card.
+- **V2 and V3 carry the same `data`,** V3's fields included, as ST's two PNG chunks do. V2 also has the V1 fields at the top level, for V1 readers. Fields the specs don't define go back where they came from, written first, so they never override a defined field.
+- **The embedded lorebook** is written as ST's `convertWorldInfoToCharacterBook` writes it, our own entry fields in `extensions.rp_harness`. One difference: `use_regex` is false unless the entry says otherwise. ST writes true, but its keys are plain text, which a V3 reader would take as patterns.
+- **Card modules:** only exportable ones, into `extensions.rp_harness.modules`. Private ones never leave.
+- **PNG:** existing card chunks are removed, then `chara` (V2) and `ccv3` (V3) go in before IEND, as ST writes them. The image must be a valid PNG.
+- **CHARX:** `card.json` (V3), the avatar as `assets/icon/images/main.<ext>` and the main icon, and each embedded asset whose file is given. An embedded asset without a file, or with a path outside the archive's folder, is left out of the card.
+- **Round trips are lossless:** an exported card imports back to the same document, in every format, and keeps every field of the file it came from (`test/formats/cardExport.test.ts`). The exceptions are ST's top-level copies and local state, and private modules.
 
 **Hardening** (`safety.ts`). These parse untrusted files, so every input is capped (`defaultLimits`), and each cap has a test with a crafted file that fails when the check is removed.
 

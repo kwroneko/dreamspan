@@ -1,7 +1,7 @@
 // A small zip reader for CHARX files: the central directory, and stored or deflated entries.
 // Every size is checked against a cap before anything is inflated, and inflating stops at
 // the size the archive declares, so a lying header can't make it allocate more.
-import { crc32, inflateRawSync } from "node:zlib"
+import { crc32, deflateRawSync, inflateRawSync } from "node:zlib"
 import { fail, type Limits } from "./safety.ts"
 
 export interface ZipEntry {
@@ -25,7 +25,7 @@ const LOCAL = 0x04034b50
  * segments, no drive letters, no NUL. Anything else rejects the archive, since an importer
  * that later writes files by these names must never be pointed outside its directory.
  */
-const isSafePath = (name: string) =>
+export const isSafePath = (name: string) =>
   name !== "" &&
   !name.startsWith("/") &&
   !name.includes("\\") &&
@@ -130,4 +130,43 @@ export const extract = (bytes: Uint8Array, entry: ZipEntry, limits: Limits, budg
   }
   budget.used += entry.size
   return out
+}
+
+/** A zip of `files`, deflating those marked; names are UTF-8. Dates are left at 1980-01-01. */
+export const writeZip = (files: ReadonlyArray<{ name: string; data: Uint8Array; deflate: boolean }>) => {
+  const parts: Array<Uint8Array> = []
+  const directory: Array<Uint8Array> = []
+  let offset = 0
+  for (const file of files) {
+    const data = file.deflate ? deflateRawSync(file.data) : file.data
+    const name = Buffer.from(file.name, "utf8")
+    // The fields local and central headers share, from "version needed" to the name length.
+    const shared = Buffer.alloc(26)
+    shared.writeUInt16LE(20, 0)
+    shared.writeUInt16LE(0x0800, 2)
+    shared.writeUInt16LE(file.deflate ? 8 : 0, 4)
+    shared.writeUInt16LE(0x21, 8)
+    shared.writeUInt32LE(crc32(file.data), 10)
+    shared.writeUInt32LE(data.byteLength, 14)
+    shared.writeUInt32LE(file.data.byteLength, 18)
+    shared.writeUInt16LE(name.byteLength, 22)
+    const local = Buffer.alloc(4)
+    local.writeUInt32LE(LOCAL, 0)
+    const central = Buffer.alloc(46)
+    central.writeUInt32LE(CENTRAL, 0)
+    central.writeUInt16LE(20, 4)
+    shared.copy(central, 6)
+    central.writeUInt32LE(offset, 42)
+    parts.push(local, shared, name, data)
+    directory.push(central, name)
+    offset += 30 + name.byteLength + data.byteLength
+  }
+  const size = directory.reduce((sum, part) => sum + part.byteLength, 0)
+  const end = Buffer.alloc(22)
+  end.writeUInt32LE(EOCD, 0)
+  end.writeUInt16LE(files.length, 8)
+  end.writeUInt16LE(files.length, 10)
+  end.writeUInt32LE(size, 12)
+  end.writeUInt32LE(offset, 16)
+  return Buffer.concat([...parts, ...directory, end])
 }

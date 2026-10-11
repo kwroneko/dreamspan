@@ -44,6 +44,7 @@ const entry = {
   match_scenario: false,
   match_creator_notes: false,
   add_memo: true,
+  use_regex: false,
   decision_hint: "Is the scene in or about Hollowmere?",
   extensions: { "some-plugin": { score: 3 } }
 }

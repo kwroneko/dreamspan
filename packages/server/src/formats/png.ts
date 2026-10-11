@@ -51,3 +51,29 @@ export const decodeText = (data: Uint8Array) => {
     ? { keyword: latin1(data), text: "" }
     : { keyword: latin1(data.subarray(0, nul)), text: latin1(data.subarray(nul + 1)) }
 }
+
+export const ASSET_KEYWORD = "chara-ext-asset_"
+
+/** A card's own text chunks: the card in either version, and V3's embedded assets. */
+const isCardChunk = (chunk: Chunk) => {
+  if (chunk.type !== "tEXt") return false
+  const keyword = decodeText(chunk.data).keyword
+  return ["ccv3", "chara"].includes(keyword.toLowerCase()) || keyword.startsWith(ASSET_KEYWORD)
+}
+
+/** The PNG without its card chunks, with `added` chunks before IEND (the last of `chunks`). */
+export const replaceCardChunks = (chunks: ReadonlyArray<Chunk>, added: ReadonlyArray<Uint8Array> = []) => {
+  const kept = chunks.filter((chunk) => !isCardChunk(chunk)).map((chunk) => chunk.raw)
+  return Buffer.concat([SIGNATURE, ...kept.slice(0, -1), ...added, ...kept.slice(-1)])
+}
+
+/** A `tEXt` chunk holding `json` as base64 UTF-8, the way ST writes a card. */
+export const cardTextChunk = (keyword: string, json: string) => {
+  const data = Buffer.from(`${keyword}\0${Buffer.from(json, "utf8").toString("base64")}`, "latin1")
+  const out = Buffer.alloc(12 + data.byteLength)
+  out.writeUInt32BE(data.byteLength, 0)
+  out.write("tEXt", 4, "latin1")
+  data.copy(out, 8)
+  out.writeUInt32BE(crc32(out.subarray(4, 8 + data.byteLength)), 8 + data.byteLength)
+  return out
+}

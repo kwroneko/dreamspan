@@ -89,7 +89,7 @@ export const stCardV2 = () => ({
           selective: true,
           insertion_order: 50,
           enabled: true,
-          position: "before_char",
+          position: "after_char",
           use_regex: true,
           extensions: {
             position: 4,

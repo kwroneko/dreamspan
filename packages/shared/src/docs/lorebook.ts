@@ -89,7 +89,7 @@ export const LorebookEntry = Schema.Struct({
   /** Card book fields with no World Info equivalent. */
   name: Schema.optionalKey(Schema.String),
   priority: Schema.optionalKey(Schema.Finite),
-  use_regex: Schema.optionalKey(Schema.Boolean),
+  use_regex: Schema.Boolean,
   /** Ours: a question for a decision model about whether the entry is relevant. */
   decision_hint: Schema.optionalKey(Schema.String),
   placement_override: Schema.optionalKey(PlacementOverride),
