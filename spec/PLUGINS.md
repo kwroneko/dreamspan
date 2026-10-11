@@ -217,7 +217,8 @@ The rule that protects the main objective: a registry is added when a core featu
 - **Phase 1–2 features register as modules with ids:** assembler stages, macros, importers, display rules, then tools.
 - **What's deliberately not in registries:** everything built on 2026-10-11 besides cost formulas (accounts and login, exposure, the request guard, the graph's integrity rules) is kernel (§3.2). Each is an Effect service or layer, so it's still reachable through overrides (§3.4).
 - **The client renders through slot registries** (message view, panels, composer actions). `src/ui/` stays the single import path for components.
-  - **Routes too.** Today's router is one hardcoded status page. The route and slot registries are built with the first real screens, the settings and login pages, so they're shaped by real use.
+  - **Routes too.** The route and slot registries were built with the first real screens, the settings and login pages, so they're shaped by real use.
+  - **Built** (2026-10-11, ARCHITECTURE.md §5): both registries, with the login and settings screens as their first users and `connection.sections` as the first slot.
 - **Namespaced chat state keys,** before the first extension needs them (`@rp/shared/state.ts` is a closed union today).
   - **Ids inside values must be declared.** The writer checks every id in a core key's value against the acting user (ARCHITECTURE §3.8). A plugin key (`<plugin-id>/<key>`) must therefore register, with its value schema, which fields hold entity, ref, revision or connection ids, so the same check covers it. Any other field is treated as free-form data: a plugin that reads an id from one must check ownership itself.
 

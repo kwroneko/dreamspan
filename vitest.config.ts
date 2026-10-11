@@ -7,6 +7,9 @@ export default defineConfig({
         test: { name: "shared", root: "packages/shared", include: ["test/**/*.test.ts"], environment: "node" }
       },
       {
+        test: { name: "client", root: "packages/client", include: ["test/**/*.test.ts"], environment: "node" }
+      },
+      {
         test: {
           name: "server",
           root: "packages/server",

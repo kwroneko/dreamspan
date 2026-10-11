@@ -1,0 +1,44 @@
+// Setting up state for a browser test without clicking through it: the same RPCs the
+// client uses, over a WebSocket carrying a session cookie.
+import { AppApi } from "@rp/shared/api.ts"
+import { Effect, Exit, Layer } from "effect"
+import { RpcClient, type RpcClientError, RpcSerialization } from "effect/rpc"
+import { Socket } from "effect/socket"
+import type { TestServer } from "./server.ts"
+
+type Client = RpcClient.FromGroup<typeof AppApi, RpcClientError.RpcClientError>
+
+/** Logs in over HTTP and runs `use` with an RPC client acting as that user. */
+export const asUser = async <A>(
+  server: TestServer,
+  handle: string,
+  password: string,
+  use: (client: Client) => Effect.Effect<A, unknown>
+): Promise<A> => {
+  const response = await fetch(`${server.url}/auth/login`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ handle, password })
+  })
+  if (response.status !== 204) throw new Error(`login as ${handle} failed: ${response.status}`)
+  const cookie = (response.headers.get("set-cookie") ?? "").split(";")[0]!
+  const program = Effect.gen(function* () {
+    const protocol = yield* Layer.build(
+      RpcClient.layerProtocolSocket().pipe(
+        Layer.provide(Socket.layerWebSocket(`${server.url.replace(/^http/, "ws")}/rpc`)),
+        Layer.provide(
+          Layer.succeed(Socket.WebSocketConstructor)(
+            (url) =>
+              new WebSocket(url, { headers: { cookie } } as unknown as Array<string>) as unknown as globalThis.WebSocket
+          )
+        ),
+        Layer.provide(RpcSerialization.layerJson)
+      )
+    )
+    const client = yield* RpcClient.make(AppApi).pipe(Effect.provide(protocol))
+    return yield* use(client)
+  })
+  const exit = await Effect.runPromiseExit(Effect.scoped(program))
+  if (Exit.isFailure(exit)) throw new Error(`RPC setup failed: ${String(exit.cause)}`)
+  return exit.value
+}

@@ -13,7 +13,7 @@ export default tseslint.config(
     }
   },
   {
-    files: ["packages/server/**/*.ts", "*.config.ts", "eslint.config.js"],
+    files: ["packages/server/**/*.ts", "packages/client/e2e/**/*.ts", "**/*.config.ts", "eslint.config.js"],
     languageOptions: { globals: globals.node }
   },
   {

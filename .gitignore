@@ -7,3 +7,5 @@ data/
 .env
 coverage/
 .claude/worktrees/
+test-results/
+playwright-report/
