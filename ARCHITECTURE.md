@@ -800,3 +800,36 @@ ST chat-completion presets (DESIGN §1.2). Pure functions with no database acces
 - **Every output matches the schema:** a seeded fuzz test mutates the fixtures with hostile values (infinities, wrong types, unconvertible objects) and decodes every document the importer returns against `PresetDoc`.
 - **Linear time:** lookups go through maps and sets, including the renaming of repeated regex ids, which was quadratic at first (30,000 repeats took 46 s).
 - Each limit's test was checked against its bug: with the check disabled, the test fails.
+
+---
+
+## 10. Macros
+
+`packages/shared/src/macros/` (DESIGN §5.6): a pure engine, for the server's context assembler and for the client when it renders text. It follows SillyTavern's current macro engine (`public/scripts/macros/`, ST's default), read at ST commit `06bde939`.
+
+**Expanding text** (`expand.ts`): `expand({ text, origin, registry, context, frozen?, random })`.
+- **`origin` is required** and decides whether anything expands:
+  - card and preset text always does (lorebook entries and notes count as card text)
+  - user-typed text only when its message's macro mode is `template`
+  - model output only through the display rule (`displayRule: true`)
+- **`context` is the state at the text's position** (`context.ts`): names, the card's fields as stored (unexpanded), the messages before it, the clock and time zone, and whatever else ST's macros read. Card text expanded against it follows the state, so `{{user}}` in a greeting follows a persona change until the message is sent.
+- **Freezing.** Random, roll, pick and the time macros are `volatile`. Each value drawn is keyed by its text (a card field's name, or none), offset, macro, arguments, and repeat count. The result returns them as `frozen`, and passing them back makes a re-expansion identical, whatever the clock or random source. Changed arguments or moved text draw again. Stored entries that aren't strings are ignored.
+
+**The registry** (`registry.ts`, `builtins.ts`). Macros register by name and aliases, matched case-insensitively, through the generic registry (`@rp/shared/registry.ts`, a copy of the server's `src/registry.ts`). The built-ins register through it like a plugin. A definition declares positional arguments with types, an optional list tail, strict arity (the default: a wrong call stays as written), delayed argument resolution (for `{{if}}`), and `volatile`.
+
+**The parser** (`parse.ts`) is a hand-written scanner in place of ST's Chevrotain grammar: no regex that can backtrack, each macro start parsed once, nesting bounded.
+
+**ST's behavior reproduced** (vectors in `packages/shared/test/macros/`, most from ST's `tests/frontend/MacroEngine.e2e.js`):
+- arguments as `{{a::b::c}}`, `{{a:b}}` or `{{a b}}`, trimmed; after a single colon or a space the rest is one argument
+- nested macros evaluated inside-out, left to right; an unknown or wrongly called macro stays as written, its nested macros expanded
+- scoped blocks `{{name}}…{{/name}}` as the last argument, trimmed and dedented unless the opener has `#`
+- `{{if}}`/`{{else}}` with only the chosen branch expanded; `{{trim}}`; `\{` escapes; the legacy `<USER>`, `<BOT>`, `<CHAR>`, `<GROUP>`, `<CHARIFNOTGROUP>` and `{{time_UTC+2}}` forms
+- card fields expanded once per expansion, on their own, with card-field macros inside them empty
+- moment's `en` formats and humanize thresholds for the time macros
+- quirks, each with a test: `{{char's}}` resolves like `{{char}}` (Chevrotain drops what can't follow a name); an unknown macro with a block comes back as `{{foo}}bar}}`; a comment's argument is still evaluated; `{{if}}` matches `if` and `else` case-sensitively when splitting
+
+**Deliberately different from ST:**
+- The instruct, system-prompt and context-template macros aren't registered, so they stay as written: text completion is out of scope (DESIGN §1.2).
+- `{{pick}}` is seeded like ST's but without seedrandom, so it picks differently for the same seed.
+- Where ST's parser recovers from a malformed macro (a bad nested macro, a stray operator), the macro stays literal here and scanning resumes after its `{{`. ST's recovery depends on the input and can swallow text after it.
+- `{{hasExtension}}` is always false: ST extensions don't exist here.

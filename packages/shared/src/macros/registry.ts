@@ -70,6 +70,8 @@ export interface MacroSpec {
   readonly strictArgs?: boolean
   /** The handler gets its arguments unexpanded, and expands what it needs with `resolve`. */
   readonly delayArgResolution?: boolean
+  /** Non-deterministic: evaluated once, then the value is frozen and reused (DESIGN §5.6). */
+  readonly volatile?: boolean
   readonly handler: (call: MacroCall) => string
 }
 

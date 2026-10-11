@@ -2,15 +2,12 @@
 // tests/frontend/MacroEngine.e2e.js (at 06bde939); the rest were derived from reading its
 // macro definitions, and those that rest on behavior ST's tests don't pin are marked unsure.
 import { describe, expect, it } from "vitest"
-import { registerBuiltinMacros } from "../../src/macros/builtins.ts"
 import type { MacroContext } from "../../src/macros/context.ts"
-import { evaluateMacros } from "../../src/macros/engine.ts"
-import { makeMacroRegistry } from "../../src/macros/registry.ts"
+import { expand } from "../../src/macros/expand.ts"
 import { humanize } from "../../src/macros/time.ts"
-import { Effect, Scope } from "effect"
+import { builtinRegistry } from "./support.ts"
 
-const registry = makeMacroRegistry()
-Effect.runSync(Effect.flatMap(Scope.make(), (scope) => Scope.provide(scope)(registerBuiltinMacros(registry))))
+const registry = builtinRegistry()
 
 /** 2026-10-11 14:05:09.123 UTC, a Sunday; 16:05 in Berlin. */
 const NOW = 1791727509123
@@ -48,7 +45,7 @@ const base: MacroContext = {
 }
 
 const run = (text: string, context: Partial<MacroContext> = {}, random: () => number = () => 0.5) =>
-  evaluateMacros(text, { registry, context: { ...base, ...context }, random })
+  expand({ text, origin: { kind: "preset" }, registry, context: { ...base, ...context }, random }).text
 
 const vectors = (cases: ReadonlyArray<readonly [string, string]>, context: Partial<MacroContext> = {}) =>
   it.each(cases)("%j → %j", (input, output) => expect(run(input, context)).toBe(output))

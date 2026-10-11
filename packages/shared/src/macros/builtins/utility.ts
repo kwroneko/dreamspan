@@ -117,16 +117,17 @@ export const utilityMacros: ReadonlyArray<MacroSpec> = [
     args: [{ name: "comment" }],
     handler: () => ""
   },
-  { name: "roll", args: [{ name: "formula" }], handler: roll },
+  { name: "roll", args: [{ name: "formula" }], volatile: true, handler: roll },
   {
     name: "random",
+    volatile: true,
     list: true,
     handler: (call) => {
       const items = choices(call.list)
       return items.length === 0 ? "" : items[Math.floor(call.random() * items.length)]!
     }
   },
-  { name: "pick", list: true, handler: pick },
+  { name: "pick", list: true, volatile: true, handler: pick },
   { name: "banned", args: [{ name: "word" }], handler: () => "" },
   {
     name: "outlet",

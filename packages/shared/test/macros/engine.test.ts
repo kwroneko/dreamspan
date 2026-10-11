@@ -2,7 +2,7 @@
 // test macros that behave like ST's, with ST's test names "User" and "Character". Vectors
 // marked "unsure" were derived from reading ST's source rather than from its tests.
 import { describe, expect, it } from "vitest"
-import { evaluateMacros } from "../../src/macros/engine.ts"
+import { expand } from "../../src/macros/expand.ts"
 import { parse } from "../../src/macros/parse.ts"
 import type { MacroSpec } from "../../src/macros/registry.ts"
 import { registryWith } from "./support.ts"
@@ -62,11 +62,13 @@ const specs: ReadonlyArray<MacroSpec> = [
 ]
 const registry = registryWith(specs)
 const run = (text: string) =>
-  evaluateMacros(text, {
+  expand({
+    text,
+    origin: { kind: "preset" },
     registry,
     context: { names: { user: "User", char: "Character" }, now: 0, timeZone: "UTC" },
     random: Math.random
-  })
+  }).text
 
 const vectors = (cases: ReadonlyArray<readonly [string, string]>) =>
   it.each(cases)("%j → %j", (input, output) => expect(run(input)).toBe(output))

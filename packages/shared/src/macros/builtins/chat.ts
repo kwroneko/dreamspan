@@ -64,18 +64,19 @@ export const chatMacros: ReadonlyArray<MacroSpec> = [
   },
   {
     name: "time",
+    volatile: true,
     args: [{ name: "offset", optional: true }],
     handler: (call) => {
       const m = /^UTC([+-]\d+)$/.exec(call.args[0] ?? "")
       return m ? formatMoment(atOffset(call.context.now, Number.parseInt(m[1]!, 10)), "LT") : now(call, "LT")
     }
   },
-  { name: "date", handler: (call) => now(call, "LL") },
-  { name: "weekday", handler: (call) => now(call, "dddd") },
-  { name: "isotime", handler: (call) => now(call, "HH:mm") },
-  { name: "isodate", handler: (call) => now(call, "YYYY-MM-DD") },
-  { name: "datetimeformat", args: [{ name: "format" }], handler: (call) => now(call, call.args[0]!) },
-  { name: "idleDuration", aliases: ["idle_duration"], handler: idleDuration },
+  { name: "date", volatile: true, handler: (call) => now(call, "LL") },
+  { name: "weekday", volatile: true, handler: (call) => now(call, "dddd") },
+  { name: "isotime", volatile: true, handler: (call) => now(call, "HH:mm") },
+  { name: "isodate", volatile: true, handler: (call) => now(call, "YYYY-MM-DD") },
+  { name: "datetimeformat", args: [{ name: "format" }], volatile: true, handler: (call) => now(call, call.args[0]!) },
+  { name: "idleDuration", aliases: ["idle_duration"], volatile: true, handler: idleDuration },
   {
     name: "timeDiff",
     args: [{ name: "left" }, { name: "right" }],

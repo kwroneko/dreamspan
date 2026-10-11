@@ -264,9 +264,17 @@ interface Block {
 }
 
 /** State shared by every evaluation in one expansion, nested ones included. */
+/** Non-deterministic values by where they were drawn (DESIGN §5.6). */
+export type FrozenValues = Readonly<Record<string, string>>
+
 interface Run {
   readonly registry: MacroLookup
   readonly random: () => number
+  readonly frozen: FrozenValues
+  /** Every frozen value used, reused or new. */
+  readonly drawn: Map<string, string>
+  /** How often each draw site has been evaluated, so repeats get their own values. */
+  readonly sites: Map<string, number>
   readonly seen: Set<string>
   /** Expanded card fields by scope: ST expands each once per evaluation. */
   readonly templates: Map<string, string>
@@ -287,11 +295,14 @@ class Expansion {
   private readonly run: Run
   private readonly context: MacroContext
   private readonly contentHash: number
+  /** Which text this is: "" for the one being expanded, else the card field's scope. */
+  private readonly scope: string
 
-  constructor(run: Run, context: MacroContext, content: string) {
+  constructor(run: Run, context: MacroContext, content: string, scope: string) {
     this.run = run
     this.context = context
     this.contentHash = stringHash(content)
+    this.scope = scope
   }
 
   /** ST's MacroEngine.evaluate. `base` is the offset of the text in the outermost one. */
@@ -409,12 +420,29 @@ class Expansion {
         return true
       }
     }
+    const key = entry.volatile ? this.drawKey(entry, offset, args) : undefined
+    const frozen = key !== undefined && Object.hasOwn(this.run.frozen, key) ? this.run.frozen[key] : undefined
+    let value: string
     try {
-      return entry.handler(call)
+      value = typeof frozen === "string" ? frozen : entry.handler(call)
     } catch {
       // ST leaves a macro whose handler fails as written.
       return asWritten
     }
+    if (key !== undefined) this.run.drawn.set(key, value)
+    return value
+  }
+
+  /**
+   * Where a non-deterministic macro was drawn: the text, the offset, the macro and its
+   * arguments, and how many times that site has been evaluated in this expansion. Changed
+   * arguments make a new draw, as does text that moved.
+   */
+  private drawKey(entry: MacroEntry, offset: number, args: ReadonlyArray<string>) {
+    const site = `${this.scope}@${offset}:${entry.id}:${stringHash(args.join("\u0000"))}`
+    const n = this.run.sites.get(site) ?? 0
+    this.run.sites.set(site, n + 1)
+    return n === 0 ? site : `${site}#${n}`
   }
 
   /** ST's baseChatReplace: a separate evaluation of card text, without card fields. */
@@ -422,21 +450,34 @@ class Expansion {
     const cached = this.run.templates.get(scope)
     if (cached !== undefined) return cached
     const { card: _card, original: _original, ...context } = this.context
-    const result = new Expansion(this.run, context, text).evaluate(text, 0)
+    const result = new Expansion(this.run, context, text, scope).evaluate(text, 0)
     this.run.templates.set(scope, result)
     return result
   }
 }
 
-export interface EvaluateOptions {
+interface EvaluateOptions {
   readonly registry: MacroLookup
   readonly context: MacroContext
   readonly random: () => number
+  readonly frozen?: FrozenValues
 }
 
-export const evaluateMacros = (text: string, options: EvaluateOptions): string =>
-  new Expansion(
-    { registry: options.registry, random: options.random, seen: new Set(), templates: new Map() },
-    options.context,
-    text
-  ).evaluate(text, 0)
+interface Evaluated {
+  readonly text: string
+  readonly frozen: FrozenValues
+}
+
+export const evaluateMacros = (text: string, options: EvaluateOptions): Evaluated => {
+  const run: Run = {
+    registry: options.registry,
+    random: options.random,
+    frozen: options.frozen ?? {},
+    drawn: new Map(),
+    sites: new Map(),
+    seen: new Set(),
+    templates: new Map()
+  }
+  const result = new Expansion(run, options.context, text, "").evaluate(text, 0)
+  return { text: result, frozen: Object.fromEntries(run.drawn) }
+}
