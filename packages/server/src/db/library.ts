@@ -8,7 +8,6 @@ import {
   type Doc,
   type EntityKind,
   LibraryRef,
-  MergeConflictInfo,
   type MergeOutcome,
   type RefId,
   type RefKind,
@@ -17,7 +16,7 @@ import {
 import { merge3 } from "@rp/shared/merge.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
-import { NotFound } from "./ops.ts"
+import { NotFound, RefOperationRefused } from "./ops.ts"
 
 export interface RefRow {
   readonly id: string
@@ -32,8 +31,10 @@ export interface RefRow {
   readonly chat_id: string | null
   readonly row_version: number
   readonly updated_at: number
-  /** The head of the followed ref, joined in. */
+  /** The head of the followed ref; for an upstream ref, its latest import. */
   readonly followed_head: string | null
+  /** The followed ref's label; null for an upstream ref. */
+  readonly followed_label: string | null
 }
 
 export const toLibraryRef = (row: RefRow) =>
@@ -52,9 +53,16 @@ export const toLibraryRef = (row: RefRow) =>
     updatedAt: row.updated_at
   })
 
+// An upstream ref follows its imports: the latest import is what it merges in, and its
+// merge base is the import it last merged. So a re-import merges with the user's edits
+// to the upstream the same way a variant merges with its upstream.
 const refSelect = `
   SELECT r.id, r.entity_id, e.kind, r.ref_kind, r.label, r.subtitle, r.head_revision_id, r.follows_ref_id,
-    r.merge_base_revision_id, r.chat_id, r.row_version, r.updated_at, f.head_revision_id AS followed_head
+    r.merge_base_revision_id, r.chat_id, r.row_version, r.updated_at, f.label AS followed_label,
+    CASE WHEN r.ref_kind = 'upstream'
+      THEN (SELECT i.id FROM entity_revisions i WHERE i.entity_id = r.entity_id AND i.origin = 'import'
+            ORDER BY i.seq DESC LIMIT 1)
+      ELSE f.head_revision_id END AS followed_head
   FROM entity_refs r
   JOIN entities e ON e.id = r.entity_id
   LEFT JOIN entity_refs f ON f.id = r.follows_ref_id`
@@ -75,45 +83,62 @@ export const makeLibraryQueries = (sql: SqlClient.SqlClient) => {
       Effect.map(([row]) => JSON.parse(row!.doc_json) as Doc)
     )
 
-  /** What merging `ref` with the ref it follows would do. */
+  /**
+   * The schema version a merge of `ref` with `theirs` produces. There are no per-kind
+   * migrations yet, so documents of different schema versions aren't merged.
+   */
+  const mergeSchemaVersion = (ref: RefRow, theirs: string) =>
+    Effect.gen(function* () {
+      const ids = [ref.head_revision_id, theirs, ref.merge_base_revision_id].filter((id) => id !== null)
+      const versions = yield* sql<{ schema_version: number }>`
+        SELECT DISTINCT schema_version FROM entity_revisions WHERE ${sql.in("id", ids)}`
+      if (versions.length !== 1) {
+        return yield* new RefOperationRefused({
+          refId: ref.id,
+          reason: "These versions have different document schema versions, which can't be merged yet."
+        })
+      }
+      return versions[0]!.schema_version
+    })
+
+  /** What merging `ref` with what it follows would do. */
   const planMerge = (ref: RefRow) =>
     Effect.gen(function* () {
       const theirsHead = ref.followed_head
-      if (theirsHead === null || ref.merge_base_revision_id === null) {
+      if (theirsHead === null || theirsHead === ref.merge_base_revision_id) {
         return {
           outcome: "up_to_date" as MergeOutcome,
           merged: yield* loadDoc(ref.head_revision_id),
           conflicts: [],
-          theirsHead: ref.head_revision_id
-        }
-      }
-      if (theirsHead === ref.merge_base_revision_id) {
-        return {
-          outcome: "up_to_date" as MergeOutcome,
-          merged: yield* loadDoc(ref.head_revision_id),
-          conflicts: [],
-          theirsHead
+          theirsHead: theirsHead ?? ref.head_revision_id,
+          schemaVersion: null
         }
       }
       const theirs = yield* loadDoc(theirsHead)
       // No edits of its own since the last merge: just move to theirs.
       if (ref.head_revision_id === ref.merge_base_revision_id) {
-        return { outcome: "fast_forward" as MergeOutcome, merged: theirs, conflicts: [], theirsHead }
+        return {
+          outcome: "fast_forward" as MergeOutcome,
+          merged: theirs,
+          conflicts: [],
+          theirsHead,
+          schemaVersion: null
+        }
       }
-      const base = yield* loadDoc(ref.merge_base_revision_id)
-      const ours = yield* loadDoc(ref.head_revision_id)
-      const result = merge3(base, ours, theirs)
+      const schemaVersion = yield* mergeSchemaVersion(ref, theirsHead)
+      // An upstream that has no import yet shares no ancestor with its first one.
+      const base = ref.merge_base_revision_id === null ? {} : yield* loadDoc(ref.merge_base_revision_id)
+      const result = merge3(base, yield* loadDoc(ref.head_revision_id), theirs)
       return {
         outcome: (result.conflicts.length > 0 ? "conflicts" : "merged") as MergeOutcome,
         merged: result.value as Doc,
-        conflicts: result.conflicts.map(
-          (c) => new MergeConflictInfo({ path: [...c.path], base: c.base, ours: c.ours, theirs: c.theirs })
-        ),
-        theirsHead
+        conflicts: result.conflicts,
+        theirsHead,
+        schemaVersion
       }
     })
 
-  return { ownedRef, refsWhere, loadDoc, planMerge }
+  return { ownedRef, refsWhere, loadDoc, mergeSchemaVersion, planMerge }
 }
 
 /** JSON with object keys sorted, so equal documents hash equally whatever their key order. */

@@ -80,6 +80,9 @@ export class RefChange extends Schema.Class<RefChange>("RefChange")({
   followers: Schema.Array(FollowerMerge)
 }) {}
 
+/** What merging a ref did, and the change that flowed on from it. */
+export const MergeAndFlow = Schema.Struct({ outcome: MergeOutcome, change: RefChange })
+
 export const StateEventOrigin = Schema.Literals(["user", "rollout", "changeset", "import"])
 
 export class FoldableStateEvent extends Schema.Class<FoldableStateEvent>("FoldableStateEvent")({
@@ -368,7 +371,7 @@ export class WriteOps extends RpcGroup.make(
     success: Schema.Array(Schema.String),
     error: Schema.Union([NotFound, StorageError])
   }),
-  /** Archives or restores an entity. Entities are never deleted. */
+  /** Archives or restores an entity. */
   Rpc.make("SetEntityArchived", {
     payload: { userId: UserId, entityId: EntityId, archived: Schema.Boolean },
     success: Schema.Void,
@@ -399,8 +402,9 @@ export class WriteOps extends RpcGroup.make(
     error: Schema.Union([NotFound, StaleWrite, RefOperationRefused, StorageError])
   }),
   /**
-   * A new upstream version (a re-import). Every ref following it merges the change in,
-   * field by field with diff3 for text; conflicting ones are left as they were and
+   * A new upstream version (a re-import). The upstream ref merges it with the user's own
+   * edits to the upstream (`outcome`), then every ref following it merges the change in,
+   * field by field with diff3 for text. Conflicting refs are left as they were and
    * report `conflicts` (DATA-MODEL §3.2).
    */
   Rpc.make("ImportUpstream", {
@@ -408,16 +412,17 @@ export class WriteOps extends RpcGroup.make(
       userId: UserId,
       refId: RefId,
       doc: Doc,
+      schemaVersion: Schema.Int,
       sourcePath: Schema.NullOr(Schema.String),
       sourceHash: Schema.NullOr(Schema.String)
     },
-    success: RefChange,
+    success: MergeAndFlow,
     error: Schema.Union([NotFound, RefOperationRefused, StorageError])
   }),
   /** Merges in what the ref follows, if it can be done without conflicts. */
   Rpc.make("MergeFollowed", {
     payload: { userId: UserId, refId: RefId },
-    success: Schema.Struct({ outcome: MergeOutcome, change: RefChange }),
+    success: MergeAndFlow,
     error: Schema.Union([NotFound, StorageError])
   }),
   /**

@@ -239,18 +239,19 @@ Layered, versioned documents (DESIGN §4, DATA-MODEL §3) for cards, presets, lo
   - a `variant` follows another ref
   - a `chat_override` follows a ref for one chat only
 - A ref that follows another records the revision it last merged from (`merge_base_revision_id`).
-- **"Update available"** is derived, not stored: the followed ref's head differs from the merge base.
+- **An upstream ref follows its imports.** Imports form their own line of revisions, each one's parent the previous import. The upstream merges the latest import, and its merge base is the import it last merged. So a re-import merges with edits made on the upstream itself, as a variant's merge does.
+- **"Update available"** is derived, not stored: what the ref follows (for an upstream, its latest import) differs from the merge base.
 - Documents are any JSON object for now. Per-kind schemas arrive with the importers (PLAN phase 1).
 - A content hash over canonical JSON (sorted keys) means an edit or re-import that changes nothing creates no revision.
 
 **Operations.**
 - **Writes:**
   - `CreateEntity`
-  - `EditRef`: a new revision on the head, with `expectedRowVersion`
+  - `EditRef`: a new revision on the head, with `expectedRowVersion`. It keeps the head's schema version, and commits its draft even when it changes nothing.
   - `ForkRef`: a new variant
   - `CreateChatOverride`
   - `PromoteOverride`: override to variant
-  - `ImportUpstream`: a new upstream revision
+  - `ImportUpstream`: a new import revision stamped with the given `schemaVersion`, merged into the upstream; it returns the upstream's outcome and its followers'
   - `MergeFollowed`
   - `ResolveMerge`: commit a hand-resolved merge, refused if the followed ref moved again since the preview
   - `SetEntityTags`: folders; `persona` is the persona folder
@@ -261,24 +262,25 @@ Layered, versioned documents (DESIGN §4, DATA-MODEL §3) for cards, presets, lo
   - `RefHistory`: first-parent chain
   - `PreviewMerge`: the resolver's view
   - `ListChatOverrides`
-- **Ownership** is enforced as in §3.8.
+- **Ownership** is enforced as in §3.8. Binned entities and chats are `NotFound`.
 
-**Changes flow to followers.** After any change to a ref (an edit, an import, a merge), every ref following it is merged in turn, transitively: upstream, then variants, then the chat overrides that follow those. Each follower ends as one of:
+**Changes flow to followers.** After any change to a ref (an edit, a merged import, a merge), every ref following it is merged in turn, transitively: upstream, then variants, then the chat overrides that follow those. Each follower ends as one of:
 - **fast-forward:** it had no edits of its own since the last merge, so it simply moves to the new revision, with no merge revision
 - **merged:** a merge revision with two parents
 - **conflicts:** left exactly as it was, with "update available" set until the user resolves it
 
-The outcomes are returned, so the UI can report what happened.
+An upstream merging a new import ends the same ways. The outcomes are returned, so the UI can report what happened.
+
+**Schema versions.** There are no per-kind migrations yet, so documents of different schema versions aren't merged: such a merge counts as conflicts, and `PreviewMerge` and `ResolveMerge` refuse it. A fast-forward still applies.
 
 **Three-way merge** (`merge3`, shared so the server's merge and the resolver's preview always agree):
-- Objects merge per key.
-- **Arrays merge per element when every element has a unique `id`, `identifier` or `uid`.** That covers preset prompts and order, card modules and lorebook entries, so additions on either side survive and deletions apply unless the other side edited the element (then it's a conflict). Order follows ours, with theirs' new elements placed after their predecessor in theirs.
+- Objects merge per key. Only own keys count, so `__proto__` or `constructor` are plain data.
+- **Arrays merge per element when every element has a unique `id`, `identifier` or `uid`.** That covers preset prompts and order, card modules and lorebook entries, so additions on either side survive and deletions apply unless the other side edited the element (then it's a conflict). **Order** follows the side that reordered the elements all three share, or ours if neither did, with the other side's new elements placed after their predecessor there. Both reordering differently is a conflict at the array, and ours' order is kept.
 - Other arrays are atomic.
-- **Text changed on both sides merges word by word** with diff3 (`node-diff3`), keeping whitespace. Edits to different sentences of the same prompt combine; overlapping edits conflict. A conflict keeps ours in the merged value and is reported with its path, e.g. `["prompts", "identifier=main", "content"]`.
+- **Text changed on both sides merges word by word** with diff3 (`node-diff3`), keeping whitespace. Edits to different sentences of the same prompt combine; overlapping edits conflict. A conflict keeps ours in the merged value and is reported with its path, e.g. `["prompts", "identifier=main", "content"]`, and each side's value; a side with no value there (added or deleted) has none.
 - `test/library.test.ts` and `packages/shared/test/merge.test.ts` run the owner's case from DESIGN §4 end to end: a softened impersonation rule and an added `{{summary}}` prompt survive an upstream re-import that rewrote another sentence of the same prompt, changed a sampler and added a prompt.
 
 **Known limits:**
-- Reordering on both sides isn't detected as a conflict (ours wins).
 - Arrays without element identities, like a card's `alternate_greetings` or `tags`, are atomic: changing them on both sides is a conflict.
 - Not built yet: export (flattening a ref to a V2/V3 card), library search, and "used by N chats".
 

@@ -218,10 +218,10 @@ export const makeReadHandlers = Effect.gen(function* () {
     PreviewMerge: ({ userId, refId }) =>
       Effect.gen(function* () {
         const ref = yield* lib.ownedRef(userId, refId)
-        if (ref.follows_ref_id === null) {
+        if (ref.followed_head === null) {
           return yield* new RefOperationRefused({
             refId,
-            reason: "This ref doesn't follow another, so there's nothing to merge."
+            reason: "This ref follows nothing, so there's nothing to merge."
           })
         }
         const plan = yield* lib.planMerge(ref)

@@ -138,6 +138,51 @@ describe("merge3: other shapes", () => {
   })
 })
 
+describe("merge3: order of keyed arrays", () => {
+  const entry = (identifier: string, enabled = true) => ({ identifier, enabled })
+  const base = [entry("main"), entry("nsfw"), entry("jb")]
+  const ids = (value: unknown) => (value as Array<{ identifier: string }>).map((e) => e.identifier)
+
+  it("takes theirs' order when only theirs reordered, keeping ours' edits and additions", () => {
+    const ours = [entry("main"), entry("nsfw", false), entry("summary"), entry("jb")]
+    const theirs = [entry("jb"), entry("main"), entry("nsfw")]
+    const { value, conflicts } = merge3(base, ours, theirs)
+    expect(conflicts).toEqual([])
+    expect(value).toEqual([entry("jb"), entry("main"), entry("nsfw", false), entry("summary")])
+  })
+
+  it("keeps ours' order when only ours reordered", () => {
+    const ours = [entry("jb"), entry("main"), entry("nsfw")]
+    const theirs = [entry("main"), entry("nsfw", false), entry("jb")]
+    expect(ids(merge3(base, ours, theirs).value)).toEqual(["jb", "main", "nsfw"])
+  })
+
+  it("reports a conflict when both sides reordered differently", () => {
+    const ours = [entry("jb"), entry("main"), entry("nsfw")]
+    const theirs = [entry("nsfw"), entry("main"), entry("jb")]
+    const { value, conflicts } = merge3({ order: base }, { order: ours }, { order: theirs })
+    expect(conflicts.map((c) => c.path)).toEqual([["order"]])
+    expect(ids((value as { order: unknown }).order)).toEqual(["jb", "main", "nsfw"])
+  })
+})
+
+describe("merge3: keys named like Object.prototype members", () => {
+  it("merges a __proto__ key as data", () => {
+    const { value, conflicts } = merge3(
+      JSON.parse('{"ext":{"__proto__":{"a":1},"k":1}}'),
+      JSON.parse('{"ext":{"__proto__":{"a":2},"k":1}}'),
+      JSON.parse('{"ext":{"__proto__":{"a":1},"k":2}}')
+    )
+    expect(conflicts).toEqual([])
+    expect(JSON.stringify(value)).toBe('{"ext":{"__proto__":{"a":2},"k":2}}')
+  })
+
+  it("reports conflicts on keys like constructor with no inherited base value", () => {
+    const { conflicts } = merge3({}, { constructor: "mine" }, { constructor: "theirs" })
+    expect(conflicts.map((c) => ({ ...c }))).toEqual([{ path: ["constructor"], ours: "mine", theirs: "theirs" }])
+  })
+})
+
 describe("mergeText", () => {
   it("combines edits to different sentences of one paragraph", () => {
     expect(mergeText("One two. Three four.", "One TWO. Three four.", "One two. Three FOUR.")).toBe(

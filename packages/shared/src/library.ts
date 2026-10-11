@@ -53,17 +53,18 @@ export class Revision extends Schema.Class<Revision>("Revision")({
 export const MergeOutcome = Schema.Literals(["up_to_date", "fast_forward", "merged", "conflicts"])
 export type MergeOutcome = typeof MergeOutcome.Type
 
+/** A conflict's value on each side; a side with no value there (added or deleted) has none. */
 export class MergeConflictInfo extends Schema.Class<MergeConflictInfo>("MergeConflictInfo")({
   path: Schema.Array(Schema.Union([Schema.String, Schema.Number])),
-  base: Schema.Unknown,
-  ours: Schema.Unknown,
-  theirs: Schema.Unknown
+  base: Schema.optionalKey(Schema.Unknown),
+  ours: Schema.optionalKey(Schema.Unknown),
+  theirs: Schema.optionalKey(Schema.Unknown)
 }) {}
 
 /** What merging a ref with the one it follows would do, for the resolver UI. */
 export class MergePreview extends Schema.Class<MergePreview>("MergePreview")({
   outcome: MergeOutcome,
-  /** The merged document; at conflicts it holds ours. */
+  /** The merged document: the clean changes merged, and ours at each conflict. */
   merged: Doc,
   conflicts: Schema.Array(MergeConflictInfo),
   /** The followed ref's head that this preview merged in. */

@@ -4,6 +4,7 @@ import { mkdtempSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { assert, describe, it } from "@effect/vitest"
+import { DraftKey } from "@rp/shared/drafts.ts"
 import type { Doc, RefId } from "@rp/shared/library.ts"
 import { Effect } from "effect"
 import * as Database from "../src/db/Database.ts"
@@ -21,6 +22,13 @@ const preset = (main: string, extra: ReadonlyArray<{ identifier: string; content
   samplers: { temperature },
   prompts: [{ identifier: "main", content: main }, ...extra]
 })
+
+/** The tag of the error an operation fails with. */
+const tag = <A, E extends { _tag: string }, R>(effect: Effect.Effect<A, E, R>) =>
+  effect.pipe(
+    Effect.flip,
+    Effect.map((e) => e._tag)
+  )
 
 const MAIN = "You are {{char}}. Write vivid prose. Do not impersonate {{user}} or speak for them."
 
@@ -47,8 +55,15 @@ const setup = (handle = "ana") =>
       Effect.flatMap(rowVersion(refId), (expectedRowVersion) =>
         writer.EditRef({ userId, refId, doc: d, expectedRowVersion, message: null, commitDraft: null })
       )
-    const reimport = (d: Doc) =>
-      writer.ImportUpstream({ userId, refId: imported.ref.id, doc: d, sourcePath: null, sourceHash: null })
+    const reimport = (d: Doc, schemaVersion = 1) =>
+      writer.ImportUpstream({
+        userId,
+        refId: imported.ref.id,
+        doc: d,
+        schemaVersion,
+        sourcePath: null,
+        sourceHash: null
+      })
     return { writer, reader, userId, upstream: imported.ref, get, doc, rowVersion, edit, reimport }
   })
 
@@ -86,7 +101,7 @@ describe("library", () => {
 
       // Upstream v2 rewrites the first sentence and lowers the temperature.
       const v2 = preset(MAIN.replace("You are {{char}}.", "You are {{char}}, the narrator."), [], 0.8)
-      const change = yield* reimport(v2)
+      const { change } = yield* reimport(v2)
       assert.deepStrictEqual(
         change.followers.map((f) => [f.refId, f.outcome]),
         [
@@ -130,7 +145,7 @@ describe("library", () => {
         "Do not impersonate {{user}} or speak for them.",
         "Never write {{user}}'s actions."
       )
-      const change = yield* reimport(preset(theirMain, [], 0.8))
+      const { change } = yield* reimport(preset(theirMain, [], 0.8))
 
       assert.deepStrictEqual(
         change.followers.map((f) => f.outcome),
@@ -202,7 +217,7 @@ describe("library", () => {
       // A story change for this chat only.
       yield* edit(override.id, preset(MAIN, [{ identifier: "scene", content: "It is raining." }]))
 
-      const change = yield* reimport(preset(MAIN, [], 0.5))
+      const { change } = yield* reimport(preset(MAIN, [], 0.5))
       assert.deepStrictEqual(
         change.followers.map((f) => [f.refId, f.outcome]),
         [
@@ -240,11 +255,6 @@ describe("library", () => {
     Effect.gen(function* () {
       const ana = yield* setup("ana")
       const bob = yield* setup("bob")
-      const tag = <A, E extends { _tag: string }, R>(effect: Effect.Effect<A, E, R>) =>
-        effect.pipe(
-          Effect.flip,
-          Effect.map((e) => e._tag)
-        )
       const variant = yield* ana.writer.ForkRef({
         userId: ana.userId,
         refId: ana.upstream.id,
@@ -271,6 +281,7 @@ describe("library", () => {
             userId: ana.userId,
             refId: variant.id,
             doc: {},
+            schemaVersion: 1,
             sourcePath: null,
             sourceHash: null
           })
@@ -326,6 +337,182 @@ describe("library", () => {
       yield* writer.SetEntityArchived({ userId, entityId: mira.entityId, archived: true })
       assert.deepStrictEqual(yield* list(null), ["Me"])
       assert.deepStrictEqual(yield* list(null, true), ["Mira"])
+    }).pipe(Effect.provide(database()))
+  )
+
+  it.live("a re-import merges with edits made on the upstream itself; a conflict waits for the user", () =>
+    Effect.gen(function* () {
+      const { writer, reader, userId, upstream, doc, edit, reimport, rowVersion } = yield* setup()
+      const variant = yield* writer.ForkRef({ userId, refId: upstream.id, label: "Narrator", subtitle: "as is" })
+      const summary = { identifier: "summary", content: "{{summary}}" }
+      yield* edit(upstream.id, preset(MAIN, [summary]))
+
+      const v2 = MAIN.replace("You are {{char}}.", "You are {{char}}, the narrator.")
+      const merged = yield* reimport(preset(v2))
+      assert.strictEqual(merged.outcome, "merged")
+      assert.deepStrictEqual(yield* doc(upstream.id), preset(v2, [summary]))
+      assert.deepStrictEqual(
+        merged.change.followers.map((f) => [f.refId, f.outcome]),
+        [[variant.id, "fast_forward"]]
+      )
+      assert.deepStrictEqual(yield* doc(variant.id), preset(v2, [summary]))
+
+      // The user rewrites a sentence that the next version rewrites too.
+      const mine = v2.replace("Write vivid prose.", "Write terse prose.")
+      yield* edit(upstream.id, preset(mine, [summary]))
+      const conflicted = yield* reimport(preset(v2.replace("Write vivid prose.", "Write lush prose.")))
+      assert.strictEqual(conflicted.outcome, "conflicts")
+      assert.deepStrictEqual(conflicted.change.followers, [])
+      assert.isTrue(conflicted.change.ref.updateAvailable)
+      assert.deepStrictEqual(yield* doc(upstream.id), preset(mine, [summary]))
+
+      const preview = yield* reader.PreviewMerge({ userId, refId: upstream.id })
+      assert.deepStrictEqual(
+        preview.conflicts.map((c) => c.path),
+        [["prompts", "identifier=main", "content"]]
+      )
+      const resolved = yield* writer.ResolveMerge({
+        userId,
+        refId: upstream.id,
+        doc: preview.merged,
+        theirsRevisionId: preview.theirsRevisionId,
+        expectedRowVersion: yield* rowVersion(upstream.id)
+      })
+      assert.isFalse(resolved.ref.updateAvailable)
+      assert.deepStrictEqual(yield* doc(upstream.id), preset(mine, [summary]))
+      // The import it resolved against is now the base: importing it again changes nothing.
+      const again = yield* reimport(preset(v2.replace("Write vivid prose.", "Write lush prose.")))
+      assert.strictEqual(again.outcome, "up_to_date")
+      assert.strictEqual(again.change.ref.headRevisionId, resolved.ref.headRevisionId)
+    }).pipe(Effect.provide(database()))
+  )
+
+  it.live("keys named like Object.prototype members merge as plain data", () =>
+    Effect.gen(function* () {
+      const { writer, reader, userId, doc, edit } = yield* setup()
+      const entity = (d: Doc) =>
+        writer.CreateEntity({
+          userId,
+          kind: "card",
+          label: "Card",
+          subtitle: "",
+          doc: d,
+          schemaVersion: 1,
+          origin: "import",
+          sourcePath: null
+        })
+      const reimport = (refId: RefId, d: Doc) =>
+        writer.ImportUpstream({ userId, refId, doc: d, schemaVersion: 1, sourcePath: null, sourceHash: null })
+
+      // JSON.parse makes `__proto__` an own key, as it is in an imported file.
+      const proto = yield* entity(JSON.parse('{"ext":{"__proto__":{"a":1},"k":1}}'))
+      const protoVariant = yield* writer.ForkRef({ userId, refId: proto.ref.id, label: "Card", subtitle: "v" })
+      yield* edit(protoVariant.id, JSON.parse('{"ext":{"__proto__":{"a":2},"k":1}}'))
+      const protoChange = yield* reimport(proto.ref.id, JSON.parse('{"ext":{"__proto__":{"a":1},"k":2}}'))
+      assert.deepStrictEqual(
+        protoChange.change.followers.map((f) => f.outcome),
+        ["merged"]
+      )
+      assert.strictEqual(JSON.stringify(yield* doc(protoVariant.id)), '{"ext":{"__proto__":{"a":2},"k":2}}')
+
+      const named = yield* entity({ x: 1 })
+      const namedVariant = yield* writer.ForkRef({ userId, refId: named.ref.id, label: "Card", subtitle: "v" })
+      yield* edit(namedVariant.id, { x: 1, constructor: "mine", toString: "mine", valueOf: "mine" })
+      yield* reimport(named.ref.id, { x: 1, constructor: "theirs", toString: "theirs", valueOf: "theirs" })
+      const preview = yield* reader.PreviewMerge({ userId, refId: namedVariant.id })
+      assert.deepStrictEqual(
+        preview.conflicts.map((c) => [c.path, c.base, c.ours, c.theirs]),
+        [
+          [["constructor"], undefined, "mine", "theirs"],
+          [["toString"], undefined, "mine", "theirs"],
+          [["valueOf"], undefined, "mine", "theirs"]
+        ]
+      )
+    }).pipe(Effect.provide(database()))
+  )
+
+  it.live("documents of different schema versions aren't merged", () =>
+    Effect.gen(function* () {
+      const { writer, reader, userId, upstream, doc, edit, reimport, rowVersion } = yield* setup()
+      const pristine = yield* writer.ForkRef({ userId, refId: upstream.id, label: "Narrator", subtitle: "as is" })
+      const mine = yield* writer.ForkRef({ userId, refId: upstream.id, label: "Narrator", subtitle: "mine" })
+      yield* edit(mine.id, preset(MAIN, [], 0.7))
+
+      const v2 = preset(MAIN, [{ identifier: "style", content: "Short paragraphs." }])
+      const { change } = yield* reimport(v2, 2)
+      assert.deepStrictEqual(
+        change.followers.map((f) => [f.refId, f.outcome]),
+        [
+          [pristine.id, "fast_forward"],
+          [mine.id, "conflicts"]
+        ]
+      )
+      assert.deepStrictEqual(yield* doc(mine.id), preset(MAIN, [], 0.7))
+      assert.strictEqual(yield* tag(reader.PreviewMerge({ userId, refId: mine.id })), "RefOperationRefused")
+      assert.strictEqual(
+        yield* tag(
+          writer.ResolveMerge({
+            userId,
+            refId: mine.id,
+            doc: v2,
+            theirsRevisionId: change.ref.headRevisionId,
+            expectedRowVersion: yield* rowVersion(mine.id)
+          })
+        ),
+        "RefOperationRefused"
+      )
+    }).pipe(Effect.provide(database()))
+  )
+
+  it.live("an edit that changes nothing still commits its draft", () =>
+    Effect.gen(function* () {
+      const { writer, reader, userId, upstream, rowVersion } = yield* setup()
+      const key = new DraftKey({ targetKind: "entity_field", targetId: upstream.id, field: "/name" })
+      const draft = yield* writer.SaveDraft({
+        userId,
+        key,
+        content: "Narrator",
+        expectedRowVersion: null,
+        baseRevision: upstream.headRevisionId
+      })
+      yield* writer.EditRef({
+        userId,
+        refId: upstream.id,
+        doc: preset(MAIN),
+        expectedRowVersion: yield* rowVersion(upstream.id),
+        message: null,
+        commitDraft: { key, expectedRowVersion: draft.rowVersion }
+      })
+      assert.strictEqual((yield* reader.GetDraft({ userId, key }))?.status, "committed")
+    }).pipe(Effect.provide(database()))
+  )
+
+  it.live("binned entities and chats can't be tagged, archived or overridden", () =>
+    Effect.gen(function* () {
+      const { writer, userId, upstream } = yield* setup()
+      const chat = yield* writer.CreateChat({
+        userId,
+        kind: "rp",
+        status: "active",
+        title: "",
+        participants: [],
+        greeting: null
+      })
+      yield* writer.DeleteChat({ userId, chatId: chat.id })
+      assert.strictEqual(
+        yield* tag(writer.CreateChatOverride({ userId, refId: upstream.id, chatId: chat.id })),
+        "NotFound"
+      )
+
+      yield* writer.DeleteEntity({ userId, entityId: upstream.entityId })
+      assert.strictEqual(
+        yield* tag(writer.SetEntityTags({ userId, entityId: upstream.entityId, tags: ["x"] })),
+        "NotFound"
+      )
+      assert.strictEqual(
+        yield* tag(writer.SetEntityArchived({ userId, entityId: upstream.entityId, archived: true })),
+        "NotFound"
+      )
     }).pipe(Effect.provide(database()))
   )
 })
