@@ -7,9 +7,11 @@
 //
 // Only containers this harness created are ever removed: by exact name, or, for those left
 // behind by a run that was killed, by our label when the process that made them is gone.
+// The label names the process by PID namespace and PID, so a run in another namespace
+// (a sandbox, a dev container) never takes a live run of ours for an orphan.
 import { execFileSync, spawnSync } from "node:child_process"
 import { randomBytes } from "node:crypto"
-import { mkdirSync, writeFileSync } from "node:fs"
+import { mkdirSync, readlinkSync, writeFileSync } from "node:fs"
 import { createServer } from "node:net"
 import { join } from "node:path"
 
@@ -17,15 +19,14 @@ export const ST_VERSION = "1.19.0"
 export const ST_IMAGE =
   "ghcr.io/sillytavern/sillytavern@sha256:eef27ff0c7961f1a2f488400f581f48ff38f8b910c5d3b8d389138d71791bb14"
 
-const LABEL = "rp-harness.st-diff.pid"
+const LABEL = "rp-harness.st-diff.owner"
+const PID_NAMESPACE = readlinkSync("/proc/self/ns/pid")
 
 export interface StContainer {
   readonly name: string
   readonly url: string
   /** The host path of ST's `default-user` directory. */
   readonly userDir: string
-  readonly logs: () => string
-  readonly stop: () => void
 }
 
 const docker = (args: ReadonlyArray<string>) =>
@@ -56,8 +57,10 @@ const alive = (pid: number) => {
 export const removeOrphans = () => {
   const rows = docker(["ps", "-a", "--filter", `label=${LABEL}`, "--format", `{{.ID}} {{.Label "${LABEL}"}}`])
   for (const row of rows.split("\n").filter(Boolean)) {
-    const [id, pid] = row.split(" ")
-    if (id && pid && !alive(Number(pid))) spawnSync("docker", ["rm", "-f", id], { stdio: "ignore" })
+    const [id, owner = ""] = row.split(" ")
+    const at = owner.lastIndexOf("/")
+    const [namespace, pid] = [owner.slice(0, at), Number(owner.slice(at + 1))]
+    if (id && namespace === PID_NAMESPACE && !alive(pid)) spawnSync("docker", ["rm", "-f", id], { stdio: "ignore" })
   }
 }
 
@@ -66,7 +69,7 @@ const config = (port: number) => `dataRoot: ./data
 listen: true
 listenAddress:
   ipv4: 127.0.0.1
-  ipv6: '[::1]'
+  ipv6: '::1'
 protocol:
   ipv4: true
   ipv6: false
@@ -126,7 +129,7 @@ export const startSt = async (
     "--name",
     name,
     "--label",
-    `${LABEL}=${process.pid}`,
+    `${LABEL}=${PID_NAMESPACE}/${process.pid}`,
     "--network",
     "host",
     "--user",
@@ -141,7 +144,7 @@ export const startSt = async (
     "--listenAddressIPv4",
     "127.0.0.1"
   ])
-  const container = { name, url: `http://127.0.0.1:${port}`, userDir: join(dataDir, "default-user"), logs, stop }
+  const container = { name, url: `http://127.0.0.1:${port}`, userDir: join(dataDir, "default-user") }
 
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {

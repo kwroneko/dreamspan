@@ -5,6 +5,8 @@ export interface Section {
   /** What the comparison ran on, for context. */
   readonly notes: ReadonlyArray<string>
   readonly differences: ReadonlyArray<string>
+  /** Why these differences are expected: they're listed, but don't fail the run. */
+  readonly expected?: string
 }
 
 const MAX_TEXT = 160
@@ -38,17 +40,17 @@ export const diffJson = (left: unknown, right: unknown, path = ""): Array<string
   return [`${path || "(root)"}: ${show(left)} ≠ ${show(right)}`]
 }
 
-/** Prints the report and returns how many differences it lists. */
+/** Prints the report and returns how many unexpected differences it lists. */
 export const printReport = (sections: ReadonlyArray<Section>) => {
   let total = 0
   for (const section of sections) {
-    total += section.differences.length
-    console.log(
-      `\n== ${section.title}: ${section.differences.length === 0 ? "same" : `${section.differences.length} differences`}`
-    )
+    const count = section.differences.length
+    if (section.expected === undefined) total += count
+    const expected = section.expected === undefined || count === 0 ? "" : ` (expected: ${section.expected})`
+    console.log(`\n== ${section.title}: ${count === 0 ? "same" : `${count} differences`}${expected}`)
     for (const note of section.notes) console.log(`   ${note}`)
     for (const difference of section.differences) console.log(` - ${difference}`)
   }
-  console.log(`\n${total === 0 ? "No differences." : `${total} differences in all.`}`)
+  console.log(`\n${total === 0 ? "No unexpected differences." : `${total} unexpected differences.`}`)
   return total
 }

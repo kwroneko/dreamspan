@@ -10,9 +10,9 @@ import {
   seededRandom
 } from "./macroVectors.ts"
 import type { MockEndpoint } from "./mock.ts"
-import { expandWithOurs, OUR_ENGINE } from "./ourMacros.ts"
+import { expandWithOurs, OUR_ENGINE, OUR_ENGINE_IS_STUB } from "./ourMacros.ts"
 import { diffJson, type Section } from "./report.ts"
-import { captureRequest, evaluateMacros } from "./st.ts"
+import { captureRequest, evaluateMacros, savePoisonPreset } from "./st.ts"
 
 /** What the user sends in every capture: it mentions the lantern, a lorebook keyword. */
 const MESSAGE = "Where does the lantern lead?"
@@ -28,7 +28,7 @@ export const checkFixtures = async (
   fixtures: FixtureSet
 ): Promise<Section> => {
   const chat = fixtures.chats[0]!
-  const body = await captureRequest(browser, url, mock, { preset: null, character: chat.card, message: MESSAGE })
+  const body = await captureRequest(browser, url, mock, { presets: [], character: chat.card, message: MESSAGE })
   const sent = JSON.stringify(body)
   const expected = [...fixtures.expectedInPrompt, ...chat.lines.map((line) => line.mes), MESSAGE]
   return {
@@ -49,7 +49,6 @@ export const compareMacros = async (browser: Browser, url: string, fixtures: Fix
   const st = await evaluateMacros(browser, url, {
     character: fixtures.chats[0]!.card,
     now: MACRO_NOW,
-    engine: "experimental",
     seed: MACRO_SEED,
     vectors
   })
@@ -65,19 +64,19 @@ export const compareMacros = async (browser: Browser, url: string, fixtures: Fix
   })
   return {
     title: "Macros: ST ≠ ours",
-    notes: [
-      `${vectors.length} vectors; ST's new engine (on by default in a fresh install: ${st.engineOnByDefault})`,
-      `ours: ${OUR_ENGINE}`
-    ],
-    differences
+    notes: [`${vectors.length} vectors; ST's new engine on: ${st.newEngine}`, `ours: ${OUR_ENGINE}`],
+    differences,
+    ...(OUR_ENGINE_IS_STUB ? { expected: "our engine is a stub" } : {})
   }
 }
 
 /**
  * Each preset file against its round trip through our importer and exporter: ST must send
- * the same request for both. Every capture starts a fresh page from the baseline settings.
- * The file is captured twice, so a difference between those two marks the capture itself
- * as unstable rather than the round trip as lossy.
+ * the same request for both. The file is loaded over the baseline settings, a fresh
+ * install's; the round trip over a poison preset (`savePoisonPreset`). Our importer gives
+ * a field the file lacks ST's default, as a fresh ST does, so the two only match if the
+ * round trip carries every setting ST applies: one it drops keeps its poisoned value.
+ * The file is captured twice, so an unstable capture isn't taken for a lossy round trip.
  */
 export const comparePresetRoundTrips = async (
   browser: Browser,
@@ -86,27 +85,28 @@ export const comparePresetRoundTrips = async (
   fixtures: FixtureSet
 ): Promise<Section> => {
   const character = fixtures.chats[0]!.card
-  const capture = (preset: string) => captureRequest(browser, url, mock, { preset, character, message: MESSAGE })
-  const notes: Array<string> = []
-  const differences: Array<string> = []
-  const baseline = await captureRequest(browser, url, mock, { preset: null, character, message: MESSAGE })
+  const capture = (...presets: ReadonlyArray<string>) =>
+    captureRequest(browser, url, mock, { presets, character, message: MESSAGE })
+  const poison = "st-diff poison"
+  const settings = await savePoisonPreset(browser, url, poison)
+  const baseline = await capture()
+  const poisoned = diffJson(baseline, await capture(poison)).length
+  const notes = [`the poison preset has ${settings} settings and changes ${poisoned} values of the baseline request`]
+  const differences = poisoned === 0 ? ["the poison preset changed nothing; was it applied?"] : []
   for (const preset of fixtures.presetRoundTrips) {
     const original = await capture(preset.name)
     const again = await capture(preset.name)
-    const roundTrip = await capture(preset.roundTripName)
+    const roundTrip = await capture(poison, preset.roundTripName)
     const changed = diffJson(baseline, original).length
-    const unstable = diffJson(original, again)
-    const lost = diffJson(original, roundTrip)
     const messages = (original as { messages?: ReadonlyArray<unknown> }).messages?.length ?? 0
     notes.push(
       `${preset.name}: ${messages} messages sent, ${changed} differences from the baseline, ${preset.issues} import issues`
     )
-    // A preset that didn't change the request was probably never applied, and would
-    // compare equal to anything.
+    // A preset that didn't change the request was probably never applied.
     if (changed === 0) differences.push(`${preset.name}: the request is the baseline's; was the preset applied?`)
     differences.push(
-      ...unstable.map((line) => `${preset.name}, captured twice: ${line}`),
-      ...lost.map((line) => `${preset.name}, file ≠ round trip: ${line}`)
+      ...diffJson(original, again).map((line) => `${preset.name}, captured twice: ${line}`),
+      ...diffJson(original, roundTrip).map((line) => `${preset.name}, file ≠ round trip: ${line}`)
     )
   }
   return { title: "Preset round trips: the request ST sends", notes, differences }

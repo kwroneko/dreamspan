@@ -25,7 +25,12 @@ interface StContext {
   readonly getRequestHeaders: (options?: { omitContentType?: boolean }) => Record<string, string>
   readonly chatMetadata: { variables?: Record<string, unknown> }
   readonly extensionSettings: { variables: { global: Record<string, unknown> } }
-  readonly powerUserSettings: { experimental_macro_engine: boolean }
+  readonly powerUserSettings: { readonly experimental_macro_engine: boolean }
+  /** The chat-completion settings in force (`oai_settings`). */
+  readonly chatCompletionSettings: Record<string, unknown> & {
+    readonly prompts: ReadonlyArray<{ readonly content?: string }>
+    readonly prompt_order: ReadonlyArray<{ readonly order: ReadonlyArray<{ readonly enabled: boolean }> }>
+  }
   /** ST's macro entry point. With an options object it uses the engine `experimental_macro_engine` selects. */
   readonly substituteParams: (text: string, options: { name1Override: string; name2Override: string }) => string
 }
@@ -194,9 +199,57 @@ export const loadFixtures = async (browser: Browser, url: string, fixtures: Fixt
   }
 }
 
+/**
+ * Saves a preset in which every setting ST applies from a preset differs from the baseline:
+ * numbers + 1, flags flipped, text marked, prompt text marked, every order entry toggled.
+ * The settings are ST's own list (`settingsToUpdate` in openai.js, the module instance the
+ * page runs), less the connection ones it doesn't apply here. ST applies only the settings
+ * a preset has, so a preset loaded over this one shows any it lacks as a poisoned value.
+ * Returns how many settings were poisoned.
+ */
+export const savePoisonPreset = async (browser: Browser, url: string, name: string) => {
+  const page = await openPage(browser, url, { readOnly: false })
+  try {
+    return await page.evaluate(async (name) => {
+      const ctx = SillyTavern.getContext()
+      const module = "/scripts/openai.js"
+      const { settingsToUpdate } = (await import(module)) as {
+        settingsToUpdate: Record<string, readonly [string, string, boolean, boolean]>
+      }
+      const settings = ctx.chatCompletionSettings
+      const poison = (value: unknown) =>
+        typeof value === "number"
+          ? value + 1
+          : typeof value === "boolean"
+            ? !value
+            : typeof value === "string"
+              ? `${value} [poison]`
+              : undefined
+      const preset: Record<string, unknown> = {}
+      for (const [key, [, setting, , connection]] of Object.entries(settingsToUpdate)) {
+        if (!connection) preset[key] = poison(settings[setting])
+      }
+      preset.prompts = settings.prompts.map((prompt) => ({ ...prompt, content: `${prompt.content ?? ""} [poison]` }))
+      preset.prompt_order = settings.prompt_order.map((list) => ({
+        ...list,
+        order: list.order.map((entry) => ({ ...entry, enabled: !entry.enabled }))
+      }))
+      const response = await fetch("/api/presets/save", {
+        method: "POST",
+        headers: ctx.getRequestHeaders(),
+        body: JSON.stringify({ apiId: "openai", name, preset })
+      })
+      if (!response.ok) throw new Error(`/api/presets/save: ${response.status}`)
+      return Object.values(preset).filter((value) => value !== undefined).length
+    }, name)
+  } finally {
+    await page.context().close()
+  }
+}
+
 export interface Capture {
-  /** A preset loaded into ST, by name, or null for the baseline settings. */
-  readonly preset: string | null
+  /** Presets loaded into ST one after another, by name; none for the baseline settings. */
+  readonly presets: ReadonlyArray<string>
   readonly character: string
   /** What the user sends. */
   readonly message: string
@@ -222,7 +275,7 @@ const selectPreset = (page: Page, name: string) =>
   }, name)
 
 /**
- * Opens the character's chat in a fresh page, selects the preset, sends the message and
+ * Opens the character's chat in a fresh page, selects the presets, sends the message and
  * returns the request body the mock received. The page saves nothing, so every capture
  * starts from the same chat and settings.
  */
@@ -232,7 +285,7 @@ export const captureRequest = async (browser: Browser, url: string, mock: MockEn
   page.on("pageerror", (error) => errors.push(error.message))
   try {
     await page.waitForFunction(() => SillyTavern.getContext().onlineStatus !== "no_connection")
-    if (capture.preset !== null) await selectPreset(page, capture.preset)
+    for (const preset of capture.presets) await selectPreset(page, preset)
     await openChat(page, capture.character)
     const next = mock.nextCompletion()
     await page.fill("#send_textarea", capture.message)
@@ -252,9 +305,10 @@ export const captureRequest = async (browser: Browser, url: string, mock: MockEn
 
 /**
  * Expands each text with ST's own macro engine, through `substituteParams`, the entry point
- * ST's prompt building uses, with the character's chat open. Before each text the
- * variables are set from its context and `Math.random` is reseeded (`seededRandom`).
- * `engine` picks ST's engine; a fresh 1.19 install has the new one on.
+ * ST's prompt building uses, with the character's chat open. With an options object it runs
+ * the new engine when `experimental_macro_engine` is on, as it is in a fresh 1.19 install.
+ * Before each text the variables are set from its context and `Math.random` is reseeded
+ * (`seededRandom`).
  */
 export const evaluateMacros = async (
   browser: Browser,
@@ -262,20 +316,17 @@ export const evaluateMacros = async (
   options: {
     readonly character: string
     readonly now: number
-    readonly engine: "experimental" | "legacy"
     readonly seed: number
     readonly vectors: ReadonlyArray<{ readonly text: string; readonly context: MacroContextInput }>
   }
-): Promise<{ readonly engineOnByDefault: boolean; readonly outcomes: ReadonlyArray<MacroOutcome> }> => {
+): Promise<{ readonly newEngine: boolean; readonly outcomes: ReadonlyArray<MacroOutcome> }> => {
   const page = await openPage(browser, url, { readOnly: true, now: options.now })
   try {
     await openChat(page, options.character)
     return await page.evaluate(
-      ({ vectors, engine, random, seed }) => {
+      ({ vectors, random, seed }) => {
         const makeRandom = (0, eval)(`(${random})`) as (seed: number) => () => number
         const ctx = SillyTavern.getContext()
-        const engineOnByDefault = ctx.powerUserSettings.experimental_macro_engine
-        ctx.powerUserSettings.experimental_macro_engine = engine === "experimental"
         const outcomes = vectors.map(({ text, context }) => {
           Math.random = makeRandom(seed)
           ctx.chatMetadata.variables = { ...context.local }
@@ -287,9 +338,9 @@ export const evaluateMacros = async (
             global: { ...ctx.extensionSettings.variables.global }
           }
         })
-        return { engineOnByDefault, outcomes }
+        return { newEngine: ctx.powerUserSettings.experimental_macro_engine, outcomes }
       },
-      { vectors: options.vectors, engine: options.engine, random: String(seededRandom), seed: options.seed }
+      { vectors: options.vectors, random: String(seededRandom), seed: options.seed }
     )
   } finally {
     await page.context().close()
