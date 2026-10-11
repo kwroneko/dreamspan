@@ -113,17 +113,18 @@ users ──< user_prefs, drafts       └──  jobs (summarization, idle-time
 
 ### 3.3 Normalized documents (sketch)
 - **card**:
-  - `name` (the in-chat name), `description`, `personality`, `scenario`, `first_mes`, `alternate_greetings[]`, `mes_example`, `system_prompt`, `post_history_instructions`, `creator_notes`, `tags`, `creator`, `version`
+  - `name` (the in-chat name), `description`, `personality`, `scenario`, `first_mes`, `alternate_greetings[]`, `mes_example`, `system_prompt`, `post_history_instructions`, `creator_notes`, `tags`, `creator`, `character_version`, and V3's `group_only_greetings[]`, `nickname`, `creator_notes_multilingual`, `source`, `creation_date`, `modification_date`, `assets[]`
   - `avatar_media_id`
   - `character_book` (an embedded lorebook document)
   - `modules[]`: `{id, title, content, exportable}` (card modules, DESIGN §4.1)
-  - `extensions{}`: unknown V2/V3 fields, preserved verbatim for lossless round trips
+  - `extensions{}`: the card's `data.extensions`, preserved verbatim
+  - `unknown_fields{}`, `unknown_root_fields{}`: keys the specs don't define, in `data` and at the top level, preserved verbatim for lossless round trips
 - **preset**:
   - `prompts[]` (`identifier`, `name`, `role`, `content`, `system_prompt`, `marker`, `injection_position`, `injection_depth`, `injection_order`, `forbid_overrides`, …)
   - `order[]` (the prompt order with enabled flags; we keep one order rather than ST's per-character order lists, and import the active one)
   - `samplers{}`, `postprocess`, `prefill{assistant, continue}`, `regex[]`, `squash`, `names_behavior`, …
   - `unsupported{}`: everything the importer couldn't represent, kept for export and for the import report
-- **lorebook**: `entries[]` (`keys`, `secondary_keys`, `content`, `constant`, `position`, `depth`, `order`, `probability`, `group`, `sticky`, `cooldown`, `delay`, `enabled`, …) plus our own fields (`decision_hint`, `placement_override`).
+- **lorebook**: `entries[]` (`keys`, `secondary_keys`, `content`, `constant`, `position`, `depth`, `order`, `probability`, `group`, `sticky`, `cooldown`, `delay`, `enabled`, …, ST's World Info entry fields in snake_case) plus our own fields (`decision_hint`, `placement_override`). The same document is a card's embedded `character_book`.
 - **note**:
   - `title`, `content`
   - `placement`: `{mode: tail|depth|section, depth?, role?}`
@@ -132,7 +133,7 @@ users ──< user_prefs, drafts       └──  jobs (summarization, idle-time
   - `exportable`
 - **preset_overlay**: `ops[]` applied to whatever preset is active: `toggle(identifier, on)`, `replace(identifier, content)`, `append(identifier, text)`, `insert(after_identifier, prompt)`. It's attached to a card (the owner) and applied under a condition (DESIGN §6.3). It's stored as operations rather than a snapshot, because it has to apply to presets it has never seen.
 
-The documents are validated with TypeBox schemas (as in reference-harness). Each document has a `schema_version` so it can be migrated.
+The documents are validated with Effect Schema (reference-harness uses TypeBox; this codebase uses Effect throughout). Each document has a `schema_version` so it can be migrated. Card and lorebook schemas are in `@rp/shared/docs/` (ARCHITECTURE.md §8).
 
 ---
 

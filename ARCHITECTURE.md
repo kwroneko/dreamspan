@@ -12,7 +12,7 @@ npm workspaces, TypeScript, ESM throughout.
 
 | Path | Contents |
 |---|---|
-| `packages/shared` | Code used by both server and client: the client-facing RPC contract (`api.ts`), its errors (`errors.ts`), and the domain schemas and pure logic (users, chats and state, library and merge, drafts, the bin, providers and usage), plus UUIDv7 ids (`id.ts`). Imported as `@rp/shared/<file>.ts`. |
+| `packages/shared` | Code used by both server and client: the client-facing RPC contract (`api.ts`), its errors (`errors.ts`), and the domain schemas and pure logic (users, chats and state, library and merge, card and lorebook documents, drafts, the bin, providers and usage), plus UUIDv7 ids (`id.ts`). Imported as `@rp/shared/<file>.ts`. |
 | `packages/server` | The Node server: HTTP, RPC over WebSocket, authentication, the database workers. |
 | `packages/client` | The React single-page app, built with Vite and served by the server. |
 | `spikes/` | Throwaway experiments with their findings (not part of the build). |
@@ -662,3 +662,13 @@ It fails with a typed `ProviderError`.
   - Publishing beyond loopback (`-p 8080:8080`) makes the gateway allowlist unsafe: where Docker doesn't pass the client's address through (rootless Docker's default port driver, `docker-proxy` for IPv6 clients), outside clients also appear to come from it.
   - **The health check** fetches `127.0.0.1` on `PORT` inside the container. In proxy mode with `TRUSTED_PROXIES` set, add `127.0.0.1` to the list, or the container reports unhealthy. Inside a container, loopback is only the container's own processes, which can read `/data` and the server secret anyway.
 - The image is about 325 MB on disk, unoptimized so far: it installs every workspace's production dependencies. Memory at idle is about 188 MB.
+
+---
+
+## 8. Import formats: cards and lorebooks
+
+**Documents** (`@rp/shared/docs/`, Effect Schema). Each has a `schema_version`.
+- **Cards** (`card.ts`): the union of Character Card V2 and V3, in the specs' field names, plus card modules (`modules[]`, DESIGN §4.1).
+  - `extensions` is the card's `data.extensions`, verbatim, so `extensions.<plugin-id>` survives (PLUGINS §3.3).
+  - Keys the specs don't define are kept verbatim too: `unknown_fields` for those in `data`, `unknown_root_fields` for the top level. They can't go in `extensions`: an export would then write them to a different place, or a plugin's namespace could collide with them.
+- **Lorebooks** (`lorebook.ts`): ST's World Info entry fields in snake_case, the same document for standalone lorebooks and a card's `character_book`. ST's numeric enums are named (`position: "at_depth"`, `role: "system"`, `selective_logic: "and_any"`). Each entry has a unique integer `uid`, so the three-way merge (§3.9) matches entries by it. Our own fields are `decision_hint` and `placement_override`.
