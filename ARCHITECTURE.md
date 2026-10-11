@@ -672,3 +672,22 @@ It fails with a typed `ProviderError`.
   - `extensions` is the card's `data.extensions`, verbatim, so `extensions.<plugin-id>` survives (PLUGINS §3.3).
   - Keys the specs don't define are kept verbatim too: `unknown_fields` for those in `data`, `unknown_root_fields` for the top level. They can't go in `extensions`: an export would then write them to a different place, or a plugin's namespace could collide with them.
 - **Lorebooks** (`lorebook.ts`): ST's World Info entry fields in snake_case, the same document for standalone lorebooks and a card's `character_book`. ST's numeric enums are named (`position: "at_depth"`, `role: "system"`, `selective_logic: "and_any"`). Each entry has a unique integer `uid`, so the three-way merge (§3.9) matches entries by it. Our own fields are `decision_hint` and `placement_override`.
+
+**Parsers** (`packages/server/src/formats/`) are pure functions over bytes: no database, no files. Each returns an `Effect` that fails with `FormatError` when the file can't be imported at all. Everything recoverable becomes an issue in the `ImportReport` (`@rp/shared/importReport.ts`) instead, so one bad field never costs the whole file.
+- **Lenient fields** (`fields.ts`). A missing or null field takes its default quietly, as in ST. A field of the wrong type takes its default too, and the report names its path.
+
+**Card import** (`importCard`, `cardImport.ts`, `card.ts`). The format comes from the bytes, never the file name.
+- **JSON:** detection follows ST: any `spec` with a `data` object is V2 or V3 (an unknown spec is read as V3, with a warning), otherwise a `name` means V1. V1 is mapped as ST maps it (its placeholder creator note dropped, comma-separated tags split).
+- **ST's top-level copies** of V1 fields and its local state (`chat`, `create_date`, `fav`, `avatar`) aren't kept; other top-level keys are.
+- **The embedded `character_book`** is mapped as ST's `convertCharacterBook` does: ST's World Info fields come out of each entry's `extensions` into the entry, with its defaults; whatever else is in `extensions` stays. Two deliberate differences: the spec's own `case_sensitive` is the fallback when the extension has none (ST ignores it), and ids that aren't unique whole numbers are replaced, with a warning, since the merge matches entries by them. An entry without `enabled` is disabled, as in ST, with a warning.
+- **Card modules** come back from `extensions.rp_harness.modules`, where an export puts them.
+
+**Hardening** (`safety.ts`). These parse untrusted files, so every input is capped (`defaultLimits`), and each cap has a test with a crafted file that fails when the check is removed.
+
+| Cap | Default | Why |
+|---|---|---|
+| File size | 64 MiB | Bounds memory and work for everything below |
+| JSON size | 32 MiB | Also applies to a PNG's card chunk once decoded |
+| JSON nesting | 64 levels | The walk after parsing is recursive; real cards nest about 8 deep |
+
+- **Prototype keys** (`__proto__`, `constructor`, `prototype`) are dropped right after `JSON.parse`, with a warning. `JSON.parse` makes them plain own keys, but a later assignment, `Object.assign` or merge can turn one into a prototype change.
