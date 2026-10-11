@@ -7,7 +7,7 @@ import { AsyncView, ErrorAlert, useAction } from "../../actions.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Switch } from "../../ui/Choice.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
-import { Field, Input } from "../../ui/Field.tsx"
+import { Field, focusFirstInvalid, Input } from "../../ui/Field.tsx"
 import { Select } from "../../ui/Select.tsx"
 import { Alert, Badge, Card, CardHeader, EmptyState } from "../../ui/Surface.tsx"
 import { modelsAtom, parseOptionalInt } from "./data.ts"
@@ -58,9 +58,9 @@ function EditModelDialog({ model, onOpenChange }: { model: Model; onOpenChange: 
   const contextValue = parseOptionalInt(context, 1)
   const maxOutputValue = parseOptionalInt(maxOutput, 1)
 
-  const submit = async (event: FormEvent) => {
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    if (contextValue.problem || maxOutputValue.problem) return
+    if (contextValue.problem || maxOutputValue.problem) return focusFirstInvalid(event.currentTarget)
     const flag = (tri: Tri) => (tri === "auto" ? undefined : tri === "yes")
     const overrides: ModelOverrides = Object.fromEntries(
       Object.entries({

@@ -24,6 +24,33 @@ export function CenteredPage({ children }: { children: ReactNode }) {
   )
 }
 
+/** Logs out, or says why it couldn't. */
+export function LogoutButton({ variant = "secondary" }: { variant?: "secondary" | "ghost" }) {
+  const [pending, setPending] = useState(false)
+  const [error, setError] = useState("")
+  return (
+    <span className="flex flex-wrap items-center gap-2">
+      <Button
+        variant={variant}
+        pending={pending}
+        onClick={async () => {
+          setPending(true)
+          setError("")
+          setError(await logout())
+          setPending(false)
+        }}
+      >
+        Log out
+      </Button>
+      {error && (
+        <span role="alert" className="text-sm text-danger">
+          {error}
+        </span>
+      )}
+    </span>
+  )
+}
+
 function Header() {
   const session = useSession()
   const isAdmin = session.user.role === "admin"
@@ -49,11 +76,7 @@ function Header() {
           <Link to="/settings/account" className="max-w-40 truncate text-sm text-muted hover:text-text">
             {session.user.displayName}
           </Link>
-          {session.via === "session" && (
-            <Button variant="ghost" onClick={() => void logout()}>
-              Log out
-            </Button>
-          )}
+          {session.via === "session" && <LogoutButton variant="ghost" />}
         </div>
       </div>
     </header>

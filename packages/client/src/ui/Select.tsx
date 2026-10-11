@@ -11,14 +11,12 @@ export function Select<Value>({
   value,
   onValueChange,
   placeholder,
-  disabled,
   className = ""
 }: {
   items: ReadonlyArray<SelectItem<Value>>
   value: Value | null
   onValueChange: (value: Value) => void
   placeholder?: string
-  disabled?: boolean
   className?: string
 }) {
   return (
@@ -28,7 +26,6 @@ export function Select<Value>({
       onValueChange={(next) => {
         if (next !== null) onValueChange(next as Value)
       }}
-      disabled={disabled}
     >
       <BaseSelect.Trigger
         className={`flex h-9 w-full min-w-0 items-center justify-between gap-2 rounded-md border border-border bg-surface px-3 text-base text-text shadow-xs outline-none select-none focus-visible:border-focus focus-visible:ring-2 focus-visible:ring-focus/40 data-disabled:opacity-50 sm:text-sm ${className}`}

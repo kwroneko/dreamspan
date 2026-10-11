@@ -11,7 +11,7 @@ import { Checkbox } from "../ui/Choice.tsx"
 import { ConfirmDialog, Dialog, DialogActions } from "../ui/Dialog.tsx"
 import { Field, Fieldset, formText, Input, SecretInput, Textarea } from "../ui/Field.tsx"
 import { Alert, Badge, Card, CardHeader, EmptyState } from "../ui/Surface.tsx"
-import { connectionsAtom, credentialsAtom, effectiveOrigin, kindsAtom } from "./connections/data.ts"
+import { effectiveOrigin, providerSetupAtom } from "./connections/data.ts"
 import { useTitle } from "./shell.tsx"
 
 const keyLabel = (credential: Credential) =>
@@ -441,15 +441,9 @@ function CredentialsPage() {
           </Button>
         }
       />
-      <AsyncView atom={kindsAtom}>
-        {(kinds) => (
-          <AsyncView atom={connectionsAtom}>
-            {(connections) => (
-              <AsyncView atom={credentialsAtom} loading="Loading keys…">
-                {(credentials) => <CredentialList credentials={credentials} connections={connections} kinds={kinds} />}
-              </AsyncView>
-            )}
-          </AsyncView>
+      <AsyncView atom={providerSetupAtom} loading="Loading keys…">
+        {({ kinds, connections, credentials }) => (
+          <CredentialList credentials={credentials} connections={connections} kinds={kinds} />
         )}
       </AsyncView>
       {creating && <CreateCredentialDialog onOpenChange={setCreating} />}

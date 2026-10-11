@@ -6,11 +6,11 @@ import { type FormEvent, useId, useState } from "react"
 import { AsyncView, ErrorAlert, useAction } from "../../actions.tsx"
 import { Button, buttonClass } from "../../ui/Button.tsx"
 import { RadioGroup } from "../../ui/Choice.tsx"
-import { Field, Fieldset, formText, Input, SecretInput } from "../../ui/Field.tsx"
+import { Field, Fieldset, focusFirstInvalid, formText, Input, SecretInput } from "../../ui/Field.tsx"
 import { Select } from "../../ui/Select.tsx"
 import { Badge, Card, CardHeader, EmptyState } from "../../ui/Surface.tsx"
 import { useTitle } from "../shell.tsx"
-import { connectionsAtom, credentialsAtom, effectiveOrigin, kindsAtom, parseOptionalInt } from "./data.ts"
+import { effectiveOrigin, parseOptionalInt, providerSetupAtom } from "./data.ts"
 
 export function ConnectionsPage() {
   useTitle("Connections")
@@ -25,46 +25,42 @@ export function ConnectionsPage() {
           </Link>
         }
       />
-      <AsyncView atom={kindsAtom}>
-        {(kinds) => (
-          <AsyncView atom={connectionsAtom} loading="Loading connections…">
-            {(connections) =>
-              connections.length === 0 ? (
-                <EmptyState title="No connections yet">
-                  <p>Add one to reach a model provider or a local server.</p>
-                </EmptyState>
-              ) : (
-                <ul className="flex flex-col divide-y divide-border">
-                  {connections.map((connection) => (
-                    <li key={connection.id} className="flex flex-col gap-1 py-3 first:pt-0 last:pb-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Link
-                          to="/settings/connections/$connectionId"
-                          params={{ connectionId: connection.id }}
-                          className="font-medium text-accent underline-offset-4 hover:underline"
-                        >
-                          {connection.name}
-                        </Link>
-                        {connection.hasKey ? (
-                          <Badge>key •••• {connection.keyHint || "set"}</Badge>
-                        ) : (
-                          <Badge tone="warning">no key</Badge>
-                        )}
-                        {connection.proxyMode !== "inherit" && (
-                          <Badge>{connection.proxyMode === "direct" ? "direct" : "own proxy"}</Badge>
-                        )}
-                      </div>
-                      <p className="text-sm text-muted [overflow-wrap:anywhere]">
-                        {kinds.find((kind) => kind.id === connection.kind)?.label ?? connection.kind} ·{" "}
-                        {effectiveOrigin(connection, kinds) ?? "no address"}
-                      </p>
-                    </li>
-                  ))}
-                </ul>
-              )
-            }
-          </AsyncView>
-        )}
+      <AsyncView atom={providerSetupAtom} loading="Loading connections…">
+        {({ kinds, connections }) =>
+          connections.length === 0 ? (
+            <EmptyState title="No connections yet">
+              <p>Add one to reach a model provider or a local server.</p>
+            </EmptyState>
+          ) : (
+            <ul className="flex flex-col divide-y divide-border">
+              {connections.map((connection) => (
+                <li key={connection.id} className="flex flex-col gap-1 py-3 first:pt-0 last:pb-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Link
+                      to="/settings/connections/$connectionId"
+                      params={{ connectionId: connection.id }}
+                      className="font-medium text-accent underline-offset-4 hover:underline"
+                    >
+                      {connection.name}
+                    </Link>
+                    {connection.hasKey ? (
+                      <Badge>key •••• {connection.keyHint || "set"}</Badge>
+                    ) : (
+                      <Badge tone="warning">no key</Badge>
+                    )}
+                    {connection.proxyMode !== "inherit" && (
+                      <Badge>{connection.proxyMode === "direct" ? "direct" : "own proxy"}</Badge>
+                    )}
+                  </div>
+                  <p className="text-sm text-muted [overflow-wrap:anywhere]">
+                    {kinds.find((kind) => kind.id === connection.kind)?.label ?? connection.kind} ·{" "}
+                    {effectiveOrigin(connection, kinds) ?? "no address"}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          )
+        }
       </AsyncView>
     </Card>
   )
@@ -105,7 +101,7 @@ function NewConnectionForm({
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setSubmitted(true)
-    if (Object.values(problems).some((problem) => problem !== null)) return
+    if (Object.values(problems).some((problem) => problem !== null)) return focusFirstInvalid(event.currentTarget)
     const apiKey = formText(event.currentTarget, "apiKey")
     const result = await action.run(
       (client) =>
@@ -223,12 +219,8 @@ export function NewConnectionPage() {
   return (
     <Card>
       <CardHeader title="New connection" />
-      <AsyncView atom={kindsAtom}>
-        {(kinds) => (
-          <AsyncView atom={credentialsAtom}>
-            {(credentials) => <NewConnectionForm kinds={kinds} credentials={credentials} />}
-          </AsyncView>
-        )}
+      <AsyncView atom={providerSetupAtom}>
+        {({ kinds, credentials }) => <NewConnectionForm kinds={kinds} credentials={credentials} />}
       </AsyncView>
     </Card>
   )

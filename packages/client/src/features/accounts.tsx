@@ -5,13 +5,13 @@ import { type FormEvent, useState } from "react"
 import { AsyncView, ErrorAlert, useAction } from "../actions.tsx"
 import { routes } from "../routes.tsx"
 import { AppClient } from "../rpc.ts"
-import { logout, useSession } from "../session.ts"
+import { useSession } from "../session.ts"
 import { Button } from "../ui/Button.tsx"
 import { ConfirmDialog, Dialog, DialogActions } from "../ui/Dialog.tsx"
 import { Field, formText, Input, PasswordInput } from "../ui/Field.tsx"
 import { Select } from "../ui/Select.tsx"
 import { Alert, Badge, Card, CardHeader } from "../ui/Surface.tsx"
-import { useTitle } from "./shell.tsx"
+import { LogoutButton, useTitle } from "./shell.tsx"
 
 const usersAtom = AppClient.query("ListUsers", undefined, { reactivityKeys: ["users"] })
 
@@ -78,10 +78,7 @@ function AccountPage() {
   return (
     <div className="flex flex-col gap-4">
       <Card>
-        <CardHeader
-          title="Account"
-          actions={session.via === "session" ? <Button onClick={() => void logout()}>Log out</Button> : undefined}
-        />
+        <CardHeader title="Account" actions={session.via === "session" ? <LogoutButton /> : undefined} />
         <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-1 text-sm">
           <dt className="text-muted">Name</dt>
           <dd>{session.user.displayName}</dd>
@@ -94,7 +91,7 @@ function AccountPage() {
       </Card>
       {session.via !== "proxy" && (
         <Card>
-          <CardHeader title="Password" level={2} />
+          <CardHeader title="Password" />
           <OwnPasswordForm />
         </Card>
       )}

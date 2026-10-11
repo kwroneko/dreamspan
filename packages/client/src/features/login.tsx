@@ -8,12 +8,12 @@ import { type FormEvent, useEffect, useState } from "react"
 import { ErrorAlert } from "../actions.tsx"
 import { describeCause } from "../errors.ts"
 import { routes } from "../routes.tsx"
-import { login, type LoginOutcome, logout, safeNext, sessionAtom } from "../session.ts"
+import { login, type LoginOutcome, safeNext, sessionAtom } from "../session.ts"
 import { Button, buttonClass } from "../ui/Button.tsx"
 import { Field, formText, Input, PasswordInput } from "../ui/Field.tsx"
 import { Loading } from "../ui/Spinner.tsx"
 import { Alert, Card } from "../ui/Surface.tsx"
-import { CenteredPage, useTitle } from "./shell.tsx"
+import { CenteredPage, LogoutButton, useTitle } from "./shell.tsx"
 
 const formatWait = (seconds: number) =>
   seconds >= 60 ? `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}` : `${seconds} s`
@@ -137,7 +137,7 @@ function SignedIn({ session, next }: { session: Session; next: string }) {
         <Link to={next} className={buttonClass("primary")}>
           Continue
         </Link>
-        {session.via === "session" && <Button onClick={() => void logout()}>Log out</Button>}
+        {session.via === "session" && <LogoutButton />}
       </div>
     </div>
   )

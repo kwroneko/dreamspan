@@ -3,7 +3,7 @@
 // the user back to login when the session has ended.
 import { RegistryContext, useAtomRefresh, useAtomValue } from "@effect/atom-react"
 import { Cause, Context, Effect, Exit } from "effect"
-import { AsyncResult, type Atom, AtomRegistry, Reactivity } from "effect/reactivity"
+import { AsyncResult, Atom, AtomRegistry, Reactivity } from "effect/reactivity"
 import { type ReactNode, useContext, useEffect, useState } from "react"
 import { type AppError, describeCause } from "./errors.ts"
 import { AppClient } from "./rpc.ts"
@@ -90,6 +90,25 @@ function FailureView({ cause, onRetry }: { cause: Cause.Cause<unknown>; onRetry:
     />
   )
 }
+
+/**
+ * Several queries as one result, all requested at once (nested `AsyncView`s would wait
+ * for each before asking for the next). A retry refreshes each.
+ */
+export const allOf = <const Atoms extends Record<string, Atom.Atom<AsyncResult.AsyncResult<unknown, unknown>>>>(
+  atoms: Atoms
+) =>
+  Atom.readable(
+    (get) =>
+      AsyncResult.all(
+        Object.fromEntries(Object.entries(atoms).map(([key, atom]) => [key, get(atom)])) as {
+          [K in keyof Atoms]: Atom.Type<Atoms[K]>
+        }
+      ),
+    (refresh) => {
+      for (const atom of Object.values(atoms)) refresh(atom)
+    }
+  )
 
 /** A query's result: loading, an error with a retry, or the value. */
 export function AsyncView<A, E>({

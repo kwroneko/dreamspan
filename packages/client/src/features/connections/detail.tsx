@@ -9,19 +9,12 @@ import { defineSlot, SlotOutlet } from "../../slots.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { RadioGroup } from "../../ui/Choice.tsx"
 import { ConfirmDialog, Dialog, DialogActions } from "../../ui/Dialog.tsx"
-import { Field, Fieldset, formText, Input, SecretInput } from "../../ui/Field.tsx"
+import { Field, Fieldset, focusFirstInvalid, formText, Input, SecretInput } from "../../ui/Field.tsx"
 import { Select } from "../../ui/Select.tsx"
 import { Alert, Badge, Card, CardHeader, EmptyState } from "../../ui/Surface.tsx"
 import { useTitle } from "../shell.tsx"
 import { AllowHostDialog } from "../credentials.tsx"
-import {
-  connectionsAtom,
-  credentialsAtom,
-  effectiveBaseUrl,
-  effectiveOrigin,
-  kindsAtom,
-  parseOptionalInt
-} from "./data.ts"
+import { effectiveBaseUrl, effectiveOrigin, parseOptionalInt, providerSetupAtom } from "./data.ts"
 
 export interface ConnectionSectionProps {
   readonly connection: Connection
@@ -70,10 +63,10 @@ export function SettingsSection({ connection, kinds }: ConnectionSectionProps) {
   }
   const shown = (problem: string | null) => (submitted ? problem : null)
 
-  const submit = async (event: FormEvent) => {
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setSubmitted(true)
-    if (Object.values(problems).some((problem) => problem !== null)) return
+    if (Object.values(problems).some((problem) => problem !== null)) return focusFirstInvalid(event.currentTarget)
     const result = await action.run(
       (client) =>
         client("UpdateConnection", {
@@ -104,7 +97,7 @@ export function SettingsSection({ connection, kinds }: ConnectionSectionProps) {
 
   return (
     <Card>
-      <CardHeader title="Settings" level={2} />
+      <CardHeader title="Settings" />
       <form onSubmit={submit} className="flex flex-col gap-5" noValidate>
         <Field label="Name" error={shown(problems.name)}>
           <Input value={values.name} onValueChange={(name) => edit({ name })} autoComplete="off" />
@@ -636,28 +629,20 @@ export function DeleteSection({ connection }: ConnectionSectionProps) {
 export function ConnectionPage() {
   const { connectionId }: { connectionId?: string } = useParams({ strict: false })
   return (
-    <AsyncView atom={kindsAtom}>
-      {(kinds) => (
-        <AsyncView atom={credentialsAtom}>
-          {(credentials) => (
-            <AsyncView atom={connectionsAtom} loading="Loading the connection…">
-              {(connections) => {
-                const connection = connections.find((entry) => entry.id === connectionId)
-                return connection ? (
-                  <ConnectionView connection={connection} kinds={kinds} credentials={credentials} />
-                ) : (
-                  <EmptyState title="This connection doesn't exist">
-                    <p>It may have been deleted.</p>
-                    <Link to="/settings/connections" className="text-accent underline-offset-4 hover:underline">
-                      All connections
-                    </Link>
-                  </EmptyState>
-                )
-              }}
-            </AsyncView>
-          )}
-        </AsyncView>
-      )}
+    <AsyncView atom={providerSetupAtom} loading="Loading the connection…">
+      {({ kinds, connections, credentials }) => {
+        const connection = connections.find((entry) => entry.id === connectionId)
+        return connection ? (
+          <ConnectionView connection={connection} kinds={kinds} credentials={credentials} />
+        ) : (
+          <EmptyState title="This connection doesn't exist">
+            <p>It may have been deleted.</p>
+            <Link to="/settings/connections" className="text-accent underline-offset-4 hover:underline">
+              All connections
+            </Link>
+          </EmptyState>
+        )
+      }}
     </AsyncView>
   )
 }

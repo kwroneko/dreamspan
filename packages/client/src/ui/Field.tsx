@@ -105,6 +105,16 @@ export function PasswordInput({
   )
 }
 
+/**
+ * After a submit the client refused: focus the first invalid control once its error has
+ * rendered. Its description includes the error, so a screen reader reads it out.
+ */
+export const focusFirstInvalid = (form: HTMLFormElement) => {
+  requestAnimationFrame(() =>
+    form.querySelector<HTMLElement>('[aria-invalid="true"], [data-invalid]:is(input, textarea)')?.focus()
+  )
+}
+
 /** A form field's text, from the form being submitted. */
 export const formText = (form: HTMLFormElement, name: string) => {
   const value = new FormData(form).get(name)

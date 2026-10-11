@@ -22,21 +22,18 @@ export function Checkbox({
   checked,
   onCheckedChange,
   children,
-  description,
-  disabled
+  description
 }: {
   checked: boolean
   onCheckedChange: (checked: boolean) => void
   children: ReactNode
   description?: ReactNode
-  disabled?: boolean
 }) {
   return (
     <label className="flex items-start gap-2.5">
       <BaseCheckbox.Root
         checked={checked}
         onCheckedChange={(next) => onCheckedChange(next)}
-        disabled={disabled}
         className={`mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-[4px] border border-border bg-surface text-accent-contrast data-checked:border-accent data-checked:bg-accent data-disabled:opacity-50 ${focusRing}`}
       >
         <BaseCheckbox.Indicator className="flex data-unchecked:hidden">
@@ -54,21 +51,18 @@ export function Switch({
   checked,
   onCheckedChange,
   children,
-  description,
-  disabled
+  description
 }: {
   checked: boolean
   onCheckedChange: (checked: boolean) => void
   children: ReactNode
   description?: ReactNode
-  disabled?: boolean
 }) {
   return (
     <label className="flex items-start gap-3">
       <BaseSwitch.Root
         checked={checked}
         onCheckedChange={(next) => onCheckedChange(next)}
-        disabled={disabled}
         className={`mt-0.5 flex h-5 w-9 shrink-0 rounded-full border border-border bg-surface-raised p-0.5 transition-colors data-checked:border-accent data-checked:bg-accent data-disabled:opacity-50 ${focusRing}`}
       >
         <BaseSwitch.Thumb className="size-3.5 rounded-full bg-muted shadow-xs transition-[translate,background-color] data-checked:translate-x-4 data-checked:bg-accent-contrast motion-reduce:transition-none" />
@@ -82,20 +76,17 @@ export function RadioGroup<Value extends string>({
   value,
   onValueChange,
   options,
-  disabled,
   ...aria
 }: {
   value: Value
   onValueChange: (value: Value) => void
   options: ReadonlyArray<{ value: Value; label: ReactNode; description?: ReactNode }>
-  disabled?: boolean
   "aria-labelledby"?: string
 }) {
   return (
     <BaseRadioGroup
       value={value}
       onValueChange={(next) => onValueChange(next as Value)}
-      disabled={disabled}
       className="flex flex-col gap-2.5"
       {...aria}
     >

@@ -49,11 +49,20 @@ export const login = async (handle: string, password: string): Promise<LoginOutc
 
 /**
  * Ends the session and reloads into the login page. A full load, not a client-side
- * navigation, so the WebSocket and everything cached for this user go with it.
+ * navigation, so the WebSocket and everything cached for this user go with it. If the
+ * server couldn't end the session, nothing reloads: the user is still logged in, and the
+ * returned message says so.
  */
-export const logout = async () => {
-  await fetch("/auth/logout", { method: "POST" }).catch(() => undefined)
+export const logout = async (): Promise<string> => {
+  let response: Response
+  try {
+    response = await fetch("/auth/logout", { method: "POST" })
+  } catch {
+    return "Can't reach the server, so you're still logged in."
+  }
+  if (!response.ok) return `The server couldn't log you out (${response.status}), so you're still logged in.`
   location.replace("/login")
+  return ""
 }
 
 /**

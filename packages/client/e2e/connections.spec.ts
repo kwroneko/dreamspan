@@ -40,6 +40,9 @@ test("create, check, edit, route and delete a connection", async ({ page }) => {
   await page.getByRole("link", { name: "New connection" }).click()
   await page.getByRole("button", { name: "Create connection" }).click()
   await expect(page.getByText("Give the connection a name.")).toBeVisible()
+  // Focus goes to the first invalid field, and its description carries the error.
+  await expect(page.getByLabel("Name")).toBeFocused()
+  await expect(page.getByLabel("Name")).toHaveAccessibleDescription(/Give the connection a name/)
 
   await createConnection(page, "Local fake", provider.baseUrl, "sk-fake-key-123456")
   await expect(page.getByText("Key ending in 3456")).toBeVisible()

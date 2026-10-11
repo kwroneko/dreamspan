@@ -10,19 +10,16 @@ export function Card({ children, className = "" }: { children: ReactNode; classN
 export function CardHeader({
   title,
   description,
-  actions,
-  level = 2
+  actions
 }: {
   title: ReactNode
   description?: ReactNode
   actions?: ReactNode
-  level?: 2 | 3
 }) {
-  const Heading = level === 2 ? "h2" : "h3"
   return (
     <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
       <div className="flex min-w-0 flex-col gap-1">
-        <Heading className="text-base font-semibold">{title}</Heading>
+        <h2 className="text-base font-semibold">{title}</h2>
         {description && <p className="text-sm text-muted">{description}</p>}
       </div>
       {actions && <div className="flex shrink-0 flex-wrap gap-2">{actions}</div>}

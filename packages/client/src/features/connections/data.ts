@@ -1,10 +1,14 @@
 // What the connection screens read. Writes name the same keys to make these stale.
 import { type Connection, type ConnectionId, originOf, type ProviderKindInfo } from "@rp/shared/providers.ts"
+import { allOf } from "../../actions.tsx"
 import { AppClient } from "../../rpc.ts"
 
 export const connectionsAtom = AppClient.query("ListConnections", undefined, { reactivityKeys: ["connections"] })
 export const credentialsAtom = AppClient.query("ListCredentials", undefined, { reactivityKeys: ["credentials"] })
 export const kindsAtom = AppClient.query("ListProviderKinds", undefined, { timeToLive: "5 minutes" })
+/** What the connection and key screens need, requested together. */
+export const providerSetupAtom = allOf({ kinds: kindsAtom, connections: connectionsAtom, credentials: credentialsAtom })
+
 export const modelsAtom = (connectionId: ConnectionId, includeHidden: boolean) =>
   AppClient.query("ListModels", { connectionId, includeHidden }, { reactivityKeys: ["models"] })
 

@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test"
 import { Effect } from "effect"
 import { asUser } from "./support/rpc.ts"
-import { ADMIN, serverPerFile, withAdmin } from "./support/server.ts"
+import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
 test.describe("no passwords set", () => {
   const server = serverPerFile()
@@ -66,6 +66,15 @@ test.describe("login required", () => {
     }
   })
 
+  test("a logout the server fails says so, and stays logged in", async ({ page }) => {
+    await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+    await page.goto(`${server().url}/settings/account`)
+    await page.route("**/auth/logout", (route) => route.fulfill({ status: 500, body: "" }))
+    await page.getByRole("banner").getByRole("button", { name: "Log out" }).click()
+    await expect(page.getByRole("banner").getByRole("alert")).toContainText("couldn't log you out (500)")
+    await expect(page).toHaveURL(`${server().url}/settings/account`)
+  })
+
   test("a disabled account can't log in, and a disabled user's open tab is sent to login", async ({ browser }) => {
     await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
       api.CreateUser({ handle: "dora", displayName: "Dora", role: "user", password: "dora-password-1" })
@@ -116,6 +125,8 @@ test.describe("throttled", () => {
     await page.getByRole("button", { name: "Log in" }).click()
     await expect(page.getByRole("alert")).toContainText("Too many attempts")
     await expect(page.getByText(/try again in 1[45]:\d\d/)).toBeVisible()
+    // The countdown stays out of the live region, so it isn't announced every second.
+    await expect(page.getByRole("alert")).not.toContainText(/\d:\d\d/)
     await expect(page.getByRole("button", { name: "Log in" })).toBeDisabled()
   })
 })
