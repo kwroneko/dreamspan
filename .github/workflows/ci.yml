@@ -28,11 +28,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: docker build --tag rp-harness:ci .
-      # Loopback-only inside the container, so no exposure settings are needed; a
-      # non-default PORT checks that the health check follows it.
+      # The image listens on 0.0.0.0, so with no exposure settings it must refuse to start.
+      - name: Refuse to start beyond loopback without exposure settings
+        run: |
+          code=0
+          timeout 60 docker run --name rp-harness-ci-unsafe rp-harness:ci > unsafe.log 2>&1 || code=$?
+          cat unsafe.log
+          echo "exit: $code"
+          [ "$code" -ne 0 ] && [ "$code" -ne 124 ] && grep -q UnsafeExposure unsafe.log
+      # With an exposure setting (an admin password) it starts. A non-default PORT checks
+      # that the health check follows it.
       - name: Run the image until it reports healthy
         run: |
-          docker run --detach --name rp-harness-ci --health-interval 2s -e HOST=127.0.0.1 -e PORT=3000 rp-harness:ci
+          docker run --detach --name rp-harness-ci --health-interval 2s -e ADMIN_PASSWORD=ci-admin-password -e PORT=3000 rp-harness:ci
           for _ in $(seq 60); do
             status=$(docker inspect --format '{{.State.Health.Status}}' rp-harness-ci)
             if [ "$status" = healthy ] || [ "$(docker inspect --format '{{.State.Running}}' rp-harness-ci)" != true ]; then break; fi
@@ -42,4 +50,4 @@ jobs:
           echo "health: $status"
           [ "$status" = healthy ]
       - if: always()
-        run: docker rm --force rp-harness-ci || true
+        run: docker rm --force --volumes rp-harness-ci rp-harness-ci-unsafe || true
