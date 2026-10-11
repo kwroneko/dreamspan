@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { EntityId } from "../src/chat.ts"
-import { type FoldableEvent, foldState, type StateEventData } from "../src/state.ts"
+import { type FoldableEvent, foldState, type StateEventData, stateKeyIds } from "../src/state.ts"
 
 const e = (data: StateEventData, scope: string | null = null): FoldableEvent => ({ data, scope })
 const mira = "mira" as EntityId
@@ -42,5 +42,11 @@ describe("foldState", () => {
     ])
     expect(state.activeNotes).toEqual([])
     expect(state.noteRevisions).toEqual({ [note]: "r2" })
+  })
+})
+
+describe("state keys", () => {
+  it("leave `<plugin-id>/<key>` to plugins: no core key has a slash", () => {
+    expect(Object.keys(stateKeyIds).filter((key) => key.includes("/"))).toEqual([])
   })
 })

@@ -1,10 +1,11 @@
-// What a state event's value refers to (DATA-MODEL §5.3). The writer checks it against
-// the acting user before the event is written: an id the user doesn't own is NotFound,
-// as everywhere else, and so is a deleted one, except when the event removes it. Reads
-// leave out what a purge removed for good.
+// What a state event's value refers to (DATA-MODEL §5.3), as its key declares it
+// (`stateKeyIds` in @rp/shared/state.ts). The writer checks it against the acting user
+// before the event is written: an id the user doesn't own is NotFound, as everywhere
+// else, and so is a deleted one, except when the event removes it. Reads leave out what
+// a purge removed for good.
 import type { UserId } from "@rp/shared/domain.ts"
 import type { EntityKind } from "@rp/shared/library.ts"
-import type { FoldableEvent, StateEventData } from "@rp/shared/state.ts"
+import { type FoldableEvent, type StateEventData, type StateKeyIds, stateKeyIds } from "@rp/shared/state.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import { NotFound } from "./ops.ts"
@@ -12,84 +13,53 @@ import { NotFound } from "./ops.ts"
 type Reference =
   | { readonly table: "entity"; readonly id: string; readonly kind: EntityKind }
   /** A ref of `entity` when given; a chat override only of this chat. */
-  | { readonly table: "ref"; readonly id: string; readonly kind: EntityKind; readonly entity?: string }
+  | { readonly table: "ref"; readonly id: string; readonly kind: EntityKind; readonly entity: string | undefined }
   /** A revision of `entity`, or of the entity of `ref`, when given. */
   | {
       readonly table: "revision"
       readonly id: string
       readonly kind: EntityKind
-      readonly entity?: string
-      readonly ref?: string | undefined
+      readonly entity: string | undefined
+      readonly ref: string | undefined
     }
   | { readonly table: "connection"; readonly id: string }
-  | { readonly table: "model"; readonly id: string; readonly connection: string }
+  | { readonly table: "model"; readonly id: string; readonly connection: string | undefined }
 
-const optional = <A>(value: string | undefined, f: (id: string) => A) => (value === undefined ? [] : [f(value)])
+/** Any key's declaration, core or (later) a plugin's. */
+type Declared = StateKeyIds<Readonly<Record<string, string | ReadonlyArray<string>>>>
 
-/**
- * Every id the value names. The switch is exhaustive, so a new key doesn't compile
- * until it's listed here.
- */
+/** Every id the value names, as its key declares them (`stateKeyIds`). */
 const references = (data: StateEventData): ReadonlyArray<Reference> => {
-  switch (data.key) {
-    case "participant.join":
-    case "participant.leave":
-    case "presence.set":
-      return [{ table: "entity", id: data.value.entity, kind: "card" }]
-    case "played_by_me.set":
-      return data.value.entities.map((id) => ({ table: "entity", id, kind: "card" }))
-    case "card.binding": {
-      const { entity, ref, revision } = data.value
-      return [
-        { table: "entity", id: entity, kind: "card" },
-        ...optional(ref, (id) => ({ table: "ref", id, kind: "card", entity }) as const),
-        ...optional(revision, (id) => ({ table: "revision", id, kind: "card", entity }) as const)
-      ]
-    }
-    case "note.activate":
-    case "note.deactivate":
-    case "author_note.set":
-      return [{ table: "entity", id: data.value.note, kind: "note" }]
-    case "note.binding":
-      return [
-        { table: "entity", id: data.value.note, kind: "note" },
-        { table: "revision", id: data.value.revision, kind: "note", entity: data.value.note }
-      ]
-    case "preset.binding": {
-      const { ref, revision } = data.value
-      return [
-        ...optional(ref, (id) => ({ table: "ref", id, kind: "preset" }) as const),
-        ...optional(revision, (id) => ({ table: "revision", id, kind: "preset", ref }) as const)
-      ]
-    }
-    case "preset_overlay.binding":
-      return [{ table: "entity", id: data.value.overlay, kind: "preset_overlay" }]
-    case "model.binding":
-      return [
-        { table: "connection", id: data.value.connection },
-        { table: "model", id: data.value.model, connection: data.value.connection }
-      ]
-    case "lorebook.attach":
-    case "lorebook.detach":
-      return [{ table: "ref", id: data.value.ref, kind: "lorebook" }]
-    case "layout.cards":
-    case "roles.projection":
-    case "macro.binding":
-    case "orchestration.mode":
-    case "output.contract":
-    case "rollout.continuity":
-    case "var.set":
-      return []
-  }
+  const declared: Declared = stateKeyIds[data.key]
+  // A key whose value isn't an object declares no fields, so this is only read for objects.
+  const value = data.value as unknown as Readonly<Record<string, string | ReadonlyArray<string> | undefined>>
+  const field = (name: string | undefined) => (name === undefined ? undefined : (value[name] as string | undefined))
+  return Object.entries(declared.ids).flatMap(([name, declaration]) => {
+    if (declaration === "text") return []
+    const held = value[name]
+    const ids = held === undefined ? [] : typeof held === "string" ? [held] : held
+    return ids.map((id): Reference => {
+      switch (declaration.table) {
+        case "entity":
+          return { table: "entity", id, kind: declaration.kind }
+        case "ref":
+          return { table: "ref", id, kind: declaration.kind, entity: field(declaration.entity) }
+        case "revision":
+          return {
+            table: "revision",
+            id,
+            kind: declaration.kind,
+            entity: field(declaration.entity),
+            ref: field(declaration.ref)
+          }
+        case "connection":
+          return { table: "connection", id }
+        case "model":
+          return { table: "model", id, connection: field(declaration.connection) }
+      }
+    })
+  })
 }
-
-/** Keys that take something out of the state: they work on deleted and purged things too. */
-const removals = new Set<StateEventData["key"]>([
-  "participant.leave",
-  "presence.set",
-  "note.deactivate",
-  "lorebook.detach"
-])
 
 export const checkStateReferences = (
   sql: SqlClient.SqlClient,
@@ -97,7 +67,8 @@ export const checkStateReferences = (
   chatId: string,
   data: StateEventData
 ) => {
-  const live = removals.has(data.key) ? 0 : 1
+  // Keys that take something out of the state work on deleted and purged things too.
+  const live = stateKeyIds[data.key].removes ? 0 : 1
   return Effect.forEach(
     references(data),
     (reference) => {
@@ -123,7 +94,7 @@ export const checkStateReferences = (
               AND owner_user_id = ${userId} AND deleted_at IS NULL AND purged_at IS NULL`
           case "model":
             return sql<{ n: number }>`SELECT count(*) AS n FROM models m JOIN connections c ON c.id = m.connection_id
-              WHERE m.id = ${reference.id} AND m.connection_id = ${reference.connection} AND c.owner_user_id = ${userId}`
+              WHERE m.id = ${reference.id} AND m.connection_id = ${reference.connection ?? null} AND c.owner_user_id = ${userId}`
         }
       })()
       return Effect.flatMap(count, ([row]) =>

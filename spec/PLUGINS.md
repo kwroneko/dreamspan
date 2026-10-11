@@ -219,7 +219,9 @@ The rule that protects the main objective: a registry is added when a core featu
 - **The client renders through slot registries** (message view, panels, composer actions). `src/ui/` stays the single import path for components.
   - **Routes too.** Today's router is one hardcoded status page. The route and slot registries are built with the first real screens, the settings and login pages, so they're shaped by real use.
 - **Namespaced chat state keys,** before the first extension needs them (`@rp/shared/state.ts` is a closed union today).
-  - **Ids inside values must be declared.** The writer checks every id in a core key's value against the acting user (ARCHITECTURE §3.8, an exhaustive switch in `db/stateRefs.ts`). A plugin key (`<plugin-id>/<key>`) must therefore register, with its value schema, which fields hold entity, ref, revision or connection ids, so the same check covers it. Any other field is treated as free-form data: a plugin that reads an id from one must check ownership itself.
+  - **Ids inside values must be declared.** The writer checks every id in a core key's value against the acting user (ARCHITECTURE §3.8). A plugin key (`<plugin-id>/<key>`) must therefore register, with its value schema, which fields hold entity, ref, revision or connection ids, so the same check covers it. Any other field is treated as free-form data: a plugin that reads an id from one must check ownership itself.
+
+  **Built** (2026-10-11, ARCHITECTURE.md §3.8): the declaration. Every key, core keys included, declares what each string field of its value holds (an id, with its table and kind, or text), and the writer's check reads only the declarations. Not built: registering a plugin key, and accepting plugin keys in `StateEventData`.
 - **Library documents keep `extensions` as a namespaced object,** matching the card spec, when the importers are built.
 - **The CSP restricts `connect-src` to our origin** from the first client release.
 
