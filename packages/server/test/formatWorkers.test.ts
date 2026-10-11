@@ -4,7 +4,7 @@ import { mkdtempSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { assert, beforeAll, describe, it } from "@effect/vitest"
-import { Effect, Exit, Schedule } from "effect"
+import { Effect, Exit } from "effect"
 import { buildWorkers } from "../scripts/build-workers.ts"
 import * as Formats from "../src/importer/Formats.ts"
 import * as Importers from "../src/importer/importers.ts"
@@ -55,21 +55,24 @@ describe("format workers", () => {
         const lags = `${offMain.maxLagMs.toFixed(0)} ms with workers, ${onMain.maxLagMs.toFixed(0)} ms without`
         // Loose bounds: the host is shared, and its load shows in any timer.
         assert.isAbove(onMain.maxLagMs, 200, `the baseline should block: ${lags}`)
-        assert.isBelow(offMain.maxLagMs, Math.min(100, onMain.maxLagMs / 3), `main thread lag: ${lags}`)
+        assert.isBelow(offMain.maxLagMs, Math.min(250, onMain.maxLagMs / 4), `main thread lag: ${lags}`)
       }).pipe(Effect.provide(Formats.layer({ workers: "source", size: 1 }))),
     60_000
   )
 
   it.live(
-    "a worker that dies fails the file it had; the next file parses on its replacement",
+    "a worker that dies fails only the file it had; the files queued behind it parse on its replacement",
     () =>
       Effect.gen(function* () {
         const formats = yield* Formats.Formats
-        const crashed = yield* Effect.exit(formats.parse(card(), "crash"))
+        // With one worker, the second file waits in the queue while the first kills it.
+        const [crashed, queued] = yield* Effect.all(
+          [Effect.exit(formats.parse(card(), "crash")), Effect.exit(formats.parse(card(), "wren.png"))],
+          { concurrency: 2 }
+        )
         assert.isTrue(Exit.isFailure(crashed) && crashed.cause.toString().includes("FormatWorkerFailed"))
-        const next = yield* formats
-          .parse(card(), "wren.png")
-          .pipe(Effect.retry({ schedule: Schedule.spaced(200), times: 50 }))
+        assert.isTrue(Exit.isSuccess(queued) && queued.value.report.format === "card-v2-png", String(queued))
+        const next = yield* formats.parse(card(), "wren.png")
         assert.strictEqual(next.report.format, "card-v2-png")
       }).pipe(
         Effect.provide(

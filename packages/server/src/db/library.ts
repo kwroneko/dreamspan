@@ -1,7 +1,6 @@
 // Library logic shared by the writer and the readers: ref rows, documents, and merge
 // planning (DATA-MODEL §3.2). Merge planning is pure given the three documents, so the
 // reader's preview and the writer's merge always agree.
-import { createHash } from "node:crypto"
 import type { ChatId, EntityId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import {
@@ -16,6 +15,7 @@ import {
 import { merge3 } from "@rp/shared/merge.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
+import { docHash } from "./documents.ts"
 import { NotFound } from "./ops.ts"
 
 export interface RefRow {
@@ -123,33 +123,4 @@ export const makeLibraryQueries = (sql: SqlClient.SqlClient) => {
       ORDER BY e.id LIMIT 1`.pipe(Effect.flatMap(([row]) => (row ? ownedRef(userId, row.id) : Effect.succeed(null))))
 
   return { ownedRef, refsWhere, loadDoc, planMerge, cardNote }
-}
-
-/** JSON with object keys sorted, so equal documents hash equally whatever their key order. */
-const canonical = (value: unknown): unknown =>
-  Array.isArray(value)
-    ? value.map(canonical)
-    : value !== null && typeof value === "object"
-      ? Object.fromEntries(
-          Object.keys(value)
-            .sort()
-            .map((k) => [k, canonical((value as Record<string, unknown>)[k])])
-        )
-      : value
-
-export const docHash = (doc: Doc) =>
-  createHash("sha256")
-    .update(JSON.stringify(canonical(doc)))
-    .digest("hex")
-
-/** Text extracted from a document for full-text search: every string value in it. */
-export const searchText = (doc: unknown): string => {
-  const parts: Array<string> = []
-  const walk = (value: unknown) => {
-    if (typeof value === "string") parts.push(value)
-    else if (Array.isArray(value)) value.forEach(walk)
-    else if (value !== null && typeof value === "object") Object.values(value).forEach(walk)
-  }
-  walk(doc)
-  return parts.join("\n")
 }

@@ -4,25 +4,11 @@ import { CardDoc } from "@rp/shared/docs/card.ts"
 import { LorebookDoc } from "@rp/shared/docs/lorebook.ts"
 import { NoteDoc } from "@rp/shared/docs/note.ts"
 import { PresetDoc } from "@rp/shared/docs/preset.ts"
-import type { ExportFormat } from "@rp/shared/libraryImport.ts"
 import { Effect, Schema } from "effect"
 import { exportCardCharx, exportCardJson, exportCardPng } from "../formats/cardExport.ts"
 import { exportStPreset } from "../formats/preset.ts"
 import { exportLorebook } from "../formats/worldInfo.ts"
-import { ExportRefused } from "./ops.ts"
-
-interface StoredFile {
-  readonly bytes: Uint8Array
-  readonly mime: string
-}
-
-interface ExportInput {
-  readonly format: ExportFormat
-  readonly docJson: string
-  readonly noteDocJson: string | null
-  readonly avatar: StoredFile | null
-  readonly assets: ReadonlyArray<StoredFile & { readonly uri: string }>
-}
+import { type ExportInput, ExportRefused } from "./ops.ts"
 
 /** A 1×1 PNG for a card without a PNG avatar, since a PNG card needs an image to live in. */
 const PLACEHOLDER_PNG = Buffer.from(

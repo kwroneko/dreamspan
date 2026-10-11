@@ -22,6 +22,12 @@ import { readMedia, storeMedia } from "./mediaFiles.ts"
 /** The largest upload: the parsers' own cap on any file (ARCHITECTURE.md §8). */
 const MAX_UPLOAD_BYTES = defaultLimits.maxFileBytes
 
+/**
+ * How long an upload's body may take to arrive: 64 MiB at about half a megabyte a second.
+ * A stalled upload holds its permit until then.
+ */
+const BODY_DEADLINE = "2 minutes"
+
 /** A file name as given, without folders or control characters, bounded. */
 const fileNameFrom = (raw: string | null) =>
   (raw ?? "")
@@ -67,14 +73,30 @@ export const layer = Layer.unwrap(
     const formats = yield* Formats
     const reader = yield* Reader
     const writer = yield* Writer
-    // Uploads past this many wait before their body is read, so at most this many are held
-    // in memory: the rest stay in the socket, where TCP holds the sender back.
-    const uploads = Semaphore.makeUnsafe(config.formatWorkers * 2)
+    // Files held in memory at once: an upload reads its body, an export its media, only with
+    // a permit. The rest wait, an upload in its socket, where TCP holds the sender back.
+    const transfers = Semaphore.makeUnsafe(config.formatWorkers * 2)
+    // One transfer per user at a time, so no user can hold every permit.
+    const transferring = new Set<string>()
+    const oneAtATime = <E, R>(
+      userId: string,
+      transfer: Effect.Effect<HttpServerResponse.HttpServerResponse, E, R>
+    ): Effect.Effect<HttpServerResponse.HttpServerResponse, E, R> =>
+      Effect.suspend(() => {
+        if (transferring.has(userId)) {
+          return Effect.succeed(
+            jsonError(429, "another of your files is still being transferred; try again once it's done")
+          )
+        }
+        transferring.add(userId)
+        return transfers
+          .withPermits(1)(transfer)
+          .pipe(Effect.ensuring(Effect.sync(() => transferring.delete(userId))))
+      })
 
     const importFile = Effect.gen(function* () {
       const request = yield* HttpServerRequest.HttpServerRequest
       const user = yield* CurrentUser
-      // A cross-site form can't send this type, on top of the Origin check.
       if (request.headers["content-type"] !== "application/octet-stream") {
         return jsonError(415, "expected application/octet-stream")
       }
@@ -86,14 +108,17 @@ export const layer = Layer.unwrap(
       const into = query.get("into")
       if (into !== null && !Schema.is(RefId)(into)) return jsonError(400, "into must name a ref")
 
-      return yield* uploads.withPermits(1)(
+      return yield* oneAtATime(
+        user.id,
         Effect.gen(function* () {
-          // The cap applies as the body arrives: past it, reading stops and the connection closes.
+          // The cap applies as the body arrives: past it, or past the deadline, reading stops
+          // and the connection closes.
           const body = yield* request.arrayBuffer.pipe(
             Effect.provideService(HttpIncomingMessage.MaxBodySize, ByteSize.bytes(MAX_UPLOAD_BYTES)),
+            Effect.timeout(BODY_DEADLINE),
             Effect.option
           )
-          if (Option.isNone(body)) return jsonError(400, "the file didn't arrive whole")
+          if (Option.isNone(body)) return jsonError(400, "the file didn't arrive whole, or in time")
           const parsed = yield* formats.parse(new Uint8Array(body.value), fileName)
           if (parsed.library === null) {
             return yield* HttpServerResponse.schemaJson(ImportResult)(
@@ -146,26 +171,31 @@ export const layer = Layer.unwrap(
       }
       const read = (file: { path: string; mime: string }) =>
         Effect.map(readMedia(config.dataDir, file.path), (bytes) => bytes && { bytes, mime: file.mime })
-      const avatar = source.avatar && (yield* read(source.avatar))
-      const assets = yield* Effect.forEach(source.assets, (asset) =>
-        Effect.map(read(asset), (file) => (file ? [{ ...file, uri: asset.uri }] : []))
-      )
-      const bytes = yield* formats.export({
-        format,
-        docJson: source.docJson,
-        noteDocJson: source.noteDocJson,
-        avatar: avatar ?? null,
-        assets: assets.flat()
-      })
       const [mime, extension] = CONTENT_TYPES[format]
-      return HttpServerResponse.uint8Array(bytes, {
-        contentType: mime,
-        headers: {
-          "content-disposition": disposition(source.label, extension),
-          "cache-control": "no-store",
-          "x-content-type-options": "nosniff"
-        }
-      })
+      return yield* oneAtATime(
+        user.id,
+        Effect.gen(function* () {
+          const avatar = source.avatar && (yield* read(source.avatar))
+          const assets = yield* Effect.forEach(source.assets, (asset) =>
+            Effect.map(read(asset), (file) => (file ? [{ ...file, uri: asset.uri }] : []))
+          )
+          const bytes = yield* formats.export({
+            format,
+            docJson: source.docJson,
+            noteDocJson: source.noteDocJson,
+            avatar: avatar ?? null,
+            assets: assets.flat()
+          })
+          return HttpServerResponse.uint8Array(bytes, {
+            contentType: mime,
+            headers: {
+              "content-disposition": disposition(source.label, extension),
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff"
+            }
+          })
+        })
+      )
     }).pipe(
       Effect.catchTags({
         NotFound: () => Effect.succeed(jsonError(404, "there's no such ref")),

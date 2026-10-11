@@ -1,17 +1,15 @@
 // Main-thread access to the format workers (ARCHITECTURE.md §10.3). The pool is the
-// database readers' (db/readerPool.ts): a worker is busy until it answers, a crashed one
-// fails the request it was running and is respawned, and requests beyond the pool's size
-// queue in order.
+// database readers' (db/readerPool.ts), with crashes isolated: a worker is busy until it
+// answers, a crashed one fails only the request it was running and is respawned, and
+// requests beyond the pool's size queue in order.
 import { Context, Effect, Layer, Schema } from "effect"
-import { RpcClient } from "effect/rpc"
+import { RpcClient, RpcClientError } from "effect/rpc"
 import { bundleEntry, defaultBundleDir, workerThreads } from "../db/Database.ts"
 import * as ReaderPool from "../db/readerPool.ts"
-import { type ExportRefused, FormatOps, ownBuffer, type ParsedFile } from "./ops.ts"
+import { type ExportInput, type ExportRefused, FormatOps, ownBuffer, type ParsedFile } from "./ops.ts"
 
 /** The format worker stopped (it crashed or ran out of memory) while it had the file. */
 export class FormatWorkerFailed extends Schema.TaggedError<FormatWorkerFailed>()("FormatWorkerFailed", {}) {}
-
-type ExportInput = Parameters<RpcClient.FromGroup<typeof FormatOps>["Export"]>[0]
 
 export class Formats extends Context.Service<
   Formats,
@@ -43,6 +41,14 @@ const MAX_HEAP_MB = 512
 const failed = (error: unknown) =>
   Effect.logError("a format worker failed", error).pipe(Effect.andThen(Effect.fail(new FormatWorkerFailed())))
 
+/** A crash reaches its request as a defect, a failed send as an RpcClientError. */
+const workerFailures = <A, E>(effect: Effect.Effect<A, E | RpcClientError.RpcClientError>) =>
+  Effect.catchIf(
+    effect,
+    (error): error is RpcClientError.RpcClientError => error instanceof RpcClientError.RpcClientError,
+    failed
+  ).pipe(Effect.catchDefect(failed))
+
 export const layer = (options: FormatsOptions) =>
   Layer.unwrap(
     Effect.gen(function* () {
@@ -54,20 +60,19 @@ export const layer = (options: FormatsOptions) =>
         Formats,
         Effect.map(RpcClient.make(FormatOps), (client) =>
           Formats.of({
-            parse: (bytes, fileName) =>
-              client.Parse({ bytes: ownBuffer(bytes), fileName }).pipe(Effect.catchTag("RpcClientError", failed)),
+            parse: (bytes, fileName) => workerFailures(client.Parse({ bytes: ownBuffer(bytes), fileName })),
             export: (input) =>
-              client
-                .Export({
+              workerFailures(
+                client.Export({
                   ...input,
                   avatar: input.avatar && { ...input.avatar, bytes: ownBuffer(input.avatar.bytes) },
                   assets: input.assets.map((asset) => ({ ...asset, bytes: ownBuffer(asset.bytes) }))
                 })
-                .pipe(Effect.catchTag("RpcClientError", failed))
+              )
           })
         )
       ).pipe(
-        Layer.provide(ReaderPool.layer(options.size, "format worker")),
+        Layer.provide(ReaderPool.layer(options.size, { name: "format worker", isolateCrashes: true })),
         Layer.provide(workerThreads(entry, {}, bundleDir, { maxOldGenerationSizeMb: MAX_HEAP_MB }))
       )
     })

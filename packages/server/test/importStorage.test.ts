@@ -7,10 +7,11 @@ import { join } from "node:path"
 import { DatabaseSync } from "node:sqlite"
 import { assert, describe, it } from "@effect/vitest"
 import type { UserId } from "@rp/shared/domain.ts"
-import type { RefId } from "@rp/shared/library.ts"
+import type { Doc, RefId } from "@rp/shared/library.ts"
 import { Effect } from "effect"
 import { databaseFile } from "../src/db/connection.ts"
 import * as Database from "../src/db/Database.ts"
+import { docHash, searchText } from "../src/db/documents.ts"
 
 const fresh = () => {
   const dataDir = mkdtempSync(join(tmpdir(), "rp-import-"))
@@ -18,6 +19,9 @@ const fresh = () => {
 }
 
 const sha = (char: string) => char.repeat(64)
+
+/** A document as the format worker sends it. */
+const encoded = (doc: Doc) => ({ docJson: JSON.stringify(doc), docHash: docHash(doc), searchText: searchText(doc) })
 
 const card = (description: string) => ({
   schema_version: 1,
@@ -66,7 +70,7 @@ const setup = Effect.gen(function* () {
       intoRefId: into,
       kind: "card",
       label: "Mira",
-      docJson: JSON.stringify(card(description)),
+      ...encoded(card(description)),
       schemaVersion: 1,
       sourceName: "mira.png",
       sourceHash: sha(description.length % 2 === 0 ? "a" : "b"),
@@ -169,7 +173,7 @@ describe("library import storage", () => {
         intoRefId: mine.ref.id,
         kind: "preset",
         label: "p",
-        docJson: "{}",
+        ...encoded({}),
         schemaVersion: 1,
         sourceName: "p.json",
         sourceHash: sha("e"),
@@ -205,7 +209,7 @@ describe("library import storage", () => {
         intoRefId: null,
         kind: "card",
         label: "Solo",
-        docJson: JSON.stringify(card("solo")),
+        ...encoded(card("solo")),
         schemaVersion: 1,
         sourceName: "solo.png",
         sourceHash: sha("f"),

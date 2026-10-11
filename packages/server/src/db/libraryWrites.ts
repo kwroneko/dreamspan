@@ -9,7 +9,8 @@ import { uuidv7 } from "@rp/shared/id.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import type { Bin } from "./bin.ts"
-import { docHash, makeLibraryQueries, type RefRow, searchText, toLibraryRef } from "./library.ts"
+import { docHash, searchText } from "./documents.ts"
+import { makeLibraryQueries, type RefRow, toLibraryRef } from "./library.ts"
 import { mediaPath } from "./media.ts"
 import { FollowerMerge, NotFound, RefChange, RefOperationRefused, StaleWrite, WriteOps } from "./ops.ts"
 import { transaction } from "./tx.ts"
@@ -21,6 +22,21 @@ interface ImportSource {
   readonly sourceHash: string
 }
 
+/** A document as stored, its hash and search text already worked out (in a format worker). */
+class EncodedDoc {
+  readonly json: string
+  readonly hash: string
+  readonly searchText: string
+  constructor(json: string, hash: string, searchText: string) {
+    this.json = json
+    this.hash = hash
+    this.searchText = searchText
+  }
+}
+
+const encode = (doc: Doc | EncodedDoc) =>
+  doc instanceof EncodedDoc ? doc : new EncodedDoc(JSON.stringify(doc), docHash(doc), searchText(doc))
+
 export const makeLibraryWriteHandlers = (bin: Bin) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
@@ -30,7 +46,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
     const insertRevision = (options: {
       readonly entityId: string
       readonly schemaVersion: number
-      readonly doc: Doc
+      readonly doc: Doc | EncodedDoc
       readonly parents: ReadonlyArray<string>
       readonly origin: "import" | "user" | "merge"
       readonly originRef: string | null
@@ -38,17 +54,18 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
     }) =>
       Effect.gen(function* () {
         const id = uuidv7()
+        const doc = encode(options.doc)
         yield* sql`INSERT INTO entity_revisions ${sql.insert({
           id,
           entity_id: options.entityId,
           parents: JSON.stringify(options.parents),
-          doc_json: JSON.stringify(options.doc),
-          doc_hash: docHash(options.doc),
+          doc_json: doc.json,
+          doc_hash: doc.hash,
           schema_version: options.schemaVersion,
           origin: options.origin,
           origin_ref: options.originRef,
           message: options.message,
-          search_text: searchText(options.doc),
+          search_text: doc.searchText,
           created_at: Date.now()
         })}`
         return id
@@ -145,7 +162,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
       readonly kind: EntityKind
       readonly label: string
       readonly subtitle: string
-      readonly doc: Doc
+      readonly doc: Doc | EncodedDoc
       readonly schemaVersion: number
       readonly origin: "user" | "import"
       readonly originRef: string | null
@@ -187,7 +204,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
     const importInto = (
       ref: RefRow,
       options: {
-        readonly doc: Doc
+        readonly doc: Doc | EncodedDoc
         readonly schemaVersion: number
         readonly originRef: string | null
         readonly sourcePath: string | null
@@ -210,12 +227,13 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
         // Imports form their own line of revisions, which the upstream ref merges in like
         // a variant merges its upstream, so the user's edits to the upstream survive.
         // Importing what was last imported adds nothing to that line.
+        const doc = encode(options.doc)
         const last = ref.followed_head === null ? null : yield* revision(ref.followed_head)
-        if (last === null || last.doc_hash !== docHash(options.doc)) {
+        if (last === null || last.doc_hash !== doc.hash) {
           yield* insertRevision({
             entityId: ref.entity_id,
             schemaVersion: options.schemaVersion,
-            doc: options.doc,
+            doc,
             parents: ref.followed_head === null ? [] : [ref.followed_head],
             origin: "import",
             originRef: options.originRef,
@@ -228,7 +246,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
       })
 
     /** Records a file in media storage for the user; the same bytes are one row for everyone. */
-    const storeMedia = (
+    const recordMedia = (
       userId: string,
       file: { sha256: string; mime: string; byteSize: number; width: number | null; height: number | null }
     ) =>
@@ -439,17 +457,20 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
       ImportFile: (input) =>
         Effect.gen(function* () {
           const { userId, intoRefId, kind } = input
-          const doc = JSON.parse(input.docJson) as Record<string, unknown>
-          if (kind === "card") {
+          // Stored as the format worker encoded it, unless a card's media change it.
+          let doc: Doc | EncodedDoc = new EncodedDoc(input.docJson, input.docHash, input.searchText)
+          if (kind === "card" && input.media.length > 0) {
+            const card = JSON.parse(input.docJson) as Record<string, unknown>
             const assets: Array<[string, string]> = []
-            doc.avatar_media_id = null
+            card.avatar_media_id = null
             for (const file of input.media) {
-              const id = yield* storeMedia(userId, file)
-              if (file.role === "avatar") doc.avatar_media_id = id
+              const id = yield* recordMedia(userId, file)
+              if (file.role === "avatar") card.avatar_media_id = id
               else assets.push([file.uri, id])
             }
             // fromEntries, since a URI comes from the file and could be "__proto__".
-            if (assets.length > 0) doc.asset_media_ids = Object.fromEntries(assets)
+            if (assets.length > 0) card.asset_media_ids = Object.fromEntries(assets)
+            doc = card
           }
           const source: ImportSource = {
             originRef: JSON.stringify({ file: input.sourceName, sha256: input.sourceHash }),

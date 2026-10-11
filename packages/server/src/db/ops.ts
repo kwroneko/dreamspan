@@ -172,10 +172,10 @@ const CloseLlmRequest = Schema.Struct({
 })
 
 // --- Library import
-const Sha256 = Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/))
+export const Sha256 = Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/))
 
 /** A file that came with an imported one, already written to media storage. */
-const ImportedMedia = Schema.Struct({
+export const ImportedMedia = Schema.Struct({
   /** The avatar, or an embedded asset named by `uri` in the card's assets. */
   role: Schema.Literals(["avatar", "asset"]),
   uri: Schema.String,
@@ -719,6 +719,12 @@ export class WriteOps extends RpcGroup.make(
       kind: EntityKind,
       label: Schema.String,
       docJson: Schema.String,
+      /**
+       * The document's content hash and search text, worked out in the format worker, so a
+       * large file doesn't hold the writer for them. Used unless the media change the document.
+       */
+      docHash: Schema.String,
+      searchText: Schema.String,
       schemaVersion: Schema.Int,
       /** The uploaded file's name and the SHA-256 of its bytes. */
       sourceName: Schema.String,

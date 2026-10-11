@@ -3,18 +3,18 @@
 // run in a format worker (Formats.ts), never on the main thread, so this registry lives
 // in that worker.
 import { createHash } from "node:crypto"
-import { posix } from "node:path"
 import type { CardDoc } from "@rp/shared/docs/card.ts"
 import { LoreRole } from "@rp/shared/docs/lorebook.ts"
 import { NOTE_SCHEMA_VERSION, type NoteDoc } from "@rp/shared/docs/note.ts"
 import { PRESET_SCHEMA_VERSION } from "@rp/shared/docs/preset.ts"
 import { ImportIssue, ImportReport } from "@rp/shared/importReport.ts"
-import type { EntityKind } from "@rp/shared/library.ts"
+import type { Doc, EntityKind } from "@rp/shared/library.ts"
 import { Context, Effect, Layer, Predicate, Schema } from "effect"
 import { importCard } from "../formats/cardImport.ts"
 import { importStPreset, isStPresetFile } from "../formats/preset.ts"
 import { attempt, type FormatError } from "../formats/safety.ts"
 import { importLorebook } from "../formats/worldInfo.ts"
+import { docHash, searchText } from "../db/documents.ts"
 import { makeRegistry, type Registry } from "../registry.ts"
 import { type Sniffed, sniff } from "./detect.ts"
 import { ParsedFile, ParsedMedia } from "./ops.ts"
@@ -61,8 +61,8 @@ const labelFrom = (...candidates: ReadonlyArray<string>) => {
   return "Untitled"
 }
 
-/** The file's name without its folder or extension. */
-const baseName = (fileName: string) => posix.basename(fileName.replaceAll("\\", "/")).replace(/\.[^.]*$/, "")
+/** The file's name without its extension; the upload route has already dropped any folders. */
+const baseName = (fileName: string) => fileName.replace(/\.[^.]*$/, "")
 
 const withIssue = (report: ImportReport, issue: ImportIssue) =>
   new ImportReport({ format: report.format, issues: [...report.issues, issue] })
@@ -203,6 +203,17 @@ const describeImage = (bytes: Uint8Array) => {
   return { mime, width: null, height: null }
 }
 
+/**
+ * The document as JSON, with its hash and search text, worked out here so the writer, which
+ * every user's writes wait on, only stores them. Of the document read back from its JSON,
+ * so they're what the writer would work out from it.
+ */
+const encoded = (doc: object) => {
+  const docJson = JSON.stringify(doc)
+  const stored = JSON.parse(docJson) as Doc
+  return { docJson, docHash: docHash(stored), searchText: searchText(stored) }
+}
+
 const failed = (format: string, code: string, message: string) =>
   new ImportReport({ format, issues: [new ImportIssue({ level: "error", code, message })] })
 
@@ -239,7 +250,7 @@ export const parseFile = (bytes: Uint8Array, fileName: string) =>
       library: library && {
         kind: library.kind,
         label: library.label,
-        docJson: JSON.stringify(library.doc),
+        ...encoded(library.doc),
         schemaVersion: library.schemaVersion,
         noteDocJson: library.note && JSON.stringify(library.note)
       },

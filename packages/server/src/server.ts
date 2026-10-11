@@ -324,13 +324,9 @@ const HttpServerLive = Layer.unwrap(
   })
 )
 
-/** Files into and out of the library, parsed and written in format workers (ARCHITECTURE.md §10). */
-const LibraryFileRoutes = ImportRoutes.layer.pipe(
-  Layer.provide(
-    Layer.unwrap(
-      Effect.map(AppConfig, (config) => Formats.layer({ workers: config.dbWorkers, size: config.formatWorkers }))
-    )
-  )
+/** The format workers (ARCHITECTURE.md §10.3), started alongside the database's. */
+const FormatsLive = Layer.unwrap(
+  Effect.map(AppConfig, (config) => Formats.layer({ workers: config.dbWorkers, size: config.formatWorkers }))
 )
 
 /**
@@ -338,11 +334,11 @@ const LibraryFileRoutes = ImportRoutes.layer.pipe(
  * and read the port the kernel picked from the HttpServer this exposes.
  */
 export const ServerLive = HttpRouter.serve(
-  Layer.mergeAll(RpcRoute, HealthRoute, AuthRoutes, LibraryFileRoutes, StaticRoutes, InterruptedRequests, RequestGuard)
+  Layer.mergeAll(RpcRoute, HealthRoute, AuthRoutes, ImportRoutes.layer, StaticRoutes, InterruptedRequests, RequestGuard)
 ).pipe(
   Layer.provide(ProvidersLive),
   Layer.provideMerge(HttpServerLive),
   Layer.provideMerge(Accounts.layer),
-  Layer.provideMerge(Layer.mergeAll(DatabaseLive, EventLoopMonitor.layer)),
+  Layer.provideMerge(Layer.mergeAll(DatabaseLive, EventLoopMonitor.layer, FormatsLive)),
   Layer.provide(InFlightRpcs.layer)
 )

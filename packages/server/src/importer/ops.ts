@@ -6,6 +6,7 @@ import { ExportFormat } from "@rp/shared/libraryImport.ts"
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
 import { Transferable } from "effect/workers"
+import { ImportedMedia, Sha256 } from "../db/ops.ts"
 
 /**
  * The bytes with a buffer of their own, so they can be transferred. A view into a larger
@@ -17,14 +18,9 @@ export const ownBuffer = (bytes: Uint8Array): Uint8Array<ArrayBuffer> =>
     ? (bytes as Uint8Array<ArrayBuffer>)
     : new Uint8Array(bytes)
 
+/** A file that came with an imported one, as `ImportFile` records it, with its bytes. */
 export class ParsedMedia extends Schema.Class<ParsedMedia>("ParsedMedia")({
-  role: Schema.Literals(["avatar", "asset"]),
-  uri: Schema.String,
-  sha256: Schema.String,
-  mime: Schema.String,
-  byteSize: Schema.Int,
-  width: Schema.NullOr(Schema.Int),
-  height: Schema.NullOr(Schema.Int),
+  ...ImportedMedia.fields,
   bytes: Transferable.Uint8Array
 }) {}
 
@@ -32,12 +28,15 @@ export class ParsedMedia extends Schema.Class<ParsedMedia>("ParsedMedia")({
 export class ParsedFile extends Schema.Class<ParsedFile>("ParsedFile")({
   report: ImportReport,
   /** Of the file's bytes. */
-  sha256: Schema.String,
+  sha256: Sha256,
   library: Schema.NullOr(
     Schema.Struct({
       kind: EntityKind,
       label: Schema.String,
       docJson: Schema.String,
+      /** The document's content hash and search text, worked out here rather than in the writer. */
+      docHash: Schema.String,
+      searchText: Schema.String,
       schemaVersion: Schema.Int,
       noteDocJson: Schema.NullOr(Schema.String)
     })
@@ -52,21 +51,20 @@ export class ExportRefused extends Schema.TaggedError<ExportRefused>()("ExportRe
 
 const ExportedFile = Schema.Struct({ bytes: Transferable.Uint8Array, mime: Schema.String })
 
+export const ExportInput = Schema.Struct({
+  format: ExportFormat,
+  docJson: Schema.String,
+  noteDocJson: Schema.NullOr(Schema.String),
+  avatar: Schema.NullOr(ExportedFile),
+  /** A card's embedded assets, by the URI its assets name them with. */
+  assets: Schema.Array(Schema.Struct({ ...ExportedFile.fields, uri: Schema.String }))
+})
+export type ExportInput = typeof ExportInput.Type
+
 export class FormatOps extends RpcGroup.make(
   Rpc.make("Parse", {
     payload: { bytes: Transferable.Uint8Array, fileName: Schema.String },
     success: ParsedFile
   }),
-  Rpc.make("Export", {
-    payload: {
-      format: ExportFormat,
-      docJson: Schema.String,
-      noteDocJson: Schema.NullOr(Schema.String),
-      avatar: Schema.NullOr(ExportedFile),
-      /** A card's embedded assets, by the URI its assets name them with. */
-      assets: Schema.Array(Schema.Struct({ ...ExportedFile.fields, uri: Schema.String }))
-    },
-    success: Transferable.Uint8Array,
-    error: ExportRefused
-  })
+  Rpc.make("Export", { payload: ExportInput, success: Transferable.Uint8Array, error: ExportRefused })
 ) {}

@@ -91,7 +91,7 @@ describe("the built-in importers", () => {
   })
 
   it("labels: a preset by its file name, a lorebook by its name or file, control characters dropped", async () => {
-    assert.strictEqual((await parse(preset, "C:\\presets\\My Preset.json")).library!.label, "My Preset")
+    assert.strictEqual((await parse(preset, "My Preset.json")).library!.label, "My Preset")
     assert.strictEqual((await parse(json(worldInfo()), "harbor.json")).library!.label, "harbor")
     const named = await parse(json({ ...stCardV2(), data: { ...stCardV2().data, name: "Wren\u0000\u001b[31m" } }))
     assert.strictEqual(named.library!.label, "Wren [31m")

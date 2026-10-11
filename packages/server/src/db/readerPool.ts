@@ -46,8 +46,14 @@ const clientError = (cause: Cause.Cause<WorkerError.WorkerError>) => {
 /**
  * Fails to build if every reader dies before any is ready. Afterwards a crashed reader is
  * respawned every second, and while no reader is up, queued reads fail instead of waiting.
+ * With `isolateCrashes`, a crash fails only the request its worker had, and queued ones
+ * wait for the respawn unless it fails too; the format workers use it, since one hostile
+ * file mustn't fail another user's.
  */
-export const layer = (size: number, name = "database reader") =>
+export const layer = (
+  size: number,
+  { name = "database reader", isolateCrashes = false }: { name?: string; isolateCrashes?: boolean } = {}
+) =>
   Layer.effect(
     RpcClient.Protocol,
     RpcClient.Protocol.make(
@@ -125,25 +131,28 @@ export const layer = (size: number, name = "database reader") =>
           const wasReady = reader.ready
           reader.ready = false
           const error = clientError(cause)
-          const failed: Array<number> = []
-          if (reader.job !== undefined) failed.push(reader.job.clientId)
+          const failed: Array<Job> = []
+          if (reader.job !== undefined) failed.push(reader.job)
           reader.job = undefined
           // With no reader up, queued reads would wait on a respawn that may never succeed.
-          if (!readers.some((other) => other.ready)) {
-            for (const job of queue.splice(0)) failed.push(job.clientId)
+          // Isolated, they wait for the respawn, and fail only if it fails too.
+          if (!readers.some((other) => other.ready) && (!isolateCrashes || !wasReady)) {
+            failed.push(...queue.splice(0))
           }
           if (!wasReady && !Deferred.isDoneUnsafe(started)) {
             diedBeforeStart.add(reader.id)
             if (diedBeforeStart.size === size) Deferred.doneUnsafe(started, Exit.fail(error))
           }
-          return Effect.logError(`${name} ${reader.id} stopped; restarting it in ${RESPAWN_MS} ms`, cause).pipe(
-            Effect.andThen(
-              Effect.forEach(
-                new Set(failed),
+          // A protocol error fails every request of its client; a defect, only its own.
+          const fail = isolateCrashes
+            ? Effect.forEach(failed, (job) => writeResponse(job.clientId, dieExit(job, error)), { discard: true })
+            : Effect.forEach(
+                new Set(failed.map((job) => job.clientId)),
                 (clientId) => writeResponse(clientId, { _tag: "ClientProtocolError", error }),
                 { discard: true }
               )
-            )
+          return Effect.logError(`${name} ${reader.id} stopped; restarting it in ${RESPAWN_MS} ms`, cause).pipe(
+            Effect.andThen(fail)
           )
         }
 
