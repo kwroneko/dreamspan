@@ -43,9 +43,25 @@ export default tseslint.config(
       "no-restricted-syntax": [
         "error",
         {
-          selector:
-            "CallExpression[callee.property.name=/^(brand|fromBrand)$/], CallExpression[callee.name=/^(brand|fromBrand)$/]",
+          selector: [
+            "CallExpression[callee.property.name=/^(brand|fromBrand)$/]",
+            "CallExpression[callee.property.value=/^(brand|fromBrand)$/]",
+            "CallExpression[callee.name=/^(brand|fromBrand)$/]"
+          ].join(", "),
           message: "Make id schemas with idSchema (@rp/shared/id.ts)."
+        }
+      ],
+      // A rule of its own name, so the blocks below that restrict other imports don't replace it.
+      "@typescript-eslint/no-restricted-imports": [
+        "error",
+        {
+          paths: [
+            {
+              name: "effect/Schema",
+              importNames: ["brand", "fromBrand"],
+              message: "Make id schemas with idSchema (@rp/shared/id.ts)."
+            }
+          ]
         }
       ]
     }

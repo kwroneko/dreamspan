@@ -578,6 +578,17 @@ describe("message graph", () => {
       yield* addState(null, { key: "participant.join", value: { entity: tomas } })
       yield* addState(null, { key: "participant.join", value: { entity: ines } })
       yield* addState(null, { key: "played_by_me.set", value: { entities: [me, tomas] } })
+      // A preset bound for Tomas: an event scoped to him.
+      const style = (yield* entity("Style", "preset")).ref.id
+      yield* writer.AddStateEvent({
+        userId,
+        chatId: chat.id,
+        slotId: null,
+        versionId: null,
+        scope: tomas,
+        data: { key: "preset.binding", value: { ref: style } }
+      })
+      assert.deepStrictEqual(Object.keys((yield* stateAt(null)).presetBindings), [tomas])
       const turn = yield* append(chat.activeLeafSlotId!, say(me, "Tomas heads home."))
       yield* addState(turn.slotId, { key: "participant.leave", value: { entity: tomas } })
       const reply = yield* append(turn.slotId, generated(mira, "Mira waves."))
@@ -596,6 +607,7 @@ describe("message graph", () => {
       const message = yield* writer.DeleteMessage({ userId, slotId: turn.slotId })
       const state = yield* stateAt(reply.slotId)
       assert.deepStrictEqual([state.participants, state.playedByMe], [[mira, me], [me]])
+      assert.deepStrictEqual(state.presetBindings, {})
       yield* writer.RestoreBinItem({ userId, itemId: message.id })
       assert.deepStrictEqual((yield* stateAt(reply.slotId)).participants, [mira, me])
     }).pipe(Effect.provide(database()))

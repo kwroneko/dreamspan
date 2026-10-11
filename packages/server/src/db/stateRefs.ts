@@ -37,6 +37,10 @@ type Declared = StateKeyIds<Readonly<Record<string, string | ReadonlyArray<strin
 
 const references = (data: StateEventData) => referencesOf(stateKeyIds[data.key], data.value)
 
+/** A participant scope is checked like a value's ids; a role names nothing. */
+const scopeReferences = (scope: FoldableEvent["scope"]) =>
+  scope === null || isStateRole(scope) ? [] : referencesOf(scopeIds, { scope })
+
 const referencesOf = (declared: Declared, of: unknown): ReadonlyArray<Reference> => {
   // A value that isn't an object declares no fields, so this is only read for objects.
   const value = of as Readonly<Record<string, string | ReadonlyArray<string> | undefined>>
@@ -78,7 +82,7 @@ export const checkStateReferences = (
   // Keys that take something out of the state work on deleted and purged things too.
   const live = stateKeyIds[data.key].removes ? 0 : 1
   return Effect.forEach(
-    [...references(data), ...(scope === null || isStateRole(scope) ? [] : referencesOf(scopeIds, { scope }))],
+    [...references(data), ...scopeReferences(scope)],
     (reference) => {
       const count = (() => {
         switch (reference.table) {
@@ -123,7 +127,7 @@ export const withoutPurged = (sql: SqlClient.SqlClient, events: ReadonlyArray<Fo
   Effect.gen(function* () {
     const ids = { entity: new Set<string>(), ref: new Set<string>(), revision: new Set<string>() }
     for (const event of events) {
-      for (const reference of references(event.data)) {
+      for (const reference of [...references(event.data), ...scopeReferences(event.scope)]) {
         if (reference.table in ids) ids[reference.table as keyof typeof ids].add(reference.id)
       }
     }
@@ -146,6 +150,7 @@ export const withoutPurged = (sql: SqlClient.SqlClient, events: ReadonlyArray<Fo
     }
     if (gone.size === 0) return events
     return events.flatMap((event): ReadonlyArray<FoldableEvent> => {
+      if (scopeReferences(event.scope).some((reference) => gone.has(reference.id))) return []
       if (!references(event.data).some((reference) => gone.has(reference.id))) return [event]
       // Only this key names several entities; the rest of the set still applies.
       if (event.data.key === "played_by_me.set") {
