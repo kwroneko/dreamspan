@@ -1204,10 +1204,16 @@ describe("secrets stay where they were entered (audit regressions)", () => {
       const second = yield* providers.setKey(userId, created.id, "sk-second-typed", created.rowVersion)
       const third = yield* providers.setKey(userId, created.id, "sk-third-typed-3", second.rowVersion)
       assert.deepStrictEqual((yield* reader.ListCredentials({ userId })).map((c) => c.name).sort(), ["Mine", "Test"])
-      // A stale form (an older row version) is refused rather than binding to a changed URL.
+      // A stale form (an older row version) is refused rather than binding to a changed URL,
+      // as a StaleWrite the client can reload on.
       assert.strictEqual(
-        (yield* flipped(providers.setKey(userId, created.id, "sk-stale-form-1", created.rowVersion))).reason,
-        "bad_request"
+        (yield* Effect.flip(providers.setKey(userId, created.id, "sk-stale-form-1", created.rowVersion)))._tag,
+        "StaleWrite"
+      )
+      assert.strictEqual(
+        (yield* Effect.flip(providers.setHeaders(userId, created.id, { "X-Token": "value-1" }, created.rowVersion)))
+          ._tag,
+        "StaleWrite"
       )
       // A credential the user named and attached is never deleted by typing a new key.
       const attached = yield* (yield* Database.Writer).SetConnectionCredential({

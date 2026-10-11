@@ -50,14 +50,6 @@ const describeError = (error: unknown): AppError => {
     return make("RpcClientError", "Can't reach the server. Check that it's running.")
   if (error instanceof NotFound) return make("NotFound", `This ${error.entity} doesn't exist any more.`)
   if (error instanceof StaleWrite) return stale(error.entity)
-  // The provider layer reports a StaleWrite as this bad_request (Providers.ts, fromStorage).
-  if (
-    error instanceof ProviderError &&
-    error.reason === "bad_request" &&
-    /changed in another tab/.test(error.message)
-  ) {
-    return stale("connection")
-  }
   if (error instanceof ProviderError) return make("ProviderError", sentence(error.message), error.reason)
   if (error instanceof AccountRejected) return make("AccountRejected", sentence(error.message), error.reason)
   if (error instanceof Forbidden) return make("Forbidden", sentence(error.message))

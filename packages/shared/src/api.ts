@@ -150,7 +150,7 @@ export class AppApi extends RpcGroup.make(
     /** The row version is the connection the user saw: the key is bound to its base URL. */
     payload: { connectionId: ConnectionId, apiKey: Schema.NullOr(Schema.String), expectedRowVersion: Schema.Int },
     success: Connection,
-    error: Schema.Union([ProviderError, ServerError])
+    error: Schema.Union([ProviderError, StaleWrite, ServerError])
   }),
   /** Replaces the custom headers. Only their names ever come back. */
   Rpc.make("SetConnectionCredential", {
@@ -195,7 +195,7 @@ export class AppApi extends RpcGroup.make(
       expectedRowVersion: Schema.Int
     },
     success: Connection,
-    error: Schema.Union([ProviderError, ServerError])
+    error: Schema.Union([ProviderError, StaleWrite, ServerError])
   }),
   Rpc.make("SetConnectionProxy", {
     payload: { connectionId: ConnectionId, mode: ProxyMode, url: Schema.NullOr(Schema.String) },

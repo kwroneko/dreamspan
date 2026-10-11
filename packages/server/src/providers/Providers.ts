@@ -33,7 +33,7 @@ import {
 } from "@rp/shared/providers.ts"
 import type { Cost, LlmRequestId, RequestPurpose, TokenCounts } from "@rp/shared/usage.ts"
 import { createHash, timingSafeEqual } from "node:crypto"
-import { ServerError } from "@rp/shared/errors.ts"
+import { ServerError, StaleWrite } from "@rp/shared/errors.ts"
 import { Cause, Context, Effect, Exit, Layer, Queue, Semaphore, Stream } from "effect"
 import { Reader, Writer } from "../db/Database.ts"
 import { Network, type ProxyOverride, RedirectRefused } from "../net/Network.ts"
@@ -206,14 +206,14 @@ export interface ProvidersShape {
     connectionId: ConnectionId,
     apiKey: string | null,
     expectedRowVersion: number
-  ) => Effect.Effect<Connection, ProviderError | ServerError>
+  ) => Effect.Effect<Connection, ProviderError | StaleWrite | ServerError>
   /** Header values, bound to the connection's current origin like a key. */
   readonly setHeaders: (
     userId: UserId,
     connectionId: ConnectionId,
     headers: Readonly<Record<string, string>> | null,
     expectedRowVersion: number
-  ) => Effect.Effect<Connection, ProviderError | ServerError>
+  ) => Effect.Effect<Connection, ProviderError | StaleWrite | ServerError>
   readonly setProxy: (
     userId: UserId,
     connectionId: ConnectionId,
@@ -241,8 +241,8 @@ export interface ProvidersShape {
 export class Providers extends Context.Service<Providers, ProvidersShape>()("rp/Providers") {}
 
 /**
- * Storage outcomes the client can act on become provider errors (NotFound: unusable,
- * StaleWrite: reload). Anything else is logged and reaches the client only as ServerError.
+ * Storage outcomes the client can act on become provider errors (NotFound: unusable).
+ * Anything else is logged and reaches the client only as ServerError.
  */
 const fromStorage = <A, R>(
   effect: Effect.Effect<A, { readonly _tag: string; readonly message: string }, R>
@@ -251,11 +251,19 @@ const fromStorage = <A, R>(
     Effect.catch((error): Effect.Effect<never, ProviderError | ServerError> =>
       error._tag === "NotFound"
         ? Effect.fail(providerError("unusable", `${error.message || "not found"}`))
-        : error._tag === "StaleWrite"
-          ? Effect.fail(providerError("bad_request", "the connection changed in another tab; reload it"))
-          : Effect.logError("provider storage operation failed", error).pipe(
-              Effect.andThen(Effect.fail(new ServerError({ message: "storage operation failed" })))
-            )
+        : Effect.logError("provider storage operation failed", error).pipe(
+            Effect.andThen(Effect.fail(new ServerError({ message: "storage operation failed" })))
+          )
+    )
+  )
+
+/** A write checked against a row version: a StaleWrite reaches the client as itself, so it reloads. */
+const fromVersionedStorage = <A, R>(
+  effect: Effect.Effect<A, { readonly _tag: string; readonly message: string }, R>
+): Effect.Effect<A, ProviderError | StaleWrite | ServerError, R> =>
+  effect.pipe(
+    Effect.catch((error): Effect.Effect<never, ProviderError | StaleWrite | ServerError> =>
+      error instanceof StaleWrite ? Effect.fail(error) : fromStorage(Effect.fail(error))
     )
   )
 
@@ -524,14 +532,16 @@ export const layer = (options: ProvidersOptions = {}) =>
           const key = typedKey(apiKey)
           const { connection, baseUrl } = yield* connectionOrigin(userId, connectionId)
           const credential = key === null ? null : yield* typedCredential(connection.name, key, baseUrl)
-          return yield* fromStorage(writer.SetConnectionKey({ userId, connectionId, expectedRowVersion, credential }))
+          return yield* fromVersionedStorage(
+            writer.SetConnectionKey({ userId, connectionId, expectedRowVersion, credential })
+          )
         })
 
       const setHeaders: ProvidersShape["setHeaders"] = (userId, connectionId, headers, expectedRowVersion) =>
         Effect.gen(function* () {
           const { baseUrl } = yield* connectionOrigin(userId, connectionId)
           const [origin] = yield* originsOf([baseUrl])
-          return yield* fromStorage(
+          return yield* fromVersionedStorage(
             writer.SetConnectionHeaders({
               userId,
               connectionId,
