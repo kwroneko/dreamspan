@@ -2,7 +2,7 @@ import { PresetDoc } from "@rp/shared/docs/preset.ts"
 import { Schema } from "effect"
 import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
-import { importStPreset, type PresetImport } from "../src/formats/preset.ts"
+import { exportStPreset, importStPreset, type PresetImport } from "../src/formats/preset.ts"
 
 const fixture = (name: string) => readFileSync(new URL(`fixtures/presets/${name}.json`, import.meta.url), "utf8")
 
@@ -327,5 +327,75 @@ describe("files that aren't chat-completion presets", () => {
     const result = importStPreset(text)
     expect(result.document).toBeNull()
     expect(codes(result, "error")).toHaveLength(1)
+  })
+})
+
+describe("exporting to an ST chat-completion preset", () => {
+  type Item = Record<string, unknown>
+  const byKey = (items: unknown, key: string) => new Map((items as Array<Item>).map((i) => [i[key], i]))
+  // ST ignores a regex depth below these bounds, as it does a missing one.
+  const stDepth = (v: unknown, min: number) => (typeof v === "number" && v >= min ? v : null)
+
+  it.each(["default", "full"])("gives back every field ST reads from %s, with the same value", (name) => {
+    const original = JSON.parse(fixture(name)) as Item
+    const file = exportStPreset(load(original).doc)
+    const connection = [
+      "chat_completion_source",
+      "openai_model",
+      "claude_model",
+      "openrouter_model",
+      "openrouter_use_fallback",
+      "openrouter_sort_models",
+      "electronhub_sort_models",
+      "custom_model",
+      "custom_url",
+      "custom_include_headers",
+      "reverse_proxy",
+      "proxy_password",
+      "show_external_models",
+      "bypass_status_check"
+    ]
+    for (const [key, value] of Object.entries(original)) {
+      if (connection.includes(key)) expect(file).not.toHaveProperty(key)
+      else if (key === "prompts") {
+        const prompts = byKey(file.prompts, "identifier")
+        for (const p of value as Array<Item>) expect(prompts.get(p.identifier)).toMatchObject(p)
+      } else if (key === "prompt_order") {
+        const global = (value as Array<Item>).find((o) => o.character_id === 100001)
+        expect(file.prompt_order).toEqual([global])
+      } else if (key === "extensions") {
+        const { regex_scripts, ...rest } = value as Item
+        const scripts = (file.extensions as Item).regex_scripts as Array<Item> | undefined
+        expect(file.extensions).toMatchObject(rest)
+        for (const [i, s] of ((regex_scripts ?? []) as Array<Item>).entries())
+          expect(scripts?.[i]).toEqual({ ...s, minDepth: stDepth(s.minDepth, -1), maxDepth: stDepth(s.maxDepth, 0) })
+      } else if (typeof file[key] === "number") expect(file[key]).toBe(Number(value))
+      else expect(file[key]).toEqual(value)
+    }
+  })
+
+  it.each(["default", "full", "legacy"])("round-trips %s to the same document", (name) => {
+    const first = load(fixture(name))
+    const second = load(JSON.stringify(exportStPreset(first.doc)))
+    expect(second.doc).toEqual(first.doc)
+    // Nothing is dropped or defaulted the second time.
+    for (const code of ["preset.prompt_orders_dropped", "preset.connection_ignored", "preset.defaults_applied"])
+      expect(codes(second)).not.toContain(code)
+  })
+
+  it("lets modelled fields win over an unsupported entry of the same name", () => {
+    const { doc } = load(fixture("default"))
+    const file = exportStPreset({ ...doc, unsupported: { ...doc.unsupported, temperature: 2, prompts: [] } })
+    expect(file.temperature).toBe(1)
+    expect(file.prompts).toHaveLength(doc.prompts.length)
+  })
+
+  it("writes the document's enums back as ST's values", () => {
+    const { doc } = load(fixture("full"))
+    expect(exportStPreset(doc)).toMatchObject({ names_behavior: 2, custom_prompt_post_processing: "strict" })
+    expect(exportStPreset({ ...doc, names_behavior: "none", postprocess: "none" })).toMatchObject({
+      names_behavior: -1,
+      custom_prompt_post_processing: ""
+    })
   })
 })

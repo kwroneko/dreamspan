@@ -654,3 +654,57 @@ const readRegex = (raw: unknown, r: Reporter): Array<RegexScript> => {
     )
   return [...scripts.values()]
 }
+
+/**
+ * The document as an ST chat-completion preset that ST loads the same way, with the fields
+ * kept in `unsupported{}`. Modelled fields win over an `unsupported{}` entry of the same name.
+ * There's no connection or model data to write: ST then keeps its current connection.
+ */
+export const exportStPreset = (doc: PresetDoc): Json => {
+  const prompts = doc.prompts.map((p) => ({
+    ...p.unsupported,
+    identifier: p.identifier,
+    name: p.name,
+    role: p.role,
+    content: p.content,
+    system_prompt: p.system_prompt,
+    marker: p.marker,
+    injection_position: p.injection_position === "absolute" ? 1 : 0,
+    injection_depth: p.injection_depth,
+    injection_order: p.injection_order,
+    injection_trigger: [...p.injection_trigger],
+    forbid_overrides: p.forbid_overrides
+  }))
+  const regex_scripts = doc.regex.map((s) => ({
+    ...s.unsupported,
+    id: s.id,
+    scriptName: s.name,
+    findRegex: s.find_regex,
+    replaceString: s.replace_string,
+    trimStrings: [...s.trim_strings],
+    placement: [...s.placement],
+    disabled: s.disabled,
+    markdownOnly: s.markdown_only,
+    promptOnly: s.prompt_only,
+    runOnEdit: s.run_on_edit,
+    substituteRegex: SUBSTITUTE_REGEX.indexOf(s.substitute_regex),
+    minDepth: s.min_depth,
+    maxDepth: s.max_depth
+  }))
+  return {
+    ...doc.unsupported,
+    ...doc.samplers,
+    ...doc.utility_prompts,
+    names_behavior: NAMES_BEHAVIOR.find(([name]) => name === doc.names_behavior)![1],
+    squash_system_messages: doc.squash,
+    custom_prompt_post_processing: doc.postprocess === "none" ? "" : doc.postprocess,
+    use_sysprompt: doc.use_sysprompt,
+    assistant_prefill: doc.prefill.assistant,
+    assistant_impersonation: doc.prefill.impersonation,
+    continue_prefill: doc.prefill.continue,
+    continue_postfix: doc.prefill.continue_postfix,
+    prompts,
+    prompt_order: [{ character_id: GLOBAL_ORDER_ID, order: doc.order.map((e) => ({ ...e })) }],
+    extensions: { ...doc.extensions, ...(regex_scripts.length > 0 ? { regex_scripts } : {}) }
+  }
+}
