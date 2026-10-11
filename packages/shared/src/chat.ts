@@ -1,15 +1,16 @@
 // The message graph as the rest of the app sees it (DATA-MODEL.md §4).
 import { Schema } from "effect"
+import { ID_TABLE } from "./id.ts"
 
-export const ChatId = Schema.String.pipe(Schema.brand("ChatId"))
+export const ChatId = Schema.String.pipe(Schema.brand("ChatId")).annotate({ [ID_TABLE]: "chat" })
 export type ChatId = typeof ChatId.Type
-export const LaneId = Schema.String.pipe(Schema.brand("LaneId"))
+export const LaneId = Schema.String.pipe(Schema.brand("LaneId")).annotate({ [ID_TABLE]: "lane" })
 export type LaneId = typeof LaneId.Type
-export const SlotId = Schema.String.pipe(Schema.brand("SlotId"))
+export const SlotId = Schema.String.pipe(Schema.brand("SlotId")).annotate({ [ID_TABLE]: "slot" })
 export type SlotId = typeof SlotId.Type
-export const VersionId = Schema.String.pipe(Schema.brand("VersionId"))
+export const VersionId = Schema.String.pipe(Schema.brand("VersionId")).annotate({ [ID_TABLE]: "version" })
 export type VersionId = typeof VersionId.Type
-export const EntityId = Schema.String.pipe(Schema.brand("EntityId"))
+export const EntityId = Schema.String.pipe(Schema.brand("EntityId")).annotate({ [ID_TABLE]: "entity" })
 export type EntityId = typeof EntityId.Type
 
 export const ChatKind = Schema.Literals(["rp", "workshop"])

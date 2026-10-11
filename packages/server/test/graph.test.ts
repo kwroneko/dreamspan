@@ -479,7 +479,7 @@ describe("message graph", () => {
             credential: { existing: null }
           })
           const model = yield* ana.writer.AddUserModel({ userId, connectionId: conn.id, key: "m", overrides: {} })
-          return { connection: conn.id as string, model: model.id as string }
+          return { connection: conn.id, model: model.id }
         })
       const anaModel = yield* connection(ana.userId)
       const bobModel = yield* connection(bob.userId)

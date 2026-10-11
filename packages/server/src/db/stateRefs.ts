@@ -28,14 +28,13 @@ type Reference =
 /** Any key's declaration, core or (later) a plugin's. */
 type Declared = StateKeyIds<Readonly<Record<string, string | ReadonlyArray<string>>>>
 
-/** Every id the value names, as its key declares them (`stateKeyIds`). */
 const references = (data: StateEventData): ReadonlyArray<Reference> => {
   const declared: Declared = stateKeyIds[data.key]
   // A key whose value isn't an object declares no fields, so this is only read for objects.
   const value = data.value as unknown as Readonly<Record<string, string | ReadonlyArray<string> | undefined>>
   const field = (name: string | undefined) => (name === undefined ? undefined : (value[name] as string | undefined))
   return Object.entries(declared.ids).flatMap(([name, declaration]) => {
-    if (declaration === "text") return []
+    if (declaration === undefined) return []
     const held = value[name]
     const ids = held === undefined ? [] : typeof held === "string" ? [held] : held
     return ids.map((id): Reference => {

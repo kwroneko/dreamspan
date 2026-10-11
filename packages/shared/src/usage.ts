@@ -1,10 +1,11 @@
 // The usage ledger (spec/PROVIDERS.md §9): one record per request to a model. Counts are
 // null when unknown, never zero.
 import { Schema } from "effect"
+import { ID_TABLE } from "./id.ts"
 import { ChatId, VersionId } from "./chat.ts"
 import { ConnectionId, ModelId } from "./providers.ts"
 
-export const LlmRequestId = Schema.String.pipe(Schema.brand("LlmRequestId"))
+export const LlmRequestId = Schema.String.pipe(Schema.brand("LlmRequestId")).annotate({ [ID_TABLE]: "llm_request" })
 export type LlmRequestId = typeof LlmRequestId.Type
 
 export const RequestPurpose = Schema.Literals([

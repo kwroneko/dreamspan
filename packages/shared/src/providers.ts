@@ -1,6 +1,7 @@
 // Connections and models (spec/PROVIDERS.md §2, §3). Shared so the client can show the
 // same kinds, fields and merged model descriptions the server uses.
 import { Schema } from "effect"
+import { ID_TABLE } from "./id.ts"
 import { RefId } from "./library.ts"
 
 /**
@@ -26,11 +27,11 @@ export class ProviderKindInfo extends Schema.Class<ProviderKindInfo>("ProviderKi
   keyOptional: Schema.Boolean
 }) {}
 
-export const ConnectionId = Schema.String.pipe(Schema.brand("ConnectionId"))
+export const ConnectionId = Schema.String.pipe(Schema.brand("ConnectionId")).annotate({ [ID_TABLE]: "connection" })
 export type ConnectionId = typeof ConnectionId.Type
-export const ModelId = Schema.String.pipe(Schema.brand("ModelId"))
+export const ModelId = Schema.String.pipe(Schema.brand("ModelId")).annotate({ [ID_TABLE]: "model" })
 export type ModelId = typeof ModelId.Type
-export const CredentialId = Schema.String.pipe(Schema.brand("CredentialId"))
+export const CredentialId = Schema.String.pipe(Schema.brand("CredentialId")).annotate({ [ID_TABLE]: "credential" })
 export type CredentialId = typeof CredentialId.Type
 
 /**

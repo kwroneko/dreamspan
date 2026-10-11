@@ -1,5 +1,11 @@
 // UUIDv7: time-ordered, so `ORDER BY id` approximates creation order (DATA-MODEL §1).
 
+/**
+ * The annotation every id schema carries, naming the table its values point into. A brand
+ * leaves no trace in a schema's AST, so this is how code finds the ids in one (state.ts).
+ */
+export const ID_TABLE = "rp/idTable"
+
 let lastMs = 0
 let sequence = 0
 

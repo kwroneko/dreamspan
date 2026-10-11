@@ -1,35 +1,42 @@
 // Chat state on the graph (DESIGN §3.4, DATA-MODEL §5). Every change to chat state is
 // an event at a position; the state at a slot is the fold of the events on the path
 // to it. The fold is a pure function so the server and the client agree on it.
-import { Schema } from "effect"
+import { Schema, type SchemaAST } from "effect"
 import { EntityId } from "./chat.ts"
-import type { EntityKind } from "./library.ts"
+import { ID_TABLE } from "./id.ts"
+import { type EntityKind, RefId, RevisionId } from "./library.ts"
+import { ConnectionId, ModelId } from "./providers.ts"
 
-const Id = Schema.String
 const event = <K extends string, V extends Schema.Top>(key: K, value: V) =>
   Schema.Struct({ key: Schema.Literal(key), value })
 
-/** The typed state-event keys (DATA-MODEL §5.3). Unknown keys are rejected on write. */
+/**
+ * The typed state-event keys (DATA-MODEL §5.3). Unknown keys are rejected on write. Ids
+ * use the id schemas, never a plain string, so `stateKeyProblems` can find them.
+ */
 export const StateEventData = Schema.Union([
   event("participant.join", Schema.Struct({ entity: EntityId })),
   event("participant.leave", Schema.Struct({ entity: EntityId })),
   event("presence.set", Schema.Struct({ entity: EntityId, present: Schema.Boolean })),
   event("played_by_me.set", Schema.Struct({ entities: Schema.Array(EntityId) })),
-  event("card.binding", Schema.Struct({ entity: EntityId, ref: Schema.optional(Id), revision: Schema.optional(Id) })),
+  event(
+    "card.binding",
+    Schema.Struct({ entity: EntityId, ref: Schema.optional(RefId), revision: Schema.optional(RevisionId) })
+  ),
   event("note.activate", Schema.Struct({ note: EntityId })),
   event("note.deactivate", Schema.Struct({ note: EntityId })),
-  event("note.binding", Schema.Struct({ note: EntityId, revision: Id })),
-  event("preset.binding", Schema.Struct({ ref: Schema.optional(Id), revision: Schema.optional(Id) })),
+  event("note.binding", Schema.Struct({ note: EntityId, revision: RevisionId })),
+  event("preset.binding", Schema.Struct({ ref: Schema.optional(RefId), revision: Schema.optional(RevisionId) })),
   event("preset_overlay.binding", Schema.Struct({ overlay: EntityId, on: Schema.Boolean })),
-  event("model.binding", Schema.Struct({ connection: Id, model: Id })),
+  event("model.binding", Schema.Struct({ connection: ConnectionId, model: ModelId })),
   event("layout.cards", Schema.Literals(["concat", "swap_tail"])),
   event("roles.projection", Schema.Literals(["by_writer", "alternate", "perspective"])),
   event("macro.binding", Schema.Struct({ name: Schema.String, value: Schema.String })),
   event("orchestration.mode", Schema.Struct({ mode: Schema.String, config: Schema.optional(Schema.Unknown) })),
   event("output.contract", Schema.Literals(["final_text", "send_message", "both"])),
   event("rollout.continuity", Schema.Literals(["fork", "resume_previous"])),
-  event("lorebook.attach", Schema.Struct({ ref: Id })),
-  event("lorebook.detach", Schema.Struct({ ref: Id })),
+  event("lorebook.attach", Schema.Struct({ ref: RefId })),
+  event("lorebook.detach", Schema.Struct({ ref: RefId })),
   event("var.set", Schema.Struct({ name: Schema.String, value: Schema.Unknown })),
   event("author_note.set", Schema.Struct({ note: EntityId }))
 ])
@@ -53,24 +60,18 @@ type IdFieldName<V> = {
 }[keyof V & string]
 
 /**
- * What each string field of a key's value holds: an id, which the writer checks against
- * the acting user (db/stateRefs.ts), or `"text"`. Every one must be listed, so a new field
- * can't skip the check by accident. Whatever reads an id out of text, or out of a field
- * that isn't a string, must check ownership itself. A key that `removes` something may
- * name a deleted thing.
+ * The id fields of a key's value, which the writer checks against the acting user
+ * (db/stateRefs.ts). A key that `removes` something may name a deleted thing.
+ * `stateKeyProblems` checks a declaration against its value schema.
  */
 export interface StateKeyIds<V> {
-  readonly ids: { readonly [F in IdFieldName<V>]: IdField<IdFieldName<V>> | "text" }
+  readonly ids: { readonly [F in IdFieldName<V>]?: IdField<IdFieldName<V>> }
   readonly removes?: true
 }
 
 type ValueOf<K extends StateEventData["key"]> = Extract<StateEventData, { readonly key: K }>["value"]
 
-/**
- * Every core key's id fields; a new key doesn't compile until it's listed. A plugin's key
- * will be `<plugin-id>/<key>` (core keys have no slash) and register its value schema with
- * a `StateKeyIds`, so the same check covers it (spec/PLUGINS.md §8).
- */
+/** Every core key's id fields; a new key doesn't compile until it's listed. */
 export const stateKeyIds: { readonly [K in StateEventData["key"]]: StateKeyIds<ValueOf<K>> } = {
   "participant.join": { ids: { entity: { table: "entity", kind: "card" } } },
   "participant.leave": { ids: { entity: { table: "entity", kind: "card" } }, removes: true },
@@ -97,14 +98,68 @@ export const stateKeyIds: { readonly [K in StateEventData["key"]]: StateKeyIds<V
   },
   "layout.cards": { ids: {} },
   "roles.projection": { ids: {} },
-  "macro.binding": { ids: { name: "text", value: "text" } },
-  "orchestration.mode": { ids: { mode: "text" } },
+  "macro.binding": { ids: {} },
+  "orchestration.mode": { ids: {} },
   "output.contract": { ids: {} },
   "rollout.continuity": { ids: {} },
   "lorebook.attach": { ids: { ref: { table: "ref", kind: "lorebook" } } },
   "lorebook.detach": { ids: { ref: { table: "ref", kind: "lorebook" } }, removes: true },
-  "var.set": { ids: { name: "text" } },
+  "var.set": { ids: {} },
   "author_note.set": { ids: { note: { table: "entity", kind: "note" } } }
+}
+
+/** Where ids sit in a schema: `field`, `field[]`, or deeper, with the table each names. */
+const idPositions = (ast: SchemaAST.AST, path: string): ReadonlyArray<{ path: string; table: string }> => {
+  const table = ast.annotations?.[ID_TABLE]
+  if (typeof table === "string") return [{ path, table }]
+  switch (ast._tag) {
+    case "Union":
+      return ast.types.flatMap((member) => idPositions(member, path))
+    case "Arrays":
+      return [...ast.elements, ...ast.rest].flatMap((element) => idPositions(element, `${path}[]`))
+    case "Objects":
+      return [
+        ...ast.propertySignatures.flatMap((p) =>
+          idPositions(p.type, path === "" ? String(p.name) : `${path}.${String(p.name)}`)
+        ),
+        ...ast.indexSignatures.flatMap((index) => idPositions(index.type, `${path}.*`))
+      ]
+    case "Declaration":
+      return ast.typeParameters.flatMap((parameter) => idPositions(parameter, path))
+    case "Suspend":
+      return [{ path, table: "unknown (a suspended schema isn't searched)" }]
+    default:
+      return []
+  }
+}
+
+/**
+ * What's wrong with a key's declaration, given its value schema; empty when nothing is.
+ * Every id in the value must sit in a top-level field (or an array in one), be declared
+ * there with the table its schema names, and every declared field must hold one. An id
+ * typed as a plain string isn't seen.
+ */
+export const stateKeyProblems = (
+  value: SchemaAST.AST,
+  declared: StateKeyIds<Readonly<Record<string, string | ReadonlyArray<string>>>>
+): ReadonlyArray<string> => {
+  const positions = idPositions(value, "")
+  const problems: Array<string> = []
+  for (const { path, table } of positions) {
+    const field = /^[^.[\]*]+(\[\])?$/.test(path) ? path.replace("[]", "") : undefined
+    const declaration = field === undefined ? undefined : declared.ids[field]
+    if (field === undefined) problems.push(`${table} id at "${path}" isn't in a top-level field`)
+    else if (declaration === undefined) problems.push(`${table} id in "${field}" isn't declared`)
+    else if (declaration.table !== table) {
+      problems.push(`"${field}" holds ${table} ids but is declared as ${declaration.table}`)
+    }
+  }
+  for (const field of Object.keys(declared.ids)) {
+    if (!positions.some(({ path }) => path === field || path === `${field}[]`)) {
+      problems.push(`"${field}" is declared as an id but its schema isn't an id schema`)
+    }
+  }
+  return problems
 }
 
 /** A state event as the fold sees it: its data plus the optional scope (a role, an entity). */
