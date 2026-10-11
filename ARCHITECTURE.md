@@ -111,7 +111,7 @@ SQLite through Node's built-in `node:sqlite` and Effect's driver (`@effect/sql-s
 - Requests queue in arrival order for the first idle reader. A request whose send fails gets a defect, and its reader is released.
 - Tested (`test/readerPool.test.ts`) with a test reader whose requests block like queries: after the interrupted read and after a crash, each light read takes well under 300 ms, and the crashed reader is replaced by a new thread; with readers that die as they start, startup fails, and a read after all readers crashed fails in about a second.
 
-Measured (`test/database.test.ts`): the same CPU-heavy 800 ms query blocks the main event loop for **795 ms** when run on the main thread, and **0.8 ms** when run through a reader worker. Light reads on another reader finish while it runs.
+Measured (`test/database.test.ts`): the same CPU-heavy 800 ms query blocks the main event loop for **795 ms** when run on the main thread, and **0.8 ms** when run through a reader worker (a test-only one, `test/support/diagnostics.ts`, with the readers' connection setup). Light reads on another reader finish while it runs.
 
 ### 3.2 Storage operations are named commands
 
@@ -187,6 +187,7 @@ Migrations (`migrations.ts`) run in the writer through Effect's `SqliteMigrator`
 - `0006_credentials` (§3.12): keys as credentials that connections reference, bound to hosts
 - `0007_accounts` (§4): `users.password_hash`, and `sessions`
 - `0008_secret_bindings` (§3.12): `connections.headers_origin`, `credentials.connection_owned`
+- `0010_graph_integrity`: foreign-key indexes, and the triggers below that weren't in `0002` (`schema/graphIntegrity.ts`)
 
 Conventions:
 - **Tables:** all `STRICT`, with JSON columns guarded by `json_valid` CHECKs and timestamps in epoch milliseconds.
@@ -194,26 +195,37 @@ Conventions:
 - **Concurrency:** mutable rows carry `row_version` for optimistic concurrency.
 - **Mutual references** (`slots.selected_version_id` ↔ `versions.slot_id`, a summary ↔ its selected revision) use deferred foreign keys. The version row is inserted first, then the slot, in one transaction.
 
-**Invariants enforced by the database** (`schema/integrity.ts`). No code path can break these, and `test/schema.test.ts` checks each one on a bare connection:
+**Invariants enforced by the database** (`schema/integrity.ts`, `schema/graphIntegrity.ts`). Triggers check each statement, so no single statement can break these, and `test/schema.test.ts` checks each one on a bare connection. A sequence of statements still can, for example deleting a selected model version and inserting another under its id in one transaction: no trigger can tell that from a legitimate insert. The writer is the only code path that writes, and these back it up:
 - **Edits are non-destructive.** Changing content creates new rows; it never overwrites. Deliberate deletion is allowed, and foreign keys keep it consistent: for example, a slot can't be left selecting a deleted version, and deleting a chat removes everything in it, its chat-local overrides and drafts included.
-  - Model-written versions are frozen once they stop generating.
+  - Model-written versions are frozen once they stop generating, and a version never goes back to generating. Only deleting for good from the recycle bin empties one: `purged_at` set, under a bin item of the chat's owner for that version, its message, or a branch in its chat. `purged_at` is never cleared on versions and slots.
   - Amending a user-written version copies the previous content into `version_history` automatically.
   - Entity revisions and summary revisions are immutable.
   - A rollout's context snapshot is frozen once written.
   - State events can only be superseded, not changed.
 - **The graph is append-only.**
   - A slot's parent is in the same chat, one level up.
-  - A slot never moves.
-  - A version's slot, writer and origin never change.
+  - A merge slot's extra parents (`slot_parents`) are in its chat and recorded before anything is appended below it, which keeps the graph acyclic: an edge out of a slot nothing points to can't close a cycle. Triggers can't run a recursive cycle check.
+  - A slot and its merge parents never move.
+  - A version's slot, writer and origin never change, and its source can only be cleared.
 - **References stay inside their chat.**
   - A slot selects only its own versions, which is what invariant 3 rests on.
   - A chat's active leaf is one of its slots.
+  - A lane forks from a slot of its chat.
+  - A version's source ("edited from #7") is a version of the same slot. Deleting the source clears the reference.
   - A state event's slot is in its chat, and its version is in that slot.
   - A summary selects only its own revisions.
+  - Rollouts (slot, leaf, parent), summaries (first and last slot, rollout), summary inputs (slot, and a version of that slot), summary parents, summarization jobs (slots, summaries), changesets (rollout), versions (rollout, changeset) and superseded state events (changeset) refer only within their chat. A reference into another chat would also block that chat's deletion with a foreign-key error.
+  - A chat override is of an entity of the chat's owner.
+  - Each holds on insert and on update. Rows others refer to never move to another chat: slots, lanes, state events, rollouts, changesets, summaries, summarization jobs and bin items. A chat override can only stop being one.
+- **What a user owns stays theirs.** Chats, entities and connections never change owner.
+- **Not enforced here:** ownership of the ids inside a state event's value (§3.8), and that a reference points at something not in the recycle bin. The writer checks both.
+
+**Foreign keys are indexed on the referencing side** wherever the referenced row can be deleted; `test/schema.test.ts` fails on a new one without an index. SQLite checks a key from that side, so without the index, every insert or delete of a referenced row scans the referencing table. Measured on a bare connection (`0010` added the missing ones): appending a message with 100,000 slots in the database took 6.2 ms before (a scan of `slots` for `selected_version_id`) and 0.07 ms after; deleting a 2,000-slot chat among 20,000 slots took 6.5 s before and 55 ms after.
 
 **Full-text search** (`schema/search.ts`). FTS5 external-content indexes cover `versions.content`, `summary_revisions.content` and `entity_revisions.search_text`, using `unicode61` with diacritic folding and prefix indexes, and triggers keep them in sync.
 - Each indexed table has an `INTEGER PRIMARY KEY seq` (a rowid alias) next to its public `id`. That's because `VACUUM` can renumber the implicit rowids of TEXT-keyed tables, which would silently corrupt an external-content index.
 - Versions are indexed only once they stop generating, so streaming doesn't churn the index.
+- Every indexed table's triggers cover inserts, deletes and (for mutable tables) updates; `test/schema.test.ts` checks this for every FTS table. A deleted row's `seq` can be reused by the next insert (SQLite can't add `AUTOINCREMENT` without rebuilding the table, and the rebuild would cascade-delete the rows referencing it), so the delete trigger is what keeps a deleted text from matching whoever's row takes its `seq` next. `0010` rebuilt `entity_revisions_fts`, which had no delete trigger.
 
 ### 3.8 Message graph operations
 
@@ -222,18 +234,22 @@ Contracts are in `db/ops.ts`, writes in `db/writes.ts` (writer worker), reads in
 - **Writes:**
   - `CreateEntity`: entity, first revision and base ref. Minimal until the library work.
   - `CreateChat`: pending or active, with participants joined at the initial position and an optional greeting as the root slot.
-  - `AppendMessage`: a new slot under any slot, becoming the active leaf; appending under a slot that has children is a branch. The first message turns a pending chat active.
-  - `AddVersion`: swipe, edit, or write your own, optionally selected.
+  - `AppendMessage`: a new slot, becoming the active leaf. The first message turns a pending chat active. A branch is explicit (`branch: true`, any live parent); otherwise the parent must be the active leaf, and a tab that missed a newer message gets `LeafMoved`, with the current leaf, instead of silently forking.
+  - `AddVersion`: swipe, edit, or write your own, optionally selected. An edit's `sourceVersionId` must be a live version of the same slot.
   - `SelectVersion`: with `expectedRowVersion`, failing as `StaleWrite` for a stale tab.
-  - `AddStateEvent`: at a position, optionally attached to a version.
+  - `AddStateEvent`: a user's state change (origin `user`) at a live position, optionally attached to a version. Events from rollouts, changesets and imports will be written by those operations.
 - **Reads:**
   - `GetChat`
   - `GetPath`: a window, below.
   - `ListVersions`
-  - `StateEventsAt`: the events that apply at a slot, in fold order. Version-attached events count only while their version is selected.
-- **Ownership.** Every operation takes the acting user and touches only that user's rows. Anything else is `NotFound`, so another user's data isn't even confirmed to exist. That includes using someone else's card as a speaker or participant.
+  - `StateEventsAt`: the events that apply at a slot, in fold order. Version-attached events count only while their version is selected, and events on a deleted message only once it's restored (DESIGN §3.4, proposed). Events naming a library entity, ref or revision that was deleted for good are left out (`played_by_me.set` keeps its other entities), so restoring a message can't bring a purged card back.
+- **Ownership.** Every operation takes the acting user and touches only that user's rows. Anything else is `NotFound`, so another user's data isn't even confirmed to exist. That includes:
+  - someone else's card as a speaker or participant
+  - every entity, ref, revision, connection and model a state event's value names (`db/stateRefs.ts`), with the kind each key expects (a note for `note.activate`). The list is an exhaustive switch over the keys, so a new key doesn't compile until its ids are listed. Keys that add something need it live; keys that remove something (`participant.leave`, `presence.set`, `note.deactivate`, `lorebook.detach`) check ownership only, so a deleted or purged card can still be taken out of a chat.
+  - another user's version as an edit's source
+- `scope`, `orchestration.mode`'s `config` and `var.set`'s `value` are free-form and not checked: whatever later reads an id from them must check ownership itself.
 - **State events are typed.** `StateEventData` is a Schema union of the keys in DATA-MODEL §5.3, so an unknown key or malformed value is rejected when the RPC payload is decoded, before it reaches the database. `foldState` is a pure function shared by server and client.
-- **Paths are read in windows.** `GetPath` walks up from a leaf and stops after `limit` slots (at most 1000), so its cost depends on the window, not the chat's length. Older history comes from the window ending at the earliest entry's parent.
+- **Paths are read in windows.** `GetPath` walks up from a leaf and stops after `limit` slots (at most 1000), so its cost depends on the window, not the chat's length. Deleted messages count toward the limit but aren't returned, so a window can be short or empty; `olderLeafSlotId` is where the next older window ends, null at the root.
   - Measured on a 2,001-slot chat: a 200-slot window takes about 22 ms end to end, and paging back reconstructs the whole path without gaps (`test/graph.test.ts`).
   - Reading all 2,001 slots in one call took 113 ms, of which the SQL was 13 ms; at 20,000 slots the SQL alone is about 180 ms. Hence the windows.
 - **Append cost.** About 2.6 ms per message end to end, including the RPC hop and a commit with a full flush (`synchronous = FULL`, ZFS).

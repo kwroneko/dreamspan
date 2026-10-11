@@ -1,7 +1,11 @@
-// Invariants enforced by the database itself (DATA-MODEL.md §15), so no code path,
-// present or future, can break them. Each trigger names the invariant it protects.
+// Invariants enforced by the database itself (DATA-MODEL.md §15). Each trigger checks
+// one statement, so no single statement can break them, whatever code runs it. A
+// sequence of statements still can (delete a model version and insert another under its
+// id), so they back up the writer, the only code path that writes, rather than replace
+// it. Each trigger names the invariant it protects. Migration 0010 (graphIntegrity.ts)
+// closes the gaps found in these.
 
-const raise = (message: string) => `SELECT RAISE(ABORT, '${message.replaceAll("'", "''")}')`
+export const raise = (message: string) => `SELECT RAISE(ABORT, '${message.replaceAll("'", "''")}')`
 
 export const integrity = [
   // --- Edits are non-destructive (invariant 1) ------------------------------------

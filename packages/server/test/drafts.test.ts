@@ -65,6 +65,7 @@ const setup = (handle = "ana") =>
           userId,
           chatId: chat.id,
           parentSlotId: tip,
+          branch: false,
           version: say(content),
           commitDraft: sentFrom === null ? null : { key: composer(), expectedRowVersion: sentFrom }
         })
@@ -256,6 +257,7 @@ describe("drafts", () => {
         userId,
         chatId: chat.id,
         parentSlotId: first.slotId,
+        branch: false,
         version: say("Mira looks up.", "model"),
         commitDraft: null
       })

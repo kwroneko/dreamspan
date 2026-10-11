@@ -2,13 +2,17 @@
 import type { ChatId, EntityId, NewVersion, SlotId, VersionId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
+import type { StateEventData } from "@rp/shared/state.ts"
 import { Effect } from "effect"
-import { SqlClient } from "effect/sql"
+import { SqlClient, type SqlError } from "effect/sql"
 import { composerKey, type DraftKey } from "@rp/shared/drafts.ts"
 import type { Bin } from "./bin.ts"
-import { AppendResult, NotFound, StaleWrite, WriteOps } from "./ops.ts"
+import { AppendResult, LeafMoved, NotFound, StaleWrite, WriteOps } from "./ops.ts"
 import { type ChatRow, toChat, toVersion, type VersionRow } from "./rows.ts"
+import { checkStateReferences } from "./stateRefs.ts"
 import { transaction as runTransaction } from "./tx.ts"
+
+type Count = Effect.Effect<ReadonlyArray<{ readonly n: number }>, SqlError.SqlError>
 
 type WriteHandlers = Parameters<typeof WriteOps.of>[0]
 /** Graph and chat write handlers. Library handlers are in libraryWrites.ts. */
@@ -19,36 +23,30 @@ export const makeWriteHandlers = (bin: Bin) =>
     const transaction = (operation: string) => runTransaction(sql, operation)
     const { drafts } = bin
 
+    /** Fails with NotFound unless `query` counts exactly one row. */
+    const found = <E>(query: Effect.Effect<ReadonlyArray<{ readonly n: number }>, E>, entity: string, id: string) =>
+      Effect.flatMap(query, ([row]) => (row?.n === 1 ? Effect.void : Effect.fail(new NotFound({ entity, id }))))
+
     /** A draft's target must belong to the user. */
-    const draftTarget = (userId: UserId, key: DraftKey) => {
-      const query =
-        key.targetKind === "composer"
-          ? key.field === ""
-            ? sql<{
-                n: number
-              }>`SELECT count(*) AS n FROM chats WHERE id = ${key.targetId} AND owner_user_id = ${userId} AND deleted_at IS NULL`
-            : sql<{ n: number }>`SELECT count(*) AS n FROM slots s JOIN chats c ON c.id = s.chat_id
+    const draftTargets: Record<DraftKey["targetKind"], (userId: UserId, key: DraftKey) => Count> = {
+      composer: (userId, key) =>
+        key.field === ""
+          ? sql`SELECT count(*) AS n FROM chats WHERE id = ${key.targetId} AND owner_user_id = ${userId} AND deleted_at IS NULL`
+          : sql`SELECT count(*) AS n FROM slots s JOIN chats c ON c.id = s.chat_id
               WHERE s.id = ${key.field} AND c.id = ${key.targetId} AND c.owner_user_id = ${userId}
-                AND s.deleted_at IS NULL AND c.deleted_at IS NULL`
-          : key.targetKind === "version_edit"
-            ? sql<{ n: number }>`SELECT count(*) AS n FROM versions v JOIN slots s ON s.id = v.slot_id
-              JOIN chats c ON c.id = s.chat_id WHERE v.id = ${key.targetId} AND c.owner_user_id = ${userId}
-              AND v.deleted_at IS NULL AND s.deleted_at IS NULL AND c.deleted_at IS NULL`
-            : key.targetKind === "scratchpad"
-              ? sql<{ n: number }>`SELECT count(*) AS n FROM slots s JOIN chats c ON c.id = s.chat_id
-                WHERE s.id = ${key.targetId} AND c.owner_user_id = ${userId} AND s.deleted_at IS NULL AND c.deleted_at IS NULL`
-              : key.targetKind === "entity_field"
-                ? sql<{ n: number }>`SELECT count(*) AS n FROM entity_refs r JOIN entities e ON e.id = r.entity_id
-                  WHERE r.id = ${key.targetId} AND e.owner_user_id = ${userId} AND e.deleted_at IS NULL`
-                : sql<{ n: number }>`SELECT count(*) AS n FROM summaries s JOIN chats c ON c.id = s.chat_id
-                  WHERE s.id = ${key.targetId} AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL`
-      return query.pipe(
-        Effect.orDie,
-        Effect.flatMap(([row]) =>
-          row?.n === 1 ? Effect.void : Effect.fail(new NotFound({ entity: key.targetKind, id: key.targetId }))
-        )
-      )
+                AND s.deleted_at IS NULL AND c.deleted_at IS NULL`,
+      version_edit: (userId, key) => sql`SELECT count(*) AS n FROM versions v JOIN slots s ON s.id = v.slot_id
+        JOIN chats c ON c.id = s.chat_id WHERE v.id = ${key.targetId} AND c.owner_user_id = ${userId}
+          AND v.deleted_at IS NULL AND s.deleted_at IS NULL AND c.deleted_at IS NULL`,
+      scratchpad: (userId, key) => sql`SELECT count(*) AS n FROM slots s JOIN chats c ON c.id = s.chat_id
+        WHERE s.id = ${key.targetId} AND c.owner_user_id = ${userId} AND s.deleted_at IS NULL AND c.deleted_at IS NULL`,
+      entity_field: (userId, key) => sql`SELECT count(*) AS n FROM entity_refs r JOIN entities e ON e.id = r.entity_id
+        WHERE r.id = ${key.targetId} AND e.owner_user_id = ${userId} AND e.deleted_at IS NULL`,
+      summary_edit: (userId, key) => sql`SELECT count(*) AS n FROM summaries s JOIN chats c ON c.id = s.chat_id
+        WHERE s.id = ${key.targetId} AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL`
     }
+    const draftTarget = (userId: UserId, key: DraftKey) =>
+      found(Effect.orDie(draftTargets[key.targetKind](userId, key)), key.targetKind, key.targetId)
 
     const ownedChat = (userId: UserId, chatId: ChatId) =>
       sql<ChatRow>`SELECT * FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`.pipe(
@@ -69,33 +67,43 @@ export const makeWriteHandlers = (bin: Bin) =>
     const checkSpeaker = (userId: UserId, speaker: EntityId | null) =>
       speaker === null
         ? Effect.void
-        : sql<{
-            n: number
-          }>`SELECT count(*) AS n FROM entities WHERE id = ${speaker} AND owner_user_id = ${userId} AND deleted_at IS NULL`.pipe(
-            Effect.flatMap(([row]) =>
-              row?.n === 1 ? Effect.void : Effect.fail(new NotFound({ entity: "entity", id: speaker }))
-            )
+        : found(
+            sql`SELECT count(*) AS n FROM entities WHERE id = ${speaker} AND owner_user_id = ${userId} AND deleted_at IS NULL`,
+            "entity",
+            speaker
+          )
+
+    /** An edit's source is a live version of the same slot, so a new slot's first version has none. */
+    const checkSource = (slotId: string, source: VersionId | undefined) =>
+      source === undefined
+        ? Effect.void
+        : found(
+            sql`SELECT count(*) AS n FROM versions WHERE id = ${source} AND slot_id = ${slotId} AND deleted_at IS NULL`,
+            "version",
+            source
           )
 
     const insertVersion = (slotId: string, ordinal: number, version: NewVersion, at: number) =>
-      sql<VersionRow>`INSERT INTO versions ${sql.insert({
-        id: uuidv7(),
-        slot_id: slotId,
-        ordinal,
-        status: version.status,
-        speaker_entity_id: version.speakerEntityId,
-        writer: version.writer,
-        content: version.content,
-        macro_mode: version.macroMode,
-        origin: version.origin,
-        source_version_id: version.sourceVersionId ?? null,
-        direction: version.direction ?? null,
-        error_json: version.error ? JSON.stringify(version.error) : null,
-        created_at: at,
-        updated_at: at
-      })} RETURNING *`.pipe(Effect.map(([row]) => row!))
+      Effect.andThen(
+        checkSource(slotId, version.sourceVersionId),
+        sql<VersionRow>`INSERT INTO versions ${sql.insert({
+          id: uuidv7(),
+          slot_id: slotId,
+          ordinal,
+          status: version.status,
+          speaker_entity_id: version.speakerEntityId,
+          writer: version.writer,
+          content: version.content,
+          macro_mode: version.macroMode,
+          origin: version.origin,
+          source_version_id: version.sourceVersionId ?? null,
+          direction: version.direction ?? null,
+          error_json: version.error ? JSON.stringify(version.error) : null,
+          created_at: at,
+          updated_at: at
+        })} RETURNING *`.pipe(Effect.map(([row]) => row!))
+      )
 
-    /** Inserts a slot with its first version: the version first, then the slot (deferred keys). */
     const insertSlot = (
       chatId: string,
       laneId: string,
@@ -118,6 +126,35 @@ export const makeWriteHandlers = (bin: Bin) =>
         return { slotId, version: row }
       })
 
+    /** A user's state change, after checking everything its value names. */
+    const insertStateEvent = (
+      userId: UserId,
+      chatId: string,
+      slotId: string | null,
+      versionId: string | null,
+      scope: string | null,
+      data: StateEventData
+    ) =>
+      Effect.gen(function* () {
+        yield* checkStateReferences(sql, userId, chatId, data)
+        const [next] = yield* sql<{ n: number }>`
+          SELECT coalesce(max(seq), -1) + 1 AS n FROM state_events WHERE chat_id = ${chatId} AND slot_id IS ${slotId}`
+        const id = uuidv7()
+        yield* sql`INSERT INTO state_events ${sql.insert({
+          id,
+          chat_id: chatId,
+          slot_id: slotId,
+          version_id: versionId,
+          seq: next!.n,
+          key: data.key,
+          scope,
+          value_json: JSON.stringify(data.value),
+          origin: "user",
+          created_at: Date.now()
+        })}`
+        return { id, seq: next!.n }
+      })
+
     const handlers = {
       Ready: () => Effect.void,
 
@@ -128,19 +165,8 @@ export const makeWriteHandlers = (bin: Bin) =>
           const laneId = uuidv7()
           yield* sql`INSERT INTO chats ${sql.insert({ id: chatId, owner_user_id: userId, kind, status, title, created_at: at })}`
           yield* sql`INSERT INTO lanes ${sql.insert({ id: laneId, chat_id: chatId, name: "main", created_at: at })}`
-          for (const [seq, entity] of participants.entries()) {
-            yield* checkSpeaker(userId, entity)
-            yield* sql`INSERT INTO state_events ${sql.insert({
-              id: uuidv7(),
-              chat_id: chatId,
-              slot_id: null,
-              version_id: null,
-              seq,
-              key: "participant.join",
-              value_json: JSON.stringify({ entity }),
-              origin: "user",
-              created_at: at
-            })}`
+          for (const entity of participants) {
+            yield* insertStateEvent(userId, chatId, null, null, null, { key: "participant.join", value: { entity } })
           }
           if (greeting) {
             yield* checkSpeaker(userId, greeting.speakerEntityId)
@@ -180,10 +206,10 @@ export const makeWriteHandlers = (bin: Bin) =>
       ClearDraft: ({ userId, key, outcome, expectedRowVersion }) =>
         drafts.clear(userId, key, outcome, expectedRowVersion).pipe(transaction("ClearDraft")),
 
-      AppendMessage: ({ userId, chatId, parentSlotId, version, commitDraft }) =>
+      AppendMessage: ({ userId, chatId, parentSlotId, branch, version, commitDraft }) =>
         Effect.gen(function* () {
           const at = Date.now()
-          yield* ownedChat(userId, chatId)
+          const current = yield* ownedChat(userId, chatId)
           yield* checkSpeaker(userId, version.speakerEntityId)
           let parent: { id: string; depth: number; lane_id: string } | null = null
           if (parentSlotId !== null) {
@@ -191,6 +217,9 @@ export const makeWriteHandlers = (bin: Bin) =>
             SELECT id, depth, lane_id FROM slots WHERE id = ${parentSlotId} AND chat_id = ${chatId} AND deleted_at IS NULL`
             if (!row) return yield* new NotFound({ entity: "slot", id: parentSlotId })
             parent = row
+          }
+          if (!branch && parentSlotId !== current.active_leaf_slot_id) {
+            return yield* new LeafMoved({ chatId, activeLeafSlotId: current.active_leaf_slot_id })
           }
           const laneId =
             parent?.lane_id ??
@@ -240,7 +269,7 @@ export const makeWriteHandlers = (bin: Bin) =>
           const slot = yield* ownedSlot(userId, slotId)
           const [version] = yield* sql<{
             id: string
-          }>`SELECT id FROM versions WHERE id = ${versionId} AND slot_id = ${slotId}`
+          }>`SELECT id FROM versions WHERE id = ${versionId} AND slot_id = ${slotId} AND deleted_at IS NULL`
           if (!version) return yield* new NotFound({ entity: "version", id: versionId })
           if (slot.row_version !== expectedRowVersion) {
             return yield* new StaleWrite({
@@ -256,25 +285,24 @@ export const makeWriteHandlers = (bin: Bin) =>
           return { rowVersion: updated!.row_version }
         }).pipe(transaction("SelectVersion")),
 
-      AddStateEvent: ({ userId, chatId, slotId, versionId, scope, data, origin }) =>
+      AddStateEvent: ({ userId, chatId, slotId, versionId, scope, data }) =>
         Effect.gen(function* () {
           yield* ownedChat(userId, chatId)
-          const [next] = yield* sql<{ n: number }>`
-          SELECT coalesce(max(seq), -1) + 1 AS n FROM state_events WHERE chat_id = ${chatId} AND slot_id IS ${slotId}`
-          const id = uuidv7()
-          yield* sql`INSERT INTO state_events ${sql.insert({
-            id,
-            chat_id: chatId,
-            slot_id: slotId,
-            version_id: versionId satisfies VersionId | null,
-            seq: next!.n,
-            key: data.key,
-            scope,
-            value_json: JSON.stringify(data.value),
-            origin,
-            created_at: Date.now()
-          })}`
-          return { id, seq: next!.n }
+          if (slotId !== null) {
+            yield* found(
+              sql`SELECT count(*) AS n FROM slots WHERE id = ${slotId} AND chat_id = ${chatId} AND deleted_at IS NULL`,
+              "slot",
+              slotId
+            )
+          }
+          if (versionId !== null) {
+            yield* found(
+              sql`SELECT count(*) AS n FROM versions WHERE id = ${versionId} AND slot_id IS ${slotId} AND deleted_at IS NULL`,
+              "version",
+              versionId
+            )
+          }
+          return yield* insertStateEvent(userId, chatId, slotId, versionId, scope, data)
         }).pipe(transaction("AddStateEvent"))
     } satisfies Partial<WriteHandlers>
     return handlers

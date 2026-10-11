@@ -33,13 +33,10 @@ export const StateEventData = Schema.Union([
   event("author_note.set", Schema.Struct({ note: EntityId }))
 ])
 export type StateEventData = typeof StateEventData.Type
-export type StateKey = StateEventData["key"]
 
 /** A state event as the fold sees it: its data plus the optional scope (a role, an entity). */
-export interface FoldableEvent {
-  readonly data: StateEventData
-  readonly scope: string | null
-}
+export const FoldableEvent = Schema.Struct({ scope: Schema.NullOr(Schema.String), data: StateEventData })
+export type FoldableEvent = typeof FoldableEvent.Type
 
 export interface Binding {
   readonly ref?: string | undefined

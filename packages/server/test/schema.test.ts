@@ -2,7 +2,17 @@
 // connection so no application code is involved.
 import { DatabaseSync } from "node:sqlite"
 import { beforeEach, describe, expect, it } from "vitest"
-import { bin, credentials, dataModel, draftHistory, providers, users } from "../src/db/schema/index.ts"
+import {
+  bin,
+  binIndex,
+  credentials,
+  dataModel,
+  draftHistory,
+  graphIntegrity,
+  providers,
+  secretBindings,
+  users
+} from "../src/db/schema/index.ts"
 
 let db: DatabaseSync
 let n = 0
@@ -117,7 +127,17 @@ const addVersion = (
 beforeEach(() => {
   db = new DatabaseSync(":memory:")
   db.exec("PRAGMA foreign_keys = ON")
-  for (const statement of [...users, ...dataModel, ...draftHistory, ...bin, ...providers, ...credentials])
+  for (const statement of [
+    ...users,
+    ...dataModel,
+    ...draftHistory,
+    ...bin,
+    ...providers,
+    ...credentials,
+    ...secretBindings,
+    ...binIndex,
+    ...graphIntegrity
+  ])
     db.exec(statement)
 })
 
@@ -173,18 +193,141 @@ describe("graph shape", () => {
     expect(() => run(`UPDATE chats SET active_leaf_slot_id = ? WHERE id = ?`, s.slotId, a.chatId)).toThrow(
       /active leaf/
     )
+    expect(() =>
+      run(
+        `INSERT INTO chats (id, owner_user_id, kind, status, active_leaf_slot_id, created_at) VALUES ('c-new', ?, 'rp', 'active', ?, 1)`,
+        owner,
+        s.slotId
+      )
+    ).toThrow(/active leaf/)
+  })
+
+  it("keeps merge parents in the chat, and the graph acyclic", () => {
+    const c = chat(user())
+    const other = chat(user())
+    const root = slot(c, null)
+    const left = slot(c, root)
+    const right = slot(c, root)
+    const merge = slot(c, left)
+    const parent = (slotId: string, parentId: string, ordinal: number) =>
+      run(`INSERT INTO slot_parents (slot_id, parent_slot_id, ordinal) VALUES (?, ?, ?)`, slotId, parentId, ordinal)
+    expect(() => parent(merge.slotId, slot(other, null).slotId, 1)).toThrow(/same chat/)
+    parent(merge.slotId, left.slotId, 0)
+    parent(merge.slotId, right.slotId, 1)
+    // A cycle: a slot below the merge becoming its parent, or a slot its own parent.
+    const below = slot(c, merge)
+    expect(() => parent(merge.slotId, below.slotId, 2)).toThrow(/before anything is appended/)
+    expect(() => parent(left.slotId, merge.slotId, 1)).toThrow(/before anything is appended/)
+    expect(() => parent(below.slotId, below.slotId, 1)).toThrow(/before anything is appended/)
+    expect(() =>
+      run(`UPDATE slot_parents SET parent_slot_id = ? WHERE slot_id = ?`, below.slotId, merge.slotId)
+    ).toThrow(/append-only/)
+  })
+
+  it("forks a lane only from a slot of its own chat", () => {
+    const c = chat(user())
+    const theirs = slot(chat(user()), null)
+    const ours = slot(c, null)
+    const lane = (from: string) =>
+      run(
+        `INSERT INTO lanes (id, chat_id, name, forked_from_slot_id, created_at) VALUES (?, ?, 'thread', ?, 1)`,
+        id("l"),
+        c.chatId,
+        from
+      )
+    expect(() => lane(theirs.slotId)).toThrow(/own chat/)
+    lane(ours.slotId)
+    expect(() =>
+      run(
+        `UPDATE lanes SET forked_from_slot_id = ? WHERE chat_id = ? AND forked_from_slot_id IS NOT NULL`,
+        theirs.slotId,
+        c.chatId
+      )
+    ).toThrow(/own chat/)
+  })
+
+  it("takes a version's source only from its own slot, and lets the source go", () => {
+    const owner = user()
+    const theirs = slot(chat(user()), null, { content: "theirs" })
+    const s = slot(chat(owner), null, { writer: "model", content: "generated" })
+    const edit = (source: string) =>
+      run(
+        `INSERT INTO versions (id, slot_id, ordinal, status, writer, content, macro_mode, origin, source_version_id, created_at, updated_at)
+         VALUES (?, ?, 1, 'complete', 'human', 'edited', 'verbatim', 'edited', ?, 1, 1)`,
+        id("v"),
+        s.slotId,
+        source
+      )
+    expect(() => edit(theirs.versionId)).toThrow(/source/)
+    edit(s.versionId)
+    expect(() =>
+      run(`UPDATE versions SET source_version_id = ? WHERE ordinal = 1 AND slot_id = ?`, theirs.versionId, s.slotId)
+    ).toThrow(/source/)
+    // Deleting the source clears the reference instead of failing on it.
+    const third = addVersion(s.slotId, 2, { writer: "model", content: "a swipe" })
+    run(`UPDATE slots SET selected_version_id = ? WHERE id = ?`, third, s.slotId)
+    tx(() => run(`DELETE FROM versions WHERE id = ?`, s.versionId))
+    expect(get(`SELECT source_version_id FROM versions WHERE slot_id = ? AND ordinal = 1`, s.slotId)).toEqual({
+      source_version_id: null
+    })
   })
 })
 
 describe("edits are non-destructive (invariant 1)", () => {
   it("freezes model output once generation ends", () => {
-    const c = chat(user())
+    const owner = user()
+    const c = chat(owner)
     const s = slot(c, null, { writer: "model", status: "generating", content: "" })
     run(`UPDATE versions SET content = 'partial text' WHERE id = ?`, s.versionId) // streaming is fine
     run(`UPDATE versions SET content = 'full text', status = 'complete' WHERE id = ?`, s.versionId)
     expect(() => run(`UPDATE versions SET content = 'rewritten' WHERE id = ?`, s.versionId)).toThrow(
       /immutable once generated/
     )
+    // Generation doesn't reopen, for model or user-written versions.
+    const typed = slot(c, s, { content: "typed" })
+    for (const v of [s.versionId, typed.versionId]) {
+      expect(() => run(`UPDATE versions SET status = 'generating' WHERE id = ?`, v)).toThrow(/never goes back/)
+    }
+    // Only deleting for good from the recycle bin empties model output.
+    expect(() => run(`UPDATE versions SET purged_at = 1, content = '' WHERE id = ?`, s.versionId)).toThrow(
+      /immutable once generated/
+    )
+    const binItem = (userId: string, kind: string, targetId: string, chatId: string) => {
+      const itemId = id("b")
+      run(
+        `INSERT INTO bin_items (id, user_id, kind, target_id, chat_id, title, excerpt, origin_json, byte_size, deleted_at)
+           VALUES (?, ?, ?, ?, ?, '', '', '{}', 0, 1)`,
+        itemId,
+        userId,
+        kind,
+        targetId,
+        chatId
+      )
+      return itemId
+    }
+    const purge = () => run(`UPDATE versions SET purged_at = 1, content = '' WHERE id = ?`, s.versionId)
+    // Pointing the version at a bin item that isn't its own doesn't open it up: another
+    // user's item, or another message's item in the same chat.
+    const stranger = user()
+    const strangers = chat(stranger)
+    for (const item of [
+      binItem(stranger, "version", s.versionId, strangers.chatId),
+      binItem(owner, "message", typed.slotId, c.chatId)
+    ]) {
+      run(`UPDATE versions SET bin_item_id = ? WHERE id = ?`, item, s.versionId)
+      run(`UPDATE slots SET bin_item_id = ? WHERE id = ?`, item, s.slotId)
+      expect(purge).toThrow(/immutable once generated/)
+    }
+    run(
+      `UPDATE slots SET deleted_at = 1, bin_item_id = ? WHERE id = ?`,
+      binItem(owner, "message", s.slotId, c.chatId),
+      s.slotId
+    )
+    purge()
+    // Deleted for good stays deleted.
+    expect(() => run(`UPDATE versions SET purged_at = NULL WHERE id = ?`, s.versionId)).toThrow(/stays purged/)
+    run(`UPDATE slots SET purged_at = 1 WHERE id = ?`, s.slotId)
+    expect(() => run(`UPDATE slots SET purged_at = NULL WHERE id = ?`, s.slotId)).toThrow(/stays purged/)
   })
 
   it("keeps the earlier content of an amended user-written version", () => {
@@ -296,6 +439,205 @@ describe("draft cleanup", () => {
   })
 })
 
+describe("references across chats", () => {
+  it("are refused from rollouts, summaries, jobs and changesets, so they can't block a chat's deletion", () => {
+    const ours = chat(user())
+    const victim = chat(user())
+    const mine = slot(ours, null)
+    const theirs = slot(victim, null)
+    const rollout = (chatId: string, slotId: string | null, leafSlotId: string | null = null) => {
+      const rolloutId = id("ro")
+      run(
+        `INSERT INTO rollouts (id, chat_id, kind, status, slot_id, leaf_slot_id, role, request_class, created_at, updated_at)
+           VALUES (?, ?, 'generation', 'running', ?, ?, 'narrator', 'interactive', 1, 1)`,
+        rolloutId,
+        chatId,
+        slotId,
+        leafSlotId
+      )
+      return rolloutId
+    }
+    expect(() => rollout(ours.chatId, theirs.slotId)).toThrow(/same chat/)
+    expect(() => rollout(ours.chatId, mine.slotId, theirs.slotId)).toThrow(/same chat/)
+    const own = rollout(ours.chatId, mine.slotId, mine.slotId)
+    expect(() => run(`UPDATE rollouts SET leaf_slot_id = ? WHERE id = ?`, theirs.slotId, own)).toThrow(/same chat/)
+    expect(() => run(`UPDATE rollouts SET chat_id = ? WHERE id = ?`, victim.chatId, own)).toThrow(/another chat/)
+    expect(() => run(`UPDATE versions SET rollout_id = ? WHERE id = ?`, own, theirs.versionId)).toThrow(/same chat/)
+
+    const summary = (first: string, last: string) => {
+      const summaryId = id("sum")
+      tx(() => {
+        const revisionId = id("sr")
+        run(
+          `INSERT INTO summary_revisions (id, summary_id, content, token_count, origin, created_at) VALUES (?, ?, 't', 1, 'generated', 1)`,
+          revisionId,
+          summaryId
+        )
+        run(
+          `INSERT INTO summaries (id, chat_id, level, selected_revision_id, first_slot_id, last_slot_id, slot_count, created_at)
+             VALUES (?, ?, 1, ?, ?, ?, 1, 1)`,
+          summaryId,
+          ours.chatId,
+          revisionId,
+          first,
+          last
+        )
+      })
+      return summaryId
+    }
+    expect(() => summary(theirs.slotId, mine.slotId)).toThrow(/same chat/)
+    expect(() => summary(mine.slotId, theirs.slotId)).toThrow(/same chat/)
+    const summaryId = summary(mine.slotId, mine.slotId)
+    const input = (slotId: string, versionId: string) =>
+      run(
+        `INSERT INTO summary_inputs (summary_id, ordinal, slot_id, version_id) VALUES (?, 0, ?, ?)`,
+        summaryId,
+        slotId,
+        versionId
+      )
+    expect(() => run(`UPDATE summaries SET chat_id = ? WHERE id = ?`, victim.chatId, summaryId)).toThrow(/another chat/)
+    expect(() => input(theirs.slotId, theirs.versionId)).toThrow(/same chat/)
+    expect(() => input(mine.slotId, theirs.versionId)).toThrow(/in its slot/)
+    input(mine.slotId, mine.versionId)
+    expect(() =>
+      run(
+        `INSERT INTO summarization_jobs (id, chat_id, level, first_slot_id, last_slot_id, target_token_count, created_at, updated_at)
+           VALUES ('job', ?, 1, ?, ?, 100, 1, 1)`,
+        ours.chatId,
+        theirs.slotId,
+        theirs.slotId
+      )
+    ).toThrow(/same chat/)
+
+    // The victim can still delete their chat.
+    tx(() => run(`DELETE FROM chats WHERE id = ?`, victim.chatId))
+  })
+
+  it("never moves a row others refer to into another chat", () => {
+    const ana = user()
+    const ours = chat(ana)
+    const victim = chat(user())
+    const s = slot(ours, null, { writer: "model" })
+    run(
+      `INSERT INTO rollouts (id, chat_id, kind, status, role, request_class, created_at, updated_at)
+         VALUES ('ro', ?, 'generation', 'running', 'narrator', 'interactive', 1, 1)`,
+      ours.chatId
+    )
+    run(
+      `INSERT INTO changesets (id, chat_id, title, origin, status, created_at) VALUES ('cs', ?, 'Edit', 'user', 'applied', 1)`,
+      ours.chatId
+    )
+    run(`UPDATE versions SET rollout_id = 'ro', changeset_id = 'cs' WHERE id = ?`, s.versionId)
+    run(
+      `INSERT INTO summarization_jobs (id, chat_id, level, first_slot_id, last_slot_id, target_token_count, created_at, updated_at)
+         VALUES ('job', ?, 1, ?, ?, 100, 1, 1)`,
+      ours.chatId,
+      s.slotId,
+      s.slotId
+    )
+    run(
+      `INSERT INTO bin_items (id, user_id, kind, target_id, chat_id, title, excerpt, origin_json, byte_size, deleted_at)
+         VALUES ('item', ?, 'message', ?, ?, '', '', '{}', 0, 1)`,
+      ana,
+      s.slotId,
+      ours.chatId
+    )
+    for (const [table, rowId] of [
+      ["rollouts", "ro"],
+      ["changesets", "cs"],
+      ["summarization_jobs", "job"],
+      ["bin_items", "item"]
+    ] as const) {
+      expect(() => run(`UPDATE ${table} SET chat_id = ? WHERE id = ?`, victim.chatId, rowId), table).toThrow(
+        /another chat/
+      )
+    }
+    tx(() => run(`DELETE FROM chats WHERE id = ?`, victim.chatId))
+  })
+
+  it("never hands a chat, card or connection to another user", () => {
+    const owner = user()
+    const stranger = user()
+    const c = chat(owner)
+    run(`INSERT INTO entities (id, owner_user_id, kind, created_at) VALUES ('card', ?, 'card', 1)`, owner)
+    run(
+      `INSERT INTO connections (id, owner_user_id, name, kind, api, created_at, updated_at)
+         VALUES ('conn', ?, 'Local', 'openai-chat', 'openai-completions', 1, 1)`,
+      owner
+    )
+    for (const [table, rowId] of [
+      ["chats", c.chatId],
+      ["entities", "card"],
+      ["connections", "conn"]
+    ] as const) {
+      expect(() => run(`UPDATE ${table} SET owner_user_id = ? WHERE id = ?`, stranger, rowId), table).toThrow(
+        /never change owner/
+      )
+    }
+  })
+
+  it("keeps a chat override to the chat owner's entities", () => {
+    const owner = user()
+    const stranger = user()
+    const c = chat(owner)
+    run(`INSERT INTO entities (id, owner_user_id, kind, created_at) VALUES ('theirs', ?, 'card', 1)`, stranger)
+    run(`INSERT INTO entity_revisions (id, entity_id, doc_json, doc_hash, schema_version, origin, created_at)
+         VALUES ('rev', 'theirs', '{}', 'h', 1, 'user', 1)`)
+    run(`INSERT INTO entity_refs (id, entity_id, ref_kind, head_revision_id, label, created_at, updated_at)
+         VALUES ('base', 'theirs', 'upstream', 'rev', 'Card', 1, 1)`)
+    expect(() =>
+      run(
+        `INSERT INTO entity_refs (id, entity_id, ref_kind, head_revision_id, follows_ref_id, label, chat_id, created_at, updated_at)
+           VALUES ('override', 'theirs', 'chat_override', 'rev', 'base', 'Card', ?, 1, 1)`,
+        c.chatId
+      )
+    ).toThrow(/chat owner/)
+    // An override stays with its chat, though it may stop being one.
+    const own = chat(owner)
+    run(`INSERT INTO entities (id, owner_user_id, kind, created_at) VALUES ('mine', ?, 'card', 1)`, owner)
+    run(`INSERT INTO entity_revisions (id, entity_id, doc_json, doc_hash, schema_version, origin, created_at)
+         VALUES ('rev2', 'mine', '{}', 'h', 1, 'user', 1)`)
+    run(`INSERT INTO entity_refs (id, entity_id, ref_kind, head_revision_id, label, created_at, updated_at)
+         VALUES ('mine-base', 'mine', 'upstream', 'rev2', 'Card', 1, 1)`)
+    run(
+      `INSERT INTO entity_refs (id, entity_id, ref_kind, head_revision_id, follows_ref_id, label, chat_id, created_at, updated_at)
+         VALUES ('mine-override', 'mine', 'chat_override', 'rev2', 'mine-base', 'Card', ?, 1, 1)`,
+      c.chatId
+    )
+    expect(() => run(`UPDATE entity_refs SET chat_id = ? WHERE id = 'mine-override'`, own.chatId)).toThrow(
+      /another chat/
+    )
+    run(`UPDATE entity_refs SET ref_kind = 'variant', chat_id = NULL WHERE id = 'mine-override'`)
+  })
+})
+
+describe("summaries", () => {
+  it("select only their own revisions", () => {
+    const c = chat(user())
+    const s = slot(c, null)
+    const summary = (summaryId: string, revisionOf: string) =>
+      tx(() => {
+        const revisionId = id("sr")
+        run(
+          `INSERT INTO summary_revisions (id, summary_id, content, token_count, origin, created_at) VALUES (?, ?, 'text', 1, 'generated', 1)`,
+          revisionId,
+          revisionOf
+        )
+        run(
+          `INSERT INTO summaries (id, chat_id, level, selected_revision_id, first_slot_id, last_slot_id, slot_count, created_at)
+           VALUES (?, ?, 1, ?, ?, ?, 1, 1)`,
+          summaryId,
+          c.chatId,
+          revisionId,
+          s.slotId,
+          s.slotId
+        )
+      })
+    summary("sum1", "sum1")
+    expect(() => summary("sum2", "sum1")).toThrow(/own revisions/)
+  })
+})
+
 describe("state events", () => {
   it("must sit on a slot of their chat, with a version of that slot", () => {
     const owner = user()
@@ -308,6 +650,26 @@ describe("state events", () => {
     expect(() => run(event, id("ev"), a.chatId, sb.slotId, null)).toThrow(/state event/)
     expect(() => run(event, id("ev"), a.chatId, sa.slotId, sb.versionId)).toThrow(/state event/)
     run(event, id("ev"), a.chatId, sa.slotId, sa.versionId)
+  })
+})
+
+describe("foreign keys", () => {
+  // Rows of these tables are never deleted (entities and connections stay as tombstones).
+  const neverDeleted = new Set(["users", "media_assets", "models", "entities", "connections"])
+
+  it("are indexed on the referencing side wherever the referenced row can be deleted", () => {
+    const unindexed: Array<string> = []
+    for (const { name } of all<{ name: string }>(`SELECT name FROM sqlite_schema WHERE type = 'table'`)) {
+      const leading = new Set(
+        all<{ name: string }>(`SELECT name FROM pragma_index_list(?)`, name).map(
+          (index) => get<{ name: string }>(`SELECT name FROM pragma_index_info(?) ORDER BY seqno`, index.name).name
+        )
+      )
+      for (const fk of all<{ from: string; table: string }>(`SELECT * FROM pragma_foreign_key_list(?)`, name)) {
+        if (!neverDeleted.has(fk.table) && !leading.has(fk.from)) unindexed.push(`${name}.${fk.from}`)
+      }
+    }
+    expect(unindexed).toEqual([])
   })
 })
 
@@ -332,6 +694,52 @@ describe("full-text search", () => {
     run(`UPDATE versions SET content = 'Black coffee' WHERE id = ?`, typed.versionId)
     expect(search("cafe")).toEqual([])
     expect(search("coffee")).toEqual([typed.versionId])
+  })
+
+  it("forgets deleted text, even when a later row reuses its seq", () => {
+    const ana = user()
+    const bob = user()
+    const revision = (owner: string, text: string) => {
+      const entityId = id("e")
+      run(`INSERT INTO entities (id, owner_user_id, kind, created_at) VALUES (?, ?, 'card', 1)`, entityId, owner)
+      run(
+        `INSERT INTO entity_revisions (id, entity_id, doc_json, doc_hash, schema_version, origin, search_text, created_at)
+         VALUES (?, ?, '{}', 'h', 1, 'user', ?, 1)`,
+        id("r"),
+        entityId,
+        text
+      )
+      return entityId
+    }
+    const matches = (q: string) =>
+      all<{ owner: string }>(
+        `SELECT e.owner_user_id AS owner FROM entity_revisions_fts f JOIN entity_revisions r ON r.seq = f.rowid
+         JOIN entities e ON e.id = r.entity_id WHERE entity_revisions_fts MATCH ?`,
+        q
+      ).map((r) => r.owner)
+    const purged = revision(ana, "a secret lighthouse")
+    run(`DELETE FROM entity_revisions WHERE entity_id = ?`, purged)
+    revision(bob, "an ordinary harbor") // takes the freed seq
+    expect(matches("lighthouse")).toEqual([])
+    expect(matches("harbor")).toEqual([bob])
+  })
+
+  it("keeps every index in step with inserts, updates and deletes of its table", () => {
+    const tables = all<{ name: string }>(
+      `SELECT name FROM sqlite_schema WHERE type = 'table' AND sql LIKE 'CREATE VIRTUAL TABLE % USING fts5%'`
+    ).map((r) => r.name.replace(/_fts$/, ""))
+    expect(tables.sort()).toEqual(["entity_revisions", "summary_revisions", "versions"])
+    for (const table of tables) {
+      const events = all<{ sql: string }>(
+        `SELECT sql FROM sqlite_schema WHERE type = 'trigger' AND tbl_name = ? AND sql LIKE ?`,
+        table,
+        `%${table}_fts%`
+      ).map((r) => /AFTER (INSERT|UPDATE|DELETE)/.exec(r.sql)?.[1])
+      const immutable = all(`SELECT 1 FROM sqlite_schema WHERE type = 'trigger' AND name = ?`, `${table}_immutable`)
+      expect(new Set(events), table).toEqual(
+        new Set(immutable.length ? ["INSERT", "DELETE"] : ["INSERT", "UPDATE", "DELETE"])
+      )
+    }
   })
 
   it("survives VACUUM", () => {

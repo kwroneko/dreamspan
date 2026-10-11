@@ -12,6 +12,7 @@
 - Re-import: imports form their own line of revisions, which the upstream ref merges like a variant merges its upstream (its `merge_base_revision_id` is the import it last merged), so edits made on the upstream itself survive a re-import.
 - Drafts: `undo_log` became the `draft_history` table, with one reversible patch per entry. Drafts gained `status` (active, committed, discarded), `created_at` and a single `recovery_text`, and writes can commit their draft atomically. A commit or discard deletes the history (owner, 2026-10-10); text it would lose goes to the recycle bin's recovered-text section.
 - The recycle bin (migration 0004): `deleted_at`, `bin_item_id` and `purged_at` on chats, slots, versions and entities, plus `bin_items` and `recovered_texts` (ARCHITECTURE.md §3.11).
+- Migration 0010: `source_version_id` names a version of the same slot. `AddStateEvent` writes origin `user` only, and checks every id in the value against the user. Events on a deleted message don't apply until it's restored (DESIGN §3.4, proposed). Foreign keys are indexed (ARCHITECTURE.md §3.7–§3.8).
 
 Original status: Draft, 2026-10-09. Phase 0 deliverable (see PLAN.md). Everything here is **[P] Proposed** unless marked otherwise. Section references like "DESIGN §3.1" point to [DESIGN.md](DESIGN.md).
 

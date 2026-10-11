@@ -8,6 +8,7 @@ import { Cause, Effect, Exit, Layer } from "effect"
 import { acquireInstanceLock, databaseFile, InstanceLocked } from "../src/db/connection.ts"
 import * as Database from "../src/db/Database.ts"
 import { buildWorkers } from "../scripts/build-workers.ts"
+import { diagnosticReaders } from "./support/diagnostics.ts"
 
 const freshDir = () => mkdtempSync(join(tmpdir(), "rp-db-"))
 const bundleDir = mkdtempSync(join(tmpdir(), "rp-bundles-"))
@@ -119,14 +120,19 @@ describe("database workers", () => {
         )
         direct.close()
 
-        const reader = yield* Database.Reader
-        yield* reader.FindUserByHandle({ handle: "warm-up" })
+        const dir = freshDir()
+        yield* Effect.provide(
+          Effect.flatMap(Database.Writer, (w) => w.Ready()),
+          database(dir, 1)
+        )
+        const reader = yield* diagnosticReaders(dir, 2)
+        yield* Effect.forEach(range(2), () => reader.CountTo({ n: 1 }), { concurrency: "unbounded" })
         const offMain = yield* measureMainThreadLag(
           Effect.all(
             [
               reader.CountTo({ n: HEAVY }).pipe(Effect.map((n) => ({ n, doneAt: performance.now() }))),
               // Light reads go to the other reader and finish while the heavy one runs.
-              Effect.forEach(range(20), () => reader.FindUserByHandle({ handle: "nobody" })).pipe(
+              Effect.forEach(range(20), () => reader.CountTo({ n: 1 })).pipe(
                 Effect.andThen(Effect.sync(() => performance.now()))
               )
             ],
@@ -139,7 +145,7 @@ describe("database workers", () => {
         assert.isBelow(lightDoneAt, heavy.doneAt, "light reads should not wait behind the heavy one")
         assert.isAbove(onMain.maxLagMs, 100, `baseline should block: ${onMain.maxLagMs.toFixed(0)} ms`)
         assert.isBelow(offMain.maxLagMs, 30, `main thread lag with workers: ${offMain.maxLagMs.toFixed(1)} ms`)
-      }).pipe(Effect.provide(database(freshDir()))),
+      }).pipe(Effect.scoped),
     30_000
   )
 
@@ -219,7 +225,9 @@ describe("bundled workers", () => {
           Effect.gen(function* () {
             const reader = yield* Database.Reader
             // Touch every reader so all of them have loaded and opened their connection.
-            yield* Effect.forEach(range(readers * 4), () => reader.CountTo({ n: 1000 }), { concurrency: "unbounded" })
+            yield* Effect.forEach(range(readers * 4), () => reader.FindUserByHandle({ handle: "nobody" }), {
+              concurrency: "unbounded"
+            })
             yield* Effect.sleep(500)
             const perWorkerMb = (process.memoryUsage().rss - before) / 1048576 / (readers + 1)
             assert.isBelow(perWorkerMb, 40, `bundled worker uses ${perWorkerMb.toFixed(0)} MB`)

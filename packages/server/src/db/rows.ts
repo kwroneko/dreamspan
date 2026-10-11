@@ -62,27 +62,6 @@ export interface VersionRow {
   readonly created_at: number
 }
 
-/** The version columns, prefixed `v_`, for queries that join slots and versions. */
-export const versionColumns = (alias: string) =>
-  [
-    "id",
-    "slot_id",
-    "ordinal",
-    "status",
-    "speaker_entity_id",
-    "writer",
-    "content",
-    "macro_mode",
-    "origin",
-    "source_version_id",
-    "direction",
-    "hidden",
-    "starred",
-    "created_at"
-  ]
-    .map((c) => `${alias}.${c} AS v_${c}`)
-    .join(", ")
-
 export const toVersion = (row: VersionRow) =>
   new Version({
     id: row.id as VersionId,
@@ -101,15 +80,8 @@ export const toVersion = (row: VersionRow) =>
     createdAt: row.created_at
   })
 
-/** Strips the `v_` prefix from a joined row's version columns. */
-export const versionFromPrefixed = (row: Record<string, unknown>) => {
-  const fields: Record<string, unknown> = {}
-  for (const [key, value] of Object.entries(row)) if (key.startsWith("v_")) fields[key.slice(2)] = value
-  return toVersion(fields as unknown as VersionRow)
-}
-
-export interface PathRow {
-  readonly slot_id: string
+/** A slot on a path, with its selected version's columns under their own names. */
+export interface PathRow extends VersionRow {
   readonly lane_id: string
   readonly parent_slot_id: string | null
   readonly depth: number
@@ -119,8 +91,8 @@ export interface PathRow {
   readonly version_count: number
 }
 
-export const toPathEntry = (row: PathRow & Record<string, unknown>) => {
-  const version = versionFromPrefixed(row)
+export const toPathEntry = (row: PathRow) => {
+  const version = toVersion(row)
   const contextExcluded = row.context_excluded === 1
   return new PathEntry({
     slotId: row.slot_id as SlotId,

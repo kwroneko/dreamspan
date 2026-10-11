@@ -55,8 +55,8 @@ const setup = (handle = "ana") =>
         macroMode: "verbatim",
         origin: "generated"
       })
-    const append = (parentSlotId: SlotId | null, content: string) =>
-      writer.AppendMessage({ userId, chatId: chat.id, parentSlotId, version: say(content), commitDraft: null })
+    const append = (parentSlotId: SlotId | null, content: string, branch = false) =>
+      writer.AppendMessage({ userId, chatId: chat.id, parentSlotId, branch, version: say(content), commitDraft: null })
     const path = (leafSlotId: SlotId | null = null) =>
       reader
         .GetPath({ userId, chatId: chat.id, leafSlotId, limit: 100 })
@@ -150,7 +150,7 @@ describe("recycle bin", () => {
   it.live("moving the tip back never deletes a composer's history without recovering its text", () =>
     Effect.gen(function* () {
       const { writer, reader, userId, chat, b, c, append } = yield* setup()
-      const d = yield* append(b.slotId, "d") // b → {c, d}, at d
+      const d = yield* append(b.slotId, "d", true) // b → {c, d}, at d
       const key = composerKey(chat.id, d.slotId)
       const typed = "A long reply typed at d, then wiped by a stray select-all."
       const draft = yield* writer.SaveDraft({
@@ -162,7 +162,7 @@ describe("recycle bin", () => {
       })
       yield* writer.SaveDraft({ userId, key, content: "", expectedRowVersion: draft.rowVersion, baseRevision: null })
       yield* writer.DeleteMessage({ userId, slotId: d.slotId }) // the wiped composer moves to b
-      yield* append(c.slotId, "e")
+      yield* append(c.slotId, "e", true)
       yield* writer.DeleteBranch({ userId, slotId: c.slotId }) // back to b again
       const texts = yield* reader.ListRecoveredTexts({ userId, source: null, limit: 10, before: null })
       assert.deepStrictEqual(
@@ -175,7 +175,7 @@ describe("recycle bin", () => {
   it.live("a branch goes as one item and comes back whole", () =>
     Effect.gen(function* () {
       const { writer, reader, userId, chat, a, b, c, path, append } = yield* setup()
-      const other = yield* append(a.slotId, "other branch") // the active leaf is now on the other branch
+      const other = yield* append(a.slotId, "other branch", true) // the active leaf is now on the other branch
       const item = yield* writer.DeleteBranch({ userId, slotId: b.slotId })
       assert.strictEqual(item.title, 'Branch of 2 messages in "Harbor"')
       assert.deepStrictEqual(yield* path(c.slotId), ["root", "a"])
@@ -194,7 +194,14 @@ describe("recycle bin", () => {
       assert.strictEqual(chatItem.title, "Harbor")
       assert.strictEqual((yield* reader.GetChat({ userId, chatId: chat.id }).pipe(Effect.flip))._tag, "NotFound")
       const write = yield* writer
-        .AppendMessage({ userId, chatId: chat.id, parentSlotId: c.slotId, version: say("hello?"), commitDraft: null })
+        .AppendMessage({
+          userId,
+          chatId: chat.id,
+          parentSlotId: c.slotId,
+          branch: false,
+          version: say("hello?"),
+          commitDraft: null
+        })
         .pipe(Effect.flip)
       assert.strictEqual(write._tag, "NotFound")
       yield* writer.RestoreBinItem({ userId, itemId: chatItem.id })

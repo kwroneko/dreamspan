@@ -9,7 +9,7 @@ import { Chat, ChatId, ChatKind, EntityId, NewVersion, PathEntry, SlotId, Versio
 import { User, UserAccount, UserId, UserRole } from "@rp/shared/domain.ts"
 import { BinItem, RecoveredText } from "@rp/shared/bin.ts"
 import { Draft, DraftKey, DraftState } from "@rp/shared/drafts.ts"
-import { AccountRejected, ModelKeyTaken, NotFound, StaleWrite } from "@rp/shared/errors.ts"
+import { AccountRejected, LeafMoved, ModelKeyTaken, NotFound, StaleWrite } from "@rp/shared/errors.ts"
 import {
   Doc,
   EntityKind,
@@ -33,7 +33,7 @@ import {
   ProviderKind,
   ProxyMode
 } from "@rp/shared/providers.ts"
-import { StateEventData } from "@rp/shared/state.ts"
+import { FoldableEvent, StateEventData } from "@rp/shared/state.ts"
 import {
   Cost,
   LlmRequest,
@@ -58,7 +58,7 @@ export class StorageError extends Schema.TaggedError<StorageError>()("StorageErr
 }) {}
 
 // Shared with the client, so the tags reach the UI unchanged.
-export { ModelKeyTaken, NotFound, StaleWrite } from "@rp/shared/errors.ts"
+export { LeafMoved, ModelKeyTaken, NotFound, StaleWrite } from "@rp/shared/errors.ts"
 
 /** The largest path window one GetPath returns. */
 export const MAX_PATH_WINDOW = 1000
@@ -82,13 +82,6 @@ export class RefChange extends Schema.Class<RefChange>("RefChange")({
 
 /** What merging a ref did, and the change that flowed on from it. */
 export const MergeAndFlow = Schema.Struct({ outcome: MergeOutcome, change: RefChange })
-
-export const StateEventOrigin = Schema.Literals(["user", "rollout", "changeset", "import"])
-
-export class FoldableStateEvent extends Schema.Class<FoldableStateEvent>("FoldableStateEvent")({
-  scope: Schema.NullOr(Schema.String),
-  data: StateEventData
-}) {}
 
 export class DraftTooLarge extends Schema.TaggedError<DraftTooLarge>()("DraftTooLarge", {
   length: Schema.Int,
@@ -629,21 +622,29 @@ export class WriteOps extends RpcGroup.make(
   }),
   /**
    * Adds a slot under `parentSlotId` (null: a root) and makes it the chat's active
-   * leaf. Appending under a slot that already has children is a branch (DESIGN §3.2).
-   * The first message turns a pending chat active.
+   * leaf. The first message turns a pending chat active.
+   *
+   * A branch is explicit (DESIGN §3.2): without `branch`, the parent must be the chat's
+   * active leaf, so a tab that missed a newer message gets LeafMoved (with the current
+   * leaf) instead of silently forking the conversation.
    */
   Rpc.make("AppendMessage", {
     payload: {
       userId: UserId,
       chatId: ChatId,
       parentSlotId: Schema.NullOr(SlotId),
+      branch: Schema.Boolean,
       version: NewVersion,
       commitDraft: CommitDraft
     },
     success: AppendResult,
-    error: Schema.Union([NotFound, StorageError])
+    error: Schema.Union([NotFound, LeafMoved, StorageError])
   }),
-  /** A new version in place: a swipe, an edit, or "write your own" (DESIGN §3.1). */
+  /**
+   * A new version in place: a swipe, an edit, or "write your own" (DESIGN §3.1). An
+   * edit's `sourceVersionId` is a live version of the same slot. A new slot's first
+   * version has no source.
+   */
   Rpc.make("AddVersion", {
     payload: { userId: UserId, slotId: SlotId, version: NewVersion, select: Schema.Boolean, commitDraft: CommitDraft },
     success: Version,
@@ -656,8 +657,11 @@ export class WriteOps extends RpcGroup.make(
     error: Schema.Union([NotFound, StaleWrite, StorageError])
   }),
   /**
-   * Records a state change at a position: after `slotId` (null: the chat's initial
-   * state), and if `versionId` is set, only while that version is selected.
+   * Records a user's state change (origin `user`) at a position: after `slotId` (null:
+   * the chat's initial state), and if `versionId` is set, only while that version is
+   * selected. Every entity, ref, revision, connection and model the value names must be
+   * the user's (NotFound otherwise). Events from rollouts, changesets and imports are
+   * written by the operations that perform those.
    */
   Rpc.make("AddStateEvent", {
     payload: {
@@ -666,8 +670,7 @@ export class WriteOps extends RpcGroup.make(
       slotId: Schema.NullOr(SlotId),
       versionId: Schema.NullOr(VersionId),
       scope: Schema.NullOr(Schema.String),
-      data: StateEventData,
-      origin: StateEventOrigin
+      data: StateEventData
     },
     success: Schema.Struct({ id: Schema.String, seq: Schema.Int }),
     error: Schema.Union([NotFound, StorageError])
@@ -707,8 +710,9 @@ export class ReadOps extends RpcGroup.make(
    * A window of the path ending at `leafSlotId` (null: the chat's active leaf): at most
    * `limit` slots, in root-to-leaf order, each with its selected version (DATA-MODEL
    * §4.4). The walk stops after `limit` slots, so the cost depends on the window, not on
-   * the chat's length. Load older history by asking for the window ending at the
-   * earliest entry's parent; `hasMore` says whether there is one.
+   * the chat's length. Deleted messages count toward `limit` but aren't returned, so a
+   * window can hold fewer entries, even none. `olderLeafSlotId` is the leaf of the next
+   * older window, null at the root.
    */
   Rpc.make("GetPath", {
     payload: {
@@ -717,7 +721,7 @@ export class ReadOps extends RpcGroup.make(
       leafSlotId: Schema.NullOr(SlotId),
       limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: MAX_PATH_WINDOW }))
     },
-    success: Schema.Struct({ entries: Schema.Array(PathEntry), hasMore: Schema.Boolean }),
+    success: Schema.Struct({ entries: Schema.Array(PathEntry), olderLeafSlotId: Schema.NullOr(SlotId) }),
     error: Schema.Union([NotFound, StorageError])
   }),
   Rpc.make("ListVersions", {
@@ -729,10 +733,13 @@ export class ReadOps extends RpcGroup.make(
    * The state events that apply at `slotId` (null: before the first message), in fold
    * order: initial events, then each slot on the path by depth, then by seq. Events
    * attached to a version count only while that version is selected (DATA-MODEL §5.2).
+   * Events on a deleted message don't apply until it's restored. Events naming a library
+   * entity, ref or revision that was deleted for good are left out (played_by_me.set
+   * keeps its other entities).
    */
   Rpc.make("StateEventsAt", {
     payload: { userId: UserId, chatId: ChatId, slotId: Schema.NullOr(SlotId) },
-    success: Schema.Array(FoldableStateEvent),
+    success: Schema.Array(FoldableEvent),
     error: Schema.Union([NotFound, StorageError])
   }),
   Rpc.make("GetDraft", {
@@ -875,12 +882,6 @@ export class ReadOps extends RpcGroup.make(
       before: Schema.NullOr(LedgerCursor)
     },
     success: Schema.Array(LlmRequest),
-    error: StorageError
-  }),
-  /** Diagnostic: a CPU-bound query of `n` steps that touches no table. Used by tests. */
-  Rpc.make("CountTo", {
-    payload: { n: Schema.Int },
-    success: Schema.Int,
     error: StorageError
   })
 ) {}

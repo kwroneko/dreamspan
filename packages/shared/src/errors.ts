@@ -16,6 +16,15 @@ export class StaleWrite extends Schema.TaggedError<StaleWrite>()("StaleWrite", {
   actual: Schema.Int
 }) {}
 
+/**
+ * A message was sent under a tip that's no longer the chat's active leaf: another tab or
+ * a reply moved on. Sending again under `activeLeafSlotId`, or as a branch, is the client's call.
+ */
+export class LeafMoved extends Schema.TaggedError<LeafMoved>()("LeafMoved", {
+  chatId: Schema.String,
+  activeLeafSlotId: Schema.NullOr(Schema.String)
+}) {}
+
 /** A model with this key already exists on the connection. */
 export class ModelKeyTaken extends Schema.TaggedError<ModelKeyTaken>()("ModelKeyTaken", {
   connectionId: Schema.String,

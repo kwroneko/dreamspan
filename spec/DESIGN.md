@@ -141,6 +141,7 @@ Where the owner corrected an earlier proposal, the corrected version is recorded
   - variables
 - **[P]** As a result, branching restores state automatically, edits after a branch point don't leak into other branches, and the timeline can show small markers for state changes.
 - **[P]** State events produced by a rollout are **attached to the version that produced them**, so switching versions switches their effects too.
+- **[P]** A deleted message's state events stop applying while it's in the recycle bin, and restoring the message brings them back (built, ARCHITECTURE.md §3.8; found 2026-10-11: before, they kept applying from the bin).
 - **[P]** Default edit scope is "from here on, on this branch", with "apply to all branches" as an option.
 - **[O]** That option assumes the note has a stable, recognizable identity, which may not be clear to the user.
 
