@@ -3,7 +3,7 @@
 import { createServer } from "node:http"
 import { NodeHttpServer } from "@effect/platform-node"
 import { AppApi, CurrentUser, Health } from "@rp/shared/api.ts"
-import { Effect, Layer } from "effect"
+import { Effect, Layer, Predicate } from "effect"
 import { HttpRouter, HttpServerRequest, HttpServerResponse, HttpStaticServer } from "effect/http"
 import { RpcSerialization, RpcServer } from "effect/rpc"
 import { makeProviderHandlers } from "./api/providers.ts"
@@ -50,8 +50,30 @@ const Handlers = AppApi.toLayer(
   })
 )
 
+/**
+ * JSON, minus the headers a client puts in its own messages. The RPC server appends
+ * those to the upgrade request's headers, later entries win, and authentication reads
+ * the result: a client could otherwise name any user in proxy mode. Identity comes
+ * only from the upgrade request.
+ */
+const TransportHeadersOnly = Layer.succeed(RpcSerialization.RpcSerialization)(
+  RpcSerialization.RpcSerialization.of({
+    ...RpcSerialization.json,
+    makeUnsafe: () => {
+      const parser = RpcSerialization.json.makeUnsafe()
+      return {
+        encode: parser.encode,
+        decode: (data) =>
+          parser
+            .decode(data)
+            .map((message) => (Predicate.isTagged(message, "Request") ? { ...message, headers: [] } : message))
+      }
+    }
+  })
+)
+
 const RpcRoute = RpcServer.layerHttp({ group: AppApi, path: "/rpc", protocol: "websocket" }).pipe(
-  Layer.provide([Handlers, AuthenticationLive, RpcSerialization.layerJson])
+  Layer.provide([Handlers, AuthenticationLive, TransportHeadersOnly])
 )
 
 /** Refuses requests from other sites' pages and DNS-rebound names (net/exposure.ts). */

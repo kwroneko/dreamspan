@@ -426,6 +426,7 @@ The provider layer's storage (spec/PROVIDERS.md §2, §3.1, §9.1), in migration
 ## 4. Authentication
 
 `auth.ts` implements the `Authentication` RPC middleware declared in `@rp/shared/api.ts`. It provides `CurrentUser` to every handler. Over the WebSocket, the headers are those of the upgrade request, so the identity applies to the whole connection.
+- **Message headers are dropped** (`TransportHeadersOnly` in `server.ts`). Effect's RPC server appends the headers a client puts in each message after the upgrade request's, and the later entries win. Before this, any client could name any user in proxy mode by sending `remote-user` in a message. The serialization now empties message headers when decoding, so identity can only come from the upgrade request (`rpc.test.ts` checks this).
 - **`AUTH_MODE=single`:** every connection is the implicit local user `local`. This is for running on your own machine.
 - **`AUTH_MODE=proxy`:** the user is whoever the reverse proxy names in `AUTH_PROXY_HEADER` (Authelia's `Remote-User`). A missing header is `Unauthorized`.
   - The header is trusted because only the proxy can connect (exposure, below).

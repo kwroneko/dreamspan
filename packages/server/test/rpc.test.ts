@@ -60,6 +60,28 @@ describe("rpc", () => {
     }).pipe(Effect.scoped, withServer(config))
   })
 
+  it.live("proxy mode: a client can't name a user in its own message headers", () => {
+    // The RPC server appends message headers after the upgrade's, and later entries win.
+    const config = testConfig({ authMode: "proxy" })
+    const whoami = (connectHeaders: Record<string, string>, messageHeaders: ReadonlyArray<[string, string]>) =>
+      Effect.callback<string>((resume) => {
+        const ws = new WebSocket(`ws://127.0.0.1:${config.port}/rpc`, {
+          headers: connectHeaders
+        } as unknown as Array<string>)
+        ws.onopen = () =>
+          ws.send(JSON.stringify({ _tag: "Request", id: "1", tag: "Whoami", payload: null, headers: messageHeaders }))
+        ws.onmessage = (event) => {
+          ws.close()
+          const exit = JSON.parse(String(event.data)).exit
+          resume(Effect.succeed(exit._tag === "Success" ? exit.value.handle : exit.cause[0].error._tag))
+        }
+      })
+    return Effect.gen(function* () {
+      assert.strictEqual(yield* whoami({ "Remote-User": "alice" }, [["remote-user", "mallory"]]), "alice")
+      assert.strictEqual(yield* whoami({}, [["remote-user", "mallory"]]), "Unauthorized")
+    }).pipe(withServer(config))
+  })
+
   it.live("connections: a key goes in and never comes out, and other users see nothing", () => {
     const config = testConfig({ authMode: "proxy" })
     return Effect.gen(function* () {
