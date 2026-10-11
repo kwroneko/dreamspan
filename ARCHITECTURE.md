@@ -29,6 +29,7 @@ Bun was measured as an alternative (2026-10-10) and not adopted. On this server 
 - knip: fails on unused files, exports and dependencies, the shared package's exports included (`knip.jsonc` says why each exception exists).
 - Vitest with `@effect/vitest`.
 - `npm run check` runs all of them. CI (`.github/workflows/ci.yml`) also builds the client and the workers, and builds the Docker image (without pushing it) and runs it until its health check passes.
+- `npm run size` prints one line of sizes: code lines in sources and in tests, comment lines, and doc lines (`scripts/size.ts`, tracked files outside `spikes/`). CI prints it too, so growth shows per commit.
 
 **Dependencies are pinned to exact versions.** The owner's machine enforces a 5-day cooldown on newly published packages.
 
