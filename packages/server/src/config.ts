@@ -5,7 +5,10 @@ const defaultClientDist = fileURLToPath(new URL("../../client/dist", import.meta
 
 const AppConfigFromEnv = Config.all({
   host: Config.String("HOST").pipe(Config.withDefault("127.0.0.1")),
-  port: Config.Port("PORT").pipe(Config.withDefault(8080)),
+  /** 0 takes any free port; the startup log names it. */
+  port: Config.schema(Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 65535 })), "PORT").pipe(
+    Config.withDefault(8080)
+  ),
   dataDir: Config.String("DATA_DIR").pipe(Config.withDefault("./data")),
   dbReaders: Config.schema(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)), "DB_READERS").pipe(
     Config.withDefault(2)

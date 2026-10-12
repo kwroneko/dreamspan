@@ -48,7 +48,7 @@ Bun was measured as an alternative (2026-10-10) and not adopted. On this server 
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `HOST`, `PORT` | `127.0.0.1`, `8080` | Listen address |
+| `HOST`, `PORT` | `127.0.0.1`, `8080` | Listen address. `PORT=0` takes a free port, which the startup log names |
 | `DATA_DIR` | `./data` | Database, instance lock, later media |
 | `DB_READERS` | `2` | Reader worker count, at least 1 (§3) |
 | `DB_ALLOW_NETWORK_FS` | `false` | Override the refusal of filesystems not known to be local (§3.4) |

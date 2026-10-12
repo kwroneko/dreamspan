@@ -23,22 +23,32 @@ interface Running {
 
 const start = async (): Promise<Running> => {
   const dataDir = tempDir("shutdown")
-  const port = 20_000 + Math.floor(Math.random() * 12_000)
+  // Port 0: the server takes a free port and names it in its startup log. A port picked
+  // here could be taken before the server binds it.
   const child = spawn(process.execPath, ["--no-wasm-code-gc", "src/main.ts"], {
     cwd: serverDir,
     env: {
       ...process.env,
       HOST: "127.0.0.1",
-      PORT: String(port),
+      PORT: "0",
       DATA_DIR: dataDir,
       DB_READERS: "1",
       DB_WORKERS: "source"
     },
-    stdio: "ignore"
+    stdio: ["ignore", "pipe", "ignore"]
   })
   const exited = new Promise<{ code: number | null; signal: string | null }>((done) =>
     child.once("exit", (code, signal) => done({ code, signal }))
   )
+  const port = await new Promise<number>((done, fail) => {
+    let log = ""
+    child.stdout!.on("data", (chunk) => {
+      log += String(chunk)
+      const listening = /Listening on http:\/\/127\.0\.0\.1:(\d+)/.exec(log)
+      if (listening) done(Number(listening[1]))
+    })
+    void exited.then(() => fail(new Error(`the server exited before listening:\n${log}`)))
+  })
   for (let attempt = 0; attempt < 300; attempt++) {
     const healthy = await fetch(`http://127.0.0.1:${port}/healthz`, { signal: AbortSignal.timeout(1000) }).then(
       (response) => response.ok,
