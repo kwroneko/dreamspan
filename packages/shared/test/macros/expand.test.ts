@@ -84,6 +84,40 @@ describe("freezing", () => {
     expect(again).toEqual(first)
   })
 
+  it("keys a draw by the macro as written, so names in its arguments don't move it", () => {
+    const text = "{{datetimeformat::[{{char}}] YYYY-MM-DD}}"
+    const first = expanded(request(text, PRESET))
+    expect(first.text).toBe("Mira 2026-10-11")
+    // A day later, with another name: the frozen clock holds, the name follows.
+    const renamed = { ...context, names: { ...context.names, char: "Wren" }, now: NOW + 86_400_000 }
+    expect(expanded(request(text, PRESET, { context: renamed, frozen: first.frozen })).text).toBe("Wren 2026-10-11")
+  })
+
+  it("draws again what the macro couldn't have produced", () => {
+    const text = "{{random::a::b}} {{pick::c::d}} {{roll::2d6}} {{isodate}}"
+    const first = expanded(request(text, PRESET))
+    const keys = Object.keys(first.frozen)
+    expect(keys).toHaveLength(4)
+    const later = { ...context, now: NOW + 86_400_000 }
+    // Possible values are kept, whatever the clock says now.
+    const possible = { [keys[0]!]: "b", [keys[1]!]: "d", [keys[2]!]: "12", [keys[3]!]: String(NOW) }
+    expect(expanded(request(text, PRESET, { context: later, frozen: possible })).text).toBe("b d 12 2026-10-11")
+    // Impossible ones aren't: an option that isn't one, dice that can't, a clock out of range.
+    for (const [index, value] of [
+      [0, "z"],
+      [1, "z"],
+      [2, "13"],
+      [2, "1"],
+      [2, "x"],
+      [3, "99999999999999"],
+      [3, "noon"]
+    ] as const) {
+      const forged = { ...possible, [keys[index]!]: value }
+      const again = expanded(request(text, PRESET, { context: later, frozen: forged }))
+      expect(again.frozen[keys[index]!]).not.toBe(value)
+    }
+  })
+
   it("draws again where the arguments changed", () => {
     const first = expanded(request("{{random::{{user}}::x}}", PRESET, { random: () => 0 }))
     expect(first.text).toBe("Alice")

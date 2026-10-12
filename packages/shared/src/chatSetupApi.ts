@@ -94,10 +94,11 @@ export class ChatSetupApi extends RpcGroup.make(
       greeting: Schema.NullOr(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
       first: FirstTurn,
       /**
-       * What each greeting's random and time macros showed (in `GetCardForChat` order), kept
-       * so the chat shows the greeting as it was seen (DESIGN §5.6).
+       * What the picked greeting's random and time macros showed, kept so the chat shows it as
+       * it was seen (DESIGN §5.6). The server freezes every greeting either way: it checks
+       * these and draws whatever is missing.
        */
-      frozen: Schema.optionalKey(Schema.Array(FrozenMacros).check(Schema.isMaxLength(1000)))
+      frozen: Schema.optionalKey(FrozenMacros)
     },
     success: Schema.Struct({ entry: PathEntry, chat: Chat }),
     error: Schema.Union([...Errors, GenerationUnavailable])

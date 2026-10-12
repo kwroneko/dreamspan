@@ -22,6 +22,21 @@ const choices = (list: ReadonlyArray<string>): ReadonlyArray<string> => {
 
 const DICE = /^([1-9]\d*)?d([1-9]\d*)([+-]\d+)?$/i
 
+const dice = (call: MacroCall) => {
+  const formula = /^\d+$/.test(call.args[0]!) ? `1d${call.args[0]}` : call.args[0]!
+  const m = DICE.exec(formula)
+  return m ? { dice: Number(m[1] ?? 1), sides: Number(m[2]), modifier: Number(m[3] ?? 0) } : undefined
+}
+
+/** A roll's value is a whole number its dice can make: from all ones to all sides. */
+const rollable = (call: MacroCall, value: string) => {
+  const formula = dice(call)
+  if (formula === undefined) return value === ""
+  if (!/^-?\d+$/.test(value)) return false
+  const total = Number(value)
+  return total >= formula.dice + formula.modifier && total <= formula.dice * formula.sides + formula.modifier
+}
+
 /** ST's droll formulas: `NdS±M`, or a bare number of sides. An invalid formula rolls "". */
 const roll = (call: MacroCall) => {
   const formula = /^\d+$/.test(call.args[0]!) ? `1d${call.args[0]}` : call.args[0]!
@@ -33,6 +48,12 @@ const roll = (call: MacroCall) => {
   let total = Number(m[3] ?? 0)
   for (let i = 0; i < dice; i++) total += 1 + Math.floor(call.random() * sides)
   return String(total)
+}
+
+/** A random or pick value is one of its choices (or nothing, from none). */
+const oneOfTheChoices = (call: MacroCall, value: string) => {
+  const items = choices(call.list)
+  return items.length === 0 ? value === "" : items.includes(value)
 }
 
 const SHORTHAND = /^([.$])([a-zA-Z](?:[\w-]*\w)?)$/
@@ -124,17 +145,18 @@ export const utilityMacros: ReadonlyArray<MacroSpec> = [
     args: [{ name: "comment" }],
     handler: () => ""
   },
-  { name: "roll", args: [{ name: "formula" }], volatile: true, handler: roll },
+  { name: "roll", args: [{ name: "formula" }], volatile: true, accepts: rollable, handler: roll },
   {
     name: "random",
     volatile: true,
     list: true,
+    accepts: oneOfTheChoices,
     handler: (call) => {
       const items = choices(call.list)
       return items.length === 0 ? "" : items[Math.floor(call.random() * items.length)]!
     }
   },
-  { name: "pick", list: true, volatile: true, handler: pick },
+  { name: "pick", list: true, volatile: true, accepts: oneOfTheChoices, handler: pick },
   { name: "banned", args: [{ name: "word" }], handler: () => "" },
   {
     name: "outlet",

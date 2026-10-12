@@ -79,6 +79,7 @@ function Pending({ card, personas }: { card: CardForChat; personas: ReadonlyArra
     // goes along to its composer, and a failure puts the sent text back.
     const submitted = text
     setText("")
+    const shownFrozen = card.greetings.length > 0 ? frozen.get(greeting) : undefined
     const result = await action.run(
       (client) =>
         Effect.gen(function* () {
@@ -86,10 +87,8 @@ function Pending({ card, personas }: { card: CardForChat; personas: ReadonlyArra
             cards: [card.card.entityId],
             persona: personaId,
             greeting: card.greetings.length > 0 ? greeting : null,
-            frozen: card.greetings.map((_, index) => {
-              if (!frozen.has(index)) expandGreeting(index)
-              return { ...frozen.get(index) }
-            }),
+            // The picked greeting as it was shown; the server freezes the rest itself.
+            ...(shownFrozen === undefined ? {} : { frozen: shownFrozen }),
             first:
               first === "send"
                 ? { _tag: "Send", content: submitted, speakerEntityId: personaId }

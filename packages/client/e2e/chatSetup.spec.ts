@@ -53,9 +53,14 @@ const setUp = (page: Page) =>
     await importCard(page, {
       name: "Wren",
       description: "A lighthouse keeper.",
-      first_mes: "{{description}} The log says {{datetimeformat::YYYY-MM-DD}}."
+      first_mes: "{{description}} The log says {{datetimeformat::[{{char}},] YYYY-MM-DD}}."
     })
     await importCard(page, { name: "Ana", description: "A cartographer." })
+    await importCard(page, {
+      name: "Crowd",
+      first_mes: "{{random::x{{space::262145}}x}}",
+      alternate_greetings: Array.from({ length: 1000 }, (_, i) => `Alternate ${i} at {{time}}`)
+    })
     await importCard(page, { name: "Bo", description: "A diver." })
     await page.goto(`${server().url}/library`)
     for (const persona of ["Ana", "Bo"]) {
@@ -328,16 +333,16 @@ test("a saved greeting keeps its card's fields and the date it showed", async ({
   await page.goto(`${server().url}/library`)
   await page.getByRole("link", { name: "Start a chat with Wren" }).click()
   const greeting = page.getByRole("article", { name: "Greeting" })
-  await expect(greeting).toContainText("A lighthouse keeper. The log says 2026-03-01.")
+  await expect(greeting).toContainText("A lighthouse keeper. The log says Wren, 2026-03-01.")
   await composer(page).fill("Hello, keeper.")
   await page.getByRole("button", { name: /^Send/ }).click()
   await expect(page).toHaveURL(/\/chats\/[^/?]+$/)
   const first = replies(page).first()
-  await expect(first).toContainText("A lighthouse keeper. The log says 2026-03-01.")
+  await expect(first).toContainText("A lighthouse keeper. The log says Wren, 2026-03-01.")
   // A day later, it still says what it said.
   await page.clock.setFixedTime(new Date("2026-03-02T12:00:00Z"))
   await page.reload()
-  await expect(replies(page).first()).toContainText("A lighthouse keeper. The log says 2026-03-01.")
+  await expect(replies(page).first()).toContainText("A lighthouse keeper. The log says Wren, 2026-03-01.")
   await expect(generating(page)).toHaveCount(0, { timeout: 20_000 })
 })
 
@@ -364,5 +369,17 @@ test("text typed while the first send makes the chat goes along to the chat's co
   await expect(page).toHaveURL(/\/chats\/[^/?]+$/)
   await expect(page.getByRole("article", { name: "Your message" })).toContainText("Take me across.")
   await expect(composer(page)).toHaveValue("And bring the lantern.")
+  await expect(generating(page)).toHaveCount(0, { timeout: 20_000 })
+})
+
+test("a card with 1,001 greetings and a huge random draw starts like any other", async ({ page }) => {
+  await login(page)
+  await page.goto(`${server().url}/library`)
+  await page.getByRole("link", { name: "Start a chat with Crowd" }).click()
+  await expect(page.getByRole("article", { name: "Greeting" })).toContainText("1 / 1001")
+  await composer(page).fill("Hello, everyone.")
+  await page.getByRole("button", { name: /^Send/ }).click()
+  await expect(page).toHaveURL(/\/chats\/[^/?]+$/)
+  await expect(page.getByRole("article", { name: "Your message" })).toContainText("Hello, everyone.")
   await expect(generating(page)).toHaveCount(0, { timeout: 20_000 })
 })

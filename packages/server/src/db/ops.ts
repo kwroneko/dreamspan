@@ -788,7 +788,8 @@ export class WriteOps extends RpcGroup.make(
       persona: Schema.NullOr(EntityId),
       greeting: Schema.NullOr(Schema.Int),
       first: FirstTurn,
-      frozen: Schema.Array(FrozenMacros)
+      /** Each greeting's frozen values, in `GetCardForChat` order; null: none to freeze. */
+      frozen: Schema.Array(Schema.NullOr(FrozenMacros))
     },
     success: AppendResult,
     error: Schema.Union([NotFound, StorageError])

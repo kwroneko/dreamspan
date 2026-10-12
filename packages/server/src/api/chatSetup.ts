@@ -93,7 +93,13 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
         // the values it saw in the preview are kept, and any it didn't send are drawn now.
         const lead = yield* reader.GetCardForChat({ userId: id, entityId: cards[0]! })
         const fields = { description: lead.description, personality: lead.personality, scenario: lead.scenario }
-        const drawn = lead.greetings.map((text, i) => freezeTemplate(text, fields, frozen?.[i] ?? {}))
+        // The names the greeting shows with: the persona's and the card's, as in the preview.
+        const [player] = persona === null ? [] : yield* reader.CastCards({ userId: id, entityIds: [persona] })
+        const names = { user: player?.name ?? "User", char: lead.card.name }
+        const picked = greeting ?? 0
+        const drawn = lead.greetings.map((text, i) =>
+          freezeTemplate(text, fields, names, i === picked ? (frozen ?? {}) : {})
+        )
         const result = yield* writer.StartChat({ userId: id, cards, persona, greeting, first, frozen: drawn })
         if (first._tag === "Generate") {
           yield* generations.start({

@@ -71,8 +71,18 @@ export interface MacroSpec {
   readonly list?: true
   /** The handler gets its arguments unexpanded, and expands what it needs with `resolve`. */
   readonly delayArgResolution?: boolean
-  /** Non-deterministic: evaluated once, then the value is frozen and reused (DESIGN §5.6). */
-  readonly volatile?: boolean
+  /**
+   * Non-deterministic: evaluated once, then frozen and reused (DESIGN §5.6). `true` freezes
+   * the value it produced; `"clock"` freezes the time it read, and its value is worked out
+   * again from that time, with the arguments as they are then.
+   */
+  readonly volatile?: boolean | "clock"
+  /**
+   * For `volatile: true`: whether the macro could have produced `value` with these
+   * arguments. A frozen value it couldn't have (arguments changed, or a stored value that
+   * was never drawn) is drawn again. Without it, any frozen value is taken.
+   */
+  readonly accepts?: (call: MacroCall, value: string) => boolean
   readonly handler: (call: MacroCall) => string
 }
 

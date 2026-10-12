@@ -95,25 +95,28 @@ describe("chat setup", () => {
   it.live("a greeting's random and time macros are frozen when the chat is made, sent or not", () =>
     Effect.gen(function* () {
       const api = yield* client()
+      const names = { user: "User", char: "Dated" }
       const dated = yield* card(api, "Dated", {
         name: "Dated",
-        first_mes: "The log says {{datetimeformat::YYYY-MM-DD}}.",
+        // Its date format names the card: the frozen date mustn't depend on the name.
+        first_mes: "The log of {{char}} says {{datetimeformat::[{{char}}] YYYY-MM-DD}}.",
         alternate_greetings: [Array.from({ length: 300 }, () => "{{time}}").join(" ")]
       })
-      // What a preview drew on another day, for the first greeting only.
-      const seen = freezeTemplate("The log says {{datetimeformat::YYYY-MM-DD}}.", {}, {})
-      const preview = Object.fromEntries(Object.keys(seen).map((key) => [key, "1999-12-31"]))
+      const text = "The log of {{char}} says {{datetimeformat::[{{char}}] YYYY-MM-DD}}."
+      // What the preview read: a clock on another day.
+      const seen = freezeTemplate(text, {}, names, {})!
+      const preview = Object.fromEntries(Object.keys(seen).map((key) => [key, String(Date.UTC(1999, 11, 31, 12))]))
       const started = yield* api.StartChat({
         cards: [dated],
         persona: null,
-        greeting: 1,
+        greeting: 0,
         first: { _tag: "Send", content: "Hi.", speakerEntityId: null },
-        frozen: [preview]
+        frozen: preview
       })
       const [greeting] = yield* pathOf(api, started.chat.id)
       const versions = yield* api.ListVersions({ slotId: greeting!.slotId })
-      // The preview's value is kept; the greeting the client sent nothing for is frozen too,
-      // with all 300 of its values, more than any fixed small cap would take.
+      // The preview's clock is kept, and the greeting the client sent nothing for is frozen
+      // too: all 300 of its values.
       assert.deepStrictEqual(versions[0]!.frozenMacros, preview)
       assert.lengthOf(Object.keys(versions[1]!.frozenMacros ?? {}), 300)
       // Without any frozen values sent, the server still draws them.
@@ -125,6 +128,71 @@ describe("chat setup", () => {
       })
       const [bareGreeting] = yield* pathOf(api, bare.chat.id)
       assert.lengthOf(Object.keys(bareGreeting!.version.frozenMacros ?? {}), 1)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
+  )
+
+  it.live("frozen values the macros couldn't have drawn are drawn again", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const names = { user: "User", char: "Odd" }
+      const text = "{{random::{{char}}::safe}} {{roll::1d6}} {{isodate}}"
+      const odd = yield* card(api, "Odd", { name: "Odd", first_mes: text })
+      const keys = Object.keys(freezeTemplate(text, {}, names, {})!)
+      assert.lengthOf(keys, 3)
+      // A choice the arguments allow (the card's name) is kept.
+      const kept = yield* api.StartChat({
+        cards: [odd],
+        persona: null,
+        greeting: 0,
+        first: { _tag: "Send", content: "Hi.", speakerEntityId: null },
+        frozen: { [keys[0]!]: "Odd", [keys[1]!]: "4", [keys[2]!]: String(Date.UTC(2020, 0, 1)) }
+      })
+      const [good] = yield* pathOf(api, kept.chat.id)
+      assert.deepStrictEqual(Object.values(good!.version.frozenMacros ?? {}), [
+        "Odd",
+        "4",
+        String(Date.UTC(2020, 0, 1))
+      ])
+      // Values outside the choices, the dice or sane dates are not.
+      const forged = yield* api.StartChat({
+        cards: [odd],
+        persona: null,
+        greeting: 0,
+        first: { _tag: "Send", content: "Hi.", speakerEntityId: null },
+        frozen: { [keys[0]!]: "FORGED", [keys[1]!]: "7", [keys[2]!]: "99999999999999" }
+      })
+      const [bad] = yield* pathOf(api, forged.chat.id)
+      const [choice, roll, clock] = Object.values(bad!.version.frozenMacros ?? {})
+      assert.include(["Odd", "safe"], choice)
+      assert.include(["1", "2", "3", "4", "5", "6"], roll)
+      assert.isBelow(Math.abs(Number(clock) - Date.now()), 60_000)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
+  )
+
+  it.live("a greeting whose single draw is huge, and a card with 1,001 greetings, both start", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const huge = yield* card(api, "Huge", { name: "Huge", first_mes: "{{random::x{{space::262145}}x}}" })
+      const preview = freezeTemplate("{{random::x{{space::262145}}x}}", {}, { user: "User", char: "Huge" }, {})!
+      assert.strictEqual(Object.values(preview)[0]!.length, 262_147)
+      const send = { _tag: "Send" as const, content: "Hi.", speakerEntityId: null }
+      assert.strictEqual(
+        yield* outcome(api.StartChat({ cards: [huge], persona: null, greeting: 0, first: send, frozen: preview })),
+        "ok"
+      )
+      assert.strictEqual(
+        yield* outcome(api.StartChat({ cards: [huge], persona: null, greeting: 0, first: send })),
+        "ok"
+      )
+      const many = yield* card(api, "Many", {
+        name: "Many",
+        first_mes: "Welcome {{time}}",
+        alternate_greetings: Array.from({ length: 1000 }, (_, i) => `Alternate ${i} {{time}}`)
+      })
+      const started = yield* api.StartChat({ cards: [many], persona: null, greeting: 1000, first: send })
+      const [greeting] = yield* pathOf(api, started.chat.id)
+      assert.strictEqual(greeting!.versionCount, 1001)
+      assert.strictEqual(greeting!.version.content, "Alternate 999 {{time}}")
     }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
   )
 

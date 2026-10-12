@@ -42,17 +42,18 @@ export class Chat extends Schema.Class<Chat>("Chat")({
 
 /**
  * Values a text's non-deterministic macros drew, by the engine's keys (macros/expand.ts).
- * Bounded as one expansion is (ARCHITECTURE §10): no more values than macros it evaluates,
- * none longer than a text, and no more in all than its work limit. Whatever a preview drew
- * fits, so a chat never fails to start on them.
+ * One expansion bounds them (ARCHITECTURE §10): no more values than the 10,000 macros it
+ * evaluates, and no more text in all than its work limit produces (4,000,000 characters,
+ * here with room to spare). Whatever an expansion drew fits.
  */
-export const FrozenMacros = Schema.Record(Schema.String, Schema.String.check(Schema.isMaxLength(262_144))).check(
+const FROZEN_MACROS_CHARACTERS = 16_000_000
+export const FrozenMacros = Schema.Record(Schema.String, Schema.String).check(
   Schema.makeFilter((record: Readonly<Record<string, string>>) => {
     const values = Object.values(record)
     if (values.length > 10_000) return "at most 10,000 frozen values"
-    return values.reduce((sum, value) => sum + value.length, 0) <= 4_000_000
+    return values.reduce((sum, value) => sum + value.length, 0) <= FROZEN_MACROS_CHARACTERS
       ? undefined
-      : "at most 4,000,000 characters of frozen values"
+      : "at most 16,000,000 characters of frozen values"
   })
 )
 

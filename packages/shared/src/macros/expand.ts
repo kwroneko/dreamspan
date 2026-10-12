@@ -326,6 +326,15 @@ interface Block {
   readonly nodes: ReadonlyArray<Node>
 }
 
+/** A frozen clock: epoch milliseconds from 1900 to 2200; anything else isn't one, and the clock is read again. */
+const EARLIEST = Date.UTC(1900, 0, 1)
+const LATEST = Date.UTC(2200, 0, 1)
+const frozenClock = (value: string | undefined) => {
+  if (value === undefined || !/^\d{1,15}$/.test(value)) return undefined
+  const at = Number(value)
+  return at >= EARLIEST && at <= LATEST ? at : undefined
+}
+
 /** Non-deterministic values by where they were drawn (DESIGN §5.6). */
 export type FrozenValues = Readonly<Record<string, string>>
 
@@ -518,11 +527,20 @@ class Expansion {
       variables: this.run.variables,
       charge: (size) => charge(this.run, size)
     }
-    const key = entry.volatile ? this.drawKey(entry, offset, args) : undefined
+    const key = entry.volatile ? this.drawKey(entry, offset, text.slice(node.start, node.end)) : undefined
     const frozen = key !== undefined && Object.hasOwn(this.run.frozen, key) ? this.run.frozen[key] : undefined
     let value: string
     try {
-      value = typeof frozen === "string" ? frozen : entry.handler(call)
+      if (entry.volatile === "clock") {
+        // The time it read is what's frozen: its value follows from that, so it can only
+        // ever be a value the macro produces.
+        const at = frozenClock(frozen) ?? call.context.now
+        value = entry.handler(at === call.context.now ? call : { ...call, context: { ...call.context, now: at } })
+        this.run.drawn.set(key!, String(at))
+        return value
+      }
+      const usable = typeof frozen === "string" && (entry.accepts === undefined || entry.accepts(call, frozen))
+      value = usable ? frozen : entry.handler(call)
     } catch (error) {
       if (error instanceof LimitReached) throw error
       // ST leaves a macro whose handler fails as written.
@@ -533,12 +551,13 @@ class Expansion {
   }
 
   /**
-   * Where a non-deterministic macro was drawn: the text, the offset, the macro and its
-   * arguments, and how many times that site has been evaluated in this expansion. Changed
-   * arguments make a new draw, as does text that moved.
+   * Where a non-deterministic macro was drawn: the text, the offset, the macro as written
+   * (its source, not its expanded arguments, so names and the like don't move it), and how
+   * many times that site has been evaluated in this expansion. Text that moved draws again;
+   * a value the macro couldn't produce with its arguments now is drawn again (`accepts`).
    */
-  private drawKey(entry: MacroEntry, offset: number, args: ReadonlyArray<string>) {
-    const site = `${this.scope}@${offset}:${entry.id}:${stringHash(args.join("\u0000"))}`
+  private drawKey(entry: MacroEntry, offset: number, source: string) {
+    const site = `${this.scope}@${offset}:${entry.id}:${stringHash(source)}`
     const n = this.run.sites.get(site) ?? 0
     this.run.sites.set(site, n + 1)
     return n === 0 ? site : `${site}#${n}`
