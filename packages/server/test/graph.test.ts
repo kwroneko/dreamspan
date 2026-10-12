@@ -1,8 +1,12 @@
 // The message graph through the real storage operations (writer and reader workers):
 // DESIGN §3, DATA-MODEL §4–§5 and invariants 2–4.
-import { mkdtempSync } from "node:fs"
+import { execFile } from "node:child_process"
+import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { fileURLToPath } from "node:url"
+import { DatabaseSync } from "node:sqlite"
+import { SqliteClient } from "@effect/sql-sqlite-node"
 import { assert, describe, it } from "@effect/vitest"
 import { type EntityId, NewVersion, type SlotId, type VersionId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
@@ -11,14 +15,37 @@ import type { EntityKind } from "@rp/shared/library.ts"
 import type { ConnectionId } from "@rp/shared/providers.ts"
 import { foldState, type StateEventData } from "@rp/shared/state.ts"
 import { Effect } from "effect"
+import { SqlClient } from "effect/sql"
+import { databaseFile } from "../src/db/connection.ts"
 import * as Database from "../src/db/Database.ts"
+import { pathWindow } from "../src/db/reads.ts"
 
-const database = () =>
-  Database.layer({
-    dataDir: mkdtempSync(join(tmpdir(), "rp-graph-")),
-    readers: 2,
-    allowNetworkFs: false,
-    workers: "source"
+const database = (dataDir = mkdtempSync(join(tmpdir(), "rp-graph-"))) =>
+  Database.layer({ dataDir, readers: 2, allowNetworkFs: false, workers: "source" })
+
+const windowProbe = fileURLToPath(new URL("./support/windowProbe.ts", import.meta.url))
+
+/** Runs support/windowProbe.ts in a child process, killed if it makes no progress in 20 s. */
+const probeWindow = (...args: Array<string>) =>
+  Effect.callback<string, Error>((resume) => {
+    const child = execFile(
+      process.execPath,
+      [windowProbe, ...args],
+      { timeout: 20_000, killSignal: "SIGKILL" },
+      (error, stdout, stderr) =>
+        resume(
+          error === null
+            ? Effect.succeed(stdout)
+            : Effect.fail(
+                new Error(
+                  error.killed
+                    ? "no progress in 20 s: the window read walked past its limit into the cycle"
+                    : `${error.message}\n${stderr}`
+                )
+              )
+        )
+    )
+    return Effect.sync(() => child.kill("SIGKILL"))
   })
 
 const say = (
@@ -609,5 +636,52 @@ describe("message graph", () => {
       yield* writer.RestoreBinItem({ userId, itemId: message.id })
       assert.deepStrictEqual((yield* stateAt(reply.slotId)).participants, [mira, me])
     }).pipe(Effect.provide(database()))
+  )
+})
+
+describe("window reads", () => {
+  // A window must stop walking at its limit, not walk the whole path and keep the newest slots.
+  it.live(
+    "stop at their limit even with a cycle further up, and walk the path by index",
+    () => {
+      const dataDir = mkdtempSync(join(tmpdir(), "rp-graph-"))
+      return Effect.gen(function* () {
+        const { userId, chatId, slots } = yield* Effect.gen(function* () {
+          const { userId, me, mira, chat, append } = yield* setup()
+          let leaf = chat.activeLeafSlotId!
+          const slots: Array<SlotId> = [leaf]
+          for (let i = 0; i < 300; i++) {
+            leaf = (yield* append(leaf, i % 2 === 0 ? say(me, `line ${i}`) : generated(mira, `reply ${i}`))).slotId
+            slots.push(leaf)
+          }
+          return { userId, chatId: chat.id, slots }
+        }).pipe(Effect.provide(database(dataDir)))
+
+        // A cycle among slots older than the window: depth 10's parent becomes depth 100.
+        // Only a walk past its limit reaches it, and then never ends. The schema forbids
+        // this, so its trigger goes first.
+        const raw = new DatabaseSync(databaseFile(dataDir))
+        raw.exec("DROP TRIGGER slots_shape_fixed")
+        raw.prepare("UPDATE slots SET parent_slot_id = ? WHERE id = ?").run(slots[100]!, slots[10]!)
+        raw.close()
+        // In a child process: an endless walk can't be stopped any other way.
+        assert.strictEqual(yield* probeWindow(dataDir, userId, chatId, "50"), "50")
+
+        // Each step of the walk is an index lookup: only the walk itself is scanned.
+        const plan = yield* Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [text, params] = pathWindow(sql, chatId, slots.at(-1)!, 200).compile()
+          const rows = yield* sql.unsafe<{ detail: string }>(`EXPLAIN QUERY PLAN ${text}`, params)
+          return rows.map((row) => row.detail)
+        }).pipe(Effect.provide(SqliteClient.layer({ filename: databaseFile(dataDir), readonly: true })))
+        assert.deepStrictEqual(
+          plan.filter((step) => step.startsWith("SCAN")),
+          ["SCAN p", "SCAN path"],
+          plan.join("\n")
+        )
+        assert.include(plan, "SEARCH s USING INDEX sqlite_autoindex_slots_1 (id=?)", plan.join("\n"))
+      }).pipe(Effect.ensuring(Effect.sync(() => rmSync(dataDir, { recursive: true, force: true }))))
+    },
+    60_000
   )
 })

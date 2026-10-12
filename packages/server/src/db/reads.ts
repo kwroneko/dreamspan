@@ -24,6 +24,27 @@ import { query } from "./tx.ts"
 
 const decodeStateEvent = Schema.decodeUnknownEffect(FoldableEvent)
 
+/** The slots from `leaf` up to the root (DATA-MODEL §4.4), or up to `limit` of them. */
+const pathCte = (sql: SqlClient.SqlClient, chatId: ChatId, leaf: SlotId, limit: number | null) => sql`
+  WITH RECURSIVE path(id, n) AS (
+    SELECT id, 1 FROM slots WHERE id = ${leaf} AND chat_id = ${chatId}
+    UNION ALL
+    SELECT s.parent_slot_id, p.n + 1 FROM slots s JOIN path p ON s.id = p.id
+    WHERE s.parent_slot_id IS NOT NULL AND (${limit} IS NULL OR p.n < ${limit})
+  )`
+
+/** GetPath's query: each slot in the window with its selected version, root first. */
+export const pathWindow = (sql: SqlClient.SqlClient, chatId: ChatId, leaf: SlotId, limit: number) =>
+  sql<PathRow>`
+    ${pathCte(sql, chatId, leaf, limit)}
+    SELECT v.id, v.slot_id, v.ordinal, v.status, v.speaker_entity_id, v.writer, v.content, v.macro_mode,
+      v.origin, v.source_version_id, v.direction, v.hidden, v.starred, v.created_at,
+      s.lane_id, s.parent_slot_id, s.depth, s.row_version, s.context_excluded,
+      s.deleted_at IS NOT NULL AS slot_deleted,
+      (SELECT count(*) FROM versions c WHERE c.slot_id = s.id AND c.deleted_at IS NULL) AS version_count
+    FROM path JOIN slots s ON s.id = path.id JOIN versions v ON v.id = s.selected_version_id
+    ORDER BY s.depth`
+
 export const makeReadHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   const lib = makeLibraryQueries(sql)
@@ -33,15 +54,6 @@ export const makeReadHandlers = Effect.gen(function* () {
     sql<ChatRow>`SELECT * FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`.pipe(
       Effect.flatMap(([row]) => (row ? Effect.succeed(row) : Effect.fail(new NotFound({ entity: "chat", id: chatId }))))
     )
-
-  /** The slots from `leaf` up to the root (DATA-MODEL §4.4), or up to `limit` of them. */
-  const pathCte = (chatId: ChatId, leaf: SlotId, limit: number | null) => sql`
-    WITH RECURSIVE path(id, n) AS (
-      SELECT id, 1 FROM slots WHERE id = ${leaf} AND chat_id = ${chatId}
-      UNION ALL
-      SELECT s.parent_slot_id, p.n + 1 FROM slots s JOIN path p ON s.id = p.id
-      WHERE s.parent_slot_id IS NOT NULL AND (${limit} IS NULL OR p.n < ${limit})
-    )`
 
   const liveSlot = (chatId: ChatId, slotId: SlotId) =>
     sql<{ id: string }>`SELECT id FROM slots WHERE id = ${slotId} AND chat_id = ${chatId} AND deleted_at IS NULL`.pipe(
@@ -62,15 +74,7 @@ export const makeReadHandlers = Effect.gen(function* () {
         const chat = yield* ownedChat(userId, chatId)
         const leaf = (leafSlotId ?? chat.active_leaf_slot_id) as SlotId | null
         if (leaf === null) return { entries: [], olderLeafSlotId: null }
-        const rows = yield* sql<PathRow>`
-          ${pathCte(chatId, leaf, limit)}
-          SELECT v.id, v.slot_id, v.ordinal, v.status, v.speaker_entity_id, v.writer, v.content, v.macro_mode,
-            v.origin, v.source_version_id, v.direction, v.hidden, v.starred, v.created_at,
-            s.lane_id, s.parent_slot_id, s.depth, s.row_version, s.context_excluded,
-            s.deleted_at IS NOT NULL AS slot_deleted,
-            (SELECT count(*) FROM versions c WHERE c.slot_id = s.id AND c.deleted_at IS NULL) AS version_count
-          FROM path JOIN slots s ON s.id = path.id JOIN versions v ON v.id = s.selected_version_id
-          ORDER BY s.depth`
+        const rows = yield* pathWindow(sql, chatId, leaf, limit)
         if (rows.length === 0) return yield* new NotFound({ entity: "slot", id: leaf })
         // Deleted messages are walked through but not shown; their replies stay in place.
         return {
@@ -101,7 +105,7 @@ export const makeReadHandlers = Effect.gen(function* () {
                 WHERE chat_id = ${chatId} AND slot_id IS NULL AND superseded_by_changeset IS NULL
                 ORDER BY seq`
             : yield* sql<{ key: string; scope: string | null; value_json: string }>`
-                ${pathCte(chatId, slotId, null)}
+                ${pathCte(sql, chatId, slotId, null)}
                 SELECT e.key, e.scope, e.value_json
                 FROM state_events e
                 LEFT JOIN path p ON p.id = e.slot_id
