@@ -45,6 +45,13 @@ interface RecordPayload {
   readonly advanced?: string | null
   /** The import run that may write the file now; null once it's finished. */
   readonly lease?: string | null
+  /** The last slot an import of the file wrote or matched, as it went. */
+  readonly last?: string | null
+  /**
+   * Where the file's earlier imports left it (`last` when this run claimed the record): the
+   * slots on the path to it are the file's, whatever the user changed in them since.
+   */
+  readonly prior?: string | null
 }
 
 /** How a chat whose import hasn't finished is titled, so the chat list says so. [P] */
@@ -252,6 +259,26 @@ export const makeStImportWriteHandlers = Effect.gen(function* () {
             (yield* sql<{
               id: string
             }>`SELECT id FROM lanes WHERE chat_id = ${chatId} ORDER BY created_at, id LIMIT 1`)[0]!.id
+          // The slots on the path to where earlier imports of the file left it, by depth, from
+          // the batch's first message down: walked once, and only if a message doesn't match exactly.
+          let priorPath: Map<number, string> | null = null
+          const firstDepth = parent === null ? 0 : parent.depth + 1
+          const priorAt = (depth: number) =>
+            Effect.gen(function* () {
+              if (priorPath === null) {
+                priorPath = new Map<number, string>()
+                if (payload.prior == null) return undefined
+                const rows = yield* sql<{ id: string; depth: number }>`
+                  WITH RECURSIVE up(id, parent, depth) AS (
+                    SELECT id, parent_slot_id, depth FROM slots WHERE id = ${payload.prior} AND chat_id = ${chatId}
+                    UNION ALL
+                    SELECT s.id, s.parent_slot_id, s.depth FROM slots s JOIN up ON s.id = up.parent WHERE up.depth > ${firstDepth}
+                  )
+                  SELECT id, depth FROM up`
+                for (const row of rows) priorPath.set(row.depth, row.id)
+              }
+              return priorPath.get(depth)
+            })
           let matching = input.matching
           let added = 0
           let differing = 0
@@ -296,7 +323,8 @@ export const makeStImportWriteHandlers = Effect.gen(function* () {
                   coalesce((SELECT h.content FROM version_history h WHERE h.version_id = v.id ORDER BY h.id LIMIT 1),
                     v.content) AS original
                 FROM slots s JOIN versions v ON v.slot_id = s.id
-                WHERE ${parent === null ? sql`s.chat_id = ${chatId} AND s.depth = 0` : sql`s.parent_slot_id = ${parent.id}`}`
+                WHERE ${parent === null ? sql`s.chat_id = ${chatId} AND s.depth = 0` : sql`s.parent_slot_id = ${parent.id}`}
+                ORDER BY s.id, v.ordinal`
               const same = (row: (typeof children)[number], version: (typeof message.versions)[number]) =>
                 row.writer === writer &&
                 row.created_at === version.at &&
@@ -316,10 +344,17 @@ export const makeStImportWriteHandlers = Effect.gen(function* () {
               const alike = (own: typeof children) =>
                 own.some((row) => row.selected === 1 && same(row, shown)) && own[0]!.hidden === (message.hidden ? 1 : 0)
               const exact = candidates.find(alike)
+              // Otherwise the slot an earlier import of this file matched or made here, whatever
+              // the user selected, hid or deleted in it since: the user's choices stay theirs.
+              const mine =
+                exact !== undefined || candidates.length === 0
+                  ? undefined
+                  : yield* priorAt(parent === null ? 0 : parent.depth + 1)
+              const earlier = mine === undefined ? undefined : candidates.find((slot) => slot[0]!.slot_id === mine)
               // A branch merged into another file's chat is that file's only where it reads
               // the same: a branch from another swipe, or with messages hidden only in it,
               // diverges there, so its own path keeps what ST had on it.
-              const own = exact ?? (input.strict ? undefined : candidates[0])
+              const own = exact ?? earlier ?? (input.strict ? undefined : candidates[0])
               const match = own?.[0]
               if (own !== undefined && match !== undefined) {
                 if (exact === undefined) differing++
@@ -366,7 +401,12 @@ export const makeStImportWriteHandlers = Effect.gen(function* () {
               RETURNING id`
             if (moved.length > 0) advanced = slotIds.at(-1)!
           }
-          const progress: RecordPayload = { ...payload, firstAdded: payload.firstAdded ?? firstAdded, advanced }
+          const progress: RecordPayload = {
+            ...payload,
+            firstAdded: payload.firstAdded ?? firstAdded,
+            advanced,
+            last: slotIds.at(-1) ?? payload.last ?? null
+          }
           yield* sql`UPDATE jobs SET updated_at = ${Date.now()}, payload_json = ${JSON.stringify(progress)}
             WHERE id = ${input.recordId}`
           return { slotIds, matching, added, differing }
@@ -464,7 +504,8 @@ export const makeStImportWriteHandlers = Effect.gen(function* () {
         // run that's over, whatever the record's state.
         yield* current(userId, lease, recordId)
         const payload = JSON.parse(row.payload_json) as RecordPayload
-        yield* sql`UPDATE jobs SET payload_json = ${JSON.stringify({ ...payload, lease })}, updated_at = ${Date.now()}
+        const prior = payload.last ?? payload.end ?? null
+        yield* sql`UPDATE jobs SET payload_json = ${JSON.stringify({ ...payload, lease, prior })}, updated_at = ${Date.now()}
           WHERE id = ${recordId}`
         return {
           recordId,

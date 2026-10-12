@@ -842,6 +842,58 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
     })
   )
 
+  for (const unfinished of [true, false]) {
+    it.effect(
+      `a branch's selected versions and deleted messages stay the user's on a ${unfinished ? "resume" : "re-import"}`,
+      () =>
+        Effect.gen(function* () {
+          const tag = unfinished ? "bs-resume" : "bs-reimport"
+          const root = `chats/Bot/${tag}-root.jsonl`
+          const branch = `chats/Bot/${tag}-branch.jsonl`
+          const base = [message(`${tag}-g`, 0), message(`${tag}-u`, 1)]
+          const first = yield* begin
+          yield* sendStFile(
+            first.importId,
+            root,
+            jsonl({ chat_metadata: {} }, ...base, message(`${tag}-root-reply`, 2)),
+            {
+              card: "none"
+            }
+          )
+          const lines = [
+            ...base,
+            message(`${tag}-reply`, 2, { swipes: [`${tag}-reply`, `${tag}-alt`], swipe_id: 0 }),
+            message(`${tag}-bin`, 3)
+          ]
+          const header = { chat_metadata: { main_chat: `${tag}-root` } }
+          if (unfinished) {
+            yield* answer(yield* sendFile(first.importId, branch, jsonl(header, ...lines), { card: "none", last: "0" }))
+          } else {
+            yield* sendStFile(first.importId, branch, jsonl(header, ...lines), { card: "none" })
+          }
+          const user = yield* first.api.Whoami()
+          const slot = query("SELECT slot_id FROM versions WHERE content = ?", `${tag}-reply`)[0]!.slot_id as SlotId
+          const alt = query("SELECT id FROM versions WHERE content = ?", `${tag}-alt`)[0]!.id as VersionId
+          yield* (yield* Writer).SelectVersion({ userId: user.id, slotId: slot, versionId: alt, expectedRowVersion: 1 })
+          const binned = query("SELECT slot_id FROM versions WHERE content = ?", `${tag}-bin`)[0]!.slot_id as SlotId
+          yield* first.api.DeleteMessage({ slotId: binned })
+          const next = yield* begin
+          yield* sendStFile(next.importId, branch, jsonl(header, ...lines, message(`${tag}-tail`, 4)), { card: "none" })
+          assert.strictEqual(
+            query("SELECT selected_version_id FROM slots WHERE id = ?", slot)[0]!.selected_version_id,
+            alt
+          )
+          assert.strictEqual(present(`${tag}-reply`), 1)
+          const rows = query(
+            "SELECT s.deleted_at FROM slots s JOIN versions v ON v.slot_id = s.id WHERE v.content = ?",
+            `${tag}-bin`
+          )
+          assert.lengthOf(rows, 1)
+          assert.isNotNull(rows[0]!.deleted_at)
+        })
+    )
+  }
+
   it.effect("the staging folder of earlier versions goes at startup, but a link there isn't followed", () =>
     Effect.gen(function* () {
       const dataDir = tempDir("st-staging")
