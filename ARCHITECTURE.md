@@ -2,7 +2,7 @@
 
 This document describes only what is implemented. Proposals live in `spec/`. When a spec is implemented, its content moves here in the same commit (CLAUDE.md "Design docs").
 
-**State**: Phase 0 done; phase 1 done except the ST data folder importer; phase 2 started (PLAN.md), 2026-10-12. Built: the scaffold, the full schema, the message-graph operations, the library operations, drafts, the recycle bin, the provider layer (§6), exposure safety and built-in login (§4), the settings screens (§5), the card, lorebook and preset formats (§8, §9), macros (§10), importing into the library (§11), and chats with streaming and the chat view (§12). Not yet built: the context assembler and real generation (chats stream from a fake generator in dev and tests only), chat setup from cards, and the ST data folder importer.
+**State**: Phases 0 and 1 done; phase 2 nearly done (PLAN.md), 2026-10-12. Built: the scaffold, schema, message graph, library, drafts, recycle bin, provider layer (§6), exposure safety and login (§4), settings screens (§5), card, lorebook and preset formats (§8, §9), macros (§10), importing (§11), chats with streaming and chat setup (§12), the ST folder import (§13), the library editors (§14), and context assembly with real generation (§15). Not yet built: notes in the chat UI, lorebook activation, the request inspector, and LCM.
 
 ---
 
