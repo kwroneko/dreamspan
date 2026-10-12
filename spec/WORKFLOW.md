@@ -120,9 +120,14 @@ Results of running Codex reviewers (GPT-6.1-Sol, GPT-6-Astra) and Opus reviewers
 |---|---|---|---|
 | L (ST folder importer), after an Opus review had found and fixed 9 | 9, before the others ran | Crashed at 18 min ("model at capacity") with no report, but left 7 adversarial tests, 6 failing (5 not found by Astra) | 8 min, 5 reproduced findings (1 high) |
 | K (chat setup, send queue) | none | 21 min, 7 medium, all with repro tests | 18 min, 7 (2 high); 4 shared with Sol |
+| J (context assembler, real generation), after two Opus reviews | 2 rounds, fixed before the others ran | Stopped at 14 min by OpenAI's cybersecurity filter, no report | 17 min, 9 reproduced (1 high) |
+| M (card and preset editors) | none | 17 min, 8 (3 high), including the only silent data loss (text stripped at unknown paths) | 12 min, 6 (1 high); 5 shared with Sol, 1 unique |
+| Fix verifications (K round 2, L rounds 2–3) | none | 13–25 min each. Found real gaps every time, including a P1 data loss in L's undo path | not run |
 
 So far:
 - Each Codex reviewer found real defects that the other missed. On K, three of each reviewer's seven findings were unique to it.
 - Both found defects after an Opus review was already done (L).
 - Sol writes repro tests for everything. Astra's reports state the method less often.
-- Sol can fail at capacity. Astra is faster here, not slower.
+- Sol failed twice: once at capacity, once on the cybersecurity filter. The filter was triggered by prompt wording ("adversarial", attacks on keys and regex); prompts now ask for a defensive review instead. Astra hasn't failed yet, and is faster here, not slower.
+- On M, Sol found more, and caught the worse defect. On L and J, Astra produced the only complete report.
+- So far running both is worth it: neither reviewer's findings contain the other's, and both keep finding real defects after Opus reviews.
