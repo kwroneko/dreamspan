@@ -4,6 +4,9 @@
 import { expect, type Page, test } from "@playwright/test"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
+/** A 1×1 PNG. */
+const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "400", FAKE_GENERATOR_TOKENS: "120" })
 
 /** Violations, from the moment the page loads: the event, and the console's report of it. */
@@ -79,5 +82,20 @@ test("every screen runs under the Content-Security-Policy", async ({ page }) => 
     await expect(page.getByRole("main")).toBeVisible()
     await page.waitForLoadState("networkidle")
   }
+  // The card editor, with its avatar from /library/media and its search in a worker.
+  await page.goto(`${server().url}/library`)
+  await page.getByRole("button", { name: "New card" }).click()
+  await page.getByRole("textbox", { name: "Name" }).fill("Wren")
+  await page.getByRole("button", { name: "Create" }).click()
+  await page.getByLabel("Choose an avatar, or drop it here").setInputFiles({
+    name: "wren.png",
+    mimeType: "image/png",
+    buffer: Buffer.from(PNG, "base64")
+  })
+  await expect(page.getByRole("img", { name: "The card's avatar" })).toBeVisible()
+  await page.getByRole("button", { name: "Search", exact: true }).click()
+  await page.getByRole("textbox", { name: "Find" }).fill("Wren")
+  await page.getByRole("dialog").getByRole("button", { name: "Find" }).click()
+  await expect(page.getByRole("dialog").getByRole("status")).toHaveText("1 match.")
   expect(violations).toEqual([])
 })

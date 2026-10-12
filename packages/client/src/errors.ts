@@ -12,6 +12,7 @@ import {
   StaleWrite
 } from "@rp/shared/errors.ts"
 import { GenerationUnavailable, NotAmendable } from "@rp/shared/chatApi.ts"
+import { EditConflict, EditRefused, InvalidDocument } from "@rp/shared/editorApi.ts"
 import { Cause } from "effect"
 import { RpcClientError } from "effect/rpc"
 
@@ -67,6 +68,14 @@ const describeError = (error: unknown): AppError => {
   if (error instanceof GenerationUnavailable) return make("GenerationUnavailable", sentence(error.message))
   if (error instanceof NotAmendable)
     return make("NotAmendable", "Only a finished message you wrote can be changed in place.")
+  // Editors
+  if (error instanceof InvalidDocument) {
+    return make("InvalidDocument", "These changes wouldn't make a valid document:", null, error.problems)
+  }
+  if (error instanceof EditRefused) return make("EditRefused", sentence(error.message))
+  if (error instanceof EditConflict) {
+    return make("EditConflict", "Some fields changed in the saved version since you started editing them.")
+  }
   if (error instanceof ServerError) {
     return make("ServerError", "Something failed on the server. The details are in the server's log.")
   }

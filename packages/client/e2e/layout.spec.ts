@@ -9,6 +9,7 @@ import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 const server = serverPerFile(withAdmin)
 let provider: FakeProvider
 let connectionPath = ""
+let cardPath = ""
 
 test.beforeAll(async () => {
   provider = await startProvider()
@@ -28,6 +29,10 @@ test.beforeAll(async () => {
   )
   await asUser(server(), ADMIN.handle, ADMIN.password, (api) => api.RefreshModels({ connectionId: connection.id }))
   connectionPath = `/settings/connections/${connection.id}`
+  const card = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+    api.CreateCard({ label: "Wren", name: "Wren" })
+  )
+  cardPath = `/library/${card.id}`
 })
 test.afterAll(async () => {
   await provider.stop()
@@ -44,7 +49,8 @@ const screens = [
   ["users", "/settings/users"],
   ["library", "/library"],
   ["import", "/import"],
-  ["st-import", "/import/st"]
+  ["st-import", "/import/st"],
+  ["card-editor", () => cardPath]
 ] as const
 
 const noSidewaysScroll = async (page: Page) =>

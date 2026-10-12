@@ -3,6 +3,7 @@ import * as accounts from "./accounts.tsx"
 import * as chat from "./chat/index.tsx"
 import * as connections from "./connections/index.ts"
 import * as credentials from "./credentials.tsx"
+import * as editor from "./editor/index.tsx"
 import * as library from "./library/index.ts"
 import * as login from "./login.tsx"
 import * as network from "./network.tsx"
@@ -14,6 +15,7 @@ export const registerFeatures = () => {
   login.register()
   status.register()
   library.register()
+  editor.register()
   chat.register()
   connections.register()
   credentials.register()

@@ -44,5 +44,7 @@ export const budgets = {
   /** The 99th percentile round trip of a trivial RPC while six streams run: the server's loop is free. */
   serverRoundTripP99Ms: 100,
   /** Deltas that arrived past the text a client had: none, ever. */
-  gaps: 0
+  gaps: 0,
+  /** From navigation to an editor ready, for a 50 KB card or a 100-prompt preset. */
+  editorOpenMs: 8000
 }

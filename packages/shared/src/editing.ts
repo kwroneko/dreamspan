@@ -180,6 +180,15 @@ export const applyDrafts = (kind: EntityKind, head: Doc, drafts: ReadonlyArray<D
   return { doc, problems }
 }
 
+/**
+ * `doc` with values put at paths, protected fields included: for a merge the user resolved
+ * by hand, which the server validates whole. Returns null if a path has no place.
+ */
+export const withValues = (doc: Doc, values: ReadonlyArray<{ readonly path: FieldPath; readonly value: unknown }>) => {
+  const copy = structuredClone(doc)
+  return values.every(({ path, value }) => setAt(copy, path, value) === null) ? copy : null
+}
+
 const SCHEMAS = { card: CardDoc, preset: PresetDoc, note: NoteDoc } as const
 
 const isEditable = (kind: EntityKind): kind is keyof typeof SCHEMAS => Object.hasOwn(SCHEMAS, kind)

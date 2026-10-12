@@ -9,6 +9,7 @@ import { Checkbox } from "../../ui/Choice.tsx"
 import { Field } from "../../ui/Field.tsx"
 import { Select } from "../../ui/Select.tsx"
 import { Badge, Card, CardHeader, EmptyState } from "../../ui/Surface.tsx"
+import { NewCardButton } from "../editor/NewCard.tsx"
 import { useTitle } from "../shell.tsx"
 import { FORMAT_LABELS, LISTED, libraryAtom } from "./data.ts"
 import { downloadExport } from "./files.ts"
@@ -77,6 +78,16 @@ function LibraryRow({ entry, persona }: { entry: LibraryRef; persona?: boolean |
             Chat
           </Link>
         )}
+        {entry.kind !== "lorebook" && (
+          <Link
+            to="/library/$refId"
+            params={{ refId: entry.id }}
+            aria-label={`Edit ${entry.label}`}
+            className={buttonClass("secondary")}
+          >
+            Edit
+          </Link>
+        )}
         {entry.refKind === "upstream" && (
           <Link
             to="/import"
@@ -110,9 +121,12 @@ export function LibraryPage() {
     <div className="flex flex-col gap-6">
       <header className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-semibold">Library</h1>
-        <Link to="/import" className={buttonClass("primary")}>
-          Import files
-        </Link>
+        <div className="flex flex-wrap gap-2">
+          <NewCardButton />
+          <Link to="/import" className={buttonClass("primary")}>
+            Import files
+          </Link>
+        </div>
       </header>
       <AsyncView atom={libraryAtom} loading="Loading the library…">
         {(lists) =>
