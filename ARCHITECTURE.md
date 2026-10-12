@@ -1218,8 +1218,10 @@ The agent's permission to edit a note or a card module (`agent_editable`) works 
 - `preset`: the scope chain (DATA-MODEL §5.4)
 - `notes`: the cards' notes that are on
 - `mode`: ST-compatible, or our layouts (below)
-- `history`: windows of the path, newest first, until the text read would fill the budget on its own
-- `macros`: the expander for preset and card text, and the path's messages resolved
+- `macros`: the expander for preset and card text
+- `scripts`: the preset's prompt regex scripts, compiled (below)
+- `history`: windows of the path, newest first, until the text read, as the regex scripts leave it, would fill the budget on its own
+- `resolve`: the path's messages resolved, and given to the macros that read the chat
 - `roles`: role projection (DESIGN §5.4)
 - `compose`: ST's prompt manager and budget, with the tail content
 - `messages`: squashing and post-processing
@@ -1272,7 +1274,7 @@ The request maps to Chat Completions per provider kind as ST maps its sources (`
 - "Post-processing": the preset's `postprocess` always applies; in ST it's a connection setting, which a preset changes only when it's bound to the connection.
 - "Reasoning and stops": ST's `reasoning_effort` and `verbosity` for the OpenAI models it lists aren't sent, nor its custom stop strings and logit-bias presets.
 - "Card overrides": ST expands a card's prompt override twice, the second time with `{{original}}`; here it's expanded once, in ST's order (before the preset's prompts), and its first `{{original}}` then becomes the prompt it replaces.
-- "Regex scripts": a script's replacement is expanded before the match is put into it, so text it captures from a message isn't expanded (ST expands after, per match: a random macro in it draws once here). A case-insensitive pattern matches both cases of ASCII letters only, and `u` is dropped where nothing in the pattern needs it. Scripts whose pattern expands macros escaped (`substituteRegex` 2), or that need backtracking, are left out and reported (below).
+- "Regex scripts": a script's replacement is expanded before the match is put into it, so text it captures from a message isn't expanded (ST expands after, per match: a random macro in it draws once here). Their pattern, replacement and trim strings are expanded before the path is read, since the scripts decide how far back it's read: macros in them that read the chat (`{{lastMessage}}`) find it empty. A case-insensitive pattern matches both cases of ASCII letters only, and `u` is dropped where nothing in the pattern needs it. Scripts whose pattern expands macros escaped (`substituteRegex` 2), or that need backtracking, are left out and reported (below).
 - "Several notes at one depth": joined in note id order; ST joins its extension prompts in key order.
 - Not built, so not compared: lorebooks (the `worldInfoBefore` and `worldInfoAfter` markers are empty), regex scripts other than prompt-only ones (ST rewrites stored messages with them as they're sent or received), ST's continue, the author's note, persona positions other than "in the prompt", card modules (they have no placement yet), and ST's power-user switches (`pin_examples`, `strip_examples`, `collapse_newlines`), which stay at their defaults.
 

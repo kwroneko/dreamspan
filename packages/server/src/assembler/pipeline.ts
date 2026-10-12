@@ -12,6 +12,7 @@ import { Context, Effect } from "effect"
 import type { SqlError } from "effect/sql"
 import { makeRegistry, type Registry } from "../registry.ts"
 import type { MacroEnvironment } from "./macros.ts"
+import type { ScriptRunner } from "./regex.ts"
 import type { Composition, Stability } from "./st.ts"
 import type {
   AssembledRequest,
@@ -115,6 +116,13 @@ interface Mode {
   readonly projection: "by_writer" | "alternate" | "perspective"
 }
 
+/** A message's text after the regex scripts, at the depth they ran at. */
+export interface Scripted {
+  readonly text: string
+  readonly volatile: boolean
+  readonly depth: number
+}
+
 /** A message of the path with its role and name in this context. */
 export interface ProjectedEntry {
   readonly entry: HistoryEntry
@@ -141,6 +149,10 @@ export interface Assembly {
   notes?: ReadonlyArray<NoteInput>
   mode?: Mode
   macros?: MacroEnvironment
+  /** The preset's prompt regex scripts, with the time and output they have left. */
+  scripts?: ScriptRunner
+  /** The verbatim messages the history stage read, by version, as the scripts left them. */
+  scripted?: ReadonlyMap<string, Scripted>
   /** The path, root first, as far back as the context could use (`history` stage). */
   history?: ReadonlyArray<HistoryEntry>
   /** Messages of the path not read, older than `history`. */

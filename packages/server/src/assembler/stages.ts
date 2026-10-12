@@ -1,7 +1,7 @@
 // The built-in assembler stages (DESIGN §5.1), registered in order through the stage
 // registry like a plugin's would be. In order:
-//   path, state, cast, model, preset, notes, mode, history, macros, roles, compose,
-//   messages, prefill, breakpoints, request
+//   path, state, cast, model, preset, notes, mode, macros, scripts, history, resolve, roles,
+//   compose, messages, prefill, breakpoints, request
 // A single-character chat with ST's layout gets what ST would send for its preset and card
 // (ST-compatible mode, DESIGN §1.2); anything else gets our layouts (DESIGN §5.2–§5.4).
 import type { ChatMessage } from "@rp/shared/macros/context.ts"
@@ -18,6 +18,7 @@ import {
   type Cast,
   need,
   type ProjectedEntry,
+  type Scripted,
   type StageRegistry
 } from "./pipeline.ts"
 import {
@@ -203,38 +204,6 @@ const modeStage = sync("mode", (assembly) => {
   }
 })
 
-/**
- * The path, newest first, as far back as the budget could use: whole windows are read
- * until the text read would fill the budget on its own. The budget then decides exactly
- * which messages go (`compose`).
- */
-const historyStage: AssemblerStage = {
-  id: "history",
-  run: (assembly) =>
-    Effect.gen(function* () {
-      const sources = yield* AssemblySources
-      const target = need(assembly, "target")
-      const budget = contextBudget(assembly)
-      let entries: ReadonlyArray<HistoryEntry> = []
-      let leaf = target.parentSlotId
-      let tokens = 0
-      while (leaf !== null && tokens < budget) {
-        const window = yield* sources.history(leaf, HISTORY_WINDOW)
-        entries = [...window.entries, ...entries]
-        // A template's stored text isn't what it expands to, which may be nothing: it counts as
-        // nothing here, so it never ends the read early.
-        tokens += window.entries.reduce(
-          (n, e) => n + (e.inContext && e.macroMode === "verbatim" ? tokensOf({ content: e.content }) : 0),
-          0
-        )
-        leaf = window.older
-      }
-      assembly.history = entries
-      assembly.historyOmitted = leaf === null ? 0 : (entries[0]?.depth ?? target.depth)
-      return assembly
-    })
-}
-
 /** The bindings macros see (DESIGN §5.3): ST's names for one character, the cast's otherwise. */
 const namesFor = (assembly: Assembly): Names => {
   const state = need(assembly, "state")
@@ -260,19 +229,17 @@ const namesFor = (assembly: Assembly): Names => {
 
 /**
  * Macro expansion by source (DESIGN §5.6): sets up the expander the later stages use for
- * preset and card text, and resolves the path's messages, verbatim unless they're templates.
+ * preset and card text. The path's messages come in once they're read (`resolve`).
  */
 const macrosStage = sync("macros", (assembly) => {
   const cast = need(assembly, "cast")
   const preset = need(assembly, "preset").doc
-  const history = need(assembly, "history")
-  const names = namesFor(assembly)
   // Preset text reads one card's fields: ST's character, or the first of the cast, which
   // stays the same from turn to turn.
   const card = cast.characters[0]
   const firstNote = assembly.notes?.find((n) => n.first && n.doc.owner.card === card?.entity)
-  const env = makeMacroEnvironment(assembly, {
-    names,
+  assembly.macros = makeMacroEnvironment(assembly, {
+    names: namesFor(assembly),
     card: cardFields(card, cast.personas[0], firstNote?.doc.content),
     messages: [],
     model: assembly.model?.key ?? "",
@@ -283,11 +250,72 @@ const macrosStage = sync("macros", (assembly) => {
     events: need(assembly, "events"),
     variables: need(assembly, "state").vars
   })
+})
+
+const scriptsStage = sync("scripts", (assembly) => {
+  assembly.scripts = promptScripts(assembly)
+})
+
+const placementOf = (entry: HistoryEntry, cast: Cast) =>
+  sideOf(entry, cast) === "user" ? PLACEMENT.userInput : PLACEMENT.aiOutput
+
+/**
+ * The path, newest first, as far back as the budget could use: whole windows are read
+ * until the text read, as the regex scripts leave it, would fill the budget on its own.
+ * The budget then decides exactly which messages go (`compose`).
+ */
+const historyStage: AssemblerStage = {
+  id: "history",
+  run: (assembly) =>
+    Effect.gen(function* () {
+      const sources = yield* AssemblySources
+      const target = need(assembly, "target")
+      const cast = need(assembly, "cast")
+      const runner = need(assembly, "scripts")
+      const budget = contextBudget(assembly)
+      const scripted = new Map<string, Scripted>()
+      let entries: ReadonlyArray<HistoryEntry> = []
+      let leaf = target.parentSlotId
+      let tokens = 0
+      let depth = 0
+      while (leaf !== null && tokens < budget) {
+        const window = yield* sources.history(leaf, HISTORY_WINDOW)
+        entries = [...window.entries, ...entries]
+        // A template's stored text isn't what it expands to, which may be nothing: it counts as
+        // nothing here, so it never ends the read early.
+        const verbatim: Array<{ readonly entry: HistoryEntry; readonly depth: number }> = []
+        for (const entry of [...window.entries].reverse()) {
+          if (!entry.inContext) continue
+          if (entry.macroMode === "verbatim") verbatim.push({ entry, depth })
+          depth++
+        }
+        const results = applyScripts(
+          assembly,
+          runner,
+          verbatim.map(({ entry, depth }) => ({ text: entry.content, placement: placementOf(entry, cast), depth }))
+        )
+        verbatim.forEach(({ entry, depth }, i) => {
+          scripted.set(entry.versionId, { ...results[i]!, depth })
+          tokens += tokensOf({ content: results[i]!.text })
+        })
+        leaf = window.older
+      }
+      assembly.history = entries
+      assembly.historyOmitted = leaf === null ? 0 : (entries[0]?.depth ?? target.depth)
+      assembly.scripted = scripted
+      return assembly
+    })
+}
+
+/** The path's messages, verbatim unless they're templates, and the chat macros read from them. */
+const resolveStage = sync("resolve", (assembly) => {
+  const cast = need(assembly, "cast")
+  const env = need(assembly, "macros")
   // Older messages that weren't read still count for the macros that number messages.
   const omitted: ChatMessage = { text: "", fromUser: false, system: true }
   const messages: Array<ChatMessage> = Array.from({ length: assembly.historyOmitted ?? 0 }, () => omitted)
   const resolved: Array<{ entry: HistoryEntry; piece: number }> = []
-  for (const entry of history) {
+  for (const entry of need(assembly, "history")) {
     if (!entry.inContext) {
       messages.push(omitted)
       continue
@@ -305,7 +333,6 @@ const macrosStage = sync("macros", (assembly) => {
     })
   }
   env.setMessages(messages)
-  assembly.macros = env
   assembly.resolved = resolved
 })
 
@@ -687,15 +714,22 @@ const composeStage = sync("compose", (assembly) => {
 
   const groupNames = !mode.st
   const projected = need(assembly, "projected")
-  const scripted = applyScripts(
+  // The history stage ran the scripts on the verbatim messages it read; templates run here.
+  const read = need(assembly, "scripted")
+  const scripted: Array<{ readonly text: string; readonly volatile: boolean } | undefined> = projected.map((p, i) =>
+    read.get(p.entry.versionId)?.depth === projected.length - 1 - i ? read.get(p.entry.versionId) : undefined
+  )
+  const rest = scripted.flatMap((s, i) => (s ? [] : [i]))
+  const ran = applyScripts(
     assembly,
-    promptScripts(assembly),
-    projected.map((p, i) => ({
-      text: env.text(p.piece),
-      placement: sideOf(p.entry, cast) === "user" ? PLACEMENT.userInput : PLACEMENT.aiOutput,
+    need(assembly, "scripts"),
+    rest.map((i) => ({
+      text: env.text(projected[i]!.piece),
+      placement: placementOf(projected[i]!.entry, cast),
       depth: projected.length - 1 - i
     }))
   )
+  rest.forEach((index, i) => (scripted[index] = ran[i]))
   const chat = injectInChat(
     projected.map((p, i) => chatLine(assembly, p, groupNames, scripted[i]!)),
     collection.filter((p) => p.injection_position === "absolute"),
@@ -824,8 +858,10 @@ const builtinStages: ReadonlyArray<AssemblerStage> = [
   presetStage,
   notesStage,
   modeStage,
-  historyStage,
   macrosStage,
+  scriptsStage,
+  historyStage,
+  resolveStage,
   rolesStage,
   composeStage,
   messagesStage,

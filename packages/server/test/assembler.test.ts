@@ -95,6 +95,23 @@ const assembled = (fixture: AssemblyFixture, options?: Parameters<typeof assembl
 
 const contents = (snapshot: ContextSnapshot) => snapshot.request.messages.map((m) => `${m.role}: ${m.content}`)
 
+/** A prompt-only regex script on the model's messages, as ST's preset file has it. */
+const regexScript = (id: string, fields: Record<string, unknown>) => ({
+  id,
+  scriptName: id,
+  replaceString: "",
+  trimStrings: [],
+  placement: [2],
+  disabled: false,
+  markdownOnly: false,
+  promptOnly: true,
+  runOnEdit: false,
+  substituteRegex: 0,
+  minDepth: null,
+  maxDepth: null,
+  ...fields
+})
+
 const at = (depth: number | null, data: StateEventData): PositionedEvent => ({ depth, event: { scope: null, data } })
 
 const note = (content: string, depth: number, role: "system" | "user" | "assistant", first = true): NoteInput => ({
@@ -271,27 +288,12 @@ describe("the context assembler", () => {
   })
 
   it("runs the preset's prompt-only regex scripts once the user approved them (ARCHITECTURE §9)", async () => {
-    const script = (id: string, fields: Record<string, unknown>) => ({
-      id,
-      scriptName: id,
-      replaceString: "",
-      trimStrings: [],
-      placement: [2],
-      disabled: false,
-      markdownOnly: false,
-      promptOnly: true,
-      runOnEdit: false,
-      substituteRegex: 0,
-      minDepth: null,
-      maxDepth: null,
-      ...fields
-    })
     const doc = preset({
       extensions: {
         regex_scripts: [
-          script("strip", { findRegex: "/<thinking>[\\s\\S]*?<\\/thinking>/g", maxDepth: 1 }),
-          script("wrap", { findRegex: "/(late)/", replaceString: "[{{match}}|$1|{{char}}]", trimStrings: ["t"] }),
-          script("backreference", { findRegex: "/(a)\\1/" })
+          regexScript("strip", { findRegex: "/<thinking>[\\s\\S]*?<\\/thinking>/g", maxDepth: 1 }),
+          regexScript("wrap", { findRegex: "/(late)/", replaceString: "[{{match}}|$1|{{char}}]", trimStrings: ["t"] }),
+          regexScript("backreference", { findRegex: "/(a)\\1/" })
         ]
       }
     })
@@ -318,7 +320,7 @@ describe("the context assembler", () => {
       assembled({
         ...fixture,
         messages: [{ side: "assistant", content }, ...fixture.messages],
-        preset: { ...preset({ extensions: { regex_scripts: [script("heavy", fields)] } }), regex_approved: true }
+        preset: { ...preset({ extensions: { regex_scripts: [regexScript("heavy", fields)] } }), regex_approved: true }
       })
     const nested = `${"(".repeat(300)}a*${")*".repeat(300)}`
     const slow = await withScript("a".repeat(43_000), { findRegex: `/${nested}/g` })
@@ -326,11 +328,11 @@ describe("the context assembler", () => {
       "The regex scripts ran out of time (200 ms for one context): the rest of the messages are sent without them."
     )
     // And so is the text they make: the script stops, the context doesn't.
-    const growing = await withScript("a".repeat(3_000), { findRegex: "/a/g", replaceString: "b".repeat(200_000) })
+    const growing = await withScript("q".repeat(3_000), { findRegex: "/q/g", replaceString: "b".repeat(200_000) })
     expect(growing.issues.map((i) => i.message)).toContain(
       'The regex script "heavy" was skipped where it failed: its replacements made more text than one context allows.'
     )
-    expect(contents(growing)).toContain(`assistant: ${"a".repeat(3_000)}`)
+    expect(contents(growing)).toContain(`assistant: ${"q".repeat(3_000)}`)
   })
 
   it("expands a card's prompt override before the preset, and fills its {{original}}", async () => {
@@ -371,6 +373,19 @@ describe("the context assembler", () => {
       chat({ messages, preset: preset({ openai_max_context: 4000, openai_max_tokens: 300 }) })
     )
     expect(contents(snapshot).filter((m) => m.includes("old ")).length).toBe(30)
+  })
+
+  it("reads the path as far as the text the regex scripts leave fills the budget", async () => {
+    const messages = Array.from({ length: 400 }, (_, i): FixtureMessage => ({
+      side: "assistant",
+      content: `<thinking>${"x".repeat(400)}</thinking>reply ${i}`
+    }))
+    const doc = preset({
+      extensions: { regex_scripts: [regexScript("strip", { findRegex: "/<thinking>[\\s\\S]*?<\\/thinking>/g" })] }
+    })
+    const snapshot = await assembled(chat({ messages, preset: { ...doc, regex_approved: true } }))
+    expect(contents(snapshot).filter((m) => m.startsWith("assistant: reply ")).length).toBe(400)
+    expect(snapshot.issues).toEqual([])
   })
 
   it("ends with the one-turn direction, as typed (DESIGN §2.2)", async () => {
