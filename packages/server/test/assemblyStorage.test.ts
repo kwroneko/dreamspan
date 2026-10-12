@@ -204,8 +204,8 @@ describe("context assembly from the database", () => {
 
   it.live("builds the same context again from the database and the values drawn (invariant 6)", () =>
     Effect.gen(function* () {
-      const { writer, userId, preset, state, assemble } = yield* setup()
-      yield* writer.EditRef({
+      const { writer, reader, userId, preset, mira, sent, state, assemble } = yield* setup()
+      const edited = yield* writer.EditRef({
         userId,
         refId: preset.ref.id,
         doc: {
@@ -222,6 +222,42 @@ describe("context assembly from the database", () => {
       const first = yield* assemble()
       const again = yield* assemble(userId, first.frozen)
       assert.deepStrictEqual(again, first)
+
+      // The chat and the library change after it: the snapshot's pins still read what it read.
+      yield* writer.AmendVersion({
+        userId,
+        versionId: sent.version.id,
+        content: "The bridge held.",
+        expectedRowVersion: 1
+      })
+      yield* writer.EditRef({
+        userId,
+        refId: mira.ref.id,
+        doc: cardDoc("Mira", "{{char}} burns the ledger.") as never,
+        expectedRowVersion: mira.ref.rowVersion,
+        message: null,
+        commitDraft: null
+      })
+      yield* writer.EditRef({
+        userId,
+        refId: preset.ref.id,
+        doc: presetDoc as never,
+        expectedRowVersion: edited.ref.rowVersion,
+        message: null,
+        commitDraft: null
+      })
+      yield* state({ key: "macro.binding", value: { name: "user", value: "Captain" } }, sent.slotId)
+      const now = yield* assemble(userId, first.frozen)
+      assert.notDeepEqual(texts(now), texts(first))
+      const rebuilt = yield* reader.RebuildContext({ userId, snapshot: JSON.stringify(first) })
+      assert.deepStrictEqual(JSON.parse(rebuilt.snapshot), first)
+
+      // Only by the chat's owner.
+      const other = yield* writer.EnsureUser({ handle: "bo", displayName: "bo" })
+      const refused = yield* Effect.flip(
+        reader.RebuildContext({ userId: other.id as UserId, snapshot: JSON.stringify(first) })
+      )
+      assert.strictEqual(refused._tag, "NotFound")
     }).pipe(Effect.provide(database()))
   )
 

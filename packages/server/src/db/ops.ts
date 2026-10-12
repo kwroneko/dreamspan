@@ -1501,7 +1501,8 @@ export class ReadOps extends RpcGroup.make(
    * The context for a version being generated, built by the assembler's stages from this one
    * read transaction: a context snapshot (assembler/types.ts) as JSON text, which the main
    * thread only passes on to be stored, and, apart, what generating needs of it
-   * (`Generation` in assembler/types.ts). `frozen` rebuilds a snapshot taken before (invariant 6).
+   * (`Generation` in assembler/types.ts), with what its sources read, pinned. `frozen` passes
+   * back the values random and time macros drew.
    */
   Rpc.make("AssembleContext", {
     payload: {
@@ -1514,6 +1515,15 @@ export class ReadOps extends RpcGroup.make(
       frozen: Schema.NullOr(Schema.Record(Schema.String, Schema.Record(Schema.String, Schema.String)))
     },
     success: Schema.Struct({ snapshot: Schema.String, generation: Schema.String }),
+    error: Schema.Union([NotFound, AssemblyFailed, StorageError])
+  }),
+  /**
+   * A context built again from a snapshot taken before, reading what its sources pinned
+   * (`SourcePins` in assembler/types.ts) rather than the chat as it is now (invariant 6).
+   */
+  Rpc.make("RebuildContext", {
+    payload: { userId: UserId, snapshot: Schema.String },
+    success: Schema.Struct({ snapshot: Schema.String }),
     error: Schema.Union([NotFound, AssemblyFailed, StorageError])
   }),
   /** The user's generation defaults; one naming something gone reads as none. */

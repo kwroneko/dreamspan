@@ -11,14 +11,17 @@ import { NotFound } from "@rp/shared/errors.ts"
 import { resolveModel } from "@rp/shared/providers.ts"
 import { FoldableEvent } from "@rp/shared/state.ts"
 import { Effect, Layer, Schema } from "effect"
-import type { SqlClient } from "effect/sql"
+import type { SqlClient, SqlError } from "effect/sql"
 import { AssemblySources, type PositionedEvent } from "../assembler/pipeline.ts"
 import {
   AssemblyFailed,
   type CardInput,
   type HistoryEntry,
   type NoteInput,
-  type PresetInput
+  type PresetInput,
+  type SnapshotInputs,
+  type SourcePins,
+  type Target
 } from "../assembler/types.ts"
 import { importStPreset } from "../formats/preset.ts"
 import {
@@ -69,6 +72,7 @@ interface HistoryRow {
   readonly version_count: number
   readonly first_writer: string
   readonly first_origin: string
+  readonly amend_count: number
 }
 
 interface Settings {
@@ -78,7 +82,31 @@ interface Settings {
   readonly versionId: string
 }
 
-export const sqlSources = (sql: SqlClient.SqlClient, { userId, chatId, slotId, versionId }: Settings) => {
+/** A snapshot to read again: its pins and its inputs. */
+interface Replay {
+  readonly pins: SourcePins
+  readonly inputs: SnapshotInputs
+}
+
+/** Why a snapshot can't be read again. */
+const unpinned = (what: string) =>
+  new AssemblyFailed({
+    reason: "invalid_document",
+    message: `The context can't be built again: ${what} it was built from is gone.`
+  })
+
+const keyOf = (...args: ReadonlyArray<unknown>) => JSON.stringify(args)
+
+/**
+ * The sources over the database, and what they read, pinned (`SourcePins`). Given a
+ * snapshot's pins, they read those again instead: the same events, versions at the same
+ * amend, the same revisions, the model and preset revision the snapshot recorded.
+ */
+export const sqlSources = (
+  sql: SqlClient.SqlClient,
+  { userId, chatId, slotId, versionId }: Settings,
+  replay?: Replay
+) => {
   // The user's defaults, read once for the model and the preset both.
   let readOnce: GenerationDefaults | undefined
   const defaults = Effect.suspend(() =>
@@ -154,7 +182,15 @@ export const sqlSources = (sql: SqlClient.SqlClient, { userId, chatId, slotId, v
       return { ref: row.ref, revision: row.revision, scope, doc } satisfies PresetInput
     })
 
-  return Layer.succeed(AssemblySources)({
+  const pins = {
+    target: null as Target | null,
+    events: [] as Array<SourcePins["events"][number]>,
+    history: [] as Array<SourcePins["history"][number]>,
+    cards: [] as Array<SourcePins["cards"][number]>,
+    notes: [] as Array<SourcePins["notes"][number]>
+  }
+
+  const live = AssemblySources.of({
     target: sql<{
       depth: number
       parent_slot_id: string | null
@@ -179,19 +215,30 @@ export const sqlSources = (sql: SqlClient.SqlClient, { userId, chatId, slotId, v
               direction: row.direction
             })
           : Effect.fail(new NotFound({ entity: "version", id: versionId }))
+      ),
+      Effect.tap((target) =>
+        Effect.sync(() => {
+          pins.target = target
+        })
       )
     ),
 
     // The events at `at` (StateEventsAt's query), with the depth of the message each follows.
     events: (at) =>
       Effect.gen(function* () {
-        const rows = yield* sql<{ key: string; scope: string | null; value_json: string; depth: number | null }>`
+        const rows = yield* sql<{
+          id: string
+          key: string
+          scope: string | null
+          value_json: string
+          depth: number | null
+        }>`
           WITH RECURSIVE path(id) AS (
             SELECT id FROM slots WHERE id = ${at} AND chat_id = ${chatId} AND ${owned}
             UNION ALL
             SELECT s.parent_slot_id FROM slots s JOIN path p ON s.id = p.id WHERE s.parent_slot_id IS NOT NULL
           )
-          SELECT e.key, e.scope, e.value_json, s.depth
+          SELECT e.id, e.key, e.scope, e.value_json, s.depth
           FROM state_events e
           LEFT JOIN path p ON p.id = e.slot_id
           LEFT JOIN slots s ON s.id = p.id
@@ -201,15 +248,13 @@ export const sqlSources = (sql: SqlClient.SqlClient, { userId, chatId, slotId, v
           ORDER BY coalesce(s.depth, -1), e.seq`
         const events = yield* Effect.forEach(rows, (row) =>
           decodeEvent({ scope: row.scope, data: { key: row.key, value: JSON.parse(row.value_json) } }).pipe(
-            Effect.map((event) => ({ ...event, depth: row.depth })),
+            Effect.map((event) => ({ ...event, depth: row.depth, id: row.id })),
             Effect.mapError(() => invalid("A state event"))
           )
         )
-        const kept = yield* withoutPurged(sql, events)
-        return kept.map(({ scope, data, ...rest }): PositionedEvent => ({
-          depth: (rest as { depth: number | null }).depth,
-          event: { scope, data }
-        }))
+        const kept = (yield* withoutPurged(sql, events)) as typeof events
+        pins.events = kept.map(({ id, depth }) => ({ id, depth }))
+        return kept.map(({ scope, data, depth }): PositionedEvent => ({ depth, event: { scope, data } }))
       }),
 
     history: (leaf, limit) =>
@@ -225,13 +270,14 @@ export const sqlSources = (sql: SqlClient.SqlClient, { userId, chatId, slotId, v
             s.deleted_at IS NOT NULL AS slot_deleted, v.id AS version_id, v.ordinal, v.status,
             v.speaker_entity_id, v.content, v.macro_mode, v.frozen_macros, v.created_at,
             (SELECT count(*) FROM versions c WHERE c.slot_id = s.id AND c.deleted_at IS NULL) AS version_count,
-            f.writer AS first_writer, f.origin AS first_origin
+            f.writer AS first_writer, f.origin AS first_origin,
+            (SELECT count(*) FROM version_history h WHERE h.version_id = v.id) AS amend_count
           FROM path JOIN slots s ON s.id = path.id JOIN versions v ON v.id = s.selected_version_id
           JOIN versions f ON f.id = (SELECT id FROM versions x WHERE x.slot_id = s.id ORDER BY x.ordinal LIMIT 1)
           ORDER BY s.depth`
-        const entries = rows
+        const read = rows
           .filter((row) => row.slot_deleted === 0)
-          .map((row): HistoryEntry => ({
+          .map((row): HistoryEntry & { amends: number } => ({
             slotId: row.slot_id,
             versionId: row.version_id,
             depth: row.depth,
@@ -243,15 +289,25 @@ export const sqlSources = (sql: SqlClient.SqlClient, { userId, chatId, slotId, v
             inContext: row.context_excluded === 0 && row.status !== "failed" && row.content.length > 0,
             sentAt: row.created_at,
             versions: row.version_count,
-            selectedOrdinal: row.ordinal
+            selectedOrdinal: row.ordinal,
+            amends: row.amend_count
           }))
-        return { entries, older: rows[0]?.parent_slot_id ?? null }
+        const older = rows[0]?.parent_slot_id ?? null
+        pins.history.push({ key: keyOf(leaf, limit), older, entries: read.map(({ content: _, ...pinned }) => pinned) })
+        return { entries: read.map(({ amends: _, ...entry }) => entry), older }
       }),
 
     cards: (entities, bindings) =>
       Effect.map(
         Effect.forEach(entities, (entity) => card(entity, bindings[entity])),
-        (cards) => cards.filter((c): c is CardInput => c !== null)
+        (read) => {
+          const cards = read.filter((c): c is CardInput => c !== null)
+          pins.cards.push({
+            key: keyOf(entities, bindings),
+            found: cards.map(({ entity, ref, revision }) => ({ entity, ref, revision }))
+          })
+          return cards
+        }
       ),
 
     notes: (cards, bound) =>
@@ -277,7 +333,16 @@ export const sqlSources = (sql: SqlClient.SqlClient, { userId, chatId, slotId, v
             if (!cards.includes(doc.owner.card)) return []
             return [{ entity: row.entity, revision: pinned ?? row.revision, doc, first } satisfies NoteInput]
           })
-        ).pipe(Effect.map((lists) => lists.flat()))
+        ).pipe(
+          Effect.map((lists) => {
+            const notes = lists.flat()
+            pins.notes.push({
+              key: keyOf(cards, bound),
+              found: notes.map(({ entity, revision, first }) => ({ entity, revision, first }))
+            })
+            return notes
+          })
+        )
       }),
 
     model: (binding) =>
@@ -338,4 +403,122 @@ export const sqlSources = (sql: SqlClient.SqlClient, { userId, chatId, slotId, v
         return { ref: null, revision: null, scope: "builtin", doc: builtinPreset } satisfies PresetInput
       })
   })
+
+  const sources = replay ? replaySources(sql, { userId, chatId }, replay, revisionDoc) : live
+  return {
+    layer: Layer.succeed(AssemblySources)(sources),
+    /** What the sources read; a replay's are the pins it was given. */
+    pins: (): SourcePins => replay?.pins ?? { ...pins, target: pins.target! }
+  }
+}
+
+/** The sources a replay reads: what the pins name, as it was then. */
+const replaySources = (
+  sql: SqlClient.SqlClient,
+  { userId, chatId }: { readonly userId: UserId; readonly chatId: ChatId },
+  { pins, inputs }: Replay,
+  revisionDoc: (
+    revisionId: string,
+    kind: string,
+    entity?: string
+  ) => Effect.Effect<{ entity_id: string; doc_json: string } | undefined, SqlError.SqlError>
+): AssemblySources["Service"] => {
+  const owned = sql`EXISTS (SELECT 1 FROM chats o WHERE o.id = ${chatId} AND o.owner_user_id = ${userId})`
+  const pinned = <A extends { readonly key: string }>(list: ReadonlyArray<A>, key: string, what: string) => {
+    const found = list.find((p) => p.key === key)
+    return found ? Effect.succeed(found) : Effect.fail(unpinned(what))
+  }
+  return {
+    target: sql<{ ok: number }>`SELECT ${owned} AS ok`.pipe(
+      Effect.flatMap(([row]) =>
+        row?.ok ? Effect.succeed(pins.target) : Effect.fail(new NotFound({ entity: "chat", id: chatId }))
+      )
+    ),
+
+    events: () =>
+      Effect.gen(function* () {
+        const ids = pins.events.map((e) => e.id)
+        const rows =
+          ids.length === 0
+            ? []
+            : yield* sql<{ id: string; key: string; scope: string | null; value_json: string }>`
+                SELECT e.id, e.key, e.scope, e.value_json FROM state_events e
+                WHERE e.chat_id = ${chatId} AND ${owned} AND e.id IN ${sql.in(ids)}`
+        const byId = new Map(rows.map((row) => [row.id, row]))
+        return yield* Effect.forEach(pins.events, ({ id, depth }) => {
+          const row = byId.get(id)
+          if (!row) return Effect.fail(unpinned("a state event"))
+          return decodeEvent({ scope: row.scope, data: { key: row.key, value: JSON.parse(row.value_json) } }).pipe(
+            Effect.map((event): PositionedEvent => ({ depth, event })),
+            Effect.mapError(() => invalid("A state event"))
+          )
+        })
+      }),
+
+    history: (leaf, limit) =>
+      Effect.gen(function* () {
+        const window = yield* pinned(pins.history, keyOf(leaf, limit), "part of the chat")
+        const ids = window.entries.map((e) => e.versionId)
+        const rows =
+          ids.length === 0
+            ? []
+            : yield* sql<{ id: string; content: string; amends: number }>`
+                SELECT v.id, v.content, (SELECT count(*) FROM version_history h WHERE h.version_id = v.id) AS amends
+                FROM versions v JOIN slots s ON s.id = v.slot_id
+                WHERE s.chat_id = ${chatId} AND ${owned} AND v.id IN ${sql.in(ids)}`
+        const byId = new Map(rows.map((row) => [row.id, row]))
+        const entries = yield* Effect.forEach(window.entries, ({ amends, ...entry }) =>
+          Effect.gen(function* () {
+            const row = byId.get(entry.versionId)
+            if (!row) return yield* unpinned("a message")
+            if (row.amends === amends) return { ...entry, content: row.content } satisfies HistoryEntry
+            // Amended since: its text then is what the next amend replaced.
+            const [earlier] = yield* sql<{ content: string }>`
+              SELECT content FROM version_history WHERE version_id = ${entry.versionId}
+              ORDER BY id LIMIT 1 OFFSET ${amends}`
+            if (!earlier) return yield* unpinned("a message's earlier text")
+            return { ...entry, content: earlier.content } satisfies HistoryEntry
+          })
+        )
+        return { entries, older: window.older }
+      }),
+
+    cards: (entities, bindings) =>
+      Effect.gen(function* () {
+        const { found } = yield* pinned(pins.cards, keyOf(entities, bindings), "a card")
+        return yield* Effect.forEach(found, ({ entity, ref, revision }) =>
+          Effect.gen(function* () {
+            const row = yield* revisionDoc(revision, "card", entity)
+            if (!row) return yield* unpinned("a card")
+            const doc = yield* decoded<CardDoc>(decodeCard(JSON.parse(row.doc_json)), "A card")
+            return { entity, ref, revision, doc } satisfies CardInput
+          })
+        )
+      }),
+
+    notes: (cards, bound) =>
+      Effect.gen(function* () {
+        const { found } = yield* pinned(pins.notes, keyOf(cards, bound), "a note")
+        return yield* Effect.forEach(found, ({ entity, revision, first }) =>
+          Effect.gen(function* () {
+            const row = yield* revisionDoc(revision, "note", entity)
+            if (!row) return yield* unpinned("a note")
+            const doc = yield* decoded<NoteDoc>(decodeNote(JSON.parse(row.doc_json)), "A note")
+            return { entity, revision, doc, first } satisfies NoteInput
+          })
+        )
+      }),
+
+    model: () => Effect.succeed(inputs.model),
+
+    preset: () =>
+      Effect.gen(function* () {
+        const { ref, revision, scope } = inputs.preset
+        if (revision === null) return { ref, revision, scope, doc: builtinPreset } satisfies PresetInput
+        const row = yield* revisionDoc(revision, "preset")
+        if (!row) return yield* unpinned("the preset")
+        const doc = yield* decoded<PresetDoc>(decodePreset(JSON.parse(row.doc_json)), "The preset")
+        return { ref, revision, scope, doc } satisfies PresetInput
+      })
+  }
 }

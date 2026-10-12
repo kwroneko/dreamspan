@@ -94,7 +94,7 @@ export interface Issue {
 }
 
 /** What a context was built from: enough to build it again from the database (invariant 6). */
-interface SnapshotInputs {
+export interface SnapshotInputs {
   readonly chatId: string
   readonly slotId: string
   readonly versionId: string
@@ -121,8 +121,37 @@ export interface ContextSnapshot {
   readonly frozen: Readonly<Record<string, FrozenValues>>
   /** Variable writes the preset's and cards' macros made, in order, to record as state. */
   readonly effects: ReadonlyArray<VariableEffect>
+  /** What the sources read, by id and revision, so the context can be read again exactly. */
+  readonly sources?: SourcePins
   /** Variable writes of template messages expanded for the first time, to record at their positions. */
   readonly templateWrites?: ReadonlyArray<{ readonly version: string; readonly writes: ReadonlyArray<VariableEffect> }>
+}
+
+/** A message of the path as it was read, but its text, which its version and amend count pin. */
+type PinnedEntry = Omit<HistoryEntry, "content"> & { readonly amends: number }
+
+/**
+ * What one context's sources read, by id and revision (DATA-MODEL §15, invariant 6): the
+ * state events, the path's versions, the cards' and notes' revisions, each read keyed by
+ * what it asked for. With the snapshot's inputs (the model, the preset's revision), it's
+ * everything the pipeline read, so it can be read again as it was.
+ */
+export interface SourcePins {
+  readonly target: Target
+  readonly events: ReadonlyArray<{ readonly id: string; readonly depth: number | null }>
+  readonly history: ReadonlyArray<{
+    readonly key: string
+    readonly older: string | null
+    readonly entries: ReadonlyArray<PinnedEntry>
+  }>
+  readonly cards: ReadonlyArray<{
+    readonly key: string
+    readonly found: ReadonlyArray<{ readonly entity: string; readonly ref: string | null; readonly revision: string }>
+  }>
+  readonly notes: ReadonlyArray<{
+    readonly key: string
+    readonly found: ReadonlyArray<{ readonly entity: string; readonly revision: string; readonly first: boolean }>
+  }>
 }
 
 /** What generating needs of a snapshot, sent to the main thread apart from it. */
