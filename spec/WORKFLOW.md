@@ -114,4 +114,15 @@ Only one stream, the main one, edits these. Other streams write their ARCHITECTU
 
 ## 7. Reviewer comparison
 
-Results of running Codex reviewers (GPT-6.1-Sol, GPT-6-Astra) and Opus reviewers on the same branches. Nothing yet.
+Results of running Codex reviewers (GPT-6.1-Sol, GPT-6-Astra) and Opus reviewers on the same branches. Both Codex reviewers ran at default effort through `codex exec`.
+
+| Branch | Opus | Sol | Astra |
+|---|---|---|---|
+| L (ST folder importer), after an Opus review had found and fixed 9 | 9, before the others ran | Crashed at 18 min ("model at capacity") with no report, but left 7 adversarial tests, 6 failing (5 not found by Astra) | 8 min, 5 reproduced findings (1 high) |
+| K (chat setup, send queue) | none | 21 min, 7 medium, all with repro tests | 18 min, 7 (2 high); 4 shared with Sol |
+
+So far:
+- Each Codex reviewer found real defects that the other missed. On K, three of each reviewer's seven findings were unique to it.
+- Both found defects after an Opus review was already done (L).
+- Sol writes repro tests for everything. Astra's reports state the method less often.
+- Sol can fail at capacity. Astra is faster here, not slower.
