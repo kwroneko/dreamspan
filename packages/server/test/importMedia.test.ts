@@ -1,11 +1,13 @@
 // Media files on disk and refused imports (ARCHITECTURE.md §11.1, §11.4): an import that's
 // refused leaves no file behind, and the sweep deletes the files no row names.
 import {
+  copyFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
+  renameSync,
   symlinkSync,
   utimesSync,
   writeFileSync
@@ -130,15 +132,57 @@ describe("the sweep, against an import in progress and links", () => {
       const deleted = yield* sweepMedia(dir, new Set(), {
         ...options,
         isRecorded: () => Effect.sync(() => committed),
-        beforeRemoving: () =>
+        between: (step) =>
           Effect.sync(() => {
-            committed = true
+            if (step === "checked") committed = true
           })
       })
       assert.strictEqual(deleted, 0)
       assert.isTrue(existsSync(join(dir, mediaPath(sha))))
       // Without the commit, it goes.
       assert.strictEqual(yield* sweepMedia(dir, new Set(), options), 1)
+    })
+  )
+
+  it.live("a file recorded after the sweep moved it aside is moved back", () =>
+    Effect.gen(function* () {
+      const dir = fresh()
+      yield* storeMedia(dir, sha, bytes)
+      old(join(dir, mediaPath(sha)))
+      let committed = false
+      const deleted = yield* sweepMedia(dir, new Set(), {
+        ...options,
+        isRecorded: () => Effect.sync(() => committed),
+        between: (step) =>
+          Effect.sync(() => {
+            if (step === "moved aside") committed = true
+          })
+      })
+      assert.strictEqual(deleted, 0)
+      assert.isTrue(existsSync(join(dir, mediaPath(sha))))
+      assert.deepStrictEqual(mediaFiles(dir), [join(dir, mediaPath(sha))])
+    })
+  )
+
+  it.live("after a crash between moving a file aside and deleting it, a recorded file comes back", () =>
+    Effect.gen(function* () {
+      const dir = fresh()
+      const kept = "ab".padEnd(64, "1")
+      const twice = "ab".padEnd(64, "2")
+      const gone = "ab".padEnd(64, "3")
+      for (const hash of [kept, twice, gone]) yield* storeMedia(dir, hash, bytes)
+      const folder = join(dir, "media", "ab")
+      // Each moved aside, as a sweep does; the server stops before the sweep deletes them.
+      const aside = (hash: string) => join(folder, `${hash}.${uuidv7()}.swept`)
+      const keptAside = aside(kept)
+      const goneAside = aside(gone)
+      renameSync(join(folder, kept), keptAside)
+      copyFileSync(join(folder, twice), aside(twice))
+      renameSync(join(folder, gone), goneAside)
+      // Recorded: kept and twice. Twice's own file is still there; gone isn't recorded.
+      const recorded = new Set([kept, twice])
+      yield* sweepMedia(dir, recorded, { ...options, isRecorded: (hash) => Effect.succeed(recorded.has(hash)) })
+      assert.deepStrictEqual(mediaFiles(dir).sort(), [join(folder, kept), join(folder, twice)])
     })
   )
 

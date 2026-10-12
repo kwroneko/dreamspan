@@ -43,11 +43,16 @@ interface SweepOptions {
   readonly pending: { readonly has: (sha256: string) => boolean }
   /** Whether a row names the file, asked again just before it goes. */
   readonly isRecorded: (sha256: string) => Effect.Effect<boolean, unknown>
-  /** Runs between a candidate's checks and its removal; for tests of what happens meanwhile. */
-  readonly beforeRemoving?: (path: string) => Effect.Effect<void>
+  /**
+   * Runs after a candidate's first checks, and again once it's moved aside; for tests of
+   * what happens meanwhile.
+   */
+  readonly between?: (step: "checked" | "moved aside", path: string) => Effect.Effect<void>
 }
 
 const HASH = /^[0-9a-f]{64}$/
+/** A file the sweep moved aside: its hash, a random id, and the suffix. */
+const SWEPT = /^([0-9a-f]{64})\.[0-9a-f-]{36}\.swept$/
 
 /**
  * Files an import wrote but never recorded, because its transaction failed or the server
@@ -57,6 +62,9 @@ const HASH = /^[0-9a-f]{64}$/
  * - An import may record a file while the sweep runs, so a candidate is checked again just
  *   before it goes: not held by an import in progress, not recorded. It's then moved aside,
  *   checked once more, and deleted, or moved back if an import took it meanwhile.
+ * - A file moved aside by a sweep that stopped there (the server died) is put back if its
+ *   hash is recorded or an import holds it, unless the file is back already; any other is
+ *   deleted. Every sweep does this first, the one at startup included.
  * - Links are never followed: only plain folders and files under the media folder, itself
  *   not a link, are looked at, and every path deleted must resolve inside it.
  * Resolves to how many files were deleted.
@@ -92,11 +100,23 @@ export const sweepMedia = (dataDir: string, recorded: ReadonlySet<string>, optio
       for (const name of yield* list(folderPath)) {
         const path = join(folderPath, name)
         const info = yield* kind(path)
-        if (info === null || !info.isFile() || info.mtimeMs > cutoff) continue
-        if (!resolve(path).startsWith(root + sep)) continue
+        if (info === null || !info.isFile() || !resolve(path).startsWith(root + sep)) continue
+        if (name.endsWith(".swept")) {
+          const hash = SWEPT.exec(name)?.[1]
+          const original = hash === undefined ? null : join(folderPath, hash)
+          if (hash !== undefined && original !== null && (recorded.has(hash) || (yield* wanted(hash)))) {
+            if ((yield* kind(original)) === null) yield* Effect.promise(() => rename(path, original))
+            else yield* Effect.promise(() => rm(path, { force: true }))
+          } else {
+            yield* Effect.promise(() => rm(path, { force: true }))
+            deleted++
+          }
+          continue
+        }
+        if (info.mtimeMs > cutoff) continue
         const sha256 = HASH.test(name) ? name : null
         if (sha256 !== null && (recorded.has(sha256) || options.pending.has(sha256))) continue
-        if (options.beforeRemoving) yield* options.beforeRemoving(path)
+        if (options.between) yield* options.between("checked", path)
         if (yield* wanted(sha256)) continue
         const aside = `${path}.${randomUUID()}.swept`
         if (
@@ -108,6 +128,7 @@ export const sweepMedia = (dataDir: string, recorded: ReadonlySet<string>, optio
           ))
         )
           continue
+        if (options.between) yield* options.between("moved aside", aside)
         if (yield* wanted(sha256)) {
           // An import that found the file gone wrote its own copy, which is the same bytes.
           yield* Effect.promise(() => rename(aside, path).catch(() => rm(aside, { force: true })))
