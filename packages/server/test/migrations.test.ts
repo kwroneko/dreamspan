@@ -47,3 +47,49 @@ describe("0006_credentials", () => {
     }).pipe(Effect.provide(writerConnection(join(tempDir("mig"), "db.sqlite"))))
   )
 })
+
+describe("0013_draft_sessions and 0014_deleted_subtree_roots", () => {
+  it.effect("keep drafts as they were and take purged slots with nothing live below for branches", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(before("0013_draft_sessions")) })
+      yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES ('u', 'u', 'u', 'admin', 1)`
+      yield* sql`INSERT INTO chats (id, owner_user_id, kind, status, created_at) VALUES ('chat', 'u', 'rp', 'active', 1)`
+      yield* sql`INSERT INTO lanes (id, chat_id, name, created_at) VALUES ('lane', 'chat', 'main', 1)`
+      yield* sql`INSERT INTO drafts (id, user_id, target_kind, target_id, field, content, status, row_version, created_at, updated_at)
+        VALUES ('d', 'u', 'composer', 'chat', '', 'typed', 'active', 4, 1, 2)`
+      yield* sql`INSERT INTO draft_history (draft_id, seq, kind, first_at, at, start, removed, inserted)
+        VALUES ('d', 1, 'edit', 1, 2, 0, '', 'typed')`
+      // As the earlier code left them: a branch purged after its only reply was deleted on its
+      // own (no shared mark), and a message purged with its reply live.
+      const slots = [
+        ["root", null, 0, null, null, null],
+        ["branch", "root", 1, "gone-branch", 10, 11],
+        ["reply", "branch", 2, "reply-item", 9, null],
+        ["message", "root", 1, "gone-message", 10, 11],
+        ["live", "message", 2, null, null, null]
+      ] as const
+      // A version and its slot point at each other: one transaction, for the deferred keys.
+      yield* sql.withTransaction(
+        Effect.forEach(slots, ([id, parent, depth, mark, deleted, purged]) =>
+          Effect.gen(function* () {
+            yield* sql`INSERT INTO versions (id, slot_id, ordinal, status, writer, content, macro_mode, origin, created_at, updated_at)
+          VALUES (${`v-${id}`}, ${id}, 0, 'complete', 'human', '', 'verbatim', 'user_written', 1, 1)`
+            yield* sql`INSERT INTO slots (id, chat_id, lane_id, parent_slot_id, depth, selected_version_id, created_at, bin_item_id, deleted_at, purged_at)
+          VALUES (${id}, 'chat', 'lane', ${parent}, ${depth}, ${`v-${id}`}, 1, ${mark}, ${deleted}, ${purged})`
+          })
+        )
+      )
+      yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(migrations) })
+
+      const [draft] = yield* sql<{ session: number; text_version: number }>`SELECT session, text_version FROM drafts`
+      assert.deepStrictEqual(draft, { session: 1, text_version: 4 })
+      assert.deepStrictEqual(yield* sql`SELECT displaced FROM draft_history`, [{ displaced: 0 }])
+      const barriers = yield* sql<{ id: string }>`SELECT id FROM slots WHERE branch_deleted = 1`
+      assert.deepStrictEqual(
+        barriers.map((row) => row.id),
+        ["branch"]
+      )
+    }).pipe(Effect.provide(writerConnection(join(tempDir("mig"), "db.sqlite"))))
+  )
+})

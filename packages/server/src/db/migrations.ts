@@ -69,7 +69,18 @@ export const migrations = {
     `UPDATE slots AS s SET branch_deleted = 1 WHERE s.deleted_at IS NOT NULL AND s.bin_item_id IS NOT NULL
       AND EXISTS (SELECT 1 FROM slots child INDEXED BY slots_parent
         WHERE child.parent_slot_id = s.id AND child.bin_item_id = s.bin_item_id)
-      AND NOT EXISTS (SELECT 1 FROM slots parent WHERE parent.id = s.parent_slot_id AND parent.bin_item_id = s.bin_item_id)`
+      AND NOT EXISTS (SELECT 1 FROM slots parent WHERE parent.id = s.parent_slot_id AND parent.bin_item_id = s.bin_item_id)`,
+    // The rest of the purged slots can't say how they were deleted: a branch whose replies
+    // were deleted on their own shares its mark with none of them. A purged message leaves its
+    // replies live, a purged branch nothing; so one with nothing live below is taken for a
+    // branch, and a reply restored from the bin later stays behind it (ARCHITECTURE §3.11).
+    `UPDATE slots AS s SET branch_deleted = 1 WHERE s.purged_at IS NOT NULL AND s.branch_deleted = 0
+      AND NOT EXISTS (
+        WITH RECURSIVE below(id) AS (
+          SELECT id FROM slots INDEXED BY slots_parent WHERE parent_slot_id = s.id
+          UNION ALL SELECT c.id FROM slots c INDEXED BY slots_parent JOIN below ON c.parent_slot_id = below.id
+        )
+        SELECT 1 FROM below JOIN slots x ON x.id = below.id WHERE x.deleted_at IS NULL)`
   ])
 }
 
