@@ -187,7 +187,7 @@ export const ImportedMedia = Schema.Struct({
 })
 
 /** A stored file, at `path` under the data directory. */
-const StoredFile = Schema.Struct({ path: Schema.String, mime: Schema.String })
+const StoredFile = Schema.Struct({ path: Schema.String, mime: Schema.String, byteSize: Schema.Int })
 
 export class ExportSource extends Schema.Class<ExportSource>("ExportSource")({
   kind: EntityKind,

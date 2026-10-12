@@ -10,7 +10,7 @@ import { exportStPreset } from "../formats/preset.ts"
 import { exportLorebook } from "../formats/worldInfo.ts"
 import { type ExportInput, ExportRefused } from "./ops.ts"
 
-/** A 1×1 PNG for a card without a PNG avatar, since a PNG card needs an image to live in. */
+/** A 1×1 PNG for a card without an avatar, since a PNG card needs an image to live in. */
 const PLACEHOLDER_PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
   "base64"
@@ -55,7 +55,13 @@ const exportCard = (input: ExportInput) =>
       case "card-v3-json":
         return exportCardJson(card, "v3")
       case "card-png": {
-        const image = input.avatar?.mime === "image/png" ? input.avatar.bytes : PLACEHOLDER_PNG
+        if (input.avatar && input.avatar.mime !== "image/png") {
+          const type = (EXTENSIONS[input.avatar.mime] ?? "non-PNG").toUpperCase()
+          return yield* new ExportRefused({
+            message: `This card's avatar is a ${type} image, which a PNG card can't hold. Export it as CHARX, which keeps the image, or as JSON.`
+          })
+        }
+        const image = input.avatar?.bytes ?? PLACEHOLDER_PNG
         return yield* exportCardPng(card, image).pipe(
           Effect.mapError(() => new ExportRefused({ message: "The card's avatar isn't a valid PNG." }))
         )

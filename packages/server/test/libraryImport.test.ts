@@ -16,7 +16,7 @@ import { Reader, Writer } from "../src/db/Database.ts"
 import { importCard } from "../src/formats/cardImport.ts"
 import { readChunks } from "../src/formats/png.ts"
 import { defaultLimits } from "../src/formats/safety.ts"
-import { cardChunk, json, png, run, stCardV2, worldInfo, zip } from "./formats/support.ts"
+import { cardChunk, chunk, json, png, run, stCardV2, worldInfo, zip } from "./formats/support.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"
 
 const config = testConfig()
@@ -141,6 +141,56 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
       const { status, bytes } = yield* exported(library!.ref.id, "card-png")
       assert.strictEqual(status, 200)
       assert.strictEqual(run(importCard(bytes)).card.name, "Wren")
+    })
+  )
+
+  it.effect("a card whose avatar isn't a PNG won't go into a PNG, and says what will hold it", () =>
+    Effect.gen(function* () {
+      const webp = Buffer.concat([Buffer.from("RIFF\x10\x00\x00\x00WEBPVP8 ", "latin1"), Buffer.alloc(8)])
+      const card = {
+        spec: "chara_card_v3",
+        spec_version: "3.0",
+        data: { ...stCardV2().data, assets: [{ type: "icon", uri: "embeded://icon.webp", name: "main", ext: "webp" }] }
+      }
+      const archive = zip([
+        { name: "card.json", data: json(card) },
+        { name: "icon.webp", data: webp, method: 0 }
+      ])
+      const { library } = yield* imported(archive, "wren.charx")
+      const refused = yield* exported(library!.ref.id, "card-png")
+      assert.strictEqual(refused.status, 422)
+      assert.include(new TextDecoder().decode(refused.bytes), "CHARX")
+      assert.strictEqual((yield* exported(library!.ref.id, "card-charx")).status, 200)
+    })
+  )
+
+  it.effect("an export's files are capped in total, however many times a document names them", () =>
+    Effect.gen(function* () {
+      const writer = yield* Writer
+      const reader = yield* Reader
+      // A 1 MiB avatar, which the edited card then names 200 times as an asset.
+      const big = png(chunk("ruMb", Buffer.alloc(1024 * 1024)), cardChunk("chara", stCardV2()))
+      const { library } = yield* imported(big, "wren.png")
+      const userId = (yield* (yield* client(config)).Whoami()).id
+      const current = yield* reader.GetRef({ userId, refId: library!.ref.id })
+      const uris = Array.from({ length: 200 }, (_, i) => `embeded://assets/copy${i}.png`)
+      yield* writer.EditRef({
+        userId,
+        refId: library!.ref.id,
+        doc: {
+          ...current.doc,
+          assets: uris.map((uri, i) => ({ type: "other", uri, name: `copy${i}`, ext: "png" })),
+          asset_media_ids: Object.fromEntries(uris.map((uri) => [uri, current.doc.avatar_media_id]))
+        },
+        expectedRowVersion: current.ref.rowVersion,
+        message: null,
+        commitDraft: null
+      })
+      const charx = yield* exported(library!.ref.id, "card-charx")
+      assert.strictEqual(charx.status, 422)
+      assert.include(new TextDecoder().decode(charx.bytes), "more than an export can hold")
+      // A format without the files reads none of them.
+      assert.strictEqual((yield* exported(library!.ref.id, "card-v2-json")).status, 200)
     })
   )
 

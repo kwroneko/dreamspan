@@ -22,8 +22,8 @@ export const makeImportReadHandlers = Effect.gen(function* () {
   const ownedMedia = (userId: UserId, mediaId: unknown) =>
     typeof mediaId !== "string"
       ? Effect.succeed(undefined)
-      : sql<{ path: string; mime: string }>`
-          SELECT m.path, m.mime FROM media_assets m
+      : sql<{ path: string; mime: string; byteSize: number }>`
+          SELECT m.path, m.mime, m.byte_size AS byteSize FROM media_assets m
           WHERE m.id = ${mediaId}
             AND EXISTS (SELECT 1 FROM media_refs r WHERE r.media_id = m.id AND r.owner_user_id = ${userId})`.pipe(
           Effect.map(([row]) => row)

@@ -9,8 +9,16 @@ import { bundleEntry, defaultBundleDir, workerThreads } from "../db/Database.ts"
 import * as ReaderPool from "../db/readerPool.ts"
 import { type ExportInput, type ExportRefused, FormatOps, ownBuffer, type ParsedFile } from "./ops.ts"
 
-/** The format worker stopped (it crashed or ran out of memory) while it had the file. */
-export class FormatWorkerFailed extends Schema.TaggedError<FormatWorkerFailed>()("FormatWorkerFailed", {}) {}
+/**
+ * The format worker failed while it had the file: it crashed, ran out of memory, ran past
+ * its deadline, or couldn't start. Files the parsers can't read are reports, not this, so
+ * the message doesn't blame the file.
+ */
+export class FormatWorkerFailed extends Schema.TaggedError<FormatWorkerFailed>()("FormatWorkerFailed", {}) {
+  override get message() {
+    return "The import failed on the server; try again."
+  }
+}
 
 export class Formats extends Context.Service<
   Formats,

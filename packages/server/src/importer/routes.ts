@@ -30,6 +30,9 @@ const BODY_DEADLINE_MS = 120_000
 /** The longest pause in an upload's body, or before its first bytes, before it's dropped. */
 const BODY_IDLE_MS = 10_000
 
+/** The most a card's files may add up to in an export: the CHARX reader's own total (§8). */
+const MAX_EXPORT_FILE_BYTES = defaultLimits.maxZipTotalBytes
+
 /** How old a media file no row names must be before the sweep deletes it: older than any import. */
 const MEDIA_GRACE_MS = 60 * 60 * 1000
 
@@ -209,8 +212,7 @@ export const layer = Layer.unwrap(
       Effect.catchTags({
         NotFound: () => Effect.succeed(jsonError(404, "there's no such ref")),
         RefOperationRefused: (error) => Effect.succeed(jsonError(409, error.reason)),
-        FormatWorkerFailed: () =>
-          Effect.succeed(jsonError(500, "The importer stopped while reading this file. The file may be malformed."))
+        FormatWorkerFailed: (error) => Effect.succeed(jsonError(500, error.message))
       }),
       Effect.catch((error) =>
         Effect.logError("an import failed", error).pipe(Effect.as(jsonError(500, "the import failed")))
@@ -233,17 +235,37 @@ export const layer = Layer.unwrap(
       if (!exportFormats[source.kind]?.includes(format)) {
         return jsonError(400, `a ${source.kind} can't be exported as ${format}`)
       }
+      // Only the files the format holds: the avatar for a PNG, every file for a CHARX. A
+      // document can name any number of them, the same one many times over, so their total
+      // is capped before anything is read, and each is read once.
+      const files = format === "card-charx" ? [source.avatar, ...source.assets] : [source.avatar]
+      const wanted = format === "card-png" || format === "card-charx" ? files.filter((file) => file !== null) : []
+      const total = wanted.reduce((sum, file) => sum + file.byteSize, 0)
+      if (total > MAX_EXPORT_FILE_BYTES) {
+        return jsonError(
+          422,
+          `This card's files add up to ${Math.ceil(total / 1024 / 1024)} MB, more than an export can hold (${MAX_EXPORT_FILE_BYTES / 1024 / 1024} MB).`
+        )
+      }
+      const cache = new Map<string, Effect.Success<ReturnType<typeof readMedia>>>()
       const read = (file: { path: string; mime: string }) =>
-        Effect.map(readMedia(config.dataDir, file.path), (bytes) => bytes && { bytes, mime: file.mime })
+        Effect.gen(function* () {
+          if (!cache.has(file.path)) cache.set(file.path, yield* readMedia(config.dataDir, file.path))
+          const bytes = cache.get(file.path)
+          return bytes && { bytes, mime: file.mime }
+        })
       const [mime, extension] = CONTENT_TYPES[format]
       return yield* oneAtATime(
         user.id,
         exports.withPermits(1)(
           Effect.gen(function* () {
-            const avatar = source.avatar && (yield* read(source.avatar))
-            const assets = yield* Effect.forEach(source.assets, (asset) =>
-              Effect.map(read(asset), (file) => (file ? [{ ...file, uri: asset.uri }] : []))
-            )
+            const avatar = source.avatar && wanted.length > 0 ? yield* read(source.avatar) : undefined
+            const assets =
+              format === "card-charx"
+                ? yield* Effect.forEach(source.assets, (asset) =>
+                    Effect.map(read(asset), (file) => (file ? [{ ...file, uri: asset.uri }] : []))
+                  )
+                : []
             const bytes = yield* formats.export({
               format,
               docJson: source.docJson,
@@ -265,7 +287,8 @@ export const layer = Layer.unwrap(
     }).pipe(
       Effect.catchTags({
         NotFound: () => Effect.succeed(jsonError(404, "there's no such ref")),
-        ExportRefused: (error) => Effect.succeed(jsonError(422, error.message))
+        ExportRefused: (error) => Effect.succeed(jsonError(422, error.message)),
+        FormatWorkerFailed: (error) => Effect.succeed(jsonError(500, error.message))
       }),
       Effect.catch((error) =>
         Effect.logError("an export failed", error).pipe(Effect.as(jsonError(500, "the export failed")))

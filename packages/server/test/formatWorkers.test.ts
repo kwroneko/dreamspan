@@ -4,7 +4,7 @@ import { mkdtempSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { assert, beforeAll, describe, it } from "@effect/vitest"
-import { Effect, Exit } from "effect"
+import { Cause, Effect, Exit } from "effect"
 import { buildWorkers } from "../scripts/build-workers.ts"
 import * as Formats from "../src/importer/Formats.ts"
 import * as Importers from "../src/importer/importers.ts"
@@ -71,6 +71,13 @@ describe("format workers", () => {
           { concurrency: 2 }
         )
         assert.isTrue(Exit.isFailure(crashed) && crashed.cause.toString().includes("FormatWorkerFailed"))
+        // A crash says nothing about the file: files the parsers can't read are reports.
+        if (Exit.isFailure(crashed)) {
+          assert.strictEqual(
+            String(Cause.squash(crashed.cause)),
+            "FormatWorkerFailed: The import failed on the server; try again."
+          )
+        }
         assert.isTrue(Exit.isSuccess(queued) && queued.value.report.format === "card-v2-png", String(queued))
         const next = yield* formats.parse(card(), "wren.png")
         assert.strictEqual(next.report.format, "card-v2-png")
