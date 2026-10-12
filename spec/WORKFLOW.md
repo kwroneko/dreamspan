@@ -114,7 +114,7 @@ Only one stream, the main one, edits these. Other streams write their ARCHITECTU
 
 ## 7. Reviewer comparison
 
-Results of running Codex reviewers (GPT-6.1-Sol, GPT-6-Astra) and Opus reviewers on the same branches. Both Codex reviewers ran at default effort through `codex exec`.
+Results of running Codex reviewers (GPT-6.1-Sol, GPT-6-Astra) and Opus reviewers on the same branches. Both Codex reviewers run through `codex exec` at high reasoning effort, the default the owner set in `~/.codex/config.toml` (`model_reasoning_effort = "high"`); the review command doesn't override it.
 
 | Branch | Opus | Sol | Astra |
 |---|---|---|---|
