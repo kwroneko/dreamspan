@@ -427,19 +427,31 @@ const chatLine = (
   assembly: Assembly,
   projected: ProjectedEntry,
   groupNames: boolean,
-  scripts: ReadonlyArray<PromptScript>,
+  scripts: PromptScripts,
   depth: number
 ): ChatLine => {
   const behavior = need(assembly, "preset").doc.names_behavior
   const placement =
     sideOf(projected.entry, need(assembly, "cast")) === "user" ? PLACEMENT.userInput : PLACEMENT.aiOutput
-  const text = scripts
-    .filter(({ script }) => appliesAt(script, placement, depth))
-    .reduce(
-      (current, { regex, replacement, trim }) => run(regex, replacement, trim, current),
-      need(assembly, "macros").text(projected.piece)
-    )
-    .replace(/\r/gm, "")
+  let text = need(assembly, "macros").text(projected.piece)
+  for (const { script, regex, replacement, trim } of scripts.list) {
+    if (!appliesAt(script, placement, depth)) continue
+    const cost = regex.source.length * (text.length + 1)
+    if (cost > scripts.work.left) {
+      if (!scripts.work.reported) {
+        assembly.issues.push({
+          kind: "regex_skipped",
+          message:
+            "The regex scripts stopped partway: they had more pattern and text to go through than one context allows."
+        })
+        scripts.work.reported = true
+      }
+      continue
+    }
+    scripts.work.left -= cost
+    text = run(regex, replacement, trim, text)
+  }
+  text = text.replace(/\r/gm, "")
   const pieces = [projected.piece]
   const named = (prefix: boolean): ChatLine => ({
     role: projected.role,
@@ -471,11 +483,31 @@ interface PromptScript {
  * the pattern compiled, with its macros expanded when the script asks for that, and the
  * replacement and trim strings expanded. A script that can't run safely is left out and reported.
  */
-const promptScripts = (assembly: Assembly): Array<PromptScript> => {
+interface PromptScripts {
+  readonly list: ReadonlyArray<PromptScript>
+  /** Pattern length times text length, left for this context. */
+  readonly work: { left: number; reported: boolean }
+}
+
+/** The linear engine's time grows with the pattern times the text: about a second of it here. */
+const REGEX_WORK = 40_000_000
+/** Patterns longer than this, after the case rewrite, are left out. */
+const MAX_PATTERN = 2_000
+/** Scripts after this many are left out. */
+const MAX_SCRIPTS = 100
+
+const promptScripts = (assembly: Assembly): PromptScripts => {
   const doc = need(assembly, "preset").doc
-  if (!doc.regex_approved) return []
-  return doc.regex.flatMap((script) => {
-    if (script.disabled || !script.prompt_only || !script.find_regex) return []
+  const work = { left: REGEX_WORK, reported: false }
+  if (!doc.regex_approved) return { list: [], work }
+  const usable = doc.regex.filter((script) => !script.disabled && script.prompt_only && script.find_regex)
+  if (usable.length > MAX_SCRIPTS) {
+    assembly.issues.push({
+      kind: "regex_skipped",
+      message: `Only the first ${MAX_SCRIPTS} of the preset's ${usable.length} prompt regex scripts run.`
+    })
+  }
+  const list = usable.slice(0, MAX_SCRIPTS).flatMap((script) => {
     const skip = (why: string) => {
       assembly.issues.push({
         kind: "regex_skipped",
@@ -489,17 +521,20 @@ const promptScripts = (assembly: Assembly): Array<PromptScript> => {
         ? presetText(assembly, `regex:${script.id}:find`, script.find_regex).text
         : script.find_regex
     const regex = compile(find)
-    if (regex === "unsafe")
+    if (regex === "unsafe") {
       return skip(
         "it needs backtracking (backreferences, lookaheads, nested counted repeats or Unicode properties), which could stall the server"
       )
+    }
     if (regex === null) return skip("its pattern isn't a valid regular expression")
+    if (regex.source.length > MAX_PATTERN) return skip("its pattern is too long")
     const replacement = script.replace_string
       ? presetText(assembly, `regex:${script.id}:replace`, script.replace_string).text
       : ""
     const trim = script.trim_strings.map((t, i) => presetText(assembly, `regex:${script.id}:trim:${i}`, t).text)
     return [{ script, regex, replacement, trim }]
   })
+  return { list, work }
 }
 
 /** The example dialogue of one card, block by block (setOpenAIMessageExamples). */

@@ -312,6 +312,19 @@ describe("the context assembler", () => {
     expect(contents(on)).toContain("assistant: <thinking>old</thinking>You're [lae|lae|Mira].")
     expect(on.issues).toEqual([expect.objectContaining({ kind: "regex_skipped" })])
     expect(on.issues[0]!.message).toContain("backreference")
+
+    // The work is bounded per context: a long pattern over a long message stops the scripts.
+    const heavy = await assembled({
+      ...fixture,
+      messages: [{ side: "assistant", content: "b".repeat(1_100_000) }, ...fixture.messages],
+      preset: {
+        ...preset({ extensions: { regex_scripts: [script("long", { findRegex: `/${"a".repeat(45)}/g` })] } }),
+        regex_approved: true
+      }
+    })
+    expect(heavy.issues.map((i) => i.message)).toContain(
+      "The regex scripts stopped partway: they had more pattern and text to go through than one context allows."
+    )
   })
 
   it("expands a card's prompt override before the preset, and fills its {{original}}", async () => {
