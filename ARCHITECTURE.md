@@ -1221,7 +1221,7 @@ The agent's permission to edit a note or a card module (`agent_editable`) works 
 - `roles`: role projection (DESIGN §5.4)
 - `compose`: ST's prompt manager and budget, with the tail content
 - `messages`: squashing and post-processing
-- `prefill`, `request`
+- `prefill`, `breakpoints` (below), `request`
 
 Stages reach data only through `AssemblySources`, so the same pipeline runs over the database (`db/assemblySources.ts`) and over in-memory fixtures (`test/support/assemblySources.ts`, used by the tests and the ST harness). A stage that runs before what it needs throws (`need`): only a misregistered stage can cause it. `AssemblyFailed` (`no_model`, `budget`, `invalid_document`) is the one way a context fails as a whole.
 
@@ -1280,6 +1280,15 @@ The request maps to Chat Completions per provider kind as ST maps its sources (`
 - **`roles.projection`:** `by_writer` (ST's: messages on the user's side are `user`, the side taken from the speaker when it's a card, else from the slot's first version); `alternate` (by depth: even depths, the greeting's, are `assistant`, so roles never change as the chat grows, and when the last message is `assistant` the tail directive ends the request); `perspective` (the speaker's own messages are `assistant`).
 
 **The tail** in every mode ends with the one-turn direction stored on the version being generated (DESIGN §2.2), as a system message, verbatim, since the user typed it.
+
+**Cache breakpoints** (`breakpoints.ts`, DESIGN §5.5), placed structurally, as deltas from reference-harness's scheme (its `src/agent/cache-breakpoints.ts`, ARCHITECTURE "Cache control"):
+- **Every message knows what it's made of** (`Stability` in `st.ts`): the preset's and cards' prompts ahead of the chat (`prefix`), the chat's own messages (`history`), and what moves or changes every turn (`volatile`): in-chat prompts and notes, which keep their depth as the chat grows, the tail, and the user turn ST fills in. Squashing and post-processing merge it with the text. reference-harness finds its boundaries by searching the wire text for `<system>` and `<conversation_summary`, and flags that as a weakness itself.
+- **reference-harness's (a), the leading system item:** here `prefix`, the last message of the leading run of prefix messages. When the provider takes them as its system parameter, its own marker there covers them.
+- **reference-harness's (b), the conversation summary:** comes with LCM's summary layer (DESIGN §8).
+- **reference-harness's (c), the last timeline item the next session reproduces verbatim:** here `history`, the last message before the first volatile one. The deepest in-chat prompt or note is where the next request starts to differ, since it moves down as messages are added; with none, it's the chat's last message. It comes first, as reference-harness's (c) takes the single free slot.
+- **reference-harness's (d) and (e), every request's end and the previous request's:** pi-ai already marks the last message, and Anthropic reads back about 20 blocks before a marker.
+- **No token floor:** reference-harness's 1,024-token minimum is Bedrock's; Anthropic ignores a marker on a shorter prefix.
+- **Off unless the model's breakpoints are `explicit`,** as reference-harness's are off unless configured: the snapshot always records them, and the provider request sends them only then (§6 "Explicit cache breakpoints").
 
 **The snapshot** (`types.ts`, DATA-MODEL §7.1, invariant 6) holds:
 - what it was built from: chat, slot, version, the leaf, the clock and time zone, type, speaker, mode, the preset's ref, revision and scope, each card's ref and revision, the model

@@ -1,6 +1,6 @@
 // The context assembler's pipeline over in-memory chats (ARCHITECTURE §13). What ST would
 // send for a preset is checked against ST itself by `npm run test:st`; these pin the rest:
-// macros by source, rebuilding, notes, the budget, prefill and our layouts.
+// macros by source, rebuilding, notes, the budget, prefill, breakpoints and our layouts.
 import type { CardDoc } from "@rp/shared/docs/card.ts"
 import type { PresetDoc } from "@rp/shared/docs/preset.ts"
 import type { StateEventData } from "@rp/shared/state.ts"
@@ -277,6 +277,45 @@ describe("the context assembler", () => {
       kind: "direction",
       version: "version-2"
     })
+  })
+
+  it("places cache breakpoints before what changes next turn (DESIGN §5.5)", async () => {
+    const snapshot = await assembled(
+      chat({
+        messages: [
+          { side: "assistant", content: "one" },
+          { side: "user", content: "two" },
+          { side: "assistant", content: "three" },
+          { side: "user", content: "four" }
+        ],
+        notes: [note("A note.", 2, "system")]
+      })
+    )
+    const messages = contents(snapshot)
+    const byReason = Object.fromEntries(snapshot.request.breakpoints.map((b) => [b.reason, messages[b.message]]))
+    // The note moves down as the chat grows: the next request starts to differ there.
+    expect(byReason).toEqual({ history: "user: two", prefix: "system: [Start a new Chat]" })
+    expect(snapshot.request.breakpoints[0]!.reason).toBe("history")
+
+    // Merged into a message of the chat, a note makes that message change: the breakpoint
+    // goes before it. With nothing that moves, it's the chat's last message.
+    const merged = await assembled(
+      chat({
+        messages: [
+          { side: "assistant", content: "one" },
+          { side: "user", content: "two" },
+          { side: "assistant", content: "three" },
+          { side: "user", content: "four" }
+        ],
+        notes: [note("A note.", 1, "assistant")],
+        preset: preset({ custom_prompt_post_processing: "merge" })
+      })
+    )
+    const mergedMessages = contents(merged)
+    expect(mergedMessages[merged.request.breakpoints[0]!.message]).toBe("user: two")
+    expect(mergedMessages).toContain("assistant: three\n\nA note.")
+    const still = await assembled(chat())
+    expect(contents(still)[still.request.breakpoints[0]!.message]).toBe("user: The road flooded.")
   })
 })
 

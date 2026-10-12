@@ -1,12 +1,13 @@
 // The built-in assembler stages (DESIGN §5.1), registered in order through the stage
 // registry like a plugin's would be. In order:
 //   path, state, cast, model, preset, notes, mode, history, macros, roles, compose,
-//   messages, prefill, request
+//   messages, prefill, breakpoints, request
 // A single-character chat with ST's layout gets what ST would send for its preset and card
 // (ST-compatible mode, DESIGN §1.2); anything else gets our layouts (DESIGN §5.2–§5.4).
 import type { ChatMessage } from "@rp/shared/macros/context.ts"
 import { foldState } from "@rp/shared/state.ts"
 import { Effect, type Scope } from "effect"
+import { placeBreakpoints } from "./breakpoints.ts"
 import { cardBlock, directive, personaBlock } from "./layouts.ts"
 import { cardFields, makeMacroEnvironment, type Names } from "./macros.ts"
 import {
@@ -698,6 +699,10 @@ const requestStage = sync("request", (assembly) => {
   })
 })
 
+const breakpointsStage = sync("breakpoints", (assembly) => {
+  assembly.breakpoints = placeBreakpoints(need(assembly, "messages"))
+})
+
 const builtinStages: ReadonlyArray<AssemblerStage> = [
   pathStage,
   stateStage,
@@ -712,6 +717,7 @@ const builtinStages: ReadonlyArray<AssemblerStage> = [
   composeStage,
   messagesStage,
   prefillStage,
+  breakpointsStage,
   requestStage
 ]
 
