@@ -82,6 +82,15 @@ export const characterMacros: ReadonlyArray<MacroSpec> = [
       return call.once("original") ? original : ""
     }
   },
+  {
+    // Registered by ST's Summarize extension; without a summary to read it stays as written.
+    name: "summary",
+    handler: (call) => {
+      const { summary } = call.context
+      if (summary === undefined) throw new Error("No summary")
+      return summary
+    }
+  },
   { name: "isMobile", handler: (call) => String(call.context.isMobile ?? false) },
   { name: "lastGenerationType", handler: (call) => call.context.lastGenerationType ?? "" },
   // ST extensions don't exist here (DESIGN §1.5).

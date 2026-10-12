@@ -153,6 +153,31 @@ describe("context assembly from the database", () => {
     }).pipe(Effect.provide(database()))
   )
 
+  it.live("sends the chat's imported summary where ST's Summarize extension put it, once it's on", () =>
+    Effect.gen(function* () {
+      const { entity, chat, state, assemble } = yield* setup()
+      const summary = yield* entity("note", "Summary", {
+        schema_version: 1,
+        title: "Summary",
+        content: "The road flooded twice.",
+        placement: { mode: "depth", depth: 1, role: "system" },
+        owner: { chat: chat.id },
+        exportable: true,
+        kind: "imported_summary",
+        template: "[Summary: {{summary}}]"
+      })
+      const off = yield* assemble()
+      assert.notInclude(texts(off).join("\n"), "flooded twice")
+      yield* state({ key: "note.activate", value: { note: summary.entityId as EntityId } })
+      const on = yield* assemble()
+      assert.deepStrictEqual(texts(on).slice(-3), [
+        "assistant: *Mira looks up.* Late again, Tobin.",
+        "system: [Summary: The road flooded twice.]",
+        "user: The road flooded."
+      ])
+    }).pipe(Effect.provide(database()))
+  )
+
   it.live("injects the card's first note, and reads the model the chat binds", () =>
     Effect.gen(function* () {
       const { writer, userId, entity, mira, state, assemble } = yield* setup()

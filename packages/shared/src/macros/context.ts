@@ -71,6 +71,8 @@ export interface MacroContext {
   readonly input?: string
   /** The text a character's prompt override replaces: `{{original}}`, once. */
   readonly original?: string
+  /** The chat's summary, as ST's Summarize extension keeps it: `{{summary}}`. */
+  readonly summary?: string
   /** World-info outlets by key: `{{outlet::key}}`. */
   readonly outlets?: Readonly<Record<string, string>>
   readonly maxContextTokens?: number

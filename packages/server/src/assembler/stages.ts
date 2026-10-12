@@ -275,7 +275,8 @@ const macrosStage = sync("macros", (assembly) => {
     maxResponseTokens: preset.samplers.openai_max_tokens,
     type: cast.type,
     chatId: need(assembly, "target").chatId,
-    variables: need(assembly, "state").vars
+    variables: need(assembly, "state").vars,
+    summary: summaryNote(assembly)?.doc.content ?? ""
   })
 })
 
@@ -696,6 +697,30 @@ const exampleLines = (assembly: Assembly, card: CardInput, char: string, prefixN
   )
 }
 
+/** The chat's summary as ST's Summarize extension kept it, when the chat has it on (DESIGN §8.1). */
+const summaryNote = (assembly: Assembly) =>
+  assembly.notes?.findLast((note) => note.doc.kind === "imported_summary" && noteCard(note.doc) === null)
+
+/**
+ * The summary as the extension sends it (formatMemoryValue): its template with `{{summary}}`
+ * replaced, or `Summary: ` before it without one, expanded; and where it goes.
+ */
+const summaryPrompt = (assembly: Assembly) => {
+  const note = summaryNote(assembly)
+  const content = note?.doc.content.trim() ?? ""
+  if (!note || !content || note.doc.placement.mode === "none") return null
+  const { template } = note.doc
+  const formatted = template ? template.replace(/\{\{summary\}\}/gi, () => content) : `Summary: ${content}`
+  const env = need(assembly, "macros")
+  const piece = env.piece(
+    `note:${note.entity}`,
+    { kind: "note", entity: note.entity, revision: note.revision },
+    formatted
+  )
+  const text = env.text(piece).trim()
+  return text ? { text: { text, piece }, placement: note.doc.placement } : null
+}
+
 const noteInjections = (assembly: Assembly, cards: ReadonlyArray<CardInput>): Array<Injection> => {
   const env = need(assembly, "macros")
   return [...need(assembly, "notes")]
@@ -853,6 +878,33 @@ const composeStage = sync("compose", (assembly) => {
     }))
   )
   rest.forEach((index, i) => (scripted[index] = ran[i]))
+  // The summary goes in-chat as an extension prompt, ahead of the Character's Note in ST's
+  // key order (`1_memory`, `DEPTH_PROMPT`), or beside the main prompt (injectToMain).
+  const placed = summaryPrompt(assembly)
+  let summary: { readonly message: StMessage; readonly at: "start" | "end" } | null = null
+  if (placed?.placement.mode === "depth") {
+    injections = [{ depth: placed.placement.depth, role: placed.placement.role, text: placed.text }, ...injections]
+  } else if (placed?.placement.mode === "section") {
+    const at = placed.placement.section === "before_main_prompt" ? "start" : "end"
+    const main = collection.findIndex((p) => p.identifier === "main")
+    const mainPrompt = collection[main]
+    if (mainPrompt?.injection_position === "absolute") {
+      // Main in-chat: the summary is injected beside it, with its role, depth and order.
+      collection.splice(at === "start" ? main : main + 1, 0, {
+        ...mainPrompt,
+        identifier: "summary",
+        content: placed.text.text,
+        piece: placed.text.piece,
+        system_prompt: undefined,
+        forbid_overrides: false
+      })
+    } else if (mainPrompt) {
+      summary = {
+        message: { role: "system", content: placed.text.text, pieces: [placed.text.piece], kind: "prefix" },
+        at
+      }
+    }
+  }
   const chat = injectInChat(
     projected.map((p, i) => chatLine(assembly, p, groupNames, scripted[i]!)),
     collection.filter((p) => p.injection_position === "absolute"),
@@ -860,6 +912,7 @@ const composeStage = sync("compose", (assembly) => {
   )
   prefill(assembly)
   const composition = compose({
+    summary,
     collection,
     disabled,
     chat,

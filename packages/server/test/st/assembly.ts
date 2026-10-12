@@ -10,11 +10,12 @@ import { importCard } from "../../src/formats/cardImport.ts"
 import { importStPreset } from "../../src/formats/preset.ts"
 import * as Importers from "../../src/importer/importers.ts"
 import { json, run } from "../formats/support.ts"
+import type { NoteInput } from "../../src/assembler/types.ts"
 import { assembleFixture, type FixtureMessage } from "../support/assemblySources.ts"
 import type { FixtureSet } from "./fixtures.ts"
 import { MOCK_MODEL, type MockEndpoint } from "./mock.ts"
 import { diffJson, type Section } from "./report.ts"
-import { captureWithSettings, savePoisonPreset } from "./st.ts"
+import { captureWithSettings, savePoisonPreset, type Summary } from "./st.ts"
 
 /** What the user sends in every capture that sends something. */
 const MESSAGE = "Is the crossing still possible tonight?"
@@ -41,7 +42,39 @@ interface Config {
   readonly presets: ReadonlyArray<string>
   readonly generate?: "impersonate" | "swipe"
   readonly postProcessing?: string
+  readonly summary?: Summary
 }
+
+/** A summary as ST's Summarize extension keeps it, its template naming the character too. */
+const summary = (position: number, depth = 2, role = 0): Summary => ({
+  text: "Tobin paid in favors; the fog came in early.",
+  template: "[{{char}}'s story so far: {{summary}}]",
+  position,
+  depth,
+  role
+})
+
+/** The note our ST import makes of it (importer/stMapping.ts). */
+const summaryNote = (s: Summary): NoteInput => ({
+  entity: "summary",
+  revision: "summary-rev",
+  first: false,
+  doc: {
+    schema_version: 1,
+    title: "Summary",
+    content: s.text,
+    placement:
+      s.position === 0
+        ? { mode: "section", section: "after_main_prompt" }
+        : s.position === 2
+          ? { mode: "section", section: "before_main_prompt" }
+          : { mode: "depth", depth: s.depth, role: (["system", "user", "assistant"] as const)[s.role]! },
+    owner: { chat: "chat-1" as never },
+    exportable: true,
+    kind: "imported_summary",
+    template: s.template
+  }
+})
 
 const imported = async (png: Uint8Array, name: string) => {
   const parsed = await Effect.runPromise(Importers.parseFile(png, `${name}.png`).pipe(Effect.provide(Importers.layer)))
@@ -86,15 +119,21 @@ const ourRequest = async (
       ],
       participants: ["character"],
       persona: "persona",
-      notes: card.note
-        ? [
-            {
-              entity: "note",
-              revision: "note-rev",
-              first: true,
-              doc: { ...card.note, owner: { card: "character" as never } }
-            }
-          ]
+      notes: [
+        ...(card.note
+          ? [
+              {
+                entity: "note",
+                revision: "note-rev",
+                first: true,
+                doc: { ...card.note, owner: { card: "character" as never } }
+              }
+            ]
+          : []),
+        ...(config.summary ? [summaryNote(config.summary)] : [])
+      ],
+      events: config.summary
+        ? [{ depth: null, event: { scope: null, data: { key: "note.activate", value: { note: "summary" as never } } } }]
         : [],
       preset: document,
       model: {
@@ -133,6 +172,11 @@ export const compareAssembly = async (
       presets: ["full"],
       postProcessing: mode
     })),
+    // ST's Summarize extension: after the main prompt, before it, and in-chat beside
+    // the Character's Note, in the user's role.
+    { name: "default, summary after main", presets: ["default"], summary: summary(0) },
+    { name: "default, summary before main", presets: ["default"], summary: summary(2) },
+    { name: "default, summary in-chat", presets: ["default"], summary: summary(1, 1, 1) },
     ...["default", "full"].flatMap((preset) =>
       (["impersonate", "swipe"] as const).map((generate) => ({
         name: `${preset}, ${generate}`,
@@ -158,10 +202,15 @@ export const compareAssembly = async (
           message: MESSAGE,
           ...(config.generate ? { generate: config.generate } : {})
         },
-        config.postProcessing
+        config.postProcessing,
+        config.summary
       )
       const ours = await ourRequest(fixtures, character, config, settings)
       const label = `${character}, ${config.name}`
+      // Both sides leaving it out would compare equal: ST must have sent it.
+      if (config.summary && !JSON.stringify(body).includes(config.summary.text)) {
+        differences.push(`${label}: ST didn't send the summary, so this compares nothing`)
+      }
       compared++
       if (ours.problem) {
         differences.push(`${label}: ${ours.problem}`)

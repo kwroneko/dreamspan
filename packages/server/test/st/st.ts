@@ -249,6 +249,36 @@ export const savePoisonPreset = async (browser: Browser, url: string, name: stri
   }
 }
 
+/** A Summarize extension summary, and the extension's settings for sending it. */
+export interface Summary {
+  readonly text: string
+  readonly template: string
+  /** ST's extension_prompt_types: 0 after the main prompt, 1 in-chat, 2 before it. */
+  readonly position: number
+  readonly depth: number
+  /** 0 system, 1 user, 2 assistant. */
+  readonly role: number
+}
+
+/**
+ * Saves the summary on the chat's second message, as the extension does (`extra.memory`),
+ * sets its settings, and has the extension read the chat again, as it does when a chat opens.
+ */
+const summarize = (page: Page, summary: Summary) =>
+  page.evaluate(async ({ text, template, position, depth, role }) => {
+    const ctx = SillyTavern.getContext() as unknown as {
+      chat: Array<{ extra?: Record<string, unknown> }>
+      extensionSettings: { memory: Record<string, unknown> }
+      eventSource: { emit: (event: string, ...args: Array<unknown>) => Promise<void> }
+      eventTypes: Record<string, string>
+      getCurrentChatId: () => string
+    }
+    const message = ctx.chat[1]!
+    message.extra = { ...message.extra, memory: text }
+    Object.assign(ctx.extensionSettings.memory, { template, position, depth, role })
+    await ctx.eventSource.emit(ctx.eventTypes.CHAT_CHANGED!, ctx.getCurrentChatId())
+  }, summary)
+
 export interface Capture {
   /** Presets loaded into ST one after another, by name; none for the baseline settings. */
   readonly presets: ReadonlyArray<string>
@@ -305,10 +335,12 @@ export const captureWithSettings = async (
   mock: MockEndpoint,
   capture: Capture,
   /** ST's custom_prompt_post_processing, a connection setting no preset changes here. */
-  postProcessing?: string
+  postProcessing?: string,
+  summary?: Summary
 ) => {
   let settings: Record<string, unknown> = {}
   const body = await captureRequest(browser, url, mock, capture, async (page) => {
+    if (summary !== undefined) await summarize(page, summary)
     if (postProcessing !== undefined) {
       await page.evaluate((value) => {
         ;(SillyTavern.getContext().chatCompletionSettings as Record<string, unknown>).custom_prompt_post_processing =

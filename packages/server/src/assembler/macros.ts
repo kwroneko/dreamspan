@@ -93,6 +93,7 @@ export const makeMacroEnvironment = (
     readonly type: string
     readonly chatId: string
     readonly variables: Readonly<Record<string, unknown>>
+    readonly summary: string
   }
 ): MacroEnvironment => {
   const { request } = assembly
@@ -115,7 +116,8 @@ export const makeMacroEnvironment = (
     maxResponseTokens: setup.maxResponseTokens,
     lastGenerationType: setup.type,
     isMobile: false,
-    pickSeed: setup.chatId
+    pickSeed: setup.chatId,
+    summary: setup.summary
   }
 
   const run = (

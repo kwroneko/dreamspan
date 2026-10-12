@@ -3,6 +3,7 @@
 // macros by source, rebuilding, notes, the budget, prefill, breakpoints and our layouts.
 import type { EntityId } from "@rp/shared/chat.ts"
 import type { CardDoc } from "@rp/shared/docs/card.ts"
+import type { NoteDoc } from "@rp/shared/docs/note.ts"
 import type { PresetDoc } from "@rp/shared/docs/preset.ts"
 import type { StateEventData } from "@rp/shared/state.ts"
 import { Effect } from "effect"
@@ -278,6 +279,66 @@ describe("the context assembler", () => {
       chat({ notes: [other], events: [at(null, { key: "note.activate", value: { note: "note-other" as never } })] })
     )
     expect(contents(active).at(-1)).toBe("system: Mira wears blue.")
+  })
+
+  it("sends an imported summary as ST's Summarize extension did (DESIGN §8.1)", async () => {
+    const summary = (placement: NoteDoc["placement"], template = "[Summary: {{summary}}]"): NoteInput => ({
+      entity: "note-summary",
+      revision: "summary-revision",
+      first: false,
+      doc: {
+        schema_version: 1,
+        title: "Summary",
+        content: "  {{char}} lost the ledger in the flood.  ",
+        placement,
+        owner: { chat: "chat-1" as never },
+        exportable: true,
+        kind: "imported_summary",
+        template
+      }
+    })
+    const on = at(null, { key: "note.activate", value: { note: "note-summary" as never } })
+    // The run it covers stays hidden: only what ST sent goes.
+    const imported = (placement: NoteDoc["placement"], fields: Partial<AssemblyFixture> = {}, template?: string) =>
+      assembled(
+        chat({
+          messages: [
+            { side: "assistant", content: "Covered.", inContext: false },
+            { side: "user", content: "Also covered.", inContext: false },
+            { side: "assistant", content: "You're late." },
+            { side: "user", content: "The road flooded." }
+          ],
+          notes: [summary(placement, template)],
+          events: [on],
+          ...fields
+        })
+      )
+    const inChat = await imported({ mode: "depth", depth: 1, role: "system" }, { notes: [] })
+    expect(contents(inChat).join("\n")).not.toContain("lost the ledger")
+    const depth = await imported(
+      { mode: "depth", depth: 1, role: "system" },
+      { notes: [summary({ mode: "depth", depth: 1, role: "system" }), note("{{char}} never guesses.", 1, "system")] }
+    )
+    expect(contents(depth).slice(-3)).toEqual([
+      "assistant: You're late.",
+      // The extension's prompt comes before the Character's Note, in ST's key order.
+      "system: [Summary: Mira lost the ledger in the flood.]\nMira never guesses.",
+      "user: The road flooded."
+    ])
+    expect(contents(depth).join("\n")).not.toContain("covered")
+    const main = "system: Write Mira's next reply in a fictional chat between Mira and Tobin."
+    const after = await imported({ mode: "section", section: "after_main_prompt" }, {}, "")
+    expect(contents(after).slice(0, 2)).toEqual([main, "system: Summary: Mira lost the ledger in the flood."])
+    const before = await imported({ mode: "section", section: "before_main_prompt" })
+    expect(contents(before).slice(0, 2)).toEqual(["system: [Summary: Mira lost the ledger in the flood.]", main])
+    // Placed nowhere, it's still what {{summary}} reads; off, it isn't sent.
+    const macro = await imported(
+      { mode: "none" },
+      { preset: preset({ prompts: [{ identifier: "main", role: "system", content: "Story so far: {{summary}}" }] }) }
+    )
+    expect(contents(macro)[0]).toMatch(/^system: Story so far: .* lost the ledger in the flood\./)
+    const off = await imported({ mode: "section", section: "after_main_prompt" }, { events: [] })
+    expect(contents(off).join("\n")).not.toContain("lost the ledger")
   })
 
   it("keeps the newest messages the preset's budget allows, and says so", async () => {
