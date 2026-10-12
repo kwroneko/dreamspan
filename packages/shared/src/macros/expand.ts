@@ -681,6 +681,8 @@ export interface ExpandRequest {
   /** The source of new draws, in [0, 1). */
   readonly random: () => number
   readonly limits?: Partial<MacroLimits>
+  /** Observes variable reads, including nested templates and shorthand operations. */
+  readonly onVariableRead?: () => void
 }
 
 export interface Expanded {
@@ -745,7 +747,7 @@ const evaluate = (
   const refusedWrites: Array<RefusedWrite> = []
   const { local, global } = options.context.variables ?? {}
   const vars = (initial: Readonly<Record<string, unknown>> | undefined, scope: VarScope) =>
-    new VariableScope(initial, scope, effects, refusedWrites, (size) => charge(run, size))
+    new VariableScope(initial, scope, effects, refusedWrites, (size) => charge(run, size), options.onVariableRead)
   const run: Run = {
     registry: options.registry,
     random: options.random,

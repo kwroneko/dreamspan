@@ -39,6 +39,9 @@ export interface MacroEnvironment {
    * the names, card and variables there.
    */
   readonly message: (entry: HistoryEntry, before: ReadonlyArray<ChatMessage>, at?: MessagePosition) => number
+  /** Later variable readers may depend on an intermittent note, including when it is skipped. */
+  readonly potentialVariableWrite: () => void
+  readonly isVolatile: (piece: number) => boolean
   readonly text: (piece: number) => string
   /** The messages of the path, resolved, for macros that read the chat. */
   readonly setMessages: (messages: ReadonlyArray<ChatMessage>) => void
@@ -99,6 +102,10 @@ export const makeMacroEnvironment = (
   const { request } = assembly
   let local: Readonly<Record<string, unknown>> = setup.variables
   let global: Readonly<Record<string, unknown>> = {}
+  let variableBarrier = false
+  const volatilePieces = new Set<number>()
+  const isVolatile = (piece: number): boolean =>
+    volatilePieces.has(piece) || (assembly.pieces[piece]!.parts?.some(isVolatile) ?? false)
 
   const record = (id: string, source: Source, text: string, parts?: ReadonlyArray<number>) => {
     assembly.pieces.push({ id, source, text, messages: [], ...(parts && parts.length > 0 ? { parts } : {}) })
@@ -129,6 +136,7 @@ export const makeMacroEnvironment = (
     effects: "context" | ((effects: ReadonlyArray<VariableEffect>) => void),
     frozen?: Readonly<Record<string, string>>
   ) => {
+    let readsVariables = false
     const result = expand({
       text,
       origin,
@@ -136,7 +144,10 @@ export const makeMacroEnvironment = (
       registry: request.macros,
       context,
       frozen: { ...frozen, ...request.frozen[id] },
-      random: request.random
+      random: request.random,
+      onVariableRead: () => {
+        readsVariables = true
+      }
     })
     if (result._tag === "LimitExceeded") {
       const where = result.scope === "" ? "" : ` in ${result.scope}`
@@ -144,7 +155,7 @@ export const makeMacroEnvironment = (
         kind: "macro_limit",
         message: `${id} was left out: its macros reached the ${result.limit} limit${where}, at offset ${result.offset}.`
       })
-      return ""
+      return { text: "", readsVariables }
     }
     if (Object.keys(result.frozen).length > 0) assembly.frozen[id] = result.frozen
     if (effects === "context") {
@@ -154,7 +165,7 @@ export const makeMacroEnvironment = (
     } else {
       effects(result.effects)
     }
-    return result.text
+    return { text: result.text, readsVariables }
   }
 
   return {
@@ -169,7 +180,10 @@ export const makeMacroEnvironment = (
         variables: { local, global }
       }
       const origin: TextOrigin = { kind: source.kind === "preset" ? "preset" : "card" }
-      return record(id, source, run(id, text, origin, context, "context"))
+      const expanded = run(id, text, origin, context, "context")
+      const piece = record(id, source, expanded.text)
+      if (variableBarrier && expanded.readsVariables) volatilePieces.add(piece)
+      return piece
     },
     verbatim: (id, source, text, parts) => record(id, source, text, parts),
     message: (entry, before, at) => {
@@ -193,9 +207,13 @@ export const makeMacroEnvironment = (
           context,
           (effects) => at?.writes?.(effects.filter((e) => e.scope === "local")),
           entry.frozen ?? undefined
-        )
+        ).text
       )
     },
+    potentialVariableWrite: () => {
+      variableBarrier = true
+    },
+    isVolatile,
     text: (piece) => assembly.pieces[piece]!.text,
     setMessages: (messages) => {
       base = { ...base, messages }

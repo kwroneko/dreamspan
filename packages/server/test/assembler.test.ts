@@ -564,6 +564,110 @@ describe("the context assembler", () => {
       }
     })
 
+    it("bounds variable-dependent notes at their placement on both due and skipped turns", async () => {
+      const snapshots = []
+      for (const users of [1, 2]) {
+        snapshots.push(
+          await assembled(
+            chat({
+              messages: Array.from({ length: users }, (_, i) => ({ side: "user", content: `USER ${i}` })),
+              preset: preset({ prompts: [{ identifier: "main", role: "system", content: "{{setvar::x::MAIN}}MAIN" }] }),
+              notes: [
+                authorNote({ mode: "tail", role: "system" }, { content: "WRITER{{setvar::x::DUE}}", interval: 2 }),
+                chatNote(
+                  "card",
+                  "PREFIX={{getvar::x}}",
+                  { mode: "section", section: "before_main_prompt" },
+                  { owner: { card: "mira" as never } }
+                )
+              ],
+              events: on("note-z-author", "card")
+            })
+          )
+        )
+      }
+      expect(snapshots.map((s) => s.request.messages[0]!.content)).toEqual(["PREFIX=MAIN", "PREFIX=DUE"])
+      for (const snapshot of snapshots) expect(snapshot.request.breakpoints).toEqual([])
+    })
+
+    it("tracks variable reads through shorthand, aliases and nested macros without tracking names", async () => {
+      for (const content of [
+        "{{.x}}",
+        "{{$g}}",
+        "{{getglobalvar::g}}",
+        "{{varexists::x}}",
+        "{{getvarindex::obj::key}}",
+        "{{if {{hasvar::x}}}}DUE{{/if}}",
+        "{{getvar::unrelated}}",
+        "{{getvar::x}}"
+      ]) {
+        for (const users of [1, 2]) {
+          const snapshot = await assembled(
+            chat({
+              messages: Array.from({ length: users }, (_, i) => ({ side: "user", content: `USER ${i}` })),
+              notes: [
+                authorNote(
+                  { mode: "tail", role: "system" },
+                  { content: "{{setvar::x::DUE}}{{setglobalvar::g::DUE}}{{setvarkey::obj::key::DUE}}", interval: 2 }
+                ),
+                chatNote("reader", content, { mode: "section", section: "before_main_prompt" })
+              ],
+              events: on("note-z-author", "reader")
+            })
+          )
+          expect(snapshot.request.breakpoints, `${users}: ${content}`).toEqual([])
+        }
+      }
+    })
+
+    it("keeps earlier variable readers and later literals cacheable", async () => {
+      for (const users of [1, 2]) {
+        const snapshot = await assembled(
+          chat({
+            messages: Array.from({ length: users }, (_, i) => ({ side: "user", content: `USER ${i}` })),
+            notes: [
+              chatNote(
+                "summary",
+                "STORY",
+                { mode: "section", section: "before_main_prompt" },
+                { kind: "imported_summary", template: "{{getvar::x}} {{summary}}" }
+              ),
+              authorNote({ mode: "tail", role: "system" }, { content: "{{setvar::x::DUE}}", interval: 2 }),
+              chatNote("literal", "STATIC", { mode: "section", section: "before_main_prompt" })
+            ],
+            events: on("summary", "note-z-author", "literal")
+          })
+        )
+        expect(snapshot.request.breakpoints.some((b) => b.reason === "prefix")).toBe(true)
+      }
+    })
+
+    it("bounds later preset prompts that read intermittent variables, including empty expansion", async () => {
+      for (const content of ["EXAMPLE={{getvar::x}}", "{{getvar::x}}"]) {
+        for (const users of [1, 2]) {
+          const snapshot = await assembled(
+            chat({
+              cards: [
+                { entity: "mira", doc: card("Mira", { mes_example: "<START>\nTobin: Hello\nMira: Hi" }) },
+                { entity: "tobin", doc: tobin }
+              ],
+              messages: Array.from({ length: users }, (_, i) => ({ side: "user", content: `USER ${i}` })),
+              preset: preset({ new_example_chat_prompt: content }),
+              notes: [authorNote({ mode: "tail", role: "system" }, { content: "{{setvar::x::DUE}}", interval: 2 })],
+              events: on("note-z-author")
+            })
+          )
+          const example = snapshot.request.messages.findIndex((m) => m.name === "example_user")
+          expect(example).toBeGreaterThan(0)
+          const heading = snapshot.request.messages.findIndex(
+            (m) => m.content === (users === 2 ? content.replace("{{getvar::x}}", "DUE") : "EXAMPLE=")
+          )
+          const boundary = heading < 0 ? example : heading
+          expect(snapshot.request.breakpoints.every((b) => b.message < boundary)).toBe(true)
+        }
+      }
+    })
+
     it("keeps a skipped interval's potential cache boundary beside main", async () => {
       for (const section of ["before_main_prompt", "after_main_prompt"] as const) {
         for (const users of [1, 2]) {

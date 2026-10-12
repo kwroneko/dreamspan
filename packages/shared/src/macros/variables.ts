@@ -80,13 +80,15 @@ export class VariableScope {
   private readonly refused: Array<RefusedWrite>
   /** Counts characters read, parsed or written against the expansion's work limit. */
   private readonly charge: (size: number) => void
+  private readonly onRead: (() => void) | undefined
 
   constructor(
     initial: Readonly<Record<string, unknown>> | undefined,
     scope: VarScope,
     effects: Array<VariableEffect>,
     refused: Array<RefusedWrite>,
-    charge: (size: number) => void
+    charge: (size: number) => void,
+    onRead?: () => void
   ) {
     this.values = new Map()
     for (const [name, value] of Object.entries(initial ?? {})) {
@@ -97,9 +99,11 @@ export class VariableScope {
     this.effects = effects
     this.refused = refused
     this.charge = charge
+    this.onRead = onRead
   }
 
   has(name: string): boolean {
+    this.onRead?.()
     return this.values.has(name)
   }
 
@@ -109,6 +113,7 @@ export class VariableScope {
   }
 
   get(name: string): unknown {
+    this.onRead?.()
     if (!this.reads.has(name)) {
       this.charge(this.size(name))
       this.reads.set(name, read(this.values.get(name)))
@@ -128,6 +133,7 @@ export class VariableScope {
 
   /** getvarkey: an object key or array index of a JSON value. */
   getAt(name: string, index: string): unknown {
+    this.onRead?.()
     let value: unknown = this.values.get(name)
     const parsed = this.json(name)
     // Indexing JSON null throws in ST, which then reads the null itself (as 0).
@@ -161,6 +167,7 @@ export class VariableScope {
 
   /** setvarkey: sets a key (an object, created if absent) or an index (an array). */
   setAt(name: string, index: string, value: string): void {
+    this.onRead?.()
     if (!name) throw new Error("Variable name cannot be empty")
     this.charge(this.size(name))
     const parsed = parseJson(this.values.get(name) ?? "null")

@@ -536,7 +536,7 @@ const cardText = (assembly: Assembly, card: CardInput, field: keyof CardInput["d
 const presetText = (assembly: Assembly, id: string, text: string, names: Partial<Names> = {}): Text => {
   const env = need(assembly, "macros")
   const piece = env.piece(`preset:${id}`, presetSource(assembly, id), text, { names })
-  return { text: env.text(piece), piece }
+  return { text: env.text(piece), piece, volatile: env.isVolatile(piece) }
 }
 
 /**
@@ -768,7 +768,7 @@ const summaryText = (assembly: Assembly, note: NoteInput): Text | null => {
     formatted
   )
   const text = env.text(piece).trim()
-  return text ? { text, piece } : null
+  return text || env.isVolatile(piece) ? { text, piece } : null
 }
 
 /** A note's text, expanded: a card's with `{{char}}` bound to the card, the chat's with the chat's bindings. */
@@ -781,7 +781,7 @@ const noteText = (assembly: Assembly, note: NoteInput, owner: CardInput | null):
     owner ? { withoutCard: true, names: { char: owner.doc.name } } : {}
   )
   const text = env.text(piece)
-  return text ? { text, piece } : null
+  return text || env.isVolatile(piece) ? { text, piece } : null
 }
 
 /**
@@ -844,8 +844,10 @@ const placedNotes = (assembly: Assembly, cards: ReadonlyArray<CardInput>) => {
       return [
         {
           place,
-          text: () =>
-            skipped
+          text: () => {
+            // Every intermittent note is a potential writer; never expand a skipped one to find out.
+            if ((note.doc.interval ?? 0) > 1) env.potentialVariableWrite()
+            return skipped
               ? {
                   text: "",
                   piece: env.verbatim(
@@ -857,6 +859,7 @@ const placedNotes = (assembly: Assembly, cards: ReadonlyArray<CardInput>) => {
               : note === summary
                 ? summaryText(assembly, note)
                 : noteText(assembly, note, owner)
+          }
         }
       ]
     })
@@ -1036,7 +1039,7 @@ const composeStage = sync("compose", (assembly) => {
         piece: text.piece,
         system_prompt: undefined,
         forbid_overrides: false,
-        barrier: place.volatile && !text.text
+        barrier: (place.volatile || env.isVolatile(text.piece)) && !text.text
       })
     } else if (mainPrompt) {
       const kind = place.volatile ? "volatile" : "prefix"
@@ -1085,7 +1088,7 @@ const messagesStage = sync("messages", (assembly) => {
   // An empty skipped note still marks the next sent message as the potential boundary.
   let barrier = false
   let messages = need(assembly, "composition").messages.map((message) => {
-    if (message.kind === "volatile") barrier = true
+    if (message.kind === "volatile" || message.pieces.some(need(assembly, "macros").isVolatile)) barrier = true
     return barrier ? { ...message, kind: "volatile" as const } : message
   })
   messages = messages.filter((m) => m.content)

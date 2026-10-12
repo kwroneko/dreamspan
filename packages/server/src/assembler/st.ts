@@ -45,6 +45,7 @@ const mergedKind = (a: Stability, b: Stability): Stability =>
 
 /** Text the pipeline expanded, with the piece it was recorded as. */
 export interface Text {
+  readonly volatile?: boolean
   readonly text: string
   readonly piece: number
 }
@@ -336,14 +337,14 @@ export const compose = (input: {
           content: input.newExampleChat.text,
           tag: "newChat",
           pieces: [input.newExampleChat.piece],
-          kind: "prefix"
+          kind: input.newExampleChat.volatile ? "volatile" : "prefix"
         }
       : null
     for (const block of input.examples) {
       const messages: Array<StMessage> = block.map((line) => ({ ...line }))
       const cost = (heading ? tokensOf(heading) : 0) + messages.reduce((n, m) => n + tokensOf(m), 0)
       if (budget - cost < 0) break
-      if (heading?.content) examples.push(heading)
+      if (heading && (heading.content || heading.kind === "volatile")) examples.push(heading)
       examples.push(...messages.filter((m) => m.content))
       spend(cost)
       examplesSent++
