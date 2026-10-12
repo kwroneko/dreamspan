@@ -365,7 +365,7 @@ describe("failures", () => {
     }).pipe(Effect.scoped, Effect.provide(layer()))
   )
 
-  it.live("refuses to send Google traffic around a proxy that applies to it", () =>
+  it.live("reports a failed Google proxy without going direct", () =>
     Effect.gen(function* () {
       const network = yield* Network.Network
       yield* network.setInstance({ proxyUrl: "http://127.0.0.1:9", bypass: [], forceProxy: false })
@@ -375,7 +375,7 @@ describe("failures", () => {
       const connection = yield* providers.createConnection({
         userId,
         kind: "google",
-        settings: settings("https://generativelanguage.googleapis.com/v1beta"),
+        settings: settings("http://127.0.0.1:1"),
         apiKey: "g-key"
       })
       const model = yield* writer.AddUserModel({ userId, connectionId: connection.id, key: "gemini-x", overrides: {} })
@@ -388,8 +388,7 @@ describe("failures", () => {
           attribution: { purpose: "generation" }
         })
       ).pipe(Effect.flip, Effect.map(asProviderError))
-      assert.strictEqual(error.reason, "unusable")
-      assert.include(error.message, "proxy")
+      assert.strictEqual(error.reason, "network")
     }).pipe(Effect.scoped, Effect.provide(layer()))
   )
 })

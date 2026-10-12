@@ -1,11 +1,8 @@
+import { openAICompletionsApi, openAIResponsesApi, anthropicMessagesApi, googleGenerativeAIApi } from "./sdk.ts"
 // The built-in provider kinds, request transforms and response observers, registered
 // through the provider registry exactly as a plugin's would be (spec/PLUGINS.md §3.1).
 // Kinds are registered in picker order: Chat Completions first, then Anthropic (owner,
 // 2026-10-10).
-import { anthropicMessagesApi } from "@earendil-works/pi-ai/api/anthropic-messages.lazy"
-import { googleGenerativeAIApi } from "@earendil-works/pi-ai/api/google-generative-ai.lazy"
-import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy"
-import { openAIResponsesApi } from "@earendil-works/pi-ai/api/openai-responses.lazy"
 import { Effect, Layer } from "effect"
 import { applyAnthropicBreakpoints } from "./breakpoints.ts"
 import { piCatalogs, withCatalog } from "./catalog.ts"
@@ -89,8 +86,6 @@ export const builtinKinds: ReadonlyArray<ProviderKindEntry> = [
     piProvider: "google",
     api: "google-generative-ai",
     streams: googleGenerativeAIApi(),
-    // pi-ai's Google adapter rejects a custom fetch, so it can't be routed through a proxy.
-    acceptsFetch: false,
     defaultBaseUrl: "https://generativelanguage.googleapis.com/v1beta",
     keyOptional: false,
     list: "google"

@@ -128,6 +128,7 @@ interface Prepared {
   readonly baseUrl: string
   readonly apiKey: string | null
   readonly headers: Readonly<Record<string, string>>
+  readonly registerHeaders: (headers: Readonly<Record<string, string | undefined>> | undefined) => void
   readonly transport: RequestNetwork
   /** Removes this connection's secrets from text that will be stored or shown (PROVIDERS §5). */
   readonly scrub: (text: string) => string
@@ -150,13 +151,18 @@ export const makeScrub = (secrets: ReadonlyArray<string | null | undefined>) => 
   const values = [...new Set(secrets.filter((v): v is string => typeof v === "string" && v.length > 0))].sort(
     (a, b) => b.length - a.length
   )
-  return (text: string) => values.reduce((out, value) => out.split(value).join("[redacted]"), text)
+  const pattern = values.length
+    ? new RegExp(values.map((value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|"), "g")
+    : null
+  return (text: string) => (pattern ? text.replace(pattern, "[redacted]") : text)
 }
 
 /** One request-local inventory, populated as secrets resolve, before any payload is captured. */
 const requestSecrets = () => {
   const values = new Set<string>()
+  let cached: ((text: string) => string) | undefined
   const add = (value: string) => {
+    cached = undefined
     if (value) values.add(value)
     // Proxy credentials may be echoed independently, percent encoded, or as Basic auth.
     try {
@@ -171,7 +177,46 @@ const requestSecrets = () => {
     }
     return value
   }
-  return { add, scrub: () => makeScrub([...values]) }
+  const headers = (headers: Readonly<Record<string, string | undefined>> | undefined) => {
+    for (const value of Object.values(headers ?? {})) {
+      if (typeof value !== "string") continue
+      add(value)
+      const auth = /^(Bearer|Basic)\s+(.+)$/i.exec(value.trim())
+      if (!auth) continue
+      add(auth[2]!)
+      if (auth[1]!.toLowerCase() === "basic") {
+        const decoded = Buffer.from(auth[2]!, "base64").toString("utf8")
+        add(decoded)
+        const colon = decoded.indexOf(":")
+        if (colon >= 0) {
+          add(decoded.slice(0, colon))
+          add(decoded.slice(colon + 1))
+        }
+      }
+    }
+  }
+  const route = (value: string) => {
+    add(value)
+    const url = new URL(value)
+    // Routes have no public/private component annotation: conservatively protect all values.
+    for (const part of [
+      ...url.pathname.split("/"),
+      ...url.search
+        .slice(1)
+        .split("&")
+        .map((p) => p.slice(p.indexOf("=") + 1))
+    ]) {
+      if (!part) continue
+      add(part)
+      try {
+        add(decodeURIComponent(part))
+      } catch {
+        /* Malformed encodings remain covered verbatim. */
+      }
+    }
+    for (const value of url.searchParams.values()) add(value)
+  }
+  return { add, headers, route, scrub: (text: string) => (cached ??= makeScrub([...values]))(text) }
 }
 
 const binding = (connectionId: string, field: "headers" | "proxy_url") => `connection:${connectionId}:${field}`
@@ -315,6 +360,7 @@ const fromList = (error: ModelListError) =>
 const buildPiModel = async (prepared: Prepared, model: Model, effective: EffectiveModel): Promise<PiModel<Api>> => {
   const found = await catalogEntry(prepared.kind, model.key)
   const base = found?.sameApi ? found.entry : null
+  prepared.registerHeaders(base?.headers)
   const price = effective.price
   return {
     ...base,
@@ -383,6 +429,7 @@ export const layer = (options: ProvidersOptions = {}) =>
           if (origin === null) {
             return yield* providerError("unusable", `${connection.name}'s base URL isn't a valid URL: "${baseUrl}"`)
           }
+          inventory.route(baseUrl)
           const credential = resolved.credential
           // The key is checked against its allowed origins before it's even decrypted.
           if (credential !== null && bindKeysToOrigins && !credential.origins.includes(origin)) {
@@ -421,7 +468,7 @@ export const layer = (options: ProvidersOptions = {}) =>
                 ? { mode: "direct" }
                 : { mode: "inherit" }
           const headers = headersJson === null ? {} : (JSON.parse(headersJson) as Record<string, string>)
-          for (const value of Object.values(headers)) inventory.add(value)
+          inventory.headers(headers)
           const transport = network.prepare(override, inventory.add)
           // Over http a connection's own proxy reads every byte. Setting one needs no key, so
           // it would otherwise be a way to collect the key in the clear.
@@ -440,7 +487,8 @@ export const layer = (options: ProvidersOptions = {}) =>
             apiKey,
             headers,
             transport,
-            scrub: inventory.scrub()
+            registerHeaders: inventory.headers,
+            scrub: inventory.scrub
           }
           if (!info.acceptsFetch) {
             // Its traffic would bypass our fetch, so it may only go where we'd send it direct anyway.
@@ -964,7 +1012,8 @@ export const layer = (options: ProvidersOptions = {}) =>
             const effective = resolveModel(model.key, model.upstream, model.overrides, prepared.connection.compat)
             const piModel = yield* Effect.tryPromise({
               try: () => buildPiModel(prepared, model, effective),
-              catch: (error) => providerError("unknown", `could not prepare the model: ${String(error)}`)
+              catch: (error) =>
+                scrubbed(prepared, providerError("unknown", `could not prepare the model: ${String(error)}`))
             })
             // An unknown context gets a default for the request, but overflow is only judged
             // against a context some source actually reported.
