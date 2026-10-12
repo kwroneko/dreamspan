@@ -16,7 +16,7 @@ import { textField } from "@rp/shared/editing.ts"
 import type { LlmRequestId } from "@rp/shared/usage.ts"
 import { Context, Effect, Layer, Stream } from "effect"
 import type { Rpc, RpcGroup } from "effect/rpc"
-import { Writer } from "../src/db/Database.ts"
+import { Reader, Writer } from "../src/db/Database.ts"
 import * as FakeGenerator from "../src/dev/fakeGenerator.ts"
 import { png, textChunk } from "./formats/support.ts"
 import { client, login, outcome, posted, serverLayer, serverPort, testConfig } from "./support/config.ts"
@@ -68,9 +68,10 @@ interface OwnChat {
   readonly generatingId: VersionId
 }
 
-class Parties extends Context.Service<Parties, { readonly alice: Party; readonly bob: Party }>()(
-  "test/isolation/Parties"
-) {}
+class Parties extends Context.Service<
+  Parties,
+  { readonly alice: Party; readonly bob: Party; readonly reader: Reader["Service"] }
+>()("test/isolation/Parties") {}
 
 type Probe = (actor: Party, owner: Party) => Effect.Effect<void, unknown>
 
@@ -1171,9 +1172,35 @@ const seed = Effect.gen(function* () {
   const bobApi = yield* client({ cookie: bobCookie })
   return {
     alice: yield* party(aliceApi, aliceUser, "alice-password", aliceCookie),
-    bob: yield* party(bobApi, yield* bobApi.Whoami(), "bob-password", bobCookie)
+    bob: yield* party(bobApi, yield* bobApi.Whoami(), "bob-password", bobCookie),
+    reader: yield* Reader
   }
 })
+
+/**
+ * Storage operations no RPC reaches yet, but that act for a user: the matrix covers AppApi
+ * only, so its completeness check can't see them. Each is probed here the same way, until an
+ * RPC exposes it and it moves into the matrix.
+ */
+const storage: Record<string, (reader: Reader["Service"], actor: Party, owner: Party) => Effect.Effect<void, unknown>> =
+  {
+    // The run inspector's rebuild (ARCHITECTURE §14): another user's snapshot, as is, rebuilds nothing.
+    RebuildContext: (reader, actor, owner) =>
+      Effect.gen(function* () {
+        const { snapshot } = yield* reader.AssembleContext({
+          userId: owner.user.id,
+          chatId: owner.chat.chatId,
+          slotId: owner.chat.replySlotId,
+          versionId: owner.chat.generatingId,
+          now: Date.now(),
+          timeZone: "UTC",
+          frozen: null
+        })
+        yield* refused(reader.RebuildContext({ userId: actor.user.id, snapshot }), "NotFound")
+        const rebuilt = yield* reader.RebuildContext({ userId: owner.user.id, snapshot })
+        assert.deepStrictEqual(JSON.parse(rebuilt.snapshot), JSON.parse(snapshot))
+      })
+  }
 
 describe("isolation matrix", () => {
   it("has exactly one entry per RPC in AppApi", () => {
@@ -1228,6 +1255,17 @@ layer(Layer.effect(Parties, seed).pipe(Layer.provide(serverLayer(config, slowGen
   excludeTestServices: true,
   timeout: "60 seconds"
 })("isolation probes", (it) => {
+  for (const [tag, probe] of Object.entries(storage)) {
+    const ways = [
+      ["bob on alice's (an admin's)", (p: Parties["Service"]) => p.bob, (p: Parties["Service"]) => p.alice],
+      ["alice (an admin) on bob's", (p: Parties["Service"]) => p.alice, (p: Parties["Service"]) => p.bob]
+    ] as const
+    for (const [way, actor, owner] of ways) {
+      it.effect(`${tag} (storage): ${way}`, () =>
+        Effect.flatMap(Parties, (p) => run((a, o) => probe(p.reader, a, o), actor, owner))
+      )
+    }
+  }
   for (const [tag, entry] of Object.entries(matrix) as Array<[string, Entry]>) {
     if ("probe" in entry) {
       it.effect(`${tag}: bob on alice's (an admin's)`, () =>
