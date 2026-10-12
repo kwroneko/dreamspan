@@ -1,4 +1,4 @@
-// Client RPC handlers for the library (ARCHITECTURE.md §10). Storage enforces ownership:
+// Client RPC handlers for the library (ARCHITECTURE.md §11). Storage enforces ownership:
 // every read is the authenticated user's own.
 import { type AppApi, CurrentUser } from "@rp/shared/api.ts"
 import { ServerError } from "@rp/shared/errors.ts"

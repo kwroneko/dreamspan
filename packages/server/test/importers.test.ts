@@ -1,4 +1,4 @@
-// The importer registry and format detection (PLUGINS §8, ARCHITECTURE.md §10.2): every
+// The importer registry and format detection (PLUGINS §8, ARCHITECTURE.md §11.2): every
 // file goes to the importer its bytes call for, whatever its name says.
 import { readFileSync } from "node:fs"
 import { assert, describe, it } from "@effect/vitest"

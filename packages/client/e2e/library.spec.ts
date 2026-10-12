@@ -1,4 +1,4 @@
-// The import screen and the library list (ARCHITECTURE.md §10): files picked in the
+// The import screen and the library list (ARCHITECTURE.md §11): files picked in the
 // browser, uploaded to the real server, their reports read as text, and exports downloaded.
 // Every file here is made up.
 import { readFile, truncate, writeFile } from "node:fs/promises"

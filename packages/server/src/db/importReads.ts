@@ -1,4 +1,4 @@
-// Read handlers for importing and exporting library files (ARCHITECTURE.md §10).
+// Read handlers for importing and exporting library files (ARCHITECTURE.md §11).
 import type { UserId } from "@rp/shared/domain.ts"
 import { Effect, Predicate } from "effect"
 import { SqlClient } from "effect/sql"

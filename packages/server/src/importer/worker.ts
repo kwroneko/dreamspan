@@ -1,4 +1,4 @@
-// Format worker entry point (ARCHITECTURE.md §10.3). The parsers are synchronous and take
+// Format worker entry point (ARCHITECTURE.md §11.3). The parsers are synchronous and take
 // up to about a second on a hostile file, so they run here, one request at a time.
 import { NodeRuntime, NodeWorkerRunner } from "@effect/platform-node"
 import { Effect, Layer } from "effect"

@@ -1,4 +1,4 @@
-// Library documents back out as files (ARCHITECTURE.md §10.4), in the format worker: a
+// Library documents back out as files (ARCHITECTURE.md §11.4), in the format worker: a
 // large lorebook takes as long to write as to read.
 import { CardDoc } from "@rp/shared/docs/card.ts"
 import { LorebookDoc } from "@rp/shared/docs/lorebook.ts"

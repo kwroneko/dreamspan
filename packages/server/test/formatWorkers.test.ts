@@ -1,4 +1,4 @@
-// The format workers (ARCHITECTURE.md §10.3): parsing happens off the main thread, and a
+// The format workers (ARCHITECTURE.md §11.3): parsing happens off the main thread, and a
 // worker that dies fails only the file it had.
 import { mkdtempSync } from "node:fs"
 import { tmpdir } from "node:os"

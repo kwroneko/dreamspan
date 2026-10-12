@@ -1,4 +1,4 @@
-// Importing and exporting files at the real boundary (ARCHITECTURE.md §10): a real server
+// Importing and exporting files at the real boundary (ARCHITECTURE.md §11): a real server
 // with its database and format workers, files uploaded over HTTP, and the library rows,
 // files on disk and reports checked. Cross-user probes are in isolation.test.ts.
 import { createHash } from "node:crypto"

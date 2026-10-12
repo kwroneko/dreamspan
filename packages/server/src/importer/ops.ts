@@ -1,4 +1,4 @@
-// The format workers' operations (ARCHITECTURE.md §10.2): parsing an uploaded file and
+// The format workers' operations (ARCHITECTURE.md §11.2): parsing an uploaded file and
 // writing an export, both CPU work on untrusted or large data, kept off the main thread.
 import { ImportReport } from "@rp/shared/importReport.ts"
 import { EntityKind } from "@rp/shared/library.ts"

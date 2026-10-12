@@ -1,5 +1,5 @@
 // Library documents as stored: their content hash and their search text. Pure, so the
-// format workers work them out for an import, and the writer only stores them (§10.1).
+// format workers work them out for an import, and the writer only stores them (§11.1).
 import { createHash } from "node:crypto"
 import type { Doc } from "@rp/shared/library.ts"
 

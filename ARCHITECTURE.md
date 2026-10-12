@@ -40,9 +40,9 @@ Bun was measured as an alternative (2026-10-10) and not adopted. On this server 
 ## 2. Server
 
 `packages/server/src/main.ts` reads configuration from the environment and launches `ServerLive` (`server.ts`). That's one HTTP server with these parts:
-- **`/rpc`:** the RPC endpoint (`AppApi` from `@rp/shared/api.ts`) over a WebSocket, JSON-serialized. Every UI action is meant to become an RPC in this group (DESIGN §7.7). Today it has `Health`, `Whoami`, the account RPCs (§4), the provider-kind, connection, credential, model, network-settings and usage RPCs (§6), and `ListLibrary` (§10).
+- **`/rpc`:** the RPC endpoint (`AppApi` from `@rp/shared/api.ts`) over a WebSocket, JSON-serialized. Every UI action is meant to become an RPC in this group (DESIGN §7.7). Today it has `Health`, `Whoami`, the account RPCs (§4), the provider-kind, connection, credential, model, network-settings and usage RPCs (§6), and `ListLibrary` (§11).
 - **`/healthz`:** a plain-text liveness route, used by the Docker health check.
-- **`/auth/login`, `/auth/logout`** (§4) and **`/library/import`, `/library/export`** (§10.4): plain HTTP, for what a WebSocket message can't do well, a cookie and a file.
+- **`/auth/login`, `/auth/logout`** (§4) and **`/library/import`, `/library/export`** (§11.4): plain HTTP, for what a WebSocket message can't do well, a cookie and a file.
 - **Everything else:** the client build, served as a single-page app (unknown paths return `index.html`, so deep links work).
 
 **Configuration** (`config.ts`, environment variables):
@@ -50,9 +50,9 @@ Bun was measured as an alternative (2026-10-10) and not adopted. On this server 
 | Variable | Default | Meaning |
 |---|---|---|
 | `HOST`, `PORT` | `127.0.0.1`, `8080` | Listen address. `PORT=0` takes a free port, which the startup log names |
-| `DATA_DIR` | `./data` | Database, instance lock, media files (§10.1) |
+| `DATA_DIR` | `./data` | Database, instance lock, media files (§11.1) |
 | `DB_READERS` | `2` | Reader worker count, at least 1 (§3) |
-| `FORMAT_WORKERS` | `1` | Format worker count, at least 1: how many uploads are parsed, or exports written, at once (§10.3) |
+| `FORMAT_WORKERS` | `1` | Format worker count, at least 1: how many uploads are parsed, or exports written, at once (§11.3) |
 | `DB_ALLOW_NETWORK_FS` | `false` | Override the refusal of filesystems not known to be local (§3.4) |
 | `DB_WORKERS` | `bundle` in production, else `source` | Worker entry points, the format workers' too (§3.6) |
 | `AUTH_MODE` | `single` | `single` or `proxy` (§4) |
@@ -165,7 +165,7 @@ Other processes are the remaining risk, so they're kept out:
 
 ### 3.6 Worker bundles
 
-Each worker thread is a separate V8 isolate that loads its own copy of every module it imports. Loading Effect's module graph from source costs about 85 MB per worker. `npm run build` therefore bundles the worker entry points into single tree-shaken files with rolldown (`packages/server/scripts/build-workers.ts` writes `packages/server/dist/workers/{writer,reader,formats}.mjs`; the format worker is §10.3). A bundled worker costs about 19 MB (measured in `test/database.test.ts`, which fails above 40 MB).
+Each worker thread is a separate V8 isolate that loads its own copy of every module it imports. Loading Effect's module graph from source costs about 85 MB per worker. `npm run build` therefore bundles the worker entry points into single tree-shaken files with rolldown (`packages/server/scripts/build-workers.ts` writes `packages/server/dist/workers/{writer,reader,formats}.mjs`; the format worker is §11.3). A bundled worker costs about 19 MB (measured in `test/database.test.ts`, which fails above 40 MB).
 
 `DB_WORKERS` selects the entry points:
 - `source` is the default outside production, so development never runs a stale bundle.
@@ -560,7 +560,7 @@ In proxy mode, a WebSocket keeps the identity it opened with until it disconnect
   - **Models:** the merged list per connection, each field marked as the user's, the provider's or unknown. Refresh, hide, edit overrides, add by id.
   - **Network** (admins): the proxy as the server returns it, the bypass list, `forceProxy`, and `InvalidNetworkSettings` as a list of problems.
   - **Account** for everyone (password, log out, how you're signed in), and **Users** for admins (create, set passwords, disable).
-  - **Import** (`features/library/`, §10): pick or drop files (`FileDrop` in `ui/`: a label around a hidden file input, so it's a picker by click or keyboard too). They upload one at a time, each with its state (waiting, importing, imported, not imported, failed), and its report rendered as plain text, so file text that looks like HTML or Markdown shows as typed. A file over the 64 MB cap is refused before it's sent. With `?into=<ref>` it updates that entry from its new version and says what happened to each variant.
+  - **Import** (`features/library/`, §11): pick or drop files (`FileDrop` in `ui/`: a label around a hidden file input, so it's a picker by click or keyboard too). They upload one at a time, each with its state (waiting, importing, imported, not imported, failed), and its report rendered as plain text, so file text that looks like HTML or Markdown shows as typed. A file over the 64 MB cap is refused before it's sent. With `?into=<ref>` it updates that entry from its new version and says what happened to each variant.
   - **Library:** cards, lorebooks and presets by label, with variant and "update available" badges, an export per entry (cards pick PNG, V2 JSON, V3 JSON or CHARX) downloaded through a blob link, and "Update from file" on upstream entries. Uploads go through `useAction` only to invalidate the `library` key.
 - **Styling** (CLIENT-FRAMEWORK §8):
   - **Semantic tokens only.** `styles.css` defines colors by role (`canvas`, `surface`, `text`, `muted`, `accent`, `danger`, `warning`, `success`, `overlay`, …), for light and dark, with `data-theme` overrides.
@@ -900,9 +900,9 @@ One write operation, `ImportFile` (`db/libraryWrites.ts`), stores a parsed file 
 
 `ExportSource` (`db/importReads.ts`) reads what an export takes: the ref's head document, the card's first note, and the stored files the document names. **Only files the user holds a reference to come back.** A document is data, and an edit could put any media id in it; another user's file is left out as if it weren't there (`test/importStorage.test.ts`).
 
-### 10.2 Importers and detection
+### 11.2 Importers and detection
 
-**The importer registry** (`importer/importers.ts`, PLUGINS §8) is a registry of §6's kind: entries by id, overridden or disabled for the length of a scope. An importer has a format id, a `detect` test and a `parse` from bytes to a document, its report and the files that came with it. The built-ins register in order: `card` (PNG, CHARX, or JSON with a `spec`), `st-world-info` (JSON with `entries`), `st-preset` (any field only ST's preset and template files have, `isStPresetFile` in `formats/preset.ts`, so instruct and context templates reach the preset importer and are reported as unsupported), and `card-v1` (JSON with a `name`, asked last since the key is common). Parsing runs in a format worker (§10.3), so the registry lives there: a plugin's importer will be a module that worker loads.
+**The importer registry** (`importer/importers.ts`, PLUGINS §8) is a registry of §6's kind: entries by id, overridden or disabled for the length of a scope. An importer has a format id, a `detect` test and a `parse` from bytes to a document, its report and the files that came with it. The built-ins register in order: `card` (PNG, CHARX, or JSON with a `spec`), `st-world-info` (JSON with `entries`), `st-preset` (any field only ST's preset and template files have, `isStPresetFile` in `formats/preset.ts`, so instruct and context templates reach the preset importer and are reported as unsupported), and `card-v1` (JSON with a `name`, asked last since the key is common). Parsing runs in a format worker (§11.3), so the registry lives there: a plugin's importer will be a module that worker loads.
 
 **Detection reads the bytes, never the name** (`importer/detect.ts`). PNG and zip by their magic bytes; for JSON, the top-level keys, read in one pass without parsing: strings are skipped by their quotes and nesting is a counter, so a hostile file costs a linear scan and can't overflow a stack. The importer that's chosen parses the file properly, under its own caps (§8). A file no importer recognizes, and a file its importer rejects (`FormatError`), become a report with one error and nothing to store.
 
@@ -911,7 +911,7 @@ One write operation, `ImportFile` (`db/libraryWrites.ts`), stores a parsed file 
 - **ST's Character's Note** leaves the card's `extensions` and becomes the note document, so it lives in one place. ST's defaults apply: depth 4, role `system`. An empty one, which ST writes into every card, stays in the extensions untouched.
 - **Files are copied to buffers of their own** before they cross to the main thread. An extracted asset can be a view into the upload or into Node's shared buffer pool, and transferring that buffer would detach the pool under the worker.
 
-### 10.3 Format workers
+### 11.3 Format workers
 
 The parsers are synchronous and take up to about a second on a hostile file (§8), so they run in worker threads (`importer/worker.ts`), never on the main thread. `Formats` (`importer/Formats.ts`) is the main thread's side.
 - **The pool is the database readers'** (`db/readerPool.ts`, §3.1), with workers of its own. A worker is busy until it answers, so the pool's size is how many files are parsed at once, and the rest queue in order. A worker that dies (a crash, or its heap limit) fails only the file it had, with `FormatWorkerFailed`, which is logged, and is respawned a second later. The files queued behind it wait for the new worker, and fail only if it dies before it's ready too (`isolateCrashes` in the pool; the database readers keep failing their queue). `test/formatWorkers.test.ts` checks this with a test worker that dies on request, and fails without the option: the pool answers a crash with a protocol error, which fails every request of its client, and all the main thread's parses share one client.
@@ -922,7 +922,7 @@ The parsers are synchronous and take up to about a second on a hostile file (§8
 
 **Known limits:** a parse can't be interrupted. A parser bug that never returns would hold its worker for good, and every later import would queue behind it. Terminating a worker after a deadline needs the pool to kill threads, which it doesn't yet.
 
-### 10.4 Upload and export
+### 11.4 Upload and export
 
 **Plain HTTP, not RPC** (`importer/routes.ts`). RPC messages are JSON, so a file would cross as base64: a third larger, one WebSocket message held whole, and decoded on the main thread before the format worker could have it. Over HTTP the body arrives as bytes, is capped as it streams, and goes to the worker as it is.
 
@@ -931,15 +931,15 @@ The parsers are synchronous and take up to about a second on a hostile file (§8
 - **Only `Content-Type: application/octet-stream`** (`415` otherwise): a cross-site form can't send it, and a cross-site `fetch` with it needs a preflight the server never answers. That's on top of the `Origin` check.
 - **Size:** at most 64 MiB, the parsers' own file cap (§8). A larger `Content-Length` is `413` before anything is read. Without one, or when it lies, reading stops as the body passes the cap and the connection is cut. Uploads wait for a permit before their body is read, two per format worker, so the server holds at most that many bodies; the rest wait in their sockets, where TCP holds the sender back. Exports take the same permits before they read their files.
 - **One transfer per user at a time** (`429` for a second one), so no one user's stalled uploads hold every permit, and a body has 2 minutes to arrive (64 MiB at half a megabyte a second). A stalled upload holds its permit until then, so two users stalling together can still hold up others' imports for that long.
-- **The name** is used as the label fallback and the source path, without folders or control characters, at most 255 characters. The format never comes from it (§10.2).
-- **Then:** the format worker parses the file (§10.3), its media are written to disk, and `ImportFile` stores it (§10.1).
+- **The name** is used as the label fallback and the source path, without folders or control characters, at most 255 characters. The format never comes from it (§11.2).
+- **Then:** the format worker parses the file (§11.3), its media are written to disk, and `ImportFile` stores it (§11.1).
 - **The answer** is `ImportResult` (`@rp/shared/libraryImport.ts`) as JSON: the report, and what the file became, or `library: null` with the report saying why. `into` naming another user's ref, or none, is `404`; a variant or another kind `409`; a worker that died while it had the file `500`, with a sentence saying so.
 
 **`POST /library/export`**, JSON `{refId, format}` (at most 4 KiB, `application/json` only): the ref's head as a file.
 - **Formats** (`exportFormats`): a card as `card-png`, `card-v2-json`, `card-v3-json` or `card-charx`; a lorebook as `st-world-info`; a preset as `st-preset`. Another kind's format is `400`, another user's ref `404`.
 - **Written in a format worker** like a parse, since a large lorebook takes as long to write (`importer/exporters.ts`). The document is decoded against its kind's schema first; one that no longer matches (an edit made it invalid) is `422` with a sentence.
 - **The card's note goes back** as ST's `depth_prompt`, unless the note is private.
-- **Files:** the avatar and assets the user holds (§10.1), read from disk by the paths `mediaPath` makes and no other. A card whose avatar isn't a PNG goes into a 1×1 placeholder PNG, since a PNG card needs an image.
+- **Files:** the avatar and assets the user holds (§11.1), read from disk by the paths `mediaPath` makes and no other. A card whose avatar isn't a PNG goes into a 1×1 placeholder PNG, since a PNG card needs an image.
 - **The response** has the file's type, `Content-Disposition: attachment` with the label as the name (an ASCII fallback, and the real name percent-encoded), `nosniff` and `no-store`.
 
 **Tests** (`test/libraryImport.test.ts`, a real server with its workers): a card PNG's rows, revision, source hash, stored avatar and note; every card format out and back in, with the Character's Note restored; CHARX assets stored and exported; lorebooks and presets; a re-import merging into a variant the user edited; unrecognized and broken files storing nothing; the content type, `Origin`, declared and streamed size checks; a second transfer while one stalls; `401` without a session. The streamed cap's test fails with the cap raised; the cross-user probes fail with the ownership checks removed.

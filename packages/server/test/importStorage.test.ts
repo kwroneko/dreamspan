@@ -1,5 +1,5 @@
 // The import's storage operations through the real writer and readers (ARCHITECTURE.md
-// §10): ImportFile and ExportSource. The HTTP upload and the parsing are tested in
+// §11): ImportFile and ExportSource. The HTTP upload and the parsing are tested in
 // libraryImport.test.ts.
 import { mkdtempSync } from "node:fs"
 import { tmpdir } from "node:os"

@@ -1,4 +1,4 @@
-// Main-thread access to the format workers (ARCHITECTURE.md §10.3). The pool is the
+// Main-thread access to the format workers (ARCHITECTURE.md §11.3). The pool is the
 // database readers' (db/readerPool.ts), with crashes isolated: a worker is busy until it
 // answers, a crashed one fails only the request it was running and is respawned, and
 // requests beyond the pool's size queue in order.

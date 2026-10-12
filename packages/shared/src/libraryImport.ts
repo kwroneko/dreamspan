@@ -1,4 +1,4 @@
-// Files in and out of the library (ARCHITECTURE.md §10): what importing a file did, and
+// Files in and out of the library (ARCHITECTURE.md §11): what importing a file did, and
 // the formats a library document can be exported as.
 import { Schema } from "effect"
 import { ImportReport } from "./importReport.ts"

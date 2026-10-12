@@ -1,4 +1,4 @@
-// Files into and out of the library over plain HTTP (ARCHITECTURE.md §10.4). RPC messages
+// Files into and out of the library over plain HTTP (ARCHITECTURE.md §11.4). RPC messages
 // are JSON, so a file would cross as base64: a third larger, and decoded whole on the main
 // thread. Both routes act as the user the session names, behind the same cross-site guard
 // as every request (server.ts), and refuse content types a cross-site form can send.

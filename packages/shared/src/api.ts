@@ -260,7 +260,7 @@ export class AppApi extends RpcGroup.make(
     success: Schema.Array(LlmRequest),
     error: ServerError
   }),
-  // --- Library import (ARCHITECTURE.md §10). Files go in and out over HTTP
+  // --- Library import (ARCHITECTURE.md §11). Files go in and out over HTTP
   // (POST /library/import, /library/export), since RPC messages are JSON.
   /** The user's upstream refs and variants of one kind, by label. */
   Rpc.make("ListLibrary", {

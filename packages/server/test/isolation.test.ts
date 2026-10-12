@@ -350,7 +350,7 @@ const http = (party: Party, path: string, body: Uint8Array | string, contentType
 
 const presetFile = readFileSync(new URL("./fixtures/presets/default.json", import.meta.url))
 
-/** The HTTP routes that act on a user's data (ARCHITECTURE.md §10.4), probed the same way. */
+/** The HTTP routes that act on a user's data (ARCHITECTURE.md §11.4), probed the same way. */
 const routes: Record<string, Probe> = {
   "POST /library/import": (actor, owner) =>
     Effect.gen(function* () {

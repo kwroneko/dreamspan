@@ -704,7 +704,7 @@ export class WriteOps extends RpcGroup.make(
     success: Schema.Struct({ id: Schema.String, seq: Schema.Int }),
     error: Schema.Union([NotFound, StorageError])
   }),
-  // --- Library import (ARCHITECTURE.md §10). The file was parsed in a format worker;
+  // --- Library import (ARCHITECTURE.md §11). The file was parsed in a format worker;
   // documents cross as JSON text, which costs the main thread a copy, not a walk.
   /**
    * A parsed file into the library: a new entity with an upstream ref, or, with
@@ -945,7 +945,7 @@ export class ReadOps extends RpcGroup.make(
     success: Schema.Array(LlmRequest),
     error: StorageError
   }),
-  // --- Library import (ARCHITECTURE.md §10).
+  // --- Library import (ARCHITECTURE.md §11).
   /**
    * What exporting a ref takes: its head document, its card's first note, and the stored
    * files the document names that the user holds a reference to.
