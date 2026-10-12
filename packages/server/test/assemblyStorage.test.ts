@@ -118,6 +118,85 @@ const setup = (handle = "ana") =>
 const texts = (snapshot: ContextSnapshot) => snapshot.request.messages.map((m) => `${m.role}: ${m.content}`)
 
 describe("context assembly from the database", () => {
+  it.live(
+    "rebuilds shared preview limits with identical frozen dice work",
+    () =>
+      Effect.gen(function* () {
+        const { reader, entity, state, userId, assemble } = yield* setup()
+        const doc = loreBook(
+          Array.from({ length: 5 }, (_, uid) =>
+            loreEntry({ constant: true, content: `ROLL_${uid} {{roll::1000000d1}}` }, uid)
+          )
+        ).document
+        const book = yield* entity("lorebook", "Dice", doc)
+        yield* state({ key: "lorebook.attach", value: { ref: book.ref.id } })
+        const first = yield* assemble()
+        assert.lengthOf(
+          first.pieces.filter((p) => p.source.kind === "lorebook" && p.source.activation.status === "activated"),
+          3
+        )
+        assert.ok(first.issues.some((i) => i.message.includes("preview work limit")))
+        const rebuilt = yield* reader.RebuildContext({ userId, snapshot: JSON.stringify(first) })
+        assert.ok(rebuilt._tag === "Rebuilt")
+        assert.deepStrictEqual(JSON.parse(rebuilt.snapshot), first)
+      }).pipe(Effect.provide(database())),
+    60000
+  )
+
+  it.live("resolves legacy primary lore by its imported filename and pins that identity", () =>
+    Effect.gen(function* () {
+      const { writer, reader, state, userId, assemble, mira } = yield* setup()
+      const doc = loreBook([loreEntry({ constant: true, content: "PRIMARY_LORE" })], {
+        name: "Different display name"
+      }).document
+      const book = yield* writer.CreateEntity({
+        userId,
+        kind: "lorebook",
+        label: "Different label",
+        subtitle: "",
+        doc: doc as never,
+        schemaVersion: 1,
+        origin: "import",
+        sourcePath: "ST/data/default-user/worlds/Primary file.json"
+      })
+      yield* writer.EditRef({
+        userId,
+        refId: mira.ref.id,
+        expectedRowVersion: mira.ref.rowVersion,
+        doc: { ...cardDoc("Mira", "Traveler"), character_book: doc, extensions: { world: "Primary file" } } as never,
+        message: null,
+        commitDraft: null
+      })
+      yield* state({ key: "lorebook.attach", value: { ref: book.ref.id } })
+      const first = yield* assemble()
+      assert.lengthOf(
+        texts(first)
+          .join("\n")
+          .match(/PRIMARY_LORE/g)!,
+        1
+      )
+      assert.strictEqual(first.sources?.lorebooks?.[0]?.found[0]?.sourceName, "Primary file")
+      yield* writer.EditRef({
+        userId,
+        refId: book.ref.id,
+        expectedRowVersion: book.ref.rowVersion,
+        doc: { ...doc, name: "Renamed again" } as never,
+        message: null,
+        commitDraft: null
+      })
+      assert.lengthOf(
+        texts(yield* assemble())
+          .join("\n")
+          .match(/PRIMARY_LORE/g)!,
+        1
+      )
+      yield* writer.DeleteEntity({ userId, entityId: book.entityId })
+      const rebuilt = yield* reader.RebuildContext({ userId, snapshot: JSON.stringify(first) })
+      assert.ok(rebuilt._tag === "Rebuilt")
+      assert.deepStrictEqual(JSON.parse(rebuilt.snapshot), first)
+    }).pipe(Effect.provide(database()))
+  )
+
   it.live("attaches lore on a path, isolates ids, and rebuilds after book edits and message amendments", () =>
     Effect.gen(function* () {
       const { writer, reader, userId, chat, state, entity, sent, assemble, mira } = yield* setup()
@@ -368,7 +447,7 @@ describe("context assembly from the database", () => {
     Effect.gen(function* () {
       const { reader, userId, assemble } = yield* setup()
       const built = yield* assemble()
-      for (const version of [undefined, 0, 1, 2, 3, 4]) {
+      for (const version of [undefined, 0, 1, 2, 3, 4, 5]) {
         const legacy = { ...built, assemblerVersion: version, sources: { ...built.sources, userMessages: [] } }
         const json = JSON.stringify(legacy)
         const result = yield* reader.RebuildContext({ userId, snapshot: json })
@@ -376,7 +455,7 @@ describe("context assembly from the database", () => {
         assert.ok(result._tag === "EarlierAssemblerVersion")
         assert.strictEqual(result.storedSnapshot, json)
       }
-      assert.strictEqual(built.assemblerVersion, 5)
+      assert.strictEqual(built.assemblerVersion, 6)
       const rebuilt = yield* reader.RebuildContext({ userId, snapshot: JSON.stringify(built) })
       assert.ok(rebuilt._tag === "Rebuilt")
       assert.deepStrictEqual(JSON.parse(rebuilt.snapshot), built)

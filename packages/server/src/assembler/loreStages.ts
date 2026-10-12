@@ -1,7 +1,7 @@
 // Lorebook reads and keyword activation, in the reader worker's registered pipeline.
 import { Effect } from "effect"
 import { matchLorebooks } from "./lorebook.ts"
-import { loreAllowance } from "./budget.ts"
+import { loreAllowance, loreBudget } from "./budget.ts"
 import { estimateTokens } from "./st.ts"
 import { cardFields } from "./macros.ts"
 import { AssemblySources, type AssemblerStage, need } from "./pipeline.ts"
@@ -32,7 +32,10 @@ export const lorebooksStage: AssemblerStage = {
         !attached.some(
           (book) =>
             state.lorebookBindings[card.entity] === book.id ||
-            (state.lorebookBindings[card.entity] === undefined && card.doc.extensions.world === book.doc.name)
+            (state.lorebookBindings[card.entity] === undefined &&
+              typeof book.sourceName === "string" &&
+              book.sourceName !== "" &&
+              card.doc.extensions.world === book.sourceName)
         )
           ? [
               {
@@ -139,7 +142,7 @@ export const loreActivationStage: AssemblerStage = {
           books,
           scan,
           {
-            budget: loreAllowance(assembly),
+            budget: loreBudget(assembly),
             ...(!need(assembly, "mode").st ? { hardBudget: loreAllowance(assembly) } : {}),
             scanDepth: 2,
             wholeWords: true,

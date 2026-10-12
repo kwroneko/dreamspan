@@ -44,7 +44,6 @@ const roll = (call: MacroCall) => {
   if (!m) return ""
   const dice = Number(m[1] ?? 1)
   const sides = Number(m[2])
-  call.charge(dice)
   let total = Number(m[3] ?? 0)
   for (let i = 0; i < dice; i++) total += 1 + Math.floor(call.random() * sides)
   return String(total)
@@ -145,7 +144,14 @@ export const utilityMacros: ReadonlyArray<MacroSpec> = [
     args: [{ name: "comment" }],
     handler: () => ""
   },
-  { name: "roll", args: [{ name: "formula" }], volatile: true, accepts: rollable, handler: roll },
+  {
+    name: "roll",
+    args: [{ name: "formula" }],
+    volatile: true,
+    work: (call) => dice(call)?.dice ?? 0,
+    accepts: rollable,
+    handler: roll
+  },
   {
     name: "random",
     volatile: true,

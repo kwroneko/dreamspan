@@ -1202,6 +1202,34 @@ describe("lorebook assembly", () => {
       events: [at(null, { key: "lorebook.attach", value: { ref: "book" as never } })],
       ...fields
     })
+  it.each(["empty", "tiny", "constant", "ineligible", "disabled"])(
+    "keeps the latest user message with %s lore in a small context",
+    async (kind) => {
+      const doc = loreBook(
+        kind === "empty"
+          ? []
+          : [
+              loreEntry(
+                kind === "tiny"
+                  ? { keys: ["unsaid"], content: "A fact." }
+                  : kind === "constant"
+                    ? { constant: true, content: "A fact." }
+                    : { constant: kind === "disabled", enabled: kind !== "disabled", content: "x".repeat(5000) }
+              )
+            ]
+      ).document
+      const f = fixture({
+        lorebooks: [{ ...attached, doc }],
+        cards: [{ entity: "mira", doc: card("Mira", { description: "A traveler." }) }],
+        persona: "",
+        messages: [{ side: "user", content: "hello" }],
+        events: [...fixture().events!, at(null, { key: "layout.cards", value: "concat" })],
+        preset: preset({ openai_max_context: 96, openai_max_tokens: 16 })
+      })
+      expect(contents(await assembled({ ...f, lorebooks: [] })).join("\n")).toContain("hello")
+      expect(contents(await assembled(f)).join("\n")).toContain("hello")
+    }
+  )
   it("does not preview content of rejected candidates", async () => {
     const doc = loreBook([
       loreEntry({ keys: ["unsaid"], content: "{{space::5000000}}{{random::a::b}}" }),
@@ -1279,7 +1307,7 @@ describe("lorebook assembly", () => {
   it("uses the attached primary book once and the embedded book only as fallback", async () => {
     const doc = loreBook([loreEntry({ constant: true, content: "PRIMARY_LORE" })], {}, "Primary world").document
     const f = fixture({
-      lorebooks: [{ ...attached, doc }],
+      lorebooks: [{ ...attached, doc, sourceName: "Primary world" }],
       cards: [{ entity: "mira", doc: { ...mira, character_book: doc, extensions: { world: "Primary world" } } }]
     })
     const result = await assembled(f)

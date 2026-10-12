@@ -541,6 +541,7 @@ class Expansion {
     const frozen = key !== undefined && Object.hasOwn(this.run.frozen, key) ? this.run.frozen[key] : undefined
     let value: string
     try {
+      if (entry.work) call.charge(entry.work(call))
       if (entry.volatile === "clock") {
         // The time it read is what's frozen: its value follows from that, so it can only
         // ever be a value the macro produces.

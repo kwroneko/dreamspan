@@ -138,8 +138,10 @@ export const sqlSources = (
 
   /** A ref the user owns, of this chat if it's an override, with its head's document. */
   const refHead = (refId: string, kind: string, entity?: string) =>
-    sql<{ id: string; entity_id: string; head_revision_id: string; doc_json: string }>`
-      SELECT r.id, r.entity_id, r.head_revision_id, h.doc_json FROM entity_refs r
+    sql<{ id: string; entity_id: string; head_revision_id: string; doc_json: string; source_path: string | null }>`
+      SELECT r.id, r.entity_id, r.head_revision_id, h.doc_json,
+        coalesce(r.source_path, (SELECT u.source_path FROM entity_refs u WHERE u.entity_id = r.entity_id AND u.ref_kind = 'upstream')) AS source_path
+      FROM entity_refs r
       JOIN entities e ON e.id = r.entity_id JOIN entity_revisions h ON h.id = r.head_revision_id
       WHERE r.id = ${refId} AND e.owner_user_id = ${userId} AND e.kind = ${kind} AND e.deleted_at IS NULL
         AND (r.chat_id IS NULL OR r.chat_id = ${chatId})
@@ -333,13 +335,21 @@ export const sqlSources = (
             const row = yield* refHead(id, "lorebook")
             if (!row) return []
             const doc = yield* decoded<LorebookDoc>(decodeLorebook(JSON.parse(row.doc_json)), "A lorebook")
-            return [{ id, entity: row.entity_id, revision: row.head_revision_id, doc } satisfies LorebookInput]
+            const sourceName =
+              row.source_path
+                ?.replaceAll("\\", "/")
+                .split("/")
+                .at(-1)
+                ?.replace(/\.json$/i, "") ?? null
+            return [
+              { id, entity: row.entity_id, revision: row.head_revision_id, doc, sourceName } satisfies LorebookInput
+            ]
           })
         )
         const books = read.flat()
         pins.lorebooks.push({
           key: keyOf(refs),
-          found: books.map(({ id, entity, revision }) => ({ id, entity, revision }))
+          found: books.map(({ id, entity, revision, sourceName }) => ({ id, entity, revision, sourceName }))
         })
         return books
       }),
@@ -600,12 +610,12 @@ const replaySources = (
     lorebooks: (refs) =>
       Effect.gen(function* () {
         const { found } = yield* pinned(pins.lorebooks ?? [], keyOf(refs), "a lorebook")
-        return yield* Effect.forEach(found, ({ id, entity, revision }) =>
+        return yield* Effect.forEach(found, ({ id, entity, revision, sourceName }) =>
           Effect.gen(function* () {
             const row = yield* revisionDoc(revision, "lorebook", entity)
             if (!row) return yield* unpinned("a lorebook")
             const doc = yield* decoded<LorebookDoc>(decodeLorebook(JSON.parse(row.doc_json)), "A lorebook")
-            return { id, entity, revision, doc } satisfies LorebookInput
+            return { id, entity, revision, doc, sourceName: sourceName ?? null } satisfies LorebookInput
           })
         )
       }),

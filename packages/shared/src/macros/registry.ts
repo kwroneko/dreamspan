@@ -83,6 +83,9 @@ export interface MacroSpec {
    * was never drawn) is drawn again. Without it, any frozen value is taken.
    */
   readonly accepts?: (call: MacroCall, value: string) => boolean
+  /** Logical handler work from its arguments, charged for fresh and frozen values alike.
+   * Volatile handlers put their work here rather than charging only when drawing. */
+  readonly work?: (call: MacroCall) => number
   readonly handler: (call: MacroCall) => string
 }
 

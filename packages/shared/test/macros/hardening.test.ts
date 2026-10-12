@@ -309,3 +309,18 @@ it("charges a shared preview allowance before allocating repeated strings", () =
     repeat.mockRestore()
   }
 })
+
+it.each(["{{roll::20d6}}", "{{random::a::b}}", "{{pick::a::b}}", "{{time}}"])(
+  "charges identical work for fresh and frozen %s",
+  (text) => {
+    const sharedWork = { remaining: 50000 }
+    const first = expand(request(text, { sharedWork }))
+    expect(first._tag).toBe("Expanded")
+    if (first._tag !== "Expanded") return
+    const replayWork = { remaining: 50000 }
+    const random = vi.fn(() => 0.9)
+    expect(expand(request(text, { sharedWork: replayWork, frozen: first.frozen, random }))).toEqual(first)
+    expect(replayWork.remaining).toBe(sharedWork.remaining)
+    expect(random).not.toHaveBeenCalled()
+  }
+)

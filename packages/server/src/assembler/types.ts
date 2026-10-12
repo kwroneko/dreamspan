@@ -9,7 +9,7 @@ import type { PresetDoc } from "@rp/shared/docs/preset.ts"
 import { Schema } from "effect"
 
 /** Bump whenever identical inputs would assemble differently. Missing means version 0. */
-export const ASSEMBLER_VERSION = 5
+export const ASSEMBLER_VERSION = 6
 
 export type Role = "system" | "user" | "assistant"
 
@@ -56,6 +56,8 @@ export interface LorebookInput {
   readonly entity: string
   readonly revision: string
   readonly doc: LorebookDoc
+  /** Retained import filename without its extension; never the mutable document name. */
+  readonly sourceName?: string | null
   /** An embedded book's owning card, for macro bindings. */
   readonly card?: CardInput
 }
@@ -180,7 +182,12 @@ export interface SourcePins {
   }>
   readonly lorebooks?: ReadonlyArray<{
     readonly key: string
-    readonly found: ReadonlyArray<{ readonly id: string; readonly entity: string; readonly revision: string }>
+    readonly found: ReadonlyArray<{
+      readonly id: string
+      readonly entity: string
+      readonly revision: string
+      readonly sourceName?: string | null
+    }>
   }>
   readonly notes: ReadonlyArray<{
     readonly key: string
