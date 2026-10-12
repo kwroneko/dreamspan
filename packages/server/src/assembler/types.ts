@@ -2,12 +2,14 @@
 import type { FrozenValues } from "@rp/shared/macros/expand.ts"
 import type { VariableEffect } from "@rp/shared/macros/variables.ts"
 import type { CardDoc } from "@rp/shared/docs/card.ts"
+import type { LorebookDoc } from "@rp/shared/docs/lorebook.ts"
+import type { matchLorebooks } from "./lorebook.ts"
 import type { NoteDoc } from "@rp/shared/docs/note.ts"
 import type { PresetDoc } from "@rp/shared/docs/preset.ts"
 import { Schema } from "effect"
 
 /** Bump whenever identical inputs would assemble differently. Missing means version 0. */
-export const ASSEMBLER_VERSION = 3
+export const ASSEMBLER_VERSION = 4
 
 export type Role = "system" | "user" | "assistant"
 
@@ -27,12 +29,36 @@ export type Source =
       readonly identifier: string
     }
   | { readonly kind: "card"; readonly entity: string; readonly revision: string; readonly field: string }
+  | {
+      readonly kind: "lorebook"
+      readonly book: string
+      readonly revision: string
+      readonly uid: number
+      readonly activation: LoreRecord
+    }
   | { readonly kind: "note"; readonly entity: string; readonly revision: string }
   | { readonly kind: "message"; readonly slot: string; readonly version: string }
   /** Text from the version being generated: its one-turn direction (DESIGN §2.2). */
   | { readonly kind: "direction"; readonly version: string }
   /** Text the assembler wrote itself, such as a card's label or ST's placeholder. */
   | { readonly kind: "assembler"; readonly what: string }
+
+export type LoreRecord =
+  | {
+      readonly status: "activated"
+      readonly step: number
+      readonly why: ReturnType<typeof matchLorebooks>["activated"][number]["why"]
+    }
+  | { readonly status: "skipped"; readonly step: number; readonly reason: string }
+
+export interface LorebookInput {
+  readonly id: string
+  readonly entity: string
+  readonly revision: string
+  readonly doc: LorebookDoc
+  /** An embedded book's owning card, for macro bindings. */
+  readonly card?: CardInput
+}
 
 /** One piece of the context: a prompt, a card field, a message, as it was sent. */
 export interface Piece {
@@ -89,7 +115,8 @@ export interface AssembledRequest {
 
 /** Something about the context the user should know: a piece dropped, a setting not applied. */
 export interface Issue {
-  readonly kind: "prefill_dropped" | "macro_limit" | "history_truncated" | "examples_truncated" | "regex_skipped"
+  readonly kind:
+    "prefill_dropped" | "macro_limit" | "history_truncated" | "examples_truncated" | "regex_skipped" | "lorebook_issue"
   readonly message: string
 }
 
@@ -122,6 +149,8 @@ export interface ContextSnapshot {
   readonly frozen: Readonly<Record<string, FrozenValues>>
   /** Variable writes the preset's and cards' macros made, in order, to record as state. */
   readonly effects: ReadonlyArray<VariableEffect>
+  /** An emergency deadline outcome: reuse it instead of racing the clock on rebuild. */
+  readonly loreFallback?: ReturnType<typeof matchLorebooks>
   /** What the sources read, by id and revision, so the context can be read again exactly. */
   readonly sources?: SourcePins
   /** Variable writes of template messages expanded for the first time, to record at their positions. */
@@ -143,6 +172,10 @@ export interface SourcePins {
   readonly cards: ReadonlyArray<{
     readonly key: string
     readonly found: ReadonlyArray<{ readonly entity: string; readonly ref: string | null; readonly revision: string }>
+  }>
+  readonly lorebooks?: ReadonlyArray<{
+    readonly key: string
+    readonly found: ReadonlyArray<{ readonly id: string; readonly entity: string; readonly revision: string }>
   }>
   readonly notes: ReadonlyArray<{
     readonly key: string

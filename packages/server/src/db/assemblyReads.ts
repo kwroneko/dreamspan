@@ -49,7 +49,13 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
           { pins: taken.sources, inputs }
         )
         const built = yield* assembler
-          .assemble({ now: inputs.now, timeZone: inputs.timeZone, frozen: taken.frozen, random: Math.random })
+          .assemble({
+            now: inputs.now,
+            timeZone: inputs.timeZone,
+            frozen: taken.frozen,
+            random: Math.random,
+            ...(taken.loreFallback ? { loreFallback: taken.loreFallback } : {})
+          })
           .pipe(Effect.provide(sources.layer))
         return { _tag: "Rebuilt" as const, snapshot: JSON.stringify({ ...built, sources: sources.pins() }) }
       }).pipe(query("RebuildContext")),

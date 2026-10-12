@@ -4,6 +4,7 @@ import type { CardFields } from "@rp/shared/macros/context.ts"
 import type { VariableEffect } from "@rp/shared/macros/variables.ts"
 import { type ChatState, foldState, noteSwitches } from "@rp/shared/state.ts"
 import { Effect, type Scope } from "effect"
+import { loreActivationStage, lorebooksStage } from "./loreStages.ts"
 import { SUMMARY_HISTORY, summaryOnPath as selectSummary } from "./summary.ts"
 import { placeBreakpoints } from "./breakpoints.ts"
 import { cardBlock, directive, personaBlock } from "./layouts.ts"
@@ -357,7 +358,7 @@ const historyStage: AssemblerStage = {
       let leaf = target.parentSlotId
       let tokens = 0
       let depth = 0
-      while (leaf !== null && tokens < budget) {
+      while (leaf !== null && (tokens < budget || depth < (assembly.loreScanDepth ?? 0))) {
         const window = yield* sources.history(leaf, HISTORY_WINDOW)
         entries = [...window.entries, ...entries]
         // A template's stored text isn't what it expands to, which may be nothing: it counts as
@@ -385,6 +386,29 @@ const historyStage: AssemblerStage = {
       return assembly
     })
 }
+
+/** Lore scanning sees the prompt-side templates too; composition reuses these results. */
+const loreScanStage = sync("lore-scan", (assembly) => {
+  if (!need(assembly, "lorebooks").length) return
+  const projected = need(assembly, "projected")
+  const scripted = new Map(need(assembly, "scripted"))
+  const rest = projected.flatMap((p, i) =>
+    scripted.get(p.entry.versionId)?.depth === projected.length - 1 - i ? [] : [i]
+  )
+  const results = applyScripts(
+    assembly,
+    need(assembly, "scripts"),
+    rest.map((i) => ({
+      text: need(assembly, "macros").text(projected[i]!.piece),
+      placement: placementOf(projected[i]!.entry, need(assembly, "cast")),
+      depth: projected.length - 1 - i
+    }))
+  )
+  rest.forEach((index, i) =>
+    scripted.set(projected[index]!.entry.versionId, { ...results[i]!, depth: projected.length - 1 - index })
+  )
+  assembly.scripted = scripted
+})
 
 /** Where a template message is: the cast, names and card its macros saw there. */
 interface Position {
@@ -954,8 +978,69 @@ const composeStage = sync("compose", (assembly) => {
   }
 
   const collection = collectionOf(assembly)
-  place(collection, "worldInfoBefore", "system", null)
-  place(collection, "worldInfoAfter", "system", null)
+  const lore = assembly.lore ?? []
+  const loreBlock = (id: string, entries: typeof lore, format = false): Text | null => {
+    if (!entries.length) return null
+    const parts = entries.map((e) => e.piece)
+    let text = parts.map(env.text).filter(Boolean).join("\n")
+    if (format && utility.wi_format) {
+      const wrapper = presetText(assembly, `utility.wi_format:${id}`, utility.wi_format)
+      text = wrapper.text.replace(/\{0\}/g, () => text)
+      parts.push(wrapper.piece)
+    }
+    return { text, piece: env.verbatim(`lore:block:${id}`, { kind: "assembler", what: "lorebook block" }, text, parts) }
+  }
+  const stLore = mode.st ? lore.toReversed() : []
+  place(
+    collection,
+    "worldInfoBefore",
+    "system",
+    loreBlock(
+      "before",
+      stLore.filter((e) => e.entry.position === "before_char"),
+      true
+    )
+  )
+  place(
+    collection,
+    "worldInfoAfter",
+    "system",
+    loreBlock(
+      "after",
+      stLore.filter((e) => e.entry.position === "after_char"),
+      true
+    )
+  )
+  if (!mode.st) {
+    const block = loreBlock("tail", lore)
+    // Always reserve the volatility boundary, including when activation produced nothing.
+    control.unshift({
+      role: "system",
+      content: block?.text ?? "",
+      pieces: block ? [block.piece] : [],
+      kind: "volatile"
+    })
+  }
+  const loreExamples = (position: "em_top" | "em_bottom") =>
+    stLore
+      .filter((e) => e.entry.position === position)
+      .flatMap((e) =>
+        exampleBlocks(env.text(e.piece)).map((block) =>
+          parseExampleBlock(block, names.user, names.char, false).map((line): ChatLine => ({
+            role: "system",
+            content: line.content,
+            name: line.name,
+            pieces: [e.piece],
+            kind: "volatile"
+          }))
+        )
+      )
+  examples = [...loreExamples("em_top"), ...examples, ...loreExamples("em_bottom")]
+  for (const e of stLore.filter((e) => e.entry.position === "outlet"))
+    assembly.issues.push({
+      kind: "lorebook_issue",
+      message: `Lorebook outlet ${e.entry.outlet_name} has no prompt outlet; entry ${e.entry.uid} was not placed.`
+    })
   place(collection, "charDescription", "system", markers.description)
   place(collection, "charPersonality", "system", markers.personality)
   place(collection, "scenario", "system", markers.scenario)
@@ -988,7 +1073,36 @@ const composeStage = sync("compose", (assembly) => {
   // Placement order is independent of expansion order: summaries see main's writes.
   const notes = pendingNotes.flatMap(({ text, place }) => {
     const expanded = text()
-    return expanded ? [{ text: expanded, place }] : []
+    if (!expanded) return []
+    const note = assembly.pieces[expanded.piece]?.source
+    const input = note?.kind === "note" ? assembly.notes?.find((n) => n.entity === note.entity) : undefined
+    const author = input && (input.doc.kind === "author_note" || input.entity === need(assembly, "state").authorNote)
+    if (!author) return [{ text: expanded, place }]
+    const top = loreBlock(
+      "an-top",
+      stLore.filter((e) => e.entry.position === "an_top")
+    )
+    const bottom = loreBlock(
+      "an-bottom",
+      stLore.filter((e) => e.entry.position === "an_bottom")
+    )
+    if (!top && !bottom) return [{ text: expanded, place }]
+    const parts = [top?.piece, expanded.piece, bottom?.piece].filter((p): p is number => p !== undefined)
+    const combined = parts.map(env.text).join("\n").trim()
+    return [
+      {
+        text: {
+          text: combined,
+          piece: env.verbatim(
+            "lore:author-note",
+            { kind: "assembler", what: "author's note with lore" },
+            combined,
+            parts
+          )
+        },
+        place
+      }
+    ]
   })
   const sendIfEmpty = assembly.sendIfEmpty ? optional("utility.send_if_empty", utility.send_if_empty) : null
   const normalFill =
@@ -1024,6 +1138,34 @@ const composeStage = sync("compose", (assembly) => {
   const injections: Array<Injection> = notes.flatMap(({ text, place }) =>
     place.at === "chat" ? [{ depth: place.depth, role: place.role, text }] : []
   )
+  for (const e of stLore.filter((e) => e.entry.position === "at_depth"))
+    injections.push({
+      depth: Math.max(0, Math.min(10000, e.entry.depth)),
+      role: e.entry.role,
+      text: { text: env.text(e.piece), piece: e.piece }
+    })
+  // Lore above history can change per turn, even when this turn has no activated entry.
+  if (
+    mode.st &&
+    need(assembly, "lorebooks").some((b) =>
+      b.doc.entries.some(
+        (e) =>
+          e.enabled && ["before_char", "after_char", "em_top", "em_bottom", "an_top", "an_bottom"].includes(e.position)
+      )
+    )
+  ) {
+    const prompt = collection[0]
+    if (prompt)
+      collection.splice(collection.indexOf(prompt), 0, {
+        ...prompt,
+        identifier: "lore-cache-boundary",
+        content: "",
+        piece: null,
+        system_prompt: false,
+        injection_position: "relative",
+        barrier: true
+      })
+  }
   const beside: Array<{ readonly message: StMessage; readonly at: "start" | "end" }> = []
   for (const { text, place } of notes) {
     if (place.at === "chat") continue
@@ -1154,12 +1296,15 @@ const builtinStages: ReadonlyArray<AssemblerStage> = [
   presetStage,
   notesStage,
   modeStage,
+  lorebooksStage,
   macrosStage,
   scriptsStage,
   historyStage,
   resolveStage,
   rolesStage,
   noteGateStage,
+  loreScanStage,
+  loreActivationStage,
   composeStage,
   messagesStage,
   breakpointsStage,

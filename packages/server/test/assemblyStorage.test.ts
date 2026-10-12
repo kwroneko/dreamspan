@@ -17,6 +17,7 @@ import * as Database from "../src/db/Database.ts"
 import { importCard } from "../src/formats/cardImport.ts"
 import { importStPreset } from "../src/formats/preset.ts"
 import { json, run } from "./formats/support.ts"
+import { loreBook, loreEntry } from "./support/loreFixtures.ts"
 import { tempDir } from "./support/tempDir.ts"
 
 const database = () =>
@@ -37,7 +38,7 @@ const setup = (handle = "ana") =>
     const reader = yield* Database.Reader
     const user = yield* writer.EnsureUser({ handle, displayName: handle })
     const userId = user.id as UserId
-    const entity = (kind: "card" | "preset" | "note", label: string, doc: object) =>
+    const entity = (kind: "card" | "preset" | "note" | "lorebook", label: string, doc: object) =>
       writer.CreateEntity({
         userId,
         kind,
@@ -117,11 +118,163 @@ const setup = (handle = "ana") =>
 const texts = (snapshot: ContextSnapshot) => snapshot.request.messages.map((m) => `${m.role}: ${m.content}`)
 
 describe("context assembly from the database", () => {
+  it.live("attaches lore on a path, isolates ids, and rebuilds after book edits and message amendments", () =>
+    Effect.gen(function* () {
+      const { writer, reader, userId, chat, state, entity, sent, assemble } = yield* setup()
+      const doc = loreBook([
+        loreEntry({ keys: ["flooded"], content: "The levee has seven gates." }),
+        loreEntry({ constant: true, probability: 50, content: "A raven watches." }, 1)
+      ]).document
+      const book = yield* entity("lorebook", "Levee", doc)
+      yield* state({ key: "lorebook.attach", value: { ref: book.ref.id } })
+      const first = yield* assemble()
+      assert.include(texts(first).join("\n"), "The levee has seven gates.")
+      assert.strictEqual(first.sources?.lorebooks?.[0]?.found[0]?.revision, book.ref.headRevisionId)
+      // A peer branch has the same attachment but did not say the key.
+      const message = (parentSlotId: SlotId | null, content: string, human: boolean, branch = false) =>
+        writer.AppendMessage({
+          userId,
+          chatId: chat.id,
+          parentSlotId,
+          branch,
+          commitDraft: null,
+          version: new NewVersion({
+            speakerEntityId: null,
+            writer: human ? "human" : "model",
+            content,
+            status: human ? "complete" : "generating",
+            macroMode: "verbatim",
+            origin: human ? "user_written" : "generated"
+          })
+        })
+      const peer = yield* message(chat.activeLeafSlotId, "The sun shines.", true, true)
+      const reply = yield* message(peer.slotId, "", false)
+      const branch = yield* reader.AssembleContext({
+        userId,
+        chatId: chat.id,
+        slotId: reply.slotId,
+        versionId: reply.version.id,
+        now: NOW,
+        timeZone: "UTC",
+        frozen: null
+      })
+      assert.notInclude(texts(JSON.parse(branch.snapshot) as ContextSnapshot).join("\n"), "seven gates")
+      yield* writer.EditRef({
+        userId,
+        refId: book.ref.id,
+        expectedRowVersion: book.ref.rowVersion,
+        doc: { ...doc, entries: [] } as never,
+        message: null,
+        commitDraft: null
+      })
+      yield* writer.AmendVersion({ userId, versionId: sent.version.id, content: "Dry road.", expectedRowVersion: 1 })
+      yield* state({ key: "lorebook.detach", value: { ref: book.ref.id } }, sent.slotId)
+      assert.notInclude(texts(yield* assemble()).join("\n"), "seven gates")
+      yield* writer.DeleteEntity({ userId, entityId: book.entityId })
+      const rebuilt = yield* reader.RebuildContext({ userId, snapshot: JSON.stringify(first) })
+      assert.ok(rebuilt._tag === "Rebuilt")
+      assert.deepStrictEqual(JSON.parse(rebuilt.snapshot), first)
+      const other = (yield* writer.EnsureUser({ handle: "other-lore", displayName: "Other" })).id
+      assert.strictEqual(
+        (yield* Effect.flip(
+          writer.AddStateEvent({
+            userId: other,
+            chatId: (yield* writer.CreateChat({
+              userId: other,
+              kind: "rp",
+              status: "active",
+              title: "Other",
+              participants: [],
+              greeting: null
+            })).id,
+            slotId: null,
+            versionId: null,
+            scope: null,
+            data: { key: "lorebook.attach", value: { ref: book.ref.id } }
+          })
+        ))._tag,
+        "NotFound"
+      )
+    }).pipe(Effect.provide(database()))
+  )
+
+  it.live(
+    "assembles a 1,000-message path with a 500-entry book in a reader worker",
+    () =>
+      Effect.gen(function* () {
+        const { writer, reader, userId, chat, entity, state } = yield* setup()
+        const book = yield* entity(
+          "lorebook",
+          "Scale",
+          loreBook(
+            Array.from({ length: 500 }, (_, uid) =>
+              loreEntry({ keys: [`key-${uid}`], content: `Scale lore ${uid}.`, position: "at_depth", depth: 0 }, uid)
+            )
+          ).document
+        )
+        yield* state({ key: "lorebook.attach", value: { ref: book.ref.id } })
+        let leaf = chat.activeLeafSlotId
+        for (let i = 1; i < 1000; i++) {
+          const message = yield* writer.AppendMessage({
+            userId,
+            chatId: chat.id,
+            parentSlotId: leaf,
+            branch: i === 1,
+            commitDraft: null,
+            version: new NewVersion({
+              speakerEntityId: null,
+              writer: "human",
+              content: `Turn ${i}: key-42`,
+              status: "complete",
+              macroMode: "verbatim",
+              origin: "user_written"
+            })
+          })
+          leaf = message.slotId
+        }
+        const reply = yield* writer.AppendMessage({
+          userId,
+          chatId: chat.id,
+          parentSlotId: leaf,
+          branch: false,
+          commitDraft: null,
+          version: new NewVersion({
+            speakerEntityId: null,
+            writer: "model",
+            content: "",
+            status: "generating",
+            macroMode: "verbatim",
+            origin: "generated"
+          })
+        })
+        const times: Array<number> = []
+        for (let i = 0; i < 6; i++) {
+          const start = performance.now()
+          const result = yield* reader.AssembleContext({
+            userId,
+            chatId: chat.id,
+            slotId: reply.slotId,
+            versionId: reply.version.id,
+            now: NOW,
+            timeZone: "UTC",
+            frozen: null
+          })
+          times.push(performance.now() - start)
+          assert.include(result.generation, "Scale lore 42.")
+        }
+        console.log(
+          `Lore assembly: 1,000 messages / 500 entries, milliseconds: ${times.map((n) => n.toFixed(1)).join(", ")}`
+        )
+        assert.isBelow(Math.min(...times), 5000)
+      }).pipe(Effect.provide(database())),
+    120000
+  )
+
   it.live("returns stored legacy snapshots without replaying changed assembler semantics", () =>
     Effect.gen(function* () {
       const { reader, userId, assemble } = yield* setup()
       const built = yield* assemble()
-      for (const version of [undefined, 0, 1, 2]) {
+      for (const version of [undefined, 0, 1, 2, 3]) {
         const legacy = { ...built, assemblerVersion: version, sources: { ...built.sources, userMessages: [] } }
         const json = JSON.stringify(legacy)
         const result = yield* reader.RebuildContext({ userId, snapshot: json })
@@ -129,7 +282,7 @@ describe("context assembly from the database", () => {
         assert.ok(result._tag === "EarlierAssemblerVersion")
         assert.strictEqual(result.storedSnapshot, json)
       }
-      assert.strictEqual(built.assemblerVersion, 3)
+      assert.strictEqual(built.assemblerVersion, 4)
       const rebuilt = yield* reader.RebuildContext({ userId, snapshot: JSON.stringify(built) })
       assert.ok(rebuilt._tag === "Rebuilt")
       assert.deepStrictEqual(JSON.parse(rebuilt.snapshot), built)

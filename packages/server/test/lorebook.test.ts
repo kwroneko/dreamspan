@@ -1,68 +1,10 @@
-import type { LorebookDoc, LorebookEntry } from "@rp/shared/docs/lorebook.ts"
+import type { LorebookEntry } from "@rp/shared/docs/lorebook.ts"
 import { describe, expect, it } from "vitest"
 import { matchLorebooks } from "../src/assembler/lorebook.ts"
+import { loreEntry as entry, loreBook as book } from "./support/loreFixtures.ts"
 import { activationCases } from "./support/lorebookCases.ts"
 
 type Input = Parameters<typeof matchLorebooks>
-const entry = (fields: Partial<LorebookEntry> = {}, uid = 0): LorebookEntry => ({
-  uid,
-  keys: [],
-  secondary_keys: [],
-  comment: "",
-  content: "",
-  constant: false,
-  selective: true,
-  selective_logic: "and_any",
-  enabled: true,
-  order: 100,
-  position: "before_char",
-  depth: 4,
-  role: "system",
-  outlet_name: "",
-  probability: 100,
-  use_probability: true,
-  group: "",
-  group_override: false,
-  group_weight: 100,
-  use_group_scoring: null,
-  scan_depth: null,
-  case_sensitive: null,
-  match_whole_words: null,
-  sticky: null,
-  cooldown: null,
-  delay: null,
-  exclude_recursion: false,
-  prevent_recursion: false,
-  delay_until_recursion: false,
-  ignore_budget: false,
-  vectorized: false,
-  automation_id: "",
-  triggers: [],
-  match_persona_description: false,
-  match_character_description: false,
-  match_character_personality: false,
-  match_character_depth_prompt: false,
-  match_scenario: false,
-  match_creator_notes: false,
-  add_memo: false,
-  use_regex: false,
-  extensions: {},
-  ...fields
-})
-const book = (entries: ReadonlyArray<LorebookEntry>, fields: Partial<LorebookDoc> = {}, id = "synthetic") => ({
-  id,
-  document: {
-    schema_version: 1,
-    name: id,
-    description: "",
-    scan_depth: null,
-    token_budget: null,
-    recursive_scanning: null,
-    extensions: {},
-    entries,
-    ...fields
-  } satisfies LorebookDoc
-})
 const run = (entries: ReadonlyArray<Partial<LorebookEntry>>, messages = ["cat"], settings: Partial<Input[2]> = {}) =>
   matchLorebooks(
     [book(entries.map((fields, uid) => entry(fields, uid)))],

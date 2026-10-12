@@ -128,6 +128,7 @@ export function CastDialog({
 interface Choices {
   readonly models: ReadonlyArray<{ readonly value: string; readonly label: string }>
   readonly presets: ReadonlyArray<LibraryRef>
+  readonly lorebooks: ReadonlyArray<LibraryRef>
 }
 
 const modelValue = (connection: string, model: string) => `${connection} ${model}`
@@ -163,7 +164,8 @@ export function SettingsDialog({
             )
           )
           const presets = yield* client("ListLibrary", { kind: "preset" })
-          return { models: models.flat(), presets }
+          const lorebooks = yield* client("ListLibrary", { kind: "lorebook" })
+          return { models: models.flat(), presets, lorebooks }
         })
       )
       .then((result) => result.ok && setChoices(result.value))
@@ -199,6 +201,21 @@ export function SettingsDialog({
           onValueChange={(ref) => void change({ _tag: "Preset", ref })}
         />
       </Field>
+      <section aria-label="Lorebooks" className="flex flex-col gap-2">
+        <h3 className="text-sm font-medium">Lorebooks</h3>
+        {choices?.lorebooks.length === 0 && (
+          <p className="text-sm text-muted">Import a lorebook in the library first.</p>
+        )}
+        {choices?.lorebooks.map((book) => (
+          <Switch
+            key={book.id}
+            checked={cast?.lorebooks.includes(book.id) ?? false}
+            onCheckedChange={(active) => void change({ _tag: "Lorebook", ref: book.id, active })}
+          >
+            {book.label}
+          </Switch>
+        ))}
+      </section>
       <div className="flex flex-col gap-2">
         <span id="layout-label" className="text-sm font-medium">
           Card layout

@@ -38,6 +38,7 @@ export class Cast extends Schema.Class<Cast>("Cast")({
   /** The chat-wide model and preset; the context assembler reads these. */
   model: Schema.NullOr(Schema.Struct({ connection: ConnectionId, model: ModelId })),
   preset: Schema.NullOr(RefId),
+  lorebooks: Schema.Array(RefId),
   layoutCards: Schema.NullOr(CardsLayout),
   rolesProjection: Schema.NullOr(RolesProjection),
   /** Every card named above. */
@@ -62,6 +63,7 @@ export const CastChange = Schema.Union([
   Schema.TaggedStruct("Layout", { layout: CardsLayout }),
   Schema.TaggedStruct("Roles", { projection: RolesProjection }),
   /** A note on or off (`note.activate`, `note.deactivate`): the chat's own, or a participant card's. */
+  Schema.TaggedStruct("Lorebook", { ref: RefId, active: Schema.Boolean }),
   Schema.TaggedStruct("Note", { entityId: EntityId, active: Schema.Boolean })
 ])
 export type CastChange = typeof CastChange.Type

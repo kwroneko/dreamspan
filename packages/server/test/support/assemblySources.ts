@@ -11,6 +11,7 @@ import {
   type ContextSnapshot,
   type HistoryEntry,
   type ModelInput,
+  type LorebookInput,
   type NoteInput,
   noteCard
 } from "../../src/assembler/types.ts"
@@ -37,6 +38,7 @@ export interface AssemblyFixture {
   readonly persona?: string
   /** More events, by the depth of the message they follow (null: the chat's start). */
   readonly events?: ReadonlyArray<PositionedEvent>
+  readonly lorebooks?: ReadonlyArray<LorebookInput>
   readonly notes?: ReadonlyArray<NoteInput>
   /** A note's earlier revisions, newest first, by note: its history before the revision it's at. */
   readonly noteRevisions?: Readonly<Record<string, ReadonlyArray<{ readonly revision: string; readonly doc: NoteDoc }>>>
@@ -94,6 +96,7 @@ const fixtureSources = (fixture: AssemblyFixture) => {
           .filter((c) => wanted.includes(c.entity))
           .map((c) => ({ entity: c.entity, ref: `ref-${c.entity}`, revision: `rev-${c.entity}`, doc: c.doc }))
       ),
+    lorebooks: (refs) => Effect.succeed((fixture.lorebooks ?? []).filter((b) => refs.includes(b.id))),
     notes: (cards) =>
       Effect.succeed(
         (fixture.notes ?? []).filter((note) => {
@@ -143,13 +146,18 @@ const assembler = () =>
 /** The context the pipeline builds for a fixture, with a fixed clock and random draws. */
 export const assembleFixture = (
   fixture: AssemblyFixture,
-  options: { readonly frozen?: ContextSnapshot["frozen"]; readonly random?: () => number } = {}
+  options: {
+    readonly frozen?: ContextSnapshot["frozen"]
+    readonly random?: () => number
+    readonly loreFallback?: ContextSnapshot["loreFallback"]
+  } = {}
 ) =>
   assembler()
     .assemble({
       now: fixture.now ?? Date.UTC(2026, 0, 1),
       timeZone: "UTC",
       frozen: options.frozen ?? {},
+      ...(options.loreFallback ? { loreFallback: options.loreFallback } : {}),
       random: options.random ?? (() => 0.5)
     })
     .pipe(Effect.provide(fixtureSources(fixture)))

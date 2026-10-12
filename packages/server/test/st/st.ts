@@ -24,7 +24,7 @@ interface StContext {
   readonly eventSource: { once: (event: string, listener: (...args: ReadonlyArray<unknown>) => void) => void }
   readonly eventTypes: { readonly APP_READY: string }
   readonly getRequestHeaders: (options?: { omitContentType?: boolean }) => Record<string, string>
-  readonly chatMetadata: { variables?: Record<string, unknown> }
+  readonly chatMetadata: { variables?: Record<string, unknown>; world_info?: string }
   readonly extensionSettings: { variables: { global: Record<string, unknown> } }
   readonly powerUserSettings: { readonly experimental_macro_engine: boolean }
   /** The chat-completion settings in force (`oai_settings`). */
@@ -368,10 +368,15 @@ export const captureWithSettings = async (
   /** ST's custom_prompt_post_processing, a connection setting no preset changes here. */
   postProcessing?: string,
   summary?: Summary,
-  authorNote?: AuthorNote
+  authorNote?: AuthorNote,
+  lorebook?: string
 ) => {
   let settings: Record<string, unknown> = {}
   const body = await captureRequest(browser, url, mock, capture, async (page) => {
+    if (lorebook !== undefined)
+      await page.evaluate((name) => {
+        SillyTavern.getContext().chatMetadata.world_info = name
+      }, lorebook)
     if (summary !== undefined) await summarize(page, summary)
     if (authorNote !== undefined) await setAuthorNote(page, authorNote)
     if (postProcessing !== undefined) {

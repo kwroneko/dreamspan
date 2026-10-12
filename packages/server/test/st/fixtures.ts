@@ -9,6 +9,7 @@ import { importCard } from "../../src/formats/cardImport.ts"
 import { exportStPreset, importStPreset } from "../../src/formats/preset.ts"
 import { exportLorebook, importLorebook } from "../../src/formats/worldInfo.ts"
 import type { CardFields } from "@rp/shared/macros/context.ts"
+import { gateLore } from "../support/loreFixtures.ts"
 import { json, png, run } from "../formats/support.ts"
 
 interface ChatLine {
@@ -222,7 +223,10 @@ export const fixtureSet = (): FixtureSet => {
     persona: PERSONA,
     cards: [{ name: CARD, png: cardPng() }, ...GATE_CARDS.map((card) => ({ name: card.name, png: gatePng(card) }))],
     gateCards: GATE_CARDS.map((card) => card.name),
-    lorebooks: [{ name: LORE, file: lorebook() }],
+    lorebooks: [
+      { name: LORE, file: lorebook() },
+      { name: gateLore.id, file: exportLorebook(gateLore.document) }
+    ],
     presets: roundTrips.flatMap((preset) => [
       { name: preset.name, data: preset.original },
       { name: preset.roundTripName, data: preset.roundTrip }

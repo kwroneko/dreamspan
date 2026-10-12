@@ -19,6 +19,7 @@ import type {
   HistoryWindow,
   Issue,
   ModelInput,
+  LorebookInput,
   NoteInput,
   Piece,
   PresetInput,
@@ -67,6 +68,7 @@ export class AssemblySources extends Context.Service<
       entities: ReadonlyArray<string>,
       bindings: Readonly<Record<string, Binding>>
     ) => Effect.Effect<ReadonlyArray<CardInput>, SourceError>
+    readonly lorebooks: (refs: ReadonlyArray<string>) => Effect.Effect<ReadonlyArray<LorebookInput>, SourceError>
     /** The notes these cards own, at the revision `bound` pins or their head. */
     readonly notes: (
       cards: ReadonlyArray<string>,
@@ -110,6 +112,7 @@ export interface AssemblyRequest {
   readonly frozen: Readonly<Record<string, FrozenValues>>
   /** Where new random draws come from, in [0, 1). */
   readonly random: () => number
+  readonly loreFallback?: ContextSnapshot["loreFallback"]
   readonly macros: MacroLookup
 }
 
@@ -163,6 +166,10 @@ export interface Assembly {
   cast?: Cast
   model?: ModelInput | null
   preset?: PresetInput
+  loreFallback?: ContextSnapshot["loreFallback"]
+  lorebooks?: ReadonlyArray<LorebookInput>
+  loreScanDepth?: number
+  lore?: ReadonlyArray<{ readonly entry: import("@rp/shared/docs/lorebook.ts").LorebookEntry; readonly piece: number }>
   notes?: ReadonlyArray<NoteInput>
   skippedNotes?: ReadonlyArray<NoteInput>
   noteUserMessages?: number
@@ -242,6 +249,7 @@ export const assemble = (stages: StageRegistry, request: AssemblyRequest) =>
       issues: assembly.issues,
       frozen: assembly.frozen,
       effects: assembly.effects,
+      ...(assembly.loreFallback ? { loreFallback: assembly.loreFallback } : {}),
       templateWrites: assembly.templateWrites
     }
     return snapshot

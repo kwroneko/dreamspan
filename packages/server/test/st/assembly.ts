@@ -12,6 +12,7 @@ import * as Importers from "../../src/importer/importers.ts"
 import { json, run } from "../formats/support.ts"
 import type { NoteInput } from "../../src/assembler/types.ts"
 import { assembleFixture, type FixtureMessage } from "../support/assemblySources.ts"
+import { gateLore } from "../support/loreFixtures.ts"
 import type { FixtureSet } from "./fixtures.ts"
 import { MOCK_MODEL, type MockEndpoint } from "./mock.ts"
 import { diffJson, type Section } from "./report.ts"
@@ -38,6 +39,7 @@ const DOCUMENTED: ReadonlyArray<{
 ]
 
 interface Config {
+  readonly lorebook?: boolean
   readonly name: string
   readonly presets: ReadonlyArray<string>
   readonly generate?: "impersonate" | "swipe"
@@ -185,7 +187,18 @@ const ourRequest = async (
         ...(config.summary ? [summaryNote(config.summary)] : []),
         ...(config.authorNote ? [authorNoteInput(config.authorNote)] : [])
       ],
+      lorebooks: config.lorebook
+        ? [{ id: gateLore.id, entity: "gate-book", revision: "gate-rev", doc: gateLore.document }]
+        : [],
       events: [
+        ...(config.lorebook
+          ? [
+              {
+                depth: null,
+                event: { scope: null, data: { key: "lorebook.attach" as const, value: { ref: gateLore.id as never } } }
+              }
+            ]
+          : []),
         ...(config.summary ? [activate("summary")] : []),
         ...(config.authorNote && config.authorNote.interval > 0 ? [activate("author-note")] : [])
       ],
@@ -219,6 +232,12 @@ export const compareAssembly = async (
   await savePoisonPreset(browser, url, POISON)
   const configs: ReadonlyArray<Config> = [
     { name: "baseline", presets: [] },
+    ...["default", "full"].map((preset) => ({
+      name: `${preset}, lorebook positions`,
+      presets: [preset],
+      lorebook: true,
+      authorNote: authorNote(1, 1, 1)
+    })),
     ...fixtures.presetRoundTrips.map((preset) => ({ name: preset.name, presets: [preset.name] })),
     { name: "poison", presets: [POISON] },
     ...["merge", "semi", "strict", "single"].map((mode) => ({
@@ -307,8 +326,11 @@ export const compareAssembly = async (
         },
         config.postProcessing,
         config.summary,
-        config.authorNote
+        config.authorNote,
+        config.lorebook ? gateLore.id : undefined
       )
+      if (config.lorebook && !JSON.stringify(body).includes("A copper bell marks the crossing."))
+        differences.push(`${character}, ${config.name}: ST sent no keyword lore`)
       const ours = await ourRequest(fixtures, character, config, settings)
       const label = `${character}, ${config.name}`
       // Both sides leaving it out would compare equal: ST must have sent it.

@@ -159,8 +159,10 @@ export const injectInChat = (
  * estimates, a token per four characters plus three per message, so what's cut at the
  * margin can differ (ARCHITECTURE §15).
  */
+export const estimateTokens = (text: string) => Math.ceil(text.length / 4)
+
 export const tokensOf = (message: { readonly content: string; readonly name?: string | undefined }) =>
-  message.content.length === 0 ? 0 : Math.ceil((message.content.length + (message.name?.length ?? 0)) / 4) + 3
+  message.content.length === 0 ? 0 : estimateTokens(message.content + (message.name ?? "")) + 3
 
 /** ST's parseExampleIntoIndividual: one example block into user and character lines. */
 export const parseExampleBlock = (
@@ -257,7 +259,7 @@ export const compose = (input: {
       role: prompt.role,
       content: prompt.content,
       pieces: prompt.piece === null ? [] : [prompt.piece],
-      kind: "prefix"
+      kind: prompt.barrier ? "volatile" : "prefix"
     }
     slots.set(at, [message])
     spend(tokensOf(message))

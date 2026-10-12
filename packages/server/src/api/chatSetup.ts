@@ -35,6 +35,8 @@ const toEvent = (change: CastChange): StateEventData => {
       return { key: "layout.cards", value: change.layout }
     case "Roles":
       return { key: "roles.projection", value: change.projection }
+    case "Lorebook":
+      return { key: change.active ? "lorebook.attach" : "lorebook.detach", value: { ref: change.ref } }
     case "Note":
       return { key: change.active ? "note.activate" : "note.deactivate", value: { note: change.entityId } }
   }
@@ -63,6 +65,7 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
         playedByMe: state.playedByMe as Cast["playedByMe"],
         model: model ? (model as NonNullable<Cast["model"]>) : null,
         preset: (state.presetBindings[""]?.ref ?? null) as Cast["preset"],
+        lorebooks: state.lorebooks as Cast["lorebooks"],
         layoutCards: state.layoutCards,
         rolesProjection: state.rolesProjection,
         cards

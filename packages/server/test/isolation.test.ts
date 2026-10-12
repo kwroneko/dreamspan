@@ -32,7 +32,7 @@ import {
   takenFrom,
   typeInto
 } from "./support/config.ts"
-import { cardDoc, presetDoc } from "./support/docs.ts"
+import { cardDoc, docFor, presetDoc } from "./support/docs.ts"
 
 type Api = Effect.Success<ReturnType<typeof client>>
 
@@ -44,6 +44,7 @@ interface Party {
   readonly credentialId: CredentialId
   readonly modelId: ModelId
   readonly refId: RefId
+  readonly loreRefId: RefId
   readonly requestId: LlmRequestId
   readonly password: string
   /** The session cookie, for the HTTP routes. */
@@ -701,6 +702,15 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
           }),
           "NotFound"
         )
+        for (const active of [true, false])
+          yield* refused(
+            actor.api.ChangeCast({
+              chatId: actor.chat.chatId,
+              slotId: null,
+              change: { _tag: "Lorebook", ref: owner.loreRefId, active }
+            }),
+            "NotFound"
+          )
         // Their chat's note, or their card's, turned on in the actor's own chat.
         for (const note of [owner.chat.noteEntityId, owner.editor.noteEntityId]) {
           yield* refused(
@@ -1251,6 +1261,16 @@ const seed = Effect.gen(function* () {
         origin: "user",
         sourcePath: null
       })
+      const lore = yield* writer.CreateEntity({
+        userId: user.id,
+        kind: "lorebook",
+        label: "Lore",
+        subtitle: "",
+        doc: docFor("lorebook", "Lore"),
+        schemaVersion: 1,
+        origin: "user",
+        sourcePath: null
+      })
       const requestId = uuidv7() as LlmRequestId
       yield* writer.OpenLlmRequest({
         userId: user.id,
@@ -1382,6 +1402,7 @@ const seed = Effect.gen(function* () {
         credentialId: credential.id,
         modelId: model.id,
         refId: ref.id,
+        loreRefId: lore.ref.id,
         requestId,
         cookie,
         port,

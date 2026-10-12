@@ -26,6 +26,8 @@ interface ExpandOptions {
 
 export interface MacroEnvironment {
   readonly names: Names
+  /** Read-only expansion for activation; freezes draws but does not write variables. */
+  readonly preview: (id: string, text: string, options?: ExpandOptions) => string
   /** Expands preset or card text at the generation's position and records it as a piece. */
   readonly piece: (id: string, source: Source, text: string, options?: ExpandOptions) => number
   /**
@@ -170,6 +172,19 @@ export const makeMacroEnvironment = (
 
   return {
     names: setup.names,
+    preview: (id, text, options = {}) =>
+      run(
+        id,
+        text,
+        { kind: "card" },
+        {
+          ...base,
+          ...(options.card ? { card: options.card } : {}),
+          names: { ...setup.names, ...options.names },
+          variables: { local, global }
+        },
+        () => {}
+      ).text,
     piece: (id, source, text, options = {}) => {
       const { card, ...rest } = base
       const context: MacroContext = {

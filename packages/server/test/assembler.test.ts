@@ -11,9 +11,11 @@ import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
 import type { PositionedEvent } from "../src/assembler/pipeline.ts"
 import type { ContextSnapshot, ModelInput, NoteInput } from "../src/assembler/types.ts"
+import { matchLorebooks } from "../src/assembler/lorebook.ts"
 import { chatCompletionsFields } from "../src/assembler/wire.ts"
 import { importCard } from "../src/formats/cardImport.ts"
 import { importStPreset } from "../src/formats/preset.ts"
+import { loreBook, loreEntry } from "./support/loreFixtures.ts"
 import { json, run } from "./formats/support.ts"
 import { type AssemblyFixture, assembleFixture, type FixtureMessage } from "./support/assemblySources.ts"
 
@@ -1179,5 +1181,142 @@ describe("our layouts (DESIGN §5.2–§5.4)", () => {
     expect(snapshot.inputs.mode).toBe("layouts")
     expect(contents(snapshot).join("\n")).toContain('<character name="Mira">')
     expect(snapshot.pieces.find((p) => p.text === "[Start a new Chat]")!.id).toBe("preset:utility.new_chat_prompt")
+  })
+})
+
+describe("lorebook assembly", () => {
+  const entries = [
+    loreEntry({ keys: ["flooded"], content: "The levee is guarded.", position: "before_char", order: 200 }, 0),
+    loreEntry(
+      { keys: ["flooded"], secondary_keys: ["road"], content: "The toll is waived.", position: "after_char" },
+      1
+    ),
+    loreEntry({ constant: true, content: "The river runs north.", position: "at_depth", depth: 0, role: "user" }, 2),
+    loreEntry({ keys: ["unsaid"], content: "Absent." }, 3),
+    loreEntry({ keys: ["/(?=road)/"], content: "Unsafe." }, 4)
+  ]
+  const attached = { id: "book", entity: "book-entity", revision: "book-rev", doc: loreBook(entries).document }
+  const fixture = (fields: Partial<AssemblyFixture> = {}) =>
+    chat({
+      lorebooks: [attached],
+      events: [at(null, { key: "lorebook.attach", value: { ref: "book" as never } })],
+      ...fields
+    })
+  it("places ST markers and depth entries, records keys and skips, and surfaces refused regex", async () => {
+    const result = await assembled(fixture({ preset: preset({ wi_format: "[{{char}}] {0}" }) }))
+    expect(contents(result).join("\n")).toContain("[Mira] The levee is guarded.")
+    expect(contents(result).join("\n")).toContain("The toll is waived.")
+    expect(contents(result).at(-1)).toBe("user: The river runs north.")
+    const tags = result.pieces.filter((p) => p.source.kind === "lorebook").map((p) => p.source)
+    expect(tags).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          uid: 0,
+          activation: { status: "activated", step: 0, why: { kind: "keys", primaryKey: "flooded", secondaryKeys: [] } }
+        }),
+        expect.objectContaining({
+          uid: 3,
+          activation: expect.objectContaining({ status: "skipped", reason: "no_primary" })
+        })
+      ])
+    )
+    expect(result.issues.some((i) => i.message.includes("Lookahead") && i.message.includes("AND ANY"))).toBe(true)
+  })
+  it("uses one stable tail block after every cache breakpoint in our layouts, including constants", async () => {
+    const a = await assembled(fixture({ participants: ["mira", "oren"] }))
+    const b = await assembled(
+      fixture({ participants: ["mira", "oren"], messages: [{ side: "user", content: "The sky cleared." }] })
+    )
+    const block = a.request.messages.findIndex((m) => m.content.includes("The levee is guarded."))
+    expect(a.request.messages[block]!.content).toBe(
+      entries
+        .slice(0, 3)
+        .map((e) => e.content)
+        .join("\n")
+    )
+    expect(a.request.breakpoints.every((p) => p.message < block)).toBe(true)
+    expect(a.request.messages.slice(0, a.request.breakpoints.find((p) => p.reason === "prefix")!.message + 1)).toEqual(
+      b.request.messages.slice(0, b.request.breakpoints.find((p) => p.reason === "prefix")!.message + 1)
+    )
+  })
+  it("scans older messages independently of request budgeting, includes names and embedded persona books", async () => {
+    const doc = loreBook([
+      loreEntry({ keys: ["Tobin"], content: "Names activate." }),
+      loreEntry({ keys: ["old-key"], scan_depth: 300, content: "Older lore.", position: "at_depth", depth: 0 }, 1)
+    ]).document
+    const messages: Array<FixtureMessage> = [
+      { side: "user", content: "old-key" },
+      ...Array.from({ length: 299 }, () => ({ side: "user" as const, content: "x".repeat(400) }))
+    ]
+    const result = await assembled(
+      chat({
+        messages,
+        cards: [
+          { entity: "mira", doc: mira },
+          { entity: "tobin", doc: { ...tobin, character_book: doc } }
+        ]
+      })
+    )
+    expect(contents(result).join("\n")).toContain("Names activate.")
+    expect(contents(result).join("\n")).toContain("Older lore.")
+    expect(contents(result).join("\n")).not.toContain("old-key")
+  })
+  it("scans scripted templates and records recursive activation", async () => {
+    const doc = loreBook([
+      loreEntry({ keys: ["flooded"], content: "FIRST levee" }),
+      loreEntry({ keys: ["levee"], content: "SECOND", position: "at_depth", depth: 0 }, 1)
+    ]).document
+    const script = regexScript("clear", { findRegex: "/flooded/g", replaceString: "clear", placement: [1] })
+    const first = await assembled(fixture({ lorebooks: [{ ...attached, doc }] }))
+    expect(
+      first.pieces.some((p) => p.source.kind === "lorebook" && p.source.uid === 1 && p.source.activation.step === 1)
+    ).toBe(true)
+    const cleared = await assembled(
+      fixture({
+        lorebooks: [{ ...attached, doc }],
+        messages: [{ side: "user", content: "flooded", macroMode: "template" }],
+        preset: { ...preset({ extensions: { regex_scripts: [script] } }), regex_approved: true }
+      })
+    )
+    expect(contents(cleared).join("\n")).not.toContain("FIRST")
+  })
+  it("keeps emergency outcomes and description draws identical on replay without persisting lore variable writes", async () => {
+    const doc = loreBook([
+      loreEntry({ constant: true, content: "{{setvar::x::leak}}A lantern." }),
+      loreEntry({ keys: ["unsaid"], content: "{{setvar::x::hidden}}" }, 1)
+    ]).document
+    const f = fixture({
+      lorebooks: [{ ...attached, doc }],
+      cards: [
+        { entity: "mira", doc: { ...mira, description: "{{random::a::b}}" } },
+        { entity: "tobin", doc: tobin }
+      ]
+    })
+    const outcome = matchLorebooks(
+      [
+        {
+          id: attached.id,
+          document: { ...doc, entries: doc.entries.map((e) => ({ ...e, content: e.uid === 0 ? "A lantern." : "" })) }
+        }
+      ],
+      { messages: ["road"] },
+      { budget: 1000 },
+      () => 0.5,
+      (text) => Math.ceil(text.length / 4)
+    )
+    const fallback = { ...outcome, replayable: false }
+    const first = await assembled(f, { loreFallback: fallback, random: () => 0.1 })
+    expect(first.effects).toEqual([])
+    expect(await assembled(f, { loreFallback: fallback, frozen: first.frozen, random: () => 0.9 })).toEqual(first)
+  })
+  it("replays probability and random content from pinned inputs and frozen values", async () => {
+    const doc = loreBook(
+      Array.from({ length: 30 }, (_, uid) =>
+        loreEntry({ constant: true, probability: 50, content: `Lore ${uid} {{random::a::b::c}}` }, uid)
+      )
+    ).document
+    const f = fixture({ lorebooks: [{ ...attached, doc }] })
+    const first = await assembled(f, { random: () => 0.1 })
+    expect(await assembled(f, { frozen: first.frozen, random: () => 0.9 })).toEqual(first)
   })
 })

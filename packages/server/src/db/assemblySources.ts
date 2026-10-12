@@ -2,6 +2,7 @@
 // rebuild reads again (ARCHITECTURE §15).
 import type { ChatId } from "@rp/shared/chat.ts"
 import { CardDoc } from "@rp/shared/docs/card.ts"
+import { LorebookDoc } from "@rp/shared/docs/lorebook.ts"
 import { NoteDoc } from "@rp/shared/docs/note.ts"
 import { PresetDoc } from "@rp/shared/docs/preset.ts"
 import type { UserId } from "@rp/shared/domain.ts"
@@ -16,6 +17,7 @@ import {
   type CardInput,
   type HistoryEntry,
   type NoteInput,
+  type LorebookInput,
   noteCard,
   type PresetInput,
   type SnapshotInputs,
@@ -38,6 +40,7 @@ import { withoutPurged } from "./stateRefs.ts"
 
 const decodeEvent = Schema.decodeUnknownEffect(FoldableEvent)
 const decodeCard = Schema.decodeUnknownExit(CardDoc)
+const decodeLorebook = Schema.decodeUnknownExit(LorebookDoc)
 const decodeNote = Schema.decodeUnknownExit(NoteDoc)
 const decodePreset = Schema.decodeUnknownExit(PresetDoc)
 
@@ -51,7 +54,11 @@ const invalid = (what: string) =>
   })
 
 const decoded = <A>(
-  exit: ReturnType<typeof decodeCard> | ReturnType<typeof decodeNote> | ReturnType<typeof decodePreset>,
+  exit:
+    | ReturnType<typeof decodeCard>
+    | ReturnType<typeof decodeNote>
+    | ReturnType<typeof decodePreset>
+    | ReturnType<typeof decodeLorebook>,
   what: string
 ) => (exit._tag === "Success" ? Effect.succeed(exit.value as A) : Effect.fail(invalid(what)))
 
@@ -189,6 +196,7 @@ export const sqlSources = (
     events: [] as Array<SourcePins["events"][number]>,
     history: [] as Array<SourcePins["history"][number]>,
     cards: [] as Array<SourcePins["cards"][number]>,
+    lorebooks: [] as Array<NonNullable<SourcePins["lorebooks"]>[number]>,
     notes: [] as Array<SourcePins["notes"][number]>,
     userMessages: [] as Array<NonNullable<SourcePins["userMessages"]>[number]>
   }
@@ -316,6 +324,24 @@ export const sqlSources = (
           return cards
         }
       ),
+
+    lorebooks: (refs) =>
+      Effect.gen(function* () {
+        const read = yield* Effect.forEach(refs, (id) =>
+          Effect.gen(function* () {
+            const row = yield* refHead(id, "lorebook")
+            if (!row) return []
+            const doc = yield* decoded<LorebookDoc>(decodeLorebook(JSON.parse(row.doc_json)), "A lorebook")
+            return [{ id, entity: row.entity_id, revision: row.head_revision_id, doc } satisfies LorebookInput]
+          })
+        )
+        const books = read.flat()
+        pins.lorebooks.push({
+          key: keyOf(refs),
+          found: books.map(({ id, entity, revision }) => ({ id, entity, revision }))
+        })
+        return books
+      }),
 
     notes: (cards, bound) =>
       Effect.gen(function* () {
@@ -550,6 +576,19 @@ const replaySources = (
             if (!row) return yield* unpinned("a card")
             const doc = yield* decoded<CardDoc>(decodeCard(JSON.parse(row.doc_json)), "A card")
             return { entity, ref, revision, doc } satisfies CardInput
+          })
+        )
+      }),
+
+    lorebooks: (refs) =>
+      Effect.gen(function* () {
+        const { found } = yield* pinned(pins.lorebooks ?? [], keyOf(refs), "a lorebook")
+        return yield* Effect.forEach(found, ({ id, entity, revision }) =>
+          Effect.gen(function* () {
+            const row = yield* revisionDoc(revision, "lorebook", entity)
+            if (!row) return yield* unpinned("a lorebook")
+            const doc = yield* decoded<LorebookDoc>(decodeLorebook(JSON.parse(row.doc_json)), "A lorebook")
+            return { id, entity, revision, doc } satisfies LorebookInput
           })
         )
       }),
