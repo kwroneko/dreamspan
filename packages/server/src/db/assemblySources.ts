@@ -16,6 +16,7 @@ import {
   type CardInput,
   type HistoryEntry,
   type NoteInput,
+  noteCard,
   type PresetInput,
   type SnapshotInputs,
   type SourcePins,
@@ -314,25 +315,28 @@ export const sqlSources = (
 
     notes: (cards, bound) =>
       Effect.gen(function* () {
-        if (cards.length === 0) return []
-        const rows = yield* sql<{ entity: string; revision: string; doc_json: string; card: string }>`
+        // The cards' notes and the chat's own.
+        const rows = yield* sql<{ entity: string; revision: string; doc_json: string; card: string | null }>`
           SELECT e.id AS entity, r.head_revision_id AS revision, h.doc_json,
             json_extract(h.doc_json, '$.owner.card') AS card
           FROM entities e JOIN entity_refs r ON r.entity_id = e.id AND r.ref_kind = 'upstream'
           JOIN entity_revisions h ON h.id = r.head_revision_id
           WHERE e.owner_user_id = ${userId} AND e.kind = 'note' AND e.deleted_at IS NULL
-            AND json_extract(h.doc_json, '$.owner.card') IN ${sql.in(cards)}
+            AND (json_extract(h.doc_json, '$.owner.chat') = ${chatId}
+              OR json_extract(h.doc_json, '$.owner.card') IN ${sql.in(cards.length === 0 ? [""] : cards)})
           ORDER BY e.id`
         const seen = new Set<string>()
         return yield* Effect.forEach(rows, (row) =>
           Effect.gen(function* () {
-            const first = !seen.has(row.card)
-            seen.add(row.card)
+            // A chat's note is on only once the chat turned it on.
+            const first = row.card !== null && !seen.has(row.card)
+            if (row.card !== null) seen.add(row.card)
             const pinned = bound[row.entity]
             const json = pinned ? (yield* revisionDoc(pinned, "note", row.entity))?.doc_json : row.doc_json
             if (json === undefined) return []
             const doc = yield* decoded<NoteDoc>(decodeNote(JSON.parse(json)), "A note")
-            if (!cards.includes(doc.owner.card)) return []
+            const card = noteCard(doc)
+            if (card === null ? "chat" in doc.owner && doc.owner.chat !== chatId : !cards.includes(card)) return []
             return [{ entity: row.entity, revision: pinned ?? row.revision, doc, first } satisfies NoteInput]
           })
         ).pipe(

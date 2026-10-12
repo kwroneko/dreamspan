@@ -44,6 +44,7 @@ import {
   type GenerationType,
   type HistoryEntry,
   type NoteInput,
+  noteCard,
   type Role,
   type Source
 } from "./types.ts"
@@ -258,7 +259,7 @@ const namesFor = (state: ChatState, cast: Cast, mode: Mode): Names => {
  */
 const macroCard = (cast: Cast, notes: ReadonlyArray<NoteInput> | undefined) => {
   const card = cast.characters[0]
-  const firstNote = notes?.find((n) => n.first && n.doc.owner.card === card?.entity)
+  const firstNote = notes?.find((n) => n.first && noteCard(n.doc) === card?.entity)
   return cardFields(card, cast.personas[0], firstNote?.doc.content)
 }
 
@@ -697,11 +698,12 @@ const exampleLines = (assembly: Assembly, card: CardInput, char: string, prefixN
 
 const noteInjections = (assembly: Assembly, cards: ReadonlyArray<CardInput>): Array<Injection> => {
   const env = need(assembly, "macros")
-  return need(assembly, "notes")
-    .filter((note) => cards.some((c) => c.entity === note.doc.owner.card))
+  return [...need(assembly, "notes")]
     .sort((a, b) => (a.entity < b.entity ? -1 : a.entity > b.entity ? 1 : 0))
     .flatMap((note) => {
-      const owner = cards.find((c) => c.entity === note.doc.owner.card)!
+      const owner = cards.find((c) => c.entity === noteCard(note.doc))
+      const { placement } = note.doc
+      if (!owner || placement.mode !== "depth") return []
       const piece = env.piece(
         `note:${note.entity}`,
         { kind: "note", entity: note.entity, revision: note.revision },
@@ -709,7 +711,7 @@ const noteInjections = (assembly: Assembly, cards: ReadonlyArray<CardInput>): Ar
         { withoutCard: true, names: { char: owner.doc.name } }
       )
       const text = env.text(piece)
-      return text ? [{ depth: note.doc.placement.depth, role: note.doc.placement.role, text: { text, piece } }] : []
+      return text ? [{ depth: placement.depth, role: placement.role, text: { text, piece } }] : []
     })
 }
 

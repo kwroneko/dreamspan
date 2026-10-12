@@ -41,7 +41,16 @@ RpcServer.layer(WriteOps, { concurrency: 1 }).pipe(
         ])
         // --- ST data folder import (ARCHITECTURE.md §13)
         const stImport = yield* makeStImportWriteHandlers
-        return WriteOps.of({ ...graph, ...library, ...binOps, ...providers, ...accounts, ...chatSetup, ...stImport, ...generation })
+        return WriteOps.of({
+          ...graph,
+          ...library,
+          ...binOps,
+          ...providers,
+          ...accounts,
+          ...chatSetup,
+          ...stImport,
+          ...generation
+        })
       })
     )
   ),

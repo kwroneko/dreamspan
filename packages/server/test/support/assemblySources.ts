@@ -6,7 +6,13 @@ import type { FoldableEvent } from "@rp/shared/state.ts"
 import { Effect, Layer, Scope } from "effect"
 import { type Assembler, makeAssembler } from "../../src/assembler/assembler.ts"
 import { AssemblySources, type PositionedEvent } from "../../src/assembler/pipeline.ts"
-import type { ContextSnapshot, HistoryEntry, ModelInput, NoteInput } from "../../src/assembler/types.ts"
+import {
+  type ContextSnapshot,
+  type HistoryEntry,
+  type ModelInput,
+  type NoteInput,
+  noteCard
+} from "../../src/assembler/types.ts"
 
 export interface FixtureMessage {
   readonly side: "user" | "assistant"
@@ -85,7 +91,13 @@ const fixtureSources = (fixture: AssemblyFixture) => {
           .filter((c) => wanted.includes(c.entity))
           .map((c) => ({ entity: c.entity, ref: `ref-${c.entity}`, revision: `rev-${c.entity}`, doc: c.doc }))
       ),
-    notes: (cards) => Effect.succeed((fixture.notes ?? []).filter((note) => cards.includes(note.doc.owner.card))),
+    notes: (cards) =>
+      Effect.succeed(
+        (fixture.notes ?? []).filter((note) => {
+          const card = noteCard(note.doc)
+          return card === null || cards.includes(card)
+        })
+      ),
     model: () => Effect.succeed(fixture.model ?? null),
     preset: () => Effect.succeed({ ref: "ref-preset", revision: "rev-preset", scope: "chat", doc: fixture.preset })
   })

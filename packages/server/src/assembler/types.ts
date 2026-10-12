@@ -245,6 +245,9 @@ export interface NoteInput {
   readonly first: boolean
 }
 
+/** The card whose note it is; null for the chat's own. */
+export const noteCard = (doc: NoteDoc) => ("card" in doc.owner ? doc.owner.card : null)
+
 /** Where the preset in effect comes from, in the scope chain (DATA-MODEL §5.4). */
 type PresetScope = "role" | "chat" | "connection" | "user" | "builtin"
 
