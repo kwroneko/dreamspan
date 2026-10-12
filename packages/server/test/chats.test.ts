@@ -99,7 +99,7 @@ describe("chats", () => {
       const api = yield* client()
       const { chat, slots } = yield* linearChat(api, 1)
       const events = yield* subscribe(api, chat.id)
-      const { entry } = yield* api.Generate({ chatId: chat.id, parentSlotId: slots[0]!, branch: false })
+      const { entry } = yield* posted(api.Generate({ chatId: chat.id, parentSlotId: slots[0]!, branch: false }))
       // No model is chosen, so the version fails saying so, rather than filling with synthetic text.
       yield* eventually(() => finished(events, entry.version.id) !== undefined)
       const version = finished(events, entry.version.id)!

@@ -18,7 +18,7 @@ import { Writer } from "../src/db/Database.ts"
 import { importCard } from "../src/formats/cardImport.ts"
 import { importStPreset } from "../src/formats/preset.ts"
 import { json, run } from "./formats/support.ts"
-import { client, serverLayer, testConfig } from "./support/config.ts"
+import { client, posted, serverLayer, testConfig } from "./support/config.ts"
 import {
   anthropicSse,
   completionChunks,
@@ -102,6 +102,8 @@ const generateReply = (
         speakerEntityId: mira.entityId as EntityId,
         writer: "model",
         content: options.greeting ?? "*{{char}} looks up.* Late again, {{user}}.",
+        // Frozen when the chat is made, as StartChat freezes every greeting.
+        ...(options.greeting ? { frozenMacros: {} } : {}),
         status: "complete",
         macroMode: "template",
         origin: "greeting"
@@ -116,13 +118,15 @@ const generateReply = (
       Effect.forkScoped
     )
     yield* eventually(() => events.length > 0)
-    const sent = yield* api.SendMessage({
-      chatId: chat.id,
-      parentSlotId: chat.activeLeafSlotId,
-      branch: false,
-      content: "The road flooded."
-    })
-    const { entry } = yield* api.Generate({ chatId: chat.id, parentSlotId: sent.entry.slotId, branch: false })
+    const sent = yield* posted(
+      api.SendMessage({
+        chatId: chat.id,
+        parentSlotId: chat.activeLeafSlotId,
+        branch: false,
+        content: "The road flooded."
+      })
+    )
+    const { entry } = yield* posted(api.Generate({ chatId: chat.id, parentSlotId: sent.entry.slotId, branch: false }))
     yield* eventually(() => finished(events, entry.version.id) !== undefined)
     return { version: finished(events, entry.version.id)!, chat, connection, model, events }
   })
@@ -261,7 +265,7 @@ describe("generation", () => {
       })
       assert.strictEqual(version.status, "complete")
       // A second reply reads the write back from the greeting's state, and doesn't record it again.
-      const { entry } = yield* api.Generate({ chatId: chat.id, parentSlotId: version.slotId, branch: false })
+      const { entry } = yield* posted(api.Generate({ chatId: chat.id, parentSlotId: version.slotId, branch: false }))
       yield* eventually(() => finished(events, entry.version.id) !== undefined)
       const sent = mock.requests().filter((r) => r.path === "/v1/chat/completions")
       assert.strictEqual(sent.length, 2)
@@ -284,6 +288,49 @@ describe("generation", () => {
       } finally {
         db.close()
       }
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("generates the reply to a message the send queue posts, from the context after it", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const mock = yield* Effect.acquireRelease(
+        Effect.promise(() => startMockProvider(completion)),
+        (m) => Effect.promise(() => m.close())
+      )
+      const api = yield* client()
+      const { version, chat, events } = yield* generateReply(api, {
+        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+        model: {}
+      })
+      // The next reply is held until the test lets it end; a message sent meanwhile queues.
+      let release = () => {}
+      const held = new Promise<void>((resolve) => (release = resolve))
+      mock.setHandler((request, res) => void held.then(() => completion(request, res)))
+      const { entry } = yield* posted(api.Generate({ chatId: chat.id, parentSlotId: version.slotId, branch: false }))
+      yield* eventually(() => mock.requests().length === 2)
+      const queued = yield* api.SendMessage({
+        chatId: chat.id,
+        parentSlotId: entry.slotId,
+        branch: false,
+        content: "Wait for me."
+      })
+      assert.strictEqual(queued._tag, "Queued")
+      release()
+      yield* eventually(() => finished(events, entry.version.id)?.status === "complete")
+      // The queue posts the message and starts its reply, which the real generator writes.
+      yield* eventually(() => mock.requests().length === 3)
+      const replies = () =>
+        events.flatMap((e) =>
+          e._tag === "Version" && e.version.status === "complete" && e.version.writer === "model" ? [e.version.id] : []
+        )
+      yield* eventually(() => new Set(replies()).size === 3)
+      const last = mock.requests()[2]!.body!.messages as ReadonlyArray<{ role: string; content: string }>
+      assert.deepStrictEqual(last.slice(-3), [
+        { role: "assistant", content: "The ledger says otherwise." },
+        { role: "assistant", content: "The ledger says otherwise." },
+        { role: "user", content: "Wait for me." }
+      ])
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 

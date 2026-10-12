@@ -12,7 +12,7 @@ import { Writer } from "../src/db/Database.ts"
 import { importCard } from "../src/formats/cardImport.ts"
 import { importStPreset } from "../src/formats/preset.ts"
 import { json, run } from "./formats/support.ts"
-import { client, serverLayer, testConfig } from "./support/config.ts"
+import { client, posted, serverLayer, testConfig } from "./support/config.ts"
 import { completionChunks, type Recorded, sse, startMockProvider } from "./support/mockProvider.ts"
 
 type Api = Effect.Success<ReturnType<typeof client>>
@@ -85,12 +85,14 @@ const setup = (
         origin: "greeting"
       })
     })
-    const sent = yield* api.SendMessage({
-      chatId: chat.id,
-      parentSlotId: chat.activeLeafSlotId,
-      branch: false,
-      content: "The road flooded."
-    })
+    const sent = yield* posted(
+      api.SendMessage({
+        chatId: chat.id,
+        parentSlotId: chat.activeLeafSlotId,
+        branch: false,
+        content: "The road flooded."
+      })
+    )
     return { chat, parent: sent.entry.slotId as SlotId }
   })
 
@@ -161,7 +163,7 @@ describe("generation at the edges", () => {
         const { chat, parent } = yield* setup(api, { connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` } })
         // Stops land before the rollout opens, while it opens, and after.
         for (let i = 0; i < 40; i++) {
-          const { entry } = yield* api.Generate({ chatId: chat.id, parentSlotId: parent, branch: true })
+          const { entry } = yield* posted(api.Generate({ chatId: chat.id, parentSlotId: parent, branch: true }))
           yield* Effect.sleep(i % 8)
           yield* Effect.exit(api.StopGeneration({ versionId: entry.version.id }))
         }
