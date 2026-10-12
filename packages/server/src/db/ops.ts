@@ -39,7 +39,7 @@ import {
   ProxyMode
 } from "@rp/shared/providers.ts"
 import { GenerationDefaults } from "@rp/shared/generation.ts"
-import { CacheWarmth, RunContext } from "@rp/shared/inspectorApi.ts"
+import { NextContext, RunContext } from "@rp/shared/inspectorApi.ts"
 import { FoldableEvent, StateEventData } from "@rp/shared/state.ts"
 import {
   Cost,
@@ -1665,7 +1665,7 @@ export class ReadOps extends RpcGroup.make(
   }),
   Rpc.make("CacheWarmth", {
     payload: { userId: UserId, chatId: ChatId },
-    success: Schema.NullOr(CacheWarmth),
+    success: NextContext,
     error: Schema.Union([NotFound, StorageError])
   }),
   /** The user's generation defaults; one naming something gone reads as none. */

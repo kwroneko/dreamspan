@@ -244,6 +244,8 @@ These are strategies for mapping history to user and assistant roles:
 - **by perspective:** the speaker's own past turns become assistant, everyone else's user. It's natural for per-character agents.
 
 ### 5.5 Caching
+
+Stepped history, dropped-message display and rewrite warnings without a TTL are implemented in ARCHITECTURE §12 and §15 (2026-10-13). LCM will later supply the history boundary.
 - **[D]** Preserving the KV cache is a near-top priority, second only to avoiding RCEs.
 - **[D]** Depth injections are cache-friendly when breakpoints are placed correctly. A depth-0 author's note is the ideal place for information that changes, like reference-harness's tail prompt. The real cache-killers are changes near the top of the prompt, which the assembler should flag **[P]**.
 - **[P]** Breakpoints follow reference-harness's scheme (ARCHITECTURE.md "Cache control"): system/preset, summary layer, last verbatim timeline item.

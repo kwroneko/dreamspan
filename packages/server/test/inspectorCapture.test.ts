@@ -67,7 +67,7 @@ it.live("review: unchanged prefix stays warm with an ordinary short header value
     )
     yield* eventually(() => finished(events, entry.version.id) !== undefined)
     const me = yield* api.Whoami()
-    const warmth = yield* (yield* Reader).CacheWarmth({ userId: me.id, chatId: chat.id })
+    const warmth = (yield* (yield* Reader).CacheWarmth({ userId: me.id, chatId: chat.id })).warmth
     const run = yield* api.GetRunContext({ versionId: entry.version.id })
     assert.include(run.messages.map((m) => m.content).join(" "), "[redacted]")
     assert.notInclude(JSON.stringify(run), "digest")
@@ -178,7 +178,7 @@ it.live("review: inserted provider messages do not steal source labels from unch
     })
     const run = yield* api.GetRunContext({ versionId: version.id })
     const me = yield* api.Whoami()
-    const warmth = yield* (yield* Reader).CacheWarmth({ userId: me.id, chatId: chat.id })
+    const warmth = (yield* (yield* Reader).CacheWarmth({ userId: me.id, chatId: chat.id })).warmth
     assert.isNotNull(warmth!.changed, "unassigned transform messages still participate in prefix comparison")
     assert.deepEqual(run.messages[0]!.sources, [])
     const card = run.messages.find((m) => m.content.includes("keeps the ledger"))!

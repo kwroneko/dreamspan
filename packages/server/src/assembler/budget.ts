@@ -8,6 +8,13 @@ export const contextBudget = (assembly: Assembly) => {
   return context - samplers.openai_max_tokens
 }
 
+/** The target includes the same response reserve as the maximum. */
+export const targetBudget = (assembly: Assembly) => {
+  const preset = need(assembly, "preset").doc
+  const maximum = contextBudget(assembly) + preset.samplers.openai_max_tokens
+  return Math.min(maximum, preset.context_target ?? Math.floor(maximum * 0.8)) - preset.samplers.openai_max_tokens
+}
+
 /** ST's default lore budget; our layouts also enforce a stable tail allowance. */
 export const loreBudget = (assembly: Assembly) => Math.max(1, Math.round(contextBudget(assembly) * 0.25))
 

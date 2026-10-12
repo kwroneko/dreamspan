@@ -39,7 +39,7 @@ export class CacheWarmth extends Context.Service<
 
       const estimate = (chatId: ChatId, entry: Watched) =>
         reader.CacheWarmth({ userId: entry.userId, chatId }).pipe(
-          Effect.map((warmth) => hub.publish(chatId, { _tag: "Cache", warmth })),
+          Effect.map((next) => hub.publish(chatId, { _tag: "Cache", ...next })),
           Effect.catchTag("NotFound", () => Effect.void),
           Effect.catch((error) => Effect.logWarning(`estimating the cache of chat ${chatId} failed`, error)),
           Effect.ensuring(

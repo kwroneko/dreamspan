@@ -31,7 +31,8 @@ const duration = (seconds: number) =>
 export function CacheIndicator({ warmth }: { warmth: CacheWarmth | null }) {
   const [now, setNow] = useState(() => Date.now())
   const [countdown, setCountdown] = useState(countdownOn)
-  const expiresAt = warmth === null ? 0 : warmth.expiresAt
+  const expiresAt = warmth?.ttlS == null ? 0 : (warmth.expiresAt ?? 0)
+  const timed = warmth?.ttlS != null && warmth.expiresAt !== null
   const warm = warmth !== null && warmth.changed === null && now < expiresAt
   // Ticks every second while counting down, otherwise once, when the cache expires.
   useEffect(() => {
@@ -43,7 +44,7 @@ export function CacheIndicator({ warmth }: { warmth: CacheWarmth | null }) {
     const timer = setTimeout(() => setNow(Date.now()), expiresAt - Date.now())
     return () => clearTimeout(timer)
   }, [warm, countdown, expiresAt])
-  if (warmth === null) return null
+  if (warmth === null || (!timed && warmth.changed === null)) return null
 
   const toggle = () => {
     setCountdown(!countdown)
@@ -55,9 +56,9 @@ export function CacheIndicator({ warmth }: { warmth: CacheWarmth | null }) {
   }
   const { changed } = warmth
   const detail = changed
-    ? `${changed.reason} The next reply writes about ${changed.tokens.toLocaleString()} tokens to the cache again.`
+    ? `${changed.reason} Next send rewrites ~${changed.tokens.toLocaleString()} tokens.`
     : !warm
-      ? `More than ${duration((warmth.expiresAt - warmth.lastRequestAt) / 1000)} passed since the last request.`
+      ? `More than ${duration((expiresAt - warmth.lastRequestAt) / 1000)} passed since the last request.`
       : warmth.verified
         ? "The provider reported using its cache on the last request."
         : "Assumed: the provider didn't report its cache on the last request."
@@ -68,7 +69,7 @@ export function CacheIndicator({ warmth }: { warmth: CacheWarmth | null }) {
     >
       <span aria-live="polite" className="flex flex-wrap items-center gap-2">
         <Badge tone={warm ? "success" : changed ? "warning" : "neutral"}>
-          {warm ? "Cache warm" : "Cache cold"} (estimate)
+          {!timed ? "Cache rewrite" : warm ? "Cache warm" : "Cache cold"} (estimate)
         </Badge>
         <span>{detail}</span>
       </span>

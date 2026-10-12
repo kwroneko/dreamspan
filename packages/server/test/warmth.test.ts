@@ -78,7 +78,7 @@ it.effect("identifies unchanged history pieces removed by the budget", () =>
       ...bounded,
       messages: [...messages, { side: "user", content: `Another synthetic turn. ${"long ".repeat(20)}` }]
     })
-    assert.include(prefixChange(last, next, describe)!.reason, "budget")
+    assert.include(prefixChange(last, next, describe)!.reason, "context reached its maximum")
   })
 )
 

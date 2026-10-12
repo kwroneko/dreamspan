@@ -156,6 +156,8 @@ export const PresetDoc = Schema.Struct({
     Schema.makeFilter(uniqueBy((e: PromptOrderEntry) => e.identifier, "identifier"))
   ),
   samplers: PresetSamplers,
+  /** Total target after a history cut; absent means 80% of the effective maximum. */
+  context_target: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThan(0))),
   utility_prompts: UtilityPrompts,
   names_behavior: NamesBehavior,
   /** ST's `squash_system_messages`: consecutive system messages are joined into one. */

@@ -99,6 +99,12 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
           updated_at: now
         })}`
         yield* sql`INSERT INTO rollout_payloads ${sql.insert({ rollout_id: rolloutId, context_snapshot_json: snapshot })}`
+        yield* sql`UPDATE rollouts SET
+          history_start_slot_id = json_extract(${snapshot}, '$.historyStart.slotId'),
+          history_start_depth = json_extract(${snapshot}, '$.historyStart.depth'),
+          history_depth = CASE WHEN json_type(${snapshot}, '$.historyStart') = 'object'
+            THEN (SELECT depth FROM slots WHERE id = ${slotId}) ELSE NULL END
+          WHERE id = ${rolloutId}`
         yield* sql`UPDATE versions SET rollout_id = ${rolloutId}, connection_id = ${connectionId},
           model_id = ${modelId}, updated_at = ${now} WHERE id = ${versionId}`
         yield* setVariables(chatId, slotId, versionId, variables, rolloutId, now)

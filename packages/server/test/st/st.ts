@@ -312,6 +312,7 @@ const setAuthorNote = (page: Page, note: AuthorNote) =>
 
 export interface Capture {
   /** Presets loaded into ST one after another, by name; none for the baseline settings. */
+  readonly overMaximum?: boolean
   readonly presets: ReadonlyArray<string>
   readonly character: string
   /** What the user sends, or, for ST's other generation types, none: the chat as it is. */
@@ -385,6 +386,19 @@ export const captureWithSettings = async (
           value
       }, postProcessing)
     }
+    if (capture.overMaximum)
+      await page.evaluate(() => {
+        const ctx = SillyTavern.getContext()
+        Object.assign(ctx.chatCompletionSettings, { openai_max_context: 1024, openai_max_tokens: 100 })
+        const history = Array.from({ length: 40 }, (_, i) => ({
+          name: i % 2 ? "Mira" : "Tobin",
+          is_user: i % 2 === 0,
+          is_system: false,
+          send_date: "2026-01-01T00:00:00.000Z",
+          mes: `Older turn ${i}: ${"road ".repeat(32)}`
+        }))
+        ;(ctx.chat as Array<unknown>).splice(0, ctx.chat.length, ...history)
+      })
     settings = await settingsInForce(page)
   })
   return { body, settings }

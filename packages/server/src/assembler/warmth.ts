@@ -23,7 +23,10 @@ const same = (
 ) => b !== undefined && a.role === b.role && a.content === b.content && (a.name ?? null) === (b.name ?? null)
 
 const LAYOUT = "The context's layout changed: the cast, the chat's settings or the roles."
-const BUDGET = "The context budget changed where the history starts."
+const budgetReason = (next: ContextSnapshot) =>
+  next.historyMove === "maximum"
+    ? "The context reached its maximum; older messages left."
+    : "The context budget changed where the history starts."
 
 /** Why a message of the path that was sent reads differently, or isn't sent, now. */
 const messageReason = (
@@ -33,7 +36,7 @@ const messageReason = (
   label: string
 ) => {
   const sent = next.pieces.find((p) => p.source.kind === "message" && p.source.slot === source.slot)
-  if (sent?.source.kind === "message" && sent.messages.length === 0) return BUDGET
+  if (sent?.source.kind === "message" && sent.messages.length === 0) return budgetReason(next)
   if (sent?.source.kind === "message") {
     if (sent.source.version !== source.version) return `${label} was edited, or another of its versions chosen.`
     const previous = last.pieces.find((p) => p.source.kind === "message" && p.source.slot === source.slot)
@@ -46,7 +49,8 @@ const messageReason = (
         .map((p) => (p.source.kind === "message" ? p.source.slot : ""))
     const oldHistory = history(last)
     const newHistory = history(next)
-    if (oldHistory[0] !== newHistory[0] || oldHistory.some((slot) => !newHistory.includes(slot))) return BUDGET
+    if (oldHistory[0] !== newHistory[0] || oldHistory.some((slot) => !newHistory.includes(slot)))
+      return budgetReason(next)
     const notes = (snapshot: ContextSnapshot) =>
       snapshot.pieces
         .filter((p) => p.source.kind === "note" && p.messages.length > 0)
@@ -61,11 +65,11 @@ const messageReason = (
     const depth = (last.sources?.history ?? []).flatMap((w) => w.entries).find((e) => e.slotId === source.slot)?.depth
     const oldest = Math.min(...read.map((e) => e.depth))
     return depth !== undefined && depth < oldest
-      ? BUDGET
+      ? budgetReason(next)
       : `The path changed: another branch is shown, or ${label} was deleted.`
   }
   if (entry.versionId !== source.version) return `${label} was edited, or another of its versions chosen.`
-  return entry.inContext ? BUDGET : `${label} was hidden.`
+  return entry.inContext ? budgetReason(next) : `${label} was hidden.`
 }
 
 const reasonAt = (last: ContextSnapshot, next: ContextSnapshot, at: number, describe: Describe) => {

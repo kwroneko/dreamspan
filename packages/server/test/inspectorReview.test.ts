@@ -104,7 +104,7 @@ describe("review reproductions", () => {
       const item = yield* api.DeleteConnection({ connectionId: connection.id })
       yield* Effect.sleep("1 second")
       const me = yield* api.Whoami()
-      const direct = yield* reader.CacheWarmth({ userId: me.id, chatId: chat.id })
+      const direct = (yield* reader.CacheWarmth({ userId: me.id, chatId: chat.id })).warmth
       assert.isNull(direct)
       assert.isTrue(
         estimates(events.slice(n)).some((e) => e.warmth === null),
@@ -115,7 +115,7 @@ describe("review reproductions", () => {
       yield* eventually(() => estimates(events.slice(restoredAt)).some((e) => e.warmth !== null))
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
-  it.live("switching to a model with no TTL must remove the estimate", () => {
+  it.live("switching to a model with no TTL keeps the rewrite estimate", () => {
     const config = testConfig()
     return Effect.gen(function* () {
       const provider = yield* mock()
@@ -142,8 +142,9 @@ describe("review reproductions", () => {
         defaults: { model: { connection: connection.id, model: model.id }, preset: null }
       })
       const me = yield* api.Whoami()
-      const result = yield* reader.CacheWarmth({ userId: me.id, chatId: chat.id })
-      assert.isNull(result, "the next model has no TTL")
+      const result = (yield* reader.CacheWarmth({ userId: me.id, chatId: chat.id })).warmth
+      assert.isNull(result!.ttlS)
+      assert.match(result!.changed!.reason, /model changed/)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 })
@@ -249,7 +250,7 @@ it.live("next-model TTL eligibility does not change the historical expiry", () =
     const before = warm(events)!.warmth!
     yield* api.EditModel({ modelId: model.id, expectedRowVersion: model.rowVersion, overrides: { cacheTtlS: 900 } })
     const me = yield* api.Whoami()
-    const after = yield* reader.CacheWarmth({ userId: me.id, chatId: chat.id })
+    const after = (yield* reader.CacheWarmth({ userId: me.id, chatId: chat.id })).warmth
     assert.strictEqual(after!.ttlS, 900)
     assert.strictEqual(after!.expiresAt, before.lastRequestAt + 300_000)
   }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
@@ -333,13 +334,13 @@ it.live("Responses inspection and warmth use the final SDK role after reasoning 
     })
     const me = yield* api.Whoami()
     const reader = yield* Reader
-    const before = yield* reader.CacheWarmth({ userId: me.id, chatId: chat.id })
+    const before = (yield* reader.CacheWarmth({ userId: me.id, chatId: chat.id })).warmth
     const reasoning = yield* api.EditModel({
       modelId: model.id,
       expectedRowVersion: model.rowVersion,
       overrides: { reasoning: true }
     })
-    const after = yield* reader.CacheWarmth({ userId: me.id, chatId: chat.id })
+    const after = (yield* reader.CacheWarmth({ userId: me.id, chatId: chat.id })).warmth
     const current = yield* api.GetChat({ chatId: chat.id })
     const { entry } = yield* posted(
       api.Generate({ chatId: chat.id, parentSlotId: current.activeLeafSlotId, branch: false })
@@ -364,14 +365,14 @@ it.live("Responses inspection and warmth use the final SDK role after reasoning 
         content: typeof m.content === "string" ? m.content : m.content.map((b) => b.text).join("\n")
       }))
     )
-    const matched = yield* reader.CacheWarmth({ userId: me.id, chatId: chat.id })
+    const matched = (yield* reader.CacheWarmth({ userId: me.id, chatId: chat.id })).warmth
     assert.isNull(matched?.changed, "the next reasoning request matches the captured developer prefix")
     yield* api.EditModel({
       modelId: model.id,
       expectedRowVersion: reasoning.rowVersion,
       overrides: { reasoning: true, compat: { supportsDeveloperRole: false } }
     })
-    assert.isNotNull((yield* reader.CacheWarmth({ userId: me.id, chatId: chat.id }))!.changed)
+    assert.isNotNull((yield* reader.CacheWarmth({ userId: me.id, chatId: chat.id })).warmth!.changed)
     assert.equal(
       (yield* api.GetRunContext({ versionId: entry.version.id })).messages[0]!.role,
       "developer",

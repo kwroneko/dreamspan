@@ -11,7 +11,7 @@ import type { PresetDoc } from "@rp/shared/docs/preset.ts"
 import { Schema } from "effect"
 
 /** Bump whenever identical inputs would assemble differently. Missing means version 0. */
-export const ASSEMBLER_VERSION = 7
+export const ASSEMBLER_VERSION = 8
 
 export type Role = "system" | "user" | "assistant"
 
@@ -161,8 +161,15 @@ export interface WireContext {
   readonly samplers: Readonly<Record<string, number>>
 }
 
+export interface HistoryStart {
+  readonly slotId: string | null
+  readonly depth: number
+}
+
 /** A context as built, stored as its rollout's frozen snapshot (DATA-MODEL §7.1). */
 export interface ContextSnapshot {
+  readonly historyStart?: HistoryStart
+  readonly historyMove?: "initial" | "maximum" | "restore" | "unchanged"
   readonly schema: 1
   readonly assemblerVersion?: number
   readonly inputs: SnapshotInputs
@@ -193,6 +200,7 @@ type PinnedEntry = Omit<HistoryEntry, "content"> & { readonly amends: number }
 /** What one context's sources read, by id and revision, each read keyed by its request (invariant 6). */
 export interface SourcePins {
   readonly target: Target
+  readonly historyStart?: HistoryStart | null
   readonly events: ReadonlyArray<{ readonly id: string; readonly depth: number | null }>
   readonly history: ReadonlyArray<{
     readonly key: string

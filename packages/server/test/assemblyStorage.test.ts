@@ -12,7 +12,9 @@ import type { ConnectionId } from "@rp/shared/providers.ts"
 import type { StateEventData } from "@rp/shared/state.ts"
 import { Effect } from "effect"
 import { readFileSync } from "node:fs"
-import type { ContextSnapshot } from "../src/assembler/types.ts"
+import { generationOf, type ContextSnapshot } from "../src/assembler/types.ts"
+import { tokensOf } from "../src/assembler/st.ts"
+import { prefixChange } from "../src/assembler/warmth.ts"
 import * as Database from "../src/db/Database.ts"
 import { importCard } from "../src/formats/cardImport.ts"
 import { importStPreset } from "../src/formats/preset.ts"
@@ -118,6 +120,186 @@ const setup = (handle = "ana") =>
 const texts = (snapshot: ContextSnapshot) => snapshot.request.messages.map((m) => `${m.role}: ${m.content}`)
 
 describe("context assembly from the database", () => {
+  it.live(
+    "pins independent branch starts, holds them between cuts and replays after edits and a raised maximum",
+    () =>
+      Effect.gen(function* () {
+        const { writer, reader, userId, chat, entity, state, sent } = yield* setup()
+        const document = {
+          ...presetDoc,
+          samplers: { ...presetDoc.samplers, openai_max_context: 500, openai_max_tokens: 40 }
+        }
+        const chosen = yield* entity("preset", "Steps", document)
+        yield* state({ key: "preset.binding", value: { ref: chosen.ref.id } })
+        const connectionId = uuidv7() as ConnectionId
+        yield* writer.CreateConnection({
+          userId,
+          connectionId,
+          kind: "openai-chat",
+          api: "openai-completions",
+          settings: {
+            name: "Steps",
+            baseUrl: null,
+            compat: {},
+            cacheTtlS: null,
+            maxConcurrent: null,
+            presetOverrideRefId: null
+          },
+          credential: { existing: null }
+        })
+        const model = yield* writer.AddUserModel({ userId, connectionId, key: "steps", overrides: {} })
+        yield* state({ key: "model.binding", value: { connection: connectionId, model: model.id } })
+        const snapshots: Array<ContextSnapshot> = []
+        const users: Array<{ id: VersionId; slot: SlotId }> = []
+        const send = (parent: SlotId, branch = false) =>
+          writer
+            .AppendMessage({
+              userId,
+              chatId: chat.id,
+              parentSlotId: parent,
+              branch,
+              commitDraft: null,
+              version: new NewVersion({
+                speakerEntityId: null,
+                writer: "human",
+                content: "u".repeat(100),
+                status: "complete",
+                macroMode: "verbatim",
+                origin: "user_written"
+              })
+            })
+            .pipe(Effect.tap((m) => Effect.sync(() => users.push({ id: m.version.id, slot: m.slotId }))))
+        const generate = (parent: SlotId) =>
+          Effect.gen(function* () {
+            const posted = yield* writer.AppendMessage({
+              userId,
+              chatId: chat.id,
+              parentSlotId: parent,
+              branch: true,
+              commitDraft: null,
+              version: new NewVersion({
+                speakerEntityId: null,
+                writer: "model",
+                content: "",
+                status: "generating",
+                macroMode: "verbatim",
+                origin: "generated"
+              })
+            })
+            const { snapshot: json } = yield* reader.AssembleContext({
+              userId,
+              chatId: chat.id,
+              slotId: posted.slotId,
+              versionId: posted.version.id,
+              now: NOW,
+              timeZone: "UTC",
+              frozen: null
+            })
+            const snapshot = JSON.parse(json) as ContextSnapshot
+            const gen = generationOf(snapshot)
+            const rolloutId = uuidv7()
+            yield* writer.StartRollout({
+              userId,
+              chatId: chat.id,
+              slotId: posted.slotId,
+              versionId: posted.version.id,
+              rolloutId,
+              leafSlotId: parent,
+              connectionId,
+              modelId: model.id,
+              snapshot: json,
+              issues: gen.issues,
+              variables: gen.variables,
+              frozenMessages: gen.frozenMessages.map((message) => ({
+                ...message,
+                versionId: message.versionId as VersionId
+              }))
+            })
+            yield* writer.SaveGeneration({
+              userId,
+              versionId: posted.version.id,
+              content: "r".repeat(100),
+              status: "complete",
+              error: null
+            })
+            yield* writer.FinishRollout({
+              userId,
+              versionId: posted.version.id,
+              rolloutId,
+              status: "completed",
+              error: null
+            })
+            snapshots.push(snapshot)
+            return { slot: posted.slotId, snapshot }
+          })
+        let last = yield* generate(sent.slotId)
+        const shared = last
+        const jumps: Array<ContextSnapshot> = []
+        let held = 0
+        for (let i = 0; i < 25; i++) {
+          const user = yield* send(last.slot)
+          const next = yield* generate(user.slotId)
+          if (next.snapshot.historyMove === "maximum") {
+            jumps.push(next.snapshot)
+            assert.isAtMost(43 + next.snapshot.request.messages.reduce((n, m) => n + tokensOf(m), 0), 400)
+            assert.match(
+              prefixChange(last.snapshot, next.snapshot, () => ({ label: "Message" }))!.reason,
+              /reached its maximum/
+            )
+          } else {
+            assert.deepStrictEqual(next.snapshot.historyStart, last.snapshot.historyStart)
+            assert.isNull(prefixChange(last.snapshot, next.snapshot, () => ({ label: "Message" })))
+            held++
+          }
+          last = next
+        }
+        assert.isAbove(jumps.length, 2)
+        assert.isAbove(held, jumps.length)
+        // A branch from before the first cut inherits the shared generation, never the other branch's latest start.
+        const fork = yield* send(shared.slot, true)
+        const branched = yield* generate(fork.slotId)
+        assert.deepStrictEqual(branched.snapshot.sources!.historyStart, shared.snapshot.historyStart)
+        assert.strictEqual(branched.snapshot.historyStart!.depth, 0)
+        // Shortening the old path restores earlier messages only as a suffix that fits the target.
+        for (const user of users.slice(-8, -1))
+          yield* writer.AmendVersion({ userId, versionId: user.id, expectedRowVersion: 1, content: "s" })
+        const shortened = yield* generate((yield* send(last.slot, true)).slotId)
+        assert.isBelow(shortened.snapshot.historyStart!.depth, last.snapshot.historyStart!.depth)
+        assert.strictEqual(shortened.snapshot.historyMove, "restore")
+        yield* writer.EditRef({
+          userId,
+          refId: chosen.ref.id,
+          expectedRowVersion: chosen.ref.rowVersion,
+          doc: {
+            ...document,
+            samplers: { ...document.samplers, openai_max_context: 10000 }
+          } as never,
+          message: null,
+          commitDraft: null
+        })
+        const raised = yield* generate((yield* send(shortened.slot)).slotId)
+        assert.strictEqual(raised.snapshot.historyStart!.depth, 0)
+        yield* writer.EditRef({
+          userId,
+          refId: chosen.ref.id,
+          expectedRowVersion: chosen.ref.rowVersion + 1,
+          doc: { ...document, samplers: { ...document.samplers, openai_max_context: 20 } } as never,
+          message: null,
+          commitDraft: null
+        })
+        const fallback = yield* reader.CacheWarmth({ userId, chatId: chat.id })
+        assert.deepStrictEqual(fallback.historyStart, raised.snapshot.historyStart)
+        assert.strictEqual(fallback.leafSlotId, raised.slot)
+        assert.isNull(fallback.warmth)
+        for (const snapshot of snapshots) {
+          const rebuilt = yield* reader.RebuildContext({ userId, snapshot: JSON.stringify(snapshot) })
+          assert.ok(rebuilt._tag === "Rebuilt")
+          assert.deepStrictEqual(JSON.parse(rebuilt.snapshot), snapshot)
+        }
+      }).pipe(Effect.provide(database())),
+    60000
+  )
+
   it.live(
     "rebuilds shared preview limits with identical frozen dice work",
     () =>
@@ -447,7 +629,7 @@ describe("context assembly from the database", () => {
     Effect.gen(function* () {
       const { reader, userId, assemble } = yield* setup()
       const built = yield* assemble()
-      for (const version of [undefined, 0, 1, 2, 3, 4, 5, 6]) {
+      for (const version of [undefined, 0, 1, 2, 3, 4, 5, 6, 7]) {
         const legacy = { ...built, assemblerVersion: version, sources: { ...built.sources, userMessages: [] } }
         const json = JSON.stringify(legacy)
         const result = yield* reader.RebuildContext({ userId, snapshot: json })
@@ -455,7 +637,7 @@ describe("context assembly from the database", () => {
         assert.ok(result._tag === "EarlierAssemblerVersion")
         assert.strictEqual(result.storedSnapshot, json)
       }
-      assert.strictEqual(built.assemblerVersion, 7)
+      assert.strictEqual(built.assemblerVersion, 8)
       const rebuilt = yield* reader.RebuildContext({ userId, snapshot: JSON.stringify(built) })
       assert.ok(rebuilt._tag === "Rebuilt")
       assert.deepStrictEqual(JSON.parse(rebuilt.snapshot), built)

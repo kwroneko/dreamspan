@@ -109,7 +109,7 @@ it.effect("lorebook-specific warmth reasons: changed/removed entry and assembled
     assert.include(prefixChange(wrapper, b, describe)!.reason, "lorebook entries that activated changed")
   })
 )
-it.effect("an intermittent note switches the estimate cold exactly when its budget changes the formatted prefix", () =>
+it.effect("an intermittent note preserves a held prefix until the maximum forces history out", () =>
   Effect.gen(function* () {
     const note: NoteInput = {
       entity: "note",
@@ -137,6 +137,7 @@ it.effect("an intermittent note switches the estimate cold exactly when its budg
     const a = yield* assembleFixture(base)
     const b = yield* assembleFixture({
       ...base,
+      historyStart: a.historyStart!,
       messages: [...base.messages, { side: "user", content: "hidden", inContext: false }]
     })
     const sent = (s: ContextSnapshot) => s.request.messages.some((m) => m.content.includes("INTERMITTENT NOTE"))
@@ -167,8 +168,8 @@ it.effect("an intermittent note switches the estimate cold exactly when its budg
       due: true
     })
     assert.notEqual(sent(a), sent(b))
-    assert.notDeepEqual(prefix(a), prefix(b))
-    assert.isNotNull(prefixChange(a, b, describe))
+    assert.deepStrictEqual(prefix(a), prefix(b))
+    assert.isNull(prefixChange(a, b, describe))
     const roomy = {
       ...base,
       preset: importStPreset(JSON.stringify({ openai_max_context: 10000, openai_max_tokens: 100 })).document!
@@ -180,7 +181,29 @@ it.effect("an intermittent note switches the estimate cold exactly when its budg
     })
     assert.deepStrictEqual(prefix(c), prefix(d))
     assert.isNull(prefixChange(c, d, describe))
-    assert.equal(prefixChange(a, b, describe)!.reason, "The context budget changed where the history starts.")
-    assert.equal(prefixChange(b, a, describe)!.reason, "The context budget changed where the history starts.")
+    let previous = b
+    let crossed = false
+    for (let count = 1; count <= 12; count++) {
+      const next = yield* assembleFixture({
+        ...base,
+        historyStart: previous.historyStart!,
+        messages: [
+          ...base.messages,
+          { side: "user", content: "hidden", inContext: false },
+          ...Array.from({ length: count }, () => ({ side: "user" as const, content: "road ".repeat(30) }))
+        ]
+      })
+      if (next.historyMove === "maximum") {
+        assert.equal(
+          prefixChange(previous, next, describe)!.reason,
+          "The context reached its maximum; older messages left."
+        )
+        crossed = true
+        break
+      }
+      assert.isNull(prefixChange(previous, next, describe))
+      previous = next
+    }
+    assert.isTrue(crossed)
   })
 )

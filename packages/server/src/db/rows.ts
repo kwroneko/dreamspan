@@ -104,7 +104,13 @@ export const toVersion = (row: VersionRow) =>
     frozenMacros: row.frozen_macros === null ? null : (JSON.parse(row.frozen_macros) as Record<string, string>),
     context: !row.has_context
       ? null
-      : { issues: row.context_issues ? (JSON.parse(row.context_issues) as Array<ContextIssue>) : [] },
+      : {
+          issues: row.context_issues
+            ? (JSON.parse(row.context_issues) as Array<ContextIssue>).filter(
+                (issue) => issue.kind !== "history_truncated"
+              )
+            : []
+        },
     rowVersion: 1 + (row.amend_count ?? 0)
   })
 

@@ -111,6 +111,12 @@ export const migrations = {
     `CREATE TRIGGER llm_requests_cache_identity_frozen BEFORE UPDATE OF cache_identity_json ON llm_requests
       WHEN OLD.status <> 'running' AND NEW.cache_identity_json IS NOT OLD.cache_identity_json
       BEGIN SELECT RAISE(ABORT, 'a closed request is a record'); END`
+  ]),
+  "0021_stepped_history": runAll([
+    `ALTER TABLE rollouts ADD COLUMN history_start_slot_id TEXT`,
+    `ALTER TABLE rollouts ADD COLUMN history_start_depth INTEGER`,
+    `ALTER TABLE rollouts ADD COLUMN history_depth INTEGER`,
+    `CREATE INDEX rollouts_history ON rollouts(chat_id, history_depth DESC, id DESC) WHERE history_depth IS NOT NULL`
   ])
 }
 

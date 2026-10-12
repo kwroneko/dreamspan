@@ -28,6 +28,7 @@ export interface FixtureMessage {
 }
 
 export interface AssemblyFixture {
+  readonly historyStart?: ContextSnapshot["historyStart"] | null
   readonly chatId?: string
   /** The path, root first; the message being generated comes after it. */
   readonly messages: ReadonlyArray<FixtureMessage>
@@ -83,6 +84,7 @@ const fixtureSources = (fixture: AssemblyFixture) => {
       speaker: fixture.target?.speaker ?? null,
       direction: fixture.target?.direction ?? null
     }),
+    historyStart: () => Effect.succeed(fixture.historyStart ?? null),
     events: () => Effect.succeed(events),
     history: (leaf, limit) =>
       Effect.sync(() => {

@@ -180,6 +180,12 @@ function MessageList({
               style={{ transform: `translateY(${item.start}px)` }}
             >
               <Message
+                outOfContext={
+                  !entry.contextExcluded &&
+                  view.history?.leafSlotId === view.leafSlotId &&
+                  view.history.historyStart !== null &&
+                  entry.depth < view.history.historyStart.depth
+                }
                 entry={entry}
                 session={session}
                 highlighted={entry.slotId === anchor}

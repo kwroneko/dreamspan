@@ -121,9 +121,9 @@ export class RunContext extends Schema.Class<RunContext>("RunContext")({
  */
 export const CacheWarmth = Schema.Struct({
   lastRequestAt: Schema.Number,
-  ttlS: Schema.Int,
+  ttlS: Schema.NullOr(Schema.Int),
   /** Historical expiry, independent of the next model's eligibility and TTL. */
-  expiresAt: Schema.Number,
+  expiresAt: Schema.NullOr(Schema.Number),
   /** The provider reported reading or writing its cache on that request. */
   verified: Schema.Boolean,
   /** The last request's tokens up to its last breakpoint: what a warm cache holds. */
@@ -132,6 +132,14 @@ export const CacheWarmth = Schema.Struct({
   changed: Schema.NullOr(Schema.Struct({ reason: Schema.String, tokens: Schema.Int }))
 })
 export type CacheWarmth = typeof CacheWarmth.Type
+
+/** The next request boundary, also available before a first send or without a cache TTL. */
+export const NextContext = Schema.Struct({
+  warmth: Schema.NullOr(CacheWarmth),
+  leafSlotId: Schema.NullOr(Schema.String),
+  historyStart: Schema.NullOr(Schema.Struct({ slotId: Schema.NullOr(Schema.String), depth: Schema.Int }))
+})
+export type NextContext = typeof NextContext.Type
 
 export class InspectorApi extends RpcGroup.make(
   /** The context a version was generated from, as sent; NotFound without one. */

@@ -1622,8 +1622,10 @@ const storage: Record<
     Effect.gen(function* () {
       yield* refused(reader.CacheWarmth({ userId: actor.user.id, chatId: owner.chat.chatId }), "NotFound")
       const own = yield* reader.CacheWarmth({ userId: owner.user.id, chatId: owner.chat.chatId })
-      assert.isNotNull(own)
-      assert.strictEqual(own!.expiresAt, own!.lastRequestAt + 300_000)
+      assert.isNotNull(own.historyStart)
+      assert.strictEqual(own.leafSlotId, owner.chat.replySlotId)
+      assert.isNotNull(own.warmth)
+      assert.strictEqual(own.warmth!.expiresAt, own.warmth!.lastRequestAt + 300_000)
     })
 }
 

@@ -27,6 +27,10 @@ const DOCUMENTED: ReadonlyArray<{
   readonly why: string
   readonly matches: (line: string, config: Config, settings: Record<string, unknown>) => boolean
 }> = [
+  {
+    why: "history leaves in steps down to the target (ST trims only to the maximum)",
+    matches: (line, config) => config.overMaximum === true && line.startsWith("messages")
+  },
   { why: "we always stream (ST sends the preset's stream_openai)", matches: (line) => line.startsWith("stream:") },
   { why: "no multi-swipe requests (ST sends the preset's n above 1)", matches: (line) => line.startsWith("n:") },
   {
@@ -39,6 +43,7 @@ const DOCUMENTED: ReadonlyArray<{
 ]
 
 interface Config {
+  readonly overMaximum?: boolean
   readonly lorebook?: boolean
   readonly name: string
   readonly presets: ReadonlyArray<string>
@@ -148,9 +153,14 @@ const ourRequest = async (
   const document = { ...parsed, regex_approved: true }
   const card = await imported(fixtures.cards.find((c) => c.name === character)!.png, character)
   const persona = run(importCard(json({ name: fixtures.persona.name, description: fixtures.persona.description }))).card
-  const lines: Array<FixtureMessage> = fixtures.chats
-    .find((c) => c.card === character)!
-    .lines.map((line) => ({ side: line.is_user ? "user" : "assistant", content: line.mes }))
+  const lines: Array<FixtureMessage> = config.overMaximum
+    ? Array.from({ length: 40 }, (_, i) => ({
+        side: i % 2 ? "assistant" : "user",
+        content: `Older turn ${i}: ${"road ".repeat(32)}`
+      }))
+    : fixtures.chats
+        .find((c) => c.card === character)!
+        .lines.map((line) => ({ side: line.is_user ? "user" : "assistant", content: line.mes }))
   // A swipe is a new version of the last reply: the context ends before it.
   const messages =
     config.generate === "swipe"
@@ -232,6 +242,7 @@ export const compareAssembly = async (
   await savePoisonPreset(browser, url, POISON)
   const configs: ReadonlyArray<Config> = [
     { name: "baseline", presets: [] },
+    { name: "history over maximum, stepped target", presets: ["default"], overMaximum: true },
     ...["default", "full"].map((preset) => ({
       name: `${preset}, lorebook positions`,
       presets: [preset],
@@ -319,6 +330,7 @@ export const compareAssembly = async (
         url,
         mock,
         {
+          overMaximum: config.overMaximum ?? false,
           presets: config.presets,
           character,
           message: config.empty ? "" : MESSAGE,
@@ -349,6 +361,29 @@ export const compareAssembly = async (
       if (ours.problem) {
         differences.push(`${label}: ${ours.problem}`)
         continue
+      }
+      if (config.overMaximum) {
+        type Messages = { messages: ReadonlyArray<{ role: string; content: string; name?: string }> }
+        const stMessages = (body as Messages).messages
+        const ourMessages = (ours.body as Messages).messages
+        const fixed = (messages: Messages["messages"]) => {
+          const at = messages.findIndex(
+            (m) =>
+              m.content.includes("Older turn") ||
+              m.name?.startsWith("example_") ||
+              m.content === settings.new_chat_prompt ||
+              m.content === settings.new_example_chat_prompt
+          )
+          return messages.slice(0, at)
+        }
+        for (const difference of diffJson(fixed(stMessages), fixed(ourMessages)))
+          differences.push(`${label}: fixed prefix ${difference}`)
+        const stCount = stMessages.filter((m) => m.content.includes("Older turn")).length
+        const ourCount = ourMessages.filter((m) => m.content.includes("Older turn")).length
+        if (stCount === 0 || stCount >= 40 || ourCount >= stCount)
+          differences.push(
+            `${label}: the overflow case did not show a stepped cut beyond ST's maximum cut (${ourCount} vs ${stCount})`
+          )
       }
       let unexpected = 0
       for (const line of diffJson(body, ours.body)) {

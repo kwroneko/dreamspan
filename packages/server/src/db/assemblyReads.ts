@@ -15,6 +15,7 @@ import {
   generationOf
 } from "../assembler/types.ts"
 import { sqlSources } from "./assemblySources.ts"
+import { previousHistoryStart } from "./historyStart.ts"
 import { readDefaults } from "./generationSettings.ts"
 import type { ReadOps } from "./ops.ts"
 import { query } from "./tx.ts"
@@ -109,13 +110,6 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
           WHERE q.chat_id = ${chatId} AND q.owner_user_id = ${userId}
             AND (q.status IN ('running', 'complete') OR q.first_token_at IS NOT NULL)
           ORDER BY q.started_at DESC, q.id DESC LIMIT 1`
-        if (!last?.snapshot || last.model_id === null) return null
-        const saved = JSON.parse(last.snapshot) as ContextSnapshot
-        const previous = {
-          ...saved,
-          ...(last.sent_context_json ? { wire: JSON.parse(last.sent_context_json) as WireContext } : {})
-        }
-        const end = lastBreakpoint(previous)
         const sources = sqlSources(sql, { userId, chatId, next: true })
         const next = yield* assembler
           .assemble({ now: Date.now(), timeZone: "UTC", frozen: {}, random: Math.random })
@@ -124,19 +118,37 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
             Effect.map((built): ContextSnapshot => ({ ...built, sources: sources.pins() })),
             Effect.catchTag("AssemblyFailed", (error) => Effect.succeed(error))
           )
-        if (next instanceof AssemblyFailed || !next.inputs.model) return null
+        const [recorded] =
+          next instanceof AssemblyFailed
+            ? yield* previousHistoryStart(sql, userId, chatId, sources.pins().target.parentSlotId)
+            : []
+        const fallback = recorded
+          ? { slotId: recorded.slot_id, depth: recorded.depth }
+          : (sources.pins().historyStart ?? null)
+        const boundary = {
+          leafSlotId: sources.pins().target.parentSlotId,
+          historyStart: next instanceof AssemblyFailed ? fallback : (next.historyStart ?? fallback)
+        }
+        if (next instanceof AssemblyFailed || !next.inputs.model || !last?.snapshot || last.model_id === null) {
+          return { ...boundary, warmth: null }
+        }
+        const saved = JSON.parse(last.snapshot) as ContextSnapshot
+        const previous = {
+          ...saved,
+          ...(last.sent_context_json ? { wire: JSON.parse(last.sent_context_json) as WireContext } : {})
+        }
+        const end = lastBreakpoint(previous)
         const sameModel =
           next.inputs.model.modelId === previous.inputs.model?.modelId &&
           next.inputs.model.connectionId === previous.inputs.model?.connectionId
         const ttlS =
-          !next.inputs.model.cacheTtlOverride && sameModel
+          (!next.inputs.model.cacheTtlOverride && sameModel
             ? previous.wire?.cache
               ? previous.wire.cache.ttlS
               : next.inputs.model.cacheTtlS
-            : next.inputs.model.cacheTtlS
-        if (ttlS == null) return null
+            : next.inputs.model.cacheTtlS) ?? null
         const changed = prefixChange(previous, next, yield* describer(sql, userId, chatId, [previous, next]))
-        let origin = last.started_at
+        let origin: number | null = last.started_at
         let originSnapshot = previous
         if ((last.cache_read ?? 0) > 0 && (last.cache_write ?? 0) === 0) {
           // Fixed-lived caches (Cerebras, OpenRouter explicit Gemini) do not slide
@@ -161,7 +173,7 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
             }
           }
           // A hit proves reuse, but without its original write time cannot date expiry.
-          if (previous.wire?.cache?.fixed && !write) return null
+          if (previous.wire?.cache?.fixed && !write) origin = null
           // A later transform can change the requested mode, but a hit cannot
           // rewrite the lifetime established by an earlier fixed-cache write.
           if (write && (previous.wire?.cache?.fixed || write.snapshot.wire?.cache?.fixed)) {
@@ -172,14 +184,20 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
         const historicalTtl = originSnapshot.wire?.cache
           ? originSnapshot.wire.cache.ttlS
           : originSnapshot.inputs.model?.cacheTtlS
-        if (historicalTtl == null) return null
+        const expiresAt = origin === null || historicalTtl == null ? null : origin + historicalTtl * 1000
         return {
-          lastRequestAt: last.started_at,
-          ttlS,
-          expiresAt: origin + historicalTtl * 1000,
-          verified: (last.cache_read ?? 0) + (last.cache_write ?? 0) > 0,
-          prefixTokens: tokensBetween(previous, 0, end),
-          changed
+          ...boundary,
+          warmth:
+            (ttlS === null || expiresAt === null) && changed === null
+              ? null
+              : {
+                  lastRequestAt: last.started_at,
+                  ttlS,
+                  expiresAt,
+                  verified: (last.cache_read ?? 0) + (last.cache_write ?? 0) > 0,
+                  prefixTokens: tokensBetween(previous, 0, end),
+                  changed
+                }
         }
       }).pipe(query("CacheWarmth")),
 

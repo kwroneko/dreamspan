@@ -20,7 +20,7 @@ import type { Cast, CastChange } from "@rp/shared/chatSetupApi.ts"
 import type { CardFields } from "@rp/shared/macros/context.ts"
 import { NotFound } from "@rp/shared/errors.ts"
 import type { BranchSwitch, ChatEvent, PathRange, PathWindow, SendResult } from "@rp/shared/chatApi.ts"
-import type { CacheWarmth } from "@rp/shared/inspectorApi.ts"
+import type { CacheWarmth, NextContext } from "@rp/shared/inspectorApi.ts"
 import { Cause, Context, Effect, Exit, Fiber, Schedule, Stream } from "effect"
 import { Atom, type AtomRegistry, AtomRegistry as Registry, Reactivity } from "effect/reactivity"
 import { type AppError, describeCause } from "../../errors.ts"
@@ -63,6 +63,7 @@ export interface ChatView {
   readonly queue: ReadonlyArray<QueuedMessage>
   /** Whether the provider's cache is likely warm for the next reply (DESIGN §5.5); null without an estimate. */
   readonly cache: CacheWarmth | null
+  readonly history: Pick<NextContext, "leafSlotId" | "historyStart"> | null
 }
 
 type Client = AppClient["Service"]
@@ -94,7 +95,8 @@ export class ChatSession {
     deleted: false,
     cast: null,
     queue: [],
-    cache: null
+    cache: null,
+    history: null
   }
   private readonly listeners = new Set<() => void>()
   /** Unmounts for the live atoms kept alive while their version generates, shown or not. */
@@ -519,10 +521,16 @@ export class ChatSession {
         if (!this.live.has(event.versionId)) this.setLive(event.versionId, "")
         this.registry.set(waitingCache(event.versionId), event.waiting)
         return
-      case "Cache":
+      case "Cache": {
         // The same estimate again (another tab subscribed) changes nothing on screen.
-        if (JSON.stringify(event.warmth) === JSON.stringify(this.view.cache)) return
-        return this.update({ cache: event.warmth })
+        const history = { leafSlotId: event.leafSlotId, historyStart: event.historyStart }
+        if (
+          JSON.stringify(event.warmth) === JSON.stringify(this.view.cache) &&
+          JSON.stringify(history) === JSON.stringify(this.view.history)
+        )
+          return
+        return this.update({ cache: event.warmth, history })
+      }
     }
   }
 

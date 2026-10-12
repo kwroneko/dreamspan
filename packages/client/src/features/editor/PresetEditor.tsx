@@ -480,6 +480,14 @@ export function PresetEditor({ store, call }: { store: EditorStore; call: Caller
           {SAMPLERS.map(([key, label, integer]) => (
             <NumberField key={key} store={store} path={["samplers", key]} label={label} integer={integer ?? false} />
           ))}
+          <NumberField
+            store={store}
+            path={["context_target"]}
+            label="Target context (tokens; empty: 80% of maximum)"
+            integer
+            min={1}
+            optional
+          />
           <TextField store={store} path={["samplers", "reasoning_effort"]} label="Reasoning effort" />
           <TextField store={store} path={["samplers", "verbosity"]} label="Verbosity" />
         </div>

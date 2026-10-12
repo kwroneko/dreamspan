@@ -37,6 +37,7 @@ import {
 } from "./providers.ts"
 import type { GenerationDefaults } from "@rp/shared/generation.ts"
 import { readDefaults } from "./generationSettings.ts"
+import { previousHistoryStart } from "./historyStart.ts"
 import { noteHistory } from "./noteHistory.ts"
 import { withoutPurged } from "./stateRefs.ts"
 
@@ -195,6 +196,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
 
   const pins = {
     target: null as Target | null,
+    historyStart: null as NonNullable<SourcePins["historyStart"]> | null,
     events: [] as Array<SourcePins["events"][number]>,
     history: [] as Array<SourcePins["history"][number]>,
     cards: [] as Array<SourcePins["cards"][number]>,
@@ -261,6 +263,12 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
   const history = noteHistory(sql, userId, chatId)
   const live = AssemblySources.of({
     target: "next" in settings ? nextTarget : versionTarget(settings.slotId, settings.versionId),
+
+    historyStart: (leaf) =>
+      Effect.map(previousHistoryStart(sql, userId, chatId, leaf), ([row]) => {
+        pins.historyStart = row ? { slotId: row.slot_id, depth: row.depth } : null
+        return pins.historyStart
+      }),
 
     // The events at `at` (StateEventsAt's query), with the depth of the message each follows.
     events: (at) =>
@@ -579,6 +587,8 @@ const replaySources = (
         row?.ok ? Effect.succeed(pins.target) : Effect.fail(new NotFound({ entity: "chat", id: chatId }))
       )
     ),
+
+    historyStart: () => Effect.succeed(pins.historyStart ?? null),
 
     events: () =>
       Effect.gen(function* () {

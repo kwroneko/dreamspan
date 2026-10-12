@@ -130,7 +130,7 @@ test("the cache indicator is warm after a reply, and cold once an earlier messag
   await mine.getByRole("button", { name: "Save" }).click()
   await expect(estimate).toContainText("Cache cold (estimate)")
   await expect(estimate).toContainText("Message 2 was")
-  await expect(estimate).toContainText(/writes about \d+ tokens to the cache again/)
+  await expect(estimate).toContainText(/Next send rewrites ~[\d,]+ tokens/)
   await shoot(page, "cache-cold")
 })
 

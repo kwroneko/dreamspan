@@ -41,7 +41,7 @@ reference-harness keys summaries by timeline (ref §1 What a summary covers) and
   2. Take the best summary ending there: fresh before stale (§2.2), then the highest level.
   3. Jump to the parent of its first slot, and repeat until the root.
 - Its cost is the verbatim window plus one indexed lookup per summary in the layer. The first step shares the walk the state fold already makes on every assembly (ARCHITECTURE §3.8 "Known limits"), and gets faster when that does.
-- **[P]** The **cursor** is the last slot of the newest selected summary. Verbatim history is everything after it on the path. Coverage sets it, not the budget, so the start of the history doesn't move from turn to turn. (ST mode slides it every turn once the chat is over budget.)
+- **[P]** The **cursor** is the last slot of the newest selected summary. Verbatim history is everything after it on the path. Coverage sets it, not the budget, so the start of the history doesn't move from turn to turn. Plain chat currently holds a recorded history start between stepped cuts (ARCHITECTURE §15); LCM coverage will supply that boundary instead.
 - **[P]** Chunks end at branch points when they can (DATA-MODEL §8.2). A chunk that would cross a slot with two or more live children ends at that slot, unless that leaves it under a quarter of `leaf_input`. The shared segment then gets summaries both branches use.
 - **[P]** A branch made later inside a summarized chain doesn't contain that chain. Its path uses the summaries before the fork, and the planner summarizes on from there.
 - **[P]** No chain contains a merge slot until threads are built (DESIGN §3.3).
@@ -111,7 +111,7 @@ reference-harness has no idle class or idle gate for summaries (ref §4 Idle-tim
 - **[P]** A batch's summaries become selectable together, when its last job ends. The cursor, and the cache rewrite that comes with moving it, then moves once per batch instead of once per chunk. Over `window_max`, finished summaries are used at once.
 - Example: a 32k window keeps 16k, summarizes 8k (two chunks) at a time, and rewrites its cached history about every 8k tokens of story. A 120k window does so about every 30k.
 - **[P]** The layer allowance has a target of 15% of the context and a maximum of 25%. Budget absorption engages above the maximum; reference-harness has it off by default (ref §2). With fanout 5 the layer grows with the logarithm of the story's length, about 10k tokens for a 750k-token story, so it rarely engages.
-- **[P]** Omit, made concrete: over `window_max` with no job covering the window's oldest part, or after the wait times out, the oldest verbatim messages past the budget are left out as in ST mode, and the context reports the range ("Messages 40–52 left out: not summarized yet"). This is the normal state while a backfill runs.
+- **[P]** Omit, made concrete: over `window_max` with no job covering the window's oldest part, or after the wait times out, the oldest verbatim messages past the budget are left out through the stepped fallback (ARCHITECTURE §15), and the context reports the range ("Messages 40–52 left out: not summarized yet"). This is the normal state while a backfill runs.
 - **[P]** While a send waits, its version shows "Summarizing messages 40–52…". Stop ends the wait, not the job.
 
 ### 2.7 Adopting an imported ST summary as L1
@@ -187,7 +187,7 @@ reference-harness synthesizes a placeholder from a failed job row and never pers
 
 ## 3. Data model
 
-### 3.1 Migration `0019_lcm`
+### 3.1 Migration `0020_lcm`
 
 Nothing writes the summary tables yet, so they're empty in every database, and changed tables are recreated rather than altered. Migrations are squashed before release anyway (PLAN).
 - `summaries`: `status` adds `failed`; new `error_json` and `batch_id`.

@@ -16,6 +16,7 @@ import type {
   CardInput,
   ContextSnapshot,
   GenerationType,
+  HistoryStart,
   HistoryEntry,
   HistoryWindow,
   Issue,
@@ -60,6 +61,7 @@ export class AssemblySources extends Context.Service<
   AssemblySources,
   {
     readonly target: Effect.Effect<Target, SourceError>
+    readonly historyStart: (leaf: string | null) => Effect.Effect<HistoryStart | null, SourceError>
     /** The events that apply at `slotId` (null: the chat's initial state), in fold order. */
     readonly events: (slotId: string | null) => Effect.Effect<ReadonlyArray<PositionedEvent>, SourceError>
     /** The window of at most `limit` messages ending at `leaf`. */
@@ -188,6 +190,9 @@ export interface Assembly {
   history?: ReadonlyArray<HistoryEntry>
   /** Messages of the path not read, older than `history`. */
   historyOmitted?: number
+  previousHistoryStart?: HistoryStart | null
+  historyStart?: HistoryStart
+  historyMove?: ContextSnapshot["historyMove"]
   /** The messages of `history` that enter the context, with the pieces recording their text. */
   resolved?: ReadonlyArray<{ readonly entry: HistoryEntry; readonly piece: number }>
   projected?: ReadonlyArray<ProjectedEntry>
@@ -233,6 +238,8 @@ export const assemble = (stages: StageRegistry, request: AssemblyRequest) =>
     const mode = need(assembly, "mode")
     const snapshot: ContextSnapshot = {
       schema: 1,
+      historyStart: need(assembly, "historyStart"),
+      historyMove: need(assembly, "historyMove"),
       assemblerVersion: ASSEMBLER_VERSION,
       inputs: {
         chatId: target.chatId,

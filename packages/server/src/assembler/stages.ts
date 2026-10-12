@@ -1,4 +1,4 @@
-import { contextBudget, loreAllowance } from "./budget.ts"
+import { contextBudget, targetBudget, loreAllowance } from "./budget.ts"
 // The built-in assembler stages, in registration order (ARCHITECTURE §15 lists them).
 import type { ChatMessage } from "@rp/shared/macros/context.ts"
 import type { CardFields } from "@rp/shared/macros/context.ts"
@@ -358,6 +358,7 @@ const historyStage: AssemblerStage = {
       const target = need(assembly, "target")
       const cast = need(assembly, "cast")
       const runner = need(assembly, "scripts")
+      assembly.previousHistoryStart = yield* sources.historyStart(target.parentSlotId)
       const budget = contextBudget(assembly)
       const scripted = new Map<string, Scripted>()
       let entries: ReadonlyArray<HistoryEntry> = []
@@ -1196,30 +1197,105 @@ const composeStage = sync("compose", (assembly) => {
       beside.push({ message: { role: place.role, content: text.text, pieces: [text.piece], kind }, at: place.at })
     }
   }
-  const chat = injectInChat(
-    [...projected.map((p, i) => chatLine(assembly, p, groupNames, scripted[i]!)), ...(normalFill ? [normalFill] : [])],
-    collection.filter((p) => p.injection_position === "absolute"),
-    injections
-  )
+  const lines = projected.map((p, i) => chatLine(assembly, p, groupNames, scripted[i]!))
   prefill(assembly)
-  const composition = compose({
-    beside,
-    collection,
-    disabled,
-    chat,
-    examples,
-    newChat,
-    newExampleChat: optional("utility.new_example_chat_prompt", utility.new_example_chat_prompt),
-    sendIfEmpty: cast.type === "normal" ? null : sendIfEmpty,
-    control,
-    // The prefill is sent after everything else, but it's context all the same.
-    budget:
-      contextBudget(assembly) -
-      (assembly.prefill ? tokensOf({ content: assembly.prefill }) : 0) -
-      (!mode.st && assembly.lorebooks?.length ? loreAllowance(assembly) - loreCost : 0)
-  })
+  const newExampleChat = optional("utility.new_example_chat_prompt", utility.new_example_chat_prompt)
+  const reserve =
+    (assembly.prefill ? tokensOf({ content: assembly.prefill }) : 0) +
+    (!mode.st && assembly.lorebooks?.length ? loreAllowance(assembly) - loreCost : 0)
+  const maximum = contextBudget(assembly) - reserve
+  const desiredTarget = targetBudget(assembly) - reserve
+  let admittedExamples = examples
+  const candidate = (start: number, budget: number, withExamples = true) =>
+    compose({
+      beside,
+      collection,
+      disabled,
+      chat: injectInChat(
+        [...lines.slice(start), ...(normalFill ? [normalFill] : [])],
+        collection.filter((p) => p.injection_position === "absolute"),
+        injections
+      ),
+      examples: withExamples ? admittedExamples : [],
+      newChat,
+      newExampleChat,
+      sendIfEmpty: cast.type === "normal" ? null : sendIfEmpty,
+      control,
+      budget
+    })
+  const postNames = {
+    user: names.user,
+    char: names.char,
+    group: cast.characters.length > 1 ? cast.characters.map((c) => c.doc.name) : []
+  }
+  const cost = (built: ReturnType<typeof compose>) => {
+    const messages = built.messages.filter((message) => message.content)
+    const processed = postProcess(doc.squash ? squash(messages) : messages, doc.postprocess, postNames)
+    const tokens = (messages: ReadonlyArray<StMessage>) => messages.reduce((sum, message) => sum + tokensOf(message), 0)
+    return 3 + Math.max(tokens(built.messages), tokens(processed))
+  }
+  const fixedCost = cost(candidate(projected.length, Number.POSITIVE_INFINITY, false))
+  if (fixedCost > maximum)
+    throw new AssemblyFailed({
+      reason: "budget",
+      message: "The fixed context and response reserve don't fit the maximum context size."
+    })
+  let lowExamples = 0,
+    highExamples = examples.length
+  while (lowExamples < highExamples) {
+    const mid = Math.ceil((lowExamples + highExamples) / 2)
+    admittedExamples = examples.slice(0, mid)
+    if (cost(candidate(projected.length, Number.POSITIVE_INFINITY)) <= maximum) lowExamples = mid
+    else highExamples = mid - 1
+  }
+  admittedExamples = examples.slice(0, lowExamples)
+  const minimum = cost(candidate(projected.length, Number.POSITIVE_INFINITY))
+  const target = Math.max(desiredTarget, minimum)
+  const fits = (start: number, budget: number) => {
+    const built = candidate(start, Number.POSITIVE_INFINITY)
+    const pieces = new Set(built.messages.flatMap((m) => m.pieces))
+    return (
+      lines.slice(start).every((line) => !line.content || line.pieces.every((piece) => pieces.has(piece))) &&
+      cost(built) <= budget
+    )
+  }
+  const earliestFit = (end: number) => {
+    let low = 0,
+      high = end
+    while (low < high) {
+      const mid = Math.floor((low + high) / 2)
+      if (fits(mid, target)) high = mid
+      else low = mid + 1
+    }
+    return low
+  }
+  const previous = assembly.previousHistoryStart
+  const earlier = previous ? projected.findIndex((p) => p.entry.depth >= previous.depth) : 0
+  let start = earlier < 0 ? projected.length : earlier
+  let budget = maximum
+  const restored = previous ? earliestFit(start) : start
+  if (!previous && fits(0, maximum)) {
+    start = 0
+    assembly.historyMove = "initial"
+  } else if (previous && restored < start) {
+    start = restored
+    budget = target
+    assembly.historyMove = "restore"
+  } else if (
+    !previous ||
+    !fits(start, maximum) ||
+    (previous.depth < (assembly.history?.[0]?.depth ?? 0) && (assembly.historyOmitted ?? 0) > 0)
+  ) {
+    assembly.historyMove = "maximum"
+    start = earliestFit(projected.length)
+    budget = target
+  } else assembly.historyMove = "unchanged"
+  const first = projected[start]?.entry
+  assembly.historyStart = { slotId: first?.slotId ?? null, depth: first?.depth ?? need(assembly, "target").depth }
+  const composition = { ...candidate(start, budget), examplesTotal: examples.length }
+  assembly.postNames = postNames
   assembly.composition = composition
-  if (composition.historySent < composition.historyTotal || (assembly.historyOmitted ?? 0) > 0) {
+  if (start > 0 || composition.historySent < composition.historyTotal || (assembly.historyOmitted ?? 0) > 0) {
     assembly.issues.push({
       kind: "history_truncated",
       message: `The context holds the last ${composition.historySent} messages: older ones don't fit the preset's context size.`
@@ -1236,8 +1312,6 @@ const composeStage = sync("compose", (assembly) => {
 /** Squashing and post-processing, as ST does them before sending (ARCHITECTURE §15). */
 const messagesStage = sync("messages", (assembly) => {
   const doc = need(assembly, "preset").doc
-  const names = need(assembly, "macros").names
-  const cast = need(assembly, "cast")
   // An empty skipped note still marks the next sent message as the potential boundary.
   let barrier = false
   let messages = need(assembly, "composition").messages.map((message) => {
@@ -1246,12 +1320,7 @@ const messagesStage = sync("messages", (assembly) => {
   })
   messages = messages.filter((m) => m.content)
   if (doc.squash) messages = squash(messages)
-  assembly.postNames = {
-    user: names.user,
-    char: names.char,
-    group: cast.characters.length > 1 ? cast.characters.map((c) => c.doc.name) : []
-  }
-  messages = postProcess(messages, doc.postprocess, assembly.postNames)
+  messages = postProcess(messages, doc.postprocess, need(assembly, "postNames"))
   assembly.messages = messages.map(({ role, content, name, pieces, kind }) => ({
     role,
     content,

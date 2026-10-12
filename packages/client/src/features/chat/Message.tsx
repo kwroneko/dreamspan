@@ -130,12 +130,14 @@ export const Message = memo(function Message({
   entry,
   session,
   highlighted,
+  outOfContext,
   branchLeaf,
   onBranch
 }: {
   entry: PathEntry
   session: ChatSession
   highlighted: boolean
+  outOfContext: boolean
   /** The leaf of the branch shown, when it isn't the chat's active one: links keep to it. */
   branchLeaf: SlotId | null
   /** Switches to another of the alternate branches at this message. */
@@ -210,7 +212,8 @@ export const Message = memo(function Message({
     <article
       aria-label={model ? "Reply" : "Your message"}
       data-slot={entry.slotId}
-      className={`flex touch-pan-y flex-col gap-2 rounded-lg border px-4 py-3 ${
+      data-out-of-context={outOfContext || undefined}
+      className={`flex touch-pan-y flex-col gap-2 rounded-lg border px-4 py-3 ${outOfContext ? "text-muted border-dashed " : ""}${
         highlighted
           ? "border-accent bg-surface"
           : model
@@ -227,7 +230,17 @@ export const Message = memo(function Message({
             {version.status}
           </Badge>
         )}
-        {!entry.inContext && !generating && version.status !== "failed" && <Badge>not in context</Badge>}
+        {entry.contextExcluded ? (
+          <span role="img" aria-label="Hidden from context" title="Hidden from context">
+            👻
+          </span>
+        ) : outOfContext ? (
+          <span role="img" aria-label="Not in the context" title="Not in the context">
+            ⊘
+          </span>
+        ) : !entry.inContext && !generating && version.status !== "failed" ? (
+          <Badge>not in context</Badge>
+        ) : null}
         {entry.branchCount > 1 && (
           // Alternate branches of the story here (DESIGN §3.2), told apart from versions.
           <div className="ml-auto flex items-center gap-1" role="group" aria-label="Branches">
