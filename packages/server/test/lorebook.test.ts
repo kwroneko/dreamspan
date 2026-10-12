@@ -411,7 +411,7 @@ describe("Astra review regressions", () => {
 
   it("L01 limits aggregate scanning across entries", () => {
     const result = run(
-      Array.from({ length: 100 }, () => ({ keys: ["missing"], scan_depth: 1000 })),
+      Array.from({ length: 1000 }, () => ({ keys: ["missing"], scan_depth: 1000, match_whole_words: false })),
       ["A".repeat(1000000)],
       { recursive: false }
     )
@@ -421,9 +421,13 @@ describe("Astra review regressions", () => {
   })
 
   it("L02 limits aggregate scanning across keys within one entry", () => {
-    const result = run([{ keys: Array.from({ length: 10000 }, (_, i) => `missing${i}`) }], ["A".repeat(250000)], {
-      recursive: false
-    })
+    const result = run(
+      [{ keys: Array.from({ length: 10000 }, (_, i) => `missing${i}`), match_whole_words: false }],
+      ["A".repeat(250000)],
+      {
+        recursive: false
+      }
+    )
     expect(result.issues).toContainEqual(expect.objectContaining({ code: "work_limit" }))
   })
 
@@ -457,12 +461,12 @@ describe("Astra review regressions", () => {
 describe("deterministic lorebook work bounds", () => {
   it("L05 stops the 10,000-entry long-buffer reproduction at a fixed amount of work", () => {
     const result = run(
-      Array.from({ length: 10000 }, () => ({ keys: ["missing"], scan_depth: 1000 })),
+      Array.from({ length: 10000 }, () => ({ keys: ["missing"], scan_depth: 1000, match_whole_words: false })),
       Array.from({ length: 1000 }, () => "A".repeat(1000)),
       { recursive: false }
     )
-    expect(result.work.scannedCharacters).toBeLessThanOrEqual(20000000)
-    expect(result.work.keyEvaluations).toBe(18)
+    expect(result.work.scannedCharacters).toBeLessThanOrEqual(512000000)
+    expect(result.work.keyEvaluations).toBeLessThan(1000)
     expect(result.work.buffers).toBe(1)
     expect(result.issues).toEqual([
       expect.objectContaining({ code: "work_limit", detail: expect.stringContaining("scannedCharacters") })
@@ -472,18 +476,23 @@ describe("deterministic lorebook work bounds", () => {
   })
 
   it("L06 bounds even empty key slots by the number of evaluations", () => {
-    const result = run([{ keys: Array.from({ length: 30000 }, () => "") }])
-    expect(result.work.keyEvaluations).toBe(20000)
+    const result = run([{ keys: Array.from({ length: 150000 }, () => "") }])
+    expect(result.work.keyEvaluations).toBe(100000)
     expect(result.issues).toEqual([
       expect.objectContaining({ code: "work_limit", detail: expect.stringContaining("keyEvaluations") })
     ])
   })
 
   it("L07 bounds aggregate regex work independently of scanned character work", () => {
-    const result = run([{ keys: Array.from({ length: 20 }, () => `/${"a?".repeat(100)}z/`) }], ["a".repeat(5000)], {
-      recursive: false
-    })
-    expect(result.work.regexWork).toBe(19 * 201 * 5001)
+    const result = run(
+      [{ keys: Array.from({ length: 20 }, (_, i) => `/${"a?".repeat(100)}z${i}/`) }],
+      ["a".repeat(5000)],
+      {
+        recursive: false,
+        workLimits: { regexWork: 2000000 }
+      }
+    )
+    expect(result.work.regexWork).toBe(202 * 5001)
     expect(result.issues).toEqual([
       expect.objectContaining({ code: "work_limit", detail: expect.stringContaining("regexWork") })
     ])
@@ -520,7 +529,7 @@ describe("deterministic lorebook work bounds", () => {
   })
 
   it("L10 issue summaries keep only a count and the first three bounded examples", () => {
-    const result = run([{ keys: Array.from({ length: 100000 }, (_, i) => `/(?=cat)${i}${"x".repeat(200)}/`) }])
+    const result = run([{ keys: Array.from({ length: 100000 }, () => `/(?=cat)${"x".repeat(200)}/`) }])
     expect(result.work.issueCount).toBe(1000)
     expect(result.issues).toHaveLength(2)
     expect(result.issues[0]?.count).toBe(1000)
@@ -576,4 +585,163 @@ describe("deterministic lorebook work bounds", () => {
     })
     expect(result.skipped[0]?.reason).toBe("error")
   })
+})
+
+describe("second Astra review regressions", () => {
+  it("L13 bounds compiled regex expansion before retaining large programs", () => {
+    const result = run(
+      [{ keys: Array.from({ length: 32 }, (_, i) => `/(?:${"a".repeat(1900)}${String(i).padStart(4, "0")}){16}/`) }],
+      ["z"],
+      { recursive: false }
+    )
+    expect(result.issues).toEqual([
+      expect.objectContaining({ code: "work_limit", detail: expect.stringContaining("compiledUnits") })
+    ])
+  })
+
+  it.each([false, true])("L14 the typical 500-entry depth-10 book admits five entries (recursion %s)", (recursive) => {
+    const entries = Array.from({ length: 500 }, (_, i) => ({
+      keys: [`Person${i}`, `Alias${i}`, `Title${i}`],
+      content: `Lore for person ${i}. `.padEnd(500, "l")
+    }))
+    const messages = Array.from({ length: 3000 }, (_, i) =>
+      (i < 10 ? "Person0 Person1 Person2 Person3 Person4. " : "Old conversation. ").padEnd(2000, "x")
+    )
+    const result = run(entries, messages, { scanDepth: 10, recursive, budget: 8192 })
+    expect(result.activated.map(({ entry }) => entry.uid)).toEqual([0, 1, 2, 3, 4])
+    expect(result.issues).toEqual([])
+  })
+})
+
+describe("lorebook memory and workload envelopes", () => {
+  it.each(["literal", "repeats", "nested", "count", "caseless", "captures", "alternatives", "combined"] as const)(
+    "L15 %s patterns stay within the compiled-memory proxy",
+    (kind) => {
+      const keys = Array.from({ length: 5000 }, (_, i) => {
+        const id = String(i).padStart(4, "0")
+        if (kind === "combined")
+          return i < 4000 || i > 4008
+            ? `/x${i.toString(36)}/`
+            : `/(?:${"(a?)".repeat(450)}${id}){${i === 4008 ? 8 : 16}}/`
+        if (kind === "repeats") return `/(?:${"a".repeat(1900)}${id}){16}/`
+        if (kind === "nested") return `/(?:(?:${"a".repeat(970)}${id}){16}){16}/`
+        if (kind === "captures") return `/(?:${"(a?)".repeat(450)}${id}){16}/`
+        if (kind === "alternatives")
+          return `/(?:${Array.from({ length: 100 }, () => "a".repeat(12)).join("|")}${id}){16}/`
+        if (kind === "count") return `/x${i.toString(36)}/`
+        if (kind === "caseless") return `/${"a".repeat(450)}${id}/i`
+        return `/${"a".repeat(1990)}${id}/`
+      })
+      const result = run([{ keys }], ["z"], { recursive: false })
+      expect(result.issues.filter(({ code }) => code === "work_limit")).toHaveLength(1)
+      expect(result.issues.filter(({ code }) => code !== "work_limit").map(({ code }) => code)).toEqual(
+        kind === "nested" ? ["unsafe_regex"] : []
+      )
+      expect(result.work.patterns).toBeLessThanOrEqual(4096)
+      expect(result.work.patternCharacters).toBeLessThanOrEqual(131072)
+      expect(result.work.compiledUnits).toBeLessThanOrEqual(262144)
+      if (kind === "combined") {
+        expect(result.work.patterns).toBe(4096)
+        expect(result.work.compiledUnits).toBeGreaterThan(260000)
+      }
+      expect(result.work.compiledUnits).toBeGreaterThan(kind === "repeats" || kind === "nested" ? 240000 : 10000)
+      expect(result.replayable).toBe(true)
+    }
+  )
+
+  for (const size of [300, 500, 1000])
+    for (const depth of [2, 5, 10])
+      for (const length of [2000, 4000]) {
+        it(`L16 typical ${size} entries, depth ${depth}, ${length}-character messages`, () => {
+          const result = run(
+            Array.from({ length: size }, (_, i) => ({
+              keys: [`Person${i}`, `Alias${i}`, `Title${i}`],
+              content: `Lore for person ${i}. `.padEnd(500, "l")
+            })),
+            Array.from({ length: 3000 }, (_, i) =>
+              (i < 10 ? "Person0 Person1 Person2 Person3 Person4. " : "Old conversation. ").padEnd(length, "x")
+            ),
+            { scanDepth: depth, budget: 8192 }
+          )
+          expect(result.activated.map(({ entry }) => entry.uid)).toEqual([0, 1, 2, 3, 4])
+          expect(result.issues).toEqual([])
+          expect(result.work.scannedCharacters).toBeLessThan(300000)
+          expect(result.work.bufferCharacters).toBeLessThan(500000)
+        })
+      }
+
+  it("L17 substring keys also have a wide typical-workload margin", () => {
+    const result = run(
+      Array.from({ length: 500 }, (_, i) => ({
+        keys: [`Person${i}.`, `Alias${i}`, `Title${i}`],
+        content: "l".repeat(500)
+      })),
+      Array.from({ length: 10 }, () => "Person0. Person1. Person2. Person3. Person4. ".padEnd(4000, "x")),
+      { scanDepth: 10, wholeWords: false, budget: 8192 }
+    )
+    expect(result.activated.map(({ entry }) => entry.uid)).toEqual([0, 1, 2, 3, 4])
+    expect(result.issues).toEqual([])
+    expect(result.work.scannedCharacters).toBeLessThan(128000000)
+  })
+
+  it("L18 caches regex evaluations per distinct buffer while counting duplicate scoring slots", () => {
+    const result = run(
+      [
+        { keys: ["/cat/", "/cat/"], group: "g", use_group_scoring: true },
+        { keys: ["/cat/"], group: "g", use_group_scoring: true }
+      ],
+      ["cat"],
+      { recursive: false }
+    )
+    expect(result.activated.map(({ entry }) => entry.uid)).toEqual([0])
+    expect(result.work.regexWork).toBe(12)
+    expect(result.work.matchResults).toBe(1)
+    expect(result.work.patterns).toBe(1)
+  })
+
+  it("L19 bounds word-index storage even for many distinct tiny words", () => {
+    const result = run([{ keys: ["cat"] }], ["one two three four"], { workLimits: { indexedWords: 3 } })
+    expect(result.work.indexedWords).toBe(3)
+    expect(result.issues[0]?.detail).toContain("indexedWords")
+  })
+
+  it("L20 counts escaped braces and character classes literally in the compilation proxy", () => {
+    const result = run([{ keys: ["/a\\{999999999\\}/", "/[{999999999}]/"] }], ["z"], { recursive: false })
+    expect(result.issues).toEqual([])
+    expect(result.work.compiledUnits).toBeLessThan(40)
+    const escapedSlash = run([{ keys: ["/\\\\{999999999}/"] }], ["z"])
+    expect(escapedSlash.issues[0]?.detail).toContain("compiledUnits")
+  })
+
+  it("D26 a shallow buffer retains an empty slot when an older nonempty message exists", () => {
+    expect(run([{ keys: ["/^\\x01cat\\n\\x01$/"] }], ["cat", "", "older"], { scanDepth: 2 }).activated).toHaveLength(1)
+  })
+})
+
+it("L21 a 500-entry book of ASCII word-boundary regex keys shares the word index", () => {
+  const result = run(
+    Array.from({ length: 500 }, (_, i) => ({
+      keys: [`/\\bPerson${i}\\b/`, `/\\bAlias${i}\\b/`, `/\\bTitle${i}\\b/`],
+      content: "l".repeat(500)
+    })),
+    Array.from({ length: 10 }, () => "Person0 Person1 Person2 Person3 Person4. ".padEnd(4000, "x")),
+    { scanDepth: 10, budget: 8192 }
+  )
+  expect(result.activated.map(({ entry }) => entry.uid)).toEqual([0, 1, 2, 3, 4])
+  expect(result.issues).toEqual([])
+  expect(result.work.regexWork).toBe(0)
+})
+
+it("L22 a typical mixed book leaves headroom for general regex evaluation", () => {
+  const result = run(
+    Array.from({ length: 500 }, (_, i) => ({
+      keys: ["Person", "Alias", "Title"].map((prefix) => (i < 50 ? `/(?:${prefix}${i})/` : `${prefix}${i}`)),
+      content: "l".repeat(500)
+    })),
+    Array.from({ length: 10 }, () => "Person0 Person1 Person2 Person3 Person4. ".padEnd(4000, "x")),
+    { scanDepth: 10, budget: 8192 }
+  )
+  expect(result.activated.map(({ entry }) => entry.uid)).toEqual([0, 1, 2, 3, 4])
+  expect(result.issues).toEqual([])
+  expect(result.work.regexWork).toBeLessThan(250000000)
 })

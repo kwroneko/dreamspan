@@ -23,9 +23,16 @@ interface Scan {
 }
 
 const workLimits = {
-  keyEvaluations: 20000,
-  scannedCharacters: 20000000,
-  regexWork: 20000000,
+  keyEvaluations: 100000,
+  scannedCharacters: 512000000,
+  regexWork: 1000000000,
+  patterns: 4096,
+  patternCharacters: 131072,
+  compiledUnits: 262144,
+  bufferCharacters: 8000000,
+  indexedWords: 100000,
+  matchResults: 20000,
+  buffers: 4096,
   tokenCharacters: 8000000,
   issueCount: 1000
 }
@@ -125,6 +132,28 @@ const refusedConstruct = (pattern: string) => {
   return "The linear engine refuses this construct; simplify nested or large counted repetitions."
 }
 
+// Counted repeats expand V8's program. Multiplying even disjoint repeats deliberately overestimates it.
+const compiledUnits = (pattern: string, characters: number) => {
+  let units = characters
+  let inClass = false
+  for (let i = 0; i < pattern.length; i++) {
+    const char = pattern[i]
+    if (char === "\\") i++
+    else if (char === "[") inClass = true
+    else if (char === "]") inClass = false
+    else if (!inClass && char === "{") {
+      const repeat = /^\{(\d+)(?:,(\d*))?\}/.exec(pattern.slice(i))
+      if (repeat) {
+        const count =
+          repeat[2] === undefined ? Number(repeat[1]) : repeat[2] === "" ? Number(repeat[1]) + 1 : Number(repeat[2])
+        units *= Math.max(1, count)
+        i += repeat[0].length - 1
+      }
+    }
+  }
+  return units
+}
+
 const secondaryPasses = (logic: SelectiveLogic, matches: ReadonlyArray<boolean>) => {
   switch (logic) {
     case "and_any":
@@ -154,7 +183,20 @@ export const matchLorebooks = (
   const failedProbability = new Set<(typeof sources)[number]>()
   const issues: Array<Issue> = []
   const issueGroups = new Map<string, Issue>()
-  const work = { keyEvaluations: 0, scannedCharacters: 0, regexWork: 0, tokenCharacters: 0, issueCount: 0, buffers: 0 }
+  const work = {
+    keyEvaluations: 0,
+    scannedCharacters: 0,
+    regexWork: 0,
+    tokenCharacters: 0,
+    issueCount: 0,
+    buffers: 0,
+    patterns: 0,
+    patternCharacters: 0,
+    compiledUnits: 0,
+    bufferCharacters: 0,
+    indexedWords: 0,
+    matchResults: 0
+  }
   const halted = Symbol("activation stopped")
   let replayable = true
   let stopped: SkipReason | undefined
@@ -202,42 +244,88 @@ export const matchLorebooks = (
   interface Buffer {
     text: string
     lower?: string
+    words?: Set<string>
+    lowerWords?: Set<string>
+    regexMatches?: Map<RegExp, boolean>
+  }
+  const wordMatch = (source: Source, buffer: Buffer, text: string, sensitive: boolean, needle: string) => {
+    const field = sensitive ? "words" : "lowerWords"
+    let words = buffer[field]
+    if (words === undefined) {
+      charge(source, "scannedCharacters", text.length)
+      words = new Set()
+      for (const match of text.matchAll(/\w+/g)) {
+        if (!words.has(match[0])) {
+          charge(source, "indexedWords", 1)
+          charge(source, "bufferCharacters", match[0].length)
+          words.add(match[0])
+        }
+      }
+      buffer[field] = words
+    }
+    return words.has(needle)
   }
   const keyMatch = (source: Source, buffer: Buffer, original: string, trim: boolean): boolean | undefined => {
     charge(source, "keyEvaluations", 1)
     if (trim && !original) return false
-    charge(source, "scannedCharacters", buffer.text.length + original.length)
+    charge(source, "scannedCharacters", original.length)
     const key = trim ? original.trim() : original
     let pattern = patterns.get(key)
     if (pattern === undefined) {
       const parsed = /^\/([\w\W]+?)\/([gimsuy]*)$/.exec(key)
       pattern = "literal"
+      if (key.startsWith("/") && key !== "//") {
+        charge(source, "patterns", 1)
+        const body = parsed?.[1] ?? ""
+        const sourceCharacters =
+          (body.length + 5 * (body.match(/[\n\r\u2028\u2029]/g)?.length ?? 0) + (body.match(/\//g)?.length ?? 0)) *
+          (parsed?.[2]?.includes("i") ? 4 : 1)
+        charge(source, "patternCharacters", key.length + sourceCharacters)
+      }
       if (parsed && !/(^|[^\\])\//.test(parsed[1]!)) {
         if (parsed[1]!.length > 2000) pattern = "limit"
         else {
-          const compiled = compileLinear(parsed[1]!.replace(/\\\//, "/"), parsed[2]!)
+          const sourcePattern = parsed[1]!.replace(/\\\//, "/")
+          charge(
+            source,
+            "compiledUnits",
+            compiledUnits(sourcePattern, sourcePattern.length * (parsed[2]!.includes("i") ? 4 : 1))
+          )
+          const compiled = compileLinear(sourcePattern, parsed[2]!)
           if (compiled === null) pattern = "invalid"
           else pattern = compiled instanceof RegExp && compiled.source.length > 2000 ? "limit" : compiled
         }
       } else if (key.startsWith("/") && key !== "//") {
         pattern = "invalid"
       }
-      patterns.set(key, pattern)
+      if (pattern !== "literal") patterns.set(key, pattern)
     }
     if (pattern instanceof RegExp) {
-      const cost = pattern.source.length * Math.max(1, buffer.text.length)
-      if (cost > 2000000) {
-        issue(
-          source,
-          "regex_limit",
-          "Regex pattern size × input size exceeds 2,000,000; shorten the pattern or scan depth.",
-          key
-        )
-        return undefined
+      const cached = buffer.regexMatches?.get(pattern)
+      if (cached !== undefined) return cached
+      const word = pattern.sticky ? undefined : /^\\b(\w+)\\b$/.exec(pattern.source)?.[1]
+      charge(source, "matchResults", 1)
+      let matched: boolean
+      if (word !== undefined) matched = wordMatch(source, buffer, buffer.text, true, word)
+      else {
+        const cost = compiledUnits(pattern.source, pattern.source.length) * Math.max(1, buffer.text.length)
+        if (cost > 8000000) {
+          issue(
+            source,
+            "regex_limit",
+            "Regex pattern size × input size exceeds 8,000,000; shorten the pattern or scan depth.",
+            key
+          )
+          return undefined
+        }
+        charge(source, "regexWork", cost)
+        charge(source, "scannedCharacters", buffer.text.length)
+        pattern.lastIndex = 0
+        matched = pattern.test(buffer.text)
       }
-      charge(source, "regexWork", cost)
-      pattern.lastIndex = 0
-      return pattern.test(buffer.text)
+      buffer.regexMatches ??= new Map()
+      buffer.regexMatches.set(pattern, matched)
+      return matched
     }
     if (pattern === "invalid") issue(source, "invalid_regex", "Invalid ST slash regex; matched as literal text.", key)
     if (pattern === "unsafe" || pattern === "limit") {
@@ -250,10 +338,16 @@ export const matchLorebooks = (
       return undefined
     }
     const sensitive = source.entry.case_sensitive ?? settings.caseSensitive ?? false
-    const text = sensitive ? buffer.text : (buffer.lower ??= buffer.text.toLowerCase())
+    if (!sensitive && buffer.lower === undefined) {
+      charge(source, "bufferCharacters", buffer.text.length * 3)
+      buffer.lower = buffer.text.toLowerCase()
+    }
+    const text = sensitive ? buffer.text : buffer.lower!
     const needle = sensitive ? key : key.toLowerCase()
-    if (!(source.entry.match_whole_words ?? settings.wholeWords ?? true) || /\s/.test(needle))
-      return text.includes(needle)
+    const wholeWords = source.entry.match_whole_words ?? settings.wholeWords ?? true
+    if (wholeWords && /^\w+$/.test(needle)) return wordMatch(source, buffer, text, sensitive, needle)
+    charge(source, "scannedCharacters", text.length)
+    if (!wholeWords || /\s/.test(needle)) return text.includes(needle)
     let index = text.indexOf(needle)
     while (index !== -1) {
       charge(source, "scannedCharacters", needle.length)
@@ -264,8 +358,10 @@ export const matchLorebooks = (
     return false
   }
   // ST keeps holes at interior empty messages, but does not extend the array for trailing ones.
-  const messages: Array<string> = []
-  let messagesReady = false
+  let messageLength = Math.min(1000, scan.messages.length)
+  while (messageLength && !scan.messages[messageLength - 1]) messageLength--
+  const messages: Array<string> = new Array(messageLength)
+  let preparedDepth = 0
   const injections = (scan.injections ?? [])
     .filter((injection) => injection.scan && injection.text)
     .map((injection) => injection.text)
@@ -275,38 +371,37 @@ export const matchLorebooks = (
   const buffer = (source: (typeof sources)[number]): Buffer => {
     const depth = Math.min(1000, source.entry.scan_depth ?? source.document.scan_depth ?? settings.scanDepth ?? 2)
     if (depth <= 0) return { text: "" }
-    if (!messagesReady) {
-      for (let i = 0; i < Math.min(1000, scan.messages.length); i++) {
-        const message = scan.messages[i]
-        if (message) {
-          charge(source, "scannedCharacters", message.length)
-          messages[i] = message.trim()
-        }
+    for (; preparedDepth < Math.min(depth, scan.messages.length); preparedDepth++) {
+      const message = scan.messages[preparedDepth]
+      if (message) {
+        charge(source, "scannedCharacters", message.length)
+        charge(source, "bufferCharacters", message.length)
+        messages[preparedDepth] = message.trim()
       }
-      messagesReady = true
     }
     const names = descriptions.filter((name) => source.entry[`match_${name}`])
     const id = `${depth}:${names.join(",")}`
     const cached = buffers.get(id)
     if (cached) return cached
+    charge(source, "buffers", 1)
     let chat = chats.get(depth)
     if (chat === undefined) {
       const slice = messages.slice(0, depth)
-      charge(
-        source,
-        "scannedCharacters",
-        1 + slice.reduce((sum, text) => sum + text.length, 0) + Math.max(0, slice.length - 1) * 2
-      )
+      const length = 1 + slice.reduce((sum, text) => sum + text.length, 0) + Math.max(0, slice.length - 1) * 2
+      charge(source, "scannedCharacters", length)
+      charge(source, "bufferCharacters", length)
       chat = "\x01" + slice.join("\n\x01")
       chats.set(depth, chat)
     }
     const blocks = names.map((name) => scan.descriptions?.[name]).filter((value): value is string => !!value)
     const extra = [...blocks, ...injections, ...recursion]
-    if (extra.length)
-      charge(source, "scannedCharacters", chat.length + extra.reduce((sum, text) => sum + text.length + 2, 0))
+    if (extra.length) {
+      const length = chat.length + extra.reduce((sum, text) => sum + text.length + 2, 0)
+      charge(source, "scannedCharacters", length)
+      charge(source, "bufferCharacters", length)
+    }
     const result = { text: chat + (extra.length ? "\n\x01" + extra.join("\n\x01") : "") }
     buffers.set(id, result)
-    work.buffers++
     return result
   }
   const recursive = (source: (typeof sources)[number]) =>
