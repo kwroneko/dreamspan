@@ -415,6 +415,11 @@ These are strategies for mapping history to user and assistant roles:
 - **[D]** **Semi-background idle-time jobs:** run LCM work in the gap after a reply, while the cache is still warm, which also refreshes it (depending on settings and provider).
 - **[P]** Summaries cover **path segments**, so threads and branches share summaries up to their fork.
 - **[P]** Editing a message already covered by a summary marks that summary stale and re-summarizes it lazily. Mechanical edits such as renames are applied to the summaries directly.
+  - **[D]** Re-summarizing is never triggered by the edit itself: an edit or swipe must not start a generation. If it's automatic, it runs with the next reply (owner, 2026-10-13).
+  - **[O]** How branches, forks and edits interact with shared summaries has to be worked out from what the user sees and expects, not only from what's correct (owner, 2026-10-13). So does how the UI shows which summary covers which messages, and where "re-summarize" lives.
+- **[D]** A summary that fails (for example, the model keeps refusing) leaves the original messages in the context for as long as they fit; no placeholder replaces them until there's no room (owner, 2026-10-13).
+- **[D]** LCM is on by default for new chats (owner, 2026-10-13). Imported chats stay off by default, as above.
+- **[D]** Both summarizer styles are supported: the reply itself is the summary (direct output, which chat-only models without tool calling need), or the model writes it through tools as reference-harness does (owner, 2026-10-12 and 2026-10-13).
 - **[P]** Summaries are **editable**, with versions.
 - **[D]** Memory retrieval of *some* sort will be a feature. LCM is already a form of RAG (owner, 2026-10-10).
 - **[D]** Assume vector search will exist somewhere eventually. Plain embedding search over all messages is of doubtful value on its own (owner, 2026-10-10). sqlite-vec already covers vector search, but only by brute force; an indexed ANN search is a benefit of alternatives such as Turso, not a requirement.
@@ -489,7 +494,9 @@ These are strategies for mapping history to user and assistant roles:
 - **[D]** No captioning by another model for text-only models, for now. There's no clear reason to send an image to a text-only model in this app.
 - **[P]** Attachments belong to the version, so editing or writing a new version can keep, add or remove them. Thumbnails show inline in the message, and a click opens a full-size viewer.
 - **[P]** When the chosen model has no vision capability, the composer and the request preview say so before sending, so images are never silently dropped ("Nothing changes silently").
-- **[P]** Images are context like anything else, so their token cost and cache effect show in the context view. Older images may need an LCM policy (keep, summarize as text, or drop beyond the verbatim window). **[O]** Which policy, decided with phase 3.
+- **[P]** Images are context like anything else, so their token cost and cache effect show in the context view.
+- **[D]** Older images: the summarizer sees the images in the range it summarizes, so the summary can describe them, and they leave the context together with the messages that range covers (owner, 2026-10-13).
+- **[D]** **Every request carries at most the last N images**, N configurable, because many models have a hard limit (Xiaomi MiMo: 4). This applies everywhere images go to a model: replies, summaries and anything else (owner, 2026-10-13). **[P]** N is set per model, with a default from the model catalog where it states one.
 
 ### 10.3 Chat-wide edits
 - **[D]** Large edits across a whole conversation, summaries included, such as search and replace to rename a character, and agentic editing to instructions.
