@@ -462,7 +462,8 @@ const chatLine = (
     role: projected.role,
     content: prefix ? `${projected.name}: ${text}` : text,
     pieces,
-    kind: "history"
+    // A depth-bounded regex script changes it as the chat grows: it isn't part of the stable prefix.
+    kind: scripted.volatile ? "volatile" : "history"
   })
   switch (behavior) {
     case "content":

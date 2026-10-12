@@ -434,6 +434,39 @@ describe("the context assembler", () => {
     expect(mergedMessages).toContain("assistant: three\n\nA note.")
     const still = await assembled(chat())
     expect(contents(still)[still.request.breakpoints[0]!.message]).toBe("user: The road flooded.")
+
+    // A regex script within a depth changes a message once it's deeper: the breakpoint goes
+    // before the first message whose text it will change.
+    const depthBound = (fields: Record<string, unknown>) =>
+      assembled(
+        chat({
+          messages: [
+            { side: "assistant", content: "<thinking>a</thinking>one" },
+            { side: "user", content: "two" },
+            { side: "assistant", content: "<thinking>b</thinking>three" },
+            { side: "user", content: "four" },
+            { side: "assistant", content: "five" },
+            { side: "user", content: "six" }
+          ],
+          preset: {
+            ...preset({
+              extensions: {
+                regex_scripts: [regexScript("strip", { findRegex: "/<thinking>[\\s\\S]*?<\\/thinking>/g", ...fields })]
+              }
+            }),
+            regex_approved: true
+          }
+        })
+      )
+    const stripped = await depthBound({ maxDepth: 3 })
+    expect(contents(stripped)).toContain("assistant: three")
+    expect(contents(stripped)[stripped.request.breakpoints[0]!.message]).toBe("user: two")
+    const kept = await depthBound({ minDepth: 4 })
+    expect(contents(kept)).toContain("assistant: <thinking>b</thinking>three")
+    expect(contents(kept)[kept.request.breakpoints[0]!.message]).toBe("user: two")
+    // Past its depths for good, or within them for good, a script changes nothing later.
+    const settled = await depthBound({ maxDepth: 1 })
+    expect(contents(settled)[settled.request.breakpoints[0]!.message]).toBe("user: six")
   })
 })
 
