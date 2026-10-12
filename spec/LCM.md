@@ -81,19 +81,14 @@ reference-harness runs a separate agent session with a summary editor tool and i
 - reference-harness's tool-based summarizer can be offered once rollouts have tools (phase 4). See question 1.
 - Why: the owner's ST workflow already works this way (DESIGN §8 [D]); chat-mode models may have no tool support; the cache is shared.
 
-### 2.4 Refusal and bad-output detection
+### 2.4 Refusal detection
 
-reference-harness runs configured soft and hard refusal rules that rerun on another model, and has no general quality check (ref §3 Refusals, bad output and accounting).
 - **[D]** A refusal is never saved as a summary. Refusal detection is useful for every message, not only summaries (DESIGN §8, owner 2026-10-12).
-- **[P]** One registry of output checks (PLUGINS §8), run on every finished generation. Each returns pass, suspect or fail, with a reason. Built in:
-  - the provider's refusal signal (a refusal stop reason or field), already a failure class for versions (`refusal{category}`, DATA-MODEL §4.5)
-  - empty, or under 10% of the target
-  - stopped by length past the overage cap
-  - refusal phrasing at the start of the text, from a short pattern list tested on a labelled synthetic set
-  - for summaries only: continuing the roleplay instead (opening with a speaker line or dialogue), and copying (more than half its 8-word shingles found in the input)
-- **[P]** For a summary, suspect or fail fails the attempt. It retries (`max_retries`), then tries the summarizer's fallback model if one is set, then becomes a failed summary (§2.8). The rejected text is kept on the job (`best_effort_draft`) and shown, never selected.
-- **[P]** For a chat version, a check only marks it ("possible refusal", with Retry and Retry with…). A false positive must never hide story text. Provider refusals stay failed versions, as today.
-- **[P]** A decision-model judge can be added as one more check, never required (DESIGN §7.6 [D]).
+- **[D]** As in reference-harness, there are two kinds and nothing else (owner, 2026-10-13):
+  - **hard refusals:** unambiguous from the provider's metadata (a refusal stop reason or field), usually with no text; already a failure class for versions (`refusal{category}`, DATA-MODEL §4.5);
+  - **soft refusals:** decided only by a judge model (a decision model, DESIGN §7.6) reading the output. No text heuristics, pattern lists or length rules.
+- **[P]** For a summary, a refusal fails the attempt: it retries (`max_retries`), then tries the summarizer's fallback model if one is set, then becomes a failed summary (§2.8), which leaves the original messages in the context while they fit (DESIGN §8.1).
+- **[P]** For a chat version, a soft refusal only marks it ("refused", with Retry and Retry with…); the text stays. Hard refusals stay failed versions, as today. Without a judge model configured, only hard refusals are detected.
 
 ### 2.5 Idle-time jobs while the cache is warm
 
@@ -271,7 +266,7 @@ Each slice moves its part of this document into ARCHITECTURE.md in the same comm
 | 1 | Migration 0019, its triggers, the summary writes (`CompleteSummary`, `EditSummary`, `SelectSummaryRevision`) and derived freshness | A schema test per trigger; freshness against hand-built graphs; isolation probes | A |
 | 2 | The `lcm` stage, the layer in both modes, breakpoint (b), pins, assembler version 8, summary sources in the inspector and the cache estimate | The model test over graph steps with summaries written by fixtures (invariants 1–4, 6); the ST gate unchanged with LCM off | B |
 | 3 | Planner, queue operations, `Summarizer`, summarization requests, use / wait / omit, batches, idle class | The model test with jobs (7, 8); the prefix comparison at a mock provider | A |
-| 4 | Output checks, retries and salvage, failed summaries and placeholders, Retry with…, marks on chat versions | The labelled set; the model test with planted refusals (5) | B |
+| 4 | Hard refusals and the judge model for soft refusals, retries, failed summaries, Retry with…, marks on chat versions | A fake judge; the model test with planted refusals (5) | B |
 | 5 | Condensation, absorption, re-summarizing stale summaries | The model test with condensation and edits, run to quiescence | B |
 | 6 | Enabling LCM, adopting imported summaries, backfill with its estimate and spend cap, the ST Summarize prompt kept on import | A synthetic ST folder adopted and backfilled; the estimate within 25% of the ledger at a fake provider | A |
 | 7 | UI: divider, summary panel, editing with drafts and revisions, coverage rail, context view | Browser flows at phone and desktop width; the performance harness with summaries | B |
