@@ -25,8 +25,16 @@ import { readMedia, storeMedia, sweepMedia } from "./mediaFiles.ts"
 /** The largest upload: the parsers' own cap on any file (ARCHITECTURE.md §8). */
 const MAX_UPLOAD_BYTES = defaultLimits.maxFileBytes
 
-/** How long an upload's body may take to arrive: 64 MiB at about half a megabyte a second. */
-const BODY_DEADLINE_MS = 120_000
+/**
+ * How fast an upload must arrive (ARCHITECTURE.md §11.4). A slow phone uplink of 1 Mbit/s,
+ * about 120 KiB/s, sends a 30 MB card in about four minutes. The deadline gives a full
+ * 64 MiB file 15 minutes, about 73 KiB/s, and the minimum rate, 32 KiB/s averaged over each
+ * 10 s, leaves such a link a margin of almost four times; a 0.5 Mbit/s one still passes. A
+ * trickle that keeps under the pause limit is dropped after its first 10 s window.
+ */
+const BODY_DEADLINE_MS = 15 * 60_000
+const BODY_MIN_BYTES_PER_SECOND = 32 * 1024
+const BODY_RATE_WINDOW_MS = 10_000
 /** The longest pause in an upload's body, or before its first bytes, before it's dropped. */
 const BODY_IDLE_MS = 10_000
 
@@ -39,6 +47,7 @@ const MEDIA_GRACE_MS = 60 * 60 * 1000
 const BODY_REFUSALS: Record<BodyRefused["reason"], readonly [status: number, message: string]> = {
   too_large: [413, `files can be at most ${MAX_UPLOAD_BYTES} bytes`],
   stalled: [408, "the file stopped arriving"],
+  trickling: [408, "the file arrived too slowly"],
   too_slow: [408, "the file took too long to arrive"],
   aborted: [400, "the file didn't arrive whole"]
 }
@@ -152,7 +161,13 @@ export const layer = Layer.unwrap(
       }
 
       const message = NodeHttpServerRequest.toIncomingMessage(request)
-      const limits = { maxBytes: MAX_UPLOAD_BYTES, idleMs: BODY_IDLE_MS, deadline: Date.now() + BODY_DEADLINE_MS }
+      const limits = {
+        maxBytes: MAX_UPLOAD_BYTES,
+        idleMs: BODY_IDLE_MS,
+        deadline: Date.now() + BODY_DEADLINE_MS,
+        minBytesPerSecond: BODY_MIN_BYTES_PER_SECOND,
+        rateWindowMs: BODY_RATE_WINDOW_MS
+      }
       return yield* oneAtATime(
         user.id,
         Effect.gen(function* () {

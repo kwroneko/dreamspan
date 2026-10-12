@@ -7,7 +7,7 @@ import type { IncomingMessage } from "node:http"
 import { Effect, Schema } from "effect"
 
 export class BodyRefused extends Schema.TaggedError<BodyRefused>()("BodyRefused", {
-  reason: Schema.Literals(["too_large", "stalled", "too_slow", "aborted"])
+  reason: Schema.Literals(["too_large", "stalled", "trickling", "too_slow", "aborted"])
 }) {}
 
 interface BodyLimits {
@@ -16,6 +16,12 @@ interface BodyLimits {
   readonly idleMs: number
   /** When the whole body must have arrived, as a time from `Date.now()`. */
   readonly deadline: number
+  /**
+   * While the body is read: the least it must average over every `rateWindowMs`, the first
+   * window being its allowance to get going.
+   */
+  readonly minBytesPerSecond: number
+  readonly rateWindowMs: number
 }
 
 /**
@@ -71,11 +77,25 @@ export const firstBytes = (message: IncomingMessage, limits: BodyLimits) =>
     return () => message.off("readable", ready).off("end", ready)
   })
 
-/** The whole body, at most `maxBytes`. On a refusal the request is paused, not destroyed. */
+/**
+ * The whole body, at most `maxBytes`, arriving at least at the minimum rate, so a trickle
+ * that keeps under the pause limit can't hold a permit for long. On a refusal the request
+ * is paused, not destroyed.
+ */
 export const readBody = (message: IncomingMessage, limits: BodyLimits) =>
   listen<Uint8Array>(message, limits, (done, fail, reset) => {
     const chunks: Array<Buffer> = []
     let bytes = 0
+    // Bytes received so far, sampled every second; the oldest kept is a window ago.
+    const history = [{ at: Date.now(), bytes: 0 }]
+    const minimum = (limits.minBytesPerSecond * limits.rateWindowMs) / 1000
+    const sampler = setInterval(() => {
+      const now = Date.now()
+      history.push({ at: now, bytes })
+      while (history.length > 1 && history[1]!.at <= now - limits.rateWindowMs) history.shift()
+      const oldest = history[0]!
+      if (now - oldest.at >= limits.rateWindowMs && bytes - oldest.bytes < minimum) fail("trickling")
+    }, 1000)
     const onData = (chunk: Buffer) => {
       bytes += chunk.byteLength
       if (bytes > limits.maxBytes) return fail("too_large")
@@ -85,6 +105,7 @@ export const readBody = (message: IncomingMessage, limits: BodyLimits) =>
     const onEnd = () => done(Buffer.concat(chunks))
     message.on("data", onData).once("end", onEnd).resume()
     return () => {
+      clearInterval(sampler)
       message.off("data", onData).off("end", onEnd)
       if (!message.readableEnded) message.pause()
     }

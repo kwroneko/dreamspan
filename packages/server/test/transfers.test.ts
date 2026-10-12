@@ -49,7 +49,21 @@ const stall = (cookie: string, bytes: number) => {
   })
   if (bytes > 0) req.write(Buffer.alloc(bytes))
   else req.flushHeaders()
-  return { answer, stop: () => req.destroy() }
+  return { req, answer, stop: () => req.destroy() }
+}
+
+/** An upload that sends one byte every 3 s: never a pause long enough to be dropped for. */
+const trickle = (cookie: string) => {
+  const upload = stall(cookie, 1)
+  const timer = setInterval(() => upload.req.write(Buffer.alloc(1)), 3000)
+  void upload.answer.then(() => clearInterval(timer))
+  return {
+    answer: upload.answer,
+    stop: () => {
+      clearInterval(timer)
+      upload.stop()
+    }
+  }
 }
 
 /** Milliseconds `effect` took, with its result. */
@@ -114,6 +128,19 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
       assert.strictEqual(uploaded.status, 200)
       assert.isBelow(uploadMs, 5_000, "an upload waited on others' silent ones")
       silent.forEach((s) => s.stop())
+    })
+  )
+
+  it.effect("uploads that trickle in under the pause limit are dropped, so others' uploads go through", () =>
+    Effect.gen(function* () {
+      const { alice, bob, carol } = yield* setup
+      const trickles = [trickle(alice), trickle(bob)]
+      yield* Effect.sleep("500 millis")
+      const { result, ms } = yield* timed(upload(carol))
+      assert.strictEqual(result.status, 200)
+      assert.isBelow(ms, 20_000, "an upload waited on others' trickles")
+      assert.deepStrictEqual(yield* Effect.promise(() => Promise.all(trickles.map((t) => t.answer))), [408, 408])
+      trickles.forEach((t) => t.stop())
     })
   )
 
