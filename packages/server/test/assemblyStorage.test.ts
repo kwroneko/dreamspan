@@ -109,7 +109,7 @@ const setup = (handle = "ana") =>
           frozen
         })
         .pipe(Effect.map(({ snapshot }) => JSON.parse(snapshot) as ContextSnapshot))
-    return { writer, reader, userId, entity, mira, tobin, preset, chat, state, sent, assemble }
+    return { writer, reader, userId, entity, mira, tobin, preset, chat, state, sent, generating, assemble }
   })
 
 const texts = (snapshot: ContextSnapshot) => snapshot.request.messages.map((m) => `${m.role}: ${m.content}`)
@@ -258,6 +258,56 @@ describe("context assembly from the database", () => {
         reader.RebuildContext({ userId: other.id as UserId, snapshot: JSON.stringify(first) })
       )
       assert.strictEqual(refused._tag, "NotFound")
+    }).pipe(Effect.provide(database()))
+  )
+
+  it.live("leaves a failed version out of the context, whatever text it kept (invariant 2)", () =>
+    Effect.gen(function* () {
+      const { writer, reader, userId, chat, tobin, generating } = yield* setup()
+      yield* writer.SaveGeneration({
+        userId,
+        versionId: generating.version.id,
+        content: "*Mira starts to an",
+        status: "failed",
+        error: { class: "server", message: "The connection dropped." }
+      })
+      const next = (parentSlotId: SlotId, version: NewVersion) =>
+        writer.AppendMessage({ userId, chatId: chat.id, parentSlotId, branch: false, version, commitDraft: null })
+      const asked = yield* next(
+        generating.slotId,
+        new NewVersion({
+          speakerEntityId: tobin.entityId,
+          writer: "human",
+          content: "Hello?",
+          status: "complete",
+          macroMode: "verbatim",
+          origin: "user_written"
+        })
+      )
+      const reply = yield* next(
+        asked.slotId,
+        new NewVersion({
+          speakerEntityId: null,
+          writer: "model",
+          content: "",
+          status: "generating",
+          macroMode: "verbatim",
+          origin: "generated"
+        })
+      )
+      const { snapshot } = yield* reader.AssembleContext({
+        userId,
+        chatId: chat.id,
+        slotId: reply.slotId,
+        versionId: reply.version.id,
+        now: NOW,
+        timeZone: "UTC",
+        frozen: null
+      })
+      const built = texts(JSON.parse(snapshot) as ContextSnapshot)
+      assert.include(built, "user: The road flooded.")
+      assert.include(built, "user: Hello?")
+      assert.isFalse(built.some((m) => m.includes("Mira starts to")))
     }).pipe(Effect.provide(database()))
   )
 
