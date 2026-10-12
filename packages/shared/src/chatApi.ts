@@ -75,7 +75,9 @@ export const ChatEvent = Schema.Union([
   /** The chat changed: its active leaf, title or last message. */
   Schema.TaggedStruct("Chat", { chat: Chat }),
   /** Something was deleted: windows read before it are out of date. */
-  Schema.TaggedStruct("Reload", {})
+  Schema.TaggedStruct("Reload", {}),
+  /** The chat went to the bin. It's the subscription's last event. */
+  Schema.TaggedStruct("Deleted", {})
 ])
 export type ChatEvent = typeof ChatEvent.Type
 

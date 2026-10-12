@@ -81,13 +81,9 @@ export const makeChatHandlers = Effect.gen(function* () {
       return chat
     })
 
-  /**
-   * After a delete: reload, the leaf may have moved, and generations under what went are
-   * stopped. Delete handlers are uninterruptible, so a caller going away can't skip this.
-   */
-  const afterDelete = (user: UserId, chatId: ChatId) =>
+  /** Stops the chat's generations whose versions went to the bin. */
+  const stopDeleted = (user: UserId, chatId: ChatId) =>
     Effect.gen(function* () {
-      hub.publish(chatId, { _tag: "Reload" })
       const running = generations.runningIn(chatId)
       const live = new Set(
         running.length === 0 ? [] : yield* reader.LiveVersions({ userId: user, versionIds: running })
@@ -95,6 +91,17 @@ export const makeChatHandlers = Effect.gen(function* () {
       yield* Effect.forEach(running, (versionId) =>
         live.has(versionId) ? Effect.void : Effect.ignore(generations.stop(user, versionId))
       )
+    })
+
+  /**
+   * After a delete within a chat: reload, the leaf may have moved, and generations under
+   * what went are stopped. Delete handlers are uninterruptible, so a caller going away
+   * can't skip this.
+   */
+  const afterDelete = (user: UserId, chatId: ChatId) =>
+    Effect.gen(function* () {
+      hub.publish(chatId, { _tag: "Reload" })
+      yield* stopDeleted(user, chatId)
       yield* publishChat(user, chatId).pipe(Effect.catchTag("NotFound", () => Effect.void))
     })
 
@@ -250,7 +257,9 @@ export const makeChatHandlers = Effect.gen(function* () {
       Effect.gen(function* () {
         const id = yield* userId
         const item = yield* writer.DeleteChat({ userId: id, chatId })
-        yield* afterDelete(id, chatId)
+        yield* stopDeleted(id, chatId)
+        // After the stopped versions, the subscriptions end.
+        hub.close(chatId, { _tag: "Deleted" })
         return item
       }).pipe(Effect.uninterruptible, internal("DeleteChat")),
 
@@ -282,8 +291,10 @@ export const makeChatHandlers = Effect.gen(function* () {
       Stream.unwrap(
         Effect.gen(function* () {
           const id = yield* userId
-          yield* reader.GetChat({ userId: id, chatId })
           const queue = yield* hub.subscribe(chatId, () => ({ _tag: "Hello", live: generations.live(chatId) }))
+          // Checked once subscribed, so a chat deleted in between can't leave a subscription
+          // its close missed. Nothing is sent before it, so nothing reaches another user.
+          yield* reader.GetChat({ userId: id, chatId })
           return Stream.fromQueue(queue)
         }).pipe(internal("SubscribeChat"))
       )

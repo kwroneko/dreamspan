@@ -46,6 +46,8 @@ export interface ChatView {
   readonly opened: number
   readonly loading: boolean
   readonly error: string | null
+  /** The chat went to the bin while open, here or elsewhere. */
+  readonly deleted: boolean
 }
 
 type Client = AppClient["Service"]
@@ -68,7 +70,8 @@ export class ChatSession {
     follow: true,
     opened: 0,
     loading: true,
-    error: null
+    error: null,
+    deleted: false
   }
   private readonly listeners = new Set<() => void>()
   /** Unmounts for the live atoms kept alive while their version generates, shown or not. */
@@ -330,6 +333,8 @@ export class ChatSession {
         return this.update({ chat: event.chat })
       case "Reload":
         return this.reload()
+      case "Deleted":
+        return this.update({ deleted: true })
     }
   }
 

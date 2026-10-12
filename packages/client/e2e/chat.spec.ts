@@ -3,7 +3,7 @@
 // sees the chat; and every chat screen at phone and desktop width, light and dark.
 import { join } from "node:path"
 import { expect, type Locator, type Page, test } from "@playwright/test"
-import type { SlotId } from "@rp/shared/chat.ts"
+import type { Chat, SlotId } from "@rp/shared/chat.ts"
 import { Effect } from "effect"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
@@ -164,6 +164,14 @@ test("a branch's URL follows the messages sent on it", async ({ page }) => {
   await page.reload()
   await expect(page.getByText("Second, on the branch")).toBeVisible()
   await expect(page.getByRole("article", { name: "Your message" })).toHaveCount(2)
+})
+
+test("a chat deleted elsewhere while open goes back to the chats", async ({ page }) => {
+  await newChat(page, "Ember")
+  const chatId = page.url().split("/chats/")[1]!.split("?")[0]! as Chat["id"]
+  await asUser(server(), ADMIN.handle, ADMIN.password, (api) => api.DeleteChat({ chatId }))
+  await expect(page).toHaveURL(/\/chats$/)
+  await expect(page.getByRole("link", { name: "Ember" })).toHaveCount(0)
 })
 
 test("another user can't open someone's chat", async ({ browser }) => {

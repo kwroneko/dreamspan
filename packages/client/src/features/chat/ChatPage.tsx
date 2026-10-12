@@ -196,6 +196,10 @@ function ChatSurface({ session, leaf, slot }: { session: ChatSession; leaf: Slot
   }, [session, leaf, slot, view.leafSlotId, view.chat])
   // Sending on another branch makes it the chat's latest: once the window moves on from the
   // URL's leaf to the active one, the URL drops the old leaf.
+  // Deleted while open, here or elsewhere: there's nothing left to show.
+  useEffect(() => {
+    if (view.deleted) void navigate({ to: "/chats", replace: true })
+  }, [navigate, view.deleted])
   const viewLeaf = useRef(view.leafSlotId)
   useEffect(() => {
     const from = viewLeaf.current

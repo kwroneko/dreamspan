@@ -4,7 +4,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import type { Chat, PathEntry, SlotId, Version, VersionId } from "@rp/shared/chat.ts"
 import type { ChatEvent, PathRange } from "@rp/shared/chatApi.ts"
-import { ConfigProvider, Effect, Layer, Option, Stream } from "effect"
+import { ConfigProvider, Effect, Fiber, Layer, Option, Stream } from "effect"
 import * as FakeGenerator from "../src/dev/fakeGenerator.ts"
 import { GenerationFailed, Generator } from "../src/chat/Generator.ts"
 import { AppConfig, type AppConfigShape } from "../src/config.ts"
@@ -378,6 +378,27 @@ describe("chats", () => {
     }).pipe(Effect.scoped, withGenerator(config, fast))
   })
 
+  it.live("deleting a chat ends its subscriptions with Deleted", () => {
+    const config = testConfig()
+    const slow = FakeGenerator.layer({ tokensPerSecond: 100, tokens: 5000 })
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const { chat, slots } = yield* linearChat(api, 1)
+      yield* api.Generate({ chatId: chat.id, parentSlotId: slots[0]!, branch: false })
+      const events: Array<ChatEvent> = []
+      const subscription = yield* api.SubscribeChat({ chatId: chat.id }).pipe(
+        Stream.runForEach((batch) => Effect.sync(() => events.push(...batch))),
+        Effect.forkScoped
+      )
+      yield* eventually(() => events.some((e) => e._tag === "Delta"))
+      yield* api.DeleteChat({ chatId: chat.id })
+      yield* Fiber.join(subscription).pipe(Effect.timeout("5 seconds"))
+      assert.strictEqual(events.at(-1)!._tag, "Deleted")
+      // And a subscription after it is refused.
+      assert.strictEqual(yield* outcome(Stream.runDrain(api.SubscribeChat({ chatId: chat.id }))), "NotFound")
+    }).pipe(Effect.scoped, withGenerator(config, slow))
+  })
+
   it.live("a Stop that loses the race with the finish gets the version as saved", () => {
     const config = testConfig()
     return Effect.gen(function* () {
@@ -435,6 +456,7 @@ describe("chats", () => {
       yield* api.DeleteChat({ chatId: chat.id })
       yield* eventually(() => finished(events, entry.version.id) !== undefined)
       assert.strictEqual(finished(events, entry.version.id)!.status, "stopped")
+      assert.strictEqual(events.at(-1)!._tag, "Deleted")
     }).pipe(Effect.scoped, withGenerator(config, slow))
   })
 
