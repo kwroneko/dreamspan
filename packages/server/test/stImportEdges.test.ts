@@ -592,6 +592,8 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
       yield* writer.SelectVersion({ userId: user.id, slotId: greeting, versionId: alt, expectedRowVersion: 1 })
       const key = new DraftKey({ targetKind: "version_edit", targetId: versionOf("kept-r"), field: "" })
       yield* writer.SaveDraft({
+        draftId: null,
+        expectedSession: null,
         userId: user.id,
         key,
         content: "an unsaved edit",

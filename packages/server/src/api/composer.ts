@@ -29,7 +29,7 @@ export const makeComposerHandlers = Effect.gen(function* () {
       }).pipe(internal("OpenComposer")),
 
     SaveComposer: (payload) =>
-      Effect.flatMap(userId, (id) => writer.SaveComposer({ userId: id, ...payload, next: payload.next ?? false })).pipe(
+      Effect.flatMap(userId, (id) => writer.SaveComposer({ userId: id, ...payload })).pipe(
         Effect.catchTag("DraftTooLarge", ({ length, max }) => Effect.fail(new TextTooLong({ length, max }))),
         internal("SaveComposer")
       ),

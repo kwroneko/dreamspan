@@ -553,22 +553,25 @@ export const layer = Layer.unwrap(
         Effect.option
       )
       if (Option.isNone(input)) return jsonError(400, "expected drafts")
+      let recovered = 0
       for (const draft of input.value.drafts) {
         if (parseField(draft.field) === null) return jsonError(400, "that isn't a field of a document")
-        yield* writer.SaveDraft({
+        const saved = yield* writer.SaveDraft({
           userId: user.id,
           key: new DraftKey({ targetKind: "entity_field", targetId: draft.refId, field: draft.field }),
-          draftId: draft.draftId ?? null,
+          draftId: draft.draftId,
           content: draft.content,
           expectedRowVersion: draft.expectedRowVersion,
-          ...(draft.expectedSession === undefined ? {} : { expectedSession: draft.expectedSession }),
+          expectedSession: draft.expectedSession,
           baseRevision: draft.baseRevisionId
         })
+        recovered += saved.recovered
       }
       for (const composer of input.value.composers ?? []) {
-        yield* writer.SaveComposer({ userId: user.id, ...composer, next: composer.next ?? false })
+        const saved = yield* writer.SaveComposer({ userId: user.id, ...composer })
+        recovered += Math.max(saved.draft?.recovered ?? 0, saved.recovered ? 1 : 0)
       }
-      return HttpServerResponse.empty({ status: 204 })
+      return HttpServerResponse.empty({ status: 204, headers: { "x-drafts-recovered": String(recovered) } })
     }).pipe(
       Effect.catchTags({
         NotFound: () => Effect.succeed(jsonError(404, "there's no such entry")),

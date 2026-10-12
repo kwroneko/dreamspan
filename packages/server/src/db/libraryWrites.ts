@@ -1,3 +1,4 @@
+import { getAt, parseField } from "@rp/shared/editing.ts"
 // Library write handlers (DATA-MODEL §3.2). They run in the writer worker, each as one
 // transaction. Every change to a ref flows on to the refs that follow it.
 import type { EntityId } from "@rp/shared/chat.ts"
@@ -410,7 +411,20 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
         Effect.gen(function* () {
           const ref = yield* lib.ownedRef(userId, refId)
           yield* checkRowVersion(ref, expectedRowVersion)
-          yield* drafts.commit(userId, commitDraft)
+          yield* drafts.commit(userId, commitDraft, {
+            targetKind: "entity_field",
+            targetId: refId,
+            content: (key) => {
+              const field = parseField(key)
+              if (field === null) return null
+              const value = getAt(doc, field.path)
+              return field.kind === "text"
+                ? typeof value === "string"
+                  ? value
+                  : null
+                : (JSON.stringify(value) ?? null)
+            }
+          })
           // An edit that changes nothing creates no revision.
           const current = yield* revision(ref.head_revision_id)
           if (current.doc_hash === docHash(doc)) return new RefChange({ ref: toLibraryRef(ref), followers: [] })

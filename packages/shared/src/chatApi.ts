@@ -88,9 +88,7 @@ const WriteErrors = [NotFound, StaleWrite, ServerError] as const
  * the send only if it still holds that text, so a reload never shows text already sent
  * (DESIGN §6.2) and a send never ends text it didn't take.
  */
-const ComposerCommit = Schema.optionalKey(
-  Schema.Struct({ draftId: Schema.String, session: Schema.Int, text: Schema.String })
-)
+const ComposerCommit = Schema.optionalKey(Schema.Struct({ draftId: Schema.String, session: Schema.Int }))
 
 /** Where a branch switch went: the sibling, and the chat with its leaf moved below it. */
 export class BranchSwitch extends Schema.Class<BranchSwitch>("BranchSwitch")({

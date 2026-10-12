@@ -84,10 +84,10 @@ const DraftField = { refId: RefId, field: Schema.String }
  */
 export const EditorDraftSave = Schema.Struct({
   ...DraftField,
-  draftId: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  draftId: Schema.NullOr(Schema.String),
   content: Schema.String,
   expectedRowVersion: Schema.NullOr(Schema.Int),
-  expectedSession: Schema.optionalKey(Schema.Int),
+  expectedSession: Schema.NullOr(Schema.Int),
   baseRevisionId: Schema.NullOr(RevisionId)
 })
 

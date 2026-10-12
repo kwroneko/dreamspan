@@ -84,7 +84,7 @@ export const makeWriteHandlers = (bin: Bin) =>
           .save({
             userId,
             key,
-            draftId: draftId ?? null,
+            draftId,
             content,
             base: expectedRowVersion === null ? null : { rowVersion: expectedRowVersion, session: expectedSession },
             baseRevision,
@@ -96,7 +96,9 @@ export const makeWriteHandlers = (bin: Bin) =>
         Effect.gen(function* () {
           const key = composerKey(chatId, tipSlotId)
           yield* draftTarget(userId, key)
+          yield* drafts.checkIdentity(userId, copyFrom)
           const from = copyFrom === null ? null : yield* drafts.findComposer(userId, chatId, copyFrom)
+          if (copyFrom !== null && from === null) return yield* new NotFound({ entity: "draft", id: copyFrom })
           return yield* drafts.openComposer(userId, key, from)
         }).pipe(transaction("OpenComposer")),
 
@@ -113,7 +115,7 @@ export const makeWriteHandlers = (bin: Bin) =>
           return yield* drafts.saveComposer(
             userId,
             chatId,
-            { draftId, rowVersion, session, next, ...(operationId === undefined ? {} : { operationId }) },
+            { draftId, rowVersion, session, next, operationId },
             content
           )
         }).pipe(transaction("SaveComposer")),
@@ -141,7 +143,11 @@ export const makeWriteHandlers = (bin: Bin) =>
           if (select) {
             yield* sql`UPDATE slots SET selected_version_id = ${row.id}, row_version = row_version + 1 WHERE id = ${slotId}`
           }
-          yield* drafts.commit(userId, commitDraft)
+          yield* drafts.commit(userId, commitDraft, {
+            targetKind: "version_edit",
+            targetId: version.sourceVersionId ?? "",
+            content: row.content
+          })
           return toVersion(row)
         }).pipe(transaction("AddVersion")),
 

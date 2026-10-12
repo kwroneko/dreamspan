@@ -7,18 +7,13 @@ import { EditorDraftSave } from "@rp/shared/editorApi.ts"
 import { Option, Schema } from "effect"
 
 const PendingSave = Schema.Union([
-  Schema.Struct({ kind: Schema.Literal("editor"), draftId: Schema.NullOr(Schema.String), payload: EditorDraftSave }),
+  Schema.Struct({ kind: Schema.Literal("editor"), payload: EditorDraftSave }),
   Schema.Struct({ kind: Schema.Literal("composer"), payload: ComposerBeacon })
 ])
 type PendingSave = typeof PendingSave.Type
 
 const DATABASE = "rp-editor-copies"
 const STORE = "copies"
-/** How long an unsent copy is kept. */
-const COPY_RETENTION_MS = 7 * 24 * 60 * 60 * 1000
-/** The most all of a user's copies may hold, in characters; the oldest go first. */
-const COPY_LIMIT_CHARS = 8 * 1024 * 1024
-
 export interface Copy {
   readonly key: string
   readonly userId: string
@@ -26,7 +21,8 @@ export interface Copy {
   readonly field: string
   readonly content: string
   readonly at: number
-  readonly save?: PendingSave
+  readonly ancestors: ReadonlyArray<string>
+  readonly save: PendingSave
 }
 
 let opened: Promise<IDBDatabase | null> | null = null
@@ -92,7 +88,10 @@ export interface PageEnv {
   readonly clearTimer: (timer: unknown) => void
   readonly now: () => number
   /** A JSON request that outlives the page (`fetch` with `keepalive`): whether the server took it. */
-  readonly keepalive: (path: string, body: string) => Promise<boolean>
+  readonly keepalive: (
+    path: string,
+    body: string
+  ) => Promise<boolean | { readonly ok: boolean; readonly recovered: number }>
 }
 
 export const browserEnv: PageEnv = {
@@ -101,12 +100,19 @@ export const browserEnv: PageEnv = {
   now: () => Date.now(),
   keepalive: (path, body) =>
     fetch(path, { method: "POST", keepalive: true, headers: { "content-type": "application/json" }, body }).then(
-      (response) => response.ok,
+      (response) => ({ ok: response.ok, recovered: Number(response.headers.get("x-drafts-recovered") ?? 0) }),
       () => false
     )
 }
 
-export const makeCopy = (userId: string, refId: string, field: string, save: PendingSave, at: number): Copy => {
+export const makeCopy = (
+  userId: string,
+  refId: string,
+  field: string,
+  save: PendingSave | { readonly kind: "composer"; readonly payload: Omit<typeof ComposerBeacon.Type, "operationId"> },
+  at: number,
+  parents: ReadonlyArray<Copy> = []
+): Copy => {
   const key = uuidv7()
   // Composer operation identities also survive a keepalive acknowledgement or a send.
   const pending =
@@ -116,7 +122,16 @@ export const makeCopy = (userId: string, refId: string, field: string, save: Pen
           payload: { ...save.payload, operationId: key }
         }
       : save
-  return { key, userId, refId, field, content: save.payload.content, save: pending, at }
+  return {
+    key,
+    userId,
+    refId,
+    field,
+    content: save.payload.content,
+    save: pending,
+    at,
+    ancestors: [...new Set(parents.flatMap((copy) => [copy.key, ...copy.ancestors]))]
+  }
 }
 
 export const keepCopy = (copy: Copy, replaced: Copy | null = null) =>
@@ -130,39 +145,8 @@ export const dropCopy = (copy: Copy) => run("readwrite", (store) => store.delete
 
 const decodeSave = Schema.decodeUnknownOption(PendingSave)
 
-/** Old releases kept composer payloads in `content`; preserve their original base too. */
-export const pendingOf = (copy: Copy): PendingSave | null => {
-  if (copy.save !== undefined) return Option.getOrNull(decodeSave(copy.save))
-  if (!copy.refId.startsWith("composer:")) return null
-  try {
-    const old = JSON.parse(copy.content) as unknown
-    const decoded = Schema.decodeUnknownOption(
-      Schema.Struct({
-        text: Schema.String,
-        rowVersion: Schema.Int,
-        session: Schema.Int,
-        next: Schema.Boolean
-      })
-    )(old)
-    if (Option.isNone(decoded)) return null
-    return Option.getOrNull(
-      decodeSave({
-        kind: "composer",
-        payload: {
-          chatId: copy.refId.slice("composer:".length),
-          draftId: copy.field.split(" ")[0],
-          rowVersion: decoded.value.rowVersion,
-          session: decoded.value.session,
-          next: decoded.value.next,
-          content: decoded.value.text,
-          operationId: copy.key
-        }
-      })
-    )
-  } catch {
-    return null
-  }
-}
+/** The complete original save, validated before replay. */
+export const pendingOf = (copy: Copy): PendingSave | null => Option.getOrNull(decodeSave(copy.save))
 
 /** The user's copies for an entry. */
 export const copiesOf = async (userId: string, refId: string): Promise<ReadonlyArray<Copy>> => {
@@ -178,37 +162,25 @@ export const copiesOfUser = async (userId: string): Promise<ReadonlyArray<Copy>>
   return copies
 }
 
-/** Logging out: the user's copies go. */
-export const clearCopies = (userId: string) =>
-  run("readwrite", (store) => forEach(store, "userId", userId, (copy, s) => s.delete(copy.key)))
-
-/** A session starts here: every other user's copies go, so nobody reads another's. */
-export const clearOtherUsers = (userId: string) =>
-  run("readwrite", (store) =>
-    forEach(store, null, null, (copy, s) => {
-      if (copy.userId !== userId) s.delete(copy.key)
+/** Try every exact copy before logout or at the user's request. Failures stay recoverable here. */
+export const flushCopies = async (userId: string) => {
+  for (const copy of await copiesOfUser(userId)) {
+    const save = pendingOf(copy)
+    if (save === null) continue
+    const body = JSON.stringify({
+      drafts: save.kind === "editor" ? [save.payload] : [],
+      composers: save.kind === "composer" ? [save.payload] : []
     })
-  )
-
-/** Copies past the retention period go, then the oldest, until the rest fit the limit. */
-export const pruneCopies = (userId: string, now: number) =>
-  run("readwrite", (store) => {
-    const kept: Array<Copy> = []
-    const request = store.index("userId").openCursor(userId)
-    request.onsuccess = () => {
-      const cursor = request.result
-      if (cursor !== null) {
-        const copy = cursor.value as Copy
-        if (now - copy.at > COPY_RETENTION_MS) cursor.delete()
-        else kept.push(copy)
-        cursor.continue()
-        return
-      }
-      let total = kept.reduce((sum, copy) => sum + copy.content.length, 0)
-      for (const copy of kept.sort((a, b) => a.at - b.at)) {
-        if (total <= COPY_LIMIT_CHARS) break
-        store.delete(copy.key)
-        total -= copy.content.length
-      }
+    try {
+      const response = await fetch("/library/drafts", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body
+      })
+      if (response.ok) await dropCopy(copy)
+    } catch {
+      /* The user can retry or delete the copy explicitly. */
     }
-  })
+  }
+  return copiesOfUser(userId)
+}

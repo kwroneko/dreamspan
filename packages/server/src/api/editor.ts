@@ -109,10 +109,10 @@ export const makeEditorHandlers = Effect.gen(function* () {
         return yield* writer.SaveDraft({
           userId: yield* userId,
           key: draftKey(refId, field),
-          draftId: draftId ?? null,
+          draftId,
           content,
           expectedRowVersion,
-          ...(expectedSession === undefined ? {} : { expectedSession }),
+          expectedSession,
           baseRevision: baseRevisionId
         })
       }).pipe(settle("SaveEditorDraft")),

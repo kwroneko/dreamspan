@@ -57,6 +57,8 @@ const draft = (api: Api, refId: RefId, field: string, content: string) =>
     const existing = opened.drafts.find((d) => d.key.field === field)
     const active = existing?.status === "active"
     return yield* api.SaveEditorDraft({
+      draftId: null,
+      expectedSession: null,
       refId,
       field,
       content,
@@ -88,6 +90,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
       const card = yield* api.CreateCard({ label: "Moved draft", name: "Moved draft" })
       const field = textField(["description"])
       const a = yield* api.SaveEditorDraft({
+        expectedSession: null,
         refId: card.id,
         field,
         draftId: null,
@@ -97,6 +100,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
       })
       const variant = yield* api.ForkVariant({ refId: card.id, label: "Variant", subtitle: "", moveDrafts: true })
       const b = yield* api.SaveEditorDraft({
+        expectedSession: null,
         refId: card.id,
         field,
         draftId: null,
@@ -152,6 +156,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
       const field = textField(["description"])
       const first = yield* draft(api, ref.id, field, "hello")
       const b = yield* api.SaveEditorDraft({
+        draftId: first.id,
         refId: ref.id,
         field,
         content: "hello B",
@@ -166,6 +171,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
         message: null
       })
       const a = yield* api.SaveEditorDraft({
+        draftId: first.id,
         refId: ref.id,
         field,
         content: "hello A",
@@ -285,6 +291,8 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
       assert.strictEqual(
         yield* outcome(
           api.SaveEditorDraft({
+            draftId: null,
+            expectedSession: null,
             refId: card.id,
             field: '["__proto__"]',
             content: "{}",
@@ -321,6 +329,8 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
       const opened = yield* api.OpenEditor({ refId: variant.id })
       const mine = opened.drafts.find((d) => d.key.field === textField(["description"]))!
       yield* api.SaveEditorDraft({
+        draftId: mine.id,
+        expectedSession: mine.session,
         refId: variant.id,
         field: mine.key.field,
         content: "Mine.",
@@ -616,6 +626,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
           yield* draft(api, refId, field, `${kind} hello B${closing ? " closing" : ""}`)
           // ...and this tab, which hadn't seen it, saves its own.
           const stale = {
+            draftId: mine.id,
             refId,
             field,
             content: `${kind} hello A`,

@@ -809,16 +809,38 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
   CreateCard: { createOnly: "makes a new card for the caller" },
   SaveEditorDraft: {
     probe: (actor, owner) =>
-      refused(
-        actor.api.SaveEditorDraft({
-          refId: owner.editor.cardRefId,
-          field: owner.editor.field,
-          content: "planted",
-          expectedRowVersion: null,
-          baseRevisionId: null
-        }),
-        "NotFound"
-      )
+      Effect.gen(function* () {
+        yield* refused(
+          actor.api.SaveEditorDraft({
+            draftId: null,
+            expectedSession: null,
+            refId: owner.editor.cardRefId,
+            field: owner.editor.field,
+            content: "planted",
+            expectedRowVersion: null,
+            baseRevisionId: null
+          }),
+          "NotFound"
+        )
+        for (const foreign of [
+          { draftId: owner.editor.draftId, expectedRowVersion: 1, expectedSession: 1, baseRevisionId: null },
+          {
+            draftId: null,
+            expectedRowVersion: null,
+            expectedSession: null,
+            baseRevisionId: (yield* owner.api.OpenEditor({ refId: owner.editor.cardRefId })).ref.headRevisionId
+          }
+        ])
+          yield* refused(
+            actor.api.SaveEditorDraft({
+              refId: actor.editor.cardRefId,
+              field: actor.editor.field,
+              content: "planted",
+              ...foreign
+            }),
+            "NotFound"
+          )
+      })
   },
   EditorDraftHistory: {
     probe: (actor, owner) =>
@@ -1057,24 +1079,29 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
         for (const chatId of [owner.chat.chatId, actor.chat.chatId]) {
           yield* refused(actor.api.OpenComposer({ chatId, tipSlotId: owner.chat.replySlotId }), "NotFound")
         }
-        // Their composer as a branch's start, into the actor's own chat: nothing comes along.
-        const opened = yield* actor.api.OpenComposer({
-          chatId: actor.chat.chatId,
-          tipSlotId: actor.chat.slotId,
-          copyFrom: owner.composerId
-        })
-        assert.notInclude(opened.content, "half typed")
+        yield* refused(
+          actor.api.OpenComposer({
+            chatId: actor.chat.chatId,
+            tipSlotId: actor.chat.slotId,
+            copyFrom: owner.composerId
+          }),
+          "NotFound"
+        )
       })
   },
   SaveComposer: {
     probe: (actor, owner) =>
       Effect.gen(function* () {
-        const planted = { draftId: owner.composerId, rowVersion: 1, session: 1, content: "planted" }
+        const planted = {
+          next: false,
+          operationId: crypto.randomUUID(),
+          draftId: owner.composerId,
+          rowVersion: 1,
+          session: 1,
+          content: "planted"
+        }
         yield* refused(actor.api.SaveComposer({ chatId: owner.chat.chatId, ...planted }), "NotFound")
-        // Their draft through the actor's own chat: not found there, so only the actor's own
-        // recovered texts get the text.
-        const saved = yield* actor.api.SaveComposer({ chatId: actor.chat.chatId, ...planted })
-        assert.isNull(saved.draft)
+        yield* refused(actor.api.SaveComposer({ chatId: actor.chat.chatId, ...planted }), "NotFound")
       })
   },
   ComposerHistory: {
@@ -1197,13 +1224,23 @@ const routes: Record<string, Probe> = {
           "/library/drafts",
           JSON.stringify({
             drafts: [],
-            composers: [{ chatId, draftId: owner.composerId, rowVersion: 1, session: 1, content: "planted" }]
+            composers: [
+              {
+                next: false,
+                operationId: crypto.randomUUID(),
+                chatId,
+                draftId: owner.composerId,
+                rowVersion: 1,
+                session: 1,
+                content: "planted"
+              }
+            ]
           }),
           "application/json"
         )
       assert.strictEqual((yield* leaving(owner.chat.chatId)).status, 404)
-      // Through the actor's own chat, it's text for the actor's own recovered texts.
-      assert.strictEqual((yield* leaving(actor.chat.chatId)).status, 204)
+      // Enclosing ownership does not authorize an independently supplied foreign draft id.
+      assert.strictEqual((yield* leaving(actor.chat.chatId)).status, 404)
     }),
   "POST /library/export": (actor, owner) =>
     Effect.gen(function* () {
@@ -1229,6 +1266,8 @@ const routes: Record<string, Probe> = {
   "POST /library/drafts": (actor, owner) =>
     Effect.gen(function* () {
       const draft = {
+        draftId: owner.editor.draftId,
+        expectedSession: 1,
         refId: owner.editor.cardRefId,
         field: owner.editor.field,
         content: "planted",
@@ -1399,6 +1438,8 @@ const seed = Effect.gen(function* () {
       const note = yield* api.CreateCardNote({ cardRefId: editorCard.id, title: "Outfit" })
       const field = textField(["description"])
       const fieldDraft = yield* api.SaveEditorDraft({
+        draftId: null,
+        expectedSession: null,
         refId: editorCard.id,
         field,
         content: "A lighthouse keeper.",
@@ -1415,6 +1456,8 @@ const seed = Effect.gen(function* () {
             [refId, "Theirs."]
           ] as const) {
             const draft = yield* api.SaveEditorDraft({
+              draftId: null,
+              expectedSession: null,
               refId: target,
               field: textField(path),
               content: text,

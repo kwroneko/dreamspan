@@ -13,17 +13,7 @@ import type { ChatNotePosition, EditorSnapshot } from "@rp/shared/editorApi.ts"
 import type { Doc, RefId, RevisionId } from "@rp/shared/library.ts"
 import { useEffect, useSyncExternalStore } from "react"
 import type { AppError } from "../../errors.ts"
-import {
-  browserEnv,
-  type Copy,
-  copiesOf,
-  dropCopy,
-  keepCopy,
-  makeCopy,
-  type PageEnv,
-  pendingOf,
-  pruneCopies
-} from "./backup.ts"
+import { browserEnv, type Copy, copiesOf, dropCopy, keepCopy, makeCopy, type PageEnv, pendingOf } from "./backup.ts"
 import type { Caller } from "./caller.ts"
 
 /** How long typing pauses before the text is saved. */
@@ -194,39 +184,34 @@ export class EditorStore {
 
   /** Replay every copy with its original base: only the writer decides a stale save. */
   private async restoreCopies() {
-    await pruneCopies(this.userId, this.env.now())
     for (const copy of [...(await copiesOf(this.userId, this.refId))].sort((a, b) => a.at - b.at)) {
       const pending = pendingOf(copy)
-      // Legacy field copies had no base. Naming no draft conservatively preserves anything
-      // they displace; new copies always replay the complete original request.
-      const payload =
-        pending?.kind === "editor"
-          ? pending.payload
-          : {
-              refId: this.refId,
-              field: copy.field,
-              content: copy.content,
-              expectedRowVersion: null,
-              baseRevisionId:
-                (this.snapshot!.drafts.find((draft) => draft.key.field === copy.field)
-                  ?.baseRevision as RevisionId | null) ?? this.snapshot!.ref.headRevisionId
-            }
-      const replay =
-        pending?.kind === "editor"
-          ? copy
-          : {
-              ...copy,
-              save: { kind: "editor" as const, draftId: null, payload }
-            }
-      if (replay !== copy) await keepCopy(replay)
-      const result = await this.call((client) => client("SaveEditorDraft", payload))
+      if (pending?.kind !== "editor") continue
+      const payload = pending.payload
+      const replay = copy
       const field = this.field(copy.field)
+      const captured = { pending: field.pending, local: field.local, rowVersion: field.rowVersion }
+      this.sendingCopies.add(replay)
+      const result = await this.call((client) => client("SaveEditorDraft", payload))
+      this.sendingCopies.delete(replay)
+      const unchanged =
+        field.pending === captured.pending &&
+        field.local === captured.local &&
+        field.rowVersion === captured.rowVersion &&
+        (captured.local === null || captured.pending?.key === copy.key)
       if (result.ok) {
-        this.hold(field, result.value)
+        if (unchanged) this.hold(field, result.value)
+        else this.recovered += result.value.recovered
         await dropCopy(copy)
       } else {
-        field.local = payload.content
-        field.pending = replay
+        if (unchanged) {
+          field.local = payload.content
+          field.pending = replay
+          field.draftId = payload.draftId ?? null
+          field.rowVersion = payload.expectedRowVersion
+          field.session = payload.expectedSession ?? null
+          field.baseRevision = payload.baseRevisionId
+        }
         this.saveError = result.error
       }
       this.restored++
@@ -327,8 +312,9 @@ export class EditorStore {
       this.userId,
       this.refId,
       key,
-      { kind: "editor", draftId: payload.draftId ?? null, payload },
-      this.env.now()
+      { kind: "editor", payload },
+      this.env.now(),
+      previous === null ? [] : [previous]
     )
     field.pending = copy
     void keepCopy(copy, replaces ? previous : null)
@@ -357,11 +343,13 @@ export class EditorStore {
       this.sendingCopies.delete(copy)
       if (result.ok) {
         // The draft holds exactly this text: it's the field's base now.
-        this.hold(field, result.value)
+        const descendant = field.pending?.ancestors.includes(copy.key) === true
+        if (field.pending === copy || descendant) this.hold(field, result.value)
+        else this.recovered += result.value.recovered
         if (field.pending === copy) {
           field.local = null
           field.pending = null
-        } else if (field.pending !== null && !this.sendingCopies.has(field.pending)) {
+        } else if (descendant && field.pending !== null && !this.sendingCopies.has(field.pending)) {
           // What's typed since was typed from this text.
           this.keep(key, field, field.local!, true)
         }
@@ -370,7 +358,7 @@ export class EditorStore {
       } else {
         this.saveError = result.error
         // A newer copy typed from this one replaces it.
-        if (field.pending !== copy) void dropCopy(copy)
+        if (field.pending?.ancestors.includes(copy.key)) void dropCopy(copy)
       }
       this.bump(key)
     }
@@ -385,12 +373,13 @@ export class EditorStore {
   private base(field: FieldDraft) {
     return {
       expectedRowVersion: field.rowVersion,
-      ...(field.session === null ? {} : { expectedSession: field.session })
+      expectedSession: field.session
     }
   }
 
   /** The draft as the server returned it. */
   private hold(field: FieldDraft, draft: Draft) {
+    this.recovered += draft.recovered
     field.draftId = draft.id
     field.baseRevision = draft.baseRevision as RevisionId | null
     field.saved = draft.status === "active" ? draft.content : null
@@ -462,7 +451,7 @@ export class EditorStore {
         }),
       ["library"]
     )
-    if (result.ok) this.recovered = result.value.recovered
+    if (result.ok) this.recovered += result.value.recovered
     if (result.ok || result.error.tag === "StaleWrite" || result.error.tag === "EditConflict") await this.refresh()
     return result
   }
@@ -584,7 +573,11 @@ export class EditorStore {
     if (drafts.length === 0 || new Blob([body]).size > KEEPALIVE_LIMIT) return
     for (const copy of copies) this.sendingCopies.add(copy)
     void this.env.keepalive("/library/drafts", body).then((ok) => {
-      if (!ok) return
+      if (!(typeof ok === "boolean" ? ok : ok.ok)) return
+      if (typeof ok !== "boolean") {
+        this.recovered += ok.recovered
+        this.bump(DRAFTS)
+      }
       for (const copy of copies) {
         this.sent.add(copy)
         void dropCopy(copy)
@@ -598,6 +591,7 @@ export class EditorStore {
    * its save goes on top.
    */
   private settle(key: string, draft: Draft) {
+    if (this.field(key).local !== null) this.recovered += draft.recovered
     const field = this.field(key)
     if (field.local === null) this.hold(field, draft)
     else this.schedule(key)

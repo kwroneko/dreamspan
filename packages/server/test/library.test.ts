@@ -505,11 +505,17 @@ describe("library", () => {
   it.live("an edit that changes nothing still commits its draft", () =>
     Effect.gen(function* () {
       const { writer, reader, userId, upstream, rowVersion } = yield* setup()
-      const key = new DraftKey({ targetKind: "entity_field", targetId: upstream.id, field: "/name" })
+      const key = new DraftKey({
+        targetKind: "entity_field",
+        targetId: upstream.id,
+        field: JSON.stringify(["prompts", "identifier=main", "content"])
+      })
       const draft = yield* writer.SaveDraft({
+        draftId: null,
+        expectedSession: null,
         userId,
         key,
-        content: "Narrator",
+        content: MAIN,
         expectedRowVersion: null,
         baseRevision: upstream.headRevisionId
       })
@@ -519,9 +525,38 @@ describe("library", () => {
         doc: preset(MAIN),
         expectedRowVersion: yield* rowVersion(upstream.id),
         message: null,
-        commitDraft: { draftId: draft.id, session: draft.session, content: draft.content }
+        commitDraft: { draftId: draft.id, session: draft.session }
       })
       assert.strictEqual((yield* reader.GetDraft({ userId, key }))?.status, "committed")
+    }).pipe(Effect.provide(database()))
+  )
+
+  it.live("a revision cannot commit field text absent from its stored document", () =>
+    Effect.gen(function* () {
+      const { writer, reader, userId, upstream, rowVersion } = yield* setup()
+      const key = new DraftKey({
+        targetKind: "entity_field",
+        targetId: upstream.id,
+        field: JSON.stringify(["prompts", "identifier=main", "content"])
+      })
+      const draft = yield* writer.SaveDraft({
+        userId,
+        key,
+        draftId: null,
+        expectedRowVersion: null,
+        expectedSession: null,
+        content: "Unstored text",
+        baseRevision: upstream.headRevisionId
+      })
+      yield* writer.EditRef({
+        userId,
+        refId: upstream.id,
+        doc: preset(MAIN),
+        expectedRowVersion: yield* rowVersion(upstream.id),
+        message: null,
+        commitDraft: { draftId: draft.id, session: draft.session }
+      })
+      assert.strictEqual((yield* reader.GetDraft({ userId, key }))?.content, draft.content)
     }).pipe(Effect.provide(database()))
   )
 

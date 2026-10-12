@@ -91,7 +91,7 @@ const chatRecordBytes = [
    FROM changeset_items i JOIN changesets c ON c.id = i.changeset_id WHERE c.chat_id = ?`
 ]
 
-export const makeBin = (sql: SqlClient.SqlClient, limits: BinLimits) => {
+export const makeBin = (sql: SqlClient.SqlClient, limits: BinLimits, now: () => number = Date.now) => {
   const insertItem = (item: {
     readonly userId: UserId
     readonly kind: BinItem["kind"]
@@ -153,16 +153,7 @@ export const makeBin = (sql: SqlClient.SqlClient, limits: BinLimits) => {
   const moveLeaf = (userId: UserId, chatId: string, from: string | null, to: string | null) =>
     Effect.gen(function* () {
       yield* sql`UPDATE chats SET active_leaf_slot_id = ${to}, row_version = row_version + 1 WHERE id = ${chatId}`
-      const there = yield* drafts.find(userId, composerKey(chatId, to))
-      if (there?.status === "active" && there.content !== "") return
-      // An empty composer can still hold history (text typed, then wiped). Ending it as a
-      // discard sends that text to the recovered-text section before the row goes.
-      if (there) {
-        yield* drafts.end(there, "discarded")
-        yield* sql`DELETE FROM drafts WHERE id = ${there.id}`
-      }
-      yield* sql`UPDATE drafts SET field = ${to ?? ""}, row_version = row_version + 1
-                 WHERE target_kind = 'composer' AND target_id = ${chatId} AND field = ${from ?? ""}`
+      yield* drafts.moveComposer(userId, chatId, from, to)
     })
 
   /**
@@ -637,7 +628,7 @@ export const makeBin = (sql: SqlClient.SqlClient, limits: BinLimits) => {
       )}`
     })
 
-  const drafts = makeDraftStore(sql, recover)
+  const drafts = makeDraftStore(sql, recover, now)
 
   return {
     drafts,

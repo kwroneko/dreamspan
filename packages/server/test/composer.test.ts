@@ -77,6 +77,8 @@ describe("the composer's drafts", () => {
       yield* typeInto(api, chat.id, null, "hello B", hello)
       // ...and this tab, which hadn't seen that, saves its own.
       const saved = yield* api.SaveComposer({
+        next: false,
+        operationId: crypto.randomUUID(),
         chatId: chat.id,
         draftId: hello.id,
         rowVersion: hello.rowVersion,
@@ -134,7 +136,7 @@ describe("the composer's drafts", () => {
           parentSlotId: sent.entry.slotId,
           branch: false,
           content: "Then",
-          composer: takenFrom(typing, "Then")
+          composer: takenFrom(typing)
         })
       )
       assert.deepStrictEqual([next.draft?.status, next.draft?.content], ["active", "Then wait."])
@@ -178,7 +180,15 @@ describe("the composer's drafts", () => {
       const late = yield* post("/library/drafts", {
         drafts: [],
         composers: [
-          { chatId: chat.id, draftId: draft.id, rowVersion: draft.rowVersion, session: draft.session, content: "wait!" }
+          {
+            next: false,
+            operationId: crypto.randomUUID(),
+            chatId: chat.id,
+            draftId: draft.id,
+            rowVersion: draft.rowVersion,
+            session: draft.session,
+            content: "wait!"
+          }
         ]
       })
       assert.strictEqual(late.status, 204)
@@ -202,6 +212,7 @@ describe("the composer's drafts", () => {
           drafts: [],
           composers: [
             {
+              operationId: crypto.randomUUID(),
               chatId: chat.id,
               draftId: from.id,
               rowVersion: from.rowVersion,
@@ -336,7 +347,17 @@ describe("the composer's drafts", () => {
       const leaving = (draft: Draft, content: string, chatId: string = chat.id) =>
         post("/library/drafts", {
           drafts: [],
-          composers: [{ chatId, draftId: draft.id, rowVersion: draft.rowVersion, session: draft.session, content }]
+          composers: [
+            {
+              next: false,
+              operationId: crypto.randomUUID(),
+              chatId,
+              draftId: draft.id,
+              rowVersion: draft.rowVersion,
+              session: draft.session,
+              content
+            }
+          ]
         })
       // Two tabs read the empty composer.
       const read = yield* open(api, chat.id, null)
@@ -380,6 +401,7 @@ describe("the composer's drafts", () => {
           : null
         const initial = yield* open(api, chat.id, tip)
         const save = {
+          next: false,
           chatId: chat.id,
           draftId: initial.id,
           rowVersion: initial.rowVersion,
@@ -396,7 +418,7 @@ describe("the composer's drafts", () => {
           parentSlotId: tip,
           branch: false,
           content: "alpha",
-          composer: takenFrom(initial, "alpha")
+          composer: takenFrom(initial)
         })
         assert.strictEqual(sent._tag, queued ? "Queued" : "Posted")
         assert.deepStrictEqual(

@@ -427,7 +427,7 @@ test("a copy this browser kept of another chat's composer is saved when a compos
         request.onsuccess = () => {
           const db = request.result
           const transaction = db.transaction("copies", "readwrite")
-          transaction.objectStore("copies").put({ ...copy, key: `${copy.userId}\n${copy.refId}\n${copy.field}` })
+          transaction.objectStore("copies").put({ ...copy, key: copy.save.payload.operationId, ancestors: [] })
           transaction.oncomplete = () => {
             db.close()
             resolve()
@@ -438,12 +438,19 @@ test("a copy this browser kept of another chat's composer is saved when a compos
       userId: setup.user.id,
       refId: `composer:${setup.chatId}`,
       field: draft.id,
-      content: JSON.stringify({
-        text: "kept in this browser",
-        rowVersion: draft.rowVersion,
-        session: draft.session,
-        next: false
-      }),
+      content: "kept in this browser",
+      save: {
+        kind: "composer",
+        payload: {
+          chatId: setup.chatId,
+          draftId: draft.id,
+          content: "kept in this browser",
+          rowVersion: draft.rowVersion,
+          session: draft.session,
+          next: false,
+          operationId: crypto.randomUUID()
+        }
+      },
       // From a page closed a while ago, before the server had it.
       at: Date.now() - 60_000
     }

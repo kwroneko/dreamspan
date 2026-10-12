@@ -28,8 +28,7 @@ import {
   keepCopy,
   makeCopy,
   type PageEnv,
-  pendingOf,
-  pruneCopies
+  pendingOf
 } from "../editor/backup.ts"
 import type { ChatSession, Outcome } from "./session.ts"
 
@@ -150,7 +149,7 @@ export class ComposerDraft {
    * typed from it, so it names the same base. Otherwise it names `base` (`rebase`: the
    * server confirmed the text this was typed from at `base`).
    */
-  private keep(text: string, rebase = false) {
+  private keep(text: string, rebase = false, parents: ReadonlyArray<Copy> = []) {
     const draft = this.base
     if (draft === null) return null
     const previous = this.pending
@@ -175,7 +174,8 @@ export class ComposerDraft {
           content: text
         }
       },
-      this.env.now()
+      this.env.now(),
+      [...parents, ...(previous === null ? [] : [previous])]
     )
     this.pending = copy
     void keepCopy(copy, replaces ? previous : null)
@@ -190,7 +190,7 @@ export class ComposerDraft {
 
   /** `copy` didn't reach the server, and a newer copy of the same draft typed from it replaces it. */
   private superseded(copy: Copy) {
-    if (this.pending !== null && this.pending !== copy && this.pending.field === copy.field) void dropCopy(copy)
+    if (this.pending?.ancestors.includes(copy.key)) void dropCopy(copy)
   }
 
   /** The base is `draft` now, with its text in the box. */
@@ -286,12 +286,10 @@ export class ComposerDraft {
     let restored = false
     let recovered = false
     let unsent: Copy | null = null
-    await pruneCopies(this.userId, this.env.now())
     // Another draft's copy only once it's stale: a tab still typing there makes its own saves.
     const now = this.env.now()
     const copies = (await copiesOfUser(this.userId)).filter(
-      (copy) =>
-        copy.refId.startsWith(COPIES) && (copy.field.split(" ")[0] === opened.id || now - copy.at > STALE_COPY_MS)
+      (copy) => copy.refId.startsWith(COPIES) && (copy.field === opened.id || now - copy.at > STALE_COPY_MS)
     )
     copies.sort((a, b) => {
       const first = pendingOf(a)
@@ -499,7 +497,7 @@ export class ComposerDraft {
     this.text = next === "" ? text : `${text}\n\n${next}`
     this.emit()
     if (this.text !== shown(draft) || this.pending !== null) {
-      this.keep(this.text)
+      this.keep(this.text, false, sendingCopy === null ? [] : [sendingCopy])
       if (sendingCopy !== null) void dropCopy(sendingCopy)
       this.schedule(0)
     }
@@ -535,6 +533,7 @@ export class ComposerDraft {
         client("RestoreComposer", { chatId: this.chatId, draftId: draft.id, seq, expectedRowVersion: draft.rowVersion })
       )
       if (result.ok) {
+        this.recovered ||= result.value.recovered > 0
         if (!this.unsaved) this.take(result.value)
         this.emit()
         if (this.unsaved) this.schedule(0)
@@ -549,9 +548,6 @@ export class ComposerDraft {
   isUnsaved() {
     return this.unsaved || (this.sending !== null && !this.sending.saved)
   }
-
-  /** What the server confirmed `beacon` sent, so closing doesn't send it twice. */
-  private sent: string | null = null
 
   /**
    * As the page goes: what's typed and not saved yet, in a request that outlives the page,
@@ -574,11 +570,14 @@ export class ComposerDraft {
         return save?.kind === "composer" ? [save.payload] : []
       })
     })
-    if (saves.length === 0 || this.sent === body || new Blob([body]).size > KEEPALIVE_LIMIT) return
+    if (saves.length === 0 || new Blob([body]).size > KEEPALIVE_LIMIT) return
     for (const copy of saves) this.inFlight.add(copy)
     void this.env.keepalive("/library/drafts", body).then((ok) => {
-      if (!ok) return
-      this.sent = body
+      if (!(typeof ok === "boolean" ? ok : ok.ok)) return
+      if (typeof ok !== "boolean") {
+        this.recovered ||= ok.recovered > 0
+        this.emit()
+      }
       // The browser copy is acknowledged; the live request still needs this identity
       // to reconcile its local draft with the writer's receipt.
       for (const copy of saves) void dropCopy(copy)

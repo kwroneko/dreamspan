@@ -5,7 +5,7 @@ import { Link, Navigate, Outlet, useLocation, useNavigate } from "@tanstack/reac
 import { AsyncResult } from "effect/reactivity"
 import { type ReactNode, useEffect, useState } from "react"
 import { ErrorAlert } from "../actions.tsx"
-import { clearOtherUsers } from "./editor/backup.ts"
+import { BrowserRecovery } from "./editor/BrowserRecovery.tsx"
 import { describeCause } from "../errors.ts"
 import { fullPath, navEntries, routes } from "../routes.tsx"
 import { logout, SessionContext, sessionAtom, useSession } from "../session.ts"
@@ -25,17 +25,6 @@ export function CenteredPage({ children }: { children: ReactNode }) {
   return (
     <main className="mx-auto flex min-h-full w-full max-w-sm flex-col justify-center gap-4 px-4 py-10">{children}</main>
   )
-}
-
-/**
- * A session here is one user's: what the editors kept in this browser for anyone else
- * (backup.ts) goes, whether they logged out or their session just ended.
- */
-function ForgetOtherUsers({ userId }: { userId: string }) {
-  useEffect(() => {
-    void clearOtherUsers(userId)
-  }, [userId])
-  return null
 }
 
 /** Hears about replies finishing elsewhere while a session is open (notices.tsx). */
@@ -63,6 +52,7 @@ export function LogoutButton({ variant = "secondary" }: { variant?: "secondary" 
       >
         Log out
       </Button>
+      {error.startsWith("Some text could not be saved.") && <BrowserRecovery userId={userId} initiallyOpen />}
       {error && (
         <span role="alert" className="text-sm text-danger">
           {error}
@@ -97,6 +87,7 @@ function Header() {
           <Link to="/bin" className="text-sm text-muted hover:text-text data-[status=active]:text-text">
             Bin
           </Link>
+          <BrowserRecovery userId={session.user.id} />
           <Link to="/settings/account" className="max-w-40 truncate text-sm text-muted hover:text-text">
             {session.user.displayName}
           </Link>
@@ -149,7 +140,6 @@ function AppShell() {
   }
   return (
     <SessionContext value={result.value}>
-      <ForgetOtherUsers userId={result.value.user.id} />
       <Notices />
       <a
         href="#content"

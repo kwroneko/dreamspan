@@ -73,6 +73,8 @@ test("a card with a 50 KB description: typing in it, and in another field", asyn
     Effect.gen(function* () {
       const card = yield* api.CreateCard({ label: "Long", name: "Long" })
       const draft = yield* api.SaveEditorDraft({
+        draftId: null,
+        expectedSession: null,
         refId: card.id,
         field: textField(["description"]),
         content: description,

@@ -24,6 +24,9 @@ export class Reader extends Context.Service<
   RpcClient.FromGroup<typeof ReadOps, RpcClientError.RpcClientError>
 >()("rp/db/Reader") {}
 
+/** Tests can advance the writer's history clock without sleeping or writing SQLite on the main thread. */
+export const DraftClock = Context.Reference<SharedArrayBuffer | null>("rp/db/DraftClock", { defaultValue: () => null })
+
 interface DatabaseOptions {
   readonly dataDir: string
   readonly readers: number
@@ -156,13 +159,15 @@ export const layer = (options: DatabaseOptions) => {
   )
 
   const Workers = Layer.unwrap(
-    Effect.map(workerEntries(options), (entries) => {
+    Effect.gen(function* () {
+      const entries = yield* workerEntries(options)
+      const draftClock = yield* DraftClock
       const WriterLive = Layer.effect(Writer, RpcClient.make(WriteOps)).pipe(
         Layer.provide(
           writerProtocol(
             workerThreads(
               entries.writer,
-              { dbPath, binLimits: options.binLimits ?? defaultBinLimits },
+              { dbPath, binLimits: options.binLimits ?? defaultBinLimits, draftClock },
               entries.bundleDir
             )
           )

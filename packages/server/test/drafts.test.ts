@@ -55,7 +55,15 @@ const setup = (handle = "ana") =>
     /** Saves like a client does: passing the row version it last saw. */
     const type = (content: string) =>
       writer
-        .SaveDraft({ userId, key: composer(), content, expectedRowVersion: rowVersion, baseRevision: null })
+        .SaveDraft({
+          draftId: null,
+          expectedSession: null,
+          userId,
+          key: composer(),
+          content,
+          expectedRowVersion: rowVersion,
+          baseRevision: null
+        })
         .pipe(Effect.tap((draft) => Effect.sync(() => (rowVersion = draft.rowVersion))))
     /** Sends `content` as a message at the tip, committing the draft it was taken from. */
     const send = (content: string) =>
@@ -66,7 +74,7 @@ const setup = (handle = "ana") =>
           parentSlotId: tip,
           branch: false,
           version: say(content),
-          commitDraft: from === null ? null : { draftId: from.id, session: from.session, content }
+          commitDraft: from === null ? null : { draftId: from.id, session: from.session }
         })
       ).pipe(
         Effect.tap((result) =>
@@ -88,6 +96,7 @@ describe("drafts", () => {
       yield* type("Hello from tab A") // the next save, coalesced with the first
       // Tab B saw only "Hello".
       const stale = yield* writer.SaveDraft({
+        draftId: first.id,
         userId,
         key: composer(),
         content: "Hello from tab B",
@@ -116,6 +125,7 @@ describe("drafts", () => {
       const first = yield* type("Hello")
       yield* type("Hello from tab A")
       yield* writer.SaveDraft({
+        draftId: first.id,
         userId,
         key: composer(),
         content: "Hello from tab B",
@@ -128,6 +138,7 @@ describe("drafts", () => {
       // destructive is among them.
       const stale = (content: string) =>
         writer.SaveDraft({
+          draftId: first.id,
           userId,
           key: composer(),
           content,
@@ -327,6 +338,8 @@ describe("drafts", () => {
 
       // Editing on the new branch leaves branch A alone...
       yield* writer.SaveDraft({
+        draftId: copied.id,
+        expectedSession: copied.session,
         userId,
         key: composerKey(chat.id, root.slotId),
         content: "A different take",
@@ -367,6 +380,8 @@ describe("drafts", () => {
       assert.isNull(yield* bob.reader.GetDraft({ userId: bob.userId, key: ana.composer() }))
       const foreign = yield* bob.writer
         .SaveDraft({
+          draftId: null,
+          expectedSession: null,
           userId: bob.userId,
           key: ana.composer(),
           content: "hi",
@@ -378,6 +393,8 @@ describe("drafts", () => {
 
       const huge = yield* bob.writer
         .SaveDraft({
+          draftId: null,
+          expectedSession: null,
           userId: bob.userId,
           key: bob.composer(),
           content: "x".repeat(1_000_001),

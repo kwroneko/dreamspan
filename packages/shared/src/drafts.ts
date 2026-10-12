@@ -53,6 +53,8 @@ export class Draft extends Schema.Class<Draft>("Draft")({
    * Number of earlier states that can be restored. History is deleted on commit; text a
    * commit or discard would lose goes to the bin's recovered-text section.
    */
+  /** Texts this write sent to recovered texts; reads return zero. */
+  recovered: Schema.Int,
   historyLength: Schema.Int
 }) {}
 

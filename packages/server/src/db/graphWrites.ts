@@ -179,18 +179,21 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
             status = CASE WHEN status = 'pending' THEN 'active' ELSE status END,
             row_version = row_version + 1
           WHERE id = ${chatId} RETURNING *`
-      const committed = yield* drafts.commit(userId, commitDraft)
+      const committed = yield* drafts.commit(userId, commitDraft, {
+        targetKind: "composer",
+        targetId: chatId,
+        content: row.writer === "model" ? (row.direction ?? "") : row.content
+      })
       // The composer at the old tip moves to the new one: text typed while something
       // else was appended stays in view, and a send's recovery text goes along with it.
-      yield* sql`UPDATE drafts SET field = ${slotId}, row_version = row_version + 1
-                   WHERE target_kind = 'composer' AND target_id = ${chatId} AND field = ${parentSlotId ?? ""}`
+      const movedRecovery = yield* drafts.moveComposer(userId, chatId, parentSlotId, slotId)
       return new AppendResult({
         slotId: slotId as SlotId,
         version: toVersion(row),
         chat: toChat(chat!),
         // The named draft as the write left it, wherever its tip is now.
         draft: committed.draft === null ? null : yield* drafts.ownDraft(userId, committed.draft.id),
-        recovered: committed.recovered
+        recovered: committed.recovered + movedRecovery
       })
     })
 

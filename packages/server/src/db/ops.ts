@@ -108,9 +108,7 @@ export class DraftTooLarge extends Schema.TaggedError<DraftTooLarge>()("DraftToo
  * was typed in, with exactly that text (drafts.ts `commit`). If it holds anything else now
  * (another tab typed on), it stays active, and nothing else is touched.
  */
-const CommitDraft = Schema.NullOr(
-  Schema.Struct({ draftId: Schema.String, session: Schema.Int, content: Schema.String })
-)
+const CommitDraft = Schema.NullOr(Schema.Struct({ draftId: Schema.String, session: Schema.Int }))
 
 export class AppendResult extends Schema.Class<AppendResult>("AppendResult")({
   slotId: SlotId,
@@ -333,11 +331,11 @@ export class WriteOps extends RpcGroup.make(
       userId: UserId,
       key: DraftKey,
       /** The draft the text was typed into, if the client had one: another draft at the key is a conflict. */
-      draftId: Schema.optionalKey(Schema.NullOr(Schema.String)),
+      draftId: Schema.NullOr(Schema.String),
       content: Schema.String,
       /** The draft as last seen: null if none was. */
       expectedRowVersion: Schema.NullOr(Schema.Int),
-      expectedSession: Schema.optionalKey(Schema.Int),
+      expectedSession: Schema.NullOr(Schema.Int),
       baseRevision: Schema.NullOr(Schema.String)
     },
     success: Draft,
@@ -372,7 +370,7 @@ export class WriteOps extends RpcGroup.make(
       rowVersion: Schema.Int,
       session: Schema.Int,
       next: Schema.Boolean,
-      operationId: Schema.optionalKey(Schema.String),
+      operationId: Schema.String,
       content: Schema.String
     },
     success: Schema.Struct({ draft: Schema.NullOr(Draft), recovered: Schema.Boolean }),

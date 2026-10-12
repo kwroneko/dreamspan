@@ -15,7 +15,7 @@ const admin = <A>(use: (api: Client) => Effect.Effect<A, unknown>) => {
 interface StoredCopy {
   key: string
   content: string
-  save?: { payload: { content: string } }
+  save: { payload: { content: string } }
 }
 const copies = (page: Page) =>
   page.evaluate(
@@ -32,14 +32,7 @@ const copies = (page: Page) =>
         }
       })
   )
-const text = (copy: StoredCopy) => {
-  if (copy.save) return copy.save.payload.content
-  try {
-    return (JSON.parse(copy.content) as { text: string }).text
-  } catch {
-    return copy.content
-  }
-}
+const text = (copy: StoredCopy) => copy.save.payload.content
 const message = (page: Page) => page.getByLabel("Message", { exact: true })
 const offlineBeacon = (page: Page) =>
   page.evaluate(() => {
@@ -48,14 +41,8 @@ const offlineBeacon = (page: Page) =>
       url === "/library/drafts" ? Promise.reject(new Error("synthetic offline")) : fetch(url, init)
   })
 
-for (const { kind, legacy } of [
-  { kind: "card", legacy: false },
-  { kind: "preset", legacy: false },
-  { kind: "card", legacy: true }
-] as const) {
-  test(`${legacy ? "legacy " : ""}${kind} backup replays its original base and preserves the other tab's text`, async ({
-    page
-  }) => {
+for (const kind of ["card", "preset"] as const) {
+  test(`${kind} backup replays its original base and preserves the other tab's text`, async ({ page }) => {
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
     let refId
     if (kind === "card") refId = (await admin((api) => api.CreateCard({ label: "Backup", name: "Synthetic" }))).id
@@ -72,6 +59,8 @@ for (const { kind, legacy } of [
     const ref = await admin((api) => api.OpenEditor({ refId: refId! }))
     const first = await admin((api) =>
       api.SaveEditorDraft({
+        draftId: null,
+        expectedSession: null,
         refId: refId!,
         field,
         content: "hello",
@@ -94,30 +83,9 @@ for (const { kind, legacy } of [
     await offlineBeacon(page)
     await box().fill("hello A")
     await expect.poll(async () => (await copies(page)).map(text)).toContain("hello A")
-    if (legacy)
-      await page.evaluate(
-        () =>
-          new Promise<void>((resolve) => {
-            const request = indexedDB.open("rp-editor-copies", 1)
-            request.onsuccess = () => {
-              const db = request.result
-              const transaction = db.transaction("copies", "readwrite")
-              const cursor = transaction.objectStore("copies").openCursor()
-              cursor.onsuccess = () => {
-                const row = cursor.result
-                if (row === null) return
-                row.update({ ...row.value, save: undefined })
-                row.continue()
-              }
-              transaction.oncomplete = () => {
-                db.close()
-                resolve()
-              }
-            }
-          })
-      )
     await admin((api) =>
       api.SaveEditorDraft({
+        draftId: first.id,
         refId: refId!,
         field,
         content: "hello B",
@@ -188,7 +156,7 @@ test("two offline composer tabs retain independent pending copies and acknowledg
         parentSlotId: null,
         branch: false,
         content: draft.content,
-        composer: { draftId: draft.id, session: draft.session, text: draft.content }
+        composer: { draftId: draft.id, session: draft.session }
       })
       return yield* api.ListRecoveredTexts({ limit: 100, before: null })
     })
@@ -202,6 +170,8 @@ test("a stale active editor meets the conflict picker after another tab commits"
       const ref = yield* api.CreateCard({ label: "Commit boundary", name: "Synthetic" })
       const field = textField(["description"])
       const draft = yield* api.SaveEditorDraft({
+        draftId: null,
+        expectedSession: null,
         refId: ref.id,
         field,
         content: "hello",
@@ -218,6 +188,7 @@ test("a stale active editor meets the conflict picker after another tab commits"
   await admin((api) =>
     Effect.gen(function* () {
       const b = yield* api.SaveEditorDraft({
+        draftId: draft.id,
         refId: ref.id,
         field,
         content: "hello B",
@@ -316,7 +287,7 @@ test("a keepalive and its later live save acknowledge the same pending operation
       parentSlotId: null,
       branch: false,
       content: "kept once",
-      composer: { draftId: kept.id, session: kept.session, text: "kept once" }
+      composer: { draftId: kept.id, session: kept.session }
     })
   )
   release!()
@@ -367,6 +338,8 @@ test("a send of text a replayed save answered for keeps another tab's newer text
     Effect.gen(function* () {
       const draft = yield* api.OpenComposer({ chatId: chat.id, tipSlotId: null })
       yield* api.SaveComposer({
+        next: false,
+        operationId: crypto.randomUUID(),
         chatId: chat.id,
         draftId: draft.id,
         rowVersion: draft.rowVersion,
@@ -420,6 +393,8 @@ test("text typed while an editor's Undo is on its way stays, saved on top of the
       const card = yield* api.CreateCard({ label: "Undo race", name: "Undo race" })
       const field = textField(["description"])
       const first = yield* api.SaveEditorDraft({
+        draftId: null,
+        expectedSession: null,
         refId: card.id,
         field,
         content: original,
@@ -497,6 +472,8 @@ test("text a revision's save sent to the recovered texts is pointed to from the 
     Effect.gen(function* () {
       const card = yield* api.CreateCard({ label: "Recovery notice", name: "Recovery notice" })
       yield* api.SaveEditorDraft({
+        draftId: null,
+        expectedSession: null,
         refId: card.id,
         field: textField(["description"]),
         content: "hello",

@@ -101,7 +101,7 @@ export const makeChatHandlers = Effect.gen(function* () {
       readonly speakerEntityId: EntityId | null
       readonly replySpeakerEntityId: EntityId | null
       readonly direction: string | null
-      readonly composer: { readonly draftId: string; readonly session: number; readonly text: string } | undefined
+      readonly composer: { readonly draftId: string; readonly session: number } | undefined
     }
   ) =>
     Effect.gen(function* () {
@@ -110,10 +110,7 @@ export const makeChatHandlers = Effect.gen(function* () {
         userId: user,
         ...send,
         // The composer draft the text was taken from (DESIGN §6.2).
-        commitDraft:
-          composer === undefined
-            ? null
-            : { draftId: composer.draftId, session: composer.session, content: composer.text }
+        commitDraft: composer === undefined ? null : { draftId: composer.draftId, session: composer.session }
       })
       if (outcome._tag === "Queued") {
         hub.publish(params.chatId, { _tag: "Queue", queue: outcome.queue })

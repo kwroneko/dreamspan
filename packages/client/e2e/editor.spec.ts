@@ -40,6 +40,8 @@ const savedCard = (name: string, fields: Record<string, string>) =>
       const card = yield* api.CreateCard({ label: name, name })
       for (const [key, content] of Object.entries(fields)) {
         yield* api.SaveEditorDraft({
+          draftId: null,
+          expectedSession: null,
           refId: card.id,
           field: textField([key]),
           content,
@@ -151,6 +153,7 @@ test("a field another tab typed on meanwhile keeps that tab's text, recovered on
       const opened = yield* api.OpenEditor({ refId })
       const draft = opened.drafts.find((d) => d.status === "active")!
       yield* api.SaveEditorDraft({
+        draftId: draft.id,
         refId,
         field: draft.key.field,
         content: "hello from the other tab",
@@ -180,6 +183,8 @@ test("an earlier revision restores as a new one", async ({ page }) => {
       const opened = yield* api.OpenEditor({ refId: refId as RefId })
       const draft = opened.drafts[0]!
       yield* api.SaveEditorDraft({
+        draftId: draft.id,
+        expectedSession: draft.session,
         refId: refId as RefId,
         field: draft.key.field,
         content: "A calm sea.",
@@ -326,6 +331,8 @@ test("an update with a conflict is resolved field by field", async ({ page }) =>
     Effect.gen(function* () {
       const opened = yield* api.OpenEditor({ refId: refId as RefId })
       const draft = yield* api.SaveEditorDraft({
+        draftId: null,
+        expectedSession: null,
         refId: refId as RefId,
         field: textField(["prompts", "identifier=main", "content"]),
         content: "Write calm prose.",
@@ -518,7 +525,23 @@ const leaveCopy = (page: Page, copy: StoredCopy) =>
         request.onsuccess = () => {
           const db = request.result
           const transaction = db.transaction("copies", "readwrite")
-          transaction.objectStore("copies").put({ ...copy, key: `${copy.userId}\n${copy.refId}\n${copy.field}` })
+          transaction.objectStore("copies").put({
+            ...copy,
+            key: crypto.randomUUID(),
+            ancestors: [],
+            save: {
+              kind: "editor",
+              payload: {
+                refId: copy.refId,
+                field: copy.field,
+                content: copy.content,
+                draftId: null,
+                expectedRowVersion: null,
+                expectedSession: null,
+                baseRevisionId: null
+              }
+            }
+          })
           transaction.oncomplete = () => {
             db.close()
             resolve()
@@ -528,7 +551,7 @@ const leaveCopy = (page: Page, copy: StoredCopy) =>
     copy
   )
 
-test("text kept in this browser is its user's: logging out or another user's session clears it", async ({ page }) => {
+test("text kept in this browser is saved before logout and survives another user's session", async ({ page }) => {
   const me = await admin((api) => api.Whoami())
   await admin((api) =>
     api.CreateUser({ handle: "copy-reader", displayName: "Reader", role: "user", password: "reader-password-1" })
@@ -541,15 +564,15 @@ test("text kept in this browser is its user's: logging out or another user's ses
   await expect(page).toHaveURL(/\/login/)
   expect(await storedCopies(page)).toEqual([])
 
-  // A session that ended without a logout leaves the copy; the next user's session clears it.
+  // A different account cannot read or delete the earlier account's pending copy.
   await leaveCopy(page, copy)
   await apiLogin(page.request, server(), "copy-reader", "reader-password-1")
   await page.goto(`${server().url}/library`)
   await expect(page.getByRole("heading", { level: 1, name: "Library" })).toBeVisible()
-  await expect.poll(() => storedCopies(page)).toEqual([])
+  expect(await storedCopies(page)).toHaveLength(1)
 })
 
-test("copies stay with a note in the bin, and go after a week, and oldest first past a size", async ({ page }) => {
+test("copies stay with a note in the bin and survive age and capacity limits", async ({ page }) => {
   const me = await admin((api) => api.Whoami())
   const { card, note } = await admin((api) =>
     Effect.gen(function* () {
@@ -583,5 +606,7 @@ test("copies stay with a note in the bin, and go after a week, and oldest first 
   }
   await page.reload()
   await expect(page.getByRole("heading", { level: 1, name: "Copies" })).toBeVisible()
-  await expect.poll(async () => (await storedCopies(page)).map((copy) => copy.refId).sort()).toEqual(["b", "c"])
+  await expect
+    .poll(async () => (await storedCopies(page)).map((copy) => copy.refId).sort())
+    .toEqual(["a", "b", "c", "old"])
 })

@@ -9,6 +9,8 @@ export const typeInto = (api: Client, chatId: ChatId, tipSlotId: SlotId | null, 
   Effect.gen(function* () {
     const draft = onto ?? (yield* api.OpenComposer({ chatId, tipSlotId }))
     const saved = yield* api.SaveComposer({
+      next: false,
+      operationId: crypto.randomUUID(),
       chatId,
       draftId: draft.id,
       rowVersion: draft.rowVersion,

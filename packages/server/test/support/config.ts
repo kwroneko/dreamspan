@@ -130,10 +130,9 @@ export const outcome = <A, E>(effect: Effect.Effect<A, E>, show: (a: A) => strin
 type Api = Effect.Success<ReturnType<typeof client>>
 
 /** What a send names of the composer draft it took `text` from (chatApi.ts `composer`). */
-export const takenFrom = (draft: Draft, text: string = draft.content) => ({
+export const takenFrom = (draft: Draft) => ({
   draftId: draft.id,
-  session: draft.session,
-  text
+  session: draft.session
 })
 
 /**
@@ -144,6 +143,8 @@ export const typeInto = (api: Api, chatId: ChatId, tipSlotId: SlotId | null, con
   Effect.gen(function* () {
     const draft = onto ?? (yield* api.OpenComposer({ chatId, tipSlotId }))
     const saved = yield* api.SaveComposer({
+      next: false,
+      operationId: crypto.randomUUID(),
       chatId,
       draftId: draft.id,
       rowVersion: draft.rowVersion,

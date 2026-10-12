@@ -33,9 +33,9 @@ export const ComposerBeacon = Schema.Struct({
    * Typed after a send of this session that may not have arrived (a page closing while it
    * was out): it starts the session that send ends, or goes on top of the text it takes.
    */
-  next: Schema.optionalKey(Schema.Boolean),
+  next: Schema.Boolean,
   /** Durable pending-copy identity: replay acknowledges it without applying the text again. */
-  operationId: Schema.optionalKey(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200))),
+  operationId: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)),
   content: Schema.String
 })
 

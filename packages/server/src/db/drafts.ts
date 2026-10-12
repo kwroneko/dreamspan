@@ -41,13 +41,12 @@ interface DraftRow {
 export interface CommitDraft {
   readonly draftId: string
   readonly session: number
-  readonly content: string
 }
 
-/** A draft as a client had it when it typed: the row version, and the session if it knows it. */
+/** A draft as a client had it when it typed: the row version and session (null before a field had a draft). */
 interface Base {
   readonly rowVersion: number
-  readonly session?: number | undefined
+  readonly session: number | null
 }
 
 interface EntryRow {
@@ -62,8 +61,9 @@ interface EntryRow {
   readonly displaced: 0 | 1
 }
 
-const toDraft = (row: DraftRow) =>
+const toDraft = (row: DraftRow, recovered = 0) =>
   new Draft({
+    recovered,
     id: row.id,
     key: { targetKind: row.target_kind, targetId: row.target_id, field: row.field },
     content: row.content,
@@ -162,7 +162,8 @@ export const makeDraftStore = (
     key: DraftKey,
     texts: ReadonlyArray<string>,
     reason: "commit" | "discard"
-  ) => Effect.Effect<void, SqlError.SqlError> = () => Effect.void
+  ) => Effect.Effect<void, SqlError.SqlError> = () => Effect.void,
+  now: () => number = Date.now
 ) => {
   const find = (userId: UserId, key: DraftKey) =>
     sql<DraftRow>`
@@ -183,6 +184,13 @@ export const makeDraftStore = (
       FROM drafts d
       WHERE d.id = ${draftId} AND d.user_id = ${userId} AND d.target_kind = 'composer'
         AND d.target_id = ${chatId}`.pipe(Effect.map(([row]) => row ?? null))
+
+  const checkIdentity = (userId: UserId, id: string | null) =>
+    Effect.gen(function* () {
+      if (id === null) return
+      const row = yield* byId(id)
+      if (row !== null && row.user_id !== userId) return yield* new NotFound({ entity: "draft", id })
+    })
 
   const get = (userId: UserId, key: DraftKey) =>
     Effect.flatMap(find(userId, key), (row) =>
@@ -256,7 +264,7 @@ export const makeDraftStore = (
         total += row.removed + row.inserted
         return index >= DraftHistoryPolicy.maxEntries || (index > 0 && total > DraftHistoryPolicy.maxHistoryChars)
       })
-      if (cut < 0) return
+      if (cut < 0) return 0
       const cutSeq = sizes[cut]!.seq
       // The text is only loaded if a dropped entry is displaced or may be destructive. SQLite
       // counts code points, so a UTF-16 length is between one and two times the count.
@@ -267,11 +275,14 @@ export const makeDraftStore = (
         before = before - row.inserted + row.removed
         return index >= cut && (row.displaced === 1 || 2 * row.removed > 200 || 2 * row.removed > before / 2)
       })
+      let recovered = 0
       if (mayLoseText) {
         const lost = beforeKept(content, yield* entries(draft.id), (seq) => seq <= cutSeq)
         yield* recover(draft.user_id, toDraft(draft).key, lost, "commit")
+        recovered = new Set(lost.filter((text) => text.trim() !== "")).size
       }
       yield* sql`DELETE FROM draft_history WHERE draft_id = ${draft.id} AND seq <= ${cutSeq}`
+      return recovered
     })
 
   /**
@@ -306,7 +317,7 @@ export const makeDraftStore = (
                          inserted = ${merged.inserted}, at = ${now}
                        WHERE draft_id = ${draft.id} AND seq = ${last.seq}`
           }
-          return
+          return 0
         }
       }
       yield* sql`INSERT INTO draft_history ${sql.insert({
@@ -320,7 +331,7 @@ export const makeDraftStore = (
         inserted: patch.inserted,
         displaced: displaced ? 1 : 0
       })}`
-      yield* retain(draft, content)
+      return yield* retain(draft, content)
     })
 
   /** The draft the client named, as it saw it: another draft at its key, or a newer version, is stale. */
@@ -338,12 +349,12 @@ export const makeDraftStore = (
     displaced = false
   ) =>
     Effect.gen(function* () {
-      const now = Date.now()
+      const at = now()
       const patch = diffPatch(draft.content, content)
       // Saving the same text against a new base revision only moves the base.
       const sameBase = baseRevision === null || baseRevision === draft.base_revision
-      if (isEmptyPatch(patch) && draft.status === "active" && sameBase) return draft
-      if (!isEmptyPatch(patch)) yield* record(draft, content, patch, kind, now, displaced)
+      if (isEmptyPatch(patch) && draft.status === "active" && sameBase) return 0
+      const recovered = isEmptyPatch(patch) ? 0 : yield* record(draft, content, patch, kind, at, displaced)
       // A save after a commit or discard starts a new drafting session.
       const reopened = draft.status !== "active"
       const textChanged = reopened || !isEmptyPatch(patch)
@@ -351,13 +362,13 @@ export const makeDraftStore = (
                    base_revision = ${baseRevision ?? draft.base_revision},
                    row_version = row_version + 1,
                    text_version = CASE WHEN ${textChanged ? 1 : 0} THEN row_version + 1 ELSE text_version END,
-                   updated_at = ${now}
+                   updated_at = ${at}
                  WHERE id = ${draft.id}`
-      return draft
+      return recovered
     })
 
   const insert = (userId: UserId, key: DraftKey, content: string, baseRevision: string | null) => {
-    const now = Date.now()
+    const at = now()
     return sql`INSERT INTO drafts ${sql.insert({
       id: uuidv7(),
       user_id: userId,
@@ -367,8 +378,8 @@ export const makeDraftStore = (
       content,
       base_revision: baseRevision,
       status: "active",
-      created_at: now,
-      updated_at: now
+      created_at: at,
+      updated_at: at
     })}`
   }
 
@@ -381,8 +392,7 @@ export const makeDraftStore = (
 
   /**
    * The one rule for text saved onto a draft, every kind, in the writer's transaction.
-   * `base` is the draft as the client had it when the text was typed (null: it had none; no
-   * session: the client didn't say, and none is taken to have ended).
+   * `base` is the draft as the client had it when the text was typed (null: it had none).
    * - Typed on the draft as it is: saved, extending the history as typing does.
    * - Another tab changed the text since (or it's `next`, see below): saved as its own
    *   history entry, the other text before it marked displaced, so it's one step back now
@@ -401,7 +411,7 @@ export const makeDraftStore = (
     options: { readonly baseRevision: string | null; readonly ended: "recover" | "reopen"; readonly next?: boolean }
   ) =>
     Effect.gen(function* () {
-      const ended = base?.session !== undefined && base.session !== draft.session
+      const ended = base !== null && base.session !== null && base.session !== draft.session
       if (ended && options.ended === "recover" && options.next !== true) {
         const recovered = content.trim() !== "" && content !== shown(draft)
         if (recovered) yield* recover(draft.user_id, toDraft(draft).key, [content], "discard")
@@ -411,14 +421,14 @@ export const makeDraftStore = (
         draft.status === "active" &&
         (base === null || ended || options.next === true || draft.text_version > base.rowVersion)
       // On another tab's text, the draft keeps the revision that text was started from.
-      yield* update(
+      const recovered = yield* update(
         draft,
         content,
         "edit",
         ended ? (options.baseRevision ?? draft.base_revision) : changed ? null : options.baseRevision,
         changed
       )
-      return { draft: toDraft((yield* byId(draft.id))!), recovered: false }
+      return { draft: toDraft((yield* byId(draft.id))!, recovered), recovered: recovered > 0 }
     })
 
   /**
@@ -437,6 +447,13 @@ export const makeDraftStore = (
   }) =>
     Effect.gen(function* () {
       yield* tooLarge(options.content)
+      yield* checkIdentity(options.userId, options.draftId)
+      if (options.baseRevision !== null && options.key.targetKind === "entity_field") {
+        const [revision] = yield* sql<{
+          id: string
+        }>`SELECT r.id FROM entity_revisions r JOIN entity_refs f ON f.entity_id = r.entity_id JOIN entities e ON e.id = r.entity_id WHERE r.id = ${options.baseRevision} AND f.id = ${options.key.targetId} AND e.owner_user_id = ${options.userId}`
+        if (!revision) return yield* new NotFound({ entity: "revision", id: options.baseRevision })
+      }
       const existing = yield* find(options.userId, options.key)
       if (existing !== null) {
         const typedHere = options.draftId === null || options.draftId === existing.id
@@ -455,8 +472,8 @@ export const makeDraftStore = (
     Effect.gen(function* () {
       yield* checkDraft(draft, draftId, expectedRowVersion)
       const content = yield* stateAt(draft, seq)
-      yield* update(draft, content, "restore", null)
-      return toDraft((yield* find(draft.user_id, toDraft(draft).key))!)
+      const recovered = yield* update(draft, content, "restore", null)
+      return toDraft((yield* find(draft.user_id, toDraft(draft).key))!, recovered)
     })
 
   const restore = (userId: UserId, key: DraftKey, draftId: string, seq: number, expectedRowVersion: number) =>
@@ -475,20 +492,23 @@ export const makeDraftStore = (
       if (outcome === "discarded") lost.unshift(draft.content)
       yield* recover(draft.user_id, toDraft(draft).key, lost, outcome === "discarded" ? "discard" : "commit")
       yield* sql`DELETE FROM draft_history WHERE draft_id = ${draft.id}`
-      const updatedAt = Date.now()
+      const updatedAt = now()
       yield* sql`UPDATE drafts SET status = ${outcome}, content = '', row_version = row_version + 1,
                    text_version = row_version + 1, session = session + 1, updated_at = ${updatedAt}
                  WHERE id = ${draft.id}`
-      const ended = toDraft({
-        ...draft,
-        status: outcome,
-        content: "",
-        row_version: draft.row_version + 1,
-        text_version: draft.row_version + 1,
-        session: draft.session + 1,
-        updated_at: updatedAt,
-        history_length: 0
-      })
+      const ended = toDraft(
+        {
+          ...draft,
+          status: outcome,
+          content: "",
+          row_version: draft.row_version + 1,
+          text_version: draft.row_version + 1,
+          session: draft.session + 1,
+          updated_at: updatedAt,
+          history_length: 0
+        },
+        new Set(lost.filter((text) => text.trim() !== "")).size
+      )
       return { draft: ended, recovered: new Set(lost.filter((text) => text.trim() !== "")).size }
     })
 
@@ -511,12 +531,24 @@ export const makeDraftStore = (
    * otherwise it's left as it is (another tab typed on, or it was sent already), so a
    * commit never ends text it didn't take. Returns the draft as the write left it.
    */
-  const commit = (userId: UserId, commitDraft: CommitDraft | null) =>
+  const commit = (
+    userId: UserId,
+    commitDraft: CommitDraft | null,
+    destination: {
+      readonly targetKind: DraftKey["targetKind"]
+      readonly targetId: string
+      readonly content: string | ((field: string) => string | null)
+    }
+  ) =>
     Effect.gen(function* () {
       if (commitDraft === null) return { draft: null, recovered: 0 }
+      yield* checkIdentity(userId, commitDraft.draftId)
       const draft = yield* byId(commitDraft.draftId)
       if (draft === null || draft.user_id !== userId) return { draft: null, recovered: 0 }
-      if (draft.status === "active" && draft.session === commitDraft.session && draft.content === commitDraft.content) {
+      if (draft.target_kind !== destination.targetKind || draft.target_id !== destination.targetId)
+        return { draft: null, recovered: 0 }
+      const content = typeof destination.content === "string" ? destination.content : destination.content(draft.field)
+      if (draft.status === "active" && draft.session === commitDraft.session && draft.content === content) {
         return yield* end(draft, "committed")
       }
       return { draft: toDraft(draft), recovered: 0 }
@@ -537,9 +569,10 @@ export const makeDraftStore = (
     Effect.gen(function* () {
       const here = yield* find(userId, key)
       const copied = shown(from)
+      let recovered = 0
       if (here === null) yield* insert(userId, key, copied, null)
-      else if (copied !== "" && shown(here) === "") yield* update(here, copied, "edit", null)
-      return toDraft((yield* find(userId, key))!)
+      else if (copied !== "" && shown(here) === "") recovered = yield* update(here, copied, "edit", null)
+      return toDraft((yield* find(userId, key))!, recovered)
     })
 
   /**
@@ -555,14 +588,18 @@ export const makeDraftStore = (
       readonly rowVersion: number
       readonly session: number
       readonly next: boolean
-      readonly operationId?: string
+      readonly operationId: string
     },
     content: string
   ) =>
     Effect.gen(function* () {
       yield* tooLarge(content)
+      yield* checkIdentity(userId, base.draftId)
+      const named = yield* byId(base.draftId)
+      if (named !== null && (named.target_kind !== "composer" || named.target_id !== chatId))
+        return yield* new NotFound({ entity: "draft", id: base.draftId })
       const draft = yield* findComposer(userId, chatId, base.draftId)
-      if (base.operationId !== undefined) {
+      {
         const [receipt] = yield* sql<{ recovered: number }>`SELECT recovered FROM composer_save_receipts
           WHERE chat_id = ${chatId} AND operation_id = ${base.operationId}`
         if (receipt !== undefined)
@@ -574,11 +611,10 @@ export const makeDraftStore = (
         if (recovered) yield* recover(userId, composerKey(chatId, null), [content], "discard")
         saved = { draft: null, recovered }
       } else {
-        // A legacy next request can reopen only the immediately following session.
         const next = base.next && draft.session <= base.session + 1
         saved = yield* saveOnto(draft, base, content, { baseRevision: null, ended: "recover", next })
       }
-      if (base.operationId !== undefined) {
+      {
         yield* sql`INSERT INTO composer_save_receipts ${sql.insert({
           chat_id: chatId,
           operation_id: base.operationId,
@@ -586,6 +622,32 @@ export const makeDraftStore = (
         })}`
       }
       return saved
+    })
+
+  const moveComposer = (userId: UserId, chatId: string, from: string | null, to: string | null) =>
+    Effect.gen(function* () {
+      if (from === to) return 0
+      const source = yield* find(userId, composerKey(chatId, from))
+      const there = yield* find(userId, composerKey(chatId, to))
+      if (source === null) {
+        if (there === null || there.content !== "") return 0
+        const ended = yield* end(there, "discarded")
+        yield* sql`DELETE FROM drafts WHERE id = ${there.id}`
+        return ended.recovered
+      }
+      if (there?.status === "active" && there.content !== "") {
+        const ended = yield* end(source, "discarded")
+        yield* sql`DELETE FROM drafts WHERE id = ${source.id}`
+        return ended.recovered
+      }
+      let recovered = 0
+      if (there !== null) {
+        recovered = (yield* end(there, "discarded")).recovered
+        yield* sql`DELETE FROM drafts WHERE id = ${there.id}`
+      }
+      yield* sql`UPDATE drafts SET field = ${to ?? ""}, row_version = row_version + 1
+        WHERE id = ${source.id}`
+      return recovered
     })
 
   const restoreComposer = (userId: UserId, chatId: string, draftId: string, seq: number, expectedRowVersion: number) =>
@@ -597,6 +659,8 @@ export const makeDraftStore = (
 
   return {
     find,
+    checkIdentity,
+    moveComposer,
     findComposer,
     get,
     toDraft,

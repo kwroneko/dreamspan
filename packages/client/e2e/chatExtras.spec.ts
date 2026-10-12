@@ -127,7 +127,7 @@ test("text wiped and then sent is in the bin's recovered text", async ({ page })
         parentSlotId: null,
         branch: false,
         content: "x",
-        composer: { draftId: wiped.id, session: wiped.session, text: "x" }
+        composer: { draftId: wiped.id, session: wiped.session }
       })
     })
   )

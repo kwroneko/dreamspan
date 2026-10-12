@@ -11,6 +11,7 @@ import { unfinishedTitle } from "@rp/shared/stImportApi.ts"
 import type { StateEventData } from "@rp/shared/state.ts"
 import { Effect, Schema } from "effect"
 import { SqlClient } from "effect/sql"
+import type { makeBin } from "./bin.ts"
 import { docHash, searchText } from "./documents.ts"
 import { ImportLeaseLost, NotFound, ST_CHAT_RECORD, ST_IMPORT_RUN, type StImportNote, WriteOps } from "./ops.ts"
 import { checkStateReferences } from "./stateRefs.ts"
@@ -56,7 +57,7 @@ interface RecordPayload {
   readonly prior?: string | null
 }
 
-export const makeStImportWriteHandlers = Effect.gen(function* () {
+export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: ReturnType<typeof makeBin>) {
   const sql = yield* SqlClient.SqlClient
 
   const ownedChat = (userId: UserId, chatId: ChatId) =>
@@ -247,7 +248,7 @@ export const makeStImportWriteHandlers = Effect.gen(function* () {
       Effect.flatMap(Schema.decodeEffect(Messages)(input.messagesJson).pipe(Effect.orDie), (messages) =>
         Effect.gen(function* () {
           const { userId, chatId, speakers } = input
-          yield* ownedChat(userId, chatId)
+          const chat = yield* ownedChat(userId, chatId)
           const payload = yield* leased(userId, input.recordId, chatId, input.lease)
           // Every speaker must be one of the user's live cards.
           const named = [...new Set(Object.values(speakers).filter((id): id is EntityId => id !== null))]
@@ -402,7 +403,10 @@ export const makeStImportWriteHandlers = Effect.gen(function* () {
             const moved = yield* sql<{ id: string }>`UPDATE chats SET active_leaf_slot_id = ${slotIds.at(-1)!}
               WHERE id = ${chatId} AND (active_leaf_slot_id IS NULL OR active_leaf_slot_id = ${advanced ?? ""})
               RETURNING id`
-            if (moved.length > 0) advanced = slotIds.at(-1)!
+            if (moved.length > 0) {
+              yield* bin.drafts.moveComposer(userId, chatId, chat.active_leaf_slot_id, slotIds.at(-1)!)
+              advanced = slotIds.at(-1)!
+            }
           }
           const progress: RecordPayload = {
             ...payload,
@@ -466,6 +470,7 @@ export const makeStImportWriteHandlers = Effect.gen(function* () {
             last_message_at = max(coalesce(last_message_at, 0), coalesce(${input.lastMessageAt}, 0)),
             row_version = row_version + 1
           WHERE id = ${chatId}`
+        if (moveLeaf) yield* bin.drafts.moveComposer(userId, chatId, leaf, input.leaf)
         const updated: RecordPayload = {
           ...payload,
           sha256: input.sha256,

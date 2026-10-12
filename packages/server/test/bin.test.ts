@@ -130,6 +130,8 @@ describe("recycle bin", () => {
     Effect.gen(function* () {
       const { writer, reader, userId, chat, b, c, path } = yield* setup()
       yield* writer.SaveDraft({
+        draftId: null,
+        expectedSession: null,
         userId,
         key: composerKey(chat.id, c.slotId),
         content: "half-typed",
@@ -153,13 +155,23 @@ describe("recycle bin", () => {
       const key = composerKey(chat.id, d.slotId)
       const typed = "A long reply typed at d, then wiped by a stray select-all."
       const draft = yield* writer.SaveDraft({
+        draftId: null,
+        expectedSession: null,
         userId,
         key,
         content: typed,
         expectedRowVersion: null,
         baseRevision: null
       })
-      yield* writer.SaveDraft({ userId, key, content: "", expectedRowVersion: draft.rowVersion, baseRevision: null })
+      yield* writer.SaveDraft({
+        draftId: draft.id,
+        expectedSession: draft.session,
+        userId,
+        key,
+        content: "",
+        expectedRowVersion: draft.rowVersion,
+        baseRevision: null
+      })
       yield* writer.DeleteMessage({ userId, slotId: d.slotId }) // the wiped composer moves to b
       yield* append(c.slotId, "e", true)
       yield* writer.DeleteBranch({ userId, slotId: c.slotId }) // back to b again
@@ -274,6 +286,8 @@ describe("recycle bin", () => {
       // Three discarded drafts into a two-text section don't touch the deleted items.
       for (const text of ["one", "two", "three"]) {
         const draft = yield* writer.SaveDraft({
+          draftId: null,
+          expectedSession: null,
           userId,
           key: composerKey(chat.id, null),
           content: text,
@@ -513,6 +527,8 @@ describe("recycle bin", () => {
       for (const text of ["one", "two", "three"]) {
         const key = composerKey(chat.id, null)
         const draft = yield* writer.SaveDraft({
+          draftId: null,
+          expectedSession: null,
           userId,
           key,
           content: text,

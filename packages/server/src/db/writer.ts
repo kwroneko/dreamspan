@@ -19,7 +19,12 @@ import { makeProviderWriteHandlers } from "./providerWrites.ts"
 import { makeWriteHandlers } from "./writes.ts"
 import { makeStImportWriteHandlers } from "./stImportWrites.ts"
 
-const { dbPath, binLimits = defaultBinLimits } = workerData as {
+const {
+  dbPath,
+  binLimits = defaultBinLimits,
+  draftClock = null
+} = workerData as {
+  readonly draftClock?: SharedArrayBuffer | null
   readonly dbPath: string
   readonly binLimits?: BinLimits
 }
@@ -29,7 +34,11 @@ RpcServer.layer(WriteOps, { concurrency: 1 }).pipe(
     WriteOps.toLayer(
       Effect.gen(function* () {
         // One bin (and draft store) for every handler group.
-        const bin = makeBin(yield* SqlClient.SqlClient, binLimits)
+        const bin = makeBin(
+          yield* SqlClient.SqlClient,
+          binLimits,
+          draftClock === null ? Date.now : () => Number(Atomics.load(new BigInt64Array(draftClock), 0))
+        )
         const [graph, library, binOps, providers, accounts, chatSetup, generation] = yield* Effect.all([
           makeWriteHandlers(bin),
           makeLibraryWriteHandlers(bin),
@@ -40,7 +49,7 @@ RpcServer.layer(WriteOps, { concurrency: 1 }).pipe(
           makeGenerationWriteHandlers
         ])
         // --- ST data folder import (ARCHITECTURE.md §13)
-        const stImport = yield* makeStImportWriteHandlers
+        const stImport = yield* makeStImportWriteHandlers(bin)
         return WriteOps.of({
           ...graph,
           ...library,

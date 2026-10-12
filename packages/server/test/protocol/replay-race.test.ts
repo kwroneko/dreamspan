@@ -1,0 +1,176 @@
+import { assert, it } from "@effect/vitest"
+import { Effect, Exit } from "effect"
+import { textField } from "@rp/shared/editing.ts"
+import { client, testConfig, withServer } from "../support/config.ts"
+import { FakeIndexedDb } from "./fakeIndexedDb.ts"
+const idb = new FakeIndexedDb()
+globalThis.indexedDB = idb as unknown as IDBFactory
+const { keepCopy, makeCopy } = await import("../../../client/src/features/editor/backup.ts")
+const { EditorStore } = await import("../../../client/src/features/editor/store.ts")
+const tick = () => new Promise<void>((r) => setImmediate(r))
+it.live("a failed backup replay must not replace typing and rebase it onto the successful live save", () =>
+  Effect.gen(function* () {
+    const api = yield* client()
+    const card = yield* api.CreateCard({ label: "Replay race", name: "Replay race" })
+    const field = textField(["description"])
+    const old = "The same long common prefix stays in this field. old"
+    const newer = old + " UNIQUE NEW TYPING 851726"
+    const draft = yield* api.SaveEditorDraft({
+      expectedSession: null,
+      refId: card.id,
+      field,
+      draftId: null,
+      content: old,
+      expectedRowVersion: null,
+      baseRevisionId: card.headRevisionId
+    })
+    yield* Effect.promise(async () => {
+      await keepCopy(
+        makeCopy(
+          "race-user",
+          card.id,
+          field,
+          {
+            kind: "editor",
+            payload: {
+              refId: card.id,
+              field,
+              draftId: draft.id,
+              content: old,
+              expectedRowVersion: draft.rowVersion,
+              expectedSession: draft.session,
+              baseRevisionId: card.headRevisionId
+            }
+          },
+          Date.now()
+        )
+      )
+      let saves = 0
+      let failReplay!: (x: unknown) => void
+      let releaseLive!: () => void
+      const replay = new Promise<unknown>((r) => (failReplay = r))
+      const live = new Promise<void>((r) => (releaseLive = r))
+      const call = async (rpc: (client: never) => Effect.Effect<unknown, unknown>) => {
+        let tag = ""
+        let payload: unknown
+        rpc(((t: string, p: unknown) => {
+          tag = t
+          payload = p
+          return Effect.void
+        }) as never)
+        if (tag === "SaveEditorDraft") {
+          saves++
+          if (saves === 1) return replay
+          if (saves === 2) await live
+        }
+        const exit = await Effect.runPromiseExit(
+          (api as unknown as Record<string, (payload: unknown) => Effect.Effect<unknown, unknown>>)[tag]!(payload)
+        )
+        return Exit.isSuccess(exit)
+          ? { ok: true, value: exit.value }
+          : { ok: false, error: { tag: "Failed", message: String(exit.cause) } }
+      }
+      const store = new EditorStore(card.id, "race-user", call as never, {
+        setTimer: () => 0,
+        clearTimer: () => {},
+        now: () => Date.now(),
+        keepalive: async () => false
+      })
+      const loading = store.load()
+      while (saves < 1) await tick()
+      store.setText(["description"], newer)
+      const saving = store.flush()
+      while (saves < 2) await tick()
+      failReplay({ ok: false, error: { tag: "Offline", message: "replay failed" } })
+      await loading
+      releaseLive()
+      await saving
+      await store.flush()
+      const now = await Effect.runPromise(api.OpenEditor({ refId: card.id }))
+      assert.strictEqual(now.drafts[0]!.content, newer)
+    })
+  }).pipe(Effect.scoped, withServer(testConfig()))
+)
+
+it.live("an offline copy restored after a newer server save must retain its base while keepalive is out", () =>
+  Effect.gen(function* () {
+    const api = yield* client()
+    const card = yield* api.CreateCard({ label: "Failed replay base", name: "Failed replay base" })
+    const field = textField(["description"])
+    const base = "A long common prefix that both tabs saw. "
+    const initial = yield* api.SaveEditorDraft({
+      expectedSession: null,
+      refId: card.id,
+      field,
+      draftId: null,
+      content: base,
+      expectedRowVersion: null,
+      baseRevisionId: card.headRevisionId
+    })
+    const other = base + "OTHER TAB UNIQUE 719624"
+    const stale = base + "offline B"
+    yield* api.SaveEditorDraft({
+      refId: card.id,
+      field,
+      draftId: initial.id,
+      content: other,
+      expectedRowVersion: initial.rowVersion,
+      expectedSession: initial.session,
+      baseRevisionId: card.headRevisionId
+    })
+    yield* Effect.promise(async () => {
+      idb.clear()
+      await keepCopy(
+        makeCopy(
+          "stale-user",
+          card.id,
+          field,
+          {
+            kind: "editor",
+            payload: {
+              refId: card.id,
+              field,
+              draftId: initial.id,
+              content: stale,
+              expectedRowVersion: initial.rowVersion,
+              expectedSession: initial.session,
+              baseRevisionId: card.headRevisionId
+            }
+          },
+          Date.now()
+        )
+      )
+      let saves = 0
+      const call = async (rpc: (client: never) => Effect.Effect<unknown, unknown>) => {
+        let tag = ""
+        let payload: unknown
+        rpc(((t: string, p: unknown) => {
+          tag = t
+          payload = p
+          return Effect.void
+        }) as never)
+        if (tag === "SaveEditorDraft" && ++saves === 1)
+          return { ok: false, error: { tag: "Offline", message: "no connection" } }
+        const exit = await Effect.runPromiseExit(
+          (api as unknown as Record<string, (payload: unknown) => Effect.Effect<unknown, unknown>>)[tag]!(payload)
+        )
+        return Exit.isSuccess(exit)
+          ? { ok: true, value: exit.value }
+          : { ok: false, error: { tag: "Failed", message: String(exit.cause) } }
+      }
+      const store = new EditorStore(card.id, "stale-user", call as never, {
+        setTimer: () => 0,
+        clearTimer: () => {},
+        now: () => Date.now(),
+        keepalive: () => new Promise(() => {})
+      })
+      await store.load()
+      store.beacon()
+      store.setText(["description"], stale + " plus")
+      await store.flush()
+      await store.commit(null)
+      const recovered = await Effect.runPromise(api.ListRecoveredTexts({ limit: 10, before: null }))
+      assert.isTrue(recovered.some((x) => x.content === other))
+    })
+  }).pipe(Effect.scoped, withServer(testConfig()))
+)
