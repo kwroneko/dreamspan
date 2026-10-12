@@ -395,7 +395,6 @@ const place = (collection: Array<StPrompt>, identifier: string, role: Role, text
   else collection[at] = prompt
 }
 
-/** A card's prompt override replaces a preset prompt unless the preset forbids it or turned it off. */
 /**
  * A card's prompt override replaces a preset prompt unless the preset forbids it or turned it
  * off. ST expands the override with the card's other fields, before the preset's prompts,
@@ -490,7 +489,10 @@ const promptScripts = (assembly: Assembly): Array<PromptScript> => {
         ? presetText(assembly, `regex:${script.id}:find`, script.find_regex).text
         : script.find_regex
     const regex = compile(find)
-    if (regex === "unsafe") return skip("backreferences and lookaheads can't be run in bounded time")
+    if (regex === "unsafe")
+      return skip(
+        "it needs backtracking (backreferences, lookaheads, nested counted repeats or Unicode properties), which could stall the server"
+      )
     if (regex === null) return skip("its pattern isn't a valid regular expression")
     const replacement = script.replace_string
       ? presetText(assembly, `regex:${script.id}:replace`, script.replace_string).text

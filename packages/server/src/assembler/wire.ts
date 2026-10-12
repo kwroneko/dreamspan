@@ -20,8 +20,10 @@ const drop = (fields: Record<string, unknown>, ...keys: ReadonlyArray<string>) =
  * Astra take `max_completion_tokens` and fewer samplers; Claude's newest models take none.
  */
 const modelRules = (fields: Record<string, unknown>, kind: string, key: string) => {
-  const gpt = kind === "openai-chat" || kind === "openrouter"
+  const gpt = kind === "openai-chat" || kind === "openrouter" || kind === "openai-responses"
+  // Responses has its own field for the length, which pi-ai sets.
   const toCompletionTokens = () => {
+    if (kind === "openai-responses") return
     fields.max_completion_tokens = fields.max_tokens
     fields.max_tokens = undefined
   }
@@ -172,8 +174,14 @@ export const providerRequest = (request: AssembledRequest, model: ModelInput): P
   )
   const s = request.samplers
   const anthropic = model.api === "anthropic-messages"
-  const samplers = anthropic ? claudeSamplers(request, model.key) : { temperature: s.temperature, top_p: s.top_p }
-  const { temperature, ...payload } = samplers
+  const { temperature, ...payload } = anthropic
+    ? claudeSamplers(request, model.key)
+    : model.api === "google-generative-ai"
+      ? // Google takes its samplers in the request's `config`, as ST sends them (topP, topK).
+        { temperature: s.temperature, config: { topP: s.top_p, ...(s.top_k > 0 ? { topK: s.top_k } : {}) } }
+      : model.api === "openai-responses"
+        ? modelRules({ temperature: s.temperature, top_p: s.top_p }, "openai-responses", model.key)
+        : { temperature: s.temperature, top_p: s.top_p }
   return {
     context: { ...(system.length > 0 ? { systemPrompt: system.join("\n\n") } : {}), messages: piMessages },
     ...(typeof temperature === "number" ? { temperature } : {}),

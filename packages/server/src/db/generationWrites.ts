@@ -92,7 +92,7 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
           frozenMessages,
           ({ versionId: id, frozen }) =>
             sql`UPDATE versions SET frozen_macros = ${JSON.stringify(frozen)}
-              WHERE id = ${id} AND macro_mode = 'template'
+              WHERE id = ${id} AND macro_mode = 'template' AND frozen_macros IS NULL
                 AND slot_id IN (SELECT id FROM slots WHERE chat_id = ${chatId})`,
           { discard: true }
         )

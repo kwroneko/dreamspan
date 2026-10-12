@@ -129,6 +129,18 @@ interface Prepared {
   readonly scrub: (text: string) => string
 }
 
+const isPlain = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+
+/** The caller's fields over pi-ai's body: objects merge key by key (Google's `config`), anything else replaces. */
+const merged = (base: unknown, over: Readonly<Record<string, unknown>>): Record<string, unknown> => {
+  const out: Record<string, unknown> = isPlain(base) ? { ...base } : {}
+  for (const [key, value] of Object.entries(over)) {
+    out[key] = isPlain(value) && isPlain(out[key]) ? merged(out[key], value) : value
+  }
+  return out
+}
+
 /** A scrubber for the given secrets: every occurrence becomes "[redacted]". */
 export const makeScrub = (secrets: ReadonlyArray<string | null | undefined>) => {
   // Short values would redact ordinary words; real keys and tokens are long.
@@ -832,7 +844,7 @@ export const layer = (options: ProvidersOptions = {}) =>
                         transforms.reduce(
                           (current, t) =>
                             t.transform(current, { target, messages: request.context.messages, breakpoints }),
-                          { ...(payload as Record<string, unknown>), ...overrides }
+                          overrides === undefined ? (payload as Record<string, unknown>) : merged(payload, overrides)
                         )
                     }
                   : {})

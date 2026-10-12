@@ -29,6 +29,7 @@ import {
   toConnection,
   toModel
 } from "./providers.ts"
+import type { GenerationDefaults } from "@rp/shared/generation.ts"
 import { readDefaults } from "./generationSettings.ts"
 import { withoutPurged } from "./stateRefs.ts"
 
@@ -78,6 +79,16 @@ interface Settings {
 }
 
 export const sqlSources = (sql: SqlClient.SqlClient, { userId, chatId, slotId, versionId }: Settings) => {
+  // The user's defaults, read once for the model and the preset both.
+  let readOnce: GenerationDefaults | undefined
+  const defaults = Effect.suspend(() =>
+    readOnce
+      ? Effect.succeed(readOnce)
+      : Effect.map(readDefaults(sql, userId), (read) => {
+          readOnce = read
+          return read
+        })
+  )
   // Every read of the chat checks it's the user's, not only the target's: a stage that
   // replaced `path` couldn't read another user's chat through the others.
   const owned = sql`EXISTS (SELECT 1 FROM chats o WHERE o.id = ${chatId} AND o.owner_user_id = ${userId})`
@@ -271,7 +282,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, { userId, chatId, slotId, v
 
     model: (binding) =>
       Effect.gen(function* () {
-        const chosen = binding ?? (yield* readDefaults(sql, userId)).model
+        const chosen = binding ?? (yield* defaults).model
         if (chosen === null) return null
         const [connection] = yield* sql<ConnectionRow>`
           SELECT ${sql.literal(connectionColumns)} FROM ${sql.literal(connectionFrom)}
@@ -319,7 +330,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, { userId, chatId, slotId, v
           const found = yield* presetFrom(chain.connection, "connection")
           if (found) return found
         }
-        const user = (yield* readDefaults(sql, userId)).preset
+        const user = (yield* defaults).preset
         if (user !== null) {
           const found = yield* presetFrom(user, "user")
           if (found) return found

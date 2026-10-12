@@ -60,8 +60,26 @@ export const layer = Layer.effect(
             })
           }
           const rolloutId = uuidv7()
-          yield* writer
-            .StartRollout({
+          const finish = (exit: Exit.Exit<unknown, unknown>) =>
+            writer
+              .FinishRollout({
+                userId,
+                rolloutId,
+                versionId,
+                status: Exit.isSuccess(exit) ? "completed" : Cause.hasInterruptsOnly(exit.cause) ? "stopped" : "failed",
+                error: Exit.isFailure(exit)
+                  ? Option.getOrNull(
+                      Option.map(Cause.findErrorOption(exit.cause), (e) =>
+                        e instanceof GenerationFailed ? e.message : String(e)
+                      )
+                    )
+                  : null
+              })
+              .pipe(Effect.catch((error) => Effect.logError(`closing rollout ${rolloutId} failed`, error)))
+          // Opened and closed as a resource of the stream's scope: once it's open, it's closed
+          // whenever and however the generation ends, a stop before the first token included.
+          yield* Effect.acquireRelease(
+            writer.StartRollout({
               userId,
               chatId,
               slotId,
@@ -76,26 +94,15 @@ export const layer = Layer.effect(
                 versionId: VersionId
                 frozen: Record<string, string>
               }>
-            })
-            .pipe(
-              Effect.catchTag("NotFound", () =>
-                Effect.fail(new GenerationFailed({ class: "not_found", message: "The model or the message is gone." }))
-              ),
-              Effect.catch(serverFailure("StartRollout"))
-            )
+            }),
+            (_, exit) => finish(exit)
+          ).pipe(
+            Effect.catchTag("NotFound", () =>
+              Effect.fail(new GenerationFailed({ class: "not_found", message: "The model or the message is gone." }))
+            ),
+            Effect.catch(serverFailure("StartRollout"))
+          )
           const wire = providerRequest(generation.request, model)
-          const finish = (exit: Exit.Exit<unknown, GenerationFailed>) =>
-            writer
-              .FinishRollout({
-                userId,
-                rolloutId,
-                versionId,
-                status: Exit.isSuccess(exit) ? "completed" : Cause.hasInterruptsOnly(exit.cause) ? "stopped" : "failed",
-                error: Exit.isFailure(exit)
-                  ? Option.getOrNull(Option.map(Cause.findErrorOption(exit.cause), (e) => e.message))
-                  : null
-              })
-              .pipe(Effect.catch((error) => Effect.logError(`closing rollout ${rolloutId} failed`, error)))
           return providers
             .stream({
               userId,
@@ -118,8 +125,7 @@ export const layer = Layer.effect(
                 error._tag === "ProviderError"
                   ? new GenerationFailed({ class: error.reason, message: error.message })
                   : new GenerationFailed({ class: "server", message: error.message })
-              ),
-              Stream.onExit(finish)
+              )
             )
         })
       )
