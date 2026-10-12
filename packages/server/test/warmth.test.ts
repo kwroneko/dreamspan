@@ -81,3 +81,11 @@ it.effect("identifies unchanged history pieces removed by the budget", () =>
     assert.include(prefixChange(last, next, describe)!.reason, "budget")
   })
 )
+
+it.effect("reports an amendment only when the same version's text changes", () =>
+  Effect.gen(function* () {
+    const last = yield* assembleFixture(fixture)
+    const next = yield* assembleFixture({ ...fixture, messages: [{ side: "user", content: "Changed text" }] })
+    assert.equal(prefixChange(last, next, describe)!.reason, "Synthetic source was amended.")
+  })
+)

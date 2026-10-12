@@ -23,7 +23,7 @@ const same = (
 ) => b !== undefined && a.role === b.role && a.content === b.content && (a.name ?? null) === (b.name ?? null)
 
 const LAYOUT = "The context's layout changed: the cast, the chat's settings or the roles."
-const BUDGET = "The budget dropped the oldest messages, so where the history starts moves with every message."
+const BUDGET = "The context budget changed where the history starts."
 
 /** Why a message of the path that was sent reads differently, or isn't sent, now. */
 const messageReason = (
@@ -35,9 +35,9 @@ const messageReason = (
   const sent = next.pieces.find((p) => p.source.kind === "message" && p.source.slot === source.slot)
   if (sent?.source.kind === "message" && sent.messages.length === 0) return BUDGET
   if (sent?.source.kind === "message") {
-    return sent.source.version === source.version
-      ? `${label} was amended.`
-      : `${label} was edited, or another of its versions chosen.`
+    if (sent.source.version !== source.version) return `${label} was edited, or another of its versions chosen.`
+    const previous = last.pieces.find((p) => p.source.kind === "message" && p.source.slot === source.slot)
+    return sent.text !== previous?.text ? `${label} was amended.` : BUDGET
   }
   const read = (next.sources?.history ?? []).flatMap((w) => w.entries)
   const entry = read.find((e) => e.slotId === source.slot)
