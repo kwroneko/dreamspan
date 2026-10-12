@@ -51,7 +51,7 @@ const savedCard = (name: string, fields: Record<string, string>) =>
       yield* api.CommitEditorDrafts({
         refId: card.id,
         expectedRowVersion: opened.ref.rowVersion,
-        fields: opened.drafts.map((d) => ({ field: d.key.field, expectedRowVersion: d.rowVersion })),
+        fields: opened.drafts.map((d) => ({ field: d.key.field, draftId: d.id, expectedRowVersion: d.rowVersion })),
         message: null
       })
       return card.id
@@ -190,7 +190,7 @@ test("an earlier revision restores as a new one", async ({ page }) => {
       yield* api.CommitEditorDrafts({
         refId: refId as RefId,
         expectedRowVersion: again.ref.rowVersion,
-        fields: [{ field: draft.key.field, expectedRowVersion: again.drafts[0]!.rowVersion }],
+        fields: [{ field: draft.key.field, draftId: draft.id, expectedRowVersion: again.drafts[0]!.rowVersion }],
         message: "Calm"
       })
     })
@@ -335,7 +335,7 @@ test("an update with a conflict is resolved field by field", async ({ page }) =>
       yield* api.CommitEditorDrafts({
         refId: refId as RefId,
         expectedRowVersion: opened.ref.rowVersion,
-        fields: [{ field: draft.key.field, expectedRowVersion: draft.rowVersion }],
+        fields: [{ field: draft.key.field, draftId: draft.id, expectedRowVersion: draft.rowVersion }],
         message: null
       })
     })
@@ -549,7 +549,7 @@ test("text kept in this browser is its user's: logging out or another user's ses
   await expect.poll(() => storedCopies(page)).toEqual([])
 })
 
-test("copies go with a deleted note, after a week, and oldest first past a size", async ({ page }) => {
+test("copies stay with a note in the bin, and go after a week, and oldest first past a size", async ({ page }) => {
   const me = await admin((api) => api.Whoami())
   const { card, note } = await admin((api) =>
     Effect.gen(function* () {
@@ -560,8 +560,19 @@ test("copies go with a deleted note, after a week, and oldest first past a size"
   )
   await open(page, card.id)
   const field = textField(["content"])
-  await leaveCopy(page, { userId: me.id, refId: note.id, field, content: "Unsent.", at: Date.now() })
   await page.getByRole("region", { name: "Note Gone" }).getByRole("button", { name: "Delete the note" }).click()
+  await expect(page.getByRole("region", { name: "Note Gone" })).toHaveCount(0)
+  // A copy of the note left behind: kept while the note is in the bin, saved once it's back.
+  await leaveCopy(page, { userId: me.id, refId: note.id, field, content: "Unsent.", at: Date.now() })
+  await page.reload()
+  await expect(page.getByRole("heading", { level: 1, name: "Copies" })).toBeVisible()
+  expect((await storedCopies(page)).filter((c) => c.refId === note.id)).toHaveLength(1)
+  const [item] = await admin((api) => api.ListBin({ limit: 10, before: null }))
+  await admin((api) => api.RestoreBinItem({ itemId: item!.id }))
+  await page.reload()
+  await expect(page.getByRole("region", { name: "Note Gone" }).getByRole("textbox", { name: /^Content/ })).toHaveValue(
+    "Unsent."
+  )
   await expect.poll(async () => (await storedCopies(page)).filter((c) => c.refId === note.id)).toEqual([])
 
   const day = 24 * 60 * 60 * 1000

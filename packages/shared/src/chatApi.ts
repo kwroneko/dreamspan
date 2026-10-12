@@ -80,11 +80,14 @@ const Errors = [NotFound, ServerError] as const
 const WriteErrors = [NotFound, StaleWrite, ServerError] as const
 
 /**
- * The row version of the composer draft at the tip (composerApi.ts) the text was typed in:
- * the draft is committed in the same transaction as the send, unless another tab typed on
- * since, so a reload never shows text already sent (DESIGN §6.2).
+ * The composer draft (composerApi.ts) the text was taken from: its id, the session it was
+ * typed in, and exactly the text taken. The draft is committed in the same transaction as
+ * the send only if it still holds that text, so a reload never shows text already sent
+ * (DESIGN §6.2) and a send never ends text it didn't take.
  */
-const ComposerRowVersion = Schema.optionalKey(Schema.Int)
+const ComposerCommit = Schema.optionalKey(
+  Schema.Struct({ draftId: Schema.String, session: Schema.Int, text: Schema.String })
+)
 
 /** Where a branch switch went: the sibling, and the chat with its leaf moved below it. */
 export class BranchSwitch extends Schema.Class<BranchSwitch>("BranchSwitch")({
@@ -93,18 +96,19 @@ export class BranchSwitch extends Schema.Class<BranchSwitch>("BranchSwitch")({
 }) {}
 
 /**
- * The composer draft the text came from after the send: committed, or still active with
- * another tab's newer text (§3.10); null without `composerRowVersion`.
+ * The composer draft the text came from, as the send left it: committed, or still active
+ * with another tab's newer text (§3.10); null without `composer`. `recovered` counts the
+ * earlier texts of its session that committing it sent to the bin's recovered texts.
  */
-const SentDraft = Schema.NullOr(Draft)
+const Sent = { draft: Schema.NullOr(Draft), recovered: Schema.Int }
 
 /**
  * What a send or a Generate did: posted at once, or queued behind a reply still being
  * written (DESIGN §2.2), with every entry now waiting in the chat.
  */
 export const SendResult = Schema.Union([
-  Schema.TaggedStruct("Posted", { entry: PathEntry, chat: Chat, draft: SentDraft }),
-  Schema.TaggedStruct("Queued", { queued: QueuedMessage, queue: Schema.Array(QueuedMessage), draft: SentDraft })
+  Schema.TaggedStruct("Posted", { entry: PathEntry, chat: Chat, ...Sent }),
+  Schema.TaggedStruct("Queued", { queued: QueuedMessage, queue: Schema.Array(QueuedMessage), ...Sent })
 ])
 export type SendResult = typeof SendResult.Type
 
@@ -155,7 +159,7 @@ export class ChatApi extends RpcGroup.make(
        * would have asked for it after an immediate send.
        */
       replySpeakerEntityId: Schema.optionalKey(Schema.NullOr(EntityId)),
-      composerRowVersion: ComposerRowVersion
+      composer: ComposerCommit
     },
     success: SendResult,
     error: Schema.Union([NotFound, LeafMoved, ServerError])
@@ -173,7 +177,7 @@ export class ChatApi extends RpcGroup.make(
       branch: Schema.Boolean,
       speakerEntityId: Schema.optionalKey(Schema.NullOr(EntityId)),
       direction: Schema.optionalKey(Schema.String),
-      composerRowVersion: ComposerRowVersion
+      composer: ComposerCommit
     },
     success: SendResult,
     error: Schema.Union([NotFound, LeafMoved, GenerationUnavailable, ServerError])

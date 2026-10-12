@@ -2,6 +2,7 @@
 // writes it as a draft, so every change is on the server within a second, with its history.
 import type { DraftState } from "@rp/shared/drafts.ts"
 import { type FieldPath, textField, valueField } from "@rp/shared/editing.ts"
+import { Link } from "@tanstack/react-router"
 import { type ReactNode, useEffect, useState } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"
@@ -262,6 +263,22 @@ export function SelectField<Value extends string>({
 }
 
 /** Says that changes kept in this browser when a page closed came back (backup.ts). */
+/** Text a save of a revision put in the bin's recovered texts, with the way there (DESIGN §6.2). */
+export function RecoveredNotice({ count }: { count: number }) {
+  if (count === 0) return null
+  return (
+    <Alert tone="neutral" title="Earlier text is in the bin">
+      <p>
+        Saving put {count === 1 ? "an earlier text" : `${count} earlier texts`} of these fields in the{" "}
+        <Link to="/bin" search={{ section: "recovered" }}>
+          bin, under recovered text
+        </Link>
+        : what was there before a large deletion, or another tab&apos;s text a save went over.
+      </p>
+    </Alert>
+  )
+}
+
 export function RestoredNotice({ count }: { count: number }) {
   if (count === 0) return null
   return (

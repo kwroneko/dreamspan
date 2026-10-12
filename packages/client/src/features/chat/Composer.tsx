@@ -5,9 +5,10 @@
 //
 // The text is a server draft per branch tip (composerDraft.ts), held in a store of its own,
 // so typing re-renders nothing else.
-import type { CastCard, EntityId, QueuedMessage, SlotId } from "@rp/shared/chat.ts"
+import type { CastCard, EntityId, QueuedMessage } from "@rp/shared/chat.ts"
 import type { DraftState } from "@rp/shared/drafts.ts"
 import { type KeyboardEvent, memo, useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react"
+import { Link } from "@tanstack/react-router"
 import { useSession } from "../../session.ts"
 import type { AppError } from "../../errors.ts"
 import { Avatar } from "../../ui/Avatar.tsx"
@@ -18,8 +19,8 @@ import { Badge } from "../../ui/Surface.tsx"
 import { Tabs } from "../../ui/Tabs.tsx"
 import { nameOf, recentSpeakers, replySpeaker, useCast } from "./cast.ts"
 import { carriedComposerText, dropCarriedComposerText } from "./composerCarry.ts"
-import { ComposerDraft, type Sent } from "./composerDraft.ts"
-import type { ChatSession, ChatView, ComposerSource, Outcome } from "./session.ts"
+import { ComposerDraft, type ComposerSource, type Sent } from "./composerDraft.ts"
+import type { ChatSession, ChatView, Outcome } from "./session.ts"
 
 /** A send whose text was typed on a branch the chat view has left since. */
 const BRANCH_CHANGED: AppError = {
@@ -426,16 +427,15 @@ export function Composer({ session, view }: { session: ChatSession; view: ChatVi
    * so a reload never shows it; if the chat view went to another branch since, it isn't
    * sent. Text that isn't sent comes back, ahead of anything typed since (composerDraft.ts).
    */
-  const submit = async (run: (submitted: string, from: ComposerSource) => Promise<Sent>) => {
+  const submit = async (run: (from: ComposerSource) => Promise<Sent>) => {
     if (busy) return
     setBusy(true)
-    await draft.submit((submitted, from) => {
-      const tip = from.key.field === "" ? null : (from.key.field as SlotId)
-      if (tip !== session.snapshot().leafSlotId) {
+    await draft.submit((from) => {
+      if (from.tip !== session.snapshot().leafSlotId) {
         setError(BRANCH_CHANGED)
         return Promise.resolve({ sent: false })
       }
-      return run(submitted, { tip, rowVersion: from.rowVersion })
+      return run(from)
     })
     setBusy(false)
   }
@@ -443,19 +443,26 @@ export function Composer({ session, view }: { session: ChatSession; view: ChatVi
   const send = () =>
     text.trim() === ""
       ? Promise.resolve()
-      : submit(async (submitted, from) => {
-          const { sent, outcome, draft } = await session.send(submitted, speaker, replySpeaker(cast, speaker), from)
+      : submit(async (from) => {
+          const { sent, outcome, draft, recovered } = await session.send(
+            from.text,
+            speaker,
+            replySpeaker(cast, speaker),
+            from
+          )
           report(outcome)
           // A message that was sent (or queued) is gone from the box, even if its reply failed.
-          return sent ? { sent, draft } : { sent }
+          return sent ? { sent, draft, recovered } : { sent }
         })
 
   // The text is this turn's direction (DESIGN §2.2): once asked for, it's on the reply.
   const generate = () =>
-    submit(async (submitted, from) => {
-      const outcome = await session.generate(from.tip, speaker, submitted, from.rowVersion)
+    submit(async (from) => {
+      const outcome = await session.generate(from.tip, speaker, from.text, from)
       report(outcome)
-      return outcome.ok ? { sent: true, draft: outcome.value.draft } : { sent: false }
+      return outcome.ok
+        ? { sent: true, draft: outcome.value.draft, recovered: outcome.value.recovered }
+        : { sent: false }
     })
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -505,8 +512,11 @@ export function Composer({ session, view }: { session: ChatSession; view: ChatVi
       )}
       {recovered && (
         <p role="status" className="text-sm text-muted">
-          This message was sent from another tab while you typed here. What you typed is in the bin, under recovered
-          text.
+          Some text from this composer is in the{" "}
+          <Link to="/bin" search={{ section: "recovered" }}>
+            bin, under recovered text
+          </Link>
+          : typed here after it was sent from another tab, or earlier text another tab's typing went over.
         </p>
       )}
       <label htmlFor="composer" className="sr-only">

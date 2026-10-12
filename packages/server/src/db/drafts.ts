@@ -37,6 +37,13 @@ interface DraftRow {
   readonly history_length: number
 }
 
+/** The draft a write took its text from: by its id, in the session it was typed in, with exactly that text. */
+export interface CommitDraft {
+  readonly draftId: string
+  readonly session: number
+  readonly content: string
+}
+
 /** A draft as a client had it when it typed: the row version, and the session if it knows it. */
 interface Base {
   readonly rowVersion: number
@@ -316,8 +323,9 @@ export const makeDraftStore = (
       yield* retain(draft, content)
     })
 
-  const checkVersion = (draft: DraftRow, expected: number) =>
-    draft.row_version === expected
+  /** The draft the client named, as it saw it: another draft at its key, or a newer version, is stale. */
+  const checkDraft = (draft: DraftRow, id: string, expected: number) =>
+    draft.id === id && draft.row_version === expected
       ? Effect.void
       : Effect.fail(new StaleWrite({ entity: "draft", id: draft.id, expected, actual: draft.row_version }))
 
@@ -413,10 +421,15 @@ export const makeDraftStore = (
       return { draft: toDraft((yield* byId(draft.id))!), recovered: false }
     })
 
-  /** Saves a draft by its key, creating it (after `checkTarget`) if there's none. */
+  /**
+   * Saves a draft by its key, creating it (after `checkTarget`) if there's none. `draftId`
+   * is the draft the text was typed into: if another draft is at the key now (that one
+   * moved to a variant, and a new one started here), its text is kept and this goes on top.
+   */
   const save = (options: {
     readonly userId: UserId
     readonly key: DraftKey
+    readonly draftId: string | null
     readonly content: string
     readonly base: Base | null
     readonly baseRevision: string | null
@@ -426,7 +439,8 @@ export const makeDraftStore = (
       yield* tooLarge(options.content)
       const existing = yield* find(options.userId, options.key)
       if (existing !== null) {
-        const saved = yield* saveOnto(existing, options.base, options.content, {
+        const typedHere = options.draftId === null || options.draftId === existing.id
+        const saved = yield* saveOnto(existing, typedHere ? options.base : null, options.content, {
           baseRevision: options.baseRevision,
           ended: "reopen"
         })
@@ -437,22 +451,23 @@ export const makeDraftStore = (
       return toDraft((yield* find(options.userId, options.key))!)
     })
 
-  const restoreRow = (draft: DraftRow, seq: number, expectedRowVersion: number) =>
+  const restoreRow = (draft: DraftRow, seq: number, expectedRowVersion: number, draftId: string = draft.id) =>
     Effect.gen(function* () {
-      yield* checkVersion(draft, expectedRowVersion)
+      yield* checkDraft(draft, draftId, expectedRowVersion)
       const content = yield* stateAt(draft, seq)
       yield* update(draft, content, "restore", null)
       return toDraft((yield* find(draft.user_id, toDraft(draft).key))!)
     })
 
-  const restore = (userId: UserId, key: DraftKey, seq: number, expectedRowVersion: number) =>
-    Effect.flatMap(get(userId, key), (draft) => restoreRow(draft, seq, expectedRowVersion))
+  const restore = (userId: UserId, key: DraftKey, draftId: string, seq: number, expectedRowVersion: number) =>
+    Effect.flatMap(get(userId, key), (draft) => restoreRow(draft, seq, expectedRowVersion, draftId))
 
   /**
    * Ends a drafting session. The committed text now lives in a version or revision, so
    * the history is deleted and the draft emptied (owner, 2026-10-10). Text that would be
    * lost goes to the bin's recovered-text section: the text from before each destructive
    * change in the session (hours of typing wiped, then saved), and a discarded draft.
+   * `recovered` counts those texts.
    */
   const end = (draft: DraftRow, outcome: "committed" | "discarded") =>
     Effect.gen(function* () {
@@ -464,7 +479,7 @@ export const makeDraftStore = (
       yield* sql`UPDATE drafts SET status = ${outcome}, content = '', row_version = row_version + 1,
                    text_version = row_version + 1, session = session + 1, updated_at = ${updatedAt}
                  WHERE id = ${draft.id}`
-      return toDraft({
+      const ended = toDraft({
         ...draft,
         status: outcome,
         content: "",
@@ -474,32 +489,42 @@ export const makeDraftStore = (
         updated_at: updatedAt,
         history_length: 0
       })
+      return { draft: ended, recovered: new Set(lost.filter((text) => text.trim() !== "")).size }
     })
 
-  const clear = (userId: UserId, key: DraftKey, outcome: "committed" | "discarded", expectedRowVersion: number) =>
+  const clear = (
+    userId: UserId,
+    key: DraftKey,
+    draftId: string,
+    outcome: "committed" | "discarded",
+    expectedRowVersion: number
+  ) =>
     Effect.gen(function* () {
       const draft = yield* get(userId, key)
-      yield* checkVersion(draft, expectedRowVersion)
-      return yield* end(draft, outcome)
+      yield* checkDraft(draft, draftId, expectedRowVersion)
+      return (yield* end(draft, outcome)).draft
     })
 
   /**
-   * For writes that commit a draft: marks it committed if it's still the version the
-   * client sent from. Otherwise it's left active, since it holds newer text.
+   * For writes that commit a draft: the draft the client took the text from, by its id, in
+   * the session it was typed in, holding exactly that text. Only then is it committed;
+   * otherwise it's left as it is (another tab typed on, or it was sent already), so a
+   * commit never ends text it didn't take. Returns the draft as the write left it.
    */
-  const commit = (
-    userId: UserId,
-    commitDraft: { readonly key: DraftKey; readonly expectedRowVersion: number } | null
-  ) =>
+  const commit = (userId: UserId, commitDraft: CommitDraft | null) =>
     Effect.gen(function* () {
-      if (commitDraft === null) return null
-      const draft = yield* find(userId, commitDraft.key)
-      if (draft === null) return null
-      if (draft.row_version === commitDraft.expectedRowVersion && draft.status === "active") {
+      if (commitDraft === null) return { draft: null, recovered: 0 }
+      const draft = yield* byId(commitDraft.draftId)
+      if (draft === null || draft.user_id !== userId) return { draft: null, recovered: 0 }
+      if (draft.status === "active" && draft.session === commitDraft.session && draft.content === commitDraft.content) {
         return yield* end(draft, "committed")
       }
-      return toDraft(draft)
+      return { draft: toDraft(draft), recovered: 0 }
     })
+
+  /** A draft by its id, the user's own only. */
+  const ownDraft = (userId: UserId, id: string) =>
+    Effect.map(byId(id), (row) => (row !== null && row.user_id === userId ? toDraft(row) : null))
 
   // --- The composer (DESIGN §6.2): a draft per branch tip, which moves with its tip.
 
@@ -583,6 +608,7 @@ export const makeDraftStore = (
     end,
     clear,
     commit,
+    ownDraft,
     openComposer,
     saveComposer,
     restoreComposer

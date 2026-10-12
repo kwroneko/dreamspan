@@ -88,7 +88,9 @@ export class RefChange extends Schema.Class<RefChange>("RefChange")({
   ref: LibraryRef,
   followers: Schema.Array(FollowerMerge),
   /** Drafts a save set aside because what they were in is gone: their text is in the recovered texts. */
-  setAside: Schema.optionalKey(Schema.Array(Schema.String))
+  setAside: Schema.optionalKey(Schema.Array(Schema.String)),
+  /** How many earlier texts of the committed drafts went to the recovered texts. */
+  recovered: Schema.optionalKey(Schema.Int)
 }) {}
 
 /** What merging a ref did, and the change that flowed on from it. */
@@ -100,18 +102,23 @@ export class DraftTooLarge extends Schema.TaggedError<DraftTooLarge>()("DraftToo
 }) {}
 
 /**
- * Marks the draft a write came from as committed, in the same transaction, so a reload
- * never shows text that was already sent. If the draft moved on since (another tab kept
- * typing), it stays active: it holds newer text than what was committed.
+ * Marks the draft a write took its text from as committed, in the same transaction, so a
+ * reload never shows text that was already sent: named by its id, in the session the text
+ * was typed in, with exactly that text (drafts.ts `commit`). If it holds anything else now
+ * (another tab typed on), it stays active, and nothing else is touched.
  */
-const CommitDraft = Schema.NullOr(Schema.Struct({ key: DraftKey, expectedRowVersion: Schema.Int }))
+const CommitDraft = Schema.NullOr(
+  Schema.Struct({ draftId: Schema.String, session: Schema.Int, content: Schema.String })
+)
 
 export class AppendResult extends Schema.Class<AppendResult>("AppendResult")({
   slotId: SlotId,
   version: Version,
   chat: Chat,
-  /** The committed draft, or the draft left active because it moved on; null if none was given. */
-  draft: Schema.NullOr(Draft)
+  /** The named draft as the write left it: committed, or still active with newer text; null if none was given. */
+  draft: Schema.NullOr(Draft),
+  /** How many texts committing it sent to the recovered texts (from before destructive or displaced changes). */
+  recovered: Schema.Int
 }) {}
 
 /** An encrypted secret and what may be shown of it. */
@@ -324,6 +331,8 @@ export class WriteOps extends RpcGroup.make(
     payload: {
       userId: UserId,
       key: DraftKey,
+      /** The draft the text was typed into, if the client had one: another draft at the key is a conflict. */
+      draftId: Schema.optionalKey(Schema.NullOr(Schema.String)),
       content: Schema.String,
       /** The draft as last seen: null if none was. */
       expectedRowVersion: Schema.NullOr(Schema.Int),
@@ -381,7 +390,7 @@ export class WriteOps extends RpcGroup.make(
   }),
   /** Restores an earlier state from the draft's history. The restore is itself undoable. */
   Rpc.make("RestoreDraftState", {
-    payload: { userId: UserId, key: DraftKey, seq: Schema.Int, expectedRowVersion: Schema.Int },
+    payload: { userId: UserId, key: DraftKey, draftId: Schema.String, seq: Schema.Int, expectedRowVersion: Schema.Int },
     success: Draft,
     error: Schema.Union([NotFound, StaleWrite, StorageError])
   }),
@@ -393,6 +402,7 @@ export class WriteOps extends RpcGroup.make(
     payload: {
       userId: UserId,
       key: DraftKey,
+      draftId: Schema.String,
       outcome: Schema.Literals(["committed", "discarded"]),
       expectedRowVersion: Schema.Int
     },
@@ -904,8 +914,9 @@ export class WriteOps extends RpcGroup.make(
       Schema.TaggedStruct("Queued", {
         queued: QueuedMessage,
         queue: Schema.Array(QueuedMessage),
-        /** The committed draft, or the draft left active because it moved on; null if none was given. */
-        draft: Schema.NullOr(Draft)
+        /** The named draft as the write left it: committed, or still active with newer text; null if none was given. */
+        draft: Schema.NullOr(Draft),
+        recovered: Schema.Int
       })
     ]),
     error: Schema.Union([NotFound, LeafMoved, StorageError])
@@ -1081,7 +1092,9 @@ export class WriteOps extends RpcGroup.make(
       userId: UserId,
       refId: RefId,
       expectedRowVersion: Schema.Int,
-      fields: Schema.Array(Schema.Struct({ field: Schema.String, expectedRowVersion: Schema.Int })),
+      fields: Schema.Array(
+        Schema.Struct({ field: Schema.String, draftId: Schema.String, expectedRowVersion: Schema.Int })
+      ),
       message: Schema.NullOr(Schema.String)
     },
     success: RefChange,

@@ -82,7 +82,7 @@ test("a card with a 50 KB description: typing in it, and in another field", asyn
       yield* api.CommitEditorDrafts({
         refId: card.id,
         expectedRowVersion: card.rowVersion,
-        fields: [{ field: draft.key.field, expectedRowVersion: draft.rowVersion }],
+        fields: [{ field: draft.key.field, draftId: draft.id, expectedRowVersion: draft.rowVersion }],
         message: null
       })
       return card.id

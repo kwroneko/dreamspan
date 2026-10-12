@@ -2,7 +2,7 @@
 // or delete for good (the one place that asks first), and the text recovered from drafts.
 import { RegistryContext } from "@effect/atom-react"
 import type { BinItem, RecoveredText } from "@rp/shared/bin.ts"
-import { Link } from "@tanstack/react-router"
+import { Link, useSearch } from "@tanstack/react-router"
 import { useContext, useState } from "react"
 import { AsyncView, ErrorAlert, useAction } from "../../actions.tsx"
 import { type AppError, describeCause } from "../../errors.ts"
@@ -337,7 +337,9 @@ function RecoveredTexts({ first }: { first: ReadonlyArray<RecoveredText> }) {
 
 export function BinPage() {
   useTitle("Bin")
-  const [tab, setTab] = useState<"deleted" | "recovered">("deleted")
+  // `?section=recovered`: where a composer or editor that put text there links to.
+  const search = useSearch({ strict: false }) as { section?: unknown }
+  const [tab, setTab] = useState<"deleted" | "recovered">(search.section === "recovered" ? "recovered" : "deleted")
   return (
     <Card>
       <CardHeader title="Bin" description="Deleted things wait here, newest first: restore them where they were." />

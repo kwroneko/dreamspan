@@ -7,7 +7,6 @@ import { uuidv7 } from "@rp/shared/id.ts"
 import { useEffect, useState } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import { useSession } from "../../session.ts"
-import { dropCopiesOf } from "./backup.ts"
 import type { AppError } from "../../errors.ts"
 import { Button } from "../../ui/Button.tsx"
 import { Field, Fieldset, Input, Textarea } from "../../ui/Field.tsx"
@@ -15,7 +14,7 @@ import { FileDrop } from "../../ui/FileDrop.tsx"
 import { Select } from "../../ui/Select.tsx"
 import { Badge, Card, CardHeader, EmptyState } from "../../ui/Surface.tsx"
 import type { Caller } from "./caller.ts"
-import { FieldTools, RestoredNotice, SwitchField, TextField } from "./controls.tsx"
+import { FieldTools, RecoveredNotice, RestoredNotice, SwitchField, TextField } from "./controls.tsx"
 import { SaveDialog } from "./SaveDialog.tsx"
 import { EditorStore, useEditorState, useLeaveGuard, useValue } from "./store.ts"
 
@@ -298,17 +297,18 @@ function NoteEditor({ entry, call, onDeleted }: { entry: NoteEntry; call: Caller
   useLeaveGuard(store)
   if (state.snapshot === null) return <p className="text-sm text-muted">Loading the note…</p>
   const remove = async () => {
+    // What's typed goes with the note to the bin, and comes back with it. A change that can't
+    // reach the server stays in this browser until the note can be opened again.
+    await store.flush()
     const result = await call((client) => client("DeleteCardNote", { noteRefId: entry.ref.id }), ["library"])
-    if (result.ok) {
-      // A deleted note's unsent text doesn't stay in this browser.
-      await dropCopiesOf(userId, entry.ref.id)
-      onDeleted()
-    } else setError(result.error)
+    if (result.ok) onDeleted()
+    else setError(result.error)
   }
   const dirty = state.dirty > 0
   return (
     <section aria-label={`Note ${entry.ref.label}`} className="flex flex-col gap-3 rounded-md border border-border p-3">
       <RestoredNotice count={state.restored} />
+      <RecoveredNotice count={state.recovered} />
       <NoteFields store={store} />
       <ErrorAlert error={error} />
       <div className="flex flex-wrap items-center gap-2">

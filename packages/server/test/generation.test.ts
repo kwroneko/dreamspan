@@ -18,7 +18,7 @@ import { Writer } from "../src/db/Database.ts"
 import { importCard } from "../src/formats/cardImport.ts"
 import { importStPreset } from "../src/formats/preset.ts"
 import { json, run } from "./formats/support.ts"
-import { client, posted, serverLayer, testConfig, typeInto } from "./support/config.ts"
+import { client, posted, serverLayer, testConfig, takenFrom, typeInto } from "./support/config.ts"
 import {
   anthropicSse,
   completionChunks,
@@ -377,7 +377,7 @@ describe("generation", () => {
         parentSlotId: entry.slotId,
         branch: false,
         direction: "Make it rain.",
-        composerRowVersion: draft.rowVersion
+        composer: takenFrom(draft)
       })
       assert.strictEqual(queued._tag, "Queued")
       assert.strictEqual(queued.draft?.status, "committed")

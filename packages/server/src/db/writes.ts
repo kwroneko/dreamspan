@@ -79,11 +79,12 @@ export const makeWriteHandlers = (bin: Bin) =>
           return toChat(row!)
         }).pipe(transaction("CreateChat")),
 
-      SaveDraft: ({ userId, key, content, expectedRowVersion, expectedSession, baseRevision }) =>
+      SaveDraft: ({ userId, key, draftId, content, expectedRowVersion, expectedSession, baseRevision }) =>
         drafts
           .save({
             userId,
             key,
+            draftId: draftId ?? null,
             content,
             base: expectedRowVersion === null ? null : { rowVersion: expectedRowVersion, session: expectedSession },
             baseRevision,
@@ -120,11 +121,11 @@ export const makeWriteHandlers = (bin: Bin) =>
       RestoreComposer: ({ userId, chatId, draftId, seq, expectedRowVersion }) =>
         drafts.restoreComposer(userId, chatId, draftId, seq, expectedRowVersion).pipe(transaction("RestoreComposer")),
 
-      RestoreDraftState: ({ userId, key, seq, expectedRowVersion }) =>
-        drafts.restore(userId, key, seq, expectedRowVersion).pipe(transaction("RestoreDraftState")),
+      RestoreDraftState: ({ userId, key, draftId, seq, expectedRowVersion }) =>
+        drafts.restore(userId, key, draftId, seq, expectedRowVersion).pipe(transaction("RestoreDraftState")),
 
-      ClearDraft: ({ userId, key, outcome, expectedRowVersion }) =>
-        drafts.clear(userId, key, outcome, expectedRowVersion).pipe(transaction("ClearDraft")),
+      ClearDraft: ({ userId, key, draftId, outcome, expectedRowVersion }) =>
+        drafts.clear(userId, key, draftId, outcome, expectedRowVersion).pipe(transaction("ClearDraft")),
 
       AppendMessage: (params) => appendMessage(params).pipe(transaction("AppendMessage")),
 

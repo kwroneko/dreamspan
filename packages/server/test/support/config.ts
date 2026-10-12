@@ -129,6 +129,13 @@ export const outcome = <A, E>(effect: Effect.Effect<A, E>, show: (a: A) => strin
 
 type Api = Effect.Success<ReturnType<typeof client>>
 
+/** What a send names of the composer draft it took `text` from (chatApi.ts `composer`). */
+export const takenFrom = (draft: Draft, text: string = draft.content) => ({
+  draftId: draft.id,
+  session: draft.session,
+  text
+})
+
 /**
  * Types into the composer at a tip as the client does: opens it, then saves onto the draft
  * that names (or onto `onto`, a draft read earlier). Returns the draft after the save.

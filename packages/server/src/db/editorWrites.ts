@@ -112,10 +112,11 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps) => {
         yield* steps.checkRowVersion(ref, expectedRowVersion)
         const head = yield* lib.loadDoc(ref.head_revision_id)
         const rows = []
-        for (const { field, expectedRowVersion: expected } of fields) {
+        for (const { field, draftId, expectedRowVersion: expected } of fields) {
           const row = yield* drafts.find(userId, new DraftKey({ targetKind: "entity_field", targetId: refId, field }))
-          // Another tab typed on since, or ended it: the client reads it again.
-          if (row === null || row.status !== "active" || row.row_version !== expected) {
+          // Another tab typed on since, ended it, or it's another draft (that one moved to a
+          // variant): the client reads it again.
+          if (row === null || row.id !== draftId || row.status !== "active" || row.row_version !== expected) {
             return yield* new StaleWrite({ entity: "draft", id: field, expected, actual: row?.row_version ?? 0 })
           }
           rows.push(row)
@@ -164,8 +165,14 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps) => {
           })
         }
         const change = yield* userEdit(ref, valid.doc, message, null)
-        for (const row of rows) yield* drafts.end(row, orphans.has(row.field) ? "discarded" : "committed")
-        return new RefChange({ ...change, setAside: [...orphans] })
+        let recovered = 0
+        for (const row of rows) {
+          const orphan = orphans.has(row.field)
+          const ended = yield* drafts.end(row, orphan ? "discarded" : "committed")
+          // A set-aside draft is reported as such; what the others' sessions lost is counted.
+          if (!orphan) recovered += ended.recovered
+        }
+        return new RefChange({ ...change, setAside: [...orphans], recovered })
       }).pipe(transaction(sql, "CommitEditorDrafts")),
 
     RestoreRevision: ({ userId, refId, revisionId, expectedRowVersion }) =>

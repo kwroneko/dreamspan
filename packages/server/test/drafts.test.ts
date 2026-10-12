@@ -57,25 +57,25 @@ const setup = (handle = "ana") =>
       writer
         .SaveDraft({ userId, key: composer(), content, expectedRowVersion: rowVersion, baseRevision: null })
         .pipe(Effect.tap((draft) => Effect.sync(() => (rowVersion = draft.rowVersion))))
-    /** Sends the composer's text as a message at the tip, committing the draft. */
-    const send = (content: string, sentFrom: number | null = rowVersion) =>
-      writer
-        .AppendMessage({
+    /** Sends `content` as a message at the tip, committing the draft it was taken from. */
+    const send = (content: string) =>
+      Effect.flatMap(reader.GetDraft({ userId, key: composer() }), (from) =>
+        writer.AppendMessage({
           userId,
           chatId: chat.id,
           parentSlotId: tip,
           branch: false,
           version: say(content),
-          commitDraft: sentFrom === null ? null : { key: composer(), expectedRowVersion: sentFrom }
+          commitDraft: from === null ? null : { draftId: from.id, session: from.session, content }
         })
-        .pipe(
-          Effect.tap((result) =>
-            Effect.sync(() => {
-              tip = result.slotId
-              rowVersion = result.draft?.rowVersion ?? null
-            })
-          )
+      ).pipe(
+        Effect.tap((result) =>
+          Effect.sync(() => {
+            tip = result.slotId
+            rowVersion = result.draft?.rowVersion ?? null
+          })
         )
+      )
     const history = () => reader.DraftHistory({ userId, key: composer(), limit: 1000 })
     return { writer, reader, userId, chat, say, composer, type, send, history, rowVersion: () => rowVersion! }
   })
@@ -101,7 +101,7 @@ describe("drafts", () => {
         (yield* reader.GetDraftState({ userId, key: composer(), seq: before!.seq })).content,
         "Hello from tab A"
       )
-      yield* send("Hello from tab B", stale.rowVersion)
+      yield* send("Hello from tab B")
       const texts = yield* reader.ListRecoveredTexts({ userId, source: null, limit: 10, before: null })
       assert.deepStrictEqual(
         texts.map((t) => [t.reason, t.content]),
@@ -155,7 +155,7 @@ describe("drafts", () => {
       assert.strictEqual((yield* history()).filter((s) => s.kind === "edit").length, 1)
 
       // Ctrl-A and a stray key.
-      yield* type("x")
+      const wiped = yield* type("x")
       const states = yield* history()
       assert.deepStrictEqual(
         states.map((s) => [s.kind, s.length]),
@@ -172,6 +172,7 @@ describe("drafts", () => {
       const restored = yield* writer.RestoreDraftState({
         userId,
         key: composer(),
+        draftId: wiped.id,
         seq: before.seq,
         expectedRowVersion: rowVersion()
       })
@@ -201,11 +202,10 @@ describe("drafts", () => {
       assert.strictEqual(reopened.status, "active")
       assert.strictEqual(reopened.historyLength, 1)
 
-      // Another tab kept typing after this one sent: the newer text stays as a draft,
-      // and moves to the new tip with the conversation.
-      const sentFrom = reopened.rowVersion
+      // Another tab kept typing after this one took the text: the newer text stays as a
+      // draft, and moves to the new tip with the conversation.
       yield* type("And then? Tell me more.")
-      const second = yield* send("And then?", sentFrom)
+      const second = yield* send("And then?")
       assert.strictEqual(second.draft?.status, "active")
       assert.strictEqual(second.draft?.content, "And then? Tell me more.")
       assert.strictEqual(second.draft?.key.field, second.slotId)
@@ -347,6 +347,7 @@ describe("drafts", () => {
       const discarded = yield* writer.ClearDraft({
         userId,
         key: composer(),
+        draftId: draft.id,
         outcome: "discarded",
         expectedRowVersion: draft.rowVersion
       })

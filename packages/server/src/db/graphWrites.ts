@@ -3,12 +3,12 @@
 // inside the calling operation's transaction.
 import type { ChatId, EntityId, NewVersion, SlotId, VersionId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
-import { composerKey, type DraftKey } from "@rp/shared/drafts.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import type { FoldableEvent, StateEventData } from "@rp/shared/state.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import type { Bin } from "./bin.ts"
+import type { CommitDraft } from "./drafts.ts"
 import { AppendResult, LeafMoved, NotFound, StaleWrite } from "./ops.ts"
 import { amendCount, type ChatRow, toChat, toVersion, type VersionRow } from "./rows.ts"
 import { checkStateReferences } from "./stateRefs.ts"
@@ -149,7 +149,7 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
     readonly parentSlotId: SlotId | null
     readonly branch: boolean
     readonly version: NewVersion
-    readonly commitDraft: { readonly key: DraftKey; readonly expectedRowVersion: number } | null
+    readonly commitDraft: CommitDraft | null
     readonly keepLeaf?: boolean
   }) =>
     Effect.gen(function* () {
@@ -184,14 +184,13 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
       // else was appended stays in view, and a send's recovery text goes along with it.
       yield* sql`UPDATE drafts SET field = ${slotId}, row_version = row_version + 1
                    WHERE target_kind = 'composer' AND target_id = ${chatId} AND field = ${parentSlotId ?? ""}`
-      const movedComposer =
-        committed !== null && committed.key.targetKind === "composer" && committed.key.targetId === chatId
-      const draft = movedComposer ? yield* drafts.find(userId, composerKey(chatId, slotId)) : null
       return new AppendResult({
         slotId: slotId as SlotId,
         version: toVersion(row),
         chat: toChat(chat!),
-        draft: draft ? drafts.toDraft(draft) : committed
+        // The named draft as the write left it, wherever its tip is now.
+        draft: committed.draft === null ? null : yield* drafts.ownDraft(userId, committed.draft.id),
+        recovered: committed.recovered
       })
     })
 

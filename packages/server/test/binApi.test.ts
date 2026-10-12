@@ -7,7 +7,7 @@ import type { ChatEvent } from "@rp/shared/chatApi.ts"
 import { Effect, Stream } from "effect"
 import { Writer } from "../src/db/Database.ts"
 import { cardDoc } from "./support/docs.ts"
-import { client, outcome, posted, testConfig, typeInto, withServer } from "./support/config.ts"
+import { client, outcome, posted, testConfig, takenFrom, typeInto, withServer } from "./support/config.ts"
 
 type Api = Effect.Success<ReturnType<typeof client>>
 
@@ -190,7 +190,7 @@ describe("the recycle bin's RPCs", () => {
           parentSlotId: m0,
           branch: false,
           content: "x",
-          composerRowVersion: wiped.rowVersion
+          composer: takenFrom(wiped)
         })
       )
       const [recovered] = yield* api.ListRecoveredTexts({ limit: 10, before: null })

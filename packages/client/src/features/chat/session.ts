@@ -26,6 +26,7 @@ import { type AppError, describeCause } from "../../errors.ts"
 import { AppClient } from "../../rpc.ts"
 import { sessionAtom } from "../../session.ts"
 import { mountedBodies, PERF, perf } from "./perf.ts"
+import type { ComposerSource } from "./composerDraft.ts"
 
 /** How many slots one read asks for. */
 const PAGE = 60
@@ -61,11 +62,8 @@ export interface ChatView {
 type Client = AppClient["Service"]
 /** The events that change loaded state, and are applied again after a read lands. */
 type Replayable = Extract<ChatEvent, { readonly _tag: "Slot" | "Version" | "Chat" }>
-/** A composer draft a send takes its text from: its tip, and the row version to commit. */
-export interface ComposerSource {
-  readonly tip: SlotId | null
-  readonly rowVersion: number
-}
+/** What a send names of the composer draft it took its text from, which it commits. */
+const commitOf = ({ draftId, session, text }: ComposerSource) => ({ draftId, session, text })
 
 export type Outcome<A> = { readonly ok: true; readonly value: A } | { readonly ok: false; readonly error: AppError }
 
@@ -637,9 +635,14 @@ export class ChatSession {
     content: string,
     speaker: EntityId | null = null,
     replySpeaker: EntityId | null = null,
-    /** The composer draft the text came from: its tip, and its row version to commit (DESIGN §6.2). */
+    /** The composer draft the text came from, which the send commits (DESIGN §6.2). */
     composer?: ComposerSource
-  ): Promise<{ readonly sent: boolean; readonly outcome: Outcome<unknown>; readonly draft: SendResult["draft"] }> {
+  ): Promise<{
+    readonly sent: boolean
+    readonly outcome: Outcome<unknown>
+    readonly draft: SendResult["draft"]
+    readonly recovered: number
+  }> {
     const parentSlotId = composer === undefined ? this.view.leafSlotId : composer.tip
     const result = await this.queueSnapshot(
       this.call((client) =>
@@ -651,19 +654,19 @@ export class ChatSession {
           speakerEntityId: speaker,
           // If it's queued, the server asks for the reply when it posts, from the same speaker.
           replySpeakerEntityId: replySpeaker,
-          ...(composer === undefined ? {} : { composerRowVersion: composer.rowVersion })
+          ...(composer === undefined ? {} : { composer: commitOf(composer) })
         })
       ),
       (value) => (value._tag === "Queued" ? value.queue : null)
     )
     if (!result.ok) {
       if (result.error.tag === "LeafMoved") this.reload()
-      return { sent: false, outcome: result, draft: null }
+      return { sent: false, outcome: result, draft: null, recovered: 0 }
     }
-    const { draft } = result.value
-    if (result.value._tag === "Queued") return { sent: true, outcome: result, draft }
+    const { draft, recovered } = result.value
+    if (result.value._tag === "Queued") return { sent: true, outcome: result, draft, recovered }
     this.appended(result.value.entry, result.value.chat)
-    return { sent: true, outcome: await this.generate(result.value.entry.slotId, replySpeaker), draft }
+    return { sent: true, outcome: await this.generate(result.value.entry.slotId, replySpeaker), draft, recovered }
   }
 
   /**
@@ -674,7 +677,7 @@ export class ChatSession {
     parentSlotId = this.view.leafSlotId,
     speaker: EntityId | null = null,
     direction = "",
-    composerRowVersion?: number
+    composer?: ComposerSource
   ): Promise<Outcome<SendResult>> {
     const branch = parentSlotId === this.view.leafSlotId && this.onOtherBranch()
     const result = await this.queueSnapshot(
@@ -685,7 +688,7 @@ export class ChatSession {
           branch,
           speakerEntityId: speaker,
           ...(direction.trim() === "" ? {} : { direction }),
-          ...(composerRowVersion === undefined ? {} : { composerRowVersion })
+          ...(composer === undefined ? {} : { composer: commitOf(composer) })
         })
       ),
       (value) => (value._tag === "Queued" ? value.queue : null)

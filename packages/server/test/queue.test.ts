@@ -9,7 +9,7 @@ import type { ChatEvent } from "@rp/shared/chatApi.ts"
 import { Deferred, Effect, Layer, Option, Stream } from "effect"
 import { Writer } from "../src/db/Database.ts"
 import { GenerationFailed, Generator } from "../src/chat/Generator.ts"
-import { client, outcome, posted, serverLayer, testConfig, typeInto } from "./support/config.ts"
+import { client, outcome, posted, serverLayer, testConfig, takenFrom, typeInto } from "./support/config.ts"
 
 type Api = Effect.Success<ReturnType<typeof client>>
 
@@ -157,7 +157,7 @@ describe("send queue", () => {
           parentSlotId: reply.slotId,
           branch: false,
           content: text,
-          composerRowVersion: draft.rowVersion
+          composer: takenFrom(draft)
         })
         assert.strictEqual(first._tag, "Queued")
         const next = yield* typeInto(api, chat.id, reply.slotId, direction, first.draft!)
@@ -167,7 +167,7 @@ describe("send queue", () => {
             parentSlotId: reply.slotId,
             branch: false,
             direction,
-            composerRowVersion: next.rowVersion
+            composer: takenFrom(next)
           }))._tag,
           "Queued"
         )
@@ -201,7 +201,7 @@ describe("send queue", () => {
           parentSlotId: reply.slotId,
           branch: false,
           content: "queued message",
-          composerRowVersion: draft.rowVersion
+          composer: takenFrom(draft)
         })
         const next = yield* typeInto(api, chat.id, reply.slotId, "restart direction", first.draft!)
         yield* api.Generate({
@@ -209,7 +209,7 @@ describe("send queue", () => {
           parentSlotId: reply.slotId,
           branch: false,
           direction: "restart direction",
-          composerRowVersion: next.rowVersion
+          composer: takenFrom(next)
         })
         return chat.id
       }).pipe(Effect.scoped, Effect.provide(serverLayer(config, gated)))
@@ -239,7 +239,7 @@ describe("send queue", () => {
         parentSlotId: reply.slotId,
         branch: false,
         content: "queued",
-        composerRowVersion: draft.rowVersion
+        composer: takenFrom(draft)
       })
       const typing = yield* typeInto(api, chat.id, reply.slotId, "next turn", sent.draft!)
       const other = yield* posted(

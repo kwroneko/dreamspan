@@ -11,7 +11,7 @@ import { Alert, Badge, Card } from "../../ui/Surface.tsx"
 import { useSession } from "../../session.ts"
 import { useTitle } from "../shell.tsx"
 import { useCaller } from "./caller.ts"
-import { RestoredNotice } from "./controls.tsx"
+import { RecoveredNotice, RestoredNotice } from "./controls.tsx"
 import { CardEditor, NoteFields } from "./CardEditor.tsx"
 import { PresetEditor } from "./PresetEditor.tsx"
 import { ForkDialog, RenameDialog } from "./RefDialogs.tsx"
@@ -164,6 +164,7 @@ function Editor({ refId }: { refId: RefId }) {
         </Alert>
       )}
       <RestoredNotice count={state.restored} />
+      <RecoveredNotice count={state.recovered} />
       {notice && (
         <Alert
           tone="success"

@@ -74,7 +74,7 @@ const commit = (api: Api, refId: RefId, message: string | null = null) =>
       expectedRowVersion: opened.ref.rowVersion,
       fields: opened.drafts
         .filter((d) => d.status === "active")
-        .map((d) => ({ field: d.key.field, expectedRowVersion: d.rowVersion })),
+        .map((d) => ({ field: d.key.field, draftId: d.id, expectedRowVersion: d.rowVersion })),
       message
     })
   })
@@ -82,6 +82,69 @@ const commit = (api: Api, refId: RefId, message: string | null = null) =>
 const doc = (api: Api, refId: RefId) => Effect.map(api.OpenEditor({ refId }), (opened) => opened.doc)
 
 layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" })("editing the library", (it) => {
+  it.effect("a save names its draft: one that moved to a variant never takes over the new draft here", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const card = yield* api.CreateCard({ label: "Moved draft", name: "Moved draft" })
+      const field = textField(["description"])
+      const a = yield* api.SaveEditorDraft({
+        refId: card.id,
+        field,
+        draftId: null,
+        content: "base A",
+        expectedRowVersion: null,
+        baseRevisionId: card.headRevisionId
+      })
+      const variant = yield* api.ForkVariant({ refId: card.id, label: "Variant", subtitle: "", moveDrafts: true })
+      const b = yield* api.SaveEditorDraft({
+        refId: card.id,
+        field,
+        draftId: null,
+        content: "base B",
+        expectedRowVersion: null,
+        baseRevisionId: card.headRevisionId
+      })
+      // A's counters match B's: only the draft's id tells them apart.
+      assert.deepStrictEqual([a.rowVersion, a.session], [b.rowVersion, b.session])
+      const stale = yield* api.SaveEditorDraft({
+        refId: card.id,
+        field,
+        draftId: a.id,
+        content: "base A2",
+        expectedRowVersion: a.rowVersion,
+        expectedSession: a.session,
+        baseRevisionId: card.headRevisionId
+      })
+      assert.strictEqual(stale.id, b.id)
+      // B's text is one step back, and the commit sends it to the recovered texts.
+      const saved = yield* api.CommitEditorDrafts({
+        refId: card.id,
+        expectedRowVersion: card.rowVersion,
+        fields: [{ field, draftId: stale.id, expectedRowVersion: stale.rowVersion }],
+        message: null
+      })
+      assert.strictEqual(saved.recovered, 1)
+      const recovered = yield* api.ListRecoveredTexts({ limit: 100, before: null })
+      assert.include(
+        recovered.map((text) => text.content),
+        "base B"
+      )
+      // A, in the variant, is as it was; and committing it by its old id here is stale.
+      assert.strictEqual((yield* api.OpenEditor({ refId: variant.id })).drafts[0]!.content, "base A")
+      assert.strictEqual(
+        yield* outcome(
+          api.CommitEditorDrafts({
+            refId: variant.id,
+            expectedRowVersion: variant.rowVersion,
+            fields: [{ field, draftId: b.id, expectedRowVersion: a.rowVersion }],
+            message: null
+          })
+        ),
+        "StaleWrite"
+      )
+    })
+  )
+
   it.effect("an active editor save crossing a commit keeps its revision base and conflicts", () =>
     Effect.gen(function* () {
       const api = yield* client()
@@ -99,7 +162,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
       yield* api.CommitEditorDrafts({
         refId: ref.id,
         expectedRowVersion: ref.rowVersion,
-        fields: [{ field, expectedRowVersion: b.rowVersion }],
+        fields: [{ field, draftId: b.id, expectedRowVersion: b.rowVersion }],
         message: null
       })
       const a = yield* api.SaveEditorDraft({
@@ -170,6 +233,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
       const restored = yield* api.RestoreEditorDraft({
         refId: card.id,
         field,
+        draftId: wiped.id,
         seq: history[1]!.seq,
         expectedRowVersion: wiped.rowVersion
       })
@@ -179,7 +243,13 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
       // A stale tab can't restore over newer text.
       assert.strictEqual(
         yield* outcome(
-          api.RestoreEditorDraft({ refId: card.id, field, seq: history[1]!.seq, expectedRowVersion: wiped.rowVersion })
+          api.RestoreEditorDraft({
+            refId: card.id,
+            field,
+            draftId: wiped.id,
+            seq: history[1]!.seq,
+            expectedRowVersion: wiped.rowVersion
+          })
         ),
         "StaleWrite"
       )
@@ -187,6 +257,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
       const discarded = yield* api.DiscardEditorDraft({
         refId: card.id,
         field,
+        draftId: restored.id,
         expectedRowVersion: restored.rowVersion
       })
       assert.strictEqual(discarded.status, "discarded")
@@ -206,6 +277,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
       yield* api.DiscardEditorDraft({
         refId: card.id,
         field: valueField(["description"]),
+        draftId: opened.drafts[0]!.id,
         expectedRowVersion: opened.drafts[0]!.rowVersion
       })
       yield* draft(api, card.id, valueField(["avatar_media_id"]), '"someone-elses-file"')

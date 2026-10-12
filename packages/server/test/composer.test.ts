@@ -7,7 +7,17 @@ import type { ChatId, SlotId } from "@rp/shared/chat.ts"
 import { type Draft, DraftHistoryPolicy } from "@rp/shared/drafts.ts"
 import { Effect } from "effect"
 import * as FakeGenerator from "../src/dev/fakeGenerator.ts"
-import { client, outcome, post, posted, serverLayer, testConfig, typeInto, withServer } from "./support/config.ts"
+import {
+  client,
+  outcome,
+  post,
+  posted,
+  serverLayer,
+  testConfig,
+  takenFrom,
+  typeInto,
+  withServer
+} from "./support/config.ts"
 
 type Api = Effect.Success<ReturnType<typeof client>>
 
@@ -83,7 +93,7 @@ describe("the composer's drafts", () => {
           parentSlotId: null,
           branch: false,
           content: "hello A",
-          composerRowVersion: saved.draft!.rowVersion
+          composer: takenFrom(saved.draft!)
         })
       )
       const recovered = yield* api.ListRecoveredTexts({ limit: 10, before: null })
@@ -105,7 +115,7 @@ describe("the composer's drafts", () => {
           parentSlotId: null,
           branch: false,
           content: "Knock twice.",
-          composerRowVersion: draft.rowVersion
+          composer: takenFrom(draft)
         })
       )
       assert.deepStrictEqual(
@@ -124,7 +134,7 @@ describe("the composer's drafts", () => {
           parentSlotId: sent.entry.slotId,
           branch: false,
           content: "Then",
-          composerRowVersion: typing.rowVersion - 1
+          composer: takenFrom(typing, "Then")
         })
       )
       assert.deepStrictEqual([next.draft?.status, next.draft?.content], ["active", "Then wait."])
@@ -160,7 +170,7 @@ describe("the composer's drafts", () => {
         parentSlotId: tip,
         branch: false,
         content: "wait",
-        composerRowVersion: draft.rowVersion
+        composer: takenFrom(draft)
       })
       assert.strictEqual(queued._tag, "Queued")
       assert.strictEqual(queued.draft?.status, "committed")
@@ -213,7 +223,7 @@ describe("the composer's drafts", () => {
           parentSlotId: null,
           branch: false,
           content: "typed after",
-          composerRowVersion: kept.rowVersion
+          composer: takenFrom(kept)
         })
       )
       assert.strictEqual((yield* next(kept, "the message after")).status, 204)
@@ -241,7 +251,7 @@ describe("the composer's drafts", () => {
               parentSlotId: tip,
               branch: false,
               content: first.content,
-              composerRowVersion: first.rowVersion
+              composer: takenFrom(first)
             })
           )
           tip = sent.entry.slotId
@@ -265,7 +275,7 @@ describe("the composer's drafts", () => {
             parentSlotId: tip,
             branch: false,
             content: next.content,
-            composerRowVersion: next.rowVersion
+            composer: takenFrom(next)
           })
         )
         const before = yield* api.ListRecoveredTexts({ limit: 100, before: null })
@@ -300,7 +310,7 @@ describe("the composer's drafts", () => {
             parentSlotId: null,
             branch: false,
             content: "NEXT",
-            composerRowVersion: saved.draft!.rowVersion
+            composer: takenFrom(saved.draft!)
           })
         )
         return {
@@ -345,7 +355,7 @@ describe("the composer's drafts", () => {
           parentSlotId: null,
           branch: false,
           content: before.content,
-          composerRowVersion: before.rowVersion
+          composer: takenFrom(before)
         })
       )
       assert.strictEqual((yield* leaving(before, "B unsent")).status, 204)
@@ -354,6 +364,80 @@ describe("the composer's drafts", () => {
       const [recovered] = yield* api.ListRecoveredTexts({ limit: 10, before: null })
       assert.strictEqual((yield* api.GetRecoveredText({ id: recovered!.id })).content, "B unsent")
       assert.strictEqual((yield* leaving(read, "x", "nope")).status, 404)
+    }).pipe(Effect.scoped, withServer(testConfig()))
+  )
+
+  // A send names the text it took. A save made again (its browser copy, sent as a page
+  // closed) answers with the draft as it is now, which may hold another tab's newer text:
+  // the send of the older text must leave that text in the draft.
+  for (const queued of [false, true]) {
+    it.live(`a send never commits newer text a replayed save answered with (${queued ? "queued" : "posted"})`, () =>
+      Effect.gen(function* () {
+        const api = yield* client()
+        const chat = yield* api.CreateChat({ title: "Replayed" })
+        const tip = queued
+          ? (yield* posted(api.Generate({ chatId: chat.id, parentSlotId: null, branch: false }))).entry.slotId
+          : null
+        const initial = yield* open(api, chat.id, tip)
+        const save = {
+          chatId: chat.id,
+          draftId: initial.id,
+          rowVersion: initial.rowVersion,
+          session: initial.session,
+          operationId: "pending-copy",
+          content: "alpha"
+        }
+        const alpha = (yield* api.SaveComposer(save)).draft!
+        yield* typeInto(api, chat.id, tip, "alpha and more from the other tab", alpha)
+        const replayed = (yield* api.SaveComposer(save)).draft!
+        assert.strictEqual(replayed.content, "alpha and more from the other tab")
+        const sent = yield* api.SendMessage({
+          chatId: chat.id,
+          parentSlotId: tip,
+          branch: false,
+          content: "alpha",
+          composer: takenFrom(initial, "alpha")
+        })
+        assert.strictEqual(sent._tag, queued ? "Queued" : "Posted")
+        assert.deepStrictEqual(
+          [sent.draft?.status, sent.draft?.content],
+          ["active", "alpha and more from the other tab"]
+        )
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(serverLayer(testConfig(), FakeGenerator.layer({ tokensPerSecond: 1, tokens: 20_000 })))
+      )
+    )
+  }
+
+  it.live("a send commits only the draft it names, never another one at its tip since", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const chat = yield* api.CreateChat({ title: "Replaced" })
+      const root = yield* posted(
+        api.SendMessage({ chatId: chat.id, parentSlotId: null, branch: false, content: "root" })
+      )
+      const a = yield* typeInto(api, chat.id, root.entry.slotId, "tab A unsent")
+      // A message is appended below the root, so A moves with it; then B starts at the root.
+      yield* posted(
+        api.SendMessage({ chatId: chat.id, parentSlotId: root.entry.slotId, branch: false, content: "reply" })
+      )
+      const b = yield* typeInto(api, chat.id, root.entry.slotId, "tab B distinct text")
+      assert.notStrictEqual(a.id, b.id)
+      // Tab A, which hadn't heard, sends its text as a branch from the root.
+      const sent = yield* posted(
+        api.SendMessage({
+          chatId: chat.id,
+          parentSlotId: root.entry.slotId,
+          branch: true,
+          content: a.content,
+          composer: takenFrom(a)
+        })
+      )
+      assert.deepStrictEqual([sent.draft?.id, sent.draft?.status], [a.id, "committed"])
+      // B moved with the branch's new message, its text intact.
+      const there = yield* open(api, chat.id, sent.entry.slotId)
+      assert.deepStrictEqual([there.id, there.content], [b.id, "tab B distinct text"])
     }).pipe(Effect.scoped, withServer(testConfig()))
   )
 })

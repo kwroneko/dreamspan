@@ -21,7 +21,17 @@ import type { Notice } from "@rp/shared/noticeApi.ts"
 import { Notices } from "../src/chat/Notices.ts"
 import * as FakeGenerator from "../src/dev/fakeGenerator.ts"
 import { png, textChunk } from "./formats/support.ts"
-import { client, login, outcome, posted, serverLayer, serverPort, testConfig, typeInto } from "./support/config.ts"
+import {
+  client,
+  login,
+  outcome,
+  posted,
+  serverLayer,
+  serverPort,
+  testConfig,
+  takenFrom,
+  typeInto
+} from "./support/config.ts"
 import { cardDoc, presetDoc } from "./support/docs.ts"
 
 type Api = Effect.Success<ReturnType<typeof client>>
@@ -65,6 +75,7 @@ interface OwnEditor {
   readonly noteRefId: RefId
   readonly avatarMediaId: string
   readonly field: string
+  readonly draftId: string
   /** A variant of the card, and one of the note, each with an update waiting to be resolved. */
   readonly pendingCardRefId: RefId
   readonly pendingNoteRefId: RefId
@@ -766,6 +777,7 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
         actor.api.RestoreEditorDraft({
           refId: owner.editor.cardRefId,
           field: owner.editor.field,
+          draftId: owner.editor.draftId,
           seq: 0,
           expectedRowVersion: 1
         }),
@@ -778,6 +790,7 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
         actor.api.DiscardEditorDraft({
           refId: owner.editor.cardRefId,
           field: owner.editor.field,
+          draftId: owner.editor.draftId,
           expectedRowVersion: 1
         }),
         "NotFound"
@@ -791,7 +804,7 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
           actor.api.CommitEditorDrafts({
             refId: owner.editor.cardRefId,
             expectedRowVersion: theirs.ref.rowVersion,
-            fields: theirs.drafts.map((d) => ({ field: d.key.field, expectedRowVersion: d.rowVersion })),
+            fields: theirs.drafts.map((d) => ({ field: d.key.field, draftId: d.id, expectedRowVersion: d.rowVersion })),
             message: "taken"
           }),
           "NotFound"
@@ -1252,7 +1265,7 @@ const seed = Effect.gen(function* () {
       assert.strictEqual(uploaded.status, 200)
       const note = yield* api.CreateCardNote({ cardRefId: editorCard.id, title: "Outfit" })
       const field = textField(["description"])
-      yield* api.SaveEditorDraft({
+      const fieldDraft = yield* api.SaveEditorDraft({
         refId: editorCard.id,
         field,
         content: "A lighthouse keeper.",
@@ -1279,7 +1292,7 @@ const seed = Effect.gen(function* () {
             yield* api.CommitEditorDrafts({
               refId: target,
               expectedRowVersion: ref.rowVersion,
-              fields: [{ field: draft.key.field, expectedRowVersion: draft.rowVersion }],
+              fields: [{ field: draft.key.field, draftId: draft.id, expectedRowVersion: draft.rowVersion }],
               message: null
             })
           }
@@ -1307,7 +1320,7 @@ const seed = Effect.gen(function* () {
           parentSlotId: null,
           branch: false,
           content: "x",
-          composerRowVersion: wiped.rowVersion
+          composer: takenFrom(wiped)
         })
       )
       const [recovered] = yield* api.ListRecoveredTexts({ limit: 1, before: null })
@@ -1345,7 +1358,8 @@ const seed = Effect.gen(function* () {
           revisionId: opened.ref.headRevisionId,
           noteRefId: note.id,
           avatarMediaId: opened.doc.avatar_media_id as string,
-          field
+          field,
+          draftId: fieldDraft.id
         }
       } satisfies Party
     })

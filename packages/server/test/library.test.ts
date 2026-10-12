@@ -519,7 +519,7 @@ describe("library", () => {
         doc: preset(MAIN),
         expectedRowVersion: yield* rowVersion(upstream.id),
         message: null,
-        commitDraft: { key, expectedRowVersion: draft.rowVersion }
+        commitDraft: { draftId: draft.id, session: draft.session, content: draft.content }
       })
       assert.strictEqual((yield* reader.GetDraft({ userId, key }))?.status, "committed")
     }).pipe(Effect.provide(database()))

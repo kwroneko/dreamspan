@@ -5,7 +5,6 @@ import { type AppApi, CurrentUser } from "@rp/shared/api.ts"
 import type { ChatId, EntityId, NewVersion, SlotId } from "@rp/shared/chat.ts"
 import { BranchSwitch, GenerationUnavailable } from "@rp/shared/chatApi.ts"
 import type { UserId } from "@rp/shared/domain.ts"
-import { composerKey } from "@rp/shared/drafts.ts"
 import { Effect, Option, Stream } from "effect"
 import { ChatHub } from "../chat/ChatHub.ts"
 import { Generator } from "../chat/Generator.ts"
@@ -98,23 +97,29 @@ export const makeChatHandlers = Effect.gen(function* () {
       readonly speakerEntityId: EntityId | null
       readonly replySpeakerEntityId: EntityId | null
       readonly direction: string | null
-      readonly composerRowVersion: number | undefined
+      readonly composer: { readonly draftId: string; readonly session: number; readonly text: string } | undefined
     }
   ) =>
     Effect.gen(function* () {
-      const { composerRowVersion, ...send } = params
+      const { composer, ...send } = params
       const outcome = yield* writer.SendOrQueue({
         userId: user,
         ...send,
-        // The composer at the tip the text was typed under (DESIGN §6.2).
+        // The composer draft the text was taken from (DESIGN §6.2).
         commitDraft:
-          composerRowVersion === undefined
+          composer === undefined
             ? null
-            : { key: composerKey(params.chatId, params.parentSlotId), expectedRowVersion: composerRowVersion }
+            : { draftId: composer.draftId, session: composer.session, content: composer.text }
       })
       if (outcome._tag === "Queued") {
         hub.publish(params.chatId, { _tag: "Queue", queue: outcome.queue })
-        return { _tag: "Queued" as const, queued: outcome.queued, queue: outcome.queue, draft: outcome.draft }
+        return {
+          _tag: "Queued" as const,
+          queued: outcome.queued,
+          queue: outcome.queue,
+          draft: outcome.draft,
+          recovered: outcome.recovered
+        }
       }
       const { result } = outcome
       if (params.kind === "generate") {
@@ -127,7 +132,7 @@ export const makeChatHandlers = Effect.gen(function* () {
       }
       const entry = yield* publishSlot(user, result.slotId)
       hub.publish(params.chatId, { _tag: "Chat", chat: result.chat })
-      return { _tag: "Posted" as const, entry, chat: result.chat, draft: result.draft }
+      return { _tag: "Posted" as const, entry, chat: result.chat, draft: result.draft, recovered: result.recovered }
     })
 
   const handlers = {
@@ -161,15 +166,7 @@ export const makeChatHandlers = Effect.gen(function* () {
     ListVersions: ({ slotId }) =>
       Effect.flatMap(userId, (id) => reader.ListVersions({ userId: id, slotId })).pipe(internal("ListVersions")),
 
-    SendMessage: ({
-      chatId,
-      parentSlotId,
-      branch,
-      content,
-      speakerEntityId,
-      replySpeakerEntityId,
-      composerRowVersion
-    }) =>
+    SendMessage: ({ chatId, parentSlotId, branch, content, speakerEntityId, replySpeakerEntityId, composer }) =>
       Effect.flatMap(userId, (id) =>
         sendOrQueue(id, {
           chatId,
@@ -180,13 +177,13 @@ export const makeChatHandlers = Effect.gen(function* () {
           speakerEntityId: speakerEntityId ?? null,
           replySpeakerEntityId: replySpeakerEntityId ?? null,
           direction: null,
-          composerRowVersion
+          composer
         })
       ).pipe(internal("SendMessage")),
 
     // Once the version is written, its generation starts even if the caller has gone:
     // otherwise it would stay `generating` with nothing behind it.
-    Generate: ({ chatId, parentSlotId, branch, speakerEntityId, direction, composerRowVersion }) =>
+    Generate: ({ chatId, parentSlotId, branch, speakerEntityId, direction, composer }) =>
       Effect.gen(function* () {
         yield* needGenerator
         const id = yield* userId
@@ -199,7 +196,7 @@ export const makeChatHandlers = Effect.gen(function* () {
           speakerEntityId: speakerEntityId ?? null,
           replySpeakerEntityId: null,
           direction: direction ?? null,
-          composerRowVersion
+          composer
         })
       }).pipe(Effect.uninterruptible, internal("Generate")),
 

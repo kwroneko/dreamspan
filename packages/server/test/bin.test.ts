@@ -280,7 +280,13 @@ describe("recycle bin", () => {
           expectedRowVersion: (yield* reader.GetDraft({ userId, key: composerKey(chat.id, null) }))?.rowVersion ?? null,
           baseRevision: null
         })
-        yield* writer.ClearDraft({ userId, key: draft.key, outcome: "discarded", expectedRowVersion: draft.rowVersion })
+        yield* writer.ClearDraft({
+          userId,
+          key: draft.key,
+          draftId: draft.id,
+          outcome: "discarded",
+          expectedRowVersion: draft.rowVersion
+        })
       }
       assert.deepStrictEqual(
         (yield* reader.ListRecoveredTexts({ userId, source: null, limit: 10, before: null })).map((t) => t.content),
@@ -512,7 +518,13 @@ describe("recycle bin", () => {
           expectedRowVersion: (yield* reader.GetDraft({ userId, key }))?.rowVersion ?? null,
           baseRevision: null
         })
-        yield* writer.ClearDraft({ userId, key, outcome: "discarded", expectedRowVersion: draft.rowVersion })
+        yield* writer.ClearDraft({
+          userId,
+          key,
+          draftId: draft.id,
+          outcome: "discarded",
+          expectedRowVersion: draft.rowVersion
+        })
       }
       const db = new DatabaseSync(databaseFile(dir))
       db.exec(`UPDATE bin_items SET deleted_at = 1000; UPDATE recovered_texts SET created_at = 1000`)

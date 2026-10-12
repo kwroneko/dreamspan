@@ -53,7 +53,8 @@ const saved = (change: RefChange) =>
   new SavedRef({
     ref: change.ref,
     followers: change.followers.map(({ refId, outcome }) => ({ refId, outcome })),
-    setAside: change.setAside ?? []
+    setAside: change.setAside ?? [],
+    recovered: change.recovered ?? 0
   })
 
 const draftKey = (refId: RefId, field: string) => new DraftKey({ targetKind: "entity_field", targetId: refId, field })
@@ -90,12 +91,13 @@ export const makeEditorHandlers = Effect.gen(function* () {
         return ref
       }).pipe(settle("CreateCard")),
 
-    SaveEditorDraft: ({ refId, field, content, expectedRowVersion, expectedSession, baseRevisionId }) =>
+    SaveEditorDraft: ({ refId, field, draftId, content, expectedRowVersion, expectedSession, baseRevisionId }) =>
       Effect.gen(function* () {
         yield* checkField(field)
         return yield* writer.SaveDraft({
           userId: yield* userId,
           key: draftKey(refId, field),
+          draftId: draftId ?? null,
           content,
           expectedRowVersion,
           ...(expectedSession === undefined ? {} : { expectedSession }),
@@ -108,14 +110,20 @@ export const makeEditorHandlers = Effect.gen(function* () {
         settle("EditorDraftHistory")
       ),
 
-    RestoreEditorDraft: ({ refId, field, seq, expectedRowVersion }) =>
+    RestoreEditorDraft: ({ refId, field, draftId, seq, expectedRowVersion }) =>
       Effect.flatMap(userId, (id) =>
-        writer.RestoreDraftState({ userId: id, key: draftKey(refId, field), seq, expectedRowVersion })
+        writer.RestoreDraftState({ userId: id, key: draftKey(refId, field), draftId, seq, expectedRowVersion })
       ).pipe(settle("RestoreEditorDraft")),
 
-    DiscardEditorDraft: ({ refId, field, expectedRowVersion }) =>
+    DiscardEditorDraft: ({ refId, field, draftId, expectedRowVersion }) =>
       Effect.flatMap(userId, (id) =>
-        writer.ClearDraft({ userId: id, key: draftKey(refId, field), outcome: "discarded", expectedRowVersion })
+        writer.ClearDraft({
+          userId: id,
+          key: draftKey(refId, field),
+          draftId,
+          outcome: "discarded",
+          expectedRowVersion
+        })
       ).pipe(settle("DiscardEditorDraft")),
 
     CommitEditorDrafts: ({ refId, expectedRowVersion, fields, message }) =>

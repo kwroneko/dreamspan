@@ -491,7 +491,8 @@ export const layer = Layer.unwrap(
                 new SavedRef({
                   ref: change.ref,
                   followers: change.followers.map(({ refId, outcome }) => ({ refId, outcome })),
-                  setAside: []
+                  setAside: [],
+                  recovered: 0
                 })
               )
             })
@@ -557,6 +558,7 @@ export const layer = Layer.unwrap(
         yield* writer.SaveDraft({
           userId: user.id,
           key: new DraftKey({ targetKind: "entity_field", targetId: draft.refId, field: draft.field }),
+          draftId: draft.draftId ?? null,
           content: draft.content,
           expectedRowVersion: draft.expectedRowVersion,
           ...(draft.expectedSession === undefined ? {} : { expectedSession: draft.expectedSession }),

@@ -41,7 +41,12 @@ export class SavedRef extends Schema.Class<SavedRef>("SavedRef")({
    * Drafts in something that's gone since (a deleted prompt's text): not saved, and their text
    * is in the bin's recovered texts.
    */
-  setAside: Schema.Array(Schema.String)
+  setAside: Schema.Array(Schema.String),
+  /**
+   * How many earlier texts of the saved drafts went to the bin's recovered texts: from
+   * before a destructive change, or another tab's text a save went over.
+   */
+  recovered: Schema.Int
 }) {}
 
 /** Everything the editor opens with, read in one snapshot. */
@@ -67,8 +72,14 @@ const Writes = [NotFound, StaleWrite, EditRefused, ServerError] as const
 
 const DraftField = { refId: RefId, field: Schema.String }
 
+/**
+ * Text typed into a field: the draft it was typed into (`draftId`, null before it had one),
+ * as the client last had it, and the text now. Also what a closing page sends
+ * (`drafts` in `POST /library/drafts`, with keepalive).
+ */
 export const EditorDraftSave = Schema.Struct({
   ...DraftField,
+  draftId: Schema.optionalKey(Schema.NullOr(Schema.String)),
   content: Schema.String,
   expectedRowVersion: Schema.NullOr(Schema.Int),
   expectedSession: Schema.optionalKey(Schema.Int),
@@ -100,13 +111,13 @@ export class EditorApi extends RpcGroup.make(
   }),
   /** Moves the draft back to an earlier state; the restore is itself undoable. */
   Rpc.make("RestoreEditorDraft", {
-    payload: { ...DraftField, seq: Schema.Int, expectedRowVersion: Schema.Int },
+    payload: { ...DraftField, draftId: Schema.String, seq: Schema.Int, expectedRowVersion: Schema.Int },
     success: Draft,
     error: Schema.Union([...Writes])
   }),
   /** Ends a draft unsaved. Its text goes to the bin's recovered texts. */
   Rpc.make("DiscardEditorDraft", {
-    payload: { ...DraftField, expectedRowVersion: Schema.Int },
+    payload: { ...DraftField, draftId: Schema.String, expectedRowVersion: Schema.Int },
     success: Draft,
     error: Schema.Union([...Writes])
   }),
@@ -115,7 +126,10 @@ export class EditorApi extends RpcGroup.make(
     payload: {
       refId: RefId,
       expectedRowVersion: Schema.Int,
-      fields: Schema.Array(Schema.Struct({ field: Schema.String, expectedRowVersion: Schema.Int })),
+      /** Each draft by its field, its id and the row version the client saved it at. */
+      fields: Schema.Array(
+        Schema.Struct({ field: Schema.String, draftId: Schema.String, expectedRowVersion: Schema.Int })
+      ),
       message: Schema.NullOr(Schema.String)
     },
     success: SavedRef,

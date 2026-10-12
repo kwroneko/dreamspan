@@ -83,7 +83,30 @@ const forEach = (
   }
 }
 
-export const makeCopy = (userId: string, refId: string, field: string, save: PendingSave): Copy => {
+/**
+ * What the draft stores use of the page: timers, the clock and requests that outlive it.
+ * The protocol tests (server test/protocol) drive them by hand.
+ */
+export interface PageEnv {
+  readonly setTimer: (run: () => void, ms: number) => unknown
+  readonly clearTimer: (timer: unknown) => void
+  readonly now: () => number
+  /** A JSON request that outlives the page (`fetch` with `keepalive`): whether the server took it. */
+  readonly keepalive: (path: string, body: string) => Promise<boolean>
+}
+
+export const browserEnv: PageEnv = {
+  setTimer: (run, ms) => setTimeout(run, ms),
+  clearTimer: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>),
+  now: () => Date.now(),
+  keepalive: (path, body) =>
+    fetch(path, { method: "POST", keepalive: true, headers: { "content-type": "application/json" }, body }).then(
+      (response) => response.ok,
+      () => false
+    )
+}
+
+export const makeCopy = (userId: string, refId: string, field: string, save: PendingSave, at: number): Copy => {
   const key = uuidv7()
   // Composer operation identities also survive a keepalive acknowledgement or a send.
   const pending =
@@ -93,7 +116,7 @@ export const makeCopy = (userId: string, refId: string, field: string, save: Pen
           payload: { ...save.payload, operationId: key }
         }
       : save
-  return { key, userId, refId, field, content: save.payload.content, save: pending, at: Date.now() }
+  return { key, userId, refId, field, content: save.payload.content, save: pending, at }
 }
 
 export const keepCopy = (copy: Copy, replaced: Copy | null = null) =>
@@ -155,10 +178,6 @@ export const copiesOfUser = async (userId: string): Promise<ReadonlyArray<Copy>>
   return copies
 }
 
-/** The copies of an entry that's gone: deleted, or no longer the user's to open. */
-export const dropCopiesOf = (userId: string, refId: string) =>
-  run("readwrite", (store) => forEach(store, "ref", [userId, refId], (copy, s) => s.delete(copy.key)))
-
 /** Logging out: the user's copies go. */
 export const clearCopies = (userId: string) =>
   run("readwrite", (store) => forEach(store, "userId", userId, (copy, s) => s.delete(copy.key)))
@@ -172,7 +191,7 @@ export const clearOtherUsers = (userId: string) =>
   )
 
 /** Copies past the retention period go, then the oldest, until the rest fit the limit. */
-export const pruneCopies = (userId: string, now = Date.now()) =>
+export const pruneCopies = (userId: string, now: number) =>
   run("readwrite", (store) => {
     const kept: Array<Copy> = []
     const request = store.index("userId").openCursor(userId)
