@@ -24,8 +24,8 @@ interface Scan {
 
 const workLimits = {
   keyEvaluations: 100000,
-  scannedCharacters: 512000000,
-  regexWork: 1000000000,
+  scannedCharacters: 128000000,
+  regexWork: 500000,
   patterns: 4096,
   patternCharacters: 131072,
   compiledUnits: 262144,
@@ -225,6 +225,19 @@ export const matchLorebooks = (
       recordIssue(source, "work_limit", `Activation stopped at the ${kind} work limit (${limit}); results are partial.`)
       throw halted
     }
+    const combined =
+      work.scannedCharacters +
+      256 * work.regexWork +
+      (kind === "scannedCharacters" ? amount : kind === "regexWork" ? 256 * amount : 0)
+    if (combined > workLimits.scannedCharacters) {
+      stopped = "work_limit"
+      recordIssue(
+        source,
+        "work_limit",
+        "Activation stopped at the combined scan/regex work limit (128000000); results are partial."
+      )
+      throw halted
+    }
     work[kind] += amount
   }
   const issue = (source: Source, code: Issue["code"], detail: string, key?: string) => {
@@ -304,16 +317,20 @@ export const matchLorebooks = (
       const cached = buffer.regexMatches?.get(pattern)
       if (cached !== undefined) return cached
       const word = pattern.sticky ? undefined : /^\\b(\w+)\\b$/.exec(pattern.source)?.[1]
+      const literal = pattern.sticky ? undefined : /^\(\?:(\w+)\)$/.exec(pattern.source)?.[1]
       charge(source, "matchResults", 1)
       let matched: boolean
       if (word !== undefined) matched = wordMatch(source, buffer, buffer.text, true, word)
-      else {
+      else if (literal !== undefined) {
+        charge(source, "scannedCharacters", buffer.text.length)
+        matched = buffer.text.includes(literal)
+      } else {
         const cost = compiledUnits(pattern.source, pattern.source.length) * Math.max(1, buffer.text.length)
-        if (cost > 8000000) {
+        if (cost > 250000) {
           issue(
             source,
             "regex_limit",
-            "Regex pattern size × input size exceeds 8,000,000; shorten the pattern or scan depth.",
+            "Regex pattern size × input size exceeds 250,000; shorten the pattern or scan depth.",
             key
           )
           return undefined

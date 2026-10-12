@@ -241,7 +241,7 @@ describe("lorebook matcher contract", () => {
   })
 
   it("runs catastrophic backtracking patterns on the linear engine", () => {
-    const result = run([{ keys: ["/(a+)+$/i"] }], ["a".repeat(50000) + "!"])
+    const result = run([{ keys: ["/(a+)+$/i"] }], ["a".repeat(10000) + "!"])
     expect(result.activated).toEqual([])
     expect(result.issues).toEqual([])
   })
@@ -465,7 +465,7 @@ describe("deterministic lorebook work bounds", () => {
       Array.from({ length: 1000 }, () => "A".repeat(1000)),
       { recursive: false }
     )
-    expect(result.work.scannedCharacters).toBeLessThanOrEqual(512000000)
+    expect(result.work.scannedCharacters).toBeLessThanOrEqual(128000000)
     expect(result.work.keyEvaluations).toBeLessThan(1000)
     expect(result.work.buffers).toBe(1)
     expect(result.issues).toEqual([
@@ -486,13 +486,13 @@ describe("deterministic lorebook work bounds", () => {
   it("L07 bounds aggregate regex work independently of scanned character work", () => {
     const result = run(
       [{ keys: Array.from({ length: 20 }, (_, i) => `/${"a?".repeat(100)}z${i}/`) }],
-      ["a".repeat(5000)],
+      ["a".repeat(500)],
       {
         recursive: false,
-        workLimits: { regexWork: 2000000 }
+        workLimits: { regexWork: 150000 }
       }
     )
-    expect(result.work.regexWork).toBe(202 * 5001)
+    expect(result.work.regexWork).toBe(202 * 501)
     expect(result.issues).toEqual([
       expect.objectContaining({ code: "work_limit", detail: expect.stringContaining("regexWork") })
     ])
@@ -632,7 +632,7 @@ describe("lorebook memory and workload envelopes", () => {
         if (kind === "caseless") return `/${"a".repeat(450)}${id}/i`
         return `/${"a".repeat(1990)}${id}/`
       })
-      const result = run([{ keys }], ["z"], { recursive: false })
+      const result = run([{ keys }], [], { recursive: false, scanDepth: 0 })
       expect(result.issues.filter(({ code }) => code === "work_limit")).toHaveLength(1)
       expect(result.issues.filter(({ code }) => code !== "work_limit").map(({ code }) => code)).toEqual(
         kind === "nested" ? ["unsafe_regex"] : []
@@ -732,7 +732,7 @@ it("L21 a 500-entry book of ASCII word-boundary regex keys shares the word index
   expect(result.work.regexWork).toBe(0)
 })
 
-it("L22 a typical mixed book leaves headroom for general regex evaluation", () => {
+it("L22 a typical mixed book uses cached substring matches for exact ASCII regexes", () => {
   const result = run(
     Array.from({ length: 500 }, (_, i) => ({
       keys: ["Person", "Alias", "Title"].map((prefix) => (i < 50 ? `/(?:${prefix}${i})/` : `${prefix}${i}`)),
@@ -743,5 +743,89 @@ it("L22 a typical mixed book leaves headroom for general regex evaluation", () =
   )
   expect(result.activated.map(({ entry }) => entry.uid)).toEqual([0, 1, 2, 3, 4])
   expect(result.issues).toEqual([])
-  expect(result.work.regexWork).toBeLessThan(250000000)
+  expect(result.work.regexWork).toBe(0)
+})
+
+describe("reviewed lorebook CPU allowance", () => {
+  it.each([false, true])("L23 combined compilation, regex and scan work stops replayably (nested %s)", (nested) => {
+    const count = nested ? 2 : 125
+    const keys = Array.from(
+      { length: count },
+      (_, i) => `/${nested ? "(".repeat(600) + "a" + ")*".repeat(600) : "a?".repeat(10)}z${String(i).padStart(3, "0")}/`
+    )
+    for (const [i, length] of [1900, 1900, 1900, 1900, 1900, 1900, 1899, 80, 18].entries()) {
+      const suffix = `x${i}){${i === 8 ? 2 : 16}}`
+      const slots = length - 3 - suffix.length
+      keys.push(`/(?:${"(a?)".repeat(Math.floor(slots / 4))}${"a".repeat(slots % 4)}${suffix}/`)
+    }
+    while (keys.length < 4095) keys.push(`/x${keys.length.toString(36).padStart(4, "0")}/`)
+    let characters = keys.reduce((sum, key) => sum + key.length - 2, 0)
+    for (let i = count + 9; characters < 61440; i++) {
+      const padding = Math.min(1990, 61440 - characters)
+      keys[i] = keys[i]!.slice(0, -1) + "a".repeat(padding) + "/"
+      characters += padding
+    }
+    const length = Math.floor(((nested ? 500000 : 1000000000) - 1 - 262143) / (count * (keys[0]!.length - 2)))
+    const messages = ["a".repeat(length - 1)]
+    if (nested) messages.push("a".repeat(333245 - length - 2))
+    const entries = [
+      { keys, scan_depth: 0 },
+      { keys: keys.slice(0, count), scan_depth: 1 },
+      {
+        keys: Array<string>(2000).fill("ab"),
+        scan_depth: nested ? 2 : 1,
+        match_whole_words: false,
+        case_sensitive: true
+      }
+    ]
+    const result = run(entries, messages, { recursive: false })
+    expect(result.replayable).toBe(true)
+    expect(result.work.scannedCharacters + 256 * result.work.regexWork).toBeLessThanOrEqual(128000000)
+    expect(result.issues.filter(({ code }) => code === "work_limit")).toEqual([
+      expect.objectContaining({ detail: expect.stringContaining("combined scan/regex") })
+    ])
+    expect(result.issues.some(({ code }) => code === "regex_timeout")).toBe(false)
+    for (let i = 0; i < 2; i++) expect(run(entries, messages, { recursive: false })).toEqual(result)
+  })
+
+  it.each(["", "g", "m", "s", "u", "gmsu"])(
+    "L24 caches exact non-sticky ASCII substring regexes (flags %s)",
+    (flags) => {
+      const key = `/(?:cat_42)/${flags}`
+      const result = run(
+        [
+          { keys: [key, key], group: "g", use_group_scoring: true },
+          { keys: [key], group: "g", use_group_scoring: true }
+        ],
+        ["concatenate_cat_42s"],
+        { recursive: false }
+      )
+      expect(result.activated.map(({ entry }) => entry.uid)).toEqual([0])
+      expect(result.work.regexWork).toBe(0)
+      expect(result.work.matchResults).toBe(1)
+      expect(result.issues).toEqual([])
+    }
+  )
+
+  it.each([
+    ["/(?:cat)/y", "cat", false],
+    ["/(?:cat)/i", "CAT", true],
+    ["/^(?:cat)/", "cat", false],
+    ["/(?:cat|dog)/", "dog", true],
+    ["/(?:cat)+$/", "cats", false],
+    ["/(?:é)/", "é", true]
+  ] as const)("L25 keeps engine semantics for %s", (key, message, matched) => {
+    const result = run([{ keys: [key] }], [message], { recursive: false })
+    expect(result.activated).toHaveLength(matched ? 1 : 0)
+    expect(result.work.regexWork).toBeGreaterThan(0)
+    expect(result.issues).toEqual([])
+  })
+})
+
+it.each([62499, 62500])("L26 enforces the 250,000-unit per-regex boundary (%s characters)", (length) => {
+  const result = run([{ keys: ["/a?zz/"] }], ["a".repeat(length)], { recursive: false })
+  expect(result.replayable).toBe(true)
+  expect(result.activated).toEqual([])
+  expect(result.work.regexWork).toBe(length === 62499 ? 250000 : 0)
+  expect(result.issues).toEqual(length === 62499 ? [] : [expect.objectContaining({ code: "regex_limit" })])
 })
