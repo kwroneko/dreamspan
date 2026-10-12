@@ -1,7 +1,7 @@
 // Preset regex scripts on V8's linear-time engine (ARCHITECTURE §15): what runs matches what
 // ST's pattern matches, and what the linear engine can't run is refused, never backtracked.
 import { describe, expect, it } from "vitest"
-import { caseless, compile, run } from "../src/assembler/regex.ts"
+import { caseless, compile, makeRegexDeadline, run } from "../src/assembler/regex.ts"
 
 const linear = (source: string) => {
   const regex = compile(source)
@@ -61,5 +61,19 @@ describe("preset regex scripts", () => {
     expect(compile("/[/")).toBeNull()
     // ST takes an unknown flag for part of the pattern, as written.
     expect(String(compile("/[a-z]/v"))).toBe("/\\/[a-z]\\/v/l")
+  })
+
+  it("interrupts an expensive linear engine call with the shared VM deadline", () => {
+    const regex = linear(`/${"(a*)".repeat(300)}b/`)
+    const deadline = makeRegexDeadline(10)
+    let started = false
+    expect(
+      deadline.run(() => {
+        started = true
+        regex.test("a".repeat(100000))
+      })
+    ).toBe(false)
+    expect(started).toBe(true)
+    expect(deadline.expired).toBe(true)
   })
 })

@@ -77,7 +77,12 @@ export const caseless = (pattern: string) => {
 export const compile = (source: string): RegExp | "unsafe" | null => {
   const m = /(\/?)(.+)\1([a-z]*)/i.exec(source)
   if (!m) return null
-  let [pattern, flags] = m[3] && !/^(?!.*?(.).*?\1)[gmixXsuUAJ]+$/.test(m[3]) ? [source, ""] : [m[2]!, m[3] ?? ""]
+  const [pattern, flags] = m[3] && !/^(?!.*?(.).*?\1)[gmixXsuUAJ]+$/.test(m[3]) ? [source, ""] : [m[2]!, m[3] ?? ""]
+  return compileLinear(pattern, flags)
+}
+
+/** The assembler's safe engine, shared by scripts and lorebook keys. */
+export const compileLinear = (pattern: string, flags: string): RegExp | "unsafe" | null => {
   try {
     new RegExp(pattern, flags)
   } catch {
@@ -164,19 +169,45 @@ export const run = (
 /** Runs `job()` in a context of its own, so a timeout can stop it. */
 const JOB = new Script("job()")
 
+/** A cumulative VM deadline; even a single engine call can be interrupted. */
+export const makeRegexDeadline = (limit: number) => {
+  const context = createContext({ job: undefined })
+  let ms = limit
+  return {
+    get expired() {
+      return ms <= 0
+    },
+    run: (job: () => void) => {
+      if (ms <= 0) return false
+      context.job = job
+      const start = performance.now()
+      try {
+        JOB.runInContext(context, { timeout: Math.max(1, Math.ceil(ms)) })
+        return true
+      } catch (error) {
+        if ((error as { code?: string }).code !== "ERR_SCRIPT_EXECUTION_TIMEOUT") throw error
+        ms = 0
+        return false
+      } finally {
+        context.job = undefined
+        if (ms > 0) ms -= performance.now() - start
+      }
+    }
+  }
+}
+
 /**
  * A preset's scripts for one context, with the time (`ms`) and the text (`output`) they may
  * still spend; each batch runs as a vm script whose timeout V8 enforces.
  */
 export const makeScriptRunner = (list: ReadonlyArray<PromptScript>, limits: { ms: number; output: number }) => {
-  const context = createContext({ job: undefined })
-  let ms = limits.ms
+  const deadline = makeRegexDeadline(limits.ms)
   const output = { left: limits.output }
   return {
     list,
     /** Whether the scripts ran out of time. */
     get expired() {
-      return ms <= 0
+      return deadline.expired
     },
     /**
      * Each message's text after the scripts, and whether it can change as the chat grows: a
@@ -189,8 +220,8 @@ export const makeScriptRunner = (list: ReadonlyArray<PromptScript>, limits: { ms
         list.some(({ script }) => !script.disabled && script.prompt_only && script.placement.includes(item.placement))
       const results = items.map((item) => ({ text: item.text, volatile: applies(item) }))
       const failed = new Map<PromptScript, string>()
-      if (list.length === 0 || items.length === 0 || ms <= 0) return { results, failed }
-      context.job = () => {
+      if (list.length === 0 || items.length === 0 || deadline.expired) return { results, failed }
+      deadline.run(() => {
         items.forEach((item, i) => {
           let { text } = item
           let volatile = false
@@ -218,17 +249,7 @@ export const makeScriptRunner = (list: ReadonlyArray<PromptScript>, limits: { ms
           }
           results[i] = { text, volatile }
         })
-      }
-      const start = performance.now()
-      try {
-        JOB.runInContext(context, { timeout: Math.max(1, Math.ceil(ms)) })
-      } catch (error) {
-        if ((error as { code?: string }).code !== "ERR_SCRIPT_EXECUTION_TIMEOUT") throw error
-        ms = 0
-      } finally {
-        context.job = undefined
-        if (ms > 0) ms -= performance.now() - start
-      }
+      })
       return { results, failed }
     }
   }
