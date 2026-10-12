@@ -41,6 +41,8 @@ A slice is one commit-sized change.
 | B | Logic: assembler, graph, providers, LCM | One review |
 | C | Docs only, styling, renames | No agent: the author's trim pass |
 
+**Who reviews (owner, 2026-10-12):** reviewers run on Codex (`codex exec`), on the owner's OpenAI quota, to save Claude quota. At first both GPT-6.1-Sol and GPT-6-Astra review the same branch, each in its own copy of the worktree, and their findings are compared: real findings each one caught, false positives, time. Now and then an Opus reviewer joins for an A/B against them. The results go in §7, and decide the default.
+
 7. **Fix and commit.** The commit message lists the findings that were fixed.
 
 **Speed:** the review runs in the background while the next slice starts. The rule is that slice N+1 isn't committed until slice N's findings are fixed, so debt is never more than one slice deep.
@@ -109,3 +111,7 @@ Only one stream, the main one, edits these. Other streams write their ARCHITECTU
 - The main stream merges it.
 - Nothing merges with open findings.
 - The host is shared, so test runs use random ports and their own data directories (they already do), and performance numbers are only trusted after checking `uptime`.
+
+## 7. Reviewer comparison
+
+Results of running Codex reviewers (GPT-6.1-Sol, GPT-6-Astra) and Opus reviewers on the same branches. Nothing yet.
