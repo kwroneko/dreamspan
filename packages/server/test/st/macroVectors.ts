@@ -65,10 +65,10 @@ const FIXTURE_NAMES = { user: "Tobin", char: "Mira Vance" }
  * checks it, so an edit that moves the line updates the citation).
  */
 export const DEVIATIONS = {
-  instructOff: { line: 871, quote: "the instruct, system-prompt and context-template macros resolve as in ST" },
-  noExtensions: { line: 874, quote: "`{{hasExtension}}` is always false" },
-  ownKeys: { line: 840, quote: "Names are own keys only" },
-  cardFieldNames: { line: 875, quote: "Names inside a card field's macros resolve against the same bindings" }
+  instructOff: { line: 877, quote: "the instruct, system-prompt and context-template macros resolve as in ST" },
+  noExtensions: { line: 880, quote: "`{{hasExtension}}` is always false" },
+  ownKeys: { line: 846, quote: "Names are own keys only" },
+  cardFieldNames: { line: 881, quote: "Names inside a card field's macros resolve against the same bindings" }
 }
 const cite = ({ line, quote }: { readonly line: number; readonly quote: string }) => `ARCHITECTURE.md:${line}: ${quote}`
 const INSTRUCT_OFF = cite(DEVIATIONS.instructOff)
