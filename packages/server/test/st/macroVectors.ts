@@ -67,12 +67,14 @@ const FIXTURE_NAMES = { user: "Tobin", char: "Mira Vance" }
 export const DEVIATIONS = {
   instructOff: { line: 871, quote: "the instruct, system-prompt and context-template macros resolve as in ST" },
   noExtensions: { line: 874, quote: "`{{hasExtension}}` is always false" },
-  ownKeys: { line: 840, quote: "Names are own keys only" }
+  ownKeys: { line: 840, quote: "Names are own keys only" },
+  cardFieldNames: { line: 875, quote: "Names inside a card field's macros resolve against the same bindings" }
 }
 const cite = ({ line, quote }: { readonly line: number; readonly quote: string }) => `ARCHITECTURE.md:${line}: ${quote}`
 const INSTRUCT_OFF = cite(DEVIATIONS.instructOff)
 const NO_EXTENSIONS = cite(DEVIATIONS.noExtensions)
 const OWN_KEYS = cite(DEVIATIONS.ownKeys)
+const CARD_FIELD_NAMES = cite(DEVIATIONS.cardFieldNames)
 
 type Vars = Partial<Pick<MacroContextInput, "local" | "global">>
 const plain = (texts: ReadonlyArray<string>): Array<MacroVector> => texts.map((text) => ({ text }))
@@ -270,8 +272,8 @@ const builtins: ReadonlyArray<MacroVector> = [
     text,
     deviation: INSTRUCT_OFF
   })),
-  // Card fields, with the names ST's page has. ST expands a card field with the persona's
-  // and the character's names even when the call overrides them: the vector after these.
+  // Card fields, with the names ST's page has. With other names, ST still expands a card
+  // field with the page's: the vector after these.
   ...[
     "[{{description}}]",
     "{{charDescription}}|{{personality}}|{{charScenario}}|",
@@ -285,7 +287,7 @@ const builtins: ReadonlyArray<MacroVector> = [
     "{{if description}}# Description\n{{description}}{{/if}}",
     "{{if scenario}}has{{else}}none{{/if}}"
   ].map((text) => ({ text, context: FIXTURE_NAMES })),
-  { text: "{{char}}: {{description}}" }
+  { text: "{{char}}: {{description}}", deviation: CARD_FIELD_NAMES }
 ]
 
 /** variables.test.ts. */
