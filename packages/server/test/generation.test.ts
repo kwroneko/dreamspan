@@ -334,6 +334,83 @@ describe("generation", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
+  it.live("generates a reply queued from the composer after a branch switch, on the branch switched to", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const mock = yield* Effect.acquireRelease(
+        Effect.promise(() => startMockProvider(completion)),
+        (m) => Effect.promise(() => m.close())
+      )
+      const api = yield* client()
+      const { version, chat, events } = yield* generateReply(api, {
+        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+        model: {}
+      })
+      const bottom = () =>
+        Effect.map(
+          api.ReadPath({ chatId: chat.id, leafSlotId: null, range: { _tag: "Bottom" }, limit: 50 }),
+          (window) => window.entries
+        )
+      const [greeting, message] = yield* bottom()
+      // Another branch from the greeting, then back to the first.
+      const other = yield* posted(
+        api.SendMessage({
+          chatId: chat.id,
+          parentSlotId: greeting!.slotId,
+          branch: true,
+          content: "Take the hill road."
+        })
+      )
+      const switched = yield* api.SwitchBranch({ chatId: chat.id, slotId: other.entry.slotId, index: 0 })
+      assert.strictEqual(switched.slotId, message!.slotId)
+      assert.strictEqual(switched.chat.activeLeafSlotId, version.slotId)
+
+      // A reply there, held; a Generate from the composer onto it queues and commits the composer.
+      let release = () => {}
+      const held = new Promise<void>((resolve) => (release = resolve))
+      mock.setHandler((request, res) => void held.then(() => completion(request, res)))
+      const { entry } = yield* posted(api.Generate({ chatId: chat.id, parentSlotId: version.slotId, branch: false }))
+      yield* eventually(() => mock.requests().length === 2)
+      const draft = yield* api.SaveComposer({
+        chatId: chat.id,
+        tipSlotId: entry.slotId,
+        content: "Make it rain.",
+        expectedRowVersion: null
+      })
+      const queued = yield* api.Generate({
+        chatId: chat.id,
+        parentSlotId: entry.slotId,
+        branch: false,
+        direction: "Make it rain.",
+        composerRowVersion: draft.rowVersion
+      })
+      assert.strictEqual(queued._tag, "Queued")
+      assert.strictEqual((yield* api.GetComposer({ chatId: chat.id, tipSlotId: entry.slotId }))?.status, "committed")
+      release()
+      yield* eventually(() => finished(events, entry.version.id)?.status === "complete")
+      yield* eventually(() => mock.requests().length === 3)
+      const tip = () => Effect.map(api.GetChat({ chatId: chat.id }), (c) => c.activeLeafSlotId)
+      let leaf = yield* tip()
+      while (leaf === entry.slotId) {
+        yield* Effect.sleep(10)
+        leaf = yield* tip()
+      }
+      // On the branch switched to, with its composer gone along and nothing left to resend.
+      const path = yield* bottom()
+      assert.deepStrictEqual(
+        path.map((e) => [e.slotId === message!.slotId, e.branchIndex, e.branchCount]).slice(0, 2),
+        [
+          [false, 0, 1],
+          [true, 0, 2]
+        ]
+      )
+      assert.strictEqual(path.at(-1)!.slotId, leaf)
+      assert.strictEqual(path.at(-1)!.version.direction, "Make it rain.")
+      const moved = yield* api.GetComposer({ chatId: chat.id, tipSlotId: leaf })
+      assert.deepStrictEqual([moved?.status, moved?.content], ["committed", ""])
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
   it.live("sends Anthropic the system prompt, the prefill and the cache breakpoints", () => {
     const config = testConfig()
     return Effect.gen(function* () {
