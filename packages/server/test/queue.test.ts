@@ -7,8 +7,9 @@ import { assert, describe, it } from "@effect/vitest"
 import type { Chat, PathEntry, SlotId, VersionId } from "@rp/shared/chat.ts"
 import type { ChatEvent } from "@rp/shared/chatApi.ts"
 import { Deferred, Effect, Layer, Option, Stream } from "effect"
+import { Writer } from "../src/db/Database.ts"
 import { GenerationFailed, Generator } from "../src/chat/Generator.ts"
-import { client, outcome, posted, serverLayer, testConfig } from "./support/config.ts"
+import { client, outcome, posted, serverLayer, testConfig, typeInto } from "./support/config.ts"
 
 type Api = Effect.Success<ReturnType<typeof client>>
 
@@ -95,6 +96,166 @@ const pathBecomes = (api: Api, chatId: Chat["id"], expected: ReadonlyArray<strin
   })
 
 describe("send queue", () => {
+  for (const cleanup of ["restore", "purge", "restart"] as const) {
+    it.live(`${cleanup} before a deleted generation finishes recovers its unposted queue`, () =>
+      Effect.gen(function* () {
+        const api = yield* client()
+        const writer = yield* Writer
+        const user = yield* api.Whoami()
+        const { chat, reply } = yield* generatingChat(api)
+        yield* api.SendMessage({
+          chatId: chat.id,
+          parentSlotId: reply.slotId,
+          branch: false,
+          content: "unposted before cleanup"
+        })
+        yield* gate(reply.version.id)
+        // Exercise the writer-to-generation gap without letting the delete RPC stop it first.
+        const item = yield* writer.DeleteMessage({ userId: user.id, slotId: reply.slotId })
+        if (cleanup === "restore") yield* api.RestoreBinItem({ itemId: item.id })
+        else if (cleanup === "purge") yield* api.PurgeBinItem({ itemId: item.id })
+        else yield* writer.InterruptGenerations()
+        assert.deepStrictEqual(yield* api.ListQueued({ chatId: chat.id }), [])
+        assert.include(
+          (yield* api.ListRecoveredTexts({ limit: 100, before: null })).map((r) => r.content),
+          "unposted before cleanup"
+        )
+      }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), gated)))
+    )
+  }
+
+  it.live("withdrawing a queued direction retains it if the caller leaves before copying it", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const { chat, reply } = yield* generatingChat(api)
+      const queued = yield* api.Generate({
+        chatId: chat.id,
+        parentSlotId: reply.slotId,
+        branch: false,
+        direction: "withdrawn direction"
+      })
+      if (queued._tag !== "Queued") return assert.fail("it should queue")
+      yield* api.WithdrawQueued({ queuedId: queued.queued.id, expectedRowVersion: queued.queued.rowVersion })
+      assert.deepStrictEqual(yield* api.ListQueued({ chatId: chat.id }), [])
+      assert.include(
+        (yield* api.ListRecoveredTexts({ limit: 100, before: null })).map((r) => r.content),
+        "withdrawn direction"
+      )
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), gated)))
+  )
+
+  for (const deletion of ["message", "branch", "chat"] as const) {
+    it.live(`deleting a streaming ${deletion} recovers committed queue text and directions before removing them`, () =>
+      Effect.gen(function* () {
+        const api = yield* client()
+        const { chat, reply } = yield* generatingChat(api)
+        const text = "committed queued message"
+        const direction = "committed queued direction"
+        const draft = yield* typeInto(api, chat.id, reply.slotId, text)
+        const first = yield* api.SendMessage({
+          chatId: chat.id,
+          parentSlotId: reply.slotId,
+          branch: false,
+          content: text,
+          composerRowVersion: draft.rowVersion
+        })
+        assert.strictEqual(first._tag, "Queued")
+        const next = yield* typeInto(api, chat.id, reply.slotId, direction, first.draft!)
+        assert.strictEqual(
+          (yield* api.Generate({
+            chatId: chat.id,
+            parentSlotId: reply.slotId,
+            branch: false,
+            direction,
+            composerRowVersion: next.rowVersion
+          }))._tag,
+          "Queued"
+        )
+        yield* gate(reply.version.id)
+        const item =
+          deletion === "message"
+            ? yield* api.DeleteMessage({ slotId: reply.slotId })
+            : deletion === "branch"
+              ? yield* api.DeleteBranch({ slotId: reply.slotId })
+              : yield* api.DeleteChat({ chatId: chat.id })
+        yield* api.RestoreBinItem({ itemId: item.id })
+        assert.deepStrictEqual(yield* api.ListQueued({ chatId: chat.id }), [])
+        const recovered = yield* api.ListRecoveredTexts({ limit: 100, before: null })
+        assert.includeMembers(
+          recovered.map((r) => r.content),
+          [text, direction]
+        )
+      }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), gated)))
+    )
+  }
+
+  it.live("a restart recovers queued directions while posting committed messages without replies", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const chatId = yield* Effect.gen(function* () {
+        const api = yield* client()
+        const { chat, reply } = yield* generatingChat(api)
+        const draft = yield* typeInto(api, chat.id, reply.slotId, "queued message")
+        const first = yield* api.SendMessage({
+          chatId: chat.id,
+          parentSlotId: reply.slotId,
+          branch: false,
+          content: "queued message",
+          composerRowVersion: draft.rowVersion
+        })
+        const next = yield* typeInto(api, chat.id, reply.slotId, "restart direction", first.draft!)
+        yield* api.Generate({
+          chatId: chat.id,
+          parentSlotId: reply.slotId,
+          branch: false,
+          direction: "restart direction",
+          composerRowVersion: next.rowVersion
+        })
+        return chat.id
+      }).pipe(Effect.scoped, Effect.provide(serverLayer(config, gated)))
+      yield* Effect.gen(function* () {
+        const api = yield* client()
+        assert.deepStrictEqual(yield* api.ListQueued({ chatId }), [])
+        assert.include(
+          (yield* path(api, chatId)).map((e) => e.version.content),
+          "queued message"
+        )
+        assert.include(
+          (yield* api.ListRecoveredTexts({ limit: 100, before: null })).map((r) => r.content),
+          "restart direction"
+        )
+      }).pipe(Effect.scoped, Effect.provide(serverLayer(config, gated)))
+    })
+  })
+
+  it.live("background queue posting moves its branch's next composer to the new tip", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const { chat, reply } = yield* generatingChat(api)
+      const [root] = yield* path(api, chat.id)
+      const draft = yield* typeInto(api, chat.id, reply.slotId, "queued")
+      const sent = yield* api.SendMessage({
+        chatId: chat.id,
+        parentSlotId: reply.slotId,
+        branch: false,
+        content: "queued",
+        composerRowVersion: draft.rowVersion
+      })
+      const typing = yield* typeInto(api, chat.id, reply.slotId, "next turn", sent.draft!)
+      const other = yield* posted(
+        api.SendMessage({ chatId: chat.id, parentSlotId: root!.slotId, branch: true, content: "other" })
+      )
+      yield* gate(reply.version.id)
+      yield* api.StopGeneration({ versionId: reply.version.id })
+      assert.strictEqual((yield* api.GetChat({ chatId: chat.id })).activeLeafSlotId, other.entry.slotId)
+      const switched = yield* api.SwitchBranch({ chatId: chat.id, slotId: other.entry.slotId, index: 0 })
+      const moved = yield* api.OpenComposer({ chatId: chat.id, tipSlotId: switched.chat.activeLeafSlotId })
+      assert.deepStrictEqual([moved.id, moved.content], [typing.id, "next turn"])
+      const left = yield* api.OpenComposer({ chatId: chat.id, tipSlotId: reply.slotId })
+      assert.deepStrictEqual([left.id === typing.id, left.content], [false, ""])
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), gated)))
+  )
+
   it.live("a message sent during a reply waits, then posts after it with a reply of its own", () =>
     Effect.gen(function* () {
       const api = yield* client()

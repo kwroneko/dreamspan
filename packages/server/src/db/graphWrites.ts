@@ -182,10 +182,8 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
       const committed = yield* drafts.commit(userId, commitDraft)
       // The composer at the old tip moves to the new one: text typed while something
       // else was appended stays in view, and a send's recovery text goes along with it.
-      if (!keepLeaf) {
-        yield* sql`UPDATE drafts SET field = ${slotId}, row_version = row_version + 1
+      yield* sql`UPDATE drafts SET field = ${slotId}, row_version = row_version + 1
                    WHERE target_kind = 'composer' AND target_id = ${chatId} AND field = ${parentSlotId ?? ""}`
-      }
       const movedComposer =
         committed !== null && committed.key.targetKind === "composer" && committed.key.targetId === chatId
       const draft = movedComposer ? yield* drafts.find(userId, composerKey(chatId, slotId)) : null

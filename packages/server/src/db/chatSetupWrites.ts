@@ -93,6 +93,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
         const owner = slot!.owner_user_id as UserId
         // The reply went to the bin (or its chat did): what waited for it is withdrawn.
         if (slot!.slot_deleted !== null || slot!.chat_deleted !== null) {
+          yield* bin.recoverQueued(owner, entries)
           yield* sql`DELETE FROM queued_messages WHERE reply_slot_id = ${replySlotId}`
           return { ...nothing, withdrawn: entries.length, queueChanged: true, queue: yield* chatQueue(sql, chatId) }
         }
@@ -117,6 +118,10 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
             .pipe(Effect.catchTag(["NotFound", "LeafMoved"], (error) => Effect.die(error)))
         const posted: Array<SlotId> = []
         if (mode === "restart") {
+          yield* bin.recoverQueued(
+            owner,
+            entries.filter((entry) => entry.kind === "generate")
+          )
           let parent = replySlotId
           for (const entry of entries) {
             if (entry.kind === "message") {
@@ -323,6 +328,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
               actual: row.row_version
             })
           }
+          yield* bin.recoverQueued(userId, [row])
           yield* sql`DELETE FROM queued_messages WHERE id = ${queuedId}`
           return { queued: toQueued(row), queue: yield* chatQueue(sql, row.chat_id) }
         }).pipe(transaction("WithdrawQueued")),

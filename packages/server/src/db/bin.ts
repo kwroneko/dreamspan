@@ -10,6 +10,7 @@ import { Data, Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import { makeDraftStore } from "./drafts.ts"
 import { NotFound } from "./ops.ts"
+import type { QueuedRow } from "./queueRows.ts"
 
 interface BinRow {
   readonly id: string
@@ -395,6 +396,7 @@ export const makeBin = (sql: SqlClient.SqlClient, limits: BinLimits) => {
       // A deleted message took the leaf up to its parent (relocateLeaf): it comes back down.
       const messages = item.kind === "message" || item.kind === "branch"
       const leaf = messages && item.chat_id !== null ? yield* tipLeaf(item.chat_id) : null
+      if (item.chat_id !== null) yield* discardDeletedQueue(item.chat_id)
       const table = {
         chat: "chats",
         message: "slots",
@@ -415,6 +417,11 @@ export const makeBin = (sql: SqlClient.SqlClient, limits: BinLimits) => {
    */
   const purgeWhere = (where: string, params: ReadonlyArray<unknown>) =>
     Effect.gen(function* () {
+      const chats = yield* sql.unsafe<{ chat_id: string }>(
+        `SELECT DISTINCT chat_id FROM bin_items WHERE chat_id IS NOT NULL AND (${where})`,
+        params
+      )
+      for (const chat of chats) yield* discardDeletedQueue(chat.chat_id)
       const now = Date.now()
       const run = (statement: string, leading: ReadonlyArray<unknown> = []) =>
         sql.unsafe(statement, [...leading, ...params])
@@ -590,6 +597,34 @@ export const makeBin = (sql: SqlClient.SqlClient, limits: BinLimits) => {
       }
     })
 
+  /** Keeps every unposted entry's text, including a Generate's one-turn direction. */
+  const recoverQueued = (userId: UserId, entries: ReadonlyArray<QueuedRow>) =>
+    Effect.gen(function* () {
+      for (const entry of entries) {
+        yield* recover(
+          userId,
+          composerKey(entry.chat_id, entry.reply_slot_id),
+          [entry.content, entry.direction ?? ""],
+          "discard"
+        )
+      }
+    })
+
+  // A restore or purge can precede the generation's cleanup (or follow a crash).
+  const discardDeletedQueue = (chatId: string) =>
+    Effect.gen(function* () {
+      const entries = yield* sql<QueuedRow & { owner_user_id: UserId }>`
+        SELECT q.*, c.owner_user_id FROM queued_messages q JOIN chats c ON c.id = q.chat_id
+          JOIN slots s ON s.id = q.reply_slot_id
+        WHERE q.chat_id = ${chatId} AND (c.deleted_at IS NOT NULL OR s.deleted_at IS NOT NULL) ORDER BY q.seq`
+      if (entries.length === 0) return
+      yield* recoverQueued(entries[0]!.owner_user_id, entries)
+      yield* sql`DELETE FROM queued_messages WHERE ${sql.in(
+        "id",
+        entries.map((entry) => entry.id)
+      )}`
+    })
+
   const drafts = makeDraftStore(sql, recover)
 
   return {
@@ -605,7 +640,8 @@ export const makeBin = (sql: SqlClient.SqlClient, limits: BinLimits) => {
     emptyBin,
     evictDeleted,
     loadItem,
-    recover
+    recover,
+    recoverQueued
   }
 }
 
