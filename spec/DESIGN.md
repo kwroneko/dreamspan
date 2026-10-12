@@ -386,6 +386,24 @@ These are strategies for mapping history to user and assistant roles:
 
   Some frontier models took the summary request for a prompt injection until a line acknowledging summary instructions was added to the preset. That's acceptable under the compatibility contract.
 - **[D]** Normally LCM runs in response to user messages, and it doesn't have to run immediately on large imported chats.
+- **[D]** **LCM also works in the plain, non-agentic chat mode:** the drop-in replacement for ST's chatting, with LCM added. The difference from agentic mode is that there's no drilling down into summaries and no search of the original text. The model sees only the top-level summaries in the context (owner, 2026-10-12).
+- **[D]** **Summarizing through the user's own preset** must be supported. reference-harness's summarizer is a model for ours and may be the default. But, as with ST's summarization, running the summary as a normal conversation turn is likely to work very well, and chat-mode models may have no tool support (owner, 2026-10-12):
+  - the conversation is cut off at the point to summarize to
+  - a summarization instruction is appended as a system message, where the provider supports a system message mid-chat (Anthropic, among others), and as a user message otherwise
+  - the model's reply is the summary
+  - it shares the cache prefix with the normal conversation, as reference-harness's does
+- **[D]** **Refusal detection** is needed on this surface, so a refusal is never saved as a summary. reference-harness has one, which may need refining for our cases later. Refusal detection is useful for every message, not only summaries (owner, 2026-10-12).
+
+### 8.1 Imported summaries
+- **[D]** Importing a chat also imports its summary, if it has one. **This is required before the owner starts using the harness** (owner, 2026-10-12).
+- **[D]** The custom single-field summary is kept in its own field, even where LCM makes it technically obsolete. A chat that already has a summary keeps it.
+- **[D]** When a chat has a run of messages hidden continuously from message 0, and a summary covering them, the summary can act as an L1 summary over those hidden messages.
+- **[D]** LCM is **not enabled by default** on imported chats, but enabling it is easy and obvious. On enabling it, the user chooses: keep the summary as the L1 covering that range, or redo LCM from scratch. Either way, the summary stays in its own field.
+- **[O]** Details to work out (owner, 2026-10-12):
+  - where ST keeps the summary (its Summarize extension stores it on messages, `extra.memory`, with injection settings in `extension_settings.memory`)
+  - how "covering the hidden run" is detected
+  - how the summary is placed in the context before LCM is enabled (proposed: as ST placed it, so an imported chat sends what ST sent)
+  - what the UI shows
 - **[D]** **Semi-background idle-time jobs:** run LCM work in the gap after a reply, while the cache is still warm, which also refreshes it (depending on settings and provider).
 - **[P]** Summaries cover **path segments**, so threads and branches share summaries up to their fork.
 - **[P]** Editing a message already covered by a summary marks that summary stale and re-summarizes it lazily. Mechanical edits such as renames are applied to the summaries directly.
