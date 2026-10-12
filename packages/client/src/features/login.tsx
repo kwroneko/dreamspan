@@ -13,6 +13,7 @@ import { Button, buttonClass } from "../ui/Button.tsx"
 import { Field, formText, Input, PasswordInput } from "../ui/Field.tsx"
 import { Loading } from "../ui/Spinner.tsx"
 import { Alert, Card } from "../ui/Surface.tsx"
+import { RecoveryNotice } from "./editor/BrowserRecovery.tsx"
 import { CenteredPage, LogoutButton, useTitle } from "./shell.tsx"
 
 const formatWait = (seconds: number) =>
@@ -145,13 +146,14 @@ function SignedIn({ session, next }: { session: Session; next: string }) {
 
 function LoginPage() {
   useTitle("Log in")
-  const search: { next?: unknown; changed?: unknown } = useSearch({ strict: false })
+  const search: { next?: unknown; changed?: unknown; recovered?: unknown } = useSearch({ strict: false })
   const next = safeNext(search.next)
   const result = useAtomValue(sessionAtom)
   const retry = useAtomRefresh(sessionAtom)
   return (
     <CenteredPage>
       <h1 className="text-xl font-semibold">Log in to rp-harness</h1>
+      {(search.recovered === "1" || search.recovered === 1) && <RecoveryNotice />}
       <Card>
         {AsyncResult.match(result, {
           onInitial: () => <Loading label="Connecting to the server…" />,

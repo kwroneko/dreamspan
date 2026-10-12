@@ -115,6 +115,7 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps) => {
         const owned = yield* lib.ownedRef(userId, refId)
         const resolved = chatNote ? yield* noteAt(sql, lib, userId, owned, chatNote) : null
         const ref = resolved?.ref ?? owned
+        for (const { draftId } of fields) yield* drafts.checkIdentity(userId, draftId)
         yield* steps.checkRowVersion(ref, expectedRowVersion)
         const head = resolved?.doc ?? (yield* lib.loadDoc(ref.head_revision_id))
         const rows = []

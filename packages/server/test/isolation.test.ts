@@ -851,44 +851,61 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
   },
   RestoreEditorDraft: {
     probe: (actor, owner) =>
-      refused(
-        actor.api.RestoreEditorDraft({
-          refId: owner.editor.cardRefId,
-          field: owner.editor.field,
-          draftId: owner.editor.draftId,
-          seq: 0,
-          expectedRowVersion: 1
-        }),
-        "NotFound"
-      )
+      Effect.gen(function* () {
+        const mine = yield* actor.api.OpenEditor({ refId: actor.editor.cardRefId })
+        for (const refId of [owner.editor.cardRefId, actor.editor.cardRefId])
+          yield* refused(
+            actor.api.RestoreEditorDraft({
+              refId,
+              field: owner.editor.field,
+              draftId: owner.editor.draftId,
+              seq: 0,
+              expectedRowVersion: mine.drafts.find((d) => d.key.field === actor.editor.field)!.rowVersion
+            }),
+            "NotFound"
+          )
+      })
   },
   DiscardEditorDraft: {
     probe: (actor, owner) =>
-      refused(
-        actor.api.DiscardEditorDraft({
-          refId: owner.editor.cardRefId,
-          field: owner.editor.field,
-          draftId: owner.editor.draftId,
-          expectedRowVersion: 1
-        }),
-        "NotFound"
-      )
+      Effect.gen(function* () {
+        const mine = yield* actor.api.OpenEditor({ refId: actor.editor.cardRefId })
+        for (const refId of [owner.editor.cardRefId, actor.editor.cardRefId])
+          yield* refused(
+            actor.api.DiscardEditorDraft({
+              refId,
+              field: owner.editor.field,
+              draftId: owner.editor.draftId,
+              expectedRowVersion: mine.drafts.find((d) => d.key.field === actor.editor.field)!.rowVersion
+            }),
+            "NotFound"
+          )
+      })
   },
   CommitEditorDrafts: {
     probe: (actor, owner) =>
       Effect.gen(function* () {
         const theirs = yield* owner.api.OpenEditor({ refId: owner.editor.cardRefId })
-        yield* refused(
-          actor.api.CommitEditorDrafts({
-            refId: owner.editor.cardRefId,
-            expectedRowVersion: theirs.ref.rowVersion,
-            fields: theirs.drafts.map((d) => ({ field: d.key.field, draftId: d.id, expectedRowVersion: d.rowVersion })),
-            message: "taken"
-          }),
-          "NotFound"
-        )
+        const mine = yield* actor.api.OpenEditor({ refId: actor.editor.cardRefId })
+        for (const target of [theirs, mine])
+          yield* refused(
+            actor.api.CommitEditorDrafts({
+              refId: target.ref.id,
+              expectedRowVersion: target.ref.rowVersion,
+              fields: [
+                {
+                  field: actor.editor.field,
+                  draftId: owner.editor.draftId,
+                  expectedRowVersion: mine.drafts.find((d) => d.key.field === actor.editor.field)!.rowVersion
+                }
+              ],
+              message: "taken"
+            }),
+            "NotFound"
+          )
       })
   },
+
   ListRevisions: {
     probe: (actor, owner) => refused(actor.api.ListRevisions({ refId: owner.editor.cardRefId, limit: 10 }), "NotFound")
   },

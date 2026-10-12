@@ -164,6 +164,7 @@ export const copiesOfUser = async (userId: string): Promise<ReadonlyArray<Copy>>
 
 /** Try every exact copy before logout or at the user's request. Failures stay recoverable here. */
 export const flushCopies = async (userId: string) => {
+  let recovered = 0
   for (const copy of await copiesOfUser(userId)) {
     const save = pendingOf(copy)
     if (save === null) continue
@@ -177,10 +178,13 @@ export const flushCopies = async (userId: string) => {
         headers: { "content-type": "application/json" },
         body
       })
-      if (response.ok) await dropCopy(copy)
+      if (response.ok) {
+        recovered += Number(response.headers.get("x-drafts-recovered") ?? 0)
+        await dropCopy(copy)
+      }
     } catch {
       /* The user can retry or delete the copy explicitly. */
     }
   }
-  return copiesOfUser(userId)
+  return { copies: await copiesOfUser(userId), recovered }
 }

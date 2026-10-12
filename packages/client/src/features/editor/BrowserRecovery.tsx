@@ -5,11 +5,32 @@ import { Button } from "../../ui/Button.tsx"
 import { ConfirmDialog, Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { copiesOfUser, type Copy, dropCopy, flushCopies } from "./backup.ts"
 
-export function BrowserRecovery({ userId, initiallyOpen = false }: { userId: string; initiallyOpen?: boolean }) {
+export function RecoveryNotice() {
+  return (
+    <p role="status">
+      Some text could not return to its original draft and was moved to{" "}
+      <a href="/bin?section=recovered" className="underline">
+        recovered texts in the bin
+      </a>
+      . After logging out, log in to the same account to find it.
+    </p>
+  )
+}
+
+export function BrowserRecovery({
+  userId,
+  initiallyOpen = false,
+  initiallyRecovered = 0
+}: {
+  userId: string
+  initiallyOpen?: boolean
+  initiallyRecovered?: number
+}) {
   const [open, setOpen] = useState(initiallyOpen)
   const [copies, setCopies] = useState<ReadonlyArray<Copy>>([])
   const [deleting, setDeleting] = useState<Copy | null>(null)
   const [pending, setPending] = useState(false)
+  const [recovered, setRecovered] = useState(initiallyRecovered)
   useEffect(() => {
     if (initiallyOpen) void copiesOfUser(userId).then(setCopies)
   }, [initiallyOpen, userId])
@@ -34,6 +55,7 @@ export function BrowserRecovery({ userId, initiallyOpen = false }: { userId: str
         title="Text kept in this browser"
         description="These copies stay until saved or until you explicitly delete them. You can copy the text out here, or retry saving it."
       >
+        {recovered > 0 && <RecoveryNotice />}
         {copies.length === 0 ? (
           <p>No unsaved browser copies.</p>
         ) : (
@@ -60,7 +82,9 @@ export function BrowserRecovery({ userId, initiallyOpen = false }: { userId: str
             pending={pending}
             onClick={async () => {
               setPending(true)
-              setCopies(await flushCopies(userId))
+              const result = await flushCopies(userId)
+              setCopies(result.copies)
+              setRecovered((count) => count + result.recovered)
               setPending(false)
             }}
           >

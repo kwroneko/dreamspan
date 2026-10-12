@@ -415,7 +415,7 @@ export const makeDraftStore = (
       if (ended && options.ended === "recover" && options.next !== true) {
         const recovered = content.trim() !== "" && content !== shown(draft)
         if (recovered) yield* recover(draft.user_id, toDraft(draft).key, [content], "discard")
-        return { draft: toDraft(draft), recovered }
+        return { draft: toDraft(draft, recovered ? 1 : 0), recovered }
       }
       const changed =
         draft.status === "active" &&
@@ -477,7 +477,10 @@ export const makeDraftStore = (
     })
 
   const restore = (userId: UserId, key: DraftKey, draftId: string, seq: number, expectedRowVersion: number) =>
-    Effect.flatMap(get(userId, key), (draft) => restoreRow(draft, seq, expectedRowVersion, draftId))
+    Effect.gen(function* () {
+      yield* checkIdentity(userId, draftId)
+      return yield* restoreRow(yield* get(userId, key), seq, expectedRowVersion, draftId)
+    })
 
   /**
    * Ends a drafting session. The committed text now lives in a version or revision, so
@@ -520,6 +523,7 @@ export const makeDraftStore = (
     expectedRowVersion: number
   ) =>
     Effect.gen(function* () {
+      yield* checkIdentity(userId, draftId)
       const draft = yield* get(userId, key)
       yield* checkDraft(draft, draftId, expectedRowVersion)
       return (yield* end(draft, outcome)).draft
@@ -603,7 +607,10 @@ export const makeDraftStore = (
         const [receipt] = yield* sql<{ recovered: number }>`SELECT recovered FROM composer_save_receipts
           WHERE chat_id = ${chatId} AND operation_id = ${base.operationId}`
         if (receipt !== undefined)
-          return { draft: draft === null ? null : toDraft(draft), recovered: receipt.recovered === 1 }
+          return {
+            draft: draft === null ? null : toDraft(draft, receipt.recovered),
+            recovered: receipt.recovered === 1
+          }
       }
       let saved
       if (draft === null) {

@@ -48,24 +48,20 @@ export const login = async (handle: string, password: string): Promise<LoginOutc
   }
 }
 
-/**
- * Ends the session and reloads into the login page. A full load, not a client-side
- * navigation, so the WebSocket and everything cached for this user go with it. If the
- * server couldn't end the session, nothing reloads: the user is still logged in, and the
- * returned message says so.
- */
-export const logout = async (userId: string): Promise<string> => {
-  if ((await flushCopies(userId)).length > 0)
-    return "Some text could not be saved. Recover it or explicitly delete its browser copy before logging out."
+/** Ends the session after flushing copies; the caller carries recovery information into login. */
+export const logout = async (userId: string): Promise<{ readonly error: string; readonly recovered: number }> => {
+  const { copies, recovered } = await flushCopies(userId)
+  const failed = (error: string) => ({ error, recovered })
+  if (copies.length > 0)
+    return failed("Some text could not be saved. Recover it or explicitly delete its browser copy before logging out.")
   let response: Response
   try {
     response = await fetch("/auth/logout", { method: "POST" })
   } catch {
-    return "Can't reach the server, so you're still logged in."
+    return failed("Can't reach the server, so you're still logged in.")
   }
-  if (!response.ok) return `The server couldn't log you out (${response.status}), so you're still logged in.`
-  location.replace("/login")
-  return ""
+  if (!response.ok) return failed(`The server couldn't log you out (${response.status}), so you're still logged in.`)
+  return { error: "", recovered }
 }
 
 /**

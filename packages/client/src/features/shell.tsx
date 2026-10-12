@@ -5,7 +5,7 @@ import { Link, Navigate, Outlet, useLocation, useNavigate } from "@tanstack/reac
 import { AsyncResult } from "effect/reactivity"
 import { type ReactNode, useEffect, useState } from "react"
 import { ErrorAlert } from "../actions.tsx"
-import { BrowserRecovery } from "./editor/BrowserRecovery.tsx"
+import { BrowserRecovery, RecoveryNotice } from "./editor/BrowserRecovery.tsx"
 import { describeCause } from "../errors.ts"
 import { fullPath, navEntries, routes } from "../routes.tsx"
 import { logout, SessionContext, sessionAtom, useSession } from "../session.ts"
@@ -38,27 +38,35 @@ export function LogoutButton({ variant = "secondary" }: { variant?: "secondary" 
   const userId = useSession().user.id
   const [pending, setPending] = useState(false)
   const [error, setError] = useState("")
+  const [recovered, setRecovered] = useState(0)
   return (
-    <span className="flex flex-wrap items-center gap-2">
+    <div className="flex flex-wrap items-center gap-2">
       <Button
         variant={variant}
         pending={pending}
         onClick={async () => {
           setPending(true)
           setError("")
-          setError(await logout(userId))
+          const result = await logout(userId)
+          const count = recovered + result.recovered
+          setRecovered(count)
+          setError(result.error)
+          if (!result.error) location.replace(count > 0 ? "/login?recovered=1" : "/login")
           setPending(false)
         }}
       >
         Log out
       </Button>
-      {error.startsWith("Some text could not be saved.") && <BrowserRecovery userId={userId} initiallyOpen />}
+      {recovered > 0 && <RecoveryNotice />}
+      {error.startsWith("Some text could not be saved.") && (
+        <BrowserRecovery userId={userId} initiallyOpen initiallyRecovered={recovered} />
+      )}
       {error && (
         <span role="alert" className="text-sm text-danger">
           {error}
         </span>
       )}
-    </span>
+    </div>
   )
 }
 
