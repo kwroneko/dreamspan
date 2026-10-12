@@ -190,11 +190,86 @@ test("a long context opens collapsed: 200 messages, about 100,000 tokens", async
   await expect(reply(page)).toBeVisible()
   await page.goto(`${server().url}/chats/${long.id}/context/${long.reply}`)
   const messages = page.getByRole("region", { name: "Messages" })
-  await expect(messages.getByRole("listitem")).toHaveCount(205)
+  expect(await messages.getByRole("listitem").count()).toBeLessThan(30)
   await expect(page.getByText(/about 10\d,\d{3} tokens/)).toBeVisible()
-  // Collapsed, the page holds a preview of each message, not its text.
+  // Only visible rows and their previews are mounted.
   expect(await page.evaluate(() => document.body.textContent.length)).toBeLessThan(80_000)
-  // Opened, a message shows all of its text.
+  // A later row can be scrolled to and expanded.
+  await messages.getByRole("list").evaluate((el) => {
+    el.scrollTop = 152 * 120
+  })
+  const target = messages.getByText("#153", { exact: true })
+  await expect
+    .poll(async () => {
+      if (await target.count()) return true
+      await messages.getByRole("list").evaluate((el) => {
+        const first = Number(el.querySelector("[data-index]")?.getAttribute("data-index"))
+        el.scrollTop += first > 152 ? -el.clientHeight / 2 : el.clientHeight / 2
+      })
+      return false
+    })
+    .toBe(true)
+  await target.scrollIntoViewIfNeeded()
   await messages.getByText("#153", { exact: true }).click()
   await expect(messages.locator("p", { hasText: "Entry 147:" })).toHaveText(entry(147).trim())
+})
+
+test("a version opened under another chat redirects to its canonical route", async ({ page }) => {
+  const other = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+    api.CreateChat({ title: "Other synthetic chat" })
+  )
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${server().url}/chats/${chat.id}`)
+  await expect(reply(page)).toBeVisible()
+  await page.goto(`${server().url}/chats/${other.id}/context/${chat.reply}`)
+  await expect(page).toHaveURL(`${server().url}/chats/${chat.id}/context/${chat.reply}`)
+  await expect(page.getByRole("link", { name: "← Back to the reply" })).toHaveAttribute(
+    "href",
+    new RegExp(`/chats/${chat.id}\\?slot=`)
+  )
+})
+
+test("10,000 short messages mount only visible rows and scroll to the last source", async ({ page }) => {
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${server().url}/chats/${chat.id}`)
+  await expect(reply(page)).toBeVisible()
+  let replaced = false
+  await page.routeWebSocket("**/rpc", (ws) => {
+    const upstream = ws.connectToServer()
+    upstream.onMessage((message) => {
+      const rewrite = (value: unknown): void => {
+        if (!value || typeof value !== "object") return
+        const object = value as Record<string, unknown>
+        if (Array.isArray(object.messages) && object.samplers && object.builtAt) {
+          object.messages = Array.from({ length: 10000 }, (_, i) => ({
+            role: "user",
+            name: null,
+            content: `Short synthetic sentence ${i}.`,
+            tokens: 10,
+            sources: [{ kind: "message", label: `Message ${i + 1}`, slotId: null }],
+            breakpoint: null
+          }))
+          replaced = true
+          return
+        }
+        for (const child of Object.values(object)) rewrite(child)
+      }
+      const data: unknown = JSON.parse(String(message))
+      rewrite(data)
+      ws.send(JSON.stringify(data))
+    })
+  })
+  await page.goto(`${server().url}/chats/${chat.id}/context/${chat.reply}`)
+  const messages = page.getByRole("region", { name: "Messages" })
+  await expect(page.getByText(/10000 messages, about 100,000 tokens/)).toBeVisible()
+  expect(replaced).toBe(true)
+  expect(await messages.getByRole("listitem").count()).toBeLessThan(80)
+  const scroll = messages.getByRole("list")
+  await scroll.evaluate((el) => {
+    el.scrollTop = el.scrollHeight
+  })
+  await expect(messages.getByText("#10000", { exact: true })).toBeVisible()
+  await messages.getByText("#10000", { exact: true }).click()
+  await expect(messages.locator("p", { hasText: "Short synthetic sentence 9999." })).toBeVisible()
+  expect(await messages.getByRole("listitem").count()).toBeLessThan(80)
 })

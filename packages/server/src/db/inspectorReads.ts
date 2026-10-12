@@ -6,12 +6,14 @@ import { NotFound } from "@rp/shared/errors.ts"
 import { type ContextSource, RunContext } from "@rp/shared/inspectorApi.ts"
 import { Effect } from "effect"
 import { SqlClient, type SqlError } from "effect/sql"
+import { wireContext } from "../assembler/wire.ts"
 import { tokensOf } from "../assembler/st.ts"
 import type { ContextSnapshot, Source } from "../assembler/types.ts"
 import type { Describe } from "../assembler/warmth.ts"
 import { builtinPreset } from "./assemblySources.ts"
 import type { ReadOps } from "./ops.ts"
-import { type LlmRequestRow, toLlmRequest } from "./providers.ts"
+import type { LlmRequestRow } from "./providers.ts"
+import type { InspectorUsage } from "@rp/shared/inspectorApi.ts"
 import { query } from "./tx.ts"
 
 const unique = <A>(list: ReadonlyArray<A>) => [...new Set(list)]
@@ -96,6 +98,26 @@ export const describer = (
     }
   })
 
+/** Explicit projection also excludes metadata from old ledger records. */
+export const rolloutUsage = (sql: SqlClient.SqlClient, userId: UserId, rolloutId: string) =>
+  sql<
+    Pick<
+      LlmRequestRow,
+      | "id"
+      | "status"
+      | "input_uncached"
+      | "cache_read"
+      | "cache_write"
+      | "output"
+      | "usage_source"
+      | "cost"
+      | "cost_currency"
+    >
+  >`
+    SELECT id, status, input_uncached, cache_read, cache_write, output, usage_source, cost, cost_currency
+    FROM llm_requests INDEXED BY llm_requests_rollout WHERE rollout_id = ${rolloutId} AND owner_user_id = ${userId}
+    ORDER BY started_at, id`
+
 export const makeInspectorReadHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   const handlers = {
@@ -127,9 +149,7 @@ export const makeInspectorReadHandlers = Effect.gen(function* () {
             SELECT r.label FROM entity_refs r JOIN entities e ON e.id = r.entity_id
             WHERE r.id = ${preset.ref} AND e.owner_user_id = ${userId}`
           : []
-        const requests = yield* sql<LlmRequestRow>`
-        SELECT * FROM llm_requests WHERE rollout_id = ${row.rollout_id} AND owner_user_id = ${userId}
-        ORDER BY started_at, id`
+        const requests = yield* rolloutUsage(sql, userId, row.rollout_id)
         const byMessage = snapshot.request.messages.map((): Array<ContextSource> => [])
         for (const piece of snapshot.pieces) {
           const described = describe(piece.source)
@@ -138,6 +158,14 @@ export const makeInspectorReadHandlers = Effect.gen(function* () {
           }
         }
         const breakpoints = new Map(snapshot.request.breakpoints.map((b) => [b.message, b.reason]))
+        const wire =
+          snapshot.wire ??
+          (model
+            ? wireContext(snapshot.request, model)
+            : {
+                messages: snapshot.request.messages.map((m, i) => ({ ...m, inputs: [i] })),
+                samplers: snapshot.request.samplers
+              })
         return new RunContext({
           chatId,
           slotId: row.slot_id as SlotId,
@@ -153,18 +181,30 @@ export const makeInspectorReadHandlers = Effect.gen(function* () {
             breakpoints: model.cacheBreakpoints
           },
           preset: { label: presetRef?.label ?? null, scope: preset.scope },
-          messages: snapshot.request.messages.map((message, i) => ({
+          messages: wire.messages.map((message) => ({
             role: message.role,
             name: message.name ?? null,
             content: message.content,
             tokens: tokensOf(message),
-            sources: byMessage[i]!,
-            breakpoint: breakpoints.get(i) ?? null
+            sources: message.inputs
+              .flatMap((i) => byMessage[i] ?? [{ kind: "preset" as const, label: "Prefill", slotId: null }])
+              .filter((source, i, all) => all.findIndex((s) => s.label === source.label) === i),
+            breakpoint: message.inputs.map((i) => breakpoints.get(i)).findLast((b) => b !== undefined) ?? null
           })),
-          prefill: snapshot.request.prefill,
-          samplers: { ...snapshot.request.samplers },
+          samplers: { ...wire.samplers },
           issues: snapshot.issues,
-          requests: requests.map(toLlmRequest)
+          requests: requests.map((r): InspectorUsage => ({
+            id: r.id as InspectorUsage["id"],
+            status: r.status,
+            usageSource: r.usage_source,
+            counts: {
+              inputUncached: r.input_uncached,
+              cacheRead: r.cache_read,
+              cacheWrite: r.cache_write,
+              output: r.output
+            },
+            cost: r.cost === null ? null : { amount: r.cost, currency: r.cost_currency! }
+          }))
         })
       }).pipe(query("RunContext"))
   } satisfies Partial<Parameters<typeof ReadOps.of>[0]>

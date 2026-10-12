@@ -93,3 +93,40 @@ describe("0013_draft_sessions and 0014_deleted_subtree_roots", () => {
     }).pipe(Effect.provide(writerConnection(join(tempDir("mig"), "db.sqlite"))))
   )
 })
+
+describe("0016_inspector", () => {
+  it.effect("backfills only arrays of valid issues and tolerates every malformed legacy value", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(before("0016_inspector")) })
+      yield* sql`INSERT INTO users(id,handle,display_name,role,created_at) VALUES('u','u','u','admin',1)`
+      yield* sql`INSERT INTO chats(id,owner_user_id,kind,status,created_at) VALUES('c','u','rp','active',1)`
+      const valid = [{ kind: "history_truncated", message: "Synthetic budget warning" }]
+      const values = [
+        "not an array",
+        null,
+        {},
+        [null],
+        [7],
+        ["bad"],
+        [{ kind: "wrong", message: "bad" }],
+        [{ kind: "macro_limit", message: 7 }],
+        [],
+        valid
+      ]
+      for (const [i, issues] of values.entries()) {
+        const id = `r${i}`
+        yield* sql`INSERT INTO rollouts(id,chat_id,kind,status,role,request_class,created_at,updated_at)
+          VALUES(${id},'c','generation','completed','narrator','interactive',1,1)`
+        yield* sql`INSERT INTO rollout_payloads(rollout_id,context_snapshot_json) VALUES(${id},${JSON.stringify({ issues })})`
+      }
+      const result = yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(migrations) }).pipe(Effect.exit)
+      assert.isTrue(Exit.isSuccess(result))
+      const rows = yield* sql<{ issues: string | null }>`SELECT context_issues_json AS issues FROM rollouts ORDER BY id`
+      assert.deepStrictEqual(
+        rows.map((row) => (row.issues === null ? null : JSON.parse(row.issues))),
+        [null, null, null, null, null, null, null, null, [], valid]
+      )
+    }).pipe(Effect.provide(writerConnection(join(tempDir("inspector-migration"), "db.sqlite"))))
+  )
+})

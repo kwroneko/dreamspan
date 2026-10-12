@@ -205,7 +205,7 @@ export const makeEditorHandlers = Effect.gen(function* () {
       Effect.flatMap(userId, (id) => reader.ListCardNotes({ userId: id, cardRefId })).pipe(settle("ListCardNotes")),
 
     CreateCardNote: ({ cardRefId, title }) =>
-      Effect.flatMap(userId, (id) => writer.CreateCardNote({ userId: id, cardRefId, title })).pipe(
+      Effect.flatMap(userId, (id) => writer.CreateCardNote({ userId: id, cardRefId, title }).pipe(changed(id))).pipe(
         settle("CreateCardNote")
       ),
 
@@ -214,7 +214,7 @@ export const makeEditorHandlers = Effect.gen(function* () {
         const id = yield* userId
         const note = yield* reader.GetLibraryRef({ userId: id, refId: noteRefId })
         if (note.kind !== "note") return yield* new NotFound({ entity: "note", id: noteRefId })
-        return yield* writer.DeleteEntity({ userId: id, entityId: note.entityId })
+        return yield* writer.DeleteEntity({ userId: id, entityId: note.entityId }).pipe(changed(id))
       }).pipe(settle("DeleteNote"))
   } satisfies Partial<Parameters<typeof AppApi.of>[0]>
   return handlers

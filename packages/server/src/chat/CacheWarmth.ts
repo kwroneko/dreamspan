@@ -25,6 +25,7 @@ export class CacheWarmth extends Context.Service<
     /** Keeps the chat's estimate current for as long as the scope lasts. Only for the chat's owner. */
     readonly watch: (userId: UserId, chatId: ChatId) => Effect.Effect<void, never, Scope.Scope>
     /** Estimates the user's open chats again: a card, preset, model or default of theirs changed. */
+    readonly refreshAll: Effect.Effect<void>
     readonly refreshUser: (userId: UserId) => Effect.Effect<void>
   }
 >()("rp/chat/CacheWarmth") {
@@ -99,6 +100,9 @@ export class CacheWarmth extends Context.Service<
                 watched.delete(chatId)
               })
           ),
+        refreshAll: Effect.sync(() => {
+          for (const chatId of watched.keys()) schedule(chatId)
+        }),
         refreshUser: (userId) =>
           Effect.sync(() => {
             for (const [chatId, entry] of watched) if (entry.userId === userId) schedule(chatId)

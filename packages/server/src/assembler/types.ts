@@ -135,6 +135,12 @@ export interface SnapshotInputs {
   readonly model: ModelInput | null
 }
 
+/** Safe provider mapping with indices back to the assembled messages. No transport settings. */
+export interface WireContext {
+  readonly messages: ReadonlyArray<RequestMessage & { readonly inputs: ReadonlyArray<number> }>
+  readonly samplers: Readonly<Record<string, number>>
+}
+
 /** A context as built, stored as its rollout's frozen snapshot (DATA-MODEL §7.1). */
 export interface ContextSnapshot {
   readonly schema: 1
@@ -155,6 +161,7 @@ export interface ContextSnapshot {
     }
   }
   /** What the sources read, by id and revision, so the context can be read again exactly. */
+  readonly wire?: WireContext
   readonly sources?: SourcePins
   /** Variable writes of template messages expanded for the first time, to record at their positions. */
   readonly templateWrites?: ReadonlyArray<{ readonly version: string; readonly writes: ReadonlyArray<VariableEffect> }>
@@ -312,6 +319,9 @@ export interface PresetInput {
 /** The model a generation uses, and what assembly needs to know about it. */
 export interface ModelInput {
   readonly connectionId: string
+  /** Non-secret cache identity; absent on legacy snapshots. */
+  readonly connectionRevision?: number
+  readonly cacheTtlS?: number | null
   readonly modelId: string
   /** The provider kind (`openai-chat`, `anthropic`, …) and its wire API. */
   readonly kind: string

@@ -3,10 +3,9 @@ import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { makeAssembler } from "../assembler/assembler.ts"
 import type { ChatId } from "@rp/shared/chat.ts"
-import { resolveModel } from "@rp/shared/providers.ts"
+import { wireContext } from "../assembler/wire.ts"
 import { lastBreakpoint, prefixChange, tokensBetween } from "../assembler/warmth.ts"
 import { describer } from "./inspectorReads.ts"
-import { type ModelRow, toModel } from "./providers.ts"
 import { NotFound } from "@rp/shared/errors.ts"
 import { ASSEMBLER_VERSION, AssemblyFailed, type ContextSnapshot, generationOf } from "../assembler/types.ts"
 import { sqlSources } from "./assemblySources.ts"
@@ -24,7 +23,11 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
         return assembler.assemble({ now, timeZone, frozen: frozen ?? {}, random: Math.random }).pipe(
           Effect.provide(sources.layer),
           Effect.map((built) => {
-            const snapshot: ContextSnapshot = { ...built, sources: sources.pins() }
+            const snapshot: ContextSnapshot = {
+              ...built,
+              sources: sources.pins(),
+              ...(built.inputs.model ? { wire: wireContext(built.request, built.inputs.model) } : {})
+            }
             return { snapshot: JSON.stringify(snapshot), generation: JSON.stringify(generationOf(snapshot)) }
           })
         )
@@ -62,12 +65,16 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
             ...(taken.loreFallback ? { loreFallback: taken.loreFallback } : {})
           })
           .pipe(Effect.provide(sources.layer))
-        return { _tag: "Rebuilt" as const, snapshot: JSON.stringify({ ...built, sources: sources.pins() }) }
+        return { _tag: "Rebuilt" as const, snapshot: JSON.stringify({
+            ...built,
+            sources: sources.pins(),
+            ...(taken.wire ? { wire: taken.wire } : {})
+          }) }
       }).pipe(query("RebuildContext")),
 
     // The cache-warmth estimate (DESIGN §5.5): the chat's last request that reached its
-    // provider, the TTL of its model, and the next request at the end of the active path
-    // compared with it up to its last breakpoint. Null when there's nothing to estimate.
+    // provider and the next request's TTL eligibility and prefix at the end of the active path
+    // compared up to its last breakpoint. Null when there's nothing to estimate.
     CacheWarmth: ({ userId, chatId }) =>
       Effect.gen(function* () {
         const [chat] = yield* sql<{ id: string }>`
@@ -77,27 +84,16 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
           started_at: number
           cache_read: number | null
           cache_write: number | null
-          connection_id: string
           model_id: string | null
           snapshot: string | null
         }>`
-          SELECT q.started_at, q.cache_read, q.cache_write, q.connection_id, q.model_id,
+          SELECT q.started_at, q.cache_read, q.cache_write, q.model_id,
             p.context_snapshot_json AS snapshot
           FROM llm_requests q JOIN rollout_payloads p ON p.rollout_id = q.rollout_id
           WHERE q.chat_id = ${chatId} AND q.owner_user_id = ${userId}
             AND (q.status IN ('running', 'complete') OR q.first_token_at IS NOT NULL)
           ORDER BY q.started_at DESC, q.id DESC LIMIT 1`
         if (!last?.snapshot || last.model_id === null) return null
-        const [model] = yield* sql<ModelRow & { connection_ttl_s: number | null }>`
-          SELECT m.*, c.cache_ttl_s AS connection_ttl_s FROM models m JOIN connections c ON c.id = m.connection_id
-          WHERE m.id = ${last.model_id} AND c.id = ${last.connection_id} AND c.owner_user_id = ${userId}
-            AND c.deleted_at IS NULL AND c.purged_at IS NULL`
-        if (!model) return null
-        const m = toModel(model)
-        // A TTL the user set on the model, else on the connection, else the catalog's.
-        const ttl = resolveModel(m.key, m.upstream, m.overrides).cacheTtlS
-        const ttlS = ttl.source === "user" ? ttl.value : (model.connection_ttl_s ?? ttl.value)
-        if (ttlS === null) return null
         const previous = JSON.parse(last.snapshot) as ContextSnapshot
         const end = lastBreakpoint(previous)
         const sources = sqlSources(sql, { userId, chatId, next: true })
@@ -108,13 +104,13 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
             Effect.map((built): ContextSnapshot => ({ ...built, sources: sources.pins() })),
             Effect.catchTag("AssemblyFailed", (error) => Effect.succeed(error))
           )
-        const changed =
-          next instanceof AssemblyFailed
-            ? { reason: `The next request can't be built: ${next.message}`, tokens: tokensBetween(previous, 0, end) }
-            : prefixChange(previous, next, yield* describer(sql, userId, chatId, [previous, next]))
+        if (next instanceof AssemblyFailed || next.inputs.model?.cacheTtlS == null) return null
+        const ttlS = next.inputs.model.cacheTtlS
+        const changed = prefixChange(previous, next, yield* describer(sql, userId, chatId, [previous, next]))
         return {
           lastRequestAt: last.started_at,
           ttlS,
+          expiresAt: last.started_at + (previous.inputs.model?.cacheTtlS ?? 0) * 1000,
           verified: (last.cache_read ?? 0) + (last.cache_write ?? 0) > 0,
           prefixTokens: tokensBetween(previous, 0, end),
           changed

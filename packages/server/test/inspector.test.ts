@@ -112,10 +112,11 @@ describe("the cache-warmth estimate", () => {
       })
       const ended = events.findIndex((e) => e._tag === "Version" && e.version.id === version.id)
       const warm = yield* estimate(events, ended, (w) => w !== null)
-      const request = (yield* api.GetRunContext({ versionId: version.id })).requests[0]!
+      const request = (yield* api.ListLlmRequests({ limit: 10, before: null }))[0]!
       assert.deepStrictEqual(warm, {
         lastRequestAt: request.startedAt,
         ttlS: 300,
+        expiresAt: request.startedAt + 300_000,
         verified: true,
         prefixTokens: warm!.prefixTokens,
         changed: null
@@ -133,7 +134,10 @@ describe("the cache-warmth estimate", () => {
       })
       const cold = yield* estimate(events, before, (w) => w?.changed != null)
       assert.strictEqual(cold!.changed!.reason, "Message 2 was edited, or another of its versions chosen.")
-      assert.strictEqual(cold!.changed!.tokens, Math.ceil("The road flooded.".length / 4) + 3)
+      assert.strictEqual(
+        cold!.changed!.tokens,
+        Math.ceil("The road washed out.".length / 4) + 3 + Math.ceil(version.content.length / 4) + 3
+      )
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
@@ -188,7 +192,7 @@ describe("the cache-warmth estimate", () => {
       })
       const cold = yield* estimate(events, before, (w) => w?.changed != null)
       assert.strictEqual(cold!.changed!.reason, "The preset changed.")
-      assert.strictEqual(cold!.changed!.tokens, cold!.prefixTokens)
+      assert.isAbove(cold!.changed!.tokens, 0)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 

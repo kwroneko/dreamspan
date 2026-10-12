@@ -489,6 +489,11 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
         const effective = resolveModel(m.key, m.upstream, m.overrides, c.compat)
         return {
           connectionId: c.id,
+          connectionRevision: connection.cache_revision,
+          cacheTtlS:
+            effective.cacheTtlS.source === "user"
+              ? effective.cacheTtlS.value
+              : (c.cacheTtlS ?? effective.cacheTtlS.value),
           modelId: m.id,
           kind: c.kind,
           api: c.api,

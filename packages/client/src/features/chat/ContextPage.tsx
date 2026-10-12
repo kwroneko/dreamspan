@@ -1,13 +1,13 @@
 // The request inspector (DESIGN §7.4): the context one reply was generated from, as it was
 // sent. Each message with its role, where its text came from, its tokens and the cache
 // breakpoints between them; then the model, the samplers and what the provider reported.
-// Text is shown as text. Messages are collapsed, and only an opened one renders its text,
-// so a long context opens at once.
+// Text is shown as text. Measured virtual rows keep dense contexts bounded; collapsed
+// messages render only their previews.
 import type { ChatId, VersionId } from "@rp/shared/chat.ts"
-import type { ContextMessage, RunContext } from "@rp/shared/inspectorApi.ts"
-import type { LlmRequest } from "@rp/shared/usage.ts"
-import { Link, useParams } from "@tanstack/react-router"
-import { useMemo, useState } from "react"
+import type { ContextMessage, RunContext, InspectorUsage } from "@rp/shared/inspectorApi.ts"
+import { Link, Navigate, useParams } from "@tanstack/react-router"
+import { useMemo, useRef, useState } from "react"
+import { useVirtualizer } from "@tanstack/react-virtual"
 import { AsyncView } from "../../actions.tsx"
 import { AppClient } from "../../rpc.ts"
 import { Alert, Badge, Card, CardHeader } from "../../ui/Surface.tsx"
@@ -27,7 +27,7 @@ function Message({ message, index, chatId }: { message: ContextMessage; index: n
   const [open, setOpen] = useState(false)
   const preview = message.content.length > PREVIEW ? `${message.content.slice(0, PREVIEW)}…` : message.content
   return (
-    <li className="flex flex-col gap-2">
+    <div className="flex flex-col gap-2">
       <details
         className="rounded-lg border border-border bg-surface"
         onToggle={(event) => setOpen(event.currentTarget.open)}
@@ -61,11 +61,11 @@ function Message({ message, index, chatId }: { message: ContextMessage; index: n
           {breakpointText[message.breakpoint]}
         </p>
       )}
-    </li>
+    </div>
   )
 }
 
-function Usage({ requests }: { requests: ReadonlyArray<LlmRequest> }) {
+function Usage({ requests }: { requests: ReadonlyArray<InspectorUsage> }) {
   if (requests.length === 0) return <p className="text-sm text-muted">No request was sent.</p>
   return (
     <div className="overflow-x-auto">
@@ -98,6 +98,37 @@ function Usage({ requests }: { requests: ReadonlyArray<LlmRequest> }) {
           ))}
         </tbody>
       </table>
+    </div>
+  )
+}
+
+function Messages({ run }: { run: RunContext }) {
+  "use no memo"
+  const parent = useRef<HTMLDivElement>(null)
+  // eslint-disable-next-line react-hooks/incompatible-library -- mutable instance; memoization is disabled above
+  const virtualizer = useVirtualizer({
+    count: run.messages.length,
+    getScrollElement: () => parent.current,
+    estimateSize: () => 120,
+    overscan: 4,
+    gap: 8
+  })
+  return (
+    <div ref={parent} role="list" className="h-[65vh] overflow-y-auto">
+      <div className="relative" style={{ height: virtualizer.getTotalSize() }}>
+        {virtualizer.getVirtualItems().map((item) => (
+          <div
+            key={item.key}
+            role="listitem"
+            data-index={item.index}
+            ref={virtualizer.measureElement}
+            className="absolute top-0 left-0 w-full"
+            style={{ transform: `translateY(${item.start}px)` }}
+          >
+            <Message message={run.messages[item.index]!} index={item.index} chatId={run.chatId} />
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
@@ -152,17 +183,7 @@ function Inspector({ run }: { run: RunContext }) {
       </Card>
       <section aria-label="Messages" className="flex flex-col gap-2">
         <h2 className="text-base font-semibold">Messages</h2>
-        <ol className="flex flex-col gap-2">
-          {run.messages.map((message, i) => (
-            <Message key={i} message={message} index={i} chatId={run.chatId} />
-          ))}
-          {run.prefill !== null && (
-            <li className="rounded-lg border border-border bg-surface px-3 py-2 text-sm">
-              <span className="font-medium">Prefill</span>{" "}
-              <span className="break-words whitespace-pre-wrap text-muted">{run.prefill}</span>
-            </li>
-          )}
-        </ol>
+        <Messages run={run} />
       </section>
     </div>
   )
@@ -179,19 +200,23 @@ export function ContextPage() {
         <h1 className="text-lg font-semibold">Context of a reply</h1>
       </header>
       <AsyncView atom={atom} loading="Loading the context…">
-        {(run) => (
-          <>
-            <Link
-              to="/chats/$chatId"
-              params={{ chatId }}
-              search={{ slot: run.slotId }}
-              className="text-sm text-muted hover:text-text"
-            >
-              ← Back to the reply
-            </Link>
-            <Inspector run={run} />
-          </>
-        )}
+        {(run) =>
+          run.chatId !== chatId ? (
+            <Navigate to="/chats/$chatId/context/$versionId" params={{ chatId: run.chatId, versionId }} replace />
+          ) : (
+            <>
+              <Link
+                to="/chats/$chatId"
+                params={{ chatId: run.chatId }}
+                search={{ slot: run.slotId }}
+                className="text-sm text-muted hover:text-text"
+              >
+                ← Back to the reply
+              </Link>
+              <Inspector run={run} />
+            </>
+          )
+        }
       </AsyncView>
     </div>
   )

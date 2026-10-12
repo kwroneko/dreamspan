@@ -3,7 +3,7 @@ import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
 import { ChatId, ContextIssue, SlotId, VersionId } from "./chat.ts"
 import { NotFound, ServerError } from "./errors.ts"
-import { LlmRequest } from "./usage.ts"
+import { LlmRequestId, RequestStatus, UsageSource } from "./usage.ts"
 
 /** Where a piece of a request message came from, named for the user. */
 export const ContextSource = Schema.Struct({
@@ -28,6 +28,21 @@ export const ContextMessage = Schema.Struct({
 })
 export type ContextMessage = typeof ContextMessage.Type
 
+/** Only the usage fields the inspector displays; provider metadata never crosses this boundary. */
+export const InspectorUsage = Schema.Struct({
+  id: LlmRequestId,
+  status: RequestStatus,
+  counts: Schema.Struct({
+    inputUncached: Schema.NullOr(Schema.Int),
+    cacheRead: Schema.NullOr(Schema.Int),
+    cacheWrite: Schema.NullOr(Schema.Int),
+    output: Schema.NullOr(Schema.Int)
+  }),
+  usageSource: UsageSource,
+  cost: Schema.NullOr(Schema.Struct({ amount: Schema.Number, currency: Schema.String }))
+})
+export type InspectorUsage = typeof InspectorUsage.Type
+
 /** One generation's request as it was sent, and what the provider reported for it. */
 export class RunContext extends Schema.Class<RunContext>("RunContext")({
   chatId: ChatId,
@@ -49,12 +64,11 @@ export class RunContext extends Schema.Class<RunContext>("RunContext")({
   ),
   preset: Schema.Struct({ label: Schema.NullOr(Schema.String), scope: Schema.String }),
   messages: Schema.Array(ContextMessage),
-  prefill: Schema.NullOr(Schema.String),
-  /** The preset's sampler values, in ST's names. */
+  /** Effective numeric samplers after provider mapping. */
   samplers: Schema.Record(Schema.String, Schema.Number),
   issues: Schema.Array(ContextIssue),
   /** Every attempt, retries included, oldest first. */
-  requests: Schema.Array(LlmRequest)
+  requests: Schema.Array(InspectorUsage)
 }) {}
 
 /**
@@ -65,11 +79,13 @@ export class RunContext extends Schema.Class<RunContext>("RunContext")({
 export const CacheWarmth = Schema.Struct({
   lastRequestAt: Schema.Number,
   ttlS: Schema.Int,
+  /** Historical expiry, independent of the next model's eligibility and TTL. */
+  expiresAt: Schema.Number,
   /** The provider reported reading or writing its cache on that request. */
   verified: Schema.Boolean,
   /** The last request's tokens up to its last breakpoint: what a warm cache holds. */
   prefixTokens: Schema.Int,
-  /** What the next request changes before that breakpoint, and the tokens from there to it. */
+  /** First difference in the mapped prefix, and the next prefix's uncached suffix tokens. */
   changed: Schema.NullOr(Schema.Struct({ reason: Schema.String, tokens: Schema.Int }))
 })
 export type CacheWarmth = typeof CacheWarmth.Type

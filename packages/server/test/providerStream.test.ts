@@ -1538,9 +1538,9 @@ describe("pure pieces", () => {
     assert.isNull(priceCost({ ...counts, output: null }, price))
   })
 
-  it("scrubs every secret, longest first, and leaves short values alone", () => {
+  it("scrubs every nonempty secret, longest first", () => {
     const scrub = makeScrub(["sk-abcdef123456", "sk-abcdef", "pw", null])
-    assert.strictEqual(scrub("key sk-abcdef123456 and sk-abcdef, pw"), "key [redacted] and [redacted], pw")
+    assert.strictEqual(scrub("key sk-abcdef123456 and sk-abcdef, pw"), "key [redacted] and [redacted], [redacted]")
   })
 
   it("reads Retry-After as seconds or a date", () => {

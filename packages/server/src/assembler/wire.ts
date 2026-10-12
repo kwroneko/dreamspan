@@ -1,6 +1,6 @@
 // The provider-neutral request mapped per provider, as ST 1.19 maps its sources (ARCHITECTURE §15).
 import type { Api, AssistantMessage, Context, Message } from "@earendil-works/pi-ai"
-import type { AssembledRequest, ModelInput, RequestMessage } from "./types.ts"
+import type { AssembledRequest, ModelInput, RequestMessage, WireContext } from "./types.ts"
 
 /** The messages with the prefill appended as the start of the reply, where the model takes one. */
 const withPrefill = (request: AssembledRequest): ReadonlyArray<RequestMessage> =>
@@ -184,4 +184,40 @@ export const providerRequest = (request: AssembledRequest, model: ModelInput): P
         ? request.breakpoints.flatMap((b) => (b.message < first ? [] : [b.message - first]))
         : []
   }
+}
+
+/** The mapped request for inspection and cache comparison, with source indices only. */
+export const wireContext = (request: AssembledRequest, model: ModelInput): WireContext => {
+  const wire = providerRequest(request, model)
+  const input = withPrefill(request)
+  const samplers: Record<string, number> = {}
+  for (const [key, value] of Object.entries(wire.payload)) {
+    if (typeof value === "number") samplers[key] = value
+    if (key === "config" && value && typeof value === "object") {
+      for (const [key, field] of Object.entries(value)) if (typeof field === "number") samplers[key] = field
+    }
+  }
+  if (wire.temperature !== undefined) samplers.temperature = wire.temperature
+  if (wire.maxTokens !== undefined) samplers.max_tokens = wire.maxTokens
+  if (model.api === "openai-completions") {
+    return { messages: input.map((message, i) => ({ ...message, inputs: [i] })), samplers }
+  }
+  const first = wire.context.systemPrompt !== undefined ? input.findIndex((m) => m.role !== "system") : 0
+  const systemCount = first === -1 ? input.length : first
+  const messages: Array<WireContext["messages"][number]> = []
+  if (wire.context.systemPrompt) {
+    messages.push({
+      role: "system",
+      content: wire.context.systemPrompt,
+      inputs: Array.from({ length: systemCount }, (_, i) => i)
+    })
+  }
+  for (const [i, message] of wire.context.messages.entries()) {
+    const content =
+      typeof message.content === "string"
+        ? message.content
+        : message.content.flatMap((block) => (block.type === "text" ? [block.text] : [])).join("\n")
+    messages.push({ role: message.role === "assistant" ? "assistant" : "user", content, inputs: [i + systemCount] })
+  }
+  return { messages, samplers }
 }

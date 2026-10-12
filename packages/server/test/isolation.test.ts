@@ -640,6 +640,10 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
         yield* refused(actor.api.GetRunContext({ versionId: owner.chat.generatingId }), "NotFound")
         const own = yield* owner.api.GetRunContext({ versionId: owner.chat.generatingId })
         assert.strictEqual(own.chatId, owner.chat.chatId)
+        assert.strictEqual(own.requests.length, 1)
+        for (const request of own.requests) {
+          assert.deepStrictEqual(Object.keys(request).sort(), ["id", "status", "counts", "usageSource", "cost"].sort())
+        }
       })
   },
   // --- Chat setup, speakers and the send queue (chatSetupApi.ts).
@@ -1258,7 +1262,10 @@ const seed = Effect.gen(function* () {
         settings: settings(`${user.handle}'s`),
         apiKey: `sk-${user.handle}-connection-key`
       })
-      const model = yield* api.AddUserModel({ connectionId: connection.id, key: "m", overrides: {} })
+      const model = yield* api.AddUserModel({ connectionId: connection.id, key: "m", overrides: { cacheTtlS: 300 } })
+      yield* api.SetGenerationDefaults({
+        defaults: { model: { connection: connection.id, model: model.id }, preset: null }
+      })
       // No RPC writes these yet.
       const { ref } = yield* writer.CreateEntity({
         userId: user.id,
@@ -1312,12 +1319,13 @@ const seed = Effect.gen(function* () {
         timeZone: "UTC",
         frozen: null
       })
+      const inspectorRollout = uuidv7()
       yield* writer.StartRollout({
         userId: user.id,
         chatId: chat.id,
         slotId: reply.entry.slotId,
         versionId: reply.entry.version.id,
-        rolloutId: uuidv7(),
+        rolloutId: inspectorRollout,
         leafSlotId: sent.entry.slotId,
         connectionId: connection.id,
         modelId: model.id,
@@ -1325,6 +1333,22 @@ const seed = Effect.gen(function* () {
         issues: [],
         variables: [],
         frozenMessages: []
+      })
+      yield* writer.OpenLlmRequest({
+        userId: user.id,
+        request: {
+          id: uuidv7() as LlmRequestId,
+          connectionId: connection.id,
+          modelId: model.id,
+          chatId: chat.id,
+          rolloutId: inspectorRollout,
+          versionId: reply.entry.version.id,
+          purpose: "generation",
+          api: "openai-completions",
+          provider: "openai",
+          modelKey: "m",
+          startedAt: Date.now()
+        }
       })
       const chatNote = yield* api.CreateChatNote({ chatId: chat.id, title: "Scene" })
       const card = yield* writer.CreateEntity({
@@ -1497,7 +1521,9 @@ const storage: Record<string, (reader: Reader["Service"], actor: Party, owner: P
     CacheWarmth: (reader, actor, owner) =>
       Effect.gen(function* () {
         yield* refused(reader.CacheWarmth({ userId: actor.user.id, chatId: owner.chat.chatId }), "NotFound")
-        yield* reader.CacheWarmth({ userId: owner.user.id, chatId: owner.chat.chatId })
+        const own = yield* reader.CacheWarmth({ userId: owner.user.id, chatId: owner.chat.chatId })
+        assert.isNotNull(own)
+        assert.strictEqual(own!.expiresAt, own!.lastRequestAt + 300_000)
       })
   }
 

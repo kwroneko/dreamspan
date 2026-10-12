@@ -4,6 +4,7 @@
 import { type AppApi, CurrentUser } from "@rp/shared/api.ts"
 import type { ChatId } from "@rp/shared/chat.ts"
 import { Effect } from "effect"
+import { CacheWarmth } from "../chat/CacheWarmth.ts"
 import { ChatHub } from "../chat/ChatHub.ts"
 import { Reader, Writer } from "../db/Database.ts"
 import { internal } from "./internal.ts"
@@ -12,6 +13,7 @@ export const makeBinHandlers = Effect.gen(function* () {
   const reader = yield* Reader
   const writer = yield* Writer
   const hub = yield* ChatHub
+  const warmth = yield* CacheWarmth
 
   const userId = Effect.map(CurrentUser, (user) => user.id)
 
@@ -32,14 +34,19 @@ export const makeBinHandlers = Effect.gen(function* () {
           const chat = yield* reader.GetChat({ userId: id, chatId }).pipe(Effect.option)
           if (chat._tag === "Some") hub.publish(chatId, { _tag: "Chat", chat: chat.value })
         }
+        yield* warmth.refreshUser(id)
         return item
       }).pipe(Effect.uninterruptible, internal("RestoreBinItem")),
 
     PurgeBinItem: ({ itemId }) =>
-      Effect.flatMap(userId, (id) => writer.PurgeBinItem({ userId: id, itemId })).pipe(internal("PurgeBinItem")),
+      Effect.flatMap(userId, (id) =>
+        writer.PurgeBinItem({ userId: id, itemId }).pipe(Effect.tap(() => warmth.refreshUser(id)))
+      ).pipe(internal("PurgeBinItem")),
 
     EmptyBin: ({ itemIds }) =>
-      Effect.flatMap(userId, (id) => writer.EmptyBin({ userId: id, itemIds })).pipe(internal("EmptyBin")),
+      Effect.flatMap(userId, (id) =>
+        writer.EmptyBin({ userId: id, itemIds }).pipe(Effect.tap(() => warmth.refreshUser(id)))
+      ).pipe(internal("EmptyBin")),
 
     ListRecoveredTexts: ({ limit, before }) =>
       Effect.flatMap(userId, (id) => reader.ListRecoveredTexts({ userId: id, source: null, limit, before })).pipe(

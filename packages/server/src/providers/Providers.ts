@@ -143,8 +143,7 @@ const merged = (base: unknown, over: Readonly<Record<string, unknown>>): Record<
 
 /** A scrubber for the given secrets: every occurrence becomes "[redacted]". */
 export const makeScrub = (secrets: ReadonlyArray<string | null | undefined>) => {
-  // Short values would redact ordinary words; real keys and tokens are long.
-  const values = [...new Set(secrets.filter((v): v is string => typeof v === "string" && v.length >= 6))].sort(
+  const values = [...new Set(secrets.filter((v): v is string => typeof v === "string" && v.length > 0))].sort(
     (a, b) => b.length - a.length
   )
   return (text: string) => values.reduce((out, value) => out.split(value).join("[redacted]"), text)
@@ -732,6 +731,8 @@ export const layer = (options: ProvidersOptions = {}) =>
           ...(errorMessage !== undefined ? { errorMessage } : {})
         })
 
+        const metadata = (value: string | null) => (value === null ? null : prepared.scrub(value).slice(0, 256))
+
         const writeClose = (message: AssistantMessage, error: ProviderError | null, context: PiContext["messages"]) =>
           Effect.gen(function* () {
             const { counts, source } = finalCounts(message, state.capture, context)
@@ -748,8 +749,10 @@ export const layer = (options: ProvidersOptions = {}) =>
                   status: error === null ? "complete" : error.reason === "aborted" ? "aborted" : "failed",
                   endedAt: Date.now(),
                   firstTokenAt: state.firstTokenAt,
-                  responseModel: message.responseModel ?? (message.model !== model.key ? message.model : null),
-                  upstream: state.capture.upstream,
+                  responseModel: metadata(
+                    message.responseModel ?? (message.model !== model.key ? message.model : null)
+                  ),
+                  upstream: metadata(state.capture.upstream),
                   counts,
                   usageSource: source,
                   rawUsage: state.capture.rawUsage,

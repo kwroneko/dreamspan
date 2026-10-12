@@ -80,6 +80,8 @@ export const makeChatHandlers = Effect.gen(function* () {
   const afterDelete = (user: UserId, chatId: ChatId) =>
     Effect.gen(function* () {
       hub.publish(chatId, { _tag: "Reload" })
+      // Any delete can evict an older shared dependency from the user's bin.
+      yield* warmth.refreshUser(user)
       yield* stopDeleted(user, chatId)
       yield* publishChat(user, chatId).pipe(Effect.catchTag("NotFound", () => Effect.void))
     })
@@ -285,6 +287,7 @@ export const makeChatHandlers = Effect.gen(function* () {
         yield* stopDeleted(id, chatId)
         // After the stopped versions, the subscriptions end.
         hub.close(chatId, { _tag: "Deleted" })
+        yield* warmth.refreshUser(id)
         return item
       }).pipe(Effect.uninterruptible, internal("DeleteChat")),
 

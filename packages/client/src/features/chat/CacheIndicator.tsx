@@ -31,7 +31,7 @@ const duration = (seconds: number) =>
 export function CacheIndicator({ warmth }: { warmth: CacheWarmth | null }) {
   const [now, setNow] = useState(() => Date.now())
   const [countdown, setCountdown] = useState(countdownOn)
-  const expiresAt = warmth === null ? 0 : warmth.lastRequestAt + warmth.ttlS * 1000
+  const expiresAt = warmth === null ? 0 : warmth.expiresAt
   const warm = warmth !== null && warmth.changed === null && now < expiresAt
   // Ticks every second while counting down, otherwise once, when the cache expires.
   useEffect(() => {
@@ -57,7 +57,7 @@ export function CacheIndicator({ warmth }: { warmth: CacheWarmth | null }) {
   const detail = changed
     ? `${changed.reason} The next reply writes about ${changed.tokens.toLocaleString()} tokens to the cache again.`
     : !warm
-      ? `More than ${duration(warmth.ttlS)} passed since the last request.`
+      ? `More than ${duration((warmth.expiresAt - warmth.lastRequestAt) / 1000)} passed since the last request.`
       : warmth.verified
         ? "The provider reported using its cache on the last request."
         : "Assumed: the provider didn't report its cache on the last request."

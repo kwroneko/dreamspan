@@ -48,6 +48,7 @@ export interface ConnectionRow {
   readonly proxy_mode: ProxyMode
   readonly proxy_url_enc: Uint8Array | null
   readonly preset_override_ref_id: string | null
+  readonly cache_revision: number
   readonly row_version: number
   readonly created_at: number
   readonly updated_at: number

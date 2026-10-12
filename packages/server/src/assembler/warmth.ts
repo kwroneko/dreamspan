@@ -4,6 +4,7 @@
 // first piece of the first differing message whose text differs says why.
 import type { ContextSource } from "@rp/shared/inspectorApi.ts"
 import { tokensOf } from "./st.ts"
+import { wireContext } from "./wire.ts"
 import type { ContextSnapshot, RequestMessage, Source } from "./types.ts"
 
 export type Describe = (source: Source) => ContextSource
@@ -30,6 +31,7 @@ const messageReason = (
   label: string
 ) => {
   const sent = next.pieces.find((p) => p.source.kind === "message" && p.source.slot === source.slot)
+  if (sent?.source.kind === "message" && sent.messages.length === 0) return BUDGET
   if (sent?.source.kind === "message") {
     return sent.source.version === source.version
       ? `${label} was amended.`
@@ -50,7 +52,13 @@ const messageReason = (
 
 const reasonAt = (last: ContextSnapshot, next: ContextSnapshot, at: number, describe: Describe) => {
   const now = new Map(next.pieces.map((piece) => [piece.id, piece]))
-  const changed = last.pieces.find((piece) => piece.messages.includes(at) && now.get(piece.id)?.text !== piece.text)
+  const changed = last.pieces.find((piece) => {
+    const after = now.get(piece.id)
+    return (
+      piece.messages.includes(at) &&
+      (after?.text !== piece.text || JSON.stringify(after.messages) !== JSON.stringify(piece.messages))
+    )
+  })
   if (changed === undefined) return LAYOUT
   const { source } = changed
   const { label } = describe(source)
@@ -80,26 +88,52 @@ const reasonAt = (last: ContextSnapshot, next: ContextSnapshot, at: number, desc
   }
 }
 
-/**
- * What the next request changes before the last one's last breakpoint, with the tokens
- * of the last one from there to it: what the provider would write again. Null when the
- * prefix holds.
- */
+/** Compare the provider-formatted reusable prefix; estimate the next uncached suffix. */
 export const prefixChange = (
   last: ContextSnapshot,
   next: ContextSnapshot,
   describe: Describe
 ): { readonly reason: string; readonly tokens: number } | null => {
   const end = lastBreakpoint(last)
+  const nextEnd = lastBreakpoint(next)
   const before = last.inputs.model
   const after = next.inputs.model
-  if (before?.connectionId !== after?.connectionId || before?.modelId !== after?.modelId) {
-    return { reason: "The model changed, and its cache is its own.", tokens: tokensBetween(last, 0, end) }
+  const mapped = (snapshot: ContextSnapshot) =>
+    snapshot.wire ??
+    (snapshot.inputs.model
+      ? wireContext(snapshot.request, snapshot.inputs.model)
+      : { messages: snapshot.request.messages.map((m, i) => ({ ...m, inputs: [i] })) })
+  const oldWire = mapped(last).messages.filter((m) => m.inputs.some((i) => i <= end))
+  const allNext = mapped(next).messages
+  const newWire = allNext.filter((m) => m.inputs.some((i) => i <= nextEnd))
+  const suffix = (at: number) => newWire.slice(at).reduce((sum, m) => sum + tokensOf(m), 0)
+  if (end < 0 || nextEnd < 0 || oldWire.length === 0 || newWire.length === 0) {
+    return {
+      reason: "No reusable cache prefix is recorded.",
+      tokens: allNext.reduce((sum, m) => sum + tokensOf(m), 0)
+    }
   }
-  const messages = last.request.messages
-  for (let at = 0; at <= end; at++) {
-    if (!same(messages[at]!, next.request.messages[at])) {
-      return { reason: reasonAt(last, next, at, describe), tokens: tokensBetween(last, at, end) }
+  if (
+    before?.connectionId !== after?.connectionId ||
+    before?.modelId !== after?.modelId ||
+    before?.key !== after?.key ||
+    before?.api !== after?.api ||
+    before?.kind !== after?.kind
+  ) {
+    return { reason: "The model changed, and its cache is its own.", tokens: suffix(0) }
+  }
+  if (before?.connectionRevision !== after?.connectionRevision) {
+    return { reason: "The connection's endpoint or route changed.", tokens: suffix(0) }
+  }
+  for (let at = 0; at < oldWire.length; at++) {
+    if (!same(oldWire[at]!, newWire[at])) {
+      const inputs = oldWire[at]!.inputs.filter((i) => i <= end)
+      const input = inputs.find((i) => !same(last.request.messages[i]!, next.request.messages[i])) ?? inputs[0]!
+      const conversion = last.request.useSystemPrompt !== next.request.useSystemPrompt
+      return {
+        reason: conversion ? "The provider's system-prompt conversion changed." : reasonAt(last, next, input, describe),
+        tokens: suffix(at)
+      }
     }
   }
   return null
