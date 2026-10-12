@@ -137,3 +137,31 @@ test("a file larger than the cap is refused before it's sent", async ({ page }) 
   await expect(page.getByRole("list", { name: "Imported files" })).toContainText("This file is larger than 64 MB.")
   expect(uploads).toBe(0)
 })
+
+test("files can't be added while a batch is importing", async ({ page }) => {
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${server().url}/import`)
+  // Each upload is held a moment, so the batch is still going when another drop could come.
+  await page.route("**/library/import?**", async (route) => {
+    await new Promise((done) => setTimeout(done, 1500))
+    await route.continue()
+  })
+  const picker = page.getByLabel("Choose files, or drop them here")
+  await picker.setInputFiles({ name: "slow.json", mimeType: "application/json", buffer: preset("Slow.") })
+  await expect(picker).toBeDisabled()
+  await expect(page.getByText("Wait until these files are done to add more.")).toBeVisible()
+  await expect(page.getByText("Done.")).toBeVisible()
+  await expect(picker).toBeEnabled()
+})
+
+test("an upload refused for an ended session says so", async ({ page }) => {
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${server().url}/import`)
+  await page.route("**/library/import?**", (route) =>
+    route.fulfill({ status: 401, contentType: "application/json", body: '{"error":"login required"}' })
+  )
+  await page
+    .getByLabel("Choose files, or drop them here")
+    .setInputFiles({ name: "late.json", mimeType: "application/json", buffer: preset("Late.") })
+  await expect(page.getByRole("list", { name: "Imported files" })).toContainText("Your session has ended.")
+})

@@ -69,9 +69,13 @@ function UploadRow({ upload }: { upload: Upload }) {
         </Badge>
       </div>
       {outcome?._tag === "Done" && <ImportReportView result={outcome.result} />}
-      {outcome?._tag === "Failed" && (
+      {(outcome?._tag === "Failed" || outcome?._tag === "Unauthorized") && (
         <Alert tone="danger">
-          <p>{outcome.message}</p>
+          <p>
+            {outcome._tag === "Failed"
+              ? outcome.message
+              : "Your session has ended. Log in again, then import the file again."}
+          </p>
         </Alert>
       )}
     </li>
@@ -138,10 +142,13 @@ export function ImportPage() {
         />
         <FileDrop
           label={into ? "Choose the new version, or drop it here" : "Choose files, or drop them here"}
-          description={`Up to ${size(MAX_IMPORT_BYTES)} each`}
+          description={
+            left > 0 ? "Wait until these files are done to add more." : `Up to ${size(MAX_IMPORT_BYTES)} each`
+          }
           multiple={!into}
           accept=".png,.json,.charx,image/png,application/json"
-          disabled={into !== null && left > 0}
+          // One batch at a time: files dropped meanwhile would interleave with it.
+          disabled={left > 0}
           onFiles={(files) => void importFiles(files)}
         />
       </Card>
