@@ -22,6 +22,8 @@ const generating = (page: Page) => page.getByText("generating", { exact: true })
 const repliesDone = async (page: Page, count: number) => {
   await expect(replies(page)).toHaveCount(count)
   await expect(generating(page)).toHaveCount(0, { timeout: 20_000 })
+  // The list followed the reply as it grew.
+  await expect(replies(page).last()).toBeInViewport()
 }
 
 const newChat = async (page: Page, title: string) => {

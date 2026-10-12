@@ -39,7 +39,9 @@ function MessageList({ session, view, anchor }: { session: ChatSession; view: Ch
     followOnAppend: view.follow,
     paddingStart: 16,
     paddingEnd: 16,
-    gap: 12
+    gap: 12,
+    // Within this of the end counts as at the end: a reply growing there stays in view.
+    scrollEndThreshold: 48
   })
 
   // A new window opens at the asked-for message, or at the bottom.
@@ -60,7 +62,7 @@ function MessageList({ session, view, anchor }: { session: ChatSession; view: Ch
     if (!settled.current || first === undefined || last === undefined) return
     if (first < EDGE) void session.loadOlder()
     if (last >= entries.length - EDGE) void session.loadNewer()
-    if (view.newer === null && virtualizer.isAtEnd(48)) session.followAtBottom()
+    if (view.newer === null && virtualizer.isAtEnd()) session.followAtBottom()
   })
 
   return (
