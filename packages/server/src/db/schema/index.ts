@@ -10,6 +10,7 @@ import { integrity } from "./integrity.ts"
 import { library } from "./library.ts"
 import { platform } from "./platform.ts"
 import { providers } from "./providers.ts"
+import { queue } from "./queue.ts"
 import { search } from "./search.ts"
 
 export const users = [
@@ -26,5 +27,5 @@ export const users = [
 // Tables first, then the triggers that refer across them.
 export const dataModel = [...platform, ...library, ...chats, ...history, ...integrity, ...search]
 
-export { accounts, bin, binIndex, credentials, draftHistory, graphIntegrity, ownership, providers }
+export { accounts, bin, binIndex, credentials, draftHistory, graphIntegrity, ownership, providers, queue }
 export { secretBindings } from "./credentials.ts"

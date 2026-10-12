@@ -8,12 +8,15 @@
 import {
   type Chat,
   type ChatId,
+  type EntityId,
   type PathEntry,
+  type QueuedMessage,
   type SlotId,
   type Version,
   type VersionId,
   versionInContext
 } from "@rp/shared/chat.ts"
+import type { Cast, CastChange } from "@rp/shared/chatSetupApi.ts"
 import { NotFound } from "@rp/shared/errors.ts"
 import type { ChatEvent, PathRange, PathWindow } from "@rp/shared/chatApi.ts"
 import { Cause, Context, Effect, Exit, Fiber, Schedule, Stream } from "effect"
@@ -48,6 +51,10 @@ export interface ChatView {
   readonly error: string | null
   /** The chat went to the bin while open, here or elsewhere. */
   readonly deleted: boolean
+  /** Who's in the chat and its settings at the leaf shown; null until read. */
+  readonly cast: Cast | null
+  /** What waits behind a reply still being written (DESIGN §2.2), in order. */
+  readonly queue: ReadonlyArray<QueuedMessage>
 }
 
 type Client = AppClient["Service"]
@@ -73,7 +80,9 @@ export class ChatSession {
     opened: 0,
     loading: true,
     error: null,
-    deleted: false
+    deleted: false,
+    cast: null,
+    queue: []
   }
   private readonly listeners = new Set<() => void>()
   /** Unmounts for the live atoms kept alive while their version generates, shown or not. */
@@ -114,9 +123,62 @@ export class ChatSession {
   readonly snapshot = () => this.view
 
   private update(change: Partial<ChatView>) {
+    const leaf = this.view.leafSlotId
     this.view = { ...this.view, ...change }
     this.report()
     for (const listener of this.listeners) listener()
+    // The cast is read at the leaf shown: another leaf may have another cast.
+    if (this.view.leafSlotId !== leaf && !this.view.loading) void this.refreshCast()
+  }
+
+  /** Bumped by every cast read, so an older reply is dropped. */
+  private castReads = 0
+
+  private async refreshCast() {
+    const read = ++this.castReads
+    const slotId = this.view.leafSlotId
+    const result = await this.call((client) => client("GetCast", { chatId: this.chatId, slotId }))
+    if (!result.ok || read !== this.castReads || this.disposed) return
+    // Unchanged, it stays the same object: every message row reads it.
+    if (JSON.stringify(result.value) !== JSON.stringify(this.view.cast)) this.update({ cast: result.value })
+  }
+
+  // --- The cast at a message's position, for text whose macros follow the chat's state
+  // there (DESIGN §5.6): a greeting's `{{user}}` is whoever the user played before it.
+
+  private readonly positionCasts = new Map<string, Cast | "loading">()
+  private readonly positionListeners = new Set<() => void>()
+
+  readonly subscribePositions = (listener: () => void) => {
+    this.positionListeners.add(listener)
+    return () => {
+      this.positionListeners.delete(listener)
+    }
+  }
+
+  /** The cast after `slotId` (null: before the first message); undefined until read. */
+  castAfter(slotId: SlotId | null): Cast | undefined {
+    const key = slotId ?? ""
+    const known = this.positionCasts.get(key)
+    if (known !== undefined) return known === "loading" ? undefined : known
+    this.positionCasts.set(key, "loading")
+    void this.call((client) => client("GetCast", { chatId: this.chatId, slotId })).then((result) => {
+      if (this.disposed) return
+      if (result.ok) this.positionCasts.set(key, result.value)
+      else this.positionCasts.delete(key)
+      for (const listener of this.positionListeners) listener()
+    })
+    return undefined
+  }
+
+  private forgetPositions() {
+    this.positionCasts.clear()
+    for (const listener of this.positionListeners) listener()
+  }
+
+  private async refreshQueue() {
+    const result = await this.call((client) => client("ListQueued", { chatId: this.chatId }))
+    if (result.ok && !this.disposed) this.update({ queue: result.value })
   }
 
   private report() {
@@ -237,6 +299,8 @@ export class ChatSession {
         error: null
       })
       for (const entry of window.entries) this.track(entry.version)
+      void this.refreshCast()
+      void this.refreshQueue()
     })
   }
 
@@ -367,6 +431,11 @@ export class ChatSession {
         return this.reload()
       case "Deleted":
         return this.update({ deleted: true })
+      case "Queue":
+        return this.update({ queue: event.queue })
+      case "State":
+        this.forgetPositions()
+        return void this.refreshCast()
     }
   }
 
@@ -477,30 +546,96 @@ export class ChatSession {
     return chat !== null && leafSlotId !== chat.activeLeafSlotId
   }
 
-  /** The user's message at the leaf, then a reply to it. `sent` says whether the message went. */
-  async send(content: string): Promise<{ readonly sent: boolean; readonly outcome: Outcome<unknown> }> {
+  /**
+   * The user's message at the leaf, as `speaker` (Send as X), then a reply to it by
+   * `replySpeaker`. Onto a reply still being written, it's queued and the server posts it,
+   * with its reply, when that one ends (DESIGN §2.2). `sent` says whether the message went.
+   */
+  async send(
+    content: string,
+    speaker: EntityId | null = null,
+    replySpeaker: EntityId | null = null
+  ): Promise<{ readonly sent: boolean; readonly outcome: Outcome<unknown> }> {
     const result = await this.call((client) =>
       client("SendMessage", {
         chatId: this.chatId,
         parentSlotId: this.view.leafSlotId,
         branch: this.onOtherBranch(),
-        content
+        content,
+        speakerEntityId: speaker
       })
     )
     if (!result.ok) {
       if (result.error.tag === "LeafMoved") this.reload()
       return { sent: false, outcome: result }
     }
+    if (result.value._tag === "Queued") {
+      this.update({ queue: result.value.queue })
+      return { sent: true, outcome: result }
+    }
     this.appended(result.value.entry, result.value.chat)
-    return { sent: true, outcome: await this.generate(result.value.entry.slotId) }
+    return { sent: true, outcome: await this.generate(result.value.entry.slotId, replySpeaker) }
   }
 
-  /** A model reply at the leaf, or under the message just sent. */
-  async generate(parentSlotId = this.view.leafSlotId): Promise<Outcome<unknown>> {
+  /**
+   * A model reply at the leaf, or under the message just sent, as `speaker` (Generate X),
+   * with a one-turn `direction`. Onto a reply still being written, it's queued.
+   */
+  async generate(
+    parentSlotId = this.view.leafSlotId,
+    speaker: EntityId | null = null,
+    direction = ""
+  ): Promise<Outcome<unknown>> {
     const branch = parentSlotId === this.view.leafSlotId && this.onOtherBranch()
-    const result = await this.call((client) => client("Generate", { chatId: this.chatId, parentSlotId, branch }))
-    if (result.ok) this.appended(result.value.entry, result.value.chat)
-    else if (result.error.tag === "LeafMoved") this.reload()
+    const result = await this.call((client) =>
+      client("Generate", {
+        chatId: this.chatId,
+        parentSlotId,
+        branch,
+        speakerEntityId: speaker,
+        ...(direction.trim() === "" ? {} : { direction })
+      })
+    )
+    if (result.ok) {
+      if (result.value._tag === "Queued") this.update({ queue: result.value.queue })
+      else this.appended(result.value.entry, result.value.chat)
+    } else if (result.error.tag === "LeafMoved") this.reload()
+    return result
+  }
+
+  /** Changes who's in the chat, or a setting, from the leaf shown on (DESIGN §3.4). */
+  async changeCast(change: CastChange): Promise<Outcome<Cast>> {
+    const result = await this.call((client) =>
+      client("ChangeCast", { chatId: this.chatId, slotId: this.view.leafSlotId, change })
+    )
+    if (result.ok) {
+      this.castReads++
+      this.update({ cast: result.value })
+      this.forgetPositions()
+    }
+    return result
+  }
+
+  async editQueued(queued: QueuedMessage, content: string): Promise<Outcome<unknown>> {
+    return this.call((client) =>
+      client("EditQueued", {
+        queuedId: queued.id,
+        content,
+        speakerEntityId: queued.speakerEntityId,
+        expectedRowVersion: queued.rowVersion
+      })
+    )
+  }
+
+  /** Every card the user can speak as or add (DESIGN §2.2). */
+  listCards() {
+    return this.call((client) => client("ListCards", undefined))
+  }
+
+  /** Takes a queued entry back; its text is returned for the composer. */
+  async withdrawQueued(queued: QueuedMessage): Promise<Outcome<QueuedMessage>> {
+    const result = await this.call((client) => client("WithdrawQueued", { queuedId: queued.id }))
+    if (result.ok) this.update({ queue: this.view.queue.filter((q) => q.id !== queued.id) })
     return result
   }
 

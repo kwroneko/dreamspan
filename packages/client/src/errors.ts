@@ -11,7 +11,7 @@ import {
   ServerError,
   StaleWrite
 } from "@rp/shared/errors.ts"
-import { ChatBusy, GenerationUnavailable, NotAmendable } from "@rp/shared/chatApi.ts"
+import { GenerationUnavailable, NotAmendable } from "@rp/shared/chatApi.ts"
 import { Cause } from "effect"
 import { RpcClientError } from "effect/rpc"
 
@@ -64,7 +64,6 @@ const describeError = (error: unknown): AppError => {
   // Chats
   if (error instanceof LeafMoved)
     return make("LeafMoved", "A newer message arrived meanwhile. The chat is up to date now: try again.")
-  if (error instanceof ChatBusy) return make("ChatBusy", "The reply is still being written. Send once it's done.")
   if (error instanceof GenerationUnavailable) return make("GenerationUnavailable", sentence(error.message))
   if (error instanceof NotAmendable)
     return make("NotAmendable", "Only a finished message you wrote can be changed in place.")

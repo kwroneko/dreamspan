@@ -1,0 +1,38 @@
+// A panel anchored to its trigger. Base UI moves focus into it, closes it on Escape or an
+// outside click and returns focus to the trigger.
+import { Popover as BasePopover } from "@base-ui/react/popover"
+import type { ReactNode } from "react"
+import { buttonClass } from "./Button.tsx"
+
+export function Popover({
+  open,
+  onOpenChange,
+  trigger,
+  triggerLabel,
+  title,
+  children
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  /** What the trigger button shows. */
+  trigger: ReactNode
+  triggerLabel: string
+  title: string
+  children: ReactNode
+}) {
+  return (
+    <BasePopover.Root open={open} onOpenChange={(next) => onOpenChange(next)}>
+      <BasePopover.Trigger aria-label={triggerLabel} className={`${buttonClass("secondary")} max-w-full`}>
+        {trigger}
+      </BasePopover.Trigger>
+      <BasePopover.Portal>
+        <BasePopover.Positioner className="z-50 outline-none" side="top" align="start" sideOffset={6}>
+          <BasePopover.Popup className="flex max-h-[min(28rem,var(--available-height))] w-[min(22rem,calc(100vw-2rem))] origin-[var(--transform-origin)] flex-col gap-2 overflow-hidden rounded-lg border border-border bg-surface p-3 text-text shadow-lg outline-none transition-[scale,opacity] duration-100 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0 motion-reduce:transition-none">
+            <BasePopover.Title className="text-sm font-semibold">{title}</BasePopover.Title>
+            {children}
+          </BasePopover.Popup>
+        </BasePopover.Positioner>
+      </BasePopover.Portal>
+    </BasePopover.Root>
+  )
+}

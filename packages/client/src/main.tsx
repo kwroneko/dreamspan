@@ -5,14 +5,17 @@ import { StrictMode } from "react"
 import { createRoot } from "react-dom/client"
 import { registerFeatures } from "./features/index.ts"
 import { buildRouter } from "./routes.tsx"
+import { CspProvider } from "./ui/CspProvider.tsx"
 
 registerFeatures()
 const router = buildRouter()
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <RegistryProvider>
-      <RouterProvider router={router} />
-    </RegistryProvider>
+    <CspProvider>
+      <RegistryProvider>
+        <RouterProvider router={router} />
+      </RegistryProvider>
+    </CspProvider>
   </StrictMode>
 )

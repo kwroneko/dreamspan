@@ -3,8 +3,9 @@ import type { LibraryRef } from "@rp/shared/library.ts"
 import { type ExportFormat, exportFormats } from "@rp/shared/libraryImport.ts"
 import { Link } from "@tanstack/react-router"
 import { useState } from "react"
-import { AsyncView } from "../../actions.tsx"
+import { AsyncView, useAction } from "../../actions.tsx"
 import { Button, buttonClass } from "../../ui/Button.tsx"
+import { Checkbox } from "../../ui/Choice.tsx"
 import { Field } from "../../ui/Field.tsx"
 import { Select } from "../../ui/Select.tsx"
 import { Badge, Card, CardHeader, EmptyState } from "../../ui/Surface.tsx"
@@ -12,7 +13,29 @@ import { useTitle } from "../shell.tsx"
 import { FORMAT_LABELS, LISTED, libraryAtom } from "./data.ts"
 import { downloadExport } from "./files.ts"
 
-function LibraryRow({ entry }: { entry: LibraryRef }) {
+/** In the persona folder or not (DESIGN §2.2): personas are what the user plays. */
+function PersonaToggle({ entry, persona }: { entry: LibraryRef; persona: boolean }) {
+  const action = useAction()
+  return (
+    <>
+      <Checkbox
+        checked={persona}
+        onCheckedChange={(next) =>
+          void action.run((client) => client("SetPersona", { entityId: entry.entityId, persona: next }), ["library"])
+        }
+      >
+        <span className="sr-only">{entry.label}: </span>Persona
+      </Checkbox>
+      {action.error && (
+        <p role="alert" className="text-sm text-danger">
+          {action.error.message}
+        </p>
+      )}
+    </>
+  )
+}
+
+function LibraryRow({ entry, persona }: { entry: LibraryRef; persona?: boolean | undefined }) {
   const formats = exportFormats[entry.kind] ?? []
   const [format, setFormat] = useState<ExportFormat | null>(formats[0] ?? null)
   const [pending, setPending] = useState(false)
@@ -43,6 +66,17 @@ function LibraryRow({ entry }: { entry: LibraryRef }) {
         )}
       </div>
       <div className="flex flex-wrap items-center gap-2">
+        {persona !== undefined && <PersonaToggle entry={entry} persona={persona} />}
+        {entry.kind === "card" && (
+          <Link
+            to="/cards/$entityId/chat"
+            params={{ entityId: entry.entityId }}
+            aria-label={`Start a chat with ${entry.label}`}
+            className={buttonClass("primary")}
+          >
+            Chat
+          </Link>
+        )}
         {entry.refKind === "upstream" && (
           <Link
             to="/import"
@@ -92,7 +126,15 @@ export function LibraryPage() {
               ) : (
                 <ul aria-label={title} className="flex flex-col divide-y divide-border">
                   {lists[kind].map((entry) => (
-                    <LibraryRow key={entry.id} entry={entry} />
+                    <LibraryRow
+                      key={entry.id}
+                      entry={entry}
+                      persona={
+                        kind === "card"
+                          ? lists.castCards.some((card) => card.entityId === entry.entityId && card.persona)
+                          : undefined
+                      }
+                    />
                   ))}
                 </ul>
               )}

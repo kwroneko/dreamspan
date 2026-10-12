@@ -2,7 +2,7 @@
 // storage enforces ownership, so another user's ids are NotFound. Each change is published
 // to the chat's subscribers, from every tab of the user, after it's committed.
 import { type AppApi, CurrentUser } from "@rp/shared/api.ts"
-import type { ChatId, NewVersion, SlotId } from "@rp/shared/chat.ts"
+import type { ChatId, EntityId, NewVersion, SlotId } from "@rp/shared/chat.ts"
 import { GenerationUnavailable } from "@rp/shared/chatApi.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { ServerError } from "@rp/shared/errors.ts"
@@ -105,28 +105,40 @@ export const makeChatHandlers = Effect.gen(function* () {
       yield* publishChat(user, chatId).pipe(Effect.catchTag("NotFound", () => Effect.void))
     })
 
-  const append = (
+  /**
+   * A message or a reply under `parentSlotId`, posted or queued behind a reply still
+   * being written (DESIGN §2.2). A posted reply starts generating.
+   */
+  const sendOrQueue = (
     user: UserId,
-    chatId: ChatId,
-    parentSlotId: SlotId | null,
-    branch: boolean,
-    version: typeof NewVersion.Type
+    params: {
+      readonly chatId: ChatId
+      readonly parentSlotId: SlotId | null
+      readonly branch: boolean
+      readonly kind: "message" | "generate"
+      readonly content: string
+      readonly speakerEntityId: EntityId | null
+      readonly direction: string | null
+    }
   ) =>
     Effect.gen(function* () {
-      const result = yield* writer.AppendMessage({
-        userId: user,
-        chatId,
-        parentSlotId,
-        branch,
-        version,
-        commitDraft: null,
-        // Provisional, until DESIGN §2.2 decides between queueing and cancelling: the one
-        // place a message onto a reply still generating is refused.
-        refuseWhileGenerating: true
-      })
+      const outcome = yield* writer.SendOrQueue({ userId: user, ...params })
+      if (outcome._tag === "Queued") {
+        hub.publish(params.chatId, { _tag: "Queue", queue: outcome.queue })
+        return { _tag: "Queued" as const, queued: outcome.queued, queue: outcome.queue }
+      }
+      const { result } = outcome
+      if (params.kind === "generate") {
+        yield* generations.start({
+          userId: user,
+          chatId: params.chatId,
+          slotId: result.slotId,
+          versionId: result.version.id
+        })
+      }
       const entry = yield* publishSlot(user, result.slotId)
-      hub.publish(chatId, { _tag: "Chat", chat: result.chat })
-      return { entry, chat: result.chat }
+      hub.publish(params.chatId, { _tag: "Chat", chat: result.chat })
+      return { _tag: "Posted" as const, entry, chat: result.chat }
     })
 
   const handlers = {
@@ -160,41 +172,51 @@ export const makeChatHandlers = Effect.gen(function* () {
     ListVersions: ({ slotId }) =>
       Effect.flatMap(userId, (id) => reader.ListVersions({ userId: id, slotId })).pipe(internal("ListVersions")),
 
-    SendMessage: ({ chatId, parentSlotId, branch, content }) =>
-      Effect.flatMap(userId, (id) => append(id, chatId, parentSlotId, branch, userText(content, "user_written"))).pipe(
-        internal("SendMessage")
-      ),
+    SendMessage: ({ chatId, parentSlotId, branch, content, speakerEntityId }) =>
+      Effect.flatMap(userId, (id) =>
+        sendOrQueue(id, {
+          chatId,
+          parentSlotId,
+          branch,
+          kind: "message",
+          content,
+          speakerEntityId: speakerEntityId ?? null,
+          direction: null
+        })
+      ).pipe(internal("SendMessage")),
 
     // Once the version is written, its generation starts even if the caller has gone:
     // otherwise it would stay `generating` with nothing behind it.
-    Generate: ({ chatId, parentSlotId, branch }) =>
+    Generate: ({ chatId, parentSlotId, branch, speakerEntityId, direction }) =>
       Effect.gen(function* () {
         yield* needGenerator
         const id = yield* userId
-        const result = yield* writer
-          .AppendMessage({
-            userId: id,
-            chatId,
-            parentSlotId,
-            branch,
-            version: generating,
-            commitDraft: null
-          })
-          .pipe(Effect.catchTag("ChatBusy", (busy) => Effect.die(busy)))
-        yield* generations.start({ userId: id, chatId, slotId: result.slotId, versionId: result.version.id })
-        const entry = yield* publishSlot(id, result.slotId)
-        hub.publish(chatId, { _tag: "Chat", chat: result.chat })
-        return { entry, chat: result.chat }
+        return yield* sendOrQueue(id, {
+          chatId,
+          parentSlotId,
+          branch,
+          kind: "generate",
+          content: "",
+          speakerEntityId: speakerEntityId ?? null,
+          direction: direction ?? null
+        })
       }).pipe(Effect.uninterruptible, internal("Generate")),
 
     Regenerate: ({ slotId, expectedRowVersion }) =>
       Effect.gen(function* () {
         yield* needGenerator
         const id = yield* userId
+        // A swipe keeps the speaker and the one-turn direction of the version it replaces
+        // (DESIGN §2.2): the direction belongs to that turn, never to later ones.
+        const { entry: before } = yield* reader.GetSlot({ userId: id, slotId })
         const added = yield* writer.AddSelectedVersion({
           userId: id,
           slotId,
-          version: generating,
+          version: {
+            ...generating,
+            speakerEntityId: before.version.speakerEntityId,
+            ...(before.version.direction ? { direction: before.version.direction } : {})
+          },
           expectedRowVersion
         })
         yield* generations.start({ userId: id, chatId: added.chatId, slotId, versionId: added.version.id })

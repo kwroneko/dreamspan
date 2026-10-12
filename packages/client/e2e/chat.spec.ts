@@ -4,6 +4,7 @@
 import { join } from "node:path"
 import { expect, type Locator, type Page, test } from "@playwright/test"
 import type { Chat, SlotId } from "@rp/shared/chat.ts"
+import type { SendResult } from "@rp/shared/chatApi.ts"
 import { Effect } from "effect"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
@@ -46,9 +47,6 @@ test("a message gets a streamed reply, with versions to swipe through", async ({
   await send(page, "The lantern swings over the *harbor*.")
   await expect(page.getByRole("article", { name: "Your message" }).locator("em")).toHaveText("harbor")
   await expect(generating(page)).toBeVisible()
-  // Send waits for the reply (DESIGN §2.2 leaves queueing open); typing doesn't.
-  await page.getByLabel("Message", { exact: true }).fill("Next")
-  await expect(page.getByRole("button", { name: "Send" })).toBeDisabled()
   await expect(generating(page)).toHaveCount(0, { timeout: 20_000 })
   const reply = replies(page).last()
   const first = await textOf(reply)
@@ -128,12 +126,13 @@ test("a message sent from an older part of the chat lands at the end, with its r
       let parent: SlotId | null = null
       let first: SlotId | null = null
       for (let i = 0; i < 90; i++) {
-        const sent: { entry: { slotId: SlotId } } = yield* api.SendMessage({
+        const sent: SendResult = yield* api.SendMessage({
           chatId: chat.id,
           parentSlotId: parent,
           branch: false,
           content: `Message ${i}`
         })
+        if (sent._tag !== "Posted") throw new Error("nothing is generating, so nothing queues")
         parent = sent.entry.slotId
         first ??= parent
       }

@@ -4,11 +4,23 @@ import { RegistryContext } from "@effect/atom-react"
 import type { ChatId, SlotId } from "@rp/shared/chat.ts"
 import { Link, useNavigate, useParams, useSearch } from "@tanstack/react-router"
 import { useVirtualizer } from "@tanstack/react-virtual"
-import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react"
+import {
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore
+} from "react"
+import { Button } from "../../ui/Button.tsx"
 import { Loading } from "../../ui/Spinner.tsx"
 import { Alert } from "../../ui/Surface.tsx"
 import { useTitle } from "../shell.tsx"
 import { chatTitle } from "./ChatsPage.tsx"
+import { CastContext, castView } from "./cast.ts"
+import { CastDialog, SettingsDialog } from "./ChatPanels.tsx"
 import { Composer } from "./Composer.tsx"
 import { Message } from "./Message.tsx"
 import { useRenderCount } from "./perf.ts"
@@ -206,9 +218,12 @@ function ChatSurface({ session, leaf, slot }: { session: ChatSession; leaf: Slot
       void navigate({ to: ".", search: slot === null ? {} : { slot }, replace: true })
     }
   }, [navigate, leaf, slot, view.leafSlotId, view.chat])
+  // Rows read the cast from context: it's the same object until the cast changes.
+  const cast = useMemo(() => castView(view.cast), [view.cast])
+  const [panel, setPanel] = useState<"cast" | "settings" | null>(null)
   return (
-    <>
-      <header className="mx-auto flex w-full max-w-3xl items-center gap-3 pb-2">
+    <CastContext value={cast}>
+      <header className="mx-auto flex w-full max-w-3xl flex-wrap items-center gap-x-3 gap-y-1 pb-2">
         <Link to="/chats" className="text-sm text-muted hover:text-text">
           ← Chats
         </Link>
@@ -218,7 +233,22 @@ function ChatSurface({ session, leaf, slot }: { session: ChatSession; leaf: Slot
             Back to the latest branch
           </Link>
         )}
+        <div className="flex gap-1">
+          <Button variant="ghost" onClick={() => setPanel("cast")}>
+            Cast
+          </Button>
+          <Button variant="ghost" onClick={() => setPanel("settings")}>
+            Settings
+          </Button>
+        </div>
       </header>
+      {/* Mounted only while open: the surface re-renders with every page of history. */}
+      {panel === "cast" && (
+        <CastDialog session={session} open onOpenChange={(open) => setPanel(open ? "cast" : null)} />
+      )}
+      {panel === "settings" && (
+        <SettingsDialog session={session} open onOpenChange={(open) => setPanel(open ? "settings" : null)} />
+      )}
       {view.error && (
         <div className="mx-auto w-full max-w-3xl">
           <Alert tone="danger">{view.error}</Alert>
@@ -230,7 +260,7 @@ function ChatSurface({ session, leaf, slot }: { session: ChatSession; leaf: Slot
         <MessageList session={session} view={view} anchor={slot} />
       )}
       <Composer session={session} view={view} />
-    </>
+    </CastContext>
   )
 }
 

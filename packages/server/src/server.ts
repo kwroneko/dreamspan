@@ -18,6 +18,7 @@ import { RpcSerialization, RpcServer } from "effect/rpc"
 import { makeAccountHandlers } from "./api/accounts.ts"
 import { makeLibraryHandlers } from "./api/library.ts"
 import { makeChatHandlers } from "./api/chats.ts"
+import { makeChatSetupHandlers } from "./api/chatSetup.ts"
 import { makeProviderHandlers } from "./api/providers.ts"
 import { Accounts, AuthenticationLive, PEER_HEADER, SESSION_COOKIE, SESSION_TTL_MS } from "./auth/Accounts.ts"
 import { ChatHub } from "./chat/ChatHub.ts"
@@ -51,11 +52,13 @@ const Handlers = AppApi.toLayer(
     const accounts = yield* makeAccountHandlers
     const library = yield* makeLibraryHandlers
     const chats = yield* makeChatHandlers
+    const chatSetup = yield* makeChatSetupHandlers
     return AppApi.of({
       ...providers,
       ...accounts,
       ...library,
       ...chats,
+      ...chatSetup,
       Health: () =>
         eventLoop.sample.pipe(
           Effect.map(

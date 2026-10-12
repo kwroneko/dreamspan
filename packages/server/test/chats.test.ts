@@ -10,7 +10,7 @@ import { GenerationFailed, Generator } from "../src/chat/Generator.ts"
 import { AppConfig, type AppConfigShape } from "../src/config.ts"
 import { Writer } from "../src/db/Database.ts"
 import { ServerLive } from "../src/server.ts"
-import { client, outcome, serverLayer, testConfig } from "./support/config.ts"
+import { client, outcome, posted, serverLayer, testConfig } from "./support/config.ts"
 import { tempDir } from "./support/tempDir.ts"
 
 type Api = Effect.Success<ReturnType<typeof client>>
@@ -67,12 +67,14 @@ const linearChat = (api: Api, count: number) =>
     const slots: Array<SlotId> = []
     let parent: SlotId | null = null
     for (let i = 0; i < count; i++) {
-      const sent: { entry: PathEntry } = yield* api.SendMessage({
-        chatId: chat.id,
-        parentSlotId: parent,
-        branch: false,
-        content: `m${i}`
-      })
+      const sent: { entry: PathEntry } = yield* posted(
+        api.SendMessage({
+          chatId: chat.id,
+          parentSlotId: parent,
+          branch: false,
+          content: `m${i}`
+        })
+      )
       const entry = sent.entry
       slots.push(entry.slotId)
       parent = entry.slotId
@@ -114,7 +116,7 @@ describe("chats", () => {
       const first = yield* api.CreateChat({ title: "  First  " })
       const second = yield* api.CreateChat({ title: "Second" })
       assert.strictEqual(first.title, "First")
-      yield* api.SendMessage({ chatId: first.id, parentSlotId: null, branch: false, content: "hello" })
+      yield* posted(api.SendMessage({ chatId: first.id, parentSlotId: null, branch: false, content: "hello" }))
       const all = yield* api.ListChats({ limit: 10, before: null })
       assert.deepStrictEqual(
         all.map((c) => c.id),
@@ -142,12 +144,14 @@ describe("chats", () => {
         yield* outcome(api.SendMessage({ chatId: chat.id, parentSlotId: slots[0]!, branch: false, content: "late" })),
         "LeafMoved"
       )
-      const branched = yield* api.SendMessage({
-        chatId: chat.id,
-        parentSlotId: slots[0]!,
-        branch: true,
-        content: "alt"
-      })
+      const branched = yield* posted(
+        api.SendMessage({
+          chatId: chat.id,
+          parentSlotId: slots[0]!,
+          branch: true,
+          content: "alt"
+        })
+      )
       assert.strictEqual(branched.chat.activeLeafSlotId, branched.entry.slotId)
       const path = yield* read(api, chat.id, { _tag: "Bottom" }, 10)
       assert.deepStrictEqual(contents(path.entries), ["m0", "alt"])
@@ -162,7 +166,7 @@ describe("chats", () => {
       const api = yield* client()
       const { chat, slots } = yield* linearChat(api, 30)
       // A branch below m10, and a deleted message on the main path: neither shows.
-      yield* api.SendMessage({ chatId: chat.id, parentSlotId: slots[10]!, branch: true, content: "side" })
+      yield* posted(api.SendMessage({ chatId: chat.id, parentSlotId: slots[10]!, branch: true, content: "side" }))
       const leaf = slots[29]!
       yield* api.DeleteMessage({ slotId: slots[20]! })
 
@@ -199,7 +203,7 @@ describe("chats", () => {
       const api = yield* client()
       const { chat, slots } = yield* linearChat(api, 20)
       for (let i = 4; i < 16; i++) {
-        yield* api.SendMessage({ chatId: chat.id, parentSlotId: slots[i]!, branch: true, content: `side ${i}` })
+        yield* posted(api.SendMessage({ chatId: chat.id, parentSlotId: slots[i]!, branch: true, content: `side ${i}` }))
       }
       const leaf = slots[19]!
       for (const limit of [1, 3, 7, 30]) {
@@ -225,15 +229,19 @@ describe("chats", () => {
     return Effect.gen(function* () {
       const api = yield* client()
       const { chat, slots } = yield* linearChat(api, 4)
-      const side = yield* api.SendMessage({ chatId: chat.id, parentSlotId: slots[1]!, branch: true, content: "side" })
-      const tip = yield* api.SendMessage({
-        chatId: chat.id,
-        parentSlotId: side.entry.slotId,
-        branch: false,
-        content: "side 2"
-      })
+      const side = yield* posted(
+        api.SendMessage({ chatId: chat.id, parentSlotId: slots[1]!, branch: true, content: "side" })
+      )
+      const tip = yield* posted(
+        api.SendMessage({
+          chatId: chat.id,
+          parentSlotId: side.entry.slotId,
+          branch: false,
+          content: "side 2"
+        })
+      )
       // Back on the main path, the active leaf is m3 again.
-      yield* api.SendMessage({ chatId: chat.id, parentSlotId: slots[3]!, branch: true, content: "m4" })
+      yield* posted(api.SendMessage({ chatId: chat.id, parentSlotId: slots[3]!, branch: true, content: "m4" }))
       const window = yield* read(api, chat.id, { _tag: "Around", slot: side.entry.slotId }, 10)
       assert.strictEqual(window.leafSlotId, tip.entry.slotId)
       assert.deepStrictEqual(contents(window.entries), ["m0", "m1", "side", "side 2"])
@@ -248,11 +256,11 @@ describe("chats", () => {
       let parent = slots[0]!
       const side: Array<SlotId> = []
       for (const content of ["b1", "b2", "b3"]) {
-        const sent = yield* api.SendMessage({ chatId: chat.id, parentSlotId: parent, branch: true, content })
+        const sent = yield* posted(api.SendMessage({ chatId: chat.id, parentSlotId: parent, branch: true, content }))
         parent = sent.entry.slotId
         side.push(parent)
       }
-      yield* api.SendMessage({ chatId: chat.id, parentSlotId: slots[1]!, branch: true, content: "m2" })
+      yield* posted(api.SendMessage({ chatId: chat.id, parentSlotId: slots[1]!, branch: true, content: "m2" }))
       const item = yield* api.DeleteMessage({ slotId: side[1]! })
       const window = yield* read(api, chat.id, { _tag: "Around", slot: side[0]! }, 10)
       assert.strictEqual(window.leafSlotId, side[2])
@@ -271,7 +279,7 @@ describe("chats", () => {
     return Effect.gen(function* () {
       const api = yield* client()
       const { chat, slots } = yield* linearChat(api, 1)
-      const { entry } = yield* api.Generate({ chatId: chat.id, parentSlotId: slots[0]!, branch: false })
+      const { entry } = yield* posted(api.Generate({ chatId: chat.id, parentSlotId: slots[0]!, branch: false }))
       for (let i = 0; i < 24; i++) {
         const [current] = (yield* read(api, chat.id, { _tag: "Bottom" }, 1)).entries
         yield* api
@@ -305,7 +313,7 @@ describe("chats", () => {
       const api = yield* client()
       const { chat, slots } = yield* linearChat(api, 1)
       const events = yield* subscribe(api, chat.id)
-      const { entry } = yield* api.Generate({ chatId: chat.id, parentSlotId: slots[0]!, branch: false })
+      const { entry } = yield* posted(api.Generate({ chatId: chat.id, parentSlotId: slots[0]!, branch: false }))
       let deleted = 0
       for (let wait = 0; wait < 8; wait++) {
         const [current] = (yield* read(api, chat.id, { _tag: "Bottom" }, 1)).entries
@@ -390,7 +398,7 @@ describe("chats", () => {
       const api = yield* client()
       const { chat, slots } = yield* linearChat(api, 1)
       const events = yield* subscribe(api, chat.id)
-      const { entry } = yield* api.Generate({ chatId: chat.id, parentSlotId: slots[0]!, branch: false })
+      const { entry } = yield* posted(api.Generate({ chatId: chat.id, parentSlotId: slots[0]!, branch: false }))
       assert.strictEqual(entry.version.status, "generating")
       const id = entry.version.id
       yield* eventually(() => finished(events, id) !== undefined)
@@ -411,7 +419,7 @@ describe("chats", () => {
     return Effect.gen(function* () {
       const api = yield* client()
       const { chat, slots } = yield* linearChat(api, 1)
-      yield* api.Generate({ chatId: chat.id, parentSlotId: slots[0]!, branch: false })
+      yield* posted(api.Generate({ chatId: chat.id, parentSlotId: slots[0]!, branch: false }))
       const events: Array<ChatEvent> = []
       const subscription = yield* api.SubscribeChat({ chatId: chat.id }).pipe(
         Stream.runForEach((batch) => Effect.sync(() => events.push(...batch))),
@@ -432,7 +440,7 @@ describe("chats", () => {
       const api = yield* client()
       const { chat, slots } = yield* linearChat(api, 1)
       const events = yield* subscribe(api, chat.id)
-      const { entry } = yield* api.Generate({ chatId: chat.id, parentSlotId: slots[0]!, branch: false })
+      const { entry } = yield* posted(api.Generate({ chatId: chat.id, parentSlotId: slots[0]!, branch: false }))
       yield* eventually(() => finished(events, entry.version.id) !== undefined)
       const stopped = yield* api.StopGeneration({ versionId: entry.version.id })
       assert.strictEqual(stopped.status, "complete")
@@ -449,7 +457,7 @@ describe("chats", () => {
     return Effect.gen(function* () {
       const api = yield* client()
       const { chat, slots } = yield* linearChat(api, 1)
-      const { entry } = yield* api.Generate({ chatId: chat.id, parentSlotId: slots[0]!, branch: false })
+      const { entry } = yield* posted(api.Generate({ chatId: chat.id, parentSlotId: slots[0]!, branch: false }))
       const swipe1 = yield* api.Regenerate({ slotId: entry.slotId, expectedRowVersion: entry.rowVersion })
       assert.strictEqual(
         yield* outcome(api.Regenerate({ slotId: entry.slotId, expectedRowVersion: entry.rowVersion })),
@@ -487,25 +495,6 @@ describe("chats", () => {
     }).pipe(Effect.scoped, withGenerator(config, slow))
   })
 
-  it.live("a message onto a reply still generating is refused (provisional, DESIGN §2.2)", () => {
-    const config = testConfig()
-    const slow = FakeGenerator.layer({ tokensPerSecond: 50, tokens: 5000 })
-    return Effect.gen(function* () {
-      const api = yield* client()
-      const { chat, slots } = yield* linearChat(api, 1)
-      const { entry } = yield* api.Generate({ chatId: chat.id, parentSlotId: slots[0]!, branch: false })
-      const send = api.SendMessage({ chatId: chat.id, parentSlotId: entry.slotId, branch: false, content: "too soon" })
-      assert.strictEqual(yield* outcome(send), "ChatBusy")
-      // As a branch from it, too: the reply is still being written.
-      assert.strictEqual(
-        yield* outcome(api.SendMessage({ chatId: chat.id, parentSlotId: entry.slotId, branch: true, content: "x" })),
-        "ChatBusy"
-      )
-      yield* api.StopGeneration({ versionId: entry.version.id })
-      assert.strictEqual(yield* outcome(send), "ok")
-    }).pipe(Effect.scoped, withGenerator(config, slow))
-  })
-
   it.live("a failed generation becomes a failed version with its cause and its text so far", () => {
     const config = testConfig()
     const failing = Layer.succeed(Generator)(
@@ -521,7 +510,7 @@ describe("chats", () => {
       const api = yield* client()
       const { chat, slots } = yield* linearChat(api, 1)
       const events = yield* subscribe(api, chat.id)
-      const { entry } = yield* api.Generate({ chatId: chat.id, parentSlotId: slots[0]!, branch: false })
+      const { entry } = yield* posted(api.Generate({ chatId: chat.id, parentSlotId: slots[0]!, branch: false }))
       yield* eventually(() => finished(events, entry.version.id) !== undefined)
       const version: Version = finished(events, entry.version.id)!
       assert.strictEqual(version.status, "failed")
@@ -538,7 +527,7 @@ describe("chats", () => {
     const stopped = Effect.gen(function* () {
       const api = yield* client()
       const { chat, slots } = yield* linearChat(api, 1)
-      const { entry } = yield* api.Generate({ chatId: chat.id, parentSlotId: slots[0]!, branch: false })
+      const { entry } = yield* posted(api.Generate({ chatId: chat.id, parentSlotId: slots[0]!, branch: false }))
       yield* Effect.sleep(300)
       return { chatId: chat.id, versionId: entry.version.id }
     }).pipe(Effect.scoped, withGenerator(config, slow))
@@ -573,7 +562,7 @@ describe("chats", () => {
           last = now
         }, 10)
         for (const { chat, slots } of chats) {
-          const { entry } = yield* api.Generate({ chatId: chat.id, parentSlotId: slots[0]!, branch: false })
+          const { entry } = yield* posted(api.Generate({ chatId: chat.id, parentSlotId: slots[0]!, branch: false }))
           yield* api.Regenerate({ slotId: entry.slotId, expectedRowVersion: entry.rowVersion })
         }
         yield* eventually(() => events.every((list) => list.filter((e) => e._tag === "Version").length === 2), 20_000)

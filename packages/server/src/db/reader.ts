@@ -5,6 +5,7 @@ import { NodeRuntime, NodeWorkerRunner } from "@effect/platform-node"
 import { Effect, Layer } from "effect"
 import { RpcServer } from "effect/rpc"
 import { makeAccountReadHandlers } from "./accounts.ts"
+import { makeChatSetupReadHandlers } from "./chatSetupReads.ts"
 import { readerConnection } from "./connection.ts"
 import { makeImportReadHandlers } from "./importReads.ts"
 import { ReadOps } from "./ops.ts"
@@ -19,8 +20,15 @@ RpcServer.layer(ReadOps, { concurrency: 1, disableFatalDefects: true }).pipe(
   Layer.provide(
     ReadOps.toLayer(
       Effect.map(
-        Effect.all([makeReadHandlers, makeProviderReadHandlers, makeAccountReadHandlers, makeImportReadHandlers]),
-        ([core, providers, accounts, imports]) => ReadOps.of({ ...core, ...providers, ...accounts, ...imports })
+        Effect.all([
+          makeReadHandlers,
+          makeProviderReadHandlers,
+          makeAccountReadHandlers,
+          makeImportReadHandlers,
+          makeChatSetupReadHandlers
+        ]),
+        ([core, providers, accounts, imports, chatSetup]) =>
+          ReadOps.of({ ...core, ...providers, ...accounts, ...imports, ...chatSetup })
       )
     )
   ),

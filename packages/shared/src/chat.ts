@@ -93,6 +93,8 @@ export class NewVersion extends Schema.Class<NewVersion>("NewVersion")({
   macroMode: MacroMode,
   origin: VersionOrigin,
   sourceVersionId: Schema.optional(VersionId),
+  /** For a greeting: which of its card's greetings it is (0: `first_mes`), so it can follow the card. */
+  greetingRef: Schema.optional(Schema.Struct({ entity: EntityId, index: Schema.Int })),
   direction: Schema.optional(Schema.String),
   /** Required for failed versions: what went wrong (DESIGN §3.1). */
   error: Schema.optional(
@@ -103,3 +105,37 @@ export class NewVersion extends Schema.Class<NewVersion>("NewVersion")({
 /** A version is usable in context when it has text and didn't fail (invariant 2). */
 export const versionInContext = (status: VersionStatus, content: string, contextExcluded: boolean) =>
   !contextExcluded && status !== "failed" && content.length > 0
+
+// --- Chat setup, speakers and the send queue (DESIGN §2.1, §2.2)
+
+/** A card as a chat shows it: its in-chat name (`{{char}}`), its library label, its folders. */
+export class CastCard extends Schema.Class<CastCard>("CastCard")({
+  entityId: EntityId,
+  /** The name in the card's document, which is what the chat shows and macros use. */
+  name: Schema.String,
+  /** The library label, for telling apart cards with the same name. */
+  label: Schema.String,
+  /** In the persona folder (DESIGN §2.2). */
+  persona: Schema.Boolean,
+  /** In the recycle bin: still named where a chat refers to it, but not offered. */
+  inBin: Schema.Boolean
+}) {}
+
+/**
+ * A message sent, or a reply asked for, while the reply it follows is still being
+ * written (DESIGN §2.2). The server holds it and posts it when that reply ends.
+ */
+export class QueuedMessage extends Schema.Class<QueuedMessage>("QueuedMessage")({
+  id: Schema.String,
+  chatId: ChatId,
+  /** The reply it waits for: posting goes under this slot, after its selected version. */
+  replySlotId: SlotId,
+  /** A message to post (then a reply to it), or a reply to generate. */
+  kind: Schema.Literals(["message", "generate"]),
+  content: Schema.String,
+  speakerEntityId: Schema.NullOr(EntityId),
+  /** For `generate`: the one-turn direction the reply gets. */
+  direction: Schema.NullOr(Schema.String),
+  rowVersion: Schema.Int,
+  createdAt: Schema.Number
+}) {}

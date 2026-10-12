@@ -4,22 +4,12 @@
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
 import { BinItem } from "./bin.ts"
-import { Chat, ChatId, PathEntry, SlotId, Version, VersionId } from "./chat.ts"
+import { Chat, ChatId, EntityId, PathEntry, QueuedMessage, SlotId, Version, VersionId } from "./chat.ts"
 import { LeafMoved, NotFound, ServerError, StaleWrite } from "./errors.ts"
 
 /** Generation needs a generator, and none is configured (the context assembler isn't built yet). */
 export class GenerationUnavailable extends Schema.TaggedError<GenerationUnavailable>()("GenerationUnavailable", {
   message: Schema.String
-}) {}
-
-/**
- * A message onto a message still being generated. Provisional: whether such a message
- * should queue or cancel the reply is an open decision (DESIGN §2.2); until it's made,
- * the server refuses it, as the client's disabled Send does.
- */
-export class ChatBusy extends Schema.TaggedError<ChatBusy>()("ChatBusy", {
-  chatId: Schema.String,
-  versionId: Schema.String
 }) {}
 
 /** Only a finished user-written version is amended in place; others get a new version (DESIGN §3.1). */
@@ -77,15 +67,26 @@ export const ChatEvent = Schema.Union([
   /** Something was deleted: windows read before it are out of date. */
   Schema.TaggedStruct("Reload", {}),
   /** The chat went to the bin. It's the subscription's last event. */
-  Schema.TaggedStruct("Deleted", {})
+  Schema.TaggedStruct("Deleted", {}),
+  /** The chat's send queue changed: every entry still waiting, in order. */
+  Schema.TaggedStruct("Queue", { queue: Schema.Array(QueuedMessage) }),
+  /** Chat state changed (participants, presence, settings): read it again. */
+  Schema.TaggedStruct("State", {})
 ])
 export type ChatEvent = typeof ChatEvent.Type
 
 const Errors = [NotFound, ServerError] as const
 const WriteErrors = [NotFound, StaleWrite, ServerError] as const
 
-/** A message added to a chat, and the chat after it. */
-const Appended = Schema.Struct({ entry: PathEntry, chat: Chat })
+/**
+ * What a send or a Generate did: posted at once, or queued behind a reply still being
+ * written (DESIGN §2.2), with every entry now waiting in the chat.
+ */
+export const SendResult = Schema.Union([
+  Schema.TaggedStruct("Posted", { entry: PathEntry, chat: Chat }),
+  Schema.TaggedStruct("Queued", { queued: QueuedMessage, queue: Schema.Array(QueuedMessage) })
+])
+export type SendResult = typeof SendResult.Type
 
 export class ChatApi extends RpcGroup.make(
   /** The user's chats, most recent first. `before` is the last chat of the previous page. */
@@ -117,21 +118,43 @@ export class ChatApi extends RpcGroup.make(
     error: Schema.Union([...Errors])
   }),
   /**
-   * The user's message under `parentSlotId`. Without `branch`, that must be the chat's
-   * active leaf (LeafMoved otherwise); with it, any slot, starting a branch (DESIGN §3.2).
+   * The user's message under `parentSlotId`, as `speakerEntityId` (Send as X). Without
+   * `branch`, that must be the chat's active leaf (LeafMoved otherwise); with it, any slot,
+   * starting a branch (DESIGN §3.2). Onto a reply still being written, it's queued and
+   * posts when that reply ends (DESIGN §2.2), followed by a reply of its own.
    */
   Rpc.make("SendMessage", {
-    payload: { chatId: ChatId, parentSlotId: Schema.NullOr(SlotId), branch: Schema.Boolean, content: Schema.String },
-    success: Appended,
-    error: Schema.Union([NotFound, LeafMoved, ChatBusy, ServerError])
+    payload: {
+      chatId: ChatId,
+      parentSlotId: Schema.NullOr(SlotId),
+      branch: Schema.Boolean,
+      content: Schema.String,
+      speakerEntityId: Schema.optionalKey(Schema.NullOr(EntityId))
+    },
+    success: SendResult,
+    error: Schema.Union([NotFound, LeafMoved, ServerError])
   }),
-  /** A model reply under `parentSlotId`, streamed to subscribers; `branch` as for SendMessage. */
+  /**
+   * A model reply under `parentSlotId`, as `speakerEntityId` (Generate X), streamed to
+   * subscribers; `branch` as for SendMessage. `direction` is a one-turn direction stored on
+   * the reply: its swipes reuse it, later turns never see it. Onto a reply still being
+   * written, it's queued like a message.
+   */
   Rpc.make("Generate", {
-    payload: { chatId: ChatId, parentSlotId: Schema.NullOr(SlotId), branch: Schema.Boolean },
-    success: Appended,
+    payload: {
+      chatId: ChatId,
+      parentSlotId: Schema.NullOr(SlotId),
+      branch: Schema.Boolean,
+      speakerEntityId: Schema.optionalKey(Schema.NullOr(EntityId)),
+      direction: Schema.optionalKey(Schema.String)
+    },
+    success: SendResult,
     error: Schema.Union([NotFound, LeafMoved, GenerationUnavailable, ServerError])
   }),
-  /** A swipe: a new model version of a slot, selected and streamed. Several can run at once. */
+  /**
+   * A swipe: a new model version of a slot, selected and streamed, with the speaker and
+   * the one-turn direction of the version it replaces. Several can run at once.
+   */
   Rpc.make("Regenerate", {
     payload: { slotId: SlotId, expectedRowVersion: Schema.Int },
     success: PathEntry,

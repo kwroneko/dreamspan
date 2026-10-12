@@ -11,6 +11,7 @@ import {
   graphIntegrity,
   ownership,
   providers,
+  queue,
   secretBindings,
   users
 } from "./schema/index.ts"
@@ -57,7 +58,8 @@ export const migrations = {
   "0008_secret_bindings": runAll(secretBindings),
   "0009_bin_index": runAll(binIndex),
   "0010_graph_integrity": runAll(graphIntegrity),
-  "0011_ownership": runAll(ownership)
+  "0011_ownership": runAll(ownership),
+  "0012_queued_messages": runAll(queue)
 }
 
 export const Migrations = SqliteMigrator.layer({ loader: SqliteMigrator.fromRecord(migrations) })

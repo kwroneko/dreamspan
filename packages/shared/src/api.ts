@@ -3,6 +3,7 @@ import { Context, Schema } from "effect"
 import { Rpc, RpcGroup, RpcMiddleware } from "effect/rpc"
 import { BinItem } from "./bin.ts"
 import { ChatApi } from "./chatApi.ts"
+import { ChatSetupApi } from "./chatSetupApi.ts"
 import { User, UserAccount, UserId, UserRole } from "./domain.ts"
 import {
   AccountRejected,
@@ -272,4 +273,6 @@ export class AppApi extends RpcGroup.make(
 )
   // --- Chats (chatApi.ts).
   .merge(ChatApi)
+  // --- Chat setup, speakers and the send queue (chatSetupApi.ts).
+  .merge(ChatSetupApi)
   .middleware(Authentication) {}

@@ -58,6 +58,13 @@ test("every screen runs under the Content-Security-Policy", async ({ page }) => 
   await expect(page.getByText("generating", { exact: true })).toHaveCount(0, { timeout: 20_000 })
   await expect(page.getByRole("article", { name: "Reply" })).toHaveCount(1)
 
+  // A select's list: Base UI would add an inline <style> for its scrollbar.
+  await page.goto(`${server().url}/settings/users`)
+  await page.getByRole("button", { name: "New user" }).click()
+  await page.getByLabel("Role").click()
+  await expect(page.getByRole("option").first()).toBeVisible()
+  await page.keyboard.press("Escape")
+
   for (const path of ["/", "/chats", "/library", "/import", "/settings", "/settings/account", "/settings/users"]) {
     await page.goto(`${server().url}${path}`)
     await expect(page.getByRole("main")).toBeVisible()

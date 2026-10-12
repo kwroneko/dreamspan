@@ -4,12 +4,14 @@
 import { useAtomValue } from "@effect/atom-react"
 import type { PathEntry, SlotId, Version } from "@rp/shared/chat.ts"
 import { Link } from "@tanstack/react-router"
-import { memo, type PointerEvent, useEffect, useRef, useState } from "react"
+import { memo, type PointerEvent, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import type { AppError } from "../../errors.ts"
 import { Button } from "../../ui/Button.tsx"
 import { Textarea } from "../../ui/Field.tsx"
 import { Markdown } from "../../ui/Markdown.tsx"
 import { Badge } from "../../ui/Surface.tsx"
+import { castView, nameOf, useCast } from "./cast.ts"
+import { displayText } from "./macros.ts"
 import { useMountedTracking, useRenderCount } from "./perf.ts"
 import { type ChatSession, liveText, type Outcome } from "./session.ts"
 
@@ -19,7 +21,44 @@ const SWIPE_PX = 60
 /** Statuses shown as a badge; `complete` needs none. */
 const flagged = new Set<Version["status"]>(["generating", "stopped", "interrupted", "failed"])
 
-function VersionBody({ version }: { version: Version }) {
+/**
+ * Text whose macros resolve against the chat's state at its position (DESIGN §5.6): a
+ * greeting's `{{user}}` is whoever the user played before it, so it follows a persona
+ * change until a message is sent after it, and a later change doesn't rewrite it. Only
+ * such text reads the cast there; other messages render as before.
+ */
+function TemplateText({
+  version,
+  session,
+  parentSlotId
+}: {
+  version: Version
+  session: ChatSession
+  parentSlotId: SlotId | null
+}) {
+  const cast = useCast()
+  const read = useCallback(() => session.castAfter(parentSlotId), [session, parentSlotId])
+  const positionCast = useSyncExternalStore(session.subscribePositions, read)
+  const here = useMemo(
+    () => (positionCast ? castView(positionCast, [...cast.cards.values()]) : cast),
+    [positionCast, cast]
+  )
+  const text = displayText(version.content, version.macroMode, {
+    user: here.user,
+    char: nameOf(here, version.speakerEntityId) ?? here.char
+  })
+  return <Markdown text={text} streaming={false} />
+}
+
+function VersionBody({
+  version,
+  session,
+  parentSlotId
+}: {
+  version: Version
+  session: ChatSession
+  parentSlotId: SlotId | null
+}) {
   const live = useAtomValue(liveText(version.id))
   useRenderCount("bodyRenders", live !== null ? "liveBodyRenders" : undefined)
   useMountedTracking(version.id)
@@ -31,6 +70,8 @@ function VersionBody({ version }: { version: Version }) {
         <p className="text-sm text-muted" aria-live="polite">
           Writing…
         </p>
+      ) : live === null && version.macroMode === "template" ? (
+        <TemplateText version={version} session={session} parentSlotId={parentSlotId} />
       ) : (
         <Markdown text={text} streaming={generating} />
       )}
@@ -85,6 +126,7 @@ export const Message = memo(function Message({
   branchLeaf: SlotId | null
 }) {
   useRenderCount("rowRenders")
+  const cast = useCast()
   const { version } = entry
   const [versions, setVersions] = useState<ReadonlyArray<Version> | null>(null)
   const [editing, setEditing] = useState(false)
@@ -157,7 +199,7 @@ export const Message = memo(function Message({
       onPointerUp={onPointerUp}
     >
       <header className="flex flex-wrap items-center gap-2 text-sm">
-        <span className="font-medium">{model ? "Model" : "You"}</span>
+        <span className="font-medium">{nameOf(cast, version.speakerEntityId) ?? (model ? "Model" : "You")}</span>
         {flagged.has(version.status) && (
           <Badge tone={version.status === "failed" ? "danger" : version.status === "generating" ? "accent" : "warning"}>
             {version.status}
@@ -198,7 +240,12 @@ export const Message = memo(function Message({
           }}
         />
       ) : (
-        <VersionBody version={version} />
+        <VersionBody version={version} session={session} parentSlotId={entry.parentSlotId} />
+      )}
+      {model && version.direction && (
+        <p className="text-xs text-muted">
+          <span className="font-medium">Direction:</span> {version.direction}
+        </p>
       )}
       <footer className="flex flex-wrap gap-1">
         {generating && (

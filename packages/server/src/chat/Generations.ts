@@ -3,11 +3,11 @@
 // so a crash keeps most of it. Stopping one keeps its text; a failure becomes a failed
 // version with its cause. Everything here runs on the main thread and never blocks it:
 // text arrives in chunks, and storage is a message to the writer worker.
-import type { ChatId, Version, VersionId } from "@rp/shared/chat.ts"
+import type { ChatId, SlotId, Version, VersionId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { NotFound } from "@rp/shared/errors.ts"
 import { Cause, Context, Effect, Exit, Fiber, Layer, Option, Stream } from "effect"
-import { Writer } from "../db/Database.ts"
+import { Reader, Writer } from "../db/Database.ts"
 import { ChatHub } from "./ChatHub.ts"
 import { type GenerationFailed, type GenerationRequest, Generator, type GeneratorShape } from "./Generator.ts"
 
@@ -42,14 +42,18 @@ export class Generations extends Context.Service<
     Generations,
     Effect.gen(function* () {
       const writer = yield* Writer
+      const reader = yield* Reader
       const hub = yield* ChatHub
       const generator = yield* Generator
       const scope = yield* Effect.scope
       const running = new Map<VersionId, Running>()
 
       // Versions a previous process left generating can't continue: they keep their text.
-      const { interrupted } = yield* writer.InterruptGenerations()
+      // What was queued behind them posts without replies (chatSetupWrites.ts).
+      const { interrupted, queued } = yield* writer.InterruptGenerations()
       if (interrupted > 0) yield* Effect.logWarning(`${interrupted} generations were interrupted by the last shutdown`)
+      if (queued > 0)
+        yield* Effect.logWarning(`${queued} queued messages were posted or dropped after the last shutdown`)
 
       const save = (entry: Running, status: Version["status"], error: Version["error"]) =>
         writer.SaveGeneration({
@@ -79,13 +83,45 @@ export class Generations extends Context.Service<
               }
             }
           }
-          const saved = yield* Effect.exit(save(entry, status, error))
+          // The final save posts what was queued behind this reply, in the same transaction.
+          const saved = yield* Effect.exit(
+            writer.FinishGeneration({
+              userId: request.userId,
+              versionId: request.versionId,
+              content: entry.text,
+              status,
+              error
+            })
+          )
           running.delete(request.versionId)
           if (Exit.isFailure(saved))
             return yield* Effect.logError(`saving generation ${request.versionId} failed`, saved.cause)
-          entry.final = saved.value
-          hub.publish(request.chatId, { _tag: "Version", version: saved.value })
+          const finished = saved.value
+          entry.final = finished.version
+          hub.publish(request.chatId, { _tag: "Version", version: finished.version })
+          if (!finished.queueChanged) return
+          if (finished.next !== null) {
+            yield* startGeneration({
+              userId: request.userId,
+              chatId: finished.chatId,
+              slotId: finished.next.slotId,
+              versionId: finished.next.versionId
+            })
+          }
+          yield* publishPosted(request.userId, finished.chatId, finished.posted)
+          hub.publish(finished.chatId, { _tag: "Queue", queue: finished.queue })
         })
+
+      /** Slots the queue posted, then the chat whose leaf they moved. */
+      const publishPosted = (userId: GenerationRequest["userId"], chatId: ChatId, posted: ReadonlyArray<SlotId>) =>
+        Effect.gen(function* () {
+          if (posted.length === 0) return
+          for (const slotId of posted) {
+            const { entry } = yield* reader.GetSlot({ userId, slotId })
+            hub.publish(chatId, { _tag: "Slot", entry })
+          }
+          hub.publish(chatId, { _tag: "Chat", chat: yield* reader.GetChat({ userId, chatId }) })
+        }).pipe(Effect.catchCause((cause) => Effect.logWarning("publishing posted messages failed", cause)))
 
       const run = (gen: GeneratorShape, entry: Running) =>
         gen.generate(entry.request).pipe(
@@ -121,21 +157,23 @@ export class Generations extends Context.Service<
           Effect.onExit((exit) => finish(entry, exit))
         )
 
+      const startGeneration = (request: GenerationRequest): Effect.Effect<void> =>
+        Effect.gen(function* () {
+          if (Option.isNone(generator)) return yield* Effect.die(new Error("no generator: refuse before writing"))
+          const entry: Running = {
+            request,
+            text: "",
+            savedAt: Date.now(),
+            stopped: false,
+            fiber: undefined,
+            final: undefined
+          }
+          running.set(request.versionId, entry)
+          entry.fiber = yield* Effect.forkIn(run(generator.value, entry), scope)
+        })
+
       return Generations.of({
-        start: (request) =>
-          Effect.gen(function* () {
-            if (Option.isNone(generator)) return yield* Effect.die(new Error("no generator: refuse before writing"))
-            const entry: Running = {
-              request,
-              text: "",
-              savedAt: Date.now(),
-              stopped: false,
-              fiber: undefined,
-              final: undefined
-            }
-            running.set(request.versionId, entry)
-            entry.fiber = yield* Effect.forkIn(run(generator.value, entry), scope)
-          }),
+        start: startGeneration,
         stop: (userId, versionId) =>
           Effect.gen(function* () {
             const entry = running.get(versionId)

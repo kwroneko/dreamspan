@@ -13,7 +13,15 @@ export const LISTED = [
   { kind: "preset", title: "Presets" }
 ] as const satisfies ReadonlyArray<{ kind: EntityKind; title: string }>
 
-export const libraryAtom = allOf({ card: listAtom("card"), lorebook: listAtom("lorebook"), preset: listAtom("preset") })
+/** Cards as chats see them: which are in the persona folder. */
+const castCardsAtom = AppClient.query("ListCards", undefined, { reactivityKeys: ["library"] })
+
+export const libraryAtom = allOf({
+  card: listAtom("card"),
+  lorebook: listAtom("lorebook"),
+  preset: listAtom("preset"),
+  castCards: castCardsAtom
+})
 
 export const FORMAT_LABELS: Record<ExportFormat, string> = {
   "card-png": "PNG",

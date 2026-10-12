@@ -12,6 +12,7 @@ import {
   graphIntegrity,
   ownership,
   providers,
+  queue,
   secretBindings,
   users
 } from "../src/db/schema/index.ts"
@@ -140,7 +141,8 @@ beforeEach(() => {
     ...secretBindings,
     ...binIndex,
     ...graphIntegrity,
-    ...ownership
+    ...ownership,
+    ...queue
   ])
     db.exec(statement)
 })
@@ -690,6 +692,48 @@ describe("state events", () => {
     expect(() => run(event, id("ev"), a.chatId, sb.slotId, null)).toThrow(/state event/)
     expect(() => run(event, id("ev"), a.chatId, sa.slotId, sb.versionId)).toThrow(/state event/)
     run(event, id("ev"), a.chatId, sa.slotId, sa.versionId)
+  })
+})
+
+describe("the send queue", () => {
+  const insert = `INSERT INTO queued_messages (id, chat_id, reply_slot_id, seq, kind, content, speaker_entity_id, created_at, updated_at)
+    VALUES (?, ?, ?, 0, ?, ?, ?, 1, 1)`
+  const entity = (ownerId: string) => {
+    const entityId = id("e")
+    run(`INSERT INTO entities (id, owner_user_id, kind, created_at) VALUES (?, ?, 'card', 1)`, entityId, ownerId)
+    return entityId
+  }
+
+  it("waits on a slot of its own chat, never moves, and speaks as the chat owner's card", () => {
+    const owner = user()
+    const other = user()
+    const a = chat(owner)
+    const b = chat(owner)
+    const sa = slot(a, null)
+    const sb = slot(b, null)
+    const mine = entity(owner)
+    const theirs = entity(other)
+    expect(() => run(insert, id("q"), a.chatId, sb.slotId, "message", "hi", null)).toThrow(/same chat/)
+    expect(() => run(insert, id("q"), a.chatId, sa.slotId, "message", "hi", theirs)).toThrow(/chat's owner/)
+    const q = id("q")
+    run(insert, q, a.chatId, sa.slotId, "message", "hi", mine)
+    expect(() => run(`UPDATE queued_messages SET chat_id = ? WHERE id = ?`, b.chatId, q)).toThrow(/another chat/)
+    expect(() => run(`UPDATE queued_messages SET reply_slot_id = ? WHERE id = ?`, sb.slotId, q)).toThrow(/same chat/)
+    expect(() => run(`UPDATE queued_messages SET speaker_entity_id = ? WHERE id = ?`, theirs, q)).toThrow(
+      /chat's owner/
+    )
+    // A message has text; only a reply asked for has a direction.
+    expect(() => run(insert, id("q"), a.chatId, sa.slotId, "message", "", null)).toThrow(/CHECK/)
+    run(insert, id("q"), a.chatId, sa.slotId, "generate", "", null)
+  })
+
+  it("goes with its chat or its slot", () => {
+    const owner = user()
+    const c = chat(owner)
+    const s1 = slot(c, null)
+    run(insert, id("q"), c.chatId, s1.slotId, "message", "hi", null)
+    run(`DELETE FROM chats WHERE id = ?`, c.chatId)
+    expect(get<{ n: number }>(`SELECT count(*) AS n FROM queued_messages`).n).toBe(0)
   })
 })
 

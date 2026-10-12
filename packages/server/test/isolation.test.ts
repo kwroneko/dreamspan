@@ -7,7 +7,7 @@
 import { readFileSync } from "node:fs"
 import { assert, describe, it, layer } from "@effect/vitest"
 import { AppApi } from "@rp/shared/api.ts"
-import type { ChatId, SlotId, VersionId } from "@rp/shared/chat.ts"
+import type { ChatId, EntityId, SlotId, VersionId } from "@rp/shared/chat.ts"
 import type { User } from "@rp/shared/domain.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import type { ConnectionSettings, ConnectionId, CredentialId, ModelId } from "@rp/shared/providers.ts"
@@ -17,7 +17,7 @@ import { Context, Effect, Layer, Stream } from "effect"
 import type { Rpc, RpcGroup } from "effect/rpc"
 import { Writer } from "../src/db/Database.ts"
 import * as FakeGenerator from "../src/dev/fakeGenerator.ts"
-import { client, login, outcome, serverLayer, serverPort, testConfig } from "./support/config.ts"
+import { client, login, outcome, posted, serverLayer, serverPort, testConfig } from "./support/config.ts"
 
 type Api = Effect.Success<ReturnType<typeof client>>
 
@@ -36,6 +36,10 @@ interface Party {
   /** The test server's port, for the HTTP routes. */
   readonly port: number
   readonly chat: OwnChat
+  /** A card, in the persona folder, with a greeting. */
+  readonly cardId: EntityId
+  /** A message queued behind the generating reply. */
+  readonly queuedId: string
 }
 
 /** A chat with the user's message and a model reply still generating under it. */
@@ -419,6 +423,19 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
           }),
           "NotFound"
         )
+        // As their card, posted or queued (the actor's reply is still generating).
+        for (const parentSlotId of [actor.chat.slotId, actor.chat.replySlotId]) {
+          yield* refused(
+            actor.api.SendMessage({
+              chatId: actor.chat.chatId,
+              parentSlotId,
+              branch: true,
+              content: "planted",
+              speakerEntityId: owner.cardId
+            }),
+            "NotFound"
+          )
+        }
       })
   },
   Generate: {
@@ -430,6 +447,15 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
         )
         yield* refused(
           actor.api.Generate({ chatId: actor.chat.chatId, parentSlotId: owner.chat.slotId, branch: true }),
+          "NotFound"
+        )
+        yield* refused(
+          actor.api.Generate({
+            chatId: actor.chat.chatId,
+            parentSlotId: actor.chat.replySlotId,
+            branch: true,
+            speakerEntityId: owner.cardId
+          }),
           "NotFound"
         )
       })
@@ -529,6 +555,107 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
   SubscribeChat: {
     probe: (actor, owner) =>
       refused(actor.api.SubscribeChat({ chatId: owner.chat.chatId }).pipe(Stream.runHead), "NotFound")
+  },
+  // --- Chat setup, speakers and the send queue (chatSetupApi.ts).
+  ListCards: {
+    probe: (actor, owner) =>
+      Effect.map(actor.api.ListCards(), (cards) => {
+        assert.isTrue(cards.some((c) => c.entityId === actor.cardId))
+        assert.isFalse(cards.some((c) => c.entityId === owner.cardId))
+      })
+  },
+  SetPersona: {
+    probe: (actor, owner) => refused(actor.api.SetPersona({ entityId: owner.cardId, persona: false }), "NotFound")
+  },
+  GetCardForChat: {
+    probe: (actor, owner) => refused(actor.api.GetCardForChat({ entityId: owner.cardId }), "NotFound")
+  },
+  StartChat: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const send = (speakerEntityId: EntityId | null) => ({ _tag: "Send" as const, content: "hi", speakerEntityId })
+        // Their card as the chat's card, as the persona, or as the first message's speaker.
+        yield* refused(
+          actor.api.StartChat({ cards: [owner.cardId], persona: null, greeting: null, first: send(null) }),
+          "NotFound"
+        )
+        yield* refused(
+          actor.api.StartChat({ cards: [actor.cardId], persona: owner.cardId, greeting: null, first: send(null) }),
+          "NotFound"
+        )
+        yield* refused(
+          actor.api.StartChat({ cards: [actor.cardId], persona: null, greeting: null, first: send(owner.cardId) }),
+          "NotFound"
+        )
+      })
+  },
+  GetCast: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        yield* refused(actor.api.GetCast({ chatId: owner.chat.chatId, slotId: null }), "NotFound")
+        yield* refused(actor.api.GetCast({ chatId: actor.chat.chatId, slotId: owner.chat.slotId }), "NotFound")
+      })
+  },
+  ChangeCast: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const join = (entityId: EntityId) => ({ _tag: "Join" as const, entityId })
+        yield* refused(
+          actor.api.ChangeCast({ chatId: owner.chat.chatId, slotId: null, change: join(actor.cardId) }),
+          "NotFound"
+        )
+        // Their card, connection or preset into the actor's own chat.
+        yield* refused(
+          actor.api.ChangeCast({ chatId: actor.chat.chatId, slotId: null, change: join(owner.cardId) }),
+          "NotFound"
+        )
+        yield* refused(
+          actor.api.ChangeCast({
+            chatId: actor.chat.chatId,
+            slotId: null,
+            change: { _tag: "Model", connection: owner.connectionId, model: owner.modelId }
+          }),
+          "NotFound"
+        )
+        yield* refused(
+          actor.api.ChangeCast({
+            chatId: actor.chat.chatId,
+            slotId: null,
+            change: { _tag: "Preset", ref: owner.refId }
+          }),
+          "NotFound"
+        )
+      })
+  },
+  ListQueued: {
+    probe: (actor, owner) => refused(actor.api.ListQueued({ chatId: owner.chat.chatId }), "NotFound")
+  },
+  EditQueued: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        yield* refused(
+          actor.api.EditQueued({
+            queuedId: owner.queuedId,
+            content: "planted",
+            speakerEntityId: null,
+            expectedRowVersion: 1
+          }),
+          "NotFound"
+        )
+        // Their card as the speaker of the actor's own queued message.
+        yield* refused(
+          actor.api.EditQueued({
+            queuedId: actor.queuedId,
+            content: "waiting",
+            speakerEntityId: owner.cardId,
+            expectedRowVersion: 1
+          }),
+          "NotFound"
+        )
+      })
+  },
+  WithdrawQueued: {
+    probe: (actor, owner) => refused(actor.api.WithdrawQueued({ queuedId: owner.queuedId }), "NotFound")
   }
 }
 
@@ -620,9 +747,31 @@ const seed = Effect.gen(function* () {
         }
       })
       const chat = yield* api.CreateChat({ title: `${user.handle}'s chat` })
-      const sent = yield* api.SendMessage({ chatId: chat.id, parentSlotId: null, branch: false, content: "hello" })
-      const reply = yield* api.Generate({ chatId: chat.id, parentSlotId: sent.entry.slotId, branch: false })
+      const sent = yield* posted(
+        api.SendMessage({ chatId: chat.id, parentSlotId: null, branch: false, content: "hello" })
+      )
+      const reply = yield* posted(api.Generate({ chatId: chat.id, parentSlotId: sent.entry.slotId, branch: false }))
+      const card = yield* writer.CreateEntity({
+        userId: user.id,
+        kind: "card",
+        label: `${user.handle}'s card`,
+        subtitle: "",
+        doc: { name: `${user.handle} card`, first_mes: "Hello, {{user}}." },
+        schemaVersion: 1,
+        origin: "user",
+        sourcePath: null
+      })
+      yield* writer.SetEntityTags({ userId: user.id, entityId: card.entityId, tags: ["persona"] })
+      const queued = yield* api.SendMessage({
+        chatId: chat.id,
+        parentSlotId: reply.entry.slotId,
+        branch: false,
+        content: "waiting"
+      })
+      if (queued._tag !== "Queued") return yield* Effect.die(new Error("the seed message didn't queue"))
       return {
+        cardId: card.entityId,
+        queuedId: queued.queued.id,
         api,
         user,
         password,
@@ -686,7 +835,10 @@ const snapshot = (owner: Party) =>
           )
         )
     ),
-    outcome(owner.api.ListVersions({ slotId: owner.chat.slotId }), JSON.stringify)
+    outcome(owner.api.ListVersions({ slotId: owner.chat.slotId }), JSON.stringify),
+    outcome(owner.api.ListQueued({ chatId: owner.chat.chatId }), JSON.stringify),
+    outcome(owner.api.GetCast({ chatId: owner.chat.chatId, slotId: null }), JSON.stringify),
+    outcome(owner.api.ListCards(), JSON.stringify)
   ])
 
 /** Runs a probe, then checks that it changed nothing of the owner's, whatever it returned. */

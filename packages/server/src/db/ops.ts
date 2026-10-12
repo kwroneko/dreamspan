@@ -7,7 +7,7 @@
 // NotFound, so their existence doesn't leak.
 import { Chat, ChatId, ChatKind, EntityId, NewVersion, PathEntry, SlotId, Version, VersionId } from "@rp/shared/chat.ts"
 import { VersionError, VersionStatus } from "@rp/shared/chat.ts"
-import { ChatBusy, NotAmendable, PathRange, PathWindow } from "@rp/shared/chatApi.ts"
+import { NotAmendable, PathRange, PathWindow } from "@rp/shared/chatApi.ts"
 import { User, UserAccount, UserId, UserRole } from "@rp/shared/domain.ts"
 import { BinItem, RecoveredText } from "@rp/shared/bin.ts"
 import { Draft, DraftKey, DraftState } from "@rp/shared/drafts.ts"
@@ -48,6 +48,8 @@ import {
 } from "@rp/shared/usage.ts"
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
+import { CastCard, QueuedMessage } from "@rp/shared/chat.ts"
+import { CardForChat, FirstTurn } from "@rp/shared/chatSetupApi.ts"
 
 const StorageErrorReason = Schema.Literals(["busy", "constraint", "corrupt", "other"])
 
@@ -647,12 +649,10 @@ export class WriteOps extends RpcGroup.make(
       parentSlotId: Schema.NullOr(SlotId),
       branch: Schema.Boolean,
       version: NewVersion,
-      commitDraft: CommitDraft,
-      /** Refuse with ChatBusy when the parent's selected version is still generating. */
-      refuseWhileGenerating: Schema.optionalKey(Schema.Boolean)
+      commitDraft: CommitDraft
     },
     success: AppendResult,
-    error: Schema.Union([NotFound, LeafMoved, ChatBusy, StorageError])
+    error: Schema.Union([NotFound, LeafMoved, StorageError])
   }),
   /**
    * A new version in place: a swipe, an edit, or "write your own" (DESIGN §3.1). An
@@ -753,8 +753,104 @@ export class WriteOps extends RpcGroup.make(
     success: Version,
     error: Schema.Union([NotFound, StorageError])
   }),
-  /** At startup: versions a previous process left generating keep their text as interrupted. */
-  Rpc.make("InterruptGenerations", { success: Schema.Struct({ interrupted: Schema.Int }), error: StorageError })
+  /**
+   * At startup: versions a previous process left generating keep their text as
+   * interrupted, and the send queue drains (`queued`: entries posted or dropped, below).
+   */
+  Rpc.make("InterruptGenerations", {
+    success: Schema.Struct({ interrupted: Schema.Int, queued: Schema.Int }),
+    error: StorageError
+  }),
+
+  // --- Chat setup, speakers and the send queue (chatSetupWrites.ts; DESIGN §2.1, §2.2).
+  /**
+   * A chat made from cards on its first turn: the cards and the persona join at the
+   * start, the persona is played by the user, every greeting of the first card becomes a
+   * version of the first message (`greeting` selected), then the first turn.
+   */
+  Rpc.make("StartChat", {
+    payload: {
+      userId: UserId,
+      cards: Schema.Array(EntityId),
+      persona: Schema.NullOr(EntityId),
+      greeting: Schema.NullOr(Schema.Int),
+      first: FirstTurn
+    },
+    success: AppendResult,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * A message (or, `generate`, a reply) under `parentSlotId`: posted, or queued when the
+   * parent's selected version is still generating (DESIGN §2.2).
+   */
+  Rpc.make("SendOrQueue", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      parentSlotId: Schema.NullOr(SlotId),
+      branch: Schema.Boolean,
+      kind: Schema.Literals(["message", "generate"]),
+      content: Schema.String,
+      speakerEntityId: Schema.NullOr(EntityId),
+      direction: Schema.NullOr(Schema.String)
+    },
+    success: Schema.Union([
+      Schema.TaggedStruct("Posted", { result: AppendResult }),
+      Schema.TaggedStruct("Queued", { queued: QueuedMessage, queue: Schema.Array(QueuedMessage) })
+    ]),
+    error: Schema.Union([NotFound, LeafMoved, StorageError])
+  }),
+  Rpc.make("EditQueued", {
+    payload: {
+      userId: UserId,
+      queuedId: Schema.String,
+      content: Schema.String,
+      speakerEntityId: Schema.NullOr(EntityId),
+      expectedRowVersion: Schema.Int
+    },
+    success: Schema.Struct({ queued: QueuedMessage, queue: Schema.Array(QueuedMessage) }),
+    error: Schema.Union([NotFound, StaleWrite, StorageError])
+  }),
+  Rpc.make("WithdrawQueued", {
+    payload: { userId: UserId, queuedId: Schema.String },
+    success: Schema.Struct({ queued: QueuedMessage, queue: Schema.Array(QueuedMessage) }),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * A generation's end: its final text and status, as SaveGeneration, and in the same
+   * transaction the send queue behind its slot. Once the slot's selected version isn't
+   * generating, the first entry posts after it; a message gets a reply of its own
+   * (`next`, generating, which the caller starts), and the rest wait for that reply. A
+   * slot gone to the bin withdraws its entries.
+   */
+  /** Adds the card to the persona folder or takes it out, keeping its other folders. */
+  Rpc.make("SetPersona", {
+    payload: { userId: UserId, entityId: EntityId, persona: Schema.Boolean },
+    success: Schema.Void,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  Rpc.make("FinishGeneration", {
+    payload: {
+      userId: UserId,
+      versionId: VersionId,
+      content: Schema.String,
+      status: VersionStatus,
+      error: Schema.NullOr(VersionError)
+    },
+    success: Schema.Struct({
+      version: Version,
+      chatId: ChatId,
+      /** Slots the queue posted, in order, the next reply's last. */
+      posted: Schema.Array(SlotId),
+      next: Schema.NullOr(Schema.Struct({ slotId: SlotId, versionId: VersionId })),
+      /** Entries withdrawn because their reply went to the bin. */
+      withdrawn: Schema.Int,
+      /** Whether the chat's queue changed, and what's left of it. */
+      queueChanged: Schema.Boolean,
+      queue: Schema.Array(QueuedMessage)
+    }),
+    error: Schema.Union([NotFound, StorageError])
+  })
 ) {}
 
 export class ReadOps extends RpcGroup.make(
@@ -1031,5 +1127,25 @@ export class ReadOps extends RpcGroup.make(
     payload: { userId: UserId, versionIds: Schema.Array(VersionId) },
     success: Schema.Array(VersionId),
     error: StorageError
+  }),
+
+  // --- Chat setup, speakers and the send queue (chatSetupReads.ts; DESIGN §2.1, §2.2).
+  /** The user's live cards, by label. */
+  Rpc.make("ListCards", { payload: { userId: UserId }, success: Schema.Array(CastCard), error: StorageError }),
+  /** These cards, as far as they're the user's (binned ones included); others are left out. */
+  Rpc.make("CastCards", {
+    payload: { userId: UserId, entityIds: Schema.Array(EntityId) },
+    success: Schema.Array(CastCard),
+    error: StorageError
+  }),
+  Rpc.make("GetCardForChat", {
+    payload: { userId: UserId, entityId: EntityId },
+    success: CardForChat,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  Rpc.make("ListQueued", {
+    payload: { userId: UserId, chatId: ChatId },
+    success: Schema.Array(QueuedMessage),
+    error: Schema.Union([NotFound, StorageError])
   })
 ) {}

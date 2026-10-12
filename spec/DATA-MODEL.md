@@ -210,6 +210,19 @@ At a **merge slot**, the path covers both incoming lanes. How they're turned int
 
 **Rule:** a failed version is never part of the context. If the selected version of a slot isn't usable (`failed`, or `generating` with no text yet), the slot is left out of the context.
 
+### 4.5a `queued_messages`: the send queue [P]
+Implemented as migration 0012 (owner's decision, DESIGN §2.2; ARCHITECTURE §12). A message sent, or a reply asked for, while the reply it follows is still generating.
+
+| column | notes |
+|---|---|
+| `id`, `chat_id` | Reaches its owner through the chat |
+| `reply_slot_id` | The reply it waits for: a slot, so it posts after whichever version ends up selected |
+| `seq` | Order in the chat's queue |
+| `kind` | `message` · `generate` (a reply asked for, no text) |
+| `content`, `speaker_entity_id` | The message and who says it (a card of the chat's owner) |
+| `direction` | For `generate`: the reply's one-turn direction |
+| `row_version`, `created_at`, `updated_at` | |
+
 ### 4.6 Slots, versions and generation
 - **Swipe** (anywhere): create a `versions` row (`status=generating`) plus a rollout. Several can generate under one slot at once; each streams independently and can be stopped on its own.
 - **Branch**: create a new child slot of the slot to branch from (same lane), plus its first version.

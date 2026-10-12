@@ -107,6 +107,14 @@ export const login = (handle: string, password: string) =>
   )
 
 /** The outcome of an RPC as a short string: "ok", or the error tag and reason. */
+/** A send or Generate that must have posted, not queued. */
+export const posted = <A extends { readonly _tag: string }, E>(effect: Effect.Effect<A, E>) =>
+  Effect.flatMap(effect, (result) =>
+    result._tag === "Posted"
+      ? Effect.succeed(result as Extract<A, { readonly _tag: "Posted" }>)
+      : Effect.die(new Error(`expected it to post, but it was ${result._tag}`))
+  )
+
 export const outcome = <A, E>(effect: Effect.Effect<A, E>, show: (a: A) => string = () => "ok") =>
   effect.pipe(
     Effect.map(show),

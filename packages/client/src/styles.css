@@ -201,3 +201,11 @@ main:has(> [data-fill]) {
   color: var(--text-muted);
   font-size: 0.9em;
 }
+
+/* What Base UI would add as an inline <style>, which the CSP refuses (ui/CspProvider.tsx). */
+.base-ui-disable-scrollbar {
+  scrollbar-width: none;
+}
+.base-ui-disable-scrollbar::-webkit-scrollbar {
+  display: none;
+}

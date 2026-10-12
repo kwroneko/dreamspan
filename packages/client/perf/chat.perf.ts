@@ -530,6 +530,7 @@ const pacedChat = async (env: Record<string, string>) => {
         branch: false,
         content: "The lantern swings over the *harbor*."
       })
+      if (sent._tag !== "Posted") return yield* Effect.die(new Error("a new chat has nothing to queue behind"))
       yield* api.Generate({ chatId: chat.id, parentSlotId: sent.entry.slotId, branch: false })
       return chat.id
     })
