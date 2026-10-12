@@ -5,10 +5,28 @@ import type { ChatEvent } from "@rp/shared/chatApi.ts"
 import { type Cause, Context, Effect, Layer, Queue, type Scope } from "effect"
 
 type Batch = ReadonlyArray<ChatEvent>
-type Subscriber = Queue.Queue<Batch, Cause.Done>
+
+interface Subscriber {
+  readonly queue: Queue.Queue<Batch, Cause.Done>
+  readonly hello: () => ChatEvent
+}
 
 /** About a frame: deltas from every stream of a chat go out together at most this often. */
 const BATCH_MS = 16
+/** Batches a subscriber may fall behind by, about eight seconds of a busy chat, before it starts over. */
+const BACKLOG = 512
+
+/**
+ * Queues a batch for a subscriber. One that has fallen a whole backlog behind (a stalled
+ * socket, a throttled tab) starts over instead of holding ever more memory: what it
+ * hasn't taken is dropped, and a fresh Hello, with the text so far of every generation,
+ * makes its client read everything again. `instead` replaces that Hello (a final event).
+ */
+const deliver = (subscriber: Subscriber, batch: Batch, instead?: ChatEvent) => {
+  if (Queue.offerUnsafe(subscriber.queue, batch)) return
+  while (Queue.sizeUnsafe(subscriber.queue) > 0) Queue.takeUnsafe(subscriber.queue)
+  Queue.offerUnsafe(subscriber.queue, [instead ?? subscriber.hello()])
+}
 
 /**
  * Merges consecutive deltas of a version into one. Any other event is a barrier, so
@@ -55,63 +73,69 @@ export class ChatHub extends Context.Service<
     ) => Effect.Effect<Queue.Dequeue<Batch, Cause.Done>, never, Scope.Scope>
   }
 >()("rp/chat/ChatHub") {
-  static readonly layer = Layer.effect(
-    ChatHub,
-    Effect.gen(function* () {
-      const subscribers = new Map<ChatId, Set<Subscriber>>()
-      const pending = new Map<ChatId, Array<ChatEvent>>()
-      let timer: ReturnType<typeof setTimeout> | undefined
+  static readonly layer = ChatHub.layerWith({ backlog: BACKLOG })
 
-      const flush = () => {
-        timer = undefined
-        for (const [chatId, events] of pending) {
-          const batch = coalesce(events)
-          for (const queue of subscribers.get(chatId) ?? []) Queue.offerUnsafe(queue, batch)
-        }
-        pending.clear()
-      }
-      yield* Effect.addFinalizer(() => Effect.sync(() => clearTimeout(timer)))
+  /** With the backlog a subscriber may fall behind by, in batches: tests make it small. */
+  static layerWith(options: { readonly backlog: number }) {
+    return Layer.effect(
+      ChatHub,
+      Effect.gen(function* () {
+        const subscribers = new Map<ChatId, Set<Subscriber>>()
+        const pending = new Map<ChatId, Array<ChatEvent>>()
+        let timer: ReturnType<typeof setTimeout> | undefined
 
-      return ChatHub.of({
-        publish: (chatId, event) => {
-          if (!subscribers.has(chatId)) return
-          const events = pending.get(chatId)
-          if (events) events.push(event)
-          else pending.set(chatId, [event])
-          timer ??= setTimeout(flush, BATCH_MS)
-        },
-        close: (chatId, last) => {
-          const batch = coalesce([...(pending.get(chatId) ?? []), last])
-          pending.delete(chatId)
-          for (const queue of subscribers.get(chatId) ?? []) {
-            Queue.offerUnsafe(queue, batch)
-            Queue.endUnsafe(queue)
+        const flush = () => {
+          timer = undefined
+          for (const [chatId, events] of pending) {
+            const batch = coalesce(events)
+            for (const subscriber of subscribers.get(chatId) ?? []) deliver(subscriber, batch)
           }
-          subscribers.delete(chatId)
-        },
-        subscribe: (chatId, hello) =>
-          Effect.gen(function* () {
-            const queue = yield* Queue.unbounded<Batch, Cause.Done>()
-            yield* Effect.acquireRelease(
-              Effect.sync(() => {
-                const set = subscribers.get(chatId) ?? new Set()
-                subscribers.set(chatId, set)
-                set.add(queue)
-                Queue.offerUnsafe(queue, [hello()])
-              }),
-              () =>
+          pending.clear()
+        }
+        yield* Effect.addFinalizer(() => Effect.sync(() => clearTimeout(timer)))
+
+        return ChatHub.of({
+          publish: (chatId, event) => {
+            if (!subscribers.has(chatId)) return
+            const events = pending.get(chatId)
+            if (events) events.push(event)
+            else pending.set(chatId, [event])
+            timer ??= setTimeout(flush, BATCH_MS)
+          },
+          close: (chatId, last) => {
+            const batch = coalesce([...(pending.get(chatId) ?? []), last])
+            pending.delete(chatId)
+            for (const subscriber of subscribers.get(chatId) ?? []) {
+              deliver(subscriber, batch, last)
+              Queue.endUnsafe(subscriber.queue)
+            }
+            subscribers.delete(chatId)
+          },
+          subscribe: (chatId, hello) =>
+            Effect.gen(function* () {
+              const queue = yield* Queue.bounded<Batch, Cause.Done>(options.backlog)
+              const subscriber: Subscriber = { queue, hello }
+              yield* Effect.acquireRelease(
                 Effect.sync(() => {
-                  const set = subscribers.get(chatId)
-                  set?.delete(queue)
-                  if (set?.size === 0) {
-                    subscribers.delete(chatId)
-                    pending.delete(chatId)
-                  }
-                })
-            )
-            return queue
-          })
+                  const set = subscribers.get(chatId) ?? new Set()
+                  subscribers.set(chatId, set)
+                  set.add(subscriber)
+                  Queue.offerUnsafe(queue, [hello()])
+                }),
+                () =>
+                  Effect.sync(() => {
+                    const set = subscribers.get(chatId)
+                    set?.delete(subscriber)
+                    if (set?.size === 0) {
+                      subscribers.delete(chatId)
+                      pending.delete(chatId)
+                    }
+                  })
+              )
+              return queue
+            })
+        })
       })
-    })
-  )
+    )
+  }
 }
