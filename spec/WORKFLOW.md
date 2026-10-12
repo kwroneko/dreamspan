@@ -126,6 +126,9 @@ Results of running Codex reviewers (GPT-6.1-Sol, GPT-6-Astra) and Opus reviewers
 | O (notes in the chat, the author's note in the assembler) | none | 26 min, 7 (2 high); 5 shared with Astra, 2 unique, including an ST mismatch it found by writing its own gate fixtures | 19 min, 8 (2 high); 5 shared, 3 unique |
 | P (request inspector, cache warmth) | none | 35 min with a capacity failure and a resume, 12 (1 high); 8 shared with Astra, 4 unique | 17 min, 9 (1 high); 8 shared, 1 unique |
 | Lorebook matcher (written by Sol) | none | (author) | 17 min, 7 (2 high): unbounded work on a 10,000-entry book, a long plain key that throws, replay that depends on the clock |
+| Lorebook wiring (written by Sol) | none | (author) | 3 rounds: 6 (2 high), then 2 (1 high), then none |
+| N fix rounds (Opus twice, then Sol twice) | none | Verified rounds 1–2 and reviewed round 4 fresh: found 5, then 9 (3 high), and showed the model test caught 1 of 6 planted defects | Fresh-eyes review after round 3 found 7 (6 high); final review found 4 (1 medium), model caught 4 of 8 planted defects |
+| Integration (N + O + lorebook wiring + P) | none | (fixer) | Seams: 5 (4 medium); final: 4 (1 medium), no loss reproduced |
 | Fix verifications (K round 2, L rounds 2–3) | none | 13–25 min each. Found real gaps every time, including a P1 data loss in L's undo path | not run |
 
 So far:
@@ -134,4 +137,6 @@ So far:
 - Sol writes repro tests for everything. Astra's reports state the method less often.
 - Sol failed four times: three times at capacity (twice on 2026-10-12 afternoon, both resumed with `codex exec resume <session id>` without losing work), once on the cybersecurity filter. The filter was triggered by prompt wording ("adversarial", attacks on keys and regex); prompts now ask for a defensive review instead. Astra hasn't failed yet, and is faster here, not slower.
 - On M and N, Sol found more, and caught the worse defects. On N, Astra's report was nearly a subset of Sol's, in half the time. On L and J, Astra produced the only complete report.
+- A fresh reviewer keeps finding new defect classes in code that earlier rounds called clean (N: Astra's fresh pass after three rounds found 6 high). For protocols with races, stating invariants and testing them with a randomized model, then planting defects to check that model, converged faster than fixing reported cases one by one.
+- Fixes by Sol held up as well as fixes by Opus on the same stream (N, P, lorebook), at no Claude quota.
 - So far running both is worth it: neither reviewer's findings contain the other's, and both keep finding real defects after Opus reviews.
