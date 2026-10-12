@@ -3,7 +3,7 @@
 // login into a 500.
 import { randomBytes } from "node:crypto"
 import { assert, describe, it } from "@effect/vitest"
-import { Effect } from "effect"
+import { Cause, Effect, Exit } from "effect"
 import { hashPassword, verifyPassword } from "../src/auth/passwords.ts"
 
 const stored = (n: number | string, r: number | string, p: number | string) =>
@@ -37,6 +37,13 @@ describe("verifyPassword", () => {
     Effect.gen(function* () {
       assert.isFalse(yield* verifyPassword("a-password", stored(2 ** 16, 1, 1)))
       assert.isFalse(yield* verifyPassword("a-password", stored(2 ** 15, 1, 1)))
+    })
+  )
+
+  it.live("still dies on a throw that isn't about the parameters", () =>
+    Effect.gen(function* () {
+      const exit = yield* Effect.exit(verifyPassword(undefined as unknown as string, stored(2 ** 10, 8, 1)))
+      assert.isTrue(Exit.isFailure(exit) && Cause.hasDies(exit.cause), String(exit))
     })
   )
 })

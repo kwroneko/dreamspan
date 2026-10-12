@@ -38,14 +38,18 @@ export const passwordProblem = (password: string) =>
  * Undefined when Node refuses the parameters, which it does by throwing: past `maxmem`
  * (it needs 128·r·(N + p + 2) bytes), with N ≥ 2^(16·r), or with a non-integer.
  */
+// Memory and the N limit; non-integers. Any other throw is a bug, and dies.
+const REFUSED_PARAMETERS = new Set<unknown>(["ERR_CRYPTO_INVALID_SCRYPT_PARAMS", "ERR_OUT_OF_RANGE"])
+
 const derive = (password: string, salt: Buffer, n: number, r: number, p: number) =>
   Effect.callback<Buffer | undefined>((resume) => {
     try {
       scrypt(password.normalize("NFKC"), salt, KEY_LENGTH, { N: n, r, p, maxmem: MAX_MEM }, (error, key) =>
         resume(error ? Effect.die(error) : Effect.succeed(key))
       )
-    } catch {
-      resume(Effect.succeed(undefined))
+    } catch (error) {
+      const code = (error as { code?: unknown }).code
+      resume(REFUSED_PARAMETERS.has(code) ? Effect.succeed(undefined) : Effect.die(error))
     }
   })
 
