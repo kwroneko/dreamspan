@@ -2,7 +2,7 @@
 
 This document describes only what is implemented. Proposals live in `spec/`. When a spec is implemented, its content moves here in the same commit (CLAUDE.md "Design docs").
 
-**State**: Phases 0 and 1 done; phase 2 nearly done (PLAN.md), 2026-10-12. Built: the scaffold, schema, message graph, library, drafts, recycle bin, provider layer (§6), exposure safety and login (§4), settings screens (§5), card, lorebook and preset formats (§8, §9), macros (§10), importing (§11), chats with streaming, chat setup and a chat's notes (§12), the ST folder import (§13), the library editors (§14), and context assembly with real generation, the request inspector and the cache-warmth indicator (§15). Not yet built: the cold-cache stagger for parallel requests (DESIGN §5.5), LCM (phase 3) and agentic rollouts (phase 4).
+**State**: Phases 0 and 1 done; phase 2 nearly done (PLAN.md), 2026-10-12. Built: the scaffold, schema, message graph, library, drafts, recycle bin, provider layer (§6), exposure safety and login (§4), settings screens (§5), card, lorebook and preset formats (§8, §9), macros (§10), importing (§11), chats with streaming, chat setup and a chat's notes (§12), the ST folder import (§13), the library editors (§14), and context assembly with real generation, lorebook activation, the request inspector and the cache-warmth indicator (§15). Not yet built: the cold-cache stagger for parallel requests (DESIGN §5.5), LCM (phase 3) and agentic rollouts (phase 4).
 
 ---
 
