@@ -49,7 +49,7 @@ export const layer = Layer.effect(
                   new GenerationFailed({ class: "not_found", message: "The message being generated is gone." })
                 )
               ),
-              Effect.catch(serverFailure("AssembleContext"))
+              Effect.catchTag(["StorageError", "RpcClientError"], serverFailure("AssembleContext"))
             )
           const generation = JSON.parse(assembled.generation) as Generation
           const { model } = generation
@@ -100,7 +100,7 @@ export const layer = Layer.effect(
             Effect.catchTag("NotFound", () =>
               Effect.fail(new GenerationFailed({ class: "not_found", message: "The model or the message is gone." }))
             ),
-            Effect.catch(serverFailure("StartRollout"))
+            Effect.catchTag(["StorageError", "RpcClientError"], serverFailure("StartRollout"))
           )
           const wire = providerRequest(generation.request, model)
           return providers

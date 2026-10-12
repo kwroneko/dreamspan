@@ -225,6 +225,25 @@ describe("generation", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
+  it.live("fails the version with the assembly's own error class when the context can't fit", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const mock = yield* Effect.acquireRelease(
+        Effect.promise(() => startMockProvider(completion)),
+        (m) => Effect.promise(() => m.close())
+      )
+      const api = yield* client()
+      const { version } = yield* generateReply(api, {
+        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+        model: {},
+        preset: { openai_max_context: 100, openai_max_tokens: 99 }
+      })
+      assert.strictEqual(version.status, "failed")
+      assert.strictEqual(version.error?.class, "budget")
+      assert.isEmpty(mock.requests())
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
   it.live("sends Anthropic the system prompt, the prefill and the cache breakpoints", () => {
     const config = testConfig()
     return Effect.gen(function* () {
