@@ -144,8 +144,14 @@ export const makeBin = (sql: SqlClient.SqlClient, limits: BinLimits) => {
         SELECT (SELECT id FROM up WHERE NOT deleted ORDER BY n LIMIT 1) AS id,
                (SELECT deleted FROM up WHERE n = 0) AS deleted`
       if (!target?.deleted) return
-      yield* sql`UPDATE chats SET active_leaf_slot_id = ${target.id}, row_version = row_version + 1 WHERE id = ${chatId}`
-      const there = yield* drafts.find(userId, composerKey(chatId, target.id))
+      yield* moveLeaf(userId, chatId, leaf, target.id)
+    })
+
+  /** Moves a chat's leaf, and the composer with it unless the new tip has text of its own. */
+  const moveLeaf = (userId: UserId, chatId: string, from: string, to: string | null) =>
+    Effect.gen(function* () {
+      yield* sql`UPDATE chats SET active_leaf_slot_id = ${to}, row_version = row_version + 1 WHERE id = ${chatId}`
+      const there = yield* drafts.find(userId, composerKey(chatId, to))
       if (there?.status === "active" && there.content !== "") return
       // An empty composer can still hold history (text typed, then wiped). Ending it as a
       // discard sends that text to the recovered-text section before the row goes.
@@ -153,8 +159,43 @@ export const makeBin = (sql: SqlClient.SqlClient, limits: BinLimits) => {
         yield* drafts.end(there, "discarded")
         yield* sql`DELETE FROM drafts WHERE id = ${there.id}`
       }
-      yield* sql`UPDATE drafts SET field = ${target.id ?? ""}, row_version = row_version + 1
-                 WHERE target_kind = 'composer' AND target_id = ${chatId} AND field = ${leaf}`
+      yield* sql`UPDATE drafts SET field = ${to ?? ""}, row_version = row_version + 1
+                 WHERE target_kind = 'composer' AND target_id = ${chatId} AND field = ${from}`
+    })
+
+  /**
+   * The chat's leaf if nothing continues below it: no child that's live, or deleted alone
+   * with replies left (what a path follows). Null otherwise, or without a leaf.
+   */
+  const tipLeaf = (chatId: string) =>
+    Effect.map(
+      sql<{ leaf: string | null; continued: number }>`
+        SELECT c.active_leaf_slot_id AS leaf, EXISTS (SELECT 1 FROM slots x WHERE x.parent_slot_id = c.active_leaf_slot_id
+          AND (x.deleted_at IS NULL OR EXISTS (SELECT 1 FROM slots g WHERE g.parent_slot_id = x.id AND g.deleted_at IS NULL)))
+          AS continued
+        FROM chats c WHERE c.id = ${chatId}`,
+      ([row]) => (row?.leaf && !row.continued ? row.leaf : null)
+    )
+
+  /**
+   * After a restore: a leaf that was a tip follows what came back below it, on the newest
+   * reply at each step, so a message deleted from the end of the chat is at its end again.
+   */
+  const followRestored = (userId: UserId, chatId: string, leaf: string) =>
+    Effect.gen(function* () {
+      const [tip] = yield* sql<{ id: string }>`
+        WITH RECURSIVE down(id, n) AS (
+          SELECT ${leaf}, 0
+          UNION ALL
+          SELECT (SELECT c.id FROM slots c WHERE c.parent_slot_id = d.id
+              AND (c.deleted_at IS NULL OR EXISTS (
+                SELECT 1 FROM slots g WHERE g.parent_slot_id = c.id AND g.deleted_at IS NULL))
+              ORDER BY c.id DESC LIMIT 1),
+            d.n + 1
+          FROM down d WHERE d.id IS NOT NULL
+        )
+        SELECT id FROM down WHERE id IS NOT NULL ORDER BY n DESC LIMIT 1`
+      if (tip!.id !== leaf) yield* moveLeaf(userId, chatId, leaf, tip!.id)
     })
 
   // --- Deleting -----------------------------------------------------------------------
@@ -351,6 +392,9 @@ export const makeBin = (sql: SqlClient.SqlClient, limits: BinLimits) => {
   const restore = (userId: UserId, itemId: string) =>
     Effect.gen(function* () {
       const item = yield* loadItem(userId, itemId)
+      // A deleted message took the leaf up to its parent (relocateLeaf): it comes back down.
+      const messages = item.kind === "message" || item.kind === "branch"
+      const leaf = messages && item.chat_id !== null ? yield* tipLeaf(item.chat_id) : null
       const table = {
         chat: "chats",
         message: "slots",
@@ -361,6 +405,7 @@ export const makeBin = (sql: SqlClient.SqlClient, limits: BinLimits) => {
       }[item.kind]
       yield* sql.unsafe(`UPDATE ${table} SET deleted_at = NULL, bin_item_id = NULL WHERE bin_item_id = ?`, [itemId])
       yield* sql`DELETE FROM bin_items WHERE id = ${itemId}`
+      if (leaf !== null) yield* followRestored(userId, item.chat_id!, leaf)
       return toBinItem(item)
     })
 

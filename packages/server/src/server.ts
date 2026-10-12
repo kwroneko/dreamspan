@@ -21,6 +21,10 @@ import { makeChatHandlers } from "./api/chats.ts"
 import { makeChatSetupHandlers } from "./api/chatSetup.ts"
 import { makeEditorHandlers } from "./api/editor.ts"
 import { makeGenerationHandlers } from "./api/generation.ts"
+import { makeBinHandlers } from "./api/bin.ts"
+import { makeComposerHandlers } from "./api/composer.ts"
+import { makeNoticeHandlers } from "./api/notices.ts"
+import { Notices } from "./chat/Notices.ts"
 import { makeProviderHandlers } from "./api/providers.ts"
 import { makeStImportHandlers } from "./api/stImport.ts"
 import { Accounts, AuthenticationLive, PEER_HEADER, SESSION_COOKIE, SESSION_TTL_MS } from "./auth/Accounts.ts"
@@ -63,6 +67,10 @@ const Handlers = AppApi.toLayer(
     const stImport = yield* makeStImportHandlers
     const editor = yield* makeEditorHandlers
     const generation = yield* makeGenerationHandlers
+    // --- The recycle bin, the composer's drafts, notices
+    const bin = yield* makeBinHandlers
+    const composer = yield* makeComposerHandlers
+    const notices = yield* makeNoticeHandlers
     return AppApi.of({
       ...providers,
       ...accounts,
@@ -72,6 +80,9 @@ const Handlers = AppApi.toLayer(
       ...stImport,
       ...editor,
       ...generation,
+      ...bin,
+      ...composer,
+      ...notices,
       Health: () =>
         eventLoop.sample.pipe(
           Effect.map(
@@ -399,6 +410,7 @@ export const serverWith = <E>(
     // --- ST data folder import (ARCHITECTURE.md §13)
     Layer.provide(StImports.layer.pipe(Layer.provideMerge(MediaHolds.layer))),
     Layer.provide(Generations.layer.pipe(Layer.provideMerge(ChatHub.layer), Layer.provideMerge(generator))),
+    Layer.provideMerge(Notices.layer),
     Layer.provide(ProvidersLive),
     Layer.provideMerge(HttpServerLive),
     Layer.provideMerge(Accounts.layer),

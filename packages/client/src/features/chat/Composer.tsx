@@ -3,9 +3,12 @@
 // one-turn direction. A send while a reply is still being written is queued by the
 // server and shows here, pending, until it posts; it can be edited or taken back.
 //
-// The text is local state, so typing re-renders nothing else.
+// The text is a server draft per branch tip (composerDraft.ts), held in a store of its own,
+// so typing re-renders nothing else.
 import type { CastCard, EntityId, QueuedMessage } from "@rp/shared/chat.ts"
-import { type KeyboardEvent, memo, useCallback, useEffect, useMemo, useState } from "react"
+import type { DraftState } from "@rp/shared/drafts.ts"
+import { type KeyboardEvent, memo, useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react"
+import { useSession } from "../../session.ts"
 import type { AppError } from "../../errors.ts"
 import { Avatar } from "../../ui/Avatar.tsx"
 import { Button } from "../../ui/Button.tsx"
@@ -15,6 +18,7 @@ import { Badge } from "../../ui/Surface.tsx"
 import { Tabs } from "../../ui/Tabs.tsx"
 import { nameOf, recentSpeakers, replySpeaker, useCast } from "./cast.ts"
 import { carriedComposerText, dropCarriedComposerText } from "./composerCarry.ts"
+import { ComposerDraft } from "./composerDraft.ts"
 import type { ChatSession, ChatView, Outcome } from "./session.ts"
 
 const coarsePointer = () => typeof matchMedia !== "undefined" && matchMedia("(pointer: coarse)").matches
@@ -269,12 +273,83 @@ function Queued({
   )
 }
 
+/** Undo from the server's history of the composer's text (DESIGN §6.2): any earlier state, back. */
+function History({ draft }: { draft: ComposerDraft }) {
+  const [open, setOpen] = useState(false)
+  const [states, setStates] = useState<ReadonlyArray<DraftState> | null>(null)
+  const [error, setError] = useState<AppError | null>(null)
+  const openChange = (next: boolean) => {
+    setOpen(next)
+    if (!next) return
+    setStates(null)
+    void draft.history().then((result) => {
+      // No draft here yet is no history yet.
+      if (result.ok || result.error.tag === "NotFound") setStates(result.ok ? result.value : [])
+      else setError(result.error)
+    })
+  }
+  const restore = async (seq: number) => {
+    const result = await draft.restore(seq)
+    if (result !== null && !result.ok) setError(result.error)
+    else setOpen(false)
+  }
+  return (
+    <Popover
+      open={open}
+      onOpenChange={openChange}
+      triggerLabel="Earlier text of this message"
+      title="Earlier text"
+      trigger="History"
+    >
+      {states === null ? (
+        <p className="px-1 py-2 text-sm text-muted">{error ? error.message : "Loading…"}</p>
+      ) : states.length <= 1 ? (
+        <p className="px-1 py-2 text-sm text-muted">Nothing earlier yet: the history starts when you type.</p>
+      ) : (
+        <ul className="flex min-h-0 flex-col overflow-y-auto">
+          {states.slice(1).map((state) => (
+            <li key={state.seq}>
+              <button
+                type="button"
+                onClick={() => void restore(state.seq)}
+                className="flex w-full flex-col items-start gap-0.5 rounded-md px-2 py-1.5 text-left text-sm outline-none hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus"
+              >
+                <span>
+                  {new Date(state.at).toLocaleTimeString(undefined, { timeStyle: "short" })} ·{" "}
+                  {state.length === 1 ? "1 character" : `${state.length} characters`}
+                </span>
+                {state.kind !== "initial" && (
+                  <span className="w-full truncate text-xs text-muted">
+                    {state.removed && state.inserted
+                      ? `then “${state.removed}” became “${state.inserted}”`
+                      : state.removed
+                        ? `then “${state.removed}” was removed`
+                        : `then “${state.inserted}” was typed`}
+                  </span>
+                )}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {error && states !== null && (
+        <p role="alert" className="text-sm text-danger">
+          {error.message}
+        </p>
+      )}
+    </Popover>
+  )
+}
+
 export function Composer({ session, view }: { session: ChatSession; view: ChatView }) {
   const castView = useCast()
   const { cast } = castView
-  // Text typed on the card's page while this chat was being made comes along (composerCarry.ts).
-  const [text, setText] = useState(() => carriedComposerText(session.id))
+  const userId = useSession().user.id
+  // The text is a server draft per branch tip (composerDraft.ts). Text typed on the card's
+  // page while this chat was being made comes along (composerCarry.ts).
+  const [draft] = useState(() => new ComposerDraft(session, userId, carriedComposerText(session.id)))
   useEffect(() => dropCarriedComposerText(session.id), [session])
+  const { text, ready, restored, error: saveError } = useSyncExternalStore(draft.subscribe, draft.snapshot)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<AppError | null>(null)
   // The speaker picked here; until then, the first card the user plays.
@@ -293,6 +368,37 @@ export function Composer({ session, view }: { session: ChatSession; view: ChatVi
   )
   const report = (outcome: Outcome<unknown>) => setError(outcome.ok ? null : outcome.error)
 
+  /** The composer belongs to the tip of the path shown (DESIGN §6.2). */
+  const syncTip = useCallback(() => {
+    const now = session.snapshot()
+    if (now.loading) return
+    draft.setTip(now.leafSlotId, session.continues(draft.currentTip ?? null, now.leafSlotId))
+  }, [draft, session])
+  useEffect(syncTip, [syncTip, view.leafSlotId, view.loading])
+
+  // Leaving the chat saves what's typed; closing or reloading the tab with text not on the
+  // server asks first, and sends it as the page goes (the editors' rules, editor/store.ts).
+  useEffect(() => {
+    const warn = (event: BeforeUnloadEvent) => {
+      if (!draft.isUnsaved()) return
+      event.preventDefault()
+      event.returnValue = ""
+    }
+    const leave = () => draft.beacon()
+    const hidden = () => {
+      if (document.visibilityState === "hidden") void draft.flush()
+    }
+    addEventListener("beforeunload", warn)
+    addEventListener("pagehide", leave)
+    document.addEventListener("visibilitychange", hidden)
+    return () => {
+      removeEventListener("beforeunload", warn)
+      removeEventListener("pagehide", leave)
+      document.removeEventListener("visibilitychange", hidden)
+      void draft.flush()
+    }
+  }, [draft])
+
   /** A card that isn't in the chat joins it from here on (DESIGN §2.2). */
   const pick = useCallback(
     async (card: CastCard) => {
@@ -309,22 +415,35 @@ export function Composer({ session, view }: { session: ChatSession; view: ChatVi
   /**
    * The text leaves the box as it's submitted, so whatever is typed while the request is out
    * stays. If the request fails, the submitted text comes back, ahead of anything typed since.
+   * The draft it came from is saved first and committed with it, so a reload never shows it.
    */
-  const submit = async (run: (submitted: string) => Promise<boolean>) => {
+  const submit = async (run: (submitted: string, composerRowVersion: number | undefined) => Promise<boolean>) => {
     if (busy) return
-    const submitted = text
-    setText("")
     setBusy(true)
-    const ok = await run(submitted)
+    const tip = draft.currentTip ?? null
+    const composerRowVersion = await draft.hold()
+    const submitted = draft.snapshot().text
+    draft.takeText("")
+    const ok = await run(submitted, composerRowVersion)
     setBusy(false)
-    if (!ok && submitted !== "") setText((current) => (current === "" ? submitted : `${submitted}\n\n${current}`))
+    if (!ok && submitted !== "") {
+      const current = draft.snapshot().text
+      draft.type(current === "" ? submitted : `${submitted}\n\n${current}`)
+    }
+    syncTip()
+    draft.release(ok ? { tip, text: submitted } : null)
   }
 
   const send = () =>
     text.trim() === ""
       ? Promise.resolve()
-      : submit(async (submitted) => {
-          const { sent, outcome } = await session.send(submitted, speaker, replySpeaker(cast, speaker))
+      : submit(async (submitted, composerRowVersion) => {
+          const { sent, outcome } = await session.send(
+            submitted,
+            speaker,
+            replySpeaker(cast, speaker),
+            composerRowVersion
+          )
           report(outcome)
           // A message that was sent (or queued) is gone from the box, even if its reply failed.
           return sent
@@ -332,8 +451,8 @@ export function Composer({ session, view }: { session: ChatSession; view: ChatVi
 
   // The text is this turn's direction (DESIGN §2.2): once asked for, it's on the reply.
   const generate = () =>
-    submit(async (submitted) => {
-      const outcome = await session.generate(undefined, speaker, submitted)
+    submit(async (submitted, composerRowVersion) => {
+      const outcome = await session.generate(undefined, speaker, submitted, composerRowVersion)
       report(outcome)
       return outcome.ok
     })
@@ -356,11 +475,10 @@ export function Composer({ session, view }: { session: ChatSession; view: ChatVi
               queued={queued}
               session={session}
               // Withdrawn text never just disappears: it comes back to the box, after what's there.
-              onWithdrawn={(withdrawn) =>
-                setText((current) =>
-                  current === "" ? withdrawn : withdrawn === "" ? current : `${current}\n\n${withdrawn}`
-                )
-              }
+              onWithdrawn={(withdrawn) => {
+                const current = draft.snapshot().text
+                draft.type(current === "" ? withdrawn : withdrawn === "" ? current : `${current}\n\n${withdrawn}`)
+              }}
             />
           ))}
         </ul>
@@ -379,6 +497,11 @@ export function Composer({ session, view }: { session: ChatSession; view: ChatVi
           </button>
         ))}
       </div>
+      {restored && (
+        <p role="status" className="text-sm text-muted">
+          Text this browser kept when the page closed before the server had it is back in the box.
+        </p>
+      )}
       <label htmlFor="composer" className="sr-only">
         Message
       </label>
@@ -387,17 +510,25 @@ export function Composer({ session, view }: { session: ChatSession; view: ChatVi
         data-testid="composer"
         rows={3}
         value={text}
-        placeholder={leafGenerating ? "Write a message: it posts when the reply finishes…" : "Write a message…"}
-        onChange={(event) => setText(event.currentTarget.value)}
+        readOnly={!ready}
+        aria-busy={!ready}
+        placeholder={
+          !ready
+            ? "Loading what you typed here…"
+            : leafGenerating
+              ? "Write a message: it posts when the reply finishes…"
+              : "Write a message…"
+        }
+        onChange={(event) => draft.type(event.currentTarget.value)}
         onKeyDown={onKeyDown}
         className="w-full resize-none rounded-md border border-border bg-surface px-3 py-2 text-base text-text outline-none placeholder:text-muted focus-visible:border-focus focus-visible:ring-2 focus-visible:ring-focus/40 sm:text-sm"
       />
       <div className="flex flex-wrap items-center gap-2">
-        <Button variant="primary" pending={busy} disabled={text.trim() === ""} onClick={send}>
+        <Button variant="primary" pending={busy} disabled={text.trim() === "" || !ready} onClick={send}>
           {name ? `Send as ${name}` : "Send"}
         </Button>
         <Button
-          disabled={busy}
+          disabled={busy || !ready}
           title={text.trim() === "" ? undefined : "The text becomes this turn's direction"}
           onClick={generate}
         >
@@ -413,9 +544,10 @@ export function Composer({ session, view }: { session: ChatSession; view: ChatVi
             Stop
           </Button>
         )}
-        {error && (
+        <History draft={draft} />
+        {(error ?? saveError) && (
           <p role="alert" className="text-sm text-danger">
-            {error.message}
+            {(error ?? saveError)!.message}
           </p>
         )}
       </div>

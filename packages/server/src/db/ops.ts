@@ -862,7 +862,9 @@ export class WriteOps extends RpcGroup.make(
       speakerEntityId: Schema.NullOr(EntityId),
       /** For a message that's queued: who replies once it posts. */
       replySpeakerEntityId: Schema.NullOr(EntityId),
-      direction: Schema.NullOr(Schema.String)
+      direction: Schema.NullOr(Schema.String),
+      /** The composer the text came from, committed with the post or the queued entry. */
+      commitDraft: CommitDraft
     },
     success: Schema.Union([
       Schema.TaggedStruct("Posted", { result: AppendResult }),
@@ -1153,6 +1155,17 @@ export class WriteOps extends RpcGroup.make(
     payload: { userId: UserId, defaults: GenerationDefaults },
     success: GenerationDefaults,
     error: Schema.Union([NotFound, StorageError])
+  }),
+  // --- Branches (DESIGN §3.2).
+  /**
+   * Moves the chat's active leaf to one of its live slots, if the chat is still at the row
+   * version the caller read the slot at. The composer stays where it was: switching
+   * branches carries no text (DESIGN §6.2).
+   */
+  Rpc.make("SetActiveLeaf", {
+    payload: { userId: UserId, chatId: ChatId, slotId: SlotId, expectedRowVersion: Schema.Int },
+    success: Chat,
+    error: Schema.Union([NotFound, StaleWrite, StorageError])
   })
 ) {}
 
@@ -1533,5 +1546,21 @@ export class ReadOps extends RpcGroup.make(
     payload: { userId: UserId },
     success: GenerationDefaults,
     error: StorageError
+  }),
+  // --- Branches (DESIGN §3.2).
+  /**
+   * Where switching to the branch at `index` among `slotId`'s alternates leads: that
+   * sibling, the tip below it on its newest replies (as ReadPath's Around opens it), and
+   * the chat's row version, for SetActiveLeaf.
+   */
+  Rpc.make("BranchTip", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      slotId: SlotId,
+      index: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
+    },
+    success: Schema.Struct({ slotId: SlotId, tipSlotId: SlotId, chatRowVersion: Schema.Int }),
+    error: Schema.Union([NotFound, StorageError])
   })
 ) {}

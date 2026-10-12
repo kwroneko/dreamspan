@@ -19,7 +19,7 @@ import {
 import type { Cast, CastChange } from "@rp/shared/chatSetupApi.ts"
 import type { CardFields } from "@rp/shared/macros/context.ts"
 import { NotFound } from "@rp/shared/errors.ts"
-import type { ChatEvent, PathRange, PathWindow } from "@rp/shared/chatApi.ts"
+import type { BranchSwitch, ChatEvent, PathRange, PathWindow } from "@rp/shared/chatApi.ts"
 import { Cause, Context, Effect, Exit, Fiber, Schedule, Stream } from "effect"
 import { Atom, type AtomRegistry, AtomRegistry as Registry } from "effect/reactivity"
 import { type AppError, describeCause } from "../../errors.ts"
@@ -252,7 +252,7 @@ export class ChatSession {
 
   // --- The server
 
-  private call<A, E>(rpc: (client: Client) => Effect.Effect<A, E>): Promise<Outcome<A>> {
+  call<A, E>(rpc: (client: Client) => Effect.Effect<A, E>): Promise<Outcome<A>> {
     return Effect.runPromiseExit(
       Effect.flatMap(Registry.getResult(this.registry, AppClient.runtime), (services) =>
         rpc(Context.get(services, AppClient))
@@ -535,7 +535,25 @@ export class ChatSession {
       this.track(stored.version)
       return true
     }
-    if (this.view.newer !== null || entry.parentSlotId !== (entries.at(-1)?.slotId ?? null)) return false
+    if (this.view.newer !== null || entry.parentSlotId !== (entries.at(-1)?.slotId ?? null)) {
+      // A new alternate of a message shown: it counts one more branch (DESIGN §3.2).
+      if (entries.some((e) => e.parentSlotId === entry.parentSlotId && e.branchCount < entry.branchCount)) {
+        this.update({
+          entries: entries.map((e) =>
+            e.parentSlotId === entry.parentSlotId && e.laneId === entry.laneId && e.branchCount < entry.branchCount
+              ? ({ ...e, branchCount: entry.branchCount } as PathEntry)
+              : e
+          )
+        })
+      }
+      // The path's leaf moves on below the window too, so the composer follows it.
+      if (this.view.newer !== null && entry.parentSlotId !== null && entry.parentSlotId === this.view.leafSlotId) {
+        this.extended.set(entry.slotId, entry.parentSlotId)
+        this.update({ leafSlotId: entry.slotId })
+      }
+      return false
+    }
+    this.extended.set(entry.slotId, entry.parentSlotId)
     let next = [...entries, entry]
     let older = this.view.older
     if (next.length > MAX_LOADED) {
@@ -556,6 +574,7 @@ export class ChatSession {
     this.followAtBottom()
     if (this.applySlot(entry)) return
     this.requestedLeaf = null
+    this.extended.set(entry.slotId, entry.parentSlotId)
     this.update({ leafSlotId: entry.slotId })
     void this.open(null)
   }
@@ -610,7 +629,9 @@ export class ChatSession {
   async send(
     content: string,
     speaker: EntityId | null = null,
-    replySpeaker: EntityId | null = null
+    replySpeaker: EntityId | null = null,
+    /** The composer draft the text came from, committed with it (DESIGN §6.2). */
+    composerRowVersion?: number
   ): Promise<{ readonly sent: boolean; readonly outcome: Outcome<unknown> }> {
     const result = await this.queueSnapshot(
       this.call((client) =>
@@ -621,7 +642,8 @@ export class ChatSession {
           content,
           speakerEntityId: speaker,
           // If it's queued, the server asks for the reply when it posts, from the same speaker.
-          replySpeakerEntityId: replySpeaker
+          replySpeakerEntityId: replySpeaker,
+          ...(composerRowVersion === undefined ? {} : { composerRowVersion })
         })
       ),
       (value) => (value._tag === "Queued" ? value.queue : null)
@@ -642,7 +664,8 @@ export class ChatSession {
   async generate(
     parentSlotId = this.view.leafSlotId,
     speaker: EntityId | null = null,
-    direction = ""
+    direction = "",
+    composerRowVersion?: number
   ): Promise<Outcome<unknown>> {
     const branch = parentSlotId === this.view.leafSlotId && this.onOtherBranch()
     const result = await this.queueSnapshot(
@@ -652,7 +675,8 @@ export class ChatSession {
           parentSlotId,
           branch,
           speakerEntityId: speaker,
-          ...(direction.trim() === "" ? {} : { direction })
+          ...(direction.trim() === "" ? {} : { direction }),
+          ...(composerRowVersion === undefined ? {} : { composerRowVersion })
         })
       ),
       (value) => (value._tag === "Queued" ? value.queue : null)
@@ -773,6 +797,40 @@ export class ChatSession {
     if (result.ok) this.applySlot(result.value)
     else if (result.error.tag === "StaleWrite") void this.refreshSlot(slotId)
     return result
+  }
+
+  /**
+   * Switches to the alternate at `index` of the message at `entry` (DESIGN §3.2): the chat's
+   * active leaf moves to that branch's tip, and the window follows it once the caller opens
+   * it where the user is.
+   */
+  async switchBranch(entry: PathEntry, index: number): Promise<Outcome<BranchSwitch>> {
+    const result = await this.call((client) =>
+      client("SwitchBranch", { chatId: this.chatId, slotId: entry.slotId, index })
+    )
+    if (result.ok) {
+      this.requestedLeaf = null
+      this.update({ chat: result.value.chat, leafSlotId: result.value.chat.activeLeafSlotId })
+    }
+    return result
+  }
+
+  // --- Where the leaf went: messages appended below it, as opposed to a jump elsewhere.
+
+  /** Each slot that became the leaf by being appended below it, with the leaf before it. */
+  private readonly extended = new Map<SlotId, SlotId | null>()
+
+  /**
+   * Whether the leaf got from `from` to `to` by messages appended below it (a send, a reply,
+   * the queue posting), rather than by moving elsewhere: the composer's draft went along.
+   */
+  continues(from: SlotId | null, to: SlotId | null): boolean {
+    let at: SlotId | null | undefined = to
+    for (let step = 0; step < 50 && at !== undefined && at !== null; step++) {
+      at = this.extended.get(at)
+      if (at === from) return true
+    }
+    return false
   }
 
   private refreshSlot(slotId: SlotId) {

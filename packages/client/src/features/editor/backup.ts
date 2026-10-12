@@ -1,7 +1,8 @@
 // The last resort for text typed and not yet on the server: a copy in this browser
 // (IndexedDB), written as the user types and removed once the server has the text. A page
 // that closes before its save and its keepalive request (capped at 64 KB) leaves the copy,
-// and the editor brings it back on the next open.
+// and the editor brings it back on the next open. A chat's composer keeps its copies here
+// too (chat/composerDraft.ts), filed under `composer:<chat>` with the branch tip as the field.
 //
 // It's a recovery copy, not a secure store: it's plain text in the browser profile, so
 // anyone with that profile can read what a user typed and didn't send while the copy lasts.

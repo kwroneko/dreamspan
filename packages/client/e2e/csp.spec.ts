@@ -76,7 +76,9 @@ test("every screen runs under the Content-Security-Policy", async ({ page }) => 
     "/import/st",
     "/settings",
     "/settings/account",
-    "/settings/users"
+    "/settings/users",
+    "/settings/notifications",
+    "/bin"
   ]) {
     await page.goto(`${server().url}${path}`)
     await expect(page.getByRole("main")).toBeVisible()

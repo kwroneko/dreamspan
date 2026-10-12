@@ -35,13 +35,32 @@ const pathCte = (sql: SqlClient.SqlClient, chatId: ChatId, leaf: SlotId, limit: 
     WHERE s.parent_slot_id IS NOT NULL AND (${limit} IS NULL OR p.n < ${limit})
   )`
 
+/** Slot `x` is on some path: live, or deleted alone with replies left in place. */
+const REACHABLE = `(x.deleted_at IS NULL
+  OR EXISTS (SELECT 1 FROM slots g WHERE g.parent_slot_id = x.id AND g.deleted_at IS NULL))`
+
+/**
+ * The alternate branches at slot `s` (DESIGN §3.2), with `also` on top: its siblings in
+ * its lane that a path can reach, which is what `latestDescendant` follows. Roots are
+ * found by chat and depth, the rest by parent, so the cost is the number of siblings. The
+ * indexes are named: left to itself, SQLite took the lane's, which scans the whole lane for
+ * every entry (5 s for a 60-slot window of the 100,000-message perf fixture).
+ */
+const siblingCount = (also = "") => {
+  const reachable = `x.lane_id = s.lane_id ${also} AND ${REACHABLE}`
+  return `CASE WHEN s.parent_slot_id IS NULL
+    THEN (SELECT count(*) FROM slots x INDEXED BY slots_chat_depth WHERE x.chat_id = s.chat_id AND x.depth = 0 AND ${reachable})
+    ELSE (SELECT count(*) FROM slots x INDEXED BY slots_parent WHERE x.parent_slot_id = s.parent_slot_id AND ${reachable}) END`
+}
+
 /** A path entry's columns: the slot's, and its selected version's under their own names. */
 const pathColumns = `v.id, v.slot_id, v.ordinal, v.status, v.speaker_entity_id, v.writer, v.content,
   v.macro_mode, v.origin, v.source_version_id, v.direction, v.hidden, v.starred, v.created_at, v.error_json,
   v.frozen_macros,
   ${amendCount("v")}, s.lane_id, s.parent_slot_id, s.depth, s.row_version, s.context_excluded,
   s.deleted_at IS NOT NULL AS slot_deleted,
-  (SELECT count(*) FROM versions c WHERE c.slot_id = s.id AND c.deleted_at IS NULL) AS version_count`
+  (SELECT count(*) FROM versions c WHERE c.slot_id = s.id AND c.deleted_at IS NULL) AS version_count,
+  ${siblingCount()} AS branch_count, ${siblingCount("AND x.id < s.id")} AS branch_index`
 
 /** The window of at most `limit` slots ending at `leaf`, root first, deleted ones included. */
 export const pathWindow = (sql: SqlClient.SqlClient, chatId: ChatId, leaf: SlotId, limit: number) =>
@@ -419,6 +438,27 @@ export const makeReadHandlers = Effect.gen(function* () {
           }
         }
       }).pipe(query("ReadPath")),
+
+    // --- Branches (DESIGN §3.2)
+    BranchTip: ({ userId, chatId, slotId, index }) =>
+      Effect.gen(function* () {
+        const chat = yield* ownedChat(userId, chatId)
+        const [slot] = yield* sql<{ parent_slot_id: string | null; lane_id: string }>`
+          SELECT parent_slot_id, lane_id FROM slots WHERE id = ${slotId} AND chat_id = ${chatId}`
+        if (!slot) return yield* new NotFound({ entity: "slot", id: slotId })
+        const [sibling] =
+          slot.parent_slot_id === null
+            ? yield* sql<{ id: SlotId }>`
+                SELECT x.id FROM slots x INDEXED BY slots_chat_depth WHERE x.chat_id = ${chatId} AND x.depth = 0
+                  AND x.lane_id = ${slot.lane_id} AND ${sql.literal(REACHABLE)}
+                ORDER BY x.id LIMIT 1 OFFSET ${index}`
+            : yield* sql<{ id: SlotId }>`
+                SELECT x.id FROM slots x INDEXED BY slots_parent WHERE x.parent_slot_id = ${slot.parent_slot_id}
+                  AND x.lane_id = ${slot.lane_id} AND ${sql.literal(REACHABLE)}
+                ORDER BY x.id LIMIT 1 OFFSET ${index}`
+        if (!sibling) return yield* new NotFound({ entity: "branch", id: `${slotId}#${index}` })
+        return { slotId: sibling.id, tipSlotId: yield* latestDescendant(sibling.id), chatRowVersion: chat.row_version }
+      }).pipe(query("BranchTip")),
 
     GetSlot: ({ userId, slotId }) =>
       sql<PathRow & { chat_id: ChatId }>`

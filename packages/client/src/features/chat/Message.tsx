@@ -5,7 +5,9 @@ import { useAtomValue } from "@effect/atom-react"
 import type { PathEntry, SlotId, Version } from "@rp/shared/chat.ts"
 import { Link } from "@tanstack/react-router"
 import { memo, type PointerEvent, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
+import type { BinItem } from "@rp/shared/bin.ts"
 import type { AppError } from "../../errors.ts"
+import { useDeletedToast } from "../bin/deleted.ts"
 import { Button } from "../../ui/Button.tsx"
 import { Textarea } from "../../ui/Field.tsx"
 import { Markdown } from "../../ui/Markdown.tsx"
@@ -127,13 +129,16 @@ export const Message = memo(function Message({
   entry,
   session,
   highlighted,
-  branchLeaf
+  branchLeaf,
+  onBranch
 }: {
   entry: PathEntry
   session: ChatSession
   highlighted: boolean
   /** The leaf of the branch shown, when it isn't the chat's active one: links keep to it. */
   branchLeaf: SlotId | null
+  /** Switches to another of the alternate branches at this message. */
+  onBranch: (entry: PathEntry, index: number) => void
 }) {
   useRenderCount("rowRenders")
   const cast = useCast()
@@ -152,6 +157,12 @@ export const Message = memo(function Message({
   const known = position >= 0
 
   const report = (outcome: Outcome<unknown>) => setError(outcome.ok ? null : outcome.error)
+  const deleted = useDeletedToast()
+  /** A delete says so, with Undo (DESIGN §6.2). */
+  const toast = (outcome: Outcome<BinItem>) => {
+    report(outcome)
+    if (outcome.ok) deleted(outcome.value)
+  }
 
   const loadVersions = async () => {
     if (known) return versions
@@ -216,8 +227,36 @@ export const Message = memo(function Message({
           </Badge>
         )}
         {!entry.inContext && !generating && version.status !== "failed" && <Badge>not in context</Badge>}
+        {entry.branchCount > 1 && (
+          // Alternate branches of the story here (DESIGN §3.2), told apart from versions.
+          <div className="ml-auto flex items-center gap-1" role="group" aria-label="Branches">
+            <Button
+              variant="ghost"
+              aria-label="Previous branch"
+              disabled={entry.branchIndex === 0}
+              onClick={() => onBranch(entry, entry.branchIndex - 1)}
+            >
+              ‹
+            </Button>
+            <span className="text-center text-muted tabular-nums">
+              branch {entry.branchIndex + 1} of {entry.branchCount}
+            </span>
+            <Button
+              variant="ghost"
+              aria-label="Next branch"
+              disabled={entry.branchIndex === entry.branchCount - 1}
+              onClick={() => onBranch(entry, entry.branchIndex + 1)}
+            >
+              ›
+            </Button>
+          </div>
+        )}
         {(model || entry.versionCount > 1) && (
-          <div className="ml-auto flex items-center gap-1" role="group" aria-label="Versions">
+          <div
+            className={`${entry.branchCount > 1 ? "" : "ml-auto "}flex items-center gap-1`}
+            role="group"
+            aria-label="Versions"
+          >
             <Button variant="ghost" aria-label="Previous version" disabled={position === 0} onClick={() => swipe(-1)}>
               ‹
             </Button>
@@ -288,11 +327,11 @@ export const Message = memo(function Message({
           Link
         </Link>
         {entry.versionCount > 1 && (
-          <Button variant="ghost" onClick={async () => report(await session.deleteVersion(version.id))}>
+          <Button variant="ghost" onClick={async () => toast(await session.deleteVersion(version.id))}>
             Delete version
           </Button>
         )}
-        <Button variant="ghost" onClick={async () => report(await session.deleteMessage(entry.slotId))}>
+        <Button variant="ghost" onClick={async () => toast(await session.deleteMessage(entry.slotId))}>
           Delete
         </Button>
       </footer>

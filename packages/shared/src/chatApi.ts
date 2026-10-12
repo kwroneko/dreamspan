@@ -79,6 +79,19 @@ const Errors = [NotFound, ServerError] as const
 const WriteErrors = [NotFound, StaleWrite, ServerError] as const
 
 /**
+ * The row version of the composer draft at the tip (composerApi.ts) the text was typed in:
+ * the draft is committed in the same transaction as the send, unless another tab typed on
+ * since, so a reload never shows text already sent (DESIGN §6.2).
+ */
+const ComposerRowVersion = Schema.optionalKey(Schema.Int)
+
+/** Where a branch switch went: the sibling, and the chat with its leaf moved below it. */
+export class BranchSwitch extends Schema.Class<BranchSwitch>("BranchSwitch")({
+  slotId: SlotId,
+  chat: Chat
+}) {}
+
+/**
  * What a send or a Generate did: posted at once, or queued behind a reply still being
  * written (DESIGN §2.2), with every entry now waiting in the chat.
  */
@@ -134,7 +147,8 @@ export class ChatApi extends RpcGroup.make(
        * Who replies to it, if it's queued: the reply then starts on the server, as the client
        * would have asked for it after an immediate send.
        */
-      replySpeakerEntityId: Schema.optionalKey(Schema.NullOr(EntityId))
+      replySpeakerEntityId: Schema.optionalKey(Schema.NullOr(EntityId)),
+      composerRowVersion: ComposerRowVersion
     },
     success: SendResult,
     error: Schema.Union([NotFound, LeafMoved, ServerError])
@@ -151,7 +165,8 @@ export class ChatApi extends RpcGroup.make(
       parentSlotId: Schema.NullOr(SlotId),
       branch: Schema.Boolean,
       speakerEntityId: Schema.optionalKey(Schema.NullOr(EntityId)),
-      direction: Schema.optionalKey(Schema.String)
+      direction: Schema.optionalKey(Schema.String),
+      composerRowVersion: ComposerRowVersion
     },
     success: SendResult,
     error: Schema.Union([NotFound, LeafMoved, GenerationUnavailable, ServerError])
@@ -196,6 +211,16 @@ export class ChatApi extends RpcGroup.make(
   Rpc.make("DeleteMessage", { payload: { slotId: SlotId }, success: BinItem, error: Schema.Union([...Errors]) }),
   Rpc.make("DeleteBranch", { payload: { slotId: SlotId }, success: BinItem, error: Schema.Union([...Errors]) }),
   Rpc.make("DeleteVersion", { payload: { versionId: VersionId }, success: BinItem, error: Schema.Union([...Errors]) }),
+  /**
+   * Switches to the branch at `index` (0: the oldest) among the alternates at `slotId`
+   * (DESIGN §3.2): the chat's active leaf moves to the tip below that sibling, following its
+   * newest replies. The composer stays where it was: each branch has its own.
+   */
+  Rpc.make("SwitchBranch", {
+    payload: { chatId: ChatId, slotId: SlotId, index: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)) },
+    success: BranchSwitch,
+    error: Schema.Union([...WriteErrors])
+  }),
   /**
    * Live updates to one chat. Each element is a batch, coalesced on the server per frame
    * (about 16 ms). The first batch starts with Hello.

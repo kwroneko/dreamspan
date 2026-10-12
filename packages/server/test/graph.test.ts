@@ -713,6 +713,19 @@ describe("window reads", () => {
           plan.join("\n")
         )
         assert.include(plan, "SEARCH s USING INDEX sqlite_autoindex_slots_1 (id=?)", plan.join("\n"))
+        // An entry's alternates are found by their parent, never by scanning the lane.
+        assert.includeMembers(
+          plan,
+          [
+            "SEARCH x USING INDEX slots_parent (parent_slot_id=?)",
+            "SEARCH x USING INDEX slots_chat_depth (chat_id=? AND depth=?)"
+          ],
+          plan.join("\n")
+        )
+        assert.isFalse(
+          plan.some((step) => step.includes("slots_lane")),
+          plan.join("\n")
+        )
       })
     },
     60_000

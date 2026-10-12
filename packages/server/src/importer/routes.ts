@@ -13,7 +13,8 @@ import {
   ImportResult
 } from "@rp/shared/libraryImport.ts"
 import { RefId, RevisionId } from "@rp/shared/library.ts"
-import { DraftKey } from "@rp/shared/drafts.ts"
+import { composerKey, DraftKey } from "@rp/shared/drafts.ts"
+import { ComposerBeacon } from "@rp/shared/composerApi.ts"
 import { parseField } from "@rp/shared/editing.ts"
 import { ByteSize, Effect, Layer, Option, Schedule, Schema, Semaphore } from "effect"
 import { NodeHttpServerRequest } from "@effect/platform-node"
@@ -111,7 +112,9 @@ const LeavingDrafts = Schema.Struct({
       expectedRowVersion: Schema.NullOr(Schema.Int),
       baseRevisionId: Schema.NullOr(RevisionId)
     })
-  ).check(Schema.isMaxLength(500))
+  ).check(Schema.isMaxLength(500)),
+  /** Chats' composers (DESIGN §6.2): one per open chat at most, in practice. */
+  composers: Schema.optionalKey(Schema.Array(ComposerBeacon).check(Schema.isMaxLength(50)))
 })
 
 const CONTENT_TYPES: Record<ExportFormat, readonly [mime: string, extension: string]> = {
@@ -541,8 +544,8 @@ export const layer = Layer.unwrap(
     )
 
     /**
-     * Editor drafts a page sends as it closes (`fetch` with `keepalive`), since its WebSocket
-     * goes with it. Each is saved as `SaveEditorDraft` would; if another save of the same field
+     * Editor and composer drafts a page sends as it closes (`fetch` with `keepalive`), since its
+     * WebSocket goes with it. Each is saved as `SaveEditorDraft` or `SaveComposer` would; if another save of the same field
      * got there first, this one goes on top, the other staying in the field's history.
      */
     const leavingDrafts = Effect.gen(function* () {
@@ -565,6 +568,21 @@ export const layer = Layer.unwrap(
           Effect.catchTag("StaleWrite", () =>
             Effect.flatMap(reader.GetDraft({ userId: user.id, key }), (current) =>
               save(current?.rowVersion ?? null, current?.status === "active" ? null : draft.baseRevisionId)
+            )
+          )
+        )
+      }
+      // A composer's draft goes on top the same way. One that's gone from its tip moved with
+      // a message appended there: it isn't made again at a slot that's no tip any more, and
+      // the copy in the browser keeps the text for the composer to bring back.
+      for (const composer of input.value.composers ?? []) {
+        const key = composerKey(composer.chatId, composer.tipSlotId)
+        const save = (expectedRowVersion: number | null) =>
+          writer.SaveDraft({ userId: user.id, key, content: composer.content, expectedRowVersion, baseRevision: null })
+        yield* save(composer.expectedRowVersion).pipe(
+          Effect.catchTag("StaleWrite", (stale) =>
+            Effect.flatMap(reader.GetDraft({ userId: user.id, key }), (current) =>
+              current === null ? Effect.fail(stale) : save(current.rowVersion)
             )
           )
         )

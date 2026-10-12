@@ -106,6 +106,8 @@ export interface PathRow extends VersionRow {
   readonly context_excluded: number
   readonly slot_deleted: number
   readonly version_count: number
+  readonly branch_count: number
+  readonly branch_index: number
 }
 
 export const toPathEntry = (row: PathRow) => {
@@ -120,6 +122,8 @@ export const toPathEntry = (row: PathRow) => {
     contextExcluded,
     version,
     versionCount: row.version_count,
+    branchCount: row.branch_count,
+    branchIndex: row.branch_index,
     inContext: versionInContext(version.status, version.content, contextExcluded)
   })
 }

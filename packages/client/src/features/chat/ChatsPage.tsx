@@ -6,14 +6,48 @@ import { AsyncView, ErrorAlert, useAction } from "../../actions.tsx"
 import { AppClient } from "../../rpc.ts"
 import { Button } from "../../ui/Button.tsx"
 import { Input } from "../../ui/Field.tsx"
-import { Card, CardHeader, EmptyState } from "../../ui/Surface.tsx"
+import { Badge, Card, CardHeader, EmptyState } from "../../ui/Surface.tsx"
+import { importState } from "@rp/shared/stImportApi.ts"
+import { useDeletedToast } from "../bin/deleted.ts"
+import { useUnseen } from "../notices.tsx"
 import { useTitle } from "../shell.tsx"
 
 const PAGE = 50
 
 const chatsAtom = AppClient.query("ListChats", { limit: PAGE, before: null }, { reactivityKeys: ["chats"] })
 
-export const chatTitle = (chat: Pick<Chat, "title">) => chat.title || "Untitled chat"
+/** A chat's title as shown, without the unfinished-import marker, which shows as a badge. */
+export const chatTitle = (chat: Pick<Chat, "title">) => importState(chat.title).title || "Untitled chat"
+
+/** The badges a chat's title gets: an import still unfinished (ARCHITECTURE §13). */
+export function ChatBadges({ chat }: { chat: Pick<Chat, "title"> }) {
+  return importState(chat.title).unfinished ? <Badge tone="warning">import unfinished</Badge> : null
+}
+
+function ChatRow({ chat, onDelete }: { chat: Chat; onDelete: (chat: Chat) => void }) {
+  const unseen = useUnseen(chat.id)
+  return (
+    <li className="flex items-center gap-3 py-2.5 first:pt-0 last:pb-0">
+      <div className="flex min-w-0 flex-1 flex-col">
+        <div className="flex min-w-0 items-center gap-2">
+          <Link
+            to="/chats/$chatId"
+            params={{ chatId: chat.id }}
+            className="truncate font-medium text-accent underline-offset-4 hover:underline"
+          >
+            {chatTitle(chat)}
+          </Link>
+          <ChatBadges chat={chat} />
+          {unseen > 0 && <Badge tone="accent">{unseen === 1 ? "1 new reply" : `${unseen} new replies`}</Badge>}
+        </div>
+        <span className="text-sm text-muted">{when(chat)}</span>
+      </div>
+      <Button variant="ghost" aria-label={`Delete ${chatTitle(chat)}`} onClick={() => onDelete(chat)}>
+        Delete
+      </Button>
+    </li>
+  )
+}
 
 const when = (chat: Chat) =>
   new Date(chat.lastMessageAt ?? chat.createdAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })
@@ -47,6 +81,11 @@ function NewChat() {
 
 function ChatRows({ first }: { first: ReadonlyArray<Chat> }) {
   const action = useAction()
+  const deleted = useDeletedToast()
+  const remove = async (chat: Chat) => {
+    const result = await action.run((client) => client("DeleteChat", { chatId: chat.id }), ["chats"])
+    if (result.ok) deleted(result.value)
+  }
   const [more, setMore] = useState<ReadonlyArray<Chat>>([])
   const [end, setEnd] = useState(first.length < PAGE)
   const chats = [...first, ...more]
@@ -70,25 +109,7 @@ function ChatRows({ first }: { first: ReadonlyArray<Chat> }) {
     <div className="flex flex-col gap-3">
       <ul className="flex flex-col divide-y divide-border">
         {chats.map((chat) => (
-          <li key={chat.id} className="flex items-center gap-3 py-2.5 first:pt-0 last:pb-0">
-            <div className="flex min-w-0 flex-1 flex-col">
-              <Link
-                to="/chats/$chatId"
-                params={{ chatId: chat.id }}
-                className="truncate font-medium text-accent underline-offset-4 hover:underline"
-              >
-                {chatTitle(chat)}
-              </Link>
-              <span className="text-sm text-muted">{when(chat)}</span>
-            </div>
-            <Button
-              variant="ghost"
-              aria-label={`Delete ${chatTitle(chat)}`}
-              onClick={() => action.run((client) => client("DeleteChat", { chatId: chat.id }), ["chats"])}
-            >
-              Delete
-            </Button>
-          </li>
+          <ChatRow key={chat.id} chat={chat} onDelete={(it) => void remove(it)} />
         ))}
       </ul>
       {!end && (

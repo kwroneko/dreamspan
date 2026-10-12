@@ -11,11 +11,13 @@ import { fullPath, navEntries, routes } from "../routes.tsx"
 import { logout, SessionContext, sessionAtom, useSession } from "../session.ts"
 import { Button } from "../ui/Button.tsx"
 import { Loading } from "../ui/Spinner.tsx"
+import { Toasts } from "../ui/Toast.tsx"
+import { setPageTitle, useNotices } from "./notices.tsx"
 
 /** Sets the tab's title while a screen is shown. */
 export const useTitle = (title: string) => {
   useEffect(() => {
-    document.title = `${title} · rp-harness`
+    setPageTitle(`${title} · rp-harness`)
   }, [title])
 }
 
@@ -33,6 +35,12 @@ function ForgetOtherUsers({ userId }: { userId: string }) {
   useEffect(() => {
     void clearOtherUsers(userId)
   }, [userId])
+  return null
+}
+
+/** Hears about replies finishing elsewhere while a session is open (notices.tsx). */
+function Notices() {
+  useNotices()
   return null
 }
 
@@ -86,6 +94,9 @@ function Header() {
           ))}
         </nav>
         <div className="ml-auto flex items-center gap-3">
+          <Link to="/bin" className="text-sm text-muted hover:text-text data-[status=active]:text-text">
+            Bin
+          </Link>
           <Link to="/settings/account" className="max-w-40 truncate text-sm text-muted hover:text-text">
             {session.user.displayName}
           </Link>
@@ -139,18 +150,21 @@ function AppShell() {
   return (
     <SessionContext value={result.value}>
       <ForgetOtherUsers userId={result.value.user.id} />
+      <Notices />
       <a
         href="#content"
         className="sr-only rounded-md bg-surface px-3 py-2 focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus:ring-2 focus:ring-focus"
       >
         Skip to content
       </a>
-      <div className="flex min-h-full flex-col">
-        <Header />
-        <main id="content" className="mx-auto w-full max-w-5xl flex-1 px-4 py-6">
-          <Outlet />
-        </main>
-      </div>
+      <Toasts>
+        <div className="flex min-h-full flex-col">
+          <Header />
+          <main id="content" className="mx-auto w-full max-w-5xl flex-1 px-4 py-6">
+            <Outlet />
+          </main>
+        </div>
+      </Toasts>
     </SessionContext>
   )
 }

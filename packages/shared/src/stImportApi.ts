@@ -106,3 +106,14 @@ export class StImportApi extends RpcGroup.make(
     error: Schema.Union([NotFound, ServerError])
   })
 ) {}
+
+const UNFINISHED = " (import unfinished)"
+
+/** How a chat whose import hasn't finished is titled, so it says so anywhere it's named. [P] */
+export const unfinishedTitle = (title: string) => `${title}${UNFINISHED}`
+
+/** A chat's title without the unfinished-import marker, and whether it had it, for a badge instead. */
+export const importState = (title: string) =>
+  title.endsWith(UNFINISHED)
+    ? { title: title.slice(0, -UNFINISHED.length), unfinished: true }
+    : { title, unfinished: false }

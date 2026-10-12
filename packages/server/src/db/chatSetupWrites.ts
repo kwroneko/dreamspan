@@ -241,7 +241,8 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
         content,
         speakerEntityId,
         replySpeakerEntityId,
-        direction
+        direction,
+        commitDraft
       }) =>
         Effect.gen(function* () {
           const chat = yield* graph.ownedChat(userId, chatId)
@@ -273,6 +274,8 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
                 created_at: at,
                 updated_at: at
               })} RETURNING *`
+              // The text waits in the queue now, and comes back to the composer if withdrawn.
+              yield* bin.drafts.commit(userId, commitDraft)
               return { _tag: "Queued" as const, queued: toQueued(row!), queue: yield* chatQueue(sql, chatId) }
             }
           }
@@ -282,7 +285,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
             parentSlotId,
             branch,
             version: kind === "message" ? userMessage(content, speakerEntityId) : reply(speakerEntityId, direction),
-            commitDraft: null
+            commitDraft
           })
           return { _tag: "Posted" as const, result }
         }).pipe(transaction("SendOrQueue")),

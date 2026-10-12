@@ -7,6 +7,7 @@ import { NOTE_SCHEMA_VERSION, type NoteDoc } from "@rp/shared/docs/note.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { validateDoc } from "@rp/shared/editing.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
+import { unfinishedTitle } from "@rp/shared/stImportApi.ts"
 import type { StateEventData } from "@rp/shared/state.ts"
 import { Effect, Schema } from "effect"
 import { SqlClient } from "effect/sql"
@@ -54,9 +55,6 @@ interface RecordPayload {
    */
   readonly prior?: string | null
 }
-
-/** How a chat whose import hasn't finished is titled, so the chat list says so. [P] */
-const unfinishedTitle = (title: string) => `${title} (import unfinished)`
 
 export const makeStImportWriteHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient

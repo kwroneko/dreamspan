@@ -10,6 +10,7 @@ import { Cause, Context, Effect, Exit, Fiber, Layer, Option, Stream } from "effe
 import { Reader, Writer } from "../db/Database.ts"
 import type { QueueOutcome } from "../db/ops.ts"
 import { ChatHub } from "./ChatHub.ts"
+import { Notices } from "./Notices.ts"
 import { type GenerationFailed, type GenerationRequest, Generator, type GeneratorShape } from "./Generator.ts"
 
 /** How often a generating version's text so far is saved. */
@@ -47,6 +48,7 @@ export class Generations extends Context.Service<
       const writer = yield* Writer
       const reader = yield* Reader
       const hub = yield* ChatHub
+      const notices = yield* Notices
       const generator = yield* Generator
       const scope = yield* Effect.scope
       const running = new Map<VersionId, Running>()
@@ -102,6 +104,16 @@ export class Generations extends Context.Service<
           const finished = saved.value
           entry.final = finished.version
           hub.publish(request.chatId, { _tag: "Version", version: finished.version })
+          // A reply that ended on its own is news wherever the user is (DESIGN §10.1).
+          if (status === "complete" || status === "failed") {
+            notices.publish(request.userId, {
+              _tag: "ReplyFinished",
+              chatId: request.chatId,
+              slotId: request.slotId,
+              versionId: request.versionId,
+              status
+            })
+          }
           yield* continueQueue(request.userId, finished)
         })
 

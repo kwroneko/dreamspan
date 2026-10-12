@@ -3,8 +3,9 @@
 // to the chat's subscribers, from every tab of the user, after it's committed.
 import { type AppApi, CurrentUser } from "@rp/shared/api.ts"
 import type { ChatId, EntityId, NewVersion, SlotId } from "@rp/shared/chat.ts"
-import { GenerationUnavailable } from "@rp/shared/chatApi.ts"
+import { BranchSwitch, GenerationUnavailable } from "@rp/shared/chatApi.ts"
 import type { UserId } from "@rp/shared/domain.ts"
+import { composerKey } from "@rp/shared/drafts.ts"
 import { Effect, Option, Stream } from "effect"
 import { ChatHub } from "../chat/ChatHub.ts"
 import { Generator } from "../chat/Generator.ts"
@@ -97,10 +98,20 @@ export const makeChatHandlers = Effect.gen(function* () {
       readonly speakerEntityId: EntityId | null
       readonly replySpeakerEntityId: EntityId | null
       readonly direction: string | null
+      readonly composerRowVersion: number | undefined
     }
   ) =>
     Effect.gen(function* () {
-      const outcome = yield* writer.SendOrQueue({ userId: user, ...params })
+      const { composerRowVersion, ...send } = params
+      const outcome = yield* writer.SendOrQueue({
+        userId: user,
+        ...send,
+        // The composer at the tip the text was typed under (DESIGN §6.2).
+        commitDraft:
+          composerRowVersion === undefined
+            ? null
+            : { key: composerKey(params.chatId, params.parentSlotId), expectedRowVersion: composerRowVersion }
+      })
       if (outcome._tag === "Queued") {
         hub.publish(params.chatId, { _tag: "Queue", queue: outcome.queue })
         return { _tag: "Queued" as const, queued: outcome.queued, queue: outcome.queue }
@@ -150,7 +161,15 @@ export const makeChatHandlers = Effect.gen(function* () {
     ListVersions: ({ slotId }) =>
       Effect.flatMap(userId, (id) => reader.ListVersions({ userId: id, slotId })).pipe(internal("ListVersions")),
 
-    SendMessage: ({ chatId, parentSlotId, branch, content, speakerEntityId, replySpeakerEntityId }) =>
+    SendMessage: ({
+      chatId,
+      parentSlotId,
+      branch,
+      content,
+      speakerEntityId,
+      replySpeakerEntityId,
+      composerRowVersion
+    }) =>
       Effect.flatMap(userId, (id) =>
         sendOrQueue(id, {
           chatId,
@@ -160,13 +179,14 @@ export const makeChatHandlers = Effect.gen(function* () {
           content,
           speakerEntityId: speakerEntityId ?? null,
           replySpeakerEntityId: replySpeakerEntityId ?? null,
-          direction: null
+          direction: null,
+          composerRowVersion
         })
       ).pipe(internal("SendMessage")),
 
     // Once the version is written, its generation starts even if the caller has gone:
     // otherwise it would stay `generating` with nothing behind it.
-    Generate: ({ chatId, parentSlotId, branch, speakerEntityId, direction }) =>
+    Generate: ({ chatId, parentSlotId, branch, speakerEntityId, direction, composerRowVersion }) =>
       Effect.gen(function* () {
         yield* needGenerator
         const id = yield* userId
@@ -178,7 +198,8 @@ export const makeChatHandlers = Effect.gen(function* () {
           content: "",
           speakerEntityId: speakerEntityId ?? null,
           replySpeakerEntityId: null,
-          direction: direction ?? null
+          direction: direction ?? null,
+          composerRowVersion
         })
       }).pipe(Effect.uninterruptible, internal("Generate")),
 
@@ -291,6 +312,22 @@ export const makeChatHandlers = Effect.gen(function* () {
         yield* afterDelete(id, item.origin.chatId as ChatId)
         return item
       }).pipe(Effect.uninterruptible, internal("DeleteVersion")),
+
+    // The tip is read, and the leaf moved there only if the chat hasn't changed since: a
+    // message arriving in between gets the tip read again.
+    SwitchBranch: ({ chatId, slotId, index }) =>
+      Effect.gen(function* () {
+        const id = yield* userId
+        const target = yield* reader.BranchTip({ userId: id, chatId, slotId, index })
+        const chat = yield* writer.SetActiveLeaf({
+          userId: id,
+          chatId,
+          slotId: target.tipSlotId,
+          expectedRowVersion: target.chatRowVersion
+        })
+        hub.publish(chatId, { _tag: "Chat", chat })
+        return new BranchSwitch({ slotId: target.slotId, chat })
+      }).pipe(Effect.retry({ times: 2, while: (error) => error._tag === "StaleWrite" }), internal("SwitchBranch")),
 
     SubscribeChat: ({ chatId }) =>
       Stream.unwrap(

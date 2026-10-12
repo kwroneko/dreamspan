@@ -50,7 +50,9 @@ const screens = [
   ["library", "/library"],
   ["import", "/import"],
   ["st-import", "/import/st"],
-  ["card-editor", () => cardPath]
+  ["card-editor", () => cardPath],
+  ["bin", "/bin"],
+  ["notifications", "/settings/notifications"]
 ] as const
 
 const noSidewaysScroll = async (page: Page) =>

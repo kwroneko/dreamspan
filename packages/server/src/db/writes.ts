@@ -204,7 +204,31 @@ export const makeWriteHandlers = (bin: Bin) =>
             error_json = ${error === null ? null : JSON.stringify(error)}, updated_at = ${Date.now()}
             WHERE id = ${versionId}`
           return toVersion(yield* ownedVersion(userId, versionId, false))
-        }).pipe(transaction("SaveGeneration"))
+        }).pipe(transaction("SaveGeneration")),
+
+      // --- Branches (DESIGN §3.2)
+
+      SetActiveLeaf: ({ userId, chatId, slotId, expectedRowVersion }) =>
+        Effect.gen(function* () {
+          const chat = yield* ownedChat(userId, chatId)
+          if (chat.row_version !== expectedRowVersion) {
+            return yield* new StaleWrite({
+              entity: "chat",
+              id: chatId,
+              expected: expectedRowVersion,
+              actual: chat.row_version
+            })
+          }
+          yield* found(
+            sql`SELECT count(*) AS n FROM slots WHERE id = ${slotId} AND chat_id = ${chatId} AND deleted_at IS NULL`,
+            "slot",
+            slotId
+          )
+          const [row] = yield* sql<ChatRow>`
+            UPDATE chats SET active_leaf_slot_id = ${slotId}, row_version = row_version + 1
+            WHERE id = ${chatId} RETURNING *`
+          return toChat(row!)
+        }).pipe(transaction("SetActiveLeaf"))
     } satisfies Partial<WriteHandlers>
     return handlers
   })

@@ -100,6 +100,13 @@ export class PathEntry extends Schema.Class<PathEntry>("PathEntry")({
   version: Version,
   versionCount: Schema.Int,
   /**
+   * The alternate branches at this position (DESIGN §3.2): the slot and its siblings in
+   * its lane, those a path can reach (live, or deleted alone with replies left), and this
+   * slot's place among them, oldest first.
+   */
+  branchCount: Schema.Int,
+  branchIndex: Schema.Int,
+  /**
    * Whether this slot enters an assembled context. False for excluded slots and
    * for selections that are failed or still empty (DATA-MODEL §15, invariant 2).
    */

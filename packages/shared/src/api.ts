@@ -5,6 +5,9 @@ import { BinItem } from "./bin.ts"
 import { ChatApi } from "./chatApi.ts"
 import { ChatSetupApi } from "./chatSetupApi.ts"
 import { StImportApi } from "./stImportApi.ts"
+import { BinApi } from "./binApi.ts"
+import { ComposerApi } from "./composerApi.ts"
+import { NoticeApi } from "./noticeApi.ts"
 import { User, UserAccount, UserId, UserRole } from "./domain.ts"
 import { EditorApi } from "./editorApi.ts"
 import {
@@ -291,4 +294,8 @@ export class AppApi extends RpcGroup.make(
   .merge(StImportApi)
   // --- The card and preset editors (editorApi.ts).
   .merge(EditorApi)
+  // --- The recycle bin, the composer's drafts, notices (binApi.ts, composerApi.ts, noticeApi.ts).
+  .merge(BinApi)
+  .merge(ComposerApi)
+  .merge(NoticeApi)
   .middleware(Authentication) {}

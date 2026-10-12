@@ -7,6 +7,7 @@ import { Deferred, Effect, Layer, Option, Stream } from "effect"
 import { ChatHub } from "../src/chat/ChatHub.ts"
 import { Generations } from "../src/chat/Generations.ts"
 import { Generator } from "../src/chat/Generator.ts"
+import { Notices } from "../src/chat/Notices.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
 
 describe("Generations and the send queue", () => {
@@ -16,6 +17,7 @@ describe("Generations and the send queue", () => {
       // Reading what the first queue posted waits until the posted reply's own end has published.
       const nextPublished = yield* Deferred.make<void>()
       const fakes = Layer.mergeAll(
+        Notices.layer,
         Layer.succeed(Writer)({
           InterruptGenerations: () => Effect.succeed({ interrupted: 0, queued: 0 }),
           // The posted reply ends, and the queue behind it is empty now.

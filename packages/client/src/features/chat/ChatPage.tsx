@@ -1,7 +1,7 @@
 // A chat (DESIGN §10.1): a URL per chat and per message, the path in a virtualized list
 // anchored at the bottom, and the composer. Nothing here locks while replies generate.
 import { RegistryContext } from "@effect/atom-react"
-import type { ChatId, SlotId } from "@rp/shared/chat.ts"
+import type { ChatId, PathEntry, SlotId } from "@rp/shared/chat.ts"
 import { Link, useNavigate, useParams, useSearch } from "@tanstack/react-router"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import {
@@ -17,8 +17,9 @@ import {
 import { Button } from "../../ui/Button.tsx"
 import { Loading } from "../../ui/Spinner.tsx"
 import { Alert } from "../../ui/Surface.tsx"
+import { useLookingAt } from "../notices.tsx"
 import { useTitle } from "../shell.tsx"
-import { chatTitle } from "./ChatsPage.tsx"
+import { ChatBadges, chatTitle } from "./ChatsPage.tsx"
 import { CastContext, castView } from "./cast.ts"
 import { CastDialog, SettingsDialog } from "./ChatPanels.tsx"
 import { Composer } from "./Composer.tsx"
@@ -31,7 +32,17 @@ const EDGE = 5
 /** Within this many pixels of the end counts as at the end. */
 const END_PX = 48
 
-function MessageList({ session, view, anchor }: { session: ChatSession; view: ChatView; anchor: SlotId | null }) {
+function MessageList({
+  session,
+  view,
+  anchor,
+  onBranch
+}: {
+  session: ChatSession
+  view: ChatView
+  anchor: SlotId | null
+  onBranch: (entry: PathEntry, index: number) => void
+}) {
   // TanStack Virtual's instance is mutable, which React Compiler's memoization can't see.
   "use no memo"
   const parent = useRef<HTMLDivElement>(null)
@@ -167,6 +178,7 @@ function MessageList({ session, view, anchor }: { session: ChatSession; view: Ch
                 session={session}
                 highlighted={entry.slotId === anchor}
                 branchLeaf={view.leafSlotId === view.chat?.activeLeafSlotId ? null : view.leafSlotId}
+                onBranch={onBranch}
               />
             </div>
           )
@@ -179,6 +191,7 @@ function MessageList({ session, view, anchor }: { session: ChatSession; view: Ch
 function OpenChat({ chatId, leaf, slot }: { chatId: ChatId; leaf: SlotId | null; slot: SlotId | null }) {
   const registry = useContext(RegistryContext)
   const [session] = useState(() => new ChatSession(chatId, leaf, registry))
+  useLookingAt(chatId)
   // The slot the chat opened at; a deep link within the open chat moves the window instead.
   const [initialSlot] = useState(slot)
   useEffect(() => {
@@ -198,11 +211,10 @@ function ChatSurface({ session, leaf, slot }: { session: ChatSession; leaf: Slot
   useEffect(() => {
     const before = shown.current
     shown.current = { leaf, slot }
-    if (leaf !== before.leaf) {
-      const current = view.leafSlotId
-      const already = leaf === null ? current !== null && current === view.chat?.activeLeafSlotId : leaf === current
-      if (!already) session.showBranch(leaf, slot)
-    } else if (slot !== before.slot) void session.open(slot)
+    const current = view.leafSlotId
+    const already = leaf === null ? current !== null && current === view.chat?.activeLeafSlotId : leaf === current
+    if (leaf !== before.leaf && !already) session.showBranch(leaf, slot)
+    else if (slot !== before.slot) void session.open(slot)
   }, [session, leaf, slot, view.leafSlotId, view.chat])
   // Sending on another branch makes it the chat's latest: once the window moves on from the
   // URL's leaf to the active one, the URL drops the old leaf.
@@ -221,6 +233,21 @@ function ChatSurface({ session, leaf, slot }: { session: ChatSession; leaf: Slot
   // Rows read the cast from context: it's the same object until the cast changes.
   const cast = useMemo(() => castView(view.cast), [view.cast])
   const [panel, setPanel] = useState<"cast" | "settings" | null>(null)
+  // Another branch (DESIGN §3.2): the chat's leaf moves to it, and the window opens at the
+  // message switched to, which the URL then names.
+  const [branchError, setBranchError] = useState<string | null>(null)
+  const onBranch = useCallback(
+    async (entry: PathEntry, index: number) => {
+      const result = await session.switchBranch(entry, index)
+      if (!result.ok) return setBranchError(result.error.message)
+      setBranchError(null)
+      const sibling = result.value.slotId
+      if (sibling === slot && leaf === null) void session.open(sibling)
+      else void navigate({ to: ".", search: { slot: sibling } })
+    },
+    [session, navigate, slot, leaf]
+  )
+  const switchBranch = useCallback((entry: PathEntry, index: number) => void onBranch(entry, index), [onBranch])
   return (
     <CastContext value={cast}>
       <header className="mx-auto flex w-full max-w-3xl flex-wrap items-center gap-x-3 gap-y-1 pb-2">
@@ -228,6 +255,7 @@ function ChatSurface({ session, leaf, slot }: { session: ChatSession; leaf: Slot
           ← Chats
         </Link>
         <h1 className="min-w-0 flex-1 truncate text-lg font-semibold">{view.chat ? chatTitle(view.chat) : "Chat"}</h1>
+        {view.chat && <ChatBadges chat={view.chat} />}
         {view.leafSlotId !== null && view.chat !== null && view.leafSlotId !== view.chat.activeLeafSlotId && (
           <Link to="." search={{}} className="text-sm text-accent hover:underline">
             Back to the latest branch
@@ -249,15 +277,15 @@ function ChatSurface({ session, leaf, slot }: { session: ChatSession; leaf: Slot
       {panel === "settings" && (
         <SettingsDialog session={session} open onOpenChange={(open) => setPanel(open ? "settings" : null)} />
       )}
-      {view.error && (
+      {(view.error ?? branchError) && (
         <div className="mx-auto w-full max-w-3xl">
-          <Alert tone="danger">{view.error}</Alert>
+          <Alert tone="danger">{view.error ?? branchError}</Alert>
         </div>
       )}
       {view.loading ? (
         <Loading label="Loading the chat…" />
       ) : (
-        <MessageList session={session} view={view} anchor={slot} />
+        <MessageList session={session} view={view} anchor={slot} onBranch={switchBranch} />
       )}
       <Composer session={session} view={view} />
     </CastContext>
