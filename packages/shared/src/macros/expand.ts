@@ -352,13 +352,22 @@ interface Run {
   readonly templates: Map<string, string>
   readonly variables: { readonly local: VariableScope; readonly global: VariableScope }
   readonly limits: MacroLimits
+  readonly sharedWork?: { remaining: number }
   depth: number
   expansions: number
   work: number
 }
 
 const charge = (run: Run, size: number) => {
-  run.work += Math.max(0, size)
+  size = Math.max(0, size)
+  if (run.sharedWork) {
+    if (size > run.sharedWork.remaining) {
+      run.sharedWork.remaining = 0
+      throw new LimitReached("work")
+    }
+    run.sharedWork.remaining -= size
+  }
+  run.work += size
   if (run.work > run.limits.maxWork) throw new LimitReached("work")
 }
 
@@ -388,6 +397,7 @@ class Expansion {
   constructor(run: Run, context: MacroContext, content: string, scope: string) {
     this.run = run
     this.context = context
+    if (run.sharedWork) charge(run, content.length)
     this.contentHash = stringHash(content)
     this.scope = scope
   }
@@ -681,6 +691,8 @@ export interface ExpandRequest {
   /** The source of new draws, in [0, 1). */
   readonly random: () => number
   readonly limits?: Partial<MacroLimits>
+  /** Cumulative work allowance across expansions; charged before allocation by handlers. */
+  readonly sharedWork?: { remaining: number }
   /** Observes variable reads, including nested templates and shorthand operations. */
   readonly onVariableRead?: () => void
 }
@@ -758,6 +770,7 @@ const evaluate = (
     templates: new Map(),
     variables: { local: vars(local, "local"), global: vars(global, "global") },
     limits: { ...DEFAULT_MACRO_LIMITS, ...options.limits },
+    ...(options.sharedWork ? { sharedWork: options.sharedWork } : {}),
     depth: 0,
     expansions: 0,
     work: 0

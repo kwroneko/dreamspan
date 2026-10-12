@@ -1,6 +1,7 @@
 // Lorebook reads and keyword activation, in the reader worker's registered pipeline.
 import { Effect } from "effect"
 import { matchLorebooks } from "./lorebook.ts"
+import { loreAllowance } from "./budget.ts"
 import { estimateTokens } from "./st.ts"
 import { cardFields } from "./macros.ts"
 import { AssemblySources, type AssemblerStage, need } from "./pipeline.ts"
@@ -24,9 +25,15 @@ export const lorebooksStage: AssemblerStage = {
     Effect.gen(function* () {
       const sources = yield* AssemblySources
       const cast = need(assembly, "cast")
-      const attached = yield* sources.lorebooks(need(assembly, "state").lorebooks)
+      const state = need(assembly, "state")
+      const attached = yield* sources.lorebooks(state.lorebooks)
       const embedded: Array<LorebookInput> = [...cast.characters, ...cast.personas].flatMap((card) =>
-        card.doc.character_book
+        card.doc.character_book &&
+        !attached.some(
+          (book) =>
+            state.lorebookBindings[card.entity] === book.id ||
+            (state.lorebookBindings[card.entity] === undefined && card.doc.extensions.world === book.doc.name)
+        )
           ? [
               {
                 id: `card:${card.entity}`,
@@ -39,13 +46,14 @@ export const lorebooksStage: AssemblerStage = {
           : []
       )
       assembly.lorebooks = [...attached, ...embedded]
+      assembly.loreMessageCount = assembly.lorebooks.length
+        ? yield* sources.messageCount(need(assembly, "target").parentSlotId)
+        : 0
       assembly.loreScanDepth = assembly.lorebooks.reduce(
         (depth, book) =>
           book.doc.entries.reduce(
             (depth, entry) =>
-              entry.enabled
-                ? Math.min(1000, Math.max(depth, entry.delay ? 1000 : (entry.scan_depth ?? book.doc.scan_depth ?? 2)))
-                : depth,
+              entry.enabled ? Math.min(1000, Math.max(depth, entry.scan_depth ?? book.doc.scan_depth ?? 2)) : depth,
             depth
           ),
         0
@@ -65,10 +73,13 @@ export const loreActivationStage: AssemblerStage = {
       }
       const env = need(assembly, "macros")
       const cast = need(assembly, "cast")
+      const sharedWork = { remaining: 4_000_000 }
+      const optionsFor = (book: LorebookInput) => ({
+        sharedWork,
+        ...(book.card ? { names: { char: book.card.doc.name }, card: cardFields(book.card, cast.personas[0]) } : {})
+      })
       const books = inputs.map((book) => {
-        const options = book.card
-          ? { names: { char: book.card.doc.name }, card: cardFields(book.card, cast.personas[0]) }
-          : {}
+        const options = optionsFor(book)
         return {
           id: book.id,
           document: {
@@ -84,8 +95,7 @@ export const loreActivationStage: AssemblerStage = {
               return {
                 ...entry,
                 keys: entry.keys.map((key, i) => env.preview(`${id}:key:${i}`, key, options)),
-                secondary_keys: entry.secondary_keys.map((key, i) => env.preview(`${id}:secondary:${i}`, key, options)),
-                content: env.preview(`${id}:content`, entry.content, options)
+                secondary_keys: entry.secondary_keys.map((key, i) => env.preview(`${id}:secondary:${i}`, key, options))
               }
             })
           }
@@ -98,12 +108,10 @@ export const loreActivationStage: AssemblerStage = {
           return `${p.name}: ${text}`
         })
       const char = cast.characters[0]
-      const preview = (field: string, text: string) => env.preview(`lore:scan:${field}`, text)
-      const samplers = need(assembly, "preset").doc.samplers
-      const context =
-        Math.min(samplers.openai_max_context, assembly.model?.context ?? Infinity) - samplers.openai_max_tokens
+      const preview = (field: string, text: string) => env.preview(`lore:scan:${field}`, text, { sharedWork })
       const scan = {
         messages,
+        messageCount: need(assembly, "loreMessageCount"),
         trigger: cast.type,
         descriptions: {
           persona_description: preview("persona", cast.personas[0]?.doc.description ?? ""),
@@ -118,12 +126,25 @@ export const loreActivationStage: AssemblerStage = {
           )
         }
       }
+      const beforeIssues = assembly.issues.length
+      const beforeFrozen = new Set(Object.keys(assembly.frozen))
+      const fallback = assembly.request.loreFallback
+      if (fallback?.previewEffects) {
+        Object.assign(assembly.frozen, fallback.previewEffects.frozen)
+        assembly.issues.push(...fallback.previewEffects.issues)
+      }
       const result =
         assembly.request.loreFallback ??
         matchLorebooks(
           books,
           scan,
-          { budget: Math.max(1, Math.round(context * 0.25)), scanDepth: 2, wholeWords: true, recursive: true },
+          {
+            budget: loreAllowance(assembly),
+            ...(!need(assembly, "mode").st ? { hardBudget: loreAllowance(assembly) } : {}),
+            scanDepth: 2,
+            wholeWords: true,
+            recursive: true
+          },
           randomFor(
             JSON.stringify([
               need(assembly, "target"),
@@ -133,9 +154,31 @@ export const loreActivationStage: AssemblerStage = {
               need(assembly, "history").map((e) => [e.versionId, e.content])
             ])
           ),
-          estimateTokens
+          estimateTokens,
+          ({ book, entry }) => {
+            if (!sharedWork.remaining) return undefined
+            const text = env.preview(
+              `lore:${book}:${entry.uid}:content`,
+              entry.content,
+              optionsFor(inputs.find((b) => b.id === book)!)
+            )
+            return sharedWork.remaining ? text : undefined
+          }
         )
-      if (!result.replayable) assembly.loreFallback = result
+      if (!fallback && !sharedWork.remaining)
+        assembly.issues.push({
+          kind: "lorebook_issue",
+          message:
+            "Lorebook preview work limit reached (4,000,000 units shared by keys, descriptions and candidate content)."
+        })
+      if (!result.replayable)
+        assembly.loreFallback = fallback ?? {
+          ...result,
+          previewEffects: {
+            frozen: Object.fromEntries(Object.entries(assembly.frozen).filter(([key]) => !beforeFrozen.has(key))),
+            issues: assembly.issues.slice(beforeIssues)
+          }
+        }
       const record = (book: string, uid: number, activation: LoreRecord, text: string) => {
         const input = inputs.find((b) => b.id === book)!
         return env.verbatim(
@@ -158,7 +201,8 @@ export const loreActivationStage: AssemblerStage = {
       if (result.skipped.some((s) => s.reason === "budget"))
         assembly.issues.push({
           kind: "lorebook_issue",
-          message: "Lorebook token allowance reached; entries were left out."
+          message:
+            "Lorebook token allowance reached; entries were left out. In our layouts this also cuts ignore_budget overflow."
         })
       return assembly
     })

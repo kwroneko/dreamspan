@@ -1202,6 +1202,141 @@ describe("lorebook assembly", () => {
       events: [at(null, { key: "lorebook.attach", value: { ref: "book" as never } })],
       ...fields
     })
+  it("does not preview content of rejected candidates", async () => {
+    const doc = loreBook([
+      loreEntry({ keys: ["unsaid"], content: "{{space::5000000}}{{random::a::b}}" }),
+      loreEntry({ keys: ["flooded"], secondary_keys: ["unsaid"], content: "{{space::5000000}}" }, 1),
+      loreEntry({ constant: true, probability: 0, content: "{{space::5000000}}" }, 2)
+    ]).document
+    const result = await assembled(fixture({ lorebooks: [{ ...attached, doc }] }))
+    expect(result.issues).toEqual([])
+    expect(Object.keys(result.frozen).filter((key) => key.startsWith("lore:"))).toEqual([])
+  })
+  it("bounds cumulative preview work, including ignore_budget candidates", async () => {
+    const doc = loreBook(
+      Array.from({ length: 100 }, (_, uid) =>
+        loreEntry({ constant: true, ignore_budget: true, content: "{{space::200000}}" }, uid)
+      )
+    ).document
+    const result = await assembled(
+      fixture({ lorebooks: [{ ...attached, doc }], preset: preset({ openai_max_context: 10000000 }) })
+    )
+    expect(result.issues.some((i) => i.message.includes("preview") && i.message.includes("limit"))).toBe(true)
+    expect(
+      result.pieces.filter((p) => p.source.kind === "lorebook").reduce((n, p) => n + p.text.length, 0)
+    ).toBeLessThan(4000000)
+  })
+  it.each([2, 20])(
+    "reserves identical history and examples space with %s messages regardless of tail activation",
+    async (count) => {
+      const doc = loreBook([
+        loreEntry({ constant: true, probability: 50, content: "LORE " + "l".repeat(290) })
+      ]).document
+      const f = fixture({
+        lorebooks: [{ ...attached, doc }],
+        events: [...fixture().events!, at(null, { key: "layout.cards", value: "concat" })],
+        cards: [
+          { entity: "mira", doc: { ...mira, mes_example: "<START>\n{{user}}: EXAMPLE?\n{{char}}: " + "e".repeat(200) } }
+        ],
+        messages: Array.from({ length: count }, (_, i) => ({
+          side: i % 2 ? "user" : "assistant",
+          content: `MESSAGE_${i} ` + "x".repeat(140)
+        })),
+        preset: preset({ openai_max_context: 600, openai_max_tokens: 50 })
+      })
+      let on: ContextSnapshot | undefined
+      let off: ContextSnapshot | undefined
+      for (let now = 1; now <= 40 && !(on && off); now++) {
+        const result = await assembled({ ...f, now })
+        if (contents(result).some((text) => text.includes("LORE"))) on = result
+        else off = result
+      }
+      expect(on).toBeDefined()
+      expect(off).toBeDefined()
+      const history = (s: ContextSnapshot) => s.request.messages.filter((m) => m.content.includes("MESSAGE_"))
+      expect(history(on!)).toEqual(history(off!))
+      expect(on!.request.messages.filter((m) => m.name?.startsWith("example_"))).toEqual(
+        off!.request.messages.filter((m) => m.name?.startsWith("example_"))
+      )
+      expect(on!.request.breakpoints).toEqual(off!.request.breakpoints)
+    }
+  )
+  it("cuts ignore_budget overflow from our tail allowance without dropping history", async () => {
+    const doc = loreBook([
+      loreEntry({ constant: true, ignore_budget: true, content: "OVERFLOW".repeat(1000) })
+    ]).document
+    const result = await assembled(
+      fixture({
+        lorebooks: [{ ...attached, doc }],
+        events: [...fixture().events!, at(null, { key: "layout.cards", value: "concat" })],
+        preset: preset({ openai_max_context: 600, openai_max_tokens: 50 })
+      })
+    )
+    expect(contents(result).join("\n")).not.toContain("OVERFLOW")
+    expect(contents(result).join("\n")).toContain("The road flooded.")
+    expect(result.issues.some((i) => i.message.includes("allowance"))).toBe(true)
+  })
+  it("uses the attached primary book once and the embedded book only as fallback", async () => {
+    const doc = loreBook([loreEntry({ constant: true, content: "PRIMARY_LORE" })], {}, "Primary world").document
+    const f = fixture({
+      lorebooks: [{ ...attached, doc }],
+      cards: [{ entity: "mira", doc: { ...mira, character_book: doc, extensions: { world: "Primary world" } } }]
+    })
+    const result = await assembled(f)
+    expect(
+      contents(result)
+        .join("\n")
+        .match(/PRIMARY_LORE/g)
+    ).toHaveLength(1)
+    expect(result.pieces.filter((p) => p.source.kind === "lorebook").map((p) => p.source)).toEqual([
+      expect.objectContaining({ book: "book", revision: "book-rev" })
+    ])
+    expect(
+      contents(await assembled({ ...f, lorebooks: [] }))
+        .join("\n")
+        .match(/PRIMARY_LORE/g)
+    ).toHaveLength(1)
+  })
+  it("counts message delays across the path independently of the scan window", async () => {
+    const doc = loreBook([loreEntry({ constant: true, delay: 1100, content: "DELAY_LORE" })]).document
+    const f = fixture({
+      lorebooks: [{ ...attached, doc }],
+      messages: Array.from({ length: 1200 }, () => ({ side: "user", content: "x".repeat(400) }))
+    })
+    expect(contents(await assembled(f)).join("\n")).toContain("DELAY_LORE")
+    expect(contents(await assembled({ ...f, messages: f.messages.slice(0, 1000) })).join("\n")).not.toContain(
+      "DELAY_LORE"
+    )
+  })
+  it.each(["em_top", "em_bottom"] as const)("orders multiple %s examples as ST does", async (position) => {
+    const doc = loreBook(
+      [100, 200].map((order, uid) =>
+        loreEntry(
+          {
+            constant: true,
+            position,
+            order,
+            content: `<START>\n{{user}}: EXAMPLE_${order}?\n{{char}}: EXAMPLE_${order}.`
+          },
+          uid
+        )
+      )
+    ).document
+    const result = await assembled(fixture({ lorebooks: [{ ...attached, doc }] }))
+    expect(result.request.messages.filter((m) => m.content.includes("EXAMPLE_")).map((m) => m.content)).toEqual(
+      (position === "em_top" ? [200, 100] : [100, 200]).flatMap((order) => [`EXAMPLE_${order}?`, `EXAMPLE_${order}.`])
+    )
+  })
+  it("omits wi_format for empty joined lore while retaining activation provenance", async () => {
+    const doc = loreBook([loreEntry({ constant: true, content: "" })]).document
+    const result = await assembled(
+      fixture({ lorebooks: [{ ...attached, doc }], preset: preset({ wi_format: "[LORE {0}]" }) })
+    )
+    expect(contents(result).join("\n")).not.toContain("[LORE")
+    expect(result.pieces.find((p) => p.source.kind === "lorebook")?.source).toMatchObject({
+      activation: { status: "activated" }
+    })
+  })
   it("places ST markers and depth entries, records keys and skips, and surfaces refused regex", async () => {
     const result = await assembled(fixture({ preset: preset({ wi_format: "[{{char}}] {0}" }) }))
     expect(contents(result).join("\n")).toContain("[Mira] The levee is guarded.")
@@ -1304,7 +1439,14 @@ describe("lorebook assembly", () => {
       () => 0.5,
       (text) => Math.ceil(text.length / 4)
     )
-    const fallback = { ...outcome, replayable: false }
+    const fallback = {
+      ...outcome,
+      replayable: false,
+      previewEffects: {
+        frozen: { "lore:book:0:content": { "synthetic-draw": "a" } },
+        issues: [{ kind: "macro_limit" as const, message: "A captured preview issue." }]
+      }
+    }
     const first = await assembled(f, { loreFallback: fallback, random: () => 0.1 })
     expect(first.effects).toEqual([])
     expect(await assembled(f, { loreFallback: fallback, frozen: first.frozen, random: () => 0.9 })).toEqual(first)

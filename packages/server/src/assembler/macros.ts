@@ -14,6 +14,7 @@ export interface Names {
 }
 
 interface ExpandOptions {
+  readonly sharedWork?: { remaining: number }
   /** Bindings for this piece only, such as the tail directive's speaker. */
   readonly names?: Partial<Names>
   /** `{{original}}`: the text a card's prompt override replaces. */
@@ -136,11 +137,14 @@ export const makeMacroEnvironment = (
     context: MacroContext,
     /** Where its variable writes go: into the context's, or to the caller. */
     effects: "context" | ((effects: ReadonlyArray<VariableEffect>) => void),
-    frozen?: Readonly<Record<string, string>>
+    frozen?: Readonly<Record<string, string>>,
+    sharedWork?: { remaining: number }
   ) => {
+    if (sharedWork?.remaining === 0) return { text: "", readsVariables: false }
     let readsVariables = false
     const result = expand({
       text,
+      ...(sharedWork ? { sharedWork } : {}),
       origin,
       purpose: "assembly",
       registry: request.macros,
@@ -183,7 +187,9 @@ export const makeMacroEnvironment = (
           names: { ...setup.names, ...options.names },
           variables: { local, global }
         },
-        () => {}
+        () => {},
+        undefined,
+        options.sharedWork
       ).text,
     piece: (id, source, text, options = {}) => {
       const { card, ...rest } = base

@@ -198,6 +198,7 @@ export const sqlSources = (
     cards: [] as Array<SourcePins["cards"][number]>,
     lorebooks: [] as Array<NonNullable<SourcePins["lorebooks"]>[number]>,
     notes: [] as Array<SourcePins["notes"][number]>,
+    messageCount: [] as Array<NonNullable<SourcePins["messageCount"]>[number]>,
     userMessages: [] as Array<NonNullable<SourcePins["userMessages"]>[number]>
   }
 
@@ -392,6 +393,22 @@ export const sqlSources = (
           )
         ),
     onPath: history.onPath,
+
+    messageCount: (leaf) =>
+      Effect.gen(function* () {
+        const [row] = yield* sql<{ n: number }>`
+        WITH RECURSIVE path(id) AS (
+          SELECT id FROM slots WHERE id = ${leaf} AND chat_id = ${chatId} AND ${owned}
+          UNION ALL
+          SELECT s.parent_slot_id FROM slots s JOIN path p ON s.id = p.id WHERE s.parent_slot_id IS NOT NULL
+        )
+        SELECT count(*) AS n FROM path JOIN slots s ON s.id = path.id
+        JOIN versions v ON v.id = s.selected_version_id
+        WHERE s.deleted_at IS NULL AND s.context_excluded = 0 AND v.status <> 'failed' AND length(v.content) > 0`
+        const count = row?.n ?? 0
+        pins.messageCount.push({ key: keyOf(leaf), count })
+        return count
+      }),
 
     // A message's side as the history reads it (`sideOf` in the stages): its speaker's, when
     // that's one of the cast, else its first version's writer.
@@ -608,6 +625,8 @@ const replaySources = (
 
     noteHistory: live.noteHistory,
     onPath: live.onPath,
+    messageCount: (leaf) =>
+      Effect.map(pinned(pins.messageCount ?? [], keyOf(leaf), "the path message count"), ({ count }) => count),
     // Which messages are the user's can change (another version selected): the count is pinned.
     userMessages: (leaf, personas, characters) =>
       Effect.map(

@@ -17,6 +17,8 @@ type Description =
 interface Scan {
   /** Prepared prompt text, including names if wanted, newest first. */
   readonly messages: ReadonlyArray<string>
+  /** Eligible messages on the full path, independently of the scan window. */
+  readonly messageCount?: number
   readonly descriptions?: Partial<Record<Description, string>>
   readonly injections?: ReadonlyArray<{ readonly text: string; readonly scan: boolean }>
   readonly trigger?: string
@@ -39,6 +41,8 @@ const workLimits = {
 
 interface Settings {
   readonly budget: number
+  /** Our layouts reserve this fixed tail allowance, including message overhead; ignore_budget cannot bypass it. */
+  readonly hardBudget?: number
   readonly scanDepth?: number
   readonly caseSensitive?: boolean
   readonly wholeWords?: boolean
@@ -167,14 +171,16 @@ const secondaryPasses = (logic: SelectiveLogic, matches: ReadonlyArray<boolean>)
   }
 }
 
-/** No storage or pipeline work. Entries, keys, descriptions and content are already macro-resolved. */
+/** Pure activation. Keys/descriptions are resolved; content can be previewed lazily on admission. */
 export const matchLorebooks = (
   books: ReadonlyArray<Book>,
   scan: Scan,
   settings: Settings,
   random: () => number,
-  countTokens: (text: string) => number
+  countTokens: (text: string) => number,
+  previewContent?: (source: Source) => string | undefined
 ) => {
+  const previews = new Map<Source, string | undefined>()
   const sources = books
     .flatMap((book) => book.document.entries.map((entry) => ({ book: book.id, entry, document: book.document })))
     .sort((a, b) => b.entry.order - a.entry.order)
@@ -428,6 +434,7 @@ export const matchLorebooks = (
   )
   const admittedGroups = new Set<string>()
   const maxSteps = Math.max(1, Math.min(64, settings.maxSteps ?? 16))
+  let hardContent = ""
   let charged = ""
   const bookCharged = new Map<string, string>()
   let overflow = false
@@ -463,7 +470,7 @@ export const matchLorebooks = (
           skip(source, "trigger")
           continue
         }
-        if (entry.delay !== null && entry.delay > scan.messages.length) {
+        if (entry.delay !== null && entry.delay > (scan.messageCount ?? scan.messages.length)) {
           skip(source, "delay")
           continue
         }
@@ -559,7 +566,7 @@ export const matchLorebooks = (
       const bookChargedTokens = new Map<string, number>()
       for (const { source, why } of candidates) {
         currentSource = source
-        const entry = source.entry
+        let entry = source.entry
         if (losers.has(source)) {
           skip(source, "group")
           continue
@@ -573,7 +580,22 @@ export const matchLorebooks = (
           failedProbability.add(source)
           continue
         }
+        if (previewContent) {
+          if (!previews.has(source)) previews.set(source, previewContent(source))
+          const content = previews.get(source)
+          if (content === undefined) {
+            skip(source, "work_limit")
+            issue(source, "work_limit", "Lorebook preview work limit reached; candidate content was left out.")
+            continue
+          }
+          entry = { ...entry, content }
+        }
         charge(source, "scannedCharacters", entry.content.length + 1)
+        const nextHard = entry.content ? hardContent + (hardContent ? "\n" : "") + entry.content : hardContent
+        if (settings.hardBudget !== undefined && nextHard && tokens(source, nextHard) + 3 > settings.hardBudget) {
+          skip(source, "budget")
+          continue
+        }
         const forBook = (newBookContent.get(source.book) ?? "") + entry.content + "\n"
         const bookBudget = source.document.token_budget
         if (!entry.ignore_budget && bookBudget !== null && bookBudget > 0) {
@@ -598,6 +620,7 @@ export const matchLorebooks = (
             continue
           }
         }
+        hardContent = nextHard
         activated.set(source, { book: source.book, entry, step, why })
         skipped.delete(source)
         if (entry.group) admittedGroups.add(entry.group)

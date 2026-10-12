@@ -190,6 +190,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
       assert.deepStrictEqual(main.playedByMe, [sam])
       assert.deepStrictEqual(main.vars, { mood: "calm", count: 3 })
       assert.lengthOf(main.lorebooks, 1)
+      assert.strictEqual(main.lorebookBindings[aliceCard], main.lorebooks[0])
       const notes = noteDocs(alice)
       const mainNote = notes.find((n) => n.doc.content === "Keep it gentle.")!
       assert.deepStrictEqual(main.activeNotes, [mainNote.id])

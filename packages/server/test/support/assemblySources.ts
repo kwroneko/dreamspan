@@ -121,6 +121,11 @@ const fixtureSources = (fixture: AssemblyFixture) => {
         const end = leaf === null ? -1 : at(leaf)
         return new Set(slots.filter((slot) => at(slot) !== -1 && at(slot) <= end))
       }),
+    messageCount: (leaf) =>
+      Effect.succeed(
+        entries.slice(0, leaf === null ? 0 : entries.findIndex((e) => e.slotId === leaf) + 1).filter((e) => e.inContext)
+          .length
+      ),
     userMessages: (leaf, personas, characters) =>
       Effect.sync(() => {
         const end = leaf === null ? -1 : entries.findIndex((e) => e.slotId === leaf)

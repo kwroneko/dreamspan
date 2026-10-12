@@ -50,6 +50,7 @@ const oracle: { readonly [K in StateEventData["key"]]?: Expected } = {
   "preset.binding": { value: (t) => ({ ref: t.preset.ref, revision: t.preset.revision }), belongs: ["revision"] },
   "preset_overlay.binding": { value: (t) => ({ overlay: t.preset_overlay.entity, on: true }) },
   "model.binding": { value: (t) => ({ connection: t.connection, model: t.model }), belongs: ["model"] },
+  "lorebook.binding": { value: (t) => ({ entity: t.card.entity, ref: t.lorebook.ref }) },
   "lorebook.attach": { value: (t) => ({ ref: t.lorebook.ref }) },
   "lorebook.detach": { value: (t) => ({ ref: t.lorebook.ref }), removes: true },
   "author_note.set": { value: (t) => ({ note: t.note.entity }) }

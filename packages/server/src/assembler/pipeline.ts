@@ -68,6 +68,7 @@ export class AssemblySources extends Context.Service<
       entities: ReadonlyArray<string>,
       bindings: Readonly<Record<string, Binding>>
     ) => Effect.Effect<ReadonlyArray<CardInput>, SourceError>
+    readonly messageCount: (leaf: string | null) => Effect.Effect<number, SourceError>
     readonly lorebooks: (refs: ReadonlyArray<string>) => Effect.Effect<ReadonlyArray<LorebookInput>, SourceError>
     /** The notes these cards own, at the revision `bound` pins or their head. */
     readonly notes: (
@@ -169,6 +170,7 @@ export interface Assembly {
   loreFallback?: ContextSnapshot["loreFallback"]
   lorebooks?: ReadonlyArray<LorebookInput>
   loreScanDepth?: number
+  loreMessageCount?: number
   lore?: ReadonlyArray<{ readonly entry: import("@rp/shared/docs/lorebook.ts").LorebookEntry; readonly piece: number }>
   notes?: ReadonlyArray<NoteInput>
   skippedNotes?: ReadonlyArray<NoteInput>

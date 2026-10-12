@@ -35,6 +35,7 @@ export const StateEventData = Schema.Union([
   event("orchestration.mode", Schema.Struct({ mode: Schema.String, config: Schema.optional(Schema.Unknown) })),
   event("output.contract", Schema.Literals(["final_text", "send_message", "both"])),
   event("rollout.continuity", Schema.Literals(["fork", "resume_previous"])),
+  event("lorebook.binding", Schema.Struct({ entity: EntityId, ref: Schema.NullOr(RefId) })),
   event("lorebook.attach", Schema.Struct({ ref: RefId })),
   event("lorebook.detach", Schema.Struct({ ref: RefId })),
   event("var.set", Schema.Struct({ name: Schema.String, value: Schema.Unknown })),
@@ -106,6 +107,7 @@ export const stateKeyIds: { readonly [K in StateEventData["key"]]: StateKeyIds<V
   "orchestration.mode": { ids: {} },
   "output.contract": { ids: {} },
   "rollout.continuity": { ids: {} },
+  "lorebook.binding": { ids: { entity: { table: "entity", kind: "card" }, ref: { table: "ref", kind: "lorebook" } } },
   "lorebook.attach": { ids: { ref: { table: "ref", kind: "lorebook" } } },
   "lorebook.detach": { ids: { ref: { table: "ref", kind: "lorebook" } }, removes: true },
   "var.set": { ids: {} },
@@ -224,6 +226,7 @@ export interface ChatState {
   readonly orchestration: { readonly mode: string; readonly config?: unknown } | null
   readonly outputContract: "final_text" | "send_message" | "both" | null
   readonly rolloutContinuity: "fork" | "resume_previous" | null
+  readonly lorebookBindings: Readonly<Record<string, string | null>>
   readonly lorebooks: ReadonlyArray<string>
   readonly vars: Readonly<Record<string, unknown>>
   readonly authorNote: string | null
@@ -245,6 +248,7 @@ const emptyChatState: ChatState = {
   orchestration: null,
   outputContract: null,
   rolloutContinuity: null,
+  lorebookBindings: {},
   lorebooks: [],
   vars: {},
   authorNote: null
@@ -306,6 +310,8 @@ const apply = (state: ChatState, { data, scope }: FoldableEvent): ChatState => {
       return { ...state, outputContract: data.value }
     case "rollout.continuity":
       return { ...state, rolloutContinuity: data.value }
+    case "lorebook.binding":
+      return { ...state, lorebookBindings: { ...state.lorebookBindings, [data.value.entity]: data.value.ref } }
     case "lorebook.attach":
       return { ...state, lorebooks: add(state.lorebooks, data.value.ref) }
     case "lorebook.detach":

@@ -1,3 +1,4 @@
+import { contextBudget, loreAllowance } from "./budget.ts"
 // The built-in assembler stages, in registration order (ARCHITECTURE §15 lists them).
 import type { ChatMessage } from "@rp/shared/macros/context.ts"
 import type { CardFields } from "@rp/shared/macros/context.ts"
@@ -94,14 +95,6 @@ const sideOf = (entry: HistoryEntry, cast: Cast) => {
 /** The card a message belongs to: its recorded speaker, else the first of its side. */
 const speakerOf = (entry: HistoryEntry, cast: Cast): CardInput | undefined =>
   recorded(entry, cast) ?? (entry.side === "user" ? cast.personas[0] : cast.characters[0])
-
-/** What the preset's budget allows: its context size, within the model's, less its response length. */
-const contextBudget = (assembly: Assembly) => {
-  const { samplers } = need(assembly, "preset").doc
-  const model = assembly.model
-  const context = Math.min(samplers.openai_max_context, model?.context ?? Number.POSITIVE_INFINITY)
-  return context - samplers.openai_max_tokens
-}
 
 const pathStage: AssemblerStage = {
   id: "path",
@@ -983,6 +976,7 @@ const composeStage = sync("compose", (assembly) => {
     if (!entries.length) return null
     const parts = entries.map((e) => e.piece)
     let text = parts.map(env.text).filter(Boolean).join("\n")
+    if (!text) return null
     if (format && utility.wi_format) {
       const wrapper = presetText(assembly, `utility.wi_format:${id}`, utility.wi_format)
       text = wrapper.text.replace(/\{0\}/g, () => text)
@@ -1011,8 +1005,10 @@ const composeStage = sync("compose", (assembly) => {
       true
     )
   )
+  let loreCost = 0
   if (!mode.st) {
     const block = loreBlock("tail", lore)
+    loreCost = tokensOf({ content: block?.text ?? "" })
     // Always reserve the volatility boundary, including when activation produced nothing.
     control.unshift({
       role: "system",
@@ -1022,7 +1018,7 @@ const composeStage = sync("compose", (assembly) => {
     })
   }
   const loreExamples = (position: "em_top" | "em_bottom") =>
-    stLore
+    (position === "em_top" ? stLore.toReversed() : stLore)
       .filter((e) => e.entry.position === position)
       .flatMap((e) =>
         exampleBlocks(env.text(e.piece)).map((block) =>
@@ -1205,7 +1201,10 @@ const composeStage = sync("compose", (assembly) => {
     sendIfEmpty: cast.type === "normal" ? null : sendIfEmpty,
     control,
     // The prefill is sent after everything else, but it's context all the same.
-    budget: contextBudget(assembly) - (assembly.prefill ? tokensOf({ content: assembly.prefill }) : 0)
+    budget:
+      contextBudget(assembly) -
+      (assembly.prefill ? tokensOf({ content: assembly.prefill }) : 0) -
+      (!mode.st && assembly.lorebooks?.length ? loreAllowance(assembly) - loreCost : 0)
   })
   assembly.composition = composition
   if (composition.historySent < composition.historyTotal || (assembly.historyOmitted ?? 0) > 0) {

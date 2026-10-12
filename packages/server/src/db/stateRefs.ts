@@ -43,12 +43,12 @@ const scopeReferences = (scope: FoldableEvent["scope"]) =>
 
 const referencesOf = (declared: Declared, of: unknown): ReadonlyArray<Reference> => {
   // A value that isn't an object declares no fields, so this is only read for objects.
-  const value = of as Readonly<Record<string, string | ReadonlyArray<string> | undefined>>
+  const value = of as Readonly<Record<string, string | ReadonlyArray<string> | null | undefined>>
   const field = (name: string | undefined) => (name === undefined ? undefined : (value[name] as string | undefined))
   return Object.entries(declared.ids).flatMap(([name, declaration]) => {
     if (declaration === undefined) return []
     const held = value[name]
-    const ids = held === undefined ? [] : typeof held === "string" ? [held] : held
+    const ids = held == null ? [] : typeof held === "string" ? [held] : held
     return ids.map((id): Reference => {
       switch (declaration.table) {
         case "entity":

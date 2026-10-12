@@ -53,6 +53,7 @@ export interface FolderContext {
 export interface ChatState {
   readonly participants: ReadonlyArray<string>
   readonly lorebooks: ReadonlyArray<string>
+  readonly lorebookBindings?: Readonly<Record<string, string>>
   readonly played: ReadonlyArray<string>
   /** Each variable's value, hashed. */
   readonly vars: Readonly<Record<string, string>>
@@ -164,6 +165,13 @@ const membership = (folder: FolderContext, link: Link, header: StChatHeader | nu
   const participants: Array<string> = []
   const absent: Array<string> = []
   const worlds: Array<string> = []
+  const lorebookBindings: Record<string, string> = {}
+  const primary = (card: CardInfo) => {
+    if (!card.world) return
+    worlds.push(card.world)
+    const ref = folder.worlds.get(card.world)
+    if (ref) lorebookBindings[card.entityId] = ref
+  }
   const group = link.group
   if (group !== null) {
     for (const member of group.members) {
@@ -171,11 +179,11 @@ const membership = (folder: FolderContext, link: Link, header: StChatHeader | nu
       if (card === undefined) continue
       participants.push(card.entityId)
       if (group.disabledMembers.includes(member)) absent.push(card.entityId)
-      if (card.world) worlds.push(card.world)
+      primary(card)
     }
   } else if (link.card !== null) {
     participants.push(link.card.entityId)
-    if (link.card.world) worlds.push(link.card.world)
+    primary(link.card)
   }
   // ST's extra books for each character (charLore), by card file.
   const files = group?.members.map(stem) ?? (link.card?.file ? [link.card.file] : [])
@@ -197,6 +205,7 @@ const membership = (folder: FolderContext, link: Link, header: StChatHeader | nu
     played,
     lorebooks,
     missingWorlds,
+    lorebookBindings,
     vars: JSON.parse(header?.variablesJson ?? "[]") as Array<[string, unknown]>
   }
 }
@@ -302,6 +311,7 @@ export const chatStateChange = (
   const state: ChatState = {
     participants: mapped.participants,
     lorebooks: mapped.lorebooks,
+    lorebookBindings: mapped.lorebookBindings,
     played: mapped.played,
     vars: Object.fromEntries(mapped.vars.map(([name, value]) => [name, hash(JSON.stringify(value))])),
     authorNote: authorNote && hash(JSON.stringify(authorNote)),
@@ -320,6 +330,14 @@ export const chatStateChange = (
   }
   if (mapped.played.length > 0 && JSON.stringify(previous?.played ?? []) !== JSON.stringify(mapped.played)) {
     events.push({ key: "played_by_me.set", value: { entities: mapped.played as Array<EntityId> } })
+  }
+  for (const entity of new Set([
+    ...Object.keys(mapped.lorebookBindings),
+    ...Object.keys(previous?.lorebookBindings ?? {})
+  ])) {
+    const ref = mapped.lorebookBindings[entity] ?? null
+    if (ref !== (previous?.lorebookBindings?.[entity] ?? null))
+      events.push({ key: "lorebook.binding", value: { entity: entity as EntityId, ref: ref as RefId | null } })
   }
   for (const ref of mapped.lorebooks) {
     if (!previous?.lorebooks.includes(ref)) events.push({ key: "lorebook.attach", value: { ref: ref as RefId } })

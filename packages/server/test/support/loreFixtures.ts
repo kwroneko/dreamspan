@@ -115,6 +115,24 @@ export const gateLore = loreBook(
         content: "THIS SHOULD NOT BE SENT."
       },
       9
+    ),
+    loreEntry(
+      {
+        constant: true,
+        order: 200,
+        position: "em_top",
+        content: "<START>\n{{user}}: Who rang the bell?\n{{char}}: The upper watch."
+      },
+      10
+    ),
+    loreEntry(
+      {
+        constant: true,
+        order: 200,
+        position: "em_bottom",
+        content: "<START>\n{{user}}: Which bank is safe?\n{{char}}: Follow the copper lamps."
+      },
+      11
     )
   ],
   {},

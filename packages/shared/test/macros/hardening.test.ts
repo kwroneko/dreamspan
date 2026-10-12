@@ -295,3 +295,17 @@ it("never evaluates text as code", () => {
     expect(source, file).not.toMatch(/\beval\b|\bFunction\s*\(|new\s+Function\b|import\s*\(/)
   }
 })
+
+it("charges a shared preview allowance before allocating repeated strings", () => {
+  const sharedWork = { remaining: 500_000 }
+  const repeat = vi.spyOn(String.prototype, "repeat")
+  try {
+    expect(expand(request("{{space::200000}}", { sharedWork }))._tag).toBe("Expanded")
+    expect(expand(request("{{space::200000}}", { sharedWork }))._tag).toBe("LimitExceeded")
+    expect(sharedWork.remaining).toBe(0)
+    // The second expansion must fail before String.repeat allocates its result.
+    expect(repeat.mock.calls.filter(([n]) => n === 200000)).toHaveLength(1)
+  } finally {
+    repeat.mockRestore()
+  }
+})
