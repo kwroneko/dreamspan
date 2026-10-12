@@ -1,4 +1,5 @@
 // Migrations through the real migrator and writer connection settings.
+import { ContextIssue } from "@rp/shared/chat.ts"
 import { join } from "node:path"
 import { SqliteMigrator } from "@effect/sql-sqlite-node"
 import { assert, describe, it } from "@effect/vitest"
@@ -101,7 +102,7 @@ describe("0016_inspector", () => {
       yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(before("0016_inspector")) })
       yield* sql`INSERT INTO users(id,handle,display_name,role,created_at) VALUES('u','u','u','admin',1)`
       yield* sql`INSERT INTO chats(id,owner_user_id,kind,status,created_at) VALUES('c','u','rp','active',1)`
-      const valid = [{ kind: "history_truncated", message: "Synthetic budget warning" }]
+      const valid = ContextIssue.fields.kind.literals.map((kind) => ({ kind, message: "Synthetic warning" }))
       const values = [
         "not an array",
         null,

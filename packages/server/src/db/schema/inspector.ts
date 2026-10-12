@@ -1,3 +1,5 @@
+import { ContextIssue } from "@rp/shared/chat.ts"
+
 // The request inspector and the cache-warmth estimate (ARCHITECTURE §15, migration 0016).
 export const inspector = [
   // What a version shows of its context's issues, without reading the whole snapshot.
@@ -11,7 +13,7 @@ export const inspector = [
           json_type(i.value, '$.message') IS NOT 'text'
           OR json_extract(i.value, '$.kind') IS NULL
           OR json_extract(i.value, '$.kind') NOT IN
-            ('prefill_dropped', 'macro_limit', 'history_truncated', 'examples_truncated', 'regex_skipped')
+            (${ContextIssue.fields.kind.literals.map((kind) => `'${kind}'`).join(", ")})
           ELSE 1 END
       ) THEN json_extract(p.context_snapshot_json, '$.issues') ELSE NULL END
     FROM rollout_payloads p WHERE p.rollout_id = rollouts.id)`,
