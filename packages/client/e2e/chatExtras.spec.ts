@@ -6,6 +6,7 @@ import { expect, type Page, test } from "@playwright/test"
 import type { ChatId, SlotId } from "@rp/shared/chat.ts"
 import type { SendResult } from "@rp/shared/chatApi.ts"
 import { Effect } from "effect"
+import { typeInto } from "./support/composer.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
@@ -51,7 +52,7 @@ test("switching between branches moves the chat to them, each with its own compo
   await expect
     .poll(async () => {
       const tip = (await admin((api) => api.GetChat({ chatId }))).activeLeafSlotId
-      return (await admin((api) => api.GetComposer({ chatId, tipSlotId: tip })))?.content
+      return (await admin((api) => api.OpenComposer({ chatId, tipSlotId: tip }))).content
     })
     .toBe("On the right, a toll.")
 
@@ -119,9 +120,8 @@ test("text wiped and then sent is in the bin's recovered text", async ({ page })
   await admin((api) =>
     Effect.gen(function* () {
       const chat = yield* api.CreateChat({ title: "Logbook" })
-      const at = { chatId: chat.id, tipSlotId: null }
-      const typed = yield* api.SaveComposer({ ...at, content: long, expectedRowVersion: null })
-      const wiped = yield* api.SaveComposer({ ...at, content: "x", expectedRowVersion: typed.rowVersion })
+      const typed = yield* typeInto(api, chat.id, null, long)
+      const wiped = yield* typeInto(api, chat.id, null, "x", typed)
       yield* api.SendMessage({
         chatId: chat.id,
         parentSlotId: null,

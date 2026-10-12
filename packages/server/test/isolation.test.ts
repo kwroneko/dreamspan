@@ -21,7 +21,7 @@ import type { Notice } from "@rp/shared/noticeApi.ts"
 import { Notices } from "../src/chat/Notices.ts"
 import * as FakeGenerator from "../src/dev/fakeGenerator.ts"
 import { png, textChunk } from "./formats/support.ts"
-import { client, login, outcome, posted, serverLayer, serverPort, testConfig } from "./support/config.ts"
+import { client, login, outcome, posted, serverLayer, serverPort, testConfig, typeInto } from "./support/config.ts"
 import { cardDoc, presetDoc } from "./support/docs.ts"
 
 type Api = Effect.Success<ReturnType<typeof client>>
@@ -51,6 +51,8 @@ interface Party {
   readonly binItemId: string
   /** Text recovered from a composer wiped and then sent. */
   readonly recoveredId: string
+  /** The composer at the chat's reply, with text in it. */
+  readonly composerId: string
   /** Publishes a notice to this party's subscribers, as a finished reply would. */
   readonly notify: (notice: Notice) => void
 }
@@ -968,49 +970,50 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
   EmptyBin: {
     probe: (actor) => Effect.map(actor.api.EmptyBin(), ({ purged }) => assert.isAtMost(purged, 1))
   },
-  GetComposer: {
+  OpenComposer: {
     probe: (actor, owner) =>
       Effect.gen(function* () {
-        yield* refused(
-          actor.api.GetComposer({ chatId: owner.chat.chatId, tipSlotId: owner.chat.replySlotId }),
-          "NotFound"
-        )
-        // Their tip, in the actor's own chat: nothing there.
-        assert.isNull(yield* actor.api.GetComposer({ chatId: actor.chat.chatId, tipSlotId: owner.chat.replySlotId }))
+        for (const chatId of [owner.chat.chatId, actor.chat.chatId]) {
+          yield* refused(actor.api.OpenComposer({ chatId, tipSlotId: owner.chat.replySlotId }), "NotFound")
+        }
+        // Their composer as a branch's start, into the actor's own chat: nothing comes along.
+        const opened = yield* actor.api.OpenComposer({
+          chatId: actor.chat.chatId,
+          tipSlotId: actor.chat.slotId,
+          copyFrom: owner.composerId
+        })
+        assert.notInclude(opened.content, "half typed")
       })
   },
   SaveComposer: {
     probe: (actor, owner) =>
       Effect.gen(function* () {
-        for (const [chatId, tipSlotId] of [
-          [owner.chat.chatId, owner.chat.replySlotId],
-          [actor.chat.chatId, owner.chat.replySlotId]
-        ] as const) {
-          yield* refused(
-            actor.api.SaveComposer({ chatId, tipSlotId, content: "planted", expectedRowVersion: null }),
-            "NotFound"
-          )
-        }
+        const planted = { draftId: owner.composerId, rowVersion: 1, session: 1, content: "planted" }
+        yield* refused(actor.api.SaveComposer({ chatId: owner.chat.chatId, ...planted }), "NotFound")
+        // Their draft through the actor's own chat: not found there, so only the actor's own
+        // recovered texts get the text.
+        const saved = yield* actor.api.SaveComposer({ chatId: actor.chat.chatId, ...planted })
+        assert.isNull(saved.draft)
       })
   },
   ComposerHistory: {
     probe: (actor, owner) =>
-      refused(
-        actor.api.ComposerHistory({ chatId: owner.chat.chatId, tipSlotId: owner.chat.replySlotId, limit: 10 }),
-        "NotFound"
-      )
+      Effect.gen(function* () {
+        for (const chatId of [owner.chat.chatId, actor.chat.chatId]) {
+          yield* refused(actor.api.ComposerHistory({ chatId, draftId: owner.composerId, limit: 10 }), "NotFound")
+        }
+      })
   },
   RestoreComposer: {
     probe: (actor, owner) =>
-      refused(
-        actor.api.RestoreComposer({
-          chatId: owner.chat.chatId,
-          tipSlotId: owner.chat.replySlotId,
-          seq: 0,
-          expectedRowVersion: 1
-        }),
-        "NotFound"
-      )
+      Effect.gen(function* () {
+        for (const chatId of [owner.chat.chatId, actor.chat.chatId]) {
+          yield* refused(
+            actor.api.RestoreComposer({ chatId, draftId: owner.composerId, seq: 0, expectedRowVersion: 1 }),
+            "NotFound"
+          )
+        }
+      })
   },
   SubscribeNotices: {
     probe: (actor, owner) =>
@@ -1107,21 +1110,19 @@ const routes: Record<string, Probe> = {
     }),
   "POST /library/drafts, with composers": (actor, owner) =>
     Effect.gen(function* () {
-      for (const [chatId, tipSlotId] of [
-        [owner.chat.chatId, owner.chat.replySlotId],
-        [actor.chat.chatId, owner.chat.replySlotId]
-      ] as const) {
-        const response = yield* http(
+      const leaving = (chatId: string) =>
+        http(
           actor,
           "/library/drafts",
           JSON.stringify({
             drafts: [],
-            composers: [{ chatId, tipSlotId, content: "planted", expectedRowVersion: null }]
+            composers: [{ chatId, draftId: owner.composerId, rowVersion: 1, session: 1, content: "planted" }]
           }),
           "application/json"
         )
-        assert.strictEqual(response.status, 404)
-      }
+      assert.strictEqual((yield* leaving(owner.chat.chatId)).status, 404)
+      // Through the actor's own chat, it's text for the actor's own recovered texts.
+      assert.strictEqual((yield* leaving(actor.chat.chatId)).status, 204)
     }),
   "POST /library/export": (actor, owner) =>
     Effect.gen(function* () {
@@ -1290,9 +1291,8 @@ const seed = Effect.gen(function* () {
       const binned = yield* api.CreateChat({ title: "binned" })
       const binItem = yield* api.DeleteChat({ chatId: binned.id })
       const scratch = yield* api.CreateChat({ title: "scratch" })
-      const at = { chatId: scratch.id, tipSlotId: null }
-      const typed = yield* api.SaveComposer({ ...at, content: "lost words ".repeat(30), expectedRowVersion: null })
-      const wiped = yield* api.SaveComposer({ ...at, content: "x", expectedRowVersion: typed.rowVersion })
+      const typed = yield* typeInto(api, scratch.id, null, "lost words ".repeat(30))
+      const wiped = yield* typeInto(api, scratch.id, null, "x", typed)
       yield* posted(
         api.SendMessage({
           chatId: scratch.id,
@@ -1303,16 +1303,12 @@ const seed = Effect.gen(function* () {
         })
       )
       const [recovered] = yield* api.ListRecoveredTexts({ limit: 1, before: null })
-      yield* api.SaveComposer({
-        chatId: chat.id,
-        tipSlotId: reply.entry.slotId,
-        content: "half typed",
-        expectedRowVersion: null
-      })
+      const composer = yield* typeInto(api, chat.id, reply.entry.slotId, "half typed")
       const notices = yield* Notices
       return {
         binItemId: binItem.id,
         recoveredId: recovered!.id,
+        composerId: composer.id,
         notify: (notice: Notice) => notices.publish(user.id, notice),
         cardId: card.entityId,
         queuedId: queued.queued.id,
@@ -1425,7 +1421,7 @@ const snapshot = (owner: Party) =>
     outcome(owner.api.ListLibrary({ kind: "card" }), JSON.stringify),
     outcome(owner.api.ListBin({ limit: 500, before: null }), JSON.stringify),
     outcome(owner.api.ListRecoveredTexts({ limit: 500, before: null }), JSON.stringify),
-    outcome(owner.api.GetComposer({ chatId: owner.chat.chatId, tipSlotId: owner.chat.replySlotId }), JSON.stringify)
+    outcome(owner.api.OpenComposer({ chatId: owner.chat.chatId, tipSlotId: owner.chat.replySlotId }), JSON.stringify)
   ])
 
 /** Runs a probe, then checks that it changed nothing of the owner's, whatever it returned. */

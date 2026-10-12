@@ -1,6 +1,8 @@
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { AppApi } from "@rp/shared/api.ts"
+import type { ChatId, SlotId } from "@rp/shared/chat.ts"
+import type { Draft } from "@rp/shared/drafts.ts"
 import { Effect, Layer, Option } from "effect"
 import { HttpServer } from "effect/http"
 import { RpcClient, RpcSerialization } from "effect/rpc"
@@ -124,3 +126,22 @@ export const outcome = <A, E>(effect: Effect.Effect<A, E>, show: (a: A) => strin
       )
     )
   )
+
+type Api = Effect.Success<ReturnType<typeof client>>
+
+/**
+ * Types into the composer at a tip as the client does: opens it, then saves onto the draft
+ * that names (or onto `onto`, a draft read earlier). Returns the draft after the save.
+ */
+export const typeInto = (api: Api, chatId: ChatId, tipSlotId: SlotId | null, content: string, onto?: Draft) =>
+  Effect.gen(function* () {
+    const draft = onto ?? (yield* api.OpenComposer({ chatId, tipSlotId }))
+    const saved = yield* api.SaveComposer({
+      chatId,
+      draftId: draft.id,
+      rowVersion: draft.rowVersion,
+      session: draft.session,
+      content
+    })
+    return saved.draft!
+  })

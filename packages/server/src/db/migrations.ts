@@ -8,6 +8,7 @@ import {
   credentials,
   dataModel,
   draftHistory,
+  draftSessions,
   graphIntegrity,
   ownership,
   providers,
@@ -59,7 +60,8 @@ export const migrations = {
   "0009_bin_index": runAll(binIndex),
   "0010_graph_integrity": runAll(graphIntegrity),
   "0011_ownership": runAll(ownership),
-  "0012_queued_messages": runAll(queue)
+  "0012_queued_messages": runAll(queue),
+  "0013_draft_sessions": runAll(draftSessions)
 }
 
 export const Migrations = SqliteMigrator.layer({ loader: SqliteMigrator.fromRecord(migrations) })

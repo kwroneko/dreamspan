@@ -287,6 +287,13 @@ export const makeReadHandlers = Effect.gen(function* () {
 
     ListActiveDrafts: ({ userId }) => drafts.listActive(userId).pipe(query("ListActiveDrafts")),
 
+    ComposerHistory: ({ userId, chatId, draftId, limit }) =>
+      Effect.gen(function* () {
+        const draft = yield* drafts.findComposer(userId, chatId, draftId)
+        if (draft === null) return yield* new NotFound({ entity: "draft", id: draftId })
+        return yield* drafts.history(draft, limit)
+      }).pipe(query("ComposerHistory")),
+
     DraftHistory: ({ userId, key, limit }) =>
       Effect.flatMap(drafts.get(userId, key), (draft) => drafts.history(draft, limit)).pipe(query("DraftHistory")),
 

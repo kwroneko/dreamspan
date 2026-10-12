@@ -4,7 +4,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import type { ChatId, PathEntry, SlotId } from "@rp/shared/chat.ts"
 import { Effect } from "effect"
-import { client, outcome, posted, testConfig, withServer } from "./support/config.ts"
+import { client, outcome, posted, testConfig, typeInto, withServer } from "./support/config.ts"
 
 type Api = Effect.Success<ReturnType<typeof client>>
 
@@ -87,10 +87,10 @@ describe("branches", () => {
       const m0 = yield* send(api, chat.id, null, "m0")
       const m1 = yield* send(api, chat.id, m0, "m1")
       const b1 = yield* send(api, chat.id, m0, "b1", true)
-      yield* api.SaveComposer({ chatId: chat.id, tipSlotId: b1, content: "on b1", expectedRowVersion: null })
+      yield* typeInto(api, chat.id, b1, "on b1")
       yield* api.SwitchBranch({ chatId: chat.id, slotId: b1, index: 0 })
-      assert.strictEqual((yield* api.GetComposer({ chatId: chat.id, tipSlotId: b1 }))?.content, "on b1")
-      assert.isNull(yield* api.GetComposer({ chatId: chat.id, tipSlotId: m1 }))
+      assert.strictEqual((yield* api.OpenComposer({ chatId: chat.id, tipSlotId: b1 })).content, "on b1")
+      assert.strictEqual((yield* api.OpenComposer({ chatId: chat.id, tipSlotId: m1 })).content, "")
     }).pipe(Effect.scoped, withServer(testConfig()))
   )
 })

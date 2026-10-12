@@ -2,7 +2,7 @@ import { accounts } from "./accounts.ts"
 import { bin, binIndex } from "./bin.ts"
 import { chats } from "./chats.ts"
 import { credentials } from "./credentials.ts"
-import { draftHistory } from "./drafts.ts"
+import { draftHistory, draftSessions } from "./drafts.ts"
 import { graphIntegrity } from "./graphIntegrity.ts"
 import { ownership } from "./ownership.ts"
 import { history } from "./history.ts"
@@ -27,5 +27,16 @@ export const users = [
 // Tables first, then the triggers that refer across them.
 export const dataModel = [...platform, ...library, ...chats, ...history, ...integrity, ...search]
 
-export { accounts, bin, binIndex, credentials, draftHistory, graphIntegrity, ownership, providers, queue }
+export {
+  accounts,
+  bin,
+  binIndex,
+  credentials,
+  draftHistory,
+  draftSessions,
+  graphIntegrity,
+  ownership,
+  providers,
+  queue
+}
 export { secretBindings } from "./credentials.ts"

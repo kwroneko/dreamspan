@@ -114,7 +114,7 @@ export const makeChatHandlers = Effect.gen(function* () {
       })
       if (outcome._tag === "Queued") {
         hub.publish(params.chatId, { _tag: "Queue", queue: outcome.queue })
-        return { _tag: "Queued" as const, queued: outcome.queued, queue: outcome.queue }
+        return { _tag: "Queued" as const, queued: outcome.queued, queue: outcome.queue, draft: outcome.draft }
       }
       const { result } = outcome
       if (params.kind === "generate") {
@@ -127,7 +127,7 @@ export const makeChatHandlers = Effect.gen(function* () {
       }
       const entry = yield* publishSlot(user, result.slotId)
       hub.publish(params.chatId, { _tag: "Chat", chat: result.chat })
-      return { _tag: "Posted" as const, entry, chat: result.chat }
+      return { _tag: "Posted" as const, entry, chat: result.chat, draft: result.draft }
     })
 
   const handlers = {

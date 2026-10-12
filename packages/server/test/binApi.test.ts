@@ -7,7 +7,7 @@ import type { ChatEvent } from "@rp/shared/chatApi.ts"
 import { Effect, Stream } from "effect"
 import { Writer } from "../src/db/Database.ts"
 import { cardDoc } from "./support/docs.ts"
-import { client, outcome, posted, testConfig, withServer } from "./support/config.ts"
+import { client, outcome, posted, testConfig, typeInto, withServer } from "./support/config.ts"
 
 type Api = Effect.Success<ReturnType<typeof client>>
 
@@ -46,11 +46,11 @@ describe("the recycle bin's RPCs", () => {
       const chat = yield* api.CreateChat({ title: "Harbor" })
       const m0 = yield* send(api, chat.id, null, "m0")
       const m1 = yield* send(api, chat.id, m0, "m1")
-      yield* api.SaveComposer({ chatId: chat.id, tipSlotId: m1, content: "half typed", expectedRowVersion: null })
+      yield* typeInto(api, chat.id, m1, "half typed")
       const events = yield* subscribe(api, chat.id)
       const item = yield* api.DeleteMessage({ slotId: m1 })
       assert.deepStrictEqual(yield* contents(api, chat.id), ["m0"])
-      assert.strictEqual((yield* api.GetComposer({ chatId: chat.id, tipSlotId: m0 }))?.content, "half typed")
+      assert.strictEqual((yield* api.OpenComposer({ chatId: chat.id, tipSlotId: m0 })).content, "half typed")
       assert.deepStrictEqual(
         (yield* api.ListBin({ limit: 10, before: null })).map((i) => i.id),
         [item.id]
@@ -60,7 +60,7 @@ describe("the recycle bin's RPCs", () => {
       yield* api.RestoreBinItem({ itemId: item.id })
       assert.deepStrictEqual(yield* contents(api, chat.id), ["m0", "m1"])
       assert.strictEqual((yield* api.GetChat({ chatId: chat.id })).activeLeafSlotId, m1)
-      assert.strictEqual((yield* api.GetComposer({ chatId: chat.id, tipSlotId: m1 }))?.content, "half typed")
+      assert.strictEqual((yield* api.OpenComposer({ chatId: chat.id, tipSlotId: m1 })).content, "half typed")
       assert.deepStrictEqual(yield* api.ListBin({ limit: 10, before: null }), [])
       // Open tabs read it again, and hear where the leaf is.
       yield* eventually(() => events.slice(seen).some((e) => e._tag === "Chat" && e.chat.activeLeafSlotId === m1))
@@ -137,13 +137,8 @@ describe("the recycle bin's RPCs", () => {
 
       // Text wiped and then sent goes to the recovered text, never to the deleted items.
       const long = "A long paragraph about the harbor at night. ".repeat(10)
-      const typed = yield* api.SaveComposer({ chatId: chat.id, tipSlotId: m0, content: long, expectedRowVersion: null })
-      const wiped = yield* api.SaveComposer({
-        chatId: chat.id,
-        tipSlotId: m0,
-        content: "x",
-        expectedRowVersion: typed.rowVersion
-      })
+      const typed = yield* typeInto(api, chat.id, m0, long)
+      const wiped = yield* typeInto(api, chat.id, m0, "x", typed)
       yield* posted(
         api.SendMessage({
           chatId: chat.id,

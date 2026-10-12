@@ -274,13 +274,10 @@ describe("drafts", () => {
       yield* type("Draft on branch A")
 
       // Branching from the root takes the composer along; branch A keeps its own copy.
-      const copied = yield* writer.CopyComposer({
-        userId,
-        chatId: chat.id,
-        fromTipSlotId: a.slotId,
-        toTipSlotId: root.slotId
-      })
-      assert.strictEqual(copied?.content, "Draft on branch A")
+      const fromA = (yield* reader.GetDraft({ userId, key: composerKey(chat.id, a.slotId) }))!
+      const branchStart = { userId, chatId: chat.id, tipSlotId: root.slotId, copyFrom: fromA.id }
+      const copied = yield* writer.OpenComposer(branchStart)
+      assert.strictEqual(copied.content, "Draft on branch A")
       const get = (tip: SlotId) =>
         reader.GetDraft({ userId, key: composerKey(chat.id, tip) }).pipe(Effect.map((d) => d?.content))
       assert.strictEqual(yield* get(a.slotId), "Draft on branch A")
@@ -290,18 +287,13 @@ describe("drafts", () => {
         userId,
         key: composerKey(chat.id, root.slotId),
         content: "A different take",
-        expectedRowVersion: copied!.rowVersion,
+        expectedRowVersion: copied.rowVersion,
         baseRevision: null
       })
       assert.strictEqual(yield* get(a.slotId), "Draft on branch A")
       // ...and copying again never overwrites text already typed there.
-      const again = yield* writer.CopyComposer({
-        userId,
-        chatId: chat.id,
-        fromTipSlotId: a.slotId,
-        toTipSlotId: root.slotId
-      })
-      assert.strictEqual(again?.content, "A different take")
+      const again = yield* writer.OpenComposer(branchStart)
+      assert.strictEqual(again.content, "A different take")
     }).pipe(Effect.provide(database()))
   )
 

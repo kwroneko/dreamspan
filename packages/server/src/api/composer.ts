@@ -15,36 +15,33 @@ export const makeComposerHandlers = Effect.gen(function* () {
   const userId = Effect.map(CurrentUser, (user) => user.id)
 
   const handlers = {
-    // Only for a live chat of the caller's: a draft is never more than its chat.
-    GetComposer: ({ chatId, tipSlotId }) =>
+    // Only for a live chat of the caller's: a draft is never more than its chat. A composer
+    // already there is read in a reader; only a new one, or a copy, takes the writer.
+    OpenComposer: ({ chatId, tipSlotId, copyFrom }) =>
       Effect.gen(function* () {
         const id = yield* userId
-        yield* reader.GetChat({ userId: id, chatId })
-        return yield* reader.GetDraft({ userId: id, key: composerKey(chatId, tipSlotId) })
-      }).pipe(internal("GetComposer")),
+        if (copyFrom === undefined) {
+          yield* reader.GetChat({ userId: id, chatId })
+          const there = yield* reader.GetDraft({ userId: id, key: composerKey(chatId, tipSlotId) })
+          if (there !== null) return there
+        }
+        return yield* writer.OpenComposer({ userId: id, chatId, tipSlotId, copyFrom: copyFrom ?? null })
+      }).pipe(internal("OpenComposer")),
 
-    SaveComposer: ({ chatId, tipSlotId, content, expectedRowVersion }) =>
-      Effect.flatMap(userId, (id) =>
-        writer.SaveDraft({
-          userId: id,
-          key: composerKey(chatId, tipSlotId),
-          content,
-          expectedRowVersion,
-          baseRevision: null
-        })
-      ).pipe(
+    SaveComposer: (payload) =>
+      Effect.flatMap(userId, (id) => writer.SaveComposer({ userId: id, ...payload })).pipe(
         Effect.catchTag("DraftTooLarge", ({ length, max }) => Effect.fail(new TextTooLong({ length, max }))),
         internal("SaveComposer")
       ),
 
-    ComposerHistory: ({ chatId, tipSlotId, limit }) =>
-      Effect.flatMap(userId, (id) =>
-        reader.DraftHistory({ userId: id, key: composerKey(chatId, tipSlotId), limit })
-      ).pipe(internal("ComposerHistory")),
+    ComposerHistory: ({ chatId, draftId, limit }) =>
+      Effect.flatMap(userId, (id) => reader.ComposerHistory({ userId: id, chatId, draftId, limit })).pipe(
+        internal("ComposerHistory")
+      ),
 
-    RestoreComposer: ({ chatId, tipSlotId, seq, expectedRowVersion }) =>
+    RestoreComposer: ({ chatId, draftId, seq, expectedRowVersion }) =>
       Effect.flatMap(userId, (id) =>
-        writer.RestoreDraftState({ userId: id, key: composerKey(chatId, tipSlotId), seq, expectedRowVersion })
+        writer.RestoreComposer({ userId: id, chatId, draftId, seq, expectedRowVersion })
       ).pipe(internal("RestoreComposer"))
   } satisfies Partial<Parameters<typeof AppApi.of>[0]>
   return handlers

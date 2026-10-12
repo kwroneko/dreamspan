@@ -6,6 +6,7 @@ import { Rpc, RpcGroup } from "effect/rpc"
 import { BinItem } from "./bin.ts"
 import { Chat, ChatId, EntityId, PathEntry, QueuedMessage, SlotId, Version, VersionId } from "./chat.ts"
 import { LeafMoved, NotFound, ServerError, StaleWrite } from "./errors.ts"
+import { Draft } from "./drafts.ts"
 
 /** Generation needs a generator, and this server has none (only tests run one without). */
 export class GenerationUnavailable extends Schema.TaggedError<GenerationUnavailable>()("GenerationUnavailable", {
@@ -92,12 +93,18 @@ export class BranchSwitch extends Schema.Class<BranchSwitch>("BranchSwitch")({
 }) {}
 
 /**
+ * The composer draft the text came from after the send: committed, or still active with
+ * another tab's newer text (§3.10); null without `composerRowVersion`.
+ */
+const SentDraft = Schema.NullOr(Draft)
+
+/**
  * What a send or a Generate did: posted at once, or queued behind a reply still being
  * written (DESIGN §2.2), with every entry now waiting in the chat.
  */
 export const SendResult = Schema.Union([
-  Schema.TaggedStruct("Posted", { entry: PathEntry, chat: Chat }),
-  Schema.TaggedStruct("Queued", { queued: QueuedMessage, queue: Schema.Array(QueuedMessage) })
+  Schema.TaggedStruct("Posted", { entry: PathEntry, chat: Chat, draft: SentDraft }),
+  Schema.TaggedStruct("Queued", { queued: QueuedMessage, queue: Schema.Array(QueuedMessage), draft: SentDraft })
 ])
 export type SendResult = typeof SendResult.Type
 

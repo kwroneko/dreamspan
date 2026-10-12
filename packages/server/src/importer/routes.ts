@@ -13,7 +13,7 @@ import {
   ImportResult
 } from "@rp/shared/libraryImport.ts"
 import { RefId, RevisionId } from "@rp/shared/library.ts"
-import { composerKey, DraftKey } from "@rp/shared/drafts.ts"
+import { DraftKey } from "@rp/shared/drafts.ts"
 import { ComposerBeacon } from "@rp/shared/composerApi.ts"
 import { parseField } from "@rp/shared/editing.ts"
 import { ByteSize, Effect, Layer, Option, Schedule, Schema, Semaphore } from "effect"
@@ -572,20 +572,10 @@ export const layer = Layer.unwrap(
           )
         )
       }
-      // A composer's draft goes on top the same way. One that's gone from its tip moved with
-      // a message appended there: it isn't made again at a slot that's no tip any more, and
-      // the copy in the browser keeps the text for the composer to bring back.
+      // A composer's text goes onto the draft it was typed into, as SaveComposer saves it:
+      // wherever that draft's tip is now, or to the recovered texts if it was sent meanwhile.
       for (const composer of input.value.composers ?? []) {
-        const key = composerKey(composer.chatId, composer.tipSlotId)
-        const save = (expectedRowVersion: number | null) =>
-          writer.SaveDraft({ userId: user.id, key, content: composer.content, expectedRowVersion, baseRevision: null })
-        yield* save(composer.expectedRowVersion).pipe(
-          Effect.catchTag("StaleWrite", (stale) =>
-            Effect.flatMap(reader.GetDraft({ userId: user.id, key }), (current) =>
-              current === null ? Effect.fail(stale) : save(current.rowVersion)
-            )
-          )
-        )
+        yield* writer.SaveComposer({ userId: user.id, ...composer })
       }
       return HttpServerResponse.empty({ status: 204 })
     }).pipe(

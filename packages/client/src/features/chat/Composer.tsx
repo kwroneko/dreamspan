@@ -5,7 +5,7 @@
 //
 // The text is a server draft per branch tip (composerDraft.ts), held in a store of its own,
 // so typing re-renders nothing else.
-import type { CastCard, EntityId, QueuedMessage } from "@rp/shared/chat.ts"
+import type { CastCard, EntityId, QueuedMessage, SlotId } from "@rp/shared/chat.ts"
 import type { DraftState } from "@rp/shared/drafts.ts"
 import { type KeyboardEvent, memo, useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react"
 import { useSession } from "../../session.ts"
@@ -18,8 +18,16 @@ import { Badge } from "../../ui/Surface.tsx"
 import { Tabs } from "../../ui/Tabs.tsx"
 import { nameOf, recentSpeakers, replySpeaker, useCast } from "./cast.ts"
 import { carriedComposerText, dropCarriedComposerText } from "./composerCarry.ts"
-import { ComposerDraft } from "./composerDraft.ts"
-import type { ChatSession, ChatView, Outcome } from "./session.ts"
+import { ComposerDraft, type Sent } from "./composerDraft.ts"
+import type { ChatSession, ChatView, ComposerSource, Outcome } from "./session.ts"
+
+/** A send whose text was typed on a branch the chat view has left since. */
+const BRANCH_CHANGED: AppError = {
+  tag: "BranchChanged",
+  message: "The branch changed before this was sent, so it wasn't. It's back in that branch's composer.",
+  problems: [],
+  reason: null
+}
 
 const coarsePointer = () => typeof matchMedia !== "undefined" && matchMedia("(pointer: coarse)").matches
 
@@ -349,7 +357,7 @@ export function Composer({ session, view }: { session: ChatSession; view: ChatVi
   // page while this chat was being made comes along (composerCarry.ts).
   const [draft] = useState(() => new ComposerDraft(session, userId, carriedComposerText(session.id)))
   useEffect(() => dropCarriedComposerText(session.id), [session])
-  const { text, ready, restored, error: saveError } = useSyncExternalStore(draft.subscribe, draft.snapshot)
+  const { text, ready, restored, recovered, error: saveError } = useSyncExternalStore(draft.subscribe, draft.snapshot)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<AppError | null>(null)
   // The speaker picked here; until then, the first card the user plays.
@@ -370,9 +378,9 @@ export function Composer({ session, view }: { session: ChatSession; view: ChatVi
 
   /** The composer belongs to the tip of the path shown (DESIGN §6.2). */
   const syncTip = useCallback(() => {
-    const now = session.snapshot()
-    if (now.loading) return
-    draft.setTip(now.leafSlotId, session.continues(draft.currentTip ?? null, now.leafSlotId))
+    const { loading, leafSlotId } = session.snapshot()
+    if (loading) return
+    draft.setTip(leafSlotId, session.movedByAppend(draft.tip ?? null, leafSlotId), session.takeBranchStart(leafSlotId))
   }, [draft, session])
   useEffect(syncTip, [syncTip, view.leafSlotId, view.loading])
 
@@ -414,47 +422,40 @@ export function Composer({ session, view }: { session: ChatSession; view: ChatVi
 
   /**
    * The text leaves the box as it's submitted, so whatever is typed while the request is out
-   * stays. If the request fails, the submitted text comes back, ahead of anything typed since.
-   * The draft it came from is saved first and committed with it, so a reload never shows it.
+   * stays. It's sent from the draft it was typed into, at that draft's tip, which commits it,
+   * so a reload never shows it; if the chat view went to another branch since, it isn't
+   * sent. Text that isn't sent comes back, ahead of anything typed since (composerDraft.ts).
    */
-  const submit = async (run: (submitted: string, composerRowVersion: number | undefined) => Promise<boolean>) => {
+  const submit = async (run: (submitted: string, from: ComposerSource) => Promise<Sent>) => {
     if (busy) return
     setBusy(true)
-    const tip = draft.currentTip ?? null
-    const composerRowVersion = await draft.hold()
-    const submitted = draft.snapshot().text
-    draft.takeText("")
-    const ok = await run(submitted, composerRowVersion)
+    await draft.submit((submitted, from) => {
+      const tip = from.key.field === "" ? null : (from.key.field as SlotId)
+      if (tip !== session.snapshot().leafSlotId) {
+        setError(BRANCH_CHANGED)
+        return Promise.resolve({ sent: false })
+      }
+      return run(submitted, { tip, rowVersion: from.rowVersion })
+    })
     setBusy(false)
-    if (!ok && submitted !== "") {
-      const current = draft.snapshot().text
-      draft.type(current === "" ? submitted : `${submitted}\n\n${current}`)
-    }
-    syncTip()
-    draft.release(ok ? { tip, text: submitted } : null)
   }
 
   const send = () =>
     text.trim() === ""
       ? Promise.resolve()
-      : submit(async (submitted, composerRowVersion) => {
-          const { sent, outcome } = await session.send(
-            submitted,
-            speaker,
-            replySpeaker(cast, speaker),
-            composerRowVersion
-          )
+      : submit(async (submitted, from) => {
+          const { sent, outcome, draft } = await session.send(submitted, speaker, replySpeaker(cast, speaker), from)
           report(outcome)
           // A message that was sent (or queued) is gone from the box, even if its reply failed.
-          return sent
+          return sent ? { sent, draft } : { sent }
         })
 
   // The text is this turn's direction (DESIGN §2.2): once asked for, it's on the reply.
   const generate = () =>
-    submit(async (submitted, composerRowVersion) => {
-      const outcome = await session.generate(undefined, speaker, submitted, composerRowVersion)
+    submit(async (submitted, from) => {
+      const outcome = await session.generate(from.tip, speaker, submitted, from.rowVersion)
       report(outcome)
-      return outcome.ok
+      return outcome.ok ? { sent: true, draft: outcome.value.draft } : { sent: false }
     })
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -500,6 +501,12 @@ export function Composer({ session, view }: { session: ChatSession; view: ChatVi
       {restored && (
         <p role="status" className="text-sm text-muted">
           Text this browser kept when the page closed before the server had it is back in the box.
+        </p>
+      )}
+      {recovered && (
+        <p role="status" className="text-sm text-muted">
+          This message was sent from another tab while you typed here. What you typed is in the bin, under recovered
+          text.
         </p>
       )}
       <label htmlFor="composer" className="sr-only">

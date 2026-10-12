@@ -332,19 +332,48 @@ export class WriteOps extends RpcGroup.make(
     error: Schema.Union([NotFound, StaleWrite, DraftTooLarge, StorageError])
   }),
   /**
-   * Starting a branch takes the composer along: copies the composer text at one tip to
-   * another, unless the other already has text of its own. Switching between existing
-   * branches doesn't copy (owner, 2026-10-10).
+   * The composer at a tip, made empty if there's none, so text typed there has a draft to
+   * name. Starting a branch takes the composer along: `copyFrom`'s text is copied in, unless
+   * the tip already has text of its own. Switching between existing branches doesn't copy
+   * (owner, 2026-10-10).
    */
-  Rpc.make("CopyComposer", {
+  Rpc.make("OpenComposer", {
     payload: {
       userId: UserId,
       chatId: ChatId,
-      fromTipSlotId: Schema.NullOr(SlotId),
-      toTipSlotId: Schema.NullOr(SlotId)
+      tipSlotId: Schema.NullOr(SlotId),
+      copyFrom: Schema.NullOr(Schema.String)
     },
-    success: Schema.NullOr(Draft),
-    error: Schema.Union([NotFound, StaleWrite, DraftTooLarge, StorageError])
+    success: Draft,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * Composer text onto the draft it was typed into, wherever that draft's tip is now
+   * (drafts.ts `saveComposer`): on top of another tab's newer text, or to the recovered
+   * texts if the draft's session ended or the draft is gone.
+   */
+  Rpc.make("SaveComposer", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      draftId: Schema.String,
+      rowVersion: Schema.Int,
+      session: Schema.Int,
+      content: Schema.String
+    },
+    success: Schema.Struct({ draft: Schema.NullOr(Draft), recovered: Schema.Boolean }),
+    error: Schema.Union([NotFound, DraftTooLarge, StorageError])
+  }),
+  Rpc.make("RestoreComposer", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      draftId: Schema.String,
+      seq: Schema.Int,
+      expectedRowVersion: Schema.Int
+    },
+    success: Draft,
+    error: Schema.Union([NotFound, StaleWrite, StorageError])
   }),
   /** Restores an earlier state from the draft's history. The restore is itself undoable. */
   Rpc.make("RestoreDraftState", {
@@ -868,7 +897,12 @@ export class WriteOps extends RpcGroup.make(
     },
     success: Schema.Union([
       Schema.TaggedStruct("Posted", { result: AppendResult }),
-      Schema.TaggedStruct("Queued", { queued: QueuedMessage, queue: Schema.Array(QueuedMessage) })
+      Schema.TaggedStruct("Queued", {
+        queued: QueuedMessage,
+        queue: Schema.Array(QueuedMessage),
+        /** The committed draft, or the draft left active because it moved on; null if none was given. */
+        draft: Schema.NullOr(Draft)
+      })
     ]),
     error: Schema.Union([NotFound, LeafMoved, StorageError])
   }),
@@ -1244,6 +1278,17 @@ export class ReadOps extends RpcGroup.make(
     payload: { userId: UserId },
     success: Schema.Array(Draft),
     error: StorageError
+  }),
+  /** A chat's composer draft's restorable states, by the draft's id. */
+  Rpc.make("ComposerHistory", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      draftId: Schema.String,
+      limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 1000 }))
+    },
+    success: Schema.Array(DraftState),
+    error: Schema.Union([NotFound, StorageError])
   }),
   /** The restorable states of a draft, newest first, without their full text. */
   Rpc.make("DraftHistory", {

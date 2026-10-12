@@ -84,23 +84,29 @@ export const makeWriteHandlers = (bin: Bin) =>
           .save({ userId, key, content, expectedRowVersion, baseRevision, checkTarget: draftTarget(userId, key) })
           .pipe(transaction("SaveDraft")),
 
-      CopyComposer: ({ userId, chatId, fromTipSlotId, toTipSlotId }) =>
+      OpenComposer: ({ userId, chatId, tipSlotId, copyFrom }) =>
         Effect.gen(function* () {
-          yield* draftTarget(userId, composerKey(chatId, toTipSlotId))
-          const from = yield* drafts.find(userId, composerKey(chatId, fromTipSlotId))
-          if (from === null || from.status !== "active" || from.content === "") return null
-          const to = yield* drafts.find(userId, composerKey(chatId, toTipSlotId))
-          // Never overwrite text already typed on the other branch.
-          if (to !== null && to.status === "active" && to.content !== "") return drafts.toDraft(to)
-          return yield* drafts.save({
-            userId,
-            key: composerKey(chatId, toTipSlotId),
-            content: from.content,
-            expectedRowVersion: to?.row_version ?? null,
-            baseRevision: null,
-            checkTarget: Effect.void
-          })
-        }).pipe(transaction("CopyComposer")),
+          const key = composerKey(chatId, tipSlotId)
+          yield* draftTarget(userId, key)
+          const from = copyFrom === null ? null : yield* drafts.findComposer(userId, chatId, copyFrom)
+          return yield* drafts.openComposer(userId, key, from)
+        }).pipe(transaction("OpenComposer")),
+
+      // Into a chat of the user's, live or in the bin: text typed as it was deleted is kept too.
+      SaveComposer: ({ userId, chatId, draftId, rowVersion, session, content }) =>
+        Effect.gen(function* () {
+          yield* found(
+            Effect.orDie(
+              sql<{ n: number }>`SELECT count(*) AS n FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId}`
+            ),
+            "chat",
+            chatId
+          )
+          return yield* drafts.saveComposer(userId, chatId, { draftId, rowVersion, session }, content)
+        }).pipe(transaction("SaveComposer")),
+
+      RestoreComposer: ({ userId, chatId, draftId, seq, expectedRowVersion }) =>
+        drafts.restoreComposer(userId, chatId, draftId, seq, expectedRowVersion).pipe(transaction("RestoreComposer")),
 
       RestoreDraftState: ({ userId, key, seq, expectedRowVersion }) =>
         drafts.restore(userId, key, seq, expectedRowVersion).pipe(transaction("RestoreDraftState")),

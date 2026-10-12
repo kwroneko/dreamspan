@@ -275,8 +275,8 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
                 updated_at: at
               })} RETURNING *`
               // The text waits in the queue now, and comes back to the composer if withdrawn.
-              yield* bin.drafts.commit(userId, commitDraft)
-              return { _tag: "Queued" as const, queued: toQueued(row!), queue: yield* chatQueue(sql, chatId) }
+              const draft = yield* bin.drafts.commit(userId, commitDraft)
+              return { _tag: "Queued" as const, queued: toQueued(row!), queue: yield* chatQueue(sql, chatId), draft }
             }
           }
           const result = yield* graph.appendMessage({

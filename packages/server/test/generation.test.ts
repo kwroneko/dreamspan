@@ -18,7 +18,7 @@ import { Writer } from "../src/db/Database.ts"
 import { importCard } from "../src/formats/cardImport.ts"
 import { importStPreset } from "../src/formats/preset.ts"
 import { json, run } from "./formats/support.ts"
-import { client, posted, serverLayer, testConfig } from "./support/config.ts"
+import { client, posted, serverLayer, testConfig, typeInto } from "./support/config.ts"
 import {
   anthropicSse,
   completionChunks,
@@ -371,12 +371,7 @@ describe("generation", () => {
       mock.setHandler((request, res) => void held.then(() => completion(request, res)))
       const { entry } = yield* posted(api.Generate({ chatId: chat.id, parentSlotId: version.slotId, branch: false }))
       yield* eventually(() => mock.requests().length === 2)
-      const draft = yield* api.SaveComposer({
-        chatId: chat.id,
-        tipSlotId: entry.slotId,
-        content: "Make it rain.",
-        expectedRowVersion: null
-      })
+      const draft = yield* typeInto(api, chat.id, entry.slotId, "Make it rain.")
       const queued = yield* api.Generate({
         chatId: chat.id,
         parentSlotId: entry.slotId,
@@ -385,7 +380,7 @@ describe("generation", () => {
         composerRowVersion: draft.rowVersion
       })
       assert.strictEqual(queued._tag, "Queued")
-      assert.strictEqual((yield* api.GetComposer({ chatId: chat.id, tipSlotId: entry.slotId }))?.status, "committed")
+      assert.strictEqual(queued.draft?.status, "committed")
       release()
       yield* eventually(() => finished(events, entry.version.id)?.status === "complete")
       yield* eventually(() => mock.requests().length === 3)
@@ -406,8 +401,8 @@ describe("generation", () => {
       )
       assert.strictEqual(path.at(-1)!.slotId, leaf)
       assert.strictEqual(path.at(-1)!.version.direction, "Make it rain.")
-      const moved = yield* api.GetComposer({ chatId: chat.id, tipSlotId: leaf })
-      assert.deepStrictEqual([moved?.status, moved?.content], ["committed", ""])
+      const moved = yield* api.OpenComposer({ chatId: chat.id, tipSlotId: leaf })
+      assert.deepStrictEqual([moved.id, moved.status, moved.content], [draft.id, "committed", ""])
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 

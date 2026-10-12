@@ -6,7 +6,18 @@ import { RpcClient, type RpcClientError, RpcSerialization } from "effect/rpc"
 import { Socket } from "effect/socket"
 import type { TestServer } from "./server.ts"
 
-type Client = RpcClient.FromGroup<typeof AppApi, RpcClientError.RpcClientError>
+export type Client = RpcClient.FromGroup<typeof AppApi, RpcClientError.RpcClientError>
+
+/** Logs in over HTTP, and resolves to the session cookie. */
+export const loginCookie = async (server: TestServer, handle: string, password: string) => {
+  const response = await fetch(`${server.url}/auth/login`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ handle, password })
+  })
+  if (response.status !== 204) throw new Error(`login as ${handle} failed: ${response.status}`)
+  return (response.headers.get("set-cookie") ?? "").split(";")[0]!
+}
 
 /** Logs in over HTTP and runs `use` with an RPC client acting as that user. */
 export const asUser = async <A>(
@@ -14,14 +25,14 @@ export const asUser = async <A>(
   handle: string,
   password: string,
   use: (client: Client) => Effect.Effect<A, unknown>
+): Promise<A> => withCookie(server, await loginCookie(server, handle, password), use)
+
+/** Runs `use` with an RPC client acting as the user whose session `cookie` is. */
+export const withCookie = async <A>(
+  server: TestServer,
+  cookie: string,
+  use: (client: Client) => Effect.Effect<A, unknown>
 ): Promise<A> => {
-  const response = await fetch(`${server.url}/auth/login`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ handle, password })
-  })
-  if (response.status !== 204) throw new Error(`login as ${handle} failed: ${response.status}`)
-  const cookie = (response.headers.get("set-cookie") ?? "").split(";")[0]!
   const program = Effect.gen(function* () {
     const protocol = yield* Layer.build(
       RpcClient.layerProtocolSocket().pipe(

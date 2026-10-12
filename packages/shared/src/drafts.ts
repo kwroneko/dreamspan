@@ -42,6 +42,11 @@ export class Draft extends Schema.Class<Draft>("Draft")({
   /** What the draft was started from, for conflict detection on commit. */
   baseRevision: Schema.NullOr(Schema.String),
   rowVersion: Schema.Int,
+  /**
+   * The drafting session, counted up each time one ends (committed or discarded). Text
+   * typed in a session that has ended is never taken as the start of the next one.
+   */
+  session: Schema.Int,
   createdAt: Schema.Number,
   updatedAt: Schema.Number,
   /**

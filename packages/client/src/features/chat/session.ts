@@ -19,7 +19,7 @@ import {
 import type { Cast, CastChange } from "@rp/shared/chatSetupApi.ts"
 import type { CardFields } from "@rp/shared/macros/context.ts"
 import { NotFound } from "@rp/shared/errors.ts"
-import type { BranchSwitch, ChatEvent, PathRange, PathWindow } from "@rp/shared/chatApi.ts"
+import type { BranchSwitch, ChatEvent, PathRange, PathWindow, SendResult } from "@rp/shared/chatApi.ts"
 import { Cause, Context, Effect, Exit, Fiber, Schedule, Stream } from "effect"
 import { Atom, type AtomRegistry, AtomRegistry as Registry } from "effect/reactivity"
 import { type AppError, describeCause } from "../../errors.ts"
@@ -61,6 +61,12 @@ export interface ChatView {
 type Client = AppClient["Service"]
 /** The events that change loaded state, and are applied again after a read lands. */
 type Replayable = Extract<ChatEvent, { readonly _tag: "Slot" | "Version" | "Chat" }>
+/** A composer draft a send takes its text from: its tip, and the row version to commit. */
+export interface ComposerSource {
+  readonly tip: SlotId | null
+  readonly rowVersion: number
+}
+
 export type Outcome<A> = { readonly ok: true; readonly value: A } | { readonly ok: false; readonly error: AppError }
 
 const withInContext = (entry: PathEntry, version: Version) =>
@@ -548,12 +554,12 @@ export class ChatSession {
       }
       // The path's leaf moves on below the window too, so the composer follows it.
       if (this.view.newer !== null && entry.parentSlotId !== null && entry.parentSlotId === this.view.leafSlotId) {
-        this.extended.set(entry.slotId, entry.parentSlotId)
+        this.lastAppend = { from: entry.parentSlotId, to: entry.slotId }
         this.update({ leafSlotId: entry.slotId })
       }
       return false
     }
-    this.extended.set(entry.slotId, entry.parentSlotId)
+    this.lastAppend = { from: entry.parentSlotId, to: entry.slotId }
     let next = [...entries, entry]
     let older = this.view.older
     if (next.length > MAX_LOADED) {
@@ -574,7 +580,7 @@ export class ChatSession {
     this.followAtBottom()
     if (this.applySlot(entry)) return
     this.requestedLeaf = null
-    this.extended.set(entry.slotId, entry.parentSlotId)
+    this.lastAppend = { from: entry.parentSlotId, to: entry.slotId }
     this.update({ leafSlotId: entry.slotId })
     void this.open(null)
   }
@@ -624,37 +630,40 @@ export class ChatSession {
   /**
    * The user's message at the leaf, as `speaker` (Send as X), then a reply to it by
    * `replySpeaker`. Onto a reply still being written, it's queued and the server posts it,
-   * with its reply, when that one ends (DESIGN §2.2). `sent` says whether the message went.
+   * with its reply, when that one ends (DESIGN §2.2). `sent` says whether the message went,
+   * and `draft` is the composer draft as the send left it.
    */
   async send(
     content: string,
     speaker: EntityId | null = null,
     replySpeaker: EntityId | null = null,
-    /** The composer draft the text came from, committed with it (DESIGN §6.2). */
-    composerRowVersion?: number
-  ): Promise<{ readonly sent: boolean; readonly outcome: Outcome<unknown> }> {
+    /** The composer draft the text came from: its tip, and its row version to commit (DESIGN §6.2). */
+    composer?: ComposerSource
+  ): Promise<{ readonly sent: boolean; readonly outcome: Outcome<unknown>; readonly draft: SendResult["draft"] }> {
+    const parentSlotId = composer === undefined ? this.view.leafSlotId : composer.tip
     const result = await this.queueSnapshot(
       this.call((client) =>
         client("SendMessage", {
           chatId: this.chatId,
-          parentSlotId: this.view.leafSlotId,
+          parentSlotId,
           branch: this.onOtherBranch(),
           content,
           speakerEntityId: speaker,
           // If it's queued, the server asks for the reply when it posts, from the same speaker.
           replySpeakerEntityId: replySpeaker,
-          ...(composerRowVersion === undefined ? {} : { composerRowVersion })
+          ...(composer === undefined ? {} : { composerRowVersion: composer.rowVersion })
         })
       ),
       (value) => (value._tag === "Queued" ? value.queue : null)
     )
     if (!result.ok) {
       if (result.error.tag === "LeafMoved") this.reload()
-      return { sent: false, outcome: result }
+      return { sent: false, outcome: result, draft: null }
     }
-    if (result.value._tag === "Queued") return { sent: true, outcome: result }
+    const { draft } = result.value
+    if (result.value._tag === "Queued") return { sent: true, outcome: result, draft }
     this.appended(result.value.entry, result.value.chat)
-    return { sent: true, outcome: await this.generate(result.value.entry.slotId, replySpeaker) }
+    return { sent: true, outcome: await this.generate(result.value.entry.slotId, replySpeaker), draft }
   }
 
   /**
@@ -666,7 +675,7 @@ export class ChatSession {
     speaker: EntityId | null = null,
     direction = "",
     composerRowVersion?: number
-  ): Promise<Outcome<unknown>> {
+  ): Promise<Outcome<SendResult>> {
     const branch = parentSlotId === this.view.leafSlotId && this.onOtherBranch()
     const result = await this.queueSnapshot(
       this.call((client) =>
@@ -815,22 +824,31 @@ export class ChatSession {
     return result
   }
 
-  // --- Where the leaf went: messages appended below it, as opposed to a jump elsewhere.
+  // --- Where the leaf went, for the composer (composerDraft.ts).
 
-  /** Each slot that became the leaf by being appended below it, with the leaf before it. */
-  private readonly extended = new Map<SlotId, SlotId | null>()
+  /** The last time the leaf moved by a message appended below it. */
+  private lastAppend: { readonly from: SlotId | null; readonly to: SlotId } | null = null
 
   /**
-   * Whether the leaf got from `from` to `to` by messages appended below it (a send, a reply,
-   * the queue posting), rather than by moving elsewhere: the composer's draft went along.
+   * Whether the leaf's last move was from `from` to `to` by a message appended below it (a
+   * send, a reply, the queue posting), rather than a jump elsewhere.
    */
-  continues(from: SlotId | null, to: SlotId | null): boolean {
-    let at: SlotId | null | undefined = to
-    for (let step = 0; step < 50 && at !== undefined && at !== null; step++) {
-      at = this.extended.get(at)
-      if (at === from) return true
-    }
-    return false
+  movedByAppend(from: SlotId | null, to: SlotId | null): boolean {
+    return this.lastAppend !== null && this.lastAppend.from === from && this.lastAppend.to === to
+  }
+
+  /** A branch the user is starting with "Branch from here" (DESIGN §6.2: it takes the composer along). */
+  private branchStart: SlotId | null = null
+
+  startBranch(at: SlotId) {
+    this.branchStart = at
+  }
+
+  /** Whether `tip` is the branch being started; it is only once. */
+  takeBranchStart(tip: SlotId | null): boolean {
+    if (tip === null || tip !== this.branchStart) return false
+    this.branchStart = null
+    return true
   }
 
   private refreshSlot(slotId: SlotId) {

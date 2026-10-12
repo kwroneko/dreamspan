@@ -315,6 +315,7 @@ export const Message = memo(function Message({
         <Link
           to="."
           search={{ leaf: entry.slotId }}
+          onClick={() => session.startBranch(entry.slotId)}
           className="inline-flex h-9 items-center rounded-md px-3 text-sm text-muted hover:bg-surface-raised hover:text-text"
         >
           Branch from here

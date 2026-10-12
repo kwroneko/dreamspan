@@ -39,3 +39,8 @@ export const draftHistory = [
   `CREATE TRIGGER drafts_gc_ref AFTER DELETE ON entity_refs
     BEGIN DELETE FROM drafts WHERE target_kind = 'entity_field' AND target_id = OLD.id; END`
 ]
+
+// Migration 0013: a draft's drafting session, counted up each time one ends (committed or
+// discarded). A save names the session its text was typed in, so text typed into a session
+// that ended since is never taken as the start of the next (ARCHITECTURE §3.10).
+export const draftSessions = [`ALTER TABLE drafts ADD COLUMN session INTEGER NOT NULL DEFAULT 1`]

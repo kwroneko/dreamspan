@@ -1,6 +1,10 @@
 // The composer's text on the server (DESIGN §6.2, DATA-MODEL §10), merged into AppApi. Each
 // branch tip of a chat has its own composer, a draft with server-side undo history: saved
 // while the user types, read back on a reload or another device, committed with the send.
+//
+// A composer's draft moves with its tip when a message is appended there, so the client
+// names the draft its text was typed into (its id, row version and session), never just
+// the tip: the server saves the text onto that draft wherever it is now (ARCHITECTURE §3.10).
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
 import { ChatId, SlotId } from "./chat.ts"
@@ -13,45 +17,57 @@ export class TextTooLong extends Schema.TaggedError<TextTooLong>()("TextTooLong"
   max: Schema.Int
 }) {}
 
-/** Which composer: a chat's, at the slot the next message goes under (null before the first). */
-const Composer = { chatId: ChatId, tipSlotId: Schema.NullOr(SlotId) }
-
 const Errors = [NotFound, ServerError] as const
-const Writes = [NotFound, StaleWrite, ServerError] as const
 
 /**
- * A SaveComposer, also as a closing page sends it with the editors' drafts (`composers` in
+ * Text typed into a composer: the draft it was typed into, as the client last had it, and
+ * the text now. Also what a closing page sends with the editors' drafts (`composers` in
  * `POST /library/drafts`, with keepalive).
  */
 export const ComposerBeacon = Schema.Struct({
-  ...Composer,
-  content: Schema.String,
-  expectedRowVersion: Schema.NullOr(Schema.Int)
+  chatId: ChatId,
+  draftId: Schema.String,
+  rowVersion: Schema.Int,
+  session: Schema.Int,
+  content: Schema.String
 })
 
 export class ComposerApi extends RpcGroup.make(
-  /** The composer's draft, or null if nothing was ever typed there. */
-  Rpc.make("GetComposer", { payload: Composer, success: Schema.NullOr(Draft), error: Schema.Union([...Errors]) }),
   /**
-   * Saves what's typed (debounced by the client). `expectedRowVersion` is the draft as last
-   * read, null before there is one: another tab's newer text is a StaleWrite, never
-   * overwritten unseen. Every change is kept in the draft's history.
+   * The composer at a tip of the chat (null: before the first message), made empty if
+   * there's none. `copyFrom` (a composer draft's id) starts a branch: its text is copied
+   * in, unless this tip has text of its own (DESIGN §6.2).
+   */
+  Rpc.make("OpenComposer", {
+    payload: { chatId: ChatId, tipSlotId: Schema.NullOr(SlotId), copyFrom: Schema.optionalKey(Schema.String) },
+    success: Draft,
+    error: Schema.Union([...Errors])
+  }),
+  /**
+   * Saves what's typed (debounced by the client) onto the draft it was typed into. Another
+   * tab's newer text stays one step back in the history. If that draft's text was sent or
+   * discarded since, or the draft is gone, the text goes to the bin's recovered texts
+   * instead (`recovered`), and `draft` is the draft as it is now (null if gone).
    */
   Rpc.make("SaveComposer", {
     payload: ComposerBeacon.fields,
-    success: Draft,
-    error: Schema.Union([...Writes, TextTooLong])
+    success: Schema.Struct({ draft: Schema.NullOr(Draft), recovered: Schema.Boolean }),
+    error: Schema.Union([...Errors, TextTooLong])
   }),
-  /** The restorable states of the composer's text, newest first. */
+  /** The restorable states of the composer draft's text, newest first. */
   Rpc.make("ComposerHistory", {
-    payload: { ...Composer, limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 1000 })) },
+    payload: {
+      chatId: ChatId,
+      draftId: Schema.String,
+      limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 1000 }))
+    },
     success: Schema.Array(DraftState),
     error: Schema.Union([...Errors])
   }),
   /** Moves the text back to an earlier state; the restore can be undone too. */
   Rpc.make("RestoreComposer", {
-    payload: { ...Composer, seq: Schema.Int, expectedRowVersion: Schema.Int },
+    payload: { chatId: ChatId, draftId: Schema.String, seq: Schema.Int, expectedRowVersion: Schema.Int },
     success: Draft,
-    error: Schema.Union([...Writes])
+    error: Schema.Union([NotFound, StaleWrite, ServerError])
   })
 ) {}
