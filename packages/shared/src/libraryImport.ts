@@ -21,7 +21,9 @@ export class LibraryImport extends Schema.Class<LibraryImport>("LibraryImport")(
   /** On a re-import: what happened to every ref following the upstream, transitively. */
   followers: Schema.Array(ImportedFollower),
   /** The card's note made from ST's Character's Note, if the card has one. */
-  note: Schema.NullOr(LibraryRef)
+  note: Schema.NullOr(LibraryRef),
+  /** On a re-import of a card from a file without an avatar: the card kept its current one. */
+  keptAvatar: Schema.Boolean
 }) {}
 
 /** The answer to one uploaded file. */

@@ -457,12 +457,26 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
       ImportFile: (input) =>
         Effect.gen(function* () {
           const { userId, intoRefId, kind } = input
+          const into = intoRefId === null ? null : yield* lib.ownedRef(userId, intoRefId)
+          if (into !== null && into.kind !== kind) {
+            return yield* new RefOperationRefused({
+              refId: into.id,
+              reason: `This file is a ${kind}, not a ${into.kind}.`
+            })
+          }
+          // A new version without an avatar (a JSON card) keeps the card's current one, which
+          // would otherwise be dropped as the new import's change.
+          const current =
+            kind === "card" && into !== null && !input.media.some((file) => file.role === "avatar")
+              ? (yield* lib.loadDoc(into.head_revision_id)).avatar_media_id
+              : null
+          const keptAvatar = typeof current === "string" ? current : null
           // Stored as the format worker encoded it, unless a card's media change it.
           let doc: Doc | EncodedDoc = new EncodedDoc(input.docJson, input.docHash, input.searchText)
-          if (kind === "card" && input.media.length > 0) {
+          if (kind === "card" && (input.media.length > 0 || keptAvatar !== null)) {
             const card = JSON.parse(input.docJson) as Record<string, unknown>
             const assets: Array<[string, string]> = []
-            card.avatar_media_id = null
+            card.avatar_media_id = keptAvatar
             for (const file of input.media) {
               const id = yield* recordMedia(userId, file)
               if (file.role === "avatar") card.avatar_media_id = id
@@ -480,7 +494,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
           let upstream: RefRow
           let outcome: MergeOutcome | null = null
           let followers: ReadonlyArray<FollowerMerge> = []
-          if (intoRefId === null) {
+          if (into === null) {
             upstream = yield* createUpstream({
               userId,
               kind,
@@ -492,15 +506,8 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
               ...source
             })
           } else {
-            const ref = yield* lib.ownedRef(userId, intoRefId)
-            if (ref.kind !== kind) {
-              return yield* new RefOperationRefused({
-                refId: intoRefId,
-                reason: `This file is a ${kind}, not a ${ref.kind}.`
-              })
-            }
-            const merged = yield* importInto(ref, { doc, schemaVersion: input.schemaVersion, ...source })
-            upstream = yield* reload(ref.id)
+            const merged = yield* importInto(into, { doc, schemaVersion: input.schemaVersion, ...source })
+            upstream = yield* reload(into.id)
             outcome = merged.outcome
             followers = merged.change.followers
           }
@@ -513,7 +520,8 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
             followers: yield* Effect.forEach(followers, ({ refId, outcome }) =>
               Effect.map(reload(refId), (ref) => new ImportedFollower({ refId, label: ref.label, outcome }))
             ),
-            note: note && toLibraryRef(note)
+            note: note && toLibraryRef(note),
+            keptAvatar: keptAvatar !== null
           })
         }).pipe(transaction(sql, "ImportFile"))
     } satisfies Partial<Parameters<typeof WriteOps.of>[0]>

@@ -3,6 +3,7 @@
 // thread. Both routes act as the user the session names, behind the same cross-site guard
 // as every request (server.ts), and refuse content types a cross-site form can send.
 import { CurrentUser } from "@rp/shared/api.ts"
+import { ImportIssue, ImportReport } from "@rp/shared/importReport.ts"
 import {
   type ExportFormat,
   ExportFormat as ExportFormatSchema,
@@ -169,9 +170,20 @@ export const layer = Layer.unwrap(
                 sourceHash: parsed.sha256,
                 media: parsed.media.map(({ bytes: _, ...file }) => file)
               })
-              return yield* HttpServerResponse.schemaJson(ImportResult)(
-                new ImportResult({ report: parsed.report, library })
-              )
+              const report = library.keptAvatar
+                ? new ImportReport({
+                    format: parsed.report.format,
+                    issues: [
+                      ...parsed.report.issues,
+                      new ImportIssue({
+                        level: "info",
+                        code: "card.avatar_kept",
+                        message: "This file has no avatar, so the card keeps the one it had."
+                      })
+                    ]
+                  })
+                : parsed.report
+              return yield* HttpServerResponse.schemaJson(ImportResult)(new ImportResult({ report, library }))
             })
           )
           return Option.getOrElse(taken, () => jsonError(503, "the server is busy with other files; try again"))

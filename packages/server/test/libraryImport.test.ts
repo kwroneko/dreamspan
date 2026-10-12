@@ -119,6 +119,22 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
     })
   )
 
+  it.effect("a new version without an avatar keeps the card's avatar, and says so", () =>
+    Effect.gen(function* () {
+      const avatar = png()
+      const first = yield* imported(png(cardChunk("chara", stCardV2())), "wren.png")
+      const second = yield* imported(json(stCardV2()), "wren.json", first.library!.ref.id)
+      assert.include(
+        second.report.issues.map((issue) => issue.code),
+        "card.avatar_kept"
+      )
+      assert.isTrue(second.library!.keptAvatar)
+      const { bytes } = yield* exported(second.library!.ref.id, "card-png")
+      // The exported PNG is the card's own image, not the placeholder.
+      assert.strictEqual(sha256(run(importCard(bytes)).avatar!.bytes), sha256(avatar))
+    })
+  )
+
   it.effect("a card without a PNG avatar still exports as a PNG", () =>
     Effect.gen(function* () {
       const { library } = yield* imported(json(stCardV2()), "wren.json")
