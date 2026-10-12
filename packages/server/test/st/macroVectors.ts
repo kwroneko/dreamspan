@@ -6,7 +6,7 @@
 // no `{{pick}}` (seeded differently, ARCHITECTURE §10), nothing about origins, freezing or
 // limits, which ST doesn't have. ST evaluates each with the fixture character's chat open,
 // so card and chat macros read the fixture card and chat, and our engine gets the same.
-// A vector whose difference ARCHITECTURE documents names the line as its `deviation`.
+// A vector whose difference ARCHITECTURE documents cites the text as its `deviation`.
 
 type VarValue = string | number
 
@@ -61,16 +61,23 @@ export const DEFAULT_MACRO_CONTEXT: MacroContextInput = { user: "User", char: "C
 const FIXTURE_NAMES = { user: "Tobin", char: "Mira Vance" }
 
 /**
- * The deviations ARCHITECTURE §10 documents, by line, with text that line contains (a test
- * checks it, so an edit that moves the line updates the citation).
+ * The deviations ARCHITECTURE documents, each by its section's heading and text the section
+ * contains (a test checks it, so an edit that drops or moves the text updates the citation).
  */
 export const DEVIATIONS = {
-  instructOff: { line: 877, quote: "the instruct, system-prompt and context-template macros resolve as in ST" },
-  noExtensions: { line: 880, quote: "`{{hasExtension}}` is always false" },
-  ownKeys: { line: 846, quote: "Names are own keys only" },
-  cardFieldNames: { line: 881, quote: "Names inside a card field's macros resolve against the same bindings" }
+  instructOff: {
+    section: "10. Macros",
+    quote: "the instruct, system-prompt and context-template macros resolve as in ST"
+  },
+  noExtensions: { section: "10. Macros", quote: "`{{hasExtension}}` is always false" },
+  ownKeys: { section: "10. Macros", quote: "Names are own keys only" },
+  cardFieldNames: {
+    section: "10. Macros",
+    quote: "Names inside a card field's macros resolve against the same bindings"
+  }
 }
-const cite = ({ line, quote }: { readonly line: number; readonly quote: string }) => `ARCHITECTURE.md:${line}: ${quote}`
+const cite = ({ section, quote }: { readonly section: string; readonly quote: string }) =>
+  `ARCHITECTURE.md § ${section}: "${quote}"`
 const INSTRUCT_OFF = cite(DEVIATIONS.instructOff)
 const NO_EXTENSIONS = cite(DEVIATIONS.noExtensions)
 const OWN_KEYS = cite(DEVIATIONS.ownKeys)
