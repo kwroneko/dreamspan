@@ -108,7 +108,7 @@ const cardPng = () => {
 }
 
 /**
- * The context assembler's fixtures (ARCHITECTURE §13): cards without a lorebook, since
+ * The context assembler's fixtures (ARCHITECTURE §15): cards without a lorebook, since
  * matching ST's lorebooks isn't a goal (DESIGN §1.3). Oren has a prompt override, post-history
  * instructions, two example blocks and a Character's Note in the user's role; Wren has none
  * of them, and no personality.

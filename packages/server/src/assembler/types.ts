@@ -1,4 +1,4 @@
-// The assembler's data, all plain JSON (DATA-MODEL §7.1; ARCHITECTURE §13).
+// The assembler's data, all plain JSON (DATA-MODEL §7.1; ARCHITECTURE §15).
 import type { FrozenValues } from "@rp/shared/macros/expand.ts"
 import type { VariableEffect } from "@rp/shared/macros/variables.ts"
 import type { CardDoc } from "@rp/shared/docs/card.ts"

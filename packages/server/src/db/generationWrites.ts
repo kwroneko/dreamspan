@@ -1,4 +1,4 @@
-// Generation's writes: rollouts and the user's defaults (ARCHITECTURE §13).
+// Generation's writes: rollouts and the user's defaults (ARCHITECTURE §15).
 import type { UserId } from "@rp/shared/domain.ts"
 import { NotFound } from "@rp/shared/errors.ts"
 import { uuidv7 } from "@rp/shared/id.ts"

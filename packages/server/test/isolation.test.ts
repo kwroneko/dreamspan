@@ -1184,7 +1184,7 @@ const seed = Effect.gen(function* () {
  */
 const storage: Record<string, (reader: Reader["Service"], actor: Party, owner: Party) => Effect.Effect<void, unknown>> =
   {
-    // The run inspector's rebuild (ARCHITECTURE §14): another user's snapshot, as is, rebuilds nothing.
+    // The run inspector's rebuild (ARCHITECTURE §15): another user's snapshot, as is, rebuilds nothing.
     RebuildContext: (reader, actor, owner) =>
       Effect.gen(function* () {
         const { snapshot } = yield* reader.AssembleContext({

@@ -1,4 +1,4 @@
-// The provider-neutral request mapped per provider, as ST 1.19 maps its sources (ARCHITECTURE §13).
+// The provider-neutral request mapped per provider, as ST 1.19 maps its sources (ARCHITECTURE §15).
 import type { Api, AssistantMessage, Context, Message } from "@earendil-works/pi-ai"
 import type { AssembledRequest, ModelInput, RequestMessage } from "./types.ts"
 

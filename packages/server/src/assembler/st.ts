@@ -1,4 +1,4 @@
-// SillyTavern 1.19's chat-completion prompt building, function by function (ARCHITECTURE §13,
+// SillyTavern 1.19's chat-completion prompt building, function by function (ARCHITECTURE §15,
 // "ST-compatible mode"; each function names the ST one it follows).
 import type { PresetDoc, PresetPrompt } from "@rp/shared/docs/preset.ts"
 import { AssemblyFailed, type GenerationType, type Role } from "./types.ts"
@@ -137,7 +137,7 @@ export const injectInChat = (
 /**
  * Token counts against the preset's budget. ST counts with the model's tokenizer; this
  * estimates, a token per four characters plus three per message, so what's cut at the
- * margin can differ (ARCHITECTURE §13).
+ * margin can differ (ARCHITECTURE §15).
  */
 export const tokensOf = (message: { readonly content: string; readonly name?: string | undefined }) =>
   message.content.length === 0 ? 0 : Math.ceil((message.content.length + (message.name?.length ?? 0)) / 4) + 3

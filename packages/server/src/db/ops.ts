@@ -1090,7 +1090,7 @@ export class WriteOps extends RpcGroup.make(
     success: LibraryRef,
     error: Schema.Union([NotFound, StorageError])
   }),
-  // --- Generation (ARCHITECTURE.md §13).
+  // --- Generation (ARCHITECTURE.md §15).
   /**
    * Opens a generation's rollout before its request is sent (DATA-MODEL §7.1): the row, its
    * frozen context snapshot (JSON text, stored as given), the version's link to it and to
@@ -1496,7 +1496,7 @@ export class ReadOps extends RpcGroup.make(
     success: StoredFile,
     error: Schema.Union([NotFound, StorageError])
   }),
-  // --- Context assembly (ARCHITECTURE.md §13).
+  // --- Context assembly (ARCHITECTURE.md §15).
   /**
    * The context for a version being generated, built by the assembler's stages from this one
    * read transaction: a context snapshot (assembler/types.ts) as JSON text, which the main

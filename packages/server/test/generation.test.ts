@@ -1,4 +1,4 @@
-// Real generation (ARCHITECTURE §13) over a real server, its workers and a socket, against
+// Real generation (ARCHITECTURE §15) over a real server, its workers and a socket, against
 // local mock providers that record what they're sent: the assembled context goes out as
 // assembled, the reply streams into the version, and the rollout, its snapshot and the
 // ledger record it. No real keys: the Anthropic one is made up, and goes only to the mock.

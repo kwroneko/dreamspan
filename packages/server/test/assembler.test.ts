@@ -1,4 +1,4 @@
-// The context assembler's pipeline over in-memory chats (ARCHITECTURE §13). What ST would
+// The context assembler's pipeline over in-memory chats (ARCHITECTURE §15). What ST would
 // send for a preset is checked against ST itself by `npm run test:st`; these pin the rest:
 // macros by source, rebuilding, notes, the budget, prefill, breakpoints and our layouts.
 import type { EntityId } from "@rp/shared/chat.ts"

@@ -1,4 +1,4 @@
-// The assembler's stage pipeline and its sources (PLUGINS §8; ARCHITECTURE §13).
+// The assembler's stage pipeline and its sources (PLUGINS §8; ARCHITECTURE §15).
 import type { FoldableEvent, ChatState } from "@rp/shared/state.ts"
 import type { FrozenValues, MacroLookup } from "@rp/shared/macros/expand.ts"
 import type { VariableEffect } from "@rp/shared/macros/variables.ts"

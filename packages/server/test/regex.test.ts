@@ -1,4 +1,4 @@
-// Preset regex scripts on V8's linear-time engine (ARCHITECTURE §13): what runs matches what
+// Preset regex scripts on V8's linear-time engine (ARCHITECTURE §15): what runs matches what
 // ST's pattern matches, and what the linear engine can't run is refused, never backtracked.
 import { describe, expect, it } from "vitest"
 import { caseless, compile, run } from "../src/assembler/regex.ts"

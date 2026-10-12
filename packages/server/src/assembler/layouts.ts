@@ -1,4 +1,4 @@
-// Our layouts' card blocks and tail directive (DESIGN §5.2, §5.3; ARCHITECTURE §13).
+// Our layouts' card blocks and tail directive (DESIGN §5.2, §5.3; ARCHITECTURE §15).
 import type { Names } from "./macros.ts"
 import { type Assembly, need } from "./pipeline.ts"
 import type { Text } from "./st.ts"

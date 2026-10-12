@@ -35,7 +35,16 @@ RpcServer.layer(ReadOps, { concurrency: 1, disableFatalDefects: true }).pipe(
           makeAssemblyReadHandlers
         ]),
         ([core, providers, accounts, imports, chatSetup, stImport, editor, assembly]) =>
-          ReadOps.of({ ...core, ...providers, ...accounts, ...imports, ...chatSetup, ...stImport, ...editor, ...assembly })
+          ReadOps.of({
+            ...core,
+            ...providers,
+            ...accounts,
+            ...imports,
+            ...chatSetup,
+            ...stImport,
+            ...editor,
+            ...assembly
+          })
       )
     )
   ),

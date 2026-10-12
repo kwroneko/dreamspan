@@ -408,7 +408,7 @@ export const serverWith = <E>(
 
 /**
  * The whole server, minus configuration, generating with the context assembler and the
- * provider layer (ARCHITECTURE §13). The fake generator is only in the development entry
+ * provider layer (ARCHITECTURE §15). The fake generator is only in the development entry
  * point (dev/main.ts) and the tests.
  */
 export const ServerLive = serverWith(ContextGenerator.layer)

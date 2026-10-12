@@ -1,4 +1,4 @@
-// Cache breakpoints, placed structurally, as deltas from reference-harness's scheme (ARCHITECTURE §13).
+// Cache breakpoints, placed structurally, as deltas from reference-harness's scheme (ARCHITECTURE §15).
 import type { Stability } from "./st.ts"
 import type { AssembledRequest } from "./types.ts"
 

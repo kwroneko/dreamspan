@@ -1,4 +1,4 @@
-// The context assembler against ST (DESIGN §1.2, ARCHITECTURE §13): for each gate card's
+// The context assembler against ST (DESIGN §1.2, ARCHITECTURE §15): for each gate card's
 // chat, each preset and each generation type, the request ST sends and the one we build for
 // the settings ST had in force must be equal, apart from the documented differences.
 import type { Browser } from "@playwright/test"
@@ -21,7 +21,7 @@ import { captureWithSettings, savePoisonPreset, type Summary } from "./st.ts"
 const MESSAGE = "Is the crossing still possible tonight?"
 const POISON = "st-diff poison"
 
-/** The differences ARCHITECTURE §13 documents, each with the lines of the diff it explains. */
+/** The differences ARCHITECTURE §15 documents, each with the lines of the diff it explains. */
 const DOCUMENTED: ReadonlyArray<{
   readonly why: string
   readonly matches: (line: string, config: Config, settings: Record<string, unknown>) => boolean
@@ -237,7 +237,7 @@ export const compareAssembly = async (
       title: "Context assembler: documented differences",
       notes: DOCUMENTED.map((difference) => difference.why),
       differences: documented,
-      expected: "ARCHITECTURE §13 documents each"
+      expected: "ARCHITECTURE §15 documents each"
     }
   ]
 }

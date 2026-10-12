@@ -1,4 +1,4 @@
-// Client RPC handlers for the user's generation defaults (ARCHITECTURE §13). Storage checks
+// Client RPC handlers for the user's generation defaults (ARCHITECTURE §15). Storage checks
 // that the model and the preset are the user's own: anything else is NotFound.
 import { type AppApi, CurrentUser } from "@rp/shared/api.ts"
 import { ServerError } from "@rp/shared/errors.ts"

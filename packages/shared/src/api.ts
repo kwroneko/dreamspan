@@ -273,7 +273,7 @@ export class AppApi extends RpcGroup.make(
     success: Schema.Array(LibraryRef),
     error: ServerError
   }),
-  // --- Generation (ARCHITECTURE.md §13).
+  // --- Generation (ARCHITECTURE.md §15).
   /** The model and preset the user's chats generate with when they don't choose. */
   Rpc.make("GetGenerationDefaults", { success: GenerationDefaults, error: ServerError }),
   /** Both defaults at once; NotFound when either isn't one of the user's own. */

@@ -1,4 +1,4 @@
-// The real generator: assembly, rollout, provider stream (ARCHITECTURE §13, "Generation").
+// The real generator: assembly, rollout, provider stream (ARCHITECTURE §15, "Generation").
 import { uuidv7 } from "@rp/shared/id.ts"
 import type { SlotId, VersionId } from "@rp/shared/chat.ts"
 import type { ConnectionId, ModelId } from "@rp/shared/providers.ts"

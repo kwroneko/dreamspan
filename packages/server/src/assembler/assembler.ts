@@ -1,4 +1,4 @@
-// The assembler with its built-in stages and macros registered (ARCHITECTURE §13).
+// The assembler with its built-in stages and macros registered (ARCHITECTURE §15).
 import { registerBuiltinMacros } from "@rp/shared/macros/builtins.ts"
 import { makeMacroRegistry, type MacroRegistry } from "@rp/shared/macros/registry.ts"
 import { Effect, type Scope } from "effect"

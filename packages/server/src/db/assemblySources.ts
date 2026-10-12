@@ -1,5 +1,5 @@
 // The assembler's sources over the database, every read the acting user's, and the pins a
-// rebuild reads again (ARCHITECTURE §13).
+// rebuild reads again (ARCHITECTURE §15).
 import type { ChatId } from "@rp/shared/chat.ts"
 import { CardDoc } from "@rp/shared/docs/card.ts"
 import { NoteDoc } from "@rp/shared/docs/note.ts"

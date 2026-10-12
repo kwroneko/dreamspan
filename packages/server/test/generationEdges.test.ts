@@ -1,4 +1,4 @@
-// Generation at the edges (ARCHITECTURE §13), over a real server and local mock providers
+// Generation at the edges (ARCHITECTURE §15), over a real server and local mock providers
 // (no real keys): samplers on the APIs ST maps them for, and a stop at any moment.
 import { assert, describe, it } from "@effect/vitest"
 import { type Chat, type EntityId, NewVersion, type SlotId } from "@rp/shared/chat.ts"

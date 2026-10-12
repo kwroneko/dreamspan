@@ -1,4 +1,4 @@
-// Context assembly and rebuilding in the reader workers (ARCHITECTURE §13).
+// Context assembly and rebuilding in the reader workers (ARCHITECTURE §15).
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { makeAssembler } from "../assembler/assembler.ts"

@@ -1,4 +1,4 @@
-// Macro expansion by source, for the assembler (DESIGN §5.6; ARCHITECTURE §10, §13).
+// Macro expansion by source, for the assembler (DESIGN §5.6; ARCHITECTURE §10, §15).
 import type { CardFields, ChatMessage, MacroContext } from "@rp/shared/macros/context.ts"
 import { expand, type TextOrigin } from "@rp/shared/macros/expand.ts"
 import type { VariableEffect } from "@rp/shared/macros/variables.ts"

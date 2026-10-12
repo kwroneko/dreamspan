@@ -1,6 +1,6 @@
 // A preset's prompt-only regex scripts, as ST 1.19 runs them when it builds a prompt
 // (extensions/regex/engine.js), on V8's linear-time engine and within a time and output
-// budget (ARCHITECTURE §13).
+// budget (ARCHITECTURE §15).
 import { setFlagsFromString } from "node:v8"
 import { createContext, Script } from "node:vm"
 import type { RegexScript } from "@rp/shared/docs/preset.ts"
@@ -116,7 +116,7 @@ class OutputLimit extends Error {}
 
 /**
  * ST's runRegexScript, its replacement already expanded, the text it makes charged to `output`.
- * It loops over `exec` because V8's `replace` can hang where no timeout reaches (§13).
+ * It loops over `exec` because V8's `replace` can hang where no timeout reaches (§15).
  */
 export const run = (
   regex: RegExp,

@@ -1,4 +1,4 @@
-// Context assembly over the database, in a reader worker (ARCHITECTURE §13): the chat's
+// Context assembly over the database, in a reader worker (ARCHITECTURE §15): the chat's
 // state, cards through their layers, the preset's scope chain, notes and the model, all the
 // acting user's, and the same context built again from the database (invariant 6).
 import { assert, describe, it } from "@effect/vitest"
