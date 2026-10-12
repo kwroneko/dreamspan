@@ -337,17 +337,186 @@ describe("the context assembler", () => {
       { preset: preset({ prompts: [{ identifier: "main", role: "system", content: "Story so far: {{summary}}" }] }) }
     )
     expect(contents(macro)[0]).toMatch(/^system: Story so far: .* lost the ledger in the flood\./)
-    // ST's extension puts it nowhere else: the other places a note can have send nothing.
+    // The sections no note is placed in yet send nothing.
     for (const placement of [
       { mode: "section", section: "card" },
       { mode: "section", section: "author_note_top" },
-      { mode: "section", section: "author_note_bottom" },
-      { mode: "tail", role: "system" }
+      { mode: "section", section: "author_note_bottom" }
     ] as const) {
       expect(contents(await imported(placement)).join("\n")).not.toContain("lost the ledger")
     }
     const off = await imported({ mode: "section", section: "after_main_prompt" }, { events: [] })
     expect(contents(off).join("\n")).not.toContain("lost the ledger")
+  })
+
+  describe("the chat's own notes", () => {
+    const chatNote = (
+      entity: string,
+      content: string,
+      placement: NoteDoc["placement"],
+      fields: Partial<NoteDoc> = {}
+    ): NoteInput => ({
+      entity,
+      revision: `${entity}-revision`,
+      first: false,
+      doc: {
+        schema_version: 1,
+        title: entity,
+        content,
+        placement,
+        owner: { chat: "chat-1" as never },
+        exportable: false,
+        ...fields
+      }
+    })
+    const on = (...notes: ReadonlyArray<string>) =>
+      notes.map((note) => at(null, { key: "note.activate", value: { note: note as never } }))
+    const authorNote = (placement: NoteDoc["placement"], fields: Partial<NoteDoc> = {}) =>
+      chatNote("note-z-author", "{{user}} is soaked.", placement, { kind: "author_note", ...fields })
+    const main = "system: Write Mira's next reply in a fictional chat between Mira and Tobin."
+
+    it("sends one once the chat turns it on, with the chat's bindings", async () => {
+      const scene = chatNote("note-scene", "{{char}} and {{user}} wait out the storm.", {
+        mode: "depth",
+        depth: 1,
+        role: "user"
+      })
+      const off = await assembled(chat({ notes: [scene] }))
+      expect(contents(off).join("\n")).not.toContain("storm")
+      const sent = await assembled(chat({ notes: [scene], events: on("note-scene") }))
+      expect(contents(sent).slice(-3)).toEqual([
+        "assistant: You're late.",
+        "user: Mira and Tobin wait out the storm.",
+        "user: The road flooded."
+      ])
+      expect(sent.pieces.find((p) => p.id === "note:note-scene")?.source).toEqual({
+        kind: "note",
+        entity: "note-scene",
+        revision: "note-scene-revision"
+      })
+      const stashed = await assembled(
+        chat({
+          notes: [scene],
+          events: [...on("note-scene"), at(1, { key: "note.deactivate", value: { note: "note-scene" as never } })]
+        })
+      )
+      expect(contents(stashed).join("\n")).not.toContain("storm")
+    })
+
+    it("puts the author's note after the summary and before the cards' notes, as ST orders its extension prompts", async () => {
+      const summary = chatNote(
+        "note-0-summary",
+        "The ledger is lost.",
+        { mode: "depth", depth: 1, role: "system" },
+        {
+          kind: "imported_summary",
+          template: "[{{summary}}]"
+        }
+      )
+      const other = chatNote("note-a-other", "Thunder.", { mode: "depth", depth: 1, role: "system" })
+      const snapshot = await assembled(
+        chat({
+          notes: [
+            note("{{char}} never guesses.", 1, "system"),
+            other,
+            authorNote({ mode: "depth", depth: 1, role: "system" }),
+            summary
+          ],
+          events: on("note-0-summary", "note-a-other", "note-z-author")
+        })
+      )
+      expect(contents(snapshot).slice(-2)).toEqual([
+        "system: [The ledger is lost.]\nTobin is soaked.\nThunder.\nMira never guesses.",
+        "user: The road flooded."
+      ])
+    })
+
+    it("names the author's note by its state event as well as by its kind", async () => {
+      const plain = chatNote("note-z-plain", "Last.", { mode: "depth", depth: 0, role: "system" })
+      const named = chatNote("note-zz-named", "First.", { mode: "depth", depth: 0, role: "system" })
+      const snapshot = await assembled(
+        chat({
+          notes: [plain, named],
+          events: [
+            ...on("note-z-plain", "note-zz-named"),
+            at(null, { key: "author_note.set", value: { note: "note-zz-named" as never } })
+          ]
+        })
+      )
+      expect(contents(snapshot).at(-1)).toBe("system: First.\nLast.")
+    })
+
+    it("puts a note at the tail at depth 0, with its role", async () => {
+      const snapshot = await assembled(
+        chat({ notes: [authorNote({ mode: "tail", role: "assistant" })], events: on("note-z-author") })
+      )
+      expect(contents(snapshot).slice(-2)).toEqual(["user: The road flooded.", "assistant: Tobin is soaked."])
+    })
+
+    it("puts notes beside the main prompt in turn, as ST's injectToMain does", async () => {
+      const summary = (section: "before_main_prompt" | "after_main_prompt") =>
+        chatNote("note-0-summary", "The ledger is lost.", { mode: "section", section }, { kind: "imported_summary" })
+      const after = await assembled(
+        chat({
+          notes: [summary("after_main_prompt"), authorNote({ mode: "section", section: "after_main_prompt" })],
+          events: on("note-0-summary", "note-z-author")
+        })
+      )
+      expect(contents(after).slice(0, 3)).toEqual([
+        main,
+        "system: Summary: The ledger is lost.",
+        "system: Tobin is soaked."
+      ])
+      const before = await assembled(
+        chat({
+          notes: [summary("before_main_prompt"), authorNote({ mode: "section", section: "before_main_prompt" })],
+          events: on("note-0-summary", "note-z-author")
+        })
+      )
+      // Each goes in at the start in turn, so the author's note ends up first.
+      expect(contents(before).slice(0, 3)).toEqual([
+        "system: Tobin is soaked.",
+        "system: Summary: The ledger is lost.",
+        main
+      ])
+    })
+
+    it("sends a note with an interval every that many of the user's messages, as ST's author's note", async () => {
+      const every = (interval: number, messages: ReadonlyArray<FixtureMessage>) =>
+        assembled(
+          chat({
+            messages,
+            notes: [authorNote({ mode: "depth", depth: 0, role: "system" }, { interval })],
+            events: on("note-z-author")
+          })
+        ).then((snapshot) => contents(snapshot).join("\n").includes("soaked"))
+      const turns = (users: number): Array<FixtureMessage> => [
+        { side: "assistant", content: "You're late." },
+        ...Array.from({ length: users }, (_, i): Array<FixtureMessage> => [
+          { side: "user", content: `Turn ${i}.` },
+          { side: "assistant", content: `Reply ${i}.` }
+        ]).flat()
+      ]
+      // Hidden messages count, as ST counts every message of the user's.
+      const hidden = turns(2).map((m, i) => (i === 1 ? { ...m, inContext: false } : m))
+      expect(await every(2, turns(1))).toBe(false)
+      expect(await every(2, turns(2))).toBe(true)
+      expect(await every(2, hidden)).toBe(true)
+      expect(await every(2, turns(3))).toBe(false)
+      expect(await every(3, turns(3))).toBe(true)
+      expect(await every(0, turns(3))).toBe(false)
+      // 1 is every turn, even before the user's first message.
+      expect(await every(1, turns(0))).toBe(true)
+      expect(await every(2, turns(0))).toBe(false)
+      // A message the user's character speaks counts as theirs, whoever wrote it; one a
+      // character speaks doesn't.
+      const spoken: Array<FixtureMessage> = [
+        { side: "assistant", content: "Impersonated.", speaker: "tobin" },
+        { side: "user", content: "Sent as Mira.", speaker: "mira" }
+      ]
+      expect(await every(2, [...turns(1), ...spoken])).toBe(true)
+      expect(await every(2, [...turns(0), spoken[1]!, { side: "user", content: "Mine." }])).toBe(false)
+    })
   })
 
   it("keeps the newest messages the preset's budget allows, and says so", async () => {

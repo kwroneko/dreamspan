@@ -8,7 +8,7 @@ import type { UserId } from "@rp/shared/domain.ts"
 import { Effect } from "effect"
 import { Generator } from "../src/chat/Generator.ts"
 import { freezeTemplate } from "../src/chat/macros.ts"
-import { Writer } from "../src/db/Database.ts"
+import { Reader, Writer } from "../src/db/Database.ts"
 import * as FakeGenerator from "../src/dev/fakeGenerator.ts"
 import { client, outcome, posted, serverLayer, testConfig } from "./support/config.ts"
 import type { CardDoc } from "@rp/shared/docs/card.ts"
@@ -327,6 +327,64 @@ describe("chat setup", () => {
         })
       )
       assert.strictEqual(sent.entry.version.speakerEntityId, tobin)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
+  )
+
+  it.live("a chat's notes: its own and its characters', each on or off per branch, made and binned", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const reader = yield* Reader
+      const writer = yield* Writer
+      const miraRef = yield* api.CreateCard({ label: "Mira", name: "Mira" })
+      const tobinRef = yield* api.CreateCard({ label: "Tobin", name: "Tobin" })
+      const outfit = yield* api.CreateCardNote({ cardRefId: miraRef.id, title: "Outfit" })
+      const mood = yield* api.CreateCardNote({ cardRefId: miraRef.id, title: "Mood" })
+      // The user plays Tobin: a persona's notes aren't the chat's to place.
+      yield* api.CreateCardNote({ cardRefId: tobinRef.id, title: "Persona note" })
+      const started = yield* api.StartChat({
+        cards: [miraRef.entityId],
+        persona: tobinRef.entityId,
+        greeting: null,
+        first: { _tag: "Send", content: "Hello.", speakerEntityId: null }
+      })
+      const chatId = started.chat.id
+      const at = started.entry.slotId
+      const listed = (slotId: typeof at | null) =>
+        Effect.map(api.ListChatNotes({ chatId, slotId }), (notes) =>
+          notes.map((n) => `${n.ref.label}${n.card === null ? " (chat)" : ""}: ${n.active ? "on" : "off"}`)
+        )
+      assert.deepStrictEqual(yield* listed(at), ["Outfit: on", "Mood: off"])
+
+      const scene = yield* api.CreateChatNote({ chatId, title: "  Scene  " })
+      assert.strictEqual(scene.label, "Scene")
+      assert.deepStrictEqual(yield* listed(at), ["Scene (chat): off", "Outfit: on", "Mood: off"])
+      const change = (entityId: EntityId, active: boolean) =>
+        api.ChangeCast({ chatId, slotId: at, change: { _tag: "Note", entityId, active } })
+      yield* change(scene.entityId, true)
+      yield* change(outfit.entityId, false)
+      yield* change(mood.entityId, true)
+      assert.deepStrictEqual(yield* listed(at), ["Scene (chat): on", "Outfit: off", "Mood: on"])
+      // Only from that message on, and only on its branch.
+      assert.deepStrictEqual(yield* listed(null), ["Scene (chat): off", "Outfit: on", "Mood: off"])
+      const other = yield* posted(
+        api.SendMessage({ chatId, parentSlotId: null, branch: true, content: "Another start." })
+      )
+      assert.deepStrictEqual(yield* listed(other.entry.slotId), ["Scene (chat): off", "Outfit: on", "Mood: off"])
+
+      // To the bin and back, like any delete.
+      const binned = yield* api.DeleteNote({ noteRefId: scene.id })
+      assert.deepStrictEqual(yield* listed(at), ["Outfit: off", "Mood: on"])
+      yield* api.RestoreBinItem({ itemId: binned.id })
+      assert.deepStrictEqual(yield* listed(at), ["Scene (chat): on", "Outfit: off", "Mood: on"])
+
+      // Another user's reads and writes see nothing of it.
+      const bo = yield* writer.EnsureUser({ handle: "bo", displayName: "Bo" })
+      const refused = yield* Effect.flip(
+        reader.ChatNoteEntries({ userId: bo.id as UserId, chatId, cards: [miraRef.entityId] })
+      )
+      assert.strictEqual(refused._tag, "NotFound")
+      const planted = yield* Effect.flip(writer.CreateChatNote({ userId: bo.id as UserId, chatId, title: "Planted" }))
+      assert.strictEqual(planted._tag, "NotFound")
     }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
   )
 

@@ -1145,6 +1145,12 @@ export class WriteOps extends RpcGroup.make(
     success: LibraryRef,
     error: Schema.Union([NotFound, StorageError])
   }),
+  /** A note of the live chat's own (DESIGN §4.1), an upstream like a card's note. */
+  Rpc.make("CreateChatNote", {
+    payload: { userId: UserId, chatId: ChatId, title: Schema.String },
+    success: LibraryRef,
+    error: Schema.Union([NotFound, StorageError])
+  }),
   // --- Generation (ARCHITECTURE.md §15).
   /**
    * Opens a generation's rollout before its request is sent (DATA-MODEL §7.1): the row, its
@@ -1524,6 +1530,17 @@ export class ReadOps extends RpcGroup.make(
   Rpc.make("ListQueued", {
     payload: { userId: UserId, chatId: ChatId },
     success: Schema.Array(QueuedMessage),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * The live chat's own notes, then these cards', by their upstream refs, oldest first; `first`
+   * marks each card's first note (ST's Character's Note).
+   */
+  Rpc.make("ChatNoteEntries", {
+    payload: { userId: UserId, chatId: ChatId, cards: Schema.Array(EntityId) },
+    success: Schema.Array(
+      Schema.Struct({ ref: LibraryRef, doc: Doc, card: Schema.NullOr(EntityId), first: Schema.Boolean })
+    ),
     error: Schema.Union([NotFound, StorageError])
   }),
   // --- ST data folder import (ARCHITECTURE.md §13).

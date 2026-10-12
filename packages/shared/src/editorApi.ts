@@ -200,6 +200,6 @@ export class EditorApi extends RpcGroup.make(
     success: LibraryRef,
     error: Schema.Union([...Errors])
   }),
-  /** To the bin, like any delete. */
-  Rpc.make("DeleteCardNote", { payload: { noteRefId: RefId }, success: BinItem, error: Schema.Union([...Errors]) })
+  /** A card's note or a chat's, to the bin like any delete. */
+  Rpc.make("DeleteNote", { payload: { noteRefId: RefId }, success: BinItem, error: Schema.Union([...Errors]) })
 ) {}

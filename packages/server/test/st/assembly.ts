@@ -15,7 +15,7 @@ import { assembleFixture, type FixtureMessage } from "../support/assemblySources
 import type { FixtureSet } from "./fixtures.ts"
 import { MOCK_MODEL, type MockEndpoint } from "./mock.ts"
 import { diffJson, type Section } from "./report.ts"
-import { captureWithSettings, savePoisonPreset, type Summary } from "./st.ts"
+import { type AuthorNote, captureWithSettings, savePoisonPreset, type Summary } from "./st.ts"
 
 /** What the user sends in every capture that sends something. */
 const MESSAGE = "Is the crossing still possible tonight?"
@@ -43,6 +43,7 @@ interface Config {
   readonly generate?: "impersonate" | "swipe"
   readonly postProcessing?: string
   readonly summary?: Summary
+  readonly authorNote?: AuthorNote
 }
 
 /** A summary as ST's Summarize extension keeps it, its template naming the character too. */
@@ -74,6 +75,42 @@ const summaryNote = (s: Summary): NoteInput => ({
     kind: "imported_summary",
     template: s.template
   }
+})
+
+/** An author's note naming both sides, at ST's position, depth and role, every `interval` messages. */
+const authorNote = (position: number, depth: number, role: number, interval = 1): AuthorNote => ({
+  text: "{{user}} is soaked through; {{char}} pretends not to notice.",
+  position,
+  depth,
+  role,
+  interval
+})
+
+/** The note our ST import makes of it (importer/stMapping.ts), and whether it turns it on. */
+const authorNoteInput = (note: AuthorNote): NoteInput => ({
+  entity: "author-note",
+  revision: "author-note-rev",
+  first: false,
+  doc: {
+    schema_version: 1,
+    title: "Author's Note",
+    content: note.text,
+    placement:
+      note.position === 0
+        ? { mode: "section", section: "after_main_prompt" }
+        : note.position === 2
+          ? { mode: "section", section: "before_main_prompt" }
+          : { mode: "depth", depth: note.depth, role: (["system", "user", "assistant"] as const)[note.role]! },
+    owner: { chat: "chat-1" as never },
+    exportable: true,
+    kind: "author_note",
+    interval: note.interval
+  }
+})
+
+const activate = (note: string) => ({
+  depth: null,
+  event: { scope: null, data: { key: "note.activate" as const, value: { note: note as never } } }
 })
 
 const imported = async (png: Uint8Array, name: string) => {
@@ -130,11 +167,13 @@ const ourRequest = async (
               }
             ]
           : []),
-        ...(config.summary ? [summaryNote(config.summary)] : [])
+        ...(config.summary ? [summaryNote(config.summary)] : []),
+        ...(config.authorNote ? [authorNoteInput(config.authorNote)] : [])
       ],
-      events: config.summary
-        ? [{ depth: null, event: { scope: null, data: { key: "note.activate", value: { note: "summary" as never } } } }]
-        : [],
+      events: [
+        ...(config.summary ? [activate("summary")] : []),
+        ...(config.authorNote && config.authorNote.interval > 0 ? [activate("author-note")] : [])
+      ],
       preset: document,
       model: {
         connectionId: "connection",
@@ -177,6 +216,19 @@ export const compareAssembly = async (
     { name: "default, summary after main", presets: ["default"], summary: summary(0) },
     { name: "default, summary before main", presets: ["default"], summary: summary(2) },
     { name: "default, summary in-chat", presets: ["default"], summary: summary(1, 1, 1) },
+    // The author's note (authors-note.js): in-chat beside the Character's Note, in the user's
+    // role; after the main prompt; before it, with the summary there too; and every second
+    // message of the user's, which one card's chat reaches with the message sent and the
+    // other's doesn't.
+    { name: "default, author's note in-chat", presets: ["default"], authorNote: authorNote(1, 1, 1) },
+    { name: "default, author's note after main", presets: ["default"], authorNote: authorNote(0, 4, 0) },
+    {
+      name: "default, author's note and summary before main",
+      presets: ["default"],
+      summary: summary(2),
+      authorNote: authorNote(2, 4, 0)
+    },
+    { name: "default, author's note every 2nd message", presets: ["default"], authorNote: authorNote(1, 0, 0, 2) },
     ...["default", "full"].flatMap((preset) =>
       (["impersonate", "swipe"] as const).map((generate) => ({
         name: `${preset}, ${generate}`,
@@ -188,6 +240,8 @@ export const compareAssembly = async (
   const differences: Array<string> = []
   const documented: Array<string> = []
   const notes: Array<string> = []
+  // Whether ST sent each note with an interval: both should happen, or the case shows nothing.
+  const everyOther: Array<boolean> = []
   let compared = 0
   let equal = 0
   for (const character of fixtures.gateCards) {
@@ -203,13 +257,22 @@ export const compareAssembly = async (
           ...(config.generate ? { generate: config.generate } : {})
         },
         config.postProcessing,
-        config.summary
+        config.summary,
+        config.authorNote
       )
       const ours = await ourRequest(fixtures, character, config, settings)
       const label = `${character}, ${config.name}`
       // Both sides leaving it out would compare equal: ST must have sent it.
       if (config.summary && !JSON.stringify(body).includes(config.summary.text)) {
         differences.push(`${label}: ST didn't send the summary, so this compares nothing`)
+      }
+      if (config.authorNote) {
+        const sent = JSON.stringify(body).includes("pretends not to notice")
+        if (config.authorNote.interval !== 1) everyOther.push(sent)
+        if (config.authorNote.interval === 1 && !sent) {
+          differences.push(`${label}: ST didn't send the author's note, so this compares nothing`)
+        }
+        notes.push(`${label}: ST ${sent ? "sent" : "didn't send"} the author's note`)
       }
       compared++
       if (ours.problem) {
@@ -226,6 +289,9 @@ export const compareAssembly = async (
       if (unexpected === 0) equal++
       notes.push(`${label}: ${(body as { messages?: ReadonlyArray<unknown> }).messages?.length ?? 0} messages`)
     }
+  }
+  if (!everyOther.includes(true) || !everyOther.includes(false)) {
+    differences.push("the author's note with an interval was always or never sent, so its interval compares nothing")
   }
   return [
     {

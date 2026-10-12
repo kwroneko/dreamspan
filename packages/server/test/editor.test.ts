@@ -558,10 +558,10 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
       // The owner never moves to another card.
       yield* draft(api, note.id, valueField(["owner"]), JSON.stringify({ card: "elsewhere" }))
       assert.strictEqual(yield* outcome(commit(api, note.id)), "InvalidDocument")
-      const binned = yield* api.DeleteCardNote({ noteRefId: note.id })
+      const binned = yield* api.DeleteNote({ noteRefId: note.id })
       assert.strictEqual(binned.kind, "entity")
       assert.isEmpty(yield* api.ListCardNotes({ cardRefId: card.id }))
-      assert.strictEqual(yield* outcome(api.DeleteCardNote({ noteRefId: card.id })), "NotFound")
+      assert.strictEqual(yield* outcome(api.DeleteNote({ noteRefId: card.id })), "NotFound")
     })
   )
 

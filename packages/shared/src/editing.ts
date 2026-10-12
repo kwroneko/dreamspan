@@ -3,7 +3,7 @@
 // its own undo history on the server. The working document is the ref's head with every
 // draft applied; the client builds it to show the diff, and the writer builds it again,
 // from the drafts it holds, to commit a revision. Both use the functions here.
-import type { EntityId } from "./chat.ts"
+import type { ChatId, EntityId } from "./chat.ts"
 import { Result, Schema, SchemaIssue } from "effect"
 import { CARD_SCHEMA_VERSION, CardDoc } from "./docs/card.ts"
 import { LorebookDoc } from "./docs/lorebook.ts"
@@ -352,5 +352,16 @@ export const newCardNote = (card: EntityId, title: string): NoteDoc => ({
   placement: { mode: "depth", depth: 4, role: "system" },
   owner: { card },
   exportable: true,
+  agent_editable: false
+})
+
+/** A new note of a chat's own: in-chat at ST's default depth for its author's note. */
+export const newChatNote = (chat: ChatId, title: string): NoteDoc => ({
+  schema_version: NOTE_SCHEMA_VERSION,
+  title,
+  content: "",
+  placement: { mode: "depth", depth: 4, role: "system" },
+  owner: { chat },
+  exportable: false,
   agent_editable: false
 })

@@ -314,6 +314,19 @@ const apply = (state: ChatState, { data, scope }: FoldableEvent): ChatState => {
 }
 
 /** Folds events, given in path order (position, then seq), into the state after them. */
+/**
+ * The notes the events turned on or off, as they last left each (DESIGN §4.1). A note they
+ * never named keeps its default: a card's first note is on, every other note off.
+ */
+export const noteSwitches = (events: Iterable<FoldableEvent>) => {
+  const last = new Map<string, boolean>()
+  for (const { data } of events) {
+    if (data.key === "note.activate") last.set(data.value.note, true)
+    if (data.key === "note.deactivate") last.set(data.value.note, false)
+  }
+  return last
+}
+
 export const foldState = (events: Iterable<FoldableEvent>, initial: ChatState = emptyChatState): ChatState => {
   let state = initial
   for (const e of events) state = apply(state, e)

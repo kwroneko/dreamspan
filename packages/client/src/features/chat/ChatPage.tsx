@@ -5,6 +5,8 @@ import type { ChatId, PathEntry, SlotId } from "@rp/shared/chat.ts"
 import { Link, useNavigate, useParams, useSearch } from "@tanstack/react-router"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import {
+  lazy,
+  Suspense,
   useCallback,
   useContext,
   useEffect,
@@ -26,6 +28,9 @@ import { Composer } from "./Composer.tsx"
 import { Message } from "./Message.tsx"
 import { useRenderCount } from "./perf.ts"
 import { ChatSession, type ChatView } from "./session.ts"
+
+// Loaded when first opened: it carries the note editor.
+const NotesDialog = lazy(() => import("./ChatNotes.tsx").then((module) => ({ default: module.NotesDialog })))
 
 /** Load more history when the first or last rendered message is this close to the loaded edge. */
 const EDGE = 5
@@ -232,7 +237,7 @@ function ChatSurface({ session, leaf, slot }: { session: ChatSession; leaf: Slot
   }, [navigate, leaf, slot, view.leafSlotId, view.chat])
   // Rows read the cast from context: it's the same object until the cast changes.
   const cast = useMemo(() => castView(view.cast), [view.cast])
-  const [panel, setPanel] = useState<"cast" | "settings" | null>(null)
+  const [panel, setPanel] = useState<"cast" | "settings" | "notes" | null>(null)
   // Another branch (DESIGN §3.2): the chat's leaf moves to it, and the window opens at the
   // message switched to, which the URL then names.
   const [branchError, setBranchError] = useState<string | null>(null)
@@ -265,6 +270,9 @@ function ChatSurface({ session, leaf, slot }: { session: ChatSession; leaf: Slot
           <Button variant="ghost" onClick={() => setPanel("cast")}>
             Cast
           </Button>
+          <Button variant="ghost" onClick={() => setPanel("notes")}>
+            Notes
+          </Button>
           <Button variant="ghost" onClick={() => setPanel("settings")}>
             Settings
           </Button>
@@ -276,6 +284,15 @@ function ChatSurface({ session, leaf, slot }: { session: ChatSession; leaf: Slot
       )}
       {panel === "settings" && (
         <SettingsDialog session={session} open onOpenChange={(open) => setPanel(open ? "settings" : null)} />
+      )}
+      {panel === "notes" && (
+        <Suspense>
+          <NotesDialog
+            session={session}
+            leafSlotId={view.leafSlotId}
+            onOpenChange={(open) => setPanel(open ? "notes" : null)}
+          />
+        </Suspense>
       )}
       {(view.error ?? branchError) && (
         <div className="mx-auto w-full max-w-3xl">

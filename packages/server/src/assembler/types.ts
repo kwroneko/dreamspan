@@ -144,6 +144,8 @@ export interface SourcePins {
     readonly key: string
     readonly found: ReadonlyArray<{ readonly entity: string; readonly revision: string; readonly first: boolean }>
   }>
+  /** Absent in snapshots from before notes had intervals, which never counted. */
+  readonly userMessages?: ReadonlyArray<{ readonly key: string; readonly count: number }>
 }
 
 /** What generating needs of a snapshot, sent to the main thread apart from it. */

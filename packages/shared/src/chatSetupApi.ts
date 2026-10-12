@@ -6,7 +6,7 @@ import { Rpc, RpcGroup } from "effect/rpc"
 import { CastCard, Chat, ChatId, EntityId, FrozenMacros, PathEntry, QueuedMessage, SlotId } from "./chat.ts"
 import { GenerationUnavailable } from "./chatApi.ts"
 import { NotFound, ServerError, StaleWrite } from "./errors.ts"
-import { RefId } from "./library.ts"
+import { Doc, LibraryRef, RefId } from "./library.ts"
 import { ConnectionId, ModelId } from "./providers.ts"
 
 /** A card's greetings and the fields its macros read, for a chat that isn't made yet. */
@@ -60,9 +60,25 @@ export const CastChange = Schema.Union([
   Schema.TaggedStruct("Model", { connection: ConnectionId, model: ModelId }),
   Schema.TaggedStruct("Preset", { ref: RefId }),
   Schema.TaggedStruct("Layout", { layout: CardsLayout }),
-  Schema.TaggedStruct("Roles", { projection: RolesProjection })
+  Schema.TaggedStruct("Roles", { projection: RolesProjection }),
+  /** A note on or off (`note.activate`, `note.deactivate`): the chat's own, or a participant card's. */
+  Schema.TaggedStruct("Note", { entityId: EntityId, active: Schema.Boolean })
 ])
 export type CastChange = typeof CastChange.Type
+
+/**
+ * A note a chat can use (DESIGN §4.1): the chat's own, or one of a participant card's, by its
+ * upstream ref, and whether it's on at the position asked about.
+ */
+export class ChatNote extends Schema.Class<ChatNote>("ChatNote")({
+  ref: LibraryRef,
+  doc: Doc,
+  /** The card whose note it is; null for the chat's own. */
+  card: Schema.NullOr(EntityId),
+  /** The card's first note, ST's Character's Note: on unless the chat turns it off. */
+  first: Schema.Boolean,
+  active: Schema.Boolean
+}) {}
 
 const Errors = [NotFound, ServerError] as const
 
@@ -113,6 +129,21 @@ export class ChatSetupApi extends RpcGroup.make(
   Rpc.make("ChangeCast", {
     payload: { chatId: ChatId, slotId: Schema.NullOr(SlotId), change: CastChange },
     success: Cast,
+    error: Schema.Union([...Errors])
+  }),
+  /**
+   * The chat's own notes, then its characters' (participants the user doesn't play), each
+   * with whether it's on after `slotId` (null: at the start).
+   */
+  Rpc.make("ListChatNotes", {
+    payload: { chatId: ChatId, slotId: Schema.NullOr(SlotId) },
+    success: Schema.Array(ChatNote),
+    error: Schema.Union([...Errors])
+  }),
+  /** A note of the chat's own, off until the chat turns it on (`ChangeCast` with `Note`). */
+  Rpc.make("CreateChatNote", {
+    payload: { chatId: ChatId, title: Schema.String },
+    success: LibraryRef,
     error: Schema.Union([...Errors])
   }),
   /** The chat's send queue, in order. */

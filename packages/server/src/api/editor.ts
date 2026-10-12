@@ -183,13 +183,13 @@ export const makeEditorHandlers = Effect.gen(function* () {
         settle("CreateCardNote")
       ),
 
-    DeleteCardNote: ({ noteRefId }) =>
+    DeleteNote: ({ noteRefId }) =>
       Effect.gen(function* () {
         const id = yield* userId
         const note = yield* reader.GetLibraryRef({ userId: id, refId: noteRefId })
         if (note.kind !== "note") return yield* new NotFound({ entity: "note", id: noteRefId })
         return yield* writer.DeleteEntity({ userId: id, entityId: note.entityId })
-      }).pipe(settle("DeleteCardNote"))
+      }).pipe(settle("DeleteNote"))
   } satisfies Partial<Parameters<typeof AppApi.of>[0]>
   return handlers
 })

@@ -2,11 +2,11 @@
 // Every handler acts as the authenticated user; storage enforces ownership, so another
 // user's ids are NotFound. Changes are published to the chat's subscribers.
 import { type AppApi, CurrentUser } from "@rp/shared/api.ts"
-import type { ChatId, SlotId } from "@rp/shared/chat.ts"
+import type { ChatId, EntityId, SlotId } from "@rp/shared/chat.ts"
 import { GenerationUnavailable } from "@rp/shared/chatApi.ts"
-import { Cast, type CastChange } from "@rp/shared/chatSetupApi.ts"
+import { Cast, type CastChange, ChatNote } from "@rp/shared/chatSetupApi.ts"
 import type { UserId } from "@rp/shared/domain.ts"
-import { foldState, type StateEventData } from "@rp/shared/state.ts"
+import { foldState, noteSwitches, type StateEventData } from "@rp/shared/state.ts"
 import { Effect, Option } from "effect"
 import { ChatHub } from "../chat/ChatHub.ts"
 import { Generations } from "../chat/Generations.ts"
@@ -34,6 +34,8 @@ const toEvent = (change: CastChange): StateEventData => {
       return { key: "layout.cards", value: change.layout }
     case "Roles":
       return { key: "roles.projection", value: change.projection }
+    case "Note":
+      return { key: change.active ? "note.activate" : "note.deactivate", value: { note: change.entityId } }
   }
 }
 
@@ -123,6 +125,26 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
         hub.publish(chatId, { _tag: "State" })
         return yield* castAt(id, chatId, slotId)
       }).pipe(internal("ChangeCast")),
+
+    // The notes the context assembler reads at this position: the chat's own and its characters'.
+    ListChatNotes: ({ chatId, slotId }) =>
+      Effect.gen(function* () {
+        const id = yield* userId
+        const events = yield* reader.StateEventsAt({ userId: id, chatId, slotId })
+        const state = foldState(events)
+        const played = new Set(state.playedByMe)
+        const cards = state.participants.filter((entity) => !played.has(entity)) as Array<EntityId>
+        const switches = noteSwitches(events)
+        const entries = yield* reader.ChatNoteEntries({ userId: id, chatId, cards })
+        return entries.map(
+          (entry) => new ChatNote({ ...entry, active: switches.get(entry.ref.entityId) ?? entry.first })
+        )
+      }).pipe(internal("ListChatNotes")),
+
+    CreateChatNote: ({ chatId, title }) =>
+      Effect.flatMap(userId, (id) => writer.CreateChatNote({ userId: id, chatId, title })).pipe(
+        internal("CreateChatNote")
+      ),
 
     ListQueued: ({ chatId }) =>
       Effect.flatMap(userId, (id) => reader.ListQueued({ userId: id, chatId })).pipe(internal("ListQueued")),

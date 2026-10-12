@@ -279,6 +279,37 @@ const summarize = (page: Page, summary: Summary) =>
     await ctx.eventSource.emit(ctx.eventTypes.CHAT_CHANGED!, ctx.getCurrentChatId())
   }, summary)
 
+/** A chat's author's note, as ST keeps it in the chat's metadata (`authors-note.js`). */
+export interface AuthorNote {
+  readonly text: string
+  /** ST's extension_prompt_types: 0 after the main prompt, 1 in-chat, 2 before it. */
+  readonly position: number
+  readonly depth: number
+  /** 0 system, 1 user, 2 assistant. */
+  readonly role: number
+  /** Sent every this many of the user's messages; 0 never. */
+  readonly interval: number
+}
+
+/** Sets the chat's author's note, and has the extension read the chat again, as when it opens. */
+const setAuthorNote = (page: Page, note: AuthorNote) =>
+  page.evaluate(async ({ text, position, depth, role, interval }) => {
+    const ctx = SillyTavern.getContext() as unknown as {
+      chatMetadata: Record<string, unknown>
+      eventSource: { emit: (event: string, ...args: Array<unknown>) => Promise<void> }
+      eventTypes: Record<string, string>
+      getCurrentChatId: () => string
+    }
+    Object.assign(ctx.chatMetadata, {
+      note_prompt: text,
+      note_position: position,
+      note_depth: depth,
+      note_role: role,
+      note_interval: interval
+    })
+    await ctx.eventSource.emit(ctx.eventTypes.CHAT_CHANGED!, ctx.getCurrentChatId())
+  }, note)
+
 export interface Capture {
   /** Presets loaded into ST one after another, by name; none for the baseline settings. */
   readonly presets: ReadonlyArray<string>
@@ -336,11 +367,13 @@ export const captureWithSettings = async (
   capture: Capture,
   /** ST's custom_prompt_post_processing, a connection setting no preset changes here. */
   postProcessing?: string,
-  summary?: Summary
+  summary?: Summary,
+  authorNote?: AuthorNote
 ) => {
   let settings: Record<string, unknown> = {}
   const body = await captureRequest(browser, url, mock, capture, async (page) => {
     if (summary !== undefined) await summarize(page, summary)
+    if (authorNote !== undefined) await setAuthorNote(page, authorNote)
     if (postProcessing !== undefined) {
       await page.evaluate((value) => {
         ;(SillyTavern.getContext().chatCompletionSettings as Record<string, unknown>).custom_prompt_post_processing =

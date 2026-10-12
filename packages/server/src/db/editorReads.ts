@@ -1,5 +1,6 @@
 // The editors' read handlers (ARCHITECTURE.md "Editing the library"), in the reader workers.
 import { EditorSnapshot, NoteEntry } from "@rp/shared/editorApi.ts"
+import type { EntityId } from "@rp/shared/chat.ts"
 import type { Doc } from "@rp/shared/library.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
@@ -68,6 +69,38 @@ export const makeEditorReadHandlers = Effect.gen(function* () {
           Effect.map(lib.loadDoc(note.head_revision_id), (doc) => new NoteEntry({ ref: toLibraryRef(note), doc }))
         )
       }).pipe(query("ListCardNotes")),
+
+    ChatNoteEntries: ({ userId, chatId, cards }) =>
+      Effect.gen(function* () {
+        const [chat] = yield* sql<{ n: number }>`
+          SELECT count(*) AS n FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`
+        if (chat?.n !== 1) return yield* new NotFound({ entity: "chat", id: chatId })
+        const rows = yield* lib.refsWhere(
+          `e.owner_user_id = ? AND e.kind = 'note' AND e.deleted_at IS NULL AND r.ref_kind = 'upstream'
+           AND EXISTS (SELECT 1 FROM entity_revisions h WHERE h.id = r.head_revision_id
+             AND (json_extract(h.doc_json, '$.owner.chat') = ?
+               OR json_extract(h.doc_json, '$.owner.card') IN (SELECT value FROM json_each(?))))`,
+          [userId, chatId, JSON.stringify(cards)]
+        )
+        const notes = yield* Effect.forEach(
+          rows.toSorted((a, b) => (a.entity_id < b.entity_id ? -1 : 1)),
+          (row) => Effect.map(lib.loadDoc(row.head_revision_id), (doc) => ({ row, doc }))
+        )
+        const cardOf = (doc: Doc) => {
+          const owner = doc["owner"] as { card?: EntityId } | undefined
+          return owner?.card ?? null
+        }
+        const entry = ({ row, doc }: (typeof notes)[number], first: boolean) => ({
+          ref: toLibraryRef(row),
+          doc,
+          card: cardOf(doc),
+          first
+        })
+        return [
+          ...notes.filter((n) => cardOf(n.doc) === null).map((n) => entry(n, false)),
+          ...cards.flatMap((card) => notes.filter((n) => cardOf(n.doc) === card).map((n, i) => entry(n, i === 0)))
+        ]
+      }).pipe(query("ChatNoteEntries")),
 
     GetMediaFile: ({ userId, mediaId }) =>
       Effect.gen(function* () {

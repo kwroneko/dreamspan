@@ -188,7 +188,8 @@ export const sqlSources = (
     events: [] as Array<SourcePins["events"][number]>,
     history: [] as Array<SourcePins["history"][number]>,
     cards: [] as Array<SourcePins["cards"][number]>,
-    notes: [] as Array<SourcePins["notes"][number]>
+    notes: [] as Array<SourcePins["notes"][number]>,
+    userMessages: [] as Array<NonNullable<SourcePins["userMessages"]>[number]>
   }
 
   const live = AssemblySources.of({
@@ -371,6 +372,28 @@ export const sqlSources = (
             doc
           }))
         )
+      }),
+
+    // A message's side as the history reads it (`sideOf` in the stages): its speaker's, when
+    // that's one of the cast, else its first version's writer.
+    userMessages: (leaf, personas, characters) =>
+      Effect.gen(function* () {
+        if (leaf === null) return 0
+        const [row] = yield* sql<{ n: number }>`
+          WITH RECURSIVE path(id) AS (
+            SELECT id FROM slots WHERE id = ${leaf} AND chat_id = ${chatId} AND ${owned}
+            UNION ALL
+            SELECT s.parent_slot_id FROM slots s JOIN path p ON s.id = p.id WHERE s.parent_slot_id IS NOT NULL
+          )
+          SELECT count(*) AS n FROM path JOIN slots s ON s.id = path.id
+          JOIN versions v ON v.id = s.selected_version_id
+          JOIN versions f ON f.id = (SELECT id FROM versions x WHERE x.slot_id = s.id ORDER BY x.ordinal LIMIT 1)
+          WHERE s.deleted_at IS NULL AND (v.speaker_entity_id IN (SELECT value FROM json_each(${JSON.stringify(personas)}))
+            OR (coalesce(v.speaker_entity_id IN (SELECT value FROM json_each(${JSON.stringify(characters)})), 0) = 0
+              AND f.writer = 'human' AND f.origin <> 'greeting'))`
+        const count = row?.n ?? 0
+        pins.userMessages.push({ key: keyOf(leaf, personas, characters), count })
+        return count
       }),
 
     // The path's slots never change their parents: the same on a rebuild.
@@ -564,6 +587,12 @@ const replaySources = (
 
     noteHistory: live.noteHistory,
     onPath: live.onPath,
+    // Which messages are the user's can change (another version selected): the count is pinned.
+    userMessages: (leaf, personas, characters) =>
+      Effect.map(
+        pinned(pins.userMessages ?? [], keyOf(leaf, personas, characters), "part of the chat"),
+        ({ count }) => count
+      ),
 
     model: () => Effect.succeed(inputs.model),
 

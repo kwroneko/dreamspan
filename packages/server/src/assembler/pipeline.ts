@@ -83,6 +83,16 @@ export class AssemblySources extends Context.Service<
       leaf: string | null,
       slots: ReadonlyArray<string>
     ) => Effect.Effect<ReadonlySet<string>, SourceError>
+    /**
+     * How many messages of the path, up to `leaf`, are on the user's side: those spoken by one
+     * of `personas`, else, unless spoken by one of `characters`, the user's own (ST counts
+     * `is_user` messages for its author's note's interval).
+     */
+    readonly userMessages: (
+      leaf: string | null,
+      personas: ReadonlyArray<string>,
+      characters: ReadonlyArray<string>
+    ) => Effect.Effect<number, SourceError>
     /** The model `binding` names, else the user's default; null when there's neither. */
     readonly model: (
       binding: { readonly connection: string; readonly model: string } | null

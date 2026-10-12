@@ -73,6 +73,7 @@ interface OwnEditor {
   readonly cardEntityId: EntityId
   readonly revisionId: RevisionId
   readonly noteRefId: RefId
+  readonly noteEntityId: EntityId
   readonly avatarMediaId: string
   readonly field: string
   readonly draftId: string
@@ -81,13 +82,15 @@ interface OwnEditor {
   readonly pendingNoteRefId: RefId
 }
 
-/** A chat with the user's message and a model reply still generating under it. */
+/** A chat with the user's message and a model reply still generating under it, and a note of its own. */
 interface OwnChat {
   readonly chatId: ChatId
   readonly slotId: SlotId
   readonly versionId: VersionId
   readonly replySlotId: SlotId
   readonly generatingId: VersionId
+  readonly noteRefId: RefId
+  readonly noteEntityId: EntityId
 }
 
 class Parties extends Context.Service<
@@ -698,7 +701,32 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
           }),
           "NotFound"
         )
+        // Their chat's note, or their card's, turned on in the actor's own chat.
+        for (const note of [owner.chat.noteEntityId, owner.editor.noteEntityId]) {
+          yield* refused(
+            actor.api.ChangeCast({
+              chatId: actor.chat.chatId,
+              slotId: null,
+              change: { _tag: "Note", entityId: note, active: true }
+            }),
+            "NotFound"
+          )
+        }
       })
+  },
+  ListChatNotes: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        yield* refused(actor.api.ListChatNotes({ chatId: owner.chat.chatId, slotId: null }), "NotFound")
+        yield* refused(
+          actor.api.ListChatNotes({ chatId: actor.chat.chatId, slotId: owner.chat.replySlotId }),
+          "NotFound"
+        )
+      })
+  },
+  CreateChatNote: {
+    probe: (actor, owner) =>
+      refused(actor.api.CreateChatNote({ chatId: owner.chat.chatId, title: "Planted" }), "NotFound")
   },
   ListQueued: {
     probe: (actor, owner) => refused(actor.api.ListQueued({ chatId: owner.chat.chatId }), "NotFound")
@@ -921,8 +949,12 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
     probe: (actor, owner) =>
       refused(actor.api.CreateCardNote({ cardRefId: owner.editor.cardRefId, title: "Planted" }), "NotFound")
   },
-  DeleteCardNote: {
-    probe: (actor, owner) => refused(actor.api.DeleteCardNote({ noteRefId: owner.editor.noteRefId }), "NotFound")
+  DeleteNote: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        yield* refused(actor.api.DeleteNote({ noteRefId: owner.editor.noteRefId }), "NotFound")
+        yield* refused(actor.api.DeleteNote({ noteRefId: owner.chat.noteRefId }), "NotFound")
+      })
   },
   // --- Branches, the recycle bin, the composer, notices
   SwitchBranch: {
@@ -1241,6 +1273,7 @@ const seed = Effect.gen(function* () {
         api.SendMessage({ chatId: chat.id, parentSlotId: null, branch: false, content: "hello" })
       )
       const reply = yield* posted(api.Generate({ chatId: chat.id, parentSlotId: sent.entry.slotId, branch: false }))
+      const chatNote = yield* api.CreateChatNote({ chatId: chat.id, title: "Scene" })
       const card = yield* writer.CreateEntity({
         userId: user.id,
         kind: "card",
@@ -1341,7 +1374,9 @@ const seed = Effect.gen(function* () {
           slotId: sent.entry.slotId,
           versionId: sent.entry.version.id,
           replySlotId: reply.entry.slotId,
-          generatingId: reply.entry.version.id
+          generatingId: reply.entry.version.id,
+          noteRefId: chatNote.id,
+          noteEntityId: chatNote.entityId
         },
         connectionId: connection.id,
         credentialId: credential.id,
@@ -1357,6 +1392,7 @@ const seed = Effect.gen(function* () {
           pendingNoteRefId,
           revisionId: opened.ref.headRevisionId,
           noteRefId: note.id,
+          noteEntityId: note.entityId,
           avatarMediaId: opened.doc.avatar_media_id as string,
           field,
           draftId: fieldDraft.id
@@ -1436,6 +1472,7 @@ const snapshot = (owner: Party) =>
     outcome(owner.api.ListVersions({ slotId: owner.chat.slotId }), JSON.stringify),
     outcome(owner.api.ListQueued({ chatId: owner.chat.chatId }), JSON.stringify),
     outcome(owner.api.GetCast({ chatId: owner.chat.chatId, slotId: null }), JSON.stringify),
+    outcome(owner.api.ListChatNotes({ chatId: owner.chat.chatId, slotId: null }), JSON.stringify),
     outcome(owner.api.ListCards(), JSON.stringify),
     outcome(owner.api.OpenEditor({ refId: owner.editor.cardRefId }), JSON.stringify),
     outcome(owner.api.ListRevisions({ refId: owner.editor.cardRefId, limit: 100 }), JSON.stringify),

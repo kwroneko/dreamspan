@@ -2,7 +2,7 @@
 // state, cards through their layers, the preset's scope chain, notes and the model, all the
 // acting user's, and the same context built again from the database (invariant 6).
 import { assert, describe, it } from "@effect/vitest"
-import { type EntityId, NewVersion, type SlotId } from "@rp/shared/chat.ts"
+import { type EntityId, NewVersion, type SlotId, type VersionId } from "@rp/shared/chat.ts"
 import type { CardDoc } from "@rp/shared/docs/card.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
@@ -175,6 +175,85 @@ describe("context assembly from the database", () => {
         "system: [Summary: The road flooded twice.]",
         "user: The road flooded."
       ])
+    }).pipe(Effect.provide(database()))
+  )
+
+  it.live("places the chat's own note on the branch that turned it on, every interval of the user's messages", () =>
+    Effect.gen(function* () {
+      const { writer, reader, userId, tobin, chat, sent, generating: reply, state } = yield* setup()
+      const created = yield* writer.CreateChatNote({ userId, chatId: chat.id, title: "Weather" })
+      const note = (fields: Record<string, unknown>, expectedRowVersion: number) =>
+        writer.EditRef({
+          userId,
+          refId: created.id,
+          doc: {
+            schema_version: 1,
+            title: "Weather",
+            content: "Rain on {{user}}'s roof.",
+            placement: { mode: "depth", depth: 0, role: "system" },
+            owner: { chat: chat.id },
+            exportable: false,
+            ...fields
+          } as never,
+          expectedRowVersion,
+          message: null,
+          commitDraft: null
+        })
+      const edited = yield* note({}, created.rowVersion)
+      const append = (parentSlotId: SlotId, human: boolean, content: string, branch = false) =>
+        writer.AppendMessage({
+          userId,
+          chatId: chat.id,
+          parentSlotId,
+          branch,
+          version: new NewVersion({
+            speakerEntityId: human ? tobin.entityId : null,
+            writer: human ? "human" : "model",
+            content,
+            status: human ? "complete" : "generating",
+            macroMode: "verbatim",
+            origin: human ? "user_written" : "generated"
+          }),
+          commitDraft: null
+        })
+      const assembleAt = (reply: { readonly slotId: SlotId; readonly version: { readonly id: VersionId } }) =>
+        reader
+          .AssembleContext({
+            userId,
+            chatId: chat.id,
+            slotId: reply.slotId,
+            versionId: reply.version.id,
+            now: NOW,
+            timeZone: "UTC",
+            frozen: null
+          })
+          .pipe(Effect.map(({ snapshot }) => JSON.parse(snapshot) as ContextSnapshot))
+      const raining = (snapshot: ContextSnapshot) => texts(snapshot).includes("system: Rain on Tobin's roof.")
+
+      // Turned on after the user's message, on this branch only.
+      yield* state({ key: "note.activate", value: { note: created.entityId } }, sent.slotId)
+      assert.isTrue(raining(yield* assembleAt(reply)))
+      const greeting = chat.activeLeafSlotId!
+      const elsewhere = yield* append(greeting, true, "The bridge held.", true)
+      assert.isFalse(raining(yield* assembleAt(yield* append(elsewhere.slotId, false, ""))))
+      const listed = (slotId: SlotId) =>
+        reader
+          .StateEventsAt({ userId, chatId: chat.id, slotId })
+          .pipe(Effect.map((events) => events.some((e) => e.data.key === "note.activate")))
+      assert.isTrue(yield* listed(sent.slotId))
+      assert.isFalse(yield* listed(elsewhere.slotId))
+
+      // Every second message of the user's: the path to the reply has one so far.
+      yield* note({ interval: 2 }, edited.ref.rowVersion)
+      assert.isFalse(raining(yield* assembleAt(reply)))
+      const second = yield* append(sent.slotId, true, "Still raining?", true)
+      const later = yield* append(second.slotId, false, "")
+      const snapshot = yield* assembleAt(later)
+      assert.isTrue(raining(snapshot))
+      // The count is pinned: deleting a message of the user's since rebuilds the same context.
+      yield* writer.DeleteMessage({ userId, slotId: second.slotId })
+      const rebuilt = yield* reader.RebuildContext({ userId, snapshot: JSON.stringify(snapshot) })
+      assert.deepStrictEqual(JSON.parse(rebuilt.snapshot), snapshot)
     }).pipe(Effect.provide(database()))
   )
 

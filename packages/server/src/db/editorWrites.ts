@@ -10,12 +10,13 @@ import {
   getAt,
   keepsRegexApproval,
   newCardNote,
+  newChatNote,
   parseField,
   validateDoc,
   withoutGrantedAgentEdits
 } from "@rp/shared/editing.ts"
 import { EditConflict, InvalidDocument } from "@rp/shared/editorApi.ts"
-import type { EntityId } from "@rp/shared/chat.ts"
+import type { ChatId, EntityId } from "@rp/shared/chat.ts"
 import type { Doc, EntityKind } from "@rp/shared/library.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import { Effect } from "effect"
@@ -274,7 +275,28 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps) => {
           sourceHash: null
         })
         return toLibraryRef(note)
-      }).pipe(transaction(sql, "CreateCardNote"))
+      }).pipe(transaction(sql, "CreateCardNote")),
+
+    CreateChatNote: ({ userId, chatId, title }) =>
+      Effect.gen(function* () {
+        const [chat] = yield* sql<{ id: ChatId }>`
+          SELECT id FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`
+        if (!chat) return yield* new NotFound({ entity: "chat", id: chatId })
+        const label = title.trim().slice(0, 200) || "Note"
+        const note = yield* steps.createUpstream({
+          userId,
+          kind: "note",
+          label,
+          subtitle: "",
+          doc: steps.encode(newChatNote(chat.id, label)),
+          schemaVersion: NOTE_SCHEMA_VERSION,
+          origin: "user",
+          originRef: null,
+          sourcePath: null,
+          sourceHash: null
+        })
+        return toLibraryRef(note)
+      }).pipe(transaction(sql, "CreateChatNote"))
   } satisfies Partial<Parameters<typeof WriteOps.of>[0]>
   return handlers
 }

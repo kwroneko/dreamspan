@@ -215,8 +215,8 @@ export const compose = (input: {
   readonly newExampleChat: Text | null
   readonly sendIfEmpty: Text | null
   readonly control: ReadonlyArray<StMessage>
-  /** The Summarize extension's prompt, put before or after the main prompt (injectToMain). */
-  readonly summary: { readonly message: StMessage; readonly at: "start" | "end" } | null
+  /** Extension prompts (the summary, notes) put before or after the main prompt in turn (injectToMain). */
+  readonly beside: ReadonlyArray<{ readonly message: StMessage; readonly at: "start" | "end" }>
   readonly budget: number
 }): Composition => {
   const { collection } = input
@@ -253,10 +253,10 @@ export const compose = (input: {
   for (const id of ["nsfw", "jailbreak", ...userRelative]) relative(id)
   if (has("enhanceDefinitions")) relative("enhanceDefinitions")
   const main = slots.get(index("main"))
-  if (input.summary && main) {
-    if (input.summary.at === "start") main.unshift(input.summary.message)
-    else main.push(input.summary.message)
-    spend(tokensOf(input.summary.message))
+  for (const { message, at } of main ? input.beside : []) {
+    if (at === "start") main!.unshift(message)
+    else main!.push(message)
+    spend(tokensOf(message))
   }
   if (budget < 0) {
     throw new AssemblyFailed({
