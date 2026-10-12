@@ -4,7 +4,7 @@
 import { readFile, truncate, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { crc32, deflateSync } from "node:zlib"
-import { expect, type Page, test } from "@playwright/test"
+import { type Browser, expect, type Locator, type Page, test } from "@playwright/test"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
 const server = serverPerFile(withAdmin)
@@ -64,7 +64,68 @@ const shoot = async (page: Page, name: string) => {
   }
 }
 
-test("import files, read their reports as text, export them, and update one from a new version", async ({ page }) => {
+/** Check the blob handed to the browser, and the saved file when native downloads work. */
+const exportedFile = async (page: Page, browser: Browser, button: Locator, filename: string) => {
+  const blobs = await page.evaluateHandle(() => {
+    const captured = new Map<string, Blob>()
+    const create = URL.createObjectURL.bind(URL)
+    URL.createObjectURL = (object) => {
+      const url = create(object)
+      if (object instanceof Blob) captured.set(url, object)
+      return url
+    }
+    return { captured, restore: () => (URL.createObjectURL = create) }
+  })
+  try {
+    const started = page.waitForEvent("download")
+    await button.click()
+    const download = await started
+    expect(download.suggestedFilename()).toBe(filename)
+    const bytes = await blobs.evaluate(async ({ captured }, url) => {
+      const blob = captured.get(url)
+      if (!blob) throw new Error(`The download did not use an exported blob: ${url}`)
+      return blob.text()
+    }, download.url())
+    const failure = await download.failure()
+    if (failure === "canceled" && browser.browserType().name() === "chromium") {
+      // Chromium has also canceled plain synthetic downloads outside this app in
+      // affected environments. Quarantine file saving only if that limitation is
+      // reproduced now, without our code, CSP, service workers or URL revocation.
+      const probe = await browser.newPage({ acceptDownloads: true })
+      try {
+        await probe.setContent("<p>Synthetic download probe</p>")
+        const event = probe.waitForEvent("download")
+        await probe.evaluate(() => {
+          const link = document.createElement("a")
+          link.href = URL.createObjectURL(new Blob(["synthetic download"]))
+          link.download = "probe.txt"
+          link.click()
+        })
+        expect(await (await event).failure(), "Only an independently reproduced cancellation is quarantined").toBe(
+          "canceled"
+        )
+        test.info().annotations.push({
+          type: "native-download-quarantined",
+          description: "Chromium canceled both the export and an independent synthetic download; blob bytes checked."
+        })
+      } finally {
+        await probe.close()
+      }
+    } else {
+      expect(failure, "The browser must complete the export download").toBeNull()
+      expect(await readFile(await download.path(), "utf8")).toBe(bytes)
+    }
+    return JSON.parse(bytes)
+  } finally {
+    await blobs.evaluate(({ restore }) => restore())
+    await blobs.dispose()
+  }
+}
+
+test("import files, read their reports as text, export them, and update one from a new version", async ({
+  page,
+  browser
+}) => {
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/import`)
   await page.getByLabel("Choose files, or drop them here").setInputFiles([
@@ -91,20 +152,24 @@ test("import files, read their reports as text, export them, and update one from
   await expect(page.getByRole("list", { name: "Presets" })).toContainText("narrator")
   await shoot(page, "library-filled")
 
-  const presetDownload = page.waitForEvent("download")
-  await page.getByRole("button", { name: "Export narrator" }).click()
-  const presetFile = await presetDownload
-  expect(presetFile.suggestedFilename()).toBe("narrator.json")
-  const exported = JSON.parse(await readFile(await presetFile.path(), "utf8"))
+  const exported = await exportedFile(
+    page,
+    browser,
+    page.getByRole("button", { name: "Export narrator" }),
+    "narrator.json"
+  )
   expect(exported.prompts.find((p: { identifier: string }) => p.identifier === "main").content).toBe(
     "Write vivid prose."
   )
 
   await page.getByRole("combobox", { name: `Export format for ${NAME}` }).click()
   await page.getByRole("option", { name: "V2 JSON" }).click()
-  const cardDownload = page.waitForEvent("download")
-  await page.getByRole("button", { name: `Export ${NAME}` }).click()
-  const cardFile = JSON.parse(await readFile(await (await cardDownload).path(), "utf8"))
+  const cardFile = await exportedFile(
+    page,
+    browser,
+    page.getByRole("button", { name: `Export ${NAME}` }),
+    "_b_Wren__b_ __bold__.json"
+  )
   expect(cardFile.data.name).toBe(NAME)
   expect(cardFile.data.extensions.depth_prompt).toEqual({
     prompt: "Wren smells of lamp oil.",
