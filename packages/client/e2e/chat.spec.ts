@@ -3,6 +3,8 @@
 // sees the chat; and every chat screen at phone and desktop width, light and dark.
 import { join } from "node:path"
 import { expect, type Locator, type Page, test } from "@playwright/test"
+import type { SlotId } from "@rp/shared/chat.ts"
+import { Effect } from "effect"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
@@ -112,6 +114,52 @@ test("a stopped reply keeps its text, and a message can be edited, linked to, br
   const walk = page.getByRole("article", { name: "Your message" }).filter({ hasText: "Walk away" })
   await walk.getByRole("button", { name: "Delete", exact: true }).click()
   await expect(page.getByText("Walk away instead.")).toHaveCount(0)
+})
+
+test("a message sent from an older part of the chat lands at the end, with its reply", async ({ page }) => {
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  const { chat, first } = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+    Effect.gen(function* () {
+      const chat = yield* api.CreateChat({ title: "Long enough" })
+      let parent: SlotId | null = null
+      let first: SlotId | null = null
+      for (let i = 0; i < 90; i++) {
+        const sent: { entry: { slotId: SlotId } } = yield* api.SendMessage({
+          chatId: chat.id,
+          parentSlotId: parent,
+          branch: false,
+          content: `Message ${i}`
+        })
+        parent = sent.entry.slotId
+        first ??= parent
+      }
+      return { chat, first: first! }
+    })
+  )
+  await page.goto(`${server().url}/chats/${chat.id}?slot=${first}`)
+  await expect(page.getByText("Message 0", { exact: true })).toBeVisible()
+  await send(page, "From the start")
+  await expect(page.getByText("From the start")).toBeVisible()
+  await repliesDone(page, 1)
+  const path = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+    api.ReadPath({ chatId: chat.id, leafSlotId: null, range: { _tag: "Bottom" }, limit: 3 })
+  )
+  expect(path.entries.map((e) => e.version.writer)).toEqual(["human", "human", "model"])
+  expect(path.entries[1]!.version.content).toBe("From the start")
+})
+
+test("a branch's URL follows the messages sent on it", async ({ page }) => {
+  await newChat(page, "Fork")
+  await send(page, "First")
+  await repliesDone(page, 1)
+  await page.getByRole("article", { name: "Your message" }).getByRole("link", { name: "Branch from here" }).click()
+  await expect(replies(page)).toHaveCount(0)
+  await send(page, "Second, on the branch")
+  await repliesDone(page, 1)
+  await expect(page).not.toHaveURL(/leaf=/)
+  await page.reload()
+  await expect(page.getByText("Second, on the branch")).toBeVisible()
+  await expect(page.getByRole("article", { name: "Your message" })).toHaveCount(2)
 })
 
 test("another user can't open someone's chat", async ({ browser }) => {

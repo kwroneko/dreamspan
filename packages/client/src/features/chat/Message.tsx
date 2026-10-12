@@ -16,12 +16,8 @@ import { type ChatSession, liveText, type Outcome } from "./session.ts"
 /** A horizontal drag this long on a message swipes to the next or previous version. */
 const SWIPE_PX = 60
 
-const statusLabel: Partial<Record<Version["status"], string>> = {
-  generating: "generating",
-  stopped: "stopped",
-  interrupted: "interrupted",
-  failed: "failed"
-}
+/** Statuses shown as a badge; `complete` needs none. */
+const flagged = new Set<Version["status"]>(["generating", "stopped", "interrupted", "failed"])
 
 function VersionBody({ version }: { version: Version }) {
   const live = useAtomValue(liveText(version.id))
@@ -101,9 +97,10 @@ export const Message = memo(function Message({
   const generating = version.status === "generating"
 
   // A slot that gained or lost versions needs its list read again.
-  const known = versions !== null && versions.length === entry.versionCount && versions.some((v) => v.id === version.id)
-  const list = known ? versions : null
-  const position = list ? list.findIndex((v) => v.id === version.id) : -1
+  // The list as read is current while it has as many versions as the slot, this one among them.
+  const position =
+    versions !== null && versions.length === entry.versionCount ? versions.findIndex((v) => v.id === version.id) : -1
+  const known = position >= 0
 
   const report = (outcome: Outcome<unknown>) => setError(outcome.ok ? null : outcome.error)
 
@@ -152,7 +149,7 @@ export const Message = memo(function Message({
     <article
       aria-label={model ? "Reply" : "Your message"}
       data-slot={entry.slotId}
-      className={`flex flex-col gap-2 rounded-lg border px-4 py-3 ${
+      className={`flex touch-pan-y flex-col gap-2 rounded-lg border px-4 py-3 ${
         highlighted
           ? "border-accent bg-surface"
           : model
@@ -164,9 +161,9 @@ export const Message = memo(function Message({
     >
       <header className="flex flex-wrap items-center gap-2 text-sm">
         <span className="font-medium">{model ? "Model" : "You"}</span>
-        {statusLabel[version.status] && (
+        {flagged.has(version.status) && (
           <Badge tone={version.status === "failed" ? "danger" : version.status === "generating" ? "accent" : "warning"}>
-            {statusLabel[version.status]}
+            {version.status}
           </Badge>
         )}
         {!entry.inContext && !generating && version.status !== "failed" && <Badge>not in context</Badge>}

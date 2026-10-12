@@ -5,7 +5,16 @@
 // Streamed text never goes through the list. Each generating version's text is an atom
 // of its own, which only its message's body reads, and deltas are applied once per
 // animation frame, so a token re-renders one row.
-import type { Chat, ChatId, PathEntry, SlotId, Version, VersionId } from "@rp/shared/chat.ts"
+import {
+  type Chat,
+  type ChatId,
+  type PathEntry,
+  type SlotId,
+  type Version,
+  type VersionId,
+  versionInContext
+} from "@rp/shared/chat.ts"
+import { NotFound } from "@rp/shared/errors.ts"
 import type { ChatEvent, PathRange, PathWindow } from "@rp/shared/chatApi.ts"
 import { Cause, Context, Effect, Exit, Fiber, Schedule, Stream } from "effect"
 import { Atom, type AtomRegistry, AtomRegistry as Registry } from "effect/reactivity"
@@ -46,7 +55,7 @@ const withInContext = (entry: PathEntry, version: Version) =>
   ({
     ...entry,
     version,
-    inContext: !entry.contextExcluded && version.status !== "failed" && version.content.length > 0
+    inContext: versionInContext(version.status, version.content, entry.contextExcluded)
   }) as PathEntry
 
 export class ChatSession {
@@ -76,7 +85,7 @@ export class ChatSession {
 
   private readonly chatId: ChatId
   /** The leaf the URL asks for; null follows the chat's active leaf. */
-  private readonly requestedLeaf: SlotId | null
+  private requestedLeaf: SlotId | null
   private readonly registry: AtomRegistry.AtomRegistry
 
   constructor(chatId: ChatId, requestedLeaf: SlotId | null, registry: AtomRegistry.AtomRegistry) {
@@ -141,7 +150,7 @@ export class ChatSession {
     )
   }
 
-  private notFound = (error: unknown) => (error as { _tag?: string })?._tag === "NotFound"
+  private notFound = (error: unknown) => error instanceof NotFound
 
   dispose() {
     this.disposed = true
@@ -225,6 +234,13 @@ export class ChatSession {
     for (const entry of window.entries) this.track(entry.version)
   }
 
+  /** Shows another branch (null: the chat's active one), at a message or at its bottom. */
+  showBranch(leaf: SlotId | null, anchor: SlotId | null) {
+    this.requestedLeaf = leaf
+    this.update({ leafSlotId: leaf, entries: [], loading: true })
+    void this.open(anchor)
+  }
+
   /** At the bottom of the whole path: new messages follow again. */
   followAtBottom() {
     if (this.view.newer === null && !this.view.follow) this.update({ follow: true })
@@ -279,8 +295,12 @@ export class ChatSession {
         }
         // The first Hello opens the chat. Another means the socket reconnected, and
         // anything may have changed meanwhile.
-        if (this.hellos++ === 0) void this.open(anchor)
-        else this.reload()
+        if (this.hellos++ === 0) return void this.open(anchor)
+        // Anything that stopped generating while the socket was down lost its Version
+        // event: its live text would hide the saved one.
+        const live = new Set(event.live.map((l) => l.versionId))
+        for (const id of [...this.live.keys()]) if (!live.has(id)) this.endLive(id)
+        this.reload()
         return
       }
       case "Slot":
@@ -302,28 +322,48 @@ export class ChatSession {
     void this.open(entries[Math.floor(entries.length / 2)]!.slotId, limit, false)
   }
 
-  /** A slot added or changed. A new one shows when it continues the loaded bottom of the path. */
-  private applySlot(entry: PathEntry) {
+  /**
+   * A slot added or changed; returns whether it's in the window. A new one joins when it
+   * continues the loaded bottom of the path.
+   */
+  private applySlot(entry: PathEntry): boolean {
     const { entries } = this.view
     const index = entries.findIndex((e) => e.slotId === entry.slotId)
     if (index >= 0) {
       const current = entries[index]!
-      if (current.rowVersion > entry.rowVersion) return
+      if (current.rowVersion > entry.rowVersion) return true
       const next = entries.slice()
       // A finished version may arrive before the slot event that started it.
       const finished = current.version.id === entry.version.id && current.version.status !== "generating"
-      next[index] = finished && entry.version.status === "generating" ? withInContext(entry, current.version) : entry
+      const stored = finished && entry.version.status === "generating" ? withInContext(entry, current.version) : entry
+      next[index] = stored
       this.update({ entries: next })
-    } else if (this.view.newer === null && entry.parentSlotId === (entries.at(-1)?.slotId ?? null)) {
-      let next = [...entries, entry]
-      let older = this.view.older
-      if (next.length > MAX_LOADED) {
-        next = next.slice(next.length - MAX_LOADED)
-        older = next[0]!.parentSlotId
-      }
-      this.update({ entries: next, older, leafSlotId: entry.slotId })
+      this.track(stored.version)
+      return true
     }
+    if (this.view.newer !== null || entry.parentSlotId !== (entries.at(-1)?.slotId ?? null)) return false
+    let next = [...entries, entry]
+    let older = this.view.older
+    if (next.length > MAX_LOADED) {
+      next = next.slice(next.length - MAX_LOADED)
+      older = next[0]!.parentSlotId
+    }
+    this.update({ entries: next, older, leafSlotId: entry.slotId })
     this.track(entry.version)
+    return true
+  }
+
+  /**
+   * A message this tab added at the leaf. When the window doesn't reach the leaf (opened
+   * at an older message), the chat opens at the bottom, where the message is.
+   */
+  private appended(entry: PathEntry, chat: Chat) {
+    this.update({ chat })
+    this.followAtBottom()
+    if (this.applySlot(entry)) return
+    this.requestedLeaf = null
+    this.update({ leafSlotId: entry.slotId })
+    void this.open(null)
   }
 
   private applyVersion(version: Version) {
@@ -364,7 +404,8 @@ export class ChatSession {
     return chat !== null && leafSlotId !== chat.activeLeafSlotId
   }
 
-  async send(content: string): Promise<Outcome<unknown>> {
+  /** The user's message at the leaf, then a reply to it. `sent` says whether the message went. */
+  async send(content: string): Promise<{ readonly sent: boolean; readonly outcome: Outcome<unknown> }> {
     const result = await this.call((client) =>
       client("SendMessage", {
         chatId: this.chatId,
@@ -375,23 +416,18 @@ export class ChatSession {
     )
     if (!result.ok) {
       if (result.error.tag === "LeafMoved") this.reload()
-      return result
+      return { sent: false, outcome: result }
     }
-    this.followAtBottom()
-    this.applySlot(result.value.entry)
-    this.update({ chat: result.value.chat })
-    return this.generate()
+    this.appended(result.value.entry, result.value.chat)
+    return { sent: true, outcome: await this.generate(result.value.entry.slotId) }
   }
 
-  /** A model reply at the leaf. */
-  async generate(): Promise<Outcome<unknown>> {
-    const result = await this.call((client) =>
-      client("Generate", { chatId: this.chatId, parentSlotId: this.view.leafSlotId, branch: this.onOtherBranch() })
-    )
-    if (result.ok) {
-      this.applySlot(result.value.entry)
-      this.update({ chat: result.value.chat })
-    } else if (result.error.tag === "LeafMoved") this.reload()
+  /** A model reply at the leaf, or under the message just sent. */
+  async generate(parentSlotId = this.view.leafSlotId): Promise<Outcome<unknown>> {
+    const branch = parentSlotId === this.view.leafSlotId && this.onOtherBranch()
+    const result = await this.call((client) => client("Generate", { chatId: this.chatId, parentSlotId, branch }))
+    if (result.ok) this.appended(result.value.entry, result.value.chat)
+    else if (result.error.tag === "LeafMoved") this.reload()
     return result
   }
 

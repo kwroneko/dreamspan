@@ -4,6 +4,7 @@ import { InvalidNetworkSettings, Unauthorized } from "@rp/shared/api.ts"
 import {
   AccountRejected,
   Forbidden,
+  LeafMoved,
   ModelKeyTaken,
   NotFound,
   ProviderError,
@@ -11,7 +12,6 @@ import {
   StaleWrite
 } from "@rp/shared/errors.ts"
 import { GenerationUnavailable, NotAmendable } from "@rp/shared/chatApi.ts"
-import { LeafMoved } from "@rp/shared/errors.ts"
 import { Cause } from "effect"
 import { RpcClientError } from "effect/rpc"
 
@@ -63,7 +63,7 @@ const describeError = (error: unknown): AppError => {
   }
   // Chats
   if (error instanceof LeafMoved)
-    return make("LeafMoved", "A newer message arrived meanwhile. Your text is still here.")
+    return make("LeafMoved", "A newer message arrived meanwhile. The chat is up to date now: try again.")
   if (error instanceof GenerationUnavailable) return make("GenerationUnavailable", sentence(error.message))
   if (error instanceof NotAmendable)
     return make("NotAmendable", "Only a finished message you wrote can be changed in place.")

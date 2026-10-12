@@ -2,7 +2,7 @@
 // anchored at the bottom, and the composer. Nothing here locks while replies generate.
 import { RegistryContext } from "@effect/atom-react"
 import type { ChatId, SlotId } from "@rp/shared/chat.ts"
-import { Link, useParams, useSearch } from "@tanstack/react-router"
+import { Link, useNavigate, useParams, useSearch } from "@tanstack/react-router"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react"
 import { Loading } from "../../ui/Spinner.tsx"
@@ -22,6 +22,8 @@ function MessageList({ session, view, anchor }: { session: ChatSession; view: Ch
   "use no memo"
   const parent = useRef<HTMLDivElement>(null)
   const positioned = useRef(0)
+  /** Paging waits until a new window is positioned: before that, the list renders from its top. */
+  const settled = useRef(false)
   const { entries } = view
   useEffect(() => {
     perf.listRenders++
@@ -44,16 +46,18 @@ function MessageList({ session, view, anchor }: { session: ChatSession; view: Ch
   useLayoutEffect(() => {
     if (view.opened === positioned.current || entries.length === 0) return
     positioned.current = view.opened
+    settled.current = false
     const index = anchor === null ? -1 : entries.findIndex((e) => e.slotId === anchor)
     if (index >= 0) virtualizer.scrollToIndex(index, { align: "center" })
     else virtualizer.scrollToEnd()
+    requestAnimationFrame(() => requestAnimationFrame(() => (settled.current = true)))
   })
 
   const items = virtualizer.getVirtualItems()
   const first = items[0]?.index
   const last = items.at(-1)?.index
   useEffect(() => {
-    if (positioned.current === 0 || first === undefined || last === undefined) return
+    if (!settled.current || first === undefined || last === undefined) return
     if (first < EDGE) void session.loadOlder()
     if (last >= entries.length - EDGE) void session.loadNewer()
     if (view.newer === null && virtualizer.isAtEnd(48)) session.followAtBottom()
@@ -99,18 +103,35 @@ function OpenChat({ chatId, leaf, slot }: { chatId: ChatId; leaf: SlotId | null;
     session.start(initialSlot)
     return () => session.dispose()
   }, [session, initialSlot])
-  return <ChatSurface session={session} slot={slot} />
+  return <ChatSurface session={session} leaf={leaf} slot={slot} />
 }
 
-function ChatSurface({ session, slot }: { session: ChatSession; slot: SlotId | null }) {
+function ChatSurface({ session, leaf, slot }: { session: ChatSession; leaf: SlotId | null; slot: SlotId | null }) {
   const view = useSyncExternalStore(session.subscribe, session.snapshot)
+  const navigate = useNavigate()
   useTitle(view.chat ? chatTitle(view.chat) : "Chat")
-  const lastSlot = useRef(slot)
+  const shown = useRef({ leaf, slot })
+  // Another message or branch of the open chat moves the window; a URL catching up with
+  // where the window already is doesn't.
   useEffect(() => {
-    if (slot === lastSlot.current) return
-    lastSlot.current = slot
-    void session.open(slot)
-  }, [session, slot])
+    const before = shown.current
+    shown.current = { leaf, slot }
+    if (leaf !== before.leaf) {
+      const current = view.leafSlotId
+      const already = leaf === null ? current !== null && current === view.chat?.activeLeafSlotId : leaf === current
+      if (!already) session.showBranch(leaf, slot)
+    } else if (slot !== before.slot) void session.open(slot)
+  }, [session, leaf, slot, view.leafSlotId, view.chat])
+  // Sending on another branch makes it the chat's latest: once the window moves on from the
+  // URL's leaf to the active one, the URL drops the old leaf.
+  const viewLeaf = useRef(view.leafSlotId)
+  useEffect(() => {
+    const from = viewLeaf.current
+    viewLeaf.current = view.leafSlotId
+    if (leaf !== null && from === leaf && view.leafSlotId !== leaf && view.leafSlotId === view.chat?.activeLeafSlotId) {
+      void navigate({ to: ".", search: slot === null ? {} : { slot }, replace: true })
+    }
+  }, [navigate, leaf, slot, view.leafSlotId, view.chat])
   return (
     <>
       <header className="mx-auto flex w-full max-w-3xl items-center gap-3 pb-2">
@@ -147,7 +168,7 @@ export function ChatPage() {
   const slot = typeof search.slot === "string" ? (search.slot as SlotId) : null
   return (
     <div data-fill className="flex min-h-0 flex-1 flex-col">
-      <OpenChat key={`${chatId}/${leaf ?? ""}`} chatId={chatId} leaf={leaf} slot={slot} />
+      <OpenChat key={chatId} chatId={chatId} leaf={leaf} slot={slot} />
     </div>
   )
 }

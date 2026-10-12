@@ -23,11 +23,11 @@ export function Composer({ session, view }: { session: ChatSession; view: ChatVi
   const send = async () => {
     if (text.trim() === "" || leafGenerating || sending) return
     setSending(true)
-    const outcome = await session.send(text)
+    const { sent, outcome } = await session.send(text)
     setSending(false)
     report(outcome)
-    // A message that wasn't sent stays in the box; one that was, even if its reply failed, goes.
-    if (outcome.ok || (outcome.error.tag !== "LeafMoved" && outcome.error.tag !== "RpcClientError")) setText("")
+    // A message that wasn't sent stays in the box; one that was goes, even if its reply failed.
+    if (sent) setText("")
   }
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
