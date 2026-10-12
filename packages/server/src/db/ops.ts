@@ -52,6 +52,7 @@ import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
 import { CastCard, FrozenMacros, QueuedMessage } from "@rp/shared/chat.ts"
 import { CardForChat, FirstTurn } from "@rp/shared/chatSetupApi.ts"
+import { AssemblyFailed } from "../assembler/types.ts"
 
 const StorageErrorReason = Schema.Literals(["busy", "constraint", "corrupt", "other"])
 
@@ -1431,5 +1432,24 @@ export class ReadOps extends RpcGroup.make(
     payload: { userId: UserId, mediaId: Schema.String },
     success: StoredFile,
     error: Schema.Union([NotFound, StorageError])
+  }),
+  // --- Context assembly (ARCHITECTURE.md §13).
+  /**
+   * The context for a version being generated, built by the assembler's stages from this one
+   * read transaction: a context snapshot (assembler/types.ts) as JSON text, which the main
+   * thread copies but never walks. `frozen` rebuilds a snapshot taken before (invariant 6).
+   */
+  Rpc.make("AssembleContext", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      slotId: SlotId,
+      versionId: VersionId,
+      now: Schema.Number,
+      timeZone: Schema.String,
+      frozen: Schema.NullOr(Schema.Record(Schema.String, Schema.Record(Schema.String, Schema.String)))
+    },
+    success: Schema.Struct({ snapshot: Schema.String }),
+    error: Schema.Union([NotFound, AssemblyFailed, StorageError])
   })
 ) {}

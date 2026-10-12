@@ -9,10 +9,12 @@
 // Environment:
 // - `ST_DIFF_TMPDIR`: where the run's directory goes (default: the OS temp directory).
 // - `ST_DIFF_KEEP=1`: keep that directory, for debugging.
+// - `ST_DIFF_ONLY=assembly,macros`: run only these comparisons (fixtures, macros, presets, assembly).
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { chromium } from "@playwright/test"
+import { compareAssembly } from "./assembly.ts"
 import { checkFixtures, compareMacros, comparePresetRoundTrips } from "./comparisons.ts"
 import { removeOrphans, ST_IMAGE, ST_VERSION, startSt } from "./container.ts"
 import { fixtureSet } from "./fixtures.ts"
@@ -57,11 +59,15 @@ const main = async () => {
   await loadFixtures(browser, st.url, fixtures)
   console.log("fixtures loaded")
 
-  const sections: Array<Section> = [
-    await checkFixtures(browser, st.url, mock, fixtures),
-    ...(await compareMacros(browser, st.url, fixtures)),
-    await comparePresetRoundTrips(browser, st.url, mock, fixtures)
+  const comparisons: ReadonlyArray<readonly [string, () => Promise<ReadonlyArray<Section>>]> = [
+    ["fixtures", async () => [await checkFixtures(browser, st.url, mock, fixtures)]],
+    ["macros", () => compareMacros(browser, st.url, fixtures)],
+    ["presets", async () => [await comparePresetRoundTrips(browser, st.url, mock, fixtures)]],
+    ["assembly", () => compareAssembly(browser, st.url, mock, fixtures)]
   ]
+  const only = process.env.ST_DIFF_ONLY?.split(",")
+  const sections: Array<Section> = []
+  for (const [name, compare] of comparisons) if (!only || only.includes(name)) sections.push(...(await compare()))
   return printReport(sections) === 0 ? 0 : 1
 }
 

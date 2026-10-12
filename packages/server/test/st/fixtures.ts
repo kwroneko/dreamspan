@@ -21,6 +21,8 @@ export interface FixtureSet {
   readonly persona: { readonly name: string; readonly description: string }
   /** Card PNGs, as our exporter writes them. */
   readonly cards: ReadonlyArray<{ readonly name: string; readonly png: Uint8Array }>
+  /** The cards the context assembler is compared on, each with a chat below. */
+  readonly gateCards: ReadonlyArray<string>
   /** World Info files, as our exporter writes them. ST names a book after its file. */
   readonly lorebooks: ReadonlyArray<{ readonly name: string; readonly file: Uint8Array }>
   readonly presets: ReadonlyArray<{ readonly name: string; readonly data: unknown }>
@@ -105,6 +107,60 @@ const cardPng = () => {
   return run(exportCardPng(card, png()))
 }
 
+/**
+ * The context assembler's fixtures (ARCHITECTURE §13): cards without a lorebook, since
+ * matching ST's lorebooks isn't a goal (DESIGN §1.3). Oren has a prompt override, post-history
+ * instructions, two example blocks and a Character's Note in the user's role; Wren has none
+ * of them, and no personality.
+ */
+const GATE_CARDS = [
+  {
+    name: "Oren Hale",
+    description: "{{char}} runs the night ferry across the estuary and owes {{user}} nothing.",
+    personality: "Gruff, honest, superstitious.",
+    scenario: "{{user}} needs passage before the fog closes in.",
+    first_mes: "*{{char}} coils a rope.* Ferry's closing, {{user}}.",
+    mes_example:
+      "<START>\n{{user}}: How much for a crossing?\n{{char}}: More than you have.\n<START>\n{{user}}: Is it safe?\n{{char}}: Nothing on this water is safe.",
+    system_prompt: "{{original}}\nKeep {{char}}'s replies short and dry.",
+    post_history_instructions: "Write only {{char}}'s next reply.",
+    depth_prompt: { prompt: "{{char}} never takes payment in coin.", depth: 1, role: "user" }
+  },
+  {
+    name: "Wren Ash",
+    description: "{{char}} keeps bees on the old sea wall.",
+    personality: "",
+    scenario: "Late summer, after the storms.",
+    first_mes: "*{{char}} lifts a frame of comb.* Careful, {{user}}.",
+    mes_example: "",
+    system_prompt: "",
+    post_history_instructions: "",
+    depth_prompt: undefined
+  }
+] as const
+
+const gatePng = (card: (typeof GATE_CARDS)[number]) => {
+  const { depth_prompt, ...fields } = card
+  const { card: doc } = run(
+    importCard(
+      json({
+        spec: "chara_card_v2",
+        spec_version: "2.0",
+        data: {
+          ...fields,
+          creator_notes: "",
+          tags: ["fixture"],
+          creator: "rp-harness",
+          character_version: "1",
+          alternate_greetings: [],
+          extensions: { talkativeness: "0.5", fav: false, ...(depth_prompt ? { depth_prompt } : {}) }
+        }
+      })
+    )
+  )
+  return run(exportCardPng(doc, png()))
+}
+
 const lorebook = () => {
   const { lorebook } = run(
     importLorebook(
@@ -164,7 +220,8 @@ export const fixtureSet = (): FixtureSet => {
   const roundTrips = presetRoundTrips()
   return {
     persona: PERSONA,
-    cards: [{ name: CARD, png: cardPng() }],
+    cards: [{ name: CARD, png: cardPng() }, ...GATE_CARDS.map((card) => ({ name: card.name, png: gatePng(card) }))],
+    gateCards: GATE_CARDS.map((card) => card.name),
     lorebooks: [{ name: LORE, file: lorebook() }],
     presets: roundTrips.flatMap((preset) => [
       { name: preset.name, data: preset.original },
@@ -179,6 +236,24 @@ export const fixtureSet = (): FixtureSet => {
           { name: PERSONA.name, is_user: true, mes: "The causeway was already under water." },
           { name: CARD, is_user: false, mes: "Then the tide came early. Write that down... no, I will." },
           { name: PERSONA.name, is_user: true, mes: "Someone lit a lantern out there." }
+        ]
+      },
+      {
+        card: "Oren Hale",
+        lines: [
+          { name: "Oren Hale", is_user: false, mes: "*Oren Hale coils a rope.* Ferry's closing, Tobin." },
+          { name: PERSONA.name, is_user: true, mes: "One crossing. I can pay." },
+          { name: "Oren Hale", is_user: false, mes: "*He spits over the rail.* Not in coin, you can't." }
+        ]
+      },
+      {
+        card: "Wren Ash",
+        lines: [
+          { name: "Wren Ash", is_user: false, mes: "*Wren Ash lifts a frame of comb.* Careful, Tobin." },
+          { name: PERSONA.name, is_user: true, mes: "They're calm today." },
+          { name: "Wren Ash", is_user: false, mes: "Calm is when they're planning something." },
+          { name: PERSONA.name, is_user: true, mes: "Planning what?" },
+          { name: "Wren Ash", is_user: false, mes: "*She smiles.* Honey, mostly." }
         ]
       }
     ],

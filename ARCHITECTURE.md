@@ -725,6 +725,8 @@ It fails with a typed `ProviderError`.
     - ST applies only the settings a preset has, so a dropped setting would pass whenever the file's value is ST's default. So the file is loaded over the baseline (a fresh install's settings), and the round trip over a poison preset. In the poison preset, every setting ST applies differs from the baseline, taken from ST's own list (`settingsToUpdate`). Our importer fills a missing field with ST's default, as a fresh ST does, so the requests match only if the round trip carries every setting.
     - The file is captured twice, so an unstable capture isn't mistaken for a lossy round trip.
     - A preset whose request equals the baseline's is flagged as not applied.
+  - **The context assembler** (`assembly.ts`, §13): for each of two gate cards, each preset and each generation type, the request ST sends against the one we build for the settings ST had in force (read from the page, through our preset importer), compared as JSON. ST's other generation types are started through `getContext().generate`, and its post-processing, a connection setting, is set on the page before sending.
+- `ST_DIFF_ONLY=assembly` (comma-separated: `fixtures`, `macros`, `presets`, `assembly`) runs only those comparisons.
 - **First results (2026-10-12):** the exported card, lorebook and chat all reach ST's request. The three preset fixtures (`default`, `full`, `legacy`) round-trip with identical requests, over the poison preset too. Checked against deliberate breakage, all reported: a card bound to a missing lorebook, a round trip with one sampler changed and a space added to one prompt, and a round trip without `temperature`, which only the poison preset reveals for `default`. All 318 macro vectors without a documented deviation match ST. The exit status is 1 when a difference isn't expected.
 
 ---
@@ -1199,3 +1201,95 @@ The agent's permission to edit a note or a card module (`agent_editable`) works 
 - `e2e/editor.spec.ts` covers edit and save with the diff, undo, history restore, a variant with unsaved changes, reordering by drag and keyboard, the regex approval, search and replace with a stopped pattern, and the update resolver; `layout.spec.ts` checks the card editor's layout and `csp.spec.ts` the avatar and the search worker under the CSP.
 
 **Not built yet:** editing lorebooks (and a card's embedded one), card fields' agent flag, a chat's override of an entry (the editor shows chat overrides but nothing opens one), removing an avatar, and "any two variants can be diffed" (DESIGN §4): only a revision with the saved version.
+
+---
+
+## 15. Context assembly
+
+`packages/server/src/assembler/` (DESIGN §5, DATA-MODEL §7.1). It turns a version being generated into a provider-neutral request (Chat Completions' messages, with names, plus ST's sampler values) and a record of where every piece of it came from, for the run inspector (DESIGN §7.4).
+
+**The pipeline** (`pipeline.ts`, PLUGINS §8). Stages are registered by id in a stage registry (§6's generic registry) and run in registration order over one `Assembly`; a plugin overrides a stage by its id, wraps one by `get`ting it first, or disables one. The built-ins (`stages.ts`) register the same way:
+- `path`: the version being generated, its slot and the slot before it
+- `state`: the events on the path to that slot, folded (§3.8)
+- `cast`: participants and the "played by me" set, each card through its layers; the speaker (the version's, else the first present character); the generation type ST's presets name (`normal`, `swipe` for a new version of a reply, `impersonate` for a character the user plays)
+- `model`: `model.binding` scoped to the narrator, else the chat's, else the user's default
+- `preset`: the scope chain (DATA-MODEL §5.4)
+- `notes`: the cards' notes that are on
+- `mode`: ST-compatible, or our layouts (below)
+- `history`: windows of the path, newest first, until the text read would fill the budget on its own
+- `macros`: the expander for preset and card text, and the path's messages resolved
+- `roles`: role projection (DESIGN §5.4)
+- `compose`: ST's prompt manager and budget, with the tail content
+- `messages`: squashing and post-processing
+- `prefill`, `request`
+
+Stages reach data only through `AssemblySources`, so the same pipeline runs over the database (`db/assemblySources.ts`) and over in-memory fixtures (`test/support/assemblySources.ts`, used by the tests and the ST harness). A stage that runs before what it needs throws (`need`): only a misregistered stage can cause it. `AssemblyFailed` (`no_model`, `budget`, `invalid_document`) is the one way a context fails as a whole.
+
+**Where it runs.** In a reader worker: `AssembleContext` (`db/assemblyReads.ts`) reads and assembles in one read transaction, so the context sees one snapshot of the database, and the main thread gets the result as one JSON string. Each reader keeps one assembler (built-in stages and macros) for its life. Measured on a synthetic 100,000-message chat (source workers, load 13 to 15):
+- with ST's default budget (4,095 tokens): 13 ms
+- with one state event in the chat: 220 to 380 ms, all of it the walk to the root every state read makes (§3.8 "Known limits")
+- with a 200,000-token preset: 1,662 messages, 250 to 340 ms, and a 2 MB result parsed on the main thread in 5 to 12 ms
+
+The pipeline itself took 5 to 13 ms of that, measured alone on 2,000 messages.
+
+**The sources over the database**, each the acting user's (another user's chat or version is `NotFound`, `test/assemblyStorage.test.ts`):
+- **Cards through their layers** (DESIGN §4): a `card.binding` revision, else its ref's head, else this chat's override of the card, else its upstream. A card in the bin is left out; one whose document no longer decodes as a card fails the context (`invalid_document`), never silently replaced.
+- **Notes:** the notes whose upstream head names a participant card as owner, at the revision `note.binding` pins. A card's first note (the oldest, which an ST import makes from the Character's Note, §11.1) is on unless the chat turns it off (`note.deactivate`), because ST always sends it; any other note is off until `note.activate`. This is a call on DESIGN §4.1's [P] activation: "not activated in other chats automatically" holds for every note but the imported one.
+- **The preset's scope chain:** `preset.binding` scoped to the narrator, the chat's own, the connection's preset override (DESIGN §9), the user's default (`user_settings` key `generation.preset`), then ST's own default preset (our importer's defaults). A level naming something deleted is passed over. Not built: the kind-specific and instance defaults, and card overlays (DATA-MODEL §5.4; `preset_overlay` has no document yet).
+- **The model:** what assembly needs (kind, wire API, key, prefill and breakpoint capabilities, a context size some source reported, the connection's preset override), merged by `resolveModel` (§3.12).
+
+**Macros by source** (`macros.ts`, §10's caller contract). Every piece is expanded on its own through `expand()`:
+- preset and card text always, card fields as ST's baseChatReplace does (trimmed, without card-field macros); notes count as card text
+- a message of the path only when its mode is `template`, against the state before its own events and the resolved text of the messages before it; its writes were recorded when it was written, so they aren't again
+- each piece's random and time draws are kept by piece id (`preset:main`, `card:<entity>:description`, `message:<version>`), over a message's stored `frozen_macros`; passing them back builds the same context
+- variable writes from preset and card text come back in order as the snapshot's `effects`, and each piece sees the variables the pieces before it left
+- a piece that reaches a macro limit is left out and reported, not the whole turn
+- messages the history didn't read still count for the macros that number messages (`{{lastMessageId}}`), as placeholders
+
+**ST-compatible mode** (`st.ts`; DESIGN §1.2). A chat with one character, no `layout.cards` and the `by_writer` projection (or none) gets what ST 1.19 would send for the same card, persona, preset and chat. `st.ts` follows ST's functions one by one (named in its comments):
+- the prompt collection: the order's enabled prompts that trigger for the generation type, with a disabled `main` kept empty
+- markers filled where the order has them, and appended where it hasn't
+- the card's prompt override and post-history instructions in place of `main` and `jailbreak`, unless the preset forbids it
+- in-chat prompts and notes injected by depth, then order, then role
+- the budget: the chat history newest first, then example dialogue blocks
+- squashing, post-processing, names behavior, impersonation and swipes
+
+The request maps to Chat Completions per provider kind as ST maps its sources (`wire.ts`): ST's custom source for OpenAI-compatible connections, OpenRouter's extra samplers, DeepSeek's non-zero `top_p`, and a seed only when set.
+
+**The fidelity gate** (`npm run test:st`, §7). Two synthetic cards without a lorebook (DESIGN §1.3: matching ST's lorebooks isn't a goal): one with a prompt override, post-history instructions, two example blocks and a Character's Note in the user's role; one with none of these and no personality. Each has its chat and the fixture persona, and is captured under ST's fresh settings, the three fixture presets, the poison preset, the `full` preset with each of ST's four post-processing modes, and ST's impersonate and swipe on two presets. Our side imports the card through our importer, and the settings ST had in force through our preset importer. First run (2026-10-12): 26 of 26 requests equal, apart from the documented differences.
+
+**Deliberate differences from ST.** The gate lists each documented difference it sees apart, without failing:
+- "Stream": we always stream; ST sends the preset's `stream_openai`. A person watches the reply (PROVIDERS §7.2).
+- "n": no multi-swipe requests; ST sends a preset's `n` above 1. DESIGN §3.1: "There's no dedicated 'generate ×N' action".
+- "send_if_empty": expanded like all preset text when it fills the user's turn; ST sends it as written before an impersonation. After a reply with an empty composer, ST sends it as a new user message that it stores in the chat; here it's in the context only.
+- "Macros expand once": ST expands a card field, then the marker prompt holding it again (`preparePrompt`), and extension prompts again when it joins them (`getExtensionPrompt`), so text a macro produced, or an escaped `\{\{`, expands the second time. Here a macro's output is never expanded again (§10).
+- "Chat messages verbatim": ST runs every message through its macros when it builds the prompt and when the user sends one; here typed and generated text stays as written unless the message is a template (DESIGN §5.6: "Text the user types is not macro-expanded by default", "Model output is not macro-substituted by default").
+- "Token counts": ST counts the budget with the model's tokenizer; here a token is four characters plus three per message, so which messages fit at the margin can differ. The budget is the preset's context size, within a context size some source reported for the model, less its response length.
+- "Fixed prompts over budget": ST shows an error and sends what it had built before the overflow; here the generation fails, saying the preset's prompts don't fit (`budget`).
+- "Prefill": sent to any model whose prefill capability is `assistant`, and otherwise dropped and reported (DESIGN §1.2); ST sends it only for its Claude source and ignores it elsewhere.
+- "Post-processing": the preset's `postprocess` always applies; in ST it's a connection setting, which a preset changes only when it's bound to the connection.
+- "OpenAI's own models": ST's per-model rules for OpenAI's o-series and GPT-5 (`max_completion_tokens`, no temperature), and its `reasoning_effort` and `verbosity` for listed models, aren't applied; ST's custom stop strings and logit-bias presets aren't sent.
+- "Several notes at one depth": joined in note id order; ST joins its extension prompts in key order.
+- Not built, so not compared: lorebooks (the `worldInfoBefore` and `worldInfoAfter` markers are empty), ST's continue, the author's note, persona positions other than "in the prompt", card modules (they have no placement yet), and ST's power-user switches (`pin_examples`, `strip_examples`, `collapse_newlines`), which stay at their defaults.
+
+**Our layouts** (DESIGN §5.2–§5.4, `layouts.ts`), for chats with more or fewer than one character, or that pick a layout or projection:
+- **`layout.cards`:** `concat` (the default) puts every character's description, personality and scenario in a block labelled with its name (`<character name="Mira">…</character>`) where the preset's `charDescription` marker is, and persona descriptions in `<persona>` blocks at `personaDescription`. `swap_tail` sends only the speaker's card, at the tail, as ST's card-swap mode sends only the speaker's. That's a call on DESIGN §5.2's "the active card's definition goes at the tail": the other cards aren't kept at the top, where they'd change the prefix whenever the speaker does.
+- **Stable bindings** (DESIGN §5.3): in preset text `{{char}}` is the cast and `{{user}}` the characters the user plays, joined with commas, unless `macro.binding` pins them; a card's own text binds `{{char}}` to that card, a persona's `{{user}}` to that persona. Preset text reads the first character's fields, which stay the same from turn to turn.
+- **The tail directive:** the preset's own group nudge with `{{char}}` bound to the speaker, or, when the speaker is a character the user plays, its impersonation prompt with `{{user}}` bound to them, which is what lets the model write for them.
+- **Names:** ST's group rules: with the default behavior, every message not by a character the user plays is prefixed with its speaker's name, and examples with their card's.
+- **`roles.projection`:** `by_writer` (ST's: messages on the user's side are `user`, the side taken from the speaker when it's a card, else from the slot's first version); `alternate` (by depth: even depths, the greeting's, are `assistant`, so roles never change as the chat grows, and when the last message is `assistant` the tail directive ends the request); `perspective` (the speaker's own messages are `assistant`).
+
+**The tail** in every mode ends with the one-turn direction stored on the version being generated (DESIGN §2.2), as a system message, verbatim, since the user typed it.
+
+**The snapshot** (`types.ts`, DATA-MODEL §7.1, invariant 6) holds:
+- what it was built from: chat, slot, version, the leaf, the clock and time zone, type, speaker, mode, the preset's ref, revision and scope, each card's ref and revision, the model
+- the request
+- every piece with its source and the messages it went into (a card block's fields included)
+- the issues the user should see: a prefill dropped, a piece left out, history or examples cut by the budget
+- the values drawn per piece, and the variable writes
+
+Building it again with the same clock and the values drawn gives the same snapshot (`test/assemblyStorage.test.ts`).
+
+**Known limits:**
+- Every assembly walks the path to the root for its state events (220 ms at 100,000 messages): §3.8's limit, to be solved there.
+- A message whose speaker has left the chat is named as the first card of its side.

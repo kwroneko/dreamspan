@@ -16,6 +16,7 @@ interface StContext {
   readonly chat: ReadonlyArray<unknown>
   readonly onlineStatus: string
   readonly selectCharacterById: (id: number) => Promise<void>
+  readonly generate: (type: string) => Promise<unknown>
   readonly getPresetManager: (apiId: string) => {
     readonly findPreset: (name: string) => string | undefined
     readonly selectPreset: (value: string) => Promise<void>
@@ -252,8 +253,9 @@ export interface Capture {
   /** Presets loaded into ST one after another, by name; none for the baseline settings. */
   readonly presets: ReadonlyArray<string>
   readonly character: string
-  /** What the user sends. */
+  /** What the user sends, or, for ST's other generation types, none: the chat as it is. */
   readonly message: string
+  readonly generate?: "impersonate" | "swipe"
 }
 
 /** Selects the character, which opens its chat. */
@@ -276,11 +278,60 @@ const selectPreset = (page: Page, name: string) =>
   }, name)
 
 /**
+ * The chat-completion settings in force, as a preset file: every setting ST's presets carry
+ * (`settingsToUpdate`, connection settings included, since custom_prompt_post_processing is
+ * one), with the prompts and the order. What our importer reads from it is what ST applies.
+ */
+const settingsInForce = (page: Page) =>
+  page.evaluate(async () => {
+    const module = "/scripts/openai.js"
+    const { settingsToUpdate } = (await import(module)) as {
+      settingsToUpdate: Record<string, readonly [string, string, boolean, boolean]>
+    }
+    const settings = SillyTavern.getContext().chatCompletionSettings
+    const preset: Record<string, unknown> = {}
+    for (const [key, [, setting]] of Object.entries(settingsToUpdate)) preset[key] = settings[setting]
+    return JSON.parse(JSON.stringify(preset)) as Record<string, unknown>
+  })
+
+/**
+ * Opens the character's chat in a fresh page, selects the presets, sends the message and
+ * returns the request body the mock received, and the settings that were in force. The page
+ * saves nothing, so every capture starts from the same chat and settings.
+ */
+export const captureWithSettings = async (
+  browser: Browser,
+  url: string,
+  mock: MockEndpoint,
+  capture: Capture,
+  /** ST's custom_prompt_post_processing, a connection setting no preset changes here. */
+  postProcessing?: string
+) => {
+  let settings: Record<string, unknown> = {}
+  const body = await captureRequest(browser, url, mock, capture, async (page) => {
+    if (postProcessing !== undefined) {
+      await page.evaluate((value) => {
+        ;(SillyTavern.getContext().chatCompletionSettings as Record<string, unknown>).custom_prompt_post_processing =
+          value
+      }, postProcessing)
+    }
+    settings = await settingsInForce(page)
+  })
+  return { body, settings }
+}
+
+/**
  * Opens the character's chat in a fresh page, selects the presets, sends the message and
  * returns the request body the mock received. The page saves nothing, so every capture
  * starts from the same chat and settings.
  */
-export const captureRequest = async (browser: Browser, url: string, mock: MockEndpoint, capture: Capture) => {
+export const captureRequest = async (
+  browser: Browser,
+  url: string,
+  mock: MockEndpoint,
+  capture: Capture,
+  beforeSending?: (page: Page) => Promise<void>
+) => {
   const page = await openPage(browser, url, { readOnly: true })
   const errors: Array<string> = []
   page.on("pageerror", (error) => errors.push(error.message))
@@ -288,7 +339,24 @@ export const captureRequest = async (browser: Browser, url: string, mock: MockEn
     await page.waitForFunction(() => SillyTavern.getContext().onlineStatus !== "no_connection")
     for (const preset of capture.presets) await selectPreset(page, preset)
     await openChat(page, capture.character)
+    await beforeSending?.(page)
     const next = mock.nextCompletion()
+    if (capture.generate) {
+      // ST's own entry point for its generation types; it resolves once the reply is in.
+      const generating = page.evaluate(
+        (type) =>
+          SillyTavern.getContext()
+            .generate(type)
+            .then(
+              () => "",
+              (error: unknown) => String(error)
+            ),
+        capture.generate
+      )
+      const recorded = await next
+      await generating
+      return recorded.body
+    }
     await page.fill("#send_textarea", capture.message)
     await page.click("#send_but")
     const recorded = await next

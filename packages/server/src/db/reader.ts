@@ -6,6 +6,7 @@ import { Effect, Layer } from "effect"
 import { RpcServer } from "effect/rpc"
 import { makeAccountReadHandlers } from "./accounts.ts"
 import { makeChatSetupReadHandlers } from "./chatSetupReads.ts"
+import { makeAssemblyReadHandlers } from "./assemblyReads.ts"
 import { readerConnection } from "./connection.ts"
 import { makeEditorReadHandlers } from "./editorReads.ts"
 import { makeImportReadHandlers } from "./importReads.ts"
@@ -30,10 +31,11 @@ RpcServer.layer(ReadOps, { concurrency: 1, disableFatalDefects: true }).pipe(
           makeChatSetupReadHandlers,
           // --- ST data folder import (ARCHITECTURE.md §13)
           makeStImportReadHandlers,
-          makeEditorReadHandlers
+          makeEditorReadHandlers,
+          makeAssemblyReadHandlers
         ]),
-        ([core, providers, accounts, imports, chatSetup, stImport, editor]) =>
-          ReadOps.of({ ...core, ...providers, ...accounts, ...imports, ...chatSetup, ...stImport, ...editor })
+        ([core, providers, accounts, imports, chatSetup, stImport, editor, assembly]) =>
+          ReadOps.of({ ...core, ...providers, ...accounts, ...imports, ...chatSetup, ...stImport, ...editor, ...assembly })
       )
     )
   ),
