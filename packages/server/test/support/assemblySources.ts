@@ -61,7 +61,6 @@ const fixtureSources = (fixture: AssemblyFixture) => {
   return Layer.succeed(AssemblySources)({
     target: Effect.succeed({
       chatId: fixture.chatId ?? "chat-1",
-      chatKind: "rp",
       slotId: slot(n),
       versionId: `version-${n}`,
       depth: n,

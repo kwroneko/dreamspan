@@ -13,6 +13,7 @@ import { makeAccountWriteHandlers } from "./accounts.ts"
 import { makeBin } from "./bin.ts"
 import { makeBinWriteHandlers } from "./binWrites.ts"
 import { makeChatSetupWriteHandlers } from "./chatSetupWrites.ts"
+import { makeGenerationWriteHandlers } from "./generationWrites.ts"
 import { makeLibraryWriteHandlers } from "./libraryWrites.ts"
 import { makeProviderWriteHandlers } from "./providerWrites.ts"
 import { makeWriteHandlers } from "./writes.ts"
@@ -29,17 +30,18 @@ RpcServer.layer(WriteOps, { concurrency: 1 }).pipe(
       Effect.gen(function* () {
         // One bin (and draft store) for every handler group.
         const bin = makeBin(yield* SqlClient.SqlClient, binLimits)
-        const [graph, library, binOps, providers, accounts, chatSetup] = yield* Effect.all([
+        const [graph, library, binOps, providers, accounts, chatSetup, generation] = yield* Effect.all([
           makeWriteHandlers(bin),
           makeLibraryWriteHandlers(bin),
           makeBinWriteHandlers(bin),
           makeProviderWriteHandlers,
           makeAccountWriteHandlers,
-          makeChatSetupWriteHandlers(bin)
+          makeChatSetupWriteHandlers(bin),
+          makeGenerationWriteHandlers
         ])
         // --- ST data folder import (ARCHITECTURE.md §13)
         const stImport = yield* makeStImportWriteHandlers
-        return WriteOps.of({ ...graph, ...library, ...binOps, ...providers, ...accounts, ...chatSetup, ...stImport })
+        return WriteOps.of({ ...graph, ...library, ...binOps, ...providers, ...accounts, ...chatSetup, ...stImport, ...generation })
       })
     )
   ),

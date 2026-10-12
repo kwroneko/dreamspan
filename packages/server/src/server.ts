@@ -20,12 +20,14 @@ import { makeLibraryHandlers } from "./api/library.ts"
 import { makeChatHandlers } from "./api/chats.ts"
 import { makeChatSetupHandlers } from "./api/chatSetup.ts"
 import { makeEditorHandlers } from "./api/editor.ts"
+import { makeGenerationHandlers } from "./api/generation.ts"
 import { makeProviderHandlers } from "./api/providers.ts"
 import { makeStImportHandlers } from "./api/stImport.ts"
 import { Accounts, AuthenticationLive, PEER_HEADER, SESSION_COOKIE, SESSION_TTL_MS } from "./auth/Accounts.ts"
 import { ChatHub } from "./chat/ChatHub.ts"
 import { Generations } from "./chat/Generations.ts"
-import { Generator } from "./chat/Generator.ts"
+import * as ContextGenerator from "./chat/ContextGenerator.ts"
+import type { Generator } from "./chat/Generator.ts"
 import { AppConfig } from "./config.ts"
 import * as Database from "./db/Database.ts"
 import { EventLoopMonitor } from "./eventLoop.ts"
@@ -60,6 +62,7 @@ const Handlers = AppApi.toLayer(
     // --- ST data folder import
     const stImport = yield* makeStImportHandlers
     const editor = yield* makeEditorHandlers
+    const generation = yield* makeGenerationHandlers
     return AppApi.of({
       ...providers,
       ...accounts,
@@ -68,6 +71,7 @@ const Handlers = AppApi.toLayer(
       ...chatSetup,
       ...stImport,
       ...editor,
+      ...generation,
       Health: () =>
         eventLoop.sample.pipe(
           Effect.map(
@@ -378,7 +382,9 @@ const FormatsLive = Layer.unwrap(
  * The whole server with this generator, minus configuration. Tests provide their own
  * AppConfig, with port 0, and read the port the kernel picked from the HttpServer this exposes.
  */
-export const serverWith = (generator: Layer.Layer<Generator, never, AppConfig>) =>
+export const serverWith = <E>(
+  generator: Layer.Layer<Generator, E, AppConfig | Database.Reader | Database.Writer | Providers.Providers>
+) =>
   HttpRouter.serve(
     Layer.mergeAll(
       RpcRoute,
@@ -390,10 +396,10 @@ export const serverWith = (generator: Layer.Layer<Generator, never, AppConfig>) 
       RequestGuard
     )
   ).pipe(
-    Layer.provide(ProvidersLive),
     // --- ST data folder import (ARCHITECTURE.md §13)
     Layer.provide(StImports.layer.pipe(Layer.provideMerge(MediaHolds.layer))),
     Layer.provide(Generations.layer.pipe(Layer.provideMerge(ChatHub.layer), Layer.provideMerge(generator))),
+    Layer.provide(ProvidersLive),
     Layer.provideMerge(HttpServerLive),
     Layer.provideMerge(Accounts.layer),
     Layer.provideMerge(Layer.mergeAll(DatabaseLive, EventLoopMonitor.layer, FormatsLive)),
@@ -401,7 +407,8 @@ export const serverWith = (generator: Layer.Layer<Generator, never, AppConfig>) 
   )
 
 /**
- * The whole server, minus configuration. It has no generator: the context assembler isn't
- * built yet, and the fake one is only in the development entry point (dev/main.ts).
+ * The whole server, minus configuration, generating with the context assembler and the
+ * provider layer (ARCHITECTURE §13). The fake generator is only in the development entry
+ * point (dev/main.ts) and the tests.
  */
-export const ServerLive = serverWith(Generator.none)
+export const ServerLive = serverWith(ContextGenerator.layer)

@@ -21,15 +21,20 @@ const MESSAGE = "Is the crossing still possible tonight?"
 const POISON = "st-diff poison"
 
 /** The differences ARCHITECTURE §13 documents, each with the lines of the diff it explains. */
-const DOCUMENTED: ReadonlyArray<{ readonly why: string; readonly matches: (line: string, config: Config) => boolean }> =
-  [
-    { why: "we always stream (ST sends the preset's stream_openai)", matches: (line) => line.startsWith("stream:") },
-    { why: "no multi-swipe requests (ST sends the preset's n above 1)", matches: (line) => line.startsWith("n:") },
-    {
-      why: "the preset's send_if_empty is expanded when it fills the user's turn (ST sends it as written before an impersonation)",
-      matches: (line, config) => config.generate === "impersonate" && /^messages\[\d+\]\.content: .*\{\{/.test(line)
-    }
-  ]
+const DOCUMENTED: ReadonlyArray<{
+  readonly why: string
+  readonly matches: (line: string, config: Config, settings: Record<string, unknown>) => boolean
+}> = [
+  { why: "we always stream (ST sends the preset's stream_openai)", matches: (line) => line.startsWith("stream:") },
+  { why: "no multi-swipe requests (ST sends the preset's n above 1)", matches: (line) => line.startsWith("n:") },
+  {
+    why: "the preset's send_if_empty is expanded when it fills the user's turn (ST sends it as written before an impersonation)",
+    matches: (line, config, settings) =>
+      config.generate === "impersonate" &&
+      /^messages\[\d+\]\.content: /.test(line) &&
+      line.includes(`: ${JSON.stringify(settings.send_if_empty)} ≠ `)
+  }
+]
 
 interface Config {
   readonly name: string
@@ -52,8 +57,10 @@ const ourRequest = async (
   config: Config,
   settings: Record<string, unknown>
 ): Promise<{ readonly body: unknown; readonly problem?: string }> => {
-  const { document } = importStPreset(JSON.stringify(settings))
-  if (document === null) return { body: null, problem: "our importer didn't take the settings ST had in force" }
+  const parsed = importStPreset(JSON.stringify(settings)).document
+  if (parsed === null) return { body: null, problem: "our importer didn't take the settings ST had in force" }
+  // The harness allows the fixture presets' regex scripts in ST, as a user would.
+  const document = { ...parsed, regex_approved: true }
   const card = await imported(fixtures.cards.find((c) => c.name === character)!.png, character)
   const persona = run(importCard(json({ name: fixtures.persona.name, description: fixtures.persona.description }))).card
   const lines: Array<FixtureMessage> = fixtures.chats
@@ -162,7 +169,7 @@ export const compareAssembly = async (
       }
       let unexpected = 0
       for (const line of diffJson(body, ours.body)) {
-        const known = DOCUMENTED.find((difference) => difference.matches(line, config))
+        const known = DOCUMENTED.find((difference) => difference.matches(line, config, settings))
         if (known) documented.push(`${label}: ${line} [${known.why}]`)
         else differences.push(`${label}: ${line}`)
         if (!known) unexpected++

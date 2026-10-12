@@ -5,11 +5,13 @@
 // A single-character chat with ST's layout gets what ST would send for its preset and card
 // (ST-compatible mode, DESIGN §1.2); anything else gets our layouts (DESIGN §5.2–§5.4).
 import type { ChatMessage } from "@rp/shared/macros/context.ts"
+import type { RegexScript } from "@rp/shared/docs/preset.ts"
 import { foldState } from "@rp/shared/state.ts"
 import { Effect, type Scope } from "effect"
 import { placeBreakpoints } from "./breakpoints.ts"
 import { cardBlock, directive, personaBlock } from "./layouts.ts"
 import { cardFields, makeMacroEnvironment, type Names } from "./macros.ts"
+import { appliesAt, compile, PLACEMENT, run } from "./regex.ts"
 import {
   type Assembly,
   type AssemblerStage,
@@ -220,7 +222,12 @@ const historyStage: AssemblerStage = {
       while (leaf !== null && tokens < budget) {
         const window = yield* sources.history(leaf, HISTORY_WINDOW)
         entries = [...window.entries, ...entries]
-        tokens += window.entries.reduce((n, e) => n + (e.inContext ? tokensOf({ content: e.content }) : 0), 0)
+        // A template's stored text isn't what it expands to, which may be nothing: it counts as
+        // nothing here, so it never ends the read early.
+        tokens += window.entries.reduce(
+          (n, e) => n + (e.inContext && e.macroMode === "verbatim" ? tokensOf({ content: e.content }) : 0),
+          0
+        )
         leaf = window.older
       }
       assembly.history = entries
@@ -389,30 +396,51 @@ const place = (collection: Array<StPrompt>, identifier: string, role: Role, text
 }
 
 /** A card's prompt override replaces a preset prompt unless the preset forbids it or turned it off. */
+/**
+ * A card's prompt override replaces a preset prompt unless the preset forbids it or turned it
+ * off. ST expands the override with the card's other fields, before the preset's prompts,
+ * and fills `{{original}}` (the prompt it replaces) once the prompt is known: the first
+ * `{{original}}` becomes it and any other nothing, as ST's macro does.
+ */
 const override = (
   assembly: Assembly,
   collection: Array<StPrompt>,
   disabled: (identifier: string) => boolean,
   identifier: "main" | "jailbreak",
-  card: CardInput,
-  field: "system_prompt" | "post_history_instructions"
+  text: Text
 ) => {
   const at = collection.findIndex((p) => p.identifier === identifier)
-  const raw = card.doc[field].trim()
-  if (at === -1 || !raw || collection[at]!.forbid_overrides || disabled(identifier)) return
-  const env = need(assembly, "macros")
+  if (at === -1 || !text.text || collection[at]!.forbid_overrides || disabled(identifier)) return
   const original = collection[at]!
-  const piece = env.piece(`card:${card.entity}:${field}`, cardSource(card, field), raw, {
-    withoutCard: true,
-    original: original.content
+  let first = true
+  const content = text.text.replace(/\{\{original\}\}/gi, () => {
+    if (!first) return ""
+    first = false
+    return original.content
   })
-  collection[at] = { ...original, content: env.text(piece), piece }
+  const record = assembly.pieces[text.piece]!
+  assembly.pieces[text.piece] = { ...record, text: content, parts: original.piece === null ? [] : [original.piece] }
+  collection[at] = { ...original, content, piece: text.piece }
 }
 
 /** A message of the path as ST sends it, with the preset's names behavior (setOpenAIMessages). */
-const chatLine = (assembly: Assembly, projected: ProjectedEntry, groupNames: boolean): ChatLine => {
+const chatLine = (
+  assembly: Assembly,
+  projected: ProjectedEntry,
+  groupNames: boolean,
+  scripts: ReadonlyArray<PromptScript>,
+  depth: number
+): ChatLine => {
   const behavior = need(assembly, "preset").doc.names_behavior
-  const text = need(assembly, "macros").text(projected.piece).replace(/\r/gm, "")
+  const placement =
+    sideOf(projected.entry, need(assembly, "cast")) === "user" ? PLACEMENT.userInput : PLACEMENT.aiOutput
+  const text = scripts
+    .filter(({ script }) => appliesAt(script, placement, depth))
+    .reduce(
+      (current, { regex, replacement, trim }) => run(regex, replacement, trim, current),
+      need(assembly, "macros").text(projected.piece)
+    )
+    .replace(/\r/gm, "")
   const pieces = [projected.piece]
   const named = (prefix: boolean): ChatLine => ({
     role: projected.role,
@@ -430,6 +458,46 @@ const chatLine = (assembly: Assembly, projected: ProjectedEntry, groupNames: boo
     case "none":
       return named(false)
   }
+}
+
+interface PromptScript {
+  readonly script: RegexScript
+  readonly regex: RegExp
+  readonly replacement: string
+  readonly trim: ReadonlyArray<string>
+}
+
+/**
+ * The preset's prompt-only regex scripts, once the user approved them (ARCHITECTURE §9):
+ * the pattern compiled, with its macros expanded when the script asks for that, and the
+ * replacement and trim strings expanded. A script that can't run safely is left out and reported.
+ */
+const promptScripts = (assembly: Assembly): Array<PromptScript> => {
+  const doc = need(assembly, "preset").doc
+  if (!doc.regex_approved) return []
+  return doc.regex.flatMap((script) => {
+    if (script.disabled || !script.prompt_only || !script.find_regex) return []
+    const skip = (why: string) => {
+      assembly.issues.push({
+        kind: "regex_skipped",
+        message: `The regex script "${script.name}" was left out: ${why}.`
+      })
+      return []
+    }
+    if (script.substitute_regex === "escaped") return skip("macros escaped into its pattern aren't supported")
+    const find =
+      script.substitute_regex === "raw"
+        ? presetText(assembly, `regex:${script.id}:find`, script.find_regex).text
+        : script.find_regex
+    const regex = compile(find)
+    if (regex === "unsafe") return skip("backreferences and lookaheads can't be run in bounded time")
+    if (regex === null) return skip("its pattern isn't a valid regular expression")
+    const replacement = script.replace_string
+      ? presetText(assembly, `regex:${script.id}:replace`, script.replace_string).text
+      : ""
+    const trim = script.trim_strings.map((t, i) => presetText(assembly, `regex:${script.id}:trim:${i}`, t).text)
+    return [{ script, regex, replacement, trim }]
+  })
 }
 
 /** The example dialogue of one card, block by block (setOpenAIMessageExamples). */
@@ -489,6 +557,14 @@ const composeStage = sync("compose", (assembly) => {
   let injections: Array<Injection>
   let newChat: Text | null
 
+  // ST's card overrides, expanded with the card's fields, ahead of everything else.
+  const overrides =
+    mode.st && cast.characters[0]
+      ? {
+          main: cardText(assembly, cast.characters[0], "system_prompt"),
+          jailbreak: cardText(assembly, cast.characters[0], "post_history_instructions")
+        }
+      : null
   if (mode.st) {
     const char = cast.characters[0]!
     const persona = cast.personas[0]
@@ -540,10 +616,10 @@ const composeStage = sync("compose", (assembly) => {
       exampleLines(assembly, card, card.doc.name, true)
     )
     injections = noteInjections(assembly, mode.layout === "swap_tail" ? tailCards : cast.characters)
-    newChat = optional(
-      "utility.new_group_chat_prompt",
-      cast.characters.length > 1 ? utility.new_group_chat_prompt : utility.new_chat_prompt
-    )
+    newChat =
+      cast.characters.length > 1
+        ? optional("utility.new_group_chat_prompt", utility.new_group_chat_prompt)
+        : optional("utility.new_chat_prompt", utility.new_chat_prompt)
     for (const card of tailCards) {
       const block = cardBlock(assembly, card, cardText)
       control.push({ role: "system", content: block.text, pieces: [block.piece], kind: "volatile" })
@@ -567,8 +643,8 @@ const composeStage = sync("compose", (assembly) => {
   place(collection, "bias", "assistant", null)
   if (markers.persona) place(collection, "personaDescription", "system", markers.persona)
   if (mode.st) {
-    override(assembly, collection, disabled, "main", cast.characters[0]!, "system_prompt")
-    override(assembly, collection, disabled, "jailbreak", cast.characters[0]!, "post_history_instructions")
+    override(assembly, collection, disabled, "main", overrides!.main)
+    override(assembly, collection, disabled, "jailbreak", overrides!.jailbreak)
   }
   if (impersonate) {
     const prompt = collection.find((p) => p.identifier === "impersonate")!
@@ -585,8 +661,10 @@ const composeStage = sync("compose", (assembly) => {
   }
 
   const groupNames = !mode.st
+  const scripts = promptScripts(assembly)
+  const projected = need(assembly, "projected")
   const chat = injectInChat(
-    need(assembly, "projected").map((p) => chatLine(assembly, p, groupNames)),
+    projected.map((p, i) => chatLine(assembly, p, groupNames, scripts, projected.length - 1 - i)),
     collection.filter((p) => p.injection_position === "absolute"),
     injections
   )
@@ -624,11 +702,12 @@ const messagesStage = sync("messages", (assembly) => {
   let messages = [...need(assembly, "composition").messages]
   if (doc.squash) messages = squash(messages)
   messages = messages.filter((m) => m.content)
-  messages = postProcess(messages, doc.postprocess, {
+  assembly.postNames = {
     user: names.user,
     char: names.char,
     group: cast.characters.length > 1 ? cast.characters.map((c) => c.doc.name) : []
-  })
+  }
+  messages = postProcess(messages, doc.postprocess, assembly.postNames)
   assembly.messages = messages.map(({ role, content, name, pieces, kind }) => ({
     role,
     content,
@@ -687,7 +766,8 @@ const requestStage = sync("request", (assembly) => {
       seed: s.seed
     },
     useSystemPrompt: doc.use_sysprompt,
-    breakpoints: assembly.breakpoints ?? []
+    breakpoints: assembly.breakpoints ?? [],
+    names: assembly.postNames ?? { user: "", char: "", group: [] }
   }
   const mark = (piece: number, i: number) => {
     const record = assembly.pieces[piece]!

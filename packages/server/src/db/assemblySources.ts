@@ -29,11 +29,8 @@ import {
   toConnection,
   toModel
 } from "./providers.ts"
+import { readDefaults } from "./generationSettings.ts"
 import { withoutPurged } from "./stateRefs.ts"
-
-/** The user settings generation reads (`SetGenerationDefaults`). */
-const DEFAULT_MODEL_SETTING = "generation.model"
-const DEFAULT_PRESET_SETTING = "generation.preset"
 
 const decodeEvent = Schema.decodeUnknownEffect(FoldableEvent)
 const decodeCard = Schema.decodeUnknownExit(CardDoc)
@@ -81,11 +78,9 @@ interface Settings {
 }
 
 export const sqlSources = (sql: SqlClient.SqlClient, { userId, chatId, slotId, versionId }: Settings) => {
-  const userSetting = (key: string) =>
-    sql<{ value_json: string }>`SELECT value_json FROM user_settings WHERE user_id = ${userId} AND key = ${key}`.pipe(
-      Effect.map(([row]) => (row ? (JSON.parse(row.value_json) as unknown) : null))
-    )
-
+  // Every read of the chat checks it's the user's, not only the target's: a stage that
+  // replaced `path` couldn't read another user's chat through the others.
+  const owned = sql`EXISTS (SELECT 1 FROM chats o WHERE o.id = ${chatId} AND o.owner_user_id = ${userId})`
   /** A revision of an entity of this kind the user owns and hasn't deleted. */
   const revisionDoc = (revisionId: string, kind: string, entity?: string) =>
     sql<{ entity_id: string; doc_json: string }>`
@@ -152,12 +147,11 @@ export const sqlSources = (sql: SqlClient.SqlClient, { userId, chatId, slotId, v
     target: sql<{
       depth: number
       parent_slot_id: string | null
-      kind: "rp" | "workshop"
       ordinal: number
       speaker_entity_id: string | null
       direction: string | null
     }>`
-      SELECT s.depth, s.parent_slot_id, c.kind, v.ordinal, v.speaker_entity_id, v.direction
+      SELECT s.depth, s.parent_slot_id, v.ordinal, v.speaker_entity_id, v.direction
       FROM versions v JOIN slots s ON s.id = v.slot_id JOIN chats c ON c.id = s.chat_id
       WHERE v.id = ${versionId} AND s.id = ${slotId} AND c.id = ${chatId} AND c.owner_user_id = ${userId}
         AND v.deleted_at IS NULL AND s.deleted_at IS NULL AND c.deleted_at IS NULL`.pipe(
@@ -165,7 +159,6 @@ export const sqlSources = (sql: SqlClient.SqlClient, { userId, chatId, slotId, v
         row
           ? Effect.succeed({
               chatId,
-              chatKind: row.kind,
               slotId,
               versionId,
               depth: row.depth,
@@ -183,7 +176,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, { userId, chatId, slotId, v
       Effect.gen(function* () {
         const rows = yield* sql<{ key: string; scope: string | null; value_json: string; depth: number | null }>`
           WITH RECURSIVE path(id) AS (
-            SELECT id FROM slots WHERE id = ${at} AND chat_id = ${chatId}
+            SELECT id FROM slots WHERE id = ${at} AND chat_id = ${chatId} AND ${owned}
             UNION ALL
             SELECT s.parent_slot_id FROM slots s JOIN path p ON s.id = p.id WHERE s.parent_slot_id IS NOT NULL
           )
@@ -191,7 +184,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, { userId, chatId, slotId, v
           FROM state_events e
           LEFT JOIN path p ON p.id = e.slot_id
           LEFT JOIN slots s ON s.id = p.id
-          WHERE e.chat_id = ${chatId} AND e.superseded_by_changeset IS NULL
+          WHERE e.chat_id = ${chatId} AND ${owned} AND e.superseded_by_changeset IS NULL
             AND (e.slot_id IS NULL OR (p.id IS NOT NULL AND s.deleted_at IS NULL))
             AND (e.version_id IS NULL OR e.version_id = s.selected_version_id)
           ORDER BY coalesce(s.depth, -1), e.seq`
@@ -212,7 +205,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, { userId, chatId, slotId, v
       Effect.gen(function* () {
         const rows = yield* sql<HistoryRow>`
           WITH RECURSIVE path(id, n) AS (
-            SELECT id, 1 FROM slots WHERE id = ${leaf} AND chat_id = ${chatId}
+            SELECT id, 1 FROM slots WHERE id = ${leaf} AND chat_id = ${chatId} AND ${owned}
             UNION ALL
             SELECT s.parent_slot_id, p.n + 1 FROM slots s JOIN path p ON s.id = p.id
             WHERE s.parent_slot_id IS NOT NULL AND p.n < ${limit}
@@ -278,18 +271,21 @@ export const sqlSources = (sql: SqlClient.SqlClient, { userId, chatId, slotId, v
 
     model: (binding) =>
       Effect.gen(function* () {
-        const chosen = (binding ?? (yield* userSetting(DEFAULT_MODEL_SETTING))) as {
-          connection?: unknown
-          model?: unknown
-        } | null
-        if (typeof chosen?.connection !== "string" || typeof chosen.model !== "string") return null
+        const chosen = binding ?? (yield* readDefaults(sql, userId)).model
+        if (chosen === null) return null
         const [connection] = yield* sql<ConnectionRow>`
           SELECT ${sql.literal(connectionColumns)} FROM ${sql.literal(connectionFrom)}
           WHERE c.id = ${chosen.connection} AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL AND c.purged_at IS NULL`
         const [model] = connection
           ? yield* sql<ModelRow>`SELECT * FROM models WHERE id = ${chosen.model} AND connection_id = ${connection.id}`
           : []
-        if (!connection || !model) return null
+        // A binding to a connection or model that's gone fails visibly; it never falls back.
+        if (!connection || !model) {
+          return yield* new AssemblyFailed({
+            reason: "no_model",
+            message: "The model this chat is bound to is gone: its connection or the model was deleted. Choose another."
+          })
+        }
         const c = toConnection(connection)
         const m = toModel(model)
         const effective = resolveModel(m.key, m.upstream, m.overrides, c.compat)
@@ -323,8 +319,8 @@ export const sqlSources = (sql: SqlClient.SqlClient, { userId, chatId, slotId, v
           const found = yield* presetFrom(chain.connection, "connection")
           if (found) return found
         }
-        const user = yield* userSetting(DEFAULT_PRESET_SETTING)
-        if (typeof user === "string") {
+        const user = (yield* readDefaults(sql, userId)).preset
+        if (user !== null) {
           const found = yield* presetFrom(user, "user")
           if (found) return found
         }

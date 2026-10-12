@@ -1,10 +1,11 @@
-// The development server: main.ts, plus the fake generator when FAKE_GENERATOR_TPS is set.
+// The development server: main.ts, or the fake generator instead of the real one when
+// FAKE_GENERATOR_TPS is set.
 // For `npm run dev:server`, the browser tests and the performance harness. The production
 // entry point (main.ts) can't wire the fake generator, and the image doesn't contain this
 // directory (.dockerignore).
 import { NodeRuntime } from "@effect/platform-node"
 import { Cause, Config, Effect, Exit, Layer, Option, Runtime, Schema } from "effect"
-import { Generator } from "../chat/Generator.ts"
+import * as ContextGenerator from "../chat/ContextGenerator.ts"
 import { AppConfig } from "../config.ts"
 import { serverWith } from "../server.ts"
 import * as FakeGenerator from "./fakeGenerator.ts"
@@ -22,7 +23,7 @@ const teardown: Runtime.Teardown = (exit, onExit) =>
   Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause) ? onExit(0) : Runtime.defaultTeardown(exit, onExit)
 
 const options = Config.all({
-  /** Tokens a second for each generation; unset, nothing generates, as in production. */
+  /** Tokens a second for each fake generation; unset, the real generator, as in production. */
   tokensPerSecond: Config.option(Config.Number("FAKE_GENERATOR_TPS")),
   /** About how many tokens each generation has. */
   tokens: Config.Int("FAKE_GENERATOR_TOKENS").pipe(Config.withDefault(400)),
@@ -33,9 +34,10 @@ const options = Config.all({
 Effect.gen(function* () {
   if (process.env.NODE_ENV === "production") return yield* new FakeGeneratorInProduction()
   const { tokensPerSecond, tokens, burstMs } = yield* options
-  const generator: Layer.Layer<Generator> = Option.match(tokensPerSecond, {
-    onNone: () => Generator.none,
-    onSome: (rate) => FakeGenerator.layer({ tokensPerSecond: rate, tokens, burstMs: Option.getOrUndefined(burstMs) })
+  const server = Option.match(tokensPerSecond, {
+    onNone: () => serverWith(ContextGenerator.layer),
+    onSome: (rate) =>
+      serverWith(FakeGenerator.layer({ tokensPerSecond: rate, tokens, burstMs: Option.getOrUndefined(burstMs) }))
   })
-  return yield* Layer.launch(serverWith(generator).pipe(Layer.provide(AppConfig.layer)))
+  return yield* Layer.launch(server.pipe(Layer.provide(AppConfig.layer)))
 }).pipe(NodeRuntime.runMain({ teardown }))

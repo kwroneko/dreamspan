@@ -29,6 +29,7 @@ import {
   ProviderKindInfo,
   ProxyMode
 } from "./providers.ts"
+import { GenerationDefaults } from "./generation.ts"
 import { LlmRequest } from "./usage.ts"
 import { EntityKind, LibraryRef } from "./library.ts"
 
@@ -271,6 +272,15 @@ export class AppApi extends RpcGroup.make(
     payload: { kind: EntityKind },
     success: Schema.Array(LibraryRef),
     error: ServerError
+  }),
+  // --- Generation (ARCHITECTURE.md §13).
+  /** The model and preset the user's chats generate with when they don't choose. */
+  Rpc.make("GetGenerationDefaults", { success: GenerationDefaults, error: ServerError }),
+  /** Both defaults at once; NotFound when either isn't one of the user's own. */
+  Rpc.make("SetGenerationDefaults", {
+    payload: { defaults: GenerationDefaults },
+    success: GenerationDefaults,
+    error: Schema.Union([NotFound, ServerError])
   })
 )
   // --- Chats (chatApi.ts).

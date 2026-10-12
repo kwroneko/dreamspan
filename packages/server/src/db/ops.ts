@@ -38,6 +38,7 @@ import {
   ProviderKind,
   ProxyMode
 } from "@rp/shared/providers.ts"
+import { GenerationDefaults } from "@rp/shared/generation.ts"
 import { FoldableEvent, StateEventData } from "@rp/shared/state.ts"
 import {
   Cost,
@@ -1088,6 +1089,59 @@ export class WriteOps extends RpcGroup.make(
     payload: { userId: UserId, cardRefId: RefId, title: Schema.String },
     success: LibraryRef,
     error: Schema.Union([NotFound, StorageError])
+  }),
+  // --- Generation (ARCHITECTURE.md §13).
+  /**
+   * Opens a generation's rollout before its request is sent (DATA-MODEL §7.1): the row, its
+   * frozen context snapshot (JSON text, stored as given), the version's link to it and to
+   * the model, the chat variables the preset's and cards' macros wrote, as `var.set`
+   * events of the version, and the values its template messages drew. The version must be the user's and still generating, and the
+   * model one of the user's live connections'.
+   */
+  Rpc.make("StartRollout", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      slotId: SlotId,
+      versionId: VersionId,
+      rolloutId: Schema.String,
+      leafSlotId: Schema.NullOr(SlotId),
+      connectionId: ConnectionId,
+      modelId: ModelId,
+      snapshot: Schema.String,
+      variables: Schema.Array(
+        Schema.Struct({ name: Schema.String, value: Schema.NullOr(Schema.Union([Schema.String, Schema.Number])) })
+      ),
+      /** The values template messages of the chat drew, kept with them so they stay the same. */
+      frozenMessages: Schema.Array(
+        Schema.Struct({ versionId: VersionId, frozen: Schema.Record(Schema.String, Schema.String) })
+      )
+    },
+    success: Schema.Void,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * Closes a rollout with its outcome, and the usage its ledger rows add up to on the rollout
+   * and on its version, in one transaction, so both match the ledger (PROVIDERS §9.1).
+   */
+  Rpc.make("FinishRollout", {
+    payload: {
+      userId: UserId,
+      rolloutId: Schema.String,
+      versionId: VersionId,
+      status: Schema.Literals(["completed", "stopped", "failed"]),
+      error: Schema.NullOr(Schema.String)
+    },
+    success: Schema.Void,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** At startup: rollouts a previous process left running are interrupted. */
+  Rpc.make("InterruptRollouts", { success: Schema.Struct({ interrupted: Schema.Int }), error: StorageError }),
+  /** The user's default model and preset; NotFound when either isn't the user's and live. */
+  Rpc.make("SetGenerationDefaults", {
+    payload: { userId: UserId, defaults: GenerationDefaults },
+    success: GenerationDefaults,
+    error: Schema.Union([NotFound, StorageError])
   })
 ) {}
 
@@ -1437,7 +1491,8 @@ export class ReadOps extends RpcGroup.make(
   /**
    * The context for a version being generated, built by the assembler's stages from this one
    * read transaction: a context snapshot (assembler/types.ts) as JSON text, which the main
-   * thread copies but never walks. `frozen` rebuilds a snapshot taken before (invariant 6).
+   * thread only passes on to be stored, and, apart, what generating needs of it
+   * (`Generation` in assembler/types.ts). `frozen` rebuilds a snapshot taken before (invariant 6).
    */
   Rpc.make("AssembleContext", {
     payload: {
@@ -1449,7 +1504,13 @@ export class ReadOps extends RpcGroup.make(
       timeZone: Schema.String,
       frozen: Schema.NullOr(Schema.Record(Schema.String, Schema.Record(Schema.String, Schema.String)))
     },
-    success: Schema.Struct({ snapshot: Schema.String }),
+    success: Schema.Struct({ snapshot: Schema.String, generation: Schema.String }),
     error: Schema.Union([NotFound, AssemblyFailed, StorageError])
+  }),
+  /** The user's generation defaults; one naming something gone reads as none. */
+  Rpc.make("GetGenerationDefaults", {
+    payload: { userId: UserId },
+    success: GenerationDefaults,
+    error: StorageError
   })
 ) {}

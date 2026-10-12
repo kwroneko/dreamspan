@@ -376,6 +376,39 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
         )
       })
   },
+  // --- Generation
+  GetGenerationDefaults: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const mine = { model: { connection: owner.connectionId, model: owner.modelId }, preset: owner.refId }
+        const set = yield* owner.api.SetGenerationDefaults({ defaults: mine })
+        assert.deepStrictEqual({ model: set.model, preset: set.preset }, mine)
+        const theirs = yield* actor.api.GetGenerationDefaults()
+        assert.notStrictEqual(theirs.model?.model, owner.modelId)
+        assert.notStrictEqual(theirs.preset, owner.refId)
+      })
+  },
+  SetGenerationDefaults: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const before = yield* owner.api.GetGenerationDefaults()
+        yield* refused(
+          actor.api.SetGenerationDefaults({
+            defaults: { model: { connection: owner.connectionId, model: owner.modelId }, preset: null }
+          }),
+          "NotFound"
+        )
+        yield* refused(actor.api.SetGenerationDefaults({ defaults: { model: null, preset: owner.refId } }), "NotFound")
+        // Another user's model on the caller's own connection is no better.
+        yield* refused(
+          actor.api.SetGenerationDefaults({
+            defaults: { model: { connection: actor.connectionId, model: owner.modelId }, preset: null }
+          }),
+          "NotFound"
+        )
+        assert.deepStrictEqual(yield* owner.api.GetGenerationDefaults(), before)
+      })
+  },
   // --- Chats
   ListChats: {
     probe: (actor, owner) =>

@@ -195,6 +195,10 @@ describe("context assembly from the database", () => {
         key: "claude-test",
         prefill: "assistant"
       })
+      // A binding to a connection that went is a visible failure, not "no model".
+      yield* writer.DeleteConnection({ userId, connectionId })
+      const gone = yield* Effect.flip(assemble())
+      assert.deepInclude(gone, { _tag: "AssemblyFailed", reason: "no_model" })
     }).pipe(Effect.provide(database()))
   )
 

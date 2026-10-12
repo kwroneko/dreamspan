@@ -150,6 +150,8 @@ export interface Assembly {
   projected?: ReadonlyArray<ProjectedEntry>
   composition?: Composition
   messages?: Array<RequestMessage & { readonly pieces: ReadonlyArray<number>; readonly kind: Stability }>
+  /** The names ST folds into the text where a provider has no `name` field. */
+  postNames?: AssembledRequest["names"]
   /** The prefill to send, when the model takes one. */
   prefill?: string
   breakpoints?: AssembledRequest["breakpoints"]

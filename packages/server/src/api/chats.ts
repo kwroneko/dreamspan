@@ -41,7 +41,7 @@ export const makeChatHandlers = Effect.gen(function* () {
   const userId = Effect.map(CurrentUser, (user) => user.id)
 
   const unavailable = new GenerationUnavailable({
-    message: "This server has nothing to generate with yet: the context assembler isn't built."
+    message: "This server has nothing to generate with."
   })
   const needGenerator = Option.isSome(generator) ? Effect.void : Effect.fail(unavailable)
 

@@ -72,6 +72,12 @@ export interface StreamRequest {
      * important first. Applied for Anthropic Messages; pi-ai's own markers stay.
      */
     readonly breakpoints?: ReadonlyArray<number>
+    /**
+     * Fields set over the body pi-ai built, before the registered transforms run: what the
+     * caller decides that pi-ai doesn't model, such as the context assembler's exact Chat
+     * Completions messages and per-provider samplers.
+     */
+    readonly payload?: Readonly<Record<string, unknown>>
   }
   readonly attribution: {
     readonly purpose: RequestPurpose
@@ -796,6 +802,7 @@ export const layer = (options: ProvidersOptions = {}) =>
               const transforms = registry.transforms.list().filter((t) => t.appliesTo(target))
               const observers = registry.observers.list().filter((o) => o.appliesTo(target))
               const breakpoints = options.breakpoints ?? []
+              const overrides = options.payload
               const events = prepared.kind.streams.streamSimple(piModel, transcript, {
                 // A keyless local server still needs a value; pi's direct calls require one.
                 apiKey: prepared.apiKey ?? "no-key",
@@ -818,14 +825,14 @@ export const layer = (options: ProvidersOptions = {}) =>
                 onProviderStreamEvent: (data) => {
                   for (const observer of observers) observer.observe(data, state.capture)
                 },
-                // Registered transforms rewrite the payload, in registration order.
-                ...(transforms.length > 0
+                // The caller's fields, then the registered transforms, in registration order.
+                ...(transforms.length > 0 || overrides !== undefined
                   ? {
                       onPayload: (payload: unknown) =>
                         transforms.reduce(
                           (current, t) =>
                             t.transform(current, { target, messages: request.context.messages, breakpoints }),
-                          payload as Record<string, unknown>
+                          { ...(payload as Record<string, unknown>), ...overrides }
                         )
                     }
                   : {})

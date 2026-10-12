@@ -243,7 +243,12 @@ export const fixtureSet = (): FixtureSet => {
         lines: [
           { name: "Oren Hale", is_user: false, mes: "*Oren Hale coils a rope.* Ferry's closing, Tobin." },
           { name: PERSONA.name, is_user: true, mes: "One crossing. I can pay." },
-          { name: "Oren Hale", is_user: false, mes: "*He spits over the rail.* Not in coin, you can't." }
+          {
+            name: "Oren Hale",
+            is_user: false,
+            // The full preset's prompt-only regex script strips this from the prompt.
+            mes: "*He spits over the rail.* <thinking>He wants coin.</thinking>Not in coin, you can't."
+          }
         ]
       },
       {

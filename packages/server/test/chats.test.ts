@@ -86,7 +86,7 @@ const read = (api: Api, chatId: Chat["id"], range: PathRange, limit: number, lea
   api.ReadPath({ chatId, leafSlotId, range, limit })
 
 describe("chats", () => {
-  it.live("the production server has no generator, whatever FAKE_GENERATOR_TPS says", () => {
+  it.live("the production server generates with the context assembler, whatever FAKE_GENERATOR_TPS says", () => {
     const env = {
       HOST: "127.0.0.1",
       PORT: "0",
@@ -98,10 +98,14 @@ describe("chats", () => {
     return Effect.gen(function* () {
       const api = yield* client()
       const { chat, slots } = yield* linearChat(api, 1)
-      assert.strictEqual(
-        yield* outcome(api.Generate({ chatId: chat.id, parentSlotId: slots[0]!, branch: false })),
-        "GenerationUnavailable"
-      )
+      const events = yield* subscribe(api, chat.id)
+      const { entry } = yield* api.Generate({ chatId: chat.id, parentSlotId: slots[0]!, branch: false })
+      // No model is chosen, so the version fails saying so, rather than filling with synthetic text.
+      yield* eventually(() => finished(events, entry.version.id) !== undefined)
+      const version = finished(events, entry.version.id)!
+      assert.strictEqual(version.status, "failed")
+      assert.strictEqual(version.content, "")
+      assert.strictEqual(version.error?.class, "no_model")
     }).pipe(
       Effect.scoped,
       Effect.provide(ServerLive.pipe(Layer.provide(AppConfig.layer))),

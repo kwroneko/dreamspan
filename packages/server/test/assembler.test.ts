@@ -270,6 +270,90 @@ describe("the context assembler", () => {
     expect(snapshot.request.prefill).toBe("Tobin:")
   })
 
+  it("runs the preset's prompt-only regex scripts once the user approved them (ARCHITECTURE §9)", async () => {
+    const script = (id: string, fields: Record<string, unknown>) => ({
+      id,
+      scriptName: id,
+      replaceString: "",
+      trimStrings: [],
+      placement: [2],
+      disabled: false,
+      markdownOnly: false,
+      promptOnly: true,
+      runOnEdit: false,
+      substituteRegex: 0,
+      minDepth: null,
+      maxDepth: null,
+      ...fields
+    })
+    const doc = preset({
+      extensions: {
+        regex_scripts: [
+          script("strip", { findRegex: "/<thinking>[\\s\\S]*?<\\/thinking>/g", maxDepth: 1 }),
+          script("wrap", { findRegex: "/(late)/", replaceString: "[{{match}}|$1|{{char}}]", trimStrings: ["t"] }),
+          script("backreference", { findRegex: "/(a)\\1/" })
+        ]
+      }
+    })
+    const fixture = chat({
+      messages: [
+        { side: "assistant", content: "<thinking>old</thinking>You're late." },
+        { side: "user", content: "The road flooded." },
+        { side: "assistant", content: "<thinking>new</thinking>Write it down." },
+        { side: "user", content: "Done." }
+      ],
+      preset: doc
+    })
+    const off = await assembled(fixture)
+    expect(contents(off)).toContain("assistant: <thinking>new</thinking>Write it down.")
+    const on = await assembled({ ...fixture, preset: { ...doc, regex_approved: true } })
+    // Within its depths only: the oldest reply keeps its thinking.
+    expect(contents(on)).toContain("assistant: Write it down.")
+    expect(contents(on)).toContain("assistant: <thinking>old</thinking>You're [lae|lae|Mira].")
+    expect(on.issues).toEqual([expect.objectContaining({ kind: "regex_skipped" })])
+    expect(on.issues[0]!.message).toContain("backreference")
+  })
+
+  it("expands a card's prompt override before the preset, and fills its {{original}}", async () => {
+    const snapshot = await assembled(
+      chat({
+        cards: [
+          {
+            entity: "mira",
+            doc: { ...mira, system_prompt: "{{setvar::mood::grim}}{{original}} Be terse.{{original}}" }
+          },
+          { entity: "tobin", doc: tobin }
+        ],
+        preset: preset({
+          prompts: [
+            { identifier: "main", role: "system", content: "Narrate." },
+            { identifier: "nsfw", role: "system", content: "Mood: {{getvar::mood}}." }
+          ]
+        })
+      })
+    )
+    expect(contents(snapshot)[0]).toBe("system: Narrate. Be terse.")
+    expect(contents(snapshot)).toContain("system: Mood: grim.")
+  })
+
+  it("doesn't stop reading the path at templates that expand to nothing", async () => {
+    const messages: Array<FixtureMessage> = [
+      ...Array.from({ length: 30 }, (_, i): FixtureMessage => ({
+        side: i % 2 ? "user" : "assistant",
+        content: `old ${i}`
+      })),
+      ...Array.from({ length: 200 }, (): FixtureMessage => ({
+        side: "assistant",
+        content: `{{// ${"x".repeat(200)}}}`,
+        macroMode: "template"
+      }))
+    ]
+    const snapshot = await assembled(
+      chat({ messages, preset: preset({ openai_max_context: 4000, openai_max_tokens: 300 }) })
+    )
+    expect(contents(snapshot).filter((m) => m.includes("old ")).length).toBe(30)
+  })
+
   it("ends with the one-turn direction, as typed (DESIGN §2.2)", async () => {
     const snapshot = await assembled(chat({ target: { direction: "Have {{char}} leave." } }))
     expect(contents(snapshot).at(-1)).toBe("system: Have {{char}} leave.")
@@ -395,5 +479,6 @@ describe("our layouts (DESIGN §5.2–§5.4)", () => {
     const snapshot = await assembled(chat({ events: [at(null, { key: "layout.cards", value: "concat" })] }))
     expect(snapshot.inputs.mode).toBe("layouts")
     expect(contents(snapshot).join("\n")).toContain('<character name="Mira">')
+    expect(snapshot.pieces.find((p) => p.text === "[Start a new Chat]")!.id).toBe("preset:utility.new_chat_prompt")
   })
 })

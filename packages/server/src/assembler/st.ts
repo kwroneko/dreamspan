@@ -298,7 +298,7 @@ export const compose = (input: {
       if (budget - tokensOf(message) < 0) break
       if (message.content) history.unshift(message)
       spend(tokensOf(message))
-      historySent++
+      if (message.kind === "history") historySent++
     }
     spend(-reserved)
     if (newChat && newChat.content) history.unshift(newChat)
@@ -333,7 +333,7 @@ export const compose = (input: {
   return {
     messages: [...messages, ...control],
     historySent,
-    historyTotal: input.chat.length,
+    historyTotal: input.chat.filter((line) => line.kind === "history").length,
     examplesSent,
     examplesTotal: input.examples.length
   }

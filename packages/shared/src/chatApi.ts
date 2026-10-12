@@ -7,7 +7,7 @@ import { BinItem } from "./bin.ts"
 import { Chat, ChatId, EntityId, PathEntry, QueuedMessage, SlotId, Version, VersionId } from "./chat.ts"
 import { LeafMoved, NotFound, ServerError, StaleWrite } from "./errors.ts"
 
-/** Generation needs a generator, and none is configured (the context assembler isn't built yet). */
+/** Generation needs a generator, and this server has none (only tests run one without). */
 export class GenerationUnavailable extends Schema.TaggedError<GenerationUnavailable>()("GenerationUnavailable", {
   message: Schema.String
 }) {}

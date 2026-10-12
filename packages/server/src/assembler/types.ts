@@ -83,11 +83,13 @@ export interface AssembledRequest {
   readonly useSystemPrompt: boolean
   /** Cache breakpoints as indices into `messages`, most important first. */
   readonly breakpoints: ReadonlyArray<{ readonly message: number; readonly reason: BreakpointReason }>
+  /** The bindings in effect, which providers without a `name` field fold into the text, as ST does. */
+  readonly names: { readonly user: string; readonly char: string; readonly group: ReadonlyArray<string> }
 }
 
 /** Something about the context the user should know: a piece dropped, a setting not applied. */
 export interface Issue {
-  readonly kind: "prefill_dropped" | "macro_limit" | "history_truncated" | "examples_truncated"
+  readonly kind: "prefill_dropped" | "macro_limit" | "history_truncated" | "examples_truncated" | "regex_skipped"
   readonly message: string
 }
 
@@ -121,12 +123,34 @@ export interface ContextSnapshot {
   readonly effects: ReadonlyArray<VariableEffect>
 }
 
+/** What generating needs of a snapshot, sent to the main thread apart from it. */
+export interface Generation {
+  readonly leafSlotId: string | null
+  readonly request: AssembledRequest
+  readonly model: ModelInput | null
+  /** The chat variables the preset's and cards' macros wrote, in order: `null` deletes one. */
+  readonly variables: ReadonlyArray<{ readonly name: string; readonly value: string | number | null }>
+  /** The random and time values each template message of the path used, to keep with it (DESIGN §5.6). */
+  readonly frozenMessages: ReadonlyArray<{ readonly versionId: string; readonly frozen: FrozenValues }>
+}
+
+/** The part of a snapshot generating needs. */
+export const generationOf = (snapshot: ContextSnapshot): Generation => ({
+  leafSlotId: snapshot.inputs.leafSlotId,
+  request: snapshot.request,
+  model: snapshot.inputs.model,
+  variables: snapshot.effects.filter((e) => e.scope === "local").map(({ name, value }) => ({ name, value })),
+  frozenMessages: snapshot.pieces.flatMap((piece) => {
+    const frozen = snapshot.frozen[piece.id]
+    return piece.source.kind === "message" && frozen ? [{ versionId: piece.source.version, frozen }] : []
+  })
+})
+
 // --- What the sources give the pipeline
 
 /** The version being generated and where it is. */
 export interface Target {
   readonly chatId: string
-  readonly chatKind: "rp" | "workshop"
   readonly slotId: string
   readonly versionId: string
   readonly depth: number
