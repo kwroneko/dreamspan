@@ -19,6 +19,7 @@ import { makeAccountHandlers } from "./api/accounts.ts"
 import { makeLibraryHandlers } from "./api/library.ts"
 import { makeChatHandlers } from "./api/chats.ts"
 import { makeChatSetupHandlers } from "./api/chatSetup.ts"
+import { makeEditorHandlers } from "./api/editor.ts"
 import { makeProviderHandlers } from "./api/providers.ts"
 import { makeStImportHandlers } from "./api/stImport.ts"
 import { Accounts, AuthenticationLive, PEER_HEADER, SESSION_COOKIE, SESSION_TTL_MS } from "./auth/Accounts.ts"
@@ -58,6 +59,7 @@ const Handlers = AppApi.toLayer(
     const chatSetup = yield* makeChatSetupHandlers
     // --- ST data folder import
     const stImport = yield* makeStImportHandlers
+    const editor = yield* makeEditorHandlers
     return AppApi.of({
       ...providers,
       ...accounts,
@@ -65,6 +67,7 @@ const Handlers = AppApi.toLayer(
       ...chats,
       ...chatSetup,
       ...stImport,
+      ...editor,
       Health: () =>
         eventLoop.sample.pipe(
           Effect.map(

@@ -6,10 +6,12 @@ import type { UserId } from "@rp/shared/domain.ts"
 import type { Doc, EntityKind, MergeOutcome, RefId } from "@rp/shared/library.ts"
 import { ImportedFollower, LibraryImport } from "@rp/shared/libraryImport.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
+import { keepsRegexApproval } from "@rp/shared/editing.ts"
 import { Effect, Predicate } from "effect"
 import { SqlClient } from "effect/sql"
 import type { Bin } from "./bin.ts"
 import { docHash, searchText } from "./documents.ts"
+import { makeEditorWriteHandlers } from "./editorWrites.ts"
 import { makeLibraryQueries, type RefRow, toLibraryRef } from "./library.ts"
 import { mediaPath } from "./media.ts"
 import { FollowerMerge, NotFound, RefChange, RefOperationRefused, StaleWrite, WriteOps } from "./ops.ts"
@@ -23,7 +25,7 @@ interface ImportSource {
 }
 
 /** A document as stored: its JSON, its hash and its search text. */
-interface EncodedDoc {
+export interface EncodedDoc {
   readonly json: string
   readonly hash: string
   readonly searchText: string
@@ -87,6 +89,17 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
       sql<{ doc_hash: string; schema_version: number }>`
       SELECT doc_hash, schema_version FROM entity_revisions WHERE id = ${id}`.pipe(Effect.map(([r]) => r!))
 
+    /**
+     * A preset's regex approval survives a merge only with the scripts it was given for:
+     * scripts merged in from a file never arrive approved (DESIGN §11, @rp/shared/editing.ts).
+     */
+    const withRegexApproval = (ref: RefRow, doc: Doc) =>
+      ref.kind !== "preset" || doc.regex_approved !== true
+        ? Effect.succeed(doc)
+        : Effect.map(lib.loadDoc(ref.head_revision_id), (ours) =>
+            keepsRegexApproval(ours, doc) ? doc : { ...doc, regex_approved: false }
+          )
+
     const mergeMessage = (ref: RefRow) =>
       ref.followed_label === null ? "Merged a new import" : `Merged changes from ${ref.followed_label}`
 
@@ -108,7 +121,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
             const merge = yield* insertRevision({
               entityId: ref.entity_id,
               schemaVersion: (yield* revision(ref.head_revision_id)).schema_version,
-              doc: encode(plan.merged),
+              doc: encode(yield* withRegexApproval(ref, plan.merged)),
               parents: [ref.head_revision_id, plan.theirsHead],
               origin: "merge",
               originRef: ref.follows_ref_id,
@@ -442,7 +455,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
           const merge = yield* insertRevision({
             entityId: ref.entity_id,
             schemaVersion: (yield* revision(ref.head_revision_id)).schema_version,
-            doc: encode(doc),
+            doc: encode(yield* withRegexApproval(ref, doc)),
             parents: [ref.head_revision_id, theirsRevisionId],
             origin: "merge",
             originRef: ref.follows_ref_id,
@@ -540,5 +553,20 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
           })
         }).pipe(transaction(sql, "ImportFile"))
     } satisfies Partial<Parameters<typeof WriteOps.of>[0]>
-    return handlers
+    // The editors' writes (editorWrites.ts) work through the same steps.
+    const editor = makeEditorWriteHandlers({
+      sql,
+      lib,
+      drafts,
+      encode,
+      insertRevision,
+      moveHead,
+      changed,
+      reload,
+      checkRowVersion,
+      revision,
+      recordMedia,
+      createUpstream
+    })
+    return { ...handlers, ...editor }
   })

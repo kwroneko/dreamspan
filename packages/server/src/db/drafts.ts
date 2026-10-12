@@ -289,7 +289,9 @@ export const makeDraftStore = (
     Effect.gen(function* () {
       const now = Date.now()
       const patch = diffPatch(draft.content, content)
-      if (isEmptyPatch(patch) && draft.status === "active") return draft
+      // Saving the same text against a new base revision only moves the base.
+      const sameBase = baseRevision === null || baseRevision === draft.base_revision
+      if (isEmptyPatch(patch) && draft.status === "active" && sameBase) return draft
       if (!isEmptyPatch(patch)) yield* record(draft, content, patch, kind, now)
       // A save after a commit or discard starts a new drafting session.
       const reopened = draft.status !== "active"

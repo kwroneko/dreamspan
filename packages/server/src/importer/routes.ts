@@ -2,7 +2,9 @@
 // are JSON, so a file would cross as base64: a third larger, and decoded whole on the main
 // thread. Both routes act as the user the session names, behind the same cross-site guard
 // as every request (server.ts), and refuse content types a cross-site form can send.
+import { createHash } from "node:crypto"
 import { CurrentUser } from "@rp/shared/api.ts"
+import { SavedRef } from "@rp/shared/editorApi.ts"
 import { ImportIssue, ImportReport } from "@rp/shared/importReport.ts"
 import {
   type ExportFormat,
@@ -64,6 +66,31 @@ const fileNameFrom = (raw: string | null) =>
     .split(/[/\\]/)
     .pop()!
     .slice(0, 255)
+
+/** The largest avatar: far more than a portrait needs, a quarter of the import cap. */
+const MAX_AVATAR_BYTES = 16 * 1024 * 1024
+
+/** Images served back to the browser, and the only types an avatar upload takes. */
+const INLINE_IMAGES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"])
+
+/** An uploaded avatar's type from its first bytes, and a PNG's size; null if it isn't one we show. */
+const avatarImage = (bytes: Uint8Array) => {
+  const ascii = (offset: number, text: string) =>
+    Buffer.from(bytes.subarray(offset, offset + text.length)).toString("latin1") === text
+  if (bytes[0] === 0x89 && ascii(1, "PNG\r\n\x1a\n") && ascii(12, "IHDR") && bytes.byteLength >= 24) {
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+    return { mime: "image/png", width: view.getUint32(16), height: view.getUint32(20) }
+  }
+  const mime =
+    bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff
+      ? "image/jpeg"
+      : ascii(0, "GIF8")
+        ? "image/gif"
+        : ascii(0, "RIFF") && ascii(8, "WEBP")
+          ? "image/webp"
+          : null
+  return mime === null ? null : { mime, width: null, height: null }
+}
 
 const jsonError = (status: number, message: string) => HttpServerResponse.jsonUnsafe({ error: message }, { status })
 
@@ -414,7 +441,109 @@ export const layer = Layer.unwrap(
       )
     )
 
+    // --- The card editor's avatar, and stored images back out (ARCHITECTURE.md "Editing the
+    // library"). An avatar upload is an upload like an import: the same permits and limits.
+    const uploadAvatar = Effect.gen(function* () {
+      const request = yield* HttpServerRequest.HttpServerRequest
+      const user = yield* CurrentUser
+      if (request.headers["content-type"] !== "application/octet-stream") {
+        return jsonError(415, "expected application/octet-stream")
+      }
+      if (Number(request.headers["content-length"]) > MAX_AVATAR_BYTES) {
+        return jsonError(413, `an avatar can be at most ${MAX_AVATAR_BYTES / 1024 / 1024} MB`)
+      }
+      const query = new URL(request.url, "http://upload").searchParams
+      const refId = query.get("ref")
+      const rowVersion = Number(query.get("rowVersion"))
+      if (!Schema.is(RefId)(refId) || !Number.isSafeInteger(rowVersion)) {
+        return jsonError(400, "expected a ref and its row version")
+      }
+      // Before the body is read: a refused upload reads and stores nothing.
+      const target = yield* reader.GetLibraryRef({ userId: user.id, refId })
+      if (target.kind !== "card") return jsonError(409, "only cards have avatars")
+      const message = NodeHttpServerRequest.toIncomingMessage(request)
+      const limits = {
+        maxBytes: MAX_AVATAR_BYTES,
+        idleMs: BODY_IDLE_MS,
+        deadline: Date.now() + BODY_DEADLINE_MS,
+        minBytesPerSecond: BODY_MIN_BYTES_PER_SECOND,
+        rateWindowMs: BODY_RATE_WINDOW_MS
+      }
+      return yield* oneAtATime(
+        user.id,
+        Effect.gen(function* () {
+          yield* firstBytes(message, limits)
+          const taken = yield* withPermitWithin(
+            uploads,
+            limits.deadline - Date.now(),
+            Effect.gen(function* () {
+              const body = yield* readBody(message, limits)
+              const image = avatarImage(body)
+              if (image === null) return jsonError(415, "an avatar must be a PNG, JPEG, GIF or WebP image")
+              const sha256 = createHash("sha256").update(body).digest("hex")
+              const change = yield* holding(
+                [sha256],
+                Effect.andThen(
+                  storeMedia(config.dataDir, sha256, body),
+                  writer.SetCardAvatar({
+                    userId: user.id,
+                    refId,
+                    expectedRowVersion: rowVersion,
+                    media: { role: "avatar", uri: "", sha256, byteSize: body.byteLength, ...image }
+                  })
+                )
+              )
+              return yield* HttpServerResponse.schemaJson(SavedRef)(
+                new SavedRef({
+                  ref: change.ref,
+                  followers: change.followers.map(({ refId, outcome }) => ({ refId, outcome }))
+                })
+              )
+            })
+          )
+          return Option.getOrElse(taken, () => jsonError(503, "the server is busy with other files; try again"))
+        }).pipe(
+          Effect.catchTag("BodyRefused", ({ reason }) => {
+            const [status, text] = BODY_REFUSALS[reason]
+            return Effect.succeed(jsonError(status, text).pipe(HttpServerResponse.setHeader("connection", "close")))
+          })
+        )
+      )
+    }).pipe(
+      Effect.catchTags({
+        NotFound: () => Effect.succeed(jsonError(404, "there's no such card")),
+        StaleWrite: () => Effect.succeed(jsonError(409, "the card changed since you opened it; reload it")),
+        RefOperationRefused: (error) => Effect.succeed(jsonError(409, error.reason))
+      }),
+      Effect.catch((error) =>
+        Effect.logError("an avatar upload failed", error).pipe(Effect.as(jsonError(500, "the upload failed")))
+      )
+    )
+
+    /** A stored image the user holds a reference to, for an `<img>` on this site only. */
+    const mediaFile = Effect.gen(function* () {
+      const request = yield* HttpServerRequest.HttpServerRequest
+      const user = yield* CurrentUser
+      const mediaId = new URL(request.url, "http://media").searchParams.get("id") ?? ""
+      const file = yield* reader.GetMediaFile({ userId: user.id, mediaId })
+      // Only images a browser shows as images; anything else stored is never served inline.
+      if (!INLINE_IMAGES.has(file.mime)) return jsonError(404, "there's no such image")
+      const bytes = yield* readMedia(config.dataDir, file.path)
+      if (bytes === undefined) return jsonError(404, "there's no such image")
+      return HttpServerResponse.uint8Array(bytes, {
+        contentType: file.mime,
+        headers: { "cache-control": "private, no-store", "x-content-type-options": "nosniff" }
+      })
+    }).pipe(
+      Effect.catchTag("NotFound", () => Effect.succeed(jsonError(404, "there's no such image"))),
+      Effect.catch((error) =>
+        Effect.logError("reading a media file failed", error).pipe(Effect.as(jsonError(500, "the file can't be read")))
+      )
+    )
+
     return Layer.mergeAll(
+      HttpRouter.add("POST", "/library/avatar", authenticated(accounts, uploadAvatar)),
+      HttpRouter.add("GET", "/library/media", authenticated(accounts, mediaFile)),
       HttpRouter.add("POST", "/library/import", authenticated(accounts, importFile)),
       HttpRouter.add("POST", "/library/export", authenticated(accounts, exportFile)),
       HttpRouter.add("POST", "/st-import/file", authenticated(accounts, stImportFile)),

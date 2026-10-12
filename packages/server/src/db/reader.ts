@@ -7,6 +7,7 @@ import { RpcServer } from "effect/rpc"
 import { makeAccountReadHandlers } from "./accounts.ts"
 import { makeChatSetupReadHandlers } from "./chatSetupReads.ts"
 import { readerConnection } from "./connection.ts"
+import { makeEditorReadHandlers } from "./editorReads.ts"
 import { makeImportReadHandlers } from "./importReads.ts"
 import { ReadOps } from "./ops.ts"
 import { makeProviderReadHandlers } from "./providerReads.ts"
@@ -28,10 +29,11 @@ RpcServer.layer(ReadOps, { concurrency: 1, disableFatalDefects: true }).pipe(
           makeImportReadHandlers,
           makeChatSetupReadHandlers,
           // --- ST data folder import (ARCHITECTURE.md §13)
-          makeStImportReadHandlers
+          makeStImportReadHandlers,
+          makeEditorReadHandlers
         ]),
-        ([core, providers, accounts, imports, chatSetup, stImport]) =>
-          ReadOps.of({ ...core, ...providers, ...accounts, ...imports, ...chatSetup, ...stImport })
+        ([core, providers, accounts, imports, chatSetup, stImport, editor]) =>
+          ReadOps.of({ ...core, ...providers, ...accounts, ...imports, ...chatSetup, ...stImport, ...editor })
       )
     )
   ),

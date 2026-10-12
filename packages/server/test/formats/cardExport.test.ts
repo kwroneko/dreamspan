@@ -67,6 +67,29 @@ describe("card export", () => {
     expect(imported(JSON.parse(text)).modules).toEqual([card.modules[0]])
   })
 
+  it("brings a module's placement back, but never the agent's permission to edit it", () => {
+    const placed = { mode: "depth", depth: 2, role: "system" } as const
+    const card: CardDoc = {
+      ...imported(stCardV2()),
+      modules: [
+        { id: "outfit", title: "Outfit", content: "Coat.", exportable: true, placement: placed, agent_editable: true }
+      ]
+    }
+    const text = new TextDecoder().decode(exportCardJson(card, "v3"))
+    expect(text).not.toContain("agent_editable")
+    expect(imported(JSON.parse(text)).modules).toEqual([
+      { id: "outfit", title: "Outfit", content: "Coat.", exportable: true, placement: placed }
+    ])
+    // A file that names the permission itself, or an invalid placement, gets neither.
+    const planted = JSON.parse(text)
+    planted.data.extensions.rp_harness.modules[0] = {
+      ...planted.data.extensions.rp_harness.modules[0],
+      agent_editable: true,
+      placement: { mode: "depth", depth: -1, role: "system" }
+    }
+    expect(imported(planted).modules).toEqual([{ id: "outfit", title: "Outfit", content: "Coat.", exportable: true }])
+  })
+
   it("never lets unknown fields override defined ones", () => {
     const card: CardDoc = {
       ...imported(cardV3()),

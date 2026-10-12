@@ -15,7 +15,8 @@ export type ExportVersion = "v2" | "v3"
 const extensionsWithModules = (card: CardDoc) => {
   const modules = card.modules
     .filter((module) => module.exportable)
-    .map(({ id, title, content }) => ({ id, title, content }))
+    // `agent_editable` stays behind: a file never grants the agent anything (DESIGN §11).
+    .map(({ id, title, content, placement }) => ({ id, title, content, ...(placement ? { placement } : {}) }))
   if (modules.length === 0) return card.extensions
   const ours = card.extensions[OUR_EXTENSION]
   return { ...card.extensions, [OUR_EXTENSION]: { ...(Predicate.isObject(ours) ? ours : {}), modules } }

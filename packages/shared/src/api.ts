@@ -6,6 +6,7 @@ import { ChatApi } from "./chatApi.ts"
 import { ChatSetupApi } from "./chatSetupApi.ts"
 import { StImportApi } from "./stImportApi.ts"
 import { User, UserAccount, UserId, UserRole } from "./domain.ts"
+import { EditorApi } from "./editorApi.ts"
 import {
   AccountRejected,
   Forbidden,
@@ -278,4 +279,6 @@ export class AppApi extends RpcGroup.make(
   .merge(ChatSetupApi)
   // --- ST data folder import (stImportApi.ts).
   .merge(StImportApi)
+  // --- The card and preset editors (editorApi.ts).
+  .merge(EditorApi)
   .middleware(Authentication) {}

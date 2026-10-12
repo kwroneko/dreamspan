@@ -3,6 +3,7 @@
 // `name` means V1. The specs: github.com/malfoyslastname/character-card-spec-v2 and
 // github.com/kwaroran/character-card-spec-v3.
 import { CARD_SCHEMA_VERSION, CardAsset, type CardDoc, type CardModule } from "@rp/shared/docs/card.ts"
+import { Placement } from "@rp/shared/docs/note.ts"
 import type { ReportBuilder } from "@rp/shared/importReport.ts"
 import { Predicate, Schema } from "effect"
 import { Fields, hasKeys, isFiniteNumber } from "./fields.ts"
@@ -84,7 +85,10 @@ const liftModules = (extensions: Record<string, unknown>, dataPath: Path, issues
       Predicate.isString(item.title) &&
       Predicate.isString(item.content)
     ) {
-      modules.push({ id: item.id, title: item.title, content: item.content, exportable: true })
+      // A placement that isn't valid is dropped, so the module goes in the card's section.
+      // `agent_editable` is never read: a file doesn't grant the agent anything (DESIGN §11).
+      const placement = Schema.is(Placement)(item.placement) ? { placement: item.placement } : {}
+      modules.push({ id: item.id, title: item.title, content: item.content, exportable: true, ...placement })
     } else {
       issues.add("warning", "card.invalid_module", `Module ${index} isn't valid; it was dropped.`, [
         ...path,

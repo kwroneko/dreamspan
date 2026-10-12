@@ -11,12 +11,14 @@ import type { ChatId, EntityId, SlotId, VersionId } from "@rp/shared/chat.ts"
 import type { User } from "@rp/shared/domain.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import type { ConnectionSettings, ConnectionId, CredentialId, ModelId } from "@rp/shared/providers.ts"
-import type { RefId } from "@rp/shared/library.ts"
+import type { RefId, RevisionId } from "@rp/shared/library.ts"
+import { textField } from "@rp/shared/editing.ts"
 import type { LlmRequestId } from "@rp/shared/usage.ts"
 import { Context, Effect, Layer, Stream } from "effect"
 import type { Rpc, RpcGroup } from "effect/rpc"
 import { Writer } from "../src/db/Database.ts"
 import * as FakeGenerator from "../src/dev/fakeGenerator.ts"
+import { png, textChunk } from "./formats/support.ts"
 import { client, login, outcome, posted, serverLayer, serverPort, testConfig } from "./support/config.ts"
 
 type Api = Effect.Success<ReturnType<typeof client>>
@@ -40,6 +42,16 @@ interface Party {
   readonly cardId: EntityId
   /** A message queued behind the generating reply. */
   readonly queuedId: string
+  readonly editor: OwnEditor
+}
+
+/** A card with an avatar, a note and an unsaved draft. */
+interface OwnEditor {
+  readonly cardRefId: RefId
+  readonly revisionId: RevisionId
+  readonly noteRefId: RefId
+  readonly avatarMediaId: string
+  readonly field: string
 }
 
 /** A chat with the user's message and a model reply still generating under it. */
@@ -672,6 +684,158 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
   UnhideImportedRun: {
     probe: (actor, owner) =>
       refused(actor.api.UnhideImportedRun({ chatId: owner.chat.chatId, throughSlotId: owner.chat.slotId }), "NotFound")
+  },
+  // --- The card and preset editors
+  OpenEditor: {
+    probe: (actor, owner) => refused(actor.api.OpenEditor({ refId: owner.editor.cardRefId }), "NotFound")
+  },
+  CreateCard: { createOnly: "makes a new card for the caller" },
+  SaveEditorDraft: {
+    probe: (actor, owner) =>
+      refused(
+        actor.api.SaveEditorDraft({
+          refId: owner.editor.cardRefId,
+          field: owner.editor.field,
+          content: "planted",
+          expectedRowVersion: null,
+          baseRevisionId: null
+        }),
+        "NotFound"
+      )
+  },
+  EditorDraftHistory: {
+    probe: (actor, owner) =>
+      refused(
+        actor.api.EditorDraftHistory({ refId: owner.editor.cardRefId, field: owner.editor.field, limit: 10 }),
+        "NotFound"
+      )
+  },
+  RestoreEditorDraft: {
+    probe: (actor, owner) =>
+      refused(
+        actor.api.RestoreEditorDraft({
+          refId: owner.editor.cardRefId,
+          field: owner.editor.field,
+          seq: 0,
+          expectedRowVersion: 1
+        }),
+        "NotFound"
+      )
+  },
+  DiscardEditorDraft: {
+    probe: (actor, owner) =>
+      refused(
+        actor.api.DiscardEditorDraft({
+          refId: owner.editor.cardRefId,
+          field: owner.editor.field,
+          expectedRowVersion: 1
+        }),
+        "NotFound"
+      )
+  },
+  CommitEditorDrafts: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const theirs = yield* owner.api.OpenEditor({ refId: owner.editor.cardRefId })
+        yield* refused(
+          actor.api.CommitEditorDrafts({
+            refId: owner.editor.cardRefId,
+            expectedRowVersion: theirs.ref.rowVersion,
+            fields: theirs.drafts.map((d) => ({ field: d.key.field, expectedRowVersion: d.rowVersion })),
+            message: "taken"
+          }),
+          "NotFound"
+        )
+      })
+  },
+  ListRevisions: {
+    probe: (actor, owner) => refused(actor.api.ListRevisions({ refId: owner.editor.cardRefId, limit: 10 }), "NotFound")
+  },
+  GetRevision: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const revisionId = owner.editor.revisionId
+        yield* refused(actor.api.GetRevision({ refId: owner.editor.cardRefId, revisionId }), "NotFound")
+        // Someone else's revision through one's own card.
+        yield* refused(actor.api.GetRevision({ refId: actor.editor.cardRefId, revisionId }), "NotFound")
+      })
+  },
+  RestoreRevision: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const revisionId = owner.editor.revisionId
+        const theirs = yield* owner.api.OpenEditor({ refId: owner.editor.cardRefId })
+        yield* refused(
+          actor.api.RestoreRevision({
+            refId: owner.editor.cardRefId,
+            revisionId,
+            expectedRowVersion: theirs.ref.rowVersion
+          }),
+          "NotFound"
+        )
+        const mine = yield* actor.api.OpenEditor({ refId: actor.editor.cardRefId })
+        yield* refused(
+          actor.api.RestoreRevision({
+            refId: actor.editor.cardRefId,
+            revisionId,
+            expectedRowVersion: mine.ref.rowVersion
+          }),
+          "NotFound"
+        )
+      })
+  },
+  ForkVariant: {
+    probe: (actor, owner) =>
+      refused(
+        actor.api.ForkVariant({ refId: owner.editor.cardRefId, label: "Taken", subtitle: "", moveDrafts: true }),
+        "NotFound"
+      )
+  },
+  RenameRef: {
+    probe: (actor, owner) =>
+      Effect.flatMap(owner.api.OpenEditor({ refId: owner.editor.cardRefId }), (theirs) =>
+        refused(
+          actor.api.RenameRef({
+            refId: owner.editor.cardRefId,
+            label: "Taken",
+            subtitle: "",
+            expectedRowVersion: theirs.ref.rowVersion
+          }),
+          "NotFound"
+        )
+      )
+  },
+  SetRegexApproval: {
+    probe: (actor, owner) =>
+      refused(actor.api.SetRegexApproval({ refId: owner.refId, approved: true, expectedRowVersion: 1 }), "NotFound")
+  },
+  PreviewUpdate: {
+    probe: (actor, owner) => refused(actor.api.PreviewUpdate({ refId: owner.editor.cardRefId }), "NotFound")
+  },
+  ApplyUpdate: {
+    probe: (actor, owner) => refused(actor.api.ApplyUpdate({ refId: owner.editor.cardRefId }), "NotFound")
+  },
+  ResolveUpdate: {
+    probe: (actor, owner) =>
+      refused(
+        actor.api.ResolveUpdate({
+          refId: owner.editor.cardRefId,
+          doc: {},
+          theirsRevisionId: owner.editor.revisionId,
+          expectedRowVersion: 1
+        }),
+        "NotFound"
+      )
+  },
+  ListCardNotes: {
+    probe: (actor, owner) => refused(actor.api.ListCardNotes({ cardRefId: owner.editor.cardRefId }), "NotFound")
+  },
+  CreateCardNote: {
+    probe: (actor, owner) =>
+      refused(actor.api.CreateCardNote({ cardRefId: owner.editor.cardRefId, title: "Planted" }), "NotFound")
+  },
+  DeleteCardNote: {
+    probe: (actor, owner) => refused(actor.api.DeleteCardNote({ noteRefId: owner.editor.noteRefId }), "NotFound")
   }
 }
 
@@ -690,6 +854,12 @@ const http = (party: Party, path: string, body: Uint8Array | string, contentType
   )
 
 const presetFile = readFileSync(new URL("./fixtures/presets/default.json", import.meta.url))
+
+/** A 1×1 PNG of one's own: the same bytes would be one stored file, referenced by both users. */
+const avatarFile = (handle: string) => png(textChunk("owner", handle))
+
+const httpGet = (party: Party, path: string) =>
+  Effect.promise(() => fetch(`http://127.0.0.1:${party.port}${path}`, { headers: { cookie: party.cookie } }))
 
 /** The HTTP routes that act on a user's data (ARCHITECTURE.md §11.4), probed the same way. */
 const routes: Record<string, Probe> = {
@@ -743,6 +913,23 @@ const routes: Record<string, Probe> = {
         "application/json"
       )
       assert.strictEqual(response.status, 404)
+    }),
+  "POST /library/avatar": (actor, owner) =>
+    Effect.gen(function* () {
+      const theirs = yield* owner.api.OpenEditor({ refId: owner.editor.cardRefId })
+      const response = yield* http(
+        actor,
+        `/library/avatar?ref=${owner.editor.cardRefId}&rowVersion=${theirs.ref.rowVersion}`,
+        avatarFile(actor.user.handle),
+        "application/octet-stream"
+      )
+      assert.strictEqual(response.status, 404)
+    }),
+  "GET /library/media": (actor, owner) =>
+    Effect.gen(function* () {
+      const path = `/library/media?id=${owner.editor.avatarMediaId}`
+      assert.strictEqual((yield* httpGet(owner, path)).status, 200)
+      assert.strictEqual((yield* httpGet(actor, path)).status, 404)
     })
 }
 
@@ -806,6 +993,27 @@ const seed = Effect.gen(function* () {
         sourcePath: null
       })
       yield* writer.SetEntityTags({ userId: user.id, entityId: card.entityId, tags: ["persona"] })
+      // A card with an avatar, a note and a draft, for the editors' probes.
+      const editorCard = yield* api.CreateCard({ label: `${user.handle}'s card`, name: "Wren" })
+      const port = yield* serverPort
+      const uploaded = yield* Effect.promise(() =>
+        fetch(`http://127.0.0.1:${port}/library/avatar?ref=${editorCard.id}&rowVersion=${editorCard.rowVersion}`, {
+          method: "POST",
+          headers: { cookie, "content-type": "application/octet-stream" },
+          body: avatarFile(user.handle)
+        })
+      )
+      assert.strictEqual(uploaded.status, 200)
+      const note = yield* api.CreateCardNote({ cardRefId: editorCard.id, title: "Outfit" })
+      const field = textField(["description"])
+      yield* api.SaveEditorDraft({
+        refId: editorCard.id,
+        field,
+        content: "A lighthouse keeper.",
+        expectedRowVersion: null,
+        baseRevisionId: null
+      })
+      const opened = yield* api.OpenEditor({ refId: editorCard.id })
       const queued = yield* api.SendMessage({
         chatId: chat.id,
         parentSlotId: reply.entry.slotId,
@@ -832,7 +1040,14 @@ const seed = Effect.gen(function* () {
         refId: ref.id,
         requestId,
         cookie,
-        port: yield* serverPort
+        port,
+        editor: {
+          cardRefId: editorCard.id,
+          revisionId: opened.ref.headRevisionId,
+          noteRefId: note.id,
+          avatarMediaId: opened.doc.avatar_media_id as string,
+          field
+        }
       } satisfies Party
     })
 
@@ -882,7 +1097,11 @@ const snapshot = (owner: Party) =>
     outcome(owner.api.ListVersions({ slotId: owner.chat.slotId }), JSON.stringify),
     outcome(owner.api.ListQueued({ chatId: owner.chat.chatId }), JSON.stringify),
     outcome(owner.api.GetCast({ chatId: owner.chat.chatId, slotId: null }), JSON.stringify),
-    outcome(owner.api.ListCards(), JSON.stringify)
+    outcome(owner.api.ListCards(), JSON.stringify),
+    outcome(owner.api.OpenEditor({ refId: owner.editor.cardRefId }), JSON.stringify),
+    outcome(owner.api.ListRevisions({ refId: owner.editor.cardRefId, limit: 100 }), JSON.stringify),
+    outcome(owner.api.ListCardNotes({ cardRefId: owner.editor.cardRefId }), JSON.stringify),
+    outcome(owner.api.ListLibrary({ kind: "card" }), JSON.stringify)
   ])
 
 /** Runs a probe, then checks that it changed nothing of the owner's, whatever it returned. */

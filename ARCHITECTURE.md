@@ -40,9 +40,9 @@ Bun was measured as an alternative (2026-10-10) and not adopted. On this server 
 ## 2. Server
 
 `packages/server/src/main.ts` reads configuration from the environment and launches `ServerLive` (`server.ts`). That's one HTTP server with these parts:
-- **`/rpc`:** the RPC endpoint (`AppApi` from `@rp/shared/api.ts`) over a WebSocket, JSON-serialized. Every UI action is meant to become an RPC in this group (DESIGN §7.7). Today it has `Health`, `Whoami`, the account RPCs (§4), the provider-kind, connection, credential, model, network-settings and usage RPCs (§6), `ListLibrary` (§11), and the chat RPCs (§12).
+- **`/rpc`:** the RPC endpoint (`AppApi` from `@rp/shared/api.ts`) over a WebSocket, JSON-serialized. Every UI action is meant to become an RPC in this group (DESIGN §7.7). Today it has `Health`, `Whoami`, the account RPCs (§4), the provider-kind, connection, credential, model, network-settings and usage RPCs (§6), `ListLibrary` (§11), the chat RPCs (§12), and the editor RPCs (§13).
 - **`/healthz`:** a plain-text liveness route, used by the Docker health check.
-- **`/auth/login`, `/auth/logout`** (§4) and **`/library/import`, `/library/export`** (§11.4): plain HTTP, for what a WebSocket message can't do well, a cookie and a file.
+- **`/auth/login`, `/auth/logout`** (§4), **`/library/import`, `/library/export`** (§11.4) and **`/library/avatar`, `/library/media`** (§13.5): plain HTTP, for what a WebSocket message can't do well, a cookie and a file.
 - **Everything else:** the client build, served as a single-page app (unknown paths return `index.html`, so deep links work).
 
 **Content-Security-Policy.** `RequestGuard` puts one on every response: `default-src 'self'`; `script-src 'self'` (the build's own modules, nothing inline, nothing from elsewhere, so markup that got past sanitizing can't run script); `style-src 'self'`; `img-src 'self'` (an image URL in a message could report on the chat to its server; Markdown blocks images too); `connect-src 'self'` plus `ws://` and `wss://` on the Host the browser used, when it's a plain host name (`'self'` covers the WebSocket in current browsers; the explicit origins, older ones); `object-src 'none'`, `base-uri 'none'`, `form-action 'self'`, `frame-ancestors 'none'`. The browser tests run every screen under it and fail on any violation (`e2e/csp.spec.ts`). The Vite development server doesn't send it.
@@ -333,7 +333,7 @@ An upstream merging a new import ends the same ways. The outcomes are returned, 
 
 **Known limits:**
 - Arrays without element identities, like a card's `alternate_greetings` or `tags`, are atomic: changing them on both sides is a conflict.
-- Not built yet: library search, and "used by N chats". Importing and exporting files is §11.
+- Not built yet: library search. Importing and exporting files is §11; editing, and "used by N chats", §13.
 
 ### 3.10 Drafts
 
@@ -498,7 +498,7 @@ The provider layer's storage (spec/PROVIDERS.md §2, §3.1, §9.1), in migration
   - an admin-only probe: a user is `Forbidden`
   - `global` (no user's data) or `createOnly` (names nothing that exists), with the reason
 
-  The HTTP routes that act on a user's data, `/library/import` and `/library/export`, have probes of the same kind, run the same way.
+  The HTTP routes that act on a user's data, `/library/import`, `/library/export`, `/library/avatar` and `/library/media`, have probes of the same kind, run the same way.
 - **Message headers are dropped** (`TransportHeadersOnly` in `server.ts`). Effect's RPC server appends the headers a client puts in each message after the upgrade request's, and the later entries win. Before this, any client could name any user in proxy mode by sending `remote-user` in a message. The serialization now empties message headers when decoding, so identity can only come from the upgrade request (`rpc.test.ts` checks this).
 - **`AUTH_MODE=single`, built-in login** (DESIGN §10.1):
   - **No account has a password:** loopback and `ALLOWED_IPS` are the implicit local admin `local`, without logging in. That's local use. It's checked on every call, not only when a connection opens: a socket opened from elsewhere while login was required doesn't become the local admin if the last password goes.
@@ -1116,3 +1116,55 @@ A SillyTavern data folder into the library and chats (DESIGN §1.4, §8.1; DATA-
 - A re-import changes a chat's state only from new messages on; without any, the report says what changed and nothing moves.
 - Speakers and links are matched only against the cards in the folder imported.
 - The writer decodes each batch before its transaction, but still in the writer thread.
+## 13. Editing the library
+
+The card and preset editors (DESIGN §4, §6.2): every field edits through a draft on the server, saving commits a revision, and nothing is ever lost. Contract in `@rp/shared/editorApi.ts` (merged into `AppApi`), the shared logic in `@rp/shared/editing.ts`, handlers in `packages/server/src/api/editor.ts`, storage in `db/editorWrites.ts` and `db/editorReads.ts`.
+
+### 13.1 Drafts per field
+
+**Every field the user edits is a draft** (§3.10), keyed by the ref and the field's path in the document (`entity_field`). A text field's draft holds its text; any other field's (a number, a switch, the prompt order, a new prompt, a list of tags) holds its JSON, with the path prefixed `=`. So each field has its own undo history on the server, the order of 100 prompts included, and a reload or another device finds every unsaved change.
+- **Paths name list elements by identity** where they have one (`["prompts", "identifier=main", "content"]`, as merge conflicts do, §3.9), so reordering never moves a draft to another prompt. Lists without identities (`alternate_greetings`) use indexes.
+- **Only the canonical spelling of a path is a field** (`parseField`): at most 8 segments, indexes whole and not negative, no `__proto__`, `constructor` or `prototype`. `SaveEditorDraft` refuses anything else (`EditRefused`). A value with such a key at any depth is refused when the drafts are applied.
+- **The working document** (`applyDrafts`) is the head with the drafts applied: values first, shallowest first, then texts, so a text in a prompt a value draft added lands in it. In a list, `null` at an element removes it, and an identity no element has adds one at the end. The client builds it for the diff and the search; the writer builds it again to commit.
+- **Protected fields** never change through a draft, each having its own action or none: `schema_version`; a card's `avatar_media_id` and `asset_media_ids`; a preset's `regex_approved`; a note's `owner`.
+- A draft records the revision it started from (`baseRevisionId` when a session starts). Saving the same text against a new base now moves the base (`drafts.ts`), which is how the client keeps a draft after a conflict.
+
+### 13.2 Saving
+
+**`CommitEditorDrafts`** takes the ref's row version and the drafts to save, each with its row version, and in one writer transaction:
+1. checks the ref and every draft are as the client saw them (`StaleWrite` otherwise: another tab typed on);
+2. checks for conflicts: a draft whose base isn't the head conflicts where the saved version changed that field since its base, unless both now say the same. Nothing is saved, and `EditConflict` names each field with the saved value and the draft's;
+3. applies the drafts and validates the result against the kind's schema (`validateDoc`: card, preset or note), which also drops keys the schema doesn't know. `InvalidDocument` lists the problems with their paths, at most 20;
+4. writes the revision (origin `user`, with the user's message), unless nothing changed, and passes the change on to the refs that follow (§3.9);
+5. ends the drafts as committed, sending text from before a destructive change to recovered texts (§3.10).
+
+Building and validating the document happens in the writer, because the drafts it applies are read in that same transaction; it's JSON and schema work, no I/O, as `EditRef`'s hashing already was. A 50 KB description and a 100-prompt preset save through it in the tests.
+
+**Other writes,** each a revision on the head and passed on to followers:
+- `RestoreRevision`: an earlier revision of the same entity as a new revision, `Restored the revision of <time> UTC`, `origin_ref` naming it. Nothing in between is lost (DATA-MODEL §15, invariant 1). Another schema version is refused.
+- `SetRegexApproval`: below.
+- `/library/avatar`: below.
+- `ForkVariant` (the writer's `ForkWithDrafts`): a variant following the ref, in one action, optionally moving the ref's unsaved drafts to it, so "make this a variant" works after the edits.
+- `RenameRef`: the library label and subtitle (DESIGN §4: the in-chat name is the document's `name`, a field like any other). Labels are trimmed, 1 to 200 characters with no control characters.
+- `CreateCard`: a card from scratch (`newCardDoc`), an upstream with every field empty but its name.
+- Notes: `CreateCardNote` makes a note entity owned by the card (`newCardNote`, in-chat at depth 4 as `system`, like ST's Character's Note), `ListCardNotes` lists a card's notes by their upstream refs, and `DeleteCardNote` sends one to the bin. A note is edited like any ref.
+- Updates from what a ref follows (§3.9): `PreviewUpdate`, `ApplyUpdate` (when no help is needed) and `ResolveUpdate` (the resolved document, validated against the kind's schema first).
+
+**Reads:** `OpenEditor` returns, in one snapshot, the ref, its head document, how many chats use it, every draft of its fields (ended ones too: their row versions are what the next save starts from) and the entity's upstream and variants. `ListRevisions` and `GetRevision` (of the ref's own entity only) are the history. `EditorDraftHistory`, `RestoreEditorDraft` and `DiscardEditorDraft` are §3.10's operations, for `entity_field` drafts only.
+
+**"Used by N chats"** (DESIGN §4): the user's live chats a change to the ref reaches. That's those whose state names it (`card.binding`, `preset.binding`, `lorebook.attach`), those with a chat override following it, and, for an entity's upstream, those its card joined (`participant.join`), which is what chats use without a binding. A chat counts even if the card left it since: too many is safer than too few.
+
+### 13.3 Regex approval
+
+A preset's scripts run only once `regex_approved` is true (§9), and only `SetRegexApproval` changes it, with its own revision ("Allowed the regex scripts to run"). The user's own edits in the editor keep it, a script's included. Anything else keeps it only for the scripts it was given for (`keepsRegexApproval`, comparing them as canonical JSON): a merged import or variant change that brings different scripts (`applyMerge`, `ResolveMerge`), and a restored revision, come out not approved. Without that, a re-import of a file with a new script merged into an approved preset arrived approved, since a merge keeps the side that changed the flag. A fast-forward moves a ref to exactly the revision it follows, approval included: the user approved those very scripts there.
+
+### 13.4 Documents
+
+- **Notes** (`@rp/shared/docs/note.ts`) have a placement: in-chat at a depth with a role, at the tail with a role, or in the card's section (DESIGN §5.2, proposed). Export writes ST's Character's Note from a depth note, from a tail note at depth 0, and not from a section note, which ST has no place for.
+- **Card modules** (`docs/card.ts`) have an optional placement, absent meaning the card's section, which export writes and import reads back.
+- **`agent_editable`** on notes and modules (DESIGN §4.1a, proposed) is only stored: nothing reads it until agents exist. Import never reads it and export never writes it, as with `regex_approved`: a file never grants anything (DESIGN §11). Card fields don't have the flag yet.
+
+### 13.5 Avatars and images
+
+- **`POST /library/avatar?ref=<card ref>&rowVersion=<n>`** (`importer/routes.ts`): the image as the body, `application/octet-stream`, at most 16 MiB, with the import's limits on slow bodies, its permits and one transfer per user (§11.4). The ref is checked before the body is read. The type comes from the bytes: PNG, JPEG, GIF or WebP, else `415`. The file goes to media storage as an import's do (§11.1), held from the sweep until `SetCardAvatar` records it, and the card gets a revision, "Changed the avatar". A stale row version is `409`.
+- **`GET /library/media?id=<media id>`**: a stored file the user holds a reference to (`GetMediaFile`), only if it's one of those four image types, with `nosniff` and `no-store`. Anything else, another user's file included, is `404`. The same bytes uploaded by two users are one file both reference, so both can read it.

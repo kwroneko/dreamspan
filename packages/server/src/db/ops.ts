@@ -23,6 +23,7 @@ import {
   RevisionId
 } from "@rp/shared/library.ts"
 import { LibraryImport } from "@rp/shared/libraryImport.ts"
+import { EditConflict, EditorSnapshot, InvalidDocument, NoteEntry } from "@rp/shared/editorApi.ts"
 import { NoteDoc } from "@rp/shared/docs/note.ts"
 import {
   Connection,
@@ -1023,6 +1024,67 @@ export class WriteOps extends RpcGroup.make(
     payload: { userId: UserId, chatId: ChatId, throughSlotId: SlotId },
     success: Schema.Struct({ unhidden: Schema.Int }),
     error: Schema.Union([NotFound, StorageError])
+  }),
+  // --- The card and preset editors (editorWrites.ts). Drafts save through SaveDraft.
+  /**
+   * The ref's head with the named drafts applied, validated against the kind's schema and
+   * committed as one revision, the drafts ended with it (@rp/shared/editing.ts).
+   */
+  Rpc.make("CommitEditorDrafts", {
+    payload: {
+      userId: UserId,
+      refId: RefId,
+      expectedRowVersion: Schema.Int,
+      fields: Schema.Array(Schema.Struct({ field: Schema.String, expectedRowVersion: Schema.Int })),
+      message: Schema.NullOr(Schema.String)
+    },
+    success: RefChange,
+    error: Schema.Union([NotFound, StaleWrite, EditConflict, InvalidDocument, StorageError])
+  }),
+  /** A new revision on the head with an earlier revision's content. */
+  Rpc.make("RestoreRevision", {
+    payload: { userId: UserId, refId: RefId, revisionId: RevisionId, expectedRowVersion: Schema.Int },
+    success: RefChange,
+    error: Schema.Union([NotFound, StaleWrite, RefOperationRefused, StorageError])
+  }),
+  /** ForkRef, optionally moving the ref's unsaved drafts to the new variant. */
+  Rpc.make("ForkWithDrafts", {
+    payload: {
+      userId: UserId,
+      refId: RefId,
+      label: Schema.String,
+      subtitle: Schema.String,
+      moveDrafts: Schema.Boolean
+    },
+    success: LibraryRef,
+    error: Schema.Union([NotFound, RefOperationRefused, StorageError])
+  }),
+  Rpc.make("RenameRef", {
+    payload: {
+      userId: UserId,
+      refId: RefId,
+      label: Schema.String,
+      subtitle: Schema.String,
+      expectedRowVersion: Schema.Int
+    },
+    success: LibraryRef,
+    error: Schema.Union([NotFound, StaleWrite, StorageError])
+  }),
+  Rpc.make("SetRegexApproval", {
+    payload: { userId: UserId, refId: RefId, approved: Schema.Boolean, expectedRowVersion: Schema.Int },
+    success: RefChange,
+    error: Schema.Union([NotFound, StaleWrite, RefOperationRefused, StorageError])
+  }),
+  /** A new avatar for a card, already written to media storage. */
+  Rpc.make("SetCardAvatar", {
+    payload: { userId: UserId, refId: RefId, expectedRowVersion: Schema.Int, media: ImportedMedia },
+    success: RefChange,
+    error: Schema.Union([NotFound, StaleWrite, RefOperationRefused, StorageError])
+  }),
+  Rpc.make("CreateCardNote", {
+    payload: { userId: UserId, cardRefId: RefId, title: Schema.String },
+    success: LibraryRef,
+    error: Schema.Union([NotFound, StorageError])
   })
 ) {}
 
@@ -1343,5 +1405,29 @@ export class ReadOps extends RpcGroup.make(
       )
     }),
     error: StorageError
+  }),
+  // --- The card and preset editors (editorReads.ts).
+  Rpc.make("OpenEditor", {
+    payload: { userId: UserId, refId: RefId },
+    success: EditorSnapshot,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** A revision of the ref's own entity. */
+  Rpc.make("GetRevisionDoc", {
+    payload: { userId: UserId, refId: RefId, revisionId: RevisionId },
+    success: Doc,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** The notes a card owns, by their upstream refs, oldest first. */
+  Rpc.make("ListCardNotes", {
+    payload: { userId: UserId, cardRefId: RefId },
+    success: Schema.Array(NoteEntry),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** A stored file the user holds a reference to. */
+  Rpc.make("GetMediaFile", {
+    payload: { userId: UserId, mediaId: Schema.String },
+    success: StoredFile,
+    error: Schema.Union([NotFound, StorageError])
   })
 ) {}

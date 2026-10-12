@@ -2,6 +2,7 @@
 // modules (DESIGN §4.1). Field names follow the card specs, so an export maps one to one.
 import { Schema } from "effect"
 import { LorebookDoc } from "./lorebook.ts"
+import { Placement } from "./note.ts"
 
 export const CARD_SCHEMA_VERSION = 1
 
@@ -21,7 +22,11 @@ export const CardModule = Schema.Struct({
   id: Schema.String,
   title: Schema.String,
   content: Schema.String,
-  exportable: Schema.Boolean
+  exportable: Schema.Boolean,
+  /** Absent: in the card's own section, with its definition (DESIGN §5.2). */
+  placement: Schema.optionalKey(Placement),
+  /** As a note's (note.ts): stored only, off when absent, and no file sets it. */
+  agent_editable: Schema.optionalKey(Schema.Boolean)
 })
 export type CardModule = typeof CardModule.Type
 
