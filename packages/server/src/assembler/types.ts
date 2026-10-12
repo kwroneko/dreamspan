@@ -214,6 +214,8 @@ export interface HistoryEntry {
   readonly content: string
   readonly macroMode: "template" | "verbatim"
   readonly frozen: FrozenValues | null
+  /** Whether a template's variable writes are recorded already, as state events of its version. */
+  readonly written: boolean
   /** False for hidden messages and for selections that failed or are still empty (invariant 2). */
   readonly inContext: boolean
   readonly sentAt: number

@@ -71,6 +71,7 @@ interface HistoryRow {
   readonly first_writer: string
   readonly first_origin: string
   readonly amend_count: number
+  readonly written: number
 }
 
 interface Settings {
@@ -269,7 +270,9 @@ export const sqlSources = (
             v.speaker_entity_id, v.content, v.macro_mode, v.frozen_macros, v.created_at,
             (SELECT count(*) FROM versions c WHERE c.slot_id = s.id AND c.deleted_at IS NULL) AS version_count,
             f.writer AS first_writer, f.origin AS first_origin,
-            (SELECT count(*) FROM version_history h WHERE h.version_id = v.id) AS amend_count
+            (SELECT count(*) FROM version_history h WHERE h.version_id = v.id) AS amend_count,
+            v.macro_mode = 'template' AND EXISTS (SELECT 1 FROM state_events w WHERE w.version_id = v.id
+              AND w.key = 'var.set' AND w.origin = 'rollout') AS written
           FROM path JOIN slots s ON s.id = path.id JOIN versions v ON v.id = s.selected_version_id
           JOIN versions f ON f.id = (SELECT id FROM versions x WHERE x.slot_id = s.id ORDER BY x.ordinal LIMIT 1)
           ORDER BY s.depth`
@@ -284,6 +287,7 @@ export const sqlSources = (
             content: row.content,
             macroMode: row.macro_mode,
             frozen: row.frozen_macros === null ? null : (JSON.parse(row.frozen_macros) as Record<string, string>),
+            written: row.written === 1,
             inContext: row.context_excluded === 0 && row.status !== "failed" && row.content.length > 0,
             sentAt: row.created_at,
             versions: row.version_count,

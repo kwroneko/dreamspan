@@ -407,7 +407,7 @@ const resolveStage: AssemblerStage = {
             names: { ...position.names, ...own },
             card: position.card,
             variables: state.vars,
-            ...(entry.frozen === null
+            ...(entry.macroMode === "template" && !entry.written
               ? {
                   writes: (effects: ReadonlyArray<VariableEffect>) => {
                     if (effects.length === 0) return

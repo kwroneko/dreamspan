@@ -15,6 +15,8 @@ export interface FixtureMessage {
   readonly macroMode?: "template" | "verbatim"
   readonly inContext?: boolean
   readonly frozen?: Readonly<Record<string, string>>
+  /** A template whose variable writes are recorded already. */
+  readonly written?: boolean
 }
 
 export interface AssemblyFixture {
@@ -47,6 +49,7 @@ const fixtureSources = (fixture: AssemblyFixture) => {
     content: m.content,
     macroMode: m.macroMode ?? "verbatim",
     frozen: m.frozen ?? null,
+    written: m.written ?? false,
     inContext: m.inContext ?? m.content.length > 0,
     sentAt: 0,
     versions: 1,

@@ -100,20 +100,21 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
         yield* sql`UPDATE versions SET rollout_id = ${rolloutId}, connection_id = ${connectionId},
           model_id = ${modelId}, updated_at = ${now} WHERE id = ${versionId}`
         yield* setVariables(chatId, slotId, versionId, variables, rolloutId, now)
-        // A template message keeps what it drew, and its writes are recorded at its position,
-        // the first time only: frozen_macros marks that it was.
+        // A template message keeps what it first drew (frozen_macros, when it had none), and
+        // its writes are recorded at its position once: a version with them recorded has them.
         yield* Effect.forEach(
           frozenMessages,
           ({ versionId: id, frozen, variables: writes }) =>
             Effect.gen(function* () {
-              const [kept] = yield* sql<{
-                slot_id: string
-              }>`UPDATE versions SET frozen_macros = ${JSON.stringify(frozen)}
-                WHERE id = ${id} AND macro_mode = 'template' AND frozen_macros IS NULL
-                  AND slot_id IN (SELECT id FROM slots WHERE chat_id = ${chatId})
-                RETURNING slot_id`
-              if (!kept || writes.length === 0) return
-              yield* setVariables(chatId, kept.slot_id, id, writes, rolloutId, now)
+              const [template] = yield* sql<{ slot_id: string; written: number }>`
+                SELECT v.slot_id, EXISTS (SELECT 1 FROM state_events w WHERE w.version_id = v.id
+                  AND w.key = 'var.set' AND w.origin = 'rollout') AS written
+                FROM versions v JOIN slots s ON s.id = v.slot_id
+                WHERE v.id = ${id} AND v.macro_mode = 'template' AND s.chat_id = ${chatId}`
+              if (!template) return
+              yield* sql`UPDATE versions SET frozen_macros = ${JSON.stringify(frozen)}
+                WHERE id = ${id} AND frozen_macros IS NULL`
+              if (template.written === 0) yield* setVariables(chatId, template.slot_id, id, writes, rolloutId, now)
             }),
           { discard: true }
         )

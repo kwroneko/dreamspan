@@ -207,28 +207,30 @@ describe("the context assembler", () => {
   })
 
   it("keeps what a template message writes the first time it expands, for what comes after it", async () => {
-    const fixture = (frozen?: Record<string, string>) =>
+    // Frozen when its chat was made, as every greeting is, but its writes not recorded yet.
+    const fixture = (written: boolean) =>
       chat({
         messages: [
           {
             side: "assistant",
             content: "{{setvar::mood::grim}}Late again.",
             macroMode: "template",
-            ...(frozen ? { frozen } : {})
+            frozen: {},
+            written
           },
           { side: "user", content: "Sorry." },
           { side: "assistant", content: "Mood: {{getvar::mood}}.", macroMode: "template" }
         ],
         preset: preset({ prompts: [{ identifier: "main", role: "system", content: "Now {{getvar::mood}}." }] })
       })
-    const first = await assembled(fixture())
+    const first = await assembled(fixture(false))
     expect(contents(first)).toContain("assistant: Mood: grim.")
     expect(contents(first)).toContain("system: Now grim.")
     expect(first.templateWrites).toEqual([
       { version: "version-0", writes: [{ scope: "local", name: "mood", value: "grim" }] }
     ])
-    // Expanded before, its writes are state events by now, and aren't written twice.
-    const again = await assembled(fixture({}))
+    // Recorded before, its writes are state events by now, and aren't written twice.
+    const again = await assembled(fixture(true))
     expect(again.templateWrites).toEqual([])
   })
 
