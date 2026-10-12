@@ -337,6 +337,15 @@ describe("the context assembler", () => {
       { preset: preset({ prompts: [{ identifier: "main", role: "system", content: "Story so far: {{summary}}" }] }) }
     )
     expect(contents(macro)[0]).toMatch(/^system: Story so far: .* lost the ledger in the flood\./)
+    // ST's extension puts it nowhere else: the other places a note can have send nothing.
+    for (const placement of [
+      { mode: "section", section: "card" },
+      { mode: "section", section: "author_note_top" },
+      { mode: "section", section: "author_note_bottom" },
+      { mode: "tail", role: "system" }
+    ] as const) {
+      expect(contents(await imported(placement)).join("\n")).not.toContain("lost the ledger")
+    }
     const off = await imported({ mode: "section", section: "after_main_prompt" }, { events: [] })
     expect(contents(off).join("\n")).not.toContain("lost the ledger")
   })
