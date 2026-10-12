@@ -1112,9 +1112,18 @@ export class WriteOps extends RpcGroup.make(
       variables: Schema.Array(
         Schema.Struct({ name: Schema.String, value: Schema.NullOr(Schema.Union([Schema.String, Schema.Number])) })
       ),
-      /** The values template messages of the chat drew, kept with them so they stay the same. */
+      /**
+       * The values template messages of the chat drew, kept with them so they stay the same, and
+       * the variables each wrote, recorded at its position the first time it expanded.
+       */
       frozenMessages: Schema.Array(
-        Schema.Struct({ versionId: VersionId, frozen: Schema.Record(Schema.String, Schema.String) })
+        Schema.Struct({
+          versionId: VersionId,
+          frozen: Schema.Record(Schema.String, Schema.String),
+          variables: Schema.Array(
+            Schema.Struct({ name: Schema.String, value: Schema.NullOr(Schema.Union([Schema.String, Schema.Number])) })
+          )
+        })
       )
     },
     success: Schema.Void,

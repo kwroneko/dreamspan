@@ -121,6 +121,8 @@ export interface ContextSnapshot {
   readonly frozen: Readonly<Record<string, FrozenValues>>
   /** Variable writes the preset's and cards' macros made, in order, to record as state. */
   readonly effects: ReadonlyArray<VariableEffect>
+  /** Variable writes of template messages expanded for the first time, to record at their positions. */
+  readonly templateWrites?: ReadonlyArray<{ readonly version: string; readonly writes: ReadonlyArray<VariableEffect> }>
 }
 
 /** What generating needs of a snapshot, sent to the main thread apart from it. */
@@ -130,21 +132,35 @@ export interface Generation {
   readonly model: ModelInput | null
   /** The chat variables the preset's and cards' macros wrote, in order: `null` deletes one. */
   readonly variables: ReadonlyArray<{ readonly name: string; readonly value: string | number | null }>
-  /** The random and time values each template message of the path used, to keep with it (DESIGN §5.6). */
-  readonly frozenMessages: ReadonlyArray<{ readonly versionId: string; readonly frozen: FrozenValues }>
+  /**
+   * The random and time values each template message of the path used, to keep with it
+   * (DESIGN §5.6), and the variables it wrote, the first time it expanded.
+   */
+  readonly frozenMessages: ReadonlyArray<{
+    readonly versionId: string
+    readonly frozen: FrozenValues
+    readonly variables: ReadonlyArray<{ readonly name: string; readonly value: string | number | null }>
+  }>
 }
 
 /** The part of a snapshot generating needs. */
-export const generationOf = (snapshot: ContextSnapshot): Generation => ({
-  leafSlotId: snapshot.inputs.leafSlotId,
-  request: snapshot.request,
-  model: snapshot.inputs.model,
-  variables: snapshot.effects.filter((e) => e.scope === "local").map(({ name, value }) => ({ name, value })),
-  frozenMessages: snapshot.pieces.flatMap((piece) => {
-    const frozen = snapshot.frozen[piece.id]
-    return piece.source.kind === "message" && frozen ? [{ versionId: piece.source.version, frozen }] : []
-  })
-})
+export const generationOf = (snapshot: ContextSnapshot): Generation => {
+  const written = new Map((snapshot.templateWrites ?? []).map((t) => [t.version, t.writes]))
+  return {
+    leafSlotId: snapshot.inputs.leafSlotId,
+    request: snapshot.request,
+    model: snapshot.inputs.model,
+    variables: snapshot.effects.filter((e) => e.scope === "local").map(({ name, value }) => ({ name, value })),
+    frozenMessages: snapshot.pieces.flatMap((piece) => {
+      if (piece.source.kind !== "message") return []
+      const frozen = snapshot.frozen[piece.id]
+      const writes = written.get(piece.source.version)
+      if (!frozen && !writes) return []
+      const variables = (writes ?? []).map(({ name, value }) => ({ name, value }))
+      return [{ versionId: piece.source.version, frozen: frozen ?? {}, variables }]
+    })
+  }
+}
 
 // --- What the sources give the pipeline
 

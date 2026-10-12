@@ -90,10 +90,7 @@ export const layer = Layer.effect(
               modelId: model.modelId as ModelId,
               snapshot: assembled.snapshot,
               variables: generation.variables,
-              frozenMessages: generation.frozenMessages as ReadonlyArray<{
-                versionId: VersionId
-                frozen: Record<string, string>
-              }>
+              frozenMessages: generation.frozenMessages.map((m) => ({ ...m, versionId: m.versionId as VersionId }))
             }),
             (_, exit) => finish(exit)
           ).pipe(

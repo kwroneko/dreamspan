@@ -55,6 +55,7 @@ const generateReply = (
     readonly connection: { readonly kind: string; readonly baseUrl: string; readonly apiKey?: string }
     readonly model: ModelOverrides
     readonly preset?: Record<string, unknown>
+    readonly greeting?: string
   }
 ) =>
   Effect.gen(function* () {
@@ -100,7 +101,7 @@ const generateReply = (
       greeting: new NewVersion({
         speakerEntityId: mira.entityId as EntityId,
         writer: "model",
-        content: "*{{char}} looks up.* Late again, {{user}}.",
+        content: options.greeting ?? "*{{char}} looks up.* Late again, {{user}}.",
         status: "complete",
         macroMode: "template",
         origin: "greeting"
@@ -123,7 +124,7 @@ const generateReply = (
     })
     const { entry } = yield* api.Generate({ chatId: chat.id, parentSlotId: sent.entry.slotId, branch: false })
     yield* eventually(() => finished(events, entry.version.id) !== undefined)
-    return { version: finished(events, entry.version.id)!, chat, connection, model }
+    return { version: finished(events, entry.version.id)!, chat, connection, model, events }
   })
 
 /** What the database recorded for a version: its rollout, its snapshot, its ledger rows. */
@@ -241,6 +242,48 @@ describe("generation", () => {
       assert.strictEqual(version.status, "failed")
       assert.strictEqual(version.error?.class, "budget")
       assert.isEmpty(mock.requests())
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("records what a template greeting writes at the greeting, the first time it expands", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const mock = yield* Effect.acquireRelease(
+        Effect.promise(() => startMockProvider(completion)),
+        (m) => Effect.promise(() => m.close())
+      )
+      const api = yield* client()
+      const { version, chat, events } = yield* generateReply(api, {
+        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+        model: {},
+        greeting: "{{setvar::mood::grim}}*{{char}} looks up.*",
+        preset: { prompts: [{ identifier: "main", role: "system", content: "Mood: {{getvar::mood}}." }] }
+      })
+      assert.strictEqual(version.status, "complete")
+      // A second reply reads the write back from the greeting's state, and doesn't record it again.
+      const { entry } = yield* api.Generate({ chatId: chat.id, parentSlotId: version.slotId, branch: false })
+      yield* eventually(() => finished(events, entry.version.id) !== undefined)
+      const sent = mock.requests().filter((r) => r.path === "/v1/chat/completions")
+      assert.strictEqual(sent.length, 2)
+      for (const request of sent) {
+        assert.deepStrictEqual((request.body!.messages as Array<{ content: string }>)[0]!.content, "Mood: grim.")
+      }
+      const db = new DatabaseSync(databaseFile(config.dataDir), { readOnly: true })
+      try {
+        const greeting = db.prepare("SELECT id, frozen_macros FROM versions WHERE origin = 'greeting'").get() as {
+          id: string
+          frozen_macros: string
+        }
+        assert.strictEqual(greeting.frozen_macros, "{}")
+        const writes = db
+          .prepare("SELECT key, value_json, origin FROM state_events WHERE version_id = ?")
+          .all(greeting.id) as Array<Record<string, unknown>>
+        assert.deepStrictEqual(writes, [
+          { key: "var.set", value_json: JSON.stringify({ name: "mood", value: "grim" }), origin: "rollout" }
+        ])
+      } finally {
+        db.close()
+      }
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 

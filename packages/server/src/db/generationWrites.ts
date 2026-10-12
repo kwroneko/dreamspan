@@ -19,6 +19,39 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
       Effect.flatMap(([row]) => (row ? Effect.void : Effect.fail(new NotFound({ entity: "rollout", id: rolloutId }))))
     )
 
+  /** `var.set` events of a version, after its slot's others, recorded by a rollout. */
+  const setVariables = (
+    chatId: string,
+    slotId: string,
+    versionId: string,
+    variables: ReadonlyArray<{ readonly name: string; readonly value: string | number | null }>,
+    rolloutId: string,
+    now: number
+  ) =>
+    Effect.gen(function* () {
+      if (variables.length === 0) return
+      const [next] = yield* sql<{ n: number }>`
+        SELECT coalesce(max(seq), -1) + 1 AS n FROM state_events WHERE chat_id = ${chatId} AND slot_id = ${slotId}`
+      yield* Effect.forEach(
+        variables,
+        ({ name, value }, i) =>
+          sql`INSERT INTO state_events ${sql.insert({
+            id: uuidv7(),
+            chat_id: chatId,
+            slot_id: slotId,
+            version_id: versionId,
+            seq: next!.n + i,
+            key: "var.set",
+            scope: null,
+            value_json: JSON.stringify({ name, value }),
+            origin: "rollout",
+            origin_ref: rolloutId,
+            created_at: now
+          })}`,
+        { discard: true }
+      )
+    })
+
   const putSetting = (userId: UserId, key: string, value: unknown) =>
     value === null
       ? sql`DELETE FROM user_settings WHERE user_id = ${userId} AND key = ${key}`
@@ -68,32 +101,22 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
         yield* sql`INSERT INTO rollout_payloads ${sql.insert({ rollout_id: rolloutId, context_snapshot_json: snapshot })}`
         yield* sql`UPDATE versions SET rollout_id = ${rolloutId}, connection_id = ${connectionId},
           model_id = ${modelId}, updated_at = ${now} WHERE id = ${versionId}`
-        const [next] = yield* sql<{ n: number }>`
-          SELECT coalesce(max(seq), -1) + 1 AS n FROM state_events WHERE chat_id = ${chatId} AND slot_id = ${slotId}`
-        yield* Effect.forEach(
-          variables,
-          ({ name, value }, i) =>
-            sql`INSERT INTO state_events ${sql.insert({
-              id: uuidv7(),
-              chat_id: chatId,
-              slot_id: slotId,
-              version_id: versionId,
-              seq: next!.n + i,
-              key: "var.set",
-              scope: null,
-              value_json: JSON.stringify({ name, value }),
-              origin: "rollout",
-              origin_ref: rolloutId,
-              created_at: now
-            })}`,
-          { discard: true }
-        )
+        yield* setVariables(chatId, slotId, versionId, variables, rolloutId, now)
+        // A template message keeps what it drew, and its writes are recorded at its position,
+        // the first time only: frozen_macros marks that it was.
         yield* Effect.forEach(
           frozenMessages,
-          ({ versionId: id, frozen }) =>
-            sql`UPDATE versions SET frozen_macros = ${JSON.stringify(frozen)}
-              WHERE id = ${id} AND macro_mode = 'template' AND frozen_macros IS NULL
-                AND slot_id IN (SELECT id FROM slots WHERE chat_id = ${chatId})`,
+          ({ versionId: id, frozen, variables: writes }) =>
+            Effect.gen(function* () {
+              const [kept] = yield* sql<{
+                slot_id: string
+              }>`UPDATE versions SET frozen_macros = ${JSON.stringify(frozen)}
+                WHERE id = ${id} AND macro_mode = 'template' AND frozen_macros IS NULL
+                  AND slot_id IN (SELECT id FROM slots WHERE chat_id = ${chatId})
+                RETURNING slot_id`
+              if (!kept || writes.length === 0) return
+              yield* setVariables(chatId, kept.slot_id, id, writes, rolloutId, now)
+            }),
           { discard: true }
         )
       }).pipe(transaction(sql, "StartRollout")),

@@ -6,6 +6,7 @@
 // (ST-compatible mode, DESIGN §1.2); anything else gets our layouts (DESIGN §5.2–§5.4).
 import type { ChatMessage } from "@rp/shared/macros/context.ts"
 import type { CardFields } from "@rp/shared/macros/context.ts"
+import type { VariableEffect } from "@rp/shared/macros/variables.ts"
 import { type ChatState, foldState } from "@rp/shared/state.ts"
 import { Effect, type Scope } from "effect"
 import { placeBreakpoints } from "./breakpoints.ts"
@@ -371,7 +372,8 @@ const positionOf = (state: ChatState, events: ReadonlyArray<PositionedEvent>) =>
 /**
  * The path's messages, verbatim unless they're templates, and the chat macros read from them.
  * A template expands with the chat as it was at its position, before its own events: its
- * cast, names, card and variables then.
+ * cast, names, card and variables then. The first time one expands for a generation, its
+ * variable writes are kept, to be recorded at its position, and count from there on now.
  */
 const resolveStage: AssemblerStage = {
   id: "resolve",
@@ -390,6 +392,10 @@ const resolveStage: AssemblerStage = {
       const omitted: ChatMessage = { text: "", fromUser: false, system: true }
       const messages: Array<ChatMessage> = Array.from({ length: assembly.historyOmitted ?? 0 }, () => omitted)
       const resolved: Array<{ entry: HistoryEntry; piece: number }> = []
+      // Writes of templates not expanded before, as events at their positions.
+      const written: Array<PositionedEvent> = []
+      const withWritten = () =>
+        written.length === 0 ? events : [...events, ...written].sort((a, b) => (a.depth ?? -1) - (b.depth ?? -1))
       for (const entry of need(assembly, "history")) {
         if (!entry.inContext) {
           messages.push(omitted)
@@ -397,14 +403,32 @@ const resolveStage: AssemblerStage = {
         }
         let at: MessagePosition | undefined
         if (entry.macroMode === "template") {
-          const before = events.filter((e) => e.depth === null || e.depth < entry.depth)
+          const before = withWritten().filter((e) => e.depth === null || e.depth < entry.depth)
           const state = foldState(before.map((e) => e.event))
           const key = positionKey(state, before)
           const position = positions.get(key) ?? (yield* positionOf(state, before))
           positions.set(key, position)
           const speaker = speakerOf(entry, position.cast)
           const own = speaker && !position.cast.personas.includes(speaker) ? { char: speaker.doc.name } : {}
-          at = { names: { ...position.names, ...own }, card: position.card, variables: state.vars }
+          at = {
+            names: { ...position.names, ...own },
+            card: position.card,
+            variables: state.vars,
+            ...(entry.frozen === null
+              ? {
+                  writes: (effects: ReadonlyArray<VariableEffect>) => {
+                    if (effects.length === 0) return
+                    assembly.templateWrites.push({ version: entry.versionId, writes: effects })
+                    for (const { name, value } of effects) {
+                      written.push({
+                        depth: entry.depth,
+                        event: { scope: null, data: { key: "var.set", value: { name, value } } }
+                      })
+                    }
+                  }
+                }
+              : {})
+          }
         }
         const piece = env.message(entry, messages, at)
         resolved.push({ entry, piece })
@@ -417,6 +441,7 @@ const resolveStage: AssemblerStage = {
         })
       }
       env.setMessages(messages)
+      if (written.length > 0) env.rebase(foldState(withWritten().map((e) => e.event)).vars)
       assembly.resolved = resolved
       return assembly
     })

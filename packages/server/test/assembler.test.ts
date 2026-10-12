@@ -206,6 +206,32 @@ describe("the context assembler", () => {
     expect(snapshot.effects).toEqual([{ scope: "local", name: "mood", value: "calm" }])
   })
 
+  it("keeps what a template message writes the first time it expands, for what comes after it", async () => {
+    const fixture = (frozen?: Record<string, string>) =>
+      chat({
+        messages: [
+          {
+            side: "assistant",
+            content: "{{setvar::mood::grim}}Late again.",
+            macroMode: "template",
+            ...(frozen ? { frozen } : {})
+          },
+          { side: "user", content: "Sorry." },
+          { side: "assistant", content: "Mood: {{getvar::mood}}.", macroMode: "template" }
+        ],
+        preset: preset({ prompts: [{ identifier: "main", role: "system", content: "Now {{getvar::mood}}." }] })
+      })
+    const first = await assembled(fixture())
+    expect(contents(first)).toContain("assistant: Mood: grim.")
+    expect(contents(first)).toContain("system: Now grim.")
+    expect(first.templateWrites).toEqual([
+      { version: "version-0", writes: [{ scope: "local", name: "mood", value: "grim" }] }
+    ])
+    // Expanded before, its writes are state events by now, and aren't written twice.
+    const again = await assembled(fixture({}))
+    expect(again.templateWrites).toEqual([])
+  })
+
   it("builds the same context again from the values drawn the first time (invariant 6)", async () => {
     const fixture = chat({
       preset: preset({

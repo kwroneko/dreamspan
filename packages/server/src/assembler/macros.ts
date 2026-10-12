@@ -5,6 +5,7 @@
 // identically. A piece that reaches a limit is dropped and reported, not the whole turn.
 import type { CardFields, ChatMessage, MacroContext } from "@rp/shared/macros/context.ts"
 import { expand, type TextOrigin } from "@rp/shared/macros/expand.ts"
+import type { VariableEffect } from "@rp/shared/macros/variables.ts"
 import type { Assembly } from "./pipeline.ts"
 import type { CardInput, HistoryEntry, Source } from "./types.ts"
 
@@ -45,6 +46,11 @@ export interface MacroEnvironment {
   readonly text: (piece: number) => string
   /** The messages of the path, resolved, for macros that read the chat. */
   readonly setMessages: (messages: ReadonlyArray<ChatMessage>) => void
+  /**
+   * The chat's variables as they are once the path's messages wrote theirs, under what the
+   * context's own macros wrote so far.
+   */
+  readonly rebase: (variables: Readonly<Record<string, unknown>>) => void
 }
 
 /** What a template message expands with: the chat's bindings, card and variables at its position. */
@@ -52,6 +58,8 @@ export interface MessagePosition {
   readonly names: Names
   readonly card: CardFields
   readonly variables: Readonly<Record<string, unknown>>
+  /** Takes the chat variables it writes; without it, they're dropped (already recorded). */
+  readonly writes?: (effects: ReadonlyArray<VariableEffect>) => void
 }
 
 /** A card's fields as macros read them, stored text, unexpanded (ARCHITECTURE §10). */
@@ -119,7 +127,8 @@ export const makeMacroEnvironment = (
     text: string,
     origin: TextOrigin,
     context: MacroContext,
-    keepEffects: boolean,
+    /** Where its variable writes go: into the context's, or to the caller. */
+    effects: "context" | ((effects: ReadonlyArray<VariableEffect>) => void),
     frozen?: Readonly<Record<string, string>>
   ) => {
     const result = expand({
@@ -140,10 +149,12 @@ export const makeMacroEnvironment = (
       return ""
     }
     if (Object.keys(result.frozen).length > 0) assembly.frozen[id] = result.frozen
-    if (keepEffects) {
+    if (effects === "context") {
       local = result.variables.local
       global = result.variables.global
       assembly.effects.push(...result.effects)
+    } else {
+      effects(result.effects)
     }
     return result.text
   }
@@ -160,14 +171,13 @@ export const makeMacroEnvironment = (
         variables: { local, global }
       }
       const origin: TextOrigin = { kind: source.kind === "preset" ? "preset" : "card" }
-      return record(id, source, run(id, text, origin, context, true))
+      return record(id, source, run(id, text, origin, context, "context"))
     },
     verbatim: (id, source, text, parts) => record(id, source, text, parts),
     message: (entry, before, at) => {
       const id = `message:${entry.versionId}`
       const source: Source = { kind: "message", slot: entry.slotId, version: entry.versionId }
       if (entry.macroMode !== "template") return record(id, source, entry.content)
-      // What it writes was recorded when it was written, so it isn't again.
       const context: MacroContext = {
         ...base,
         ...(at ? { card: at.card } : {}),
@@ -178,12 +188,28 @@ export const makeMacroEnvironment = (
       return record(
         id,
         source,
-        run(id, entry.content, { kind: "message", macroMode: "template" }, context, false, entry.frozen ?? undefined)
+        run(
+          id,
+          entry.content,
+          { kind: "message", macroMode: "template" },
+          context,
+          (effects) => at?.writes?.(effects.filter((e) => e.scope === "local")),
+          entry.frozen ?? undefined
+        )
       )
     },
     text: (piece) => assembly.pieces[piece]!.text,
     setMessages: (messages) => {
       base = { ...base, messages }
+    },
+    rebase: (variables) => {
+      const next: Record<string, unknown> = { ...variables }
+      for (const effect of assembly.effects) {
+        if (effect.scope !== "local") continue
+        if (effect.value === null) delete next[effect.name]
+        else next[effect.name] = effect.value
+      }
+      local = next
     }
   }
 }

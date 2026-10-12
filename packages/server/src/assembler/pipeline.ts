@@ -171,6 +171,8 @@ export interface Assembly {
   readonly pieces: Array<Piece>
   readonly frozen: Record<string, FrozenValues>
   readonly effects: Array<VariableEffect>
+  /** The variable writes of template messages expanded for the first time, by version. */
+  readonly templateWrites: Array<{ readonly version: string; readonly writes: ReadonlyArray<VariableEffect> }>
   readonly issues: Array<Issue>
 }
 
@@ -192,7 +194,7 @@ export const makeStageRegistry = (): StageRegistry => makeRegistry<AssemblerStag
 /** Runs every stage in effect, in order, and returns the context as built. */
 export const assemble = (stages: StageRegistry, request: AssemblyRequest) =>
   Effect.gen(function* () {
-    let assembly: Assembly = { request, pieces: [], frozen: {}, effects: [], issues: [] }
+    let assembly: Assembly = { request, pieces: [], frozen: {}, effects: [], templateWrites: [], issues: [] }
     for (const stage of stages.list()) assembly = yield* stage.run(assembly)
     const target = need(assembly, "target")
     const preset = need(assembly, "preset")
@@ -218,7 +220,8 @@ export const assemble = (stages: StageRegistry, request: AssemblyRequest) =>
       pieces: assembly.pieces,
       issues: assembly.issues,
       frozen: assembly.frozen,
-      effects: assembly.effects
+      effects: assembly.effects,
+      templateWrites: assembly.templateWrites
     }
     return snapshot
   })
