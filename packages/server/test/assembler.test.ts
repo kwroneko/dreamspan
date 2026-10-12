@@ -246,6 +246,16 @@ describe("the context assembler", () => {
     // The model's own context bounds it too.
     const small = await assembled(chat({ messages, model: model({ context: 600 }) }))
     expect(small.request.messages.filter((m) => m.content.startsWith("message")).length).toBeLessThan(sent.length)
+    // So does a prefill the model is sent: it's context too.
+    const prefilled = await assembled(
+      chat({
+        messages,
+        preset: preset({ openai_max_context: 1000, openai_max_tokens: 200, assistant_prefill: "word ".repeat(80) }),
+        model: model({ prefill: "assistant" })
+      })
+    )
+    expect(prefilled.request.prefill).toBeTruthy()
+    expect(prefilled.request.messages.filter((m) => m.content.startsWith("message")).length).toBeLessThan(sent.length)
   })
 
   it("fails when the preset's own prompts don't fit its budget", async () => {

@@ -1223,9 +1223,9 @@ The agent's permission to edit a note or a card module (`agent_editable`) works 
 - `history`: windows of the path, newest first, until the text read, as the regex scripts leave it, would fill the budget on its own
 - `resolve`: the path's messages resolved, and given to the macros that read the chat
 - `roles`: role projection (DESIGN §5.4)
-- `compose`: ST's prompt manager and budget, with the tail content
+- `compose`: ST's prompt manager and budget, with the tail content and the prefill
 - `messages`: squashing and post-processing
-- `prefill`, `breakpoints` (below), `request`
+- `breakpoints` (below), `request`
 
 Stages reach data only through `AssemblySources`, so the same pipeline runs over the database (`db/assemblySources.ts`) and over in-memory fixtures (`test/support/assemblySources.ts`, used by the tests and the ST harness). A stage that runs before what it needs throws (`need`): only a misregistered stage can cause it. `AssemblyFailed` (`no_model`, `budget`, `invalid_document`) is the one way a context fails as a whole.
 
@@ -1270,7 +1270,7 @@ The request maps to Chat Completions per provider kind as ST maps its sources (`
 - "Chat messages verbatim": ST runs every message through its macros when it builds the prompt and when the user sends one; here typed and generated text stays as written unless the message is a template (DESIGN §5.6: "Text the user types is not macro-expanded by default", "Model output is not macro-substituted by default").
 - "Token counts": ST counts the budget with the model's tokenizer; here a token is four characters plus three per message, so which messages fit at the margin can differ. The budget is the preset's context size, within a context size some source reported for the model, less its response length.
 - "Fixed prompts over budget": ST shows an error and sends what it had built before the overflow; here the generation fails, saying the preset's prompts don't fit (`budget`).
-- "Prefill": sent to any model whose prefill capability is `assistant`, and otherwise dropped and reported (DESIGN §1.2); ST sends it only for its Claude source and ignores it elsewhere.
+- "Prefill": sent to any model whose prefill capability is `assistant`, and otherwise dropped and reported (DESIGN §1.2); ST sends it only for its Claude source and ignores it elsewhere. A prefill that's sent comes out of the budget; ST doesn't count it, so it can send more than the preset's context size.
 - "Post-processing": the preset's `postprocess` always applies; in ST it's a connection setting, which a preset changes only when it's bound to the connection.
 - "Reasoning and stops": ST's `reasoning_effort` and `verbosity` for the OpenAI models it lists aren't sent, nor its custom stop strings and logit-bias presets.
 - "Card overrides": ST expands a card's prompt override twice, the second time with `{{original}}`; here it's expanded once, in ST's order (before the preset's prompts), and its first `{{original}}` then becomes the prompt it replaces.

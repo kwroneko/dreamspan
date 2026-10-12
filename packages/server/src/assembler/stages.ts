@@ -1,7 +1,7 @@
 // The built-in assembler stages (DESIGN §5.1), registered in order through the stage
 // registry like a plugin's would be. In order:
 //   path, state, cast, model, preset, notes, mode, macros, scripts, history, resolve, roles,
-//   compose, messages, prefill, breakpoints, request
+//   compose (with the prefill), messages, breakpoints, request
 // A single-character chat with ST's layout gets what ST would send for its preset and card
 // (ST-compatible mode, DESIGN §1.2); anything else gets our layouts (DESIGN §5.2–§5.4).
 import type { ChatMessage } from "@rp/shared/macros/context.ts"
@@ -448,6 +448,29 @@ const override = (
   collection[at] = { ...original, content, piece: text.piece }
 }
 
+/**
+ * The preset's assistant prefill (impersonation prefill when the user's character speaks):
+ * sent where the model can be prefilled, and otherwise dropped and reported (DESIGN §1.2).
+ */
+const prefill = (assembly: Assembly) => {
+  const doc = need(assembly, "preset").doc
+  const type = need(assembly, "cast").type
+  const raw = type === "impersonate" ? doc.prefill.impersonation : doc.prefill.assistant
+  const id = type === "impersonate" ? "prefill.impersonation" : "prefill.assistant"
+  const text = raw ? presetText(assembly, id, raw).text.trimEnd() : ""
+  if (!text) return
+  if (assembly.model?.prefill === "assistant") {
+    assembly.prefill = text
+  } else {
+    assembly.issues.push({
+      kind: "prefill_dropped",
+      message: assembly.model
+        ? `The preset's prefill wasn't sent: ${assembly.model.key} isn't known to take one. Set its prefill capability if it does.`
+        : "The preset's prefill wasn't sent: no model is chosen."
+    })
+  }
+}
+
 /** A message of the path as ST sends it, with the preset's names behavior (setOpenAIMessages). */
 const chatLine = (
   assembly: Assembly,
@@ -736,6 +759,7 @@ const composeStage = sync("compose", (assembly) => {
     collection.filter((p) => p.injection_position === "absolute"),
     injections
   )
+  prefill(assembly)
   const composition = compose({
     collection,
     disabled,
@@ -745,7 +769,8 @@ const composeStage = sync("compose", (assembly) => {
     newExampleChat: optional("utility.new_example_chat_prompt", utility.new_example_chat_prompt),
     sendIfEmpty: optional("utility.send_if_empty", utility.send_if_empty),
     control,
-    budget: contextBudget(assembly)
+    // The prefill is sent after everything else, but it's context all the same.
+    budget: contextBudget(assembly) - (assembly.prefill ? tokensOf({ content: assembly.prefill }) : 0)
   })
   assembly.composition = composition
   if (composition.historySent < composition.historyTotal || (assembly.historyOmitted ?? 0) > 0) {
@@ -784,34 +809,6 @@ const messagesStage = sync("messages", (assembly) => {
     kind
   }))
 })
-
-/**
- * The preset's assistant prefill (impersonation prefill when the user's character speaks):
- * sent where the model can be prefilled, and otherwise dropped and reported (DESIGN §1.2).
- */
-const prefillStage: AssemblerStage = {
-  id: "prefill",
-  run: (assembly) =>
-    Effect.sync(() => {
-      const doc = need(assembly, "preset").doc
-      const type = need(assembly, "cast").type
-      const raw = type === "impersonate" ? doc.prefill.impersonation : doc.prefill.assistant
-      const id = type === "impersonate" ? "prefill.impersonation" : "prefill.assistant"
-      const text = raw ? presetText(assembly, id, raw).text.trimEnd() : ""
-      if (!text) return assembly
-      if (assembly.model?.prefill === "assistant") {
-        assembly.prefill = text
-      } else {
-        assembly.issues.push({
-          kind: "prefill_dropped",
-          message: assembly.model
-            ? `The preset's prefill wasn't sent: ${assembly.model.key} isn't known to take one. Set its prefill capability if it does.`
-            : "The preset's prefill wasn't sent: no model is chosen."
-        })
-      }
-      return assembly
-    })
-}
 
 /** The provider-neutral request, and which message each piece ended up in. */
 const requestStage = sync("request", (assembly) => {
@@ -866,7 +863,6 @@ const builtinStages: ReadonlyArray<AssemblerStage> = [
   rolesStage,
   composeStage,
   messagesStage,
-  prefillStage,
   breakpointsStage,
   requestStage
 ]
