@@ -5,18 +5,21 @@
 // A single-character chat with ST's layout gets what ST would send for its preset and card
 // (ST-compatible mode, DESIGN §1.2); anything else gets our layouts (DESIGN §5.2–§5.4).
 import type { ChatMessage } from "@rp/shared/macros/context.ts"
-import { foldState } from "@rp/shared/state.ts"
+import type { CardFields } from "@rp/shared/macros/context.ts"
+import { type ChatState, foldState } from "@rp/shared/state.ts"
 import { Effect, type Scope } from "effect"
 import { placeBreakpoints } from "./breakpoints.ts"
 import { cardBlock, directive, personaBlock } from "./layouts.ts"
-import { cardFields, makeMacroEnvironment, type Names } from "./macros.ts"
+import { cardFields, makeMacroEnvironment, type MessagePosition, type Names } from "./macros.ts"
 import { compile, makeScriptRunner, PLACEMENT, type PromptScript, type ScriptRunner } from "./regex.ts"
 import {
   type Assembly,
   type AssemblerStage,
   AssemblySources,
   type Cast,
+  type Mode,
   need,
+  type PositionedEvent,
   type ProjectedEntry,
   type Scripted,
   type StageRegistry
@@ -39,7 +42,15 @@ import {
   tokensOf,
   triggers
 } from "./st.ts"
-import { AssemblyFailed, type CardInput, type HistoryEntry, type Role, type Source } from "./types.ts"
+import {
+  AssemblyFailed,
+  type CardInput,
+  type GenerationType,
+  type HistoryEntry,
+  type NoteInput,
+  type Role,
+  type Source
+} from "./types.ts"
 
 /** A stage that reads nothing more; it may fail the assembly with AssemblyFailed. */
 const sync = (id: string, run: (assembly: Assembly) => void): AssemblerStage => ({
@@ -114,28 +125,33 @@ const stateStage: AssemblerStage = {
     })
 }
 
+/** The cast a state names, its cards through their layers; `speaker` speaks, when it's known. */
+const castOf = (state: ChatState, speakerId: string | null, ordinal: number) =>
+  Effect.gen(function* () {
+    const sources = yield* AssemblySources
+    const played = new Set(state.playedByMe)
+    const wanted = [...new Set([...state.participants, ...state.playedByMe, ...(speakerId ? [speakerId] : [])])]
+    const cards = new Map((yield* sources.cards(wanted, state.cardBindings)).map((c) => [c.entity, c]))
+    const characters = wanted.filter((e) => !played.has(e)).flatMap((e) => cards.get(e) ?? [])
+    const personas = state.playedByMe.flatMap((e) => cards.get(e) ?? [])
+    const absent = new Set(state.absent)
+    const speaker =
+      (speakerId ? cards.get(speakerId) : undefined) ??
+      characters.find((c) => !absent.has(c.entity)) ??
+      characters[0] ??
+      null
+    const type: GenerationType =
+      speaker && played.has(speaker.entity) ? "impersonate" : ordinal > 0 ? "swipe" : "normal"
+    const cast: Cast = { characters, personas, absent, speaker, type }
+    return cast
+  })
+
 const castStage: AssemblerStage = {
   id: "cast",
   run: (assembly) =>
     Effect.gen(function* () {
-      const sources = yield* AssemblySources
       const target = need(assembly, "target")
-      const state = need(assembly, "state")
-      const played = new Set(state.playedByMe)
-      const wanted = [
-        ...new Set([...state.participants, ...state.playedByMe, ...(target.speaker ? [target.speaker] : [])])
-      ]
-      const cards = new Map((yield* sources.cards(wanted, state.cardBindings)).map((c) => [c.entity, c]))
-      const characters = wanted.filter((e) => !played.has(e)).flatMap((e) => cards.get(e) ?? [])
-      const personas = state.playedByMe.flatMap((e) => cards.get(e) ?? [])
-      const absent = new Set(state.absent)
-      const speaker =
-        (target.speaker ? cards.get(target.speaker) : undefined) ??
-        characters.find((c) => !absent.has(c.entity)) ??
-        characters[0] ??
-        null
-      const type = speaker && played.has(speaker.entity) ? "impersonate" : target.ordinal > 0 ? "swipe" : "normal"
-      assembly.cast = { characters, personas, absent, speaker, type }
+      assembly.cast = yield* castOf(need(assembly, "state"), target.speaker, target.ordinal)
       return assembly
     })
 }
@@ -171,6 +187,21 @@ const presetStage: AssemblerStage = {
  * always sends, so it's on unless the chat turned it off; any other note is on once the
  * chat turns it on (`note.activate`).
  */
+/** Whether each note the events turned on or off is on, as they last left it. */
+const noteSwitches = (events: Iterable<PositionedEvent>) => {
+  const last = new Map<string, boolean>()
+  for (const { event } of events) {
+    if (event.data.key === "note.activate") last.set(event.data.value.note, true)
+    if (event.data.key === "note.deactivate") last.set(event.data.value.note, false)
+  }
+  return last
+}
+
+const activeNotes = (events: Iterable<PositionedEvent>, notes: ReadonlyArray<NoteInput>) => {
+  const last = noteSwitches(events)
+  return notes.filter((note) => last.get(note.entity) ?? note.first)
+}
+
 const notesStage: AssemblerStage = {
   id: "notes",
   run: (assembly) =>
@@ -178,37 +209,31 @@ const notesStage: AssemblerStage = {
       const sources = yield* AssemblySources
       const state = need(assembly, "state")
       const cast = need(assembly, "cast")
-      const last = new Map<string, boolean>()
-      for (const { event } of need(assembly, "events")) {
-        if (event.data.key === "note.activate") last.set(event.data.value.note, true)
-        if (event.data.key === "note.deactivate") last.set(event.data.value.note, false)
-      }
       const notes = yield* sources.notes(
         cast.characters.map((c) => c.entity),
         state.noteRevisions
       )
-      assembly.notes = notes.filter((note) => last.get(note.entity) ?? note.first)
+      assembly.notes = activeNotes(need(assembly, "events"), notes)
       return assembly
     })
 }
 
-const modeStage = sync("mode", (assembly) => {
-  const state = need(assembly, "state")
-  const cast = need(assembly, "cast")
+const modeOf = (state: ChatState, cast: Cast): Mode => {
   const layout = state.layoutCards
   const projection = state.rolesProjection
-  assembly.mode = {
+  return {
     st: cast.characters.length === 1 && layout === null && (projection === null || projection === "by_writer"),
     layout: layout ?? "concat",
     projection: projection ?? "by_writer"
   }
+}
+
+const modeStage = sync("mode", (assembly) => {
+  assembly.mode = modeOf(need(assembly, "state"), need(assembly, "cast"))
 })
 
 /** The bindings macros see (DESIGN §5.3): ST's names for one character, the cast's otherwise. */
-const namesFor = (assembly: Assembly): Names => {
-  const state = need(assembly, "state")
-  const cast = need(assembly, "cast")
-  const mode = need(assembly, "mode")
+const namesFor = (state: ChatState, cast: Cast, mode: Mode): Names => {
   const pinned = state.macroBindings
   const join = (cards: ReadonlyArray<CardInput>) => cards.map((c) => c.doc.name).join(", ")
   if (mode.st) {
@@ -231,23 +256,28 @@ const namesFor = (assembly: Assembly): Names => {
  * Macro expansion by source (DESIGN §5.6): sets up the expander the later stages use for
  * preset and card text. The path's messages come in once they're read (`resolve`).
  */
+/**
+ * The card fields preset text reads: ST's character, or the first of the cast, which stays the
+ * same from turn to turn, with its first note as ST's Character's Note.
+ */
+const macroCard = (cast: Cast, notes: ReadonlyArray<NoteInput> | undefined) => {
+  const card = cast.characters[0]
+  const firstNote = notes?.find((n) => n.first && n.doc.owner.card === card?.entity)
+  return cardFields(card, cast.personas[0], firstNote?.doc.content)
+}
+
 const macrosStage = sync("macros", (assembly) => {
   const cast = need(assembly, "cast")
   const preset = need(assembly, "preset").doc
-  // Preset text reads one card's fields: ST's character, or the first of the cast, which
-  // stays the same from turn to turn.
-  const card = cast.characters[0]
-  const firstNote = assembly.notes?.find((n) => n.first && n.doc.owner.card === card?.entity)
   assembly.macros = makeMacroEnvironment(assembly, {
-    names: namesFor(assembly),
-    card: cardFields(card, cast.personas[0], firstNote?.doc.content),
+    names: namesFor(need(assembly, "state"), cast, need(assembly, "mode")),
+    card: macroCard(cast, assembly.notes),
     messages: [],
     model: assembly.model?.key ?? "",
     maxContextTokens: preset.samplers.openai_max_context,
     maxResponseTokens: preset.samplers.openai_max_tokens,
     type: cast.type,
     chatId: need(assembly, "target").chatId,
-    events: need(assembly, "events"),
     variables: need(assembly, "state").vars
   })
 })
@@ -307,34 +337,90 @@ const historyStage: AssemblerStage = {
     })
 }
 
-/** The path's messages, verbatim unless they're templates, and the chat macros read from them. */
-const resolveStage = sync("resolve", (assembly) => {
-  const cast = need(assembly, "cast")
-  const env = need(assembly, "macros")
-  // Older messages that weren't read still count for the macros that number messages.
-  const omitted: ChatMessage = { text: "", fromUser: false, system: true }
-  const messages: Array<ChatMessage> = Array.from({ length: assembly.historyOmitted ?? 0 }, () => omitted)
-  const resolved: Array<{ entry: HistoryEntry; piece: number }> = []
-  for (const entry of need(assembly, "history")) {
-    if (!entry.inContext) {
-      messages.push(omitted)
-      continue
-    }
-    const speaker = speakerOf(entry, cast)
-    const own = speaker && !cast.personas.includes(speaker) ? { char: speaker.doc.name } : {}
-    const piece = env.message(entry, messages, own)
-    resolved.push({ entry, piece })
-    messages.push({
-      text: env.text(piece),
-      fromUser: sideOf(entry, cast) === "user",
-      sentAt: entry.sentAt,
-      versions: entry.versions,
-      selectedVersion: entry.selectedOrdinal
+/** Where a template message is: the cast, names and card its macros saw there. */
+interface Position {
+  readonly cast: Cast
+  readonly names: Names
+  readonly card: CardFields
+}
+
+/** What decides a position's cast, names and card: equal keys share them. */
+const positionKey = (state: ChatState, events: Iterable<PositionedEvent>) =>
+  JSON.stringify([
+    state.participants,
+    state.playedByMe,
+    state.absent,
+    state.cardBindings,
+    state.macroBindings,
+    state.layoutCards,
+    state.rolesProjection,
+    state.noteRevisions,
+    [...noteSwitches(events)]
+  ])
+
+const positionOf = (state: ChatState, events: ReadonlyArray<PositionedEvent>) =>
+  Effect.gen(function* () {
+    const sources = yield* AssemblySources
+    const cast = yield* castOf(state, null, 0)
+    const card = cast.characters[0]
+    const notes = card ? activeNotes(events, yield* sources.notes([card.entity], state.noteRevisions)) : []
+    const position: Position = { cast, names: namesFor(state, cast, modeOf(state, cast)), card: macroCard(cast, notes) }
+    return position
+  })
+
+/**
+ * The path's messages, verbatim unless they're templates, and the chat macros read from them.
+ * A template expands with the chat as it was at its position, before its own events: its
+ * cast, names, card and variables then.
+ */
+const resolveStage: AssemblerStage = {
+  id: "resolve",
+  run: (assembly) =>
+    Effect.gen(function* () {
+      const cast = need(assembly, "cast")
+      const env = need(assembly, "macros")
+      const events = need(assembly, "events")
+      const positions = new Map<string, Position>([
+        [
+          positionKey(need(assembly, "state"), events),
+          { cast, names: env.names, card: macroCard(cast, assembly.notes) }
+        ]
+      ])
+      // Older messages that weren't read still count for the macros that number messages.
+      const omitted: ChatMessage = { text: "", fromUser: false, system: true }
+      const messages: Array<ChatMessage> = Array.from({ length: assembly.historyOmitted ?? 0 }, () => omitted)
+      const resolved: Array<{ entry: HistoryEntry; piece: number }> = []
+      for (const entry of need(assembly, "history")) {
+        if (!entry.inContext) {
+          messages.push(omitted)
+          continue
+        }
+        let at: MessagePosition | undefined
+        if (entry.macroMode === "template") {
+          const before = events.filter((e) => e.depth === null || e.depth < entry.depth)
+          const state = foldState(before.map((e) => e.event))
+          const key = positionKey(state, before)
+          const position = positions.get(key) ?? (yield* positionOf(state, before))
+          positions.set(key, position)
+          const speaker = speakerOf(entry, position.cast)
+          const own = speaker && !position.cast.personas.includes(speaker) ? { char: speaker.doc.name } : {}
+          at = { names: { ...position.names, ...own }, card: position.card, variables: state.vars }
+        }
+        const piece = env.message(entry, messages, at)
+        resolved.push({ entry, piece })
+        messages.push({
+          text: env.text(piece),
+          fromUser: sideOf(entry, cast) === "user",
+          sentAt: entry.sentAt,
+          versions: entry.versions,
+          selectedVersion: entry.selectedOrdinal
+        })
+      }
+      env.setMessages(messages)
+      assembly.resolved = resolved
+      return assembly
     })
-  }
-  env.setMessages(messages)
-  assembly.resolved = resolved
-})
+}
 
 /**
  * Role projection (DESIGN §5.4): by writer (ST's: the user's side is `user`), strict

@@ -5,8 +5,7 @@
 // identically. A piece that reaches a limit is dropped and reported, not the whole turn.
 import type { CardFields, ChatMessage, MacroContext } from "@rp/shared/macros/context.ts"
 import { expand, type TextOrigin } from "@rp/shared/macros/expand.ts"
-import { foldState } from "@rp/shared/state.ts"
-import type { Assembly, PositionedEvent } from "./pipeline.ts"
+import type { Assembly } from "./pipeline.ts"
 import type { CardInput, HistoryEntry, Source } from "./types.ts"
 
 export interface Names {
@@ -38,13 +37,21 @@ export interface MacroEnvironment {
    */
   readonly verbatim: (id: string, source: Source, text: string, parts?: ReadonlyArray<number>) => number
   /**
-   * Records a message of the path: verbatim unless its mode is `template`. `before` are the
-   * messages before it; `names` binds the card it belongs to.
+   * Records a message of the path: verbatim unless its mode is `template`. A template expands
+   * with the chat as it was at its position: `before` are the messages before it, and `at`
+   * the names, card and variables there.
    */
-  readonly message: (entry: HistoryEntry, before: ReadonlyArray<ChatMessage>, names?: Partial<Names>) => number
+  readonly message: (entry: HistoryEntry, before: ReadonlyArray<ChatMessage>, at?: MessagePosition) => number
   readonly text: (piece: number) => string
   /** The messages of the path, resolved, for macros that read the chat. */
   readonly setMessages: (messages: ReadonlyArray<ChatMessage>) => void
+}
+
+/** What a template message expands with: the chat's bindings, card and variables at its position. */
+export interface MessagePosition {
+  readonly names: Names
+  readonly card: CardFields
+  readonly variables: Readonly<Record<string, unknown>>
 }
 
 /** A card's fields as macros read them, stored text, unexpanded (ARCHITECTURE §10). */
@@ -70,10 +77,6 @@ export const cardFields = (card: CardInput | undefined, persona: CardInput | und
   return fields
 }
 
-/** The chat's variables before the events at `depth` and after: a message's state before its own events. */
-const variablesBefore = (events: ReadonlyArray<PositionedEvent>, depth: number) =>
-  foldState(events.filter((e) => e.depth === null || e.depth < depth).map((e) => e.event)).vars
-
 export const makeMacroEnvironment = (
   assembly: Assembly,
   setup: {
@@ -85,7 +88,6 @@ export const makeMacroEnvironment = (
     readonly maxResponseTokens: number
     readonly type: string
     readonly chatId: string
-    readonly events: ReadonlyArray<PositionedEvent>
     readonly variables: Readonly<Record<string, unknown>>
   }
 ): MacroEnvironment => {
@@ -161,17 +163,17 @@ export const makeMacroEnvironment = (
       return record(id, source, run(id, text, origin, context, true))
     },
     verbatim: (id, source, text, parts) => record(id, source, text, parts),
-    message: (entry, before, names = {}) => {
+    message: (entry, before, at) => {
       const id = `message:${entry.versionId}`
       const source: Source = { kind: "message", slot: entry.slotId, version: entry.versionId }
       if (entry.macroMode !== "template") return record(id, source, entry.content)
-      // Expanded against the state at its own position, before its own events; what it
-      // writes was recorded when it was written, so it isn't again.
+      // What it writes was recorded when it was written, so it isn't again.
       const context: MacroContext = {
         ...base,
+        ...(at ? { card: at.card } : {}),
         messages: before,
-        names: { ...setup.names, ...names },
-        variables: { local: variablesBefore(setup.events, entry.depth), global: {} }
+        names: at?.names ?? setup.names,
+        variables: { local: at?.variables ?? local, global: {} }
       }
       return record(
         id,

@@ -1,6 +1,7 @@
 // The context assembler's pipeline over in-memory chats (ARCHITECTURE §13). What ST would
 // send for a preset is checked against ST itself by `npm run test:st`; these pin the rest:
 // macros by source, rebuilding, notes, the budget, prefill, breakpoints and our layouts.
+import type { EntityId } from "@rp/shared/chat.ts"
 import type { CardDoc } from "@rp/shared/docs/card.ts"
 import type { PresetDoc } from "@rp/shared/docs/preset.ts"
 import type { StateEventData } from "@rp/shared/state.ts"
@@ -167,6 +168,27 @@ describe("the context assembler", () => {
     expect(messages).toContain("assistant: *Mira waves at Tobin.* 1")
     expect(messages).toContain("system: x is 2")
     expect(messages).toContain("user: I typed {{char}} myself.")
+  })
+
+  it("expands a template message with the cast, names and card it had at its position", async () => {
+    const greeting = {
+      side: "assistant",
+      content: "{{char}} greets {{user}}: {{description}}",
+      macroMode: "template"
+    } as const
+    const snapshot = await assembled(
+      chat({
+        messages: [greeting, { side: "user", content: "Hi." }],
+        // After the greeting, Oren takes Mira's place, and {{user}} is pinned.
+        events: [
+          at(0, { key: "participant.leave", value: { entity: "mira" as EntityId } }),
+          at(0, { key: "participant.join", value: { entity: "oren" as EntityId } }),
+          at(0, { key: "macro.binding", value: { name: "user", value: "Captain" } })
+        ]
+      })
+    )
+    expect(contents(snapshot)).toContain("assistant: Mira greets Tobin: Mira keeps the ledger for Tobin.")
+    expect(contents(snapshot)).toContain("user: Hi.")
   })
 
   it("records the variables macros write, and later pieces read them", async () => {

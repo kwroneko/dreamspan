@@ -1244,7 +1244,7 @@ The pipeline itself took 5 to 13 ms of that, measured alone on 2,000 messages.
 
 **Macros by source** (`macros.ts`, §10's caller contract). Every piece is expanded on its own through `expand()`:
 - preset and card text always, card fields as ST's baseChatReplace does (trimmed, without card-field macros); notes count as card text
-- a message of the path only when its mode is `template`, against the state before its own events and the resolved text of the messages before it; its writes were recorded when it was written, so they aren't again
+- a message of the path only when its mode is `template`, against the state before its own events (the cast, `{{user}}` and `{{char}}`, the card fields and the variables as they were there, so a later join, leave or pinned binding doesn't rewrite it) and the resolved text of the messages before it; its writes were recorded when it was written, so they aren't again
 - each piece's random and time draws are kept by piece id (`preset:main`, `card:<entity>:description`, `message:<version>`), over a message's stored `frozen_macros`; passing them back builds the same context
 - variable writes from preset and card text come back in order as the snapshot's `effects`, and each piece sees the variables the pieces before it left
 - a piece that reaches a macro limit is left out and reported, not the whole turn

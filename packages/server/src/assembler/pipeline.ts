@@ -109,7 +109,7 @@ export interface Cast {
 }
 
 /** How the context is laid out (DATA-MODEL §5.3: `layout.cards`, `roles.projection`). */
-interface Mode {
+export interface Mode {
   /** ST-compatible: one character, ST's markers and roles. Otherwise our layouts. */
   readonly st: boolean
   readonly layout: "concat" | "swap_tail"
