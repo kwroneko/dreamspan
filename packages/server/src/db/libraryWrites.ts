@@ -6,7 +6,14 @@ import type { UserId } from "@rp/shared/domain.ts"
 import type { Doc, EntityKind, MergeOutcome, RefId } from "@rp/shared/library.ts"
 import { ImportedFollower, LibraryImport } from "@rp/shared/libraryImport.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
-import { keepsRegexApproval } from "@rp/shared/editing.ts"
+import {
+  hasSchema,
+  keepsRegexApproval,
+  protectedChanges,
+  validateDoc,
+  withoutGrantedAgentEdits
+} from "@rp/shared/editing.ts"
+import { InvalidDocument } from "@rp/shared/editorApi.ts"
 import { Effect, Predicate } from "effect"
 import { SqlClient } from "effect/sql"
 import type { Bin } from "./bin.ts"
@@ -90,15 +97,39 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
       SELECT doc_hash, schema_version FROM entity_revisions WHERE id = ${id}`.pipe(Effect.map(([r]) => r!))
 
     /**
-     * A preset's regex approval survives a merge only with the scripts it was given for:
-     * scripts merged in from a file never arrive approved (DESIGN §11, @rp/shared/editing.ts).
+     * A merge grants nothing the head didn't have: a preset's regex approval survives only with
+     * the scripts it was given for, so scripts merged in from a file never arrive approved, and
+     * the agent's permission to edit a note or module stays off where it was off (DESIGN §11,
+     * §4.1a; @rp/shared/editing.ts).
      */
-    const withRegexApproval = (ref: RefRow, doc: Doc) =>
-      ref.kind !== "preset" || doc.regex_approved !== true
-        ? Effect.succeed(doc)
-        : Effect.map(lib.loadDoc(ref.head_revision_id), (ours) =>
-            keepsRegexApproval(ours, doc) ? doc : { ...doc, regex_approved: false }
-          )
+    const withoutGrants = (ref: RefRow, doc: Doc) =>
+      Effect.map(lib.loadDoc(ref.head_revision_id), (ours) => {
+        const next = withoutGrantedAgentEdits(ref.kind, ours, doc)
+        return ref.kind === "preset" && next.regex_approved === true && !keepsRegexApproval(ours, next)
+          ? { ...next, regex_approved: false }
+          : next
+      })
+
+    /** Media and cards a document names that aren't the user's, as NotFound. */
+    const checkReferences = (userId: string, doc: Doc) =>
+      Effect.gen(function* () {
+        const media = [
+          doc.avatar_media_id,
+          ...Object.values(Predicate.isObject(doc.asset_media_ids) ? doc.asset_media_ids : {})
+        ].filter((id) => id !== null && id !== undefined)
+        for (const id of media) {
+          const [held] = yield* sql<{ n: number }>`
+            SELECT count(*) AS n FROM media_refs WHERE media_id = ${String(id)} AND owner_user_id = ${userId}`
+          if (typeof id !== "string" || held!.n === 0) return yield* new NotFound({ entity: "media", id: String(id) })
+        }
+        const card = Predicate.isObject(doc.owner) ? doc.owner.card : undefined
+        if (card !== undefined) {
+          const [owned] = yield* sql<{ n: number }>`
+            SELECT count(*) AS n FROM entities WHERE id = ${String(card)} AND owner_user_id = ${userId} AND kind = 'card'`
+          if (typeof card !== "string" || owned!.n === 0)
+            return yield* new NotFound({ entity: "card", id: String(card) })
+        }
+      })
 
     const mergeMessage = (ref: RefRow) =>
       ref.followed_label === null ? "Merged a new import" : `Merged changes from ${ref.followed_label}`
@@ -121,7 +152,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
             const merge = yield* insertRevision({
               entityId: ref.entity_id,
               schemaVersion: (yield* revision(ref.head_revision_id)).schema_version,
-              doc: encode(yield* withRegexApproval(ref, plan.merged)),
+              doc: encode(yield* withoutGrants(ref, plan.merged)),
               parents: [ref.head_revision_id, plan.theirsHead],
               origin: "merge",
               originRef: ref.follows_ref_id,
@@ -452,10 +483,31 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
               reason: "What this ref follows changed again since the merge was previewed; preview it again."
             })
           }
+          if (ref.followed_head === ref.merge_base_revision_id) {
+            return yield* new RefOperationRefused({
+              refId,
+              reason: "There's no update to resolve: this already has everything it follows."
+            })
+          }
+          // The resolved document comes from the client: it must be valid, keep each protected
+          // field from one side or the other, and name only the user's own files and cards.
+          // As with an automatic merge (library.ts), a valid document stays valid; one stored
+          // before its kind had a schema isn't held to it.
+          const sides = [yield* lib.loadDoc(ref.head_revision_id), yield* lib.loadDoc(theirsRevisionId)]
+          const checked = hasSchema(ref.kind) && validateDoc(ref.kind, sides[0]!).ok
+          const valid = checked ? validateDoc(ref.kind, doc) : { ok: true as const, doc }
+          if (!valid.ok) return yield* new InvalidDocument({ problems: valid.problems })
+          yield* checkReferences(userId, valid.doc)
+          const moved = protectedChanges(ref.kind, valid.doc, sides)
+          if (moved.length > 0) {
+            return yield* new InvalidDocument({
+              problems: moved.map((field) => `${field}: this can only be kept from one side or the other.`)
+            })
+          }
           const merge = yield* insertRevision({
             entityId: ref.entity_id,
             schemaVersion: (yield* revision(ref.head_revision_id)).schema_version,
-            doc: encode(yield* withRegexApproval(ref, doc)),
+            doc: encode(yield* withoutGrants(ref, valid.doc)),
             parents: [ref.head_revision_id, theirsRevisionId],
             origin: "merge",
             originRef: ref.follows_ref_id,

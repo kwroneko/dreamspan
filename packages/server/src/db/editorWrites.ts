@@ -6,11 +6,13 @@ import { DraftKey } from "@rp/shared/drafts.ts"
 import {
   applyDrafts,
   canonicalJson,
+  droppedDrafts,
   getAt,
   keepsRegexApproval,
   newCardNote,
   parseField,
-  validateDoc
+  validateDoc,
+  withoutGrantedAgentEdits
 } from "@rp/shared/editing.ts"
 import { EditConflict, InvalidDocument } from "@rp/shared/editorApi.ts"
 import type { EntityId } from "@rp/shared/chat.ts"
@@ -137,15 +139,30 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps) => {
           }
         }
         if (conflicts.length > 0) return yield* new EditConflict({ fields: conflicts })
-        const applied = applyDrafts(ref.kind, head, rows)
+        // A draft in something that's gone (a prompt deleted since) is set aside: its text goes
+        // to the recovered texts, and the rest is saved. Any other problem refuses the save.
+        const orphans = new Set(
+          applyDrafts(ref.kind, head, rows)
+            .problems.filter((problem) => problem.orphan)
+            .map((problem) => problem.field)
+        )
+        const kept = rows.filter((row) => !orphans.has(row.field))
+        const applied = applyDrafts(ref.kind, head, kept)
         if (applied.problems.length > 0) {
           return yield* new InvalidDocument({ problems: applied.problems.map((p) => `${p.field}: ${p.message}`) })
         }
         const valid = validateDoc(ref.kind, applied.doc)
         if (!valid.ok) return yield* new InvalidDocument({ problems: valid.problems })
+        // What the schema would drop (text at a key it doesn't know) is refused, never saved away.
+        const dropped = droppedDrafts(applied.doc, valid.doc, kept)
+        if (dropped.length > 0) {
+          return yield* new InvalidDocument({
+            problems: dropped.map(({ field }) => `${field}: a ${ref.kind} has no such field, so this can't be saved.`)
+          })
+        }
         const change = yield* userEdit(ref, valid.doc, message, null)
-        for (const row of rows) yield* drafts.end(row, "committed")
-        return change
+        for (const row of rows) yield* drafts.end(row, orphans.has(row.field) ? "discarded" : "committed")
+        return new RefChange({ ...change, setAside: [...orphans] })
       }).pipe(transaction(sql, "CommitEditorDrafts")),
 
     RestoreRevision: ({ userId, refId, revisionId, expectedRowVersion }) =>
@@ -157,11 +174,12 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps) => {
         if (earlier.schema_version !== (yield* steps.revision(ref.head_revision_id)).schema_version) {
           return yield* refused(ref, "That revision is of another schema version, and documents can't be migrated yet.")
         }
-        let doc = JSON.parse(earlier.doc_json) as Doc
+        const head = yield* lib.loadDoc(ref.head_revision_id)
+        // A permission revoked since doesn't come back with the old revision.
+        let doc = withoutGrantedAgentEdits(ref.kind, head, JSON.parse(earlier.doc_json) as Doc)
         // An old revision's scripts, an import's say, don't come back approved.
         if (ref.kind === "preset" && doc.regex_approved === true) {
-          if (!keepsRegexApproval(yield* lib.loadDoc(ref.head_revision_id), doc))
-            doc = { ...doc, regex_approved: false }
+          if (!keepsRegexApproval(head, doc)) doc = { ...doc, regex_approved: false }
         }
         const saved = new Date(earlier.created_at).toISOString().replace("T", " ").slice(0, 16)
         return yield* userEdit(

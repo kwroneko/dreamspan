@@ -6,6 +6,7 @@
 import type { EntityId } from "./chat.ts"
 import { Result, Schema, SchemaIssue } from "effect"
 import { CARD_SCHEMA_VERSION, CardDoc } from "./docs/card.ts"
+import { LorebookDoc } from "./docs/lorebook.ts"
 import { NOTE_SCHEMA_VERSION, NoteDoc } from "./docs/note.ts"
 import { PresetDoc } from "./docs/preset.ts"
 import type { Doc, EntityKind } from "./library.ts"
@@ -82,38 +83,69 @@ const hasForbiddenKey = (value: unknown): boolean =>
     ? value.some(hasForbiddenKey)
     : isObject(value) && Object.keys(value).some((key) => FORBIDDEN.has(key) || hasForbiddenKey(value[key]))
 
+/** Why a value can't go at a path. `orphan`: what it was in is gone (deleted, or never there). */
+interface Refusal {
+  readonly reason: string
+  readonly orphan: boolean
+}
+
 /**
- * Puts `value` at `path` in `root`, in place. In an array, null at an element removes it,
- * and an identity no element has adds one at the end. Returns why it can't, or null.
+ * Puts `value` at `path` in `root`, in place. Undefined removes what's there; in a list, so
+ * does null, and an identity no element has adds one at the end. Returns why it can't, or null.
  */
-const setAt = (root: unknown, path: FieldPath, value: unknown): string | null => {
+const setAt = (root: unknown, path: FieldPath, value: unknown): Refusal | null => {
   const parent = getAt(root, path.slice(0, -1))
   const last = path.at(-1)!
+  const remove = value === undefined || (value === null && Array.isArray(parent))
   if (Array.isArray(parent)) {
     if (typeof last === "number") {
-      if (last > parent.length || (last === parent.length && value === null)) return "there's no such element"
-      if (value === null) parent.splice(last, 1)
+      if (last > parent.length || (last === parent.length && remove)) {
+        return { reason: "there's no such element", orphan: false }
+      }
+      if (remove) parent.splice(last, 1)
       else parent[last] = value
       return null
     }
     const id = identityOf(last)
-    if (id === null) return "a list's elements are named by their id"
+    if (id === null) return { reason: "a list's elements are named by their id", orphan: false }
     const index = parent.findIndex((element) => matches(element, id))
-    if (value === null) {
+    if (remove) {
       if (index >= 0) parent.splice(index, 1)
       return null
     }
-    if (!matches(value, id)) return "the element doesn't have the id its path names"
+    if (!matches(value, id)) return { reason: "the element doesn't have the id its path names", orphan: false }
     if (index >= 0) parent[index] = value
     else parent.push(value)
     return null
   }
   if (isObject(parent) && typeof last === "string") {
-    parent[last] = value
+    if (remove) delete parent[last]
+    else parent[last] = value
     return null
   }
-  return "the document has no place for it"
+  return { reason: "the document has no place for it", orphan: parent === undefined }
 }
+
+/** Lists whose elements have ids, by kind: a path names their elements by id, never by index. */
+const IDENTIFIED: Partial<Record<EntityKind, ReadonlyArray<string>>> = {
+  card: ["modules", "character_book/entries"],
+  preset: ["prompts", "order", "regex"]
+}
+
+const IDENTITY_KEYS = ["id", "identifier", "uid"] as const
+
+/** Whether a path goes into a list with ids by an index, where a reorder would move it to another element. */
+const indexIntoIdentified = (kind: EntityKind, doc: unknown, path: FieldPath) =>
+  path.some((segment, at) => {
+    if (typeof segment !== "number") return false
+    const list = getAt(doc, path.slice(0, at))
+    const known = IDENTIFIED[kind]?.includes(path.slice(0, at).join("/")) ?? false
+    const identified =
+      Array.isArray(list) &&
+      list.length > 0 &&
+      IDENTITY_KEYS.some((key) => list.every((element) => isObject(element) && Object.hasOwn(element, key)))
+    return known || identified
+  })
 
 /** Top-level fields a draft never changes: each changes through its own action, or never. */
 const PROTECTED: Partial<Record<EntityKind, ReadonlySet<string>>> = {
@@ -121,6 +153,15 @@ const PROTECTED: Partial<Record<EntityKind, ReadonlySet<string>>> = {
   preset: new Set(["schema_version", "regex_approved"]),
   note: new Set(["schema_version", "owner"])
 }
+
+/**
+ * Protected fields (above) of `doc` that hold neither side's value: a resolved merge can keep
+ * one side's avatar or owner, never put another there.
+ */
+export const protectedChanges = (kind: EntityKind, doc: Doc, sides: ReadonlyArray<Doc>) =>
+  [...(PROTECTED[kind] ?? [])].filter(
+    (key) => !sides.some((side) => canonicalJson(side[key]) === canonicalJson(doc[key]))
+  )
 
 export interface DraftContent {
   readonly field: string
@@ -130,6 +171,8 @@ export interface DraftContent {
 interface FieldProblem {
   readonly field: string
   readonly message: string
+  /** What the field was in is gone, such as a deleted prompt's text. */
+  readonly orphan: boolean
 }
 
 /**
@@ -142,11 +185,11 @@ export const applyDrafts = (kind: EntityKind, head: Doc, drafts: ReadonlyArray<D
   const parsed = drafts.flatMap((draft) => {
     const field = parseField(draft.field)
     if (field === null) {
-      problems.push({ field: draft.field, message: "This isn't a field of a document." })
+      problems.push({ field: draft.field, message: "This isn't a field of a document.", orphan: false })
       return []
     }
     if (PROTECTED[kind]?.has(String(field.path[0]))) {
-      problems.push({ field: draft.field, message: "This changes through its own action, not an edit." })
+      problems.push({ field: draft.field, message: "This changes through its own action, not an edit.", orphan: false })
       return []
     }
     return [{ ...field, draft }]
@@ -155,43 +198,49 @@ export const applyDrafts = (kind: EntityKind, head: Doc, drafts: ReadonlyArray<D
     a.kind !== b.kind ? (a.kind === "value" ? -1 : 1) : a.path.length - b.path.length
   )
   for (const { kind: fieldKind, path, draft } of ordered) {
+    const problem = (message: string, orphan = false) => problems.push({ field: draft.field, message, orphan })
+    if (indexIntoIdentified(kind, doc, path)) {
+      problem("This names a list's element by its place; elements with ids are named by their id.")
+      continue
+    }
     let value: unknown = draft.content
     if (fieldKind === "value") {
       try {
         value = JSON.parse(draft.content)
       } catch {
-        problems.push({ field: draft.field, message: "This value isn't valid." })
+        problem("This value isn't valid.")
         continue
       }
       if (hasForbiddenKey(value)) {
-        problems.push({ field: draft.field, message: "This value has a key that isn't allowed." })
+        problem("This value has a key that isn't allowed.")
         continue
       }
     } else {
       const current = getAt(doc, path)
       if (current !== undefined && typeof current !== "string") {
-        problems.push({ field: draft.field, message: "This field isn't text." })
+        problem("This field isn't text.")
         continue
       }
     }
     const refused = setAt(doc, path, value)
-    if (refused !== null) problems.push({ field: draft.field, message: `This field can't be changed: ${refused}.` })
+    if (refused !== null) problem(`This field can't be changed: ${refused.reason}.`, refused.orphan)
   }
   return { doc, problems }
 }
 
 /**
  * `doc` with values put at paths, protected fields included: for a merge the user resolved
- * by hand, which the server validates whole. Returns null if a path has no place.
+ * by hand, which the server validates whole. Undefined removes. Returns null if a path has no place.
  */
 export const withValues = (doc: Doc, values: ReadonlyArray<{ readonly path: FieldPath; readonly value: unknown }>) => {
   const copy = structuredClone(doc)
   return values.every(({ path, value }) => setAt(copy, path, value) === null) ? copy : null
 }
 
-const SCHEMAS = { card: CardDoc, preset: PresetDoc, note: NoteDoc } as const
+const SCHEMAS = { card: CardDoc, preset: PresetDoc, note: NoteDoc, lorebook: LorebookDoc } as const
 
-const isEditable = (kind: EntityKind): kind is keyof typeof SCHEMAS => Object.hasOwn(SCHEMAS, kind)
+/** Whether documents of this kind have a schema to be checked against. */
+export const hasSchema = (kind: EntityKind): kind is keyof typeof SCHEMAS => Object.hasOwn(SCHEMAS, kind)
 
 const formatIssues = SchemaIssue.makeFormatterStandardSchemaV1()
 
@@ -202,17 +251,31 @@ const formatIssues = SchemaIssue.makeFormatterStandardSchemaV1()
 export const validateDoc = (
   kind: EntityKind,
   doc: unknown
-): { readonly ok: true; readonly doc: Doc } | { readonly ok: false; readonly problems: ReadonlyArray<string> } => {
-  if (!isEditable(kind)) return { ok: false, problems: [`A ${kind} can't be edited yet.`] }
+):
+  | { readonly ok: true; readonly doc: Doc }
+  | { readonly ok: false; readonly problems: ReadonlyArray<string>; readonly paths: ReadonlyArray<FieldPath> } => {
+  if (!hasSchema(kind)) return { ok: false, problems: [`A ${kind} can't be edited yet.`], paths: [] }
   const result = Schema.decodeUnknownResult(SCHEMAS[kind] as Schema.Codec<unknown, unknown>)(doc)
   if (Result.isSuccess(result)) return { ok: true, doc: result.success as Doc }
+  const issues = formatIssues(result.failure.issue).issues.slice(0, 20)
   return {
     ok: false,
-    problems: formatIssues(result.failure.issue)
-      .issues.slice(0, 20)
-      .map((issue) => `${(issue.path ?? []).map(String).join(".") || "the document"}: ${issue.message}`)
+    problems: issues.map((issue) => `${(issue.path ?? []).map(String).join(".") || "the document"}: ${issue.message}`),
+    paths: issues.map((issue) =>
+      (issue.path ?? []).map((segment) => (typeof segment === "number" ? segment : String(segment)))
+    )
   }
 }
+
+/**
+ * Drafts the schema would drop from the document, such as text at a key it doesn't know:
+ * saving them would end the draft and keep nothing of it.
+ */
+export const droppedDrafts = (applied: Doc, valid: Doc, drafts: ReadonlyArray<DraftContent>) =>
+  drafts.filter(({ field }) => {
+    const parsed = parseField(field)
+    return parsed !== null && canonicalJson(getAt(applied, parsed.path)) !== canonicalJson(getAt(valid, parsed.path))
+  })
 
 /** JSON with object keys sorted, for comparing values whatever their key order. */
 export const canonicalJson = (value: unknown): string =>
@@ -233,6 +296,31 @@ export const canonicalJson = (value: unknown): string =>
  */
 export const keepsRegexApproval = (ours: Doc, next: Doc) =>
   ours.regex_approved === true && canonicalJson(ours.regex) === canonicalJson(next.regex)
+
+/**
+ * The agent's permission to edit a note or a card module is given only by the user setting
+ * it (DESIGN §4.1a): anything else (a restore, a merge, a resolved update) keeps it off where
+ * the head has it off.
+ */
+export const withoutGrantedAgentEdits = (kind: EntityKind, ours: Doc, next: Doc): Doc => {
+  if (kind === "note") {
+    return next.agent_editable === true && ours.agent_editable !== true ? { ...next, agent_editable: false } : next
+  }
+  if (kind !== "card" || !Array.isArray(next.modules)) return next
+  const allowed = new Set(
+    (Array.isArray(ours.modules) ? ours.modules : []).flatMap((module: unknown) =>
+      isObject(module) && module.agent_editable === true ? [module.id] : []
+    )
+  )
+  return {
+    ...next,
+    modules: next.modules.map((module: unknown) =>
+      isObject(module) && module.agent_editable === true && !allowed.has(module.id)
+        ? { ...module, agent_editable: false }
+        : module
+    )
+  }
+}
 
 /** A card made from scratch: its name, and every field empty. */
 export const newCardDoc = (name: string): CardDoc => ({

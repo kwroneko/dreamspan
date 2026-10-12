@@ -48,10 +48,14 @@ interface Party {
 /** A card with an avatar, a note and an unsaved draft. */
 interface OwnEditor {
   readonly cardRefId: RefId
+  readonly cardEntityId: EntityId
   readonly revisionId: RevisionId
   readonly noteRefId: RefId
   readonly avatarMediaId: string
   readonly field: string
+  /** A variant of the card, and one of the note, each with an update waiting to be resolved. */
+  readonly pendingCardRefId: RefId
+  readonly pendingNoteRefId: RefId
 }
 
 /** A chat with the user's message and a model reply still generating under it. */
@@ -817,15 +821,39 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
   },
   ResolveUpdate: {
     probe: (actor, owner) =>
-      refused(
-        actor.api.ResolveUpdate({
-          refId: owner.editor.cardRefId,
-          doc: {},
-          theirsRevisionId: owner.editor.revisionId,
-          expectedRowVersion: 1
-        }),
-        "NotFound"
-      )
+      Effect.gen(function* () {
+        yield* refused(
+          actor.api.ResolveUpdate({
+            refId: owner.editor.cardRefId,
+            doc: {},
+            theirsRevisionId: owner.editor.revisionId,
+            expectedRowVersion: 1
+          }),
+          "NotFound"
+        )
+        // The owner's file or card named in the actor's own resolution.
+        const resolveOwn = (refId: RefId, change: (merged: Record<string, unknown>) => Record<string, unknown>) =>
+          Effect.gen(function* () {
+            const preview = yield* actor.api.PreviewUpdate({ refId })
+            const opened = yield* actor.api.OpenEditor({ refId })
+            return yield* refused(
+              actor.api.ResolveUpdate({
+                refId,
+                doc: change(preview.merged),
+                theirsRevisionId: preview.theirsRevisionId,
+                expectedRowVersion: opened.ref.rowVersion
+              }),
+              "NotFound"
+            )
+          })
+        const media = owner.editor.avatarMediaId
+        yield* resolveOwn(actor.editor.pendingCardRefId, (merged) => ({ ...merged, avatar_media_id: media }))
+        yield* resolveOwn(actor.editor.pendingCardRefId, (merged) => ({ ...merged, asset_media_ids: { x: media } }))
+        yield* resolveOwn(actor.editor.pendingNoteRefId, (merged) => ({
+          ...merged,
+          owner: { card: owner.editor.cardEntityId }
+        }))
+      })
   },
   ListCardNotes: {
     probe: (actor, owner) => refused(actor.api.ListCardNotes({ cardRefId: owner.editor.cardRefId }), "NotFound")
@@ -925,6 +953,24 @@ const routes: Record<string, Probe> = {
       )
       assert.strictEqual(response.status, 404)
     }),
+  "POST /library/drafts": (actor, owner) =>
+    Effect.gen(function* () {
+      const draft = {
+        refId: owner.editor.cardRefId,
+        field: owner.editor.field,
+        content: "planted",
+        baseRevisionId: null
+      }
+      for (const expectedRowVersion of [null, 1]) {
+        const response = yield* http(
+          actor,
+          "/library/drafts",
+          JSON.stringify({ drafts: [{ ...draft, expectedRowVersion }] }),
+          "application/json"
+        )
+        assert.strictEqual(response.status, 404)
+      }
+    }),
   "GET /library/media": (actor, owner) =>
     Effect.gen(function* () {
       const path = `/library/media?id=${owner.editor.avatarMediaId}`
@@ -1014,6 +1060,33 @@ const seed = Effect.gen(function* () {
         baseRevisionId: null
       })
       const opened = yield* api.OpenEditor({ refId: editorCard.id })
+      // Variants with an update to resolve: both sides changed the same field.
+      const pending = (refId: RefId, path: ReadonlyArray<string>) =>
+        Effect.gen(function* () {
+          const variant = yield* api.ForkVariant({ refId, label: "Pending", subtitle: "", moveDrafts: false })
+          for (const [target, text] of [
+            [variant.id, "Mine."],
+            [refId, "Theirs."]
+          ] as const) {
+            const draft = yield* api.SaveEditorDraft({
+              refId: target,
+              field: textField(path),
+              content: text,
+              expectedRowVersion: null,
+              baseRevisionId: null
+            })
+            const ref = (yield* api.OpenEditor({ refId: target })).ref
+            yield* api.CommitEditorDrafts({
+              refId: target,
+              expectedRowVersion: ref.rowVersion,
+              fields: [{ field: draft.key.field, expectedRowVersion: draft.rowVersion }],
+              message: null
+            })
+          }
+          return variant.id
+        })
+      const pendingCardRefId = yield* pending(editorCard.id, ["personality"])
+      const pendingNoteRefId = yield* pending(note.id, ["content"])
       const queued = yield* api.SendMessage({
         chatId: chat.id,
         parentSlotId: reply.entry.slotId,
@@ -1043,6 +1116,9 @@ const seed = Effect.gen(function* () {
         port,
         editor: {
           cardRefId: editorCard.id,
+          cardEntityId: editorCard.entityId,
+          pendingCardRefId,
+          pendingNoteRefId,
           revisionId: opened.ref.headRevisionId,
           noteRefId: note.id,
           avatarMediaId: opened.doc.avatar_media_id as string,

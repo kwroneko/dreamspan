@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
   applyDrafts,
+  droppedDrafts,
   canonicalJson,
   getAt,
   keepsRegexApproval,
@@ -8,7 +9,9 @@ import {
   parseField,
   textField,
   validateDoc,
-  valueField
+  valueField,
+  withoutGrantedAgentEdits,
+  withValues
 } from "../src/editing.ts"
 
 const prompts = {
@@ -105,5 +108,64 @@ describe("documents", () => {
     expect(keepsRegexApproval(ours, { regex: [...scripts, { id: "b", find_regex: "(a+)+$" }] })).toBe(false)
     expect(keepsRegexApproval({ ...ours, regex_approved: false }, ours)).toBe(false)
     expect(canonicalJson({ b: 1, a: [{ d: 1, c: 2 }] })).toBe('{"a":[{"c":2,"d":1}],"b":1}')
+  })
+})
+
+describe("what the drafts can't do", () => {
+  it("names elements of a list with ids by id, never by place", () => {
+    const card = { modules: [{ id: "x", content: "same" }] }
+    const { problems } = applyDrafts("card", card, [{ field: textField(["modules", 0, "content"]), content: "for x" }])
+    expect(problems.map((p) => p.message)).toEqual([
+      "This names a list's element by its place; elements with ids are named by their id."
+    ])
+    // A list without ids is named by place.
+    const greetings = applyDrafts("card", { alternate_greetings: ["Hi."] }, [
+      { field: textField(["alternate_greetings", 0]), content: "Hello." }
+    ])
+    expect(greetings.doc.alternate_greetings).toEqual(["Hello."])
+  })
+
+  it("tells a draft in something gone from one that doesn't fit", () => {
+    const { problems } = applyDrafts("preset", prompts, [
+      { field: textField(["prompts", "identifier=gone", "content"]), content: "x" },
+      { field: textField(["order", "identifier=main", "enabled", "deeper"]), content: "x" }
+    ])
+    expect(problems.map((p) => p.orphan)).toEqual([true, false])
+  })
+
+  it("finds drafts the schema would drop", () => {
+    const applied = { a: "kept", unknown: "My irreplaceable text" }
+    const drafts = [
+      { field: textField(["a"]), content: "kept" },
+      { field: textField(["unknown"]), content: "My irreplaceable text" }
+    ]
+    expect(droppedDrafts(applied, { a: "kept" }, drafts).map((d) => d.field)).toEqual([textField(["unknown"])])
+  })
+
+  it("removes a key for a side that deleted it, rather than setting it null", () => {
+    const doc = { modules: [{ id: "m", placement: { mode: "section" } }] }
+    expect(withValues(doc, [{ path: ["modules", "id=m", "placement"], value: undefined }])).toEqual({
+      modules: [{ id: "m" }]
+    })
+  })
+
+  it("never grants the agent a permission the head doesn't give", () => {
+    expect(withoutGrantedAgentEdits("note", { agent_editable: false }, { agent_editable: true }).agent_editable).toBe(
+      false
+    )
+    expect(withoutGrantedAgentEdits("note", { agent_editable: true }, { agent_editable: true }).agent_editable).toBe(
+      true
+    )
+    const ours = { modules: [{ id: "a", agent_editable: true }] }
+    const next = {
+      modules: [
+        { id: "a", agent_editable: true },
+        { id: "b", agent_editable: true }
+      ]
+    }
+    expect(withoutGrantedAgentEdits("card", ours, next).modules).toEqual([
+      { id: "a", agent_editable: true },
+      { id: "b", agent_editable: false }
+    ])
   })
 })

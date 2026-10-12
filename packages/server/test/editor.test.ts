@@ -9,7 +9,7 @@ import { textField, valueField } from "@rp/shared/editing.ts"
 import { ImportResult } from "@rp/shared/libraryImport.ts"
 import type { RefId } from "@rp/shared/library.ts"
 import { Effect, Schema } from "effect"
-import { Writer } from "../src/db/Database.ts"
+import { Reader, Writer } from "../src/db/Database.ts"
 import { chunk, png } from "./formats/support.ts"
 import { client, outcome, serverLayer, serverPort, testConfig } from "./support/config.ts"
 
@@ -468,6 +468,11 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
       assert.strictEqual(stale.status, 409)
       const text = yield* upload(`/library/avatar?ref=${card.id}&rowVersion=${card.rowVersion}`, new Uint8Array(64))
       assert.strictEqual(text.status, 415)
+      // Only a whole PNG signature makes a PNG, for avatars as for imports.
+      const broken = Uint8Array.from(image)
+      broken.set([0, 0, 0, 0], 4)
+      const half = yield* upload(`/library/avatar?ref=${card.id}&rowVersion=${card.rowVersion}`, broken)
+      assert.strictEqual(half.status, 415)
       const response = yield* upload(`/library/avatar?ref=${card.id}&rowVersion=${card.rowVersion}`, image)
       assert.strictEqual(response.status, 200)
       const opened = yield* api.OpenEditor({ refId: card.id })
@@ -516,6 +521,224 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
         revisionId: library.ref.headRevisionId
       })) as unknown as PresetDoc
       assert.strictEqual(imported.prompts.length, 12)
+    })
+  )
+})
+
+/** A card's variant with an update it can't take without help: both changed its personality. */
+const pendingVariant = (api: Api, name: string) =>
+  Effect.gen(function* () {
+    const card = yield* api.CreateCard({ label: name, name })
+    const variant = yield* api.ForkVariant({
+      refId: card.id,
+      label: `${name} variant`,
+      subtitle: "",
+      moveDrafts: false
+    })
+    yield* draft(api, variant.id, textField(["personality"]), "Quiet.")
+    yield* commit(api, variant.id)
+    yield* draft(api, card.id, textField(["personality"]), "Loud.")
+    yield* commit(api, card.id)
+    const preview = yield* api.PreviewUpdate({ refId: variant.id })
+    assert.strictEqual(preview.outcome, "conflicts")
+    const opened = yield* api.OpenEditor({ refId: variant.id })
+    return { card, variant: opened.ref, preview }
+  })
+
+layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" })("what editing refuses", (it) => {
+  it.effect("a resolved update must be pending, keep protected fields from a side, and grant nothing", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      // Nothing pending: there's nothing to resolve.
+      const card = yield* api.CreateCard({ label: "Settled", name: "Settled" })
+      const settled = yield* api.ForkVariant({
+        refId: card.id,
+        label: "Settled variant",
+        subtitle: "",
+        moveDrafts: false
+      })
+      const opened = yield* api.OpenEditor({ refId: settled.id })
+      assert.strictEqual(
+        yield* outcome(
+          api.ResolveUpdate({
+            refId: settled.id,
+            doc: opened.doc,
+            theirsRevisionId: card.headRevisionId,
+            expectedRowVersion: settled.rowVersion
+          })
+        ),
+        "EditRefused"
+      )
+
+      const { variant, preview } = yield* pendingVariant(api, "Pending")
+      const resolve = (doc: Record<string, unknown>) =>
+        api.ResolveUpdate({
+          refId: variant.id,
+          doc,
+          theirsRevisionId: preview.theirsRevisionId,
+          expectedRowVersion: variant.rowVersion
+        })
+      // Another of the user's own files as the avatar: neither side has it.
+      const other = yield* api.CreateCard({ label: "Pictured", name: "Pictured" })
+      const uploaded = yield* upload(
+        `/library/avatar?ref=${other.id}&rowVersion=${other.rowVersion}`,
+        png(chunk("tEXt", new TextEncoder().encode("Comment\0other")))
+      )
+      assert.strictEqual(uploaded.status, 200)
+      const media = (yield* doc(api, other.id)).avatar_media_id
+      assert.strictEqual(yield* outcome(resolve({ ...preview.merged, avatar_media_id: media })), "InvalidDocument")
+      assert.strictEqual(yield* outcome(resolve({ ...preview.merged, personality: 3 })), "InvalidDocument")
+      // A module the agent may edit isn't granted by a resolution.
+      const modules = [{ id: "m", title: "M", content: "", exportable: true, agent_editable: true }]
+      yield* resolve({ ...preview.merged, modules })
+      const resolved = yield* doc(api, variant.id)
+      assert.deepStrictEqual(resolved.modules, [{ ...modules[0], agent_editable: false }])
+      assert.isFalse((yield* api.OpenEditor({ refId: variant.id })).ref.updateAvailable)
+    })
+  )
+
+  it.effect("a note's resolved update can't move it to another card", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const card = yield* api.CreateCard({ label: "Noted", name: "Noted" })
+      const another = yield* api.CreateCard({ label: "Another", name: "Another" })
+      const note = yield* api.CreateCardNote({ cardRefId: card.id, title: "Note" })
+      const variant = yield* api.ForkVariant({ refId: note.id, label: "Note variant", subtitle: "", moveDrafts: false })
+      yield* draft(api, variant.id, textField(["content"]), "Mine.")
+      yield* commit(api, variant.id)
+      yield* draft(api, note.id, textField(["content"]), "Theirs.")
+      yield* commit(api, note.id)
+      const preview = yield* api.PreviewUpdate({ refId: variant.id })
+      const opened = yield* api.OpenEditor({ refId: variant.id })
+      const result = yield* Effect.flip(
+        api.ResolveUpdate({
+          refId: variant.id,
+          doc: { ...preview.merged, owner: { card: another.entityId } },
+          theirsRevisionId: preview.theirsRevisionId,
+          expectedRowVersion: opened.ref.rowVersion
+        })
+      )
+      assert.strictEqual(result._tag, "InvalidDocument")
+      assert.include(result._tag === "InvalidDocument" ? result.problems.join() : "", "owner")
+    })
+  )
+
+  it.effect("two valid edits that merge into an invalid preset leave the variant to resolve", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const refId = (yield* importPreset(preset("default"))).ref.id
+      const before = (yield* doc(api, refId)) as unknown as PresetDoc
+      const x = { ...before.prompts[0]!, identifier: "x", name: "X", system_prompt: false, marker: false }
+      yield* draft(api, refId, valueField(["prompts", "identifier=x"]), JSON.stringify(x))
+      yield* commit(api, refId)
+      const variant = yield* api.ForkVariant({ refId, label: "Without X", subtitle: "", moveDrafts: false })
+      yield* draft(api, variant.id, valueField(["prompts", "identifier=x"]), "null")
+      yield* commit(api, variant.id)
+      const variantDoc = yield* doc(api, variant.id)
+      // The upstream puts X in its order; the variant deleted X.
+      yield* draft(
+        api,
+        refId,
+        valueField(["order"]),
+        JSON.stringify([...before.order, { identifier: "x", enabled: true }])
+      )
+      const saved = yield* commit(api, refId)
+      assert.deepStrictEqual(
+        saved.followers.map((f) => f.outcome),
+        ["conflicts"]
+      )
+      assert.deepStrictEqual(yield* doc(api, variant.id), variantDoc)
+      const preview = yield* api.PreviewUpdate({ refId: variant.id })
+      assert.deepStrictEqual(
+        preview.conflicts.map((c) => c.path),
+        [["order"]]
+      )
+      // Keeping the variant's order resolves it.
+      const opened = yield* api.OpenEditor({ refId: variant.id })
+      yield* api.ResolveUpdate({
+        refId: variant.id,
+        doc: { ...preview.merged, order: variantDoc.order },
+        theirsRevisionId: preview.theirsRevisionId,
+        expectedRowVersion: opened.ref.rowVersion
+      })
+      assert.isFalse((yield* api.OpenEditor({ refId: variant.id })).ref.updateAvailable)
+    })
+  )
+
+  it.effect("text at a field the schema doesn't know is refused, and the draft keeps it", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const card = yield* api.CreateCard({ label: "Unknown", name: "Unknown" })
+      yield* draft(api, card.id, textField(["not_a_card_field"]), "My irreplaceable text")
+      const refused = yield* Effect.flip(commit(api, card.id))
+      assert.strictEqual(refused._tag, "InvalidDocument")
+      const opened = yield* api.OpenEditor({ refId: card.id })
+      assert.deepStrictEqual(
+        opened.drafts.map((d) => [d.status, d.content]),
+        [["active", "My irreplaceable text"]]
+      )
+      assert.strictEqual(opened.ref.headRevisionId, card.headRevisionId)
+    })
+  )
+
+  it.effect("a list with ids is addressed by id, so a reorder can't send an edit to another element", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const card = yield* api.CreateCard({ label: "Indexed", name: "Indexed" })
+      const modules = [
+        { id: "x", title: "X", content: "same", exportable: false },
+        { id: "y", title: "Y", content: "same", exportable: false }
+      ]
+      yield* draft(api, card.id, valueField(["modules"]), JSON.stringify(modules))
+      yield* commit(api, card.id)
+      yield* draft(api, card.id, textField(["modules", 0, "content"]), "intended for X")
+      assert.strictEqual(yield* outcome(commit(api, card.id)), "InvalidDocument")
+      assert.deepStrictEqual((yield* doc(api, card.id)).modules, modules)
+    })
+  )
+
+  it.effect("a draft in something deleted since is set aside on save, its text recovered", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const card = yield* api.CreateCard({ label: "Removed", name: "Removed" })
+      yield* draft(
+        api,
+        card.id,
+        valueField(["modules", "id=x"]),
+        JSON.stringify({ id: "x", title: "X", content: "", exportable: false })
+      )
+      yield* draft(api, card.id, textField(["modules", "id=x", "content"]), "Unsaved text")
+      yield* draft(api, card.id, valueField(["modules", "id=x"]), "null")
+      yield* draft(api, card.id, textField(["scenario"]), "Kept.")
+      const saved = yield* commit(api, card.id)
+      assert.deepStrictEqual(saved.setAside, [textField(["modules", "id=x", "content"])])
+      const after = yield* doc(api, card.id)
+      assert.deepStrictEqual([after.scenario, after.modules], ["Kept.", []])
+      const reader = yield* Reader
+      const me = yield* api.Whoami()
+      const recovered = yield* reader.ListRecoveredTexts({ userId: me.id, source: null, limit: 100, before: null })
+      assert.include(
+        recovered.map((r) => r.content),
+        "Unsaved text"
+      )
+    })
+  )
+
+  it.effect("restoring an earlier revision never gives the agent back a permission taken away", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const card = yield* api.CreateCard({ label: "Permission", name: "Permission" })
+      const note = yield* api.CreateCardNote({ cardRefId: card.id, title: "N" })
+      yield* draft(api, note.id, valueField(["agent_editable"]), "true")
+      const allowed = yield* commit(api, note.id)
+      yield* draft(api, note.id, valueField(["agent_editable"]), "false")
+      const stopped = yield* commit(api, note.id)
+      yield* api.RestoreRevision({
+        refId: note.id,
+        revisionId: allowed.ref.headRevisionId,
+        expectedRowVersion: stopped.ref.rowVersion
+      })
+      assert.isFalse((yield* doc(api, note.id)).agent_editable)
     })
   )
 })

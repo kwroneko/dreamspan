@@ -18,6 +18,7 @@ import { docHash, searchText } from "../db/documents.ts"
 import { makeRegistry, type Registry } from "../registry.ts"
 import { type Sniffed, sniff } from "./detect.ts"
 import { ParsedFile, ParsedMedia } from "./ops.ts"
+import { describeImage } from "./images.ts"
 
 /** A file that came with an imported one: a card's avatar or an embedded asset. */
 interface ImportedFile {
@@ -179,29 +180,6 @@ export const layer = Layer.effect(
 )
 
 export const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex")
-
-/** An image's type from its first bytes, and a PNG's size from its header. */
-const describeImage = (bytes: Uint8Array) => {
-  const starts = (...prefix: ReadonlyArray<number>) => prefix.every((byte, index) => bytes[index] === byte)
-  const ascii = (offset: number, text: string) =>
-    Buffer.from(bytes.subarray(offset, offset + text.length)).toString("latin1") === text
-  if (starts(0x89, 0x50, 0x4e, 0x47) && ascii(12, "IHDR") && bytes.byteLength >= 24) {
-    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
-    return { mime: "image/png", width: view.getUint32(16), height: view.getUint32(20) }
-  }
-  const mime = starts(0xff, 0xd8, 0xff)
-    ? "image/jpeg"
-    : ascii(0, "GIF8")
-      ? "image/gif"
-      : ascii(0, "RIFF") && ascii(8, "WEBP")
-        ? "image/webp"
-        : ascii(4, "ftypavif")
-          ? "image/avif"
-          : ascii(0, "BM")
-            ? "image/bmp"
-            : "application/octet-stream"
-  return { mime, width: null, height: null }
-}
 
 /**
  * The document as JSON, with its hash and search text, worked out here so the writer, which

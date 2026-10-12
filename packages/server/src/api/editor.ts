@@ -52,7 +52,8 @@ type Settled<E> =
 const saved = (change: RefChange) =>
   new SavedRef({
     ref: change.ref,
-    followers: change.followers.map(({ refId, outcome }) => ({ refId, outcome }))
+    followers: change.followers.map(({ refId, outcome }) => ({ refId, outcome })),
+    setAside: change.setAside ?? []
   })
 
 const draftKey = (refId: RefId, field: string) => new DraftKey({ targetKind: "entity_field", targetId: refId, field })
@@ -159,16 +160,11 @@ export const makeEditorHandlers = Effect.gen(function* () {
         settle("ApplyUpdate")
       ),
 
+    // The writer checks the document: valid, protected fields from one side, references owned.
     ResolveUpdate: ({ refId, doc, theirsRevisionId, expectedRowVersion }) =>
-      Effect.gen(function* () {
-        const id = yield* userId
-        const ref = yield* reader.GetLibraryRef({ userId: id, refId })
-        const valid = validateDoc(ref.kind, doc)
-        if (!valid.ok) return yield* new InvalidDocument({ problems: valid.problems })
-        return saved(
-          yield* writer.ResolveMerge({ userId: id, refId, doc: valid.doc, theirsRevisionId, expectedRowVersion })
-        )
-      }).pipe(settle("ResolveUpdate")),
+      Effect.flatMap(userId, (id) =>
+        writer.ResolveMerge({ userId: id, refId, doc, theirsRevisionId, expectedRowVersion })
+      ).pipe(Effect.map(saved), settle("ResolveUpdate")),
 
     ListCardNotes: ({ cardRefId }) =>
       Effect.flatMap(userId, (id) => reader.ListCardNotes({ userId: id, cardRefId })).pipe(settle("ListCardNotes")),

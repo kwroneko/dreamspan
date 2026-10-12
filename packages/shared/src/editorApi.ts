@@ -36,7 +36,12 @@ export class EditConflict extends Schema.TaggedError<EditConflict>()("EditConfli
 /** A ref after a change, and what happened to the refs following it, transitively. */
 export class SavedRef extends Schema.Class<SavedRef>("SavedRef")({
   ref: LibraryRef,
-  followers: Schema.Array(Schema.Struct({ refId: RefId, outcome: MergeOutcome }))
+  followers: Schema.Array(Schema.Struct({ refId: RefId, outcome: MergeOutcome })),
+  /**
+   * Drafts in something that's gone since (a deleted prompt's text): not saved, and their text
+   * is in the bin's recovered texts.
+   */
+  setAside: Schema.Array(Schema.String)
 }) {}
 
 /** Everything the editor opens with, read in one snapshot. */

@@ -7,11 +7,13 @@ import {
   type Doc,
   type EntityKind,
   LibraryRef,
+  MergeConflictInfo,
   type MergeOutcome,
   type RefId,
   type RefKind,
   type RevisionId
 } from "@rp/shared/library.ts"
+import { hasSchema, validateDoc } from "@rp/shared/editing.ts"
 import { merge3 } from "@rp/shared/merge.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
@@ -103,6 +105,30 @@ export const makeLibraryQueries = (sql: SqlClient.SqlClient) => {
       // Theirs brings nothing new: only the merge base moves.
       if (result.conflicts.length === 0 && docHash(result.value as Doc) === docHash(ours)) {
         return { ...upToDate, theirsHead }
+      }
+      // Two valid edits can merge into an invalid document (an order entry naming a prompt
+      // the other side deleted). The fields the schema refuses become conflicts to resolve.
+      const merged = result.value as Doc
+      if (result.conflicts.length === 0 && hasSchema(ref.kind) && validateDoc(ref.kind, ours).ok) {
+        const check = validateDoc(ref.kind, merged)
+        if (!check.ok) {
+          const fields = [...new Set(check.paths.map((path) => String(path[0] ?? "")))]
+          return {
+            outcome: "conflicts" as MergeOutcome,
+            merged,
+            conflicts: fields.map((field) =>
+              field === ""
+                ? new MergeConflictInfo({ path: [], base, ours, theirs })
+                : new MergeConflictInfo({
+                    path: [field],
+                    ...(Object.hasOwn(base, field) ? { base: base[field] } : {}),
+                    ...(Object.hasOwn(ours, field) ? { ours: ours[field] } : {}),
+                    ...(Object.hasOwn(theirs, field) ? { theirs: theirs[field] } : {})
+                  })
+            ),
+            theirsHead
+          }
+        }
       }
       return {
         outcome: (result.conflicts.length > 0 ? "conflicts" : "merged") as MergeOutcome,

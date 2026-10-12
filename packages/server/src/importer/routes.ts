@@ -12,7 +12,9 @@ import {
   exportFormats,
   ImportResult
 } from "@rp/shared/libraryImport.ts"
-import { RefId } from "@rp/shared/library.ts"
+import { RefId, RevisionId } from "@rp/shared/library.ts"
+import { DraftKey } from "@rp/shared/drafts.ts"
+import { parseField } from "@rp/shared/editing.ts"
 import { ByteSize, Effect, Layer, Option, Schedule, Schema, Semaphore } from "effect"
 import { NodeHttpServerRequest } from "@effect/platform-node"
 import { HttpIncomingMessage, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http"
@@ -27,6 +29,7 @@ import { StImports } from "./StImports.ts"
 import type { EntityId } from "@rp/shared/chat.ts"
 import { classifyStPath, ST_CHAT_PART_BYTES } from "@rp/shared/stFolder.ts"
 import { StFileResult } from "@rp/shared/stImportApi.ts"
+import { describeImage } from "./images.ts"
 import { readMedia, storeMedia, sweepMedia } from "./mediaFiles.ts"
 
 /** The largest upload: the parsers' own cap on any file (ARCHITECTURE.md §8). */
@@ -73,25 +76,6 @@ const MAX_AVATAR_BYTES = 16 * 1024 * 1024
 /** Images served back to the browser, and the only types an avatar upload takes. */
 const INLINE_IMAGES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"])
 
-/** An uploaded avatar's type from its first bytes, and a PNG's size; null if it isn't one we show. */
-const avatarImage = (bytes: Uint8Array) => {
-  const ascii = (offset: number, text: string) =>
-    Buffer.from(bytes.subarray(offset, offset + text.length)).toString("latin1") === text
-  if (bytes[0] === 0x89 && ascii(1, "PNG\r\n\x1a\n") && ascii(12, "IHDR") && bytes.byteLength >= 24) {
-    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
-    return { mime: "image/png", width: view.getUint32(16), height: view.getUint32(20) }
-  }
-  const mime =
-    bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff
-      ? "image/jpeg"
-      : ascii(0, "GIF8")
-        ? "image/gif"
-        : ascii(0, "RIFF") && ascii(8, "WEBP")
-          ? "image/webp"
-          : null
-  return mime === null ? null : { mime, width: null, height: null }
-}
-
 const jsonError = (status: number, message: string) => HttpServerResponse.jsonUnsafe({ error: message }, { status })
 
 /**
@@ -117,6 +101,18 @@ const authenticated = <A, E, R>(accounts: Accounts["Service"], handle: Effect.Ef
   })
 
 const ExportRequest = Schema.Struct({ refId: RefId, format: ExportFormatSchema })
+
+const LeavingDrafts = Schema.Struct({
+  drafts: Schema.Array(
+    Schema.Struct({
+      refId: RefId,
+      field: Schema.String,
+      content: Schema.String,
+      expectedRowVersion: Schema.NullOr(Schema.Int),
+      baseRevisionId: Schema.NullOr(RevisionId)
+    })
+  ).check(Schema.isMaxLength(500))
+})
 
 const CONTENT_TYPES: Record<ExportFormat, readonly [mime: string, extension: string]> = {
   "card-v2-json": ["application/json", "json"],
@@ -478,8 +474,10 @@ export const layer = Layer.unwrap(
             limits.deadline - Date.now(),
             Effect.gen(function* () {
               const body = yield* readBody(message, limits)
-              const image = avatarImage(body)
-              if (image === null) return jsonError(415, "an avatar must be a PNG, JPEG, GIF or WebP image")
+              const image = describeImage(body)
+              if (!INLINE_IMAGES.has(image.mime)) {
+                return jsonError(415, "an avatar must be a PNG, JPEG, GIF or WebP image")
+              }
               const sha256 = createHash("sha256").update(body).digest("hex")
               const change = yield* holding(
                 [sha256],
@@ -496,7 +494,8 @@ export const layer = Layer.unwrap(
               return yield* HttpServerResponse.schemaJson(SavedRef)(
                 new SavedRef({
                   ref: change.ref,
-                  followers: change.followers.map(({ refId, outcome }) => ({ refId, outcome }))
+                  followers: change.followers.map(({ refId, outcome }) => ({ refId, outcome })),
+                  setAside: []
                 })
               )
             })
@@ -541,7 +540,51 @@ export const layer = Layer.unwrap(
       )
     )
 
+    /**
+     * Editor drafts a page sends as it closes (`fetch` with `keepalive`), since its WebSocket
+     * goes with it. Each is saved as `SaveEditorDraft` would; if another save of the same field
+     * got there first, this one goes on top, the other staying in the field's history.
+     */
+    const leavingDrafts = Effect.gen(function* () {
+      const request = yield* HttpServerRequest.HttpServerRequest
+      const user = yield* CurrentUser
+      if (!request.headers["content-type"]?.startsWith("application/json")) {
+        return jsonError(415, "expected application/json")
+      }
+      const input = yield* HttpServerRequest.schemaBodyJson(LeavingDrafts).pipe(
+        Effect.provideService(HttpIncomingMessage.MaxBodySize, ByteSize.mebibytes(4)),
+        Effect.option
+      )
+      if (Option.isNone(input)) return jsonError(400, "expected drafts")
+      for (const draft of input.value.drafts) {
+        if (parseField(draft.field) === null) return jsonError(400, "that isn't a field of a document")
+        const key = new DraftKey({ targetKind: "entity_field", targetId: draft.refId, field: draft.field })
+        const save = (expectedRowVersion: number | null, baseRevision: string | null) =>
+          writer.SaveDraft({ userId: user.id, key, content: draft.content, expectedRowVersion, baseRevision })
+        yield* save(draft.expectedRowVersion, draft.baseRevisionId).pipe(
+          Effect.catchTag("StaleWrite", () =>
+            Effect.flatMap(reader.GetDraft({ userId: user.id, key }), (current) =>
+              save(current?.rowVersion ?? null, current?.status === "active" ? null : draft.baseRevisionId)
+            )
+          )
+        )
+      }
+      return HttpServerResponse.empty({ status: 204 })
+    }).pipe(
+      Effect.catchTags({
+        NotFound: () => Effect.succeed(jsonError(404, "there's no such entry")),
+        StaleWrite: () => Effect.succeed(jsonError(409, "the draft changed meanwhile")),
+        DraftTooLarge: () => Effect.succeed(jsonError(413, "a draft is too long"))
+      }),
+      Effect.catch((error) =>
+        Effect.logError("saving drafts on leaving failed", error).pipe(
+          Effect.as(jsonError(500, "the drafts weren't saved"))
+        )
+      )
+    )
+
     return Layer.mergeAll(
+      HttpRouter.add("POST", "/library/drafts", authenticated(accounts, leavingDrafts)),
       HttpRouter.add("POST", "/library/avatar", authenticated(accounts, uploadAvatar)),
       HttpRouter.add("GET", "/library/media", authenticated(accounts, mediaFile)),
       HttpRouter.add("POST", "/library/import", authenticated(accounts, importFile)),

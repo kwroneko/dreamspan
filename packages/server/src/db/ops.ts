@@ -84,7 +84,9 @@ export class FollowerMerge extends Schema.Class<FollowerMerge>("FollowerMerge")(
 /** A ref after a change, and what happened to every ref that follows it, transitively. */
 export class RefChange extends Schema.Class<RefChange>("RefChange")({
   ref: LibraryRef,
-  followers: Schema.Array(FollowerMerge)
+  followers: Schema.Array(FollowerMerge),
+  /** Drafts a save set aside because what they were in is gone: their text is in the recovered texts. */
+  setAside: Schema.optionalKey(Schema.Array(Schema.String))
 }) {}
 
 /** What merging a ref did, and the change that flowed on from it. */
@@ -509,7 +511,7 @@ export class WriteOps extends RpcGroup.make(
       expectedRowVersion: Schema.Int
     },
     success: RefChange,
-    error: Schema.Union([NotFound, StaleWrite, RefOperationRefused, StorageError])
+    error: Schema.Union([NotFound, StaleWrite, RefOperationRefused, InvalidDocument, StorageError])
   }),
   // --- Connections and models (spec/PROVIDERS.md §2, §3). Secrets arrive encrypted:
   // the main thread holds the server secret, the workers only see ciphertext.
