@@ -124,12 +124,14 @@ Results of running Codex reviewers (GPT-6.1-Sol, GPT-6-Astra) and Opus reviewers
 | M (card and preset editors) | none | 17 min, 8 (3 high), including the only silent data loss (text stripped at unknown paths) | 12 min, 6 (1 high); 5 shared with Sol, 1 unique |
 | N (branch switcher, bin, composer drafts, notifications) | none | 27 min, 14 (7 high), 7 unique to Sol, including queue cleanup deleting the only copy of composer text and EmptyBin purging items added after the confirmation | 15 min, 8 (3 high); 7 shared with Sol, 1 unique (an idle tab overwriting another's newer draft) |
 | O (notes in the chat, the author's note in the assembler) | none | 26 min, 7 (2 high); 5 shared with Astra, 2 unique, including an ST mismatch it found by writing its own gate fixtures | 19 min, 8 (2 high); 5 shared, 3 unique |
+| P (request inspector, cache warmth) | none | 35 min with a capacity failure and a resume, 12 (1 high); 8 shared with Astra, 4 unique | 17 min, 9 (1 high); 8 shared, 1 unique |
+| Lorebook matcher (written by Sol) | none | (author) | 17 min, 7 (2 high): unbounded work on a 10,000-entry book, a long plain key that throws, replay that depends on the clock |
 | Fix verifications (K round 2, L rounds 2–3) | none | 13–25 min each. Found real gaps every time, including a P1 data loss in L's undo path | not run |
 
 So far:
 - Each Codex reviewer found real defects that the other missed. On K, three of each reviewer's seven findings were unique to it.
 - Both found defects after an Opus review was already done (L).
 - Sol writes repro tests for everything. Astra's reports state the method less often.
-- Sol failed twice: once at capacity, once on the cybersecurity filter. The filter was triggered by prompt wording ("adversarial", attacks on keys and regex); prompts now ask for a defensive review instead. Astra hasn't failed yet, and is faster here, not slower.
+- Sol failed four times: three times at capacity (twice on 2026-10-12 afternoon, both resumed with `codex exec resume <session id>` without losing work), once on the cybersecurity filter. The filter was triggered by prompt wording ("adversarial", attacks on keys and regex); prompts now ask for a defensive review instead. Astra hasn't failed yet, and is faster here, not slower.
 - On M and N, Sol found more, and caught the worse defects. On N, Astra's report was nearly a subset of Sol's, in half the time. On L and J, Astra produced the only complete report.
 - So far running both is worth it: neither reviewer's findings contain the other's, and both keep finding real defects after Opus reviews.
