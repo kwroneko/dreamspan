@@ -49,6 +49,9 @@ describe("preset regex scripts", () => {
     expect(run(linear("/(?<who>mira)/giu"), "[$<who>]", [], "Mira and MIRA")).toBe("[Mira] and [MIRA]")
     // The catastrophic pattern runs, in linear time, rather than being refused.
     expect(run(linear("/(a+)+$/gi"), "x", [], `${"a".repeat(5000)}!`)).toBe(`${"a".repeat(5000)}!`)
+    // Empty matches of a pattern with many groups, where V8's own replace never returns.
+    expect(run(linear(`/${"(a*)".repeat(40)}/g`), "[$1]", [], "baab")).toBe("[]b[aa][]b[]")
+    expect(run(linear("/(?:)/g"), "-", [], "ab")).toBe("-a-b-")
   })
 
   it("refuses what only a backtracking engine can run", () => {

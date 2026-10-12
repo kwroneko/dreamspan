@@ -5,13 +5,12 @@
 // A single-character chat with ST's layout gets what ST would send for its preset and card
 // (ST-compatible mode, DESIGN §1.2); anything else gets our layouts (DESIGN §5.2–§5.4).
 import type { ChatMessage } from "@rp/shared/macros/context.ts"
-import type { RegexScript } from "@rp/shared/docs/preset.ts"
 import { foldState } from "@rp/shared/state.ts"
 import { Effect, type Scope } from "effect"
 import { placeBreakpoints } from "./breakpoints.ts"
 import { cardBlock, directive, personaBlock } from "./layouts.ts"
 import { cardFields, makeMacroEnvironment, type Names } from "./macros.ts"
-import { appliesAt, compile, PLACEMENT, run } from "./regex.ts"
+import { compile, makeScriptRunner, PLACEMENT, type PromptScript, type ScriptRunner } from "./regex.ts"
 import {
   type Assembly,
   type AssemblerStage,
@@ -427,31 +426,10 @@ const chatLine = (
   assembly: Assembly,
   projected: ProjectedEntry,
   groupNames: boolean,
-  scripts: PromptScripts,
-  depth: number
+  scripted: { readonly text: string; readonly volatile: boolean }
 ): ChatLine => {
   const behavior = need(assembly, "preset").doc.names_behavior
-  const placement =
-    sideOf(projected.entry, need(assembly, "cast")) === "user" ? PLACEMENT.userInput : PLACEMENT.aiOutput
-  let text = need(assembly, "macros").text(projected.piece)
-  for (const { script, regex, replacement, trim } of scripts.list) {
-    if (!appliesAt(script, placement, depth)) continue
-    const cost = regex.source.length * (text.length + 1)
-    if (cost > scripts.work.left) {
-      if (!scripts.work.reported) {
-        assembly.issues.push({
-          kind: "regex_skipped",
-          message:
-            "The regex scripts stopped partway: they had more pattern and text to go through than one context allows."
-        })
-        scripts.work.reported = true
-      }
-      continue
-    }
-    scripts.work.left -= cost
-    text = run(regex, replacement, trim, text)
-  }
-  text = text.replace(/\r/gm, "")
+  const text = scripted.text.replace(/\r/gm, "")
   const pieces = [projected.piece]
   const named = (prefix: boolean): ChatLine => ({
     role: projected.role,
@@ -471,35 +449,24 @@ const chatLine = (
   }
 }
 
-interface PromptScript {
-  readonly script: RegexScript
-  readonly regex: RegExp
-  readonly replacement: string
-  readonly trim: ReadonlyArray<string>
-}
+/** One context's time for the preset's regex scripts: V8 stops them once it's spent. */
+const REGEX_MS = 200
+/** Characters of replacement text the scripts may make for one context. */
+const REGEX_OUTPUT = 2_000_000
+/** Patterns longer than this, after the case rewrite, are left out. */
+const MAX_PATTERN = 2_000
+/** Scripts after this many are left out. */
+const MAX_SCRIPTS = 100
 
 /**
  * The preset's prompt-only regex scripts, once the user approved them (ARCHITECTURE §9):
  * the pattern compiled, with its macros expanded when the script asks for that, and the
  * replacement and trim strings expanded. A script that can't run safely is left out and reported.
  */
-interface PromptScripts {
-  readonly list: ReadonlyArray<PromptScript>
-  /** Pattern length times text length, left for this context. */
-  readonly work: { left: number; reported: boolean }
-}
-
-/** The linear engine's time grows with the pattern times the text: about a second of it here. */
-const REGEX_WORK = 40_000_000
-/** Patterns longer than this, after the case rewrite, are left out. */
-const MAX_PATTERN = 2_000
-/** Scripts after this many are left out. */
-const MAX_SCRIPTS = 100
-
-const promptScripts = (assembly: Assembly): PromptScripts => {
+const promptScripts = (assembly: Assembly): ScriptRunner => {
   const doc = need(assembly, "preset").doc
-  const work = { left: REGEX_WORK, reported: false }
-  if (!doc.regex_approved) return { list: [], work }
+  const limits = { ms: REGEX_MS, output: REGEX_OUTPUT }
+  if (!doc.regex_approved) return makeScriptRunner([], limits)
   const usable = doc.regex.filter((script) => !script.disabled && script.prompt_only && script.find_regex)
   if (usable.length > MAX_SCRIPTS) {
     assembly.issues.push({
@@ -507,7 +474,7 @@ const promptScripts = (assembly: Assembly): PromptScripts => {
       message: `Only the first ${MAX_SCRIPTS} of the preset's ${usable.length} prompt regex scripts run.`
     })
   }
-  const list = usable.slice(0, MAX_SCRIPTS).flatMap((script) => {
+  const list = usable.slice(0, MAX_SCRIPTS).flatMap((script): Array<PromptScript> => {
     const skip = (why: string) => {
       assembly.issues.push({
         kind: "regex_skipped",
@@ -534,7 +501,28 @@ const promptScripts = (assembly: Assembly): PromptScripts => {
     const trim = script.trim_strings.map((t, i) => presetText(assembly, `regex:${script.id}:trim:${i}`, t).text)
     return [{ script, regex, replacement, trim }]
   })
-  return { list, work }
+  return makeScriptRunner(list, limits)
+}
+
+/** The scripts' text for these messages, as one batch; what stopped them is reported once. */
+const applyScripts = (
+  assembly: Assembly,
+  runner: ScriptRunner,
+  items: ReadonlyArray<{ readonly text: string; readonly placement: number; readonly depth: number }>
+) => {
+  const expired = runner.expired
+  const { results, failed } = runner.apply(items)
+  const report = (message: string) => {
+    if (!assembly.issues.some((i) => i.message === message)) assembly.issues.push({ kind: "regex_skipped", message })
+  }
+  for (const [{ script }, why] of failed)
+    report(`The regex script "${script.name}" was skipped where it failed: ${why}.`)
+  if (!expired && runner.expired && runner.list.length > 0) {
+    report(
+      `The regex scripts ran out of time (${REGEX_MS} ms for one context): the rest of the messages are sent without them.`
+    )
+  }
+  return results
 }
 
 /** The example dialogue of one card, block by block (setOpenAIMessageExamples). */
@@ -698,10 +686,18 @@ const composeStage = sync("compose", (assembly) => {
   }
 
   const groupNames = !mode.st
-  const scripts = promptScripts(assembly)
   const projected = need(assembly, "projected")
+  const scripted = applyScripts(
+    assembly,
+    promptScripts(assembly),
+    projected.map((p, i) => ({
+      text: env.text(p.piece),
+      placement: sideOf(p.entry, cast) === "user" ? PLACEMENT.userInput : PLACEMENT.aiOutput,
+      depth: projected.length - 1 - i
+    }))
+  )
   const chat = injectInChat(
-    projected.map((p, i) => chatLine(assembly, p, groupNames, scripts, projected.length - 1 - i)),
+    projected.map((p, i) => chatLine(assembly, p, groupNames, scripted[i]!)),
     collection.filter((p) => p.injection_position === "absolute"),
     injections
   )

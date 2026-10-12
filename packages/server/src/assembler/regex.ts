@@ -1,14 +1,8 @@
-// A preset's prompt-only regex scripts (ARCHITECTURE §9), as ST 1.19 runs them on the chat
-// when it builds a prompt (extensions/regex/engine.js: getRegexedString, runRegexScript).
-// They run only once the user approved the preset's scripts (`regex_approved`).
-//
-// A script's pattern comes from a file, so it must never stall a thread: `(a+)+$` takes
-// exponential time on some inputs with a backtracking engine. So every script runs on V8's
-// linear-time engine (the `l` flag; turned on here, for the whole process). That engine
-// takes no `i` or `u` flag, so a case-insensitive pattern is rewritten with both cases of
-// each ASCII letter, and `u` is dropped when the pattern uses nothing only it allows. What
-// it can't run at all (backreferences, lookarounds) is refused, and reported, never run.
+// A preset's prompt-only regex scripts, as ST 1.19 runs them when it builds a prompt
+// (extensions/regex/engine.js), on V8's linear-time engine and within a time and output
+// budget (ARCHITECTURE §13).
 import { setFlagsFromString } from "node:v8"
+import { createContext, Script } from "node:vm"
 import type { RegexScript } from "@rp/shared/docs/preset.ts"
 
 setFlagsFromString("--enable-experimental-regexp-engine")
@@ -102,27 +96,139 @@ export const compile = (source: string): RegExp | "unsafe" | null => {
   }
 }
 
-/** Whether ST runs a prompt-only script on a message of this placement at this depth. */
-export const appliesAt = (script: RegexScript, placement: number, depth: number) =>
-  !script.disabled &&
-  script.prompt_only &&
-  script.placement.includes(placement) &&
-  (script.min_depth === null || script.min_depth < -1 || depth >= script.min_depth) &&
-  (script.max_depth === null || script.max_depth < 0 || depth <= script.max_depth)
+/** A compiled script, its replacement and trim strings expanded. */
+export interface PromptScript {
+  readonly script: RegexScript
+  readonly regex: RegExp
+  readonly replacement: string
+  readonly trim: ReadonlyArray<string>
+}
+
+const minBounded = (script: RegexScript) => script.min_depth !== null && script.min_depth >= -1
+const maxBounded = (script: RegexScript) => script.max_depth !== null && script.max_depth >= 0
+
+/** Whether ST runs a prompt-only script on a message at this depth (getRegexedString). */
+const withinDepth = (script: RegexScript, depth: number) =>
+  (!minBounded(script) || depth >= script.min_depth!) && (!maxBounded(script) || depth <= script.max_depth!)
+
+/** Thrown from a replacement once the scripts have made all the text they may. */
+class OutputLimit extends Error {}
 
 /**
  * ST's runRegexScript, with the replacement already expanded: `{{match}}` and `$n` or `$<name>`
- * become the match and its groups, with the trim strings removed from each.
+ * become the match and its groups, with the trim strings removed from each. Every replacement
+ * is charged to `output`, and the run stops with OutputLimit once it's spent.
+ *
+ * The matches are found with `exec`, as `String.prototype.replace` would: V8 13.6 loops
+ * forever, where no timeout reaches, when `replace` with a function meets an empty match of
+ * a global linear-engine pattern with 32 or more groups.
  */
-export const run = (regex: RegExp, replacement: string, trimStrings: ReadonlyArray<string>, text: string) => {
-  regex.lastIndex = 0
+export const run = (
+  regex: RegExp,
+  replacement: string,
+  trimStrings: ReadonlyArray<string>,
+  text: string,
+  output: { left: number } = { left: Number.POSITIVE_INFINITY }
+) => {
   const template = replacement.replace(/{{match}}/gi, "$0")
-  return text.replace(regex, (...args: Array<unknown>) => {
-    const groups = typeof args.at(-1) === "object" ? (args.at(-1) as Record<string, string> | undefined) : undefined
-    return template.replaceAll(/\$(\d+)|\$<([^>]+)>/g, (_, num: string | undefined, name: string | undefined) => {
-      const value = num ? args[Number(num)] : name ? groups?.[name] : undefined
+  const replace = (match: RegExpExecArray) => {
+    // What a replace function gets: the match, its groups, its offset and the text.
+    const args: ReadonlyArray<unknown> = [...match, match.index, text]
+    const made = template.replaceAll(/\$(\d+)|\$<([^>]+)>/g, (_, num: string | undefined, name: string | undefined) => {
+      const value = num ? args[Number(num)] : name ? match.groups?.[name] : undefined
       if (typeof value !== "string" || !value) return ""
       return trimStrings.reduce((s, trim) => s.replaceAll(trim, ""), value)
     })
-  })
+    output.left -= made.length
+    if (output.left < 0) throw new OutputLimit()
+    return made
+  }
+  regex.lastIndex = 0
+  let result = ""
+  let copied = 0
+  for (;;) {
+    const match = regex.exec(text)
+    if (match === null) break
+    result += text.slice(copied, match.index) + replace(match)
+    copied = match.index + match[0].length
+    if (!regex.global) break
+    if (match[0] === "") regex.lastIndex++
+  }
+  return result + text.slice(copied)
 }
+
+/** Runs `job()` in a context of its own, so a timeout can stop it. */
+const JOB = new Script("job()")
+
+/**
+ * A preset's scripts for one context, with what they may still spend: `ms` of time, and
+ * `output` characters of replacement text. The linear engine bounds a match by the pattern
+ * times the text, which is still far too slow at the sizes a preset can reach, so every batch
+ * runs as a vm script with a timeout: V8 stops whatever runs, a regex included, once the time
+ * is spent. A script that fails or runs out of output is skipped for that message.
+ */
+export const makeScriptRunner = (list: ReadonlyArray<PromptScript>, limits: { ms: number; output: number }) => {
+  const context = createContext({ job: undefined })
+  let ms = limits.ms
+  const output = { left: limits.output }
+  return {
+    list,
+    /** Whether the scripts ran out of time. */
+    get expired() {
+      return ms <= 0
+    },
+    /**
+     * Each message's text after the scripts, and whether a depth-bounded script makes it
+     * change as the chat grows: one that applies now and stops at a later depth, or one
+     * that doesn't apply yet and matches. Messages the time didn't cover keep their text.
+     */
+    apply: (items: ReadonlyArray<{ readonly text: string; readonly placement: number; readonly depth: number }>) => {
+      const results = items.map((item) => ({ text: item.text, volatile: false }))
+      const failed = new Map<PromptScript, string>()
+      if (list.length === 0 || items.length === 0 || ms <= 0) return { results, failed }
+      context.job = () => {
+        items.forEach((item, i) => {
+          let { text } = item
+          let volatile = false
+          for (const entry of list) {
+            const { script, regex } = entry
+            if (script.disabled || !script.prompt_only || !script.placement.includes(item.placement)) continue
+            try {
+              if (!withinDepth(script, item.depth)) {
+                regex.lastIndex = 0
+                if (minBounded(script) && item.depth < script.min_depth! && regex.test(text)) volatile = true
+                continue
+              }
+              const next = run(regex, entry.replacement, entry.trim, text, output)
+              if (maxBounded(script) && next !== text) volatile = true
+              text = next
+            } catch (error) {
+              if (!failed.has(entry)) {
+                failed.set(
+                  entry,
+                  error instanceof OutputLimit
+                    ? "its replacements made more text than one context allows"
+                    : String(error)
+                )
+              }
+            }
+          }
+          results[i] = { text, volatile }
+        })
+      }
+      const start = performance.now()
+      try {
+        JOB.runInContext(context, { timeout: Math.max(1, Math.ceil(ms)) })
+      } catch (error) {
+        if ((error as { code?: string }).code !== "ERR_SCRIPT_EXECUTION_TIMEOUT") throw error
+        ms = 0
+      } finally {
+        context.job = undefined
+        if (ms > 0) ms -= performance.now() - start
+      }
+      return { results, failed }
+    }
+  }
+}
+
+export type ScriptRunner = ReturnType<typeof makeScriptRunner>

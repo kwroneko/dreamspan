@@ -313,18 +313,24 @@ describe("the context assembler", () => {
     expect(on.issues).toEqual([expect.objectContaining({ kind: "regex_skipped" })])
     expect(on.issues[0]!.message).toContain("backreference")
 
-    // The work is bounded per context: a long pattern over a long message stops the scripts.
-    const heavy = await assembled({
-      ...fixture,
-      messages: [{ side: "assistant", content: "b".repeat(1_100_000) }, ...fixture.messages],
-      preset: {
-        ...preset({ extensions: { regex_scripts: [script("long", { findRegex: `/${"a".repeat(45)}/g` })] } }),
-        regex_approved: true
-      }
-    })
-    expect(heavy.issues.map((i) => i.message)).toContain(
-      "The regex scripts stopped partway: they had more pattern and text to go through than one context allows."
+    // Time is bounded per context: V8 stops a pattern that would take seconds.
+    const withScript = (content: string, fields: Record<string, unknown>) =>
+      assembled({
+        ...fixture,
+        messages: [{ side: "assistant", content }, ...fixture.messages],
+        preset: { ...preset({ extensions: { regex_scripts: [script("heavy", fields)] } }), regex_approved: true }
+      })
+    const nested = `${"(".repeat(300)}a*${")*".repeat(300)}`
+    const slow = await withScript("a".repeat(43_000), { findRegex: `/${nested}/g` })
+    expect(slow.issues.map((i) => i.message)).toContain(
+      "The regex scripts ran out of time (200 ms for one context): the rest of the messages are sent without them."
     )
+    // And so is the text they make: the script stops, the context doesn't.
+    const growing = await withScript("a".repeat(3_000), { findRegex: "/a/g", replaceString: "b".repeat(200_000) })
+    expect(growing.issues.map((i) => i.message)).toContain(
+      'The regex script "heavy" was skipped where it failed: its replacements made more text than one context allows.'
+    )
+    expect(contents(growing)).toContain(`assistant: ${"a".repeat(3_000)}`)
   })
 
   it("expands a card's prompt override before the preset, and fills its {{original}}", async () => {
