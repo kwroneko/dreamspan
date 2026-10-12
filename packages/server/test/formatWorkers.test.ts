@@ -86,6 +86,32 @@ describe("format workers", () => {
     60_000
   )
 
+  it.live(
+    "a parse that never returns is failed at its deadline, its worker stopped; the files behind it parse",
+    () =>
+      Effect.gen(function* () {
+        const formats = yield* Formats.Formats
+        const start = Date.now()
+        const [looping, queued] = yield* Effect.all(
+          [Effect.exit(formats.parse(card(), "loop")), Effect.exit(formats.parse(card(), "wren.png"))],
+          { concurrency: 2 }
+        )
+        assert.isTrue(Exit.isFailure(looping) && looping.cause.toString().includes("FormatWorkerFailed"))
+        assert.isBelow(Date.now() - start, 15_000)
+        assert.isTrue(Exit.isSuccess(queued) && queued.value.report.format === "card-v2-png", String(queued))
+      }).pipe(
+        Effect.provide(
+          Formats.layer({
+            workers: "source",
+            size: 1,
+            jobDeadlineMs: 2_000,
+            entry: new URL("./support/crashingFormatWorker.ts", import.meta.url)
+          })
+        )
+      ),
+    60_000
+  )
+
   describe("bundled", () => {
     const bundleDir = mkdtempSync(join(tmpdir(), "rp-bundles-"))
     beforeAll(() => buildWorkers(bundleDir), 120_000)

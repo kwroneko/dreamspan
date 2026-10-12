@@ -3,6 +3,7 @@
 // answers, a crashed one fails only the request it was running and is respawned, and
 // requests beyond the pool's size queue in order.
 import { Context, Effect, Layer, Schema } from "effect"
+import type { Worker } from "node:worker_threads"
 import { RpcClient, RpcClientError } from "effect/rpc"
 import { bundleEntry, defaultBundleDir, workerThreads } from "../db/Database.ts"
 import * as ReaderPool from "../db/readerPool.ts"
@@ -29,6 +30,8 @@ interface FormatsOptions {
   readonly bundleDir?: string
   /** A test's own worker script. */
   readonly entry?: URL
+  /** How long a parse or an export may run before its worker is stopped; 30 s by default. */
+  readonly jobDeadlineMs?: number
 }
 
 /**
@@ -37,6 +40,12 @@ interface FormatsOptions {
  * and its request fails, instead of the whole server running out of memory.
  */
 const MAX_HEAP_MB = 512
+
+/**
+ * The worst file within the caps parses in about a second, unloaded (ARCHITECTURE.md §8);
+ * a job past this is a parser that will never return.
+ */
+const JOB_DEADLINE_MS = 30_000
 
 const failed = (error: unknown) =>
   Effect.logError("a format worker failed", error).pipe(Effect.andThen(Effect.fail(new FormatWorkerFailed())))
@@ -52,6 +61,8 @@ const workerFailures = <A, E>(effect: Effect.Effect<A, E | RpcClientError.RpcCli
 export const layer = (options: FormatsOptions) =>
   Layer.unwrap(
     Effect.gen(function* () {
+      // The newest thread of each worker id, so a job past its deadline can be stopped.
+      const threads = new Map<number, Worker>()
       const bundleDir = options.workers === "bundle" ? (options.bundleDir ?? defaultBundleDir) : undefined
       const entry =
         options.entry ??
@@ -72,8 +83,21 @@ export const layer = (options: FormatsOptions) =>
           })
         )
       ).pipe(
-        Layer.provide(ReaderPool.layer(options.size, { name: "format worker", isolateCrashes: true })),
-        Layer.provide(workerThreads(entry, {}, bundleDir, { maxOldGenerationSizeMb: MAX_HEAP_MB }))
+        Layer.provide(
+          ReaderPool.layer(options.size, {
+            name: "format worker",
+            isolateCrashes: true,
+            jobDeadline: {
+              ms: options.jobDeadlineMs ?? JOB_DEADLINE_MS,
+              terminate: (id) => void threads.get(id)?.terminate()
+            }
+          })
+        ),
+        Layer.provide(
+          workerThreads(entry, {}, bundleDir, { maxOldGenerationSizeMb: MAX_HEAP_MB }, (id, thread) =>
+            threads.set(id, thread)
+          )
+        )
       )
     })
   )

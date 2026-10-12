@@ -84,15 +84,19 @@ export const workerThreads = (
   entry: URL,
   workerData: Record<string, unknown>,
   bundleDir?: string,
-  resourceLimits?: ResourceLimits
+  resourceLimits?: ResourceLimits,
+  /** Told of each thread spawned, by worker id, e.g. to be able to stop it. */
+  onThread?: (id: number, thread: Worker) => void
 ) =>
-  NodeWorker.layer(() => {
+  NodeWorker.layer((id) => {
     if (bundleDir !== undefined && !stampMatches(bundleDir)) throw new WorkerBundleStale({ path: bundleDir })
-    return new Worker(entry, {
+    const thread = new Worker(entry, {
       workerData,
       name: entry.pathname.split("/").pop(),
       ...(resourceLimits ? { resourceLimits } : {})
     })
+    onThread?.(id, thread)
+    return thread
   })
 
 /**

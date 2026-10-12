@@ -920,7 +920,7 @@ The parsers are synchronous and take up to about a second on a hostile file (§8
 - **Measured** in the test: an 11 MB lorebook parsed on the main thread blocks it for hundreds of milliseconds. Through a worker, the main thread's longest stall stays under a quarter of that and under 250 ms; measured alone, 130 ms against 1,224 ms under a load average near 90. The bounds are loose because the host is shared.
 - **Bundled** like the database workers (§3.6): `formats.mjs`, stamped with them, and refused when missing or stale.
 
-**Known limits:** a parse can't be interrupted. A parser bug that never returns would hold its worker for good, and every later import would queue behind it. Terminating a worker after a deadline needs the pool to kill threads, which it doesn't yet.
+- **A job has 30 s** (`jobDeadline` in the pool, format workers only). A parse or export still running then, such as a parser bug that never returns, gets its thread terminated (`Formats` keeps the newest thread of each worker id for that). The pool then treats it as a crash: only that request fails, and the worker is respawned for the files queued behind it. The worst file within the caps parses in about a second unloaded. The test stops a looping worker at a 2 s deadline, and fails when stopping it does nothing. The database readers have no deadline and behave as before.
 
 ### 11.4 Upload and export
 

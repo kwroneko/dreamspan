@@ -20,6 +20,16 @@ interface Reader {
   readonly worker: Worker.Worker<RpcMessage.FromServerEncoded, RpcMessage.FromClientEncoded>
   ready: boolean
   job: Job | undefined
+  /** The running job's deadline, when the pool has one. */
+  deadline: NodeJS.Timeout | undefined
+  /** The worker was stopped for running past its deadline. */
+  timedOut: boolean
+}
+
+/** A job that runs past `ms` is failed, and its worker stopped with `terminate` and respawned. */
+interface JobDeadline {
+  readonly ms: number
+  readonly terminate: (readerId: number) => void
 }
 
 const RESPAWN_MS = 1000
@@ -48,11 +58,16 @@ const clientError = (cause: Cause.Cause<WorkerError.WorkerError>) => {
  * respawned every second, and while no reader is up, queued reads fail instead of waiting.
  * With `isolateCrashes`, a crash fails only the request its worker had, and queued ones
  * wait for the respawn unless it fails too; the format workers use it, since one hostile
- * file mustn't fail another user's.
+ * file mustn't fail another user's. With `jobDeadline` (format workers only), a job that
+ * runs too long is failed the same way, its worker stopped and respawned.
  */
 export const layer = (
   size: number,
-  { name = "database reader", isolateCrashes = false }: { name?: string; isolateCrashes?: boolean } = {}
+  {
+    name = "database reader",
+    isolateCrashes = false,
+    jobDeadline
+  }: { name?: string; isolateCrashes?: boolean; jobDeadline?: JobDeadline } = {}
 ) =>
   Layer.effect(
     RpcClient.Protocol,
@@ -82,6 +97,13 @@ export const layer = (
                 reader.job = undefined
                 yield* writeResponse(job.clientId, dieExit(job, Cause.squash(sent.cause)))
               } else {
+                if (jobDeadline) {
+                  // Stopping the thread is a crash: onCrash fails the job and the pool respawns it.
+                  reader.deadline = setTimeout(() => {
+                    reader.timedOut = true
+                    jobDeadline.terminate(reader.id)
+                  }, jobDeadline.ms)
+                }
                 i++
               }
             }
@@ -91,6 +113,7 @@ export const layer = (
         const finish = (reader: Reader, response: RpcMessage.ResponseExitEncoded) => {
           const job = reader.job!
           reader.job = undefined
+          clearTimeout(reader.deadline)
           return Effect.andThen(writeResponse(job.clientId, response), dispatch)
         }
 
@@ -130,7 +153,17 @@ export const layer = (
           if (Cause.hasInterruptsOnly(cause)) return Effect.void
           const wasReady = reader.ready
           reader.ready = false
-          const error = clientError(cause)
+          clearTimeout(reader.deadline)
+          const timedOut = reader.timedOut
+          reader.timedOut = false
+          const error = timedOut
+            ? new RpcClientError.RpcClientError({
+                reason: new RpcClientError.RpcClientDefect({
+                  message: `${name} ${reader.id} ran past its ${jobDeadline?.ms} ms deadline`,
+                  cause: null
+                })
+              })
+            : clientError(cause)
           const failed: Array<Job> = []
           if (reader.job !== undefined) failed.push(reader.job)
           reader.job = undefined
@@ -151,7 +184,8 @@ export const layer = (
                 (clientId) => writeResponse(clientId, { _tag: "ClientProtocolError", error }),
                 { discard: true }
               )
-          return Effect.logError(`${name} ${reader.id} stopped; restarting it in ${RESPAWN_MS} ms`, cause).pipe(
+          const why = timedOut ? `ran past its deadline and was stopped` : "stopped"
+          return Effect.logError(`${name} ${reader.id} ${why}; restarting it in ${RESPAWN_MS} ms`, cause).pipe(
             Effect.andThen(fail)
           )
         }
@@ -161,7 +195,9 @@ export const layer = (
             id,
             worker: yield* platform.spawn<RpcMessage.FromServerEncoded, RpcMessage.FromClientEncoded>(id),
             ready: false,
-            job: undefined
+            job: undefined,
+            deadline: undefined,
+            timedOut: false
           }
           readers.push(reader)
           yield* reader.worker
