@@ -140,14 +140,16 @@ export const makeEditorHandlers = Effect.gen(function* () {
 
     CommitEditorDrafts: ({ refId, expectedRowVersion, fields, message, chatNote }) =>
       Effect.flatMap(userId, (id) =>
-        writer.CommitEditorDrafts({
-          userId: id,
-          refId,
-          expectedRowVersion,
-          fields,
-          message,
-          ...(chatNote ? { chatNote } : {})
-        }).pipe(changed(id))
+        writer
+          .CommitEditorDrafts({
+            userId: id,
+            refId,
+            expectedRowVersion,
+            fields,
+            message,
+            ...(chatNote ? { chatNote } : {})
+          })
+          .pipe(changed(id))
       ).pipe(
         Effect.tap(() =>
           Effect.sync(() => {

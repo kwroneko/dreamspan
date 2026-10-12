@@ -30,7 +30,9 @@ export const describer = (
 ): Effect.Effect<Describe, SqlError.SqlError> =>
   Effect.gen(function* () {
     const sources = snapshots.flatMap((s) => s.pieces.map((p) => p.source))
-    const revisions = unique(sources.flatMap((s) => (s.kind === "card" || s.kind === "note" || s.kind === "lorebook" ? [s.revision] : [])))
+    const revisions = unique(
+      sources.flatMap((s) => (s.kind === "card" || s.kind === "note" || s.kind === "lorebook" ? [s.revision] : []))
+    )
     const entities =
       revisions.length === 0
         ? []

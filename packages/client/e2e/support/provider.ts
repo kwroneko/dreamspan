@@ -43,7 +43,9 @@ export const startProvider = async (): Promise<FakeProvider> => {
       request.on("end", () => {
         completions.push(JSON.parse(body) as FakeProvider["completions"][number])
         response.writeHead(200, { "content-type": "text/event-stream" })
-        response.write(chunk({ choices: [{ index: 0, delta: { role: "assistant", content: REPLY }, finish_reason: null }] }))
+        response.write(
+          chunk({ choices: [{ index: 0, delta: { role: "assistant", content: REPLY }, finish_reason: null }] })
+        )
         response.write(chunk({ choices: [{ index: 0, delta: {}, finish_reason: "stop" }] }))
         response.write(
           chunk({

@@ -71,11 +71,14 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
             ...(taken.loreFallback ? { loreFallback: taken.loreFallback } : {})
           })
           .pipe(Effect.provide(sources.layer))
-        return { _tag: "Rebuilt" as const, snapshot: JSON.stringify({
+        return {
+          _tag: "Rebuilt" as const,
+          snapshot: JSON.stringify({
             ...built,
             sources: sources.pins(),
             ...(taken.wire ? { wire: taken.wire } : {})
-          }) }
+          })
+        }
       }).pipe(query("RebuildContext")),
 
     // The cache-warmth estimate (DESIGN §5.5): the chat's last request that reached its
