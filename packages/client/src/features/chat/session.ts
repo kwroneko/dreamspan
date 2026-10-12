@@ -51,6 +51,8 @@ export interface ChatView {
 }
 
 type Client = AppClient["Service"]
+/** The events that change loaded state, and are applied again after a read lands. */
+type Replayable = Extract<ChatEvent, { readonly _tag: "Slot" | "Version" | "Chat" }>
 export type Outcome<A> = { readonly ok: true; readonly value: A } | { readonly ok: false; readonly error: AppError }
 
 const withInContext = (entry: PathEntry, version: Version) =>
@@ -85,6 +87,9 @@ export class ChatSession {
   /** Bumped by every read that replaces the window, so an older read's reply is dropped. */
   private generation = 0
   private paging = false
+  /** Reads in flight, and the events received since the first of them started (below). */
+  private reads = 0
+  private missed: Array<Replayable> = []
 
   private readonly chatId: ChatId
   /** The leaf the URL asks for; null follows the chat's active leaf. */
@@ -192,27 +197,47 @@ export class ChatSession {
     return null
   }
 
+  /**
+   * Runs a read and applies what it returns. The server may answer it from before an
+   * event that arrived meanwhile and was already applied: the reply would then undo it.
+   * So the events received while reads are in flight are applied again once each lands;
+   * applying one twice changes nothing (by row version).
+   */
+  private async reading(read: () => Promise<void>) {
+    this.reads++
+    try {
+      await read()
+    } finally {
+      this.reads--
+      const missed = this.missed
+      if (this.reads === 0) this.missed = []
+      if (!this.disposed) for (const event of missed) this.applyState(event)
+    }
+  }
+
   /** Replaces the window: at the bottom, or around a slot; `reposition` scrolls to it. */
-  async open(anchor: SlotId | null, limit = PAGE, reposition = true) {
+  open(anchor: SlotId | null, limit = PAGE, reposition = true) {
     const generation = ++this.generation
     this.update({ loading: this.view.entries.length === 0 })
-    const [window, chat] = await Promise.all([
-      this.read(anchor === null ? { _tag: "Bottom" } : { _tag: "Around", slot: anchor }, limit),
-      this.call((client) => client("GetChat", { chatId: this.chatId }))
-    ])
-    if (window === null || this.disposed || generation !== this.generation) return
-    this.update({
-      chat: chat.ok ? chat.value : this.view.chat,
-      leafSlotId: window.leafSlotId,
-      entries: window.entries,
-      older: window.older,
-      newer: window.newer,
-      follow: window.newer === null,
-      opened: reposition ? this.view.opened + 1 : this.view.opened,
-      loading: false,
-      error: null
+    return this.reading(async () => {
+      const [window, chat] = await Promise.all([
+        this.read(anchor === null ? { _tag: "Bottom" } : { _tag: "Around", slot: anchor }, limit),
+        this.call((client) => client("GetChat", { chatId: this.chatId }))
+      ])
+      if (window === null || this.disposed || generation !== this.generation) return
+      this.update({
+        chat: chat.ok ? chat.value : this.view.chat,
+        leafSlotId: window.leafSlotId,
+        entries: window.entries,
+        older: window.older,
+        newer: window.newer,
+        follow: window.newer === null,
+        opened: reposition ? this.view.opened + 1 : this.view.opened,
+        loading: false,
+        error: null
+      })
+      for (const entry of window.entries) this.track(entry.version)
     })
-    for (const entry of window.entries) this.track(entry.version)
   }
 
   async loadOlder() {
@@ -221,18 +246,20 @@ export class ChatSession {
     this.paging = true
     this.report()
     const generation = this.generation
-    const window = await this.read({ _tag: "Older", from })
-    this.paging = false
-    this.report()
-    if (window === null || this.disposed || generation !== this.generation || this.view.older !== from) return
-    let entries = [...window.entries, ...this.view.entries]
-    let newer = this.view.newer
-    if (entries.length > MAX_LOADED) {
-      entries = entries.slice(0, MAX_LOADED)
-      newer = entries.at(-1)!.slotId
-    }
-    this.update({ entries, older: window.older, newer, follow: newer === null && this.view.follow })
-    for (const entry of window.entries) this.track(entry.version)
+    await this.reading(async () => {
+      const window = await this.read({ _tag: "Older", from })
+      this.paging = false
+      this.report()
+      if (window === null || this.disposed || generation !== this.generation || this.view.older !== from) return
+      let entries = [...window.entries, ...this.view.entries]
+      let newer = this.view.newer
+      if (entries.length > MAX_LOADED) {
+        entries = entries.slice(0, MAX_LOADED)
+        newer = entries.at(-1)!.slotId
+      }
+      this.update({ entries, older: window.older, newer, follow: newer === null && this.view.follow })
+      for (const entry of window.entries) this.track(entry.version)
+    })
   }
 
   async loadNewer() {
@@ -241,19 +268,21 @@ export class ChatSession {
     this.paging = true
     this.report()
     const generation = this.generation
-    const window = await this.read({ _tag: "Newer", after })
-    this.paging = false
-    this.report()
-    if (window === null || this.disposed || generation !== this.generation || this.view.newer !== after) return
-    let entries = [...this.view.entries, ...window.entries]
-    let older = this.view.older
-    if (entries.length > MAX_LOADED) {
-      entries = entries.slice(entries.length - MAX_LOADED)
-      older = entries[0]!.parentSlotId
-    }
-    // A page read on the way down never scrolls to the end by itself.
-    this.update({ entries, older, newer: window.newer, follow: false })
-    for (const entry of window.entries) this.track(entry.version)
+    await this.reading(async () => {
+      const window = await this.read({ _tag: "Newer", after })
+      this.paging = false
+      this.report()
+      if (window === null || this.disposed || generation !== this.generation || this.view.newer !== after) return
+      let entries = [...this.view.entries, ...window.entries]
+      let older = this.view.older
+      if (entries.length > MAX_LOADED) {
+        entries = entries.slice(entries.length - MAX_LOADED)
+        older = entries[0]!.parentSlotId
+      }
+      // A page read on the way down never scrolls to the end by itself.
+      this.update({ entries, older, newer: window.newer, follow: false })
+      for (const entry of window.entries) this.track(entry.version)
+    })
   }
 
   /** Shows another branch (null: the chat's active one), at a message or at its bottom. */
@@ -330,15 +359,27 @@ export class ChatSession {
         return
       }
       case "Slot":
-        return this.applySlot(event.entry)
       case "Version":
-        return this.applyVersion(event.version)
       case "Chat":
-        return this.update({ chat: event.chat })
+        if (this.reads > 0) this.missed.push(event)
+        return this.applyState(event)
       case "Reload":
         return this.reload()
       case "Deleted":
         return this.update({ deleted: true })
+    }
+  }
+
+  /** Applies a change to loaded state; applying it again, or after a newer one, changes nothing. */
+  private applyState(event: Replayable) {
+    switch (event._tag) {
+      case "Slot":
+        return void this.applySlot(event.entry)
+      case "Version":
+        return this.applyVersion(event.version)
+      case "Chat":
+        if (this.view.chat !== null && this.view.chat.rowVersion > event.chat.rowVersion) return
+        return this.update({ chat: event.chat })
     }
   }
 
@@ -399,6 +440,10 @@ export class ChatSession {
     const { entries } = this.view
     const index = entries.findIndex((e) => e.version.id === version.id)
     if (index < 0) return
+    const current = entries[index]!.version
+    // Already newer: amended since, or finished where this says generating.
+    if (current.rowVersion > version.rowVersion) return
+    if (current.status !== "generating" && version.status === "generating") return
     const next = entries.slice()
     next[index] = withInContext(entries[index]!, version)
     this.update({ entries: next })
@@ -525,9 +570,11 @@ export class ChatSession {
     return result
   }
 
-  private async refreshSlot(slotId: SlotId) {
-    const window = await this.read({ _tag: "Around", slot: slotId }, 1)
-    const entry = window?.entries.find((e) => e.slotId === slotId)
-    if (entry) this.applySlot(entry)
+  private refreshSlot(slotId: SlotId) {
+    return this.reading(async () => {
+      const window = await this.read({ _tag: "Around", slot: slotId }, 1)
+      const entry = window?.entries.find((e) => e.slotId === slotId)
+      if (entry) this.applySlot(entry)
+    })
   }
 }
