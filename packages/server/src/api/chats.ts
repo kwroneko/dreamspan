@@ -6,6 +6,7 @@ import type { ChatId, EntityId, NewVersion, SlotId } from "@rp/shared/chat.ts"
 import { BranchSwitch, GenerationUnavailable } from "@rp/shared/chatApi.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { Effect, Option, Stream } from "effect"
+import { CacheWarmth } from "../chat/CacheWarmth.ts"
 import { ChatHub } from "../chat/ChatHub.ts"
 import { Generator } from "../chat/Generator.ts"
 import { Generations } from "../chat/Generations.ts"
@@ -35,6 +36,7 @@ export const makeChatHandlers = Effect.gen(function* () {
   const reader = yield* Reader
   const writer = yield* Writer
   const hub = yield* ChatHub
+  const warmth = yield* CacheWarmth
   const generations = yield* Generations
   const generator = yield* Generator
 
@@ -334,6 +336,7 @@ export const makeChatHandlers = Effect.gen(function* () {
           // Checked once subscribed, so a chat deleted in between can't leave a subscription
           // its close missed. Nothing is sent before it, so nothing reaches another user.
           yield* reader.GetChat({ userId: id, chatId })
+          yield* warmth.watch(id, chatId)
           return Stream.fromQueue(queue)
         }).pipe(internal("SubscribeChat"))
       )

@@ -71,6 +71,11 @@ export class ChatHub extends Context.Service<
       chatId: ChatId,
       hello: () => ChatEvent
     ) => Effect.Effect<Queue.Dequeue<Batch, Cause.Done>, never, Scope.Scope>
+    /**
+     * Calls `listener` for each change published to a chat someone subscribes to: every
+     * event but streamed text and the cache estimate, which follows from the others.
+     */
+    readonly listen: (listener: (chatId: ChatId) => void) => Effect.Effect<void, never, Scope.Scope>
   }
 >()("rp/chat/ChatHub") {
   static readonly layer = ChatHub.layerWith({ backlog: BACKLOG })
@@ -81,6 +86,7 @@ export class ChatHub extends Context.Service<
       ChatHub,
       Effect.gen(function* () {
         const subscribers = new Map<ChatId, Set<Subscriber>>()
+        const listeners = new Set<(chatId: ChatId) => void>()
         const pending = new Map<ChatId, Array<ChatEvent>>()
         let timer: ReturnType<typeof setTimeout> | undefined
 
@@ -97,6 +103,7 @@ export class ChatHub extends Context.Service<
         return ChatHub.of({
           publish: (chatId, event) => {
             if (!subscribers.has(chatId)) return
+            if (event._tag !== "Delta" && event._tag !== "Cache") for (const listener of listeners) listener(chatId)
             const events = pending.get(chatId)
             if (events) events.push(event)
             else pending.set(chatId, [event])
@@ -111,6 +118,11 @@ export class ChatHub extends Context.Service<
             }
             subscribers.delete(chatId)
           },
+          listen: (listener) =>
+            Effect.acquireRelease(
+              Effect.sync(() => listeners.add(listener)),
+              () => Effect.sync(() => listeners.delete(listener))
+            ),
           subscribe: (chatId, hello) =>
             Effect.gen(function* () {
               const queue = yield* Queue.bounded<Batch, Cause.Done>(options.backlog)

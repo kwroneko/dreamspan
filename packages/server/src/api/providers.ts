@@ -4,6 +4,7 @@
 import { type AppApi, ConnectionTest, CurrentUser, ModelRefresh, NetworkSettings } from "@rp/shared/api.ts"
 import { Forbidden, ServerError } from "@rp/shared/errors.ts"
 import { Effect } from "effect"
+import { CacheWarmth } from "../chat/CacheWarmth.ts"
 import { Reader, Writer } from "../db/Database.ts"
 import { Network } from "../net/Network.ts"
 import { Providers } from "../providers/Providers.ts"
@@ -25,6 +26,7 @@ export const makeProviderHandlers = Effect.gen(function* () {
   const writer = yield* Writer
   const providers = yield* Providers
   const network = yield* Network
+  const warmth = yield* CacheWarmth
 
   const userId = Effect.map(CurrentUser, (user) => user.id)
 
@@ -68,7 +70,9 @@ export const makeProviderHandlers = Effect.gen(function* () {
       ),
     UpdateConnection: ({ connectionId, settings, expectedRowVersion }) =>
       Effect.flatMap(userId, (id) =>
-        writer.UpdateConnection({ userId: id, connectionId, settings, expectedRowVersion })
+        writer
+          .UpdateConnection({ userId: id, connectionId, settings, expectedRowVersion })
+          .pipe(Effect.tap(() => warmth.refreshUser(id)))
       ).pipe(Effect.catchTag(["StorageError", "RpcClientError"], toServerError("UpdateConnection"))),
     SetConnectionKey: ({ connectionId, apiKey, expectedRowVersion }) =>
       Effect.flatMap(userId, (id) => providers.setKey(id, connectionId, apiKey, expectedRowVersion)),
@@ -97,9 +101,11 @@ export const makeProviderHandlers = Effect.gen(function* () {
         Effect.catchTag(["StorageError", "RpcClientError"], toServerError("AddUserModel"))
       ),
     EditModel: ({ modelId, overrides, expectedRowVersion }) =>
-      Effect.flatMap(userId, (id) => writer.EditModel({ userId: id, modelId, overrides, expectedRowVersion })).pipe(
-        Effect.catchTag(["StorageError", "RpcClientError"], toServerError("EditModel"))
-      ),
+      Effect.flatMap(userId, (id) =>
+        writer
+          .EditModel({ userId: id, modelId, overrides, expectedRowVersion })
+          .pipe(Effect.tap(() => warmth.refreshUser(id)))
+      ).pipe(Effect.catchTag(["StorageError", "RpcClientError"], toServerError("EditModel"))),
     SetModelHidden: ({ modelId, hidden }) =>
       Effect.flatMap(userId, (id) => writer.SetModelHidden({ userId: id, modelId, hidden })).pipe(
         Effect.catchTag(["StorageError", "RpcClientError"], toServerError("SetModelHidden"))

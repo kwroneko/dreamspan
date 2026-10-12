@@ -7,6 +7,7 @@ import { BinItem } from "./bin.ts"
 import { Chat, ChatId, EntityId, PathEntry, QueuedMessage, SlotId, Version, VersionId } from "./chat.ts"
 import { LeafMoved, NotFound, ServerError, StaleWrite } from "./errors.ts"
 import { Draft } from "./drafts.ts"
+import { CacheWarmth } from "./inspectorApi.ts"
 
 /** Generation needs a generator, and this server has none (only tests run one without). */
 export class GenerationUnavailable extends Schema.TaggedError<GenerationUnavailable>()("GenerationUnavailable", {
@@ -72,7 +73,9 @@ export const ChatEvent = Schema.Union([
   /** The chat's send queue changed: every entry still waiting, in order. */
   Schema.TaggedStruct("Queue", { queue: Schema.Array(QueuedMessage) }),
   /** Chat state changed (participants, presence, settings): read it again. */
-  Schema.TaggedStruct("State", {})
+  Schema.TaggedStruct("State", {}),
+  /** The cache-warmth estimate changed; null when there's none to show (DESIGN §5.5). */
+  Schema.TaggedStruct("Cache", { warmth: Schema.NullOr(CacheWarmth) })
 ])
 export type ChatEvent = typeof ChatEvent.Type
 

@@ -1,4 +1,5 @@
 // The assembler's data, all plain JSON (DATA-MODEL §7.1; ARCHITECTURE §15).
+import type { ContextIssue } from "@rp/shared/chat.ts"
 import type { FrozenValues } from "@rp/shared/macros/expand.ts"
 import type { VariableEffect } from "@rp/shared/macros/variables.ts"
 import type { CardDoc } from "@rp/shared/docs/card.ts"
@@ -115,12 +116,7 @@ export interface AssembledRequest {
   readonly names: { readonly user: string; readonly char: string; readonly group: ReadonlyArray<string> }
 }
 
-/** Something about the context the user should know: a piece dropped, a setting not applied. */
-export interface Issue {
-  readonly kind:
-    "prefill_dropped" | "macro_limit" | "history_truncated" | "examples_truncated" | "regex_skipped" | "lorebook_issue"
-  readonly message: string
-}
+export type Issue = ContextIssue
 
 /** What a context was built from: enough to build it again from the database (invariant 6). */
 export interface SnapshotInputs {
@@ -205,6 +201,8 @@ export interface Generation {
   readonly model: ModelInput | null
   /** The chat variables the preset's and cards' macros wrote, in order: `null` deletes one. */
   readonly variables: ReadonlyArray<{ readonly name: string; readonly value: string | number | null }>
+  /** What the user should know about the context, kept on its rollout for the version to show. */
+  readonly issues: ReadonlyArray<Issue>
   /**
    * The random and time values each template message of the path used, to keep with it
    * (DESIGN §5.6), and the variables it wrote, the first time it expanded.
@@ -224,6 +222,7 @@ export const generationOf = (snapshot: ContextSnapshot): Generation => {
     request: snapshot.request,
     model: snapshot.inputs.model,
     variables: snapshot.effects.filter((e) => e.scope === "local").map(({ name, value }) => ({ name, value })),
+    issues: snapshot.issues,
     frozenMessages: snapshot.pieces.flatMap((piece) => {
       if (piece.source.kind !== "message") return []
       const frozen = snapshot.frozen[piece.id]

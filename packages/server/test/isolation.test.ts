@@ -633,6 +633,15 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
     probe: (actor, owner) =>
       refused(actor.api.SubscribeChat({ chatId: owner.chat.chatId }).pipe(Stream.runHead), "NotFound")
   },
+  // --- The request inspector (inspectorApi.ts).
+  GetRunContext: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        yield* refused(actor.api.GetRunContext({ versionId: owner.chat.generatingId }), "NotFound")
+        const own = yield* owner.api.GetRunContext({ versionId: owner.chat.generatingId })
+        assert.strictEqual(own.chatId, owner.chat.chatId)
+      })
+  },
   // --- Chat setup, speakers and the send queue (chatSetupApi.ts).
   ListCards: {
     probe: (actor, owner) =>
@@ -1293,6 +1302,30 @@ const seed = Effect.gen(function* () {
         api.SendMessage({ chatId: chat.id, parentSlotId: null, branch: false, content: "hello" })
       )
       const reply = yield* posted(api.Generate({ chatId: chat.id, parentSlotId: sent.entry.slotId, branch: false }))
+      // The reply's context, recorded as generating records it, for the request inspector.
+      const { snapshot } = yield* (yield* Reader).AssembleContext({
+        userId: user.id,
+        chatId: chat.id,
+        slotId: reply.entry.slotId,
+        versionId: reply.entry.version.id,
+        now: Date.now(),
+        timeZone: "UTC",
+        frozen: null
+      })
+      yield* writer.StartRollout({
+        userId: user.id,
+        chatId: chat.id,
+        slotId: reply.entry.slotId,
+        versionId: reply.entry.version.id,
+        rolloutId: uuidv7(),
+        leafSlotId: sent.entry.slotId,
+        connectionId: connection.id,
+        modelId: model.id,
+        snapshot,
+        issues: [],
+        variables: [],
+        frozenMessages: []
+      })
       const chatNote = yield* api.CreateChatNote({ chatId: chat.id, title: "Scene" })
       const card = yield* writer.CreateEntity({
         userId: user.id,
@@ -1443,7 +1476,7 @@ const seed = Effect.gen(function* () {
  */
 const storage: Record<string, (reader: Reader["Service"], actor: Party, owner: Party) => Effect.Effect<void, unknown>> =
   {
-    // The run inspector's rebuild (ARCHITECTURE §15): another user's snapshot, as is, rebuilds nothing.
+    // Rebuilding a context from its pins (ARCHITECTURE §15): another user's snapshot, as is, rebuilds nothing.
     RebuildContext: (reader, actor, owner) =>
       Effect.gen(function* () {
         const { snapshot } = yield* reader.AssembleContext({
@@ -1459,6 +1492,12 @@ const storage: Record<string, (reader: Reader["Service"], actor: Party, owner: P
         const rebuilt = yield* reader.RebuildContext({ userId: owner.user.id, snapshot })
         assert.ok(rebuilt._tag === "Rebuilt")
         assert.deepStrictEqual(JSON.parse(rebuilt.snapshot), JSON.parse(snapshot))
+      }),
+    // The cache-warmth estimate, which the chat's subscription pushes only to its owner.
+    CacheWarmth: (reader, actor, owner) =>
+      Effect.gen(function* () {
+        yield* refused(reader.CacheWarmth({ userId: actor.user.id, chatId: owner.chat.chatId }), "NotFound")
+        yield* reader.CacheWarmth({ userId: owner.user.id, chatId: owner.chat.chatId })
       })
   }
 

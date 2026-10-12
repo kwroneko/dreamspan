@@ -45,7 +45,7 @@ const decodeNote = Schema.decodeUnknownExit(NoteDoc)
 const decodePreset = Schema.decodeUnknownExit(PresetDoc)
 
 /** ST's default chat-completion preset: what generation uses when nothing chooses one. */
-const builtinPreset = importStPreset(JSON.stringify({ frequency_penalty: 0 })).document!
+export const builtinPreset = importStPreset(JSON.stringify({ frequency_penalty: 0 })).document!
 
 const invalid = (what: string) =>
   new AssemblyFailed({
@@ -83,12 +83,13 @@ interface HistoryRow {
   readonly written: number
 }
 
-interface Settings {
-  readonly userId: UserId
-  readonly chatId: ChatId
-  readonly slotId: string
-  readonly versionId: string
-}
+/**
+ * The version being generated, or `next`: a reply not yet asked for, at the end of the
+ * chat's active path, the request the cache-warmth estimate compares (DESIGN §5.5).
+ */
+type Settings =
+  | { readonly userId: UserId; readonly chatId: ChatId; readonly slotId: string; readonly versionId: string }
+  | { readonly userId: UserId; readonly chatId: ChatId; readonly next: true }
 
 /** A snapshot to read again: its pins and its inputs. */
 interface Replay {
@@ -110,11 +111,8 @@ const keyOf = (...args: ReadonlyArray<unknown>) => JSON.stringify(args)
  * snapshot's pins, they read those again instead: the same events, versions at the same
  * amend, the same revisions, the model and preset revision the snapshot recorded.
  */
-export const sqlSources = (
-  sql: SqlClient.SqlClient,
-  { userId, chatId, slotId, versionId }: Settings,
-  replay?: Replay
-) => {
+export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?: Replay) => {
+  const { userId, chatId } = settings
   // The user's defaults, read once for the model and the preset both.
   let readOnce: GenerationDefaults | undefined
   const defaults = Effect.suspend(() =>
@@ -204,9 +202,13 @@ export const sqlSources = (
     userMessages: [] as Array<NonNullable<SourcePins["userMessages"]>[number]>
   }
 
-  const history = noteHistory(sql, userId, chatId)
-  const live = AssemblySources.of({
-    target: sql<{
+  const pinTarget = (target: Target) =>
+    Effect.sync(() => {
+      pins.target = target
+    })
+
+  const versionTarget = (slotId: string, versionId: string) =>
+    sql<{
       depth: number
       parent_slot_id: string | null
       ordinal: number
@@ -231,12 +233,32 @@ export const sqlSources = (
             })
           : Effect.fail(new NotFound({ entity: "version", id: versionId }))
       ),
-      Effect.tap((target) =>
-        Effect.sync(() => {
-          pins.target = target
-        })
-      )
+      Effect.tap(pinTarget)
+    )
+
+  const nextTarget = sql<{ leaf: string | null; depth: number | null }>`
+    SELECT c.active_leaf_slot_id AS leaf, s.depth FROM chats c LEFT JOIN slots s ON s.id = c.active_leaf_slot_id
+    WHERE c.id = ${chatId} AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL`.pipe(
+    Effect.flatMap(([row]) =>
+      row
+        ? Effect.succeed({
+            chatId,
+            slotId: "",
+            versionId: "",
+            depth: row.depth === null ? 0 : row.depth + 1,
+            parentSlotId: row.leaf,
+            ordinal: 0,
+            speaker: null,
+            direction: null
+          } satisfies Target)
+        : Effect.fail(new NotFound({ entity: "chat", id: chatId }))
     ),
+    Effect.tap(pinTarget)
+  )
+
+  const history = noteHistory(sql, userId, chatId)
+  const live = AssemblySources.of({
+    target: "next" in settings ? nextTarget : versionTarget(settings.slotId, settings.versionId),
 
     // The events at `at` (StateEventsAt's query), with the depth of the message each follows.
     events: (at) =>

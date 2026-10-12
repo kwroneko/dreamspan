@@ -1,6 +1,6 @@
-// A fake OpenAI-compatible provider on loopback: it lists two models, answers chat
-// completions with a short streamed reply, and records the keys and request bodies it was
-// sent. No real provider or key is ever used.
+// A fake OpenAI-compatible provider on loopback: it lists two models, streams the same reply
+// to every chat completion, reporting a cache read, and records the keys and request bodies it
+// was sent. No real provider or key is ever used.
 import { createServer } from "node:http"
 import type { AddressInfo } from "node:net"
 
@@ -13,8 +13,11 @@ export interface FakeProvider {
   readonly stop: () => Promise<void>
 }
 
-const chunk = (delta: Record<string, unknown>, finish: string | null) =>
-  `data: ${JSON.stringify({ id: "fake", object: "chat.completion.chunk", model: "fake-small", choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`
+/** The reply every chat completion streams. */
+export const REPLY = "The bridge holds."
+
+const chunk = (body: Record<string, unknown>) =>
+  `data: ${JSON.stringify({ id: "fake", object: "chat.completion.chunk", model: "fake-small", ...body })}\n\n`
 
 export const startProvider = async (): Promise<FakeProvider> => {
   const keys: Array<string> = []
@@ -40,8 +43,14 @@ export const startProvider = async (): Promise<FakeProvider> => {
       request.on("end", () => {
         completions.push(JSON.parse(body) as FakeProvider["completions"][number])
         response.writeHead(200, { "content-type": "text/event-stream" })
-        response.write(chunk({ role: "assistant", content: "The bridge holds." }, null))
-        response.write(chunk({}, "stop"))
+        response.write(chunk({ choices: [{ index: 0, delta: { role: "assistant", content: REPLY }, finish_reason: null }] }))
+        response.write(chunk({ choices: [{ index: 0, delta: {}, finish_reason: "stop" }] }))
+        response.write(
+          chunk({
+            choices: [],
+            usage: { prompt_tokens: 120, completion_tokens: 6, prompt_tokens_details: { cached_tokens: 100 } }
+          })
+        )
         response.end("data: [DONE]\n\n")
       })
       return

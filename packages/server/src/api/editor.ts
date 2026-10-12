@@ -8,9 +8,11 @@ import { newCardDoc, parseField, validateDoc } from "@rp/shared/editing.ts"
 import { EditRefused, InvalidDocument, SavedRef } from "@rp/shared/editorApi.ts"
 import { NotFound, ServerError } from "@rp/shared/errors.ts"
 import type { RefId } from "@rp/shared/library.ts"
+import type { UserId } from "@rp/shared/domain.ts"
 import { Effect } from "effect"
 import { RpcClientError } from "effect/rpc"
 import { ChatHub } from "../chat/ChatHub.ts"
+import { CacheWarmth } from "../chat/CacheWarmth.ts"
 import { Reader, Writer } from "../db/Database.ts"
 import { DraftTooLarge, type RefChange, RefOperationRefused, StorageError } from "../db/ops.ts"
 
@@ -70,7 +72,13 @@ export const makeEditorHandlers = Effect.gen(function* () {
   const hub = yield* ChatHub
   const reader = yield* Reader
   const writer = yield* Writer
+  const warmth = yield* CacheWarmth
   const userId = Effect.map(CurrentUser, (user) => user.id)
+  /** What a chat sends may have changed: its cache estimate is worked out again. */
+  const changed =
+    (id: UserId) =>
+    <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+      Effect.tap(effect, () => warmth.refreshUser(id))
 
   const handlers = {
     OpenEditor: ({ refId, chatNote }) =>
@@ -139,7 +147,7 @@ export const makeEditorHandlers = Effect.gen(function* () {
           fields,
           message,
           ...(chatNote ? { chatNote } : {})
-        })
+        }).pipe(changed(id))
       ).pipe(
         Effect.tap(() =>
           Effect.sync(() => {
@@ -160,7 +168,7 @@ export const makeEditorHandlers = Effect.gen(function* () {
 
     RestoreRevision: ({ refId, revisionId, expectedRowVersion }) =>
       Effect.flatMap(userId, (id) =>
-        writer.RestoreRevision({ userId: id, refId, revisionId, expectedRowVersion })
+        writer.RestoreRevision({ userId: id, refId, revisionId, expectedRowVersion }).pipe(changed(id))
       ).pipe(Effect.map(saved), settle("RestoreRevision")),
 
     ForkVariant: ({ refId, label, subtitle, moveDrafts }) =>
@@ -174,16 +182,15 @@ export const makeEditorHandlers = Effect.gen(function* () {
       ),
 
     SetRegexApproval: ({ refId, approved, expectedRowVersion }) =>
-      Effect.flatMap(userId, (id) => writer.SetRegexApproval({ userId: id, refId, approved, expectedRowVersion })).pipe(
-        Effect.map(saved),
-        settle("SetRegexApproval")
-      ),
+      Effect.flatMap(userId, (id) =>
+        writer.SetRegexApproval({ userId: id, refId, approved, expectedRowVersion }).pipe(changed(id))
+      ).pipe(Effect.map(saved), settle("SetRegexApproval")),
 
     PreviewUpdate: ({ refId }) =>
       Effect.flatMap(userId, (id) => reader.PreviewMerge({ userId: id, refId })).pipe(settle("PreviewUpdate")),
 
     ApplyUpdate: ({ refId }) =>
-      Effect.flatMap(userId, (id) => writer.MergeFollowed({ userId: id, refId })).pipe(
+      Effect.flatMap(userId, (id) => writer.MergeFollowed({ userId: id, refId }).pipe(changed(id))).pipe(
         Effect.map(({ outcome, change }) => ({ outcome, saved: saved(change) })),
         settle("ApplyUpdate")
       ),
@@ -191,7 +198,7 @@ export const makeEditorHandlers = Effect.gen(function* () {
     // The writer checks the document: valid, protected fields from one side, references owned.
     ResolveUpdate: ({ refId, doc, theirsRevisionId, expectedRowVersion }) =>
       Effect.flatMap(userId, (id) =>
-        writer.ResolveMerge({ userId: id, refId, doc, theirsRevisionId, expectedRowVersion })
+        writer.ResolveMerge({ userId: id, refId, doc, theirsRevisionId, expectedRowVersion }).pipe(changed(id))
       ).pipe(Effect.map(saved), settle("ResolveUpdate")),
 
     ListCardNotes: ({ cardRefId }) =>

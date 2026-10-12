@@ -10,6 +10,7 @@ import {
   draftHistory,
   draftSessions,
   graphIntegrity,
+  inspector,
   ownership,
   providers,
   queue,
@@ -89,7 +90,8 @@ export const migrations = {
       recovered INTEGER NOT NULL CHECK (recovered IN (0, 1)),
       PRIMARY KEY (chat_id, operation_id)
     ) STRICT`
-  ])
+  ]),
+  "0016_inspector": runAll(inspector)
 }
 
 export const Migrations = SqliteMigrator.layer({ loader: SqliteMigrator.fromRecord(migrations) })

@@ -3,6 +3,7 @@
 import { type AppApi, CurrentUser } from "@rp/shared/api.ts"
 import { ServerError } from "@rp/shared/errors.ts"
 import { Effect } from "effect"
+import { CacheWarmth } from "../chat/CacheWarmth.ts"
 import { Reader, Writer } from "../db/Database.ts"
 
 const serverError = (operation: string) => (error: unknown) =>
@@ -13,14 +14,15 @@ const serverError = (operation: string) => (error: unknown) =>
 export const makeGenerationHandlers = Effect.gen(function* () {
   const reader = yield* Reader
   const writer = yield* Writer
+  const warmth = yield* CacheWarmth
   return {
     GetGenerationDefaults: () =>
       Effect.flatMap(CurrentUser, (user) => reader.GetGenerationDefaults({ userId: user.id })).pipe(
         Effect.catchTag(["StorageError", "RpcClientError"], serverError("GetGenerationDefaults"))
       ),
     SetGenerationDefaults: ({ defaults }) =>
-      Effect.flatMap(CurrentUser, (user) => writer.SetGenerationDefaults({ userId: user.id, defaults })).pipe(
-        Effect.catchTag(["StorageError", "RpcClientError"], serverError("SetGenerationDefaults"))
-      )
+      Effect.flatMap(CurrentUser, (user) =>
+        writer.SetGenerationDefaults({ userId: user.id, defaults }).pipe(Effect.tap(() => warmth.refreshUser(user.id)))
+      ).pipe(Effect.catchTag(["StorageError", "RpcClientError"], serverError("SetGenerationDefaults")))
   } satisfies Partial<Parameters<typeof AppApi.of>[0]>
 })

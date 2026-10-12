@@ -291,6 +291,19 @@ export const Message = memo(function Message({
       ) : (
         <VersionBody version={version} session={session} parentSlotId={entry.parentSlotId} />
       )}
+      {version.context !== null && version.context.issues.length > 0 && (
+        // What the user should know about the context it was generated from (ARCHITECTURE §15).
+        <details className="text-xs text-warning">
+          <summary className="cursor-pointer">
+            {version.context.issues.length === 1 ? "1 note" : `${version.context.issues.length} notes`} on its context
+          </summary>
+          <ul className="mt-1 list-disc pl-5">
+            {version.context.issues.map((issue, i) => (
+              <li key={i}>{issue.message}</li>
+            ))}
+          </ul>
+        </details>
+      )}
       {model && version.direction && (
         <p className="text-xs text-muted">
           <span className="font-medium">Direction:</span> {version.direction}
@@ -311,6 +324,15 @@ export const Message = memo(function Message({
           <Button variant="ghost" onClick={() => setEditing(true)}>
             Edit
           </Button>
+        )}
+        {version.context !== null && (
+          <Link
+            to="/chats/$chatId/context/$versionId"
+            params={{ chatId: session.id, versionId: version.id }}
+            className="inline-flex h-9 items-center rounded-md px-3 text-sm text-muted hover:bg-surface-raised hover:text-text"
+          >
+            Context
+          </Link>
         )}
         <Link
           to="."

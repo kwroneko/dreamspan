@@ -84,6 +84,7 @@ export const layer = Layer.effect(
               connectionId: model.connectionId as ConnectionId,
               modelId: model.modelId as ModelId,
               snapshot: assembled.snapshot,
+              issues: generation.issues,
               variables: generation.variables,
               frozenMessages: generation.frozenMessages.map((m) => ({ ...m, versionId: m.versionId as VersionId }))
             }),

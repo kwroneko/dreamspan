@@ -20,6 +20,7 @@ import type { Cast, CastChange } from "@rp/shared/chatSetupApi.ts"
 import type { CardFields } from "@rp/shared/macros/context.ts"
 import { NotFound } from "@rp/shared/errors.ts"
 import type { BranchSwitch, ChatEvent, PathRange, PathWindow, SendResult } from "@rp/shared/chatApi.ts"
+import type { CacheWarmth } from "@rp/shared/inspectorApi.ts"
 import { Cause, Context, Effect, Exit, Fiber, Schedule, Stream } from "effect"
 import { Atom, type AtomRegistry, AtomRegistry as Registry, Reactivity } from "effect/reactivity"
 import { type AppError, describeCause } from "../../errors.ts"
@@ -57,6 +58,8 @@ export interface ChatView {
   readonly cast: Cast | null
   /** What waits behind a reply still being written (DESIGN §2.2), in order. */
   readonly queue: ReadonlyArray<QueuedMessage>
+  /** Whether the provider's cache is likely warm for the next reply (DESIGN §5.5); null without an estimate. */
+  readonly cache: CacheWarmth | null
 }
 
 type Client = AppClient["Service"]
@@ -87,7 +90,8 @@ export class ChatSession {
     error: null,
     deleted: false,
     cast: null,
-    queue: []
+    queue: [],
+    cache: null
   }
   private readonly listeners = new Set<() => void>()
   /** Unmounts for the live atoms kept alive while their version generates, shown or not. */
@@ -506,6 +510,10 @@ export class ChatSession {
       case "State":
         this.forgetPositions()
         return void this.refreshCast()
+      case "Cache":
+        // The same estimate again (another tab subscribed) changes nothing on screen.
+        if (JSON.stringify(event.warmth) === JSON.stringify(this.view.cache)) return
+        return this.update({ cache: event.warmth })
     }
   }
 

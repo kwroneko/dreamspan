@@ -8,6 +8,7 @@ import { StImportApi } from "./stImportApi.ts"
 import { BinApi } from "./binApi.ts"
 import { ComposerApi } from "./composerApi.ts"
 import { NoticeApi } from "./noticeApi.ts"
+import { InspectorApi } from "./inspectorApi.ts"
 import { User, UserAccount, UserId, UserRole } from "./domain.ts"
 import { EditorApi } from "./editorApi.ts"
 import {
@@ -298,4 +299,6 @@ export class AppApi extends RpcGroup.make(
   .merge(BinApi)
   .merge(ComposerApi)
   .merge(NoticeApi)
+  // --- The request inspector (inspectorApi.ts).
+  .merge(InspectorApi)
   .middleware(Authentication) {}

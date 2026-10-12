@@ -60,6 +60,23 @@ export const FrozenMacros = Schema.Record(Schema.String, Schema.String).check(
 /** Why a generation failed, shown on its version (DESIGN §3.1). */
 export const VersionError = Schema.Struct({ class: Schema.String, message: Schema.String })
 
+/**
+ * Something about an assembled context the user should know: a prefill dropped, a piece
+ * left out, history cut by the budget (ARCHITECTURE §15).
+ */
+export const ContextIssue = Schema.Struct({
+  kind: Schema.Literals([
+    "prefill_dropped",
+    "macro_limit",
+    "history_truncated",
+    "examples_truncated",
+    "regex_skipped",
+    "lorebook_issue"
+  ]),
+  message: Schema.String
+})
+export type ContextIssue = typeof ContextIssue.Type
+
 export class Version extends Schema.Class<Version>("Version")({
   id: VersionId,
   slotId: SlotId,
@@ -82,6 +99,11 @@ export class Version extends Schema.Class<Version>("Version")({
    * macros drew when it was made, so it reads the same every time (DESIGN §5.6).
    */
   frozenMacros: Schema.NullOr(FrozenMacros),
+  /**
+   * For a generated version, the context it was generated from: null when none was
+   * recorded. The request inspector reads it whole (inspectorApi.ts).
+   */
+  context: Schema.NullOr(Schema.Struct({ issues: Schema.Array(ContextIssue) })),
   /**
    * Optimistic concurrency for amending a user-written version: one more than the number
    * of times it was amended, counted from its kept history (version_history).

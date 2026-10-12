@@ -10,6 +10,7 @@ import { makeAssemblyReadHandlers } from "./assemblyReads.ts"
 import { readerConnection } from "./connection.ts"
 import { makeEditorReadHandlers } from "./editorReads.ts"
 import { makeImportReadHandlers } from "./importReads.ts"
+import { makeInspectorReadHandlers } from "./inspectorReads.ts"
 import { ReadOps } from "./ops.ts"
 import { makeProviderReadHandlers } from "./providerReads.ts"
 import { makeReadHandlers } from "./reads.ts"
@@ -32,9 +33,10 @@ RpcServer.layer(ReadOps, { concurrency: 1, disableFatalDefects: true }).pipe(
           // --- ST data folder import (ARCHITECTURE.md §13)
           makeStImportReadHandlers,
           makeEditorReadHandlers,
-          makeAssemblyReadHandlers
+          makeAssemblyReadHandlers,
+          makeInspectorReadHandlers
         ]),
-        ([core, providers, accounts, imports, chatSetup, stImport, editor, assembly]) =>
+        ([core, providers, accounts, imports, chatSetup, stImport, editor, assembly, inspector]) =>
           ReadOps.of({
             ...core,
             ...providers,
@@ -43,7 +45,8 @@ RpcServer.layer(ReadOps, { concurrency: 1, disableFatalDefects: true }).pipe(
             ...chatSetup,
             ...stImport,
             ...editor,
-            ...assembly
+            ...assembly,
+            ...inspector
           })
       )
     )

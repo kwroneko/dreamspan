@@ -1,0 +1,172 @@
+// The request inspector's reads (DESIGN §7.4; ARCHITECTURE §15): a version's context as it
+// was sent, from its rollout's stored snapshot, with each piece's source named for the user.
+import type { ChatId, SlotId } from "@rp/shared/chat.ts"
+import type { UserId } from "@rp/shared/domain.ts"
+import { NotFound } from "@rp/shared/errors.ts"
+import { type ContextSource, RunContext } from "@rp/shared/inspectorApi.ts"
+import { Effect } from "effect"
+import { SqlClient, type SqlError } from "effect/sql"
+import { tokensOf } from "../assembler/st.ts"
+import type { ContextSnapshot, Source } from "../assembler/types.ts"
+import type { Describe } from "../assembler/warmth.ts"
+import { builtinPreset } from "./assemblySources.ts"
+import type { ReadOps } from "./ops.ts"
+import { type LlmRequestRow, toLlmRequest } from "./providers.ts"
+import { query } from "./tx.ts"
+
+const unique = <A>(list: ReadonlyArray<A>) => [...new Set(list)]
+
+/**
+ * Names for the sources of these snapshots' pieces: cards and notes by the revision they
+ * were read at, preset prompts by the preset revision's names, messages by their place.
+ */
+export const describer = (
+  sql: SqlClient.SqlClient,
+  userId: UserId,
+  chatId: ChatId,
+  snapshots: ReadonlyArray<ContextSnapshot>
+): Effect.Effect<Describe, SqlError.SqlError> =>
+  Effect.gen(function* () {
+    const sources = snapshots.flatMap((s) => s.pieces.map((p) => p.source))
+    const revisions = unique(sources.flatMap((s) => (s.kind === "card" || s.kind === "note" || s.kind === "lorebook" ? [s.revision] : [])))
+    const entities =
+      revisions.length === 0
+        ? []
+        : yield* sql<{ id: string; name: string | null; label: string | null }>`
+            SELECT v.id, json_extract(v.doc_json, '$.name') AS name,
+              (SELECT r.label FROM entity_refs r WHERE r.entity_id = e.id AND r.ref_kind = 'upstream') AS label
+            FROM entity_revisions v JOIN entities e ON e.id = v.entity_id
+            WHERE v.id IN ${sql.in(revisions)} AND e.owner_user_id = ${userId}`
+    const names = new Map(entities.map((row) => [row.id, row.name ?? row.label ?? "unnamed"]))
+    const presets = unique(sources.flatMap((s) => (s.kind === "preset" && s.revision !== null ? [s.revision] : [])))
+    const prompts =
+      presets.length === 0
+        ? []
+        : yield* sql<{ revision: string; identifier: string; name: string }>`
+            SELECT v.id AS revision, json_extract(p.value, '$.identifier') AS identifier,
+              json_extract(p.value, '$.name') AS name
+            FROM entity_revisions v JOIN entities e ON e.id = v.entity_id, json_each(v.doc_json, '$.prompts') p
+            WHERE v.id IN ${sql.in(presets)} AND e.owner_user_id = ${userId}`
+    const promptNames = new Map(prompts.map((row) => [`${row.revision}:${row.identifier}`, row.name]))
+    for (const prompt of builtinPreset.prompts) promptNames.set(`null:${prompt.identifier}`, prompt.name)
+    const slots = unique(sources.flatMap((s) => (s.kind === "message" ? [s.slot] : [])))
+    const depths =
+      slots.length === 0
+        ? []
+        : yield* sql<{ id: string; depth: number }>`
+            SELECT s.id, s.depth FROM slots s JOIN chats c ON c.id = s.chat_id
+            WHERE s.id IN ${sql.in(slots)} AND c.id = ${chatId} AND c.owner_user_id = ${userId}`
+    const depthOf = new Map(depths.map((row) => [row.id, row.depth]))
+
+    return (source: Source): ContextSource => {
+      switch (source.kind) {
+        case "preset": {
+          const name = promptNames.get(`${source.revision}:${source.identifier}`)
+          // Its other text (`utility.new_chat_prompt`, `prefill.assistant`) by what it is.
+          const other = source.identifier.replace(/^utility\./, "").replaceAll("_", " ")
+          return { kind: "preset", label: name ? `Preset prompt “${name}”` : `Preset: ${other}`, slotId: null }
+        }
+        case "card":
+          return {
+            kind: "card",
+            label: `Card “${names.get(source.revision) ?? "unnamed"}”: ${source.field}`,
+            slotId: null
+          }
+        case "lorebook":
+          return {
+            kind: "lorebook",
+            label: `Lorebook “${names.get(source.revision) ?? "unnamed"}”: entry ${source.uid}`,
+            slotId: null
+          }
+        case "note":
+          return { kind: "note", label: `Note “${names.get(source.revision) ?? "unnamed"}”`, slotId: null }
+        case "message": {
+          const depth = depthOf.get(source.slot)
+          return {
+            kind: "message",
+            label: depth === undefined ? "A message" : `Message ${depth + 1}`,
+            slotId: source.slot as SlotId
+          }
+        }
+        case "direction":
+          return { kind: "direction", label: "One-turn direction", slotId: null }
+        case "assembler":
+          return { kind: "assembler", label: source.what.charAt(0).toUpperCase() + source.what.slice(1), slotId: null }
+      }
+    }
+  })
+
+export const makeInspectorReadHandlers = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient
+  const handlers = {
+    RunContext: ({ userId, versionId }) =>
+      Effect.gen(function* () {
+        const [row] = yield* sql<{
+          chat_id: string
+          slot_id: string
+          rollout_id: string
+          status: string
+          snapshot: string
+        }>`
+        SELECT s.chat_id, v.slot_id, r.id AS rollout_id, r.status, p.context_snapshot_json AS snapshot
+        FROM versions v JOIN slots s ON s.id = v.slot_id JOIN chats c ON c.id = s.chat_id
+        JOIN rollouts r ON r.id = v.rollout_id JOIN rollout_payloads p ON p.rollout_id = r.id
+        WHERE v.id = ${versionId} AND c.owner_user_id = ${userId} AND p.context_snapshot_json IS NOT NULL
+          AND v.deleted_at IS NULL AND s.deleted_at IS NULL AND c.deleted_at IS NULL`
+        if (!row) return yield* new NotFound({ entity: "context", id: versionId })
+        const snapshot = JSON.parse(row.snapshot) as ContextSnapshot
+        const chatId = row.chat_id as ChatId
+        const describe = yield* describer(sql, userId, chatId, [snapshot])
+        const { model, preset } = snapshot.inputs
+        const [connection] = model
+          ? yield* sql<{ name: string }>`
+            SELECT name FROM connections WHERE id = ${model.connectionId} AND owner_user_id = ${userId}`
+          : []
+        const [presetRef] = preset.ref
+          ? yield* sql<{ label: string }>`
+            SELECT r.label FROM entity_refs r JOIN entities e ON e.id = r.entity_id
+            WHERE r.id = ${preset.ref} AND e.owner_user_id = ${userId}`
+          : []
+        const requests = yield* sql<LlmRequestRow>`
+        SELECT * FROM llm_requests WHERE rollout_id = ${row.rollout_id} AND owner_user_id = ${userId}
+        ORDER BY started_at, id`
+        const byMessage = snapshot.request.messages.map((): Array<ContextSource> => [])
+        for (const piece of snapshot.pieces) {
+          const described = describe(piece.source)
+          for (const i of piece.messages) {
+            if (!byMessage[i]!.some((s) => s.label === described.label)) byMessage[i]!.push(described)
+          }
+        }
+        const breakpoints = new Map(snapshot.request.breakpoints.map((b) => [b.message, b.reason]))
+        return new RunContext({
+          chatId,
+          slotId: row.slot_id as SlotId,
+          versionId,
+          builtAt: snapshot.inputs.now,
+          status: row.status,
+          type: snapshot.inputs.type,
+          mode: snapshot.inputs.mode,
+          model: model && {
+            connection: connection?.name ?? "a deleted connection",
+            model: model.key,
+            kind: model.kind,
+            breakpoints: model.cacheBreakpoints
+          },
+          preset: { label: presetRef?.label ?? null, scope: preset.scope },
+          messages: snapshot.request.messages.map((message, i) => ({
+            role: message.role,
+            name: message.name ?? null,
+            content: message.content,
+            tokens: tokensOf(message),
+            sources: byMessage[i]!,
+            breakpoint: breakpoints.get(i) ?? null
+          })),
+          prefill: snapshot.request.prefill,
+          samplers: { ...snapshot.request.samplers },
+          issues: snapshot.issues,
+          requests: requests.map(toLlmRequest)
+        })
+      }).pipe(query("RunContext"))
+  } satisfies Partial<Parameters<typeof ReadOps.of>[0]>
+  return handlers
+})

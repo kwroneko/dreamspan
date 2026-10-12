@@ -6,6 +6,7 @@ import { draftHistory, draftSessions } from "./drafts.ts"
 import { graphIntegrity } from "./graphIntegrity.ts"
 import { ownership } from "./ownership.ts"
 import { history } from "./history.ts"
+import { inspector } from "./inspector.ts"
 import { integrity } from "./integrity.ts"
 import { library } from "./library.ts"
 import { platform } from "./platform.ts"
@@ -35,6 +36,7 @@ export {
   draftHistory,
   draftSessions,
   graphIntegrity,
+  inspector,
   ownership,
   providers,
   queue

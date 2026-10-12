@@ -10,7 +10,7 @@ import type { SqlClient } from "effect/sql"
 import type { Bin } from "./bin.ts"
 import type { CommitDraft } from "./drafts.ts"
 import { AppendResult, LeafMoved, NotFound, StaleWrite } from "./ops.ts"
-import { amendCount, type ChatRow, toChat, toVersion, type VersionRow } from "./rows.ts"
+import { versionExtras, type ChatRow, toChat, toVersion, type VersionRow } from "./rows.ts"
 import { checkStateReferences } from "./stateRefs.ts"
 
 export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"]) => {
@@ -33,7 +33,7 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
   /** A version of the user's, with its amend count; `live` also refuses one in the bin. */
   const ownedVersion = (userId: UserId, versionId: VersionId, live: boolean) =>
     sql<VersionRow & { purged_at: number | null }>`
-      SELECT v.*, ${sql.literal(amendCount("v"))} FROM versions v JOIN slots s ON s.id = v.slot_id
+      SELECT v.*, ${sql.literal(versionExtras("v"))} FROM versions v JOIN slots s ON s.id = v.slot_id
         JOIN chats c ON c.id = s.chat_id
       WHERE v.id = ${versionId} AND c.owner_user_id = ${userId}
         AND (${live ? 0 : 1} OR (v.deleted_at IS NULL AND s.deleted_at IS NULL AND c.deleted_at IS NULL))`.pipe(

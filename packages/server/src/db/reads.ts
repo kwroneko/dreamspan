@@ -12,7 +12,7 @@ import { makeDraftStore } from "./drafts.ts"
 import { makeLibraryQueries, toLibraryRef } from "./library.ts"
 import { NotFound, ReadOps, RefOperationRefused, StorageError } from "./ops.ts"
 import {
-  amendCount,
+  versionExtras,
   type ChatRow,
   type PathRow,
   toChat,
@@ -53,8 +53,8 @@ const siblingCount = (also = "") => {
 /** A path entry's columns: the slot's, and its selected version's under their own names. */
 const pathColumns = `v.id, v.slot_id, v.ordinal, v.status, v.speaker_entity_id, v.writer, v.content,
   v.macro_mode, v.origin, v.source_version_id, v.direction, v.hidden, v.starred, v.created_at, v.error_json,
-  v.frozen_macros,
-  ${amendCount("v")}, s.lane_id, s.parent_slot_id, s.depth, s.row_version, s.context_excluded,
+  v.frozen_macros, v.rollout_id,
+  ${versionExtras("v")}, s.lane_id, s.parent_slot_id, s.depth, s.row_version, s.context_excluded,
   s.deleted_at IS NOT NULL AS slot_deleted,
   (SELECT count(*) FROM versions c WHERE c.slot_id = s.id AND c.deleted_at IS NULL) AS version_count,
   ${siblingCount()} AS branch_count, ${siblingCount("AND x.id < s.id")} AS branch_index`
@@ -207,7 +207,7 @@ export const makeReadHandlers = Effect.gen(function* () {
     ListVersions: ({ userId, slotId }) =>
       Effect.gen(function* () {
         const rows = yield* sql<VersionRow>`
-          SELECT v.*, ${sql.literal(amendCount("v"))} FROM versions v JOIN slots s ON s.id = v.slot_id JOIN chats c ON c.id = s.chat_id
+          SELECT v.*, ${sql.literal(versionExtras("v"))} FROM versions v JOIN slots s ON s.id = v.slot_id JOIN chats c ON c.id = s.chat_id
           WHERE v.slot_id = ${slotId} AND c.owner_user_id = ${userId}
             AND v.deleted_at IS NULL AND s.deleted_at IS NULL AND c.deleted_at IS NULL
           ORDER BY v.ordinal`
@@ -479,7 +479,7 @@ export const makeReadHandlers = Effect.gen(function* () {
     GetVersion: ({ userId, versionId }) =>
       Effect.gen(function* () {
         const [row] = yield* sql<VersionRow>`
-          SELECT v.*, ${sql.literal(amendCount("v"))} FROM versions v JOIN slots s ON s.id = v.slot_id JOIN chats c ON c.id = s.chat_id
+          SELECT v.*, ${sql.literal(versionExtras("v"))} FROM versions v JOIN slots s ON s.id = v.slot_id JOIN chats c ON c.id = s.chat_id
           WHERE v.id = ${versionId} AND c.owner_user_id = ${userId}
             AND v.deleted_at IS NULL AND s.deleted_at IS NULL AND c.deleted_at IS NULL`
         if (!row) return yield* new NotFound({ entity: "version", id: versionId })

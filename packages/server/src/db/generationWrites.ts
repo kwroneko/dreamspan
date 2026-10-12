@@ -67,6 +67,7 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
       connectionId,
       modelId,
       snapshot,
+      issues,
       variables,
       frozenMessages
     }) =>
@@ -92,6 +93,7 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
           connection_id: connectionId,
           model_id: modelId,
           request_class: "interactive",
+          context_issues_json: JSON.stringify(issues),
           created_at: now,
           started_at: now,
           updated_at: now

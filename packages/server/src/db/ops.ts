@@ -6,7 +6,7 @@
 // owns (DATA-MODEL §1, principle 6). Rows owned by someone else are reported as
 // NotFound, so their existence doesn't leak.
 import { Chat, ChatId, ChatKind, EntityId, NewVersion, PathEntry, SlotId, Version, VersionId } from "@rp/shared/chat.ts"
-import { VersionError, VersionStatus } from "@rp/shared/chat.ts"
+import { ContextIssue, VersionError, VersionStatus } from "@rp/shared/chat.ts"
 import { NotAmendable, PathRange, PathWindow } from "@rp/shared/chatApi.ts"
 import { User, UserAccount, UserId, UserRole } from "@rp/shared/domain.ts"
 import { BinChanged, BinItem, RecoveredText } from "@rp/shared/bin.ts"
@@ -39,6 +39,7 @@ import {
   ProxyMode
 } from "@rp/shared/providers.ts"
 import { GenerationDefaults } from "@rp/shared/generation.ts"
+import { CacheWarmth, RunContext } from "@rp/shared/inspectorApi.ts"
 import { FoldableEvent, StateEventData } from "@rp/shared/state.ts"
 import {
   Cost,
@@ -1171,6 +1172,8 @@ export class WriteOps extends RpcGroup.make(
       connectionId: ConnectionId,
       modelId: ModelId,
       snapshot: Schema.String,
+      /** The snapshot's issues, kept on the rollout for its version to show. */
+      issues: Schema.Array(ContextIssue),
       variables: Schema.Array(
         Schema.Struct({ name: Schema.String, value: Schema.NullOr(Schema.Union([Schema.String, Schema.Number])) })
       ),
@@ -1628,6 +1631,18 @@ export class ReadOps extends RpcGroup.make(
       })
     ]),
     error: Schema.Union([NotFound, AssemblyFailed, StorageError])
+  }),
+  /** A version's context as it was sent, with its sources named and its usage (inspectorReads.ts). */
+  Rpc.make("RunContext", {
+    payload: { userId: UserId, versionId: VersionId },
+    success: RunContext,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** Whether the chat's provider cache is likely warm for its next request (DESIGN §5.5). */
+  Rpc.make("CacheWarmth", {
+    payload: { userId: UserId, chatId: ChatId },
+    success: Schema.NullOr(CacheWarmth),
+    error: Schema.Union([NotFound, StorageError])
   }),
   /** The user's generation defaults; one naming something gone reads as none. */
   Rpc.make("GetGenerationDefaults", {

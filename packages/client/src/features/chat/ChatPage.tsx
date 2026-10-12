@@ -22,6 +22,7 @@ import { Alert } from "../../ui/Surface.tsx"
 import { useLookingAt } from "../notices.tsx"
 import { useTitle } from "../shell.tsx"
 import { ChatBadges, chatTitle } from "./ChatsPage.tsx"
+import { CacheIndicator } from "./CacheIndicator.tsx"
 import { CastContext, castView } from "./cast.ts"
 import { CastDialog, SettingsDialog } from "./ChatPanels.tsx"
 import { Composer } from "./Composer.tsx"
@@ -304,6 +305,7 @@ function ChatSurface({ session, leaf, slot }: { session: ChatSession; leaf: Slot
       ) : (
         <MessageList session={session} view={view} anchor={slot} onBranch={switchBranch} />
       )}
+      <CacheIndicator warmth={view.cache} />
       <Composer session={session} view={view} />
     </CastContext>
   )

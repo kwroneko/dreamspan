@@ -24,10 +24,12 @@ import { makeGenerationHandlers } from "./api/generation.ts"
 import { makeBinHandlers } from "./api/bin.ts"
 import { makeComposerHandlers } from "./api/composer.ts"
 import { makeNoticeHandlers } from "./api/notices.ts"
+import { makeInspectorHandlers } from "./api/inspector.ts"
 import { Notices } from "./chat/Notices.ts"
 import { makeProviderHandlers } from "./api/providers.ts"
 import { makeStImportHandlers } from "./api/stImport.ts"
 import { Accounts, AuthenticationLive, PEER_HEADER, SESSION_COOKIE, SESSION_TTL_MS } from "./auth/Accounts.ts"
+import { CacheWarmth } from "./chat/CacheWarmth.ts"
 import { ChatHub } from "./chat/ChatHub.ts"
 import { Generations } from "./chat/Generations.ts"
 import * as ContextGenerator from "./chat/ContextGenerator.ts"
@@ -71,6 +73,7 @@ const Handlers = AppApi.toLayer(
     const bin = yield* makeBinHandlers
     const composer = yield* makeComposerHandlers
     const notices = yield* makeNoticeHandlers
+    const inspector = yield* makeInspectorHandlers
     return AppApi.of({
       ...providers,
       ...accounts,
@@ -83,6 +86,7 @@ const Handlers = AppApi.toLayer(
       ...bin,
       ...composer,
       ...notices,
+      ...inspector,
       Health: () =>
         eventLoop.sample.pipe(
           Effect.map(
@@ -409,7 +413,12 @@ export const serverWith = <E>(
   ).pipe(
     // --- ST data folder import (ARCHITECTURE.md §13)
     Layer.provide(StImports.layer.pipe(Layer.provideMerge(MediaHolds.layer))),
-    Layer.provide(Generations.layer.pipe(Layer.provideMerge(ChatHub.layer), Layer.provideMerge(generator))),
+    Layer.provide(
+      Layer.merge(Generations.layer, CacheWarmth.layer).pipe(
+        Layer.provideMerge(ChatHub.layer),
+        Layer.provideMerge(generator)
+      )
+    ),
     Layer.provideMerge(Notices.layer),
     Layer.provide(ProvidersLive),
     Layer.provideMerge(HttpServerLive),
