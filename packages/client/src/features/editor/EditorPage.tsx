@@ -8,6 +8,7 @@ import { ErrorAlert } from "../../actions.tsx"
 import { Button, buttonClass } from "../../ui/Button.tsx"
 import { Loading } from "../../ui/Spinner.tsx"
 import { Alert, Badge, Card } from "../../ui/Surface.tsx"
+import { useSession } from "../../session.ts"
 import { useTitle } from "../shell.tsx"
 import { useCaller } from "./caller.ts"
 import { RestoredNotice } from "./controls.tsx"
@@ -47,7 +48,8 @@ const savedNotice = (saved: SavedRef) => {
 
 function Editor({ refId }: { refId: RefId }) {
   const call = useCaller()
-  const [store] = useState(() => new EditorStore(refId, call))
+  const userId = useSession().user.id
+  const [store] = useState(() => new EditorStore(refId, userId, call))
   const [open, setOpen] = useState<Open>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [uploadError, setUploadError] = useState<string | null>(null)

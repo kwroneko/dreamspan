@@ -5,6 +5,7 @@ import { Link, Navigate, Outlet, useLocation, useNavigate } from "@tanstack/reac
 import { AsyncResult } from "effect/reactivity"
 import { type ReactNode, useEffect, useState } from "react"
 import { ErrorAlert } from "../actions.tsx"
+import { clearOtherUsers } from "./editor/backup.ts"
 import { describeCause } from "../errors.ts"
 import { fullPath, navEntries, routes } from "../routes.tsx"
 import { logout, SessionContext, sessionAtom, useSession } from "../session.ts"
@@ -24,8 +25,20 @@ export function CenteredPage({ children }: { children: ReactNode }) {
   )
 }
 
+/**
+ * A session here is one user's: what the editors kept in this browser for anyone else
+ * (backup.ts) goes, whether they logged out or their session just ended.
+ */
+function ForgetOtherUsers({ userId }: { userId: string }) {
+  useEffect(() => {
+    void clearOtherUsers(userId)
+  }, [userId])
+  return null
+}
+
 /** Logs out, or says why it couldn't. */
 export function LogoutButton({ variant = "secondary" }: { variant?: "secondary" | "ghost" }) {
+  const userId = useSession().user.id
   const [pending, setPending] = useState(false)
   const [error, setError] = useState("")
   return (
@@ -36,7 +49,7 @@ export function LogoutButton({ variant = "secondary" }: { variant?: "secondary" 
         onClick={async () => {
           setPending(true)
           setError("")
-          setError(await logout())
+          setError(await logout(userId))
           setPending(false)
         }}
       >
@@ -125,6 +138,7 @@ function AppShell() {
   }
   return (
     <SessionContext value={result.value}>
+      <ForgetOtherUsers userId={result.value.user.id} />
       <a
         href="#content"
         className="sr-only rounded-md bg-surface px-3 py-2 focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus:ring-2 focus:ring-focus"

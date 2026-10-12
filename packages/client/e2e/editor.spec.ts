@@ -439,3 +439,104 @@ test("text too long to send as the page goes: the warning stops a close, and a r
     .poll(async () => (await admin((api) => api.OpenEditor({ refId: note.id }))).drafts[0]?.content[0])
     .toBe("y")
 })
+
+interface StoredCopy {
+  readonly userId: string
+  readonly refId: string
+  readonly field: string
+  readonly content: string
+  readonly at: number
+}
+
+/** The editors' copies in this browser (backup.ts), as stored. */
+const storedCopies = (page: Page) =>
+  page.evaluate(
+    () =>
+      new Promise<Array<StoredCopy>>((resolve) => {
+        const request = indexedDB.open("rp-editor-copies", 1)
+        request.onupgradeneeded = () => {
+          const store = request.result.createObjectStore("copies", { keyPath: "key" })
+          store.createIndex("userId", "userId")
+          store.createIndex("ref", ["userId", "refId"])
+        }
+        request.onsuccess = () => {
+          const db = request.result
+          const all = db.transaction("copies").objectStore("copies").getAll()
+          all.onsuccess = () => {
+            db.close()
+            resolve(all.result as Array<StoredCopy>)
+          }
+        }
+      })
+  )
+
+/** A copy as a page that closed before the server had the text leaves it. */
+const leaveCopy = (page: Page, copy: StoredCopy) =>
+  page.evaluate(
+    (copy) =>
+      new Promise<void>((resolve) => {
+        const request = indexedDB.open("rp-editor-copies", 1)
+        request.onupgradeneeded = () => {
+          const store = request.result.createObjectStore("copies", { keyPath: "key" })
+          store.createIndex("userId", "userId")
+          store.createIndex("ref", ["userId", "refId"])
+        }
+        request.onsuccess = () => {
+          const db = request.result
+          const transaction = db.transaction("copies", "readwrite")
+          transaction.objectStore("copies").put({ ...copy, key: `${copy.userId}\n${copy.refId}\n${copy.field}` })
+          transaction.oncomplete = () => {
+            db.close()
+            resolve()
+          }
+        }
+      }),
+    copy
+  )
+
+test("text kept in this browser is its user's: logging out or another user's session clears it", async ({ page }) => {
+  const me = await admin((api) => api.Whoami())
+  await admin((api) =>
+    api.CreateUser({ handle: "copy-reader", displayName: "Reader", role: "user", password: "reader-password-1" })
+  )
+  const refId = await savedCard("Kept", {})
+  await open(page, refId)
+  const copy = { userId: me.id, refId, field: textField(["description"]), content: "Unsent.", at: Date.now() }
+  await leaveCopy(page, copy)
+  await page.getByRole("button", { name: "Log out" }).first().click()
+  await expect(page).toHaveURL(/\/login/)
+  expect(await storedCopies(page)).toEqual([])
+
+  // A session that ended without a logout leaves the copy; the next user's session clears it.
+  await leaveCopy(page, copy)
+  await apiLogin(page.request, server(), "copy-reader", "reader-password-1")
+  await page.goto(`${server().url}/library`)
+  await expect(page.getByRole("heading", { level: 1, name: "Library" })).toBeVisible()
+  await expect.poll(() => storedCopies(page)).toEqual([])
+})
+
+test("copies go with a deleted note, after a week, and oldest first past a size", async ({ page }) => {
+  const me = await admin((api) => api.Whoami())
+  const { card, note } = await admin((api) =>
+    Effect.gen(function* () {
+      const card = yield* api.CreateCard({ label: "Copies", name: "Copies" })
+      const note = yield* api.CreateCardNote({ cardRefId: card.id, title: "Gone" })
+      return { card, note }
+    })
+  )
+  await open(page, card.id)
+  const field = textField(["content"])
+  await leaveCopy(page, { userId: me.id, refId: note.id, field, content: "Unsent.", at: Date.now() })
+  await page.getByRole("region", { name: "Note Gone" }).getByRole("button", { name: "Delete the note" }).click()
+  await expect.poll(async () => (await storedCopies(page)).filter((c) => c.refId === note.id)).toEqual([])
+
+  const day = 24 * 60 * 60 * 1000
+  const now = Date.now()
+  await leaveCopy(page, { userId: me.id, refId: "old", field, content: "A week ago.", at: now - 8 * day })
+  for (const [index, refId] of ["a", "b", "c"].entries()) {
+    await leaveCopy(page, { userId: me.id, refId, field, content: "x".repeat(3_500_000), at: now - (3 - index) * 1000 })
+  }
+  await page.reload()
+  await expect(page.getByRole("heading", { level: 1, name: "Copies" })).toBeVisible()
+  await expect.poll(async () => (await storedCopies(page)).map((copy) => copy.refId).sort()).toEqual(["b", "c"])
+})

@@ -6,7 +6,7 @@ import type { EditorSnapshot } from "@rp/shared/editorApi.ts"
 import type { Doc, RefId } from "@rp/shared/library.ts"
 import { useEffect, useSyncExternalStore } from "react"
 import type { AppError } from "../../errors.ts"
-import { copiesOf, dropCopy, keepCopy } from "./backup.ts"
+import { copiesOf, dropCopiesOf, dropCopy, keepCopy, pruneCopies } from "./backup.ts"
 import type { Caller } from "./caller.ts"
 
 /** How long typing pauses before the text is saved. */
@@ -54,9 +54,12 @@ export class EditorStore {
   private valueDoc: Doc = {}
 
   readonly refId: RefId
+  /** The signed-in user, whose copies in this browser (backup.ts) are the only ones read. */
+  private readonly userId: string
   private readonly call: Caller
 
-  constructor(refId: RefId, call: Caller) {
+  constructor(refId: RefId, userId: string, call: Caller) {
+    this.userId = userId
     this.refId = refId
     this.call = call
   }
@@ -137,6 +140,8 @@ export class EditorStore {
     else this.loadError = result.error
     this.bumpAll()
     if (result.ok) await this.restoreCopies()
+    // An entry that's gone (deleted, or never the user's) keeps no copies here.
+    else if (result.error.tag === "NotFound") await dropCopiesOf(this.userId, this.refId)
     return result
   }
 
@@ -149,9 +154,10 @@ export class EditorStore {
    */
   private async restoreCopies() {
     let restored = 0
-    for (const { field, content } of await copiesOf(this.refId)) {
+    await pruneCopies(this.userId)
+    for (const { field, content } of await copiesOf(this.userId, this.refId)) {
       if (this.current(field) === content || (this.current(field) === null && this.headContent(field) === content)) {
-        void dropCopy(this.refId, field, content)
+        void dropCopy(this.userId, this.refId, field, content)
         continue
       }
       this.change(field, content)
@@ -219,7 +225,7 @@ export class EditorStore {
 
   /** Typing re-renders the field; the page hears only when a field starts having unsaved changes. */
   private change(key: string, content: string) {
-    void keepCopy(this.refId, key, content)
+    void keepCopy(this.userId, this.refId, key, content)
     const field = this.field(key)
     const quiet = field.local !== null
     field.local = content
@@ -257,7 +263,7 @@ export class EditorStore {
         field.saved = result.value.content
         field.rowVersion = result.value.rowVersion
         if (field.local === content) field.local = null
-        void dropCopy(this.refId, key, content)
+        void dropCopy(this.userId, this.refId, key, content)
         this.saveError = null
       } else {
         this.saveError = result.error
@@ -445,7 +451,7 @@ export class EditorStore {
         if (!response.ok) return
         for (const { field, content } of drafts) {
           this.sent.set(field, content)
-          void dropCopy(this.refId, field, content)
+          void dropCopy(this.userId, this.refId, field, content)
         }
       },
       () => undefined

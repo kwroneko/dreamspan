@@ -6,6 +6,8 @@ import type { NoteEntry } from "@rp/shared/editorApi.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import { useEffect, useState } from "react"
 import { ErrorAlert } from "../../actions.tsx"
+import { useSession } from "../../session.ts"
+import { dropCopiesOf } from "./backup.ts"
 import type { AppError } from "../../errors.ts"
 import { Button } from "../../ui/Button.tsx"
 import { Field, Fieldset, Input, Textarea } from "../../ui/Field.tsx"
@@ -285,7 +287,8 @@ export function NoteFields({ store }: { store: EditorStore }) {
 
 /** One of the card's notes: an entity of its own, saved on its own. */
 function NoteEditor({ entry, call, onDeleted }: { entry: NoteEntry; call: Caller; onDeleted: () => void }) {
-  const [store] = useState(() => new EditorStore(entry.ref.id, call))
+  const userId = useSession().user.id
+  const [store] = useState(() => new EditorStore(entry.ref.id, userId, call))
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<AppError | null>(null)
   const state = useEditorState(store)
@@ -296,8 +299,11 @@ function NoteEditor({ entry, call, onDeleted }: { entry: NoteEntry; call: Caller
   if (state.snapshot === null) return <p className="text-sm text-muted">Loading the note…</p>
   const remove = async () => {
     const result = await call((client) => client("DeleteCardNote", { noteRefId: entry.ref.id }), ["library"])
-    if (result.ok) onDeleted()
-    else setError(result.error)
+    if (result.ok) {
+      // A deleted note's unsent text doesn't stay in this browser.
+      await dropCopiesOf(userId, entry.ref.id)
+      onDeleted()
+    } else setError(result.error)
   }
   const dirty = state.dirty > 0
   return (

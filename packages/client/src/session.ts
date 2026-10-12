@@ -2,6 +2,7 @@
 // are plain HTTP because only a response can set the session cookie (ARCHITECTURE §4).
 import type { Session } from "@rp/shared/api.ts"
 import { createContext, useContext } from "react"
+import { clearCopies } from "./features/editor/backup.ts"
 import { AppClient } from "./rpc.ts"
 
 export const sessionAtom = AppClient.query("GetSession", undefined)
@@ -53,7 +54,7 @@ export const login = async (handle: string, password: string): Promise<LoginOutc
  * server couldn't end the session, nothing reloads: the user is still logged in, and the
  * returned message says so.
  */
-export const logout = async (): Promise<string> => {
+export const logout = async (userId: string): Promise<string> => {
   let response: Response
   try {
     response = await fetch("/auth/logout", { method: "POST" })
@@ -61,6 +62,8 @@ export const logout = async (): Promise<string> => {
     return "Can't reach the server, so you're still logged in."
   }
   if (!response.ok) return `The server couldn't log you out (${response.status}), so you're still logged in.`
+  // Text the editors kept in this browser for this user goes with the session.
+  await clearCopies(userId)
   location.replace("/login")
   return ""
 }
