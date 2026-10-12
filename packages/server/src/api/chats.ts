@@ -196,7 +196,23 @@ export const makeChatHandlers = Effect.gen(function* () {
         return entry
       }).pipe(Effect.uninterruptible, internal("Regenerate")),
 
-    StopGeneration: ({ versionId }) => Effect.flatMap(userId, (id) => generations.stop(id, versionId)),
+    StopGeneration: ({ versionId }) =>
+      Effect.flatMap(userId, (id) =>
+        generations.stop(id, versionId).pipe(
+          // A Stop that loses the race with the natural finish (or comes twice) gets the
+          // version as saved, as long as it's the user's and done.
+          Effect.catchTag("NotFound", (notFound) =>
+            reader
+              .GetVersion({ userId: id, versionId })
+              .pipe(
+                Effect.flatMap((version) =>
+                  version.status === "generating" ? Effect.fail(notFound) : Effect.succeed(version)
+                )
+              )
+          ),
+          internal("StopGeneration")
+        )
+      ),
 
     SelectVersion: ({ slotId, versionId, expectedRowVersion }) =>
       Effect.gen(function* () {

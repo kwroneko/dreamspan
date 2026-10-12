@@ -971,7 +971,7 @@ The chat RPCs, live updates and generation. Contract in `@rp/shared/chatApi.ts` 
   - `SendMessage` and `Generate` add a message under a tip: the user's text, or a model reply that streams. Without `branch` the tip must be the active leaf (`LeafMoved` otherwise); with it, any slot, which starts a branch (DESIGN §3.2). `SendMessage` onto a reply still generating is `ChatBusy`, provisionally (below).
   - `Regenerate` is a swipe: a new model version of a slot, selected and streamed. `EditVersion` saves an edit as a new version "edited from" its source, and `WriteVersion` is "write your own". All three check the slot's row version (`StaleWrite`), through the writer's `AddSelectedVersion`.
   - `SelectVersion` (row version), and `AmendVersion` for a finished user-written version (`NotAmendable` otherwise; DESIGN §3.1). A version's `rowVersion` is one more than the number of times it was amended, counted from `version_history`, since `versions` has no `row_version` column.
-  - `StopGeneration` stops one generation and returns the version as saved.
+  - `StopGeneration` stops one generation and returns the version as saved. A Stop that loses the race with the natural finish, or comes twice, gets the finished version too; NotFound means it isn't the user's or is in the bin.
   - `DeleteMessage`, `DeleteBranch`, `DeleteVersion`: to the bin (§3.11). Generations under what was deleted are stopped.
 - **`SubscribeChat`:** a stream of event batches, below.
 

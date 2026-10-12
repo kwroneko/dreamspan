@@ -378,6 +378,23 @@ describe("chats", () => {
     }).pipe(Effect.scoped, withGenerator(config, fast))
   })
 
+  it.live("a Stop that loses the race with the finish gets the version as saved", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const { chat, slots } = yield* linearChat(api, 1)
+      const events = yield* subscribe(api, chat.id)
+      const { entry } = yield* api.Generate({ chatId: chat.id, parentSlotId: slots[0]!, branch: false })
+      yield* eventually(() => finished(events, entry.version.id) !== undefined)
+      const stopped = yield* api.StopGeneration({ versionId: entry.version.id })
+      assert.strictEqual(stopped.status, "complete")
+      assert.strictEqual(stopped.content, finished(events, entry.version.id)!.content)
+      // Gone to the bin, it's no longer there to stop.
+      yield* api.DeleteVersion({ versionId: entry.version.id })
+      assert.strictEqual(yield* outcome(api.StopGeneration({ versionId: entry.version.id })), "NotFound")
+    }).pipe(Effect.scoped, withGenerator(config, fast))
+  })
+
   it.live("parallel swipes under one slot stop one at a time; a late subscriber gets the text so far", () => {
     const config = testConfig()
     const slow = FakeGenerator.layer({ tokensPerSecond: 200, tokens: 2000 })
@@ -401,7 +418,8 @@ describe("chats", () => {
       const stopped = yield* api.StopGeneration({ versionId: swipe1.version.id })
       assert.strictEqual(stopped.status, "stopped")
       assert.isAbove(stopped.content.length, 0)
-      assert.strictEqual(yield* outcome(api.StopGeneration({ versionId: swipe1.version.id })), "NotFound")
+      // Twice is the same as once.
+      assert.deepStrictEqual(yield* api.StopGeneration({ versionId: swipe1.version.id }), stopped)
       yield* Effect.sleep(200)
       assert.strictEqual(streamedText(events, swipe1.version.id), stopped.content)
       // The others are still going.

@@ -441,7 +441,12 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
       )
   },
   StopGeneration: {
-    probe: (actor, owner) => refused(actor.api.StopGeneration({ versionId: owner.chat.generatingId }), "NotFound")
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        yield* refused(actor.api.StopGeneration({ versionId: owner.chat.generatingId }), "NotFound")
+        // A finished version, which a Stop that lost the race with the finish returns.
+        yield* refused(actor.api.StopGeneration({ versionId: owner.chat.versionId }), "NotFound")
+      })
   },
   SelectVersion: {
     probe: (actor, owner) =>

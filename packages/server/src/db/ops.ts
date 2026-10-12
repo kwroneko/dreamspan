@@ -1014,6 +1014,12 @@ export class ReadOps extends RpcGroup.make(
     success: PathWindow,
     error: Schema.Union([NotFound, StorageError])
   }),
+  /** One of the user's live versions: not in the bin, nor its message or chat. */
+  Rpc.make("GetVersion", {
+    payload: { userId: UserId, versionId: VersionId },
+    success: Version,
+    error: Schema.Union([NotFound, StorageError])
+  }),
   /** One live slot with its selected version, as a path shows it, and its chat. */
   Rpc.make("GetSlot", {
     payload: { userId: UserId, slotId: SlotId },
