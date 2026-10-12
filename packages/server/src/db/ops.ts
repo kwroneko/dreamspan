@@ -362,6 +362,7 @@ export class WriteOps extends RpcGroup.make(
       rowVersion: Schema.Int,
       session: Schema.Int,
       next: Schema.Boolean,
+      operationId: Schema.optionalKey(Schema.String),
       content: Schema.String
     },
     success: Schema.Struct({ draft: Schema.NullOr(Draft), recovered: Schema.Boolean }),

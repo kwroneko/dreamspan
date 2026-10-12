@@ -81,6 +81,14 @@ export const migrations = {
           UNION ALL SELECT c.id FROM slots c INDEXED BY slots_parent JOIN below ON c.parent_slot_id = below.id
         )
         SELECT 1 FROM below JOIN slots x ON x.id = below.id WHERE x.deleted_at IS NULL)`
+  ]),
+  "0015_composer_save_receipts": runAll([
+    `CREATE TABLE composer_save_receipts (
+      chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+      operation_id TEXT NOT NULL,
+      recovered INTEGER NOT NULL CHECK (recovered IN (0, 1)),
+      PRIMARY KEY (chat_id, operation_id)
+    ) STRICT`
   ])
 }
 

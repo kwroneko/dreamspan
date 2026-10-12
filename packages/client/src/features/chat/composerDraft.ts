@@ -14,11 +14,11 @@
 // This browser's copy of the text is a save waiting to be made: filed under the draft's id
 // with the row version and session it names, so a draft that moved never strands it. Any
 // chat's composer opening makes every such save there is, and the server decides each.
-import type { ChatId, SlotId } from "@rp/shared/chat.ts"
+import type { SlotId } from "@rp/shared/chat.ts"
 import type { SendResult } from "@rp/shared/chatApi.ts"
 import type { Draft, DraftState } from "@rp/shared/drafts.ts"
 import type { AppError } from "../../errors.ts"
-import { copiesOfUser, dropCopy, keepCopy, pruneCopies } from "../editor/backup.ts"
+import { type Copy, copiesOfUser, dropCopy, keepCopy, makeCopy, pendingOf, pruneCopies } from "../editor/backup.ts"
 import type { ChatSession, Outcome } from "./session.ts"
 
 /** How long typing pauses before the text is saved. */
@@ -48,33 +48,6 @@ export type Sent = { readonly sent: false } | { readonly sent: true; readonly dr
 /** What this browser's copies (backup.ts) file a chat's composer under. */
 const COPIES = "composer:"
 const copyTarget = (chatId: string) => `${COPIES}${chatId}`
-/** A copy's field: the draft's id, and whether it's text typed after a send of the draft. */
-const copyField = (draftId: string, next: boolean) => (next ? `${draftId} next` : draftId)
-/** A copy's content: the text and the draft it was typed on, as SaveComposer takes them. */
-const copyContent = (text: string, draft: Draft, next: boolean) =>
-  JSON.stringify({ text, rowVersion: draft.rowVersion, session: draft.session, next })
-
-interface Pending {
-  readonly text: string
-  readonly rowVersion: number
-  readonly session: number
-  readonly next: boolean
-}
-
-const pendingOf = (content: string): Pending | null => {
-  try {
-    const value = JSON.parse(content) as Partial<Pending>
-    return typeof value.text === "string" &&
-      typeof value.rowVersion === "number" &&
-      typeof value.session === "number" &&
-      typeof value.next === "boolean"
-      ? (value as Pending)
-      : null
-  } catch {
-    return null
-  }
-}
-
 /** The draft's text as the box would show it: an ended draft holds none. */
 const shown = (draft: Draft | null) => (draft?.status === "active" ? draft.content : "")
 
@@ -90,8 +63,10 @@ export class ComposerDraft {
   private error: AppError | null = null
   /** A send is on its way: the box holds the next message, saved once the send is answered. */
   private held = false
-  /** The send on its way: its text, the draft it was typed on, and whether the server has that text. */
-  private sending: { readonly text: string; readonly from: Draft; saved: boolean } | null = null
+  /** The pending save of the send on its way, and whether the server has it. */
+  private sending: { saved: boolean; readonly copy: Copy | null } | null = null
+  private pending: Copy | null = null
+  private readonly inFlight = new WeakSet<Copy>()
   private timer: ReturnType<typeof setTimeout> | null = null
   private queue: Promise<void> = Promise.resolve()
   private readonly listeners = new Set<() => void>()
@@ -144,21 +119,30 @@ export class ComposerDraft {
     return this.draft !== null && this.text !== shown(this.draft)
   }
 
-  /** Copies the text into this browser, as a save of it would be made. */
+  /** Capture the save at typing time, keeping requests already on their way separately. */
   private keep(text: string) {
     const draft = this.draft
-    if (draft === null) return
-    void keepCopy(
-      this.userId,
-      copyTarget(this.chatId),
-      copyField(draft.id, this.held),
-      copyContent(text, draft, this.held)
-    )
+    if (draft === null) return null
+    const previous = this.pending
+    const copy = makeCopy(this.userId, copyTarget(this.chatId), draft.id, {
+      kind: "composer",
+      payload: {
+        chatId: this.chatId,
+        draftId: draft.id,
+        rowVersion: draft.rowVersion,
+        session: draft.session,
+        next: this.held,
+        content: text
+      }
+    })
+    this.pending = copy
+    void keepCopy(copy, previous !== null && this.inFlight.has(previous) ? null : previous)
+    return copy
   }
 
-  /** Drops the copy of `text` on `draft`, once the server has it. */
-  private drop(text: string, draft: Draft, next = false) {
-    void dropCopy(this.userId, copyTarget(this.chatId), copyField(draft.id, next), copyContent(text, draft, next))
+  private acknowledge(copy: Copy) {
+    void dropCopy(copy)
+    if (this.pending === copy) this.pending = null
   }
 
   // --- The tip
@@ -241,25 +225,28 @@ export class ComposerDraft {
       (copy) =>
         copy.refId.startsWith(COPIES) && (copy.field.split(" ")[0] === opened.id || now - copy.at > STALE_COPY_MS)
     )
-    // A session's own text before what was typed after its send.
-    copies.sort((a, b) => Number(a.field.endsWith(" next")) - Number(b.field.endsWith(" next")))
-    for (const copy of copies) {
-      const pending = pendingOf(copy.content)
-      const chatId = copy.refId.slice(COPIES.length) as ChatId
-      const draftId = copy.field.split(" ")[0]!
-      if (pending === null) {
-        void dropCopy(this.userId, copy.refId, copy.field, copy.content)
-        continue
-      }
-      const { text, ...base } = pending
-      const saved = await this.session.call((client) =>
-        client("SaveComposer", { chatId, draftId, ...base, content: text })
+    copies.sort((a, b) => {
+      const first = pendingOf(a)
+      const second = pendingOf(b)
+      return (
+        a.at - b.at ||
+        Number(first?.kind === "composer" && first.payload.next === true) -
+          Number(second?.kind === "composer" && second.payload.next === true)
       )
+    })
+    for (const copy of copies) {
+      const pending = pendingOf(copy)
+      if (pending?.kind !== "composer") continue
+      const { chatId, draftId, content: text } = pending.payload
+      const saved = await this.session.call((client) => client("SaveComposer", pending.payload))
       if (!saved.ok && saved.error.tag !== "NotFound") {
-        if (draftId === opened.id) unsent = text
+        if (draftId === opened.id) {
+          unsent = text
+          this.pending = copy
+        }
         continue
       }
-      void dropCopy(this.userId, copy.refId, copy.field, copy.content)
+      await dropCopy(copy)
       if (!saved.ok) continue
       const now = saved.value.draft
       if (now?.id === opened.id) {
@@ -317,46 +304,38 @@ export class ComposerDraft {
     return this.enqueue(() => this.save())
   }
 
-  private request(draft: Draft, content: string) {
-    return this.session.call((client) =>
-      client("SaveComposer", {
-        chatId: this.chatId,
-        draftId: draft.id,
-        rowVersion: draft.rowVersion,
-        session: draft.session,
-        content
-      })
-    )
+  private async request(copy: Copy) {
+    const save = pendingOf(copy)!
+    if (save.kind !== "composer") throw new Error("expected a composer save")
+    this.inFlight.add(copy)
+    try {
+      return await this.session.call((client) => client("SaveComposer", save.payload))
+    } finally {
+      this.inFlight.delete(copy)
+    }
   }
 
-  /** Saves the text onto the draft it was typed into. */
+  /** Saves the pending request unchanged, even if an earlier save advanced the draft. */
   private async save() {
-    const draft = this.draft
-    if (this.held || draft === null || !this.dirty) return
-    const text = this.text
-    const saved = await this.request(draft, text)
+    if (this.held || this.draft === null || (!this.dirty && this.pending === null)) return
+    const copy = this.pending ?? this.keep(this.text)!
+    const saved = await this.request(copy)
     if (!saved.ok) {
       this.error = saved.error
       this.emit()
       return
     }
-    this.drop(text, draft)
+    const unchanged = this.pending === copy
+    this.acknowledge(copy)
     this.error = null
     const now = saved.value.draft
-    if (!saved.value.recovered && now !== null) {
-      this.draft = now
-      return this.emit()
-    }
-    // The draft's text was sent from another tab, or the draft is gone: what was typed here
-    // is in the recovered texts, and the box shows the composer as it is now.
-    this.recovered = saved.value.recovered
+    this.recovered ||= saved.value.recovered
     const current = now ?? (await this.reopen())
     if (current === null) return this.emit()
     this.draft = current
-    // Typed on while the save was out: that stays, on the composer as it is now.
-    if (this.text === text) this.text = shown(current)
+    if (unchanged) this.text = shown(current)
     this.emit()
-    if (this.dirty) this.schedule(0)
+    if (this.pending !== null || this.dirty) this.schedule(0)
   }
 
   /** The composer at the tip asked for, read again. */
@@ -379,21 +358,24 @@ export class ComposerDraft {
     const from = this.draft
     if (from === null || this.held) return Promise.resolve()
     const text = this.text
-    const sending = { text, from, saved: text === shown(from) }
+    const copy = this.pending ?? (this.dirty ? this.keep(text) : null)
+    const sending = { saved: text === shown(from) && copy === null, copy }
     this.cancelTimer()
     this.held = true
     this.sending = sending
+    if (this.pending === copy) this.pending = null
     this.text = ""
     this.emit()
     return this.enqueue(async () => {
       let saved = from
       if (!sending.saved) {
-        const result = await this.request(from, text)
+        const result = await this.request(copy!)
         if (!result.ok || result.value.recovered || result.value.draft === null) {
           if (!result.ok) this.error = result.error
           return this.giveBack(text, result.ok ? (result.value.draft ?? from) : from)
         }
         saved = result.value.draft
+        this.acknowledge(copy!)
         sending.saved = true
       }
       const outcome = await run(text, saved)
@@ -401,8 +383,6 @@ export class ComposerDraft {
       const next = this.text
       this.held = false
       this.sending = null
-      this.drop(text, from)
-      this.drop(next, from, true)
       const after = outcome.draft ?? (await this.reopen())
       if (after !== null && after.session !== saved.session) this.draft = after
       else if (after !== null && next === "") {
@@ -412,10 +392,7 @@ export class ComposerDraft {
       }
       // Otherwise what's typed since goes on top of that tab's text, theirs one step back.
       else this.draft = saved
-      if (this.dirty) {
-        this.keep(this.text)
-        this.schedule(SAVE_DELAY_MS)
-      }
+      if (this.pending !== null || this.dirty) this.schedule(SAVE_DELAY_MS)
       this.emit()
     })
   }
@@ -424,13 +401,14 @@ export class ComposerDraft {
   private giveBack(text: string, draft: Draft) {
     const next = this.text
     this.held = false
+    const sendingCopy = this.sending?.copy ?? null
     this.sending = null
-    this.drop(next, this.draft!, true)
     this.draft = draft
     this.text = next === "" ? text : `${text}\n\n${next}`
     this.emit()
     if (this.dirty) {
       this.keep(this.text)
+      if (sendingCopy !== null) void dropCopy(sendingCopy)
       this.schedule(0)
     }
   }
@@ -492,27 +470,19 @@ export class ComposerDraft {
     const draft = this.draft
     if (draft === null) return
     const sending = this.sending
-    const saves: Array<{ readonly on: Draft; readonly text: string; readonly next: boolean }> =
-      sending === null
-        ? this.dirty
-          ? [{ on: draft, text: this.text, next: false }]
-          : []
-        : [
-            ...(sending.saved ? [] : [{ on: sending.from, text: sending.text, next: false }]),
-            ...(this.text === "" ? [] : [{ on: sending.from, text: this.text, next: true }])
-          ]
+    const saves = [
+      ...(sending !== null && !sending.saved && sending.copy !== null ? [sending.copy] : []),
+      ...(this.pending === null ? [] : [this.pending])
+    ]
     const body = JSON.stringify({
       drafts: [],
-      composers: saves.map(({ on, text, next }) => ({
-        chatId: this.chatId,
-        draftId: on.id,
-        rowVersion: on.rowVersion,
-        session: on.session,
-        next,
-        content: text
-      }))
+      composers: saves.flatMap((copy) => {
+        const save = pendingOf(copy)
+        return save?.kind === "composer" ? [save.payload] : []
+      })
     })
     if (saves.length === 0 || this.sent === body || new Blob([body]).size > KEEPALIVE_LIMIT) return
+    for (const copy of saves) this.inFlight.add(copy)
     void fetch("/library/drafts", {
       method: "POST",
       keepalive: true,
@@ -522,7 +492,9 @@ export class ComposerDraft {
       (response) => {
         if (!response.ok) return
         this.sent = body
-        for (const { on, text, next } of saves) this.drop(text, on, next)
+        // The browser copy is acknowledged; the live request still needs this identity
+        // to reconcile its local draft with the writer's receipt.
+        for (const copy of saves) void dropCopy(copy)
       },
       () => undefined
     )

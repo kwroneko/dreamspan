@@ -82,6 +82,40 @@ const commit = (api: Api, refId: RefId, message: string | null = null) =>
 const doc = (api: Api, refId: RefId) => Effect.map(api.OpenEditor({ refId }), (opened) => opened.doc)
 
 layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" })("editing the library", (it) => {
+  it.effect("an active editor save crossing a commit keeps its revision base and conflicts", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const ref = yield* api.CreateCard({ label: "Crossing commit", name: "Synthetic" })
+      const field = textField(["description"])
+      const first = yield* draft(api, ref.id, field, "hello")
+      const b = yield* api.SaveEditorDraft({
+        refId: ref.id,
+        field,
+        content: "hello B",
+        expectedRowVersion: first.rowVersion,
+        expectedSession: first.session,
+        baseRevisionId: null
+      })
+      yield* api.CommitEditorDrafts({
+        refId: ref.id,
+        expectedRowVersion: ref.rowVersion,
+        fields: [{ field, expectedRowVersion: b.rowVersion }],
+        message: null
+      })
+      const a = yield* api.SaveEditorDraft({
+        refId: ref.id,
+        field,
+        content: "hello A",
+        expectedRowVersion: first.rowVersion,
+        expectedSession: first.session,
+        baseRevisionId: null
+      })
+      assert.strictEqual(a.baseRevision, first.baseRevision)
+      assert.strictEqual(yield* outcome(commit(api, ref.id)), "EditConflict")
+      assert.strictEqual((yield* doc(api, ref.id)).description, "hello B")
+    })
+  )
+
   it.effect("a card's fields edit through drafts and save as one revision", () =>
     Effect.gen(function* () {
       const api = yield* client()

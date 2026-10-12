@@ -4,10 +4,10 @@
 import { applyDrafts, type FieldPath, getAt, parseField, textField, valueField } from "@rp/shared/editing.ts"
 import type { Draft } from "@rp/shared/drafts.ts"
 import type { EditorSnapshot } from "@rp/shared/editorApi.ts"
-import type { Doc, RefId } from "@rp/shared/library.ts"
+import type { Doc, RefId, RevisionId } from "@rp/shared/library.ts"
 import { useEffect, useSyncExternalStore } from "react"
 import type { AppError } from "../../errors.ts"
-import { copiesOf, dropCopiesOf, dropCopy, keepCopy, pruneCopies } from "./backup.ts"
+import { type Copy, copiesOf, dropCopiesOf, dropCopy, keepCopy, makeCopy, pendingOf, pruneCopies } from "./backup.ts"
 import type { Caller } from "./caller.ts"
 
 /** How long typing pauses before the text is saved. */
@@ -16,6 +16,10 @@ const SAVE_DELAY_MS = 600
 interface FieldDraft {
   /** The draft's content as the server has it; null without an active draft. */
   saved: string | null
+  draftId: string | null
+  baseRevision: RevisionId | null
+  pending: Copy | null
+  savingCopy: Copy | null
   /** The draft row's version, an ended draft's too: the next session starts from it. */
   rowVersion: number | null
   /** The draft's session, so the server knows which one the text was typed in. */
@@ -122,7 +126,18 @@ export class EditorStore {
   private field(key: string) {
     let field = this.fields.get(key)
     if (field === undefined) {
-      field = { saved: null, rowVersion: null, session: null, local: null, timer: null, inFlight: null }
+      field = {
+        saved: null,
+        draftId: null,
+        baseRevision: null,
+        pending: null,
+        savingCopy: null,
+        rowVersion: null,
+        session: null,
+        local: null,
+        timer: null,
+        inFlight: null
+      }
       this.fields.set(key, field)
     }
     return field
@@ -151,33 +166,47 @@ export class EditorStore {
   /** How many changes the last open brought back from this browser's copies. */
   restored = 0
 
-  /**
-   * Text a page closed on before the server had it (backup.ts) comes back as unsaved
-   * changes, saved as typing would be. A copy the server already holds is dropped.
-   */
+  /** Replay every copy with its original base: only the writer decides a stale save. */
   private async restoreCopies() {
-    let restored = 0
     await pruneCopies(this.userId)
-    for (const { field, content } of await copiesOf(this.userId, this.refId)) {
-      if (this.current(field) === content || (this.current(field) === null && this.headContent(field) === content)) {
-        void dropCopy(this.userId, this.refId, field, content)
-        continue
+    for (const copy of [...(await copiesOf(this.userId, this.refId))].sort((a, b) => a.at - b.at)) {
+      const pending = pendingOf(copy)
+      // Legacy field copies had no base. Naming no draft conservatively preserves anything
+      // they displace; new copies always replay the complete original request.
+      const payload =
+        pending?.kind === "editor"
+          ? pending.payload
+          : {
+              refId: this.refId,
+              field: copy.field,
+              content: copy.content,
+              expectedRowVersion: null,
+              baseRevisionId:
+                (this.snapshot!.drafts.find((draft) => draft.key.field === copy.field)
+                  ?.baseRevision as RevisionId | null) ?? this.snapshot!.ref.headRevisionId
+            }
+      const replay =
+        pending?.kind === "editor"
+          ? copy
+          : {
+              ...copy,
+              save: { kind: "editor" as const, draftId: null, payload }
+            }
+      if (replay !== copy) await keepCopy(replay)
+      const result = await this.call((client) => client("SaveEditorDraft", payload))
+      const field = this.field(copy.field)
+      if (result.ok) {
+        this.hold(field, result.value)
+        await dropCopy(copy)
+      } else {
+        field.local = payload.content
+        field.pending = replay
+        this.saveError = result.error
       }
-      this.change(field, content)
-      restored++
+      this.restored++
     }
-    if (restored > 0) {
-      this.restored = restored
-      this.bump(DRAFTS)
-    }
-  }
-
-  /** What a field holds in the saved version, as its draft would hold it. */
-  private headContent(key: string) {
-    const parsed = parseField(key)
-    if (parsed === null) return null
-    const value = getAt(this.head, parsed.path)
-    return parsed.kind === "value" ? JSON.stringify(value) : typeof value === "string" ? value : null
+    this.rebuild()
+    this.bumpAll()
   }
 
   /** The server's state, keeping what was typed here and not saved yet. */
@@ -186,6 +215,8 @@ export class EditorStore {
     this.loadError = null
     for (const field of this.fields.values()) {
       field.saved = null
+      field.draftId = null
+      field.baseRevision = null
       field.rowVersion = null
       field.session = null
     }
@@ -225,8 +256,24 @@ export class EditorStore {
 
   /** Typing re-renders the field; the page hears only when a field starts having unsaved changes. */
   private change(key: string, content: string) {
-    void keepCopy(this.userId, this.refId, key, content)
     const field = this.field(key)
+    const previous = field.pending
+    const copy = makeCopy(this.userId, this.refId, key, {
+      kind: "editor",
+      draftId: field.draftId,
+      payload: {
+        refId: this.refId,
+        field: key,
+        content,
+        ...this.base(field),
+        baseRevisionId: field.saved === null ? (this.snapshot?.ref.headRevisionId ?? null) : field.baseRevision
+      }
+    })
+    field.pending = copy
+    void keepCopy(
+      copy,
+      previous === field.savingCopy || (previous !== null && this.sendingCopies.has(previous)) ? null : previous
+    )
     const quiet = field.local !== null
     field.local = content
     if (key.startsWith("=")) {
@@ -251,14 +298,20 @@ export class EditorStore {
     field.timer = null
     while (field.inFlight) await field.inFlight
     if (field.local === null) return
-    const content = field.local
+    const copy = field.pending!
+    const pending = pendingOf(copy)!
+    if (pending.kind !== "editor") return
+    field.savingCopy = copy
     const run = async () => {
       // Another tab saved this field meanwhile: the server puts this on top, theirs kept.
-      const result = await this.saveOnce(key, content)
+      const result = await this.call((client) => client("SaveEditorDraft", pending.payload))
       if (result.ok) {
         this.hold(field, result.value)
-        if (field.local === content) field.local = null
-        void dropCopy(this.userId, this.refId, key, content)
+        if (field.pending === copy) {
+          field.local = null
+          field.pending = null
+        }
+        void dropCopy(copy)
         this.saveError = null
       } else {
         this.saveError = result.error
@@ -268,22 +321,9 @@ export class EditorStore {
     field.inFlight = run()
     await field.inFlight
     field.inFlight = null
+    field.savingCopy = null
     // Only now is the save over, as far as the page is concerned.
     this.bump(DRAFTS)
-  }
-
-  private saveOnce(key: string, content: string) {
-    const field = this.field(key)
-    return this.call((client) =>
-      client("SaveEditorDraft", {
-        refId: this.refId,
-        field: key,
-        content,
-        ...this.base(field),
-        // A new drafting session starts from the saved version.
-        baseRevisionId: field.saved === null ? (this.snapshot?.ref.headRevisionId ?? null) : null
-      })
-    )
   }
 
   /** The draft as this tab last had it, for a save to name. */
@@ -296,6 +336,8 @@ export class EditorStore {
 
   /** The draft as the server returned it. */
   private hold(field: FieldDraft, draft: Draft) {
+    field.draftId = draft.id
+    field.baseRevision = draft.baseRevision as RevisionId | null
     field.saved = draft.status === "active" ? draft.content : null
     field.rowVersion = draft.rowVersion
     field.session = draft.session
@@ -427,7 +469,8 @@ export class EditorStore {
   }
 
   /** What the server confirmed `beacon` sent, per field, so closing doesn't send it twice. */
-  private readonly sent = new Map<string, string>()
+  private readonly sent = new WeakSet<Copy>()
+  private readonly sendingCopies = new WeakSet<Copy>()
 
   /**
    * As the page goes: what's typed and not saved yet, in a request that outlives the page.
@@ -435,22 +478,16 @@ export class EditorStore {
    * text (backup.ts), after `beforeunload` has asked. A send counts once the server answers.
    */
   beacon() {
-    const head = this.snapshot?.ref.headRevisionId ?? null
-    const drafts = [...this.fields].flatMap(([field, draft]) =>
-      draft.local === null || this.sent.get(field) === draft.local
-        ? []
-        : [
-            {
-              refId: this.refId,
-              field,
-              content: draft.local,
-              ...this.base(draft),
-              baseRevisionId: draft.saved === null ? head : null
-            }
-          ]
+    const copies = [...this.fields.values()].flatMap((field) =>
+      field.pending === null || this.sent.has(field.pending) ? [] : [field.pending]
     )
+    const drafts = copies.flatMap((copy) => {
+      const save = pendingOf(copy)
+      return save?.kind === "editor" ? [save.payload] : []
+    })
     const body = JSON.stringify({ drafts })
     if (drafts.length === 0 || new Blob([body]).size > KEEPALIVE_LIMIT) return
+    for (const copy of copies) this.sendingCopies.add(copy)
     void fetch("/library/drafts", {
       method: "POST",
       keepalive: true,
@@ -459,9 +496,9 @@ export class EditorStore {
     }).then(
       (response) => {
         if (!response.ok) return
-        for (const { field, content } of drafts) {
-          this.sent.set(field, content)
-          void dropCopy(this.userId, this.refId, field, content)
+        for (const copy of copies) {
+          this.sent.add(copy)
+          void dropCopy(copy)
         }
       },
       () => undefined

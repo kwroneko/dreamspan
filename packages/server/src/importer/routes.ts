@@ -12,8 +12,9 @@ import {
   exportFormats,
   ImportResult
 } from "@rp/shared/libraryImport.ts"
-import { RefId, RevisionId } from "@rp/shared/library.ts"
+import { RefId } from "@rp/shared/library.ts"
 import { DraftKey } from "@rp/shared/drafts.ts"
+import { EditorDraftSave } from "@rp/shared/editorApi.ts"
 import { ComposerBeacon } from "@rp/shared/composerApi.ts"
 import { parseField } from "@rp/shared/editing.ts"
 import { ByteSize, Effect, Layer, Option, Schedule, Schema, Semaphore } from "effect"
@@ -104,16 +105,7 @@ const authenticated = <A, E, R>(accounts: Accounts["Service"], handle: Effect.Ef
 const ExportRequest = Schema.Struct({ refId: RefId, format: ExportFormatSchema })
 
 const LeavingDrafts = Schema.Struct({
-  drafts: Schema.Array(
-    Schema.Struct({
-      refId: RefId,
-      field: Schema.String,
-      content: Schema.String,
-      expectedRowVersion: Schema.NullOr(Schema.Int),
-      expectedSession: Schema.optionalKey(Schema.Int),
-      baseRevisionId: Schema.NullOr(RevisionId)
-    })
-  ).check(Schema.isMaxLength(500)),
+  drafts: Schema.Array(EditorDraftSave).check(Schema.isMaxLength(500)),
   /** Chats' composers (DESIGN §6.2): one per open chat at most, in practice. */
   composers: Schema.optionalKey(Schema.Array(ComposerBeacon).check(Schema.isMaxLength(50)))
 })

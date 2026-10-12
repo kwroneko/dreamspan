@@ -1,15 +1,16 @@
-// The last resort for text typed and not yet on the server: a copy in this browser
-// (IndexedDB), written as the user types and removed once the server has the text. A page
-// that closes before its save and its keepalive request (capped at 64 KB) leaves the copy,
-// and the editor brings it back on the next open. A chat's composer keeps its copies here
-// too (chat/composerDraft.ts), filed under `composer:<chat>` with its draft's id as the field
-// and the save they stand for as the content.
-//
-// It's a recovery copy, not a secure store: it's plain text in the browser profile, so
-// anyone with that profile can read what a user typed and didn't send while the copy lasts.
-// So copies belong to their user, are never restored to another, and go when the user logs
-// out, when another user's session starts here, when their entry is deleted, after a week,
-// and oldest first past a total size. Anything failing here only loses the copy.
+// Pending saves kept in this browser until the exact copy is acknowledged. Tabs own
+// independent copies; a newer edit may replace only this store's unsent copy. The payload
+// is the save as typed, including its base, and replay never refreshes that base.
+import { ComposerBeacon } from "@rp/shared/composerApi.ts"
+import { uuidv7 } from "@rp/shared/id.ts"
+import { EditorDraftSave } from "@rp/shared/editorApi.ts"
+import { Option, Schema } from "effect"
+
+const PendingSave = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("editor"), draftId: Schema.NullOr(Schema.String), payload: EditorDraftSave }),
+  Schema.Struct({ kind: Schema.Literal("composer"), payload: ComposerBeacon })
+])
+type PendingSave = typeof PendingSave.Type
 
 const DATABASE = "rp-editor-copies"
 const STORE = "copies"
@@ -18,13 +19,14 @@ const COPY_RETENTION_MS = 7 * 24 * 60 * 60 * 1000
 /** The most all of a user's copies may hold, in characters; the oldest go first. */
 const COPY_LIMIT_CHARS = 8 * 1024 * 1024
 
-interface Copy {
+export interface Copy {
   readonly key: string
   readonly userId: string
   readonly refId: string
   readonly field: string
   readonly content: string
   readonly at: number
+  readonly save?: PendingSave
 }
 
 let opened: Promise<IDBDatabase | null> | null = null
@@ -46,8 +48,6 @@ const database = () => {
   })
   return opened
 }
-
-const keyOf = (userId: string, refId: string, field: string) => `${userId}\n${refId}\n${field}`
 
 const run = async (mode: IDBTransactionMode, apply: (store: IDBObjectStore) => void) => {
   const db = await database()
@@ -83,20 +83,63 @@ const forEach = (
   }
 }
 
-export const keepCopy = (userId: string, refId: string, field: string, content: string) =>
-  run("readwrite", (store) =>
-    store.put({ key: keyOf(userId, refId, field), userId, refId, field, content, at: Date.now() } satisfies Copy)
-  )
+export const makeCopy = (userId: string, refId: string, field: string, save: PendingSave): Copy => {
+  const key = uuidv7()
+  // Composer operation identities also survive a keepalive acknowledgement or a send.
+  const pending =
+    save.kind === "composer"
+      ? {
+          ...save,
+          payload: { ...save.payload, operationId: key }
+        }
+      : save
+  return { key, userId, refId, field, content: save.payload.content, save: pending, at: Date.now() }
+}
 
-/** Drops a copy once the server holds `content` (a newer copy stays). */
-export const dropCopy = (userId: string, refId: string, field: string, content: string) =>
+export const keepCopy = (copy: Copy, replaced: Copy | null = null) =>
   run("readwrite", (store) => {
-    const key = keyOf(userId, refId, field)
-    const request = store.get(key)
-    request.onsuccess = () => {
-      if ((request.result as Copy | undefined)?.content === content) store.delete(key)
-    }
+    store.put(copy)
+    if (replaced !== null) store.delete(replaced.key)
   })
+
+/** Acknowledgement names the copy, never reconstructed text or version metadata. */
+export const dropCopy = (copy: Copy) => run("readwrite", (store) => store.delete(copy.key))
+
+const decodeSave = Schema.decodeUnknownOption(PendingSave)
+
+/** Old releases kept composer payloads in `content`; preserve their original base too. */
+export const pendingOf = (copy: Copy): PendingSave | null => {
+  if (copy.save !== undefined) return Option.getOrNull(decodeSave(copy.save))
+  if (!copy.refId.startsWith("composer:")) return null
+  try {
+    const old = JSON.parse(copy.content) as unknown
+    const decoded = Schema.decodeUnknownOption(
+      Schema.Struct({
+        text: Schema.String,
+        rowVersion: Schema.Int,
+        session: Schema.Int,
+        next: Schema.Boolean
+      })
+    )(old)
+    if (Option.isNone(decoded)) return null
+    return Option.getOrNull(
+      decodeSave({
+        kind: "composer",
+        payload: {
+          chatId: copy.refId.slice("composer:".length),
+          draftId: copy.field.split(" ")[0],
+          rowVersion: decoded.value.rowVersion,
+          session: decoded.value.session,
+          next: decoded.value.next,
+          content: decoded.value.text,
+          operationId: copy.key
+        }
+      })
+    )
+  } catch {
+    return null
+  }
+}
 
 /** The user's copies for an entry. */
 export const copiesOf = async (userId: string, refId: string): Promise<ReadonlyArray<Copy>> => {

@@ -100,7 +100,7 @@ export const makeWriteHandlers = (bin: Bin) =>
         }).pipe(transaction("OpenComposer")),
 
       // Into a chat of the user's, live or in the bin: text typed as it was deleted is kept too.
-      SaveComposer: ({ userId, chatId, draftId, rowVersion, session, next, content }) =>
+      SaveComposer: ({ userId, chatId, draftId, rowVersion, session, next, operationId, content }) =>
         Effect.gen(function* () {
           yield* found(
             Effect.orDie(
@@ -109,7 +109,12 @@ export const makeWriteHandlers = (bin: Bin) =>
             "chat",
             chatId
           )
-          return yield* drafts.saveComposer(userId, chatId, { draftId, rowVersion, session, next }, content)
+          return yield* drafts.saveComposer(
+            userId,
+            chatId,
+            { draftId, rowVersion, session, next, ...(operationId === undefined ? {} : { operationId }) },
+            content
+          )
         }).pipe(transaction("SaveComposer")),
 
       RestoreComposer: ({ userId, chatId, draftId, seq, expectedRowVersion }) =>

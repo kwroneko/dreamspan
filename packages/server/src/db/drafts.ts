@@ -340,7 +340,7 @@ export const makeDraftStore = (
       const reopened = draft.status !== "active"
       const textChanged = reopened || !isEmptyPatch(patch)
       yield* sql`UPDATE drafts SET content = ${content}, status = 'active',
-                   base_revision = ${reopened ? baseRevision : (baseRevision ?? draft.base_revision)},
+                   base_revision = ${baseRevision ?? draft.base_revision},
                    row_version = row_version + 1,
                    text_version = CASE WHEN ${textChanged ? 1 : 0} THEN row_version + 1 ELSE text_version END,
                    updated_at = ${now}
@@ -403,7 +403,13 @@ export const makeDraftStore = (
         draft.status === "active" &&
         (base === null || ended || options.next === true || draft.text_version > base.rowVersion)
       // On another tab's text, the draft keeps the revision that text was started from.
-      yield* update(draft, content, "edit", changed ? null : options.baseRevision, changed)
+      yield* update(
+        draft,
+        content,
+        "edit",
+        ended ? (options.baseRevision ?? draft.base_revision) : changed ? null : options.baseRevision,
+        changed
+      )
       return { draft: toDraft((yield* byId(draft.id))!), recovered: false }
     })
 
@@ -519,18 +525,42 @@ export const makeDraftStore = (
   const saveComposer = (
     userId: UserId,
     chatId: string,
-    base: { readonly draftId: string; readonly rowVersion: number; readonly session: number; readonly next: boolean },
+    base: {
+      readonly draftId: string
+      readonly rowVersion: number
+      readonly session: number
+      readonly next: boolean
+      readonly operationId?: string
+    },
     content: string
   ) =>
     Effect.gen(function* () {
       yield* tooLarge(content)
       const draft = yield* findComposer(userId, chatId, base.draftId)
+      if (base.operationId !== undefined) {
+        const [receipt] = yield* sql<{ recovered: number }>`SELECT recovered FROM composer_save_receipts
+          WHERE chat_id = ${chatId} AND operation_id = ${base.operationId}`
+        if (receipt !== undefined)
+          return { draft: draft === null ? null : toDraft(draft), recovered: receipt.recovered === 1 }
+      }
+      let saved
       if (draft === null) {
         const recovered = content.trim() !== ""
         if (recovered) yield* recover(userId, composerKey(chatId, null), [content], "discard")
-        return { draft: null, recovered }
+        saved = { draft: null, recovered }
+      } else {
+        // A legacy next request can reopen only the immediately following session.
+        const next = base.next && draft.session <= base.session + 1
+        saved = yield* saveOnto(draft, base, content, { baseRevision: null, ended: "recover", next })
       }
-      return yield* saveOnto(draft, base, content, { baseRevision: null, ended: "recover", next: base.next })
+      if (base.operationId !== undefined) {
+        yield* sql`INSERT INTO composer_save_receipts ${sql.insert({
+          chat_id: chatId,
+          operation_id: base.operationId,
+          recovered: saved.recovered ? 1 : 0
+        })}`
+      }
+      return saved
     })
 
   const restoreComposer = (userId: UserId, chatId: string, draftId: string, seq: number, expectedRowVersion: number) =>

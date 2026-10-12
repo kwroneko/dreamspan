@@ -227,6 +227,98 @@ describe("the composer's drafts", () => {
     }).pipe(Effect.scoped, withServer(testConfig()))
   )
 
+  for (const sentFirst of [false, true]) {
+    it.live(`replaying a next-message save after its send does nothing (first sent: ${sentFirst})`, () =>
+      Effect.gen(function* () {
+        const api = yield* client()
+        const chat = yield* api.CreateChat({ title: "Replay" })
+        const first = yield* typeInto(api, chat.id, null, "FIRST")
+        let tip: SlotId | null = null
+        if (sentFirst) {
+          const sent = yield* posted(
+            api.SendMessage({
+              chatId: chat.id,
+              parentSlotId: tip,
+              branch: false,
+              content: first.content,
+              composerRowVersion: first.rowVersion
+            })
+          )
+          tip = sent.entry.slotId
+        }
+        const request = {
+          chatId: chat.id,
+          draftId: first.id,
+          rowVersion: first.rowVersion,
+          session: first.session,
+          next: true,
+          operationId: "next-copy",
+          content: "NEXT"
+        }
+        const replay = () => post("/library/drafts", { drafts: [], composers: [request] })
+        assert.strictEqual((yield* replay()).status, 204)
+        const next = yield* open(api, chat.id, tip)
+        assert.strictEqual(next.content, "NEXT")
+        const sent = yield* posted(
+          api.SendMessage({
+            chatId: chat.id,
+            parentSlotId: tip,
+            branch: false,
+            content: next.content,
+            composerRowVersion: next.rowVersion
+          })
+        )
+        const before = yield* api.ListRecoveredTexts({ limit: 100, before: null })
+        assert.strictEqual((yield* replay()).status, 204)
+        const after = yield* open(api, chat.id, sent.entry.slotId)
+        assert.deepStrictEqual([after.status, after.content], ["committed", ""])
+        assert.deepStrictEqual(yield* api.ListRecoveredTexts({ limit: 100, before: null }), before)
+      }).pipe(Effect.scoped, withServer(testConfig()))
+    )
+  }
+
+  it.live("a pending next-message receipt survives a server and worker restart", () =>
+    Effect.gen(function* () {
+      const config = testConfig()
+      const { request, tip, recovered } = yield* Effect.gen(function* () {
+        const api = yield* client()
+        const chat = yield* api.CreateChat({ title: "Durable replay" })
+        const first = yield* typeInto(api, chat.id, null, "FIRST")
+        const request = {
+          chatId: chat.id,
+          draftId: first.id,
+          rowVersion: first.rowVersion,
+          session: first.session,
+          next: true,
+          operationId: "survives-restart",
+          content: "NEXT"
+        }
+        const saved = yield* api.SaveComposer(request)
+        const sent = yield* posted(
+          api.SendMessage({
+            chatId: chat.id,
+            parentSlotId: null,
+            branch: false,
+            content: "NEXT",
+            composerRowVersion: saved.draft!.rowVersion
+          })
+        )
+        return {
+          request,
+          tip: sent.entry.slotId,
+          recovered: yield* api.ListRecoveredTexts({ limit: 100, before: null })
+        }
+      }).pipe(Effect.scoped, withServer(config))
+      yield* Effect.gen(function* () {
+        const api = yield* client()
+        assert.strictEqual((yield* post("/library/drafts", { drafts: [], composers: [request] })).status, 204)
+        const after = yield* open(api, request.chatId, tip)
+        assert.deepStrictEqual([after.status, after.content], ["committed", ""])
+        assert.deepStrictEqual(yield* api.ListRecoveredTexts({ limit: 100, before: null }), recovered)
+      }).pipe(Effect.scoped, withServer(config))
+    })
+  )
+
   it.live("takes a closing page's text with the editors' drafts, onto the draft it was typed into", () =>
     Effect.gen(function* () {
       const api = yield* client()

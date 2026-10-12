@@ -67,6 +67,14 @@ const Writes = [NotFound, StaleWrite, EditRefused, ServerError] as const
 
 const DraftField = { refId: RefId, field: Schema.String }
 
+export const EditorDraftSave = Schema.Struct({
+  ...DraftField,
+  content: Schema.String,
+  expectedRowVersion: Schema.NullOr(Schema.Int),
+  expectedSession: Schema.optionalKey(Schema.Int),
+  baseRevisionId: Schema.NullOr(RevisionId)
+})
+
 export class EditorApi extends RpcGroup.make(
   Rpc.make("OpenEditor", { payload: { refId: RefId }, success: EditorSnapshot, error: Schema.Union([...Errors]) }),
   /** A card from scratch: an upstream with every field empty but its name. */
@@ -81,17 +89,7 @@ export class EditorApi extends RpcGroup.make(
    * started from: given when a session starts, or to take the saved version as the new base.
    */
   Rpc.make("SaveEditorDraft", {
-    payload: {
-      ...DraftField,
-      content: Schema.String,
-      /**
-       * The draft as last seen (null: none was), with its session. Another tab's save since
-       * is decided on the server: this text goes on top, theirs one step back and kept.
-       */
-      expectedRowVersion: Schema.NullOr(Schema.Int),
-      expectedSession: Schema.optionalKey(Schema.Int),
-      baseRevisionId: Schema.NullOr(RevisionId)
-    },
+    payload: EditorDraftSave.fields,
     success: Draft,
     error: Schema.Union([...Writes])
   }),
