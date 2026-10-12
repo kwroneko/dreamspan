@@ -8,6 +8,7 @@ import { exportCardPng } from "../../src/formats/cardExport.ts"
 import { importCard } from "../../src/formats/cardImport.ts"
 import { exportStPreset, importStPreset } from "../../src/formats/preset.ts"
 import { exportLorebook, importLorebook } from "../../src/formats/worldInfo.ts"
+import type { CardFields } from "@rp/shared/macros/context.ts"
 import { json, png, run } from "../formats/support.ts"
 
 interface ChatLine {
@@ -44,13 +45,36 @@ const CARD = "Mira Vance"
 const LORE = "Saltmarsh Lore"
 
 /** The card's text fields, macros unexpanded. */
-export const CARD_TEXT = {
+const CARD_TEXT = {
   description: "{{char}} keeps the tide ledger of Saltmarsh and owes {{user}} a favor.",
   personality: "Dry, exact, quietly kind.",
   scenario: "{{user}} arrives at the ledger house during a spring flood.",
   first_mes: "*{{char}} looks up from the ledger.* You're late, {{user}}.",
   mes_example: "<START>\n{{user}}: Is the causeway open?\n{{char}}: Until the eleventh bell.",
   creator_notes: "Synthetic fixture for the ST harness."
+}
+
+const DEPTH_PROMPT = "{{char}} never guesses a tide."
+const CARD_VERSION = "1"
+
+/** When every fixture chat message was sent, as ST stores it and as epoch milliseconds (UTC). */
+export const CHAT_SEND_DATE = "January 1, 2026 12:00am"
+export const CHAT_SENT_AT = Date.UTC(2026, 0, 1)
+
+/** The fixture card as ST's macros read it, with the persona's description. */
+export const MACRO_CARD: CardFields = {
+  description: CARD_TEXT.description,
+  personality: CARD_TEXT.personality,
+  scenario: CARD_TEXT.scenario,
+  persona: PERSONA.description,
+  mesExamples: CARD_TEXT.mes_example,
+  systemPrompt: "",
+  postHistoryInstructions: "",
+  depthPrompt: DEPTH_PROMPT,
+  creatorNotes: CARD_TEXT.creator_notes,
+  version: CARD_VERSION,
+  firstMessage: CARD_TEXT.first_mes,
+  alternateGreetings: []
 }
 
 const cardPng = () => {
@@ -66,13 +90,13 @@ const cardPng = () => {
           post_history_instructions: "",
           tags: ["fixture"],
           creator: "rp-harness",
-          character_version: "1",
+          character_version: CARD_VERSION,
           alternate_greetings: [],
           extensions: {
             talkativeness: "0.5",
             fav: false,
             world: LORE,
-            depth_prompt: { prompt: "{{char}} never guesses a tide.", depth: 2, role: "system" }
+            depth_prompt: { prompt: DEPTH_PROMPT, depth: 2, role: "system" }
           }
         }
       })

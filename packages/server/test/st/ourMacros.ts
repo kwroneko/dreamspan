@@ -1,24 +1,26 @@
-// Our macro engine as the ST harness calls it: the seam where the engine plugs in.
-//
-// Until the macro engine (`packages/shared/src/macros/`) merges, `expandWithOurs` is a
-// stub that knows only `{{user}}` and `{{char}}`, so the comparison runs and its
-// differences don't fail the run. To plug the engine in, replace the body with a call to
-// its expansion, giving it everything in `OurMacroInput`, and set `OUR_ENGINE_IS_STUB` to
-// false.
+// Our macro engine as the ST harness calls it (`@rp/shared/macros/`, ARCHITECTURE §10), with
+// the context ST's page has: the vector's names and variables, the fixture card and chat,
+// ST's settings, the fixed clock.
+import { registerBuiltinMacros } from "@rp/shared/macros/builtins.ts"
+import type { CardFields, ChatMessage } from "@rp/shared/macros/context.ts"
+import { expand } from "@rp/shared/macros/expand.ts"
+import { makeMacroRegistry } from "@rp/shared/macros/registry.ts"
+import { Effect, Scope } from "effect"
 import type { MacroContextInput, MacroOutcome } from "./macroVectors.ts"
 
-export interface OurMacroInput {
+/** What ST's page holds besides the vector's own context. */
+interface StEnvironment {
+  readonly card: CardFields
+  readonly messages: ReadonlyArray<ChatMessage>
+  readonly model: string
+  readonly maxContextTokens: number
+  readonly maxResponseTokens: number
+}
+
+interface OurMacroInput {
   readonly text: string
   readonly context: MacroContextInput
-  /** The open character's text fields, macros unexpanded (ST's `{{description}}` and so on). */
-  readonly card: {
-    readonly description: string
-    readonly personality: string
-    readonly scenario: string
-    readonly first_mes: string
-    readonly mes_example: string
-    readonly creator_notes: string
-  }
+  readonly environment: StEnvironment
   /** Epoch milliseconds, and the time zone ST's page runs in. */
   readonly now: number
   readonly timeZone: string
@@ -27,13 +29,36 @@ export interface OurMacroInput {
 }
 
 /** The engine's name in the report. */
-export const OUR_ENGINE = "stub: {{user}} and {{char}} only"
-export const OUR_ENGINE_IS_STUB = true
+export const OUR_ENGINE = "@rp/shared/macros expand(), built-in macros"
+export const OUR_ENGINE_IS_STUB = false
 
-export const expandWithOurs = (input: OurMacroInput): MacroOutcome => ({
-  output: input.text.replace(/\{\{(user|char)\}\}/gi, (_, name: string) =>
-    name.toLowerCase() === "user" ? input.context.user : input.context.char
-  ),
-  local: { ...input.context.local },
-  global: { ...input.context.global }
-})
+// The built-ins stay registered for the whole run: the scope is never closed.
+const registry = makeMacroRegistry()
+Effect.runSync(Effect.flatMap(Scope.make(), (scope) => Scope.provide(scope)(registerBuiltinMacros(registry))))
+
+/** Card text expands as ST expands a preset prompt; a limit reached is reported as the output. */
+export const expandWithOurs = (input: OurMacroInput): MacroOutcome => {
+  const { environment, context } = input
+  const result = expand({
+    text: input.text,
+    origin: { kind: "preset" },
+    purpose: "assembly",
+    registry,
+    context: {
+      names: { user: context.user, char: context.char },
+      variables: { local: context.local, global: context.global },
+      card: environment.card,
+      messages: environment.messages,
+      now: input.now,
+      timeZone: input.timeZone,
+      model: environment.model,
+      input: "",
+      maxContextTokens: environment.maxContextTokens,
+      maxResponseTokens: environment.maxResponseTokens,
+      isMobile: false
+    },
+    random: input.random
+  })
+  if (result._tag === "LimitExceeded") return { output: `(limit: ${result.limit})`, local: {}, global: {} }
+  return { output: result.text, local: { ...result.variables.local }, global: { ...result.variables.global } }
+}

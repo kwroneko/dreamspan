@@ -7,7 +7,7 @@ import type { Browser, Page } from "@playwright/test"
 import { readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { png } from "../formats/support.ts"
-import type { FixtureSet } from "./fixtures.ts"
+import { CHAT_SEND_DATE, type FixtureSet } from "./fixtures.ts"
 import { MACRO_TIME_ZONE, type MacroContextInput, type MacroOutcome, seededRandom } from "./macroVectors.ts"
 import { MOCK_MODEL, type MockEndpoint } from "./mock.ts"
 
@@ -173,7 +173,7 @@ export const loadFixtures = async (browser: Browser, url: string, fixtures: Fixt
           const lines = chat.lines.map((line) => ({
             ...line,
             is_system: false,
-            send_date: "January 1, 2026 12:00am",
+            send_date: input.sendDate,
             extra: {}
           }))
           await post("/api/chats/save", {
@@ -186,6 +186,7 @@ export const loadFixtures = async (browser: Browser, url: string, fixtures: Fixt
       },
       {
         personaName: fixtures.persona.name,
+        sendDate: CHAT_SEND_DATE,
         personaAvatar: PERSONA_AVATAR,
         personaPng: base64(png()),
         cards: fixtures.cards.map((card) => ({ name: card.name, png: base64(card.png) })),
@@ -319,7 +320,12 @@ export const evaluateMacros = async (
     readonly seed: number
     readonly vectors: ReadonlyArray<{ readonly text: string; readonly context: MacroContextInput }>
   }
-): Promise<{ readonly newEngine: boolean; readonly outcomes: ReadonlyArray<MacroOutcome> }> => {
+): Promise<{
+  readonly newEngine: boolean
+  /** The settings ST's state macros read: `custom_model`, `openai_max_context`, `openai_max_tokens`. */
+  readonly settings: { readonly model: string; readonly maxContextTokens: number; readonly maxResponseTokens: number }
+  readonly outcomes: ReadonlyArray<MacroOutcome>
+}> => {
   const page = await openPage(browser, url, { readOnly: true, now: options.now })
   try {
     await openChat(page, options.character)
@@ -338,7 +344,16 @@ export const evaluateMacros = async (
             global: { ...ctx.extensionSettings.variables.global }
           }
         })
-        return { newEngine: ctx.powerUserSettings.experimental_macro_engine, outcomes }
+        const oai = ctx.chatCompletionSettings
+        return {
+          newEngine: ctx.powerUserSettings.experimental_macro_engine,
+          settings: {
+            model: String(oai.custom_model),
+            maxContextTokens: Number(oai.openai_max_context),
+            maxResponseTokens: Number(oai.openai_max_tokens)
+          },
+          outcomes
+        }
       },
       { vectors: options.vectors, random: String(seededRandom), seed: options.seed }
     )

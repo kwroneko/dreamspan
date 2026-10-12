@@ -59,7 +59,7 @@ const main = async () => {
 
   const sections: Array<Section> = [
     await checkFixtures(browser, st.url, mock, fixtures),
-    await compareMacros(browser, st.url, fixtures),
+    ...(await compareMacros(browser, st.url, fixtures)),
     await comparePresetRoundTrips(browser, st.url, mock, fixtures)
   ]
   return printReport(sections) === 0 ? 0 : 1

@@ -20,6 +20,7 @@ export const ST_IMAGE =
   "ghcr.io/sillytavern/sillytavern@sha256:eef27ff0c7961f1a2f488400f581f48ff38f8b910c5d3b8d389138d71791bb14"
 
 const LABEL = "rp-harness.st-diff.owner"
+const NAME_PREFIX = "rp-st-diff-"
 const PID_NAMESPACE = readlinkSync("/proc/self/ns/pid")
 
 export interface StContainer {
@@ -53,14 +54,28 @@ const alive = (pid: number) => {
   }
 }
 
-/** Removes containers left by earlier runs of this harness whose process has exited. */
+/**
+ * Removes containers left by earlier runs of this harness whose process has exited. A
+ * container must match all of: a name starting with our prefix and our label (both as
+ * Docker filters, which it ANDs, and checked again here), a label value of our own shape
+ * naming this PID namespace, and an owner process that's gone.
+ */
 export const removeOrphans = () => {
-  const rows = docker(["ps", "-a", "--filter", `label=${LABEL}`, "--format", `{{.ID}} {{.Label "${LABEL}"}}`])
+  const rows = docker([
+    "ps",
+    "-a",
+    "--filter",
+    `name=^${NAME_PREFIX}`,
+    "--filter",
+    `label=${LABEL}`,
+    "--format",
+    `{{.ID}} {{.Names}} {{.Label "${LABEL}"}}`
+  ])
   for (const row of rows.split("\n").filter(Boolean)) {
-    const [id, owner = ""] = row.split(" ")
-    const at = owner.lastIndexOf("/")
-    const [namespace, pid] = [owner.slice(0, at), Number(owner.slice(at + 1))]
-    if (id && namespace === PID_NAMESPACE && !alive(pid)) spawnSync("docker", ["rm", "-f", id], { stdio: "ignore" })
+    const [id, name = "", owner = ""] = row.split(" ")
+    const match = /^(pid:\[\d+\])\/(\d+)$/.exec(owner)
+    if (!id || !name.startsWith(NAME_PREFIX) || !match || match[1] !== PID_NAMESPACE) continue
+    if (!alive(Number(match[2]))) spawnSync("docker", ["rm", "-f", id], { stdio: "ignore" })
   }
 }
 
@@ -113,7 +128,7 @@ export const startSt = async (
   mkdirSync(dataDir, { recursive: true })
   writeFileSync(join(configDir, "config.yaml"), config(port))
 
-  const name = `rp-st-diff-${process.pid}-${randomBytes(3).toString("hex")}`
+  const name = `${NAME_PREFIX}${process.pid}-${randomBytes(3).toString("hex")}`
   const user = `${process.getuid?.() ?? 1000}:${process.getgid?.() ?? 1000}`
   const logs = () => {
     const result = spawnSync("docker", ["logs", "--tail", "60", name], { encoding: "utf8" })

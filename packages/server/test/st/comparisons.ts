@@ -1,6 +1,6 @@
-// The comparisons the harness runs against ST, each producing one report section.
+// The comparisons the harness runs against ST, each producing report sections.
 import type { Browser } from "@playwright/test"
-import { CARD_TEXT, type FixtureSet } from "./fixtures.ts"
+import { CHAT_SENT_AT, type FixtureSet, MACRO_CARD } from "./fixtures.ts"
 import {
   DEFAULT_MACRO_CONTEXT,
   MACRO_NOW,
@@ -40,34 +40,67 @@ export const checkFixtures = async (
   }
 }
 
-/** Each macro vector through ST's engine and ours: the output and the variables after it. */
-export const compareMacros = async (browser: Browser, url: string, fixtures: FixtureSet): Promise<Section> => {
+/**
+ * Each macro vector through ST's engine and ours: the output and the variables after it.
+ * Differences on vectors marked as documented deviations are listed apart and expected.
+ */
+export const compareMacros = async (
+  browser: Browser,
+  url: string,
+  fixtures: FixtureSet
+): Promise<ReadonlyArray<Section>> => {
   const vectors = MACRO_VECTORS.map((vector) => ({
-    text: vector.text,
+    ...vector,
     context: { ...DEFAULT_MACRO_CONTEXT, ...vector.context }
   }))
+  const chat = fixtures.chats[0]!
   const st = await evaluateMacros(browser, url, {
-    character: fixtures.chats[0]!.card,
+    character: chat.card,
     now: MACRO_NOW,
     seed: MACRO_SEED,
-    vectors
+    vectors: vectors.map(({ text, context }) => ({ text, context }))
   })
-  const differences = vectors.flatMap((vector, i) => {
+  const environment = {
+    ...st.settings,
+    card: MACRO_CARD,
+    messages: chat.lines.map((line) => ({ text: line.mes, fromUser: line.is_user, sentAt: CHAT_SENT_AT }))
+  }
+  const differences: Array<string> = []
+  const deviations: Array<string> = []
+  const unobserved: Array<string> = []
+  vectors.forEach((vector, i) => {
     const ours = expandWithOurs({
-      ...vector,
-      card: CARD_TEXT,
+      text: vector.text,
+      context: vector.context,
+      environment,
       now: MACRO_NOW,
       timeZone: MACRO_TIME_ZONE,
       random: seededRandom(MACRO_SEED)
     })
-    return diffJson(st.outcomes[i], ours).map((line) => `${JSON.stringify(vector.text)} ${line}`)
+    const lines = diffJson(st.outcomes[i], ours).map((line) => `${JSON.stringify(vector.text)} ${line}`)
+    if (vector.deviation === undefined) differences.push(...lines)
+    else if (lines.length > 0) deviations.push(...lines.map((line) => `${line} [${vector.deviation}]`))
+    else unobserved.push(`${JSON.stringify(vector.text)}: no difference [${vector.deviation}]`)
   })
-  return {
-    title: "Macros: ST ≠ ours",
-    notes: [`${vectors.length} vectors; ST's new engine on: ${st.newEngine}`, `ours: ${OUR_ENGINE}`],
-    differences,
-    ...(OUR_ENGINE_IS_STUB ? { expected: "our engine is a stub" } : {})
-  }
+  const deviating = vectors.filter((vector) => vector.deviation !== undefined).length
+  return [
+    {
+      title: "Macros: ST ≠ ours",
+      notes: [
+        `${vectors.length - deviating} vectors; ST's new engine on: ${st.newEngine}`,
+        `ours: ${OUR_ENGINE}`,
+        "each line: the vector, then the JSON path, ST's value ≠ ours"
+      ],
+      differences,
+      ...(OUR_ENGINE_IS_STUB ? { expected: "our engine is a stub" } : {})
+    },
+    {
+      title: "Macros: documented deviations",
+      notes: [`${deviating} vectors`, ...unobserved],
+      differences: deviations,
+      expected: "ARCHITECTURE documents each"
+    }
+  ]
 }
 
 /**
