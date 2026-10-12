@@ -39,14 +39,24 @@ function TemplateText({
   const cast = useCast()
   const read = useCallback(() => session.castAfter(parentSlotId), [session, parentSlotId])
   const positionCast = useSyncExternalStore(session.subscribePositions, read)
+  // The speaker card's own fields, for `{{description}}` and the like, as the preview had them.
+  const readFields = useCallback(
+    () => (version.speakerEntityId === null ? undefined : session.cardFields(version.speakerEntityId)),
+    [session, version.speakerEntityId]
+  )
+  const fields = useSyncExternalStore(session.subscribePositions, readFields)
   const here = useMemo(
     () => (positionCast ? castView(positionCast, [...cast.cards.values()]) : cast),
     [positionCast, cast]
   )
-  const text = displayText(version.content, version.macroMode, {
-    user: here.user,
-    char: nameOf(here, version.speakerEntityId) ?? here.char
-  })
+  // Random and time macros show what they drew when the greeting was first shown.
+  const text = displayText(
+    version.content,
+    version.macroMode,
+    { user: here.user, char: nameOf(here, version.speakerEntityId) ?? here.char },
+    fields ?? {},
+    version.frozenMacros ?? {}
+  )
   return <Markdown text={text} streaming={false} />
 }
 

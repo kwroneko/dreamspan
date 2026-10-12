@@ -3,6 +3,7 @@
 // until the first send, so opening cards never leaves greeting-only chats behind.
 import type { CastCard, EntityId } from "@rp/shared/chat.ts"
 import type { CardForChat } from "@rp/shared/chatSetupApi.ts"
+import type { FrozenValues } from "@rp/shared/macros/expand.ts"
 import { useNavigate, useParams } from "@tanstack/react-router"
 import { Effect } from "effect"
 import { useEffect, useState } from "react"
@@ -14,7 +15,7 @@ import { Markdown } from "../../ui/Markdown.tsx"
 import { Select } from "../../ui/Select.tsx"
 import { Loading } from "../../ui/Spinner.tsx"
 import { useTitle } from "../shell.tsx"
-import { displayText } from "./macros.ts"
+import { expandForDisplay } from "./macros.ts"
 
 const PERSONA_KEY = "rp.lastPersona"
 const NONE = "none"
@@ -46,6 +47,21 @@ function Pending({ card, personas }: { card: CardForChat; personas: ReadonlyArra
   const playing = personas.find((p) => p.entityId === persona) ?? null
   const shown = card.greetings[greeting]
   const name = card.card.name
+  const fields = { description: card.description, personality: card.personality, scenario: card.scenario }
+  // What each greeting's random and time macros drew when first shown: the chat keeps them,
+  // so a greeting reads the same after the send as before it (DESIGN §5.6).
+  const [frozen] = useState(() => new Map<number, FrozenValues>())
+  const expandGreeting = (index: number) => {
+    const result = expandForDisplay(
+      card.greetings[index]!,
+      "template",
+      { user: playing?.name ?? "User", char: name },
+      fields,
+      frozen.get(index) ?? {}
+    )
+    frozen.set(index, result.frozen)
+    return result.text
+  }
 
   const start = async (first: "send" | "generate") => {
     const personaId = playing?.entityId ?? null
@@ -56,6 +72,10 @@ function Pending({ card, personas }: { card: CardForChat; personas: ReadonlyArra
             cards: [card.card.entityId],
             persona: personaId,
             greeting: card.greetings.length > 0 ? greeting : null,
+            frozen: card.greetings.map((_, index) => {
+              if (!frozen.has(index)) expandGreeting(index)
+              return { ...frozen.get(index) }
+            }),
             first:
               first === "send"
                 ? { _tag: "Send", content: text, speakerEntityId: personaId }
@@ -132,15 +152,7 @@ function Pending({ card, personas }: { card: CardForChat; personas: ReadonlyArra
                 </div>
               )}
             </header>
-            <Markdown
-              text={displayText(
-                shown,
-                "template",
-                { user: playing?.name ?? "User", char: name },
-                { description: card.description, personality: card.personality, scenario: card.scenario }
-              )}
-              streaming={false}
-            />
+            <Markdown text={expandGreeting(greeting)} streaming={false} />
           </article>
         )}
       </div>

@@ -48,7 +48,7 @@ import {
 } from "@rp/shared/usage.ts"
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
-import { CastCard, QueuedMessage } from "@rp/shared/chat.ts"
+import { CastCard, FrozenMacros, QueuedMessage } from "@rp/shared/chat.ts"
 import { CardForChat, FirstTurn } from "@rp/shared/chatSetupApi.ts"
 
 const StorageErrorReason = Schema.Literals(["busy", "constraint", "corrupt", "other"])
@@ -192,6 +192,19 @@ export const ImportedMedia = Schema.Struct({
 
 /** A stored file, at `path` under the data directory. */
 const StoredFile = Schema.Struct({ path: Schema.String, mime: Schema.String, byteSize: Schema.Int })
+
+/** What the send queue did behind a slot (chatSetupWrites.ts). */
+export const QueueOutcome = Schema.Struct({
+  chatId: ChatId,
+  /** Slots the queue posted, in order, the next reply's last. */
+  posted: Schema.Array(SlotId),
+  next: Schema.NullOr(Schema.Struct({ slotId: SlotId, versionId: VersionId })),
+  /** Entries withdrawn because their reply went to the bin. */
+  withdrawn: Schema.Int,
+  /** Whether the chat's queue changed, and what's left of it. */
+  queueChanged: Schema.Boolean,
+  queue: Schema.Array(QueuedMessage)
+})
 
 export class ExportSource extends Schema.Class<ExportSource>("ExportSource")({
   kind: EntityKind,
@@ -774,7 +787,8 @@ export class WriteOps extends RpcGroup.make(
       cards: Schema.Array(EntityId),
       persona: Schema.NullOr(EntityId),
       greeting: Schema.NullOr(Schema.Int),
-      first: FirstTurn
+      first: FirstTurn,
+      frozen: Schema.Array(FrozenMacros)
     },
     success: AppendResult,
     error: Schema.Union([NotFound, StorageError])
@@ -792,6 +806,8 @@ export class WriteOps extends RpcGroup.make(
       kind: Schema.Literals(["message", "generate"]),
       content: Schema.String,
       speakerEntityId: Schema.NullOr(EntityId),
+      /** For a message that's queued: who replies once it posts. */
+      replySpeakerEntityId: Schema.NullOr(EntityId),
       direction: Schema.NullOr(Schema.String)
     },
     success: Schema.Union([
@@ -812,9 +828,18 @@ export class WriteOps extends RpcGroup.make(
     error: Schema.Union([NotFound, StaleWrite, StorageError])
   }),
   Rpc.make("WithdrawQueued", {
-    payload: { userId: UserId, queuedId: Schema.String },
+    payload: { userId: UserId, queuedId: Schema.String, expectedRowVersion: Schema.Int },
     success: Schema.Struct({ queued: QueuedMessage, queue: Schema.Array(QueuedMessage) }),
-    error: Schema.Union([NotFound, StorageError])
+    error: Schema.Union([NotFound, StaleWrite, StorageError])
+  }),
+  /**
+   * SelectVersion, and in the same transaction the queue behind the slot: a selected
+   * version that isn't generating lets it post, as a generation's end does.
+   */
+  Rpc.make("SelectAndDrain", {
+    payload: { userId: UserId, slotId: SlotId, versionId: VersionId, expectedRowVersion: Schema.Int },
+    success: QueueOutcome,
+    error: Schema.Union([NotFound, StaleWrite, StorageError])
   }),
   /**
    * A generation's end: its final text and status, as SaveGeneration, and in the same
@@ -837,18 +862,7 @@ export class WriteOps extends RpcGroup.make(
       status: VersionStatus,
       error: Schema.NullOr(VersionError)
     },
-    success: Schema.Struct({
-      version: Version,
-      chatId: ChatId,
-      /** Slots the queue posted, in order, the next reply's last. */
-      posted: Schema.Array(SlotId),
-      next: Schema.NullOr(Schema.Struct({ slotId: SlotId, versionId: VersionId })),
-      /** Entries withdrawn because their reply went to the bin. */
-      withdrawn: Schema.Int,
-      /** Whether the chat's queue changed, and what's left of it. */
-      queueChanged: Schema.Boolean,
-      queue: Schema.Array(QueuedMessage)
-    }),
+    success: Schema.Struct({ ...QueueOutcome.fields, version: Version }),
     error: Schema.Union([NotFound, StorageError])
   })
 ) {}

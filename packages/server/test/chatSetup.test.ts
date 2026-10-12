@@ -109,6 +109,41 @@ describe("chat setup", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), slow)))
   )
 
+  it.live("a queued send is answered by the speaker picked when it was sent, not the reply it waited for", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const miraId = yield* card(api, "Mira", mira)
+      const anaId = yield* card(api, "Ana", { name: "Ana" }, true)
+      // The user has the model write their own turn (impersonation), and replies meanwhile.
+      const started = yield* api.StartChat({
+        cards: [miraId],
+        persona: anaId,
+        greeting: null,
+        first: { _tag: "Generate", speakerEntityId: anaId, direction: "" }
+      })
+      const queued = yield* api.SendMessage({
+        chatId: started.chat.id,
+        parentSlotId: started.entry.slotId,
+        branch: false,
+        content: "Now answer me.",
+        speakerEntityId: anaId,
+        replySpeakerEntityId: miraId
+      })
+      assert.strictEqual(queued._tag, "Queued")
+      yield* api.StopGeneration({ versionId: started.entry.version.id })
+      let entries = yield* pathOf(api, started.chat.id)
+      while (entries.length < 4) {
+        yield* Effect.sleep(20)
+        entries = yield* pathOf(api, started.chat.id)
+      }
+      assert.deepStrictEqual(
+        entries.map((e) => e.version.speakerEntityId),
+        [miraId, anaId, anaId, miraId]
+      )
+      yield* api.StopGeneration({ versionId: entries[3]!.version.id })
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), slow)))
+  )
+
   it.live("without a generator, a chat starting with a reply isn't made at all", () =>
     Effect.gen(function* () {
       const api = yield* client()

@@ -6,31 +6,13 @@ import type { ChatId, SlotId } from "@rp/shared/chat.ts"
 import { GenerationUnavailable } from "@rp/shared/chatApi.ts"
 import { Cast, type CastChange } from "@rp/shared/chatSetupApi.ts"
 import type { UserId } from "@rp/shared/domain.ts"
-import { ServerError } from "@rp/shared/errors.ts"
 import { foldState, type StateEventData } from "@rp/shared/state.ts"
 import { Effect, Option } from "effect"
-import { RpcClientError } from "effect/rpc"
 import { ChatHub } from "../chat/ChatHub.ts"
 import { Generations } from "../chat/Generations.ts"
 import { Generator } from "../chat/Generator.ts"
 import { Reader, Writer } from "../db/Database.ts"
-import { StorageError } from "../db/ops.ts"
-
-type Internal = StorageError | RpcClientError.RpcClientError
-
-/** Storage and worker failures become ServerError, logged; every other error keeps its tag. */
-const internal =
-  (operation: string) =>
-  <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, Exclude<E, Internal> | ServerError, R> =>
-    Effect.catchIf(
-      effect,
-      (error): error is Extract<E, Internal> =>
-        error instanceof StorageError || error instanceof RpcClientError.RpcClientError,
-      (error) =>
-        Effect.logError(`${operation} failed`, error).pipe(
-          Effect.andThen(Effect.fail(new ServerError({ message: `${operation} failed` })))
-        )
-    ) as Effect.Effect<A, Exclude<E, Internal> | ServerError, R>
+import { internal } from "./internal.ts"
 
 /** A cast change as the state event it records (DATA-MODEL §5.3), chat-wide. */
 const toEvent = (change: CastChange): StateEventData => {
@@ -98,7 +80,7 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
       Effect.flatMap(userId, (id) => reader.GetCardForChat({ userId: id, entityId })).pipe(internal("GetCardForChat")),
 
     // Once the chat is written, a first reply starts even if the caller has gone.
-    StartChat: ({ cards, persona, greeting, first }) =>
+    StartChat: ({ cards, persona, greeting, first, frozen }) =>
       Effect.gen(function* () {
         if (first._tag === "Generate" && Option.isNone(generator)) {
           return yield* new GenerationUnavailable({
@@ -106,7 +88,7 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
           })
         }
         const id = yield* userId
-        const result = yield* writer.StartChat({ userId: id, cards, persona, greeting, first })
+        const result = yield* writer.StartChat({ userId: id, cards, persona, greeting, first, frozen: frozen ?? [] })
         if (first._tag === "Generate") {
           yield* generations.start({
             userId: id,
@@ -147,10 +129,10 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
         return queued
       }).pipe(internal("EditQueued")),
 
-    WithdrawQueued: ({ queuedId }) =>
+    WithdrawQueued: ({ queuedId, expectedRowVersion }) =>
       Effect.gen(function* () {
         const id = yield* userId
-        const { queued, queue } = yield* writer.WithdrawQueued({ userId: id, queuedId })
+        const { queued, queue } = yield* writer.WithdrawQueued({ userId: id, queuedId, expectedRowVersion })
         hub.publish(queued.chatId, { _tag: "Queue", queue })
         return queued
       }).pipe(internal("WithdrawQueued"))

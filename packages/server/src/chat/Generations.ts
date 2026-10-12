@@ -8,6 +8,7 @@ import type { UserId } from "@rp/shared/domain.ts"
 import { NotFound } from "@rp/shared/errors.ts"
 import { Cause, Context, Effect, Exit, Fiber, Layer, Option, Stream } from "effect"
 import { Reader, Writer } from "../db/Database.ts"
+import type { QueueOutcome } from "../db/ops.ts"
 import { ChatHub } from "./ChatHub.ts"
 import { type GenerationFailed, type GenerationRequest, Generator, type GeneratorShape } from "./Generator.ts"
 
@@ -36,6 +37,8 @@ export class Generations extends Context.Service<
     readonly live: (chatId: ChatId) => Array<{ readonly versionId: VersionId; readonly text: string }>
     /** The versions generating in a chat. */
     readonly runningIn: (chatId: ChatId) => Array<VersionId>
+    /** After a write moved the send queue: starts the reply it posted, and publishes what changed. */
+    readonly continueQueue: (userId: UserId, outcome: typeof QueueOutcome.Type) => Effect.Effect<void>
   }
 >()("rp/chat/Generations") {
   static readonly layer = Layer.effect(
@@ -99,17 +102,23 @@ export class Generations extends Context.Service<
           const finished = saved.value
           entry.final = finished.version
           hub.publish(request.chatId, { _tag: "Version", version: finished.version })
-          if (!finished.queueChanged) return
-          if (finished.next !== null) {
+          yield* continueQueue(request.userId, finished)
+        })
+
+      /** After the queue moved: the reply it posted starts, and subscribers hear of both. */
+      const continueQueue = (userId: GenerationRequest["userId"], outcome: typeof QueueOutcome.Type) =>
+        Effect.gen(function* () {
+          if (!outcome.queueChanged) return
+          if (outcome.next !== null) {
             yield* startGeneration({
-              userId: request.userId,
-              chatId: finished.chatId,
-              slotId: finished.next.slotId,
-              versionId: finished.next.versionId
+              userId,
+              chatId: outcome.chatId,
+              slotId: outcome.next.slotId,
+              versionId: outcome.next.versionId
             })
           }
-          yield* publishPosted(request.userId, finished.chatId, finished.posted)
-          hub.publish(finished.chatId, { _tag: "Queue", queue: finished.queue })
+          yield* publishPosted(userId, outcome.chatId, outcome.posted)
+          hub.publish(outcome.chatId, { _tag: "Queue", queue: outcome.queue })
         })
 
       /** Slots the queue posted, then the chat whose leaf they moved. */
@@ -174,6 +183,7 @@ export class Generations extends Context.Service<
 
       return Generations.of({
         start: startGeneration,
+        continueQueue,
         stop: (userId, versionId) =>
           Effect.gen(function* () {
             const entry = running.get(versionId)

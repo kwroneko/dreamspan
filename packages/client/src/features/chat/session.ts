@@ -17,6 +17,7 @@ import {
   versionInContext
 } from "@rp/shared/chat.ts"
 import type { Cast, CastChange } from "@rp/shared/chatSetupApi.ts"
+import type { CardFields } from "@rp/shared/macros/context.ts"
 import { NotFound } from "@rp/shared/errors.ts"
 import type { ChatEvent, PathRange, PathWindow } from "@rp/shared/chatApi.ts"
 import { Cause, Context, Effect, Exit, Fiber, Schedule, Stream } from "effect"
@@ -176,9 +177,58 @@ export class ChatSession {
     for (const listener of this.positionListeners) listener()
   }
 
+  /**
+   * Bumped by every `Queue` event. A queue the server returned (a read, or a send's reply)
+   * was taken before the events that arrived while it was in flight, so it's dropped when
+   * one did: the event is newer, and an older snapshot could bring back a posted entry.
+   */
+  private queueEvents = 0
+
+  private async queueSnapshot<A>(
+    request: Promise<Outcome<A>>,
+    queue: (value: A) => ReadonlyArray<QueuedMessage> | null
+  ): Promise<Outcome<A>> {
+    const seen = this.queueEvents
+    const result = await request
+    if (result.ok && !this.disposed && seen === this.queueEvents) {
+      const next = queue(result.value)
+      if (next !== null) this.update({ queue: next })
+    }
+    return result
+  }
+
   private async refreshQueue() {
-    const result = await this.call((client) => client("ListQueued", { chatId: this.chatId }))
-    if (result.ok && !this.disposed) this.update({ queue: result.value })
+    await this.queueSnapshot(
+      this.call((client) => client("ListQueued", { chatId: this.chatId })),
+      (queue) => queue
+    )
+  }
+
+  // --- Card text for macros at a message (`{{description}}` in a greeting), by card.
+
+  private readonly cardTexts = new Map<string, CardFields | "loading">()
+
+  /** The fields a card's macros read; undefined until read, then a `subscribePositions` change. */
+  cardFields(entityId: EntityId): CardFields | undefined {
+    const known = this.cardTexts.get(entityId)
+    if (known !== undefined) return known === "loading" ? undefined : known
+    this.cardTexts.set(entityId, "loading")
+    void this.call((client) => client("GetCardForChat", { entityId })).then((result) => {
+      if (this.disposed) return
+      // A card in the bin or gone reads as empty fields, as in assembly.
+      this.cardTexts.set(
+        entityId,
+        result.ok
+          ? {
+              description: result.value.description,
+              personality: result.value.personality,
+              scenario: result.value.scenario
+            }
+          : {}
+      )
+      for (const listener of this.positionListeners) listener()
+    })
+    return undefined
   }
 
   private report() {
@@ -432,6 +482,7 @@ export class ChatSession {
       case "Deleted":
         return this.update({ deleted: true })
       case "Queue":
+        this.queueEvents++
         return this.update({ queue: event.queue })
       case "State":
         this.forgetPositions()
@@ -556,23 +607,25 @@ export class ChatSession {
     speaker: EntityId | null = null,
     replySpeaker: EntityId | null = null
   ): Promise<{ readonly sent: boolean; readonly outcome: Outcome<unknown> }> {
-    const result = await this.call((client) =>
-      client("SendMessage", {
-        chatId: this.chatId,
-        parentSlotId: this.view.leafSlotId,
-        branch: this.onOtherBranch(),
-        content,
-        speakerEntityId: speaker
-      })
+    const result = await this.queueSnapshot(
+      this.call((client) =>
+        client("SendMessage", {
+          chatId: this.chatId,
+          parentSlotId: this.view.leafSlotId,
+          branch: this.onOtherBranch(),
+          content,
+          speakerEntityId: speaker,
+          // If it's queued, the server asks for the reply when it posts, from the same speaker.
+          replySpeakerEntityId: replySpeaker
+        })
+      ),
+      (value) => (value._tag === "Queued" ? value.queue : null)
     )
     if (!result.ok) {
       if (result.error.tag === "LeafMoved") this.reload()
       return { sent: false, outcome: result }
     }
-    if (result.value._tag === "Queued") {
-      this.update({ queue: result.value.queue })
-      return { sent: true, outcome: result }
-    }
+    if (result.value._tag === "Queued") return { sent: true, outcome: result }
     this.appended(result.value.entry, result.value.chat)
     return { sent: true, outcome: await this.generate(result.value.entry.slotId, replySpeaker) }
   }
@@ -587,18 +640,20 @@ export class ChatSession {
     direction = ""
   ): Promise<Outcome<unknown>> {
     const branch = parentSlotId === this.view.leafSlotId && this.onOtherBranch()
-    const result = await this.call((client) =>
-      client("Generate", {
-        chatId: this.chatId,
-        parentSlotId,
-        branch,
-        speakerEntityId: speaker,
-        ...(direction.trim() === "" ? {} : { direction })
-      })
+    const result = await this.queueSnapshot(
+      this.call((client) =>
+        client("Generate", {
+          chatId: this.chatId,
+          parentSlotId,
+          branch,
+          speakerEntityId: speaker,
+          ...(direction.trim() === "" ? {} : { direction })
+        })
+      ),
+      (value) => (value._tag === "Queued" ? value.queue : null)
     )
     if (result.ok) {
-      if (result.value._tag === "Queued") this.update({ queue: result.value.queue })
-      else this.appended(result.value.entry, result.value.chat)
+      if (result.value._tag === "Posted") this.appended(result.value.entry, result.value.chat)
     } else if (result.error.tag === "LeafMoved") this.reload()
     return result
   }
@@ -616,13 +671,21 @@ export class ChatSession {
     return result
   }
 
-  async editQueued(queued: QueuedMessage, content: string): Promise<Outcome<unknown>> {
+  /**
+   * Saves a queued message's new text over the version the editor started from: if another
+   * tab changed it since, that's StaleWrite, and nothing is overwritten.
+   */
+  async editQueued(
+    queued: QueuedMessage,
+    content: string,
+    from: { readonly rowVersion: number; readonly speakerEntityId: EntityId | null }
+  ): Promise<Outcome<QueuedMessage>> {
     return this.call((client) =>
       client("EditQueued", {
         queuedId: queued.id,
         content,
-        speakerEntityId: queued.speakerEntityId,
-        expectedRowVersion: queued.rowVersion
+        speakerEntityId: from.speakerEntityId,
+        expectedRowVersion: from.rowVersion
       })
     )
   }
@@ -634,7 +697,9 @@ export class ChatSession {
 
   /** Takes a queued entry back; its text is returned for the composer. */
   async withdrawQueued(queued: QueuedMessage): Promise<Outcome<QueuedMessage>> {
-    const result = await this.call((client) => client("WithdrawQueued", { queuedId: queued.id }))
+    const result = await this.call((client) =>
+      client("WithdrawQueued", { queuedId: queued.id, expectedRowVersion: queued.rowVersion })
+    )
     if (result.ok) this.update({ queue: this.view.queue.filter((q) => q.id !== queued.id) })
     return result
   }

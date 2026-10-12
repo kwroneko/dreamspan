@@ -655,7 +655,8 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
       })
   },
   WithdrawQueued: {
-    probe: (actor, owner) => refused(actor.api.WithdrawQueued({ queuedId: owner.queuedId }), "NotFound")
+    probe: (actor, owner) =>
+      refused(actor.api.WithdrawQueued({ queuedId: owner.queuedId, expectedRowVersion: 1 }), "NotFound")
   }
 }
 

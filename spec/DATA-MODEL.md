@@ -220,6 +220,7 @@ Implemented as migration 0012 (owner's decision, DESIGN §2.2; ARCHITECTURE §12
 | `seq` | Order in the chat's queue |
 | `kind` | `message` · `generate` (a reply asked for, no text) |
 | `content`, `speaker_entity_id` | The message and who says it (a card of the chat's owner) |
+| `reply_speaker_entity_id` | For `message`: who replies once it posts, picked when it was sent |
 | `direction` | For `generate`: the reply's one-turn direction |
 | `row_version`, `created_at`, `updated_at` | |
 

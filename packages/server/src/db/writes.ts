@@ -25,6 +25,7 @@ export const makeWriteHandlers = (bin: Bin) =>
 
     const {
       found,
+      selectVersion,
       ownedChat,
       ownedSlot,
       ownedVersion,
@@ -126,25 +127,10 @@ export const makeWriteHandlers = (bin: Bin) =>
         }).pipe(transaction("AddVersion")),
 
       SelectVersion: ({ userId, slotId, versionId, expectedRowVersion }) =>
-        Effect.gen(function* () {
-          const slot = yield* ownedSlot(userId, slotId)
-          const [version] = yield* sql<{
-            id: string
-          }>`SELECT id FROM versions WHERE id = ${versionId} AND slot_id = ${slotId} AND deleted_at IS NULL`
-          if (!version) return yield* new NotFound({ entity: "version", id: versionId })
-          if (slot.row_version !== expectedRowVersion) {
-            return yield* new StaleWrite({
-              entity: "slot",
-              id: slotId,
-              expected: expectedRowVersion,
-              actual: slot.row_version
-            })
-          }
-          const [updated] = yield* sql<{ row_version: number }>`
-          UPDATE slots SET selected_version_id = ${versionId}, row_version = row_version + 1
-          WHERE id = ${slotId} RETURNING row_version`
-          return { rowVersion: updated!.row_version }
-        }).pipe(transaction("SelectVersion")),
+        selectVersion(userId, slotId, versionId, expectedRowVersion).pipe(
+          Effect.map(({ rowVersion }) => ({ rowVersion })),
+          transaction("SelectVersion")
+        ),
 
       AddStateEvent: ({ userId, chatId, slotId, versionId, scope, data }) =>
         Effect.gen(function* () {

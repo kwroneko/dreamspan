@@ -38,6 +38,7 @@ const pathCte = (sql: SqlClient.SqlClient, chatId: ChatId, leaf: SlotId, limit: 
 /** A path entry's columns: the slot's, and its selected version's under their own names. */
 const pathColumns = `v.id, v.slot_id, v.ordinal, v.status, v.speaker_entity_id, v.writer, v.content,
   v.macro_mode, v.origin, v.source_version_id, v.direction, v.hidden, v.starred, v.created_at, v.error_json,
+  v.frozen_macros,
   ${amendCount("v")}, s.lane_id, s.parent_slot_id, s.depth, s.row_version, s.context_excluded,
   s.deleted_at IS NOT NULL AS slot_deleted,
   (SELECT count(*) FROM versions c WHERE c.slot_id = s.id AND c.deleted_at IS NULL) AS version_count`

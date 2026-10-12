@@ -722,6 +722,10 @@ describe("the send queue", () => {
     expect(() => run(`UPDATE queued_messages SET speaker_entity_id = ? WHERE id = ?`, theirs, q)).toThrow(
       /chat's owner/
     )
+    expect(() => run(`UPDATE queued_messages SET reply_speaker_entity_id = ? WHERE id = ?`, theirs, q)).toThrow(
+      /chat's owner/
+    )
+    run(`UPDATE queued_messages SET reply_speaker_entity_id = ? WHERE id = ?`, mine, q)
     // A message has text; only a reply asked for has a direction.
     expect(() => run(insert, id("q"), a.chatId, sa.slotId, "message", "", null)).toThrow(/CHECK/)
     run(insert, id("q"), a.chatId, sa.slotId, "generate", "", null)

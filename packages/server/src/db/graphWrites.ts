@@ -9,7 +9,7 @@ import type { FoldableEvent, StateEventData } from "@rp/shared/state.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import type { Bin } from "./bin.ts"
-import { AppendResult, LeafMoved, NotFound } from "./ops.ts"
+import { AppendResult, LeafMoved, NotFound, StaleWrite } from "./ops.ts"
 import { amendCount, type ChatRow, toChat, toVersion, type VersionRow } from "./rows.ts"
 import { checkStateReferences } from "./stateRefs.ts"
 
@@ -78,6 +78,7 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
         origin: version.origin,
         source_version_id: version.sourceVersionId ?? null,
         greeting_ref: version.greetingRef ? JSON.stringify(version.greetingRef) : null,
+        frozen_macros: version.frozenMacros ? JSON.stringify(version.frozenMacros) : null,
         direction: version.direction ?? null,
         error_json: version.error ? JSON.stringify(version.error) : null,
         created_at: at,
@@ -138,7 +139,8 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
     })
 
   /**
-   * A new slot under `parentSlotId` (null: the first message), becoming the active leaf.
+   * A new slot under `parentSlotId` (null: the first message), becoming the active leaf,
+   * unless `keepLeaf` (a message posted on a branch the user has moved away from).
    * Without `branch` the parent must be the active leaf. `commitDraft` is committed with it.
    */
   const appendMessage = (params: {
@@ -148,9 +150,11 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
     readonly branch: boolean
     readonly version: NewVersion
     readonly commitDraft: { readonly key: DraftKey; readonly expectedRowVersion: number } | null
+    readonly keepLeaf?: boolean
   }) =>
     Effect.gen(function* () {
       const { userId, chatId, parentSlotId, branch, version, commitDraft } = params
+      const keepLeaf = params.keepLeaf ?? false
       const at = Date.now()
       const current = yield* ownedChat(userId, chatId)
       yield* checkSpeaker(userId, version.speakerEntityId)
@@ -171,15 +175,17 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
         }>`SELECT id FROM lanes WHERE chat_id = ${chatId} ORDER BY created_at, id LIMIT 1`)[0]!.id
       const { slotId, version: row } = yield* insertSlot(chatId, laneId, parent, version, at)
       const [chat] = yield* sql<ChatRow>`
-          UPDATE chats SET active_leaf_slot_id = ${slotId}, last_message_at = ${at},
+          UPDATE chats SET active_leaf_slot_id = ${keepLeaf ? current.active_leaf_slot_id : slotId}, last_message_at = ${at},
             status = CASE WHEN status = 'pending' THEN 'active' ELSE status END,
             row_version = row_version + 1
           WHERE id = ${chatId} RETURNING *`
       const committed = yield* drafts.commit(userId, commitDraft)
       // The composer at the old tip moves to the new one: text typed while something
       // else was appended stays in view, and a send's recovery text goes along with it.
-      yield* sql`UPDATE drafts SET field = ${slotId}, row_version = row_version + 1
+      if (!keepLeaf) {
+        yield* sql`UPDATE drafts SET field = ${slotId}, row_version = row_version + 1
                    WHERE target_kind = 'composer' AND target_id = ${chatId} AND field = ${parentSlotId ?? ""}`
+      }
       const movedComposer =
         committed !== null && committed.key.targetKind === "composer" && committed.key.targetId === chatId
       const draft = movedComposer ? yield* drafts.find(userId, composerKey(chatId, slotId)) : null
@@ -191,8 +197,31 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
       })
     })
 
+  /** Selects a live version of the slot, if the slot is still at the row version the user saw. */
+  const selectVersion = (userId: UserId, slotId: SlotId, versionId: VersionId, expectedRowVersion: number) =>
+    Effect.gen(function* () {
+      const slot = yield* ownedSlot(userId, slotId)
+      const [version] = yield* sql<{
+        id: string
+      }>`SELECT id FROM versions WHERE id = ${versionId} AND slot_id = ${slotId} AND deleted_at IS NULL`
+      if (!version) return yield* new NotFound({ entity: "version", id: versionId })
+      if (slot.row_version !== expectedRowVersion) {
+        return yield* new StaleWrite({
+          entity: "slot",
+          id: slotId,
+          expected: expectedRowVersion,
+          actual: slot.row_version
+        })
+      }
+      const [updated] = yield* sql<{ row_version: number }>`
+          UPDATE slots SET selected_version_id = ${versionId}, row_version = row_version + 1
+          WHERE id = ${slotId} RETURNING row_version`
+      return { rowVersion: updated!.row_version, chatId: slot.chat_id as ChatId }
+    })
+
   return {
     found,
+    selectVersion,
     ownedChat,
     ownedSlot,
     ownedVersion,

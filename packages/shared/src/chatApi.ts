@@ -129,7 +129,12 @@ export class ChatApi extends RpcGroup.make(
       parentSlotId: Schema.NullOr(SlotId),
       branch: Schema.Boolean,
       content: Schema.String,
-      speakerEntityId: Schema.optionalKey(Schema.NullOr(EntityId))
+      speakerEntityId: Schema.optionalKey(Schema.NullOr(EntityId)),
+      /**
+       * Who replies to it, if it's queued: the reply then starts on the server, as the client
+       * would have asked for it after an immediate send.
+       */
+      replySpeakerEntityId: Schema.optionalKey(Schema.NullOr(EntityId))
     },
     success: SendResult,
     error: Schema.Union([NotFound, LeafMoved, ServerError])

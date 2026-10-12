@@ -82,12 +82,11 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
           slot_deleted: number | null
           chat_deleted: number | null
           owner_user_id: string
+          active_leaf_slot_id: string | null
           status: string
-          writer: string
-          speaker_entity_id: string | null
         }>`
           SELECT s.chat_id, s.deleted_at AS slot_deleted, c.deleted_at AS chat_deleted, c.owner_user_id,
-            v.status, v.writer, v.speaker_entity_id
+            c.active_leaf_slot_id, v.status
           FROM slots s JOIN chats c ON c.id = s.chat_id JOIN versions v ON v.id = s.selected_version_id
           WHERE s.id = ${replySlotId}`
         const chatId = slot!.chat_id as ChatId
@@ -99,6 +98,10 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
         }
         // Still being written: another version of the slot is selected and generating.
         if (slot!.status === "generating") return nothing
+        // The user moved to another branch while it waited: it posts where it was sent, and
+        // the chat stays where the user is. Silently moving them back would hide what they
+        // sent there since.
+        const keepLeaf = slot!.active_leaf_slot_id !== replySlotId
         // A branch from a live slot of a live chat: neither NotFound nor LeafMoved can happen.
         const append = (parentSlotId: string, version: NewVersion) =>
           graph
@@ -108,7 +111,8 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
               parentSlotId: parentSlotId as SlotId,
               branch: true,
               version,
-              commitDraft: null
+              commitDraft: null,
+              keepLeaf
             })
             .pipe(Effect.catchTag(["NotFound", "LeafMoved"], (error) => Effect.die(error)))
         const posted: Array<SlotId> = []
@@ -128,8 +132,8 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
           return { ...nothing, posted, queueChanged: true, queue: yield* chatQueue(sql, chatId) }
         }
         const [first] = entries
-        // A message's reply speaks as the reply it was queued behind did.
-        const replySpeaker = slot!.writer === "model" ? yield* liveSpeaker(owner, slot!.speaker_entity_id) : null
+        // A message's reply comes from whoever was picked when it was sent, as for a send then.
+        const replySpeaker = yield* liveSpeaker(owner, first!.reply_speaker_entity_id)
         const speaker = yield* liveSpeaker(owner, first!.speaker_entity_id)
         let replyParent = replySlotId
         if (first!.kind === "message") {
@@ -155,7 +159,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
       })
 
     const handlers = {
-      StartChat: ({ userId, cards, persona, greeting, first }) =>
+      StartChat: ({ userId, cards, persona, greeting, first, frozen }) =>
         Effect.gen(function* () {
           const ids = [...new Set([...cards, ...(persona === null ? [] : [persona])])]
           const loaded = yield* loadCards(sql, userId, ids)
@@ -202,7 +206,8 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
               status: "complete",
               macroMode: "template",
               origin: "greeting",
-              greetingRef: { entity: lead.card.entityId, index: lead.greetingIndexes[i]! }
+              greetingRef: { entity: lead.card.entityId, index: lead.greetingIndexes[i]! },
+              ...(frozen[i] ? { frozenMacros: frozen[i] } : {})
             })
           if (lead.greetings.length > 0) {
             const { slotId, version } = yield* graph.insertSlot(chatId, laneId, null, greetingVersion(0), at)
@@ -227,10 +232,21 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
             )
         }).pipe(transaction("StartChat")),
 
-      SendOrQueue: ({ userId, chatId, parentSlotId, branch, kind, content, speakerEntityId, direction }) =>
+      SendOrQueue: ({
+        userId,
+        chatId,
+        parentSlotId,
+        branch,
+        kind,
+        content,
+        speakerEntityId,
+        replySpeakerEntityId,
+        direction
+      }) =>
         Effect.gen(function* () {
           const chat = yield* graph.ownedChat(userId, chatId)
           yield* graph.checkSpeaker(userId, speakerEntityId)
+          if (kind === "message") yield* graph.checkSpeaker(userId, replySpeakerEntityId)
           if (parentSlotId !== null) {
             const [parent] = yield* sql<{ status: string }>`
               SELECT v.status FROM slots s JOIN versions v ON v.id = s.selected_version_id
@@ -252,6 +268,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
                 kind,
                 content: kind === "message" ? content : "",
                 speaker_entity_id: speakerEntityId,
+                reply_speaker_entity_id: kind === "message" ? replySpeakerEntityId : null,
                 direction: kind === "generate" && direction !== null && direction.trim() !== "" ? direction : null,
                 created_at: at,
                 updated_at: at
@@ -290,10 +307,19 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
           return { queued: toQueued(updated!), queue: yield* chatQueue(sql, row.chat_id) }
         }).pipe(transaction("EditQueued")),
 
-      WithdrawQueued: ({ userId, queuedId }) =>
+      WithdrawQueued: ({ userId, queuedId, expectedRowVersion }) =>
         Effect.gen(function* () {
           const row = yield* ownedQueued(sql, userId, queuedId)
           if (row === null) return yield* new NotFound({ entity: "queued message", id: queuedId })
+          // A tab that hasn't seen another's edit doesn't throw it away.
+          if (row.row_version !== expectedRowVersion) {
+            return yield* new StaleWrite({
+              entity: "queued message",
+              id: queuedId,
+              expected: expectedRowVersion,
+              actual: row.row_version
+            })
+          }
           yield* sql`DELETE FROM queued_messages WHERE id = ${queuedId}`
           return { queued: toQueued(row), queue: yield* chatQueue(sql, row.chat_id) }
         }).pipe(transaction("WithdrawQueued")),
@@ -326,6 +352,13 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
           const queue = status === "interrupted" ? nothing : yield* afterReply(row.slot_id, "reply")
           return { version, chatId: slot!.chat_id as ChatId, ...queue }
         }).pipe(transaction("FinishGeneration")),
+
+      SelectAndDrain: ({ userId, slotId, versionId, expectedRowVersion }) =>
+        Effect.gen(function* () {
+          const { chatId } = yield* graph.selectVersion(userId, slotId, versionId, expectedRowVersion)
+          // Selecting a finished version ends the wait, as its generation's end would have.
+          return { chatId, ...(yield* afterReply(slotId, "reply")) }
+        }).pipe(transaction("SelectAndDrain")),
 
       InterruptGenerations: () =>
         Effect.gen(function* () {

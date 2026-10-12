@@ -3,7 +3,7 @@
 // anything else is NotFound.
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
-import { CastCard, Chat, ChatId, EntityId, PathEntry, QueuedMessage, SlotId } from "./chat.ts"
+import { CastCard, Chat, ChatId, EntityId, FrozenMacros, PathEntry, QueuedMessage, SlotId } from "./chat.ts"
 import { GenerationUnavailable } from "./chatApi.ts"
 import { NotFound, ServerError, StaleWrite } from "./errors.ts"
 import { RefId } from "./library.ts"
@@ -92,7 +92,12 @@ export class ChatSetupApi extends RpcGroup.make(
       cards: Schema.Array(EntityId).check(Schema.isMinLength(1)),
       persona: Schema.NullOr(EntityId),
       greeting: Schema.NullOr(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
-      first: FirstTurn
+      first: FirstTurn,
+      /**
+       * What each greeting's random and time macros showed (in `GetCardForChat` order), kept
+       * so the chat shows the greeting as it was seen (DESIGN §5.6).
+       */
+      frozen: Schema.optionalKey(Schema.Array(FrozenMacros).check(Schema.isMaxLength(1000)))
     },
     success: Schema.Struct({ entry: PathEntry, chat: Chat }),
     error: Schema.Union([...Errors, GenerationUnavailable])
@@ -126,10 +131,13 @@ export class ChatSetupApi extends RpcGroup.make(
     success: QueuedMessage,
     error: Schema.Union([NotFound, StaleWrite, ServerError])
   }),
-  /** Takes a queued entry back before it posts; returns it, so its text can go back to the composer. */
+  /**
+   * Takes a queued entry back before it posts, as the user last saw it (StaleWrite if
+   * another tab changed it since); returns it, so its text can go back to the composer.
+   */
   Rpc.make("WithdrawQueued", {
-    payload: { queuedId: Schema.String },
+    payload: { queuedId: Schema.String, expectedRowVersion: Schema.Int },
     success: QueuedMessage,
-    error: Schema.Union([...Errors])
+    error: Schema.Union([NotFound, StaleWrite, ServerError])
   })
 ) {}

@@ -18,17 +18,22 @@ export const queue = [
     kind TEXT NOT NULL CHECK (kind IN ('message', 'generate')),
     content TEXT NOT NULL,
     speaker_entity_id TEXT REFERENCES entities(id) ON DELETE SET NULL,
+    -- For 'message': who replies to it once it posts, picked when it was sent, as an
+    -- immediate send's reply is.
+    reply_speaker_entity_id TEXT REFERENCES entities(id) ON DELETE SET NULL,
     -- For 'generate': the one-turn direction the reply gets.
     direction TEXT,
     row_version INTEGER NOT NULL DEFAULT 1,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
     CHECK (kind = 'generate' OR length(content) > 0),
-    CHECK (kind = 'generate' OR direction IS NULL)
+    CHECK (kind = 'generate' OR direction IS NULL),
+    CHECK (kind = 'message' OR reply_speaker_entity_id IS NULL)
   ) STRICT`,
   `CREATE INDEX queued_messages_reply ON queued_messages(reply_slot_id, seq)`,
   `CREATE INDEX queued_messages_chat ON queued_messages(chat_id, seq)`,
   `CREATE INDEX queued_messages_speaker ON queued_messages(speaker_entity_id)`,
+  `CREATE INDEX queued_messages_reply_speaker ON queued_messages(reply_speaker_entity_id)`,
 
   // It stays in its chat, waits for a slot of that chat, and speaks as a card of the
   // chat's owner: one statement can't point it at another user's chat or card.
@@ -48,5 +53,15 @@ export const queue = [
   `CREATE TRIGGER queued_messages_speaker_owner_update BEFORE UPDATE OF speaker_entity_id ON queued_messages
     WHEN NEW.speaker_entity_id IS NOT NULL AND (SELECT owner_user_id FROM entities WHERE id = NEW.speaker_entity_id)
       IS NOT (SELECT owner_user_id FROM chats WHERE id = NEW.chat_id)
-    BEGIN ${raise("a queued message speaks as a card of the chat's owner")}; END`
+    BEGIN ${raise("a queued message speaks as a card of the chat's owner")}; END`,
+  `CREATE TRIGGER queued_messages_reply_speaker_owner BEFORE INSERT ON queued_messages
+    WHEN NEW.reply_speaker_entity_id IS NOT NULL
+      AND (SELECT owner_user_id FROM entities WHERE id = NEW.reply_speaker_entity_id)
+      IS NOT (SELECT owner_user_id FROM chats WHERE id = NEW.chat_id)
+    BEGIN ${raise("a queued message's reply speaks as a card of the chat's owner")}; END`,
+  `CREATE TRIGGER queued_messages_reply_speaker_owner_update BEFORE UPDATE OF reply_speaker_entity_id ON queued_messages
+    WHEN NEW.reply_speaker_entity_id IS NOT NULL
+      AND (SELECT owner_user_id FROM entities WHERE id = NEW.reply_speaker_entity_id)
+      IS NOT (SELECT owner_user_id FROM chats WHERE id = NEW.chat_id)
+    BEGIN ${raise("a queued message's reply speaks as a card of the chat's owner")}; END`
 ]

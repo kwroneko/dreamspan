@@ -164,8 +164,15 @@ function Queued({
   onWithdrawn: (text: string) => void
 }) {
   const view = useCast()
-  const [editing, setEditing] = useState<string | null>(null)
+  // The text being edited, and the version of the entry it started from: saving over a
+  // newer one from another tab is a conflict, never a silent overwrite.
+  const [editing, setEditing] = useState<{
+    readonly text: string
+    readonly rowVersion: number
+    readonly speakerEntityId: QueuedMessage["speakerEntityId"]
+  } | null>(null)
   const [error, setError] = useState<AppError | null>(null)
+  const [conflict, setConflict] = useState(false)
   const who = nameOf(view, queued.speakerEntityId)
   const message = queued.kind === "message"
   return (
@@ -181,17 +188,43 @@ function Queued({
           className="flex flex-col gap-2"
           onSubmit={async (event) => {
             event.preventDefault()
-            const outcome = await session.editQueued(queued, editing)
-            setError(outcome.ok ? null : outcome.error)
-            if (outcome.ok) setEditing(null)
+            const outcome = await session.editQueued(queued, editing.text, editing)
+            if (outcome.ok) {
+              setEditing(null)
+              setError(null)
+              setConflict(false)
+            } else if (outcome.error.tag === "StaleWrite") {
+              // Keep this text; show theirs; saving again (deliberately) replaces it.
+              setConflict(true)
+              setError(null)
+              setEditing({ ...editing, rowVersion: queued.rowVersion, speakerEntityId: queued.speakerEntityId })
+            } else setError(outcome.error)
           }}
         >
-          <Textarea aria-label="Queued message" value={editing} onChange={(e) => setEditing(e.currentTarget.value)} />
+          {conflict && (
+            <div role="alert" className="rounded-md border border-warning/40 bg-warning/5 px-3 py-2 text-sm">
+              <p>Changed in another tab while you were editing. It now reads:</p>
+              <p className="mt-1 whitespace-pre-wrap text-muted [overflow-wrap:anywhere]">{queued.content}</p>
+              <p className="mt-1">Save again to replace it with your text, or cancel to keep theirs.</p>
+            </div>
+          )}
+          <Textarea
+            aria-label="Queued message"
+            value={editing.text}
+            onChange={(e) => setEditing({ ...editing, text: e.currentTarget.value })}
+          />
           <div className="flex gap-2">
             <Button type="submit" variant="primary">
               Save
             </Button>
-            <Button onClick={() => setEditing(null)}>Cancel</Button>
+            <Button
+              onClick={() => {
+                setEditing(null)
+                setConflict(false)
+              }}
+            >
+              Cancel
+            </Button>
           </div>
         </form>
       ) : (
@@ -201,7 +234,16 @@ function Queued({
       )}
       <div className="flex gap-1">
         {message && editing === null && (
-          <Button variant="ghost" onClick={() => setEditing(queued.content)}>
+          <Button
+            variant="ghost"
+            onClick={() =>
+              setEditing({
+                text: queued.content,
+                rowVersion: queued.rowVersion,
+                speakerEntityId: queued.speakerEntityId
+              })
+            }
+          >
             Edit
           </Button>
         )}
@@ -261,25 +303,37 @@ export function Composer({ session, view }: { session: ChatSession; view: ChatVi
   )
   const onPick = useCallback((card: CastCard) => void pick(card), [pick])
 
-  const send = async () => {
-    if (text.trim() === "" || busy) return
+  /**
+   * The text leaves the box as it's submitted, so whatever is typed while the request is out
+   * stays. If the request fails, the submitted text comes back, ahead of anything typed since.
+   */
+  const submit = async (run: (submitted: string) => Promise<boolean>) => {
+    if (busy) return
+    const submitted = text
+    setText("")
     setBusy(true)
-    const { sent, outcome } = await session.send(text, speaker, replySpeaker(cast, speaker))
+    const ok = await run(submitted)
     setBusy(false)
-    report(outcome)
-    // A message that wasn't sent stays in the box; one that was (or was queued) goes.
-    if (sent) setText("")
+    if (!ok && submitted !== "") setText((current) => (current === "" ? submitted : `${submitted}\n\n${current}`))
   }
 
-  const generate = async () => {
-    if (busy) return
-    setBusy(true)
-    const outcome = await session.generate(undefined, speaker, text)
-    setBusy(false)
-    report(outcome)
-    // The text was this turn's direction (DESIGN §2.2): it's on the reply now.
-    if (outcome.ok) setText("")
-  }
+  const send = () =>
+    text.trim() === ""
+      ? Promise.resolve()
+      : submit(async (submitted) => {
+          const { sent, outcome } = await session.send(submitted, speaker, replySpeaker(cast, speaker))
+          report(outcome)
+          // A message that was sent (or queued) is gone from the box, even if its reply failed.
+          return sent
+        })
+
+  // The text is this turn's direction (DESIGN §2.2): once asked for, it's on the reply.
+  const generate = () =>
+    submit(async (submitted) => {
+      const outcome = await session.generate(undefined, speaker, submitted)
+      report(outcome)
+      return outcome.ok
+    })
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key !== "Enter" || event.nativeEvent.isComposing) return
@@ -298,7 +352,12 @@ export function Composer({ session, view }: { session: ChatSession; view: ChatVi
               key={queued.id}
               queued={queued}
               session={session}
-              onWithdrawn={(withdrawn) => setText((current) => (current === "" ? withdrawn : current))}
+              // Withdrawn text never just disappears: it comes back to the box, after what's there.
+              onWithdrawn={(withdrawn) =>
+                setText((current) =>
+                  current === "" ? withdrawn : withdrawn === "" ? current : `${current}\n\n${withdrawn}`
+                )
+              }
             />
           ))}
         </ul>

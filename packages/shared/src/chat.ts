@@ -40,6 +40,13 @@ export class Chat extends Schema.Class<Chat>("Chat")({
   lastMessageAt: Schema.NullOr(Schema.Number)
 }) {}
 
+/** Values a text's non-deterministic macros drew, by the engine's keys (macros/expand.ts). */
+export const FrozenMacros = Schema.Record(Schema.String, Schema.String.check(Schema.isMaxLength(10_000))).check(
+  Schema.makeFilter((record: Readonly<Record<string, string>>) =>
+    Object.keys(record).length <= 256 ? undefined : "at most 256 frozen values"
+  )
+)
+
 /** Why a generation failed, shown on its version (DESIGN §3.1). */
 export const VersionError = Schema.Struct({ class: Schema.String, message: Schema.String })
 
@@ -60,6 +67,11 @@ export class Version extends Schema.Class<Version>("Version")({
   createdAt: Schema.Number,
   /** Set on failed versions only. */
   error: Schema.NullOr(VersionError),
+  /**
+   * For text whose macros resolve on display (a greeting): the values its random and time
+   * macros drew when it was made, so it reads the same every time (DESIGN §5.6).
+   */
+  frozenMacros: Schema.NullOr(FrozenMacros),
   /**
    * Optimistic concurrency for amending a user-written version: one more than the number
    * of times it was amended, counted from its kept history (version_history).
@@ -95,6 +107,8 @@ export class NewVersion extends Schema.Class<NewVersion>("NewVersion")({
   sourceVersionId: Schema.optional(VersionId),
   /** For a greeting: which of its card's greetings it is (0: `first_mes`), so it can follow the card. */
   greetingRef: Schema.optional(Schema.Struct({ entity: EntityId, index: Schema.Int })),
+  /** For a template: the values its volatile macros drew when it was shown, kept (DESIGN §5.6). */
+  frozenMacros: Schema.optional(FrozenMacros),
   direction: Schema.optional(Schema.String),
   /** Required for failed versions: what went wrong (DESIGN §3.1). */
   error: Schema.optional(
@@ -134,6 +148,8 @@ export class QueuedMessage extends Schema.Class<QueuedMessage>("QueuedMessage")(
   kind: Schema.Literals(["message", "generate"]),
   content: Schema.String,
   speakerEntityId: Schema.NullOr(EntityId),
+  /** For `message`: who replies to it once it posts, as for a send made then. */
+  replySpeakerEntityId: Schema.NullOr(EntityId),
   /** For `generate`: the one-turn direction the reply gets. */
   direction: Schema.NullOr(Schema.String),
   rowVersion: Schema.Int,

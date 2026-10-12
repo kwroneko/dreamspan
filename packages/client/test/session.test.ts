@@ -1,6 +1,6 @@
 // A chat session's window against events that arrive while a read is in flight: the
 // server may answer the read from before them, and the reply mustn't undo them.
-import type { Chat, ChatId, PathEntry, SlotId, Version, VersionId } from "@rp/shared/chat.ts"
+import type { Chat, ChatId, PathEntry, QueuedMessage, SlotId, Version, VersionId } from "@rp/shared/chat.ts"
 import type { ChatEvent, PathWindow } from "@rp/shared/chatApi.ts"
 import { AtomRegistry } from "effect/reactivity"
 import { describe, expect, it, vi } from "vitest"
@@ -105,5 +105,23 @@ describe("ChatSession", () => {
     answers[0]!(window([first, entry("s2", "s1", version("v2", "s2", "complete", "The tide turned."))]))
     await opening
     expect(s.snapshot().entries[1]!.version.status).toBe("complete")
+  })
+
+  it("doesn't let a queue read older than a Queue event bring back what it removed", async () => {
+    const s = new ChatSession(chatId, null, AtomRegistry.make())
+    const internals = s as unknown as {
+      call: () => Promise<unknown>
+      refreshQueue: () => Promise<void>
+      receive: (batch: ReadonlyArray<ChatEvent>, anchor: SlotId | null) => void
+    }
+    let answer!: (value: unknown) => void
+    internals.call = () => new Promise((resolve) => (answer = resolve))
+    const reading = internals.refreshQueue()
+    // The server read the queue, then something queued; the event beats the read's reply.
+    const queued = { id: "q1", content: "new", rowVersion: 1 } as unknown as QueuedMessage
+    internals.receive([{ _tag: "Queue", queue: [queued] }], null)
+    answer({ ok: true, value: [] })
+    await reading
+    expect(s.snapshot().queue.map((q) => q.content)).toEqual(["new"])
   })
 })

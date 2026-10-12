@@ -13,6 +13,7 @@ export interface QueuedRow {
   readonly kind: "message" | "generate"
   readonly content: string
   readonly speaker_entity_id: string | null
+  readonly reply_speaker_entity_id: string | null
   readonly direction: string | null
   readonly row_version: number
   readonly created_at: number
@@ -26,6 +27,7 @@ export const toQueued = (row: QueuedRow) =>
     kind: row.kind,
     content: row.content,
     speakerEntityId: row.speaker_entity_id as EntityId | null,
+    replySpeakerEntityId: row.reply_speaker_entity_id as EntityId | null,
     direction: row.direction,
     rowVersion: row.row_version,
     createdAt: row.created_at

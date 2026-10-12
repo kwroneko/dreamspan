@@ -5,35 +5,12 @@ import { type AppApi, CurrentUser } from "@rp/shared/api.ts"
 import type { ChatId, EntityId, NewVersion, SlotId } from "@rp/shared/chat.ts"
 import { GenerationUnavailable } from "@rp/shared/chatApi.ts"
 import type { UserId } from "@rp/shared/domain.ts"
-import { ServerError } from "@rp/shared/errors.ts"
 import { Effect, Option, Stream } from "effect"
-import { RpcClientError } from "effect/rpc"
 import { ChatHub } from "../chat/ChatHub.ts"
 import { Generator } from "../chat/Generator.ts"
 import { Generations } from "../chat/Generations.ts"
 import { Reader, Writer } from "../db/Database.ts"
-import { StorageError } from "../db/ops.ts"
-
-/** Failures the client can't act on are logged here and reported without internals. */
-const toServerError = (operation: string) => (error: unknown) =>
-  Effect.logError(`${operation} failed`, error).pipe(
-    Effect.andThen(Effect.fail(new ServerError({ message: `${operation} failed` })))
-  )
-
-type Internal = StorageError | RpcClientError.RpcClientError
-
-const isInternal = <E>(error: E): error is Extract<E, Internal> =>
-  error instanceof StorageError || error instanceof RpcClientError.RpcClientError
-
-/** Storage and worker failures become ServerError; every other error keeps its tag. */
-const internal =
-  (operation: string) =>
-  <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, Exclude<E, Internal> | ServerError, R> =>
-    Effect.catchIf(effect, isInternal, toServerError(operation)) as Effect.Effect<
-      A,
-      Exclude<E, Internal> | ServerError,
-      R
-    >
+import { internal, toServerError } from "./internal.ts"
 
 const userText = (content: string, origin: NewVersion["origin"], sourceVersionId?: NewVersion["sourceVersionId"]) => ({
   speakerEntityId: null,
@@ -118,6 +95,7 @@ export const makeChatHandlers = Effect.gen(function* () {
       readonly kind: "message" | "generate"
       readonly content: string
       readonly speakerEntityId: EntityId | null
+      readonly replySpeakerEntityId: EntityId | null
       readonly direction: string | null
     }
   ) =>
@@ -172,7 +150,7 @@ export const makeChatHandlers = Effect.gen(function* () {
     ListVersions: ({ slotId }) =>
       Effect.flatMap(userId, (id) => reader.ListVersions({ userId: id, slotId })).pipe(internal("ListVersions")),
 
-    SendMessage: ({ chatId, parentSlotId, branch, content, speakerEntityId }) =>
+    SendMessage: ({ chatId, parentSlotId, branch, content, speakerEntityId, replySpeakerEntityId }) =>
       Effect.flatMap(userId, (id) =>
         sendOrQueue(id, {
           chatId,
@@ -181,6 +159,7 @@ export const makeChatHandlers = Effect.gen(function* () {
           kind: "message",
           content,
           speakerEntityId: speakerEntityId ?? null,
+          replySpeakerEntityId: replySpeakerEntityId ?? null,
           direction: null
         })
       ).pipe(internal("SendMessage")),
@@ -198,6 +177,7 @@ export const makeChatHandlers = Effect.gen(function* () {
           kind: "generate",
           content: "",
           speakerEntityId: speakerEntityId ?? null,
+          replySpeakerEntityId: null,
           direction: direction ?? null
         })
       }).pipe(Effect.uninterruptible, internal("Generate")),
@@ -243,12 +223,15 @@ export const makeChatHandlers = Effect.gen(function* () {
         )
       ),
 
+    // Selecting a finished version lets what was queued behind the slot post (DESIGN §2.2).
     SelectVersion: ({ slotId, versionId, expectedRowVersion }) =>
       Effect.gen(function* () {
         const id = yield* userId
-        yield* writer.SelectVersion({ userId: id, slotId, versionId, expectedRowVersion })
-        return yield* publishSlot(id, slotId)
-      }).pipe(internal("SelectVersion")),
+        const outcome = yield* writer.SelectAndDrain({ userId: id, slotId, versionId, expectedRowVersion })
+        const entry = yield* publishSlot(id, slotId)
+        yield* generations.continueQueue(id, outcome)
+        return entry
+      }).pipe(Effect.uninterruptible, internal("SelectVersion")),
 
     EditVersion: ({ slotId, sourceVersionId, content, expectedRowVersion }) =>
       Effect.gen(function* () {

@@ -220,9 +220,12 @@ describe("send queue", () => {
         ),
         "StaleWrite"
       )
-      const withdrawn = yield* api.WithdrawQueued({ queuedId: second.queued.id })
+      const withdrawn = yield* api.WithdrawQueued({ queuedId: second.queued.id, expectedRowVersion: 1 })
       assert.strictEqual(withdrawn.content, "never")
-      assert.strictEqual(yield* outcome(api.WithdrawQueued({ queuedId: second.queued.id })), "NotFound")
+      assert.strictEqual(
+        yield* outcome(api.WithdrawQueued({ queuedId: second.queued.id, expectedRowVersion: 1 })),
+        "NotFound"
+      )
       yield* release(reply.version.id)
       const entries = yield* pathBecomes(api, chat.id, [
         "you: m0",
@@ -231,7 +234,10 @@ describe("send queue", () => {
         "model (generating)"
       ])
       // Once posted it's a message, no longer a queued one.
-      assert.strictEqual(yield* outcome(api.WithdrawQueued({ queuedId: first.queued.id })), "NotFound")
+      assert.strictEqual(
+        yield* outcome(api.WithdrawQueued({ queuedId: first.queued.id, expectedRowVersion: edited.rowVersion })),
+        "NotFound"
+      )
       assert.lengthOf(yield* api.ListQueued({ chatId: chat.id }), 0)
       yield* release(entries[3]!.version.id)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), gated)))
@@ -277,6 +283,102 @@ describe("send queue", () => {
       }).pipe(Effect.scoped, Effect.provide(serverLayer(config, gated)))
     })
   })
+
+  it.live("withdrawing as an older view of the entry is refused, so another tab's edit isn't lost", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const { chat, reply } = yield* generatingChat(api)
+      const queued = yield* api.SendMessage({
+        chatId: chat.id,
+        parentSlotId: reply.slotId,
+        branch: false,
+        content: "old"
+      })
+      if (queued._tag !== "Queued") return assert.fail("it should queue")
+      // Another tab edits it.
+      yield* api.EditQueued({
+        queuedId: queued.queued.id,
+        content: "newer",
+        speakerEntityId: null,
+        expectedRowVersion: queued.queued.rowVersion
+      })
+      assert.strictEqual(
+        yield* outcome(
+          api.WithdrawQueued({ queuedId: queued.queued.id, expectedRowVersion: queued.queued.rowVersion })
+        ),
+        "StaleWrite"
+      )
+      assert.deepStrictEqual(
+        (yield* api.ListQueued({ chatId: chat.id })).map((q) => q.content),
+        ["newer"]
+      )
+      yield* release(reply.version.id)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), gated)))
+  )
+
+  it.live("selecting a finished version of the reply posts the queue at once", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const { chat, reply } = yield* generatingChat(api)
+      yield* release(reply.version.id)
+      const [, finished] = yield* pathBecomes(api, chat.id, ["you: m0", "model (complete)"])
+      const swipe = yield* api.Regenerate({ slotId: reply.slotId, expectedRowVersion: finished!.rowVersion })
+      yield* api.SendMessage({ chatId: chat.id, parentSlotId: reply.slotId, branch: false, content: "m1" })
+      // Back to the finished version while the swipe still generates: nothing to wait for.
+      yield* api.SelectVersion({
+        slotId: reply.slotId,
+        versionId: finished!.version.id,
+        expectedRowVersion: swipe.rowVersion
+      })
+      const entries = yield* pathBecomes(api, chat.id, ["you: m0", "model (complete)", "you: m1", "model (generating)"])
+      assert.lengthOf(yield* api.ListQueued({ chatId: chat.id }), 0)
+      // A later send to the old reply hears that the chat moved on, rather than forking it away.
+      assert.strictEqual(
+        yield* outcome(
+          api.SendMessage({ chatId: chat.id, parentSlotId: reply.slotId, branch: false, content: "late" })
+        ),
+        "LeafMoved"
+      )
+      yield* release(swipe.version.id)
+      yield* release(entries[3]!.version.id)
+      yield* pathBecomes(api, chat.id, ["you: m0", "model (complete)", "you: m1", "model (complete)"])
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), gated)))
+  )
+
+  it.live("a queued message posts on its own branch when the user has moved to another", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const { chat, reply } = yield* generatingChat(api)
+      const [m0] = yield* path(api, chat.id)
+      yield* api.SendMessage({ chatId: chat.id, parentSlotId: reply.slotId, branch: false, content: "queued" })
+      // Meanwhile the user starts another branch from m0, and stays there.
+      const elsewhere = yield* posted(
+        api.SendMessage({ chatId: chat.id, parentSlotId: m0!.slotId, branch: true, content: "elsewhere" })
+      )
+      yield* release(reply.version.id)
+      let queued: ReadonlyArray<unknown> = [1]
+      while (queued.length > 0) {
+        queued = yield* api.ListQueued({ chatId: chat.id })
+        yield* Effect.sleep(20)
+      }
+      // The chat is still where the user is; the queued message posted after the reply.
+      assert.deepStrictEqual((yield* path(api, chat.id)).map(describeEntry), ["you: m0", "you: elsewhere"])
+      assert.strictEqual((yield* api.GetChat({ chatId: chat.id })).activeLeafSlotId, elsewhere.entry.slotId)
+      const there = yield* api.ReadPath({
+        chatId: chat.id,
+        leafSlotId: null,
+        range: { _tag: "Around", slot: reply.slotId },
+        limit: 10
+      })
+      assert.deepStrictEqual(there.entries.map(describeEntry), [
+        "you: m0",
+        "model (complete)",
+        "you: queued",
+        "model (generating)"
+      ])
+      yield* release(there.entries[3]!.version.id)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), gated)))
+  )
 
   it.live("a message onto a finished reply posts at once", () =>
     Effect.gen(function* () {

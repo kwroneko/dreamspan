@@ -3,7 +3,7 @@
 // expands: a message's stored macro mode, never this code.
 import { registerBuiltinMacros } from "@rp/shared/macros/builtins.ts"
 import type { CardFields } from "@rp/shared/macros/context.ts"
-import { expand } from "@rp/shared/macros/expand.ts"
+import { expand, type FrozenValues } from "@rp/shared/macros/expand.ts"
 import { makeMacroRegistry } from "@rp/shared/macros/registry.ts"
 import { Effect, Scope } from "effect"
 
@@ -33,21 +33,36 @@ export interface DisplayNames {
   readonly char: string
 }
 
-/** Text as shown: expanded when its origin says so, as written otherwise, or when a limit is hit. */
-export const displayText = (
+/**
+ * Text as shown, and the values its random and time macros drew: expanded when its origin
+ * says so, as written otherwise, or when a limit is hit. `frozen` (a version's
+ * `frozenMacros`) makes those macros show what they showed before (DESIGN §5.6).
+ */
+export const expandForDisplay = (
   text: string,
   macroMode: "template" | "verbatim",
   names: DisplayNames,
-  card: CardFields = {}
-) => {
-  if (macroMode !== "template" || (!text.includes("{{") && !text.includes("<"))) return text
+  card: CardFields = {},
+  frozen: FrozenValues = {}
+): { readonly text: string; readonly frozen: FrozenValues } => {
+  if (macroMode !== "template" || (!text.includes("{{") && !text.includes("<"))) return { text, frozen: {} }
   const result = expand({
     text,
     origin: { kind: "message", macroMode },
     purpose: "display",
     registry,
     context: { names, card, now: Date.now(), timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone },
+    frozen,
     random: seeded(text)
   })
-  return result._tag === "Expanded" ? result.text : text
+  return result._tag === "Expanded" ? { text: result.text, frozen: result.frozen } : { text, frozen: {} }
 }
+
+/** Text as shown (`expandForDisplay`), without the values drawn. */
+export const displayText = (
+  text: string,
+  macroMode: "template" | "verbatim",
+  names: DisplayNames,
+  card: CardFields = {},
+  frozen: FrozenValues = {}
+) => expandForDisplay(text, macroMode, names, card, frozen).text
