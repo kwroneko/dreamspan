@@ -9,6 +9,7 @@
 import type { ComponentProps } from "react"
 import remend from "remend"
 import { defaultRehypePlugins, parseMarkdownIntoBlocks, Streamdown } from "streamdown"
+import { withDefinitions } from "./referenceDefinitions.ts"
 
 const [harden] = defaultRehypePlugins.harden as [unknown, unknown]
 const rehypePlugins = [
@@ -31,24 +32,6 @@ function Link({ node: _node, ...props }: ComponentProps<"a"> & { node?: unknown 
 
 const components = { a: Link }
 
-const REFERENCE_DEFINITION = /^ {0,3}\[[^\]]+\]:/m
-const REFERENCE_DEFINITIONS = /^ {0,3}\[[^\]]+\]:.*$/gm
-/** A line opening or closing a fenced code block. */
-const FENCE = /^ {0,3}(?:```|~~~)/gm
-
-/**
- * Each block is rendered on its own, so a link in one can't see a reference definition
- * in another: every block gets the text's definitions at its end, where they render as
- * nothing. Not inside a code block still open (a streaming one), where they'd show.
- */
-const withDefinitions = (text: string, blocks: Array<string>): Array<string> => {
-  if (!REFERENCE_DEFINITION.test(text)) return blocks
-  const definitions = text.match(REFERENCE_DEFINITIONS)!.join("\n")
-  return blocks.map((block) =>
-    (block.match(FENCE)?.length ?? 0) % 2 === 1 ? block : `${block.replace(/\n*$/, "")}\n\n${definitions}\n`
-  )
-}
-
 /**
  * Markdown, with `streaming` while the text is still arriving: the last block is then
  * closed up for display, the way Streamdown does it for a whole message.
@@ -59,7 +42,7 @@ export function Markdown({ text, streaming }: { text: string; streaming: boolean
   const blocks = (markdown: string) => {
     const all = parseMarkdownIntoBlocks(markdown)
     const shown = !streaming || all.length === 0 ? all : [...all.slice(0, -1), remend(all.at(-1)!)]
-    return withDefinitions(markdown, shown)
+    return [...withDefinitions(markdown, shown)]
   }
   return (
     <Streamdown

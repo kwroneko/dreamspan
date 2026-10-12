@@ -55,6 +55,74 @@ interface SlotPosition {
   readonly depth: number
 }
 
+/**
+ * Walks up a path (`ancestorsAt`), counted in this worker. A walk from the leaf costs its
+ * distance from it, so a page of `Newer` takes at most one, however many branches it
+ * crosses: the tests check the count.
+ */
+export const pathWalks = { up: 0 }
+
+/**
+ * The ancestors of `from` at these depths (none above `from.depth`), by depth: one walk
+ * up to the smallest, so it costs the depth difference.
+ */
+const ancestorsAt = (sql: SqlClient.SqlClient, from: SlotPosition, depths: ReadonlyArray<number>) =>
+  sql<SlotPosition>`
+    WITH RECURSIVE up(id, parent, depth) AS (
+      SELECT id, parent_slot_id, depth FROM slots WHERE id = ${from.id}
+      UNION ALL
+      SELECT s.id, s.parent_slot_id, s.depth FROM slots s JOIN up ON s.id = up.parent
+      WHERE up.depth > ${Math.min(...depths)}
+    )
+    SELECT id, depth FROM up WHERE ${sql.in("depth", depths)}`.pipe(
+    Effect.map((rows) => {
+      pathWalks.up++
+      return new Map(rows.map((row) => [row.depth, row.id]))
+    })
+  )
+
+/**
+ * Walks down from `after` towards `leaf`, at most `limit` slots, and returns the last
+ * slot reached (null for none). `after` comes from a window the client read, so it's on
+ * the path: a run of only children needs no check. At the first branch, the rest of
+ * the window is the leaf's ancestors, found in one walk up from it. The cost is the
+ * window's length, plus the distance from the leaf once if the window has a branch
+ * (each branch walking up on its own cost seven seconds for 60 of them 99,000 messages
+ * from the leaf). Checking `after` itself would cost its distance from the leaf on
+ * every page, so it isn't: a slot of this chat that isn't on the path walks down its
+ * own branch instead, which shows the caller only its own chat.
+ */
+export const walkTowards = (sql: SqlClient.SqlClient, leaf: SlotPosition, after: SlotPosition, limit: number) =>
+  Effect.gen(function* () {
+    let current = after
+    let remaining = limit
+    while (remaining > 0 && current.depth < leaf.depth) {
+      const run = yield* sql<SlotPosition>`
+        WITH RECURSIVE down(id, depth, n) AS (
+          SELECT ${current.id}, ${current.depth}, 0
+          UNION ALL
+          SELECT c.id, c.depth, d.n + 1 FROM down d JOIN slots c ON c.parent_slot_id = d.id
+          WHERE d.n < ${remaining} AND d.id <> ${leaf.id}
+            AND (SELECT count(*) FROM slots x WHERE x.parent_slot_id = d.id) = 1
+        )
+        SELECT id, depth FROM down WHERE n > 0 ORDER BY n`
+      if (run.length > 0) {
+        current = run.at(-1)!
+        remaining -= run.length
+        continue
+      }
+      const last = Math.min(leaf.depth, current.depth + remaining)
+      const found = yield* ancestorsAt(sql, leaf, [current.depth + 1, last])
+      const [step] = yield* sql<{
+        parent_slot_id: string | null
+      }>`SELECT parent_slot_id FROM slots WHERE id = ${found.get(current.depth + 1)!}`
+      if (step?.parent_slot_id !== current.id) break
+      current = { id: found.get(last)!, depth: last }
+      break
+    }
+    return current.id === after.id ? null : current
+  })
+
 export const makeReadHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   const lib = makeLibraryQueries(sql)
@@ -71,22 +139,6 @@ export const makeReadHandlers = Effect.gen(function* () {
   const slotIn = (chatId: ChatId, slotId: SlotId) =>
     sql<SlotPosition>`SELECT id, depth FROM slots WHERE id = ${slotId} AND chat_id = ${chatId}`.pipe(
       Effect.flatMap(([row]) => (row ? Effect.succeed(row) : Effect.fail(new NotFound({ entity: "slot", id: slotId }))))
-    )
-
-  /**
-   * The ancestors of `from` at these depths (none above `from.depth`), by depth: one walk
-   * up to the smallest, so it costs the depth difference.
-   */
-  const ancestorsAt = (from: SlotPosition, depths: ReadonlyArray<number>) =>
-    sql<SlotPosition>`
-      WITH RECURSIVE up(id, parent, depth) AS (
-        SELECT id, parent_slot_id, depth FROM slots WHERE id = ${from.id}
-        UNION ALL
-        SELECT s.id, s.parent_slot_id, s.depth FROM slots s JOIN up ON s.id = up.parent
-        WHERE up.depth > ${Math.min(...depths)}
-      )
-      SELECT id, depth FROM up WHERE ${sql.in("depth", depths)}`.pipe(
-      Effect.map((rows) => new Map(rows.map((row) => [row.depth, row.id])))
     )
 
   /**
@@ -107,48 +159,6 @@ export const makeReadHandlers = Effect.gen(function* () {
         FROM down d WHERE d.id IS NOT NULL
       )
       SELECT id FROM down WHERE id IS NOT NULL ORDER BY n DESC LIMIT 1`.pipe(Effect.map(([row]) => row!.id))
-
-  /**
-   * Walks down from `after` towards `leaf`, at most `limit` slots, and returns the last
-   * slot reached (null for none). `after` comes from a window the client read, so it's on
-   * the path: a run of only children needs no check. At the first branch, the rest of
-   * the window is the leaf's ancestors, found in one walk up from it. The cost is the
-   * window's length, plus the distance from the leaf once if the window has a branch
-   * (each branch walking up on its own cost seven seconds for 60 of them 99,000 messages
-   * from the leaf). Checking `after` itself would cost its distance from the leaf on
-   * every page, so it isn't: a slot of this chat that isn't on the path walks down its
-   * own branch instead, which shows the caller only its own chat.
-   */
-  const walkTowards = (leaf: SlotPosition, after: SlotPosition, limit: number) =>
-    Effect.gen(function* () {
-      let current = after
-      let remaining = limit
-      while (remaining > 0 && current.depth < leaf.depth) {
-        const run = yield* sql<SlotPosition>`
-          WITH RECURSIVE down(id, depth, n) AS (
-            SELECT ${current.id}, ${current.depth}, 0
-            UNION ALL
-            SELECT c.id, c.depth, d.n + 1 FROM down d JOIN slots c ON c.parent_slot_id = d.id
-            WHERE d.n < ${remaining} AND d.id <> ${leaf.id}
-              AND (SELECT count(*) FROM slots x WHERE x.parent_slot_id = d.id) = 1
-          )
-          SELECT id, depth FROM down WHERE n > 0 ORDER BY n`
-        if (run.length > 0) {
-          current = run.at(-1)!
-          remaining -= run.length
-          continue
-        }
-        const last = Math.min(leaf.depth, current.depth + remaining)
-        const found = yield* ancestorsAt(leaf, [current.depth + 1, last])
-        const [step] = yield* sql<{
-          parent_slot_id: string | null
-        }>`SELECT parent_slot_id FROM slots WHERE id = ${found.get(current.depth + 1)!}`
-        if (step?.parent_slot_id !== current.id) break
-        current = { id: found.get(last)!, depth: last }
-        break
-      }
-      return current.id === after.id ? null : current
-    })
 
   const liveSlot = (chatId: ChatId, slotId: SlotId) =>
     sql<{ id: string }>`SELECT id FROM slots WHERE id = ${slotId} AND chat_id = ${chatId} AND deleted_at IS NULL`.pipe(
@@ -380,7 +390,7 @@ export const makeReadHandlers = Effect.gen(function* () {
           }
           case "Newer": {
             const after = yield* slotIn(chatId, range.after)
-            const last = yield* walkTowards(leafSlot, after, limit)
+            const last = yield* walkTowards(sql, leafSlot, after, limit)
             if (last === null) return window(leaf, [], null, false)
             const rows = yield* windowEndingAt(chatId, last.id, last.depth - after.depth)
             return window(leaf, rows, last.id === leaf ? null : last.id, false)
@@ -393,12 +403,13 @@ export const makeReadHandlers = Effect.gen(function* () {
             const lastDepthOn = (leafDepth: number) => Math.min(leafDepth, top + limit - 1)
             let pathLeaf = leafSlot
             let lastDepth = lastDepthOn(pathLeaf.depth)
-            let found = anchor.depth <= pathLeaf.depth ? yield* ancestorsAt(pathLeaf, [anchor.depth, lastDepth]) : null
+            let found =
+              anchor.depth <= pathLeaf.depth ? yield* ancestorsAt(sql, pathLeaf, [anchor.depth, lastDepth]) : null
             if (found?.get(anchor.depth) !== anchor.id) {
               // A slot on another path opens the path through it, on its latest replies.
               pathLeaf = yield* slotIn(chatId, yield* latestDescendant(anchor.id))
               lastDepth = lastDepthOn(pathLeaf.depth)
-              found = yield* ancestorsAt(pathLeaf, [lastDepth])
+              found = yield* ancestorsAt(sql, pathLeaf, [lastDepth])
             }
             const end = found.get(lastDepth)!
             const first = Math.max(0, lastDepth - limit + 1)

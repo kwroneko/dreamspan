@@ -15,7 +15,7 @@ import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { databaseFile } from "../src/db/connection.ts"
 import * as Database from "../src/db/Database.ts"
-import { pathWindow } from "../src/db/reads.ts"
+import { pathWalks, pathWindow, walkTowards } from "../src/db/reads.ts"
 import { tempDir } from "./support/tempDir.ts"
 
 const database = (dataDir = tempDir("graph")) =>
@@ -638,6 +638,40 @@ describe("message graph", () => {
 })
 
 describe("window reads", () => {
+  it.live("a page down through many branches walks up from the leaf once", () => {
+    const dataDir = tempDir("graph")
+    return Effect.gen(function* () {
+      const { slots } = yield* Effect.gen(function* () {
+        const { me, mira, chat, append } = yield* setup()
+        let leaf = chat.activeLeafSlotId!
+        const slots: Array<SlotId> = [leaf]
+        for (let i = 1; i < 50; i++) {
+          leaf = (yield* append(leaf, i % 2 === 0 ? say(me, `line ${i}`) : generated(mira, `reply ${i}`))).slotId
+          slots.push(leaf)
+        }
+        // A side reply under each of 20 messages on the path: 20 branch points.
+        for (let i = 10; i < 30; i++) yield* append(slots[i]!, say(me, `side ${i}`), true)
+        return { slots }
+      }).pipe(Effect.provide(database(dataDir)))
+
+      const leaf = { id: slots[49]!, depth: 49 }
+      const walk = (from: number, limit: number) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const before = pathWalks.up
+          const last = yield* walkTowards(sql, leaf, { id: slots[from]!, depth: from }, limit)
+          return { last: last?.id, walks: pathWalks.up - before }
+        }).pipe(Effect.provide(SqliteClient.layer({ filename: databaseFile(dataDir), readonly: true })))
+
+      // Through all 20 branches: one walk up, however many branches.
+      assert.deepStrictEqual(yield* walk(5, 30), { last: slots[35], walks: 1 })
+      // Only children all the way: none.
+      assert.deepStrictEqual(yield* walk(32, 10), { last: slots[42], walks: 0 })
+      // Starting on a branch, to the leaf.
+      assert.deepStrictEqual(yield* walk(10, 60), { last: slots[49], walks: 1 })
+    })
+  })
+
   // A window must stop walking at its limit, not walk the whole path and keep the newest slots.
   it.live(
     "stop at their limit even with a cycle further up, and walk the path by index",
