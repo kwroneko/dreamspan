@@ -1,5 +1,5 @@
 // Main-thread access to the database workers. ARCHITECTURE.md §3.1 and §3.6.
-import { existsSync, mkdirSync } from "node:fs"
+import { existsSync } from "node:fs"
 import { join } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import { type ResourceLimits, Worker } from "node:worker_threads"
@@ -9,6 +9,7 @@ import { RpcClient, type RpcClientError } from "effect/rpc"
 import { Worker as Workers } from "effect/workers"
 import { type BinLimits, defaultBinLimits } from "@rp/shared/bin.ts"
 import { acquireInstanceLock, checkFilesystem, databaseFile } from "./connection.ts"
+import { prepareDataDirectory } from "../dataDirectory.ts"
 import { ReadOps, WriteOps } from "./ops.ts"
 import * as ReaderPool from "./readerPool.ts"
 import { stampMatches } from "./workerStamp.ts"
@@ -148,7 +149,7 @@ export const layer = (options: DatabaseOptions) => {
   // Runs before any connection opens, and holds the instance lock for the layer's lifetime.
   const Guards = Layer.effectDiscard(
     Effect.gen(function* () {
-      mkdirSync(options.dataDir, { recursive: true })
+      yield* prepareDataDirectory(options.dataDir)
       yield* checkFilesystem(options.dataDir, options.allowNetworkFs)
       yield* acquireInstanceLock(options.dataDir)
     })

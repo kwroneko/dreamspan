@@ -70,6 +70,8 @@ Bun was measured as an alternative (2026-10-10) and not adopted. On this server 
 | `KEY_HOST_BINDING` | `true` | Keys go only to the hosts their credential was entered for (§3.12). A security setting, so it's set only here, never from inside the app |
 | `FAKE_GENERATOR_TPS`, `FAKE_GENERATOR_TOKENS` | unset, `400` | Read only by the development entry point (`src/dev/main.ts`): chats generate synthetic text at this rate, about this many tokens each (§12). `main.ts` ignores them |
 
+**Data directory** (`dataDirectory.ts`). Before opening storage or generating the server secret, startup creates missing path components once and checks directory write/search access. An unusable `DATA_DIR` exits with the path and filesystem cause. Recursive Node mkdir is avoided: on `/proc/nope` it loops on `ENOENT` instead of returning. `startup.test.ts` spawns the real server for missing, non-directory and unwritable paths, with generated and configured secrets.
+
 **Secrets** (`secrets.ts`). Connection secrets (API keys, header values, proxy URLs) are encrypted at rest with AES-256-GCM, under a key derived (HKDF-SHA256) from the server secret.
 - **Bound to where they belong.** Each ciphertext is bound to what it belongs to (`credential:<id>:key`, `connection:<id>:headers`, `connection:<id>:proxy_url`), so it doesn't decrypt anywhere else.
 - **Format:** a version byte, a fresh 12-byte nonce, the tag, then the ciphertext.

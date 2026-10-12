@@ -7,9 +7,11 @@
 // trivial). With the key file next to the database, encryption protects a leaked database
 // or backup on its own, not a copy of the whole data directory.
 import { createCipheriv, createDecipheriv, hkdfSync, randomBytes } from "node:crypto"
-import { chmodSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs"
+import { chmodSync, readFileSync, statSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { Context, Effect, Layer, Option, Redacted, Schema } from "effect"
+
+import { prepareDataDirectory } from "./dataDirectory.ts"
 
 const FORMAT_VERSION = 1
 const NONCE_BYTES = 12
@@ -104,10 +106,10 @@ export const loadServerSecret = (options: ServerSecretOptions) =>
       return yield* check(secret, `SECRET_KEY_FILE ${path}`)
     }
 
+    yield* prepareDataDirectory(options.dataDir)
     const path = join(options.dataDir, "secret.key")
     return yield* Effect.try({
       try: () => {
-        mkdirSync(options.dataDir, { recursive: true })
         try {
           // `wx` fails if the file exists, so two starts can't overwrite each other's secret.
           writeFileSync(path, `${randomBytes(32).toString("base64")}\n`, { flag: "wx", mode: 0o600 })
