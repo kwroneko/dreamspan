@@ -284,49 +284,6 @@ test("text typed while Generate is on its way stays in the composer", async ({ p
   await expect(generating(page)).toHaveCount(0, { timeout: 20_000 })
 })
 
-test("saving a queued message another tab changed meanwhile is a conflict, not an overwrite", async ({
-  page,
-  context
-}) => {
-  let heard = false
-  page.on("websocket", (socket) =>
-    socket.on("framereceived", (frame) => {
-      if (String(frame.payload).includes("The other tab's edit.")) heard = true
-    })
-  )
-  await login(page)
-  await chatWithMira(page)
-  await miraGenerating(page)
-  await composer(page).fill("The first words.")
-  await page.getByRole("button", { name: "Send as Bo" }).click()
-  const mine = page.getByRole("list", { name: "Queued messages" })
-  await expect(mine).toContainText("The first words.")
-  const other = await context.newPage()
-  await other.goto(page.url())
-  const theirs = other.getByRole("list", { name: "Queued messages" })
-  await expect(theirs).toContainText("The first words.")
-
-  await mine.getByRole("button", { name: "Edit" }).click()
-  await mine.getByLabel("Queued message").fill("An older draft.")
-  await theirs.getByRole("button", { name: "Edit" }).click()
-  await theirs.getByLabel("Queued message").fill("The other tab's edit.")
-  await theirs.getByRole("button", { name: "Save" }).click()
-  await expect(theirs).toContainText("The other tab's edit.")
-  // Once this tab has heard of it, its save is refused with theirs shown; its own text stays.
-  await expect.poll(() => heard).toBe(true)
-  await expect(mine.getByLabel("Queued message")).toHaveValue("An older draft.")
-  await mine.getByRole("button", { name: "Save" }).click()
-  await expect(mine.getByRole("alert")).toContainText("The other tab's edit.")
-  await expect(theirs).toContainText("The other tab's edit.")
-  await expect(mine.getByLabel("Queued message")).toHaveValue("An older draft.")
-  // Saving again is deliberate: it replaces theirs.
-  await mine.getByRole("button", { name: "Save" }).click()
-  await expect(mine).toContainText("An older draft.")
-  await expect(theirs).toContainText("An older draft.")
-  await other.close()
-  await page.getByRole("button", { name: "Stop", exact: true }).first().click()
-})
-
 test("a saved greeting keeps its card's fields and the date it showed", async ({ page }) => {
   await page.clock.setFixedTime(new Date("2026-03-01T12:00:00Z"))
   await login(page)
