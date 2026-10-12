@@ -28,8 +28,8 @@ export const makeBinWriteHandlers = (bin: Bin) =>
         deleting("DeleteConnection", userId, bin.deleteConnection(userId, connectionId)),
       RestoreBinItem: ({ userId, itemId }) => bin.restore(userId, itemId).pipe(transaction(sql, "RestoreBinItem")),
       PurgeBinItem: ({ userId, itemId }) => bin.purge(userId, itemId).pipe(transaction(sql, "PurgeBinItem")),
-      EmptyBin: ({ userId }) =>
-        bin.emptyBin(userId).pipe(
+      EmptyBin: ({ userId, itemIds }) =>
+        bin.emptyBin(userId, itemIds).pipe(
           Effect.map((purged) => ({ purged })),
           transaction(sql, "EmptyBin")
         ),

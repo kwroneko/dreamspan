@@ -40,6 +40,29 @@ const subscribe = (api: Api, chatId: Chat["id"]) =>
   })
 
 describe("the recycle bin's RPCs", () => {
+  it.live("refuses to empty a bin changed after confirmation, including equal-size replacements", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const chat = yield* api.CreateChat({ title: "Confirmed item" })
+      const first = yield* api.DeleteChat({ chatId: chat.id })
+      const snapshot = (yield* api.ListBin({ limit: 100, before: null })).map((item) => item.id)
+      const other = yield* api.CreateChat({ title: "Late item" })
+      const late = yield* api.DeleteChat({ chatId: other.id })
+      assert.strictEqual(yield* outcome(api.EmptyBin({ itemIds: snapshot })), "BinChanged")
+      assert.sameMembers(
+        (yield* api.ListBin({ limit: 100, before: null })).map((item) => item.id),
+        [first.id, late.id]
+      )
+      yield* api.RestoreBinItem({ itemId: first.id })
+      assert.strictEqual(yield* outcome(api.EmptyBin({ itemIds: snapshot })), "BinChanged")
+      assert.sameMembers(
+        (yield* api.ListBin({ limit: 100, before: null })).map((item) => item.id),
+        [late.id]
+      )
+      assert.lengthOf(snapshot, 1)
+    }).pipe(Effect.scoped, withServer(testConfig()))
+  )
+
   it.live("restores the first message from the empty root, with its path and composer", () =>
     Effect.gen(function* () {
       const api = yield* client()
@@ -151,7 +174,10 @@ describe("the recycle bin's RPCs", () => {
       assert.strictEqual(yield* outcome(api.RestoreBinItem({ itemId: swipe.id })), "NotFound")
       const gone = yield* api.CreateChat({ title: "Gone" })
       yield* api.DeleteChat({ chatId: gone.id })
-      assert.deepStrictEqual(yield* api.EmptyBin(), { purged: 1 })
+      assert.deepStrictEqual(
+        yield* api.EmptyBin({ itemIds: (yield* api.ListBin({ limit: 100, before: null })).map((item) => item.id) }),
+        { purged: 1 }
+      )
       assert.deepStrictEqual(yield* api.ListBin({ limit: 10, before: null }), [])
 
       // Text wiped and then sent goes to the recovered text, never to the deleted items.

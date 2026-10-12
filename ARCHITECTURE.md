@@ -412,7 +412,7 @@ Deleting is deliberate and fundamentally non-destructive (DESIGN §6.2): deletes
 - **A chat** is deleted, with everything in it and its other bin items. A connection whose preset was one of its chat overrides loses that preset.
 - **An entity** loses its refs, revisions and tags. The entity row stays, so messages that named it as their speaker still point somewhere.
 - **A message, branch or swipe** has its versions emptied: content, reasoning, display forms, amend history and attachments. Its slots stay as placeholders, so the conversation's structure and any summaries over it remain valid. This is the one exception to model output being frozen: a version may be emptied only as part of a purge of its own bin item (§3.7).
-- Purging is set-based: `EmptyBin` runs the same few statements whatever the bin holds.
+- `EmptyBin` takes the exact item ids shown for confirmation. In the writer transaction it compares them with the user's current bin; additions, removals or replacements return `BinChanged` without purging anything. The client loads all pages before enabling Empty the bin, captures the ids when the dialog opens, and reloads on closing a changed confirmation. Purging those ids is set-based; unposted queue text is recovered before any purge can remove it.
 
 **Two independent sections**, each evicting its own oldest entries past its own limits, never the other's:
 - **Deleted items** (`ListBin`): 10,000 items or 2 GB by default. Eviction deletes the oldest for good, never the item the delete just made, each in a savepoint: a purge that fails is rolled back, logged and skipped, so it never fails the delete that triggered it. If what can go can't make room, nothing goes and the bin stays over its limits (DESIGN §6.2, proposed).

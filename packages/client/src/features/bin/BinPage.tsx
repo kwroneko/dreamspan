@@ -147,11 +147,12 @@ function ItemRow({ item, onGone }: { item: BinItem; onGone: (item: BinItem) => v
 }
 
 function DeletedItems({ first }: { first: ReadonlyArray<BinItem> }) {
+  const registry = useContext(RegistryContext)
   const action = useAction()
   const [more, setMore] = useState<ReadonlyArray<BinItem>>([])
   const [gone, setGone] = useState<ReadonlySet<string>>(new Set())
   const [end, setEnd] = useState(first.length < PAGE)
-  const [emptying, setEmptying] = useState(false)
+  const [emptying, setEmptying] = useState<ReadonlyArray<string> | null>(null)
   const items = [...first, ...more]
   const loadMore = async () => {
     const last = items.at(-1)!
@@ -173,10 +174,11 @@ function DeletedItems({ first }: { first: ReadonlyArray<BinItem> }) {
   return (
     <div className="flex flex-col gap-3">
       <div className="flex justify-end">
-        <Button variant="ghost" onClick={() => setEmptying(true)}>
+        <Button variant="ghost" disabled={!end} onClick={() => setEmptying(shown.map((item) => item.id))}>
           Empty the bin
         </Button>
       </div>
+      {!end && <p className="text-sm text-muted">Load all deleted items before emptying the bin.</p>}
       <ul className="flex flex-col divide-y divide-border">
         {shown.map((item) => (
           <ItemRow key={item.id} item={item} onGone={(it) => setGone(new Set([...gone, it.id]))} />
@@ -189,17 +191,25 @@ function DeletedItems({ first }: { first: ReadonlyArray<BinItem> }) {
       )}
       <ErrorAlert error={action.error} />
       <ConfirmDialog
-        open={emptying}
-        onOpenChange={setEmptying}
+        open={emptying !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setEmptying(null)
+            if (action.error?.tag === "BinChanged") registry.refresh(itemsAtom)
+          }
+        }}
         title="Empty the bin?"
-        description="Everything deleted goes for good: chats and entries entirely, messages as empty placeholders. Recovered text stays. This can't be undone."
+        description={`${emptying?.length ?? 0} deleted items go for good: chats and entries entirely, messages as empty placeholders. Recovered text stays. This can't be undone.`}
         confirmLabel="Empty the bin"
         pending={action.pending}
         onConfirm={async () => {
-          const result = await action.run((client) => client("EmptyBin", undefined), RESTORED_KEYS)
-          if (result.ok) setEmptying(false)
+          if (emptying === null) return
+          const result = await action.run((client) => client("EmptyBin", { itemIds: emptying }), RESTORED_KEYS)
+          if (result.ok) setEmptying(null)
         }}
-      />
+      >
+        <ErrorAlert error={action.error} />
+      </ConfirmDialog>
     </div>
   )
 }

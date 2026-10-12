@@ -2,7 +2,7 @@
 // deleted, to restore in place or delete for good, and the text recovered from drafts.
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
-import { BinItem, RecoveredText } from "./bin.ts"
+import { BinChanged, BinItem, RecoveredText } from "./bin.ts"
 import { NotFound, ServerError } from "./errors.ts"
 
 const Errors = [NotFound, ServerError] as const
@@ -30,7 +30,11 @@ export class BinApi extends RpcGroup.make(
     success: Schema.Void,
     error: Schema.Union([...Errors])
   }),
-  Rpc.make("EmptyBin", { success: Schema.Struct({ purged: Schema.Int }), error: ServerError }),
+  Rpc.make("EmptyBin", {
+    payload: { itemIds: Schema.Array(Schema.String) },
+    success: Schema.Struct({ purged: Schema.Int }),
+    error: Schema.Union([BinChanged, ServerError])
+  }),
   /** Recovered text, newest first, as excerpts. */
   Rpc.make("ListRecoveredTexts", {
     payload: { limit: Page, before: Schema.NullOr(Schema.Struct({ createdAt: Schema.Number, id: Schema.String })) },

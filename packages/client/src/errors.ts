@@ -1,5 +1,6 @@
 // Errors as the user reads them. Each tag the server sends (@rp/shared/errors.ts) gets a
 // sentence; the server's own messages are shown as given, since they name the problem.
+import { BinChanged } from "@rp/shared/bin.ts"
 import { InvalidNetworkSettings, Unauthorized } from "@rp/shared/api.ts"
 import {
   AccountRejected,
@@ -51,6 +52,11 @@ const describeError = (error: unknown): AppError => {
   if (error instanceof Unauthorized) return make("Unauthorized", "Your session has ended. Log in again.")
   if (error instanceof RpcClientError.RpcClientError)
     return make("RpcClientError", "Can't reach the server. Check that it's running.")
+  if (error instanceof BinChanged)
+    return make(
+      "BinChanged",
+      "The bin changed since you opened this confirmation. Close it to reload the bin, then check and confirm again."
+    )
   if (error instanceof NotFound) return make("NotFound", `This ${error.entity} doesn't exist any more.`)
   if (error instanceof StaleWrite) return stale(error.entity)
   if (error instanceof ProviderError) return make("ProviderError", sentence(error.message), error.reason)

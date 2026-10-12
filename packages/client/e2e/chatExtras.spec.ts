@@ -240,3 +240,34 @@ for (const scheme of ["light", "dark"] as const) {
     })
   }
 }
+
+test("emptying the bin rejects items added after its confirmation opened", async ({ page }) => {
+  const first = await admin((api) =>
+    Effect.gen(function* () {
+      const chat = yield* api.CreateChat({ title: "Confirmed deletion" })
+      return yield* api.DeleteChat({ chatId: chat.id })
+    })
+  )
+  await login(page)
+  await page.goto(`${server().url}/bin`)
+  await page.getByRole("button", { name: "Empty the bin", exact: true }).click()
+  const dialog = page.getByRole("alertdialog")
+  await expect(dialog).toBeVisible()
+  const late = await admin((api) =>
+    Effect.gen(function* () {
+      const chat = yield* api.CreateChat({ title: "New deletion in another tab" })
+      return yield* api.DeleteChat({ chatId: chat.id })
+    })
+  )
+  await dialog.getByRole("button", { name: "Empty the bin", exact: true }).click()
+  await expect(dialog).toContainText("The bin changed")
+  expect((await admin((api) => api.ListBin({ limit: 500, before: null }))).map((i) => i.id)).toEqual(
+    expect.arrayContaining([first.id, late.id])
+  )
+  await dialog.getByRole("button", { name: "Cancel" }).click()
+  await expect(page.getByRole("listitem", { name: late.title })).toBeVisible()
+  await page.getByRole("button", { name: "Empty the bin", exact: true }).click()
+  await dialog.getByRole("button", { name: "Empty the bin", exact: true }).click()
+  await expect(dialog).toHaveCount(0)
+  expect(await admin((api) => api.ListBin({ limit: 500, before: null }))).toEqual([])
+})

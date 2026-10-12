@@ -2,7 +2,7 @@
 // bin_item_id) instead of removing them, so restoring puts things back exactly where
 // they were. Two sections with independent capacities: deleted items and recovered text.
 import { Buffer } from "node:buffer"
-import { BinItem, type BinLimits, RecoveredText } from "@rp/shared/bin.ts"
+import { BinChanged, BinItem, type BinLimits, RecoveredText } from "@rp/shared/bin.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { composerKey, type DraftKey, excerpt } from "@rp/shared/drafts.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
@@ -497,11 +497,16 @@ export const makeBin = (sql: SqlClient.SqlClient, limits: BinLimits) => {
   const purge = (userId: UserId, itemId: string) =>
     Effect.flatMap(loadItem(userId, itemId), (item) => purgeWhere("id = ?", [item.id]))
 
-  const emptyBin = (userId: UserId) =>
+  const emptyBin = (userId: UserId, itemIds: ReadonlyArray<string>) =>
     Effect.gen(function* () {
-      const [count] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM bin_items WHERE user_id = ${userId}`
+      const rows = yield* sql<{ id: string }>`SELECT id FROM bin_items WHERE user_id = ${userId}`
+      const confirmed = new Set(itemIds)
+      if (rows.length !== confirmed.size || !rows.every((row) => confirmed.has(row.id))) {
+        return yield* new BinChanged()
+      }
+      // The comparison and purge share this writer transaction: every current item was confirmed.
       yield* purgeWhere("user_id = ?", [userId])
-      return count!.n
+      return rows.length
     })
 
   /**

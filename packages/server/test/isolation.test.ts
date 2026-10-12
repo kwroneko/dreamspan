@@ -968,7 +968,15 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
   },
   // Last of the bin's: it empties the actor's own bin, which later probes don't need.
   EmptyBin: {
-    probe: (actor) => Effect.map(actor.api.EmptyBin(), ({ purged }) => assert.isAtMost(purged, 1))
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const items = yield* actor.api.ListBin({ limit: 500, before: null })
+        yield* refused(
+          actor.api.EmptyBin({ itemIds: [...items.map((item) => item.id), owner.binItemId] }),
+          "BinChanged"
+        )
+        assert.isAtMost((yield* actor.api.EmptyBin({ itemIds: items.map((item) => item.id) })).purged, 1)
+      })
   },
   OpenComposer: {
     probe: (actor, owner) =>

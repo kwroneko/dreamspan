@@ -312,7 +312,9 @@ describe("recycle bin", () => {
       yield* writer.DeleteChat({ userId, chatId: other.id })
       yield* writer.DeleteEntity({ userId, entityId: card.entityId })
 
-      assert.deepStrictEqual(yield* writer.EmptyBin({ userId }), { purged: 5 })
+      assert.deepStrictEqual(yield* writer.EmptyBin({ userId, itemIds: (yield* bin()).map((item) => item.id) }), {
+        purged: 5
+      })
       assert.deepStrictEqual(yield* bin(), [])
       assert.deepStrictEqual(yield* path(), ["root", "a"])
       const db = new DatabaseSync(databaseFile(dir), { readOnly: true })

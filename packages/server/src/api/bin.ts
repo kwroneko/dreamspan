@@ -38,7 +38,8 @@ export const makeBinHandlers = Effect.gen(function* () {
     PurgeBinItem: ({ itemId }) =>
       Effect.flatMap(userId, (id) => writer.PurgeBinItem({ userId: id, itemId })).pipe(internal("PurgeBinItem")),
 
-    EmptyBin: () => Effect.flatMap(userId, (id) => writer.EmptyBin({ userId: id })).pipe(internal("EmptyBin")),
+    EmptyBin: ({ itemIds }) =>
+      Effect.flatMap(userId, (id) => writer.EmptyBin({ userId: id, itemIds })).pipe(internal("EmptyBin")),
 
     ListRecoveredTexts: ({ limit, before }) =>
       Effect.flatMap(userId, (id) => reader.ListRecoveredTexts({ userId: id, source: null, limit, before })).pipe(

@@ -2,6 +2,9 @@
 import { Schema } from "effect"
 import { DraftTargetKind } from "./drafts.ts"
 
+/** The deleted-item set changed since the user confirmed it. */
+export class BinChanged extends Schema.TaggedError<BinChanged>()("BinChanged", {}) {}
+
 const BinItemKind = Schema.Literals(["chat", "message", "branch", "version", "entity", "connection"])
 
 /** Something explicitly deleted: a chat, a message, a swipe, a branch, a library entity, a connection. */
