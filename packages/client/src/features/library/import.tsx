@@ -127,9 +127,16 @@ export function ImportPage() {
     <div className="mx-auto flex max-w-3xl flex-col gap-6">
       <header className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-semibold">{into ? "Update from a file" : "Import"}</h1>
-        <Link to="/library" className={buttonClass("ghost")}>
-          Back to the library
-        </Link>
+        <div className="flex flex-wrap gap-2">
+          {!into && (
+            <Link to="/import/st" className={buttonClass("secondary")}>
+              Import a SillyTavern folder
+            </Link>
+          )}
+          <Link to="/library" className={buttonClass("ghost")}>
+            Back to the library
+          </Link>
+        </div>
       </header>
       <Card>
         <CardHeader

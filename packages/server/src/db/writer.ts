@@ -16,6 +16,7 @@ import { makeChatSetupWriteHandlers } from "./chatSetupWrites.ts"
 import { makeLibraryWriteHandlers } from "./libraryWrites.ts"
 import { makeProviderWriteHandlers } from "./providerWrites.ts"
 import { makeWriteHandlers } from "./writes.ts"
+import { makeStImportWriteHandlers } from "./stImportWrites.ts"
 
 const { dbPath, binLimits = defaultBinLimits } = workerData as {
   readonly dbPath: string
@@ -36,7 +37,9 @@ RpcServer.layer(WriteOps, { concurrency: 1 }).pipe(
           makeAccountWriteHandlers,
           makeChatSetupWriteHandlers(bin)
         ])
-        return WriteOps.of({ ...graph, ...library, ...binOps, ...providers, ...accounts, ...chatSetup })
+        // --- ST data folder import (ARCHITECTURE.md §13)
+        const stImport = yield* makeStImportWriteHandlers
+        return WriteOps.of({ ...graph, ...library, ...binOps, ...providers, ...accounts, ...chatSetup, ...stImport })
       })
     )
   ),

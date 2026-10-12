@@ -43,7 +43,8 @@ const screens = [
   ["account", "/settings/account"],
   ["users", "/settings/users"],
   ["library", "/library"],
-  ["import", "/import"]
+  ["import", "/import"],
+  ["st-import", "/import/st"]
 ] as const
 
 const noSidewaysScroll = async (page: Page) =>

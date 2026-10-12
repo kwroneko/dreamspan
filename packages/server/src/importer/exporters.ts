@@ -39,7 +39,8 @@ const withCharacterNote = (card: CardDoc, noteDocJson: string | null) =>
   Effect.gen(function* () {
     if (noteDocJson === null) return card
     const note = yield* decode(NoteDoc, "card's note")(noteDocJson)
-    if (!note.exportable) return card
+    // ST's Character's Note is only ever at a depth; a persona's note placed elsewhere stays here.
+    if (!note.exportable || note.placement.mode !== "depth") return card
     const depthPrompt = { prompt: note.content, depth: note.placement.depth, role: note.placement.role }
     return { ...card, extensions: { ...card.extensions, depth_prompt: depthPrompt } }
   })

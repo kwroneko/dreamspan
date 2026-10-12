@@ -4,6 +4,7 @@ import { Rpc, RpcGroup, RpcMiddleware } from "effect/rpc"
 import { BinItem } from "./bin.ts"
 import { ChatApi } from "./chatApi.ts"
 import { ChatSetupApi } from "./chatSetupApi.ts"
+import { StImportApi } from "./stImportApi.ts"
 import { User, UserAccount, UserId, UserRole } from "./domain.ts"
 import {
   AccountRejected,
@@ -275,4 +276,6 @@ export class AppApi extends RpcGroup.make(
   .merge(ChatApi)
   // --- Chat setup, speakers and the send queue (chatSetupApi.ts).
   .merge(ChatSetupApi)
+  // --- ST data folder import (stImportApi.ts).
+  .merge(StImportApi)
   .middleware(Authentication) {}

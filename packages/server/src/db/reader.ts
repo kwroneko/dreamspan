@@ -11,6 +11,7 @@ import { makeImportReadHandlers } from "./importReads.ts"
 import { ReadOps } from "./ops.ts"
 import { makeProviderReadHandlers } from "./providerReads.ts"
 import { makeReadHandlers } from "./reads.ts"
+import { makeStImportReadHandlers } from "./stImportReads.ts"
 
 const { dbPath } = workerData as { readonly dbPath: string }
 
@@ -25,10 +26,12 @@ RpcServer.layer(ReadOps, { concurrency: 1, disableFatalDefects: true }).pipe(
           makeProviderReadHandlers,
           makeAccountReadHandlers,
           makeImportReadHandlers,
-          makeChatSetupReadHandlers
+          makeChatSetupReadHandlers,
+          // --- ST data folder import (ARCHITECTURE.md §13)
+          makeStImportReadHandlers
         ]),
-        ([core, providers, accounts, imports, chatSetup]) =>
-          ReadOps.of({ ...core, ...providers, ...accounts, ...imports, ...chatSetup })
+        ([core, providers, accounts, imports, chatSetup, stImport]) =>
+          ReadOps.of({ ...core, ...providers, ...accounts, ...imports, ...chatSetup, ...stImport })
       )
     )
   ),

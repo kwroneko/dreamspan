@@ -4,15 +4,15 @@ import type { RefId } from "@rp/shared/library.ts"
 import { type ExportFormat, ImportResult } from "@rp/shared/libraryImport.ts"
 import { Schema } from "effect"
 
-export type UploadOutcome =
-  | { readonly _tag: "Done"; readonly result: ImportResult }
+export type UploadOutcome<A = ImportResult> =
+  | { readonly _tag: "Done"; readonly result: A }
   | { readonly _tag: "Unauthorized" }
   | { readonly _tag: "Failed"; readonly message: string }
 
 const decodeResult = Schema.decodeUnknownSync(ImportResult)
 
 /** The server's `{error}` sentence, or a fallback with the status. */
-const failure = async (response: Response, what: string) => {
+export const failure = async (response: Response, what: string) => {
   const body: unknown = await response.json().catch(() => null)
   const error = typeof body === "object" && body !== null && "error" in body ? body.error : null
   return typeof error === "string" && error !== ""

@@ -6,6 +6,7 @@ import { RpcServer } from "effect/rpc"
 import * as Importers from "./importers.ts"
 import { exportFile } from "./exporters.ts"
 import { FormatOps, ownBuffer } from "./ops.ts"
+import * as StParse from "./stParse.ts"
 
 // A handler's defect answers its own request, so the pool (db/readerPool.ts) takes a Defect
 // message for the protocol failing.
@@ -16,7 +17,16 @@ RpcServer.layer(FormatOps, { concurrency: 1, disableFatalDefects: true }).pipe(
         FormatOps.of({
           Parse: ({ bytes, fileName }) =>
             Importers.parseFile(bytes, fileName).pipe(Effect.provideService(Importers.Importers, registry)),
-          Export: (input) => Effect.map(exportFile(input), ownBuffer)
+          Export: (input) => Effect.map(exportFile(input), ownBuffer),
+          // --- ST data folder import
+          ParseStChatPart: StParse.parseChatPart,
+          ParseStSettings: ({ bytes }) => StParse.parseSettings(bytes),
+          ParseStGroup: ({ bytes, fileName }) => StParse.parseGroup(bytes, fileName),
+          ParseStLibraryFile: ({ bytes, fileName, expect }) =>
+            StParse.parseLibraryFile(bytes, fileName, expect).pipe(
+              Effect.provideService(Importers.Importers, registry)
+            ),
+          BuildStPersona: ({ bytes, fileName, persona }) => StParse.buildPersona(bytes, fileName, persona)
         })
       )
     )

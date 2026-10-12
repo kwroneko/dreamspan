@@ -65,7 +65,16 @@ test("every screen runs under the Content-Security-Policy", async ({ page }) => 
   await expect(page.getByRole("option").first()).toBeVisible()
   await page.keyboard.press("Escape")
 
-  for (const path of ["/", "/chats", "/library", "/import", "/settings", "/settings/account", "/settings/users"]) {
+  for (const path of [
+    "/",
+    "/chats",
+    "/library",
+    "/import",
+    "/import/st",
+    "/settings",
+    "/settings/account",
+    "/settings/users"
+  ]) {
     await page.goto(`${server().url}${path}`)
     await expect(page.getByRole("main")).toBeVisible()
     await page.waitForLoadState("networkidle")

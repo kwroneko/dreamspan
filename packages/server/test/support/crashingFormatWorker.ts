@@ -20,7 +20,12 @@ RpcServer.layer(FormatOps, { concurrency: 1, disableFatalDefects: true }).pipe(
                     for (;;);
                   })
                 : Importers.parseFile(bytes, fileName).pipe(Effect.provideService(Importers.Importers, registry)),
-          Export: () => Effect.sync(() => process.exit(1))
+          Export: () => Effect.sync(() => process.exit(1)),
+          ParseStChatPart: () => Effect.sync(() => process.exit(1)),
+          ParseStSettings: () => Effect.sync(() => process.exit(1)),
+          ParseStGroup: () => Effect.sync(() => process.exit(1)),
+          ParseStLibraryFile: () => Effect.sync(() => process.exit(1)),
+          BuildStPersona: () => Effect.sync(() => process.exit(1))
         })
       )
     )

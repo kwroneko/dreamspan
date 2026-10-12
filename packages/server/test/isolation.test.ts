@@ -657,6 +657,21 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
   WithdrawQueued: {
     probe: (actor, owner) =>
       refused(actor.api.WithdrawQueued({ queuedId: owner.queuedId, expectedRowVersion: 1 }), "NotFound")
+  },
+  // --- ST data folder import
+  StartStImport: { createOnly: "starts an import for the caller, ending only the caller's earlier one" },
+  GetStImportReport: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const { importId } = yield* owner.api.StartStImport({ unsupported: [] })
+        yield* refused(actor.api.GetStImportReport({ importId }), "NotFound")
+        // The owner's import is still theirs.
+        yield* owner.api.GetStImportReport({ importId })
+      })
+  },
+  UnhideImportedRun: {
+    probe: (actor, owner) =>
+      refused(actor.api.UnhideImportedRun({ chatId: owner.chat.chatId, throughSlotId: owner.chat.slotId }), "NotFound")
   }
 }
 
@@ -690,6 +705,34 @@ const routes: Record<string, Probe> = {
       // A new import is the actor's own, and nothing of the owner's changes (run checks).
       const own = yield* http(actor, "/library/import?name=p.json", presetFile, "application/octet-stream")
       assert.strictEqual(own.status, 200)
+    }),
+  "POST /st-import/file": (actor, owner) =>
+    Effect.gen(function* () {
+      const { importId } = yield* owner.api.StartStImport({ unsupported: [] })
+      const path = (query: Record<string, string>) => `/st-import/file?${new URLSearchParams(query)}`
+      const chat = new TextEncoder().encode(
+        [{ chat_metadata: {} }, { name: "A", mes: "hi" }, { name: "B", is_user: true, mes: "hello" }]
+          .map((line) => JSON.stringify(line))
+          .join("\n")
+      )
+      // The owner's import takes nothing from anyone else.
+      const into = yield* http(
+        actor,
+        path({ import: importId, path: "chats/A/a.jsonl" }),
+        chat,
+        "application/octet-stream"
+      )
+      assert.strictEqual(into.status, 404)
+      // The actor's own import can't name the owner's card as a chat's.
+      const own = yield* actor.api.StartStImport({ unsupported: [] })
+      const linked = yield* http(
+        actor,
+        path({ import: own.importId, path: "chats/A/a.jsonl", card: owner.cardId }),
+        chat,
+        "application/octet-stream"
+      )
+      assert.strictEqual(linked.status, 200)
+      assert.strictEqual(((yield* Effect.promise(() => linked.json())) as { outcome: string }).outcome, "failed")
     }),
   "POST /library/export": (actor, owner) =>
     Effect.gen(function* () {

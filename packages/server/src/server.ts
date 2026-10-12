@@ -20,6 +20,7 @@ import { makeLibraryHandlers } from "./api/library.ts"
 import { makeChatHandlers } from "./api/chats.ts"
 import { makeChatSetupHandlers } from "./api/chatSetup.ts"
 import { makeProviderHandlers } from "./api/providers.ts"
+import { makeStImportHandlers } from "./api/stImport.ts"
 import { Accounts, AuthenticationLive, PEER_HEADER, SESSION_COOKIE, SESSION_TTL_MS } from "./auth/Accounts.ts"
 import { ChatHub } from "./chat/ChatHub.ts"
 import { Generations } from "./chat/Generations.ts"
@@ -29,6 +30,8 @@ import * as Database from "./db/Database.ts"
 import { EventLoopMonitor } from "./eventLoop.ts"
 import * as Formats from "./importer/Formats.ts"
 import * as ImportRoutes from "./importer/routes.ts"
+import { MediaHolds } from "./importer/MediaHolds.ts"
+import { StImports } from "./importer/StImports.ts"
 import {
   crossSiteProblem,
   exposurePolicy,
@@ -53,12 +56,15 @@ const Handlers = AppApi.toLayer(
     const library = yield* makeLibraryHandlers
     const chats = yield* makeChatHandlers
     const chatSetup = yield* makeChatSetupHandlers
+    // --- ST data folder import
+    const stImport = yield* makeStImportHandlers
     return AppApi.of({
       ...providers,
       ...accounts,
       ...library,
       ...chats,
       ...chatSetup,
+      ...stImport,
       Health: () =>
         eventLoop.sample.pipe(
           Effect.map(
@@ -382,6 +388,8 @@ export const serverWith = (generator: Layer.Layer<Generator, never, AppConfig>) 
     )
   ).pipe(
     Layer.provide(ProvidersLive),
+    // --- ST data folder import (ARCHITECTURE.md §13)
+    Layer.provide(StImports.layer.pipe(Layer.provideMerge(MediaHolds.layer))),
     Layer.provide(Generations.layer.pipe(Layer.provideMerge(ChatHub.layer), Layer.provideMerge(generator))),
     Layer.provideMerge(HttpServerLive),
     Layer.provideMerge(Accounts.layer),

@@ -1,6 +1,6 @@
 # Data model
 
-**Status**: Partially implemented, 2026-10-10. The schema (every table below) and the message-graph operations are implemented and documented in ARCHITECTURE.md §3.7–§3.8. The library operations of §3.2 are implemented too (ARCHITECTURE.md §3.9), except export. Drafts are implemented (ARCHITECTURE.md §3.10). Not yet implemented: changeset application and revert, summaries and jobs logic, and the ST import mapping (§14). Implementation deltas from this draft:
+**Status**: Partially implemented, 2026-10-10. The schema (every table below) and the message-graph operations are implemented and documented in ARCHITECTURE.md §3.7–§3.8. The library operations of §3.2 are implemented too (ARCHITECTURE.md §3.9), except export. Drafts are implemented (ARCHITECTURE.md §3.10). The ST import mapping (§14) is implemented (ARCHITECTURE.md §13). Not yet implemented: changeset application and revert, summaries and jobs logic. Implementation deltas from this draft:
 - `rollouts.version_ids` is derived from `versions.rollout_id` instead of stored (principle 2).
 - FTS-indexed tables have an integer `seq` rowid alias.
 - Invariants are enforced by database triggers.
@@ -12,6 +12,7 @@
 - Re-import: imports form their own line of revisions, which the upstream ref merges like a variant merges its upstream (its `merge_base_revision_id` is the import it last merged), so edits made on the upstream itself survive a re-import.
 - Drafts: `undo_log` became the `draft_history` table, with one reversible patch per entry. Drafts gained `status` (active, committed, discarded), `created_at` and a single `recovery_text`, and writes can commit their draft atomically. A commit or discard deletes the history (owner, 2026-10-10); text it would lose goes to the recycle bin's recovered-text section.
 - The recycle bin (migration 0004): `deleted_at`, `bin_item_id` and `purged_at` on chats, slots, versions and entities, plus `bin_items` and `recovered_texts` (ARCHITECTURE.md §3.11).
+- ST import (ARCHITECTURE.md §13), all **[P]**: an imported chat file is recorded in a `jobs` row (`kind: st-import-chat`), so a re-run merges into the chat it made instead of duplicating it. The import never removes chat content: a chat whose import stopped stays, titled as unfinished until an import of the file finishes it, and only the recycle bin removes content. A chat's messages before its first user message wait in a staging file, so a greeting-only chat is never written. The record holds a lease, so one import run writes a file at a time. The note document (§3.3) gained a chat owner, `section` and `none` placements, `kind` (`author_note`, `imported_summary`), `interval`, `template` and `covers`. ST's summary is a chat-owned note of `kind: imported_summary` (DESIGN §8.1), recording the hidden run it covers rather than an L1 summary row.
 - Migration 0010: `source_version_id` names a version of the same slot. `AddStateEvent` writes origin `user` only, and checks every id in the value against the user. Events on a deleted message don't apply until it's restored (DESIGN §3.4, proposed). Foreign keys are indexed (ARCHITECTURE.md §3.7–§3.8).
 
 Original status: Draft, 2026-10-09. Phase 0 deliverable (see PLAN.md). Everything here is **[P] Proposed** unless marked otherwise. Section references like "DESIGN §3.1" point to [DESIGN.md](DESIGN.md).
@@ -441,6 +442,7 @@ ST's multi-user layout (`data/<handle>/…`): importing a whole ST data root off
 | World Info files | `entities(lorebook)` + `upstream` refs |
 | Chat-completion presets | `entities(preset)` + `upstream` refs; anything unrepresentable goes in `unsupported{}` and the import report |
 | Chats with zero user turns | Skipped and counted (DESIGN §1.4) |
+| The Summarize extension's summary (`extra.memory` on messages; `extension_settings.memory`) | **[P]** A chat-owned note of `kind: imported_summary` with the current summary (the latest not on the last message, as ST reads it), ST's template and placement, and the earlier summaries as revisions. If it sits on or after the last message of the hidden run from message 0, the note records the run as `covers`, for LCM to adopt as an L1 summary once enabled (DESIGN §8.1). No `summaries` row is written. |
 
 Linking chats to cards uses ST's folder name, falling back to the card name, the avatar file name, or a match on the greeting text. Anything ambiguous goes in the import report for the user to resolve.
 

@@ -7,7 +7,20 @@ import type { Worker } from "node:worker_threads"
 import { RpcClientError } from "effect/rpc"
 import { bundleEntry, defaultBundleDir, workerThreads } from "../db/Database.ts"
 import * as ReaderPool from "../db/readerPool.ts"
-import { type ExportInput, type ExportRefused, FormatOps, ownBuffer, type ParsedFile } from "./ops.ts"
+import type { ImportReport } from "@rp/shared/importReport.ts"
+import type { EntityKind } from "@rp/shared/library.ts"
+import {
+  type ExportInput,
+  type ExportRefused,
+  FormatOps,
+  ownBuffer,
+  type ParsedFile,
+  type StChatPart,
+  type StGroup,
+  type StLibraryFile,
+  type StPersona,
+  type StSettings
+} from "./ops.ts"
 
 /**
  * The format worker failed while it had the file: it crashed, ran out of memory, ran past
@@ -27,6 +40,32 @@ export class Formats extends Context.Service<
     readonly parse: (bytes: Uint8Array, fileName: string) => Effect.Effect<ParsedFile, FormatWorkerFailed>
     /** Writes a document as a file in a worker. Files' buffers of their own are transferred. */
     readonly export: (input: ExportInput) => Effect.Effect<Uint8Array, ExportRefused | FormatWorkerFailed>
+    /** The ST data folder's files (ARCHITECTURE.md §13), each in a worker like any upload. */
+    readonly st: {
+      readonly chatPart: (input: {
+        readonly bytes: Uint8Array
+        readonly first: boolean
+        readonly firstIndex: number
+        readonly carryAt: number | null
+      }) => Effect.Effect<StChatPart, FormatWorkerFailed>
+      readonly settings: (
+        bytes: Uint8Array
+      ) => Effect.Effect<{ readonly report: ImportReport; readonly settings: StSettings | null }, FormatWorkerFailed>
+      readonly group: (
+        bytes: Uint8Array,
+        fileName: string
+      ) => Effect.Effect<{ readonly report: ImportReport; readonly group: StGroup | null }, FormatWorkerFailed>
+      readonly libraryFile: (
+        bytes: Uint8Array,
+        fileName: string,
+        expect: EntityKind
+      ) => Effect.Effect<StLibraryFile, FormatWorkerFailed>
+      readonly persona: (
+        bytes: Uint8Array,
+        fileName: string,
+        persona: StPersona | null
+      ) => Effect.Effect<ParsedFile, FormatWorkerFailed>
+    }
   }
 >()("rp/importer/Formats") {}
 
@@ -87,7 +126,16 @@ export const layer = (options: FormatsOptions) =>
                   avatar: input.avatar && { ...input.avatar, bytes: ownBuffer(input.avatar.bytes) },
                   assets: input.assets.map((asset) => ({ ...asset, bytes: ownBuffer(asset.bytes) }))
                 })
-              )
+              ),
+            st: {
+              chatPart: (input) => workerFailures(client.ParseStChatPart({ ...input, bytes: ownBuffer(input.bytes) })),
+              settings: (bytes) => workerFailures(client.ParseStSettings({ bytes: ownBuffer(bytes) })),
+              group: (bytes, fileName) => workerFailures(client.ParseStGroup({ bytes: ownBuffer(bytes), fileName })),
+              libraryFile: (bytes, fileName, expect) =>
+                workerFailures(client.ParseStLibraryFile({ bytes: ownBuffer(bytes), fileName, expect })),
+              persona: (bytes, fileName, persona) =>
+                workerFailures(client.BuildStPersona({ bytes: ownBuffer(bytes), fileName, persona }))
+            }
           })
         )
       ).pipe(

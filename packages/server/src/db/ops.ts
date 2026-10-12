@@ -23,6 +23,7 @@ import {
   RevisionId
 } from "@rp/shared/library.ts"
 import { LibraryImport } from "@rp/shared/libraryImport.ts"
+import { NoteDoc } from "@rp/shared/docs/note.ts"
 import {
   Connection,
   ConnectionId,
@@ -215,6 +216,49 @@ export class ExportSource extends Schema.Class<ExportSource>("ExportSource")({
   /** Embedded assets, by the `uri` the card's assets name them with. */
   assets: Schema.Array(Schema.Struct({ ...StoredFile.fields, uri: Schema.String }))
 }) {}
+
+// --- ST data folder import (ARCHITECTURE.md §13)
+/** The `jobs` kind of an imported chat file's record. */
+export const ST_CHAT_RECORD = "st-import-chat"
+/** Another import run took the record over, or it finished: this one writes no more of it. */
+export class ImportLeaseLost extends Schema.TaggedError<ImportLeaseLost>()("ImportLeaseLost", {
+  recordId: Schema.String
+}) {}
+
+/** A chat-owned note an ST chat brings, which the writer stores as a note entity. */
+export const StImportNote = Schema.Struct({
+  kind: Schema.Literals(["author_note", "imported_summary"]),
+  title: Schema.String,
+  /** Its texts, oldest first, as the note's revisions; the last is current. */
+  contents: Schema.NonEmptyArray(Schema.String),
+  placement: NoteDoc.fields.placement,
+  interval: Schema.optionalKey(Schema.Int),
+  template: Schema.optionalKey(Schema.String),
+  covers: NoteDoc.fields.covers,
+  /** Whether ST sent it: an active note, or one kept for the record. */
+  activate: Schema.Boolean
+})
+export type StImportNote = typeof StImportNote.Type
+
+/** A chat file an earlier import recorded, and the chat it went into. */
+const StChatRecord = Schema.Struct({
+  recordId: Schema.String,
+  source: Schema.String,
+  chatId: ChatId,
+  complete: Schema.Boolean,
+  /** The chat is in the recycle bin. */
+  binned: Schema.Boolean,
+  /** What the importer last made of the file's chat state (opaque to storage). */
+  stateJson: Schema.String,
+  /** The chat-owned notes the import made, by kind. */
+  notes: Schema.Record(Schema.String, EntityId),
+  /** The file's last slot when its import last finished. */
+  end: Schema.NullOr(SlotId),
+  /** The file went into another file's chat. */
+  merged: Schema.Boolean,
+  /** The first slot an unfinished import of the file added. */
+  firstAdded: Schema.NullOr(SlotId)
+})
 
 export class WriteOps extends RpcGroup.make(
   /** Answers once the writer has opened the database and run migrations. */
@@ -865,6 +909,107 @@ export class WriteOps extends RpcGroup.make(
     },
     success: Schema.Struct({ ...QueueOutcome.fields, version: Version }),
     error: Schema.Union([NotFound, StorageError])
+  }),
+  // --- ST data folder import (ARCHITECTURE.md §13). A chat goes in as a pending chat, its
+  // messages in batches of one transaction each, then its state and the chat made active.
+  // A record of the file (a `jobs` row) is written with the chat, so a re-run finds it.
+  /**
+   * A record of an ST chat file under its source path, and a new pending chat for it, unless
+   * it goes into `chatId` (a branch file into its parent's chat).
+   */
+  Rpc.make("StImportStartChat", {
+    payload: {
+      userId: UserId,
+      source: Schema.String,
+      title: Schema.String,
+      createdAt: Schema.Number,
+      chatId: Schema.NullOr(ChatId),
+      /** The import run that may write it. */
+      lease: Schema.String
+    },
+    success: Schema.Struct({ chatId: ChatId, recordId: Schema.String }),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * A batch of messages under `parentSlotId` (null: the chat's first). While `matching`, a
+   * message that matches a child already there (a version with the same text and time, by
+   * the same kind of writer) is that child, taking any versions it lacks; the first that
+   * doesn't starts new slots. Returns each message's slot, in order.
+   */
+  Rpc.make("StImportMessages", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      /** The file's record, which keeps the import's progress, and this run's lease of it. */
+      recordId: Schema.String,
+      lease: Schema.String,
+      /** A new chat's leaf follows its messages while they come in. */
+      advanceLeaf: Schema.Boolean,
+      /**
+       * A branch merged into another file's chat: a message matches only where the slot shows
+       * the same version and hides it the same way. Otherwise those differences are counted.
+       */
+      strict: Schema.Boolean,
+      parentSlotId: Schema.NullOr(SlotId),
+      matching: Schema.Boolean,
+      /** A JSON array of the format worker's messages (formats/stChat.ts), passed on unread. */
+      messagesJson: Schema.String,
+      /** Each speaker key of the messages, as a card of the user's, or null. */
+      speakers: Schema.Record(Schema.String, Schema.NullOr(EntityId))
+    },
+    success: Schema.Struct({
+      slotIds: Schema.Array(SlotId),
+      matching: Schema.Boolean,
+      added: Schema.Int,
+      /** Matched messages shown or hidden differently here than in the file. */
+      differing: Schema.Int
+    }),
+    error: Schema.Union([NotFound, ImportLeaseLost, StorageError])
+  }),
+  /**
+   * The chat's state from the file, at `position` (null: the chat's start), and the chat made
+   * active. A new note replaces the import's earlier one of its kind. The leaf moves only if
+   * it's still `leaf.from`, so a chat continued here keeps its own leaf.
+   */
+  Rpc.make("StImportFinishChat", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      recordId: Schema.String,
+      lease: Schema.String,
+      position: Schema.NullOr(SlotId),
+      events: Schema.Array(StateEventData),
+      notes: Schema.Array(StImportNote),
+      /** The notes of the chat file this one continues (a branch's parent), which new ones replace. */
+      previousNotes: Schema.Record(Schema.String, EntityId),
+      /** Kinds of note the file no longer has: the import's earlier one is deactivated. */
+      removedNotes: Schema.Array(StImportNote.fields.kind),
+      /** The chat's new leaf, taken only if the leaf is unset or where this file last ended. */
+      leaf: Schema.NullOr(SlotId),
+      /** The file's last slot, recorded for the next import. */
+      end: Schema.NullOr(SlotId),
+      lastMessageAt: Schema.NullOr(Schema.Number),
+      sha256: Schema.String,
+      stateJson: Schema.String
+    },
+    success: Schema.Struct({ notes: Schema.Record(Schema.String, EntityId) }),
+    error: Schema.Union([NotFound, ImportLeaseLost, StorageError])
+  }),
+  /**
+   * Makes `lease` (an import run) the one that may write a recorded file's chat: a resumed or
+   * repeated import of the file, after which an earlier run's writes are refused.
+   */
+  Rpc.make("StImportClaim", {
+    payload: { userId: UserId, recordId: Schema.String, lease: Schema.String },
+    /** The record as it is now, which an earlier view of it may be behind. */
+    success: StChatRecord,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** Un-hides the hidden messages on the path from the chat's first message to `throughSlotId`. */
+  Rpc.make("StImportUnhide", {
+    payload: { userId: UserId, chatId: ChatId, throughSlotId: SlotId },
+    success: Schema.Struct({ unhidden: Schema.Int }),
+    error: Schema.Union([NotFound, StorageError])
   })
 ) {}
 
@@ -1162,5 +1307,28 @@ export class ReadOps extends RpcGroup.make(
     payload: { userId: UserId, chatId: ChatId },
     success: Schema.Array(QueuedMessage),
     error: Schema.Union([NotFound, StorageError])
+  }),
+  // --- ST data folder import (ARCHITECTURE.md §13).
+  /**
+   * What earlier imports made, for a re-run to find: the chat files recorded and the chats
+   * they went into, and the user's upstream library refs that came from a file.
+   */
+  Rpc.make("StImportSources", {
+    payload: { userId: UserId },
+    success: Schema.Struct({
+      chats: Schema.Array(StChatRecord),
+      library: Schema.Array(
+        Schema.Struct({
+          refId: RefId,
+          entityId: EntityId,
+          kind: EntityKind,
+          label: Schema.String,
+          sourcePath: Schema.String,
+          sourceHash: Schema.NullOr(Schema.String),
+          binned: Schema.Boolean
+        })
+      )
+    }),
+    error: StorageError
   })
 ) {}

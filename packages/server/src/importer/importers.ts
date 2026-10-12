@@ -26,7 +26,7 @@ interface ImportedFile {
   readonly bytes: Uint8Array
 }
 
-interface Imported {
+export interface Imported {
   readonly report: ImportReport
   /** Null when the file holds nothing to import, e.g. an unsupported preset kind. */
   readonly library: {
@@ -178,7 +178,7 @@ export const layer = Layer.effect(
   })
 )
 
-const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex")
+export const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex")
 
 /** An image's type from its first bytes, and a PNG's size from its header. */
 const describeImage = (bytes: Uint8Array) => {
@@ -214,8 +214,37 @@ const encoded = (doc: object) => {
   return { docJson, docHash: docHash(stored), searchText: searchText(stored) }
 }
 
-const failed = (format: string, code: string, message: string) =>
+export const failed = (format: string, code: string, message: string) =>
   new ImportReport({ format, issues: [new ImportIssue({ level: "error", code, message })] })
+
+/** What a parse returns for an imported file whose bytes hash to `fileSha256`. */
+export const parsedFile = ({ report, library, files }: Imported, fileSha256: string) =>
+  new ParsedFile({
+    report,
+    sha256: fileSha256,
+    library: library && {
+      kind: library.kind,
+      label: library.label,
+      ...encoded(library.doc),
+      schemaVersion: library.schemaVersion,
+      noteDocJson: library.note && JSON.stringify(library.note)
+    },
+    media: library
+      ? files.map(
+          (entry) =>
+            new ParsedMedia({
+              role: entry.role,
+              uri: entry.uri,
+              sha256: sha256(entry.bytes),
+              byteSize: entry.bytes.byteLength,
+              ...describeImage(entry.bytes),
+              // A copy with its own buffer: the bytes may be a view into the upload or into
+              // Node's shared pool, and they're transferred to the main thread.
+              bytes: new Uint8Array(entry.bytes)
+            })
+        )
+      : []
+  })
 
 /**
  * Reads a file with the first importer that detects it. Never fails: a file that can't be
@@ -243,31 +272,5 @@ export const parseFile = (bytes: Uint8Array, fileName: string) =>
           library: null,
           files: []
         }
-    const { library } = imported
-    return new ParsedFile({
-      report: imported.report,
-      sha256: sha256(bytes),
-      library: library && {
-        kind: library.kind,
-        label: library.label,
-        ...encoded(library.doc),
-        schemaVersion: library.schemaVersion,
-        noteDocJson: library.note && JSON.stringify(library.note)
-      },
-      media: library
-        ? imported.files.map(
-            (entry) =>
-              new ParsedMedia({
-                role: entry.role,
-                uri: entry.uri,
-                sha256: sha256(entry.bytes),
-                byteSize: entry.bytes.byteLength,
-                ...describeImage(entry.bytes),
-                // A copy with its own buffer: the bytes may be a view into the upload or into
-                // Node's shared pool, and they're transferred to the main thread.
-                bytes: new Uint8Array(entry.bytes)
-              })
-          )
-        : []
-    })
+    return parsedFile(imported, sha256(bytes))
   })

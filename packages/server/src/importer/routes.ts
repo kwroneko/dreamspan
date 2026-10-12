@@ -20,6 +20,11 @@ import { Reader, Writer } from "../db/Database.ts"
 import { defaultLimits } from "../formats/safety.ts"
 import { BodyRefused, firstBytes, readBody } from "./body.ts"
 import { Formats } from "./Formats.ts"
+import { MediaHolds } from "./MediaHolds.ts"
+import { StImports } from "./StImports.ts"
+import type { EntityId } from "@rp/shared/chat.ts"
+import { classifyStPath, ST_CHAT_PART_BYTES } from "@rp/shared/stFolder.ts"
+import { StFileResult } from "@rp/shared/stImportApi.ts"
 import { readMedia, storeMedia, sweepMedia } from "./mediaFiles.ts"
 
 /** The largest upload: the parsers' own cap on any file (ARCHITECTURE.md §8). */
@@ -110,22 +115,8 @@ export const layer = Layer.unwrap(
     const formats = yield* Formats
     const reader = yield* Reader
     const writer = yield* Writer
-    // Media an import has written and not yet recorded, by hash with a count of imports, so
-    // the sweep leaves them alone until the import commits or gives up.
-    const pending = new Map<string, number>()
-    const holding = <A, E, R>(hashes: ReadonlyArray<string>, effect: Effect.Effect<A, E, R>) =>
-      Effect.acquireUseRelease(
-        Effect.sync(() => hashes.forEach((sha256) => pending.set(sha256, (pending.get(sha256) ?? 0) + 1))),
-        () => effect,
-        () =>
-          Effect.sync(() =>
-            hashes.forEach((sha256) => {
-              const count = (pending.get(sha256) ?? 1) - 1
-              if (count === 0) pending.delete(sha256)
-              else pending.set(sha256, count)
-            })
-          )
-      )
+    // Media an import has written and not yet recorded, which the sweep leaves alone.
+    const { pending, holding } = yield* MediaHolds
     // Files held in memory at once. An upload takes a permit once its first bytes arrive, so
     // one that sends nothing holds none; the rest wait in their sockets, where TCP holds the
     // sender back. Exports have permits of their own, so stalled uploads can't hold them up.
@@ -353,9 +344,80 @@ export const layer = Layer.unwrap(
       if (deleted > 0) yield* Effect.logInfo(`deleted ${deleted} media files that no library entry names`)
     }).pipe(Effect.catch((error) => Effect.logWarning("the media sweep failed", error)))
 
+    // --- ST data folder import (ARCHITECTURE.md §13): one file of the folder, or one part
+    // of a chat file, through the same limits as a library upload.
+    const stImports = yield* StImports
+    const stImportFile = Effect.gen(function* () {
+      const request = yield* HttpServerRequest.HttpServerRequest
+      const user = yield* CurrentUser
+      if (request.headers["content-type"] !== "application/octet-stream") {
+        return jsonError(415, "expected application/octet-stream")
+      }
+      const query = new URL(request.url, "http://upload").searchParams
+      const importId = query.get("import") ?? ""
+      const path = query.get("path") ?? ""
+      const file = classifyStPath(path)
+      if (file === null || file.kind === "unsupported") return jsonError(400, "that isn't a file the import reads")
+      const chat = file.kind === "chat" || file.kind === "group_chat"
+      const part = chat ? Number(query.get("part") ?? "0") : 0
+      if (!Number.isSafeInteger(part) || part < 0 || part > 100_000)
+        return jsonError(400, "part must be a part's number")
+      const card = query.get("card")
+      if (card !== null && card !== "none" && !/^[0-9a-f-]{36}$/.test(card))
+        return jsonError(400, "card must name a card")
+      const maxBytes = chat ? ST_CHAT_PART_BYTES : MAX_UPLOAD_BYTES
+      if (Number(request.headers["content-length"]) > maxBytes) return jsonError(413, `at most ${maxBytes} bytes`)
+      // Before the body is read: another user's import, or none, reads nothing.
+      if (!stImports.exists(user, importId)) return jsonError(404, "there's no such import")
+
+      const message = NodeHttpServerRequest.toIncomingMessage(request)
+      const limits = {
+        maxBytes,
+        idleMs: BODY_IDLE_MS,
+        deadline: Date.now() + BODY_DEADLINE_MS,
+        minBytesPerSecond: BODY_MIN_BYTES_PER_SECOND,
+        rateWindowMs: BODY_RATE_WINDOW_MS
+      }
+      return yield* oneAtATime(
+        user.id,
+        Effect.gen(function* () {
+          yield* firstBytes(message, limits)
+          const taken = yield* withPermitWithin(
+            uploads,
+            limits.deadline - Date.now(),
+            Effect.gen(function* () {
+              const body = yield* readBody(message, limits)
+              const answer = yield* stImports.file(user, importId, path, body, {
+                part,
+                last: query.get("last") !== "0",
+                card: card as EntityId | "none" | null,
+                orphan: query.get("orphan") === "1"
+              })
+              return yield* HttpServerResponse.schemaJson(StFileResult)(answer)
+            })
+          )
+          return Option.getOrElse(taken, () => jsonError(503, "the server is busy with other files; try again"))
+        }).pipe(
+          Effect.catchTag("BodyRefused", ({ reason }) => {
+            const [status, text] = BODY_REFUSALS[reason]
+            return Effect.succeed(jsonError(status, text).pipe(HttpServerResponse.setHeader("connection", "close")))
+          })
+        )
+      )
+    }).pipe(
+      Effect.catchTags({
+        NotFound: () => Effect.succeed(jsonError(404, "there's no such import")),
+        StImportFailed: (error) => Effect.succeed(jsonError(500, error.message))
+      }),
+      Effect.catch((error) =>
+        Effect.logError("an ST import failed", error).pipe(Effect.as(jsonError(500, "the import failed")))
+      )
+    )
+
     return Layer.mergeAll(
       HttpRouter.add("POST", "/library/import", authenticated(accounts, importFile)),
       HttpRouter.add("POST", "/library/export", authenticated(accounts, exportFile)),
+      HttpRouter.add("POST", "/st-import/file", authenticated(accounts, stImportFile)),
       Layer.effectDiscard(Effect.forkScoped(Effect.repeat(sweep, Schedule.spaced("1 hour"))))
     )
   })
