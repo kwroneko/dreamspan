@@ -42,6 +42,7 @@ Where the owner corrected an earlier proposal, the corrected version is recorded
 - **[D]** Lorebooks usually wreck the KV cache, so they will work differently here.
 - **[D]** Decision models (Jev and others) can decide whether an entry is included. This must stay optional.
 - **[P]** Activation sources: keyword triggers as the fallback, an optional decision model asking whether each entry or group is relevant to the current scene, and an agent lookup tool for anything missed.
+- **[D]** Keyword matching follows ST's convention for now (owner, 2026-10-12): `use_regex` is ignored, as ST never reads it, and a key is a regular expression only when written as `/pattern/flags`. Low priority to revisit.
 - **[P]** Placement is cache-friendly: entries are never inserted above the history. They go in a block near the tail, where they stay until the next compaction boundary.
 
 ### 1.4 ST data folder import
