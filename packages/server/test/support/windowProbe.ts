@@ -7,7 +7,7 @@ import { NodeRuntime } from "@effect/platform-node"
 import { SqliteClient } from "@effect/sql-sqlite-node"
 import type { ChatId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
-import { Effect } from "effect"
+import { Effect, Logger } from "effect"
 import { databaseFile } from "../../src/db/connection.ts"
 import { makeReadHandlers } from "../../src/db/reads.ts"
 
@@ -17,4 +17,9 @@ Effect.gen(function* () {
   const { GetPath } = yield* makeReadHandlers
   const window = yield* GetPath({ userId, chatId, leafSlotId: null, limit: Number(limit) })
   process.stdout.write(String(window.entries.length))
-}).pipe(Effect.provide(SqliteClient.layer({ filename: databaseFile(dataDir), readonly: true })), NodeRuntime.runMain)
+}).pipe(
+  Effect.provide(SqliteClient.layer({ filename: databaseFile(dataDir), readonly: true })),
+  // Silent, so stdout holds only the count: a slow read logs a warning there.
+  Effect.provide(Logger.layer([])),
+  NodeRuntime.runMain
+)
