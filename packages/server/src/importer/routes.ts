@@ -11,7 +11,7 @@ import {
   ImportResult
 } from "@rp/shared/libraryImport.ts"
 import { RefId } from "@rp/shared/library.ts"
-import { ByteSize, Effect, Layer, Option, Schema, Semaphore } from "effect"
+import { ByteSize, Effect, Layer, Option, Schedule, Schema, Semaphore } from "effect"
 import { NodeHttpServerRequest } from "@effect/platform-node"
 import { HttpIncomingMessage, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http"
 import { Accounts } from "../auth/Accounts.ts"
@@ -20,7 +20,7 @@ import { Reader, Writer } from "../db/Database.ts"
 import { defaultLimits } from "../formats/safety.ts"
 import { BodyRefused, firstBytes, readBody } from "./body.ts"
 import { Formats } from "./Formats.ts"
-import { readMedia, storeMedia } from "./mediaFiles.ts"
+import { readMedia, storeMedia, sweepMedia } from "./mediaFiles.ts"
 
 /** The largest upload: the parsers' own cap on any file (ARCHITECTURE.md §8). */
 const MAX_UPLOAD_BYTES = defaultLimits.maxFileBytes
@@ -29,6 +29,9 @@ const MAX_UPLOAD_BYTES = defaultLimits.maxFileBytes
 const BODY_DEADLINE_MS = 120_000
 /** The longest pause in an upload's body, or before its first bytes, before it's dropped. */
 const BODY_IDLE_MS = 10_000
+
+/** How old a media file no row names must be before the sweep deletes it: older than any import. */
+const MEDIA_GRACE_MS = 60 * 60 * 1000
 
 const BODY_REFUSALS: Record<BodyRefused["reason"], readonly [status: number, message: string]> = {
   too_large: [413, `files can be at most ${MAX_UPLOAD_BYTES} bytes`],
@@ -139,6 +142,11 @@ export const layer = Layer.unwrap(
       const fileName = fileNameFrom(query.get("name"))
       const into = query.get("into")
       if (into !== null && !Schema.is(RefId)(into)) return jsonError(400, "into must name a ref")
+      // Before the body is read: a refused import reads, parses and stores nothing.
+      const target = into === null ? null : yield* reader.GetLibraryRef({ userId: user.id, refId: into })
+      if (target !== null && target.refKind !== "upstream") {
+        return jsonError(409, "only a library entry's original takes a new version of its file")
+      }
 
       const message = NodeHttpServerRequest.toIncomingMessage(request)
       const limits = { maxBytes: MAX_UPLOAD_BYTES, idleMs: BODY_IDLE_MS, deadline: Date.now() + BODY_DEADLINE_MS }
@@ -158,6 +166,9 @@ export const layer = Layer.unwrap(
                 return yield* HttpServerResponse.schemaJson(ImportResult)(
                   new ImportResult({ report: parsed.report, library: null })
                 )
+              }
+              if (target !== null && target.kind !== parsed.library.kind) {
+                return jsonError(409, `This file is a ${parsed.library.kind}, not a ${target.kind}.`)
               }
               yield* Effect.forEach(parsed.media, (file) => storeMedia(config.dataDir, file.sha256, file.bytes), {
                 discard: true
@@ -261,9 +272,17 @@ export const layer = Layer.unwrap(
       )
     )
 
+    // At startup and every hour: media files no row names, which a failed import can leave.
+    const sweep = Effect.gen(function* () {
+      const recorded = new Set(yield* reader.ListMediaHashes())
+      const deleted = yield* sweepMedia(config.dataDir, recorded, MEDIA_GRACE_MS)
+      if (deleted > 0) yield* Effect.logInfo(`deleted ${deleted} media files that no library entry names`)
+    }).pipe(Effect.catch((error) => Effect.logWarning("the media sweep failed", error)))
+
     return Layer.mergeAll(
       HttpRouter.add("POST", "/library/import", authenticated(accounts, importFile)),
-      HttpRouter.add("POST", "/library/export", authenticated(accounts, exportFile))
+      HttpRouter.add("POST", "/library/export", authenticated(accounts, exportFile)),
+      Layer.effectDiscard(Effect.forkScoped(Effect.repeat(sweep, Schedule.spaced("1 hour"))))
     )
   })
 )

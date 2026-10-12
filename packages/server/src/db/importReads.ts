@@ -2,7 +2,7 @@
 import type { UserId } from "@rp/shared/domain.ts"
 import { Effect, Predicate } from "effect"
 import { SqlClient } from "effect/sql"
-import { makeLibraryQueries } from "./library.ts"
+import { makeLibraryQueries, toLibraryRef } from "./library.ts"
 import { ExportSource, type ReadOps } from "./ops.ts"
 import { query } from "./tx.ts"
 
@@ -48,7 +48,16 @@ export const makeImportReadHandlers = Effect.gen(function* () {
           avatar: (yield* ownedMedia(userId, doc.avatar_media_id)) ?? null,
           assets: assets.flat()
         })
-      }).pipe(query("ExportSource"))
+      }).pipe(query("ExportSource")),
+
+    GetLibraryRef: ({ userId, refId }) =>
+      lib.ownedRef(userId, refId).pipe(Effect.map(toLibraryRef), query("GetLibraryRef")),
+
+    ListMediaHashes: () =>
+      sql<{ sha256: string }>`SELECT sha256 FROM media_assets`.pipe(
+        Effect.map((rows) => rows.map((row) => row.sha256)),
+        query("ListMediaHashes")
+      )
   } satisfies Partial<Parameters<typeof ReadOps.of>[0]>
   return handlers
 })

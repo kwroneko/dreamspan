@@ -954,5 +954,16 @@ export class ReadOps extends RpcGroup.make(
     payload: { userId: UserId, refId: RefId },
     success: ExportSource,
     error: Schema.Union([NotFound, StorageError])
+  }),
+  /** A ref without its document, to check where an import goes before reading the file. */
+  Rpc.make("GetLibraryRef", {
+    payload: { userId: UserId, refId: RefId },
+    success: LibraryRef,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** Every stored file's SHA-256, for the sweep of files no row names. */
+  Rpc.make("ListMediaHashes", {
+    success: Schema.Array(Schema.String),
+    error: StorageError
   })
 ) {}
