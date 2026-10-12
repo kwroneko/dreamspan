@@ -1,17 +1,15 @@
 // Layered library documents through the real storage operations (DESIGN §4,
 // DATA-MODEL §3.2): edits, variants, chat overrides, re-imports and merges.
-import { mkdtempSync } from "node:fs"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
 import { assert, describe, it } from "@effect/vitest"
 import { DraftKey } from "@rp/shared/drafts.ts"
 import type { Doc, RefId } from "@rp/shared/library.ts"
 import { Effect } from "effect"
 import * as Database from "../src/db/Database.ts"
+import { tempDir } from "./support/tempDir.ts"
 
 const database = () =>
   Database.layer({
-    dataDir: mkdtempSync(join(tmpdir(), "rp-lib-")),
+    dataDir: tempDir("lib"),
     readers: 2,
     allowNetworkFs: false,
     workers: "source"

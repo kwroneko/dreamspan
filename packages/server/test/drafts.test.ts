@@ -1,16 +1,14 @@
 // Drafts with server-persisted undo history (DESIGN §6.2), through the real workers.
-import { mkdtempSync } from "node:fs"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
 import { assert, describe, it } from "@effect/vitest"
 import { NewVersion, type SlotId } from "@rp/shared/chat.ts"
 import { composerKey } from "@rp/shared/drafts.ts"
 import { Effect } from "effect"
 import * as Database from "../src/db/Database.ts"
+import { tempDir } from "./support/tempDir.ts"
 
 const database = () =>
   Database.layer({
-    dataDir: mkdtempSync(join(tmpdir(), "rp-drafts-")),
+    dataDir: tempDir("drafts"),
     readers: 2,
     allowNetworkFs: false,
     workers: "source"

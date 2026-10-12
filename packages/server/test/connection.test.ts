@@ -1,6 +1,4 @@
-import { closeSync, mkdtempSync, openSync, writeSync } from "node:fs"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { closeSync, openSync, writeSync } from "node:fs"
 import { DatabaseSync } from "node:sqlite"
 import { SqliteClient } from "@effect/sql-sqlite-node"
 import { assert, describe, it } from "@effect/vitest"
@@ -8,6 +6,7 @@ import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { classifyFilesystem, databaseFile, toStorageError } from "../src/db/connection.ts"
 import * as Database from "../src/db/Database.ts"
+import { tempDir } from "./support/tempDir.ts"
 
 const database = (dataDir: string) => Database.layer({ dataDir, readers: 1, allowNetworkFs: false, workers: "source" })
 
@@ -42,7 +41,7 @@ describe("storage errors", () => {
     "a corrupted page reaches the caller as corrupt, through the workers",
     () =>
       Effect.gen(function* () {
-        const dir = mkdtempSync(join(tmpdir(), "rp-corrupt-"))
+        const dir = tempDir("corrupt")
         yield* Effect.flatMap(Database.Writer, (writer) =>
           writer.EnsureUser({ handle: "alice", displayName: "Alice" })
         ).pipe(Effect.provide(database(dir)))

@@ -1,11 +1,11 @@
-import { mkdtempSync, statSync, writeFileSync } from "node:fs"
-import { tmpdir } from "node:os"
+import { statSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Exit, Option, Redacted } from "effect"
 import { loadServerSecret, makeSecrets } from "../src/secrets.ts"
+import { tempDir } from "./support/tempDir.ts"
 
-const fresh = () => mkdtempSync(join(tmpdir(), "rp-secret-"))
+const fresh = () => tempDir("secret")
 const none = { secretKey: Option.none(), secretKeyFile: Option.none() }
 
 describe("server secret", () => {

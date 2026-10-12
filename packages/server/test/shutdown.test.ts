@@ -2,8 +2,7 @@
 // out first, WebSockets are told the server is going away, the database workers close
 // cleanly, and the process exits 0 on its own.
 import { type ChildProcess, spawn } from "node:child_process"
-import { existsSync, mkdtempSync, rmSync } from "node:fs"
-import { tmpdir } from "node:os"
+import { existsSync, rmSync } from "node:fs"
 import { join, resolve } from "node:path"
 import { DatabaseSync } from "node:sqlite"
 import { assert, describe, it } from "@effect/vitest"
@@ -11,6 +10,7 @@ import { AppApi } from "@rp/shared/api.ts"
 import { Effect, Layer } from "effect"
 import { RpcClient, RpcSerialization } from "effect/rpc"
 import { Socket } from "effect/socket"
+import { tempDir } from "./support/tempDir.ts"
 
 const serverDir = resolve(import.meta.dirname, "..")
 
@@ -22,7 +22,7 @@ interface Running {
 }
 
 const start = async (): Promise<Running> => {
-  const dataDir = mkdtempSync(join(tmpdir(), "rp-shutdown-"))
+  const dataDir = tempDir("shutdown")
   const port = 20_000 + Math.floor(Math.random() * 12_000)
   const child = spawn(process.execPath, ["--no-wasm-code-gc", "src/main.ts"], {
     cwd: serverDir,

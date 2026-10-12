@@ -1,6 +1,5 @@
 import { spawnSync } from "node:child_process"
-import { cpSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
-import { tmpdir } from "node:os"
+import { cpSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { DatabaseSync } from "node:sqlite"
 import { assert, describe, it } from "@effect/vitest"
@@ -10,8 +9,9 @@ import { acquireInstanceLock, databaseFile, InstanceLocked } from "../src/db/con
 import * as Database from "../src/db/Database.ts"
 import { diagnosticReaders } from "./support/diagnostics.ts"
 import { stalls } from "./support/liveness.ts"
+import { tempDir } from "./support/tempDir.ts"
 
-const freshDir = () => mkdtempSync(join(tmpdir(), "rp-db-"))
+const freshDir = () => tempDir("db")
 const bundleDir = inject("bundleDir")
 const database = (dataDir: string, readers = 2, workers: "source" | "bundle" = "source") =>
   Database.layer({ dataDir, readers, allowNetworkFs: false, workers, bundleDir })
@@ -166,7 +166,7 @@ describe("database workers", () => {
 describe("bundled workers", () => {
   it.live("are refused when the sources changed since they were built", () =>
     Effect.gen(function* () {
-      const staleDir = mkdtempSync(join(tmpdir(), "rp-bundles-"))
+      const staleDir = tempDir("bundles")
       cpSync(bundleDir, staleDir, { recursive: true })
       const stampFile = join(staleDir, "stamp.json")
       const stamp = JSON.parse(readFileSync(stampFile, "utf8")) as { sources: Array<string> }

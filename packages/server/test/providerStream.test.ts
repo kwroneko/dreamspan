@@ -1,9 +1,6 @@
 // The provider layer end to end (spec/PROVIDERS.md §4, §7, §9): real pi-ai adapters
 // against a scripted provider speaking the real wire formats, through the network
 // module and the database workers.
-import { mkdtempSync } from "node:fs"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
 import type { AssistantMessage, Context as PiContext } from "@earendil-works/pi-ai"
 import { assert, describe, it } from "@effect/vitest"
 import type { UserId } from "@rp/shared/domain.ts"
@@ -20,6 +17,7 @@ import { alignTranscript } from "../src/providers/breakpoints.ts"
 import { priceCost } from "../src/providers/usage.ts"
 import { makeSecrets, Secrets } from "../src/secrets.ts"
 import { anthropicSse, completionChunks, json, sse, startMockProvider } from "./support/mockProvider.ts"
+import { tempDir } from "./support/tempDir.ts"
 
 const layer = (bindKeysToOrigins = true) =>
   Providers.layer({ retry: { maxRetries: 2, baseDelayMs: 5, maxDelayMs: 1_000 }, bindKeysToOrigins }).pipe(
@@ -27,7 +25,7 @@ const layer = (bindKeysToOrigins = true) =>
     Layer.provideMerge(ProviderBuiltins.layer),
     Layer.provideMerge(
       Database.layer({
-        dataDir: mkdtempSync(join(tmpdir(), "rp-stream-")),
+        dataDir: tempDir("stream"),
         readers: 1,
         allowNetworkFs: false,
         workers: "source"

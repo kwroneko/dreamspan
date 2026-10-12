@@ -1,4 +1,3 @@
-import { mkdtempSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { AppApi } from "@rp/shared/api.ts"
@@ -9,6 +8,7 @@ import { Socket } from "effect/socket"
 import { PasswordCost } from "../../src/auth/passwords.ts"
 import { AppConfig, type AppConfigShape } from "../../src/config.ts"
 import { ServerLive } from "../../src/server.ts"
+import { tempDir } from "./tempDir.ts"
 
 /**
  * A server on loopback with a fresh data directory. Port 0 makes the kernel pick a free
@@ -19,7 +19,7 @@ import { ServerLive } from "../../src/server.ts"
 export const testConfig = (overrides: Partial<AppConfigShape> = {}): AppConfigShape => ({
   host: "127.0.0.1",
   port: 0,
-  dataDir: mkdtempSync(join(tmpdir(), "rp-server-")),
+  dataDir: tempDir("server"),
   dbReaders: 1,
   dbAllowNetworkFs: false,
   dbWorkers: "source",

@@ -1,7 +1,4 @@
 // Connections, models and the usage ledger (spec/PROVIDERS.md), through the real workers.
-import { mkdtempSync } from "node:fs"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
 import { assert, describe, it } from "@effect/vitest"
 import type { UserId } from "@rp/shared/domain.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
@@ -9,10 +6,11 @@ import { type ConnectionId, type ConnectionSettings, type CredentialId, resolveM
 import { type LlmRequest, type LlmRequestId, unknownCounts } from "@rp/shared/usage.ts"
 import { Effect, Exit } from "effect"
 import * as Database from "../src/db/Database.ts"
+import { tempDir } from "./support/tempDir.ts"
 
 const database = () =>
   Database.layer({
-    dataDir: mkdtempSync(join(tmpdir(), "rp-providers-")),
+    dataDir: tempDir("providers"),
     readers: 1,
     allowNetworkFs: false,
     workers: "source"

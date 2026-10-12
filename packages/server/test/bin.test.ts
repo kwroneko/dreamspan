@@ -1,7 +1,4 @@
 // The recycle bin (DESIGN §6.2), through the real workers.
-import { mkdtempSync } from "node:fs"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
 import { DatabaseSync } from "node:sqlite"
 import { assert, describe, it } from "@effect/vitest"
 import type { BinItem, BinLimits, RecoveredText } from "@rp/shared/bin.ts"
@@ -12,8 +9,9 @@ import type { ConnectionId } from "@rp/shared/providers.ts"
 import { Effect } from "effect"
 import { databaseFile } from "../src/db/connection.ts"
 import * as Database from "../src/db/Database.ts"
+import { tempDir } from "./support/tempDir.ts"
 
-const database = (dataDir = mkdtempSync(join(tmpdir(), "rp-bin-")), binLimits?: BinLimits) =>
+const database = (dataDir = tempDir("bin"), binLimits?: BinLimits) =>
   Database.layer({
     dataDir,
     readers: 2,
@@ -216,7 +214,7 @@ describe("recycle bin", () => {
   )
 
   it.live("deleting a message for good erases its content and leaves an empty placeholder", () => {
-    const dir = mkdtempSync(join(tmpdir(), "rp-bin-"))
+    const dir = tempDir("bin")
     return Effect.gen(function* () {
       const { writer, userId, say, b, path, bin } = yield* setup()
       const swipe = yield* writer.AddVersion({
@@ -296,7 +294,7 @@ describe("recycle bin", () => {
   )
 
   it.live("emptying the bin deletes everything in it for good", () => {
-    const dir = mkdtempSync(join(tmpdir(), "rp-bin-"))
+    const dir = tempDir("bin")
     return Effect.gen(function* () {
       const { writer, reader, userId, card, say, b, c, path, bin, newChat } = yield* setup()
       const swipe = yield* writer.AddVersion({
@@ -332,7 +330,7 @@ describe("recycle bin", () => {
   it.live(
     "a chat holding a connection's preset override can be evicted, and a failed eviction never blocks a delete",
     () => {
-      const dir = mkdtempSync(join(tmpdir(), "rp-bin-"))
+      const dir = tempDir("bin")
       return Effect.gen(function* () {
         const { writer, reader, userId, a, b, bin, newChat, path } = yield* setup()
         const preset = yield* writer.CreateEntity({
@@ -396,7 +394,7 @@ describe("recycle bin", () => {
   )
 
   it.live("eviction never takes the item just deleted, and takes nothing if it can't make room", () => {
-    const dir = mkdtempSync(join(tmpdir(), "rp-bin-"))
+    const dir = tempDir("bin")
     return Effect.gen(function* () {
       const { writer, userId, root, a, b, c, bin } = yield* setup()
       const excerpts = () => bin().pipe(Effect.map((items) => items.map((i) => i.excerpt)))
@@ -470,7 +468,7 @@ describe("recycle bin", () => {
   )
 
   it.live("a chat's size counts its agent runs and state, and an entity's its search text", () => {
-    const dir = mkdtempSync(join(tmpdir(), "rp-bin-"))
+    const dir = tempDir("bin")
     return Effect.gen(function* () {
       const { writer, userId, card, newChat } = yield* setup()
       const story = yield* newChat("Story") // no messages
@@ -498,7 +496,7 @@ describe("recycle bin", () => {
   })
 
   it.live("pages through items deleted in the same millisecond without skipping any", () => {
-    const dir = mkdtempSync(join(tmpdir(), "rp-bin-"))
+    const dir = tempDir("bin")
     return Effect.gen(function* () {
       const { writer, reader, userId, chat, a, b, c } = yield* setup()
       for (const slot of [a, b, c]) yield* writer.DeleteMessage({ userId, slotId: slot.slotId })

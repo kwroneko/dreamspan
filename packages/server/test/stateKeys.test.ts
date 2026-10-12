@@ -4,9 +4,6 @@
 // which fields must belong to another field of the value. The ids are the fields whose
 // value differs between two users' things. Every key that `stateKeyIds` gives ids must
 // have an entry, so a new key gets these checks too.
-import { mkdtempSync } from "node:fs"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
 import { assert, describe, it, layer } from "@effect/vitest"
 import type { EntityId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
@@ -16,6 +13,7 @@ import type { ConnectionId, ModelId } from "@rp/shared/providers.ts"
 import { type FoldableEvent, type StateEventData, stateKeyIds } from "@rp/shared/state.ts"
 import { Context, Effect, Layer } from "effect"
 import * as Database from "../src/db/Database.ts"
+import { tempDir } from "./support/tempDir.ts"
 
 interface Item {
   readonly entity: EntityId
@@ -149,7 +147,7 @@ const fixture = Layer.effect(
 ).pipe(
   Layer.provide(
     Database.layer({
-      dataDir: mkdtempSync(join(tmpdir(), "rp-state-keys-")),
+      dataDir: tempDir("state-keys"),
       readers: 1,
       allowNetworkFs: false,
       workers: "source"

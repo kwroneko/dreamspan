@@ -1,6 +1,4 @@
 // Migrations through the real migrator and writer connection settings.
-import { mkdtempSync } from "node:fs"
-import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { SqliteMigrator } from "@effect/sql-sqlite-node"
 import { assert, describe, it } from "@effect/vitest"
@@ -8,6 +6,7 @@ import { Effect, Exit } from "effect"
 import { SqlClient } from "effect/sql"
 import { writerConnection } from "../src/db/connection.ts"
 import { migrations } from "../src/db/migrations.ts"
+import { tempDir } from "./support/tempDir.ts"
 
 /** The migrations that run before `name`. The migrator skips anything older than the latest it has run. */
 const before = (name: string) => Object.fromEntries(Object.entries(migrations).filter(([key]) => key < name))
@@ -26,7 +25,7 @@ describe("0005_providers", () => {
       assert.isTrue(Exit.isFailure(exit))
       const kept = yield* sql<{ name: string }>`SELECT name FROM connections`
       assert.deepStrictEqual(kept, [{ name: "Kept" }])
-    }).pipe(Effect.provide(writerConnection(join(mkdtempSync(join(tmpdir(), "rp-mig-")), "db.sqlite"))))
+    }).pipe(Effect.provide(writerConnection(join(tempDir("mig"), "db.sqlite"))))
   )
 })
 
@@ -45,6 +44,6 @@ describe("0006_credentials", () => {
       assert.isTrue(Exit.isFailure(exit))
       const kept = yield* sql<{ key_hint: string }>`SELECT key_hint FROM connections`
       assert.deepStrictEqual(kept, [{ key_hint: "abcd" }])
-    }).pipe(Effect.provide(writerConnection(join(mkdtempSync(join(tmpdir(), "rp-mig-")), "db.sqlite"))))
+    }).pipe(Effect.provide(writerConnection(join(tempDir("mig"), "db.sqlite"))))
   )
 })

@@ -1,7 +1,4 @@
 // The network module against real local proxies (spec/PROVIDERS.md §6.2).
-import { mkdtempSync } from "node:fs"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Layer } from "effect"
 import * as Database from "../src/db/Database.ts"
@@ -9,6 +6,7 @@ import { describeRoute, parseBypass } from "../src/net/route.ts"
 import * as Network from "../src/net/Network.ts"
 import { makeSecrets, Secrets } from "../src/secrets.ts"
 import { startHttpProxy, startSocks5Proxy, startTarget } from "./support/proxies.ts"
+import { tempDir } from "./support/tempDir.ts"
 
 const layer = (dataDir: string) =>
   Network.layer.pipe(
@@ -40,7 +38,7 @@ describe("network", () => {
       assert.strictEqual(proxy.tunnels().length, 1)
       assert.match(routes.at(-1)!, /^via proxy http:\/\/127\.0\.0\.1:\d+$/)
       assert.strictEqual(target.requests(), 2)
-    }).pipe(Effect.scoped, Effect.provide(layer(mkdtempSync(join(tmpdir(), "rp-net-")))))
+    }).pipe(Effect.scoped, Effect.provide(layer(tempDir("net"))))
   )
 
   it.live("a host bypassed by name goes direct whatever its addresses", () =>
@@ -56,7 +54,7 @@ describe("network", () => {
       )
       assert.deepStrictEqual(body, { ok: true })
       assert.deepStrictEqual(proxy.tunnels(), [])
-    }).pipe(Effect.scoped, Effect.provide(layer(mkdtempSync(join(tmpdir(), "rp-net-")))))
+    }).pipe(Effect.scoped, Effect.provide(layer(tempDir("net"))))
   )
 
   it.live("honors a connection's own SOCKS5 proxy with credentials, and its direct override", () =>
@@ -77,12 +75,12 @@ describe("network", () => {
       assert.deepStrictEqual(instance.tunnels(), [])
       assert.strictEqual(socks.tunnels().length, 1)
       assert.strictEqual(target.requests(), 2)
-    }).pipe(Effect.scoped, Effect.provide(layer(mkdtempSync(join(tmpdir(), "rp-net-")))))
+    }).pipe(Effect.scoped, Effect.provide(layer(tempDir("net"))))
   )
 
   it.live("keeps the proxy across restarts, encrypted, and never shows its credentials", () =>
     Effect.gen(function* () {
-      const dataDir = mkdtempSync(join(tmpdir(), "rp-net-"))
+      const dataDir = tempDir("net")
       const set = Effect.gen(function* () {
         const network = yield* Network.Network
         return yield* network.setInstance({
@@ -118,7 +116,7 @@ describe("network", () => {
         .pipe(Effect.flip)
       assert.strictEqual(result._tag, "InvalidNetworkSettings")
       if (result._tag === "InvalidNetworkSettings") assert.strictEqual(result.problems.length, 2)
-    }).pipe(Effect.provide(layer(mkdtempSync(join(tmpdir(), "rp-net-")))))
+    }).pipe(Effect.provide(layer(tempDir("net"))))
   )
 })
 

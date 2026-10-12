@@ -1,9 +1,6 @@
 // The message graph through the real storage operations (writer and reader workers):
 // DESIGN §3, DATA-MODEL §4–§5 and invariants 2–4.
 import { execFile } from "node:child_process"
-import { mkdtempSync, rmSync } from "node:fs"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { DatabaseSync } from "node:sqlite"
 import { SqliteClient } from "@effect/sql-sqlite-node"
@@ -19,8 +16,9 @@ import { SqlClient } from "effect/sql"
 import { databaseFile } from "../src/db/connection.ts"
 import * as Database from "../src/db/Database.ts"
 import { pathWindow } from "../src/db/reads.ts"
+import { tempDir } from "./support/tempDir.ts"
 
-const database = (dataDir = mkdtempSync(join(tmpdir(), "rp-graph-"))) =>
+const database = (dataDir = tempDir("graph")) =>
   Database.layer({ dataDir, readers: 2, allowNetworkFs: false, workers: "source" })
 
 const windowProbe = fileURLToPath(new URL("./support/windowProbe.ts", import.meta.url))
@@ -644,7 +642,7 @@ describe("window reads", () => {
   it.live(
     "stop at their limit even with a cycle further up, and walk the path by index",
     () => {
-      const dataDir = mkdtempSync(join(tmpdir(), "rp-graph-"))
+      const dataDir = tempDir("graph")
       return Effect.gen(function* () {
         const { userId, chatId, slots } = yield* Effect.gen(function* () {
           const { userId, me, mira, chat, append } = yield* setup()
@@ -680,7 +678,7 @@ describe("window reads", () => {
           plan.join("\n")
         )
         assert.include(plan, "SEARCH s USING INDEX sqlite_autoindex_slots_1 (id=?)", plan.join("\n"))
-      }).pipe(Effect.ensuring(Effect.sync(() => rmSync(dataDir, { recursive: true, force: true }))))
+      })
     },
     60_000
   )

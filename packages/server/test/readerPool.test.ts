@@ -1,5 +1,4 @@
-import { cpSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
-import { tmpdir } from "node:os"
+import { cpSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { Worker } from "node:worker_threads"
 import { NodeWorker } from "@effect/platform-node"
@@ -11,6 +10,7 @@ import { workerThreads, writerProtocol } from "../src/db/Database.ts"
 import * as ReaderPool from "../src/db/readerPool.ts"
 import { PoolOps } from "./support/poolOps.ts"
 import { stalls } from "./support/liveness.ts"
+import { tempDir } from "./support/tempDir.ts"
 
 class Readers extends Context.Service<Readers, RpcClient.FromGroup<typeof PoolOps, RpcClientError.RpcClientError>>()(
   "test/Readers"
@@ -179,8 +179,8 @@ describe("reader pool", () => {
   )
 
   describe("with bundles", () => {
-    // A copy of the run's build (support/bundles.ts), since this test changes it.
-    const bundleDir = mkdtempSync(join(tmpdir(), "rp-bundles-"))
+    // A copy of the run's build (support/globalSetup.ts), since this test changes it.
+    const bundleDir = tempDir("bundles")
     cpSync(inject("bundleDir"), bundleDir, { recursive: true })
 
     it.live(
