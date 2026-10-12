@@ -57,6 +57,12 @@ export const makeImportReadHandlers = Effect.gen(function* () {
       sql<{ sha256: string }>`SELECT sha256 FROM media_assets`.pipe(
         Effect.map((rows) => rows.map((row) => row.sha256)),
         query("ListMediaHashes")
+      ),
+
+    IsMediaRecorded: ({ sha256 }) =>
+      sql<{ n: number }>`SELECT count(*) AS n FROM media_assets WHERE sha256 = ${sha256}`.pipe(
+        Effect.map(([row]) => row!.n > 0),
+        query("IsMediaRecorded")
       )
   } satisfies Partial<Parameters<typeof ReadOps.of>[0]>
   return handlers

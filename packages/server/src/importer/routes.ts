@@ -110,6 +110,22 @@ export const layer = Layer.unwrap(
     const formats = yield* Formats
     const reader = yield* Reader
     const writer = yield* Writer
+    // Media an import has written and not yet recorded, by hash with a count of imports, so
+    // the sweep leaves them alone until the import commits or gives up.
+    const pending = new Map<string, number>()
+    const holding = <A, E, R>(hashes: ReadonlyArray<string>, effect: Effect.Effect<A, E, R>) =>
+      Effect.acquireUseRelease(
+        Effect.sync(() => hashes.forEach((sha256) => pending.set(sha256, (pending.get(sha256) ?? 0) + 1))),
+        () => effect,
+        () =>
+          Effect.sync(() =>
+            hashes.forEach((sha256) => {
+              const count = (pending.get(sha256) ?? 1) - 1
+              if (count === 0) pending.delete(sha256)
+              else pending.set(sha256, count)
+            })
+          )
+      )
     // Files held in memory at once. An upload takes a permit once its first bytes arrive, so
     // one that sends nothing holds none; the rest wait in their sockets, where TCP holds the
     // sender back. Exports have permits of their own, so stalled uploads can't hold them up.
@@ -188,17 +204,22 @@ export const layer = Layer.unwrap(
               if (target !== null && target.kind !== parsed.library.kind) {
                 return jsonError(409, `This file is a ${parsed.library.kind}, not a ${target.kind}.`)
               }
-              yield* Effect.forEach(parsed.media, (file) => storeMedia(config.dataDir, file.sha256, file.bytes), {
-                discard: true
-              })
-              const library = yield* writer.ImportFile({
-                userId: user.id,
-                intoRefId: into,
-                ...parsed.library,
-                sourceName: fileName,
-                sourceHash: parsed.sha256,
-                media: parsed.media.map(({ bytes: _, ...file }) => file)
-              })
+              const library = yield* holding(
+                parsed.media.map((file) => file.sha256),
+                Effect.gen(function* () {
+                  yield* Effect.forEach(parsed.media, (file) => storeMedia(config.dataDir, file.sha256, file.bytes), {
+                    discard: true
+                  })
+                  return yield* writer.ImportFile({
+                    userId: user.id,
+                    intoRefId: into,
+                    ...parsed.library!,
+                    sourceName: fileName,
+                    sourceHash: parsed.sha256,
+                    media: parsed.media.map(({ bytes: _, ...file }) => file)
+                  })
+                })
+              )
               const kept = [
                 ...(library.keptAvatar
                   ? [
@@ -324,7 +345,11 @@ export const layer = Layer.unwrap(
     // At startup and every hour: media files no row names, which a failed import can leave.
     const sweep = Effect.gen(function* () {
       const recorded = new Set(yield* reader.ListMediaHashes())
-      const deleted = yield* sweepMedia(config.dataDir, recorded, MEDIA_GRACE_MS)
+      const deleted = yield* sweepMedia(config.dataDir, recorded, {
+        graceMs: MEDIA_GRACE_MS,
+        pending,
+        isRecorded: (sha256) => reader.IsMediaRecorded({ sha256 })
+      })
       if (deleted > 0) yield* Effect.logInfo(`deleted ${deleted} media files that no library entry names`)
     }).pipe(Effect.catch((error) => Effect.logWarning("the media sweep failed", error)))
 

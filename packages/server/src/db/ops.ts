@@ -942,6 +942,12 @@ export class ReadOps extends RpcGroup.make(
     success: LibraryRef,
     error: Schema.Union([NotFound, StorageError])
   }),
+  /** Whether a row names the file with this SHA-256: the sweep asks just before deleting. */
+  Rpc.make("IsMediaRecorded", {
+    payload: { sha256: Schema.String },
+    success: Schema.Boolean,
+    error: StorageError
+  }),
   /** Every stored file's SHA-256, for the sweep of files no row names. */
   Rpc.make("ListMediaHashes", {
     success: Schema.Array(Schema.String),
