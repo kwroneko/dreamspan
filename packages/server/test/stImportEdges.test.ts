@@ -768,6 +768,80 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
     })
   )
 
+  it.effect("a message the user amended still matches when its import resumes, and on a re-import", () =>
+    Effect.gen(function* () {
+      const path = "chats/Bot/amended.jsonl"
+      const lines = [message("am-greeting", 0), message("am-user", 1), message("am-reply", 2)]
+      const first = yield* begin
+      yield* answer(
+        yield* sendFile(first.importId, path, jsonl({ chat_metadata: {} }, ...lines), { card: "none", last: "0" })
+      )
+      const user = yield* first.api.Whoami()
+      const writer = yield* Writer
+      const versionId = query("SELECT id FROM versions WHERE content = 'am-user'")[0]!.id as VersionId
+      yield* writer.AmendVersion({ userId: user.id, versionId, content: "am-user edited", expectedRowVersion: 1 })
+      const second = yield* begin
+      yield* sendStFile(second.importId, path, jsonl({ chat_metadata: {} }, ...lines, message("am-next", 3)), {
+        card: "none"
+      })
+      assert.deepStrictEqual(
+        pathTo("am-next").map((row) => row.content),
+        ["am-greeting", "am-user edited", "am-reply", "am-next"]
+      )
+      assert.strictEqual(present("am-user"), 0)
+      // The second amend: its row version is one more than its amends.
+      yield* writer.AmendVersion({
+        userId: user.id,
+        versionId,
+        content: "am-user edited again",
+        expectedRowVersion: 2
+      })
+      const third = yield* begin
+      const tail = [...lines, message("am-next", 3), message("am-tail", 4)]
+      yield* sendStFile(third.importId, path, jsonl({ chat_metadata: {} }, ...tail), { card: "none" })
+      assert.deepStrictEqual(
+        pathTo("am-tail").map((row) => row.content),
+        ["am-greeting", "am-user edited again", "am-reply", "am-next", "am-tail"]
+      )
+      assert.strictEqual(present("am-user"), 0)
+      assert.strictEqual(present("am-reply"), 1)
+      assert.strictEqual(yield* leafText(chatOf(path)), "am-tail")
+    })
+  )
+
+  it.effect("a message deleted after an earlier one was amended stays in the bin on a resume", () =>
+    Effect.gen(function* () {
+      const path = "chats/Bot/amended-binned.jsonl"
+      const lines = [message("ab-greeting", 0), message("ab-user", 1), message("ab-binned", 2)]
+      const first = yield* begin
+      yield* answer(
+        yield* sendFile(first.importId, path, jsonl({ chat_metadata: {} }, ...lines), { card: "none", last: "0" })
+      )
+      const user = yield* first.api.Whoami()
+      const versionId = query("SELECT id FROM versions WHERE content = 'ab-user'")[0]!.id as VersionId
+      yield* (yield* Writer).AmendVersion({
+        userId: user.id,
+        versionId,
+        content: "ab-user edited",
+        expectedRowVersion: 1
+      })
+      const slotId = query(
+        "SELECT s.id FROM slots s JOIN versions v ON v.slot_id = s.id WHERE v.content = 'ab-binned'"
+      )[0]!.id as SlotId
+      yield* first.api.DeleteMessage({ slotId })
+      const second = yield* begin
+      yield* sendStFile(second.importId, path, jsonl({ chat_metadata: {} }, ...lines, message("ab-next", 3)), {
+        card: "none"
+      })
+      const rows = query(
+        "SELECT s.deleted_at FROM slots s JOIN versions v ON v.slot_id = s.id WHERE v.content = 'ab-binned'"
+      )
+      assert.lengthOf(rows, 1)
+      assert.isNotNull(rows[0]!.deleted_at)
+      assert.strictEqual(present("ab-user"), 0)
+    })
+  )
+
   it.effect("the staging folder of earlier versions goes at startup, but a link there isn't followed", () =>
     Effect.gen(function* () {
       const dataDir = tempDir("st-staging")

@@ -278,22 +278,29 @@ export const makeStImportWriteHandlers = Effect.gen(function* () {
               })} RETURNING id`.pipe(Effect.map(([row]) => row!.id))
             if (matching) {
               // Messages in the bin match too: a re-import doesn't bring back what was deleted here.
+              // A version the user amended matches by the text it had before (`original`, its
+              // oldest history entry), so it isn't imported again beside the amended one.
               const children = yield* sql<{
                 slot_id: string
                 depth: number
                 hidden: number
                 selected: number
                 content: string
+                original: string
                 created_at: number
                 writer: string
                 ordinal: number
               }>`
                 SELECT s.id AS slot_id, s.depth, s.context_excluded AS hidden, v.id = s.selected_version_id AS selected,
-                  v.content, v.created_at, v.writer, v.ordinal
+                  v.content, v.created_at, v.writer, v.ordinal,
+                  coalesce((SELECT h.content FROM version_history h WHERE h.version_id = v.id ORDER BY h.id LIMIT 1),
+                    v.content) AS original
                 FROM slots s JOIN versions v ON v.slot_id = s.id
                 WHERE ${parent === null ? sql`s.chat_id = ${chatId} AND s.depth = 0` : sql`s.parent_slot_id = ${parent.id}`}`
               const same = (row: (typeof children)[number], version: (typeof message.versions)[number]) =>
-                row.writer === writer && row.content === version.content && row.created_at === version.at
+                row.writer === writer &&
+                row.created_at === version.at &&
+                (row.content === version.content || row.original === version.content)
               const shown = message.versions[chosen]!
               const versionsOf = (slotId: string) => children.filter((row) => row.slot_id === slotId)
               // Every sibling with a version of the message: a branch that went its own way
