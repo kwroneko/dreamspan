@@ -61,7 +61,16 @@ export const migrations = {
   "0010_graph_integrity": runAll(graphIntegrity),
   "0011_ownership": runAll(ownership),
   "0012_queued_messages": runAll(queue),
-  "0013_draft_sessions": runAll(draftSessions)
+  "0013_draft_sessions": runAll(draftSessions),
+  "0014_deleted_subtree_roots": runAll([
+    `ALTER TABLE slots ADD COLUMN branch_deleted INTEGER NOT NULL DEFAULT 0 CHECK (branch_deleted IN (0, 1))`,
+    `UPDATE slots SET branch_deleted = 1 WHERE id IN (SELECT target_id FROM bin_items WHERE kind = 'branch')`,
+    // Purged subtree roots can still be identified by the shared deletion mark of their children.
+    `UPDATE slots AS s SET branch_deleted = 1 WHERE s.deleted_at IS NOT NULL AND s.bin_item_id IS NOT NULL
+      AND EXISTS (SELECT 1 FROM slots child INDEXED BY slots_parent
+        WHERE child.parent_slot_id = s.id AND child.bin_item_id = s.bin_item_id)
+      AND NOT EXISTS (SELECT 1 FROM slots parent WHERE parent.id = s.parent_slot_id AND parent.bin_item_id = s.bin_item_id)`
+  ])
 }
 
 export const Migrations = SqliteMigrator.layer({ loader: SqliteMigrator.fromRecord(migrations) })

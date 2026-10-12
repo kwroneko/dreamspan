@@ -4,6 +4,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import type { ChatId, PathEntry, SlotId } from "@rp/shared/chat.ts"
 import { Effect } from "effect"
+import { Reader, Writer } from "../src/db/Database.ts"
 import { client, outcome, posted, testConfig, typeInto, withServer } from "./support/config.ts"
 
 type Api = Effect.Success<ReturnType<typeof client>>
@@ -21,6 +22,95 @@ const shape = (entries: ReadonlyArray<PathEntry>) =>
   entries.map((e) => `${e.version.content}:${e.branchIndex + 1}/${e.branchCount}`)
 
 describe("branches", () => {
+  for (const purge of [false, true]) {
+    it.live(
+      `does not follow a ${purge ? "purged" : "deleted"} subtree when an older individual deletion inside it is restored`,
+      () =>
+        Effect.gen(function* () {
+          const api = yield* client()
+          const chat = yield* api.CreateChat({ title: "Subtree boundary" })
+          const root = yield* send(api, chat.id, null, "root")
+          const a = yield* send(api, chat.id, root, "subtree")
+          const b = yield* send(api, chat.id, a, "older deletion")
+          const inner = yield* api.DeleteMessage({ slotId: b })
+          const other = yield* send(api, chat.id, root, "other", true)
+          const subtree = yield* api.DeleteBranch({ slotId: a })
+          if (purge) yield* api.PurgeBinItem({ itemId: subtree.id })
+          yield* api.RestoreBinItem({ itemId: inner.id })
+          assert.deepStrictEqual(shape(yield* path(api, chat.id)), ["root:1/1", "other:1/1"])
+          assert.strictEqual(
+            (yield* api.SwitchBranch({ chatId: chat.id, slotId: other, index: 0 })).chat.activeLeafSlotId,
+            other
+          )
+        }).pipe(Effect.scoped, withServer(testConfig()))
+    )
+  }
+
+  for (const change of ["restore", "delete message", "delete branch"] as const) {
+    it.live(`${change} on an inactive branch invalidates a previously read branch tip`, () =>
+      Effect.gen(function* () {
+        const api = yield* client()
+        const reader = yield* Reader
+        const writer = yield* Writer
+        const user = yield* api.Whoami()
+        const chat = yield* api.CreateChat({ title: "Structural changes" })
+        const root = yield* send(api, chat.id, null, "root")
+        const a = yield* send(api, chat.id, root, "a")
+        const child = yield* send(api, chat.id, a, "continuation")
+        const b = yield* send(api, chat.id, root, "other", true)
+        const item = change === "restore" ? yield* api.DeleteMessage({ slotId: child }) : null
+        const target = yield* reader.BranchTip({ userId: user.id, chatId: chat.id, slotId: b, index: 0 })
+        if (item) yield* api.RestoreBinItem({ itemId: item.id })
+        else if (change === "delete message") yield* api.DeleteMessage({ slotId: child })
+        else yield* api.DeleteBranch({ slotId: child })
+        assert.strictEqual(
+          yield* outcome(
+            writer.SetActiveLeaf({
+              userId: user.id,
+              chatId: chat.id,
+              slotId: target.tipSlotId,
+              expectedRowVersion: target.chatRowVersion
+            })
+          ),
+          "StaleWrite"
+        )
+        const fresh = yield* api.SwitchBranch({ chatId: chat.id, slotId: b, index: 0 })
+        assert.strictEqual(fresh.chat.activeLeafSlotId, change === "restore" ? child : a)
+      }).pipe(Effect.scoped, withServer(testConfig()))
+    )
+  }
+
+  it.live("counts and follows chains of individually deleted ancestors, including purged placeholders", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const chat = yield* api.CreateChat({ title: "Deleted chain" })
+      const root = yield* send(api, chat.id, null, "root")
+      const a = yield* send(api, chat.id, root, "a")
+      const b = yield* send(api, chat.id, a, "b")
+      const c = yield* send(api, chat.id, b, "survivor")
+      const other = yield* send(api, chat.id, root, "other", true)
+      const deleted = yield* api.DeleteMessage({ slotId: a })
+      yield* api.DeleteMessage({ slotId: b })
+      for (const purged of [false, true]) {
+        if (purged) yield* api.PurgeBinItem({ itemId: deleted.id })
+        yield* api.SwitchBranch({ chatId: chat.id, slotId: other, index: 1 })
+        assert.deepStrictEqual(shape(yield* path(api, chat.id)), ["root:1/1", "other:2/2"])
+        const switched = yield* api.SwitchBranch({ chatId: chat.id, slotId: other, index: 0 })
+        assert.strictEqual(switched.chat.activeLeafSlotId, c)
+        const around = yield* api.ReadPath({
+          chatId: chat.id,
+          leafSlotId: other,
+          range: { _tag: "Around", slot: c },
+          limit: 20
+        })
+        assert.strictEqual(around.leafSlotId, c)
+      }
+      yield* api.DeleteBranch({ slotId: c })
+      yield* api.SwitchBranch({ chatId: chat.id, slotId: other, index: 0 })
+      assert.deepStrictEqual(shape(yield* path(api, chat.id)), ["root:1/1", "other:1/1"])
+    }).pipe(Effect.scoped, withServer(testConfig()))
+  )
+
   it.live("counts the alternates at each position, and switching moves the leaf to a branch's tip", () =>
     Effect.gen(function* () {
       const api = yield* client()

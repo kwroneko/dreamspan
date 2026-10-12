@@ -7,6 +7,7 @@ import { FoldableEvent } from "@rp/shared/state.ts"
 import { Effect, Schema } from "effect"
 import { SqlClient } from "effect/sql"
 import { toBinItem, toRecoveredText } from "./bin.ts"
+import { reachableSlot } from "./graphReachability.ts"
 import { makeDraftStore } from "./drafts.ts"
 import { makeLibraryQueries, toLibraryRef } from "./library.ts"
 import { NotFound, ReadOps, RefOperationRefused, StorageError } from "./ops.ts"
@@ -35,10 +36,6 @@ const pathCte = (sql: SqlClient.SqlClient, chatId: ChatId, leaf: SlotId, limit: 
     WHERE s.parent_slot_id IS NOT NULL AND (${limit} IS NULL OR p.n < ${limit})
   )`
 
-/** Slot `x` is on some path: live, or deleted alone with replies left in place. */
-const REACHABLE = `(x.deleted_at IS NULL
-  OR EXISTS (SELECT 1 FROM slots g WHERE g.parent_slot_id = x.id AND g.deleted_at IS NULL))`
-
 /**
  * The alternate branches at slot `s` (DESIGN §3.2), with `also` on top: its siblings in
  * its lane that a path can reach, which is what `latestDescendant` follows. Roots are
@@ -47,7 +44,7 @@ const REACHABLE = `(x.deleted_at IS NULL
  * every entry (5 s for a 60-slot window of the 100,000-message perf fixture).
  */
 const siblingCount = (also = "") => {
-  const reachable = `x.lane_id = s.lane_id ${also} AND ${REACHABLE}`
+  const reachable = `x.lane_id = s.lane_id ${also} AND ${reachableSlot("x")}`
   return `CASE WHEN s.parent_slot_id IS NULL
     THEN (SELECT count(*) FROM slots x INDEXED BY slots_chat_depth WHERE x.chat_id = s.chat_id AND x.depth = 0 AND ${reachable})
     ELSE (SELECT count(*) FROM slots x INDEXED BY slots_parent WHERE x.parent_slot_id = s.parent_slot_id AND ${reachable}) END`
@@ -172,8 +169,7 @@ export const makeReadHandlers = Effect.gen(function* () {
         SELECT ${slotId}, 0
         UNION ALL
         SELECT (SELECT c.id FROM slots c WHERE c.parent_slot_id = d.id
-            AND (c.deleted_at IS NULL OR EXISTS (
-              SELECT 1 FROM slots g WHERE g.parent_slot_id = c.id AND g.deleted_at IS NULL))
+            AND ${sql.literal(reachableSlot("c"))}
             ORDER BY c.id DESC LIMIT 1),
           d.n + 1
         FROM down d WHERE d.id IS NOT NULL
@@ -457,11 +453,11 @@ export const makeReadHandlers = Effect.gen(function* () {
           slot.parent_slot_id === null
             ? yield* sql<{ id: SlotId }>`
                 SELECT x.id FROM slots x INDEXED BY slots_chat_depth WHERE x.chat_id = ${chatId} AND x.depth = 0
-                  AND x.lane_id = ${slot.lane_id} AND ${sql.literal(REACHABLE)}
+                  AND x.lane_id = ${slot.lane_id} AND ${sql.literal(reachableSlot("x"))}
                 ORDER BY x.id LIMIT 1 OFFSET ${index}`
             : yield* sql<{ id: SlotId }>`
                 SELECT x.id FROM slots x INDEXED BY slots_parent WHERE x.parent_slot_id = ${slot.parent_slot_id}
-                  AND x.lane_id = ${slot.lane_id} AND ${sql.literal(REACHABLE)}
+                  AND x.lane_id = ${slot.lane_id} AND ${sql.literal(reachableSlot("x"))}
                 ORDER BY x.id LIMIT 1 OFFSET ${index}`
         if (!sibling) return yield* new NotFound({ entity: "branch", id: `${slotId}#${index}` })
         return { slotId: sibling.id, tipSlotId: yield* latestDescendant(sibling.id), chatRowVersion: chat.row_version }

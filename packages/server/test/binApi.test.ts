@@ -40,6 +40,25 @@ const subscribe = (api: Api, chatId: Chat["id"]) =>
   })
 
 describe("the recycle bin's RPCs", () => {
+  it.live("restores the first message from the empty root, with its path and composer", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const chat = yield* api.CreateChat({ title: "Root restore" })
+      const root = yield* send(api, chat.id, null, "only message")
+      const typed = yield* typeInto(api, chat.id, root, "unsent continuation")
+      const item = yield* api.DeleteMessage({ slotId: root })
+      assert.isNull((yield* api.GetChat({ chatId: chat.id })).activeLeafSlotId)
+      yield* api.RestoreBinItem({ itemId: item.id })
+      assert.strictEqual((yield* api.GetChat({ chatId: chat.id })).activeLeafSlotId, root)
+      assert.deepStrictEqual(yield* contents(api, chat.id), ["only message"])
+      // The same draft went up to the empty root and came back down with its session intact.
+      const back = yield* api.OpenComposer({ chatId: chat.id, tipSlotId: root })
+      assert.deepStrictEqual([back.id, back.content, back.session], [typed.id, "unsent continuation", typed.session])
+      const rootless = yield* api.OpenComposer({ chatId: chat.id, tipSlotId: null })
+      assert.deepStrictEqual([rootless.id === typed.id, rootless.content], [false, ""])
+    }).pipe(Effect.scoped, withServer(testConfig()))
+  )
+
   it.live("puts the chat's last message back at its end, with the composer that went up with the leaf", () =>
     Effect.gen(function* () {
       const api = yield* client()

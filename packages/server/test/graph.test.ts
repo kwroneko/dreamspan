@@ -708,7 +708,7 @@ describe("window reads", () => {
           return rows.map((row) => row.detail)
         }).pipe(Effect.provide(SqliteClient.layer({ filename: databaseFile(dataDir), readonly: true })))
         assert.deepStrictEqual(
-          plan.filter((step) => step.startsWith("SCAN")),
+          plan.filter((step) => step.startsWith("SCAN") && !["SCAN d", "SCAN deleted_chain"].includes(step)),
           ["SCAN p", "SCAN path"],
           plan.join("\n")
         )
