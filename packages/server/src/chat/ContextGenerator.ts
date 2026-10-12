@@ -1,9 +1,4 @@
-// The real generator (ARCHITECTURE §13): the context assembler in front of the provider
-// layer. Each generation is a rollout (DATA-MODEL §1, principle 7): its context is assembled
-// in a reader worker, stored as the rollout's frozen snapshot before the request is sent,
-// streamed through the provider layer (which writes the usage ledger), and closed with the
-// usage the ledger adds up to. A failure, of the assembly or the request, fails the version
-// with its cause (DESIGN §3.1).
+// The real generator: assembly, rollout, provider stream (ARCHITECTURE §13, "Generation").
 import { uuidv7 } from "@rp/shared/id.ts"
 import type { SlotId, VersionId } from "@rp/shared/chat.ts"
 import type { ConnectionId, ModelId } from "@rp/shared/providers.ts"

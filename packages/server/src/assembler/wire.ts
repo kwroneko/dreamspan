@@ -1,9 +1,4 @@
-// From the provider-neutral request to what a provider is sent (DESIGN §1.2: "sampler
-// values, mapped per provider"), as ST 1.19 maps its sources (createGenerationParameters,
-// sendClaudeRequest, convertClaudeMessages). Chat Completions gets the messages exactly,
-// names included; Anthropic and the other APIs get them through pi-ai, with names folded
-// into the text and later system messages sent as the user's, as ST sends them to Claude.
-// The fields pi-ai doesn't set go in `payload`, merged over the body it built (PROVIDERS §4).
+// The provider-neutral request mapped per provider, as ST 1.19 maps its sources (ARCHITECTURE §13).
 import type { Api, AssistantMessage, Context, Message } from "@earendil-works/pi-ai"
 import type { AssembledRequest, ModelInput, RequestMessage } from "./types.ts"
 
@@ -125,12 +120,8 @@ export interface ProviderRequest {
 const text = (content: string) => ({ type: "text" as const, text: content })
 
 /**
- * The request for a model. Chat Completions takes the messages as they are, in `payload`:
- * pi-ai's own conversion would drop names and move later system messages to the top. The
- * context pi-ai gets then only feeds its usage estimate, so it's the same text as the user's.
- * Other APIs get a context pi-ai converts: the preset's leading system messages as the
- * system prompt (always, except for Anthropic and Google without `use_sysprompt`, as in ST),
- * later ones as the user's, consecutive turns of a role joined, and the prefill last.
+ * The request for a model: Chat Completions gets the messages as they are, in `payload` (the
+ * context pi-ai gets only feeds its usage estimate); other APIs get a context pi-ai converts.
  */
 export const providerRequest = (request: AssembledRequest, model: ModelInput): ProviderRequest => {
   if (model.api === "openai-completions") {

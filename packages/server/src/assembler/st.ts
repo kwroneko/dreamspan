@@ -1,10 +1,5 @@
-// SillyTavern's chat-completion prompt building, as ST 1.19 does it (public/scripts/
-// openai.js: preparePromptsForChatCompletion, populateChatCompletion,
-// populationInjectionPrompts, populateChatHistory, populateDialogueExamples, ChatCompletion's
-// squashSystemMessages; PromptManager.js: getPromptCollection; src/prompt-converters.js:
-// postProcessPrompt). The compatibility contract (DESIGN §1.2) is that a preset does here
-// what it does in ST, so this follows ST's order, budget and quirks closely; every
-// deliberate difference is listed in ARCHITECTURE §13 and checked by `npm run test:st`.
+// SillyTavern 1.19's chat-completion prompt building, function by function (ARCHITECTURE §13,
+// "ST-compatible mode"; each function names the ST one it follows).
 import type { PresetDoc, PresetPrompt } from "@rp/shared/docs/preset.ts"
 import { AssemblyFailed, type GenerationType, type Role } from "./types.ts"
 

@@ -1,6 +1,4 @@
-// Context assembly in the reader workers (ARCHITECTURE §13): the assembler's stages run over
-// the database in one read transaction, off the main thread. Each reader keeps one
-// assembler, with its built-in stages and macros, for its lifetime.
+// Context assembly and rebuilding in the reader workers (ARCHITECTURE §13).
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { makeAssembler } from "../assembler/assembler.ts"

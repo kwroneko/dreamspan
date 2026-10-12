@@ -1,7 +1,4 @@
-// The context assembler's data (DESIGN §5, DATA-MODEL §7.1): what it reads, what it
-// produces, and the record of where each piece of the context came from. Everything here
-// is plain JSON, so an assembled context crosses from the reader worker as one string and
-// is stored as the rollout's snapshot as it is.
+// The assembler's data, all plain JSON (DATA-MODEL §7.1; ARCHITECTURE §13).
 import type { FrozenValues } from "@rp/shared/macros/expand.ts"
 import type { VariableEffect } from "@rp/shared/macros/variables.ts"
 import type { CardDoc } from "@rp/shared/docs/card.ts"
@@ -130,12 +127,7 @@ export interface ContextSnapshot {
 /** A message of the path as it was read, but its text, which its version and amend count pin. */
 type PinnedEntry = Omit<HistoryEntry, "content"> & { readonly amends: number }
 
-/**
- * What one context's sources read, by id and revision (DATA-MODEL §15, invariant 6): the
- * state events, the path's versions, the cards' and notes' revisions, each read keyed by
- * what it asked for. With the snapshot's inputs (the model, the preset's revision), it's
- * everything the pipeline read, so it can be read again as it was.
- */
+/** What one context's sources read, by id and revision, each read keyed by its request (invariant 6). */
 export interface SourcePins {
   readonly target: Target
   readonly events: ReadonlyArray<{ readonly id: string; readonly depth: number | null }>

@@ -1,6 +1,4 @@
-// Our layouts (DESIGN §5.2, §5.3): each card in a labelled block, and the tail directive
-// that names this turn's speaker. A card's own text binds `{{char}}` to that card and a
-// persona's binds `{{user}}` to that persona, so no binding changes from turn to turn.
+// Our layouts' card blocks and tail directive (DESIGN §5.2, §5.3; ARCHITECTURE §13).
 import type { Names } from "./macros.ts"
 import { type Assembly, need } from "./pipeline.ts"
 import type { Text } from "./st.ts"

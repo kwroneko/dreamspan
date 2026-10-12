@@ -1,9 +1,4 @@
-// The context assembler's pipeline (DESIGN §5.1, PLUGINS §8): stages registered by id and
-// run in registration order over one assembly. A plugin overrides a stage by registering
-// the same id, wraps one by `get`ting it first, or disables one. The built-in stages are
-// registered the same way (stages.ts). Stages read the database only through
-// `AssemblySources`, so an assembly can be built again from the database alone (DATA-MODEL
-// §15, invariant 6), and the ST harness runs the same pipeline over fixtures.
+// The assembler's stage pipeline and its sources (PLUGINS §8; ARCHITECTURE §13).
 import type { FoldableEvent, ChatState } from "@rp/shared/state.ts"
 import type { FrozenValues, MacroLookup } from "@rp/shared/macros/expand.ts"
 import type { VariableEffect } from "@rp/shared/macros/variables.ts"

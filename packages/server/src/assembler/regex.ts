@@ -115,13 +115,8 @@ const withinDepth = (script: RegexScript, depth: number) =>
 class OutputLimit extends Error {}
 
 /**
- * ST's runRegexScript, with the replacement already expanded: `{{match}}` and `$n` or `$<name>`
- * become the match and its groups, with the trim strings removed from each. Every replacement
- * is charged to `output`, and the run stops with OutputLimit once it's spent.
- *
- * The matches are found with `exec`, as `String.prototype.replace` would: V8 13.6 loops
- * forever, where no timeout reaches, when `replace` with a function meets an empty match of
- * a global linear-engine pattern with 32 or more groups.
+ * ST's runRegexScript, its replacement already expanded, each replacement charged to `output`.
+ * It loops over `exec` because V8's `replace` can hang where no timeout reaches (§13).
  */
 export const run = (
   regex: RegExp,
@@ -161,11 +156,8 @@ export const run = (
 const JOB = new Script("job()")
 
 /**
- * A preset's scripts for one context, with what they may still spend: `ms` of time, and
- * `output` characters of replacement text. The linear engine bounds a match by the pattern
- * times the text, which is still far too slow at the sizes a preset can reach, so every batch
- * runs as a vm script with a timeout: V8 stops whatever runs, a regex included, once the time
- * is spent. A script that fails or runs out of output is skipped for that message.
+ * A preset's scripts for one context, with the time (`ms`) and replacement text (`output`)
+ * they may still spend; each batch runs as a vm script whose timeout V8 enforces.
  */
 export const makeScriptRunner = (list: ReadonlyArray<PromptScript>, limits: { ms: number; output: number }) => {
   const context = createContext({ job: undefined })

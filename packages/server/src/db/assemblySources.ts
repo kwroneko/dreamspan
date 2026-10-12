@@ -1,7 +1,5 @@
-// The assembler's sources over the database, in a reader worker (ARCHITECTURE §13). Every
-// read is the acting user's: another user's chat, card, preset, note, connection or model
-// is NotFound or skipped, as everywhere else (§3.8). All of one assembly's reads run in one
-// read transaction, so it sees one snapshot of the database.
+// The assembler's sources over the database, every read the acting user's, and the pins a
+// rebuild reads again (ARCHITECTURE §13).
 import type { ChatId } from "@rp/shared/chat.ts"
 import { CardDoc } from "@rp/shared/docs/card.ts"
 import { NoteDoc } from "@rp/shared/docs/note.ts"

@@ -1,9 +1,4 @@
-// The built-in assembler stages (DESIGN §5.1), registered in order through the stage
-// registry like a plugin's would be. In order:
-//   path, state, cast, model, preset, notes, mode, macros, scripts, history, resolve, roles,
-//   compose (with the prefill), messages, breakpoints, request
-// A single-character chat with ST's layout gets what ST would send for its preset and card
-// (ST-compatible mode, DESIGN §1.2); anything else gets our layouts (DESIGN §5.2–§5.4).
+// The built-in assembler stages, in registration order (ARCHITECTURE §13 lists them).
 import type { ChatMessage } from "@rp/shared/macros/context.ts"
 import type { CardFields } from "@rp/shared/macros/context.ts"
 import type { VariableEffect } from "@rp/shared/macros/variables.ts"
@@ -370,10 +365,8 @@ const positionOf = (state: ChatState, events: ReadonlyArray<PositionedEvent>) =>
   })
 
 /**
- * The path's messages, verbatim unless they're templates, and the chat macros read from them.
- * A template expands with the chat as it was at its position, before its own events: its
- * cast, names, card and variables then. The first time one expands for a generation, its
- * variable writes are kept, to be recorded at its position, and count from there on now.
+ * The path's messages, verbatim unless they're templates, which expand with the chat as it
+ * was at their position and, the first time, hand back their writes (§13 "Macros by source").
  */
 const resolveStage: AssemblerStage = {
   id: "resolve",
@@ -720,14 +713,7 @@ const noteInjections = (assembly: Assembly, cards: ReadonlyArray<CardInput>): Ar
     })
 }
 
-/**
- * Builds the context the way ST's populateChatCompletion does: the preset's prompts in
- * order with the markers filled, the chat with in-chat prompts and notes injected at their
- * depths, examples, and control prompts at the end. In ST-compatible mode the markers get
- * the character's fields as ST fills them; otherwise the cast's labelled blocks (DESIGN
- * §5.2), and the tail gets the speaker directive (DESIGN §5.3) and, in card-swap mode, the
- * speaker's card.
- */
+/** The context as ST's populateChatCompletion builds it, with our layouts' blocks and tail outside ST mode. */
 const composeStage = sync("compose", (assembly) => {
   const doc = need(assembly, "preset").doc
   const cast = need(assembly, "cast")

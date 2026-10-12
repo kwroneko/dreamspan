@@ -1,6 +1,4 @@
-// Generation's writes (ARCHITECTURE §13): a rollout opened with its frozen context snapshot
-// and closed with the usage its ledger rows add up to, and the user's generation defaults.
-// Every one is the acting user's: another user's version, rollout, model or preset is NotFound.
+// Generation's writes: rollouts and the user's defaults (ARCHITECTURE §13).
 import type { UserId } from "@rp/shared/domain.ts"
 import { NotFound } from "@rp/shared/errors.ts"
 import { uuidv7 } from "@rp/shared/id.ts"

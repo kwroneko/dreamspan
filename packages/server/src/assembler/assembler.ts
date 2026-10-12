@@ -1,6 +1,4 @@
-// The assembler as its callers use it: the stage and macro registries with the built-ins
-// registered, and a function from sources to a context snapshot. The reader worker keeps
-// one for its lifetime; tests and the ST harness make their own.
+// The assembler with its built-in stages and macros registered (ARCHITECTURE §13).
 import { registerBuiltinMacros } from "@rp/shared/macros/builtins.ts"
 import { makeMacroRegistry, type MacroRegistry } from "@rp/shared/macros/registry.ts"
 import { Effect, type Scope } from "effect"

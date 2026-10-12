@@ -1,8 +1,4 @@
-// Macro expansion by source (DESIGN §5.6, ARCHITECTURE §10), for the assembler. Preset and
-// card text expands; a message of the path expands only when its stored mode is
-// `template`. Every piece is expanded on its own, with the variables the pieces before it
-// left, and its random and time draws are kept per piece so the context can be built again
-// identically. A piece that reaches a limit is dropped and reported, not the whole turn.
+// Macro expansion by source, for the assembler (DESIGN §5.6; ARCHITECTURE §10, §13).
 import type { CardFields, ChatMessage, MacroContext } from "@rp/shared/macros/context.ts"
 import { expand, type TextOrigin } from "@rp/shared/macros/expand.ts"
 import type { VariableEffect } from "@rp/shared/macros/variables.ts"

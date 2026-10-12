@@ -1,6 +1,4 @@
-// The user's generation defaults in `user_settings` (DATA-MODEL §5.4), shared by the reader
-// (assembly, GetGenerationDefaults) and the writer (SetGenerationDefaults). A default naming
-// something deleted, or no longer the user's, reads as none.
+// The user's generation defaults in `user_settings`; one naming something gone reads as none.
 import type { UserId } from "@rp/shared/domain.ts"
 import { GenerationDefaults } from "@rp/shared/generation.ts"
 import type { RefId } from "@rp/shared/library.ts"
