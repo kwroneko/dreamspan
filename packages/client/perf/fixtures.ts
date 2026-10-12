@@ -122,17 +122,20 @@ const build = async (dir: string): Promise<Fixture> => {
   }
 }
 
-/** A fresh data directory holding the fixtures, built once per fixture version. */
+/** A fresh data directory holding the fixtures, built once per fixture version. The caller removes it. */
 export const prepare = async (): Promise<{ dataDir: string; fixture: Fixture }> => {
   const cache = join(tmpdir(), `rp-perf-fixture-v${VERSION}`)
   if (!existsSync(join(cache, "fixture.json"))) {
     const building = mkdtempSync(join(tmpdir(), "rp-perf-build-"))
-    const fixture = await build(building)
-    writeFileSync(join(building, "fixture.json"), JSON.stringify(fixture))
-    rmSync(cache, { recursive: true, force: true })
-    mkdirSync(cache, { recursive: true })
-    for (const file of [DB, "fixture.json"]) renameSync(join(building, file), join(cache, file))
-    rmSync(building, { recursive: true, force: true })
+    try {
+      const fixture = await build(building)
+      writeFileSync(join(building, "fixture.json"), JSON.stringify(fixture))
+      rmSync(cache, { recursive: true, force: true })
+      mkdirSync(cache, { recursive: true })
+      for (const file of [DB, "fixture.json"]) renameSync(join(building, file), join(cache, file))
+    } finally {
+      rmSync(building, { recursive: true, force: true })
+    }
   }
   const dataDir = mkdtempSync(join(tmpdir(), "rp-perf-"))
   copyFileSync(join(cache, DB), join(dataDir, DB))

@@ -22,8 +22,10 @@ const generating = (page: Page) => page.getByText("generating", { exact: true })
 const repliesDone = async (page: Page, count: number) => {
   await expect(replies(page)).toHaveCount(count)
   await expect(generating(page)).toHaveCount(0, { timeout: 20_000 })
-  // The list followed the reply as it grew.
-  await expect(replies(page).last()).toBeInViewport()
+  // The list followed the reply as it grew: it ends on screen.
+  const list = await page.getByTestId("messages").boundingBox()
+  const reply = await replies(page).last().boundingBox()
+  expect(reply!.y + reply!.height).toBeLessThanOrEqual(list!.y + list!.height + 1)
 }
 
 const newChat = async (page: Page, title: string) => {

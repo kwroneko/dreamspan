@@ -2,7 +2,7 @@
 // with the fake generator at 300 tokens a second per stream, on synthetic chats of 100,000
 // and 300 messages. Each scenario measures what the owner would feel (frames, input,
 // scroll anchoring, memory, renders per streamed token) and fails past its budget.
-import { appendFileSync } from "node:fs"
+import { appendFileSync, rmSync } from "node:fs"
 import { loadavg } from "node:os"
 import { join } from "node:path"
 import { type CDPSession, expect, type Page, test } from "@playwright/test"
@@ -14,14 +14,17 @@ import { type PerfServer, startServer, withClient } from "./support.ts"
 
 let server: PerfServer
 let fixture: Fixture
+let dataDir: string
 test.beforeAll(async () => {
   const prepared = await prepare()
   fixture = prepared.fixture
-  server = await startServer(prepared.dataDir)
+  dataDir = prepared.dataDir
+  server = await startServer(dataDir)
 })
 
 test.afterAll(async () => {
   await server?.stop()
+  if (dataDir) rmSync(dataDir, { recursive: true, force: true })
 })
 
 /** Each scenario's numbers, one JSON line each in the output directory, with the load at the time. */
@@ -58,7 +61,7 @@ const instrument = () => {
   requestAnimationFrame(tick)
 }
 
-interface Window {
+interface Measured {
   readonly loaf: Array<{ start: number; duration: number }>
   readonly events: Array<{ name: string; start: number; duration: number }>
   readonly frames: Array<{ at: number; interval: number }>
@@ -68,9 +71,9 @@ interface Window {
 const now = (page: Page) => page.evaluate(() => performance.now())
 
 /** What happened in the page since `from` (a page timestamp). */
-const since = (page: Page, from: number): Promise<Window> =>
+const since = (page: Page, from: number): Promise<Measured> =>
   page.evaluate((from) => {
-    const m = (window as unknown as { __m: Window }).__m
+    const m = (window as unknown as { __m: Measured }).__m
     return {
       loaf: m.loaf.filter((e) => e.start >= from),
       events: m.events.filter((e) => e.start >= from),
@@ -86,24 +89,22 @@ const quantile = (values: ReadonlyArray<number>, q: number) => {
 }
 const round = (n: number) => Math.round(n * 10) / 10
 
-const frameStats = (window: Window) => ({
+const frameStats = (measured: Measured) => ({
   frameP95Ms: round(
     quantile(
-      window.frames.map((f) => f.interval),
+      measured.frames.map((f) => f.interval),
       0.95
     )
   ),
-  longFramesOver100: window.loaf.filter((e) => e.duration > 100).length,
-  longFramesOver50: window.loaf.filter((e) => e.duration > 50).length,
-  worstFrameMs: round(Math.max(0, ...window.loaf.map((e) => e.duration)))
+  longFramesOver100: measured.loaf.filter((e) => e.duration > 100).length,
+  longFramesOver50: measured.loaf.filter((e) => e.duration > 50).length,
+  worstFrameMs: round(Math.max(0, ...measured.loaf.map((e) => e.duration)))
 })
 
-const openPage = async (page: Page) => {
-  await page.addInitScript(instrument)
-  return page.context().newCDPSession(page)
-}
+const openPage = (page: Page) => page.addInitScript(instrument)
 
-const heapMb = async (page: Page, cdp: CDPSession) => {
+/** The JS heap after garbage collection. */
+const heapMb = async (cdp: CDPSession) => {
   await cdp.send("HeapProfiler.collectGarbage")
   const { usedSize } = (await cdp.send("Runtime.getHeapUsage")) as { usedSize: number }
   return round(usedSize / 2 ** 20)
@@ -161,6 +162,20 @@ const startStreams = (chatId: string, count: number) =>
     })
   )
 
+/** Round trips of a trivial RPC, every 100 ms, in milliseconds. */
+const pingServer = (count: number) =>
+  withClient(server, (api) =>
+    Effect.forEach(Array.from({ length: count }), () =>
+      Effect.gen(function* () {
+        const start = performance.now()
+        yield* api.Health()
+        const ms = performance.now() - start
+        yield* Effect.sleep(100)
+        return ms
+      })
+    )
+  )
+
 const stopStreams = (versions: ReadonlyArray<VersionId>) =>
   withClient(server, (api) => Effect.forEach(versions, (versionId) => Effect.ignore(api.StopGeneration({ versionId }))))
 
@@ -179,14 +194,38 @@ const scrollState = (page: Page) =>
     firstIndex: Number(list.querySelector<HTMLElement>("[data-index]")?.dataset.index ?? -1)
   }))
 
+/** The open chat's window, as the client reports it. */
+const windowState = (page: Page) =>
+  page.evaluate(
+    () =>
+      (window as unknown as { __rpPerf: { window: { first: string; older: boolean; loaded: number } } }).__rpPerf.window
+  )
+
+/**
+ * Waits for the next older page to land above `slot`, the first loaded message, and returns
+ * how far that message moved on screen: an unbounded number when it left the screen.
+ */
+const prepended = async (page: Page, slot: string, top: number) => {
+  await page
+    .waitForFunction(
+      (slot) => (window as unknown as { __rpPerf: { window: { first: string } } }).__rpPerf.window.first !== slot,
+      slot,
+      { timeout: 30_000 }
+    )
+    .catch(async (error: unknown) => {
+      throw new Error(`no older page landed: ${JSON.stringify(await windowState(page))}`, { cause: error })
+    })
+  await settle(page)
+  const after = await topOf(page, slot)
+  return after === null ? Number.POSITIVE_INFINITY : Math.abs(after - top)
+}
+
 /**
  * Scrolls the list to the top of what's loaded. The first loaded message is then at the
  * list's top padding, which is where it must stay when older history lands above it.
  */
 const scrollToTop = async (page: Page) => {
-  const slot = await page.evaluate(
-    () => (window as unknown as { __rpPerf: { window: { first: string } } }).__rpPerf.window.first
-  )
+  const { first: slot } = await windowState(page)
   await messages(page).evaluate((list) => list.scrollTo({ top: 0 }))
   return { slot, top: 16 }
 }
@@ -217,50 +256,36 @@ test("open at the bottom and at a deep slot", async ({ page }) => {
   await onScreen(page, fixture.long.deep)
   const deepMs = Date.now() - deepStart
   record("open", { bottomMs, deepMs, ...frameStats(bottom) })
+  expect(frameStats(bottom).longFramesOver100).toBeLessThanOrEqual(budgets.navigationLongFramesOver100)
   expect(bottomMs).toBeLessThan(budgets.openBottomMs)
   expect(deepMs).toBeLessThan(budgets.openDeepMs)
 })
 
 test("scroll the full length of 100,000 messages", async ({ page }) => {
-  const cdp = await openPage(page)
+  await openPage(page)
+  const cdp = await page.context().newCDPSession(page)
   await page.goto(chatUrl(fixture.long.chatId))
   await onScreen(page)
-  const heapStart = await heapMb(page, cdp)
+  const heapStart = await heapMb(cdp)
   const from = await now(page)
   const errors: Array<number> = []
   const examples: Array<Record<string, number>> = []
   const started = Date.now()
   let pages = 0
-  const olderLeft = () =>
-    page.evaluate(() => (window as unknown as { __rpPerf: { window: { older: boolean } } }).__rpPerf.window.older)
-  while (await olderLeft()) {
+  const heapSamples: Array<number> = []
+  while ((await windowState(page)).older) {
     const before = await scrollToTop(page)
     // The next older page lands above: this message must stay where it is.
-    await page
-      .waitForFunction(
-        (slot) => {
-          const row = document.querySelector(`article[data-slot="${slot}"]`)?.closest("[data-index]")
-          return row === null || row === undefined || Number((row as HTMLElement).dataset.index) > 0
-        },
-        before.slot,
-        { timeout: 30_000 }
-      )
-      .catch(async (error: unknown) => {
-        const state = await page.evaluate(
-          () => (window as unknown as { __rpPerf: { window: unknown } }).__rpPerf.window
-        )
-        throw new Error(`no older page after ${pages} pages: ${JSON.stringify(state)}`, { cause: error })
-      })
-    await settle(page)
-    const after = await topOf(page, before.slot)
-    if (after !== null) errors.push(Math.abs(after - before.top))
-    if (after !== null && Math.abs(after - before.top) > budgets.anchorErrorPx && examples.length < 5) {
-      examples.push({ page: pages, before: round(before.top), after: round(after), ...(await scrollState(page)) })
+    const error = await prepended(page, before.slot, before.top)
+    errors.push(error)
+    if (error > budgets.anchorErrorPx && examples.length < 5) {
+      examples.push({ page: pages, error: round(error), ...(await scrollState(page)) })
     }
     pages++
+    if (pages % 400 === 0) heapSamples.push(await heapMb(cdp))
   }
-  const window = await since(page, from)
-  const heapEnd = await heapMb(page, cdp)
+  const measured = await since(page, from)
+  const heapEnd = await heapMb(cdp)
   record("scroll", {
     pages,
     seconds: round((Date.now() - started) / 1000),
@@ -268,10 +293,13 @@ test("scroll the full length of 100,000 messages", async ({ page }) => {
     anchorErrorsOverBudget: errors.filter((e) => e > budgets.anchorErrorPx).length,
     examples: JSON.stringify(examples),
     heapStartMb: heapStart,
+    heapEveryFourHundredPagesMb: heapSamples.join(" "),
     heapEndMb: heapEnd,
-    ...frameStats(window)
+    ...frameStats(measured)
   })
   expect(Math.max(0, ...errors)).toBeLessThanOrEqual(budgets.anchorErrorPx)
+  expect(frameStats(measured).frameP95Ms).toBeLessThanOrEqual(budgets.scrollFrameP95Ms)
+  expect(frameStats(measured).longFramesOver100).toBeLessThanOrEqual(budgets.scrollLongFramesOver100)
   expect(heapEnd - heapStart).toBeLessThan(budgets.heapGrowthMb)
   expect(heapEnd).toBeLessThan(budgets.heapMb)
 })
@@ -285,9 +313,19 @@ test("six streams: renders per token, drift, prepending and typing", async ({ pa
   await page.waitForTimeout(1000)
 
   // Steady streaming: only the bodies of streaming messages render, once per update.
+  // At the bottom, the last reply grows and the list stays at the end.
   const steadyFrom = await now(page)
-  await page.waitForTimeout(3000)
+  const fromEnd: Array<number> = []
+  const sample = async () => {
+    for (let i = 0; i < 15; i++) {
+      await page.waitForTimeout(200)
+      fromEnd.push(await messages(page).evaluate((list) => list.scrollHeight - list.scrollTop - list.clientHeight))
+    }
+  }
+  // Meanwhile, how long the server takes to answer anything: its event loop carries every stream.
+  const [pings] = await Promise.all([pingServer(30), sample()])
   const steady = await since(page, steadyFrom)
+  const pinnedPx = Math.max(...fromEnd)
 
   // Typing in the composer while the streams run.
   const typingFrom = await now(page)
@@ -297,9 +335,10 @@ test("six streams: renders per token, drift, prepending and typing", async ({ pa
   await page.getByTestId("composer").pressSequentially("She hesitated at the door, then knocked twice.", { delay: 50 })
   const typing = await since(page, typingFrom)
   const counters1 = typing.perf
-  const updates = counters1.rowUpdates! - counters0.rowUpdates!
-  const bodies = counters1.bodyRenders! - counters0.bodyRenders!
+  const updates = counters1.shownUpdates! - counters0.shownUpdates!
+  const bodies = counters1.liveBodyRenders! - counters0.liveBodyRenders!
   const rows = counters1.rowRenders! - counters0.rowRenders!
+  const lists = counters1.listRenders! - counters0.listRenders!
   const inputs = typing.events.filter((e) => e.name.startsWith("key") || e.name === "input" || e.name === "beforeinput")
 
   // Scrolled up a screen, replies growing below must not move what's on screen.
@@ -308,28 +347,29 @@ test("six streams: renders per token, drift, prepending and typing", async ({ pa
   await page.waitForTimeout(300)
   const anchor = await firstVisible(page)
   await page.waitForTimeout(1500)
-  const drift = Math.abs(((await topOf(page, anchor.slot)) ?? anchor.top) - anchor.top)
+  const anchorAfter = await topOf(page, anchor.slot)
+  const drift = anchorAfter === null ? Number.POSITIVE_INFINITY : Math.abs(anchorAfter - anchor.top)
 
   // Prepending older history while they stream.
-  const top = await scrollToTop(page)
-  await page.waitForFunction(
-    (slot) =>
-      Number(
-        document.querySelector(`article[data-slot="${slot}"]`)?.closest<HTMLElement>("[data-index]")?.dataset.index ?? 0
-      ) > 0,
-    top.slot
+  const updatesBefore = await page.evaluate(
+    () => (window as unknown as { __rpPerf: { rowUpdates: number } }).__rpPerf.rowUpdates
   )
-  await settle(page)
-  const prependError = Math.abs(((await topOf(page, top.slot)) ?? top.top) - top.top)
+  const top = await scrollToTop(page)
+  const prependError = await prepended(page, top.slot, top.top)
+  const updatesDuring =
+    (await page.evaluate(() => (window as unknown as { __rpPerf: { rowUpdates: number } }).__rpPerf.rowUpdates)) -
+    updatesBefore
   await stopStreams(streams)
   const all = await since(page, steadyFrom)
-  // The server's own event loop over the last minute: every stream shares it.
+  // The server's own event-loop numbers over the last minute (the scroll scenario included).
   const health = await withClient(server, (api) => api.Health())
 
   record("streams", {
     updates,
     bodyRendersPerUpdate: round(bodies / Math.max(1, updates)),
     rowRendersWhileTyping: rows,
+    listRendersPerUpdate: round(lists / Math.max(1, updates)),
+    updatesWhilePrepending: updatesDuring,
     inputP95Ms: round(
       quantile(
         inputs.map((e) => e.duration),
@@ -338,14 +378,17 @@ test("six streams: renders per token, drift, prepending and typing", async ({ pa
     ),
     inputEvents: inputs.length,
     driftPx: round(drift),
+    pinnedPx: round(pinnedPx),
     prependErrorPx: round(prependError),
     gaps: all.perf.gaps ?? 0,
-    serverLoopP99Ms: health.eventLoopP99Ms,
-    serverLoopMaxMs: health.eventLoopMaxMs,
+    serverRoundTripP99Ms: round(quantile(pings, 0.99)),
+    serverLoopP99LastMinuteMs: health.eventLoopP99Ms,
     steadyFrameP95Ms: frameStats(steady).frameP95Ms,
     ...frameStats(all)
   })
   expect(updates).toBeGreaterThan(50)
+  // The prepend happened while the streams were still running.
+  expect(updatesDuring).toBeGreaterThan(0)
   expect(bodies / updates).toBeLessThanOrEqual(budgets.bodyRendersPerUpdate)
   expect(rows).toBeLessThanOrEqual(budgets.rowRendersWhileStreaming)
   expect(
@@ -355,9 +398,10 @@ test("six streams: renders per token, drift, prepending and typing", async ({ pa
     )
   ).toBeLessThanOrEqual(budgets.inputP95Ms)
   expect(drift).toBeLessThanOrEqual(budgets.streamDriftPx)
+  expect(pinnedPx).toBeLessThanOrEqual(budgets.pinnedPx)
   expect(prependError).toBeLessThanOrEqual(budgets.anchorErrorPx)
   expect(all.perf.gaps ?? 0).toBe(budgets.gaps)
-  expect(health.eventLoopP99Ms).toBeLessThanOrEqual(budgets.serverLoopP99Ms)
+  expect(quantile(pings, 0.99)).toBeLessThanOrEqual(budgets.serverRoundTripP99Ms)
   expect(frameStats(steady).frameP95Ms).toBeLessThanOrEqual(budgets.frameP95Ms)
   expect(frameStats(all).longFramesOver100).toBeLessThanOrEqual(budgets.longFramesOver100)
 })
@@ -382,8 +426,8 @@ test("swipe through versions", async ({ page }) => {
     await row.getByRole("button", { name: "Next version" }).click()
     await expect(row.getByText(`${2 + i} / 4`)).toBeVisible()
   }
-  const window = await since(page, from)
-  const clicks = window.events.filter((e) => e.name === "click" || e.name === "pointerup" || e.name === "pointerdown")
+  const measured = await since(page, from)
+  const clicks = measured.events.filter((e) => e.name === "click" || e.name === "pointerup" || e.name === "pointerdown")
   record("swipe", {
     inputP95Ms: round(
       quantile(
@@ -391,7 +435,7 @@ test("swipe through versions", async ({ page }) => {
         0.95
       )
     ),
-    ...frameStats(window)
+    ...frameStats(measured)
   })
   expect(
     quantile(
@@ -399,6 +443,7 @@ test("swipe through versions", async ({ page }) => {
       0.95
     )
   ).toBeLessThanOrEqual(budgets.inputP95Ms)
+  expect(frameStats(measured).longFramesOver100).toBeLessThanOrEqual(budgets.longFramesOver100)
 })
 
 test("switch chats mid-stream", async ({ page }) => {
@@ -426,10 +471,11 @@ test("switch chats mid-stream", async ({ page }) => {
   await page.waitForTimeout(800)
   const grew = (await length()) > first
   await stopStreams(streams)
-  const window = await since(page, from)
-  record("switch", { awayMs, backMs, grew: String(grew), gaps: window.perf.gaps ?? 0, ...frameStats(window) })
+  const measured = await since(page, from)
+  record("switch", { awayMs, backMs, grew: String(grew), gaps: measured.perf.gaps ?? 0, ...frameStats(measured) })
   expect(grew).toBe(true)
-  expect(window.perf.gaps ?? 0).toBe(budgets.gaps)
+  expect(measured.perf.gaps ?? 0).toBe(budgets.gaps)
+  expect(frameStats(measured).longFramesOver100).toBeLessThanOrEqual(budgets.navigationLongFramesOver100)
   expect(awayMs).toBeLessThan(budgets.openBottomMs)
   expect(backMs).toBeLessThan(budgets.openBottomMs)
 })

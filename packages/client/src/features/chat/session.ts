@@ -21,7 +21,7 @@ import { Atom, type AtomRegistry, AtomRegistry as Registry } from "effect/reacti
 import { type AppError, describeCause } from "../../errors.ts"
 import { AppClient } from "../../rpc.ts"
 import { sessionAtom } from "../../session.ts"
-import { perf } from "./perf.ts"
+import { mountedBodies, perf } from "./perf.ts"
 
 /** How many slots one read asks for. */
 const PAGE = 60
@@ -300,6 +300,7 @@ export class ChatSession {
         }
         this.setLive(id, text)
         perf.rowUpdates++
+        if (mountedBodies.has(id)) perf.shownUpdates++
       }
     })
     this.pending.clear()

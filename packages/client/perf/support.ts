@@ -35,7 +35,8 @@ export const startServer = async (dataDir: string, env: Record<string, string> =
         DB_WORKERS: "bundle",
         CLIENT_DIST: resolve(root, "packages/client/dist"),
         FAKE_GENERATOR_TPS: "300",
-        FAKE_GENERATOR_TOKENS: "3000",
+        // Twenty seconds a stream: every streaming scenario ends while they still run.
+        FAKE_GENERATOR_TOKENS: "6000",
         ...env
       },
       stdio: ["ignore", "pipe", "pipe"]

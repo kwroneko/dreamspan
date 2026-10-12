@@ -10,7 +10,7 @@ import { Button } from "../../ui/Button.tsx"
 import { Textarea } from "../../ui/Field.tsx"
 import { Markdown } from "../../ui/Markdown.tsx"
 import { Badge } from "../../ui/Surface.tsx"
-import { perf } from "./perf.ts"
+import { mountedBodies, perf } from "./perf.ts"
 import { type ChatSession, liveText, type Outcome } from "./session.ts"
 
 /** A horizontal drag this long on a message swipes to the next or previous version. */
@@ -23,7 +23,14 @@ function VersionBody({ version }: { version: Version }) {
   const live = useAtomValue(liveText(version.id))
   useEffect(() => {
     perf.bodyRenders++
+    if (live !== null) perf.liveBodyRenders++
   })
+  useEffect(() => {
+    mountedBodies.add(version.id)
+    return () => {
+      mountedBodies.delete(version.id)
+    }
+  }, [version.id])
   const generating = version.status === "generating"
   const text = live ?? version.content
   return (
