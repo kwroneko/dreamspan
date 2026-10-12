@@ -251,6 +251,13 @@ These are strategies for mapping history to user and assistant roles:
   - The TTL comes from known provider defaults, or from a TTL the user sets on any model or connection. No TTL means no indicator.
   - **[P]** States: warm (verified from reported cache usage), warm (assumed), cold.
   - **[P]** It tracks the prefix of the *next* generation and warns when an edit changed it ("next send rewrites ~N tokens").
+  - **[D]** That warning shows even when no TTL is known: a changed prefix is cold whatever the TTL (owner, 2026-10-13).
+  - **[D]** Known provider defaults cover every provider that documents a cache lifetime, not just Anthropic (owner, 2026-10-13).
+- **[D]** **History that doesn't fit is cut in steps, not one message at a time** (owner, 2026-10-13). ST drops just enough old messages to fit the maximum context, so once a chat reaches it, every new message pushes the oldest one out and the cached prefix changes on every send. Instead there are two thresholds, as in reference-harness: a **maximum** and a **target** context size. When the maximum is reached, enough old messages leave the context to get down to the target, and the start of the history stays put until the maximum is reached again, so the cache survives the sends in between.
+  - **[D]** The target defaults to a fixed distance below the maximum, so a preset imported from ST, which has only a maximum, needs no translation (owner, 2026-10-13).
+  - **[D]** Where the history starts is therefore state, not a formula of the messages and the budget (owner, 2026-10-13).
+  - **[P]** Default target: 80% of the maximum. The start point is recorded with each generation's context and read back by the next one on the same path, so a rebuild reproduces it. It applies in every layout, ST-compatible mode included, where it's a documented difference from ST. LCM's summary cursor later takes this role (LCM.md).
+- **[D]** **Messages that dropped out of the context are shown as such** in the chat (owner, 2026-10-13): faded, or with another background or border shade (whichever fits the final design), and an icon. They must look different from messages the user hid on purpose, which ST marks with a ghost icon. It isn't shown as a note or issue on each reply.
 - **[D]** **Parallel requests with a cold cache can cause N cache writes.** Stagger them deliberately per provider: start one, and release the others once its cache write is readable. When that happens differs by provider, so it must be tested and measured (cache-read token counts on the follow-ups) **[P]**.
 
 ### 5.6 Macros
