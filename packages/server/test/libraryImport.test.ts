@@ -10,7 +10,7 @@ import { assert, describe, layer } from "@effect/vitest"
 import type { PresetDoc } from "@rp/shared/docs/preset.ts"
 import { ImportResult } from "@rp/shared/libraryImport.ts"
 import type { RefId } from "@rp/shared/library.ts"
-import { Effect, Option, Redacted, Schedule, Schema } from "effect"
+import { Effect, Option, Redacted, Schema } from "effect"
 import { databaseFile } from "../src/db/connection.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { importCard } from "../src/formats/cardImport.ts"
@@ -270,23 +270,6 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
       assert.notStrictEqual(streamed, 200)
       const health = yield* Effect.promise(() => fetch(`${base}/healthz`))
       assert.strictEqual(health.status, 200)
-
-      // One transfer per user at a time, so nobody can hold every slot with stalled uploads.
-      const stalled = request(`${base}/library/import?name=slow.json`, {
-        method: "POST",
-        agent: false,
-        headers: { "content-type": "application/octet-stream", "content-length": "100000" }
-      })
-      stalled.on("error", () => {})
-      stalled.write(Buffer.alloc(10))
-      yield* Effect.sleep("500 millis")
-      assert.strictEqual((yield* upload(file, "x.png")).status, 429)
-      stalled.destroy()
-      const after = yield* upload(file, "x.png").pipe(
-        Effect.map((response) => response.status),
-        Effect.repeat({ until: (status) => status !== 429, schedule: Schedule.spaced("200 millis"), times: 25 })
-      )
-      assert.strictEqual(after, 200)
     })
   )
 })

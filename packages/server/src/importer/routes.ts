@@ -11,22 +11,30 @@ import {
 } from "@rp/shared/libraryImport.ts"
 import { RefId } from "@rp/shared/library.ts"
 import { ByteSize, Effect, Layer, Option, Schema, Semaphore } from "effect"
+import { NodeHttpServerRequest } from "@effect/platform-node"
 import { HttpIncomingMessage, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http"
 import { Accounts } from "../auth/Accounts.ts"
 import { AppConfig } from "../config.ts"
 import { Reader, Writer } from "../db/Database.ts"
 import { defaultLimits } from "../formats/safety.ts"
+import { BodyRefused, firstBytes, readBody } from "./body.ts"
 import { Formats } from "./Formats.ts"
 import { readMedia, storeMedia } from "./mediaFiles.ts"
 
 /** The largest upload: the parsers' own cap on any file (ARCHITECTURE.md §8). */
 const MAX_UPLOAD_BYTES = defaultLimits.maxFileBytes
 
-/**
- * How long an upload's body may take to arrive: 64 MiB at about half a megabyte a second.
- * A stalled upload holds its permit until then.
- */
-const BODY_DEADLINE = "2 minutes"
+/** How long an upload's body may take to arrive: 64 MiB at about half a megabyte a second. */
+const BODY_DEADLINE_MS = 120_000
+/** The longest pause in an upload's body, or before its first bytes, before it's dropped. */
+const BODY_IDLE_MS = 10_000
+
+const BODY_REFUSALS: Record<BodyRefused["reason"], readonly [status: number, message: string]> = {
+  too_large: [413, `files can be at most ${MAX_UPLOAD_BYTES} bytes`],
+  stalled: [408, "the file stopped arriving"],
+  too_slow: [408, "the file took too long to arrive"],
+  aborted: [400, "the file didn't arrive whole"]
+}
 
 /** A file name as given, without folders or control characters, bounded. */
 const fileNameFrom = (raw: string | null) =>
@@ -37,6 +45,19 @@ const fileNameFrom = (raw: string | null) =>
     .slice(0, 255)
 
 const jsonError = (status: number, message: string) => HttpServerResponse.jsonUnsafe({ error: message }, { status })
+
+/**
+ * Runs `effect` holding one of `semaphore`'s permits, waiting at most `waitMs` for it.
+ * None when the wait ran out.
+ */
+const withPermitWithin = <A, E, R>(semaphore: Semaphore.Semaphore, waitMs: number, effect: Effect.Effect<A, E, R>) =>
+  Effect.uninterruptibleMask((restore) =>
+    Effect.flatMap(restore(Effect.timeoutOption(semaphore.take(1), Math.max(0, waitMs))), (taken) =>
+      Option.isNone(taken)
+        ? Effect.succeed(Option.none<A>())
+        : restore(effect).pipe(Effect.map(Option.some), Effect.ensuring(semaphore.release(1)))
+    )
+  )
 
 /** The user the request's session names, as for an RPC (auth/Accounts.ts). */
 const authenticated = <A, E, R>(accounts: Accounts["Service"], handle: Effect.Effect<A, E, R>) =>
@@ -73,26 +94,36 @@ export const layer = Layer.unwrap(
     const formats = yield* Formats
     const reader = yield* Reader
     const writer = yield* Writer
-    // Files held in memory at once: an upload reads its body, an export its media, only with
-    // a permit. The rest wait, an upload in its socket, where TCP holds the sender back.
-    const transfers = Semaphore.makeUnsafe(config.formatWorkers * 2)
-    // One transfer per user at a time, so no user can hold every permit.
-    const transferring = new Set<string>()
+    // Files held in memory at once. An upload takes a permit once its first bytes arrive, so
+    // one that sends nothing holds none; the rest wait in their sockets, where TCP holds the
+    // sender back. Exports have permits of their own, so stalled uploads can't hold them up.
+    const uploads = Semaphore.makeUnsafe(config.formatWorkers * 2)
+    const exports = Semaphore.makeUnsafe(config.formatWorkers * 2)
+    // One transfer per user at a time: another waits its turn, for as long as an upload may
+    // take, so no user holds more than one permit.
+    const users = new Map<string, { readonly semaphore: Semaphore.Semaphore; waiting: number }>()
     const oneAtATime = <E, R>(
       userId: string,
       transfer: Effect.Effect<HttpServerResponse.HttpServerResponse, E, R>
     ): Effect.Effect<HttpServerResponse.HttpServerResponse, E, R> =>
-      Effect.suspend(() => {
-        if (transferring.has(userId)) {
-          return Effect.succeed(
-            jsonError(429, "another of your files is still being transferred; try again once it's done")
-          )
-        }
-        transferring.add(userId)
-        return transfers
-          .withPermits(1)(transfer)
-          .pipe(Effect.ensuring(Effect.sync(() => transferring.delete(userId))))
-      })
+      Effect.acquireUseRelease(
+        Effect.sync(() => {
+          const slot = users.get(userId) ?? { semaphore: Semaphore.makeUnsafe(1), waiting: 0 }
+          slot.waiting++
+          users.set(userId, slot)
+          return slot
+        }),
+        (slot) =>
+          Effect.map(withPermitWithin(slot.semaphore, BODY_DEADLINE_MS, transfer), (response) =>
+            Option.getOrElse(response, () =>
+              jsonError(503, "another of your files is still being transferred; try again once it's done")
+            )
+          ),
+        (slot) =>
+          Effect.sync(() => {
+            if (--slot.waiting === 0) users.delete(userId)
+          })
+      )
 
     const importFile = Effect.gen(function* () {
       const request = yield* HttpServerRequest.HttpServerRequest
@@ -101,45 +132,55 @@ export const layer = Layer.unwrap(
         return jsonError(415, "expected application/octet-stream")
       }
       if (Number(request.headers["content-length"]) > MAX_UPLOAD_BYTES) {
-        return jsonError(413, `files can be at most ${MAX_UPLOAD_BYTES} bytes`)
+        return jsonError(413, BODY_REFUSALS.too_large[1])
       }
       const query = new URL(request.url, "http://upload").searchParams
       const fileName = fileNameFrom(query.get("name"))
       const into = query.get("into")
       if (into !== null && !Schema.is(RefId)(into)) return jsonError(400, "into must name a ref")
 
+      const message = NodeHttpServerRequest.toIncomingMessage(request)
+      const limits = { maxBytes: MAX_UPLOAD_BYTES, idleMs: BODY_IDLE_MS, deadline: Date.now() + BODY_DEADLINE_MS }
       return yield* oneAtATime(
         user.id,
         Effect.gen(function* () {
-          // The cap applies as the body arrives: past it, or past the deadline, reading stops
-          // and the connection closes.
-          const body = yield* request.arrayBuffer.pipe(
-            Effect.provideService(HttpIncomingMessage.MaxBodySize, ByteSize.bytes(MAX_UPLOAD_BYTES)),
-            Effect.timeout(BODY_DEADLINE),
-            Effect.option
+          yield* firstBytes(message, limits)
+          const taken = yield* withPermitWithin(
+            uploads,
+            limits.deadline - Date.now(),
+            Effect.gen(function* () {
+              // The cap applies as the body arrives: past it, after a pause or past the deadline,
+              // reading stops, and the answer closes the connection.
+              const body = yield* readBody(message, limits)
+              const parsed = yield* formats.parse(body, fileName)
+              if (parsed.library === null) {
+                return yield* HttpServerResponse.schemaJson(ImportResult)(
+                  new ImportResult({ report: parsed.report, library: null })
+                )
+              }
+              yield* Effect.forEach(parsed.media, (file) => storeMedia(config.dataDir, file.sha256, file.bytes), {
+                discard: true
+              })
+              const library = yield* writer.ImportFile({
+                userId: user.id,
+                intoRefId: into,
+                ...parsed.library,
+                sourceName: fileName,
+                sourceHash: parsed.sha256,
+                media: parsed.media.map(({ bytes: _, ...file }) => file)
+              })
+              return yield* HttpServerResponse.schemaJson(ImportResult)(
+                new ImportResult({ report: parsed.report, library })
+              )
+            })
           )
-          if (Option.isNone(body)) return jsonError(400, "the file didn't arrive whole, or in time")
-          const parsed = yield* formats.parse(new Uint8Array(body.value), fileName)
-          if (parsed.library === null) {
-            return yield* HttpServerResponse.schemaJson(ImportResult)(
-              new ImportResult({ report: parsed.report, library: null })
-            )
-          }
-          yield* Effect.forEach(parsed.media, (file) => storeMedia(config.dataDir, file.sha256, file.bytes), {
-            discard: true
+          return Option.getOrElse(taken, () => jsonError(503, "the server is busy with other files; try again"))
+        }).pipe(
+          Effect.catchTag("BodyRefused", ({ reason }) => {
+            const [status, text] = BODY_REFUSALS[reason]
+            return Effect.succeed(jsonError(status, text).pipe(HttpServerResponse.setHeader("connection", "close")))
           })
-          const library = yield* writer.ImportFile({
-            userId: user.id,
-            intoRefId: into,
-            ...parsed.library,
-            sourceName: fileName,
-            sourceHash: parsed.sha256,
-            media: parsed.media.map(({ bytes: _, ...file }) => file)
-          })
-          return yield* HttpServerResponse.schemaJson(ImportResult)(
-            new ImportResult({ report: parsed.report, library })
-          )
-        })
+        )
       )
     }).pipe(
       Effect.catchTags({
@@ -174,27 +215,29 @@ export const layer = Layer.unwrap(
       const [mime, extension] = CONTENT_TYPES[format]
       return yield* oneAtATime(
         user.id,
-        Effect.gen(function* () {
-          const avatar = source.avatar && (yield* read(source.avatar))
-          const assets = yield* Effect.forEach(source.assets, (asset) =>
-            Effect.map(read(asset), (file) => (file ? [{ ...file, uri: asset.uri }] : []))
-          )
-          const bytes = yield* formats.export({
-            format,
-            docJson: source.docJson,
-            noteDocJson: source.noteDocJson,
-            avatar: avatar ?? null,
-            assets: assets.flat()
+        exports.withPermits(1)(
+          Effect.gen(function* () {
+            const avatar = source.avatar && (yield* read(source.avatar))
+            const assets = yield* Effect.forEach(source.assets, (asset) =>
+              Effect.map(read(asset), (file) => (file ? [{ ...file, uri: asset.uri }] : []))
+            )
+            const bytes = yield* formats.export({
+              format,
+              docJson: source.docJson,
+              noteDocJson: source.noteDocJson,
+              avatar: avatar ?? null,
+              assets: assets.flat()
+            })
+            return HttpServerResponse.uint8Array(bytes, {
+              contentType: mime,
+              headers: {
+                "content-disposition": disposition(source.label, extension),
+                "cache-control": "no-store",
+                "x-content-type-options": "nosniff"
+              }
+            })
           })
-          return HttpServerResponse.uint8Array(bytes, {
-            contentType: mime,
-            headers: {
-              "content-disposition": disposition(source.label, extension),
-              "cache-control": "no-store",
-              "x-content-type-options": "nosniff"
-            }
-          })
-        })
+        )
       )
     }).pipe(
       Effect.catchTags({
