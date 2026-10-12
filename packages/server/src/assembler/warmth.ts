@@ -37,7 +37,23 @@ const messageReason = (
   if (sent?.source.kind === "message") {
     if (sent.source.version !== source.version) return `${label} was edited, or another of its versions chosen.`
     const previous = last.pieces.find((p) => p.source.kind === "message" && p.source.slot === source.slot)
-    return sent.text !== previous?.text ? `${label} was amended.` : BUDGET
+    if (sent.text !== previous?.text) return `${label} was amended.`
+    // Message offsets can move because notes were inserted or a breakpoint shortened,
+    // even when every retained history turn is unchanged.
+    const history = (snapshot: ContextSnapshot) =>
+      snapshot.pieces
+        .filter((p) => p.source.kind === "message" && p.messages.length > 0)
+        .map((p) => (p.source.kind === "message" ? p.source.slot : ""))
+    const oldHistory = history(last)
+    const newHistory = history(next)
+    if (oldHistory[0] !== newHistory[0] || oldHistory.some((slot) => !newHistory.includes(slot))) return BUDGET
+    const notes = (snapshot: ContextSnapshot) =>
+      snapshot.pieces
+        .filter((p) => p.source.kind === "note" && p.messages.length > 0)
+        .map((p) => [p.id, p.text, p.messages])
+    return JSON.stringify(notes(last)) !== JSON.stringify(notes(next))
+      ? "The notes in the context or their placement changed."
+      : "The reusable cache prefix's endpoint or layout changed."
   }
   const read = (next.sources?.history ?? []).flatMap((w) => w.entries)
   const entry = read.find((e) => e.slotId === source.slot)
