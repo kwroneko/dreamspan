@@ -97,7 +97,8 @@ Where the owner corrected an earlier proposal, the corrected version is recorded
   - **Generate X**: the model writes X's turn, as a real generation. Not a fake turn inserted into the history, and no command to remember.
 - **[P]** **Composer text used with Generate becomes a one-turn direction**, stored on that generated turn. Swiping reuses it, going back restores it, and it never leaks into later turns. This replaces "put next-turn guidance in the author's note and remember to remove it".
 - **[P]** Impersonation is just Generate for a character you play. The output lands as a real turn with versions. A "draft into composer" option is available.
-- **[O]** When sending into a chat that's still generating: queue or cancel?
+- **[D]** Sending into a chat that's still generating **queues** the message (owner, 2026-10-12). It shows as pending under the streaming reply and posts as soon as the reply finishes. If the reply is stopped, it posts right after the stopped version. Typing and sending are never blocked; to interject, press Stop first.
+- **[P]** The queued message is held by the server, so it survives closing the tab. It attaches to the reply's slot, not to a version, so it posts after whichever version ends up selected, including a failed one (which stays out of the context). Posting it starts the next reply as a normal Send does. A queued message can be edited or withdrawn until it posts.
 
 ### 2.3 Group-chat orchestration (see §7)
 - **[D]** The owner only uses group chats. Single-card chats are a special case of the general system.

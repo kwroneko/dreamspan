@@ -87,7 +87,7 @@ Session notes are not kept in the repository.
 
 ## Open questions
 1. "Start over" with a card: a new peer chat (proposed) or a new root in the same chat? (DESIGN §2.1)
-2. Sending into a chat that's still generating: queue or cancel? (§2.2)
+2. ~~Sending into a chat that's still generating: queue or cancel?~~ **Resolved: queue** (owner, 2026-10-12; DESIGN §2.2).
 3. How merged threads become one sequence (§3.3). Deferred: not needed until threads are built.
 4. Note identity for "apply to all branches" edits (§3.4).
 5. ~~Client framework~~ **Resolved: React** (owner, 2026-10-10; [CLIENT-FRAMEWORK.md](CLIENT-FRAMEWORK.md)). Server HTTP framework: deferred by the owner (2026-10-10); [EFFECT.md](EFFECT.md) proposes Effect's own HTTP server.
