@@ -288,6 +288,7 @@ describe("generation", () => {
         "complete",
         JSON.stringify([version.error, mock.requests().map((r) => r.path)])
       )
+      // The reply is what the model wrote: ST sends the prefill, and saves only the response.
       assert.strictEqual(version.content, " she says.")
       const body = mock.requests().find((r) => r.path.startsWith("/v1/messages"))!.body! as {
         system: ReadonlyArray<{ text: string }>
