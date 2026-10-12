@@ -41,6 +41,29 @@ describe("network", () => {
     }).pipe(Effect.scoped, Effect.provide(layer(tempDir("net"))))
   )
 
+  it.live("a prepared request keeps the transport whose secrets it registered", () =>
+    Effect.gen(function* () {
+      const target = yield* resource(() => startTarget(() => ({ json: { ok: true } })))
+      const first = yield* resource(startHttpProxy)
+      const second = yield* resource(startHttpProxy)
+      const network = yield* Network.Network
+      yield* network.setInstance({ proxyUrl: first.url, bypass: [], forceProxy: false })
+      const secrets: string[] = []
+      const prepared = network.prepare({ mode: "inherit" }, (value) => secrets.push(value))
+      yield* network.setInstance({ proxyUrl: second.url, bypass: [], forceProxy: false })
+      assert.deepStrictEqual(secrets, [first.url])
+      const route = yield* prepared.route(new URL(target.url))
+      assert.deepStrictEqual(route, { via: "proxy", proxy: first.url, source: "instance" })
+      yield* Effect.promise(() =>
+        prepared
+          .fetchFor()(target.url)
+          .then((r) => r.text())
+      )
+      assert.strictEqual(first.tunnels().length, 1)
+      assert.strictEqual(second.tunnels().length, 0)
+    }).pipe(Effect.scoped, Effect.provide(layer(tempDir("net"))))
+  )
+
   it.live("a host bypassed by name goes direct whatever its addresses", () =>
     Effect.gen(function* () {
       const target = yield* resource(() => startTarget(() => ({ json: { ok: true } })))

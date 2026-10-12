@@ -643,6 +643,8 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
         assert.strictEqual(own.chatId, owner.chat.chatId)
         assert.strictEqual(own.messages[0]?.role, "developer")
         assert.strictEqual(own.messages[0]?.content, "Synthetic SDK instruction")
+        assert.notInclude(JSON.stringify(own), "server-only-digest")
+        assert.notInclude(JSON.stringify(own), '"digest"')
         assert.strictEqual(own.requests.length, 1)
         for (const request of own.requests) {
           assert.deepStrictEqual(Object.keys(request).sort(), ["id", "status", "counts", "usageSource", "cost"].sort())
@@ -1341,7 +1343,9 @@ const seed = Effect.gen(function* () {
         userId: user.id,
         rolloutId: inspectorRollout,
         wire: JSON.stringify({
-          messages: [{ role: "developer", content: "Synthetic SDK instruction", inputs: [0] }],
+          messages: [
+            { role: "developer", content: "Synthetic SDK instruction", digest: "server-only-digest", inputs: [0] }
+          ],
           samplers: {}
         })
       })

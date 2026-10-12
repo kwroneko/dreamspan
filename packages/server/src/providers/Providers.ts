@@ -5,7 +5,7 @@
 // pi-ai's API implementations are called directly with an explicit key and an empty
 // env, never through its Models collection, so no request can pick up a key from the
 // server's environment (PROVIDERS §4).
-import { sentWire, wireContext } from "../assembler/wire.ts"
+import { markWireSources, sentWire, wireContext } from "../assembler/wire.ts"
 import type { AssembledRequest, ModelInput } from "../assembler/types.ts"
 import { mappingCapabilities } from "./mapping.ts"
 import type {
@@ -39,7 +39,7 @@ import { createHash, timingSafeEqual } from "node:crypto"
 import { ServerError, StaleWrite } from "@rp/shared/errors.ts"
 import { Cause, Context, Effect, Exit, Layer, Queue, Semaphore, Stream } from "effect"
 import { Reader, Writer } from "../db/Database.ts"
-import { Network, type ProxyOverride, RedirectRefused } from "../net/Network.ts"
+import { Network, type ProxyOverride, type RequestNetwork, RedirectRefused } from "../net/Network.ts"
 import { describeRoute, proxyUrlProblem } from "../net/route.ts"
 import { Secrets } from "../secrets.ts"
 import { catalogEntry } from "./catalog.ts"
@@ -128,7 +128,7 @@ interface Prepared {
   readonly baseUrl: string
   readonly apiKey: string | null
   readonly headers: Readonly<Record<string, string>>
-  readonly override: ProxyOverride
+  readonly transport: RequestNetwork
   /** Removes this connection's secrets from text that will be stored or shown (PROVIDERS §5). */
   readonly scrub: (text: string) => string
 }
@@ -153,15 +153,25 @@ export const makeScrub = (secrets: ReadonlyArray<string | null | undefined>) => 
   return (text: string) => values.reduce((out, value) => out.split(value).join("[redacted]"), text)
 }
 
-/** The secrets in a proxy URL: the whole URL and its password. */
-const proxySecrets = (url: string | null) => {
-  if (url === null) return []
-  try {
-    const parsed = new URL(url)
-    return [url, decodeURIComponent(parsed.password), parsed.href]
-  } catch {
-    return [url]
+/** One request-local inventory, populated as secrets resolve, before any payload is captured. */
+const requestSecrets = () => {
+  const values = new Set<string>()
+  const add = (value: string) => {
+    if (value) values.add(value)
+    // Proxy credentials may be echoed independently, percent encoded, or as Basic auth.
+    try {
+      const url = new URL(value)
+      values.add(url.href)
+      const username = decodeURIComponent(url.username)
+      const password = decodeURIComponent(url.password)
+      for (const part of [url.username, url.password, username, password]) if (part) values.add(part)
+      if (username || password) values.add(Buffer.from(`${username}:${password}`).toString("base64"))
+    } catch {
+      /* Most secrets aren't URLs. */
+    }
+    return value
   }
+  return { add, scrub: () => makeScrub([...values]) }
 }
 
 const binding = (connectionId: string, field: "headers" | "proxy_url") => `connection:${connectionId}:${field}`
@@ -360,10 +370,14 @@ export const layer = (options: ProvidersOptions = {}) =>
               `the provider kind "${connection.kind}" now speaks ${info.api}, not ${connection.api}; create the connection again`
             )
           }
+          const inventory = requestSecrets()
           const decryptWith = (blob: Uint8Array | null, bound: string) =>
             blob === null
               ? Effect.succeed(null)
-              : secrets.decrypt(blob, bound).pipe(Effect.mapError((error) => providerError("unusable", error.message)))
+              : secrets.decrypt(blob, bound).pipe(
+                  Effect.map(inventory.add),
+                  Effect.mapError((error) => providerError("unusable", error.message))
+                )
           const baseUrl = connection.baseUrl ?? info.defaultBaseUrl
           const origin = originOf(baseUrl)
           if (origin === null) {
@@ -407,6 +421,8 @@ export const layer = (options: ProvidersOptions = {}) =>
                 ? { mode: "direct" }
                 : { mode: "inherit" }
           const headers = headersJson === null ? {} : (JSON.parse(headersJson) as Record<string, string>)
+          for (const value of Object.values(headers)) inventory.add(value)
+          const transport = network.prepare(override, inventory.add)
           // Over http a connection's own proxy reads every byte. Setting one needs no key, so
           // it would otherwise be a way to collect the key in the clear.
           const secret = apiKey !== null || Object.keys(headers).length > 0
@@ -423,12 +439,12 @@ export const layer = (options: ProvidersOptions = {}) =>
             baseUrl,
             apiKey,
             headers,
-            override,
-            scrub: makeScrub([apiKey, ...Object.values(headers), ...proxySecrets(proxyUrl)])
+            transport,
+            scrub: inventory.scrub()
           }
           if (!info.acceptsFetch) {
             // Its traffic would bypass our fetch, so it may only go where we'd send it direct anyway.
-            const route = yield* network.route(new URL(prepared.baseUrl), override)
+            const route = yield* transport.route(new URL(prepared.baseUrl))
             if (route.via === "proxy") {
               return yield* providerError(
                 "unusable",
@@ -446,7 +462,7 @@ export const layer = (options: ProvidersOptions = {}) =>
 
       /** The fetch for a prepared connection's requests, reporting each route. */
       const fetchFor = (prepared: Prepared, onRoute: (description: string) => void) =>
-        network.fetchFor(prepared.override, (route, target) => onRoute(describeRoute(route, target)))
+        prepared.transport.fetchFor((route, target) => onRoute(describeRoute(route, target)))
 
       // --- Connection operations that need the secret ------------------------------
 
@@ -796,7 +812,7 @@ export const layer = (options: ProvidersOptions = {}) =>
           })
           const onRoute = (description: string) => offer({ type: "route", description })
           if (!prepared.kind.acceptsFetch) {
-            const route = yield* network.route(new URL(prepared.baseUrl), prepared.override)
+            const route = yield* prepared.transport.route(new URL(prepared.baseUrl))
             onRoute(describeRoute(route, new URL(prepared.baseUrl)))
           }
           // pi-ai reports onResponse only for successful responses (the SDKs throw first on
@@ -846,15 +862,22 @@ export const layer = (options: ProvidersOptions = {}) =>
                 },
                 // The caller's fields, then the registered transforms, in registration order.
                 onPayload: async (payload: unknown) => {
+                  const sources = request.inspection
+                    ? wireContext(request.inspection.request, {
+                        ...request.inspection.model,
+                        mapping: mappingCapabilities(
+                          resolveModel(model.key, model.upstream, model.overrides, prepared.connection.compat)
+                        )
+                      })
+                    : undefined
+                  const initial =
+                    overrides === undefined ? (payload as Record<string, unknown>) : merged(payload, overrides)
+                  if (sources) markWireSources(initial, sources)
                   const final = transforms.reduce(
                     (current, t) => t.transform(current, { target, messages: request.context.messages, breakpoints }),
-                    overrides === undefined ? (payload as Record<string, unknown>) : merged(payload, overrides)
+                    initial
                   )
-                  if (request.inspection && request.attribution.rolloutId) {
-                    const mapping = mappingCapabilities(
-                      resolveModel(model.key, model.upstream, model.overrides, prepared.connection.compat)
-                    )
-                    const sources = wireContext(request.inspection.request, { ...request.inspection.model, mapping })
+                  if (sources && request.attribution.rolloutId) {
                     const wire = sentWire(final, sources, prepared.scrub)
                     await Effect.runPromise(
                       fromStorage(

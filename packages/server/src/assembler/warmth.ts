@@ -4,7 +4,7 @@
 // first piece of the first differing message whose text differs says why.
 import type { ContextSource } from "@rp/shared/inspectorApi.ts"
 import { tokensOf } from "./st.ts"
-import { wireContext } from "./wire.ts"
+import { wireContext, wireDigest } from "./wire.ts"
 import type { ContextSnapshot, Source, WireContext } from "./types.ts"
 
 export type Describe = (source: Source) => ContextSource
@@ -105,9 +105,12 @@ export const prefixChange = (
     (snapshot.inputs.model
       ? wireContext(snapshot.request, snapshot.inputs.model)
       : { messages: snapshot.request.messages.map((m, i) => ({ ...m, inputs: [i] })) })
-  const oldWire = mapped(last).messages.filter((m) => m.inputs.some((i) => i <= end))
+  // Include unassigned transform insertions between attributed messages in the prefix too.
+  const prefix = (messages: WireContext["messages"], end: number) =>
+    messages.slice(0, messages.findLastIndex((m) => m.inputs.some((i) => i <= end)) + 1)
+  const oldWire = prefix(mapped(last).messages, end)
   const allNext = mapped(next).messages
-  const newWire = allNext.filter((m) => m.inputs.some((i) => i <= nextEnd))
+  const newWire = prefix(allNext, nextEnd)
   const suffix = (at: number) => newWire.slice(at).reduce((sum, m) => sum + tokensOf(m), 0)
   if (end < 0 || nextEnd < 0 || oldWire.length === 0 || newWire.length === 0) {
     return {
@@ -131,7 +134,9 @@ export const prefixChange = (
     return { reason: "The model's request-conversion capabilities changed.", tokens: suffix(0) }
   }
   for (let at = 0; at < oldWire.length; at++) {
-    if (!same(oldWire[at]!, newWire[at])) {
+    const previous = oldWire[at]!
+    const upcoming = newWire[at]
+    if (!upcoming || (previous.digest ?? wireDigest(previous)) !== (upcoming.digest ?? wireDigest(upcoming))) {
       const inputs = oldWire[at]!.inputs.filter((i) => i <= end)
       const input = inputs.find((i) => !same(last.request.messages[i]!, next.request.messages[i])) ?? inputs[0]!
       const conversion = last.request.useSystemPrompt !== next.request.useSystemPrompt

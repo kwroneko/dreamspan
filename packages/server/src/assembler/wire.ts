@@ -1,6 +1,7 @@
 // The provider-neutral request mapped per provider, as ST 1.19 maps its sources (ARCHITECTURE §15).
 import { convertResponsesMessages } from "@earendil-works/pi-ai/api/openai-responses-shared"
 import { normalizeContext } from "@earendil-works/pi-ai/utils/transcript"
+import { createHash } from "node:crypto"
 import { Predicate } from "effect"
 import type { Api, AssistantMessage, Context, Message, Model } from "@earendil-works/pi-ai"
 import type { AssembledRequest, ModelInput, RequestMessage, WireContext } from "./types.ts"
@@ -233,10 +234,19 @@ export const wireContext = (request: AssembledRequest, model: ModelInput): WireC
       input: ["text"],
       compat: { supportsDeveloperRole: model.mapping?.supportsDeveloperRole ?? true }
     } as Model<"openai-responses">
-    return {
-      ...sentWire({ input: convertResponsesMessages(sdk, normalizeContext(wire.context), new Set()) }, projected),
-      samplers
+    const payload = { input: convertResponsesMessages(sdk, normalizeContext(wire.context), new Set()) }
+    const converted = {
+      ...projected,
+      messages: projected.messages.map((message) => ({
+        ...message,
+        role:
+          message.role === "system" && sdk.reasoning && sdk.compat?.supportsDeveloperRole !== false
+            ? ("developer" as const)
+            : message.role
+      }))
     }
+    markWireSources(payload, converted)
+    return { ...sentWire(payload, projected), samplers }
   }
   if (model.api === "google-generative-ai") {
     return {
@@ -247,26 +257,36 @@ export const wireContext = (request: AssembledRequest, model: ModelInput): WireC
   return projected
 }
 
-/** Extract only text messages and numeric samplers from the final SDK/transformed body.
- * Headers, connection settings, tool definitions and arbitrary payload fields never enter storage.
- */
-export const sentWire = (
-  payload: Record<string, unknown>,
-  sources: WireContext,
-  scrub = (text: string) => text
-): WireContext => {
-  const content = (value: unknown): string =>
-    typeof value === "string"
+type WireMessage = WireContext["messages"][number]
+type TextMessage = Pick<WireMessage, "role" | "content" | "name">
+
+/** Only stored server-side; display redaction must not change cache identity. */
+export const wireDigest = (message: TextMessage): string =>
+  createHash("sha256")
+    .update(JSON.stringify([message.role, message.name ?? null, message.content]))
+    .digest("hex")
+
+// Enumerable symbols survive normal transform object spreads, but never JSON serialization.
+const provenance = Symbol("wire sources")
+const systemProvenance = Symbol("system sources")
+type Carrier = {
+  [provenance]?: ReadonlyArray<number>
+  [systemProvenance]?: { readonly content: string; readonly inputs: ReadonlyArray<number> }
+}
+const textContent = (value: unknown): string =>
+  typeof value === "string"
+    ? value
+    : Array.isArray(value)
       ? value
-      : Array.isArray(value)
-        ? value
-            .flatMap((block) => (Predicate.isObject(block) && typeof block.text === "string" ? [block.text] : []))
-            .join("\n")
-        : ""
+          .flatMap((block) => (Predicate.isObject(block) && typeof block.text === "string" ? [block.text] : []))
+          .join("\n")
+      : ""
+
+const wireRows = (payload: Record<string, unknown>) => {
   const config = Predicate.isObject(payload.config) ? payload.config : {}
-  const rows: Array<{ role: WireContext["messages"][number]["role"]; content: string; name?: string }> = []
-  const system = content(payload.system ?? config.systemInstruction)
-  if (system) rows.push({ role: "system", content: system })
+  const rows: Array<{ row: TextMessage; carrier: Carrier; system?: true }> = []
+  const system = textContent(payload.system ?? config.systemInstruction)
+  if (system) rows.push({ row: { role: "system", content: system }, carrier: payload, system: true })
   const messages = payload.messages ?? payload.input ?? payload.contents
   if (Array.isArray(messages))
     for (const message of messages) {
@@ -275,11 +295,42 @@ export const sentWire = (
       if (role !== "system" && role !== "developer" && role !== "user" && role !== "assistant" && role !== "model")
         continue
       rows.push({
-        role,
-        content: content(message.content ?? message.parts),
-        ...(typeof message.name === "string" ? { name: message.name } : {})
+        row: {
+          role,
+          content: textContent(message.content ?? message.parts),
+          ...(typeof message.name === "string" ? { name: message.name } : {})
+        },
+        carrier: message
       })
     }
+  return rows
+}
+
+/** Attach provenance before transforms. Missing/replaced carriers remain unassigned, never positional. */
+export const markWireSources = (payload: Record<string, unknown>, sources: WireContext): void => {
+  const matches = new Map<string, Array<ReadonlyArray<number>>>()
+  for (const message of sources.messages) {
+    const key = wireDigest(message)
+    const queue = matches.get(key) ?? []
+    queue.push(message.inputs)
+    matches.set(key, queue)
+  }
+  for (const { row, carrier, system } of wireRows(payload)) {
+    const inputs = matches.get(wireDigest(row))?.shift() ?? []
+    if (system) carrier[systemProvenance] = { content: row.content, inputs }
+    else carrier[provenance] = inputs
+  }
+}
+
+/** Extract only text messages and numeric samplers from the final SDK/transformed body.
+ * Headers, connection settings, tool definitions and arbitrary payload fields never enter storage.
+ */
+export const sentWire = (
+  payload: Record<string, unknown>,
+  sources: WireContext,
+  scrub = (text: string) => text
+): WireContext => {
+  const config = Predicate.isObject(payload.config) ? payload.config : {}
   const samplers: Record<string, number> = {}
   for (const fields of [payload, config])
     for (const key of [
@@ -301,31 +352,19 @@ export const sentWire = (
     ]) {
       if (typeof fields[key] === "number") samplers[key] = fields[key]
     }
-  // Text-only assembly preserves order. Match text when the SDK drops empty messages;
-  // a transform rewriting a message keeps its positional source attribution.
-  const byContent = new Map<string, number[]>()
-  for (const [i, source] of sources.messages.entries()) {
-    const indices = byContent.get(source.content) ?? []
-    indices.push(i)
-    byContent.set(source.content, indices)
-  }
-  let cursor = 0
   return {
     mapping: sources.mapping,
     samplers,
-    messages: rows.map((row) => {
-      const at =
-        sources.messages[cursor]?.content === row.content
-          ? cursor
-          : (byContent.get(row.content)?.find((i) => i >= cursor) ?? cursor)
-      const source = sources.messages[at]
-      cursor = at + 1
-      return {
-        ...row,
-        content: scrub(row.content),
-        ...(row.name ? { name: scrub(row.name) } : {}),
-        inputs: source?.inputs ?? [0]
-      }
-    })
+    messages: wireRows(payload).map(({ row, carrier, system }) => ({
+      ...row,
+      digest: wireDigest(row),
+      content: scrub(row.content),
+      ...(row.name ? { name: scrub(row.name) } : {}),
+      inputs: system
+        ? carrier[systemProvenance]?.content === row.content
+          ? carrier[systemProvenance]!.inputs
+          : []
+        : (carrier[provenance] ?? [])
+    }))
   }
 }

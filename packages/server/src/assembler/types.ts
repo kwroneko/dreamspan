@@ -141,6 +141,8 @@ export interface WireContext {
   readonly messages: ReadonlyArray<
     Omit<RequestMessage, "role"> & {
       readonly role: Role | "developer" | "model"
+      /** Digest of final, unredacted text/role/name. Never projected into an RPC DTO. */
+      readonly digest?: string
       readonly inputs: ReadonlyArray<number>
     }
   >

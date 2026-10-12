@@ -41,7 +41,14 @@ interface NetworkView {
   readonly forceProxy: boolean
 }
 
+/** Transport pinned to the settings whose secrets were registered for this request. */
+export interface RequestNetwork {
+  readonly fetchFor: (onRoute?: (route: Route, target: URL) => void) => typeof fetch
+  readonly route: (target: URL) => Effect.Effect<Route>
+}
+
 export interface NetworkShape {
+  readonly prepare: (override: ProxyOverride, registerSecret: (value: string) => void) => RequestNetwork
   /**
    * A fetch for one connection's requests. `onRoute` hears the route of every request,
    * for the connection test and the request inspector.
@@ -138,11 +145,12 @@ export const layer = Layer.effect(
 
     // One dispatcher per route, reused so connections pool; closed with the layer.
     const dispatchers = new Map<string, Dispatcher>()
-    const dispatcherFor = (route: Route) => {
-      const key = route.via === "direct" ? `direct:${route.pinned ? "pinned" : "any"}` : route.proxy
+    const dispatcherFor = (route: Route, settings: Current) => {
+      const key =
+        route.via === "direct" ? `direct:${route.pinned ? JSON.stringify(settings.bypassEntries) : "any"}` : route.proxy
       let dispatcher = dispatchers.get(key)
       if (!dispatcher) {
-        dispatcher = makeDispatcher(route, () => Ref.getUnsafe(current).bypass)
+        dispatcher = makeDispatcher(route, () => settings.bypass)
         dispatchers.set(key, dispatcher)
       }
       return dispatcher
@@ -151,8 +159,7 @@ export const layer = Layer.effect(
       Effect.promise(() => Promise.allSettled([...dispatchers.values()].map((d) => d.close())))
     )
 
-    const routeNow = (target: URL, override: ProxyOverride) => {
-      const settings = Ref.getUnsafe(current)
+    const routeNow = (target: URL, override: ProxyOverride, settings: Current = Ref.getUnsafe(current)) => {
       return decideRoute({
         target,
         override,
@@ -168,12 +175,17 @@ export const layer = Layer.effect(
      * redirect anywhere: an open redirect on an allowed host would carry the key off. Each
      * hop is routed afresh.
      */
-    const fetchFor: NetworkShape["fetchFor"] = (override, onRoute) => {
+    const fetchFor = (
+      override: ProxyOverride,
+      onRoute?: (route: Route, target: URL) => void,
+      settings?: Current
+    ): typeof fetch => {
       const routed = async (input: Parameters<typeof fetch>[0], init: RequestInit = {}) => {
         let target = new URL(input instanceof Request ? input.url : input.toString())
         let request: { input: Parameters<typeof fetch>[0]; init: RequestInit } = { input, init }
         for (let hop = 0; ; hop++) {
-          const route = await routeNow(target, override)
+          const selected = settings ?? Ref.getUnsafe(current)
+          const route = await routeNow(target, override, selected)
           if (route.via === "proxy" && proxyUrlProblem(route.proxy) !== null) {
             throw new Error(`The proxy for this request is unusable: ${proxyUrlProblem(route.proxy)}`)
           }
@@ -181,7 +193,7 @@ export const layer = Layer.effect(
           const response = await undiciFetch(request.input as Parameters<typeof undiciFetch>[0], {
             ...(request.init as unknown as Parameters<typeof undiciFetch>[1]),
             redirect: "manual",
-            dispatcher: dispatcherFor(route)
+            dispatcher: dispatcherFor(route, selected)
           })
           const location = response.headers.get("location")
           if (response.status < 300 || response.status > 399 || location === null)
@@ -245,6 +257,15 @@ export const layer = Layer.effect(
       })
 
     return Network.of({
+      prepare: (override, registerSecret) => {
+        const settings = Ref.getUnsafe(current)
+        if (settings.proxyUrl !== null) registerSecret(settings.proxyUrl)
+        if (override.mode === "custom") registerSecret(override.url)
+        return {
+          fetchFor: (onRoute) => fetchFor(override, onRoute, settings),
+          route: (target) => Effect.promise(() => routeNow(target, override, settings))
+        }
+      },
       fetchFor,
       route: (target, override) => Effect.promise(() => routeNow(target, override)),
       forced: () => Ref.getUnsafe(current).forceProxy,

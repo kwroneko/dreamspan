@@ -44,7 +44,10 @@ export interface RequestTarget {
 export interface RequestTransform {
   readonly id: string
   readonly appliesTo: (target: RequestTarget) => boolean
-  /** Returns the payload to send: the same object changed in place, or a new one. */
+  /** Returns the payload to send: the same object changed in place, or a new one.
+   * Retain message objects (or spread them) to preserve inspector provenance symbols.
+   * Freshly constructed messages are unassigned; symbols never enter serialized HTTP.
+   */
   readonly transform: (
     payload: Record<string, unknown>,
     request: {
