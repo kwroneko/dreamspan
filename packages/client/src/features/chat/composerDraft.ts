@@ -388,11 +388,12 @@ export class ComposerDraft {
       return
     }
     const unchanged = this.pending === copy
+    const descendant = this.pending?.ancestors.includes(copy.key) === true
     this.acknowledge(copy)
     this.error = null
     this.recovered ||= saved.value.recovered
     const now = saved.value.draft ?? (await this.reopen())
-    if (now !== null && shown(now) === sent) {
+    if (now !== null && shown(now) === sent && (unchanged || descendant)) {
       // The draft holds this tab's text: it's the base now, and what's typed since was typed
       // from it.
       this.base = now

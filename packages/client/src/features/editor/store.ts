@@ -190,7 +190,15 @@ export class EditorStore {
       const payload = pending.payload
       const replay = copy
       const field = this.field(copy.field)
-      const captured = { pending: field.pending, local: field.local, rowVersion: field.rowVersion }
+      const captured = {
+        pending: field.pending,
+        local: field.local,
+        saved: field.saved,
+        draftId: field.draftId,
+        rowVersion: field.rowVersion,
+        session: field.session,
+        baseRevision: field.baseRevision
+      }
       this.sendingCopies.add(replay)
       const result = await this.call((client) => client("SaveEditorDraft", payload))
       this.sendingCopies.delete(replay)
@@ -198,6 +206,10 @@ export class EditorStore {
         field.pending === captured.pending &&
         field.local === captured.local &&
         field.rowVersion === captured.rowVersion &&
+        field.draftId === captured.draftId &&
+        field.session === captured.session &&
+        field.baseRevision === captured.baseRevision &&
+        field.saved === captured.saved &&
         (captured.local === null || captured.pending?.key === copy.key)
       if (result.ok) {
         if (unchanged) this.hold(field, result.value)
@@ -306,8 +318,12 @@ export class EditorStore {
             draftId: field.draftId,
             content,
             ...this.base(field),
-            baseRevisionId: field.saved === null ? (this.snapshot?.ref.headRevisionId ?? null) : field.baseRevision
+            baseRevisionId:
+              field.saved === null && field.local === null && previous === null
+                ? (this.snapshot?.ref.headRevisionId ?? null)
+                : field.baseRevision
           }
+    if (previous === null && field.local === null) field.baseRevision = payload.baseRevisionId
     const copy = makeCopy(
       this.userId,
       this.refId,

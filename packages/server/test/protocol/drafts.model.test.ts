@@ -28,9 +28,10 @@ import type { ChatId, SlotId } from "@rp/shared/chat.ts"
 import { applyPatch, invertPatch } from "@rp/shared/drafts.ts"
 import { getAt, textField } from "@rp/shared/editing.ts"
 import type { RefId } from "@rp/shared/library.ts"
-import { Cause, Deferred, Effect, Exit, Layer, Option, Stream } from "effect"
+import { Cause, Deferred, Effect, Exit, Layer, Option, Scope, Stream } from "effect"
 import { RpcClientError } from "effect/rpc"
 import { type GenerationFailed, Generator } from "../../src/chat/Generator.ts"
+import { DraftClock } from "../../src/db/Database.ts"
 import { databaseFile } from "../../src/db/connection.ts"
 import { client, serverLayer, serverPort, testConfig } from "../support/config.ts"
 import { type Completed, FakeIndexedDb } from "./fakeIndexedDb.ts"
@@ -38,6 +39,7 @@ import { type Completed, FakeIndexedDb } from "./fakeIndexedDb.ts"
 const idb = new FakeIndexedDb()
 globalThis.indexedDB = idb as unknown as IDBFactory
 // Imported once IndexedDB is in place: backup.ts opens it on first use.
+const { makeCopy, keepCopy, dropCopy } = await import("../../../client/src/features/editor/backup.ts")
 const { ComposerDraft } = await import("../../../client/src/features/chat/composerDraft.ts")
 const { EditorStore } = await import("../../../client/src/features/editor/store.ts")
 const { describeCause } = await import("../../../client/src/errors.ts")
@@ -103,9 +105,12 @@ interface Request {
   readonly tag: string
   readonly payload: unknown
   readonly keepalive: boolean
+  readonly copyIds: Array<string>
   /** The client hears nothing back: lost on the way, or the page is gone. */
   silent: boolean
-  readonly answer: (outcome: Exit.Exit<unknown, unknown> | boolean) => void
+  readonly answer: (
+    outcome: Exit.Exit<unknown, unknown> | boolean | { readonly ok: boolean; readonly recovered: number }
+  ) => void
 }
 
 const lost = () =>
@@ -136,46 +141,50 @@ class Net {
   }
 
   send(page: Page, tag: string, payload: unknown, keepalive: boolean, store: EditorStore | null = null) {
-    return new Promise<Exit.Exit<unknown, unknown> | boolean>((resolve) => {
-      const request: Request = {
-        id: this.next++,
-        page,
-        store,
-        tag,
-        payload,
-        keepalive,
-        silent: false,
-        answer: (outcome) => {
-          if (answered) return
-          answered = true
-          page.outstanding--
-          if (page.alive) resolve(outcome)
+    return new Promise<Exit.Exit<unknown, unknown> | boolean | { readonly ok: boolean; readonly recovered: number }>(
+      (resolve) => {
+        const request: Request = {
+          id: this.next++,
+          page,
+          store,
+          tag,
+          payload,
+          keepalive,
+          copyIds: [],
+          silent: false,
+          answer: (outcome) => {
+            if (answered) return
+            answered = true
+            page.outstanding--
+            if (page.alive) resolve(outcome)
+          }
         }
+        let answered = false
+        page.outstanding++
+        this.world.checkRequest(request)
+        const fail = () => request.answer(keepalive ? false : lost())
+        if (page.tab.offline) {
+          this.world.log(`  r${request.id} ${tag} from tab ${page.tab.id}: offline`)
+          return fail()
+        }
+        const roll = this.reliable ? 0 : this.world.rng()
+        const repeatable = REPEATABLE.has(tag)
+        // Reads mostly go through; writes are held more, so typing meets them on their way.
+        const now = tag.startsWith("Open") || tag.endsWith("History") ? 0.75 : 0.5
+        const how =
+          roll < now ? "now" : roll < 0.8 ? "held" : roll < 0.87 ? "lost" : roll < 0.94 ? "reply lost" : "twice"
+        const policy = how === "twice" && !repeatable ? "now" : how
+        this.world.log(`  r${request.id} ${tag} from tab ${page.tab.id}: ${policy}`)
+        if (policy === "lost") return fail()
+        if (policy === "held") return void this.held.push(request)
+        if (policy === "reply lost") {
+          fail()
+          request.silent = true
+        }
+        this.ready.push(request)
+        if (policy === "twice") this.held.push({ ...request, id: this.next++, silent: true })
       }
-      let answered = false
-      page.outstanding++
-      this.world.checkRequest(request)
-      const fail = () => request.answer(keepalive ? false : lost())
-      if (page.tab.offline) {
-        this.world.log(`  r${request.id} ${tag} from tab ${page.tab.id}: offline`)
-        return fail()
-      }
-      const roll = this.reliable ? 0 : this.world.rng()
-      const repeatable = REPEATABLE.has(tag)
-      // Reads mostly go through; writes are held more, so typing meets them on their way.
-      const now = tag.startsWith("Open") || tag.endsWith("History") ? 0.75 : 0.5
-      const how = roll < now ? "now" : roll < 0.8 ? "held" : roll < 0.87 ? "lost" : roll < 0.94 ? "reply lost" : "twice"
-      const policy = how === "twice" && !repeatable ? "now" : how
-      this.world.log(`  r${request.id} ${tag} from tab ${page.tab.id}: ${policy}`)
-      if (policy === "lost") return fail()
-      if (policy === "held") return void this.held.push(request)
-      if (policy === "reply lost") {
-        fail()
-        request.silent = true
-      }
-      this.ready.push(request)
-      if (policy === "twice") this.held.push({ ...request, id: this.next++, silent: true })
-    })
+    )
   }
 
   /** A held request goes on: delivered, delivered with its reply lost, or lost. */
@@ -245,7 +254,9 @@ class Page {
     clearTimer: (timer: unknown) => void this.timers.delete(timer as number),
     now: () => this.world.now(),
     keepalive: (_path: string, body: string) =>
-      this.world.net.send(this, "keepalive", JSON.parse(body), true) as Promise<boolean>
+      this.world.net.send(this, "keepalive", JSON.parse(body), true) as Promise<
+        boolean | { readonly ok: boolean; readonly recovered: number }
+      >
   }
 
   readonly world: World
@@ -320,7 +331,7 @@ class World {
   rng: () => number = Math.random
   readonly net = new Net(this)
   readonly tabs: Array<Tab> = []
-  /** Tokens typed and not removed by the user in a field that showed them. */
+  /** Complete texts typed and not removed by the user in a field that showed them. */
   readonly live = new Set<string>()
   /**
    * What a tab showed as the user picked an earlier state to restore, by tab and state: the
@@ -328,7 +339,9 @@ class World {
    */
   readonly picked = new Map<string, string>()
   /** Canonical payloads the server answered for: the copies a client may delete. */
-  readonly acked = new Set<string>()
+  readonly acknowledgedCopies = new Set<string>()
+  readonly confirmedBases = new Map<string, string>()
+  readonly sentBases = new Map<string, string>()
   readonly lines: Array<string> = []
   /** The pages' clock: it moves on with every reading, so copies made in a run are ordered. */
   private clock = Date.now()
@@ -341,14 +354,19 @@ class World {
   /** A violation found where it can't be thrown (as IndexedDB completes). */
   pending: Violation | null = null
 
-  readonly api: Api
-  readonly port: number
+  api: Api
+  port: number
+  restart: () => Promise<void> = async () => undefined
+  readonly writerClock = new BigInt64Array(new SharedArrayBuffer(8))
+  readonly branchPositions = new Set<string>()
+  readonly copyHistory = new Map<string, Record<string, unknown>>()
   readonly db: DatabaseSync
 
   constructor(api: Api, port: number, db: DatabaseSync) {
     this.api = api
     this.port = port
     this.db = db
+    Atomics.store(this.writerClock, 0, BigInt(this.clock))
   }
 
   log(line: string) {
@@ -362,6 +380,7 @@ class World {
   /** Time passes: copies made before are stale now. */
   wait(ms: number) {
     this.clock += ms
+    Atomics.add(this.writerClock, 0, BigInt(ms))
   }
 
   /** A write another device makes, which the step waits for. */
@@ -371,13 +390,12 @@ class World {
 
   newToken() {
     const token = `#${this.token++}#`
-    this.live.add(token)
     return token
   }
 
   /** The user removed these from a field that showed them. */
   removed(before: string, after: string) {
-    for (const token of tokens(before)) if (!after.includes(token)) this.live.delete(token)
+    for (const text of this.live) if (before.includes(text) && !after.includes(text)) this.live.delete(text)
   }
 
   fail(message: string): never {
@@ -424,6 +442,35 @@ class World {
 
   checkRequest(request: Request) {
     const payload = request.payload as Record<string, unknown>
+    const payloads = request.keepalive
+      ? [...(payload.drafts as Array<unknown>), ...((payload.composers as Array<unknown>) ?? [])]
+      : [payload]
+    const fields = (
+      (request.store ?? request.page.editor) as unknown as {
+        fields: Map<string, { pending: { key: string; save: { payload: unknown } } | null }>
+      }
+    ).fields
+    for (const save of payloads) {
+      const operationId = (save as Record<string, unknown>).operationId
+      if (typeof operationId === "string") {
+        request.copyIds.push(operationId)
+        continue
+      }
+      const composer = request.page.composer as unknown as {
+        pending: { key: string; save: { payload: unknown } } | null
+        sending: { copy: { key: string; save: { payload: unknown } } | null } | null
+      }
+      const shown = [...fields.values()]
+        .flatMap((field) => (field.pending === null ? [] : [field.pending]))
+        .concat(
+          composer.pending === null ? [] : [composer.pending],
+          composer.sending?.copy == null ? [] : [composer.sending.copy]
+        )
+      const own = shown.find((copy) => canonical(copy.save.payload) === canonical(save))
+      const copy =
+        own ?? idb.values().find((copy) => canonical((copy.save as { payload: unknown }).payload) === canonical(save))
+      if (copy !== undefined) request.copyIds.push(copy.key)
+    }
     // I3: a save names the draft it was typed into.
     const fieldSaves =
       request.tag === "SaveEditorDraft"
@@ -432,7 +479,10 @@ class World {
           ? (payload.drafts as Array<Record<string, unknown>>)
           : []
     for (const save of fieldSaves) {
-      if (save.expectedRowVersion !== null && typeof save.draftId !== "string")
+      if (
+        save.expectedRowVersion !== null &&
+        (typeof save.draftId !== "string" || typeof save.expectedSession !== "number")
+      )
         this.fail(`I3: a field save names no draft: ${canonical(save)}`)
     }
     if (request.tag === "CommitEditorDrafts") {
@@ -452,7 +502,28 @@ class World {
     const payload = request.payload as Record<string, unknown>
     const recoveredBefore = this.recoveredCount()
     const draftsBefore = new Map(this.drafts().map((d) => [d.id, d]))
-    let outcome: Exit.Exit<unknown, unknown> | boolean
+    const composerSaves =
+      request.tag === "SaveComposer"
+        ? [payload]
+        : request.keepalive
+          ? ((payload.composers as Array<Record<string, unknown>>) ?? [])
+          : []
+    const duplicate =
+      composerSaves.length === 1 &&
+      this.all(
+        `SELECT 1 FROM composer_save_receipts WHERE chat_id = ? AND operation_id = ?`,
+        composerSaves[0]!.chatId as string,
+        composerSaves[0]!.operationId as string
+      ).length > 0
+    const state = () =>
+      canonical([
+        this.all(`SELECT * FROM drafts ORDER BY id`),
+        this.all(`SELECT * FROM draft_history ORDER BY draft_id, seq`),
+        this.all(`SELECT * FROM recovered_texts ORDER BY id`)
+      ])
+    const prior = duplicate ? state() : null
+    let keepaliveRecovered = 0
+    let outcome: Exit.Exit<unknown, unknown> | boolean | { readonly ok: boolean; readonly recovered: number }
     if (request.keepalive) {
       const response = await fetch(`http://127.0.0.1:${this.port}/library/drafts`, {
         method: "POST",
@@ -460,16 +531,55 @@ class World {
         body: JSON.stringify(payload)
       })
       outcome = response.ok
-      if (response.ok) {
-        for (const save of [...(payload.drafts as Array<unknown>), ...((payload.composers as Array<unknown>) ?? [])])
-          this.acked.add(canonical(save))
-      }
+      keepaliveRecovered = Number(response.headers.get("x-drafts-recovered") ?? 0)
+      if (response.ok && this.recoveredCount() > recoveredBefore && keepaliveRecovered === 0)
+        this.fail("I5: keepalive recovered text without reporting it")
     } else {
       outcome = await Effect.runPromiseExit((this.api as unknown as AnyApi)[request.tag]!(payload))
-      if (Exit.isSuccess(outcome) && (request.tag === "SaveComposer" || request.tag === "SaveEditorDraft"))
-        this.acked.add(canonical(payload))
     }
+    for (const save of composerSaves) {
+      if ((typeof outcome !== "boolean" && Exit.isFailure(outcome)) || outcome === false) continue
+      if (
+        this.all(
+          `SELECT 1 FROM composer_save_receipts WHERE chat_id = ? AND operation_id = ?`,
+          save.chatId as string,
+          save.operationId as string
+        ).length !== 1
+      )
+        this.fail("I4: an acknowledged composer operation has no durable receipt")
+    }
+    if (prior !== null && state() !== prior) this.fail("I4: a replay applied an acknowledged operation twice")
     const ok = typeof outcome === "boolean" ? outcome : Exit.isSuccess(outcome)
+    if (ok && !request.silent && request.page.alive) for (const key of request.copyIds) this.acknowledgedCopies.add(key)
+    if (
+      ok &&
+      !request.silent &&
+      request.page.alive &&
+      typeof outcome !== "boolean" &&
+      Exit.isSuccess(outcome) &&
+      (request.tag === "SaveEditorDraft" || request.tag === "SaveComposer")
+    ) {
+      const value = outcome.value as Record<string, unknown>
+      const draft = (request.tag === "SaveComposer" ? value.draft : value) as {
+        id: string
+        rowVersion: number
+        session: number
+        baseRevision: string | null
+        content: string
+      } | null
+      if (draft !== null && draft.content === payload.content) {
+        const kind = request.tag === "SaveComposer" ? "composer" : "editor"
+        const saved = this.copyBase(kind, {
+          draftId: draft.id,
+          rowVersion: draft.rowVersion,
+          session: draft.session,
+          expectedRowVersion: draft.rowVersion,
+          expectedSession: draft.session,
+          baseRevisionId: draft.baseRevision
+        })
+        for (const key of request.copyIds) this.confirmedBases.set(key, saved)
+      }
+    }
     if (ok && typeof outcome !== "boolean" && Exit.isSuccess(outcome) && request.tag.startsWith("Restore")) {
       const seen = this.picked.get(`${request.page.tab.id} ${payload.seq as number}`)
       if (seen !== undefined) this.removed(seen, (outcome.value as { content: string }).content)
@@ -486,10 +596,36 @@ class World {
       )
     }
     if (ok && typeof outcome !== "boolean" && Exit.isSuccess(outcome)) {
+      if (request.tag === "SendMessage" || request.tag === "Generate") {
+        const value = outcome.value as {
+          draft: { id: string; content: string; status: string; rowVersion: number; session: number } | null
+        }
+        const source = payload.composer as { draftId: string; session: number } | undefined
+        const after = value.draft
+        if (
+          !request.silent &&
+          request.page.alive &&
+          source !== undefined &&
+          after !== null &&
+          after.id === source.draftId &&
+          after.status === "committed" &&
+          after.session === source.session + 1
+        )
+          this.sentBases.set(
+            `${source.draftId}/${source.session}`,
+            this.copyBase("composer", { draftId: after.id, rowVersion: after.rowVersion, session: after.session })
+          )
+      }
+      if (request.tag === "OpenComposer") this.branchPositions.add((payload.tipSlotId as string | null) ?? "")
+      if (
+        (request.tag === "SendMessage" || request.tag === "Generate") &&
+        (outcome.value as { _tag: string })._tag === "Posted"
+      )
+        this.branchPositions.delete((payload.parentSlotId as string | null) ?? "")
       this.checkCommit(request, draftsBefore, outcome.value as Record<string, unknown>)
       this.checkRecovered(request, recoveredBefore, outcome.value as Record<string, unknown>)
     }
-    request.answer(outcome)
+    request.answer(request.keepalive ? { ok: outcome as boolean, recovered: keepaliveRecovered } : outcome)
   }
 
   /** I2: a commit ends only the draft it names, holding exactly the text it names. */
@@ -497,12 +633,25 @@ class World {
     const payload = request.payload as Record<string, unknown>
     const named = new Set<string>()
     if ((request.tag === "SendMessage" || request.tag === "Generate") && payload.composer !== undefined) {
-      const composer = payload.composer as { draftId: string; session: number; text: string }
+      const composer = payload.composer as { draftId: string; session: number }
+      const text =
+        request.tag === "Generate" ? ((payload.direction as string | undefined) ?? "") : (payload.content as string)
       named.add(composer.draftId)
       const was = before.get(composer.draftId)
       const now = this.drafts().find((d) => d.id === composer.draftId)
-      if (was !== undefined && now !== undefined && now.session !== was.session && was.content !== composer.text)
-        this.fail(`I2: a send of ${JSON.stringify(composer.text)} committed ${JSON.stringify(was.content)}`)
+      const destination =
+        value._tag === "Queued"
+          ? (value.queued as { kind: string; content: string; direction: string | null })
+          : (value.entry as { version: { content: string; direction: string | null } }).version
+      const stored = request.tag === "Generate" ? (destination.direction ?? "") : destination.content
+      if (stored !== text) this.fail(`I2: destination stored ${JSON.stringify(stored)} for ${JSON.stringify(text)}`)
+      if (
+        was !== undefined &&
+        now !== undefined &&
+        now.session !== was.session &&
+        (was.content !== text || was.session !== composer.session)
+      )
+        this.fail(`I2: a send of ${JSON.stringify(text)} committed ${JSON.stringify(was.content)}`)
     } else if (request.tag === "CommitEditorDrafts") {
       for (const { draftId } of payload.fields as Array<{ draftId: string }>) named.add(draftId)
       const shown = commitsShown.get(request)!
@@ -536,12 +685,14 @@ class World {
     const says =
       request.tag === "SaveComposer"
         ? value.recovered === true
-        : request.tag === "SendMessage" || request.tag === "Generate" || request.tag === "CommitEditorDrafts"
-          ? (value.recovered as number) > 0 || ((value.setAside as Array<unknown> | undefined)?.length ?? 0) > 0
-          : null
+        : ["SaveEditorDraft", "RestoreEditorDraft", "DiscardEditorDraft", "RestoreComposer"].includes(request.tag)
+          ? (value.recovered as number) > 0
+          : request.tag === "SendMessage" || request.tag === "Generate" || request.tag === "CommitEditorDrafts"
+            ? (value.recovered as number) > 0 || ((value.setAside as Array<unknown> | undefined)?.length ?? 0) > 0
+            : null
     if (says === false) this.fail(`I5: ${request.tag} sent text to the recovered texts without saying so`)
     if (says && !request.silent && request.page.alive) {
-      if (request.tag === "CommitEditorDrafts") expectEditorNotice.add(commitStores.get(request)!)
+      if (request.store !== null) expectEditorNotice.add(request.store)
       else expectComposerNotice.add(request.page)
     }
   }
@@ -554,7 +705,20 @@ class World {
     const history = this.all<{ draft: string; start: number; removed: string; inserted: string }>(
       `SELECT draft_id AS draft, start, removed, inserted FROM draft_history ORDER BY draft_id, seq DESC`
     )
-    for (const draft of this.all<{ id: string; content: string }>(`SELECT id, content FROM drafts`)) {
+    const branchPositions = [...this.branchPositions]
+    const shownDrafts = this.tabs.flatMap(({ page }) => {
+      const base = (page.composer as unknown as { base: { id: string } | null }).base
+      return base === null ? [] : [base.id]
+    })
+    for (const draft of this.all<{ id: string; content: string }>(
+      `SELECT d.id, d.content FROM drafts d WHERE
+      (d.target_kind = 'composer' AND EXISTS (SELECT 1 FROM chats c WHERE c.id = d.target_id) AND
+        (d.id IN (SELECT value FROM json_each(?)) OR d.field IN (SELECT value FROM json_each(?)) OR d.field = coalesce((SELECT active_leaf_slot_id FROM chats WHERE id = d.target_id), '') OR
+          EXISTS (SELECT 1 FROM slots s WHERE s.id = d.field AND NOT EXISTS (SELECT 1 FROM slots child WHERE child.parent_slot_id = s.id AND child.deleted_at IS NULL)))) OR
+      (d.target_kind = 'entity_field' AND EXISTS (SELECT 1 FROM entity_refs f WHERE f.id = d.target_id))`,
+      JSON.stringify(shownDrafts),
+      JSON.stringify(branchPositions)
+    )) {
       let text = draft.content
       texts.push(text)
       for (const entry of history.filter((h) => h.draft === draft.id)) {
@@ -570,7 +734,16 @@ class World {
       `SELECT content AS c, direction AS d FROM queued_messages`
     ))
       texts.push(row.c, row.d ?? "")
-    for (const row of this.all<{ d: string }>(`SELECT doc_json AS d FROM entity_revisions`)) texts.push(row.d)
+    const strings = (value: unknown): Array<string> =>
+      typeof value === "string"
+        ? [value]
+        : value !== null && typeof value === "object"
+          ? Object.values(value).flatMap(strings)
+          : []
+    for (const row of this.all<{ d: string }>(
+      `SELECT doc_json AS d FROM entity_revisions r WHERE EXISTS (SELECT 1 FROM entity_refs f WHERE f.entity_id = r.entity_id)`
+    ))
+      texts.push(...strings(JSON.parse(row.d)))
     return texts
   }
 
@@ -610,8 +783,10 @@ class World {
       ...this.serverTexts(),
       ...this.shownTexts(),
       ...(withCopies ? idb.values().map((copy) => String(copy.content)) : [])
-    ].join("\u0000")
-    const missing = [...this.live].filter((token) => !haystack.includes(token))
+    ]
+    const missing = [...this.live].filter(
+      (text) => !haystack.some((reachable) => reachable === text || reachable.includes(text))
+    )
     if (missing.length > 0) this.fail(`I1: typed text is nowhere: ${missing.join(" ")}`)
     // A page shows what came back once it has heard everything it asked.
     for (const page of expectComposerNotice) {
@@ -628,20 +803,72 @@ class World {
     expectEditorNotice.clear()
   }
 
+  /** The complete base of the text, apart from its target (checked by ancestry). */
+  private copyBase(kind: string, payload: Record<string, unknown>) {
+    return canonical(
+      kind === "editor"
+        ? {
+            draftId: payload.draftId,
+            rowVersion: payload.expectedRowVersion,
+            session: payload.expectedSession,
+            revision: payload.baseRevisionId
+          }
+        : { draftId: payload.draftId, rowVersion: payload.rowVersion, session: payload.session }
+    )
+  }
+
   /** I4: a copy goes only once acknowledged, or replaced by a newer copy of the same draft typed from it. */
   completed({ put, deleted }: Completed) {
+    for (const copy of put) {
+      const save = copy.save as { kind: string; payload: Record<string, unknown> }
+      const base = this.copyBase(save.kind, save.payload)
+      const parents = [...this.copyHistory.values(), ...idb.values()].filter(
+        (parent) =>
+          (copy.ancestors as ReadonlyArray<string>).includes(parent.key as string) &&
+          parent.refId === copy.refId &&
+          parent.field === copy.field
+      )
+      if (
+        parents.length > 0 &&
+        !parents.some((parent) => {
+          const before = parent.save as { kind: string; payload: Record<string, unknown> }
+          return (
+            before.kind === save.kind &&
+            (this.copyBase(before.kind, before.payload) === base ||
+              this.confirmedBases.get(parent.key as string) === base ||
+              (before.kind === "composer" &&
+                before.payload.next === true &&
+                this.sentBases.get(`${before.payload.draftId as string}/${before.payload.session as number}`) === base))
+          )
+        })
+      )
+        this.fail(
+          `I3: a copy's base changed without acknowledging an ancestor's exact text: ${canonical(save.payload)}`
+        )
+      this.copyHistory.set(copy.key, copy)
+    }
     for (const copy of deleted) {
-      const save = copy.save as { kind: string; payload: Record<string, unknown> } | undefined
-      if (save !== undefined && this.acked.has(canonical(save.payload))) continue
-      // The same draft: a composer's copies are filed under its id, a field's under the
-      // field (whose draft may have changed: moved to a variant, a new one started).
-      const same = (other: Record<string, unknown>) =>
-        other.key !== copy.key &&
-        other.refId === copy.refId &&
-        other.field === copy.field &&
-        String(other.key) > String(copy.key)
-      if (put.some(same) || idb.values().some(same)) continue
-      this.fail(`I4: a copy was deleted unacknowledged: ${JSON.stringify(copy.content)}`)
+      const save = copy.save as { kind: string; payload: Record<string, unknown> }
+      if (this.acknowledgedCopies.has(copy.key)) continue
+      const descendant = [...this.copyHistory.values(), ...idb.values()].some((other) => {
+        const ancestry = other.ancestors as ReadonlyArray<string>
+        const pending = other.save as { kind: string; payload: Record<string, unknown> }
+        return (
+          ancestry.includes(copy.key) &&
+          other.refId === copy.refId &&
+          other.field === copy.field &&
+          pending.kind === save.kind &&
+          (this.acknowledgedCopies.has(other.key as string) || idb.values().some((value) => value.key === other.key))
+        )
+      })
+      if (!descendant) {
+        this.log(
+          `copy deletion ${canonical(copy)}; successors ${canonical([...this.copyHistory.values()].filter((other) => (other.ancestors as ReadonlyArray<string>).includes(copy.key)).map((other) => ({ key: other.key, refId: other.refId, field: other.field, kept: idb.values().some((value) => value.key === other.key), acknowledged: this.acknowledgedCopies.has(other.key as string) })))}`
+        )
+        this.fail(
+          `I4: a copy was deleted without an acknowledged or retained descendant: ${JSON.stringify(copy.content)}`
+        )
+      }
     }
   }
 }
@@ -679,6 +906,7 @@ const OPS: ReadonlyArray<Op> = [
       if (!ready) return null
       const after = edit(w, text)
       w.removed(text, after)
+      if (after !== "") w.live.add(after)
       page.composer.type(after)
       return JSON.stringify(after)
     }
@@ -692,6 +920,7 @@ const OPS: ReadonlyArray<Op> = [
       const text = page.editor.text(path)
       const after = edit(w, text)
       w.removed(text, after)
+      if (after !== "") w.live.add(after)
       page.editor.setText(path, after)
       return `${path.join(".")} ${JSON.stringify(after)}`
     }
@@ -718,7 +947,7 @@ const OPS: ReadonlyArray<Op> = [
       void page.composer.submit(async (from) => {
         // The view went to another branch since: Composer.tsx doesn't send.
         if (from.tip !== page.tip) return { sent: false }
-        const composer = { draftId: from.draftId, session: from.session, text: from.text }
+        const composer = { draftId: from.draftId, session: from.session }
         const branch = from.tip !== w.leaf()
         const result = generate
           ? await page.call((c: never) =>
@@ -1002,6 +1231,30 @@ const OPS: ReadonlyArray<Op> = [
     }
   },
   {
+    name: "purge a chat with a queued direction",
+    weight: 1,
+    run: (w) => {
+      w.background.push(purgeQueue(w, false))
+      return null
+    }
+  },
+  {
+    name: "purge a branch with a queued direction",
+    weight: 1,
+    run: (w) => {
+      w.background.push(purgeQueue(w, true))
+      return null
+    }
+  },
+  {
+    name: "the server restarts",
+    weight: 1,
+    run: (w) => {
+      w.background.push(w.restart())
+      return null
+    }
+  },
+  {
     name: "half a minute passes",
     weight: 1,
     run: (w) => {
@@ -1054,10 +1307,20 @@ const runSteps = async (w: World, steps: ReadonlyArray<Step>) => {
     let roll = w.rng() * total
     const op = OPS.find((candidate) => (roll -= candidate.weight) < 0)!
     const leafBefore = w.leaf()
+    const slotsBefore = new Set(
+      w.all<{ id: string }>(`SELECT id FROM slots WHERE chat_id = ?`, w.chatId).map((slot) => slot.id)
+    )
     w.log(`${step.index}: tab ${tab.id} ${op.name}`)
     const detail = op.run(w, tab)
     if (detail !== null) w.lines[w.lines.length - 1] += `: ${detail}`
     await settle(w)
+    if (w.leaf() !== leafBefore) {
+      // Bin relocation and branch changes offer both endpoints in the UI.
+      // Actual appends remove their old endpoint again just below.
+      w.branchPositions.add(leafBefore ?? "")
+      w.branchPositions.add(w.leaf() ?? "")
+    }
+    for (const slot of w.liveSlots()) if (!slotsBefore.has(slot.id)) w.branchPositions.delete(slot.parent ?? "")
     follow(w, leafBefore)
     await settle(w)
     if (process.env.DRAFT_MODEL_DEBUG !== undefined) w.dump()
@@ -1122,18 +1385,41 @@ const drain = async (w: World) => {
 }
 
 /** One run of `steps` on a fresh server; the lines it logged, and the violation if any. */
-const runOnce = (steps: ReadonlyArray<Step>) =>
+const runOnce = (steps: ReadonlyArray<Step>, directed?: (w: World) => Promise<void>) =>
   Effect.gen(function* () {
     gates.clear()
     idb.clear()
     expectComposerNotice.clear()
     expectEditorNotice.clear()
     const config = testConfig()
+    let serverScope = yield* Scope.make()
+    const clock = new SharedArrayBuffer(8)
+    Atomics.store(new BigInt64Array(clock), 0, BigInt(Date.now()))
+    const start = Effect.gen(function* () {
+      const context = yield* Layer.buildWithScope(
+        serverLayer(config, gated).pipe(Layer.provide(Layer.succeed(DraftClock)(clock))),
+        serverScope
+      )
+      return yield* Effect.gen(function* () {
+        return { api: yield* client(), port: yield* serverPort }
+      }).pipe(Effect.provide(context), Scope.provide(serverScope))
+    })
+    yield* Effect.addFinalizer(() => Scope.close(serverScope, Exit.void))
+    const { api, port } = yield* start
     return yield* Effect.gen(function* () {
-      const api = yield* client()
-      const port = yield* serverPort
       const db = new DatabaseSync(databaseFile(config.dataDir), { readOnly: true })
       const w = new World(api, port, db)
+      Object.defineProperty(w, "writerClock", { value: new BigInt64Array(clock) })
+      w.restart = () =>
+        Effect.runPromise(
+          Effect.gen(function* () {
+            yield* Scope.close(serverScope, Exit.void)
+            serverScope = yield* Scope.make()
+            const next = yield* start
+            w.api = next.api
+            w.port = next.port
+          })
+        )
       idb.onComplete = (completed) => {
         try {
           w.completed(completed)
@@ -1158,6 +1444,7 @@ const runOnce = (steps: ReadonlyArray<Step>) =>
       const result = yield* Effect.promise(async () => {
         try {
           await settle(w)
+          if (directed !== undefined) await directed(w)
           await runSteps(w, steps)
           await drain(w)
           if (w.pending !== null) throw w.pending
@@ -1173,8 +1460,8 @@ const runOnce = (steps: ReadonlyArray<Step>) =>
         }
       })
       return { lines: w.lines, violation: result }
-    }).pipe(Effect.scoped, Effect.provide(serverLayer(config, gated)))
-  })
+    })
+  }).pipe(Effect.scoped)
 
 const stepsOf = (seed: number, count: number): ReadonlyArray<Step> =>
   Array.from({ length: count }, (_, index) => ({ index, seed: seed * 100_003 + index }))
@@ -1203,6 +1490,313 @@ const shrink = (steps: ReadonlyArray<Step>, budget = 40) =>
     }
     return last
   })
+
+/** Directed operations complement sampling: each has an oracle check, so a short run
+ * still exercises sessions, full whitespace, receipts across restart, movement, queue
+ * cleanup, keepalive, and the writer's history-retention clock. */
+const request = async (w: World, tag: string, payload: unknown, store: EditorStore | null = null) => {
+  const page = w.tabs[0]!.page
+  const result =
+    store === null
+      ? page.call((c: never) => (c as (tag: string, p: unknown) => unknown)(tag, payload))
+      : page.callEditor((c: never) => (c as (tag: string, p: unknown) => unknown)(tag, payload), store)
+  await settle(w)
+  const answered = await result
+  if (!answered.ok) throw new Violation(`directed ${tag} failed: ${answered.error.message}`)
+  return answered.value
+}
+
+const purgeQueue = async (w: World, branch: boolean) => {
+  const chat = await Effect.runPromise(w.api.CreateChat({ title: "Queue purge" }))
+  const parent = await Effect.runPromise(w.api.Generate({ chatId: chat.id, parentSlotId: null, branch: false }))
+  if (parent._tag !== "Posted") throw new Violation("directed parent did not post")
+  const text = `  queued direction ${w.newToken()}\n\n`
+  w.live.add(text)
+  await Effect.runPromise(
+    w.api.Generate({ chatId: chat.id, parentSlotId: parent.entry.slotId, branch: false, direction: text })
+  )
+  const item = await Effect.runPromise(
+    branch ? w.api.DeleteBranch({ slotId: parent.entry.slotId }) : w.api.DeleteChat({ chatId: chat.id })
+  )
+  await Effect.runPromise(w.api.PurgeBinItem({ itemId: item.id }))
+  w.check(true)
+}
+
+const DIRECTED: ReadonlyArray<{ name: string; run: (w: World) => Promise<void> }> = [
+  {
+    name: "an older save cannot rebase text typed after Send cleared the box",
+    run: async (w) => {
+      const page = w.tabs[0]!.page
+      const first = `First ${w.newToken()}`
+      page.composer.type(first)
+      w.live.add(first)
+      const saving = page.composer.flush()
+      for (let tries = 0; tries < 100 && w.net.ready.length === 0; tries++)
+        await new Promise((resolve) => setImmediate(resolve))
+      const oldSave = w.net.ready.shift()!
+      if (oldSave?.tag !== "SaveComposer") w.fail("directed old save was not captured")
+      page.composer.type(`${first} plus`)
+      w.live.add(`${first} plus`)
+      const sending = page.composer.submit(async (from) => {
+        const result = await page.call((c: never) =>
+          (c as (tag: string, payload: unknown) => unknown)("SendMessage", {
+            chatId: w.chatId,
+            parentSlotId: from.tip,
+            branch: false,
+            content: from.text,
+            composer: { draftId: from.draftId, session: from.session }
+          })
+        )
+        if (!result.ok) return { sent: false }
+        const value = result.value as { _tag: string; entry: { slotId: SlotId }; draft: never; recovered: number }
+        if (value._tag !== "Posted") w.fail("directed send did not post")
+        page.go(value.entry.slotId, true, false)
+        return { sent: true, draft: value.draft, recovered: value.recovered }
+      })
+      const next = `Next ${w.newToken()}`
+      page.composer.type(next)
+      w.live.add(next)
+      w.net.ready.push(oldSave)
+      await settle(w)
+      await saving
+      await sending
+      const keeping = page.composer.flush()
+      await settle(w)
+      await keeping
+      w.check(false)
+    }
+  },
+  {
+    name: "copy replacements survive overlapping completion callbacks",
+    run: async (w) => {
+      const opened = await Effect.runPromise(w.api.OpenEditor({ refId: w.noteRef }))
+      const payload = {
+        refId: w.noteRef,
+        field: textField(FIELDS[0]),
+        draftId: null,
+        expectedRowVersion: null,
+        expectedSession: null,
+        baseRevisionId: opened.ref.headRevisionId,
+        content: "first"
+      }
+      const first = makeCopy(USER, w.noteRef, payload.field, { kind: "editor", payload }, w.now())
+      const second = makeCopy(
+        USER,
+        w.noteRef,
+        payload.field,
+        { kind: "editor", payload: { ...payload, content: "second" } },
+        w.now(),
+        [first]
+      )
+      const third = makeCopy(
+        USER,
+        w.noteRef,
+        payload.field,
+        { kind: "editor", payload: { ...payload, content: "third" } },
+        w.now(),
+        [second]
+      )
+      await keepCopy(first)
+      await Promise.all([keepCopy(second, first), keepCopy(third, second)])
+      await request(w, "SaveEditorDraft", third.save.payload, w.tabs[0]!.page.editor)
+      await dropCopy(third)
+      w.check(true)
+      const orphan = makeCopy(
+        USER,
+        w.noteRef,
+        payload.field,
+        { kind: "editor", payload: { ...payload, content: "orphan" } },
+        w.now()
+      )
+      const unrelated = makeCopy(
+        USER,
+        w.noteRef,
+        textField(FIELDS[1]),
+        { kind: "editor", payload: { ...payload, field: textField(FIELDS[1]) } },
+        w.now(),
+        [orphan]
+      )
+      assert.throws(
+        () =>
+          w.completed({
+            put: [unrelated as unknown as Record<string, unknown> & { key: string }],
+            deleted: [orphan as unknown as Record<string, unknown> & { key: string }]
+          }),
+        "I4:"
+      )
+    }
+  },
+  {
+    name: "an acknowledged successor remains proof after its copy is removed",
+    run: async (w) => {
+      const opened = await Effect.runPromise(w.api.OpenEditor({ refId: w.noteRef }))
+      const payload = {
+        refId: w.noteRef,
+        field: textField(FIELDS[0]),
+        draftId: null,
+        expectedRowVersion: null,
+        expectedSession: null,
+        baseRevisionId: opened.ref.headRevisionId,
+        content: "unacknowledged predecessor"
+      }
+      const before = makeCopy(USER, w.noteRef, payload.field, { kind: "editor", payload }, w.now())
+      const successor = makeCopy(
+        USER,
+        w.noteRef,
+        payload.field,
+        { kind: "editor", payload: { ...payload, content: "unacknowledged predecessor plus live changes" } },
+        w.now(),
+        [before]
+      )
+      await keepCopy(before)
+      await keepCopy(successor)
+      await request(w, "SaveEditorDraft", successor.save.payload, w.tabs[0]!.page.editor)
+      await dropCopy(successor)
+      await dropCopy(before)
+      w.check(true)
+    }
+  },
+  {
+    name: "exact whitespace through keepalive and reload",
+    run: async (w) => {
+      const tab = w.tabs[0]!
+      const text = `  full text ${w.newToken()}\n\n`
+      w.live.add(text)
+      tab.page.composer.type(text)
+      tab.page.composer.beacon()
+      await settle(w)
+      const old = tab.page
+      old.alive = false
+      tab.page = new Page(w, tab, old.ref, old.tip, old.follows)
+      await settle(w)
+      w.check(false)
+    }
+  },
+  {
+    name: "commit session and stored destination",
+    run: async (w) => {
+      const leaf = w.leaf()
+      const draft = await Effect.runPromise(w.api.OpenComposer({ chatId: w.chatId, tipSlotId: leaf }))
+      const text = "identical across sessions"
+      await request(w, "SaveComposer", {
+        chatId: w.chatId,
+        draftId: draft.id,
+        rowVersion: draft.rowVersion,
+        session: draft.session,
+        next: false,
+        operationId: crypto.randomUUID(),
+        content: text
+      })
+      const posted = (await request(w, "SendMessage", {
+        chatId: w.chatId,
+        parentSlotId: leaf,
+        branch: false,
+        content: text,
+        composer: { draftId: draft.id, session: draft.session }
+      })) as { entry: { slotId: SlotId } }
+      const next = await Effect.runPromise(w.api.OpenComposer({ chatId: w.chatId, tipSlotId: posted.entry.slotId }))
+      await request(w, "SaveComposer", {
+        chatId: w.chatId,
+        draftId: next.id,
+        rowVersion: next.rowVersion,
+        session: next.session,
+        next: false,
+        operationId: crypto.randomUUID(),
+        content: text
+      })
+      await request(w, "SendMessage", {
+        chatId: w.chatId,
+        parentSlotId: leaf,
+        branch: true,
+        content: text,
+        composer: { draftId: draft.id, session: draft.session }
+      })
+    }
+  },
+  {
+    name: "receipts replay exactly once across server restart",
+    run: async (w) => {
+      const draft = await Effect.runPromise(w.api.OpenComposer({ chatId: w.chatId, tipSlotId: w.leaf() }))
+      const payload = {
+        chatId: w.chatId,
+        draftId: draft.id,
+        rowVersion: draft.rowVersion,
+        session: draft.session,
+        next: true,
+        operationId: "directed-restart",
+        content: "saved once"
+      }
+      await request(w, "SaveComposer", payload)
+      await request(w, "SendMessage", {
+        chatId: w.chatId,
+        parentSlotId: w.leaf(),
+        branch: false,
+        content: payload.content,
+        composer: { draftId: draft.id, session: draft.session }
+      })
+      await w.restart()
+      await request(w, "SaveComposer", payload)
+    }
+  },
+  {
+    name: "background append keeps full text reachable at the leaf",
+    run: async (w) => {
+      const draft = await Effect.runPromise(w.api.OpenComposer({ chatId: w.chatId, tipSlotId: w.leaf() }))
+      const text = "  unfinished paragraph\n"
+      w.live.add(text)
+      await request(w, "SaveComposer", {
+        chatId: w.chatId,
+        draftId: draft.id,
+        rowVersion: draft.rowVersion,
+        session: draft.session,
+        next: false,
+        operationId: crypto.randomUUID(),
+        content: text
+      })
+      const before = w.leaf()
+      await request(w, "SendMessage", { chatId: w.chatId, parentSlotId: before, branch: false, content: "background" })
+      follow(w, before)
+      await settle(w)
+      w.check(false)
+    }
+  },
+  { name: "chat purge recovers queued directions", run: (w) => purgeQueue(w, false) },
+  { name: "branch purge recovers queued directions", run: (w) => purgeQueue(w, true) },
+  {
+    name: "history retention reports recovery with the writer clock advanced",
+    run: async (w) => {
+      const draft = await Effect.runPromise(w.api.OpenComposer({ chatId: w.chatId, tipSlotId: w.leaf() }))
+      for (let index = 0; index < 1003; index++) {
+        w.wait(61_000)
+        await request(w, "SaveComposer", {
+          chatId: w.chatId,
+          draftId: draft.id,
+          rowVersion: draft.rowVersion,
+          session: draft.session,
+          next: false,
+          operationId: crypto.randomUUID(),
+          content: `retained ${index}`
+        })
+      }
+      if (w.recoveredCount() === 0) w.fail("I5: directed retention never recovered an earlier state")
+    }
+  }
+]
+
+for (const scenario of DIRECTED) {
+  it.live(
+    `directed draft protocol: ${scenario.name}`,
+    () =>
+      Effect.gen(function* () {
+        const run = yield* runOnce([], async (w) => {
+          w.net.reliable = true
+          await scenario.run(w)
+        })
+        if (run.violation !== null) assert.fail(`${run.violation.message}\n${run.lines.join("\n")}`)
+      }),
+    { timeout: 120_000 }
+  )
+}
 
 const seeds = ONLY !== undefined ? [Number(ONLY)] : Array.from({ length: SEEDS }, (_, i) => i + 1)
 
