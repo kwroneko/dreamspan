@@ -12,7 +12,9 @@ export const perf = {
   /** Renders of message bodies, of message rows, and of the list itself. */
   bodyRenders: 0,
   rowRenders: 0,
-  listRenders: 0
+  listRenders: 0,
+  /** The open chat's window: what the harness reports when a scenario gets stuck. */
+  window: { loaded: 0, first: "", older: false, newer: false, paging: false, loading: false, error: "" }
 }
 
 declare global {

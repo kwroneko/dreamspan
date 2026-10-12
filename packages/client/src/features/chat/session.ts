@@ -107,7 +107,21 @@ export class ChatSession {
 
   private update(change: Partial<ChatView>) {
     this.view = { ...this.view, ...change }
+    this.report()
     for (const listener of this.listeners) listener()
+  }
+
+  private report() {
+    const { entries, older, newer, loading, error } = this.view
+    perf.window = {
+      loaded: entries.length,
+      first: entries[0]?.slotId ?? "",
+      older: older !== null,
+      newer: newer !== null,
+      paging: this.paging,
+      loading,
+      error: error ?? ""
+    }
   }
 
   // --- The server
@@ -201,9 +215,11 @@ export class ChatSession {
     const from = this.view.older
     if (from === null || this.paging || this.view.loading) return
     this.paging = true
+    this.report()
     const generation = this.generation
     const window = await this.read({ _tag: "Older", from })
     this.paging = false
+    this.report()
     if (window === null || this.disposed || generation !== this.generation || this.view.older !== from) return
     let entries = [...window.entries, ...this.view.entries]
     let newer = this.view.newer
@@ -219,9 +235,11 @@ export class ChatSession {
     const after = this.view.newer
     if (after === null || this.paging || this.view.loading) return
     this.paging = true
+    this.report()
     const generation = this.generation
     const window = await this.read({ _tag: "Newer", after })
     this.paging = false
+    this.report()
     if (window === null || this.disposed || generation !== this.generation || this.view.newer !== after) return
     let entries = [...this.view.entries, ...window.entries]
     let older = this.view.older

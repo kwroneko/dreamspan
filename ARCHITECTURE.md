@@ -1008,4 +1008,21 @@ The chat RPCs, live updates and generation. Contract in `@rp/shared/chatApi.ts` 
 - **Not built yet:** composer drafts on the server (§3.10), a branch switcher at branch points, undo from the bin, speakers and participants.
 - `e2e/chat.spec.ts` covers streaming, versions, stopping, editing, links, branches, deleting, another user, and the screens at phone and desktop width in both themes.
 
+**The performance harness** (`packages/client/perf/`, `npm run test:perf`; CLIENT-FRAMEWORK §7). The built client and the real server with bundled workers and the fake generator at 300 tokens a second per stream, on Chromium through Playwright, one worker.
+- **Fixtures** (`fixtures.ts`): synthetic chats of 100,000 messages (every 50th reply with four versions, one failed; an HTML message every 997; a three-message side branch every 5,000) and two of 300. The server migrates a fresh data directory and creates the chats; the messages are then written straight into the file in one transaction (seconds, where 100,000 RPCs would take minutes), cached per fixture version in the system temp directory and copied for each run.
+- **Scenarios:** open at the bottom and 70,000 messages up; scroll the full length to the root, prepending 1,650 pages of older history; six streams, measuring renders, typing in the composer, drift while scrolled up and prepending while they run; swiping through versions; switching chats mid-stream and back.
+- **Measured:** long animation frames, frame intervals, Event Timing input durations, the scroll position of the first loaded message as older history lands above it (must stay put to the pixel), the JS heap after garbage collection before and after the full scroll, message-body and row renders per streamed update (`features/chat/perf.ts` counts them in every build), delta gaps, and the server's event-loop p99 from `Health`.
+- **Budgets** (`budgets.ts`) fail the run. They're set from runs on this shared 48-core host at load averages of 30 to 90, with headroom for that load. One run at load 33 (2026-10-12):
+
+| Scenario | Measured | Budget |
+|---|---|---|
+| Open at the bottom / at a deep message | 0.9 s / 0.8 s (3.7 s / 6.1 s at load 58) | 8 s each |
+| Full scroll, 1,644 older pages | anchoring error 0 px; heap 7.6 → 12.5 MB; frame p95 33 ms | 2 px; growth 40 MB, total 150 MB |
+| Six streams | frame p95 16.7 ms; 0 frames over 100 ms; input p95 32 ms (88 to 112 at load 40 to 70); drift and prepend error 0 px; body renders per update 0.5 (only visible streams render), rows re-rendered 0; gaps 0; server loop p99 34 ms | p95 50 ms; 3 frames; 250 ms; 2 px; 1; 0; 0; 50 ms |
+| Swipe through versions | input p95 72 ms (200 at load 49) | 250 ms |
+| Switch chats mid-stream | away 0.4 s, back 0.25 s; the stream kept growing, no gaps | 8 s |
+
+- **What it found:** a list that stopped following a growing reply (the end now spans 48 px), paging that read older history on every open, and its own measurement races (a reference row prepended a moment before it was read).
+- **Not covered yet:** WebKit, CPU throttling for phone-class devices, real phones (CLIENT-FRAMEWORK §7), and CI: the full run takes about four minutes plus the build.
+
 **Open decisions this leaves open:** sending into a chat that's still generating (DESIGN §2.2, [O]): the server allows it, and the client disables Send while the chat's own leaf is generating. "Start over" with a card (DESIGN §2.1, [O]) isn't built.
