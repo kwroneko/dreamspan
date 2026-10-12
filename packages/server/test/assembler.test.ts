@@ -375,24 +375,54 @@ describe("the context assembler", () => {
     expect(on.issues).toEqual([expect.objectContaining({ kind: "regex_skipped" })])
     expect(on.issues[0]!.message).toContain("backreference")
 
-    // Time is bounded per context: V8 stops a pattern that would take seconds.
-    const withScript = (content: string, fields: Record<string, unknown>) =>
+    // Time is bounded per context: V8 stops a pattern that would take seconds, which would
+    // have emptied the newest reply; it's sent as written.
+    const scripted = (messages: ReadonlyArray<FixtureMessage>, scripts: ReadonlyArray<object>, context = 20_000) =>
       assembled({
         ...fixture,
-        messages: [{ side: "assistant", content }, ...fixture.messages],
-        preset: { ...preset({ extensions: { regex_scripts: [regexScript("heavy", fields)] } }), regex_approved: true }
+        messages,
+        preset: {
+          ...preset({ openai_max_context: context, extensions: { regex_scripts: scripts } }),
+          regex_approved: true
+        }
       })
     const nested = `${"(".repeat(300)}a*${")*".repeat(300)}`
-    const slow = await withScript("a".repeat(43_000), { findRegex: `/${nested}/g` })
+    const slow = await scripted(
+      [...fixture.messages, { side: "assistant", content: "a".repeat(43_000) }],
+      [regexScript("heavy", { findRegex: `/${nested}/g` })]
+    )
     expect(slow.issues.map((i) => i.message)).toContain(
       "The regex scripts ran out of time (200 ms for one context): the rest of the messages are sent without them."
     )
-    // And so is the text they make: the script stops, the context doesn't.
-    const growing = await withScript("q".repeat(3_000), { findRegex: "/q/g", replaceString: "b".repeat(200_000) })
+    expect(contents(slow).at(-1)).toBe(`assistant: ${"a".repeat(43_000)}`)
+    // Another turn could leave them the time they lacked: what it didn't cover isn't cached as stable.
+    expect(slow.request.breakpoints.map((b) => b.reason)).not.toContain("history")
+
+    // And so is the text they make, replaced or copied: the script stops, the context doesn't.
+    const growing = await scripted(
+      [{ side: "assistant", content: "q".repeat(3_000) }, ...fixture.messages],
+      [regexScript("heavy", { findRegex: "/q/g", replaceString: "b".repeat(200_000) })]
+    )
+    const tooMuch = 'The regex script "copy 16" was skipped where it failed: it made more text than one context allows.'
     expect(growing.issues.map((i) => i.message)).toContain(
-      'The regex script "heavy" was skipped where it failed: its replacements made more text than one context allows.'
+      'The regex script "heavy" was skipped where it failed: it made more text than one context allows.'
     )
     expect(contents(growing)).toContain(`assistant: ${"q".repeat(3_000)}`)
+    // Seventeen scripts that each copy a 500,000-character reply make 8,500,000 characters.
+    const copies = Array.from({ length: 17 }, (_, i) => regexScript(`copy ${i}`, { findRegex: "/^/g" }))
+    const copied = await scripted(
+      [
+        { side: "assistant", content: "Old." },
+        { side: "user", content: "Go on." },
+        { side: "assistant", content: "q".repeat(500_000) },
+        { side: "user", content: "Last." }
+      ],
+      copies,
+      200_000
+    )
+    expect(copied.issues.map((i) => i.message)).toContain(tooMuch)
+    // What ran out depends on the messages after: the ones it skipped aren't cached as stable.
+    expect(copied.request.breakpoints.map((b) => b.reason)).not.toContain("history")
   })
 
   it("expands a card's prompt override before the preset, and fills its {{original}}", async () => {

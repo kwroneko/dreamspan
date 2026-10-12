@@ -607,8 +607,8 @@ const chatLine = (
 
 /** One context's time for the preset's regex scripts: V8 stops them once it's spent. */
 const REGEX_MS = 200
-/** Characters of replacement text the scripts may make for one context. */
-const REGEX_OUTPUT = 2_000_000
+/** Characters of text the scripts may make for one context, copied or replaced. */
+const REGEX_OUTPUT = 8_000_000
 /** Patterns longer than this, after the case rewrite, are left out. */
 const MAX_PATTERN = 2_000
 /** Scripts after this many are left out. */

@@ -115,7 +115,7 @@ const withinDepth = (script: RegexScript, depth: number) =>
 class OutputLimit extends Error {}
 
 /**
- * ST's runRegexScript, its replacement already expanded, each replacement charged to `output`.
+ * ST's runRegexScript, its replacement already expanded, the text it makes charged to `output`.
  * It loops over `exec` because V8's `replace` can hang where no timeout reaches (§13).
  */
 export const run = (
@@ -134,21 +134,30 @@ export const run = (
       if (typeof value !== "string" || !value) return ""
       return trimStrings.reduce((s, trim) => s.replaceAll(trim, ""), value)
     })
-    output.left -= made.length
-    if (output.left < 0) throw new OutputLimit()
     return made
+  }
+  const charge = (length: number) => {
+    output.left -= length
+    if (output.left < 0) throw new OutputLimit()
   }
   regex.lastIndex = 0
   let result = ""
   let copied = 0
+  let matched = false
   for (;;) {
     const match = regex.exec(text)
     if (match === null) break
-    result += text.slice(copied, match.index) + replace(match)
+    matched = true
+    const made = replace(match)
+    charge(match.index - copied + made.length)
+    result += text.slice(copied, match.index) + made
     copied = match.index + match[0].length
     if (!regex.global) break
     if (match[0] === "") regex.lastIndex++
   }
+  // Without a match the text is returned as it is, and nothing is made.
+  if (!matched) return text
+  charge(text.length - copied)
   return result + text.slice(copied)
 }
 
@@ -156,8 +165,8 @@ export const run = (
 const JOB = new Script("job()")
 
 /**
- * A preset's scripts for one context, with the time (`ms`) and replacement text (`output`)
- * they may still spend; each batch runs as a vm script whose timeout V8 enforces.
+ * A preset's scripts for one context, with the time (`ms`) and the text (`output`) they may
+ * still spend; each batch runs as a vm script whose timeout V8 enforces.
  */
 export const makeScriptRunner = (list: ReadonlyArray<PromptScript>, limits: { ms: number; output: number }) => {
   const context = createContext({ job: undefined })
@@ -170,12 +179,15 @@ export const makeScriptRunner = (list: ReadonlyArray<PromptScript>, limits: { ms
       return ms <= 0
     },
     /**
-     * Each message's text after the scripts, and whether a depth-bounded script makes it
-     * change as the chat grows: one that applies now and stops at a later depth, or one
-     * that doesn't apply yet and matches. Messages the time didn't cover keep their text.
+     * Each message's text after the scripts, and whether it can change as the chat grows: a
+     * depth-bounded script applies now and stops at a later depth, or doesn't apply yet and
+     * matches, or a script was skipped for it (out of time or output, which the messages
+     * read before it spent). Messages the time didn't cover keep their text.
      */
     apply: (items: ReadonlyArray<{ readonly text: string; readonly placement: number; readonly depth: number }>) => {
-      const results = items.map((item) => ({ text: item.text, volatile: false }))
+      const applies = (item: (typeof items)[number]) =>
+        list.some(({ script }) => !script.disabled && script.prompt_only && script.placement.includes(item.placement))
+      const results = items.map((item) => ({ text: item.text, volatile: applies(item) }))
       const failed = new Map<PromptScript, string>()
       if (list.length === 0 || items.length === 0 || ms <= 0) return { results, failed }
       context.job = () => {
@@ -195,12 +207,11 @@ export const makeScriptRunner = (list: ReadonlyArray<PromptScript>, limits: { ms
               if (maxBounded(script) && next !== text) volatile = true
               text = next
             } catch (error) {
+              volatile = true
               if (!failed.has(entry)) {
                 failed.set(
                   entry,
-                  error instanceof OutputLimit
-                    ? "its replacements made more text than one context allows"
-                    : String(error)
+                  error instanceof OutputLimit ? "it made more text than one context allows" : String(error)
                 )
               }
             }
