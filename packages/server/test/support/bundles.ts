@@ -1,8 +1,8 @@
 // Global setup for the server tests: builds the worker bundles (ARCHITECTURE.md §3.6) once
-// per run, before any test file starts, for every file that needs them. A build takes
-// about 200 s of CPU on this host (rolldown and minification use every core). Building in
-// two files' beforeAll hooks doubled that, and at a load average of 85 one build overran
-// the hooks' 60 s limit. Files that change a build copy it first.
+// per run, before any test file starts, for every file that needs them, and outside any
+// hook's time limit: once, at a load average of 85, a build in a beforeAll hook overran
+// its 60 s. A build usually takes about 2 s, and 10 to 17 s of CPU (rolldown uses every
+// core). Files that change a build copy it first.
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
