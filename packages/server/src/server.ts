@@ -121,10 +121,36 @@ const RpcRoute = RpcServer.layerHttp({ group: AppApi, path: "/rpc", protocol: "w
   Layer.provide([Handlers, AuthenticationLive, TransportHeadersOnly])
 )
 
+/** A host as a URL has it (name, IPv4 or bracketed IPv6, and a port), safe to put in a header. */
+const HOST = /^[A-Za-z0-9.-]+(?::\d{1,5})?$|^\[[0-9A-Fa-f:.]+\](?::\d{1,5})?$/
+
+/**
+ * The Content-Security-Policy on every response. Only the app's own scripts run: none
+ * inline, none from elsewhere, so markup that slipped past sanitizing can't run script.
+ * Images load only from the app itself, so text can't report on the chat through an
+ * image URL (Markdown blocks them as well). Connections go to the app and its WebSocket,
+ * on the host the browser used; `'self'` covers the WebSocket in current browsers, the
+ * explicit origins cover older ones.
+ */
+const contentSecurityPolicy = (host: string | undefined) => {
+  const socket = host !== undefined && HOST.test(host) ? ` ws://${host} wss://${host}` : ""
+  return [
+    "default-src 'self'",
+    "script-src 'self'",
+    "style-src 'self'",
+    "img-src 'self'",
+    `connect-src 'self'${socket}`,
+    "object-src 'none'",
+    "base-uri 'none'",
+    "form-action 'self'",
+    "frame-ancestors 'none'"
+  ].join("; ")
+}
+
 /**
  * Every request passes here first. It refuses other sites' pages and DNS-rebound names
  * (net/exposure.ts), and records the socket's address in PEER_HEADER for authentication,
- * replacing any copy the client sent.
+ * replacing any copy the client sent. Every response gets the Content-Security-Policy.
  */
 const RequestGuard = HttpRouter.middleware(
   Effect.gen(function* () {
@@ -145,9 +171,10 @@ const RequestGuard = HttpRouter.middleware(
     }
     return (httpEffect) =>
       Effect.flatMap(HttpServerRequest.HttpServerRequest, (request) => {
+        const csp = HttpServerResponse.setHeader("content-security-policy", contentSecurityPolicy(request.headers.host))
         const headers = { host: request.headers.host, origin: request.headers.origin }
         const problem = crossSiteProblem(headers, publicOrigins, checkHost)
-        if (problem !== undefined) return Effect.succeed(HttpServerResponse.text(problem, { status: 403 }))
+        if (problem !== undefined) return Effect.succeed(csp(HttpServerResponse.text(problem, { status: 403 })))
         const withoutPeer = Headers.remove(request.headers, PEER_HEADER)
         const peered = request.modify({
           headers: Option.match(request.remoteAddress, {
@@ -155,7 +182,7 @@ const RequestGuard = HttpRouter.middleware(
             onSome: (address) => Headers.set(withoutPeer, PEER_HEADER, address)
           })
         })
-        return Effect.provideService(httpEffect, HttpServerRequest.HttpServerRequest, peered)
+        return Effect.provideService(httpEffect, HttpServerRequest.HttpServerRequest, peered).pipe(Effect.map(csp))
       })
   }),
   { global: true }

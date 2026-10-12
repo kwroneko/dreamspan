@@ -1,13 +1,16 @@
 // Exposure safety (spec/DESIGN.md §11): the policy, and the gate on real sockets.
+import { writeFileSync } from "node:fs"
 import { request } from "node:http"
 import { connect } from "node:net"
 import { networkInterfaces } from "node:os"
+import { join } from "node:path"
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Layer, Logger } from "effect"
 import { AppConfig } from "../src/config.ts"
 import { crossSiteProblem, type ExposureConfig, exposurePolicy, parsePublicOrigins } from "../src/net/exposure.ts"
 import { ServerLive } from "../src/server.ts"
 import { serverPort, testConfig, withServer } from "./support/config.ts"
+import { tempDir } from "./support/tempDir.ts"
 
 const policy = (overrides: Partial<ExposureConfig>, passwords = false) => {
   const result = exposurePolicy(
@@ -277,6 +280,55 @@ describe("cross-site guard", () => {
       // (WebSocket clients won't send a custom Host, so this one is plain HTTP.)
       const rebound = `evil.example:${port}`
       assert.strictEqual(yield* healthz("127.0.0.1", "127.0.0.1", { Host: rebound, Origin: `http://${rebound}` }), 403)
+    }).pipe(withServer(config))
+  })
+})
+
+/** GET `path` on loopback, resolving to the status and the Content-Security-Policy. */
+const cspOf = (path: string, headers: Record<string, string> = {}) =>
+  Effect.flatMap(serverPort, (port) =>
+    Effect.callback<{ status: number; csp: string }, Error>((resume) => {
+      const req = request({ host: "127.0.0.1", port, path, headers }, (res) => {
+        res.resume()
+        resume(Effect.succeed({ status: res.statusCode ?? 0, csp: String(res.headers["content-security-policy"]) }))
+      })
+      req.on("error", (error) => resume(Effect.fail(error)))
+      req.end()
+    })
+  )
+
+describe("content security policy", () => {
+  it.live("every response has it: the app, its routes, the health check and a refusal", () => {
+    const clientDist = tempDir("client")
+    writeFileSync(join(clientDist, "index.html"), "<!doctype html><title>t</title>")
+    const config = testConfig({ clientDist })
+    return Effect.gen(function* () {
+      const port = yield* serverPort
+      for (const path of ["/", "/chats/some-chat", "/healthz"]) {
+        const { status, csp } = yield* cspOf(path, { Accept: "text/html" })
+        assert.strictEqual(status, 200, path)
+        const directives = new Map(
+          csp.split("; ").map((d) => [d.split(" ")[0]!, d.split(" ").slice(1).join(" ")] as const)
+        )
+        assert.strictEqual(directives.get("default-src"), "'self'")
+        assert.strictEqual(directives.get("script-src"), "'self'", "no inline script, none from elsewhere")
+        assert.strictEqual(directives.get("img-src"), "'self'")
+        assert.strictEqual(directives.get("connect-src"), `'self' ws://127.0.0.1:${port} wss://127.0.0.1:${port}`)
+        assert.strictEqual(directives.get("frame-ancestors"), "'none'")
+      }
+      const refused = yield* cspOf("/healthz", { Origin: "https://evil.example" })
+      assert.strictEqual(refused.status, 403)
+      assert.include(refused.csp, "script-src 'self'")
+    }).pipe(withServer(config))
+  })
+
+  it.live("a Host that isn't a host name adds no WebSocket origin", () => {
+    const config = testConfig({ authMode: "proxy" })
+    return Effect.gen(function* () {
+      // Proxy mode with no PUBLIC_ORIGINS refuses it, and the refusal still has the policy.
+      const { csp } = yield* cspOf("/healthz", { Host: "x; script-src *" })
+      assert.include(csp, "connect-src 'self'; ")
+      assert.notInclude(csp, "script-src *")
     }).pipe(withServer(config))
   })
 })

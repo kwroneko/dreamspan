@@ -45,6 +45,8 @@ Bun was measured as an alternative (2026-10-10) and not adopted. On this server 
 - **`/auth/login`, `/auth/logout`** (§4) and **`/library/import`, `/library/export`** (§11.4): plain HTTP, for what a WebSocket message can't do well, a cookie and a file.
 - **Everything else:** the client build, served as a single-page app (unknown paths return `index.html`, so deep links work).
 
+**Content-Security-Policy.** `RequestGuard` puts one on every response: `default-src 'self'`; `script-src 'self'` (the build's own modules, nothing inline, nothing from elsewhere, so markup that got past sanitizing can't run script); `style-src 'self'`; `img-src 'self'` (an image URL in a message could report on the chat to its server; Markdown blocks images too); `connect-src 'self'` plus `ws://` and `wss://` on the Host the browser used, when it's a plain host name (`'self'` covers the WebSocket in current browsers; the explicit origins, older ones); `object-src 'none'`, `base-uri 'none'`, `form-action 'self'`, `frame-ancestors 'none'`. The browser tests run every screen under it and fail on any violation (`e2e/csp.spec.ts`). The Vite development server doesn't send it.
+
 **Configuration** (`config.ts`, environment variables):
 
 | Variable | Default | Meaning |
