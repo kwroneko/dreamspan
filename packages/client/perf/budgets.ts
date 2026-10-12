@@ -28,7 +28,9 @@ export const budgets = {
   streamDriftPx: 2,
   /** Renders of streaming bodies on screen per update to one of them: exactly the row that changed. */
   bodyRendersPerUpdate: 1,
-  /** Message rows rendered while only text streams: none. */
+  /** List renders per update to a body on screen: measured 0.5 to 0.7, as rows grow and are re-measured. */
+  listRendersPerUpdate: 1.5,
+  /** Message rows, and bodies not streaming, rendered while only text streams: none. */
   rowRendersWhileStreaming: 0,
   /** Heap growth after scrolling the whole long chat, after garbage collection. */
   heapGrowthMb: 40,

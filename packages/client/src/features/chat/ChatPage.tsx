@@ -77,8 +77,10 @@ function MessageList({ session, view, anchor }: { session: ChatSession; view: Ch
   // scroll in its first few pixels: the list then never let go.
   //
   // The user scrolling up lets go at once, before the first scroll event: a smooth scroll
-  // starts with steps small enough to still look like the end. Reaching the end again
-  // holds on once the user has stopped for a moment.
+  // starts with steps small enough to still look like the end. So does grabbing the
+  // scrollbar or a middle-button autoscroll. Reaching the end again holds on once the user
+  // has stopped for a moment. (A scroll up with none of these, like find in page, lets go
+  // only once it's 48 px from the end.)
   const intent = useRef(0)
   useEffect(() => {
     const list = parent.current
@@ -94,6 +96,10 @@ function MessageList({ session, view, anchor }: { session: ChatSession; view: Ch
     const onKey = (event: KeyboardEvent) => {
       if (["ArrowUp", "PageUp", "Home"].includes(event.key)) letGo()
     }
+    const onPointerDown = (event: PointerEvent) => {
+      const onScrollbar = event.target === list && event.offsetX >= list.clientWidth
+      if (onScrollbar || event.button === 1) letGo()
+    }
     // Capture runs before the virtualizer's own listener, whose render may follow at once.
     const onScroll = () => {
       if (!atEnd()) hold(false)
@@ -101,11 +107,13 @@ function MessageList({ session, view, anchor }: { session: ChatSession; view: Ch
     list.addEventListener("wheel", onWheel, { passive: true })
     list.addEventListener("touchmove", letGo, { passive: true })
     list.addEventListener("keydown", onKey)
+    list.addEventListener("pointerdown", onPointerDown)
     list.addEventListener("scroll", onScroll, { passive: true, capture: true })
     return () => {
       list.removeEventListener("wheel", onWheel)
       list.removeEventListener("touchmove", letGo)
       list.removeEventListener("keydown", onKey)
+      list.removeEventListener("pointerdown", onPointerDown)
       list.removeEventListener("scroll", onScroll, { capture: true })
     }
   }, [hold])

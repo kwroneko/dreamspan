@@ -337,6 +337,7 @@ test("six streams: renders per token, drift, prepending and typing", async ({ pa
   const counters1 = typing.perf
   const updates = counters1.shownUpdates! - counters0.shownUpdates!
   const bodies = counters1.liveBodyRenders! - counters0.liveBodyRenders!
+  const otherBodies = counters1.bodyRenders! - counters0.bodyRenders! - bodies
   const rows = counters1.rowRenders! - counters0.rowRenders!
   const lists = counters1.listRenders! - counters0.listRenders!
   const inputs = typing.events.filter((e) => e.name.startsWith("key") || e.name === "input" || e.name === "beforeinput")
@@ -368,6 +369,7 @@ test("six streams: renders per token, drift, prepending and typing", async ({ pa
     updates,
     bodyRendersPerUpdate: round(bodies / Math.max(1, updates)),
     rowRendersWhileTyping: rows,
+    otherBodyRendersWhileTyping: otherBodies,
     listRendersPerUpdate: round(lists / Math.max(1, updates)),
     updatesWhilePrepending: updatesDuring,
     inputP95Ms: round(
@@ -391,6 +393,8 @@ test("six streams: renders per token, drift, prepending and typing", async ({ pa
   expect(updatesDuring).toBeGreaterThan(0)
   expect(bodies / updates).toBeLessThanOrEqual(budgets.bodyRendersPerUpdate)
   expect(rows).toBeLessThanOrEqual(budgets.rowRendersWhileStreaming)
+  expect(otherBodies).toBeLessThanOrEqual(budgets.rowRendersWhileStreaming)
+  expect(lists / updates).toBeLessThanOrEqual(budgets.listRendersPerUpdate)
   expect(
     quantile(
       inputs.map((e) => e.duration),

@@ -225,7 +225,11 @@ describe("chats", () => {
         const [current] = (yield* read(api, chat.id, { _tag: "Bottom" }, 1)).entries
         yield* api
           .Regenerate({ slotId: entry.slotId, expectedRowVersion: current!.rowVersion })
-          .pipe(Effect.timeoutOption(i % 6))
+          // An interrupted call may still commit after this read: the next one is then stale.
+          .pipe(
+            Effect.timeoutOption(i % 6),
+            Effect.catchTag("StaleWrite", () => Effect.void)
+          )
       }
       const versions = yield* Effect.gen(function* () {
         const deadline = Date.now() + 10_000
