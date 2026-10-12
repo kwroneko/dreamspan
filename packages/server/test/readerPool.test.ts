@@ -220,6 +220,35 @@ describe("reader pool", () => {
   )
 
   it.live(
+    "an answer to a request the reader isn't running is dropped, and finishes nothing",
+    () =>
+      Effect.gen(function* () {
+        const { StrayExit } = yield* Readers
+        const before = yield* bothUp
+        // Had the stray Exit finished the read, its real answer would be dropped instead.
+        const servedBy = yield* StrayExit().pipe(stalls("the read's own answer was dropped"))
+        assert.isTrue(before.has(servedBy))
+      }).pipe(Effect.provide(readers(2))),
+    30_000
+  )
+
+  it.live(
+    "a protocol defect from a reader is a crash of that reader: its read is retried",
+    () => {
+      const gate = makeGate()
+      const { stops, logger } = stopLog()
+      return Effect.gen(function* () {
+        const { DefectOnce } = yield* Readers
+        const before = yield* bothUp
+        const servedBy = yield* DefectOnce().pipe(stalls("the read was never retried"))
+        assert.isTrue(before.has(servedBy))
+        assert.strictEqual(stops.length, 1)
+      }).pipe(Effect.provide(readers(2, { gate })), Effect.provide(logger))
+    },
+    30_000
+  )
+
+  it.live(
     "startup fails when no reader comes up",
     () =>
       Effect.gen(function* () {

@@ -5,7 +5,7 @@
 // Here a reader stays busy until it answers, and a crashed reader gets nothing until it's back.
 import { Cause, Deferred, Effect, Exit, Layer, Option, Result, Schedule, Schema, type Stream } from "effect"
 import { type Rpc, RpcClient, RpcClientError, type RpcGroup, RpcMessage, type RpcSerialization } from "effect/rpc"
-import { Worker, type WorkerError } from "effect/workers"
+import { Worker, WorkerError } from "effect/workers"
 
 type Transferables = Parameters<RpcClient.Protocol["Service"]["send"]>[2]
 
@@ -157,7 +157,7 @@ export const layer = (
 
         const onResponse =
           (reader: Reader) =>
-          (response: RpcMessage.FromServerEncoded): Effect.Effect<void> => {
+          (response: RpcMessage.FromServerEncoded): Effect.Effect<void, WorkerError.WorkerError> => {
             const job = reader.job
             // An answer to a request the reader isn't running is dropped: nobody waits on it.
             const stray = (what: string) =>
@@ -170,13 +170,14 @@ export const layer = (
                 }
                 return response._tag === "Chunk" ? writeResponse(job.clientId, response) : finish(reader, response)
               case "Defect":
-                // It names no request, but a reader runs one at a time, so it's that request's.
-                if (job === undefined) return stray("a defect")
-                return finish(
-                  reader,
-                  RpcMessage.ResponseExitDieEncoded({
-                    requestId: RpcMessage.RequestId(job.request.id),
-                    encodedDefect: response.defect
+                // The workers answer a handler's defect with its request's Exit
+                // (disableFatalDefects), so this is the protocol failing: a crash of the reader.
+                return Effect.fail(
+                  new WorkerError.WorkerError({
+                    reason: new WorkerError.WorkerReceiveError({
+                      message: "the worker reported a protocol defect",
+                      cause: response.defect
+                    })
                   })
                 )
             }

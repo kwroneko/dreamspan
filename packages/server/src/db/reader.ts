@@ -13,7 +13,9 @@ import { makeReadHandlers } from "./reads.ts"
 
 const { dbPath } = workerData as { readonly dbPath: string }
 
-RpcServer.layer(ReadOps, { concurrency: 1 }).pipe(
+// A handler's defect answers its own request, so the pool (readerPool.ts) takes a Defect
+// message for the protocol failing.
+RpcServer.layer(ReadOps, { concurrency: 1, disableFatalDefects: true }).pipe(
   Layer.provide(
     ReadOps.toLayer(
       Effect.map(

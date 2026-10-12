@@ -12,5 +12,9 @@ export const PoolOps = RpcGroup.make(
   /** Ends the first thread that runs it, as a crash would; a later run returns its thread id. */
   Rpc.make("CrashOnce", { success: Schema.Number }),
   /** Blocks like Hold, then ends the worker thread. */
-  Rpc.make("HoldThenCrash")
+  Rpc.make("HoldThenCrash"),
+  /** Sends the pool an answer to a request it isn't running, then answers with its thread id. */
+  Rpc.make("StrayExit", { success: Schema.Number }),
+  /** The first thread that runs it sends the pool a protocol Defect; a later run returns its thread id. */
+  Rpc.make("DefectOnce", { success: Schema.Number })
 )

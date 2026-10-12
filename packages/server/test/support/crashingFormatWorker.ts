@@ -7,7 +7,7 @@ import { RpcServer } from "effect/rpc"
 import * as Importers from "../../src/importer/importers.ts"
 import { FormatOps } from "../../src/importer/ops.ts"
 
-RpcServer.layer(FormatOps, { concurrency: 1 }).pipe(
+RpcServer.layer(FormatOps, { concurrency: 1, disableFatalDefects: true }).pipe(
   Layer.provide(
     FormatOps.toLayer(
       Effect.map(Importers.Importers, (registry) =>

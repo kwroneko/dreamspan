@@ -7,7 +7,9 @@ import * as Importers from "./importers.ts"
 import { exportFile } from "./exporters.ts"
 import { FormatOps, ownBuffer } from "./ops.ts"
 
-RpcServer.layer(FormatOps, { concurrency: 1 }).pipe(
+// A handler's defect answers its own request, so the pool (db/readerPool.ts) takes a Defect
+// message for the protocol failing.
+RpcServer.layer(FormatOps, { concurrency: 1, disableFatalDefects: true }).pipe(
   Layer.provide(
     FormatOps.toLayer(
       Effect.map(Importers.Importers, (registry) =>
