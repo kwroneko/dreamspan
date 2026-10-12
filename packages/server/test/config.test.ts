@@ -1,11 +1,10 @@
 import { spawnSync } from "node:child_process"
-import { mkdtempSync, readdirSync, rmSync } from "node:fs"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { readdirSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import { assert, describe, it } from "@effect/vitest"
 import { ConfigProvider, Effect, Exit, Layer } from "effect"
 import { AppConfig } from "../src/config.ts"
+import { tempDir } from "./support/tempDir.ts"
 
 const load = (env: Record<string, string>) =>
   Effect.exit(Layer.build(AppConfig.layer)).pipe(
@@ -25,7 +24,7 @@ describe("configuration", () => {
   )
 
   it("refuses the fake generator in production, before anything starts", () => {
-    const dataDir = mkdtempSync(join(tmpdir(), "rp-fake-"))
+    const dataDir = tempDir("fake")
     const run = spawnSync(process.execPath, [fileURLToPath(new URL("../src/main.ts", import.meta.url))], {
       env: { ...process.env, NODE_ENV: "production", FAKE_GENERATOR_TPS: "300", DATA_DIR: dataDir, PORT: "9" },
       encoding: "utf8",
@@ -35,6 +34,5 @@ describe("configuration", () => {
     assert.include(run.stdout + run.stderr, "FakeGeneratorInProduction")
     // It stopped before opening the database.
     assert.deepStrictEqual(readdirSync(dataDir), [])
-    rmSync(dataDir, { recursive: true })
   })
 })

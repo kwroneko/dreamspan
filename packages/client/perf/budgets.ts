@@ -1,5 +1,5 @@
 // What the harness fails on. Set from runs on the shared 48-core host at load averages
-// of 30 to 90 (see ARCHITECTURE §10), with headroom for that load: a regression that
+// of 30 to 90 (see ARCHITECTURE §12), with headroom for that load: a regression that
 // matters crosses these by far more than the host's noise.
 export const budgets = {
   /** From navigation to the last message on screen. */

@@ -7,7 +7,8 @@ import { RpcClient, RpcSerialization } from "effect/rpc"
 import { Socket } from "effect/socket"
 import { PasswordCost } from "../../src/auth/passwords.ts"
 import { AppConfig, type AppConfigShape } from "../../src/config.ts"
-import { ServerLive } from "../../src/server.ts"
+import type { Generator } from "../../src/chat/Generator.ts"
+import { ServerLive, serverWith } from "../../src/server.ts"
 import { tempDir } from "./tempDir.ts"
 
 /**
@@ -49,8 +50,11 @@ export const testConfig = (overrides: Partial<AppConfigShape> = {}): AppConfigSh
  */
 const testPasswordCost = Layer.succeed(PasswordCost)({ n: 2 ** 10, r: 8, p: 1 })
 
-export const serverLayer = (config: AppConfigShape) =>
-  ServerLive.pipe(Layer.provide([Layer.succeed(AppConfig)(config), testPasswordCost]))
+/** The test server, with the generator its configuration picks unless one is given. */
+export const serverLayer = (config: AppConfigShape, generator?: Layer.Layer<Generator>) =>
+  (generator === undefined ? ServerLive : serverWith(generator)).pipe(
+    Layer.provide([Layer.succeed(AppConfig)(config), testPasswordCost])
+  )
 
 export const withServer = (config: AppConfigShape) => Effect.provide(serverLayer(config))
 

@@ -5,6 +5,7 @@ import { defineConfig, devices } from "@playwright/test"
 export default defineConfig({
   testDir: ".",
   testMatch: "*.perf.ts",
+  globalSetup: "./globalSetup.ts",
   outputDir: process.env.PLAYWRIGHT_OUTPUT_DIR ?? "../test-results/perf",
   timeout: 30 * 60_000,
   expect: { timeout: 30_000 },

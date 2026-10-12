@@ -355,7 +355,15 @@ const GeneratorFromConfig = Layer.unwrap(
  */
 export const serverWith = (generator: Layer.Layer<Generator, never, AppConfig>) =>
   HttpRouter.serve(
-    Layer.mergeAll(RpcRoute, HealthRoute, AuthRoutes, ImportRoutes.layer, StaticRoutes, InterruptedRequests, RequestGuard)
+    Layer.mergeAll(
+      RpcRoute,
+      HealthRoute,
+      AuthRoutes,
+      ImportRoutes.layer,
+      StaticRoutes,
+      InterruptedRequests,
+      RequestGuard
+    )
   ).pipe(
     Layer.provide(ProvidersLive),
     Layer.provide(Generations.layer.pipe(Layer.provideMerge(ChatHub.layer), Layer.provideMerge(generator))),

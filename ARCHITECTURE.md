@@ -66,7 +66,7 @@ Bun was measured as an alternative (2026-10-10) and not adopted. On this server 
 | `CLIENT_DIST` | `packages/client/dist` | Static files to serve |
 | `SECRET_KEY`, `SECRET_KEY_FILE` | unset | The server secret (below). Generated into `DATA_DIR/secret.key` when neither is set |
 | `KEY_HOST_BINDING` | `true` | Keys go only to the hosts their credential was entered for (§3.12). A security setting, so it's set only here, never from inside the app |
-| `FAKE_GENERATOR_TPS`, `FAKE_GENERATOR_TOKENS` | unset, `400` | Development, tests and the performance harness only: chats generate synthetic text at this rate, about this many tokens each (§10). Refused with `NODE_ENV=production` |
+| `FAKE_GENERATOR_TPS`, `FAKE_GENERATOR_TOKENS` | unset, `400` | Development, tests and the performance harness only: chats generate synthetic text at this rate, about this many tokens each (§12). Refused with `NODE_ENV=production` |
 
 **Secrets** (`secrets.ts`). Connection secrets (API keys, header values, proxy URLs) are encrypted at rest with AES-256-GCM, under a key derived (HKDF-SHA256) from the server secret.
 - **Bound to where they belong.** Each ciphertext is bound to what it belongs to (`credential:<id>:key`, `connection:<id>:headers`, `connection:<id>:proxy_url`), so it doesn't decrypt anywhere else.
@@ -572,7 +572,7 @@ In proxy mode, a WebSocket keeps the identity it opened with until it disconnect
   - **The default Tailwind palette is removed** (`--color-*: initial`), so a class like `bg-zinc-800` doesn't exist. Only token utilities (`bg-surface`, `text-muted`) can be written. A redesign changes token values, not components.
   - **One import path for UI components.** Feature code imports from `src/ui/`, never from Base UI directly; ESLint enforces it. Base UI carries behavior and accessibility (labels, focus traps, keyboard), and `src/ui/` carries the look: buttons, fields, select, checkbox, switch, radio group, dialogs, cards, badges, alerts.
   - Inputs use 16 px text on touch screens, so iOS doesn't zoom into them. A submit the client refuses focuses the first invalid field, whose description carries the error.
-- **Message text** is Markdown through `ui/Markdown.tsx` (§10).
+- **Message text** is Markdown through `ui/Markdown.tsx` (§12).
 - **Tests:**
   - `test/` (Vitest): the registries.
   - `e2e/` (Playwright, `npm run test:browser`, outside `npm run check`): the built client against the real server and its database workers, each file with its own servers on random ports and fresh data directories, and a fake OpenAI-style provider on loopback. One flow per screen (the import screen's in `e2e/library.spec.ts`), a cross-user check through the UI (another user never sees someone's connections or keys, in a separate tab or after logout in the same one), every screen at phone and desktop width in light and dark with no sideways scrolling, and dialogs from the keyboard. `SCREENSHOT_DIR` saves screenshots. Chromium's headless shell comes from `~/.cache/ms-playwright`; CI installs it.

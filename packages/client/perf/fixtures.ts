@@ -124,7 +124,8 @@ const build = async (dir: string): Promise<Fixture> => {
 
 /** A fresh data directory holding the fixtures, built once per fixture version. The caller removes it. */
 export const prepare = async (): Promise<{ dataDir: string; fixture: Fixture }> => {
-  const cache = join(tmpdir(), `rp-perf-fixture-v${VERSION}`)
+  // Outside the run's own temp directory (globalSetup.ts), so it outlives the run.
+  const cache = join(process.env.RP_PERF_CACHE_ROOT ?? tmpdir(), `rp-perf-fixture-v${VERSION}`)
   if (!existsSync(join(cache, "fixture.json"))) {
     const building = mkdtempSync(join(tmpdir(), "rp-perf-build-"))
     try {

@@ -7,15 +7,14 @@ import type { ChatEvent, PathRange } from "@rp/shared/chatApi.ts"
 import { Effect, Layer, Option, Stream } from "effect"
 import * as FakeGenerator from "../src/chat/fakeGenerator.ts"
 import { GenerationFailed, Generator } from "../src/chat/Generator.ts"
-import { AppConfig, type AppConfigShape } from "../src/config.ts"
+import type { AppConfigShape } from "../src/config.ts"
 import { Writer } from "../src/db/Database.ts"
-import { serverWith } from "../src/server.ts"
-import { client, outcome, testConfig } from "./support/config.ts"
+import { client, outcome, serverLayer, testConfig } from "./support/config.ts"
 
 type Api = Effect.Success<ReturnType<typeof client>>
 
 const withGenerator = (config: AppConfigShape, generator: Layer.Layer<Generator>) =>
-  Effect.provide(serverWith(generator).pipe(Layer.provide(Layer.succeed(AppConfig)(config))))
+  Effect.provide(serverLayer(config, generator))
 
 const fast = FakeGenerator.layer({ tokensPerSecond: 3000, tokens: 150 })
 
@@ -86,7 +85,7 @@ describe("chats", () => {
   it.live("lists chats by last message, in pages", () => {
     const config = testConfig()
     return Effect.gen(function* () {
-      const api = yield* client(config)
+      const api = yield* client()
       const first = yield* api.CreateChat({ title: "  First  " })
       const second = yield* api.CreateChat({ title: "Second" })
       assert.strictEqual(first.title, "First")
@@ -112,7 +111,7 @@ describe("chats", () => {
   it.live("a message names the tip it was written under; a branch starts anywhere", () => {
     const config = testConfig()
     return Effect.gen(function* () {
-      const api = yield* client(config)
+      const api = yield* client()
       const { chat, slots } = yield* linearChat(api, 3)
       assert.strictEqual(
         yield* outcome(api.SendMessage({ chatId: chat.id, parentSlotId: slots[0]!, branch: false, content: "late" })),
@@ -135,7 +134,7 @@ describe("chats", () => {
   it.live("reads a path in windows, both ways, and opens at a slot", () => {
     const config = testConfig()
     return Effect.gen(function* () {
-      const api = yield* client(config)
+      const api = yield* client()
       const { chat, slots } = yield* linearChat(api, 30)
       // A branch below m10, and a deleted message on the main path: neither shows.
       yield* api.SendMessage({ chatId: chat.id, parentSlotId: slots[10]!, branch: true, content: "side" })
@@ -172,7 +171,7 @@ describe("chats", () => {
   it.live("a slot that isn't on the path opens the path through it, on its latest replies", () => {
     const config = testConfig()
     return Effect.gen(function* () {
-      const api = yield* client(config)
+      const api = yield* client()
       const { chat, slots } = yield* linearChat(api, 4)
       const side = yield* api.SendMessage({ chatId: chat.id, parentSlotId: slots[1]!, branch: true, content: "side" })
       const tip = yield* api.SendMessage({
@@ -192,7 +191,7 @@ describe("chats", () => {
   it.live("the path through a slot on another branch goes through a message deleted on its own", () => {
     const config = testConfig()
     return Effect.gen(function* () {
-      const api = yield* client(config)
+      const api = yield* client()
       const { chat, slots } = yield* linearChat(api, 2)
       let parent = slots[0]!
       const side: Array<SlotId> = []
@@ -218,7 +217,7 @@ describe("chats", () => {
   it.live("a caller going away can't leave a version generating with nothing behind it", () => {
     const config = testConfig()
     return Effect.gen(function* () {
-      const api = yield* client(config)
+      const api = yield* client()
       const { chat, slots } = yield* linearChat(api, 1)
       const { entry } = yield* api.Generate({ chatId: chat.id, parentSlotId: slots[0]!, branch: false })
       for (let i = 0; i < 24; i++) {
@@ -251,7 +250,7 @@ describe("chats", () => {
     const config = testConfig()
     const slow = FakeGenerator.layer({ tokensPerSecond: 100, tokens: 5000 })
     return Effect.gen(function* () {
-      const api = yield* client(config)
+      const api = yield* client()
       const { chat, slots } = yield* linearChat(api, 1)
       const events = yield* subscribe(api, chat.id)
       const { entry } = yield* api.Generate({ chatId: chat.id, parentSlotId: slots[0]!, branch: false })
@@ -275,7 +274,7 @@ describe("chats", () => {
   it.live("versions: swipes, edits and amends check the row version", () => {
     const config = testConfig()
     return Effect.gen(function* () {
-      const api = yield* client(config)
+      const api = yield* client()
       const { slots } = yield* linearChat(api, 1)
       const slotId = slots[0]!
       const [original] = yield* api.ListVersions({ slotId })
@@ -318,7 +317,7 @@ describe("chats", () => {
   it.live("without a generator, generating is refused and creates nothing", () => {
     const config = testConfig()
     return Effect.gen(function* () {
-      const api = yield* client(config)
+      const api = yield* client()
       const { chat, slots } = yield* linearChat(api, 1)
       assert.strictEqual(
         yield* outcome(api.Generate({ chatId: chat.id, parentSlotId: slots[0]!, branch: false })),
@@ -336,7 +335,7 @@ describe("chats", () => {
   it.live("a generation streams as deltas that add up to the saved text", () => {
     const config = testConfig()
     return Effect.gen(function* () {
-      const api = yield* client(config)
+      const api = yield* client()
       const { chat, slots } = yield* linearChat(api, 1)
       const events = yield* subscribe(api, chat.id)
       const { entry } = yield* api.Generate({ chatId: chat.id, parentSlotId: slots[0]!, branch: false })
@@ -358,7 +357,7 @@ describe("chats", () => {
     const config = testConfig()
     const slow = FakeGenerator.layer({ tokensPerSecond: 200, tokens: 2000 })
     return Effect.gen(function* () {
-      const api = yield* client(config)
+      const api = yield* client()
       const { chat, slots } = yield* linearChat(api, 1)
       const { entry } = yield* api.Generate({ chatId: chat.id, parentSlotId: slots[0]!, branch: false })
       const swipe1 = yield* api.Regenerate({ slotId: entry.slotId, expectedRowVersion: entry.rowVersion })
@@ -408,7 +407,7 @@ describe("chats", () => {
       })
     )
     return Effect.gen(function* () {
-      const api = yield* client(config)
+      const api = yield* client()
       const { chat, slots } = yield* linearChat(api, 1)
       const events = yield* subscribe(api, chat.id)
       const { entry } = yield* api.Generate({ chatId: chat.id, parentSlotId: slots[0]!, branch: false })
@@ -426,7 +425,7 @@ describe("chats", () => {
     const config = testConfig()
     const slow = FakeGenerator.layer({ tokensPerSecond: 100, tokens: 5000 })
     const stopped = Effect.gen(function* () {
-      const api = yield* client(config)
+      const api = yield* client()
       const { chat, slots } = yield* linearChat(api, 1)
       const { entry } = yield* api.Generate({ chatId: chat.id, parentSlotId: slots[0]!, branch: false })
       yield* Effect.sleep(300)
@@ -434,7 +433,7 @@ describe("chats", () => {
     }).pipe(Effect.scoped, withGenerator(config, slow))
     const restarted = (started: Effect.Success<typeof stopped>) =>
       Effect.gen(function* () {
-        const api = yield* client(config)
+        const api = yield* client()
         const path = yield* read(api, started.chatId, { _tag: "Bottom" }, 10)
         const version = path.entries.at(-1)!.version
         assert.strictEqual(version.id, started.versionId)
@@ -450,7 +449,7 @@ describe("chats", () => {
       const config = testConfig()
       const harness = FakeGenerator.layer({ tokensPerSecond: 300, tokens: 900 })
       return Effect.gen(function* () {
-        const api = yield* client(config)
+        const api = yield* client()
         const chats = yield* Effect.forEach([0, 1, 2], () => linearChat(api, 1))
         const events = yield* Effect.forEach(chats, ({ chat }) => subscribe(api, chat.id))
         // The server runs in this process: a 10 ms timer here sees every stall of its loop
