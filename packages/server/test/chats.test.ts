@@ -3,7 +3,7 @@
 // deltas, stopped, failed and deleted. Cross-user access is in the isolation matrix.
 import { assert, describe, it } from "@effect/vitest"
 import type { Chat, PathEntry, SlotId, Version, VersionId } from "@rp/shared/chat.ts"
-import type { ChatEvent, PathRange } from "@rp/shared/chatApi.ts"
+import type { ChatEvent, PathRange, PathWindow } from "@rp/shared/chatApi.ts"
 import { ConfigProvider, Effect, Fiber, Layer, Option, Stream } from "effect"
 import * as FakeGenerator from "../src/dev/fakeGenerator.ts"
 import { GenerationFailed, Generator } from "../src/chat/Generator.ts"
@@ -190,6 +190,33 @@ describe("chats", () => {
       const top = yield* read(api, chat.id, { _tag: "Around", slot: slots[0]! }, 6, leaf)
       assert.deepStrictEqual(contents(top.entries), ["m0", "m1", "m2", "m3", "m4", "m5"])
       assert.isNull(top.older)
+    }).pipe(Effect.scoped, withGenerator(config, Generator.none))
+  })
+
+  it.live("pages down through a branch at every message", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const { chat, slots } = yield* linearChat(api, 20)
+      for (let i = 4; i < 16; i++) {
+        yield* api.SendMessage({ chatId: chat.id, parentSlotId: slots[i]!, branch: true, content: `side ${i}` })
+      }
+      const leaf = slots[19]!
+      for (const limit of [1, 3, 7, 30]) {
+        const seen: Array<string> = []
+        let newer: SlotId | null = slots[2]!
+        while (newer !== null) {
+          const page: PathWindow = yield* read(api, chat.id, { _tag: "Newer", after: newer }, limit, leaf)
+          assert.isAtMost(page.entries.length, limit)
+          seen.push(...contents(page.entries))
+          newer = page.newer
+        }
+        assert.deepStrictEqual(
+          seen,
+          Array.from({ length: 17 }, (_, i) => `m${i + 3}`),
+          `limit ${limit}`
+        )
+      }
     }).pipe(Effect.scoped, withGenerator(config, Generator.none))
   })
 

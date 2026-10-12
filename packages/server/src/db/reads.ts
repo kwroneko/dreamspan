@@ -111,11 +111,13 @@ export const makeReadHandlers = Effect.gen(function* () {
   /**
    * Walks down from `after` towards `leaf`, at most `limit` slots, and returns the last
    * slot reached (null for none). `after` comes from a window the client read, so it's on
-   * the path: a run of only children needs no check, and at a branch the child towards
-   * the leaf is found by walking up from it. The cost is the window's length plus, at
-   * each branch, its distance from the leaf. Checking `after` itself would cost its
-   * distance from the leaf on every page, so it isn't: a slot of this chat that isn't on
-   * the path walks down its own branch instead, which shows the caller only its own chat.
+   * the path: a run of only children needs no check. At the first branch, the rest of
+   * the window is the leaf's ancestors, found in one walk up from it. The cost is the
+   * window's length, plus the distance from the leaf once if the window has a branch
+   * (each branch walking up on its own cost seven seconds for 60 of them 99,000 messages
+   * from the leaf). Checking `after` itself would cost its distance from the leaf on
+   * every page, so it isn't: a slot of this chat that isn't on the path walks down its
+   * own branch instead, which shows the caller only its own chat.
    */
   const walkTowards = (leaf: SlotPosition, after: SlotPosition, limit: number) =>
     Effect.gen(function* () {
@@ -136,13 +138,14 @@ export const makeReadHandlers = Effect.gen(function* () {
           remaining -= run.length
           continue
         }
-        const next = (yield* ancestorsAt(leaf, [current.depth + 1])).get(current.depth + 1)!
+        const last = Math.min(leaf.depth, current.depth + remaining)
+        const found = yield* ancestorsAt(leaf, [current.depth + 1, last])
         const [step] = yield* sql<{
           parent_slot_id: string | null
-        }>`SELECT parent_slot_id FROM slots WHERE id = ${next}`
+        }>`SELECT parent_slot_id FROM slots WHERE id = ${found.get(current.depth + 1)!}`
         if (step?.parent_slot_id !== current.id) break
-        current = { id: next, depth: current.depth + 1 }
-        remaining -= 1
+        current = { id: found.get(last)!, depth: last }
+        break
       }
       return current.id === after.id ? null : current
     })
