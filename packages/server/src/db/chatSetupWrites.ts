@@ -207,7 +207,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
               macroMode: "template",
               origin: "greeting",
               greetingRef: { entity: lead.card.entityId, index: lead.greetingIndexes[i]! },
-              ...(frozen[i] ? { frozenMacros: frozen[i] } : {})
+              ...(frozen[i] && Object.keys(frozen[i]).length > 0 ? { frozenMacros: frozen[i] } : {})
             })
           if (lead.greetings.length > 0) {
             const { slotId, version } = yield* graph.insertSlot(chatId, laneId, null, greetingVersion(0), at)

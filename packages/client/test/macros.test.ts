@@ -1,5 +1,7 @@
 // Macros in displayed text (features/chat/macros.ts): a greeting's random and time macros
 // show what they drew when it was first shown, whatever the clock says later (DESIGN §5.6).
+import { FrozenMacros } from "@rp/shared/chat.ts"
+import { Schema } from "effect"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { displayText, expandForDisplay } from "../src/features/chat/macros.ts"
 
@@ -17,6 +19,12 @@ describe("display macros", () => {
     expect(displayText(text, "template", names, {}, first.frozen)).toBe(first.text)
     // Without them, the clock shows through: that's what freezing is for.
     expect(displayText(text, "template", names)).not.toBe(first.text)
+  })
+
+  it("draw no more than the server takes, however many macros a greeting has", () => {
+    const preview = expandForDisplay(Array.from({ length: 300 }, () => "{{time}}").join(" "), "template", names)
+    expect(Object.keys(preview.frozen)).toHaveLength(300)
+    expect(Schema.is(FrozenMacros)(preview.frozen)).toBe(true)
   })
 
   it("read the speaker card's fields, and never expand verbatim text", () => {

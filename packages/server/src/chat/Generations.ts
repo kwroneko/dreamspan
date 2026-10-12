@@ -105,10 +105,16 @@ export class Generations extends Context.Service<
           yield* continueQueue(request.userId, finished)
         })
 
-      /** After the queue moved: the reply it posted starts, and subscribers hear of both. */
+      /**
+       * After the queue moved: the reply it posted starts, and subscribers hear of both. The
+       * queue goes out first, before anything here waits, so queue events leave in the order
+       * the writer committed them: a reply posted from this queue may end at once and publish
+       * the next queue, and an older one must never follow it.
+       */
       const continueQueue = (userId: GenerationRequest["userId"], outcome: typeof QueueOutcome.Type) =>
         Effect.gen(function* () {
           if (!outcome.queueChanged) return
+          hub.publish(outcome.chatId, { _tag: "Queue", queue: outcome.queue })
           if (outcome.next !== null) {
             yield* startGeneration({
               userId,
@@ -118,7 +124,6 @@ export class Generations extends Context.Service<
             })
           }
           yield* publishPosted(userId, outcome.chatId, outcome.posted)
-          hub.publish(outcome.chatId, { _tag: "Queue", queue: outcome.queue })
         })
 
       /** Slots the queue posted, then the chat whose leaf they moved. */

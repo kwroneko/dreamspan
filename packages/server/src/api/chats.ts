@@ -228,9 +228,9 @@ export const makeChatHandlers = Effect.gen(function* () {
       Effect.gen(function* () {
         const id = yield* userId
         const outcome = yield* writer.SelectAndDrain({ userId: id, slotId, versionId, expectedRowVersion })
-        const entry = yield* publishSlot(id, slotId)
+        // The queue event first, in commit order (Generations.continueQueue).
         yield* generations.continueQueue(id, outcome)
-        return entry
+        return yield* publishSlot(id, slotId)
       }).pipe(Effect.uninterruptible, internal("SelectVersion")),
 
     EditVersion: ({ slotId, sourceVersionId, content, expectedRowVersion }) =>

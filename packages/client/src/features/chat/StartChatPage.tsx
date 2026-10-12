@@ -6,7 +6,7 @@ import type { CardForChat } from "@rp/shared/chatSetupApi.ts"
 import type { FrozenValues } from "@rp/shared/macros/expand.ts"
 import { useNavigate, useParams } from "@tanstack/react-router"
 import { Effect } from "effect"
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { ErrorAlert, useAction } from "../../actions.tsx"
 import { Avatar } from "../../ui/Avatar.tsx"
 import { Button } from "../../ui/Button.tsx"
@@ -15,6 +15,7 @@ import { Markdown } from "../../ui/Markdown.tsx"
 import { Select } from "../../ui/Select.tsx"
 import { Loading } from "../../ui/Spinner.tsx"
 import { useTitle } from "../shell.tsx"
+import { carryComposerText } from "./composerCarry.ts"
 import { expandForDisplay } from "./macros.ts"
 
 const PERSONA_KEY = "rp.lastPersona"
@@ -43,7 +44,15 @@ function Pending({ card, personas }: { card: CardForChat; personas: ReadonlyArra
     return personas.find((p) => p.entityId === saved)?.entityId ?? personas[0]?.entityId ?? NONE
   })
   const [greeting, setGreeting] = useState(0)
-  const [text, setText] = useState("")
+  const [text, setTextState] = useState("")
+  // The latest text, for what's typed while the first send is on its way (read after it).
+  const typed = useRef("")
+  const setText = (next: string | ((current: string) => string)) =>
+    setTextState((current) => {
+      const value = typeof next === "function" ? next(current) : next
+      typed.current = value
+      return value
+    })
   const playing = personas.find((p) => p.entityId === persona) ?? null
   const shown = card.greetings[greeting]
   const name = card.card.name
@@ -64,7 +73,12 @@ function Pending({ card, personas }: { card: CardForChat; personas: ReadonlyArra
   }
 
   const start = async (first: "send" | "generate") => {
+    if (action.pending) return
     const personaId = playing?.entityId ?? null
+    // The text leaves the box as it's sent; whatever is typed while the chat is being made
+    // goes along to its composer, and a failure puts the sent text back.
+    const submitted = text
+    setText("")
     const result = await action.run(
       (client) =>
         Effect.gen(function* () {
@@ -78,8 +92,8 @@ function Pending({ card, personas }: { card: CardForChat; personas: ReadonlyArra
             }),
             first:
               first === "send"
-                ? { _tag: "Send", content: text, speakerEntityId: personaId }
-                : { _tag: "Generate", speakerEntityId: card.card.entityId, direction: text }
+                ? { _tag: "Send", content: submitted, speakerEntityId: personaId }
+                : { _tag: "Generate", speakerEntityId: card.card.entityId, direction: submitted }
           })
           // A message gets its reply, as after any send; a server without a generator still keeps the message.
           if (first === "send") {
@@ -96,7 +110,12 @@ function Pending({ card, personas }: { card: CardForChat; personas: ReadonlyArra
         }),
       ["chats"]
     )
-    if (result.ok) void navigate({ to: "/chats/$chatId", params: { chatId: result.value.chat.id } })
+    if (!result.ok) {
+      if (submitted !== "") setText((current) => (current === "" ? submitted : `${submitted}\n\n${current}`))
+      return
+    }
+    carryComposerText(result.value.chat.id, typed.current)
+    void navigate({ to: "/chats/$chatId", params: { chatId: result.value.chat.id } })
   }
 
   return (
@@ -165,7 +184,10 @@ function Pending({ card, personas }: { card: CardForChat; personas: ReadonlyArra
           rows={3}
           value={text}
           placeholder={`Write to ${name}…`}
-          onChange={(event) => setText(event.currentTarget.value)}
+          onChange={(event) => {
+            typed.current = event.currentTarget.value
+            setText(event.currentTarget.value)
+          }}
           className="w-full resize-none rounded-md border border-border bg-surface px-3 py-2 text-base text-text outline-none placeholder:text-muted focus-visible:border-focus focus-visible:ring-2 focus-visible:ring-focus/40 sm:text-sm"
         />
         <div className="flex flex-wrap items-center gap-2">

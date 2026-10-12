@@ -7,6 +7,7 @@ import type { Chat, EntityId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { Effect } from "effect"
 import { Generator } from "../src/chat/Generator.ts"
+import { freezeTemplate } from "../src/chat/macros.ts"
 import { Writer } from "../src/db/Database.ts"
 import * as FakeGenerator from "../src/dev/fakeGenerator.ts"
 import { client, outcome, posted, serverLayer, testConfig } from "./support/config.ts"
@@ -88,6 +89,42 @@ describe("chat setup", () => {
           ["Mira", false]
         ]
       )
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
+  )
+
+  it.live("a greeting's random and time macros are frozen when the chat is made, sent or not", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const dated = yield* card(api, "Dated", {
+        name: "Dated",
+        first_mes: "The log says {{datetimeformat::YYYY-MM-DD}}.",
+        alternate_greetings: [Array.from({ length: 300 }, () => "{{time}}").join(" ")]
+      })
+      // What a preview drew on another day, for the first greeting only.
+      const seen = freezeTemplate("The log says {{datetimeformat::YYYY-MM-DD}}.", {}, {})
+      const preview = Object.fromEntries(Object.keys(seen).map((key) => [key, "1999-12-31"]))
+      const started = yield* api.StartChat({
+        cards: [dated],
+        persona: null,
+        greeting: 1,
+        first: { _tag: "Send", content: "Hi.", speakerEntityId: null },
+        frozen: [preview]
+      })
+      const [greeting] = yield* pathOf(api, started.chat.id)
+      const versions = yield* api.ListVersions({ slotId: greeting!.slotId })
+      // The preview's value is kept; the greeting the client sent nothing for is frozen too,
+      // with all 300 of its values, more than any fixed small cap would take.
+      assert.deepStrictEqual(versions[0]!.frozenMacros, preview)
+      assert.lengthOf(Object.keys(versions[1]!.frozenMacros ?? {}), 300)
+      // Without any frozen values sent, the server still draws them.
+      const bare = yield* api.StartChat({
+        cards: [dated],
+        persona: null,
+        greeting: null,
+        first: { _tag: "Send", content: "Hi.", speakerEntityId: null }
+      })
+      const [bareGreeting] = yield* pathOf(api, bare.chat.id)
+      assert.lengthOf(Object.keys(bareGreeting!.version.frozenMacros ?? {}), 1)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
   )
 

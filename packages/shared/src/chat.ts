@@ -40,11 +40,20 @@ export class Chat extends Schema.Class<Chat>("Chat")({
   lastMessageAt: Schema.NullOr(Schema.Number)
 }) {}
 
-/** Values a text's non-deterministic macros drew, by the engine's keys (macros/expand.ts). */
-export const FrozenMacros = Schema.Record(Schema.String, Schema.String.check(Schema.isMaxLength(10_000))).check(
-  Schema.makeFilter((record: Readonly<Record<string, string>>) =>
-    Object.keys(record).length <= 256 ? undefined : "at most 256 frozen values"
-  )
+/**
+ * Values a text's non-deterministic macros drew, by the engine's keys (macros/expand.ts).
+ * Bounded as one expansion is (ARCHITECTURE §10): no more values than macros it evaluates,
+ * none longer than a text, and no more in all than its work limit. Whatever a preview drew
+ * fits, so a chat never fails to start on them.
+ */
+export const FrozenMacros = Schema.Record(Schema.String, Schema.String.check(Schema.isMaxLength(262_144))).check(
+  Schema.makeFilter((record: Readonly<Record<string, string>>) => {
+    const values = Object.values(record)
+    if (values.length > 10_000) return "at most 10,000 frozen values"
+    return values.reduce((sum, value) => sum + value.length, 0) <= 4_000_000
+      ? undefined
+      : "at most 4,000,000 characters of frozen values"
+  })
 )
 
 /** Why a generation failed, shown on its version (DESIGN §3.1). */

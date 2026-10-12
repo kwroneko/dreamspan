@@ -106,6 +106,11 @@ export class ChatSession {
   private requestedLeaf: SlotId | null
   private readonly registry: AtomRegistry.AtomRegistry
 
+  /** The chat this session shows. */
+  get id(): ChatId {
+    return this.chatId
+  }
+
   constructor(chatId: ChatId, requestedLeaf: SlotId | null, registry: AtomRegistry.AtomRegistry) {
     this.chatId = chatId
     this.requestedLeaf = requestedLeaf

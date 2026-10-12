@@ -12,6 +12,7 @@ import { ChatHub } from "../chat/ChatHub.ts"
 import { Generations } from "../chat/Generations.ts"
 import { Generator } from "../chat/Generator.ts"
 import { Reader, Writer } from "../db/Database.ts"
+import { freezeTemplate } from "../chat/macros.ts"
 import { internal } from "./internal.ts"
 
 /** A cast change as the state event it records (DATA-MODEL §5.3), chat-wide. */
@@ -88,7 +89,12 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
           })
         }
         const id = yield* userId
-        const result = yield* writer.StartChat({ userId: id, cards, persona, greeting, first, frozen: frozen ?? [] })
+        // Every greeting's random and time macros are frozen here, whatever the client sent:
+        // the values it saw in the preview are kept, and any it didn't send are drawn now.
+        const lead = yield* reader.GetCardForChat({ userId: id, entityId: cards[0]! })
+        const fields = { description: lead.description, personality: lead.personality, scenario: lead.scenario }
+        const drawn = lead.greetings.map((text, i) => freezeTemplate(text, fields, frozen?.[i] ?? {}))
+        const result = yield* writer.StartChat({ userId: id, cards, persona, greeting, first, frozen: drawn })
         if (first._tag === "Generate") {
           yield* generations.start({
             userId: id,

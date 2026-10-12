@@ -340,3 +340,29 @@ test("a saved greeting keeps its card's fields and the date it showed", async ({
   await expect(replies(page).first()).toContainText("A lighthouse keeper. The log says 2026-03-01.")
   await expect(generating(page)).toHaveCount(0, { timeout: 20_000 })
 })
+
+test("text typed while the first send makes the chat goes along to the chat's composer", async ({ page }) => {
+  // Holds the StartChat request until the test lets it through.
+  let release: (() => void) | null = null
+  await page.routeWebSocket("**/rpc", (socket) => {
+    const server = socket.connectToServer()
+    socket.onMessage((message) => {
+      if (release === null && String(message).includes('"tag":"StartChat"')) release = () => server.send(message)
+      else server.send(message)
+    })
+    server.onMessage((message) => socket.send(message))
+  })
+  await login(page)
+  await page.goto(`${server().url}/library`)
+  await page.getByRole("link", { name: "Start a chat with Tobin" }).click()
+  await composer(page).fill("Take me across.")
+  await page.getByRole("button", { name: /^Send/ }).click()
+  await expect.poll(() => release !== null).toBe(true)
+  await expect(composer(page)).toHaveValue("")
+  await composer(page).fill("And bring the lantern.")
+  release!()
+  await expect(page).toHaveURL(/\/chats\/[^/?]+$/)
+  await expect(page.getByRole("article", { name: "Your message" })).toContainText("Take me across.")
+  await expect(composer(page)).toHaveValue("And bring the lantern.")
+  await expect(generating(page)).toHaveCount(0, { timeout: 20_000 })
+})

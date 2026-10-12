@@ -5,7 +5,7 @@
 //
 // The text is local state, so typing re-renders nothing else.
 import type { CastCard, EntityId, QueuedMessage } from "@rp/shared/chat.ts"
-import { type KeyboardEvent, memo, useCallback, useMemo, useState } from "react"
+import { type KeyboardEvent, memo, useCallback, useEffect, useMemo, useState } from "react"
 import type { AppError } from "../../errors.ts"
 import { Avatar } from "../../ui/Avatar.tsx"
 import { Button } from "../../ui/Button.tsx"
@@ -14,6 +14,7 @@ import { Popover } from "../../ui/Popover.tsx"
 import { Badge } from "../../ui/Surface.tsx"
 import { Tabs } from "../../ui/Tabs.tsx"
 import { nameOf, recentSpeakers, replySpeaker, useCast } from "./cast.ts"
+import { carriedComposerText, dropCarriedComposerText } from "./composerCarry.ts"
 import type { ChatSession, ChatView, Outcome } from "./session.ts"
 
 const coarsePointer = () => typeof matchMedia !== "undefined" && matchMedia("(pointer: coarse)").matches
@@ -271,7 +272,9 @@ function Queued({
 export function Composer({ session, view }: { session: ChatSession; view: ChatView }) {
   const castView = useCast()
   const { cast } = castView
-  const [text, setText] = useState("")
+  // Text typed on the card's page while this chat was being made comes along (composerCarry.ts).
+  const [text, setText] = useState(() => carriedComposerText(session.id))
+  useEffect(() => dropCarriedComposerText(session.id), [session])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<AppError | null>(null)
   // The speaker picked here; until then, the first card the user plays.
