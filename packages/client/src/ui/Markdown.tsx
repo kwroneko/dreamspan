@@ -33,6 +33,22 @@ const components = { a: Link }
 
 /** A reference definition anywhere can change how earlier text parses: then everything is lexed again. */
 const REFERENCE_DEFINITION = /^ {0,3}\[[^\]]+\]:/m
+const REFERENCE_DEFINITIONS = /^ {0,3}\[[^\]]+\]:.*$/gm
+/** A line opening or closing a fenced code block. */
+const FENCE = /^ {0,3}(?:```|~~~)/gm
+
+/**
+ * Each block is rendered on its own, so a link in one can't see a reference definition
+ * in another: every block gets the text's definitions at its end, where they render as
+ * nothing. Not inside a code block still open (a streaming one), where they'd show.
+ */
+const withDefinitions = (text: string, blocks: Array<string>): Array<string> => {
+  if (!REFERENCE_DEFINITION.test(text)) return blocks
+  const definitions = text.match(REFERENCE_DEFINITIONS)!.join("\n")
+  return blocks.map((block) =>
+    (block.match(FENCE)?.length ?? 0) % 2 === 1 ? block : `${block.replace(/\n*$/, "")}\n\n${definitions}\n`
+  )
+}
 
 /**
  * Splits growing text into blocks, lexing only from the last settled block on: blocks
@@ -70,8 +86,8 @@ export function Markdown({ text, streaming }: { text: string; streaming: boolean
   const [split] = useState(incrementalBlocks)
   const blocks = (markdown: string) => {
     const all = split(markdown)
-    if (!streaming || all.length === 0) return all
-    return [...all.slice(0, -1), remend(all.at(-1)!)]
+    const shown = !streaming || all.length === 0 ? all : [...all.slice(0, -1), remend(all.at(-1)!)]
+    return withDefinitions(markdown, shown)
   }
   return (
     <Streamdown
