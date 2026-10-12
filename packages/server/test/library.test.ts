@@ -2,9 +2,11 @@
 // DATA-MODEL §3.2): edits, variants, chat overrides, re-imports and merges.
 import { assert, describe, it } from "@effect/vitest"
 import { DraftKey } from "@rp/shared/drafts.ts"
-import type { Doc, RefId } from "@rp/shared/library.ts"
+import type { UserId } from "@rp/shared/domain.ts"
+import type { Doc, EntityKind, RefId } from "@rp/shared/library.ts"
 import { Effect } from "effect"
 import * as Database from "../src/db/Database.ts"
+import { docHash, searchText } from "../src/db/documents.ts"
 import { tempDir } from "./support/tempDir.ts"
 
 const database = () =>
@@ -20,6 +22,37 @@ const preset = (main: string, extra: ReadonlyArray<{ identifier: string; content
   samplers: { temperature },
   prompts: [{ identifier: "main", content: main }, ...extra]
 })
+
+/**
+ * A document imported into an upstream ref, as an uploaded file is (ImportFile): what the
+ * upstream did with it, and the change that flowed on to its followers.
+ */
+const importInto = (
+  writer: Database.Writer["Service"],
+  userId: UserId,
+  refId: RefId,
+  kind: EntityKind,
+  doc: Doc,
+  schemaVersion = 1
+) =>
+  writer
+    .ImportFile({
+      userId,
+      intoRefId: refId,
+      kind,
+      label: "",
+      docJson: JSON.stringify(doc),
+      docHash: docHash(doc),
+      searchText: searchText(doc),
+      schemaVersion,
+      sourceName: "file.json",
+      sourceHash: "0".repeat(64),
+      media: [],
+      noteDocJson: null
+    })
+    .pipe(
+      Effect.map((result) => ({ outcome: result.outcome!, change: { ref: result.ref, followers: result.followers } }))
+    )
 
 /** The tag of the error an operation fails with. */
 const tag = <A, E extends { _tag: string }, R>(effect: Effect.Effect<A, E, R>) =>
@@ -54,14 +87,7 @@ const setup = (handle = "ana") =>
         writer.EditRef({ userId, refId, doc: d, expectedRowVersion, message: null, commitDraft: null })
       )
     const reimport = (d: Doc, schemaVersion = 1) =>
-      writer.ImportUpstream({
-        userId,
-        refId: imported.ref.id,
-        doc: d,
-        schemaVersion,
-        sourcePath: null,
-        sourceHash: null
-      })
+      importInto(writer, userId, imported.ref.id, "preset", d, schemaVersion)
     return { writer, reader, userId, upstream: imported.ref, get, doc, rowVersion, edit, reimport }
   })
 
@@ -274,16 +300,7 @@ describe("library", () => {
         "RefOperationRefused"
       )
       assert.strictEqual(
-        yield* tag(
-          ana.writer.ImportUpstream({
-            userId: ana.userId,
-            refId: variant.id,
-            doc: {},
-            schemaVersion: 1,
-            sourcePath: null,
-            sourceHash: null
-          })
-        ),
+        yield* tag(importInto(ana.writer, ana.userId, variant.id, "preset", {})),
         "RefOperationRefused"
       )
       assert.strictEqual(
@@ -399,8 +416,7 @@ describe("library", () => {
           origin: "import",
           sourcePath: null
         })
-      const reimport = (refId: RefId, d: Doc) =>
-        writer.ImportUpstream({ userId, refId, doc: d, schemaVersion: 1, sourcePath: null, sourceHash: null })
+      const reimport = (refId: RefId, d: Doc) => importInto(writer, userId, refId, "card", d)
 
       // JSON.parse makes `__proto__` an own key, as it is in an imported file.
       const proto = yield* entity(JSON.parse('{"ext":{"__proto__":{"a":1},"k":1}}'))
@@ -473,15 +489,7 @@ describe("library", () => {
         sourcePath: null
       })
       const variant = yield* writer.ForkRef({ userId, refId: created.ref.id, label: "Mira", subtitle: "v" })
-      const reimport = (d: Doc) =>
-        writer.ImportUpstream({
-          userId,
-          refId: created.ref.id,
-          doc: d,
-          schemaVersion: 1,
-          sourcePath: null,
-          sourceHash: null
-        })
+      const reimport = (d: Doc) => importInto(writer, userId, created.ref.id, "card", d)
 
       const same = yield* reimport({ name: "Mira" })
       assert.strictEqual(same.outcome, "up_to_date")

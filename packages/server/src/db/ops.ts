@@ -426,25 +426,6 @@ export class WriteOps extends RpcGroup.make(
     success: LibraryRef,
     error: Schema.Union([NotFound, StaleWrite, RefOperationRefused, StorageError])
   }),
-  /**
-   * A new upstream version (a re-import). The upstream ref merges it with the user's own
-   * edits to the upstream (`outcome`), then every ref following it merges the change in,
-   * field by field with diff3 for text. Conflicting refs are left as they were and
-   * report `conflicts` (DATA-MODEL §3.2). Until documents can be migrated, one of another
-   * `schemaVersion` than the entity's is refused.
-   */
-  Rpc.make("ImportUpstream", {
-    payload: {
-      userId: UserId,
-      refId: RefId,
-      doc: Doc,
-      schemaVersion: Schema.Int,
-      sourcePath: Schema.NullOr(Schema.String),
-      sourceHash: Schema.NullOr(Schema.String)
-    },
-    success: MergeAndFlow,
-    error: Schema.Union([NotFound, RefOperationRefused, StorageError])
-  }),
   /** Merges in what the ref follows, if it can be done without conflicts. */
   Rpc.make("MergeFollowed", {
     payload: { userId: UserId, refId: RefId },

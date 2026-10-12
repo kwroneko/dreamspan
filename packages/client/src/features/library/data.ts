@@ -8,10 +8,10 @@ const listAtom = (kind: EntityKind) => AppClient.query("ListLibrary", { kind }, 
 
 /** The kinds the library screen lists, in order. */
 export const LISTED = [
-  { kind: "card", title: "Cards", singular: "card" },
-  { kind: "lorebook", title: "Lorebooks", singular: "lorebook" },
-  { kind: "preset", title: "Presets", singular: "preset" }
-] as const satisfies ReadonlyArray<{ kind: EntityKind; title: string; singular: string }>
+  { kind: "card", title: "Cards" },
+  { kind: "lorebook", title: "Lorebooks" },
+  { kind: "preset", title: "Presets" }
+] as const satisfies ReadonlyArray<{ kind: EntityKind; title: string }>
 
 export const libraryAtom = allOf({ card: listAtom("card"), lorebook: listAtom("lorebook"), preset: listAtom("preset") })
 

@@ -22,20 +22,18 @@ interface ImportSource {
   readonly sourceHash: string
 }
 
-/** A document as stored, its hash and search text already worked out (in a format worker). */
-class EncodedDoc {
+/** A document as stored: its JSON, its hash and its search text. */
+interface EncodedDoc {
   readonly json: string
   readonly hash: string
   readonly searchText: string
-  constructor(json: string, hash: string, searchText: string) {
-    this.json = json
-    this.hash = hash
-    this.searchText = searchText
-  }
 }
 
-const encode = (doc: Doc | EncodedDoc) =>
-  doc instanceof EncodedDoc ? doc : new EncodedDoc(JSON.stringify(doc), docHash(doc), searchText(doc))
+const encode = (doc: Doc): EncodedDoc => ({
+  json: JSON.stringify(doc),
+  hash: docHash(doc),
+  searchText: searchText(doc)
+})
 
 export const makeLibraryWriteHandlers = (bin: Bin) =>
   Effect.gen(function* () {
@@ -46,7 +44,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
     const insertRevision = (options: {
       readonly entityId: string
       readonly schemaVersion: number
-      readonly doc: Doc | EncodedDoc
+      readonly doc: EncodedDoc
       readonly parents: ReadonlyArray<string>
       readonly origin: "import" | "user" | "merge"
       readonly originRef: string | null
@@ -54,7 +52,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
     }) =>
       Effect.gen(function* () {
         const id = uuidv7()
-        const doc = encode(options.doc)
+        const { doc } = options
         yield* sql`INSERT INTO entity_revisions ${sql.insert({
           id,
           entity_id: options.entityId,
@@ -104,7 +102,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
             const merge = yield* insertRevision({
               entityId: ref.entity_id,
               schemaVersion: (yield* revision(ref.head_revision_id)).schema_version,
-              doc: plan.merged,
+              doc: encode(plan.merged),
               parents: [ref.head_revision_id, plan.theirsHead],
               origin: "merge",
               originRef: ref.follows_ref_id,
@@ -162,7 +160,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
       readonly kind: EntityKind
       readonly label: string
       readonly subtitle: string
-      readonly doc: Doc | EncodedDoc
+      readonly doc: EncodedDoc
       readonly schemaVersion: number
       readonly origin: "user" | "import"
       readonly originRef: string | null
@@ -204,7 +202,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
     const importInto = (
       ref: RefRow,
       options: {
-        readonly doc: Doc | EncodedDoc
+        readonly doc: EncodedDoc
         readonly schemaVersion: number
         readonly originRef: string | null
         readonly sourcePath: string | null
@@ -227,7 +225,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
         // Imports form their own line of revisions, which the upstream ref merges in like
         // a variant merges its upstream, so the user's edits to the upstream survive.
         // Importing what was last imported adds nothing to that line.
-        const doc = encode(options.doc)
+        const { doc } = options
         const last = ref.followed_head === null ? null : yield* revision(ref.followed_head)
         if (last === null || last.doc_hash !== doc.hash) {
           yield* insertRevision({
@@ -275,7 +273,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
         const doc: Doc = { ...(JSON.parse(noteDocJson) as Doc), owner: { card: cardEntityId } }
         const existing = yield* lib.cardNote(userId as UserId, cardEntityId)
         if (existing !== null) {
-          yield* importInto(existing, { doc, schemaVersion: NOTE_SCHEMA_VERSION, ...source })
+          yield* importInto(existing, { doc: encode(doc), schemaVersion: NOTE_SCHEMA_VERSION, ...source })
           return yield* reload(existing.id)
         }
         return yield* createUpstream({
@@ -283,7 +281,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
           kind: "note",
           label: "Character's Note",
           subtitle: "",
-          doc,
+          doc: encode(doc),
           schemaVersion: NOTE_SCHEMA_VERSION,
           origin: "import",
           ...source
@@ -297,7 +295,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
           kind,
           label,
           subtitle,
-          doc,
+          doc: encode(doc),
           schemaVersion,
           origin,
           originRef: sourcePath,
@@ -339,7 +337,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
           const edit = yield* insertRevision({
             entityId: ref.entity_id,
             schemaVersion: current.schema_version,
-            doc,
+            doc: encode(doc),
             parents: [ref.head_revision_id],
             origin: "user",
             originRef: null,
@@ -416,11 +414,6 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
           return toLibraryRef(yield* reload(refId))
         }).pipe(transaction(sql, "PromoteOverride")),
 
-      ImportUpstream: ({ userId, refId, doc, schemaVersion, sourcePath, sourceHash }) =>
-        Effect.flatMap(lib.ownedRef(userId, refId), (ref) =>
-          importInto(ref, { doc, schemaVersion, originRef: sourcePath, sourcePath, sourceHash })
-        ).pipe(transaction(sql, "ImportUpstream")),
-
       MergeFollowed: ({ userId, refId }) =>
         Effect.flatMap(lib.ownedRef(userId, refId), mergeAndFlow).pipe(transaction(sql, "MergeFollowed")),
 
@@ -443,7 +436,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
           const merge = yield* insertRevision({
             entityId: ref.entity_id,
             schemaVersion: (yield* revision(ref.head_revision_id)).schema_version,
-            doc,
+            doc: encode(doc),
             parents: [ref.head_revision_id, theirsRevisionId],
             origin: "merge",
             originRef: ref.follows_ref_id,
@@ -472,7 +465,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
               : null
           const keptAvatar = typeof current === "string" ? current : null
           // Stored as the format worker encoded it, unless a card's media change it.
-          let doc: Doc | EncodedDoc = new EncodedDoc(input.docJson, input.docHash, input.searchText)
+          let doc: EncodedDoc = { json: input.docJson, hash: input.docHash, searchText: input.searchText }
           if (kind === "card" && (input.media.length > 0 || keptAvatar !== null)) {
             const card = JSON.parse(input.docJson) as Record<string, unknown>
             const assets: Array<[string, string]> = []
@@ -484,7 +477,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
             }
             // fromEntries, since a URI comes from the file and could be "__proto__".
             if (assets.length > 0) card.asset_media_ids = Object.fromEntries(assets)
-            doc = card
+            doc = encode(card)
           }
           const source: ImportSource = {
             originRef: JSON.stringify({ file: input.sourceName, sha256: input.sourceHash }),
