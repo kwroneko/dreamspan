@@ -7,6 +7,7 @@ import { Effect } from "effect"
 import { sniff } from "../src/importer/detect.ts"
 import * as Importers from "../src/importer/importers.ts"
 import { cardChunk, cardV3, json, png, stCardV2, worldInfo, zip } from "./formats/support.ts"
+import { cardDoc } from "./support/docs.ts"
 
 const parse = (bytes: Uint8Array, name = "upload.bin") =>
   Importers.parseFile(bytes, name).pipe(Effect.provide(Importers.layer), Effect.runPromise)
@@ -132,6 +133,40 @@ describe("the built-in importers", () => {
           Effect.succeed({
             report: new ImportReport({ format: "my-lorebooks", issues: [] }),
             library: { kind: "lorebook", label: "Broken", doc: { entries: "none" }, schemaVersion: 1, note: null },
+            files: []
+          })
+      })
+      const parsed = yield* Importers.parseFile(json(worldInfo()), "x.json")
+      assert.isNull(parsed.library)
+      assert.deepStrictEqual(
+        parsed.report.issues.map((issue) => issue.code),
+        ["file.invalid_document"]
+      )
+    }).pipe(Effect.scoped, Effect.provide(Importers.layer), Effect.runPromise))
+
+  it("never passes on a card note its schema refuses", () =>
+    Effect.gen(function* () {
+      const registry = yield* Importers.Importers
+      yield* registry.disable("st-world-info")
+      yield* registry.register({
+        id: "card",
+        detect: (file) => file.keys.has("entries"),
+        parse: () =>
+          Effect.succeed({
+            report: new ImportReport({ format: "my-cards", issues: [] }),
+            library: {
+              kind: "card",
+              label: "Deep",
+              doc: cardDoc("Deep"),
+              schemaVersion: 1,
+              note: {
+                schema_version: 1,
+                title: "Note",
+                content: "Too deep.",
+                placement: { mode: "depth", depth: 10_001, role: "system" },
+                exportable: true
+              }
+            },
             files: []
           })
       })

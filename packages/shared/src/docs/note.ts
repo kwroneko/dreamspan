@@ -9,6 +9,13 @@ import { LoreRole } from "./lorebook.ts"
 
 export const NOTE_SCHEMA_VERSION = 1
 
+/** The deepest a note goes in the chat: ST's own limit (`MAX_INJECTION_DEPTH`). */
+export const MAX_NOTE_DEPTH = 10_000
+
+/** A depth ST would use: past its limit, the limit; not a whole number from 0, its default, 4. */
+export const noteDepth = (depth: unknown) =>
+  typeof depth === "number" && Number.isSafeInteger(depth) && depth >= 0 ? Math.min(depth, MAX_NOTE_DEPTH) : 4
+
 /**
  * Where a note or card module goes in the context (DESIGN §5.2, proposed): in-chat at a
  * depth with a role; at the tail (depth 0); in a fixed section; or nowhere, read only by a
@@ -18,7 +25,7 @@ export const Placement = Schema.Union([
   /** In-chat, this many messages from the end, sent with this role. */
   Schema.Struct({
     mode: Schema.Literal("depth"),
-    depth: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+    depth: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: MAX_NOTE_DEPTH })),
     role: LoreRole
   }),
   Schema.Struct({ mode: Schema.Literal("tail"), role: LoreRole }),

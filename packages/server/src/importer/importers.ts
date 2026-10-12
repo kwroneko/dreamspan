@@ -5,7 +5,7 @@
 import { createHash } from "node:crypto"
 import type { CardDoc } from "@rp/shared/docs/card.ts"
 import { LoreRole } from "@rp/shared/docs/lorebook.ts"
-import { NOTE_SCHEMA_VERSION, type NoteDoc } from "@rp/shared/docs/note.ts"
+import { MAX_NOTE_DEPTH, NOTE_SCHEMA_VERSION, noteDepth, type NoteDoc } from "@rp/shared/docs/note.ts"
 import { PRESET_SCHEMA_VERSION } from "@rp/shared/docs/preset.ts"
 import { ImportIssue, ImportReport } from "@rp/shared/importReport.ts"
 import type { Doc, EntityKind } from "@rp/shared/library.ts"
@@ -77,18 +77,21 @@ const withIssue = (report: ImportReport, issue: ImportIssue) =>
 const characterNote = (card: CardDoc) => {
   const { depth_prompt: depthPrompt, ...extensions } = card.extensions
   if (!Predicate.isObject(depthPrompt) || typeof depthPrompt.prompt !== "string" || depthPrompt.prompt === "") {
-    return { card, note: null }
+    return { card, note: null, clamped: null }
   }
-  const depth = Number.isSafeInteger(depthPrompt.depth) && (depthPrompt.depth as number) >= 0 ? depthPrompt.depth : 4
+  // A depth past ST's limit goes to the limit, as deep as ST puts anything; one that isn't a
+  // whole number from 0 takes ST's default. Either is reported.
+  const depth = noteDepth(depthPrompt.depth)
+  const clamped = depthPrompt.depth === undefined || depthPrompt.depth === depth ? null : depth
   const role = Schema.is(LoreRole)(depthPrompt.role) ? depthPrompt.role : "system"
   const note: Omit<NoteDoc, "owner"> = {
     schema_version: NOTE_SCHEMA_VERSION,
     title: "Character's Note",
     content: depthPrompt.prompt,
-    placement: { mode: "depth", depth: depth as number, role },
+    placement: { mode: "depth", depth, role },
     exportable: true
   }
-  return { card: { ...card, extensions }, note }
+  return { card: { ...card, extensions }, note, clamped }
 }
 
 const cardImporter: Importer = {
@@ -97,8 +100,8 @@ const cardImporter: Importer = {
   detect: (file) => file.container === "png" || file.container === "zip" || file.keys.has("spec"),
   parse: (bytes, fileName) =>
     Effect.map(importCard(bytes), (imported) => {
-      const { card, note } = characterNote(imported.card)
-      const report = note
+      const { card, note, clamped } = characterNote(imported.card)
+      const noted = note
         ? withIssue(
             imported.report,
             new ImportIssue({
@@ -109,6 +112,18 @@ const cardImporter: Importer = {
             })
           )
         : imported.report
+      const report =
+        clamped === null
+          ? noted
+          : withIssue(
+              noted,
+              new ImportIssue({
+                level: "warning",
+                code: "card.character_note_depth",
+                message: `The Character's Note's depth isn't one ST uses (0 to ${MAX_NOTE_DEPTH}), so it's at depth ${clamped}.`,
+                path: ["data", "extensions", "depth_prompt", "depth"]
+              })
+            )
       return {
         report,
         library: {
@@ -198,9 +213,13 @@ export const failed = (format: string, code: string, message: string) =>
 
 /** What a parse returns for an imported file whose bytes hash to `fileSha256`. */
 export const parsedFile = ({ report, library, files }: Imported, fileSha256: string) => {
-  // The importers build documents to their schemas; one that came out invalid is an importer
-  // bug, and is never stored (the writer trusts that imports were checked here).
-  const check = library && validateDoc(library.kind, library.doc)
+  // The importers build documents to their schemas, the card's note too; one that came out
+  // invalid is an importer bug, and is never stored. The note is checked as a card's, which
+  // the writer makes it.
+  const docCheck = library && validateDoc(library.kind, library.doc)
+  const noteCheck =
+    library?.note && validateDoc("note", { ...library.note, owner: { card: "0190a000-0000-7000-8000-000000000000" } })
+  const check = docCheck && !docCheck.ok ? docCheck : noteCheck
   if (check && !check.ok) {
     return new ParsedFile({
       report: failed(

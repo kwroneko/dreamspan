@@ -3,7 +3,7 @@
 // persona's card. Like every parse, nothing here throws on a file's content: a file that
 // can't be read is a report with an error.
 import { CardDoc } from "@rp/shared/docs/card.ts"
-import { NOTE_SCHEMA_VERSION, type NoteDoc } from "@rp/shared/docs/note.ts"
+import { NOTE_SCHEMA_VERSION, noteDepth, type NoteDoc } from "@rp/shared/docs/note.ts"
 import { ImportReport, ReportBuilder } from "@rp/shared/importReport.ts"
 import type { EntityKind } from "@rp/shared/library.ts"
 import { Effect, Schema } from "effect"
@@ -103,7 +103,7 @@ const personaNote = (persona: StPersona): Omit<NoteDoc, "owner"> | null => {
       : persona.position === 3
         ? { mode: "section", section: "author_note_bottom" }
         : persona.position === 4
-          ? { mode: "depth", depth: persona.depth, role: stRole(persona.role) }
+          ? { mode: "depth", depth: noteDepth(persona.depth), role: stRole(persona.role) }
           : persona.position === 9
             ? { mode: "none" }
             : null

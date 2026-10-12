@@ -5,6 +5,7 @@
 import type { ChatId, EntityId, SlotId } from "@rp/shared/chat.ts"
 import { NOTE_SCHEMA_VERSION, type NoteDoc } from "@rp/shared/docs/note.ts"
 import type { UserId } from "@rp/shared/domain.ts"
+import { validateDoc } from "@rp/shared/editing.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import type { StateEventData } from "@rp/shared/state.ts"
 import { Effect, Schema } from "effect"
@@ -126,6 +127,9 @@ export const makeStImportWriteHandlers = Effect.gen(function* () {
           ...(note.template === undefined || !current ? {} : { template: note.template }),
           ...(note.covers === undefined || !current ? {} : { covers: note.covers })
         }
+        const check = validateDoc("note", doc)
+        if (!check.ok)
+          return yield* Effect.die(new Error(`refusing to store an invalid note: ${check.problems.join("; ")}`))
         const id = uuidv7()
         yield* sql`INSERT INTO entity_revisions ${sql.insert({
           id,

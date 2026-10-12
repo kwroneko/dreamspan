@@ -70,9 +70,10 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
         const { doc } = options
         // Every revision is valid for its kind. Callers check what users send and say why;
         // this is the backstop, so a bug fails loudly rather than storing a broken document.
-        // Imports were checked against the schema in the format worker (importers.ts).
-        if (options.origin !== "import") {
-          const [entity] = yield* sql<{ kind: EntityKind }>`SELECT kind FROM entities WHERE id = ${options.entityId}`
+        // Imports were checked against the schema in the format worker (importers.ts); a note,
+        // small, is checked again here whatever its origin, as the writer completes it.
+        const [entity] = yield* sql<{ kind: EntityKind }>`SELECT kind FROM entities WHERE id = ${options.entityId}`
+        if (options.origin !== "import" || entity!.kind === "note") {
           const check = hasSchema(entity!.kind) ? validateDoc(entity!.kind, JSON.parse(doc.json)) : null
           if (check && !check.ok) {
             return yield* Effect.die(

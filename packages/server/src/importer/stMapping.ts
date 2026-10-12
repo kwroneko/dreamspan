@@ -2,7 +2,7 @@
 // with, who spoke, and the chat state its metadata maps to, as events against what an
 // earlier import made of it. Pure: the import (StImports.ts) does the storing.
 import type { EntityId, SlotId } from "@rp/shared/chat.ts"
-import type { NoteDoc } from "@rp/shared/docs/note.ts"
+import { noteDepth, type NoteDoc } from "@rp/shared/docs/note.ts"
 import { shownText } from "@rp/shared/importReport.ts"
 import type { RefId } from "@rp/shared/library.ts"
 import type { StateEventData } from "@rp/shared/state.ts"
@@ -68,7 +68,7 @@ const placementOf = (position: number, depth: number, role: number): NoteDoc["pl
       ? { mode: "section", section: "after_main_prompt" }
       : position === 2
         ? { mode: "section", section: "before_main_prompt" }
-        : { mode: "depth", depth, role: stRole(role) }
+        : { mode: "depth", depth: noteDepth(depth), role: stRole(role) }
 
 /** A card greeting as a pattern: `{{char}}` filled in, `{{user}}` matching any name. */
 const greetingMatches = (greeting: string, cardName: string, chatGreeting: string) => {

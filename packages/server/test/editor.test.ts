@@ -10,7 +10,7 @@ import { ImportResult } from "@rp/shared/libraryImport.ts"
 import type { RefId } from "@rp/shared/library.ts"
 import { Effect, Exit, Schema } from "effect"
 import { Reader, Writer } from "../src/db/Database.ts"
-import { chunk, png } from "./formats/support.ts"
+import { chunk, png, stCardV2 } from "./formats/support.ts"
 import { client, outcome, serverLayer, serverPort, testConfig } from "./support/config.ts"
 
 const config = testConfig()
@@ -883,6 +883,53 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
         content: "They met at the harbor, at dusk.",
         placement: { mode: "none" }
       })
+    })
+  )
+})
+
+layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" })("a card's imported note", (it) => {
+  it.effect("is always valid: a depth past ST's limit is clamped and reported, and nothing stores an invalid one", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const card = (depth: number) => {
+        const file = stCardV2()
+        ;(file.data.extensions as { depth_prompt: { depth: number } }).depth_prompt.depth = depth
+        return new TextEncoder().encode(JSON.stringify(file))
+      }
+      const imported = (bytes: Uint8Array, into?: RefId) =>
+        Effect.gen(function* () {
+          const response = yield* upload(`/library/import?name=wren.json${into ? `&into=${into}` : ""}`, bytes)
+          return Schema.decodeUnknownSync(ImportResult)(yield* Effect.promise(() => response.json()))
+        })
+      const first = yield* imported(card(2))
+      const again = yield* imported(card(10_001), first.library!.ref.id)
+      assert.include(
+        again.report.issues.map((issue) => issue.code),
+        "card.character_note_depth"
+      )
+      const note = yield* api.OpenEditor({ refId: again.library!.note!.id })
+      assert.deepStrictEqual(note.doc.placement, { mode: "depth", depth: 10_000, role: "system" })
+      assert.isTrue(validateDoc("note", note.doc).ok)
+      // An unrelated edit of the note saves.
+      yield* draft(api, note.ref.id, textField(["content"]), "Still valid.")
+      yield* commit(api, note.ref.id)
+
+      // An import revision of a note is checked in the writer too.
+      const writer = yield* Writer
+      const me = yield* api.Whoami()
+      const exit = yield* Effect.exit(
+        writer.CreateEntity({
+          userId: me.id,
+          kind: "note",
+          label: "Deep",
+          subtitle: "",
+          doc: { ...note.doc, placement: { mode: "depth", depth: 10_001, role: "system" } },
+          schemaVersion: 1,
+          origin: "import",
+          sourcePath: null
+        })
+      )
+      assert.isTrue(Exit.isFailure(exit))
     })
   )
 })
