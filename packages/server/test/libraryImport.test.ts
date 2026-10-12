@@ -17,18 +17,21 @@ import { importCard } from "../src/formats/cardImport.ts"
 import { readChunks } from "../src/formats/png.ts"
 import { defaultLimits } from "../src/formats/safety.ts"
 import { cardChunk, chunk, json, png, run, stCardV2, worldInfo, zip } from "./formats/support.ts"
-import { client, serverLayer, testConfig } from "./support/config.ts"
+import { client, serverLayer, serverPort, testConfig } from "./support/config.ts"
 
 const config = testConfig()
-const base = `http://127.0.0.1:${config.port}`
+/** The test server's address; its port is the one the kernel picked. */
+const base = Effect.map(serverPort, (port) => `http://127.0.0.1:${port}`)
 
 const upload = (bytes: Uint8Array, name: string, into?: RefId, headers: Record<string, string> = {}) =>
-  Effect.promise(() =>
-    fetch(`${base}/library/import?name=${encodeURIComponent(name)}${into ? `&into=${into}` : ""}`, {
-      method: "POST",
-      headers: { "content-type": "application/octet-stream", ...headers },
-      body: bytes
-    })
+  Effect.flatMap(base, (url) =>
+    Effect.promise(() =>
+      fetch(`${url}/library/import?name=${encodeURIComponent(name)}${into ? `&into=${into}` : ""}`, {
+        method: "POST",
+        headers: { "content-type": "application/octet-stream", ...headers },
+        body: bytes
+      })
+    )
   )
 
 const imported = (bytes: Uint8Array, name: string, into?: RefId) =>
@@ -39,14 +42,16 @@ const imported = (bytes: Uint8Array, name: string, into?: RefId) =>
   })
 
 const exported = (refId: RefId, format: string) =>
-  Effect.promise(async () => {
-    const response = await fetch(`${base}/library/export`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ refId, format })
+  Effect.flatMap(base, (url) =>
+    Effect.promise(async () => {
+      const response = await fetch(`${url}/library/export`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ refId, format })
+      })
+      return { status: response.status, response, bytes: new Uint8Array(await response.arrayBuffer()) }
     })
-    return { status: response.status, response, bytes: new Uint8Array(await response.arrayBuffer()) }
-  })
+  )
 
 const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex")
 
@@ -69,7 +74,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
       assert.strictEqual(library.ref.label, "Wren")
       assert.strictEqual(library.note?.kind, "note")
 
-      const api = yield* client(config)
+      const api = yield* client()
       assert.include(
         (yield* api.ListLibrary({ kind: "card" })).map((ref) => ref.id),
         library.ref.id
@@ -171,7 +176,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
       // A 1 MiB avatar, which the edited card then names 200 times as an asset.
       const big = png(chunk("ruMb", Buffer.alloc(1024 * 1024)), cardChunk("chara", stCardV2()))
       const { library } = yield* imported(big, "wren.png")
-      const userId = (yield* (yield* client(config)).Whoami()).id
+      const userId = (yield* (yield* client()).Whoami()).id
       const current = yield* reader.GetRef({ userId, refId: library!.ref.id })
       const uris = Array.from({ length: 200 }, (_, i) => `embeded://assets/copy${i}.png`)
       yield* writer.EditRef({
@@ -265,7 +270,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
       const reader = yield* Reader
       const first = yield* imported(presetFile("Write vivid prose. Do not speak for {{user}}."), "Narrator.json")
       const upstream = first.library!.ref
-      const userId = (yield* (yield* client(config)).Whoami()).id
+      const userId = (yield* (yield* client()).Whoami()).id
       const variant = yield* writer.ForkRef({ userId, refId: upstream.id, label: "Narrator", subtitle: "mine" })
       const current = yield* reader.GetRef({ userId, refId: variant.id })
       const doc = current.doc as PresetDoc
@@ -325,7 +330,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
 
   it.effect("a file nothing recognizes is a report with an error, and nothing is stored", () =>
     Effect.gen(function* () {
-      const api = yield* client(config)
+      const api = yield* client()
       const before = (yield* api.ListLibrary({ kind: "card" })).length
       const result = yield* imported(json({ hello: "world" }), "card.png")
       assert.isNull(result.library)
@@ -341,12 +346,13 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
       const file = png(cardChunk("chara", stCardV2()))
       assert.strictEqual((yield* upload(file, "x.png", undefined, { "content-type": "text/plain" })).status, 415)
       assert.strictEqual((yield* upload(file, "x.png", undefined, { origin: "https://evil.example" })).status, 403)
-      const declared = yield* Effect.promise(() => sendRaw(String(defaultLimits.maxFileBytes + 1), 1))
+      const url = yield* base
+      const declared = yield* Effect.promise(() => sendRaw(url, String(defaultLimits.maxFileBytes + 1), 1))
       assert.strictEqual(declared, 413)
       // A body that keeps coming without a length is cut off once it passes the cap.
-      const streamed = yield* Effect.promise(() => sendRaw(undefined, defaultLimits.maxFileBytes + 1024 * 1024))
+      const streamed = yield* Effect.promise(() => sendRaw(url, undefined, defaultLimits.maxFileBytes + 1024 * 1024))
       assert.notStrictEqual(streamed, 200)
-      const health = yield* Effect.promise(() => fetch(`${base}/healthz`))
+      const health = yield* Effect.promise(() => fetch(`${url}/healthz`))
       assert.strictEqual(health.status, 200)
     })
   )
@@ -356,7 +362,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
  * A raw upload of `size` zero bytes, with `length` as its Content-Length (chunked when
  * undefined). Resolves to the status, or "reset" when the server cuts the connection.
  */
-const sendRaw = (length: string | undefined, size: number) =>
+const sendRaw = (base: string, length: string | undefined, size: number) =>
   new Promise<number | "reset">((resolve) => {
     const req = request(`${base}/library/import?name=big.json`, {
       method: "POST",
@@ -388,8 +394,9 @@ describe("with login required", () => {
   layer(serverLayer(locked), { excludeTestServices: true, timeout: "60 seconds" })("library import", (it) => {
     it.effect("an upload or export without a session is refused", () =>
       Effect.gen(function* () {
+        const url = yield* base
         const response = yield* Effect.promise(() =>
-          fetch(`http://127.0.0.1:${locked.port}/library/import?name=x.png`, {
+          fetch(`${url}/library/import?name=x.png`, {
             method: "POST",
             headers: { "content-type": "application/octet-stream" },
             body: png(cardChunk("chara", stCardV2()))
@@ -398,7 +405,7 @@ describe("with login required", () => {
         assert.strictEqual(response.status, 401)
         assert.isFalse(existsSync(join(locked.dataDir, "media")))
         const exportResponse = yield* Effect.promise(() =>
-          fetch(`http://127.0.0.1:${locked.port}/library/export`, {
+          fetch(`${url}/library/export`, {
             method: "POST",
             headers: { "content-type": "application/json" },
             body: JSON.stringify({ refId: "x", format: "st-preset" })

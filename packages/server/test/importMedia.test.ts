@@ -4,7 +4,6 @@ import {
   copyFileSync,
   existsSync,
   mkdirSync,
-  mkdtempSync,
   readdirSync,
   readFileSync,
   renameSync,
@@ -12,7 +11,6 @@ import {
   utimesSync,
   writeFileSync
 } from "node:fs"
-import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { assert, describe, it } from "@effect/vitest"
 import { uuidv7 } from "@rp/shared/id.ts"
@@ -21,18 +19,22 @@ import { Effect, Schedule, Schema } from "effect"
 import { mediaPath } from "../src/db/media.ts"
 import { storeMedia, sweepMedia } from "../src/importer/mediaFiles.ts"
 import { cardChunk, png, stCardV2 } from "./formats/support.ts"
-import { testConfig, withServer } from "./support/config.ts"
+import { serverPort, testConfig, withServer } from "./support/config.ts"
+import { tempDir } from "./support/tempDir.ts"
 
 const presetFile = readFileSync(new URL("./fixtures/presets/default.json", import.meta.url))
 const cardFile = () => png(cardChunk("chara", stCardV2()))
 
-const upload = (port: number, bytes: Uint8Array, into?: string) =>
-  Effect.promise(() =>
-    fetch(`http://127.0.0.1:${port}/library/import?name=f${into ? `&into=${into}` : ""}`, {
-      method: "POST",
-      headers: { "content-type": "application/octet-stream" },
-      body: bytes
-    })
+/** An upload to the enclosing test server. */
+const upload = (bytes: Uint8Array, into?: string) =>
+  Effect.flatMap(serverPort, (port) =>
+    Effect.promise(() =>
+      fetch(`http://127.0.0.1:${port}/library/import?name=f${into ? `&into=${into}` : ""}`, {
+        method: "POST",
+        headers: { "content-type": "application/octet-stream" },
+        body: bytes
+      })
+    )
   )
 
 /** Every file under the media folder. */
@@ -48,14 +50,14 @@ describe("media files", () => {
   it.live("a refused import, into a ref that isn't there or of another kind, stores no file", () => {
     const config = testConfig()
     return Effect.gen(function* () {
-      const missing = yield* upload(config.port, cardFile(), uuidv7())
+      const missing = yield* upload(cardFile(), uuidv7())
       assert.strictEqual(missing.status, 404)
       assert.deepStrictEqual(mediaFiles(config.dataDir), [])
 
       const preset = Schema.decodeUnknownSync(ImportResult)(
-        yield* Effect.promise(() => Effect.runPromise(upload(config.port, presetFile)).then((r) => r.json()))
+        yield* Effect.flatMap(upload(presetFile), (response) => Effect.promise(() => response.json()))
       )
-      const wrongKind = yield* upload(config.port, cardFile(), preset.library!.ref.id)
+      const wrongKind = yield* upload(cardFile(), preset.library!.ref.id)
       assert.strictEqual(wrongKind.status, 409)
       assert.deepStrictEqual(mediaFiles(config.dataDir), [])
     }).pipe(withServer(config))
@@ -64,7 +66,7 @@ describe("media files", () => {
   it.live("the sweep deletes old files no row names, and keeps recorded and recent ones", () => {
     const config = testConfig()
     return Effect.gen(function* () {
-      yield* upload(config.port, cardFile()).pipe(withServer(config))
+      yield* upload(cardFile()).pipe(withServer(config))
       const [recorded] = mediaFiles(config.dataDir)
       assert.isDefined(recorded)
       const folder = join(config.dataDir, "media", "ab")
@@ -90,7 +92,7 @@ describe("media files", () => {
 
 describe("the sweep, against an import in progress and links", () => {
   const HOUR = 60 * 60 * 1000
-  const fresh = () => mkdtempSync(join(tmpdir(), "rp-sweep-"))
+  const fresh = () => tempDir("sweep")
   const old = (path: string) => utimesSync(path, twoHoursAgo(), twoHoursAgo())
   const sha = "ab".padEnd(64, "c")
   const bytes = new Uint8Array([1, 2, 3])

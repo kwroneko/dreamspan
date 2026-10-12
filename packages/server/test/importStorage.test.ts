@@ -1,9 +1,6 @@
 // The import's storage operations through the real writer and readers (ARCHITECTURE.md
 // §11): ImportFile and ExportSource. The HTTP upload and the parsing are tested in
 // libraryImport.test.ts.
-import { mkdtempSync } from "node:fs"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
 import { DatabaseSync } from "node:sqlite"
 import { assert, describe, it } from "@effect/vitest"
 import type { UserId } from "@rp/shared/domain.ts"
@@ -11,10 +8,11 @@ import type { Doc, RefId } from "@rp/shared/library.ts"
 import { Effect } from "effect"
 import { databaseFile } from "../src/db/connection.ts"
 import * as Database from "../src/db/Database.ts"
+import { tempDir } from "./support/tempDir.ts"
 import { docHash, searchText } from "../src/db/documents.ts"
 
 const fresh = () => {
-  const dataDir = mkdtempSync(join(tmpdir(), "rp-import-"))
+  const dataDir = tempDir("import")
   return { dataDir, layer: Database.layer({ dataDir, readers: 1, allowNetworkFs: false, workers: "source" }) }
 }
 

@@ -6,10 +6,11 @@ import { request } from "node:http"
 import { assert, layer } from "@effect/vitest"
 import { ImportResult } from "@rp/shared/libraryImport.ts"
 import { Effect, Schema } from "effect"
-import { client, login, serverLayer, testConfig } from "./support/config.ts"
+import { client, login, serverLayer, serverPort, testConfig } from "./support/config.ts"
 
 const config = testConfig()
-const base = `http://127.0.0.1:${config.port}`
+/** The test server's address, set by `setup`: its port is the one the kernel picked. */
+let base = ""
 const presetFile = readFileSync(new URL("./fixtures/presets/default.json", import.meta.url))
 
 const upload = (cookie: string) =>
@@ -81,16 +82,17 @@ let parties: Parties | undefined
 const setup = Effect.suspend(() => (parties ? Effect.succeed(parties) : makeParties))
 
 const makeParties = Effect.gen(function* () {
-  const local = yield* client(config)
+  base = `http://127.0.0.1:${yield* serverPort}`
+  const local = yield* client()
   const admin = yield* local.Whoami()
   yield* local.SetPassword({ userId: admin.id, currentPassword: null, newPassword: "alice-password" })
-  const alice = (yield* login(config, admin.handle, "alice-password")).cookie
-  const aliceApi = yield* client(config, { cookie: alice })
+  const alice = (yield* login(admin.handle, "alice-password")).cookie
+  const aliceApi = yield* client({ cookie: alice })
   for (const handle of ["bob", "carol"]) {
     yield* aliceApi.CreateUser({ handle, displayName: handle, role: "user", password: `${handle}-password` })
   }
-  const bob = (yield* login(config, "bob", "bob-password")).cookie
-  const carol = (yield* login(config, "carol", "carol-password")).cookie
+  const bob = (yield* login("bob", "bob-password")).cookie
+  const carol = (yield* login("carol", "carol-password")).cookie
   const imported = yield* Effect.promise(() => Effect.runPromise(upload(carol)).then((r) => r.json()))
   const carolPreset = Schema.decodeUnknownSync(ImportResult)(imported).library!.ref.id
   parties = { alice, bob, carol, carolPreset }

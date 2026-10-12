@@ -15,7 +15,7 @@ import type { LlmRequestId } from "@rp/shared/usage.ts"
 import { Context, Effect, Layer } from "effect"
 import type { Rpc, RpcGroup } from "effect/rpc"
 import { Writer } from "../src/db/Database.ts"
-import { client, login, outcome, serverLayer, testConfig } from "./support/config.ts"
+import { client, login, outcome, serverLayer, serverPort, testConfig } from "./support/config.ts"
 
 type Api = Effect.Success<ReturnType<typeof client>>
 
@@ -31,6 +31,8 @@ interface Party {
   readonly password: string
   /** The session cookie, for the HTTP routes. */
   readonly cookie: string
+  /** The test server's port, for the HTTP routes. */
+  readonly port: number
 }
 
 class Parties extends Context.Service<Parties, { readonly alice: Party; readonly bob: Party }>()(
@@ -341,7 +343,7 @@ const config = testConfig()
 /** A request to an HTTP route as `party`, from this site. */
 const http = (party: Party, path: string, body: Uint8Array | string, contentType: string) =>
   Effect.promise(() =>
-    fetch(`http://127.0.0.1:${config.port}${path}`, {
+    fetch(`http://127.0.0.1:${party.port}${path}`, {
       method: "POST",
       headers: { cookie: party.cookie, "content-type": contentType },
       body
@@ -430,7 +432,8 @@ const seed = Effect.gen(function* () {
         modelId: model.id,
         refId: ref.id,
         requestId,
-        cookie
+        cookie,
+        port: yield* serverPort
       } satisfies Party
     })
 

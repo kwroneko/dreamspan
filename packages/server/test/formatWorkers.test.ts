@@ -1,13 +1,10 @@
 // The format workers (ARCHITECTURE.md §11.3): parsing happens off the main thread, and a
 // worker that dies fails only the file it had.
-import { mkdtempSync } from "node:fs"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
-import { assert, beforeAll, describe, it } from "@effect/vitest"
+import { assert, describe, it } from "@effect/vitest"
 import { Cause, Effect, Exit } from "effect"
-import { buildWorkers } from "../scripts/build-workers.ts"
 import * as Formats from "../src/importer/Formats.ts"
 import * as Importers from "../src/importer/importers.ts"
+import { inject } from "vitest"
 import { cardChunk, json, png, stCardV2 } from "./formats/support.ts"
 
 /** Largest gap between 5 ms timer ticks on this thread while `effect` runs. */
@@ -120,8 +117,8 @@ describe("format workers", () => {
   )
 
   describe("bundled", () => {
-    const bundleDir = mkdtempSync(join(tmpdir(), "rp-bundles-"))
-    beforeAll(() => buildWorkers(bundleDir), 120_000)
+    // Built once per run by the global setup.
+    const bundleDir = inject("bundleDir")
 
     it.live(
       "parse the same way",
