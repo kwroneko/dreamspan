@@ -483,8 +483,10 @@ describe("context assembly from the database", () => {
         writer.SaveDraft({
           userId,
           key: new DraftKey({ targetKind: "entity_field", targetId: note.ref.id, field }),
+          draftId: null,
           content,
           expectedRowVersion,
+          expectedSession: null,
           baseRevision: baseRevisionId
         })
       const position = { chatId: chat.id, slotId: sent.slotId }

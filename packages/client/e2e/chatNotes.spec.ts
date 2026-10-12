@@ -162,8 +162,10 @@ test("editing at a displayed leaf keeps the sibling branch's note revision", asy
       const draft = yield* api.SaveEditorDraft({
         refId: note.id,
         field,
+        draftId: null,
         content: "RAIN",
         expectedRowVersion: null,
+        expectedSession: null,
         baseRevisionId: note.headRevisionId
       })
       yield* api.CommitEditorDrafts({
