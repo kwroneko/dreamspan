@@ -1538,7 +1538,7 @@ export class ReadOps extends RpcGroup.make(
    * marks each card's first note (ST's Character's Note).
    */
   Rpc.make("ChatNoteEntries", {
-    payload: { userId: UserId, chatId: ChatId, cards: Schema.Array(EntityId) },
+    payload: { userId: UserId, chatId: ChatId, slotId: Schema.NullOr(SlotId), cards: Schema.Array(EntityId) },
     success: Schema.Array(
       Schema.Struct({ ref: LibraryRef, doc: Doc, card: Schema.NullOr(EntityId), first: Schema.Boolean })
     ),
@@ -1624,7 +1624,7 @@ export class ReadOps extends RpcGroup.make(
         _tag: Schema.Literal("EarlierAssemblerVersion"),
         assemblerVersion: Schema.Int,
         currentVersion: Schema.Int,
-        snapshot: Schema.String
+        storedSnapshot: Schema.String
       })
     ]),
     error: Schema.Union([NotFound, AssemblyFailed, StorageError])

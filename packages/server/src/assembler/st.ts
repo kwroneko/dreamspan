@@ -302,7 +302,7 @@ export const compose = (input: {
       : null
     const reserved = newChat ? tokensOf(newChat) : 0
     spend(reserved)
-    if (input.chat.at(-1)?.role === "assistant" && input.sendIfEmpty?.text) {
+    if (input.chat.findLast((line) => line.content)?.role === "assistant" && input.sendIfEmpty?.text) {
       const message: StMessage = {
         role: "user",
         content: input.sendIfEmpty.text,

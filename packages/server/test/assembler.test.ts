@@ -505,6 +505,65 @@ describe("the context assembler", () => {
       }
     })
 
+    it("expands main, summary, author and other notes in dependency order regardless of placement", async () => {
+      for (const placement of [
+        { mode: "depth", depth: 0, role: "system" },
+        { mode: "section", section: "before_main_prompt" },
+        { mode: "section", section: "after_main_prompt" }
+      ] as const) {
+        const snapshot = await assembled(
+          chat({
+            preset: preset({ prompts: [{ identifier: "main", role: "system", content: "{{setvar::x::MAIN}}MAIN" }] }),
+            notes: [
+              chatNote("sum", "STORY", placement, {
+                kind: "imported_summary",
+                template: "{{getvar::x}}{{setvar::x::SUM}}{{summary}}"
+              }),
+              authorNote(placement, { content: "{{getvar::x}} is soaked through.{{setvar::x::AUTHOR}}" }),
+              chatNote("other", "{{getvar::x}} follows.", placement)
+            ],
+            events: on("sum", "note-z-author", "other")
+          })
+        )
+        expect(contents(snapshot).join("\n")).toContain("MAINSTORY")
+        expect(contents(snapshot).join("\n")).toContain("SUM is soaked through.")
+        expect(contents(snapshot).join("\n")).toContain("AUTHOR follows.")
+      }
+    })
+
+    it("keeps skipped cache markers out of filler selection and role squashing", async () => {
+      for (const target of [{}, { speaker: "tobin" }, { ordinal: 1 }]) {
+        for (const role of ["system", "user", "assistant"] as const) {
+          for (const placement of [
+            { mode: "section", section: "after_main_prompt", role },
+            { mode: "depth", depth: 0, role }
+          ] as const) {
+            const build = (interval: number) =>
+              assembled(
+                chat({
+                  target,
+                  messages: [
+                    { side: "user", content: "USER" },
+                    { side: "assistant", content: "REPLY" }
+                  ],
+                  preset: preset({
+                    squash_system_messages: true,
+                    send_if_empty: "FILLER",
+                    prompts: [{ identifier: "main", role: "system", content: "MAIN" }]
+                  }),
+                  notes: [authorNote(placement, { interval })],
+                  events: on("note-z-author")
+                })
+              )
+            const absent = await build(0)
+            const skipped = await build(99)
+            expect(skipped.request.messages, JSON.stringify({ target, placement })).toEqual(absent.request.messages)
+            expect(skipped.request.breakpoints.length).toBeLessThanOrEqual(absent.request.breakpoints.length)
+          }
+        }
+      }
+    })
+
     it("keeps a skipped interval's potential cache boundary beside main", async () => {
       for (const section of ["before_main_prompt", "after_main_prompt"] as const) {
         for (const users of [1, 2]) {

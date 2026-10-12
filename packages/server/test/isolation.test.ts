@@ -1436,6 +1436,7 @@ const storage: Record<string, (reader: Reader["Service"], actor: Party, owner: P
         })
         yield* refused(reader.RebuildContext({ userId: actor.user.id, snapshot }), "NotFound")
         const rebuilt = yield* reader.RebuildContext({ userId: owner.user.id, snapshot })
+        assert.ok(rebuilt._tag === "Rebuilt")
         assert.deepStrictEqual(JSON.parse(rebuilt.snapshot), JSON.parse(snapshot))
       })
   }

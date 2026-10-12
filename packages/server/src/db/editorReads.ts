@@ -20,7 +20,8 @@ export const makeEditorReadHandlers = Effect.gen(function* () {
     OpenEditor: ({ userId, refId, chatNote }) =>
       Effect.gen(function* () {
         const owned = yield* lib.ownedRef(userId, refId)
-        const ref = chatNote ? yield* noteAt(sql, lib, userId, owned, chatNote) : owned
+        const resolved = chatNote ? yield* noteAt(sql, lib, userId, owned, chatNote) : null
+        const ref = resolved?.ref ?? owned
         // The chats a change to this ref reaches: those whose state names it, those with an
         // override following it, and, for the entity's upstream, those the card joined. A
         // chat counts even if the card left it since: better to say too many than too few.
@@ -42,7 +43,7 @@ export const makeEditorReadHandlers = Effect.gen(function* () {
         const variants = yield* lib.refsWhere("r.entity_id = ? AND r.ref_kind <> 'chat_override'", [ref.entity_id])
         return new EditorSnapshot({
           ref: toLibraryRef(ref),
-          doc: yield* lib.loadDoc(ref.head_revision_id),
+          doc: resolved?.doc ?? (yield* lib.loadDoc(ref.head_revision_id)),
           usedByChats: usage!.n,
           drafts: draftRows.map(drafts.toDraft),
           variants: variants.map(toLibraryRef)
@@ -72,7 +73,7 @@ export const makeEditorReadHandlers = Effect.gen(function* () {
         )
       }).pipe(query("ListCardNotes")),
 
-    ChatNoteEntries: ({ userId, chatId, cards }) =>
+    ChatNoteEntries: ({ userId, chatId, slotId, cards }) =>
       Effect.gen(function* () {
         const [chat] = yield* sql<{ n: number }>`
           SELECT count(*) AS n FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`
@@ -86,7 +87,13 @@ export const makeEditorReadHandlers = Effect.gen(function* () {
         )
         const notes = yield* Effect.forEach(
           rows.toSorted((a, b) => (a.entity_id < b.entity_id ? -1 : 1)),
-          (row) => Effect.map(lib.loadDoc(row.head_revision_id), (doc) => ({ row, doc }))
+          (row) =>
+            Effect.gen(function* () {
+              const doc = yield* lib.loadDoc(row.head_revision_id)
+              if ((doc.owner as { chat?: string } | undefined)?.chat !== chatId) return { row, doc }
+              const resolved = yield* noteAt(sql, lib, userId, row, { chatId, slotId })
+              return { row: resolved.ref, doc: resolved.doc }
+            })
         )
         const cardOf = (doc: Doc) => {
           const owner = doc["owner"] as { card?: EntityId } | undefined

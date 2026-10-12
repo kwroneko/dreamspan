@@ -136,16 +136,17 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
         const played = new Set(state.playedByMe)
         const cards = state.participants.filter((entity) => !played.has(entity)) as Array<EntityId>
         const switches = noteSwitches(events)
-        const entries = yield* reader.ChatNoteEntries({ userId: id, chatId, cards })
+        const entries = yield* reader.ChatNoteEntries({ userId: id, chatId, slotId, cards })
         return yield* Effect.forEach(entries, (entry) =>
           Effect.gen(function* () {
             const revisionId = state.noteRevisions[entry.ref.entityId] as RevisionId | undefined
-            const resolved = revisionId
-              ? {
-                  ref: { ...entry.ref, headRevisionId: revisionId },
-                  doc: yield* reader.GetRevisionDoc({ userId: id, refId: entry.ref.id, revisionId })
-                }
-              : entry
+            const resolved =
+              entry.card !== null && revisionId
+                ? {
+                    ref: { ...entry.ref, headRevisionId: revisionId },
+                    doc: yield* reader.GetRevisionDoc({ userId: id, refId: entry.ref.id, revisionId })
+                  }
+                : entry
             return new ChatNote({ ...entry, ...resolved, active: switches.get(entry.ref.entityId) ?? entry.first })
           })
         )

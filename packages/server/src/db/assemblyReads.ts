@@ -33,7 +33,7 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
             _tag: "EarlierAssemblerVersion" as const,
             assemblerVersion: taken.assemblerVersion ?? 0,
             currentVersion: ASSEMBLER_VERSION,
-            snapshot: json
+            storedSnapshot: json
           }
         }
         if (!taken.sources) {

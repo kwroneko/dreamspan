@@ -252,6 +252,32 @@ export const compareAssembly = async (
     },
     { name: "default, author's note after main as user", presets: ["default"], authorNote: authorNote(0, 4, 1) },
     { name: "default, author's note before main as assistant", presets: ["default"], authorNote: authorNote(2, 4, 2) },
+    {
+      name: "default, impersonate interval 2",
+      presets: ["default"],
+      authorNote: authorNote(1, 0, 0, 2),
+      generate: "impersonate"
+    },
+    { name: "default, skipped after main as user", presets: ["default"], authorNote: authorNote(0, 4, 1, 99) },
+    {
+      name: "default, summary writes the author's variable",
+      presets: ["default"],
+      summary: { ...summary(0), template: "{{setvar::x::SUM}}{{summary}}" },
+      authorNote: { ...authorNote(1, 0, 0), text: "{{getvar::x}} is soaked through; {{char}} pretends not to notice." }
+    },
+    {
+      name: "full, skipped section as user with squash",
+      presets: ["full"],
+      postProcessing: "none",
+      authorNote: authorNote(0, 4, 1, 99)
+    },
+    {
+      name: "full, skipped depth-zero note before impersonation filler",
+      presets: ["full"],
+      postProcessing: "none",
+      authorNote: authorNote(1, 0, 0, 99),
+      generate: "impersonate"
+    },
     ...["default", "full"].flatMap((preset) =>
       (["impersonate", "swipe"] as const).map((generate) => ({
         name: `${preset}, ${generate}`,

@@ -33,6 +33,7 @@ import {
 } from "./providers.ts"
 import type { GenerationDefaults } from "@rp/shared/generation.ts"
 import { readDefaults } from "./generationSettings.ts"
+import { noteHistory } from "./noteHistory.ts"
 import { withoutPurged } from "./stateRefs.ts"
 
 const decodeEvent = Schema.decodeUnknownEffect(FoldableEvent)
@@ -192,6 +193,7 @@ export const sqlSources = (
     userMessages: [] as Array<NonNullable<SourcePins["userMessages"]>[number]>
   }
 
+  const history = noteHistory(sql, userId, chatId)
   const live = AssemblySources.of({
     target: sql<{
       depth: number
@@ -353,26 +355,17 @@ export const sqlSources = (
         )
       }),
 
-    // A revision's first parents, which never change: the same from a pinned revision.
     noteHistory: (entity, revision, limit) =>
-      Effect.gen(function* () {
-        const rows = yield* sql<{ id: string; doc_json: string }>`
-          WITH RECURSIVE chain(id, n) AS (
-            SELECT v.id, 1 FROM entity_revisions v JOIN entities e ON e.id = v.entity_id
-            WHERE v.id = ${revision} AND v.entity_id = ${entity} AND e.owner_user_id = ${userId} AND e.kind = 'note'
-            UNION ALL
-            SELECT json_extract(v.parents, '$[0]'), c.n + 1 FROM entity_revisions v JOIN chain c ON v.id = c.id
-            WHERE json_extract(v.parents, '$[0]') IS NOT NULL AND c.n < ${limit}
+      history
+        .noteHistory(entity, revision, limit)
+        .pipe(
+          Effect.flatMap((rows) =>
+            Effect.forEach(rows, (row) =>
+              Effect.map(decoded<NoteDoc>(decodeNote(row.doc), "A note"), (doc) => ({ revision: row.revision, doc }))
+            )
           )
-          SELECT v.id, v.doc_json FROM chain c JOIN entity_revisions v ON v.id = c.id
-          WHERE v.entity_id = ${entity} ORDER BY c.n`
-        return yield* Effect.forEach(rows, (row) =>
-          Effect.map(decoded<NoteDoc>(decodeNote(JSON.parse(row.doc_json)), "A note"), (doc) => ({
-            revision: row.id,
-            doc
-          }))
-        )
-      }),
+        ),
+    onPath: history.onPath,
 
     // A message's side as the history reads it (`sideOf` in the stages): its speaker's, when
     // that's one of the cast, else its first version's writer.
@@ -397,20 +390,6 @@ export const sqlSources = (
         const count = row?.n ?? 0
         pins.userMessages.push({ key: keyOf(leaf, personas, characters), count })
         return count
-      }),
-
-    // The path's slots never change their parents: the same on a rebuild.
-    onPath: (leaf, slots) =>
-      Effect.gen(function* () {
-        if (leaf === null || slots.length === 0) return new Set<string>()
-        const rows = yield* sql<{ id: string }>`
-          WITH RECURSIVE path(id) AS (
-            SELECT id FROM slots WHERE id = ${leaf} AND chat_id = ${chatId} AND ${owned}
-            UNION ALL
-            SELECT s.parent_slot_id FROM slots s JOIN path p ON s.id = p.id WHERE s.parent_slot_id IS NOT NULL
-          )
-          SELECT id FROM path WHERE id IN ${sql.in([...slots])}`
-        return new Set(rows.map((row) => row.id))
       }),
 
     model: (binding) =>

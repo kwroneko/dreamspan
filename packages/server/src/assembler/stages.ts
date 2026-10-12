@@ -1,10 +1,10 @@
 // The built-in assembler stages, in registration order (ARCHITECTURE §15 lists them).
 import type { ChatMessage } from "@rp/shared/macros/context.ts"
-import type { NoteDoc } from "@rp/shared/docs/note.ts"
 import type { CardFields } from "@rp/shared/macros/context.ts"
 import type { VariableEffect } from "@rp/shared/macros/variables.ts"
 import { type ChatState, foldState, noteSwitches } from "@rp/shared/state.ts"
 import { Effect, type Scope } from "effect"
+import { SUMMARY_HISTORY, summaryOnPath as selectSummary } from "./summary.ts"
 import { placeBreakpoints } from "./breakpoints.ts"
 import { cardBlock, directive, personaBlock } from "./layouts.ts"
 import { cardFields, makeMacroEnvironment, type MessagePosition, type Names } from "./macros.ts"
@@ -204,9 +204,6 @@ const due = (interval: number | undefined, userMessages: number) =>
   interval === 1 ||
   (interval > 1 && userMessages >= interval && userMessages % interval === 0)
 
-/** How many of a summary's revisions are looked through for one on the path. */
-const SUMMARY_HISTORY = 1_000
-
 /**
  * An imported summary as ST would send it on this path: the newest of its texts saved on a
  * message of the path, up to the leaf (DATA-MODEL §15, invariant 5); none when the path has
@@ -223,10 +220,8 @@ const summaryOnPath = (notes: ReadonlyArray<NoteInput>, target: Target) =>
         const history = yield* sources.noteHistory(note.entity, note.revision, SUMMARY_HISTORY)
         const saved = [...new Set(history.flatMap((r) => (r.doc.source_slot_id ? [r.doc.source_slot_id] : [])))]
         const onPath = yield* sources.onPath(leaf, saved)
-        const found = history.find(({ doc }) => doc.source_slot_id === undefined || onPath.has(doc.source_slot_id))
-        if (!found) return []
-        const doc: NoteDoc = { ...note.doc, content: found.doc.content }
-        return [{ ...note, revision: found.revision, doc }]
+        const found = selectSummary(note.doc, history, onPath)
+        return found ? [{ ...note, ...found }] : []
       })
     )
     return placed.flat()
@@ -846,18 +841,24 @@ const placedNotes = (assembly: Assembly, cards: ReadonlyArray<CardInput>) => {
       const place = placeOf(note)
       if (owner === undefined || place === null) return []
       const skipped = assembly.skippedNotes?.includes(note)
-      if (note === summary && !skipped) return [{ text: () => summaryText(assembly, note), place }]
-      const text = skipped
-        ? {
-            text: "",
-            piece: env.verbatim(
-              `note:${note.entity}`,
-              { kind: "note", entity: note.entity, revision: note.revision },
-              ""
-            )
-          }
-        : noteText(assembly, note, owner)
-      return text ? [{ text: () => text, place }] : []
+      return [
+        {
+          place,
+          text: () =>
+            skipped
+              ? {
+                  text: "",
+                  piece: env.verbatim(
+                    `note:${note.entity}`,
+                    { kind: "note", entity: note.entity, revision: note.revision },
+                    ""
+                  )
+                }
+              : note === summary
+                ? summaryText(assembly, note)
+                : noteText(assembly, note, owner)
+        }
+      ]
     })
 }
 
@@ -1087,8 +1088,8 @@ const messagesStage = sync("messages", (assembly) => {
     if (message.kind === "volatile") barrier = true
     return barrier ? { ...message, kind: "volatile" as const } : message
   })
-  if (doc.squash) messages = squash(messages)
   messages = messages.filter((m) => m.content)
+  if (doc.squash) messages = squash(messages)
   assembly.postNames = {
     user: names.user,
     char: names.char,

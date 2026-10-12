@@ -121,16 +121,17 @@ describe("context assembly from the database", () => {
     Effect.gen(function* () {
       const { reader, userId, assemble } = yield* setup()
       const built = yield* assemble()
-      for (const version of [undefined, 0]) {
+      for (const version of [undefined, 0, 1]) {
         const legacy = { ...built, assemblerVersion: version, sources: { ...built.sources, userMessages: [] } }
         const json = JSON.stringify(legacy)
         const result = yield* reader.RebuildContext({ userId, snapshot: json })
-        assert.strictEqual(result._tag, "EarlierAssemblerVersion")
-        assert.strictEqual(result.snapshot, json)
+        assert.strictEqual("snapshot" in result, false)
+        assert.ok(result._tag === "EarlierAssemblerVersion")
+        assert.strictEqual(result.storedSnapshot, json)
       }
-      assert.strictEqual(built.assemblerVersion, 1)
+      assert.strictEqual(built.assemblerVersion, 2)
       const rebuilt = yield* reader.RebuildContext({ userId, snapshot: JSON.stringify(built) })
-      assert.strictEqual(rebuilt._tag, "Rebuilt")
+      assert.ok(rebuilt._tag === "Rebuilt")
       assert.deepStrictEqual(JSON.parse(rebuilt.snapshot), built)
     }).pipe(Effect.provide(database()))
   )
@@ -306,6 +307,7 @@ describe("context assembly from the database", () => {
       })
       assert.strictEqual((JSON.parse(snapshot) as ContextSnapshot).sources?.userMessages?.[0]?.count, 0)
       const rebuilt = yield* reader.RebuildContext({ userId, snapshot })
+      assert.ok(rebuilt._tag === "Rebuilt")
       assert.deepStrictEqual(JSON.parse(rebuilt.snapshot), JSON.parse(snapshot))
     }).pipe(Effect.provide(database()))
   )
@@ -448,6 +450,7 @@ describe("context assembly from the database", () => {
       // The count is pinned: deleting a message of the user's since rebuilds the same context.
       yield* writer.DeleteMessage({ userId, slotId: second.slotId })
       const rebuilt = yield* reader.RebuildContext({ userId, snapshot: JSON.stringify(snapshot) })
+      assert.ok(rebuilt._tag === "Rebuilt")
       assert.deepStrictEqual(JSON.parse(rebuilt.snapshot), snapshot)
     }).pipe(Effect.provide(database()))
   )
@@ -549,11 +552,13 @@ describe("context assembly from the database", () => {
       const now = yield* assemble(userId, first.frozen)
       assert.notDeepEqual(texts(now), texts(first))
       const rebuilt = yield* reader.RebuildContext({ userId, snapshot: JSON.stringify(first) })
+      assert.ok(rebuilt._tag === "Rebuilt")
       assert.deepStrictEqual(JSON.parse(rebuilt.snapshot), first)
 
       // A card in the bin can come back, and its revisions never changed: it still rebuilds.
       yield* writer.DeleteEntity({ userId, entityId: mira.entityId as EntityId })
       const binned = yield* reader.RebuildContext({ userId, snapshot: JSON.stringify(first) })
+      assert.ok(binned._tag === "Rebuilt")
       assert.deepStrictEqual(JSON.parse(binned.snapshot), first)
       // So does a context without a character, which reads no card's notes.
       const empty = yield* assemble()
@@ -562,6 +567,7 @@ describe("context assembly from the database", () => {
         [tobin.entityId]
       )
       const again2 = yield* reader.RebuildContext({ userId, snapshot: JSON.stringify(empty) })
+      assert.ok(again2._tag === "Rebuilt")
       assert.deepStrictEqual(JSON.parse(again2.snapshot), empty)
 
       // Only by the chat's owner.

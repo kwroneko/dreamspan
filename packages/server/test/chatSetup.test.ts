@@ -380,7 +380,7 @@ describe("chat setup", () => {
       // Another user's reads and writes see nothing of it.
       const bo = yield* writer.EnsureUser({ handle: "bo", displayName: "Bo" })
       const refused = yield* Effect.flip(
-        reader.ChatNoteEntries({ userId: bo.id as UserId, chatId, cards: [miraRef.entityId] })
+        reader.ChatNoteEntries({ userId: bo.id as UserId, chatId, slotId: null, cards: [miraRef.entityId] })
       )
       assert.strictEqual(refused._tag, "NotFound")
       const planted = yield* Effect.flip(writer.CreateChatNote({ userId: bo.id as UserId, chatId, title: "Planted" }))

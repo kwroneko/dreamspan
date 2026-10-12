@@ -113,9 +113,10 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps) => {
     CommitEditorDrafts: ({ userId, refId, expectedRowVersion, fields, message, chatNote }) =>
       Effect.gen(function* () {
         const owned = yield* lib.ownedRef(userId, refId)
-        const ref = chatNote ? yield* noteAt(sql, lib, userId, owned, chatNote) : owned
+        const resolved = chatNote ? yield* noteAt(sql, lib, userId, owned, chatNote) : null
+        const ref = resolved?.ref ?? owned
         yield* steps.checkRowVersion(ref, expectedRowVersion)
-        const head = yield* lib.loadDoc(ref.head_revision_id)
+        const head = resolved?.doc ?? (yield* lib.loadDoc(ref.head_revision_id))
         const rows = []
         for (const { field, draftId, expectedRowVersion: expected } of fields) {
           const row = yield* drafts.find(userId, new DraftKey({ targetKind: "entity_field", targetId: refId, field }))
@@ -172,7 +173,9 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps) => {
         const change = yield* chatNote
           ? Effect.gen(function* () {
               const current = yield* steps.revision(ref.head_revision_id)
-              const encoded = steps.encode(valid.doc)
+              // The binding supplies applicability for an edit; the import's source no longer does.
+              const { source_slot_id: _source, ...edited } = valid.doc
+              const encoded = steps.encode(valid.doc.kind === "imported_summary" ? edited : valid.doc)
               if (encoded.hash === current.doc_hash) return new RefChange({ ref: toLibraryRef(ref), followers: [] })
               const revision = yield* steps.insertRevision({
                 entityId: ref.entity_id,

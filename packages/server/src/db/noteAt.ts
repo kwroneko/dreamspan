@@ -4,6 +4,8 @@ import type { ChatNotePosition } from "@rp/shared/editorApi.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import type { makeLibraryQueries, RefRow } from "./library.ts"
+import { SUMMARY_HISTORY, summaryOnPath } from "../assembler/summary.ts"
+import { noteHistory } from "./noteHistory.ts"
 import { NotFound } from "./ops.ts"
 
 export const noteAt = Effect.fnUntraced(function* (
@@ -41,10 +43,22 @@ export const noteAt = Effect.fnUntraced(function* (
         AND (e.slot_id IS NULL OR (p.id IS NOT NULL AND s.deleted_at IS NULL))
         AND (e.version_id IS NULL OR e.version_id = s.selected_version_id)
       ORDER BY coalesce(s.depth, -1) DESC, e.seq DESC LIMIT 1`
-  if (!binding) return ref
   const [revision] = yield* sql<{
     id: string
-  }>`SELECT id FROM entity_revisions WHERE id = ${binding.revision} AND entity_id = ${ref.entity_id}`
-  if (!revision) return yield* new NotFound({ entity: "revision", id: binding.revision })
-  return { ...ref, head_revision_id: revision.id }
+  }>`SELECT id FROM entity_revisions WHERE id = ${binding?.revision ?? ref.head_revision_id} AND entity_id = ${ref.entity_id}`
+  if (!revision) return yield* new NotFound({ entity: "revision", id: binding?.revision ?? ref.head_revision_id })
+  const current = yield* lib.loadDoc(revision.id)
+  let doc = current
+  let selected = revision.id
+  if (current.kind === "imported_summary" && current.source_slot_id !== undefined) {
+    const sources = noteHistory(sql, userId, chatId)
+    const history = yield* sources.noteHistory(ref.entity_id, revision.id, SUMMARY_HISTORY)
+    const slots = [
+      ...new Set(history.flatMap(({ doc }) => (typeof doc.source_slot_id === "string" ? [doc.source_slot_id] : [])))
+    ]
+    const found = summaryOnPath(current, history, yield* sources.onPath(slotId, slots))
+    doc = found?.doc ?? { ...current, content: "" }
+    selected = found?.revision ?? revision.id
+  }
+  return { ref: { ...ref, head_revision_id: selected }, doc }
 })
