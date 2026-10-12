@@ -968,7 +968,7 @@ The chat RPCs, live updates and generation. Contract in `@rp/shared/chatApi.ts` 
 - **Chats:** `ListChats` (most recent first, by last message, else creation; paged by `(time, id)`), `CreateChat` (a title only, for now), `GetChat`, `DeleteChat`.
 - **Reading:** `ReadPath`, below, and `ListVersions` for the version picker.
 - **Writing:**
-  - `SendMessage` and `Generate` add a message under a tip: the user's text, or a model reply that streams. Without `branch` the tip must be the active leaf (`LeafMoved` otherwise); with it, any slot, which starts a branch (DESIGN §3.2).
+  - `SendMessage` and `Generate` add a message under a tip: the user's text, or a model reply that streams. Without `branch` the tip must be the active leaf (`LeafMoved` otherwise); with it, any slot, which starts a branch (DESIGN §3.2). `SendMessage` onto a reply still generating is `ChatBusy`, provisionally (below).
   - `Regenerate` is a swipe: a new model version of a slot, selected and streamed. `EditVersion` saves an edit as a new version "edited from" its source, and `WriteVersion` is "write your own". All three check the slot's row version (`StaleWrite`), through the writer's `AddSelectedVersion`.
   - `SelectVersion` (row version), and `AmendVersion` for a finished user-written version (`NotAmendable` otherwise; DESIGN §3.1). A version's `rowVersion` is one more than the number of times it was amended, counted from `version_history`, since `versions` has no `row_version` column.
   - `StopGeneration` stops one generation and returns the version as saved.
@@ -1027,4 +1027,4 @@ The chat RPCs, live updates and generation. Contract in `@rp/shared/chatApi.ts` 
 - **What it found:** a list that stopped following a growing reply, then (with a wider threshold) one that wouldn't let go when the user scrolled up mid-stream; paging that read older history on every open; and races in its own measurements, found by mutating the client in review.
 - **Not covered yet:** bursty and slow streams, parallel swipes streaming under one slot, WebKit, CPU throttling for phone-class devices, real phones (CLIENT-FRAMEWORK §7), and CI: the full run takes about four minutes plus the build.
 
-**Open decisions this leaves open:** sending into a chat that's still generating (DESIGN §2.2, [O]): the server allows it, and the client disables Send while the chat's own leaf is generating. "Start over" with a card (DESIGN §2.1, [O]) isn't built.
+**Open decisions this leaves open:** sending into a chat that's still generating (DESIGN §2.2, [O]: queue or cancel?). Provisionally, until the owner decides, `SendMessage` onto a message whose selected version is still generating fails with `ChatBusy`, in one place (the `refuseWhileGenerating` flag the handler passes to `AppendMessage`), and the client disables Send then. `Generate` isn't refused. "Start over" with a card (DESIGN §2.1, [O]) isn't built.

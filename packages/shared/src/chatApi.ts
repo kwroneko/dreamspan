@@ -12,6 +12,16 @@ export class GenerationUnavailable extends Schema.TaggedError<GenerationUnavaila
   message: Schema.String
 }) {}
 
+/**
+ * A message onto a message still being generated. Provisional: whether such a message
+ * should queue or cancel the reply is an open decision (DESIGN §2.2); until it's made,
+ * the server refuses it, as the client's disabled Send does.
+ */
+export class ChatBusy extends Schema.TaggedError<ChatBusy>()("ChatBusy", {
+  chatId: Schema.String,
+  versionId: Schema.String
+}) {}
+
 /** Only a finished user-written version is amended in place; others get a new version (DESIGN §3.1). */
 export class NotAmendable extends Schema.TaggedError<NotAmendable>()("NotAmendable", {
   versionId: Schema.String
@@ -111,7 +121,7 @@ export class ChatApi extends RpcGroup.make(
   Rpc.make("SendMessage", {
     payload: { chatId: ChatId, parentSlotId: Schema.NullOr(SlotId), branch: Schema.Boolean, content: Schema.String },
     success: Appended,
-    error: Schema.Union([NotFound, LeafMoved, ServerError])
+    error: Schema.Union([NotFound, LeafMoved, ChatBusy, ServerError])
   }),
   /** A model reply under `parentSlotId`, streamed to subscribers; `branch` as for SendMessage. */
   Rpc.make("Generate", {

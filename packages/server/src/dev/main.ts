@@ -31,7 +31,7 @@ const options = Config.all({
 Effect.gen(function* () {
   if (process.env.NODE_ENV === "production") return yield* new FakeGeneratorInProduction()
   const { tokensPerSecond, tokens } = yield* options
-  const generator = Option.match(tokensPerSecond, {
+  const generator: Layer.Layer<Generator> = Option.match(tokensPerSecond, {
     onNone: () => Generator.none,
     onSome: (rate) => FakeGenerator.layer({ tokensPerSecond: rate, tokens })
   })

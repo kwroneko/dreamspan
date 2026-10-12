@@ -7,7 +7,7 @@
 // NotFound, so their existence doesn't leak.
 import { Chat, ChatId, ChatKind, EntityId, NewVersion, PathEntry, SlotId, Version, VersionId } from "@rp/shared/chat.ts"
 import { VersionError, VersionStatus } from "@rp/shared/chat.ts"
-import { NotAmendable, PathRange, PathWindow } from "@rp/shared/chatApi.ts"
+import { ChatBusy, NotAmendable, PathRange, PathWindow } from "@rp/shared/chatApi.ts"
 import { User, UserAccount, UserId, UserRole } from "@rp/shared/domain.ts"
 import { BinItem, RecoveredText } from "@rp/shared/bin.ts"
 import { Draft, DraftKey, DraftState } from "@rp/shared/drafts.ts"
@@ -647,10 +647,12 @@ export class WriteOps extends RpcGroup.make(
       parentSlotId: Schema.NullOr(SlotId),
       branch: Schema.Boolean,
       version: NewVersion,
-      commitDraft: CommitDraft
+      commitDraft: CommitDraft,
+      /** Refuse with ChatBusy when the parent's selected version is still generating. */
+      refuseWhileGenerating: Schema.optionalKey(Schema.Boolean)
     },
     success: AppendResult,
-    error: Schema.Union([NotFound, LeafMoved, StorageError])
+    error: Schema.Union([NotFound, LeafMoved, ChatBusy, StorageError])
   }),
   /**
    * A new version in place: a swipe, an edit, or "write your own" (DESIGN §3.1). An

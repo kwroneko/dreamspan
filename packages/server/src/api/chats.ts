@@ -112,7 +112,10 @@ export const makeChatHandlers = Effect.gen(function* () {
         parentSlotId,
         branch,
         version,
-        commitDraft: null
+        commitDraft: null,
+        // Provisional, until DESIGN §2.2 decides between queueing and cancelling: the one
+        // place a message onto a reply still generating is refused.
+        refuseWhileGenerating: true
       })
       const entry = yield* publishSlot(user, result.slotId)
       hub.publish(chatId, { _tag: "Chat", chat: result.chat })
@@ -161,14 +164,16 @@ export const makeChatHandlers = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* needGenerator
         const id = yield* userId
-        const result = yield* writer.AppendMessage({
-          userId: id,
-          chatId,
-          parentSlotId,
-          branch,
-          version: generating,
-          commitDraft: null
-        })
+        const result = yield* writer
+          .AppendMessage({
+            userId: id,
+            chatId,
+            parentSlotId,
+            branch,
+            version: generating,
+            commitDraft: null
+          })
+          .pipe(Effect.catchTag("ChatBusy", (busy) => Effect.die(busy)))
         yield* generations.start({ userId: id, chatId, slotId: result.slotId, versionId: result.version.id })
         const entry = yield* publishSlot(id, result.slotId)
         hub.publish(chatId, { _tag: "Chat", chat: result.chat })

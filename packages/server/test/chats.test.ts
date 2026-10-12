@@ -420,6 +420,25 @@ describe("chats", () => {
     }).pipe(Effect.scoped, withGenerator(config, slow))
   })
 
+  it.live("a message onto a reply still generating is refused (provisional, DESIGN §2.2)", () => {
+    const config = testConfig()
+    const slow = FakeGenerator.layer({ tokensPerSecond: 50, tokens: 5000 })
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const { chat, slots } = yield* linearChat(api, 1)
+      const { entry } = yield* api.Generate({ chatId: chat.id, parentSlotId: slots[0]!, branch: false })
+      const send = api.SendMessage({ chatId: chat.id, parentSlotId: entry.slotId, branch: false, content: "too soon" })
+      assert.strictEqual(yield* outcome(send), "ChatBusy")
+      // As a branch from it, too: the reply is still being written.
+      assert.strictEqual(
+        yield* outcome(api.SendMessage({ chatId: chat.id, parentSlotId: entry.slotId, branch: true, content: "x" })),
+        "ChatBusy"
+      )
+      yield* api.StopGeneration({ versionId: entry.version.id })
+      assert.strictEqual(yield* outcome(send), "ok")
+    }).pipe(Effect.scoped, withGenerator(config, slow))
+  })
+
   it.live("a failed generation becomes a failed version with its cause and its text so far", () => {
     const config = testConfig()
     const failing = Layer.succeed(Generator)(

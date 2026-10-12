@@ -7,7 +7,7 @@ import { Effect } from "effect"
 import { SqlClient, type SqlError } from "effect/sql"
 import { composerKey, type DraftKey } from "@rp/shared/drafts.ts"
 import type { Bin } from "./bin.ts"
-import { NotAmendable } from "@rp/shared/chatApi.ts"
+import { ChatBusy, NotAmendable } from "@rp/shared/chatApi.ts"
 import { AppendResult, LeafMoved, NotFound, StaleWrite, WriteOps } from "./ops.ts"
 import { amendCount, type ChatRow, toChat, toVersion, type VersionRow } from "./rows.ts"
 import { checkStateReferences } from "./stateRefs.ts"
@@ -219,16 +219,21 @@ export const makeWriteHandlers = (bin: Bin) =>
       ClearDraft: ({ userId, key, outcome, expectedRowVersion }) =>
         drafts.clear(userId, key, outcome, expectedRowVersion).pipe(transaction("ClearDraft")),
 
-      AppendMessage: ({ userId, chatId, parentSlotId, branch, version, commitDraft }) =>
+      AppendMessage: ({ userId, chatId, parentSlotId, branch, version, commitDraft, refuseWhileGenerating }) =>
         Effect.gen(function* () {
           const at = Date.now()
           const current = yield* ownedChat(userId, chatId)
           yield* checkSpeaker(userId, version.speakerEntityId)
           let parent: { id: string; depth: number; lane_id: string } | null = null
           if (parentSlotId !== null) {
-            const [row] = yield* sql<{ id: string; depth: number; lane_id: string }>`
-            SELECT id, depth, lane_id FROM slots WHERE id = ${parentSlotId} AND chat_id = ${chatId} AND deleted_at IS NULL`
+            const [row] = yield* sql<{ id: string; depth: number; lane_id: string; selected: string; status: string }>`
+            SELECT s.id, s.depth, s.lane_id, v.id AS selected, v.status FROM slots s
+              JOIN versions v ON v.id = s.selected_version_id
+            WHERE s.id = ${parentSlotId} AND s.chat_id = ${chatId} AND s.deleted_at IS NULL`
             if (!row) return yield* new NotFound({ entity: "slot", id: parentSlotId })
+            if (refuseWhileGenerating && row.status === "generating") {
+              return yield* new ChatBusy({ chatId, versionId: row.selected })
+            }
             parent = row
           }
           if (!branch && parentSlotId !== current.active_leaf_slot_id) {
