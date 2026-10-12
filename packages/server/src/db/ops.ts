@@ -220,6 +220,8 @@ export class ExportSource extends Schema.Class<ExportSource>("ExportSource")({
 // --- ST data folder import (ARCHITECTURE.md §13)
 /** The `jobs` kind of an imported chat file's record. */
 export const ST_CHAT_RECORD = "st-import-chat"
+/** The `jobs` kind of the row naming a user's current import run: the only one that may write. */
+export const ST_IMPORT_RUN = "st-import-run"
 /** Another import run took the record over, or it finished: this one writes no more of it. */
 export class ImportLeaseLost extends Schema.TaggedError<ImportLeaseLost>()("ImportLeaseLost", {
   recordId: Schema.String
@@ -917,6 +919,15 @@ export class WriteOps extends RpcGroup.make(
    * A record of an ST chat file under its source path, and a new pending chat for it, unless
    * it goes into `chatId` (a branch file into its parent's chat).
    */
+  /**
+   * Makes `importId` the user's current import run. Only the current run may claim a record,
+   * start a chat or write one: every run before it is over, and the leases it holds expired.
+   */
+  Rpc.make("StImportBegin", {
+    payload: { userId: UserId, importId: Schema.String },
+    success: Schema.Void,
+    error: StorageError
+  }),
   Rpc.make("StImportStartChat", {
     payload: {
       userId: UserId,
@@ -928,7 +939,7 @@ export class WriteOps extends RpcGroup.make(
       lease: Schema.String
     },
     success: Schema.Struct({ chatId: ChatId, recordId: Schema.String }),
-    error: Schema.Union([NotFound, StorageError])
+    error: Schema.Union([NotFound, ImportLeaseLost, StorageError])
   }),
   /**
    * A batch of messages under `parentSlotId` (null: the chat's first). While `matching`, a
@@ -997,13 +1008,15 @@ export class WriteOps extends RpcGroup.make(
   }),
   /**
    * Makes `lease` (an import run) the one that may write a recorded file's chat: a resumed or
-   * repeated import of the file, after which an earlier run's writes are refused.
+   * repeated import of the file, after which an earlier run's writes are refused. Only the
+   * user's current run may claim (`ImportLeaseLost` otherwise); the lease it takes is its
+   * own already, or one of a run that's over.
    */
   Rpc.make("StImportClaim", {
     payload: { userId: UserId, recordId: Schema.String, lease: Schema.String },
     /** The record as it is now, which an earlier view of it may be behind. */
     success: StChatRecord,
-    error: Schema.Union([NotFound, StorageError])
+    error: Schema.Union([NotFound, ImportLeaseLost, StorageError])
   }),
   /** Un-hides the hidden messages on the path from the chat's first message to `throughSlotId`. */
   Rpc.make("StImportUnhide", {

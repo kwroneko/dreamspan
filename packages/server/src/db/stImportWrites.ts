@@ -10,7 +10,7 @@ import type { StateEventData } from "@rp/shared/state.ts"
 import { Effect, Schema } from "effect"
 import { SqlClient } from "effect/sql"
 import { docHash, searchText } from "./documents.ts"
-import { ImportLeaseLost, NotFound, ST_CHAT_RECORD, type StImportNote, WriteOps } from "./ops.ts"
+import { ImportLeaseLost, NotFound, ST_CHAT_RECORD, ST_IMPORT_RUN, type StImportNote, WriteOps } from "./ops.ts"
 import { checkStateReferences } from "./stateRefs.ts"
 import { transaction } from "./tx.ts"
 
@@ -151,20 +151,53 @@ export const makeStImportWriteHandlers = Effect.gen(function* () {
     })
 
   /**
+   * Fails unless `lease` is the user's current import run: a run the user started another
+   * since is over, even while a request of it is still on its way.
+   */
+  const current = (userId: UserId, lease: string, recordId: string) =>
+    sql<{ n: number }>`SELECT count(*) AS n FROM jobs WHERE owner_user_id = ${userId} AND kind = ${ST_IMPORT_RUN}
+      AND json_extract(payload_json, '$.importId') = ${lease}`.pipe(
+      Effect.flatMap(([row]) => (row?.n === 1 ? Effect.void : Effect.fail(new ImportLeaseLost({ recordId }))))
+    )
+
+  /**
    * The record, which this run holds the lease of: a run that another started since, or that
    * a finished import ended, writes nothing.
    */
   const leased = (userId: UserId, recordId: string, chatId: string, lease: string) =>
-    Effect.flatMap(record(userId, recordId), (payload) =>
-      payload.chatId === chatId && payload.lease === lease
-        ? Effect.succeed(payload)
-        : Effect.fail(new ImportLeaseLost({ recordId }))
+    Effect.andThen(
+      current(userId, lease, recordId),
+      Effect.flatMap(record(userId, recordId), (payload) =>
+        payload.chatId === chatId && payload.lease === lease
+          ? Effect.succeed(payload)
+          : Effect.fail(new ImportLeaseLost({ recordId }))
+      )
     )
 
   const handlers = {
+    StImportBegin: ({ userId, importId }) =>
+      Effect.gen(function* () {
+        const at = Date.now()
+        const payload = JSON.stringify({ importId })
+        const updated = yield* sql`UPDATE jobs SET payload_json = ${payload}, updated_at = ${at}
+          WHERE owner_user_id = ${userId} AND kind = ${ST_IMPORT_RUN} RETURNING id`
+        if (updated.length === 0) {
+          yield* sql`INSERT INTO jobs ${sql.insert({
+            id: uuidv7(),
+            owner_user_id: userId,
+            kind: ST_IMPORT_RUN,
+            status: "processing",
+            payload_json: payload,
+            created_at: at,
+            updated_at: at
+          })}`
+        }
+      }).pipe(transaction(sql, "StImportBegin")),
+
     StImportStartChat: ({ userId, source, title, createdAt, chatId: into, lease }) =>
       Effect.gen(function* () {
         const recordId = uuidv7()
+        yield* current(userId, lease, recordId)
         const at = Date.now()
         let chatId: string
         if (into !== null) {
@@ -420,6 +453,9 @@ export const makeStImportWriteHandlers = Effect.gen(function* () {
           JOIN chats c ON c.id = json_extract(j.payload_json, '$.chatId') AND c.owner_user_id = ${userId}
           WHERE j.id = ${recordId} AND j.owner_user_id = ${userId} AND j.kind = ${ST_CHAT_RECORD}`
         if (!row) return yield* new NotFound({ entity: "import record", id: recordId })
+        // A run that's over takes nothing; the current one takes its own lease, or one of a
+        // run that's over, whatever the record's state.
+        yield* current(userId, lease, recordId)
         const payload = JSON.parse(row.payload_json) as RecordPayload
         yield* sql`UPDATE jobs SET payload_json = ${JSON.stringify({ ...payload, lease })}, updated_at = ${Date.now()}
           WHERE id = ${recordId}`

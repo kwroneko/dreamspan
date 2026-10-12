@@ -292,6 +292,8 @@ export class StImports extends Context.Service<
               session.report.unsupported.set(file.what, (session.report.unsupported.get(file.what) ?? 0) + 1)
             }
           }
+          // Every run before it is over: none of them writes any more (ARCHITECTURE.md §13).
+          yield* writer.StImportBegin({ userId: user.id, importId: session.id })
           sessions.set(user.id, session)
           return session.id
         })

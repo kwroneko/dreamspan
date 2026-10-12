@@ -10,9 +10,10 @@ import { DraftKey } from "@rp/shared/drafts.ts"
 import { existsSync, lstatSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { foldState } from "@rp/shared/state.ts"
-import { Effect } from "effect"
+import { Deferred, Effect, Fiber } from "effect"
 import { databaseFile } from "../src/db/connection.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
+import { Formats } from "../src/importer/Formats.ts"
 import { removeOldStaging } from "../src/importer/StImports.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"
 import { tempDir } from "./support/tempDir.ts"
@@ -651,15 +652,72 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
             }
           ])
         })
-      yield* writer.StImportClaim({ userId: user.id, recordId, lease: "another-run" })
+      const second = yield* begin
+      yield* writer.StImportClaim({ userId: user.id, recordId, lease: second.importId })
       assert.strictEqual((yield* Effect.flip(batch(importId)))._tag, "ImportLeaseLost")
       // The new run finishes the file; then no run may write it, not even that one.
-      const second = yield* begin
       yield* sendStFile(second.importId, path, jsonl({ chat_metadata: {} }, ...lines, message("lease-r", 2)), {
         card: "none"
       })
       assert.strictEqual((yield* Effect.flip(batch(second.importId)))._tag, "ImportLeaseLost")
-      assert.strictEqual((yield* Effect.flip(batch("another-run")))._tag, "ImportLeaseLost")
+      assert.strictEqual((yield* Effect.flip(batch(importId)))._tag, "ImportLeaseLost")
+    })
+  )
+
+  it.effect("a run the user started another since claims nothing, not even a finished record", () =>
+    Effect.gen(function* () {
+      const path = "chats/Bot/stale-claim.jsonl"
+      const lines = [message("sc-g", 0), message("sc-u", 1)]
+      const seed = yield* begin
+      yield* sendStFile(seed.importId, path, jsonl({ chat_metadata: {} }, ...lines), { card: "none" })
+      const user = yield* seed.api.Whoami()
+      const writer = yield* Writer
+      const recordId = query("SELECT id FROM jobs WHERE json_extract(payload_json, '$.source') = ?", path)[0]!
+        .id as string
+      const stale = yield* begin
+      yield* begin
+      assert.strictEqual(
+        (yield* Effect.flip(writer.StImportClaim({ userId: user.id, recordId, lease: stale.importId })))._tag,
+        "ImportLeaseLost"
+      )
+      assert.isNull(
+        query("SELECT json_extract(payload_json, '$.lease') AS lease FROM jobs WHERE id = ?", recordId)[0]!.lease
+      )
+    })
+  )
+
+  it.effect("an upload admitted before the user started another import writes nothing after it", () =>
+    Effect.gen(function* () {
+      const path = "chats/Bot/stale-upload.jsonl"
+      const lines = [message("su-g", 0), message("su-u", 1)]
+      const seed = yield* begin
+      yield* sendStFile(seed.importId, path, jsonl({ chat_metadata: {} }, ...lines), { card: "none" })
+      const stale = yield* begin
+      const formats = yield* Formats
+      const st = formats.st as { chatPart: typeof formats.st.chatPart }
+      const original = st.chatPart
+      const entered = Deferred.makeUnsafe<void>()
+      const release = Deferred.makeUnsafe<void>()
+      try {
+        // The stale run's part is parsed, and waits, while the user starts another import.
+        st.chatPart = (input) =>
+          original(input).pipe(
+            Effect.tap(() => Deferred.succeed(entered, undefined)),
+            Effect.tap(() => Deferred.await(release))
+          )
+        const pending = yield* Effect.forkChild(
+          sendFile(stale.importId, path, jsonl({ chat_metadata: {} }, ...lines, message("su-stale", 2)), {
+            card: "none"
+          }).pipe(Effect.flatMap(answer))
+        )
+        yield* Deferred.await(entered)
+        yield* stale.api.StartStImport({ unsupported: [] })
+        yield* Deferred.succeed(release, undefined)
+        assert.strictEqual((yield* Fiber.join(pending)).outcome, "failed")
+        assert.strictEqual(present("su-stale"), 0)
+      } finally {
+        st.chatPart = original
+      }
     })
   )
 
