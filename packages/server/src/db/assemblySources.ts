@@ -121,10 +121,11 @@ export const sqlSources = (
   // replaced `path` couldn't read another user's chat through the others.
   const owned = sql`EXISTS (SELECT 1 FROM chats o WHERE o.id = ${chatId} AND o.owner_user_id = ${userId})`
   /** A revision of an entity of this kind the user owns and hasn't deleted. */
-  const revisionDoc = (revisionId: string, kind: string, entity?: string) =>
+  const revisionDoc = (revisionId: string, kind: string, entity?: string, binned = false) =>
     sql<{ entity_id: string; doc_json: string }>`
       SELECT v.entity_id, v.doc_json FROM entity_revisions v JOIN entities e ON e.id = v.entity_id
-      WHERE v.id = ${revisionId} AND e.owner_user_id = ${userId} AND e.kind = ${kind} AND e.deleted_at IS NULL
+      WHERE v.id = ${revisionId} AND e.owner_user_id = ${userId} AND e.kind = ${kind}
+        AND (${binned ? 1 : 0} OR e.deleted_at IS NULL)
         AND (${entity ?? null} IS NULL OR e.id = ${entity ?? null})`.pipe(Effect.map(([row]) => row))
 
   /** A ref the user owns, of this chat if it's an override, with its head's document. */
@@ -410,7 +411,12 @@ export const sqlSources = (
       })
   })
 
-  const sources = replay ? replaySources(sql, { userId, chatId }, replay, revisionDoc) : live
+  const sources = replay
+    ? replaySources(sql, { userId, chatId }, replay, (revision, kind, entity) =>
+        // A revision never changes: one of an entity in the bin still reads as it was.
+        revisionDoc(revision, kind, entity, true)
+      )
+    : live
   return {
     layer: Layer.succeed(AssemblySources)(sources),
     /** What the sources read; a replay's are the pins it was given. */

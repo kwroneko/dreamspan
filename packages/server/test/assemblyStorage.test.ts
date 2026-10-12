@@ -204,7 +204,7 @@ describe("context assembly from the database", () => {
 
   it.live("builds the same context again from the database and the values drawn (invariant 6)", () =>
     Effect.gen(function* () {
-      const { writer, reader, userId, preset, mira, sent, state, assemble } = yield* setup()
+      const { writer, reader, userId, preset, mira, tobin, sent, state, assemble } = yield* setup()
       const edited = yield* writer.EditRef({
         userId,
         refId: preset.ref.id,
@@ -251,6 +251,19 @@ describe("context assembly from the database", () => {
       assert.notDeepEqual(texts(now), texts(first))
       const rebuilt = yield* reader.RebuildContext({ userId, snapshot: JSON.stringify(first) })
       assert.deepStrictEqual(JSON.parse(rebuilt.snapshot), first)
+
+      // A card in the bin can come back, and its revisions never changed: it still rebuilds.
+      yield* writer.DeleteEntity({ userId, entityId: mira.entityId as EntityId })
+      const binned = yield* reader.RebuildContext({ userId, snapshot: JSON.stringify(first) })
+      assert.deepStrictEqual(JSON.parse(binned.snapshot), first)
+      // So does a context without a character, which reads no card's notes.
+      const empty = yield* assemble()
+      assert.deepStrictEqual(
+        empty.inputs.cards.map((c) => c.entity),
+        [tobin.entityId]
+      )
+      const again2 = yield* reader.RebuildContext({ userId, snapshot: JSON.stringify(empty) })
+      assert.deepStrictEqual(JSON.parse(again2.snapshot), empty)
 
       // Only by the chat's owner.
       const other = yield* writer.EnsureUser({ handle: "bo", displayName: "bo" })
