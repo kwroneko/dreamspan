@@ -22,6 +22,14 @@ interface Scan {
   readonly trigger?: string
 }
 
+const workLimits = {
+  keyEvaluations: 20000,
+  scannedCharacters: 20000000,
+  regexWork: 20000000,
+  tokenCharacters: 8000000,
+  issueCount: 1000
+}
+
 interface Settings {
   readonly budget: number
   readonly scanDepth?: number
@@ -31,7 +39,10 @@ interface Settings {
   /** Includes the initial pass; capped at 64 even if the caller asks for more. */
   readonly maxSteps?: number
   readonly groupScoring?: boolean
+  /** Emergency guard only. A timeout makes the result non-replayable. */
   readonly regexMs?: number
+  /** Callers may lower, but cannot raise, these per-activation limits. */
+  readonly workLimits?: Partial<typeof workLimits>
 }
 
 interface Source {
@@ -64,6 +75,8 @@ type SkipReason =
   | "probability"
   | "group"
   | "budget"
+  | "work_limit"
+  | "error"
 
 interface Skipped extends Source {
   readonly step: number
@@ -73,9 +86,19 @@ interface Skipped extends Source {
 interface Issue {
   readonly book: string
   readonly uid: number
-  readonly code: "invalid_regex" | "unsafe_regex" | "regex_timeout" | "regex_limit" | "unsupported" | "recursion_limit"
+  readonly code:
+    | "invalid_regex"
+    | "unsafe_regex"
+    | "regex_timeout"
+    | "regex_limit"
+    | "unsupported"
+    | "recursion_limit"
+    | "work_limit"
+    | "evaluation_error"
   readonly detail: string
   readonly key?: string
+  count: number
+  readonly examples: Array<{ book: string; uid: number; key?: string }>
 }
 
 const descriptions: ReadonlyArray<Description> = [
@@ -86,7 +109,22 @@ const descriptions: ReadonlyArray<Description> = [
   "scenario",
   "creator_notes"
 ]
-const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+const wordCharacter = (text: string, index: number) => {
+  const code = text.charCodeAt(index)
+  return (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || code === 95 || (code >= 97 && code <= 122)
+}
+
+const refusedConstruct = (pattern: string) => {
+  if (pattern.includes("(?!")) return "Negative lookahead is unsupported; use a secondary key with NOT ANY."
+  if (pattern.includes("(?=")) return "Lookahead is unsupported; use a secondary key with AND ANY."
+  if (/\(\?<[=!]/.test(pattern))
+    return "Lookbehind with captures or unsupported assertions; remove captures or use a literal prefix."
+  if (/\\[1-9]|\\k</.test(pattern)) return "Backreference is unsupported; repeat the literal text instead."
+  if (/\\[pP]\{/.test(pattern)) return "Unicode property escapes are unsupported; use an explicit character class."
+  if (/\\u\{/.test(pattern)) return "Unicode code-point escapes are unsupported; use the literal character instead."
+  return "The linear engine refuses this construct; simplify nested or large counted repetitions."
+}
+
 const secondaryPasses = (logic: SelectiveLogic, matches: ReadonlyArray<boolean>) => {
   switch (logic) {
     case "and_any":
@@ -115,17 +153,60 @@ export const matchLorebooks = (
   const skipped = new Map<(typeof sources)[number], Skipped>()
   const failedProbability = new Set<(typeof sources)[number]>()
   const issues: Array<Issue> = []
-  const issueKeys = new Set<string>()
-  const issue = (source: Source, code: Issue["code"], detail: string, key?: string) => {
-    const id = JSON.stringify([source.book, source.entry.uid, code, key, detail])
-    if (issueKeys.has(id)) return
-    issueKeys.add(id)
-    issues.push({ book: source.book, uid: source.entry.uid, code, detail, ...(key === undefined ? {} : { key }) })
+  const issueGroups = new Map<string, Issue>()
+  const work = { keyEvaluations: 0, scannedCharacters: 0, regexWork: 0, tokenCharacters: 0, issueCount: 0, buffers: 0 }
+  const halted = Symbol("activation stopped")
+  let replayable = true
+  let stopped: SkipReason | undefined
+  let currentSource: Source | undefined = sources[0]
+  const recordIssue = (source: Source, code: Issue["code"], detail: string, key?: string) => {
+    const id = JSON.stringify([code, detail])
+    const example = {
+      book: source.book,
+      uid: source.entry.uid,
+      ...(key === undefined ? {} : { key: key.slice(0, 160) })
+    }
+    const previous = issueGroups.get(id)
+    if (previous) {
+      previous.count++
+      if (previous.examples.length < 3) previous.examples.push(example)
+    } else {
+      const item = { ...example, code, detail, count: 1, examples: [example] }
+      issueGroups.set(id, item)
+      issues.push(item)
+    }
   }
-  const deadline = makeRegexDeadline(settings.regexMs ?? 200)
-  const patterns = new Map<string, RegExp | "literal" | "invalid" | "unsafe" | "limit" | "timeout">()
-  const keyMatch = (source: Source, haystack: string, original: string, trim: boolean): boolean | undefined => {
-    if (!original) return false
+  const charge = (source: Source, kind: keyof typeof workLimits, amount: number) => {
+    const limit = Math.max(0, Math.min(workLimits[kind], settings.workLimits?.[kind] ?? workLimits[kind]))
+    if (amount > limit - work[kind]) {
+      stopped = "work_limit"
+      recordIssue(source, "work_limit", `Activation stopped at the ${kind} work limit (${limit}); results are partial.`)
+      throw halted
+    }
+    work[kind] += amount
+  }
+  const issue = (source: Source, code: Issue["code"], detail: string, key?: string) => {
+    charge(source, "issueCount", 1)
+    recordIssue(source, code, detail, key)
+  }
+  const tokenCounts = new Map<string, number>()
+  const tokens = (source: Source, text: string) => {
+    const cached = tokenCounts.get(text)
+    if (cached !== undefined) return cached
+    charge(source, "tokenCharacters", text.length)
+    const count = countTokens(text)
+    tokenCounts.set(text, count)
+    return count
+  }
+  const patterns = new Map<string, RegExp | "literal" | "invalid" | "unsafe" | "limit">()
+  interface Buffer {
+    text: string
+    lower?: string
+  }
+  const keyMatch = (source: Source, buffer: Buffer, original: string, trim: boolean): boolean | undefined => {
+    charge(source, "keyEvaluations", 1)
+    if (trim && !original) return false
+    charge(source, "scannedCharacters", buffer.text.length + original.length)
     const key = trim ? original.trim() : original
     let pattern = patterns.get(key)
     if (pattern === undefined) {
@@ -134,13 +215,8 @@ export const matchLorebooks = (
       if (parsed && !/(^|[^\\])\//.test(parsed[1]!)) {
         if (parsed[1]!.length > 2000) pattern = "limit"
         else {
-          const result: { regex: ReturnType<typeof compileLinear> } = { regex: null }
-          const completed = deadline.run(() => {
-            result.regex = compileLinear(parsed[1]!.replace(/\\\//, "/"), parsed[2]!)
-          })
-          const compiled = result.regex
-          if (!completed) pattern = "timeout"
-          else if (compiled === null) pattern = "invalid"
+          const compiled = compileLinear(parsed[1]!.replace(/\\\//, "/"), parsed[2]!)
+          if (compiled === null) pattern = "invalid"
           else pattern = compiled instanceof RegExp && compiled.source.length > 2000 ? "limit" : compiled
         }
       } else if (key.startsWith("/") && key !== "//") {
@@ -149,56 +225,89 @@ export const matchLorebooks = (
       patterns.set(key, pattern)
     }
     if (pattern instanceof RegExp) {
-      let matched = false
-      if (
-        !deadline.run(() => {
-          pattern.lastIndex = 0
-          matched = pattern.test(haystack)
-        })
-      ) {
-        issue(source, "regex_timeout", "Lorebook regex time allowance exhausted.", key)
+      const cost = pattern.source.length * Math.max(1, buffer.text.length)
+      if (cost > 2000000) {
+        issue(
+          source,
+          "regex_limit",
+          "Regex pattern size × input size exceeds 2,000,000; shorten the pattern or scan depth.",
+          key
+        )
         return undefined
       }
-      return matched
+      charge(source, "regexWork", cost)
+      pattern.lastIndex = 0
+      return pattern.test(buffer.text)
     }
     if (pattern === "invalid") issue(source, "invalid_regex", "Invalid ST slash regex; matched as literal text.", key)
-    if (pattern !== "literal" && pattern !== "invalid") {
-      const code = pattern === "unsafe" ? "unsafe_regex" : pattern === "limit" ? "regex_limit" : "regex_timeout"
+    if (pattern === "unsafe" || pattern === "limit") {
       issue(
         source,
-        code,
-        pattern === "unsafe"
-          ? "The linear-time engine cannot run this regex."
-          : pattern === "limit"
-            ? "Regex exceeds 2,000 characters."
-            : "Lorebook regex time allowance exhausted.",
+        pattern === "unsafe" ? "unsafe_regex" : "regex_limit",
+        pattern === "unsafe" ? refusedConstruct(key) : "Regex exceeds 2,000 characters; shorten the pattern.",
         key
       )
       return undefined
     }
     const sensitive = source.entry.case_sensitive ?? settings.caseSensitive ?? false
-    const text = sensitive ? haystack : haystack.toLowerCase()
+    const text = sensitive ? buffer.text : (buffer.lower ??= buffer.text.toLowerCase())
     const needle = sensitive ? key : key.toLowerCase()
-    if (!(source.entry.match_whole_words ?? settings.wholeWords ?? true) || needle.split(/\s+/).length > 1)
+    if (!(source.entry.match_whole_words ?? settings.wholeWords ?? true) || /\s/.test(needle))
       return text.includes(needle)
-    return new RegExp(`(?:^|\\W)(${escape(needle)})(?:$|\\W)`).test(text)
+    let index = text.indexOf(needle)
+    while (index !== -1) {
+      charge(source, "scannedCharacters", needle.length)
+      if (!wordCharacter(text, index - 1) && !wordCharacter(text, index + needle.length)) return true
+      index = text.indexOf(needle, index + 1)
+      if (index === text.length && needle.length === 0) return !wordCharacter(text, index - 1)
+    }
+    return false
   }
-  const messages = scan.messages.slice(0, 1000).map((message) => message.trim())
+  // ST keeps holes at interior empty messages, but does not extend the array for trailing ones.
+  const messages: Array<string> = []
+  let messagesReady = false
   const injections = (scan.injections ?? [])
     .filter((injection) => injection.scan && injection.text)
     .map((injection) => injection.text)
   const recursion: Array<string> = []
-  const buffer = (source: (typeof sources)[number]) => {
+  const chats = new Map<number, string>()
+  const buffers = new Map<string, Buffer>()
+  const buffer = (source: (typeof sources)[number]): Buffer => {
     const depth = Math.min(1000, source.entry.scan_depth ?? source.document.scan_depth ?? settings.scanDepth ?? 2)
-    if (depth <= 0) return ""
-    const chat = "\x01" + messages.slice(0, depth).join("\n\x01")
-    const blocks: Array<string> = []
-    for (const name of descriptions) {
-      const value = scan.descriptions?.[name]
-      if (source.entry[`match_${name}`] && value) blocks.push(value)
+    if (depth <= 0) return { text: "" }
+    if (!messagesReady) {
+      for (let i = 0; i < Math.min(1000, scan.messages.length); i++) {
+        const message = scan.messages[i]
+        if (message) {
+          charge(source, "scannedCharacters", message.length)
+          messages[i] = message.trim()
+        }
+      }
+      messagesReady = true
     }
+    const names = descriptions.filter((name) => source.entry[`match_${name}`])
+    const id = `${depth}:${names.join(",")}`
+    const cached = buffers.get(id)
+    if (cached) return cached
+    let chat = chats.get(depth)
+    if (chat === undefined) {
+      const slice = messages.slice(0, depth)
+      charge(
+        source,
+        "scannedCharacters",
+        1 + slice.reduce((sum, text) => sum + text.length, 0) + Math.max(0, slice.length - 1) * 2
+      )
+      chat = "\x01" + slice.join("\n\x01")
+      chats.set(depth, chat)
+    }
+    const blocks = names.map((name) => scan.descriptions?.[name]).filter((value): value is string => !!value)
     const extra = [...blocks, ...injections, ...recursion]
-    return chat + (extra.length ? "\n\x01" + extra.join("\n\x01") : "")
+    if (extra.length)
+      charge(source, "scannedCharacters", chat.length + extra.reduce((sum, text) => sum + text.length + 2, 0))
+    const result = { text: chat + (extra.length ? "\n\x01" + extra.join("\n\x01") : "") }
+    buffers.set(id, result)
+    work.buffers++
+    return result
   }
   const recursive = (source: (typeof sources)[number]) =>
     source.document.recursive_scanning ?? settings.recursive ?? true
@@ -210,183 +319,233 @@ export const matchLorebooks = (
   let charged = ""
   const bookCharged = new Map<string, string>()
   let overflow = false
+  const exhaustedBooks = new Set<string>()
   let step = 0
   const skip = (source: (typeof sources)[number], reason: SkipReason) =>
     skipped.set(source, { book: source.book, entry: source.entry, step, reason })
-  for (const source of sources) {
-    const entry = source.entry
-    const unsupported: Array<string> = []
-    if (entry.sticky || entry.cooldown) unsupported.push("sticky/cooldown")
-    if (entry.character_filter) unsupported.push("character filters")
-    if (entry.group.includes(",")) unsupported.push("overlapping groups (group treated as one name)")
-    if (entry.group && entry.group_weight !== 100) unsupported.push("group weights (deterministic choice)")
-    if (entry.vectorized || entry.automation_id || /^@@(?:activate|dont_activate)/.test(entry.content))
-      unsupported.push("vector/external/decorator activation")
-    if (unsupported.length) issue(source, "unsupported", unsupported.join("; "))
-  }
-  for (; step < maxSteps; step++) {
-    const candidates: Array<{ source: (typeof sources)[number]; why: Why; score: number }> = []
+  const activate = () => {
     for (const source of sources) {
-      if (activated.has(source) || failedProbability.has(source)) continue
+      currentSource = source
       const entry = source.entry
-      if (!entry.enabled) {
-        skip(source, "disabled")
-        continue
-      }
-      if (entry.triggers.length && !entry.triggers.includes(scan.trigger ?? "normal")) {
-        skip(source, "trigger")
-        continue
-      }
-      if (entry.delay !== null && entry.delay > scan.messages.length) {
-        skip(source, "delay")
-        continue
-      }
-      const delayed = Number(entry.delay_until_recursion)
-      if ((delayed && step < delayed) || (step > 0 && (!recursive(source) || entry.exclude_recursion))) {
-        skip(source, "recursion")
-        continue
-      }
-      const text = buffer(source)
-      let why: Why = { kind: "constant" }
-      if (!entry.constant) {
-        let primaryKey: string | undefined
-        let unsafe = false
-        for (const key of entry.keys) {
-          const matched = keyMatch(source, text, key, true)
-          if (matched === undefined) unsafe = true
-          if (matched) {
-            primaryKey = key
-            break
-          }
-        }
-        if (primaryKey === undefined) {
-          skip(source, unsafe ? "regex" : "no_primary")
+      const unsupported: Array<string> = []
+      if (entry.sticky || entry.cooldown) unsupported.push("sticky/cooldown")
+      if (entry.character_filter) unsupported.push("character filters")
+      if (entry.group.includes(",")) unsupported.push("overlapping groups (group treated as one name)")
+      if (entry.group && entry.group_weight !== 100) unsupported.push("group weights (deterministic choice)")
+      if (entry.vectorized || entry.automation_id || /^@@(?:activate|dont_activate)/.test(entry.content))
+        unsupported.push("vector/external/decorator activation")
+      if (unsupported.length) issue(source, "unsupported", unsupported.join("; "))
+    }
+    for (; step < maxSteps; step++) {
+      buffers.clear()
+      const candidates: Array<{ source: (typeof sources)[number]; why: Why; score: number }> = []
+      for (const source of sources) {
+        currentSource = source
+        if (activated.has(source) || failedProbability.has(source)) continue
+        const entry = source.entry
+        if (!entry.enabled) {
+          skip(source, "disabled")
           continue
         }
-        unsafe = false
-        const secondaryKeys: Array<string> = []
-        if (entry.selective && entry.secondary_keys.length) {
-          const matches = entry.secondary_keys.map((key) => {
+        if (entry.triggers.length && !entry.triggers.includes(scan.trigger ?? "normal")) {
+          skip(source, "trigger")
+          continue
+        }
+        if (entry.delay !== null && entry.delay > scan.messages.length) {
+          skip(source, "delay")
+          continue
+        }
+        const delayed = Number(entry.delay_until_recursion)
+        if ((delayed && step < delayed) || (step > 0 && (!recursive(source) || entry.exclude_recursion))) {
+          skip(source, "recursion")
+          continue
+        }
+        const scoring = entry.group && (settings.groupScoring || scoredGroups.has(entry.group))
+        const text = !entry.constant || scoring ? buffer(source) : { text: "" }
+        let why: Why = { kind: "constant" }
+        if (!entry.constant) {
+          let primaryKey: string | undefined
+          let unsafe = false
+          for (const key of entry.keys) {
             const matched = keyMatch(source, text, key, true)
             if (matched === undefined) unsafe = true
-            if (matched) secondaryKeys.push(key)
-            return matched ?? false
-          })
-          if (unsafe) {
-            skip(source, "regex")
+            if (matched) {
+              primaryKey = key
+              break
+            }
+          }
+          if (primaryKey === undefined) {
+            skip(source, unsafe ? "regex" : "no_primary")
             continue
           }
-          if (!secondaryPasses(entry.selective_logic, matches)) {
-            skip(source, "secondary")
-            continue
+          unsafe = false
+          const secondaryKeys: Array<string> = []
+          if (entry.selective && entry.secondary_keys.length) {
+            const matches = entry.secondary_keys.map((key) => {
+              const matched = keyMatch(source, text, key, true)
+              if (matched === undefined) unsafe = true
+              if (matched) secondaryKeys.push(key)
+              return matched ?? false
+            })
+            if (unsafe) {
+              skip(source, "regex")
+              continue
+            }
+            if (!secondaryPasses(entry.selective_logic, matches)) {
+              skip(source, "secondary")
+              continue
+            }
+          }
+          why = {
+            kind: "keys",
+            primaryKey,
+            secondaryKeys,
+            ...(entry.selective && entry.secondary_keys.length ? { logic: entry.selective_logic } : {})
           }
         }
-        why = {
-          kind: "keys",
-          primaryKey,
-          secondaryKeys,
-          ...(entry.selective && entry.secondary_keys.length ? { logic: entry.selective_logic } : {})
+        let score = 0
+        if (scoring) {
+          const primary = entry.keys.filter((key) => keyMatch(source, text, key, false)).length
+          const secondary = entry.secondary_keys.filter((key) => keyMatch(source, text, key, false)).length
+          score = primary
+          if (
+            entry.keys.length &&
+            (entry.selective_logic === "and_any" ||
+              (entry.selective_logic === "and_all" && secondary === entry.secondary_keys.length))
+          )
+            score += secondary
+        }
+        candidates.push({ source, why, score })
+      }
+      const groups = new Map<string, typeof candidates>()
+      for (const candidate of candidates) {
+        const group = candidate.source.entry.group
+        if (group) {
+          const members = groups.get(group)
+          if (members) members.push(candidate)
+          else groups.set(group, [candidate])
         }
       }
-      let score = 0
-      if (entry.group && (settings.groupScoring || scoredGroups.has(entry.group))) {
-        const primary = entry.keys.filter((key) => keyMatch(source, text, key, false)).length
-        const secondary = entry.secondary_keys.filter((key) => keyMatch(source, text, key, false)).length
-        score = primary
-        if (
-          primary &&
-          (entry.selective_logic === "and_any" ||
-            (entry.selective_logic === "and_all" && secondary === entry.secondary_keys.length))
+      const losers = new Set<(typeof sources)[number]>()
+      for (const [group, members] of groups) {
+        if (admittedGroups.has(group)) {
+          for (const member of members) losers.add(member.source)
+          continue
+        }
+        const maxScore = members.reduce((max, member) => Math.max(max, member.score), 0)
+        const eligible = members.filter(
+          (member) =>
+            !(member.source.entry.use_group_scoring ?? settings.groupScoring ?? false) || member.score === maxScore
         )
-          score += secondary
+        const winner = eligible.find((member) => member.source.entry.group_override) ?? eligible[0]!
+        for (const member of members) if (member !== winner) losers.add(member.source)
       }
-      candidates.push({ source, why, score })
-    }
-    const groups = new Map<string, typeof candidates>()
-    for (const candidate of candidates) {
-      const group = candidate.source.entry.group
-      if (group) {
-        const members = groups.get(group)
-        if (members) members.push(candidate)
-        else groups.set(group, [candidate])
+      let newContent = ""
+      const newBookContent = new Map<string, string>()
+      const contributions: Array<string> = []
+      let chargedTokens: number | undefined
+      const bookChargedTokens = new Map<string, number>()
+      for (const { source, why } of candidates) {
+        currentSource = source
+        const entry = source.entry
+        if (losers.has(source)) {
+          skip(source, "group")
+          continue
+        }
+        if ((overflow || exhaustedBooks.has(source.book)) && !entry.ignore_budget) {
+          skip(source, "budget")
+          continue
+        }
+        if (entry.use_probability && entry.probability !== 100 && random() * 100 > entry.probability) {
+          skip(source, "probability")
+          failedProbability.add(source)
+          continue
+        }
+        charge(source, "scannedCharacters", entry.content.length + 1)
+        const forBook = (newBookContent.get(source.book) ?? "") + entry.content + "\n"
+        const bookBudget = source.document.token_budget
+        if (!entry.ignore_budget && bookBudget !== null && bookBudget > 0) {
+          let previous = bookChargedTokens.get(source.book)
+          if (previous === undefined) {
+            previous = tokens(source, bookCharged.get(source.book) ?? "")
+            bookChargedTokens.set(source.book, previous)
+          }
+          if (previous + tokens(source, forBook) >= bookBudget) {
+            skip(source, "budget")
+            exhaustedBooks.add(source.book)
+            continue
+          }
+        }
+        newContent += entry.content + "\n"
+        newBookContent.set(source.book, forBook)
+        if (!entry.ignore_budget) {
+          chargedTokens ??= tokens(source, charged)
+          if (chargedTokens + tokens(source, newContent) >= settings.budget) {
+            skip(source, "budget")
+            overflow = true
+            continue
+          }
+        }
+        activated.set(source, { book: source.book, entry, step, why })
+        skipped.delete(source)
+        if (entry.group) admittedGroups.add(entry.group)
+        if (recursive(source) && !entry.prevent_recursion) contributions.push(entry.content)
       }
-    }
-    const losers = new Set<(typeof sources)[number]>()
-    for (const [group, members] of groups) {
-      if (admittedGroups.has(group)) {
-        for (const member of members) losers.add(member.source)
-        continue
-      }
-      const maxScore = members.reduce((max, member) => Math.max(max, member.score), 0)
-      const eligible = members.filter(
-        (member) =>
-          !(member.source.entry.use_group_scoring ?? settings.groupScoring ?? false) || member.score === maxScore
+      charged += newContent
+      for (const [book, content] of newBookContent) bookCharged.set(book, (bookCharged.get(book) ?? "") + content)
+      if (overflow) break
+      const text = contributions.join("\n")
+      if (text) recursion.push(text)
+      const pendingDelay = sources.some(
+        (source) =>
+          source.entry.enabled &&
+          !activated.has(source) &&
+          !failedProbability.has(source) &&
+          recursive(source) &&
+          !source.entry.exclude_recursion &&
+          Number(source.entry.delay_until_recursion) > step
       )
-      const winner = eligible.find((member) => member.source.entry.group_override) ?? eligible[0]!
-      for (const member of members) if (member !== winner) losers.add(member.source)
+      if (!contributions.length && !pendingDelay) break
     }
-    let newContent = ""
-    const newBookContent = new Map<string, string>()
-    const contributions: Array<string> = []
-    for (const { source, why } of candidates) {
-      const entry = source.entry
-      if (losers.has(source)) {
-        skip(source, "group")
-        continue
-      }
-      if (overflow && !entry.ignore_budget) {
-        skip(source, "budget")
-        continue
-      }
-      if (entry.use_probability && entry.probability !== 100 && random() * 100 > entry.probability) {
-        skip(source, "probability")
-        failedProbability.add(source)
-        continue
-      }
-      newContent += entry.content + "\n"
-      const forBook = (newBookContent.get(source.book) ?? "") + entry.content + "\n"
-      newBookContent.set(source.book, forBook)
-      const bookBudget = source.document.token_budget
-      if (
-        !entry.ignore_budget &&
-        (countTokens(charged) + countTokens(newContent) >= settings.budget ||
-          (bookBudget !== null &&
-            bookBudget > 0 &&
-            countTokens(bookCharged.get(source.book) ?? "") + countTokens(forBook) >= bookBudget))
-      ) {
-        skip(source, "budget")
-        overflow = true
-        continue
-      }
-      activated.set(source, { book: source.book, entry, step, why })
-      skipped.delete(source)
-      if (entry.group) admittedGroups.add(entry.group)
-      if (recursive(source) && !entry.prevent_recursion) contributions.push(entry.content)
+    if (step === maxSteps) {
+      for (const source of sources)
+        if (!activated.has(source) && recursive(source))
+          issue(source, "recursion_limit", `Stopped after ${maxSteps} activation passes.`)
     }
-    charged += newContent
-    for (const [book, content] of newBookContent) bookCharged.set(book, (bookCharged.get(book) ?? "") + content)
-    if (overflow) break
-    const text = contributions.join("\n")
-    if (text) recursion.push(text)
-    const pendingDelay = sources.some(
-      (source) =>
-        source.entry.enabled &&
-        !activated.has(source) &&
-        !failedProbability.has(source) &&
-        recursive(source) &&
-        !source.entry.exclude_recursion &&
-        Number(source.entry.delay_until_recursion) > step
-    )
-    if (!contributions.length && !pendingDelay) break
   }
-  if (step === maxSteps) {
-    for (const source of sources)
-      if (!activated.has(source) && recursive(source))
-        issue(source, "recursion_limit", `Stopped after ${maxSteps} activation passes.`)
+  try {
+    const completed = makeRegexDeadline(settings.regexMs ?? 5000).run(activate)
+    if (!completed && currentSource) {
+      replayable = false
+      stopped = "error"
+      recordIssue(
+        currentSource,
+        "regex_timeout",
+        "Emergency activation deadline reached; this partial result is not replayable."
+      )
+    }
+  } catch (error) {
+    if (error !== halted && currentSource) {
+      stopped = "error"
+      recordIssue(
+        currentSource,
+        "evaluation_error",
+        `Activation failed: ${String(error).slice(0, 160)}; results are partial.`
+      )
+    }
+  }
+  if (stopped) {
+    for (const source of sources) {
+      const previous = skipped.get(source)
+      if (!activated.has(source) && (!previous || previous.step < step || source === currentSource))
+        skip(source, stopped)
+    }
   }
   return {
     activated: sources.flatMap((source) => activated.get(source) ?? []),
     skipped: sources.flatMap((source) => skipped.get(source) ?? []),
-    issues
+    issues,
+    work,
+    replayable
   }
 }

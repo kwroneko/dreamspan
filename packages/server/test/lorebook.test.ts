@@ -246,12 +246,12 @@ describe("lorebook matcher contract", () => {
     expect(result.issues).toEqual([])
   })
 
-  it("bounds expensive linear patterns with a VM deadline and keeps literal entries usable", () => {
+  it("R29 bounds expensive linear patterns deterministically and keeps literal entries usable", () => {
     const pattern = `/${"(a*)".repeat(300)}b/`
-    const result = run([{ keys: [pattern] }, { keys: ["a"] }], ["a".repeat(100000)], { regexMs: 1, wholeWords: false })
+    const result = run([{ keys: [pattern] }, { keys: ["a"] }], ["a".repeat(100000)], { wholeWords: false })
     expect(result.activated.map(({ entry }) => entry.uid)).toEqual([1])
     expect(result.skipped[0]?.reason).toBe("regex")
-    expect(result.issues).toContainEqual(expect.objectContaining({ code: "regex_timeout", key: pattern }))
+    expect(result.issues).toContainEqual(expect.objectContaining({ code: "regex_limit", key: pattern.slice(0, 160) }))
   })
 
   it("reports invalid literal fallback, unsupported regexes and excessive patterns", () => {
@@ -275,12 +275,10 @@ describe("lorebook matcher contract", () => {
     expect(result.activated).toHaveLength(1)
   })
 
-  it("reports invalid syntax for every entry sharing a cached key", () => {
+  it("reports invalid syntax once with affected entry examples", () => {
     const result = run([{ keys: ["/[/"] }, { keys: ["/[/"] }], ["/[/"])
-    expect(result.issues.map(({ uid, code }) => [uid, code])).toEqual([
-      [0, "invalid_regex"],
-      [1, "invalid_regex"]
-    ])
+    expect(result.issues).toHaveLength(1)
+    expect(result.issues[0]).toMatchObject({ code: "invalid_regex", count: 2, examples: [{ uid: 0 }, { uid: 1 }] })
   })
 
   it("caps rewritten patterns as well as their original spelling", () => {
@@ -316,5 +314,266 @@ describe("lorebook matcher contract", () => {
   it("fails closed when a negative secondary condition cannot be safely tested", () => {
     const result = run([{ keys: ["cat"], secondary_keys: ["/(?=cat)cat/"], selective_logic: "not_any" }])
     expect(result.skipped[0]?.reason).toBe("regex")
+  })
+})
+
+describe("Astra review regressions", () => {
+  it("K14 long plain whole-word keywords never compile as native regexes", () => {
+    const key = "a".repeat(100000)
+    expect(run([{ keys: [key] }], [key], { recursive: false }).activated).toHaveLength(1)
+  })
+
+  it("D25 trailing empty messages do not add ST sentinels", () => {
+    expect(run([{ keys: ["/cat$/"] }], ["cat", ""]).activated).toHaveLength(1)
+    expect(run([{ keys: ["/^\\x01\\n\\x01cat$/"] }], ["", "cat"]).activated).toHaveLength(1)
+    expect(run([{ keys: ["/cat$/"] }], ["cat", " "]).activated).toHaveLength(0)
+  })
+
+  it("G18 secondary scoring needs primary slots, not a matching primary", () => {
+    const result = run(
+      [
+        {
+          keys: [" cat "],
+          secondary_keys: ["red", "blue"],
+          selective: false,
+          group: "g",
+          use_group_scoring: true,
+          order: 1
+        },
+        { keys: ["cat"], group: "g", use_group_scoring: true, order: 2 }
+      ],
+      ["cat red blue"],
+      { wholeWords: false }
+    )
+    expect(result.activated.map(({ entry }) => entry.uid)).toEqual([0])
+    expect(
+      run([
+        { constant: true, keys: ["dog"], secondary_keys: ["cat"], group: "g", use_group_scoring: true, order: 1 },
+        { constant: true, keys: ["dog"], group: "g", use_group_scoring: true, order: 2 }
+      ]).activated.map(({ entry }) => entry.uid)
+    ).toEqual([0])
+  })
+
+  it("G19 empty scoring slots match without activation's truthiness gate", () => {
+    expect(
+      run([
+        { keys: ["cat", ""], group: "g", use_group_scoring: true, order: 1 },
+        { keys: ["cat"], group: "g", use_group_scoring: true, order: 2 }
+      ]).activated.map(({ entry }) => entry.uid)
+    ).toEqual([0])
+  })
+
+  it("B10 a book's exhausted budget does not spend or stop other books", () => {
+    const result = matchLorebooks(
+      [
+        book(
+          [
+            entry({ constant: true, content: "long", order: 200 }),
+            entry({ constant: true, content: "", order: 150 }, 1)
+          ],
+          { token_budget: 2 },
+          "small"
+        ),
+        book([entry({ constant: true, content: "x" })], {}, "other")
+      ],
+      { messages: [] },
+      { budget: 3 },
+      () => 0.5,
+      (text) => text.length
+    )
+    expect(result.activated.map(({ book }) => book)).toEqual(["other"])
+    expect(result.skipped.map(({ reason }) => reason)).toEqual(["budget", "budget"])
+  })
+
+  it("R23 short regex activations replay identically without the old 200 ms cutoff", () => {
+    const entries = Array.from({ length: 3000 }, (_, i) => ({ keys: [`/cat|absent${i}/`], content: "x" }))
+    const first = run(entries, ["cat"], { budget: 1e9, recursive: false })
+    // Deliberate safety departure: ST has no aggregate token-counter work cap.
+    expect(first.activated).toHaveLength(2827)
+    expect(first.replayable).toBe(true)
+    expect(first.issues).toEqual([
+      expect.objectContaining({ code: "work_limit", detail: expect.stringContaining("tokenCharacters") })
+    ])
+    expect(run(entries, ["cat"], { budget: 1e9, recursive: false })).toEqual(first)
+  })
+
+  it.each([
+    ["R24", "/(cat)\\1/", /backreference/i, /repeat.*literal/i],
+    ["R25", "/(?=cat)cat/", /lookahead/i, /secondary.*AND ANY/i],
+    ["R26", "/cat(?!fish)/", /negative lookahead/i, /secondary.*NOT ANY/i],
+    ["R27", "/(?<=(cat))cat/", /lookbehind.*captur/i, /remove.*captur/i],
+    ["R28", "/\\p{L}/u", /Unicode property/i, /explicit.*class/i]
+  ])("%s refused regex explains the construct and a remedy", (_, key, construct, remedy) => {
+    const result = run([{ keys: [key as string] }])
+    expect(result.issues[0]?.detail).toMatch(construct as RegExp)
+    expect(result.issues[0]?.detail).toMatch(remedy as RegExp)
+  })
+
+  it("L01 limits aggregate scanning across entries", () => {
+    const result = run(
+      Array.from({ length: 100 }, () => ({ keys: ["missing"], scan_depth: 1000 })),
+      ["A".repeat(1000000)],
+      { recursive: false }
+    )
+    expect(result.issues).toContainEqual(
+      expect.objectContaining({ code: "work_limit", detail: expect.stringContaining("scannedCharacters") })
+    )
+  })
+
+  it("L02 limits aggregate scanning across keys within one entry", () => {
+    const result = run([{ keys: Array.from({ length: 10000 }, (_, i) => `missing${i}`) }], ["A".repeat(250000)], {
+      recursive: false
+    })
+    expect(result.issues).toContainEqual(expect.objectContaining({ code: "work_limit" }))
+  })
+
+  it("L03 bounds total text sent to the token counter", () => {
+    let characters = 0
+    const result = matchLorebooks(
+      [book(Array.from({ length: 1000 }, (_, i) => entry({ constant: true, content: "a".repeat(2000) }, i)))],
+      { messages: [] },
+      { budget: 1e9, recursive: false },
+      () => 0.5,
+      (text) => {
+        characters += text.length
+        return text.length
+      }
+    )
+    expect(characters).toBeLessThanOrEqual(8000000)
+    expect(result.issues).toContainEqual(
+      expect.objectContaining({ code: "work_limit", detail: expect.stringContaining("tokenCharacters") })
+    )
+  })
+
+  it("L04 collapses repeated regex refusals and bounds issue collection", () => {
+    const result = run([{ keys: Array.from({ length: 2000 }, (_, i) => `/(?=cat)${i}/`) }])
+    expect(result.issues.length).toBeLessThanOrEqual(2)
+    expect(result.issues).toContainEqual(
+      expect.objectContaining({ code: "work_limit", detail: expect.stringContaining("issueCount") })
+    )
+  })
+})
+
+describe("deterministic lorebook work bounds", () => {
+  it("L05 stops the 10,000-entry long-buffer reproduction at a fixed amount of work", () => {
+    const result = run(
+      Array.from({ length: 10000 }, () => ({ keys: ["missing"], scan_depth: 1000 })),
+      Array.from({ length: 1000 }, () => "A".repeat(1000)),
+      { recursive: false }
+    )
+    expect(result.work.scannedCharacters).toBeLessThanOrEqual(20000000)
+    expect(result.work.keyEvaluations).toBe(18)
+    expect(result.work.buffers).toBe(1)
+    expect(result.issues).toEqual([
+      expect.objectContaining({ code: "work_limit", detail: expect.stringContaining("scannedCharacters") })
+    ])
+    expect(result.skipped).toHaveLength(10000)
+    expect(result.replayable).toBe(true)
+  })
+
+  it("L06 bounds even empty key slots by the number of evaluations", () => {
+    const result = run([{ keys: Array.from({ length: 30000 }, () => "") }])
+    expect(result.work.keyEvaluations).toBe(20000)
+    expect(result.issues).toEqual([
+      expect.objectContaining({ code: "work_limit", detail: expect.stringContaining("keyEvaluations") })
+    ])
+  })
+
+  it("L07 bounds aggregate regex work independently of scanned character work", () => {
+    const result = run([{ keys: Array.from({ length: 20 }, () => `/${"a?".repeat(100)}z/`) }], ["a".repeat(5000)], {
+      recursive: false
+    })
+    expect(result.work.regexWork).toBe(19 * 201 * 5001)
+    expect(result.issues).toEqual([
+      expect.objectContaining({ code: "work_limit", detail: expect.stringContaining("regexWork") })
+    ])
+  })
+
+  it("L08 counts the invariant prefix once and preserves non-additive tokenization", () => {
+    const calls: Array<string> = []
+    const result = matchLorebooks(
+      [
+        book([
+          entry({ keys: ["cat"], content: "dragon", order: 200 }),
+          entry({ keys: ["dragon"], content: "a" }, 1),
+          entry({ keys: ["dragon"], content: "b" }, 2)
+        ])
+      ],
+      { messages: ["cat"] },
+      { budget: 5 },
+      () => 0.5,
+      (text) => {
+        calls.push(text)
+        return text === "a\nb\n" ? 10 : text ? 1 : 0
+      }
+    )
+    expect(result.activated.map(({ entry }) => entry.uid)).toEqual([0, 1])
+    // The next pass reuses the count from the first admission.
+    expect(calls.filter((text) => text === "dragon\n")).toHaveLength(1)
+    expect(calls).toContain("a\nb\n")
+  })
+
+  it("L09 unscored constants do not build or scan buffers", () => {
+    const result = run([{ constant: true }], ["a".repeat(1000000)])
+    expect(result.work.buffers).toBe(0)
+    expect(result.work.scannedCharacters).toBe(1)
+  })
+
+  it("L10 issue summaries keep only a count and the first three bounded examples", () => {
+    const result = run([{ keys: Array.from({ length: 100000 }, (_, i) => `/(?=cat)${i}${"x".repeat(200)}/`) }])
+    expect(result.work.issueCount).toBe(1000)
+    expect(result.issues).toHaveLength(2)
+    expect(result.issues[0]?.count).toBe(1000)
+    expect(result.issues[0]?.examples).toHaveLength(3)
+    expect(result.issues[0]?.examples.every((example) => example.key!.length <= 160)).toBe(true)
+    expect(result.issues[1]?.code).toBe("work_limit")
+  })
+
+  it("L11 preserves completed admissions when the next token count exhausts work", () => {
+    const result = run(
+      [
+        { constant: true, content: "a" },
+        { constant: true, content: "b" }
+      ],
+      [],
+      { recursive: false, workLimits: { tokenCharacters: 2 } }
+    )
+    expect(result.activated.map(({ entry }) => entry.uid)).toEqual([0])
+    expect(result.skipped.map(({ entry, reason }) => [entry.uid, reason])).toEqual([[1, "work_limit"]])
+    expect(result.work.tokenCharacters).toBe(2)
+  })
+
+  it("R30 the emergency guard explicitly marks partial results as not replayable", () => {
+    const result = run([{ keys: ["/(a+)+$/i"] }], ["a".repeat(50000) + "!"], { regexMs: 0 })
+    expect(result.replayable).toBe(false)
+    expect(result.issues).toEqual([
+      expect.objectContaining({ code: "regex_timeout", detail: expect.stringContaining("not replayable") })
+    ])
+  })
+
+  it("R31 oversized malformed slash patterns are refused before parsing (safety departure from ST)", () => {
+    const key = `/${"(".repeat(2001)}/`
+    const result = run([{ keys: [key] }], [key])
+    expect(result.activated).toHaveLength(0)
+    expect(result.issues[0]?.code).toBe("regex_limit")
+  })
+
+  it("L12 evaluation failures become issues with the completed partial result", () => {
+    const result = matchLorebooks(
+      [book([entry({ constant: true, content: "a" }), entry({ constant: true, content: "b" }, 1)])],
+      { messages: [] },
+      { budget: 100 },
+      () => 0.5,
+      (text) => {
+        if (text === "a\nb\n") throw new Error("synthetic tokenizer failure")
+        return text.length
+      }
+    )
+    expect(result.activated.map(({ entry }) => entry.uid)).toEqual([0])
+    expect(result.issues[0]).toMatchObject({
+      code: "evaluation_error",
+      detail: expect.stringContaining("synthetic tokenizer failure")
+    })
+    expect(result.skipped[0]?.reason).toBe("error")
   })
 })
