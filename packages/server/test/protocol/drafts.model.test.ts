@@ -39,7 +39,8 @@ import { type Completed, FakeIndexedDb } from "./fakeIndexedDb.ts"
 const idb = new FakeIndexedDb()
 globalThis.indexedDB = idb as unknown as IDBFactory
 // Imported once IndexedDB is in place: backup.ts opens it on first use.
-const { makeCopy, keepCopy, dropCopy } = await import("../../../client/src/features/editor/backup.ts")
+const { makeCopy, keepCopy, dropCopy, copiesOfUser, flushCopies } =
+  await import("../../../client/src/features/editor/backup.ts")
 const { ComposerDraft } = await import("../../../client/src/features/chat/composerDraft.ts")
 const { EditorStore } = await import("../../../client/src/features/editor/store.ts")
 const { describeCause } = await import("../../../client/src/errors.ts")
@@ -52,6 +53,7 @@ const ONLY = process.env.DRAFT_MODEL_SEED
 const TABS = Number(process.env.DRAFT_MODEL_TABS ?? 2)
 /** The copies' user: the server runs in single-user mode. */
 const USER = "model-user"
+const OTHER_USER = "model-other-user"
 const FIELDS = [["content"], ["title"]] as const
 
 // --- The server's generator: each reply waits until the model ends it.
@@ -140,7 +142,14 @@ class Net {
     return this.ready.length > 0 || this.pumping !== null
   }
 
-  send(page: Page, tag: string, payload: unknown, keepalive: boolean, store: EditorStore | null = null) {
+  send(
+    page: Page,
+    tag: string,
+    payload: unknown,
+    keepalive: boolean,
+    store: EditorStore | null = null,
+    copyId?: string
+  ) {
     return new Promise<Exit.Exit<unknown, unknown> | boolean | { readonly ok: boolean; readonly recovered: number }>(
       (resolve) => {
         const request: Request = {
@@ -161,7 +170,13 @@ class Net {
         }
         let answered = false
         page.outstanding++
-        this.world.checkRequest(request)
+        try {
+          this.world.checkRequest(request, copyId)
+        } catch (error) {
+          this.world.log(`request capture failed: ${String(error)}`)
+          this.world.pending ??= error instanceof Violation ? error : new Violation(String(error))
+          throw error
+        }
         const fail = () => request.answer(keepalive ? false : lost())
         if (page.tab.offline) {
           this.world.log(`  r${request.id} ${tag} from tab ${page.tab.id}: offline`)
@@ -347,12 +362,15 @@ class World {
   private clock = Date.now()
   private token = 0
   chatId!: ChatId
+  otherChatId!: ChatId
+  otherRef!: RefId
   noteRef!: RefId
   refs: Array<RefId> = []
   /** The server's own work a step started (another device's writes, a reply ending). */
   background: Array<Promise<unknown>> = []
   /** A violation found where it can't be thrown (as IndexedDB completes). */
   pending: Violation | null = null
+  recoveryOwner: string | null = null
 
   api: Api
   port: number
@@ -402,6 +420,37 @@ class World {
     throw new Violation(message)
   }
 
+  async copies(owner: string) {
+    const copies = await copiesOfUser(owner)
+    if (copies.some((copy) => copy.userId !== owner)) this.fail("I4: recovery exposed another account's copy")
+    return copies
+  }
+
+  async recoverOwner(owner: string) {
+    const remaining = [...(await this.copies(owner))]
+    const original = globalThis.fetch
+    globalThis.fetch = (async (url, init) => {
+      if (url !== "/library/drafts") return original(url, init)
+      const body = JSON.parse(init!.body as string) as { drafts: Array<unknown>; composers: Array<unknown> }
+      const save = body.drafts[0] ?? body.composers[0]
+      const at = remaining.findIndex((copy) => canonical(copy.save.payload) === canonical(save))
+      const [copy] = remaining.splice(at, 1)
+      const saving = this.net.send(this.tabs[0]!.page, "keepalive", body, true, null, copy?.key)
+      await settle(this)
+      const result = (await saving) as { ok: boolean; recovered: number } | boolean
+      const ok = typeof result === "boolean" ? result : result.ok
+      return new Response(null, {
+        status: ok ? 204 : 503,
+        headers: { "x-drafts-recovered": String(typeof result === "boolean" ? 0 : result.recovered) }
+      })
+    }) as typeof fetch
+    try {
+      return await flushCopies(owner)
+    } finally {
+      globalThis.fetch = original
+    }
+  }
+
   // --- Database reads (a read-only connection on the server's file).
 
   all<T>(query: string, ...params: Array<string | number | null>) {
@@ -433,44 +482,59 @@ class World {
   }
 
   drafts() {
-    return this.all<{ id: string; content: string; session: number; status: string }>(
-      `SELECT id, content, session, status FROM drafts`
-    )
+    return this.all<{
+      id: string
+      content: string
+      session: number
+      status: string
+      targetId: string
+      targetKind: string
+    }>(`SELECT id, content, session, status, target_id AS targetId, target_kind AS targetKind FROM drafts`)
   }
 
   // --- Requests, checked as they're made and as they're delivered.
 
-  checkRequest(request: Request) {
+  checkRequest(request: Request, copyId?: string) {
     const payload = request.payload as Record<string, unknown>
     const payloads = request.keepalive
       ? [...(payload.drafts as Array<unknown>), ...((payload.composers as Array<unknown>) ?? [])]
       : [payload]
-    const fields = (
-      (request.store ?? request.page.editor) as unknown as {
-        fields: Map<string, { pending: { key: string; save: { payload: unknown } } | null }>
-      }
-    ).fields
-    for (const save of payloads) {
-      const operationId = (save as Record<string, unknown>).operationId
-      if (typeof operationId === "string") {
-        request.copyIds.push(operationId)
-        continue
-      }
-      const composer = request.page.composer as unknown as {
-        pending: { key: string; save: { payload: unknown } } | null
-        sending: { copy: { key: string; save: { payload: unknown } } | null } | null
-      }
-      const shown = [...fields.values()]
-        .flatMap((field) => (field.pending === null ? [] : [field.pending]))
-        .concat(
-          composer.pending === null ? [] : [composer.pending],
-          composer.sending?.copy == null ? [] : [composer.sending.copy]
-        )
-      const own = shown.find((copy) => canonical(copy.save.payload) === canonical(save))
-      const copy =
-        own ?? idb.values().find((copy) => canonical((copy.save as { payload: unknown }).payload) === canonical(save))
-      if (copy !== undefined) request.copyIds.push(copy.key)
+    type Pending = { key: string; save: { payload: unknown } }
+    const editor = (request.store ?? request.page.editor) as unknown as {
+      fields: Map<string, { pending: Pending | null }>
+      sendingCopies: WeakSet<Pending>
     }
+    if (copyId !== undefined) request.copyIds.push(copyId)
+    else
+      for (const save of payloads) {
+        const operationId = (save as Record<string, unknown>).operationId
+        if (typeof operationId === "string") {
+          request.copyIds.push(operationId)
+          continue
+        }
+        const composer = request.page.composer as unknown as {
+          pending: { key: string; save: { payload: unknown } } | null
+          sending: { copy: { key: string; save: { payload: unknown } } | null } | null
+        }
+        // The newest matching in-flight copy made this request. Pending text can
+        // already be another copy with identical bytes and base (seed 60).
+        const sending =
+          request.tag === "SaveEditorDraft"
+            ? [...idb.originals.values()].reverse().filter((copy) => editor.sendingCopies.has(copy as Pending))
+            : []
+        const shown = (sending as Array<Pending>).concat(
+          [...editor.fields.values()]
+            .flatMap((field) => (field.pending === null ? [] : [field.pending]))
+            .concat(
+              composer.pending === null ? [] : [composer.pending],
+              composer.sending?.copy == null ? [] : [composer.sending.copy]
+            )
+        )
+        const own = shown.find((copy) => canonical(copy.save.payload) === canonical(save))
+        const copy =
+          own ?? idb.values().find((copy) => canonical((copy.save as { payload: unknown }).payload) === canonical(save))
+        if (copy !== undefined) request.copyIds.push(copy.key)
+      }
     // I3: a save names the draft it was typed into.
     const fieldSaves =
       request.tag === "SaveEditorDraft"
@@ -649,7 +713,10 @@ class World {
         was !== undefined &&
         now !== undefined &&
         now.session !== was.session &&
-        (was.content !== text || was.session !== composer.session)
+        (was.content !== text ||
+          was.session !== composer.session ||
+          was.targetKind !== "composer" ||
+          was.targetId !== payload.chatId)
       )
         this.fail(`I2: a send of ${JSON.stringify(text)} committed ${JSON.stringify(was.content)}`)
     } else if (request.tag === "CommitEditorDrafts") {
@@ -681,6 +748,10 @@ class World {
 
   /** I5: a tab's write that put text in the recovered texts says so, and the tab shows it. */
   private checkRecovered(request: Request, before: number, value: Record<string, unknown>) {
+    if (request.tag === "SaveComposer" && value.draft !== null) {
+      const nested = (value.draft as { recovered: number }).recovered
+      if (nested > 0 !== value.recovered) this.fail("I5: composer recovery metadata surfaces disagree")
+    }
     if (this.recoveredCount() === before) return
     const says =
       request.tag === "SaveComposer"
@@ -873,7 +944,7 @@ class World {
   }
 }
 
-type Draft = { id: string; content: string; session: number; status: string }
+type Draft = { id: string; content: string; session: number; status: string; targetId: string; targetKind: string }
 const commitsShown = new WeakMap<Request, Map<string, string>>()
 const commitStores = new WeakMap<Request, EditorStore>()
 const expectComposerNotice = new Set<Page>()
@@ -898,6 +969,68 @@ const edit = (w: World, before: string) => {
 type Op = { readonly name: string; readonly weight: number; readonly run: (w: World, tab: Tab) => string | null }
 
 const OPS: ReadonlyArray<Op> = [
+  {
+    name: "refresh the editor, including while saves are in flight",
+    weight: 4,
+    run: (_, { page }) => {
+      void page.editor.refresh()
+      return null
+    }
+  },
+  {
+    name: "send with another chat's composer identity",
+    weight: 2,
+    run: (w, { page }) => {
+      const draft = w.drafts().find((d) => d.targetId === w.chatId && d.status === "active" && d.content.trim() !== "")
+      if (!draft) return null
+      void page.call((c: never) =>
+        (c as (tag: string, p: unknown) => unknown)("SendMessage", {
+          chatId: w.otherChatId,
+          parentSlotId: null,
+          branch: true,
+          content: draft.content,
+          composer: { draftId: draft.id, session: draft.session }
+        })
+      )
+      return draft.id
+    }
+  },
+  {
+    name: "another account retains a browser copy",
+    weight: 2,
+    run: (w) => {
+      const text = `Other account ${w.newToken()}`
+      w.live.add(text)
+      const copy = makeCopy(
+        OTHER_USER,
+        w.otherRef,
+        textField(FIELDS[0]),
+        {
+          kind: "editor",
+          payload: {
+            refId: w.otherRef,
+            field: textField(FIELDS[0]),
+            draftId: null,
+            expectedRowVersion: null,
+            expectedSession: null,
+            baseRevisionId: null,
+            content: text
+          }
+        },
+        w.now()
+      )
+      w.background.push(keepCopy(copy))
+      return text
+    }
+  },
+  {
+    name: "logout or recovery retries only this account's copies",
+    weight: 2,
+    run: (w) => {
+      w.recoveryOwner = w.rng() < 0.5 ? USER : OTHER_USER
+      return null
+    }
+  },
   {
     name: "type in the composer",
     weight: 14,
@@ -1314,6 +1447,17 @@ const runSteps = async (w: World, steps: ReadonlyArray<Step>) => {
     const detail = op.run(w, tab)
     if (detail !== null) w.lines[w.lines.length - 1] += `: ${detail}`
     await settle(w)
+    await w.copies(USER)
+    await w.copies(OTHER_USER)
+    if (w.recoveryOwner !== null) {
+      const owner = w.recoveryOwner
+      w.recoveryOwner = null
+      const reliable = w.net.reliable
+      w.net.reliable = true
+      await w.recoverOwner(owner)
+      w.net.reliable = reliable
+      await settle(w)
+    }
     if (w.leaf() !== leafBefore) {
       // Bin relocation and branch changes offer both endpoints in the UI.
       // Actual appends remove their old endpoint again just below.
@@ -1374,6 +1518,8 @@ const drain = async (w: World) => {
     while (w.net.held.length > 0) w.net.ready.push(w.net.held.shift()!)
     await settle(w)
   }
+  await w.recoverOwner(OTHER_USER)
+  await settle(w)
   w.check(false)
   if (idb.values().length > 0)
     w.fail(
@@ -1429,10 +1575,12 @@ const runOnce = (steps: ReadonlyArray<Step>, directed?: (w: World) => Promise<vo
       }
       const chat = yield* api.CreateChat({ title: "Model" })
       w.chatId = chat.id
+      w.otherChatId = (yield* api.CreateChat({ title: "Other model chat" })).id
       yield* api.SendMessage({ chatId: chat.id, parentSlotId: null, branch: false, content: "The first message." })
       const card = yield* api.CreateCard({ label: "Model card", name: "Model card" })
       w.noteRef = (yield* api.CreateCardNote({ cardRefId: card.id, title: "Model note" })).id
       w.refs = [w.noteRef]
+      w.otherRef = (yield* api.CreateCardNote({ cardRefId: card.id, title: "Other account copy target" })).id
       // The tabs open the same way in every run.
       w.rng = mulberry(0)
       const leaf = w.leaf()
@@ -1523,6 +1671,179 @@ const purgeQueue = async (w: World, branch: boolean) => {
 }
 
 const DIRECTED: ReadonlyArray<{ name: string; run: (w: World) => Promise<void> }> = [
+  {
+    name: "a send in another chat leaves the source composer active",
+    run: async (w) => {
+      const opened = await Effect.runPromise(w.api.OpenComposer({ chatId: w.chatId, tipSlotId: w.leaf() }))
+      const saved = await Effect.runPromise(
+        w.api.SaveComposer({
+          chatId: w.chatId,
+          draftId: opened.id,
+          rowVersion: opened.rowVersion,
+          session: opened.session,
+          operationId: crypto.randomUUID(),
+          next: false,
+          content: "Source chat text"
+        })
+      )
+      const draft = saved.draft!
+      await request(w, "SendMessage", {
+        chatId: w.otherChatId,
+        parentSlotId: null,
+        branch: false,
+        content: draft.content,
+        composer: { draftId: draft.id, session: draft.session }
+      })
+      const after = await Effect.runPromise(w.api.OpenComposer({ chatId: w.chatId, tipSlotId: w.leaf() }))
+      if (after.content !== draft.content || after.session !== draft.session)
+        w.fail("I2: another chat committed the source draft")
+    }
+  },
+  {
+    name: "recovery and logout exclude another copy owner",
+    run: async (w) => {
+      const payload = {
+        refId: w.otherRef,
+        field: textField(FIELDS[0]),
+        draftId: null,
+        expectedRowVersion: null,
+        expectedSession: null,
+        baseRevisionId: null,
+        content: "Other owner's only browser copy"
+      }
+      const copy = makeCopy(OTHER_USER, w.otherRef, payload.field, { kind: "editor", payload }, w.now())
+      w.live.add(copy.content)
+      await keepCopy(copy)
+      if ((await w.copies(USER)).length !== 0) w.fail("I4: another owner's recovery text was visible")
+      await w.recoverOwner(USER)
+      if (!(await w.copies(OTHER_USER)).some((c) => c.key === copy.key))
+        w.fail("I4: logout removed another owner's copy")
+      await w.recoverOwner(OTHER_USER)
+      if ((await w.copies(OTHER_USER)).length !== 0) w.fail("I4: acknowledged recovery copy stayed")
+    }
+  },
+  {
+    name: "refresh and an in-flight save keep later typing on its original field base",
+    run: async (w) => {
+      const page = w.tabs[0]!.page
+      const store = page.editor
+      const field = textField(FIELDS[0])
+      const opened = store.snapshot!
+      const draft = await Effect.runPromise(
+        w.api.SaveEditorDraft({
+          refId: page.ref,
+          field,
+          draftId: null,
+          expectedRowVersion: null,
+          expectedSession: null,
+          baseRevisionId: opened.ref.headRevisionId,
+          content: "original"
+        })
+      )
+      const refreshing = store.refresh()
+      await settle(w)
+      await refreshing
+      store.setText(FIELDS[0], "original typed")
+      await Effect.runPromise(
+        w.api.SaveEditorDraft({
+          refId: page.ref,
+          field,
+          draftId: draft.id,
+          expectedRowVersion: draft.rowVersion,
+          expectedSession: draft.session,
+          baseRevisionId: opened.ref.headRevisionId,
+          content: "other tab unseen"
+        })
+      )
+      const refresh = store.refresh()
+      await settle(w)
+      await refresh
+      const saving = store.flush()
+      // Hold the save before the network delivers it, then type further.
+      const held = w.net.ready.splice(0)
+      store.setText(FIELDS[0], "original typed more")
+      const copies = await w.copies(USER)
+      const later = copies.find((copy) => copy.content === "original typed more")
+      if (later?.save.kind !== "editor" || later.save.payload.expectedRowVersion !== draft.rowVersion)
+        w.fail("I3: refresh rebased unsaved typing on unseen text")
+      w.net.ready.push(...held)
+      await settle(w)
+      await saving
+      const flush = store.flush()
+      await settle(w)
+      await flush
+    }
+  },
+  {
+    name: "a next save spanning two completed sends cannot replace the third session",
+    run: async (w) => {
+      const chat = await Effect.runPromise(w.api.CreateChat({ title: "Two queued sessions" }))
+      const parent = await Effect.runPromise(w.api.Generate({ chatId: chat.id, parentSlotId: null, branch: false }))
+      if (parent._tag !== "Posted") return w.fail("I2: queued-send parent did not post")
+      const tip = parent.entry.slotId
+      const save = async (content: string) => {
+        const d = await Effect.runPromise(w.api.OpenComposer({ chatId: chat.id, tipSlotId: tip }))
+        return (
+          await Effect.runPromise(
+            w.api.SaveComposer({
+              chatId: chat.id,
+              draftId: d.id,
+              rowVersion: d.rowVersion,
+              session: d.session,
+              operationId: crypto.randomUUID(),
+              next: false,
+              content
+            })
+          )
+        ).draft!
+      }
+      const first = await save("first queued text")
+      const a = await Effect.runPromise(
+        w.api.SendMessage({
+          chatId: chat.id,
+          parentSlotId: tip,
+          branch: false,
+          content: first.content,
+          composer: { draftId: first.id, session: first.session }
+        })
+      )
+      const second = await save("second queued direction")
+      const b = await Effect.runPromise(
+        w.api.Generate({
+          chatId: chat.id,
+          parentSlotId: tip,
+          branch: false,
+          direction: second.content,
+          composer: { draftId: second.id, session: second.session }
+        })
+      )
+      if (a._tag !== "Queued" || b._tag !== "Queued") w.fail("I2: the two sends did not queue")
+      const third = await save("third session typing")
+      const content = "next text from the first queued send"
+      const result = await Effect.runPromise(
+        w.api.SaveComposer({
+          chatId: chat.id,
+          draftId: first.id,
+          rowVersion: first.rowVersion,
+          session: first.session,
+          operationId: crypto.randomUUID(),
+          next: true,
+          content
+        })
+      )
+      if (result.draft?.content !== third.content || result.draft.session !== third.session)
+        w.fail("I3: a late next save crossed two ended sessions")
+      if (!result.recovered || result.draft?.recovered !== 1) w.fail("I5: late next recovery was not reported")
+      const recovered = await Effect.runPromise(w.api.ListRecoveredTexts({ limit: 100, before: null }))
+      if (!recovered.some((t) => t.content === content)) w.fail("I1: late next text was not recovered")
+      const queue = await Effect.runPromise(w.api.ListQueued({ chatId: chat.id }))
+      if (
+        !queue.some((entry) => entry.content === first.content) ||
+        !queue.some((entry) => entry.direction === second.content)
+      )
+        w.fail("I2: queued send text changed")
+    }
+  },
   {
     name: "an older save cannot rebase text typed after Send cleared the box",
     run: async (w) => {

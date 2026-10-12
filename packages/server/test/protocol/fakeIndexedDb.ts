@@ -43,6 +43,10 @@ class Transaction {
     setImmediate(() => this.end())
   }
 
+  remember(value: Value) {
+    this.db.originals.add(value)
+  }
+
   objectStore() {
     return this.store
   }
@@ -91,7 +95,9 @@ class ObjectStore {
   createIndex() {}
 
   put(value: Value) {
+    this.transaction.remember(value)
     const copy = structuredClone(value)
+    this.transaction.remember(copy)
     this.rows.set(copy.key, copy)
     this.transaction.put.push(copy)
   }
@@ -158,6 +164,8 @@ const INDEXES = new Map<string, KeyPath>([
 
 export class FakeIndexedDb {
   private readonly rows = new Map<string, Value>()
+  /** Original objects let the oracle identify the store's WeakSet of in-flight copies. */
+  readonly originals = new Set<Value>()
   private opened = false
   /** Transactions not complete yet. */
   pending = 0
@@ -195,5 +203,6 @@ export class FakeIndexedDb {
 
   clear() {
     this.rows.clear()
+    this.originals.clear()
   }
 }
