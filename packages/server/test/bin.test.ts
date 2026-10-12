@@ -10,6 +10,7 @@ import { Effect } from "effect"
 import { databaseFile } from "../src/db/connection.ts"
 import * as Database from "../src/db/Database.ts"
 import { tempDir } from "./support/tempDir.ts"
+import { cardDoc, presetDoc } from "./support/docs.ts"
 
 const database = (dataDir = tempDir("bin"), binLimits?: BinLimits) =>
   Database.layer({
@@ -31,7 +32,7 @@ const setup = (handle = "ana") =>
       kind: "card",
       label: "Mira",
       subtitle: "",
-      doc: { name: "Mira" },
+      doc: cardDoc("Mira"),
       schemaVersion: 1,
       origin: "user",
       sourcePath: null
@@ -338,7 +339,7 @@ describe("recycle bin", () => {
           kind: "preset",
           label: "Narrator",
           subtitle: "",
-          doc: { name: "Narrator" },
+          doc: presetDoc(),
           schemaVersion: 1,
           origin: "user",
           sourcePath: null

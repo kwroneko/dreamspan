@@ -68,6 +68,18 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
       Effect.gen(function* () {
         const id = uuidv7()
         const { doc } = options
+        // Every revision is valid for its kind. Callers check what users send and say why;
+        // this is the backstop, so a bug fails loudly rather than storing a broken document.
+        // Imports were checked against the schema in the format worker (importers.ts).
+        if (options.origin !== "import") {
+          const [entity] = yield* sql<{ kind: EntityKind }>`SELECT kind FROM entities WHERE id = ${options.entityId}`
+          const check = hasSchema(entity!.kind) ? validateDoc(entity!.kind, JSON.parse(doc.json)) : null
+          if (check && !check.ok) {
+            return yield* Effect.die(
+              new Error(`refusing to store an invalid ${entity!.kind}: ${check.problems.join("; ")}`)
+            )
+          }
+        }
         yield* sql`INSERT INTO entity_revisions ${sql.insert({
           id,
           entity_id: options.entityId,
@@ -145,9 +157,26 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
               yield* moveHead(ref.id, ref.head_revision_id, plan.theirsHead)
             }
             break
-          case "fast_forward":
-            yield* moveHead(ref.id, plan.theirsHead, plan.theirsHead)
-            break
+          case "fast_forward": {
+            // Moving to exactly what it follows would bring along a permission the user gave
+            // there and not here: then it's a merge revision with the permission kept off.
+            const doc = yield* withoutGrants(ref, plan.merged)
+            if (docHash(doc) === docHash(plan.merged)) {
+              yield* moveHead(ref.id, plan.theirsHead, plan.theirsHead)
+              break
+            }
+            const merge = yield* insertRevision({
+              entityId: ref.entity_id,
+              schemaVersion: (yield* revision(ref.head_revision_id)).schema_version,
+              doc: encode(doc),
+              parents: [ref.head_revision_id, plan.theirsHead],
+              origin: "merge",
+              originRef: ref.follows_ref_id,
+              message: mergeMessage(ref)
+            })
+            yield* moveHead(ref.id, merge, plan.theirsHead)
+            return "merged" as MergeOutcome
+          }
           case "merged": {
             const merge = yield* insertRevision({
               entityId: ref.entity_id,
@@ -491,11 +520,8 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
           }
           // The resolved document comes from the client: it must be valid, keep each protected
           // field from one side or the other, and name only the user's own files and cards.
-          // As with an automatic merge (library.ts), a valid document stays valid; one stored
-          // before its kind had a schema isn't held to it.
           const sides = [yield* lib.loadDoc(ref.head_revision_id), yield* lib.loadDoc(theirsRevisionId)]
-          const checked = hasSchema(ref.kind) && validateDoc(ref.kind, sides[0]!).ok
-          const valid = checked ? validateDoc(ref.kind, doc) : { ok: true as const, doc }
+          const valid = hasSchema(ref.kind) ? validateDoc(ref.kind, doc) : { ok: true as const, doc }
           if (!valid.ok) return yield* new InvalidDocument({ problems: valid.problems })
           yield* checkReferences(userId, valid.doc)
           const moved = protectedChanges(ref.kind, valid.doc, sides)

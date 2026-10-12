@@ -121,4 +121,25 @@ describe("the built-in importers", () => {
       assert.strictEqual((yield* Importers.parseFile(json(worldInfo()), "x.json")).report.format, "st-world-info")
       assert.strictEqual((yield* Importers.parseFile(card, "x.png")).report.format, "card-v2-png")
     }).pipe(Effect.provide(Importers.layer), Effect.runPromise))
+
+  it("never passes on a document its kind's schema refuses, whichever importer made it", () =>
+    Effect.gen(function* () {
+      const registry = yield* Importers.Importers
+      yield* registry.register({
+        id: "st-world-info",
+        detect: (file) => file.keys.has("entries"),
+        parse: () =>
+          Effect.succeed({
+            report: new ImportReport({ format: "my-lorebooks", issues: [] }),
+            library: { kind: "lorebook", label: "Broken", doc: { entries: "none" }, schemaVersion: 1, note: null },
+            files: []
+          })
+      })
+      const parsed = yield* Importers.parseFile(json(worldInfo()), "x.json")
+      assert.isNull(parsed.library)
+      assert.deepStrictEqual(
+        parsed.report.issues.map((issue) => issue.code),
+        ["file.invalid_document"]
+      )
+    }).pipe(Effect.scoped, Effect.provide(Importers.layer), Effect.runPromise))
 })

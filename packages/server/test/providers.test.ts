@@ -7,6 +7,7 @@ import { type LlmRequest, type LlmRequestId, unknownCounts } from "@rp/shared/us
 import { Effect, Exit } from "effect"
 import * as Database from "../src/db/Database.ts"
 import { tempDir } from "./support/tempDir.ts"
+import { cardDoc, presetDoc } from "./support/docs.ts"
 
 const database = () =>
   Database.layer({
@@ -251,7 +252,7 @@ describe("review regressions", () => {
         kind: "preset",
         label: "Ana's preset",
         subtitle: "",
-        doc: {},
+        doc: presetDoc(),
         schemaVersion: 1,
         origin: "user",
         sourcePath: null
@@ -439,7 +440,7 @@ describe("usage ledger", () => {
         kind: "card",
         label: "Mira",
         subtitle: "",
-        doc: {},
+        doc: cardDoc("Mira"),
         schemaVersion: 1,
         origin: "user",
         sourcePath: null

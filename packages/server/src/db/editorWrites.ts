@@ -120,6 +120,14 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps) => {
           }
           rows.push(row)
         }
+        // A draft in something that's gone (a prompt deleted since) is set aside: its text goes
+        // to the recovered texts, and the rest is saved. It's found first, so it never counts
+        // as a conflict.
+        const orphans = new Set(
+          applyDrafts(ref.kind, head, rows)
+            .problems.filter((problem) => problem.orphan)
+            .map((problem) => problem.field)
+        )
         // A draft started from an older revision conflicts where the saved version changed
         // the same field since, unless both say the same.
         const bases = new Map<string, Doc>()
@@ -127,6 +135,7 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps) => {
         for (const row of rows) {
           const field = parseField(row.field)
           if (row.base_revision === null || row.base_revision === ref.head_revision_id || field === null) continue
+          if (orphans.has(row.field)) continue
           if (!bases.has(row.base_revision)) {
             const base = yield* entityRevision(ref, row.base_revision)
             bases.set(row.base_revision, base === null ? {} : (JSON.parse(base.doc_json) as Doc))
@@ -139,13 +148,7 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps) => {
           }
         }
         if (conflicts.length > 0) return yield* new EditConflict({ fields: conflicts })
-        // A draft in something that's gone (a prompt deleted since) is set aside: its text goes
-        // to the recovered texts, and the rest is saved. Any other problem refuses the save.
-        const orphans = new Set(
-          applyDrafts(ref.kind, head, rows)
-            .problems.filter((problem) => problem.orphan)
-            .map((problem) => problem.field)
-        )
+        // Any other problem refuses the save.
         const kept = rows.filter((row) => !orphans.has(row.field))
         const applied = applyDrafts(ref.kind, head, kept)
         if (applied.problems.length > 0) {

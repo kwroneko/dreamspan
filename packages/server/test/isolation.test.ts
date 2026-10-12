@@ -20,6 +20,7 @@ import { Writer } from "../src/db/Database.ts"
 import * as FakeGenerator from "../src/dev/fakeGenerator.ts"
 import { png, textChunk } from "./formats/support.ts"
 import { client, login, outcome, posted, serverLayer, serverPort, testConfig } from "./support/config.ts"
+import { cardDoc, presetDoc } from "./support/docs.ts"
 
 type Api = Effect.Success<ReturnType<typeof client>>
 
@@ -1001,7 +1002,7 @@ const seed = Effect.gen(function* () {
         kind: "preset",
         label: "Preset",
         subtitle: "",
-        doc: {},
+        doc: presetDoc(),
         schemaVersion: 1,
         origin: "user",
         sourcePath: null
@@ -1033,7 +1034,7 @@ const seed = Effect.gen(function* () {
         kind: "card",
         label: `${user.handle}'s card`,
         subtitle: "",
-        doc: { name: `${user.handle} card`, first_mes: "Hello, {{user}}." },
+        doc: cardDoc(`${user.handle} card`, { first_mes: "Hello, {{user}}." }),
         schemaVersion: 1,
         origin: "user",
         sourcePath: null

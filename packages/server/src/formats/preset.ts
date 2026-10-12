@@ -756,7 +756,7 @@ const readRegex = (raw: unknown, r: ReportBuilder): Array<RegexScript> => {
       find_regex: text(s, "findRegex", path, what, r),
       replace_string: text(s, "replaceString", path, what, r),
       trim_strings: Array.isArray(s.trimStrings) ? s.trimStrings.filter((t) => typeof t === "string") : [],
-      placement: Array.isArray(s.placement) ? s.placement.filter((p) => Number.isInteger(p)) : [],
+      placement: Array.isArray(s.placement) ? s.placement.filter((p) => Number.isSafeInteger(p)) : [],
       disabled: Boolean(s.disabled),
       markdown_only: Boolean(s.markdownOnly),
       prompt_only: Boolean(s.promptOnly),

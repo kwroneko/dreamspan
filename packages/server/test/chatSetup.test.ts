@@ -11,13 +11,15 @@ import { freezeTemplate } from "../src/chat/macros.ts"
 import { Writer } from "../src/db/Database.ts"
 import * as FakeGenerator from "../src/dev/fakeGenerator.ts"
 import { client, outcome, posted, serverLayer, testConfig } from "./support/config.ts"
+import type { CardDoc } from "@rp/shared/docs/card.ts"
+import { cardDoc } from "./support/docs.ts"
 
 type Api = Effect.Success<ReturnType<typeof client>>
 
 const slow = FakeGenerator.layer({ tokensPerSecond: 20, tokens: 2000 })
 
 /** A card of the caller's, made as an import would, optionally in the persona folder. */
-const card = (api: Api, label: string, doc: Record<string, unknown>, persona = false) =>
+const card = (api: Api, label: string, doc: Partial<CardDoc>, persona = false) =>
   Effect.gen(function* () {
     const writer = yield* Writer
     const me = yield* api.Whoami()
@@ -26,7 +28,7 @@ const card = (api: Api, label: string, doc: Record<string, unknown>, persona = f
       kind: "card",
       label,
       subtitle: "",
-      doc,
+      doc: cardDoc(label, doc),
       schemaVersion: 1,
       origin: "user",
       sourcePath: null

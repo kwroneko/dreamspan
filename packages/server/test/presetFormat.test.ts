@@ -585,6 +585,13 @@ describe("cases where ST's behaviour is easy to miss", () => {
     { character_id: 100001, order: entries.map(([identifier, enabled]) => ({ identifier, enabled })) }
   ]
 
+  it("keeps only regex placements its schema takes: whole numbers within the safe range", () => {
+    const text = JSON.stringify(preset({ extensions: { regex_scripts: [{ id: "r", placement: [1e20, 2, 1.5] }] } }))
+    const result = importStPreset(text)
+    expect(result.document!.regex[0]!.placement).toEqual([2])
+    expect(Schema.decodeUnknownExit(PresetDoc)(result.document)._tag).toBe("Success")
+  })
+
   it("reads infinite regex depths as ST does, and reports them", () => {
     const text = JSON.stringify(
       preset({ extensions: { regex_scripts: [{ id: "r", findRegex: "/a/", minDepth: "Infinity", maxDepth: "MAX" }] } })

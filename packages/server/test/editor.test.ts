@@ -5,10 +5,10 @@ import { readFileSync } from "node:fs"
 import { assert, layer } from "@effect/vitest"
 import type { ChatId } from "@rp/shared/chat.ts"
 import type { PresetDoc } from "@rp/shared/docs/preset.ts"
-import { textField, valueField } from "@rp/shared/editing.ts"
+import { textField, validateDoc, valueField } from "@rp/shared/editing.ts"
 import { ImportResult } from "@rp/shared/libraryImport.ts"
 import type { RefId } from "@rp/shared/library.ts"
-import { Effect, Schema } from "effect"
+import { Effect, Exit, Schema } from "effect"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { chunk, png } from "./formats/support.ts"
 import { client, outcome, serverLayer, serverPort, testConfig } from "./support/config.ts"
@@ -739,6 +739,110 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
         expectedRowVersion: stopped.ref.rowVersion
       })
       assert.isFalse((yield* doc(api, note.id)).agent_editable)
+    })
+  )
+})
+
+layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" })("every revision is valid", (it) => {
+  it.effect("a file the schema would refuse never makes an invalid revision, and nothing stores one", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const refId = (yield* importPreset(preset("full"))).ref.id
+      // A regex placement past the safe integers: the importer drops it.
+      yield* importPreset(
+        preset("full", (file) => {
+          ;(file.extensions.regex_scripts[0] as { placement: Array<number> }).placement = [1e20]
+        }),
+        refId
+      )
+      const imported = yield* doc(api, refId)
+      assert.isTrue(validateDoc("preset", imported).ok)
+      // A write that skips the checks callers make still can't store an invalid document.
+      const writer = yield* Writer
+      const me = yield* api.Whoami()
+      const opened = yield* api.OpenEditor({ refId })
+      const exit = yield* Effect.exit(
+        writer.EditRef({
+          userId: me.id,
+          refId,
+          doc: { ...opened.doc, prompts: "arbitrary invalid replacement" },
+          expectedRowVersion: opened.ref.rowVersion,
+          message: null,
+          commitDraft: null
+        })
+      )
+      assert.isTrue(Exit.isFailure(exit))
+      assert.deepStrictEqual(yield* doc(api, refId), imported)
+    })
+  )
+
+  it.effect("a resolution is held to the schema too", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const { variant, preview } = yield* pendingVariant(api, "Schema")
+      assert.strictEqual(
+        yield* outcome(
+          api.ResolveUpdate({
+            refId: variant.id,
+            doc: { ...preview.merged, modules: "arbitrary invalid replacement" },
+            theirsRevisionId: preview.theirsRevisionId,
+            expectedRowVersion: variant.rowVersion
+          })
+        ),
+        "InvalidDocument"
+      )
+    })
+  )
+
+  it.effect("a draft in something deleted since never conflicts: it's set aside, and the rest saves", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const card = yield* api.CreateCard({ label: "Orphan", name: "Orphan" })
+      const module = { id: "x", title: "X", content: "old", exportable: false }
+      yield* draft(api, card.id, valueField(["modules", "id=x"]), JSON.stringify(module))
+      yield* commit(api, card.id)
+      const variant = yield* api.ForkVariant({ refId: card.id, label: "V", subtitle: "", moveDrafts: false })
+      yield* draft(api, variant.id, textField(["modules", "id=x", "content"]), "valuable unsaved")
+      // The module goes upstream, and the variant follows.
+      yield* draft(api, card.id, valueField(["modules", "id=x"]), "null")
+      yield* commit(api, card.id)
+      yield* draft(api, variant.id, textField(["scenario"]), "unrelated edit")
+      const saved = yield* commit(api, variant.id)
+      assert.deepStrictEqual(saved.setAside, [textField(["modules", "id=x", "content"])])
+      assert.strictEqual((yield* doc(api, variant.id)).scenario, "unrelated edit")
+      const reader = yield* Reader
+      const me = yield* api.Whoami()
+      const recovered = yield* reader.ListRecoveredTexts({ userId: me.id, source: null, limit: 100, before: null })
+      assert.include(
+        recovered.map((r) => r.content),
+        "valuable unsaved"
+      )
+    })
+  )
+
+  it.effect("following what it follows never gives a variant a permission taken away from it", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const card = yield* api.CreateCard({ label: "Granted", name: "Granted" })
+      const note = yield* api.CreateCardNote({ cardRefId: card.id, title: "N" })
+      yield* draft(api, note.id, valueField(["agent_editable"]), "true")
+      yield* commit(api, note.id)
+      yield* draft(api, note.id, valueField(["agent_editable"]), "false")
+      yield* commit(api, note.id)
+      const variant = yield* api.ForkVariant({ refId: note.id, label: "Revoked", subtitle: "", moveDrafts: false })
+      yield* draft(api, note.id, valueField(["agent_editable"]), "true")
+      const saved = yield* commit(api, note.id)
+      assert.deepStrictEqual(
+        saved.followers.map((f) => f.outcome),
+        ["merged"]
+      )
+      assert.isFalse((yield* doc(api, variant.id)).agent_editable)
+      // The same holds for a preset's regex approval.
+      const presetId = (yield* importPreset(preset("full"))).ref.id
+      const follower = yield* api.ForkVariant({ refId: presetId, label: "Unapproved", subtitle: "", moveDrafts: false })
+      const opened = yield* api.OpenEditor({ refId: presetId })
+      yield* api.SetRegexApproval({ refId: presetId, approved: true, expectedRowVersion: opened.ref.rowVersion })
+      assert.isFalse((yield* doc(api, follower.id)).regex_approved)
     })
   )
 })

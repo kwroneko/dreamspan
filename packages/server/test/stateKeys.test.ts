@@ -14,6 +14,7 @@ import { type FoldableEvent, type StateEventData, stateKeyIds } from "@rp/shared
 import { Context, Effect, Layer } from "effect"
 import * as Database from "../src/db/Database.ts"
 import { tempDir } from "./support/tempDir.ts"
+import { docFor } from "./support/docs.ts"
 
 interface Item {
   readonly entity: EntityId
@@ -83,7 +84,7 @@ const fixture = Layer.effect(
               kind,
               label: kind,
               subtitle: "",
-              doc: {},
+              doc: docFor(kind, kind),
               schemaVersion: 1,
               origin: "user",
               sourcePath: null

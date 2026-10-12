@@ -8,6 +8,7 @@ import type { Doc, RefId } from "@rp/shared/library.ts"
 import { Effect } from "effect"
 import { databaseFile } from "../src/db/connection.ts"
 import * as Database from "../src/db/Database.ts"
+import { cardDoc } from "./support/docs.ts"
 import { tempDir } from "./support/tempDir.ts"
 import { docHash, searchText } from "../src/db/documents.ts"
 
@@ -21,15 +22,11 @@ const sha = (char: string) => char.repeat(64)
 /** A document as the format worker sends it. */
 const encoded = (doc: Doc) => ({ docJson: JSON.stringify(doc), docHash: docHash(doc), searchText: searchText(doc) })
 
-const card = (description: string) => ({
-  schema_version: 1,
-  name: "Mira",
-  description,
-  avatar_media_id: null,
-  assets: [{ type: "icon", uri: "embeded://assets/main.png", name: "main", ext: "png" }],
-  modules: [],
-  extensions: {}
-})
+const card = (description: string) =>
+  cardDoc("Mira", {
+    description,
+    assets: [{ type: "icon", uri: "embeded://assets/main.png", name: "main", ext: "png" }]
+  })
 
 const noteJson = (content: string) =>
   JSON.stringify({

@@ -109,7 +109,7 @@ export const makeLibraryQueries = (sql: SqlClient.SqlClient) => {
       // Two valid edits can merge into an invalid document (an order entry naming a prompt
       // the other side deleted). The fields the schema refuses become conflicts to resolve.
       const merged = result.value as Doc
-      if (result.conflicts.length === 0 && hasSchema(ref.kind) && validateDoc(ref.kind, ours).ok) {
+      if (result.conflicts.length === 0 && hasSchema(ref.kind)) {
         const check = validateDoc(ref.kind, merged)
         if (!check.ok) {
           const fields = [...new Set(check.paths.map((path) => String(path[0] ?? "")))]

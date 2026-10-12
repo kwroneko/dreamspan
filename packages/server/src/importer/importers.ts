@@ -19,6 +19,7 @@ import { makeRegistry, type Registry } from "../registry.ts"
 import { type Sniffed, sniff } from "./detect.ts"
 import { ParsedFile, ParsedMedia } from "./ops.ts"
 import { describeImage } from "./images.ts"
+import { validateDoc } from "@rp/shared/editing.ts"
 
 /** A file that came with an imported one: a card's avatar or an embedded asset. */
 interface ImportedFile {
@@ -196,8 +197,23 @@ export const failed = (format: string, code: string, message: string) =>
   new ImportReport({ format, issues: [new ImportIssue({ level: "error", code, message })] })
 
 /** What a parse returns for an imported file whose bytes hash to `fileSha256`. */
-export const parsedFile = ({ report, library, files }: Imported, fileSha256: string) =>
-  new ParsedFile({
+export const parsedFile = ({ report, library, files }: Imported, fileSha256: string) => {
+  // The importers build documents to their schemas; one that came out invalid is an importer
+  // bug, and is never stored (the writer trusts that imports were checked here).
+  const check = library && validateDoc(library.kind, library.doc)
+  if (check && !check.ok) {
+    return new ParsedFile({
+      report: failed(
+        report.format,
+        "file.invalid_document",
+        `This file can't be imported: reading it gave a document that isn't valid (${check.problems.slice(0, 3).join("; ")}).`
+      ),
+      sha256: fileSha256,
+      library: null,
+      media: []
+    })
+  }
+  return new ParsedFile({
     report,
     sha256: fileSha256,
     library: library && {
@@ -223,6 +239,7 @@ export const parsedFile = ({ report, library, files }: Imported, fileSha256: str
         )
       : []
   })
+}
 
 /**
  * Reads a file with the first importer that detects it. Never fails: a file that can't be

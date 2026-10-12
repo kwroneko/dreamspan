@@ -5,6 +5,7 @@ import { composerKey } from "@rp/shared/drafts.ts"
 import { Effect } from "effect"
 import * as Database from "../src/db/Database.ts"
 import { tempDir } from "./support/tempDir.ts"
+import { cardDoc } from "./support/docs.ts"
 
 const database = () =>
   Database.layer({
@@ -33,7 +34,7 @@ const setup = (handle = "ana") =>
       kind: "card",
       label: "Me",
       subtitle: "",
-      doc: { name: "Me" },
+      doc: cardDoc("Me"),
       schemaVersion: 1,
       origin: "user",
       sourcePath: null

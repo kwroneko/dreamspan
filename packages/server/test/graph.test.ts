@@ -17,6 +17,7 @@ import { databaseFile } from "../src/db/connection.ts"
 import * as Database from "../src/db/Database.ts"
 import { pathWalks, pathWindow, walkTowards } from "../src/db/reads.ts"
 import { tempDir } from "./support/tempDir.ts"
+import { docFor } from "./support/docs.ts"
 
 const database = (dataDir = tempDir("graph")) =>
   Database.layer({ dataDir, readers: 2, allowNetworkFs: false, workers: "source" })
@@ -76,7 +77,7 @@ const setup = (handle = "ana") =>
         kind,
         label: name,
         subtitle: "",
-        doc: { name },
+        doc: docFor(kind, name),
         schemaVersion: 1,
         origin: "user",
         sourcePath: null

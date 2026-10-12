@@ -7,6 +7,7 @@ import type { Doc, EntityKind, RefId } from "@rp/shared/library.ts"
 import { Effect } from "effect"
 import * as Database from "../src/db/Database.ts"
 import { docHash, searchText } from "../src/db/documents.ts"
+import { cardDoc, presetDoc } from "./support/docs.ts"
 import { tempDir } from "./support/tempDir.ts"
 
 const database = () =>
@@ -17,11 +18,8 @@ const database = () =>
     workers: "source"
   })
 
-const preset = (main: string, extra: ReadonlyArray<{ identifier: string; content: string }> = [], temperature = 1) => ({
-  name: "Narrator",
-  samplers: { temperature },
-  prompts: [{ identifier: "main", content: main }, ...extra]
-})
+const preset = (main: string, extra: ReadonlyArray<{ identifier: string; content: string }> = [], temperature = 1) =>
+  presetDoc([{ identifier: "main", content: main }, ...extra], { temperature })
 
 /**
  * A document imported into an upstream ref, as an uploaded file is (ImportFile): what the
@@ -135,17 +133,14 @@ describe("library", () => {
       )
 
       assert.deepStrictEqual(yield* doc(pristine.id), v2)
-      assert.deepStrictEqual(yield* doc(mine.id), {
-        name: "Narrator",
-        samplers: { temperature: 0.8 },
-        prompts: [
-          {
-            identifier: "main",
-            content: "You are {{char}}, the narrator. Write vivid prose. Avoid speaking for {{user}} unless asked."
-          },
-          { identifier: "summary", content: "{{summary}}" }
-        ]
-      })
+      assert.deepStrictEqual(
+        yield* doc(mine.id),
+        preset(
+          "You are {{char}}, the narrator. Write vivid prose. Avoid speaking for {{user}} unless asked.",
+          [{ identifier: "summary", content: "{{summary}}" }],
+          0.8
+        )
+      )
       // The merge is a revision with both parents, and the variant is up to date.
       const [merge] = yield* reader.RefHistory({ userId, refId: mine.id, limit: 1 })
       assert.strictEqual(merge!.origin, "merge")
@@ -333,7 +328,7 @@ describe("library", () => {
           kind: "card",
           label: name,
           subtitle: "",
-          doc: { name },
+          doc: cardDoc(name),
           schemaVersion: 1,
           origin: "user",
           sourcePath: null
@@ -408,7 +403,7 @@ describe("library", () => {
       const entity = (d: Doc) =>
         writer.CreateEntity({
           userId,
-          kind: "card",
+          kind: "preset_overlay",
           label: "Card",
           subtitle: "",
           doc: d,
@@ -416,7 +411,7 @@ describe("library", () => {
           origin: "import",
           sourcePath: null
         })
-      const reimport = (refId: RefId, d: Doc) => importInto(writer, userId, refId, "card", d)
+      const reimport = (refId: RefId, d: Doc) => importInto(writer, userId, refId, "preset_overlay", d)
 
       // JSON.parse makes `__proto__` an own key, as it is in an imported file.
       const proto = yield* entity(JSON.parse('{"ext":{"__proto__":{"a":1},"k":1}}'))
@@ -471,7 +466,7 @@ describe("library", () => {
         accepted.change.followers.map((f) => f.outcome),
         ["fast_forward"]
       )
-      assert.deepStrictEqual(yield* doc(variant.id), { ...v2, samplers: { temperature: 0.7 } })
+      assert.deepStrictEqual(yield* doc(variant.id), { ...v2, samplers: { ...v2.samplers, temperature: 0.7 } })
     }).pipe(Effect.provide(database()))
   )
 
@@ -483,7 +478,7 @@ describe("library", () => {
         kind: "card",
         label: "Mira",
         subtitle: "",
-        doc: { name: "Mira" },
+        doc: cardDoc("Mira"),
         schemaVersion: 1,
         origin: "user",
         sourcePath: null
@@ -491,7 +486,7 @@ describe("library", () => {
       const variant = yield* writer.ForkRef({ userId, refId: created.ref.id, label: "Mira", subtitle: "v" })
       const reimport = (d: Doc) => importInto(writer, userId, created.ref.id, "card", d)
 
-      const same = yield* reimport({ name: "Mira" })
+      const same = yield* reimport(cardDoc("Mira"))
       assert.strictEqual(same.outcome, "up_to_date")
       assert.deepStrictEqual(same.change.followers, [])
       assert.isFalse(same.change.ref.updateAvailable)
@@ -501,9 +496,9 @@ describe("library", () => {
       assert.deepStrictEqual(yield* origins(variant.id), ["user"])
 
       // That import is now the merge base, so the next one merges cleanly.
-      const next = yield* reimport({ name: "Mira Vale" })
+      const next = yield* reimport(cardDoc("Mira Vale"))
       assert.strictEqual(next.outcome, "merged")
-      assert.deepStrictEqual((yield* reader.GetRef({ userId, refId: variant.id })).doc, { name: "Mira Vale" })
+      assert.deepStrictEqual((yield* reader.GetRef({ userId, refId: variant.id })).doc, cardDoc("Mira Vale"))
     }).pipe(Effect.provide(database()))
   )
 
