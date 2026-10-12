@@ -8,7 +8,7 @@
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
 import { ChatId, SlotId } from "./chat.ts"
-import { Draft, DraftState } from "./drafts.ts"
+import { Draft, DraftRestore, DraftState } from "./drafts.ts"
 import { NotFound, ServerError, StaleWrite } from "./errors.ts"
 
 /** Text past the drafts' cap (DraftHistoryPolicy.maxContentChars); nothing was saved. */
@@ -73,7 +73,7 @@ export class ComposerApi extends RpcGroup.make(
   }),
   /** Moves the text back to an earlier state; the restore can be undone too. */
   Rpc.make("RestoreComposer", {
-    payload: { chatId: ChatId, draftId: Schema.String, seq: Schema.Int, expectedRowVersion: Schema.Int },
+    payload: { chatId: ChatId, draftId: Schema.String, ...DraftRestore },
     success: Draft,
     error: Schema.Union([NotFound, StaleWrite, ServerError])
   })

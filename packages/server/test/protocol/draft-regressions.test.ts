@@ -329,3 +329,29 @@ it.live("logout and another login must not silently drop unsent copies", () =>
     assert.lengthOf(login, 1)
   })
 )
+
+it.live("the writer reports displacement facts, including a repeated composer receipt", () =>
+  Effect.gen(function* () {
+    const api = yield* client()
+    const chat = yield* api.CreateChat({ title: "Replay conflict" })
+    const base = yield* api.OpenComposer({ chatId: chat.id, tipSlotId: null })
+    const elsewhere = yield* typeInto(api, chat.id, null, "saved elsewhere")
+    const payload = {
+      chatId: chat.id,
+      draftId: base.id,
+      rowVersion: base.rowVersion,
+      session: base.session,
+      next: false,
+      operationId: crypto.randomUUID(),
+      content: "offline browser text"
+    }
+    const replay = yield* api.SaveComposer(payload)
+    assert.deepEqual({ ...replay.draft?.displaced }, { at: elsewhere.updatedAt, content: elsewhere.content })
+    const duplicate = yield* api.SaveComposer(payload)
+    assert.deepEqual(duplicate.draft?.displaced, replay.draft?.displaced)
+    const read = yield* api.OpenComposer({ chatId: chat.id, tipSlotId: null })
+    assert.isNull(read.displaced)
+    const same = yield* api.SaveComposer({ ...payload, operationId: crypto.randomUUID() })
+    assert.isNull(same.draft?.displaced)
+  }).pipe(Effect.scoped, withServer(testConfig()))
+)

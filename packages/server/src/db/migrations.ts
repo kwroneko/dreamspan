@@ -95,6 +95,10 @@ export const migrations = {
   "0017_sent_context": runAll([
     `ALTER TABLE rollout_payloads ADD COLUMN sent_context_json TEXT
       CHECK (sent_context_json IS NULL OR json_valid(sent_context_json))`
+  ]),
+  "0018_draft_displacement_receipts": runAll([
+    `ALTER TABLE composer_save_receipts ADD COLUMN displaced_json TEXT
+      CHECK (displaced_json IS NULL OR json_valid(displaced_json))`
   ])
 }
 

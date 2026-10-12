@@ -14,6 +14,7 @@ import type { Doc, RefId, RevisionId } from "@rp/shared/library.ts"
 import { useEffect, useSyncExternalStore } from "react"
 import type { AppError } from "../../errors.ts"
 import { browserEnv, type Copy, copiesOf, dropCopy, keepCopy, makeCopy, type PageEnv, pendingOf } from "./backup.ts"
+import type { ReplayConflict } from "./backup.ts"
 import type { Caller } from "./caller.ts"
 
 /** How long typing pauses before the text is saved. */
@@ -21,6 +22,8 @@ const SAVE_DELAY_MS = 600
 
 /** A field's base and what's typed on it. */
 interface FieldDraft {
+  conflict: ReplayConflict | null
+  replayedAt: number | null
   /** The draft's content as the server has it; null without an active draft. */
   saved: string | null
   draftId: string | null
@@ -141,6 +144,8 @@ export class EditorStore {
     let field = this.fields.get(key)
     if (field === undefined) {
       field = {
+        conflict: null,
+        replayedAt: null,
         saved: null,
         draftId: null,
         baseRevision: null,
@@ -211,9 +216,12 @@ export class EditorStore {
         field.baseRevision === captured.baseRevision &&
         field.saved === captured.saved &&
         (captured.local === null || captured.pending?.key === copy.key)
+      field.replayedAt = copy.at
       if (result.ok) {
+        if (result.value.displaced !== null) field.conflict = { ...result.value.displaced, typedAt: copy.at }
         if (unchanged) this.hold(field, result.value)
         else this.recovered += result.value.recovered
+        field.replayedAt = null
         await dropCopy(copy)
       } else {
         if (unchanged) {
@@ -358,6 +366,9 @@ export class EditorStore {
       const result = await this.call((client) => client("SaveEditorDraft", pending.payload))
       this.sendingCopies.delete(copy)
       if (result.ok) {
+        if (field.replayedAt !== null && result.value.displaced !== null)
+          field.conflict = { ...result.value.displaced, typedAt: field.replayedAt }
+        field.replayedAt = null
         // The draft holds exactly this text: it's the field's base now.
         const descendant = field.pending?.ancestors.includes(copy.key) === true
         if (field.pending === copy || descendant) this.hold(field, result.value)
@@ -498,11 +509,33 @@ export class EditorStore {
     return result
   }
 
+  conflict(key: string) {
+    return this.field(key).conflict
+  }
+
+  acknowledgeConflict(key: string) {
+    this.field(key).conflict = null
+    this.bump(key)
+  }
+
+  async switchConflict(key: string) {
+    const field = this.field(key)
+    const conflict = field.conflict
+    if (conflict === null) return
+    const result = await this.restore(key, 0, conflict.content)
+    if (!result.ok) {
+      this.saveError = result.error
+      this.bump(DRAFTS)
+    }
+    if (result.ok && field.local === null && field.saved === conflict.content && field.conflict === conflict)
+      this.acknowledgeConflict(key)
+  }
+
   history(key: string, limit = 50) {
     return this.call((client) => client("EditorDraftHistory", { refId: this.refId, field: key, limit }))
   }
 
-  async restore(key: string, seq: number) {
+  async restore(key: string, seq: number, content?: string) {
     const picked = this.current(key)
     await this.save(key)
     const field = this.field(key)
@@ -515,6 +548,7 @@ export class EditorStore {
         field: key,
         draftId: draftId ?? "",
         seq,
+        ...(content === undefined ? {} : { content }),
         expectedRowVersion: rowVersion ?? 0
       })
     )

@@ -120,11 +120,13 @@ export const makeWriteHandlers = (bin: Bin) =>
           )
         }).pipe(transaction("SaveComposer")),
 
-      RestoreComposer: ({ userId, chatId, draftId, seq, expectedRowVersion }) =>
-        drafts.restoreComposer(userId, chatId, draftId, seq, expectedRowVersion).pipe(transaction("RestoreComposer")),
+      RestoreComposer: ({ userId, chatId, draftId, seq, expectedRowVersion, content }) =>
+        drafts
+          .restoreComposer(userId, chatId, draftId, seq, expectedRowVersion, content)
+          .pipe(transaction("RestoreComposer")),
 
-      RestoreDraftState: ({ userId, key, draftId, seq, expectedRowVersion }) =>
-        drafts.restore(userId, key, draftId, seq, expectedRowVersion).pipe(transaction("RestoreDraftState")),
+      RestoreDraftState: ({ userId, key, draftId, seq, expectedRowVersion, content }) =>
+        drafts.restore(userId, key, draftId, seq, expectedRowVersion, content).pipe(transaction("RestoreDraftState")),
 
       ClearDraft: ({ userId, key, draftId, outcome, expectedRowVersion }) =>
         drafts.clear(userId, key, draftId, outcome, expectedRowVersion).pipe(transaction("ClearDraft")),

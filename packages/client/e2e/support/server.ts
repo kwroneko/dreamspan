@@ -12,6 +12,8 @@ const root = resolve(import.meta.dirname, "../../../..")
 export interface TestServer {
   readonly url: string
   readonly port: number
+  readonly pause: () => Promise<void>
+  readonly restart: () => Promise<void>
   readonly stop: () => Promise<void>
 }
 
@@ -28,59 +30,72 @@ const startOnce = async (env: Record<string, string>): Promise<TestServer | null
   const dataDir = mkdtempSync(join(tmpdir(), "rp-browser-"))
   const serverPort = nextPort()
   const entry = env.FAKE_GENERATOR_TPS === undefined ? "packages/server/src/main.ts" : "packages/server/src/dev/main.ts"
-  const child = spawn(process.execPath, ["--no-wasm-code-gc", entry], {
-    cwd: root,
-    env: {
-      ...process.env,
-      HOST: "127.0.0.1",
-      PORT: String(serverPort),
-      DATA_DIR: dataDir,
-      DB_READERS: "1",
-      DB_WORKERS: "source",
-      CLIENT_DIST: join(root, "packages/client/dist"),
-      ...env
-    },
-    stdio: ["ignore", "pipe", "pipe"]
-  })
+  const launch = () =>
+    spawn(process.execPath, ["--no-wasm-code-gc", entry], {
+      cwd: root,
+      env: {
+        ...process.env,
+        HOST: "127.0.0.1",
+        PORT: String(serverPort),
+        DATA_DIR: dataDir,
+        DB_READERS: "1",
+        DB_WORKERS: "source",
+        CLIENT_DIST: join(root, "packages/client/dist"),
+        ...env
+      },
+      stdio: ["ignore", "pipe", "pipe"]
+    })
+  let child = launch()
   // A worker torn down after a timeout skips afterAll: the server mustn't outlive it.
   const orphaned = () => {
     child.kill("SIGKILL")
     rmSync(dataDir, { recursive: true, force: true })
   }
   process.once("exit", orphaned)
-  child.once("exit", () => process.off("exit", orphaned))
   let output = ""
-  child.stdout!.on("data", (chunk) => (output += chunk))
-  child.stderr!.on("data", (chunk) => (output += chunk))
-  const stop = async () => {
+  const capture = () => {
+    child.stdout!.on("data", (chunk) => (output += chunk))
+    child.stderr!.on("data", (chunk) => (output += chunk))
+  }
+  capture()
+  const pause = async () => {
     if (child.exitCode === null && child.signalCode === null) {
-      // No SIGKILL fallback: a server that doesn't stop with a page open is a bug to see.
       child.kill("SIGTERM")
       await waitForExit(child)
     }
+  }
+  const stop = async () => {
+    await pause()
+    process.off("exit", orphaned)
     rmSync(dataDir, { recursive: true, force: true })
   }
   const url = `http://127.0.0.1:${serverPort}`
-  for (let attempt = 0; attempt < 200; attempt++) {
-    if (child.exitCode !== null) {
-      await stop()
-      // Someone else holds the port: try the next one. Anything else is a real failure.
-      if (output.includes("EADDRINUSE")) return null
-      throw new Error(`the server exited:\n${output}`)
+  const healthy = async () => {
+    for (let attempt = 0; attempt < 200; attempt++) {
+      if (child.exitCode !== null || child.signalCode !== null) return false
+      const ok = await fetch(`${url}/healthz`, { signal: AbortSignal.timeout(1000) }).then(
+        (response) => response.ok,
+        () => false
+      )
+      if (ok) return true
+      await new Promise((done) => setTimeout(done, 100))
     }
-    // Bounded, in case something else holds the port and never answers.
-    const healthy = await fetch(`${url}/healthz`, { signal: AbortSignal.timeout(1000) }).then(
-      (response) => response.ok,
-      () => false
-    )
-    if (healthy) return { url, port: serverPort, stop }
-    await new Promise((done) => setTimeout(done, 100))
+    return false
   }
+  const restart = async () => {
+    await pause()
+    output = ""
+    child = launch()
+    capture()
+    if (!(await healthy())) throw new Error(`the server didn't restart:\n${output}`)
+  }
+  if (await healthy()) return { url, port: serverPort, stop, pause, restart }
   await stop()
+  if (output.includes("EADDRINUSE")) return null
   throw new Error(`the server didn't become healthy:\n${output}`)
 }
 
-const startServer = async (env: Record<string, string> = {}): Promise<TestServer> => {
+export const startServer = async (env: Record<string, string> = {}): Promise<TestServer> => {
   for (let attempt = 0; attempt < 5; attempt++) {
     const server = await startOnce(env)
     if (server) return server

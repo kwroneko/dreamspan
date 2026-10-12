@@ -19,6 +19,7 @@
 import type { SlotId } from "@rp/shared/chat.ts"
 import type { SendResult } from "@rp/shared/chatApi.ts"
 import { Draft, type DraftState } from "@rp/shared/drafts.ts"
+import type { ReplayConflict } from "../editor/backup.ts"
 import type { AppError } from "../../errors.ts"
 import {
   browserEnv,
@@ -45,7 +46,9 @@ export interface ComposerState {
   readonly text: string
   /** The tip's text is loaded, so the box takes input. */
   readonly ready: boolean
-  /** The text came back from this browser's copy, made as a page closed before the server had it. */
+  /** A replay displaced text saved elsewhere; kept until acknowledged or switched. */
+  readonly conflict: ReplayConflict | null
+  /** The text came back from this browser's copy before the server had it. */
   readonly restored: boolean
   /** Text typed in this chat's composers went to the bin's recovered texts since the page opened. */
   readonly recovered: boolean
@@ -79,6 +82,8 @@ export class ComposerDraft {
   private base: Draft | null = null
   private text = ""
   private ready = false
+  private conflict: ReplayConflict | null = null
+  private replayedAt: number | null = null
   private restored = false
   private recovered = false
   private error: AppError | null = null
@@ -92,7 +97,14 @@ export class ComposerDraft {
   private timer: unknown = null
   private queue: Promise<void> = Promise.resolve()
   private readonly listeners = new Set<() => void>()
-  private state: ComposerState = { text: "", ready: false, restored: false, recovered: false, error: null }
+  private state: ComposerState = {
+    text: "",
+    ready: false,
+    restored: false,
+    conflict: null,
+    recovered: false,
+    error: null
+  }
 
   private readonly session: ChatSession
   private readonly userId: string
@@ -119,8 +131,8 @@ export class ComposerDraft {
   readonly snapshot = () => this.state
 
   private emit() {
-    const { text, ready, restored, recovered, error } = this
-    this.state = { text, ready, restored, recovered, error }
+    const { text, ready, restored, conflict, recovered, error } = this
+    this.state = { text, ready, restored, conflict, recovered, error }
     for (const listener of this.listeners) listener()
   }
 
@@ -253,7 +265,7 @@ export class ComposerDraft {
   /** The tip's text in the box, with what this browser kept of it when a page closed. */
   private async show(tip: SlotId | null, opened: Draft) {
     this.error = null
-    const { draft, restored, recovered, unsent } = await this.saveCopies(opened)
+    const { draft, restored, conflict, recovered, unsent } = await this.saveCopies(opened)
     this.take(draft)
     const save = unsent === null ? null : pendingOf(unsent)
     if (save?.kind === "composer") {
@@ -263,6 +275,8 @@ export class ComposerDraft {
       this.text = unsent!.content
       this.pending = unsent
     }
+    this.replayedAt = unsent?.at ?? null
+    this.conflict = conflict
     this.restored = restored
     // Stays for the page: text that went to the recovered texts as the box left its draft
     // was lost there, and this is where the user still is.
@@ -283,6 +297,7 @@ export class ComposerDraft {
    */
   private async saveCopies(opened: Draft) {
     let draft = opened
+    let conflict: ReplayConflict | null = null
     let restored = false
     let recovered = false
     let unsent: Copy | null = null
@@ -312,12 +327,13 @@ export class ComposerDraft {
       await dropCopy(copy)
       const now = saved.value.draft
       if (now?.id === opened.id) {
+        if (now.displaced !== null) conflict = { ...now.displaced, typedAt: copy.at }
         restored ||= shown(now) !== shown(draft)
         draft = now
       }
       recovered ||= saved.value.recovered && chatId === this.chatId
     }
-    return { draft, restored: restored || unsent !== null, recovered, unsent }
+    return { draft, conflict, restored: restored || unsent !== null, recovered, unsent }
   }
 
   /**
@@ -334,6 +350,24 @@ export class ComposerDraft {
   /** The tip the box is on, or on its way to. */
   get tip() {
     return this.requested
+  }
+
+  acknowledgeConflict() {
+    this.conflict = null
+    this.emit()
+  }
+
+  /** An explicit restore keeps the text it replaces as a separate undo step. */
+  async switchConflict() {
+    const conflict = this.conflict
+    if (conflict === null) return
+    const result = await this.restore(0, conflict.content)
+    if (result !== null && !result.ok) {
+      this.error = result.error
+      this.emit()
+    }
+    if (result?.ok && !this.unsaved && this.text === conflict.content && this.conflict === conflict)
+      this.acknowledgeConflict()
   }
 
   // --- Typing and saving
@@ -392,6 +426,9 @@ export class ComposerDraft {
     this.acknowledge(copy)
     this.error = null
     this.recovered ||= saved.value.recovered
+    if (this.replayedAt !== null && saved.value.draft?.displaced != null)
+      this.conflict = { ...saved.value.draft.displaced, typedAt: this.replayedAt }
+    this.replayedAt = null
     const now = saved.value.draft ?? (await this.reopen())
     if (now !== null && shown(now) === sent && (unchanged || descendant)) {
       // The draft holds this tab's text: it's the base now, and what's typed since was typed
@@ -521,7 +558,7 @@ export class ComposerDraft {
    * the server: if the box changed before it could go (calls before it were still out), it
    * isn't made. Text typed while it's on its way stays in the box, saved on top of it.
    */
-  restore(seq: number): Promise<Outcome<Draft> | null> {
+  restore(seq: number, content?: string): Promise<Outcome<Draft> | null> {
     const picked = this.text
     this.cancelTimer()
     return this.enqueue(async () => {
@@ -531,7 +568,13 @@ export class ComposerDraft {
       if (this.unsaved) return { ok: false as const, error: this.error ?? NOT_SAVED }
       if (this.text !== picked) return { ok: false as const, error: CHANGED }
       const result = await this.session.call((client) =>
-        client("RestoreComposer", { chatId: this.chatId, draftId: draft.id, seq, expectedRowVersion: draft.rowVersion })
+        client("RestoreComposer", {
+          chatId: this.chatId,
+          draftId: draft.id,
+          seq,
+          expectedRowVersion: draft.rowVersion,
+          ...(content === undefined ? {} : { content })
+        })
       )
       if (result.ok) {
         this.recovered ||= result.value.recovered > 0

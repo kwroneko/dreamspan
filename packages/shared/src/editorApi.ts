@@ -5,7 +5,7 @@ import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
 import { ChatId, SlotId } from "./chat.ts"
 import { BinItem } from "./bin.ts"
-import { Draft, DraftState } from "./drafts.ts"
+import { Draft, DraftRestore, DraftState } from "./drafts.ts"
 import { NotFound, ServerError, StaleWrite } from "./errors.ts"
 import { Doc, LibraryRef, MergeOutcome, MergePreview, RefId, Revision, RevisionId } from "./library.ts"
 
@@ -120,7 +120,7 @@ export class EditorApi extends RpcGroup.make(
   }),
   /** Moves the draft back to an earlier state; the restore is itself undoable. */
   Rpc.make("RestoreEditorDraft", {
-    payload: { ...DraftField, draftId: Schema.String, seq: Schema.Int, expectedRowVersion: Schema.Int },
+    payload: { ...DraftField, draftId: Schema.String, ...DraftRestore },
     success: Draft,
     error: Schema.Union([...Writes])
   }),

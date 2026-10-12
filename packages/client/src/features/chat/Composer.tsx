@@ -19,6 +19,7 @@ import { Badge } from "../../ui/Surface.tsx"
 import { Tabs } from "../../ui/Tabs.tsx"
 import { nameOf, recentSpeakers, replySpeaker, useCast } from "./cast.ts"
 import { carriedComposerText, dropCarriedComposerText } from "./composerCarry.ts"
+import { ReplayNotice } from "../editor/ReplayNotice.tsx"
 import { ComposerDraft, type ComposerSource, type Sent } from "./composerDraft.ts"
 import type { ChatSession, ChatView, Outcome } from "./session.ts"
 
@@ -358,7 +359,14 @@ export function Composer({ session, view }: { session: ChatSession; view: ChatVi
   // page while this chat was being made comes along (composerCarry.ts).
   const [draft] = useState(() => new ComposerDraft(session, userId, carriedComposerText(session.id)))
   useEffect(() => dropCarriedComposerText(session.id), [session])
-  const { text, ready, restored, recovered, error: saveError } = useSyncExternalStore(draft.subscribe, draft.snapshot)
+  const {
+    text,
+    ready,
+    restored,
+    conflict,
+    recovered,
+    error: saveError
+  } = useSyncExternalStore(draft.subscribe, draft.snapshot)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<AppError | null>(null)
   // The speaker picked here; until then, the first card the user plays.
@@ -505,7 +513,14 @@ export function Composer({ session, view }: { session: ChatSession; view: ChatVi
           </button>
         ))}
       </div>
-      {restored && (
+      {conflict && (
+        <ReplayNotice
+          conflict={conflict}
+          acknowledge={() => draft.acknowledgeConflict()}
+          switchText={() => draft.switchConflict()}
+        />
+      )}
+      {restored && !conflict && (
         <p role="status" className="text-sm text-muted">
           Text this browser kept when the page closed before the server had it is back in the box.
         </p>
@@ -516,7 +531,8 @@ export function Composer({ session, view }: { session: ChatSession; view: ChatVi
           <Link to="/bin" search={{ section: "recovered" }}>
             bin, under recovered text
           </Link>
-          : typed here after it was sent from another tab, or earlier text another tab's typing went over.
+          : text typed in this browser while offline whose session ended elsewhere, or earlier text another tab's typing
+          went over.
         </p>
       )}
       <label htmlFor="composer" className="sr-only">

@@ -45,7 +45,7 @@ export const makeEditorReadHandlers = Effect.gen(function* () {
           ref: toLibraryRef(ref),
           doc: resolved?.doc ?? (yield* lib.loadDoc(ref.head_revision_id)),
           usedByChats: usage!.n,
-          drafts: draftRows.map(drafts.toDraft),
+          drafts: draftRows.map((row) => drafts.toDraft(row)),
           variants: variants.map(toLibraryRef)
         })
       }).pipe(query("OpenEditor")),

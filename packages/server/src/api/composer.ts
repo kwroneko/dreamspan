@@ -39,10 +39,10 @@ export const makeComposerHandlers = Effect.gen(function* () {
         internal("ComposerHistory")
       ),
 
-    RestoreComposer: ({ chatId, draftId, seq, expectedRowVersion }) =>
-      Effect.flatMap(userId, (id) =>
-        writer.RestoreComposer({ userId: id, chatId, draftId, seq, expectedRowVersion })
-      ).pipe(internal("RestoreComposer"))
+    RestoreComposer: (payload) =>
+      Effect.flatMap(userId, (id) => writer.RestoreComposer({ userId: id, ...payload })).pipe(
+        internal("RestoreComposer")
+      )
   } satisfies Partial<Parameters<typeof AppApi.of>[0]>
   return handlers
 })

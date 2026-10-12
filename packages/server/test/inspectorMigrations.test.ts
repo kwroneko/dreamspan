@@ -8,7 +8,7 @@ import { migrations } from "../src/db/migrations.ts"
 import { tempDir } from "./support/tempDir.ts"
 const before = Object.fromEntries(Object.entries(migrations).filter(([k]) => k < "0013"))
 it.effect(
-  "0013 through 0017 in order on a populated pre-0013 database preserve drafts, history, payloads and issues",
+  "0013 through 0018 in order on a populated pre-0013 database preserve drafts, history, payloads and issues",
   () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
@@ -28,13 +28,17 @@ it.effect(
       for (const [key, value] of Object.entries(migrations).filter(([k]) => k >= "0013")) {
         completed[key] = value
         yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(completed) })
+        if (key === "0015_composer_save_receipts")
+          yield* sql`INSERT INTO composer_save_receipts(chat_id,operation_id,recovered) VALUES('c','pending-copy',0)`
       }
       const [draft] = yield* sql`SELECT content,row_version,session,text_version FROM drafts`
       assert.deepStrictEqual(draft, { content: "KEEP ME", row_version: 7, session: 1, text_version: 7 })
       assert.deepStrictEqual(yield* sql`SELECT displaced,inserted FROM draft_history`, [
         { displaced: 0, inserted: "KEEP ME" }
       ])
-      assert.deepStrictEqual(yield* sql`SELECT * FROM composer_save_receipts`, [])
+      assert.deepStrictEqual(yield* sql`SELECT * FROM composer_save_receipts`, [
+        { chat_id: "c", operation_id: "pending-copy", recovered: 0, displaced_json: null }
+      ])
       assert.deepStrictEqual(yield* sql`SELECT context_snapshot_json,sent_context_json FROM rollout_payloads`, [
         { context_snapshot_json: snapshot, sent_context_json: null }
       ])

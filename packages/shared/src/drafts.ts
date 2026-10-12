@@ -34,6 +34,12 @@ export const composerKey = (chatId: string, tipSlotId: string | null) =>
 
 const DraftStatus = Schema.Literals(["active", "committed", "discarded"])
 
+/** Text this write displaced, as recorded by the writer; reads return null. */
+export class DraftDisplacement extends Schema.Class<DraftDisplacement>("DraftDisplacement")({
+  at: Schema.Number,
+  content: Schema.String
+}) {}
+
 export class Draft extends Schema.Class<Draft>("Draft")({
   id: Schema.String,
   key: DraftKey,
@@ -55,6 +61,7 @@ export class Draft extends Schema.Class<Draft>("Draft")({
    */
   /** Texts this write sent to recovered texts; reads return zero. */
   recovered: Schema.Int,
+  displaced: Schema.NullOr(DraftDisplacement),
   historyLength: Schema.Int
 }) {}
 
@@ -136,3 +143,10 @@ export const DraftHistoryPolicy = {
 /** Shortens text for a history list: the start and the end, around an ellipsis. */
 export const excerpt = (text: string, max = 80) =>
   text.length <= max ? text : `${text.slice(0, max / 2 - 1)}…${text.slice(text.length - (max / 2 - 1))}`
+
+/** Restore from history, or an explicitly picked browser-conflict text retained by the client. */
+export const DraftRestore = {
+  seq: Schema.Int,
+  expectedRowVersion: Schema.Int,
+  content: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(DraftHistoryPolicy.maxContentChars)))
+}

@@ -1,6 +1,7 @@
 // Pending saves kept in this browser until the exact copy is acknowledged. Tabs own
 // independent copies; a newer edit may replace only this store's unsent copy. The payload
 // is the save as typed, including its base, and replay never refreshes that base.
+import type { DraftDisplacement } from "@rp/shared/drafts.ts"
 import { ComposerBeacon } from "@rp/shared/composerApi.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import { EditorDraftSave } from "@rp/shared/editorApi.ts"
@@ -187,4 +188,9 @@ export const flushCopies = async (userId: string) => {
     }
   }
   return { copies: await copiesOfUser(userId), recovered }
+}
+
+/** A replay conflict stays visible in its field until acknowledged or switched. */
+export interface ReplayConflict extends DraftDisplacement {
+  readonly typedAt: number
 }

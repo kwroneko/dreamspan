@@ -122,9 +122,9 @@ export const makeEditorHandlers = Effect.gen(function* () {
         settle("EditorDraftHistory")
       ),
 
-    RestoreEditorDraft: ({ refId, field, draftId, seq, expectedRowVersion }) =>
+    RestoreEditorDraft: ({ refId, field, ...restore }) =>
       Effect.flatMap(userId, (id) =>
-        writer.RestoreDraftState({ userId: id, key: draftKey(refId, field), draftId, seq, expectedRowVersion })
+        writer.RestoreDraftState({ userId: id, key: draftKey(refId, field), ...restore })
       ).pipe(settle("RestoreEditorDraft")),
 
     DiscardEditorDraft: ({ refId, field, draftId, expectedRowVersion }) =>

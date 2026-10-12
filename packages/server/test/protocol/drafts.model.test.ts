@@ -1671,6 +1671,77 @@ const purgeQueue = async (w: World, branch: boolean) => {
 }
 
 const DIRECTED: ReadonlyArray<{ name: string; run: (w: World) => Promise<void> }> = [
+  ...(["composer", "editor"] as const).flatMap((kind) =>
+    (["acknowledged", "switched"] as const).map((choice) => ({
+      name: `${kind} replay keeps a displaced-text notice until ${choice}`,
+      run: async (w: World) => {
+        const tab = w.tabs[0]!
+        const old = tab.page
+        const field = textField(FIELDS[0])
+        if (kind === "composer") old.composer.type("saved elsewhere!")
+        else old.editor.setText(FIELDS[0], "saved elsewhere!")
+        await settle(w)
+        old.alive = false
+        const other = w.tabs[1]!.page
+        if (kind === "composer") {
+          other.composer.type("saved elsewhere")
+          const saving = other.composer.flush()
+          await settle(w)
+          await saving
+        } else {
+          other.editor.setText(FIELDS[0], "saved elsewhere")
+          const saving = other.editor.flush()
+          await settle(w)
+          await saving
+        }
+        tab.page = new Page(w, tab, old.ref, old.tip, old.follows)
+        await settle(w)
+        const page = tab.page
+        const conflict = () => (kind === "composer" ? page.composer.snapshot().conflict : page.editor.conflict(field))
+        assert.strictEqual(conflict()?.content, "saved elsewhere", "I5: replay must tell the user what it displaced")
+        if (kind === "composer") page.composer.type("saved elsewhere!!")
+        else page.editor.setText(FIELDS[0], "saved elsewhere!!")
+        const saving = kind === "composer" ? page.composer.flush() : page.editor.flush()
+        await settle(w)
+        await saving
+        assert.strictEqual(conflict()?.content, "saved elsewhere", "I5: typing must not dismiss the conflict")
+        const refreshing = page.editor.refresh()
+        await settle(w)
+        await refreshing
+        assert.strictEqual(conflict()?.content, "saved elsewhere", "I5: refresh must not dismiss the conflict")
+        if (choice === "acknowledged") {
+          if (kind === "composer") page.composer.acknowledgeConflict()
+          else page.editor.acknowledgeConflict(field)
+          assert.isNull(conflict())
+          assert.strictEqual(
+            kind === "composer" ? page.composer.snapshot().text : page.editor.text(FIELDS[0]),
+            "saved elsewhere!!"
+          )
+          return
+        }
+        const switching = kind === "composer" ? page.composer.switchConflict() : page.editor.switchConflict(field)
+        await settle(w)
+        await switching
+        assert.isNull(conflict())
+        assert.strictEqual(
+          kind === "composer" ? page.composer.snapshot().text : page.editor.text(FIELDS[0]),
+          "saved elsewhere"
+        )
+        const states = kind === "composer" ? page.composer.history() : page.editor.history(field)
+        await settle(w)
+        const history = await states
+        assert.isTrue(history.ok)
+        if (!history.ok) return
+        const undo = kind === "composer" ? page.composer.restore(history.value[1]!.seq) : page.editor.undo(field)
+        await settle(w)
+        await undo
+        assert.strictEqual(
+          kind === "composer" ? page.composer.snapshot().text : page.editor.text(FIELDS[0]),
+          "saved elsewhere!!"
+        )
+      }
+    }))
+  ),
   {
     name: "a send in another chat leaves the source composer active",
     run: async (w) => {

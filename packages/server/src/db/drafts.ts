@@ -7,6 +7,7 @@ import {
   diffPatch,
   Draft,
   DraftHistoryPolicy,
+  DraftDisplacement,
   type DraftKey,
   DraftState,
   excerpt,
@@ -61,9 +62,10 @@ interface EntryRow {
   readonly displaced: 0 | 1
 }
 
-const toDraft = (row: DraftRow, recovered = 0) =>
+const toDraft = (row: DraftRow, recovered = 0, displaced: DraftDisplacement | null = null) =>
   new Draft({
     recovered,
+    displaced,
     id: row.id,
     key: { targetKind: row.target_kind, targetId: row.target_id, field: row.field },
     content: row.content,
@@ -206,7 +208,7 @@ export const makeDraftStore = (
     sql<DraftRow>`
       SELECT d.*, (SELECT count(*) FROM draft_history h WHERE h.draft_id = d.id) AS history_length
       FROM drafts d WHERE d.user_id = ${userId} AND d.status = 'active' AND d.content <> ''
-      ORDER BY d.updated_at DESC`.pipe(Effect.map((rows) => rows.map(toDraft)))
+      ORDER BY d.updated_at DESC`.pipe(Effect.map((rows) => rows.map((row) => toDraft(row))))
 
   /** The text of state `seq`: the current text with newer entries undone. */
   const stateAt = (draft: DraftRow, seq: number) =>
@@ -420,6 +422,13 @@ export const makeDraftStore = (
       const changed =
         draft.status === "active" &&
         (base === null || ended || options.next === true || draft.text_version > base.rowVersion)
+      const [last] = changed
+        ? yield* sql<EntryRow>`SELECT * FROM draft_history WHERE draft_id = ${draft.id} ORDER BY seq DESC LIMIT 1`
+        : []
+      const displaced =
+        changed && draft.content !== content
+          ? new DraftDisplacement({ at: last?.at ?? draft.created_at, content: draft.content })
+          : null
       // On another tab's text, the draft keeps the revision that text was started from.
       const recovered = yield* update(
         draft,
@@ -428,7 +437,7 @@ export const makeDraftStore = (
         ended ? (options.baseRevision ?? draft.base_revision) : changed ? null : options.baseRevision,
         changed
       )
-      return { draft: toDraft((yield* byId(draft.id))!, recovered), recovered: recovered > 0 }
+      return { draft: toDraft((yield* byId(draft.id))!, recovered, displaced), recovered: recovered > 0 }
     })
 
   /**
@@ -468,18 +477,31 @@ export const makeDraftStore = (
       return toDraft((yield* find(options.userId, options.key))!)
     })
 
-  const restoreRow = (draft: DraftRow, seq: number, expectedRowVersion: number, draftId: string = draft.id) =>
+  const restoreRow = (
+    draft: DraftRow,
+    seq: number,
+    expectedRowVersion: number,
+    draftId: string = draft.id,
+    picked?: string
+  ) =>
     Effect.gen(function* () {
       yield* checkDraft(draft, draftId, expectedRowVersion)
-      const content = yield* stateAt(draft, seq)
+      const content = picked ?? (yield* stateAt(draft, seq))
       const recovered = yield* update(draft, content, "restore", null)
       return toDraft((yield* find(draft.user_id, toDraft(draft).key))!, recovered)
     })
 
-  const restore = (userId: UserId, key: DraftKey, draftId: string, seq: number, expectedRowVersion: number) =>
+  const restore = (
+    userId: UserId,
+    key: DraftKey,
+    draftId: string,
+    seq: number,
+    expectedRowVersion: number,
+    content?: string
+  ) =>
     Effect.gen(function* () {
       yield* checkIdentity(userId, draftId)
-      return yield* restoreRow(yield* get(userId, key), seq, expectedRowVersion, draftId)
+      return yield* restoreRow(yield* get(userId, key), seq, expectedRowVersion, draftId, content)
     })
 
   /**
@@ -604,13 +626,25 @@ export const makeDraftStore = (
         return yield* new NotFound({ entity: "draft", id: base.draftId })
       const draft = yield* findComposer(userId, chatId, base.draftId)
       {
-        const [receipt] = yield* sql<{ recovered: number }>`SELECT recovered FROM composer_save_receipts
+        const [receipt] = yield* sql<{
+          recovered: number
+          displaced_json: string | null
+        }>`SELECT recovered, displaced_json FROM composer_save_receipts
           WHERE chat_id = ${chatId} AND operation_id = ${base.operationId}`
-        if (receipt !== undefined)
+        if (receipt !== undefined) {
+          let displaced: DraftDisplacement | null = null
+          if (draft !== null && receipt.displaced_json !== null) {
+            const kept = JSON.parse(receipt.displaced_json) as { session: number; seq: number; at: number }
+            const [entry] = yield* sql<EntryRow>`SELECT * FROM draft_history
+              WHERE draft_id = ${draft.id} AND seq = ${kept.seq + 1} AND displaced = 1`
+            if (draft.session === kept.session && entry !== undefined)
+              displaced = new DraftDisplacement({ at: kept.at, content: yield* stateAt(draft, kept.seq) })
+          }
           return {
-            draft: draft === null ? null : toDraft(draft, receipt.recovered),
+            draft: draft === null ? null : toDraft(draft, receipt.recovered, displaced),
             recovered: receipt.recovered === 1
           }
+        }
       }
       let saved
       if (draft === null) {
@@ -622,10 +656,19 @@ export const makeDraftStore = (
         saved = yield* saveOnto(draft, base, content, { baseRevision: null, ended: "recover", next })
       }
       {
+        const displaced = saved.draft?.displaced
+        const [entry] =
+          displaced == null
+            ? []
+            : yield* sql<EntryRow>`SELECT * FROM draft_history WHERE draft_id = ${base.draftId} ORDER BY seq DESC LIMIT 1`
         yield* sql`INSERT INTO composer_save_receipts ${sql.insert({
           chat_id: chatId,
           operation_id: base.operationId,
-          recovered: saved.recovered ? 1 : 0
+          recovered: saved.recovered ? 1 : 0,
+          displaced_json:
+            displaced == null || entry === undefined
+              ? null
+              : JSON.stringify({ session: saved.draft!.session, seq: entry.seq - 1, at: displaced.at })
         })}`
       }
       return saved
@@ -657,11 +700,18 @@ export const makeDraftStore = (
       return recovered
     })
 
-  const restoreComposer = (userId: UserId, chatId: string, draftId: string, seq: number, expectedRowVersion: number) =>
+  const restoreComposer = (
+    userId: UserId,
+    chatId: string,
+    draftId: string,
+    seq: number,
+    expectedRowVersion: number,
+    content?: string
+  ) =>
     Effect.gen(function* () {
       const draft = yield* findComposer(userId, chatId, draftId)
       if (draft === null) return yield* new NotFound({ entity: "draft", id: draftId })
-      return yield* restoreRow(draft, seq, expectedRowVersion)
+      return yield* restoreRow(draft, seq, expectedRowVersion, draftId, content)
     })
 
   return {

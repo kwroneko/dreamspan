@@ -3,7 +3,7 @@
 import type { DraftState } from "@rp/shared/drafts.ts"
 import { type FieldPath, textField, valueField } from "@rp/shared/editing.ts"
 import { Link } from "@tanstack/react-router"
-import { type ReactNode, useEffect, useState } from "react"
+import { type ReactNode, useEffect, useState, useSyncExternalStore } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"
 import { Button } from "../../ui/Button.tsx"
@@ -12,6 +12,7 @@ import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { Field, Input, Textarea } from "../../ui/Field.tsx"
 import { Select } from "../../ui/Select.tsx"
 import { Alert, Badge } from "../../ui/Surface.tsx"
+import { ReplayNotice } from "./ReplayNotice.tsx"
 import type { CallResult } from "./caller.ts"
 import { type EditorStore, useDirty, useText, useValue } from "./store.ts"
 
@@ -89,12 +90,20 @@ function HistoryDialog({
 /** Undo, history and revert for a field with changes. */
 export function FieldTools({ store, field, label }: { store: EditorStore; field: string; label: string }) {
   const dirty = useDirty(store, field)
+  const conflict = useSyncExternalStore(store.subscribe(field), () => store.conflict(field))
   const [history, setHistory] = useState(false)
   const [error, setError] = useState<AppError | null>(null)
-  if (!dirty) return null
+  if (!dirty && conflict === null) return null
   const settle = (result: CallResult<unknown> | undefined) => setError(result && !result.ok ? result.error : null)
   return (
     <div className="flex flex-col gap-1">
+      {conflict && (
+        <ReplayNotice
+          conflict={conflict}
+          acknowledge={() => store.acknowledgeConflict(field)}
+          switchText={() => store.switchConflict(field)}
+        />
+      )}
       <div className="flex flex-wrap gap-1">
         <Button variant="ghost" aria-label={`Undo ${label}`} onClick={() => void store.undo(field).then(settle)}>
           Undo

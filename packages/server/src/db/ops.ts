@@ -10,7 +10,7 @@ import { ContextIssue, VersionError, VersionStatus } from "@rp/shared/chat.ts"
 import { NotAmendable, PathRange, PathWindow } from "@rp/shared/chatApi.ts"
 import { User, UserAccount, UserId, UserRole } from "@rp/shared/domain.ts"
 import { BinChanged, BinItem, RecoveredText } from "@rp/shared/bin.ts"
-import { Draft, DraftKey, DraftState } from "@rp/shared/drafts.ts"
+import { Draft, DraftKey, DraftRestore, DraftState } from "@rp/shared/drafts.ts"
 import { AccountRejected, LeafMoved, ModelKeyTaken, NotFound, StaleWrite } from "@rp/shared/errors.ts"
 import {
   Doc,
@@ -381,15 +381,14 @@ export class WriteOps extends RpcGroup.make(
       userId: UserId,
       chatId: ChatId,
       draftId: Schema.String,
-      seq: Schema.Int,
-      expectedRowVersion: Schema.Int
+      ...DraftRestore
     },
     success: Draft,
     error: Schema.Union([NotFound, StaleWrite, StorageError])
   }),
   /** Restores an earlier state from the draft's history. The restore is itself undoable. */
   Rpc.make("RestoreDraftState", {
-    payload: { userId: UserId, key: DraftKey, draftId: Schema.String, seq: Schema.Int, expectedRowVersion: Schema.Int },
+    payload: { userId: UserId, key: DraftKey, draftId: Schema.String, ...DraftRestore },
     success: Draft,
     error: Schema.Union([NotFound, StaleWrite, StorageError])
   }),
