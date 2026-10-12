@@ -15,7 +15,7 @@ import { Badge, Card, CardHeader, EmptyState } from "../../ui/Surface.tsx"
 import type { Caller } from "./caller.ts"
 import { FieldTools, SwitchField, TextField } from "./controls.tsx"
 import { SaveDialog } from "./SaveDialog.tsx"
-import { EditorStore, useEditorState, useValue } from "./store.ts"
+import { EditorStore, useEditorState, useLeaveGuard, useValue } from "./store.ts"
 
 const ROLES = [
   { value: "system", label: "System" },
@@ -251,7 +251,7 @@ function Modules({ store }: { store: EditorStore }) {
               description="Kept for agents, which aren't built yet. A file never turns this on."
             />
             <div>
-              <Button variant="ghost" onClick={() => store.setValue(at, null)}>
+              <Button variant="ghost" onClick={() => void store.removeItem(at)}>
                 Remove the module
               </Button>
             </div>
@@ -291,8 +291,8 @@ function NoteEditor({ entry, call, onDeleted }: { entry: NoteEntry; call: Caller
   const state = useEditorState(store)
   useEffect(() => {
     void store.load()
-    return () => void store.flush()
   }, [store])
+  useLeaveGuard(store)
   if (state.snapshot === null) return <p className="text-sm text-muted">Loading the note…</p>
   const remove = async () => {
     const result = await call((client) => client("DeleteCardNote", { noteRefId: entry.ref.id }), ["library"])

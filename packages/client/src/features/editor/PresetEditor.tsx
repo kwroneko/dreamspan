@@ -174,7 +174,7 @@ function Prompts({ store }: { store: EditorStore }) {
 
   const remove = (identifier: string) => {
     setOrder(order.filter((entry) => entry.identifier !== identifier))
-    store.setValue(prompt(identifier), null)
+    void store.removeItem(prompt(identifier))
   }
 
   return (
@@ -345,7 +345,7 @@ function Script({ store, script }: { store: EditorStore; script: RegexScript }) 
             <NumberField store={store} path={[...at, "max_depth"]} label="To depth (empty: any)" nullable integer />
           </div>
           <div>
-            <Button variant="ghost" onClick={() => store.setValue(at, null)}>
+            <Button variant="ghost" onClick={() => void store.removeItem(at)}>
               Delete the script
             </Button>
           </div>

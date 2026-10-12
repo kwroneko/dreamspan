@@ -322,3 +322,52 @@ test("an update with a conflict is resolved field by field", async ({ page }) =>
   await page.getByRole("button", { name: "Edit Main Prompt" }).click()
   await expect(page.getByRole("textbox", { name: /^Prompt/ })).toHaveValue("Write terse, calm prose.")
 })
+
+test("note text typed just before closing the tab is kept, with a warning first", async ({ page }) => {
+  const { card, note } = await admin((api) =>
+    Effect.gen(function* () {
+      const card = yield* api.CreateCard({ label: "Notes", name: "Notes" })
+      const note = yield* api.CreateCardNote({ cardRefId: card.id, title: "Outfit" })
+      return { card, note }
+    })
+  )
+  await open(page, card.id)
+  const content = page.getByRole("region", { name: "Note Outfit" }).getByRole("textbox", { name: /^Content/ })
+  await content.fill("A grey coat, typed in the last moment.")
+  const warned = await page.evaluate(() => {
+    const event = new Event("beforeunload", { cancelable: true })
+    window.dispatchEvent(event)
+    return event.defaultPrevented
+  })
+  expect(warned).toBe(true)
+  // Closing goes ahead: what was typed leaves with the page.
+  await page.close()
+  await expect
+    .poll(async () => {
+      const opened = await admin((api) => api.OpenEditor({ refId: note.id }))
+      return opened.drafts.filter((d) => d.status === "active").map((d) => d.content)
+    })
+    .toEqual(["A grey coat, typed in the last moment."])
+})
+
+test("removing an edited module takes its drafts with it, and the card still saves", async ({ page }) => {
+  const refId = await savedCard("Modules", {})
+  await open(page, refId)
+  await page.getByRole("button", { name: "Add a module", exact: true }).click()
+  const module = page.getByRole("region", { name: "Module New module" })
+  await module.getByRole("textbox", { name: /^Content/ }).fill("A draft that goes with its module.")
+  await kept(page)
+  await page.getByRole("button", { name: "Remove the module", exact: true }).click()
+  await field(page, "Scenario").fill("Still saved.")
+  await kept(page)
+  // The module's content draft ended with it; nothing hidden is left to save.
+  const drafts = await admin((api) => api.OpenEditor({ refId: refId as RefId }))
+  expect(drafts.drafts.filter((d) => d.status === "active" && d.key.field.endsWith('"content"]'))).toEqual([])
+  await page.getByRole("button", { name: /^Save \(/ }).click()
+  await page.getByRole("dialog", { name: "Save a revision" }).getByRole("button", { name: "Save revision" }).click()
+  await expect(page.getByText("Saved a revision.")).toBeVisible()
+  await expect(state(page)).toHaveText("Everything is saved.")
+  const opened = await admin((api) => api.OpenEditor({ refId: refId as RefId }))
+  expect(opened.doc.modules).toEqual([])
+  expect(opened.doc.scenario).toBe("Still saved.")
+})

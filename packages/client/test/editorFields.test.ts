@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import { resolution } from "../src/features/editor/conflicts.tsx"
 import { changedFields, fieldLabel, searchable } from "../src/features/editor/fields.ts"
 
 const preset = {
@@ -46,5 +47,25 @@ describe("editor fields", () => {
       ["Alternate greetings 1", "Hi.", 0],
       ["Alternate greetings 2", "Hello.", 1]
     ])
+    expect(searchable("card", { character_version: "v2" }).map((f) => f.label)).toEqual(["Character version"])
+  })
+})
+
+describe("resolving an update", () => {
+  const merged = { modules: [{ id: "m", title: "M", placement: { mode: "depth", depth: 2, role: "system" } }] }
+  const path = ["modules", "id=m", "placement"]
+  const conflict = { key: "p", label: "Placement", mine: { mode: "tail", role: "user" }, theirs: undefined }
+
+  it("deletes what the side taken deleted", () => {
+    expect(resolution(merged, [path], [conflict], [{ side: "theirs" }])).toEqual({
+      modules: [{ id: "m", title: "M" }]
+    })
+    expect(resolution(merged, [path], [conflict], [{ side: "mine" }])).toEqual({
+      modules: [{ id: "m", title: "M", placement: { mode: "tail", role: "user" } }]
+    })
+  })
+
+  it("refuses an edit that isn't valid instead of deleting the field", () => {
+    expect(resolution(merged, [path], [conflict], [{ side: "edit", text: "{not json" }])).toBeNull()
   })
 })

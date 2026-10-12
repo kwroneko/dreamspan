@@ -1,5 +1,7 @@
 // The per-field conflict picker (DESIGN §4): for each field both sides changed, keep one
 // side, or edit the text into what it should be.
+import { type FieldPath, withValues } from "@rp/shared/editing.ts"
+import type { Doc } from "@rp/shared/library.ts"
 import { useId } from "react"
 import { RadioGroup } from "../../ui/Choice.tsx"
 import { Field, Textarea } from "../../ui/Field.tsx"
@@ -28,6 +30,22 @@ export const chosen = (conflict: Conflict, choice: Choice): unknown => {
   } catch {
     return undefined
   }
+}
+
+/**
+ * The merged document with each conflict as the user chose it. A side without a value there
+ * deleted it, so taking that side deletes it too. Null if a choice isn't valid or doesn't fit.
+ */
+export const resolution = (
+  merged: Doc,
+  paths: ReadonlyArray<FieldPath>,
+  conflicts: ReadonlyArray<Conflict>,
+  choices: ReadonlyArray<Choice>
+) => {
+  const values = paths.map((path, index) => ({ path, value: chosen(conflicts[index]!, choices[index]!) }))
+  // An edit that isn't valid JSON is undefined too, and must not delete the field.
+  const invalid = values.some(({ value }, index) => value === undefined && choices[index]!.side === "edit")
+  return invalid ? null : withValues(merged, values)
 }
 
 const shown = (value: unknown) => (value === undefined ? "(removed)" : asEditable(value))

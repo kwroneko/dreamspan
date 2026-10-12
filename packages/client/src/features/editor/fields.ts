@@ -117,7 +117,14 @@ export const searchable = (kind: EntityKind, doc: Doc): ReadonlyArray<Searchable
   if (kind === "card") {
     const top = ["name", "description", "personality", "scenario", "first_mes"].map((key) => [key])
     const greetings = getAt(doc, ["alternate_greetings"])
-    const rest = ["mes_example", "system_prompt", "post_history_instructions", "creator_notes", "creator"]
+    const rest = [
+      "mes_example",
+      "system_prompt",
+      "post_history_instructions",
+      "creator_notes",
+      "creator",
+      "character_version"
+    ]
     return [
       ...strings(doc, top).map(label),
       ...(Array.isArray(greetings) ? greetings : []).flatMap((text: unknown, index) =>

@@ -16,7 +16,7 @@ import { ForkDialog, RenameDialog } from "./RefDialogs.tsx"
 import { RevisionsDialog } from "./RevisionsDialog.tsx"
 import { SaveDialog } from "./SaveDialog.tsx"
 import { SearchDialog } from "./SearchDialog.tsx"
-import { EditorStore, useEditorState } from "./store.ts"
+import { EditorStore, useEditorState, useLeaveGuard } from "./store.ts"
 import { UpdateDialog } from "./UpdateDialog.tsx"
 
 const KINDS: Record<string, string> = { card: "card", preset: "preset", note: "note", lorebook: "lorebook" }
@@ -27,6 +27,7 @@ const plural = (count: number, one: string, many: string) => `${count} ${count =
 
 /** What saving did to the refs that follow this one. */
 const savedNotice = (saved: SavedRef) => {
+  const setAside = saved.setAside.length
   const merged = saved.followers.filter((f) => f.outcome === "fast_forward" || f.outcome === "merged").length
   const conflicts = saved.followers.filter((f) => f.outcome === "conflicts").length
   return [
@@ -34,7 +35,10 @@ const savedNotice = (saved: SavedRef) => {
     merged > 0
       ? `${plural(merged, "entry that follows this one", "entries that follow this one")} took the change.`
       : "",
-    conflicts > 0 ? `${plural(conflicts, "variant has", "variants have")} conflicts to resolve in its own editor.` : ""
+    conflicts > 0 ? `${plural(conflicts, "variant has", "variants have")} conflicts to resolve in its own editor.` : "",
+    setAside > 0
+      ? `${plural(setAside, "change was", "changes were")} in something deleted since, so ${setAside === 1 ? "it's" : "they're"} in the bin's recovered texts instead.`
+      : ""
   ]
     .filter((part) => part !== "")
     .join(" ")
@@ -52,17 +56,8 @@ function Editor({ refId }: { refId: RefId }) {
 
   useEffect(() => {
     void store.load()
-    // Leaving the page saves what was typed in the last moment.
-    return () => void store.flush()
   }, [store])
-
-  useEffect(() => {
-    const warn = (event: BeforeUnloadEvent) => {
-      if (store.isSaving()) event.preventDefault()
-    }
-    addEventListener("beforeunload", warn)
-    return () => removeEventListener("beforeunload", warn)
-  }, [store])
+  useLeaveGuard(store)
 
   if (state.loadError) {
     return (

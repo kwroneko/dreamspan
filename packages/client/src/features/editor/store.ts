@@ -1,10 +1,10 @@
 // One ref being edited (ARCHITECTURE.md §13): its saved document, and a draft per field the
 // user changed, saved to the server as they type. Components subscribe to one field each,
 // so typing in a 50 KB description re-renders that field only.
-import { applyDrafts, type FieldPath, getAt, textField, valueField } from "@rp/shared/editing.ts"
+import { applyDrafts, type FieldPath, getAt, parseField, textField, valueField } from "@rp/shared/editing.ts"
 import type { EditorSnapshot } from "@rp/shared/editorApi.ts"
 import type { Doc, RefId } from "@rp/shared/library.ts"
-import { useSyncExternalStore } from "react"
+import { useEffect, useSyncExternalStore } from "react"
 import type { AppError } from "../../errors.ts"
 import type { Caller } from "./caller.ts"
 
@@ -356,6 +356,51 @@ export class EditorStore {
     return result
   }
 
+  /**
+   * Removes a list element, and ends the drafts of fields inside it (their text goes to the
+   * recovered texts): nothing could save them any more.
+   */
+  async removeItem(path: FieldPath) {
+    this.setValue(path, null)
+    const inside = this.dirtyFields().filter((key) => {
+      const field = parseField(key)?.path
+      return field !== undefined && field.length > path.length && path.every((segment, at) => field[at] === segment)
+    })
+    await Promise.all(inside.map((key) => this.discard(key)))
+  }
+
+  /** What `beacon` last sent per field, so closing doesn't send it twice. */
+  private readonly sent = new Map<string, string>()
+
+  /**
+   * As the page goes: what's typed and not saved yet, in a request that outlives the page
+   * (`keepalive`, which browsers cap at 64 KB; past that, `beforeunload` has warned).
+   */
+  beacon() {
+    const head = this.snapshot?.ref.headRevisionId ?? null
+    const drafts = [...this.fields].flatMap(([field, draft]) =>
+      draft.local === null || this.sent.get(field) === draft.local
+        ? []
+        : [
+            {
+              refId: this.refId,
+              field,
+              content: draft.local,
+              expectedRowVersion: draft.rowVersion,
+              baseRevisionId: draft.saved === null ? head : null
+            }
+          ]
+    )
+    if (drafts.length === 0) return
+    for (const { field, content } of drafts) this.sent.set(field, content)
+    void fetch("/library/drafts", {
+      method: "POST",
+      keepalive: true,
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ drafts })
+    }).catch(() => undefined)
+  }
+
   private settle(key: string, saved: string | null, rowVersion: number) {
     const field = this.field(key)
     field.saved = saved
@@ -383,3 +428,22 @@ export const useDirty = (store: EditorStore, field: string) =>
 
 /** What the page shows: the documents, how many fields have changes, saving or not. */
 export const useEditorState = (store: EditorStore) => useSyncExternalStore(store.subscribe(DRAFTS), store.state)
+
+/**
+ * Every store on a page guards its own changes: leaving the editor saves what's typed, closing
+ * or reloading the tab with a change not on the server yet asks first, and sends it as it goes.
+ */
+export const useLeaveGuard = (store: EditorStore) =>
+  useEffect(() => {
+    const warn = (event: BeforeUnloadEvent) => {
+      if (store.isSaving()) event.preventDefault()
+    }
+    const leave = () => store.beacon()
+    addEventListener("beforeunload", warn)
+    addEventListener("pagehide", leave)
+    return () => {
+      removeEventListener("beforeunload", warn)
+      removeEventListener("pagehide", leave)
+      void store.flush()
+    }
+  }, [store])

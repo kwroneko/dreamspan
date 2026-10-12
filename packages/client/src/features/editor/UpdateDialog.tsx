@@ -1,7 +1,6 @@
 // Taking in an update from what this ref follows: a new import of the file, or the changes
 // of the entry a variant follows (§3.9). Without conflicts it's one click; with them, the
 // user picks per field: theirs, mine, or an edit (DESIGN §4).
-import { withValues } from "@rp/shared/editing.ts"
 import type { MergePreview } from "@rp/shared/library.ts"
 import { useEffect, useState } from "react"
 import { ErrorAlert } from "../../actions.tsx"
@@ -9,7 +8,7 @@ import type { AppError } from "../../errors.ts"
 import { Button } from "../../ui/Button.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import type { Caller } from "./caller.ts"
-import { type Choice, type Conflict, ConflictPicker, chosen } from "./conflicts.tsx"
+import { type Choice, type Conflict, ConflictPicker, resolution } from "./conflicts.tsx"
 import { fieldLabel } from "./fields.ts"
 import { type EditorStore, useEditorState } from "./store.ts"
 
@@ -50,12 +49,12 @@ export function UpdateDialog({ store, call, onClose }: { store: EditorStore; cal
   const apply = () => finish(() => call((client) => client("ApplyUpdate", { refId: store.refId }), ["library"]))
 
   const resolve = (preview: MergePreview) => {
-    const values = preview.conflicts.map((conflict, index) => {
-      const value = chosen(conflicts[index]!, choices[index]!)
-      // A side without a value there removed it.
-      return { path: conflict.path, value: value === undefined ? null : value }
-    })
-    const doc = withValues(preview.merged, values)
+    const doc = resolution(
+      preview.merged,
+      preview.conflicts.map((conflict) => conflict.path),
+      conflicts,
+      choices
+    )
     if (doc === null) {
       setError({
         tag: "Invalid",
