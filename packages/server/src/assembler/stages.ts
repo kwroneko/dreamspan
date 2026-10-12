@@ -1,4 +1,4 @@
-// The built-in assembler stages, in registration order (ARCHITECTURE §13 lists them).
+// The built-in assembler stages, in registration order (ARCHITECTURE §15 lists them).
 import type { ChatMessage } from "@rp/shared/macros/context.ts"
 import type { CardFields } from "@rp/shared/macros/context.ts"
 import type { VariableEffect } from "@rp/shared/macros/variables.ts"
@@ -368,7 +368,7 @@ const positionOf = (state: ChatState, events: ReadonlyArray<PositionedEvent>) =>
 
 /**
  * The path's messages, verbatim unless they're templates, which expand with the chat as it
- * was at their position and, the first time, hand back their writes (§13 "Macros by source").
+ * was at their position and, the first time, hand back their writes (§15 "Macros by source").
  */
 const resolveStage: AssemblerStage = {
   id: "resolve",
@@ -884,7 +884,11 @@ const composeStage = sync("compose", (assembly) => {
   let summary: { readonly message: StMessage; readonly at: "start" | "end" } | null = null
   if (placed?.placement.mode === "depth") {
     injections = [{ depth: placed.placement.depth, role: placed.placement.role, text: placed.text }, ...injections]
-  } else if (placed?.placement.mode === "section") {
+  } else if (
+    placed?.placement.mode === "section" &&
+    (placed.placement.section === "before_main_prompt" || placed.placement.section === "after_main_prompt")
+  ) {
+    // The extension's other places don't come from an import; they're not placed.
     const at = placed.placement.section === "before_main_prompt" ? "start" : "end"
     const main = collection.findIndex((p) => p.identifier === "main")
     const mainPrompt = collection[main]
@@ -939,7 +943,7 @@ const composeStage = sync("compose", (assembly) => {
   }
 })
 
-/** Squashing and post-processing, as ST does them before sending (ARCHITECTURE §13). */
+/** Squashing and post-processing, as ST does them before sending (ARCHITECTURE §15). */
 const messagesStage = sync("messages", (assembly) => {
   const doc = need(assembly, "preset").doc
   const names = need(assembly, "macros").names
