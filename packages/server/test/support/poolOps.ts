@@ -10,5 +10,7 @@ export const PoolOps = RpcGroup.make(
   /** Ends the worker thread, as a crash would. */
   Rpc.make("Crash"),
   /** Ends the first thread that runs it, as a crash would; a later run returns its thread id. */
-  Rpc.make("CrashOnce", { success: Schema.Number })
+  Rpc.make("CrashOnce", { success: Schema.Number }),
+  /** Blocks like Hold, then ends the worker thread. */
+  Rpc.make("HoldThenCrash")
 )

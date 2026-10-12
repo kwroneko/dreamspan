@@ -94,8 +94,8 @@ export const layer = (options: FormatsOptions) =>
         Layer.provide(
           ReaderPool.layer(options.size, {
             name: "format worker",
-            // A file that stopped one worker would stop the next, and its bytes went with the first.
-            retryCrashed: false,
+            // No retryCrashed: a file that stopped one worker would stop the next, and its
+            // bytes went with the first.
             jobDeadline: {
               ms: options.jobDeadlineMs ?? JOB_DEADLINE_MS,
               terminate: (id) => void threads.get(id)?.terminate()

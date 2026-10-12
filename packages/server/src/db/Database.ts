@@ -173,7 +173,8 @@ export const layer = (options: DatabaseOptions) => {
           const writer = yield* Writer
           yield* writer.Ready()
           return Layer.effect(Reader, ReaderPool.client(ReadOps)).pipe(
-            Layer.provide(ReaderPool.layer(options.readers)),
+            // Reads are idempotent, so one whose reader crashed can run again.
+            Layer.provide(ReaderPool.layer(options.readers, { retryCrashed: true })),
             Layer.provide(workerThreads(entries.reader, { dbPath }, entries.bundleDir))
           )
         })

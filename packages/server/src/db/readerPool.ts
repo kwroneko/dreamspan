@@ -3,7 +3,7 @@
 // is interrupted and keeps routing to a crashed worker until it respawns. node:sqlite can't
 // stop a running query, so both sent reads to a busy or dead reader while another idled.
 // Here a reader stays busy until it answers, and a crashed reader gets nothing until it's back.
-import { Cause, Deferred, Effect, Exit, Layer, Option, Result, Schedule, Schema } from "effect"
+import { Cause, Deferred, Effect, Exit, Layer, Option, Result, Schedule, Schema, type Stream } from "effect"
 import { type Rpc, RpcClient, RpcClientError, type RpcGroup, RpcMessage, type RpcSerialization } from "effect/rpc"
 import { Worker, type WorkerError } from "effect/workers"
 
@@ -15,11 +15,16 @@ interface Job {
   readonly transferables: Transferables
   /** The request already stopped a reader once. */
   readonly crashed: boolean
+  /** Its caller gave up while a reader ran it. */
+  interrupted: boolean
 }
+
+type ReaderWorker = Worker.Worker<RpcMessage.FromServerEncoded, RpcMessage.FromClientEncoded>
 
 interface Reader {
   readonly id: number
-  readonly worker: Worker.Worker<RpcMessage.FromServerEncoded, RpcMessage.FromClientEncoded>
+  /** A new one for each thread, since Effect's keeps a message it couldn't send for its next thread. */
+  worker: ReaderWorker
   ready: boolean
   job: Job | undefined
   /** The running job's deadline, when the pool has one. */
@@ -59,10 +64,13 @@ const restoreClientError = (defect: unknown) =>
   Option.match(decodeClientError(defect), { onNone: () => Effect.die(defect), onSome: Effect.fail })
 
 /**
- * `RpcClient.make` over a pool, for a group without streaming rpcs: a request the pool
- * failed fails with its typed `RpcClientError`.
+ * `RpcClient.make` over a pool: a request the pool failed fails with its typed
+ * `RpcClientError`. Streaming rpcs, whose calls return a Stream, don't type-check.
  */
-export const client = <Rpcs extends Rpc.Any>(group: RpcGroup.RpcGroup<Rpcs>) =>
+export const client = <Rpcs extends Rpc.Any>(
+  group: RpcGroup.RpcGroup<Rpcs> &
+    ([Extract<Rpc.Success<Rpcs>, Stream.Stream<unknown, unknown, unknown>>] extends [never] ? unknown : never)
+) =>
   Effect.map(RpcClient.make(group), (calls) => {
     type Call = (...args: Array<unknown>) => Effect.Effect<unknown, unknown>
     const typed: Record<string, Call> = {}
@@ -84,8 +92,8 @@ const clientError = (cause: Cause.Cause<WorkerError.WorkerError>) => {
 /**
  * Fails to build if every reader dies before any is ready. Afterwards a crashed reader is
  * respawned every second. A crash touches only the request its reader had: with
- * `retryCrashed`, that request goes to the next free reader, once; without, or when it
- * stops a reader again, it fails with an `RpcClientError` (through `client`). Queued
+ * `retryCrashed`, that request goes to the next free reader, once, unless its caller gave
+ * up on it; otherwise it fails with an `RpcClientError` (through `client`). Queued
  * requests wait for a respawn, and fail when one fails while no reader is up. With
  * `jobDeadline`, a job that runs too long is failed the same way, its worker stopped and
  * respawned. Only idempotent requests without transferables can be retried: a request's
@@ -95,7 +103,7 @@ export const layer = (
   size: number,
   {
     name = "database reader",
-    retryCrashed = true,
+    retryCrashed = false,
     jobDeadline
   }: { name?: string; retryCrashed?: boolean; jobDeadline?: JobDeadline } = {}
 ) =>
@@ -151,16 +159,19 @@ export const layer = (
           (reader: Reader) =>
           (response: RpcMessage.FromServerEncoded): Effect.Effect<void> => {
             const job = reader.job
-            // Answers to a request the reader no longer runs, e.g. an interrupt that
-            // arrived after the request finished, are dropped.
-            if (job === undefined) return Effect.void
+            // An answer to a request the reader isn't running is dropped: nobody waits on it.
+            const stray = (what: string) =>
+              Effect.logWarning(`${name} ${reader.id} sent ${what} for a request it isn't running; dropped`)
             switch (response._tag) {
               case "Chunk":
-                return response.requestId === job.request.id ? writeResponse(job.clientId, response) : Effect.void
               case "Exit":
-                return response.requestId === job.request.id ? finish(reader, response) : Effect.void
+                if (job === undefined || response.requestId !== job.request.id) {
+                  return stray(`an answer to request ${response.requestId}`)
+                }
+                return response._tag === "Chunk" ? writeResponse(job.clientId, response) : finish(reader, response)
               case "Defect":
-                // A reader runs one request at a time, so the defect is that request's alone.
+                // It names no request, but a reader runs one at a time, so it's that request's.
+                if (job === undefined) return stray("a defect")
                 return finish(
                   reader,
                   RpcMessage.ResponseExitDieEncoded({
@@ -198,7 +209,7 @@ export const layer = (
           const job = reader.job
           reader.job = undefined
           let outcome = ""
-          if (job !== undefined && retryCrashed && !job.crashed) {
+          if (job !== undefined && retryCrashed && !job.crashed && !job.interrupted) {
             // First in line, as it was sent before everything queued.
             queue.unshift({ ...job, crashed: true })
             outcome = `; retrying its ${job.request.tag} request`
@@ -235,10 +246,15 @@ export const layer = (
             timedOut: false
           }
           readers.push(reader)
-          yield* reader.worker.run(onResponse(reader), { onSpawn: onStart(reader) }).pipe(
+          yield* Effect.suspend(() => reader.worker.run(onResponse(reader), { onSpawn: onStart(reader) })).pipe(
             Effect.tapCause(onCrash(reader)),
             // A spawn that throws, e.g. refusing a stale bundle, is a defect, which retry skips.
             Effect.catchDefect(Effect.fail),
+            Effect.tapError(() =>
+              Effect.map(platform.spawn<RpcMessage.FromServerEncoded, RpcMessage.FromClientEncoded>(id), (worker) => {
+                reader.worker = worker
+              })
+            ),
             Effect.retry(Schedule.spaced(RESPAWN_MS)),
             Effect.interruptible,
             Effect.forkScoped
@@ -256,7 +272,14 @@ export const layer = (
         ): Effect.Effect<void> => {
           switch (message._tag) {
             case "Request":
-              queue.push({ clientId, request: message, transferables, crashed: false })
+              queue.push({
+                clientId,
+                request: message,
+                // A buffer listed twice, e.g. one file used twice in a document, fails the send.
+                transferables: transferables && [...new Set(transferables)],
+                crashed: false,
+                interrupted: false
+              })
               return dispatch
             case "Interrupt": {
               const queued = queue.findIndex((job) => job.clientId === clientId && job.request.id === message.requestId)
@@ -266,7 +289,9 @@ export const layer = (
               }
               // The reader stops at its next statement at best, and stays busy until it answers.
               const reader = running(clientId, message.requestId)
-              return reader ? Effect.orDie(reader.worker.send(message)) : Effect.void
+              if (reader === undefined) return Effect.void
+              reader.job!.interrupted = true
+              return Effect.orDie(reader.worker.send(message))
             }
             case "Ack": {
               const reader = running(clientId, message.requestId)

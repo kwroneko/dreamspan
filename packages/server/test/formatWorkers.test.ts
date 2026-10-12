@@ -6,6 +6,7 @@ import * as Formats from "../src/importer/Formats.ts"
 import * as Importers from "../src/importer/importers.ts"
 import { inject } from "vitest"
 import { cardChunk, json, png, stCardV2 } from "./formats/support.ts"
+import { stalls } from "./support/liveness.ts"
 
 /** Largest gap between 5 ms timer ticks on this thread while `effect` runs. */
 const mainThreadLag = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
@@ -95,6 +96,36 @@ describe("format workers", () => {
         Effect.provide(Logger.layer([collector]))
       )
     },
+    60_000
+  )
+
+  it.live(
+    "a file that can't be sent fails alone, even first in line on a new worker",
+    () =>
+      Effect.gen(function* () {
+        const formats = yield* Formats.Formats
+        // Its buffer is detached, so sending it throws. Behind a crash, it goes to the
+        // replacement before that is ready to take messages, and Effect's worker holds it.
+        const unsendable = new Uint8Array(8)
+        structuredClone(unsendable.buffer, { transfer: [unsendable.buffer] })
+        const [, failed] = yield* Effect.all(
+          [Effect.exit(formats.parse(card(), "crash")), Effect.exit(formats.parse(unsendable, "detached.png"))],
+          { concurrency: 2 }
+        )
+        assert.isTrue(Exit.isFailure(failed))
+        for (const name of ["a.png", "b.png"]) {
+          const parsed = yield* formats.parse(card(), name).pipe(stalls("a file after it never parsed"))
+          assert.strictEqual(parsed.report.format, "card-v2-png")
+        }
+      }).pipe(
+        Effect.provide(
+          Formats.layer({
+            workers: "source",
+            size: 1,
+            entry: new URL("./support/crashingFormatWorker.ts", import.meta.url)
+          })
+        )
+      ),
     60_000
   )
 

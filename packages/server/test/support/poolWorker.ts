@@ -16,6 +16,13 @@ const count = new DatabaseSync(":memory:").prepare(
   "WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c WHERE x < ?) SELECT count(*) FROM c"
 )
 
+const hold = () => {
+  Atomics.store(gate!, 2, threadId)
+  Atomics.add(gate!, 1, 1)
+  Atomics.notify(gate!, 1)
+  Atomics.wait(gate!, 0, 0)
+}
+
 RpcServer.layer(PoolOps, { concurrency: 1 }).pipe(
   Layer.provide(
     PoolOps.toLayer({
@@ -24,12 +31,11 @@ RpcServer.layer(PoolOps, { concurrency: 1 }).pipe(
           count.get(n)
           return threadId
         }),
-      Hold: () =>
+      Hold: () => Effect.sync(hold),
+      HoldThenCrash: () =>
         Effect.sync(() => {
-          Atomics.store(gate!, 2, threadId)
-          Atomics.add(gate!, 1, 1)
-          Atomics.notify(gate!, 1)
-          Atomics.wait(gate!, 0, 0)
+          hold()
+          process.exit(1)
         }),
       Crash: () => Effect.sync(() => process.exit(1)),
       CrashOnce: () =>

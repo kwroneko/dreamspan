@@ -169,6 +169,40 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
     })
   )
 
+  it.effect("a CHARX whose assets share one file exports with each of them", () =>
+    Effect.gen(function* () {
+      // The same bytes under two names are one stored file, read once for the export.
+      const image = png()
+      const card = {
+        spec: "chara_card_v3",
+        spec_version: "3.0",
+        data: {
+          ...stCardV2().data,
+          assets: [
+            { type: "icon", uri: "embeded://main.png", name: "main", ext: "png" },
+            { type: "other", uri: "embeded://a.png", name: "a", ext: "png" },
+            { type: "other", uri: "embeded://b.png", name: "b", ext: "png" }
+          ]
+        }
+      }
+      const archive = zip([
+        { name: "card.json", data: json(card) },
+        { name: "main.png", data: image, method: 0 },
+        { name: "a.png", data: image, method: 0 },
+        { name: "b.png", data: image, method: 0 }
+      ])
+      const { library } = yield* imported(archive, "wren.charx")
+      const { status, bytes } = yield* exported(library!.ref.id, "card-charx")
+      assert.strictEqual(status, 200)
+      const back = run(importCard(bytes))
+      assert.strictEqual(sha256(back.avatar!.bytes), sha256(image))
+      assert.deepStrictEqual(
+        back.assets.map((asset) => sha256(asset.bytes)),
+        [sha256(image), sha256(image)]
+      )
+    })
+  )
+
   it.effect("an export's files are capped in total, however many times a document names them", () =>
     Effect.gen(function* () {
       const writer = yield* Writer

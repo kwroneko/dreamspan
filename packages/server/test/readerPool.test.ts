@@ -59,7 +59,7 @@ const readers = (
 ) => {
   let spawns = 0
   return Layer.effect(Readers, ReaderPool.client(PoolOps)).pipe(
-    Layer.provide(ReaderPool.layer(size)),
+    Layer.provide(ReaderPool.layer(size, { retryCrashed: true })),
     Layer.provide(
       NodeWorker.layer(() => {
         const spawn = spawns++
@@ -200,6 +200,26 @@ describe("reader pool", () => {
   )
 
   it.live(
+    "a read its caller gave up on isn't retried when it stops its reader",
+    () => {
+      const gate = makeGate()
+      const { stops, logger } = stopLog()
+      return Effect.gen(function* () {
+        const { HoldThenCrash } = yield* Readers
+        yield* bothUp
+        const read = yield* Effect.forkChild(HoldThenCrash())
+        yield* gate.holding.pipe(stalls("the reader never started the read"))
+        yield* Fiber.interrupt(read)
+        yield* gate.release
+        // A retry would go straight to the other reader, and stop it before both are up.
+        yield* bothUp
+        assert.strictEqual(stops.length, 1)
+      }).pipe(Effect.ensuring(gate.release), Effect.provide(readers(2, { gate })), Effect.provide(logger))
+    },
+    30_000
+  )
+
+  it.live(
     "startup fails when no reader comes up",
     () =>
       Effect.gen(function* () {
@@ -262,7 +282,7 @@ describe("reader pool", () => {
         }).pipe(
           Effect.provide(
             Layer.effect(Readers, ReaderPool.client(PoolOps)).pipe(
-              Layer.provide(ReaderPool.layer(1)),
+              Layer.provide(ReaderPool.layer(1, { retryCrashed: true })),
               Layer.provide(workerThreads(poolWorker, {}, bundleDir))
             )
           )
