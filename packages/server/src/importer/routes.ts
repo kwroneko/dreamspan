@@ -110,6 +110,7 @@ const LeavingDrafts = Schema.Struct({
       field: Schema.String,
       content: Schema.String,
       expectedRowVersion: Schema.NullOr(Schema.Int),
+      expectedSession: Schema.optionalKey(Schema.Int),
       baseRevisionId: Schema.NullOr(RevisionId)
     })
   ).check(Schema.isMaxLength(500)),
@@ -545,8 +546,8 @@ export const layer = Layer.unwrap(
 
     /**
      * Editor and composer drafts a page sends as it closes (`fetch` with `keepalive`), since its
-     * WebSocket goes with it. Each is saved as `SaveEditorDraft` or `SaveComposer` would; if another save of the same field
-     * got there first, this one goes on top, the other staying in the field's history.
+     * WebSocket goes with it. Each is saved as `SaveEditorDraft` or `SaveComposer` would: the
+     * writer decides a conflict with another tab's save in the same transaction (drafts.ts).
      */
     const leavingDrafts = Effect.gen(function* () {
       const request = yield* HttpServerRequest.HttpServerRequest
@@ -561,27 +562,22 @@ export const layer = Layer.unwrap(
       if (Option.isNone(input)) return jsonError(400, "expected drafts")
       for (const draft of input.value.drafts) {
         if (parseField(draft.field) === null) return jsonError(400, "that isn't a field of a document")
-        const key = new DraftKey({ targetKind: "entity_field", targetId: draft.refId, field: draft.field })
-        const save = (expectedRowVersion: number | null, baseRevision: string | null) =>
-          writer.SaveDraft({ userId: user.id, key, content: draft.content, expectedRowVersion, baseRevision })
-        yield* save(draft.expectedRowVersion, draft.baseRevisionId).pipe(
-          Effect.catchTag("StaleWrite", () =>
-            Effect.flatMap(reader.GetDraft({ userId: user.id, key }), (current) =>
-              save(current?.rowVersion ?? null, current?.status === "active" ? null : draft.baseRevisionId)
-            )
-          )
-        )
+        yield* writer.SaveDraft({
+          userId: user.id,
+          key: new DraftKey({ targetKind: "entity_field", targetId: draft.refId, field: draft.field }),
+          content: draft.content,
+          expectedRowVersion: draft.expectedRowVersion,
+          ...(draft.expectedSession === undefined ? {} : { expectedSession: draft.expectedSession }),
+          baseRevision: draft.baseRevisionId
+        })
       }
-      // A composer's text goes onto the draft it was typed into, as SaveComposer saves it:
-      // wherever that draft's tip is now, or to the recovered texts if it was sent meanwhile.
       for (const composer of input.value.composers ?? []) {
-        yield* writer.SaveComposer({ userId: user.id, ...composer })
+        yield* writer.SaveComposer({ userId: user.id, ...composer, next: composer.next ?? false })
       }
       return HttpServerResponse.empty({ status: 204 })
     }).pipe(
       Effect.catchTags({
         NotFound: () => Effect.succeed(jsonError(404, "there's no such entry")),
-        StaleWrite: () => Effect.succeed(jsonError(409, "the draft changed meanwhile")),
         DraftTooLarge: () => Effect.succeed(jsonError(413, "a draft is too long"))
       }),
       Effect.catch((error) =>

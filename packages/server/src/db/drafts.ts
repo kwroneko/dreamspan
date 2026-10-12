@@ -31,9 +31,16 @@ interface DraftRow {
   readonly base_revision: string | null
   readonly row_version: number
   readonly session: number
+  readonly text_version: number
   readonly created_at: number
   readonly updated_at: number
   readonly history_length: number
+}
+
+/** A draft as a client had it when it typed: the row version, and the session if it knows it. */
+interface Base {
+  readonly rowVersion: number
+  readonly session?: number | undefined
 }
 
 interface EntryRow {
@@ -44,6 +51,8 @@ interface EntryRow {
   readonly start: number
   readonly removed: string
   readonly inserted: string
+  /** Saved over another tab's text: the text before it is kept, whatever its size. */
+  readonly displaced: 0 | 1
 }
 
 const toDraft = (row: DraftRow) =>
@@ -95,7 +104,8 @@ const patchPieces = (pieces: ReadonlyArray<string>, patch: Patch) => {
 /**
  * History walked back from the current text, newest entry first: each entry with the
  * lengths of the text after and before it, which is all destructiveness depends on. The
- * text before an entry is only rebuilt for entries from seq `textFrom` up.
+ * text before an entry is only rebuilt for entries from seq `textFrom` up. `kept`: the text
+ * before the entry must outlive the history (a destructive change, or another tab's text).
  */
 const walkBack = (content: string, newestFirst: ReadonlyArray<EntryRow>, textFrom = Infinity) => {
   let length = content.length
@@ -109,7 +119,7 @@ const walkBack = (content: string, newestFirst: ReadonlyArray<EntryRow>, textFro
       entry,
       after: length,
       before,
-      destructive: isDestructive(patch, before),
+      kept: entry.displaced === 1 || isDestructive(patch, before),
       textBefore: rebuilt ? pieces : null
     }
     length = before
@@ -117,15 +127,15 @@ const walkBack = (content: string, newestFirst: ReadonlyArray<EntryRow>, textFro
   })
 }
 
-/** The text from just before each destructive entry that `wanted` picks, newest first. */
-const beforeDestructive = (
+/** The text from just before each kept entry that `wanted` picks, newest first. */
+const beforeKept = (
   content: string,
   newestFirst: ReadonlyArray<EntryRow>,
   wanted: (seq: number) => boolean = () => true
 ) => {
   const picked = new Set(
     walkBack(content, newestFirst)
-      .filter((step) => step.destructive && wanted(step.entry.seq))
+      .filter((step) => step.kept && wanted(step.entry.seq))
       .map((step) => step.entry.seq)
   )
   if (picked.size === 0) return []
@@ -153,6 +163,11 @@ export const makeDraftStore = (
       FROM drafts d
       WHERE d.user_id = ${userId} AND d.target_kind = ${key.targetKind} AND d.target_id = ${key.targetId}
         AND d.field = ${key.field}`.pipe(Effect.map(([row]) => row ?? null))
+
+  const byId = (id: string) =>
+    sql<DraftRow>`
+      SELECT d.*, (SELECT count(*) FROM draft_history h WHERE h.draft_id = d.id) AS history_length
+      FROM drafts d WHERE d.id = ${id}`.pipe(Effect.map(([row]) => row ?? null))
 
   /** A chat's composer draft by its id, wherever its tip is now. */
   const findComposer = (userId: UserId, chatId: string, draftId: string) =>
@@ -226,8 +241,8 @@ export const makeDraftStore = (
    */
   const retain = (draft: DraftRow, content: string) =>
     Effect.gen(function* () {
-      const sizes = yield* sql<{ seq: number; removed: number; inserted: number }>`
-        SELECT seq, length(removed) AS removed, length(inserted) AS inserted
+      const sizes = yield* sql<{ seq: number; removed: number; inserted: number; displaced: 0 | 1 }>`
+        SELECT seq, length(removed) AS removed, length(inserted) AS inserted, displaced
         FROM draft_history WHERE draft_id = ${draft.id} ORDER BY seq DESC`
       let total = 0
       const cut = sizes.findIndex((row, index) => {
@@ -236,17 +251,17 @@ export const makeDraftStore = (
       })
       if (cut < 0) return
       const cutSeq = sizes[cut]!.seq
-      // The text is only loaded if a dropped entry may be destructive. SQLite counts code
-      // points, so a UTF-16 length is between one and two times the count. Starting from a
-      // lower bound on the text's length and doubling what was removed can only flag
-      // more entries than isDestructive would, never fewer.
+      // The text is only loaded if a dropped entry is displaced or may be destructive. SQLite
+      // counts code points, so a UTF-16 length is between one and two times the count.
+      // Starting from a lower bound on the text's length and doubling what was removed can
+      // only flag more entries than isDestructive would, never fewer.
       let before = content.length / 2
       const mayLoseText = sizes.some((row, index) => {
         before = before - row.inserted + row.removed
-        return index >= cut && (2 * row.removed > 200 || 2 * row.removed > before / 2)
+        return index >= cut && (row.displaced === 1 || 2 * row.removed > 200 || 2 * row.removed > before / 2)
       })
       if (mayLoseText) {
-        const lost = beforeDestructive(content, yield* entries(draft.id), (seq) => seq <= cutSeq)
+        const lost = beforeKept(content, yield* entries(draft.id), (seq) => seq <= cutSeq)
         yield* recover(draft.user_id, toDraft(draft).key, lost, "commit")
       }
       yield* sql`DELETE FROM draft_history WHERE draft_id = ${draft.id} AND seq <= ${cutSeq}`
@@ -254,7 +269,7 @@ export const makeDraftStore = (
 
   /**
    * Records `patch` (turning the draft's text into `content`), extending the last entry when
-   * typing continues. A `boundary` never extends one: the text before it stays a state.
+   * typing continues. One saved over another tab's text (`displaced`) never extends one.
    */
   const record = (
     draft: DraftRow,
@@ -262,12 +277,12 @@ export const makeDraftStore = (
     patch: Patch,
     kind: "edit" | "restore",
     now: number,
-    boundary: boolean
+    displaced: boolean
   ) =>
     Effect.gen(function* () {
       const [last] =
         yield* sql<EntryRow>`SELECT * FROM draft_history WHERE draft_id = ${draft.id} ORDER BY seq DESC LIMIT 1`
-      if (last && !boundary && kind === "edit" && last.kind === "edit" && draft.status === "active") {
+      if (last && !displaced && kind === "edit" && last.kind === "edit" && draft.status === "active") {
         const lastPatch = patchOf(last)
         const beforeLast = applyPatch(draft.content, invertPatch(lastPatch))
         const continuing =
@@ -295,7 +310,8 @@ export const makeDraftStore = (
         at: now,
         start: patch.start,
         removed: patch.removed,
-        inserted: patch.inserted
+        inserted: patch.inserted,
+        displaced: displaced ? 1 : 0
       })}`
       yield* retain(draft, content)
     })
@@ -311,7 +327,7 @@ export const makeDraftStore = (
     content: string,
     kind: "edit" | "restore",
     baseRevision: string | null,
-    boundary = false
+    displaced = false
   ) =>
     Effect.gen(function* () {
       const now = Date.now()
@@ -319,12 +335,15 @@ export const makeDraftStore = (
       // Saving the same text against a new base revision only moves the base.
       const sameBase = baseRevision === null || baseRevision === draft.base_revision
       if (isEmptyPatch(patch) && draft.status === "active" && sameBase) return draft
-      if (!isEmptyPatch(patch)) yield* record(draft, content, patch, kind, now, boundary)
+      if (!isEmptyPatch(patch)) yield* record(draft, content, patch, kind, now, displaced)
       // A save after a commit or discard starts a new drafting session.
       const reopened = draft.status !== "active"
+      const textChanged = reopened || !isEmptyPatch(patch)
       yield* sql`UPDATE drafts SET content = ${content}, status = 'active',
                    base_revision = ${reopened ? baseRevision : (baseRevision ?? draft.base_revision)},
-                   row_version = row_version + 1, updated_at = ${now}
+                   row_version = row_version + 1,
+                   text_version = CASE WHEN ${textChanged ? 1 : 0} THEN row_version + 1 ELSE text_version END,
+                   updated_at = ${now}
                  WHERE id = ${draft.id}`
       return draft
     })
@@ -350,35 +369,65 @@ export const makeDraftStore = (
       ? Effect.fail(new DraftTooLarge({ length: content.length, max: DraftHistoryPolicy.maxContentChars }))
       : Effect.void
 
+  const shown = (draft: DraftRow | null) => (draft?.status === "active" ? draft.content : "")
+
+  /**
+   * The one rule for text saved onto a draft, every kind, in the writer's transaction.
+   * `base` is the draft as the client had it when the text was typed (null: it had none; no
+   * session: the client didn't say, and none is taken to have ended).
+   * - Typed on the draft as it is: saved, extending the history as typing does.
+   * - Another tab changed the text since (or it's `next`, see below): saved as its own
+   *   history entry, the other text before it marked displaced, so it's one step back now
+   *   and goes to the recovered texts when the session ends or the entry is dropped.
+   * - The session it was typed in has ended since (sent, committed, discarded): `ended`
+   *   decides. "recover" (the composer: its text was sent) puts the text in the recovered
+   *   texts and leaves the draft alone; "reopen" (a field: an alternative edit, caught by
+   *   the edit conflict on commit) starts the next session with it.
+   * `next` is composer text typed after a send of this session that may not have arrived:
+   * it reopens the session the send ended, or goes on top of the text the send would take.
+   */
+  const saveOnto = (
+    draft: DraftRow,
+    base: Base | null,
+    content: string,
+    options: { readonly baseRevision: string | null; readonly ended: "recover" | "reopen"; readonly next?: boolean }
+  ) =>
+    Effect.gen(function* () {
+      const ended = base?.session !== undefined && base.session !== draft.session
+      if (ended && options.ended === "recover" && options.next !== true) {
+        const recovered = content.trim() !== "" && content !== shown(draft)
+        if (recovered) yield* recover(draft.user_id, toDraft(draft).key, [content], "discard")
+        return { draft: toDraft(draft), recovered }
+      }
+      const changed =
+        draft.status === "active" &&
+        (base === null || ended || options.next === true || draft.text_version > base.rowVersion)
+      // On another tab's text, the draft keeps the revision that text was started from.
+      yield* update(draft, content, "edit", changed ? null : options.baseRevision, changed)
+      return { draft: toDraft((yield* byId(draft.id))!), recovered: false }
+    })
+
+  /** Saves a draft by its key, creating it (after `checkTarget`) if there's none. */
   const save = (options: {
     readonly userId: UserId
     readonly key: DraftKey
     readonly content: string
-    readonly expectedRowVersion: number | null
+    readonly base: Base | null
     readonly baseRevision: string | null
     readonly checkTarget: Effect.Effect<void, NotFound, never>
   }) =>
     Effect.gen(function* () {
       yield* tooLarge(options.content)
       const existing = yield* find(options.userId, options.key)
-      if (existing === null) {
-        if (options.expectedRowVersion !== null) {
-          return yield* new StaleWrite({
-            entity: "draft",
-            id: options.key.targetId,
-            expected: options.expectedRowVersion,
-            actual: 0
-          })
-        }
-        yield* options.checkTarget
-        yield* insert(options.userId, options.key, options.content, options.baseRevision)
-      } else {
-        if (options.expectedRowVersion === null) {
-          return yield* new StaleWrite({ entity: "draft", id: existing.id, expected: 0, actual: existing.row_version })
-        }
-        yield* checkVersion(existing, options.expectedRowVersion)
-        yield* update(existing, options.content, "edit", options.baseRevision)
+      if (existing !== null) {
+        const saved = yield* saveOnto(existing, options.base, options.content, {
+          baseRevision: options.baseRevision,
+          ended: "reopen"
+        })
+        return saved.draft
       }
+      yield* options.checkTarget
+      yield* insert(options.userId, options.key, options.content, options.baseRevision)
       return toDraft((yield* find(options.userId, options.key))!)
     })
 
@@ -401,19 +450,20 @@ export const makeDraftStore = (
    */
   const end = (draft: DraftRow, outcome: "committed" | "discarded") =>
     Effect.gen(function* () {
-      const lost = beforeDestructive(draft.content, yield* entries(draft.id))
+      const lost = beforeKept(draft.content, yield* entries(draft.id))
       if (outcome === "discarded") lost.unshift(draft.content)
       yield* recover(draft.user_id, toDraft(draft).key, lost, outcome === "discarded" ? "discard" : "commit")
       yield* sql`DELETE FROM draft_history WHERE draft_id = ${draft.id}`
       const updatedAt = Date.now()
       yield* sql`UPDATE drafts SET status = ${outcome}, content = '', row_version = row_version + 1,
-                   session = session + 1, updated_at = ${updatedAt}
+                   text_version = row_version + 1, session = session + 1, updated_at = ${updatedAt}
                  WHERE id = ${draft.id}`
       return toDraft({
         ...draft,
         status: outcome,
         content: "",
         row_version: draft.row_version + 1,
+        text_version: draft.row_version + 1,
         session: draft.session + 1,
         updated_at: updatedAt,
         history_length: 0
@@ -447,8 +497,6 @@ export const makeDraftStore = (
 
   // --- The composer (DESIGN §6.2): a draft per branch tip, which moves with its tip.
 
-  const shown = (draft: DraftRow | null) => (draft?.status === "active" ? draft.content : "")
-
   /**
    * The composer at `key`, made empty if there's none, so every text typed in a composer
    * has a draft to name. `from` is the composer a branch starts from: its text is copied
@@ -459,35 +507,30 @@ export const makeDraftStore = (
       const here = yield* find(userId, key)
       const copied = shown(from)
       if (here === null) yield* insert(userId, key, copied, null)
-      else if (copied !== "" && shown(here) === "") yield* update(here, copied, "edit", null, true)
+      else if (copied !== "" && shown(here) === "") yield* update(here, copied, "edit", null)
       return toDraft((yield* find(userId, key))!)
     })
 
   /**
-   * Text typed into the composer draft `base` names (its id, and the row version and session
-   * the client had), saved onto that draft wherever it is now: its tip may have moved on
-   * with a message appended there. Another tab's save since goes one step back in the
-   * history, never merged into this one. If the draft's session ended since (its text was
-   * sent, or it was discarded) or the draft is gone, the text goes to the recovered texts
-   * rather than starting the composer over with text already sent (`recovered`).
+   * Text typed into the composer draft `base` names, saved onto that draft wherever it is
+   * now (its tip may have moved on with a message appended there), by `saveOnto`'s rule.
+   * A draft that's gone sends the text to the recovered texts.
    */
   const saveComposer = (
     userId: UserId,
     chatId: string,
-    base: { readonly draftId: string; readonly rowVersion: number; readonly session: number },
+    base: { readonly draftId: string; readonly rowVersion: number; readonly session: number; readonly next: boolean },
     content: string
   ) =>
     Effect.gen(function* () {
       yield* tooLarge(content)
       const draft = yield* findComposer(userId, chatId, base.draftId)
-      if (draft === null || draft.session !== base.session) {
-        const recovered = content.trim() !== "" && content !== shown(draft)
-        const key = draft === null ? composerKey(chatId, null) : toDraft(draft).key
-        if (recovered) yield* recover(userId, key, [content], "discard")
-        return { draft: draft && toDraft(draft), recovered }
+      if (draft === null) {
+        const recovered = content.trim() !== ""
+        if (recovered) yield* recover(userId, composerKey(chatId, null), [content], "discard")
+        return { draft: null, recovered }
       }
-      yield* update(draft, content, "edit", null, draft.row_version !== base.rowVersion)
-      return { draft: toDraft((yield* findComposer(userId, chatId, draft.id))!), recovered: false }
+      return yield* saveOnto(draft, base, content, { baseRevision: null, ended: "recover", next: base.next })
     })
 
   const restoreComposer = (userId: UserId, chatId: string, draftId: string, seq: number, expectedRowVersion: number) =>

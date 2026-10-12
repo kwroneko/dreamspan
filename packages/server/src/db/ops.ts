@@ -315,21 +315,23 @@ export class WriteOps extends RpcGroup.make(
   Rpc.make("DeleteSession", { payload: { tokenHash: Schema.String }, success: Schema.Void, error: StorageError }),
   /**
    * Saves a draft (debounced by the client while the user types). The first save creates
-   * it, checking the target belongs to the user; later saves pass the row version they
-   * last saw, so a stale tab can't overwrite newer text. Every change is kept as an undo
-   * history entry (DESIGN §6.2).
+   * it, checking the target belongs to the user; later saves pass the draft as they last
+   * saw it, and the writer decides a conflict with another tab (drafts.ts `saveOnto`): a
+   * stale tab never overwrites newer text unseen. Every change is kept as an undo history
+   * entry (DESIGN §6.2).
    */
   Rpc.make("SaveDraft", {
     payload: {
       userId: UserId,
       key: DraftKey,
       content: Schema.String,
-      /** Null to create the draft. */
+      /** The draft as last seen: null if none was. */
       expectedRowVersion: Schema.NullOr(Schema.Int),
+      expectedSession: Schema.optionalKey(Schema.Int),
       baseRevision: Schema.NullOr(Schema.String)
     },
     success: Draft,
-    error: Schema.Union([NotFound, StaleWrite, DraftTooLarge, StorageError])
+    error: Schema.Union([NotFound, DraftTooLarge, StorageError])
   }),
   /**
    * The composer at a tip, made empty if there's none, so text typed there has a draft to
@@ -359,6 +361,7 @@ export class WriteOps extends RpcGroup.make(
       draftId: Schema.String,
       rowVersion: Schema.Int,
       session: Schema.Int,
+      next: Schema.Boolean,
       content: Schema.String
     },
     success: Schema.Struct({ draft: Schema.NullOr(Draft), recovered: Schema.Boolean }),

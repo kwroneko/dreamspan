@@ -362,3 +362,92 @@ test("starting a branch copies the composer into it", async ({ page }) => {
   // A copy: the branch it came from keeps its own.
   expect(await onServer(setup.chatId, setup.tip)).toBe("half typed continuation")
 })
+
+test("closing while a send is out keeps what was typed after it", async ({ page }) => {
+  // Once the send leaves, nothing more comes back from the server before the page goes.
+  let armed = false
+  let cut = false
+  await page.routeWebSocket(/\/rpc$/, (socket) => {
+    const upstream = socket.connectToServer()
+    socket.onMessage((data) => {
+      if (armed && typeof data === "string" && (JSON.parse(data) as { tag?: string }).tag === "SendMessage") cut = true
+      upstream.send(data)
+    })
+    upstream.onMessage((data) => {
+      if (!cut) socket.send(data)
+    })
+  })
+  const chatId = await newChat(page, "Closing mid-send")
+  await box(page).fill("the first message")
+  await expect.poll(() => onServer(chatId, null)).toBe("the first message")
+  armed = true
+  await page.getByRole("button", { name: "Send" }).click()
+  await expect.poll(() => cut).toBe(true)
+  await box(page).fill("the next message")
+  await expect.poll(() => leaf(chatId)).not.toBeNull()
+  // Without this browser's copy, as on another device: the request sent as the page goes keeps it.
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) => {
+        const request = indexedDB.open("rp-editor-copies", 1)
+        request.onsuccess = () => {
+          const transaction = request.result.transaction("copies", "readwrite")
+          transaction.objectStore("copies").clear()
+          transaction.oncomplete = () => resolve()
+        }
+      })
+  )
+  page.on("dialog", (dialog) => void dialog.accept())
+  armed = false
+  cut = false
+  await page.reload()
+  await expect(box(page)).toHaveValue("the next message")
+  expect(await onServer(chatId, await leaf(chatId))).toBe("the next message")
+})
+
+test("a copy this browser kept of another chat's composer is saved when a composer opens", async ({ page }) => {
+  const setup = await admin((api) =>
+    Effect.gen(function* () {
+      const chat = yield* api.CreateChat({ title: "Elsewhere" })
+      return { chatId: chat.id, draft: yield* typeInto(api, chat.id, null, "on the server"), user: yield* api.Whoami() }
+    })
+  )
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${server().url}/chats`)
+  const { draft } = setup
+  await page.evaluate(
+    (copy) =>
+      new Promise<void>((resolve) => {
+        const request = indexedDB.open("rp-editor-copies", 1)
+        request.onupgradeneeded = () => {
+          const store = request.result.createObjectStore("copies", { keyPath: "key" })
+          store.createIndex("userId", "userId")
+          store.createIndex("ref", ["userId", "refId"])
+        }
+        request.onsuccess = () => {
+          const db = request.result
+          const transaction = db.transaction("copies", "readwrite")
+          transaction.objectStore("copies").put({ ...copy, key: `${copy.userId}\n${copy.refId}\n${copy.field}` })
+          transaction.oncomplete = () => {
+            db.close()
+            resolve()
+          }
+        }
+      }),
+    {
+      userId: setup.user.id,
+      refId: `composer:${setup.chatId}`,
+      field: draft.id,
+      content: JSON.stringify({
+        text: "kept in this browser",
+        rowVersion: draft.rowVersion,
+        session: draft.session,
+        next: false
+      }),
+      // From a page closed a while ago, before the server had it.
+      at: Date.now() - 60_000
+    }
+  )
+  await newChat(page, "Somewhere else")
+  await expect.poll(() => onServer(setup.chatId, null)).toBe("kept in this browser")
+})

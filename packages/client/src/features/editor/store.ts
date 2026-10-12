@@ -2,6 +2,7 @@
 // user changed, saved to the server as they type. Components subscribe to one field each,
 // so typing in a 50 KB description re-renders that field only.
 import { applyDrafts, type FieldPath, getAt, parseField, textField, valueField } from "@rp/shared/editing.ts"
+import type { Draft } from "@rp/shared/drafts.ts"
 import type { EditorSnapshot } from "@rp/shared/editorApi.ts"
 import type { Doc, RefId } from "@rp/shared/library.ts"
 import { useEffect, useSyncExternalStore } from "react"
@@ -17,6 +18,8 @@ interface FieldDraft {
   saved: string | null
   /** The draft row's version, an ended draft's too: the next session starts from it. */
   rowVersion: number | null
+  /** The draft's session, so the server knows which one the text was typed in. */
+  session: number | null
   /** Changed here and not saved yet. */
   local: string | null
   timer: ReturnType<typeof setTimeout> | null
@@ -119,7 +122,7 @@ export class EditorStore {
   private field(key: string) {
     let field = this.fields.get(key)
     if (field === undefined) {
-      field = { saved: null, rowVersion: null, local: null, timer: null, inFlight: null }
+      field = { saved: null, rowVersion: null, session: null, local: null, timer: null, inFlight: null }
       this.fields.set(key, field)
     }
     return field
@@ -184,12 +187,9 @@ export class EditorStore {
     for (const field of this.fields.values()) {
       field.saved = null
       field.rowVersion = null
+      field.session = null
     }
-    for (const draft of snapshot.drafts) {
-      const field = this.field(draft.key.field)
-      field.saved = draft.status === "active" ? draft.content : null
-      field.rowVersion = draft.rowVersion
-    }
+    for (const draft of snapshot.drafts) this.hold(this.field(draft.key.field), draft)
     this.rebuild()
   }
 
@@ -253,15 +253,10 @@ export class EditorStore {
     if (field.local === null) return
     const content = field.local
     const run = async () => {
-      let result = await this.saveOnce(key, content)
-      // Another tab saved this field meanwhile: its text stays in the history, and this one goes on top.
-      if (!result.ok && result.error.tag === "StaleWrite") {
-        await this.refresh()
-        result = await this.saveOnce(key, content)
-      }
+      // Another tab saved this field meanwhile: the server puts this on top, theirs kept.
+      const result = await this.saveOnce(key, content)
       if (result.ok) {
-        field.saved = result.value.content
-        field.rowVersion = result.value.rowVersion
+        this.hold(field, result.value)
         if (field.local === content) field.local = null
         void dropCopy(this.userId, this.refId, key, content)
         this.saveError = null
@@ -284,11 +279,26 @@ export class EditorStore {
         refId: this.refId,
         field: key,
         content,
-        expectedRowVersion: field.rowVersion,
+        ...this.base(field),
         // A new drafting session starts from the saved version.
         baseRevisionId: field.saved === null ? (this.snapshot?.ref.headRevisionId ?? null) : null
       })
     )
+  }
+
+  /** The draft as this tab last had it, for a save to name. */
+  private base(field: FieldDraft) {
+    return {
+      expectedRowVersion: field.rowVersion,
+      ...(field.session === null ? {} : { expectedSession: field.session })
+    }
+  }
+
+  /** The draft as the server returned it. */
+  private hold(field: FieldDraft, draft: Draft) {
+    field.saved = draft.status === "active" ? draft.content : null
+    field.rowVersion = draft.rowVersion
+    field.session = draft.session
   }
 
   /** Everything typed, saved. */
@@ -357,7 +367,7 @@ export class EditorStore {
     const result = await this.call((client) =>
       client("DiscardEditorDraft", { refId: this.refId, field: key, expectedRowVersion: field.rowVersion! })
     )
-    if (result.ok) this.settle(key, null, result.value.rowVersion)
+    if (result.ok) this.settle(key, result.value)
     return result
   }
 
@@ -371,7 +381,7 @@ export class EditorStore {
     const result = await this.call((client) =>
       client("RestoreEditorDraft", { refId: this.refId, field: key, seq, expectedRowVersion: field.rowVersion ?? 0 })
     )
-    if (result.ok) this.settle(key, result.value.content, result.value.rowVersion)
+    if (result.ok) this.settle(key, result.value)
     return result
   }
 
@@ -395,11 +405,11 @@ export class EditorStore {
         refId: this.refId,
         field: key,
         content,
-        expectedRowVersion: field.rowVersion,
+        ...this.base(field),
         baseRevisionId: this.snapshot!.ref.headRevisionId
       })
     )
-    if (result.ok) this.settle(key, result.value.content, result.value.rowVersion)
+    if (result.ok) this.settle(key, result.value)
     return result
   }
 
@@ -434,7 +444,7 @@ export class EditorStore {
               refId: this.refId,
               field,
               content: draft.local,
-              expectedRowVersion: draft.rowVersion,
+              ...this.base(draft),
               baseRevisionId: draft.saved === null ? head : null
             }
           ]
@@ -458,10 +468,9 @@ export class EditorStore {
     )
   }
 
-  private settle(key: string, saved: string | null, rowVersion: number) {
+  private settle(key: string, draft: Draft) {
     const field = this.field(key)
-    field.saved = saved
-    field.rowVersion = rowVersion
+    this.hold(field, draft)
     field.local = null
     if (key.startsWith("=")) this.rebuild()
     this.bump(key, STRUCTURE, DRAFTS)

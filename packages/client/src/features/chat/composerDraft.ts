@@ -10,17 +10,23 @@
 // text wherever that draft is now (ARCHITECTURE §3.10). Going to another tip, the text is
 // saved on its own draft first; if the new tip's draft turns out to be the same one (it
 // moved there), the text stays in the box. Server calls run one at a time, in order.
-import type { SlotId } from "@rp/shared/chat.ts"
+//
+// This browser's copy of the text is a save waiting to be made: filed under the draft's id
+// with the row version and session it names, so a draft that moved never strands it. Any
+// chat's composer opening makes every such save there is, and the server decides each.
+import type { ChatId, SlotId } from "@rp/shared/chat.ts"
 import type { SendResult } from "@rp/shared/chatApi.ts"
 import type { Draft, DraftState } from "@rp/shared/drafts.ts"
 import type { AppError } from "../../errors.ts"
-import { copiesOf, dropCopy, keepCopy, pruneCopies } from "../editor/backup.ts"
+import { copiesOfUser, dropCopy, keepCopy, pruneCopies } from "../editor/backup.ts"
 import type { ChatSession, Outcome } from "./session.ts"
 
 /** How long typing pauses before the text is saved. */
 const SAVE_DELAY_MS = 600
 /** The most a `keepalive` request may carry, in bytes, in the browsers that cap it. */
 const KEEPALIVE_LIMIT = 64 * 1024
+/** How old another draft's copy in this browser is before an opening composer saves it. */
+const STALE_COPY_MS = 30_000
 /** How long a composer that couldn't be read waits before it's read again. */
 const RETRY_MS = 2000
 
@@ -39,8 +45,35 @@ export interface ComposerState {
 /** A send's outcome as the composer needs it: not sent, or the draft as the send left it. */
 export type Sent = { readonly sent: false } | { readonly sent: true; readonly draft: SendResult["draft"] }
 
-/** What this browser's copies (backup.ts) file a chat's composer under: a tip is its field. */
-const copyTarget = (chatId: string) => `composer:${chatId}`
+/** What this browser's copies (backup.ts) file a chat's composer under. */
+const COPIES = "composer:"
+const copyTarget = (chatId: string) => `${COPIES}${chatId}`
+/** A copy's field: the draft's id, and whether it's text typed after a send of the draft. */
+const copyField = (draftId: string, next: boolean) => (next ? `${draftId} next` : draftId)
+/** A copy's content: the text and the draft it was typed on, as SaveComposer takes them. */
+const copyContent = (text: string, draft: Draft, next: boolean) =>
+  JSON.stringify({ text, rowVersion: draft.rowVersion, session: draft.session, next })
+
+interface Pending {
+  readonly text: string
+  readonly rowVersion: number
+  readonly session: number
+  readonly next: boolean
+}
+
+const pendingOf = (content: string): Pending | null => {
+  try {
+    const value = JSON.parse(content) as Partial<Pending>
+    return typeof value.text === "string" &&
+      typeof value.rowVersion === "number" &&
+      typeof value.session === "number" &&
+      typeof value.next === "boolean"
+      ? (value as Pending)
+      : null
+  } catch {
+    return null
+  }
+}
 
 /** The draft's text as the box would show it: an ended draft holds none. */
 const shown = (draft: Draft | null) => (draft?.status === "active" ? draft.content : "")
@@ -57,6 +90,8 @@ export class ComposerDraft {
   private error: AppError | null = null
   /** A send is on its way: the box holds the next message, saved once the send is answered. */
   private held = false
+  /** The send on its way: its text, the draft it was typed on, and whether the server has that text. */
+  private sending: { readonly text: string; readonly from: Draft; saved: boolean } | null = null
   private timer: ReturnType<typeof setTimeout> | null = null
   private queue: Promise<void> = Promise.resolve()
   private readonly listeners = new Set<() => void>()
@@ -109,9 +144,21 @@ export class ComposerDraft {
     return this.draft !== null && this.text !== shown(this.draft)
   }
 
-  /** Where this browser's copy of the text is filed: the tip its draft was at. */
-  private get field() {
-    return this.draft?.key.field ?? this.requested ?? ""
+  /** Copies the text into this browser, as a save of it would be made. */
+  private keep(text: string) {
+    const draft = this.draft
+    if (draft === null) return
+    void keepCopy(
+      this.userId,
+      copyTarget(this.chatId),
+      copyField(draft.id, this.held),
+      copyContent(text, draft, this.held)
+    )
+  }
+
+  /** Drops the copy of `text` on `draft`, once the server has it. */
+  private drop(text: string, draft: Draft, next = false) {
+    void dropCopy(this.userId, copyTarget(this.chatId), copyField(draft.id, next), copyContent(text, draft, next))
   }
 
   // --- The tip
@@ -161,25 +208,67 @@ export class ComposerDraft {
     if (this.requested === tip) await this.show(tip, draft)
   }
 
-  /** The tip's text in the box, or what this browser kept of it when a page closed. */
-  private async show(tip: SlotId | null, draft: Draft) {
-    this.draft = draft
-    this.text = shown(draft)
+  /** The tip's text in the box, with what this browser kept of it when a page closed. */
+  private async show(tip: SlotId | null, opened: Draft) {
     this.error = null
-    this.restored = false
-    this.recovered = false
-    await pruneCopies(this.userId)
-    const copy = (await copiesOf(this.userId, copyTarget(this.chatId))).find((c) => c.field === draft.key.field)
+    const { draft, restored, recovered, unsent } = await this.saveCopies(opened)
+    this.draft = draft
+    this.text = unsent ?? shown(draft)
+    this.restored = restored
+    this.recovered = recovered
     if (this.requested !== tip) return
-    if (copy !== undefined && copy.content !== this.text) {
-      this.text = copy.content
-      this.restored = true
-    } else if (copy !== undefined) void dropCopy(this.userId, copyTarget(this.chatId), copy.field, copy.content)
     if (this.carried !== "" && this.text === "") this.text = this.carried
     this.carried = ""
     this.ready = true
     this.emit()
     if (this.dirty) this.schedule(0)
+  }
+
+  /**
+   * Makes every save this browser kept for want of the server (a page closed first), any
+   * chat's, and says what they did to `opened`: its text came back (`restored`), or went to
+   * the recovered texts. A copy of `opened` that can't be saved now comes back as `unsent`.
+   */
+  private async saveCopies(opened: Draft) {
+    let draft = opened
+    let restored = false
+    let recovered = false
+    let unsent: string | null = null
+    await pruneCopies(this.userId)
+    // Another draft's copy only once it's stale: a tab still typing there makes its own saves.
+    const now = Date.now()
+    const copies = (await copiesOfUser(this.userId)).filter(
+      (copy) =>
+        copy.refId.startsWith(COPIES) && (copy.field.split(" ")[0] === opened.id || now - copy.at > STALE_COPY_MS)
+    )
+    // A session's own text before what was typed after its send.
+    copies.sort((a, b) => Number(a.field.endsWith(" next")) - Number(b.field.endsWith(" next")))
+    for (const copy of copies) {
+      const pending = pendingOf(copy.content)
+      const chatId = copy.refId.slice(COPIES.length) as ChatId
+      const draftId = copy.field.split(" ")[0]!
+      if (pending === null) {
+        void dropCopy(this.userId, copy.refId, copy.field, copy.content)
+        continue
+      }
+      const { text, ...base } = pending
+      const saved = await this.session.call((client) =>
+        client("SaveComposer", { chatId, draftId, ...base, content: text })
+      )
+      if (!saved.ok && saved.error.tag !== "NotFound") {
+        if (draftId === opened.id) unsent = text
+        continue
+      }
+      void dropCopy(this.userId, copy.refId, copy.field, copy.content)
+      if (!saved.ok) continue
+      const now = saved.value.draft
+      if (now?.id === opened.id) {
+        restored ||= shown(now) !== shown(draft)
+        draft = now
+      }
+      recovered ||= saved.value.recovered && chatId === this.chatId
+    }
+    return { draft, restored: restored || unsent !== null, recovered, unsent }
   }
 
   /**
@@ -191,9 +280,6 @@ export class ComposerDraft {
   private rebase(draft: Draft) {
     if (this.held || this.draft === null) return
     if (this.dirty) return this.schedule(0)
-    if (draft.key.field !== this.draft.key.field) {
-      void dropCopy(this.userId, copyTarget(this.chatId), this.draft.key.field, this.text)
-    }
     this.draft = draft
     this.text = shown(draft)
   }
@@ -207,7 +293,7 @@ export class ComposerDraft {
 
   type(text: string) {
     this.text = text
-    if (this.draft !== null) void keepCopy(this.userId, copyTarget(this.chatId), this.field, text)
+    this.keep(text)
     this.emit()
     this.schedule(SAVE_DELAY_MS)
   }
@@ -254,7 +340,7 @@ export class ComposerDraft {
       this.emit()
       return
     }
-    void dropCopy(this.userId, copyTarget(this.chatId), draft.key.field, text)
+    this.drop(text, draft)
     this.error = null
     const now = saved.value.draft
     if (!saved.value.recovered && now !== null) {
@@ -293,50 +379,60 @@ export class ComposerDraft {
     const from = this.draft
     if (from === null || this.held) return Promise.resolve()
     const text = this.text
+    const sending = { text, from, saved: text === shown(from) }
     this.cancelTimer()
     this.held = true
+    this.sending = sending
     this.text = ""
     this.emit()
     return this.enqueue(async () => {
       let saved = from
-      if (text !== shown(from)) {
+      if (!sending.saved) {
         const result = await this.request(from, text)
         if (!result.ok || result.value.recovered || result.value.draft === null) {
           if (!result.ok) this.error = result.error
           return this.giveBack(text, result.ok ? (result.value.draft ?? from) : from)
         }
         saved = result.value.draft
+        sending.saved = true
       }
       const outcome = await run(text, saved)
       if (!outcome.sent) return this.giveBack(text, saved)
+      const next = this.text
       this.held = false
-      void dropCopy(this.userId, copyTarget(this.chatId), from.key.field, text)
+      this.sending = null
+      this.drop(text, from)
+      this.drop(next, from, true)
       const after = outcome.draft ?? (await this.reopen())
       if (after !== null && after.session !== saved.session) this.draft = after
-      else if (after !== null && this.text === "") {
+      else if (after !== null && next === "") {
         // Not committed: another tab typed on before the send arrived. Its text shows.
         this.draft = after
         this.text = shown(after)
       }
       // Otherwise what's typed since goes on top of that tab's text, theirs one step back.
       else this.draft = saved
-      // What's typed since is filed where its draft is now.
-      if (this.dirty && this.field !== from.key.field) {
-        void dropCopy(this.userId, copyTarget(this.chatId), from.key.field, this.text)
-        void keepCopy(this.userId, copyTarget(this.chatId), this.field, this.text)
+      if (this.dirty) {
+        this.keep(this.text)
+        this.schedule(SAVE_DELAY_MS)
       }
       this.emit()
-      if (this.dirty) this.schedule(SAVE_DELAY_MS)
     })
   }
 
   /** The text of a send that didn't go, back in the box ahead of what's typed since, on `draft`. */
   private giveBack(text: string, draft: Draft) {
+    const next = this.text
     this.held = false
+    this.sending = null
+    this.drop(next, this.draft!, true)
     this.draft = draft
-    this.text = this.text === "" ? text : `${text}\n\n${this.text}`
+    this.text = next === "" ? text : `${text}\n\n${next}`
     this.emit()
-    if (this.dirty) this.schedule(0)
+    if (this.dirty) {
+      this.keep(this.text)
+      this.schedule(0)
+    }
   }
 
   // --- Undo from the server's history
@@ -386,21 +482,37 @@ export class ComposerDraft {
 
   /**
    * As the page goes: what's typed and not saved yet, in a request that outlives the page,
-   * with the editors' (POST /library/drafts). Past the browsers' 64 KB cap for such a
-   * request, or while a send is out (the box then holds the next message, for a draft the
-   * send hasn't committed yet), only the copy in this browser keeps the text.
+   * with the editors' (POST /library/drafts). While a send is out, that's its text if the
+   * server hasn't confirmed it, and the next message (`next`): the server puts it in the
+   * session the send ends, or on top of the text the send would take if it never arrives.
+   * Past the browsers' 64 KB cap for such a request, only the copy in this browser keeps
+   * the text.
    */
   beacon() {
     const draft = this.draft
-    if (draft === null || this.held || !this.dirty || this.sent === this.text) return
-    const text = this.text
+    if (draft === null) return
+    const sending = this.sending
+    const saves: Array<{ readonly on: Draft; readonly text: string; readonly next: boolean }> =
+      sending === null
+        ? this.dirty
+          ? [{ on: draft, text: this.text, next: false }]
+          : []
+        : [
+            ...(sending.saved ? [] : [{ on: sending.from, text: sending.text, next: false }]),
+            ...(this.text === "" ? [] : [{ on: sending.from, text: this.text, next: true }])
+          ]
     const body = JSON.stringify({
       drafts: [],
-      composers: [
-        { chatId: this.chatId, draftId: draft.id, rowVersion: draft.rowVersion, session: draft.session, content: text }
-      ]
+      composers: saves.map(({ on, text, next }) => ({
+        chatId: this.chatId,
+        draftId: on.id,
+        rowVersion: on.rowVersion,
+        session: on.session,
+        next,
+        content: text
+      }))
     })
-    if (new Blob([body]).size > KEEPALIVE_LIMIT) return
+    if (saves.length === 0 || this.sent === body || new Blob([body]).size > KEEPALIVE_LIMIT) return
     void fetch("/library/drafts", {
       method: "POST",
       keepalive: true,
@@ -409,8 +521,8 @@ export class ComposerDraft {
     }).then(
       (response) => {
         if (!response.ok) return
-        this.sent = text
-        void dropCopy(this.userId, copyTarget(this.chatId), draft.key.field, text)
+        this.sent = body
+        for (const { on, text, next } of saves) this.drop(text, on, next)
       },
       () => undefined
     )

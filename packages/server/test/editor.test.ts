@@ -11,7 +11,7 @@ import type { RefId } from "@rp/shared/library.ts"
 import { Effect, Exit, Schema } from "effect"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { chunk, png, stCardV2 } from "./formats/support.ts"
-import { client, outcome, serverLayer, serverPort, testConfig } from "./support/config.ts"
+import { client, outcome, post, serverLayer, serverPort, testConfig } from "./support/config.ts"
 
 const config = testConfig()
 
@@ -487,6 +487,42 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
         (yield* Effect.promise(() => fetch(`${url}/library/media?id=${card.headRevisionId}`))).status,
         404
       )
+    })
+  )
+
+  it.effect("another tab's field text a stale save goes over is kept, live or as a page closes", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const recovered = () =>
+        Effect.flatMap(api.ListRecoveredTexts({ limit: 100, before: null }), (texts) =>
+          Effect.forEach(texts, (text) => Effect.map(api.GetRecoveredText({ id: text.id }), (full) => full.content))
+        )
+      for (const kind of ["card", "preset"] as const) {
+        for (const closing of [false, true]) {
+          const refId =
+            kind === "card"
+              ? (yield* api.CreateCard({ label: "Two tabs", name: "Two tabs" })).id
+              : (yield* importPreset(preset("default"))).ref.id
+          const field =
+            kind === "card" ? textField(["description"]) : textField(["prompts", "identifier=main", "content"])
+          const mine = yield* draft(api, refId, field, `${kind} hello`)
+          // The other tab read that, and typed on within the time typing coalesces...
+          yield* draft(api, refId, field, `${kind} hello B${closing ? " closing" : ""}`)
+          // ...and this tab, which hadn't seen it, saves its own.
+          const stale = {
+            refId,
+            field,
+            content: `${kind} hello A`,
+            expectedRowVersion: mine.rowVersion,
+            expectedSession: mine.session,
+            baseRevisionId: null
+          }
+          if (closing) assert.strictEqual((yield* post("/library/drafts", { drafts: [stale] })).status, 204)
+          else yield* api.SaveEditorDraft(stale)
+          yield* commit(api, refId)
+          assert.include(yield* recovered(), `${kind} hello B${closing ? " closing" : ""}`)
+        }
+      }
     })
   )
 

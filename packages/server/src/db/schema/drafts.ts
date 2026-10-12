@@ -40,7 +40,16 @@ export const draftHistory = [
     BEGIN DELETE FROM drafts WHERE target_kind = 'entity_field' AND target_id = OLD.id; END`
 ]
 
-// Migration 0013: a draft's drafting session, counted up each time one ends (committed or
-// discarded). A save names the session its text was typed in, so text typed into a session
-// that ended since is never taken as the start of the next (ARCHITECTURE §3.10).
-export const draftSessions = [`ALTER TABLE drafts ADD COLUMN session INTEGER NOT NULL DEFAULT 1`]
+// Migration 0013: what a save needs to decide a conflict on its own (ARCHITECTURE §3.10).
+// - `session` counts drafting sessions, up each time one ends (committed or discarded): text
+//   typed in a session that has ended is never taken as the start of the next.
+// - `text_version` is the row version the text last changed at. Moving a composer with its
+//   tip changes the row version, not the text, so only a save since is another tab's.
+// - `displaced` marks a history entry saved over another tab's text: the text before it goes
+//   to the recovered texts when the session ends or the entry is dropped, whatever its size.
+export const draftSessions = [
+  `ALTER TABLE drafts ADD COLUMN session INTEGER NOT NULL DEFAULT 1`,
+  `ALTER TABLE drafts ADD COLUMN text_version INTEGER NOT NULL DEFAULT 1`,
+  `UPDATE drafts SET text_version = row_version`,
+  `ALTER TABLE draft_history ADD COLUMN displaced INTEGER NOT NULL DEFAULT 0 CHECK (displaced IN (0, 1))`
+]

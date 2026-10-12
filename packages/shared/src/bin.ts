@@ -29,8 +29,9 @@ export class RecoveredText extends Schema.Class<RecoveredText>("RecoveredText")(
   /** Where it was typed, e.g. "Mira › description" or "Composer in Harbor". */
   sourceLabel: Schema.String,
   /**
-   * commit: from before a destructive change, saved when the session was committed or when
-   * history retention dropped the change; discard: a discarded draft.
+   * commit: from before a destructive change or another tab's save gone over, saved when the
+   * session was committed or when history retention dropped the change; discard: a
+   * discarded draft, or text saved after its draft was sent.
    */
   reason: Schema.Literals(["commit", "discard"]),
   /** The full text for a single read; an excerpt in lists. */

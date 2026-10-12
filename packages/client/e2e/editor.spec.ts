@@ -139,6 +139,40 @@ test("undo brings a field's text back after select-all and a stray key", async (
   await expect(states.first()).toContainText("Restored.")
 })
 
+test("a field another tab typed on meanwhile keeps that tab's text, recovered once saved", async ({ page }) => {
+  const refId = (await savedCard("Two tabs", {})) as RefId
+  await open(page, refId)
+  const greeting = field(page, "First message")
+  await greeting.fill("hello")
+  await kept(page)
+  // Another tab, which saw "hello", types on.
+  await admin((api) =>
+    Effect.gen(function* () {
+      const opened = yield* api.OpenEditor({ refId })
+      const draft = opened.drafts.find((d) => d.status === "active")!
+      yield* api.SaveEditorDraft({
+        refId,
+        field: draft.key.field,
+        content: "hello from the other tab",
+        expectedRowVersion: draft.rowVersion,
+        expectedSession: draft.session,
+        baseRevisionId: null
+      })
+    })
+  )
+  await greeting.fill("hello from this tab")
+  await kept(page)
+  await page.getByRole("button", { name: "Save (1)" }).click()
+  await page.getByRole("dialog", { name: "Save a revision" }).getByRole("button", { name: "Save revision" }).click()
+  await expect(state(page)).toHaveText("Everything is saved.")
+  const recovered = await admin((api) =>
+    Effect.flatMap(api.ListRecoveredTexts({ limit: 10, before: null }), (texts) =>
+      Effect.succeed(texts.map((t) => t.content))
+    )
+  )
+  expect(recovered).toContain("hello from the other tab")
+})
+
 test("an earlier revision restores as a new one", async ({ page }) => {
   const refId = await savedCard("Restore", { scenario: "A storm." })
   await admin((api) =>

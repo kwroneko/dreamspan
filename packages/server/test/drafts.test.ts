@@ -81,24 +81,67 @@ const setup = (handle = "ana") =>
   })
 
 describe("drafts", () => {
-  it.live("the first save creates the draft; later saves from a stale tab are refused", () =>
+  it.live("a stale tab's save goes on top; the text it went over is kept, past the commit", () =>
+    Effect.gen(function* () {
+      const { writer, reader, userId, composer, type, send } = yield* setup()
+      const first = yield* type("Hello")
+      yield* type("Hello from tab A") // the next save, coalesced with the first
+      // Tab B saw only "Hello".
+      const stale = yield* writer.SaveDraft({
+        userId,
+        key: composer(),
+        content: "Hello from tab B",
+        expectedRowVersion: first.rowVersion,
+        expectedSession: first.session,
+        baseRevision: null
+      })
+      assert.strictEqual(stale.content, "Hello from tab B")
+      const [, before] = yield* reader.DraftHistory({ userId, key: composer(), limit: 10 })
+      assert.strictEqual(
+        (yield* reader.GetDraftState({ userId, key: composer(), seq: before!.seq })).content,
+        "Hello from tab A"
+      )
+      yield* send("Hello from tab B", stale.rowVersion)
+      const texts = yield* reader.ListRecoveredTexts({ userId, source: null, limit: 10, before: null })
+      assert.deepStrictEqual(
+        texts.map((t) => [t.reason, t.content]),
+        [["commit", "Hello from tab A"]]
+      )
+    }).pipe(Effect.provide(database()))
+  )
+
+  it.live("history retention keeps the text another tab's save went over", () =>
     Effect.gen(function* () {
       const { writer, reader, userId, composer, type } = yield* setup()
-      const first = yield* type("Hel")
-      assert.strictEqual(first.status, "active")
-      yield* type("Hello")
-
-      const stale = yield* writer
-        .SaveDraft({
+      const first = yield* type("Hello")
+      yield* type("Hello from tab A")
+      yield* writer.SaveDraft({
+        userId,
+        key: composer(),
+        content: "Hello from tab B",
+        expectedRowVersion: first.rowVersion,
+        expectedSession: first.session,
+        baseRevision: null
+      })
+      // Two more saves from tabs that hadn't seen the last, each its own entry, past the
+      // history's 1,000,000-character budget: the entries before them go, and nothing
+      // destructive is among them.
+      const stale = (content: string) =>
+        writer.SaveDraft({
           userId,
           key: composer(),
-          content: "Hello from tab B",
+          content,
           expectedRowVersion: first.rowVersion,
+          expectedSession: first.session,
           baseRevision: null
         })
-        .pipe(Effect.flip)
-      assert.strictEqual(stale._tag, "StaleWrite")
-      assert.strictEqual((yield* reader.GetDraft({ userId, key: composer() }))!.content, "Hello")
+      yield* stale("x".repeat(600_000))
+      yield* stale("x".repeat(600_000) + "y".repeat(400_000))
+      const texts = yield* reader.ListRecoveredTexts({ userId, source: null, limit: 10, before: null })
+      assert.include(
+        texts.map((t) => t.content),
+        "Hello from tab A"
+      )
     }).pipe(Effect.provide(database()))
   )
 

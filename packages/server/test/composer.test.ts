@@ -57,7 +57,7 @@ describe("the composer's drafts", () => {
     }).pipe(Effect.scoped, withServer(testConfig()))
   )
 
-  it.live("keeps another tab's text one step back when a stale tab saves over it", () =>
+  it.live("keeps another tab's text when a stale tab saves over it: one step back, then recovered", () =>
     Effect.gen(function* () {
       const api = yield* client()
       const chat = yield* api.CreateChat({ title: "Two tabs" })
@@ -74,7 +74,23 @@ describe("the composer's drafts", () => {
         content: "hello A"
       })
       assert.deepStrictEqual([saved.draft?.content, saved.recovered], ["hello A", false])
-      assert.include(yield* states(api, chat.id, null), "hello B")
+      const [, before] = yield* api.ComposerHistory({ chatId: chat.id, draftId: hello.id, limit: 10 })
+      assert.strictEqual(before?.length, "hello B".length)
+      // The history ends with the send; that text doesn't, however short.
+      yield* posted(
+        api.SendMessage({
+          chatId: chat.id,
+          parentSlotId: null,
+          branch: false,
+          content: "hello A",
+          composerRowVersion: saved.draft!.rowVersion
+        })
+      )
+      const recovered = yield* api.ListRecoveredTexts({ limit: 10, before: null })
+      assert.deepStrictEqual(
+        recovered.map((text) => text.content),
+        ["hello B"]
+      )
     }).pipe(Effect.scoped, withServer(testConfig()))
   )
 
@@ -165,6 +181,50 @@ describe("the composer's drafts", () => {
       Effect.scoped,
       Effect.provide(serverLayer(testConfig(), FakeGenerator.layer({ tokensPerSecond: 5, tokens: 20_000 })))
     )
+  )
+
+  it.live("puts text typed after a send in the session the send ends, or on top if it never arrived", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const chat = yield* api.CreateChat({ title: "Next" })
+      const next = (from: Draft, content: string) =>
+        post("/library/drafts", {
+          drafts: [],
+          composers: [
+            {
+              chatId: chat.id,
+              draftId: from.id,
+              rowVersion: from.rowVersion,
+              session: from.session,
+              next: true,
+              content
+            }
+          ]
+        })
+      // The send never arrived: the next text goes on top, the unsent one kept.
+      const unsent = yield* typeInto(api, chat.id, null, "never sent")
+      assert.strictEqual((yield* next(unsent, "typed after")).status, 204)
+      const kept = yield* open(api, chat.id, null)
+      assert.strictEqual(kept.content, "typed after")
+      // The send arrived: the next text starts the session after it.
+      const sent = yield* posted(
+        api.SendMessage({
+          chatId: chat.id,
+          parentSlotId: null,
+          branch: false,
+          content: "typed after",
+          composerRowVersion: kept.rowVersion
+        })
+      )
+      assert.strictEqual((yield* next(kept, "the message after")).status, 204)
+      const after = yield* open(api, chat.id, sent.entry.slotId)
+      assert.deepStrictEqual([after.status, after.content], ["active", "the message after"])
+      const recovered = yield* api.ListRecoveredTexts({ limit: 10, before: null })
+      assert.deepStrictEqual(
+        recovered.map((text) => text.content),
+        ["never sent"]
+      )
+    }).pipe(Effect.scoped, withServer(testConfig()))
   )
 
   it.live("takes a closing page's text with the editors' drafts, onto the draft it was typed into", () =>

@@ -2,7 +2,8 @@
 // (IndexedDB), written as the user types and removed once the server has the text. A page
 // that closes before its save and its keepalive request (capped at 64 KB) leaves the copy,
 // and the editor brings it back on the next open. A chat's composer keeps its copies here
-// too (chat/composerDraft.ts), filed under `composer:<chat>` with the branch tip as the field.
+// too (chat/composerDraft.ts), filed under `composer:<chat>` with its draft's id as the field
+// and the save they stand for as the content.
 //
 // It's a recovery copy, not a secure store: it's plain text in the browser profile, so
 // anyone with that profile can read what a user typed and didn't send while the copy lasts.
@@ -101,6 +102,13 @@ export const dropCopy = (userId: string, refId: string, field: string, content: 
 export const copiesOf = async (userId: string, refId: string): Promise<ReadonlyArray<Copy>> => {
   const copies: Array<Copy> = []
   await run("readonly", (store) => forEach(store, "ref", [userId, refId], (copy) => copies.push(copy)))
+  return copies
+}
+
+/** All the user's copies. */
+export const copiesOfUser = async (userId: string): Promise<ReadonlyArray<Copy>> => {
+  const copies: Array<Copy> = []
+  await run("readonly", (store) => forEach(store, "userId", userId, (copy) => copies.push(copy)))
   return copies
 }
 

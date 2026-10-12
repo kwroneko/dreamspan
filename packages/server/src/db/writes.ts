@@ -79,9 +79,16 @@ export const makeWriteHandlers = (bin: Bin) =>
           return toChat(row!)
         }).pipe(transaction("CreateChat")),
 
-      SaveDraft: ({ userId, key, content, expectedRowVersion, baseRevision }) =>
+      SaveDraft: ({ userId, key, content, expectedRowVersion, expectedSession, baseRevision }) =>
         drafts
-          .save({ userId, key, content, expectedRowVersion, baseRevision, checkTarget: draftTarget(userId, key) })
+          .save({
+            userId,
+            key,
+            content,
+            base: expectedRowVersion === null ? null : { rowVersion: expectedRowVersion, session: expectedSession },
+            baseRevision,
+            checkTarget: draftTarget(userId, key)
+          })
           .pipe(transaction("SaveDraft")),
 
       OpenComposer: ({ userId, chatId, tipSlotId, copyFrom }) =>
@@ -93,7 +100,7 @@ export const makeWriteHandlers = (bin: Bin) =>
         }).pipe(transaction("OpenComposer")),
 
       // Into a chat of the user's, live or in the bin: text typed as it was deleted is kept too.
-      SaveComposer: ({ userId, chatId, draftId, rowVersion, session, content }) =>
+      SaveComposer: ({ userId, chatId, draftId, rowVersion, session, next, content }) =>
         Effect.gen(function* () {
           yield* found(
             Effect.orDie(
@@ -102,7 +109,7 @@ export const makeWriteHandlers = (bin: Bin) =>
             "chat",
             chatId
           )
-          return yield* drafts.saveComposer(userId, chatId, { draftId, rowVersion, session }, content)
+          return yield* drafts.saveComposer(userId, chatId, { draftId, rowVersion, session, next }, content)
         }).pipe(transaction("SaveComposer")),
 
       RestoreComposer: ({ userId, chatId, draftId, seq, expectedRowVersion }) =>

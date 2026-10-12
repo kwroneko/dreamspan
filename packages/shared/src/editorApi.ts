@@ -84,7 +84,12 @@ export class EditorApi extends RpcGroup.make(
     payload: {
       ...DraftField,
       content: Schema.String,
+      /**
+       * The draft as last seen (null: none was), with its session. Another tab's save since
+       * is decided on the server: this text goes on top, theirs one step back and kept.
+       */
       expectedRowVersion: Schema.NullOr(Schema.Int),
+      expectedSession: Schema.optionalKey(Schema.Int),
       baseRevisionId: Schema.NullOr(RevisionId)
     },
     success: Draft,

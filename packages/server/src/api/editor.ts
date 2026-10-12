@@ -90,7 +90,7 @@ export const makeEditorHandlers = Effect.gen(function* () {
         return ref
       }).pipe(settle("CreateCard")),
 
-    SaveEditorDraft: ({ refId, field, content, expectedRowVersion, baseRevisionId }) =>
+    SaveEditorDraft: ({ refId, field, content, expectedRowVersion, expectedSession, baseRevisionId }) =>
       Effect.gen(function* () {
         yield* checkField(field)
         return yield* writer.SaveDraft({
@@ -98,6 +98,7 @@ export const makeEditorHandlers = Effect.gen(function* () {
           key: draftKey(refId, field),
           content,
           expectedRowVersion,
+          ...(expectedSession === undefined ? {} : { expectedSession }),
           baseRevision: baseRevisionId
         })
       }).pipe(settle("SaveEditorDraft")),

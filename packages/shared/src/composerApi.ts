@@ -29,6 +29,11 @@ export const ComposerBeacon = Schema.Struct({
   draftId: Schema.String,
   rowVersion: Schema.Int,
   session: Schema.Int,
+  /**
+   * Typed after a send of this session that may not have arrived (a page closing while it
+   * was out): it starts the session that send ends, or goes on top of the text it takes.
+   */
+  next: Schema.optionalKey(Schema.Boolean),
   content: Schema.String
 })
 
