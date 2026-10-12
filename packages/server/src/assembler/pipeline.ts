@@ -2,6 +2,7 @@
 import type { FoldableEvent, ChatState } from "@rp/shared/state.ts"
 import type { FrozenValues, MacroLookup } from "@rp/shared/macros/expand.ts"
 import type { VariableEffect } from "@rp/shared/macros/variables.ts"
+import type { NoteDoc } from "@rp/shared/docs/note.ts"
 import type { NotFound } from "@rp/shared/errors.ts"
 import { Context, Effect } from "effect"
 import type { SqlError } from "effect/sql"
@@ -71,6 +72,17 @@ export class AssemblySources extends Context.Service<
       cards: ReadonlyArray<string>,
       bound: Readonly<Record<string, string>>
     ) => Effect.Effect<ReadonlyArray<NoteInput>, SourceError>
+    /** A note's revisions from `revision` back along its first parents, newest first, at most `limit`. */
+    readonly noteHistory: (
+      entity: string,
+      revision: string,
+      limit: number
+    ) => Effect.Effect<ReadonlyArray<{ readonly revision: string; readonly doc: NoteDoc }>, SourceError>
+    /** Which of `slots` are on the path from the chat's first message to `leaf`. */
+    readonly onPath: (
+      leaf: string | null,
+      slots: ReadonlyArray<string>
+    ) => Effect.Effect<ReadonlySet<string>, SourceError>
     /** The model `binding` names, else the user's default; null when there's neither. */
     readonly model: (
       binding: { readonly connection: string; readonly model: string } | null

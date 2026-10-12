@@ -238,6 +238,8 @@ export const StImportNote = Schema.Struct({
   title: Schema.String,
   /** Its texts, oldest first, as the note's revisions; the last is current. */
   contents: Schema.NonEmptyArray(Schema.String),
+  /** For a summary, the message each text was saved on, in the same order, where it's known. */
+  sources: Schema.optionalKey(Schema.Array(Schema.NullOr(SlotId))),
   placement: NoteDoc.fields.placement,
   interval: Schema.optionalKey(Schema.Int),
   template: Schema.optionalKey(Schema.String),

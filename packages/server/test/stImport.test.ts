@@ -4,11 +4,12 @@
 // probes are in isolation.test.ts.
 import { DatabaseSync } from "node:sqlite"
 import { assert, describe, layer } from "@effect/vitest"
-import type { ChatId, SlotId } from "@rp/shared/chat.ts"
+import { type ChatId, NewVersion, type SlotId } from "@rp/shared/chat.ts"
 import { foldState } from "@rp/shared/state.ts"
 import { Effect, Stream } from "effect"
 import { databaseFile } from "../src/db/connection.ts"
-import { Reader } from "../src/db/Database.ts"
+import type { ContextSnapshot } from "../src/assembler/types.ts"
+import { Reader, Writer } from "../src/db/Database.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"
 import { ALICE_MAIN, largeChat, stFolder } from "./support/stFolder.ts"
 import { importStFolder, sendFile, sendStFile } from "./support/stUpload.ts"
@@ -217,9 +218,52 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
         exportable: true,
         kind: "imported_summary",
         template: "[Story so far: {{summary}}]",
-        covers: { first_slot_id: bobSlots[0]!.id, last_slot_id: bobSlots[14]!.id, slot_count: 15 }
+        covers: { first_slot_id: bobSlots[0]!.id, last_slot_id: bobSlots[14]!.id, slot_count: 15 },
+        source_slot_id: bobSlots[14]!.id
       })
       assert.include((yield* stateAt(bob, null)).activeNotes, summary!.id)
+
+      // Assembled, it sends what ST would on each path: at the end, the latest summary; on a
+      // branch from before it, the one saved by then.
+      const writer = yield* Writer
+      const reader = yield* Reader
+      const userId = (yield* api.Whoami()).id
+      const sentAfter = (parentSlotId: SlotId) =>
+        Effect.gen(function* () {
+          const target = yield* writer.AppendMessage({
+            userId,
+            chatId: bob,
+            parentSlotId,
+            branch: true,
+            version: new NewVersion({
+              speakerEntityId: null,
+              writer: "model",
+              content: "",
+              status: "generating",
+              macroMode: "verbatim",
+              origin: "generated"
+            }),
+            commitDraft: null
+          })
+          const { snapshot } = yield* reader.AssembleContext({
+            userId,
+            chatId: bob,
+            slotId: target.slotId,
+            versionId: target.version.id,
+            now: Date.UTC(2026, 0, 1),
+            timeZone: "UTC",
+            frozen: null
+          })
+          return (JSON.parse(snapshot) as ContextSnapshot).request.messages.map((m) => m.content).join("\n")
+        })
+      const atEnd = yield* sentAfter(bobSlots.at(-1)!.id)
+      assert.include(atEnd, "[Story so far: Bob and Sam met, then argued.]")
+      assert.notInclude(atEnd, "On the last message")
+      const early = yield* sentAfter(bobSlots[7]!.id)
+      assert.notInclude(early, "then argued")
+      assert.include(early, "[Story so far: Bob and Sam met.]")
+      // Before the first, there's none to send.
+      assert.notInclude(yield* sentAfter(bobSlots[6]!.id), "Story so far")
       assert.strictEqual(report.summaries, 2)
 
       // Mira's card file was renamed: linked by her name. Her summary covers no hidden run,

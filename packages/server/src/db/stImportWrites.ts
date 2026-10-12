@@ -125,7 +125,8 @@ export const makeStImportWriteHandlers = Effect.gen(function* () {
           kind: note.kind,
           ...(note.interval === undefined || !current ? {} : { interval: note.interval }),
           ...(note.template === undefined || !current ? {} : { template: note.template }),
-          ...(note.covers === undefined || !current ? {} : { covers: note.covers })
+          ...(note.covers === undefined || !current ? {} : { covers: note.covers }),
+          ...(note.sources?.[index] ? { source_slot_id: note.sources[index] } : {})
         }
         const check = validateDoc("note", doc)
         if (!check.ok)

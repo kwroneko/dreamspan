@@ -1,5 +1,6 @@
 // The built-in assembler stages, in registration order (ARCHITECTURE §15 lists them).
 import type { ChatMessage } from "@rp/shared/macros/context.ts"
+import type { NoteDoc } from "@rp/shared/docs/note.ts"
 import type { CardFields } from "@rp/shared/macros/context.ts"
 import type { VariableEffect } from "@rp/shared/macros/variables.ts"
 import { type ChatState, foldState } from "@rp/shared/state.ts"
@@ -45,6 +46,7 @@ import {
   type HistoryEntry,
   type NoteInput,
   noteCard,
+  type Target,
   type Role,
   type Source
 } from "./types.ts"
@@ -199,6 +201,34 @@ const activeNotes = (events: Iterable<PositionedEvent>, notes: ReadonlyArray<Not
   return notes.filter((note) => last.get(note.entity) ?? note.first)
 }
 
+/** How many of a summary's revisions are looked through for one on the path. */
+const SUMMARY_HISTORY = 1_000
+
+/**
+ * An imported summary as ST would send it on this path: the newest of its texts saved on a
+ * message of the path, up to the leaf (DATA-MODEL §15, invariant 5); none when the path has
+ * none of them. A text with no message (one the user wrote) applies anywhere. The
+ * template and placement are the current revision's, which alone keeps them.
+ */
+const summaryOnPath = (notes: ReadonlyArray<NoteInput>, target: Target) =>
+  Effect.gen(function* () {
+    const sources = yield* AssemblySources
+    const leaf = target.parentSlotId
+    const placed = yield* Effect.forEach(notes, (note) =>
+      Effect.gen(function* () {
+        if (note.doc.kind !== "imported_summary" || note.doc.source_slot_id === undefined) return [note]
+        const history = yield* sources.noteHistory(note.entity, note.revision, SUMMARY_HISTORY)
+        const saved = [...new Set(history.flatMap((r) => (r.doc.source_slot_id ? [r.doc.source_slot_id] : [])))]
+        const onPath = yield* sources.onPath(leaf, saved)
+        const found = history.find(({ doc }) => doc.source_slot_id === undefined || onPath.has(doc.source_slot_id))
+        if (!found) return []
+        const doc: NoteDoc = { ...note.doc, content: found.doc.content }
+        return [{ ...note, revision: found.revision, doc }]
+      })
+    )
+    return placed.flat()
+  })
+
 const notesStage: AssemblerStage = {
   id: "notes",
   run: (assembly) =>
@@ -210,7 +240,7 @@ const notesStage: AssemblerStage = {
         cast.characters.map((c) => c.entity),
         state.noteRevisions
       )
-      assembly.notes = activeNotes(need(assembly, "events"), notes)
+      assembly.notes = yield* summaryOnPath(activeNotes(need(assembly, "events"), notes), need(assembly, "target"))
       return assembly
     })
 }

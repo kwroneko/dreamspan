@@ -76,6 +76,11 @@ export const NoteDoc = Schema.Struct({
    * [P] The run of messages hidden from the chat's first message that the summary covers
    * (DESIGN §8.1), so LCM can adopt it as the L1 summary of that range once it's enabled.
    */
-  covers: Schema.optionalKey(Schema.Struct({ first_slot_id: SlotId, last_slot_id: SlotId, slot_count: Schema.Int }))
+  covers: Schema.optionalKey(Schema.Struct({ first_slot_id: SlotId, last_slot_id: SlotId, slot_count: Schema.Int })),
+  /**
+   * [P] For an imported summary, the message ST saved this text on (`extra.memory`): ST sends
+   * the latest one on the chat before its last message, so it applies on paths through it.
+   */
+  source_slot_id: Schema.optionalKey(SlotId)
 })
 export type NoteDoc = typeof NoteDoc.Type

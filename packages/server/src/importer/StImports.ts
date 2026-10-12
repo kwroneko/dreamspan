@@ -164,7 +164,8 @@ interface ChatProgress {
   hiddenRun: number
   runOpen: boolean
   throughSlot: SlotId | null
-  readonly summaries: Array<{ index: number; text: string }>
+  /** Each with the slot of the message it was saved on, once that message is written. */
+  readonly summaries: Array<{ index: number; text: string; slot?: SlotId }>
   /** The budget the summaries hold, given back when the chat is done. */
   summaryChars: number
   readonly spoke: Set<EntityId>
@@ -520,6 +521,10 @@ export class StImports extends Context.Service<
             progress.atEnd = slotId === progress.prevEnd
           }
           progress.firstSlot ??= written.slotIds[0] ?? null
+          for (const summary of progress.summaries) {
+            const at = summary.index - progress.written
+            if (at >= 0 && at < written.slotIds.length) summary.slot = written.slotIds[at]!
+          }
           const lastHidden = progress.hiddenRun - 1
           if (lastHidden >= progress.written && lastHidden < progress.written + written.slotIds.length) {
             progress.throughSlot = written.slotIds[lastHidden - progress.written]!

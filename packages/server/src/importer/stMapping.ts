@@ -230,7 +230,7 @@ export interface HiddenRun {
  */
 const summaryOf = (
   folder: FolderContext,
-  summaries: ReadonlyArray<{ readonly index: number; readonly text: string }>,
+  summaries: ReadonlyArray<{ readonly index: number; readonly text: string; readonly slot?: SlotId | undefined }>,
   messages: number,
   run: HiddenRun
 ) => {
@@ -238,15 +238,22 @@ const summaryOf = (
   const current = usable.at(-1)
   if (current === undefined) return null
   const history: Array<string> = [current.text]
+  // Where each text was saved: the earliest of a run of the same text, which ST would find
+  // on any path through it.
+  const sources: Array<SlotId | null> = [current.slot ?? null]
   let chars = 0
   let trimmed = false
   for (const summary of usable.toReversed()) {
-    if (summary.text === history[0]) continue
+    if (summary.text === history[0]) {
+      sources[0] = summary.slot ?? null
+      continue
+    }
     if (history.length >= MAX_SUMMARY_REVISIONS || chars + summary.text.length > MAX_SUMMARY_HISTORY_CHARS) {
       trimmed = true
       break
     }
     history.unshift(summary.text)
+    sources.unshift(summary.slot ?? null)
     chars += summary.text.length
   }
   const { position, depth, role, template, enabled } = folder.settings?.summary ?? DEFAULT_SUMMARY_SETTINGS
@@ -261,6 +268,7 @@ const summaryOf = (
     kind: "imported_summary",
     title: "Summary",
     contents: history as [string, ...Array<string>],
+    ...(sources.some((s) => s !== null) ? { sources } : {}),
     placement: placementOf(position, depth, role),
     template,
     ...(covers ? { covers } : {}),
@@ -276,7 +284,11 @@ export const chatStateChange = (
     readonly link: Link
     readonly header: StChatHeader | null
     readonly spoke: ReadonlySet<EntityId>
-    readonly summaries: ReadonlyArray<{ readonly index: number; readonly text: string }>
+    readonly summaries: ReadonlyArray<{
+      readonly index: number
+      readonly text: string
+      readonly slot?: SlotId | undefined
+    }>
     readonly messages: number
     readonly run: HiddenRun
   },

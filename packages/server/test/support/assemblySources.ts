@@ -1,6 +1,7 @@
 // The assembler's sources over an in-memory chat, for tests and the ST harness: the same
 // pipeline the reader worker runs, without a database.
 import type { CardDoc } from "@rp/shared/docs/card.ts"
+import type { NoteDoc } from "@rp/shared/docs/note.ts"
 import type { PresetDoc } from "@rp/shared/docs/preset.ts"
 import type { FoldableEvent } from "@rp/shared/state.ts"
 import { Effect, Layer, Scope } from "effect"
@@ -37,6 +38,8 @@ export interface AssemblyFixture {
   /** More events, by the depth of the message they follow (null: the chat's start). */
   readonly events?: ReadonlyArray<PositionedEvent>
   readonly notes?: ReadonlyArray<NoteInput>
+  /** A note's earlier revisions, newest first, by note: its history before the revision it's at. */
+  readonly noteRevisions?: Readonly<Record<string, ReadonlyArray<{ readonly revision: string; readonly doc: NoteDoc }>>>
   readonly preset: PresetDoc
   readonly model?: ModelInput | null
   readonly now?: number
@@ -98,6 +101,23 @@ const fixtureSources = (fixture: AssemblyFixture) => {
           return card === null || cards.includes(card)
         })
       ),
+    noteHistory: (entity, revision, limit) =>
+      Effect.sync(() => {
+        const note = (fixture.notes ?? []).find((n) => n.entity === entity)
+        const chain = [
+          ...(note ? [{ revision: note.revision, doc: note.doc }] : []),
+          ...(fixture.noteRevisions?.[entity] ?? [])
+        ]
+        const from = chain.findIndex((r) => r.revision === revision)
+        return from === -1 ? [] : chain.slice(from, from + limit)
+      }),
+    // The path is slot-0 to the leaf; any other id is off it.
+    onPath: (leaf, slots) =>
+      Effect.sync(() => {
+        const at = (slot: string) => entries.findIndex((e) => e.slotId === slot)
+        const end = leaf === null ? -1 : at(leaf)
+        return new Set(slots.filter((slot) => at(slot) !== -1 && at(slot) <= end))
+      }),
     model: () => Effect.succeed(fixture.model ?? null),
     preset: () => Effect.succeed({ ref: "ref-preset", revision: "rev-preset", scope: "chat", doc: fixture.preset })
   })
