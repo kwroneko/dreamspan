@@ -1,15 +1,14 @@
+import { tokensOf } from "../assembler/st.ts"
 // The request inspector's reads (DESIGN §7.4; ARCHITECTURE §15): a version's context as it
 // was sent, from its rollout's stored snapshot, with each piece's source named for the user.
-import type { ChatId, SlotId, ContextIssue } from "@rp/shared/chat.ts"
+import { createHash } from "node:crypto"
+import type { ChatId, SlotId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { NotFound } from "@rp/shared/errors.ts"
 import { type ContextSource, RunContext } from "@rp/shared/inspectorApi.ts"
 import { Effect } from "effect"
 import { SqlClient, type SqlError } from "effect/sql"
-import { wireContext } from "../assembler/wire.ts"
-import { tokensOf } from "../assembler/st.ts"
-import type { ContextSnapshot, Source, WireContext } from "../assembler/types.ts"
-import type { Describe } from "../assembler/warmth.ts"
+import type { ContextSnapshot, Source, WireContext, InspectionInputs } from "../assembler/types.ts"
 import { builtinPreset } from "./assemblySources.ts"
 import type { ReadOps } from "./ops.ts"
 import type { LlmRequestRow } from "./providers.ts"
@@ -27,7 +26,7 @@ export const describer = (
   userId: UserId,
   chatId: ChatId,
   snapshots: ReadonlyArray<ContextSnapshot>
-): Effect.Effect<Describe, SqlError.SqlError> =>
+): Effect.Effect<(source: Source) => ContextSource, SqlError.SqlError> =>
   Effect.gen(function* () {
     const sources = snapshots.flatMap((s) => s.pieces.map((p) => p.source))
     const revisions = unique(
@@ -63,39 +62,67 @@ export const describer = (
     const depthOf = new Map(depths.map((row) => [row.id, row.depth]))
 
     return (source: Source): ContextSource => {
+      const identity =
+        source.kind === "lorebook"
+          ? [source.kind, source.book, source.revision, source.uid]
+          : source.kind === "note"
+            ? [source.kind, source.entity, source.revision]
+            : source
+      const common = {
+        id: createHash("sha256").update(JSON.stringify(identity)).digest("hex"),
+        activation:
+          source.kind === "lorebook"
+            ? { kind: "lorebook" as const, ...source.activation }
+            : source.kind === "note"
+              ? (source.activation ?? null)
+              : null
+      }
       switch (source.kind) {
         case "preset": {
           const name = promptNames.get(`${source.revision}:${source.identifier}`)
           // Its other text (`utility.new_chat_prompt`, `prefill.assistant`) by what it is.
           const other = source.identifier.replace(/^utility\./, "").replaceAll("_", " ")
-          return { kind: "preset", label: name ? `Preset prompt “${name}”` : `Preset: ${other}`, slotId: null }
+          return {
+            ...common,
+            kind: "preset",
+            label: name ? `Preset prompt “${name}”` : `Preset: ${other}`,
+            slotId: null
+          }
         }
         case "card":
           return {
+            ...common,
             kind: "card",
             label: `Card “${names.get(source.revision) ?? "unnamed"}”: ${source.field}`,
             slotId: null
           }
         case "lorebook":
           return {
+            ...common,
             kind: "lorebook",
             label: `Lorebook “${names.get(source.revision) ?? "unnamed"}”: entry ${source.uid}`,
             slotId: null
           }
         case "note":
-          return { kind: "note", label: `Note “${names.get(source.revision) ?? "unnamed"}”`, slotId: null }
+          return { ...common, kind: "note", label: `Note “${names.get(source.revision) ?? "unnamed"}”`, slotId: null }
         case "message": {
           const depth = depthOf.get(source.slot)
           return {
+            ...common,
             kind: "message",
             label: depth === undefined ? "A message" : `Message ${depth + 1}`,
             slotId: source.slot as SlotId
           }
         }
         case "direction":
-          return { kind: "direction", label: "One-turn direction", slotId: null }
+          return { ...common, kind: "direction", label: "One-turn direction", slotId: null }
         case "assembler":
-          return { kind: "assembler", label: source.what.charAt(0).toUpperCase() + source.what.slice(1), slotId: null }
+          return {
+            ...common,
+            kind: "assembler",
+            label: source.what.charAt(0).toUpperCase() + source.what.slice(1),
+            slotId: null
+          }
       }
     }
   })
@@ -120,6 +147,40 @@ export const rolloutUsage = (sql: SqlClient.SqlClient, userId: UserId, rolloutId
     FROM llm_requests INDEXED BY llm_requests_rollout WHERE rollout_id = ${rolloutId} AND owner_user_id = ${userId}
     ORDER BY started_at, id`
 
+/** Raw display metadata leaves the reader only with generation, never through the public inspector. */
+export const inspectionInputs = (sql: SqlClient.SqlClient, userId: UserId, snapshot: ContextSnapshot) =>
+  Effect.gen(function* () {
+    const describe = yield* describer(sql, userId, snapshot.inputs.chatId as ChatId, [snapshot])
+    const { model, preset } = snapshot.inputs
+    const [connection] = model
+      ? yield* sql<{ name: string }>`
+      SELECT name FROM connections WHERE id = ${model.connectionId} AND owner_user_id = ${userId}`
+      : []
+    const [presetRef] = preset.ref
+      ? yield* sql<{ label: string }>`
+      SELECT r.label FROM entity_refs r JOIN entities e ON e.id = r.entity_id
+      WHERE r.id = ${preset.ref} AND e.owner_user_id = ${userId}`
+      : []
+    const sources = snapshot.request.messages.map((): Array<ContextSource> => [])
+    for (const piece of snapshot.pieces) {
+      const source = describe(piece.source)
+      for (const i of piece.messages) {
+        if (!sources[i]!.some((s) => s.id === source.id)) sources[i]!.push(source)
+      }
+    }
+    return {
+      model: model && {
+        connection: connection?.name ?? "a deleted connection",
+        model: model.key,
+        kind: model.kind,
+        breakpoints: model.cacheBreakpoints
+      },
+      preset: { label: presetRef?.label ?? null, scope: preset.scope },
+      sources,
+      issues: snapshot.issues
+    } satisfies InspectionInputs
+  })
+
 export const makeInspectorReadHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   const handlers = {
@@ -132,9 +193,8 @@ export const makeInspectorReadHandlers = Effect.gen(function* () {
           status: string
           snapshot: string
           sent_context_json: string | null
-          context_issues_json: string | null
         }>`
-        SELECT s.chat_id, v.slot_id, r.id AS rollout_id, r.status, r.context_issues_json, p.context_snapshot_json AS snapshot, p.sent_context_json
+        SELECT s.chat_id, v.slot_id, r.id AS rollout_id, r.status, p.context_snapshot_json AS snapshot, p.sent_context_json
         FROM versions v JOIN slots s ON s.id = v.slot_id JOIN chats c ON c.id = s.chat_id
         JOIN rollouts r ON r.id = v.rollout_id JOIN rollout_payloads p ON p.rollout_id = r.id
         WHERE v.id = ${versionId} AND c.owner_user_id = ${userId} AND p.context_snapshot_json IS NOT NULL
@@ -142,35 +202,9 @@ export const makeInspectorReadHandlers = Effect.gen(function* () {
         if (!row) return yield* new NotFound({ entity: "context", id: versionId })
         const snapshot = JSON.parse(row.snapshot) as ContextSnapshot
         const chatId = row.chat_id as ChatId
-        const describe = yield* describer(sql, userId, chatId, [snapshot])
-        const { model, preset } = snapshot.inputs
-        const [connection] = model
-          ? yield* sql<{ name: string }>`
-            SELECT name FROM connections WHERE id = ${model.connectionId} AND owner_user_id = ${userId}`
-          : []
-        const [presetRef] = preset.ref
-          ? yield* sql<{ label: string }>`
-            SELECT r.label FROM entity_refs r JOIN entities e ON e.id = r.entity_id
-            WHERE r.id = ${preset.ref} AND e.owner_user_id = ${userId}`
-          : []
         const requests = yield* rolloutUsage(sql, userId, row.rollout_id)
-        const byMessage = snapshot.request.messages.map((): Array<ContextSource> => [])
-        for (const piece of snapshot.pieces) {
-          const described = describe(piece.source)
-          for (const i of piece.messages) {
-            if (!byMessage[i]!.some((s) => s.label === described.label)) byMessage[i]!.push(described)
-          }
-        }
-        const breakpoints = new Map(snapshot.request.breakpoints.map((b) => [b.message, b.reason]))
-        const wire =
-          (row.sent_context_json ? (JSON.parse(row.sent_context_json) as WireContext) : null) ??
-          snapshot.wire ??
-          (model
-            ? wireContext(snapshot.request, model)
-            : {
-                messages: snapshot.request.messages.map((m, i) => ({ ...m, inputs: [i] })),
-                samplers: snapshot.request.samplers
-              })
+        const wire = row.sent_context_json ? (JSON.parse(row.sent_context_json) as WireContext) : null
+        const display = wire?.display
         return new RunContext({
           chatId,
           slotId: row.slot_id as SlotId,
@@ -179,28 +213,23 @@ export const makeInspectorReadHandlers = Effect.gen(function* () {
           status: row.status,
           type: snapshot.inputs.type,
           mode: snapshot.inputs.mode,
-          model: model && {
-            connection: connection?.name ?? "a deleted connection",
-            model: model.key,
-            kind: model.kind,
-            breakpoints: model.cacheBreakpoints
-          },
-          preset: { label: presetRef?.label ?? null, scope: preset.scope },
-          messages: wire.messages.map((message) => ({
-            role: message.role,
-            name: message.name ?? null,
-            content: message.content,
-            tokens: tokensOf(message),
-            sources: message.inputs
-              .flatMap((i) => byMessage[i] ?? [{ kind: "preset" as const, label: "Prefill", slotId: null }])
-              .filter((source, i, all) => all.findIndex((s) => s.label === source.label) === i),
-            breakpoint: message.inputs.map((i) => breakpoints.get(i)).findLast((b) => b !== undefined) ?? null
-          })),
-          samplers: { ...wire.samplers },
-          issues:
-            row.context_issues_json === null
-              ? []
-              : (JSON.parse(row.context_issues_json) as ReadonlyArray<ContextIssue>),
+          capture: display ? "captured" : "unavailable",
+          messages: display
+            ? wire!.messages.map((message) => ({
+                role: message.role,
+                name: message.name ?? null,
+                content: message.content,
+                tokens: tokensOf(message),
+                sources: message.sources ?? [],
+                breakpoint: message.breakpoint ?? null
+              }))
+            : [],
+          samplers: display ? { ...wire!.samplers } : {},
+          ...(display ?? {
+            model: null,
+            preset: { label: null, scope: "unavailable" },
+            issues: []
+          }),
           requests: requests.map((r): InspectorUsage => ({
             id: r.id as InspectorUsage["id"],
             status: r.status,

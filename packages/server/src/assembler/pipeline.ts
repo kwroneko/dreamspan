@@ -1,4 +1,5 @@
 // The assembler's stage pipeline and its sources (PLUGINS §8; ARCHITECTURE §15).
+import type { SourceActivation } from "@rp/shared/inspectorApi.ts"
 import type { FoldableEvent, ChatState } from "@rp/shared/state.ts"
 import type { FrozenValues, MacroLookup } from "@rp/shared/macros/expand.ts"
 import type { VariableEffect } from "@rp/shared/macros/variables.ts"
@@ -174,6 +175,7 @@ export interface Assembly {
   lore?: ReadonlyArray<{ readonly entry: import("@rp/shared/docs/lorebook.ts").LorebookEntry; readonly piece: number }>
   notes?: ReadonlyArray<NoteInput>
   skippedNotes?: ReadonlyArray<NoteInput>
+  noteDecisions?: ReadonlyMap<string, Extract<SourceActivation, { kind: "note" }>>
   noteUserMessages?: number
   sendIfEmpty?: boolean
   mode?: Mode

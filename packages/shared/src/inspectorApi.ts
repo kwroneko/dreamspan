@@ -1,14 +1,50 @@
 // The request inspector and the cache-warmth estimate (DESIGN §5.5, §7.4), merged into AppApi.
+import { SelectiveLogic } from "./docs/lorebook.ts"
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
 import { ChatId, ContextIssue, SlotId, VersionId } from "./chat.ts"
 import { NotFound, ServerError } from "./errors.ts"
 import { LlmRequestId, RequestStatus, UsageSource } from "./usage.ts"
 
+/** Historical activation decisions; keyword text is scrubbed with the sent request. */
+export const SourceActivation = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal("lorebook"),
+    status: Schema.Literal("activated"),
+    step: Schema.Int,
+    why: Schema.Union([
+      Schema.Struct({ kind: Schema.Literal("constant") }),
+      Schema.Struct({
+        kind: Schema.Literal("keys"),
+        primaryKey: Schema.String,
+        secondaryKeys: Schema.Array(Schema.String),
+        logic: Schema.optionalKey(SelectiveLogic)
+      })
+    ])
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("lorebook"),
+    status: Schema.Literal("skipped"),
+    step: Schema.Int,
+    reason: Schema.String
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("note"),
+    activation: Schema.Literals(["explicit", "default"]),
+    interval: Schema.NullOr(Schema.Int),
+    userMessages: Schema.NullOr(Schema.Int),
+    due: Schema.Boolean
+  })
+])
+export type SourceActivation = typeof SourceActivation.Type
+
 /** Where a piece of a request message came from, named for the user. */
 export const ContextSource = Schema.Struct({
   kind: Schema.Literals(["preset", "card", "lorebook", "note", "message", "direction", "assembler"]),
+  /** Stable identity from source references and revisions, independent of display text. */
+  id: Schema.String,
   label: Schema.String,
+  activation: Schema.NullOr(SourceActivation),
   /** A message of the chat, to link to. */
   slotId: Schema.NullOr(SlotId)
 })
@@ -43,16 +79,8 @@ export const InspectorUsage = Schema.Struct({
 })
 export type InspectorUsage = typeof InspectorUsage.Type
 
-/** One generation's request as it was sent, and what the provider reported for it. */
-export class RunContext extends Schema.Class<RunContext>("RunContext")({
-  chatId: ChatId,
-  slotId: SlotId,
-  versionId: VersionId,
-  builtAt: Schema.Number,
-  /** The rollout's status: running, completed, stopped, failed, interrupted. */
-  status: Schema.String,
-  type: Schema.Literals(["normal", "swipe", "impersonate"]),
-  mode: Schema.Literals(["st", "layouts"]),
+/** The complete display projection sanitized at final capture, excluding storage identities and usage. */
+export const ContextDisplay = Schema.Struct({
   model: Schema.NullOr(
     Schema.Struct({
       connection: Schema.String,
@@ -66,7 +94,22 @@ export class RunContext extends Schema.Class<RunContext>("RunContext")({
   messages: Schema.Array(ContextMessage),
   /** Effective numeric samplers after provider mapping. */
   samplers: Schema.Record(Schema.String, Schema.Number),
-  issues: Schema.Array(ContextIssue),
+  issues: Schema.Array(ContextIssue)
+})
+export type ContextDisplay = typeof ContextDisplay.Type
+
+/** One generation's request as it was sent, and what the provider reported for it. */
+export class RunContext extends Schema.Class<RunContext>("RunContext")({
+  chatId: ChatId,
+  slotId: SlotId,
+  versionId: VersionId,
+  builtAt: Schema.Number,
+  /** The rollout's status: running, completed, stopped, failed, interrupted. */
+  status: Schema.String,
+  type: Schema.Literals(["normal", "swipe", "impersonate"]),
+  mode: Schema.Literals(["st", "layouts"]),
+  capture: Schema.Literals(["captured", "unavailable"]),
+  ...ContextDisplay.fields,
   /** Every attempt, retries included, oldest first. */
   requests: Schema.Array(InspectorUsage)
 }) {}

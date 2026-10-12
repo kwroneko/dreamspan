@@ -394,7 +394,8 @@ describe("the context assembler", () => {
       expect(sent.pieces.find((p) => p.id === "note:note-scene")?.source).toEqual({
         kind: "note",
         entity: "note-scene",
-        revision: "note-scene-revision"
+        revision: "note-scene-revision",
+        activation: { kind: "note", activation: "explicit", interval: null, userMessages: null, due: true }
       })
       const stashed = await assembled(
         chat({

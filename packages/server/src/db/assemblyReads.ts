@@ -5,7 +5,7 @@ import { makeAssembler } from "../assembler/assembler.ts"
 import type { ChatId } from "@rp/shared/chat.ts"
 import { wireContext } from "../assembler/wire.ts"
 import { lastBreakpoint, prefixChange, tokensBetween } from "../assembler/warmth.ts"
-import { describer } from "./inspectorReads.ts"
+import { describer, inspectionInputs } from "./inspectorReads.ts"
 import { NotFound } from "@rp/shared/errors.ts"
 import {
   ASSEMBLER_VERSION,
@@ -28,14 +28,20 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
         const sources = sqlSources(sql, { userId, chatId, slotId, versionId })
         return assembler.assemble({ now, timeZone, frozen: frozen ?? {}, random: Math.random }).pipe(
           Effect.provide(sources.layer),
-          Effect.map((built) => {
-            const snapshot: ContextSnapshot = {
-              ...built,
-              sources: sources.pins(),
-              ...(built.inputs.model ? { wire: wireContext(built.request, built.inputs.model) } : {})
-            }
-            return { snapshot: JSON.stringify(snapshot), generation: JSON.stringify(generationOf(snapshot)) }
-          })
+          Effect.flatMap((built) =>
+            Effect.gen(function* () {
+              const snapshot: ContextSnapshot = {
+                ...built,
+                sources: sources.pins(),
+                ...(built.inputs.model ? { wire: wireContext(built.request, built.inputs.model) } : {})
+              }
+              const inspection = yield* inspectionInputs(sql, userId, snapshot)
+              return {
+                snapshot: JSON.stringify(snapshot),
+                generation: JSON.stringify({ ...generationOf(snapshot), inspection })
+              }
+            })
+          )
         )
       }).pipe(query("AssembleContext")),
 

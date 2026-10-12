@@ -229,7 +229,7 @@ test("a version opened under another chat redirects to its canonical route", asy
   )
 })
 
-const denseContext = async (page: Page) => {
+const denseContext = async (page: Page, explanations = false) => {
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/chats/${chat.id}`)
   await expect(reply(page)).toBeVisible()
@@ -246,9 +246,48 @@ const denseContext = async (page: Page) => {
             name: null,
             content: `Short synthetic sentence ${i}.`,
             tokens: 10,
-            sources: [{ kind: "message", label: `Message ${i + 1}`, slotId: null }],
+            sources: [
+              { id: `message:${i}`, kind: "message", label: `Message ${i + 1}`, slotId: null, activation: null }
+            ],
             breakpoint: null
           }))
+          if (explanations) {
+            ;(object.messages as Array<{ sources: unknown }>)[0]!.sources = [
+              {
+                id: "book-a",
+                kind: "lorebook",
+                label: "Lorebook Harbor: entry 0",
+                slotId: null,
+                activation: { kind: "lorebook", status: "activated", step: 0, why: { kind: "constant" } }
+              },
+              {
+                id: "book-b",
+                kind: "lorebook",
+                label: "Lorebook Harbor: entry 0",
+                slotId: null,
+                activation: {
+                  kind: "lorebook",
+                  status: "activated",
+                  step: 1,
+                  why: { kind: "keys", primaryKey: "[redacted]", secondaryKeys: ["road"], logic: "and_all" }
+                }
+              },
+              {
+                id: "note-a",
+                kind: "note",
+                label: "Note Interval",
+                slotId: null,
+                activation: { kind: "note", activation: "explicit", interval: 2, userMessages: 20, due: true }
+              },
+              {
+                id: "note-b",
+                kind: "note",
+                label: "Note Default",
+                slotId: null,
+                activation: { kind: "note", activation: "default", interval: null, userMessages: null, due: true }
+              }
+            ]
+          }
           replaced = true
           return
         }
@@ -316,4 +355,17 @@ test("expanded messages survive unmounting and scrolling back", async ({ page })
   await expect(messages.getByText("#1", { exact: true })).toBeVisible()
   await expect(messages.locator("details").first()).toHaveAttribute("open", "")
   await expect(messages.locator("p", { hasText: "Short synthetic sentence 0." })).toBeVisible()
+})
+
+test("source explanations retain distinct equal labels and show historical activation decisions", async ({ page }) => {
+  const messages = await denseContext(page, true)
+  await expect(messages.getByText("Lorebook Harbor: entry 0", { exact: true })).toHaveCount(2)
+  await expect(messages.getByText("Activated at step 0: constant entry.", { exact: true })).toBeVisible()
+  await expect(
+    messages.getByText("Activated at step 1: keyword “[redacted]”; and_all: “road”.", { exact: true })
+  ).toBeVisible()
+  await expect(
+    messages.getByText("Activated by this chat; every 2 user messages; counted 20; due this turn.", { exact: true })
+  ).toBeVisible()
+  await expect(messages.getByText("Active by default; every turn; due this turn.", { exact: true })).toBeVisible()
 })

@@ -256,6 +256,19 @@ const noteGateStage = sync("note-gate", (assembly) => {
   assembly.sendIfEmpty = fill
   const count = need(assembly, "noteUserMessages") + (fill && need(assembly, "cast").type === "normal" ? 1 : 0)
   const active = need(assembly, "notes")
+  const switches = switchesOf(need(assembly, "events"))
+  assembly.noteDecisions = new Map(
+    active.map((note) => [
+      note.entity,
+      {
+        kind: "note" as const,
+        activation: switches.get(note.entity) === true ? ("explicit" as const) : ("default" as const),
+        interval: note.doc.interval ?? null,
+        userMessages: (note.doc.interval ?? 0) > 1 ? count : null,
+        due: due(note.doc.interval, count)
+      }
+    ])
+  )
   assembly.skippedNotes = active.filter((note) => !due(note.doc.interval, count) && (note.doc.interval ?? 0) > 1)
   assembly.notes = active.filter((note) => due(note.doc.interval, count))
 })
@@ -769,6 +782,13 @@ const exampleLines = (assembly: Assembly, card: CardInput, char: string, prefixN
 const summaryNote = (assembly: Assembly, notes = assembly.notes) =>
   notes?.findLast((note) => note.doc.kind === "imported_summary" && noteCard(note.doc) === null)
 
+const noteSource = (assembly: Assembly, note: NoteInput): Source => ({
+  kind: "note",
+  entity: note.entity,
+  revision: note.revision,
+  activation: assembly.noteDecisions?.get(note.entity)
+})
+
 /**
  * The summary as the extension sends it (formatMemoryValue): its template with `{{summary}}`
  * replaced, or `Summary: ` before it without one, expanded.
@@ -779,11 +799,7 @@ const summaryText = (assembly: Assembly, note: NoteInput): Text | null => {
   const { template } = note.doc
   const formatted = template ? template.replace(/\{\{summary\}\}/gi, () => content) : `Summary: ${content}`
   const env = need(assembly, "macros")
-  const piece = env.piece(
-    `note:${note.entity}`,
-    { kind: "note", entity: note.entity, revision: note.revision },
-    formatted
-  )
+  const piece = env.piece(`note:${note.entity}`, noteSource(assembly, note), formatted)
   const text = env.text(piece).trim()
   return text || env.isVolatile(piece) ? { text, piece } : null
 }
@@ -793,7 +809,7 @@ const noteText = (assembly: Assembly, note: NoteInput, owner: CardInput | null):
   const env = need(assembly, "macros")
   const piece = env.piece(
     `note:${note.entity}`,
-    { kind: "note", entity: note.entity, revision: note.revision },
+    noteSource(assembly, note),
     note.doc.content.trim(),
     owner ? { withoutCard: true, names: { char: owner.doc.name } } : {}
   )
@@ -867,11 +883,7 @@ const placedNotes = (assembly: Assembly, cards: ReadonlyArray<CardInput>) => {
             return skipped
               ? {
                   text: "",
-                  piece: env.verbatim(
-                    `note:${note.entity}`,
-                    { kind: "note", entity: note.entity, revision: note.revision },
-                    ""
-                  )
+                  piece: env.verbatim(`note:${note.entity}`, noteSource(assembly, note), "")
                 }
               : note === summary
                 ? summaryText(assembly, note)

@@ -5,8 +5,9 @@
 // pi-ai's API implementations are called directly with an explicit key and an empty
 // env, never through its Models collection, so no request can pick up a key from the
 // server's environment (PROVIDERS §4).
+import { inspectWire } from "../assembler/inspection.ts"
 import { markWireSources, sentWire, wireContext } from "../assembler/wire.ts"
-import type { AssembledRequest, ModelInput } from "../assembler/types.ts"
+import type { AssembledRequest, ModelInput, InspectionInputs } from "../assembler/types.ts"
 import { mappingCapabilities } from "./mapping.ts"
 import type {
   Api,
@@ -63,7 +64,11 @@ export interface StreamRequest {
   readonly connectionId: ConnectionId
   readonly modelId: ModelId
   readonly context: PiContext
-  readonly inspection?: { readonly request: AssembledRequest; readonly model: ModelInput }
+  readonly inspection?: {
+    readonly request: AssembledRequest
+    readonly model: ModelInput
+    readonly display?: InspectionInputs | undefined
+  }
   readonly options?: {
     readonly reasoning?: ThinkingLevel
     readonly maxTokens?: number
@@ -932,7 +937,16 @@ export const layer = (options: ProvidersOptions = {}) =>
                         writer.RecordSentContext({
                           userId: request.userId,
                           rolloutId: request.attribution.rolloutId,
-                          wire: JSON.stringify(wire)
+                          wire: JSON.stringify(
+                            request.inspection?.display
+                              ? inspectWire(
+                                  wire,
+                                  request.inspection.request,
+                                  request.inspection.display,
+                                  prepared.scrub
+                                )
+                              : wire
+                          )
                         })
                       ),
                       { signal }

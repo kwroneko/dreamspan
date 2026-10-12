@@ -142,7 +142,7 @@ it.live("review: final capture excludes transport fields and scrubs all request 
     const stored = yield* savedContexts(config.dataDir)
     const saved = (JSON.parse(stored) as Array<{ sent_context_json: string }>).at(-1)!.sent_context_json
     const parsed = JSON.parse(saved)
-    assert.deepEqual(Object.keys(parsed).sort(), ["mapping", "messages", "samplers"])
+    assert.deepEqual(Object.keys(parsed).sort(), ["display", "mapping", "messages", "samplers"])
     const actual = mock.requests().at(-1)!.body!.messages as Message[]
     assert.equal(parsed.messages[0].digest, wireDigest(actual[0]! as Parameters<typeof wireDigest>[0]))
     assert.notInclude(JSON.stringify(run), parsed.messages[0].digest)

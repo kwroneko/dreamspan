@@ -422,7 +422,11 @@ it.live("malformed legacy snapshot issues remain inspectable over RPC", () => {
         })
     )
     const result = yield* api.GetRunContext({ versionId: version.id }).pipe(Effect.exit)
-    if (result._tag === "Success") assert.deepEqual(result.value.issues, [])
+    if (result._tag === "Success") {
+      assert.deepEqual(result.value.issues, [])
+      assert.equal(result.value.capture, "unavailable")
+      assert.deepEqual(result.value.messages, [])
+    }
     assert.equal(result._tag, "Success")
   }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
 })

@@ -7,7 +7,7 @@ import { tokensOf } from "./st.ts"
 import { wireContext, wireDigest } from "./wire.ts"
 import type { ContextSnapshot, Source, WireContext } from "./types.ts"
 
-export type Describe = (source: Source) => ContextSource
+export type Describe = (source: Source) => Pick<ContextSource, "label">
 
 /** The last request message a cache breakpoint follows; -1 without one. */
 export const lastBreakpoint = (snapshot: ContextSnapshot) =>

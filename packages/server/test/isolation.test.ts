@@ -1343,8 +1343,16 @@ const seed = Effect.gen(function* () {
         userId: user.id,
         rolloutId: inspectorRollout,
         wire: JSON.stringify({
+          display: { model: null, preset: { label: null, scope: "builtin" }, issues: [] },
           messages: [
-            { role: "developer", content: "Synthetic SDK instruction", digest: "server-only-digest", inputs: [0] }
+            {
+              role: "developer",
+              content: "Synthetic SDK instruction",
+              digest: "server-only-digest",
+              inputs: [0],
+              sources: [],
+              breakpoint: null
+            }
           ],
           samplers: {}
         })

@@ -102,7 +102,7 @@ export const layer = Layer.effect(
               connectionId: model.connectionId as ConnectionId,
               modelId: model.modelId as ModelId,
               context: wire.context,
-              inspection: { request: generation.request, model },
+              inspection: { request: generation.request, model, display: generation.inspection },
               options: {
                 ...(wire.temperature !== undefined ? { temperature: wire.temperature } : {}),
                 ...(wire.maxTokens !== undefined ? { maxTokens: wire.maxTokens } : {}),

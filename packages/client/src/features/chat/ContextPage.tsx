@@ -4,7 +4,7 @@
 // Text is shown as text. Measured virtual rows keep dense contexts bounded; collapsed
 // messages render only their previews.
 import type { ChatId, VersionId } from "@rp/shared/chat.ts"
-import type { ContextMessage, RunContext, InspectorUsage } from "@rp/shared/inspectorApi.ts"
+import type { ContextMessage, RunContext, InspectorUsage, SourceActivation } from "@rp/shared/inspectorApi.ts"
 import { Link, Navigate, useParams } from "@tanstack/react-router"
 import { useMemo, useRef, useState } from "react"
 import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual"
@@ -22,6 +22,25 @@ const breakpointText = {
   prefix: "Cache breakpoint: the end of the preset's part",
   history: "Cache breakpoint: the end of the history the next request repeats"
 } as const
+
+const activationText = (activation: SourceActivation): string => {
+  if (activation.kind === "note") {
+    const on = activation.activation === "explicit" ? "Activated by this chat" : "Active by default"
+    const interval =
+      activation.interval === null || activation.interval === 1
+        ? "every turn"
+        : activation.interval === 0
+          ? "never due"
+          : `every ${activation.interval} user messages; counted ${activation.userMessages}`
+    return `${on}; ${interval}; ${activation.due ? "due this turn" : "skipped this turn"}.`
+  }
+  if (activation.status === "skipped") return `Skipped at step ${activation.step}: ${activation.reason}`
+  const why =
+    activation.why.kind === "constant"
+      ? "constant entry"
+      : `keyword “${activation.why.primaryKey}”${activation.why.secondaryKeys.length ? `; ${activation.why.logic ?? "and_any"}: ${activation.why.secondaryKeys.map((key) => `“${key}”`).join(", ")}` : ""}`
+  return `Activated at step ${activation.step}: ${why}.`
+}
 
 function Message({
   message,
@@ -52,15 +71,20 @@ function Message({
             <span className="text-muted tabular-nums">~{message.tokens.toLocaleString()} tokens</span>
           </span>
           <span className="flex flex-wrap gap-1">
-            {message.sources.map((source) =>
-              source.slotId ? (
-                <Link key={source.label} to="/chats/$chatId" params={{ chatId }} search={{ slot: source.slotId }}>
-                  <Badge tone="accent">{source.label}</Badge>
-                </Link>
-              ) : (
-                <Badge key={source.label}>{source.label}</Badge>
-              )
-            )}
+            {message.sources.map((source) => (
+              <span key={source.id} className="flex flex-col gap-1">
+                {source.slotId ? (
+                  <Link to="/chats/$chatId" params={{ chatId }} search={{ slot: source.slotId }}>
+                    <Badge tone="accent">{source.label}</Badge>
+                  </Link>
+                ) : (
+                  <Badge>{source.label}</Badge>
+                )}
+                {source.activation && (
+                  <span className="text-xs break-words text-muted">{activationText(source.activation)}</span>
+                )}
+              </span>
+            ))}
           </span>
           {!open && <span className="line-clamp-2 text-sm break-words text-muted">{preview}</span>}
         </summary>
@@ -221,7 +245,11 @@ function Inspector({ run }: { run: RunContext }) {
       </Card>
       <section aria-label="Messages" className="flex flex-col gap-2">
         <h2 className="text-base font-semibold">Messages</h2>
-        <Messages key={run.versionId} run={run} />
+        {run.capture === "unavailable" ? (
+          <p className="text-sm text-muted">Not sent / unavailable: no sanitized final request capture is stored.</p>
+        ) : (
+          <Messages key={run.versionId} run={run} />
+        )}
       </section>
     </div>
   )

@@ -1,4 +1,5 @@
 // The assembler's data, all plain JSON (DATA-MODEL §7.1; ARCHITECTURE §15).
+import type { ContextDisplay, ContextMessage, ContextSource, SourceActivation } from "@rp/shared/inspectorApi.ts"
 import type { ContextIssue } from "@rp/shared/chat.ts"
 import type { FrozenValues } from "@rp/shared/macros/expand.ts"
 import type { VariableEffect } from "@rp/shared/macros/variables.ts"
@@ -10,7 +11,7 @@ import type { PresetDoc } from "@rp/shared/docs/preset.ts"
 import { Schema } from "effect"
 
 /** Bump whenever identical inputs would assemble differently. Missing means version 0. */
-export const ASSEMBLER_VERSION = 6
+export const ASSEMBLER_VERSION = 7
 
 export type Role = "system" | "user" | "assistant"
 
@@ -37,7 +38,12 @@ export type Source =
       readonly uid: number
       readonly activation: LoreRecord
     }
-  | { readonly kind: "note"; readonly entity: string; readonly revision: string }
+  | {
+      readonly kind: "note"
+      readonly entity: string
+      readonly revision: string
+      readonly activation?: Extract<SourceActivation, { kind: "note" }> | undefined
+    }
   | { readonly kind: "message"; readonly slot: string; readonly version: string }
   /** Text from the version being generated: its one-turn direction (DESIGN §2.2). */
   | { readonly kind: "direction"; readonly version: string }
@@ -137,10 +143,14 @@ export interface SnapshotInputs {
 
 /** Safe provider mapping with indices back to the assembled messages. No transport settings. */
 export interface WireContext {
+  /** Complete sanitized historical display, present only after final capture. */
+  readonly display?: Pick<ContextDisplay, "model" | "preset" | "issues">
   readonly mapping?: ModelInput["mapping"]
   readonly messages: ReadonlyArray<
     Omit<RequestMessage, "role"> & {
       readonly role: Role | "developer" | "model"
+      readonly sources?: ContextMessage["sources"]
+      readonly breakpoint?: ContextMessage["breakpoint"]
       /** Digest of final, unredacted text/role/name. Never projected into an RPC DTO. */
       readonly digest?: string
       readonly inputs: ReadonlyArray<number>
@@ -209,8 +219,15 @@ export interface SourcePins {
   readonly userMessages?: ReadonlyArray<{ readonly key: string; readonly count: number }>
 }
 
+/** Raw metadata from the assembly transaction, scrubbed only at final capture on the main thread. */
+export interface InspectionInputs extends Pick<ContextDisplay, "model" | "preset" | "issues"> {
+  readonly sources: ReadonlyArray<ReadonlyArray<ContextSource>>
+}
+
 /** What generating needs of a snapshot, sent to the main thread apart from it. */
 export interface Generation {
+  /** Labels and source decisions read in the same transaction as assembly; scrubbed on the main thread. */
+  readonly inspection?: InspectionInputs
   readonly leafSlotId: string | null
   readonly request: AssembledRequest
   readonly model: ModelInput | null
