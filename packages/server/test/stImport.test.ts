@@ -274,7 +274,12 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
       assert.deepStrictEqual(
         miraNotes.map((n) => [n.doc.kind, n.doc.content, n.doc.placement, n.doc.covers]),
         [
-          ["author_note", "Summary: Mira lost her map.", { mode: "section", section: "after_main_prompt" }, undefined],
+          [
+            "author_note",
+            "Summary: Mira lost her map.",
+            { mode: "section", section: "after_main_prompt", role: "system" },
+            undefined
+          ],
           ["imported_summary", "Mira is looking for her map.", { mode: "depth", depth: 3, role: "system" }, undefined]
         ]
       )
@@ -524,4 +529,56 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
       })
     )
   })
+  it.effect("keeps imported roles beside the main prompt for author notes and summaries", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      for (const [position, role] of [
+        [0, 1],
+        [2, 2]
+      ] as const) {
+        const { importId } = yield* api.StartStImport({ unsupported: [] })
+        const settings = {
+          extension_settings: {
+            memory: { position, role, depth: 2, template: "[{{summary}}]" },
+            disabledExtensions: []
+          }
+        }
+        yield* sendStFile(importId, "settings.json", encode(settings))
+        yield* sendStFile(
+          importId,
+          "characters/Mira_new.png",
+          folder.get("ST/data/default-user/characters/Mira_new.png")!
+        )
+        const path = `chats/Mira_new/roles-${position}.jsonl`
+        yield* sendStFile(
+          importId,
+          path,
+          jsonl(
+            {
+              user_name: "Sam",
+              character_name: "Mira",
+              chat_metadata: {
+                note_prompt: "Author",
+                note_position: position,
+                note_role: role,
+                note_depth: 4,
+                note_interval: 1
+              }
+            },
+            line("Mira", "Greeting", 0),
+            { ...line("Sam", "Question", 1), extra: { memory: "Summary" } },
+            line("Mira", "Reply", 2)
+          )
+        )
+        const docs = noteDocs(chatBySource(path))
+        assert.lengthOf(docs, 2)
+        for (const { doc } of docs)
+          assert.deepStrictEqual(doc.placement, {
+            mode: "section",
+            section: position === 0 ? "after_main_prompt" : "before_main_prompt",
+            role: role === 1 ? "user" : "assistant"
+          })
+      }
+    })
+  )
 })

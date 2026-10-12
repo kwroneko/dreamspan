@@ -378,7 +378,10 @@ export const sqlSources = (
     // that's one of the cast, else its first version's writer.
     userMessages: (leaf, personas, characters) =>
       Effect.gen(function* () {
-        if (leaf === null) return 0
+        if (leaf === null) {
+          pins.userMessages.push({ key: keyOf(leaf, personas, characters), count: 0 })
+          return 0
+        }
         const [row] = yield* sql<{ n: number }>`
           WITH RECURSIVE path(id) AS (
             SELECT id FROM slots WHERE id = ${leaf} AND chat_id = ${chatId} AND ${owned}

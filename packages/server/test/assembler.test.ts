@@ -481,6 +481,146 @@ describe("the context assembler", () => {
       ])
     })
 
+    it("expands summaries after main writes, independently of placement order", async () => {
+      for (const placement of [
+        { mode: "depth", depth: 0, role: "system" },
+        { mode: "section", section: "before_main_prompt" },
+        { mode: "section", section: "after_main_prompt" }
+      ] as const) {
+        const snapshot = await assembled(
+          chat({
+            preset: preset({
+              prompts: [{ identifier: "main", role: "system", content: "{{setvar::weather::RAIN}}MAIN" }]
+            }),
+            notes: [
+              chatNote("summary", "A summary", placement, {
+                kind: "imported_summary",
+                template: "[{{summary}}; {{getvar::weather}}]"
+              })
+            ],
+            events: on("summary")
+          })
+        )
+        expect(contents(snapshot).join("\n")).toContain("[A summary; RAIN]")
+      }
+    })
+
+    it("keeps a skipped interval's potential cache boundary beside main", async () => {
+      for (const section of ["before_main_prompt", "after_main_prompt"] as const) {
+        for (const users of [1, 2]) {
+          const snapshot = await assembled(
+            chat({
+              messages: Array.from({ length: users }, (_, i) => ({ side: "user", content: `USER ${i}` })),
+              notes: [authorNote({ mode: "section", section }, { interval: 2 })],
+              events: on("note-z-author")
+            })
+          )
+          const marked = snapshot.request.breakpoints.map((b) => b.message)
+          expect(marked).toEqual(section === "before_main_prompt" ? [] : [0])
+          expect(contents(snapshot).join("\n").includes("soaked")).toBe(users === 2)
+        }
+      }
+    })
+
+    it("keeps skipped depth notes volatile without expanding their macros", async () => {
+      const snapshot = await assembled(
+        chat({
+          messages: [{ side: "user", content: "USER" }],
+          notes: [
+            chatNote(
+              "depth",
+              "{{setvar::skipped::BAD}}Note",
+              { mode: "depth", depth: 1, role: "system" },
+              { interval: 2 }
+            )
+          ],
+          events: on("depth")
+        })
+      )
+      expect(snapshot.effects).toEqual([])
+      expect(snapshot.request.breakpoints.map((b) => snapshot.request.messages[b.message]!.content)).not.toContain(
+        "USER"
+      )
+      expect(contents(snapshot).join("\n")).not.toContain("Note")
+    })
+
+    it("keeps skipped barriers out of the text when depth notes share a role", async () => {
+      const snapshot = await assembled(
+        chat({
+          notes: [
+            chatNote("a", "First.", { mode: "depth", depth: 0, role: "system" }),
+            chatNote("b", "Skipped.", { mode: "depth", depth: 0, role: "system" }, { interval: 2 }),
+            chatNote("c", "Last.", { mode: "depth", depth: 0, role: "system" })
+          ],
+          events: on("a", "b", "c")
+        })
+      )
+      expect(contents(snapshot).at(-1)).toBe("system: First.\nLast.")
+    })
+
+    it("counts normal send_if_empty before gating and puts depth-zero notes after it", async () => {
+      for (const users of [1, 2]) {
+        const snapshot = await assembled(
+          chat({
+            messages: [
+              ...Array.from({ length: users }, (_, i): FixtureMessage => ({ side: "user", content: `USER ${i}` })),
+              { side: "assistant", content: "Reply." }
+            ],
+            preset: preset({ send_if_empty: "Continue." }),
+            notes: [authorNote({ mode: "depth", depth: 0, role: "system" }, { interval: 2 })],
+            events: on("note-z-author")
+          })
+        )
+        expect(contents(snapshot).slice(-1 - (users === 1 ? 1 : 0))).toEqual(
+          users === 1 ? ["user: Continue.", "system: Tobin is soaked."] : ["user: Continue."]
+        )
+      }
+      // Swipes and impersonation don't store a new user turn in ST and don't count one.
+      for (const target of [{ ordinal: 1 }, { speaker: "tobin" }]) {
+        const snapshot = await assembled(
+          chat({
+            target,
+            messages: [
+              { side: "user", content: "USER" },
+              { side: "assistant", content: "Reply." }
+            ],
+            preset: preset({ send_if_empty: "Continue." }),
+            notes: [authorNote({ mode: "depth", depth: 0, role: "system" }, { interval: 2 })],
+            events: on("note-z-author")
+          })
+        )
+        expect(contents(snapshot).join("\n")).not.toContain("soaked")
+      }
+    })
+
+    it("keeps section note roles beside relative and in-chat main prompts", async () => {
+      for (const absolute of [false, true]) {
+        for (const [section, role] of [
+          ["after_main_prompt", "user"],
+          ["before_main_prompt", "assistant"]
+        ] as const) {
+          const snapshot = await assembled(
+            chat({
+              preset: preset({
+                prompts: [
+                  {
+                    identifier: "main",
+                    role: "system",
+                    content: "MAIN",
+                    injection_position: absolute ? 1 : 0,
+                    injection_depth: 1
+                  }
+                ]
+              }),
+              notes: [authorNote({ mode: "section", section, role })],
+              events: on("note-z-author")
+            })
+          )
+          expect(contents(snapshot)).toContain(`${role}: Tobin is soaked.`)
+        }
+      }
+    })
+
     it("sends a note with an interval every that many of the user's messages, as ST's author's note", async () => {
       const every = (interval: number, messages: ReadonlyArray<FixtureMessage>) =>
         assembled(

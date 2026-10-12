@@ -21,7 +21,7 @@ import type { CardFields } from "@rp/shared/macros/context.ts"
 import { NotFound } from "@rp/shared/errors.ts"
 import type { BranchSwitch, ChatEvent, PathRange, PathWindow, SendResult } from "@rp/shared/chatApi.ts"
 import { Cause, Context, Effect, Exit, Fiber, Schedule, Stream } from "effect"
-import { Atom, type AtomRegistry, AtomRegistry as Registry } from "effect/reactivity"
+import { Atom, type AtomRegistry, AtomRegistry as Registry, Reactivity } from "effect/reactivity"
 import { type AppError, describeCause } from "../../errors.ts"
 import { AppClient } from "../../rpc.ts"
 import { sessionAtom } from "../../session.ts"
@@ -278,7 +278,17 @@ export class ChatSession {
     this.hellos = 0
     const subscribe = Effect.flatMap(Registry.getResult(this.registry, AppClient.runtime), (services) =>
       Context.get(services, AppClient)("SubscribeChat", { chatId: this.chatId }).pipe(
-        Stream.runForEach((batch) => Effect.sync(() => this.receive(batch, anchor)))
+        Stream.runForEach((batch) =>
+          Effect.sync(() => {
+            if (batch.some((event) => event._tag === "State" || event._tag === "Reload" || event._tag === "Hello")) {
+              Context.get(
+                services as unknown as Context.Context<Reactivity.Reactivity>,
+                Reactivity.Reactivity
+              ).invalidateUnsafe([`chat-notes:${this.chatId}`])
+            }
+            this.receive(batch, anchor)
+          })
+        )
       )
     )
     this.subscription = Effect.runFork(

@@ -9,7 +9,7 @@
 // server acknowledged it, or a newer copy of the field typed from it replaces it.
 import { applyDrafts, type FieldPath, getAt, parseField, textField, valueField } from "@rp/shared/editing.ts"
 import type { Draft } from "@rp/shared/drafts.ts"
-import type { EditorSnapshot } from "@rp/shared/editorApi.ts"
+import type { ChatNotePosition, EditorSnapshot } from "@rp/shared/editorApi.ts"
 import type { Doc, RefId, RevisionId } from "@rp/shared/library.ts"
 import { useEffect, useSyncExternalStore } from "react"
 import type { AppError } from "../../errors.ts"
@@ -84,12 +84,14 @@ export class EditorStore {
   private readonly userId: string
   private readonly call: Caller
   private readonly env: PageEnv
+  private readonly chatNote: ChatNotePosition | undefined
 
-  constructor(refId: RefId, userId: string, call: Caller, env: PageEnv = browserEnv) {
+  constructor(refId: RefId, userId: string, call: Caller, env: PageEnv = browserEnv, chatNote?: ChatNotePosition) {
     this.userId = userId
     this.refId = refId
     this.call = call
     this.env = env
+    this.chatNote = chatNote
   }
 
   /** A subscription to some channels, the same function each time, as React wants. */
@@ -174,7 +176,9 @@ export class EditorStore {
   }
 
   async load() {
-    const result = await this.call((client) => client("OpenEditor", { refId: this.refId }))
+    const result = await this.call((client) =>
+      client("OpenEditor", { refId: this.refId, ...(this.chatNote ? { chatNote: this.chatNote } : {}) })
+    )
     if (result.ok) this.apply(result.value)
     else this.loadError = result.error
     this.bumpAll()
@@ -280,7 +284,7 @@ export class EditorStore {
   }
 
   setValue(path: FieldPath, value: unknown) {
-    this.change(valueField(path), JSON.stringify(value))
+    this.change(valueField(path), JSON.stringify(value) ?? "undefined")
   }
 
   /** Typing re-renders the field; the page hears only when a field starts having unsaved changes. */
@@ -401,7 +405,9 @@ export class EditorStore {
 
   /** The server's drafts and head again, without losing what's typed here. */
   async refresh() {
-    const result = await this.call((client) => client("OpenEditor", { refId: this.refId }))
+    const result = await this.call((client) =>
+      client("OpenEditor", { refId: this.refId, ...(this.chatNote ? { chatNote: this.chatNote } : {}) })
+    )
     if (result.ok) {
       this.apply(result.value)
       this.bumpAll()
@@ -450,6 +456,7 @@ export class EditorStore {
         client("CommitEditorDrafts", {
           refId: this.refId,
           expectedRowVersion: snapshot.ref.rowVersion,
+          ...(this.chatNote ? { chatNote: this.chatNote } : {}),
           fields,
           message
         }),

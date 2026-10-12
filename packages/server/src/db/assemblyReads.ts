@@ -3,7 +3,7 @@ import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { makeAssembler } from "../assembler/assembler.ts"
 import type { ChatId } from "@rp/shared/chat.ts"
-import { AssemblyFailed, type ContextSnapshot, generationOf } from "../assembler/types.ts"
+import { ASSEMBLER_VERSION, AssemblyFailed, type ContextSnapshot, generationOf } from "../assembler/types.ts"
 import { sqlSources } from "./assemblySources.ts"
 import { readDefaults } from "./generationSettings.ts"
 import type { ReadOps } from "./ops.ts"
@@ -26,15 +26,21 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
       }).pipe(query("AssembleContext")),
 
     RebuildContext: ({ userId, snapshot: json }) =>
-      Effect.suspend(() => {
+      Effect.gen(function* () {
         const taken = JSON.parse(json) as ContextSnapshot
+        if ((taken.assemblerVersion ?? 0) !== ASSEMBLER_VERSION) {
+          return {
+            _tag: "EarlierAssemblerVersion" as const,
+            assemblerVersion: taken.assemblerVersion ?? 0,
+            currentVersion: ASSEMBLER_VERSION,
+            snapshot: json
+          }
+        }
         if (!taken.sources) {
-          return Effect.fail(
-            new AssemblyFailed({
-              reason: "invalid_document",
-              message: "The context can't be built again: it was taken before contexts pinned what they read."
-            })
-          )
+          return yield* new AssemblyFailed({
+            reason: "invalid_document",
+            message: "The context can't be built again: it was taken before contexts pinned what they read."
+          })
         }
         const { inputs } = taken
         const sources = sqlSources(
@@ -42,12 +48,10 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
           { userId, chatId: inputs.chatId as ChatId, slotId: inputs.slotId, versionId: inputs.versionId },
           { pins: taken.sources, inputs }
         )
-        return assembler
+        const built = yield* assembler
           .assemble({ now: inputs.now, timeZone: inputs.timeZone, frozen: taken.frozen, random: Math.random })
-          .pipe(
-            Effect.provide(sources.layer),
-            Effect.map((built) => ({ snapshot: JSON.stringify({ ...built, sources: sources.pins() }) }))
-          )
+          .pipe(Effect.provide(sources.layer))
+        return { _tag: "Rebuilt" as const, snapshot: JSON.stringify({ ...built, sources: sources.pins() }) }
       }).pipe(query("RebuildContext")),
 
     GetGenerationDefaults: ({ userId }) => readDefaults(sql, userId).pipe(query("GetGenerationDefaults"))

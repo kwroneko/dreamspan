@@ -5,6 +5,7 @@
 import { useAtomRefresh } from "@effect/atom-react"
 import type { BinItem } from "@rp/shared/bin.ts"
 import type { SlotId } from "@rp/shared/chat.ts"
+import type { ChatNotePosition } from "@rp/shared/editorApi.ts"
 import type { ChatNote } from "@rp/shared/chatSetupApi.ts"
 import type { Placement } from "@rp/shared/docs/note.ts"
 import { useMemo, useState } from "react"
@@ -28,11 +29,13 @@ const placed = (placement: Placement) => {
     case "tail":
       return `At the end of the chat, as ${placement.role}`
     case "section":
-      return placement.section === "before_main_prompt"
-        ? "Before the main prompt"
-        : placement.section === "after_main_prompt"
-          ? "After the main prompt"
-          : "Not sent: nothing places notes there yet"
+      return (
+        (placement.section === "before_main_prompt"
+          ? "Before the main prompt"
+          : placement.section === "after_main_prompt"
+            ? "After the main prompt"
+            : "Not sent: nothing places notes there yet") + (placement.role ? `, as ${placement.role}` : "")
+      )
     case "none":
       return "Not placed: only a macro reads it"
   }
@@ -58,7 +61,8 @@ function NoteRow({
   editing,
   onToggle,
   onEdit,
-  onDeleted
+  onDeleted,
+  position
 }: {
   note: ChatNote
   /** The card's name, for a card's note. */
@@ -67,6 +71,7 @@ function NoteRow({
   onToggle: (active: boolean) => void
   onEdit: () => void
   onDeleted: (item: BinItem) => void
+  position: ChatNotePosition
 }) {
   const call = useCaller()
   const title = titleOf(note)
@@ -88,10 +93,19 @@ function NoteRow({
       </div>
       {editing && (
         <NoteEditor
+          key={card === null ? (position.slotId ?? "start") : note.ref.id}
           noteRef={note.ref}
           call={call}
           {...(card === null
-            ? { onDeleted }
+            ? {
+                onDeleted,
+                chatNote: position,
+                notice: (
+                  <Alert title="From here on, on this branch">
+                    <p>Saving applies from the displayed message on, on this branch.</p>
+                  </Alert>
+                )
+              }
             : {
                 notice: (
                   <Alert title={`${card}'s note`}>
@@ -118,7 +132,12 @@ export function NotesDialog({
   const chatId = session.id
   // Library changes (a save, a delete, an undo from the bin) read the list again.
   const atom = useMemo(
-    () => AppClient.query("ListChatNotes", { chatId, slotId: leafSlotId }, { reactivityKeys: ["library"] }),
+    () =>
+      AppClient.query(
+        "ListChatNotes",
+        { chatId, slotId: leafSlotId },
+        { reactivityKeys: ["library", `chat-notes:${chatId}`] }
+      ),
     [chatId, leafSlotId]
   )
   const refresh = useAtomRefresh(atom)
@@ -152,6 +171,7 @@ export function NotesDialog({
         <NoteRow
           key={note.ref.id}
           note={note}
+          position={{ chatId, slotId: leafSlotId }}
           card={note.card === null ? null : (cards.get(note.card)?.name ?? "The card")}
           editing={editing === note.ref.id}
           onToggle={(active) => void toggle(note, active)}

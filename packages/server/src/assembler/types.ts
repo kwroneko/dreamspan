@@ -6,6 +6,9 @@ import type { NoteDoc } from "@rp/shared/docs/note.ts"
 import type { PresetDoc } from "@rp/shared/docs/preset.ts"
 import { Schema } from "effect"
 
+/** Bump whenever identical inputs would assemble differently. Missing means version 0. */
+export const ASSEMBLER_VERSION = 1
+
 export type Role = "system" | "user" | "assistant"
 
 /**
@@ -110,6 +113,7 @@ export interface SnapshotInputs {
 /** A context as built, stored as its rollout's frozen snapshot (DATA-MODEL §7.1). */
 export interface ContextSnapshot {
   readonly schema: 1
+  readonly assemblerVersion?: number
   readonly inputs: SnapshotInputs
   readonly request: AssembledRequest
   readonly pieces: ReadonlyArray<Piece>

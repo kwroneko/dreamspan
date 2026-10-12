@@ -24,6 +24,13 @@ const prompts = {
 }
 
 describe("draft fields", () => {
+  it("omits an optional field explicitly, without confusing omission with null", () => {
+    const field = valueField(["interval"])
+    const applied = applyDrafts("note", { interval: 2, title: "Note" }, [{ field, content: "undefined" }])
+    expect(applied).toEqual({ doc: { title: "Note" }, problems: [] })
+    expect(applyDrafts("note", { interval: 2 }, [{ field, content: "null" }]).doc).toEqual({ interval: null })
+  })
+
   it("names texts and values by path, in one spelling only", () => {
     expect(parseField(textField(["prompts", "identifier=main", "content"]))).toEqual({
       kind: "text",

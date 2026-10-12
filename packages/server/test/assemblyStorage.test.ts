@@ -3,6 +3,8 @@
 // acting user's, and the same context built again from the database (invariant 6).
 import { assert, describe, it } from "@effect/vitest"
 import { type EntityId, NewVersion, type SlotId, type VersionId } from "@rp/shared/chat.ts"
+import { DraftKey } from "@rp/shared/drafts.ts"
+import { textField } from "@rp/shared/editing.ts"
 import type { CardDoc } from "@rp/shared/docs/card.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
@@ -115,6 +117,199 @@ const setup = (handle = "ana") =>
 const texts = (snapshot: ContextSnapshot) => snapshot.request.messages.map((m) => `${m.role}: ${m.content}`)
 
 describe("context assembly from the database", () => {
+  it.live("returns stored legacy snapshots without replaying changed assembler semantics", () =>
+    Effect.gen(function* () {
+      const { reader, userId, assemble } = yield* setup()
+      const built = yield* assemble()
+      for (const version of [undefined, 0]) {
+        const legacy = { ...built, assemblerVersion: version, sources: { ...built.sources, userMessages: [] } }
+        const json = JSON.stringify(legacy)
+        const result = yield* reader.RebuildContext({ userId, snapshot: json })
+        assert.strictEqual(result._tag, "EarlierAssemblerVersion")
+        assert.strictEqual(result.snapshot, json)
+      }
+      assert.strictEqual(built.assemblerVersion, 1)
+      const rebuilt = yield* reader.RebuildContext({ userId, snapshot: JSON.stringify(built) })
+      assert.strictEqual(rebuilt._tag, "Rebuilt")
+      assert.deepStrictEqual(JSON.parse(rebuilt.snapshot), built)
+    }).pipe(Effect.provide(database()))
+  )
+
+  it.live("saves chat note drafts at the displayed leaf without moving sibling revisions", () =>
+    Effect.gen(function* () {
+      const { writer, reader, userId, entity, chat, state, sent, assemble } = yield* setup()
+      const note = yield* entity("note", "Weather", {
+        schema_version: 1,
+        title: "Weather",
+        content: "RAIN",
+        placement: { mode: "tail", role: "system" },
+        owner: { chat: chat.id },
+        exportable: false
+      })
+      yield* state({ key: "note.activate", value: { note: note.entityId } })
+      const field = textField(["content"])
+      const save = (
+        content: string,
+        baseRevisionId: typeof note.ref.headRevisionId,
+        expectedRowVersion: number | null
+      ) =>
+        writer.SaveDraft({
+          userId,
+          key: new DraftKey({ targetKind: "entity_field", targetId: note.ref.id, field }),
+          content,
+          expectedRowVersion,
+          baseRevision: baseRevisionId
+        })
+      const position = { chatId: chat.id, slotId: sent.slotId }
+      const draft = yield* save("SUN", note.ref.headRevisionId, null)
+      const committed = yield* writer.CommitEditorDrafts({
+        userId,
+        refId: note.ref.id,
+        expectedRowVersion: note.ref.rowVersion,
+        fields: [{ field, draftId: draft.id, expectedRowVersion: draft.rowVersion }],
+        message: null,
+        chatNote: position
+      })
+      const events = yield* reader.StateEventsAt({ userId, chatId: chat.id, slotId: sent.slotId })
+      assert.isTrue(
+        events.some((e) => e.data.key === "note.binding" && e.data.value.revision === committed.ref.headRevisionId)
+      )
+      assert.include(texts(yield* assemble()), "system: SUN")
+      const elsewhere = yield* reader.OpenEditor({
+        userId,
+        refId: note.ref.id,
+        chatNote: { chatId: chat.id, slotId: chat.activeLeafSlotId }
+      })
+      assert.strictEqual(elsewhere.doc.content, "RAIN")
+      const here = yield* reader.OpenEditor({ userId, refId: note.ref.id, chatNote: position })
+      assert.strictEqual(here.doc.content, "SUN")
+      assert.strictEqual(here.ref.headRevisionId, committed.ref.headRevisionId)
+      assert.strictEqual((yield* reader.OpenEditor({ userId, refId: note.ref.id })).doc.content, "RAIN")
+      // A second edit must start from the branch binding, preserving the first edit's other fields.
+      const second = yield* save("SNOW", here.ref.headRevisionId, draft.rowVersion + 1)
+      yield* writer.CommitEditorDrafts({
+        userId,
+        refId: note.ref.id,
+        expectedRowVersion: here.ref.rowVersion,
+        fields: [{ field, draftId: second.id, expectedRowVersion: second.rowVersion }],
+        message: null,
+        chatNote: position
+      })
+      assert.strictEqual(
+        (yield* reader.OpenEditor({ userId, refId: note.ref.id, chatNote: position })).doc.content,
+        "SNOW"
+      )
+    }).pipe(Effect.provide(database()))
+  )
+
+  it.live("refuses a chat note editor position outside its owning chat, on reads and saves", () =>
+    Effect.gen(function* () {
+      const { writer, reader, userId, chat } = yield* setup()
+      const note = yield* writer.CreateChatNote({ userId, chatId: chat.id, title: "Own" })
+      const other = yield* writer.CreateChat({
+        userId,
+        kind: "rp",
+        status: "active",
+        title: "Other",
+        participants: [],
+        greeting: null
+      })
+      const peer = (yield* writer.EnsureUser({ handle: "peer", displayName: "Peer" })).id
+      const foreign = yield* writer.CreateChat({
+        userId: peer,
+        kind: "rp",
+        status: "active",
+        title: "Foreign",
+        participants: [],
+        greeting: null
+      })
+      for (const chatNote of [
+        { chatId: other.id, slotId: null },
+        { chatId: other.id, slotId: chat.activeLeafSlotId },
+        { chatId: foreign.id, slotId: null }
+      ]) {
+        assert.strictEqual(
+          (yield* Effect.flip(reader.OpenEditor({ userId, refId: note.id, chatNote })))._tag,
+          "NotFound"
+        )
+        assert.strictEqual(
+          (yield* Effect.flip(
+            writer.CommitEditorDrafts({
+              userId,
+              refId: note.id,
+              expectedRowVersion: note.rowVersion,
+              fields: [],
+              message: null,
+              chatNote
+            })
+          ))._tag,
+          "NotFound"
+        )
+      }
+    }).pipe(Effect.provide(database()))
+  )
+
+  it.live("pins an empty path's zero user count for an immediate rebuild", () =>
+    Effect.gen(function* () {
+      const writer = yield* Database.Writer
+      const reader = yield* Database.Reader
+      const userId = (yield* writer.EnsureUser({ handle: "empty", displayName: "Empty" })).id
+      const chat = yield* writer.CreateChat({
+        userId,
+        kind: "rp",
+        status: "active",
+        title: "Empty",
+        participants: [],
+        greeting: null
+      })
+      const note = yield* writer.CreateChatNote({ userId, chatId: chat.id, title: "Interval" })
+      const doc = (yield* reader.OpenEditor({ userId, refId: note.id })).doc
+      yield* writer.EditRef({
+        userId,
+        refId: note.id,
+        expectedRowVersion: note.rowVersion,
+        doc: { ...doc, interval: 2 },
+        message: null,
+        commitDraft: null
+      })
+      yield* writer.AddStateEvent({
+        userId,
+        chatId: chat.id,
+        slotId: null,
+        versionId: null,
+        scope: null,
+        data: { key: "note.activate", value: { note: note.entityId } }
+      })
+      const reply = yield* writer.AppendMessage({
+        userId,
+        chatId: chat.id,
+        parentSlotId: null,
+        branch: false,
+        version: new NewVersion({
+          speakerEntityId: null,
+          writer: "model",
+          content: "",
+          status: "generating",
+          macroMode: "verbatim",
+          origin: "generated"
+        }),
+        commitDraft: null
+      })
+      const { snapshot } = yield* reader.AssembleContext({
+        userId,
+        chatId: chat.id,
+        slotId: reply.slotId,
+        versionId: reply.version.id,
+        now: NOW,
+        timeZone: "UTC",
+        frozen: null
+      })
+      assert.strictEqual((JSON.parse(snapshot) as ContextSnapshot).sources?.userMessages?.[0]?.count, 0)
+      const rebuilt = yield* reader.RebuildContext({ userId, snapshot })
+      assert.deepStrictEqual(JSON.parse(rebuilt.snapshot), JSON.parse(snapshot))
+    }).pipe(Effect.provide(database()))
+  )
+
   it.live("builds the chat's context with its cards, preset and state", () =>
     Effect.gen(function* () {
       const { assemble, state, preset } = yield* setup()

@@ -67,6 +67,7 @@ class Fixture extends Context.Service<
     readonly second: Things
     /** bob's, in the bin. */
     readonly deleted: Things
+    readonly foreignNote: Item
     readonly theirs: Things
   }
 >()("test/stateKeys/Fixture") {}
@@ -124,7 +125,17 @@ const fixture = Layer.effect(
       participants: [],
       greeting: null
     })
+    const otherChat = yield* writer.CreateChat({
+      userId: bob,
+      kind: "rp",
+      status: "active",
+      title: "Other",
+      participants: [],
+      greeting: null
+    })
+    const foreign = yield* writer.CreateChatNote({ userId: bob, chatId: otherChat.id, title: "Foreign" })
     return {
+      foreignNote: { entity: foreign.entityId, ref: foreign.id, revision: foreign.headRevisionId },
       add: (key: string, value: Value, scope?: string) =>
         writer
           .AddStateEvent({
@@ -219,6 +230,19 @@ layer(fixture, { excludeTestServices: true, timeout: "60 seconds" })("state key 
         )
       }
     }
+  }
+
+  for (const key of ["note.activate", "note.deactivate", "note.binding", "author_note.set"] as const) {
+    it.effect(`${key}: another chat's note is NotFound`, () =>
+      Effect.gen(function* () {
+        const f = yield* Fixture
+        const value =
+          key === "note.binding"
+            ? { note: f.foreignNote.entity, revision: f.foreignNote.revision }
+            : { note: f.foreignNote.entity }
+        assert.strictEqual(yield* f.add(key, value), "NotFound")
+      })
+    )
   }
 
   // An event's scope, when it isn't a role, is a participant: a card of the user's.

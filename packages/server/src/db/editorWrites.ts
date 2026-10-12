@@ -22,6 +22,8 @@ import { uuidv7 } from "@rp/shared/id.ts"
 import { Effect } from "effect"
 import type { SqlClient, SqlError } from "effect/sql"
 import type { makeDraftStore } from "./drafts.ts"
+import { makeGraphWrites } from "./graphWrites.ts"
+import { noteAt } from "./noteAt.ts"
 import { type makeLibraryQueries, type RefRow, toLibraryRef } from "./library.ts"
 import type { EncodedDoc } from "./libraryWrites.ts"
 import { NotFound, RefChange, RefOperationRefused, StaleWrite, type WriteOps } from "./ops.ts"
@@ -68,6 +70,7 @@ export interface LibrarySteps {
 }
 
 const parseValue = (content: string): unknown => {
+  if (content === "undefined") return undefined
   try {
     return JSON.parse(content)
   } catch {
@@ -107,9 +110,10 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps) => {
   const refused = (ref: RefRow, reason: string) => new RefOperationRefused({ refId: ref.id, reason })
 
   const handlers = {
-    CommitEditorDrafts: ({ userId, refId, expectedRowVersion, fields, message }) =>
+    CommitEditorDrafts: ({ userId, refId, expectedRowVersion, fields, message, chatNote }) =>
       Effect.gen(function* () {
-        const ref = yield* lib.ownedRef(userId, refId)
+        const owned = yield* lib.ownedRef(userId, refId)
+        const ref = chatNote ? yield* noteAt(sql, lib, userId, owned, chatNote) : owned
         yield* steps.checkRowVersion(ref, expectedRowVersion)
         const head = yield* lib.loadDoc(ref.head_revision_id)
         const rows = []
@@ -165,7 +169,34 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps) => {
             problems: dropped.map(({ field }) => `${field}: a ${ref.kind} has no such field, so this can't be saved.`)
           })
         }
-        const change = yield* userEdit(ref, valid.doc, message, null)
+        const change = yield* chatNote
+          ? Effect.gen(function* () {
+              const current = yield* steps.revision(ref.head_revision_id)
+              const encoded = steps.encode(valid.doc)
+              if (encoded.hash === current.doc_hash) return new RefChange({ ref: toLibraryRef(ref), followers: [] })
+              const revision = yield* steps.insertRevision({
+                entityId: ref.entity_id,
+                schemaVersion: current.schema_version,
+                doc: encoded,
+                parents: [ref.head_revision_id],
+                origin: "user",
+                originRef: null,
+                message
+              })
+              yield* makeGraphWrites(sql, drafts).insertStateEvent(
+                userId,
+                chatNote.chatId,
+                chatNote.slotId,
+                null,
+                null,
+                {
+                  key: "note.binding",
+                  value: { note: ref.entity_id as EntityId, revision: revision as never }
+                }
+              )
+              return new RefChange({ ref: toLibraryRef({ ...ref, head_revision_id: revision }), followers: [] })
+            })
+          : userEdit(ref, valid.doc, message, null)
         let recovered = 0
         for (const row of rows) {
           const orphan = orphans.has(row.field)

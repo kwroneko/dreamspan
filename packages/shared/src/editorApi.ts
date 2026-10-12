@@ -3,6 +3,7 @@
 // saving commits the drafts as one revision. Writes carry the row version the client saw.
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
+import { ChatId, SlotId } from "./chat.ts"
 import { BinItem } from "./bin.ts"
 import { Draft, DraftState } from "./drafts.ts"
 import { NotFound, ServerError, StaleWrite } from "./errors.ts"
@@ -70,6 +71,10 @@ const Subtitle = Schema.String.check(Schema.isMaxLength(200), Schema.isPattern(/
 const Errors = [NotFound, ServerError] as const
 const Writes = [NotFound, StaleWrite, EditRefused, ServerError] as const
 
+/** A chat note edits from the displayed position, on that branch. */
+export const ChatNotePosition = Schema.Struct({ chatId: ChatId, slotId: Schema.NullOr(SlotId) })
+export type ChatNotePosition = typeof ChatNotePosition.Type
+
 const DraftField = { refId: RefId, field: Schema.String }
 
 /**
@@ -87,7 +92,11 @@ export const EditorDraftSave = Schema.Struct({
 })
 
 export class EditorApi extends RpcGroup.make(
-  Rpc.make("OpenEditor", { payload: { refId: RefId }, success: EditorSnapshot, error: Schema.Union([...Errors]) }),
+  Rpc.make("OpenEditor", {
+    payload: { refId: RefId, chatNote: Schema.optionalKey(ChatNotePosition) },
+    success: EditorSnapshot,
+    error: Schema.Union([...Errors])
+  }),
   /** A card from scratch: an upstream with every field empty but its name. */
   Rpc.make("CreateCard", {
     payload: { label: Label, name: Schema.String },
@@ -124,6 +133,7 @@ export class EditorApi extends RpcGroup.make(
   /** Saves the named drafts as one revision, and ends them. */
   Rpc.make("CommitEditorDrafts", {
     payload: {
+      chatNote: Schema.optionalKey(ChatNotePosition),
       refId: RefId,
       expectedRowVersion: Schema.Int,
       /** Each draft by its field, its id and the row version the client saved it at. */

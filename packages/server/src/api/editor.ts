@@ -10,6 +10,7 @@ import { NotFound, ServerError } from "@rp/shared/errors.ts"
 import type { RefId } from "@rp/shared/library.ts"
 import { Effect } from "effect"
 import { RpcClientError } from "effect/rpc"
+import { ChatHub } from "../chat/ChatHub.ts"
 import { Reader, Writer } from "../db/Database.ts"
 import { DraftTooLarge, type RefChange, RefOperationRefused, StorageError } from "../db/ops.ts"
 
@@ -66,13 +67,16 @@ const checkField = (field: string) =>
     : Effect.void
 
 export const makeEditorHandlers = Effect.gen(function* () {
+  const hub = yield* ChatHub
   const reader = yield* Reader
   const writer = yield* Writer
   const userId = Effect.map(CurrentUser, (user) => user.id)
 
   const handlers = {
-    OpenEditor: ({ refId }) =>
-      Effect.flatMap(userId, (id) => reader.OpenEditor({ userId: id, refId })).pipe(settle("OpenEditor")),
+    OpenEditor: ({ refId, chatNote }) =>
+      Effect.flatMap(userId, (id) => reader.OpenEditor({ userId: id, refId, ...(chatNote ? { chatNote } : {}) })).pipe(
+        settle("OpenEditor")
+      ),
 
     CreateCard: ({ label, name }) =>
       Effect.gen(function* () {
@@ -126,10 +130,25 @@ export const makeEditorHandlers = Effect.gen(function* () {
         })
       ).pipe(settle("DiscardEditorDraft")),
 
-    CommitEditorDrafts: ({ refId, expectedRowVersion, fields, message }) =>
+    CommitEditorDrafts: ({ refId, expectedRowVersion, fields, message, chatNote }) =>
       Effect.flatMap(userId, (id) =>
-        writer.CommitEditorDrafts({ userId: id, refId, expectedRowVersion, fields, message })
-      ).pipe(Effect.map(saved), settle("CommitEditorDrafts")),
+        writer.CommitEditorDrafts({
+          userId: id,
+          refId,
+          expectedRowVersion,
+          fields,
+          message,
+          ...(chatNote ? { chatNote } : {})
+        })
+      ).pipe(
+        Effect.tap(() =>
+          Effect.sync(() => {
+            if (chatNote) hub.publish(chatNote.chatId, { _tag: "State" })
+          })
+        ),
+        Effect.map(saved),
+        settle("CommitEditorDrafts")
+      ),
 
     ListRevisions: ({ refId, limit }) =>
       Effect.flatMap(userId, (id) => reader.RefHistory({ userId: id, refId, limit })).pipe(settle("ListRevisions")),

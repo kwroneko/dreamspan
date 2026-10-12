@@ -42,7 +42,8 @@ export const Placement = Schema.Union([
       "after_main_prompt",
       "author_note_top",
       "author_note_bottom"
-    ])
+    ]),
+    role: Schema.optionalKey(LoreRole)
   }),
   /** [P] Not placed: only a macro (ST's `{{summary}}`) reads it. */
   Schema.Struct({ mode: Schema.Literal("none") })

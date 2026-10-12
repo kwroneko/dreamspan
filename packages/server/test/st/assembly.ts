@@ -41,6 +41,7 @@ interface Config {
   readonly name: string
   readonly presets: ReadonlyArray<string>
   readonly generate?: "impersonate" | "swipe"
+  readonly empty?: boolean
   readonly postProcessing?: string
   readonly summary?: Summary
   readonly authorNote?: AuthorNote
@@ -66,9 +67,13 @@ const summaryNote = (s: Summary): NoteInput => ({
     content: s.text,
     placement:
       s.position === 0
-        ? { mode: "section", section: "after_main_prompt" }
+        ? { mode: "section", section: "after_main_prompt", role: (["system", "user", "assistant"] as const)[s.role]! }
         : s.position === 2
-          ? { mode: "section", section: "before_main_prompt" }
+          ? {
+              mode: "section",
+              section: "before_main_prompt",
+              role: (["system", "user", "assistant"] as const)[s.role]!
+            }
           : { mode: "depth", depth: s.depth, role: (["system", "user", "assistant"] as const)[s.role]! },
     owner: { chat: "chat-1" as never },
     exportable: true,
@@ -97,9 +102,17 @@ const authorNoteInput = (note: AuthorNote): NoteInput => ({
     content: note.text,
     placement:
       note.position === 0
-        ? { mode: "section", section: "after_main_prompt" }
+        ? {
+            mode: "section",
+            section: "after_main_prompt",
+            role: (["system", "user", "assistant"] as const)[note.role]!
+          }
         : note.position === 2
-          ? { mode: "section", section: "before_main_prompt" }
+          ? {
+              mode: "section",
+              section: "before_main_prompt",
+              role: (["system", "user", "assistant"] as const)[note.role]!
+            }
           : { mode: "depth", depth: note.depth, role: (["system", "user", "assistant"] as const)[note.role]! },
     owner: { chat: "chat-1" as never },
     exportable: true,
@@ -142,7 +155,9 @@ const ourRequest = async (
       ? lines.slice(0, -1)
       : config.generate
         ? lines
-        : [...lines, { side: "user" as const, content: MESSAGE }]
+        : config.empty
+          ? lines
+          : [...lines, { side: "user" as const, content: MESSAGE }]
   const snapshot = await Effect.runPromise(
     assembleFixture({
       messages,
@@ -229,6 +244,14 @@ export const compareAssembly = async (
       authorNote: authorNote(2, 4, 0)
     },
     { name: "default, author's note every 2nd message", presets: ["default"], authorNote: authorNote(1, 0, 0, 2) },
+    {
+      name: "full, empty send counts toward interval 2",
+      presets: ["full"],
+      authorNote: authorNote(1, 0, 0, 2),
+      empty: true
+    },
+    { name: "default, author's note after main as user", presets: ["default"], authorNote: authorNote(0, 4, 1) },
+    { name: "default, author's note before main as assistant", presets: ["default"], authorNote: authorNote(2, 4, 2) },
     ...["default", "full"].flatMap((preset) =>
       (["impersonate", "swipe"] as const).map((generate) => ({
         name: `${preset}, ${generate}`,
@@ -253,7 +276,7 @@ export const compareAssembly = async (
         {
           presets: config.presets,
           character,
-          message: MESSAGE,
+          message: config.empty ? "" : MESSAGE,
           ...(config.generate ? { generate: config.generate } : {})
         },
         config.postProcessing,

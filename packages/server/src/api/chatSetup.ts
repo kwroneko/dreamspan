@@ -1,3 +1,4 @@
+import type { RevisionId } from "@rp/shared/library.ts"
 // RPC handlers for chat setup, speakers and the send queue (@rp/shared/chatSetupApi.ts).
 // Every handler acts as the authenticated user; storage enforces ownership, so another
 // user's ids are NotFound. Changes are published to the chat's subscribers.
@@ -136,8 +137,17 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
         const cards = state.participants.filter((entity) => !played.has(entity)) as Array<EntityId>
         const switches = noteSwitches(events)
         const entries = yield* reader.ChatNoteEntries({ userId: id, chatId, cards })
-        return entries.map(
-          (entry) => new ChatNote({ ...entry, active: switches.get(entry.ref.entityId) ?? entry.first })
+        return yield* Effect.forEach(entries, (entry) =>
+          Effect.gen(function* () {
+            const revisionId = state.noteRevisions[entry.ref.entityId] as RevisionId | undefined
+            const resolved = revisionId
+              ? {
+                  ref: { ...entry.ref, headRevisionId: revisionId },
+                  doc: yield* reader.GetRevisionDoc({ userId: id, refId: entry.ref.id, revisionId })
+                }
+              : entry
+            return new ChatNote({ ...entry, ...resolved, active: switches.get(entry.ref.entityId) ?? entry.first })
+          })
         )
       }).pipe(internal("ListChatNotes")),
 

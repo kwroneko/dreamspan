@@ -479,7 +479,7 @@ test("a change that can't reach the server survives its note going to the bin an
   const unsent = "Unsent offline note text 73519"
   await box.fill(unsent)
   await expect.poll(async () => (await copies(page)).map(text)).toContain(unsent)
-  const item = await admin((api) => api.DeleteCardNote({ noteRefId: seeded.note.id }))
+  const item = await admin((api) => api.DeleteNote({ noteRefId: seeded.note.id }))
   // In the bin, the note can't be opened, and its copy waits.
   await page.reload()
   await expect(page.getByRole("alert")).toBeVisible()

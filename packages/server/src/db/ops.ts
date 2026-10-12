@@ -23,7 +23,7 @@ import {
   RevisionId
 } from "@rp/shared/library.ts"
 import { LibraryImport } from "@rp/shared/libraryImport.ts"
-import { EditConflict, EditorSnapshot, InvalidDocument, NoteEntry } from "@rp/shared/editorApi.ts"
+import { ChatNotePosition, EditConflict, EditorSnapshot, InvalidDocument, NoteEntry } from "@rp/shared/editorApi.ts"
 import { NoteDoc } from "@rp/shared/docs/note.ts"
 import {
   Connection,
@@ -1089,6 +1089,7 @@ export class WriteOps extends RpcGroup.make(
    */
   Rpc.make("CommitEditorDrafts", {
     payload: {
+      chatNote: Schema.optionalKey(ChatNotePosition),
       userId: UserId,
       refId: RefId,
       expectedRowVersion: Schema.Int,
@@ -1568,7 +1569,7 @@ export class ReadOps extends RpcGroup.make(
   }),
   // --- The card and preset editors (editorReads.ts).
   Rpc.make("OpenEditor", {
-    payload: { userId: UserId, refId: RefId },
+    payload: { userId: UserId, refId: RefId, chatNote: Schema.optionalKey(ChatNotePosition) },
     success: EditorSnapshot,
     error: Schema.Union([NotFound, StorageError])
   }),
@@ -1617,7 +1618,15 @@ export class ReadOps extends RpcGroup.make(
    */
   Rpc.make("RebuildContext", {
     payload: { userId: UserId, snapshot: Schema.String },
-    success: Schema.Struct({ snapshot: Schema.String }),
+    success: Schema.Union([
+      Schema.Struct({ _tag: Schema.Literal("Rebuilt"), snapshot: Schema.String }),
+      Schema.Struct({
+        _tag: Schema.Literal("EarlierAssemblerVersion"),
+        assemblerVersion: Schema.Int,
+        currentVersion: Schema.Int,
+        snapshot: Schema.String
+      })
+    ]),
     error: Schema.Union([NotFound, AssemblyFailed, StorageError])
   }),
   /** The user's generation defaults; one naming something gone reads as none. */

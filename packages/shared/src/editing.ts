@@ -206,7 +206,7 @@ export const applyDrafts = (kind: EntityKind, head: Doc, drafts: ReadonlyArray<D
     let value: unknown = draft.content
     if (fieldKind === "value") {
       try {
-        value = JSON.parse(draft.content)
+        value = draft.content === "undefined" ? undefined : JSON.parse(draft.content)
       } catch {
         problem("This value isn't valid.")
         continue

@@ -948,7 +948,7 @@ const OPS: ReadonlyArray<Op> = [
       const note = w.rng() < 0.4
       const slot = pick(w.rng, w.liveSlots())
       if (!note && slot === undefined) return null
-      w.later(note ? w.api.DeleteCardNote({ noteRefId: w.noteRef }) : w.api.DeleteMessage({ slotId: slot!.id }))
+      w.later(note ? w.api.DeleteNote({ noteRefId: w.noteRef }) : w.api.DeleteMessage({ slotId: slot!.id }))
       return note ? "the note" : slot!.id
     }
   },

@@ -7,6 +7,7 @@ import { SqlClient } from "effect/sql"
 import { makeDraftStore } from "./drafts.ts"
 import { makeLibraryQueries, toLibraryRef } from "./library.ts"
 import { isMediaPath } from "./media.ts"
+import { noteAt } from "./noteAt.ts"
 import { NotFound, type ReadOps } from "./ops.ts"
 import { query } from "./tx.ts"
 
@@ -16,9 +17,10 @@ export const makeEditorReadHandlers = Effect.gen(function* () {
   const drafts = makeDraftStore(sql)
 
   const handlers = {
-    OpenEditor: ({ userId, refId }) =>
+    OpenEditor: ({ userId, refId, chatNote }) =>
       Effect.gen(function* () {
-        const ref = yield* lib.ownedRef(userId, refId)
+        const owned = yield* lib.ownedRef(userId, refId)
+        const ref = chatNote ? yield* noteAt(sql, lib, userId, owned, chatNote) : owned
         // The chats a change to this ref reaches: those whose state names it, those with an
         // override following it, and, for the entity's upstream, those the card joined. A
         // chat counts even if the card left it since: better to say too many than too few.

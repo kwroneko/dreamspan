@@ -253,10 +253,23 @@ const notesStage: AssemblerStage = {
             cast.characters.map((c) => c.entity)
           )
         : 0
-      assembly.notes = active.filter((note) => due(note.doc.interval, userMessages))
+      assembly.notes = active
+      assembly.noteUserMessages = userMessages
       return assembly
     })
 }
+
+/** Gate after the history's roles exist, before any note can change its last role. */
+const noteGateStage = sync("note-gate", (assembly) => {
+  const fill =
+    need(assembly, "projected").at(-1)?.role === "assistant" &&
+    need(assembly, "preset").doc.utility_prompts.send_if_empty !== ""
+  assembly.sendIfEmpty = fill
+  const count = need(assembly, "noteUserMessages") + (fill && need(assembly, "cast").type === "normal" ? 1 : 0)
+  const active = need(assembly, "notes")
+  assembly.skippedNotes = active.filter((note) => !due(note.doc.interval, count) && (note.doc.interval ?? 0) > 1)
+  assembly.notes = active.filter((note) => due(note.doc.interval, count))
+})
 
 const modeOf = (state: ChatState, cast: Cast): Mode => {
   const layout = state.layoutCards
@@ -741,8 +754,8 @@ const exampleLines = (assembly: Assembly, card: CardInput, char: string, prefixN
 }
 
 /** The chat's summary as ST's Summarize extension kept it, when the chat has it on (DESIGN §8.1). */
-const summaryNote = (assembly: Assembly) =>
-  assembly.notes?.findLast((note) => note.doc.kind === "imported_summary" && noteCard(note.doc) === null)
+const summaryNote = (assembly: Assembly, notes = assembly.notes) =>
+  notes?.findLast((note) => note.doc.kind === "imported_summary" && noteCard(note.doc) === null)
 
 /**
  * The summary as the extension sends it (formatMemoryValue): its template with `{{summary}}`
@@ -783,7 +796,7 @@ const noteText = (assembly: Assembly, note: NoteInput, owner: CardInput | null):
  */
 type NotePlace =
   | { readonly at: "chat"; readonly depth: number; readonly role: Role }
-  | { readonly at: "start" | "end"; readonly volatile: boolean }
+  | { readonly at: "start" | "end"; readonly volatile: boolean; readonly role: Role }
 
 const placeOf = (note: NoteInput): NotePlace | null => {
   const { placement } = note.doc
@@ -797,7 +810,8 @@ const placeOf = (note: NoteInput): NotePlace | null => {
       return {
         at: placement.section === "before_main_prompt" ? "start" : "end",
         // A note that comes and goes with its interval changes the prefix it's in.
-        volatile: (note.doc.interval ?? 0) > 1
+        volatile: (note.doc.interval ?? 0) > 1,
+        role: placement.role ?? "system"
       }
     case "none":
       return null
@@ -811,8 +825,10 @@ const placeOf = (note: NoteInput): NotePlace | null => {
  * in this order, and those beside the main prompt go there in it.
  */
 const placedNotes = (assembly: Assembly, cards: ReadonlyArray<CardInput>) => {
+  const env = need(assembly, "macros")
   const authorNote = need(assembly, "state").authorNote
-  const summary = summaryNote(assembly)
+  const candidates = [...need(assembly, "notes"), ...(assembly.skippedNotes ?? [])]
+  const summary = summaryNote(assembly, candidates)
   const rank = (note: NoteInput) =>
     note === summary
       ? 0
@@ -821,7 +837,7 @@ const placedNotes = (assembly: Assembly, cards: ReadonlyArray<CardInput>) => {
         : note.entity === authorNote || note.doc.kind === "author_note"
           ? 1
           : 2
-  return need(assembly, "notes")
+  return candidates
     .filter((note) => note.doc.kind !== "imported_summary" || note === summary)
     .toSorted((a, b) => rank(a) - rank(b) || (a.entity < b.entity ? -1 : a.entity > b.entity ? 1 : 0))
     .flatMap((note) => {
@@ -829,8 +845,19 @@ const placedNotes = (assembly: Assembly, cards: ReadonlyArray<CardInput>) => {
       const owner = card === null ? null : cards.find((c) => c.entity === card)
       const place = placeOf(note)
       if (owner === undefined || place === null) return []
-      const text = note === summary ? summaryText(assembly, note) : noteText(assembly, note, owner)
-      return text ? [{ text, place }] : []
+      const skipped = assembly.skippedNotes?.includes(note)
+      if (note === summary && !skipped) return [{ text: () => summaryText(assembly, note), place }]
+      const text = skipped
+        ? {
+            text: "",
+            piece: env.verbatim(
+              `note:${note.entity}`,
+              { kind: "note", entity: note.entity, revision: note.revision },
+              ""
+            )
+          }
+        : noteText(assembly, note, owner)
+      return text ? [{ text: () => text, place }] : []
     })
 }
 
@@ -848,7 +875,7 @@ const composeStage = sync("compose", (assembly) => {
   const control: Array<StMessage> = []
   let markers: { description: Text | null; personality: Text | null; scenario: Text | null; persona: Text | null }
   let examples: Array<Array<ChatLine>>
-  let notes: ReturnType<typeof placedNotes>
+  let pendingNotes: ReturnType<typeof placedNotes>
   let newChat: Text | null
 
   // ST's card overrides, expanded with the card's fields, ahead of everything else.
@@ -886,7 +913,7 @@ const composeStage = sync("compose", (assembly) => {
             })()
           : null
     }
-    notes = placedNotes(assembly, [char])
+    pendingNotes = placedNotes(assembly, [char])
     newChat = optional("utility.new_chat_prompt", utility.new_chat_prompt)
   } else {
     const blocks = (cards: ReadonlyArray<CardInput>, block: typeof cardBlock) =>
@@ -909,7 +936,7 @@ const composeStage = sync("compose", (assembly) => {
     examples = (mode.layout === "swap_tail" ? tailCards : cast.characters).flatMap((card) =>
       exampleLines(assembly, card, card.doc.name, true)
     )
-    notes = placedNotes(assembly, mode.layout === "swap_tail" ? tailCards : cast.characters)
+    pendingNotes = placedNotes(assembly, mode.layout === "swap_tail" ? tailCards : cast.characters)
     newChat =
       cast.characters.length > 1
         ? optional("utility.new_group_chat_prompt", utility.new_group_chat_prompt)
@@ -954,6 +981,22 @@ const composeStage = sync("compose", (assembly) => {
     control.push({ role: "system", content: direction, pieces: [piece], kind: "volatile" })
   }
 
+  // Placement order is independent of expansion order: summaries see main's writes.
+  const notes = pendingNotes.flatMap(({ text, place }) => {
+    const expanded = text()
+    return expanded ? [{ text: expanded, place }] : []
+  })
+  const sendIfEmpty = assembly.sendIfEmpty ? optional("utility.send_if_empty", utility.send_if_empty) : null
+  const normalFill =
+    cast.type === "normal" && sendIfEmpty?.text
+      ? {
+          role: "user" as const,
+          content: doc.names_behavior === "content" ? `${names.user}: ${sendIfEmpty.text}` : sendIfEmpty.text,
+          ...(doc.names_behavior === "completion" ? { name: sanitizeName(names.user) } : {}),
+          pieces: [sendIfEmpty.piece],
+          kind: "volatile" as const
+        }
+      : null
   const groupNames = !mode.st
   const projected = need(assembly, "projected")
   // The history stage ran the scripts on the verbatim messages it read; templates run here.
@@ -987,18 +1030,20 @@ const composeStage = sync("compose", (assembly) => {
       collection.splice(place.at === "start" ? main : main + 1, 0, {
         ...mainPrompt,
         identifier: "note",
+        role: place.role,
         content: text.text,
         piece: text.piece,
         system_prompt: undefined,
-        forbid_overrides: false
+        forbid_overrides: false,
+        barrier: place.volatile && !text.text
       })
     } else if (mainPrompt) {
       const kind = place.volatile ? "volatile" : "prefix"
-      beside.push({ message: { role: "system", content: text.text, pieces: [text.piece], kind }, at: place.at })
+      beside.push({ message: { role: place.role, content: text.text, pieces: [text.piece], kind }, at: place.at })
     }
   }
   const chat = injectInChat(
-    projected.map((p, i) => chatLine(assembly, p, groupNames, scripted[i]!)),
+    [...projected.map((p, i) => chatLine(assembly, p, groupNames, scripted[i]!)), ...(normalFill ? [normalFill] : [])],
     collection.filter((p) => p.injection_position === "absolute"),
     injections
   )
@@ -1011,7 +1056,7 @@ const composeStage = sync("compose", (assembly) => {
     examples,
     newChat,
     newExampleChat: optional("utility.new_example_chat_prompt", utility.new_example_chat_prompt),
-    sendIfEmpty: optional("utility.send_if_empty", utility.send_if_empty),
+    sendIfEmpty: cast.type === "normal" ? null : sendIfEmpty,
     control,
     // The prefill is sent after everything else, but it's context all the same.
     budget: contextBudget(assembly) - (assembly.prefill ? tokensOf({ content: assembly.prefill }) : 0)
@@ -1036,7 +1081,12 @@ const messagesStage = sync("messages", (assembly) => {
   const doc = need(assembly, "preset").doc
   const names = need(assembly, "macros").names
   const cast = need(assembly, "cast")
-  let messages = [...need(assembly, "composition").messages]
+  // An empty skipped note still marks the next sent message as the potential boundary.
+  let barrier = false
+  let messages = need(assembly, "composition").messages.map((message) => {
+    if (message.kind === "volatile") barrier = true
+    return barrier ? { ...message, kind: "volatile" as const } : message
+  })
   if (doc.squash) messages = squash(messages)
   messages = messages.filter((m) => m.content)
   assembly.postNames = {
@@ -1105,6 +1155,7 @@ const builtinStages: ReadonlyArray<AssemblerStage> = [
   historyStage,
   resolveStage,
   rolesStage,
+  noteGateStage,
   composeStage,
   messagesStage,
   breakpointsStage,

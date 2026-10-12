@@ -47,8 +47,9 @@ export type StateEventData = typeof StateEventData.Type
  * of the same value: a ref or revision of that entity, a revision of that ref's entity, a
  * model of that connection.
  */
+/** `chatOwned` also checks a note document's owner.chat when present. */
 type IdField<F extends string> =
-  | { readonly table: "entity"; readonly kind: EntityKind }
+  | { readonly table: "entity"; readonly kind: EntityKind; readonly chatOwned?: true }
   | { readonly table: "ref"; readonly kind: EntityKind; readonly entity?: F }
   | { readonly table: "revision"; readonly kind: EntityKind; readonly entity?: F; readonly ref?: F }
   | { readonly table: "connection" }
@@ -84,10 +85,13 @@ export const stateKeyIds: { readonly [K in StateEventData["key"]]: StateKeyIds<V
       revision: { table: "revision", kind: "card", entity: "entity" }
     }
   },
-  "note.activate": { ids: { note: { table: "entity", kind: "note" } } },
-  "note.deactivate": { ids: { note: { table: "entity", kind: "note" } }, removes: true },
+  "note.activate": { ids: { note: { table: "entity", kind: "note", chatOwned: true } } },
+  "note.deactivate": { ids: { note: { table: "entity", kind: "note", chatOwned: true } }, removes: true },
   "note.binding": {
-    ids: { note: { table: "entity", kind: "note" }, revision: { table: "revision", kind: "note", entity: "note" } }
+    ids: {
+      note: { table: "entity", kind: "note", chatOwned: true },
+      revision: { table: "revision", kind: "note", entity: "note" }
+    }
   },
   "preset.binding": {
     ids: { ref: { table: "ref", kind: "preset" }, revision: { table: "revision", kind: "preset", ref: "ref" } }
@@ -105,7 +109,7 @@ export const stateKeyIds: { readonly [K in StateEventData["key"]]: StateKeyIds<V
   "lorebook.attach": { ids: { ref: { table: "ref", kind: "lorebook" } } },
   "lorebook.detach": { ids: { ref: { table: "ref", kind: "lorebook" } }, removes: true },
   "var.set": { ids: {} },
-  "author_note.set": { ids: { note: { table: "entity", kind: "note" } } }
+  "author_note.set": { ids: { note: { table: "entity", kind: "note", chatOwned: true } } }
 }
 
 /**
@@ -313,7 +317,6 @@ const apply = (state: ChatState, { data, scope }: FoldableEvent): ChatState => {
   }
 }
 
-/** Folds events, given in path order (position, then seq), into the state after them. */
 /**
  * The notes the events turned on or off, as they last left each (DESIGN §4.1). A note they
  * never named keeps its default: a card's first note is on, every other note off.
@@ -327,6 +330,7 @@ export const noteSwitches = (events: Iterable<FoldableEvent>) => {
   return last
 }
 
+/** Folds events, given in path order (position, then seq), into the state after them. */
 export const foldState = (events: Iterable<FoldableEvent>, initial: ChatState = emptyChatState): ChatState => {
   let state = initial
   for (const e of events) state = apply(state, e)

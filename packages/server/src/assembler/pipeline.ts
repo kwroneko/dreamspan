@@ -25,7 +25,7 @@ import type {
   RequestMessage,
   Target
 } from "./types.ts"
-import { AssemblyFailed } from "./types.ts"
+import { ASSEMBLER_VERSION, AssemblyFailed } from "./types.ts"
 
 export type SourceError = AssemblyFailed | NotFound | SqlError.SqlError
 
@@ -164,6 +164,9 @@ export interface Assembly {
   model?: ModelInput | null
   preset?: PresetInput
   notes?: ReadonlyArray<NoteInput>
+  skippedNotes?: ReadonlyArray<NoteInput>
+  noteUserMessages?: number
+  sendIfEmpty?: boolean
   mode?: Mode
   macros?: MacroEnvironment
   /** The preset's prompt regex scripts, with the time and output they have left. */
@@ -219,6 +222,7 @@ export const assemble = (stages: StageRegistry, request: AssemblyRequest) =>
     const mode = need(assembly, "mode")
     const snapshot: ContextSnapshot = {
       schema: 1,
+      assemblerVersion: ASSEMBLER_VERSION,
       inputs: {
         chatId: target.chatId,
         slotId: target.slotId,

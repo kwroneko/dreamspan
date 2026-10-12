@@ -16,6 +16,8 @@ export interface StPrompt {
   readonly injection_depth: number
   readonly injection_order: number
   readonly forbid_overrides: boolean
+  /** An intermittent note absent this turn still bounds what can be cached. */
+  readonly barrier?: boolean
 }
 
 /** A message being composed, before squashing and post-processing. */
@@ -99,11 +101,14 @@ export const injectInChat = (
   // Newest first, as ST holds them while injecting.
   const messages: Array<ChatLine> = [...lines].reverse()
   const depths = [
-    ...new Set([...prompts.filter((p) => p.content).map((p) => p.injection_depth), ...injections.map((i) => i.depth)])
+    ...new Set([
+      ...prompts.filter((p) => p.content || p.barrier).map((p) => p.injection_depth),
+      ...injections.map((i) => i.depth)
+    ])
   ].sort((a, b) => a - b)
   let inserted = 0
   for (const depth of depths) {
-    const atDepth = prompts.filter((p) => p.injection_depth === depth && p.content)
+    const atDepth = prompts.filter((p) => p.injection_depth === depth && (p.content || p.barrier))
     const groups = new Map<number, Array<StPrompt>>([[100, []]])
     for (const prompt of atDepth)
       groups.set(prompt.injection_order, [...(groups.get(prompt.injection_order) ?? []), prompt])
@@ -114,11 +119,25 @@ export const injectInChat = (
         const own = group.filter((p) => p.role === role)
         const extensions = order === 100 ? injections.filter((i) => i.depth === depth && i.role === role) : []
         const parts = [
-          ...(own.length > 0 ? [own.map((p) => p.content).join("\n")] : []),
-          ...(extensions.length > 0 ? [extensions.map((i) => i.text.text.trim()).join("\n")] : [])
+          ...(own.length > 0
+            ? [
+                own
+                  .map((p) => p.content)
+                  .filter(Boolean)
+                  .join("\n")
+              ]
+            : []),
+          ...(extensions.length > 0
+            ? [
+                extensions
+                  .map((i) => i.text.text.trim())
+                  .filter(Boolean)
+                  .join("\n")
+              ]
+            : [])
         ].filter((x) => x)
         const content = parts.map((x) => x.trim()).join("\n")
-        if (content.length === 0) continue
+        if (content.length === 0 && extensions.length === 0 && !own.some((p) => p.barrier)) continue
         const pieces = [
           ...own.flatMap((p) => (p.piece === null ? [] : [p.piece])),
           ...extensions.map((i) => i.text.piece)
@@ -213,6 +232,7 @@ export const compose = (input: {
   readonly examples: ReadonlyArray<ReadonlyArray<ChatLine>>
   readonly newChat: Text | null
   readonly newExampleChat: Text | null
+  /** A context-only filler for impersonation or swipe, after injections as ST adds it. */
   readonly sendIfEmpty: Text | null
   readonly control: ReadonlyArray<StMessage>
   /** Extension prompts (the summary, notes) put before or after the main prompt in turn (injectToMain). */
@@ -282,8 +302,7 @@ export const compose = (input: {
       : null
     const reserved = newChat ? tokensOf(newChat) : 0
     spend(reserved)
-    const last = input.chat.at(-1)
-    if (last?.role === "assistant" && input.sendIfEmpty && input.sendIfEmpty.text) {
+    if (input.chat.at(-1)?.role === "assistant" && input.sendIfEmpty?.text) {
       const message: StMessage = {
         role: "user",
         content: input.sendIfEmpty.text,
@@ -299,7 +318,7 @@ export const compose = (input: {
       const line = input.chat[i]!
       const message: StMessage = { ...line }
       if (budget - tokensOf(message) < 0) break
-      if (message.content) history.unshift(message)
+      if (message.content || message.kind === "volatile") history.unshift(message)
       spend(tokensOf(message))
       if (message.kind === "history") historySent++
     }

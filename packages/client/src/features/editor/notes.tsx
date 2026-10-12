@@ -1,5 +1,6 @@
 // Notes (DESIGN §4.1) and where notes and card modules go: a note's fields and its editor,
 // used by the card editor, a note's own page and a chat's notes.
+import type { ChatNotePosition } from "@rp/shared/editorApi.ts"
 import type { BinItem } from "@rp/shared/bin.ts"
 import type { Placement } from "@rp/shared/docs/note.ts"
 import { type FieldPath, valueField } from "@rp/shared/editing.ts"
@@ -12,6 +13,7 @@ import { Button } from "../../ui/Button.tsx"
 import { Field, Input } from "../../ui/Field.tsx"
 import { Select } from "../../ui/Select.tsx"
 import { Badge } from "../../ui/Surface.tsx"
+import { browserEnv } from "./backup.ts"
 import type { Caller } from "./caller.ts"
 import { FieldTools, NumberField, RecoveredNotice, RestoredNotice, SwitchField, TextField } from "./controls.tsx"
 import { SaveDialog } from "./SaveDialog.tsx"
@@ -70,12 +72,12 @@ export function PlacementField({
 }) {
   const placement = useValue<Placement | undefined>(store, path) ?? { mode: "section", section: "card" }
   const [depth, setDepth] = useState<string | null>(null)
-  const role: Role = placement.mode === "depth" || placement.mode === "tail" ? placement.role : "system"
+  const role: Role = placement.mode === "none" ? "system" : (placement.role ?? "system")
   const set = (place: Place, change: { depth?: number; role?: Role } = {}) => {
     const nextRole = change.role ?? role
     const nextDepth = change.depth ?? (placement.mode === "depth" ? placement.depth : 4)
     const next: Placement = place.startsWith("section:")
-      ? { mode: "section", section: place.slice("section:".length) as Section }
+      ? { mode: "section", section: place.slice("section:".length) as Section, role: nextRole }
       : place === "tail"
         ? { mode: "tail", role: nextRole }
         : place === "depth"
@@ -111,9 +113,9 @@ export function PlacementField({
             />
           </Field>
         )}
-        {(placement.mode === "depth" || placement.mode === "tail") && (
+        {(placement.mode === "depth" || placement.mode === "tail" || placement.mode === "section") && (
           <Field label="Role">
-            <Select items={ROLES} value={role} onValueChange={(next) => set(placement.mode as Place, { role: next })} />
+            <Select items={ROLES} value={role} onValueChange={(next) => set(placeOf(placement), { role: next })} />
           </Field>
         )}
       </div>
@@ -140,6 +142,7 @@ export function NoteFields({ store }: { store: EditorStore }) {
           path={["interval"]}
           label="Every how many of your messages (empty or 1: every time; 0: never)"
           integer
+          optional
           min={0}
           step="1"
         />
@@ -161,7 +164,8 @@ export function NoteEditor({
   noteRef,
   call,
   onDeleted,
-  notice
+  notice,
+  chatNote
 }: {
   noteRef: LibraryRef
   call: Caller
@@ -169,9 +173,10 @@ export function NoteEditor({
   onDeleted?: (item: BinItem) => void
   /** Said above the fields. */
   notice?: ReactNode
+  chatNote?: ChatNotePosition
 }) {
   const userId = useSession().user.id
-  const [store] = useState(() => new EditorStore(noteRef.id, userId, call))
+  const [store] = useState(() => new EditorStore(noteRef.id, userId, call, browserEnv, chatNote))
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<AppError | null>(null)
   const state = useEditorState(store)

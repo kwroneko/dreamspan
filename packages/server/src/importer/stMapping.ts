@@ -65,9 +65,9 @@ const placementOf = (position: number, depth: number, role: number): NoteDoc["pl
   position === -1
     ? { mode: "none" }
     : position === 0
-      ? { mode: "section", section: "after_main_prompt" }
+      ? { mode: "section", section: "after_main_prompt", role: stRole(role) }
       : position === 2
-        ? { mode: "section", section: "before_main_prompt" }
+        ? { mode: "section", section: "before_main_prompt", role: stRole(role) }
         : { mode: "depth", depth: noteDepth(depth), role: stRole(role) }
 
 /** A card greeting as a pattern: `{{char}}` filled in, `{{user}}` matching any name. */

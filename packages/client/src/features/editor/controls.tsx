@@ -167,7 +167,8 @@ export function NumberField({
   min,
   max,
   integer = false,
-  nullable = false
+  nullable = false,
+  optional = false
 }: {
   store: EditorStore
   path: FieldPath
@@ -178,14 +179,16 @@ export function NumberField({
   integer?: boolean
   /** Empty means no value (null). */
   nullable?: boolean
+  /** Empty omits an optional field. */
+  optional?: boolean
 }) {
   const value = useValue<number | null>(store, path)
   const [typed, setTyped] = useState<string | null>(null)
   const field = valueField(path)
   const accept = (text: string) => {
     setTyped(text)
-    if (nullable && text.trim() === "") {
-      if (value !== null) store.setValue(path, null)
+    if ((nullable || optional) && text.trim() === "") {
+      store.setValue(path, optional ? undefined : null)
       return
     }
     const number = Number(text)
