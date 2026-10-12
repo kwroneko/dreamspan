@@ -7,13 +7,15 @@ import { Worker } from "node:worker_threads"
 import { assert, layer } from "@effect/vitest"
 import type { ChatId, SlotId, VersionId } from "@rp/shared/chat.ts"
 import { DraftKey } from "@rp/shared/drafts.ts"
-import { readdirSync } from "node:fs"
+import { existsSync, lstatSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { foldState } from "@rp/shared/state.ts"
 import { Effect } from "effect"
 import { databaseFile } from "../src/db/connection.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
+import { removeOldStaging } from "../src/importer/StImports.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"
+import { tempDir } from "./support/tempDir.ts"
 import { importStFolder, sendFile, sendStFile } from "./support/stUpload.ts"
 
 const config = testConfig()
@@ -474,29 +476,57 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
     })
   )
 
-  it.effect("a long chat without a user message is skipped however its parts fall", () =>
+  it.effect("a chat of two or more messages without a user turn goes in, however its parts fall", () =>
+    Effect.gen(function* () {
+      const { importId, api } = yield* begin
+      const path = "chats/Bot/all-model.jsonl"
+      yield* answer(yield* sendFile(importId, path, jsonl({ chat_metadata: {} }), { card: "none", last: "0" }))
+      yield* answer(yield* sendFile(importId, path, jsonl(message("am-0", 0)), { card: "none", part: "1", last: "0" }))
+      const done = yield* answer(
+        yield* sendFile(importId, path, jsonl(message("am-2", 2)), { card: "none", part: "2", last: "1" })
+      )
+      assert.strictEqual(done.outcome, "added")
+      assert.deepStrictEqual(
+        pathTo("am-2").map((row) => row.content),
+        ["am-0", "am-2"]
+      )
+      const report = yield* api.GetStImportReport({ importId })
+      assert.isTrue(report.issues.some((issue) => issue.path === path && issue.code === "st.no_user_turn"))
+      assert.strictEqual(report.greetingOnly, 0)
+    })
+  )
+
+  it.effect("a chat of one message goes in when the user wrote it", () =>
     Effect.gen(function* () {
       const { importId } = yield* begin
-      const lines = Array.from({ length: 10 }, (_, i) => message("g".repeat(1024 * 1024), i * 2))
-      const a = "chats/Bot/long-greet-a.jsonl"
-      const b = "chats/Bot/long-greet-b.jsonl"
-      yield* answer(
-        yield* sendFile(importId, a, jsonl({ chat_metadata: {} }, ...lines.slice(0, 6)), { card: "none", last: "0" })
+      const path = "chats/Bot/one-user-message.jsonl"
+      const done = yield* sendStFile(importId, path, jsonl({ chat_metadata: {} }, message("oum-1", 1)), {
+        card: "none"
+      })
+      assert.strictEqual(done.outcome, "added")
+      assert.strictEqual(present("oum-1"), 1)
+    })
+  )
+
+  it.effect("a greeting-only file is skipped onto a chat an earlier import made, writing nothing", () =>
+    Effect.gen(function* () {
+      const path = "chats/Bot/greeting-reimport.jsonl"
+      const first = yield* begin
+      yield* sendStFile(first.importId, path, jsonl({ chat_metadata: {} }, message("gre-g", 0), message("gre-u", 1)), {
+        card: "none"
+      })
+      const slots = query("SELECT count(*) AS n FROM slots WHERE chat_id = ?", chatOf(path))[0]!.n
+      const second = yield* begin
+      const again = yield* sendStFile(
+        second.importId,
+        path,
+        jsonl({ chat_metadata: { note_prompt: "new" } }, message("gre-only", 0)),
+        { card: "none" }
       )
-      const aDone = yield* answer(
-        yield* sendFile(importId, a, jsonl(...lines.slice(6)), { card: "none", part: "1", last: "1" })
-      )
-      for (let i = 0; i < 9; i++) {
-        const body = jsonl(...(i === 0 ? [{ chat_metadata: {} }] : []), lines[i])
-        yield* answer(yield* sendFile(importId, b, body, { card: "none", part: String(i), last: "0" }))
-      }
-      const bDone = yield* answer(yield* sendFile(importId, b, jsonl(lines[9]), { card: "none", part: "9", last: "1" }))
-      assert.deepStrictEqual([aDone.outcome, bDone.outcome], ["skipped", "skipped"])
-      assert.isUndefined(chatOf(a))
-      assert.isUndefined(chatOf(b))
-      assert.lengthOf(query("SELECT id FROM chats WHERE title LIKE 'long-greet-%'"), 0)
-      // Held back past memory in a staging file, which is gone once the chat is skipped.
-      assert.deepStrictEqual(readdirSync(join(config.dataDir, "st-staging", importId)), [])
+      assert.strictEqual(again.outcome, "skipped")
+      assert.strictEqual(present("gre-only"), 0)
+      assert.strictEqual(query("SELECT count(*) AS n FROM slots WHERE chat_id = ?", chatOf(path))[0]!.n, slots)
+      assert.lengthOf(notesOf(chatOf(path)), 0)
     })
   )
 
@@ -633,51 +663,30 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
     })
   )
 
-  it.effect("a greeting-only branch is skipped without writing anything, so nothing of another import is touched", () =>
+  it.effect("a greeting-only branch is skipped without writing anything into its parent's chat", () =>
     Effect.gen(function* () {
-      const first = yield* begin
+      const { importId } = yield* begin
       yield* sendStFile(
-        first.importId,
+        importId,
         "chats/Bot/greet-root.jsonl",
         jsonl({ chat_metadata: {} }, message("gr-g", 0), message("gr-u", 1)),
-        {
-          card: "none"
-        }
+        { card: "none" }
       )
-      const greetings = Array.from({ length: 9 }, (_, i) => message(`gr${i}:${"g".repeat(1024 * 1024)}`, i * 2))
+      const chatId = chatOf("chats/Bot/greet-root.jsonl")
+      const slots = query("SELECT count(*) AS n FROM slots WHERE chat_id = ?", chatId)[0]!.n
       const header = { chat_metadata: { main_chat: "greet-root" } }
-      for (let i = 0; i < 9; i++) {
-        const body = jsonl(...(i === 0 ? [header] : []), greetings[i])
-        yield* answer(
-          yield* sendFile(first.importId, "chats/Bot/greet-only.jsonl", body, {
-            card: "none",
-            part: String(i),
-            last: "0"
-          })
-        )
-      }
-      const second = yield* begin
-      yield* sendStFile(
-        second.importId,
-        "chats/Bot/greet-kept.jsonl",
-        jsonl(header, ...greetings, message("greet-kept-user", 19)),
-        {
-          card: "none"
-        }
+      yield* answer(yield* sendFile(importId, "chats/Bot/greet-only.jsonl", jsonl(header), { card: "none", last: "0" }))
+      const skipped = yield* answer(
+        yield* sendFile(importId, "chats/Bot/greet-only.jsonl", jsonl(message("gr-other", 0)), {
+          card: "none",
+          part: "1",
+          last: "1"
+        })
       )
-      const skipped = yield* sendStFile(second.importId, "chats/Bot/greet-only.jsonl", jsonl(header, ...greetings), {
-        card: "none"
-      })
       assert.strictEqual(skipped.outcome, "skipped")
-      assert.strictEqual(present("greet-kept-user"), 1)
-      assert.strictEqual(
-        textOf(
-          query(
-            "SELECT s.id FROM slots s JOIN versions v ON v.id = s.selected_version_id WHERE v.content = 'greet-kept-user'"
-          )[0]!.id as string
-        ),
-        "greet-kept-user"
-      )
+      assert.isUndefined(chatOf("chats/Bot/greet-only.jsonl"))
+      assert.strictEqual(present("gr-other"), 0)
+      assert.strictEqual(query("SELECT count(*) AS n FROM slots WHERE chat_id = ?", chatId)[0]!.n, slots)
     })
   )
   it.effect("a new chat finished by another run ends with its leaf on its last message, however its parts fell", () =>
@@ -698,6 +707,23 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
         "added"
       )
       assert.strictEqual(yield* leafText(chatOf(path)), "leaf-329")
+    })
+  )
+
+  it.effect("the staging folder of earlier versions goes at startup, but a link there isn't followed", () =>
+    Effect.gen(function* () {
+      const dataDir = tempDir("st-staging")
+      mkdirSync(join(dataDir, "st-staging", "an-import"), { recursive: true })
+      writeFileSync(join(dataDir, "st-staging", "an-import", "chat.jsonl"), "held")
+      yield* removeOldStaging(dataDir)
+      assert.isFalse(existsSync(join(dataDir, "st-staging")))
+
+      const elsewhere = tempDir("st-staging-target")
+      writeFileSync(join(elsewhere, "keep.txt"), "kept")
+      symlinkSync(elsewhere, join(dataDir, "st-staging"))
+      yield* removeOldStaging(dataDir)
+      assert.strictEqual(readFileSync(join(elsewhere, "keep.txt"), "utf8"), "kept")
+      assert.isTrue(lstatSync(join(dataDir, "st-staging")).isSymbolicLink())
     })
   )
 })

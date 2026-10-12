@@ -53,7 +53,7 @@ export class StImportReport extends Schema.Class<StImportReport>("StImportReport
   counts: Schema.Record(Schema.String, StCount),
   messages: Schema.Int,
   summaries: Schema.Int,
-  /** Chats with only a greeting and no user turn, skipped (DESIGN §1.4). */
+  /** Chats of one message, not the user's: only a greeting, skipped (DESIGN §1.4). */
   greetingOnly: Schema.Int,
   /** Files ST has that this app doesn't read, by what they are (DESIGN §1.2). */
   unsupported: Schema.Array(Schema.Struct({ what: Schema.String, count: Schema.Int })),

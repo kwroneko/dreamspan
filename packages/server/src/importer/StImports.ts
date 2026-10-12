@@ -19,8 +19,9 @@ import type { EntityKind, RefId } from "@rp/shared/library.ts"
 import { classifyStPath, type StFile, stParentPath } from "@rp/shared/stFolder.ts"
 import { StFileResult, StHiddenRun, type StImportReport, StLinkChoice } from "@rp/shared/stImportApi.ts"
 import { createHash } from "node:crypto"
+import { lstat, rm } from "node:fs/promises"
 import { join } from "node:path"
-import { Context, Effect, Exit, Layer, Schedule, Schema } from "effect"
+import { Context, Effect, Exit, Layer, Schema } from "effect"
 import { ChatHub } from "../chat/ChatHub.ts"
 import { AppConfig } from "../config.ts"
 import { Reader, Writer } from "../db/Database.ts"
@@ -28,7 +29,6 @@ import { Formats } from "./Formats.ts"
 import { MediaHolds } from "./MediaHolds.ts"
 import { storeMedia } from "./mediaFiles.ts"
 import type { ParsedFile, StChatHeader, StPersona, StSettings, StSpeaker } from "./ops.ts"
-import { replay, stage, stagingDir, sweepStaging, unstage } from "./stStaging.ts"
 import { Report } from "./stReport.ts"
 import {
   type CardInfo,
@@ -49,16 +49,32 @@ const IDLE_MS = 60 * 60_000
  * are refused for this run. The heap holds about three times this: about 50 MB, for an hour.
  */
 const MAX_HELD_CHARS = 16 * 1024 * 1024
+
 /**
- * Messages held back while a chat has no user message yet, so a greeting-only chat is
- * skipped however its parts fall. Past this it's no greeting-only chat, and goes in.
+ * Earlier versions of the import kept a chat's messages in `DATA_DIR/st-staging` until its
+ * first user message. Nothing writes there now; at startup the folder goes, once, unless
+ * it's a link: then it's left alone, with a warning, rather than followed.
  */
-const MAX_PENDING_CHARS = 8 * 1024 * 1024
-/**
- * Past MAX_PENDING_CHARS, a chat still without a user message waits in a staging file
- * (stStaging.ts), up to this much; past that it's refused as no chat anyone wrote in.
- */
-const MAX_STAGED_BYTES = 256 * 1024 * 1024
+export const removeOldStaging = (dataDir: string) =>
+  Effect.tryPromise(async () => {
+    const path = join(dataDir, "st-staging")
+    const stat = await lstat(path).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") return null
+      throw error
+    })
+    if (stat === null) return "absent"
+    if (!stat.isDirectory()) return "not a folder"
+    // `rm` removes links inside the folder without following them.
+    await rm(path, { recursive: true })
+    return "removed"
+  }).pipe(
+    Effect.flatMap((outcome) =>
+      outcome === "not a folder"
+        ? Effect.logWarning("DATA_DIR/st-staging isn't a folder (a link?), so it was left alone")
+        : Effect.void
+    ),
+    Effect.catch((error) => Effect.logWarning("removing DATA_DIR/st-staging failed", error))
+  )
 
 const hash = (text: string) => createHash("sha256").update(text).digest("hex")
 
@@ -138,12 +154,13 @@ interface ChatProgress {
   lastAt: number | null
   lastMessageAt: number | null
   userTurns: number
-  /** Batches held back, with their speakers' cards. */
+  /**
+   * The chat's first message, held back until a second one comes or the file ends: a chat
+   * of one message, not a user's, is a greeting-only chat, and is skipped (DESIGN §1.4).
+   */
   readonly pending: Array<{ readonly batch: Batch; readonly speakers: ReadonlyMap<string, EntityId | null> }>
-  pendingChars: number
-  /** The staging file the held-back batches went to past MAX_PENDING_CHARS, and its size. */
-  readonly staging: string
-  stagedBytes: number
+  /** Whether it's more than a greeting-only chat, so its messages go in as they come. */
+  decided: boolean
   hiddenRun: number
   runOpen: boolean
   throughSlot: SlotId | null
@@ -215,19 +232,7 @@ export class StImports extends Context.Service<
       const hub = yield* ChatHub
       const sessions = new Map<string, Session>()
 
-      // Staging files of imports that are over: all of them at startup, then hourly. Nothing
-      // else is ever cleaned up: a chat an import didn't finish stays, marked so (ARCHITECTURE.md §13).
-      yield* Effect.forkScoped(
-        Effect.repeat(
-          Effect.suspend(() =>
-            sweepStaging(
-              config.dataDir,
-              new Set([...sessions.values()].filter((s) => Date.now() - s.touched <= IDLE_MS).map((s) => s.id))
-            )
-          ).pipe(Effect.catchDefect((error) => Effect.logWarning("the ST import staging sweep failed", error))),
-          Schedule.spaced("1 hour")
-        )
-      )
+      yield* removeOldStaging(config.dataDir)
 
       const sessionOf = (user: User, importId: string) => {
         const session = sessions.get(user.id)
@@ -287,9 +292,6 @@ export class StImports extends Context.Service<
               session.report.unsupported.set(file.what, (session.report.unsupported.get(file.what) ?? 0) + 1)
             }
           }
-          // The import it replaces is over, and so are its staging files.
-          const replaced = sessions.get(user.id)
-          if (replaced !== undefined) yield* unstage(stagingDir(config.dataDir, replaced.id))
           sessions.set(user.id, session)
           return session.id
         })
@@ -447,14 +449,12 @@ export class StImports extends Context.Service<
 
       // --- Chats.
 
-      /** Ends the chat being read, giving back the budget its summaries held and its staging. */
+      /** Ends the chat being read, giving back the budget its summaries held. */
       const dropChat = (session: Session) =>
-        Effect.suspend(() => {
+        Effect.sync(() => {
           const chat = session.chat
           session.chat = null
-          if (chat === null) return Effect.void
-          session.held -= chat.summaryChars
-          return chat.stagedBytes > 0 ? unstage(chat.staging) : Effect.void
+          if (chat !== null) session.held -= chat.summaryChars
         })
 
       /** The chat's record and, for a new one, the chat itself: once it has a user message. */
@@ -768,9 +768,7 @@ export class StImports extends Context.Service<
           lastMessageAt: null,
           userTurns: 0,
           pending: [],
-          pendingChars: 0,
-          staging: join(stagingDir(config.dataDir, session.id), `${hash(path)}.jsonl`),
-          stagedBytes: 0,
+          decided: false,
           hiddenRun: 0,
           runOpen: true,
           throughSlot: null,
@@ -845,52 +843,38 @@ export class StImports extends Context.Service<
           progress.nextPart = request.part + 1
           report.messages += part.messages
 
-          // Until a user message comes, it may be a greeting-only chat (DESIGN §1.4): nothing is
-          // written. Its messages are held back in memory, and past that in a staging file, so
-          // a chat that ends without one is skipped however its parts fell.
+          // A chat of one message, not the user's, is the greeting-only chat ST makes by opening a
+          // card (DESIGN §1.4): skipped, whether or not an earlier import has it. Its first
+          // message waits until a second one comes or the file ends, however its parts fall.
           const speakers = speakerMap(session, progress.link, progress.header, part.speakers, progress.spoke)
-          if (progress.target === null && progress.userTurns === 0) {
-            if (request.last) {
+          if (!progress.decided) {
+            if (progress.index <= 1 && !request.last) {
+              progress.pending.push(...part.batches.map((batch) => ({ batch, speakers })))
+              return result("continue")
+            }
+            if (progress.index === 0 || (progress.index === 1 && progress.userTurns === 0)) {
               yield* dropChat(session)
-              report.greetingOnly++
+              if (progress.index === 1) report.greetingOnly++
               report.count(file.kind, "skipped")
-              return result("skipped", "only a greeting")
+              return result("skipped", progress.index === 0 ? "no messages" : "only a greeting")
             }
-            progress.pending.push(...part.batches.map((batch) => ({ batch, speakers })))
-            progress.pendingChars += part.batches.reduce((sum, batch) => sum + batch.messagesJson.length, 0)
-            if (progress.pendingChars > MAX_PENDING_CHARS) {
-              progress.stagedBytes += progress.pendingChars
-              if (progress.stagedBytes > MAX_STAGED_BYTES) {
-                yield* dropChat(session)
-                report.count(file.kind, "failed")
-                report.issue(
-                  path,
-                  "error",
-                  "st.no_user_turn",
-                  "This chat runs over 256 MB without a single user message."
-                )
-                return result("failed", "too long without a user message")
-              }
-              yield* stage(progress.staging, progress.pending.splice(0))
-              progress.pendingChars = 0
-            }
-            return result("continue")
+            progress.decided = true
           }
           const target = progress.target ?? (yield* startChat(session, user, progress))
-          if (progress.stagedBytes > 0) {
-            yield* replay(progress.staging, (held) =>
-              writeBatch(session, user, progress, target, held.batch, held.speakers)
-            )
-            yield* unstage(progress.staging)
-            progress.stagedBytes = 0
-          }
           for (const held of progress.pending.splice(0)) {
             yield* writeBatch(session, user, progress, target, held.batch, held.speakers)
           }
-          progress.pendingChars = 0
           for (const batch of part.batches) yield* writeBatch(session, user, progress, target, batch, speakers)
           if (!request.last) return result("continue")
 
+          if (progress.userTurns === 0) {
+            report.issue(
+              path,
+              "info",
+              "st.no_user_turn",
+              "This chat has no message of yours; it was imported all the same."
+            )
+          }
           const outcome = yield* finishChat(session, user, progress, target)
           yield* dropChat(session)
           report.count(file.kind, outcome)
