@@ -8,5 +8,7 @@ export const PoolOps = RpcGroup.make(
   /** Blocks the worker thread, as a query would, until readerPool.test.ts releases it. */
   Rpc.make("Hold"),
   /** Ends the worker thread, as a crash would. */
-  Rpc.make("Crash")
+  Rpc.make("Crash"),
+  /** Ends the first thread that runs it, as a crash would; a later run returns its thread id. */
+  Rpc.make("CrashOnce", { success: Schema.Number })
 )

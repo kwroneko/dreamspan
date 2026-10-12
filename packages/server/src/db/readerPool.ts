@@ -3,8 +3,8 @@
 // is interrupted and keeps routing to a crashed worker until it respawns. node:sqlite can't
 // stop a running query, so both sent reads to a busy or dead reader while another idled.
 // Here a reader stays busy until it answers, and a crashed reader gets nothing until it's back.
-import { Cause, Deferred, Effect, Exit, Layer, Result, Schedule, Schema } from "effect"
-import { RpcClient, RpcClientError, RpcMessage, type RpcSerialization } from "effect/rpc"
+import { Cause, Deferred, Effect, Exit, Layer, Option, Result, Schedule, Schema } from "effect"
+import { type Rpc, RpcClient, RpcClientError, type RpcGroup, RpcMessage, type RpcSerialization } from "effect/rpc"
 import { Worker, type WorkerError } from "effect/workers"
 
 type Transferables = Parameters<RpcClient.Protocol["Service"]["send"]>[2]
@@ -13,6 +13,8 @@ interface Job {
   readonly clientId: number
   readonly request: RpcMessage.RequestEncoded
   readonly transferables: Transferables
+  /** The request already stopped a reader once. */
+  readonly crashed: boolean
 }
 
 interface Reader {
@@ -37,11 +39,37 @@ const RESPAWN_MS = 1000
 // As in Effect's worker protocol: messages cross by structured clone.
 const codecFor = Schema.toCodecJson as RpcSerialization.CodecFor
 const encodeDefect = Schema.encodeSync(codecFor(Schema.Defect()))
+const encodeClientError = Schema.encodeSync(codecFor(RpcClientError.RpcClientError))
+const decodeClientError = Schema.decodeUnknownOption(codecFor(RpcClientError.RpcClientError))
 
 const dieExit = (job: Job, defect: unknown) =>
   RpcMessage.ResponseExitDieEncoded({
     requestId: RpcMessage.RequestId(job.request.id),
     encodedDefect: encodeDefect(defect)
+  })
+
+/**
+ * Fails one request with `error`. It crosses as a defect, which `client` turns back into
+ * the typed error: an rpc's exit can only fail with the errors it declares, and a protocol
+ * error would fail every request of the client.
+ */
+const failExit = (job: Job, error: RpcClientError.RpcClientError) => dieExit(job, encodeClientError(error))
+
+const restoreClientError = (defect: unknown) =>
+  Option.match(decodeClientError(defect), { onNone: () => Effect.die(defect), onSome: Effect.fail })
+
+/**
+ * `RpcClient.make` over a pool, for a group without streaming rpcs: a request the pool
+ * failed fails with its typed `RpcClientError`.
+ */
+export const client = <Rpcs extends Rpc.Any>(group: RpcGroup.RpcGroup<Rpcs>) =>
+  Effect.map(RpcClient.make(group), (calls) => {
+    type Call = (...args: Array<unknown>) => Effect.Effect<unknown, unknown>
+    const typed: Record<string, Call> = {}
+    for (const [tag, call] of Object.entries(calls as Record<string, Call>)) {
+      typed[tag] = (...args) => Effect.catchDefect(call(...args), restoreClientError)
+    }
+    return typed as typeof calls
   })
 
 const clientError = (cause: Cause.Cause<WorkerError.WorkerError>) => {
@@ -55,19 +83,21 @@ const clientError = (cause: Cause.Cause<WorkerError.WorkerError>) => {
 
 /**
  * Fails to build if every reader dies before any is ready. Afterwards a crashed reader is
- * respawned every second, and while no reader is up, queued reads fail instead of waiting.
- * With `isolateCrashes`, a crash fails only the request its worker had, and queued ones
- * wait for the respawn unless it fails too; the format workers use it, since one hostile
- * file mustn't fail another user's. With `jobDeadline` (format workers only), a job that
- * runs too long is failed the same way, its worker stopped and respawned.
+ * respawned every second. A crash touches only the request its reader had: with
+ * `retryCrashed`, that request goes to the next free reader, once; without, or when it
+ * stops a reader again, it fails with an `RpcClientError` (through `client`). Queued
+ * requests wait for a respawn, and fail when one fails while no reader is up. With
+ * `jobDeadline`, a job that runs too long is failed the same way, its worker stopped and
+ * respawned. Only idempotent requests without transferables can be retried: a request's
+ * transferred buffers went to the worker that crashed.
  */
 export const layer = (
   size: number,
   {
     name = "database reader",
-    isolateCrashes = false,
+    retryCrashed = true,
     jobDeadline
-  }: { name?: string; isolateCrashes?: boolean; jobDeadline?: JobDeadline } = {}
+  }: { name?: string; retryCrashed?: boolean; jobDeadline?: JobDeadline } = {}
 ) =>
   Layer.effect(
     RpcClient.Protocol,
@@ -165,28 +195,33 @@ export const layer = (
               })
             : clientError(cause)
           const failed: Array<Job> = []
-          if (reader.job !== undefined) failed.push(reader.job)
+          const job = reader.job
           reader.job = undefined
-          // With no reader up, queued reads would wait on a respawn that may never succeed.
-          // Isolated, they wait for the respawn, and fail only if it fails too.
-          if (!readers.some((other) => other.ready) && (!isolateCrashes || !wasReady)) {
-            failed.push(...queue.splice(0))
+          let outcome = ""
+          if (job !== undefined && retryCrashed && !job.crashed) {
+            // First in line, as it was sent before everything queued.
+            queue.unshift({ ...job, crashed: true })
+            outcome = `; retrying its ${job.request.tag} request`
+          } else if (job !== undefined) {
+            failed.push(job)
+            if (job.crashed) outcome = `; its ${job.request.tag} request stopped a reader before, so it fails`
           }
+          // A respawn that fails while no reader is up may never succeed, so queued requests
+          // fail instead of waiting on it.
+          if (!wasReady && !readers.some((other) => other.ready)) failed.push(...queue.splice(0))
           if (!wasReady && !Deferred.isDoneUnsafe(started)) {
             diedBeforeStart.add(reader.id)
             if (diedBeforeStart.size === size) Deferred.doneUnsafe(started, Exit.fail(error))
           }
-          // A protocol error fails every request of its client; a defect, only its own.
-          const fail = isolateCrashes
-            ? Effect.forEach(failed, (job) => writeResponse(job.clientId, dieExit(job, error)), { discard: true })
-            : Effect.forEach(
-                new Set(failed.map((job) => job.clientId)),
-                (clientId) => writeResponse(clientId, { _tag: "ClientProtocolError", error }),
-                { discard: true }
-              )
           const why = timedOut ? `ran past its deadline and was stopped` : "stopped"
-          return Effect.logError(`${name} ${reader.id} ${why}; restarting it in ${RESPAWN_MS} ms`, cause).pipe(
-            Effect.andThen(fail)
+          return Effect.logError(
+            `${name} ${reader.id} ${why}; restarting it in ${RESPAWN_MS} ms${outcome}`,
+            cause
+          ).pipe(
+            Effect.andThen(
+              Effect.forEach(failed, (job) => writeResponse(job.clientId, failExit(job, error)), { discard: true })
+            ),
+            Effect.andThen(dispatch)
           )
         }
 
@@ -200,14 +235,14 @@ export const layer = (
             timedOut: false
           }
           readers.push(reader)
-          yield* reader.worker
-            .run(onResponse(reader), { onSpawn: onStart(reader) })
-            .pipe(
-              Effect.tapCause(onCrash(reader)),
-              Effect.retry(Schedule.spaced(RESPAWN_MS)),
-              Effect.interruptible,
-              Effect.forkScoped
-            )
+          yield* reader.worker.run(onResponse(reader), { onSpawn: onStart(reader) }).pipe(
+            Effect.tapCause(onCrash(reader)),
+            // A spawn that throws, e.g. refusing a stale bundle, is a defect, which retry skips.
+            Effect.catchDefect(Effect.fail),
+            Effect.retry(Schedule.spaced(RESPAWN_MS)),
+            Effect.interruptible,
+            Effect.forkScoped
+          )
         }
         yield* Deferred.await(started)
 
@@ -221,7 +256,7 @@ export const layer = (
         ): Effect.Effect<void> => {
           switch (message._tag) {
             case "Request":
-              queue.push({ clientId, request: message, transferables })
+              queue.push({ clientId, request: message, transferables, crashed: false })
               return dispatch
             case "Interrupt": {
               const queued = queue.findIndex((job) => job.clientId === clientId && job.request.id === message.requestId)

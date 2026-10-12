@@ -1,10 +1,10 @@
 // Main-thread access to the format workers (ARCHITECTURE.md §11.3). The pool is the
-// database readers' (db/readerPool.ts), with crashes isolated: a worker is busy until it
-// answers, a crashed one fails only the request it was running and is respawned, and
-// requests beyond the pool's size queue in order.
+// database readers' (db/readerPool.ts): a worker is busy until it answers, a crashed one
+// fails only the request it was running and is respawned, and requests beyond the pool's
+// size queue in order.
 import { Context, Effect, Layer, Schema } from "effect"
 import type { Worker } from "node:worker_threads"
-import { RpcClient, RpcClientError } from "effect/rpc"
+import { RpcClientError } from "effect/rpc"
 import { bundleEntry, defaultBundleDir, workerThreads } from "../db/Database.ts"
 import * as ReaderPool from "../db/readerPool.ts"
 import { type ExportInput, type ExportRefused, FormatOps, ownBuffer, type ParsedFile } from "./ops.ts"
@@ -58,7 +58,7 @@ const JOB_DEADLINE_MS = 30_000
 const failed = (error: unknown) =>
   Effect.logError("a format worker failed", error).pipe(Effect.andThen(Effect.fail(new FormatWorkerFailed())))
 
-/** A crash reaches its request as a defect, a failed send as an RpcClientError. */
+/** A crash reaches its request as an RpcClientError, a failed send as a defect. */
 const workerFailures = <A, E>(effect: Effect.Effect<A, E | RpcClientError.RpcClientError>) =>
   Effect.catchIf(
     effect,
@@ -77,7 +77,7 @@ export const layer = (options: FormatsOptions) =>
         (bundleDir === undefined ? new URL("./worker.ts", import.meta.url) : yield* bundleEntry(bundleDir, "formats"))
       return Layer.effect(
         Formats,
-        Effect.map(RpcClient.make(FormatOps), (client) =>
+        Effect.map(ReaderPool.client(FormatOps), (client) =>
           Formats.of({
             parse: (bytes, fileName) => workerFailures(client.Parse({ bytes: ownBuffer(bytes), fileName })),
             export: (input) =>
@@ -94,7 +94,8 @@ export const layer = (options: FormatsOptions) =>
         Layer.provide(
           ReaderPool.layer(options.size, {
             name: "format worker",
-            isolateCrashes: true,
+            // A file that stopped one worker would stop the next, and its bytes went with the first.
+            retryCrashed: false,
             jobDeadline: {
               ms: options.jobDeadlineMs ?? JOB_DEADLINE_MS,
               terminate: (id) => void threads.get(id)?.terminate()

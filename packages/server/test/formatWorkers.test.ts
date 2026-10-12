@@ -1,7 +1,7 @@
 // The format workers (ARCHITECTURE.md §11.3): parsing happens off the main thread, and a
 // worker that dies fails only the file it had.
 import { assert, describe, it } from "@effect/vitest"
-import { Cause, Effect, Exit } from "effect"
+import { Cause, Effect, Exit, Logger } from "effect"
 import * as Formats from "../src/importer/Formats.ts"
 import * as Importers from "../src/importer/importers.ts"
 import { inject } from "vitest"
@@ -58,9 +58,13 @@ describe("format workers", () => {
   )
 
   it.live(
-    "a worker that dies fails only the file it had; the files queued behind it parse on its replacement",
-    () =>
-      Effect.gen(function* () {
+    "a worker that dies fails only the file it had, without retrying it; the files queued behind it parse on its replacement",
+    () => {
+      let stops = 0
+      const collector = Logger.make((options) => {
+        if (/^format worker \d+ stopped/.test(String(options.message))) stops++
+      })
+      return Effect.gen(function* () {
         const formats = yield* Formats.Formats
         // With one worker, the second file waits in the queue while the first kills it.
         const [crashed, queued] = yield* Effect.all(
@@ -78,6 +82,8 @@ describe("format workers", () => {
         assert.isTrue(Exit.isSuccess(queued) && queued.value.report.format === "card-v2-png", String(queued))
         const next = yield* formats.parse(card(), "wren.png")
         assert.strictEqual(next.report.format, "card-v2-png")
+        // A retry would have run first in line, on the replacement, and stopped it too.
+        assert.strictEqual(stops, 1)
       }).pipe(
         Effect.provide(
           Formats.layer({
@@ -85,8 +91,10 @@ describe("format workers", () => {
             size: 1,
             entry: new URL("./support/crashingFormatWorker.ts", import.meta.url)
           })
-        )
-      ),
+        ),
+        Effect.provide(Logger.layer([collector]))
+      )
+    },
     60_000
   )
 

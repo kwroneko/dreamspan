@@ -172,7 +172,7 @@ export const layer = (options: DatabaseOptions) => {
         Effect.gen(function* () {
           const writer = yield* Writer
           yield* writer.Ready()
-          return Layer.effect(Reader, RpcClient.make(ReadOps)).pipe(
+          return Layer.effect(Reader, ReaderPool.client(ReadOps)).pipe(
             Layer.provide(ReaderPool.layer(options.readers)),
             Layer.provide(workerThreads(entries.reader, { dbPath }, entries.bundleDir))
           )

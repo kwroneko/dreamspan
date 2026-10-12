@@ -7,7 +7,8 @@ import { RpcServer } from "effect/rpc"
 import { PoolOps } from "./poolOps.ts"
 
 // From readerPool.test.ts: [0] is 1 once released, [1] counts Holds started, [2] is the
-// thread holding. A held start blocks before the worker serves anything.
+// thread holding, [3] is 1 once a CrashOnce has crashed. A held start blocks before the
+// worker serves anything.
 const { gate, heldStart } = (workerData ?? {}) as { readonly gate?: Int32Array; readonly heldStart?: boolean }
 if (heldStart) Atomics.wait(gate!, 0, 0)
 
@@ -30,7 +31,12 @@ RpcServer.layer(PoolOps, { concurrency: 1 }).pipe(
           Atomics.notify(gate!, 1)
           Atomics.wait(gate!, 0, 0)
         }),
-      Crash: () => Effect.sync(() => process.exit(1))
+      Crash: () => Effect.sync(() => process.exit(1)),
+      CrashOnce: () =>
+        Effect.sync(() => {
+          if (Atomics.compareExchange(gate!, 3, 0, 1) === 0) process.exit(1)
+          return threadId
+        })
     })
   ),
   Layer.provide(RpcServer.layerProtocolWorkerRunner),

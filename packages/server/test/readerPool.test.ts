@@ -4,8 +4,8 @@ import { Worker } from "node:worker_threads"
 import { NodeWorker } from "@effect/platform-node"
 import { assert, describe, it } from "@effect/vitest"
 import { inject } from "vitest"
-import { Cause, Context, Deferred, Effect, Exit, Fiber, Layer, Logger, Schedule } from "effect"
-import { RpcClient, type RpcClientError } from "effect/rpc"
+import { Cause, Context, Deferred, Effect, Exit, Fiber, Layer, Logger, Option, Schedule } from "effect"
+import { RpcClient, RpcClientError } from "effect/rpc"
 import { workerThreads, writerProtocol } from "../src/db/Database.ts"
 import * as ReaderPool from "../src/db/readerPool.ts"
 import { PoolOps } from "./support/poolOps.ts"
@@ -26,8 +26,9 @@ const deadWorker = new URL("./support/deadWorker.ts", import.meta.url)
  * below release only after their reads, and wait on no clock.
  */
 const makeGate = () => {
-  // [0] is 1 once released, [1] counts Holds started, [2] is the thread holding.
-  const cells = new Int32Array(new SharedArrayBuffer(12))
+  // [0] is 1 once released, [1] counts Holds started, [2] is the thread holding, [3] is 1
+  // once a CrashOnce has crashed.
+  const cells = new Int32Array(new SharedArrayBuffer(16))
   return {
     cells,
     /** Waits until a reader is blocked in a Hold, and returns its thread id. */
@@ -57,7 +58,7 @@ const readers = (
   } = {}
 ) => {
   let spawns = 0
-  return Layer.effect(Readers, RpcClient.make(PoolOps)).pipe(
+  return Layer.effect(Readers, ReaderPool.client(PoolOps)).pipe(
     Layer.provide(ReaderPool.layer(size)),
     Layer.provide(
       NodeWorker.layer(() => {
@@ -86,6 +87,18 @@ const lightReads = Effect.flatMap(Readers, ({ Count }) =>
   Effect.map((ids) => new Set(ids)),
   stalls("a light read went to a held reader")
 )
+
+/** Collects which reader each logged stop was, in order. */
+const stopLog = () => {
+  const stops: Array<string> = []
+  const logger = Logger.layer([
+    Logger.make((options) => {
+      const reader = /^database reader (\d+) stopped/.exec(String(options.message))?.[1]
+      if (reader !== undefined) stops.push(reader)
+    })
+  ])
+  return { stops, logger }
+}
 
 describe("reader pool", () => {
   it.live(
@@ -118,9 +131,11 @@ describe("reader pool", () => {
     () => {
       const gate = makeGate()
       return Effect.gen(function* () {
-        const { Crash } = yield* Readers
+        const { CrashOnce } = yield* Readers
         const before = yield* bothUp
-        assert.isTrue(Exit.isFailure(yield* Effect.exit(Crash())))
+        // The read is retried on the reader that's up.
+        const retriedOn = yield* CrashOnce().pipe(stalls("the crashed read was never retried"))
+        assert.isTrue(before.has(retriedOn))
         // Its replacement starts held, so it can't serve before the release: every light
         // read goes to the reader that's still up.
         const served = yield* lightReads
@@ -131,6 +146,55 @@ describe("reader pool", () => {
         const after = yield* bothUp
         assert.strictEqual([...after].filter((id) => !before.has(id)).length, 1)
       }).pipe(Effect.ensuring(gate.release), Effect.provide(readers(2, { gate, heldStart: (spawn) => spawn >= 2 })))
+    },
+    30_000
+  )
+
+  it.live(
+    "a crash fails no read: the crashed one is retried, and the other reader's read finishes",
+    () => {
+      const gate = makeGate()
+      return Effect.gen(function* () {
+        const { CrashOnce, Hold } = yield* Readers
+        const before = yield* bothUp
+        const held = yield* Effect.forkChild(Hold())
+        yield* gate.holding.pipe(stalls("the reader never started its Hold"))
+        // Only the other reader is free, so it takes the read and stops, and the retry can
+        // only run on its replacement.
+        const retriedOn = yield* CrashOnce().pipe(stalls("the crashed read was never retried"))
+        assert.isFalse(before.has(retriedOn))
+        yield* gate.release
+        yield* Fiber.join(held).pipe(stalls("the held read never finished"))
+      }).pipe(Effect.ensuring(gate.release), Effect.provide(readers(2, { gate })))
+    },
+    30_000
+  )
+
+  it.live(
+    "a read that stops a reader twice fails with a typed error, and isn't retried again",
+    () => {
+      const gate = makeGate()
+      const { stops, logger } = stopLog()
+      return Effect.gen(function* () {
+        const { Crash, Hold } = yield* Readers
+        yield* bothUp
+        const held = yield* Effect.forkChild(Hold())
+        yield* gate.holding.pipe(stalls("the reader never started its Hold"))
+        // It stops the free reader, then that reader's replacement.
+        const crash = yield* Effect.exit(Crash().pipe(stalls("the read was retried without end")))
+        assert.isTrue(Exit.isFailure(crash))
+        if (Exit.isFailure(crash)) {
+          const error = Cause.findErrorOption(crash.cause)
+          assert.isTrue(Option.isSome(error) && error.value instanceof RpcClientError.RpcClientError, String(crash))
+        }
+        assert.strictEqual(stops.length, 2)
+        assert.strictEqual(stops[0], stops[1])
+        // The read held on the other reader never noticed.
+        yield* gate.release
+        yield* Fiber.join(held).pipe(stalls("the held read never finished"))
+        yield* bothUp
+        assert.strictEqual(stops.length, 2)
+      }).pipe(Effect.ensuring(gate.release), Effect.provide(readers(2, { gate })), Effect.provide(logger))
     },
     30_000
   )
@@ -148,10 +212,9 @@ describe("reader pool", () => {
   it.live(
     "reads fail instead of waiting when every reader is down",
     () => {
-      // A crash fails every request in flight on any reader, so the Crash calls failing
-      // doesn't mean both readers are down, and a crash still being handled would fail a
-      // read sent now. A reader respawns only after its crash is handled, so its second
-      // stop (the first failed respawn) means its first is done.
+      // The Crash calls fail at the first failed respawn, which can come before the other
+      // reader's crash is handled. A reader respawns only after its crash is handled, so its
+      // second stop (the first failed respawn) means its first is done.
       const stops = new Map<string, number>()
       const crashesHandled = Deferred.makeUnsafe<void>()
       const collector = Logger.make((options) => {
@@ -198,7 +261,7 @@ describe("reader pool", () => {
           if (Exit.isFailure(read)) assert.include(Cause.pretty(read.cause), "npm run build")
         }).pipe(
           Effect.provide(
-            Layer.effect(Readers, RpcClient.make(PoolOps)).pipe(
+            Layer.effect(Readers, ReaderPool.client(PoolOps)).pipe(
               Layer.provide(ReaderPool.layer(1)),
               Layer.provide(workerThreads(poolWorker, {}, bundleDir))
             )
