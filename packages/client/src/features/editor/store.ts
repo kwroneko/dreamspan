@@ -6,6 +6,7 @@ import type { EditorSnapshot } from "@rp/shared/editorApi.ts"
 import type { Doc, RefId } from "@rp/shared/library.ts"
 import { useEffect, useSyncExternalStore } from "react"
 import type { AppError } from "../../errors.ts"
+import { copiesOf, dropCopy, keepCopy } from "./backup.ts"
 import type { Caller } from "./caller.ts"
 
 /** How long typing pauses before the text is saved. */
@@ -29,7 +30,12 @@ export interface EditorState {
   /** How many fields have changes. */
   readonly dirty: number
   readonly saving: boolean
+  /** Changes the last open brought back from this browser's copies. */
+  readonly restored: number
 }
+
+/** The most a `keepalive` request may carry, in bytes, in the browsers that cap it. */
+const KEEPALIVE_LIMIT = 64 * 1024
 
 /** Channels besides each field's own: the documents changed, or which fields are dirty. */
 const STRUCTURE = "structure"
@@ -86,7 +92,8 @@ export class EditorStore {
           loadError: this.loadError,
           saveError: this.saveError,
           dirty: this.dirtyFields().length,
-          saving: this.isSaving()
+          saving: this.isSaving(),
+          restored: this.restored
         }
       }
     }
@@ -129,7 +136,39 @@ export class EditorStore {
     if (result.ok) this.apply(result.value)
     else this.loadError = result.error
     this.bumpAll()
+    if (result.ok) await this.restoreCopies()
     return result
+  }
+
+  /** How many changes the last open brought back from this browser's copies. */
+  restored = 0
+
+  /**
+   * Text a page closed on before the server had it (backup.ts) comes back as unsaved
+   * changes, saved as typing would be. A copy the server already holds is dropped.
+   */
+  private async restoreCopies() {
+    let restored = 0
+    for (const { field, content } of await copiesOf(this.refId)) {
+      if (this.current(field) === content || (this.current(field) === null && this.headContent(field) === content)) {
+        void dropCopy(this.refId, field, content)
+        continue
+      }
+      this.change(field, content)
+      restored++
+    }
+    if (restored > 0) {
+      this.restored = restored
+      this.bump(DRAFTS)
+    }
+  }
+
+  /** What a field holds in the saved version, as its draft would hold it. */
+  private headContent(key: string) {
+    const parsed = parseField(key)
+    if (parsed === null) return null
+    const value = getAt(this.head, parsed.path)
+    return parsed.kind === "value" ? JSON.stringify(value) : typeof value === "string" ? value : null
   }
 
   /** The server's state, keeping what was typed here and not saved yet. */
@@ -180,6 +219,7 @@ export class EditorStore {
 
   /** Typing re-renders the field; the page hears only when a field starts having unsaved changes. */
   private change(key: string, content: string) {
+    void keepCopy(this.refId, key, content)
     const field = this.field(key)
     const quiet = field.local !== null
     field.local = content
@@ -217,6 +257,7 @@ export class EditorStore {
         field.saved = result.value.content
         field.rowVersion = result.value.rowVersion
         if (field.local === content) field.local = null
+        void dropCopy(this.refId, key, content)
         this.saveError = null
       } else {
         this.saveError = result.error
@@ -369,12 +410,13 @@ export class EditorStore {
     await Promise.all(inside.map((key) => this.discard(key)))
   }
 
-  /** What `beacon` last sent per field, so closing doesn't send it twice. */
+  /** What the server confirmed `beacon` sent, per field, so closing doesn't send it twice. */
   private readonly sent = new Map<string, string>()
 
   /**
-   * As the page goes: what's typed and not saved yet, in a request that outlives the page
-   * (`keepalive`, which browsers cap at 64 KB; past that, `beforeunload` has warned).
+   * As the page goes: what's typed and not saved yet, in a request that outlives the page.
+   * Browsers cap such a request at 64 KB; past that only the copy in this browser keeps the
+   * text (backup.ts), after `beforeunload` has asked. A send counts once the server answers.
    */
   beacon() {
     const head = this.snapshot?.ref.headRevisionId ?? null
@@ -391,14 +433,23 @@ export class EditorStore {
             }
           ]
     )
-    if (drafts.length === 0) return
-    for (const { field, content } of drafts) this.sent.set(field, content)
+    const body = JSON.stringify({ drafts })
+    if (drafts.length === 0 || new Blob([body]).size > KEEPALIVE_LIMIT) return
     void fetch("/library/drafts", {
       method: "POST",
       keepalive: true,
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ drafts })
-    }).catch(() => undefined)
+      body
+    }).then(
+      (response) => {
+        if (!response.ok) return
+        for (const { field, content } of drafts) {
+          this.sent.set(field, content)
+          void dropCopy(this.refId, field, content)
+        }
+      },
+      () => undefined
+    )
   }
 
   private settle(key: string, saved: string | null, rowVersion: number) {
@@ -436,7 +487,10 @@ export const useEditorState = (store: EditorStore) => useSyncExternalStore(store
 export const useLeaveGuard = (store: EditorStore) =>
   useEffect(() => {
     const warn = (event: BeforeUnloadEvent) => {
-      if (store.isSaving()) event.preventDefault()
+      if (!store.isSaving()) return
+      event.preventDefault()
+      // What older browsers need to ask.
+      event.returnValue = ""
     }
     const leave = () => store.beacon()
     addEventListener("beforeunload", warn)

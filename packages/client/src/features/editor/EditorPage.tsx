@@ -10,6 +10,7 @@ import { Loading } from "../../ui/Spinner.tsx"
 import { Alert, Badge, Card } from "../../ui/Surface.tsx"
 import { useTitle } from "../shell.tsx"
 import { useCaller } from "./caller.ts"
+import { RestoredNotice } from "./controls.tsx"
 import { CardEditor, NoteFields } from "./CardEditor.tsx"
 import { PresetEditor } from "./PresetEditor.tsx"
 import { ForkDialog, RenameDialog } from "./RefDialogs.tsx"
@@ -160,6 +161,7 @@ function Editor({ refId }: { refId: RefId }) {
           <p>{uploadError}</p>
         </Alert>
       )}
+      <RestoredNotice count={state.restored} />
       {notice && (
         <Alert
           tone="success"

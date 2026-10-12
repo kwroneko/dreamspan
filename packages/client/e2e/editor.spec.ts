@@ -323,6 +323,22 @@ test("an update with a conflict is resolved field by field", async ({ page }) =>
   await expect(page.getByRole("textbox", { name: /^Prompt/ })).toHaveValue("Write terse, calm prose.")
 })
 
+/** Records each request to /library/drafts: whether it was sent with `keepalive`, and how it went. */
+const recordBeacons = (page: Page, fail = 0) =>
+  page.evaluate((fail) => {
+    const original = window.fetch
+    const sent: Array<boolean> = []
+    let failing = fail
+    Object.assign(window, { __beacons: sent })
+    window.fetch = (input, init) => {
+      if (input !== "/library/drafts") return original(input, init)
+      sent.push(init?.keepalive === true)
+      return failing-- > 0 ? Promise.reject(new Error("offline")) : original(input, init)
+    }
+  }, fail)
+
+const beacons = (page: Page) => page.evaluate(() => (window as unknown as { __beacons: Array<boolean> }).__beacons)
+
 test("note text typed just before closing the tab is kept, with a warning first", async ({ page }) => {
   const { card, note } = await admin((api) =>
     Effect.gen(function* () {
@@ -332,6 +348,7 @@ test("note text typed just before closing the tab is kept, with a warning first"
     })
   )
   await open(page, card.id)
+  await recordBeacons(page)
   const content = page.getByRole("region", { name: "Note Outfit" }).getByRole("textbox", { name: /^Content/ })
   await content.fill("A grey coat, typed in the last moment.")
   const warned = await page.evaluate(() => {
@@ -340,7 +357,9 @@ test("note text typed just before closing the tab is kept, with a warning first"
     return event.defaultPrevented
   })
   expect(warned).toBe(true)
-  // Closing goes ahead: what was typed leaves with the page.
+  // Closing goes ahead: what was typed leaves with the page, in a request that outlives it.
+  await page.evaluate(() => window.dispatchEvent(new Event("pagehide")))
+  expect(await beacons(page)).toEqual([true])
   await page.close()
   await expect
     .poll(async () => {
@@ -370,4 +389,53 @@ test("removing an edited module takes its drafts with it, and the card still sav
   const opened = await admin((api) => api.OpenEditor({ refId: refId as RefId }))
   expect(opened.doc.modules).toEqual([])
   expect(opened.doc.scenario).toBe("Still saved.")
+})
+
+test("a send that failed as the page went is sent again the next time it goes", async ({ page }) => {
+  const refId = await savedCard("Retry", {})
+  await open(page, refId)
+  await recordBeacons(page, 1)
+  await field(page, "Description").fill("Sent twice if need be.")
+  await page.evaluate(() => window.dispatchEvent(new Event("pagehide")))
+  await expect.poll(() => beacons(page)).toEqual([true])
+  await page.evaluate(() => window.dispatchEvent(new Event("pagehide")))
+  await expect.poll(() => beacons(page)).toEqual([true, true])
+})
+
+test("text too long to send as the page goes: the warning stops a close, and a reload brings it back", async ({
+  page
+}) => {
+  const { card, note } = await admin((api) =>
+    Effect.gen(function* () {
+      const card = yield* api.CreateCard({ label: "Long note", name: "Long" })
+      const note = yield* api.CreateCardNote({ cardRefId: card.id, title: "Long" })
+      return { card, note }
+    })
+  )
+  await open(page, card.id)
+  const content = () => page.getByRole("region", { name: "Note Long" }).getByRole("textbox", { name: /^Content/ })
+  const saved = async () => {
+    const opened = await admin((api) => api.OpenEditor({ refId: note.id }))
+    return opened.drafts.filter((d) => d.status === "active").map((d) => d.content.length)
+  }
+  // Closing asks first, and staying lets the text reach the server.
+  const dialogs: Array<string> = []
+  page.on("dialog", (dialog) => {
+    dialogs.push(dialog.type())
+    void (dialogs.length === 1 ? dialog.dismiss() : dialog.accept())
+  })
+  await content().fill("x".repeat(70_000))
+  await page.close({ runBeforeUnload: true })
+  await expect.poll(() => dialogs).toEqual(["beforeunload"])
+  expect(page.isClosed()).toBe(false)
+  await expect.poll(saved).toEqual([70_000])
+
+  // A reload that goes ahead anyway: too long for the request, the copy in the browser keeps it.
+  await content().fill("y".repeat(70_000))
+  await page.reload()
+  await expect(page.getByText("Brought back from this browser")).toBeVisible()
+  await expect(content()).toHaveValue("y".repeat(70_000))
+  await expect
+    .poll(async () => (await admin((api) => api.OpenEditor({ refId: note.id }))).drafts[0]?.content[0])
+    .toBe("y")
 })

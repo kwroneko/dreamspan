@@ -10,7 +10,7 @@ import { Checkbox, Switch } from "../../ui/Choice.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { Field, Input, Textarea } from "../../ui/Field.tsx"
 import { Select } from "../../ui/Select.tsx"
-import { Badge } from "../../ui/Surface.tsx"
+import { Alert, Badge } from "../../ui/Surface.tsx"
 import type { CallResult } from "./caller.ts"
 import { type EditorStore, useDirty, useText, useValue } from "./store.ts"
 
@@ -258,5 +258,18 @@ export function SelectField<Value extends string>({
     <Field label={<FieldLabel store={store} field={field} label={label} />}>
       <Select items={items} value={value ?? null} onValueChange={(next) => store.setValue(path, next)} />
     </Field>
+  )
+}
+
+/** Says that changes kept in this browser when a page closed came back (backup.ts). */
+export function RestoredNotice({ count }: { count: number }) {
+  if (count === 0) return null
+  return (
+    <Alert tone="warning" title="Brought back from this browser">
+      <p>
+        {count === 1 ? "A change" : `${count} changes`} typed before the page closed hadn't reached the server.{" "}
+        {count === 1 ? "It's" : "They're"} back as unsaved changes: check them, then save.
+      </p>
+    </Alert>
   )
 }

@@ -13,7 +13,7 @@ import { FileDrop } from "../../ui/FileDrop.tsx"
 import { Select } from "../../ui/Select.tsx"
 import { Badge, Card, CardHeader, EmptyState } from "../../ui/Surface.tsx"
 import type { Caller } from "./caller.ts"
-import { FieldTools, SwitchField, TextField } from "./controls.tsx"
+import { FieldTools, RestoredNotice, SwitchField, TextField } from "./controls.tsx"
 import { SaveDialog } from "./SaveDialog.tsx"
 import { EditorStore, useEditorState, useLeaveGuard, useValue } from "./store.ts"
 
@@ -302,6 +302,7 @@ function NoteEditor({ entry, call, onDeleted }: { entry: NoteEntry; call: Caller
   const dirty = state.dirty > 0
   return (
     <section aria-label={`Note ${entry.ref.label}`} className="flex flex-col gap-3 rounded-md border border-border p-3">
+      <RestoredNotice count={state.restored} />
       <NoteFields store={store} />
       <ErrorAlert error={error} />
       <div className="flex flex-wrap items-center gap-2">
