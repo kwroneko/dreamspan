@@ -7,8 +7,10 @@ import { join } from "node:path"
 import { assert, describe, it } from "@effect/vitest"
 import { AppApi, Authentication } from "@rp/shared/api.ts"
 import type { UserId } from "@rp/shared/domain.ts"
-import { Effect, Option, Redacted } from "effect"
-import { hashPassword, PasswordCost, verifyPassword } from "../src/auth/passwords.ts"
+import { Effect, Layer, Option, Redacted } from "effect"
+import { AppConfig } from "../src/config.ts"
+import { Reader } from "../src/db/Database.ts"
+import { ServerLive } from "../src/server.ts"
 import { client, login, outcome, post, serverPort, testConfig, withServer } from "./support/config.ts"
 
 /** A login sent from `from`, so it can come from an address other than loopback. */
@@ -42,14 +44,18 @@ describe("accounts", () => {
     }
   })
 
-  it.live("hashes at full cost unless a test lowers it", () =>
-    Effect.gen(function* () {
-      const hash = yield* hashPassword("a-password", yield* PasswordCost)
-      assert.match(hash, /^scrypt\$32768\$8\$3\$/)
-      assert.isTrue(yield* verifyPassword("a-password", hash))
-      assert.isFalse(yield* verifyPassword("another-one", hash))
-    })
-  )
+  it.live("a server not given a lower cost stores passwords hashed at full cost", () => {
+    // The other tests' servers hash at a lower cost (support/config.ts); this one doesn't.
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const me = yield* api.Whoami()
+      yield* api.SetPassword({ userId: me.id, currentPassword: null, newPassword: "a-password" })
+      const stored = yield* (yield* Reader).GetPasswordHash({ userId: me.id })
+      assert.match(stored?.passwordHash ?? "", /^scrypt\$32768\$8\$3\$/)
+      assert.strictEqual((yield* login("local", "a-password")).status, 204)
+    }).pipe(Effect.scoped, Effect.provide(ServerLive.pipe(Layer.provide(Layer.succeed(AppConfig)(config)))))
+  })
 
   it.live("from passwordless local use to login, sessions and logout", () => {
     const config = testConfig()
