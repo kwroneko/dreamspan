@@ -21,7 +21,7 @@ import { Atom, type AtomRegistry, AtomRegistry as Registry } from "effect/reacti
 import { type AppError, describeCause } from "../../errors.ts"
 import { AppClient } from "../../rpc.ts"
 import { sessionAtom } from "../../session.ts"
-import { mountedBodies, perf } from "./perf.ts"
+import { mountedBodies, PERF, perf } from "./perf.ts"
 
 /** How many slots one read asks for. */
 const PAGE = 60
@@ -115,6 +115,7 @@ export class ChatSession {
   }
 
   private report() {
+    if (!PERF) return
     const { entries, older, newer, loading, error } = this.view
     perf.window = {
       loaded: entries.length,
@@ -270,10 +271,10 @@ export class ChatSession {
   // --- Events
 
   private receive(batch: ReadonlyArray<ChatEvent>, anchor: SlotId | null) {
-    perf.batches++
+    if (PERF) perf.batches++
     for (const event of batch) {
       if (event._tag === "Delta") {
-        perf.deltas++
+        if (PERF) perf.deltas++
         const list = this.pending.get(event.versionId)
         if (list) list.push(event)
         else this.pending.set(event.versionId, [event])
@@ -298,12 +299,15 @@ export class ChatSession {
       for (const [id, deltas] of this.pending) {
         let text = this.registry.get(liveText(id)) ?? ""
         for (const { offset, text: added } of deltas) {
-          if (offset > text.length) perf.gaps++
-          else if (offset + added.length > text.length) text = text.slice(0, offset) + added
+          if (offset > text.length) {
+            if (PERF) perf.gaps++
+          } else if (offset + added.length > text.length) text = text.slice(0, offset) + added
         }
         this.setLive(id, text)
-        perf.rowUpdates++
-        if (mountedBodies.has(id)) perf.shownUpdates++
+        if (PERF) {
+          perf.rowUpdates++
+          if (mountedBodies.has(id)) perf.shownUpdates++
+        }
       }
     })
     this.pending.clear()

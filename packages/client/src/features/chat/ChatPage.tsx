@@ -11,7 +11,7 @@ import { useTitle } from "../shell.tsx"
 import { chatTitle } from "./ChatsPage.tsx"
 import { Composer } from "./Composer.tsx"
 import { Message } from "./Message.tsx"
-import { perf } from "./perf.ts"
+import { useRenderCount } from "./perf.ts"
 import { ChatSession, type ChatView } from "./session.ts"
 
 /** Load more history when the first or last rendered message is this close to the loaded edge. */
@@ -29,9 +29,7 @@ function MessageList({ session, view, anchor }: { session: ChatSession; view: Ch
   /** Whether the list stays at the end as messages grow or arrive (below). */
   const [follow] = useState({ stuck: true })
   const { entries } = view
-  useEffect(() => {
-    perf.listRenders++
-  })
+  useRenderCount("listRenders")
   // eslint-disable-next-line react-hooks/incompatible-library -- this component opts out of memoization above
   const virtualizer = useVirtualizer({
     count: entries.length,

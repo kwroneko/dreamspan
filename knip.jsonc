@@ -3,6 +3,8 @@
   // The shared package's package.json exports every file, which would make all of its
   // exports public API. Only our own packages import it, so an export nobody uses is dead.
   "includeEntryExports": true,
+  // Stand-ins for dependencies' imports, reached through Vite aliases, not imports.
+  "ignore": ["packages/client/src/stubs/**"],
   "workspaces": {
     ".": {
       // Throwaway experiments, kept for their findings and not part of the build.

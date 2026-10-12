@@ -10,7 +10,7 @@ import { Button } from "../../ui/Button.tsx"
 import { Textarea } from "../../ui/Field.tsx"
 import { Markdown } from "../../ui/Markdown.tsx"
 import { Badge } from "../../ui/Surface.tsx"
-import { mountedBodies, perf } from "./perf.ts"
+import { useMountedTracking, useRenderCount } from "./perf.ts"
 import { type ChatSession, liveText, type Outcome } from "./session.ts"
 
 /** A horizontal drag this long on a message swipes to the next or previous version. */
@@ -21,16 +21,8 @@ const flagged = new Set<Version["status"]>(["generating", "stopped", "interrupte
 
 function VersionBody({ version }: { version: Version }) {
   const live = useAtomValue(liveText(version.id))
-  useEffect(() => {
-    perf.bodyRenders++
-    if (live !== null) perf.liveBodyRenders++
-  })
-  useEffect(() => {
-    mountedBodies.add(version.id)
-    return () => {
-      mountedBodies.delete(version.id)
-    }
-  }, [version.id])
+  useRenderCount("bodyRenders", live !== null ? "liveBodyRenders" : undefined)
+  useMountedTracking(version.id)
   const generating = version.status === "generating"
   const text = live ?? version.content
   return (
@@ -92,9 +84,7 @@ export const Message = memo(function Message({
   /** The leaf of the branch shown, when it isn't the chat's active one: links keep to it. */
   branchLeaf: SlotId | null
 }) {
-  useEffect(() => {
-    perf.rowRenders++
-  })
+  useRenderCount("rowRenders")
   const { version } = entry
   const [versions, setVersions] = useState<ReadonlyArray<Version> | null>(null)
   const [editing, setEditing] = useState(false)

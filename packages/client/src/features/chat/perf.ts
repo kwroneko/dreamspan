@@ -1,5 +1,10 @@
 // Counters the performance harness reads (CLIENT-FRAMEWORK §7, packages/client/perf/).
-// Plain increments, cheap enough to keep in every build.
+// Built in only when VITE_PERF=1 at build time, as `npm run test:perf` builds: otherwise
+// PERF is false, every use below is dead code, and the bundle has neither the counters
+// nor window.__rpPerf.
+import { useEffect } from "react"
+
+export const PERF = import.meta.env.VITE_PERF === "1"
 
 export const perf = {
   /** Event batches and deltas received. */
@@ -23,10 +28,36 @@ export const perf = {
 /** The versions whose message body is mounted, so an update to one can be told from one off screen. */
 export const mountedBodies = new Set<string>()
 
+type RenderCounter = "bodyRenders" | "liveBodyRenders" | "rowRenders" | "listRenders"
+
+function useCountRenders(counter: RenderCounter, also?: RenderCounter) {
+  useEffect(() => {
+    perf[counter]++
+    if (also) perf[also]++
+  })
+}
+
+function useMountedBody(versionId: string) {
+  useEffect(() => {
+    mountedBodies.add(versionId)
+    return () => {
+      mountedBodies.delete(versionId)
+    }
+  }, [versionId])
+}
+
+const noop = () => {}
+
+/** Counts every render of the calling component in `counter`, and in `also` when given. */
+export const useRenderCount: (counter: RenderCounter, also?: RenderCounter) => void = PERF ? useCountRenders : noop
+
+/** Keeps a message body in `mountedBodies` while it's mounted. */
+export const useMountedTracking: (versionId: string) => void = PERF ? useMountedBody : noop
+
 declare global {
   interface Window {
     __rpPerf?: typeof perf
   }
 }
 
-window.__rpPerf = perf
+if (PERF) window.__rpPerf = perf
