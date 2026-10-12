@@ -25,15 +25,17 @@ const options = Config.all({
   /** Tokens a second for each generation; unset, nothing generates, as in production. */
   tokensPerSecond: Config.option(Config.Number("FAKE_GENERATOR_TPS")),
   /** About how many tokens each generation has. */
-  tokens: Config.Int("FAKE_GENERATOR_TOKENS").pipe(Config.withDefault(400))
+  tokens: Config.Int("FAKE_GENERATOR_TOKENS").pipe(Config.withDefault(400)),
+  /** Set, tokens come in bursts this many milliseconds apart (the performance harness). */
+  burstMs: Config.option(Config.Int("FAKE_GENERATOR_BURST_MS"))
 })
 
 Effect.gen(function* () {
   if (process.env.NODE_ENV === "production") return yield* new FakeGeneratorInProduction()
-  const { tokensPerSecond, tokens } = yield* options
+  const { tokensPerSecond, tokens, burstMs } = yield* options
   const generator: Layer.Layer<Generator> = Option.match(tokensPerSecond, {
     onNone: () => Generator.none,
-    onSome: (rate) => FakeGenerator.layer({ tokensPerSecond: rate, tokens })
+    onSome: (rate) => FakeGenerator.layer({ tokensPerSecond: rate, tokens, burstMs: Option.getOrUndefined(burstMs) })
   })
   return yield* Layer.launch(serverWith(generator).pipe(Layer.provide(AppConfig.layer)))
 }).pipe(NodeRuntime.runMain({ teardown }))

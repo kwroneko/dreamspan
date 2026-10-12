@@ -9,11 +9,14 @@ export interface FakeGeneratorOptions {
   readonly tokensPerSecond: number
   /** About how many tokens each generation has. */
   readonly tokens: number
+  /** Bursty: the tokens due come all at once this often, at the same average rate. */
+  readonly burstMs?: number | undefined
 }
 
 /**
  * Wakes at most every 10 ms and sends the tokens due by then, as a provider's chunks
- * would arrive: 300 tok/s comes as about three tokens per chunk.
+ * would arrive: 300 tok/s comes as about three tokens per chunk. Bursty, it wakes every
+ * `burstMs` instead.
  */
 export const layer = (options: FakeGeneratorOptions) =>
   Layer.succeed(Generator)(
@@ -21,7 +24,7 @@ export const layer = (options: FakeGeneratorOptions) =>
       generate: (request) =>
         Stream.suspend(() => {
           const tokens = tokenize(syntheticMarkdown(seedOf(request.versionId), options.tokens))
-          const interval = Math.min(100, Math.max(10, 1000 / options.tokensPerSecond))
+          const interval = options.burstMs ?? Math.min(100, Math.max(10, 1000 / options.tokensPerSecond))
           const started = Date.now()
           let sent = 0
           return Stream.tick(interval).pipe(

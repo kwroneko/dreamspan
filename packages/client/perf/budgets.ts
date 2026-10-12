@@ -32,6 +32,11 @@ export const budgets = {
   listRendersPerUpdate: 1.5,
   /** Message rows, and bodies not streaming, rendered while only text streams: none. */
   rowRendersWhileStreaming: 0,
+  /**
+   * Main-thread script time while one reply past 4,000 tokens streams on, per second
+   * (measured 130 to 150): rendering more than the last block would cross it.
+   */
+  longReplyScriptMsPerSecond: 400,
   /** Heap growth after scrolling the whole long chat, after garbage collection. */
   heapGrowthMb: 40,
   /** Heap after scrolling the whole long chat. */

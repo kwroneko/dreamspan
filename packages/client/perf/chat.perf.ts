@@ -2,8 +2,8 @@
 // with the fake generator at 300 tokens a second per stream, on synthetic chats of 100,000
 // and 300 messages. Each scenario measures what the owner would feel (frames, input,
 // scroll anchoring, memory, renders per streamed token) and fails past its budget.
-import { appendFileSync, rmSync } from "node:fs"
-import { loadavg } from "node:os"
+import { appendFileSync, mkdtempSync, rmSync } from "node:fs"
+import { loadavg, tmpdir } from "node:os"
 import { join } from "node:path"
 import { type CDPSession, expect, type Page, test } from "@playwright/test"
 import type { ChatId, VersionId } from "@rp/shared/chat.ts"
@@ -482,4 +482,232 @@ test("switch chats mid-stream", async ({ page }) => {
   expect(frameStats(measured).longFramesOver100).toBeLessThanOrEqual(budgets.navigationLongFramesOver100)
   expect(awayMs).toBeLessThan(budgets.openBottomMs)
   expect(backMs).toBeLessThan(budgets.openBottomMs)
+})
+
+// --- Long replies, parallel swipes, bursty and slow streams (CLIENT-FRAMEWORK §7)
+
+/** Main-thread script time so far, in milliseconds (CDP's own accounting). */
+const scriptMs = async (cdp: CDPSession) => {
+  const { metrics } = (await cdp.send("Performance.getMetrics")) as { metrics: Array<{ name: string; value: number }> }
+  return metrics.find((m) => m.name === "ScriptDuration")!.value * 1000
+}
+
+const counters = (page: Page) =>
+  page.evaluate(() => ({ ...(window as unknown as { __rpPerf: Record<string, number> }).__rpPerf }))
+
+/** Words shown in the message being generated. */
+const generatingWords = (page: Page) =>
+  page.evaluate(() => {
+    const row = [...document.querySelectorAll("article[data-slot]")].find((r) =>
+      [...r.querySelectorAll("*")].some((e) => e.childElementCount === 0 && e.textContent === "generating")
+    )
+    return (row?.querySelector(".markdown")?.textContent ?? "").split(/\s+/).filter(Boolean).length
+  })
+
+/** How far the list is from its end, every 100 ms for `ms`. */
+const fromEndSamples = async (page: Page, ms: number) => {
+  const samples: Array<number> = []
+  for (let elapsed = 0; elapsed < ms; elapsed += 100) {
+    await page.waitForTimeout(100)
+    samples.push(await messages(page).evaluate((list) => list.scrollHeight - list.scrollTop - list.clientHeight))
+  }
+  return samples
+}
+
+/**
+ * A server of the scenario's own, with the generator paced differently, on a fresh data
+ * directory: a chat whose one message gets a reply that starts generating.
+ */
+const pacedChat = async (env: Record<string, string>) => {
+  const dataDir = mkdtempSync(join(tmpdir(), "rp-perf-paced-"))
+  const paced = await startServer(dataDir, env)
+  const chatId = await withClient(paced, (api) =>
+    Effect.gen(function* () {
+      const chat = yield* api.CreateChat({ title: "Paced" })
+      const sent = yield* api.SendMessage({
+        chatId: chat.id,
+        parentSlotId: null,
+        branch: false,
+        content: "The lantern swings over the *harbor*."
+      })
+      yield* api.Generate({ chatId: chat.id, parentSlotId: sent.entry.slotId, branch: false })
+      return chat.id
+    })
+  )
+  return {
+    url: `${paced.url}/chats/${chatId}`,
+    stop: async () => {
+      await paced.stop()
+      rmSync(dataDir, { recursive: true, force: true })
+    }
+  }
+}
+
+test("a long reply, past 4,000 tokens", async ({ page }) => {
+  await openPage(page)
+  const cdp = await page.context().newCDPSession(page)
+  await cdp.send("Performance.enable")
+  await page.goto(chatUrl(fixture.short[0]!.chatId))
+  await onScreen(page)
+  // 6,000 tokens at 300 a second: past 4,000 after about 13 seconds.
+  const streams = await startStreams(fixture.short[0]!.chatId, 1)
+  await expect.poll(() => generatingWords(page), { timeout: 60_000, intervals: [500] }).toBeGreaterThan(4000)
+  const from = await now(page)
+  const script0 = await scriptMs(cdp)
+  const counters0 = await counters(page)
+  const words0 = await generatingWords(page)
+  const fromEnd = await fromEndSamples(page, 4000)
+  const script1 = await scriptMs(cdp)
+  const words1 = await generatingWords(page)
+  const measured = await since(page, from)
+  await stopStreams(streams)
+  const updates = measured.perf.shownUpdates! - counters0.shownUpdates!
+  const bodies = measured.perf.liveBodyRenders! - counters0.liveBodyRenders!
+  const scriptMsPerSecond = round((script1 - script0) / 4)
+  record("long reply", {
+    wordsFrom: words0,
+    wordsTo: words1,
+    updates,
+    scriptMsPerSecond,
+    bodyRendersPerUpdate: round(bodies / Math.max(1, updates)),
+    pinnedPx: round(Math.max(...fromEnd)),
+    ...frameStats(measured)
+  })
+  expect(words1).toBeGreaterThan(words0)
+  expect(bodies / updates).toBeLessThanOrEqual(budgets.bodyRendersPerUpdate)
+  expect(scriptMsPerSecond).toBeLessThanOrEqual(budgets.longReplyScriptMsPerSecond)
+  expect(Math.max(...fromEnd)).toBeLessThanOrEqual(budgets.pinnedPx)
+  expect(frameStats(measured).frameP95Ms).toBeLessThanOrEqual(budgets.frameP95Ms)
+  expect(frameStats(measured).longFramesOver100).toBeLessThanOrEqual(budgets.longFramesOver100)
+})
+
+test("parallel swipes under one slot", async ({ page }) => {
+  await openPage(page)
+  const chatId = fixture.short[1]!.chatId
+  await page.goto(chatUrl(chatId))
+  await onScreen(page)
+  // Three more versions of the last reply at once; the last one started is shown.
+  const swipes = await withClient(server, (api) =>
+    Effect.gen(function* () {
+      const window = yield* api.ReadPath({ chatId, leafSlotId: null, range: { _tag: "Bottom" }, limit: 2 })
+      let entry = window.entries.at(-1)!
+      const started: Array<VersionId> = []
+      for (let i = 0; i < 3; i++) {
+        entry = yield* api.Regenerate({ slotId: entry.slotId, expectedRowVersion: entry.rowVersion })
+        started.push(entry.version.id)
+      }
+      return { slot: entry.slotId, started, versions: entry.versionCount }
+    })
+  )
+  const row = page.locator(`article[data-slot="${swipes.slot}"]`)
+  await expect(row.getByText("generating", { exact: true })).toBeVisible()
+  await expect(row.getByRole("group", { name: "Versions" })).toHaveText(`‹${swipes.versions}›`)
+  await page.waitForTimeout(1000)
+  const from = await now(page)
+  const counters0 = await counters(page)
+  const fromEnd = await fromEndSamples(page, 3000)
+  const measured = await since(page, from)
+  const updates = measured.perf.rowUpdates! - counters0.rowUpdates!
+  const shown = measured.perf.shownUpdates! - counters0.shownUpdates!
+  const bodies = measured.perf.liveBodyRenders! - counters0.liveBodyRenders!
+  const rows = measured.perf.rowRenders! - counters0.rowRenders!
+
+  // The one before, still generating off screen, kept its text: it shows it, and it grows.
+  await row.getByRole("button", { name: "Previous version" }).click()
+  await expect(row.getByText(`${swipes.versions - 1} / ${swipes.versions}`)).toBeVisible()
+  const length = async () => ((await row.locator(".markdown").textContent()) ?? "").length
+  const before = await length()
+  await page.waitForTimeout(800)
+  const grew = (await length()) > before
+  await stopStreams(swipes.started)
+  record("parallel swipes", {
+    updates,
+    shownUpdates: shown,
+    bodyRendersPerShownUpdate: round(bodies / Math.max(1, shown)),
+    rowRenders: rows,
+    previousGrew: String(grew),
+    gaps: measured.perf.gaps ?? 0,
+    pinnedPx: round(Math.max(...fromEnd)),
+    ...frameStats(measured)
+  })
+  // All three stream, one is shown, and only its body renders.
+  expect(updates).toBeGreaterThan(2 * shown)
+  expect(shown).toBeGreaterThan(50)
+  expect(bodies / shown).toBeLessThanOrEqual(budgets.bodyRendersPerUpdate)
+  expect(rows).toBeLessThanOrEqual(budgets.rowRendersWhileStreaming)
+  expect(grew).toBe(true)
+  expect(measured.perf.gaps ?? 0).toBe(budgets.gaps)
+  expect(Math.max(...fromEnd)).toBeLessThanOrEqual(budgets.pinnedPx)
+  expect(frameStats(measured).frameP95Ms).toBeLessThanOrEqual(budgets.frameP95Ms)
+  expect(frameStats(measured).longFramesOver100).toBeLessThanOrEqual(budgets.longFramesOver100)
+})
+
+test("a bursty stream: 300 tokens at once, every second", async ({ page }) => {
+  const paced = await pacedChat({
+    FAKE_GENERATOR_TPS: "300",
+    FAKE_GENERATOR_BURST_MS: "1000",
+    FAKE_GENERATOR_TOKENS: "4000"
+  })
+  try {
+    await openPage(page)
+    await page.goto(paced.url)
+    await onScreen(page)
+    await page.waitForTimeout(1500)
+    const from = await now(page)
+    const counters0 = await counters(page)
+    const fromEnd = await fromEndSamples(page, 5000)
+    const measured = await since(page, from)
+    const updates = measured.perf.shownUpdates! - counters0.shownUpdates!
+    const bodies = measured.perf.liveBodyRenders! - counters0.liveBodyRenders!
+    record("bursty", {
+      updates,
+      bodyRendersPerUpdate: round(bodies / Math.max(1, updates)),
+      pinnedPx: round(Math.max(...fromEnd)),
+      gaps: measured.perf.gaps ?? 0,
+      ...frameStats(measured)
+    })
+    // A burst a second is one update a second, not one a token.
+    expect(updates).toBeGreaterThanOrEqual(4)
+    expect(updates).toBeLessThanOrEqual(7)
+    expect(bodies / updates).toBeLessThanOrEqual(budgets.bodyRendersPerUpdate)
+    expect(Math.max(...fromEnd)).toBeLessThanOrEqual(budgets.pinnedPx)
+    expect(measured.perf.gaps ?? 0).toBe(budgets.gaps)
+    expect(frameStats(measured).longFramesOver100).toBeLessThanOrEqual(budgets.longFramesOver100)
+  } finally {
+    await paced.stop()
+  }
+})
+
+test("a slow stream: 4 tokens a second", async ({ page }) => {
+  const paced = await pacedChat({ FAKE_GENERATOR_TPS: "4", FAKE_GENERATOR_TOKENS: "200" })
+  try {
+    await openPage(page)
+    await page.goto(paced.url)
+    await onScreen(page)
+    await page.waitForTimeout(1000)
+    const from = await now(page)
+    const counters0 = await counters(page)
+    const fromEnd = await fromEndSamples(page, 5000)
+    const measured = await since(page, from)
+    const deltas = measured.perf.deltas! - counters0.deltas!
+    const updates = measured.perf.shownUpdates! - counters0.shownUpdates!
+    const bodies = measured.perf.liveBodyRenders! - counters0.liveBodyRenders!
+    record("slow", {
+      deltas,
+      updates,
+      bodyRendersPerUpdate: round(bodies / Math.max(1, updates)),
+      pinnedPx: round(Math.max(...fromEnd)),
+      gaps: measured.perf.gaps ?? 0,
+      ...frameStats(measured)
+    })
+    // Every token shows as it comes: one update per delta, none held back.
+    expect(deltas).toBeGreaterThanOrEqual(15)
+    expect(updates).toBe(deltas)
+    expect(bodies / updates).toBeLessThanOrEqual(budgets.bodyRendersPerUpdate)
+    expect(Math.max(...fromEnd)).toBeLessThanOrEqual(budgets.pinnedPx)
+    expect(measured.perf.gaps ?? 0).toBe(budgets.gaps)
+    expect(frameStats(measured).longFramesOver100).toBe(0)
+  } finally {
+    await paced.stop()
+  }
 })
