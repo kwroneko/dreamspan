@@ -89,6 +89,7 @@ interface OwnChat {
   readonly slotId: SlotId
   readonly versionId: VersionId
   readonly replySlotId: SlotId
+  readonly rolloutId: string
   readonly generatingId: VersionId
   readonly noteRefId: RefId
   readonly noteEntityId: EntityId
@@ -96,7 +97,7 @@ interface OwnChat {
 
 class Parties extends Context.Service<
   Parties,
-  { readonly alice: Party; readonly bob: Party; readonly reader: Reader["Service"] }
+  { readonly alice: Party; readonly bob: Party; readonly reader: Reader["Service"]; readonly writer: Writer["Service"] }
 >()("test/isolation/Parties") {}
 
 type Probe = (actor: Party, owner: Party) => Effect.Effect<void, unknown>
@@ -640,6 +641,8 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
         yield* refused(actor.api.GetRunContext({ versionId: owner.chat.generatingId }), "NotFound")
         const own = yield* owner.api.GetRunContext({ versionId: owner.chat.generatingId })
         assert.strictEqual(own.chatId, owner.chat.chatId)
+        assert.strictEqual(own.messages[0]?.role, "developer")
+        assert.strictEqual(own.messages[0]?.content, "Synthetic SDK instruction")
         assert.strictEqual(own.requests.length, 1)
         for (const request of own.requests) {
           assert.deepStrictEqual(Object.keys(request).sort(), ["id", "status", "counts", "usageSource", "cost"].sort())
@@ -1334,6 +1337,14 @@ const seed = Effect.gen(function* () {
         variables: [],
         frozenMessages: []
       })
+      yield* writer.RecordSentContext({
+        userId: user.id,
+        rolloutId: inspectorRollout,
+        wire: JSON.stringify({
+          messages: [{ role: "developer", content: "Synthetic SDK instruction", inputs: [0] }],
+          samplers: {}
+        })
+      })
       yield* writer.OpenLlmRequest({
         userId: user.id,
         request: {
@@ -1453,7 +1464,8 @@ const seed = Effect.gen(function* () {
           replySlotId: reply.entry.slotId,
           generatingId: reply.entry.version.id,
           noteRefId: chatNote.id,
-          noteEntityId: chatNote.entityId
+          noteEntityId: chatNote.entityId,
+          rolloutId: inspectorRollout
         },
         connectionId: connection.id,
         credentialId: credential.id,
@@ -1489,7 +1501,8 @@ const seed = Effect.gen(function* () {
   return {
     alice: yield* party(aliceApi, aliceUser, "alice-password", aliceCookie),
     bob: yield* party(bobApi, yield* bobApi.Whoami(), "bob-password", bobCookie),
-    reader: yield* Reader
+    reader: yield* Reader,
+    writer
   }
 })
 
@@ -1498,34 +1511,49 @@ const seed = Effect.gen(function* () {
  * only, so its completeness check can't see them. Each is probed here the same way, until an
  * RPC exposes it and it moves into the matrix.
  */
-const storage: Record<string, (reader: Reader["Service"], actor: Party, owner: Party) => Effect.Effect<void, unknown>> =
-  {
-    // Rebuilding a context from its pins (ARCHITECTURE §15): another user's snapshot, as is, rebuilds nothing.
-    RebuildContext: (reader, actor, owner) =>
-      Effect.gen(function* () {
-        const { snapshot } = yield* reader.AssembleContext({
-          userId: owner.user.id,
-          chatId: owner.chat.chatId,
-          slotId: owner.chat.replySlotId,
-          versionId: owner.chat.generatingId,
-          now: Date.now(),
-          timeZone: "UTC",
-          frozen: null
-        })
-        yield* refused(reader.RebuildContext({ userId: actor.user.id, snapshot }), "NotFound")
-        const rebuilt = yield* reader.RebuildContext({ userId: owner.user.id, snapshot })
-        assert.ok(rebuilt._tag === "Rebuilt")
-        assert.deepStrictEqual(JSON.parse(rebuilt.snapshot), JSON.parse(snapshot))
-      }),
-    // The cache-warmth estimate, which the chat's subscription pushes only to its owner.
-    CacheWarmth: (reader, actor, owner) =>
-      Effect.gen(function* () {
-        yield* refused(reader.CacheWarmth({ userId: actor.user.id, chatId: owner.chat.chatId }), "NotFound")
-        const own = yield* reader.CacheWarmth({ userId: owner.user.id, chatId: owner.chat.chatId })
-        assert.isNotNull(own)
-        assert.strictEqual(own!.expiresAt, own!.lastRequestAt + 300_000)
+const storage: Record<
+  string,
+  (reader: Reader["Service"], actor: Party, owner: Party, writer: Writer["Service"]) => Effect.Effect<void, unknown>
+> = {
+  RecordSentContext: (_reader, actor, owner, writer) =>
+    Effect.gen(function* () {
+      yield* refused(
+        writer.RecordSentContext({
+          userId: actor.user.id,
+          rolloutId: owner.chat.rolloutId,
+          wire: JSON.stringify({ messages: [], samplers: {} })
+        }),
+        "NotFound"
+      )
+      const run = yield* owner.api.GetRunContext({ versionId: owner.chat.generatingId })
+      assert.strictEqual(run.messages[0]?.content, "Synthetic SDK instruction")
+    }),
+  // Rebuilding a context from its pins (ARCHITECTURE §15): another user's snapshot, as is, rebuilds nothing.
+  RebuildContext: (reader, actor, owner) =>
+    Effect.gen(function* () {
+      const { snapshot } = yield* reader.AssembleContext({
+        userId: owner.user.id,
+        chatId: owner.chat.chatId,
+        slotId: owner.chat.replySlotId,
+        versionId: owner.chat.generatingId,
+        now: Date.now(),
+        timeZone: "UTC",
+        frozen: null
       })
-  }
+      yield* refused(reader.RebuildContext({ userId: actor.user.id, snapshot }), "NotFound")
+      const rebuilt = yield* reader.RebuildContext({ userId: owner.user.id, snapshot })
+      assert.ok(rebuilt._tag === "Rebuilt")
+      assert.deepStrictEqual(JSON.parse(rebuilt.snapshot), JSON.parse(snapshot))
+    }),
+  // The cache-warmth estimate, which the chat's subscription pushes only to its owner.
+  CacheWarmth: (reader, actor, owner) =>
+    Effect.gen(function* () {
+      yield* refused(reader.CacheWarmth({ userId: actor.user.id, chatId: owner.chat.chatId }), "NotFound")
+      const own = yield* reader.CacheWarmth({ userId: owner.user.id, chatId: owner.chat.chatId })
+      assert.isNotNull(own)
+      assert.strictEqual(own!.expiresAt, own!.lastRequestAt + 300_000)
+    })
+}
 
 describe("isolation matrix", () => {
   it("has exactly one entry per RPC in AppApi", () => {
@@ -1591,7 +1619,7 @@ layer(Layer.effect(Parties, seed).pipe(Layer.provide(serverLayer(config, slowGen
     ] as const
     for (const [way, actor, owner] of ways) {
       it.effect(`${tag} (storage): ${way}`, () =>
-        Effect.flatMap(Parties, (p) => run((a, o) => probe(p.reader, a, o), actor, owner))
+        Effect.flatMap(Parties, (p) => run((a, o) => probe(p.reader, a, o, p.writer), actor, owner))
       )
     }
   }

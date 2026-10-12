@@ -1194,6 +1194,12 @@ export class WriteOps extends RpcGroup.make(
     success: Schema.Void,
     error: Schema.Union([NotFound, StorageError])
   }),
+  /** The sanitized SDK payload projection, recorded before HTTP; only the rollout's owner may write it. */
+  Rpc.make("RecordSentContext", {
+    payload: { userId: UserId, rolloutId: Schema.String, wire: Schema.String },
+    success: Schema.Void,
+    error: Schema.Union([NotFound, StorageError])
+  }),
   /**
    * Closes a rollout with its outcome, and the usage its ledger rows add up to on the rollout
    * and on its version, in one transaction, so both match the ledger (PROVIDERS §9.1).

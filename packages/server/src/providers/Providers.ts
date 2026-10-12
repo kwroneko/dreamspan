@@ -5,6 +5,9 @@
 // pi-ai's API implementations are called directly with an explicit key and an empty
 // env, never through its Models collection, so no request can pick up a key from the
 // server's environment (PROVIDERS §4).
+import { sentWire, wireContext } from "../assembler/wire.ts"
+import type { AssembledRequest, ModelInput } from "../assembler/types.ts"
+import { mappingCapabilities } from "./mapping.ts"
 import type {
   Api,
   AssistantMessage,
@@ -60,6 +63,7 @@ export interface StreamRequest {
   readonly connectionId: ConnectionId
   readonly modelId: ModelId
   readonly context: PiContext
+  readonly inspection?: { readonly request: AssembledRequest; readonly model: ModelInput }
   readonly options?: {
     readonly reasoning?: ThinkingLevel
     readonly maxTokens?: number
@@ -841,16 +845,30 @@ export const layer = (options: ProvidersOptions = {}) =>
                   for (const observer of observers) observer.observe(data, state.capture)
                 },
                 // The caller's fields, then the registered transforms, in registration order.
-                ...(transforms.length > 0 || overrides !== undefined
-                  ? {
-                      onPayload: (payload: unknown) =>
-                        transforms.reduce(
-                          (current, t) =>
-                            t.transform(current, { target, messages: request.context.messages, breakpoints }),
-                          overrides === undefined ? (payload as Record<string, unknown>) : merged(payload, overrides)
-                        )
-                    }
-                  : {})
+                onPayload: async (payload: unknown) => {
+                  const final = transforms.reduce(
+                    (current, t) => t.transform(current, { target, messages: request.context.messages, breakpoints }),
+                    overrides === undefined ? (payload as Record<string, unknown>) : merged(payload, overrides)
+                  )
+                  if (request.inspection && request.attribution.rolloutId) {
+                    const mapping = mappingCapabilities(
+                      resolveModel(model.key, model.upstream, model.overrides, prepared.connection.compat)
+                    )
+                    const sources = wireContext(request.inspection.request, { ...request.inspection.model, mapping })
+                    const wire = sentWire(final, sources, prepared.scrub)
+                    await Effect.runPromise(
+                      fromStorage(
+                        writer.RecordSentContext({
+                          userId: request.userId,
+                          rolloutId: request.attribution.rolloutId,
+                          wire: JSON.stringify(wire)
+                        })
+                      ),
+                      { signal }
+                    )
+                  }
+                  return final
+                }
               })
               for await (const event of events) {
                 if ("partial" in event) state.partial = event.partial

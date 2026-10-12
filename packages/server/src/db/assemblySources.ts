@@ -1,5 +1,6 @@
 // The assembler's sources over the database, every read the acting user's, and the pins a
 // rebuild reads again (ARCHITECTURE §15).
+import { mappingCapabilities } from "../providers/mapping.ts"
 import type { ChatId } from "@rp/shared/chat.ts"
 import { CardDoc } from "@rp/shared/docs/card.ts"
 import { LorebookDoc } from "@rp/shared/docs/lorebook.ts"
@@ -490,6 +491,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
         return {
           connectionId: c.id,
           connectionRevision: connection.cache_revision,
+          mapping: mappingCapabilities(effective),
           cacheTtlS:
             effective.cacheTtlS.source === "user"
               ? effective.cacheTtlS.value

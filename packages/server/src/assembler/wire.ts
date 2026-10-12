@@ -1,5 +1,8 @@
 // The provider-neutral request mapped per provider, as ST 1.19 maps its sources (ARCHITECTURE §15).
-import type { Api, AssistantMessage, Context, Message } from "@earendil-works/pi-ai"
+import { convertResponsesMessages } from "@earendil-works/pi-ai/api/openai-responses-shared"
+import { normalizeContext } from "@earendil-works/pi-ai/utils/transcript"
+import { Predicate } from "effect"
+import type { Api, AssistantMessage, Context, Message, Model } from "@earendil-works/pi-ai"
 import type { AssembledRequest, ModelInput, RequestMessage, WireContext } from "./types.ts"
 
 /** The messages with the prefill appended as the start of the reply, where the model takes one. */
@@ -200,7 +203,7 @@ export const wireContext = (request: AssembledRequest, model: ModelInput): WireC
   if (wire.temperature !== undefined) samplers.temperature = wire.temperature
   if (wire.maxTokens !== undefined) samplers.max_tokens = wire.maxTokens
   if (model.api === "openai-completions") {
-    return { messages: input.map((message, i) => ({ ...message, inputs: [i] })), samplers }
+    return { messages: input.map((message, i) => ({ ...message, inputs: [i] })), samplers, mapping: model.mapping }
   }
   const first = wire.context.systemPrompt !== undefined ? input.findIndex((m) => m.role !== "system") : 0
   const systemCount = first === -1 ? input.length : first
@@ -219,5 +222,110 @@ export const wireContext = (request: AssembledRequest, model: ModelInput): WireC
         : message.content.flatMap((block) => (block.type === "text" ? [block.text] : [])).join("\n")
     messages.push({ role: message.role === "assistant" ? "assistant" : "user", content, inputs: [i + systemCount] })
   }
-  return { messages, samplers }
+  const projected = { messages, samplers, mapping: model.mapping }
+  if (model.api === "openai-responses") {
+    // Use the installed SDK's conversion, including developer roles and text normalization.
+    const sdk = {
+      id: model.key,
+      api: model.api,
+      provider: "openai",
+      reasoning: model.mapping?.reasoning ?? false,
+      input: ["text"],
+      compat: { supportsDeveloperRole: model.mapping?.supportsDeveloperRole ?? true }
+    } as Model<"openai-responses">
+    return {
+      ...sentWire({ input: convertResponsesMessages(sdk, normalizeContext(wire.context), new Set()) }, projected),
+      samplers
+    }
+  }
+  if (model.api === "google-generative-ai") {
+    return {
+      ...projected,
+      messages: messages.map((m) => (m.role === "assistant" ? { ...m, role: "model" as const } : m))
+    }
+  }
+  return projected
+}
+
+/** Extract only text messages and numeric samplers from the final SDK/transformed body.
+ * Headers, connection settings, tool definitions and arbitrary payload fields never enter storage.
+ */
+export const sentWire = (
+  payload: Record<string, unknown>,
+  sources: WireContext,
+  scrub = (text: string) => text
+): WireContext => {
+  const content = (value: unknown): string =>
+    typeof value === "string"
+      ? value
+      : Array.isArray(value)
+        ? value
+            .flatMap((block) => (Predicate.isObject(block) && typeof block.text === "string" ? [block.text] : []))
+            .join("\n")
+        : ""
+  const config = Predicate.isObject(payload.config) ? payload.config : {}
+  const rows: Array<{ role: WireContext["messages"][number]["role"]; content: string; name?: string }> = []
+  const system = content(payload.system ?? config.systemInstruction)
+  if (system) rows.push({ role: "system", content: system })
+  const messages = payload.messages ?? payload.input ?? payload.contents
+  if (Array.isArray(messages))
+    for (const message of messages) {
+      if (!Predicate.isObject(message)) continue
+      const role = message.role
+      if (role !== "system" && role !== "developer" && role !== "user" && role !== "assistant" && role !== "model")
+        continue
+      rows.push({
+        role,
+        content: content(message.content ?? message.parts),
+        ...(typeof message.name === "string" ? { name: message.name } : {})
+      })
+    }
+  const samplers: Record<string, number> = {}
+  for (const fields of [payload, config])
+    for (const key of [
+      "temperature",
+      "top_p",
+      "topP",
+      "top_k",
+      "topK",
+      "max_tokens",
+      "max_completion_tokens",
+      "max_output_tokens",
+      "maxOutputTokens",
+      "frequency_penalty",
+      "presence_penalty",
+      "seed",
+      "min_p",
+      "top_a",
+      "repetition_penalty"
+    ]) {
+      if (typeof fields[key] === "number") samplers[key] = fields[key]
+    }
+  // Text-only assembly preserves order. Match text when the SDK drops empty messages;
+  // a transform rewriting a message keeps its positional source attribution.
+  const byContent = new Map<string, number[]>()
+  for (const [i, source] of sources.messages.entries()) {
+    const indices = byContent.get(source.content) ?? []
+    indices.push(i)
+    byContent.set(source.content, indices)
+  }
+  let cursor = 0
+  return {
+    mapping: sources.mapping,
+    samplers,
+    messages: rows.map((row) => {
+      const at =
+        sources.messages[cursor]?.content === row.content
+          ? cursor
+          : (byContent.get(row.content)?.find((i) => i >= cursor) ?? cursor)
+      const source = sources.messages[at]
+      cursor = at + 1
+      return {
+        ...row,
+        content: scrub(row.content),
+        ...(row.name ? { name: scrub(row.name) } : {}),
+        inputs: source?.inputs ?? [0]
+      }
+    })
+  }
 }

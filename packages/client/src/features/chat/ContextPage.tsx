@@ -7,7 +7,7 @@ import type { ChatId, VersionId } from "@rp/shared/chat.ts"
 import type { ContextMessage, RunContext, InspectorUsage } from "@rp/shared/inspectorApi.ts"
 import { Link, Navigate, useParams } from "@tanstack/react-router"
 import { useMemo, useRef, useState } from "react"
-import { useVirtualizer } from "@tanstack/react-virtual"
+import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual"
 import { AsyncView } from "../../actions.tsx"
 import { AppClient } from "../../rpc.ts"
 import { Alert, Badge, Card, CardHeader } from "../../ui/Surface.tsx"
@@ -23,12 +23,24 @@ const breakpointText = {
   history: "Cache breakpoint: the end of the history the next request repeats"
 } as const
 
-function Message({ message, index, chatId }: { message: ContextMessage; index: number; chatId: ChatId }) {
-  const [open, setOpen] = useState(false)
+function Message({
+  message,
+  index,
+  chatId,
+  open,
+  setOpen
+}: {
+  message: ContextMessage
+  index: number
+  chatId: ChatId
+  open: boolean
+  setOpen: (open: boolean) => void
+}) {
   const preview = message.content.length > PREVIEW ? `${message.content.slice(0, PREVIEW)}…` : message.content
   return (
     <div className="flex flex-col gap-2">
       <details
+        open={open}
         className="rounded-lg border border-border bg-surface"
         onToggle={(event) => setOpen(event.currentTarget.open)}
       >
@@ -105,12 +117,18 @@ function Usage({ requests }: { requests: ReadonlyArray<InspectorUsage> }) {
 function Messages({ run }: { run: RunContext }) {
   "use no memo"
   const parent = useRef<HTMLDivElement>(null)
+  const [expanded, setExpanded] = useState<ReadonlySet<number>>(() => new Set())
+  const [focused, setFocused] = useState<number | null>(null)
   // eslint-disable-next-line react-hooks/incompatible-library -- mutable instance; memoization is disabled above
   const virtualizer = useVirtualizer({
     count: run.messages.length,
     getScrollElement: () => parent.current,
     estimateSize: () => 120,
     overscan: 4,
+    rangeExtractor: (range) => {
+      const visible = defaultRangeExtractor(range)
+      return focused === null || visible.includes(focused) ? visible : [...visible, focused].sort((a, b) => a - b)
+    },
     gap: 8
   })
   return (
@@ -120,12 +138,32 @@ function Messages({ run }: { run: RunContext }) {
           <div
             key={item.key}
             role="listitem"
+            aria-posinset={item.index + 1}
+            aria-setsize={run.messages.length}
+            onFocusCapture={() => setFocused(item.index)}
+            onBlurCapture={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget)) setFocused(null)
+            }}
             data-index={item.index}
             ref={virtualizer.measureElement}
             className="absolute top-0 left-0 w-full"
             style={{ transform: `translateY(${item.start}px)` }}
           >
-            <Message message={run.messages[item.index]!} index={item.index} chatId={run.chatId} />
+            <Message
+              message={run.messages[item.index]!}
+              index={item.index}
+              chatId={run.chatId}
+              open={expanded.has(item.index)}
+              setOpen={(open) =>
+                setExpanded((previous) => {
+                  if (previous.has(item.index) === open) return previous
+                  const next = new Set(previous)
+                  if (open) next.add(item.index)
+                  else next.delete(item.index)
+                  return next
+                })
+              }
+            />
           </div>
         ))}
       </div>
@@ -183,7 +221,7 @@ function Inspector({ run }: { run: RunContext }) {
       </Card>
       <section aria-label="Messages" className="flex flex-col gap-2">
         <h2 className="text-base font-semibold">Messages</h2>
-        <Messages run={run} />
+        <Messages key={run.versionId} run={run} />
       </section>
     </div>
   )

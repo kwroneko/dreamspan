@@ -137,7 +137,13 @@ export interface SnapshotInputs {
 
 /** Safe provider mapping with indices back to the assembled messages. No transport settings. */
 export interface WireContext {
-  readonly messages: ReadonlyArray<RequestMessage & { readonly inputs: ReadonlyArray<number> }>
+  readonly mapping?: ModelInput["mapping"]
+  readonly messages: ReadonlyArray<
+    Omit<RequestMessage, "role"> & {
+      readonly role: Role | "developer" | "model"
+      readonly inputs: ReadonlyArray<number>
+    }
+  >
   readonly samplers: Readonly<Record<string, number>>
 }
 
@@ -321,6 +327,12 @@ export interface ModelInput {
   readonly connectionId: string
   /** Non-secret cache identity; absent on legacy snapshots. */
   readonly connectionRevision?: number
+  /** Values needed for SDK text conversion, and a digest of all effective mapping capabilities. */
+  readonly mapping?: {
+    readonly reasoning: boolean
+    readonly supportsDeveloperRole: boolean
+    readonly revision: string
+  }
   readonly cacheTtlS?: number | null
   readonly modelId: string
   /** The provider kind (`openai-chat`, `anthropic`, …) and its wire API. */

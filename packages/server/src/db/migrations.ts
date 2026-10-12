@@ -91,7 +91,11 @@ export const migrations = {
       PRIMARY KEY (chat_id, operation_id)
     ) STRICT`
   ]),
-  "0016_inspector": runAll(inspector)
+  "0016_inspector": runAll(inspector),
+  "0017_sent_context": runAll([
+    `ALTER TABLE rollout_payloads ADD COLUMN sent_context_json TEXT
+      CHECK (sent_context_json IS NULL OR json_valid(sent_context_json))`
+  ])
 }
 
 export const Migrations = SqliteMigrator.layer({ loader: SqliteMigrator.fromRecord(migrations) })

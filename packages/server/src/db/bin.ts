@@ -82,7 +82,7 @@ const versionBytes = (v: string) =>
 const chatRecordBytes = [
   `SELECT ${bytes("value_json")} AS n FROM state_events WHERE chat_id = ?`,
   `SELECT ${bytes("error")} + ${bytes("cache_observed_json")} FROM rollouts WHERE chat_id = ?`,
-  `SELECT ${bytes("p.context_snapshot_json")} + ${bytes("p.transcript_json")}
+  `SELECT ${bytes("p.context_snapshot_json")} + ${bytes("p.transcript_json")} + ${bytes("p.sent_context_json")}
    FROM rollout_payloads p JOIN rollouts r ON r.id = p.rollout_id WHERE r.chat_id = ?`,
   `SELECT ${bytes("b.messages_json")} FROM rollout_branches b JOIN rollouts r ON r.id = b.rollout_id WHERE r.chat_id = ?`,
   `SELECT ${bytes("v.content")} FROM summary_revisions v JOIN summaries s ON s.id = v.summary_id WHERE s.chat_id = ?`,

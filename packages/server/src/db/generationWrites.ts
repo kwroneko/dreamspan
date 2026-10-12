@@ -122,6 +122,12 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
         )
       }).pipe(transaction(sql, "StartRollout")),
 
+    RecordSentContext: ({ userId, rolloutId, wire }) =>
+      Effect.gen(function* () {
+        yield* ownedRollout(userId, rolloutId)
+        yield* sql`UPDATE rollout_payloads SET sent_context_json = ${wire} WHERE rollout_id = ${rolloutId}`
+      }).pipe(transaction(sql, "RecordSentContext")),
+
     FinishRollout: ({ userId, rolloutId, versionId, status, error }) =>
       Effect.gen(function* () {
         yield* ownedRollout(userId, rolloutId)

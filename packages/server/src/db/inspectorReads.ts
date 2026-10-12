@@ -1,6 +1,6 @@
 // The request inspector's reads (DESIGN §7.4; ARCHITECTURE §15): a version's context as it
 // was sent, from its rollout's stored snapshot, with each piece's source named for the user.
-import type { ChatId, SlotId } from "@rp/shared/chat.ts"
+import type { ChatId, SlotId, ContextIssue } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { NotFound } from "@rp/shared/errors.ts"
 import { type ContextSource, RunContext } from "@rp/shared/inspectorApi.ts"
@@ -8,7 +8,7 @@ import { Effect } from "effect"
 import { SqlClient, type SqlError } from "effect/sql"
 import { wireContext } from "../assembler/wire.ts"
 import { tokensOf } from "../assembler/st.ts"
-import type { ContextSnapshot, Source } from "../assembler/types.ts"
+import type { ContextSnapshot, Source, WireContext } from "../assembler/types.ts"
 import type { Describe } from "../assembler/warmth.ts"
 import { builtinPreset } from "./assemblySources.ts"
 import type { ReadOps } from "./ops.ts"
@@ -129,8 +129,10 @@ export const makeInspectorReadHandlers = Effect.gen(function* () {
           rollout_id: string
           status: string
           snapshot: string
+          sent_context_json: string | null
+          context_issues_json: string | null
         }>`
-        SELECT s.chat_id, v.slot_id, r.id AS rollout_id, r.status, p.context_snapshot_json AS snapshot
+        SELECT s.chat_id, v.slot_id, r.id AS rollout_id, r.status, r.context_issues_json, p.context_snapshot_json AS snapshot, p.sent_context_json
         FROM versions v JOIN slots s ON s.id = v.slot_id JOIN chats c ON c.id = s.chat_id
         JOIN rollouts r ON r.id = v.rollout_id JOIN rollout_payloads p ON p.rollout_id = r.id
         WHERE v.id = ${versionId} AND c.owner_user_id = ${userId} AND p.context_snapshot_json IS NOT NULL
@@ -159,6 +161,7 @@ export const makeInspectorReadHandlers = Effect.gen(function* () {
         }
         const breakpoints = new Map(snapshot.request.breakpoints.map((b) => [b.message, b.reason]))
         const wire =
+          (row.sent_context_json ? (JSON.parse(row.sent_context_json) as WireContext) : null) ??
           snapshot.wire ??
           (model
             ? wireContext(snapshot.request, model)
@@ -192,7 +195,10 @@ export const makeInspectorReadHandlers = Effect.gen(function* () {
             breakpoint: message.inputs.map((i) => breakpoints.get(i)).findLast((b) => b !== undefined) ?? null
           })),
           samplers: { ...wire.samplers },
-          issues: snapshot.issues,
+          issues:
+            row.context_issues_json === null
+              ? []
+              : (JSON.parse(row.context_issues_json) as ReadonlyArray<ContextIssue>),
           requests: requests.map((r): InspectorUsage => ({
             id: r.id as InspectorUsage["id"],
             status: r.status,

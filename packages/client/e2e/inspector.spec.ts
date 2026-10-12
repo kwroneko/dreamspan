@@ -229,7 +229,7 @@ test("a version opened under another chat redirects to its canonical route", asy
   )
 })
 
-test("10,000 short messages mount only visible rows and scroll to the last source", async ({ page }) => {
+const denseContext = async (page: Page) => {
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/chats/${chat.id}`)
   await expect(reply(page)).toBeVisible()
@@ -263,6 +263,11 @@ test("10,000 short messages mount only visible rows and scroll to the last sourc
   const messages = page.getByRole("region", { name: "Messages" })
   await expect(page.getByText(/10000 messages, about 100,000 tokens/)).toBeVisible()
   expect(replaced).toBe(true)
+  return messages
+}
+
+test("10,000 short messages mount only visible rows and scroll to the last source", async ({ page }) => {
+  const messages = await denseContext(page)
   expect(await messages.getByRole("listitem").count()).toBeLessThan(80)
   const scroll = messages.getByRole("list")
   await scroll.evaluate((el) => {
@@ -272,4 +277,43 @@ test("10,000 short messages mount only visible rows and scroll to the last sourc
   await messages.getByText("#10000", { exact: true }).click()
   await expect(messages.locator("p", { hasText: "Short synthetic sentence 9999." })).toBeVisible()
   expect(await messages.getByRole("listitem").count()).toBeLessThan(80)
+})
+
+test("virtualized messages retain keyboard focus and expose their list positions", async ({ page }) => {
+  const messages = await denseContext(page)
+  const first = messages.locator("summary").first()
+  await first.focus()
+  for (let i = 0; i < 8; i++) {
+    await page.keyboard.press("PageDown")
+    await page.waitForTimeout(80)
+  }
+  await expect(first).toBeFocused()
+  await messages.getByRole("list").evaluate((el) => {
+    el.scrollTop = el.scrollHeight
+  })
+  const last = messages.getByRole("listitem").filter({ hasText: "#10000" })
+  await expect(last).toBeVisible()
+  await expect(first).toBeFocused()
+  await expect(last).toHaveAttribute("aria-posinset", "10000")
+  await expect(last).toHaveAttribute("aria-setsize", "10000")
+  expect(await messages.getByRole("listitem").count()).toBeLessThan(80)
+})
+
+test("expanded messages survive unmounting and scrolling back", async ({ page }) => {
+  const messages = await denseContext(page)
+  await messages.getByText("#1", { exact: true }).click()
+  // Move focus out so this row can unmount independently of focus retention.
+  await page.getByRole("link", { name: "← Back to the reply" }).focus()
+  const scroll = messages.getByRole("list")
+  await scroll.evaluate((el) => {
+    el.scrollTop = el.scrollHeight
+  })
+  await expect(messages.getByText("#10000", { exact: true })).toBeVisible()
+  await expect(messages.getByText("#1", { exact: true })).toHaveCount(0)
+  await scroll.evaluate((el) => {
+    el.scrollTop = 0
+  })
+  await expect(messages.getByText("#1", { exact: true })).toBeVisible()
+  await expect(messages.locator("details").first()).toHaveAttribute("open", "")
+  await expect(messages.locator("p", { hasText: "Short synthetic sentence 0." })).toBeVisible()
 })

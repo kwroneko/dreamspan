@@ -5,7 +5,7 @@
 import type { ContextSource } from "@rp/shared/inspectorApi.ts"
 import { tokensOf } from "./st.ts"
 import { wireContext } from "./wire.ts"
-import type { ContextSnapshot, RequestMessage, Source } from "./types.ts"
+import type { ContextSnapshot, Source, WireContext } from "./types.ts"
 
 export type Describe = (source: Source) => ContextSource
 
@@ -17,8 +17,10 @@ export const lastBreakpoint = (snapshot: ContextSnapshot) =>
 export const tokensBetween = (snapshot: ContextSnapshot, from: number, to: number) =>
   snapshot.request.messages.slice(from, to + 1).reduce((sum, message) => sum + tokensOf(message), 0)
 
-const same = (a: RequestMessage, b: RequestMessage | undefined) =>
-  b !== undefined && a.role === b.role && a.content === b.content && (a.name ?? null) === (b.name ?? null)
+const same = (
+  a: Pick<WireContext["messages"][number], "role" | "content" | "name">,
+  b: Pick<WireContext["messages"][number], "role" | "content" | "name"> | undefined
+) => b !== undefined && a.role === b.role && a.content === b.content && (a.name ?? null) === (b.name ?? null)
 
 const LAYOUT = "The context's layout changed: the cast, the chat's settings or the roles."
 const BUDGET = "The budget dropped the oldest messages, so where the history starts moves with every message."
@@ -124,6 +126,9 @@ export const prefixChange = (
   }
   if (before?.connectionRevision !== after?.connectionRevision) {
     return { reason: "The connection's endpoint or route changed.", tokens: suffix(0) }
+  }
+  if ((last.wire?.mapping ?? before?.mapping)?.revision !== (next.wire?.mapping ?? after?.mapping)?.revision) {
+    return { reason: "The model's request-conversion capabilities changed.", tokens: suffix(0) }
   }
   for (let at = 0; at < oldWire.length; at++) {
     if (!same(oldWire[at]!, newWire[at])) {

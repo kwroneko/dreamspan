@@ -1,9 +1,13 @@
+import * as ProviderBuiltins from "../src/providers/builtins.ts"
+import { ProviderRegistry } from "../src/providers/registry.ts"
+import { Worker } from "node:worker_threads"
+import { databaseFile } from "../src/db/connection.ts"
 import { assert, describe, it } from "@effect/vitest"
 import type { ChatEvent } from "@rp/shared/chatApi.ts"
-import { Effect } from "effect"
+import { Effect, Layer } from "effect"
 import { Reader } from "../src/db/Database.ts"
-import { client, serverLayer, testConfig } from "./support/config.ts"
-import { eventually, generateReply } from "./support/generation.ts"
+import { client, serverLayer, testConfig, posted } from "./support/config.ts"
+import { eventually, finished, generateReply } from "./support/generation.ts"
 import { startMockProvider, completionChunks, sse, anthropicSse } from "./support/mockProvider.ts"
 const mock = (echo = false) =>
   Effect.acquireRelease(
@@ -278,4 +282,182 @@ it.live("graph deletions refresh other open chats because bin eviction can remov
     yield* api.DeleteChat({ chatId: other.id })
     yield* eventually(() => estimates(events.slice(from)).length > 0)
   }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+})
+
+it.live("Responses inspection and warmth use the final SDK role after reasoning changes", () => {
+  const config = testConfig()
+  return Effect.gen(function* () {
+    const mock = yield* Effect.acquireRelease(
+      Effect.promise(() =>
+        startMockProvider((_req, res) =>
+          sse(
+            res,
+            [
+              {
+                type: "response.output_item.added",
+                output_index: 0,
+                item: { type: "message", id: "msg_1", role: "assistant", content: [] }
+              },
+              { type: "response.output_text.delta", output_index: 0, delta: "Synthetic answer." },
+              {
+                type: "response.output_item.done",
+                output_index: 0,
+                item: {
+                  type: "message",
+                  id: "msg_1",
+                  role: "assistant",
+                  content: [{ type: "output_text", text: "Synthetic answer." }]
+                }
+              },
+              {
+                type: "response.completed",
+                response: {
+                  id: "resp_1",
+                  status: "completed",
+                  model: "mock-model",
+                  output: [],
+                  usage: { input_tokens: 120, output_tokens: 6, input_tokens_details: { cached_tokens: 100 } }
+                }
+              }
+            ],
+            { done: false }
+          )
+        )
+      ),
+      (m) => Effect.promise(() => m.close())
+    )
+    const api = yield* client()
+    const { chat, model, events } = yield* generateReply(api, {
+      connection: { kind: "openai-responses", baseUrl: mock.url + "/v1", apiKey: "synthetic-key", cacheTtlS: 300 },
+      model: { reasoning: false }
+    })
+    const me = yield* api.Whoami()
+    const reader = yield* Reader
+    const before = yield* reader.CacheWarmth({ userId: me.id, chatId: chat.id })
+    const reasoning = yield* api.EditModel({
+      modelId: model.id,
+      expectedRowVersion: model.rowVersion,
+      overrides: { reasoning: true }
+    })
+    const after = yield* reader.CacheWarmth({ userId: me.id, chatId: chat.id })
+    const current = yield* api.GetChat({ chatId: chat.id })
+    const { entry } = yield* posted(
+      api.Generate({ chatId: chat.id, parentSlotId: current.activeLeafSlotId, branch: false })
+    )
+    yield* eventually(() => finished(events, entry.version.id) !== undefined)
+    const run = yield* api.GetRunContext({ versionId: entry.version.id })
+    const bodies = mock
+      .requests()
+      .filter((r) => r.path.endsWith("/responses"))
+      .map((r) => r.body)
+    assert.isNull(before?.changed)
+    assert.isTrue(run.messages.every((m) => m.sources.length > 0))
+    assert.deepEqual(
+      { shown: run.messages[0]!.role, changed: after?.changed !== null },
+      { shown: (bodies.at(-1)!.input as Array<{ role: string }>)[0]!.role, changed: true }
+    )
+    const sent = bodies.at(-1)!.input as Array<{ role: string; content: string | Array<{ text: string }> }>
+    assert.deepEqual(
+      run.messages.map((m) => ({ role: m.role, content: m.content })),
+      sent.map((m) => ({
+        role: m.role,
+        content: typeof m.content === "string" ? m.content : m.content.map((b) => b.text).join("\n")
+      }))
+    )
+    const matched = yield* reader.CacheWarmth({ userId: me.id, chatId: chat.id })
+    assert.isNull(matched?.changed, "the next reasoning request matches the captured developer prefix")
+    yield* api.EditModel({
+      modelId: model.id,
+      expectedRowVersion: reasoning.rowVersion,
+      overrides: { reasoning: true, compat: { supportsDeveloperRole: false } }
+    })
+    assert.isNotNull((yield* reader.CacheWarmth({ userId: me.id, chatId: chat.id }))!.changed)
+    assert.equal(
+      (yield* api.GetRunContext({ versionId: entry.version.id })).messages[0]!.role,
+      "developer",
+      "editing capabilities never changes the historical sent mapping"
+    )
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+})
+
+it.live("malformed legacy snapshot issues remain inspectable over RPC", () => {
+  const config = testConfig()
+  return Effect.gen(function* () {
+    const mock = yield* Effect.acquireRelease(
+      Effect.promise(() =>
+        startMockProvider((_req, res) =>
+          sse(res, completionChunks(["Synthetic answer."], { prompt_tokens: 10, completion_tokens: 2 }))
+        )
+      ),
+      (m) => Effect.promise(() => m.close())
+    )
+    const api = yield* client()
+    const { version } = yield* generateReply(api, {
+      connection: { kind: "openai-chat", baseUrl: mock.url + "/v1" },
+      model: {}
+    })
+    // Exactly the post-0013 state for an otherwise valid pre-0013 snapshot with bad issues:
+    // migration leaves context_snapshot_json untouched and backfills context_issues_json=null.
+    yield* Effect.promise(
+      () =>
+        new Promise<void>((resolve, reject) => {
+          const worker = new Worker(
+            `
+      const {DatabaseSync} = require('node:sqlite');
+      const {workerData} = require('node:worker_threads');
+      const db = new DatabaseSync(workerData);
+      try {
+        const row = db.prepare('SELECT rollout_id, context_snapshot_json FROM rollout_payloads LIMIT 1').get();
+        const snapshot = JSON.parse(row.context_snapshot_json);
+        snapshot.issues = 'not an array';
+        db.prepare('DELETE FROM rollout_payloads WHERE rollout_id=?').run(row.rollout_id);
+        db.prepare('INSERT INTO rollout_payloads(rollout_id,context_snapshot_json) VALUES(?,?)').run(row.rollout_id, JSON.stringify(snapshot));
+        db.exec('UPDATE rollouts SET context_issues_json=NULL');
+      } finally { db.close(); }
+    `,
+            { eval: true, workerData: databaseFile(config.dataDir) }
+          )
+          worker.once("error", reject)
+          worker.once("exit", (code) => (code === 0 ? resolve() : reject(new Error(`fixture worker exited ${code}`))))
+        })
+    )
+    const result = yield* api.GetRunContext({ versionId: version.id }).pipe(Effect.exit)
+    if (result._tag === "Success") assert.deepEqual(result.value.issues, [])
+    assert.equal(result._tag, "Success")
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+})
+
+it.live("inspection captures the final transformed payload and scrubs request secrets", () => {
+  const config = testConfig()
+  return Effect.gen(function* () {
+    const provider = yield* mock()
+    const registry = yield* ProviderRegistry
+    const key = "sk-synthetic-payload-key"
+    yield* registry.transforms.register({
+      id: "synthetic-message-transform",
+      appliesTo: (target) => target.api === "openai-completions",
+      transform: (payload) => {
+        const messages = payload.messages as Array<{ role: string; content: string }>
+        messages[0] = { ...messages[0]!, role: "developer", content: messages[0]!.content + " " + key }
+        return { ...payload, headers: { authorization: key }, private_field: key }
+      }
+    })
+    const api = yield* client()
+    const { version } = yield* generateReply(api, {
+      connection: { kind: "openai-chat", baseUrl: provider.url + "/v1", apiKey: key },
+      model: {}
+    })
+    assert.equal(version.status, "complete")
+    const run = yield* api.GetRunContext({ versionId: version.id })
+    const sent = provider.requests().find((r) => r.path.endsWith("/chat/completions"))!.body!.messages as Array<{
+      role: string
+      content: string
+    }>
+    assert.equal(run.messages[0]!.role, sent[0]!.role)
+    assert.equal(run.messages[0]!.content, sent[0]!.content.replaceAll(key, "[redacted]"))
+    assert.isAbove(run.messages[0]!.sources.length, 0)
+    assert.notInclude(JSON.stringify(run), key)
+    assert.notInclude(JSON.stringify(run), "private_field")
+    assert.notInclude(JSON.stringify(run), "authorization")
+  }).pipe(Effect.scoped, Effect.provide(Layer.merge(serverLayer(config), ProviderBuiltins.layer)))
 })

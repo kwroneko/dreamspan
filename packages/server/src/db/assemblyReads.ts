@@ -7,7 +7,13 @@ import { wireContext } from "../assembler/wire.ts"
 import { lastBreakpoint, prefixChange, tokensBetween } from "../assembler/warmth.ts"
 import { describer } from "./inspectorReads.ts"
 import { NotFound } from "@rp/shared/errors.ts"
-import { ASSEMBLER_VERSION, AssemblyFailed, type ContextSnapshot, generationOf } from "../assembler/types.ts"
+import {
+  ASSEMBLER_VERSION,
+  AssemblyFailed,
+  type ContextSnapshot,
+  type WireContext,
+  generationOf
+} from "../assembler/types.ts"
 import { sqlSources } from "./assemblySources.ts"
 import { readDefaults } from "./generationSettings.ts"
 import type { ReadOps } from "./ops.ts"
@@ -85,16 +91,21 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
           cache_read: number | null
           cache_write: number | null
           model_id: string | null
+          sent_context_json: string | null
           snapshot: string | null
         }>`
           SELECT q.started_at, q.cache_read, q.cache_write, q.model_id,
-            p.context_snapshot_json AS snapshot
+            p.context_snapshot_json AS snapshot, p.sent_context_json
           FROM llm_requests q JOIN rollout_payloads p ON p.rollout_id = q.rollout_id
           WHERE q.chat_id = ${chatId} AND q.owner_user_id = ${userId}
             AND (q.status IN ('running', 'complete') OR q.first_token_at IS NOT NULL)
           ORDER BY q.started_at DESC, q.id DESC LIMIT 1`
         if (!last?.snapshot || last.model_id === null) return null
-        const previous = JSON.parse(last.snapshot) as ContextSnapshot
+        const saved = JSON.parse(last.snapshot) as ContextSnapshot
+        const previous = {
+          ...saved,
+          ...(last.sent_context_json ? { wire: JSON.parse(last.sent_context_json) as WireContext } : {})
+        }
         const end = lastBreakpoint(previous)
         const sources = sqlSources(sql, { userId, chatId, next: true })
         const next = yield* assembler

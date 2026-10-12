@@ -18,7 +18,7 @@ export type ContextSource = typeof ContextSource.Type
 const BreakpointReason = Schema.Literals(["prefix", "history"])
 
 export const ContextMessage = Schema.Struct({
-  role: Schema.Literals(["system", "user", "assistant"]),
+  role: Schema.Literals(["system", "developer", "user", "assistant", "model"]),
   name: Schema.NullOr(Schema.String),
   content: Schema.String,
   /** The assembler's estimate: a token per four characters, plus three per message. */

@@ -486,7 +486,8 @@ describe("recycle bin", () => {
         `INSERT INTO rollouts (id, chat_id, kind, status, role, request_class, error, created_at, updated_at)
          VALUES ('r1', ?, 'generation', 'failed', 'narrator', 'interactive', 'oops', 0, 0)`
       ).run(story.id)
-      db.exec(`INSERT INTO rollout_payloads VALUES ('r1', '{"a":1}', '["猫"]')`)
+      db.exec(`INSERT INTO rollout_payloads (rollout_id, context_snapshot_json, transcript_json, sent_context_json)
+        VALUES ('r1', '{"a":1}', '["猫"]', '{"messages":[]}')`)
       db.prepare(
         `INSERT INTO state_events (id, chat_id, seq, key, value_json, origin, created_at)
          VALUES ('e1', ?, 1, 'var.set', '"雨"', 'user', 0)`
@@ -498,8 +499,8 @@ describe("recycle bin", () => {
         )
         .all(card.entityId)
       db.close()
-      // "oops", {"a":1}, ["猫"] and "雨"
-      assert.strictEqual((yield* writer.DeleteChat({ userId, chatId: story.id })).byteSize, 4 + 7 + 7 + 5)
+      // "oops", {"a":1}, ["猫"], {"messages":[]} and "雨"
+      assert.strictEqual((yield* writer.DeleteChat({ userId, chatId: story.id })).byteSize, 4 + 7 + 7 + 15 + 5)
       assert.strictEqual((yield* writer.DeleteEntity({ userId, entityId: card.entityId })).byteSize, entityBytes!.n)
     }).pipe(Effect.provide(database(dir)))
   })
