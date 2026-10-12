@@ -846,3 +846,43 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
     })
   )
 })
+
+layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" })("an imported chat note", (it) => {
+  it.effect("keeps the fields the editor doesn't show through an edit", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const writer = yield* Writer
+      const me = yield* api.Whoami()
+      const chat = yield* api.CreateChat({ title: "Harbor" })
+      const note = {
+        schema_version: 1,
+        title: "Summary",
+        content: "They met at the harbor.",
+        placement: { mode: "section", section: "after_main_prompt" },
+        owner: { chat: chat.id },
+        exportable: false,
+        kind: "imported_summary",
+        interval: 3,
+        template: "[Summary: {{summary}}]"
+      }
+      const { ref } = yield* writer.CreateEntity({
+        userId: me.id,
+        kind: "note",
+        label: "Summary",
+        subtitle: "",
+        doc: note,
+        schemaVersion: 1,
+        origin: "import",
+        sourcePath: null
+      })
+      yield* draft(api, ref.id, textField(["content"]), "They met at the harbor, at dusk.")
+      yield* draft(api, ref.id, valueField(["placement"]), '{"mode":"none"}')
+      yield* commit(api, ref.id)
+      assert.deepStrictEqual(yield* doc(api, ref.id), {
+        ...note,
+        content: "They met at the harbor, at dusk.",
+        placement: { mode: "none" }
+      })
+    })
+  )
+})

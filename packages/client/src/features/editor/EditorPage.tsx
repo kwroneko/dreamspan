@@ -1,4 +1,4 @@
-// A library entry's editor (ARCHITECTURE.md §13): which entry and scope you're editing, how
+// A library entry's editor (ARCHITECTURE.md §14): which entry and scope you're editing, how
 // many chats the change reaches, and the state you're in: saved, or changes kept as drafts.
 import type { SavedRef } from "@rp/shared/editorApi.ts"
 import type { RefId } from "@rp/shared/library.ts"

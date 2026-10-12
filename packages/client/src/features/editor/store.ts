@@ -1,4 +1,4 @@
-// One ref being edited (ARCHITECTURE.md §13): its saved document, and a draft per field the
+// One ref being edited (ARCHITECTURE.md §14): its saved document, and a draft per field the
 // user changed, saved to the server as they type. Components subscribe to one field each,
 // so typing in a 50 KB description re-renders that field only.
 import { applyDrafts, type FieldPath, getAt, parseField, textField, valueField } from "@rp/shared/editing.ts"

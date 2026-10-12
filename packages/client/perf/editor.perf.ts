@@ -1,4 +1,4 @@
-// The editors under load (ARCHITECTURE.md §13): a card with a 50 KB description and a
+// The editors under load (ARCHITECTURE.md §14): a card with a 50 KB description and a
 // preset with 100 prompts, typed into, toggled and reordered in the built client against
 // the real server. Input must stay quick, and no frame long.
 import { appendFileSync, mkdtempSync, readFileSync, rmSync } from "node:fs"

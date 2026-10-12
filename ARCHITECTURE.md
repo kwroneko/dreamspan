@@ -40,9 +40,9 @@ Bun was measured as an alternative (2026-10-10) and not adopted. On this server 
 ## 2. Server
 
 `packages/server/src/main.ts` reads configuration from the environment and launches `ServerLive` (`server.ts`). That's one HTTP server with these parts:
-- **`/rpc`:** the RPC endpoint (`AppApi` from `@rp/shared/api.ts`) over a WebSocket, JSON-serialized. Every UI action is meant to become an RPC in this group (DESIGN §7.7). Today it has `Health`, `Whoami`, the account RPCs (§4), the provider-kind, connection, credential, model, network-settings and usage RPCs (§6), `ListLibrary` (§11), the chat RPCs (§12), and the editor RPCs (§13).
+- **`/rpc`:** the RPC endpoint (`AppApi` from `@rp/shared/api.ts`) over a WebSocket, JSON-serialized. Every UI action is meant to become an RPC in this group (DESIGN §7.7). Today it has `Health`, `Whoami`, the account RPCs (§4), the provider-kind, connection, credential, model, network-settings and usage RPCs (§6), `ListLibrary` (§11), the chat RPCs (§12), and the editor RPCs (§14).
 - **`/healthz`:** a plain-text liveness route, used by the Docker health check.
-- **`/auth/login`, `/auth/logout`** (§4), **`/library/import`, `/library/export`** (§11.4) and **`/library/avatar`, `/library/media`** (§13.5): plain HTTP, for what a WebSocket message can't do well, a cookie and a file.
+- **`/auth/login`, `/auth/logout`** (§4), **`/library/import`, `/library/export`** (§11.4) and **`/library/avatar`, `/library/media`** (§14.5): plain HTTP, for what a WebSocket message can't do well, a cookie and a file.
 - **Everything else:** the client build, served as a single-page app (unknown paths return `index.html`, so deep links work).
 
 **Content-Security-Policy.** `RequestGuard` puts one on every response: `default-src 'self'`; `script-src 'self'` (the build's own modules, nothing inline, nothing from elsewhere, so markup that got past sanitizing can't run script); `style-src 'self'`; `img-src 'self'` (an image URL in a message could report on the chat to its server; Markdown blocks images too); `connect-src 'self'` plus `ws://` and `wss://` on the Host the browser used, when it's a plain host name (`'self'` covers the WebSocket in current browsers; the explicit origins, older ones); `object-src 'none'`, `base-uri 'none'`, `form-action 'self'`, `frame-ancestors 'none'`. The browser tests run every screen under it and fail on any violation (`e2e/csp.spec.ts`). The Vite development server doesn't send it.
@@ -333,7 +333,7 @@ An upstream merging a new import ends the same ways. The outcomes are returned, 
 
 **Known limits:**
 - Arrays without element identities, like a card's `alternate_greetings` or `tags`, are atomic: changing them on both sides is a conflict.
-- Not built yet: library search. Importing and exporting files is §11; editing, and "used by N chats", §13.
+- Not built yet: library search. Importing and exporting files is §11; editing, and "used by N chats", §14.
 
 ### 3.10 Drafts
 
@@ -570,7 +570,7 @@ In proxy mode, a WebSocket keeps the identity it opened with until it disconnect
   - **Import** (`features/library/`, §11): pick or drop files (`FileDrop` in `ui/`: a label around a hidden file input, so it's a picker by click or keyboard too). They upload one at a time, each with its state (waiting, importing, imported, not imported, failed) and its report rendered as plain text, so file text that looks like HTML or Markdown shows as typed. A failure gives its reason, an ended session included. The picker is disabled until a batch is done, so a second batch can't interleave with it. A file over the 64 MB cap is refused before it's sent. With `?into=<ref>` it updates that entry from its new version and says what happened to each variant.
   - **Library:** cards, lorebooks and presets by label, with variant and "update available" badges, an export per entry (cards pick PNG, V2 JSON, V3 JSON or CHARX) downloaded through a blob link, and "Update from file" on upstream entries. Uploads go through `useAction` only to invalidate the `library` key.
   - **Chats** (`/chats`) and a chat (`/chats/$chatId`): §12.
-  - **The card and preset editors** (`/library/$refId`): §13.6.
+  - **The card and preset editors** (`/library/$refId`): §14.6.
 - **Styling** (CLIENT-FRAMEWORK §8):
   - **Semantic tokens only.** `styles.css` defines colors by role (`canvas`, `surface`, `text`, `muted`, `accent`, `danger`, `warning`, `success`, `overlay`, …), for light and dark, with `data-theme` overrides.
   - **The default Tailwind palette is removed** (`--color-*: initial`), so a class like `bg-zinc-800` doesn't exist. Only token utilities (`bg-surface`, `text-muted`) can be written. A redesign changes token values, not components.
@@ -1119,11 +1119,11 @@ A SillyTavern data folder into the library and chats (DESIGN §1.4, §8.1; DATA-
 - A re-import changes a chat's state only from new messages on; without any, the report says what changed and nothing moves.
 - Speakers and links are matched only against the cards in the folder imported.
 - The writer decodes each batch before its transaction, but still in the writer thread.
-## 13. Editing the library
+## 14. Editing the library
 
 The card and preset editors (DESIGN §4, §6.2): every field edits through a draft on the server, saving commits a revision, and nothing is ever lost. Contract in `@rp/shared/editorApi.ts` (merged into `AppApi`), the shared logic in `@rp/shared/editing.ts`, handlers in `packages/server/src/api/editor.ts`, storage in `db/editorWrites.ts` and `db/editorReads.ts`.
 
-### 13.1 Drafts per field
+### 14.1 Drafts per field
 
 **Every field the user edits is a draft** (§3.10), keyed by the ref and the field's path in the document (`entity_field`). A text field's draft holds its text; any other field's (a number, a switch, the prompt order, a new prompt, a list of tags) holds its JSON, with the path prefixed `=`. So each field has its own undo history on the server, the order of 100 prompts included, and a reload or another device finds every unsaved change.
 - **Paths name list elements by identity** where they have one (`["prompts", "identifier=main", "content"]`, as merge conflicts do, §3.9), so reordering never moves a draft to another prompt. Lists without identities (`alternate_greetings`) use indexes; an index into a list with ids (`modules`, `prompts`, `order`, `regex`, a lorebook's entries, or any list whose elements all have one) is refused, since after a reorder it would name another element.
@@ -1132,7 +1132,7 @@ The card and preset editors (DESIGN §4, §6.2): every field edits through a dra
 - **Protected fields** never change through a draft, each having its own action or none: `schema_version`; a card's `avatar_media_id` and `asset_media_ids`; a preset's `regex_approved`; a note's `owner`.
 - A draft records the revision it started from (`baseRevisionId` when a session starts). Saving the same text against a new base now moves the base (`drafts.ts`), which is how the client keeps a draft after a conflict.
 
-### 13.2 Saving
+### 14.2 Saving
 
 **`CommitEditorDrafts`** takes the ref's row version and the drafts to save, each with its row version, and in one writer transaction:
 1. checks the ref and every draft are as the client saw them (`StaleWrite` otherwise: another tab typed on);
@@ -1154,32 +1154,32 @@ Building and validating the document happens in the writer, because the drafts i
 - `RenameRef`: the library label and subtitle (DESIGN §4: the in-chat name is the document's `name`, a field like any other). Labels are trimmed, 1 to 200 characters with no control characters.
 - `CreateCard`: a card from scratch (`newCardDoc`), an upstream with every field empty but its name.
 - Notes: `CreateCardNote` makes a note entity owned by the card (`newCardNote`, in-chat at depth 4 as `system`, like ST's Character's Note), `ListCardNotes` lists a card's notes by their upstream refs, and `DeleteCardNote` sends one to the bin. A note is edited like any ref.
-- Updates from what a ref follows (§3.9): `PreviewUpdate`, `ApplyUpdate` (when no help is needed) and `ResolveUpdate`. A resolved document comes from the client, so the writer (`ResolveMerge`) takes it only while an update is pending, checks it against the kind's schema, refuses media and cards that aren't the user's as `NotFound` (`avatar_media_id`, `asset_media_ids`, a note's `owner.card`), takes each protected field from one side or the other (`protectedChanges`), and grants nothing (§13.3).
+- Updates from what a ref follows (§3.9): `PreviewUpdate`, `ApplyUpdate` (when no help is needed) and `ResolveUpdate`. A resolved document comes from the client, so the writer (`ResolveMerge`) takes it only while an update is pending, checks it against the kind's schema, refuses media and cards that aren't the user's as `NotFound` (`avatar_media_id`, `asset_media_ids`, a note's `owner.card`), takes each protected field from one side or the other (`protectedChanges`), and grants nothing (§14.3).
 - **An automatic merge never makes an invalid document** (`planMerge` in `db/library.ts`). Two valid edits can merge into an invalid one: a variant deletes a prompt the upstream then adds to its order. The fields the schema refuses become conflicts, the ref stays as it was with "update available", and the resolver shows them. This costs a schema check of the merged document per merge, in the writer.
 
 **Reads:** `OpenEditor` returns, in one snapshot, the ref, its head document, how many chats use it, every draft of its fields (ended ones too: their row versions are what the next save starts from) and the entity's upstream and variants. `ListRevisions` and `GetRevision` (of the ref's own entity only) are the history. `EditorDraftHistory`, `RestoreEditorDraft` and `DiscardEditorDraft` are §3.10's operations, for `entity_field` drafts only.
 
 **"Used by N chats"** (DESIGN §4): the user's live chats a change to the ref reaches. That's those whose state names it (`card.binding`, `preset.binding`, `lorebook.attach`), those with a chat override following it, and, for an entity's upstream, those its card joined (`participant.join`), which is what chats use without a binding. A chat counts even if the card left it since: too many is safer than too few.
 
-### 13.3 What changes never grant
+### 14.3 What changes never grant
 
 A preset's scripts run only once `regex_approved` is true (§9), and only `SetRegexApproval` changes it, with its own revision ("Allowed the regex scripts to run"). The user's own edits in the editor keep it, a script's included. Anything else keeps it only for the scripts it was given for (`keepsRegexApproval`, comparing them as canonical JSON): a merged import or variant change that brings different scripts (`applyMerge`, `ResolveMerge`), and a restored revision, come out not approved. Without that, a re-import of a file with a new script merged into an approved preset arrived approved, since a merge keeps the side that changed the flag. A fast-forward is no exception: a ref without edits of its own would move to exactly the revision it follows, approval included, so where that revision has an approval or permission the ref doesn't, the ref gets a merge revision with it kept off instead (`applyMerge`).
 
 The agent's permission to edit a note or a card module (`agent_editable`) works the same way (`withoutGrantedAgentEdits`): the user turns it on in the editor, and a merge, a resolved update or a restored revision keeps it off wherever the head has it off.
 
-### 13.4 Documents
+### 14.4 Documents
 
-- **Notes** (`@rp/shared/docs/note.ts`) have a placement: in-chat at a depth with a role, at the tail with a role, or in the card's section (DESIGN §5.2, proposed). Export writes ST's Character's Note from a depth note, from a tail note at depth 0, and not from a section note, which ST has no place for.
-- **Card modules** (`docs/card.ts`) have an optional placement, absent meaning the card's section, which export writes and import reads back.
+- **Notes** (`@rp/shared/docs/note.ts`) have a placement (DESIGN §5.2, proposed): in-chat at a depth with a role; at the tail with a role; in a section, the card's own (`card`, with its definition) or one of ST's (§13); or none, read only by a macro. Export writes ST's Character's Note from a depth note, and from a tail note at depth 0, never from the others, which ST's note has no place for. The editor shows every placement, and the fields it doesn't edit (a chat note's `kind`, `interval`, `template`, `covers`) stay as they are: a draft changes only its own path, and the schema keeps them.
+- **Card modules** (`docs/card.ts`) have an optional placement, absent meaning the card's section (`section: card`), which export writes and import reads back.
 - **`agent_editable`** on notes and modules (DESIGN §4.1a, proposed) is only stored: nothing reads it until agents exist. Import never reads it and export never writes it, as with `regex_approved`: a file never grants anything (DESIGN §11). Card fields don't have the flag yet.
 
-### 13.5 Avatars and images
+### 14.5 Avatars and images
 
 - **`POST /library/avatar?ref=<card ref>&rowVersion=<n>`** (`importer/routes.ts`): the image as the body, `application/octet-stream`, at most 16 MiB, with the import's limits on slow bodies, its permits and one transfer per user (§11.4). The ref is checked before the body is read. The type comes from the bytes (`importer/images.ts`, the same classifier the importers use, a PNG needing its whole signature): PNG, JPEG, GIF or WebP, else `415`. The file goes to media storage as an import's do (§11.1), held from the sweep until `SetCardAvatar` records it, and the card gets a revision, "Changed the avatar". A stale row version is `409`.
 - **`POST /library/drafts`**: editor drafts a closing page sends with `fetch(…, { keepalive: true })`, JSON, at most 500 and 4 MiB; each saved as `SaveEditorDraft` would, and on top of another save of the same field that got there first, which stays in its history. Another user's ref is `404`.
 - **`GET /library/media?id=<media id>`**: a stored file the user holds a reference to (`GetMediaFile`), only if it's one of those four image types, with `nosniff` and `no-store`. Anything else, another user's file included, is `404`. The same bytes uploaded by two users are one file both reference, so both can read it.
 
-### 13.6 The editors in the client
+### 14.6 The editors in the client
 
 `packages/client/src/features/editor/`, at `/library/$refId` (loaded with the first entry opened), on stock components. The library lists **Edit** on cards and presets and has **New card**.
 - **The page says which state you're in** (DESIGN §6.2): which entry and scope (original, variant), "used by N chats" with "to change it for some chats only, make a variant", and a sticky bar with Save, Search, History, Make a variant and Rename, over "Everything is saved", "Keeping your changes…" or "N fields have changes, kept as drafts until you save a revision". An update from what the entry follows shows as a banner.

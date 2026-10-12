@@ -1,4 +1,4 @@
-// The card and preset editors (ARCHITECTURE.md §13) in a real browser against the real
+// The card and preset editors (ARCHITECTURE.md §14) in a real browser against the real
 // server: edits kept as drafts, saved as revisions, undone, restored, forked, reordered,
 // approved, searched and resolved. Every card and preset here is made up.
 import { readFile } from "node:fs/promises"
