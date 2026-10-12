@@ -23,7 +23,9 @@ export class LibraryImport extends Schema.Class<LibraryImport>("LibraryImport")(
   /** The card's note made from ST's Character's Note, if the card has one. */
   note: Schema.NullOr(LibraryRef),
   /** On a re-import of a card from a file without an avatar: the card kept its current one. */
-  keptAvatar: Schema.Boolean
+  keptAvatar: Schema.Boolean,
+  /** On a re-import of a card: how many embedded files it kept that the new file doesn't hold. */
+  keptAssets: Schema.Int
 }) {}
 
 /** The answer to one uploaded file. */

@@ -199,19 +199,30 @@ export const layer = Layer.unwrap(
                 sourceHash: parsed.sha256,
                 media: parsed.media.map(({ bytes: _, ...file }) => file)
               })
-              const report = library.keptAvatar
-                ? new ImportReport({
-                    format: parsed.report.format,
-                    issues: [
-                      ...parsed.report.issues,
+              const kept = [
+                ...(library.keptAvatar
+                  ? [
                       new ImportIssue({
                         level: "info",
                         code: "card.avatar_kept",
                         message: "This file has no avatar, so the card keeps the one it had."
                       })
                     ]
-                  })
-                : parsed.report
+                  : []),
+                ...(library.keptAssets > 0
+                  ? [
+                      new ImportIssue({
+                        level: "info",
+                        code: "card.assets_kept",
+                        message: `This file doesn't hold ${library.keptAssets === 1 ? "one of the card's embedded files" : `${library.keptAssets} of the card's embedded files`} that it still names, so the card keeps the ones it had.`
+                      })
+                    ]
+                  : [])
+              ]
+              const report = new ImportReport({
+                format: parsed.report.format,
+                issues: [...parsed.report.issues, ...kept]
+              })
               return yield* HttpServerResponse.schemaJson(ImportResult)(new ImportResult({ report, library }))
             })
           )

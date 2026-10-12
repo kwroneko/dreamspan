@@ -215,13 +215,25 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
         { name: "assets/emotion/happy.png", data: extra, method: 0 }
       ])
       const { library } = yield* imported(archive, "wren.charx")
-      const { bytes } = yield* exported(library!.ref.id, "card-charx")
-      const back = run(importCard(bytes))
-      assert.deepStrictEqual(
-        back.assets.map((asset) => [asset.uri, sha256(asset.bytes)]),
-        [["embeded://assets/emotion/happy.png", sha256(extra)]]
+      const exportsBoth = Effect.gen(function* () {
+        const { bytes } = yield* exported(library!.ref.id, "card-charx")
+        const back = run(importCard(bytes))
+        assert.deepStrictEqual(
+          back.assets.map((asset) => [asset.uri, sha256(asset.bytes)]),
+          [["embeded://assets/emotion/happy.png", sha256(extra)]]
+        )
+        assert.strictEqual(sha256(back.avatar!.bytes), sha256(icon))
+      })
+      yield* exportsBoth
+
+      // Its card.json alone as the new version: the files it names but doesn't hold stay.
+      const json3 = yield* imported(json(card), "wren.json", library!.ref.id)
+      assert.includeMembers(
+        json3.report.issues.map((issue) => issue.code),
+        ["card.avatar_kept", "card.assets_kept"]
       )
-      assert.strictEqual(sha256(back.avatar!.bytes), sha256(icon))
+      assert.strictEqual(json3.library!.keptAssets, 1)
+      yield* exportsBoth
     })
   )
 

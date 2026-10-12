@@ -6,7 +6,7 @@ import type { UserId } from "@rp/shared/domain.ts"
 import type { Doc, EntityKind, MergeOutcome, RefId } from "@rp/shared/library.ts"
 import { ImportedFollower, LibraryImport } from "@rp/shared/libraryImport.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
-import { Effect } from "effect"
+import { Effect, Predicate } from "effect"
 import { SqlClient } from "effect/sql"
 import type { Bin } from "./bin.ts"
 import { docHash, searchText } from "./documents.ts"
@@ -34,6 +34,12 @@ const encode = (doc: Doc): EncodedDoc => ({
   hash: docHash(doc),
   searchText: searchText(doc)
 })
+
+/** The URIs a card document's `assets` name. */
+const assetUris = (assets: unknown) =>
+  Array.isArray(assets)
+    ? assets.flatMap((asset) => (Predicate.isObject(asset) && typeof asset.uri === "string" ? [asset.uri] : []))
+    : []
 
 export const makeLibraryWriteHandlers = (bin: Bin) =>
   Effect.gen(function* () {
@@ -457,27 +463,42 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
               reason: `This file is a ${kind}, not a ${into.kind}.`
             })
           }
-          // A new version without an avatar (a JSON card) keeps the card's current one, which
-          // would otherwise be dropped as the new import's change.
-          const current =
-            kind === "card" && into !== null && !input.media.some((file) => file.role === "avatar")
-              ? (yield* lib.loadDoc(into.head_revision_id)).avatar_media_id
-              : null
-          const keptAvatar = typeof current === "string" ? current : null
-          // Stored as the format worker encoded it, unless a card's media change it.
+          // A new version without some of the card's files (a JSON card has none) keeps the
+          // card's current ones, which would otherwise be dropped as the new version's change:
+          // its avatar, and the assets its own `assets` still name.
+          const current = kind === "card" && into !== null ? yield* lib.loadDoc(into.head_revision_id) : null
+          let keptAvatar = false
+          let keptAssets = 0
+          // Stored as the format worker encoded it, unless a card's files change it.
           let doc: EncodedDoc = { json: input.docJson, hash: input.docHash, searchText: input.searchText }
-          if (kind === "card" && (input.media.length > 0 || keptAvatar !== null)) {
+          if (kind === "card" && (input.media.length > 0 || current !== null)) {
             const card = JSON.parse(input.docJson) as Record<string, unknown>
-            const assets: Array<[string, string]> = []
-            card.avatar_media_id = keptAvatar
+            let avatar: string | null = null
+            // A Map, since a URI comes from the file and could be "__proto__".
+            const assets = new Map<string, string>()
             for (const file of input.media) {
               const id = yield* recordMedia(userId, file)
-              if (file.role === "avatar") card.avatar_media_id = id
-              else assets.push([file.uri, id])
+              if (file.role === "avatar") avatar = id
+              else assets.set(file.uri, id)
             }
-            // fromEntries, since a URI comes from the file and could be "__proto__".
-            if (assets.length > 0) card.asset_media_ids = Object.fromEntries(assets)
-            doc = encode(card)
+            if (avatar === null && typeof current?.avatar_media_id === "string") {
+              avatar = current.avatar_media_id
+              keptAvatar = true
+            }
+            const held = Predicate.isObject(current?.asset_media_ids) ? current.asset_media_ids : {}
+            for (const uri of assetUris(card.assets)) {
+              const id = Object.hasOwn(held, uri) ? held[uri] : undefined
+              if (!assets.has(uri) && typeof id === "string") {
+                assets.set(uri, id)
+                keptAssets++
+              }
+            }
+            // Untouched unless the file brought media or the card kept some of its own.
+            if (input.media.length > 0 || keptAvatar || keptAssets > 0) {
+              card.avatar_media_id = avatar
+              if (assets.size > 0) card.asset_media_ids = Object.fromEntries(assets)
+              doc = encode(card)
+            }
           }
           const source: ImportSource = {
             originRef: JSON.stringify({ file: input.sourceName, sha256: input.sourceHash }),
@@ -514,7 +535,8 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
               Effect.map(reload(refId), (ref) => new ImportedFollower({ refId, label: ref.label, outcome }))
             ),
             note: note && toLibraryRef(note),
-            keptAvatar: keptAvatar !== null
+            keptAvatar,
+            keptAssets
           })
         }).pipe(transaction(sql, "ImportFile"))
     } satisfies Partial<Parameters<typeof WriteOps.of>[0]>
