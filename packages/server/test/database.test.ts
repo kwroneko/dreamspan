@@ -9,6 +9,7 @@ import { Cause, Effect, Exit, Fiber, Layer } from "effect"
 import { acquireInstanceLock, databaseFile, InstanceLocked } from "../src/db/connection.ts"
 import * as Database from "../src/db/Database.ts"
 import { diagnosticReaders } from "./support/diagnostics.ts"
+import { stalls } from "./support/liveness.ts"
 
 const freshDir = () => mkdtempSync(join(tmpdir(), "rp-db-"))
 const bundleDir = inject("bundleDir")
@@ -133,11 +134,13 @@ describe("database workers", () => {
         // thread serves light reads through the other reader. Had the blocked reader blocked
         // the main thread, neither they nor the release after them could ever run.
         const held = yield* Effect.forkChild(reader.Hold())
-        yield* holding
-        yield* Effect.forEach(range(20), () => reader.CountTo({ n: 1 }))
+        yield* holding.pipe(stalls("the reader never started its Hold"))
+        yield* Effect.forEach(range(20), () => reader.CountTo({ n: 1 })).pipe(
+          stalls("a light read waited on the held reader, or the main thread was blocked")
+        )
         assert.isUndefined(held.pollUnsafe(), "the reader is still blocked")
         yield* release
-        yield* Fiber.join(held)
+        yield* Fiber.join(held).pipe(stalls("the released reader never answered"))
       }).pipe(Effect.scoped),
     30_000
   )

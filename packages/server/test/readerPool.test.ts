@@ -10,6 +10,7 @@ import { RpcClient, type RpcClientError } from "effect/rpc"
 import { workerThreads, writerProtocol } from "../src/db/Database.ts"
 import * as ReaderPool from "../src/db/readerPool.ts"
 import { PoolOps } from "./support/poolOps.ts"
+import { stalls } from "./support/liveness.ts"
 
 class Readers extends Context.Service<Readers, RpcClient.FromGroup<typeof PoolOps, RpcClientError.RpcClientError>>()(
   "test/Readers"
@@ -73,12 +74,18 @@ const servingThreads = Effect.flatMap(Readers, ({ Count }) =>
 ).pipe(Effect.map((ids) => new Set(ids)))
 
 /** Waits until both readers are up, and returns their thread ids. */
-const bothUp = servingThreads.pipe(Effect.repeat({ until: (ids) => ids.size === 2 }))
+const bothUp = servingThreads.pipe(
+  Effect.repeat({ until: (ids) => ids.size === 2 }),
+  stalls("both readers never served at once")
+)
 
 /** The threads serving five light reads in a row. */
 const lightReads = Effect.flatMap(Readers, ({ Count }) =>
   Effect.forEach(Array.from({ length: 5 }), () => Count({ n: 1 }))
-).pipe(Effect.map((ids) => new Set(ids)))
+).pipe(
+  Effect.map((ids) => new Set(ids)),
+  stalls("a light read went to a held reader")
+)
 
 describe("reader pool", () => {
   it.live(
@@ -90,7 +97,7 @@ describe("reader pool", () => {
         const before = yield* bothUp
         // The caller gives up, but the reader is still running the query.
         const held = yield* Effect.forkChild(Hold())
-        const heldThread = yield* gate.holding
+        const heldThread = yield* gate.holding.pipe(stalls("the reader never started its Hold"))
         yield* Fiber.interrupt(held)
         // Every light read goes to the other reader.
         const served = yield* lightReads
@@ -158,8 +165,8 @@ describe("reader pool", () => {
         yield* bothUp
         // Both readers crash, and every respawn dies as it starts.
         yield* Effect.all([Effect.exit(Crash()), Effect.exit(Crash())], { concurrency: 2 })
-        yield* Deferred.await(crashesHandled)
-        const read = yield* Effect.exit(Count({ n: 1 }))
+        yield* Deferred.await(crashesHandled).pipe(stalls("the crashes and failed respawns were never logged"))
+        const read = yield* Effect.exit(Count({ n: 1 }).pipe(stalls("a read waited while every reader was down")))
         assert.isTrue(Exit.isFailure(read))
         // The failed respawn's error, not a crash's.
         if (Exit.isFailure(read)) assert.include(Cause.pretty(read.cause), "exited with code: 3")
@@ -186,7 +193,7 @@ describe("reader pool", () => {
           const stampFile = join(bundleDir, "stamp.json")
           writeFileSync(stampFile, JSON.stringify({ ...JSON.parse(readFileSync(stampFile, "utf8")), hash: "0" }))
           yield* Effect.exit(Crash())
-          const read = yield* Effect.exit(Count({ n: 1 }))
+          const read = yield* Effect.exit(Count({ n: 1 }).pipe(stalls("a read waited for a stale reader")))
           assert.isTrue(Exit.isFailure(read))
           if (Exit.isFailure(read)) assert.include(Cause.pretty(read.cause), "npm run build")
         }).pipe(
