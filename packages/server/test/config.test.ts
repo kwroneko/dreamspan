@@ -23,9 +23,9 @@ describe("configuration", () => {
     })
   )
 
-  it("refuses the fake generator in production, before anything starts", () => {
+  it("the development server refuses to run in production, before anything starts", () => {
     const dataDir = tempDir("fake")
-    const run = spawnSync(process.execPath, [fileURLToPath(new URL("../src/main.ts", import.meta.url))], {
+    const run = spawnSync(process.execPath, [fileURLToPath(new URL("../src/dev/main.ts", import.meta.url))], {
       env: { ...process.env, NODE_ENV: "production", FAKE_GENERATOR_TPS: "300", DATA_DIR: dataDir, PORT: "9" },
       encoding: "utf8",
       timeout: 20_000

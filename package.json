@@ -9,7 +9,7 @@
     "node": ">=24.11"
   },
   "scripts": {
-    "dev:server": "node --watch packages/server/src/main.ts",
+    "dev:server": "node --watch packages/server/src/dev/main.ts",
     "dev:client": "npm run dev -w @rp/client",
     "build": "npm run build -w @rp/client && npm run build -w @rp/server",
     "start": "node packages/server/src/main.ts",

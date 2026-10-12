@@ -1,5 +1,6 @@
 // A real server for browser tests: `node packages/server/src/main.ts` with a fresh data
-// directory and a random loopback port, serving the client build. Stopped by PID.
+// directory and a random loopback port, serving the client build. Stopped by PID. A file
+// that asks for the fake generator gets the development entry point, which has it.
 import { type ChildProcess, spawn } from "node:child_process"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -26,7 +27,8 @@ const waitForExit = (child: ChildProcess) =>
 const startOnce = async (env: Record<string, string>): Promise<TestServer | null> => {
   const dataDir = mkdtempSync(join(tmpdir(), "rp-browser-"))
   const serverPort = nextPort()
-  const child = spawn(process.execPath, ["--no-wasm-code-gc", "packages/server/src/main.ts"], {
+  const entry = env.FAKE_GENERATOR_TPS === undefined ? "packages/server/src/main.ts" : "packages/server/src/dev/main.ts"
+  const child = spawn(process.execPath, ["--no-wasm-code-gc", entry], {
     cwd: root,
     env: {
       ...process.env,

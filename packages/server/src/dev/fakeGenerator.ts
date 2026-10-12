@@ -1,7 +1,8 @@
 // A generator that streams synthetic Markdown at a set rate, for tests, the development
-// server and the performance harness (CLIENT-FRAMEWORK §7). main.ts refuses it in production.
+// server and the performance harness (CLIENT-FRAMEWORK §7). Only dev/main.ts and tests wire
+// it; the production image doesn't contain it (.dockerignore).
 import { Effect, Layer, Option, Stream } from "effect"
-import { Generator } from "./Generator.ts"
+import { Generator } from "../chat/Generator.ts"
 import { seedOf, syntheticMarkdown, tokenize } from "./syntheticText.ts"
 
 export interface FakeGeneratorOptions {

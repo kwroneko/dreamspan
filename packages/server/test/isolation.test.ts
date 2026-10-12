@@ -13,9 +13,10 @@ import { uuidv7 } from "@rp/shared/id.ts"
 import type { ConnectionSettings, ConnectionId, CredentialId, ModelId } from "@rp/shared/providers.ts"
 import type { RefId } from "@rp/shared/library.ts"
 import type { LlmRequestId } from "@rp/shared/usage.ts"
-import { Context, Effect, Layer, Option, Stream } from "effect"
+import { Context, Effect, Layer, Stream } from "effect"
 import type { Rpc, RpcGroup } from "effect/rpc"
 import { Writer } from "../src/db/Database.ts"
+import * as FakeGenerator from "../src/dev/fakeGenerator.ts"
 import { client, login, outcome, serverLayer, serverPort, testConfig } from "./support/config.ts"
 
 type Api = Effect.Success<ReturnType<typeof client>>
@@ -527,7 +528,8 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
 }
 
 /** A generator so slow that the seeded replies are still generating when the probes run. */
-const config = testConfig({ fakeGeneratorTps: Option.some(5), fakeGeneratorTokens: 20_000 })
+const config = testConfig()
+const slowGenerator = FakeGenerator.layer({ tokensPerSecond: 5, tokens: 20_000 })
 
 /** A request to an HTTP route as `party`, from this site. */
 const http = (party: Party, path: string, body: Uint8Array | string, contentType: string) =>
@@ -692,7 +694,7 @@ const run = (probe: Probe, actor: (p: Parties["Service"]) => Party, owner: (p: P
     })
   )
 
-layer(Layer.effect(Parties, seed).pipe(Layer.provide(serverLayer(config))), {
+layer(Layer.effect(Parties, seed).pipe(Layer.provide(serverLayer(config, slowGenerator))), {
   excludeTestServices: true,
   timeout: "60 seconds"
 })("isolation probes", (it) => {

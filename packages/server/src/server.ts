@@ -21,7 +21,6 @@ import { makeChatHandlers } from "./api/chats.ts"
 import { makeProviderHandlers } from "./api/providers.ts"
 import { Accounts, AuthenticationLive, PEER_HEADER, SESSION_COOKIE, SESSION_TTL_MS } from "./auth/Accounts.ts"
 import { ChatHub } from "./chat/ChatHub.ts"
-import * as FakeGenerator from "./chat/fakeGenerator.ts"
 import { Generations } from "./chat/Generations.ts"
 import { Generator } from "./chat/Generator.ts"
 import { AppConfig } from "./config.ts"
@@ -337,19 +336,6 @@ const FormatsLive = Layer.unwrap(
 )
 
 /**
- * The fake generator when configured (tests, development, the performance harness; main.ts
- * refuses it in production), otherwise none: the context assembler isn't built yet.
- */
-const GeneratorFromConfig = Layer.unwrap(
-  Effect.map(AppConfig, (config) =>
-    Option.match(config.fakeGeneratorTps, {
-      onNone: () => Generator.none,
-      onSome: (tokensPerSecond) => FakeGenerator.layer({ tokensPerSecond, tokens: config.fakeGeneratorTokens })
-    })
-  )
-)
-
-/**
  * The whole server with this generator, minus configuration. Tests provide their own
  * AppConfig, with port 0, and read the port the kernel picked from the HttpServer this exposes.
  */
@@ -373,5 +359,8 @@ export const serverWith = (generator: Layer.Layer<Generator, never, AppConfig>) 
     Layer.provide(InFlightRpcs.layer)
   )
 
-/** The whole server, minus configuration. */
-export const ServerLive = serverWith(GeneratorFromConfig)
+/**
+ * The whole server, minus configuration. It has no generator: the context assembler isn't
+ * built yet, and the fake one is only in the development entry point (dev/main.ts).
+ */
+export const ServerLive = serverWith(Generator.none)

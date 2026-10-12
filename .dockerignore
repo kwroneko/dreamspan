@@ -11,3 +11,5 @@
 .claude
 spikes
 .git
+# The development entry point and the fake generator never ship (ARCHITECTURE.md §12).
+packages/server/src/dev

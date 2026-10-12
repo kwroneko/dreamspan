@@ -4,12 +4,14 @@
 import { assert, describe, it } from "@effect/vitest"
 import type { Chat, PathEntry, SlotId, Version, VersionId } from "@rp/shared/chat.ts"
 import type { ChatEvent, PathRange } from "@rp/shared/chatApi.ts"
-import { Effect, Layer, Option, Stream } from "effect"
-import * as FakeGenerator from "../src/chat/fakeGenerator.ts"
+import { ConfigProvider, Effect, Layer, Option, Stream } from "effect"
+import * as FakeGenerator from "../src/dev/fakeGenerator.ts"
 import { GenerationFailed, Generator } from "../src/chat/Generator.ts"
-import type { AppConfigShape } from "../src/config.ts"
+import { AppConfig, type AppConfigShape } from "../src/config.ts"
 import { Writer } from "../src/db/Database.ts"
+import { ServerLive } from "../src/server.ts"
 import { client, outcome, serverLayer, testConfig } from "./support/config.ts"
+import { tempDir } from "./support/tempDir.ts"
 
 type Api = Effect.Success<ReturnType<typeof client>>
 
@@ -82,6 +84,29 @@ const read = (api: Api, chatId: Chat["id"], range: PathRange, limit: number, lea
   api.ReadPath({ chatId, leafSlotId, range, limit })
 
 describe("chats", () => {
+  it.live("the production server has no generator, whatever FAKE_GENERATOR_TPS says", () => {
+    const env = {
+      HOST: "127.0.0.1",
+      PORT: "0",
+      DATA_DIR: tempDir("production"),
+      DB_READERS: "1",
+      DB_WORKERS: "source",
+      FAKE_GENERATOR_TPS: "300"
+    }
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const { chat, slots } = yield* linearChat(api, 1)
+      assert.strictEqual(
+        yield* outcome(api.Generate({ chatId: chat.id, parentSlotId: slots[0]!, branch: false })),
+        "GenerationUnavailable"
+      )
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(ServerLive.pipe(Layer.provide(AppConfig.layer))),
+      Effect.provideService(ConfigProvider.ConfigProvider, ConfigProvider.fromEnvRecord(env))
+    )
+  })
+
   it.live("lists chats by last message, in pages", () => {
     const config = testConfig()
     return Effect.gen(function* () {

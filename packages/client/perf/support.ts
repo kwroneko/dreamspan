@@ -24,7 +24,7 @@ const exited = (child: ChildProcess) =>
 export const startServer = async (dataDir: string, env: Record<string, string> = {}): Promise<PerfServer> => {
   for (let attempt = 0; attempt < 5; attempt++) {
     const port = 20_000 + Math.floor(Math.random() * 12_000)
-    const child = spawn(process.execPath, ["packages/server/src/main.ts"], {
+    const child = spawn(process.execPath, ["packages/server/src/dev/main.ts"], {
       cwd: root,
       env: {
         ...process.env,

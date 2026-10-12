@@ -21,7 +21,7 @@ import { DatabaseSync } from "node:sqlite"
 import type { ChatId, SlotId } from "@rp/shared/chat.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import { Effect } from "effect"
-import { syntheticMarkdown } from "../../server/src/chat/syntheticText.ts"
+import { syntheticMarkdown } from "../../server/src/dev/syntheticText.ts"
 import { startServer, withClient } from "./support.ts"
 
 /** Bump when what's generated changes, so a stale cache isn't used. */

@@ -39,8 +39,6 @@ export const testConfig = (overrides: Partial<AppConfigShape> = {}): AppConfigSh
   secretKey: Option.none(),
   secretKeyFile: Option.none(),
   keyHostBinding: true,
-  fakeGeneratorTps: Option.none(),
-  fakeGeneratorTokens: 400,
   ...overrides
 })
 
