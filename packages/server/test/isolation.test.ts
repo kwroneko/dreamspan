@@ -175,6 +175,98 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
         "NotFound"
       )
   },
+  GetLcmState: {
+    probe: (actor, owner) =>
+      refused(actor.api.GetLcmState({ chatId: owner.chat.chatId, leafSlotId: owner.chat.slotId }), "NotFound")
+  },
+  GetLcmCoverage: {
+    probe: (actor, owner) =>
+      refused(
+        actor.api.GetLcmCoverage({
+          chatId: owner.chat.chatId,
+          leafSlotId: owner.chat.slotId,
+          fromDepth: 0,
+          toDepth: 10
+        }),
+        "NotFound"
+      )
+  },
+  ListSummaryRevisions: {
+    probe: (actor, owner) => refused(actor.api.ListSummaryRevisions({ summaryId: owner.summary.id }), "NotFound")
+  },
+  SetSummaryRerun: {
+    probe: (actor, owner) =>
+      Effect.all([
+        refused(
+          actor.api.SetSummaryRerun({
+            chatId: owner.chat.chatId,
+            target: { _tag: "Summary", summaryId: owner.summary.id },
+            requested: true
+          }),
+          "NotFound"
+        ),
+        refused(
+          actor.api.SetSummaryRerun({
+            chatId: owner.chat.chatId,
+            target: { _tag: "Job", jobId: owner.summaryJob.jobId },
+            requested: true
+          }),
+          "NotFound"
+        ),
+        // Their own chat with the other's summary: still nothing.
+        refused(
+          actor.api.SetSummaryRerun({
+            chatId: actor.chat.chatId,
+            target: { _tag: "Summary", summaryId: owner.summary.id },
+            requested: true
+          }),
+          "NotFound"
+        )
+      ]).pipe(Effect.asVoid)
+  },
+  SetLcmEnabled: {
+    probe: (actor, owner) => refused(actor.api.SetLcmEnabled({ chatId: owner.chat.chatId, enabled: false }), "NotFound")
+  },
+  GetSummaryDraft: {
+    probe: (actor, owner) => refused(actor.api.GetSummaryDraft({ summaryId: owner.summary.id }), "NotFound")
+  },
+  SaveSummaryDraft: {
+    probe: (actor, owner) =>
+      refused(
+        actor.api.SaveSummaryDraft({
+          summaryId: owner.summary.id,
+          draftId: null,
+          content: "planted",
+          expectedRowVersion: null,
+          expectedSession: null,
+          baseRevisionId: null
+        }),
+        "NotFound"
+      )
+  },
+  SummaryDraftHistory: {
+    probe: (actor, owner) =>
+      refused(actor.api.SummaryDraftHistory({ summaryId: owner.summary.id, limit: 10 }), "NotFound")
+  },
+  RestoreSummaryDraft: {
+    probe: (actor, owner) =>
+      refused(
+        actor.api.RestoreSummaryDraft({
+          summaryId: owner.summary.id,
+          draftId: "none",
+          seq: 0,
+          expectedRowVersion: 1
+        }),
+        "NotFound"
+      )
+  },
+  DiscardSummaryDraft: {
+    probe: (actor, owner) =>
+      refused(
+        actor.api.DiscardSummaryDraft({ summaryId: owner.summary.id, draftId: "none", expectedRowVersion: 1 }),
+        "NotFound"
+      )
+  },
   Health: { global: "liveness and event-loop numbers for the instance" },
   Whoami: {
     probe: (actor, owner) =>

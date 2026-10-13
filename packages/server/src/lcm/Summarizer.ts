@@ -6,6 +6,7 @@ import type { ConnectionId, ModelId } from "@rp/shared/providers.ts"
 import { Cause, Context, Effect, Exit, Layer, Stream } from "effect"
 import type { ContextSnapshot, Generation } from "../assembler/types.ts"
 import { providerRequest } from "../assembler/wire.ts"
+import { ChatHub } from "../chat/ChatHub.ts"
 import { Reader, Writer } from "../db/Database.ts"
 import type { SummaryJob } from "../db/lcmJobs.ts"
 import { ProviderError, Providers } from "../providers/Providers.ts"
@@ -35,11 +36,14 @@ export class Summarizer extends Context.Service<
       const reader = yield* Reader,
         writer = yield* Writer,
         providers = yield* Providers,
-        checks = yield* SummaryChecks
+        checks = yield* SummaryChecks,
+        hub = yield* ChatHub
       const scope = yield* Effect.scope
       const running = new Map<string, SummaryJob>()
       const users = new Set<UserId>(),
         due = new Map<string, { position: Position; at: number }>()
+      /** Open chats read their summaries again (ChatEvent `Lcm`). */
+      const changed = (chatId: ChatId) => Effect.sync(() => hub.publish(chatId, { _tag: "Lcm" }))
       const safe = <A, E>(effect: Effect.Effect<A, E>) =>
         effect.pipe(
           Effect.catchCause((c) =>
@@ -246,6 +250,7 @@ export class Summarizer extends Context.Service<
               chunks: p.chunks,
               requestClass: interactive && p.over ? "interactive" : "idle"
             })
+            if (jobs.length) yield* changed(position.chatId)
             return { ...p, jobs: [...p.jobs, ...jobs] }
           }
           return p
@@ -282,11 +287,13 @@ export class Summarizer extends Context.Service<
                   .pipe(Effect.catch((error) => Effect.logWarning("LCM claim failed", error).pipe(Effect.as(null))))
                 if (!job) break
                 running.set(job.id, job)
+                yield* changed(job.chatId)
                 yield* Effect.forkIn(
                   safe(run(job)).pipe(
                     Effect.ensuring(
                       Effect.sync(() => {
                         running.delete(job.id)
+                        hub.publish(job.chatId, { _tag: "Lcm" })
                       })
                     )
                   ),

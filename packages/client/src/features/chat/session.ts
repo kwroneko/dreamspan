@@ -21,6 +21,7 @@ import type { CardFields } from "@rp/shared/macros/context.ts"
 import { NotFound } from "@rp/shared/errors.ts"
 import type { BranchSwitch, ChatEvent, PathRange, PathWindow, SendResult } from "@rp/shared/chatApi.ts"
 import type { CacheWarmth, NextContext } from "@rp/shared/inspectorApi.ts"
+import type { LcmCoverage, LcmState } from "@rp/shared/lcm.ts"
 import { Cause, Context, Effect, Exit, Fiber, Schedule, Stream } from "effect"
 import { Atom, type AtomRegistry, AtomRegistry as Registry, Reactivity } from "effect/reactivity"
 import { type AppError, describeCause } from "../../errors.ts"
@@ -64,6 +65,10 @@ export interface ChatView {
   /** Whether the provider's cache is likely warm for the next reply (DESIGN §5.5); null without an estimate. */
   readonly cache: CacheWarmth | null
   readonly history: Pick<NextContext, "leafSlotId" | "historyStart" | "summarizedThrough"> | null
+  /** What stands in for older history on the path shown (DESIGN §8); null until read. */
+  readonly lcm: LcmState | null
+  /** Bumped each time the summaries are read and differ, so a window of coverage reads again. */
+  readonly lcmVersion: number
 }
 
 type Client = AppClient["Service"]
@@ -96,7 +101,9 @@ export class ChatSession {
     cast: null,
     queue: [],
     cache: null,
-    history: null
+    history: null,
+    lcm: null,
+    lcmVersion: 0
   }
   private readonly listeners = new Set<() => void>()
   /** Unmounts for the live atoms kept alive while their version generates, shown or not. */
@@ -150,10 +157,44 @@ export class ChatSession {
     if (this.view.leafSlotId !== leaf) {
       if (!this.view.loading) void this.refreshCast()
       void this.refreshContext()
+      void this.refreshLcm()
     }
   }
 
   private contextReads = 0
+
+  private lcmReads = 0
+  private lcmTimer: ReturnType<typeof setTimeout> | null = null
+
+  /** Reads the summaries on the path shown, soon: a run of events makes one read. */
+  private scheduleLcm() {
+    if (this.lcmTimer !== null) return
+    this.lcmTimer = setTimeout(() => {
+      this.lcmTimer = null
+      void this.refreshLcm()
+    }, 120)
+  }
+
+  private async refreshLcm() {
+    const read = ++this.lcmReads
+    const leafSlotId = this.view.leafSlotId
+    if (leafSlotId === null || this.disposed) return
+    const result = await this.call((client) => client("GetLcmState", { chatId: this.chatId, leafSlotId }))
+    if (!result.ok || this.disposed || read !== this.lcmReads || leafSlotId !== this.view.leafSlotId) return
+    // The same layer again (the leaf moved on, a reply streamed) changes nothing on screen.
+    if (JSON.stringify(result.value) === JSON.stringify(this.view.lcm)) return
+    this.update({ lcm: result.value, lcmVersion: this.view.lcmVersion + 1 })
+  }
+
+  /** The summaries overlapping a range of message depths on the path shown, without their text. */
+  async coverage(fromDepth: number, toDepth: number): Promise<LcmCoverage | null> {
+    const leafSlotId = this.view.leafSlotId
+    if (leafSlotId === null) return null
+    const result = await this.call((client) =>
+      client("GetLcmCoverage", { chatId: this.chatId, leafSlotId, fromDepth, toDepth })
+    )
+    return result.ok && !this.disposed ? result.value : null
+  }
 
   private async refreshContext() {
     const read = ++this.contextReads
@@ -331,6 +372,7 @@ export class ChatSession {
 
   dispose() {
     this.disposed = true
+    if (this.lcmTimer !== null) clearTimeout(this.lcmTimer)
     if (this.frame !== null) cancelAnimationFrame(this.frame)
     if (this.subscription) Effect.runFork(Fiber.interrupt(this.subscription))
     for (const [id, unmount] of this.live) {
@@ -530,12 +572,18 @@ export class ChatSession {
         return this.update({ queue: event.queue })
       case "State":
         this.forgetPositions()
+        this.scheduleLcm()
         return void this.refreshCast()
+      case "Lcm":
+        return this.scheduleLcm()
       case "WaitingCache":
         if (!this.live.has(event.versionId)) this.setLive(event.versionId, "")
         this.registry.set(waitingCache(event.versionId), event.waiting)
         return
       case "Cache": {
+        // An edit, a swipe, a delete or a hide can make a summary stale; the estimate follows
+        // every such change, so the layer is read again with it.
+        this.scheduleLcm()
         if (event.leafSlotId !== this.view.leafSlotId) {
           void this.refreshContext()
           return
@@ -572,6 +620,7 @@ export class ChatSession {
 
   /** Reads the loaded range again, as far as one read goes, keeping the same slots in view. */
   private reload() {
+    this.scheduleLcm()
     const { entries, newer } = this.view
     const limit = Math.min(MAX_LOADED, Math.max(PAGE, entries.length))
     if (newer === null || entries.length === 0) return void this.open(null, limit, entries.length === 0)

@@ -26,9 +26,13 @@ import { CacheIndicator } from "./CacheIndicator.tsx"
 import { CastContext, castView } from "./cast.ts"
 import { CastDialog, SettingsDialog } from "./ChatPanels.tsx"
 import { Composer } from "./Composer.tsx"
+import { CoverageRail, LANE_PX, useCoverage } from "./CoverageRail.tsx"
+import { LcmBoundary } from "./LcmBoundary.tsx"
+import { setRail, useRail } from "./lcm.ts"
 import { Message } from "./Message.tsx"
 import { useRenderCount } from "./perf.ts"
 import { ChatSession, type ChatView } from "./session.ts"
+import { SummaryPanel } from "./SummaryPanel.tsx"
 
 // Loaded when first opened: it carries the note editor.
 const NotesDialog = lazy(() => import("./ChatNotes.tsx").then((module) => ({ default: module.NotesDialog })))
@@ -38,16 +42,38 @@ const EDGE = 5
 /** Within this many pixels of the end counts as at the end. */
 const END_PX = 48
 
+/**
+ * Where the divider between summarized and verbatim history goes: the index among `entries`
+ * it goes before (entries.length: after the last), or null when the loaded window doesn't
+ * hold the boundary.
+ */
+export function boundaryIndex(view: ChatView): number | null {
+  const lcm = view.lcm
+  if (lcm === null || !lcm.enabled || lcm.leafSlotId !== view.leafSlotId) return null
+  const { entries } = view
+  if (entries.length === 0) return null
+  let at = entries.findIndex((e) => e.depth > lcm.cursorDepth)
+  if (at < 0) at = entries.length
+  // Before the loaded window, or after it with more below: not here.
+  if (at === 0 && view.older !== null) return null
+  if (at === entries.length && view.newer !== null) return null
+  return at
+}
+
 function MessageList({
   session,
   view,
   anchor,
-  onBranch
+  rail,
+  onBranch,
+  onOpenSummaries
 }: {
   session: ChatSession
   view: ChatView
   anchor: SlotId | null
+  rail: boolean
   onBranch: (entry: PathEntry, index: number) => void
+  onOpenSummaries: (focus: string | null) => void
 }) {
   // TanStack Virtual's instance is mutable, which React Compiler's memoization can't see.
   "use no memo"
@@ -59,12 +85,20 @@ function MessageList({
   const [follow] = useState({ stuck: true })
   const { entries } = view
   useRenderCount("listRenders")
+  const lcm = view.lcm?.enabled === true && view.lcm.leafSlotId === view.leafSlotId ? view.lcm : null
+  // The divider is a row of its own, before the entry at `divider` (-1: none).
+  const divider = boundaryIndex(view) ?? -1
+  const rowCount = entries.length + (divider >= 0 ? 1 : 0)
+  /** The entry shown at a row, or null for the divider. */
+  const entryAt = (row: number) => (row === divider ? null : entries[divider >= 0 && row > divider ? row - 1 : row]!)
+  /** The row an entry is shown at. */
+  const rowOf = (entry: number) => (divider >= 0 && entry >= divider ? entry + 1 : entry)
   // eslint-disable-next-line react-hooks/incompatible-library -- this component opts out of memoization above
   const virtualizer = useVirtualizer({
-    count: entries.length,
+    count: rowCount,
     getScrollElement: () => parent.current,
-    estimateSize: () => 180,
-    getItemKey: (index) => entries[index]!.slotId,
+    estimateSize: (row) => (row === divider ? 44 : 180),
+    getItemKey: (row) => entryAt(row)?.slotId ?? "lcm-boundary",
     overscan: 4,
     anchorTo: "end",
     followOnAppend: view.follow,
@@ -90,7 +124,7 @@ function MessageList({
     positioned.current = view.opened
     settled.current = false
     const index = anchor === null ? -1 : entries.findIndex((e) => e.slotId === anchor)
-    if (index >= 0) virtualizer.scrollToIndex(index, { align: "center" })
+    if (index >= 0) virtualizer.scrollToIndex(rowOf(index), { align: "center" })
     else virtualizer.scrollToEnd()
     hold(index < 0)
     requestAnimationFrame(() => requestAnimationFrame(() => (settled.current = true)))
@@ -158,9 +192,32 @@ function MessageList({
   useEffect(() => {
     if (!settled.current || first === undefined || last === undefined) return
     if (first < EDGE) void session.loadOlder()
-    if (last >= entries.length - EDGE) void session.loadNewer()
+    if (last >= rowCount - EDGE) void session.loadNewer()
     if (view.newer === null && virtualizer.isAtEnd(END_PX)) session.followAtBottom()
   })
+
+  // What the summaries cover, for the marks on the messages and the rail.
+  const through = lcm
+    ? lcm.cursorDepth < 0
+      ? null
+      : lcm.cursorDepth
+    : view.history?.leafSlotId === view.leafSlotId
+      ? view.history.summarizedThrough
+      : null
+  const railRows = useCoverage(session, entries, lcm, view.lcmVersion, rail && lcm !== null)
+  const showRail = rail && lcm !== null
+  const railLevels = Math.max(
+    1,
+    ...(lcm?.layer.map((s) => s.level) ?? []),
+    ...railRows.map((s) => s.level),
+    ...(lcm?.jobs.map((j) => j.level) ?? [])
+  )
+  const railPx = showRail ? railLevels * LANE_PX + 6 : 0
+  /** Where an entry's row is, from the virtualizer's measurements (estimates for rows not seen yet). */
+  const position = (index: number) => {
+    const item = virtualizer.measurementsCache[rowOf(index)]
+    return item ? { start: item.start, end: item.end } : null
+  }
 
   return (
     <div
@@ -169,36 +226,41 @@ function MessageList({
       className="min-h-0 flex-1 overflow-y-auto overscroll-contain [overflow-anchor:none]"
     >
       <div className="relative mx-auto w-full max-w-3xl" style={{ height: virtualizer.getTotalSize() }}>
+        {showRail && (
+          <CoverageRail entries={entries} rows={railRows} lcm={lcm} position={position} onOpen={onOpenSummaries} />
+        )}
         {items.map((item) => {
-          const entry = entries[item.index]!
+          const entry = entryAt(item.index)
           return (
             <div
               key={item.key}
               data-index={item.index}
               ref={virtualizer.measureElement}
               className="chat-row absolute top-0 left-0 w-full"
-              style={{ transform: `translateY(${item.start}px)` }}
+              style={{
+                transform: `translateY(${item.start}px)`,
+                ...(railPx > 0 ? { left: railPx, width: `calc(100% - ${railPx}px)` } : {})
+              }}
             >
-              <Message
-                summarized={
-                  !entry.contextExcluded &&
-                  view.history?.leafSlotId === view.leafSlotId &&
-                  view.history.summarizedThrough !== null &&
-                  entry.depth <= view.history.summarizedThrough
-                }
-                outOfContext={
-                  !entry.contextExcluded &&
-                  view.history?.leafSlotId === view.leafSlotId &&
-                  view.history.historyStart !== null &&
-                  entry.depth < view.history.historyStart.depth &&
-                  entry.depth > (view.history.summarizedThrough ?? -1)
-                }
-                entry={entry}
-                session={session}
-                highlighted={entry.slotId === anchor}
-                branchLeaf={view.leafSlotId === view.chat?.activeLeafSlotId ? null : view.leafSlotId}
-                onBranch={onBranch}
-              />
+              {entry === null ? (
+                <LcmBoundary lcm={lcm!} onOpen={() => onOpenSummaries(null)} />
+              ) : (
+                <Message
+                  summarized={!entry.contextExcluded && through !== null && entry.depth <= through}
+                  outOfContext={
+                    !entry.contextExcluded &&
+                    view.history?.leafSlotId === view.leafSlotId &&
+                    view.history.historyStart !== null &&
+                    entry.depth < view.history.historyStart.depth &&
+                    entry.depth > (through ?? -1)
+                  }
+                  entry={entry}
+                  session={session}
+                  highlighted={entry.slotId === anchor}
+                  branchLeaf={view.leafSlotId === view.chat?.activeLeafSlotId ? null : view.leafSlotId}
+                  onBranch={onBranch}
+                />
+              )}
             </div>
           )
         })}
@@ -251,7 +313,15 @@ function ChatSurface({ session, leaf, slot }: { session: ChatSession; leaf: Slot
   }, [navigate, leaf, slot, view.leafSlotId, view.chat])
   // Rows read the cast from context: it's the same object until the cast changes.
   const cast = useMemo(() => castView(view.cast), [view.cast])
-  const [panel, setPanel] = useState<"cast" | "settings" | "notes" | null>(null)
+  const [panel, setPanel] = useState<"cast" | "settings" | "notes" | "summaries" | null>(null)
+  /** The summary the panel opens at: one clicked on the rail, or none. */
+  const [focus, setFocus] = useState<string | null>(null)
+  const rail = useRail()
+  const openSummaries = useCallback((summaryId: string | null) => {
+    setFocus(summaryId)
+    setPanel("summaries")
+  }, [])
+  const lcmOn = view.lcm?.enabled === true && view.lcm.leafSlotId === view.leafSlotId
   // Another branch (DESIGN §3.2): the chat's leaf moves to it, and the window opens at the
   // message switched to, which the URL then names.
   const [branchError, setBranchError] = useState<string | null>(null)
@@ -267,6 +337,17 @@ function ChatSurface({ session, leaf, slot }: { session: ChatSession; leaf: Slot
     [session, navigate, slot, leaf]
   )
   const switchBranch = useCallback((entry: PathEntry, index: number) => void onBranch(entry, index), [onBranch])
+  // A summary's range opens the window at its first message, as a link to that message does.
+  const branchLeaf = view.leafSlotId === view.chat?.activeLeafSlotId ? null : view.leafSlotId
+  const jump = useCallback(
+    (target: SlotId) => {
+      setPanel(null)
+      if (target === slot) void session.open(target)
+      else
+        void navigate({ to: ".", search: branchLeaf === null ? { slot: target } : { leaf: branchLeaf, slot: target } })
+    },
+    [session, navigate, slot, branchLeaf]
+  )
   return (
     <CastContext value={cast}>
       <header className="mx-auto flex w-full max-w-3xl flex-wrap items-center gap-x-3 gap-y-1 pb-2">
@@ -287,6 +368,16 @@ function ChatSurface({ session, leaf, slot }: { session: ChatSession; leaf: Slot
           <Button variant="ghost" onClick={() => setPanel("notes")}>
             Notes
           </Button>
+          {lcmOn && (
+            <>
+              <Button variant="ghost" onClick={() => openSummaries(null)}>
+                Summaries
+              </Button>
+              <Button variant="ghost" aria-pressed={rail} onClick={() => setRail(!rail)}>
+                Coverage rail
+              </Button>
+            </>
+          )}
           <Button variant="ghost" onClick={() => setPanel("settings")}>
             Settings
           </Button>
@@ -298,6 +389,15 @@ function ChatSurface({ session, leaf, slot }: { session: ChatSession; leaf: Slot
       )}
       {panel === "settings" && (
         <SettingsDialog session={session} open onOpenChange={(open) => setPanel(open ? "settings" : null)} />
+      )}
+      {panel === "summaries" && view.lcm !== null && (
+        <SummaryPanel
+          session={session}
+          lcm={view.lcm}
+          focus={focus}
+          onJump={jump}
+          onOpenChange={(open) => setPanel(open ? "summaries" : null)}
+        />
       )}
       {panel === "notes" && (
         <Suspense>
@@ -316,7 +416,14 @@ function ChatSurface({ session, leaf, slot }: { session: ChatSession; leaf: Slot
       {view.loading ? (
         <Loading label="Loading the chat…" />
       ) : (
-        <MessageList session={session} view={view} anchor={slot} onBranch={switchBranch} />
+        <MessageList
+          session={session}
+          view={view}
+          anchor={slot}
+          rail={rail}
+          onBranch={switchBranch}
+          onOpenSummaries={openSummaries}
+        />
       )}
       <CacheIndicator warmth={view.cache} />
       <Composer session={session} view={view} />

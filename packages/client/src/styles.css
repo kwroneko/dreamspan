@@ -209,3 +209,8 @@ main:has(> [data-fill]) {
 .base-ui-disable-scrollbar::-webkit-scrollbar {
   display: none;
 }
+
+/* A stale summary on the coverage rail: hatched in the warning color (features/chat/CoverageRail.tsx). */
+.rail-stale {
+  background-image: repeating-linear-gradient(135deg, var(--warning) 0 2px, transparent 2px 5px);
+}

@@ -217,6 +217,8 @@ export const Message = memo(function Message({
       data-summarized={summarized || undefined}
       data-out-of-context={outOfContext || undefined}
       className={`flex touch-pan-y flex-col gap-2 rounded-lg border px-4 py-3 ${outOfContext ? "text-muted border-dashed " : ""}${
+        summarized && !entry.contextExcluded ? "border-l-4 border-l-accent/50 " : ""
+      }${entry.contextExcluded ? "opacity-60 " : ""}${
         highlighted
           ? "border-accent bg-surface"
           : model
@@ -238,7 +240,19 @@ export const Message = memo(function Message({
             👻
           </span>
         ) : summarized ? (
-          <Badge>Summarized</Badge>
+          <>
+            <span
+              role="img"
+              aria-label="Summarized: a summary stands in for this message"
+              title="Summarized: a summary stands in for this message"
+              className="text-muted"
+            >
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" aria-hidden="true">
+                <path d="M2 3.5h12M2 7h12M2 10.5h8" strokeWidth="1.6" strokeLinecap="round" />
+              </svg>
+            </span>
+            <Badge>Summarized</Badge>
+          </>
         ) : outOfContext ? (
           <span role="img" aria-label="Not in the context" title="Not in the context">
             ⊘

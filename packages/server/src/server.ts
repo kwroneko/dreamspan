@@ -423,9 +423,10 @@ export const serverWith = <E>(
     Layer.provide(StImports.layer.pipe(Layer.provideMerge(MediaHolds.layer))),
     Layer.provide(
       Layer.merge(Generations.layer, CacheWarmth.layer).pipe(
-        Layer.provideMerge(ChatHub.layer),
         Layer.provideMerge(generator),
-        Layer.provideMerge(summaries)
+        Layer.provideMerge(summaries),
+        // Last, so the summarizer can tell open chats that their summaries changed.
+        Layer.provideMerge(ChatHub.layer)
       )
     ),
     Layer.provideMerge(Notices.layer),

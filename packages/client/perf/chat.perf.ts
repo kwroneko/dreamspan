@@ -304,6 +304,49 @@ test("scroll the full length of 100,000 messages", async ({ page }) => {
   expect(heapEnd).toBeLessThan(budgets.heapMb)
 })
 
+test("a summarized chat: the divider and the coverage rail, scrolling up across the boundary", async ({ page }) => {
+  await openPage(page)
+  // The rail is drawn: its bars are part of what must stay smooth.
+  await page.addInitScript(() => localStorage.setItem("rp.lcmRail", "1"))
+  const { chatId, boundary, covered } = fixture.summarized
+  const openStart = Date.now()
+  await page.goto(chatUrl(chatId))
+  await onScreen(page)
+  const bottomMs = Date.now() - openStart
+  // Opened at the last summarized message, the divider is just below it and the rail beside it.
+  const deepStart = Date.now()
+  await page.goto(chatUrl(chatId, `?slot=${covered}`))
+  await onScreen(page, covered)
+  await expect(page.getByTestId("lcm-boundary")).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByTestId("coverage-rail").getByRole("button").first()).toBeVisible({ timeout: 30_000 })
+  const deepMs = Date.now() - deepStart
+  await expect(page.locator(`article[data-slot="${covered}"]`)).toHaveAttribute("data-summarized", "true")
+  await expect(page.locator(`article[data-slot="${boundary}"]`)).not.toHaveAttribute("data-summarized")
+  const from = await now(page)
+  const errors: Array<number> = []
+  const pages = 40
+  for (let i = 0; i < pages && (await windowState(page)).older; i++) {
+    const before = await scrollToTop(page)
+    errors.push(await prepended(page, before.slot, before.top))
+  }
+  const measured = await since(page, from)
+  const rendered = await page.getByTestId("coverage-rail").getByRole("button").count()
+  record("summarized", {
+    bottomMs,
+    deepMs,
+    pages,
+    railBars: rendered,
+    anchorErrorMaxPx: round(Math.max(0, ...errors)),
+    ...frameStats(measured)
+  })
+  expect(rendered).toBeGreaterThan(0)
+  expect(bottomMs).toBeLessThan(budgets.openBottomMs)
+  expect(deepMs).toBeLessThan(budgets.openDeepMs)
+  expect(Math.max(0, ...errors)).toBeLessThanOrEqual(budgets.anchorErrorPx)
+  expect(frameStats(measured).frameP95Ms).toBeLessThanOrEqual(budgets.scrollFrameP95Ms)
+  expect(frameStats(measured).longFramesOver100).toBeLessThanOrEqual(budgets.scrollLongFramesOver100)
+})
+
 test("six streams: renders per token, drift, prepending and typing", async ({ page }) => {
   await openPage(page)
   await page.goto(chatUrl(fixture.long.chatId))

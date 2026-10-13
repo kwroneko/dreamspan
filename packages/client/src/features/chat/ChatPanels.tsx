@@ -6,7 +6,7 @@ import type { CastChange } from "@rp/shared/chatSetupApi.ts"
 import type { LibraryRef } from "@rp/shared/library.ts"
 import type { Connection, Model } from "@rp/shared/providers.ts"
 import { Effect } from "effect"
-import { useEffect, useState } from "react"
+import { useEffect, useState, useSyncExternalStore } from "react"
 import { useAction } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"
 import { Avatar } from "../../ui/Avatar.tsx"
@@ -125,6 +125,29 @@ export function CastDialog({
   )
 }
 
+/** LCM for the whole chat (DESIGN §8): on for new chats, off for imported ones. */
+function Summaries({ session }: { session: ChatSession }) {
+  const view = useSyncExternalStore(session.subscribe, session.snapshot)
+  const [error, setError] = useState<AppError | null>(null)
+  const enabled = view.lcm?.enabled ?? false
+  return (
+    <div className="flex flex-col gap-1">
+      <Switch
+        checked={enabled}
+        onCheckedChange={(on) =>
+          void session
+            .call((client) => client("SetLcmEnabled", { chatId: session.id, enabled: on }))
+            .then((result) => setError(result.ok ? null : result.error))
+        }
+        description="Older messages are summarized so the chat can go on. For the whole chat, not from here on. Nothing is generated until your next reply."
+      >
+        Summarize older messages
+      </Switch>
+      <Problem error={error} />
+    </div>
+  )
+}
+
 interface Choices {
   readonly models: ReadonlyArray<{ readonly value: string; readonly label: string }>
   readonly presets: ReadonlyArray<LibraryRef>
@@ -201,6 +224,7 @@ export function SettingsDialog({
           onValueChange={(ref) => void change({ _tag: "Preset", ref })}
         />
       </Field>
+      <Summaries session={session} />
       <section aria-label="Lorebooks" className="flex flex-col gap-2">
         <h3 className="text-sm font-medium">Lorebooks</h3>
         {choices?.lorebooks.length === 0 && (

@@ -142,6 +142,27 @@ export const migrations = {
   ]),
   "0025_summary_prefix": runAll([
     `ALTER TABLE summarization_jobs ADD COLUMN prefix_json TEXT CHECK (prefix_json IS NULL OR json_valid(prefix_json))`
+  ]),
+  // The UI's "summarize this again with the next reply": a request the planner finds, so a
+  // click never starts a generation. A request names a summary or a job that gave up.
+  "0026_summary_reruns": runAll([
+    `CREATE TABLE summary_reruns (
+      id TEXT PRIMARY KEY,
+      chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+      summary_id TEXT REFERENCES summaries(id) ON DELETE CASCADE,
+      job_id TEXT REFERENCES summarization_jobs(id) ON DELETE CASCADE,
+      requested_at INTEGER NOT NULL,
+      CHECK ((summary_id IS NULL) <> (job_id IS NULL))
+    ) STRICT`,
+    `CREATE INDEX summary_reruns_chat ON summary_reruns(chat_id)`,
+    `CREATE UNIQUE INDEX summary_reruns_summary ON summary_reruns(summary_id) WHERE summary_id IS NOT NULL`,
+    `CREATE UNIQUE INDEX summary_reruns_job ON summary_reruns(job_id) WHERE job_id IS NOT NULL`,
+    `CREATE TRIGGER summary_reruns_same_chat BEFORE INSERT ON summary_reruns
+      WHEN (NEW.summary_id IS NOT NULL AND (SELECT chat_id FROM summaries WHERE id = NEW.summary_id) IS NOT NEW.chat_id)
+        OR (NEW.job_id IS NOT NULL AND (SELECT chat_id FROM summarization_jobs WHERE id = NEW.job_id) IS NOT NEW.chat_id)
+      BEGIN SELECT RAISE(ABORT, 'a rerun request must name something in its own chat'); END`,
+    `CREATE TRIGGER summary_reruns_fixed BEFORE UPDATE OF chat_id, summary_id, job_id ON summary_reruns
+      BEGIN SELECT RAISE(ABORT, 'a rerun request is withdrawn and asked again, never moved'); END`
   ])
 }
 

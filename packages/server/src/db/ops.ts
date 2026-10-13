@@ -1,5 +1,16 @@
 import { SummaryJob, SummaryChunk, SummaryPlan } from "./lcmJobs.ts"
-import { Summary, SummaryId, SummaryRevisionId, SummaryInput, SummaryChild, SummaryChange } from "@rp/shared/lcm.ts"
+import {
+  LcmCoverage,
+  LcmState,
+  RerunTarget,
+  Summary,
+  SummaryId,
+  SummaryRevision,
+  SummaryRevisionId,
+  SummaryInput,
+  SummaryChild,
+  SummaryChange
+} from "@rp/shared/lcm.ts"
 // Storage operations, executed inside the database worker threads (ARCHITECTURE.md §3).
 // Each write operation runs as one synchronous transaction inside the writer worker,
 // so a transaction can never span an await or a network call.
@@ -370,6 +381,11 @@ export class WriteOps extends RpcGroup.make(
     payload: { userId: UserId, summaryId: SummaryId, revisionId: SummaryRevisionId, expectedRowVersion: Schema.Int },
     success: Summary,
     error: Schema.Union([StorageError, NotFound, StaleWrite])
+  }),
+  /** Asks for a summary or a failed job to be done again with the next reply, or withdraws the ask. */
+  Rpc.make("SetSummaryRerun", {
+    payload: { userId: UserId, chatId: ChatId, target: RerunTarget, requested: Schema.Boolean },
+    error: Schema.Union([StorageError, NotFound])
   }),
   /** Answers once the writer has opened the database and run migrations. */
   Rpc.make("Ready"),
@@ -1332,6 +1348,23 @@ export class ReadOps extends RpcGroup.make(
   Rpc.make("GetSummary", {
     payload: { userId: UserId, summaryId: SummaryId },
     success: Summary,
+    error: Schema.Union([StorageError, NotFound])
+  }),
+  /** The layer in use on the path to a leaf, with the failed summaries and unfinished jobs on it. */
+  Rpc.make("GetLcmState", {
+    payload: { userId: UserId, chatId: ChatId, leafSlotId: SlotId },
+    success: LcmState,
+    error: Schema.Union([StorageError, NotFound])
+  }),
+  /** Every summary on the path overlapping message depths `fromDepth`..`toDepth`, without their text. */
+  Rpc.make("GetLcmCoverage", {
+    payload: { userId: UserId, chatId: ChatId, leafSlotId: SlotId, fromDepth: Schema.Int, toDepth: Schema.Int },
+    success: LcmCoverage,
+    error: Schema.Union([StorageError, NotFound])
+  }),
+  Rpc.make("ListSummaryRevisions", {
+    payload: { userId: UserId, summaryId: SummaryId },
+    success: Schema.Array(SummaryRevision),
     error: Schema.Union([StorageError, NotFound])
   }),
   Rpc.make("FindUserByHandle", {

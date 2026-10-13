@@ -151,6 +151,8 @@ Implemented in [ARCHITECTURE §16](../ARCHITECTURE.md#16-lcm-hierarchical-summar
 
 ### 2.13 UI
 
+Implemented in [ARCHITECTURE §16](../ARCHITECTURE.md#16-lcm-hierarchical-summaries) (Summary UI): the divider, the panel with editing, revisions and re-summarize requests, the rail, the marks, the context view and the chat switch. Not yet built: cost and model per summary, summarization rollouts in the panel, Retry with… another model, the enable dialog (slice 6), and the consumers of re-summarize and retry requests (slices 4–5).
+
 - **[D]** The UI shows where verbatim context ends and which summaries stand in for older history (DESIGN §8.1). **[P]** The three layers proposed there:
 - **Boundary divider [P].** Always shown with LCM on, after the cursor on the path shown: "Older messages: 7 summaries, ~6k tokens", with stale and failed counts and running jobs ("Summarizing 40–52…"). Clicking opens the summary panel. It's read for the path's leaf (`LcmState`) and pushed as a chat event when it changes.
 - **Summary panel [P].** The layer in order. Each summary expands to its children, and an L1 to links to its messages. Each shows level, range, tokens, model, cost and state (fresh, stale, failed, edited), with Edit, Re-summarize, Retry with… and its revisions. Summarization rollouts and their cost show here until the activity panel exists (DESIGN §7.4, phase 4).
@@ -235,7 +237,7 @@ Each slice moves its part of this document into ARCHITECTURE.md in the same comm
 | 4 | Hard refusals and the judge model for soft refusals, retries, failed summaries, Retry with…, marks on chat versions | A fake judge; the model test with planted refusals (5) | B |
 | 5 | Condensation, absorption, re-summarizing stale summaries | The model test with condensation and edits, run to quiescence | B |
 | 6 | Enabling LCM, adopting imported summaries, backfill with its estimate and spend cap, the ST Summarize prompt kept on import | A synthetic ST folder adopted and backfilled; the estimate within 25% of the ledger at a fake provider | A |
-| 7 | UI: divider, summary panel, editing with drafts and revisions, coverage rail, context view | Browser flows at phone and desktop width; the performance harness with summaries | B |
+| 7 ✓ | UI: divider, summary panel, editing with drafts and revisions, coverage rail, context view | Browser flows at phone and desktop width; the performance harness with summaries | B |
 
 ---
 

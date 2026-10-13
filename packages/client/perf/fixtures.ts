@@ -25,11 +25,13 @@ import { syntheticMarkdown } from "../../server/src/dev/syntheticText.ts"
 import { startServer, withClient } from "./support.ts"
 
 /** Bump when what's generated changes, so a stale cache isn't used. */
-const VERSION = 1
+const VERSION = 2
 const DB = "rp-harness.db"
 
 export interface Fixture {
   readonly long: { readonly chatId: ChatId; readonly deep: SlotId }
+  /** 20,000 messages, the first 18,000 under summaries up to level 4; the divider is at `boundary`. */
+  readonly summarized: { readonly chatId: ChatId; readonly boundary: SlotId; readonly covered: SlotId }
   readonly short: ReadonlyArray<{ readonly chatId: ChatId; readonly title: string }>
 }
 
@@ -49,7 +51,10 @@ const fill = (db: DatabaseSync, chatId: string, count: number, seed: number) => 
   )
   const start = Date.now() - count * 60_000
   const slots: Array<string> = []
+  /** The version each slot on the main path shows. */
+  const versions: Array<string> = []
   let parent: string | null = null
+  let lastSelected = ""
   const message = (depth: number, parentId: string | null, branchSeed = 0) => {
     const at = start + depth * 60_000
     const slotId = uuidv7()
@@ -76,11 +81,13 @@ const fill = (db: DatabaseSync, chatId: string, count: number, seed: number) => 
       if (!failed) selected = id
     }
     insertSlot.run(slotId, chatId, lane, parentId, depth, selected, at)
+    lastSelected = selected
     return slotId
   }
   for (let depth = 0; depth < count; depth++) {
     parent = message(depth, parent)
     slots.push(parent)
+    versions.push(lastSelected)
     // Now and then an older branch: three messages off the main path.
     if (depth % 5000 === 2500) {
       let side = parent
@@ -90,16 +97,82 @@ const fill = (db: DatabaseSync, chatId: string, count: number, seed: number) => 
   db.prepare(
     "UPDATE chats SET active_leaf_slot_id = ?, last_message_at = ?, row_version = row_version + 1 WHERE id = ?"
   ).run(parent, Date.now(), chatId)
-  return slots
+  return { slots, versions }
+}
+
+/**
+ * Summaries over the first `covered` messages as the summarizer would leave them: level 1
+ * over 16 messages each, and four levels of fives above, so the layer is the nine of level 4.
+ */
+const summarize = (
+  db: DatabaseSync,
+  chatId: string,
+  path: { slots: Array<string>; versions: Array<string> },
+  covered: number
+) => {
+  const revision = db.prepare(
+    "INSERT INTO summary_revisions (id, summary_id, content, token_count, origin, created_at) VALUES (?, ?, ?, ?, 'generated', ?)"
+  )
+  const summary = db.prepare(
+    `INSERT INTO summaries (id, chat_id, level, selected_revision_id, first_slot_id, last_slot_id, slot_count, status, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'complete', ?)`
+  )
+  const input = db.prepare(
+    "INSERT INTO summary_inputs (summary_id, ordinal, slot_id, version_id, amend_count) VALUES (?, ?, ?, ?, 0)"
+  )
+  const parent = db.prepare(
+    "INSERT INTO summary_parents (summary_id, ordinal, parent_id, parent_revision_id) VALUES (?, ?, ?, ?)"
+  )
+  const seal = db.prepare("UPDATE summaries SET sealed = 1 WHERE id = ?")
+  interface Made {
+    id: string
+    revision: string
+    first: string
+    last: string
+    count: number
+  }
+  const make = (level: number, first: string, last: string, count: number, text: string): Made => {
+    const id = uuidv7()
+    const revisionId = uuidv7()
+    const now = Date.now()
+    revision.run(revisionId, id, text, Math.ceil(text.length / 4), now)
+    summary.run(id, chatId, level, revisionId, first, last, count, now)
+    return { id, revision: revisionId, first, last, count }
+  }
+  let level: Array<Made> = []
+  for (let at = 0; at + 16 <= covered; at += 16) {
+    const made = make(1, path.slots[at]!, path.slots[at + 15]!, 16, syntheticMarkdown(at, 90))
+    for (let i = 0; i < 16; i++) input.run(made.id, i, path.slots[at + i]!, path.versions[at + i]!)
+    seal.run(made.id)
+    level.push(made)
+  }
+  for (let depth = 2; depth <= 4; depth++) {
+    const next: Array<Made> = []
+    for (let at = 0; at + 5 <= level.length; at += 5) {
+      const group = level.slice(at, at + 5)
+      const made = make(
+        depth,
+        group[0]!.first,
+        group[4]!.last,
+        group.reduce((n, g) => n + g.count, 0),
+        syntheticMarkdown(at + depth, 120)
+      )
+      group.forEach((child, i) => parent.run(made.id, i, child.id, child.revision))
+      seal.run(made.id)
+      next.push(made)
+    }
+    level = next
+  }
 }
 
 const build = async (dir: string): Promise<Fixture> => {
   const server = await startServer(dir)
-  const [long, a, b] = await withClient(server, (api) =>
+  const [long, a, b, summarized] = await withClient(server, (api) =>
     Effect.all([
       api.CreateChat({ title: "The long voyage" }),
       api.CreateChat({ title: "Harbor watch" }),
-      api.CreateChat({ title: "Tide caves" })
+      api.CreateChat({ title: "Tide caves" }),
+      api.CreateChat({ title: "The summarized voyage" })
     ])
   )
   await server.stop()
@@ -107,14 +180,22 @@ const build = async (dir: string): Promise<Fixture> => {
   const db = new DatabaseSync(join(dir, DB))
   db.exec("PRAGMA synchronous = OFF")
   db.exec("BEGIN")
-  const longSlots = fill(db, long.id, 100_000, 1)
+  const { slots: longSlots } = fill(db, long.id, 100_000, 1)
   fill(db, a.id, 300, 2)
   fill(db, b.id, 300, 3)
+  const voyage = fill(db, summarized.id, 20_000, 4)
+  // 18,000 = 1,125 summaries of 16 messages, in nine whole groups of 125.
+  summarize(db, summarized.id, voyage, 18_000)
   db.exec("COMMIT")
   db.exec("PRAGMA wal_checkpoint(TRUNCATE)")
   db.close()
   return {
     long: { chatId: long.id, deep: longSlots[30_000]! as SlotId },
+    summarized: {
+      chatId: summarized.id,
+      boundary: voyage.slots[18_000]! as SlotId,
+      covered: voyage.slots[17_999]! as SlotId
+    },
     short: [
       { chatId: a.id, title: a.title },
       { chatId: b.id, title: b.title }

@@ -77,6 +77,8 @@ export const ChatEvent = Schema.Union([
   Schema.TaggedStruct("Queue", { queue: Schema.Array(QueuedMessage) }),
   /** Chat state changed (participants, presence, settings): read it again. */
   Schema.TaggedStruct("State", {}),
+  /** The chat's summaries changed (made, edited, selected, failed, asked for again) or LCM was switched: read GetLcmState again. */
+  Schema.TaggedStruct("Lcm", {}),
   /** The cache-warmth estimate changed; null when there's none to show (DESIGN §5.5). */
   Schema.TaggedStruct("Cache", NextContext.fields)
 ])
