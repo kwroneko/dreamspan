@@ -168,6 +168,7 @@ export interface ProjectedEntry {
  * misregistered plugin stage can cause.
  */
 export interface Assembly {
+  contextBudget?: ContextSnapshot["contextBudget"]
   lcm?: SummaryLayer
   lcmPieces?: ReadonlyArray<number>
   lcmFailurePieces?: ReadonlyArray<{ readonly from: number; readonly to: number; readonly piece: number }>
@@ -258,6 +259,7 @@ export const assemble = (stages: StageRegistry, request: AssemblyRequest) =>
     const revision = yield* sources.historyRevision(target.parentSlotId, historyStart.depth)
     const snapshot: ContextSnapshot = {
       schema: 1,
+      ...(assembly.contextBudget ? { contextBudget: assembly.contextBudget } : {}),
       historyStart: { ...historyStart, ...(historyStart.state ? { state: { ...historyStart.state, revision } } : {}) },
       historyMove: need(assembly, "historyMove"),
       ...(assembly.lcm ? { historyBudget: need(assembly, "composition").historyBudget } : {}),

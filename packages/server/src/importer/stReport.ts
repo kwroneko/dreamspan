@@ -9,6 +9,7 @@ const MAX_OFFERS = 2000
 type Outcome = "added" | "updated" | "unchanged" | "skipped" | "failed"
 
 export class Report {
+  selectedPreset: StIssue | null = null
   private readonly counts = new Map<string, Record<Outcome, number>>()
   messages = 0
   summaries = 0
@@ -48,6 +49,7 @@ export class Report {
   }
 
   build() {
+    const issues = [...this.issues, ...(this.selectedPreset ? [this.selectedPreset] : [])]
     return new StImportReport({
       counts: Object.fromEntries([...this.counts].map(([kind, counter]) => [kind, new StCount(counter)])),
       messages: this.messages,
@@ -56,8 +58,8 @@ export class Report {
       unsupported: [...this.unsupported].map(([what, count]) => ({ what, count })),
       hiddenRuns: [...this.hiddenRuns.values()],
       links: [...this.links.values()],
-      issues: [...this.issues],
-      dropped: this.dropped
+      issues: issues.slice(0, MAX_ISSUES),
+      dropped: this.dropped + Math.max(0, issues.length - MAX_ISSUES)
     })
   }
 }

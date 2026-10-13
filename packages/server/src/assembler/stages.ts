@@ -1546,7 +1546,14 @@ const composeStage = sync("compose", (assembly) => {
     const depth = projected[start]?.entry.depth ?? need(assembly, "target").depth
     return (assembly.lcmFailurePieces ?? []).filter((failure) => failure.to <= depth)
   }
-  const candidate = (start: number, budget: number, withExamples = true, reserved = false, includeFailures = true) => {
+  const candidate = (
+    start: number,
+    budget: number,
+    withExamples = true,
+    reserved = false,
+    includeFailures = true,
+    withoutHistory = false
+  ) => {
     if (includeFailures) start = normalizedStart(start)
     const { beside, collection, injections, layer } = reserved ? reservedPlacement : actualPlacement
     const markers: Array<StMessage> = (includeFailures ? failuresBefore(start) : []).map((failure) => ({
@@ -1562,7 +1569,7 @@ const composeStage = sync("compose", (assembly) => {
       collection,
       disabled,
       chat: injectInChat(
-        [...lines.slice(start), ...(normalFill ? [normalFill] : [])],
+        [...(withoutHistory ? [] : lines.slice(start)), ...(normalFill ? [normalFill] : [])],
         collection.filter((p) => p.injection_position === "absolute"),
         injections
       ),
@@ -1586,10 +1593,18 @@ const composeStage = sync("compose", (assembly) => {
     return 3 + Math.max(tokens(built.messages), tokens(processed))
   }
   const fixedCost = cost(candidate(projected.length, Number.POSITIVE_INFINITY, false, false, false))
+  const contextBudgetInfo = (nonHistoryTokens: number) => ({
+    maximum: contextBudget(assembly) + doc.samplers.openai_max_tokens,
+    target: targetBudget(assembly) + doc.samplers.openai_max_tokens,
+    responseReserve: doc.samplers.openai_max_tokens,
+    nonHistoryTokens: nonHistoryTokens + (assembly.prefill ? tokensOf({ content: assembly.prefill }) : 0)
+  })
   if (fixedCost > maximum)
     throw new AssemblyFailed({
       reason: "budget",
-      message: "The full notes, fixed context and response reserve don't fit the maximum context size."
+      message: "The full notes, fixed context and response reserve don't fit the maximum context size.",
+      contextBudget: contextBudgetInfo(fixedCost),
+      preset: { ref: need(assembly, "preset").ref, scope: need(assembly, "preset").scope }
     })
   const layerReserve = assembly.lcm
     ? Math.max(0, Math.min(maximum - fixedCost, Math.ceil(contextBudget(assembly) * 0.15) - actualPlacement.layerCost))
@@ -1706,6 +1721,7 @@ const composeStage = sync("compose", (assembly) => {
     budget = target
   } else assembly.historyMove = previous ? "unchanged" : "initial"
   start = normalizedStart(start)
+  assembly.contextBudget = contextBudgetInfo(cost(candidate(start, Number.POSITIVE_INFINITY, true, false, true, true)))
   const first = projected[start]?.entry
   assembly.historyStart = {
     slotId: first?.slotId ?? null,

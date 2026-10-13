@@ -65,7 +65,7 @@ export interface ChatView {
   readonly queue: ReadonlyArray<QueuedMessage>
   /** Whether the provider's cache is likely warm for the next reply (DESIGN §5.5); null without an estimate. */
   readonly cache: CacheWarmth | null
-  readonly history: Pick<NextContext, "leafSlotId" | "historyStart" | "summarizedThrough"> | null
+  readonly history: Omit<NextContext, "warmth"> | null
   /** What stands in for older history on the path shown (DESIGN §8); null until read. */
   readonly lcm: LcmState | null
   /** Bumped each time the summaries are read and differ, so a window of coverage reads again. */
@@ -610,7 +610,8 @@ export class ChatSession {
         const history = {
           leafSlotId: event.leafSlotId,
           historyStart: event.historyStart,
-          summarizedThrough: event.summarizedThrough
+          summarizedThrough: event.summarizedThrough,
+          ...(event.budget === undefined ? {} : { budget: event.budget })
         }
         if (
           JSON.stringify(event.warmth) === JSON.stringify(this.view.cache) &&

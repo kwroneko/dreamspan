@@ -86,6 +86,17 @@ test("dropped messages have a faded border and accessible icon distinct from hid
   await expect(hidden.getByRole("img", { name: "Hidden from context", exact: true })).toBeVisible()
   await expect(hidden).not.toHaveAttribute("data-out-of-context")
   await expect(hidden.getByRole("img", { name: "Not in the context", exact: true })).toHaveCount(0)
+  const next = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+    api.GetNextContext({ chatId, leafSlotId: null })
+  )
+  const firstSent = entries.find((e) => e.depth >= next.historyStart!.depth)!
+  await page.goto(`${server().url}/chats/${chatId}?slot=${firstSent.slotId}`)
+  const explanation = page.getByRole("status").filter({ hasText: "Not sent: the preset" })
+  await expect(explanation).toContainText("“Stepped” allows 400 tokens")
+  const sent = page.locator(`article[data-slot="${firstSent.slotId}"]`)
+  await expect(sent).toBeVisible()
+  await expect(sent).not.toHaveAttribute("data-out-of-context")
+  expect((await explanation.boundingBox())!.y).toBeLessThan((await sent.boundingBox())!.y)
 })
 
 test("a changed prefix shows the rewrite estimate without a TTL or countdown", async ({ page }) => {

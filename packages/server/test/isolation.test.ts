@@ -800,7 +800,13 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
         )
         const own = yield* owner.api.GetNextContext({ chatId: owner.chat.chatId, leafSlotId: owner.chat.slotId })
         assert.strictEqual(own.leafSlotId, owner.chat.slotId)
-        assert.deepStrictEqual(Object.keys(own).sort(), ["historyStart", "leafSlotId", "summarizedThrough", "warmth"])
+        assert.deepStrictEqual(Object.keys(own).sort(), [
+          "budget",
+          "historyStart",
+          "leafSlotId",
+          "summarizedThrough",
+          "warmth"
+        ])
         if (own.historyStart) assert.deepStrictEqual(Object.keys(own.historyStart).sort(), ["depth", "slotId"])
       })
   },
@@ -1787,6 +1793,19 @@ const storage: Record<
   string,
   (reader: Reader["Service"], actor: Party, owner: Party, writer: Writer["Service"]) => Effect.Effect<void, unknown>
 > = {
+  StImportDefaultPreset: (_reader, actor, owner, writer) =>
+    Effect.gen(function* () {
+      const { importId } = yield* owner.api.StartStImport({ unsupported: [] })
+      yield* refused(
+        writer.StImportDefaultPreset({ userId: actor.user.id, importId, refId: owner.refId }),
+        "ImportLeaseLost"
+      )
+      const mine = yield* actor.api.StartStImport({ unsupported: [] })
+      yield* refused(
+        writer.StImportDefaultPreset({ userId: actor.user.id, importId: mine.importId, refId: owner.refId }),
+        "NotFound"
+      )
+    }),
   StImportSummarySettings: (_reader, actor, owner, writer) =>
     Effect.gen(function* () {
       const { importId } = yield* owner.api.StartStImport({ unsupported: [] })

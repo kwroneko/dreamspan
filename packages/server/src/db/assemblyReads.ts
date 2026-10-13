@@ -153,7 +153,21 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
           ? { slotId: recorded.slot_id, depth: recorded.depth }
           : (sources.pins().historyStart ?? null)
         const start = next instanceof AssemblyFailed ? fallback : (next.historyStart ?? fallback)
+        const budget = next.contextBudget
+        const preset = next instanceof AssemblyFailed ? next.preset : next.inputs.preset
+        const [presetRef] = preset?.ref
+          ? yield* sql<{ label: string }>`SELECT r.label FROM entity_refs r JOIN entities e ON e.id = r.entity_id
+              WHERE r.id = ${preset.ref} AND e.owner_user_id = ${userId}`
+          : []
         const boundary = {
+          budget:
+            budget && preset
+              ? {
+                  ...budget,
+                  presetName: presetRef?.label ?? (preset.scope === "builtin" ? "Default" : "Unnamed"),
+                  builtinPreset: preset.scope === "builtin"
+                }
+              : null,
           leafSlotId: sources.pins().target.parentSlotId,
           historyStart: start ? { slotId: start.slotId, depth: start.depth } : null,
           summarizedThrough: (sources.pins().lcm?.cursorDepth ?? -1) < 0 ? null : sources.pins().lcm!.cursorDepth

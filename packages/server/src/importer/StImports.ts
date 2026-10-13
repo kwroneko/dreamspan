@@ -17,7 +17,7 @@ import { uuidv7 } from "@rp/shared/id.ts"
 import { shownList, shownText } from "@rp/shared/importReport.ts"
 import type { EntityKind, RefId } from "@rp/shared/library.ts"
 import { classifyStPath, type StFile, stParentPath } from "@rp/shared/stFolder.ts"
-import { StFileResult, StHiddenRun, type StImportReport, StLinkChoice } from "@rp/shared/stImportApi.ts"
+import { StFileResult, StHiddenRun, type StImportReport, StIssue, StLinkChoice } from "@rp/shared/stImportApi.ts"
 import { createHash } from "node:crypto"
 import { lstat, rm } from "node:fs/promises"
 import { join } from "node:path"
@@ -450,6 +450,21 @@ export class StImports extends Context.Service<
           const parsed = yield* formats.st.libraryFile(bytes, file, kind)
           const imported = yield* importLibrary(session, user, path, kind, parsed.parsed)
           if (imported.entity !== null && kind === "lorebook") session.worlds.set(name, imported.entity.refId)
+          if (imported.entity !== null && kind === "preset" && session.settings?.selectedPreset === name) {
+            const adopted = yield* writer.StImportDefaultPreset({
+              userId: user.id,
+              importId: session.id,
+              refId: imported.entity.refId
+            })
+            session.report.selectedPreset = new StIssue({
+              path: "settings.json",
+              level: "info",
+              code: adopted ? "st.preset_default" : "st.preset_kept",
+              message: adopted
+                ? `ST used preset “${shownText(name)}”; it is now your default preset.`
+                : `ST used preset “${shownText(name)}”; your existing default preset was kept.`
+            })
+          }
           return imported.outcome
         })
 
@@ -926,6 +941,15 @@ export class StImports extends Context.Service<
                 settings: JSON.stringify(settings.summary)
               })
               session.settings = settings
+              session.report.selectedPreset =
+                settings.selectedPreset === null
+                  ? null
+                  : new StIssue({
+                      path,
+                      level: "warning",
+                      code: "st.preset_missing",
+                      message: `ST used preset “${shownText(settings.selectedPreset)}”, but its preset file has not been imported from this folder. Your default preset was left unchanged.`
+                    })
               session.personaNames = new Map()
               for (const persona of settings.personas) {
                 session.personaNames.set(persona.name, [
