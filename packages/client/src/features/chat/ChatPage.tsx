@@ -131,6 +131,15 @@ function MessageList({
     requestAnimationFrame(() => requestAnimationFrame(() => (settled.current = true)))
   })
 
+  // An end scroll remains pending by row index while the virtualizer measures it.
+  // Appending or inserting the summary divider can move the last message to another
+  // index. Retarget before the next frame, even if we're still exactly at the end:
+  // otherwise reconciliation scrolls to the old row and the scroll listener lets go.
+  const lastSlot = entries.at(-1)?.slotId
+  useLayoutEffect(() => {
+    if (view.follow && follow.stuck && rowCount > 0) virtualizer.scrollToEnd()
+  }, [divider, lastSlot, rowCount, view.follow, follow, virtualizer])
+
   // At the bottom, the list stays there while the last messages grow or arrive, until the
   // user scrolls away. TanStack Virtual follows on its own only while the scroll position
   // is exactly at the end when a row grows, which a send that reopens the window, or a

@@ -214,3 +214,126 @@ for (const scheme of ["light", "dark"] as const) {
     })
   }
 }
+
+test("a branch reply stays at the end when its summary divider arrives during an end scroll", async ({ page }) => {
+  // Let the new leaf's summary state arrive after the reply has started an end scroll.
+  let held = false
+  let holdStream = false
+  const reads: Array<() => void> = []
+  const updates: Array<() => void> = []
+  await page.routeWebSocket(/\/rpc$/, (socket) => {
+    const upstream = socket.connectToServer()
+    socket.onMessage((data) => {
+      if (held && typeof data === "string" && JSON.parse(data).tag === "GetLcmState") {
+        reads.push(() => upstream.send(data))
+      } else upstream.send(data)
+    })
+    upstream.onMessage((data) => {
+      if (
+        holdStream &&
+        typeof data === "string" &&
+        (data.includes('"_tag":"Delta"') || data.includes('"_tag":"Version"'))
+      ) {
+        updates.push(() => socket.send(data))
+      } else socket.send(data)
+    })
+  })
+  await newChat(page, "Divider race")
+  await send(page, "First")
+  await repliesDone(page, 1)
+  await page.getByRole("article", { name: "Your message" }).getByRole("link", { name: "Branch from here" }).click()
+  await expect(replies(page)).toHaveCount(0)
+  await expect(page.getByTestId("lcm-boundary")).toHaveCount(1)
+
+  // A busy frame leaves the virtualizer's index-based scroll pending while RPCs render
+  // the reply and then insert a divider above it. Resume frames only after that insertion.
+  held = true
+  holdStream = true
+  const frames = await page.evaluateHandle(() => {
+    const request = window.requestAnimationFrame.bind(window)
+    const cancel = window.cancelAnimationFrame.bind(window)
+    const pending = new Map<number, FrameRequestCallback>()
+    let id = 0
+    window.requestAnimationFrame = (callback) => {
+      pending.set(--id, callback)
+      return id
+    }
+    window.cancelAnimationFrame = (frame) => {
+      if (frame < 0) pending.delete(frame)
+      else cancel(frame)
+    }
+    const resume = (flush = false) => {
+      window.requestAnimationFrame = request
+      window.cancelAnimationFrame = cancel
+      const callbacks = [...pending.values()]
+      pending.clear()
+      for (const callback of callbacks) {
+        if (flush) callback(performance.now())
+        else request(callback)
+      }
+    }
+    let observer: MutationObserver | null = null
+    return {
+      onDivider: () => {
+        observer = new MutationObserver(() => {
+          if (document.querySelector('[data-testid="lcm-boundary"]') === null) return
+          observer!.disconnect()
+          // Run the pending frame just after layout commits the divider. Deliver its
+          // scroll event before a later passive effect can mask the wrong target.
+          resume(true)
+          document.querySelector('[data-testid="messages"]')!.dispatchEvent(new Event("scroll"))
+        })
+        observer.observe(document.querySelector('[data-testid="messages"]')!, { childList: true, subtree: true })
+      },
+      resume: () => {
+        observer?.disconnect()
+        resume()
+      }
+    }
+  })
+  try {
+    await send(page, "Walk away instead.\n\n".repeat(8).trim())
+    await expect(replies(page)).toHaveCount(1)
+    await expect(generating(page)).toHaveCount(1)
+    await expect(page.getByTestId("lcm-boundary")).toHaveCount(0)
+    await expect.poll(() => reads.length).toBeGreaterThan(0)
+    await expect
+      .poll(() =>
+        page.getByTestId("messages").evaluate((list) => list.scrollHeight - list.scrollTop - list.clientHeight)
+      )
+      .toBeLessThanOrEqual(1)
+    // Deliver the end scroll's event before inserting the divider, with its frame still
+    // pending. The virtualizer must preserve that end target across the row-index change.
+    await page.getByTestId("messages").evaluate((list) => list.dispatchEvent(new Event("scroll")))
+    await frames.evaluate((control) => control.onDivider())
+    held = false
+    for (const read of reads) read()
+    await expect(page.getByTestId("lcm-boundary")).toHaveCount(1)
+  } finally {
+    await frames.evaluate((control) => control.resume())
+    await frames.dispose()
+  }
+
+  // Keep token growth from masking a wrong scroll target by resizing the row back to
+  // the bottom. With frames running again, the inserted divider must leave it on screen.
+  try {
+    await expect(async () => {
+      await page.evaluate(
+        () => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done())))
+      )
+      const list = await page.getByTestId("messages").boundingBox()
+      const reply = await replies(page).last().boundingBox()
+      expect(reply!.y + reply!.height).toBeLessThanOrEqual(list!.y + list!.height + 1)
+    }).toPass({ timeout: 5_000 })
+  } finally {
+    holdStream = false
+    for (const update of updates) update()
+  }
+  await expect(generating(page)).toHaveCount(0, { timeout: 20_000 })
+  // Even allowing layout to settle, the reply must land fully inside the visible list.
+  await expect(async () => {
+    const list = await page.getByTestId("messages").boundingBox()
+    const reply = await replies(page).last().boundingBox()
+    expect(reply!.y + reply!.height).toBeLessThanOrEqual(list!.y + list!.height + 1)
+  }).toPass({ timeout: 5_000 })
+})
