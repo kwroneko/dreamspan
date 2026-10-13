@@ -4,7 +4,7 @@ import type { ServerResponse } from "node:http"
 import type { VersionId } from "@rp/shared/chat.ts"
 import { Effect, Stream } from "effect"
 import { Reader, Writer } from "../src/db/Database.ts"
-import { client, serverLayer, testConfig } from "./support/config.ts"
+import { client, posted, serverLayer, testConfig } from "./support/config.ts"
 import { eventually, finished, generateReply } from "./support/generation.ts"
 import { completionChunks, startMockProvider } from "./support/mockProvider.ts"
 
@@ -201,6 +201,44 @@ describe("cold-cache stagger at the generation boundary", () => {
       60_000
     )
   }
+
+  it.live("a shorter warm history does not bypass a new cold extension", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const f = yield* fixture(api)
+      const sent = yield* posted(
+        api.SendMessage({
+          chatId: f.chat.id,
+          parentSlotId: f.version.slotId,
+          branch: false,
+          content: "A long new never-cached chapter. ".repeat(100)
+        })
+      )
+      const leader = (yield* posted(
+        api.Generate({
+          chatId: f.chat.id,
+          parentSlotId: sent.entry.slotId,
+          branch: false
+        })
+      )).entry
+      yield* eventually(() => f.pending.length === 1)
+      const follower = yield* swipe(api, { ...f, version: leader.version })
+      yield* eventually(() => f.pending.length === 2 || waiting(f, follower.version.id))
+      assert.strictEqual(f.pending.length, 1, "the extension has not been cached yet")
+      assert.isTrue(waiting(f, follower.version.id))
+      f.emit(0)
+      yield* eventually(() => f.pending.length === 2)
+      f.emit(1)
+      const ids = [leader.version.id, follower.version.id]
+      yield* eventually(() => ids.every((id) => finished(f.events, id) !== undefined))
+      const rows = yield* ledger(api, ids)
+      assert.strictEqual(
+        rows.reduce((n, r) => n + (r.counts.cacheWrite ?? 0), 0),
+        100
+      )
+      assert.strictEqual(rows.find((r) => r.versionId === follower.version.id)?.cacheStagger?.hit, true)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
+  )
 
   it.live("a warm prefix starts every swipe before any response chunk", () =>
     Effect.gen(function* () {

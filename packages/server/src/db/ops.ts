@@ -174,6 +174,14 @@ const OpenLlmRequest = Schema.Struct({
 
 /** Closes a ledger row with what the request produced. */
 const CloseLlmRequest = Schema.Struct({
+  cacheIdentity: Schema.optionalKey(
+    Schema.NullOr(
+      Schema.Struct({
+        prefixes: Schema.Array(Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/))),
+        expiresAt: Schema.NullOr(Schema.Number)
+      })
+    )
+  ),
   cacheStagger: Schema.optionalKey(Schema.NullOr(CacheStagger)),
   id: LlmRequestId,
   status: RequestStatus,
@@ -1643,13 +1651,13 @@ export class ReadOps extends RpcGroup.make(
     success: RunContext,
     error: Schema.Union([NotFound, StorageError])
   }),
-  /** Whether the chat's provider cache is likely warm for its next request (DESIGN §5.5). */
+  /** Whether a prior request covers the entire requested provider cache endpoint. */
   Rpc.make("CachePrefixWarm", {
     payload: {
       userId: UserId,
       connectionId: ConnectionId,
       modelId: ModelId,
-      snapshot: Schema.String,
+      prefix: Sha256,
       now: Schema.Number
     },
     success: Schema.Boolean,

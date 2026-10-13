@@ -340,6 +340,7 @@ export const makeProviderWriteHandlers = Effect.gen(function* () {
       Effect.gen(function* () {
         const { counts, cost } = request
         const rows = yield* sql`UPDATE llm_requests SET ${sql.update({
+          cache_identity_json: request.cacheIdentity == null ? null : JSON.stringify(request.cacheIdentity),
           cache_stagger_json: request.cacheStagger == null ? null : JSON.stringify(request.cacheStagger),
           status: request.status,
           ended_at: request.endedAt,

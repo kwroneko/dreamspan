@@ -10,7 +10,7 @@ import { inspectWire } from "../assembler/inspection.ts"
 import { markWireSources, sentWire, wireContext } from "../assembler/wire.ts"
 import type { AssembledRequest, ModelInput, InspectionInputs } from "../assembler/types.ts"
 import { defaultCacheRelease, makeCacheStagger } from "./cacheStagger.ts"
-import { canonicalJson } from "@rp/shared/editing.ts"
+import { cacheIdentity } from "./cacheIdentity.ts"
 import { mappingCapabilities } from "./mapping.ts"
 import type {
   Api,
@@ -787,6 +787,7 @@ export const layer = (options: ProvidersOptions = {}) =>
         const requestId = uuidv7() as LlmRequestId
         const attribution = request.attribution
         const state = {
+          cacheIdentity: null as { readonly prefixes: ReadonlyArray<string>; readonly expiresAt: number | null } | null,
           capture: emptyCapture() as Capture,
           status: null as number | null,
           retryAfterMs: null as number | null,
@@ -828,6 +829,7 @@ export const layer = (options: ProvidersOptions = {}) =>
                   id: requestId,
                   status: error === null ? "complete" : error.reason === "aborted" ? "aborted" : "failed",
                   endedAt: Date.now(),
+                  cacheIdentity: state.cacheIdentity,
                   firstTokenAt: state.firstTokenAt,
                   responseModel: metadata(
                     message.responseModel ?? (message.model !== model.key ? message.model : null)
@@ -952,14 +954,31 @@ export const layer = (options: ProvidersOptions = {}) =>
                   if (sources && request.inspection && state.gate === undefined) {
                     const input = request.inspection
                     const mappedModel = { ...input.model, mapping: sources.mapping }
-                    const wire = sentWire(final, sources)
-                    const end = Math.max(-1, ...input.request.breakpoints.map((b) => b.message))
-                    const prefix = wire.messages.slice(
-                      0,
-                      wire.messages.findLastIndex((m) => m.inputs.some((i) => i <= end)) + 1
-                    )
-                    if (end >= 0 && prefix.length > 0 && mappedModel.cacheBreakpoints !== "none") {
+                    const prefixes = cacheIdentity({
+                      payload: final,
+                      api: prepared.api,
+                      mode: mappedModel.cacheBreakpoints,
+                      retention: options.cacheRetention,
+                      sessionId: options.sessionId,
+                      sources,
+                      end: Math.max(-1, ...input.request.breakpoints.map((b) => b.message)),
+                      scope: [
+                        request.userId,
+                        prepared.connection.id,
+                        mappedModel.connectionRevision,
+                        prepared.baseUrl,
+                        prepared.headers,
+                        model.id,
+                        model.key,
+                        prepared.api,
+                        prepared.kind.id,
+                        sources.mapping?.revision
+                      ]
+                    })
+                    const key = prefixes.at(-1)
+                    if (key) {
                       const ttl = mappedModel.cacheTtlS
+                      state.cacheIdentity = { prefixes, expiresAt: ttl == null ? null : Date.now() + ttl * 1000 }
                       const warm =
                         ttl != null &&
                         (await Effect.runPromise(
@@ -969,32 +988,12 @@ export const layer = (options: ProvidersOptions = {}) =>
                               connectionId: prepared.connection.id,
                               modelId: model.id,
                               now: Date.now(),
-                              snapshot: JSON.stringify({
-                                inputs: { model: mappedModel },
-                                request: input.request,
-                                wire,
-                                pieces: []
-                              })
+                              prefix: key
                             })
                           ),
                           { signal }
                         ))
                       if (!warm) {
-                        const key = createHash("sha256")
-                          .update(
-                            canonicalJson([
-                              request.userId,
-                              prepared.connection.id,
-                              mappedModel.connectionRevision,
-                              model.id,
-                              model.key,
-                              prepared.api,
-                              prepared.kind.id,
-                              sources.mapping?.revision,
-                              prefix.map((m) => m.digest)
-                            ])
-                          )
-                          .digest("hex")
                         state.gate = stagger.join(key, requestId, prepared.kind.cacheRelease ?? defaultCacheRelease)
                         if (state.gate.leader) {
                           if (state.gate.waiting) offer({ type: "waiting-cache", waiting: true })

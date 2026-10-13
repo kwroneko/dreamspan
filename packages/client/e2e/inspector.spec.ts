@@ -376,7 +376,16 @@ test("a held branch reply says waiting for the cache, including after reload", a
   const held = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
     Effect.gen(function* () {
       const path = yield* api.ReadPath({ chatId: chat.id, leafSlotId: null, range: { _tag: "Bottom" }, limit: 100 })
-      const parentSlotId = path.entries[0]!.slotId
+      const parent = path.entries[0]!
+      const parentSlotId = parent.slotId
+      // The earlier, longer request already covers this branch's old prefix. Make
+      // the shared prefix cold explicitly before testing the waiting state.
+      yield* api.EditVersion({
+        slotId: parentSlotId,
+        sourceVersionId: parent.version.id,
+        expectedRowVersion: parent.rowVersion,
+        content: "Mira opens a new, uncached harbor ledger."
+      })
       const leader = yield* api.Generate({ chatId: chat.id, parentSlotId, branch: true })
       if (leader._tag !== "Posted") return yield* Effect.die(new Error("leader queued"))
       // The two branches format the same reusable prefix.

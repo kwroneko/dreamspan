@@ -105,6 +105,12 @@ export const migrations = {
     `CREATE TRIGGER llm_requests_stagger_frozen BEFORE UPDATE OF cache_stagger_json ON llm_requests
       WHEN OLD.status <> 'running' AND NEW.cache_stagger_json IS NOT OLD.cache_stagger_json
       BEGIN SELECT RAISE(ABORT, 'a closed request is a record'); END`
+  ]),
+  "0020_cache_identity": runAll([
+    `ALTER TABLE llm_requests ADD COLUMN cache_identity_json TEXT CHECK (cache_identity_json IS NULL OR json_valid(cache_identity_json))`,
+    `CREATE TRIGGER llm_requests_cache_identity_frozen BEFORE UPDATE OF cache_identity_json ON llm_requests
+      WHEN OLD.status <> 'running' AND NEW.cache_identity_json IS NOT OLD.cache_identity_json
+      BEGIN SELECT RAISE(ABORT, 'a closed request is a record'); END`
   ])
 }
 
