@@ -194,6 +194,7 @@ Where the owner corrected an earlier proposal, the corrected version is recorded
   - placement: tail/D0, depth N, or a fixed section
   - condition: always, on this character's turn, while this character is present, or decided by a decision model
   - activation per chat (as state events)
+  - **[D]** a note created in a chat starts on, from the message shown (owner, 2026-10-13)
   - an exportable or private flag
 
 #### 4.1a State the agent changes during a chat
