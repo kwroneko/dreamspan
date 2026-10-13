@@ -1,3 +1,4 @@
+import { layerText, lcmStage } from "./lcm.ts"
 import { createHash } from "node:crypto"
 import { contextBudget, targetBudget, loreAllowance, loreBudget } from "./budget.ts"
 // The built-in assembler stages, in registration order (ARCHITECTURE §15 lists them).
@@ -71,6 +72,10 @@ const sync = (id: string, run: (assembly: Assembly) => void): AssemblerStage => 
 
 /** How many messages one read of the path takes. */
 const HISTORY_WINDOW = 200
+
+const hasSummary = (assembly: Assembly, piece: number): boolean =>
+  assembly.pieces[piece]?.source.kind === "summary" ||
+  (assembly.pieces[piece]?.parts?.some((p) => hasSummary(assembly, p)) ?? false)
 
 const presetSource = (assembly: Assembly, identifier: string): Source => {
   const preset = need(assembly, "preset")
@@ -335,7 +340,9 @@ const macrosStage = sync("macros", (assembly) => {
     type: cast.type,
     chatId: need(assembly, "target").chatId,
     variables: need(assembly, "state").vars,
-    summary: summaryNote(assembly)?.doc.content ?? ""
+    summary: assembly.lcm?.summaries.length
+      ? layerText(assembly.lcm.summaries, need(assembly, "mode").st)
+      : (summaryNote(assembly)?.doc.content ?? "")
   })
 })
 
@@ -370,8 +377,12 @@ const historyStage: AssemblerStage = {
       let leaf = target.parentSlotId
       let tokens = 0
       let depth = 0
-      while (leaf !== null && (tokens < budget || depth < (assembly.loreScanDepth ?? 0))) {
-        const window = yield* sources.history(leaf, HISTORY_WINDOW)
+      while (
+        leaf !== null &&
+        leaf !== assembly.lcm?.cursor &&
+        (tokens < budget || depth < (assembly.loreScanDepth ?? 0))
+      ) {
+        const window = yield* sources.history(leaf, HISTORY_WINDOW, assembly.lcm?.cursor ?? undefined)
         entries = [...window.entries, ...entries]
         // A template's stored text isn't what it expands to, which may be nothing: it counts as
         // nothing here, so it never ends the read early.
@@ -393,7 +404,8 @@ const historyStage: AssemblerStage = {
         leaf = window.older
       }
       assembly.history = entries
-      assembly.historyOmitted = leaf === null ? 0 : (entries[0]?.depth ?? target.depth)
+      assembly.historyOmitted =
+        leaf === null ? 0 : Math.max(0, (entries[0]?.depth ?? target.depth) - (assembly.lcm?.cursorDepth ?? -1) - 1)
       assembly.scripted = scripted
       return assembly
     })
@@ -572,7 +584,14 @@ const cardText = (assembly: Assembly, card: CardInput, field: keyof CardInput["d
 const presetText = (assembly: Assembly, id: string, text: string, names: Partial<Names> = {}): Text => {
   const env = need(assembly, "macros")
   const piece = env.piece(`preset:${id}`, presetSource(assembly, id), text, { names })
-  return { text: env.text(piece), piece, volatile: env.isVolatile(piece) }
+  const expanded = env.text(piece)
+  if (
+    assembly.lcm?.summaries.length &&
+    /\{\{\s*summary\s*\}\}/i.test(text) &&
+    expanded.includes(layerText(assembly.lcm.summaries, need(assembly, "mode").st))
+  )
+    assembly.pieces[piece] = { ...assembly.pieces[piece]!, parts: assembly.lcmPieces ?? [] }
+  return { text: expanded, piece, volatile: env.isVolatile(piece) }
 }
 
 /**
@@ -593,7 +612,8 @@ const collectionOf = (assembly: Assembly): Array<StPrompt> => {
     const text = allowed && prompt.content ? presetText(assembly, prompt.identifier, prompt.content) : null
     collection.push({
       identifier: prompt.identifier,
-      role: prompt.role,
+      role: text && !need(assembly, "mode").st && hasSummary(assembly, text.piece) ? "system" : prompt.role,
+      ...(text && hasSummary(assembly, text.piece) ? { kind: "summary" as const } : {}),
       content: text?.text ?? "",
       piece: text?.piece ?? null,
       system_prompt: prompt.system_prompt,
@@ -637,8 +657,17 @@ const override = (
     return original.content
   })
   const record = assembly.pieces[text.piece]!
-  assembly.pieces[text.piece] = { ...record, text: content, parts: original.piece === null ? [] : [original.piece] }
-  collection[at] = { ...original, content, piece: text.piece }
+  assembly.pieces[text.piece] = {
+    ...record,
+    text: content,
+    parts: first || original.piece === null ? [] : [original.piece]
+  }
+  collection[at] = {
+    ...original,
+    content,
+    piece: text.piece,
+    kind: hasSummary(assembly, text.piece) ? "summary" : "prefix"
+  }
 }
 
 /**
@@ -861,7 +890,10 @@ const placeOf = (note: NoteInput): NotePlace | null => {
 const placedNotes = (assembly: Assembly, cards: ReadonlyArray<CardInput>) => {
   const env = need(assembly, "macros")
   const authorNote = need(assembly, "state").authorNote
-  const candidates = [...need(assembly, "notes"), ...(assembly.skippedNotes ?? [])]
+  const hasLayer = (assembly.lcm?.summaries.length ?? 0) > 0
+  const candidates = [...need(assembly, "notes"), ...(assembly.skippedNotes ?? [])].filter(
+    (n) => !hasLayer || n.doc.kind !== "imported_summary"
+  )
   const summary = summaryNote(assembly, candidates)
   const rank = (note: NoteInput) =>
     note === summary
@@ -871,7 +903,7 @@ const placedNotes = (assembly: Assembly, cards: ReadonlyArray<CardInput>) => {
         : note.entity === authorNote || note.doc.kind === "author_note"
           ? 1
           : 2
-  return candidates
+  const placed = candidates
     .filter((note) => note.doc.kind !== "imported_summary" || note === summary)
     .toSorted((a, b) => rank(a) - rank(b) || (a.entity < b.entity ? -1 : a.entity > b.entity ? 1 : 0))
     .flatMap((note) => {
@@ -908,6 +940,26 @@ const placedNotes = (assembly: Assembly, cards: ReadonlyArray<CardInput>) => {
         }
       ]
     })
+  if (hasLayer && need(assembly, "mode").st) {
+    const imported = summaryNote(assembly)
+    const place = imported ? placeOf(imported) : { at: "end" as const, volatile: false, role: "system" as const }
+    if (place)
+      placed.unshift({
+        place,
+        text: () => {
+          const piece = env.piece(
+            "lcm:placement",
+            { kind: "assembler", what: "summary placement" },
+            imported?.doc.template || "Summary: {{summary}}"
+          )
+          const text = env.text(piece)
+          if (text.includes(layerText(assembly.lcm!.summaries, true)))
+            assembly.pieces[piece] = { ...assembly.pieces[piece]!, parts: assembly.lcmPieces ?? [] }
+          return { piece, text }
+        }
+      })
+  }
+  return placed
 }
 
 /** The context as ST's populateChatCompletion builds it, with our layouts' blocks and tail outside ST mode. */
@@ -1405,7 +1457,9 @@ const composeStage = sync("compose", (assembly) => {
   if (start > 0 || composition.historySent < composition.historyTotal || (assembly.historyOmitted ?? 0) > 0) {
     assembly.issues.push({
       kind: "history_truncated",
-      message: `The context holds the last ${composition.historySent} messages: older ones don't fit the preset's context size.`
+      message: assembly.lcmOmitted?.length
+        ? assembly.lcmOmitted.map((r) => `Messages ${r.from}–${r.to} left out: not summarized yet.`).join(" ")
+        : `The context holds the last ${composition.historySent} messages: older ones don't fit the preset's context size.`
     })
   }
   if (composition.examplesSent < composition.examplesTotal) {
@@ -1421,9 +1475,14 @@ const messagesStage = sync("messages", (assembly) => {
   const doc = need(assembly, "preset").doc
   // An empty skipped note still marks the next sent message as the potential boundary.
   let barrier = false
-  let messages = need(assembly, "composition").messages.map((message) => {
+  let messages: Array<StMessage> = need(assembly, "composition").messages.map((message) => {
     if (message.kind === "volatile" || message.pieces.some(need(assembly, "macros").isVolatile)) barrier = true
-    return barrier ? { ...message, kind: "volatile" as const } : message
+    const summary = message.pieces.some((p) => hasSummary(assembly, p))
+    return {
+      ...message,
+      ...(barrier ? { kind: "volatile" as const } : summary ? { kind: "summary" as const } : {}),
+      summary
+    }
   })
   messages = messages.filter((m) => m.content)
   if (doc.squash) messages = squash(messages)
@@ -1442,7 +1501,14 @@ const requestStage = sync("request", (assembly) => {
   const doc = need(assembly, "preset").doc
   const messages = need(assembly, "messages")
   const s = doc.samplers
+  const firstSummary = messages.findIndex((m) => m.pieces.some((p) => hasSummary(assembly, p)))
+  if (assembly.lcm?.summaries.length && firstSummary < 0)
+    throw new AssemblyFailed({
+      reason: "invalid_document",
+      message: "This preset has no enabled placement for its summaries."
+    })
   assembly.result = {
+    ...(firstSummary >= 0 ? { summaryStart: firstSummary } : {}),
     messages: messages.map(({ role, content, name }) => ({ role, content, ...(name ? { name } : {}) })),
     prefill: assembly.prefill ?? null,
     samplers: {
@@ -1472,7 +1538,9 @@ const requestStage = sync("request", (assembly) => {
 })
 
 const breakpointsStage = sync("breakpoints", (assembly) => {
-  assembly.breakpoints = placeBreakpoints(need(assembly, "messages"))
+  assembly.breakpoints = placeBreakpoints(
+    need(assembly, "messages").map((m) => ({ ...m, summary: m.pieces.some((p) => hasSummary(assembly, p)) }))
+  )
 })
 
 const builtinStages: ReadonlyArray<AssemblerStage> = [
@@ -1484,6 +1552,7 @@ const builtinStages: ReadonlyArray<AssemblerStage> = [
   notesStage,
   modeStage,
   lorebooksStage,
+  lcmStage,
   macrosStage,
   scriptsStage,
   historyStage,

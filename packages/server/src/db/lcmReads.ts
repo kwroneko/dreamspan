@@ -5,8 +5,13 @@ import { SqlClient } from "effect/sql"
 import { NotFound, type ReadOps } from "./ops.ts"
 import { query } from "./tx.ts"
 
-export const readSummary = (sql: SqlClient.SqlClient, userId: UserId, id: string, revision?: string) => {
-  const memo = new Map<string, Summary>()
+export const readSummary = (
+  sql: SqlClient.SqlClient,
+  userId: UserId,
+  id: string,
+  revision?: string,
+  memo = new Map<string, Summary>()
+) => {
   const read = (summaryId: string): Effect.Effect<Summary, NotFound | import("effect/sql").SqlError.SqlError> =>
     Effect.gen(function* () {
       const cached = memo.get(summaryId)
@@ -27,9 +32,10 @@ export const readSummary = (sql: SqlClient.SqlClient, userId: UserId, id: string
         token_count: number
         origin: Summary["origin"]
         revision_id: string
+        revision_number: number
         first_depth: number
         last_depth: number
-      }>`SELECT s.*, r.id AS revision_id, r.content, r.token_count, r.origin, a.depth AS first_depth, b.depth AS last_depth
+      }>`SELECT s.*, r.id AS revision_id, r.content, r.token_count, r.origin, (SELECT count(*) FROM summary_revisions p WHERE p.summary_id = s.id AND p.seq <= r.seq) AS revision_number, a.depth AS first_depth, b.depth AS last_depth
           FROM summaries s JOIN chats c ON c.id = s.chat_id
           JOIN summary_revisions r ON r.summary_id = s.id AND r.id = coalesce(${summaryId === id ? (revision ?? null) : null}, s.selected_revision_id)
           JOIN slots a ON a.id = s.first_slot_id JOIN slots b ON b.id = s.last_slot_id
@@ -68,6 +74,7 @@ export const readSummary = (sql: SqlClient.SqlClient, userId: UserId, id: string
         from: row.first_depth + 1,
         to: row.last_depth + 1,
         slotCount: row.slot_count,
+        revisionNumber: row.revision_number,
         revisionId: row.revision_id,
         content: row.content,
         tokens: row.token_count,

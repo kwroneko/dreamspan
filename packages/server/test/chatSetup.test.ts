@@ -6,6 +6,7 @@ import { assert, describe, it } from "@effect/vitest"
 import type { Chat, EntityId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { Effect } from "effect"
+import { foldState } from "@rp/shared/state.ts"
 import { Generator } from "../src/chat/Generator.ts"
 import { freezeTemplate } from "../src/chat/macros.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
@@ -66,6 +67,11 @@ describe("chat setup", () => {
         first: { _tag: "Send", content: "Hello.", speakerEntityId: anaId }
       })
       assert.strictEqual(started.chat.title, "Mira & Ana")
+      const me = yield* api.Whoami()
+      const initial = foldState(
+        yield* (yield* Reader).StateEventsAt({ userId: me.id, chatId: started.chat.id, slotId: null })
+      )
+      assert.strictEqual(initial.lcm?.enabled, true)
       assert.strictEqual(started.entry.version.speakerEntityId, anaId)
       const [greeting, message] = yield* pathOf(api, started.chat.id)
       assert.strictEqual(message!.slotId, started.entry.slotId)

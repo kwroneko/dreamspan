@@ -17,11 +17,13 @@ export interface StPrompt {
   readonly injection_order: number
   readonly forbid_overrides: boolean
   /** An intermittent note absent this turn still bounds what can be cached. */
+  readonly kind?: Stability
   readonly barrier?: boolean
 }
 
 /** A message being composed, before squashing and post-processing. */
 export interface StMessage {
+  readonly summary?: boolean
   readonly role: Role
   readonly content: string
   readonly name?: string
@@ -37,11 +39,17 @@ export interface StMessage {
  * chat's own messages (`history`), and what moves or changes every turn (`volatile`): in-chat
  * prompts and notes, which keep their depth as the chat grows, and the tail.
  */
-export type Stability = "prefix" | "history" | "volatile"
+export type Stability = "prefix" | "summary" | "history" | "volatile"
 
 /** What a message merged from two is, for caching. */
 const mergedKind = (a: Stability, b: Stability): Stability =>
-  a === "volatile" || b === "volatile" ? "volatile" : a === "history" || b === "history" ? "history" : "prefix"
+  a === "volatile" || b === "volatile"
+    ? "volatile"
+    : a === "history" || b === "history"
+      ? "history"
+      : a === "summary" || b === "summary"
+        ? "summary"
+        : "prefix"
 
 /** Text the pipeline expanded, with the piece it was recorded as. */
 export interface Text {
@@ -240,6 +248,9 @@ export const compose = (input: {
   readonly control: ReadonlyArray<StMessage>
   /** Extension prompts (the summary, notes) put before or after the main prompt in turn (injectToMain). */
   readonly beside: ReadonlyArray<{ readonly message: StMessage; readonly at: "start" | "end" }>
+  readonly layer?: ReadonlyArray<StMessage>
+  readonly stableExamples?: boolean
+  readonly layerReserve?: number
   readonly budget: number
 }): Composition => {
   const { collection } = input
@@ -259,7 +270,7 @@ export const compose = (input: {
       role: prompt.role,
       content: prompt.content,
       pieces: prompt.piece === null ? [] : [prompt.piece],
-      kind: prompt.barrier ? "volatile" : "prefix"
+      kind: prompt.barrier ? "volatile" : (prompt.kind ?? "prefix")
     }
     slots.set(at, [message])
     spend(tokensOf(message))
@@ -281,6 +292,8 @@ export const compose = (input: {
     else main!.push(message)
     spend(tokensOf(message))
   }
+  const layer = input.layer ?? []
+  spend(layer.reduce((n, m) => n + tokensOf(m), 0))
   if (budget < 0) {
     throw new AssemblyFailed({
       reason: "budget",
@@ -289,6 +302,35 @@ export const compose = (input: {
         "(its context size less its response length). Raise the context size, or turn prompts off."
     })
   }
+
+  spend(Math.min(Math.max(0, budget), input.layerReserve ?? 0))
+
+  let examplesSent = 0
+  const sendExamples = () => {
+    if (!has("dialogueExamples")) return
+    const examples: Array<StMessage> = []
+    const heading: StMessage | null = input.newExampleChat
+      ? {
+          role: "system",
+          content: input.newExampleChat.text,
+          tag: "newChat",
+          pieces: [input.newExampleChat.piece],
+          kind: input.newExampleChat.volatile ? "volatile" : "prefix"
+        }
+      : null
+    for (const block of input.examples) {
+      const messages: Array<StMessage> = block.map((line) => ({ ...line }))
+      const cost = (heading ? tokensOf(heading) : 0) + messages.reduce((n, m) => n + tokensOf(m), 0)
+      if (budget - cost < 0) break
+      if (heading && (heading.content || heading.kind === "volatile")) examples.push(heading)
+      examples.push(...messages.filter((m) => m.content))
+      spend(cost)
+      examplesSent++
+    }
+    slots.set(index("dialogueExamples"), examples)
+  }
+
+  if (input.stableExamples) sendExamples()
 
   // The chat history, newest first, while the budget lasts.
   let historySent = 0
@@ -327,32 +369,11 @@ export const compose = (input: {
     }
     spend(-reserved)
     if (newChat && newChat.content) history.unshift(newChat)
+    if (layer.length) history.splice(newChat && newChat.content ? 1 : 0, 0, ...layer)
     slots.set(index("chatHistory"), history)
   }
 
-  let examplesSent = 0
-  if (has("dialogueExamples")) {
-    const examples: Array<StMessage> = []
-    const heading: StMessage | null = input.newExampleChat
-      ? {
-          role: "system",
-          content: input.newExampleChat.text,
-          tag: "newChat",
-          pieces: [input.newExampleChat.piece],
-          kind: input.newExampleChat.volatile ? "volatile" : "prefix"
-        }
-      : null
-    for (const block of input.examples) {
-      const messages: Array<StMessage> = block.map((line) => ({ ...line }))
-      const cost = (heading ? tokensOf(heading) : 0) + messages.reduce((n, m) => n + tokensOf(m), 0)
-      if (budget - cost < 0) break
-      if (heading && (heading.content || heading.kind === "volatile")) examples.push(heading)
-      examples.push(...messages.filter((m) => m.content))
-      spend(cost)
-      examplesSent++
-    }
-    slots.set(index("dialogueExamples"), examples)
-  }
+  if (!input.stableExamples) sendExamples()
 
   const messages = [...slots.entries()].sort(([a], [b]) => a - b).flatMap(([, list]) => list)
   return {
@@ -371,7 +392,7 @@ export const squash = (messages: ReadonlyArray<StMessage>): Array<StMessage> => 
   for (const message of messages) {
     if (message.role === "system" && !message.content) continue
     const last = out.at(-1)
-    if (last && squashable(last) && squashable(message)) {
+    if (last && squashable(last) && squashable(message) && Boolean(last.summary) === Boolean(message.summary)) {
       out[out.length - 1] = {
         ...last,
         content: `${last.content}\n${message.content}`,
@@ -454,7 +475,7 @@ const mergeMessages = (
   const merged: Array<StMessage> = []
   for (const message of messages) {
     const last = merged.at(-1)
-    if (last && last.role === message.role && message.content) {
+    if (last && last.role === message.role && message.content && Boolean(last.summary) === Boolean(message.summary)) {
       merged[merged.length - 1] = {
         ...last,
         content: `${last.content}\n\n${message.content}`,

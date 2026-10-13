@@ -21,6 +21,7 @@ export class Summary extends Schema.Class<Summary>("Summary")({
   from: Schema.Int,
   to: Schema.Int,
   slotCount: Schema.Int,
+  revisionNumber: Schema.Int,
   revisionId: SummaryRevisionId,
   content: Schema.String,
   tokens: Schema.Int,

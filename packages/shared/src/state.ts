@@ -15,6 +15,7 @@ const event = <K extends string, V extends Schema.Top>(key: K, value: V) =>
  * use the id schemas, never a plain string, so `stateKeyProblems` can find them.
  */
 export const StateEventData = Schema.Union([
+  event("lcm.settings", Schema.Struct({ enabled: Schema.Boolean, tail: Schema.optionalKey(Schema.String) })),
   event("participant.join", Schema.Struct({ entity: EntityId })),
   event("participant.leave", Schema.Struct({ entity: EntityId })),
   event("presence.set", Schema.Struct({ entity: EntityId, present: Schema.Boolean })),
@@ -75,6 +76,7 @@ type ValueOf<K extends StateEventData["key"]> = Extract<StateEventData, { readon
 
 /** Every core key's id fields; a new key doesn't compile until it's listed. */
 export const stateKeyIds: { readonly [K in StateEventData["key"]]: StateKeyIds<ValueOf<K>> } = {
+  "lcm.settings": { ids: {} },
   "participant.join": { ids: { entity: { table: "entity", kind: "card" } } },
   "participant.leave": { ids: { entity: { table: "entity", kind: "card" } }, removes: true },
   "presence.set": { ids: { entity: { table: "entity", kind: "card" } }, removes: true },
@@ -209,6 +211,7 @@ interface Binding {
 }
 
 export interface ChatState {
+  readonly lcm: { readonly enabled: boolean; readonly tail?: string } | null
   /** In join order. */
   readonly participants: ReadonlyArray<string>
   readonly absent: ReadonlyArray<string>
@@ -233,6 +236,7 @@ export interface ChatState {
 }
 
 const emptyChatState: ChatState = {
+  lcm: null,
   participants: [],
   absent: [],
   playedByMe: [],
@@ -260,6 +264,8 @@ const remove = (list: ReadonlyArray<string>, item: string) => list.filter((x) =>
 const apply = (state: ChatState, { data, scope }: FoldableEvent): ChatState => {
   const at = scope ?? ""
   switch (data.key) {
+    case "lcm.settings":
+      return { ...state, lcm: data.value }
     case "participant.join":
       return {
         ...state,

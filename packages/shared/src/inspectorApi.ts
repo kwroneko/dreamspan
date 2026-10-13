@@ -40,7 +40,15 @@ export type SourceActivation = typeof SourceActivation.Type
 
 /** Where a piece of a request message came from, named for the user. */
 export const ContextSource = Schema.Struct({
-  kind: Schema.Literals(["preset", "card", "lorebook", "note", "message", "direction", "assembler"]),
+  summary: Schema.optionalKey(
+    Schema.Struct({
+      id: Schema.String,
+      revision: Schema.String,
+      stale: Schema.Boolean,
+      changed: Schema.optionalKey(Schema.Boolean)
+    })
+  ),
+  kind: Schema.Literals(["preset", "card", "lorebook", "note", "summary", "message", "direction", "assembler"]),
   /** Stable identity from source references and revisions, independent of display text. */
   id: Schema.String,
   label: Schema.String,
@@ -51,7 +59,7 @@ export const ContextSource = Schema.Struct({
 export type ContextSource = typeof ContextSource.Type
 
 /** Why a cache breakpoint follows a message: the end of the preset's prefix, or of the stable history. */
-const BreakpointReason = Schema.Literals(["prefix", "history"])
+const BreakpointReason = Schema.Literals(["prefix", "summary", "history"])
 
 export const ContextMessage = Schema.Struct({
   role: Schema.Literals(["system", "developer", "user", "assistant", "model"]),

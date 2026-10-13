@@ -141,7 +141,7 @@ export const providerRequest = (request: AssembledRequest, model: ModelInput): P
   const system: Array<string> = []
   let first = 0
   if (systemParameter) {
-    while (first < messages.length && messages[first]!.role === "system")
+    while (first < messages.length && messages[first]!.role === "system" && first < (request.summaryStart ?? Infinity))
       system.push(named(messages[first++]!, request.names))
   }
   // One message each: consecutive turns of a role stay apart, so a breakpoint on one
@@ -207,7 +207,7 @@ export const wireContext = (request: AssembledRequest, model: ModelInput): WireC
     return { messages: input.map((message, i) => ({ ...message, inputs: [i] })), samplers, mapping: model.mapping }
   }
   const first = wire.context.systemPrompt !== undefined ? input.findIndex((m) => m.role !== "system") : 0
-  const systemCount = first === -1 ? input.length : first
+  const systemCount = Math.min(first === -1 ? input.length : first, request.summaryStart ?? Infinity)
   const messages: Array<WireContext["messages"][number]> = []
   if (wire.context.systemPrompt) {
     messages.push({

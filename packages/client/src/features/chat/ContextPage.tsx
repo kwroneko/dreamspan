@@ -19,6 +19,7 @@ const PREVIEW = 200
 const count = (n: number | null) => (n === null ? "unknown" : n.toLocaleString())
 
 const breakpointText = {
+  summary: "Cache breakpoint: the end of the summary layer",
   prefix: "Cache breakpoint: the end of the preset's part",
   history: "Cache breakpoint: the end of the history the next request repeats"
 } as const
@@ -79,6 +80,12 @@ function Message({
                   </Link>
                 ) : (
                   <Badge>{source.label}</Badge>
+                )}
+                {source.summary?.stale && (
+                  <span className="text-xs text-warning">Stale when this reply was generated.</span>
+                )}
+                {source.summary?.changed && (
+                  <span className="text-xs text-warning">Summary stale or replaced since this reply.</span>
                 )}
                 {source.activation && (
                   <span className="text-xs break-words text-muted">{activationText(source.activation)}</span>

@@ -83,12 +83,17 @@ const reasonAt = (last: ContextSnapshot, next: ContextSnapshot, at: number, desc
       (after?.text !== piece.text || JSON.stringify(after.messages) !== JSON.stringify(piece.messages))
     )
   })
-  if (changed === undefined) return LAYOUT
+  if (changed === undefined) {
+    if (JSON.stringify(last.lcm?.selected) !== JSON.stringify(next.lcm?.selected)) return "The summary layer changed."
+    return LAYOUT
+  }
   const { source } = changed
   const { label } = describe(source)
   const after = now.get(changed.id)?.source
   const varies = `${label} reads differently: a macro in it gives a new value each time, or what it reads changed.`
   switch (source.kind) {
+    case "summary":
+      return `Summary of messages ${source.from}–${source.to} replaced.`
     case "message":
       return messageReason(last, next, source, label)
     case "preset":
@@ -104,6 +109,8 @@ const reasonAt = (last: ContextSnapshot, next: ContextSnapshot, at: number, desc
         ? `${label} isn't in the context any more.`
         : `The lorebook entries that activated changed: ${label} reads differently or another entry took its place.`
     case "assembler":
+      if (source.what === "summary placement")
+        return "The summary's placement template changed, or a macro in it gives a new value."
       return source.what.startsWith("lorebook") || changed.id.startsWith("lore:")
         ? "The lorebook entries that activated changed, or what they read."
         : LAYOUT

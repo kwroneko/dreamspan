@@ -780,7 +780,7 @@ describe("context assembly from the database", () => {
         assert.ok(result._tag === "EarlierAssemblerVersion")
         assert.strictEqual(result.storedSnapshot, json)
       }
-      assert.strictEqual(built.assemblerVersion, 10)
+      assert.strictEqual(built.assemblerVersion, 11)
       const rebuilt = yield* reader.RebuildContext({ userId, snapshot: JSON.stringify(built) })
       assert.ok(rebuilt._tag === "Rebuilt")
       assert.deepStrictEqual(JSON.parse(rebuilt.snapshot), built)

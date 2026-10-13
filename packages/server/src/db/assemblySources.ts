@@ -1,3 +1,5 @@
+import { selectSummaryLayer } from "./lcmLayer.ts"
+import { readSummary } from "./lcmReads.ts"
 // The assembler's sources over the database, every read the acting user's, and the pins a
 // rebuild reads again (ARCHITECTURE §15).
 import { documentedCachePolicy } from "../providers/cachePolicy.ts"
@@ -195,6 +197,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
       return { ref: row.ref, revision: row.revision, scope, doc } satisfies PresetInput
     })
 
+  let layerPins: SourcePins["lcm"]
   const pins = {
     target: null as Target | null,
     historyStart: null as NonNullable<SourcePins["historyStart"]> | null,
@@ -267,6 +270,23 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
 
   const history = noteHistory(sql, userId, chatId)
   const live = AssemblySources.of({
+    summaryLayer: (leaf) =>
+      selectSummaryLayer(sql, userId, chatId, leaf).pipe(
+        Effect.tap((layer) =>
+          Effect.sync(() => {
+            layerPins = {
+              cursor: layer.cursor,
+              cursorDepth: layer.cursorDepth,
+              summaries: layer.summaries.map((s) => ({
+                id: s.id,
+                revision: s.revisionId,
+                fresh: s.fresh,
+                status: s.status
+              }))
+            }
+          })
+        )
+      ),
     target: "next" in settings ? nextTarget : versionTarget(settings.slotId, settings.versionId),
 
     historyStart: (leaf) =>
@@ -324,14 +344,14 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
         return kept.map(({ scope, data, depth }): PositionedEvent => ({ depth, event: { scope, data } }))
       }),
 
-    history: (leaf, limit) =>
+    history: (leaf, limit, after) =>
       Effect.gen(function* () {
         const rows = yield* sql<HistoryRow>`
           WITH RECURSIVE path(id, n) AS (
-            SELECT id, 1 FROM slots WHERE id = ${leaf} AND chat_id = ${chatId} AND ${owned}
+            SELECT id, 1 FROM slots WHERE id = ${leaf} AND id IS NOT ${after ?? null} AND chat_id = ${chatId} AND ${owned}
             UNION ALL
             SELECT s.parent_slot_id, p.n + 1 FROM slots s JOIN path p ON s.id = p.id
-            WHERE s.parent_slot_id IS NOT NULL AND p.n < ${limit}
+            WHERE s.parent_slot_id IS NOT NULL AND s.parent_slot_id IS NOT ${after ?? null} AND p.n < ${limit}
           )
           SELECT s.id AS slot_id, s.parent_slot_id, s.depth, s.context_excluded,
             s.deleted_at IS NOT NULL AS slot_deleted, v.id AS version_id, v.ordinal, v.status,
@@ -362,8 +382,12 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
             selectedOrdinal: row.ordinal,
             amends: row.amend_count
           }))
-        const older = rows[0]?.parent_slot_id ?? null
-        pins.history.push({ key: keyOf(leaf, limit), older, entries: read.map(({ content: _, ...pinned }) => pinned) })
+        const older = rows[0]?.parent_slot_id === after ? null : (rows[0]?.parent_slot_id ?? null)
+        pins.history.push({
+          key: keyOf(leaf, limit, after ?? null),
+          older,
+          entries: read.map(({ content: _, ...pinned }) => pinned)
+        })
         return { entries: read.map(({ amends: _, ...entry }) => entry), older }
       }),
 
@@ -580,7 +604,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
   return {
     layer: Layer.succeed(AssemblySources)(sources),
     /** What the sources read; a replay's are the pins it was given. */
-    pins: (): SourcePins => replay?.pins ?? { ...pins, target: pins.target! }
+    pins: (): SourcePins => replay?.pins ?? { ...pins, target: pins.target!, ...(layerPins ? { lcm: layerPins } : {}) }
   }
 }
 
@@ -602,6 +626,21 @@ const replaySources = (
     return found ? Effect.succeed(found) : Effect.fail(unpinned(what))
   }
   return {
+    summaryLayer: () =>
+      Effect.gen(function* () {
+        const layer = pins.lcm
+        if (!layer) return yield* unpinned("the summary layer")
+        const summaries = yield* Effect.forEach(layer.summaries, (pin) =>
+          readSummary(sql, userId, pin.id, pin.revision).pipe(
+            Effect.flatMap((summary) =>
+              summary.chatId === chatId
+                ? Effect.succeed({ ...summary, fresh: pin.fresh, status: pin.status })
+                : Effect.fail(new NotFound({ entity: "summary", id: pin.id }))
+            )
+          )
+        )
+        return { summaries, cursor: layer.cursor, cursorDepth: layer.cursorDepth }
+      }),
     target: sql<{ ok: number }>`SELECT ${owned} AS ok`.pipe(
       Effect.flatMap(([row]) =>
         row?.ok ? Effect.succeed(pins.target) : Effect.fail(new NotFound({ entity: "chat", id: chatId }))
@@ -631,9 +670,9 @@ const replaySources = (
         })
       }),
 
-    history: (leaf, limit) =>
+    history: (leaf, limit, after) =>
       Effect.gen(function* () {
-        const window = yield* pinned(pins.history, keyOf(leaf, limit), "part of the chat")
+        const window = yield* pinned(pins.history, keyOf(leaf, limit, after ?? null), "part of the chat")
         const ids = window.entries.map((e) => e.versionId)
         const rows =
           ids.length === 0

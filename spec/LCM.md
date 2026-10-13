@@ -1,6 +1,6 @@
 # LCM: hierarchical summarization
 
-**Status**: Proposed, 2026-10-13. Phase 3 (PLAN.md). Slice 1 is implemented in ARCHITECTURE §16; the remaining slices are proposed. Items are marked as in DESIGN.md: **[D]** the owner stated or confirmed it (with where), **[P]** proposed and not confirmed, **[O]** open. The baseline is reference-harness as described in [the earlier reference notes](the earlier reference notes), cited as "ref §N". This document lists what carries over, then only the differences.
+**Status**: Proposed, 2026-10-13. Phase 3 (PLAN.md). Slices 1 and 2 are implemented in ARCHITECTURE §16; the remaining slices are proposed. Items are marked as in DESIGN.md: **[D]** the owner stated or confirmed it (with where), **[P]** proposed and not confirmed, **[O]** open. The baseline is reference-harness as described in [the earlier reference notes](the earlier reference notes), cited as "ref §N". This document lists what carries over, then only the differences.
 
 Scope:
 - **[D]** LCM is the main feature: chats of unlimited length with a fixed, cache-friendly budget, keeping every message and every intermediate summary (DESIGN §8).
@@ -34,14 +34,7 @@ Token counts here use the assembler's estimate (four characters a token, three a
 ### 2.1 Summaries over path segments in a branching graph
 
 reference-harness keys summaries by timeline (ref §1 What a summary covers) and shares them across views only by copying rows (ref §5 Summary mirroring).
-- **[P]** A summary covers a chain of slots, each the primary parent of the next (DESIGN §8.1, DATA-MODEL §8).
-- **[P]** A summary is on a path exactly when its last slot is. The graph is append-only and a path follows primary parents, so the whole chain is then on the path. Branches that share a segment use the same rows, with nothing copied.
-- **[P]** Selection walks back from the leaf, where reference-harness walks forward from the timeline's start (ref §4 Coverage selection):
-  1. Walk back through the verbatim history to the first slot that ends a usable summary.
-  2. Take the best summary ending there: fresh before stale (§2.2), then the highest level.
-  3. Jump to the parent of its first slot, and repeat until the root.
-- Its cost is the verbatim window plus one indexed lookup per summary in the layer. The first step shares the walk the state fold already makes on every assembly (ARCHITECTURE §3.8 "Known limits"), and gets faster when that does.
-- **[P]** The **cursor** is the last slot of the newest selected summary. Verbatim history is everything after it on the path. Coverage sets it, not the budget, so the start of the history doesn't move from turn to turn. Plain chat currently holds a recorded history start between stepped cuts (ARCHITECTURE §15); LCM coverage will supply that boundary instead.
+Implemented in [ARCHITECTURE §16](../ARCHITECTURE.md#16-lcm-hierarchical-summaries): shared primary-parent chains, on-path selection, freshness/level/newness preference, continuous root coverage and a cursor independent of the raw budget. Selection uses indexed ending-slot candidates over the path, with shared freshness memoization; no summary copying between branches.
 - **[P]** Chunks end at branch points when they can (DATA-MODEL §8.2). A chunk that would cross a slot with two or more live children ends at that slot, unless that leaves it under a quarter of `leaf_input`. The shared segment then gets summaries both branches use.
 - **[P]** A branch made later inside a summarized chain doesn't contain that chain. Its path uses the summaries before the fork, and the planner summarizes on from there.
 - **[P]** No chain contains a merge slot until threads are built (DESIGN §3.3).
@@ -50,13 +43,7 @@ reference-harness keys summaries by timeline (ref §1 What a summary covers) and
 ### 2.2 Edits, swipes, deletes and restores under a summary
 
 reference-harness records event ids only. A covered edit or delete leaves its summaries as they were, and they stay current (ref §5; §8 item 7).
-- **[P]** Each L1 input records a slot of the chain and its **effective version**: the selected version if it's usable and the slot is live and not hidden, otherwise none. DATA-MODEL §8.1 records only versions; "none" is added so that a summary made with a message deleted or hidden stays fresh while it stays that way.
-- **[P]** Above level 1, lineage also records the child's revision it was condensed from.
-- **[P]** Freshness is derived, never stored (DATA-MODEL principle 2). An L1 is fresh when every input's effective version is still the one recorded. A higher level is fresh when every child is fresh and still selects the recorded revision.
-- So none of these writes anything to summaries:
-  - swiping or editing a covered message makes its summaries stale, and selecting the old version again makes them fresh;
-  - deleting a covered message to the bin, or hiding it, makes them stale, and restoring or un-hiding makes them fresh.
-- **[P]** A stale summary stays in the context until a fresh one for the same chain lands (DESIGN §8.1: "re-summarizes it lazily"). Dropping it would put its whole range back as raw text, over budget, and its text is usually still mostly right.
+Implemented in [ARCHITECTURE §16](../ARCHITECTURE.md#16-lcm-hierarchical-summaries): nullable effective version and amendment pins, child revision pins, recursive derived freshness, and stale fallback only without a fresh candidate at that endpoint. Edits, swipes, deletes, restores and hides change no summary rows.
 - **[P]** Re-summarizing writes a new summary row over the same chain with the new inputs. The stale one stays. If the user swipes back, the old one is fresh and selected again, with no request. Summaries are in effect keyed by chain and inputs, and none is ever lost.
 - **[P]** Re-summarizing runs at `idle` class (§2.5). "Re-summarize now" runs it at `interactive`.
 - **[P]** A summary whose selected revision the user wrote isn't replaced automatically when it goes stale. It's flagged. See question 2.
@@ -138,22 +125,11 @@ reference-harness synthesizes a placeholder from a failed job row and never pers
 
 ### 2.9 How summaries enter the context
 
-- **[P]** A registered `lcm` stage runs before `history`, selects the layer (§2.1), and gives `history` the cursor to read from.
-- **[P]** Summary text is model output or the user's, so it's never macro-expanded (DESIGN §5.6 [D]).
-- **[P]** Labels are message ranges by depth ("Messages 40–120"), which never change. reference-harness labels recency from timestamps and caches the labels to limit churn (ref §4 Cache breakpoints). Story time isn't wall time here, and a fixed label needs no cache.
-- **ST-compatible mode [P].** The layer's summaries, joined with blank lines, are what `{{summary}}` reads and what the chat's summary settings place: the imported note's template and position, or ST's Summarize defaults for a chat without one. The owner's preset already has a `{{summary}}` prompt (DESIGN §4 [D]). With LCM off nothing changes, and neither does the differential gate. With LCM on, the request differs from ST's by design, and the gate lists that as a documented difference.
-- **Our layouts [P].** One system message, `<summaries>` holding `<summary level="2" from="40" to="120">` blocks, at the preset's `{{summary}}` prompt if it has one, otherwise right before the history.
-- **Breakpoints [P].** A new `Stability` kind, `summary`, and reference-harness's breakpoint (b) after the layer's last message, which ARCHITECTURE §15 lists as coming with LCM. Anthropic takes four markers; the priority is (c) stable history, (b) layer, (a) prefix, then pi-ai's last message. A layer change then costs the layer and the history, never the preset and cards above it.
-- **[P]** In LCM mode nothing above the history depends on how long the window is. Example dialogues are budgeted against `window_max`, not against what's left this turn, so a growing window doesn't change the prefix.
-- **Lorebooks [P].** The tail allowance stays as built: lore is budgeted from stored content, and in LCM mode the window doesn't depend on the budget except for the over-maximum check. Keeping entries until the next compaction boundary (DESIGN §1.3 [P], deferred in ARCHITECTURE §15) can use the cursor as that boundary later. It isn't part of this phase.
-- **[P]** The cache estimate names a changed layer as the first changed source ("Summary of messages 40–120 replaced"), so the "next send rewrites ~N tokens" warning covers summary edits and cursor moves.
-- **[P]** The assembler semantics version goes to 8.
+Implemented in [ARCHITECTURE §16](../ARCHITECTURE.md#16-lcm-hierarchical-summaries): literal rendering in both modes, placement, stable examples and the layer allowance, breakpoint (b), omitted ranges, cache estimates and assembler semantics version 8. LCM-off assembly retains the unchanged ST differential oracle. Depth-positioned summaries move ahead of verbatim history to preserve §4's partition invariant. Planner waits and budget absorption remain in slices 3 and 5.
 
 ### 2.10 RebuildContext and pins
 
-- **[P]** A snapshot pins the selected summaries by id and revision, whether each was stale, the cursor and any omitted range. Revisions are immutable and summary rows live as long as their chat, so a rebuild renders the same layer whatever happened since. It doesn't select again, as reference-harness's late-input redo pins its selection (ref §4 Cache breakpoints).
-- **[P]** The inspector marks a version generated with a summary that's since gone stale or been replaced. It's derived from the pins, like "written against an older version" (DATA-MODEL §4.6).
-- **[P]** A summarization rollout's snapshot is its request, and rebuilds the same way.
+Implemented in [ARCHITECTURE §16](../ARCHITECTURE.md#16-lcm-hierarchical-summaries): selected immutable revisions, freshness/status and cursor pins, replay without reselection, and inspector flags for summaries changed since generation. Summarization rollout snapshots arrive with slice 3.
 
 ### 2.11 Backfill and its cost estimate
 
@@ -169,7 +145,7 @@ reference-harness synthesizes a placeholder from a failed job row and never pers
 
 ### 2.12 Settings and plain chat mode
 
-- **[P]** LCM is chat-wide: an `lcm.settings` state key, accepted only at the chat's initial position. Summaries are shared across branches, and per-branch chunking would stop that. Its value: enabled, and overrides of the knobs and the tail. Defaults live in user settings.
+- Implemented: chat-wide initial `lcm.settings`, enabled for new chats and disabled for newly imported chats, with an optional tail (ARCHITECTURE §16). **[P]** Further knob overrides and user defaults arrive with the planner and enable flow.
 - **[D]** Plain chat mode has no drill-down and no search (DESIGN §8). **[P]** The layer is always bare in phase 3, like reference-harness's generation layer; reference-harness's live layer adds expansion handles and a note (ref §4 Coverage selection).
 - Not carried over: the diary layer, donor mirroring (path sharing replaces it), recency labels, the summary editor tool (phase 4).
 
@@ -229,6 +205,7 @@ Every change to LCM keeps these, as every change to drafts keeps ARCHITECTURE §
 9. **Isolation.** Another user's chats, summaries and jobs are `NotFound` through every operation.
 
 **The model test** (`test/protocol/lcm.model.test.ts`), in the style of `drafts.model.test.ts`: the real server, workers and assembler, with a fake provider.
+- Built for slices 1–2: fixture summaries encode their inputs, and graph steps check invariants 1–4 and 6. Job, batch and refusal steps below are still planned.
 - The fake summarizer's reply encodes its inputs: an L1 lists `depth:version` for each slot it read, a condensation its children and their revisions. So the oracle can decode any summary in any context back into what it covers and from which versions.
 - Random steps: append a message or a reply, branch, swipe, edit, select, delete a message, branch or version, restore, purge, hide and show, run some jobs, fail one with a planted refusal, edit a summary, select a revision, re-summarize, retry, change LCM settings, restart the server.
 - The oracle is an in-memory model of the graph and its selections, written apart from the SQL, which computes paths, effective versions and freshness.
@@ -253,7 +230,7 @@ Each slice moves its part of this document into ARCHITECTURE.md in the same comm
 | # | Slice | Test oracle | Tier |
 |---|---|---|---|
 | 1 ✓ | Migration 0023, its triggers, the summary writes (`CompleteSummary`, `EditSummary`, `SelectSummaryRevision`) and derived freshness | A schema test per trigger; freshness against hand-built graphs; isolation probes | A |
-| 2 | The `lcm` stage, the layer in both modes, breakpoint (b), pins, assembler version 11, summary sources in the inspector and the cache estimate | The model test over graph steps with summaries written by fixtures (invariants 1–4, 6); the ST gate unchanged with LCM off | B |
+| 2 ✓ | The `lcm` stage, the layer in both modes, breakpoint (b), pins, assembler version 11, summary sources in the inspector and the cache estimate | The model test over graph steps with summaries written by fixtures (invariants 1–4, 6); the ST gate unchanged with LCM off | B |
 | 3 | Planner, queue operations, `Summarizer`, summarization requests, use / wait / omit, batches, idle class | The model test with jobs (7, 8); the prefix comparison at a mock provider | A |
 | 4 | Hard refusals and the judge model for soft refusals, retries, failed summaries, Retry with…, marks on chat versions | A fake judge; the model test with planted refusals (5) | B |
 | 5 | Condensation, absorption, re-summarizing stale summaries | The model test with condensation and edits, run to quiescence | B |

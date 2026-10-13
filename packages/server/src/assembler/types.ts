@@ -11,7 +11,7 @@ import type { PresetDoc } from "@rp/shared/docs/preset.ts"
 import { Schema } from "effect"
 
 /** Bump whenever identical inputs would assemble differently. Missing means version 0. */
-export const ASSEMBLER_VERSION = 10
+export const ASSEMBLER_VERSION = 11
 
 export type Role = "system" | "user" | "assistant"
 
@@ -24,6 +24,16 @@ export type GenerationType = "normal" | "swipe" | "impersonate"
 
 /** Where a piece of the context came from, for the request inspector (DESIGN §7.4). */
 export type Source =
+  | {
+      readonly kind: "summary"
+      readonly id: string
+      readonly revision: string
+      readonly revisionNumber: number
+      readonly level: number
+      readonly from: number
+      readonly to: number
+      readonly stale: boolean
+    }
   | {
       readonly kind: "preset"
       readonly ref: string | null
@@ -107,9 +117,10 @@ interface Samplers {
 }
 
 /** Why a cache breakpoint is where it is (DESIGN §5.5, reference-harness's scheme). */
-type BreakpointReason = "prefix" | "history"
+type BreakpointReason = "prefix" | "summary" | "history"
 
 export interface AssembledRequest {
+  readonly summaryStart?: number
   readonly messages: ReadonlyArray<RequestMessage>
   /** Starts the model's reply, when the model can be prefilled; dropped and reported otherwise. */
   readonly prefill: string | null
@@ -179,6 +190,19 @@ export interface HistoryStart {
 export interface ContextSnapshot {
   readonly historyStart?: HistoryStart
   readonly historyMove?: "initial" | "maximum" | "budget" | "restore" | "unchanged"
+  readonly lcm?: {
+    readonly cursor: string | null
+    readonly selected: ReadonlyArray<{
+      readonly id: string
+      readonly revision: string
+      readonly stale: boolean
+      readonly from: number
+      readonly to: number
+      readonly level: number
+    }>
+    readonly omitted: ReadonlyArray<{ readonly from: number; readonly to: number }>
+    readonly verbatim: { readonly from: number; readonly to: number } | null
+  }
   readonly schema: 1
   readonly assemblerVersion?: number
   readonly inputs: SnapshotInputs
@@ -206,8 +230,24 @@ export interface ContextSnapshot {
 /** A message of the path as it was read, but its text, which its version and amend count pin. */
 type PinnedEntry = Omit<HistoryEntry, "content"> & { readonly amends: number }
 
+export interface SummaryLayer {
+  readonly summaries: ReadonlyArray<import("@rp/shared/lcm.ts").Summary>
+  readonly cursor: string | null
+  readonly cursorDepth: number
+}
+
 /** What one context's sources read, by id and revision, each read keyed by its request (invariant 6). */
 export interface SourcePins {
+  readonly lcm?: {
+    readonly cursor: string | null
+    readonly cursorDepth: number
+    readonly summaries: ReadonlyArray<{
+      readonly id: string
+      readonly revision: string
+      readonly fresh: boolean
+      readonly status: import("@rp/shared/lcm.ts").Summary["status"]
+    }>
+  }
   readonly target: Target
   readonly historyStart?: HistoryStart | null
   readonly historyRevisions?: Readonly<Record<string, number>>
@@ -274,7 +314,7 @@ export const generationOf = (snapshot: ContextSnapshot): Generation => {
     request: snapshot.request,
     model: snapshot.inputs.model,
     variables: snapshot.effects.filter((e) => e.scope === "local").map(({ name, value }) => ({ name, value })),
-    issues: snapshot.issues,
+    issues: snapshot.lcm ? snapshot.issues.filter((issue) => issue.kind !== "history_truncated") : snapshot.issues,
     frozenMessages: snapshot.pieces.flatMap((piece) => {
       if (piece.source.kind !== "message") return []
       const frozen = snapshot.frozen[piece.id]

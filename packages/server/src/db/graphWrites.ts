@@ -120,6 +120,8 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
     data: StateEventData
   ) =>
     Effect.gen(function* () {
+      if (data.key === "lcm.settings" && (slotId !== null || versionId !== null || scope !== null))
+        return yield* new NotFound({ entity: "chat-wide settings", id: chatId })
       yield* checkStateReferences(sql, userId, chatId, data, scope)
       const [next] = yield* sql<{ n: number }>`
           SELECT coalesce(max(seq), -1) + 1 AS n FROM state_events WHERE chat_id = ${chatId} AND slot_id IS ${slotId}`

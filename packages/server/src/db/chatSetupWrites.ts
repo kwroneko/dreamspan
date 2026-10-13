@@ -189,6 +189,10 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
             created_at: at
           })}`
           yield* sql`INSERT INTO lanes ${sql.insert({ id: laneId, chat_id: chatId, name: "main", created_at: at })}`
+          yield* graph.insertStateEvent(userId, chatId, null, null, null, {
+            key: "lcm.settings",
+            value: { enabled: true }
+          })
           for (const entity of ids) {
             yield* graph.insertStateEvent(userId, chatId, null, null, null, {
               key: "participant.join",

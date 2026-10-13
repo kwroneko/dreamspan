@@ -225,6 +225,17 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
             created_at: createdAt
           })}`
           yield* sql`INSERT INTO lanes ${sql.insert({ id: uuidv7(), chat_id: chatId, name: "main", created_at: at })}`
+          yield* sql`INSERT INTO state_events ${sql.insert({
+            id: uuidv7(),
+            chat_id: chatId,
+            slot_id: null,
+            version_id: null,
+            seq: 0,
+            key: "lcm.settings",
+            value_json: JSON.stringify({ enabled: false }),
+            origin: "import",
+            created_at: at
+          })}`
         }
         // An earlier record of this file whose chat was deleted for good names nothing now.
         yield* sql`DELETE FROM jobs WHERE owner_user_id = ${userId} AND kind = ${ST_CHAT_RECORD}

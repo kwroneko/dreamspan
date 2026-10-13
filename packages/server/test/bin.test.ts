@@ -484,9 +484,12 @@ describe("recycle bin", () => {
       // Each later item leaves out what's already in the bin under an earlier one.
       assert.strictEqual((yield* writer.DeleteMessage({ userId, slotId: b.slotId })).byteSize, 1) // "b"
       assert.strictEqual((yield* writer.DeleteBranch({ userId, slotId: a.slotId })).byteSize, 2) // "a", "c"
-      // "root", and the state event that made the card a participant
+      // "root", the participant join and the initial LCM setting
       const joined = JSON.stringify({ entity: card.entityId }).length
-      assert.strictEqual((yield* writer.DeleteChat({ userId, chatId: chat.id })).byteSize, 4 + joined)
+      assert.strictEqual(
+        (yield* writer.DeleteChat({ userId, chatId: chat.id })).byteSize,
+        4 + joined + JSON.stringify({ enabled: true }).length
+      )
     }).pipe(Effect.provide(database()))
   )
 
@@ -513,8 +516,11 @@ describe("recycle bin", () => {
         )
         .all(card.entityId)
       db.close()
-      // "oops", {"a":1}, ["猫"], {"messages":[]} and "雨"
-      assert.strictEqual((yield* writer.DeleteChat({ userId, chatId: story.id })).byteSize, 4 + 7 + 7 + 15 + 5)
+      // "oops", {"a":1}, ["猫"], {"messages":[]}, "雨" and the initial LCM setting
+      assert.strictEqual(
+        (yield* writer.DeleteChat({ userId, chatId: story.id })).byteSize,
+        4 + 7 + 7 + 15 + 5 + JSON.stringify({ enabled: true }).length
+      )
       assert.strictEqual((yield* writer.DeleteEntity({ userId, entityId: card.entityId })).byteSize, entityBytes!.n)
     }).pipe(Effect.provide(database(dir)))
   })

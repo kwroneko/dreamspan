@@ -31,6 +31,7 @@ export interface AssemblyFixture {
   readonly historyStart?: ContextSnapshot["historyStart"] | null
   readonly chatId?: string
   /** The path, root first; the message being generated comes after it. */
+  readonly summaries?: ReadonlyArray<import("@rp/shared/lcm.ts").Summary>
   readonly messages: ReadonlyArray<FixtureMessage>
   readonly target?: { readonly speaker?: string; readonly direction?: string; readonly ordinal?: number }
   readonly cards: ReadonlyArray<{ readonly entity: string; readonly doc: CardDoc }>
@@ -88,11 +89,18 @@ const fixtureSources = (fixture: AssemblyFixture) => {
     historyRevision: (_leaf, before) =>
       Effect.succeed(entries.slice(0, before).reduce((n, e) => n - (e.inContext ? e.content.length : 0), 0)),
     events: () => Effect.succeed(events),
-    history: (leaf, limit) =>
+    summaryLayer: () =>
+      Effect.succeed({
+        summaries: fixture.summaries ?? [],
+        cursor: fixture.summaries?.at(-1)?.lastSlotId ?? null,
+        cursorDepth: fixture.summaries?.at(-1) ? fixture.summaries.at(-1)!.to - 1 : -1
+      }),
+    history: (leaf, limit, after) =>
       Effect.sync(() => {
         const end = entries.findIndex((e) => e.slotId === leaf)
-        const start = Math.max(0, end - limit + 1)
-        return { entries: entries.slice(start, end + 1), older: start === 0 ? null : slot(start - 1) }
+        const boundary = after === undefined ? 0 : entries.findIndex((e) => e.slotId === after) + 1
+        const start = Math.max(boundary, end - limit + 1)
+        return { entries: entries.slice(start, end + 1), older: start === boundary ? null : slot(start - 1) }
       }),
     cards: (wanted) =>
       Effect.succeed(

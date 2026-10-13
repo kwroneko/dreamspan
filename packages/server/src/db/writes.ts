@@ -68,6 +68,7 @@ export const makeWriteHandlers = (bin: Bin) =>
           const laneId = uuidv7()
           yield* sql`INSERT INTO chats ${sql.insert({ id: chatId, owner_user_id: userId, kind, status, title, created_at: at })}`
           yield* sql`INSERT INTO lanes ${sql.insert({ id: laneId, chat_id: chatId, name: "main", created_at: at })}`
+          yield* insertStateEvent(userId, chatId, null, null, null, { key: "lcm.settings", value: { enabled: true } })
           for (const entity of participants) {
             yield* insertStateEvent(userId, chatId, null, null, null, { key: "participant.join", value: { entity } })
           }

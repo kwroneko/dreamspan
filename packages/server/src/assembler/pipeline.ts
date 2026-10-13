@@ -26,6 +26,7 @@ import type {
   Piece,
   PresetInput,
   RequestMessage,
+  SummaryLayer,
   Target
 } from "./types.ts"
 import { ASSEMBLER_VERSION, AssemblyFailed } from "./types.ts"
@@ -60,13 +61,14 @@ export interface PresetChain {
 export class AssemblySources extends Context.Service<
   AssemblySources,
   {
+    readonly summaryLayer: (leaf: string | null) => Effect.Effect<SummaryLayer, SourceError>
     readonly target: Effect.Effect<Target, SourceError>
     readonly historyRevision: (leaf: string | null, before: number) => Effect.Effect<number, SourceError>
     readonly historyStart: (leaf: string | null) => Effect.Effect<HistoryStart | null, SourceError>
     /** The events that apply at `slotId` (null: the chat's initial state), in fold order. */
     readonly events: (slotId: string | null) => Effect.Effect<ReadonlyArray<PositionedEvent>, SourceError>
     /** The window of at most `limit` messages ending at `leaf`. */
-    readonly history: (leaf: string, limit: number) => Effect.Effect<HistoryWindow, SourceError>
+    readonly history: (leaf: string, limit: number, after?: string) => Effect.Effect<HistoryWindow, SourceError>
     /** Each card as a participant uses it: its binding, else this chat's override, else its upstream. */
     readonly cards: (
       entities: ReadonlyArray<string>,
@@ -164,6 +166,10 @@ export interface ProjectedEntry {
  * misregistered plugin stage can cause.
  */
 export interface Assembly {
+  lcm?: SummaryLayer
+  lcmPieces?: ReadonlyArray<number>
+  lcmVerbatim?: { readonly from: number; readonly to: number } | null
+  lcmOmitted?: ReadonlyArray<{ readonly from: number; readonly to: number }>
   readonly request: AssemblyRequest
   target?: Target
   events?: ReadonlyArray<PositionedEvent>
@@ -266,7 +272,24 @@ export const assemble = (stages: StageRegistry, request: AssemblyRequest) =>
       frozen: assembly.frozen,
       effects: assembly.effects,
       ...(assembly.loreFallback ? { loreFallback: assembly.loreFallback } : {}),
-      templateWrites: assembly.templateWrites
+      templateWrites: assembly.templateWrites,
+      ...(assembly.lcm
+        ? {
+            lcm: {
+              cursor: assembly.lcm.cursor,
+              selected: assembly.lcm.summaries.map((s) => ({
+                id: s.id,
+                revision: s.revisionId,
+                stale: !s.fresh,
+                from: s.from,
+                to: s.to,
+                level: s.level
+              })),
+              omitted: assembly.lcmOmitted ?? [],
+              verbatim: assembly.lcmVerbatim ?? null
+            }
+          }
+        : {})
     }
     return snapshot
   })

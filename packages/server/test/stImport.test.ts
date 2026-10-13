@@ -188,6 +188,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
       const main = yield* stateAt(alice, chat.activeLeafSlotId)
       assert.sameMembers([...main.participants], [aliceCard, sam])
       assert.deepStrictEqual(main.playedByMe, [sam])
+      assert.strictEqual(main.lcm?.enabled, false)
       assert.deepStrictEqual(main.vars, { mood: "calm", count: 3 })
       assert.lengthOf(main.lorebooks, 1)
       assert.strictEqual(main.lorebookBindings[aliceCard], main.lorebooks[0])

@@ -1,3 +1,4 @@
+import { selectSummaryLayer } from "./lcmLayer.ts"
 import { tokensOf } from "../assembler/st.ts"
 // The request inspector's reads (DESIGN §7.4; ARCHITECTURE §15): a version's context as it
 // was sent, from its rollout's stored snapshot, with each piece's source named for the user.
@@ -105,6 +106,14 @@ export const describer = (
           }
         case "note":
           return { ...common, kind: "note", label: `Note “${names.get(source.revision) ?? "unnamed"}”`, slotId: null }
+        case "summary":
+          return {
+            ...common,
+            kind: "summary",
+            label: `Summary, level ${source.level}, messages ${source.from}–${source.to}, revision ${source.revisionNumber}`,
+            slotId: null,
+            summary: { id: source.id, revision: source.revision, stale: source.stale }
+          }
         case "message": {
           const depth = depthOf.get(source.slot)
           return {
@@ -205,6 +214,17 @@ export const makeInspectorReadHandlers = Effect.gen(function* () {
         const requests = yield* rolloutUsage(sql, userId, row.rollout_id)
         const wire = row.sent_context_json ? (JSON.parse(row.sent_context_json) as WireContext) : null
         const display = wire?.display
+        const current = new Map<string, { readonly revisionId: string; readonly fresh: boolean }>()
+        if (snapshot.lcm?.selected.length) {
+          const [settings] = yield* sql<{
+            enabled: number
+          }>`SELECT json_extract(value_json, '$.enabled') AS enabled FROM state_events
+            WHERE chat_id = ${chatId} AND slot_id IS NULL AND scope IS NULL AND key = 'lcm.settings' ORDER BY seq DESC LIMIT 1`
+          if (settings?.enabled)
+            for (const summary of (yield* selectSummaryLayer(sql, userId, chatId, snapshot.inputs.leafSlotId))
+              .summaries)
+              current.set(summary.id, summary)
+        }
         return new RunContext({
           chatId,
           slotId: row.slot_id as SlotId,
@@ -220,7 +240,18 @@ export const makeInspectorReadHandlers = Effect.gen(function* () {
                 name: message.name ?? null,
                 content: message.content,
                 tokens: tokensOf(message),
-                sources: message.sources ?? [],
+                sources: (message.sources ?? []).map((source) => {
+                  if (!source.summary) return source
+                  const now = current.get(source.summary.id)
+                  return {
+                    ...source,
+                    summary: {
+                      ...source.summary,
+                      changed:
+                        !now || now.revisionId !== source.summary.revision || (!source.summary.stale && !now.fresh)
+                    }
+                  }
+                }),
                 breakpoint: message.breakpoint ?? null
               }))
             : [],
