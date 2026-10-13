@@ -164,6 +164,8 @@ export class ChatSession {
   private contextReads = 0
 
   private lcmReads = 0
+  /** The newest read applied: a slow read is never dropped for a newer one still in flight. */
+  private lcmApplied = 0
   private lcmTimer: ReturnType<typeof setTimeout> | null = null
 
   /** Reads the summaries on the path shown, soon: a run of events makes one read. */
@@ -180,7 +182,8 @@ export class ChatSession {
     const leafSlotId = this.view.leafSlotId
     if (leafSlotId === null || this.disposed) return
     const result = await this.call((client) => client("GetLcmState", { chatId: this.chatId, leafSlotId }))
-    if (!result.ok || this.disposed || read !== this.lcmReads || leafSlotId !== this.view.leafSlotId) return
+    if (!result.ok || this.disposed || read < this.lcmApplied || leafSlotId !== this.view.leafSlotId) return
+    this.lcmApplied = read
     // The same layer again (the leaf moved on, a reply streamed) changes nothing on screen.
     if (JSON.stringify(result.value) === JSON.stringify(this.view.lcm)) return
     this.update({ lcm: result.value, lcmVersion: this.view.lcmVersion + 1 })

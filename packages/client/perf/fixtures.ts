@@ -25,7 +25,7 @@ import { syntheticMarkdown } from "../../server/src/dev/syntheticText.ts"
 import { startServer, withClient } from "./support.ts"
 
 /** Bump when what's generated changes, so a stale cache isn't used. */
-const VERSION = 2
+const VERSION = 4
 const DB = "rp-harness.db"
 
 export interface Fixture {
@@ -168,12 +168,18 @@ const summarize = (
 const build = async (dir: string): Promise<Fixture> => {
   const server = await startServer(dir)
   const [long, a, b, summarized] = await withClient(server, (api) =>
-    Effect.all([
-      api.CreateChat({ title: "The long voyage" }),
-      api.CreateChat({ title: "Harbor watch" }),
-      api.CreateChat({ title: "Tide caves" }),
-      api.CreateChat({ title: "The summarized voyage" })
-    ])
+    Effect.gen(function* () {
+      // No spending ahead: the summarized chat has more raw messages than its window, and on
+      // start the summarizer would plan them all, holding the writer for half a minute and
+      // failing for want of a model, which is not what these scenarios measure.
+      yield* api.SetGenerationDefaults({ defaults: { model: null, preset: null, lcm: { spendAhead: false } } })
+      return yield* Effect.all([
+        api.CreateChat({ title: "The long voyage" }),
+        api.CreateChat({ title: "Harbor watch" }),
+        api.CreateChat({ title: "Tide caves" }),
+        api.CreateChat({ title: "The summarized voyage" })
+      ])
+    })
   )
   await server.stop()
 
@@ -183,6 +189,16 @@ const build = async (dir: string): Promise<Fixture> => {
   const { slots: longSlots } = fill(db, long.id, 100_000, 1)
   fill(db, a.id, 300, 2)
   fill(db, b.id, 300, 3)
+  // These chats stand for imported ones, where LCM is off (DESIGN §8.1). With it on, the first
+  // reply would plan a backfill of the whole 100,000 messages in one transaction, which is the
+  // enable flow's job (LCM slice 6), not what these scenarios measure.
+  for (const chatId of [long.id, a.id, b.id]) {
+    db.prepare(
+      `INSERT INTO state_events (id, chat_id, seq, key, value_json, origin, created_at)
+       SELECT ?, ?, coalesce(max(seq), 0) + 1, 'lcm.settings', '{"enabled":false}', 'user', ? FROM state_events
+       WHERE chat_id = ? AND slot_id IS NULL`
+    ).run(uuidv7(), chatId, Date.now(), chatId)
+  }
   const voyage = fill(db, summarized.id, 20_000, 4)
   // 18,000 = 1,125 summaries of 16 messages, in nine whole groups of 125.
   summarize(db, summarized.id, voyage, 18_000)

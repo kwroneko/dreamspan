@@ -330,6 +330,8 @@ test("a summarized chat: the divider and the coverage rail, scrolling up across 
     errors.push(await prepended(page, before.slot, before.top))
   }
   const measured = await since(page, from)
+  // The bars of the last window arrive a moment after the scrolling stops.
+  await expect(page.getByTestId("coverage-rail").getByRole("button").first()).toBeVisible({ timeout: 30_000 })
   const rendered = await page.getByTestId("coverage-rail").getByRole("button").count()
   record("summarized", {
     bottomMs,
