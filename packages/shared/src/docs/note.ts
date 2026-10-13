@@ -65,10 +65,12 @@ export const NoteDoc = Schema.Struct({
    */
   agent_editable: Schema.optionalKey(Schema.Boolean),
   /**
-   * [P] What an imported chat note was in ST: its author's note, or the Summarize
-   * extension's summary (DESIGN §8.1), kept in its own note.
+   * [P] What an imported note was in ST: a chat's author's note, or the Summarize
+   * extension's summary (DESIGN §8.1), kept in its own note; or a persona's description
+   * placed anywhere but the prompt's persona description (ARCHITECTURE §13), which the
+   * assembler sends from this note instead of from the persona card's description.
    */
-  kind: Schema.optionalKey(Schema.Literals(["author_note", "imported_summary"])),
+  kind: Schema.optionalKey(Schema.Literals(["author_note", "imported_summary", "persona_description"])),
   /** [P] ST's author's note frequency: sent every this many messages; 0 never (ST's `note_interval`). */
   interval: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
   /** [P] How a summary is sent: ST's template, with `{{summary}}` standing for the content. */

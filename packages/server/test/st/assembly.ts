@@ -9,14 +9,15 @@ import { chatCompletionsFields } from "../../src/assembler/wire.ts"
 import { importCard } from "../../src/formats/cardImport.ts"
 import { importStPreset } from "../../src/formats/preset.ts"
 import * as Importers from "../../src/importer/importers.ts"
-import { json, run } from "../formats/support.ts"
+import { json, png, run } from "../formats/support.ts"
 import type { NoteInput } from "../../src/assembler/types.ts"
 import { assembleFixture, type FixtureMessage } from "../support/assemblySources.ts"
 import { gateLore } from "../support/loreFixtures.ts"
 import type { FixtureSet } from "./fixtures.ts"
 import { MOCK_MODEL, type MockEndpoint } from "./mock.ts"
 import { diffJson, type Section } from "./report.ts"
-import { type AuthorNote, captureWithSettings, savePoisonPreset, type Summary } from "./st.ts"
+import { buildPersona } from "../../src/importer/stParse.ts"
+import { type AuthorNote, captureWithSettings, type PersonaPlacement, savePoisonPreset, type Summary } from "./st.ts"
 
 /** What the user sends in every capture that sends something. */
 const MESSAGE = "Is the crossing still possible tonight?"
@@ -52,7 +53,12 @@ interface Config {
   readonly postProcessing?: string
   readonly summary?: Summary
   readonly authorNote?: AuthorNote
+  /** Where ST puts the persona's description, and whether it sends it there in this case. */
+  readonly persona?: PersonaPlacement & { readonly sent: boolean }
 }
+
+/** The text of the fixture persona's description that ST's request must carry, or not. */
+const PERSONA_TEXT = "is a cartographer who distrusts maps drawn by others"
 
 /** A summary as ST's Summarize extension keeps it, its template naming the character too. */
 const summary = (position: number, depth = 2, role = 0): Summary => ({
@@ -128,6 +134,28 @@ const authorNoteInput = (note: AuthorNote): NoteInput => ({
   }
 })
 
+/** The note our ST import makes of the fixture persona placed there (importer/stParse.ts), or none in the prompt. */
+const personaNoteInput = async (fixtures: FixtureSet, placement: PersonaPlacement): Promise<NoteInput | null> => {
+  const avatar = "st-diff-persona.png"
+  const parsed = await Effect.runPromise(
+    buildPersona(png(), avatar, {
+      avatar,
+      name: fixtures.persona.name,
+      description: fixtures.persona.description,
+      ...placement
+    })
+  )
+  const note = parsed.library?.noteDocJson
+  return note
+    ? {
+        entity: "persona-note",
+        revision: "persona-note-rev",
+        first: true,
+        doc: { ...(JSON.parse(note) as Omit<NoteDoc, "owner">), owner: { card: "persona" as never } }
+      }
+    : null
+}
+
 const activate = (note: string) => ({
   depth: null,
   event: { scope: null, data: { key: "note.activate" as const, value: { note: note as never } } }
@@ -153,6 +181,7 @@ const ourRequest = async (
   const document = { ...parsed, regex_approved: true }
   const card = await imported(fixtures.cards.find((c) => c.name === character)!.png, character)
   const persona = run(importCard(json({ name: fixtures.persona.name, description: fixtures.persona.description }))).card
+  const personaNote = config.persona ? await personaNoteInput(fixtures, config.persona) : null
   const lines: Array<FixtureMessage> = config.overMaximum
     ? Array.from({ length: 40 }, (_, i) => ({
         side: i % 2 ? "assistant" : "user",
@@ -194,6 +223,7 @@ const ourRequest = async (
               }
             ]
           : []),
+        ...(personaNote ? [personaNote] : []),
         ...(config.summary ? [summaryNote(config.summary)] : []),
         ...(config.authorNote ? [authorNoteInput(config.authorNote)] : [])
       ],
@@ -308,6 +338,74 @@ export const compareAssembly = async (
       authorNote: authorNote(1, 0, 0, 99),
       generate: "impersonate"
     },
+    // The persona's description placed at the author's note's top or bottom (personas.js):
+    // it joins the note's text, and goes where the note goes or with ST's default note, in-chat
+    // at depth 4, when the chat has none; it goes nowhere when the note is off or not due.
+    ...(
+      [
+        ["top", 2],
+        ["bottom", 3]
+      ] as const
+    ).flatMap(([where, position]) => [
+      {
+        name: `default, persona at the ${where} of the author's note`,
+        presets: ["default"],
+        authorNote: authorNote(1, 1, 1),
+        persona: { position, depth: 2, role: 0, sent: true }
+      },
+      {
+        name: `default, persona at the ${where} of the default author's note`,
+        presets: ["default"],
+        persona: { position, depth: 2, role: 0, sent: true }
+      },
+      {
+        name: `full, persona at the ${where} of the author's note, after main as user`,
+        presets: ["full"],
+        authorNote: authorNote(0, 4, 1),
+        persona: { position, depth: 2, role: 0, sent: true }
+      },
+      {
+        name: `default, persona at the ${where} of the author's note, before main as assistant`,
+        presets: ["default"],
+        authorNote: authorNote(2, 4, 2),
+        persona: { position, depth: 2, role: 0, sent: true }
+      },
+      {
+        name: `default, persona at the ${where} of an author's note that is switched off`,
+        presets: ["default"],
+        authorNote: authorNote(1, 1, 1, 0),
+        persona: { position, depth: 2, role: 0, sent: false }
+      },
+      {
+        name: `default, persona at the ${where} of an author's note that is not due`,
+        presets: ["default"],
+        authorNote: authorNote(1, 1, 1, 99),
+        persona: { position, depth: 2, role: 0, sent: false }
+      },
+      {
+        name: `default, persona at the ${where} of the author's note, with lore there`,
+        presets: ["default"],
+        lorebook: true,
+        authorNote: authorNote(1, 1, 1),
+        persona: { position, depth: 2, role: 0, sent: true }
+      },
+      {
+        name: `default, persona at the ${where} of the default author's note, with lore there`,
+        presets: ["default"],
+        lorebook: true,
+        persona: { position, depth: 2, role: 0, sent: true }
+      }
+    ]),
+    {
+      name: "default, persona at depth",
+      presets: ["default"],
+      persona: { position: 4, depth: 2, role: 1, sent: true }
+    },
+    {
+      name: "default, persona not sent",
+      presets: ["default"],
+      persona: { position: 9, depth: 2, role: 0, sent: false }
+    },
     ...["default", "full"].flatMap((preset) =>
       (["impersonate", "swipe"] as const).map((generate) => ({
         name: `${preset}, ${generate}`,
@@ -339,7 +437,8 @@ export const compareAssembly = async (
         config.postProcessing,
         config.summary,
         config.authorNote,
-        config.lorebook ? gateLore.id : undefined
+        config.lorebook ? gateLore.id : undefined,
+        config.persona
       )
       if (config.lorebook && !JSON.stringify(body).includes("A copper bell marks the crossing."))
         differences.push(`${character}, ${config.name}: ST sent no keyword lore`)
@@ -348,6 +447,12 @@ export const compareAssembly = async (
       // Both sides leaving it out would compare equal: ST must have sent it.
       if (config.summary && !JSON.stringify(body).includes(config.summary.text)) {
         differences.push(`${label}: ST didn't send the summary, so this compares nothing`)
+      }
+      // Both sides leaving the persona out would compare equal: ST must send it where this case says.
+      if (config.persona && JSON.stringify(body).includes(PERSONA_TEXT) !== config.persona.sent) {
+        differences.push(
+          `${label}: ST ${config.persona.sent ? "didn't send" : "sent"} the persona's description, so this compares nothing`
+        )
       }
       if (config.authorNote) {
         const sent = JSON.stringify(body).includes("pretends not to notice")

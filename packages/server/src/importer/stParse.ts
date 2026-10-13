@@ -113,7 +113,8 @@ const personaNote = (persona: StPersona): Omit<NoteDoc, "owner"> | null => {
       title: "Persona description",
       content: persona.description,
       placement,
-      exportable: true
+      exportable: true,
+      kind: "persona_description"
     }
   )
 }

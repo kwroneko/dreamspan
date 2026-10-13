@@ -187,6 +187,10 @@ export interface Assembly {
   lore?: ReadonlyArray<{ readonly entry: import("@rp/shared/docs/lorebook.ts").LorebookEntry; readonly piece: number }>
   notes?: ReadonlyArray<NoteInput>
   skippedNotes?: ReadonlyArray<NoteInput>
+  /** The personas whose description a note places, so the persona description marker leaves them out. */
+  placedPersonas?: ReadonlySet<string>
+  /** The chat has an author's note that is switched off: ST sends nothing that rides on it. */
+  authorNoteOff?: boolean
   noteDecisions?: ReadonlyMap<string, Extract<SourceActivation, { kind: "note" }>>
   noteUserMessages?: number
   sendIfEmpty?: boolean

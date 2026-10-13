@@ -339,13 +339,11 @@ describe("the context assembler", () => {
       { preset: preset({ prompts: [{ identifier: "main", role: "system", content: "Story so far: {{summary}}" }] }) }
     )
     expect(contents(macro)[0]).toMatch(/^system: Story so far: .* lost the ledger in the flood\./)
-    // The sections no note is placed in yet send nothing.
-    for (const placement of [
-      { mode: "section", section: "card" },
-      { mode: "section", section: "author_note_top" },
-      { mode: "section", section: "author_note_bottom" }
-    ] as const) {
-      expect(contents(await imported(placement)).join("\n")).not.toContain("lost the ledger")
+    // With the card's definition there is no card to put a chat's note with; at the author's
+    // note's top or bottom it joins the default note a chat without one has.
+    expect(contents(await imported({ mode: "section", section: "card" })).join("\n")).not.toContain("lost the ledger")
+    for (const section of ["author_note_top", "author_note_bottom"] as const) {
+      expect(contents(await imported({ mode: "section", section })).join("\n")).toContain("lost the ledger")
     }
     const off = await imported({ mode: "section", section: "after_main_prompt" }, { events: [] })
     expect(contents(off).join("\n")).not.toContain("lost the ledger")
@@ -481,6 +479,118 @@ describe("the context assembler", () => {
         "system: Tobin is soaked.",
         "system: Summary: The ledger is lost.",
         main
+      ])
+    })
+
+    describe("a persona placed by its note (ARCHITECTURE §13)", () => {
+      const persona = (placement: NoteDoc["placement"]): NoteInput => ({
+        entity: "note-persona",
+        revision: "note-persona-revision",
+        first: true,
+        doc: {
+          schema_version: 1,
+          title: "Persona description",
+          content: "{{user}} draws maps.",
+          placement,
+          owner: { card: "tobin" as never },
+          exportable: true,
+          kind: "persona_description"
+        }
+      })
+      const top = persona({ mode: "section", section: "author_note_top" })
+      const bottom = persona({ mode: "section", section: "author_note_bottom" })
+      const inChat = { mode: "depth", depth: 1, role: "system" } as const
+      const sent = (snapshot: ContextSnapshot) => contents(snapshot).filter((line) => line.includes("draws maps"))
+
+      it("sends it at the top or bottom of the author's note, and not where the persona goes", async () => {
+        for (const [note, expected] of [
+          [top, "system: Tobin draws maps.\nTobin is soaked."],
+          [bottom, "system: Tobin is soaked.\nTobin draws maps."]
+        ] as const) {
+          const snapshot = await assembled(chat({ notes: [note, authorNote(inChat)], events: on("note-z-author") }))
+          expect(sent(snapshot)).toEqual([expected])
+          expect(contents(snapshot).slice(-2)).toEqual([expected, "user: The road flooded."])
+        }
+      })
+
+      it("sends it beside the main prompt when the author's note goes there", async () => {
+        const snapshot = await assembled(
+          chat({
+            notes: [bottom, authorNote({ mode: "section", section: "after_main_prompt", role: "user" })],
+            events: on("note-z-author")
+          })
+        )
+        expect(contents(snapshot).slice(0, 2)).toEqual([main, "user: Tobin is soaked.\nTobin draws maps."])
+      })
+
+      it("sends it with ST's default note, in-chat at depth 4, when the chat has none", async () => {
+        const messages = [
+          { side: "assistant", content: "One." },
+          { side: "user", content: "Two." },
+          { side: "assistant", content: "Three." },
+          { side: "user", content: "Four." },
+          { side: "assistant", content: "Five." },
+          { side: "user", content: "Six." }
+        ] as const
+        for (const note of [top, bottom]) {
+          const snapshot = await assembled(chat({ messages: [...messages], notes: [note] }))
+          expect(contents(snapshot).slice(-5)).toEqual([
+            "system: Tobin draws maps.",
+            "assistant: Three.",
+            "user: Four.",
+            "assistant: Five.",
+            "user: Six."
+          ])
+        }
+      })
+
+      it("sends nothing of it while the author's note is switched off or not due, as ST does", async () => {
+        const off = authorNote(inChat, { interval: 0 })
+        expect(sent(await assembled(chat({ notes: [top, off] })))).toEqual([])
+        const skipped = authorNote(inChat, { interval: 3 })
+        expect(sent(await assembled(chat({ notes: [top, skipped], events: on("note-z-author") })))).toEqual([])
+        const every = await assembled(
+          chat({ notes: [top, authorNote(inChat, { interval: 1 })], events: on("note-z-author") })
+        )
+        expect(sent(every)).toEqual(["system: Tobin draws maps.\nTobin is soaked."])
+      })
+
+      it("joins the author's note as one piece of the context", async () => {
+        // The lore comes with the other tests; here only that the persona is outside the note.
+        const snapshot = await assembled(chat({ notes: [top, authorNote(inChat)], events: on("note-z-author") }))
+        expect(snapshot.pieces.some((p) => p.id === "lore:author-note")).toBe(true)
+      })
+
+      it("places it at depth or nowhere by its note, never also in the persona's description", async () => {
+        const deep = await assembled(chat({ notes: [persona({ mode: "depth", depth: 0, role: "user" })] }))
+        expect(sent(deep)).toEqual(["user: Tobin draws maps."])
+        const none = await assembled(chat({ notes: [persona({ mode: "none" })] }))
+        expect(sent(none)).toEqual([])
+        const plain = await assembled(chat())
+        expect(sent(plain)).toEqual(["system: Tobin draws maps."])
+      })
+
+      it("keeps a persona whose note isn't its description's placement in the prompt", async () => {
+        const { kind: _, ...plain } = top.doc
+        const other: NoteInput = { ...top, doc: { ...plain, title: "Scene", content: "Rain." } }
+        const snapshot = await assembled(chat({ notes: [other] }))
+        expect(sent(snapshot)).toEqual(["system: Tobin draws maps."])
+      })
+    })
+
+    it("sends a note placed with the card's definition above it", async () => {
+      const snapshot = await assembled(
+        chat({
+          notes: [
+            {
+              ...note("Tide tables.", 1, "system"),
+              doc: { ...note("Tide tables.", 1, "system").doc, placement: { mode: "section", section: "card" } }
+            }
+          ]
+        })
+      )
+      expect(contents(snapshot).filter((line) => line.includes("keeps the ledger"))).toEqual([
+        "system: Tide tables.\nMira keeps the ledger for Tobin."
       ])
     })
 

@@ -12,7 +12,7 @@ import type { PresetDoc } from "@rp/shared/docs/preset.ts"
 import { Schema } from "effect"
 
 /** Bump whenever identical inputs would assemble differently. Missing means version 0. */
-export const ASSEMBLER_VERSION = 14
+export const ASSEMBLER_VERSION = 15
 
 export type Role = "system" | "user" | "assistant"
 
@@ -404,6 +404,15 @@ export interface NoteInput {
 
 /** The card whose note it is; null for the chat's own. */
 export const noteCard = (doc: NoteDoc) => ("card" in doc.owner ? doc.owner.card : null)
+
+/**
+ * A persona's note that places its description (ARCHITECTURE §13): what an ST import makes of
+ * a persona placed anywhere but the prompt's persona description. Imports before the note had
+ * its `kind` titled it "Persona description" and made it the card's first note.
+ */
+export const placesDescription = (note: NoteInput) =>
+  note.doc.kind === "persona_description" ||
+  (note.doc.kind === undefined && note.first && note.doc.title === "Persona description")
 
 /** Where the preset in effect comes from, in the scope chain (DATA-MODEL §5.4). */
 type PresetScope = "role" | "chat" | "connection" | "user" | "builtin"

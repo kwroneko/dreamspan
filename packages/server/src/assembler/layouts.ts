@@ -23,9 +23,15 @@ const block = (assembly: Assembly, tag: string, card: CardInput, parts: Readonly
 }
 
 /** A character's description, personality and scenario, in that order, labelled with its name. */
-export const cardBlock = (assembly: Assembly, card: CardInput, cardText: CardText): Text => {
+export const cardBlock = (
+  assembly: Assembly,
+  card: CardInput,
+  cardText: CardText,
+  top: ReadonlyArray<Text> = []
+): Text => {
   const own = { char: card.doc.name }
   return block(assembly, "character", card, [
+    ...top,
     cardText(assembly, card, "description", own),
     cardText(assembly, card, "personality", own),
     cardText(assembly, card, "scenario", own)
@@ -33,8 +39,12 @@ export const cardBlock = (assembly: Assembly, card: CardInput, cardText: CardTex
 }
 
 /** A persona's description, labelled with its name. */
-export const personaBlock = (assembly: Assembly, card: CardInput, cardText: CardText): Text =>
-  block(assembly, "persona", card, [cardText(assembly, card, "description", { user: card.doc.name })])
+export const personaBlock = (
+  assembly: Assembly,
+  card: CardInput,
+  cardText: CardText,
+  top: ReadonlyArray<Text> = []
+): Text => block(assembly, "persona", card, [...top, cardText(assembly, card, "description", { user: card.doc.name })])
 
 /**
  * The tail directive (DESIGN §5.3): the preset's own group nudge naming the speaker, or,

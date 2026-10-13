@@ -327,6 +327,33 @@ const setAuthorNote = (page: Page, note: AuthorNote) =>
     await ctx.eventSource.emit(ctx.eventTypes.CHAT_CHANGED!, ctx.getCurrentChatId())
   }, note)
 
+/** Where ST puts the persona's description (`persona_description_positions`), as the page has it set. */
+export interface PersonaPlacement {
+  /** 0 in the prompt, 2 top and 3 bottom of the author's note, 4 at depth, 9 not sent. */
+  readonly position: number
+  readonly depth: number
+  /** 0 system, 1 user, 2 assistant. */
+  readonly role: number
+}
+
+/**
+ * Moves the persona's description, in the page's settings and in the persona's own descriptor,
+ * which ST copies over them when a chat opens.
+ */
+const setPersonaPlacement = (page: Page, placement: PersonaPlacement) =>
+  page.evaluate(({ position, depth, role }) => {
+    const user = SillyTavern.getContext().powerUserSettings as unknown as {
+      persona_descriptions: Record<string, Record<string, unknown>>
+    } & Record<string, unknown>
+    Object.assign(user, {
+      persona_description_position: position,
+      persona_description_depth: depth,
+      persona_description_role: role
+    })
+    for (const descriptor of Object.values(user.persona_descriptions))
+      Object.assign(descriptor, { position, depth, role })
+  }, placement)
+
 export interface Capture {
   readonly previewOverlap?: "protected" | "unprotected"
   /** Presets loaded into ST one after another, by name; none for the baseline settings. */
@@ -388,7 +415,8 @@ export const captureWithSettings = async (
   postProcessing?: string,
   summary?: Summary,
   authorNote?: AuthorNote,
-  lorebook?: string
+  lorebook?: string,
+  persona?: PersonaPlacement
 ) => {
   let settings: Record<string, unknown> = {}
   const body = await captureRequest(browser, url, mock, capture, async (page) => {
@@ -398,6 +426,7 @@ export const captureWithSettings = async (
       }, lorebook)
     if (summary !== undefined) await summarize(page, summary)
     if (authorNote !== undefined) await setAuthorNote(page, authorNote)
+    if (persona !== undefined) await setPersonaPlacement(page, persona)
     if (postProcessing !== undefined) {
       await page.evaluate((value) => {
         ;(SillyTavern.getContext().chatCompletionSettings as Record<string, unknown>).custom_prompt_post_processing =
