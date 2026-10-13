@@ -40,6 +40,8 @@ export const StateEventData = Schema.Union([
   event("lorebook.binding", Schema.Struct({ entity: EntityId, ref: Schema.NullOr(RefId) })),
   event("lorebook.attach", Schema.Struct({ ref: RefId })),
   event("lorebook.detach", Schema.Struct({ ref: RefId })),
+  /** A card's own lorebook (`character_book`) used or not; on unless a chat turns it off. */
+  event("lorebook.embedded", Schema.Struct({ entity: EntityId, on: Schema.Boolean })),
   event("var.set", Schema.Struct({ name: Schema.String, value: Schema.Unknown })),
   event("author_note.set", Schema.Struct({ note: EntityId }))
 ])
@@ -113,6 +115,7 @@ export const stateKeyIds: { readonly [K in StateEventData["key"]]: StateKeyIds<V
   "lorebook.binding": { ids: { entity: { table: "entity", kind: "card" }, ref: { table: "ref", kind: "lorebook" } } },
   "lorebook.attach": { ids: { ref: { table: "ref", kind: "lorebook" } } },
   "lorebook.detach": { ids: { ref: { table: "ref", kind: "lorebook" } }, removes: true },
+  "lorebook.embedded": { ids: { entity: { table: "entity", kind: "card" } } },
   "var.set": { ids: {} },
   "author_note.set": { ids: { note: { table: "entity", kind: "note", chatOwned: true } } }
 }
@@ -232,6 +235,8 @@ export interface ChatState {
   readonly rolloutContinuity: "fork" | "resume_previous" | null
   readonly lorebookBindings: Readonly<Record<string, string | null>>
   readonly lorebooks: ReadonlyArray<string>
+  /** Cards whose own lorebook is turned off (false) or back on; absent is on. */
+  readonly embeddedLorebooks: Readonly<Record<string, boolean>>
   readonly vars: Readonly<Record<string, unknown>>
   readonly authorNote: string | null
 }
@@ -255,6 +260,7 @@ const emptyChatState: ChatState = {
   rolloutContinuity: null,
   lorebookBindings: {},
   lorebooks: [],
+  embeddedLorebooks: {},
   vars: {},
   authorNote: null
 }
@@ -323,6 +329,8 @@ const apply = (state: ChatState, { data, scope }: FoldableEvent): ChatState => {
       return { ...state, lorebooks: add(state.lorebooks, data.value.ref) }
     case "lorebook.detach":
       return { ...state, lorebooks: remove(state.lorebooks, data.value.ref) }
+    case "lorebook.embedded":
+      return { ...state, embeddedLorebooks: { ...state.embeddedLorebooks, [data.value.entity]: data.value.on } }
     case "var.set":
       return { ...state, vars: { ...state.vars, [data.value.name]: data.value.value } }
     case "author_note.set":

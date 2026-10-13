@@ -43,6 +43,7 @@ Where the owner corrected an earlier proposal, the corrected version is recorded
 - **[D]** Decision models (Jev and others) can decide whether an entry is included. This must stay optional.
 - **[P]** Activation sources: keyword triggers as the fallback, an optional decision model asking whether each entry or group is relevant to the current scene, and an agent lookup tool for anything missed.
 - **[D]** Keyword matching follows ST's convention for now (owner, 2026-10-12): `use_regex` is ignored, as ST never reads it, and a key is a regular expression only when written as `/pattern/flags`. Low priority to revisit.
+- **[D]** A card's own lorebook (`character_book`) is used in new chats automatically, with no "import card lore" dialog. A chat imported from ST keeps what ST sent: the card's lorebook only if ST had imported it as a lorebook file. Each chat's settings can turn a card's lorebook on or off (owner, 2026-10-14).
 - **[P]** Placement is cache-friendly: entries are never inserted above the history. They go in a block near the tail, where they stay until the next compaction boundary.
 
 ### 1.4 ST data folder import

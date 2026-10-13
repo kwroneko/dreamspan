@@ -331,6 +331,17 @@ export function SettingsDialog({
       <DecisionModels models={choices?.models ?? []} open={open} />
       <section aria-label="Lorebooks" className="flex flex-col gap-2">
         <h3 className="text-sm font-medium">Lorebooks</h3>
+        {(cast?.cards ?? [])
+          .filter((card) => card.lorebook && !card.inBin && cast?.participants.includes(card.entityId))
+          .map((card) => (
+            <Switch
+              key={card.entityId}
+              checked={!cast?.cardLorebooksOff.includes(card.entityId)}
+              onCheckedChange={(on) => void change({ _tag: "CardLorebook", entityId: card.entityId, on })}
+            >
+              {card.name}'s own lorebook
+            </Switch>
+          ))}
         {choices?.lorebooks.length === 0 && (
           <p className="text-sm text-muted">Import a lorebook in the library first.</p>
         )}

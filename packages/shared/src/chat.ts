@@ -177,7 +177,9 @@ export class CastCard extends Schema.Class<CastCard>("CastCard")({
   /** In the persona folder (DESIGN §2.2). */
   persona: Schema.Boolean,
   /** In the recycle bin: still named where a chat refers to it, but not offered. */
-  inBin: Schema.Boolean
+  inBin: Schema.Boolean,
+  /** It carries its own lorebook (`character_book`), which a chat can turn off. */
+  lorebook: Schema.Boolean
 }) {}
 
 /**

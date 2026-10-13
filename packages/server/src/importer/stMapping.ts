@@ -29,7 +29,11 @@ export interface CardInfo {
   readonly name: string
   readonly greetings: ReadonlyArray<string>
   readonly world: string | null
-  /** It carries its own lorebook, which chats use when `world` isn't in the folder. */
+  /**
+   * It carries its own lorebook. ST never sends that copy: only a lorebook file named by
+   * `world`, which its "Import Card Lore" dialog makes from it. So the import turns the
+   * card's own book off in a chat unless that file is in the folder.
+   */
   readonly book: boolean
 }
 
@@ -56,6 +60,8 @@ export interface ChatState {
   readonly participants: ReadonlyArray<string>
   readonly lorebooks: ReadonlyArray<string>
   readonly lorebookBindings?: Readonly<Record<string, string>>
+  /** Cards whose own lorebook the chat has off, as ST didn't send it. */
+  readonly embeddedOff?: ReadonlyArray<string>
   readonly played: ReadonlyArray<string>
   /** Each variable's value, hashed. */
   readonly vars: Readonly<Record<string, string>>
@@ -184,9 +190,12 @@ const membership = (folder: FolderContext, link: Link, header: StChatHeader | nu
   const absent: Array<string> = []
   const worlds: Array<string> = []
   const lorebookBindings: Record<string, string> = {}
-  // A card's own world that ST never saved to its worlds folder: the card's copy is used.
+  // Cards whose own book ST never imported as a file: ST didn't send it, so it's off.
+  const embeddedOff: Array<string> = []
+  // Their world is that book's name in the card maker's ST: not missing from the user's.
   const embedded = new Set<string>()
   const primary = (card: CardInfo) => {
+    if (card.book && !(card.world && folder.worlds.has(card.world))) embeddedOff.push(card.entityId)
     if (!card.world) return
     if (card.book && !folder.worlds.has(card.world)) embedded.add(card.world)
     worlds.push(card.world)
@@ -227,6 +236,7 @@ const membership = (folder: FolderContext, link: Link, header: StChatHeader | nu
     lorebooks,
     missingWorlds,
     lorebookBindings,
+    embeddedOff,
     vars: JSON.parse(header?.variablesJson ?? "[]") as Array<[string, unknown]>
   }
 }
@@ -333,6 +343,7 @@ export const chatStateChange = (
     participants: mapped.participants,
     lorebooks: mapped.lorebooks,
     lorebookBindings: mapped.lorebookBindings,
+    embeddedOff: mapped.embeddedOff,
     played: mapped.played,
     vars: Object.fromEntries(mapped.vars.map(([name, value]) => [name, hash(JSON.stringify(value))])),
     authorNote: authorNote && hash(JSON.stringify(authorNote)),
@@ -359,6 +370,15 @@ export const chatStateChange = (
     const ref = mapped.lorebookBindings[entity] ?? null
     if (ref !== (previous?.lorebookBindings?.[entity] ?? null))
       events.push({ key: "lorebook.binding", value: { entity: entity as EntityId, ref: ref as RefId | null } })
+  }
+  // Off where ST didn't send the card's book; back on if a re-import finds its file now.
+  for (const entity of mapped.embeddedOff) {
+    if (!previous?.embeddedOff?.includes(entity))
+      events.push({ key: "lorebook.embedded", value: { entity: entity as EntityId, on: false } })
+  }
+  for (const entity of previous?.embeddedOff ?? []) {
+    if (!mapped.embeddedOff.includes(entity))
+      events.push({ key: "lorebook.embedded", value: { entity: entity as EntityId, on: true } })
   }
   for (const ref of mapped.lorebooks) {
     if (!previous?.lorebooks.includes(ref)) events.push({ key: "lorebook.attach", value: { ref: ref as RefId } })

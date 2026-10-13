@@ -46,7 +46,8 @@ const parse = (row: CardRow): CardText => {
       name: name === "" ? row.label : name,
       label: row.label,
       persona: row.persona === 1,
-      inBin: row.in_bin === 1
+      inBin: row.in_bin === 1,
+      lorebook: typeof doc.character_book === "object" && doc.character_book !== null
     }),
     greetings: greetingIndexes.map((index) => all[index]!),
     greetingIndexes,

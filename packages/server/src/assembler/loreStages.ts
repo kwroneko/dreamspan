@@ -29,6 +29,8 @@ export const lorebooksStage: AssemblerStage = {
       const attached = yield* sources.lorebooks(state.lorebooks)
       const embedded: Array<LorebookInput> = [...cast.characters, ...cast.personas].flatMap((card) =>
         card.doc.character_book &&
+        // Turned off for this chat: an ST import of a card whose book ST never imported.
+        state.embeddedLorebooks[card.entity] !== false &&
         !attached.some(
           (book) =>
             state.lorebookBindings[card.entity] === book.id ||

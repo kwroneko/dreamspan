@@ -53,6 +53,7 @@ const oracle: { readonly [K in StateEventData["key"]]?: Expected } = {
   "lorebook.binding": { value: (t) => ({ entity: t.card.entity, ref: t.lorebook.ref }) },
   "lorebook.attach": { value: (t) => ({ ref: t.lorebook.ref }) },
   "lorebook.detach": { value: (t) => ({ ref: t.lorebook.ref }), removes: true },
+  "lorebook.embedded": { value: (t) => ({ entity: t.card.entity, on: false }) },
   "author_note.set": { value: (t) => ({ note: t.note.entity }) }
 }
 

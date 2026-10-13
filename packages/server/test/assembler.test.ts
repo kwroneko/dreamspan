@@ -1516,6 +1516,21 @@ describe("lorebook assembly", () => {
         .match(/PRIMARY_LORE/g)
     ).toHaveLength(1)
   })
+  it("leaves a card's own book out when the chat turns it off, as an ST import does when ST never imported it", async () => {
+    const doc = loreBook([loreEntry({ constant: true, content: "CARD_LORE" })]).document
+    const f = fixture({ cards: [{ entity: "mira", doc: { ...mira, character_book: doc } }] })
+    expect(contents(await assembled(f)).join("\n")).toContain("CARD_LORE")
+    const off = {
+      ...f,
+      events: [...f.events!, at(null, { key: "lorebook.embedded", value: { entity: "mira" as never, on: false } })]
+    }
+    expect(contents(await assembled(off)).join("\n")).not.toContain("CARD_LORE")
+    const backOn = {
+      ...off,
+      events: [...off.events, at(null, { key: "lorebook.embedded", value: { entity: "mira" as never, on: true } })]
+    }
+    expect(contents(await assembled(backOn)).join("\n")).toContain("CARD_LORE")
+  })
   it("counts message delays across the path independently of the scan window", async () => {
     const doc = loreBook([loreEntry({ constant: true, delay: 1100, content: "DELAY_LORE" })]).document
     const f = fixture({

@@ -39,6 +39,8 @@ export class Cast extends Schema.Class<Cast>("Cast")({
   model: Schema.NullOr(Schema.Struct({ connection: ConnectionId, model: ModelId })),
   preset: Schema.NullOr(RefId),
   lorebooks: Schema.Array(RefId),
+  /** Cards whose own lorebook this chat has turned off. */
+  cardLorebooksOff: Schema.Array(EntityId),
   layoutCards: Schema.NullOr(CardsLayout),
   rolesProjection: Schema.NullOr(RolesProjection),
   /** Every card named above. */
@@ -64,6 +66,8 @@ export const CastChange = Schema.Union([
   Schema.TaggedStruct("Roles", { projection: RolesProjection }),
   /** A note on or off (`note.activate`, `note.deactivate`): the chat's own, or a participant card's. */
   Schema.TaggedStruct("Lorebook", { ref: RefId, active: Schema.Boolean }),
+  /** A card's own lorebook on or off (`lorebook.embedded`). */
+  Schema.TaggedStruct("CardLorebook", { entityId: EntityId, on: Schema.Boolean }),
   Schema.TaggedStruct("Note", { entityId: EntityId, active: Schema.Boolean })
 ])
 export type CastChange = typeof CastChange.Type
