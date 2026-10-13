@@ -1,6 +1,6 @@
 # LCM: hierarchical summarization
 
-**Status**: Proposed, 2026-10-13. Phase 3 (PLAN.md). Nothing here is built. Items are marked as in DESIGN.md: **[D]** the owner stated or confirmed it (with where), **[P]** proposed and not confirmed, **[O]** open. The baseline is reference-harness as described in [the earlier reference notes](the earlier reference notes), cited as "ref §N". This document lists what carries over, then only the differences.
+**Status**: Proposed, 2026-10-13. Phase 3 (PLAN.md). Slice 1 is implemented in ARCHITECTURE §16; the remaining slices are proposed. Items are marked as in DESIGN.md: **[D]** the owner stated or confirmed it (with where), **[P]** proposed and not confirmed, **[O]** open. The baseline is reference-harness as described in [the earlier reference notes](the earlier reference notes), cited as "ref §N". This document lists what carries over, then only the differences.
 
 Scope:
 - **[D]** LCM is the main feature: chats of unlimited length with a fixed, cache-friendly budget, keeping every message and every intermediate summary (DESIGN §8).
@@ -187,20 +187,9 @@ reference-harness synthesizes a placeholder from a failed job row and never pers
 
 ## 3. Data model
 
-### 3.1 Migration `0023_lcm`
+### 3.1 Migration `0023_lcm` — implemented
 
-Nothing writes the summary tables yet, so they're empty in every database, and changed tables are recreated rather than altered. Migrations are squashed before release anyway (PLAN).
-- `summaries`: `status` adds `failed`; new `error_json` and `batch_id`.
-- `summary_revisions.origin` adds `imported`.
-- `summary_inputs.version_id` becomes nullable: none means the slot was deleted, hidden or unusable then.
-- `summary_parents` gains `parent_revision_id` (NOT NULL), the child's revision it was condensed from.
-- `summarization_jobs` gains `batch_id` (indexed) and `leaf_slot_id`, the path it was planned on. `request_class` already includes `idle`.
-- Triggers, as the existing ones (ARCHITECTURE §3.7):
-  - new references stay inside their chat;
-  - `parent_revision_id` is a revision of `parent_id`;
-  - inputs and lineage never change;
-  - a summary changes only its selection, its status (to `superseded`, on absorption) and its row version.
-- No change needed for: `lcm.settings` (a typed state key with no ids, in `@rp/shared/state.ts`), user defaults (`user_settings`), the backfill record (`jobs`), the imported note, the capability flag (`models.capabilities_json`), search (`summary_revisions` is indexed already).
+Moved to [ARCHITECTURE §16](../ARCHITECTURE.md#16-lcm-hierarchical-summaries), with the slice 1 code. The migration, summary writes and derived freshness are built; queue and planner operations below remain proposals.
 
 ### 3.2 Operations
 
@@ -263,7 +252,7 @@ Each slice moves its part of this document into ARCHITECTURE.md in the same comm
 
 | # | Slice | Test oracle | Tier |
 |---|---|---|---|
-| 1 | Migration 0023, its triggers, the summary writes (`CompleteSummary`, `EditSummary`, `SelectSummaryRevision`) and derived freshness | A schema test per trigger; freshness against hand-built graphs; isolation probes | A |
+| 1 ✓ | Migration 0023, its triggers, the summary writes (`CompleteSummary`, `EditSummary`, `SelectSummaryRevision`) and derived freshness | A schema test per trigger; freshness against hand-built graphs; isolation probes | A |
 | 2 | The `lcm` stage, the layer in both modes, breakpoint (b), pins, assembler version 11, summary sources in the inspector and the cache estimate | The model test over graph steps with summaries written by fixtures (invariants 1–4, 6); the ST gate unchanged with LCM off | B |
 | 3 | Planner, queue operations, `Summarizer`, summarization requests, use / wait / omit, batches, idle class | The model test with jobs (7, 8); the prefix comparison at a mock provider | A |
 | 4 | Hard refusals and the judge model for soft refusals, retries, failed summaries, Retry with…, marks on chat versions | A fake judge; the model test with planted refusals (5) | B |

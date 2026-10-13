@@ -2,7 +2,7 @@
 
 This document describes only what is implemented. Proposals live in `spec/`. When a spec is implemented, its content moves here in the same commit (CLAUDE.md "Design docs").
 
-**State**: Phases 0 and 1 done; phase 2 nearly done (PLAN.md), 2026-10-13. Built: the scaffold, schema, message graph, library, drafts, recycle bin, provider layer (§6), exposure safety and login (§4), settings screens (§5), card, lorebook and preset formats (§8, §9), macros (§10), importing (§11), chats with streaming, chat setup and a chat's notes (§12), the ST folder import (§13), the library editors (§14), and context assembly with real generation, lorebook activation, the request inspector, stepped history with pinned cut state and full note text, branch-aware context markers, the cache-warmth indicator and cold-cache stagger (§15). Not yet built: LCM (phase 3) and agentic rollouts (phase 4).
+**State**: Phases 0 and 1 done; phase 2 nearly done (PLAN.md), 2026-10-13. Built: the scaffold, schema, message graph, library, drafts, recycle bin, provider layer (§6), exposure safety and login (§4), settings screens (§5), card, lorebook and preset formats (§8, §9), macros (§10), importing (§11), chats with streaming, chat setup and a chat's notes (§12), the ST folder import (§13), the library editors (§14), and context assembly with real generation, lorebook activation, the request inspector, stepped history with pinned cut state and full note text, branch-aware context markers, the cache-warmth indicator and cold-cache stagger (§15). Built also: LCM storage (§16). Not yet built: LCM planning and generation (phase 3) and agentic rollouts (phase 4).
 
 ---
 
@@ -215,6 +215,7 @@ Migrations (`migrations.ts`) run in the writer through Effect's `SqliteMigrator`
 - `0014_deleted_subtree_roots` (§3.11): `slots.branch_deleted` marks a deleted subtree root, which stays a traversal barrier after purge. For slots purged before it, the marks can't always tell a purged branch from a purged message, so a purged slot with nothing live below it is taken for a branch: a reply of it restored from the bin later stays behind it.
 - `0015_composer_save_receipts` (§3.10): pending composer operation receipts, kept until their chat is deleted. `0018_draft_displacement_receipts` adds their original displacement time and history position; it stores no text.
 - `0016_inspector` (§15, `schema/inspector.ts`): `rollouts.context_issues_json`, backfilled only from valid issue arrays (malformed values become null), connection cache revisions and their triggers, and `llm_requests_chat` on `(chat_id, started_at)` for a chat's latest request.
+- `0019_lcm` (§16): version-aware summary lineage, revisions, immutable retention and job path/batch references.
 - `0017_sent_context` (§15): `rollout_payloads.sent_context_json`, the sanitized final SDK message mapping, recorded before each attempt's HTTP request. The frozen assembly snapshot stays intact.
 
 Conventions:
@@ -1536,3 +1537,19 @@ Fixed lifetimes (Cerebras, OpenRouter explicit Gemini) use both the matching pre
 - The time zone is UTC: the client doesn't send the user's yet.
 - The cache estimate assumes the next request is a new reply at the displayed path’s leaf: a swipe, another speaker or a generation type a preset prompt triggers on can differ from it.
 - Each estimate assembles the next request in a reader, after every change to an open chat: what an assembly costs (above), up to a few hundred milliseconds of a reader at 100,000 messages with state events.
+
+## 16. LCM: hierarchical summaries
+
+Phase 3 slice 1 implements summary storage and freshness; planning and provider-driven summarization are still pending. `spec/LCM.md` records the remaining slices.
+
+**Migration 0023** (`db/schema/lcm.ts`) recreates the five previously unwritten summary tables and their indexes, reference guards, immutable revision triggers, draft cleanup and FTS triggers. It refuses a database with any summary or job data rather than discarding it. Summaries add `failed`, error JSON and a batch id; revisions add `imported`; L1 inputs allow a null version for an absent effective message; higher-level lineage pins each child's revision. Jobs add an indexed batch and a leaf inside their chat. All foreign keys are indexed. Inputs, lineage, revisions and summary identity are immutable, including INSERT OR REPLACE, and may be deleted only with their chat. A summary changes only its selected revision, row version or status to `superseded`.
+
+**Writes** (`db/ops.ts`, `db/lcmWrites.ts`) run in the writer, one transaction each:
+
+- `CompleteSummary` requires an owned processing job and running summarize/condense rollout. It walks the job's primary-parent chain, refuses merges, requires L1 inputs in exactly chain order, or lower-level children that partition it in declared order with revisions belonging to those children. It saves the summary, generated revision, inputs or lineage, permitted absorption supersessions, completed job and finished rollout with ledger usage atomically. An invalid reference or chain rolls back everything. Job creation and claiming arrive in slice 3; tests use synthetic worker fixtures.
+- `EditSummary` writes and selects a user revision with `expectedRowVersion`, and commits only the named draft/session holding exactly that text, returning recovery metadata. `SelectSummaryRevision` selects only a revision of that summary, with the same concurrency guard. Both refresh the caller's cache estimates.
+- `GetSummary`, `EditSummary` and `SelectSummaryRevision` are authenticated RPCs (`@rp/shared/lcm.ts`, `api/lcm.ts`). Every new storage operation and RPC has cross-user probes in both directions. References reach their owner through the chat; foreign or deleted chats are `NotFound`.
+
+**Freshness** (`db/lcmReads.ts`) is derived in the read transaction. An L1 is fresh when every input still matches its slot's effective version: the selected nonempty, nongenerating, nonfailed version of a live, unpurged, unhidden slot, otherwise null. The input also records the amendment count because human versions can change content without changing id. A higher level is fresh only if every child is fresh and selects the recorded revision. Edits, swipes, deletes, restores and hides write nothing to summaries; selecting the old version or restoring visibility can make them fresh again. Reading a summary never starts a generation.
+
+Tests: a bare-schema oracle for each new trigger and foreign-key indexes, a real-server hand-built branching graph with recursive freshness, amendment and revision selection, completion rollback, and the isolation matrix. Fixtures use synthetic data only and write SQL in a worker.

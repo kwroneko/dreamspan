@@ -1,3 +1,4 @@
+import { makeLcmHandlers } from "./api/lcm.ts"
 // Composition of the HTTP server: the RPC endpoint over a WebSocket, login and logout,
 // a health route, and the client build served as a single-page app.
 import { createServer } from "node:http"
@@ -87,6 +88,7 @@ const Handlers = AppApi.toLayer(
       ...composer,
       ...notices,
       ...inspector,
+      ...(yield* makeLcmHandlers),
       Health: () =>
         eventLoop.sample.pipe(
           Effect.map(

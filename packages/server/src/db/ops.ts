@@ -1,3 +1,4 @@
+import { Summary, SummaryId, SummaryRevisionId, SummaryInput, SummaryChild, SummaryChange } from "@rp/shared/lcm.ts"
 // Storage operations, executed inside the database worker threads (ARCHITECTURE.md §3).
 // Each write operation runs as one synchronous transaction inside the writer worker,
 // so a transaction can never span an await or a network call.
@@ -286,6 +287,35 @@ const StChatRecord = Schema.Struct({
 })
 
 export class WriteOps extends RpcGroup.make(
+  Rpc.make("CompleteSummary", {
+    payload: {
+      userId: UserId,
+      jobId: Schema.String,
+      rolloutId: Schema.String,
+      content: Schema.String,
+      status: Schema.Literals(["complete", "truncated"]),
+      inputs: Schema.Array(SummaryInput),
+      children: Schema.Array(SummaryChild)
+    },
+    success: Summary,
+    error: Schema.Union([StorageError, NotFound])
+  }),
+  Rpc.make("EditSummary", {
+    payload: {
+      userId: UserId,
+      summaryId: SummaryId,
+      content: Schema.String,
+      expectedRowVersion: Schema.Int,
+      commitDraft: CommitDraft
+    },
+    success: SummaryChange,
+    error: Schema.Union([StorageError, NotFound, StaleWrite])
+  }),
+  Rpc.make("SelectSummaryRevision", {
+    payload: { userId: UserId, summaryId: SummaryId, revisionId: SummaryRevisionId, expectedRowVersion: Schema.Int },
+    success: Summary,
+    error: Schema.Union([StorageError, NotFound, StaleWrite])
+  }),
   /** Answers once the writer has opened the database and run migrations. */
   Rpc.make("Ready"),
   /** The user with this handle, created on first sight. A disabled user is refused. */
@@ -1244,6 +1274,11 @@ export class WriteOps extends RpcGroup.make(
 ) {}
 
 export class ReadOps extends RpcGroup.make(
+  Rpc.make("GetSummary", {
+    payload: { userId: UserId, summaryId: SummaryId },
+    success: Summary,
+    error: Schema.Union([StorageError, NotFound])
+  }),
   Rpc.make("FindUserByHandle", {
     payload: { handle: Schema.String },
     success: Schema.NullOr(User),

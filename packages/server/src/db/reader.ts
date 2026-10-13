@@ -1,3 +1,4 @@
+import { makeLcmReadHandlers } from "./lcmReads.ts"
 // Reader worker entry point. Each reader holds one read-only connection. Under WAL,
 // readers never block the writer and the writer never blocks readers.
 import { workerData } from "node:worker_threads"
@@ -34,9 +35,10 @@ RpcServer.layer(ReadOps, { concurrency: 1, disableFatalDefects: true }).pipe(
           makeStImportReadHandlers,
           makeEditorReadHandlers,
           makeAssemblyReadHandlers,
-          makeInspectorReadHandlers
+          makeInspectorReadHandlers,
+          makeLcmReadHandlers
         ]),
-        ([core, providers, accounts, imports, chatSetup, stImport, editor, assembly, inspector]) =>
+        ([core, providers, accounts, imports, chatSetup, stImport, editor, assembly, inspector, lcm]) =>
           ReadOps.of({
             ...core,
             ...providers,
@@ -46,7 +48,8 @@ RpcServer.layer(ReadOps, { concurrency: 1, disableFatalDefects: true }).pipe(
             ...stImport,
             ...editor,
             ...assembly,
-            ...inspector
+            ...inspector,
+            ...lcm
           })
       )
     )

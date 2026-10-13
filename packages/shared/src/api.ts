@@ -1,3 +1,4 @@
+import { LcmApi } from "./lcm.ts"
 // The client-facing contract. Every UI action is an RPC in this group (DESIGN §7.7).
 import { Context, Schema } from "effect"
 import { Rpc, RpcGroup, RpcMiddleware } from "effect/rpc"
@@ -301,4 +302,5 @@ export class AppApi extends RpcGroup.make(
   .merge(NoticeApi)
   // --- The request inspector (inspectorApi.ts).
   .merge(InspectorApi)
+  .merge(LcmApi)
   .middleware(Authentication) {}

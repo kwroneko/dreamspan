@@ -1,3 +1,5 @@
+import type { Summary } from "@rp/shared/lcm.ts"
+import { completeFixture, summaryJob } from "./support/lcmFixtures.ts"
 // The isolation matrix (spec/WORKFLOW.md §3, DESIGN §11): every RPC in AppApi has an
 // entry, and the suite fails on an RPC without one or an entry without its RPC. A probe
 // runs through a real server over real sockets: one user reads, changes or references
@@ -51,6 +53,8 @@ interface Party {
   readonly cookie: string
   /** The test server's port, for the HTTP routes. */
   readonly port: number
+  readonly summary: Summary
+  readonly summaryJob: { readonly jobId: string; readonly rolloutId: string }
   readonly chat: OwnChat
   /** A card, in the persona folder, with a greeting. */
   readonly cardId: EntityId
@@ -147,6 +151,30 @@ const ownModel = (party: Party) =>
   )
 
 const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry } = {
+  GetSummary: { probe: (actor, owner) => refused(actor.api.GetSummary({ summaryId: owner.summary.id }), "NotFound") },
+  EditSummary: {
+    probe: (actor, owner) =>
+      refused(
+        actor.api.EditSummary({
+          summaryId: owner.summary.id,
+          content: "planted",
+          expectedRowVersion: 1,
+          commitDraft: null
+        }),
+        "NotFound"
+      )
+  },
+  SelectSummaryRevision: {
+    probe: (actor, owner) =>
+      refused(
+        actor.api.SelectSummaryRevision({
+          summaryId: owner.summary.id,
+          revisionId: owner.summary.revisionId,
+          expectedRowVersion: 1
+        }),
+        "NotFound"
+      )
+  },
   Health: { global: "liveness and event-loop numbers for the instance" },
   Whoami: {
     probe: (actor, owner) =>
@@ -1546,6 +1574,10 @@ const seed = Effect.gen(function* () {
         api,
         user,
         password,
+        summary: yield* completeFixture(config.dataDir, writer, user.id, chat.id, [
+          { slotId: sent.entry.slotId, versionId: sent.entry.version.id, amendCount: 0 }
+        ]),
+        summaryJob: yield* summaryJob(config.dataDir, chat.id, sent.entry.slotId, sent.entry.slotId),
         chat: {
           chatId: chat.id,
           slotId: sent.entry.slotId,
@@ -1604,6 +1636,41 @@ const storage: Record<
   string,
   (reader: Reader["Service"], actor: Party, owner: Party, writer: Writer["Service"]) => Effect.Effect<void, unknown>
 > = {
+  CompleteSummary: (_reader, actor, owner, writer) =>
+    refused(
+      writer.CompleteSummary({
+        userId: actor.user.id,
+        ...owner.summaryJob,
+        content: "planted",
+        status: "complete",
+        inputs: [{ slotId: owner.chat.slotId, versionId: owner.chat.versionId, amendCount: 0 }],
+        children: []
+      }),
+      "NotFound"
+    ),
+  GetSummary: (reader, actor, owner) =>
+    refused(reader.GetSummary({ userId: actor.user.id, summaryId: owner.summary.id }), "NotFound"),
+  EditSummary: (_reader, actor, owner, writer) =>
+    refused(
+      writer.EditSummary({
+        userId: actor.user.id,
+        summaryId: owner.summary.id,
+        content: "planted",
+        expectedRowVersion: 1,
+        commitDraft: null
+      }),
+      "NotFound"
+    ),
+  SelectSummaryRevision: (_reader, actor, owner, writer) =>
+    refused(
+      writer.SelectSummaryRevision({
+        userId: actor.user.id,
+        summaryId: owner.summary.id,
+        revisionId: owner.summary.revisionId,
+        expectedRowVersion: 1
+      }),
+      "NotFound"
+    ),
   RecordSentContext: (_reader, actor, owner, writer) =>
     Effect.gen(function* () {
       yield* refused(
@@ -1661,6 +1728,7 @@ const snapshot = (owner: Party) =>
   Effect.all([
     outcome(owner.api.ListConnections(), JSON.stringify),
     outcome(owner.api.ListCredentials(), JSON.stringify),
+    outcome(owner.api.GetSummary({ summaryId: owner.summary.id }), JSON.stringify),
     outcome(owner.api.ListModels({ connectionId: owner.connectionId, includeHidden: true }), JSON.stringify),
     outcome(owner.api.ListLlmRequests({ limit: 1000, before: null }), JSON.stringify),
     outcome(owner.api.ListUsers(), JSON.stringify),

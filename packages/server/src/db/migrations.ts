@@ -1,4 +1,5 @@
 import { historyChangesSchema } from "./historyChanges.ts"
+import { lcm } from "./schema/lcm.ts"
 import { SqliteMigrator } from "@effect/sql-sqlite-node"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
@@ -119,7 +120,15 @@ export const migrations = {
     `ALTER TABLE rollouts ADD COLUMN history_depth INTEGER`,
     `CREATE INDEX rollouts_history ON rollouts(chat_id, history_depth DESC, id DESC) WHERE history_depth IS NOT NULL`
   ]),
-  "0022_history_changes": runAll(historyChangesSchema)
+  "0022_history_changes": runAll(historyChangesSchema),
+  "0023_lcm": Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const [row] = yield* sql<{
+      n: number
+    }>`SELECT (SELECT count(*) FROM summaries) + (SELECT count(*) FROM summary_revisions) + (SELECT count(*) FROM summary_inputs) + (SELECT count(*) FROM summary_parents) + (SELECT count(*) FROM summarization_jobs) AS n`
+    if (row!.n !== 0) return yield* Effect.die(new Error("0023_lcm requires empty summary tables"))
+    yield* runAll(lcm)
+  })
 }
 
 export const Migrations = SqliteMigrator.layer({ loader: SqliteMigrator.fromRecord(migrations) })
