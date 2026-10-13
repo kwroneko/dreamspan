@@ -4,7 +4,7 @@
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { expect, test } from "@playwright/test"
+import { expect, type Page, test } from "@playwright/test"
 import { writeStFolder } from "./support/stFiles.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
@@ -18,7 +18,20 @@ test.afterAll(() => {
   rmSync(root, { recursive: true, force: true })
 })
 
-test("import an ST folder by typing its path", async ({ page }) => {
+/** At phone and desktop width: nothing scrolls sideways, and with SCREENSHOT_DIR set, saved there. */
+const shoot = async (page: Page, name: string) => {
+  for (const [width, device] of [
+    [390, "phone"],
+    [1280, "desktop"]
+  ] as const) {
+    await page.setViewportSize({ width, height: 844 })
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0)
+    const dir = process.env.SCREENSHOT_DIR
+    if (dir) await page.screenshot({ path: join(dir, `st-import-path-${name}-${device}.png`), fullPage: true })
+  }
+}
+
+test("import an ST folder by browsing to it or typing its path", async ({ page }) => {
   const st = writeStFolder(root, ["Bob - bridge", "Bob - river"])
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/import`)
@@ -28,7 +41,20 @@ test("import an ST folder by typing its path", async ({ page }) => {
   await page.getByRole("button", { name: "Look in this folder" }).click()
   await expect(page.getByText("There's no folder at that path, or it can't be read.")).toBeVisible()
 
-  await page.getByLabel("Folder path").fill(st)
+  // Browse to it: the folder browser fills the field as folders are opened.
+  await page.getByLabel("Folder path").fill(root)
+  await page.getByRole("button", { name: "Look in this folder" }).click()
+  // ST's folder is found inside the one looked in.
+  await expect(page.getByText("3 files to import")).toBeVisible()
+  const folders = page.getByRole("navigation", { name: "Folders" })
+  await folders.getByRole("button", { name: "ST", exact: true }).click()
+  await expect(page.getByLabel("Folder path")).toHaveValue(st)
+  // What was found in the other folder is gone.
+  await expect(page.getByText("3 files to import")).toHaveCount(0)
+  // ST's data folder is marked.
+  await folders.getByRole("button", { name: "data SillyTavern" }).click()
+  await expect(page.getByLabel("Folder path")).toHaveValue(join(st, "data"))
+  await shoot(page, "browsing")
   await page.getByRole("button", { name: "Look in this folder" }).click()
   await expect(page.getByText("3 files to import")).toBeVisible()
   await page.getByRole("button", { name: "Import", exact: true }).click()

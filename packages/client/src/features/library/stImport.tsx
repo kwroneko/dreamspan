@@ -20,6 +20,7 @@ import { Spinner } from "../../ui/Spinner.tsx"
 import { Alert, Badge, Card, CardHeader } from "../../ui/Surface.tsx"
 import { useTitle } from "../shell.tsx"
 import { libraryAtom } from "./data.ts"
+import { FolderBrowser } from "./FolderBrowser.tsx"
 import {
   orderBranches,
   pathFiles,
@@ -234,6 +235,8 @@ export function StImportPage() {
   // Each file's import reports its own failure in the list below, not as the page's error.
   const fileAction = useAction()
   const [folderPath, setFolderPath] = useState("")
+  // Where the browser starts: a typed folder once looked in; null is the home folder.
+  const [browsed, setBrowsed] = useState<string | null>(null)
   const [files, setFiles] = useState<ReadonlyArray<StFound> | null>(null)
   const [roots, setRoots] = useState<ReadonlyArray<StRoot>>([])
   const [prefix, setPrefix] = useState<string | null>(null)
@@ -255,7 +258,10 @@ export function StImportPage() {
 
   const scan = async () => {
     const scanned = await action.run((client) => client("ScanStFolder", { path: folderPath.trim() }))
-    if (scanned.ok) choose(pathFiles(scanned.value.root, scanned.value.files))
+    if (!scanned.ok) return
+    choose(pathFiles(scanned.value.root, scanned.value.files))
+    // The browser shows a typed folder once it's known to be one.
+    if (scanned.value.root !== browsed) setBrowsed(scanned.value.root)
   }
 
   const readPart: ReadPart = async (request) => {
@@ -339,7 +345,11 @@ export function StImportPage() {
     const entry = current?.byPath.get(path)
     if (!current || !entry) return "Choose the folder again to import this chat."
     // The report's candidates are the user's cards, or "none".
-    const answer = await sendStFile(current.importId, entry, { card: card as EntityId | "none" }, () => {}, readPart)
+    const extra = { card: card as EntityId | "none" }
+    let answer = await sendStFile(current.importId, entry, extra, () => {}, readPart)
+    // A branch whose parent never came: it's imported on its own, as at the end of the import.
+    if (answer._tag === "Done" && answer.result.outcome === "deferred")
+      answer = await sendStFile(current.importId, entry, { ...extra, orphan: true }, () => {}, readPart)
     if (answer._tag === "Unauthorized") {
       registry.refresh(sessionAtom)
       return "Your session has ended."
@@ -396,6 +406,20 @@ export function StImportPage() {
             Look in this folder
           </Button>
         </form>
+        <div className="mt-3">
+          <FolderBrowser
+            key={browsed ?? ""}
+            start={browsed}
+            disabled={running}
+            onOpen={(path) => {
+              setFolderPath(path)
+              // What was found in another folder no longer applies.
+              setFiles(null)
+              setRoots([])
+              setPrefix(null)
+            }}
+          />
+        </div>
         <p className="mt-4 mb-2 text-sm text-muted">
           Using a browser on another computer, where the folder is? Choose it here instead, and it's sent from this
           browser.

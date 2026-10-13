@@ -972,6 +972,7 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
         yield* owner.api.GetStImportReport({ importId })
       })
   },
+  ListFolder: { adminOnly: (actor) => refused(actor.api.ListFolder({ path: null }), "Forbidden") },
   ScanStFolder: { adminOnly: (actor) => refused(actor.api.ScanStFolder({ path: "/" }), "Forbidden") },
   ImportStFolderFile: {
     adminOnly: (actor, owner) =>
@@ -982,6 +983,8 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
             importId,
             root: "/",
             path: "settings.json",
+            size: 0,
+            modifiedMs: 0,
             start: 0,
             part: 0,
             card: null,

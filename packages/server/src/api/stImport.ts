@@ -8,7 +8,7 @@ import { Effect } from "effect"
 import { ChatHub } from "../chat/ChatHub.ts"
 import { Writer } from "../db/Database.ts"
 import { StImports } from "../importer/StImports.ts"
-import { readStFolderFile, scanStFolder } from "../importer/stFolderDisk.ts"
+import { listFolder, readStFolderFile, scanStFolder } from "../importer/stFolderDisk.ts"
 
 /** Reading a folder by its path is for admins: anyone else could read any user's files. */
 const adminOnly = Effect.flatMap(CurrentUser, (user) =>
@@ -24,8 +24,9 @@ export const makeStImportHandlers = Effect.gen(function* () {
   return {
     StartStImport: ({ unsupported }) =>
       Effect.flatMap(CurrentUser, (user) => Effect.map(imports.start(user, unsupported), (importId) => ({ importId }))),
+    ListFolder: ({ path }) => Effect.andThen(adminOnly, listFolder(path)),
     ScanStFolder: ({ path }) => Effect.andThen(adminOnly, scanStFolder(path)),
-    ImportStFolderFile: ({ importId, root, path, start, part, card, orphan }) =>
+    ImportStFolderFile: ({ importId, root, path, size, modifiedMs, start, part, card, orphan }) =>
       Effect.gen(function* () {
         const user = yield* adminOnly
         const file = classifyStPath(path)
@@ -33,7 +34,7 @@ export const makeStImportHandlers = Effect.gen(function* () {
           return yield* new StFolderUnreadable({ message: "That isn't a file the import reads." })
         if (!imports.exists(user, importId)) return yield* new NotFound({ entity: "import", id: importId })
         const chat = file.kind === "chat" || file.kind === "group_chat"
-        const read = yield* readStFolderFile(root, path, start, chat)
+        const read = yield* readStFolderFile(root, path, { size, modifiedMs }, start, chat)
         const result = yield* imports.file(user, importId, path, read.bytes, { part, last: read.last, card, orphan })
         return { result, next: read.next, last: read.last }
       }).pipe(Effect.catchTag("StImportFailed", (error) => Effect.fail(new ServerError({ message: error.message })))),

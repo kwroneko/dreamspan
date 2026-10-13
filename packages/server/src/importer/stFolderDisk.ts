@@ -2,10 +2,11 @@
 // ARCHITECTURE.md §13): listing the files the import reads, and reading one of them, a chat
 // in parts cut at line ends as the browser upload sends it. Plain file reads on the main
 // thread; parsing stays in the format workers.
-import { open, opendir, realpath, stat } from "node:fs/promises"
-import { isAbsolute, join } from "node:path"
+import { open, opendir, readdir, realpath, stat } from "node:fs/promises"
+import { homedir } from "node:os"
+import { dirname, isAbsolute, join } from "node:path"
 import { classifyStPath, ST_CHAT_PART_BYTES } from "@rp/shared/stFolder.ts"
-import { StFolderEntry, StFolderUnreadable } from "@rp/shared/stImportApi.ts"
+import { FolderListing, StFolderEntry, StFolderUnreadable } from "@rp/shared/stImportApi.ts"
 import { Effect } from "effect"
 import { defaultLimits } from "../formats/safety.ts"
 
@@ -86,14 +87,15 @@ export const scanStFolder = (path: string) =>
         // A few files at a time: an ST folder can have thousands, more than a process may open.
         const entries: Array<StFolderEntry> = []
         for (let at = 0; at < found.length; at += 32) {
-          const batch = found.slice(at, at + 32).map(
-            async ({ path, full, chat }) =>
-              new StFolderEntry({
-                path,
-                size: (await stat(full)).size,
-                mainChat: chat ? await mainChatOf(full) : null
-              })
-          )
+          const batch = found.slice(at, at + 32).map(async ({ path, full, chat }) => {
+            const { size, mtimeMs } = await stat(full)
+            return new StFolderEntry({
+              path,
+              size,
+              modifiedMs: mtimeMs,
+              mainChat: chat ? await mainChatOf(full) : null
+            })
+          })
           entries.push(...(await Promise.all(batch)))
         }
         return entries
@@ -108,16 +110,76 @@ export const scanStFolder = (path: string) =>
 
 class TooMany extends Error {}
 
+/** Subfolders listed in the folder browser; a folder with more says so. */
+const MAX_LISTED = 1_000
+
+/**
+ * Whether a folder looks like ST's, from the names in it: its install (`server.js` and
+ * `data`), its data folder (`default-user`), or one user's folder (`characters` and `chats`).
+ */
+const looksLikeSt = async (folder: string) => {
+  try {
+    const names = new Set(await readdir(folder))
+    return (
+      (names.has("server.js") && names.has("data")) ||
+      names.has("default-user") ||
+      (names.has("characters") && names.has("chats"))
+    )
+  } catch {
+    return false
+  }
+}
+
+/** A folder's subfolders, hidden ones left out, for the import page's folder browser. */
+export const listFolder = (path: string | null) =>
+  Effect.tryPromise({
+    try: async () => {
+      if (path !== null && !isAbsolute(path)) throw new Refused("Enter the folder's full path.")
+      const folder = await realpath(path ?? homedir())
+      const names: Array<string> = []
+      let truncated = false
+      for await (const entry of await opendir(folder)) {
+        if (entry.name.startsWith(".") || !entry.isDirectory()) continue
+        if (names.length === MAX_LISTED) {
+          truncated = true
+          break
+        }
+        names.push(entry.name)
+      }
+      names.sort((a, b) => a.localeCompare(b))
+      const folders = []
+      for (let at = 0; at < names.length; at += 32) {
+        const batch = names.slice(at, at + 32)
+        const marks = await Promise.all(batch.map((name) => looksLikeSt(join(folder, name))))
+        folders.push(...batch.map((name, i) => ({ name, st: marks[i]! })))
+      }
+      const parent = dirname(folder)
+      return new FolderListing({ path: folder, parent: parent === folder ? null : parent, folders, truncated })
+    },
+    catch: (error) =>
+      unreadable(error instanceof Refused ? error.message : "There's no folder at that path, or it can't be read.")
+  })
+
 /**
  * One file of an ST user's folder, or the part of a chat file from byte `start`: at most
  * 8 MiB, ending at a line end unless it's the file's end.
  */
-export const readStFolderFile = (root: string, path: string, start: number, chat: boolean) =>
+export const readStFolderFile = (
+  root: string,
+  path: string,
+  seen: { readonly size: number; readonly modifiedMs: number },
+  start: number,
+  chat: boolean
+) =>
   Effect.tryPromise({
     try: async () => {
+      if (!isAbsolute(root)) throw new Refused("Enter the folder's full path.")
       const handle = await open(join(root, path), "r")
       try {
-        const { size } = await handle.stat()
+        const { size, mtimeMs } = await handle.stat()
+        // A chat ST is still writing to: its parts would mix two versions of the file.
+        if (size !== seen.size || mtimeMs !== seen.modifiedMs)
+          throw new Refused("It changed after the folder was read. Look in the folder again, then import it.")
         const max = chat ? ST_CHAT_PART_BYTES : defaultLimits.maxFileBytes
         if (!chat && size > max) throw new Refused(`It's larger than ${Math.round(max / 1024 / 1024)} MB.`)
         const buffer = Buffer.alloc(Math.max(0, Math.min(max, size - start)))

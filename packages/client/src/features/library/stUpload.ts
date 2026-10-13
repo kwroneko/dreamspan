@@ -17,7 +17,7 @@ import { failure, type UploadOutcome } from "./files.ts"
 
 /** Where a file's bytes come from: the folder at a path, or a file picked in the browser. */
 export type StSource =
-  | { readonly _tag: "Path"; readonly root: string; readonly mainChat: string | null }
+  | { readonly _tag: "Path"; readonly root: string; readonly modifiedMs: number; readonly mainChat: string | null }
   | { readonly _tag: "Picked"; readonly file: File }
 
 /** A file of the chosen folder, by its path in it. */
@@ -39,7 +39,11 @@ export const pickedFiles = (files: ReadonlyArray<File>): ReadonlyArray<StFound> 
   }))
 
 export const pathFiles = (root: string, files: ReadonlyArray<StFolderEntry>): ReadonlyArray<StFound> =>
-  files.map(({ path, size, mainChat }) => ({ path, size, source: { _tag: "Path", root, mainChat } }))
+  files.map(({ path, size, modifiedMs, mainChat }) => ({
+    path,
+    size,
+    source: { _tag: "Path", root, modifiedMs, mainChat }
+  }))
 
 export const stRoots = (found: ReadonlyArray<StFound>): ReadonlyArray<StRoot> =>
   findStRoots(found.map((entry) => entry.path))
@@ -126,6 +130,8 @@ export type ReadPart = (request: {
   readonly importId: string
   readonly root: string
   readonly path: string
+  readonly size: number
+  readonly modifiedMs: number
   readonly start: number
   readonly part: number
   readonly card: EntityId | "none" | null
@@ -157,6 +163,8 @@ export const sendStFile = async (
         importId,
         root: source.root,
         path: entry.path,
+        size: entry.size,
+        modifiedMs: source.modifiedMs,
         start,
         part,
         card: extra.card ?? null,

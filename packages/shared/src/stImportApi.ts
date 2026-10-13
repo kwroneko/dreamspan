@@ -90,6 +90,8 @@ export class StFolderEntry extends Schema.Class<StFolderEntry>("StFolderEntry")(
   /** Relative to the folder, `/`-separated. */
   path: Schema.String,
   size: Schema.Number,
+  /** When it last changed: a file that changes during its import is refused, not mixed. */
+  modifiedMs: Schema.Number,
   /** The parent a branch chat names (`main_chat`), so parents are imported first. */
   mainChat: Schema.NullOr(Schema.String)
 }) {}
@@ -101,7 +103,24 @@ export class StFolderUnreadable extends Schema.TaggedError<StFolderUnreadable>()
 
 const FolderPath = Schema.String.check(Schema.isMaxLength(4096))
 
+/** A folder in the import page's folder browser. */
+export class FolderListing extends Schema.Class<FolderListing>("FolderListing")({
+  path: Schema.String,
+  /** Null at the top of the file system. */
+  parent: Schema.NullOr(Schema.String),
+  /** Subfolders, those that look like ST's (an install, its data, or one user's folder) marked. */
+  folders: Schema.Array(Schema.Struct({ name: Schema.String, st: Schema.Boolean })),
+  /** More subfolders than are listed. */
+  truncated: Schema.Boolean
+}) {}
+
 export class StImportApi extends RpcGroup.make(
+  /** A folder's subfolders for the folder browser, from the home folder when `path` is null. Admin only. */
+  Rpc.make("ListFolder", {
+    payload: { path: Schema.NullOr(FolderPath) },
+    success: FolderListing,
+    error: Schema.Union([Forbidden, StFolderUnreadable])
+  }),
   /**
    * Lists the files of an ST folder at a path on the machine the app runs on (DESIGN §1.4).
    * Admin only: on an instance with several users, anyone else could read any user's files.
@@ -121,6 +140,9 @@ export class StImportApi extends RpcGroup.make(
       /** The ST user's folder: the scanned root joined with the chosen user's prefix. */
       root: FolderPath,
       path: FolderPath,
+      /** The file as the scan saw it: if it has changed since, it's refused. */
+      size: Schema.Number,
+      modifiedMs: Schema.Number,
       start: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
       part: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
       /** The user's answer to a link choice: one of their cards, or `none`. */

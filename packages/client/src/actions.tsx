@@ -72,7 +72,7 @@ export function ErrorAlert({ error, title, actions }: { error: AppError | null; 
   )
 }
 
-function FailureView({ cause, onRetry }: { cause: Cause.Cause<unknown>; onRetry: () => void }) {
+export function FailureView({ cause, onRetry }: { cause: Cause.Cause<unknown>; onRetry: () => void }) {
   const registry = useContext(RegistryContext)
   const error = describeCause(cause)
   const unauthorized = error.tag === "Unauthorized"

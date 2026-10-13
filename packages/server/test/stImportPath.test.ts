@@ -4,7 +4,7 @@
 // browser upload's tests (stImport.test.ts) cover what the import does with the files; this
 // checks that the same folder read from disk gives the same import. Non-admins are refused
 // in isolation.test.ts.
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { assert, layer } from "@effect/vitest"
@@ -63,7 +63,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
       const ordered = sorted.map((f) => (isChat(f) ? chats[next++]! : f))
 
       let parts = 0
-      const send = (entry: Pick<StFolderEntry, "path">, orphan = false) =>
+      const send = (entry: Pick<StFolderEntry, "path" | "size" | "modifiedMs">, orphan = false) =>
         Effect.gen(function* () {
           let start = 0
           for (let part = 0; ; part++) {
@@ -71,6 +71,8 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
               importId,
               root: userRoot,
               path: entry.path,
+              size: entry.size,
+              modifiedMs: entry.modifiedMs,
               start,
               part,
               card: null,
@@ -107,10 +109,13 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
 
       // Choosing the card for the chat the import couldn't link reads it from disk again.
       const [choice] = report.links
+      const twin = mine.find((f) => f.path === choice!.path)!
       const linked = yield* api.ImportStFolderFile({
         importId,
         root: userRoot,
         path: choice!.path,
+        size: twin.size,
+        modifiedMs: twin.modifiedMs,
         start: 0,
         part: 0,
         card: choice!.candidates[0]!.entityId,
@@ -120,11 +125,41 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
     })
   )
 
+  it.effect("refuses a chat that changed after the scan instead of mixing its versions", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const root = yield* onDisk(new Map([[LARGE, folder.get(LARGE)!]]))
+      const userRoot = join(root, "ST/data/default-user")
+      const scanned = yield* api.ScanStFolder({ path: userRoot })
+      const chat = scanned.files.find((f) => f.path === "chats/Bob/Bob - very long.jsonl")!
+      const { importId } = yield* api.StartStImport({ unsupported: [] })
+      // Without its card in the folder, the chat is imported with none.
+      const request = { importId, root: userRoot, path: chat.path, size: chat.size, modifiedMs: chat.modifiedMs }
+      const first = yield* api.ImportStFolderFile({ ...request, start: 0, part: 0, card: "none", orphan: false })
+      assert.strictEqual(first.result.outcome, "continue")
+      // ST writes a new message to the chat between two parts.
+      appendFileSync(join(userRoot, chat.path), "\n{}")
+      const error = yield* Effect.flip(
+        api.ImportStFolderFile({ ...request, start: first.next, part: 1, card: "none", orphan: false })
+      )
+      assert.strictEqual(error._tag, "StFolderUnreadable")
+    })
+  )
+
   it.effect("refuses a relative path, a missing folder and a path outside the import's files", () =>
     Effect.gen(function* () {
       const api = yield* client()
       const refused = <A, E extends { readonly _tag: string }>(call: Effect.Effect<A, E>) =>
         Effect.map(Effect.flip(call), (error) => error._tag)
+      /** The size and time a scan would have reported, so only the path is wrong. */
+      const seen = (file: string) => {
+        try {
+          const { size, mtimeMs } = statSync(file)
+          return { size, modifiedMs: mtimeMs }
+        } catch {
+          return { size: 0, modifiedMs: 0 }
+        }
+      }
       assert.strictEqual(yield* refused(api.ScanStFolder({ path: "ST/data" })), "StFolderUnreadable")
       assert.strictEqual(
         yield* refused(api.ScanStFolder({ path: join(tmpdir(), "rp-no-such-folder") })),
@@ -145,13 +180,39 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
       ] as const) {
         assert.strictEqual(
           yield* refused(
-            api.ImportStFolderFile({ importId, root: base, path, start: 0, part: 0, card: null, orphan: false })
+            api.ImportStFolderFile({
+              ...seen(join(base, path)),
+              importId,
+              root: base,
+              path,
+              start: 0,
+              part: 0,
+              card: null,
+              orphan: false
+            })
           ),
           "StFolderUnreadable"
         )
       }
+      // A root relative to wherever the app was started.
+      assert.strictEqual(
+        yield* refused(
+          api.ImportStFolderFile({
+            ...seen(join(root, "user/settings.json")),
+            importId,
+            root: "user",
+            path: "settings.json",
+            start: 0,
+            part: 0,
+            card: null,
+            orphan: false
+          })
+        ),
+        "StFolderUnreadable"
+      )
       // The same call on a file the import reads goes through.
       const settings = yield* api.ImportStFolderFile({
+        ...seen(join(root, "user/settings.json")),
         importId,
         root: join(root, "user"),
         path: "settings.json",
