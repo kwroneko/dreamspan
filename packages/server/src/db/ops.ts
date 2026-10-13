@@ -71,7 +71,7 @@ import {
 } from "@rp/shared/usage.ts"
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
-import { CastCard, FrozenMacros, QueuedMessage } from "@rp/shared/chat.ts"
+import { CastCard, ChatSummary, FrozenMacros, QueuedMessage } from "@rp/shared/chat.ts"
 import { CardForChat, FirstTurn } from "@rp/shared/chatSetupApi.ts"
 import { AssemblyFailed } from "../assembler/types.ts"
 
@@ -1783,6 +1783,12 @@ export class ReadOps extends RpcGroup.make(
   // --- Chat setup, speakers and the send queue (chatSetupReads.ts; DESIGN §2.1, §2.2).
   /** The user's live cards, by label. */
   Rpc.make("ListCards", { payload: { userId: UserId }, success: Schema.Array(CastCard), error: StorageError }),
+  /** The chat list's details of these chats, as far as they're the user's; others are left out. */
+  Rpc.make("ChatSummaries", {
+    payload: { userId: UserId, chatIds: Schema.Array(ChatId) },
+    success: Schema.Array(ChatSummary),
+    error: StorageError
+  }),
   /** These cards, as far as they're the user's (binned ones included); others are left out. */
   Rpc.make("CastCards", {
     payload: { userId: UserId, entityIds: Schema.Array(EntityId) },

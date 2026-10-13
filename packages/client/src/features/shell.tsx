@@ -1,5 +1,5 @@
 // The app shell: it lets nobody past without a session (the server decides; this only
-// routes to login), then renders the header and the registered screen.
+// routes to login), then renders the sidebar (the chats, then the rest) and the screen.
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react"
 import { Link, Navigate, Outlet, useLocation, useNavigate } from "@tanstack/react-router"
 import { AsyncResult } from "effect/reactivity"
@@ -12,6 +12,7 @@ import { logout, SessionContext, sessionAtom, useSession } from "../session.ts"
 import { Button } from "../ui/Button.tsx"
 import { Loading } from "../ui/Spinner.tsx"
 import { Toasts } from "../ui/Toast.tsx"
+import { ChatList } from "./chat/ChatList.tsx"
 import { setPageTitle, useNotices } from "./notices.tsx"
 
 /** Sets the tab's title while a screen is shown. */
@@ -70,39 +71,87 @@ export function LogoutButton({ variant = "secondary" }: { variant?: "secondary" 
   )
 }
 
-function Header() {
+const navLink =
+  "flex items-center gap-2 rounded-md px-2.5 py-1.5 text-sm text-muted hover:bg-surface-raised hover:text-text data-[status=active]:bg-surface-raised data-[status=active]:text-text"
+
+/** Everything but the chats: the library, import, settings, the bin, the account. */
+function Navigation({ onNavigate }: { onNavigate?: () => void }) {
   const session = useSession()
   const isAdmin = session.user.role === "admin"
   return (
-    <header className="border-b border-border bg-surface">
-      <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-2.5">
+    <nav aria-label="Main" className="flex flex-col gap-0.5">
+      <Link to="/" activeOptions={{ exact: true }} className={navLink} onClick={onNavigate}>
+        Characters
+      </Link>
+      {navEntries("app", isAdmin)
+        .filter((entry) => fullPath(entry) !== "/" && fullPath(entry) !== "/chats")
+        .map((entry) => (
+          <Link key={entry.id} to={fullPath(entry)} className={navLink} onClick={onNavigate}>
+            {entry.nav!.label}
+          </Link>
+        ))}
+      <Link to="/bin" className={navLink} onClick={onNavigate}>
+        Bin
+      </Link>
+      <div className="mt-1 flex flex-wrap items-center gap-2 border-t border-border px-2.5 pt-2 text-sm">
+        <Link to="/settings/account" className="max-w-40 truncate text-muted hover:text-text" onClick={onNavigate}>
+          {session.user.displayName}
+        </Link>
+        <BrowserRecovery userId={session.user.id} />
+        {session.via === "session" && <LogoutButton variant="ghost" />}
+      </div>
+    </nav>
+  )
+}
+
+/** The sidebar: the chats first, as in any chat app, then the rest. */
+function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
+  return (
+    <div className="flex h-full min-h-0 flex-col gap-3 p-3">
+      <div className="flex items-center justify-between gap-2 px-1">
+        <Link to="/" className="font-semibold" onClick={onNavigate}>
+          rp-harness
+        </Link>
+        <Link to="/" className="rounded-md px-2 py-1 text-sm text-accent hover:bg-surface-raised" onClick={onNavigate}>
+          New chat
+        </Link>
+      </div>
+      <ChatList />
+      <Navigation {...(onNavigate ? { onNavigate } : {})} />
+    </div>
+  )
+}
+
+/** Phones: a bar with the menu, which opens the sidebar over the page. */
+function PhoneBar() {
+  const [open, setOpen] = useState(false)
+  const pathname = useLocation({ select: (location) => location.pathname })
+  useEffect(() => setOpen(false), [pathname])
+  return (
+    <>
+      <div className="flex items-center gap-2 border-b border-border bg-surface px-3 py-2 lg:hidden">
+        <button
+          type="button"
+          aria-label="Chats and menu"
+          aria-expanded={open}
+          onClick={() => setOpen(true)}
+          className="rounded-md px-2 py-1 text-lg leading-none hover:bg-surface-raised"
+        >
+          ☰
+        </button>
         <Link to="/" className="font-semibold">
           rp-harness
         </Link>
-        <nav aria-label="Main" className="flex gap-1">
-          {navEntries("app", isAdmin).map((entry) => (
-            <Link
-              key={entry.id}
-              to={fullPath(entry)}
-              activeOptions={{ exact: fullPath(entry) === "/" }}
-              className="rounded-md px-2.5 py-1.5 text-sm text-muted hover:bg-surface-raised hover:text-text data-[status=active]:bg-surface-raised data-[status=active]:text-text"
-            >
-              {entry.nav!.label}
-            </Link>
-          ))}
-        </nav>
-        <div className="ml-auto flex items-center gap-3">
-          <Link to="/bin" className="text-sm text-muted hover:text-text data-[status=active]:text-text">
-            Bin
-          </Link>
-          <BrowserRecovery userId={session.user.id} />
-          <Link to="/settings/account" className="max-w-40 truncate text-sm text-muted hover:text-text">
-            {session.user.displayName}
-          </Link>
-          {session.via === "session" && <LogoutButton variant="ghost" />}
-        </div>
       </div>
-    </header>
+      {open && (
+        <div className="fixed inset-0 z-40 flex lg:hidden">
+          <div className="flex w-[min(22rem,88vw)] flex-col border-r border-border bg-surface shadow-xl">
+            <Sidebar onNavigate={() => setOpen(false)} />
+          </div>
+          <button type="button" aria-label="Close the menu" className="flex-1 bg-overlay" onClick={() => setOpen(false)} />
+        </div>
+      )}
+    </>
   )
 }
 
@@ -156,14 +205,34 @@ function AppShell() {
         Skip to content
       </a>
       <Toasts>
-        <div className="flex min-h-full flex-col">
-          <Header />
-          <main id="content" className="mx-auto w-full max-w-5xl flex-1 px-4 py-6">
-            <Outlet />
-          </main>
+        <div className="flex h-dvh">
+          <aside className="hidden w-80 shrink-0 border-r border-border bg-surface lg:block">
+            <Sidebar />
+          </aside>
+          <div className="flex min-w-0 flex-1 flex-col">
+            <PhoneBar />
+            <Main />
+          </div>
         </div>
       </Toasts>
     </SessionContext>
+  )
+}
+
+/** Chats fill the height and scroll their own messages; other screens scroll as pages. */
+function Main() {
+  const pathname = useLocation({ select: (location) => location.pathname })
+  const fill = /^\/chats\/[^/]+$/.test(pathname)
+  return (
+    <main id="content" className={`min-h-0 flex-1 ${fill ? "flex flex-col" : "overflow-y-auto"}`}>
+      {fill ? (
+        <Outlet />
+      ) : (
+        <div className="mx-auto w-full max-w-5xl px-4 py-6">
+          <Outlet />
+        </div>
+      )}
+    </main>
   )
 }
 

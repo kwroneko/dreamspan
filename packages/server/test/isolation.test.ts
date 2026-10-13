@@ -609,6 +609,14 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
         )
       })
   },
+  ListChatSummaries: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const chatIds = [owner.chat.chatId]
+        assert.lengthOf(yield* owner.api.ListChatSummaries({ chatIds }), 1)
+        assert.lengthOf(yield* actor.api.ListChatSummaries({ chatIds }), 0)
+      })
+  },
   CreateChat: { createOnly: "starts an empty chat for the caller" },
   GetChat: { probe: (actor, owner) => refused(actor.api.GetChat({ chatId: owner.chat.chatId }), "NotFound") },
   ReadPath: {

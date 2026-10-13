@@ -4,7 +4,7 @@
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
 import { BinItem } from "./bin.ts"
-import { Chat, ChatId, EntityId, PathEntry, QueuedMessage, SlotId, Version, VersionId } from "./chat.ts"
+import { Chat, ChatId, ChatSummary, EntityId, PathEntry, QueuedMessage, SlotId, Version, VersionId } from "./chat.ts"
 import { LeafMoved, NotFound, ServerError, StaleWrite } from "./errors.ts"
 import { Draft } from "./drafts.ts"
 import { NextContext } from "./inspectorApi.ts"
@@ -127,6 +127,12 @@ export class ChatApi extends RpcGroup.make(
       before: Schema.NullOr(Schema.Struct({ at: Schema.Number, id: ChatId }))
     },
     success: Schema.Array(Chat),
+    error: ServerError
+  }),
+  /** The chat list's details of these chats (cast, message count, last message); others' are left out. */
+  Rpc.make("ListChatSummaries", {
+    payload: { chatIds: Schema.Array(ChatId).check(Schema.isMaxLength(200)) },
+    success: Schema.Array(ChatSummary),
     error: ServerError
   }),
   Rpc.make("CreateChat", { payload: { title: Schema.String }, success: Chat, error: ServerError }),
