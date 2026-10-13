@@ -41,7 +41,15 @@ A slice is one commit-sized change.
 | B | Logic: assembler, graph, providers, LCM | One review |
 | C | Docs only, styling, renames | No agent: the author's trim pass |
 
-**Who reviews (owner, 2026-10-12):** reviewers run on Codex (`codex exec`), on the owner's OpenAI quota, to save Claude quota. At first both GPT-6.1-Sol and GPT-6-Astra review the same branch, each in its own copy of the worktree, and their findings are compared: real findings each one caught, false positives, time. Now and then an Opus reviewer joins for an A/B against them. The results go in §7, and decide the default.
+**Who does what (2026-10-13, from the owner's assessment of the models):**
+- **Opus 5.5:** coordinates, designs, builds features, writes specs and handoffs, talks to the owner. It produces mergeable code most consistently and is the better coordinator: GPT models can loop on a task without advancing. Fixes that need a redesign, or high-severity isolation and data-loss fixes, stay on Opus.
+- **GPT-6.1-Sol (Codex):** cheap enough to be effectively unlimited. Reviews every branch, verifies fixes, does research (ST source, reference-harness, provider docs), and fixes well-scoped review findings that have a test. Builds only small follow-ups with a test oracle (flaky tests, startup bugs). Its code goes through the coordinator's read of the diff before merging. Each prompt says to stop and report after two failed attempts at the same problem, instead of looping.
+- **GPT-6-Astra (Codex):** scarce, since one run costs several percent of the weekly quota; check `rate_limits.primary.used_percent` before launching one. Strong on very hard, well-defined problems, but it reinterprets prompts, does unrequested work, and its code tends to add issues. So it never writes code that merges: it reviews in its own disposable worktree copy, and every finding needs a reproduction. Used for a second, fresh-eyes review of concurrency protocols, isolation and data-loss code, and for periodic whole-subsystem audits.
+- **Sonnet 5.5:** lighter work at moderate effort: rebases with conflict resolution (design conflicts go back to Opus), integration branches, turning reports into fix lists, mechanical edits. Not features: at the effort hard work needs it costs more than Opus, and its LCM slices missed requirements already decided.
+- **Haiku 5.5:** kept under 100k tokens of context. Relays Codex runs, triages large test logs, locates code, and runs as several parallel attempts at one bounded problem (a flaky test, a tricky bug) from which Opus picks the one that passes.
+- **Fable:** not used (quota).
+
+The Sol/Astra A/B results that preceded this are in §7.
 
 7. **Fix and commit.** The commit message lists the findings that were fixed.
 
