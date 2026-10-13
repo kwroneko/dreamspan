@@ -1,19 +1,18 @@
 // Usage capture, normalization and cost (spec/PROVIDERS.md §9.2, §9.3).
 //
-// pi-ai already normalizes every adapter to uncached input + cache reads + cache writes
-// + output, which we verified per adapter. On top of that we keep the provider's own
-// usage object verbatim (seen through onProviderStreamEvent), so a normalization that
-// turns out wrong for some upstream can be recounted later, and so we can read what pi
-// drops: OpenRouter's reported cost and routed upstream, Anthropic's refusal category.
+// Keep the raw provider usage alongside pi's normalized counts, and fill the
+// documented hit fields compatible adapters omit. This also retains reported cost,
+// routed upstream and refusal details for the ledger.
 import type { AssistantMessage, Message, Usage } from "@earendil-works/pi-ai"
 import { estimateContextTokens, estimateTextTokens } from "@earendil-works/pi-ai/utils/estimate"
 import type { Price } from "@rp/shared/providers.ts"
 import { type Cost, type TokenCounts, unknownCounts, type UsageSource } from "@rp/shared/usage.ts"
-import { Predicate } from "effect"
+import { Option, Predicate, Schema } from "effect"
 import type { CostFormula, RequestTarget } from "./registry.ts"
 
 /** What a request's raw provider events told us, beyond pi's normalized message. */
 export interface Capture {
+  headerCacheRead: number | null
   rawUsage: Record<string, unknown> | null
   reportedCost: number | null
   upstream: string | null
@@ -21,11 +20,22 @@ export interface Capture {
 }
 
 export const emptyCapture = (): Capture => ({
+  headerCacheRead: null,
   rawUsage: null,
   reportedCost: null,
   upstream: null,
   refusalCategory: null
 })
+
+const decodeHeaderCount = Schema.decodeUnknownOption(
+  Schema.NumberFromString.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0))
+)
+// Dedicated Fireworks: https://docs.fireworks.ai/guides/prompt-caching
+// This is token reuse, unlike a gateway's whole-response cache-status header.
+export const captureUsageHeaders = (headers: Headers, capture: Capture) => {
+  const hit = headers.get("fireworks-cached-prompt-tokens")
+  if (hit !== null) capture.headerCacheRead = Option.getOrNull(decodeHeaderCount(hit))
+}
 
 const record = (value: unknown) => (Predicate.isObject(value) ? (value as Record<string, unknown>) : null)
 
@@ -64,6 +74,13 @@ export const usageObservers: Record<string, (data: unknown, capture: Capture) =>
   }
 }
 
+usageObservers["google-vertex"] = usageObservers["google-generative-ai"]!
+usageObservers["azure-openai-responses"] = usageObservers["openai-responses"]!
+usageObservers["bedrock-converse-stream"] = (data, capture) => {
+  const usage = record(record(record(data)?.metadata)?.usage)
+  if (usage) capture.rawUsage = usage
+}
+
 const countsFromUsage = (usage: Usage): TokenCounts => ({
   inputUncached: usage.input,
   cacheRead: usage.cacheRead,
@@ -92,7 +109,33 @@ export const finalCounts = (
   const text = messageText(message)
   const finished = message.stopReason === "stop" || message.stopReason === "length" || message.stopReason === "toolUse"
   if (capture.rawUsage !== null) {
-    const counts = countsFromUsage(message.usage)
+    let counts = countsFromUsage(message.usage)
+    // pi's compatible Chat adapter does not preserve every upstream's hit spelling.
+    // PROVIDER-CACHE-TTLS.md: Anthropic/Bedrock, Chat/Responses, Gemini, Together,
+    // and Vercel AI Gateway. A discount alone never proves a token cache hit.
+    const raw = capture.rawUsage
+    const hit = [
+      raw.cache_read_input_tokens,
+      raw.cacheReadInputTokens,
+      record(raw.prompt_tokens_details)?.cached_tokens,
+      record(raw.input_tokens_details)?.cached_tokens,
+      raw.prompt_cache_hit_tokens,
+      raw.cachedContentTokenCount,
+      raw.total_cached_tokens,
+      raw.cached_tokens,
+      record(raw.inputTokenDetails)?.cacheReadTokens,
+      capture.headerCacheRead
+    ].find((v) => Predicate.isNumber(v) && v >= 0)
+    if (Predicate.isNumber(hit)) {
+      const totalInput = (counts.inputUncached ?? 0) + (counts.cacheRead ?? 0)
+      counts = {
+        ...counts,
+        cacheRead: hit,
+        inputUncached: Predicate.isNumber(raw.prompt_cache_miss_tokens)
+          ? raw.prompt_cache_miss_tokens
+          : Math.max(0, totalInput - hit)
+      }
+    }
     if (finished) return { counts, source: "reported" }
     // A stopped or failed request may have reported only its start (Anthropic sends
     // output_tokens: 1 in message_start), so output is at least what actually arrived.
@@ -107,8 +150,9 @@ export const finalCounts = (
   return {
     counts: {
       ...unknownCounts,
-      // Whether any of it was cached isn't known, so all of it counts as uncached.
-      inputUncached: estimateContextTokens(context).tokens,
+      // A documented header may report cache reads even without streamed usage.
+      inputUncached: Math.max(0, estimateContextTokens(context).tokens - (capture.headerCacheRead ?? 0)),
+      cacheRead: capture.headerCacheRead,
       output: estimateTextTokens(text)
     },
     source: "estimated"

@@ -1,3 +1,4 @@
+import { documentedCachePolicy } from "./cachePolicy.ts"
 // The provider layer (spec/PROVIDERS.md): one streaming entry point over pi-ai for the
 // assembler and, later, the agent loop, plus the connection operations that need the
 // server secret or the network (encrypting secrets, fetching model lists, testing).
@@ -47,7 +48,7 @@ import { catalogEntry } from "./catalog.ts"
 import { classify, parseRetryAfter, ProviderError, providerError, RETRYABLE } from "./errors.ts"
 import type { ModelListError } from "./modelLists.ts"
 import { type ProviderKindEntry, ProviderRegistry, type RequestTarget } from "./registry.ts"
-import { type Capture, costOf, emptyCapture, finalCounts } from "./usage.ts"
+import { type Capture, captureUsageHeaders, costOf, emptyCapture, finalCounts } from "./usage.ts"
 
 export { ProviderError } from "./errors.ts"
 
@@ -878,6 +879,7 @@ export const layer = (options: ProvidersOptions = {}) =>
               if (error instanceof RedirectRefused) state.refused = error.message
               throw error
             })
+            captureUsageHeaders(response.headers, state.capture)
             state.status = response.status
             state.retryAfterMs = parseRetryAfter(response.headers.get("retry-after") ?? undefined)
             return response
@@ -931,7 +933,21 @@ export const layer = (options: ProvidersOptions = {}) =>
                     initial
                   )
                   if (sources && request.attribution.rolloutId) {
-                    const wire = sentWire(final, sources, prepared.scrub)
+                    const policy = documentedCachePolicy(
+                      { provider: prepared.kind.piProvider, api: prepared.api, model: model.key },
+                      final
+                    )
+                    const selected = request.inspection!.model
+                    const wire = {
+                      ...sentWire(final, sources, prepared.scrub),
+                      cache: {
+                        ttlS: selected.cacheTtlOverride
+                          ? (selected.cacheTtlS ?? null)
+                          : (policy?.ttlS ?? selected.cacheTtlS ?? null),
+                        fixed: policy?.fixed ?? false,
+                        source: selected.cacheTtlOverride ? null : (policy?.source ?? null)
+                      }
+                    }
                     await Effect.runPromise(
                       fromStorage(
                         writer.RecordSentContext({

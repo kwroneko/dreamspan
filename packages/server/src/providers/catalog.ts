@@ -4,6 +4,7 @@
 import type { Api, Model } from "@earendil-works/pi-ai"
 import type { ModelUpstream } from "@rp/shared/providers.ts"
 import { Effect } from "effect"
+import { documentedCachePolicy } from "./cachePolicy.ts"
 import type { ListedModel } from "./modelLists.ts"
 import type { Catalog, ProviderKindEntry } from "./registry.ts"
 
@@ -43,23 +44,26 @@ export const catalogEntry = async (kind: ProviderKindEntry, key: string) => {
 }
 
 /** What the catalog knows about a model, in the shape users see and can override. */
-const upstreamFromCatalog = (entry: Model<Api>, sameApi: boolean): ModelUpstream => ({
-  name: entry.name,
-  context: entry.contextWindow,
-  maxOutput: entry.maxTokens,
-  vision: entry.input.includes("image"),
-  reasoning: entry.reasoning,
-  ...(entry.thinkingLevelMap ? { thinkingLevels: { ...entry.thinkingLevelMap } } : {}),
-  ...(entry.promptCache?.short !== undefined ? { cacheTtlS: entry.promptCache.short } : {}),
-  ...(sameApi && entry.compat ? { compat: { ...entry.compat } } : {}),
-  price: {
-    input: entry.cost.input,
-    output: entry.cost.output,
-    cacheRead: entry.cost.cacheRead,
-    cacheWrite: entry.cost.cacheWrite,
-    ...(entry.cost.tiers ? { tiers: entry.cost.tiers.map((tier) => ({ ...tier })) } : {})
+const upstreamFromCatalog = (entry: Model<Api>, sameApi: boolean): ModelUpstream => {
+  const cache = documentedCachePolicy({ provider: entry.provider, api: entry.api, model: entry.id })
+  return {
+    name: entry.name,
+    context: entry.contextWindow,
+    maxOutput: entry.maxTokens,
+    vision: entry.input.includes("image"),
+    reasoning: entry.reasoning,
+    ...(entry.thinkingLevelMap ? { thinkingLevels: { ...entry.thinkingLevelMap } } : {}),
+    ...(cache ? { cacheTtlS: cache.ttlS } : {}),
+    ...(sameApi && entry.compat ? { compat: { ...entry.compat } } : {}),
+    price: {
+      input: entry.cost.input,
+      output: entry.cost.output,
+      cacheRead: entry.cost.cacheRead,
+      cacheWrite: entry.cost.cacheWrite,
+      ...(entry.cost.tiers ? { tiers: entry.cost.tiers.map((tier) => ({ ...tier })) } : {})
+    }
   }
-})
+}
 
 /**
  * Listed models merged over what the kind's catalog knows: the list's own fields win,

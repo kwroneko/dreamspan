@@ -143,6 +143,8 @@ export interface SnapshotInputs {
 
 /** Safe provider mapping with indices back to the assembled messages. No transport settings. */
 export interface WireContext {
+  /** Actual request cache policy after transforms; server-only. */
+  readonly cache?: { readonly ttlS: number | null; readonly fixed: boolean; readonly source: string | null }
   /** Complete sanitized historical display, present only after final capture. */
   readonly display?: Pick<ContextDisplay, "model" | "preset" | "issues">
   readonly mapping?: ModelInput["mapping"]
@@ -353,6 +355,7 @@ export interface ModelInput {
     readonly revision: string
   }
   readonly cacheTtlS?: number | null
+  readonly cacheTtlOverride?: boolean
   readonly modelId: string
   /** The provider kind (`openai-chat`, `anthropic`, …) and its wire API. */
   readonly kind: string

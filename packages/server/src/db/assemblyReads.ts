@@ -124,13 +124,44 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
             Effect.map((built): ContextSnapshot => ({ ...built, sources: sources.pins() })),
             Effect.catchTag("AssemblyFailed", (error) => Effect.succeed(error))
           )
-        if (next instanceof AssemblyFailed || next.inputs.model?.cacheTtlS == null) return null
-        const ttlS = next.inputs.model.cacheTtlS
+        if (next instanceof AssemblyFailed || !next.inputs.model) return null
+        const sameModel =
+          next.inputs.model.modelId === previous.inputs.model?.modelId &&
+          next.inputs.model.connectionId === previous.inputs.model?.connectionId
+        const ttlS =
+          !next.inputs.model.cacheTtlOverride && sameModel
+            ? (previous.wire?.cache?.ttlS ?? next.inputs.model.cacheTtlS)
+            : next.inputs.model.cacheTtlS
+        if (ttlS == null) return null
         const changed = prefixChange(previous, next, yield* describer(sql, userId, chatId, [previous, next]))
+        let origin = last.started_at
+        if (previous.wire?.cache?.fixed && (last.cache_read ?? 0) > 0 && (last.cache_write ?? 0) === 0) {
+          // Fixed-lived caches (Cerebras, OpenRouter explicit Gemini) do not slide
+          // on a hit. Find the matching prefix's write/miss, never a newer unrelated one.
+          const candidates = yield* sql<{ started_at: number; snapshot: string; sent: string | null }>`
+            SELECT q.started_at, p.context_snapshot_json AS snapshot, p.sent_context_json AS sent
+            FROM llm_requests q JOIN rollout_payloads p ON p.rollout_id = q.rollout_id
+            WHERE q.chat_id = ${chatId} AND q.owner_user_id = ${userId} AND q.model_id = ${last.model_id}
+              AND q.started_at <= ${last.started_at} AND q.status = 'complete' AND p.context_snapshot_json IS NOT NULL
+              AND (q.cache_read = 0 OR q.cache_write > 0)
+            ORDER BY q.started_at DESC, q.id DESC LIMIT 100`
+          const descriptions = yield* describer(sql, userId, chatId, [previous])
+          const write = candidates.find((row) => {
+            const snapshot = {
+              ...(JSON.parse(row.snapshot) as ContextSnapshot),
+              ...(row.sent ? { wire: JSON.parse(row.sent) as WireContext } : {})
+            }
+            return prefixChange(snapshot, previous, descriptions) === null
+          })
+          // A hit proves reuse, but without its original write time cannot date expiry.
+          if (!write) return null
+          origin = write.started_at
+        }
+        const historicalTtl = previous.wire?.cache?.ttlS ?? previous.inputs.model?.cacheTtlS ?? 0
         return {
           lastRequestAt: last.started_at,
           ttlS,
-          expiresAt: last.started_at + (previous.inputs.model?.cacheTtlS ?? 0) * 1000,
+          expiresAt: origin + historicalTtl * 1000,
           verified: (last.cache_read ?? 0) + (last.cache_write ?? 0) > 0,
           prefixTokens: tokensBetween(previous, 0, end),
           changed

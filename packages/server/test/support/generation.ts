@@ -43,6 +43,7 @@ export const generateReply = (
       readonly apiKey?: string
       readonly cacheTtlS?: number
     }
+    readonly modelKey?: string
     readonly model: ModelOverrides
     readonly preset?: Record<string, unknown>
     readonly greeting?: string
@@ -64,7 +65,11 @@ export const generateReply = (
       },
       ...(options.connection.apiKey ? { apiKey: options.connection.apiKey } : {})
     })
-    const model = yield* api.AddUserModel({ connectionId: connection.id, key: "mock-model", overrides: options.model })
+    const model = yield* api.AddUserModel({
+      connectionId: connection.id,
+      key: options.modelKey ?? "mock-model",
+      overrides: options.model
+    })
     const entity = (kind: "card" | "preset", label: string, doc: object) =>
       writer.CreateEntity({
         userId,
