@@ -11,6 +11,7 @@ export interface GenerationRequest {
   readonly chatId: ChatId
   readonly slotId: SlotId
   readonly versionId: VersionId
+  readonly onWaitingCache?: (waiting: boolean) => void
 }
 
 /** Why a generation failed, as its failed version records it (DESIGN §3.1). */

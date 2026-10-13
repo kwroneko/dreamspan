@@ -34,6 +34,9 @@ const PAGE = 60
 /** At most this many slots stay loaded; the far end is dropped, and read again when needed. */
 const MAX_LOADED = 500
 
+/** Whether this version is held behind a cold-prefix writer. */
+export const waitingCache = Atom.family((_id: VersionId) => Atom.make(false))
+
 /** The text so far of a version that's generating, by its id; null when it isn't. */
 export const liveText = Atom.family((_id: VersionId) => Atom.make<string | null>(null))
 
@@ -315,6 +318,7 @@ export class ChatSession {
     if (this.frame !== null) cancelAnimationFrame(this.frame)
     if (this.subscription) Effect.runFork(Fiber.interrupt(this.subscription))
     for (const [id, unmount] of this.live) {
+      this.registry.set(waitingCache(id), false)
       this.registry.set(liveText(id), null)
       unmount()
     }
@@ -482,7 +486,8 @@ export class ChatSession {
   private apply(event: Exclude<ChatEvent, { readonly _tag: "Delta" }>, anchor: SlotId | null) {
     switch (event._tag) {
       case "Hello": {
-        for (const { versionId, text } of event.live) {
+        for (const { versionId, text, waitingCache: waiting } of event.live) {
+          this.registry.set(waitingCache(versionId), waiting ?? false)
           if (text.length >= (this.registry.get(liveText(versionId)) ?? "").length) this.setLive(versionId, text)
         }
         // The first Hello opens the chat. Another means the socket reconnected, and
@@ -510,6 +515,10 @@ export class ChatSession {
       case "State":
         this.forgetPositions()
         return void this.refreshCast()
+      case "WaitingCache":
+        if (!this.live.has(event.versionId)) this.setLive(event.versionId, "")
+        this.registry.set(waitingCache(event.versionId), event.waiting)
+        return
       case "Cache":
         // The same estimate again (another tab subscribed) changes nothing on screen.
         if (JSON.stringify(event.warmth) === JSON.stringify(this.view.cache)) return
@@ -619,17 +628,27 @@ export class ChatSession {
   private track(version: Version) {
     if (version.status !== "generating" || this.live.has(version.id)) return
     const known = this.registry.get(liveText(version.id))
-    this.live.set(version.id, this.registry.mount(liveText(version.id)))
+    this.live.set(version.id, this.mountLive(version.id))
     if (known === null) this.registry.set(liveText(version.id), version.content)
   }
 
+  private mountLive(id: VersionId) {
+    const text = this.registry.mount(liveText(id))
+    const waiting = this.registry.mount(waitingCache(id))
+    return () => {
+      text()
+      waiting()
+    }
+  }
+
   private setLive(id: VersionId, text: string) {
-    if (!this.live.has(id)) this.live.set(id, this.registry.mount(liveText(id)))
+    if (!this.live.has(id)) this.live.set(id, this.mountLive(id))
     this.registry.set(liveText(id), text)
   }
 
   private endLive(id: VersionId) {
     this.pending.delete(id)
+    this.registry.set(waitingCache(id), false)
     this.registry.set(liveText(id), null)
     this.live.get(id)?.()
     this.live.delete(id)

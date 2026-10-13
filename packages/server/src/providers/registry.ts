@@ -32,6 +32,8 @@ export interface ProviderKindEntry {
   readonly listModels: (request: ListRequest) => Effect.Effect<ReadonlyArray<ListedModel>, ModelListError>
   /** Known models' facts (pi-ai's catalog for built-ins), loaded on first use. */
   readonly catalog?: () => Promise<Catalog>
+  /** When this provider makes a prefix write readable; defaults to first chunk, 10 s. */
+  readonly cacheRelease?: import("./cacheStagger.ts").CacheReleasePolicy
 }
 
 /** What a transform or observer is looking at: the kind and wire API of the request. */

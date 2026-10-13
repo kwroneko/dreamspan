@@ -56,10 +56,13 @@ export class PathWindow extends Schema.Class<PathWindow>("PathWindow")({
 export const ChatEvent = Schema.Union([
   /** The first event of every subscription, with the text so far of each version generating now. */
   Schema.TaggedStruct("Hello", {
-    live: Schema.Array(Schema.Struct({ versionId: VersionId, text: Schema.String }))
+    live: Schema.Array(
+      Schema.Struct({ versionId: VersionId, text: Schema.String, waitingCache: Schema.optionalKey(Schema.Boolean) })
+    )
   }),
   /** Text appended to a generating version at `offset`, so a client can tell a repeat from a gap. */
   Schema.TaggedStruct("Delta", { versionId: VersionId, offset: Schema.Int, text: Schema.String }),
+  Schema.TaggedStruct("WaitingCache", { versionId: VersionId, waiting: Schema.Boolean }),
   /** A slot was added, or its selection or versions changed. */
   Schema.TaggedStruct("Slot", { entry: PathEntry }),
   /** A version's text or status changed: a generation ended, or it was amended. */

@@ -369,3 +369,27 @@ test("source explanations retain distinct equal labels and show historical activ
   ).toBeVisible()
   await expect(messages.getByText("Active by default; every turn; due this turn.", { exact: true })).toBeVisible()
 })
+
+test("a held branch reply says waiting for the cache, including after reload", async ({ page }) => {
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  provider.hold()
+  const held = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+    Effect.gen(function* () {
+      const path = yield* api.ReadPath({ chatId: chat.id, leafSlotId: null, range: { _tag: "Bottom" }, limit: 100 })
+      const parentSlotId = path.entries[0]!.slotId
+      const leader = yield* api.Generate({ chatId: chat.id, parentSlotId, branch: true })
+      if (leader._tag !== "Posted") return yield* Effect.die(new Error("leader queued"))
+      // The two branches format the same reusable prefix.
+      const follower = yield* api.Generate({ chatId: chat.id, parentSlotId, branch: true })
+      if (follower._tag !== "Posted") return yield* Effect.die(new Error("follower queued"))
+      return follower.entry.slotId
+    })
+  )
+  await page.goto(`${server().url}/chats/${chat.id}?leaf=${held}`)
+  await expect(page.getByText("Waiting for the cache…", { exact: true })).toBeVisible()
+  await page.reload()
+  await expect(page.getByText("Waiting for the cache…", { exact: true })).toBeVisible()
+  provider.release()
+  await expect(page.getByText("Waiting for the cache…", { exact: true })).toHaveCount(0)
+  await expect(reply(page)).toBeVisible()
+})

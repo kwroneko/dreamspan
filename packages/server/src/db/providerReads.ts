@@ -1,4 +1,6 @@
 // Connection, model and ledger read handlers, in the reader workers.
+import type { ContextSnapshot, WireContext } from "../assembler/types.ts"
+import { prefixChange } from "../assembler/warmth.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { ConnectionForRequest, type ReadOps } from "./ops.ts"
@@ -24,6 +26,41 @@ export const makeProviderReadHandlers = Effect.gen(function* () {
   const { ownedConnection, ownedModel, ownedCredential } = makeProviderQueries(sql)
 
   const handlers = {
+    CachePrefixWarm: ({ userId, connectionId, modelId, snapshot, now }) =>
+      Effect.gen(function* () {
+        yield* ownedConnection(userId, connectionId)
+        yield* ownedModel(userId, modelId)
+        const rows = yield* sql<{ snapshot: string; wire: string }>`
+          SELECT p.context_snapshot_json AS snapshot, p.sent_context_json AS wire
+          FROM llm_requests q JOIN rollout_payloads p ON p.rollout_id = q.rollout_id
+          WHERE q.owner_user_id = ${userId} AND q.connection_id = ${connectionId} AND q.model_id = ${modelId}
+            AND q.started_at + COALESCE(json_extract(p.context_snapshot_json, '$.inputs.model.cacheTtlS'), 0) * 1000 > ${now} AND (q.status = 'complete' OR q.first_token_at IS NOT NULL)
+            AND p.sent_context_json IS NOT NULL
+          ORDER BY q.started_at DESC LIMIT 100`
+        // Only identity is needed; retain historical source metadata so the comparison
+        // can describe a mismatch without requiring another assembly.
+        const next = JSON.parse(snapshot) as Pick<ContextSnapshot, "inputs" | "request"> & {
+          readonly wire: WireContext
+        }
+        return rows.some((row) => {
+          const previous = JSON.parse(row.snapshot) as ContextSnapshot
+          return (
+            prefixChange(
+              { ...previous, wire: JSON.parse(row.wire) as WireContext },
+              {
+                ...previous,
+                inputs: { ...previous.inputs, model: next.inputs.model },
+                request: next.request,
+                wire: next.wire,
+                pieces: []
+              },
+              () => ({
+                label: "Prefix"
+              })
+            ) === null
+          )
+        })
+      }).pipe(query("CachePrefixWarm")),
     ListConnections: ({ userId }) =>
       sql<ConnectionRow>`SELECT ${sql.literal(connectionColumns)} FROM ${sql.literal(connectionFrom)}
         WHERE c.owner_user_id = ${userId} AND c.deleted_at IS NULL AND c.purged_at IS NULL ORDER BY c.id`.pipe(

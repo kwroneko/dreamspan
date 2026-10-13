@@ -9,6 +9,8 @@ import { documentedCachePolicy } from "./cachePolicy.ts"
 import { inspectWire } from "../assembler/inspection.ts"
 import { markWireSources, sentWire, wireContext } from "../assembler/wire.ts"
 import type { AssembledRequest, ModelInput, InspectionInputs } from "../assembler/types.ts"
+import { defaultCacheRelease, makeCacheStagger } from "./cacheStagger.ts"
+import { canonicalJson } from "@rp/shared/editing.ts"
 import { mappingCapabilities } from "./mapping.ts"
 import type {
   Api,
@@ -98,6 +100,7 @@ export interface StreamRequest {
 }
 
 export type ProviderEvent =
+  | { readonly type: "waiting-cache"; readonly waiting: boolean }
   | { readonly type: "attempt"; readonly attempt: number; readonly requestId: LlmRequestId }
   | { readonly type: "route"; readonly description: string }
   /** Waiting out a rate limit the provider asked for on this connection, before sending. */
@@ -722,6 +725,7 @@ export const layer = (options: ProvidersOptions = {}) =>
       // --- Streaming ----------------------------------------------------------------
 
       // Per-connection cap (PROVIDERS §7.3) and the pause a Retry-After asks for.
+      const stagger = makeCacheStagger()
       const caps = new Map<string, { semaphore: Semaphore.Semaphore; permits: number }>()
       const pausedUntil = new Map<string, number>()
       const withCap = (connection: Connection) =>
@@ -788,7 +792,9 @@ export const layer = (options: ProvidersOptions = {}) =>
           retryAfterMs: null as number | null,
           firstTokenAt: null as number | null,
           partial: null as AssistantMessage | null,
-          refused: null as string | null
+          refused: null as string | null,
+          gate: undefined as ReturnType<typeof stagger.join> | undefined,
+          release: undefined as "first-chunk" | "complete" | "timeout" | "leader-ended" | undefined
         }
         /** What the request produced so far, for a close after an interruption or a defect. */
         const partialMessage = (stopReason: "aborted" | "error", errorMessage?: string): AssistantMessage => ({
@@ -827,6 +833,14 @@ export const layer = (options: ProvidersOptions = {}) =>
                     message.responseModel ?? (message.model !== model.key ? message.model : null)
                   ),
                   upstream: metadata(state.capture.upstream),
+                  cacheStagger:
+                    state.gate?.leader && state.release
+                      ? {
+                          leaderRequestId: state.gate.leader,
+                          release: state.release,
+                          hit: counts.cacheRead === null ? null : counts.cacheRead > 0
+                        }
+                      : null,
                   counts,
                   usageSource: source,
                   rawUsage: state.capture.rawUsage,
@@ -914,6 +928,9 @@ export const layer = (options: ProvidersOptions = {}) =>
                 // Registered observers read the raw events (usage capture, PROVIDERS §9.2).
                 onProviderStreamEvent: (data) => {
                   for (const observer of observers) observer.observe(data, state.capture)
+                  if ((prepared.kind.cacheRelease ?? defaultCacheRelease).after === "first-chunk") {
+                    state.gate?.release("first-chunk")
+                  }
                 },
                 // The caller's fields, then the registered transforms, in registration order.
                 onPayload: async (payload: unknown) => {
@@ -932,6 +949,64 @@ export const layer = (options: ProvidersOptions = {}) =>
                     (current, t) => t.transform(current, { target, messages: request.context.messages, breakpoints }),
                     initial
                   )
+                  if (sources && request.inspection && state.gate === undefined) {
+                    const input = request.inspection
+                    const mappedModel = { ...input.model, mapping: sources.mapping }
+                    const wire = sentWire(final, sources)
+                    const end = Math.max(-1, ...input.request.breakpoints.map((b) => b.message))
+                    const prefix = wire.messages.slice(
+                      0,
+                      wire.messages.findLastIndex((m) => m.inputs.some((i) => i <= end)) + 1
+                    )
+                    if (end >= 0 && prefix.length > 0 && mappedModel.cacheBreakpoints !== "none") {
+                      const ttl = mappedModel.cacheTtlS
+                      const warm =
+                        ttl != null &&
+                        (await Effect.runPromise(
+                          fromStorage(
+                            reader.CachePrefixWarm({
+                              userId: request.userId,
+                              connectionId: prepared.connection.id,
+                              modelId: model.id,
+                              now: Date.now(),
+                              snapshot: JSON.stringify({
+                                inputs: { model: mappedModel },
+                                request: input.request,
+                                wire,
+                                pieces: []
+                              })
+                            })
+                          ),
+                          { signal }
+                        ))
+                      if (!warm) {
+                        const key = createHash("sha256")
+                          .update(
+                            canonicalJson([
+                              request.userId,
+                              prepared.connection.id,
+                              mappedModel.connectionRevision,
+                              model.id,
+                              model.key,
+                              prepared.api,
+                              prepared.kind.id,
+                              sources.mapping?.revision,
+                              prefix.map((m) => m.digest)
+                            ])
+                          )
+                          .digest("hex")
+                        state.gate = stagger.join(key, requestId, prepared.kind.cacheRelease ?? defaultCacheRelease)
+                        if (state.gate.leader) {
+                          if (state.gate.waiting) offer({ type: "waiting-cache", waiting: true })
+                          try {
+                            state.release = await state.gate.wait(signal)
+                          } finally {
+                            offer({ type: "waiting-cache", waiting: false })
+                          }
+                        }
+                      }
+                    }
+                  }
                   if (sources && request.attribution.rolloutId) {
                     const policy = documentedCachePolicy(
                       { provider: prepared.kind.piProvider, api: prepared.api, model: model.key },
@@ -971,13 +1046,23 @@ export const layer = (options: ProvidersOptions = {}) =>
               })
               for await (const event of events) {
                 if ("partial" in event) state.partial = event.partial
+                // Plugins may expose only normalized events, without a raw-event callback.
+                if (
+                  event.type !== "start" &&
+                  event.type !== "error" &&
+                  (prepared.kind.cacheRelease ?? defaultCacheRelease).after === "first-chunk"
+                ) {
+                  state.gate?.release("first-chunk")
+                }
                 if (event.type === "text_delta" || event.type === "thinking_delta" || event.type === "toolcall_delta") {
                   state.firstTokenAt ??= Date.now()
                   if (event.type === "text_delta") offer({ type: "text", delta: event.delta })
                   if (event.type === "thinking_delta") offer({ type: "thinking", delta: event.delta })
                 }
               }
-              return await events.result()
+              const result = await events.result()
+              if (result.stopReason !== "error" && result.stopReason !== "aborted") state.gate?.release("complete")
+              return result
             },
             catch: (error) => error
           }).pipe(
@@ -1024,7 +1109,8 @@ export const layer = (options: ProvidersOptions = {}) =>
                 error ? { ok: false, error } : { ok: true, event: { type: "done", requestId, message, counts, cost } }
               )
             )
-          )
+          ),
+          Effect.ensuring(Effect.sync(() => state.gate?.finish()))
         )
       }
 

@@ -15,7 +15,7 @@ import { Badge } from "../../ui/Surface.tsx"
 import { castView, nameOf, useCast } from "./cast.ts"
 import { displayText } from "./macros.ts"
 import { useMountedTracking, useRenderCount } from "./perf.ts"
-import { type ChatSession, liveText, type Outcome } from "./session.ts"
+import { type ChatSession, liveText, waitingCache, type Outcome } from "./session.ts"
 
 /** A horizontal drag this long on a message swipes to the next or previous version. */
 const SWIPE_PX = 60
@@ -72,6 +72,7 @@ function VersionBody({
   parentSlotId: SlotId | null
 }) {
   const live = useAtomValue(liveText(version.id))
+  const waiting = useAtomValue(waitingCache(version.id))
   useRenderCount("bodyRenders", live !== null ? "liveBodyRenders" : undefined)
   useMountedTracking(version.id)
   const generating = version.status === "generating"
@@ -80,7 +81,7 @@ function VersionBody({
     <div className="flex flex-col gap-2">
       {text === "" && generating ? (
         <p className="text-sm text-muted" aria-live="polite">
-          Writing…
+          {waiting ? "Waiting for the cache…" : "Writing…"}
         </p>
       ) : live === null && version.macroMode === "template" ? (
         <TemplateText version={version} session={session} parentSlotId={parentSlotId} />

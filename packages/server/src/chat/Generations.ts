@@ -19,6 +19,7 @@ const SAVE_EVERY_MS = 2000
 interface Running {
   readonly request: GenerationRequest
   text: string
+  waitingCache: boolean
   savedAt: number
   /** Stopped by the user (`stopped`), as opposed to the server going down (`interrupted`). */
   stopped: boolean
@@ -35,7 +36,9 @@ export class Generations extends Context.Service<
     /** Stops one generation and returns its version as saved; NotFound unless it's running and the user's. */
     readonly stop: (userId: UserId, versionId: VersionId) => Effect.Effect<Version, NotFound>
     /** The text so far of each version generating in a chat. */
-    readonly live: (chatId: ChatId) => Array<{ readonly versionId: VersionId; readonly text: string }>
+    readonly live: (
+      chatId: ChatId
+    ) => Array<{ readonly versionId: VersionId; readonly text: string; readonly waitingCache?: boolean }>
     /** The versions generating in a chat. */
     readonly runningIn: (chatId: ChatId) => Array<VersionId>
     /** After a write moved the send queue: starts the reply it posted, and publishes what changed. */
@@ -150,38 +153,46 @@ export class Generations extends Context.Service<
         }).pipe(Effect.catchCause((cause) => Effect.logWarning("publishing posted messages failed", cause)))
 
       const run = (gen: GeneratorShape, entry: Running) =>
-        gen.generate(entry.request).pipe(
-          Stream.runForEach((chunk) =>
-            Effect.suspend(() => {
-              const offset = entry.text.length
-              entry.text += chunk
-              hub.publish(entry.request.chatId, {
-                _tag: "Delta",
-                versionId: entry.request.versionId,
-                offset,
-                text: chunk
+        gen
+          .generate({
+            ...entry.request,
+            onWaitingCache: (waiting) => {
+              entry.waitingCache = waiting
+              hub.publish(entry.request.chatId, { _tag: "WaitingCache", versionId: entry.request.versionId, waiting })
+            }
+          })
+          .pipe(
+            Stream.runForEach((chunk) =>
+              Effect.suspend(() => {
+                const offset = entry.text.length
+                entry.text += chunk
+                hub.publish(entry.request.chatId, {
+                  _tag: "Delta",
+                  versionId: entry.request.versionId,
+                  offset,
+                  text: chunk
+                })
+                if (Date.now() - entry.savedAt < SAVE_EVERY_MS) return Effect.void
+                entry.savedAt = Date.now()
+                return save(entry, "generating", null).pipe(
+                  // Gone for good (purged from the bin): nothing it writes would be kept.
+                  Effect.catchTag("NotFound", () =>
+                    Effect.suspend(() => {
+                      entry.stopped = true
+                      return Effect.interrupt
+                    })
+                  ),
+                  Effect.tapCause((cause) =>
+                    Cause.hasInterruptsOnly(cause)
+                      ? Effect.void
+                      : Effect.logWarning("saving a generation's text so far failed", cause)
+                  ),
+                  Effect.catchTag(["StorageError", "RpcClientError"], () => Effect.void)
+                )
               })
-              if (Date.now() - entry.savedAt < SAVE_EVERY_MS) return Effect.void
-              entry.savedAt = Date.now()
-              return save(entry, "generating", null).pipe(
-                // Gone for good (purged from the bin): nothing it writes would be kept.
-                Effect.catchTag("NotFound", () =>
-                  Effect.suspend(() => {
-                    entry.stopped = true
-                    return Effect.interrupt
-                  })
-                ),
-                Effect.tapCause((cause) =>
-                  Cause.hasInterruptsOnly(cause)
-                    ? Effect.void
-                    : Effect.logWarning("saving a generation's text so far failed", cause)
-                ),
-                Effect.catchTag(["StorageError", "RpcClientError"], () => Effect.void)
-              )
-            })
-          ),
-          Effect.onExit((exit) => finish(entry, exit))
-        )
+            ),
+            Effect.onExit((exit) => finish(entry, exit))
+          )
 
       const startGeneration = (request: GenerationRequest): Effect.Effect<void> =>
         Effect.gen(function* () {
@@ -189,6 +200,7 @@ export class Generations extends Context.Service<
           const entry: Running = {
             request,
             text: "",
+            waitingCache: false,
             savedAt: Date.now(),
             stopped: false,
             fiber: undefined,
@@ -215,7 +227,11 @@ export class Generations extends Context.Service<
         live: (chatId) =>
           [...running.values()]
             .filter((entry) => entry.request.chatId === chatId)
-            .map((entry) => ({ versionId: entry.request.versionId, text: entry.text })),
+            .map((entry) => ({
+              versionId: entry.request.versionId,
+              text: entry.text,
+              waitingCache: entry.waitingCache
+            })),
         runningIn: (chatId) =>
           [...running.values()]
             .filter((entry) => entry.request.chatId === chatId)

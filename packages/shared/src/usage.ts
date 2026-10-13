@@ -54,6 +54,13 @@ export type UsageSource = typeof UsageSource.Type
 export const Cost = Schema.Struct({ amount: Schema.Number, currency: Schema.String, formula: Schema.String })
 export type Cost = typeof Cost.Type
 
+/** Follower outcome, proved by reported cache tokens; null means usage was unavailable. */
+export const CacheStagger = Schema.Struct({
+  leaderRequestId: LlmRequestId,
+  release: Schema.Literals(["first-chunk", "complete", "timeout", "leader-ended"]),
+  hit: Schema.NullOr(Schema.Boolean)
+})
+
 export class LlmRequest extends Schema.Class<LlmRequest>("LlmRequest")({
   id: LlmRequestId,
   connectionId: ConnectionId,
@@ -70,6 +77,7 @@ export class LlmRequest extends Schema.Class<LlmRequest>("LlmRequest")({
   startedAt: Schema.Number,
   firstTokenAt: Schema.NullOr(Schema.Number),
   endedAt: Schema.NullOr(Schema.Number),
+  cacheStagger: Schema.optionalKey(Schema.NullOr(CacheStagger)),
   counts: TokenCounts,
   usageSource: UsageSource,
   reportedCost: Schema.NullOr(Schema.Number),

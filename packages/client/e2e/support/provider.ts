@@ -1,7 +1,7 @@
 // A fake OpenAI-compatible provider on loopback: it lists two models, streams the same reply
 // to every chat completion, reporting a cache read, and records the keys and request bodies it
 // was sent. No real provider or key is ever used.
-import { createServer } from "node:http"
+import { createServer, type ServerResponse } from "node:http"
 import type { AddressInfo } from "node:net"
 
 export interface FakeProvider {
@@ -10,6 +10,8 @@ export interface FakeProvider {
   readonly keys: ReadonlyArray<string>
   /** The chat completion requests received, parsed, in order. */
   readonly completions: ReadonlyArray<{ readonly messages: ReadonlyArray<{ role: string; content: string }> }>
+  readonly hold: () => void
+  readonly release: () => void
   readonly stop: () => Promise<void>
 }
 
@@ -22,6 +24,22 @@ const chunk = (body: Record<string, unknown>) =>
 export const startProvider = async (): Promise<FakeProvider> => {
   const keys: Array<string> = []
   const completions: Array<FakeProvider["completions"][number]> = []
+  let holding = false
+  const held: Array<() => void> = []
+  const respond = (response: ServerResponse) => {
+    response.writeHead(200, { "content-type": "text/event-stream" })
+    response.write(
+      chunk({ choices: [{ index: 0, delta: { role: "assistant", content: REPLY }, finish_reason: null }] })
+    )
+    response.write(chunk({ choices: [{ index: 0, delta: {}, finish_reason: "stop" }] }))
+    response.write(
+      chunk({
+        choices: [],
+        usage: { prompt_tokens: 120, completion_tokens: 6, prompt_tokens_details: { cached_tokens: 100 } }
+      })
+    )
+    response.end("data: [DONE]\n\n")
+  }
   const server = createServer((request, response) => {
     const auth = request.headers.authorization
     if (auth?.startsWith("Bearer ")) keys.push(auth.slice(7))
@@ -42,18 +60,8 @@ export const startProvider = async (): Promise<FakeProvider> => {
       request.on("data", (data: Buffer) => (body += data.toString()))
       request.on("end", () => {
         completions.push(JSON.parse(body) as FakeProvider["completions"][number])
-        response.writeHead(200, { "content-type": "text/event-stream" })
-        response.write(
-          chunk({ choices: [{ index: 0, delta: { role: "assistant", content: REPLY }, finish_reason: null }] })
-        )
-        response.write(chunk({ choices: [{ index: 0, delta: {}, finish_reason: "stop" }] }))
-        response.write(
-          chunk({
-            choices: [],
-            usage: { prompt_tokens: 120, completion_tokens: 6, prompt_tokens_details: { cached_tokens: 100 } }
-          })
-        )
-        response.end("data: [DONE]\n\n")
+        if (holding) held.push(() => respond(response))
+        else respond(response)
       })
       return
     }
@@ -65,6 +73,17 @@ export const startProvider = async (): Promise<FakeProvider> => {
     baseUrl: `http://127.0.0.1:${port}/v1`,
     keys,
     completions,
-    stop: () => new Promise((done) => server.close(() => done()))
+    hold: () => {
+      holding = true
+    },
+    release: () => {
+      holding = false
+      for (const send of held.splice(0)) send()
+    },
+    stop: () =>
+      new Promise((done) => {
+        server.closeAllConnections()
+        server.close(() => done())
+      })
   }
 }

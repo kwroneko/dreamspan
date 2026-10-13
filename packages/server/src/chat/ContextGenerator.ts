@@ -113,6 +113,11 @@ export const layer = Layer.effect(
               attribution: { purpose: "generation", chatId, rolloutId, versionId }
             })
             .pipe(
+              Stream.tap((event) =>
+                Effect.sync(() => {
+                  if (event.type === "waiting-cache") request.onWaitingCache?.(event.waiting)
+                })
+              ),
               Stream.filter((event) => event.type === "text"),
               Stream.map((event) => event.delta),
               Stream.mapError((error) =>

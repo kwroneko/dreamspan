@@ -4,6 +4,7 @@ import { openAICompletionsApi, openAIResponsesApi, anthropicMessagesApi, googleG
 // Kinds are registered in picker order: Chat Completions first, then Anthropic (owner,
 // 2026-10-10).
 import { Effect, Layer } from "effect"
+import { defaultCacheRelease } from "./cacheStagger.ts"
 import { applyAnthropicBreakpoints } from "./breakpoints.ts"
 import { piCatalogs, withCatalog } from "./catalog.ts"
 import { modelListers } from "./modelLists.ts"
@@ -21,6 +22,7 @@ const kind = (
   const { list, ...rest } = entry
   const catalog = piCatalogs[entry.piProvider]
   const self: ProviderKindEntry = {
+    cacheRelease: defaultCacheRelease,
     ...rest,
     acceptsFetch: entry.acceptsFetch ?? true,
     ...(catalog ? { catalog } : {}),

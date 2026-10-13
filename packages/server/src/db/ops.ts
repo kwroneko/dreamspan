@@ -45,6 +45,7 @@ import {
   Cost,
   LlmRequest,
   LlmRequestId,
+  CacheStagger,
   RequestPurpose,
   RequestStatus,
   TokenCounts,
@@ -173,6 +174,7 @@ const OpenLlmRequest = Schema.Struct({
 
 /** Closes a ledger row with what the request produced. */
 const CloseLlmRequest = Schema.Struct({
+  cacheStagger: Schema.optionalKey(Schema.NullOr(CacheStagger)),
   id: LlmRequestId,
   status: RequestStatus,
   endedAt: Schema.Number,
@@ -1642,6 +1644,17 @@ export class ReadOps extends RpcGroup.make(
     error: Schema.Union([NotFound, StorageError])
   }),
   /** Whether the chat's provider cache is likely warm for its next request (DESIGN §5.5). */
+  Rpc.make("CachePrefixWarm", {
+    payload: {
+      userId: UserId,
+      connectionId: ConnectionId,
+      modelId: ModelId,
+      snapshot: Schema.String,
+      now: Schema.Number
+    },
+    success: Schema.Boolean,
+    error: Schema.Union([NotFound, StorageError])
+  }),
   Rpc.make("CacheWarmth", {
     payload: { userId: UserId, chatId: ChatId },
     success: Schema.NullOr(CacheWarmth),

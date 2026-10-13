@@ -168,6 +168,7 @@ export interface LlmRequestRow {
   readonly reported_cost: number | null
   readonly cost: number | null
   readonly cost_currency: string | null
+  readonly cache_stagger_json: string | null
   readonly cost_formula: string | null
 }
 
@@ -188,6 +189,7 @@ export const toLlmRequest = (row: LlmRequestRow) =>
     startedAt: row.started_at,
     firstTokenAt: row.first_token_at,
     endedAt: row.ended_at,
+    cacheStagger: row.cache_stagger_json ? JSON.parse(row.cache_stagger_json) : null,
     counts: {
       inputUncached: row.input_uncached,
       cacheRead: row.cache_read,

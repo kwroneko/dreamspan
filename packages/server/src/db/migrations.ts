@@ -99,6 +99,12 @@ export const migrations = {
   "0018_draft_displacement_receipts": runAll([
     `ALTER TABLE composer_save_receipts ADD COLUMN displaced_json TEXT
       CHECK (displaced_json IS NULL OR json_valid(displaced_json))`
+  ]),
+  "0019_cache_stagger": runAll([
+    `ALTER TABLE llm_requests ADD COLUMN cache_stagger_json TEXT CHECK (cache_stagger_json IS NULL OR json_valid(cache_stagger_json))`,
+    `CREATE TRIGGER llm_requests_stagger_frozen BEFORE UPDATE OF cache_stagger_json ON llm_requests
+      WHEN OLD.status <> 'running' AND NEW.cache_stagger_json IS NOT OLD.cache_stagger_json
+      BEGIN SELECT RAISE(ABORT, 'a closed request is a record'); END`
   ])
 }
 
