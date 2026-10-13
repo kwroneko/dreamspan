@@ -5,6 +5,10 @@ import type { Browser } from "@playwright/test"
 import type { CardDoc } from "@rp/shared/docs/card.ts"
 import type { NoteDoc } from "@rp/shared/docs/note.ts"
 import { Effect } from "effect"
+import { ReportBuilder } from "@rp/shared/importReport.ts"
+import { parseStChatPart } from "../../src/formats/stChat.ts"
+import { parseStSettings } from "../../src/formats/stData.ts"
+import { chatStateChange } from "../../src/importer/stMapping.ts"
 import { chatCompletionsFields } from "../../src/assembler/wire.ts"
 import { importCard } from "../../src/formats/cardImport.ts"
 import { importStPreset } from "../../src/formats/preset.ts"
@@ -53,6 +57,9 @@ interface Config {
   readonly postProcessing?: string
   readonly summary?: Summary
   readonly authorNote?: AuthorNote
+  readonly defaultAuthorNote?: boolean
+  /** An existing activated note edited to interval zero stays active in the chat state. */
+  readonly activeAuthorNote?: boolean
   /** Where ST puts the persona's description, and whether it sends it there in this case. */
   readonly persona?: PersonaPlacement & { readonly sent: boolean }
 }
@@ -105,34 +112,70 @@ const authorNote = (position: number, depth: number, role: number, interval = 1)
 })
 
 /** The note our ST import makes of it (importer/stMapping.ts), and whether it turns it on. */
-const authorNoteInput = (note: AuthorNote): NoteInput => ({
-  entity: "author-note",
-  revision: "author-note-rev",
-  first: false,
-  doc: {
-    schema_version: 1,
-    title: "Author's Note",
-    content: note.text,
-    placement:
-      note.position === 0
-        ? {
-            mode: "section",
-            section: "after_main_prompt",
-            role: (["system", "user", "assistant"] as const)[note.role]!
+const authorNoteInput = (note: AuthorNote, defaults = false): NoteInput | null => {
+  const issues = new ReportBuilder()
+  const header = parseStChatPart(
+    json({
+      chat_metadata: defaults
+        ? {}
+        : {
+            note_prompt: note.text,
+            note_position: note.position,
+            note_depth: note.depth,
+            note_role: note.role,
+            note_interval: note.interval
           }
-        : note.position === 2
+    }),
+    { first: true, firstIndex: 0, carryAt: null },
+    issues
+  ).header
+  const settings = parseStSettings(
+    json({
+      extension_settings: {
+        note: defaults
           ? {
-              mode: "section",
-              section: "before_main_prompt",
-              role: (["system", "user", "assistant"] as const)[note.role]!
+              default: note.text,
+              defaultPosition: note.position,
+              defaultDepth: note.depth,
+              defaultRole: note.role,
+              defaultInterval: note.interval
             }
-          : { mode: "depth", depth: note.depth, role: (["system", "user", "assistant"] as const)[note.role]! },
-    owner: { chat: "chat-1" as never },
-    exportable: true,
-    kind: "author_note",
-    interval: note.interval
-  }
-})
+          : {}
+      }
+    }),
+    issues
+  )
+  const mapped = chatStateChange(
+    { settings, cards: new Map(), personas: new Map(), personaNames: new Map(), worlds: new Map() },
+    {
+      header,
+      link: { card: null, group: null },
+      spoke: new Set(),
+      summaries: [],
+      messages: 2,
+      run: { length: 0, firstSlot: null, throughSlot: null }
+    },
+    null,
+    true
+  ).notes.find((n) => n.kind === "author_note")
+  return mapped
+    ? {
+        entity: "author-note",
+        revision: "author-note-rev",
+        first: false,
+        doc: {
+          schema_version: 1,
+          title: mapped.title,
+          content: mapped.contents[0]!,
+          placement: mapped.placement,
+          owner: { chat: "chat-1" as never },
+          exportable: true,
+          kind: "author_note",
+          ...(mapped.interval !== undefined ? { interval: mapped.interval } : {})
+        }
+      }
+    : null
+}
 
 /** The note our ST import makes of the fixture persona placed there (importer/stParse.ts), or none in the prompt. */
 const personaNoteInput = async (fixtures: FixtureSet, placement: PersonaPlacement): Promise<NoteInput | null> => {
@@ -181,6 +224,7 @@ const ourRequest = async (
   const document = { ...parsed, regex_approved: true }
   const card = await imported(fixtures.cards.find((c) => c.name === character)!.png, character)
   const persona = run(importCard(json({ name: fixtures.persona.name, description: fixtures.persona.description }))).card
+  const importedAuthorNote = config.authorNote ? authorNoteInput(config.authorNote, config.defaultAuthorNote) : null
   const personaNote = config.persona ? await personaNoteInput(fixtures, config.persona) : null
   const lines: Array<FixtureMessage> = config.overMaximum
     ? Array.from({ length: 40 }, (_, i) => ({
@@ -225,7 +269,7 @@ const ourRequest = async (
           : []),
         ...(personaNote ? [personaNote] : []),
         ...(config.summary ? [summaryNote(config.summary)] : []),
-        ...(config.authorNote ? [authorNoteInput(config.authorNote)] : [])
+        ...(importedAuthorNote ? [importedAuthorNote] : [])
       ],
       lorebooks: config.lorebook
         ? [{ id: gateLore.id, entity: "gate-book", revision: "gate-rev", doc: gateLore.document }]
@@ -240,7 +284,9 @@ const ourRequest = async (
             ]
           : []),
         ...(config.summary ? [activate("summary")] : []),
-        ...(config.authorNote && config.authorNote.interval > 0 ? [activate("author-note")] : [])
+        ...(config.authorNote && (config.activeAuthorNote || config.authorNote.interval > 0)
+          ? [activate("author-note")]
+          : [])
       ],
       preset: document,
       model: {
@@ -376,6 +422,30 @@ export const compareAssembly = async (
         authorNote: authorNote(1, 1, 1, 0),
         persona: { position, depth: 2, role: 0, sent: false }
       },
+      ...[false, true].flatMap((defaultAuthorNote) =>
+        [
+          authorNote(1, 0, 1),
+          authorNote(0, 4, 1),
+          authorNote(2, 4, 2),
+          authorNote(1, 0, 0, 0),
+          authorNote(1, 0, 0, 99)
+        ].map((note) => ({
+          name: `default, persona at the ${where} of an empty imported ${defaultAuthorNote ? "default" : "chat"} author's note, position ${note.position}, interval ${note.interval}`,
+          presets: ["default"],
+          lorebook: true,
+          defaultAuthorNote,
+          authorNote: { ...note, text: "" },
+          persona: { position, depth: 2, role: 0, sent: note.interval === 1 }
+        }))
+      ),
+      {
+        name: `default, persona at the ${where} of an active author's note edited to interval zero`,
+        presets: ["default"],
+        lorebook: true,
+        activeAuthorNote: true,
+        authorNote: authorNote(1, 0, 0, 0),
+        persona: { position, depth: 2, role: 0, sent: false }
+      },
       {
         name: `default, persona at the ${where} of an author's note that is not due`,
         presets: ["default"],
@@ -457,7 +527,7 @@ export const compareAssembly = async (
       if (config.authorNote) {
         const sent = JSON.stringify(body).includes("pretends not to notice")
         if (config.authorNote.interval !== 1) everyOther.push(sent)
-        if (config.authorNote.interval === 1 && !sent) {
+        if (config.authorNote.text !== "" && config.authorNote.interval === 1 && !sent) {
           differences.push(`${label}: ST didn't send the author's note, so this compares nothing`)
         }
         notes.push(`${label}: ST ${sent ? "sent" : "didn't send"} the author's note`)

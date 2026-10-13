@@ -555,6 +555,86 @@ describe("the context assembler", () => {
         expect(sent(every)).toEqual(["system: Tobin draws maps.\nTobin is soaked."])
       })
 
+      for (const layout of ["concat", "swap_tail"] as const) {
+        for (const legacy of [false, true]) {
+          const description = (placement: NoteDoc["placement"]) => {
+            const note = persona(placement)
+            if (!legacy) return note
+            const { kind: _, ...doc } = note.doc
+            return { ...note, doc }
+          }
+          it(`keeps a ${legacy ? "legacy" : "current"} persona description placed with its card in ${layout}`, async () => {
+            const snapshot = await assembled(
+              chat({
+                notes: [description({ mode: "section", section: "card" })],
+                events: [at(null, { key: "layout.cards", value: layout })]
+              })
+            )
+            expect(sent(snapshot)).toEqual(['system: <persona name="Tobin">\nTobin draws maps.\n</persona>'])
+            expect(contents(snapshot).join("\n").split("Tobin draws maps.")).toHaveLength(2)
+          })
+          it(`keeps ordinary card notes beside a relocated ${legacy ? "legacy" : "current"} persona in ${layout}`, async () => {
+            const cardNote = persona({ mode: "section", section: "card" })
+            const { kind: _, ...ordinaryDoc } = cardNote.doc
+            const extra: NoteInput = {
+              ...cardNote,
+              entity: "ordinary-note",
+              first: false,
+              doc: {
+                ...ordinaryDoc,
+                title: "Scene",
+                content: "ORDINARY_CARD_NOTE"
+              }
+            }
+            const snapshot = await assembled(
+              chat({
+                notes: [description({ mode: "depth", depth: 0, role: "user" }), extra],
+                events: [...on("ordinary-note"), at(null, { key: "layout.cards", value: layout })]
+              })
+            )
+            expect(sent(snapshot)).toEqual(["user: Tobin draws maps."])
+            expect(contents(snapshot).filter((line) => line.includes("ORDINARY_CARD_NOTE"))).toEqual([
+              'system: <persona name="Tobin">\nORDINARY_CARD_NOTE\n</persona>'
+            ])
+            const empty = await assembled(
+              chat({
+                notes: [description({ mode: "depth", depth: 0, role: "user" })],
+                events: [at(null, { key: "layout.cards", value: layout })]
+              })
+            )
+            expect(contents(empty).join("\n")).not.toContain("<persona")
+          })
+        }
+      }
+
+      for (const layout of [null, "concat", "swap_tail"] as const) {
+        for (const attachment of [top, bottom]) {
+          it(`turning an active author's note interval from 1 to 0 disables its attachments in ${layout ?? "ST"} at ${attachment.doc.placement.mode === "section" ? attachment.doc.placement.section : ""}`, async () => {
+            const book = loreBook([
+              loreEntry({ content: "LORE_TOP", constant: true, position: "an_top" }, 0),
+              loreEntry({ content: "LORE_BOTTOM", constant: true, position: "an_bottom" }, 1)
+            ])
+            const fixture = chat({
+              notes: [attachment, authorNote(inChat, { interval: 1 })],
+              // Our layouts put all lore at the tail; ST attaches these entries to the note.
+              lorebooks: layout ? [] : [{ id: "book", entity: "book", revision: "book-rev", doc: book.document }],
+              events: [
+                ...on("note-z-author"),
+                at(null, { key: "lorebook.attach", value: { ref: "book" as never } }),
+                ...(layout ? [at(null, { key: "layout.cards", value: layout })] : [])
+              ]
+            })
+            expect(sent(await assembled(fixture))).toHaveLength(1)
+            const snapshot = await assembled({ ...fixture, notes: [attachment, authorNote(inChat, { interval: 0 })] })
+            const text = contents(snapshot).join("\n")
+            expect(text).not.toContain("draws maps")
+            expect(text).not.toContain("is soaked")
+            expect(text).not.toContain("LORE_TOP")
+            expect(text).not.toContain("LORE_BOTTOM")
+          })
+        }
+      }
+
       it("joins the author's note as one piece of the context", async () => {
         // The lore comes with the other tests; here only that the persona is outside the note.
         const snapshot = await assembled(chat({ notes: [top, authorNote(inChat)], events: on("note-z-author") }))

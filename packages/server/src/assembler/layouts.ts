@@ -38,13 +38,21 @@ export const cardBlock = (
   ])
 }
 
-/** A persona's description, labelled with its name. */
+/** A persona's notes and its description unless placed elsewhere, labelled with its name. */
 export const personaBlock = (
   assembly: Assembly,
   card: CardInput,
   cardText: CardText,
   top: ReadonlyArray<Text> = []
-): Text => block(assembly, "persona", card, [...top, cardText(assembly, card, "description", { user: card.doc.name })])
+): Text | null => {
+  const parts = [
+    ...top,
+    ...(assembly.placedPersonas?.has(card.entity)
+      ? []
+      : [cardText(assembly, card, "description", { user: card.doc.name })])
+  ]
+  return parts.some((part) => part.text) ? block(assembly, "persona", card, parts) : null
+}
 
 /**
  * The tail directive (DESIGN §5.3): the preset's own group nudge naming the speaker, or,

@@ -213,7 +213,7 @@ const membership = (folder: FolderContext, link: Link, header: StChatHeader | nu
 /** The author's note: the chat's own, or the default ST gives a chat without one. */
 const authorNoteOf = (folder: FolderContext, header: StChatHeader | null): StImportNote | null => {
   const note = header?.authorNote ?? folder.settings?.defaultAuthorNote ?? null
-  if (note === null || note.content.trim() === "") return null
+  if (note === null) return null
   return {
     kind: "author_note",
     title: "Author's Note",

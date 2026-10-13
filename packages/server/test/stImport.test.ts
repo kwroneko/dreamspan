@@ -209,7 +209,22 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
       assert.strictEqual(bobSlots.filter((s) => s.hidden === 1).length, 15)
       const offer = report.hiddenRuns.find((run) => run.chatId === bob)!
       assert.deepStrictEqual([offer.hidden, offer.throughSlotId, offer.summaryCovers], [15, bobSlots[14]!.id, true])
-      const [summary] = noteDocs(bob)
+      const bobNotes = noteDocs(bob)
+      const summary = bobNotes.find((note) => note.doc.kind === "imported_summary")
+      const emptyAuthor = bobNotes.find((note) => note.doc.kind === "author_note")!
+      assert.deepStrictEqual(emptyAuthor.doc, {
+        schema_version: 1,
+        title: "Author's Note",
+        content: "",
+        placement: { mode: "depth", depth: 4, role: "system" },
+        owner: { chat: bob },
+        exportable: true,
+        kind: "author_note",
+        interval: 1
+      })
+      const bobState = yield* stateAt(bob, null)
+      assert.strictEqual(bobState.authorNote, emptyAuthor.id)
+      assert.include(bobState.activeNotes, emptyAuthor.id)
       assert.strictEqual(summary!.revisions, 2)
       assert.deepStrictEqual(summary!.doc, {
         schema_version: 1,

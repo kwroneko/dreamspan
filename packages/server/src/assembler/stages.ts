@@ -266,7 +266,10 @@ const notesStage: AssemblerStage = {
           return card !== null && placesDescription(note) && personas.some((p) => p.entity === card) ? [card] : []
         })
       )
-      assembly.authorNoteOff = notes.some((note) => isAuthorNote(state, note) && !active.includes(note))
+      // Interval zero remains off even when activated, rather than becoming a missing note after gating.
+      assembly.authorNoteOff = notes.some(
+        (note) => isAuthorNote(state, note) && (!active.includes(note) || note.doc.interval === 0)
+      )
       // The path is counted only for an interval that needs it: it's a walk to the root.
       const userMessages = active.some((note) => (note.doc.interval ?? 0) > 1)
         ? yield* sources.userMessages(
@@ -1143,8 +1146,11 @@ const composeStage = sync("compose", (assembly) => {
     pendingNotes = placedNotes(assembly, [char], persona ? [persona] : [])
     newChat = optional("utility.new_chat_prompt", utility.new_chat_prompt)
   } else {
-    const blocks = (cards: ReadonlyArray<CardInput>, block: typeof cardBlock, persona = false) =>
-      cards.map((card) => block(assembly, card, cardText, cardNotes(assembly, card, persona ? null : card)))
+    const blocks = (cards: ReadonlyArray<CardInput>, block: typeof cardBlock | typeof personaBlock, persona = false) =>
+      cards.flatMap((card) => {
+        const text = block(assembly, card, cardText, cardNotes(assembly, card, persona ? null : card))
+        return text ? [text] : []
+      })
     const characters = mode.layout === "swap_tail" ? [] : blocks(cast.characters, cardBlock)
     const joined = (id: string, texts: ReadonlyArray<Text>): Text | null => {
       if (texts.length === 0) return null
@@ -1156,14 +1162,7 @@ const composeStage = sync("compose", (assembly) => {
       description: joined("characters", characters),
       personality: null,
       scenario: null,
-      persona: joined(
-        "personas",
-        blocks(
-          cast.personas.filter((p) => !assembly.placedPersonas?.has(p.entity)),
-          personaBlock,
-          true
-        )
-      )
+      persona: joined("personas", blocks(cast.personas, personaBlock, true))
     }
     const tailCards =
       mode.layout === "swap_tail" && cast.speaker && !cast.personas.includes(cast.speaker) ? [cast.speaker] : []

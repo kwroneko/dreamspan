@@ -111,6 +111,9 @@ export const parseStSettings = (bytes: Uint8Array, issues: ReportBuilder): StSet
   const memory = object(extensions.memory)
   const disabled = strings(extensions.disabledExtensions, 1000)
   const note = object(extensions.note)
+  const hasNoteSettings = [note.defaultPosition, note.defaultDepth, note.defaultRole, note.defaultInterval].some(
+    (value) => typeof value === "number" && Number.isFinite(value)
+  )
   const characterNotes = (Array.isArray(note.chara) ? note.chara : []).filter(
     (entry) => object(entry).useChara === true
   )
@@ -129,7 +132,7 @@ export const parseStSettings = (bytes: Uint8Array, issues: ReportBuilder): StSet
       return typeof lore.name === "string" ? [{ card: bounded(lore.name), worlds: strings(lore.extraBooks, 100) }] : []
     }),
     defaultAuthorNote: authorNoteFrom(
-      { ...note, content: typeof note.default === "string" && note.default !== "" ? note.default : null },
+      { ...note, content: typeof note.default === "string" ? note.default : hasNoteSettings ? "" : null },
       {
         content: "content",
         position: "defaultPosition",
