@@ -128,11 +128,27 @@ export function EnableLcmDialog({
     if (offer === null) return
     setPending(true)
     const result = await session.call((client) =>
-      client("EnableLcm", { chatId: session.id, leafSlotId: offer.leafSlotId, choice })
+      client("EnableLcm", {
+        chatId: session.id,
+        leafSlotId: offer.leafSlotId,
+        choice,
+        approved: choice === "adopt" ? offer.adopted! : offer.fromScratch
+      })
     )
     setPending(false)
     if (result.ok) onOpenChange(false)
-    else setError(result.error)
+    else {
+      setError(result.error)
+      if (result.error.tag === "LcmEstimateChanged") {
+        const updated = await session.call((client) =>
+          client("GetLcmEnableOffer", { chatId: session.id, leafSlotId: offer.leafSlotId })
+        )
+        if (updated.ok) {
+          setOffer(updated.value)
+          if (updated.value.adopted === null) setChoice("scratch")
+        }
+      }
+    }
   }
   const estimate = offer === null ? null : choice === "adopt" && offer.adopted ? offer.adopted : offer.fromScratch
   return (

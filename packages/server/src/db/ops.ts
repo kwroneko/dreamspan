@@ -176,6 +176,15 @@ export class ConnectionForRequest extends Schema.Class<ConnectionForRequest>("Co
 const LedgerCursor = Schema.Struct({ startedAt: Schema.Number, id: Schema.String })
 
 /** Opens a ledger row before a request is sent (PROVIDERS §9.1). */
+const ImportedLcmSummary = Schema.Struct({
+  noteEntity: Schema.String,
+  content: Schema.String,
+  firstSlotId: SlotId,
+  lastSlotId: SlotId,
+  slotCount: Schema.Int,
+  hidden: Schema.Int
+})
+
 const OpenLlmRequest = Schema.Struct({
   id: LlmRequestId,
   connectionId: ConnectionId,
@@ -187,7 +196,10 @@ const OpenLlmRequest = Schema.Struct({
   api: Schema.String,
   provider: Schema.String,
   modelKey: Schema.String,
-  startedAt: Schema.Number
+  startedAt: Schema.Number,
+  reservation: Schema.optionalKey(
+    Schema.Struct({ tokens: Schema.Int, cost: Schema.NullOr(Schema.Number), currency: Schema.NullOr(Schema.String) })
+  )
 })
 
 /** Closes a ledger row with what the request produced. */
@@ -428,8 +440,28 @@ export class WriteOps extends RpcGroup.make(
    * `adopt`, records that summary as the first level over it; writes the switch; and, when the
    * work has jobs, records the backfill with the approved spend. Nothing is generated.
    */
+  Rpc.make("StageLcmEnable", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      leafSlotId: SlotId,
+      choice: EnableChoice,
+      approved: BackfillApproval,
+      imported: Schema.NullOr(ImportedLcmSummary),
+      runId: Schema.optionalKey(Schema.String)
+    },
+    success: Schema.Struct({ runId: Schema.String, ready: Schema.Boolean }),
+    error: Schema.Union([StorageError, NotFound])
+  }),
   Rpc.make("EnableLcm", {
-    payload: { userId: UserId, chatId: ChatId, leafSlotId: SlotId, choice: EnableChoice, approved: BackfillApproval },
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      leafSlotId: SlotId,
+      choice: EnableChoice,
+      approved: BackfillApproval,
+      runId: Schema.optionalKey(Schema.String)
+    },
     success: Schema.Struct({ unhidden: Schema.Int, summaryId: Schema.NullOr(Schema.String) }),
     error: Schema.Union([StorageError, NotFound])
   }),
@@ -883,7 +915,7 @@ export class WriteOps extends RpcGroup.make(
   // --- The usage ledger (PROVIDERS §9.1).
   Rpc.make("OpenLlmRequest", {
     payload: { userId: UserId, request: OpenLlmRequest },
-    success: Schema.Void,
+    success: Schema.Boolean,
     error: Schema.Union([NotFound, StorageError])
   }),
   Rpc.make("CloseLlmRequest", {
@@ -1441,6 +1473,11 @@ export class ReadOps extends RpcGroup.make(
     error: Schema.Union([StorageError, NotFound])
   }),
   /** The imported summary a chat could adopt and the work enabling LCM would do, measured (priced by the caller). */
+  Rpc.make("ReadLcmImported", {
+    payload: { userId: UserId, chatId: ChatId, leafSlotId: SlotId },
+    success: Schema.NullOr(ImportedLcmSummary),
+    error: Schema.Union([StorageError, NotFound])
+  }),
   Rpc.make("EstimateBackfill", {
     payload: { userId: UserId, chatId: ChatId, leafSlotId: SlotId },
     success: BackfillBasis,

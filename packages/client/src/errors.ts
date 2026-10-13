@@ -1,5 +1,6 @@
 // Errors as the user reads them. Each tag the server sends (@rp/shared/errors.ts) gets a
 // sentence; the server's own messages are shown as given, since they name the problem.
+import { LcmEstimateChanged } from "@rp/shared/lcm.ts"
 import { BinChanged } from "@rp/shared/bin.ts"
 import { InvalidNetworkSettings, Unauthorized } from "@rp/shared/api.ts"
 import {
@@ -49,6 +50,7 @@ const stale = (entity: string) =>
   )
 
 const describeError = (error: unknown): AppError => {
+  if (error instanceof LcmEstimateChanged) return make("LcmEstimateChanged", error.message)
   if (error instanceof Unauthorized) return make("Unauthorized", "Your session has ended. Log in again.")
   if (error instanceof RpcClientError.RpcClientError)
     return make("RpcClientError", "Can't reach the server. Check that it's running.")

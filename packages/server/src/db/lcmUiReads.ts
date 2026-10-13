@@ -121,7 +121,7 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
           selected: string
         }>`WITH RECURSIVE chosen(id,n) AS (
           SELECT s.id,0 FROM summaries s JOIN chats c ON c.id=s.chat_id
-            WHERE s.id=${summaryId} AND c.owner_user_id=${userId} AND c.deleted_at IS NULL
+            WHERE s.id=${summaryId} AND s.sealed=1 AND c.owner_user_id=${userId} AND c.deleted_at IS NULL
           UNION ALL SELECT x.chosen_id,p.n+1 FROM lcm_summary_choices x JOIN chosen p ON x.summary_id=p.id
             WHERE x.chosen_id<>p.id AND p.n<64
         ) SELECT s.selected_revision_id AS selected FROM chosen p JOIN summaries s ON s.id=p.id ORDER BY p.n DESC LIMIT 1`

@@ -407,13 +407,26 @@ function Backfill({ session, lcm }: { session: ChatSession; lcm: LcmState }) {
   const act = async (action: "pause" | "continue" | "summarizeNow") => {
     setPending(action)
     const result = await session.call((client) =>
-      client("SetLcmBackfill", { chatId: session.id, leafSlotId: lcm.leafSlotId, action })
+      client("SetLcmBackfill", {
+        chatId: session.id,
+        leafSlotId: lcm.leafSlotId,
+        action,
+        ...(action === "continue" && backfill ? { approved: backfill.remaining } : {})
+      })
     )
     setPending(null)
     if (result.ok) {
       setBackfill(result.value)
       setError(null)
-    } else setError(result.error)
+    } else {
+      setError(result.error)
+      if (result.error.tag === "LcmEstimateChanged") {
+        const updated = await session.call((client) =>
+          client("GetLcmBackfill", { chatId: session.id, leafSlotId: lcm.leafSlotId })
+        )
+        if (updated.ok) setBackfill(updated.value)
+      }
+    }
   }
   if (backfill === null || backfill.state === "done") return <Problem error={error} />
   const jobs = backfill.remaining.l1Jobs + backfill.remaining.condensations

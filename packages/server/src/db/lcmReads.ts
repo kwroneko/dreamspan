@@ -1,3 +1,4 @@
+import { contextExcluded } from "./lcmVisibility.ts"
 import { Summary } from "@rp/shared/lcm.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { Effect, Schema } from "effect"
@@ -39,7 +40,7 @@ export const readSummary = (
           FROM summaries s JOIN chats c ON c.id = s.chat_id
           JOIN summary_revisions r ON r.summary_id = s.id AND r.id = coalesce(${summaryId === id ? (revision ?? null) : null}, s.selected_revision_id)
           JOIN slots a ON a.id = s.first_slot_id JOIN slots b ON b.id = s.last_slot_id
-          WHERE s.id = ${summaryId} AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL`
+          WHERE s.id = ${summaryId} AND s.sealed = 1 AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL`
       if (!row) return yield* new NotFound({ entity: "summary", id: summaryId })
       const inputs = yield* sql<{
         slot_id: string
@@ -48,7 +49,7 @@ export const readSummary = (
         effective: string | null
         current_amends: number
       }>`
-        SELECT i.*, CASE WHEN s.deleted_at IS NULL AND s.purged_at IS NULL AND s.context_excluded = 0
+        SELECT i.*, CASE WHEN s.deleted_at IS NULL AND s.purged_at IS NULL AND ${sql.literal(contextExcluded())} = 0
           AND v.deleted_at IS NULL AND v.purged_at IS NULL AND v.status NOT IN ('generating', 'failed') AND length(v.content) > 0
           THEN v.id ELSE NULL END AS effective, (SELECT count(*) FROM version_history h WHERE h.version_id = v.id) AS current_amends
         FROM summary_inputs i JOIN slots s ON s.id = i.slot_id LEFT JOIN versions v ON v.id = s.selected_version_id

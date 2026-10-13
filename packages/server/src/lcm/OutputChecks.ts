@@ -2,6 +2,7 @@ import type { ChatId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { Context, Effect, Layer } from "effect"
 import { makeRegistry, type Registry } from "../registry.ts"
+import type { ProviderError } from "@rp/shared/errors.ts"
 import type { JudgeUnavailable } from "../decision/RefusalJudge.ts"
 
 /**
@@ -19,7 +20,7 @@ export interface SummaryCheck {
     readonly rolloutId: string
     /** The instruction the output answers. */
     readonly instruction?: string
-  }) => Effect.Effect<CheckVerdict, JudgeUnavailable>
+  }) => Effect.Effect<CheckVerdict, JudgeUnavailable | ProviderError>
 }
 
 /**

@@ -10,6 +10,7 @@ import { Effect } from "effect"
 import { type FakeProvider, startProvider } from "./support/provider.ts"
 import { loginCookie, withCookie } from "./support/rpc.ts"
 import { ADMIN, serverPerFile, withAdmin } from "./support/server.ts"
+import { fixtureSql } from "../../server/test/support/lcmFixtures.ts"
 import { IMPORTED_SUMMARY, writeStFolder } from "./support/stFiles.ts"
 
 const server = serverPerFile(withAdmin)
@@ -19,7 +20,7 @@ let provider: FakeProvider
 let cookie: string
 let root = ""
 
-const CHATS = ["Bob - desktop", "Bob - phone", "Bob - scratch"]
+const CHATS = ["Bob - desktop", "Bob - phone", "Bob - scratch", "Bob - approval"]
 
 test.beforeAll(async () => {
   provider = await startProvider()
@@ -62,7 +63,7 @@ test("import the folder", async ({ page }) => {
   await page.goto(`${server().url}/import/st`)
   await page.getByLabel("Choose the folder").setInputFiles(join(root, "ST"))
   await page.getByRole("button", { name: "Import", exact: true }).click()
-  await expect(page.getByRole("list", { name: "Imported" })).toContainText("Chats: 3 added")
+  await expect(page.getByRole("list", { name: "Imported" })).toContainText("Chats: 4 added")
 })
 
 const openChat = async (page: Page, title: string) => {
@@ -156,4 +157,36 @@ test("starting over shows the run again and summarizes it with the rest", async 
   await page.getByRole("dialog", { name: "Summaries" }).getByRole("button", { name: "Done" }).click()
   await page.getByRole("button", { name: "Notes" }).click()
   await expect(page.getByRole("dialog", { name: /Notes/ }).getByText("summary").first()).toBeVisible()
+})
+
+test("a higher estimate stays in the dialog until the new figures are confirmed", async ({ page }) => {
+  const before = provider.completions.length
+  const model = await withCookie(server(), cookie, (api) =>
+    Effect.map(api.GetGenerationDefaults(), (d) => d.model!.model)
+  )
+  const price = async (rate: number) =>
+    Effect.runPromise(
+      fixtureSql(server().dataDir, [
+        {
+          sql: "UPDATE models SET upstream_json=? WHERE id=?",
+          params: [JSON.stringify({ price: { input: rate, output: rate * 4, cacheRead: rate / 10 } }), model]
+        }
+      ])
+    )
+  await price(1)
+  await openChat(page, "Bob - approval")
+  await page.getByRole("button", { name: "Enable summaries", exact: true }).click()
+  const dialog = page.getByRole("dialog", { name: "Summarize older messages" })
+  await dialog.getByRole("radio", { name: "Summarize from scratch" }).click()
+  const cost = dialog.getByTestId("estimate-cost")
+  const seen = await cost.innerText()
+  await price(1000)
+  await dialog.getByRole("button", { name: "Enable summaries", exact: true }).click()
+  await expect(dialog.getByRole("alert")).toContainText("The estimate changed")
+  await expect(cost).not.toHaveText(seen)
+  await expect(dialog).toBeVisible()
+  expect(provider.completions.length).toBe(before)
+  await dialog.getByRole("button", { name: "Enable summaries", exact: true }).click()
+  await expect(dialog).toHaveCount(0)
+  expect(provider.completions.length).toBe(before)
 })

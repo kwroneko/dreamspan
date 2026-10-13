@@ -7,7 +7,7 @@ import type { UserId } from "@rp/shared/domain.ts"
 import { Context, Effect, Layer, Stream } from "effect"
 import { Reader } from "../db/Database.ts"
 import { SummaryChecks } from "../lcm/OutputChecks.ts"
-import { Providers } from "../providers/Providers.ts"
+import { ProviderError, Providers } from "../providers/Providers.ts"
 
 export type Verdict = "unjudged" | "clear" | "refused"
 
@@ -33,6 +33,8 @@ export class JudgeUnavailable {
   }
 }
 
+export const judgeInputTokens = (summaryTokens: number) => Math.ceil(SYSTEM.length / 4) + summaryTokens + 120
+
 const SYSTEM =
   "You check whether text written by an AI model is a refusal. A refusal is a reply that declines, " +
   "deflects or breaks off the task it was given, instead of doing it: apologizing and not complying, " +
@@ -45,7 +47,7 @@ const JUDGE_TIMEOUT_MS = 60_000
 
 export class RefusalJudge extends Context.Service<
   RefusalJudge,
-  { readonly judge: (input: JudgeInput) => Effect.Effect<Verdict, JudgeUnavailable> }
+  { readonly judge: (input: JudgeInput) => Effect.Effect<Verdict, JudgeUnavailable | ProviderError> }
 >()("rp/decision/RefusalJudge") {
   static readonly layer = Layer.effect(
     RefusalJudge,
@@ -53,7 +55,7 @@ export class RefusalJudge extends Context.Service<
       const reader = yield* Reader
       const providers = yield* Providers
       const checks = yield* SummaryChecks
-      const judge = (input: JudgeInput): Effect.Effect<Verdict, JudgeUnavailable> =>
+      const judge = (input: JudgeInput): Effect.Effect<Verdict, JudgeUnavailable | ProviderError> =>
         Effect.gen(function* () {
           const defaults = yield* reader
             .GetGenerationDefaults({ userId: input.userId })
@@ -99,9 +101,10 @@ export class RefusalJudge extends Context.Service<
                 })
               ),
               Effect.timeout(JUDGE_TIMEOUT_MS),
-              Effect.mapError(
-                (e) =>
-                  new JudgeUnavailable(`The judge model failed: ${String((e as { message?: string }).message ?? e)}`)
+              Effect.mapError((e) =>
+                e instanceof ProviderError && e.reason === "budget_held"
+                  ? e
+                  : new JudgeUnavailable(`The judge model failed: ${String((e as { message?: string }).message ?? e)}`)
               )
             )
           // The judge's own reply is a one-word protocol, not the judged text: nothing here reads the output.

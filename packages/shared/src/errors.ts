@@ -65,6 +65,7 @@ export class ServerError extends Schema.TaggedError<ServerError>()("ServerError"
 export const ProviderErrorReason = Schema.Literals([
   /** The connection can't be used as configured: no key, an unreadable secret, a route the API can't take. */
   "unusable",
+  "budget_held",
   "auth",
   "rate_limited",
   "overloaded",

@@ -1,7 +1,13 @@
 import { type AppApi, CurrentUser } from "@rp/shared/api.ts"
 import { TextTooLong } from "@rp/shared/composerApi.ts"
 import { DraftKey } from "@rp/shared/drafts.ts"
-import { type BackfillCounts, type BackfillEstimate, LcmBackfill, LcmEnableOffer } from "@rp/shared/lcm.ts"
+import {
+  type BackfillCounts,
+  type BackfillEstimate,
+  LcmEstimateChanged,
+  LcmBackfill,
+  LcmEnableOffer
+} from "@rp/shared/lcm.ts"
 import type { ChatId, SlotId } from "@rp/shared/chat.ts"
 import { NotFound } from "@rp/shared/errors.ts"
 import type { UserId } from "@rp/shared/domain.ts"
@@ -11,6 +17,7 @@ import { ChatHub } from "../chat/ChatHub.ts"
 import { CacheWarmth } from "../chat/CacheWarmth.ts"
 import { Reader, Writer } from "../db/Database.ts"
 import { DraftTooLarge } from "../db/ops.ts"
+import { judgeInputTokens } from "../decision/RefusalJudge.ts"
 import { Summarizer } from "../lcm/Summarizer.ts"
 import * as Providers from "../providers/Providers.ts"
 import { internal } from "./internal.ts"
@@ -31,21 +38,65 @@ export const makeLcmHandlers = Effect.gen(function* () {
   const userId = Effect.map(CurrentUser, (user) => user.id)
   /** The counts through the summarizer's cost formulas; unpriced when none applies. */
   const priced = (id: UserId, counts: BackfillCounts): Effect.Effect<BackfillEstimate> =>
-    counts.model === null || counts.blocked !== null
-      ? Effect.succeed({ ...counts, cost: null })
-      : providers
-          .estimateCost(id, counts.model.connection, counts.model.model, {
-            inputUncached: counts.uncachedInput,
-            cacheRead: counts.cachedInput,
-            cacheWrite: counts.cacheWrite,
+    Effect.gen(function* () {
+      if (counts.model === null || counts.blocked !== null) return { ...counts, cost: null }
+      const costs = yield* Effect.forEach(counts.plannedRequests ?? [], (request) =>
+        providers
+          .estimateCost(id, counts.model!.connection, counts.model!.model, {
+            inputUncached: request.uncachedInput,
+            cacheRead: request.cachedInput,
+            cacheWrite: request.cacheWrite,
             cacheWriteLong: 0,
-            output: counts.output,
+            output: request.output,
             reasoning: null
           })
-          .pipe(
-            Effect.catch(() => Effect.succeed(null)),
-            Effect.map((cost) => ({ ...counts, cost: cost && { amount: cost.amount, currency: cost.currency } }))
+          .pipe(Effect.catch(() => Effect.succeed(null)))
+      )
+      const defaults = yield* reader
+        .GetGenerationDefaults({ userId: id })
+        .pipe(Effect.catch(() => Effect.succeed(null)))
+      const judge = defaults?.judge
+      const requests = counts.plannedRequests ?? []
+      const judged = judge
+        ? yield* Effect.forEach(requests, (request) =>
+            providers
+              .estimateCost(id, judge.connection, judge.model, {
+                inputUncached: judgeInputTokens(request.output),
+                cacheRead: 0,
+                cacheWrite: 0,
+                cacheWriteLong: 0,
+                output: 2,
+                reasoning: null
+              })
+              .pipe(Effect.catch(() => Effect.succeed(null)))
           )
+        : []
+      costs.push(...judged)
+      const judgeInput = judge ? requests.reduce((n, r) => n + judgeInputTokens(r.output), 0) : 0
+      const measured = {
+        ...counts,
+        uncachedInput: counts.uncachedInput + judgeInput,
+        output: counts.output + judged.length * 2
+      }
+      const currency = costs[0]?.currency
+      const cost =
+        costs.length && currency && costs.every((c) => c !== null && c.currency === currency)
+          ? { amount: costs.reduce((n, c) => n + c!.amount, 0), currency }
+          : null
+      return { ...measured, cost }
+    })
+  const validateApproval = (seen: BackfillEstimate | undefined, current: BackfillEstimate) =>
+    !seen ||
+    billed(current) > billed(seen) ||
+    (current.cost !== null &&
+      (seen.cost === null || current.cost.currency !== seen.cost.currency || current.cost.amount > seen.cost.amount))
+      ? Effect.fail(
+          new LcmEstimateChanged({
+            message: "The estimate changed. Review the new figures and confirm again.",
+            estimate: current
+          })
+        )
+      : Effect.void
   const approval = (e: BackfillEstimate) => ({
     jobs: e.l1Jobs + e.condensations,
     tokens: billed(e),
@@ -139,19 +190,46 @@ export const makeLcmHandlers = Effect.gen(function* () {
           adopted: basis.adopted ? yield* priced(id, basis.adopted) : null
         })
       }).pipe(internal("GetLcmEnableOffer")),
-    EnableLcm: ({ chatId, leafSlotId, choice }) =>
+    EnableLcm: ({ chatId, leafSlotId, choice, approved }) =>
       Effect.gen(function* () {
         const id = yield* userId
-        // The estimate the user saw is measured again here: the client sends only its choice.
+        // Revalidation never grants a higher allowance than the figures the caller saw.
         const basis = yield* reader.EstimateBackfill({ userId: id, chatId, leafSlotId })
         const counts = choice === "adopt" ? basis.adopted : basis.fromScratch
         if (counts === null) return yield* new NotFound({ entity: "imported summary", id: chatId })
-        const done = yield* writer.EnableLcm({
+        const current = yield* priced(id, counts)
+        yield* validateApproval(approved, current)
+        const imported = yield* reader.ReadLcmImported({ userId: id, chatId, leafSlotId })
+        let staged = yield* writer.StageLcmEnable({
           userId: id,
           chatId,
           leafSlotId,
           choice,
-          approved: approval(yield* priced(id, counts))
+          approved: approval(approved!),
+          imported
+        })
+        while (!staged.ready)
+          staged = yield* writer.StageLcmEnable({
+            userId: id,
+            chatId,
+            leafSlotId,
+            choice,
+            approved: approval(approved!),
+            imported,
+            runId: staged.runId
+          })
+        // Pricing/settings may also change while a very long range is being staged.
+        const refreshed = yield* reader.EstimateBackfill({ userId: id, chatId, leafSlotId })
+        const finalCounts = choice === "adopt" ? refreshed.adopted : refreshed.fromScratch
+        if (!finalCounts) return yield* new NotFound({ entity: "imported summary", id: chatId })
+        yield* validateApproval(approved, yield* priced(id, finalCounts))
+        const done = yield* writer.EnableLcm({
+          runId: staged.runId,
+          userId: id,
+          chatId,
+          leafSlotId,
+          choice,
+          approved: approval(approved!)
         })
         // The run is shown again: open tabs read the chat anew.
         hub.publish(chatId, done.unhidden > 0 ? { _tag: "Reload" } : { _tag: "State" })
@@ -160,16 +238,18 @@ export const makeLcmHandlers = Effect.gen(function* () {
       }).pipe(internal("EnableLcm")),
     GetLcmBackfill: ({ chatId, leafSlotId }) =>
       Effect.flatMap(userId, (id) => backfillOf(id, chatId, leafSlotId)).pipe(internal("GetLcmBackfill")),
-    SetLcmBackfill: ({ chatId, leafSlotId, action }) =>
+    SetLcmBackfill: ({ chatId, leafSlotId, action, approved }) =>
       Effect.gen(function* () {
         const id = yield* userId
         if (action === "continue") {
           const basis = yield* reader.EstimateBackfill({ userId: id, chatId, leafSlotId })
+          const current = yield* priced(id, basis.fromScratch)
+          yield* validateApproval(approved, current)
           yield* writer.SetBackfill({
             userId: id,
             chatId,
             action,
-            approved: approval(yield* priced(id, basis.fromScratch))
+            approved: approval(approved!)
           })
         } else yield* writer.SetBackfill({ userId: id, chatId, action: action === "pause" ? "pause" : "drive" })
         // "Summarize now" and Continue are the clicks that plan; the pool runs what they make.

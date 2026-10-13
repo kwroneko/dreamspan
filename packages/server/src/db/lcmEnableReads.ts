@@ -1,3 +1,4 @@
+import { contextExcluded } from "./lcmVisibility.ts"
 // What enabling LCM on a chat takes (spec/LCM.md §2.7, §2.11), measured in one read: the
 // imported summary that could stand in for its hidden run, and the work the planner would do
 // from the first message or after that summary. The counts are priced on the main thread, where
@@ -45,11 +46,19 @@ export const makeLcmEnableReadHandlers = Effect.gen(function* () {
           WHERE s.depth > ${after}
       ) SELECT count(*) AS n, coalesce(sum((length(v.content) + 3) / 4 + 3), 0) AS tokens
         FROM path p JOIN slots s ON s.id = p.id JOIN versions v ON v.id = s.selected_version_id
-        WHERE s.deleted_at IS NULL AND s.purged_at IS NULL AND (s.context_excluded = 0 OR s.depth <= ${shownThrough})
+        WHERE s.deleted_at IS NULL AND s.purged_at IS NULL AND (${sql.literal(contextExcluded())} = 0 OR s.depth <= ${shownThrough})
           AND v.deleted_at IS NULL AND v.purged_at IS NULL AND v.status NOT IN ('generating', 'failed')
           AND length(v.content) > 0`.pipe(Effect.map(([row]) => row ?? { n: 0, tokens: 0 }))
 
   return {
+    ReadLcmImported: ({ userId, chatId, leafSlotId }) =>
+      Effect.gen(function* () {
+        const [owned] = yield* sql`SELECT 1 FROM slots s JOIN chats c ON c.id = s.chat_id
+        WHERE s.id = ${leafSlotId} AND c.id = ${chatId} AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL`
+        if (!owned) return yield* new NotFound({ entity: "chat", id: chatId })
+        const [existing] = yield* sql`SELECT 1 FROM summaries WHERE chat_id = ${chatId} AND sealed = 1 LIMIT 1`
+        return existing ? null : yield* importedSummary(sql, userId, chatId, leafSlotId)
+      }).pipe(query("ReadLcmImported")),
     GetBackfill: ({ userId, chatId }) =>
       Effect.gen(function* () {
         const [owned] =
@@ -191,6 +200,7 @@ export const makeLcmEnableReadHandlers = Effect.gen(function* () {
             return {
               messages: rest.tokens > 0 ? Math.round((rest.n * totals.summarized) / rest.tokens) : 0,
               tokens: totals.summarized,
+              plannedRequests: totals.plannedRequests,
               l1Jobs: totals.l1Jobs,
               condensations: totals.condensations,
               uncachedInput: totals.uncachedInput,

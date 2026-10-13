@@ -75,6 +75,11 @@ export interface ResponseObserver {
 export interface CostFormula {
   readonly id: string
   readonly appliesTo: (target: RequestTarget & { readonly model: string }) => boolean
+  readonly upperBound?: (input: {
+    readonly inputTokens: number
+    readonly outputTokens: number
+    readonly price: Price | null
+  }) => Omit<Cost, "formula"> | null
   readonly cost: (input: {
     readonly counts: TokenCounts
     readonly capture: Capture

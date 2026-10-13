@@ -1,5 +1,5 @@
 // Enabling LCM on a chat and holding its backfill to what the user approved (spec/LCM.md §2.7,
-// §2.11). Enabling is one transaction: the imported summary becomes the first level over the run
+// §2.11). Bounded preparation precedes one publication transaction: the imported summary becomes the first level over the run
 // it covers (or the run is just shown), the switch is written, and the backfill is recorded. It
 // never generates; the next reply, or "Summarize now", plans the work.
 import type { UserId } from "@rp/shared/domain.ts"
@@ -10,12 +10,12 @@ import { tokensOf } from "../assembler/st.ts"
 import type { Bin } from "./bin.ts"
 import { makeGraphWrites } from "./graphWrites.ts"
 import { BACKFILL_KIND, type BackfillPayload, backfillOf, capFor, spentSince } from "./lcmBackfill.ts"
-import { importedSummary } from "./lcmImported.ts"
+import type { ImportedSummary } from "./lcmImported.ts"
 import { NotFound, StorageError, type WriteOps } from "./ops.ts"
 import { transaction } from "./tx.ts"
 
-/** The rule of `lcmPath`: a slot's effective version, none when the slot or its text is out of the context. */
-const EFFECTIVE = `s.deleted_at IS NULL AND s.purged_at IS NULL AND s.context_excluded = 0
+/** The effective version after the covered run is shown; deleted/failed text still has none. */
+const EFFECTIVE = `s.deleted_at IS NULL AND s.purged_at IS NULL
   AND v.deleted_at IS NULL AND v.purged_at IS NULL AND v.status NOT IN ('generating', 'failed') AND length(v.content) > 0`
 
 export const makeLcmEnableWriteHandlers = (bin: Bin) =>
@@ -36,64 +36,120 @@ export const makeLcmEnableWriteHandlers = (bin: Bin) =>
       sql`UPDATE jobs SET payload_json = ${JSON.stringify(payload)}, updated_at = ${Date.now()} WHERE id = ${id}`
 
     return {
-      EnableLcm: ({ userId, chatId, leafSlotId, choice, approved }) =>
+      StageLcmEnable: ({ userId, chatId, leafSlotId, choice, approved, imported, runId }) =>
         Effect.gen(function* () {
           yield* ownedChat(userId, chatId, leafSlotId)
-          const imported = yield* importedSummary(sql, userId, chatId, leafSlotId)
-          const [existing] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM summaries
-            WHERE chat_id = ${chatId} AND status IN ('complete', 'truncated')`
-          const covered = imported !== null && existing!.n === 0
-          if (choice === "adopt" && !covered)
-            return yield* reject("EnableLcm", "This chat has no imported summary to adopt.")
-          const now = Date.now()
-          let unhidden = 0
-          let summaryId: string | null = null
-          // The run is shown again either way: adopted, its summary stands in for it; redone, the
-          // summaries are made from it. A hidden slot has no effective version (spec/LCM.md §2.2).
-          if (covered) {
-            const shown = yield* sql<{ id: string }>`WITH RECURSIVE chain(id, parent) AS (
-                SELECT id, parent_slot_id FROM slots WHERE id = ${imported.lastSlotId}
-                UNION ALL SELECT s.id, s.parent_slot_id FROM slots s JOIN chain c ON s.id = c.parent
-              ) UPDATE slots SET context_excluded = 0, row_version = row_version + 1
-              WHERE id IN (SELECT id FROM chain) AND context_excluded = 1 RETURNING id`
-            unhidden = shown.length
+          if (!runId) {
+            if (choice === "adopt" && !imported)
+              return yield* reject("StageLcmEnable", "This chat has no imported summary to adopt.")
+            yield* sql`UPDATE lcm_enable_runs SET phase = 'cancelled' WHERE chat_id = ${chatId} AND published = 0 AND phase <> 'cancelled'`
+            const id = uuidv7()
+            yield* sql`INSERT INTO lcm_enable_runs(id, chat_id, payload_json, cursor, phase)
+              VALUES (${id}, ${chatId}, ${JSON.stringify({ leafSlotId, choice, approved, imported })},
+                ${imported?.lastSlotId ?? null}, ${imported ? "gather" : "ready"})`
+            return { runId: id, ready: !imported }
           }
-          if (choice === "adopt" && covered) {
-            summaryId = uuidv7()
-            const revisionId = uuidv7()
-            const [first] = yield* sql<{ depth: number }>`SELECT depth FROM slots WHERE id = ${imported.firstSlotId}`
+          const [run] = yield* sql<{
+            payload_json: string
+            cursor: string | null
+            gathered: number
+            copied: number
+            phase: string
+          }>`
+            SELECT * FROM lcm_enable_runs WHERE id = ${runId} AND chat_id = ${chatId} AND published = 0`
+          if (!run || run.phase === "cancelled") return yield* new NotFound({ entity: "enable run", id: runId })
+          const payload = JSON.parse(run.payload_json) as { imported: ImportedSummary; choice: string }
+          const source = payload.imported
+          if (run.phase === "gather") {
+            const rows = yield* sql<{
+              id: string
+              parent: string | null
+              depth: number
+              version_id: string | null
+              amend_count: number
+              merged: number
+              generating: number
+            }>`
+              WITH RECURSIVE chain(id, parent, depth, n) AS (
+                SELECT id, parent_slot_id, depth, 1 FROM slots WHERE id = ${run.cursor} AND chat_id = ${chatId}
+                UNION ALL SELECT s.id, s.parent_slot_id, s.depth, c.n + 1 FROM slots s JOIN chain c ON s.id = c.parent WHERE c.n < 500
+              ) SELECT c.id, c.parent, c.depth,
+                CASE WHEN ${sql.literal(EFFECTIVE)} THEN v.id END AS version_id,
+                CASE WHEN ${sql.literal(EFFECTIVE)} THEN (SELECT count(*) FROM version_history h WHERE h.version_id = v.id) ELSE 0 END AS amend_count,
+                EXISTS(SELECT 1 FROM slot_parents p WHERE p.slot_id = c.id) AS merged,
+                coalesce(v.status = 'generating', 0) AS generating
+              FROM chain c JOIN slots s ON s.id = c.id LEFT JOIN versions v ON v.id = s.selected_version_id ORDER BY c.depth DESC`
+            if (
+              !rows.length ||
+              rows.some((r, n) => r.depth !== source.slotCount - 1 - run.gathered - n || r.merged || r.generating)
+            )
+              return yield* reject("StageLcmEnable", "The imported range changed. Review the offer again.")
+            yield* sql`INSERT INTO lcm_enable_slots ${sql.insert(rows.map((r) => ({ run_id: runId, ordinal: r.depth, slot_id: r.id, version_id: r.version_id, amend_count: r.amend_count })))}`
+            const last = rows.at(-1)!
+            const gathered = run.gathered + rows.length
+            if (gathered === source.slotCount && (last.id !== source.firstSlotId || last.parent !== null))
+              return yield* reject("StageLcmEnable", "The imported range changed.")
+            yield* sql`UPDATE lcm_enable_runs SET cursor = ${last.parent}, gathered = ${gathered},
+              phase = ${gathered === source.slotCount ? (payload.choice === "adopt" ? "create" : "ready") : "gather"} WHERE id = ${runId}`
+          } else if (run.phase === "create") {
+            yield* sql`UPDATE lcm_enable_runs SET phase = 'copy' WHERE id = ${runId}`
+            const revisionId = uuidv7(),
+              now = Date.now()
             yield* sql`INSERT INTO summary_revisions ${sql.insert({
               id: revisionId,
-              summary_id: summaryId,
-              content: imported.content,
-              token_count: tokensOf({ content: imported.content }),
+              summary_id: runId,
+              content: source.content,
+              token_count: tokensOf({ content: source.content }),
               origin: "imported",
               created_at: now
             })}`
             yield* sql`INSERT INTO summaries ${sql.insert({
-              id: summaryId,
+              id: runId,
               chat_id: chatId,
               level: 1,
               selected_revision_id: revisionId,
-              first_slot_id: imported.firstSlotId,
-              last_slot_id: imported.lastSlotId,
-              slot_count: imported.slotCount,
+              first_slot_id: source.firstSlotId,
+              last_slot_id: source.lastSlotId,
+              slot_count: source.slotCount,
               status: "complete",
               created_at: now
             })}`
-            // Each slot's effective version, now that the run is shown.
-            yield* sql`INSERT INTO summary_inputs (summary_id, ordinal, slot_id, version_id, amend_count)
-              WITH RECURSIVE chain(id, parent, depth) AS (
-                SELECT id, parent_slot_id, depth FROM slots WHERE id = ${imported.lastSlotId}
-                UNION ALL SELECT s.id, s.parent_slot_id, s.depth FROM slots s JOIN chain c ON s.id = c.parent
-                  WHERE c.id <> ${imported.firstSlotId}
-              ) SELECT ${summaryId}, c.depth - ${first!.depth}, c.id,
-                CASE WHEN ${sql.literal(EFFECTIVE)} THEN v.id END,
-                CASE WHEN ${sql.literal(EFFECTIVE)} THEN (SELECT count(*) FROM version_history h WHERE h.version_id = v.id) ELSE 0 END
-              FROM chain c JOIN slots s ON s.id = c.id LEFT JOIN versions v ON v.id = s.selected_version_id
-              ORDER BY c.depth`
-            yield* sql`UPDATE summaries SET sealed = 1 WHERE id = ${summaryId}`
+          } else if (run.phase === "copy") {
+            yield* sql`INSERT INTO summary_inputs(summary_id, ordinal, slot_id, version_id, amend_count)
+              SELECT run_id, ordinal, slot_id, version_id, amend_count FROM lcm_enable_slots
+              WHERE run_id = ${runId} AND ordinal >= ${run.copied} ORDER BY ordinal LIMIT 500`
+            const copied = Math.min(source.slotCount, run.copied + 500)
+            yield* sql`UPDATE lcm_enable_runs SET copied = ${copied}, phase = ${copied === source.slotCount ? "ready" : "copy"} WHERE id = ${runId}`
           }
+          const [updated] = yield* sql<{ phase: string }>`SELECT phase FROM lcm_enable_runs WHERE id = ${runId}`
+          return { runId, ready: updated!.phase === "ready" }
+        }).pipe(transaction(sql, "StageLcmEnable")),
+
+      EnableLcm: ({ userId, chatId, leafSlotId, choice, approved, runId }) =>
+        Effect.gen(function* () {
+          yield* ownedChat(userId, chatId, leafSlotId)
+          let unhidden = 0
+          let summaryId: string | null = null
+          if (runId) {
+            const [run] = yield* sql<{ payload_json: string; phase: string }>`SELECT * FROM lcm_enable_runs
+              WHERE id = ${runId} AND chat_id = ${chatId} AND published = 0`
+            if (!run || run.phase !== "ready")
+              return yield* reject("EnableLcm", "The imported range is still being prepared.")
+            const payload = JSON.parse(run.payload_json) as {
+              imported: ImportedSummary | null
+              choice: string
+              leafSlotId: string
+            }
+            if (payload.choice !== choice || payload.leafSlotId !== leafSlotId)
+              return yield* reject("EnableLcm", "The enable choice changed.")
+            unhidden = payload.imported?.hidden ?? 0
+            if (choice === "adopt") {
+              summaryId = runId
+              yield* sql`UPDATE summaries SET sealed = 1 WHERE id = ${summaryId}`
+            }
+            yield* sql`UPDATE lcm_enable_runs SET published = 1 WHERE id = ${runId}`
+          } else if (choice === "adopt") return yield* reject("EnableLcm", "Adoption needs a prepared range.")
+          const now = Date.now()
           // The switch, keeping the chat's other settings.
           const [latest] = yield* sql<{ value_json: string }>`SELECT value_json FROM state_events
             WHERE chat_id = ${chatId} AND slot_id IS NULL AND scope IS NULL AND key = 'lcm.settings'

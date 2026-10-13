@@ -241,6 +241,7 @@ export function makeSummarizer(pool: boolean) {
           Effect.catch((error) =>
             Effect.gen(function* () {
               if (!(error instanceof ProviderError)) return yield* Effect.fail(error)
+              if (error.reason === "budget_held") return yield* error
               rejected = error.reason === "refused"
               if (
                 job.attempts <= job.maxRetries ||
@@ -257,7 +258,13 @@ export function makeSummarizer(pool: boolean) {
                 rejected = true
                 const verdict = yield* check
                   .check({ userId: job.userId, chatId: job.chatId, text: content, rolloutId, instruction })
-                  .pipe(Effect.catch(() => Effect.succeed("refused" as const)))
+                  .pipe(
+                    Effect.catch((failure) =>
+                      failure instanceof ProviderError && failure.reason === "budget_held"
+                        ? Effect.fail(failure)
+                        : Effect.succeed("refused" as const)
+                    )
+                  )
                 if (verdict === "refused") return yield* error
                 rejected = false
               }
@@ -275,7 +282,12 @@ export function makeSummarizer(pool: boolean) {
           Effect.onExit((exit) =>
             Effect.gen(function* () {
               if (Exit.isFailure(exit)) {
-                if (Cause.hasInterruptsOnly(exit.cause))
+                const failure = Cause.findErrorOption(exit.cause)
+                const held =
+                  failure._tag === "Some" &&
+                  failure.value instanceof ProviderError &&
+                  failure.value.reason === "budget_held"
+                if (Cause.hasInterruptsOnly(exit.cause) || held)
                   yield* safe(writer.ReleaseSummaryJob({ userId: job.userId, jobId: job.id, attempt: job.epoch }))
                 else
                   yield* safe(
@@ -408,7 +420,7 @@ export function makeSummarizer(pool: boolean) {
         const over = p.partialBatch
         // A paused or capped backfill starts nothing: the send goes on with what is left out reported.
         if (p.backfill?.held) return over
-        while (p.over && p.jobs.length && Date.now() < deadline) {
+        while (p.over && p.jobs.length && !p.backfill?.held && Date.now() < deadline) {
           for (const job of p.jobs) yield* writer.EscalateSummaryJob({ userId: position.userId, jobId: job.id })
           yield* Effect.sleep(250)
           p = yield* reader.PlanSummaries(position)

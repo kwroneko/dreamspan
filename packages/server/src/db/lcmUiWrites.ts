@@ -19,7 +19,8 @@ export const makeLcmUiWriteHandlers = Effect.gen(function* () {
           return yield* new NotFound({ entity: "model", id: model.model })
         const modelJson = model ? JSON.stringify(model) : null
         if (target._tag === "Summary") {
-          const [row] = yield* sql`SELECT 1 FROM summaries WHERE id = ${target.summaryId} AND chat_id = ${chatId}`
+          const [row] =
+            yield* sql`SELECT 1 FROM summaries WHERE id = ${target.summaryId} AND chat_id = ${chatId} AND sealed = 1`
           if (!row) return yield* new NotFound({ entity: "summary", id: target.summaryId })
           yield* requested
             ? sql`INSERT INTO summary_reruns (id, chat_id, summary_id, requested_at, model_json)

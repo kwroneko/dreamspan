@@ -1872,6 +1872,23 @@ const storage: Record<
     ),
   GetBackfill: (reader, actor, owner) =>
     refused(reader.GetBackfill({ userId: actor.user.id, chatId: owner.chat.chatId }), "NotFound"),
+  ReadLcmImported: (reader, actor, owner) =>
+    refused(
+      reader.ReadLcmImported({ userId: actor.user.id, chatId: owner.chat.chatId, leafSlotId: owner.chat.slotId }),
+      "NotFound"
+    ),
+  StageLcmEnable: (_reader, actor, owner, writer) =>
+    refused(
+      writer.StageLcmEnable({
+        userId: actor.user.id,
+        chatId: owner.chat.chatId,
+        leafSlotId: owner.chat.slotId,
+        choice: "scratch",
+        approved: { jobs: 1, tokens: 1, cost: null, currency: null },
+        imported: null
+      }),
+      "NotFound"
+    ),
   EnableLcm: (_reader, actor, owner, writer) =>
     refused(
       writer.EnableLcm({

@@ -69,6 +69,11 @@ describe("estimateBackfill", () => {
     assert.isAbove(seconds, 1800)
   })
 
+  it("includes the planner's 128-slot limit when messages are short", () => {
+    const totals = estimateBackfill({ ...story, tokens: 400_000, messages: 100_000 })
+    assert.isAtLeast(totals.l1Jobs, Math.ceil(totals.summarized / (128 * 4)))
+  })
+
   it("handles an empty chat and a missing window", () => {
     assert.strictEqual(estimateBackfill({ ...story, tokens: 0, messages: 0 }).l1Jobs, 0)
     assert.strictEqual(estimateBackfill({ ...story, windowMax: 0 }).l1Jobs, 0)

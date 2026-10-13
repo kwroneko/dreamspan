@@ -1,3 +1,4 @@
+import { contextExcluded } from "./lcmVisibility.ts"
 // Write handlers for the ST data folder import (ARCHITECTURE.md §13). Each is one
 // transaction in the writer, and a chat goes in over several: its start, its messages in
 // batches, its state. Nothing here reads a file: the format worker parsed them, and the main
@@ -340,7 +341,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
                 version_purged: number
                 branch_deleted: number
               }>`
-                SELECT s.id AS slot_id, s.depth, s.context_excluded AS hidden, v.id = s.selected_version_id AS selected,
+                SELECT s.id AS slot_id, s.depth, ${sql.literal(contextExcluded())} AS hidden, v.id = s.selected_version_id AS selected,
                   v.content, v.created_at, v.writer, v.ordinal,
                   s.purged_at IS NOT NULL AS slot_purged, v.purged_at IS NOT NULL AS version_purged,
                   s.branch_deleted,

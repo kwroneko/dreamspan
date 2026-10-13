@@ -214,6 +214,13 @@ export const builtinCostFormulas: ReadonlyArray<CostFormula> = [
   {
     id: "builtin",
     appliesTo: () => true,
+    upperBound: ({ inputTokens, outputTokens, price }) => {
+      if (!price) return null
+      const rates = [price, ...(price.tiers ?? [])]
+      const input = Math.max(...rates.flatMap((r) => [r.input, r.cacheRead ?? 0, r.cacheWrite ?? 0, r.input * 2]))
+      const output = Math.max(...rates.map((r) => r.output))
+      return { amount: (inputTokens * input + outputTokens * output) / 1e6, currency: "USD" }
+    },
     cost: ({ counts, price }) => {
       const amount = price === null ? null : priceCost(counts, price)
       return amount === null ? null : { amount, currency: "USD" }

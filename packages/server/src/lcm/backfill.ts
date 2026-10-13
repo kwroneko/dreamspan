@@ -5,6 +5,7 @@
 // quarters of it, a pass plans at most `MAX_JOBS_PER_PLAN` chunks, a chunk takes whole messages
 // until it holds `leafInput` tokens, and `fanout` summaries of a level are condensed into one.
 
+import { MAX_CHUNK_SLOTS } from "../db/lcmLimits.ts"
 import { MAX_JOBS_PER_PLAN } from "../db/lcmMaintain.ts"
 
 /** The summarization instruction after the chunk, in estimated tokens. */
@@ -31,7 +32,15 @@ export interface BackfillInput {
   readonly cacheWrites: boolean
 }
 
+interface PlannedRequest {
+  readonly uncachedInput: number
+  readonly cachedInput: number
+  readonly cacheWrite: number
+  readonly output: number
+}
+
 export interface BackfillTotals {
+  readonly plannedRequests: ReadonlyArray<PlannedRequest>
   readonly l1Jobs: number
   readonly condensations: number
   readonly uncachedInput: number
@@ -45,6 +54,7 @@ export interface BackfillTotals {
 }
 
 const EMPTY: BackfillTotals = {
+  plannedRequests: [],
   l1Jobs: 0,
   condensations: 0,
   uncachedInput: 0,
@@ -71,7 +81,8 @@ export const estimateBackfill = (input: BackfillInput): BackfillTotals => {
   const trigger = windowMax * 0.75
   if (input.tokens <= trigger) return EMPTY
   // A chunk ends once it holds `leafInput` tokens, so it overshoots by half a message on average.
-  const chunk = leafInput + input.tokens / input.messages / 2
+  const average = input.tokens / input.messages
+  const chunk = Math.min(leafInput + average / 2, MAX_CHUNK_SLOTS * average)
   // Passes: each plans up to four chunks from what lies before the kept half, until the window is
   // under its trigger. The last chunk of a pass is whatever is left, so it can be small.
   let total = input.tokens
@@ -97,6 +108,7 @@ export const estimateBackfill = (input: BackfillInput): BackfillTotals => {
     for (let level = 1; level < counts.length; level++) tokens += (counts[level] ?? 0) * size(level)
     return Math.min(tokens, input.layerMax)
   }
+  const plannedRequests: PlannedRequest[] = []
   let uncached = 0
   let read = 0
   let write = 0
@@ -123,12 +135,20 @@ export const estimateBackfill = (input: BackfillInput): BackfillTotals => {
   }
   for (const body of chunks) {
     summarized += body
+    const before = [uncached, read, write]
     request(body, layerNow(), fresh)
+    plannedRequests.push({
+      uncachedInput: Math.round(uncached - before[0]!),
+      cachedInput: Math.round(read - before[1]!),
+      cacheWrite: Math.round(write - before[2]!),
+      output: input.leafTarget
+    })
     output += input.leafTarget
     counts[1] = (counts[1] ?? 0) + 1
     fresh = input.leafTarget
     // Condense whenever a level holds `fanout` summaries; a condensation can fill the level above.
     for (let level = 1; (counts[level] ?? 0) >= fanout; level++) {
+      const previous = [uncached, read, write]
       requests++
       condensations++
       // Its request is the layer before its parts, the parts, and the instruction; the newest part is new.
@@ -143,6 +163,12 @@ export const estimateBackfill = (input: BackfillInput): BackfillTotals => {
         else uncached += cold
         read += input.prefix + Math.max(0, before + parts - cold)
       }
+      plannedRequests.push({
+        uncachedInput: Math.round(uncached - previous[0]!),
+        cachedInput: Math.round(read - previous[1]!),
+        cacheWrite: Math.round(write - previous[2]!),
+        output: input.condenseTarget
+      })
       output += input.condenseTarget
       counts[level] = (counts[level] ?? 0) - fanout
       counts[level + 1] = (counts[level + 1] ?? 0) + 1
@@ -150,6 +176,7 @@ export const estimateBackfill = (input: BackfillInput): BackfillTotals => {
     }
   }
   return {
+    plannedRequests,
     l1Jobs: chunks.length,
     condensations,
     uncachedInput: Math.round(uncached),

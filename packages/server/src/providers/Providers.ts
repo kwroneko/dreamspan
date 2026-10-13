@@ -798,6 +798,8 @@ export const layer = (options: ProvidersOptions = {}) =>
         const requestId = uuidv7() as LlmRequestId
         const attribution = request.attribution
         const state = {
+          opened: false,
+          held: false,
           cachePolicy: null as {
             readonly ttlS: number | null
             readonly fixed: boolean
@@ -834,6 +836,7 @@ export const layer = (options: ProvidersOptions = {}) =>
         const writeClose = (message: AssistantMessage, error: ProviderError | null, context: PiContext["messages"]) =>
           Effect.gen(function* () {
             const { counts, source } = finalCounts(message, state.capture, context)
+            if (!state.opened) return { counts, cost: null }
             const cost = costOf(
               registry.costs.list(),
               { kind: prepared.kind.id, api: prepared.api, model: model.key },
@@ -876,27 +879,85 @@ export const layer = (options: ProvidersOptions = {}) =>
             return { counts, cost }
           })
 
-        const open = fromStorage(
-          writer.OpenLlmRequest({
-            userId: request.userId,
-            request: {
-              id: requestId,
-              connectionId: prepared.connection.id,
-              modelId: model.id,
-              chatId: attribution.chatId ?? null,
-              rolloutId: attribution.rolloutId ?? null,
-              versionId: attribution.versionId ?? null,
-              purpose: attribution.purpose,
-              api: prepared.api,
-              provider: piModel.provider,
-              modelKey: model.key,
-              startedAt: Date.now()
+        // Admission uses the final transformed wire payload, immediately before dispatch.
+        // UTF-8 bytes plus framing bound text tokens conservatively, without assuming cache hits.
+        const open = (payload: Readonly<Record<string, unknown>>) =>
+          Effect.gen(function* () {
+            if (state.opened) return
+            const hasImages = request.context.messages.some(
+              (m) => typeof m.content !== "string" && m.content.some((p) => p.type === "image")
+            )
+            const inputTokens =
+              Buffer.byteLength(JSON.stringify(payload), "utf8") +
+              256 +
+              (hasImages ? (knownContext ?? Number.MAX_SAFE_INTEGER) : 0)
+            const configurations = ["generationConfig", "config", "inferenceConfig", "inference_config"]
+              .map((key) => payload[key])
+              .filter(isPlain)
+            const limits = [
+              payload["max_tokens"],
+              payload["max_completion_tokens"],
+              payload["max_output_tokens"],
+              payload["maxTokens"],
+              payload["max_tokens_to_sample"],
+              ...configurations.flatMap((c) => [c["maxOutputTokens"], c["maxTokens"], c["max_tokens"]])
+            ].filter((n): n is number => typeof n === "number" && Number.isFinite(n) && n > 0)
+            const outputTokens = Math.max(
+              ...(limits.length ? limits : [request.options?.maxTokens ?? piModel.maxTokens])
+            )
+            const target = { kind: prepared.kind.id, api: prepared.api, model: model.key }
+            const formulas = [...registry.costs.list()]
+              .reverse()
+              .filter((f) => f.appliesTo(target) && f.id !== "reported")
+            const formula = formulas.find(
+              (f) =>
+                f.cost({
+                  counts: {
+                    inputUncached: inputTokens,
+                    cacheRead: 0,
+                    cacheWrite: 0,
+                    cacheWriteLong: 0,
+                    output: outputTokens,
+                    reasoning: null
+                  },
+                  capture: emptyCapture(),
+                  price: model.upstream.price ?? null
+                }) !== null
+            )
+            const bound =
+              formula?.upperBound?.({ inputTokens, outputTokens, price: model.upstream.price ?? null }) ?? null
+            const allowed = yield* fromStorage(
+              writer.OpenLlmRequest({
+                userId: request.userId,
+                request: {
+                  id: requestId,
+                  connectionId: prepared.connection.id,
+                  modelId: model.id,
+                  chatId: attribution.chatId ?? null,
+                  rolloutId: attribution.rolloutId ?? null,
+                  versionId: attribution.versionId ?? null,
+                  purpose: attribution.purpose,
+                  api: prepared.api,
+                  provider: piModel.provider,
+                  modelKey: model.key,
+                  startedAt: Date.now(),
+                  reservation: {
+                    tokens: inputTokens + outputTokens,
+                    cost: bound?.amount ?? null,
+                    currency: bound?.currency ?? null
+                  }
+                }
+              })
+            )
+            if (!allowed) {
+              state.held = true
+              return yield* providerError("budget_held", "The backfill is held at its approved limit.")
             }
+            state.opened = true
+            offer({ type: "attempt", attempt: number, requestId })
           })
-        )
 
         const use = Effect.gen(function* () {
-          offer({ type: "attempt", attempt: number, requestId })
           const transcript = yield* Effect.try({
             try: () =>
               normalizeContext(
@@ -1021,6 +1082,7 @@ export const layer = (options: ProvidersOptions = {}) =>
                   )
                   const effective = resolveModel(model.key, model.upstream, model.overrides, prepared.connection.compat)
                   const final = limitImages(transformed, effective.maxImages.value)
+                  await Effect.runPromise(open(final), { signal })
                   const policy = documentedCachePolicy(
                     { provider: prepared.kind.piProvider, api: prepared.api, model: model.key },
                     final
@@ -1112,8 +1174,9 @@ export const layer = (options: ProvidersOptions = {}) =>
               Effect.succeed(partialMessage("error", thrown instanceof Error ? thrown.message : String(thrown)))
             )
           )
-          const classified =
-            state.refused !== null
+          const classified = state.held
+            ? providerError("budget_held", "The backfill is held at its approved limit.")
+            : state.refused !== null
               ? providerError("unusable", state.refused)
               : classify(
                   message,
@@ -1128,7 +1191,11 @@ export const layer = (options: ProvidersOptions = {}) =>
         // The row is opened before sending and closed on every exit: success, failure,
         // interruption at any point, or a defect (PROVIDERS §9.1).
         return Effect.acquireUseRelease(
-          open,
+          attribution.purpose === "summarize" ||
+            attribution.purpose === "condense" ||
+            (attribution.purpose === "decision" && attribution.rolloutId)
+            ? Effect.void
+            : open({}),
           () => use,
           (_, exit) => {
             if (Exit.isSuccess(exit)) return Effect.void

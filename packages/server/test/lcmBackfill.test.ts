@@ -54,6 +54,14 @@ const cachingProvider = () => {
 }
 
 /** Dollars per million tokens for the test model, through the built-in formula. */
+// Accuracy is measured to completion under a deliberately generous, explicitly approved
+// allowance. Hard admission uses a byte bound, so the normal forecast can hold sooner.
+const testAllowance = (e: import("@rp/shared/lcm.ts").BackfillEstimate) => ({
+  ...e,
+  uncachedInput: e.uncachedInput * 10,
+  cost: e.cost ? { ...e.cost, amount: e.cost.amount * 10 } : null
+})
+
 const PRICE = { input: 1, output: 4, cacheRead: 0.1, cacheWrite: 0 }
 
 const within = (actual: number, expected: number, share: number, what: string) =>
@@ -66,8 +74,31 @@ const environment = (server: ReturnType<typeof lcmServer>, names: ReadonlyArray<
       Effect.promise(() => startMockProvider(cachingProvider())),
       (m) => Effect.promise(() => m.close())
     )
-    const api = yield* client(),
-      writer = yield* Writer,
+    const baseApi = yield* client()
+    const api = {
+      ...baseApi,
+      EnableLcm: (params: Parameters<typeof baseApi.EnableLcm>[0]) =>
+        Effect.gen(function* () {
+          const offer = yield* baseApi.GetLcmEnableOffer(params)
+          return yield* baseApi.EnableLcm({
+            ...params,
+            approved:
+              params.approved ??
+              testAllowance(params.choice === "adopt" ? (offer.adopted ?? offer.fromScratch) : offer.fromScratch)
+          })
+        }),
+      SetLcmBackfill: (params: Parameters<typeof baseApi.SetLcmBackfill>[0]) =>
+        Effect.gen(function* () {
+          const current = params.action === "continue" ? yield* baseApi.GetLcmBackfill(params) : null
+          return yield* baseApi.SetLcmBackfill({
+            ...params,
+            ...(params.action === "continue" && current
+              ? { approved: params.approved ?? testAllowance(current.remaining) }
+              : {})
+          })
+        })
+    }
+    const writer = yield* Writer,
       reader = yield* Reader,
       summarizer = server.summarizer(),
       user = yield* api.Whoami(),
@@ -273,7 +304,7 @@ lcmTest(
       // Lower the cap so a few summaries reach it.
       yield* fixtureSql(server.config.dataDir, [
         {
-          sql: "UPDATE jobs SET payload_json = json_set(payload_json, '$.capTokens', 3000, '$.capCost', NULL) WHERE kind = 'lcm-backfill' AND json_extract(payload_json, '$.chatId') = ?",
+          sql: "UPDATE jobs SET payload_json = json_set(payload_json, '$.capTokens', 11000, '$.capCost', NULL) WHERE kind = 'lcm-backfill' AND json_extract(payload_json, '$.chatId') = ?",
           params: [capped.chatId]
         }
       ])
@@ -288,8 +319,8 @@ lcmTest(
       yield* settle(capped.chatId, capped.leaf, "completion")
       const stopped = yield* api.GetLcmBackfill({ chatId: capped.chatId, leafSlotId: capped.leaf })
       assert.strictEqual(stopped?.state, "capped")
-      assert.isAtLeast(stopped!.spentTokens, 3000)
-      // A job or two may be in flight when the cap is reached, never more.
+      assert.isAtMost(stopped!.spentTokens, 11000)
+      // A request that cannot fit is held before dispatch, including its output allowance.
       const spentAtCap = mock.requests().length - requestsBefore
       assert.isAbove(spentAtCap, 0)
       assert.isAbove(stopped!.remaining.l1Jobs, 0)

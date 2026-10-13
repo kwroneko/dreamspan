@@ -1,3 +1,4 @@
+import { contextExcluded } from "./lcmVisibility.ts"
 import { selectSummaryLayer } from "./lcmLayer.ts"
 import { readSummary } from "./lcmReads.ts"
 // The assembler's sources over the database, every read the acting user's, and the pins a
@@ -384,7 +385,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
             SELECT s.parent_slot_id, p.n + 1 FROM slots s JOIN path p ON s.id = p.id
             WHERE s.parent_slot_id IS NOT NULL AND s.parent_slot_id IS NOT ${after ?? null} AND p.n < ${limit}
           )
-          SELECT s.id AS slot_id, s.parent_slot_id, s.depth, s.context_excluded,
+          SELECT s.id AS slot_id, s.parent_slot_id, s.depth, ${sql.literal(contextExcluded())} AS context_excluded,
             s.deleted_at IS NOT NULL AS slot_deleted, v.id AS version_id, v.ordinal, v.status,
             v.speaker_entity_id, v.content, v.macro_mode, v.frozen_macros, v.created_at,
             (SELECT count(*) FROM versions c WHERE c.slot_id = s.id AND c.deleted_at IS NULL) AS version_count,
@@ -521,7 +522,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
         )
         SELECT count(*) AS n FROM path JOIN slots s ON s.id = path.id
         JOIN versions v ON v.id = s.selected_version_id
-        WHERE s.deleted_at IS NULL AND s.context_excluded = 0 AND v.status <> 'failed' AND length(v.content) > 0`
+        WHERE s.deleted_at IS NULL AND ${sql.literal(contextExcluded())} = 0 AND v.status <> 'failed' AND length(v.content) > 0`
         const count = row?.n ?? 0
         pins.messageCount.push({ key: keyOf(leaf), count })
         return count

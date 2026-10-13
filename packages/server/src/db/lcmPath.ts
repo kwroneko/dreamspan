@@ -1,3 +1,4 @@
+import { contextExcluded } from "./lcmVisibility.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { NotFound } from "@rp/shared/errors.ts"
 import { Effect } from "effect"
@@ -36,9 +37,9 @@ export const lcmPath = (
       UNION ALL SELECT s.id, s.parent_slot_id, s.depth, p.n + 1 FROM slots s JOIN path p ON s.id = p.parent_slot_id
         WHERE p.id IS NOT ${first ?? null} AND p.n < ${limit}
     ) SELECT p.id, p.parent_slot_id AS parent, p.depth,
-      CASE WHEN s.deleted_at IS NULL AND s.purged_at IS NULL AND s.context_excluded = 0
+      CASE WHEN s.deleted_at IS NULL AND s.purged_at IS NULL AND ${sql.literal(contextExcluded())} = 0
         AND v.deleted_at IS NULL AND v.purged_at IS NULL AND v.status NOT IN ('generating','failed') AND length(v.content) > 0 THEN v.id END AS versionId,
-      CASE WHEN s.deleted_at IS NULL AND s.purged_at IS NULL AND s.context_excluded = 0
+      CASE WHEN s.deleted_at IS NULL AND s.purged_at IS NULL AND ${sql.literal(contextExcluded())} = 0
         AND v.deleted_at IS NULL AND v.purged_at IS NULL AND v.status NOT IN ('generating','failed') THEN coalesce(v.content,'') ELSE '' END AS content,
       (SELECT count(*) FROM version_history h WHERE h.version_id = v.id) AS amendCount,
       coalesce(v.status = 'generating',0) AS generating,

@@ -60,13 +60,60 @@ export const backfillOf = (sql: SqlClient.SqlClient, chatId: string) =>
     WHERE kind = 'lcm-backfill' AND json_extract(payload_json, '$.chatId') = ${chatId}
     ORDER BY created_at DESC, id DESC LIMIT 1`.pipe(Effect.map(([raw]) => (raw ? rowOf(raw) : null)))
 
-/** What the summarization requests of a chat have used since a time: billed tokens, and money when priced. */
+/** Summary rollouts include their judge requests, but never narrator decisions. Interrupted or
+ * unreported requests retain their reservation: a restart cannot prove they were free. */
 export const spentSince = (sql: SqlClient.SqlClient, chatId: string, since: number) =>
   sql<{ tokens: number; cost: number | null; currency: string | null }>`
-    SELECT coalesce(sum(coalesce(input_uncached, 0) + coalesce(cache_read, 0) + coalesce(cache_write, 0) + coalesce(output, 0)), 0) AS tokens,
-      sum(cost) AS cost, max(cost_currency) AS currency
-    FROM llm_requests WHERE chat_id = ${chatId} AND purpose IN ('summarize', 'condense')
-      AND started_at >= ${since} AND status <> 'running'`.pipe(Effect.map(([row]) => row!))
+    SELECT coalesce(sum(CASE WHEN reserved_tokens IS NOT NULL AND usage_source IS NOT 'reported' THEN reserved_tokens
+      ELSE coalesce(input_uncached, 0) + coalesce(cache_read, 0) + coalesce(cache_write, 0) + coalesce(output, 0) END), 0) AS tokens,
+      sum(CASE WHEN reserved_cost IS NOT NULL AND usage_source IS NOT 'reported' THEN reserved_cost ELSE coalesce(cost, reserved_cost) END) AS cost, max(coalesce(cost_currency, reserved_currency)) AS currency
+    FROM llm_requests WHERE chat_id = ${chatId} AND started_at >= ${since} AND status <> 'running'
+      AND (purpose IN ('summarize', 'condense') OR (purpose = 'decision' AND EXISTS (
+        SELECT 1 FROM rollouts r WHERE r.id = llm_requests.rollout_id AND r.kind IN ('summarize', 'condense'))))`.pipe(
+    Effect.map(([row]) => row!)
+  )
+
+/** Admission and reservation happen in OpenLlmRequest's transaction, shared by every dispatch. */
+export const admitRequest = Effect.fnUntraced(function* (
+  sql: SqlClient.SqlClient,
+  userId: string,
+  request: {
+    chatId: string | null
+    rolloutId: string | null
+    purpose: string
+    reservation?: { tokens: number; cost: number | null; currency: string | null }
+  }
+) {
+  if (!request.chatId) return { allowed: true, backfillId: null }
+  const related =
+    request.purpose === "summarize" ||
+    request.purpose === "condense" ||
+    (request.purpose === "decision" &&
+      request.rolloutId &&
+      (yield* sql`SELECT 1 FROM rollouts WHERE id = ${request.rolloutId} AND kind IN ('summarize', 'condense')`)
+        .length > 0)
+  if (!related) return { allowed: true, backfillId: null }
+  const row = yield* backfillOf(sql, request.chatId)
+  if (!row || row.status === "complete" || row.ownerUserId !== userId) return { allowed: true, backfillId: null }
+  if (row.paused || row.capped) return { allowed: false, backfillId: row.id }
+  const spent = yield* spentSince(sql, row.chatId, row.startedAt)
+  const [pending] = yield* sql<{ tokens: number; cost: number }>`SELECT coalesce(sum(reserved_tokens), 0) AS tokens,
+    coalesce(sum(reserved_cost), 0) AS cost FROM llm_requests WHERE backfill_id = ${row.id} AND status = 'running'`
+  const bound = request.reservation
+  if (
+    !bound ||
+    spent.tokens + pending!.tokens + bound.tokens > row.capTokens ||
+    (row.capCost !== null &&
+      (bound.cost === null ||
+        bound.currency !== row.currency ||
+        (spent.cost ?? 0) + pending!.cost + bound.cost > row.capCost))
+  ) {
+    const { id, ownerUserId: _owner, status: _status, ...payload } = row
+    yield* sql`UPDATE jobs SET payload_json = ${JSON.stringify({ ...payload, capped: true })}, updated_at = ${Date.now()} WHERE id = ${id}`
+    return { allowed: false, backfillId: row.id }
+  }
+  return { allowed: true, backfillId: row.id }
+})
 
 /** Whether the spending has reached the cap, by tokens or, when both are known, by money. */
 export const overCap = (row: BackfillPayload, spent: { tokens: number; cost: number | null }) =>

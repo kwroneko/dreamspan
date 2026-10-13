@@ -132,6 +132,11 @@ export type RerunTarget = typeof RerunTarget.Type
  * which only the main thread has (`BackfillEstimate`).
  */
 export const BackfillCounts = Schema.Struct({
+  plannedRequests: Schema.optionalKey(
+    Schema.Array(
+      Schema.Struct({ uncachedInput: Schema.Int, cachedInput: Schema.Int, cacheWrite: Schema.Int, output: Schema.Int })
+    )
+  ),
   /** Messages and estimated tokens before the window that no summary covers yet. */
   messages: Schema.Int,
   tokens: Schema.Int,
@@ -161,6 +166,11 @@ export const BackfillEstimate = Schema.Struct({
   cost: Schema.NullOr(Schema.Struct({ amount: Schema.Number, currency: Schema.String }))
 })
 export type BackfillEstimate = typeof BackfillEstimate.Type
+
+export class LcmEstimateChanged extends Schema.TaggedError<LcmEstimateChanged>()("LcmEstimateChanged", {
+  message: Schema.String,
+  estimate: BackfillEstimate
+}) {}
 
 /** An ST summary the chat can adopt as the first level over the run it covers (DESIGN §8.1). */
 const ImportedSummaryOffer = Schema.Struct({
@@ -320,10 +330,15 @@ export class LcmApi extends RpcGroup.make(
    * and nothing is generated until the next reply or "Summarize now".
    */
   Rpc.make("EnableLcm", {
-    payload: { chatId: ChatId, leafSlotId: SlotId, choice: EnableChoice },
+    payload: {
+      chatId: ChatId,
+      leafSlotId: SlotId,
+      choice: EnableChoice,
+      approved: Schema.optionalKey(BackfillEstimate)
+    },
     /** The backfill it started; null when there was nothing to summarize beyond the window. */
     success: Schema.NullOr(LcmBackfill),
-    error: Schema.Union([NotFound, ServerError])
+    error: Schema.Union([NotFound, ServerError, LcmEstimateChanged])
   }),
   /** The chat's backfill, if it has one: its state, spending and what is left. */
   Rpc.make("GetLcmBackfill", {
@@ -336,9 +351,14 @@ export class LcmApi extends RpcGroup.make(
    * now instead of waiting for the next reply. "Summarize now" is the one click that plans.
    */
   Rpc.make("SetLcmBackfill", {
-    payload: { chatId: ChatId, leafSlotId: SlotId, action: Schema.Literals(["pause", "continue", "summarizeNow"]) },
+    payload: {
+      chatId: ChatId,
+      leafSlotId: SlotId,
+      action: Schema.Literals(["pause", "continue", "summarizeNow"]),
+      approved: Schema.optionalKey(BackfillEstimate)
+    },
     success: Schema.NullOr(LcmBackfill),
-    error: Schema.Union([NotFound, ServerError])
+    error: Schema.Union([NotFound, ServerError, LcmEstimateChanged])
   }),
   /** Turns LCM on or off for the whole chat; it keeps its other settings. */
   Rpc.make("SetLcmEnabled", {

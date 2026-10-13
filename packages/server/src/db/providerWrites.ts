@@ -1,3 +1,4 @@
+import { admitRequest } from "./lcmBackfill.ts"
 // Connection, model and ledger write handlers (spec/PROVIDERS.md §2, §3, §9). They run
 // in the writer worker, each as one transaction. Secrets arrive already encrypted.
 import { uuidv7 } from "@rp/shared/id.ts"
@@ -317,6 +318,8 @@ export const makeProviderWriteHandlers = Effect.gen(function* () {
     OpenLlmRequest: ({ userId, request }) =>
       Effect.gen(function* () {
         yield* ownedConnection(userId, request.connectionId)
+        const admission = yield* admitRequest(sql, userId, request)
+        if (!admission.allowed) return false
         // The database also checks that the chat is this user's and the model is this
         // connection's (schema/providers.ts).
         yield* sql`INSERT INTO llm_requests ${sql.insert({
@@ -332,8 +335,13 @@ export const makeProviderWriteHandlers = Effect.gen(function* () {
           provider: request.provider,
           model_key: request.modelKey,
           status: "running",
+          backfill_id: admission.backfillId,
+          reserved_tokens: admission.backfillId ? request.reservation!.tokens : null,
+          reserved_cost: admission.backfillId ? request.reservation!.cost : null,
+          reserved_currency: admission.backfillId ? request.reservation!.currency : null,
           started_at: request.startedAt
         })}`
+        return true
       }).pipe(transaction(sql, "OpenLlmRequest")),
 
     CloseLlmRequest: ({ userId, request }) =>

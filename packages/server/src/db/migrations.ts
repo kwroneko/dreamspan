@@ -1,3 +1,4 @@
+import { lcmEnableSchema } from "./schema/lcmEnable.ts"
 import { historyChangesSchema } from "./historyChanges.ts"
 import { lcm } from "./schema/lcm.ts"
 import { SqliteMigrator } from "@effect/sql-sqlite-node"
@@ -202,7 +203,15 @@ export const migrations = {
       chosen_id TEXT NOT NULL REFERENCES summaries(id) ON DELETE CASCADE
     ) STRICT`,
     `CREATE INDEX lcm_summary_choices_chosen ON lcm_summary_choices(chosen_id)`
-  ])
+  ]),
+  "0032_lcm_request_budget": runAll([
+    `ALTER TABLE llm_requests ADD COLUMN backfill_id TEXT REFERENCES jobs(id)`,
+    `ALTER TABLE llm_requests ADD COLUMN reserved_tokens INTEGER`,
+    `ALTER TABLE llm_requests ADD COLUMN reserved_cost REAL`,
+    `ALTER TABLE llm_requests ADD COLUMN reserved_currency TEXT`,
+    `CREATE INDEX llm_requests_backfill ON llm_requests(backfill_id, status)`
+  ]),
+  "0033_lcm_enable_staging": runAll(lcmEnableSchema)
 }
 
 export const Migrations = SqliteMigrator.layer({ loader: SqliteMigrator.fromRecord(migrations) })
