@@ -9,7 +9,13 @@ export const jsonl = (lines: ReadonlyArray<unknown>) =>
   new TextEncoder().encode(lines.map((line) => JSON.stringify(line)).join("\n"))
 
 /** A V2 card as ST keeps it in `characters/`. */
-export const card = (name: string, firstMes: string, extensions: Record<string, unknown> = {}) =>
+/** `more` adds or replaces fields of the card's `data` (a `character_book`, say). */
+export const card = (
+  name: string,
+  firstMes: string,
+  extensions: Record<string, unknown> = {},
+  more: Record<string, unknown> = {}
+) =>
   png(
     cardChunk("chara", {
       name,
@@ -29,7 +35,8 @@ export const card = (name: string, firstMes: string, extensions: Record<string, 
         creator: "tests",
         character_version: "1",
         alternate_greetings: [],
-        extensions
+        extensions,
+        ...more
       }
     })
   )

@@ -191,6 +191,8 @@ interface Session extends FolderContext {
   readonly library: Map<string, LibraryEntry>
   readonly libraryByHash: Map<string, LibraryEntry>
   readonly records: Map<string, ChatRecord>
+  /** Lorebooks already reported missing: once per import, not once per chat naming them. */
+  readonly missingWorlds: Set<string>
   chat: ChatProgress | null
 }
 
@@ -262,6 +264,7 @@ export class StImports extends Context.Service<
             library: new Map(),
             libraryByHash: new Map(),
             records: new Map(),
+            missingWorlds: new Set(),
             chat: null
           }
           for (const entry of sources.library) {
@@ -555,11 +558,13 @@ export class StImports extends Context.Service<
             progress.isNew
           )
           for (const name of change.missingWorlds) {
+            if (session.missingWorlds.has(name)) continue
+            session.missingWorlds.add(name)
             report.issue(
               progress.path,
               "warning",
               "st.world_missing",
-              `The lorebook “${shownText(name)}” wasn't in the folder, so it isn't attached.`
+              `The lorebook “${shownText(name)}” wasn't in the folder, so it isn't attached to the chats that name it.`
             )
           }
           if (change.summaryOnLast) {
@@ -708,7 +713,15 @@ export class StImports extends Context.Service<
           const chosen: CardInfo | null =
             request.card === "none"
               ? null
-              : (known ?? { entityId: request.card, label: "", file: null, name: "", greetings: [], world: null })
+              : (known ?? {
+                  entityId: request.card,
+                  label: "",
+                  file: null,
+                  name: "",
+                  greetings: [],
+                  world: null,
+                  book: false
+                })
           link = { card: chosen, group: null }
         } else {
           const found = linkChat(session.cards, file.folder, part.speakers, part.greeting)

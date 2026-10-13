@@ -29,6 +29,8 @@ export interface CardInfo {
   readonly name: string
   readonly greetings: ReadonlyArray<string>
   readonly world: string | null
+  /** It carries its own lorebook, which chats use when `world` isn't in the folder. */
+  readonly book: boolean
 }
 
 export interface Link {
@@ -111,6 +113,14 @@ export const linkChat = (
     "The chat's messages name several cards' avatars."
   )
   if (byAvatar) return byAvatar
+  // The character's name in the chat: a card whose file was renamed (or downloaded again
+  // as "name (1)") still has it.
+  const names = new Set(speakers.flatMap((s) => (!s.user && s.name.trim() !== "" ? [s.name.trim()] : [])))
+  const bySpeaker = one(
+    all.filter((card) => names.has(card.name.trim())),
+    `Several cards are named “${shownText([...names].join("”, “"))}”.`
+  )
+  if (bySpeaker) return bySpeaker
   if (greeting !== null) {
     const byGreeting = one(
       all.filter((card) => card.greetings.some((g) => greetingMatches(g, card.name, greeting))),
@@ -118,7 +128,15 @@ export const linkChat = (
     )
     if (byGreeting) return byGreeting
   }
-  return { choices: [], reason: `No card matches the folder “${shownText(folder)}”.` }
+  const who = names.size === 0 ? "" : ` or is named “${shownText([...names].join("”, “"))}”`
+  // ST saves a chat under "undefined" when no character was selected.
+  return {
+    choices: [],
+    reason:
+      folder === "undefined"
+        ? `ST saved this chat without a character (in the folder “undefined”), and no card in the folder${who === "" ? " matches it" : who.replace(" or", "")}.`
+        : `No card in the folder has the file name “${shownText(folder)}”${who}. ST's card for this chat may have been deleted or renamed.`
+  }
 }
 
 /**
@@ -166,8 +184,11 @@ const membership = (folder: FolderContext, link: Link, header: StChatHeader | nu
   const absent: Array<string> = []
   const worlds: Array<string> = []
   const lorebookBindings: Record<string, string> = {}
+  // A card's own world that ST never saved to its worlds folder: the card's copy is used.
+  const embedded = new Set<string>()
   const primary = (card: CardInfo) => {
     if (!card.world) return
+    if (card.book && !folder.worlds.has(card.world)) embedded.add(card.world)
     worlds.push(card.world)
     const ref = folder.worlds.get(card.world)
     if (ref) lorebookBindings[card.entityId] = ref
@@ -195,8 +216,8 @@ const membership = (folder: FolderContext, link: Link, header: StChatHeader | nu
   const missingWorlds: Array<string> = []
   for (const name of new Set(worlds)) {
     const ref = folder.worlds.get(name)
-    if (ref === undefined) missingWorlds.push(name)
-    else lorebooks.push(ref)
+    if (ref !== undefined) lorebooks.push(ref)
+    else if (!embedded.has(name)) missingWorlds.push(name)
   }
   const played = [...spoke]
   return {

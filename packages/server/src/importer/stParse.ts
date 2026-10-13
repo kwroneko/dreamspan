@@ -86,7 +86,8 @@ export const parseLibraryFile = (bytes: Uint8Array, fileName: string, expect: En
         greetings: [card.first_mes, ...card.alternate_greetings, ...card.group_only_greetings]
           .filter((greeting) => greeting.trim() !== "")
           .map((greeting) => greeting.slice(0, stChatLimits.maxGreetingChars)),
-        world: typeof world === "string" && world !== "" ? world : null
+        world: typeof world === "string" && world !== "" ? world : null,
+        book: card.character_book !== undefined
       }
     })
   })

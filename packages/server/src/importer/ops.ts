@@ -143,7 +143,13 @@ export class StGroup extends Schema.Class<StGroup>("StGroup")({
 export class StLibraryFile extends Schema.Class<StLibraryFile>("StLibraryFile")({
   parsed: ParsedFile,
   card: Schema.NullOr(
-    Schema.Struct({ name: Schema.String, greetings: Schema.Array(Schema.String), world: Schema.NullOr(Schema.String) })
+    Schema.Struct({
+      name: Schema.String,
+      greetings: Schema.Array(Schema.String),
+      world: Schema.NullOr(Schema.String),
+      /** It carries a lorebook of its own (`character_book`). */
+      book: Schema.Boolean
+    })
   )
 }) {}
 
