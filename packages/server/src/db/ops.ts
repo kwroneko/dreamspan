@@ -300,6 +300,10 @@ const StChatRecord = Schema.Struct({
 })
 
 export class WriteOps extends RpcGroup.make(
+  Rpc.make("SaveLcmMaintenance", {
+    payload: { userId: UserId, chatId: ChatId, leafSlotId: SlotId, pins: Schema.String },
+    error: Schema.Union([StorageError, NotFound])
+  }),
   Rpc.make("EnqueueSummaries", {
     payload: {
       userId: UserId,
@@ -1392,7 +1396,14 @@ export class ReadOps extends RpcGroup.make(
   }),
   /** Every summary on the path overlapping message depths `fromDepth`..`toDepth`, without their text. */
   Rpc.make("GetLcmCoverage", {
-    payload: { userId: UserId, chatId: ChatId, leafSlotId: SlotId, fromDepth: Schema.Int, toDepth: Schema.Int },
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      leafSlotId: SlotId,
+      fromDepth: Schema.Int,
+      toDepth: Schema.Int,
+      includeResolved: Schema.optionalKey(Schema.Boolean)
+    },
     success: LcmCoverage,
     error: Schema.Union([StorageError, NotFound])
   }),

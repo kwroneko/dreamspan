@@ -178,6 +178,26 @@ export const migrations = {
   "0029_rerun_models": runAll([
     // "Retry with…": the model a rerun request wants for the new job.
     `ALTER TABLE summary_reruns ADD COLUMN model_json TEXT CHECK (model_json IS NULL OR json_valid(model_json))`
+  ]),
+  "0031_lcm_reply_maintenance": runAll([
+    `CREATE TABLE lcm_reply_maintenance (
+      chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+      leaf_slot_id TEXT NOT NULL REFERENCES slots(id) ON DELETE CASCADE,
+      pins_json TEXT NOT NULL CHECK (json_valid(pins_json)),
+      PRIMARY KEY (chat_id, leaf_slot_id)
+    ) STRICT`,
+    `ALTER TABLE summarization_jobs ADD COLUMN source_summary_id TEXT REFERENCES summaries(id)`,
+    `ALTER TABLE summarization_jobs ADD COLUMN source_revision_id TEXT REFERENCES summary_revisions(id)`,
+    `ALTER TABLE summarization_jobs ADD COLUMN rerun_ids_json TEXT CHECK (rerun_ids_json IS NULL OR json_valid(rerun_ids_json))`,
+    `ALTER TABLE summarization_jobs ADD COLUMN explicit_requested INTEGER NOT NULL DEFAULT 0 CHECK (explicit_requested IN (0, 1))`,
+    `CREATE INDEX summarization_jobs_source ON summarization_jobs(source_summary_id)`,
+    `CREATE INDEX summarization_jobs_source_revision ON summarization_jobs(source_revision_id)`,
+    `CREATE INDEX lcm_reply_maintenance_leaf ON lcm_reply_maintenance(leaf_slot_id)`,
+    `CREATE TABLE lcm_summary_choices (
+      summary_id TEXT PRIMARY KEY REFERENCES summaries(id) ON DELETE CASCADE,
+      chosen_id TEXT NOT NULL REFERENCES summaries(id) ON DELETE CASCADE
+    ) STRICT`,
+    `CREATE INDEX lcm_summary_choices_chosen ON lcm_summary_choices(chosen_id)`
   ])
 }
 

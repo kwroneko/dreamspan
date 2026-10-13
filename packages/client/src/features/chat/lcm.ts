@@ -13,11 +13,11 @@ export const tokensText = (tokens: number) =>
       ? `~${(tokens / 1000).toFixed(1)}k tokens`
       : `~${tokens} tokens`
 
-export type SummaryHealth = "failed" | "stale" | "fresh"
+export type SummaryHealth = "failed" | "stale" | "fresh" | "resolved"
 
 /** A summary is stale when what it covers changed since; one that failed has no text. */
-export const healthOf = (summary: Pick<LcmSummary, "status" | "fresh">): SummaryHealth =>
-  summary.status === "failed" ? "failed" : summary.fresh ? "fresh" : "stale"
+export const healthOf = (summary: Pick<LcmSummary, "status" | "fresh" | "resolved">): SummaryHealth =>
+  summary.status === "failed" ? (summary.resolved ? "resolved" : "failed") : summary.fresh ? "fresh" : "stale"
 
 export const originText = (origin: LcmSummary["origin"]) =>
   origin === "user"
@@ -54,7 +54,10 @@ export interface BoundaryCounts {
 
 export const countsOf = (lcm: LcmState): BoundaryCounts => ({
   stale: lcm.layer.filter((s) => healthOf(s) === "stale").length,
-  failed: lcm.failed.length + lcm.jobs.filter((j) => j.status === "failed").length,
+  failed: new Set([
+    ...lcm.failed.map((s) => `${s.level}:${s.from}:${s.to}`),
+    ...lcm.jobs.filter((j) => j.status === "failed").map((j) => `${j.level}:${j.from}:${j.to}`)
+  ]).size,
   running: lcm.jobs.filter((j) => j.status === "processing"),
   queued: lcm.jobs.filter((j) => j.status === "pending").length,
   rerun:

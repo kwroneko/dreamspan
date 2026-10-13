@@ -1,3 +1,5 @@
+import { MAX_CHUNK_SLOTS } from "./lcmLimits.ts"
+import { createHash } from "node:crypto"
 import type { UserId } from "@rp/shared/domain.ts"
 import type { Summary } from "@rp/shared/lcm.ts"
 import { Effect } from "effect"
@@ -54,6 +56,9 @@ export const maintain = (
     const rows = yield* sql<{ id: string; status: string }>`${onPath}
       SELECT s.id, s.status FROM path JOIN summaries s INDEXED BY summaries_last_slot ON s.last_slot_id = path.id
       WHERE s.chat_id = ${chatId} AND s.sealed = 1 AND s.status IN ('complete', 'truncated', 'superseded', 'failed')`
+    const choices = yield* sql<{ summary_id: string; chosen_id: string }>`SELECT x.* FROM lcm_summary_choices x
+      JOIN summaries s ON s.id=x.summary_id WHERE s.chat_id=${chatId}`
+    const dismissed = new Set(choices.filter((c) => c.summary_id !== c.chosen_id).map((c) => c.summary_id))
     const candidates: Array<Candidate> = []
     const held: Array<{ level: number; from: number; to: number }> = []
     const failedById = new Map<string, Summary>()
@@ -67,7 +72,11 @@ export const maintain = (
         failedById.set(summary.id, summary)
         continue
       }
-      candidates.push({ ...summary, batchLive: summary.batchId !== null && liveBatches.has(summary.batchId) })
+      candidates.push({
+        ...summary,
+        protected: !dismissed.has(summary.id),
+        batchLive: summary.batchId !== null && liveBatches.has(summary.batchId)
+      })
     }
     const jobs = yield* sql<{ level: number; from: number; to: number; input_child_ids: string | null }>`${onPath}
       SELECT j.level, a.depth + 1 AS "from", b.depth + 1 AS "to", j.input_child_ids
@@ -79,7 +88,18 @@ export const maintain = (
     type Ask = { readonly id: string; readonly model: typeof ModelChoice.Type | undefined }
     const forced = new Map<string, Ask>()
     const retries: Array<{ ask: Ask; level: number; first: string; last: string; children: Array<string> }> = []
-    if (options.reason === "reply") {
+    const [episode] = yield* sql<{ pins_json: string }>`SELECT pins_json FROM lcm_reply_maintenance
+      WHERE chat_id = ${chatId} AND leaf_slot_id = ${leaf}`
+    type Pins = {
+      signatures: Record<string, string>
+      asks: Array<string>
+      askModels: Record<string, string | null>
+      largeRequests: Record<string, Ask>
+      explicit: Array<string>
+    }
+    const previous: Pins | undefined = episode ? (JSON.parse(episode.pins_json) as Pins) : undefined
+    const askModels: Record<string, string | null> = {}
+    if (options.reason === "reply" || previous) {
       const asks = yield* sql<{
         id: string
         summary_id: string | null
@@ -93,6 +113,12 @@ export const maintain = (
           j.last_slot_id AS job_last, j.input_child_ids AS job_children, j.result_summary_id AS job_result
         FROM summary_reruns r LEFT JOIN summarization_jobs j ON j.id = r.job_id WHERE r.chat_id = ${chatId}`
       for (const row of asks) {
+        if (
+          options.reason !== "reply" &&
+          (!previous?.asks.includes(row.id) || previous.askModels[row.id] !== row.model_json)
+        )
+          continue
+        askModels[row.id] = row.model_json
         const ask: Ask = {
           id: row.id,
           ...(row.model_json ? { model: JSON.parse(row.model_json) as typeof ModelChoice.Type } : { model: undefined })
@@ -130,7 +156,83 @@ export const maintain = (
     const [last] = yield* sql<{ eager: number }>`
       SELECT eager FROM summarization_jobs WHERE chat_id = ${chatId} AND status IN ('complete', 'failed')
       ORDER BY updated_at DESC, id DESC LIMIT 1`
+    // Freeze effective message inputs and every selected child revision at the authorizing reply.
+    // Completion can continue that exact episode; later edits do not inherit its permission.
+    const path = candidates.length ? yield* lcmPath(sql, userId, chatId, leaf) : []
+    const byId = new Map(candidates.map((s) => [s.id as string, s]))
+    const signatures: Record<string, string> = {}
+    const signature = (s: Summary): string =>
+      (signatures[s.id] ??= createHash("sha256")
+        .update(
+          JSON.stringify([
+            s.revisionId,
+            choices.find((c) => c.summary_id === s.id)?.chosen_id ?? null,
+            s.level === 1
+              ? path.slice(s.from - 1, s.to).map(slotInput)
+              : s.children.map((c) => {
+                  const child = byId.get(c.summaryId)
+                  return child ? signature(child) : c.revisionId
+                })
+          ])
+        )
+        .digest("hex"))
+    for (const s of candidates) signature(s)
+    for (const retry of retries) {
+      const chain = yield* lcmPath(sql, userId, chatId, retry.last, retry.first)
+      signatures[`retry:${retry.ask.id}`] = createHash("sha256")
+        .update(JSON.stringify([chain.map(slotInput), retry.children.map((id) => byId.get(id)?.revisionId)]))
+        .digest("hex")
+    }
+    const authorizedRetries = retries.filter(
+      (r) => options.reason === "reply" || previous?.signatures[`retry:${r.ask.id}`] === signatures[`retry:${r.ask.id}`]
+    )
+    // Legacy/imported leaves can span more than the new slot cap. Continue their explicit
+    // request over bounded parts even after its queue row was consumed by the first part.
+    if (options.reason === "completion")
+      for (const [id, ask] of Object.entries(previous?.largeRequests ?? {})) {
+        const source = byId.get(id)
+        if (source && previous?.signatures[id] === signatures[id]) {
+          forced.set(id, ask)
+          chains.set(id, path.slice(source.from - 1, source.to))
+        }
+      }
+    const finishedParts = yield* sql<{
+      source: string
+      result: string
+      rerun_ids_json: string | null
+    }>`SELECT source_summary_id AS source,result_summary_id AS result,rerun_ids_json
+      FROM summarization_jobs WHERE chat_id=${chatId} AND source_summary_id IS NOT NULL AND status='complete'`
+    const completed = new Map<string, Array<Summary>>()
+    for (const part of finishedParts) {
+      const result = byId.get(part.result)
+      const asks = part.rerun_ids_json ? (JSON.parse(part.rerun_ids_json) as Array<string>) : [""]
+      if (result?.fresh)
+        for (const ask of asks) {
+          const key = `${part.source}:${ask}`
+          completed.set(key, [...(completed.get(key) ?? []), result])
+        }
+    }
+    const explicit = new Set(previous?.explicit ?? [])
+    if (options.reason === "reply") {
+      explicit.clear()
+      const containsRequest = (s: Summary): boolean =>
+        forced.has(s.id) ||
+        s.children.some((c) => {
+          const child = byId.get(c.summaryId)
+          return child !== undefined && containsRequest(child)
+        })
+      for (const s of candidates) if (containsRequest(s)) explicit.add(s.id)
+    }
+    const authorized =
+      options.reason === "reply"
+        ? undefined
+        : new Set(candidates.filter((s) => previous?.signatures[s.id] === signatures[s.id]).map((s) => s.id as string))
+    // Fresh results of queued work can join ordinary condensation, but never authorize a stale repair.
+    if (authorized)
+      for (const s of candidates)
+        if (s.fresh && s.origin === "generated" && previous?.signatures[s.id] === undefined) authorized.add(s.id)
     const plan = planMaintenance({
+      ...(authorized ? { authorized } : {}),
       summaries: candidates,
       layer: layer.summaries,
       liveJobs: jobs.map((j) => ({
@@ -154,31 +256,41 @@ export const maintain = (
         lastFinishedEager: last?.eager === 1
       }
     })
-    const chunkFor = (chain: ReadonlyArray<LcmSlot>, ask?: Ask) =>
+    const chunkFor = (chain: ReadonlyArray<LcmSlot>, ask?: Ask, source?: Summary) =>
       !chain.length || chain.some((c) => c.generating || c.merged) || !chain.some((c) => c.versionId !== null)
         ? []
-        : [
-            {
-              inputs: chain.map(slotInput),
-              target: options.leafTarget,
-              clipTokens: options.clipTokens,
-              refresh: true,
-              ...(ask ? { rerunIds: [ask.id], ...(ask.model ? { model: ask.model } : {}) } : {})
-            }
-          ]
+        : Array.from({ length: Math.ceil(chain.length / MAX_CHUNK_SLOTS) }, (_, n) => ({
+            inputs: chain.slice(n * MAX_CHUNK_SLOTS, (n + 1) * MAX_CHUNK_SLOTS).map(slotInput),
+            target: options.leafTarget,
+            clipTokens: options.clipTokens,
+            refresh: true,
+            explicitRequested: source !== undefined && explicit.has(source.id),
+            ...(source ? { sourceSummaryId: source.id, sourceRevisionId: source.revisionId } : {}),
+            ...(ask ? { rerunIds: [ask.id], ...(ask.model ? { model: ask.model } : {}) } : {})
+          })).filter(
+            (chunk) =>
+              !source ||
+              source.slotCount <= MAX_CHUNK_SLOTS ||
+              !completed
+                .get(`${source.id}:${ask?.id ?? ""}`)
+                ?.some(
+                  (part) =>
+                    part.firstSlotId === chunk.inputs[0]!.slotId && part.lastSlotId === chunk.inputs.at(-1)!.slotId
+                )
+          )
     // Requests first, then what staleness asks for. A slot still being written, or a merge, can't be
     // summarized; the next pass will see it.
     const refresh = [
       ...(yield* Effect.forEach(
-        retries.filter((r) => r.level === 1),
+        authorizedRetries.filter((r) => r.level === 1),
         (r) => Effect.map(lcmPath(sql, userId, chatId, r.last, r.first), (chain) => chunkFor(chain, r.ask))
       )).flat(),
       ...[...plan.resummarize]
         .sort((a, b) => Number(forced.has(b)) - Number(forced.has(a)))
-        .flatMap((id) => chunkFor(chains.get(id) ?? [], forced.get(id)))
+        .flatMap((id) => chunkFor(chains.get(id) ?? [], forced.get(id), byId.get(id)))
     ]
     const condensations: Array<PlannedJob> = [
-      ...retries
+      ...authorizedRetries
         .filter((r) => r.level > 1 && r.children.length > 1)
         .map((r) => ({
           level: r.level,
@@ -195,12 +307,33 @@ export const maintain = (
           children: c.children as PlannedJob["children"],
           target: condenseTarget,
           eager: c.eager,
+          explicitRequested: explicit.has(c.sourceOf ?? c.rerunOf ?? c.absorbedParentId ?? ""),
+          ...((c.sourceOf ?? c.rerunOf ?? c.absorbedParentId) &&
+          byId.get((c.sourceOf ?? c.rerunOf ?? c.absorbedParentId)!)
+            ? {
+                sourceSummaryId: byId.get((c.sourceOf ?? c.rerunOf ?? c.absorbedParentId)!)!.id,
+                sourceRevisionId: byId.get((c.sourceOf ?? c.rerunOf ?? c.absorbedParentId)!)!.revisionId
+              }
+            : {}),
           ...(c.absorbedParentId ? { absorbedParentId: c.absorbedParentId as never } : {}),
           ...(ask ? { rerunIds: [ask.id], ...(ask.model ? { model: ask.model } : {}) } : {})
         }
       })
     ]
     return {
+      ...(options.reason === "reply"
+        ? {
+            maintenancePins: JSON.stringify({
+              signatures,
+              askModels,
+              largeRequests: Object.fromEntries(
+                [...forced].filter(([id]) => (byId.get(id)?.slotCount ?? 0) > MAX_CHUNK_SLOTS)
+              ),
+              explicit: [...explicit],
+              asks: [...forced.values(), ...retries.map((r) => r.ask)].map((a) => a.id)
+            } satisfies Pins)
+          }
+        : {}),
       condensations: condensations.slice(0, MAX_JOBS_PER_PLAN),
       refresh: refresh.slice(0, MAX_JOBS_PER_PLAN),
       flagged: plan.flagged as Array<Summary["id"]>

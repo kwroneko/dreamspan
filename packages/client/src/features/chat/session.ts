@@ -186,16 +186,18 @@ export class ChatSession {
     if (!result.ok || this.disposed || read < this.lcmApplied || leafSlotId !== this.view.leafSlotId) return
     this.lcmApplied = read
     // The same layer again (the leaf moved on, a reply streamed) changes nothing on screen.
-    if (JSON.stringify(result.value) === JSON.stringify(this.view.lcm)) return
-    this.update({ lcm: result.value, lcmVersion: this.view.lcmVersion + 1 })
+    this.update({
+      lcm: JSON.stringify(result.value) === JSON.stringify(this.view.lcm) ? this.view.lcm : result.value,
+      lcmVersion: this.view.lcmVersion + 1
+    })
   }
 
   /** The summaries overlapping a range of message depths on the path shown, without their text. */
-  async coverage(fromDepth: number, toDepth: number): Promise<LcmCoverage | null> {
+  async coverage(fromDepth: number, toDepth: number, includeResolved = false): Promise<LcmCoverage | null> {
     const leafSlotId = this.view.leafSlotId
     if (leafSlotId === null) return null
     const result = await this.call((client) =>
-      client("GetLcmCoverage", { chatId: this.chatId, leafSlotId, fromDepth, toDepth })
+      client("GetLcmCoverage", { chatId: this.chatId, leafSlotId, fromDepth, toDepth, includeResolved })
     )
     return result.ok && !this.disposed ? result.value : null
   }

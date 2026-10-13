@@ -64,6 +64,8 @@ export const LcmSummary = Schema.Struct({
   revisionId: SummaryRevisionId,
   /** Asked to be summarized again with the next reply (SetSummaryRerun). */
   rerun: Schema.Boolean,
+  replacementAvailable: Schema.optionalKey(Schema.Boolean),
+  resolved: Schema.optionalKey(Schema.Boolean),
   content: Schema.NullOr(Schema.String),
   /** The summaries this one condenses, in order; empty at level 1. */
   children: Schema.Array(SummaryId)
@@ -155,6 +157,7 @@ export class LcmApi extends RpcGroup.make(
     payload: {
       chatId: ChatId,
       leafSlotId: SlotId,
+      includeResolved: Schema.optionalKey(Schema.Boolean),
       fromDepth: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
       toDepth: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
     },

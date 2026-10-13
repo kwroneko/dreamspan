@@ -25,6 +25,7 @@ interface PlannedCondensation {
   readonly absorbedParentId?: string
   /** The summary the user asked to have made again, which this condensation does. */
   readonly rerunOf?: string
+  readonly sourceOf?: string
   readonly eager: boolean
 }
 
@@ -39,6 +40,7 @@ export interface Maintenance {
 /** A summary as the planner sees it. */
 export type Candidate = Summary & {
   /** Its batch still has jobs running: not selectable yet, so not condensable. */
+  readonly protected?: boolean
   readonly batchLive: boolean
 }
 
@@ -62,14 +64,19 @@ export interface MaintenanceInput {
   /** Summaries the user asked to have made again with the next reply: done whether or not they are stale. */
   readonly forced: ReadonlySet<string>
   /** Which maintenance this pass may start: only a reply starts re-summarizing; a finished job only continues it. */
+  readonly authorized?: ReadonlySet<string>
   readonly reason: "reply" | "completion"
   readonly settings: MaintenanceSettings
 }
 
 type Range = { readonly from: number; readonly to: number }
 const handWritten = (s: Summary) => s.origin !== "generated"
-const better = (a: Summary, b: Summary) =>
-  Number(b.fresh) - Number(a.fresh) || b.level - a.level || b.id.localeCompare(a.id)
+const protectedChoice = (s: Candidate) => handWritten(s) && s.protected !== false
+const better = (a: Candidate, b: Candidate) =>
+  Number(protectedChoice(b)) - Number(protectedChoice(a)) ||
+  Number(b.fresh) - Number(a.fresh) ||
+  b.level - a.level ||
+  b.id.localeCompare(a.id)
 const overlaps = (a: Range, b: Range) => a.from <= b.to && b.from <= a.to
 
 /** How a summary stands once the work this pass starts is done. */
@@ -94,6 +101,7 @@ export const planMaintenance = (input: MaintenanceInput): Maintenance => {
     live.filter((s) => s.from === range.from && s.to === range.to && s.level < below && selectable(s)).sort(better)
   // A fresh summary of the same range and at least its level has already taken its place.
   const replaced = (s: Candidate) =>
+    !protectedChoice(s) &&
     live.some(
       (o) => o.id !== s.id && o.from === s.from && o.to === s.to && o.level >= s.level && o.fresh && selectable(o)
     )
@@ -134,13 +142,14 @@ export const planMaintenance = (input: MaintenanceInput): Maintenance => {
     return result
   }
   const settle = (s: Candidate): Standing => {
+    if (input.reason === "completion" && !input.authorized?.has(s.id)) return "stuck"
     if (handWritten(s)) {
       flagged.add(s.id)
       return "flagged"
     }
     if (s.level === 1) {
       if (!input.hasContent(s) || held(1, s)) return "stuck"
-      if (!busy(1, s) && input.reason === "reply") resummarize.add(s.id)
+      if (!busy(1, s) && (input.reason === "reply" || input.authorized?.has(s.id))) resummarize.add(s.id)
       return "pending"
     }
     // A condensation is written again over the same chain once each of its parts has a fresh summary.
@@ -152,6 +161,11 @@ export const planMaintenance = (input: MaintenanceInput): Maintenance => {
       const options = optionsFor(part, s.level)
       if (options[0]?.fresh) {
         chosen.push(options[0].id)
+        continue
+      }
+      if (options[0] && protectedChoice(options[0])) {
+        flagged.add(options[0].id)
+        worst = "flagged"
         continue
       }
       // Nothing fresh yet: write again one the user didn't write, if the range has such a summary.
@@ -166,17 +180,18 @@ export const planMaintenance = (input: MaintenanceInput): Maintenance => {
     }
     if (worst !== "current") return worst
     if (held(s.level, s)) return "stuck"
-    if (!busy(s.level, s) && !input.forced.has(s.id)) recreate.push({ level: s.level, children: chosen, eager: false })
+    if (!busy(s.level, s) && !input.forced.has(s.id))
+      recreate.push({ level: s.level, children: chosen, eager: false, sourceOf: s.id })
     return "pending"
   }
   for (const s of stale) standingOf(s)
 
   // What the user asked for is done as asked: a new summary over the same chain, hand-written or not,
   // stale or fresh, whatever stands against it. Only a reply starts it.
-  if (input.reason === "reply")
+  if (input.reason === "reply" || input.authorized)
     for (const id of input.forced) {
       const s = byId.get(id)
-      if (!s || s.status === "superseded") continue
+      if (!s || s.status === "superseded" || (input.reason === "completion" && !input.authorized?.has(id))) continue
       if (s.level === 1) {
         if (input.hasContent(s)) resummarize.add(s.id)
         continue
@@ -194,7 +209,13 @@ export const planMaintenance = (input: MaintenanceInput): Maintenance => {
   const pool = (level: number) => {
     const members = new Map<string, Candidate>()
     for (const s of live)
-      if (s.level === level && s.fresh && selectable(s) && !consumed(s)) {
+      if (
+        s.level === level &&
+        s.fresh &&
+        selectable(s) &&
+        !consumed(s) &&
+        (!input.authorized || input.authorized.has(s.id))
+      ) {
         const key = `${s.from}:${s.to}`
         const other = members.get(key)
         if (!other || better(other, s) > 0) members.set(key, s)

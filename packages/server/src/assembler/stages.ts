@@ -1278,7 +1278,10 @@ const composeStage = sync("compose", (assembly) => {
     control.push({ role: "system", content: direction, pieces: [piece], kind: "volatile" })
   }
 
-  const previous = assembly.previousHistoryStart
+  const previous =
+    assembly.previousHistoryStart && assembly.previousHistoryStart.depth <= need(assembly, "target").depth
+      ? assembly.previousHistoryStart
+      : null
   const configuration = createHash("sha256")
     .update(
       JSON.stringify([
@@ -1648,7 +1651,7 @@ const composeStage = sync("compose", (assembly) => {
     }
     return low
   }
-  const earlier = previous && !assembly.lcm ? projected.findIndex((p) => p.entry.depth >= previous.depth) : 0
+  const earlier = previous ? projected.findIndex((p) => p.entry.depth >= previous.depth) : 0
   let start = earlier < 0 ? projected.length : earlier
   let budget = maximum
   const mayRestore =
@@ -1660,8 +1663,7 @@ const composeStage = sync("compose", (assembly) => {
       assembly.historyRevision !== prior.revision)
   const exceeded =
     !fits(start, maximum) ||
-    (!assembly.lcm &&
-      previous !== null &&
+    (previous !== null &&
       previous !== undefined &&
       previous.depth < (assembly.history?.[0]?.depth ?? 0) &&
       (assembly.historyOmitted ?? 0) > 0)
@@ -1761,7 +1763,7 @@ const requestStage = sync("request", (assembly) => {
   const messages = need(assembly, "messages")
   const s = doc.samplers
   const firstSummary = messages.findIndex((m) => m.pieces.some((p) => hasSummary(assembly, p)))
-  if (assembly.lcm?.summaries.length && firstSummary < 0)
+  if (assembly.lcm?.summaries.some((s) => s.content !== "") && firstSummary < 0)
     throw new AssemblyFailed({
       reason: "invalid_document",
       message: "This preset has no enabled placement for its summaries."

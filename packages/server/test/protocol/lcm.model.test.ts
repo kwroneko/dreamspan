@@ -8,7 +8,7 @@ import type { AppendResult } from "../../src/db/ops.ts"
 import type { ContextSnapshot } from "../../src/assembler/types.ts"
 import { client, posted, testConfig } from "../support/config.ts"
 import { completeFixture, fixtureSql } from "../support/lcmFixtures.ts"
-import { lastText, lcmServer, PLANTED } from "../support/lcmHarness.ts"
+import { lastText, lcmServer, lcmHarness, lcmTest, PLANTED } from "../support/lcmHarness.ts"
 import { docFor } from "../support/docs.ts"
 import { completionChunks, sse, startMockProvider } from "../support/mockProvider.ts"
 
@@ -280,7 +280,14 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
     const remember = (summary: Summary, inputs: Summary["inputs"], children: ReadonlyArray<Artifact>) => {
       const lineage = children.map((s) => ({ summaryId: s.id, revisionId: s.revision }))
       const text = JSON.stringify(children.length ? lineage.map((s) => [s.summaryId, s.revisionId]) : inputs) + PAD
-      assert.strictEqual(summary.content, text)
+      if (summary.content === "") {
+        assert.isTrue(
+          children.length
+            ? children.every((c) => c.revisions.get(c.revision) === "")
+            : inputs.every((i) => i.versionId === null && i.amendCount === 0),
+          "empty coverage has only zero-content lineage"
+        )
+      } else assert.strictEqual(summary.content, text)
       origins.set(summary.revisionId, summary.origin)
       artifacts.set(summary.id, {
         batchId: summary.batchId,
@@ -290,27 +297,83 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
         level: summary.level,
         inputs,
         children: lineage,
-        revisions: new Map([[summary.revisionId, text]]),
+        revisions: new Map([[summary.revisionId, summary.content]]),
         revision: summary.revisionId,
         rowVersion: 1
       })
     }
+    const adoptEmptyCoverage = async () => {
+      const [rows] = await call(
+        fixtureSql(config.dataDir, [
+          {
+            sql: `SELECT s.id,j.id AS job_id,j.attempts,j.rollout_id FROM summaries s
+        JOIN summarization_jobs j ON j.result_summary_id=s.id JOIN summary_revisions r ON r.id=s.selected_revision_id
+        WHERE s.chat_id=? AND j.status='complete' AND r.content='' ORDER BY s.level,s.id`,
+            params: [chat.id]
+          }
+        ])
+      )
+      for (const row of rows!)
+        if (!artifacts.has(row.id as Summary["id"])) {
+          assert.strictEqual(row.attempts, 0, "empty coverage starts no paid attempt")
+          assert.isNull(row.rollout_id, "empty coverage creates no rollout")
+          const summary = await call(reader.GetSummary({ userId: user.id, summaryId: row.id as Summary["id"] }))
+          remember(
+            summary,
+            summary.inputs,
+            summary.children.map((c) => artifacts.get(c.summaryId)!)
+          )
+        }
+    }
     const expectedLayer = (history: ReadonlyArray<Node>) => {
       const onPath = new Set(history.map((n) => n.id)),
         selected: Array<Artifact> = []
+      const available = (s: Artifact) =>
+        !superseded.has(s.id) &&
+        !(s.revisions.get(s.revision) === "" && !fresh(s)) &&
+        onPath.has(s.last) &&
+        ![...jobs.values()].some(
+          (j) => j.batchId === s.batchId && s.batchId !== null && ["pending", "processing"].includes(j.status)
+        )
+      const includesChoice = (s: Artifact, manual: Artifact): boolean =>
+        s.children.some((child) =>
+          child.summaryId === manual.id
+            ? child.revisionId === manual.revision
+            : includesChoice(artifacts.get(child.summaryId)!, manual)
+        )
+      const protectedRows = [...artifacts.values()].filter(
+        (s) => available(s) && origins.get(s.revision) !== "generated"
+      )
       let at = history.length - 1
       while (at >= 0) {
         const options = [...artifacts.values()]
           .filter(
             (s) =>
-              !superseded.has(s.id) &&
-              onPath.has(s.last) &&
+              available(s) &&
+              !(
+                origins.get(s.revision) === "generated" &&
+                protectedRows.some(
+                  (manual) =>
+                    manual.id !== s.id &&
+                    manual.level <= s.level &&
+                    nodes.get(s.first)!.depth <= nodes.get(manual.first)!.depth &&
+                    nodes.get(s.last)!.depth >= nodes.get(manual.last)!.depth &&
+                    !includesChoice(s, manual)
+                )
+              ) &&
               s.last === history[at]!.id &&
               ![...jobs.values()].some(
                 (j) => j.batchId === s.batchId && s.batchId !== null && ["pending", "processing"].includes(j.status)
               )
           )
-          .sort((a, b) => Number(fresh(b)) - Number(fresh(a)) || b.level - a.level || b.id.localeCompare(a.id))
+          .sort(
+            (a, b) =>
+              Number(["user", "imported"].includes(origins.get(b.revision)!)) -
+                Number(["user", "imported"].includes(origins.get(a.revision)!)) ||
+              Number(fresh(b)) - Number(fresh(a)) ||
+              b.level - a.level ||
+              b.id.localeCompare(a.id)
+          )
         const chosen = options[0]
         if (chosen) {
           selected.unshift(chosen)
@@ -323,6 +386,7 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
       return enabled ? selected : []
     }
     const checkContext = async (target: Node) => {
+      await adoptEmptyCoverage()
       const { snapshot: json } = await call(
         reader.AssembleContext({
           userId: user.id,
@@ -360,7 +424,9 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
         }
         visit(artifact)
         const piece = snapshot.pieces.find((p) => p.source.kind === "summary" && p.source.id === pin.id)!
-        assert.isNotEmpty(piece.messages, "I2: selected summary is rendered")
+        if (artifact.revisions.get(artifact.revision) === "")
+          assert.strictEqual(piece.text, "", "empty lineage emits no prose")
+        else assert.isNotEmpty(piece.messages, "I2: selected summary is rendered")
         assert.isTrue(
           piece.messages.every((i) => snapshot.request.messages[i]!.content.includes(piece.text)),
           "I2: attributed summary text actually appears"
@@ -536,10 +602,15 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
           { sql: "SELECT count(*) AS n FROM summaries WHERE status IN ('complete','truncated','superseded')" }
         ])
       )
-      assert.strictEqual(Number(saved![0]!.n), artifacts.size, "I5: only accepted outputs became summaries")
+      assert.strictEqual(
+        Number(saved![0]!.n),
+        artifacts.size,
+        "I5: only accepted outputs and verified empty lineage became summaries"
+      )
       return row.status as string
     }
     const claimAndRun = async (mode: Mode, limit = 60) => {
+      await adoptEmptyCoverage()
       let ran = 0
       for (let n = 0; n < limit; n++) {
         const job = await call(writer.ClaimSummaryJob({ userId: user.id }))
@@ -613,7 +684,11 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
           )
           assert.isFalse(seen.has(key), "at most one re-summarization per affected summary per reply")
           seen.add(key)
-          if (job.level === 1) assert.strictEqual(reason, "reply", "a finished job does not start a re-summarization")
+          if (job.level === 1)
+            assert.isTrue(
+              same.every((b) => !b.fresh),
+              "completion continues only the stale work authorized by this reply"
+            )
         }
         const ran = await claimAndRun("ok")
         if (!made.length && !ran) return true
@@ -981,8 +1056,67 @@ for (const seed of ONLY === undefined ? Array.from({ length: SEEDS }, (_, i) => 
     { timeout: 600_000 }
   )
 
+// Manual protection changes which randomly generated layers reach the budget. Keep absorption
+// coverage deterministic and run it through the same real workers and summarizer.
+if (ONLY === undefined)
+  lcmTest("directed absorption retains the original children and changes the active layer", (server) =>
+    Effect.gen(function* () {
+      const h = yield* lcmHarness(server, {
+        messages: 16,
+        settings: { fanout: 3, condenseTarget: 100, leafTarget: 1000 },
+        summarizer: () => ({ text: "A synthetic summary. " + "word ".repeat(640) })
+      })
+      const children: Array<Summary> = []
+      for (let n = 0; n < 5; n++) {
+        const job = yield* h.enqueue(n * 2, n * 2 + 1)
+        yield* h.drain
+        const [rows] = yield* fixtureSql(h.dataDir, [
+          { sql: "SELECT result_summary_id AS id FROM summarization_jobs WHERE id=?", params: [job.id] }
+        ])
+        children.push(yield* h.api.GetSummary({ summaryId: rows![0]!.id as Summary["id"] }))
+      }
+      const position = { userId: h.userId, chatId: h.chat.id, leafSlotId: h.rows.at(-1)!.slotId }
+      yield* h.writer.EnqueueCondensations({
+        ...position,
+        requestClass: "interactive",
+        jobs: [{ level: 2, children: children.slice(2).map((c) => c.id), target: 1000, eager: false }]
+      })
+      yield* h.drain
+      const made = yield* h.plan("completion")
+      assert.lengthOf(made, 1)
+      const [jobs] = yield* fixtureSql(h.dataDir, [
+        {
+          sql: "SELECT eager,absorbed_parent_id,input_child_ids FROM summarization_jobs WHERE id=?",
+          params: [made[0]!.id]
+        }
+      ])
+      assert.strictEqual(jobs![0]!.eager, 1)
+      assert.deepEqual(
+        JSON.parse(jobs![0]!.input_child_ids as string),
+        children.map((c) => c.id)
+      )
+      yield* h.drain
+      const state = yield* h.api.GetLcmState({ chatId: h.chat.id, leafSlotId: position.leafSlotId })
+      assert.deepEqual(
+        state.layer.map((s) => s.level),
+        [2]
+      )
+      const parent = yield* h.api.GetSummary({ summaryId: state.layer[0]!.id })
+      assert.deepEqual(
+        parent.children.map((c) => c.summaryId),
+        children.map((c) => c.id)
+      )
+      assert.isTrue(parent.fresh)
+      assert.strictEqual(
+        (yield* h.api.GetSummary({ summaryId: jobs![0]!.absorbed_parent_id as Summary["id"] })).status,
+        "superseded"
+      )
+      exercised["absorbed"] = (exercised["absorbed"] ?? 0) + 1
+    })
+  )
+
 if (ONLY === undefined && STEPS >= 100)
-  it("the seeds ran jobs to completion, to retry, and to failure under planted refusals", () => {
+  it("the model and directed case exercised completion, retries, refusals and absorption", () => {
     for (const key of [
       "run-job:complete:L1",
       "refuse-job:pending:L1",

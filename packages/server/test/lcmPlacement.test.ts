@@ -272,65 +272,72 @@ it.effect("the first ST summary keeps framing inside the example reservation", (
 )
 
 for (const layout of ["st", "concat"] as const)
-  it.effect(
-    `the summary cursor supersedes the stepped start until the remaining ${layout} history exceeds maximum`,
-    () =>
-      Effect.gen(function* () {
-        const input = fixture(
-          { mode: "section", section: "after_main_prompt" },
-          {
-            openai_max_context: 1000,
-            openai_max_tokens: 40
-          }
-        )
-        const events: AssemblyFixture["events"] = [
-          ...input.events!,
-          ...(layout === "st"
-            ? []
-            : [{ depth: null, event: { scope: null, data: { key: "layout.cards" as const, value: layout } } }])
-        ]
-        const messages: AssemblyFixture["messages"] = Array.from({ length: 24 }, (_, i) => ({
-          side: "user",
-          content: `RAW ${i} ${"r".repeat(150)}`
-        }))
-        const before = yield* assembleFixture({ ...input, events, messages, summaries: [] })
-        assert.isAbove(before.historyStart!.depth, 1)
-        assert.isNotEmpty(before.lcm!.omitted)
-        const covered = before.historyStart!.depth - 1
-        const selected = Array.from({ length: covered }, (_, i) => summary(i))
-        const after = yield* assembleFixture({
-          ...input,
-          events,
-          messages,
-          summaries: selected,
-          historyStart: before.historyStart!
-        })
-        assert.strictEqual(after.historyStart!.depth, covered)
-        assert.deepStrictEqual(after.lcm!.omitted, [])
-        assert.strictEqual(after.lcm!.verbatim!.from, covered + 1)
-        assert.isTrue(after.request.messages.some((m) => m.content.includes(`RAW ${covered} `)))
-        const failed = yield* assembleFixture({
-          ...input,
-          events,
-          messages: messages.slice(0, 4),
-          summaries: [],
-          historyStart: before.historyStart!
-        })
-        assert.strictEqual(failed.historyStart!.depth, 0)
-        assert.deepStrictEqual(failed.lcm!.omitted, [])
-        const over = yield* assembleFixture({
-          ...input,
-          events,
-          messages: [...messages, ...messages],
-          summaries: selected,
-          historyStart: after.historyStart!
-        })
-        assert.isAbove(over.historyStart!.depth, covered)
-        assert.strictEqual(over.lcm!.omitted[0]!.from, covered + 1)
-        assert.strictEqual(over.lcm!.omitted[0]!.to, over.historyStart!.depth)
-        assert.strictEqual(over.historyMove, "maximum")
-        assert.strictEqual(over.historyBudget, after.historyBudget)
+  it.effect(`the ${layout} stepped start holds across landings before it and advances for landings past it`, () =>
+    Effect.gen(function* () {
+      const input = fixture(
+        { mode: "section", section: "after_main_prompt" },
+        {
+          openai_max_context: 1000,
+          openai_max_tokens: 40
+        }
+      )
+      const events: AssemblyFixture["events"] = [
+        ...input.events!,
+        ...(layout === "st"
+          ? []
+          : [{ depth: null, event: { scope: null, data: { key: "layout.cards" as const, value: layout } } }])
+      ]
+      const messages: AssemblyFixture["messages"] = Array.from({ length: 24 }, (_, i) => ({
+        side: "user",
+        content: `RAW ${i} ${"r".repeat(150)}`
+      }))
+      const before = yield* assembleFixture({ ...input, events, messages, summaries: [] })
+      assert.isAbove(before.historyStart!.depth, 1)
+      assert.isNotEmpty(before.lcm!.omitted)
+      const covered = before.historyStart!.depth - 1
+      const selected = Array.from({ length: covered }, (_, i) => summary(i))
+      const after = yield* assembleFixture({
+        ...input,
+        events,
+        messages,
+        summaries: selected,
+        historyStart: before.historyStart!
       })
+      assert.strictEqual(after.historyStart!.depth, before.historyStart!.depth)
+      assert.deepStrictEqual(after.lcm!.omitted, [{ from: covered + 1, to: before.historyStart!.depth }])
+      assert.strictEqual(after.lcm!.verbatim!.from, before.historyStart!.depth + 1)
+      assert.isFalse(after.request.messages.some((m) => m.content.includes(`RAW ${covered} `)))
+      const landed = yield* assembleFixture({
+        ...input,
+        events,
+        messages,
+        summaries: [...selected, summary(covered), summary(covered + 1)],
+        historyStart: after.historyStart!
+      })
+      assert.strictEqual(landed.historyStart!.depth, covered + 2)
+      assert.deepStrictEqual(landed.lcm!.omitted, [])
+      const failed = yield* assembleFixture({
+        ...input,
+        events,
+        messages: messages.slice(0, 4),
+        summaries: [],
+        historyStart: before.historyStart!
+      })
+      assert.strictEqual(failed.historyStart!.depth, 0)
+      assert.deepStrictEqual(failed.lcm!.omitted, [])
+      const over = yield* assembleFixture({
+        ...input,
+        events,
+        messages: [...messages, ...messages],
+        summaries: selected,
+        historyStart: after.historyStart!
+      })
+      assert.isAbove(over.historyStart!.depth, covered)
+      assert.strictEqual(over.lcm!.omitted[0]!.from, covered + 1)
+      assert.strictEqual(over.lcm!.omitted[0]!.to, over.historyStart!.depth)
+      assert.strictEqual(over.historyMove, "maximum")
+      assert.strictEqual(over.historyBudget, after.historyBudget)
+    })
   )
 
 it.effect("unused layer allowance never rejects fixed content that fits", () =>

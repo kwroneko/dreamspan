@@ -288,10 +288,9 @@ export function makeSummarizer(pool: boolean) {
                       ...describeFailure(exit.cause)
                     })
                   )
-              } else if (pool) {
-                // A finished summary may make a run condensable, or let a stale condensation be written again.
-                schedule({ userId: job.userId, chatId: job.chatId, leafSlotId: job.leafSlotId }, "completion")
               }
+              if (pool && !(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)))
+                schedule({ userId: job.userId, chatId: job.chatId, leafSlotId: job.leafSlotId }, "completion")
             })
           )
         )
@@ -301,15 +300,21 @@ export function makeSummarizer(pool: boolean) {
       Effect.gen(function* () {
         users.add(position.userId)
         const p = yield* reader.PlanSummaries({ ...position, ...(reason ? { reason } : {}) })
-        if (p.enabled && !interactive && p.spendAhead) {
-          const chunks = [...p.chunks, ...p.refresh]
+        if (p.enabled && p.maintenancePins && reason === "reply")
+          yield* writer.SaveLcmMaintenance({ ...position, pins: p.maintenancePins })
+        if (p.enabled && !interactive) {
+          const explicitChunks = p.refresh.filter((c) => c.explicitRequested || c.rerunIds?.length)
+          const explicitCondensations = p.condensations.filter((c) => c.explicitRequested || c.rerunIds?.length)
+          const chunks = p.spendAhead ? [...p.chunks, ...p.refresh] : explicitChunks
+          const jobs = p.spendAhead ? p.condensations : explicitCondensations
           const made = chunks.length
             ? yield* writer.EnqueueSummaries({ ...position, chunks, requestClass: "idle" })
             : []
-          const condensed = p.condensations.length
-            ? yield* writer.EnqueueCondensations({ ...position, jobs: p.condensations, requestClass: "idle" })
+          const condensed = jobs.length
+            ? yield* writer.EnqueueCondensations({ ...position, jobs, requestClass: "idle" })
             : []
           if (made.length || condensed.length) yield* changed(position.chatId)
+          if (pool && [...made, ...condensed].some((j) => j.status === "complete")) schedule(position, "completion")
           return { ...p, jobs: [...p.jobs, ...made, ...condensed] }
         }
         if (p.enabled && p.chunks.length && interactive && p.over) {
@@ -332,7 +337,7 @@ export function makeSummarizer(pool: boolean) {
     const startup = yield* writer.ResetSummaryJobs()
     for (const p of startup) {
       users.add(p.userId)
-      schedule(p, undefined)
+      schedule(p, "completion")
     }
     if (pool)
       yield* Effect.forkIn(
@@ -341,7 +346,13 @@ export function makeSummarizer(pool: boolean) {
             for (const [chatId, p] of due)
               if (p.at <= Date.now()) {
                 due.delete(chatId)
-                yield* safe(plan(p.position, false, p.reason))
+                yield* plan(p.position, false, p.reason).pipe(
+                  Effect.catch((error) => {
+                    // Keep the already-frozen reply authorization; an enqueue race never authorizes later edits.
+                    if (error._tag === "StorageError") schedule(p.position, "completion")
+                    return Effect.logWarning("LCM plan will retry", error)
+                  })
+                )
               }
             for (const userId of users) {
               const reconciled = yield* writer

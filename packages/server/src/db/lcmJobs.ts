@@ -33,6 +33,9 @@ export const SummaryChunk = Schema.Struct({
   refresh: Schema.optionalKey(Schema.Boolean),
   /** Rerun requests this chunk answers; the enqueue withdraws them, whether it makes the job or finds one. */
   rerunIds: Schema.optionalKey(Schema.Array(Schema.String)),
+  explicitRequested: Schema.optionalKey(Schema.Boolean),
+  sourceSummaryId: Schema.optionalKey(SummaryId),
+  sourceRevisionId: Schema.optionalKey(Schema.String),
   model: Schema.optionalKey(ModelChoice)
 })
 /** A condensation to enqueue: its parts in order, the level it makes, and the parent it absorbs into, if any. */
@@ -43,11 +46,15 @@ export const PlannedJob = Schema.Struct({
   eager: Schema.Boolean,
   absorbedParentId: Schema.optionalKey(SummaryId),
   rerunIds: Schema.optionalKey(Schema.Array(Schema.String)),
+  explicitRequested: Schema.optionalKey(Schema.Boolean),
+  sourceSummaryId: Schema.optionalKey(SummaryId),
+  sourceRevisionId: Schema.optionalKey(Schema.String),
   model: Schema.optionalKey(ModelChoice)
 })
 export type PlannedJob = typeof PlannedJob.Type
 export const SummaryPlan = Schema.Struct({
   chunks: Schema.Array(SummaryChunk),
+  maintenancePins: Schema.optionalKey(Schema.String),
   /** Stale level-1 summaries to write again, as chunks; only a reply plans them. */
   refresh: Schema.Array(SummaryChunk),
   condensations: Schema.Array(PlannedJob),

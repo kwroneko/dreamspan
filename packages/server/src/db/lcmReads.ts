@@ -61,6 +61,14 @@ export const readSummary = (
       let fresh = inputs.every(
         (i) => i.version_id === i.effective && (i.version_id === null || i.amend_count === i.current_amends)
       )
+      // An explicit rerun establishes an active generated replacement. Old lineage remains
+      // pinned for replay, while live generated ancestors must incorporate the replacement.
+      const [replacement] = yield* sql`SELECT 1 FROM summarization_jobs j JOIN summaries s ON s.id=j.result_summary_id
+        WHERE j.source_summary_id=${summaryId} AND j.source_revision_id=${row.revision_id}
+          AND j.explicit_requested=1 AND j.status='complete' AND s.status IN ('complete','truncated')`
+      const [choice] =
+        yield* sql`SELECT 1 FROM lcm_summary_choices WHERE summary_id=${summaryId} AND chosen_id<>summary_id`
+      if (choice || (replacement && row.origin === "generated")) fresh = false
       for (const child of children) {
         const parent = yield* read(child.parent_id)
         fresh &&= parent.fresh && parent.revisionId === child.parent_revision_id

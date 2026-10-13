@@ -106,13 +106,57 @@ export const selectSummaryLayer = (
     for (const candidate of candidates) {
       if (!(yield* valid(candidate.id))) continue
       const summary = yield* readSummary(sql, userId, candidate.id, undefined, memo)
-      if (summary.to - summary.from + 1 !== summary.slotCount) continue
+      if (summary.to - summary.from + 1 !== summary.slotCount || (summary.content === "" && !summary.fresh)) continue
       const options = ending.get(summary.to) ?? []
       options.push(summary)
       ending.set(summary.to, options)
     }
+    const choices = yield* sql<{ summary_id: string; chosen_id: string }>`SELECT x.* FROM lcm_summary_choices x
+      JOIN summaries s ON s.id=x.summary_id WHERE s.chat_id=${chatId}`
+    const redirects = new Map(choices.map((c) => [c.summary_id, c.chosen_id]))
+    const activeChoice = (id: string): string => {
+      const seen = new Set<string>()
+      while (redirects.has(id) && redirects.get(id)! !== id && !seen.has(id)) {
+        seen.add(id)
+        id = redirects.get(id)!
+      }
+      return id
+    }
+    const chosen = new Set(choices.map((c) => activeChoice(c.chosen_id)))
+    const dismissed = new Set(choices.filter((c) => c.summary_id !== c.chosen_id).map((c) => c.summary_id))
+    const protectedChoice = (s: Summary) => !dismissed.has(s.id) && (s.origin === "user" || s.origin === "imported")
+    const protectedSummaries = [...ending.values()].flat().filter(protectedChoice)
+    const includesChoice = (s: Summary, manual: Summary): boolean =>
+      s.children.some((child) =>
+        child.summaryId === manual.id
+          ? child.revisionId === manual.revisionId
+          : memo.has(child.summaryId) && includesChoice(memo.get(child.summaryId)!, manual)
+      )
+    for (const [end, options] of ending) {
+      const allowed = options.filter(
+        (s) =>
+          !protectedSummaries.some(
+            (manual) =>
+              s.id !== manual.id &&
+              s.origin === "generated" &&
+              s.level >= manual.level &&
+              s.from <= manual.from &&
+              s.to >= manual.to &&
+              !includesChoice(s, manual)
+          )
+      )
+      if (allowed.length) ending.set(end, allowed)
+      else ending.delete(end)
+    }
     for (const options of ending.values())
-      options.sort((a, b) => Number(b.fresh) - Number(a.fresh) || b.level - a.level || b.id.localeCompare(a.id))
+      options.sort(
+        (a, b) =>
+          Number(protectedChoice(b)) - Number(protectedChoice(a)) ||
+          Number(chosen.has(b.id)) - Number(chosen.has(a.id)) ||
+          Number(b.fresh) - Number(a.fresh) ||
+          b.level - a.level ||
+          b.id.localeCompare(a.id)
+      )
     let selected: Array<Summary> = []
     let expected: number | undefined
     for (const [end, options] of [...ending].sort(([a], [b]) => b - a)) {

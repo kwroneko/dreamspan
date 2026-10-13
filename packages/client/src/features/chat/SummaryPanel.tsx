@@ -27,9 +27,11 @@ function StateBadges({ summary }: { summary: LcmSummary }) {
     <>
       {health === "stale" && <Badge tone="warning">Stale</Badge>}
       {health === "failed" && <Badge tone="danger">Failed</Badge>}
+      {health === "resolved" && <Badge>Resolved failure</Badge>}
       {summary.origin === "user" && <Badge>Edited</Badge>}
       {summary.origin === "imported" && <Badge>Imported from SillyTavern</Badge>}
       {summary.status === "truncated" && <Badge>Cut short</Badge>}
+      {summary.replacementAvailable && <Badge>Replacement available in Revisions</Badge>}
       {summary.rerun && <Badge tone="accent">Re-summarizes with the next reply</Badge>}
     </>
   )
@@ -197,11 +199,13 @@ function SummaryRow({
   session,
   summary,
   focused,
+  blockedByManual = false,
   onJump
 }: {
   session: ChatSession
   summary: LcmSummary
   focused: boolean
+  blockedByManual?: boolean
   onJump: (slot: SlotId) => void
 }) {
   const [mode, setMode] = useState<Mode>("view")
@@ -258,6 +262,11 @@ function SummaryRow({
         <StateBadges summary={summary} />
       </div>
       {summary.error && <p className="text-sm text-danger">{summary.error}</p>}
+      {blockedByManual && (
+        <p className="text-sm text-muted">
+          Edit or re-summarize the covering summary to change this part of the context.
+        </p>
+      )}
       {mode === "edit" ? (
         <Editor session={session} summary={{ ...summary, content }} onDone={() => setMode("view")} />
       ) : (
@@ -299,6 +308,7 @@ function SummaryRow({
           <Button
             variant="ghost"
             aria-pressed={summary.rerun}
+            disabled={blockedByManual && !summary.rerun}
             aria-label={`${summary.rerun ? "Cancel re-summarizing" : "Re-summarize"} ${rangeText(summary.from, summary.to).toLowerCase()} with the next reply`}
             onClick={() => void rerun(!summary.rerun)}
           >
@@ -371,6 +381,7 @@ export function SummaryPanel({
   onOpenChange: (open: boolean) => void
 }) {
   const inUse = useMemo(() => new Set<string>(lcm.layer.map((s) => s.id)), [lcm.layer])
+  const version = useSyncExternalStore(session.subscribe, session.snapshot).lcmVersion
   const [fetched, setFetched] = useState<LcmSummary | null>(null)
   const known = focus === null ? undefined : lcm.failed.find((s) => s.id === focus)
   const wanted = focus !== null && !inUse.has(focus) && known === undefined ? focus : null
@@ -382,36 +393,25 @@ export function SummaryPanel({
       .then(async (result) => {
         if (!live || !result.ok) return
         const s = result.value
-        const revisions = await session.call((client) => client("ListSummaryRevisions", { summaryId: s.id }))
+        const coverage = await session.coverage(s.from - 1, s.to - 1, true)
         if (!live) return
-        setFetched({
-          id: s.id,
-          level: s.level,
-          firstSlotId: s.firstSlotId,
-          lastSlotId: s.lastSlotId,
-          from: s.from,
-          to: s.to,
-          slotCount: s.slotCount,
-          status: s.status,
-          error: s.error,
-          fresh: s.fresh,
-          tokens: s.tokens,
-          origin: s.origin,
-          revisionNumber: s.revisionNumber,
-          revisionCount: revisions.ok ? revisions.value.length : s.revisionNumber,
-          rowVersion: s.rowVersion,
-          revisionId: s.revisionId,
-          rerun: false,
-          content: s.content,
-          children: s.children.map((c) => c.summaryId)
-        })
+        const row = coverage?.summaries.find((row) => row.id === s.id)
+        if (row) setFetched({ ...row, content: s.content })
       })
     return () => {
       live = false
     }
-  }, [session, wanted])
+  }, [session, wanted, version])
+  const blockedByManual = (s: LcmSummary) =>
+    lcm.layer.some(
+      (parent) => parent.id !== s.id && parent.origin !== "generated" && parent.from <= s.from && parent.to >= s.to
+    )
   const extra = wanted !== null && fetched?.id === wanted ? fetched : null
-  const unfinished = lcm.jobs
+  const unfinished = lcm.jobs.filter(
+    (job) =>
+      job.status !== "failed" ||
+      !lcm.failed.some((s) => s.level === job.level && s.from === job.from && s.to === job.to)
+  )
   return (
     <Dialog
       open
@@ -440,6 +440,7 @@ export function SummaryPanel({
               session={session}
               summary={summary}
               focused={summary.id === focus}
+              blockedByManual={blockedByManual(summary)}
               onJump={onJump}
             />
           ))}
@@ -453,6 +454,7 @@ export function SummaryPanel({
               session={session}
               summary={summary}
               focused={summary.id === focus}
+              blockedByManual={blockedByManual(summary)}
               onJump={onJump}
             />
           ))}
@@ -466,7 +468,13 @@ export function SummaryPanel({
         <section aria-label="Not in use" className="flex flex-col gap-2">
           <p className="text-sm text-muted">This summary is condensed into one above, so it isn't sent itself.</p>
           <ul className="flex flex-col">
-            <SummaryRow session={session} summary={extra} focused onJump={onJump} />
+            <SummaryRow
+              session={session}
+              summary={extra}
+              focused
+              blockedByManual={blockedByManual(extra)}
+              onJump={onJump}
+            />
           </ul>
         </section>
       )}

@@ -1728,6 +1728,16 @@ const storage: Record<
   string,
   (reader: Reader["Service"], actor: Party, owner: Party, writer: Writer["Service"]) => Effect.Effect<void, unknown>
 > = {
+  SaveLcmMaintenance: (_reader, actor, owner, writer) =>
+    refused(
+      writer.SaveLcmMaintenance({
+        userId: actor.user.id,
+        chatId: owner.chat.chatId,
+        leafSlotId: owner.chat.slotId,
+        pins: JSON.stringify({ signatures: {}, asks: [], explicit: [] })
+      }),
+      "NotFound"
+    ),
   EnqueueSummaries: (_reader, actor, owner, writer) =>
     refused(
       writer.EnqueueSummaries({

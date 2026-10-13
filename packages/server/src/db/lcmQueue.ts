@@ -1,3 +1,4 @@
+import { completeEmpty } from "./lcmEmpty.ts"
 import { summaryIsWarm } from "./lcmWarmth.ts"
 import type { SummaryPrefix } from "../lcm/prefix.ts"
 import { lineageValidator } from "./lcmLayer.ts"
@@ -11,6 +12,7 @@ import { fallbackModel, type JobError, prefixAt, recordFailedSummary } from "./l
 import { readSummary } from "./lcmReads.ts"
 import type { Summary } from "@rp/shared/lcm.ts"
 import { jobColumns, type SummaryJob } from "./lcmJobs.ts"
+import { MAX_CHUNK_SLOTS } from "./lcmLimits.ts"
 import { lcmPath, slotInput } from "./lcmPath.ts"
 import { NotFound, StorageError, type WriteOps } from "./ops.ts"
 import { transaction } from "./tx.ts"
@@ -44,11 +46,19 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
       usage_cost = (SELECT sum(cost) FROM llm_requests WHERE rollout_id = ${rolloutId})
       WHERE id = ${rolloutId} AND status = 'running'`
   return {
+    SaveLcmMaintenance: ({ userId, chatId, leafSlotId, pins }) =>
+      Effect.gen(function* () {
+        yield* lcmPath(sql, userId, chatId, leafSlotId, leafSlotId)
+        yield* sql`INSERT INTO lcm_reply_maintenance(chat_id,leaf_slot_id,pins_json) VALUES (${chatId},${leafSlotId},${pins})
+          ON CONFLICT(chat_id,leaf_slot_id) DO UPDATE SET pins_json=excluded.pins_json`
+      }).pipe(transaction(sql, "SaveLcmMaintenance")),
     // Work here depends on the chunks and the jobs around them, never on the length of the chat: a
     // write holds the writer, and a long chat's first plan must not hold it for a noticeable time.
     EnqueueSummaries: ({ userId, chatId, leafSlotId, chunks, requestClass, triggerVersionId }) =>
       Effect.gen(function* () {
         yield* lcmPath(sql, userId, chatId, leafSlotId, leafSlotId)
+        if (chunks.length > 8)
+          return yield* reject("EnqueueSummaries", "A write accepts at most eight bounded chunks; plan again.")
         if (triggerVersionId) {
           // The reply that triggered the plan lies on the leaf's path: walk up from the leaf by the
           // difference of their depths, which is a few steps however long the chat is.
@@ -69,9 +79,14 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
         const withdraw = (ids: ReadonlyArray<string> | undefined) =>
           ids?.length ? sql`DELETE FROM summary_reruns WHERE chat_id = ${chatId} AND id IN ${sql.in(ids)}` : Effect.void
         for (const chunk of chunks) {
+          if (chunk.sourceSummaryId) {
+            const source = yield* readSummary(sql, userId, chunk.sourceSummaryId)
+            if (source.chatId !== chatId) return yield* new NotFound({ entity: "summary", id: source.id })
+            if (source.revisionId !== chunk.sourceRevisionId) continue
+          }
           const first = chunk.inputs[0]?.slotId,
             last = chunk.inputs.at(-1)?.slotId
-          if (!first || !last || chunk.target <= 0)
+          if (!first || !last || chunk.target <= 0 || chunk.inputs.length > MAX_CHUNK_SLOTS)
             return yield* reject("EnqueueSummaries", "The summary chain or its inputs changed; plan again.")
           const chain = yield* lcmPath(sql, userId, chatId, last, first, chunk.inputs.length)
           if (
@@ -85,7 +100,10 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
           if (!chunk.refresh) {
             const owners = yield* sql<{ id: string }>`
               SELECT DISTINCT s.id FROM summary_inputs i JOIN summaries s ON s.id = i.summary_id
-              WHERE i.slot_id IN ${sql.in(chain.map((c) => c.id))} AND s.chat_id = ${chatId} AND s.level = 1
+              WHERE i.slot_id IN (WITH RECURSIVE chain(id,n) AS (
+                SELECT ${last},1 UNION ALL SELECT s.parent_slot_id,c.n+1 FROM slots s JOIN chain c ON c.id=s.id
+                  WHERE c.n < ${chunk.inputs.length}
+              ) SELECT id FROM chain) AND s.chat_id = ${chatId} AND s.level = 1
                 AND s.sealed = 1 AND s.status IN ('complete', 'truncated')`
             let covered = false
             for (const owner of owners)
@@ -97,13 +115,28 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
           }
           const ids = new Set(chain.map((s) => s.id))
           const near = yield* sql<{
+            id: string
+            status: string
             first_slot_id: string
             last_slot_id: string
             span: number
-          }>`SELECT j.first_slot_id, j.last_slot_id, b.depth - a.depth + 1 AS span FROM summarization_jobs j
+          }>`SELECT j.id,j.status,j.first_slot_id, j.last_slot_id, b.depth - a.depth + 1 AS span FROM summarization_jobs j
               JOIN slots a ON a.id = j.first_slot_id JOIN slots b ON b.id = j.last_slot_id
             WHERE j.chat_id = ${chatId} AND j.level = 1 AND j.status IN ('pending', 'processing')
               AND a.depth <= ${chain.at(-1)!.depth} AND b.depth >= ${chain[0]!.depth}`
+          const answering = chunk.rerunIds?.length
+            ? near.find((j) => j.status === "pending" && j.first_slot_id === first && j.last_slot_id === last)
+            : undefined
+          if (answering) {
+            yield* sql`UPDATE summarization_jobs SET explicit_requested=1,request_class=${requestClass},
+              model_json=${chunk.model ? JSON.stringify(chunk.model) : null},prefix_json=${prefix},
+              source_summary_id=${chunk.sourceSummaryId ?? null},source_revision_id=${chunk.sourceRevisionId ?? null},
+              rerun_ids_json=${JSON.stringify(chunk.rerunIds)},target_token_count=${chunk.target},clip_tokens=${chunk.clipTokens ?? 6000},updated_at=${now}
+              WHERE id=${answering.id} AND status='pending'`
+            yield* withdraw(chunk.rerunIds)
+            result.push(yield* get(userId, answering.id))
+            continue
+          }
           let overlap = false
           for (const p of near) {
             const other = yield* lcmPath(sql, userId, chatId, p.last_slot_id, p.first_slot_id, p.span)
@@ -112,10 +145,7 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
               break
             }
           }
-          if (overlap) {
-            yield* withdraw(chunk.rerunIds)
-            continue
-          }
+          if (overlap) continue
           const id = uuidv7()
           yield* sql`INSERT INTO summarization_jobs ${sql.insert({
             id,
@@ -129,10 +159,16 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
             prefix_json: prefix,
             batch_id: batchId,
             model_json: chunk.model ? JSON.stringify(chunk.model) : null,
+            source_summary_id: chunk.sourceSummaryId ?? null,
+            source_revision_id: chunk.sourceRevisionId ?? null,
+            rerun_ids_json: chunk.rerunIds ? JSON.stringify(chunk.rerunIds) : null,
+            explicit_requested: chunk.explicitRequested || chunk.rerunIds?.length ? 1 : 0,
             request_class: requestClass,
             created_at: now,
             updated_at: now
           })}`
+          if (chunk.inputs.every((i) => i.versionId === null))
+            yield* completeEmpty(sql, id, chatId, batchId, chunk.inputs)
           yield* withdraw(chunk.rerunIds)
           result.push(yield* get(userId, id))
         }
@@ -151,6 +187,11 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
         const withdraw = (ids: ReadonlyArray<string> | undefined) =>
           ids?.length ? sql`DELETE FROM summary_reruns WHERE chat_id = ${chatId} AND id IN ${sql.in(ids)}` : Effect.void
         for (const job of planned) {
+          if (job.sourceSummaryId) {
+            const source = yield* readSummary(sql, userId, job.sourceSummaryId)
+            if (source.chatId !== chatId) return yield* new NotFound({ entity: "summary", id: source.id })
+            if (source.revisionId !== job.sourceRevisionId) continue
+          }
           const children: Array<Summary> = []
           for (const id of job.children) children.push(yield* readSummary(sql, userId, id))
           const first = children[0],
@@ -181,8 +222,8 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
               return yield* reject("EnqueueCondensations", "Absorption must reduce the parent's own parts again.")
           }
           // A live job of this level that starts on this chain at or before the last part and ends at or after the first.
-          const [clash] = yield* sql<{ id: string }>`
-            SELECT j.id FROM summarization_jobs j JOIN slots b ON b.id = j.last_slot_id
+          const [clash] = yield* sql<{ id: string; status: string; first_slot_id: string; last_slot_id: string }>`
+            SELECT j.id,j.status,j.first_slot_id,j.last_slot_id FROM summarization_jobs j JOIN slots b ON b.id = j.last_slot_id
             WHERE j.chat_id = ${chatId} AND j.level = ${job.level} AND j.status IN ('pending', 'processing')
               AND b.depth >= (SELECT depth FROM slots WHERE id = ${first.firstSlotId})
               AND j.first_slot_id IN (WITH RECURSIVE up(id) AS (
@@ -190,7 +231,20 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
               ) SELECT id FROM up)
             LIMIT 1`
           if (clash) {
-            yield* withdraw(job.rerunIds)
+            if (
+              job.rerunIds?.length &&
+              clash.status === "pending" &&
+              clash.first_slot_id === first.firstSlotId &&
+              clash.last_slot_id === last.lastSlotId
+            ) {
+              yield* sql`UPDATE summarization_jobs SET explicit_requested=1,request_class=${requestClass},
+                model_json=${job.model ? JSON.stringify(job.model) : null},prefix_json=${prefix},input_child_ids=${JSON.stringify(job.children)},
+                source_summary_id=${job.sourceSummaryId ?? null},source_revision_id=${job.sourceRevisionId ?? null},
+                rerun_ids_json=${JSON.stringify(job.rerunIds)},target_token_count=${job.target},updated_at=${now}
+                WHERE id=${clash.id} AND status='pending'`
+              yield* withdraw(job.rerunIds)
+              result.push(yield* get(userId, clash.id))
+            }
             continue
           }
           const id = uuidv7()
@@ -208,10 +262,16 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
             eager: job.eager ? 1 : 0,
             model_json: job.model ? JSON.stringify(job.model) : null,
             prefix_json: prefix,
+            source_summary_id: job.sourceSummaryId ?? null,
+            source_revision_id: job.sourceRevisionId ?? null,
+            rerun_ids_json: job.rerunIds ? JSON.stringify(job.rerunIds) : null,
+            explicit_requested: job.explicitRequested || job.rerunIds?.length ? 1 : 0,
             request_class: requestClass,
             created_at: now,
             updated_at: now
           })}`
+          if (children.every((c) => c.content === "" && c.fresh))
+            yield* completeEmpty(sql, id, chatId, null, [], children, job.level)
           yield* withdraw(job.rerunIds)
           result.push(yield* get(userId, id))
         }
@@ -247,13 +307,13 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
         const [next] = yield* sql<{ id: string }>`SELECT j.id FROM summarization_jobs j JOIN chats c ON c.id = j.chat_id
         JOIN slots start ON start.id = j.first_slot_id
         WHERE c.owner_user_id = ${userId} AND c.deleted_at IS NULL AND j.status = 'pending'
-        AND (j.request_class = 'interactive' OR coalesce((SELECT json_extract(value_json,'$.spendAhead') FROM user_settings WHERE user_id = ${userId} AND key = 'generation.lcm'),1) <> 0)
+        AND (j.request_class = 'interactive' OR j.explicit_requested = 1 OR coalesce((SELECT json_extract(value_json,'$.spendAhead') FROM user_settings WHERE user_id = ${userId} AND key = 'generation.lcm'),1) <> 0)
         AND (SELECT count(*) FROM summarization_jobs busy JOIN chats bc ON bc.id = busy.chat_id
           WHERE bc.owner_user_id = ${userId} AND busy.status = 'processing') < 2
         AND (j.level > 1 OR NOT EXISTS (SELECT 1 FROM summarization_jobs busy JOIN slots bs ON bs.id = busy.first_slot_id
           WHERE busy.chat_id = j.chat_id AND busy.level = 1 AND
             (busy.status = 'processing' OR (busy.status = 'pending'
-             AND (busy.request_class = 'interactive' OR coalesce((SELECT json_extract(value_json,'$.spendAhead') FROM user_settings WHERE user_id = ${userId} AND key = 'generation.lcm'),1) <> 0
+             AND (busy.request_class = 'interactive' OR busy.explicit_requested = 1 OR coalesce((SELECT json_extract(value_json,'$.spendAhead') FROM user_settings WHERE user_id = ${userId} AND key = 'generation.lcm'),1) <> 0
                OR busy.last_slot_id IN (WITH RECURSIVE ancestors(id) AS (SELECT j.last_slot_id UNION ALL SELECT s.parent_slot_id FROM slots s JOIN ancestors a ON a.id=s.id WHERE s.parent_slot_id IS NOT NULL) SELECT id FROM ancestors))
              AND (bs.depth < start.depth OR (bs.depth = start.depth AND busy.id < j.id))))))
         ORDER BY CASE j.request_class WHEN 'interactive' THEN 0 WHEN 'idle' THEN 1 ELSE 2 END, j.created_at, j.id LIMIT 1`

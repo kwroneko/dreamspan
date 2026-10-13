@@ -1,3 +1,4 @@
+import { MAX_CHUNK_SLOTS } from "./lcmLimits.ts"
 import { applySummaryPrefix, type SummaryPrefix } from "../lcm/prefix.ts"
 import { completedCoverage, failedHold } from "./lcmCoverage.ts"
 import { maintain, MAX_JOBS_PER_PLAN } from "./lcmMaintain.ts"
@@ -128,7 +129,7 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
           if (s.generating || s.merged) break
           chunk.push(s)
           tokens += cost(s)
-          if (tokens >= leafInput || (s.children >= 2 && tokens >= leafInput / 4)) {
+          if (chunk.length >= MAX_CHUNK_SLOTS || tokens >= leafInput || (s.children >= 2 && tokens >= leafInput / 4)) {
             flush()
           }
         }

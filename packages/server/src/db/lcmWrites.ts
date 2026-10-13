@@ -33,6 +33,8 @@ export const makeLcmWriteHandlers = (bin: Bin) =>
             batch_id: string | null
             input_child_ids: string | null
             absorbed_parent_id: string | null
+            source_summary_id: string | null
+            source_revision_id: string | null
           }>`
         SELECT j.* FROM summarization_jobs j JOIN chats c ON c.id = j.chat_id
         WHERE j.id = ${jobId} AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL AND j.status = 'processing'`
@@ -134,8 +136,16 @@ export const makeLcmWriteHandlers = (bin: Bin) =>
           for (const [ordinal, child] of children.entries())
             yield* sql`INSERT INTO summary_parents ${sql.insert({ summary_id: id, ordinal, parent_id: child.summaryId, parent_revision_id: child.revisionId })}`
           yield* sql`UPDATE summaries SET sealed = 1 WHERE id = ${id}`
-          for (const summaryId of supersede)
+          for (const summaryId of supersede) {
+            const protectedSummary = yield* readSummary(sql, userId, summaryId)
+            if (protectedSummary.origin === "user" || protectedSummary.origin === "imported") continue
             yield* sql`UPDATE summaries SET status = 'superseded', row_version = row_version + 1 WHERE id = ${summaryId}`
+          }
+          if (job.source_summary_id !== null) {
+            const source = yield* readSummary(sql, userId, job.source_summary_id)
+            if (source.origin === "generated" && source.revisionId === job.source_revision_id)
+              yield* sql`UPDATE lcm_summary_choices SET chosen_id=${id} WHERE chosen_id=${source.id}`
+          }
           const updated =
             yield* sql`UPDATE summarization_jobs SET status = 'complete', result_summary_id = ${id}, updated_at = ${now}
         WHERE id = ${jobId} AND status = 'processing' RETURNING id`
@@ -156,6 +166,7 @@ export const makeLcmWriteHandlers = (bin: Bin) =>
           const revisionId = uuidv7()
           yield* sql`INSERT INTO summary_revisions ${sql.insert({ id: revisionId, summary_id: summaryId, content, token_count: tokensOf({ content }), origin: "user", created_at: Date.now() })}`
           yield* sql`UPDATE summaries SET selected_revision_id = ${revisionId}, row_version = row_version + 1 WHERE id = ${summaryId}`
+          yield* sql`DELETE FROM lcm_summary_choices WHERE summary_id=${summaryId}`
           const { recovered } = yield* bin.drafts.commit(userId, commitDraft, {
             targetKind: "summary_edit",
             targetId: summaryId,
@@ -166,9 +177,25 @@ export const makeLcmWriteHandlers = (bin: Bin) =>
       SelectSummaryRevision: ({ userId, summaryId, revisionId, expectedRowVersion }) =>
         Effect.gen(function* () {
           yield* current(userId, summaryId, expectedRowVersion)
-          yield* readSummary(sql, userId, summaryId, revisionId)
-          yield* sql`UPDATE summaries SET selected_revision_id = ${revisionId}, row_version = row_version + 1 WHERE id = ${summaryId}`
-          return yield* readSummary(sql, userId, summaryId)
+          const [revision] = yield* sql<{
+            summary_id: string
+          }>`SELECT summary_id FROM summary_revisions WHERE id=${revisionId}`
+          const target = revision?.summary_id
+          if (!target) return yield* new NotFound({ entity: "summary revision", id: revisionId })
+          if (target !== summaryId) {
+            const [replacement] = yield* sql`SELECT 1 FROM summarization_jobs
+              WHERE source_summary_id=${summaryId} AND result_summary_id=${target} AND status='complete'`
+            if (!replacement) return yield* new NotFound({ entity: "summary revision", id: revisionId })
+            yield* readSummary(sql, userId, target, revisionId)
+            yield* sql`INSERT INTO lcm_summary_choices(summary_id,chosen_id) VALUES (${summaryId},${target})
+              ON CONFLICT(summary_id) DO UPDATE SET chosen_id=excluded.chosen_id`
+            yield* sql`UPDATE summaries SET row_version=row_version+1 WHERE id=${summaryId}`
+          } else {
+            yield* readSummary(sql, userId, summaryId, revisionId)
+            yield* sql`DELETE FROM lcm_summary_choices WHERE summary_id=${summaryId}`
+          }
+          yield* sql`UPDATE summaries SET selected_revision_id = ${revisionId}, row_version = row_version + 1 WHERE id = ${target}`
+          return yield* readSummary(sql, userId, target)
         }).pipe(transaction(sql, "SelectSummaryRevision"))
     } satisfies Partial<Parameters<typeof WriteOps.of>[0]>
   })

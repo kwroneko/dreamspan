@@ -390,3 +390,41 @@ for (const [name, viewport] of [
     })
   })
 }
+
+test("rail child rerun exposes cancel action", async ({ page }) => {
+  const fixture = await makeChat("review-child-rerun")
+  await open(page, fixture)
+  await page.getByRole("button", { name: "Coverage rail", exact: true }).click()
+  await page
+    .getByTestId("coverage-rail")
+    .getByRole("button", { name: /Level 1, messages 1–4/ })
+    .click()
+  const row = panel(page).locator(`[data-summary="${fixture.first.id}"]`)
+  await row.getByRole("button", { name: /Re-summarize messages 1–4 with the next reply/ }).click()
+  await expect.poll(() => count(server().dataDir, "summary_reruns", fixture.chatId)).toBe(1)
+  await expect(row.getByRole("button", { name: /Cancel re-summarizing messages 1–4/ })).toBeVisible()
+  await row.getByRole("button", { name: /Cancel re-summarizing messages 1–4/ }).click()
+  await expect.poll(() => count(server().dataDir, "summary_reruns", fixture.chatId)).toBe(0)
+  await expect(row.getByRole("button", { name: /Re-summarize messages 1–4 with the next reply/ })).toBeVisible()
+  await admin((api) =>
+    api.EditSummary({
+      summaryId: fixture.first.id as never,
+      content: "A revised child from another tab.",
+      expectedRowVersion: 1,
+      commitDraft: null
+    })
+  )
+  await expect(row.getByText("A revised child from another tab.", { exact: true })).toBeVisible()
+  await admin((api) =>
+    api.EditSummary({
+      summaryId: fixture.top.id as never,
+      content: "My protected condensation.",
+      expectedRowVersion: 1,
+      commitDraft: null
+    })
+  )
+  await expect(row.getByRole("button", { name: /Re-summarize messages 1–4 with the next reply/ })).toBeDisabled()
+  await expect(
+    row.getByText("Edit or re-summarize the covering summary to change this part of the context.")
+  ).toBeVisible()
+})

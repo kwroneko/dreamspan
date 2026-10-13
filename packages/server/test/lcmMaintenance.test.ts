@@ -162,11 +162,12 @@ describe("stale summaries", () => {
     const replacement = summary(1, 3, 4)
     const second = plan([stale(l1[1]!), replacement, l1[0]!, l1[2]!, staleTop], {
       layer: [l1[0]!, replacement, l1[2]!],
-      reason: "completion"
+      reason: "completion",
+      authorized: new Set([staleTop.id])
     })
     assert.lengthOf(second.resummarize, 0)
     assert.deepStrictEqual(second.condensations, [
-      { level: 2, children: [l1[0]!.id, replacement.id, l1[2]!.id], eager: false }
+      { level: 2, children: [l1[0]!.id, replacement.id, l1[2]!.id], eager: false, sourceOf: top.id }
     ])
   })
 
