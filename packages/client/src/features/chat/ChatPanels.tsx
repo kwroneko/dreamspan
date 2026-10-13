@@ -4,6 +4,7 @@
 import type { CastCard, EntityId } from "@rp/shared/chat.ts"
 import type { CastChange } from "@rp/shared/chatSetupApi.ts"
 import type { LibraryRef } from "@rp/shared/library.ts"
+import { GenerationDefaults } from "@rp/shared/generation.ts"
 import type { Connection, Model } from "@rp/shared/providers.ts"
 import { Effect } from "effect"
 import { useEffect, useState, useSyncExternalStore } from "react"
@@ -17,6 +18,7 @@ import { Field } from "../../ui/Field.tsx"
 import { Select } from "../../ui/Select.tsx"
 import { Badge } from "../../ui/Surface.tsx"
 import { useCast } from "./cast.ts"
+import { modelValue, parseModelValue } from "./modelChoices.ts"
 import type { ChatSession } from "./session.ts"
 
 function useChange(session: ChatSession) {
@@ -148,13 +150,85 @@ function Summaries({ session }: { session: ChatSession }) {
   )
 }
 
+const NONE = "none"
+
+/**
+ * The two models LCM can use besides the summarizer, for all of the user's chats: a judge that
+ * reads replies and summaries and says whether they are refusals, and a fallback summarizer
+ * tried once when the summarizer's retries run out. Both are optional.
+ */
+function DecisionModels({ models, open }: { models: Choices["models"]; open: boolean }) {
+  const action = useAction()
+  const [defaults, setDefaults] = useState<GenerationDefaults | null>(null)
+  useEffect(() => {
+    if (!open) return
+    void action
+      .run((client) => client("GetGenerationDefaults", undefined))
+      .then((result) => result.ok && setDefaults(result.value))
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per opening
+  }, [open])
+  const items = [{ value: NONE, label: "None" }, ...models]
+  const save = (next: GenerationDefaults) =>
+    void action
+      .run((client) => client("SetGenerationDefaults", { defaults: next }))
+      .then((result) => {
+        if (result.ok) setDefaults(result.value)
+      })
+  const judge = defaults?.judge ? modelValue(defaults.judge.connection, defaults.judge.model) : NONE
+  const fallback = defaults?.lcm?.fallback
+    ? modelValue(defaults.lcm.fallback.connection, defaults.lcm.fallback.model)
+    : NONE
+  return (
+    <section aria-label="Models for summaries" className="flex flex-col gap-3">
+      <Field
+        label="Refusal judge"
+        description="A model that reads replies and summaries and says whether they are refusals. Without one, only the provider's own refusals are caught. For all your chats."
+      >
+        <Select
+          items={items}
+          value={defaults ? judge : null}
+          placeholder="None"
+          onValueChange={(value) =>
+            defaults &&
+            save(
+              new GenerationDefaults({
+                ...defaults,
+                judge: value === NONE ? null : parseModelValue(value)
+              })
+            )
+          }
+        />
+      </Field>
+      <Field
+        label="Fallback summarizer"
+        description="Tried once when a summary keeps failing on its own model. For all your chats."
+      >
+        <Select
+          items={items}
+          value={defaults ? fallback : null}
+          placeholder="None"
+          onValueChange={(value) => {
+            if (!defaults) return
+            const { fallback: _gone, ...rest } = defaults.lcm ?? {}
+            save(
+              new GenerationDefaults({
+                ...defaults,
+                lcm: value === NONE ? rest : { ...rest, fallback: parseModelValue(value) }
+              })
+            )
+          }}
+        />
+      </Field>
+      <Problem error={action.error} />
+    </section>
+  )
+}
+
 interface Choices {
   readonly models: ReadonlyArray<{ readonly value: string; readonly label: string }>
   readonly presets: ReadonlyArray<LibraryRef>
   readonly lorebooks: ReadonlyArray<LibraryRef>
 }
-
-const modelValue = (connection: string, model: string) => `${connection} ${model}`
 
 /** Model, preset, card layout and role projection for the chat (DESIGN §5.2, §5.4). */
 export function SettingsDialog({
@@ -225,6 +299,7 @@ export function SettingsDialog({
         />
       </Field>
       <Summaries session={session} />
+      <DecisionModels models={choices?.models ?? []} open={open} />
       <section aria-label="Lorebooks" className="flex flex-col gap-2">
         <h3 className="text-sm font-medium">Lorebooks</h3>
         {choices?.lorebooks.length === 0 && (

@@ -5,6 +5,7 @@
 // Streamed text never goes through the list. Each generating version's text is an atom
 // of its own, which only its message's body reads, and deltas are applied once per
 // animation frame, so a token re-renders one row.
+import type { Connection, Model } from "@rp/shared/providers.ts"
 import {
   type Chat,
   type ChatId,
@@ -865,9 +866,17 @@ export class ChatSession {
     return result
   }
 
-  async regenerate(entry: PathEntry): Promise<Outcome<unknown>> {
+  /** A swipe; with a `model`, "Retry with…" that one instead of the chat's. */
+  async regenerate(
+    entry: PathEntry,
+    model?: { readonly connection: Connection["id"]; readonly model: Model["id"] }
+  ): Promise<Outcome<unknown>> {
     return this.slotWrite(entry.slotId, (client) =>
-      client("Regenerate", { slotId: entry.slotId, expectedRowVersion: entry.rowVersion })
+      client("Regenerate", {
+        slotId: entry.slotId,
+        expectedRowVersion: entry.rowVersion,
+        ...(model ? { model } : {})
+      })
     )
   }
 

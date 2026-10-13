@@ -6,7 +6,7 @@
 import type { ChatId, PathEntry } from "@rp/shared/chat.ts"
 import type { SendResult } from "@rp/shared/chatApi.ts"
 import type { VersionId } from "@rp/shared/chat.ts"
-import { expect, type Page, test } from "@playwright/test"
+import { expect, type Locator, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
 import { type FakeProvider, startProvider } from "./support/provider.ts"
 import { type Client, loginCookie, withCookie } from "./support/rpc.ts"
@@ -312,6 +312,57 @@ for (const [name, viewport] of [
       await dialog.getByRole("button", { name: "Done" }).click()
       await expect(page.getByTestId("lcm-boundary")).toBeVisible()
       await expect(article(page, fixture, 8)).toHaveAttribute("data-summarized", "true")
+    })
+
+    test("the refusal judge and the fallback summarizer are chosen in the settings and kept", async ({ page }) => {
+      const fixture = await makeChat(`models-${name}`)
+      // Whatever an earlier run chose: none.
+      await admin((api) =>
+        Effect.gen(function* () {
+          const now = yield* api.GetGenerationDefaults()
+          yield* api.SetGenerationDefaults({ defaults: { model: now.model, preset: now.preset, judge: null, lcm: {} } })
+        })
+      )
+      await open(page, fixture)
+      await page.getByRole("button", { name: "Settings" }).click()
+      const dialog = page.getByRole("dialog", { name: "Chat settings" })
+      const pick = async (select: Locator, option: string | RegExp) => {
+        await select.click()
+        await page.getByRole("listbox").getByRole("option", { name: option }).click()
+        await expect(page.getByRole("listbox")).toHaveCount(0)
+      }
+      await pick(dialog.getByLabel("Refusal judge"), /fake-small/)
+      await pick(dialog.getByLabel("Fallback summarizer"), /fake-small/)
+      await expect
+        .poll(async () => admin((api) => api.GetGenerationDefaults()).then((d) => [!!d.judge, !!d.lcm?.fallback]))
+        .toEqual([true, true])
+      await pick(dialog.getByLabel("Refusal judge"), "None")
+      await expect.poll(async () => admin((api) => api.GetGenerationDefaults()).then((d) => !!d.judge)).toBe(false)
+      // Clearing one leaves the other.
+      expect(await admin((api) => api.GetGenerationDefaults()).then((d) => !!d.lcm?.fallback)).toBe(true)
+    })
+
+    test("a reply a judge found refused is marked and can be retried with another model", async ({ page }) => {
+      const fixture = await makeChat(`retry-${name}`)
+      const reply = await admin((api) =>
+        api.Generate({ chatId: fixture.chatId, parentSlotId: fixture.entries.at(-1)!.slotId, branch: false })
+      )
+      if (reply._tag !== "Posted") throw new Error("the reply was queued")
+      await open(page, fixture)
+      await expect(page.getByRole("article", { name: "Reply" }).getByText("The bridge holds.")).toBeVisible()
+      await expect(page.getByText("Retry with…")).toHaveCount(0)
+      await Effect.runPromise(
+        fixtureSql(server().dataDir, [
+          { sql: "UPDATE versions SET mark = 'refused' WHERE id = ?", params: [reply.entry.version.id] }
+        ])
+      )
+      await page.reload()
+      const article = page.getByRole("article", { name: "Reply" })
+      await expect(article.getByText("refused", { exact: true })).toBeVisible()
+      const before = provider.completions.length
+      await article.getByText("Retry with…").click()
+      await page.getByRole("option", { name: /fake-small/ }).click()
+      await expect.poll(() => provider.completions.length).toBeGreaterThan(before)
     })
 
     test("the context view names a summary source with its level, range and revision", async ({ page }) => {

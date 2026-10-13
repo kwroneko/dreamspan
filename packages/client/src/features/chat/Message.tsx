@@ -11,9 +11,11 @@ import { useDeletedToast } from "../bin/deleted.ts"
 import { Button } from "../../ui/Button.tsx"
 import { Textarea } from "../../ui/Field.tsx"
 import { Markdown } from "../../ui/Markdown.tsx"
+import { Select } from "../../ui/Select.tsx"
 import { Badge } from "../../ui/Surface.tsx"
 import { castView, nameOf, useCast } from "./cast.ts"
 import { displayText } from "./macros.ts"
+import { parseModelValue, useModelChoices } from "./modelChoices.ts"
 import { useMountedTracking, useRenderCount } from "./perf.ts"
 import { type ChatSession, liveText, waitingCache, type Outcome } from "./session.ts"
 
@@ -60,6 +62,21 @@ function TemplateText({
     version.frozenMacros ?? {}
   )
   return <Markdown text={text} streaming={false} />
+}
+
+/** "Retry with…" another model, for a reply that was refused. */
+function RetryWith({ onPick }: { onPick: (model: ReturnType<typeof parseModelValue>) => void | Promise<void> }) {
+  const models = useModelChoices(true)
+  return (
+    <div className="w-56">
+      <Select
+        items={models}
+        value={null}
+        placeholder="Retry with…"
+        onValueChange={(value) => void onPick(parseModelValue(value))}
+      />
+    </div>
+  )
 }
 
 function VersionBody({
@@ -359,6 +376,10 @@ export const Message = memo(function Message({
             Regenerate
           </Button>
         )}
+        {model &&
+          (version.mark === "refused" || (version.status === "failed" && version.error?.class === "refused")) && (
+            <RetryWith onPick={async (choice) => report(await session.regenerate(entry, choice))} />
+          )}
         {!editing && !generating && (
           <Button variant="ghost" onClick={() => setEditing(true)}>
             Edit
