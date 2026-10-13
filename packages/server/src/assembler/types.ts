@@ -11,7 +11,7 @@ import type { PresetDoc } from "@rp/shared/docs/preset.ts"
 import { Schema } from "effect"
 
 /** Bump whenever identical inputs would assemble differently. Missing means version 0. */
-export const ASSEMBLER_VERSION = 8
+export const ASSEMBLER_VERSION = 9
 
 export type Role = "system" | "user" | "assistant"
 
@@ -162,6 +162,14 @@ export interface WireContext {
 }
 
 export interface HistoryStart {
+  readonly state?: {
+    readonly configuration: string
+    readonly identity: string
+    readonly maximum: number
+    readonly target: number
+    readonly examples: number
+    readonly revision: number
+  }
   readonly slotId: string | null
   readonly depth: number
 }
@@ -201,6 +209,7 @@ type PinnedEntry = Omit<HistoryEntry, "content"> & { readonly amends: number }
 export interface SourcePins {
   readonly target: Target
   readonly historyStart?: HistoryStart | null
+  readonly historyRevisions?: Readonly<Record<string, number>>
   readonly events: ReadonlyArray<{ readonly id: string; readonly depth: number | null }>
   readonly history: ReadonlyArray<{
     readonly key: string

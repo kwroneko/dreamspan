@@ -1,3 +1,4 @@
+import { recordHistoryReduction } from "./historyChanges.ts"
 // What the writer's chat operations share (writes.ts, chatSetupWrites.ts): ownership
 // checks, inserting versions, slots and state events, and appending a message. Each runs
 // inside the calling operation's transaction.
@@ -203,7 +204,8 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
       const slot = yield* ownedSlot(userId, slotId)
       const [version] = yield* sql<{
         id: string
-      }>`SELECT id FROM versions WHERE id = ${versionId} AND slot_id = ${slotId} AND deleted_at IS NULL`
+        content: string
+      }>`SELECT id, content FROM versions WHERE id = ${versionId} AND slot_id = ${slotId} AND deleted_at IS NULL`
       if (!version) return yield* new NotFound({ entity: "version", id: versionId })
       if (slot.row_version !== expectedRowVersion) {
         return yield* new StaleWrite({
@@ -213,6 +215,7 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
           actual: slot.row_version
         })
       }
+      yield* recordHistoryReduction(sql, slotId, version.content)
       const [updated] = yield* sql<{ row_version: number }>`
           UPDATE slots SET selected_version_id = ${versionId}, row_version = row_version + 1
           WHERE id = ${slotId} RETURNING row_version`

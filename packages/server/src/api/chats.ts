@@ -328,6 +328,11 @@ export const makeChatHandlers = Effect.gen(function* () {
         return new BranchSwitch({ slotId: target.slotId, chat })
       }).pipe(Effect.retry({ times: 2, while: (error) => error._tag === "StaleWrite" }), internal("SwitchBranch")),
 
+    GetNextContext: ({ chatId, leafSlotId }) =>
+      Effect.flatMap(userId, (id) => reader.CacheWarmth({ userId: id, chatId, leafSlotId })).pipe(
+        internal("GetNextContext")
+      ),
+
     SubscribeChat: ({ chatId }) =>
       Stream.unwrap(
         Effect.gen(function* () {

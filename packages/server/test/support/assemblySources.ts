@@ -85,6 +85,8 @@ const fixtureSources = (fixture: AssemblyFixture) => {
       direction: fixture.target?.direction ?? null
     }),
     historyStart: () => Effect.succeed(fixture.historyStart ?? null),
+    historyRevision: (_leaf, before) =>
+      Effect.succeed(entries.slice(0, before).reduce((n, e) => n - (e.inContext ? e.content.length : 0), 0)),
     events: () => Effect.succeed(events),
     history: (leaf, limit) =>
       Effect.sync(() => {

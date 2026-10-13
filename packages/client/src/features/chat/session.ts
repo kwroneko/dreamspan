@@ -147,7 +147,21 @@ export class ChatSession {
     this.report()
     for (const listener of this.listeners) listener()
     // The cast is read at the leaf shown: another leaf may have another cast.
-    if (this.view.leafSlotId !== leaf && !this.view.loading) void this.refreshCast()
+    if (this.view.leafSlotId !== leaf) {
+      if (!this.view.loading) void this.refreshCast()
+      void this.refreshContext()
+    }
+  }
+
+  private contextReads = 0
+
+  private async refreshContext() {
+    const read = ++this.contextReads
+    const leafSlotId = this.view.leafSlotId
+    if (leafSlotId === null) return
+    const result = await this.call((client) => client("GetNextContext", { chatId: this.chatId, leafSlotId }))
+    if (!result.ok || this.disposed || read !== this.contextReads || leafSlotId !== this.view.leafSlotId) return
+    this.apply({ _tag: "Cache", ...result.value }, null)
   }
 
   /** Bumped by every cast read, so an older reply is dropped. */
@@ -522,6 +536,11 @@ export class ChatSession {
         this.registry.set(waitingCache(event.versionId), event.waiting)
         return
       case "Cache": {
+        if (event.leafSlotId !== this.view.leafSlotId) {
+          void this.refreshContext()
+          return
+        }
+        this.contextReads++
         // The same estimate again (another tab subscribed) changes nothing on screen.
         const history = { leafSlotId: event.leafSlotId, historyStart: event.historyStart }
         if (

@@ -630,6 +630,23 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
   DeleteVersion: {
     probe: (actor, owner) => refused(actor.api.DeleteVersion({ versionId: owner.chat.versionId }), "NotFound")
   },
+  GetNextContext: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        yield* refused(
+          actor.api.GetNextContext({ chatId: owner.chat.chatId, leafSlotId: owner.chat.slotId }),
+          "NotFound"
+        )
+        yield* refused(
+          actor.api.GetNextContext({ chatId: actor.chat.chatId, leafSlotId: owner.chat.slotId }),
+          "NotFound"
+        )
+        const own = yield* owner.api.GetNextContext({ chatId: owner.chat.chatId, leafSlotId: owner.chat.slotId })
+        assert.strictEqual(own.leafSlotId, owner.chat.slotId)
+        assert.deepStrictEqual(Object.keys(own).sort(), ["historyStart", "leafSlotId", "warmth"])
+        if (own.historyStart) assert.deepStrictEqual(Object.keys(own.historyStart).sort(), ["depth", "slotId"])
+      })
+  },
   SubscribeChat: {
     probe: (actor, owner) =>
       refused(actor.api.SubscribeChat({ chatId: owner.chat.chatId }).pipe(Stream.runHead), "NotFound")
@@ -1621,6 +1638,10 @@ const storage: Record<
   CacheWarmth: (reader, actor, owner) =>
     Effect.gen(function* () {
       yield* refused(reader.CacheWarmth({ userId: actor.user.id, chatId: owner.chat.chatId }), "NotFound")
+      yield* refused(
+        reader.CacheWarmth({ userId: actor.user.id, chatId: actor.chat.chatId, leafSlotId: owner.chat.slotId }),
+        "NotFound"
+      )
       const own = yield* reader.CacheWarmth({ userId: owner.user.id, chatId: owner.chat.chatId })
       assert.isNotNull(own.historyStart)
       assert.strictEqual(own.leafSlotId, owner.chat.replySlotId)

@@ -1,3 +1,4 @@
+import { recordHistoryReduction } from "./historyChanges.ts"
 // Write handlers for chat setup, speakers and the send queue (DESIGN §2.1, §2.2). They run
 // in the writer worker, each as one transaction.
 //
@@ -362,6 +363,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
           ) {
             return yield* new NotFound({ entity: "generating version", id: versionId })
           }
+          yield* recordHistoryReduction(sql, row.slot_id, content, versionId)
           yield* sql`UPDATE versions SET content = ${content}, status = ${status},
             error_json = ${error === null ? null : JSON.stringify(error)}, updated_at = ${Date.now()}
             WHERE id = ${versionId}`

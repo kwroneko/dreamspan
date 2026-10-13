@@ -1,3 +1,4 @@
+import { historyChangesSchema } from "./historyChanges.ts"
 import { SqliteMigrator } from "@effect/sql-sqlite-node"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
@@ -117,7 +118,8 @@ export const migrations = {
     `ALTER TABLE rollouts ADD COLUMN history_start_depth INTEGER`,
     `ALTER TABLE rollouts ADD COLUMN history_depth INTEGER`,
     `CREATE INDEX rollouts_history ON rollouts(chat_id, history_depth DESC, id DESC) WHERE history_depth IS NOT NULL`
-  ])
+  ]),
+  "0022_history_changes": runAll(historyChangesSchema)
 }
 
 export const Migrations = SqliteMigrator.layer({ loader: SqliteMigrator.fromRecord(migrations) })

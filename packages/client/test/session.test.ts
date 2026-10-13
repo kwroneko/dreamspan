@@ -63,9 +63,11 @@ const session = () => {
   const answers: Array<(window: PathWindow) => void> = []
   const internals = s as unknown as {
     read: () => Promise<PathWindow>
+    refreshContext: () => Promise<void>
     call: () => Promise<unknown>
     receive: (batch: ReadonlyArray<ChatEvent>, anchor: SlotId | null) => void
   }
+  internals.refreshContext = async () => {}
   internals.read = () => new Promise((answer) => answers.push(answer))
   internals.call = () => Promise.resolve({ ok: true, value: chat })
   return { s, answers, receive: (event: ChatEvent) => internals.receive([event], null) }

@@ -120,6 +120,106 @@ const setup = (handle = "ana") =>
 const texts = (snapshot: ContextSnapshot) => snapshot.request.messages.map((m) => `${m.role}: ${m.content}`)
 
 describe("context assembly from the database", () => {
+  for (const [label, original, shortened] of [
+    ["astral characters", "😀".repeat(500), "a".repeat(500)],
+    ["embedded NULs", "\0" + "a".repeat(1000), "\0" + "a".repeat(500)]
+  ] as const) {
+    it.live(`pins pre-boundary reductions by UTF-16 length with ${label}`, () =>
+      Effect.gen(function* () {
+        const { writer, reader, userId, chat, entity, state, sent } = yield* setup()
+        const chosen = yield* entity("preset", "Unicode steps", {
+          ...presetDoc,
+          samplers: { ...presetDoc.samplers, openai_max_context: 500, openai_max_tokens: 40 }
+        })
+        yield* state({ key: "preset.binding", value: { ref: chosen.ref.id } })
+        const connectionId = uuidv7() as ConnectionId
+        yield* writer.CreateConnection({
+          userId,
+          connectionId,
+          kind: "openai-chat",
+          api: "openai-completions",
+          settings: {
+            name: "Unicode",
+            baseUrl: null,
+            compat: {},
+            cacheTtlS: null,
+            maxConcurrent: null,
+            presetOverrideRefId: null
+          },
+          credential: { existing: null }
+        })
+        const model = yield* writer.AddUserModel({ userId, connectionId, key: "unicode", overrides: {} })
+        yield* state({ key: "model.binding", value: { connection: connectionId, model: model.id } })
+        const append = (parentSlotId: SlotId, content: string, generating = false) =>
+          writer.AppendMessage({
+            userId,
+            chatId: chat.id,
+            parentSlotId,
+            branch: true,
+            commitDraft: null,
+            version: new NewVersion({
+              speakerEntityId: null,
+              writer: generating ? "model" : "human",
+              content,
+              status: generating ? "generating" : "complete",
+              macroMode: "verbatim",
+              origin: generating ? "generated" : "user_written"
+            })
+          })
+        const old = yield* append(sent.slotId, original)
+        let leaf = old.slotId
+        for (let i = 0; i < 24; i++) leaf = (yield* append(leaf, "x".repeat(80))).slotId
+        const target = yield* append(leaf, "", true)
+        const build = (slotId: SlotId, versionId: VersionId) =>
+          reader
+            .AssembleContext({
+              userId,
+              chatId: chat.id,
+              slotId,
+              versionId,
+              now: NOW,
+              timeZone: "UTC",
+              frozen: null
+            })
+            .pipe(Effect.map(({ snapshot }) => JSON.parse(snapshot) as ContextSnapshot))
+        const first = yield* build(target.slotId, target.version.id)
+        assert.isAbove(first.historyStart!.depth, 2, "the edited message must be before the recorded boundary")
+        const generation = generationOf(first)
+        yield* writer.StartRollout({
+          userId,
+          chatId: chat.id,
+          slotId: target.slotId,
+          versionId: target.version.id,
+          rolloutId: uuidv7(),
+          leafSlotId: leaf,
+          connectionId,
+          modelId: model.id,
+          snapshot: JSON.stringify(first),
+          issues: generation.issues,
+          variables: generation.variables,
+          frozenMessages: generation.frozenMessages.map((message) => ({
+            ...message,
+            versionId: message.versionId as VersionId
+          }))
+        })
+        yield* writer.AmendVersion({ userId, versionId: old.version.id, expectedRowVersion: 1, content: shortened })
+        const next = yield* append(target.slotId, "", true)
+        const rebuilt = yield* build(next.slotId, next.version.id)
+        assert.deepStrictEqual(rebuilt.sources!.historyStart, first.historyStart)
+        assert.isAbove(
+          rebuilt.historyStart!.state!.revision,
+          first.historyStart!.state!.revision,
+          "the durable reduction must be observed even when SQLite length does not decrease"
+        )
+        for (const snapshot of [first, rebuilt]) {
+          const replayed = yield* reader.RebuildContext({ userId, snapshot: JSON.stringify(snapshot) })
+          assert.ok(replayed._tag === "Rebuilt")
+          assert.deepStrictEqual(JSON.parse(replayed.snapshot), snapshot)
+        }
+      }).pipe(Effect.provide(database()))
+    )
+  }
+
   it.live(
     "pins independent branch starts, holds them between cuts and replays after edits and a raised maximum",
     () =>
@@ -131,6 +231,16 @@ describe("context assembly from the database", () => {
         }
         const chosen = yield* entity("preset", "Steps", document)
         yield* state({ key: "preset.binding", value: { ref: chosen.ref.id } })
+        const interval = yield* entity("note", "Interval", {
+          schema_version: 1,
+          title: "Interval",
+          content: "N".repeat(80),
+          owner: { chat: chat.id },
+          placement: { mode: "tail", role: "system" },
+          interval: 2,
+          exportable: false
+        })
+        yield* state({ key: "note.activate", value: { note: interval.entityId } })
         const connectionId = uuidv7() as ConnectionId
         yield* writer.CreateConnection({
           userId,
@@ -261,7 +371,7 @@ describe("context assembly from the database", () => {
         assert.deepStrictEqual(branched.snapshot.sources!.historyStart, shared.snapshot.historyStart)
         assert.strictEqual(branched.snapshot.historyStart!.depth, 0)
         // Shortening the old path restores earlier messages only as a suffix that fits the target.
-        for (const user of users.slice(-8, -1))
+        for (const user of users.slice(-10, -1))
           yield* writer.AmendVersion({ userId, versionId: user.id, expectedRowVersion: 1, content: "s" })
         const shortened = yield* generate((yield* send(last.slot, true)).slotId)
         assert.isBelow(shortened.snapshot.historyStart!.depth, last.snapshot.historyStart!.depth)
@@ -288,7 +398,10 @@ describe("context assembly from the database", () => {
           commitDraft: null
         })
         const fallback = yield* reader.CacheWarmth({ userId, chatId: chat.id })
-        assert.deepStrictEqual(fallback.historyStart, raised.snapshot.historyStart)
+        assert.deepStrictEqual(fallback.historyStart, {
+          slotId: raised.snapshot.historyStart!.slotId,
+          depth: raised.snapshot.historyStart!.depth
+        })
         assert.strictEqual(fallback.leafSlotId, raised.slot)
         assert.isNull(fallback.warmth)
         for (const snapshot of snapshots) {
@@ -629,7 +742,7 @@ describe("context assembly from the database", () => {
     Effect.gen(function* () {
       const { reader, userId, assemble } = yield* setup()
       const built = yield* assemble()
-      for (const version of [undefined, 0, 1, 2, 3, 4, 5, 6, 7]) {
+      for (const version of [undefined, 0, 1, 2, 3, 4, 5, 6, 7, 8]) {
         const legacy = { ...built, assemblerVersion: version, sources: { ...built.sources, userMessages: [] } }
         const json = JSON.stringify(legacy)
         const result = yield* reader.RebuildContext({ userId, snapshot: json })
@@ -637,7 +750,7 @@ describe("context assembly from the database", () => {
         assert.ok(result._tag === "EarlierAssemblerVersion")
         assert.strictEqual(result.storedSnapshot, json)
       }
-      assert.strictEqual(built.assemblerVersion, 8)
+      assert.strictEqual(built.assemblerVersion, 9)
       const rebuilt = yield* reader.RebuildContext({ userId, snapshot: JSON.stringify(built) })
       assert.ok(rebuilt._tag === "Rebuilt")
       assert.deepStrictEqual(JSON.parse(rebuilt.snapshot), built)

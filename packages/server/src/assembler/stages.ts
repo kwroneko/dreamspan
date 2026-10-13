@@ -1,4 +1,5 @@
-import { contextBudget, targetBudget, loreAllowance } from "./budget.ts"
+import { createHash } from "node:crypto"
+import { contextBudget, targetBudget, loreAllowance, loreBudget } from "./budget.ts"
 // The built-in assembler stages, in registration order (ARCHITECTURE §15 lists them).
 import type { ChatMessage } from "@rp/shared/macros/context.ts"
 import type { CardFields } from "@rp/shared/macros/context.ts"
@@ -359,6 +360,10 @@ const historyStage: AssemblerStage = {
       const cast = need(assembly, "cast")
       const runner = need(assembly, "scripts")
       assembly.previousHistoryStart = yield* sources.historyStart(target.parentSlotId)
+      assembly.historyRevision = yield* sources.historyRevision(
+        target.parentSlotId,
+        assembly.previousHistoryStart?.depth ?? 0
+      )
       const budget = contextBudget(assembly)
       const scripted = new Map<string, Scripted>()
       let entries: ReadonlyArray<HistoryEntry> = []
@@ -802,7 +807,7 @@ const summaryText = (assembly: Assembly, note: NoteInput): Text | null => {
   const env = need(assembly, "macros")
   const piece = env.piece(`note:${note.entity}`, noteSource(assembly, note), formatted)
   const text = env.text(piece).trim()
-  return text || env.isVolatile(piece) ? { text, piece } : null
+  return { text, piece }
 }
 
 /** A note's text, expanded: a card's with `{{char}}` bound to the card, the chat's with the chat's bindings. */
@@ -815,7 +820,7 @@ const noteText = (assembly: Assembly, note: NoteInput, owner: CardInput | null):
     owner ? { withoutCard: true, names: { char: owner.doc.name } } : {}
   )
   const text = env.text(piece)
-  return text || env.isVolatile(piece) ? { text, piece } : null
+  return { text, piece }
 }
 
 /**
@@ -878,6 +883,15 @@ const placedNotes = (assembly: Assembly, cards: ReadonlyArray<CardInput>) => {
       return [
         {
           place,
+          capacity: (() => {
+            const content =
+              note === summary
+                ? note.doc.template
+                  ? note.doc.template.replace(/\{\{summary\}\}/gi, () => note.doc.content.trim())
+                  : `Summary: ${note.doc.content.trim()}`
+                : note.doc.content.trim()
+            return content.includes("{{") ? Math.max(content.length, loreBudget(assembly) * 4) : content.length
+          })(),
           text: () => {
             // Every intermittent note is a potential writer; never expand a skipped one to find out.
             if ((note.doc.interval ?? 0) > 1) env.potentialVariableWrite()
@@ -1080,13 +1094,21 @@ const composeStage = sync("compose", (assembly) => {
   }
 
   // Placement order is independent of expansion order: summaries see main's writes.
-  const notes = pendingNotes.flatMap(({ text, place }) => {
-    const expanded = text()
+  const notes = pendingNotes.flatMap(({ text, place, capacity }) => {
+    let expanded = text()
     if (!expanded) return []
+    if (expanded.text.length > capacity) {
+      assembly.issues.push({
+        kind: "macro_limit",
+        message: "A note expansion exceeded its reserved context allowance and was shortened."
+      })
+      expanded = { ...expanded, text: expanded.text.slice(0, capacity) }
+      assembly.pieces[expanded.piece] = { ...assembly.pieces[expanded.piece]!, text: expanded.text }
+    }
     const note = assembly.pieces[expanded.piece]?.source
     const input = note?.kind === "note" ? assembly.notes?.find((n) => n.entity === note.entity) : undefined
     const author = input && (input.doc.kind === "author_note" || input.entity === need(assembly, "state").authorNote)
-    if (!author) return [{ text: expanded, place }]
+    if (!author) return [{ text: expanded, place, capacity }]
     const top = loreBlock(
       "an-top",
       stLore.filter((e) => e.entry.position === "an_top")
@@ -1095,9 +1117,12 @@ const composeStage = sync("compose", (assembly) => {
       "an-bottom",
       stLore.filter((e) => e.entry.position === "an_bottom")
     )
-    if (!top && !bottom) return [{ text: expanded, place }]
+    if (!top && !bottom) return [{ text: expanded, place, capacity }]
     const parts = [top?.piece, expanded.piece, bottom?.piece].filter((p): p is number => p !== undefined)
-    const combined = parts.map(env.text).join("\n").trim()
+    const combined = [top?.text, expanded.text, bottom?.text]
+      .filter((text) => text !== undefined)
+      .join("\n")
+      .trim()
     return [
       {
         text: {
@@ -1109,7 +1134,8 @@ const composeStage = sync("compose", (assembly) => {
             parts
           )
         },
-        place
+        place,
+        capacity: capacity + (top?.text.length ?? 0) + (bottom?.text.length ?? 0) + 2
       }
     ]
   })
@@ -1144,15 +1170,6 @@ const composeStage = sync("compose", (assembly) => {
   rest.forEach((index, i) => (scripted[index] = ran[i]))
   // Notes in-chat are extension prompts at their depth; the others go beside the main prompt,
   // one after another (injectToMain).
-  const injections: Array<Injection> = notes.flatMap(({ text, place }) =>
-    place.at === "chat" ? [{ depth: place.depth, role: place.role, text }] : []
-  )
-  for (const e of stLore.filter((e) => e.entry.position === "at_depth"))
-    injections.push({
-      depth: Math.max(0, Math.min(10000, e.entry.depth)),
-      role: e.entry.role,
-      text: { text: env.text(e.piece), piece: e.piece }
-    })
   // Lore above history can change per turn, even when this turn has no activated entry.
   if (
     mode.st &&
@@ -1175,28 +1192,49 @@ const composeStage = sync("compose", (assembly) => {
         barrier: true
       })
   }
-  const beside: Array<{ readonly message: StMessage; readonly at: "start" | "end" }> = []
-  for (const { text, place } of notes) {
-    if (place.at === "chat") continue
-    const main = collection.findIndex((p) => p.identifier === "main")
-    const mainPrompt = collection[main]
-    if (mainPrompt?.injection_position === "absolute") {
-      // Main in-chat: the note is injected beside it, with its role, depth and order.
-      collection.splice(place.at === "start" ? main : main + 1, 0, {
-        ...mainPrompt,
-        identifier: "note",
-        role: place.role,
-        content: text.text,
-        piece: text.piece,
-        system_prompt: undefined,
-        forbid_overrides: false,
-        barrier: (place.volatile || env.isVolatile(text.piece)) && !text.text
+  const placement = (placed: typeof notes) => {
+    const collection = [...baseCollection]
+    const injections: Array<Injection> = placed.flatMap(({ text, place }) =>
+      place.at === "chat" ? [{ depth: place.depth, role: place.role, text }] : []
+    )
+    for (const e of stLore.filter((e) => e.entry.position === "at_depth"))
+      injections.push({
+        depth: Math.max(0, Math.min(10000, e.entry.depth)),
+        role: e.entry.role,
+        text: { text: env.text(e.piece), piece: e.piece }
       })
-    } else if (mainPrompt) {
-      const kind = place.volatile ? "volatile" : "prefix"
-      beside.push({ message: { role: place.role, content: text.text, pieces: [text.piece], kind }, at: place.at })
+    const beside: Array<{ readonly message: StMessage; readonly at: "start" | "end" }> = []
+    for (const { text, place } of placed) {
+      if (place.at === "chat") continue
+      const main = collection.findIndex((p) => p.identifier === "main")
+      const mainPrompt = collection[main]
+      if (mainPrompt?.injection_position === "absolute") {
+        // Main in-chat: the note is injected beside it, with its role, depth and order.
+        collection.splice(place.at === "start" ? main : main + 1, 0, {
+          ...mainPrompt,
+          identifier: "note",
+          role: place.role,
+          content: text.text,
+          piece: text.piece,
+          system_prompt: undefined,
+          forbid_overrides: false,
+          barrier: (place.volatile || env.isVolatile(text.piece)) && !text.text
+        })
+      } else if (mainPrompt) {
+        const kind = place.volatile ? "volatile" : "prefix"
+        beside.push({ message: { role: place.role, content: text.text, pieces: [text.piece], kind }, at: place.at })
+      }
     }
+    return { collection, beside, injections }
   }
+  const baseCollection = collection
+  const actualPlacement = placement(notes)
+  const reservedPlacement = placement(
+    notes.map((note) => ({
+      ...note,
+      text: { ...note.text, text: "x".repeat(note.capacity) }
+    }))
+  )
   const lines = projected.map((p, i) => chatLine(assembly, p, groupNames, scripted[i]!))
   prefill(assembly)
   const newExampleChat = optional("utility.new_example_chat_prompt", utility.new_example_chat_prompt)
@@ -1206,8 +1244,9 @@ const composeStage = sync("compose", (assembly) => {
   const maximum = contextBudget(assembly) - reserve
   const desiredTarget = targetBudget(assembly) - reserve
   let admittedExamples = examples
-  const candidate = (start: number, budget: number, withExamples = true) =>
-    compose({
+  const candidate = (start: number, budget: number, withExamples = true, reserved = false) => {
+    const { beside, collection, injections } = reserved ? reservedPlacement : actualPlacement
+    return compose({
       beside,
       collection,
       disabled,
@@ -1223,6 +1262,7 @@ const composeStage = sync("compose", (assembly) => {
       control,
       budget
     })
+  }
   const postNames = {
     user: names.user,
     char: names.char,
@@ -1234,25 +1274,47 @@ const composeStage = sync("compose", (assembly) => {
     const tokens = (messages: ReadonlyArray<StMessage>) => messages.reduce((sum, message) => sum + tokensOf(message), 0)
     return 3 + Math.max(tokens(built.messages), tokens(processed))
   }
-  const fixedCost = cost(candidate(projected.length, Number.POSITIVE_INFINITY, false))
+  const previous = assembly.previousHistoryStart
+  const configuration = createHash("sha256")
+    .update(
+      JSON.stringify([
+        doc,
+        assembly.model,
+        mode,
+        [...cast.characters, ...cast.personas].map((c) => [c.entity, c.doc]),
+        [...(assembly.notes ?? []), ...(assembly.skippedNotes ?? [])].toSorted((a, b) =>
+          a.entity.localeCompare(b.entity)
+        ),
+        assembly.lorebooks
+      ])
+    )
+    .digest("hex")
+  const identity = JSON.stringify([need(assembly, "preset").ref, assembly.model?.connectionId, assembly.model?.modelId])
+  const prior = previous?.state
+  const configurationChanged = prior?.configuration !== configuration
+  const fixedCost = cost(candidate(projected.length, Number.POSITIVE_INFINITY, false, true))
   if (fixedCost > maximum)
     throw new AssemblyFailed({
       reason: "budget",
       message: "The fixed context and response reserve don't fit the maximum context size."
     })
-  let lowExamples = 0,
-    highExamples = examples.length
-  while (lowExamples < highExamples) {
-    const mid = Math.ceil((lowExamples + highExamples) / 2)
-    admittedExamples = examples.slice(0, mid)
-    if (cost(candidate(projected.length, Number.POSITIVE_INFINITY)) <= maximum) lowExamples = mid
-    else highExamples = mid - 1
+  const admit = () => {
+    let low = 0,
+      high = examples.length
+    while (low < high) {
+      const mid = Math.ceil((low + high) / 2)
+      admittedExamples = examples.slice(0, mid)
+      if (cost(candidate(projected.length, Number.POSITIVE_INFINITY, true, true)) <= maximum) low = mid
+      else high = mid - 1
+    }
+    admittedExamples = examples.slice(0, low)
   }
-  admittedExamples = examples.slice(0, lowExamples)
-  const minimum = cost(candidate(projected.length, Number.POSITIVE_INFINITY))
-  const target = Math.max(desiredTarget, minimum)
+  if (configurationChanged) admit()
+  else admittedExamples = examples.slice(0, prior.examples)
+  const minimum = cost(candidate(projected.length, Number.POSITIVE_INFINITY, true, true))
+  let target = Math.max(desiredTarget, minimum)
   const fits = (start: number, budget: number) => {
-    const built = candidate(start, Number.POSITIVE_INFINITY)
+    const built = candidate(start, Number.POSITIVE_INFINITY, true, true)
     const pieces = new Set(built.messages.flatMap((m) => m.pieces))
     return (
       lines.slice(start).every((line) => !line.content || line.pieces.every((piece) => pieces.has(piece))) &&
@@ -1269,29 +1331,48 @@ const composeStage = sync("compose", (assembly) => {
     }
     return low
   }
-  const previous = assembly.previousHistoryStart
   const earlier = previous ? projected.findIndex((p) => p.entry.depth >= previous.depth) : 0
   let start = earlier < 0 ? projected.length : earlier
   let budget = maximum
-  const restored = previous ? earliestFit(start) : start
-  if (!previous && fits(0, maximum)) {
-    start = 0
-    assembly.historyMove = "initial"
-  } else if (previous && restored < start) {
+  const mayRestore =
+    prior &&
+    (contextBudget(assembly) > prior.maximum ||
+      targetBudget(assembly) > prior.target ||
+      identity !== prior.identity ||
+      assembly.historyRevision !== prior.revision)
+  const exceeded =
+    !fits(start, maximum) ||
+    (previous !== null &&
+      previous !== undefined &&
+      previous.depth < (assembly.history?.[0]?.depth ?? 0) &&
+      (assembly.historyOmitted ?? 0) > 0)
+  if (exceeded) {
+    admit()
+    target = Math.max(desiredTarget, cost(candidate(projected.length, Number.POSITIVE_INFINITY, true, true)))
+  }
+  const restored = mayRestore ? earliestFit(start) : start
+  if (previous && restored < start) {
     start = restored
     budget = target
     assembly.historyMove = "restore"
-  } else if (
-    !previous ||
-    !fits(start, maximum) ||
-    (previous.depth < (assembly.history?.[0]?.depth ?? 0) && (assembly.historyOmitted ?? 0) > 0)
-  ) {
+  } else if (exceeded) {
     assembly.historyMove = "maximum"
-    start = earliestFit(projected.length)
+    start = Math.max(previous ? start : 0, earliestFit(projected.length))
     budget = target
-  } else assembly.historyMove = "unchanged"
+  } else assembly.historyMove = previous ? "unchanged" : "initial"
   const first = projected[start]?.entry
-  assembly.historyStart = { slotId: first?.slotId ?? null, depth: first?.depth ?? need(assembly, "target").depth }
+  assembly.historyStart = {
+    slotId: first?.slotId ?? null,
+    depth: first?.depth ?? need(assembly, "target").depth,
+    state: {
+      configuration,
+      identity,
+      maximum: contextBudget(assembly),
+      target: targetBudget(assembly),
+      examples: admittedExamples.length,
+      revision: assembly.historyRevision ?? 0
+    }
+  }
   const composition = { ...candidate(start, budget), examplesTotal: examples.length }
   assembly.postNames = postNames
   assembly.composition = composition

@@ -1,3 +1,4 @@
+import { recordHistoryReduction } from "./historyChanges.ts"
 // Write operation handlers. They run inside the writer worker, each as one transaction.
 import type { ChatId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
@@ -143,6 +144,7 @@ export const makeWriteHandlers = (bin: Bin) =>
           }>`SELECT coalesce(max(ordinal), -1) + 1 AS n FROM versions WHERE slot_id = ${slotId}`
           const row = yield* insertVersion(slotId, next!.n, version, at)
           if (select) {
+            yield* recordHistoryReduction(sql, slotId, row.content)
             yield* sql`UPDATE slots SET selected_version_id = ${row.id}, row_version = row_version + 1 WHERE id = ${slotId}`
           }
           yield* drafts.commit(userId, commitDraft, {
@@ -197,6 +199,7 @@ export const makeWriteHandlers = (bin: Bin) =>
             n: number
           }>`SELECT coalesce(max(ordinal), -1) + 1 AS n FROM versions WHERE slot_id = ${slotId}`
           const row = yield* insertVersion(slotId, next!.n, version, Date.now())
+          yield* recordHistoryReduction(sql, slotId, row.content)
           yield* sql`UPDATE slots SET selected_version_id = ${row.id}, row_version = row_version + 1 WHERE id = ${slotId}`
           return { chatId: slot.chat_id as ChatId, version: toVersion(row) }
         }).pipe(transaction("AddSelectedVersion")),
@@ -216,6 +219,7 @@ export const makeWriteHandlers = (bin: Bin) =>
           }
           if (content === row.content) return toVersion(row)
           // The trigger keeps the previous text in version_history (DESIGN §3.1).
+          yield* recordHistoryReduction(sql, row.slot_id, content, versionId)
           yield* sql`UPDATE versions SET content = ${content}, updated_at = ${Date.now()} WHERE id = ${versionId}`
           return toVersion(yield* ownedVersion(userId, versionId, true))
         }).pipe(transaction("AmendVersion")),
@@ -227,6 +231,7 @@ export const makeWriteHandlers = (bin: Bin) =>
           if (row.writer !== "model" || row.status !== "generating" || row.purged_at !== null) {
             return yield* new NotFound({ entity: "generating version", id: versionId })
           }
+          yield* recordHistoryReduction(sql, row.slot_id, content, versionId)
           yield* sql`UPDATE versions SET content = ${content}, status = ${status},
             error_json = ${error === null ? null : JSON.stringify(error)}, updated_at = ${Date.now()}
             WHERE id = ${versionId}`

@@ -1664,7 +1664,7 @@ export class ReadOps extends RpcGroup.make(
     error: Schema.Union([NotFound, StorageError])
   }),
   Rpc.make("CacheWarmth", {
-    payload: { userId: UserId, chatId: ChatId },
+    payload: { userId: UserId, chatId: ChatId, leafSlotId: Schema.optionalKey(Schema.NullOr(SlotId)) },
     success: NextContext,
     error: Schema.Union([NotFound, StorageError])
   }),

@@ -187,7 +187,7 @@ reference-harness synthesizes a placeholder from a failed job row and never pers
 
 ## 3. Data model
 
-### 3.1 Migration `0020_lcm`
+### 3.1 Migration `0021_lcm`
 
 Nothing writes the summary tables yet, so they're empty in every database, and changed tables are recreated rather than altered. Migrations are squashed before release anyway (PLAN).
 - `summaries`: `status` adds `failed`; new `error_json` and `batch_id`.
@@ -264,7 +264,7 @@ Each slice moves its part of this document into ARCHITECTURE.md in the same comm
 | # | Slice | Test oracle | Tier |
 |---|---|---|---|
 | 1 | Migration 0019, its triggers, the summary writes (`CompleteSummary`, `EditSummary`, `SelectSummaryRevision`) and derived freshness | A schema test per trigger; freshness against hand-built graphs; isolation probes | A |
-| 2 | The `lcm` stage, the layer in both modes, breakpoint (b), pins, assembler version 8, summary sources in the inspector and the cache estimate | The model test over graph steps with summaries written by fixtures (invariants 1–4, 6); the ST gate unchanged with LCM off | B |
+| 2 | The `lcm` stage, the layer in both modes, breakpoint (b), pins, assembler version 10, summary sources in the inspector and the cache estimate | The model test over graph steps with summaries written by fixtures (invariants 1–4, 6); the ST gate unchanged with LCM off | B |
 | 3 | Planner, queue operations, `Summarizer`, summarization requests, use / wait / omit, batches, idle class | The model test with jobs (7, 8); the prefix comparison at a mock provider | A |
 | 4 | Hard refusals and the judge model for soft refusals, retries, failed summaries, Retry with…, marks on chat versions | A fake judge; the model test with planted refusals (5) | B |
 | 5 | Condensation, absorption, re-summarizing stale summaries | The model test with condensation and edits, run to quiescence | B |

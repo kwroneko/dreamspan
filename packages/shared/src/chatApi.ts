@@ -236,6 +236,12 @@ export class ChatApi extends RpcGroup.make(
     success: BranchSwitch,
     error: Schema.Union([...WriteErrors])
   }),
+  /** Next request at the displayed leaf; Cache events invalidate this read. */
+  Rpc.make("GetNextContext", {
+    payload: { chatId: ChatId, leafSlotId: Schema.NullOr(SlotId) },
+    success: NextContext,
+    error: Schema.Union([...Errors])
+  }),
   /**
    * Live updates to one chat. Each element is a batch, coalesced on the server per frame
    * (about 16 ms). The first batch starts with Hello.

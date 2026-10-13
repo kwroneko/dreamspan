@@ -61,6 +61,7 @@ export class AssemblySources extends Context.Service<
   AssemblySources,
   {
     readonly target: Effect.Effect<Target, SourceError>
+    readonly historyRevision: (leaf: string | null, before: number) => Effect.Effect<number, SourceError>
     readonly historyStart: (leaf: string | null) => Effect.Effect<HistoryStart | null, SourceError>
     /** The events that apply at `slotId` (null: the chat's initial state), in fold order. */
     readonly events: (slotId: string | null) => Effect.Effect<ReadonlyArray<PositionedEvent>, SourceError>
@@ -191,6 +192,7 @@ export interface Assembly {
   /** Messages of the path not read, older than `history`. */
   historyOmitted?: number
   previousHistoryStart?: HistoryStart | null
+  historyRevision?: number
   historyStart?: HistoryStart
   historyMove?: ContextSnapshot["historyMove"]
   /** The messages of `history` that enter the context, with the pieces recording their text. */
@@ -236,9 +238,12 @@ export const assemble = (stages: StageRegistry, request: AssemblyRequest) =>
     const preset = need(assembly, "preset")
     const cast = need(assembly, "cast")
     const mode = need(assembly, "mode")
+    const historyStart = need(assembly, "historyStart")
+    const sources = yield* AssemblySources
+    const revision = yield* sources.historyRevision(target.parentSlotId, historyStart.depth)
     const snapshot: ContextSnapshot = {
       schema: 1,
-      historyStart: need(assembly, "historyStart"),
+      historyStart: { ...historyStart, ...(historyStart.state ? { state: { ...historyStart.state, revision } } : {}) },
       historyMove: need(assembly, "historyMove"),
       assemblerVersion: ASSEMBLER_VERSION,
       inputs: {

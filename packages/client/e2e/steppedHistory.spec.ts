@@ -112,3 +112,29 @@ test("a changed prefix shows the rewrite estimate without a TTL or countdown", a
   await reply.getByRole("link", { name: "Context" }).click()
   await expect(page.getByText(/older ones don't fit/)).toBeVisible()
 })
+
+test("two tabs and an inactive-path deep link keep their own context boundary", async ({ page, context }) => {
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  const longLeaf = entries.at(-1)!.slotId
+  const url = `${server().url}/chats/${chatId}?leaf=${longLeaf}&slot=${entries[1]!.slotId}`
+  await page.goto(url)
+  const dropped = page.locator(`article[data-slot="${entries[1]!.slotId}"]`)
+  await expect(dropped).toHaveAttribute("data-out-of-context", "true")
+  const branch = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+    api.SendMessage({ chatId, parentSlotId: entries[0]!.slotId, branch: true, content: "Short branch." })
+  )
+  expect(branch._tag).toBe("Posted")
+  if (branch._tag !== "Posted") throw new Error("expected posted branch")
+  const other = await context.newPage()
+  await other.goto(`${server().url}/chats/${chatId}?leaf=${branch.entry.slotId}`)
+  await expect(other.getByText("Short branch.", { exact: true })).toBeVisible()
+  await expect(other.locator('[data-out-of-context="true"]')).toHaveCount(0)
+  await page.reload()
+  await expect(dropped).toHaveAttribute("data-out-of-context", "true")
+  await expect(dropped.getByRole("img", { name: "Not in the context", exact: true })).toBeVisible()
+  await expect(page.getByRole("img", { name: "Hidden from context", exact: true })).toBeVisible()
+  await other.reload()
+  await expect(other.locator('[data-out-of-context="true"]')).toHaveCount(0)
+  await expect(dropped).toHaveAttribute("data-out-of-context", "true")
+  await other.close()
+})

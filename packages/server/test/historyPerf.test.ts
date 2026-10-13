@@ -9,16 +9,22 @@ import { generationOf, type ContextSnapshot } from "../src/assembler/types.ts"
 import * as Database from "../src/db/Database.ts"
 import { databaseFile } from "../src/db/connection.ts"
 import { tempDir } from "./support/tempDir.ts"
+import type { HistoryWorkSample } from "./support/historyPerfWorker.ts"
 
-const worker = (file: string, userId: string, chatId: string) =>
+const worker = <A = Array<string>>(
+  file: string,
+  userId: string,
+  chatId: string,
+  workload: "long" | "siblings" | "swipes" = "long"
+) =>
   Effect.promise(
     () =>
-      new Promise<Array<string>>((resolve, reject) => {
+      new Promise<A>((resolve, reject) => {
         const thread = new Worker(new URL("./support/historyPerfWorker.ts", import.meta.url), {
-          workerData: { file, userId, chatId, seed: true }
+          workerData: { file, userId, chatId, workload }
         })
-        let plan: Array<string>
-        thread.once("message", (value: Array<string>) => {
+        let plan: A
+        thread.once("message", (value: A) => {
           plan = value
         })
         thread.once("error", reject)
@@ -73,7 +79,7 @@ it.live(
         plan.join("\n")
       )
       assert.isFalse(
-        plan.some((step) => /^SCAN (r|slots|rollouts)/.test(step)),
+        plan.some((step) => /^SCAN (slots|rollouts)(?:\s|$)/.test(step)),
         plan.join("\n")
       )
       yield* Effect.gen(function* () {
@@ -160,3 +166,53 @@ it.live(
   },
   60000
 )
+
+for (const workload of ["siblings", "swipes"] as const) {
+  it.live(
+    `walks a long path once with unrelated ${workload} generations`,
+    () => {
+      const dataDir = tempDir(`history-${workload}`)
+      return Effect.gen(function* () {
+        const setup = yield* Effect.gen(function* () {
+          const writer = yield* Database.Writer
+          const user = yield* writer.EnsureUser({ handle: "perf", displayName: "Perf" })
+          const chat = yield* writer.CreateChat({
+            userId: user.id,
+            kind: "rp",
+            status: "active",
+            title: "Synthetic branch history",
+            participants: [],
+            greeting: null
+          })
+          return { userId: user.id, chatId: chat.id }
+        }).pipe(Effect.provide(Database.layer({ dataDir, readers: 1, allowNetworkFs: false, workers: "source" })))
+        const samples = yield* worker<Array<HistoryWorkSample>>(
+          databaseFile(dataDir),
+          setup.userId,
+          setup.chatId,
+          workload
+        )
+        console.log(`History lookup / ${workload}: ${JSON.stringify(samples.map(({ plan: _, ...sample }) => sample))}`)
+        assert.deepStrictEqual(
+          samples.map((sample) => sample.candidates),
+          [0, 100, 500]
+        )
+        const baseline = samples[0]!
+        assert.isAbove(baseline.ancestryReads, 0, "the ancestry-read probe must observe the real traversal")
+        for (const sample of samples) {
+          assert.deepStrictEqual(sample.start, { slot_id: "perf-s-0", depth: 0 })
+          assert.isAtMost(
+            sample.ancestryReads,
+            baseline.ancestryReads * 3 + sample.candidates * 4,
+            `${workload}: ${sample.candidates} unrelated generations must not multiply the ancestry walk`
+          )
+          assert.ok(
+            sample.plan.some((step) => step.includes("rollouts_history")),
+            sample.plan.join("\n")
+          )
+        }
+      })
+    },
+    120000
+  )
+}

@@ -91,7 +91,7 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
     // The cache-warmth estimate (DESIGN §5.5): the chat's last request that reached its
     // provider and the next request's TTL eligibility and prefix at the end of the active path
     // compared up to its last breakpoint. Null when there's nothing to estimate.
-    CacheWarmth: ({ userId, chatId }) =>
+    CacheWarmth: ({ userId, chatId, leafSlotId }) =>
       Effect.gen(function* () {
         const [chat] = yield* sql<{ id: string }>`
           SELECT id FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`
@@ -110,7 +110,7 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
           WHERE q.chat_id = ${chatId} AND q.owner_user_id = ${userId}
             AND (q.status IN ('running', 'complete') OR q.first_token_at IS NOT NULL)
           ORDER BY q.started_at DESC, q.id DESC LIMIT 1`
-        const sources = sqlSources(sql, { userId, chatId, next: true })
+        const sources = sqlSources(sql, { userId, chatId, next: true, leafSlotId: leafSlotId ?? null })
         const next = yield* assembler
           .assemble({ now: Date.now(), timeZone: "UTC", frozen: {}, random: Math.random })
           .pipe(
@@ -125,9 +125,10 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
         const fallback = recorded
           ? { slotId: recorded.slot_id, depth: recorded.depth }
           : (sources.pins().historyStart ?? null)
+        const start = next instanceof AssemblyFailed ? fallback : (next.historyStart ?? fallback)
         const boundary = {
           leafSlotId: sources.pins().target.parentSlotId,
-          historyStart: next instanceof AssemblyFailed ? fallback : (next.historyStart ?? fallback)
+          historyStart: start ? { slotId: start.slotId, depth: start.depth } : null
         }
         if (next instanceof AssemblyFailed || !next.inputs.model || !last?.snapshot || last.model_id === null) {
           return { ...boundary, warmth: null }

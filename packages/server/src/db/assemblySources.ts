@@ -37,6 +37,7 @@ import {
 } from "./providers.ts"
 import type { GenerationDefaults } from "@rp/shared/generation.ts"
 import { readDefaults } from "./generationSettings.ts"
+import { historyRevision } from "./historyChanges.ts"
 import { previousHistoryStart } from "./historyStart.ts"
 import { noteHistory } from "./noteHistory.ts"
 import { withoutPurged } from "./stateRefs.ts"
@@ -88,11 +89,11 @@ interface HistoryRow {
 
 /**
  * The version being generated, or `next`: a reply not yet asked for, at the end of the
- * chat's active path, the request the cache-warmth estimate compares (DESIGN §5.5).
+ * requested path (active by default), the request the cache-warmth estimate compares (DESIGN §5.5).
  */
 type Settings =
   | { readonly userId: UserId; readonly chatId: ChatId; readonly slotId: string; readonly versionId: string }
-  | { readonly userId: UserId; readonly chatId: ChatId; readonly next: true }
+  | { readonly userId: UserId; readonly chatId: ChatId; readonly next: true; readonly leafSlotId?: string | null }
 
 /** A snapshot to read again: its pins and its inputs. */
 interface Replay {
@@ -197,6 +198,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
   const pins = {
     target: null as Target | null,
     historyStart: null as NonNullable<SourcePins["historyStart"]> | null,
+    historyRevisions: {} as Record<string, number>,
     events: [] as Array<SourcePins["events"][number]>,
     history: [] as Array<SourcePins["history"][number]>,
     cards: [] as Array<SourcePins["cards"][number]>,
@@ -240,9 +242,12 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
       Effect.tap(pinTarget)
     )
 
+  const viewedLeaf = "next" in settings ? (settings.leafSlotId ?? null) : null
   const nextTarget = sql<{ leaf: string | null; depth: number | null }>`
-    SELECT c.active_leaf_slot_id AS leaf, s.depth FROM chats c LEFT JOIN slots s ON s.id = c.active_leaf_slot_id
-    WHERE c.id = ${chatId} AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL`.pipe(
+    SELECT s.id AS leaf, s.depth FROM chats c LEFT JOIN slots s
+      ON s.id = coalesce(${viewedLeaf}, c.active_leaf_slot_id) AND s.chat_id = c.id
+    WHERE c.id = ${chatId} AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL
+      AND (${viewedLeaf} IS NULL OR (s.id IS NOT NULL AND s.deleted_at IS NULL))`.pipe(
     Effect.flatMap(([row]) =>
       row
         ? Effect.succeed({
@@ -266,8 +271,23 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
 
     historyStart: (leaf) =>
       Effect.map(previousHistoryStart(sql, userId, chatId, leaf), ([row]) => {
-        pins.historyStart = row ? { slotId: row.slot_id, depth: row.depth } : null
+        pins.historyStart = row
+          ? { slotId: row.slot_id, depth: row.depth, ...(row.state_json ? { state: JSON.parse(row.state_json) } : {}) }
+          : null
         return pins.historyStart
+      }),
+
+    historyRevision: (leaf, before) =>
+      Effect.suspend(() => {
+        const key = keyOf(leaf, before)
+        const cached = pins.historyRevisions[key]
+        return cached === undefined
+          ? Effect.map(historyRevision(sql, userId, chatId, leaf, before), ([row]) => {
+              const revision = row!.revision
+              pins.historyRevisions[key] = revision
+              return revision
+            })
+          : Effect.succeed(cached)
       }),
 
     // The events at `at` (StateEventsAt's query), with the depth of the message each follows.
@@ -589,6 +609,7 @@ const replaySources = (
     ),
 
     historyStart: () => Effect.succeed(pins.historyStart ?? null),
+    historyRevision: (leaf, before) => Effect.succeed(pins.historyRevisions?.[keyOf(leaf, before)] ?? 0),
 
     events: () =>
       Effect.gen(function* () {
