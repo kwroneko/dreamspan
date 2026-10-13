@@ -16,16 +16,6 @@ export interface JobError {
   readonly category?: string | null
 }
 
-/** The summarizer's output target for a level: the chat's `leafTarget` at level 1, reference-harness's 800 above. */
-export const targetFor = (sql: SqlClient.SqlClient, chatId: string, level: number) =>
-  level > 1
-    ? Effect.succeed(800)
-    : sql<{ target: number | null }>`
-        SELECT json_extract(value_json, '$.leafTarget') AS target FROM state_events
-        WHERE chat_id = ${chatId} AND key = 'lcm.settings' AND slot_id IS NULL ORDER BY seq DESC LIMIT 1`.pipe(
-        Effect.map(([row]) => row?.target ?? 600)
-      )
-
 /**
  * The reply prefix to pin for a job: the reply that triggered it, else the closest selected reply
  * above `leafSlotId`. The search is bounded, so it costs the same in a chat of any length; a job

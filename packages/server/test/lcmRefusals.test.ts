@@ -151,34 +151,43 @@ lcmTest("a judge that fails or gives no verdict fails the attempt: nothing unche
 )
 
 lcmTest(
-  "Retry, and Retry with… another model, make a new job over a failed summary's range and keep the failure",
+  "Retry with… another model is a request the next reply answers: the click starts nothing, the failure stays",
   (server) =>
     Effect.gen(function* () {
       const h = yield* lcmHarness(server, { summarizer: () => ({ status: 400 }) })
-      yield* h.enqueue(0, 5)
+      const first = yield* h.enqueue(0, 5)
       yield* h.drain
       const [failed] = yield* summaries(h.dataDir, h.chat.id)
       assert.strictEqual(failed!.status, "failed")
-      const { jobId } = yield* h.api.RetrySummary({ summaryId: failed!.id as never, model: h.fallback })
+      const calls = () => requestsTo(h.mock, "fallback-model").length
+      const asked = (target: { _tag: "Summary"; summaryId: never } | { _tag: "Job"; jobId: string }) =>
+        h.api.SetSummaryRerun({ chatId: h.chat.id, target, requested: true, model: h.fallback })
+      yield* asked({ _tag: "Summary", summaryId: failed!.id as never })
+      const jobs = () =>
+        fixtureSql(h.dataDir, [
+          { sql: "SELECT count(*) AS n FROM summarization_jobs WHERE chat_id=?", params: [h.chat.id] }
+        ]).pipe(Effect.map(([rows]) => Number(rows![0]!.n)))
+      assert.strictEqual(yield* jobs(), 1, "the click made no job")
+      assert.lengthOf(yield* h.plan("completion"), 0, "a finished job does not answer it")
+      // The reply's pass does: one interactive-free job on the chosen model, and the row is withdrawn.
+      const made = yield* h.plan("reply")
+      assert.lengthOf(made, 1)
       const job = yield* h.runNext
-      assert.strictEqual(job!.id, jobId)
-      assert.strictEqual(job!.requestClass, "interactive")
+      assert.strictEqual(job!.id, made[0]!.id)
       const rows = yield* summaries(h.dataDir, h.chat.id)
       assert.deepStrictEqual(
         rows.map((r) => r.status),
         ["failed", "complete"]
       )
       assert.strictEqual(rows[1]!.content, "A fallback summary.")
-      // Retrying it again while its job is live brings that job forward instead of making another.
-      const again = yield* h.api.RetrySummary({ summaryId: failed!.id as never })
-      const [live] = (yield* fixtureSql(h.dataDir, [
-        {
-          sql: "SELECT count(*) AS n FROM summarization_jobs WHERE chat_id=? AND status='pending'",
-          params: [h.chat.id]
-        }
-      ]))[0]!
-      assert.strictEqual(Number(live!.n), 1)
-      assert.notStrictEqual(again.jobId, jobId)
+      assert.strictEqual(calls(), 1)
+      const [left] = yield* fixtureSql(h.dataDir, [
+        { sql: "SELECT count(*) AS n FROM summary_reruns WHERE chat_id=?", params: [h.chat.id] }
+      ])
+      assert.strictEqual(Number(left![0]!.n), 0)
+      // A job that gave up is retried the same way (the first job's row, which ended in the failed summary).
+      yield* asked({ _tag: "Job", jobId: first.id })
+      assert.lengthOf(yield* h.plan("reply"), 1)
     })
 )
 
@@ -215,6 +224,9 @@ lcmTest(
       const refused = yield* generate("Go on.")
       const marked = yield* settle(refused.slotId, (v) => v.status === "complete" && v.mark === "refused")
       assert.include(marked.content, PLANTED, "the text stays")
+      // The path the client reads carries the mark too.
+      const path = yield* h.api.ReadPath({ chatId: h.chat.id, leafSlotId: null, range: { _tag: "Bottom" }, limit: 5 })
+      assert.strictEqual(path.entries.find((e) => e.slotId === refused.slotId)?.version.mark, "refused")
       // Retry with… the fallback model: its reply is clear, so it is not marked.
       yield* h.api.Regenerate({ slotId: refused.slotId, expectedRowVersion: refused.rowVersion, model: h.fallback })
       const retried = yield* settle(refused.slotId, (v) => v.id !== marked.id && v.status === "complete")

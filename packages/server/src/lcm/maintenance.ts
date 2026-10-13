@@ -23,6 +23,8 @@ interface PlannedCondensation {
   readonly level: number
   readonly children: ReadonlyArray<string>
   readonly absorbedParentId?: string
+  /** The summary the user asked to have made again, which this condensation does. */
+  readonly rerunOf?: string
   readonly eager: boolean
 }
 
@@ -57,6 +59,8 @@ export interface MaintenanceInput {
   readonly held: ReadonlyArray<{ readonly level: number; readonly from: number; readonly to: number }>
   /** Whether some slot of the L1's chain still has content to summarize. */
   readonly hasContent: (summary: Summary) => boolean
+  /** Summaries the user asked to have made again with the next reply: done whether or not they are stale. */
+  readonly forced: ReadonlySet<string>
   /** Which maintenance this pass may start: only a reply starts re-summarizing; a finished job only continues it. */
   readonly reason: "reply" | "completion"
   readonly settings: MaintenanceSettings
@@ -162,10 +166,27 @@ export const planMaintenance = (input: MaintenanceInput): Maintenance => {
     }
     if (worst !== "current") return worst
     if (held(s.level, s)) return "stuck"
-    if (!busy(s.level, s)) recreate.push({ level: s.level, children: chosen, eager: false })
+    if (!busy(s.level, s) && !input.forced.has(s.id)) recreate.push({ level: s.level, children: chosen, eager: false })
     return "pending"
   }
   for (const s of stale) standingOf(s)
+
+  // What the user asked for is done as asked: a new summary over the same chain, hand-written or not,
+  // stale or fresh, whatever stands against it. Only a reply starts it.
+  if (input.reason === "reply")
+    for (const id of input.forced) {
+      const s = byId.get(id)
+      if (!s || s.status === "superseded") continue
+      if (s.level === 1) {
+        if (input.hasContent(s)) resummarize.add(s.id)
+        continue
+      }
+      const children = s.children.map((c) => {
+        const part = byId.get(c.summaryId)
+        return (part && optionsFor(part, s.level)[0]?.id) ?? c.summaryId
+      })
+      recreate.push({ level: s.level, children, eager: false, rerunOf: s.id })
+    }
 
   // --- Ordinary condensation: unconsumed fresh summaries of one level, adjacent, in fanout-sized groups.
   const condensations: Array<PlannedCondensation> = [...recreate]

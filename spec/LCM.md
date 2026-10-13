@@ -45,7 +45,7 @@ Implemented in [ARCHITECTURE §16](../ARCHITECTURE.md#16-lcm-hierarchical-summar
 reference-harness records event ids only. A covered edit or delete leaves its summaries as they were, and they stay current (ref §5; §8 item 7).
 Implemented in [ARCHITECTURE §16](../ARCHITECTURE.md#16-lcm-hierarchical-summaries): nullable effective version and amendment pins, child revision pins, recursive derived freshness, and stale fallback only without a fresh candidate at that endpoint. Edits, swipes, deletes, restores and hides change no summary rows.
 - Implemented (ARCHITECTURE §16, condensation and stale summaries): re-summarizing writes a new summary row over the same chain with the new inputs; the stale one stays, and a swipe back makes it fresh again with no request. It runs only with the next reply, for summaries the path uses, once per affected summary; a hand-written stale summary is flagged, never replaced.
-- Re-summarizing runs at `idle` class (§2.5). "Re-summarize now" is `RetrySummary`, at `interactive`. **[P]** A rerun request recorded for "redo with the next reply" (slice 7) is not built here.
+- Re-summarizing runs at `idle` class (§2.5). "Re-summarize" and Retry are rerun requests (`SetSummaryRerun`) that the next reply's planning answers; no click generates (ARCHITECTURE §16).
 - Implemented: a summary whose selected revision the user wrote isn't replaced automatically when it goes stale; it's flagged (`SummaryPlan.flagged`). See question 2.
 - **[D]** Deleting a message for good keeps an empty placeholder, so summaries over it stay valid (DESIGN §6.2). **[P]** Those summaries are stale, since the slot has no effective version, and their text may still describe it. The summary panel says so and offers Re-summarize.
 - **[P]** A version still generating has no effective version, so the planner doesn't summarize a chain while a covered slot is generating.
@@ -112,7 +112,7 @@ reference-harness has no idle class or idle gate for summaries (ref §4 Idle-tim
 
 reference-harness synthesizes a placeholder from a failed job row and never persists it. It omits the range's raw messages at once, treats the failure as terminal, and needs an operator to delete the job row before the range can be retried (ref §6).
 - **[D]** Failure placeholders are part of the baseline (DESIGN §8).
-- Implemented (ARCHITECTURE §16): a failed L1 is a summary row with status `failed`, its inputs, its error and an empty revision; it is held while its inputs are unchanged, stale after an edit or swipe inside the range, and Retry and Retry with… are actions on it (`RetrySummary`). A failed row never replaces messages that fit.
+- Implemented (ARCHITECTURE §16): a failed L1 is a summary row with status `failed`, its inputs, its error and an empty revision; it is held while its inputs are unchanged, stale after an edit or swipe inside the range, and Retry and Retry with… are rerun requests on it (`SetSummaryRerun`). A failed row never replaces messages that fit.
 - **[P]** Not yet built: the assembler rendering the marker ("[Messages 40–52 could not be summarized.]") when the window would pass `window_max`, and the failure on the divider, the rail and the summary panel (slice 7). Today such a range is left out through the stepped fallback with the "not summarized yet" report.
 - A failed condensation leaves its children selected, as in reference-harness. It gets a failed row too, so it shows (implemented, slice 5).
 
@@ -172,7 +172,7 @@ Moved to [ARCHITECTURE §16](../ARCHITECTURE.md#16-lcm-hierarchical-summaries), 
 - `FailSummaryAttempt`: a retry (pending, the error, the rejected draft) or the end (a failed summary with its error); the rollout finished either way.
 - `ReleaseSummaryJob` (drain, attempt refunded), `ResetSummaryJobs` (startup), `EscalateSummaryJob`.
 - `EditSummary` (a user revision, selected, committing its draft, with `expectedRowVersion`) and `SelectSummaryRevision`.
-- `AdoptImportedSummary` (§2.7), `RetrySummary` (a failed or stale summary, at `interactive`, optionally with a model), `SetBackfill`.
+- `AdoptImportedSummary` (§2.7), `SetSummaryRerun` (implemented: a request the next reply answers, optionally with a model), `SetBackfill`.
 
 **Readers:**
 - The `lcm` stage's sources inside `AssembleContext`, in the same read transaction: summaries ending on the path, their freshness, their batches.

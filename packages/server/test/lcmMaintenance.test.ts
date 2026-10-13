@@ -53,6 +53,7 @@ const plan = (summaries: ReadonlyArray<Candidate>, extra: Partial<MaintenanceInp
     layer: summaries.filter((s) => s.status !== "superseded"),
     liveJobs: [],
     held: [],
+    forced: new Set<string>(),
     hasContent: () => true,
     reason: "reply",
     settings,
@@ -176,6 +177,23 @@ describe("stale summaries", () => {
     const result = plan([mine, l1[1]!, top], { layer: [top] })
     assert.sameMembers([...result.flagged], [mine.id, top.id])
     assert.lengthOf(result.condensations, 0)
+  })
+})
+
+describe("requests to redo", () => {
+  it("redoes a fresh or hand-written level-1 summary on a reply, and a condensation over its best parts, not on a finished job", () => {
+    const l1 = row(2)
+    const mine = { ...l1[0]!, origin: "user" as const }
+    const top = summary(2, 1, 4, { kids: [mine.id, l1[1]!.id] })
+    const forced = new Set([mine.id, top.id])
+    const result = plan([mine, l1[1]!, top], { forced })
+    assert.deepStrictEqual(result.resummarize, [mine.id])
+    assert.deepStrictEqual(result.condensations, [
+      { level: 2, children: [mine.id, l1[1]!.id], eager: false, rerunOf: top.id }
+    ])
+    const later = plan([mine, l1[1]!, top], { forced, reason: "completion" })
+    assert.lengthOf(later.resummarize, 0)
+    assert.lengthOf(later.condensations, 0)
   })
 })
 

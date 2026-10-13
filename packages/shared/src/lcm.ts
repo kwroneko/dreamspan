@@ -171,7 +171,13 @@ export class LcmApi extends RpcGroup.make(
    * is generated now: the request waits for the planner, which no click ever runs.
    */
   Rpc.make("SetSummaryRerun", {
-    payload: { chatId: ChatId, target: RerunTarget, requested: Schema.Boolean },
+    payload: {
+      chatId: ChatId,
+      target: RerunTarget,
+      requested: Schema.Boolean,
+      /** "Retry with…": the model that does it again; otherwise the chat's summarizer. */
+      model: Schema.optionalKey(ModelChoice)
+    },
     success: Schema.Void,
     error: Schema.Union([NotFound, ServerError])
   }),
@@ -215,14 +221,5 @@ export class LcmApi extends RpcGroup.make(
     payload: { summaryId: SummaryId, draftId: Schema.String, expectedRowVersion: Schema.Int },
     success: Draft,
     error: Schema.Union([NotFound, StaleWrite, ServerError])
-  }),
-  /**
-   * Retry, or "Retry with…" a model of the user's: a new job over the summary's own range at
-   * the interactive class. The failed or stale summary stays; the new one is a new row.
-   */
-  Rpc.make("RetrySummary", {
-    payload: { summaryId: SummaryId, model: Schema.optionalKey(ModelChoice) },
-    success: Schema.Struct({ jobId: Schema.String }),
-    error: Schema.Union([NotFound, ServerError])
   })
 ) {}

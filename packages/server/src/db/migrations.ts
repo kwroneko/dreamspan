@@ -174,6 +174,10 @@ export const migrations = {
   "0028_condensation": runAll([
     // A job started because the layer was over its budget (spec/LCM.md §2.6); its episode goes on to the target.
     `ALTER TABLE summarization_jobs ADD COLUMN eager INTEGER NOT NULL DEFAULT 0 CHECK (eager IN (0, 1))`
+  ]),
+  "0029_rerun_models": runAll([
+    // "Retry with…": the model a rerun request wants for the new job.
+    `ALTER TABLE summary_reruns ADD COLUMN model_json TEXT CHECK (model_json IS NULL OR json_valid(model_json))`
   ])
 }
 

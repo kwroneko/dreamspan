@@ -1,6 +1,7 @@
 import { ChatId, SlotId } from "@rp/shared/chat.ts"
 import { UserId } from "@rp/shared/domain.ts"
 import { SummaryId, SummaryInput } from "@rp/shared/lcm.ts"
+import { ModelChoice } from "@rp/shared/lcmSettings.ts"
 import { Schema } from "effect"
 
 export const SummaryJob = Schema.Struct({
@@ -29,7 +30,10 @@ export const SummaryChunk = Schema.Struct({
   target: Schema.Int,
   clipTokens: Schema.optionalKey(Schema.Int),
   /** Writes a stale summary's range again: an overlapping completed range does not make it redundant. */
-  refresh: Schema.optionalKey(Schema.Boolean)
+  refresh: Schema.optionalKey(Schema.Boolean),
+  /** Rerun requests this chunk answers; the enqueue withdraws them, whether it makes the job or finds one. */
+  rerunIds: Schema.optionalKey(Schema.Array(Schema.String)),
+  model: Schema.optionalKey(ModelChoice)
 })
 /** A condensation to enqueue: its parts in order, the level it makes, and the parent it absorbs into, if any. */
 export const PlannedJob = Schema.Struct({
@@ -37,7 +41,9 @@ export const PlannedJob = Schema.Struct({
   children: Schema.Array(SummaryId),
   target: Schema.Int,
   eager: Schema.Boolean,
-  absorbedParentId: Schema.optionalKey(SummaryId)
+  absorbedParentId: Schema.optionalKey(SummaryId),
+  rerunIds: Schema.optionalKey(Schema.Array(Schema.String)),
+  model: Schema.optionalKey(ModelChoice)
 })
 export type PlannedJob = typeof PlannedJob.Type
 export const SummaryPlan = Schema.Struct({

@@ -7,13 +7,16 @@ import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import type { ContextSnapshot } from "../assembler/types.ts"
 import { ownedModel } from "./generationSettings.ts"
-import { fallbackModel, type JobError, prefixAt, recordFailedSummary, targetFor } from "./lcmFailures.ts"
+import { fallbackModel, type JobError, prefixAt, recordFailedSummary } from "./lcmFailures.ts"
 import { readSummary } from "./lcmReads.ts"
 import type { Summary } from "@rp/shared/lcm.ts"
 import { jobColumns, type SummaryJob } from "./lcmJobs.ts"
 import { lcmPath, slotInput } from "./lcmPath.ts"
 import { NotFound, StorageError, type WriteOps } from "./ops.ts"
 import { transaction } from "./tx.ts"
+
+/** How far above the leaf a plan's triggering reply may be; replies are the last few messages. */
+const MAX_TRIGGER_DISTANCE = 5000
 
 export const makeLcmQueueHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
@@ -47,17 +50,24 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* lcmPath(sql, userId, chatId, leafSlotId, leafSlotId)
         if (triggerVersionId) {
-          const [version] = yield* sql<{
-            slot_id: string
-          }>`SELECT v.slot_id FROM versions v JOIN slots s ON s.id=v.slot_id
-            WHERE v.id=${triggerVersionId} AND s.chat_id=${chatId}`
-          if (!version) return yield* new NotFound({ entity: "summary trigger", id: triggerVersionId })
+          // The reply that triggered the plan lies on the leaf's path: walk up from the leaf by the
+          // difference of their depths, which is a few steps however long the chat is.
+          const [near] = yield* sql<{ ok: number }>`
+            WITH RECURSIVE up(id, n) AS (
+              SELECT l.id, 0 FROM slots l WHERE l.id = ${leafSlotId} AND l.chat_id = ${chatId}
+              UNION ALL SELECT s.parent_slot_id, u.n + 1 FROM slots s JOIN up u ON u.id = s.id
+                WHERE s.parent_slot_id IS NOT NULL AND u.n < ${MAX_TRIGGER_DISTANCE}
+            )
+            SELECT EXISTS (SELECT 1 FROM versions v JOIN up ON up.id = v.slot_id WHERE v.id = ${triggerVersionId}) AS ok`
+          if (!near?.ok) return yield* new NotFound({ entity: "summary trigger", id: triggerVersionId })
         }
         const prefix = yield* prefixAt(sql, chatId, leafSlotId, triggerVersionId)
         const valid = lineageValidator(sql, userId)
         const batchId = uuidv7(),
           now = Date.now(),
           result: SummaryJob[] = []
+        const withdraw = (ids: ReadonlyArray<string> | undefined) =>
+          ids?.length ? sql`DELETE FROM summary_reruns WHERE chat_id = ${chatId} AND id IN ${sql.in(ids)}` : Effect.void
         for (const chunk of chunks) {
           const first = chunk.inputs[0]?.slotId,
             last = chunk.inputs.at(-1)?.slotId
@@ -80,7 +90,10 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
             let covered = false
             for (const owner of owners)
               if ((yield* valid(owner.id)) && (yield* readSummary(sql, userId, owner.id)).fresh) covered = true
-            if (covered) continue
+            if (covered) {
+              yield* withdraw(chunk.rerunIds)
+              continue
+            }
           }
           const ids = new Set(chain.map((s) => s.id))
           const near = yield* sql<{
@@ -99,7 +112,10 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
               break
             }
           }
-          if (overlap) continue
+          if (overlap) {
+            yield* withdraw(chunk.rerunIds)
+            continue
+          }
           const id = uuidv7()
           yield* sql`INSERT INTO summarization_jobs ${sql.insert({
             id,
@@ -112,10 +128,12 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
             clip_tokens: chunk.clipTokens ?? 6000,
             prefix_json: prefix,
             batch_id: batchId,
+            model_json: chunk.model ? JSON.stringify(chunk.model) : null,
             request_class: requestClass,
             created_at: now,
             updated_at: now
           })}`
+          yield* withdraw(chunk.rerunIds)
           result.push(yield* get(userId, id))
         }
         return result
@@ -130,6 +148,8 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
         const prefix = yield* prefixAt(sql, chatId, leafSlotId, triggerVersionId)
         const now = Date.now(),
           result: SummaryJob[] = []
+        const withdraw = (ids: ReadonlyArray<string> | undefined) =>
+          ids?.length ? sql`DELETE FROM summary_reruns WHERE chat_id = ${chatId} AND id IN ${sql.in(ids)}` : Effect.void
         for (const job of planned) {
           const children: Array<Summary> = []
           for (const id of job.children) children.push(yield* readSummary(sql, userId, id))
@@ -169,7 +189,10 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
                 SELECT ${last.lastSlotId} UNION ALL SELECT s.parent_slot_id FROM slots s JOIN up u ON u.id = s.id WHERE s.parent_slot_id IS NOT NULL
               ) SELECT id FROM up)
             LIMIT 1`
-          if (clash) continue
+          if (clash) {
+            yield* withdraw(job.rerunIds)
+            continue
+          }
           const id = uuidv7()
           yield* sql`INSERT INTO summarization_jobs ${sql.insert({
             id,
@@ -183,11 +206,13 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
             input_child_ids: JSON.stringify(job.children),
             absorbed_parent_id: job.absorbedParentId ?? null,
             eager: job.eager ? 1 : 0,
+            model_json: job.model ? JSON.stringify(job.model) : null,
             prefix_json: prefix,
             request_class: requestClass,
             created_at: now,
             updated_at: now
           })}`
+          yield* withdraw(job.rerunIds)
           result.push(yield* get(userId, id))
         }
         return result
@@ -320,47 +345,6 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
           best_effort_draft = ${draft ?? null}, rollout_id = NULL, result_summary_id = ${summaryId}, updated_at = ${now}
           WHERE id = ${jobId}`
       }).pipe(transaction(sql, "FailSummaryAttempt")),
-    RetrySummary: ({ userId, summaryId, model }) =>
-      Effect.gen(function* () {
-        const summary = yield* readSummary(sql, userId, summaryId)
-        if (model && !(yield* ownedModel(sql, userId, model.connection, model.model)))
-          return yield* new NotFound({ entity: "model", id: model.model })
-        // A job already live for the range is the retry: it is brought forward, on the chosen model.
-        const [live] = yield* sql<{ id: string; status: string }>`
-          SELECT id, status FROM summarization_jobs WHERE chat_id = ${summary.chatId} AND level = ${summary.level}
-            AND first_slot_id = ${summary.firstSlotId} AND last_slot_id = ${summary.lastSlotId} AND status IN ('pending', 'processing')`
-        if (live) {
-          yield* sql`UPDATE summarization_jobs SET request_class = 'interactive', updated_at = ${Date.now()},
-            model_json = CASE WHEN status = 'pending' AND ${model ? 1 : 0} THEN ${JSON.stringify(model ?? null)} ELSE model_json END
-            WHERE id = ${live.id}`
-          return { jobId: live.id }
-        }
-        const chain = yield* lcmPath(sql, userId, summary.chatId, summary.lastSlotId, summary.firstSlotId)
-        if (chain[0]?.id !== summary.firstSlotId || chain.some((s) => s.generating || s.merged))
-          return yield* reject("RetrySummary", "The summary's range is not ready to summarize.")
-        if (summary.level === 1 && chain.every((s) => s.versionId === null))
-          return yield* reject("RetrySummary", "Nothing in the summary's range can be summarized now.")
-        const id = uuidv7(),
-          now = Date.now()
-        yield* sql`INSERT INTO summarization_jobs ${sql.insert({
-          id,
-          chat_id: summary.chatId,
-          level: summary.level,
-          first_slot_id: summary.firstSlotId,
-          last_slot_id: summary.lastSlotId,
-          leaf_slot_id: summary.lastSlotId,
-          target_token_count: yield* targetFor(sql, summary.chatId, summary.level),
-          clip_tokens: 6000,
-          input_child_ids: summary.level > 1 ? JSON.stringify(summary.children.map((c) => c.summaryId)) : null,
-          prefix_json: yield* prefixAt(sql, summary.chatId, summary.lastSlotId),
-          model_json: model ? JSON.stringify(model) : null,
-          batch_id: uuidv7(),
-          request_class: "interactive",
-          created_at: now,
-          updated_at: now
-        })}`
-        return { jobId: id }
-      }).pipe(transaction(sql, "RetrySummary")),
     ReleaseSummaryJob: ({ userId, jobId, attempt }) =>
       Effect.gen(function* () {
         yield* get(userId, jobId, attempt, true)

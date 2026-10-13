@@ -334,3 +334,41 @@ lcmTest(
     }),
   { pool: true, timeout: 90_000 }
 )
+
+lcmTest(
+  "a request to redo a summary is answered by the next reply, hand-written or fresh, and then withdrawn",
+  (server) =>
+    Effect.gen(function* () {
+      const h = yield* lcmHarness(server, { messages: 8, settings: { fanout: 3 }, summarizer: numbered() })
+      yield* pairs(h, 2)
+      const [mine, other] = yield* rowsOf(h)
+      const summary = yield* h.api.GetSummary({ summaryId: mine!.id as never })
+      yield* h.api.EditSummary({
+        summaryId: summary.id,
+        content: "My own summary.",
+        expectedRowVersion: summary.rowVersion,
+        commitDraft: null
+      })
+      const ask = (id: unknown, requested = true) =>
+        h.api.SetSummaryRerun({ chatId: h.chat.id, target: { _tag: "Summary", summaryId: id as never }, requested })
+      const calls = () => requestsTo(h.mock, "primary-model").length
+      yield* ask(mine!.id)
+      yield* ask(other!.id)
+      yield* ask(other!.id, false)
+      assert.strictEqual(calls(), 2, "asking starts no generation")
+      assert.lengthOf(yield* h.plan("completion"), 0)
+      const made = yield* h.plan("reply")
+      assert.lengthOf(made, 1, "only the request that still stands")
+      yield* h.drain
+      assert.strictEqual(calls(), 3)
+      const rows = yield* rowsOf(h)
+      assert.lengthOf(rows, 3)
+      assert.strictEqual(rows[2]!.origin, "generated")
+      assert.strictEqual(rows[0]!.content, "My own summary.", "the user's text is kept")
+      const [left] = yield* fixtureSql(h.dataDir, [
+        { sql: "SELECT count(*) AS n FROM summary_reruns WHERE chat_id=?", params: [h.chat.id] }
+      ])
+      assert.strictEqual(Number(left![0]!.n), 0)
+      assert.lengthOf(yield* h.plan("reply"), 0)
+    })
+)

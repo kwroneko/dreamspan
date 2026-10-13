@@ -363,11 +363,6 @@ export class WriteOps extends RpcGroup.make(
     },
     error: Schema.Union([StorageError, NotFound])
   }),
-  Rpc.make("RetrySummary", {
-    payload: { userId: UserId, summaryId: SummaryId, model: Schema.optionalKey(ModelChoice) },
-    success: Schema.Struct({ jobId: Schema.String }),
-    error: Schema.Union([StorageError, NotFound])
-  }),
   Rpc.make("ReleaseSummaryJob", {
     payload: { userId: UserId, jobId: Schema.String, attempt: Schema.Int },
     error: Schema.Union([StorageError, NotFound])
@@ -411,7 +406,13 @@ export class WriteOps extends RpcGroup.make(
   }),
   /** Asks for a summary or a failed job to be done again with the next reply, or withdraws the ask. */
   Rpc.make("SetSummaryRerun", {
-    payload: { userId: UserId, chatId: ChatId, target: RerunTarget, requested: Schema.Boolean },
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      target: RerunTarget,
+      requested: Schema.Boolean,
+      model: Schema.optionalKey(ModelChoice)
+    },
     error: Schema.Union([StorageError, NotFound])
   }),
   /** Answers once the writer has opened the database and run migrations. */
