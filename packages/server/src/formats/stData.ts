@@ -47,6 +47,7 @@ interface StSummarySettings {
 }
 
 export interface StSettings {
+  readonly selectedPreset: string | null
   readonly personas: ReadonlyArray<StPersona>
   /** Lorebooks ST applies to every chat (`world_info_settings.world_info.globalSelect`). */
   readonly globalWorlds: ReadonlyArray<string>
@@ -87,6 +88,7 @@ const numberOr = (value: unknown, fallback: number) =>
 
 export const parseStSettings = (bytes: Uint8Array, issues: ReportBuilder): StSettings => {
   const settings = object(parseJson(bytes, stDataLimits.maxSettingsBytes, defaultLimits, issues))
+  const selectedPreset = object(settings.oai_settings).preset_settings_openai
   const powerUser = object(settings.power_user)
   const names = object(powerUser.personas)
   const descriptions = object(powerUser.persona_descriptions)
@@ -129,6 +131,7 @@ export const parseStSettings = (bytes: Uint8Array, issues: ReportBuilder): StSet
     )
   }
   return {
+    selectedPreset: typeof selectedPreset === "string" && selectedPreset !== "" ? bounded(selectedPreset) : null,
     personas,
     globalWorlds: strings(worldInfo.globalSelect, 1000),
     characterWorlds: (Array.isArray(worldInfo.charLore) ? worldInfo.charLore : []).slice(0, 10_000).flatMap((entry) => {

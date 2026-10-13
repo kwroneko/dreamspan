@@ -1,0 +1,129 @@
+// Synthetic folder imports exercised through HTTP and the next-context reader.
+import { assert, layer } from "@effect/vitest"
+import { Effect } from "effect"
+import { client, serverLayer, testConfig } from "./support/config.ts"
+import { card, encode, header, jsonl, message } from "./support/stFolder.ts"
+import { importStFolder } from "./support/stUpload.ts"
+
+const folder = (descriptionChars = 20_000) =>
+  new Map([
+    ["settings.json", encode({ oai_settings: { preset_settings_openai: "Roomy" } })],
+    ["characters/Mira.png", card("Mira", "Hello.", {}, { description: "x".repeat(descriptionChars) })],
+    ["OpenAI Settings/Roomy.json", encode({ openai_max_context: 32000, openai_max_tokens: 300 })],
+    [
+      "chats/Mira/Imported.jsonl",
+      jsonl([
+        header({}),
+        ...Array.from({ length: 50 }, (_, i) =>
+          message({
+            name: i % 2 ? "Sam" : "Mira",
+            user: i % 2 === 1,
+            minute: i,
+            mes: `Turn ${i}: ${"a".repeat(100)}`
+          })
+        )
+      ])
+    ]
+  ])
+
+layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "90 seconds" })("ST selected preset", (it) => {
+  for (const chars of [14_000, 20_000]) {
+    it.effect(`keeps all 50 imported messages in context with a ${chars / 4}-token card`, () =>
+      Effect.gen(function* () {
+        const api = yield* client()
+        // The first import has no setting row; the second has an explicitly unset default.
+        if (chars === 20_000) yield* api.SetGenerationDefaults({ defaults: { model: null, preset: null } })
+        const { report } = yield* importStFolder(folder(chars))
+        const chat = (yield* api.ListChats({ limit: 10, before: null }))[0]!
+        const path = yield* api.ReadPath({ chatId: chat.id, leafSlotId: null, range: { _tag: "Bottom" }, limit: 100 })
+        assert.lengthOf(path.entries, 50)
+        const next = yield* api.GetNextContext({ chatId: chat.id, leafSlotId: null })
+        assert.strictEqual(next.historyStart?.depth, 0)
+        assert.strictEqual(next.historyStart?.slotId, path.entries[0]!.slotId)
+        assert.deepInclude(next.budget, {
+          maximum: 32000,
+          target: 25600,
+          responseReserve: 300,
+          presetName: "Roomy",
+          builtinPreset: false
+        })
+        assert.isAbove(next.budget!.nonHistoryTokens, chars / 4)
+        assert.isBelow(next.budget!.nonHistoryTokens, chars / 4 + 200)
+        const defaults = yield* api.GetGenerationDefaults()
+        assert.isNotNull(defaults.preset)
+        assert.deepInclude(
+          report.issues.find((i) => i.code === "st.preset_default"),
+          {
+            path: "settings.json",
+            level: "info",
+            code: "st.preset_default",
+            message: "ST used preset “Roomy”; it is now your default preset."
+          }
+        )
+      })
+    )
+  }
+  it.effect("preserves a chosen default and names the preset ST used in the report", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      yield* importStFolder(folder())
+      const chosen = (yield* api.ListLibrary({ kind: "preset" })).find((ref) => ref.label === "Roomy")!.id
+      yield* api.SetGenerationDefaults({ defaults: { model: null, preset: chosen } })
+      const files = folder()
+      files.set("settings.json", encode({ oai_settings: { preset_settings_openai: "Other" } }))
+      files.set("OpenAI Settings/Other.json", encode({ openai_max_context: 64000 }))
+      const { report } = yield* importStFolder(files)
+      assert.strictEqual((yield* api.GetGenerationDefaults()).preset, chosen)
+      assert.deepInclude(
+        report.issues.find((i) => i.code === "st.preset_kept"),
+        {
+          path: "settings.json",
+          level: "info",
+          code: "st.preset_kept",
+          message: "ST used preset “Other”; your existing default preset was kept."
+        }
+      )
+      // Re-importing the selected preset still cannot replace the user's choice.
+      assert.strictEqual(
+        (yield* importStFolder(files)).report.issues.filter((i) => i.code === "st.preset_default").length,
+        0
+      )
+      assert.strictEqual((yield* api.GetGenerationDefaults()).preset, chosen)
+    })
+  )
+  it.effect("reports a selected file absent from the folder, including the built-in budget on failure", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      yield* api.SetGenerationDefaults({ defaults: { model: null, preset: null } })
+      const files = folder()
+      files.set("settings.json", encode({ oai_settings: { preset_settings_openai: "Missing" } }))
+      const { report } = yield* importStFolder(files)
+      assert.isNull((yield* api.GetGenerationDefaults()).preset)
+      assert.deepInclude(
+        report.issues.find((i) => i.code === "st.preset_missing"),
+        {
+          path: "settings.json",
+          level: "warning",
+          code: "st.preset_missing",
+          message:
+            "ST used preset “Missing”, but its preset file has not been imported from this folder. Your default preset was left unchanged."
+        }
+      )
+      const chat = (yield* api.ListChats({ limit: 10, before: null }))[0]!
+      const next = yield* api.GetNextContext({ chatId: chat.id, leafSlotId: null })
+      assert.isNull(next.historyStart)
+      assert.deepInclude(next.budget, {
+        maximum: 4095,
+        target: 3276,
+        responseReserve: 300,
+        presetName: "Default",
+        builtinPreset: true
+      })
+      assert.isAbove(next.budget!.nonHistoryTokens, 5000)
+      const chosen = (yield* api.ListLibrary({ kind: "preset" })).find((ref) => ref.label === "Roomy")!.id
+      yield* api.SetGenerationDefaults({ defaults: { model: null, preset: chosen } })
+      assert.isTrue((yield* importStFolder(files)).report.issues.some((i) => i.code === "st.preset_missing"))
+      assert.strictEqual((yield* api.GetGenerationDefaults()).preset, chosen)
+    })
+  )
+})

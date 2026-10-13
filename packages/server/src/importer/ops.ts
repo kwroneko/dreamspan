@@ -116,6 +116,7 @@ const StPersona = Schema.Struct({
 export type StPersona = typeof StPersona.Type
 
 export class StSettings extends Schema.Class<StSettings>("StSettings")({
+  selectedPreset: Schema.NullOr(Schema.String),
   personas: Schema.Array(StPersona),
   globalWorlds: Schema.Array(Schema.String),
   characterWorlds: Schema.Array(Schema.Struct({ card: Schema.String, worlds: Schema.Array(Schema.String) })),

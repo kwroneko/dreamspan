@@ -228,6 +228,7 @@ describe("ST settings and groups", () => {
       issues
     )
     expect(settings).toEqual({
+      selectedPreset: null,
       personas: [
         { avatar: "a.png", name: "Ann", description: "Ann.", position: 4, depth: 1, role: 2 },
         { avatar: "b.png", name: "", description: "No name.", position: 0, depth: 2, role: 0 }
