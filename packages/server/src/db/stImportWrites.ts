@@ -55,6 +55,8 @@ interface RecordPayload {
    * slots on the path to it are the file's, whatever the user changed in them since.
    */
   readonly prior?: string | null
+  /** This pass matched a deleted subtree root; later live additions remain behind it. */
+  readonly branchDeleted?: boolean
 }
 
 export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: ReturnType<typeof makeBin>) {
@@ -67,8 +69,8 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
     )
 
   const ownedSlot = (chatId: string, slotId: string) =>
-    sql<{ id: string; depth: number; lane_id: string }>`
-      SELECT id, depth, lane_id FROM slots WHERE id = ${slotId} AND chat_id = ${chatId}`.pipe(
+    sql<{ id: string; depth: number; lane_id: string; deleted_at: number | null }>`
+      SELECT id, depth, lane_id, deleted_at FROM slots WHERE id = ${slotId} AND chat_id = ${chatId}`.pipe(
       Effect.flatMap(([row]) => (row ? Effect.succeed(row) : Effect.fail(new NotFound({ entity: "slot", id: slotId }))))
     )
 
@@ -268,7 +270,8 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
             WHERE id = ${entity} AND owner_user_id = ${userId} AND kind = 'card' AND deleted_at IS NULL`
             if (row?.n !== 1) return yield* new NotFound({ entity: "entity", id: entity })
           }
-          let parent = input.parentSlotId === null ? null : yield* ownedSlot(chatId, input.parentSlotId)
+          let parent: { id: string; depth: number; lane_id: string } | null =
+            input.parentSlotId === null ? null : yield* ownedSlot(chatId, input.parentSlotId)
           const laneId =
             parent?.lane_id ??
             (yield* sql<{
@@ -297,6 +300,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
           let matching = input.matching
           let added = 0
           let differing = 0
+          let branchDeleted = payload.branchDeleted ?? false
           let firstAdded: string | null = null
           const slotIds: Array<SlotId> = []
           for (const message of messages) {
@@ -332,15 +336,21 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
                 created_at: number
                 writer: string
                 ordinal: number
+                slot_purged: number
+                version_purged: number
+                branch_deleted: number
               }>`
                 SELECT s.id AS slot_id, s.depth, s.context_excluded AS hidden, v.id = s.selected_version_id AS selected,
                   v.content, v.created_at, v.writer, v.ordinal,
+                  s.purged_at IS NOT NULL AS slot_purged, v.purged_at IS NOT NULL AS version_purged,
+                  s.branch_deleted,
                   coalesce((SELECT h.content FROM version_history h WHERE h.version_id = v.id ORDER BY h.id LIMIT 1),
                     v.content) AS original
                 FROM slots s JOIN versions v ON v.slot_id = s.id
                 WHERE ${parent === null ? sql`s.chat_id = ${chatId} AND s.depth = 0` : sql`s.parent_slot_id = ${parent.id}`}
                 ORDER BY s.id, v.ordinal`
               const same = (row: (typeof children)[number], version: (typeof message.versions)[number]) =>
+                row.version_purged === 0 &&
                 row.writer === writer &&
                 row.created_at === version.at &&
                 (row.content === version.content || row.original === version.content)
@@ -361,21 +371,33 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
               const exact = candidates.find(alike)
               // Otherwise the slot an earlier import of this file matched or made here, whatever
               // the user selected, hid or deleted in it since: the user's choices stay theirs.
+              // A purged slot has no text left to match. Only this file's recorded path
+              // may identify its placeholder, with the retained timestamp and writer.
+              const purged = children.filter(
+                (row) =>
+                  row.slot_purged === 1 &&
+                  row.writer === writer &&
+                  message.versions.some((version) => row.created_at === version.at)
+              )
               const mine =
-                exact !== undefined || candidates.length === 0
+                (exact !== undefined && purged.length === 0) || (candidates.length === 0 && purged.length === 0)
                   ? undefined
                   : yield* priorAt(parent === null ? 0 : parent.depth + 1)
               const earlier = mine === undefined ? undefined : candidates.find((slot) => slot[0]!.slot_id === mine)
+              const placeholder = mine === undefined ? undefined : purged.find((row) => row.slot_id === mine)
               // A branch merged into another file's chat is that file's only where it reads
               // the same: a branch from another swipe, or with messages hidden only in it,
               // diverges there, so its own path keeps what ST had on it.
               const own = exact ?? earlier ?? (input.strict ? undefined : candidates[0])
-              const match = own?.[0]
-              if (own !== undefined && match !== undefined) {
-                if (exact === undefined) differing++
-                let next = Math.max(...own.map((row) => row.ordinal)) + 1
-                for (const version of message.versions) {
-                  if (!own.some((row) => same(row, version))) yield* insertVersion(match.slot_id, next++, version)
+              const match = placeholder ?? own?.[0]
+              if (match !== undefined) {
+                branchDeleted ||= match.branch_deleted === 1
+                if (exact === undefined && placeholder === undefined) differing++
+                if (own !== undefined && match.slot_purged === 0) {
+                  let next = Math.max(...own.map((row) => row.ordinal)) + 1
+                  for (const version of message.versions) {
+                    if (!own.some((row) => same(row, version))) yield* insertVersion(match.slot_id, next++, version)
+                  }
                 }
                 parent = { id: match.slot_id, depth: match.depth, lane_id: laneId }
                 slotIds.push(match.slot_id as SlotId)
@@ -410,9 +432,10 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
           // A new chat's leaf follows its messages, so a chat whose import stops shows them,
           // unless the user moved it: only from unset, or where the import last put it.
           let advanced = payload.advanced ?? null
-          if (input.advanceLeaf && slotIds.length > 0) {
+          if (input.advanceLeaf && !branchDeleted && slotIds.length > 0) {
             const moved = yield* sql<{ id: string }>`UPDATE chats SET active_leaf_slot_id = ${slotIds.at(-1)!}
               WHERE id = ${chatId} AND (active_leaf_slot_id IS NULL OR active_leaf_slot_id = ${advanced ?? ""})
+              AND EXISTS (SELECT 1 FROM slots WHERE id = ${slotIds.at(-1)!} AND deleted_at IS NULL)
               RETURNING id`
             if (moved.length > 0) {
               yield* bin.drafts.moveComposer(userId, chatId, chat.active_leaf_slot_id, slotIds.at(-1)!)
@@ -423,6 +446,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
             ...payload,
             firstAdded: payload.firstAdded ?? firstAdded,
             advanced,
+            branchDeleted,
             last: slotIds.at(-1) ?? payload.last ?? null
           }
           yield* sql`UPDATE jobs SET updated_at = ${Date.now()}, payload_json = ${JSON.stringify(progress)}
@@ -437,7 +461,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
         const chat = yield* ownedChat(userId, chatId)
         const payload = yield* leased(userId, input.recordId, chatId, input.lease)
         if (input.position !== null) yield* ownedSlot(chatId, input.position)
-        if (input.leaf !== null) yield* ownedSlot(chatId, input.leaf)
+        const target = input.leaf === null ? null : yield* ownedSlot(chatId, input.leaf)
         if (input.end !== null) yield* ownedSlot(chatId, input.end)
         const notes: Record<string, EntityId> = {
           ...input.previousNotes,
@@ -466,11 +490,32 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
           delete notes[kind]
         }
         for (const event of input.events) yield* insertEvent(userId, chatId, input.position, event)
-        // Only from where this file's import left it: a chat continued here keeps its own.
+        // Deleting the file's end moves the leaf to its nearest live ancestor. An import
+        // continues from there too, walking individual deletions without restoring them.
+        // A whole deleted branch stays a barrier, including when its root was purged.
+        let previousLeaf = payload.end ?? payload.advanced ?? null
+        let blocked = payload.branchDeleted ?? false
+        if (previousLeaf !== null) {
+          const [previous] = yield* sql<{ leaf: string | null; blocked: number }>`
+            WITH RECURSIVE up(id, parent, deleted, barrier, n) AS (
+              SELECT id, parent_slot_id, deleted_at IS NOT NULL, branch_deleted, 0
+              FROM slots WHERE id = ${previousLeaf} AND chat_id = ${chatId}
+              UNION ALL
+              SELECT s.id, s.parent_slot_id, s.deleted_at IS NOT NULL, s.branch_deleted, up.n + 1
+              FROM slots s JOIN up ON s.id = up.parent WHERE up.deleted AND NOT up.barrier
+            )
+            SELECT (SELECT id FROM up WHERE NOT deleted ORDER BY n LIMIT 1) AS leaf,
+              EXISTS (SELECT 1 FROM up WHERE barrier) AS blocked`
+          previousLeaf = previous?.leaf ?? null
+          blocked ||= previous?.blocked === 1
+        }
+        // Only from where this file left it (or deletion relocated it). A chat continued
+        // here keeps its own leaf and composer; an unchanged file has no leaf to move to.
         const leaf = chat.active_leaf_slot_id
         const moveLeaf =
-          input.leaf !== null &&
-          (leaf === null || leaf === (payload.end ?? null) || leaf === (payload.advanced ?? null))
+          !blocked &&
+          target?.deleted_at === null &&
+          (leaf === null || leaf === previousLeaf || leaf === (payload.advanced ?? null))
         // A chat of the import's own loses its unfinished mark, unless the user renamed it.
         if (!payload.merged && payload.title !== undefined) {
           yield* sql`UPDATE chats SET title = ${payload.title}
@@ -524,7 +569,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
         yield* current(userId, lease, recordId)
         const payload = JSON.parse(row.payload_json) as RecordPayload
         const prior = payload.last ?? payload.end ?? null
-        yield* sql`UPDATE jobs SET payload_json = ${JSON.stringify({ ...payload, lease, prior })}, updated_at = ${Date.now()}
+        yield* sql`UPDATE jobs SET payload_json = ${JSON.stringify({ ...payload, lease, prior, branchDeleted: false })}, updated_at = ${Date.now()}
           WHERE id = ${recordId}`
         return {
           recordId,
