@@ -368,10 +368,12 @@ export function makeSummarizer(pool: boolean) {
               if (p.at <= Date.now()) {
                 due.delete(chatId)
                 yield* plan(p.position, false, p.reason).pipe(
-                  Effect.catch((error) => {
+                  Effect.catchCause((cause) => {
+                    if (Cause.hasInterruptsOnly(cause)) return Effect.interrupt
                     // Keep the already-frozen reply authorization; an enqueue race never authorizes later edits.
-                    if (error._tag === "StorageError") schedule(p.position, "completion")
-                    return Effect.logWarning("LCM plan will retry", error)
+                    const error = Cause.findErrorOption(cause)
+                    if (error._tag === "Some" && error.value._tag === "StorageError") schedule(p.position, "completion")
+                    return Effect.logWarning("LCM planning failed", cause)
                   })
                 )
               }
@@ -385,13 +387,23 @@ export function makeSummarizer(pool: boolean) {
                 })
                 .pipe(
                   Effect.as(true),
-                  Effect.catch((error) => Effect.logWarning("LCM reconciliation failed", error).pipe(Effect.as(false)))
+                  Effect.catchCause((cause) =>
+                    Cause.hasInterruptsOnly(cause)
+                      ? Effect.interrupt
+                      : Effect.logWarning("LCM reconciliation failed", cause).pipe(Effect.as(false))
+                  )
                 )
               if (!reconciled) continue
               for (let n = 0; n < 2; n++) {
                 const job = yield* writer
                   .ClaimSummaryJob({ userId })
-                  .pipe(Effect.catch((error) => Effect.logWarning("LCM claim failed", error).pipe(Effect.as(null))))
+                  .pipe(
+                    Effect.catchCause((cause) =>
+                      Cause.hasInterruptsOnly(cause)
+                        ? Effect.interrupt
+                        : Effect.logWarning("LCM claim failed", cause).pipe(Effect.as(null))
+                    )
+                  )
                 if (!job) break
                 running.set(job.id, job)
                 yield* changed(job.chatId)

@@ -4,7 +4,10 @@ import type { ServerResponse } from "node:http"
 import { it } from "@effect/vitest"
 import { NewVersion, type SlotId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
-import { Effect } from "effect"
+import { Context, Effect, Scope } from "effect"
+import { ChatHub } from "../../src/chat/ChatHub.ts"
+import { SummaryChecks } from "../../src/lcm/OutputChecks.ts"
+import { Providers } from "../../src/providers/Providers.ts"
 import { Reader, Writer } from "../../src/db/Database.ts"
 import type { SummaryJob } from "../../src/db/lcmJobs.ts"
 import type { AppendResult } from "../../src/db/ops.ts"
@@ -48,15 +51,45 @@ export const lastText = (request: Recorded) => {
  */
 export const lcmServer = (config: AppConfigShape = testConfig(), pool = false) => {
   let captured: Summarizer["Service"] | undefined
+  let startAfterReply = false
   const layer = Layer.effect(
     Summarizer,
-    Effect.tap(makeSummarizer(pool), (s) =>
-      Effect.sync(() => {
-        captured = s
+    Effect.gen(function* () {
+      const context = (yield* Effect.context<
+        Reader | Writer | Providers | SummaryChecks | ChatHub | Scope.Scope
+      >()).pipe(Context.pick(Reader, Writer, Providers, SummaryChecks, ChatHub, Scope.Scope))
+      captured = yield* makeSummarizer(pool)
+      const startPool = makeSummarizer(true).pipe(
+        Effect.provide(context),
+        Effect.map((s) => {
+          captured = s
+        })
+      )
+      return Summarizer.of({
+        afterReply: (position) =>
+          Effect.gen(function* () {
+            if (startAfterReply) {
+              startAfterReply = false
+              yield* startPool.pipe(Effect.orDie)
+            }
+            yield* captured!.afterReply(position)
+          }),
+        beforeReply: (position) => captured!.beforeReply(position),
+        planNow: (position, reason) => captured!.planNow(position, reason),
+        runJob: (job) => captured!.runJob(job)
       })
-    )
+    })
   )
-  return { config, layer: serverLayer(config, undefined, layer), summarizer: () => captured! }
+  return {
+    config,
+    layer: serverLayer(config, undefined, layer),
+    summarizer: () => captured!,
+    /** Defer the pool until the next reply finishes; synthetic fixture jobs have no live registry entry. */
+    startPoolAfterReply: () =>
+      Effect.sync(() => {
+        startAfterReply = true
+      })
+  }
 }
 
 /** A test with its own server, data directory and summarizer. */
