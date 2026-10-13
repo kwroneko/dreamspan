@@ -1,6 +1,7 @@
 import type { SummaryPrefix } from "../lcm/prefix.ts"
 // The assembler's data, all plain JSON (DATA-MODEL §7.1; ARCHITECTURE §15).
 import type { ContextDisplay, ContextMessage, ContextSource, SourceActivation } from "@rp/shared/inspectorApi.ts"
+import { ContextBudget } from "@rp/shared/inspectorApi.ts"
 import type { ContextIssue } from "@rp/shared/chat.ts"
 import type { FrozenValues } from "@rp/shared/macros/expand.ts"
 import type { VariableEffect } from "@rp/shared/macros/variables.ts"
@@ -189,6 +190,7 @@ export interface HistoryStart {
 
 /** A context as built, stored as its rollout's frozen snapshot (DATA-MODEL §7.1). */
 export interface ContextSnapshot {
+  readonly contextBudget?: ContextBudget
   readonly historyStart?: HistoryStart
   readonly historyMove?: "initial" | "maximum" | "budget" | "restore" | "unchanged"
   readonly historyBudget?: number
@@ -464,5 +466,7 @@ export interface ModelInput {
 /** Why a context couldn't be built: the generation fails with this, as its failed version shows. */
 export class AssemblyFailed extends Schema.TaggedError<AssemblyFailed>()("AssemblyFailed", {
   reason: Schema.Literals(["no_model", "budget", "invalid_document"]),
-  message: Schema.String
+  message: Schema.String,
+  contextBudget: Schema.optionalKey(ContextBudget),
+  preset: Schema.optionalKey(Schema.Struct({ ref: Schema.NullOr(Schema.String), scope: Schema.String }))
 }) {}

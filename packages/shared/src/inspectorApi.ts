@@ -141,8 +141,28 @@ export const CacheWarmth = Schema.Struct({
 })
 export type CacheWarmth = typeof CacheWarmth.Type
 
+/** Estimated budget for the next context, with raw history excluded from its fixed cost. */
+export const ContextBudget = Schema.Struct({
+  /** Effective context window and stepped target, both including the response reserve. */
+  maximum: Schema.Int,
+  target: Schema.Int,
+  responseReserve: Schema.Int,
+  /** Estimated tokens for fixed content, examples, summaries and framing, excluding raw history. */
+  nonHistoryTokens: Schema.Int
+})
+export type ContextBudget = typeof ContextBudget.Type
+
 /** The next request boundary, also available before a first send or without a cache TTL. */
 export const NextContext = Schema.Struct({
+  budget: Schema.optionalKey(
+    Schema.NullOr(
+      Schema.Struct({
+        ...ContextBudget.fields,
+        presetName: Schema.String,
+        builtinPreset: Schema.Boolean
+      })
+    )
+  ),
   warmth: Schema.NullOr(CacheWarmth),
   leafSlotId: Schema.NullOr(Schema.String),
   historyStart: Schema.NullOr(Schema.Struct({ slotId: Schema.NullOr(Schema.String), depth: Schema.Int })),

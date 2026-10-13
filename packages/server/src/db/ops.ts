@@ -1193,6 +1193,12 @@ export class WriteOps extends RpcGroup.make(
     success: Schema.Void,
     error: Schema.Union([ImportLeaseLost, StorageError])
   }),
+  /** Adopts ST's selected preset only while the user has no stored default. */
+  Rpc.make("StImportDefaultPreset", {
+    payload: { userId: UserId, importId: Schema.String, refId: RefId },
+    success: Schema.Boolean,
+    error: Schema.Union([ImportLeaseLost, NotFound, StorageError])
+  }),
   Rpc.make("StImportBegin", {
     payload: { userId: UserId, importId: Schema.String },
     success: Schema.Void,

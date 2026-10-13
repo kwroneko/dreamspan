@@ -17,6 +17,7 @@ import { docHash, searchText } from "./documents.ts"
 import { ImportLeaseLost, NotFound, ST_CHAT_RECORD, ST_IMPORT_RUN, type StImportNote, WriteOps } from "./ops.ts"
 import { checkStateReferences } from "./stateRefs.ts"
 import { transaction } from "./tx.ts"
+import { DEFAULT_PRESET, ownedPreset } from "./generationSettings.ts"
 
 /** A message as the format worker wrote it (formats/stChat.ts). */
 const Message = Schema.Struct({
@@ -189,6 +190,16 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
     )
 
   const handlers = {
+    StImportDefaultPreset: ({ userId, importId, refId }) =>
+      Effect.gen(function* () {
+        yield* current(userId, importId, importId)
+        if (!(yield* ownedPreset(sql, userId, refId))) return yield* new NotFound({ entity: "preset", id: refId })
+        const changed = yield* sql`INSERT INTO user_settings (user_id,key,value_json)
+          VALUES (${userId},${DEFAULT_PRESET},${JSON.stringify(refId)})
+          ON CONFLICT(user_id,key) DO UPDATE SET value_json=excluded.value_json
+          WHERE json_type(user_settings.value_json) = 'null' RETURNING user_id`
+        return changed.length > 0
+      }).pipe(transaction(sql, "StImportDefaultPreset")),
     StImportSummarySettings: ({ userId, importId, prompt, settings }) =>
       Effect.gen(function* () {
         yield* current(userId, importId, importId)

@@ -87,19 +87,46 @@ function MessageList({
   const { entries } = view
   useRenderCount("listRenders")
   const lcm = view.lcm?.enabled === true && view.lcm.leafSlotId === view.leafSlotId ? view.lcm : null
+  const history = view.history?.leafSlotId === view.leafSlotId ? view.history : null
+  const through = lcm ? (lcm.cursorDepth < 0 ? null : lcm.cursorDepth) : (history?.summarizedThrough ?? null)
+  const outOfContext = (entry: PathEntry) =>
+    !entry.contextExcluded &&
+    history?.historyStart != null &&
+    entry.depth < history.historyStart.depth &&
+    entry.depth > (through ?? -1)
+  const budget = history?.budget
+  let historyDivider = -1
+  if (budget && entries.length > 0) {
+    const start = history.historyStart
+    if (start && (entries.some(outOfContext) || (view.older !== null && start.depth > (through ?? -1) + 1))) {
+      const at = entries.findIndex((e) => !e.contextExcluded && e.depth >= start.depth && e.depth > (through ?? -1))
+      if (at < 0) {
+        if (view.newer === null) historyDivider = entries.length
+      } else if (at > 0 || entries[at]!.depth === start.depth) historyDivider = at
+    } else if (budget.nonHistoryTokens + budget.responseReserve > budget.maximum && view.newer === null) {
+      historyDivider = entries.length
+    }
+  }
   // The divider is a row of its own, before the entry at `divider` (-1: none).
   const divider = boundaryIndex(view) ?? -1
-  const rowCount = entries.length + (divider >= 0 ? 1 : 0)
-  /** The entry shown at a row, or null for the divider. */
-  const entryAt = (row: number) => (row === divider ? null : entries[divider >= 0 && row > divider ? row - 1 : row]!)
+  const rows = Array.from({ length: entries.length + 1 }, (_, index) => [
+    ...(index === divider ? [{ kind: "lcm" as const }] : []),
+    ...(index === historyDivider ? [{ kind: "history" as const }] : []),
+    ...(index < entries.length ? [{ kind: "message" as const, entry: entries[index]! }] : [])
+  ]).flat()
+  const rowCount = rows.length
   /** The row an entry is shown at. */
-  const rowOf = (entry: number) => (divider >= 0 && entry >= divider ? entry + 1 : entry)
+  const rowOf = (entry: number) =>
+    entry + (divider >= 0 && entry >= divider ? 1 : 0) + (historyDivider >= 0 && entry >= historyDivider ? 1 : 0)
   // eslint-disable-next-line react-hooks/incompatible-library -- this component opts out of memoization above
   const virtualizer = useVirtualizer({
     count: rowCount,
     getScrollElement: () => parent.current,
-    estimateSize: (row) => (row === divider ? 44 : 180),
-    getItemKey: (row) => entryAt(row)?.slotId ?? "lcm-boundary",
+    estimateSize: (row) => (rows[row]!.kind === "message" ? 180 : rows[row]!.kind === "lcm" ? 44 : 64),
+    getItemKey: (row) => {
+      const item = rows[row]!
+      return item.kind === "message" ? item.entry.slotId : `${item.kind}-boundary`
+    },
     overscan: 4,
     anchorTo: "end",
     followOnAppend: view.follow,
@@ -198,13 +225,6 @@ function MessageList({
   })
 
   // What the summaries cover, for the marks on the messages and the rail.
-  const through = lcm
-    ? lcm.cursorDepth < 0
-      ? null
-      : lcm.cursorDepth
-    : view.history?.leafSlotId === view.leafSlotId
-      ? view.history.summarizedThrough
-      : null
   const railRows = useCoverage(session, entries, lcm, view.lcmVersion, rail && lcm !== null)
   const showRail = rail && lcm !== null
   const railLevels = Math.max(
@@ -231,7 +251,7 @@ function MessageList({
           <CoverageRail entries={entries} rows={railRows} lcm={lcm} position={position} onOpen={onOpenSummaries} />
         )}
         {items.map((item) => {
-          const entry = entryAt(item.index)
+          const row = rows[item.index]!
           return (
             <div
               key={item.key}
@@ -243,21 +263,22 @@ function MessageList({
                 ...(railPx > 0 ? { left: railPx, width: `calc(100% - ${railPx}px)` } : {})
               }}
             >
-              {entry === null ? (
+              {row.kind === "lcm" ? (
                 <LcmBoundary lcm={lcm!} onOpen={() => onOpenSummaries(null)} />
+              ) : row.kind === "history" ? (
+                <Alert>
+                  Not sent: the preset “{budget!.presetName}”{budget!.builtinPreset ? " (ST’s built-in default)" : ""}{" "}
+                  allows {budget!.maximum.toLocaleString()} tokens, targets {budget!.target.toLocaleString()}, reserves{" "}
+                  {budget!.responseReserve.toLocaleString()} for the reply, and the card, prompts and other fixed
+                  content take ~{budget!.nonHistoryTokens.toLocaleString()}.
+                </Alert>
               ) : (
                 <Message
-                  summarized={!entry.contextExcluded && through !== null && entry.depth <= through}
-                  outOfContext={
-                    !entry.contextExcluded &&
-                    view.history?.leafSlotId === view.leafSlotId &&
-                    view.history.historyStart !== null &&
-                    entry.depth < view.history.historyStart.depth &&
-                    entry.depth > (through ?? -1)
-                  }
-                  entry={entry}
+                  summarized={!row.entry.contextExcluded && through !== null && row.entry.depth <= through}
+                  outOfContext={outOfContext(row.entry)}
+                  entry={row.entry}
                   session={session}
-                  highlighted={entry.slotId === anchor}
+                  highlighted={row.entry.slotId === anchor}
                   branchLeaf={view.leafSlotId === view.chat?.activeLeafSlotId ? null : view.leafSlotId}
                   onBranch={onBranch}
                 />
