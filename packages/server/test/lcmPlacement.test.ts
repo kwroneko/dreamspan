@@ -216,3 +216,57 @@ it.effect("Anthropic and Responses inspection keep summary provenance after syst
     }
   })
 )
+
+for (const placement of [null, "before_main_prompt", "after_main_prompt"] as const)
+  it.effect(`beside-main summary precedes history when main follows it: ${placement ?? "default"}`, () =>
+    Effect.gen(function* () {
+      const input = fixture(
+        { mode: "section", section: placement ?? "after_main_prompt", role: "user" },
+        {
+          prompts: [{ identifier: "main", role: "system", content: "FIXED MAIN", system_prompt: true }],
+          prompt_order: [
+            {
+              character_id: 100001,
+              order: [
+                { identifier: "chatHistory", enabled: true },
+                { identifier: "main", enabled: true }
+              ]
+            }
+          ]
+        }
+      )
+      const snapshot = yield* assembleFixture({ ...input, ...(placement === null ? { notes: [] } : {}) })
+      const messages = snapshot.request.messages
+      assert.strictEqual(
+        messages.find((m) => m.content.includes("LAYER CONTENT"))!.role,
+        placement === null ? "system" : "user"
+      )
+      assert.isBelow(
+        messages.findIndex((m) => m.content.includes("LAYER CONTENT")),
+        messages.findIndex((m) => m.content.includes("RAW FIRST"))
+      )
+    })
+  )
+
+it.effect("the first ST summary keeps framing inside the example reservation", () =>
+  Effect.gen(function* () {
+    const input = fixture({ mode: "none" }, { openai_max_context: 512, openai_max_tokens: 1 })
+    const make = (count: number) =>
+      assembleFixture({
+        ...input,
+        notes: [],
+        summaries: count ? [summary(0)] : [],
+        cards: [
+          {
+            entity: "mira",
+            doc: cardDoc("Mira", { mes_example: "<START>\nUser: " + "x".repeat(1524) + "\nMira: Example response." })
+          }
+        ]
+      })
+    const examples = (s: Effect.Success<ReturnType<typeof make>>) =>
+      s.request.messages.filter((m) => m.content.includes("Example response."))
+    const before = examples(yield* make(0))
+    assert.isNotEmpty(before)
+    assert.deepStrictEqual(examples(yield* make(1)), before)
+  })
+)

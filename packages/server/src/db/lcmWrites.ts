@@ -132,6 +132,7 @@ export const makeLcmWriteHandlers = (bin: Bin) =>
             yield* sql`INSERT INTO summary_inputs ${sql.insert({ summary_id: id, ordinal, slot_id: input.slotId, version_id: input.versionId, amend_count: input.amendCount })}`
           for (const [ordinal, child] of children.entries())
             yield* sql`INSERT INTO summary_parents ${sql.insert({ summary_id: id, ordinal, parent_id: child.summaryId, parent_revision_id: child.revisionId })}`
+          yield* sql`UPDATE summaries SET sealed = 1 WHERE id = ${id}`
           for (const summaryId of supersede)
             yield* sql`UPDATE summaries SET status = 'superseded', row_version = row_version + 1 WHERE id = ${summaryId}`
           const updated =

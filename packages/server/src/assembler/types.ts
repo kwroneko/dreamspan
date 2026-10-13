@@ -11,7 +11,7 @@ import type { PresetDoc } from "@rp/shared/docs/preset.ts"
 import { Schema } from "effect"
 
 /** Bump whenever identical inputs would assemble differently. Missing means version 0. */
-export const ASSEMBLER_VERSION = 12
+export const ASSEMBLER_VERSION = 13
 
 export type Role = "system" | "user" | "assistant"
 

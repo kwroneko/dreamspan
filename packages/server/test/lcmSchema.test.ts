@@ -129,7 +129,7 @@ beforeEach(() => {
 })
 
 afterEach(() => db.close())
-const summary = (c: ReturnType<typeof chat>, input: ReturnType<typeof slot>, level = 1) => {
+const summary = (c: ReturnType<typeof chat>, input: ReturnType<typeof slot>, level = 1, last = input, count = 1) => {
   const summaryId = id("sum"),
     revisionId = id("rev")
   tx(() => {
@@ -139,17 +139,19 @@ const summary = (c: ReturnType<typeof chat>, input: ReturnType<typeof slot>, lev
       summaryId
     )
     run(
-      `INSERT INTO summaries(id,chat_id,level,selected_revision_id,first_slot_id,last_slot_id,slot_count,created_at) VALUES(?,?,?,?,?,?,1,1)`,
+      `INSERT INTO summaries(id,chat_id,level,selected_revision_id,first_slot_id,last_slot_id,slot_count,created_at) VALUES(?,?,?,?,?,?,?,1)`,
       summaryId,
       c.chatId,
       level,
       revisionId,
       input.slotId,
-      input.slotId
+      last.slotId,
+      count
     )
   })
   return { summaryId, revisionId }
 }
+const seal = (s: ReturnType<typeof summary>) => run("UPDATE summaries SET sealed=1 WHERE id=?", s.summaryId)
 const setup = () => {
   const c = chat(user())
   const s = slot(c, null)
@@ -180,7 +182,9 @@ describe("0019 lineage and retention triggers", () => {
     input(a, s, null)
   })
   it("checks child revision ownership on insert", () => {
-    const { a, b } = setup()
+    const { a, b, s } = setup()
+    input(a, s)
+    seal(a)
     expect(() => parent(b, a, b.revisionId)).toThrow(/revision of its child/)
     parent(b, a)
   })
@@ -188,12 +192,14 @@ describe("0019 lineage and retention triggers", () => {
     it(`${table} cannot be updated`, () => {
       const { a, b, s } = setup()
       input(a, s)
+      seal(a)
       parent(b, a)
       expect(() => run(`UPDATE ${table} SET ordinal = ordinal + 1`)).toThrow(/immutable/)
     })
     it(`${table} cannot be deleted while its chat exists`, () => {
       const { a, b, s } = setup()
       input(a, s)
+      seal(a)
       parent(b, a)
       expect(() => run(`DELETE FROM ${table}`)).toThrow(/as long as/)
     })
@@ -236,6 +242,7 @@ describe("0019 lineage and retention triggers", () => {
     it(`${table} refuses INSERT OR REPLACE with recursive triggers off`, () => {
       const { a, b, s } = setup()
       input(a, s)
+      seal(a)
       parent(b, a)
       expect(get<{ recursive_triggers: number }>("PRAGMA recursive_triggers").recursive_triggers).toBe(0)
       expect(() => run(`INSERT OR REPLACE INTO ${table} SELECT * FROM ${table}`)).toThrow(/cannot be replaced/)
@@ -243,6 +250,7 @@ describe("0019 lineage and retention triggers", () => {
   it("chat deletion cascades through retained summaries, revisions, lineage and search", () => {
     const { c, s, a, b } = setup()
     input(a, s)
+    seal(a)
     parent(b, a)
     run(`DELETE FROM chats WHERE id=?`, c.chatId)
     for (const table of ["summaries", "summary_revisions", "summary_inputs", "summary_parents"])
@@ -268,5 +276,141 @@ describe("foreign keys", () => {
       }
     }
     expect(unindexed).toEqual([])
+  })
+})
+
+describe("review: malformed lineage", () => {
+  it("rejects endpoints on different branches despite matching depths", () => {
+    const { c, s } = setup(),
+      middle = slot(c, s),
+      fork = slot(c, s),
+      end = slot(c, middle)
+    expect(() =>
+      tx(() => {
+        run(
+          "INSERT INTO summary_revisions(id,summary_id,content,token_count,origin,created_at) VALUES('bad-rev','bad','bad',1,'generated',1)"
+        )
+        run(
+          "INSERT INTO summaries(id,chat_id,level,selected_revision_id,first_slot_id,last_slot_id,slot_count,created_at) VALUES('bad',?,1,'bad-rev',?,?,2,1)",
+          c.chatId,
+          fork.slotId,
+          end.slotId
+        )
+      })
+    ).toThrow()
+  })
+  it("rejects self-reference and children at the same or higher level", () => {
+    const { c, s, a, b } = setup()
+    input(a, s)
+    seal(a)
+    parent(b, a)
+    seal(b)
+    const same = summary(c, s, 2),
+      higher = summary(c, s, 1)
+    expect(() => parent(same, b)).toThrow(/strictly lower/)
+    expect(() => parent(higher, b)).toThrow(/strictly lower/)
+    expect(() => parent(same, same)).toThrow(/strictly lower/)
+    parent(same, a)
+    seal(same)
+  })
+  it("rejects inputs beyond the declared chain", () => {
+    const { c, s, a } = setup(),
+      after = slot(c, s)
+    input(a, s)
+    expect(() =>
+      run(
+        "INSERT INTO summary_inputs(summary_id,ordinal,slot_id,version_id) VALUES(?,1,?,?)",
+        a.summaryId,
+        after.slotId,
+        after.versionId
+      )
+    ).toThrow()
+  })
+})
+
+describe("lineage publication", () => {
+  it("seals complete ordered inputs, rejects gaps and wrong endpoints, and cannot reopen", () => {
+    const { c, s } = setup(),
+      middle = slot(c, s),
+      end = slot(c, middle),
+      fork = slot(c, s)
+    const a = summary(c, s, 1, end, 3)
+    expect(() => seal(a)).toThrow(/entire chain/)
+    expect(() => input(a, middle)).toThrow(/follow.*chain/)
+    input(a, s)
+    expect(() => seal(a)).toThrow(/entire chain/)
+    const add = (ordinal: number, v: typeof s) =>
+      run(
+        "INSERT INTO summary_inputs(summary_id,ordinal,slot_id,version_id) VALUES(?,?,?,?)",
+        a.summaryId,
+        ordinal,
+        v.slotId,
+        v.versionId
+      )
+    expect(() => add(2, end)).toThrow(/follow.*chain/)
+    expect(() => add(1, end)).toThrow(/follow.*chain/)
+    add(1, middle)
+    add(2, end)
+    seal(a)
+    expect(() => run("UPDATE summaries SET sealed=0 WHERE id=?", a.summaryId)).toThrow(/only summary/)
+    expect(() => add(3, slot(c, end))).toThrow()
+    const wrong = summary(c, s, 1, middle, 2)
+    input(wrong, s)
+    run(
+      "INSERT INTO summary_inputs(summary_id,ordinal,slot_id,version_id) VALUES(?,1,?,?)",
+      wrong.summaryId,
+      fork.slotId,
+      fork.versionId
+    )
+    expect(() => seal(wrong)).toThrow(/entire chain/)
+  })
+  it("seals only a complete lower-level partition and closes child appends", () => {
+    const { c, s, a } = setup(),
+      next = slot(c, s),
+      last = slot(c, next)
+    input(a, s)
+    seal(a)
+    const b = summary(c, next),
+      extra = summary(c, last),
+      high = summary(c, s, 2, next, 2)
+    input(b, next)
+    seal(b)
+    input(extra, last)
+    seal(extra)
+    expect(() => seal(high)).toThrow(/entire chain/)
+    expect(() => parent(high, b)).toThrow(/partition/)
+    parent(high, a)
+    expect(() => seal(high)).toThrow(/entire chain/)
+    run(
+      "INSERT INTO summary_parents(summary_id,parent_id,ordinal,parent_revision_id) VALUES(?,?,1,?)",
+      high.summaryId,
+      b.summaryId,
+      b.revisionId
+    )
+    seal(high)
+    expect(() =>
+      run(
+        "INSERT INTO summary_parents(summary_id,parent_id,ordinal,parent_revision_id) VALUES(?,?,2,?)",
+        high.summaryId,
+        extra.summaryId,
+        extra.revisionId
+      )
+    ).toThrow(/closed/)
+  })
+  it("cannot bypass publication by inserting an already sealed summary", () => {
+    const { c, s } = setup()
+    expect(() =>
+      tx(() => {
+        run(
+          "INSERT INTO summary_revisions(id,summary_id,content,token_count,origin,created_at) VALUES('sealed-rev','sealed','bad',1,'generated',1)"
+        )
+        run(
+          "INSERT INTO summaries(id,chat_id,level,selected_revision_id,first_slot_id,last_slot_id,slot_count,sealed,created_at) VALUES('sealed',?,1,'sealed-rev',?,?,1,1,1)",
+          c.chatId,
+          s.slotId,
+          s.slotId
+        )
+      })
+    ).toThrow(/sealed after insertion/)
   })
 })

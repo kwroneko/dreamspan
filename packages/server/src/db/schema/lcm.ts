@@ -22,7 +22,7 @@ export const lcm = [
         .replace("'truncated', 'superseded'", "'truncated', 'superseded', 'failed'")
         .replace(
           "rollout_id TEXT",
-          "error_json TEXT CHECK (error_json IS NULL OR json_valid(error_json)), batch_id TEXT, rollout_id TEXT"
+          "sealed INTEGER NOT NULL DEFAULT 0 CHECK (sealed IN (0, 1)), error_json TEXT CHECK (error_json IS NULL OR json_valid(error_json)), batch_id TEXT, rollout_id TEXT"
         )
     if (statement.startsWith("CREATE TABLE summary_revisions"))
       return statement.replace("'user', 'changeset'", "'user', 'changeset', 'imported'")
@@ -50,6 +50,52 @@ export const lcm = [
   `CREATE TRIGGER summary_parents_own_revision BEFORE INSERT ON summary_parents
     WHEN (SELECT summary_id FROM summary_revisions WHERE id = NEW.parent_revision_id) IS NOT NEW.parent_id
     BEGIN ${raise("lineage must pin a revision of its child")}; END`,
+  `CREATE TRIGGER summaries_chain BEFORE INSERT ON summaries WHEN NOT EXISTS (
+    WITH RECURSIVE chain(id, parent_slot_id, n) AS (
+      SELECT id, parent_slot_id, 1 FROM slots WHERE id = NEW.last_slot_id AND chat_id = NEW.chat_id
+      UNION ALL SELECT s.id, s.parent_slot_id, c.n + 1 FROM slots s JOIN chain c ON s.id = c.parent_slot_id
+        WHERE c.n < NEW.slot_count AND s.chat_id = NEW.chat_id
+    ) SELECT 1 FROM chain WHERE id = NEW.first_slot_id AND n = NEW.slot_count
+      AND NOT EXISTS (SELECT 1 FROM chain c JOIN slot_parents p ON p.slot_id = c.id)
+    ) BEGIN ${raise("summary endpoints must form its declared primary-parent chain")}; END`,
+  `CREATE TRIGGER summaries_start_unsealed BEFORE INSERT ON summaries WHEN NEW.sealed <> 0
+    BEGIN ${raise("summary lineage must be sealed after insertion")}; END`,
+  ...["summary_inputs", "summary_parents"].map(
+    (table) =>
+      `CREATE TRIGGER ${table}_closed BEFORE INSERT ON ${table}
+      WHEN (SELECT sealed FROM summaries WHERE id = NEW.summary_id) = 1
+      BEGIN ${raise("sealed summary lineage is closed")}; END`
+  ),
+  `CREATE TRIGGER summary_inputs_chain BEFORE INSERT ON summary_inputs WHEN NOT EXISTS (
+    SELECT 1 FROM summaries s JOIN slots i ON i.id = NEW.slot_id
+    WHERE s.id = NEW.summary_id AND s.level = 1 AND NEW.ordinal >= 0 AND NEW.ordinal < s.slot_count
+      AND NEW.ordinal = (SELECT count(*) FROM summary_inputs WHERE summary_id = s.id)
+      AND CASE WHEN NEW.ordinal = 0 THEN NEW.slot_id = s.first_slot_id ELSE
+        i.parent_slot_id = (SELECT slot_id FROM summary_inputs WHERE summary_id = s.id AND ordinal = NEW.ordinal - 1) END
+    ) BEGIN ${raise("summary inputs must follow their declared chain in order")}; END`,
+  `CREATE TRIGGER summary_parents_chain BEFORE INSERT ON summary_parents WHEN NOT EXISTS (
+    SELECT 1 FROM summaries s JOIN summaries child ON child.id = NEW.parent_id
+      JOIN slots first ON first.id = child.first_slot_id
+    WHERE s.id = NEW.summary_id AND s.level > 1 AND child.level < s.level AND child.id <> s.id
+      AND child.sealed = 1 AND child.status <> 'failed'
+      AND NEW.ordinal >= 0 AND NEW.ordinal = (SELECT count(*) FROM summary_parents WHERE summary_id = s.id)
+      AND CASE WHEN NEW.ordinal = 0 THEN child.first_slot_id = s.first_slot_id ELSE
+        first.parent_slot_id = (SELECT prev.last_slot_id FROM summary_parents p JOIN summaries prev ON prev.id = p.parent_id
+          WHERE p.summary_id = s.id AND p.ordinal = NEW.ordinal - 1) END
+    ) BEGIN ${raise("summary children must partition its chain at strictly lower levels")}; END`,
+  `CREATE TRIGGER summaries_seal BEFORE UPDATE OF sealed ON summaries WHEN OLD.sealed = 0 AND NEW.sealed = 1 AND NOT coalesce((
+    CASE WHEN NEW.level = 1 THEN
+      (SELECT count(*) FROM summary_inputs WHERE summary_id = NEW.id) = NEW.slot_count
+      AND (SELECT slot_id FROM summary_inputs WHERE summary_id = NEW.id ORDER BY ordinal DESC LIMIT 1) = NEW.last_slot_id
+      AND NOT EXISTS (SELECT 1 FROM summary_parents WHERE summary_id = NEW.id)
+    ELSE
+      (SELECT coalesce(sum(child.slot_count),0) FROM summary_parents p JOIN summaries child ON child.id = p.parent_id
+        WHERE p.summary_id = NEW.id) = NEW.slot_count
+      AND (SELECT child.last_slot_id FROM summary_parents p JOIN summaries child ON child.id = p.parent_id
+        WHERE p.summary_id = NEW.id ORDER BY p.ordinal DESC LIMIT 1) = NEW.last_slot_id
+      AND NOT EXISTS (SELECT 1 FROM summary_inputs WHERE summary_id = NEW.id)
+    END
+    ), 0) BEGIN ${raise("sealed summary lineage must cover its entire chain")}; END`,
   ...["INSERT", "UPDATE OF leaf_slot_id, chat_id"].map(
     (event, i) =>
       `CREATE TRIGGER summarization_jobs_leaf_same_chat${i ? "_update" : ""} BEFORE ${event} ON summarization_jobs
@@ -73,7 +119,7 @@ export const lcm = [
       BEGIN ${raise("summary lineage lives as long as its chat")}; END`
   ]),
   `CREATE TRIGGER summaries_immutable BEFORE UPDATE ON summaries WHEN
-    NEW.id IS NOT OLD.id OR NEW.chat_id IS NOT OLD.chat_id OR NEW.level IS NOT OLD.level OR
+    (OLD.sealed = 1 AND NEW.sealed <> 1) OR NEW.id IS NOT OLD.id OR NEW.chat_id IS NOT OLD.chat_id OR NEW.level IS NOT OLD.level OR
     NEW.first_slot_id IS NOT OLD.first_slot_id OR NEW.last_slot_id IS NOT OLD.last_slot_id OR
     NEW.slot_count IS NOT OLD.slot_count OR NEW.audience_json IS NOT OLD.audience_json OR
     NEW.rollout_id IS NOT OLD.rollout_id OR NEW.error_json IS NOT OLD.error_json OR
