@@ -88,6 +88,11 @@ function VersionBody({
       ) : (
         <Markdown text={text} streaming={generating} />
       )}
+      {version.mark === "refused" && (
+        <p role="note" className="text-sm text-muted">
+          A judge model found this reply a refusal. Its text is kept; Regenerate to try again.
+        </p>
+      )}
       {version.status === "failed" && version.error && (
         <p role="note" className="rounded-md border border-danger/40 bg-danger/5 px-3 py-2 text-sm text-danger">
           Failed ({version.error.class}): {version.error.message}
@@ -235,6 +240,7 @@ export const Message = memo(function Message({
             {version.status}
           </Badge>
         )}
+        {version.mark === "refused" && <Badge tone="warning">refused</Badge>}
         {entry.contextExcluded ? (
           <span role="img" aria-label="Hidden from context" title="Hidden from context">
             👻

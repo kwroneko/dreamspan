@@ -27,14 +27,15 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   const assembler = yield* makeAssembler
   const handlers = {
-    AssembleContext: ({ userId, chatId, slotId, versionId, now, timeZone, frozen, partialBatch }) =>
+    AssembleContext: ({ userId, chatId, slotId, versionId, now, timeZone, frozen, partialBatch, model }) =>
       Effect.suspend(() => {
         const sources = sqlSources(sql, {
           userId,
           chatId,
           slotId,
           versionId,
-          ...(partialBatch === undefined ? {} : { partialBatch })
+          ...(partialBatch === undefined ? {} : { partialBatch }),
+          ...(model === undefined ? {} : { modelOverride: model })
         })
         return assembler.assemble({ now, timeZone, frozen: frozen ?? {}, random: Math.random }).pipe(
           Effect.provide(sources.layer),

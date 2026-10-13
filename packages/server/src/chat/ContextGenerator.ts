@@ -49,7 +49,8 @@ export const layer = Layer.effect(
               now: Date.now(),
               timeZone: "UTC",
               frozen: null,
-              partialBatch
+              partialBatch,
+              ...(request.model ? { model: request.model } : {})
             })
             .pipe(
               Effect.catchTag("AssemblyFailed", (error) =>

@@ -1,6 +1,6 @@
 # LCM: hierarchical summarization
 
-**Status**: Proposed, 2026-10-13. Phase 3 (PLAN.md). Slices 1 and 2 are implemented in ARCHITECTURE §16; the remaining slices are proposed. Items are marked as in DESIGN.md: **[D]** the owner stated or confirmed it (with where), **[P]** proposed and not confirmed, **[O]** open. The baseline is reference-harness as described in [the earlier reference notes](the earlier reference notes), cited as "ref §N". This document lists what carries over, then only the differences.
+**Status**: Proposed, 2026-10-13. Phase 3 (PLAN.md). Slices 1–4 are implemented in ARCHITECTURE §16; the remaining slices are proposed. Items are marked as in DESIGN.md: **[D]** the owner stated or confirmed it (with where), **[P]** proposed and not confirmed, **[O]** open. The baseline is reference-harness as described in [the earlier reference notes](the earlier reference notes), cited as "ref §N". This document lists what carries over, then only the differences.
 
 Scope:
 - **[D]** LCM is the main feature: chats of unlimited length with a fixed, cache-friendly budget, keeping every message and every intermediate summary (DESIGN §8).
@@ -70,12 +70,7 @@ reference-harness runs a separate agent session with a summary editor tool and i
 
 ### 2.4 Refusal detection
 
-- **[D]** A refusal is never saved as a summary. Refusal detection is useful for every message, not only summaries (DESIGN §8, owner 2026-10-12).
-- **[D]** As in reference-harness, there are two kinds and nothing else (owner, 2026-10-13):
-  - **hard refusals:** unambiguous from the provider's metadata (a refusal stop reason or field), usually with no text; already a failure class for versions (`refusal{category}`, DATA-MODEL §4.5);
-  - **soft refusals:** decided only by a judge model (a decision model, DESIGN §7.6) reading the output. No text heuristics, pattern lists or length rules.
-- **[P]** For a summary, a refusal fails the attempt: it retries (`max_retries`), then tries the summarizer's fallback model if one is set, then becomes a failed summary (§2.8), which leaves the original messages in the context while they fit (DESIGN §8.1).
-- **[P]** For a chat version, a soft refusal only marks it ("refused", with Retry and Retry with…); the text stays. Hard refusals stay failed versions, as today. Without a judge model configured, only hard refusals are detected.
+Implemented in [ARCHITECTURE §16](../ARCHITECTURE.md#16-lcm-hierarchical-summaries) (refusals and failed summaries): hard refusals from provider metadata, soft refusals decided only by a judge model, never a text heuristic; a summary refusal fails the attempt, retries, tries the fallback model, then becomes a failed summary; a chat version's soft refusal marks it and keeps its text.
 
 ### 2.5 Idle-time jobs while the cache is warm
 
@@ -117,11 +112,9 @@ reference-harness has no idle class or idle gate for summaries (ref §4 Idle-tim
 
 reference-harness synthesizes a placeholder from a failed job row and never persists it. It omits the range's raw messages at once, treats the failure as terminal, and needs an operator to delete the job row before the range can be retried (ref §6).
 - **[D]** Failure placeholders are part of the baseline (DESIGN §8).
-- **[P]** A failed L1 is a summary row with status `failed`, its inputs and its error (class and reason, as on a failed version). Its revision is empty, and the assembler renders the marker ("[Messages 40–52 could not be summarized.]").
-- **[P]** A failure isn't terminal for its range. It's tied to its inputs, so an edit or swipe inside the range makes it stale and the planner tries again. Retry and Retry with… another model are actions on it.
-- **[P]** It shows as failed, with its cause, on the divider, the rail and the summary panel, as failed versions do (DESIGN §3.1 [D]).
-- **[P]** A failed segment holds the cursor. Its raw messages stay verbatim while the window has room, and the placeholder replaces them only when the window would pass `window_max`. See question 3.
-- A failed condensation leaves its children selected, as in reference-harness. It gets a failed row too, so it shows.
+- Implemented (ARCHITECTURE §16): a failed L1 is a summary row with status `failed`, its inputs, its error and an empty revision; it is held while its inputs are unchanged, stale after an edit or swipe inside the range, and Retry and Retry with… are actions on it (`RetrySummary`). A failed row never replaces messages that fit.
+- **[P]** Not yet built: the assembler rendering the marker ("[Messages 40–52 could not be summarized.]") when the window would pass `window_max`, and the failure on the divider, the rail and the summary panel (slice 7). Today such a range is left out through the stepped fallback with the "not summarized yet" report.
+- A failed condensation leaves its children selected, as in reference-harness. It gets a failed row too, so it shows (slice 5).
 
 ### 2.9 How summaries enter the context
 
@@ -207,7 +200,7 @@ Every change to LCM keeps these, as every change to drafts keeps ARCHITECTURE §
 9. **Isolation.** Another user's chats, summaries and jobs are `NotFound` through every operation.
 
 **The model test** (`test/protocol/lcm.model.test.ts`), in the style of `drafts.model.test.ts`: the real server, workers and assembler, with a fake provider.
-- Built for slices 1–2: fixture summaries encode their inputs, and graph steps check invariants 1–4 and 6. Job, batch and refusal steps below are still planned.
+- Built for slices 1–4: fixture summaries encode their inputs, and graph steps check invariants 1–4 and 6; job steps run the real summarizer against a scripted provider and a fake judge, with planted hard and soft refusals (invariants 5 and 7). Condensation, edits to quiescence and batch steps are slice 5.
 - The fake summarizer's reply encodes its inputs: an L1 lists `depth:version` for each slot it read, a condensation its children and their revisions. So the oracle can decode any summary in any context back into what it covers and from which versions.
 - Random steps: append a message or a reply, branch, swipe, edit, select, delete a message, branch or version, restore, purge, hide and show, run some jobs, fail one with a planted refusal, edit a summary, select a revision, re-summarize, retry, change LCM settings, restart the server.
 - The oracle is an in-memory model of the graph and its selections, written apart from the SQL, which computes paths, effective versions and freshness.
@@ -234,7 +227,7 @@ Each slice moves its part of this document into ARCHITECTURE.md in the same comm
 | 1 ✓ | Migration 0023, its triggers, the summary writes (`CompleteSummary`, `EditSummary`, `SelectSummaryRevision`) and derived freshness | A schema test per trigger; freshness against hand-built graphs; isolation probes | A |
 | 2 ✓ | The `lcm` stage, the layer in both modes, breakpoint (b), pins, assembler version 11, summary sources in the inspector and the cache estimate | The model test over graph steps with summaries written by fixtures (invariants 1–4, 6); the ST gate unchanged with LCM off | B |
 | 3 | Planner, queue operations, `Summarizer`, summarization requests, use / wait / omit, batches, idle class | The model test with jobs (7, 8); the prefix comparison at a mock provider | A |
-| 4 | Hard refusals and the judge model for soft refusals, retries, failed summaries, Retry with…, marks on chat versions | A fake judge; the model test with planted refusals (5) | B |
+| 4 ✓ | Hard refusals and the judge model for soft refusals, retries, failed summaries, Retry with…, marks on chat versions | A fake judge; the model test with planted refusals (5) | B |
 | 5 | Condensation, absorption, re-summarizing stale summaries | The model test with condensation and edits, run to quiescence | B |
 | 6 | Enabling LCM, adopting imported summaries, backfill with its estimate and spend cap, the ST Summarize prompt kept on import | A synthetic ST folder adopted and backfilled; the estimate within 25% of the ledger at a fake provider | A |
 | 7 ✓ | UI: divider, summary panel, editing with drafts and revisions, coverage rail, context view | Browser flows at phone and desktop width; the performance harness with summaries | B |

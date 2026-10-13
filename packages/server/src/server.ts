@@ -1,3 +1,5 @@
+import { RefusalJudge } from "./decision/RefusalJudge.ts"
+import { SummaryChecks } from "./lcm/OutputChecks.ts"
 import { Summarizer } from "./lcm/Summarizer.ts"
 import { makeLcmHandlers } from "./api/lcm.ts"
 // Composition of the HTTP server: the RPC endpoint over a WebSocket, login and logout,
@@ -425,6 +427,8 @@ export const serverWith = <E>(
       Layer.merge(Generations.layer, CacheWarmth.layer).pipe(
         Layer.provideMerge(generator),
         Layer.provideMerge(summaries),
+        // The refusal judge registers itself with the summary checks the summarizer runs.
+        Layer.provideMerge(RefusalJudge.layer.pipe(Layer.provideMerge(SummaryChecks.layer))),
         // Last, so the summarizer can tell open chats that their summaries changed.
         Layer.provideMerge(ChatHub.layer)
       )

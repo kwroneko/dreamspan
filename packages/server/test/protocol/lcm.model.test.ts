@@ -1,6 +1,4 @@
-import { uuidv7 } from "@rp/shared/id.ts"
 import type { SummaryJob } from "../../src/db/lcmJobs.ts"
-import { Summarizer } from "../../src/lcm/Summarizer.ts"
 import { assert, it } from "@effect/vitest"
 import { NewVersion, type SlotId, type VersionId } from "@rp/shared/chat.ts"
 import type { Summary } from "@rp/shared/lcm.ts"
@@ -8,8 +6,9 @@ import { Cause, Effect, Exit } from "effect"
 import { Reader, Writer } from "../../src/db/Database.ts"
 import type { AppendResult } from "../../src/db/ops.ts"
 import type { ContextSnapshot } from "../../src/assembler/types.ts"
-import { client, posted, serverLayer, testConfig } from "../support/config.ts"
+import { client, posted, testConfig } from "../support/config.ts"
 import { completeFixture, fixtureSql } from "../support/lcmFixtures.ts"
+import { lastText, lcmServer, PLANTED } from "../support/lcmHarness.ts"
 import { docFor } from "../support/docs.ts"
 import { completionChunks, sse, startMockProvider } from "../support/mockProvider.ts"
 
@@ -34,7 +33,7 @@ const kinds = [
   "settings",
   "enqueue",
   "run-job",
-  "fail-job",
+  "refuse-job",
   "release-job"
 ] as const
 interface Step {
@@ -73,6 +72,8 @@ interface Artifact {
   rowVersion: number
 }
 
+/** What the seeds' job steps came to, across the run: a model that never refused would prove nothing. */
+const exercised: Record<string, number> = {}
 const randomOf = (seed: number) => () => {
   seed = (seed + 0x6d2b79f5) | 0
   let t = Math.imul(seed ^ (seed >>> 15), 1 | seed)
@@ -91,19 +92,50 @@ const stepsOf = (seed: number, count: number): Array<Step> => {
 const pick = <A>(list: ReadonlyArray<A>, at: number): A | undefined => list[Math.floor(at * list.length)]
 const runOnce = (steps: ReadonlyArray<Step>) => {
   const config = testConfig(),
+    server = lcmServer(config),
     trace: Array<string> = []
   return Effect.gen(function* () {
+    // What the summarizer's model answers to the next summarization request: the test sets it
+    // from its own model of the graph. The judge is a fake that refuses what the test planted.
+    let script: "hard" | "soft" | { readonly text: string } = { text: "" }
     const mock = yield* Effect.acquireRelease(
       Effect.promise(() =>
-        startMockProvider((_req, res) =>
-          sse(res, completionChunks(["Model reply."], { prompt_tokens: 50, completion_tokens: 3 }))
-        )
+        startMockProvider((req, res) => {
+          if (req.body?.model === "judge-model")
+            return sse(
+              res,
+              completionChunks([lastText(req).includes(PLANTED) ? "REFUSED" : "OK"], {
+                prompt_tokens: 50,
+                completion_tokens: 3
+              })
+            )
+          const messages = (req.body?.messages ?? []) as Array<{ content: string }>
+          if (!messages.at(-1)?.content?.includes("Return only the summary"))
+            return sse(res, completionChunks(["Model reply."], { prompt_tokens: 50, completion_tokens: 3 }))
+          if (script === "hard")
+            return sse(res, [
+              {
+                id: "r",
+                object: "chat.completion.chunk",
+                model: "m",
+                choices: [{ index: 0, delta: { role: "assistant", content: "" }, finish_reason: "content_filter" }]
+              }
+            ])
+          sse(
+            res,
+            completionChunks([script === "soft" ? `${PLANTED} I cannot.` : script.text], {
+              prompt_tokens: 50,
+              completion_tokens: 3
+            })
+          )
+        })
       ),
       (m) => Effect.promise(() => m.close())
     )
     const api = yield* client(),
       writer = yield* Writer,
       reader = yield* Reader,
+      summarizer = server.summarizer(),
       user = yield* api.Whoami()
     const connection = yield* api.CreateConnection({
       kind: "openai-chat",
@@ -117,8 +149,15 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
       }
     })
     const model = yield* api.AddUserModel({ connectionId: connection.id, key: "synthetic-model", overrides: {} })
+    const judgeModel = yield* api.AddUserModel({ connectionId: connection.id, key: "judge-model", overrides: {} })
+    const fallbackModel = yield* api.AddUserModel({ connectionId: connection.id, key: "fallback-model", overrides: {} })
     yield* api.SetGenerationDefaults({
-      defaults: { model: { connection: connection.id, model: model.id }, preset: null }
+      defaults: {
+        model: { connection: connection.id, model: model.id },
+        judge: { connection: connection.id, model: judgeModel.id },
+        lcm: { fallback: { connection: connection.id, model: fallbackModel.id } },
+        preset: null
+      }
     })
     const card = yield* writer.CreateEntity({
       userId: user.id,
@@ -144,6 +183,7 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
       artifacts = new Map<Summary["id"], Artifact>()
     const jobs = new Map<string, SummaryJob>()
     const snapshots: Array<string> = []
+    const counts: Record<string, number> = {}
     let leaf: SlotId | null = null,
       enabled = true
     const path = (tip: SlotId | null) => {
@@ -372,6 +412,9 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
         )
       }
       const revisionRows = results[1]!
+      for (const row of revisionRows)
+        if (row.origin === "generated")
+          assert.isFalse(String(row.content).includes(PLANTED), "I5: no generated revision holds a refusal")
       for (const summary of artifacts.values())
         for (const [id, text] of summary.revisions)
           assert.strictEqual(revisionRows.find((r) => r.id === id)?.content, text)
@@ -515,9 +558,40 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
               "I7: only one live job per chain"
             )
           }
-        } else if (["run-job", "fail-job", "release-job"].includes(step.kind)) {
-          const job = await call(writer.ClaimSummaryJob({ userId: user.id }))
-          if (job) {
+        } else if (["run-job", "refuse-job", "release-job"].includes(step.kind)) {
+          // A clean job to run: a short chain of live, visible messages on the active path, unless
+          // one is queued already. Refusal steps then run it until its retries and its fallback are spent.
+          if (step.kind !== "release-job" && leaf && enabled && !nodes.get(leaf)!.deleted) {
+            const history = path(leaf)
+            const clean = (n: Node) => !n.deleted && !n.hidden && versions.get(n.selected)!.content !== ""
+            const start = Math.floor(step.b * history.length)
+            const chain = history.slice(start, start + 1 + (index % 3)).filter(clean)
+            const queued = [...jobs.values()].some((j) => ["pending", "processing"].includes(j.status))
+            if (!queued && chain.length && history.slice(start, start + chain.length).every(clean)) {
+              const added = await call(
+                writer.EnqueueSummaries({
+                  userId: user.id,
+                  chatId: chat.id,
+                  leafSlotId: leaf,
+                  requestClass: "idle",
+                  chunks: [
+                    {
+                      target: 600,
+                      inputs: chain.map((n) => ({
+                        slotId: n.id,
+                        versionId: effective(n),
+                        amendCount: effective(n) === null ? 0 : versions.get(n.selected)!.amends
+                      }))
+                    }
+                  ]
+                })
+              )
+              for (const job of added) jobs.set(job.id, job)
+            }
+          }
+          for (let attempt = 0; attempt < 6; attempt++) {
+            const job = await call(writer.ClaimSummaryJob({ userId: user.id }))
+            if (!job) break
             jobs.set(job.id, job)
             assert.isNull(await call(writer.ClaimSummaryJob({ userId: user.id })), "I7: one L1 per chat")
             const earlier = [...jobs.values()].filter(
@@ -527,56 +601,60 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
             if (step.kind === "release-job") {
               await call(writer.ReleaseSummaryJob({ userId: user.id, jobId: job.id, attempt: job.epoch }))
               jobs.set(job.id, { ...job, status: "pending", attempts: job.attempts - 1 })
-            } else {
-              const assembly = await call(
-                Effect.exit(reader.AssembleSummary({ userId: user.id, jobId: job.id, attempt: job.epoch }))
-              )
-              if (step.kind === "fail-job" || Exit.isFailure(assembly)) {
-                await call(
-                  writer.FailSummaryAttempt({
-                    userId: user.id,
-                    jobId: job.id,
-                    attempt: job.epoch,
-                    rolloutId: null,
-                    error: "Synthetic failure"
-                  })
-                )
-                jobs.set(job.id, { ...job, status: job.attempts > 2 ? "failed" : "pending" })
-              } else {
-                const snapshot = JSON.parse(assembly.value.snapshot) as ContextSnapshot
-                const chain = path(job.lastSlotId).slice(nodes.get(job.firstSlotId)!.depth)
-                const expected = chain.map((n) => ({
-                  slotId: n.id,
-                  versionId: effective(n),
-                  amendCount: effective(n) === null ? 0 : versions.get(n.selected)!.amends
-                }))
-                assert.deepStrictEqual(snapshot.summaryJob!.inputs, expected, "I7: exact request versions")
-                const rolloutId = uuidv7()
-                await call(
-                  writer.StartSummaryRollout({
-                    userId: user.id,
-                    jobId: job.id,
-                    attempt: job.epoch,
-                    rolloutId,
-                    snapshot: assembly.value.snapshot
-                  })
-                )
-                const summary = await call(
-                  writer.CompleteSummary({
-                    userId: user.id,
-                    jobId: job.id,
-                    rolloutId,
-                    content: JSON.stringify(expected),
-                    status: "complete",
-                    inputs: expected,
-                    children: []
-                  })
-                )
-                remember(summary, expected, [])
-                jobs.set(job.id, { ...job, status: "complete" })
-                snapshots.push(assembly.value.snapshot)
-              }
+              break
             }
+            // The real summarizer runs the job against the scripted model and the fake judge.
+            const chain = path(job.lastSlotId).slice(nodes.get(job.firstSlotId)!.depth)
+            const expected = chain.map((n) => ({
+              slotId: n.id,
+              versionId: effective(n),
+              amendCount: effective(n) === null ? 0 : versions.get(n.selected)!.amends
+            }))
+            const assembly = await call(
+              Effect.exit(reader.AssembleSummary({ userId: user.id, jobId: job.id, attempt: job.epoch }))
+            )
+            if (!Exit.isFailure(assembly)) {
+              const snapshot = JSON.parse(assembly.value.snapshot) as ContextSnapshot
+              assert.deepStrictEqual(snapshot.summaryJob!.inputs, expected, "I7: exact request versions")
+              snapshots.push(assembly.value.snapshot)
+            }
+            script = step.kind === "refuse-job" ? (step.b < 0.5 ? "hard" : "soft") : { text: JSON.stringify(expected) }
+            await call(summarizer.runJob(job))
+            const [rows] = await call(
+              fixtureSql(config.dataDir, [
+                {
+                  sql: "SELECT status,attempts,result_summary_id FROM summarization_jobs WHERE id=?",
+                  params: [job.id]
+                }
+              ])
+            )
+            const row = rows![0]!
+            jobs.set(job.id, { ...job, status: row.status as SummaryJob["status"], attempts: Number(row.attempts) })
+            counts[`${step.kind}:${row.status}:${assembly._tag}`] =
+              (counts[`${step.kind}:${row.status}:${assembly._tag}`] ?? 0) + 1
+            if (row.status === "complete") {
+              assert.notStrictEqual(step.kind, "refuse-job", "I5: a refusal is never saved as a summary")
+              remember(
+                await call(reader.GetSummary({ userId: user.id, summaryId: row.result_summary_id as never })),
+                expected,
+                []
+              )
+            }
+            if (row.status === "failed" && row.result_summary_id) {
+              const failed = await call(
+                reader.GetSummary({ userId: user.id, summaryId: row.result_summary_id as never })
+              )
+              assert.strictEqual(failed.status, "failed")
+              assert.strictEqual(failed.content, "")
+              assert.isFalse(artifacts.has(failed.id), "I5: a failed summary is not a summary the oracle may select")
+            }
+            const [saved] = await call(
+              fixtureSql(config.dataDir, [
+                { sql: "SELECT count(*) AS n FROM summaries WHERE status IN ('complete','truncated','superseded')" }
+              ])
+            )
+            assert.strictEqual(Number(saved![0]!.n), artifacts.size, "I5: only accepted outputs became summaries")
+            if (row.status !== "pending") break
           }
         } else if (step.kind === "condense") {
           const pairs: Array<ReadonlyArray<Artifact>> = []
@@ -660,8 +738,9 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
       }
     }
     const exit = yield* Effect.tryPromise(run).pipe(Effect.exit)
+    for (const [key, n] of Object.entries(counts)) exercised[key] = (exercised[key] ?? 0) + n
     return { failure: Exit.isFailure(exit) ? Cause.pretty(exit.cause) : null, trace }
-  }).pipe(Effect.provide(serverLayer(config, undefined, Summarizer.none)))
+  }).pipe(Effect.provide(server.layer))
 }
 
 const shrink = (steps: ReadonlyArray<Step>) =>
@@ -693,3 +772,10 @@ for (const seed of ONLY === undefined ? Array.from({ length: SEEDS }, (_, i) => 
       }),
     { timeout: 600_000 }
   )
+
+if (ONLY === undefined && STEPS >= 100)
+  it("the seeds ran jobs to completion, to retry, and to failure under planted refusals", () => {
+    assert.isAbove(exercised["run-job:complete:Success"] ?? 0, 0)
+    assert.isAbove(exercised["refuse-job:pending:Success"] ?? 0, 0)
+    assert.isAbove(exercised["refuse-job:failed:Success"] ?? 0, 0)
+  })

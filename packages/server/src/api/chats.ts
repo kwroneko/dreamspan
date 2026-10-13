@@ -201,7 +201,7 @@ export const makeChatHandlers = Effect.gen(function* () {
         })
       }).pipe(Effect.uninterruptible, internal("Generate")),
 
-    Regenerate: ({ slotId, expectedRowVersion }) =>
+    Regenerate: ({ slotId, expectedRowVersion, model }) =>
       Effect.gen(function* () {
         yield* needGenerator
         const id = yield* userId
@@ -218,7 +218,13 @@ export const makeChatHandlers = Effect.gen(function* () {
           },
           expectedRowVersion
         })
-        yield* generations.start({ userId: id, chatId: added.chatId, slotId, versionId: added.version.id })
+        yield* generations.start({
+          userId: id,
+          chatId: added.chatId,
+          slotId,
+          versionId: added.version.id,
+          ...(model ? { model } : {})
+        })
         const { entry } = yield* reader.GetSlot({ userId: id, slotId })
         hub.publish(added.chatId, { _tag: "Slot", entry })
         return entry

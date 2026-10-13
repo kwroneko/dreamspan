@@ -1,3 +1,4 @@
+import { RefusalJudge } from "../src/decision/RefusalJudge.ts"
 import { Summarizer } from "../src/lcm/Summarizer.ts"
 // Generations' side of the send queue: queue events leave in the order the writer committed
 // them, even when the reply a queue posted ends at once and publishes the next queue while
@@ -19,7 +20,13 @@ describe("Generations and the send queue", () => {
       const nextPublished = yield* Deferred.make<void>()
       const fakes = Layer.mergeAll(
         Notices.layer,
-        Layer.succeed(Summarizer)({ afterReply: () => Effect.void, beforeReply: () => Effect.succeed(false) }),
+        Layer.succeed(Summarizer)({
+          afterReply: () => Effect.void,
+          beforeReply: () => Effect.succeed(false),
+          runJob: () => Effect.void,
+          planNow: () => Effect.succeed([])
+        }),
+        Layer.succeed(RefusalJudge)({ judge: () => Effect.succeed("unjudged") }),
         Layer.succeed(Writer)({
           InterruptGenerations: () => Effect.succeed({ interrupted: 0, queued: 0 }),
           // The posted reply ends, and the queue behind it is empty now.

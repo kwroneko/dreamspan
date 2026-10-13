@@ -189,11 +189,22 @@ for (const mode of ["direct", "tool", "refused", "partial", "gap"] as const) {
           assert.isAtLeast(summaries, 3)
           const [rows] = yield* fixtureSql(config.dataDir, [
             {
-              sql: "SELECT count(*) AS n FROM summaries s JOIN llm_requests q ON q.rollout_id=s.rollout_id WHERE s.chat_id=?",
+              sql: "SELECT count(*) AS n FROM summaries s JOIN llm_requests q ON q.rollout_id=s.rollout_id WHERE s.chat_id=? AND s.status<>'failed'",
               params: [chat.id]
             }
           ])
           assert.strictEqual(Number(rows![0]!.n), 0)
+          // The end of the retries is a failed summary with its cause and an empty revision, not a lost range.
+          const [failedRows] = yield* fixtureSql(config.dataDir, [
+            {
+              sql: "SELECT s.error_json,s.status,r.content,r.origin FROM summaries s JOIN summary_revisions r ON r.id=s.selected_revision_id WHERE s.chat_id=? AND s.status='failed'",
+              params: [chat.id]
+            }
+          ])
+          assert.lengthOf(failedRows!, 1)
+          assert.strictEqual(failedRows![0]!.status, "failed")
+          assert.strictEqual(failedRows![0]!.content, "")
+          assert.deepInclude(JSON.parse(failedRows![0]!.error_json as string), { class: "refused", kind: "hard" })
           const unchanged = yield* reader.AssembleContext({
             userId: user.id,
             chatId: chat.id,
@@ -215,7 +226,7 @@ for (const mode of ["direct", "tool", "refused", "partial", "gap"] as const) {
         for (let n = 0; n < 200; n++) {
           const [rows] = yield* fixtureSql(config.dataDir, [
             {
-              sql: "SELECT s.id,s.status AS summary_status,s.batch_id,r.request_class,r.status,p.context_snapshot_json AS snapshot FROM summaries s JOIN rollouts r ON r.id=s.rollout_id JOIN rollout_payloads p ON p.rollout_id=r.id WHERE s.chat_id=?",
+              sql: "SELECT s.id,s.status AS summary_status,s.batch_id,r.request_class,r.status,p.context_snapshot_json AS snapshot FROM summaries s JOIN rollouts r ON r.id=s.rollout_id JOIN rollout_payloads p ON p.rollout_id=r.id WHERE s.chat_id=? AND s.status<>'failed'",
               params: [chat.id]
             }
           ])

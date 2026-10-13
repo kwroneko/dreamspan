@@ -115,6 +115,10 @@ export const makeLcmHandlers = Effect.gen(function* () {
           outcome: "discarded",
           expectedRowVersion
         })
-      ).pipe(internal("DiscardSummaryDraft"))
+      ).pipe(internal("DiscardSummaryDraft")),
+    RetrySummary: (params) =>
+      Effect.flatMap(CurrentUser, (user) => writer.RetrySummary({ userId: user.id, ...params })).pipe(
+        internal("RetrySummary")
+      )
   } satisfies Partial<Parameters<typeof AppApi.of>[0]>
 })

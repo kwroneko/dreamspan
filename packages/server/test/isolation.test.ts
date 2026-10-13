@@ -267,6 +267,9 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
         "NotFound"
       )
   },
+  RetrySummary: {
+    probe: (actor, owner) => refused(actor.api.RetrySummary({ summaryId: owner.summary.id }), "NotFound")
+  },
   Health: { global: "liveness and event-loop numbers for the instance" },
   Whoami: {
     probe: (actor, owner) =>
@@ -1737,6 +1740,13 @@ const storage: Record<
         chunks: [],
         requestClass: "idle"
       }),
+      "NotFound"
+    ),
+  RetrySummary: (_reader, actor, owner, writer) =>
+    refused(writer.RetrySummary({ userId: actor.user.id, summaryId: owner.summary.id }), "NotFound"),
+  MarkVersion: (_reader, actor, owner, writer) =>
+    refused(
+      writer.MarkVersion({ userId: actor.user.id, versionId: owner.chat.versionId, mark: "refused" }),
       "NotFound"
     ),
   PlanSummaries: (reader, actor, owner) =>

@@ -4,7 +4,14 @@ import { NotFound } from "@rp/shared/errors.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
-import { DEFAULT_MODEL, DEFAULT_PRESET, ownedModel, ownedPreset, readDefaults } from "./generationSettings.ts"
+import {
+  DEFAULT_JUDGE,
+  DEFAULT_MODEL,
+  DEFAULT_PRESET,
+  ownedModel,
+  ownedPreset,
+  readDefaults
+} from "./generationSettings.ts"
 import type { WriteOps } from "./ops.ts"
 import { transaction } from "./tx.ts"
 
@@ -183,9 +190,14 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
         if (preset !== null && !(yield* ownedPreset(sql, userId, preset))) {
           return yield* new NotFound({ entity: "ref", id: preset })
         }
+        const fallback = defaults.lcm?.fallback
+        for (const choice of [defaults.judge, fallback])
+          if (choice && !(yield* ownedModel(sql, userId, choice.connection, choice.model)))
+            return yield* new NotFound({ entity: "model", id: choice.model })
         yield* putSetting(userId, DEFAULT_MODEL, model)
         yield* putSetting(userId, DEFAULT_PRESET, preset)
         if (defaults.lcm !== undefined) yield* putSetting(userId, "generation.lcm", defaults.lcm)
+        if (defaults.judge !== undefined) yield* putSetting(userId, DEFAULT_JUDGE, defaults.judge)
         return yield* readDefaults(sql, userId)
       }).pipe(transaction(sql, "SetGenerationDefaults"))
   } satisfies Partial<Parameters<typeof WriteOps.of>[0]>

@@ -8,6 +8,8 @@ import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import type { ContextSnapshot } from "../assembler/types.ts"
 import { ownedModel } from "./generationSettings.ts"
+import { fallbackModel, type JobError, prefixAt, recordFailedSummary, targetFor } from "./lcmFailures.ts"
+import { readSummary } from "./lcmReads.ts"
 import { jobColumns, type SummaryJob } from "./lcmJobs.ts"
 import { lcmPath, slotInput } from "./lcmPath.ts"
 import { NotFound, StorageError, type WriteOps } from "./ops.ts"
@@ -190,7 +192,7 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
         yield* sql`INSERT INTO rollout_payloads ${sql.insert({ rollout_id: rolloutId, context_snapshot_json: snapshot })}`
         yield* sql`UPDATE summarization_jobs SET rollout_id = ${rolloutId} WHERE id = ${jobId}`
       }).pipe(transaction(sql, "StartSummaryRollout")),
-    FailSummaryAttempt: ({ userId, jobId, attempt, rolloutId, error, draft }) =>
+    FailSummaryAttempt: ({ userId, jobId, attempt, rolloutId, error, errorClass, errorKind, errorCategory, draft }) =>
       Effect.gen(function* () {
         yield* get(userId, jobId, attempt, true)
         const [active] = yield* sql<{
@@ -198,10 +200,84 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
         }>`SELECT rollout_id FROM summarization_jobs WHERE id = ${jobId}`
         if (active!.rollout_id !== rolloutId)
           return yield* new NotFound({ entity: "summary rollout", id: rolloutId ?? "" })
+        const failure: JobError = {
+          class: errorClass ?? "unknown",
+          message: error,
+          ...(errorKind ? { kind: errorKind } : {}),
+          ...(errorCategory ? { category: errorCategory } : {})
+        }
         yield* close(rolloutId, "failed", error)
-        yield* sql`UPDATE summarization_jobs SET status = CASE WHEN attempts <= max_retries THEN 'pending' ELSE 'failed' END,
-        error = ${error}, best_effort_draft = ${draft ?? null}, rollout_id = NULL, updated_at = ${Date.now()} WHERE id = ${jobId}`
+        const [job] = yield* sql<{
+          id: string
+          chat_id: string
+          level: number
+          first_slot_id: string
+          last_slot_id: string
+          batch_id: string | null
+          input_child_ids: string | null
+          attempts: number
+          max_retries: number
+          fallback_used: number
+          model_json: string | null
+        }>`SELECT * FROM summarization_jobs WHERE id = ${jobId}`
+        const now = Date.now()
+        // The summarizer's own model gets its retries; the fallback model, if the user set one, gets one more attempt.
+        const retry = job!.attempts <= job!.max_retries
+        const fallback = !retry && job!.fallback_used === 0 ? yield* fallbackModel(sql, userId) : null
+        if (retry || fallback) {
+          yield* sql`UPDATE summarization_jobs SET status = 'pending', error = ${JSON.stringify(failure)},
+            best_effort_draft = ${draft ?? null}, rollout_id = NULL, updated_at = ${now},
+            model_json = ${fallback ? JSON.stringify(fallback) : job!.model_json},
+            fallback_used = ${fallback ? 1 : job!.fallback_used}
+            WHERE id = ${jobId}`
+          return
+        }
+        const summaryId = yield* recordFailedSummary(sql, userId, job!, rolloutId, failure)
+        yield* sql`UPDATE summarization_jobs SET status = 'failed', error = ${JSON.stringify(failure)},
+          best_effort_draft = ${draft ?? null}, rollout_id = NULL, result_summary_id = ${summaryId}, updated_at = ${now}
+          WHERE id = ${jobId}`
       }).pipe(transaction(sql, "FailSummaryAttempt")),
+    RetrySummary: ({ userId, summaryId, model }) =>
+      Effect.gen(function* () {
+        const summary = yield* readSummary(sql, userId, summaryId)
+        if (model && !(yield* ownedModel(sql, userId, model.connection, model.model)))
+          return yield* new NotFound({ entity: "model", id: model.model })
+        // A job already live for the range is the retry: it is brought forward, on the chosen model.
+        const [live] = yield* sql<{ id: string; status: string }>`
+          SELECT id, status FROM summarization_jobs WHERE chat_id = ${summary.chatId} AND level = ${summary.level}
+            AND first_slot_id = ${summary.firstSlotId} AND last_slot_id = ${summary.lastSlotId} AND status IN ('pending', 'processing')`
+        if (live) {
+          yield* sql`UPDATE summarization_jobs SET request_class = 'interactive', updated_at = ${Date.now()},
+            model_json = CASE WHEN status = 'pending' AND ${model ? 1 : 0} THEN ${JSON.stringify(model ?? null)} ELSE model_json END
+            WHERE id = ${live.id}`
+          return { jobId: live.id }
+        }
+        const chain = yield* lcmPath(sql, userId, summary.chatId, summary.lastSlotId, summary.firstSlotId)
+        if (chain[0]?.id !== summary.firstSlotId || chain.some((s) => s.generating || s.merged))
+          return yield* reject("RetrySummary", "The summary's range is not ready to summarize.")
+        if (summary.level === 1 && chain.every((s) => s.versionId === null))
+          return yield* reject("RetrySummary", "Nothing in the summary's range can be summarized now.")
+        const id = uuidv7(),
+          now = Date.now()
+        yield* sql`INSERT INTO summarization_jobs ${sql.insert({
+          id,
+          chat_id: summary.chatId,
+          level: summary.level,
+          first_slot_id: summary.firstSlotId,
+          last_slot_id: summary.lastSlotId,
+          leaf_slot_id: summary.lastSlotId,
+          target_token_count: yield* targetFor(sql, summary.chatId, summary.level),
+          clip_tokens: 6000,
+          input_child_ids: summary.level > 1 ? JSON.stringify(summary.children.map((c) => c.summaryId)) : null,
+          prefix_json: yield* prefixAt(sql, summary.chatId, summary.lastSlotId),
+          model_json: model ? JSON.stringify(model) : null,
+          batch_id: uuidv7(),
+          request_class: "interactive",
+          created_at: now,
+          updated_at: now
+        })}`
+        return { jobId: id }
+      }).pipe(transaction(sql, "RetrySummary")),
     ReleaseSummaryJob: ({ userId, jobId, attempt }) =>
       Effect.gen(function* () {
         yield* get(userId, jobId, attempt, true)

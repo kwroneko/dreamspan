@@ -163,6 +163,13 @@ export const migrations = {
       BEGIN SELECT RAISE(ABORT, 'a rerun request must name something in its own chat'); END`,
     `CREATE TRIGGER summary_reruns_fixed BEFORE UPDATE OF chat_id, summary_id, job_id ON summary_reruns
       BEGIN SELECT RAISE(ABORT, 'a rerun request is withdrawn and asked again, never moved'); END`
+  ]),
+  "0027_refusals": runAll([
+    // The model chosen for this job (Retry with…, or the fallback), over the chat's summarizer binding.
+    `ALTER TABLE summarization_jobs ADD COLUMN model_json TEXT CHECK (model_json IS NULL OR json_valid(model_json))`,
+    `ALTER TABLE summarization_jobs ADD COLUMN fallback_used INTEGER NOT NULL DEFAULT 0 CHECK (fallback_used IN (0, 1))`,
+    // A judge model's finding on a version's text (spec/LCM.md §2.4). Only the mark changes.
+    `ALTER TABLE versions ADD COLUMN mark TEXT CHECK (mark IS NULL OR mark IN ('refused'))`
   ])
 }
 

@@ -1,5 +1,5 @@
 import { applySummaryPrefix, type SummaryPrefix } from "../lcm/prefix.ts"
-import { completedCoverage } from "./lcmCoverage.ts"
+import { completedCoverage, failedHold } from "./lcmCoverage.ts"
 import { tokensOf } from "../assembler/st.ts"
 import { foldState } from "@rp/shared/state.ts"
 import { Effect } from "effect"
@@ -103,18 +103,9 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
           }
         }
         flush()
-        // A terminal failure holds its range until explicit retry (slice 4).
-        const failed = yield* sql<{
-          first_slot_id: string
-          last_slot_id: string
-        }>`SELECT first_slot_id,last_slot_id FROM summarization_jobs WHERE chat_id = ${chatId} AND status = 'failed' AND level = 1`
-        return {
-          ...result,
-          chunks: chunks.filter(
-            (c) =>
-              !failed.some((f) => c.inputs.some((i) => i.slotId === f.first_slot_id || i.slotId === f.last_slot_id))
-          )
-        }
+        // A failed summary holds its range while its inputs are unchanged (spec/LCM.md §2.8).
+        const held = yield* failedHold(sql, userId, chatId, path)
+        return { ...result, chunks: chunks.filter((c) => !c.inputs.some((i) => held.has(i.slotId))) }
       }).pipe(query("PlanSummaries")),
     AssembleSummary: ({ userId, jobId, attempt }) =>
       Effect.gen(function* () {
@@ -135,7 +126,10 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
           next: true,
           cut: job.lastSlotId,
           summaryBefore: { slot: chain[0]!.parent, depth: chain[0]!.depth - 1 },
-          partialBatch: true
+          partialBatch: true,
+          ...(job.modelJson
+            ? { modelOverride: JSON.parse(job.modelJson) as { connection: string; model: string } }
+            : {})
         })
         const events = yield* Effect.flatMap(AssemblySources, (s) => s.events(job.lastSlotId)).pipe(
           Effect.provide(sources.layer)

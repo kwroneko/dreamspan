@@ -8,6 +8,7 @@ import type { SqlClient } from "effect/sql"
 
 export const DEFAULT_MODEL = "generation.model"
 export const DEFAULT_PRESET = "generation.preset"
+export const DEFAULT_JUDGE = "generation.judge"
 
 /** A live connection of the user's and a model of it. */
 export const ownedModel = (sql: SqlClient.SqlClient, userId: UserId, connection: string, model: string) =>
@@ -37,10 +38,21 @@ export const readDefaults = (sql: SqlClient.SqlClient, userId: UserId) =>
       typeof model.model === "string" &&
       (yield* ownedModel(sql, userId, model.connection, model.model))
     const presetOk = typeof preset === "string" && (yield* ownedPreset(sql, userId, preset))
-    const lcm = (yield* setting(sql, userId, "generation.lcm")) as GenerationDefaults["lcm"] | null
+    const stored = (yield* setting(sql, userId, "generation.lcm")) as GenerationDefaults["lcm"] | null
+    // A model that is gone reads as none, like the default model.
+    const usable = (choice: { connection?: unknown; model?: unknown } | null | undefined) =>
+      typeof choice?.connection === "string" && typeof choice.model === "string"
+        ? ownedModel(sql, userId, choice.connection, choice.model)
+        : Effect.succeed(false)
+    const { fallback, ...rest } = stored ?? {}
+    const lcm = stored ? { ...rest, ...((yield* usable(fallback)) ? { fallback } : {}) } : null
+    const judge = (yield* setting(sql, userId, DEFAULT_JUDGE)) as { connection?: unknown; model?: unknown } | null
     return new GenerationDefaults({
       model: modelOk ? { connection: model!.connection as ConnectionId, model: model!.model as ModelId } : null,
       ...(lcm ? { lcm } : {}),
+      ...((yield* usable(judge))
+        ? { judge: { connection: judge!.connection as ConnectionId, model: judge!.model as ModelId } }
+        : {}),
       preset: presetOk ? (preset as RefId) : null
     })
   })

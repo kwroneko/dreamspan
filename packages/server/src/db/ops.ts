@@ -1,4 +1,5 @@
 import { SummaryJob, SummaryChunk, SummaryPlan } from "./lcmJobs.ts"
+import { ModelChoice } from "@rp/shared/lcmSettings.ts"
 import {
   LcmCoverage,
   LcmState,
@@ -337,8 +338,17 @@ export class WriteOps extends RpcGroup.make(
       attempt: Schema.Int,
       rolloutId: Schema.NullOr(Schema.String),
       draft: Schema.optionalKey(Schema.NullOr(Schema.String)),
-      error: Schema.String
+      error: Schema.String,
+      /** The failure's class (a provider error's reason, `judge`, ...), kept on the job and on the failed summary. */
+      errorClass: Schema.optionalKey(Schema.String),
+      errorKind: Schema.optionalKey(Schema.Literals(["hard", "soft"])),
+      errorCategory: Schema.optionalKey(Schema.NullOr(Schema.String))
     },
+    error: Schema.Union([StorageError, NotFound])
+  }),
+  Rpc.make("RetrySummary", {
+    payload: { userId: UserId, summaryId: SummaryId, model: Schema.optionalKey(ModelChoice) },
+    success: Schema.Struct({ jobId: Schema.String }),
     error: Schema.Union([StorageError, NotFound])
   }),
   Rpc.make("ReleaseSummaryJob", {
@@ -968,6 +978,12 @@ export class WriteOps extends RpcGroup.make(
       status: VersionStatus,
       error: Schema.NullOr(VersionError)
     },
+    success: Version,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** A judge model's finding on a finished model version: its text stays (spec/LCM.md §2.4). */
+  Rpc.make("MarkVersion", {
+    payload: { userId: UserId, versionId: VersionId, mark: Schema.NullOr(Schema.Literals(["refused"])) },
     success: Version,
     error: Schema.Union([NotFound, StorageError])
   }),
@@ -1751,6 +1767,8 @@ export class ReadOps extends RpcGroup.make(
   Rpc.make("AssembleContext", {
     payload: {
       partialBatch: Schema.optionalKey(Schema.Boolean),
+      /** "Retry with…": this model instead of the chat's. */
+      model: Schema.optionalKey(ModelChoice),
       userId: UserId,
       chatId: ChatId,
       slotId: SlotId,

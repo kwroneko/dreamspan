@@ -95,6 +95,11 @@ export class Version extends Schema.Class<Version>("Version")({
   /** Set on failed versions only. */
   error: Schema.NullOr(VersionError),
   /**
+   * A judge model read this version's text and found a refusal (spec/LCM.md §2.4). The text
+   * stays; a provider's own refusal makes a failed version instead.
+   */
+  mark: Schema.NullOr(Schema.Literals(["refused"])),
+  /**
    * For text whose macros resolve on display (a greeting): the values its random and time
    * macros drew when it was made, so it reads the same every time (DESIGN §5.6).
    */

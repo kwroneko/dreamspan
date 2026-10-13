@@ -16,6 +16,10 @@ export const SummaryJob = Schema.Struct({
   target: Schema.Int,
   attempts: Schema.Int,
   requestClass: Schema.Literals(["interactive", "idle", "background"]),
+  /** The model chosen for this job (Retry with…, or the fallback), as JSON; null follows the chat's bindings. */
+  modelJson: Schema.NullOr(Schema.String),
+  fallbackUsed: Schema.Int,
+  maxRetries: Schema.Int,
   batchId: Schema.NullOr(Schema.String),
   status: Schema.Literals(["pending", "processing", "complete", "failed"])
 })
@@ -37,4 +41,5 @@ export const SummaryPlan = Schema.Struct({
 export const jobColumns = `j.id, j.chat_id AS chatId, c.owner_user_id AS userId,
  j.first_slot_id AS firstSlotId, j.last_slot_id AS lastSlotId, j.leaf_slot_id AS leafSlotId,
  j.clip_tokens AS clipTokens, j.claim_epoch AS epoch, j.level, j.target_token_count AS target, j.attempts, j.request_class AS requestClass,
+ j.model_json AS modelJson, j.fallback_used AS fallbackUsed, j.max_retries AS maxRetries,
  j.batch_id AS batchId, j.status`

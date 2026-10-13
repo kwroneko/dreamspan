@@ -5,6 +5,7 @@ import { TextTooLong } from "./composerApi.ts"
 import { Draft, DraftRestore, DraftState } from "./drafts.ts"
 import { NotFound, ServerError, StaleWrite } from "./errors.ts"
 import { idSchema } from "./id.ts"
+import { ModelChoice } from "./lcmSettings.ts"
 
 export const SummaryId = idSchema("SummaryId", "summaries")
 export const SummaryRevisionId = idSchema("SummaryRevisionId", "summary_revisions")
@@ -214,5 +215,14 @@ export class LcmApi extends RpcGroup.make(
     payload: { summaryId: SummaryId, draftId: Schema.String, expectedRowVersion: Schema.Int },
     success: Draft,
     error: Schema.Union([NotFound, StaleWrite, ServerError])
+  }),
+  /**
+   * Retry, or "Retry with…" a model of the user's: a new job over the summary's own range at
+   * the interactive class. The failed or stale summary stays; the new one is a new row.
+   */
+  Rpc.make("RetrySummary", {
+    payload: { summaryId: SummaryId, model: Schema.optionalKey(ModelChoice) },
+    success: Schema.Struct({ jobId: Schema.String }),
+    error: Schema.Union([NotFound, ServerError])
   })
 ) {}

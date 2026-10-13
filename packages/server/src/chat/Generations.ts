@@ -1,3 +1,4 @@
+import { RefusalJudge } from "../decision/RefusalJudge.ts"
 import { Summarizer } from "../lcm/Summarizer.ts"
 // Running generations (DESIGN §3.1): one fiber each, any number at once, several under one
 // slot. Their text streams to the chat's subscribers as deltas and is saved now and then,
@@ -50,6 +51,7 @@ export class Generations extends Context.Service<
     Generations,
     Effect.gen(function* () {
       const summaries = yield* Summarizer
+      const judge = yield* RefusalJudge
       const writer = yield* Writer
       const reader = yield* Reader
       const hub = yield* ChatHub
@@ -73,6 +75,29 @@ export class Generations extends Context.Service<
           status,
           error
         })
+
+      /**
+       * A finished reply is read by the judge model, if the user chose one: a refusal marks the
+       * version and leaves its text (spec/LCM.md §2.4). A judge that fails marks nothing.
+       */
+      const markIfRefused = (request: GenerationRequest, text: string) =>
+        judge.judge({ userId: request.userId, chatId: request.chatId, text, versionId: request.versionId }).pipe(
+          Effect.flatMap((verdict) =>
+            verdict === "refused"
+              ? writer
+                  .MarkVersion({ userId: request.userId, versionId: request.versionId, mark: "refused" })
+                  .pipe(
+                    Effect.tap((version) =>
+                      Effect.sync(() => hub.publish(request.chatId, { _tag: "Version", version }))
+                    )
+                  )
+              : Effect.void
+          ),
+          Effect.catchCause((cause) =>
+            Cause.hasInterruptsOnly(cause) ? Effect.void : Effect.logWarning("judging a reply failed", cause)
+          ),
+          Effect.asVoid
+        )
 
       const finish = (entry: Running, exit: Exit.Exit<void, GenerationFailed>) =>
         Effect.gen(function* () {
@@ -119,6 +144,8 @@ export class Generations extends Context.Service<
               status
             })
           }
+          if (status === "complete" && entry.text.trim() !== "")
+            yield* Effect.forkIn(markIfRefused(request, entry.text), scope)
           if (status === "complete")
             yield* summaries.afterReply({
               userId: request.userId,

@@ -3,6 +3,7 @@
 // and the performance harness have one: the fake (fakeGenerator.ts).
 import type { ChatId, SlotId, VersionId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
+import type { ConnectionId, ModelId } from "@rp/shared/providers.ts"
 import { Context, Layer, Option, Schema, type Stream } from "effect"
 
 /** A position in a chat to generate at: a new version of `slotId`, on the path through it. */
@@ -11,6 +12,8 @@ export interface GenerationRequest {
   readonly chatId: ChatId
   readonly slotId: SlotId
   readonly versionId: VersionId
+  /** "Retry with…": generates with this model instead of the chat's. */
+  readonly model?: { readonly connection: ConnectionId; readonly model: ModelId }
   readonly onWaitingCache?: (waiting: boolean) => void
 }
 

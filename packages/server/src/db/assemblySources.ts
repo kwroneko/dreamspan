@@ -97,6 +97,8 @@ type Settings = {
   readonly cut?: string
   readonly summaryBefore?: { readonly slot: string | null; readonly depth: number }
   readonly partialBatch?: boolean
+  /** A model chosen for this context over the chat's bindings: "Retry with…", a summary job's fallback. */
+  readonly modelOverride?: { readonly connection: string; readonly model: string }
 } & (
   | { readonly userId: UserId; readonly chatId: ChatId; readonly slotId: string; readonly versionId: string }
   | { readonly userId: UserId; readonly chatId: ChatId; readonly next: true; readonly leafSlotId?: string | null }
@@ -539,7 +541,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
 
     model: (binding) =>
       Effect.gen(function* () {
-        const chosen = binding ?? (yield* defaults).model
+        const chosen = settings.modelOverride ?? binding ?? (yield* defaults).model
         if (chosen === null) return null
         const [connection] = yield* sql<ConnectionRow>`
           SELECT ${sql.literal(connectionColumns)} FROM ${sql.literal(connectionFrom)}

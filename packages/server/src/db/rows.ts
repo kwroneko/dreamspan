@@ -62,6 +62,7 @@ export interface VersionRow {
   readonly starred: number
   readonly created_at: number
   readonly error_json: string | null
+  readonly mark?: "refused" | null
   readonly frozen_macros: string | null
   readonly rollout_id: string | null
   /** How often a user-written version was amended (`versionExtras`); absent on a row just inserted. */
@@ -101,6 +102,7 @@ export const toVersion = (row: VersionRow) =>
     starred: row.starred === 1,
     createdAt: row.created_at,
     error: toVersionError(row.error_json),
+    mark: row.mark ?? null,
     frozenMacros: row.frozen_macros === null ? null : (JSON.parse(row.frozen_macros) as Record<string, string>),
     context: !row.has_context
       ? null

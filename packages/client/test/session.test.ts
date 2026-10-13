@@ -38,6 +38,7 @@ const version = (id: string, slotId: string, status: Version["status"], content:
     starred: false,
     createdAt: 0,
     error: null,
+    mark: null,
     rowVersion: 1
   }) as unknown as Version
 

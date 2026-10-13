@@ -18,7 +18,12 @@ for (const style of ["direct", "tool"] as const) {
     Summarizer,
     Effect.map(Providers, (p) => {
       providers = p
-      return Summarizer.of({ afterReply: () => Effect.void, beforeReply: () => Effect.succeed(false) })
+      return Summarizer.of({
+        afterReply: () => Effect.void,
+        beforeReply: () => Effect.succeed(false),
+        runJob: () => Effect.void,
+        planNow: () => Effect.succeed([])
+      })
     })
   )
   it.live(

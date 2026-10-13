@@ -239,6 +239,15 @@ export const makeWriteHandlers = (bin: Bin) =>
           return toVersion(yield* ownedVersion(userId, versionId, false))
         }).pipe(transaction("SaveGeneration")),
 
+      MarkVersion: ({ userId, versionId, mark }) =>
+        Effect.gen(function* () {
+          const row = yield* ownedVersion(userId, versionId, true)
+          if (row.writer !== "model" || row.status !== "complete" || row.purged_at !== null)
+            return yield* new NotFound({ entity: "version", id: versionId })
+          yield* sql`UPDATE versions SET mark = ${mark} WHERE id = ${versionId}`
+          return toVersion(yield* ownedVersion(userId, versionId, true))
+        }).pipe(transaction("MarkVersion")),
+
       // --- Branches (DESIGN §3.2)
 
       SetActiveLeaf: ({ userId, chatId, slotId, expectedRowVersion }) =>

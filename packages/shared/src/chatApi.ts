@@ -8,6 +8,7 @@ import { Chat, ChatId, EntityId, PathEntry, QueuedMessage, SlotId, Version, Vers
 import { LeafMoved, NotFound, ServerError, StaleWrite } from "./errors.ts"
 import { Draft } from "./drafts.ts"
 import { NextContext } from "./inspectorApi.ts"
+import { ModelChoice } from "./lcmSettings.ts"
 
 /** Generation needs a generator, and this server has none (only tests run one without). */
 export class GenerationUnavailable extends Schema.TaggedError<GenerationUnavailable>()("GenerationUnavailable", {
@@ -193,7 +194,12 @@ export class ChatApi extends RpcGroup.make(
    * the one-turn direction of the version it replaces. Several can run at once.
    */
   Rpc.make("Regenerate", {
-    payload: { slotId: SlotId, expectedRowVersion: Schema.Int },
+    payload: {
+      slotId: SlotId,
+      expectedRowVersion: Schema.Int,
+      /** "Retry with…": this swipe uses another model of the user's. */
+      model: Schema.optionalKey(ModelChoice)
+    },
     success: PathEntry,
     error: Schema.Union([...WriteErrors, GenerationUnavailable])
   }),
