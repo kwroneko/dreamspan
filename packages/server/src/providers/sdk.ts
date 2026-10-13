@@ -1,6 +1,7 @@
-// The audited bundle has no ambient SDK configuration and requires our Google transport.
-// Server builds, development startup and test setup rebuild the pinned dependencies.
-const sdk = (await import(
-  new URL("../../dist/providers/sdkEntry.mjs", import.meta.url).href
-)) as typeof import("./sdkEntry.ts")
-export const { openAICompletionsApi, openAIResponsesApi, anthropicMessagesApi, googleGenerativeAIApi } = sdk
+export { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy"
+export { openAIResponsesApi } from "@earendil-works/pi-ai/api/openai-responses.lazy"
+export { anthropicMessagesApi } from "@earendil-works/pi-ai/api/anthropic-messages.lazy"
+import { lazyApi } from "@earendil-works/pi-ai/api/lazy"
+
+export const googleGenerativeAIApi = () =>
+  lazyApi(() => import("./google.ts").then(({ stream, streamSimple }) => ({ stream, streamSimple })))

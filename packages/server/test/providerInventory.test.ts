@@ -1,11 +1,12 @@
 import { assert, it } from "@effect/vitest"
 import { Effect, Layer } from "effect"
 import { vi } from "vitest"
-import { writeFileSync } from "node:fs"
+import { readFileSync, writeFileSync } from "node:fs"
 import { spawn } from "node:child_process"
 import { fileURLToPath } from "node:url"
 import { Worker } from "node:worker_threads"
 import { setGlobalProxyFromEnv } from "node:http"
+import { scrubProviderEnvironment } from "../src/providerEnvironment.ts"
 import { databaseFile } from "../src/db/connection.ts"
 import { ProviderRegistry } from "../src/providers/registry.ts"
 import * as ProviderBuiltins from "../src/providers/builtins.ts"
@@ -69,7 +70,64 @@ const SDK_ENV = [
   "gcloud_project",
   "google_cloud_project",
   "CLOUDSDK_CONFIG",
-  "PI_CACHE_RETENTION"
+  "PI_CACHE_RETENTION",
+  "HTTP_PROXY",
+  "HTTPS_PROXY",
+  "ALL_PROXY",
+  "NO_PROXY",
+  "http_proxy",
+  "https_proxy",
+  "all_proxy",
+  "no_proxy",
+  "NODE_USE_ENV_PROXY",
+  "AWS_PROFILE",
+  "AWS_ACCESS_KEY_ID",
+  "AWS_SECRET_ACCESS_KEY",
+  "AWS_SESSION_TOKEN",
+  "AWS_WEB_IDENTITY_TOKEN_FILE",
+  "AWS_CONTAINER_CREDENTIALS_FULL_URI",
+  "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
+  "AWS_BEDROCK_FORCE_CACHE",
+  "AWS_BEDROCK_FORCE_HTTP1",
+  "AWS_BEDROCK_SKIP_AUTH",
+  "AZURE_OPENAI_DEPLOYMENT_NAME_MAP",
+  "AZURE_OPENAI_BASE_URL",
+  "AZURE_OPENAI_RESOURCE_NAME",
+  "AZURE_OPENAI_API_VERSION",
+  "PI_OAUTH_CALLBACK_HOST",
+  "ANT_LING_API_KEY",
+  "QWEN_TOKEN_PLAN_API_KEY",
+  "QWEN_TOKEN_PLAN_CN_API_KEY",
+  "NVIDIA_API_KEY",
+  "DEEPSEEK_API_KEY",
+  "GROQ_API_KEY",
+  "CEREBRAS_API_KEY",
+  "XAI_API_KEY",
+  "TYPESAFE_API_KEY",
+  "RADIUS_API_KEY",
+  "OPENROUTER_API_KEY",
+  "AI_GATEWAY_API_KEY",
+  "ZAI_API_KEY",
+  "ZAI_CODING_CN_API_KEY",
+  "MISTRAL_API_KEY",
+  "MINIMAX_API_KEY",
+  "MINIMAX_CN_API_KEY",
+  "MOONSHOT_API_KEY",
+  "HF_TOKEN",
+  "FIREWORKS_API_KEY",
+  "TOGETHER_API_KEY",
+  "BASETEN_API_KEY",
+  "OPENCODE_API_KEY",
+  "KIMI_API_KEY",
+  "KIMI_CODE_OAUTH_HOST",
+  "KIMI_OAUTH_HOST",
+  "META_API_KEY",
+  "CLOUDFLARE_API_KEY",
+  "XIAOMI_API_KEY",
+  "XIAOMI_TOKEN_PLAN_CN_API_KEY",
+  "XIAOMI_TOKEN_PLAN_AMS_API_KEY",
+  "XIAOMI_TOKEN_PLAN_SGP_API_KEY",
+  "COPILOT_GITHUB_TOKEN"
 ] as const
 
 const resource = <A extends { close: () => Promise<void> }>(start: () => Promise<A>) =>
@@ -150,6 +208,7 @@ for (const kind of ["openai-chat", "openai-responses", "anthropic", "google"]) {
       yield* Effect.acquireRelease(
         Effect.sync(() => {
           for (const [k, v] of Object.entries(env)) vi.stubEnv(k, v)
+          scrubProviderEnvironment()
         }),
         () => Effect.sync(() => vi.unstubAllEnvs())
       )
@@ -168,8 +227,8 @@ for (const kind of ["openai-chat", "openai-responses", "anthropic", "google"]) {
       assert.isUndefined(headers["openai-organization"])
       assert.isUndefined(headers["openai-project"])
       assert.notInclude(JSON.stringify(mock.requests().at(-1)!.body), '"prompt_cache_retention":"24h"')
-      for (const [name, value] of Object.entries(env))
-        assert.equal(process.env[name], value, "SDK isolation must not mutate the host environment")
+      for (const name of Object.keys(env))
+        assert.isUndefined(process.env[name], "startup must remove ambient SDK configuration")
       const run = yield* api.GetRunContext({ versionId: version.id })
       const sent = mock.requests().at(-1)!
       assert.equal(sent.path, baselineSent.path, "environment must not change endpoint selection")
@@ -328,11 +387,13 @@ it.live("Google uses the pinned transport in a fresh Node process with environme
     const config = testConfig()
     const moduleUrl = (path: string) => new URL(path, import.meta.url).href
     const source = `
-      import { Effect, Layer } from ${JSON.stringify(import.meta.resolve("effect"))};
-      import * as Database from ${JSON.stringify(moduleUrl("../src/db/Database.ts"))};
-      import * as Network from ${JSON.stringify(moduleUrl("../src/net/Network.ts"))};
-      import { Secrets, makeSecrets } from ${JSON.stringify(moduleUrl("../src/secrets.ts"))};
-      import { googleGenerativeAIApi } from ${JSON.stringify(moduleUrl("../src/providers/sdk.ts"))};
+      import { scrubProviderEnvironment } from ${JSON.stringify(moduleUrl("../src/providerEnvironment.ts"))};
+      scrubProviderEnvironment();
+      const { Effect, Layer } = await import(${JSON.stringify(import.meta.resolve("effect"))});
+      const Database = await import(${JSON.stringify(moduleUrl("../src/db/Database.ts"))});
+      const Network = await import(${JSON.stringify(moduleUrl("../src/net/Network.ts"))});
+      const { Secrets, makeSecrets } = await import(${JSON.stringify(moduleUrl("../src/secrets.ts"))});
+      const { googleGenerativeAIApi } = await import(${JSON.stringify(moduleUrl("../src/providers/sdk.ts"))});
       await Effect.runPromise(Effect.gen(function*(){
         const network = yield* Network.Network;
         yield* network.setInstance({proxyUrl:process.argv[3],bypass:[],forceProxy:false});
@@ -441,4 +502,34 @@ it.live("Google captures and Version errors scrub the configured proxy's credent
     for (const value of [proxyUrl, "synthetic-google-proxy-password"])
       assert.notInclude(JSON.stringify({ run, events, stored: yield* savedContexts(config.dataDir) }), value)
   }).pipe(Effect.scoped, Effect.provide(Layer.merge(serverLayer(config), ProviderBuiltins.layer)))
+})
+
+it("scrubs future SDK variables by prefix and preserves server settings", () => {
+  const env: NodeJS.ProcessEnv = {
+    OPENAI_FUTURE_OPTION: "synthetic",
+    google_genai_future: "synthetic",
+    AWS_BEARER_TOKEN_BEDROCK_NEW: "synthetic",
+    HOST: "127.0.0.1",
+    PORT: "0",
+    SECRET_KEY: "synthetic-server",
+    NODE_ENV: "production"
+  }
+  scrubProviderEnvironment(env)
+  assert.deepEqual(env, { HOST: "127.0.0.1", PORT: "0", SECRET_KEY: "synthetic-server", NODE_ENV: "production" })
+})
+it("refuses a scrub prefix that overlaps server configuration before deleting anything", () => {
+  const env = { OPENAI_FUTURE_SERVER_SETTING: "synthetic", OPENAI_API_KEY: "synthetic-key" }
+  assert.throws(
+    () => scrubProviderEnvironment(env, ["OPENAI_FUTURE_SERVER_SETTING"]),
+    /server.*OPENAI_FUTURE_SERVER_SETTING/
+  )
+  assert.equal(env.OPENAI_API_KEY, "synthetic-key")
+})
+
+it("server configuration declares environment names for the startup overlap guard", () => {
+  for (const file of ["../src/config.ts", "../src/dev/runMain.ts"])
+    assert.notMatch(
+      readFileSync(new URL(file, import.meta.url), "utf8"),
+      /Config\.\w+\([^\n]*"[A-Z][A-Z_]+"|process\.env\.[A-Z_]+/
+    )
 })

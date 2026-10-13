@@ -1577,3 +1577,263 @@ describe("pure pieces", () => {
     )
   })
 })
+
+it.live("Google's REST adapter preserves fragmented SSE, thinking, tools and cache usage", () =>
+  Effect.gen(function* () {
+    const server = yield* mock((_request, res) => {
+      res.writeHead(200, { "content-type": "text/event-stream" })
+      const chunks = [
+        {
+          responseId: "synthetic-response",
+          candidates: [
+            { content: { parts: [{ text: "Think", thought: true, thoughtSignature: "thinking-signature" }] } }
+          ]
+        },
+        { candidates: [{ content: { parts: [{ text: "Synthetic ", thoughtSignature: "text-signature" }] } }] },
+        {
+          candidates: [
+            {
+              content: {
+                parts: [
+                  { text: "answer" },
+                  { functionCall: { name: "lookup", args: { place: "harbor" } }, thoughtSignature: "tool-signature" }
+                ]
+              },
+              finishReason: "STOP"
+            }
+          ],
+          usageMetadata: {
+            promptTokenCount: 120,
+            cachedContentTokenCount: 100,
+            candidatesTokenCount: 6,
+            thoughtsTokenCount: 3,
+            totalTokenCount: 129,
+            syntheticExtraUsage: 7
+          }
+        }
+      ]
+      const wire = chunks.map((c) => `data: ${JSON.stringify(c)}\r\n\r\n`).join("")
+      // Split the JSON strings and CRLF delimiters, rather than relying on socket chunks.
+      for (let i = 0; i < wire.length; i += 7) res.write(wire.slice(i, i + 7))
+      res.end()
+    })
+    const registry = yield* ProviderRegistry
+    const rawChunks: unknown[] = []
+    yield* registry.observers.register({
+      id: "synthetic-google-observer",
+      appliesTo: () => true,
+      observe: (data) => {
+        rawChunks.push(data)
+      }
+    })
+    const writer = yield* Database.Writer
+    const providers = yield* Providers.Providers
+    const userId = (yield* writer.EnsureUser({ handle: "ana", displayName: "Ana" })).id as UserId
+    const connection = yield* providers.createConnection({
+      userId,
+      kind: "google",
+      settings: settings(server.url),
+      apiKey: "synthetic-google-key"
+    })
+    const model = yield* writer.AddUserModel({
+      userId,
+      connectionId: connection.id,
+      key: "gemini-2.5-pro",
+      overrides: { reasoning: true }
+    })
+    const events = yield* collect(
+      providers.stream({
+        userId,
+        connectionId: connection.id,
+        modelId: model.id,
+        context,
+        options: { reasoning: "low" },
+        attribution: { purpose: "generation" }
+      })
+    )
+    const done = events.find((e) => e.type === "done")!
+    if (done.type !== "done") return assert.fail("no final message")
+    assert.equal(done.message.responseId, "synthetic-response")
+    assert.equal(done.message.stopReason, "toolUse")
+    assert.deepEqual(
+      done.message.content.map((b) => b.type),
+      ["thinking", "text", "toolCall"]
+    )
+    assert.equal(done.counts.cacheRead, 100)
+    assert.equal(done.counts.inputUncached, 20)
+    assert.equal(done.counts.reasoning, 3)
+    assert.equal(
+      done.message.content[0]!.type === "thinking" && done.message.content[0]!.thinkingSignature,
+      "thinking-signature"
+    )
+    const reader = yield* Database.Reader
+    const ledger = (yield* reader.ListLlmRequests({ userId, limit: 1, before: null }))[0]!
+    assert.equal(ledger.counts.cacheRead, 100)
+    assert.include(JSON.stringify(rawChunks), '"syntheticExtraUsage":7')
+    const body = server.requests()[0]!.body!
+    assert.deepEqual(body.systemInstruction, { parts: [{ text: "You are the narrator." }] })
+    assert.deepEqual((body.generationConfig as Record<string, unknown>).thinkingConfig, {
+      includeThoughts: true,
+      thinkingBudget: 2048
+    })
+  }).pipe(Effect.scoped, Effect.provide(layer()))
+)
+
+it.live("stopping Google aborts its HTTP stream and closes the ledger row", () =>
+  Effect.gen(function* () {
+    let closed = false
+    const server = yield* mock((_request, res) => {
+      res.writeHead(200, { "content-type": "text/event-stream" })
+      res.write(`data: ${JSON.stringify({ candidates: [{ content: { parts: [{ text: "Synthetic" }] } }] })}\n\n`)
+      res.on("close", () => {
+        closed = true
+      })
+    })
+    const writer = yield* Database.Writer
+    const providers = yield* Providers.Providers
+    const userId = (yield* writer.EnsureUser({ handle: "ana", displayName: "Ana" })).id as UserId
+    const connection = yield* providers.createConnection({
+      userId,
+      kind: "google",
+      settings: settings(server.url),
+      apiKey: "synthetic-google-key"
+    })
+    const model = yield* writer.AddUserModel({ userId, connectionId: connection.id, key: "gemini-x", overrides: {} })
+    yield* collect(
+      providers
+        .stream({
+          userId,
+          connectionId: connection.id,
+          modelId: model.id,
+          context,
+          attribution: { purpose: "generation" }
+        })
+        .pipe(Stream.takeUntil((e) => e.type === "text"))
+    )
+    const reader = yield* Database.Reader
+    const [row] = yield* reader.ListLlmRequests({ userId, limit: 1, before: null })
+    assert.equal(row!.status, "aborted")
+    yield* Effect.sleep(50)
+    assert.isTrue(closed)
+  }).pipe(Effect.scoped, Effect.provide(layer()))
+)
+it.live("Google refuses cross-origin redirects without retrying or sending the key onward", () =>
+  Effect.gen(function* () {
+    const evil = yield* mock((_r, res) => json(res, 200, {}))
+    const server = yield* mock((_r, res) => {
+      res.writeHead(307, { location: evil.url + "/steal" })
+      res.end()
+    })
+    const writer = yield* Database.Writer
+    const providers = yield* Providers.Providers
+    const userId = (yield* writer.EnsureUser({ handle: "ana", displayName: "Ana" })).id as UserId
+    const connection = yield* providers.createConnection({
+      userId,
+      kind: "google",
+      settings: settings(server.url),
+      apiKey: "synthetic-google-key"
+    })
+    const model = yield* writer.AddUserModel({ userId, connectionId: connection.id, key: "gemini-x", overrides: {} })
+    const error = yield* collect(
+      providers.stream({
+        userId,
+        connectionId: connection.id,
+        modelId: model.id,
+        context,
+        attribution: { purpose: "generation" }
+      })
+    ).pipe(Effect.flip, Effect.map(asProviderError))
+    assert.equal(error.reason, "unusable")
+    assert.include(error.message, "refused a redirect")
+    assert.lengthOf(server.requests(), 1)
+    assert.lengthOf(evil.requests(), 0)
+  }).pipe(Effect.scoped, Effect.provide(layer()))
+)
+
+it.live("Google applies a custom thinking-level map once and keeps tool call ids unique", () =>
+  Effect.gen(function* () {
+    const server = yield* mock((_r, res) =>
+      sse(
+        res,
+        [
+          {
+            candidates: [
+              {
+                content: {
+                  parts: [
+                    { functionCall: { id: "synthetic-call", name: "lookup", args: { place: "harbor" } } },
+                    { functionCall: { id: "synthetic-call", name: "lookup", args: { place: "dock" } } }
+                  ]
+                },
+                finishReason: "STOP"
+              }
+            ]
+          }
+        ],
+        { done: false }
+      )
+    )
+    const registry = yield* ProviderRegistry
+    yield* registry.kinds.register({
+      ...registry.kinds.get("google")!,
+      catalog: async () => ({
+        "gemini-3-flash": {
+          id: "gemini-3-flash",
+          name: "Synthetic",
+          api: "google-generative-ai",
+          provider: "google",
+          baseUrl: server.url,
+          reasoning: true,
+          input: ["text"],
+          contextWindow: 8192,
+          maxTokens: 4096,
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+          headers: { "X-Shared": "synthetic-catalog-header" }
+        }
+      })
+    })
+    const writer = yield* Database.Writer
+    const providers = yield* Providers.Providers
+    const userId = (yield* writer.EnsureUser({ handle: "ana", displayName: "Ana" })).id as UserId
+    const connection = yield* providers.createConnection({
+      userId,
+      kind: "google",
+      settings: settings(server.url),
+      apiKey: "synthetic-google-key"
+    })
+    yield* providers.setHeaders(
+      userId,
+      connection.id,
+      { "x-shared": "synthetic-connection-header" },
+      connection.rowVersion
+    )
+    const model = yield* writer.AddUserModel({
+      userId,
+      connectionId: connection.id,
+      key: "gemini-3-flash",
+      overrides: { reasoning: true, thinkingLevels: { low: "medium", medium: "high" } }
+    })
+    const events = yield* collect(
+      providers.stream({
+        userId,
+        connectionId: connection.id,
+        modelId: model.id,
+        context,
+        options: { reasoning: "low" },
+        attribution: { purpose: "generation" }
+      })
+    )
+    assert.equal(server.requests()[0]!.headers["x-shared"], "synthetic-connection-header")
+    const body = server.requests()[0]!.body!
+    assert.deepEqual((body.generationConfig as Record<string, unknown>).thinkingConfig, {
+      includeThoughts: true,
+      thinkingLevel: "MEDIUM"
+    })
+    const done = events.find((e) => e.type === "done")!
+    if (done.type !== "done") return assert.fail("no final message")
+    const calls = done.message.content.filter((b) => b.type === "toolCall")
+    assert.lengthOf(calls, 2)
+    assert.equal(calls[0]!.id, "synthetic-call")
+    assert.notEqual(calls[0]!.id, calls[1]!.id)
+  }).pipe(Effect.scoped, Effect.provide(layer()))
+)

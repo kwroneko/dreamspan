@@ -34,7 +34,6 @@ COPY packages/server/package.json packages/server/
 COPY packages/server/src packages/server/src
 COPY --from=build /app/packages/client/dist packages/client/dist
 COPY --from=build /app/packages/server/dist/workers packages/server/dist/workers
-COPY --from=build /app/packages/server/dist/providers packages/server/dist/providers
 RUN mkdir -p /data && chown node:node /data
 USER node
 VOLUME /data

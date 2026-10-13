@@ -56,3 +56,60 @@ for (const secretKey of [undefined, "synthetic-server-secret"]) {
     })
   }
 }
+
+for (const entry of ["src/main.ts", "src/dev/main.ts"]) {
+  it(`scrubs SDK configuration before ${entry} starts and keeps server configuration`, async () => {
+    const fixture = tempDir("startup-scrub")
+    const probe = join(fixture, "probe.mjs")
+    writeFileSync(
+      probe,
+      `process.once('SIGTERM', () => {
+      const keys = ['OPENAI_FUTURE_OPTION','ANTHROPIC_API_KEY','GOOGLE_GENAI_USE_VERTEXAI','http_proxy','NODE_USE_ENV_PROXY'];
+      console.log('scrub-result:' + JSON.stringify({removed:keys.every(k=>process.env[k]===undefined),
+        server:process.env.SECRET_KEY==='synthetic-server-secret' && process.env.PORT==='0' && process.env.HOST==='127.0.0.1'}));
+    });`
+    )
+    const child = spawn(process.execPath, ["--no-wasm-code-gc", "--import", probe, entry], {
+      cwd: resolve(import.meta.dirname, ".."),
+      env: {
+        ...process.env,
+        HOST: "127.0.0.1",
+        PORT: "0",
+        DATA_DIR: fixture,
+        DB_WORKERS: "source",
+        SECRET_KEY: "synthetic-server-secret",
+        SECRET_KEY_FILE: undefined,
+        NODE_ENV: "test",
+        OPENAI_FUTURE_OPTION: "synthetic",
+        ANTHROPIC_API_KEY: "synthetic",
+        GOOGLE_GENAI_USE_VERTEXAI: "true",
+        http_proxy: "http://127.0.0.1:9",
+        NODE_USE_ENV_PROXY: "1"
+      },
+      stdio: ["ignore", "pipe", "pipe"]
+    })
+    let output = "",
+      stopping = false
+    child.stdout.on("data", (chunk) => {
+      output += chunk
+      if (output.includes("Listening on") && !stopping) {
+        stopping = true
+        child.kill("SIGTERM")
+      }
+    })
+    child.stderr.on("data", (chunk) => (output += chunk))
+    const exited = new Promise<number | null>((done, fail) => {
+      child.once("exit", done)
+      child.once("error", fail)
+    })
+    const timer = setTimeout(() => child.kill("SIGKILL"), 20000)
+    try {
+      assert.equal(await exited, 0, output)
+      assert.include(output, 'scrub-result:{"removed":true,"server":true}')
+    } finally {
+      clearTimeout(timer)
+      if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL")
+      await exited
+    }
+  })
+}

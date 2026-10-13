@@ -1,7 +1,6 @@
 // Bundles the worker entry points (the database's and the format workers') into single
 // tree-shaken files, and stamps them with the sources they came from. Why bundles:
 // ARCHITECTURE.md §3.6.
-import { buildProviders } from "./build-providers.ts"
 import { fileURLToPath } from "node:url"
 import { build } from "rolldown"
 import { writeStamp } from "../src/db/workerStamp.ts"
@@ -9,7 +8,6 @@ import { writeStamp } from "../src/db/workerStamp.ts"
 const WORKERS = { writer: "db/writer.ts", reader: "db/reader.ts", formats: "importer/worker.ts" } as const
 
 export const buildWorkers = async (outDir = fileURLToPath(new URL("../dist/workers", import.meta.url))) => {
-  await buildProviders()
   const moduleIds: Array<string> = []
   for (const [name, source] of Object.entries(WORKERS)) {
     const { output } = await build({

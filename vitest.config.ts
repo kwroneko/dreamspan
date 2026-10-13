@@ -16,6 +16,7 @@ export default defineConfig({
           root: "packages/server",
           include: ["test/**/*.test.ts"],
           environment: "node",
+          setupFiles: [join(import.meta.dirname, "packages/server/test/support/environment.ts")],
           testTimeout: 30_000,
           // Builds the worker bundles once per run, and checks the run leaves no temporary files.
           globalSetup: [join(import.meta.dirname, "packages/server/test/support/globalSetup.ts")],
