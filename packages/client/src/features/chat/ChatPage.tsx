@@ -361,7 +361,7 @@ function ChatSurface({ session, leaf, slot }: { session: ChatSession; leaf: Slot
             Back to the latest branch
           </Link>
         )}
-        <div className="flex gap-1">
+        <div className="flex flex-wrap gap-1">
           <Button variant="ghost" onClick={() => setPanel("cast")}>
             Cast
           </Button>

@@ -120,7 +120,12 @@ export const failedJob = async (dataDir: string, chatId: ChatId, entries: Readon
   return id
 }
 
-export const count = async (dataDir: string, table: string) => {
-  const [rows] = await run(dataDir, [{ sql: `SELECT count(*) AS n FROM ${table}` }])
+/** Rows of a table, in one chat when `chatId` is given. */
+export const count = async (dataDir: string, table: string, chatId?: ChatId) => {
+  const [rows] = await run(dataDir, [
+    chatId === undefined
+      ? { sql: `SELECT count(*) AS n FROM ${table}` }
+      : { sql: `SELECT count(*) AS n FROM ${table} WHERE chat_id = ?`, params: [chatId] }
+  ])
   return rows![0]!["n"] as number
 }

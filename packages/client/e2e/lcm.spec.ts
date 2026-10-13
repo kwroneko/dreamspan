@@ -233,10 +233,10 @@ for (const [name, viewport] of [
       await page.waitForTimeout(1000)
       expect(await count(server().dataDir, "summarization_jobs")).toBe(jobs)
       expect(provider.completions.length).toBe(requests)
-      expect(await count(server().dataDir, "summary_reruns")).toBe(1)
+      expect(await count(server().dataDir, "summary_reruns", fixture.chatId)).toBe(1)
       await row.getByRole("button", { name: /^Cancel re-summarizing messages 1–4/ }).click()
       await expect(row.getByText("Re-summarizes with the next reply")).toHaveCount(0)
-      expect(await count(server().dataDir, "summary_reruns")).toBe(0)
+      expect(await count(server().dataDir, "summary_reruns", fixture.chatId)).toBe(0)
     })
 
     test("a job that gave up is shown as failed and can be asked to retry with the next reply", async ({ page }) => {
@@ -250,7 +250,7 @@ for (const [name, viewport] of [
       await expect(jobs).toContainText("The model refused three times.")
       await jobs.getByRole("button", { name: /^Retry messages 9–11 with the next reply/ }).click()
       await expect(jobs.getByText("Retries with the next reply")).toBeVisible()
-      expect(await count(server().dataDir, "summary_reruns")).toBeGreaterThan(0)
+      expect(await count(server().dataDir, "summary_reruns", fixture.chatId)).toBeGreaterThan(0)
     })
 
     test("the coverage rail draws a bar per summary by level; stale ones are marked; a click opens the summary", async ({
