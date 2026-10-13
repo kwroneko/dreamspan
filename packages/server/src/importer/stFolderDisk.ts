@@ -3,7 +3,6 @@
 // in parts cut at line ends as the browser upload sends it. Plain file reads on the main
 // thread; parsing stays in the format workers.
 import { open, opendir, readdir, realpath, stat } from "node:fs/promises"
-import { homedir } from "node:os"
 import { dirname, isAbsolute, join } from "node:path"
 import { classifyStPath, ST_CHAT_PART_BYTES } from "@rp/shared/stFolder.ts"
 import { FolderListing, StFolderEntry, StFolderUnreadable } from "@rp/shared/stImportApi.ts"
@@ -130,12 +129,12 @@ const looksLikeSt = async (folder: string) => {
   }
 }
 
-/** A folder's subfolders, hidden ones left out, for the import page's folder browser. */
-export const listFolder = (path: string | null) =>
+/** A folder's subfolders, hidden ones left out, for the import page's folder browser; `start` when `path` is null. */
+export const listFolder = (path: string | null, start: string) =>
   Effect.tryPromise({
     try: async () => {
       if (path !== null && !isAbsolute(path)) throw new Refused("Enter the folder's full path.")
-      const folder = await realpath(path ?? homedir())
+      const folder = await realpath(path ?? start)
       const names: Array<string> = []
       let truncated = false
       for await (const entry of await opendir(folder)) {

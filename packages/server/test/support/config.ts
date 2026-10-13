@@ -37,6 +37,7 @@ export const testConfig = (overrides: Partial<AppConfigShape> = {}): AppConfigSh
   publicOrigins: [],
   loopbackRequiresLogin: true,
   adminUser: Option.none(),
+  importStartDir: Option.none(),
   adminPassword: Option.none(),
   adminPasswordFile: Option.none(),
   clientDist: join(tmpdir(), "rp-no-client"),

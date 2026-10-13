@@ -4,7 +4,9 @@ import { type AppApi, CurrentUser } from "@rp/shared/api.ts"
 import { Forbidden, NotFound, ServerError } from "@rp/shared/errors.ts"
 import { classifyStPath } from "@rp/shared/stFolder.ts"
 import { StFolderUnreadable } from "@rp/shared/stImportApi.ts"
-import { Effect } from "effect"
+import { homedir } from "node:os"
+import { Effect, Option } from "effect"
+import { AppConfig } from "../config.ts"
 import { ChatHub } from "../chat/ChatHub.ts"
 import { Writer } from "../db/Database.ts"
 import { StImports } from "../importer/StImports.ts"
@@ -21,10 +23,12 @@ export const makeStImportHandlers = Effect.gen(function* () {
   const imports = yield* StImports
   const writer = yield* Writer
   const hub = yield* ChatHub
+  const config = yield* AppConfig
+  const start = Option.getOrElse(config.importStartDir, homedir)
   return {
     StartStImport: ({ unsupported }) =>
       Effect.flatMap(CurrentUser, (user) => Effect.map(imports.start(user, unsupported), (importId) => ({ importId }))),
-    ListFolder: ({ path }) => Effect.andThen(adminOnly, listFolder(path)),
+    ListFolder: ({ path }) => Effect.andThen(adminOnly, listFolder(path, start)),
     ScanStFolder: ({ path }) => Effect.andThen(adminOnly, scanStFolder(path)),
     ImportStFolderFile: ({ importId, root, path, size, modifiedMs, start, part, card, orphan }) =>
       Effect.gen(function* () {

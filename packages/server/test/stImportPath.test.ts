@@ -4,17 +4,23 @@
 // browser upload's tests (stImport.test.ts) cover what the import does with the files; this
 // checks that the same folder read from disk gives the same import. Non-admins are refused
 // in isolation.test.ts.
-import { appendFileSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs"
+import { appendFileSync, mkdirSync, mkdtempSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
+import { afterAll } from "vitest"
 import { assert, layer } from "@effect/vitest"
 import { classifyStPath, findStRoots, orderStChats, ST_FILE_ORDER } from "@rp/shared/stFolder.ts"
 import type { StFileResult, StFolderEntry } from "@rp/shared/stImportApi.ts"
-import { Effect } from "effect"
+import { Effect, Option } from "effect"
 import { client, serverLayer, testConfig } from "./support/config.ts"
 import { largeChat, stFolder } from "./support/stFolder.ts"
 
-const config = testConfig()
+// Where the folder browser starts (IMPORT_START_DIR), with an ST data folder in it.
+const startDir = mkdtempSync(join(tmpdir(), "rp-st-start-"))
+mkdirSync(join(startDir, "st-data/default-user"), { recursive: true })
+mkdirSync(join(startDir, "notes"))
+afterAll(() => rmSync(startDir, { recursive: true, force: true }))
+const config = { ...testConfig(), importStartDir: Option.some(startDir) }
 const folder = new Map(stFolder("ST/data/default-user/"))
 // More than one 8 MiB part.
 const LARGE = "ST/data/default-user/chats/Bob/Bob - very long.jsonl"
@@ -142,6 +148,21 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
       const error = yield* Effect.flip(
         api.ImportStFolderFile({ ...request, start: first.next, part: 1, card: "none", orphan: false })
       )
+      assert.strictEqual(error._tag, "StFolderUnreadable")
+    })
+  )
+
+  it.effect("the folder browser starts at IMPORT_START_DIR and marks ST's data folder", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const listing = yield* api.ListFolder({ path: null })
+      assert.strictEqual(listing.path, realpathSync(startDir))
+      assert.deepStrictEqual(listing.folders, [
+        { name: "notes", st: false },
+        { name: "st-data", st: true }
+      ])
+      assert.strictEqual(listing.parent, realpathSync(join(startDir, "..")))
+      const error = yield* Effect.flip(api.ListFolder({ path: "relative" }))
       assert.strictEqual(error._tag, "StFolderUnreadable")
     })
   )

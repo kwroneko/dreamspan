@@ -61,6 +61,8 @@ const AppConfigFromEnv = Config.all({
    * admin, else "admin").
    */
   adminUser: Config.option(Config.String(serverEnvironment.ADMIN_USER)),
+  /** Where the import page's folder browser starts, and its path field's first value: the home folder when unset. */
+  importStartDir: Config.option(Config.String(serverEnvironment.IMPORT_START_DIR)),
   adminPassword: Config.option(Config.Redacted(serverEnvironment.ADMIN_PASSWORD)),
   adminPasswordFile: Config.option(Config.String(serverEnvironment.ADMIN_PASSWORD_FILE)),
   publicOrigins: Config.Array(Schema.String, serverEnvironment.PUBLIC_ORIGINS).pipe(

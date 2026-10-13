@@ -9,8 +9,9 @@ import type { StHiddenRun, StImportReport, StLinkChoice } from "@rp/shared/stImp
 import type { StRoot } from "@rp/shared/stFolder.ts"
 import { Link } from "@tanstack/react-router"
 import { AsyncResult } from "effect/reactivity"
-import { useContext, useRef, useState } from "react"
+import { useContext, useMemo, useRef, useState } from "react"
 import { ErrorAlert, useAction } from "../../actions.tsx"
+import { AppClient } from "../../rpc.ts"
 import { sessionAtom } from "../../session.ts"
 import { Button, buttonClass } from "../../ui/Button.tsx"
 import { Field, Input } from "../../ui/Field.tsx"
@@ -234,7 +235,12 @@ export function StImportPage() {
   const action = useAction()
   // Each file's import reports its own failure in the list below, not as the page's error.
   const fileAction = useAction()
-  const [folderPath, setFolderPath] = useState("")
+  // Null until the user types or opens a folder: the field shows where the browser starts
+  // (IMPORT_START_DIR, else the home folder), so a deployment can point it at ST's data.
+  const [typedPath, setFolderPath] = useState<string | null>(null)
+  const startAtom = useMemo(() => AppClient.query("ListFolder", { path: null }), [])
+  const start = useAtomValue(startAtom)
+  const folderPath = typedPath ?? (AsyncResult.isSuccess(start) ? start.value.path : "")
   // Where the browser starts: a typed folder once looked in; null is the home folder.
   const [browsed, setBrowsed] = useState<string | null>(null)
   const [files, setFiles] = useState<ReadonlyArray<StFound> | null>(null)
