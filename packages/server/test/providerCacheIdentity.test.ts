@@ -1,7 +1,7 @@
 // Real SDK payloads, HTTP and worker ledger; synthetic requests only.
 import { assert, it } from "@effect/vitest"
 import { Effect, Fiber, Layer, Stream } from "effect"
-import type { ServerResponse } from "node:http"
+import type { IncomingHttpHeaders, ServerResponse } from "node:http"
 import type { AssembledRequest, ModelInput } from "../src/assembler/types.ts"
 import { providerRequest } from "../src/assembler/wire.ts"
 import * as Database from "../src/db/Database.ts"
@@ -45,17 +45,23 @@ const request: AssembledRequest = {
     seed: -1
   }
 }
-const setup = (kind: string) =>
+const setup = (
+  kind: string,
+  compat: Record<string, unknown> = {},
+  policy: { provider?: string; modelKey?: string; cacheTtlOverride?: boolean } = {}
+) =>
   Effect.gen(function* () {
-    const pending: Array<{ body: Record<string, unknown>; res: ServerResponse }> = []
+    const pending: Array<{ body: Record<string, unknown>; headers: IncomingHttpHeaders; res: ServerResponse }> = []
     const server = yield* Effect.acquireRelease(
       Effect.promise(() =>
         startMockProvider((r, res) => {
-          pending.push({ body: r.body!, res })
+          pending.push({ body: r.body!, headers: r.headers, res })
         })
       ),
       (server) => Effect.promise(() => server.close())
     )
+    const registry = yield* ProviderRegistry
+    if (policy.provider) yield* registry.kinds.register({ ...registry.kinds.get(kind)!, piProvider: policy.provider })
     const providers = yield* Providers.Providers
     const reader = yield* Database.Reader
     const writer = yield* Database.Writer
@@ -66,7 +72,7 @@ const setup = (kind: string) =>
       settings: {
         name: "Synthetic",
         baseUrl: server.url,
-        compat: {},
+        compat,
         cacheTtlS: 300,
         maxConcurrent: null,
         presetOverrideRefId: null
@@ -77,7 +83,7 @@ const setup = (kind: string) =>
     const model = yield* writer.AddUserModel({
       userId,
       connectionId: connection.id,
-      key: "mock-model",
+      key: policy.modelKey ?? "mock-model",
       overrides: { cacheBreakpoints }
     })
     const api = (yield* ProviderRegistry).kinds.get(kind)!.api
@@ -89,13 +95,14 @@ const setup = (kind: string) =>
       key: model.key,
       cacheBreakpoints,
       cacheTtlS: 300,
+      cacheTtlOverride: policy.cacheTtlOverride ?? true,
       prefill: "none",
       context: null,
       presetOverride: null
     }
-    const wire = providerRequest(request, input)
-    const start = (extra: Providers.StreamRequest["options"] = {}) =>
+    const start = (extra: Providers.StreamRequest["options"] = {}, assembled: AssembledRequest = request) =>
       Effect.gen(function* () {
+        const wire = providerRequest(assembled, input)
         const events: Providers.ProviderEvent[] = []
         const fiber = yield* providers
           .stream({
@@ -103,7 +110,7 @@ const setup = (kind: string) =>
             connectionId: connection.id,
             modelId: model.id,
             context: wire.context,
-            inspection: { request, model: input },
+            inspection: { request: assembled, model: input },
             options: { payload: wire.payload, breakpoints: wire.breakpoints, ...extra },
             attribution: { purpose: "generation" }
           })
@@ -117,7 +124,7 @@ const setup = (kind: string) =>
           )
         return { events, fiber }
       })
-    return { pending, start, reader, userId }
+    return { pending, start, reader, userId, providers, connection }
   })
 const held = (events: Providers.ProviderEvent[]) => events.some((e) => e.type === "waiting-cache" && e.waiting)
 const tools = (name: string) => [
@@ -125,6 +132,7 @@ const tools = (name: string) => [
 ]
 const cases: Array<{
   name: string
+  assembled?: AssembledRequest
   kind: string
   a: Providers.StreamRequest["options"]
   b: Providers.StreamRequest["options"]
@@ -137,6 +145,7 @@ const cases: Array<{
   },
   {
     name: "different structured prefix blocks",
+    assembled: { ...request, breakpoints: [{ message: 1, reason: "history" }] },
     kind: "anthropic",
     a: {
       payload: {
@@ -199,9 +208,9 @@ for (const c of cases)
   it.live(`${c.name} starts independently`, () =>
     Effect.gen(function* () {
       const f = yield* setup(c.kind)
-      const a = yield* f.start(c.a)
+      const a = yield* f.start(c.a, c.assembled)
       yield* eventually(() => f.pending.length === 1)
-      const b = yield* f.start(c.b)
+      const b = yield* f.start(c.b, c.assembled)
       yield* eventually(() => f.pending.length === 2 || held(b.events))
       assert.strictEqual(f.pending.length, 2, "the leader cannot warm this follower")
       assert.isFalse(held(b.events))
@@ -217,7 +226,7 @@ for (const c of cases)
   )
 
 // Warmth must use the same identity as the in-flight gate, even for callers without a rollout.
-const finish = (kind: string, res: ServerResponse) => {
+const finish = (kind: string, res: ServerResponse, cacheRead?: number) => {
   if (kind === "anthropic")
     anthropicSse(res, [
       {
@@ -245,7 +254,12 @@ const finish = (kind: string, res: ServerResponse) => {
             status: "completed",
             model: "mock-model",
             output: [],
-            usage: { input_tokens: 100, output_tokens: 0, total_tokens: 100 }
+            usage: {
+              input_tokens: 100,
+              output_tokens: 0,
+              total_tokens: 100,
+              ...(cacheRead === undefined ? {} : { input_tokens_details: { cached_tokens: cacheRead } })
+            }
           }
         }
       ],
@@ -256,24 +270,24 @@ for (const c of cases.slice(0, 4))
   it.live(`${c.name} also separates historical warmth`, () =>
     Effect.gen(function* () {
       const f = yield* setup(c.kind)
-      const prime = yield* f.start(c.a)
+      const prime = yield* f.start(c.a, c.assembled)
       yield* eventually(() => f.pending.length === 1)
       finish(c.kind, f.pending[0]!.res)
       yield* Fiber.join(prime.fiber)
       assert.isTrue(prime.events.some((e) => e.type === "done"))
 
-      const warmA = yield* f.start(c.a)
+      const warmA = yield* f.start(c.a, c.assembled)
       yield* eventually(() => f.pending.length === 2)
-      const warmB = yield* f.start(c.a)
+      const warmB = yield* f.start(c.a, c.assembled)
       yield* eventually(() => f.pending.length === 3 || held(warmB.events))
       assert.strictEqual(f.pending.length, 3, "identical tools, content and routing are already covered")
       assert.isFalse(held(warmB.events))
       yield* Fiber.interrupt(warmA.fiber)
       yield* Fiber.interrupt(warmB.fiber)
 
-      const cold = yield* f.start(c.b)
+      const cold = yield* f.start(c.b, c.assembled)
       yield* eventually(() => f.pending.length === 4)
-      const follower = yield* f.start(c.b)
+      const follower = yield* f.start(c.b, c.assembled)
       yield* eventually(() => f.pending.length === 5 || held(follower.events))
       assert.strictEqual(f.pending.length, 4, "the old identity cannot warm a different request")
       assert.isTrue(held(follower.events))
@@ -288,3 +302,209 @@ for (const c of cases.slice(0, 4))
       assert.isFalse(JSON.stringify(rows).includes("c3ludGhldGlj"), "raw image blocks never enter the ledger")
     }).pipe(Effect.scoped, Effect.provide(layer()))
   )
+
+const changedTail: AssembledRequest = {
+  ...request,
+  messages: [request.messages[0]!, { role: "user", content: "A different one-turn direction." }]
+}
+
+it.live("explicit trailing markers do not split a common cold reusable prefix", () =>
+  Effect.gen(function* () {
+    const f = yield* setup("anthropic")
+    const a = yield* f.start()
+    yield* eventually(() => f.pending.length === 1)
+    const b = yield* f.start({}, changedTail)
+    yield* eventually(() => f.pending.length === 2 || held(b.events))
+    assert.strictEqual(f.pending.length, 1)
+    assert.isTrue(held(b.events))
+    finish("anthropic", f.pending[0]!.res)
+    yield* Fiber.join(a.fiber)
+    yield* eventually(() => f.pending.length === 2)
+    assert.deepStrictEqual(f.pending[0]!.body.system, f.pending[1]!.body.system)
+    assert.notDeepEqual(f.pending[0]!.body.messages, f.pending[1]!.body.messages)
+    finish("anthropic", f.pending[1]!.res)
+    yield* Fiber.join(b.fiber)
+  }).pipe(Effect.scoped, Effect.provide(layer()))
+)
+
+for (const change of ["tail", "unused session"] as const)
+  it.live(`a warm Anthropic reusable prefix stays warm with a changed ${change}`, () =>
+    Effect.gen(function* () {
+      const f = yield* setup("anthropic")
+      const prime = yield* f.start({ sessionId: "chat-one" })
+      yield* eventually(() => f.pending.length === 1)
+      finish("anthropic", f.pending[0]!.res)
+      yield* Fiber.join(prime.fiber)
+      const options = { sessionId: change === "tail" ? "chat-one" : "chat-two" }
+      const assembled = change === "tail" ? changedTail : request
+      const a = yield* f.start(options, assembled)
+      yield* eventually(() => f.pending.length === 2)
+      const b = yield* f.start(options, assembled)
+      yield* eventually(() => f.pending.length === 3 || held(b.events))
+      assert.strictEqual(f.pending.length, 3)
+      assert.isFalse(held(b.events))
+      if (change === "unused session") {
+        assert.deepStrictEqual(f.pending[0]!.body, f.pending[1]!.body)
+        for (const p of f.pending)
+          for (const header of ["x-session-affinity", "x-session-id", "session_id", "x-client-request-id"])
+            assert.isUndefined(p.headers[header])
+      }
+      yield* Fiber.interrupt(a.fiber)
+      yield* Fiber.interrupt(b.fiber)
+    }).pipe(Effect.scoped, Effect.provide(layer()))
+  )
+
+it.live("Anthropic top-level automatic cache control coalesces and records warmth", () =>
+  Effect.gen(function* () {
+    const f = yield* setup("anthropic")
+    const options = {
+      payload: {
+        cache_control: { type: "ephemeral" },
+        system: [{ type: "text", text: request.messages[0]!.content }],
+        messages: [{ role: "user", content: "Reply." }]
+      }
+    }
+    const a = yield* f.start(options)
+    yield* eventually(() => f.pending.length === 1)
+    const b = yield* f.start(options)
+    yield* eventually(() => f.pending.length === 2 || held(b.events))
+    assert.strictEqual(f.pending.length, 1)
+    assert.isTrue(held(b.events))
+    assert.deepStrictEqual(f.pending[0]!.body.cache_control, { type: "ephemeral" })
+    assert.notInclude(JSON.stringify(f.pending[0]!.body.system), "cache_control")
+    assert.notInclude(JSON.stringify(f.pending[0]!.body.messages), "cache_control")
+    finish("anthropic", f.pending[0]!.res)
+    yield* Fiber.join(a.fiber)
+    yield* eventually(() => f.pending.length === 2)
+    finish("anthropic", f.pending[1]!.res)
+    yield* Fiber.join(b.fiber)
+    const warmA = yield* f.start(options)
+    yield* eventually(() => f.pending.length === 3)
+    const warmB = yield* f.start(options)
+    yield* eventually(() => f.pending.length === 4 || held(warmB.events))
+    assert.strictEqual(f.pending.length, 4, "top-level cache coverage survives the leader")
+    assert.isFalse(held(warmB.events))
+    yield* Fiber.interrupt(warmA.fiber)
+    yield* Fiber.interrupt(warmB.fiber)
+  }).pipe(Effect.scoped, Effect.provide(layer()))
+)
+
+for (const format of ["native", "openrouter"] as const)
+  it.live(`actual Anthropic ${format} affinity headers separate gates and warmth`, () =>
+    Effect.gen(function* () {
+      const f = yield* setup("anthropic", {
+        sendSessionAffinityHeaders: true,
+        ...(format === "openrouter" ? { sessionAffinityFormat: "openrouter" } : {})
+      })
+      const a = yield* f.start({ sessionId: "chat-one" })
+      yield* eventually(() => f.pending.length === 1)
+      const b = yield* f.start({ sessionId: "chat-two" })
+      yield* eventually(() => f.pending.length === 2 || held(b.events))
+      assert.strictEqual(f.pending.length, 2)
+      const header = format === "native" ? "x-session-affinity" : "x-session-id"
+      assert.strictEqual(f.pending[0]!.headers[header], "chat-one")
+      assert.strictEqual(f.pending[1]!.headers[header], "chat-two")
+      finish("anthropic", f.pending[0]!.res)
+      yield* Fiber.join(a.fiber)
+      const follower = yield* f.start({ sessionId: "chat-two" })
+      yield* eventually(() => held(follower.events) || f.pending.length === 3)
+      assert.strictEqual(f.pending.length, 2, "chat-one's cached bytes cannot warm chat-two's route")
+      assert.isTrue(held(follower.events))
+      finish("anthropic", f.pending[1]!.res)
+      yield* Fiber.join(b.fiber)
+      yield* eventually(() => f.pending.length === 3)
+      finish("anthropic", f.pending[2]!.res)
+      yield* Fiber.join(follower.fiber)
+    }).pipe(Effect.scoped, Effect.provide(layer()))
+  )
+
+it.live("an actual affinity header override preserves warmth across unused SDK session values", () =>
+  Effect.gen(function* () {
+    const f = yield* setup("anthropic", { sendSessionAffinityHeaders: true })
+    yield* f.providers.setHeaders(
+      f.userId,
+      f.connection.id,
+      { "x-session-affinity": "fixed-route" },
+      f.connection.rowVersion
+    )
+    const prime = yield* f.start({ sessionId: "chat-one" })
+    yield* eventually(() => f.pending.length === 1)
+    finish("anthropic", f.pending[0]!.res)
+    yield* Fiber.join(prime.fiber)
+    const a = yield* f.start({ sessionId: "chat-two" })
+    yield* eventually(() => f.pending.length === 2)
+    const b = yield* f.start({ sessionId: "chat-three" })
+    yield* eventually(() => f.pending.length === 3 || held(b.events))
+    assert.strictEqual(f.pending.length, 3)
+    assert.isTrue(f.pending.every((p) => p.headers["x-session-affinity"] === "fixed-route"))
+    assert.isFalse(held(b.events))
+    yield* Fiber.interrupt(a.fiber)
+    yield* Fiber.interrupt(b.fiber)
+  }).pipe(Effect.scoped, Effect.provide(layer()))
+)
+
+it.live("later explicit checkpoints remain available as historical coverage", () =>
+  Effect.gen(function* () {
+    const f = yield* setup("anthropic")
+    const prime = yield* f.start()
+    yield* eventually(() => f.pending.length === 1)
+    finish("anthropic", f.pending[0]!.res)
+    yield* Fiber.join(prime.fiber)
+    const extended = { ...request, breakpoints: [{ message: 1, reason: "history" as const }] }
+    const a = yield* f.start({}, extended)
+    yield* eventually(() => f.pending.length === 2)
+    const b = yield* f.start({}, extended)
+    yield* eventually(() => f.pending.length === 3 || held(b.events))
+    assert.strictEqual(f.pending.length, 3)
+    assert.isFalse(held(b.events))
+    yield* Fiber.interrupt(a.fiber)
+    yield* Fiber.interrupt(b.fiber)
+  }).pipe(Effect.scoped, Effect.provide(layer()))
+)
+
+for (const mode of ["documented", "unknown", "fixed-hit"] as const)
+  it.live(`scheduling uses the final ${mode} cache lifetime`, () =>
+    Effect.gen(function* () {
+      const f = yield* setup(
+        "openai-responses",
+        {},
+        {
+          cacheTtlOverride: false,
+          ...(mode === "documented" ? { modelKey: "gpt-5.6" } : {}),
+          ...(mode === "fixed-hit" ? { provider: "cerebras" } : {})
+        }
+      )
+      const prime = yield* f.start()
+      yield* eventually(() => f.pending.length === 1)
+      finish("openai-responses", f.pending[0]!.res, mode === "fixed-hit" ? 100 : 0)
+      yield* Fiber.join(prime.fiber)
+      const a = yield* f.start()
+      yield* eventually(() => f.pending.length === 2)
+      const b = yield* f.start()
+      yield* eventually(() => f.pending.length === 3 || held(b.events))
+      assert.strictEqual(f.pending.length, mode === "documented" ? 3 : 2)
+      assert.strictEqual(held(b.events), mode !== "documented")
+      yield* Fiber.interrupt(b.fiber)
+      yield* Fiber.interrupt(a.fiber)
+    }).pipe(Effect.scoped, Effect.provide(layer()))
+  )
+
+it.live("stagger hits use normalized Fireworks header counts", () =>
+  Effect.gen(function* () {
+    const f = yield* setup("openai-responses")
+    const a = yield* f.start()
+    yield* eventually(() => f.pending.length === 1)
+    const b = yield* f.start()
+    yield* eventually(() => held(b.events))
+    finish("openai-responses", f.pending[0]!.res)
+    yield* Fiber.join(a.fiber)
+    yield* eventually(() => f.pending.length === 2)
+    f.pending[1]!.res.setHeader("fireworks-cached-prompt-tokens", "75")
+    finish("openai-responses", f.pending[1]!.res)
+    yield* Fiber.join(b.fiber)
+    const rows = yield* f.reader.ListLlmRequests({ userId: f.userId, limit: 10, before: null })
+    const follower = rows.find((row) => row.cacheStagger !== null)!
+    assert.strictEqual(follower.counts.cacheRead, 75)
+    assert.isTrue(follower.cacheStagger!.hit)
+  }).pipe(Effect.scoped, Effect.provide(layer()))
+)

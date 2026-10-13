@@ -7,13 +7,8 @@ import { randomUUID } from "node:crypto"
 import { Effect, Layer, Schema, Stream } from "effect"
 import { NodeRuntime } from "@effect/platform-node"
 import type { UserId } from "@rp/shared/domain.ts"
-import { providerRequest } from "../src/assembler/wire.ts"
 import type { AssembledRequest, ModelInput } from "../src/assembler/types.ts"
-import * as Database from "../src/db/Database.ts"
-import * as Network from "../src/net/Network.ts"
 import { scrubProviderEnvironment } from "../src/providerEnvironment.ts"
-import { ProviderRegistry } from "../src/providers/registry.ts"
-import { makeSecrets, Secrets } from "../src/secrets.ts"
 
 const { values } = parseArgs({
   options: {
@@ -53,6 +48,11 @@ const config = Schema.decodeUnknownSync(
 const key = process.env[config.keyEnv]
 if (!key) throw new Error(`Set ${config.keyEnv} to the key to use.`)
 scrubProviderEnvironment()
+const { providerRequest } = await import("../src/assembler/wire.ts")
+const Database = await import("../src/db/Database.ts")
+const Network = await import("../src/net/Network.ts")
+const { ProviderRegistry } = await import("../src/providers/registry.ts")
+const { makeSecrets, Secrets } = await import("../src/secrets.ts")
 const Builtins = await import("../src/providers/builtins.ts")
 const { Providers, layer: providersLayer } = await import("../src/providers/Providers.ts")
 const scratch = resolve(values.scratch!)

@@ -10,7 +10,7 @@ import { inspectWire } from "../assembler/inspection.ts"
 import { markWireSources, sentWire, wireContext } from "../assembler/wire.ts"
 import type { AssembledRequest, ModelInput, InspectionInputs } from "../assembler/types.ts"
 import { defaultCacheRelease, makeCacheStagger } from "./cacheStagger.ts"
-import { cacheIdentity } from "./cacheIdentity.ts"
+import { cacheIdentity, routeCacheIdentity } from "./cacheIdentity.ts"
 import { mappingCapabilities } from "./mapping.ts"
 import type {
   Api,
@@ -787,6 +787,12 @@ export const layer = (options: ProvidersOptions = {}) =>
         const requestId = uuidv7() as LlmRequestId
         const attribution = request.attribution
         const state = {
+          cachePolicy: null as {
+            readonly ttlS: number | null
+            readonly fixed: boolean
+            readonly source: string | null
+          } | null,
+          pendingIdentity: undefined as ReturnType<typeof cacheIdentity> | undefined,
           cacheIdentity: null as { readonly prefixes: ReadonlyArray<string>; readonly expiresAt: number | null } | null,
           capture: emptyCapture() as Capture,
           status: null as number | null,
@@ -829,7 +835,11 @@ export const layer = (options: ProvidersOptions = {}) =>
                   id: requestId,
                   status: error === null ? "complete" : error.reason === "aborted" ? "aborted" : "failed",
                   endedAt: Date.now(),
-                  cacheIdentity: state.cacheIdentity,
+                  // Fixed caches keep their write's expiry; a read cannot start a new lifetime.
+                  cacheIdentity:
+                    state.cachePolicy?.fixed && !(counts.cacheRead === 0 || (counts.cacheWrite ?? 0) > 0)
+                      ? null
+                      : state.cacheIdentity,
                   firstTokenAt: state.firstTokenAt,
                   responseModel: metadata(
                     message.responseModel ?? (message.model !== model.key ? message.model : null)
@@ -888,21 +898,62 @@ export const layer = (options: ProvidersOptions = {}) =>
           // pi-ai reports onResponse only for successful responses (the SDKs throw first on
           // errors), so the status and Retry-After are read here, on every response.
           const routed = fetchFor(prepared, onRoute)
-          const observed: typeof fetch = async (input, init) => {
-            // pi turns a thrown fetch into "Connection error.", which would be retried as a
-            // network failure; a refused redirect is kept and reported as it is.
-            const response = await routed(input, init).catch((error: unknown) => {
-              if (error instanceof RedirectRefused) state.refused = error.message
-              throw error
-            })
-            captureUsageHeaders(response.headers, state.capture)
-            state.status = response.status
-            state.retryAfterMs = parseRetryAfter(response.headers.get("retry-after") ?? undefined)
-            return response
-          }
 
           const message = yield* Effect.tryPromise({
             try: async (signal) => {
+              let recordSent: (() => Promise<void>) | undefined
+              const observed: typeof fetch = async (input, init) => {
+                if (state.pendingIdentity) {
+                  const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined))
+                  const identity = routeCacheIdentity(state.pendingIdentity, headers)
+                  state.pendingIdentity = undefined
+                  const ttl = state.cachePolicy?.ttlS
+                  state.cacheIdentity = {
+                    prefixes: identity.prefixes,
+                    expiresAt: ttl == null ? null : Date.now() + ttl * 1000
+                  }
+                  const key = identity.requested
+                  if (key) {
+                    const warm =
+                      ttl != null &&
+                      (await Effect.runPromise(
+                        fromStorage(
+                          reader.CachePrefixWarm({
+                            userId: request.userId,
+                            connectionId: prepared.connection.id,
+                            modelId: model.id,
+                            now: Date.now(),
+                            prefix: key
+                          })
+                        ),
+                        { signal }
+                      ))
+                    if (!warm) {
+                      state.gate = stagger.join(key, requestId, prepared.kind.cacheRelease ?? defaultCacheRelease)
+                      if (state.gate.leader) {
+                        if (state.gate.waiting) offer({ type: "waiting-cache", waiting: true })
+                        try {
+                          state.release = await state.gate.wait(signal)
+                        } finally {
+                          offer({ type: "waiting-cache", waiting: false })
+                        }
+                      }
+                    }
+                  }
+                }
+                await recordSent?.()
+                recordSent = undefined
+                // SDK-created affinity headers are now available, before any HTTP is sent.
+                // Preserve refused redirects instead of retrying the SDK's generic network error.
+                const response = await routed(input, init).catch((error: unknown) => {
+                  if (error instanceof RedirectRefused) state.refused = error.message
+                  throw error
+                })
+                captureUsageHeaders(response.headers, state.capture)
+                state.status = response.status
+                state.retryAfterMs = parseRetryAfter(response.headers.get("retry-after") ?? undefined)
+                return response
+              }
               const options = request.options ?? {}
               const target: RequestTarget = { kind: prepared.kind.id, api: prepared.api }
               const transforms = registry.transforms.list().filter((t) => t.appliesTo(target))
@@ -951,15 +1002,24 @@ export const layer = (options: ProvidersOptions = {}) =>
                     (current, t) => t.transform(current, { target, messages: request.context.messages, breakpoints }),
                     initial
                   )
+                  const policy = documentedCachePolicy(
+                    { provider: prepared.kind.piProvider, api: prepared.api, model: model.key },
+                    final
+                  )
+                  const selected = request.inspection?.model
+                  state.cachePolicy = {
+                    ttlS: selected?.cacheTtlOverride ? (selected.cacheTtlS ?? null) : (policy?.ttlS ?? null),
+                    fixed: policy?.fixed ?? false,
+                    source: selected?.cacheTtlOverride ? null : (policy?.source ?? null)
+                  }
                   if (sources && request.inspection && state.gate === undefined) {
                     const input = request.inspection
                     const mappedModel = { ...input.model, mapping: sources.mapping }
-                    const prefixes = cacheIdentity({
+                    const identity = cacheIdentity({
                       payload: final,
                       api: prepared.api,
                       mode: mappedModel.cacheBreakpoints,
                       retention: options.cacheRetention,
-                      sessionId: options.sessionId,
                       sources,
                       end: Math.max(-1, ...input.request.breakpoints.map((b) => b.message)),
                       scope: [
@@ -975,70 +1035,32 @@ export const layer = (options: ProvidersOptions = {}) =>
                         sources.mapping?.revision
                       ]
                     })
-                    const key = prefixes.at(-1)
-                    if (key) {
-                      const ttl = mappedModel.cacheTtlS
-                      state.cacheIdentity = { prefixes, expiresAt: ttl == null ? null : Date.now() + ttl * 1000 }
-                      const warm =
-                        ttl != null &&
-                        (await Effect.runPromise(
-                          fromStorage(
-                            reader.CachePrefixWarm({
-                              userId: request.userId,
-                              connectionId: prepared.connection.id,
-                              modelId: model.id,
-                              now: Date.now(),
-                              prefix: key
-                            })
-                          ),
-                          { signal }
-                        ))
-                      if (!warm) {
-                        state.gate = stagger.join(key, requestId, prepared.kind.cacheRelease ?? defaultCacheRelease)
-                        if (state.gate.leader) {
-                          if (state.gate.waiting) offer({ type: "waiting-cache", waiting: true })
-                          try {
-                            state.release = await state.gate.wait(signal)
-                          } finally {
-                            offer({ type: "waiting-cache", waiting: false })
-                          }
-                        }
-                      }
-                    }
+                    state.pendingIdentity = identity.prefixes.length > 0 ? identity : undefined
                   }
-                  if (sources && request.attribution.rolloutId) {
-                    const policy = documentedCachePolicy(
-                      { provider: prepared.kind.piProvider, api: prepared.api, model: model.key },
-                      final
-                    )
-                    const selected = request.inspection!.model
-                    const wire = {
-                      ...sentWire(final, sources, prepared.scrub),
-                      cache: {
-                        ttlS: selected.cacheTtlOverride ? (selected.cacheTtlS ?? null) : (policy?.ttlS ?? null),
-                        fixed: policy?.fixed ?? false,
-                        source: selected.cacheTtlOverride ? null : (policy?.source ?? null)
-                      }
-                    }
-                    await Effect.runPromise(
-                      fromStorage(
-                        writer.RecordSentContext({
-                          userId: request.userId,
-                          rolloutId: request.attribution.rolloutId,
-                          wire: JSON.stringify(
-                            request.inspection?.display
-                              ? inspectWire(
-                                  wire,
-                                  request.inspection.request,
-                                  request.inspection.display,
-                                  prepared.scrub
-                                )
-                              : wire
-                          )
-                        })
-                      ),
-                      { signal }
-                    )
+                  const rolloutId = request.attribution.rolloutId
+                  if (sources && rolloutId) {
+                    const wire = { ...sentWire(final, sources, prepared.scrub), cache: state.cachePolicy }
+                    recordSent = () =>
+                      Effect.runPromise(
+                        fromStorage(
+                          writer.RecordSentContext({
+                            userId: request.userId,
+                            rolloutId,
+                            wire: JSON.stringify(
+                              request.inspection?.display
+                                ? inspectWire(
+                                    wire,
+                                    request.inspection.request,
+                                    request.inspection.display,
+                                    prepared.scrub
+                                  )
+                                : wire
+                            )
+                          })
+                        ),
+                        { signal }
+                      )
+                    if (!prepared.kind.acceptsFetch) await recordSent()
                   }
                   return final
                 }

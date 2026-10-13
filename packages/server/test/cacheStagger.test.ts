@@ -15,40 +15,52 @@ type Fixture = Effect.Success<ReturnType<typeof generateReply>>
 
 const answer = (res: ServerResponse, read: boolean, kind: string, firstOnly = false) => {
   const events: ReadonlyArray<Record<string, unknown>> =
-    kind === "openai-chat"
-      ? completionChunks(["A synthetic reply."], {
-          prompt_tokens: 120,
-          completion_tokens: 4,
-          prompt_tokens_details: { cached_tokens: read ? 100 : 0 }
-        })
-      : [
+    kind === "google"
+      ? [
           {
-            type: "message_start",
-            message: {
-              id: "msg_test",
-              type: "message",
-              role: "assistant",
-              model: "mock-model",
-              content: [],
-              stop_reason: null,
-              usage: {
-                input_tokens: 20,
-                cache_read_input_tokens: read ? 100 : 0,
-                cache_creation_input_tokens: read ? 0 : 100,
-                output_tokens: 1
-              }
+            candidates: [{ content: { parts: [{ text: "A synthetic reply." }] }, finishReason: "STOP" }],
+            usageMetadata: {
+              promptTokenCount: 120,
+              cachedContentTokenCount: read ? 100 : 0,
+              candidatesTokenCount: 4,
+              totalTokenCount: 124
             }
-          },
-          { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
-          { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "A synthetic reply." } },
-          { type: "content_block_stop", index: 0 },
-          {
-            type: "message_delta",
-            delta: { stop_reason: "end_turn", stop_sequence: null },
-            usage: { output_tokens: 4 }
-          },
-          { type: "message_stop" }
+          }
         ]
+      : kind === "openai-chat"
+        ? completionChunks(["A synthetic reply."], {
+            prompt_tokens: 120,
+            completion_tokens: 4,
+            prompt_tokens_details: { cached_tokens: read ? 100 : 0 }
+          })
+        : [
+            {
+              type: "message_start",
+              message: {
+                id: "msg_test",
+                type: "message",
+                role: "assistant",
+                model: "mock-model",
+                content: [],
+                stop_reason: null,
+                usage: {
+                  input_tokens: 20,
+                  cache_read_input_tokens: read ? 100 : 0,
+                  cache_creation_input_tokens: read ? 0 : 100,
+                  output_tokens: 1
+                }
+              }
+            },
+            { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+            { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "A synthetic reply." } },
+            { type: "content_block_stop", index: 0 },
+            {
+              type: "message_delta",
+              delta: { stop_reason: "end_turn", stop_sequence: null },
+              usage: { output_tokens: 4 }
+            },
+            { type: "message_stop" }
+          ]
   res.writeHead(200, { "content-type": "text/event-stream" })
   const send = (event: Record<string, unknown>) =>
     res.write(`${kind === "anthropic" ? `event: ${event.type}\n` : ""}data: ${JSON.stringify(event)}\n\n`)
@@ -65,7 +77,8 @@ const answer = (res: ServerResponse, read: boolean, kind: string, firstOnly = fa
 const fixture = (api: Api, kind = "anthropic") =>
   Effect.gen(function* () {
     const cached = new Set<string>()
-    const prefix = (body: Record<string, unknown> | null) => JSON.stringify([body?.system, body?.messages])
+    const prefix = (body: Record<string, unknown> | null) =>
+      JSON.stringify([body?.system ?? body?.systemInstruction, body?.messages ?? body?.contents])
     const mock = yield* Effect.acquireRelease(
       Effect.promise(() =>
         startMockProvider((request, res) => {
@@ -146,14 +159,14 @@ const ledger = (api: Api, ids: ReadonlyArray<VersionId>) =>
     .pipe(Effect.map((rows) => rows.filter((r) => r.versionId !== null && ids.includes(r.versionId))))
 
 describe("cold-cache stagger at the generation boundary", () => {
-  for (const kind of ["anthropic", "openai-chat"]) {
+  for (const kind of ["anthropic", "openai-chat", "google"]) {
     it.live(
       `${kind}: cold parallel swipes write once and followers read after the first chunk`,
       () =>
         Effect.gen(function* () {
           const api = yield* client()
           const f = yield* fixture(api, kind)
-          yield* makeCold(api, f, kind === "openai-chat")
+          yield* makeCold(api, f, kind !== "anthropic")
           const leader = yield* swipe(api, f)
           yield* eventually(() => f.pending.length === 1)
           const followers = [yield* swipe(api, f), yield* swipe(api, f), yield* swipe(api, f)]
@@ -201,6 +214,36 @@ describe("cold-cache stagger at the generation boundary", () => {
       60_000
     )
   }
+
+  it.live("different Generate directions share a cold history gate", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const f = yield* fixture(api)
+      yield* makeCold(api, f)
+      const path = yield* api.ReadPath({ chatId: f.chat.id, leafSlotId: null, range: { _tag: "Bottom" }, limit: 20 })
+      const parentSlotId = path.entries[1]!.slotId
+      const leader = (yield* posted(
+        api.Generate({ chatId: f.chat.id, parentSlotId, branch: true, direction: "Describe the sea." })
+      )).entry
+      yield* eventually(() => f.pending.length === 1)
+      const follower = (yield* posted(
+        api.Generate({ chatId: f.chat.id, parentSlotId, branch: true, direction: "Describe the mountains." })
+      )).entry
+      yield* eventually(() => f.pending.length === 2 || waiting(f, follower.version.id))
+      assert.strictEqual(f.pending.length, 1)
+      assert.isTrue(waiting(f, follower.version.id))
+      f.emit(0)
+      yield* eventually(() => f.pending.length === 2)
+      f.emit(1)
+      const ids = [leader.version.id, follower.version.id]
+      yield* eventually(() => ids.every((id) => finished(f.events, id) !== undefined))
+      const rows = yield* ledger(api, ids)
+      assert.strictEqual(
+        rows.find((r) => r.versionId === follower.version.id)?.cacheStagger?.leaderRequestId,
+        rows.find((r) => r.versionId === leader.version.id)?.id
+      )
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
+  )
 
   it.live("a shorter warm history does not bypass a new cold extension", () =>
     Effect.gen(function* () {
