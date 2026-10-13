@@ -139,6 +139,9 @@ export const migrations = {
         `CREATE TRIGGER summarization_jobs_rollout_same_chat${i ? "_update" : ""} BEFORE ${event} ON summarization_jobs WHEN NEW.rollout_id IS NOT NULL AND (SELECT chat_id FROM rollouts WHERE id = NEW.rollout_id) IS NOT NEW.chat_id BEGIN SELECT RAISE(ABORT, 'summary rollout must belong to its job chat'); END`
     ),
     `CREATE INDEX summarization_jobs_chat_status ON summarization_jobs(chat_id, status, level)`
+  ]),
+  "0025_summary_prefix": runAll([
+    `ALTER TABLE summarization_jobs ADD COLUMN prefix_json TEXT CHECK (prefix_json IS NULL OR json_valid(prefix_json))`
   ])
 }
 

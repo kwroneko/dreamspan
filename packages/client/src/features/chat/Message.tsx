@@ -131,6 +131,7 @@ export const Message = memo(function Message({
   session,
   highlighted,
   outOfContext,
+  summarized,
   branchLeaf,
   onBranch
 }: {
@@ -138,6 +139,7 @@ export const Message = memo(function Message({
   session: ChatSession
   highlighted: boolean
   outOfContext: boolean
+  summarized: boolean
   /** The leaf of the branch shown, when it isn't the chat's active one: links keep to it. */
   branchLeaf: SlotId | null
   /** Switches to another of the alternate branches at this message. */
@@ -212,6 +214,7 @@ export const Message = memo(function Message({
     <article
       aria-label={model ? "Reply" : "Your message"}
       data-slot={entry.slotId}
+      data-summarized={summarized || undefined}
       data-out-of-context={outOfContext || undefined}
       className={`flex touch-pan-y flex-col gap-2 rounded-lg border px-4 py-3 ${outOfContext ? "text-muted border-dashed " : ""}${
         highlighted
@@ -234,6 +237,8 @@ export const Message = memo(function Message({
           <span role="img" aria-label="Hidden from context" title="Hidden from context">
             👻
           </span>
+        ) : summarized ? (
+          <Badge>Summarized</Badge>
         ) : outOfContext ? (
           <span role="img" aria-label="Not in the context" title="Not in the context">
             ⊘

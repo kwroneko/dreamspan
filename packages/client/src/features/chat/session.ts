@@ -63,7 +63,7 @@ export interface ChatView {
   readonly queue: ReadonlyArray<QueuedMessage>
   /** Whether the provider's cache is likely warm for the next reply (DESIGN §5.5); null without an estimate. */
   readonly cache: CacheWarmth | null
-  readonly history: Pick<NextContext, "leafSlotId" | "historyStart"> | null
+  readonly history: Pick<NextContext, "leafSlotId" | "historyStart" | "summarizedThrough"> | null
 }
 
 type Client = AppClient["Service"]
@@ -542,7 +542,11 @@ export class ChatSession {
         }
         this.contextReads++
         // The same estimate again (another tab subscribed) changes nothing on screen.
-        const history = { leafSlotId: event.leafSlotId, historyStart: event.historyStart }
+        const history = {
+          leafSlotId: event.leafSlotId,
+          historyStart: event.historyStart,
+          summarizedThrough: event.summarizedThrough
+        }
         if (
           JSON.stringify(event.warmth) === JSON.stringify(this.view.cache) &&
           JSON.stringify(history) === JSON.stringify(this.view.history)

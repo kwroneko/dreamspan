@@ -190,14 +190,6 @@ const presetStage: AssemblerStage = {
         chat: bindings[""] ?? null,
         connection: assembly.model?.presetOverride ?? null
       })
-      if (assembly.request.summaryMaxTokens !== undefined)
-        assembly.preset = {
-          ...assembly.preset,
-          doc: {
-            ...assembly.preset.doc,
-            samplers: { ...assembly.preset.doc.samplers, openai_max_tokens: assembly.request.summaryMaxTokens }
-          }
-        }
       return assembly
     })
 }
@@ -969,6 +961,8 @@ const placedNotes = (assembly: Assembly, cards: ReadonlyArray<CardInput>) => {
     if (place)
       placed.unshift({
         place,
+        id: "lcm:placement",
+        baseline: 0,
         text: () => {
           const piece = env.piece(
             "lcm:placement",
@@ -1282,8 +1276,13 @@ const composeStage = sync("compose", (assembly) => {
   }
   const placement = (placed: typeof notes) => {
     const collection = [...baseCollection]
+    const layer: Array<StMessage> = placed.flatMap(({ text, place }) =>
+      place.at === "chat" && hasSummary(assembly, text.piece)
+        ? [{ role: place.role, content: text.text, pieces: [text.piece], kind: "summary" as const }]
+        : []
+    )
     const injections: Array<Injection> = placed.flatMap(({ text, place }) =>
-      place.at === "chat" ? [{ depth: place.depth, role: place.role, text }] : []
+      place.at === "chat" && !hasSummary(assembly, text.piece) ? [{ depth: place.depth, role: place.role, text }] : []
     )
     for (const e of stLore.filter((e) => e.entry.position === "at_depth"))
       injections.push({
@@ -1313,7 +1312,68 @@ const composeStage = sync("compose", (assembly) => {
         beside.push({ message: { role: place.role, content: text.text, pieces: [text.piece], kind }, at: place.at })
       }
     }
-    return { collection, beside, injections }
+    for (let i = collection.length - 1; i >= 0; i--) {
+      const prompt = collection[i]!
+      if (prompt.piece === null || !hasSummary(assembly, prompt.piece) || disabled(prompt.identifier)) continue
+      if (prompt.injection_position === "absolute") {
+        layer.unshift({ role: prompt.role, content: prompt.content, pieces: [prompt.piece], kind: "summary" })
+        collection.splice(i, 1)
+      } else if (i > collection.findIndex((p) => p.identifier === "chatHistory")) {
+        collection.splice(i, 1)
+        collection.splice(
+          Math.max(
+            0,
+            collection.findIndex((p) => p.identifier === "chatHistory")
+          ),
+          0,
+          prompt
+        )
+      }
+    }
+    if (
+      collection.findIndex((p) => p.identifier === "main") > collection.findIndex((p) => p.identifier === "chatHistory")
+    ) {
+      for (let i = beside.length - 1; i >= 0; i--) {
+        const { message } = beside[i]!
+        if (!message.pieces.some((p) => hasSummary(assembly, p))) continue
+        layer.unshift({ ...message, kind: "summary" })
+        beside.splice(i, 1)
+      }
+    }
+    const hasSummaryPrompt = collection.some(
+      (p) =>
+        p.piece !== null &&
+        !disabled(p.identifier) &&
+        hasSummary(assembly, p.piece) &&
+        (p.system_prompt === false || ["main", "nsfw", "jailbreak", "enhanceDefinitions"].includes(p.identifier))
+    )
+    if (
+      assembly.lcm?.summaries.length &&
+      !hasSummaryPrompt &&
+      !layer.length &&
+      !beside.some(({ message }) => message.pieces.some((p) => hasSummary(assembly, p)))
+    )
+      layer.push({
+        role: "system",
+        content: (mode.st ? "Summary: " : "") + layerText(assembly.lcm.summaries, mode.st),
+        pieces: [...(assembly.lcmPieces ?? [])],
+        kind: "summary"
+      })
+    const renderedLayer = assembly.lcm ? layerText(assembly.lcm.summaries, mode.st) : ""
+    const embeddedCost = (content: string) =>
+      renderedLayer ? tokensOf({ content }) - tokensOf({ content: content.split(renderedLayer).join("") }) : 0
+    const layerCost =
+      layer.reduce((n, message) => n + tokensOf(message), 0) +
+      collection.reduce(
+        (n, prompt) =>
+          n + (prompt.piece !== null && hasSummary(assembly, prompt.piece) ? embeddedCost(prompt.content) : 0),
+        0
+      ) +
+      beside.reduce(
+        (n, { message }) => n + (message.pieces.some((p) => hasSummary(assembly, p)) ? tokensOf(message) : 0),
+        0
+      )
+    return { collection, beside, injections, layer, layerCost }
   }
   const baseCollection = collection
   const actualPlacement = placement(notes)
@@ -1324,12 +1384,14 @@ const composeStage = sync("compose", (assembly) => {
   const reserve =
     (assembly.prefill ? tokensOf({ content: assembly.prefill }) : 0) +
     (!mode.st && assembly.lorebooks?.length ? loreAllowance(assembly) - loreCost : 0)
-  const maximum = contextBudget(assembly) - reserve
-  const desiredTarget = targetBudget(assembly) - reserve
+  let maximum = contextBudget(assembly) - reserve
+  let desiredTarget = targetBudget(assembly) - reserve
   let admittedExamples = examples
   const candidate = (start: number, budget: number, withExamples = true, reserved = false) => {
-    const { beside, collection, injections } = reserved ? reservedPlacement : actualPlacement
+    const { beside, collection, injections, layer } = reserved ? reservedPlacement : actualPlacement
     return compose({
+      layer,
+      stableExamples: assembly.lcm !== undefined,
       beside,
       collection,
       disabled,
@@ -1363,12 +1425,22 @@ const composeStage = sync("compose", (assembly) => {
       reason: "budget",
       message: "The full notes, fixed context and response reserve don't fit the maximum context size."
     })
+  const layerReserve = assembly.lcm
+    ? Math.max(0, Math.min(maximum - fixedCost, Math.ceil(contextBudget(assembly) * 0.15) - actualPlacement.layerCost))
+    : 0
+  maximum -= layerReserve
+  desiredTarget -= layerReserve
   const oldNotes = configurationChanged ? undefined : prior?.noteBudget
   const sizes = Object.fromEntries(
-    notes.map((note) => [note.id, Math.max(oldNotes?.sizes[note.id] ?? 0, note.baseline, note.text.text.length)])
+    notes
+      .filter((note) => !hasSummary(assembly, note.text.piece))
+      .map((note) => [note.id, Math.max(oldNotes?.sizes[note.id] ?? 0, note.baseline, note.text.text.length)])
   )
   const noteBudgetChanged =
-    oldNotes !== undefined && notes.some((note) => note.text.text.length > (oldNotes.sizes[note.id] ?? 0))
+    oldNotes !== undefined &&
+    notes.some(
+      (note) => !hasSummary(assembly, note.text.piece) && note.text.text.length > (oldNotes.sizes[note.id] ?? 0)
+    )
   // Only unused capacity is speculative. Actual note text is always present in both budgets.
   const allowance = Math.max(
     0,
@@ -1378,7 +1450,7 @@ const composeStage = sync("compose", (assembly) => {
     let left = characters
     reservedPlacement = placement(
       notes.map((note) => {
-        const extra = Math.min(left, sizes[note.id]! - note.text.text.length)
+        const extra = Math.min(left, Math.max(0, (sizes[note.id] ?? note.text.text.length) - note.text.text.length))
         left -= extra
         return { ...note, text: { ...note.text, text: note.text.text + "x".repeat(extra) } }
       })
@@ -1431,10 +1503,11 @@ const composeStage = sync("compose", (assembly) => {
     }
     return low
   }
-  const earlier = previous ? projected.findIndex((p) => p.entry.depth >= previous.depth) : 0
+  const earlier = previous && !assembly.lcm ? projected.findIndex((p) => p.entry.depth >= previous.depth) : 0
   let start = earlier < 0 ? projected.length : earlier
   let budget = maximum
   const mayRestore =
+    !assembly.lcm &&
     prior &&
     (contextBudget(assembly) > prior.maximum ||
       targetBudget(assembly) > prior.target ||
@@ -1442,7 +1515,8 @@ const composeStage = sync("compose", (assembly) => {
       assembly.historyRevision !== prior.revision)
   const exceeded =
     !fits(start, maximum) ||
-    (previous !== null &&
+    (!assembly.lcm &&
+      previous !== null &&
       previous !== undefined &&
       previous.depth < (assembly.history?.[0]?.depth ?? 0) &&
       (assembly.historyOmitted ?? 0) > 0)
@@ -1455,7 +1529,7 @@ const composeStage = sync("compose", (assembly) => {
     start = restored
     budget = target
     assembly.historyMove = "restore"
-  } else if (exceeded || noteBudgetChanged) {
+  } else if (exceeded || (!assembly.lcm && noteBudgetChanged)) {
     assembly.historyMove = exceeded ? "maximum" : "budget"
     start = Math.max(previous ? start : 0, earliestFit(projected.length))
     budget = target
@@ -1474,9 +1548,26 @@ const composeStage = sync("compose", (assembly) => {
       revision: assembly.historyRevision ?? 0
     }
   }
-  const composition = { ...candidate(start, budget), examplesTotal: examples.length }
+  const composition = {
+    ...candidate(start, budget),
+    historyBudget: candidate(projected.length, maximum).historyBudget,
+    examplesTotal: examples.length
+  }
   assembly.postNames = postNames
   assembly.composition = composition
+  if (assembly.lcm) {
+    const sentPieces = new Set(composition.messages.flatMap((m) => m.pieces))
+    const retained = projected.filter((p) => sentPieces.has(p.piece))
+    const truncated =
+      start > 0 || composition.historySent < composition.historyTotal || (assembly.historyOmitted ?? 0) > 0
+    const first = truncated
+      ? Math.min(need(assembly, "target").depth, ...retained.map((p) => p.entry.depth))
+      : assembly.lcm.cursorDepth + 1
+    assembly.lcmOmitted =
+      first > assembly.lcm.cursorDepth + 1 ? [{ from: assembly.lcm.cursorDepth + 2, to: first }] : []
+    assembly.lcmVerbatim =
+      first < need(assembly, "target").depth ? { from: first + 1, to: need(assembly, "target").depth } : null
+  }
   if (start > 0 || composition.historySent < composition.historyTotal || (assembly.historyOmitted ?? 0) > 0) {
     assembly.issues.push({
       kind: "history_truncated",

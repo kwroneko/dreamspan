@@ -127,6 +127,7 @@ describe("context assembly from the database", () => {
     it.live(`pins pre-boundary reductions by UTF-16 length with ${label}`, () =>
       Effect.gen(function* () {
         const { writer, reader, userId, chat, entity, state, sent } = yield* setup()
+        yield* state({ key: "lcm.settings", value: { enabled: false } })
         const chosen = yield* entity("preset", "Unicode steps", {
           ...presetDoc,
           samplers: { ...presetDoc.samplers, openai_max_context: 500, openai_max_tokens: 40 }
@@ -225,6 +226,7 @@ describe("context assembly from the database", () => {
     () =>
       Effect.gen(function* () {
         const { writer, reader, userId, chat, entity, state, sent } = yield* setup()
+        yield* state({ key: "lcm.settings", value: { enabled: false } })
         const document = {
           ...presetDoc,
           samplers: { ...presetDoc.samplers, openai_max_context: 500, openai_max_tokens: 40 }
@@ -780,7 +782,7 @@ describe("context assembly from the database", () => {
         assert.ok(result._tag === "EarlierAssemblerVersion")
         assert.strictEqual(result.storedSnapshot, json)
       }
-      assert.strictEqual(built.assemblerVersion, 13)
+      assert.strictEqual(built.assemblerVersion, 14)
       const rebuilt = yield* reader.RebuildContext({ userId, snapshot: JSON.stringify(built) })
       assert.ok(rebuilt._tag === "Rebuilt")
       assert.deepStrictEqual(JSON.parse(rebuilt.snapshot), built)

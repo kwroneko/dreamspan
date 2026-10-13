@@ -115,7 +115,6 @@ export class AssemblySources extends Context.Service<
 export interface AssemblyRequest {
   readonly summarizing?: boolean
   readonly summaryClipTokens?: number
-  readonly summaryMaxTokens?: number
   readonly now: number
   readonly timeZone: string
   /** Values drawn by an earlier assembly of this context, per piece: rebuilds it identically. */

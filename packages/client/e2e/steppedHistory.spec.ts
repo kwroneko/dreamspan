@@ -1,3 +1,4 @@
+import { fixtureSql } from "../../server/test/support/lcmFixtures.ts"
 import { expect, test } from "@playwright/test"
 import { Effect } from "effect"
 import type { ChatId, PathEntry } from "@rp/shared/chat.ts"
@@ -137,4 +138,48 @@ test("two tabs and an inactive-path deep link keep their own context boundary", 
   await expect(other.locator('[data-out-of-context="true"]')).toHaveCount(0)
   await expect(dropped).toHaveAttribute("data-out-of-context", "true")
   await other.close()
+})
+
+test("summarized messages are distinct from dropped and hidden messages", async ({ page }) => {
+  await Effect.runPromise(
+    fixtureSql(server().dataDir, [
+      {
+        sql: "INSERT INTO state_events(id,chat_id,seq,key,value_json,origin,created_at) SELECT 'lcm-on',?,coalesce(max(seq),0)+1,'lcm.settings','{\"enabled\":true}','user',1 FROM state_events WHERE chat_id=?",
+        params: [chatId, chatId]
+      },
+      {
+        sql: "INSERT INTO summary_revisions(id,summary_id,content,token_count,origin,created_at) VALUES('ui-revision','ui-summary','Synthetic summary.',5,'generated',1)"
+      },
+      {
+        sql: "INSERT INTO summaries(id,chat_id,level,selected_revision_id,first_slot_id,last_slot_id,slot_count,status,created_at) VALUES('ui-summary',?,1,'ui-revision',?,?,3,'complete',1)",
+        params: [chatId, entries[0]!.slotId, entries[2]!.slotId]
+      },
+      ...entries.slice(0, 3).map((entry, i) => ({
+        sql: "INSERT INTO summary_inputs(summary_id,ordinal,slot_id,version_id,amend_count) VALUES('ui-summary',?,?,?,0)",
+        params: [i, entry.slotId, entry.contextExcluded ? null : entry.version.id]
+      })),
+      { sql: "UPDATE summaries SET sealed=1 WHERE id='ui-summary'" }
+    ])
+  )
+  const sent = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+    api.SendMessage({
+      chatId,
+      parentSlotId: entries.at(-1)!.slotId,
+      branch: true,
+      content: "Recent raw material " + "x".repeat(700)
+    })
+  )
+  if (sent._tag !== "Posted") throw new Error("expected posted message")
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${server().url}/chats/${chatId}?leaf=${sent.entry.slotId}&slot=${entries[1]!.slotId}`)
+  const summarized = page.locator(`article[data-slot="${entries[1]!.slotId}"]`)
+  await expect(summarized).toHaveAttribute("data-summarized", "true")
+  await expect(summarized.getByText("Summarized", { exact: true })).toBeVisible()
+  await expect(summarized).not.toHaveAttribute("data-out-of-context")
+  const hidden = page.locator(`article[data-slot="${entries[0]!.slotId}"]`)
+  await expect(hidden.getByRole("img", { name: "Hidden from context", exact: true })).toBeVisible()
+  await expect(hidden).not.toHaveAttribute("data-summarized")
+  const dropped = page.locator(`article[data-slot="${entries[3]!.slotId}"]`)
+  await expect(dropped).toHaveAttribute("data-out-of-context", "true")
+  await expect(dropped).not.toHaveAttribute("data-summarized")
 })

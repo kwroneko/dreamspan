@@ -180,11 +180,18 @@ function MessageList({
               style={{ transform: `translateY(${item.start}px)` }}
             >
               <Message
+                summarized={
+                  !entry.contextExcluded &&
+                  view.history?.leafSlotId === view.leafSlotId &&
+                  view.history.summarizedThrough !== null &&
+                  entry.depth <= view.history.summarizedThrough
+                }
                 outOfContext={
                   !entry.contextExcluded &&
                   view.history?.leafSlotId === view.leafSlotId &&
                   view.history.historyStart !== null &&
-                  entry.depth < view.history.historyStart.depth
+                  entry.depth < view.history.historyStart.depth &&
+                  entry.depth > (view.history.summarizedThrough ?? -1)
                 }
                 entry={entry}
                 session={session}

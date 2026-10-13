@@ -145,7 +145,8 @@ export type CacheWarmth = typeof CacheWarmth.Type
 export const NextContext = Schema.Struct({
   warmth: Schema.NullOr(CacheWarmth),
   leafSlotId: Schema.NullOr(Schema.String),
-  historyStart: Schema.NullOr(Schema.Struct({ slotId: Schema.NullOr(Schema.String), depth: Schema.Int }))
+  historyStart: Schema.NullOr(Schema.Struct({ slotId: Schema.NullOr(Schema.String), depth: Schema.Int })),
+  summarizedThrough: Schema.NullOr(Schema.Int)
 })
 export type NextContext = typeof NextContext.Type
 

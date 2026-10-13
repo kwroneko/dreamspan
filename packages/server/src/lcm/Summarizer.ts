@@ -1,5 +1,5 @@
 import type { AssistantMessage, Message } from "@earendil-works/pi-ai"
-import type { ChatId, SlotId } from "@rp/shared/chat.ts"
+import type { ChatId, SlotId, VersionId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import type { ConnectionId, ModelId } from "@rp/shared/providers.ts"
@@ -12,7 +12,12 @@ import { ProviderError, Providers } from "../providers/Providers.ts"
 import { SummaryChecks } from "./OutputChecks.ts"
 import { summaryDraft, summaryTool, clipSummary } from "./summaryTool.ts"
 
-type Position = { readonly userId: UserId; readonly chatId: ChatId; readonly leafSlotId: SlotId }
+type Position = {
+  readonly userId: UserId
+  readonly chatId: ChatId
+  readonly leafSlotId: SlotId
+  readonly triggerVersionId?: VersionId
+}
 export class Summarizer extends Context.Service<
   Summarizer,
   {
@@ -32,6 +37,7 @@ export class Summarizer extends Context.Service<
         providers = yield* Providers,
         checks = yield* SummaryChecks
       const scope = yield* Effect.scope
+      const running = new Map<string, SummaryJob>()
       const users = new Set<UserId>(),
         due = new Map<string, { position: Position; at: number }>()
       const safe = <A, E>(effect: Effect.Effect<A, E>) =>
@@ -235,18 +241,10 @@ export class Summarizer extends Context.Service<
           users.add(position.userId)
           const p = yield* reader.PlanSummaries(position)
           if (p.enabled && p.chunks.length && ((!interactive && p.spendAhead) || (interactive && p.over))) {
-            const warmth = yield* reader
-              .CacheWarmth({ userId: position.userId, chatId: position.chatId })
-              .pipe(Effect.catch(() => Effect.succeed(null)))
             const jobs = yield* writer.EnqueueSummaries({
               ...position,
               chunks: p.chunks,
-              requestClass:
-                interactive && p.over
-                  ? "interactive"
-                  : warmth && warmth.expiresAt > Date.now() && !warmth.changed
-                    ? "idle"
-                    : "background"
+              requestClass: interactive && p.over ? "interactive" : "idle"
             })
             return { ...p, jobs: [...p.jobs, ...jobs] }
           }
@@ -266,12 +264,34 @@ export class Summarizer extends Context.Service<
                 yield* safe(plan(p.position))
               }
             for (const userId of users) {
+              const reconciled = yield* writer
+                .ReconcileSummaryJobs({
+                  userId,
+                  running: [...running.values()]
+                    .filter((j) => j.userId === userId)
+                    .map((j) => ({ id: j.id, epoch: j.epoch }))
+                })
+                .pipe(
+                  Effect.as(true),
+                  Effect.catch((error) => Effect.logWarning("LCM reconciliation failed", error).pipe(Effect.as(false)))
+                )
+              if (!reconciled) continue
               for (let n = 0; n < 2; n++) {
                 const job = yield* writer
                   .ClaimSummaryJob({ userId })
                   .pipe(Effect.catch((error) => Effect.logWarning("LCM claim failed", error).pipe(Effect.as(null))))
                 if (!job) break
-                yield* Effect.forkIn(safe(run(job)), scope)
+                running.set(job.id, job)
+                yield* Effect.forkIn(
+                  safe(run(job)).pipe(
+                    Effect.ensuring(
+                      Effect.sync(() => {
+                        running.delete(job.id)
+                      })
+                    )
+                  ),
+                  scope
+                )
               }
             }
             yield* Effect.sleep(250)

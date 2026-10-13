@@ -1,3 +1,5 @@
+import { cacheExpiry } from "./cacheExpiry.ts"
+import { applySummaryPrefix } from "../lcm/prefix.ts"
 import { summaryTail } from "../lcm/request.ts"
 // Context assembly and rebuilding in the reader workers (ARCHITECTURE §15).
 import { Effect } from "effect"
@@ -85,8 +87,7 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
             ...(taken.summaryJob
               ? {
                   summarizing: true,
-                  summaryClipTokens: taken.summaryJob.clipTokens,
-                  summaryMaxTokens: taken.request.samplers.max_tokens
+                  summaryClipTokens: taken.summaryJob.clipTokens
                 }
               : {}),
             ...(taken.loreFallback ? { loreFallback: taken.loreFallback } : {})
@@ -96,11 +97,16 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
           _tag: "Rebuilt" as const,
           snapshot: JSON.stringify({
             ...(taken.summaryJob
-              ? summaryTail({
-                  ...built,
-                  summaryJob: taken.summaryJob,
-                  request: { ...built.request, samplers: taken.request.samplers }
-                })
+              ? summaryTail(
+                  applySummaryPrefix(
+                    {
+                      ...built,
+                      summaryJob: taken.summaryJob,
+                      request: { ...built.request, samplers: taken.request.samplers }
+                    },
+                    taken.summaryJob.prefix
+                  )
+                )
               : built),
             sources: sources.pins(),
             ...(taken.wire ? { wire: taken.wire } : {})
@@ -148,7 +154,8 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
         const start = next instanceof AssemblyFailed ? fallback : (next.historyStart ?? fallback)
         const boundary = {
           leafSlotId: sources.pins().target.parentSlotId,
-          historyStart: start ? { slotId: start.slotId, depth: start.depth } : null
+          historyStart: start ? { slotId: start.slotId, depth: start.depth } : null,
+          summarizedThrough: (sources.pins().lcm?.cursorDepth ?? -1) < 0 ? null : sources.pins().lcm!.cursorDepth
         }
         if (next instanceof AssemblyFailed || !next.inputs.model || !last?.snapshot || last.model_id === null) {
           return { ...boundary, warmth: null }
@@ -169,43 +176,7 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
               : next.inputs.model.cacheTtlS
             : next.inputs.model.cacheTtlS) ?? null
         const changed = prefixChange(previous, next, yield* describer(sql, userId, chatId, [previous, next]))
-        let origin: number | null = last.started_at
-        let originSnapshot = previous
-        if ((last.cache_read ?? 0) > 0 && (last.cache_write ?? 0) === 0) {
-          // Fixed-lived caches (Cerebras, OpenRouter explicit Gemini) do not slide
-          // on a hit. Find the matching prefix's write/miss, never a newer unrelated one.
-          const candidates = yield* sql<{ started_at: number; snapshot: string; sent: string | null }>`
-            SELECT q.started_at, p.context_snapshot_json AS snapshot, p.sent_context_json AS sent
-            FROM llm_requests q JOIN rollout_payloads p ON p.rollout_id = q.rollout_id
-            WHERE q.chat_id = ${chatId} AND q.owner_user_id = ${userId} AND q.model_id = ${last.model_id}
-              AND q.started_at <= ${last.started_at} AND q.status = 'complete' AND p.context_snapshot_json IS NOT NULL
-              AND (q.cache_read = 0 OR q.cache_write > 0)
-            ORDER BY q.started_at DESC, q.id DESC LIMIT 100`
-          const descriptions = yield* describer(sql, userId, chatId, [previous])
-          let write: { startedAt: number; snapshot: ContextSnapshot } | undefined
-          for (const row of candidates) {
-            const snapshot = {
-              ...(JSON.parse(row.snapshot) as ContextSnapshot),
-              ...(row.sent ? { wire: JSON.parse(row.sent) as WireContext } : {})
-            }
-            if (prefixChange(snapshot, previous, descriptions) === null) {
-              write = { startedAt: row.started_at, snapshot }
-              break
-            }
-          }
-          // A hit proves reuse, but without its original write time cannot date expiry.
-          if (previous.wire?.cache?.fixed && !write) origin = null
-          // A later transform can change the requested mode, but a hit cannot
-          // rewrite the lifetime established by an earlier fixed-cache write.
-          if (write && (previous.wire?.cache?.fixed || write.snapshot.wire?.cache?.fixed)) {
-            origin = write.startedAt
-            originSnapshot = write.snapshot
-          }
-        }
-        const historicalTtl = originSnapshot.wire?.cache
-          ? originSnapshot.wire.cache.ttlS
-          : originSnapshot.inputs.model?.cacheTtlS
-        const expiresAt = origin === null || historicalTtl == null ? null : origin + historicalTtl * 1000
+        const expiresAt = yield* cacheExpiry(sql, userId, chatId, last, previous)
         return {
           ...boundary,
           warmth:

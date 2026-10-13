@@ -125,7 +125,7 @@ for (const [mode, anthropic] of [
         ])
         const json = rows![0]!.snapshot as string,
           snapshot = JSON.parse(json) as ContextSnapshot
-        assert.strictEqual(snapshot.assemblerVersion, 10)
+        assert.strictEqual(snapshot.assemblerVersion, 14)
         assert.strictEqual(snapshot.lcm!.cursor, second.slotId)
         assert.deepStrictEqual(
           snapshot.lcm!.selected.map((s) => s.id),
@@ -168,7 +168,8 @@ for (const [mode, anthropic] of [
         assert.isFalse(wire.context.systemPrompt?.includes("{{incvar::never}}") ?? false)
         assert.isTrue(wire.breakpoints.length >= 2)
         const warm = yield* reader.CacheWarmth({ userId: user.id, chatId: chat.id })
-        assert.isNull(warm?.changed)
+        assert.isNull(warm.warmth?.changed)
+        assert.strictEqual(warm.summarizedThrough, second.depth)
         const changed = yield* api.EditSummary({
           summaryId: summary.id,
           content: "The summary was replaced.",
@@ -177,8 +178,8 @@ for (const [mode, anthropic] of [
         })
         assert.strictEqual(changed.summary.revisionNumber, 3)
         const cold = yield* reader.CacheWarmth({ userId: user.id, chatId: chat.id })
-        assert.include(cold!.changed!.reason, "Summary")
-        assert.isAbove(cold!.changed!.tokens, 0)
+        assert.include(cold.warmth!.changed!.reason, "Summary")
+        assert.isAbove(cold.warmth!.changed!.tokens, 0)
         assert.isTrue(
           (yield* api.GetRunContext({ versionId: reply.entry.version.id })).messages
             .flatMap((m) => m.sources)

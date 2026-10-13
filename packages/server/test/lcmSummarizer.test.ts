@@ -8,7 +8,7 @@ import { eventually, finished, generateReply } from "./support/generation.ts"
 import { completeFixture, fixtureSql } from "./support/lcmFixtures.ts"
 import type { ContextSnapshot } from "../src/assembler/types.ts"
 
-for (const mode of ["direct", "tool", "refused", "partial"] as const) {
+for (const mode of ["direct", "tool", "refused", "partial", "gap"] as const) {
   const style = mode === "tool" ? "tool" : "direct"
   const config = testConfig()
   it.live(
@@ -25,7 +25,7 @@ for (const mode of ["direct", "tool", "refused", "partial"] as const) {
                 messages.at(-1)?.content?.includes("Return only the summary")
               ) {
                 summaries++
-                if (mode === "refused") {
+                if (mode === "refused" || (mode === "gap" && summaries <= 3)) {
                   sse(res, [
                     {
                       id: "refusal",
@@ -113,7 +113,19 @@ for (const mode of ["direct", "tool", "refused", "partial"] as const) {
         const { chat, events } = yield* generateReply(api, {
           connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1`, cacheTtlS: 300 },
           model: { context: 8192, tools: true },
-          preset: { openai_max_context: 8192, openai_max_tokens: 512 }
+          preset: {
+            openai_max_context: 8192,
+            openai_max_tokens: 512,
+            prompts: [
+              {
+                identifier: "main",
+                name: "Main",
+                role: "system",
+                system_prompt: true,
+                content: "Fixed instruction. {{random::" + Array.from({ length: 1000 }, (_, i) => i).join("::") + "}}"
+              }
+            ]
+          }
         })
         yield* Effect.sleep(350)
         yield* writer.AddStateEvent({
@@ -214,6 +226,27 @@ for (const mode of ["direct", "tool", "refused", "partial"] as const) {
         assert.isAbove(summaryRows.length, 0)
         assert.strictEqual(summaryRows[0]!.summary_status, mode === "partial" ? "truncated" : "complete")
         if (mode === "partial") assert.isAtLeast(summaries, 3)
+        if (mode === "gap") {
+          for (let n = 0; n < 200; n++) {
+            const [rows] = yield* fixtureSql(config.dataDir, [
+              {
+                sql: "SELECT count(*) AS n FROM summarization_jobs WHERE chat_id=? AND status IN ('pending','processing')",
+                params: [chat.id]
+              }
+            ])
+            if (Number(rows![0]!.n) === 0) break
+            yield* Effect.sleep(100)
+          }
+          const paid = summaries
+          assert.isAbove(paid, 3)
+          for (let n = 0; n < 3; n++) {
+            const retried = yield* posted(api.Generate({ chatId: chat.id, parentSlotId: leaf, branch: true }))
+            yield* eventually(() => finished(events, retried.entry.version.id) !== undefined, 60_000)
+            yield* Effect.sleep(650)
+            assert.strictEqual(summaries, paid, "replanning after a failed gap must not buy the completed ranges again")
+          }
+          return
+        }
         const summarySnapshot = JSON.parse(summaryRows[0]!.snapshot as string) as ContextSnapshot
         const [live] = yield* fixtureSql(config.dataDir, [
           {

@@ -174,7 +174,7 @@ const parent = (b: ReturnType<typeof summary>, a: ReturnType<typeof summary>, re
     revisionId
   )
 
-describe("0019 lineage and retention triggers", () => {
+describe("0023 lineage and retention triggers", () => {
   it("accepts absent effective inputs but refuses a version of another slot", () => {
     const { c, s, a } = setup()
     const other = slot(c, s)

@@ -46,6 +46,7 @@ export const generateReply = (
     readonly modelKey?: string
     readonly model: ModelOverrides
     readonly preset?: Record<string, unknown>
+    readonly example?: string
     readonly greeting?: string
   }
 ) =>
@@ -81,7 +82,10 @@ export const generateReply = (
         origin: "user",
         sourcePath: null
       })
-    const mira = yield* entity("card", "Mira", cardDoc("Mira", "{{char}} keeps the ledger for {{user}}."))
+    const mira = yield* entity("card", "Mira", {
+      ...cardDoc("Mira", "{{char}} keeps the ledger for {{user}}."),
+      mes_example: options.example ?? ""
+    })
     const tobin = yield* entity("card", "Tobin", cardDoc("Tobin", "{{user}} draws maps."))
     const preset = yield* entity("preset", "Preset", presetDoc(options.preset ?? {}))
     yield* api.SetGenerationDefaults({

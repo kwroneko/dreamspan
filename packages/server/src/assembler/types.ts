@@ -1,3 +1,4 @@
+import type { SummaryPrefix } from "../lcm/prefix.ts"
 // The assembler's data, all plain JSON (DATA-MODEL §7.1; ARCHITECTURE §15).
 import type { ContextDisplay, ContextMessage, ContextSource, SourceActivation } from "@rp/shared/inspectorApi.ts"
 import type { ContextIssue } from "@rp/shared/chat.ts"
@@ -11,7 +12,7 @@ import type { PresetDoc } from "@rp/shared/docs/preset.ts"
 import { Schema } from "effect"
 
 /** Bump whenever identical inputs would assemble differently. Missing means version 0. */
-export const ASSEMBLER_VERSION = 13
+export const ASSEMBLER_VERSION = 14
 
 export type Role = "system" | "user" | "assistant"
 
@@ -197,6 +198,7 @@ export interface ContextSnapshot {
     readonly inputs: ReadonlyArray<import("@rp/shared/lcm.ts").Summary["inputs"][number]>
     readonly tail: string
     readonly style: "direct" | "tool"
+    readonly prefix?: SummaryPrefix
   }
   readonly lcm?: {
     readonly cursor: string | null

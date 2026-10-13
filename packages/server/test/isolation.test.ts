@@ -1,5 +1,5 @@
 import type { Summary } from "@rp/shared/lcm.ts"
-import { completeFixture, summaryJob } from "./support/lcmFixtures.ts"
+import { completeFixture, fixtureSql, summaryJob } from "./support/lcmFixtures.ts"
 // The isolation matrix (spec/WORKFLOW.md §3, DESIGN §11): every RPC in AppApi has an
 // entry, and the suite fails on an RPC without one or an entry without its RPC. A probe
 // runs through a real server over real sockets: one user reads, changes or references
@@ -671,7 +671,7 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
         )
         const own = yield* owner.api.GetNextContext({ chatId: owner.chat.chatId, leafSlotId: owner.chat.slotId })
         assert.strictEqual(own.leafSlotId, owner.chat.slotId)
-        assert.deepStrictEqual(Object.keys(own).sort(), ["historyStart", "leafSlotId", "warmth"])
+        assert.deepStrictEqual(Object.keys(own).sort(), ["historyStart", "leafSlotId", "summarizedThrough", "warmth"])
         if (own.historyStart) assert.deepStrictEqual(Object.keys(own.historyStart).sort(), ["depth", "slotId"])
       })
   },
@@ -1680,6 +1680,17 @@ const storage: Record<
     refused(writer.ReleaseSummaryJob({ userId: actor.user.id, jobId: owner.summaryJob.jobId, attempt: 0 }), "NotFound"),
   EscalateSummaryJob: (_reader, actor, owner, writer) =>
     refused(writer.EscalateSummaryJob({ userId: actor.user.id, jobId: owner.summaryJob.jobId }), "NotFound"),
+  ReconcileSummaryJobs: (_reader, actor, owner, writer) =>
+    Effect.gen(function* () {
+      const inspect = () =>
+        fixtureSql(config.dataDir, [
+          { sql: "SELECT * FROM summarization_jobs WHERE id=?", params: [owner.summaryJob.jobId] }
+        ])
+      const before = yield* inspect()
+      assert.strictEqual(before[0]![0]!.status, "processing")
+      yield* writer.ReconcileSummaryJobs({ userId: actor.user.id, running: [{ id: actor.summaryJob.jobId, epoch: 0 }] })
+      assert.deepStrictEqual(yield* inspect(), before)
+    }),
   ClaimSummaryJob: (_reader, actor, _owner, writer) =>
     Effect.gen(function* () {
       const job = yield* writer.ClaimSummaryJob({ userId: actor.user.id })

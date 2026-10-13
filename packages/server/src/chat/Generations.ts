@@ -120,7 +120,12 @@ export class Generations extends Context.Service<
             })
           }
           if (status === "complete")
-            yield* summaries.afterReply({ userId: request.userId, chatId: request.chatId, leafSlotId: request.slotId })
+            yield* summaries.afterReply({
+              userId: request.userId,
+              chatId: request.chatId,
+              leafSlotId: request.slotId,
+              triggerVersionId: request.versionId
+            })
           yield* continueQueue(request.userId, finished)
         })
 

@@ -5,7 +5,7 @@ import type { SqlClient } from "effect/sql"
 import { readSummary } from "./lcmReads.ts"
 
 /** Recheck stored lineage before freshness recursion or advancing past originals. */
-const lineageValidator = (sql: SqlClient.SqlClient, userId: UserId) => {
+export const lineageValidator = (sql: SqlClient.SqlClient, userId: UserId) => {
   const memo = new Map<string, boolean>()
   const valid = (id: string): Effect.Effect<boolean, import("effect/sql").SqlError.SqlError> =>
     Effect.gen(function* () {

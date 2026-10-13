@@ -1,3 +1,7 @@
+import { summaryIsWarm } from "./lcmWarmth.ts"
+import type { SummaryPrefix } from "../lcm/prefix.ts"
+import { takeSummaryPrefix } from "../lcm/prefix.ts"
+import { completedCoverage } from "./lcmCoverage.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { Effect } from "effect"
@@ -35,9 +39,25 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
       usage_cost = (SELECT sum(cost) FROM llm_requests WHERE rollout_id = ${rolloutId})
       WHERE id = ${rolloutId} AND status = 'running'`
   return {
-    EnqueueSummaries: ({ userId, chatId, leafSlotId, chunks, requestClass }) =>
+    EnqueueSummaries: ({ userId, chatId, leafSlotId, chunks, requestClass, triggerVersionId }) =>
       Effect.gen(function* () {
         const path = yield* lcmPath(sql, userId, chatId, leafSlotId)
+        if (triggerVersionId) {
+          const [version] = yield* sql<{
+            slot_id: string
+          }>`SELECT v.slot_id FROM versions v JOIN slots s ON s.id=v.slot_id
+            WHERE v.id=${triggerVersionId} AND s.chat_id=${chatId}`
+          if (!version || !path.some((s) => s.id === version.slot_id))
+            return yield* new NotFound({ entity: "summary trigger", id: triggerVersionId })
+        }
+        const covered = yield* completedCoverage(sql, userId, chatId, path)
+        const [origin] = yield* sql<{ snapshot: string }>`WITH RECURSIVE path(id) AS (
+          SELECT ${leafSlotId} UNION ALL SELECT s.parent_slot_id FROM slots s JOIN path p ON p.id=s.id WHERE s.parent_slot_id IS NOT NULL
+        ) SELECT p.context_snapshot_json AS snapshot FROM path a JOIN slots s ON s.id=a.id
+          JOIN versions v ON v.id=coalesce(${triggerVersionId ?? null},s.selected_version_id) AND v.slot_id=s.id JOIN rollouts r ON r.id=v.rollout_id
+          JOIN rollout_payloads p ON p.rollout_id=r.id WHERE r.chat_id=${chatId} AND r.kind='generation'
+          AND p.context_snapshot_json IS NOT NULL ORDER BY s.depth DESC LIMIT 1`
+        const prefix = origin ? JSON.stringify(takeSummaryPrefix(JSON.parse(origin.snapshot) as ContextSnapshot)) : null
         const batchId = uuidv7(),
           now = Date.now(),
           result: SummaryJob[] = []
@@ -52,6 +72,7 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
             JSON.stringify(chain.map(slotInput)) !== JSON.stringify(chunk.inputs)
           )
             return yield* reject("EnqueueSummaries", "The summary chain or its inputs changed; plan again.")
+          if (chain.some((s) => covered.has(s.id))) continue
           const pending = yield* sql<{
             first_slot_id: string
             last_slot_id: string
@@ -76,6 +97,7 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
             leaf_slot_id: leafSlotId,
             target_token_count: chunk.target,
             clip_tokens: chunk.clipTokens ?? 6000,
+            prefix_json: prefix,
             batch_id: batchId,
             request_class: requestClass,
             created_at: now,
@@ -85,8 +107,33 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
         }
         return result
       }).pipe(transaction(sql, "EnqueueSummaries")),
+    ReconcileSummaryJobs: ({ userId, running }) =>
+      Effect.gen(function* () {
+        const rows = yield* sql<{ id: string; claim_epoch: number; rollout_id: string | null }>`
+          SELECT j.id,j.claim_epoch,j.rollout_id FROM summarization_jobs j JOIN chats c ON c.id=j.chat_id
+          WHERE c.owner_user_id=${userId} AND j.status='processing'`
+        for (const row of rows) {
+          if (running.some((r) => r.id === row.id && r.epoch === row.claim_epoch)) continue
+          yield* close(row.rollout_id, "interrupted", null)
+          yield* sql`UPDATE summarization_jobs SET status='pending', attempts=max(0,attempts-1), rollout_id=NULL,
+            updated_at=${Date.now()} WHERE id=${row.id}`
+        }
+      }).pipe(transaction(sql, "ReconcileSummaryJobs")),
     ClaimSummaryJob: ({ userId }) =>
       Effect.gen(function* () {
+        const idle = yield* sql<{ id: string; chat_id: string; prefix_json: string | null }>`
+          SELECT j.id,j.chat_id,j.prefix_json FROM summarization_jobs j JOIN chats c ON c.id=j.chat_id
+          WHERE c.owner_user_id=${userId} AND c.deleted_at IS NULL AND j.status='pending' AND j.request_class='idle'`
+        for (const job of idle)
+          if (
+            !(yield* summaryIsWarm(
+              sql,
+              userId,
+              job.chat_id,
+              job.prefix_json ? (JSON.parse(job.prefix_json) as SummaryPrefix) : null
+            ))
+          )
+            yield* sql`UPDATE summarization_jobs SET request_class='background' WHERE id=${job.id}`
         const [next] = yield* sql<{ id: string }>`SELECT j.id FROM summarization_jobs j JOIN chats c ON c.id = j.chat_id
         JOIN slots start ON start.id = j.first_slot_id
         WHERE c.owner_user_id = ${userId} AND c.deleted_at IS NULL AND j.status = 'pending'
@@ -119,6 +166,12 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
           return yield* new NotFound({ entity: "summary request", id: jobId })
         const [active] = yield* sql`SELECT id FROM summarization_jobs WHERE id = ${jobId} AND rollout_id IS NOT NULL`
         if (active) return yield* reject("StartSummaryRollout", "The attempt already has a rollout.")
+        const requestClass =
+          j.requestClass === "idle" && !(yield* summaryIsWarm(sql, userId, j.chatId, saved))
+            ? "background"
+            : j.requestClass
+        if (requestClass !== j.requestClass)
+          yield* sql`UPDATE summarization_jobs SET request_class=${requestClass} WHERE id=${jobId}`
         const now = Date.now()
         yield* sql`INSERT INTO rollouts ${sql.insert({
           id: rolloutId,
@@ -129,7 +182,7 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
           role: "summarizer",
           connection_id: model.connectionId,
           model_id: model.modelId,
-          request_class: j.requestClass,
+          request_class: requestClass,
           created_at: now,
           started_at: now,
           updated_at: now

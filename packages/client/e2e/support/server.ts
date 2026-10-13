@@ -10,6 +10,7 @@ import { type APIRequestContext, test } from "@playwright/test"
 const root = resolve(import.meta.dirname, "../../../..")
 
 export interface TestServer {
+  readonly dataDir: string
   readonly url: string
   readonly port: number
   readonly pause: () => Promise<void>
@@ -89,7 +90,7 @@ const startOnce = async (env: Record<string, string>): Promise<TestServer | null
     capture()
     if (!(await healthy())) throw new Error(`the server didn't restart:\n${output}`)
   }
-  if (await healthy()) return { url, port: serverPort, stop, pause, restart }
+  if (await healthy()) return { url, dataDir, port: serverPort, stop, pause, restart }
   await stop()
   if (output.includes("EADDRINUSE")) return null
   throw new Error(`the server didn't become healthy:\n${output}`)

@@ -293,11 +293,16 @@ export class WriteOps extends RpcGroup.make(
       userId: UserId,
       chatId: ChatId,
       leafSlotId: SlotId,
+      triggerVersionId: Schema.optionalKey(VersionId),
       chunks: Schema.Array(SummaryChunk),
       requestClass: SummaryJob.fields.requestClass
     },
     success: Schema.Array(SummaryJob),
     error: Schema.Union([StorageError, NotFound])
+  }),
+  Rpc.make("ReconcileSummaryJobs", {
+    payload: { userId: UserId, running: Schema.Array(Schema.Struct({ id: Schema.String, epoch: Schema.Int })) },
+    error: StorageError
   }),
   Rpc.make("ClaimSummaryJob", {
     payload: { userId: UserId },

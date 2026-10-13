@@ -251,7 +251,6 @@ export const compose = (input: {
   readonly beside: ReadonlyArray<{ readonly message: StMessage; readonly at: "start" | "end" }>
   readonly layer?: ReadonlyArray<StMessage>
   readonly stableExamples?: boolean
-  readonly layerReserve?: number
   readonly budget: number
 }): Composition => {
   const { collection } = input
@@ -303,8 +302,6 @@ export const compose = (input: {
         "(its context size less its response length). Raise the context size, or turn prompts off."
     })
   }
-
-  spend(Math.min(Math.max(0, budget), input.layerReserve ?? 0))
 
   let examplesSent = 0
   const sendExamples = () => {

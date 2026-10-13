@@ -1,3 +1,5 @@
+import { applySummaryPrefix, type SummaryPrefix } from "../lcm/prefix.ts"
+import { completedCoverage } from "./lcmCoverage.ts"
 import { tokensOf } from "../assembler/st.ts"
 import { foldState } from "@rp/shared/state.ts"
 import { Effect } from "effect"
@@ -77,26 +79,30 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
         const chunks: Array<{ inputs: ReturnType<typeof slotInput>[]; target: number; clipTokens: number }> = []
         let chunk: (typeof path)[number][] = [],
           tokens = 0
+        const covered = yield* completedCoverage(sql, userId, chatId, path)
+        const flush = () => {
+          if (chunk.length)
+            chunks.push({
+              inputs: chunk.map(slotInput),
+              target: state.lcm!.leafTarget ?? 600,
+              clipTokens: Math.max(1, Math.floor(leafInput * 1.5))
+            })
+          chunk = []
+          tokens = 0
+        }
         for (const s of raw.slice(0, end)) {
+          if (covered.has(s.id)) {
+            flush()
+            continue
+          }
           if (s.generating || s.merged) break
           chunk.push(s)
           tokens += cost(s)
           if (tokens >= leafInput || (s.children >= 2 && tokens >= leafInput / 4)) {
-            chunks.push({
-              inputs: chunk.map(slotInput),
-              target: state.lcm.leafTarget ?? 600,
-              clipTokens: Math.max(1, Math.floor(leafInput * 1.5))
-            })
-            chunk = []
-            tokens = 0
+            flush()
           }
         }
-        if (chunk.length)
-          chunks.push({
-            inputs: chunk.map(slotInput),
-            target: state.lcm.leafTarget ?? 600,
-            clipTokens: Math.max(1, Math.floor(leafInput * 1.5))
-          })
+        flush()
         // A terminal failure holds its range until explicit retry (slice 4).
         const failed = yield* sql<{
           first_slot_id: string
@@ -138,16 +144,19 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
           defaults = yield* readDefaults(sql, userId)
         if (!state.lcm?.enabled)
           return yield* new AssemblyFailed({ reason: "invalid_document", message: "LCM is disabled." })
+        const [pinned] = yield* sql<{
+          prefix_json: string | null
+        }>`SELECT prefix_json FROM summarization_jobs WHERE id=${jobId}`
+        const prefix = pinned?.prefix_json ? (JSON.parse(pinned.prefix_json) as SummaryPrefix) : undefined
         const clipTokens = job.clipTokens
         const built = yield* assembler
           .assemble({
-            now: Date.now(),
-            timeZone: "UTC",
-            frozen: {},
+            now: prefix?.inputs.now ?? Date.now(),
+            timeZone: prefix?.inputs.timeZone ?? "UTC",
+            frozen: prefix?.frozen ?? {},
             random: Math.random,
             summarizing: true,
-            summaryClipTokens: clipTokens,
-            summaryMaxTokens: Math.ceil(job.target * 2.5)
+            summaryClipTokens: clipTokens
           })
           .pipe(Effect.provide(sources.layer))
         const rendered = new Set(
@@ -168,29 +177,48 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
           (style === "tool"
             ? "\nWrite the summary with summary_tool. Create a draft and finalize it; assistant prose is not the summary."
             : "\nReturn only the summary, without commentary.")
-        const snapshot: ContextSnapshot = summaryTail({
-          ...built,
-          sources: sources.pins(),
-          summaryJob: { id: jobId, clipTokens, inputs: chain.map(slotInput), tail, style },
-          request: {
-            ...built.request,
-            samplers: { ...built.request.samplers, max_tokens: Math.ceil(job.target * 2.5) }
-          }
-        })
-        if (
-          snapshot.request.messages.reduce((n, m) => n + tokensOf(m), 0) + snapshot.request.samplers.max_tokens >
-          (snapshot.inputs.model?.context ?? Infinity)
+        const snapshot: ContextSnapshot = summaryTail(
+          applySummaryPrefix(
+            {
+              ...built,
+              sources: sources.pins(),
+              summaryJob: {
+                id: jobId,
+                clipTokens,
+                inputs: chain.map(slotInput),
+                tail,
+                style,
+                ...(prefix ? { prefix } : {})
+              },
+              request: {
+                ...built.request,
+                samplers: { ...built.request.samplers, max_tokens: Math.ceil(job.target * 2.5) }
+              }
+            },
+            prefix
+          )
         )
+        const availableOutput = Math.floor(
+          (snapshot.inputs.model?.context ?? Infinity) - snapshot.request.messages.reduce((n, m) => n + tokensOf(m), 0)
+        )
+        if (availableOutput < 1)
           return yield* new AssemblyFailed({
             reason: "budget",
-            message: "The summary and its instruction exceed the model context."
+            message: "The pinned summary prefix and chunk exceed the model context."
           })
         const taken = {
           ...snapshot,
-          ...(snapshot.inputs.model ? { wire: wireContext(snapshot.request, snapshot.inputs.model) } : {})
+          request: {
+            ...snapshot.request,
+            samplers: {
+              ...snapshot.request.samplers,
+              max_tokens: Math.min(snapshot.request.samplers.max_tokens, availableOutput)
+            }
+          }
         }
+        const wire = taken.inputs.model ? wireContext(taken.request, taken.inputs.model) : undefined
         return {
-          snapshot: JSON.stringify(taken),
+          snapshot: JSON.stringify({ ...taken, ...(wire ? { wire } : {}) }),
           generation: JSON.stringify({
             ...generationOf(taken),
             inspection: yield* inspectionInputs(sql, userId, taken)

@@ -125,7 +125,7 @@ reference-harness synthesizes a placeholder from a failed job row and never pers
 
 ### 2.9 How summaries enter the context
 
-Implemented in [ARCHITECTURE §16](../ARCHITECTURE.md#16-lcm-hierarchical-summaries): literal rendering in both modes, placement, stable examples and the layer allowance, breakpoint (b), omitted ranges, cache estimates and assembler semantics version 8. LCM-off assembly retains the unchanged ST differential oracle. Depth-positioned summaries move ahead of verbatim history to preserve §4's partition invariant. Planner waits and budget absorption remain in slices 3 and 5.
+Implemented in [ARCHITECTURE §16](../ARCHITECTURE.md#16-lcm-hierarchical-summaries): literal rendering in both modes, placement, stable examples and the layer allowance, breakpoint (b), omitted ranges, cache estimates and assembler semantics version 14. LCM-off assembly retains the unchanged ST differential oracle. Depth-positioned summaries move ahead of verbatim history to preserve §4's partition invariant. Planner waits and budget absorption remain in slices 3 and 5.
 
 ### 2.10 RebuildContext and pins
 
