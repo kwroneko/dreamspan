@@ -1,7 +1,6 @@
 import { summaryIsWarm } from "./lcmWarmth.ts"
 import type { SummaryPrefix } from "../lcm/prefix.ts"
-import { takeSummaryPrefix } from "../lcm/prefix.ts"
-import { completedCoverage } from "./lcmCoverage.ts"
+import { lineageValidator } from "./lcmLayer.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { Effect } from "effect"
@@ -10,6 +9,7 @@ import type { ContextSnapshot } from "../assembler/types.ts"
 import { ownedModel } from "./generationSettings.ts"
 import { fallbackModel, type JobError, prefixAt, recordFailedSummary, targetFor } from "./lcmFailures.ts"
 import { readSummary } from "./lcmReads.ts"
+import type { Summary } from "@rp/shared/lcm.ts"
 import { jobColumns, type SummaryJob } from "./lcmJobs.ts"
 import { lcmPath, slotInput } from "./lcmPath.ts"
 import { NotFound, StorageError, type WriteOps } from "./ops.ts"
@@ -41,48 +41,59 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
       usage_cost = (SELECT sum(cost) FROM llm_requests WHERE rollout_id = ${rolloutId})
       WHERE id = ${rolloutId} AND status = 'running'`
   return {
+    // Work here depends on the chunks and the jobs around them, never on the length of the chat: a
+    // write holds the writer, and a long chat's first plan must not hold it for a noticeable time.
     EnqueueSummaries: ({ userId, chatId, leafSlotId, chunks, requestClass, triggerVersionId }) =>
       Effect.gen(function* () {
-        const path = yield* lcmPath(sql, userId, chatId, leafSlotId)
+        yield* lcmPath(sql, userId, chatId, leafSlotId, leafSlotId)
         if (triggerVersionId) {
           const [version] = yield* sql<{
             slot_id: string
           }>`SELECT v.slot_id FROM versions v JOIN slots s ON s.id=v.slot_id
             WHERE v.id=${triggerVersionId} AND s.chat_id=${chatId}`
-          if (!version || !path.some((s) => s.id === version.slot_id))
-            return yield* new NotFound({ entity: "summary trigger", id: triggerVersionId })
+          if (!version) return yield* new NotFound({ entity: "summary trigger", id: triggerVersionId })
         }
-        const covered = yield* completedCoverage(sql, userId, chatId, path)
-        const [origin] = yield* sql<{ snapshot: string }>`WITH RECURSIVE path(id) AS (
-          SELECT ${leafSlotId} UNION ALL SELECT s.parent_slot_id FROM slots s JOIN path p ON p.id=s.id WHERE s.parent_slot_id IS NOT NULL
-        ) SELECT p.context_snapshot_json AS snapshot FROM path a JOIN slots s ON s.id=a.id
-          JOIN versions v ON v.id=coalesce(${triggerVersionId ?? null},s.selected_version_id) AND v.slot_id=s.id JOIN rollouts r ON r.id=v.rollout_id
-          JOIN rollout_payloads p ON p.rollout_id=r.id WHERE r.chat_id=${chatId} AND r.kind='generation'
-          AND p.context_snapshot_json IS NOT NULL ORDER BY s.depth DESC LIMIT 1`
-        const prefix = origin ? JSON.stringify(takeSummaryPrefix(JSON.parse(origin.snapshot) as ContextSnapshot)) : null
+        const prefix = yield* prefixAt(sql, chatId, leafSlotId, triggerVersionId)
+        const valid = lineageValidator(sql, userId)
         const batchId = uuidv7(),
           now = Date.now(),
           result: SummaryJob[] = []
         for (const chunk of chunks) {
-          const first = path.findIndex((s) => s.id === chunk.inputs[0]?.slotId)
-          const chain = path.slice(first, first + chunk.inputs.length)
+          const first = chunk.inputs[0]?.slotId,
+            last = chunk.inputs.at(-1)?.slotId
+          if (!first || !last || chunk.target <= 0)
+            return yield* reject("EnqueueSummaries", "The summary chain or its inputs changed; plan again.")
+          const chain = yield* lcmPath(sql, userId, chatId, last, first, chunk.inputs.length)
           if (
-            first < 0 ||
-            !chunk.inputs.length ||
-            chunk.target <= 0 ||
+            chain[0]?.id !== first ||
             chain.some((s) => s.generating || s.merged) ||
             JSON.stringify(chain.map(slotInput)) !== JSON.stringify(chunk.inputs)
           )
             return yield* reject("EnqueueSummaries", "The summary chain or its inputs changed; plan again.")
-          if (chain.some((s) => covered.has(s.id))) continue
-          const pending = yield* sql<{
+          // Already summarized: a fresh level-1 summary over any of these slots. A rewrite of a stale
+          // summary is its own range's business, so overlapping fresh ones don't make it redundant.
+          if (!chunk.refresh) {
+            const owners = yield* sql<{ id: string }>`
+              SELECT DISTINCT s.id FROM summary_inputs i JOIN summaries s ON s.id = i.summary_id
+              WHERE i.slot_id IN ${sql.in(chain.map((c) => c.id))} AND s.chat_id = ${chatId} AND s.level = 1
+                AND s.sealed = 1 AND s.status IN ('complete', 'truncated')`
+            let covered = false
+            for (const owner of owners)
+              if ((yield* valid(owner.id)) && (yield* readSummary(sql, userId, owner.id)).fresh) covered = true
+            if (covered) continue
+          }
+          const ids = new Set(chain.map((s) => s.id))
+          const near = yield* sql<{
             first_slot_id: string
             last_slot_id: string
-          }>`SELECT first_slot_id,last_slot_id FROM summarization_jobs WHERE chat_id = ${chatId} AND level = 1 AND status IN ('pending','processing')`
-          const ids = new Set(chain.map((s) => s.id))
+            span: number
+          }>`SELECT j.first_slot_id, j.last_slot_id, b.depth - a.depth + 1 AS span FROM summarization_jobs j
+              JOIN slots a ON a.id = j.first_slot_id JOIN slots b ON b.id = j.last_slot_id
+            WHERE j.chat_id = ${chatId} AND j.level = 1 AND j.status IN ('pending', 'processing')
+              AND a.depth <= ${chain.at(-1)!.depth} AND b.depth >= ${chain[0]!.depth}`
           let overlap = false
-          for (const p of pending) {
-            const other = yield* lcmPath(sql, userId, chatId, p.last_slot_id, p.first_slot_id)
+          for (const p of near) {
+            const other = yield* lcmPath(sql, userId, chatId, p.last_slot_id, p.first_slot_id, p.span)
             if (other.some((s) => ids.has(s.id))) {
               overlap = true
               break
@@ -109,6 +120,78 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
         }
         return result
       }).pipe(transaction(sql, "EnqueueSummaries")),
+    EnqueueCondensations: ({ userId, chatId, leafSlotId, triggerVersionId, jobs: planned, requestClass }) =>
+      Effect.gen(function* () {
+        yield* lcmPath(sql, userId, chatId, leafSlotId, leafSlotId)
+        const onPath = (slotId: string) =>
+          sql<{ n: number }>`WITH RECURSIVE path(id) AS (
+            SELECT ${leafSlotId} UNION ALL SELECT s.parent_slot_id FROM slots s JOIN path p ON p.id = s.id WHERE s.parent_slot_id IS NOT NULL
+          ) SELECT count(*) AS n FROM path WHERE id = ${slotId}`.pipe(Effect.map(([row]) => row!.n === 1))
+        const prefix = yield* prefixAt(sql, chatId, leafSlotId, triggerVersionId)
+        const now = Date.now(),
+          result: SummaryJob[] = []
+        for (const job of planned) {
+          const children: Array<Summary> = []
+          for (const id of job.children) children.push(yield* readSummary(sql, userId, id))
+          const first = children[0],
+            last = children.at(-1)
+          if (!first || !last || children.length < 2)
+            return yield* reject("EnqueueCondensations", "A condensation needs at least two parts.")
+          for (const [n, child] of children.entries()) {
+            if (child.chatId !== chatId || child.status === "failed" || child.level >= job.level)
+              return yield* reject("EnqueueCondensations", "Parts must be this chat's summaries below the new level.")
+            if (n > 0) {
+              const [link] = yield* sql<{
+                ok: number
+              }>`SELECT parent_slot_id = ${children[n - 1]!.lastSlotId} AS ok FROM slots WHERE id = ${child.firstSlotId}`
+              if (!link?.ok)
+                return yield* reject("EnqueueCondensations", "Parts must follow one another along one chain.")
+            }
+          }
+          if (!(yield* onPath(last.lastSlotId)))
+            return yield* reject("EnqueueCondensations", "The parts are not on the path being planned.")
+          if (job.absorbedParentId) {
+            const parent = yield* readSummary(sql, userId, job.absorbedParentId)
+            const own = new Set(job.children as ReadonlyArray<string>)
+            if (
+              parent.chatId !== chatId ||
+              parent.level !== job.level ||
+              parent.children.some((c) => !own.has(c.summaryId))
+            )
+              return yield* reject("EnqueueCondensations", "Absorption must reduce the parent's own parts again.")
+          }
+          // A live job of this level that starts on this chain at or before the last part and ends at or after the first.
+          const [clash] = yield* sql<{ id: string }>`
+            SELECT j.id FROM summarization_jobs j JOIN slots b ON b.id = j.last_slot_id
+            WHERE j.chat_id = ${chatId} AND j.level = ${job.level} AND j.status IN ('pending', 'processing')
+              AND b.depth >= (SELECT depth FROM slots WHERE id = ${first.firstSlotId})
+              AND j.first_slot_id IN (WITH RECURSIVE up(id) AS (
+                SELECT ${last.lastSlotId} UNION ALL SELECT s.parent_slot_id FROM slots s JOIN up u ON u.id = s.id WHERE s.parent_slot_id IS NOT NULL
+              ) SELECT id FROM up)
+            LIMIT 1`
+          if (clash) continue
+          const id = uuidv7()
+          yield* sql`INSERT INTO summarization_jobs ${sql.insert({
+            id,
+            chat_id: chatId,
+            level: job.level,
+            first_slot_id: first.firstSlotId,
+            last_slot_id: last.lastSlotId,
+            leaf_slot_id: leafSlotId,
+            target_token_count: job.target,
+            clip_tokens: 6000,
+            input_child_ids: JSON.stringify(job.children),
+            absorbed_parent_id: job.absorbedParentId ?? null,
+            eager: job.eager ? 1 : 0,
+            prefix_json: prefix,
+            request_class: requestClass,
+            created_at: now,
+            updated_at: now
+          })}`
+          result.push(yield* get(userId, id))
+        }
+        return result
+      }).pipe(transaction(sql, "EnqueueCondensations")),
     ReconcileSummaryJobs: ({ userId, running }) =>
       Effect.gen(function* () {
         const rows = yield* sql<{ id: string; claim_epoch: number; rollout_id: string | null }>`

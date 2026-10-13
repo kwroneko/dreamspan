@@ -39,6 +39,8 @@ const describeFailure = (cause: Cause.Cause<unknown>) => {
   return { error: Cause.pretty(cause).slice(0, 2000), errorClass: "unknown" }
 }
 
+type PlanReason = "reply" | "completion"
+
 type Position = {
   readonly userId: UserId
   readonly chatId: ChatId
@@ -53,7 +55,7 @@ export class Summarizer extends Context.Service<
     /** Runs a job this caller claimed to its outcome: completed, retried, failed or released. */
     readonly runJob: (job: SummaryJob) => Effect.Effect<void>
     /** Plans and enqueues now, as after a reply; the jobs it made. */
-    readonly planNow: (position: Position) => Effect.Effect<ReadonlyArray<SummaryJob>>
+    readonly planNow: (position: Position, reason?: PlanReason) => Effect.Effect<ReadonlyArray<SummaryJob>>
   }
 >()("rp/lcm/Summarizer") {
   static readonly none = Layer.succeed(Summarizer)({
@@ -78,7 +80,7 @@ export function makeSummarizer(pool: boolean) {
     const scope = yield* Effect.scope
     const running = new Map<string, SummaryJob>()
     const users = new Set<UserId>(),
-      due = new Map<string, { position: Position; at: number }>()
+      due = new Map<string, { position: Position; at: number; reason: PlanReason | undefined }>()
     /** Open chats read their summaries again (ChatEvent `Lcm`). */
     const changed = (chatId: ChatId) => Effect.sync(() => hub.publish(chatId, { _tag: "Lcm" }))
     const safe = <A, E>(effect: Effect.Effect<A, E>) =>
@@ -230,7 +232,7 @@ export function makeSummarizer(pool: boolean) {
               content: truncated ? clipSummary(content, job.target) : content,
               status: truncated ? "truncated" : "complete",
               inputs: snapshot.summaryJob!.inputs,
-              children: []
+              children: snapshot.summaryJob!.children ?? []
             })
             return
           }
@@ -266,7 +268,7 @@ export function makeSummarizer(pool: boolean) {
                 content,
                 status: "truncated",
                 inputs: frozenInputs.inputs,
-                children: []
+                children: frozenInputs.children ?? []
               })
             })
           ),
@@ -286,30 +288,51 @@ export function makeSummarizer(pool: boolean) {
                       ...describeFailure(exit.cause)
                     })
                   )
+              } else if (pool) {
+                // A finished summary may make a run condensable, or let a stale condensation be written again.
+                schedule({ userId: job.userId, chatId: job.chatId, leafSlotId: job.leafSlotId }, "completion")
               }
             })
           )
         )
       })
-    const plan = (position: Position, interactive = false) =>
+    /** Plans what a reply (or, continuing its work, a finished job) should start, and enqueues it. */
+    const plan = (position: Position, interactive = false, reason?: PlanReason) =>
       Effect.gen(function* () {
         users.add(position.userId)
-        const p = yield* reader.PlanSummaries(position)
-        if (p.enabled && p.chunks.length && ((!interactive && p.spendAhead) || (interactive && p.over))) {
-          const jobs = yield* writer.EnqueueSummaries({
-            ...position,
-            chunks: p.chunks,
-            requestClass: interactive && p.over ? "interactive" : "idle"
-          })
+        const p = yield* reader.PlanSummaries({ ...position, ...(reason ? { reason } : {}) })
+        if (p.enabled && !interactive && p.spendAhead) {
+          const chunks = [...p.chunks, ...p.refresh]
+          const made = chunks.length
+            ? yield* writer.EnqueueSummaries({ ...position, chunks, requestClass: "idle" })
+            : []
+          const condensed = p.condensations.length
+            ? yield* writer.EnqueueCondensations({ ...position, jobs: p.condensations, requestClass: "idle" })
+            : []
+          if (made.length || condensed.length) yield* changed(position.chatId)
+          return { ...p, jobs: [...p.jobs, ...made, ...condensed] }
+        }
+        if (p.enabled && p.chunks.length && interactive && p.over) {
+          const jobs = yield* writer.EnqueueSummaries({ ...position, chunks: p.chunks, requestClass: "interactive" })
           if (jobs.length) yield* changed(position.chatId)
           return { ...p, jobs: [...p.jobs, ...jobs] }
         }
         return p
       })
+    /** Plans for a chat after a delay that lets triggers coalesce; a reply's pass is not weakened by a job's. */
+    const schedule = (position: Position, reason: PlanReason | undefined) => {
+      const prior = due.get(position.chatId)
+      const kept = prior?.reason === "reply"
+      due.set(position.chatId, {
+        position: kept && reason !== "reply" ? prior.position : position,
+        at: Date.now() + 250,
+        reason: kept ? "reply" : reason
+      })
+    }
     const startup = yield* writer.ResetSummaryJobs()
     for (const p of startup) {
       users.add(p.userId)
-      due.set(p.chatId, { position: p, at: Date.now() + 250 })
+      schedule(p, undefined)
     }
     if (pool)
       yield* Effect.forkIn(
@@ -318,7 +341,7 @@ export function makeSummarizer(pool: boolean) {
             for (const [chatId, p] of due)
               if (p.at <= Date.now()) {
                 due.delete(chatId)
-                yield* safe(plan(p.position))
+                yield* safe(plan(p.position, false, p.reason))
               }
             for (const userId of users) {
               const reconciled = yield* writer
@@ -378,14 +401,14 @@ export function makeSummarizer(pool: boolean) {
       )
     return Summarizer.of({
       runJob: (job) => safe(run(job)),
-      planNow: (position) =>
-        plan(position).pipe(
+      planNow: (position, reason = "reply") =>
+        plan(position, false, reason).pipe(
           Effect.map((p) => p.jobs),
           Effect.orDie
         ),
       afterReply: (position) =>
         Effect.sync(() => {
-          if (pool) due.set(position.chatId, { position, at: Date.now() + 250 })
+          if (pool) schedule(position, "reply")
         }),
       beforeReply: pool ? waitForRunway : () => Effect.succeed(false)
     })

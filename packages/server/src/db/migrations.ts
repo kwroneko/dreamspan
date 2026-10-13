@@ -170,6 +170,10 @@ export const migrations = {
     `ALTER TABLE summarization_jobs ADD COLUMN fallback_used INTEGER NOT NULL DEFAULT 0 CHECK (fallback_used IN (0, 1))`,
     // A judge model's finding on a version's text (spec/LCM.md §2.4). Only the mark changes.
     `ALTER TABLE versions ADD COLUMN mark TEXT CHECK (mark IS NULL OR mark IN ('refused'))`
+  ]),
+  "0028_condensation": runAll([
+    // A job started because the layer was over its budget (spec/LCM.md §2.6); its episode goes on to the target.
+    `ALTER TABLE summarization_jobs ADD COLUMN eager INTEGER NOT NULL DEFAULT 0 CHECK (eager IN (0, 1))`
   ])
 }
 

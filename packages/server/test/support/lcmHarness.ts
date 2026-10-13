@@ -46,11 +46,11 @@ export const lastText = (request: Recorded) => {
  * The test server with a summarizer that has no background pool, so the test claims and runs
  * jobs itself; `summarizer()` is that instance.
  */
-export const lcmServer = (config: AppConfigShape = testConfig()) => {
+export const lcmServer = (config: AppConfigShape = testConfig(), pool = false) => {
   let captured: Summarizer["Service"] | undefined
   const layer = Layer.effect(
     Summarizer,
-    Effect.tap(makeSummarizer(false), (s) =>
+    Effect.tap(makeSummarizer(pool), (s) =>
       Effect.sync(() => {
         captured = s
       })
@@ -63,15 +63,15 @@ export const lcmServer = (config: AppConfigShape = testConfig()) => {
 export const lcmTest = <E, R>(
   name: string,
   body: (server: ReturnType<typeof lcmServer>) => Effect.Effect<void, E, R>,
-  timeout = 60_000
+  options: { readonly timeout?: number; readonly pool?: boolean } = {}
 ) =>
   it.live(
     name,
     () => {
-      const server = lcmServer()
+      const server = lcmServer(testConfig(), options.pool)
       return body(server).pipe(Effect.provide(server.layer)) as Effect.Effect<void, unknown, never>
     },
-    timeout
+    options.timeout ?? 60_000
   )
 
 export const lcmHarness = (
@@ -200,7 +200,7 @@ export const lcmHarness = (
         const leaf = rows.at(-1)!.slotId
         const path = yield* reader.GetPath({ userId, chatId: chat.id, leafSlotId: null, limit: 500 })
         const chunk = {
-          target: 100,
+          target: Number(options.settings?.leafTarget ?? 100),
           inputs: path.entries
             .slice(from, to + 1)
             .map((e) => ({ slotId: e.slotId, versionId: e.version.id, amendCount: e.version.rowVersion - 1 }))
@@ -214,6 +214,22 @@ export const lcmHarness = (
         })
         return job!
       })
+    /** Plans as after a reply (or, with "completion", as after a finished job) and enqueues; the jobs made. */
+    const plan = (reason: "reply" | "completion" = "reply") =>
+      summarizer.planNow({ userId, chatId: chat.id, leafSlotId: rows.at(-1)!.slotId }, reason)
+    /** Plans and runs everything to quiescence, as a reply and its cascade would; every job that ran. */
+    const settle = Effect.gen(function* () {
+      const ran: Array<SummaryJob> = []
+      let reason: "reply" | "completion" = "reply"
+      for (let pass = 0; pass < 20; pass++) {
+        const made = yield* plan(reason)
+        const done = yield* drain
+        ran.push(...done)
+        if (!made.length && !done.length) break
+        reason = "completion"
+      }
+      return ran
+    })
     /** Claims the next job and runs it to its outcome; null when nothing could be claimed. */
     const runNext = Effect.gen(function* () {
       const job = yield* writer.ClaimSummaryJob({ userId })
@@ -246,6 +262,8 @@ export const lcmHarness = (
       rows,
       append,
       enqueue,
+      plan,
+      settle,
       runNext,
       drain,
       defaults,

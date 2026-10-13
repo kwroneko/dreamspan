@@ -172,6 +172,7 @@ export interface Assembly {
   lcmPieces?: ReadonlyArray<number>
   lcmVerbatim?: { readonly from: number; readonly to: number } | null
   lcmOmitted?: ReadonlyArray<{ readonly from: number; readonly to: number }>
+  lcmBudget?: { readonly target: number; readonly maximum: number }
   readonly request: AssemblyRequest
   target?: Target
   events?: ReadonlyArray<PositionedEvent>
@@ -289,6 +290,7 @@ export const assemble = (stages: StageRegistry, request: AssemblyRequest) =>
                 level: s.level
               })),
               omitted: assembly.lcmOmitted ?? [],
+              ...(assembly.lcmBudget ? { layerBudget: assembly.lcmBudget } : {}),
               verbatim: assembly.lcmVerbatim ?? null
             }
           }

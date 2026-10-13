@@ -34,7 +34,11 @@ const kinds = [
   "enqueue",
   "run-job",
   "refuse-job",
-  "release-job"
+  "release-job",
+  "maintain",
+  "maintain",
+  "summary",
+  "summary"
 ] as const
 interface Step {
   readonly kind: (typeof kinds)[number]
@@ -74,6 +78,8 @@ interface Artifact {
 
 /** What the seeds' job steps came to, across the run: a model that never refused would prove nothing. */
 const exercised: Record<string, number> = {}
+/** Every summary carries this after what it encodes, so a few of them put the layer over its budget. */
+const PAD = " ·".repeat(120)
 const randomOf = (seed: number) => () => {
   seed = (seed + 0x6d2b79f5) | 0
   let t = Math.imul(seed ^ (seed >>> 15), 1 | seed)
@@ -148,7 +154,11 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
         presetOverrideRefId: null
       }
     })
-    const model = yield* api.AddUserModel({ connectionId: connection.id, key: "synthetic-model", overrides: {} })
+    const model = yield* api.AddUserModel({
+      connectionId: connection.id,
+      key: "synthetic-model",
+      overrides: { context: 2048 }
+    })
     const judgeModel = yield* api.AddUserModel({ connectionId: connection.id, key: "judge-model", overrides: {} })
     const fallbackModel = yield* api.AddUserModel({ connectionId: connection.id, key: "fallback-model", overrides: {} })
     yield* api.SetGenerationDefaults({
@@ -178,10 +188,24 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
       greeting: null
     })
     const call = <A, E>(effect: Effect.Effect<A, E>) => Effect.runPromise(effect)
+    // A fanout of two and a small condensation target make every condensation path reachable in a short run.
+    const knobs = { fanout: 2, condenseTarget: 100 }
+    yield* writer.AddStateEvent({
+      userId: user.id,
+      chatId: chat.id,
+      slotId: null,
+      versionId: null,
+      scope: null,
+      data: { key: "lcm.settings", value: { enabled: true, ...knobs } }
+    })
     const nodes = new Map<SlotId, Node>(),
       versions = new Map<VersionId, Version>(),
       artifacts = new Map<Summary["id"], Artifact>()
     const jobs = new Map<string, SummaryJob>()
+    // Absorbed summaries, the origin of each revision, and the failed rows whose inputs may still stand.
+    const superseded = new Set<string>(),
+      origins = new Map<string, string>(),
+      failedRows: Array<Artifact> = []
     const snapshots: Array<string> = []
     const counts: Record<string, number> = {}
     let leaf: SlotId | null = null,
@@ -255,14 +279,15 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
     }
     const remember = (summary: Summary, inputs: Summary["inputs"], children: ReadonlyArray<Artifact>) => {
       const lineage = children.map((s) => ({ summaryId: s.id, revisionId: s.revision }))
-      const text = JSON.stringify(children.length ? lineage.map((s) => [s.summaryId, s.revisionId]) : inputs)
+      const text = JSON.stringify(children.length ? lineage.map((s) => [s.summaryId, s.revisionId]) : inputs) + PAD
       assert.strictEqual(summary.content, text)
+      origins.set(summary.revisionId, summary.origin)
       artifacts.set(summary.id, {
         batchId: summary.batchId,
         id: summary.id,
         first: children[0]?.first ?? inputs[0]!.slotId,
         last: children.at(-1)?.last ?? inputs.at(-1)!.slotId,
-        level: children.length ? Math.max(...children.map((s) => s.level)) + 1 : 1,
+        level: summary.level,
         inputs,
         children: lineage,
         revisions: new Map([[summary.revisionId, text]]),
@@ -278,6 +303,7 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
         const options = [...artifacts.values()]
           .filter(
             (s) =>
+              !superseded.has(s.id) &&
               onPath.has(s.last) &&
               s.last === history[at]!.id &&
               ![...jobs.values()].some(
@@ -419,6 +445,195 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
         for (const [id, text] of summary.revisions)
           assert.strictEqual(revisionRows.find((r) => r.id === id)?.content, text)
     }
+    type Mode = "ok" | "hard" | "soft"
+    const jobRow = async (id: string) =>
+      (
+        await call(
+          fixtureSql(config.dataDir, [
+            {
+              sql: "SELECT status,attempts,result_summary_id,input_child_ids,absorbed_parent_id FROM summarization_jobs WHERE id=?",
+              params: [id]
+            }
+          ])
+        )
+      )[0]![0]!
+    /** Runs a claimed job through the real summarizer and folds its outcome into the oracle. */
+    const runClaimed = async (job: SummaryJob, mode: Mode) => {
+      jobs.set(job.id, job)
+      const declared = await jobRow(job.id)
+      const childIds = declared.input_child_ids ? (JSON.parse(declared.input_child_ids as string) as string[]) : []
+      const kids = childIds.map((id) => artifacts.get(id as never)!)
+      assert.isTrue(
+        kids.every((k) => k !== undefined),
+        "a condensation's parts are summaries the oracle knows"
+      )
+      const chain = path(job.lastSlotId).slice(nodes.get(job.firstSlotId)!.depth)
+      const expected = chain.map((n) => ({
+        slotId: n.id,
+        versionId: effective(n),
+        amendCount: effective(n) === null ? 0 : versions.get(n.selected)!.amends
+      }))
+      const assembly = await call(
+        Effect.exit(reader.AssembleSummary({ userId: user.id, jobId: job.id, attempt: job.epoch }))
+      )
+      if (!Exit.isFailure(assembly)) {
+        const snapshot = JSON.parse(assembly.value.snapshot) as ContextSnapshot
+        if (job.level === 1) assert.deepStrictEqual(snapshot.summaryJob!.inputs, expected, "I7: exact request versions")
+        else
+          assert.deepStrictEqual(
+            snapshot.summaryJob!.children,
+            kids.map((k) => ({ summaryId: k.id, revisionId: k.revision })),
+            "I7: a condensation sends exactly its parts at their selected revisions"
+          )
+        snapshots.push(assembly.value.snapshot)
+      }
+      script =
+        mode !== "ok"
+          ? mode
+          : { text: JSON.stringify(job.level > 1 ? kids.map((k) => [k.id, k.revision]) : expected) + PAD }
+      await call(summarizer.runJob(job))
+      const row = await jobRow(job.id)
+      jobs.set(job.id, { ...job, status: row.status as SummaryJob["status"], attempts: Number(row.attempts) })
+      const tally = `${mode === "ok" ? "run" : "refuse"}-job:${row.status}:L${job.level > 1 ? "n" : 1}`
+      counts[tally] = (counts[tally] ?? 0) + 1
+      if (row.status === "complete") {
+        assert.strictEqual(mode, "ok", "I5: a refusal is never saved as a summary")
+        remember(
+          await call(reader.GetSummary({ userId: user.id, summaryId: row.result_summary_id as never })),
+          job.level > 1 ? [] : expected,
+          kids
+        )
+        if (job.level > 1)
+          counts[declared.absorbed_parent_id ? "absorbed" : "condensed"] =
+            (counts[declared.absorbed_parent_id ? "absorbed" : "condensed"] ?? 0) + 1
+        if (declared.absorbed_parent_id) {
+          const parent = artifacts.get(declared.absorbed_parent_id as never)!
+          const originals = new Set(parent.children.map((c) => c.summaryId as string))
+          superseded.add(parent.id)
+          for (const kid of kids) if (!originals.has(kid.id)) superseded.add(kid.id)
+        }
+      }
+      if (row.status === "failed" && row.result_summary_id) {
+        const failed = await call(reader.GetSummary({ userId: user.id, summaryId: row.result_summary_id as never }))
+        assert.strictEqual(failed.status, "failed")
+        assert.strictEqual(failed.content, "")
+        assert.isFalse(artifacts.has(failed.id), "I5: a failed summary is not one the oracle may select")
+        failedRows.push({
+          batchId: failed.batchId,
+          id: failed.id,
+          first: failed.firstSlotId,
+          last: failed.lastSlotId,
+          level: failed.level,
+          inputs: failed.inputs,
+          children: failed.children,
+          revisions: new Map([[failed.revisionId, ""]]),
+          revision: failed.revisionId,
+          rowVersion: failed.rowVersion
+        })
+      }
+      const [saved] = await call(
+        fixtureSql(config.dataDir, [
+          { sql: "SELECT count(*) AS n FROM summaries WHERE status IN ('complete','truncated','superseded')" }
+        ])
+      )
+      assert.strictEqual(Number(saved![0]!.n), artifacts.size, "I5: only accepted outputs became summaries")
+      return row.status as string
+    }
+    const claimAndRun = async (mode: Mode, limit = 60) => {
+      let ran = 0
+      for (let n = 0; n < limit; n++) {
+        const job = await call(writer.ClaimSummaryJob({ userId: user.id }))
+        if (!job) break
+        await runClaimed(job, mode)
+        ran++
+      }
+      return ran
+    }
+    // Why a stale summary may still be in a context after the planner is quiet: the user wrote it, or
+    // it sits over one they wrote, or nothing in its range has content, or its rewrite failed and the
+    // failure still stands (spec/LCM.md §2.2, §2.8).
+    const handWritten = (a: Artifact) => origins.get(a.revision) !== "generated"
+    const heldByFailure = (a: Artifact) =>
+      failedRows.some((f) => f.level === a.level && f.first === a.first && f.last === a.last && fresh(f))
+    const hasFreshBelow = (c: Artifact, below: number) =>
+      [...artifacts.values()].some(
+        (o) => o.first === c.first && o.last === c.last && o.level < below && !superseded.has(o.id) && fresh(o)
+      )
+    const explain = (a: Artifact, depth = 0): string =>
+      JSON.stringify({
+        id: a.id.slice(-6),
+        level: a.level,
+        first: nodes.get(a.first)!.depth,
+        last: nodes.get(a.last)!.depth,
+        fresh: fresh(a),
+        hand: handWritten(a),
+        held: heldByFailure(a),
+        content: a.level === 1 ? chain(a).map((n) => effective(n) !== null) : undefined,
+        children: depth < 3 ? a.children.map((c) => explain(artifacts.get(c.summaryId)!, depth + 1)) : undefined,
+        replaced: [...artifacts.values()]
+          .filter((o) => o.id !== a.id && o.first === a.first && o.last === a.last)
+          .map((o) => [o.level, fresh(o), superseded.has(o.id)])
+      })
+    const excused = (a: Artifact): boolean => {
+      if (handWritten(a) || heldByFailure(a)) return true
+      if (a.level === 1) return !chain(a).some((n) => effective(n) !== null)
+      return a.children.some((p) => {
+        const part = artifacts.get(p.summaryId)!
+        return !hasFreshBelow(part, a.level) && excused(part)
+      })
+    }
+    /**
+     * What a reply on the path ending at `target.parent` sets going: planning as a reply, then every
+     * job run, then planning as each finished job would, until nothing is left. Checks that only
+     * stale summaries are written again, each once, and only by the reply's own pass.
+     */
+    const cascade = async (target: Node | undefined) => {
+      if (!enabled || !target || target.deleted || target.parent === null) return false
+      const position = { userId: user.id, chatId: chat.id, leafSlotId: target.parent }
+      const before = [...artifacts.values()].map((a) => ({ a, fresh: fresh(a) }))
+      const seen = new Set<string>()
+      let reason: "reply" | "completion" = "reply"
+      for (let pass = 0; pass < 40; pass++) {
+        const made = await call(summarizer.planNow(position, reason))
+        for (const job of made) {
+          jobs.set(job.id, job)
+          const same = before.filter(
+            (b) =>
+              !superseded.has(b.a.id) &&
+              b.a.level === job.level &&
+              b.a.first === job.firstSlotId &&
+              b.a.last === job.lastSlotId
+          )
+          if (!same.length) continue
+          const key = `${job.level}:${job.firstSlotId}:${job.lastSlotId}`
+          counts[`rewritten:L${job.level > 1 ? "n" : 1}`] = (counts[`rewritten:L${job.level > 1 ? "n" : 1}`] ?? 0) + 1
+          assert.isTrue(
+            same.every((b) => !b.fresh),
+            "only a stale summary is written again"
+          )
+          assert.isFalse(seen.has(key), "at most one re-summarization per affected summary per reply")
+          seen.add(key)
+          if (job.level === 1) assert.strictEqual(reason, "reply", "a finished job does not start a re-summarization")
+        }
+        const ran = await claimAndRun("ok")
+        if (!made.length && !ran) return true
+        reason = "completion"
+      }
+      return assert.fail("planning did not reach quiescence")
+    }
+    const assertQuiet = async (target: Node) => {
+      const snapshot = await checkContext(target)
+      for (const pin of snapshot.lcm?.selected ?? [])
+        if (pin.stale)
+          assert.isTrue(
+            excused(artifacts.get(pin.id as never)!),
+            `quiescence: a stale summary in a context is excused ${explain(artifacts.get(pin.id as never)!)}`
+          )
+      assert.isTrue(
+        [...jobs.values()].every((j) => !["pending", "processing"].includes(j.status)),
+        "quiescence: no live job"
+      )
+    }
     const run = async () => {
       await append(null, "root", false)
       await append(leaf, "middle", false)
@@ -505,8 +720,10 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
         } else if (step.kind === "summary" && leaf) {
           const history = path(nodes.get(leaf)!.parent)
           if (history.length) {
-            const start = Math.floor(step.a * history.length),
-              end = start + 1 + Math.floor(step.b * (history.length - start))
+            // Mostly pairs on a grid, which tile and so can be condensed; sometimes any range at all.
+            const any = Math.floor(step.a * history.length)
+            const start = step.b < 0.7 ? any - (any % 2) : any,
+              end = step.b < 0.7 ? start + 2 : start + 1 + Math.floor(step.b * (history.length - start))
             const inputs = history.slice(start, end).map((n) => ({
               slotId: n.id,
               versionId: effective(n),
@@ -520,7 +737,11 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
                   j.lastSlotId === inputs.at(-1)!.slotId
               )
             )
-              remember(await call(completeFixture(config.dataDir, writer, user.id, chat.id, inputs)), inputs, [])
+              remember(
+                await call(completeFixture(config.dataDir, writer, user.id, chat.id, inputs, [], PAD)),
+                inputs,
+                []
+              )
           }
         } else if (step.kind === "enqueue" && leaf && enabled) {
           const history = path(leaf)
@@ -593,69 +814,33 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
             const job = await call(writer.ClaimSummaryJob({ userId: user.id }))
             if (!job) break
             jobs.set(job.id, job)
-            assert.isNull(await call(writer.ClaimSummaryJob({ userId: user.id })), "I7: one L1 per chat")
-            const earlier = [...jobs.values()].filter(
-              (j) => j.status === "pending" && nodes.get(j.firstSlotId)!.depth < nodes.get(job.firstSlotId)!.depth
-            )
-            assert.lengthOf(earlier, 0, "I7: oldest path segment first")
+            if (job.level === 1) {
+              // One level-1 job at a time per chat: another claim finds only condensations.
+              const another = await call(writer.ClaimSummaryJob({ userId: user.id }))
+              if (another) {
+                assert.isAbove(another.level, 1, "I7: one L1 per chat")
+                await call(writer.ReleaseSummaryJob({ userId: user.id, jobId: another.id, attempt: another.epoch }))
+                jobs.set(another.id, { ...another, status: "pending", attempts: another.attempts - 1 })
+              }
+              const earlier = [...jobs.values()].filter(
+                (j) =>
+                  j.level === 1 &&
+                  j.status === "pending" &&
+                  nodes.get(j.firstSlotId)!.depth < nodes.get(job.firstSlotId)!.depth
+              )
+              assert.lengthOf(earlier, 0, "I7: oldest path segment first")
+            }
             if (step.kind === "release-job") {
               await call(writer.ReleaseSummaryJob({ userId: user.id, jobId: job.id, attempt: job.epoch }))
               jobs.set(job.id, { ...job, status: "pending", attempts: job.attempts - 1 })
               break
             }
-            // The real summarizer runs the job against the scripted model and the fake judge.
-            const chain = path(job.lastSlotId).slice(nodes.get(job.firstSlotId)!.depth)
-            const expected = chain.map((n) => ({
-              slotId: n.id,
-              versionId: effective(n),
-              amendCount: effective(n) === null ? 0 : versions.get(n.selected)!.amends
-            }))
-            const assembly = await call(
-              Effect.exit(reader.AssembleSummary({ userId: user.id, jobId: job.id, attempt: job.epoch }))
-            )
-            if (!Exit.isFailure(assembly)) {
-              const snapshot = JSON.parse(assembly.value.snapshot) as ContextSnapshot
-              assert.deepStrictEqual(snapshot.summaryJob!.inputs, expected, "I7: exact request versions")
-              snapshots.push(assembly.value.snapshot)
-            }
-            script = step.kind === "refuse-job" ? (step.b < 0.5 ? "hard" : "soft") : { text: JSON.stringify(expected) }
-            await call(summarizer.runJob(job))
-            const [rows] = await call(
-              fixtureSql(config.dataDir, [
-                {
-                  sql: "SELECT status,attempts,result_summary_id FROM summarization_jobs WHERE id=?",
-                  params: [job.id]
-                }
-              ])
-            )
-            const row = rows![0]!
-            jobs.set(job.id, { ...job, status: row.status as SummaryJob["status"], attempts: Number(row.attempts) })
-            counts[`${step.kind}:${row.status}:${assembly._tag}`] =
-              (counts[`${step.kind}:${row.status}:${assembly._tag}`] ?? 0) + 1
-            if (row.status === "complete") {
-              assert.notStrictEqual(step.kind, "refuse-job", "I5: a refusal is never saved as a summary")
-              remember(
-                await call(reader.GetSummary({ userId: user.id, summaryId: row.result_summary_id as never })),
-                expected,
-                []
-              )
-            }
-            if (row.status === "failed" && row.result_summary_id) {
-              const failed = await call(
-                reader.GetSummary({ userId: user.id, summaryId: row.result_summary_id as never })
-              )
-              assert.strictEqual(failed.status, "failed")
-              assert.strictEqual(failed.content, "")
-              assert.isFalse(artifacts.has(failed.id), "I5: a failed summary is not a summary the oracle may select")
-            }
-            const [saved] = await call(
-              fixtureSql(config.dataDir, [
-                { sql: "SELECT count(*) AS n FROM summaries WHERE status IN ('complete','truncated','superseded')" }
-              ])
-            )
-            assert.strictEqual(Number(saved![0]!.n), artifacts.size, "I5: only accepted outputs became summaries")
-            if (row.status !== "pending") break
+            const status = await runClaimed(job, step.kind === "refuse-job" ? (step.b < 0.5 ? "hard" : "soft") : "ok")
+            if (status !== "pending") break
           }
+        } else if (step.kind === "maintain") {
+          const target = leaf ? nodes.get(leaf) : undefined
+          if (await cascade(target)) await assertQuiet(target!)
         } else if (step.kind === "condense") {
           const pairs: Array<ReadonlyArray<Artifact>> = []
           for (const a of artifacts.values())
@@ -673,7 +858,7 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
                 }) as Summary
             )
             remember(
-              await call(completeFixture(config.dataDir, writer, user.id, chat.id, [], fixtureChildren)),
+              await call(completeFixture(config.dataDir, writer, user.id, chat.id, [], fixtureChildren, PAD)),
               [],
               children
             )
@@ -693,6 +878,7 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
             summary.revision = result.summary.revisionId
             summary.rowVersion = result.summary.rowVersion
             summary.revisions.set(summary.revision, text)
+            origins.set(summary.revision, "user")
           } else {
             const revision = pick([...summary.revisions.keys()], step.b)!
             const result = await call(
@@ -714,7 +900,7 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
               slotId: null,
               versionId: null,
               scope: null,
-              data: { key: "lcm.settings", value: { enabled } }
+              data: { key: "lcm.settings", value: { enabled, ...knobs } }
             })
           )
         }
@@ -736,6 +922,28 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
           )
         }
       }
+      // Run to quiescence (spec/LCM.md §4): whatever the steps left, a reply's pass and its cascade
+      // settle, and then no context on those paths holds a stale summary the planner could have replaced.
+      if (!enabled) {
+        enabled = true
+        await call(
+          writer.AddStateEvent({
+            userId: user.id,
+            chatId: chat.id,
+            slotId: null,
+            versionId: null,
+            scope: null,
+            data: { key: "lcm.settings", value: { enabled, ...knobs } }
+          })
+        )
+      }
+      const live = [...nodes.values()].filter((n) => !n.deleted && n.parent !== null && !nodes.get(n.parent)!.deleted)
+      const targets = [leaf ? nodes.get(leaf) : undefined, pick(live, 0.25), pick(live, 0.6), pick(live, 0.9)]
+      for (const target of targets)
+        if (target && (await cascade(target))) {
+          await assertQuiet(target)
+          counts["quiescent"] = (counts["quiescent"] ?? 0) + 1
+        }
     }
     const exit = yield* Effect.tryPromise(run).pipe(Effect.exit)
     for (const [key, n] of Object.entries(counts)) exercised[key] = (exercised[key] ?? 0) + n
@@ -775,7 +983,14 @@ for (const seed of ONLY === undefined ? Array.from({ length: SEEDS }, (_, i) => 
 
 if (ONLY === undefined && STEPS >= 100)
   it("the seeds ran jobs to completion, to retry, and to failure under planted refusals", () => {
-    assert.isAbove(exercised["run-job:complete:Success"] ?? 0, 0)
-    assert.isAbove(exercised["refuse-job:pending:Success"] ?? 0, 0)
-    assert.isAbove(exercised["refuse-job:failed:Success"] ?? 0, 0)
+    for (const key of [
+      "run-job:complete:L1",
+      "refuse-job:pending:L1",
+      "refuse-job:failed:L1",
+      "condensed",
+      "quiescent",
+      "rewritten:L1",
+      "absorbed"
+    ])
+      assert.isAbove(exercised[key] ?? 0, 0, key + JSON.stringify(exercised))
   })

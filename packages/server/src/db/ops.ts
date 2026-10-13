@@ -1,4 +1,4 @@
-import { SummaryJob, SummaryChunk, SummaryPlan } from "./lcmJobs.ts"
+import { PlannedJob, SummaryJob, SummaryChunk, SummaryPlan } from "./lcmJobs.ts"
 import { ModelChoice } from "@rp/shared/lcmSettings.ts"
 import {
   LcmCoverage,
@@ -307,6 +307,23 @@ export class WriteOps extends RpcGroup.make(
       leafSlotId: SlotId,
       triggerVersionId: Schema.optionalKey(VersionId),
       chunks: Schema.Array(SummaryChunk),
+      requestClass: SummaryJob.fields.requestClass
+    },
+    success: Schema.Array(SummaryJob),
+    error: Schema.Union([StorageError, NotFound])
+  }),
+  /**
+   * Condensations: level n+1 jobs over the ordered parts the planner chose (or an absorbing summary's
+   * parts again). Each part is checked to be the chat's, below the level and adjacent to the one
+   * before, and the last to lie on the leaf's path; a range a live job covers is skipped.
+   */
+  Rpc.make("EnqueueCondensations", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      leafSlotId: SlotId,
+      triggerVersionId: Schema.optionalKey(VersionId),
+      jobs: Schema.Array(PlannedJob),
       requestClass: SummaryJob.fields.requestClass
     },
     success: Schema.Array(SummaryJob),
@@ -1755,7 +1772,13 @@ export class ReadOps extends RpcGroup.make(
    * back the values random and time macros drew.
    */
   Rpc.make("PlanSummaries", {
-    payload: { userId: UserId, chatId: ChatId, leafSlotId: SlotId },
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      leafSlotId: SlotId,
+      /** Without one, only new chunks are planned. A reply may start re-summarizing; a finished job only continues it. */
+      reason: Schema.optionalKey(Schema.Literals(["reply", "completion"]))
+    },
     success: SummaryPlan,
     error: Schema.Union([StorageError, NotFound, AssemblyFailed])
   }),

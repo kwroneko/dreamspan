@@ -1,6 +1,6 @@
 import { ChatId, SlotId } from "@rp/shared/chat.ts"
 import { UserId } from "@rp/shared/domain.ts"
-import { SummaryInput } from "@rp/shared/lcm.ts"
+import { SummaryId, SummaryInput } from "@rp/shared/lcm.ts"
 import { Schema } from "effect"
 
 export const SummaryJob = Schema.Struct({
@@ -27,16 +27,34 @@ export type SummaryJob = typeof SummaryJob.Type
 export const SummaryChunk = Schema.Struct({
   inputs: Schema.Array(SummaryInput),
   target: Schema.Int,
-  clipTokens: Schema.optionalKey(Schema.Int)
+  clipTokens: Schema.optionalKey(Schema.Int),
+  /** Writes a stale summary's range again: an overlapping completed range does not make it redundant. */
+  refresh: Schema.optionalKey(Schema.Boolean)
 })
+/** A condensation to enqueue: its parts in order, the level it makes, and the parent it absorbs into, if any. */
+export const PlannedJob = Schema.Struct({
+  level: Schema.Int,
+  children: Schema.Array(SummaryId),
+  target: Schema.Int,
+  eager: Schema.Boolean,
+  absorbedParentId: Schema.optionalKey(SummaryId)
+})
+export type PlannedJob = typeof PlannedJob.Type
 export const SummaryPlan = Schema.Struct({
   chunks: Schema.Array(SummaryChunk),
+  /** Stale level-1 summaries to write again, as chunks; only a reply plans them. */
+  refresh: Schema.Array(SummaryChunk),
+  condensations: Schema.Array(PlannedJob),
+  /** Used summaries that are stale but left to the user: hand-written, or built over one. */
+  flagged: Schema.Array(SummaryId),
   enabled: Schema.Boolean,
   over: Schema.Boolean,
   partialBatch: Schema.Boolean,
   windowMax: Schema.Int,
   jobs: Schema.Array(SummaryJob),
-  spendAhead: Schema.Boolean
+  spendAhead: Schema.Boolean,
+  /** Why nothing is planned although LCM is on: no model is chosen to summarize with. */
+  blocked: Schema.NullOr(Schema.Literal("no_model"))
 })
 export const jobColumns = `j.id, j.chat_id AS chatId, c.owner_user_id AS userId,
  j.first_slot_id AS firstSlotId, j.last_slot_id AS lastSlotId, j.leaf_slot_id AS leafSlotId,

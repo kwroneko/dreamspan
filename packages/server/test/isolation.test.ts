@@ -1742,6 +1742,17 @@ const storage: Record<
       }),
       "NotFound"
     ),
+  EnqueueCondensations: (_reader, actor, owner, writer) =>
+    refused(
+      writer.EnqueueCondensations({
+        userId: actor.user.id,
+        chatId: owner.chat.chatId,
+        leafSlotId: owner.chat.slotId,
+        jobs: [],
+        requestClass: "idle"
+      }),
+      "NotFound"
+    ),
   RetrySummary: (_reader, actor, owner, writer) =>
     refused(writer.RetrySummary({ userId: actor.user.id, summaryId: owner.summary.id }), "NotFound"),
   MarkVersion: (_reader, actor, owner, writer) =>

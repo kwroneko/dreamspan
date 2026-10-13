@@ -11,6 +11,7 @@ import { NoteDoc } from "@rp/shared/docs/note.ts"
 import { PresetDoc } from "@rp/shared/docs/preset.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { NotFound } from "@rp/shared/errors.ts"
+import type { Summary } from "@rp/shared/lcm.ts"
 import { resolveModel } from "@rp/shared/providers.ts"
 import { FoldableEvent } from "@rp/shared/state.ts"
 import { Effect, Layer, Schema } from "effect"
@@ -97,6 +98,12 @@ type Settings = {
   readonly cut?: string
   readonly summaryBefore?: { readonly slot: string | null; readonly depth: number }
   readonly partialBatch?: boolean
+  /** A condensation's request: the layer before `summaryBefore`, then exactly these parts, ending at `cursor`. */
+  readonly condense?: {
+    readonly children: ReadonlyArray<Summary>
+    readonly cursor: string
+    readonly cursorDepth: number
+  }
   /** A model chosen for this context over the chat's bindings: "Retry with…", a summary job's fallback. */
   readonly modelOverride?: { readonly connection: string; readonly model: string }
 } & (
@@ -286,9 +293,15 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
         settings.partialBatch
       ).pipe(
         Effect.map((layer) =>
-          settings.summaryBefore
-            ? { ...layer, cursor: settings.summaryBefore.slot, cursorDepth: settings.summaryBefore.depth }
-            : layer
+          settings.condense
+            ? {
+                summaries: [...layer.summaries, ...settings.condense.children],
+                cursor: settings.condense.cursor,
+                cursorDepth: settings.condense.cursorDepth
+              }
+            : settings.summaryBefore
+              ? { ...layer, cursor: settings.summaryBefore.slot, cursorDepth: settings.summaryBefore.depth }
+              : layer
         ),
         Effect.tap((layer) =>
           Effect.sync(() => {

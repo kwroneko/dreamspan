@@ -1,6 +1,6 @@
 # LCM: hierarchical summarization
 
-**Status**: Proposed, 2026-10-13. Phase 3 (PLAN.md). Slices 1–4 are implemented in ARCHITECTURE §16; the remaining slices are proposed. Items are marked as in DESIGN.md: **[D]** the owner stated or confirmed it (with where), **[P]** proposed and not confirmed, **[O]** open. The baseline is reference-harness as described in [the earlier reference notes](the earlier reference notes), cited as "ref §N". This document lists what carries over, then only the differences.
+**Status**: Proposed, 2026-10-13. Phase 3 (PLAN.md). Slices 1–5 are implemented in ARCHITECTURE §16; the remaining slices are proposed. Items are marked as in DESIGN.md: **[D]** the owner stated or confirmed it (with where), **[P]** proposed and not confirmed, **[O]** open. The baseline is reference-harness as described in [the earlier reference notes](the earlier reference notes), cited as "ref §N". This document lists what carries over, then only the differences.
 
 Scope:
 - **[D]** LCM is the main feature: chats of unlimited length with a fixed, cache-friendly budget, keeping every message and every intermediate summary (DESIGN §8).
@@ -44,9 +44,9 @@ Implemented in [ARCHITECTURE §16](../ARCHITECTURE.md#16-lcm-hierarchical-summar
 
 reference-harness records event ids only. A covered edit or delete leaves its summaries as they were, and they stay current (ref §5; §8 item 7).
 Implemented in [ARCHITECTURE §16](../ARCHITECTURE.md#16-lcm-hierarchical-summaries): nullable effective version and amendment pins, child revision pins, recursive derived freshness, and stale fallback only without a fresh candidate at that endpoint. Edits, swipes, deletes, restores and hides change no summary rows.
-- **[P]** Re-summarizing writes a new summary row over the same chain with the new inputs. The stale one stays. If the user swipes back, the old one is fresh and selected again, with no request. Summaries are in effect keyed by chain and inputs, and none is ever lost.
-- **[P]** Re-summarizing runs at `idle` class (§2.5). "Re-summarize now" runs it at `interactive`.
-- **[P]** A summary whose selected revision the user wrote isn't replaced automatically when it goes stale. It's flagged. See question 2.
+- Implemented (ARCHITECTURE §16, condensation and stale summaries): re-summarizing writes a new summary row over the same chain with the new inputs; the stale one stays, and a swipe back makes it fresh again with no request. It runs only with the next reply, for summaries the path uses, once per affected summary; a hand-written stale summary is flagged, never replaced.
+- Re-summarizing runs at `idle` class (§2.5). "Re-summarize now" is `RetrySummary`, at `interactive`. **[P]** A rerun request recorded for "redo with the next reply" (slice 7) is not built here.
+- Implemented: a summary whose selected revision the user wrote isn't replaced automatically when it goes stale; it's flagged (`SummaryPlan.flagged`). See question 2.
 - **[D]** Deleting a message for good keeps an empty placeholder, so summaries over it stay valid (DESIGN §6.2). **[P]** Those summaries are stale, since the slot has no effective version, and their text may still describe it. The summary panel says so and offers Re-summarize.
 - **[P]** A version still generating has no effective version, so the planner doesn't summarize a chain while a covered slot is generating.
 - **[P]** Mechanical edits through changesets (DESIGN §10.3) come in phase 5. DATA-MODEL §8.2 proposes updating `summary_inputs` in place; inputs are immutable here, so a changeset will write a new summary row for the new versions with the replaced text instead.
@@ -114,7 +114,7 @@ reference-harness synthesizes a placeholder from a failed job row and never pers
 - **[D]** Failure placeholders are part of the baseline (DESIGN §8).
 - Implemented (ARCHITECTURE §16): a failed L1 is a summary row with status `failed`, its inputs, its error and an empty revision; it is held while its inputs are unchanged, stale after an edit or swipe inside the range, and Retry and Retry with… are actions on it (`RetrySummary`). A failed row never replaces messages that fit.
 - **[P]** Not yet built: the assembler rendering the marker ("[Messages 40–52 could not be summarized.]") when the window would pass `window_max`, and the failure on the divider, the rail and the summary panel (slice 7). Today such a range is left out through the stepped fallback with the "not summarized yet" report.
-- A failed condensation leaves its children selected, as in reference-harness. It gets a failed row too, so it shows (slice 5).
+- A failed condensation leaves its children selected, as in reference-harness. It gets a failed row too, so it shows (implemented, slice 5).
 
 ### 2.9 How summaries enter the context
 
@@ -200,7 +200,7 @@ Every change to LCM keeps these, as every change to drafts keeps ARCHITECTURE §
 9. **Isolation.** Another user's chats, summaries and jobs are `NotFound` through every operation.
 
 **The model test** (`test/protocol/lcm.model.test.ts`), in the style of `drafts.model.test.ts`: the real server, workers and assembler, with a fake provider.
-- Built for slices 1–4: fixture summaries encode their inputs, and graph steps check invariants 1–4 and 6; job steps run the real summarizer against a scripted provider and a fake judge, with planted hard and soft refusals (invariants 5 and 7). Condensation, edits to quiescence and batch steps are slice 5.
+- Built for slices 1–4: fixture summaries encode their inputs, and graph steps check invariants 1–4 and 6; job steps run the real summarizer against a scripted provider and a fake judge, with planted hard and soft refusals (invariants 5 and 7). Slice 5 adds real condensations (fanout of two), edits and hand-written summaries, and a cascade per `maintain` step and at the end, checked at quiescence.
 - The fake summarizer's reply encodes its inputs: an L1 lists `depth:version` for each slot it read, a condensation its children and their revisions. So the oracle can decode any summary in any context back into what it covers and from which versions.
 - Random steps: append a message or a reply, branch, swipe, edit, select, delete a message, branch or version, restore, purge, hide and show, run some jobs, fail one with a planted refusal, edit a summary, select a revision, re-summarize, retry, change LCM settings, restart the server.
 - The oracle is an in-memory model of the graph and its selections, written apart from the SQL, which computes paths, effective versions and freshness.
@@ -228,7 +228,7 @@ Each slice moves its part of this document into ARCHITECTURE.md in the same comm
 | 2 ✓ | The `lcm` stage, the layer in both modes, breakpoint (b), pins, assembler version 11, summary sources in the inspector and the cache estimate | The model test over graph steps with summaries written by fixtures (invariants 1–4, 6); the ST gate unchanged with LCM off | B |
 | 3 | Planner, queue operations, `Summarizer`, summarization requests, use / wait / omit, batches, idle class | The model test with jobs (7, 8); the prefix comparison at a mock provider | A |
 | 4 ✓ | Hard refusals and the judge model for soft refusals, retries, failed summaries, Retry with…, marks on chat versions | A fake judge; the model test with planted refusals (5) | B |
-| 5 | Condensation, absorption, re-summarizing stale summaries | The model test with condensation and edits, run to quiescence | B |
+| 5 ✓ | Condensation, absorption, re-summarizing stale summaries | The model test with condensation and edits, run to quiescence | B |
 | 6 | Enabling LCM, adopting imported summaries, backfill with its estimate and spend cap, the ST Summarize prompt kept on import | A synthetic ST folder adopted and backfilled; the estimate within 25% of the ledger at a fake provider | A |
 | 7 ✓ | UI: divider, summary panel, editing with drafts and revisions, coverage rail, context view | Browser flows at phone and desktop width; the performance harness with summaries | B |
 

@@ -26,15 +26,26 @@ export const targetFor = (sql: SqlClient.SqlClient, chatId: string, level: numbe
         Effect.map(([row]) => row?.target ?? 600)
       )
 
-/** The reply prefix to pin for a job at `leaf`: the closest selected reply on its path (spec/LCM.md §2.5). */
+/**
+ * The reply prefix to pin for a job: the reply that triggered it, else the closest selected reply
+ * above `leafSlotId`. The search is bounded, so it costs the same in a chat of any length; a job
+ * without a pinned prefix is assembled from scratch.
+ */
 export const prefixAt = (sql: SqlClient.SqlClient, chatId: string, leafSlotId: string, triggerVersionId?: string) =>
   Effect.gen(function* () {
-    const [origin] = yield* sql<{ snapshot: string }>`WITH RECURSIVE path(id) AS (
-      SELECT ${leafSlotId} UNION ALL SELECT s.parent_slot_id FROM slots s JOIN path p ON p.id=s.id WHERE s.parent_slot_id IS NOT NULL
-    ) SELECT p.context_snapshot_json AS snapshot FROM path a JOIN slots s ON s.id=a.id
-      JOIN versions v ON v.id=coalesce(${triggerVersionId ?? null},s.selected_version_id) AND v.slot_id=s.id JOIN rollouts r ON r.id=v.rollout_id
-      JOIN rollout_payloads p ON p.rollout_id=r.id WHERE r.chat_id=${chatId} AND r.kind='generation'
-      AND p.context_snapshot_json IS NOT NULL ORDER BY s.depth DESC LIMIT 1`
+    const [origin] = triggerVersionId
+      ? yield* sql<{ snapshot: string }>`
+          SELECT p.context_snapshot_json AS snapshot FROM versions v JOIN slots s ON s.id = v.slot_id
+            JOIN rollouts r ON r.id = v.rollout_id JOIN rollout_payloads p ON p.rollout_id = r.id
+          WHERE v.id = ${triggerVersionId} AND s.chat_id = ${chatId} AND r.kind = 'generation'
+            AND p.context_snapshot_json IS NOT NULL`
+      : yield* sql<{ snapshot: string }>`WITH RECURSIVE path(id, n) AS (
+          SELECT ${leafSlotId}, 1 UNION ALL SELECT s.parent_slot_id, p.n + 1 FROM slots s JOIN path p ON p.id = s.id
+            WHERE s.parent_slot_id IS NOT NULL AND p.n < 400
+        ) SELECT p.context_snapshot_json AS snapshot FROM path a JOIN slots s ON s.id = a.id
+          JOIN versions v ON v.id = s.selected_version_id JOIN rollouts r ON r.id = v.rollout_id
+          JOIN rollout_payloads p ON p.rollout_id = r.id WHERE r.chat_id = ${chatId} AND r.kind = 'generation'
+          AND p.context_snapshot_json IS NOT NULL ORDER BY s.depth DESC LIMIT 1`
     return origin ? JSON.stringify(takeSummaryPrefix(JSON.parse(origin.snapshot) as ContextSnapshot)) : null
   })
 

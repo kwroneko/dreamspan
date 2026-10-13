@@ -50,7 +50,8 @@ export const makeLcmWriteHandlers = (bin: Bin) =>
             if (
               job.rollout_id !== rolloutId ||
               frozen?.id !== jobId ||
-              JSON.stringify(frozen.inputs) !== JSON.stringify(inputs)
+              JSON.stringify(frozen.inputs) !== JSON.stringify(inputs) ||
+              JSON.stringify(frozen.children ?? []) !== JSON.stringify(children)
             )
               return yield* refused("Completion must use the inputs frozen for this job's active request")
           }

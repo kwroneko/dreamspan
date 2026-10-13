@@ -196,6 +196,8 @@ export interface ContextSnapshot {
     readonly id: string
     readonly clipTokens: number
     readonly inputs: ReadonlyArray<import("@rp/shared/lcm.ts").Summary["inputs"][number]>
+    /** A condensation's parts, each at the revision the request rendered. */
+    readonly children?: ReadonlyArray<import("@rp/shared/lcm.ts").Summary["children"][number]>
     readonly tail: string
     readonly style: "direct" | "tool"
     readonly prefix?: SummaryPrefix
@@ -211,6 +213,8 @@ export interface ContextSnapshot {
       readonly level: number
     }>
     readonly omitted: ReadonlyArray<{ readonly from: number; readonly to: number }>
+    /** The layer's target (15% of the context) and maximum (25%) in tokens, which condensation measures against. */
+    readonly layerBudget?: { readonly target: number; readonly maximum: number }
     readonly verbatim: { readonly from: number; readonly to: number } | null
   }
   readonly schema: 1

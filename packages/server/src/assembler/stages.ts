@@ -1428,6 +1428,11 @@ const composeStage = sync("compose", (assembly) => {
   const layerReserve = assembly.lcm
     ? Math.max(0, Math.min(maximum - fixedCost, Math.ceil(contextBudget(assembly) * 0.15) - actualPlacement.layerCost))
     : 0
+  if (assembly.lcm)
+    assembly.lcmBudget = {
+      target: Math.ceil(contextBudget(assembly) * 0.15),
+      maximum: Math.ceil(contextBudget(assembly) * 0.25)
+    }
   maximum -= layerReserve
   desiredTarget -= layerReserve
   const oldNotes = configurationChanged ? undefined : prior?.noteBudget

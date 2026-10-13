@@ -63,7 +63,9 @@ export const completeFixture = (
   userId: Parameters<Writer["Service"]["CompleteSummary"]>[0]["userId"],
   chatId: string,
   inputs: Summary["inputs"],
-  children: ReadonlyArray<Summary> = []
+  children: ReadonlyArray<Summary> = [],
+  /** Text after the encoded lineage, to give a summary some weight. */
+  pad = ""
 ) =>
   Effect.gen(function* () {
     const first = children[0]?.firstSlotId ?? inputs[0]!.slotId
@@ -72,7 +74,7 @@ export const completeFixture = (
     return yield* writer.CompleteSummary({
       userId,
       ...job,
-      content: JSON.stringify(children.length ? children.map((s) => [s.id, s.revisionId]) : inputs),
+      content: JSON.stringify(children.length ? children.map((s) => [s.id, s.revisionId]) : inputs) + pad,
       status: "complete",
       inputs,
       children: children.map((s) => ({ summaryId: s.id, revisionId: s.revisionId }))

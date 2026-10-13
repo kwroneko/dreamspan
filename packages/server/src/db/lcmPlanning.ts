@@ -1,5 +1,6 @@
 import { applySummaryPrefix, type SummaryPrefix } from "../lcm/prefix.ts"
 import { completedCoverage, failedHold } from "./lcmCoverage.ts"
+import { maintain, MAX_JOBS_PER_PLAN } from "./lcmMaintain.ts"
 import { tokensOf } from "../assembler/st.ts"
 import { foldState } from "@rp/shared/state.ts"
 import { Effect } from "effect"
@@ -13,6 +14,8 @@ import { sqlSources } from "./assemblySources.ts"
 import { readDefaults } from "./generationSettings.ts"
 import { jobColumns, type SummaryJob } from "./lcmJobs.ts"
 import { lcmPath, slotInput } from "./lcmPath.ts"
+import { readSummary } from "./lcmReads.ts"
+import type { Summary } from "@rp/shared/lcm.ts"
 import { selectSummaryLayer } from "./lcmLayer.ts"
 import { NotFound, type ReadOps } from "./ops.ts"
 import { query } from "./tx.ts"
@@ -22,7 +25,7 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   const assembler = yield* makeAssembler
   return {
-    PlanSummaries: ({ userId, chatId, leafSlotId }) =>
+    PlanSummaries: ({ userId, chatId, leafSlotId, reason }) =>
       Effect.gen(function* () {
         yield* lcmPath(sql, userId, chatId, leafSlotId, leafSlotId)
         const sources = sqlSources(sql, { userId, chatId, next: true, cut: leafSlotId })
@@ -37,14 +40,26 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
         )
         const empty = {
           chunks: [],
+          refresh: [],
+          condensations: [],
+          flagged: [],
           enabled: state.lcm?.enabled === true,
           over: false,
           partialBatch: false,
           windowMax: 0,
           jobs: [],
-          spendAhead: defaults.lcm?.spendAhead !== false
+          spendAhead: defaults.lcm?.spendAhead !== false,
+          blocked: null as "no_model" | null
         }
         if (!state.lcm?.enabled) return empty
+        // Nothing is planned without a model to summarize with: jobs would only fail. The state is the caller's to show.
+        const bound =
+          state.modelBindings["summarizer"] ?? state.modelBindings["narrator"] ?? state.modelBindings[""] ?? null
+        const usable = yield* Effect.flatMap(AssemblySources, (s) => s.model(bound)).pipe(
+          Effect.provide(sources.layer),
+          Effect.catchTag("AssemblyFailed", () => Effect.succeed(null))
+        )
+        if (usable === null) return { ...empty, blocked: "no_model" as const }
         const layer = yield* selectSummaryLayer(sql, userId, chatId, leafSlotId)
         const path = yield* lcmPath(sql, userId, chatId, leafSlotId, layer.cursor ?? undefined)
         const onPath = new Set(path.map((s) => s.id))
@@ -59,6 +74,16 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
             reason: "budget",
             message: "LCM's runway must fit two summary chunks; increase the context or reduce leafInput."
           })
+        const maintenance = reason
+          ? yield* maintain(sql, userId, chatId, leafSlotId, layer, {
+              reason,
+              fanout: state.lcm.fanout,
+              condenseTarget: state.lcm.condenseTarget,
+              leafTarget: state.lcm.leafTarget ?? 600,
+              clipTokens: Math.max(1, Math.floor(leafInput * 1.5)),
+              budget: built.lcm?.layerBudget ?? { target: Number.MAX_SAFE_INTEGER, maximum: Number.MAX_SAFE_INTEGER }
+            })
+          : { condensations: [], refresh: [], flagged: [] }
         const raw = path.filter((s) => s.depth > layer.cursorDepth)
         const cost = (s: (typeof path)[number]) => (s.content ? Math.ceil(s.content.length / 4) + 3 : 0)
         const total = raw.reduce((n, s) => n + cost(s), 0)
@@ -67,6 +92,7 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
         const remaining = path.filter((s) => s.depth > available.cursorDepth)
         const result = {
           ...empty,
+          ...maintenance,
           windowMax,
           partialBatch,
           over: remaining.reduce((n, s) => n + cost(s), 0) > windowMax,
@@ -76,6 +102,8 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
         let keep = 0,
           end = raw.length
         while (end > 0 && keep < windowMax * 0.5) keep += cost(raw[--end]!)
+        // A failed summary holds its range while its inputs are unchanged (spec/LCM.md §2.8).
+        const held = yield* failedHold(sql, userId, chatId, path)
         const chunks: Array<{ inputs: ReturnType<typeof slotInput>[]; target: number; clipTokens: number }> = []
         let chunk: (typeof path)[number][] = [],
           tokens = 0
@@ -91,7 +119,9 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
           tokens = 0
         }
         for (const s of raw.slice(0, end)) {
-          if (covered.has(s.id)) {
+          // A bounded batch: the rest is planned once this one has run (a write must stay short).
+          if (chunks.length >= MAX_JOBS_PER_PLAN) break
+          if (covered.has(s.id) || held.has(s.id)) {
             flush()
             continue
           }
@@ -102,10 +132,8 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
             flush()
           }
         }
-        flush()
-        // A failed summary holds its range while its inputs are unchanged (spec/LCM.md §2.8).
-        const held = yield* failedHold(sql, userId, chatId, path)
-        return { ...result, chunks: chunks.filter((c) => !c.inputs.some((i) => held.has(i.slotId))) }
+        if (chunks.length < MAX_JOBS_PER_PLAN) flush()
+        return { ...result, chunks }
       }).pipe(query("PlanSummaries")),
     AssembleSummary: ({ userId, jobId, attempt }) =>
       Effect.gen(function* () {
@@ -115,11 +143,41 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
         )
         if (!job) return yield* new NotFound({ entity: "summary job", id: jobId })
         const chain = yield* lcmPath(sql, userId, job.chatId, job.lastSlotId, job.firstSlotId)
-        if (job.level !== 1 || chain[0]?.id !== job.firstSlotId || chain.some((s) => s.generating || s.merged))
+        if (chain[0]?.id !== job.firstSlotId || chain.some((s) => s.generating || s.merged))
           return yield* new AssemblyFailed({
             reason: "invalid_document",
             message: "The summary job does not cover a ready primary-parent chain."
           })
+        // A condensation is addressed by its parts: exactly these, at their selected revisions, in order.
+        const children: Array<Summary> = []
+        if (job.level > 1) {
+          const [declared] = yield* sql<{ input_child_ids: string | null }>`
+            SELECT input_child_ids FROM summarization_jobs WHERE id = ${jobId}`
+          for (const id of JSON.parse(declared?.input_child_ids ?? "[]") as Array<string>)
+            children.push(
+              yield* readSummary(sql, userId, id).pipe(
+                Effect.catchTag("NotFound", () =>
+                  Effect.fail(
+                    new AssemblyFailed({ reason: "invalid_document", message: "A part of the condensation is gone." })
+                  )
+                )
+              )
+            )
+          let at = 0
+          for (const child of children) {
+            if (child.status === "failed" || child.firstSlotId !== chain[at]?.id)
+              return yield* new AssemblyFailed({
+                reason: "invalid_document",
+                message: "The condensation's parts do not follow the job's chain."
+              })
+            at += child.slotCount
+          }
+          if (children.length < 2 || at !== chain.length || children.at(-1)!.lastSlotId !== job.lastSlotId)
+            return yield* new AssemblyFailed({
+              reason: "invalid_document",
+              message: "The condensation's parts do not cover the job's chain."
+            })
+        }
         const sources = sqlSources(sql, {
           userId,
           chatId: job.chatId,
@@ -127,6 +185,9 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
           cut: job.lastSlotId,
           summaryBefore: { slot: chain[0]!.parent, depth: chain[0]!.depth - 1 },
           partialBatch: true,
+          ...(job.level > 1
+            ? { condense: { children, cursor: job.lastSlotId, cursorDepth: chain.at(-1)!.depth } }
+            : {}),
           ...(job.modelJson
             ? { modelOverride: JSON.parse(job.modelJson) as { connection: string; model: string } }
             : {})
@@ -158,16 +219,34 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
             .filter((p) => p.source.kind === "message" && p.messages.length > 0)
             .map((p) => (p.source.kind === "message" ? p.source.version : ""))
         )
-        if (chain.some((s) => s.versionId && !rendered.has(s.versionId)) || built.lcm?.omitted.length)
+        const sent = built.lcm?.selected.slice(-children.length || undefined) ?? []
+        if (
+          job.level === 1
+            ? chain.some((s) => s.versionId && !rendered.has(s.versionId))
+            : sent.length !== children.length ||
+              sent.some((s, n) => s.id !== children[n]!.id || s.revision !== children[n]!.revisionId)
+        )
+          return yield* new AssemblyFailed({
+            reason: "budget",
+            message:
+              job.level === 1
+                ? "The summary request cannot render its whole declared chunk."
+                : "The condensation request cannot render exactly its declared parts."
+          })
+        if (built.lcm?.omitted.length)
           return yield* new AssemblyFailed({
             reason: "budget",
             message: "The summary request cannot render its whole declared chunk."
           })
         const style = state.lcm.style ?? "direct"
+        const instruction =
+          job.level > 1
+            ? `Condense the last ${children.length} summaries above (messages ${children[0]!.from} to ${children.at(-1)!.to}) into one summary of at most ${job.target} words. Keep its language and voice, names, events and unresolved details. The earlier summaries are continuity, not material to condense again.`
+            : (state.lcm.tail ??
+              defaults.lcm?.tail ??
+              `Summarize the conversation since the previous summaries in at most ${job.target} words. Keep its language and voice, names, events and unresolved details. The preceding summaries are continuity, not material to summarize again.`)
         const tail =
-          (state.lcm.tail ??
-            defaults.lcm?.tail ??
-            `Summarize the conversation since the previous summaries in at most ${job.target} words. Keep its language and voice, names, events and unresolved details. The preceding summaries are continuity, not material to summarize again.`) +
+          instruction +
           (style === "tool"
             ? "\nWrite the summary with summary_tool. Create a draft and finalize it; assistant prose is not the summary."
             : "\nReturn only the summary, without commentary.")
@@ -179,7 +258,10 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
               summaryJob: {
                 id: jobId,
                 clipTokens,
-                inputs: chain.map(slotInput),
+                inputs: job.level > 1 ? [] : chain.map(slotInput),
+                ...(job.level > 1
+                  ? { children: children.map((c) => ({ summaryId: c.id, revisionId: c.revisionId })) }
+                  : {}),
                 tail,
                 style,
                 ...(prefix ? { prefix } : {})
