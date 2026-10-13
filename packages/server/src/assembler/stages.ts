@@ -83,6 +83,7 @@ const clipForSummary = (assembly: Assembly, text: string) => {
 
 const hasSummary = (assembly: Assembly, piece: number): boolean =>
   assembly.pieces[piece]?.source.kind === "summary" ||
+  (assembly.lcmFailurePieces?.some((failure) => failure.piece === piece) ?? false) ||
   (assembly.pieces[piece]?.parts?.some((p) => hasSummary(assembly, p)) ?? false)
 
 const presetSource = (assembly: Assembly, identifier: string): Source => {
@@ -1530,10 +1531,32 @@ const composeStage = sync("compose", (assembly) => {
   let maximum = contextBudget(assembly) - reserve
   let desiredTarget = targetBudget(assembly) - reserve
   let admittedExamples = examples
-  const candidate = (start: number, budget: number, withExamples = true, reserved = false) => {
+  // A cut inside a failed range replaces the whole range, never just an unexplained prefix.
+  const normalizedStart = (start: number) => {
+    let depth = projected[start]?.entry.depth ?? need(assembly, "target").depth
+    for (const failure of assembly.lcmFailurePieces ?? []) {
+      if (failure.from < depth + 1 && failure.to >= depth + 1) {
+        while (start < projected.length && projected[start]!.entry.depth < failure.to) start++
+        depth = projected[start]?.entry.depth ?? need(assembly, "target").depth
+      }
+    }
+    return start
+  }
+  const failuresBefore = (start: number) => {
+    const depth = projected[start]?.entry.depth ?? need(assembly, "target").depth
+    return (assembly.lcmFailurePieces ?? []).filter((failure) => failure.to <= depth)
+  }
+  const candidate = (start: number, budget: number, withExamples = true, reserved = false, includeFailures = true) => {
+    if (includeFailures) start = normalizedStart(start)
     const { beside, collection, injections, layer } = reserved ? reservedPlacement : actualPlacement
+    const markers: Array<StMessage> = (includeFailures ? failuresBefore(start) : []).map((failure) => ({
+      role: "system",
+      content: assembly.pieces[failure.piece]!.text,
+      pieces: [failure.piece],
+      kind: "summary"
+    }))
     return compose({
-      layer,
+      layer: [...layer, ...markers],
       stableExamples: assembly.lcm !== undefined,
       beside,
       collection,
@@ -1562,7 +1585,7 @@ const composeStage = sync("compose", (assembly) => {
     const tokens = (messages: ReadonlyArray<StMessage>) => messages.reduce((sum, message) => sum + tokensOf(message), 0)
     return 3 + Math.max(tokens(built.messages), tokens(processed))
   }
-  const fixedCost = cost(candidate(projected.length, Number.POSITIVE_INFINITY, false))
+  const fixedCost = cost(candidate(projected.length, Number.POSITIVE_INFINITY, false, false, false))
   if (fixedCost > maximum)
     throw new AssemblyFailed({
       reason: "budget",
@@ -1603,7 +1626,7 @@ const composeStage = sync("compose", (assembly) => {
         return { ...note, text: { ...note.text, text: note.text.text + "x".repeat(extra) } }
       })
     )
-    return cost(candidate(projected.length, Number.POSITIVE_INFINITY, false, true))
+    return cost(candidate(projected.length, Number.POSITIVE_INFINITY, false, true, false))
   }
   let lowReserve = 0,
     highReserve = allowance * 4
@@ -1613,9 +1636,9 @@ const composeStage = sync("compose", (assembly) => {
     else highReserve = mid - 1
   }
   reserveNotes(lowReserve)
-  const budgetCost = (start: number, withExamples = true) => {
-    const actual = cost(candidate(start, Number.POSITIVE_INFINITY, withExamples))
-    const reserved = cost(candidate(start, Number.POSITIVE_INFINITY, withExamples, true))
+  const budgetCost = (start: number, withExamples = true, includeFailures = true) => {
+    const actual = cost(candidate(start, Number.POSITIVE_INFINITY, withExamples, false, includeFailures))
+    const reserved = cost(candidate(start, Number.POSITIVE_INFINITY, withExamples, true, includeFailures))
     return Math.max(actual, Math.min(reserved, actual + allowance))
   }
   const admit = () => {
@@ -1624,16 +1647,17 @@ const composeStage = sync("compose", (assembly) => {
     while (low < high) {
       const mid = Math.ceil((low + high) / 2)
       admittedExamples = examples.slice(0, mid)
-      if (budgetCost(projected.length) <= maximum) low = mid
+      if (budgetCost(projected.length, true, false) <= maximum) low = mid
       else high = mid - 1
     }
     admittedExamples = examples.slice(0, low)
   }
   if (configurationChanged || noteBudgetChanged) admit()
   else admittedExamples = examples.slice(0, prior.examples)
-  const minimum = budgetCost(projected.length)
+  const minimum = budgetCost(projected.length, true, false)
   let target = Math.max(desiredTarget, minimum)
   const fits = (start: number, budget: number) => {
+    start = normalizedStart(start)
     const built = candidate(start, Number.POSITIVE_INFINITY, true, true)
     const pieces = new Set(built.messages.flatMap((m) => m.pieces))
     return (
@@ -1669,7 +1693,7 @@ const composeStage = sync("compose", (assembly) => {
       (assembly.historyOmitted ?? 0) > 0)
   if (exceeded) {
     admit()
-    target = Math.max(desiredTarget, budgetCost(projected.length))
+    target = Math.max(desiredTarget, budgetCost(projected.length, true, false))
   }
   const restored = mayRestore ? earliestFit(start) : start
   if (previous && restored < start) {
@@ -1681,6 +1705,7 @@ const composeStage = sync("compose", (assembly) => {
     start = Math.max(previous ? start : 0, earliestFit(projected.length))
     budget = target
   } else assembly.historyMove = previous ? "unchanged" : "initial"
+  start = normalizedStart(start)
   const first = projected[start]?.entry
   assembly.historyStart = {
     slotId: first?.slotId ?? null,
@@ -1697,12 +1722,20 @@ const composeStage = sync("compose", (assembly) => {
   }
   const composition = {
     ...candidate(start, budget),
-    historyBudget: candidate(projected.length, maximum).historyBudget,
+    historyBudget:
+      candidate(projected.length, maximum, true, false, false).historyBudget -
+      failuresBefore(start).reduce((n, failure) => n + tokensOf({ content: assembly.pieces[failure.piece]!.text }), 0),
     examplesTotal: examples.length
   }
   assembly.postNames = postNames
   assembly.composition = composition
   if (assembly.lcm) {
+    assembly.lcmFailures = failuresBefore(start).map(({ from, to }) => ({ from, to }))
+    for (const failure of assembly.lcmFailures)
+      assembly.issues.push({
+        kind: "summary_failed",
+        message: `Messages ${failure.from}–${failure.to} could not be summarized; a failure marker replaces their originals.`
+      })
     const sentPieces = new Set(composition.messages.flatMap((m) => m.pieces))
     const retained = projected.filter((p) => sentPieces.has(p.piece))
     const truncated =
@@ -1763,7 +1796,7 @@ const requestStage = sync("request", (assembly) => {
   const messages = need(assembly, "messages")
   const s = doc.samplers
   const firstSummary = messages.findIndex((m) => m.pieces.some((p) => hasSummary(assembly, p)))
-  if (assembly.lcm?.summaries.some((s) => s.content !== "") && firstSummary < 0)
+  if ((assembly.lcm?.summaries.some((s) => s.content !== "") || assembly.lcmFailures?.length) && firstSummary < 0)
     throw new AssemblyFailed({
       reason: "invalid_document",
       message: "This preset has no enabled placement for its summaries."

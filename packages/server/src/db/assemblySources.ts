@@ -1,5 +1,5 @@
 import { contextExcluded } from "./lcmVisibility.ts"
-import { selectSummaryLayer } from "./lcmLayer.ts"
+import { selectSummaryLayer, selectFailedRanges } from "./lcmLayer.ts"
 import { readSummary } from "./lcmReads.ts"
 // The assembler's sources over the database, every read the acting user's, and the pins a
 // rebuild reads again (ARCHITECTURE §15).
@@ -304,9 +304,19 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
               ? { ...layer, cursor: settings.summaryBefore.slot, cursorDepth: settings.summaryBefore.depth }
               : layer
         ),
+        Effect.flatMap((layer) =>
+          selectFailedRanges(
+            sql,
+            userId,
+            chatId,
+            settings.summaryBefore ? settings.summaryBefore.slot : leaf,
+            layer.cursorDepth
+          ).pipe(Effect.map((failures) => ({ ...layer, failures })))
+        ),
         Effect.tap((layer) =>
           Effect.sync(() => {
             layerPins = {
+              failures: layer.failures,
               cursor: layer.cursor,
               cursorDepth: layer.cursorDepth,
               summaries: layer.summaries.map((s) => ({
@@ -671,7 +681,7 @@ const replaySources = (
             )
           )
         )
-        return { summaries, cursor: layer.cursor, cursorDepth: layer.cursorDepth }
+        return { summaries, failures: layer.failures ?? [], cursor: layer.cursor, cursorDepth: layer.cursorDepth }
       }),
     target: sql<{ ok: number }>`SELECT ${owned} AS ok`.pipe(
       Effect.flatMap(([row]) =>

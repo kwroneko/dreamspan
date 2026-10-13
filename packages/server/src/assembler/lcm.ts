@@ -35,6 +35,22 @@ export const lcmStage: AssemblerStage = {
         })
         return assembly.pieces.length - 1
       })
+      const ranges: Array<{ from: number; to: number }> = []
+      for (const failure of assembly.lcm.failures ?? []) {
+        const last = ranges.at(-1)
+        if (last && failure.from <= last.to) last.to = Math.max(last.to, failure.to)
+        else ranges.push({ from: failure.from, to: failure.to })
+      }
+      assembly.lcmFailurePieces = ranges.map((range) => {
+        const piece = assembly.pieces.length
+        assembly.pieces.push({
+          id: `lcm:failed:${range.from}:${range.to}`,
+          source: { kind: "assembler", what: "Failed summary" },
+          text: `[Messages ${range.from}–${range.to} could not be summarized.]`,
+          messages: []
+        })
+        return { ...range, piece }
+      })
       return assembly
     })
 }

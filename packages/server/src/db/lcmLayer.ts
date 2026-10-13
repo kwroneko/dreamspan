@@ -170,3 +170,32 @@ export const selectSummaryLayer = (
     const newest = selected.at(-1)
     return { summaries: selected, cursor: newest?.lastSlotId ?? null, cursorDepth: newest ? newest.to - 1 : -1 }
   })
+
+/** Failures only stand while their declared inputs still match the viewed path. */
+export const selectFailedRanges = (
+  sql: SqlClient.SqlClient,
+  userId: UserId,
+  chatId: string,
+  leaf: string | null,
+  cursorDepth: number
+) =>
+  Effect.gen(function* () {
+    const [any] = yield* sql<{ present: number }>`SELECT EXISTS(SELECT 1 FROM summaries s JOIN chats c ON c.id=s.chat_id
+      WHERE s.chat_id=${chatId} AND c.owner_user_id=${userId} AND c.deleted_at IS NULL AND s.sealed=1 AND s.level=1 AND s.status='failed') AS present`
+    if (!any?.present) return []
+    const rows = yield* sql<{ id: string }>`WITH RECURSIVE path(id) AS (
+      SELECT s.id FROM slots s JOIN chats c ON c.id=s.chat_id
+        WHERE s.id=${leaf} AND c.id=${chatId} AND c.owner_user_id=${userId} AND c.deleted_at IS NULL
+      UNION ALL SELECT s.parent_slot_id FROM slots s JOIN path p ON s.id=p.id WHERE s.parent_slot_id IS NOT NULL
+    ) SELECT s.id FROM path JOIN summaries s INDEXED BY summaries_last_slot ON s.last_slot_id=path.id
+      WHERE s.chat_id=${chatId} AND s.sealed=1 AND s.level=1 AND s.status='failed'`
+    const valid = lineageValidator(sql, userId),
+      failures: Array<{ id: string; revision: string; from: number; to: number }> = []
+    for (const row of rows) {
+      if (!(yield* valid(row.id))) continue
+      const summary = yield* readSummary(sql, userId, row.id)
+      if (summary.fresh && summary.from > cursorDepth + 1)
+        failures.push({ id: summary.id, revision: summary.revisionId, from: summary.from, to: summary.to })
+    }
+    return failures.sort((a, b) => a.from - b.from || a.to - b.to || a.id.localeCompare(b.id))
+  })

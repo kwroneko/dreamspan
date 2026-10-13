@@ -69,6 +69,7 @@ export const ContextIssue = Schema.Struct({
     "prefill_dropped",
     "macro_limit",
     "history_truncated",
+    "summary_failed",
     "examples_truncated",
     "regex_skipped",
     "lorebook_issue"

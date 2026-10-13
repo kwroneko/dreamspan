@@ -170,6 +170,8 @@ export interface ProjectedEntry {
 export interface Assembly {
   lcm?: SummaryLayer
   lcmPieces?: ReadonlyArray<number>
+  lcmFailurePieces?: ReadonlyArray<{ readonly from: number; readonly to: number; readonly piece: number }>
+  lcmFailures?: ReadonlyArray<{ readonly from: number; readonly to: number }>
   lcmVerbatim?: { readonly from: number; readonly to: number } | null
   lcmOmitted?: ReadonlyArray<{ readonly from: number; readonly to: number }>
   lcmBudget?: { readonly target: number; readonly maximum: number }
@@ -293,6 +295,7 @@ export const assemble = (stages: StageRegistry, request: AssemblyRequest) =>
                 to: s.to,
                 level: s.level
               })),
+              failures: assembly.lcmFailures ?? [],
               omitted: assembly.lcmOmitted ?? [],
               ...(assembly.lcmBudget ? { layerBudget: assembly.lcmBudget } : {}),
               verbatim: assembly.lcmVerbatim ?? null

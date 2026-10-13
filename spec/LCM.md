@@ -109,7 +109,7 @@ reference-harness has no idle class or idle gate for summaries (ref §4 Idle-tim
 reference-harness synthesizes a placeholder from a failed job row and never persists it. It omits the range's raw messages at once, treats the failure as terminal, and needs an operator to delete the job row before the range can be retried (ref §6).
 - **[D]** Failure placeholders are part of the baseline (DESIGN §8).
 - Implemented (ARCHITECTURE §16): a failed L1 is a summary row with status `failed`, its inputs, its error and an empty revision; it is held while its inputs are unchanged, stale after an edit or swipe inside the range, and Retry and Retry with… are rerun requests on it (`SetSummaryRerun`). A failed row never replaces messages that fit.
-- **[P]** Not yet built: the assembler rendering the marker ("[Messages 40–52 could not be summarized.]") when the window would pass `window_max`, and the failure on the divider, the rail and the summary panel (slice 7). Today such a range is left out through the stepped fallback with the "not summarized yet" report.
+- Implemented (ARCHITECTURE §16): the assembler sends "[Messages 40–52 could not be summarized.]" only when the window would pass `window_max` and raw history must leave. The marker consumes budget, is reported as an assembly issue and its failure range is pinned for exact rebuilds. The divider, rail and summary panel already show failures (slice 7).
 - A failed condensation leaves its children selected, as in reference-harness. It gets a failed row too, so it shows (implemented, slice 5).
 
 ### 2.9 How summaries enter the context
@@ -215,7 +215,7 @@ Other tests:
 
 ## 5. Slices
 
-Each slice moves its part of this document into ARCHITECTURE.md in the same commit. The last marks this document obsolete. All seven slices are built, but the document stays current for what is not: the items §2.8 and §2.13 list as not built.
+Each slice moves its part of this document into ARCHITECTURE.md in the same commit. The last marks this document obsolete. All seven slices are built, but the document stays current for what is not: the cost/model per summary and summarization rollout items §2.13 lists as not built.
 
 | # | Slice | Test oracle | Tier |
 |---|---|---|---|

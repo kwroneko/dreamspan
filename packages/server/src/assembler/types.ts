@@ -12,7 +12,7 @@ import type { PresetDoc } from "@rp/shared/docs/preset.ts"
 import { Schema } from "effect"
 
 /** Bump whenever identical inputs would assemble differently. Missing means version 0. */
-export const ASSEMBLER_VERSION = 18
+export const ASSEMBLER_VERSION = 19
 
 export type Role = "system" | "user" | "assistant"
 
@@ -212,6 +212,7 @@ export interface ContextSnapshot {
       readonly to: number
       readonly level: number
     }>
+    readonly failures?: ReadonlyArray<{ readonly from: number; readonly to: number }>
     readonly omitted: ReadonlyArray<{ readonly from: number; readonly to: number }>
     /** The layer's target (15% of the context) and maximum (25%) in tokens, which condensation measures against. */
     readonly layerBudget?: { readonly target: number; readonly maximum: number }
@@ -244,7 +245,15 @@ export interface ContextSnapshot {
 /** A message of the path as it was read, but its text, which its version and amend count pin. */
 type PinnedEntry = Omit<HistoryEntry, "content"> & { readonly amends: number }
 
+interface FailedSummaryRange {
+  readonly id: string
+  readonly revision: string
+  readonly from: number
+  readonly to: number
+}
+
 export interface SummaryLayer {
+  readonly failures?: ReadonlyArray<FailedSummaryRange>
   readonly summaries: ReadonlyArray<import("@rp/shared/lcm.ts").Summary>
   readonly cursor: string | null
   readonly cursorDepth: number
@@ -253,6 +262,7 @@ export interface SummaryLayer {
 /** What one context's sources read, by id and revision, each read keyed by its request (invariant 6). */
 export interface SourcePins {
   readonly lcm?: {
+    readonly failures?: ReadonlyArray<FailedSummaryRange>
     readonly cursor: string | null
     readonly cursorDepth: number
     readonly summaries: ReadonlyArray<{
