@@ -1,6 +1,6 @@
 # LCM: hierarchical summarization
 
-**Status**: Proposed, 2026-10-13. Phase 3 (PLAN.md). Slices 1–5 are implemented in ARCHITECTURE §16; the remaining slices are proposed. Items are marked as in DESIGN.md: **[D]** the owner stated or confirmed it (with where), **[P]** proposed and not confirmed, **[O]** open. The baseline is reference-harness as described in [the earlier reference notes](the earlier reference notes), cited as "ref §N". This document lists what carries over, then only the differences.
+**Status**: Proposed, 2026-10-13. Phase 3 (PLAN.md). Slices 1–7 are implemented in ARCHITECTURE §16; what is not built is listed under its section and in §5. Items are marked as in DESIGN.md: **[D]** the owner stated or confirmed it (with where), **[P]** proposed and not confirmed, **[O]** open. The baseline is reference-harness as described in [the earlier reference notes](the earlier reference notes), cited as "ref §N". This document lists what carries over, then only the differences.
 
 Scope:
 - **[D]** LCM is the main feature: chats of unlimited length with a fixed, cache-friendly budget, keeping every message and every intermediate summary (DESIGN §8).
@@ -100,13 +100,9 @@ reference-harness has no idle class or idle gate for summaries (ref §4 Idle-tim
 
 - **[D]** Importing a chat imports its summary, and that's required before the owner switches. The summary is kept in its own field. When a run hidden from message 0 has a summary covering it, the summary can act as the L1 over it. LCM is off by default on imported chats, and enabling it is easy and obvious; on enabling, the user chooses between keeping the summary as that L1 and redoing LCM from scratch (DESIGN §8.1, owner 2026-10-12).
 - Built (ARCHITECTURE §13): the `imported_summary` note, sent as ST placed it, recording `covers` when it sits at or after the hidden run's end.
-- **[P]** Enabling LCM on an imported chat opens one dialog: adopt the summary as the L1 over the hidden run (offered only when `covers` is set) or summarize from the first message; the cost estimate for the rest (§2.10); Enable.
-- **[P]** Adopting is one write (`AdoptImportedSummary`). It un-hides the run, writes an L1 over it with each slot's effective version, gives it a revision of origin `imported` holding the summary the shown path has (the note's newest revision on it), and turns LCM on. Un-hiding is required: a hidden slot has no effective version (§2.2), so an L1 over a hidden run would describe nothing.
-- **[P]** Redo un-hides the run too, and starts the backfill.
-- **[P]** The imported note is sent only while the path's layer is empty. Once the layer has a summary, the layer takes its place, and `{{summary}}` reads the layer. So adopting replaces it at once, redoing loses nothing while the backfill runs, and the note itself is never changed.
-- **[P]** The adopted L1 covers the hidden run only, though ST's summary may also describe messages after it, up to the one it was saved on. That's what ST sent (the summary and those messages verbatim), so the context stays what ST sent.
+- Implemented in [ARCHITECTURE §16](../ARCHITECTURE.md#16-lcm-hierarchical-summaries) (*Enabling and backfill*), as one transaction named `EnableLcm` (the `AdoptImportedSummary` proposed here): the dialog (from the chat settings switch and from the notice a chat with LCM off shows once its context drops messages); adopting writes an L1 over the run with each slot's effective version and a revision of origin `imported` holding the text the shown path has, after showing the run again (a hidden slot has no effective version, §2.2); starting over shows the run too and plans the backfill; the note is never changed and is sent only while the layer is empty, so adopting replaces it at once and starting over loses nothing while the backfill runs; the adopted L1 covers the hidden run only.
 - **[P]** If branches saved different summaries inside the run, the adopted text is the shown path's. Other branches share the chain and so the L1. Re-summarize fixes one that differs.
-- **[P]** The UI labels it "Imported from SillyTavern", with what it covers.
+- The panel labels it "Imported from SillyTavern".
 
 ### 2.8 Failure placeholders
 
@@ -127,14 +123,13 @@ Implemented in [ARCHITECTURE §16](../ARCHITECTURE.md#16-lcm-hierarchical-summar
 ### 2.11 Backfill and its cost estimate
 
 - **[D]** LCM normally runs in response to user messages, and doesn't have to run at once on large imported chats (DESIGN §8). **[P]** Backfill is lazy (DESIGN §1.4).
-- **[P]** A backfill starts only from the enable dialog, after the estimate, and covers the shown path. Other branches get theirs when visited. A `jobs` row (kind `lcm-backfill`) holds the estimate, the approved spend and the progress, so it survives restarts and can be paused.
-- **[P]** It runs at `background` class, one chunk at a time per chat (§2.5). It stops and asks again if the ledger's actual cost passes 150% of the estimate.
-- **[P]** The estimate, for a path with S tokens before the window, a prefix of P tokens (preset and cards), chunks of C = 4,000:
+- Implemented in [ARCHITECTURE §16](../ARCHITECTURE.md#16-lcm-hierarchical-summaries) (*Enabling and backfill*): a backfill starts only from the enable dialog, after the estimate, and covers the shown path (other branches get theirs when visited); a `jobs` row of kind `lcm-backfill` holds the approved estimate, the cap and its state, so it survives restarts; it waits for the next reply or "Summarize now", then runs through the existing planner in its bounded batches; spending is read from the ledger and stops at 150% of the estimate until the user continues (Continue sets a new limit of 150% of what is left); it can be paused.
+- The estimate follows the formula below, which the planner's rules refine: for a path with S tokens before the window, a prefix of P tokens (preset and cards), chunks of C = 4,000:
   - about S / C L1 jobs, plus a quarter as many condensations (S/C × (1/5 + 1/25 + …));
   - each L1 sends P, the layer so far (L, bounded by §2.6), C and the tail, and returns up to 600 tokens (capped at 1,500);
   - with explicit breakpoints and jobs inside the TTL, P and L are cache reads; C and the tail are uncached.
 - Worked example: S = 750k tokens (3,000 messages of 250), P = 6k, L averaging 5k. That's 188 L1s and about 46 condensations: about 0.95M uncached input, 2.4M cache reads and 0.15M output. Without caching, about 3.4M uncached input. As a rule of thumb, uncached input is about 1.3× the story and output 0.2×.
-- **[P]** The dialog shows these counts, the cost through the user's cost formulas for the summarizer's model (DESIGN §9 [D]), whether caching applies, and a duration from the model's recent output speed (about one to two hours for the example, one request at a time).
+- The dialog and the panel show the counts, the cost through the user's cost formulas for the summarizer's model (DESIGN §9 [D]), whether caching applies, and a duration from the model's recent output speed (null without a history). Judge requests are outside the cap.
 
 ### 2.12 Settings and plain chat mode
 
@@ -144,7 +139,7 @@ Implemented in [ARCHITECTURE §16](../ARCHITECTURE.md#16-lcm-hierarchical-summar
 
 ### 2.13 UI
 
-Implemented in [ARCHITECTURE §16](../ARCHITECTURE.md#16-lcm-hierarchical-summaries) (Summary UI): the divider, the panel with editing, revisions and re-summarize requests, the rail, the marks, the context view and the chat switch. Not yet built: cost and model per summary, summarization rollouts in the panel, Retry with… another model, the enable dialog (slice 6), and the consumers of re-summarize and retry requests (slices 4–5).
+Implemented in [ARCHITECTURE §16](../ARCHITECTURE.md#16-lcm-hierarchical-summaries) (Summary UI): the divider, the panel with editing, revisions and re-summarize requests, the rail, the marks, the context view and the chat switch. Not yet built: cost and model per summary and summarization rollouts in the panel. The enable dialog and the backfill section are slice 6.
 
 - **[D]** The UI shows where verbatim context ends and which summaries stand in for older history (DESIGN §8.1). **[P]** The three layers proposed there:
 - **Boundary divider [P].** Always shown with LCM on, after the cursor on the path shown: "Older messages: 7 summaries, ~6k tokens", with stale and failed counts and running jobs ("Summarizing 40–52…"). Clicking opens the summary panel. It's read for the path's leaf (`LcmState`) and pushed as a chat event when it changes.
@@ -172,13 +167,13 @@ Moved to [ARCHITECTURE §16](../ARCHITECTURE.md#16-lcm-hierarchical-summaries), 
 - `FailSummaryAttempt`: a retry (pending, the error, the rejected draft) or the end (a failed summary with its error); the rollout finished either way.
 - `ReleaseSummaryJob` (drain, attempt refunded), `ResetSummaryJobs` (startup), `EscalateSummaryJob`.
 - `EditSummary` (a user revision, selected, committing its draft, with `expectedRowVersion`) and `SelectSummaryRevision`.
-- `AdoptImportedSummary` (§2.7), `SetSummaryRerun` (implemented: a request the next reply answers, optionally with a model), `SetBackfill`.
+- Implemented: `EnableLcm` (§2.7, adopting and the switch in one transaction), `SetBackfill` (§2.11), `SetSummaryRerun` (a request the next reply answers, optionally with a model).
 
 **Readers:**
 - The `lcm` stage's sources inside `AssembleContext`, in the same read transaction: summaries ending on the path, their freshness, their batches.
 - `AssembleContext` for a job: the summarization request (§2.3).
 - `PlanSummaries(chat, leaf)`: the chunks, condensations and re-summaries to enqueue. The writer re-checks what it's given.
-- `LcmState(chat, leaf)` for the divider, `CoverageForWindow` for the rail (through the `summary_inputs_slot` and `summary_parents_parent` indexes), `GetSummary`, `SummaryRevisions`, `EstimateBackfill`.
+- `LcmState(chat, leaf)` for the divider, `CoverageForWindow` for the rail (through the `summary_inputs_slot` and `summary_parents_parent` indexes), `GetSummary`, `SummaryRevisions`, and `EstimateBackfill` with `GetBackfill` (implemented, slice 6).
 
 **Main thread** (Effect services, no SQL): `LcmPlanner` (triggers and coalescing), `Summarizer` (the pool, provider calls, output checks, waits), the output-check registry, and an `Lcm` chat event through `ChatHub`.
 
@@ -220,16 +215,16 @@ Other tests:
 
 ## 5. Slices
 
-Each slice moves its part of this document into ARCHITECTURE.md in the same commit. The last marks this document obsolete.
+Each slice moves its part of this document into ARCHITECTURE.md in the same commit. The last marks this document obsolete. All seven slices are built, but the document stays current for what is not: the Summarize prompt kept on import (§2.3), and the items §2.8 and §2.13 list as not built.
 
 | # | Slice | Test oracle | Tier |
 |---|---|---|---|
 | 1 ✓ | Migration 0023, its triggers, the summary writes (`CompleteSummary`, `EditSummary`, `SelectSummaryRevision`) and derived freshness | A schema test per trigger; freshness against hand-built graphs; isolation probes | A |
 | 2 ✓ | The `lcm` stage, the layer in both modes, breakpoint (b), pins, assembler version 11, summary sources in the inspector and the cache estimate | The model test over graph steps with summaries written by fixtures (invariants 1–4, 6); the ST gate unchanged with LCM off | B |
-| 3 | Planner, queue operations, `Summarizer`, summarization requests, use / wait / omit, batches, idle class | The model test with jobs (7, 8); the prefix comparison at a mock provider | A |
+| 3 ✓ | Planner, queue operations, `Summarizer`, summarization requests, use / wait / omit, batches, idle class | The model test with jobs (7, 8); the prefix comparison at a mock provider | A |
 | 4 ✓ | Hard refusals and the judge model for soft refusals, retries, failed summaries, Retry with…, marks on chat versions | A fake judge; the model test with planted refusals (5) | B |
 | 5 ✓ | Condensation, absorption, re-summarizing stale summaries | The model test with condensation and edits, run to quiescence | B |
-| 6 | Enabling LCM, adopting imported summaries, backfill with its estimate and spend cap, the ST Summarize prompt kept on import | A synthetic ST folder adopted and backfilled; the estimate within 25% of the ledger at a fake provider | A |
+| 6 ✓ | Enabling LCM, adopting imported summaries, backfill with its estimate and spend cap. **Not built:** the ST Summarize prompt kept on import (§2.3) | A synthetic ST folder adopted and backfilled; the estimate within 25% of the ledger at a fake provider | A |
 | 7 ✓ | UI: divider, summary panel, editing with drafts and revisions, coverage rail, context view | Browser flows at phone and desktop width; the performance harness with summaries | B |
 
 ---

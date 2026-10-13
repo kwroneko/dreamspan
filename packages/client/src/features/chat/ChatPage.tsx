@@ -25,6 +25,7 @@ import { ChatBadges, chatTitle } from "./ChatsPage.tsx"
 import { CacheIndicator } from "./CacheIndicator.tsx"
 import { CastContext, castView } from "./cast.ts"
 import { CastDialog, SettingsDialog } from "./ChatPanels.tsx"
+import { EnableLcmDialog } from "./EnableLcmDialog.tsx"
 import { Composer } from "./Composer.tsx"
 import { CoverageRail, LANE_PX, useCoverage } from "./CoverageRail.tsx"
 import { LcmBoundary } from "./LcmBoundary.tsx"
@@ -313,7 +314,7 @@ function ChatSurface({ session, leaf, slot }: { session: ChatSession; leaf: Slot
   }, [navigate, leaf, slot, view.leafSlotId, view.chat])
   // Rows read the cast from context: it's the same object until the cast changes.
   const cast = useMemo(() => castView(view.cast), [view.cast])
-  const [panel, setPanel] = useState<"cast" | "settings" | "notes" | "summaries" | null>(null)
+  const [panel, setPanel] = useState<"cast" | "settings" | "notes" | "summaries" | "enable" | null>(null)
   /** The summary the panel opens at: one clicked on the rail, or none. */
   const [focus, setFocus] = useState<string | null>(null)
   const rail = useRail()
@@ -399,6 +400,9 @@ function ChatSurface({ session, leaf, slot }: { session: ChatSession; leaf: Slot
           onOpenChange={(open) => setPanel(open ? "summaries" : null)}
         />
       )}
+      {panel === "enable" && (
+        <EnableLcmDialog session={session} onOpenChange={(open) => setPanel(open ? "enable" : null)} />
+      )}
       {panel === "notes" && (
         <Suspense>
           <NotesDialog
@@ -408,6 +412,24 @@ function ChatSurface({ session, leaf, slot }: { session: ChatSession; leaf: Slot
           />
         </Suspense>
       )}
+      {/* A chat that has outgrown its context with summaries off (spec/LCM.md §2.13): easy to turn on. */}
+      {view.lcm !== null &&
+        !view.lcm.enabled &&
+        view.lcm.leafSlotId === view.leafSlotId &&
+        (view.history?.historyStart?.depth ?? 0) > 0 && (
+          <div className="mx-auto w-full max-w-3xl pb-2">
+            <Alert
+              title="Older messages beyond the context aren't summarized"
+              actions={
+                <Button variant="primary" onClick={() => setPanel("enable")}>
+                  Enable summaries
+                </Button>
+              }
+            >
+              The model no longer sees them. Summaries keep what happened in them in the context.
+            </Alert>
+          </div>
+        )}
       {(view.error ?? branchError) && (
         <div className="mx-auto w-full max-w-3xl">
           <Alert tone="danger">{view.error ?? branchError}</Alert>

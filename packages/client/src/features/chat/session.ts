@@ -168,6 +168,16 @@ export class ChatSession {
   /** The newest read applied: a slow read is never dropped for a newer one still in flight. */
   private lcmApplied = 0
   private lcmTimer: ReturnType<typeof setTimeout> | null = null
+  private readonly lcmListeners = new Set<() => void>()
+
+  /**
+   * Called each time the summaries were read again after the server said they changed, even
+   * when the layer came back the same: the backfill's state is not part of the layer.
+   */
+  readonly onLcmRead = (listener: () => void) => {
+    this.lcmListeners.add(listener)
+    return () => void this.lcmListeners.delete(listener)
+  }
 
   /** Reads the summaries on the path shown, soon: a run of events makes one read. */
   private scheduleLcm() {
@@ -185,6 +195,7 @@ export class ChatSession {
     const result = await this.call((client) => client("GetLcmState", { chatId: this.chatId, leafSlotId }))
     if (!result.ok || this.disposed || read < this.lcmApplied || leafSlotId !== this.view.leafSlotId) return
     this.lcmApplied = read
+    for (const listener of this.lcmListeners) listener()
     // The same layer again (the leaf moved on, a reply streamed) changes nothing on screen.
     this.update({
       lcm: JSON.stringify(result.value) === JSON.stringify(this.view.lcm) ? this.view.lcm : result.value,

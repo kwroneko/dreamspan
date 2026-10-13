@@ -306,9 +306,16 @@ for (const [name, viewport] of [
       await dialog.getByRole("button", { name: "Done" }).click()
       await expect(page.getByTestId("lcm-boundary")).toHaveCount(0)
       await expect(article(page, fixture, 8)).not.toHaveAttribute("data-summarized")
-      await expect(page.getByRole("button", { name: "Summaries" })).toHaveCount(0)
+      await expect(page.getByRole("button", { name: "Summaries", exact: true })).toHaveCount(0)
       await page.getByRole("button", { name: "Settings" }).click()
       await dialog.getByRole("switch", { name: /Summarize older messages/ }).click()
+      // Turning it on for a chat with messages asks how to start and what it costs first.
+      const enable = page.getByRole("dialog", { name: "Summarize older messages" })
+      await expect(
+        enable.getByRole("group", { name: "Estimate" }).or(enable.getByText("Nothing needs summarizing"))
+      ).toBeVisible()
+      await enable.getByRole("button", { name: "Enable summaries" }).click()
+      await expect(enable).toHaveCount(0)
       await dialog.getByRole("button", { name: "Done" }).click()
       await expect(page.getByTestId("lcm-boundary")).toBeVisible()
       await expect(article(page, fixture, 8)).toHaveAttribute("data-summarized", "true")

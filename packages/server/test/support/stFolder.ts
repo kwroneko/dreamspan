@@ -4,12 +4,12 @@
 import { readFileSync } from "node:fs"
 import { cardChunk, png, worldInfo } from "../formats/support.ts"
 
-const encode = (value: unknown) => new TextEncoder().encode(JSON.stringify(value))
-const jsonl = (lines: ReadonlyArray<unknown>) =>
+export const encode = (value: unknown) => new TextEncoder().encode(JSON.stringify(value))
+export const jsonl = (lines: ReadonlyArray<unknown>) =>
   new TextEncoder().encode(lines.map((line) => JSON.stringify(line)).join("\n"))
 
 /** A V2 card as ST keeps it in `characters/`. */
-const card = (name: string, firstMes: string, extensions: Record<string, unknown> = {}) =>
+export const card = (name: string, firstMes: string, extensions: Record<string, unknown> = {}) =>
   png(
     cardChunk("chara", {
       name,
@@ -50,7 +50,7 @@ interface Message {
   readonly persona?: string
 }
 
-const message = (m: Message) => ({
+export const message = (m: Message) => ({
   name: m.name,
   is_user: m.user ?? false,
   is_system: m.hidden ?? false,
@@ -70,7 +70,7 @@ const message = (m: Message) => ({
   extra: { ...(m.reasoning ? { reasoning: m.reasoning } : {}), ...(m.memory ? { memory: m.memory } : {}) }
 })
 
-const header = (metadata: Record<string, unknown>) => ({
+export const header = (metadata: Record<string, unknown>) => ({
   chat_metadata: { integrity: "00000000-0000-4000-8000-000000000000", ...metadata },
   user_name: "unused",
   character_name: "unused"

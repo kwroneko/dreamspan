@@ -6,6 +6,7 @@ import { Draft, DraftRestore, DraftState } from "./drafts.ts"
 import { NotFound, ServerError, StaleWrite } from "./errors.ts"
 import { idSchema } from "./id.ts"
 import { ModelChoice } from "./lcmSettings.ts"
+import { ConnectionId, ModelId } from "./providers.ts"
 
 export const SummaryId = idSchema("SummaryId", "summaries")
 export const SummaryRevisionId = idSchema("SummaryRevisionId", "summary_revisions")
@@ -125,6 +126,128 @@ export const RerunTarget = Schema.Union([
 ])
 export type RerunTarget = typeof RerunTarget.Type
 
+/**
+ * What summarizing a chat's older history will take, by the formula in spec/LCM.md §2.11:
+ * counts of what is sent and returned. The money comes from the summarizer's cost formulas,
+ * which only the main thread has (`BackfillEstimate`).
+ */
+export const BackfillCounts = Schema.Struct({
+  /** Messages and estimated tokens before the window that no summary covers yet. */
+  messages: Schema.Int,
+  tokens: Schema.Int,
+  /** Level-1 summaries and the condensations over them that the work comes to. */
+  l1Jobs: Schema.Int,
+  condensations: Schema.Int,
+  uncachedInput: Schema.Int,
+  cachedInput: Schema.Int,
+  cacheWrite: Schema.Int,
+  output: Schema.Int,
+  /** The model has a cache lifetime, so the preset and the summaries so far are counted as cache reads. */
+  cached: Schema.Boolean,
+  /** The summarizer's model; null when none is chosen, and then nothing can be summarized. */
+  model: Schema.NullOr(
+    Schema.Struct({ connection: ConnectionId, model: ModelId, name: Schema.String, sharesCache: Schema.Boolean })
+  ),
+  /** Why nothing can be summarized: no model, or a context too small for two chunks between the window's ends. */
+  blocked: Schema.NullOr(Schema.Literals(["no_model", "runway"])),
+  /** From the model's recent output speed; null without a history of requests. */
+  seconds: Schema.NullOr(Schema.Int)
+})
+export type BackfillCounts = typeof BackfillCounts.Type
+
+/** The counts, and what they come to through the user's cost formulas; null when none prices this model. */
+export const BackfillEstimate = Schema.Struct({
+  ...BackfillCounts.fields,
+  cost: Schema.NullOr(Schema.Struct({ amount: Schema.Number, currency: Schema.String }))
+})
+export type BackfillEstimate = typeof BackfillEstimate.Type
+
+/** An ST summary the chat can adopt as the first level over the run it covers (DESIGN §8.1). */
+const ImportedSummaryOffer = Schema.Struct({
+  /** Messages 1 to `to`. */
+  to: Schema.Int,
+  tokens: Schema.Int,
+  /** Of those messages, how many are hidden now; adopting shows them, as the summary stands in. */
+  hidden: Schema.Int,
+  preview: Schema.String
+})
+
+/** What the reader measures for enabling and for the backfill panel: priced on the main thread. */
+export const BackfillBasis = Schema.Struct({
+  enabled: Schema.Boolean,
+  imported: Schema.NullOr(ImportedSummaryOffer),
+  /** The work from the first message (or from the summaries' cursor), with the imported run shown. */
+  fromScratch: BackfillCounts,
+  adopted: Schema.NullOr(BackfillCounts)
+})
+export type BackfillBasis = typeof BackfillBasis.Type
+
+const BackfillState = Schema.Literals(["waiting", "running", "paused", "capped", "done"])
+
+/** What the writer needs of an estimate to hold the work to it: its billed tokens and money, and its jobs. */
+export const BackfillApproval = Schema.Struct({
+  jobs: Schema.Int,
+  tokens: Schema.Int,
+  cost: Schema.NullOr(Schema.Number),
+  currency: Schema.NullOr(Schema.String)
+})
+export type BackfillApproval = typeof BackfillApproval.Type
+
+/** A chat's backfill as stored, with what the ledger shows spent against it. */
+export const BackfillStatus = Schema.Struct({
+  state: BackfillState,
+  choice: Schema.Literals(["adopt", "scratch"]),
+  startedAt: Schema.Number,
+  armed: Schema.Boolean,
+  paused: Schema.Boolean,
+  capped: Schema.Boolean,
+  drive: Schema.Boolean,
+  spentTokens: Schema.Int,
+  spentCost: Schema.NullOr(Schema.Number),
+  capTokens: Schema.Int,
+  capCost: Schema.NullOr(Schema.Number),
+  currency: Schema.NullOr(Schema.String)
+})
+export type BackfillStatus = typeof BackfillStatus.Type
+
+/** What the enable dialog shows: the imported summary if one can be adopted, and each choice's estimate. */
+export class LcmEnableOffer extends Schema.Class<LcmEnableOffer>("LcmEnableOffer")({
+  chatId: ChatId,
+  leafSlotId: SlotId,
+  enabled: Schema.Boolean,
+  imported: Schema.NullOr(ImportedSummaryOffer),
+  fromScratch: BackfillEstimate,
+  /** What is left after the imported summary stands in for its run; null without an offer. */
+  adopted: Schema.NullOr(BackfillEstimate)
+}) {}
+
+export const EnableChoice = Schema.Literals(["adopt", "scratch"])
+export type EnableChoice = typeof EnableChoice.Type
+
+/**
+ * The backfill of a chat that LCM was enabled on (spec/LCM.md §2.11): its state, what was
+ * approved and what has been spent against it, and what is left.
+ */
+export class LcmBackfill extends Schema.Class<LcmBackfill>("LcmBackfill")({
+  chatId: ChatId,
+  /**
+   * waiting: started by the next reply or "Summarize now"; running; paused by the user;
+   * capped: spending reached 150% of the estimate and waits for Continue; done.
+   */
+  state: BackfillState,
+  choice: EnableChoice,
+  startedAt: Schema.Number,
+  /** Billed tokens (input, cache and output) and money the summaries since have used, from the ledger. */
+  spentTokens: Schema.Int,
+  spentCost: Schema.NullOr(Schema.Number),
+  /** Where spending stops until the user continues: 150% of the estimate. */
+  capTokens: Schema.Int,
+  capCost: Schema.NullOr(Schema.Number),
+  currency: Schema.NullOr(Schema.String),
+  /** What is left to do now. */
+  remaining: BackfillEstimate
+}) {}
+
 export const SummaryChange = Schema.Struct({ summary: Summary, recovered: Schema.Int })
 export class LcmApi extends RpcGroup.make(
   Rpc.make("GetSummary", {
@@ -182,6 +305,39 @@ export class LcmApi extends RpcGroup.make(
       model: Schema.optionalKey(ModelChoice)
     },
     success: Schema.Void,
+    error: Schema.Union([NotFound, ServerError])
+  }),
+  /** What enabling LCM on this chat would do and cost, for the dialog. Reads only. */
+  Rpc.make("GetLcmEnableOffer", {
+    payload: { chatId: ChatId, leafSlotId: SlotId },
+    success: LcmEnableOffer,
+    error: Schema.Union([NotFound, ServerError])
+  }),
+  /**
+   * Turns LCM on with the user's choice (spec/LCM.md §2.7): `adopt` makes the imported
+   * summary the level-1 summary over the run it covers, `scratch` summarizes from the first
+   * message. Either way the run is shown again, the imported summary stays in its own note,
+   * and nothing is generated until the next reply or "Summarize now".
+   */
+  Rpc.make("EnableLcm", {
+    payload: { chatId: ChatId, leafSlotId: SlotId, choice: EnableChoice },
+    /** The backfill it started; null when there was nothing to summarize beyond the window. */
+    success: Schema.NullOr(LcmBackfill),
+    error: Schema.Union([NotFound, ServerError])
+  }),
+  /** The chat's backfill, if it has one: its state, spending and what is left. */
+  Rpc.make("GetLcmBackfill", {
+    payload: { chatId: ChatId, leafSlotId: SlotId },
+    success: Schema.NullOr(LcmBackfill),
+    error: Schema.Union([NotFound, ServerError])
+  }),
+  /**
+   * Pause, continue past the spending cap (with a new cap of 150% of what is left), or start
+   * now instead of waiting for the next reply. "Summarize now" is the one click that plans.
+   */
+  Rpc.make("SetLcmBackfill", {
+    payload: { chatId: ChatId, leafSlotId: SlotId, action: Schema.Literals(["pause", "continue", "summarizeNow"]) },
+    success: Schema.NullOr(LcmBackfill),
     error: Schema.Union([NotFound, ServerError])
   }),
   /** Turns LCM on or off for the whole chat; it keeps its other settings. */

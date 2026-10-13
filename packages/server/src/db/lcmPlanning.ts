@@ -13,6 +13,7 @@ import { wireContext } from "../assembler/wire.ts"
 import { summaryTail } from "../lcm/request.ts"
 import { sqlSources } from "./assemblySources.ts"
 import { readDefaults } from "./generationSettings.ts"
+import { backfillOf, overCap, spentSince } from "./lcmBackfill.ts"
 import { jobColumns, type SummaryJob } from "./lcmJobs.ts"
 import { lcmPath, slotInput } from "./lcmPath.ts"
 import { readSummary } from "./lcmReads.ts"
@@ -50,9 +51,20 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
           windowMax: 0,
           jobs: [],
           spendAhead: defaults.lcm?.spendAhead !== false,
-          blocked: null as "no_model" | null
+          blocked: null as "no_model" | null,
+          liveJobs: 0,
+          backfill: null as { armed: boolean; held: boolean; drive: boolean; settled: boolean } | null
         }
         if (!state.lcm?.enabled) return empty
+        // The chat's backfill (spec/LCM.md §2.11): begun by a reply, held at its cap.
+        const row = yield* backfillOf(sql, chatId)
+        const live = row?.status === "processing" ? row : null
+        const stopped = live
+          ? live.paused || live.capped || overCap(live, yield* spentSince(sql, chatId, live.startedAt))
+          : false
+        const progress = live ? { armed: live.armed, held: stopped, drive: live.drive } : null
+        // Enabling waits for the next reply; startup and a finished job's pass do not begin it.
+        if (progress?.armed && reason !== "reply") return { ...empty, backfill: { ...progress, settled: false } }
         // Nothing is planned without a model to summarize with: jobs would only fail. The state is the caller's to show.
         const bound =
           state.modelBindings["summarizer"] ?? state.modelBindings["narrator"] ?? state.modelBindings[""] ?? null
@@ -60,7 +72,8 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
           Effect.provide(sources.layer),
           Effect.catchTag("AssemblyFailed", () => Effect.succeed(null))
         )
-        if (usable === null) return { ...empty, blocked: "no_model" as const }
+        if (usable === null)
+          return { ...empty, blocked: "no_model" as const, backfill: progress && { ...progress, settled: false } }
         const layer = yield* selectSummaryLayer(sql, userId, chatId, leafSlotId)
         const path = yield* lcmPath(sql, userId, chatId, leafSlotId, layer.cursor ?? undefined)
         const onPath = new Set(path.map((s) => s.id))
@@ -91,15 +104,25 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
         const partialBatch = total > windowMax
         const available = partialBatch ? yield* selectSummaryLayer(sql, userId, chatId, leafSlotId, true) : layer
         const remaining = path.filter((s) => s.depth > available.cursorDepth)
+        const settled = (r: {
+          chunks: ReadonlyArray<unknown>
+          refresh: ReadonlyArray<unknown>
+          condensations: ReadonlyArray<unknown>
+        }) =>
+          progress && {
+            ...progress,
+            settled: active.length === 0 && !r.chunks.length && !r.refresh.length && !r.condensations.length
+          }
         const result = {
           ...empty,
           ...maintenance,
+          liveJobs: active.length,
           windowMax,
           partialBatch,
           over: remaining.reduce((n, s) => n + cost(s), 0) > windowMax,
           jobs: active.filter((j) => j.firstSlotId === remaining[0]?.id)
         }
-        if (active.length || total <= windowMax * 0.75) return result
+        if (active.length || total <= windowMax * 0.75) return { ...result, backfill: settled(result) }
         let keep = 0,
           end = raw.length
         while (end > 0 && keep < windowMax * 0.5) keep += cost(raw[--end]!)
@@ -134,7 +157,7 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
           }
         }
         if (chunks.length < MAX_JOBS_PER_PLAN) flush()
-        return { ...result, chunks }
+        return { ...result, chunks, backfill: settled({ ...result, chunks }) }
       }).pipe(query("PlanSummaries")),
     AssembleSummary: ({ userId, jobId, attempt }) =>
       Effect.gen(function* () {

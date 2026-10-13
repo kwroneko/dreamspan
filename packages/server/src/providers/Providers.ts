@@ -320,6 +320,16 @@ export interface ProvidersShape {
     connectionId: ConnectionId
   ) => Effect.Effect<TestResult, ProviderError | ServerError>
   readonly stream: (request: StreamRequest) => Stream.Stream<ProviderEvent, ProviderError | ServerError>
+  /**
+   * What a request with these counts would cost through the cost formulas, as the ledger
+   * would record it (PROVIDERS §9.3): null when no formula prices this model. Nothing is sent.
+   */
+  readonly estimateCost: (
+    userId: UserId,
+    connectionId: ConnectionId,
+    modelId: ModelId,
+    counts: TokenCounts
+  ) => Effect.Effect<Cost | null, ProviderError | ServerError>
   /** The provider kinds in effect, built-in and from plugins, in picker order. */
   readonly kinds: () => ReadonlyArray<ProviderKindInfo>
 }
@@ -1206,7 +1216,20 @@ export const layer = (options: ProvidersOptions = {}) =>
           )
         )
 
+      const estimateCost: ProvidersShape["estimateCost"] = (userId, connectionId, modelId, counts) =>
+        Effect.gen(function* () {
+          const connection = yield* fromStorage(reader.GetConnection({ userId, connectionId }))
+          const model = yield* fromStorage(reader.GetModel({ userId, modelId }))
+          if (model.connectionId !== connection.id) return null
+          return costOf(
+            registry.costs.list(),
+            { kind: connection.kind, api: connection.api, model: model.key },
+            { counts, capture: emptyCapture(), price: model.upstream.price ?? null }
+          )
+        })
+
       return Providers.of({
+        estimateCost,
         kinds: () =>
           registry.kinds.list().map(
             (entry) =>

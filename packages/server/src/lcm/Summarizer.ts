@@ -302,11 +302,20 @@ export function makeSummarizer(pool: boolean) {
         const p = yield* reader.PlanSummaries({ ...position, ...(reason ? { reason } : {}) })
         if (p.enabled && p.maintenancePins && reason === "reply")
           yield* writer.SaveLcmMaintenance({ ...position, pins: p.maintenancePins })
-        if (p.enabled && !interactive) {
+        // The chat's backfill (spec/LCM.md §2.11): a reply begins it, and it is over when nothing is left.
+        const backfill = (action: "begin" | "finish") =>
+          writer.SetBackfill({ userId: position.userId, chatId: position.chatId, action }).pipe(
+            Effect.catch(() => Effect.void),
+            Effect.andThen(changed(position.chatId))
+          )
+        if (p.backfill?.armed && reason === "reply") yield* backfill("begin")
+        if (p.backfill?.settled) yield* backfill("finish")
+        const held = p.backfill?.held === true
+        if (p.enabled && !interactive && !held) {
           const explicitChunks = p.refresh.filter((c) => c.explicitRequested || c.rerunIds?.length)
           const explicitCondensations = p.condensations.filter((c) => c.explicitRequested || c.rerunIds?.length)
-          const chunks = p.spendAhead ? [...p.chunks, ...p.refresh] : explicitChunks
-          const jobs = p.spendAhead ? p.condensations : explicitCondensations
+          const chunks = p.spendAhead || p.backfill?.drive === true ? [...p.chunks, ...p.refresh] : explicitChunks
+          const jobs = p.spendAhead || p.backfill?.drive === true ? p.condensations : explicitCondensations
           const made = chunks.length
             ? yield* writer.EnqueueSummaries({ ...position, chunks, requestClass: "idle" })
             : []
@@ -317,7 +326,7 @@ export function makeSummarizer(pool: boolean) {
           if (pool && [...made, ...condensed].some((j) => j.status === "complete")) schedule(position, "completion")
           return { ...p, jobs: [...p.jobs, ...made, ...condensed] }
         }
-        if (p.enabled && p.chunks.length && interactive && p.over) {
+        if (p.enabled && p.chunks.length && interactive && p.over && !held) {
           const jobs = yield* writer.EnqueueSummaries({ ...position, chunks: p.chunks, requestClass: "interactive" })
           if (jobs.length) yield* changed(position.chatId)
           return { ...p, jobs: [...p.jobs, ...jobs] }
@@ -397,6 +406,8 @@ export function makeSummarizer(pool: boolean) {
         const deadline = Date.now() + 120_000
         let p = yield* plan(position, true)
         const over = p.partialBatch
+        // A paused or capped backfill starts nothing: the send goes on with what is left out reported.
+        if (p.backfill?.held) return over
         while (p.over && p.jobs.length && Date.now() < deadline) {
           for (const job of p.jobs) yield* writer.EscalateSummaryJob({ userId: position.userId, jobId: job.id })
           yield* Effect.sleep(250)

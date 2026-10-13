@@ -179,6 +179,10 @@ export const migrations = {
     // "Retry with…": the model a rerun request wants for the new job.
     `ALTER TABLE summary_reruns ADD COLUMN model_json TEXT CHECK (model_json IS NULL OR json_valid(model_json))`
   ]),
+  "0030_lcm_backfill": runAll([
+    // The backfill of a chat that LCM was enabled on is a `jobs` row (spec/LCM.md §2.11) found by its chat.
+    `CREATE INDEX jobs_lcm_backfill ON jobs(json_extract(payload_json, '$.chatId')) WHERE kind = 'lcm-backfill'`
+  ]),
   "0031_lcm_reply_maintenance": runAll([
     `CREATE TABLE lcm_reply_maintenance (
       chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,

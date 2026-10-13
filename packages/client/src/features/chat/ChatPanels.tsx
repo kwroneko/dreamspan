@@ -18,6 +18,7 @@ import { Field } from "../../ui/Field.tsx"
 import { Select } from "../../ui/Select.tsx"
 import { Badge } from "../../ui/Surface.tsx"
 import { useCast } from "./cast.ts"
+import { EnableLcmDialog } from "./EnableLcmDialog.tsx"
 import { modelValue, parseModelValue } from "./modelChoices.ts"
 import type { ChatSession } from "./session.ts"
 
@@ -127,24 +128,30 @@ export function CastDialog({
   )
 }
 
-/** LCM for the whole chat (DESIGN §8): on for new chats, off for imported ones. */
+/**
+ * LCM for the whole chat (DESIGN §8): on for new chats, off for imported ones. Turning it on
+ * for a chat with messages asks how to start and what it costs first (spec/LCM.md §2.7, §2.11).
+ */
 function Summaries({ session }: { session: ChatSession }) {
   const view = useSyncExternalStore(session.subscribe, session.snapshot)
   const [error, setError] = useState<AppError | null>(null)
+  const [enabling, setEnabling] = useState(false)
   const enabled = view.lcm?.enabled ?? false
   return (
     <div className="flex flex-col gap-1">
       <Switch
         checked={enabled}
-        onCheckedChange={(on) =>
+        onCheckedChange={(on) => {
+          if (on && view.leafSlotId !== null) return setEnabling(true)
           void session
             .call((client) => client("SetLcmEnabled", { chatId: session.id, enabled: on }))
             .then((result) => setError(result.ok ? null : result.error))
-        }
+        }}
         description="Older messages are summarized so the chat can go on. For the whole chat, not from here on. Nothing is generated until your next reply."
       >
         Summarize older messages
       </Switch>
+      {enabling && <EnableLcmDialog session={session} onOpenChange={setEnabling} />}
       <Problem error={error} />
     </div>
   )

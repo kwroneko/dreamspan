@@ -227,6 +227,43 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
   SetLcmEnabled: {
     probe: (actor, owner) => refused(actor.api.SetLcmEnabled({ chatId: owner.chat.chatId, enabled: false }), "NotFound")
   },
+  GetLcmEnableOffer: {
+    probe: (actor, owner) =>
+      refused(actor.api.GetLcmEnableOffer({ chatId: owner.chat.chatId, leafSlotId: owner.chat.slotId }), "NotFound")
+  },
+  EnableLcm: {
+    probe: (actor, owner) =>
+      Effect.all([
+        refused(
+          actor.api.EnableLcm({ chatId: owner.chat.chatId, leafSlotId: owner.chat.slotId, choice: "scratch" }),
+          "NotFound"
+        ),
+        refused(
+          actor.api.EnableLcm({ chatId: owner.chat.chatId, leafSlotId: owner.chat.slotId, choice: "adopt" }),
+          "NotFound"
+        ),
+        // Their own chat with the other's leaf: still nothing.
+        refused(
+          actor.api.EnableLcm({ chatId: actor.chat.chatId, leafSlotId: owner.chat.slotId, choice: "scratch" }),
+          "NotFound"
+        )
+      ]).pipe(Effect.asVoid)
+  },
+  GetLcmBackfill: {
+    probe: (actor, owner) =>
+      refused(actor.api.GetLcmBackfill({ chatId: owner.chat.chatId, leafSlotId: owner.chat.slotId }), "NotFound")
+  },
+  SetLcmBackfill: {
+    probe: (actor, owner) =>
+      Effect.all(
+        (["pause", "continue", "summarizeNow"] as const).map((action) =>
+          refused(
+            actor.api.SetLcmBackfill({ chatId: owner.chat.chatId, leafSlotId: owner.chat.slotId, action }),
+            "NotFound"
+          )
+        )
+      ).pipe(Effect.asVoid)
+  },
   GetSummaryDraft: {
     probe: (actor, owner) => refused(actor.api.GetSummaryDraft({ summaryId: owner.summary.id }), "NotFound")
   },
@@ -1828,6 +1865,26 @@ const storage: Record<
     ),
   GetSummary: (reader, actor, owner) =>
     refused(reader.GetSummary({ userId: actor.user.id, summaryId: owner.summary.id }), "NotFound"),
+  EstimateBackfill: (reader, actor, owner) =>
+    refused(
+      reader.EstimateBackfill({ userId: actor.user.id, chatId: owner.chat.chatId, leafSlotId: owner.chat.slotId }),
+      "NotFound"
+    ),
+  GetBackfill: (reader, actor, owner) =>
+    refused(reader.GetBackfill({ userId: actor.user.id, chatId: owner.chat.chatId }), "NotFound"),
+  EnableLcm: (_reader, actor, owner, writer) =>
+    refused(
+      writer.EnableLcm({
+        userId: actor.user.id,
+        chatId: owner.chat.chatId,
+        leafSlotId: owner.chat.slotId,
+        choice: "scratch",
+        approved: { jobs: 1, tokens: 1, cost: null, currency: null }
+      }),
+      "NotFound"
+    ),
+  SetBackfill: (_reader, actor, owner, writer) =>
+    refused(writer.SetBackfill({ userId: actor.user.id, chatId: owner.chat.chatId, action: "pause" }), "NotFound"),
   EditSummary: (_reader, actor, owner, writer) =>
     refused(
       writer.EditSummary({

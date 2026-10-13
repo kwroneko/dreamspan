@@ -13,6 +13,39 @@ export const tokensText = (tokens: number) =>
       ? `~${(tokens / 1000).toFixed(1)}k tokens`
       : `~${tokens} tokens`
 
+/** Money as an estimate gives it: cents or less for a short job, so small amounts keep their digits. */
+export const moneyText = (amount: number, currency: string) => {
+  const digits = amount >= 10 ? 0 : amount >= 1 ? 2 : amount >= 0.01 ? 3 : 4
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency,
+      minimumFractionDigits: digits,
+      maximumFractionDigits: digits
+    }).format(amount)
+  } catch {
+    // A currency code the browser doesn't know is only a label (PROVIDERS §9.3).
+    return `${amount.toFixed(digits)} ${currency}`
+  }
+}
+
+export const durationText = (seconds: number) =>
+  seconds < 60
+    ? "under a minute"
+    : seconds < 3600
+      ? `about ${Math.round(seconds / 60)} minutes`
+      : `about ${(seconds / 3600).toFixed(1)} hours`
+
+/** A count of tokens, rounded as an estimate is. */
+export const countText = (tokens: number) =>
+  tokens >= 1_000_000
+    ? `${(tokens / 1_000_000).toFixed(1)}M`
+    : tokens >= 10_000
+      ? `${Math.round(tokens / 1000)}k`
+      : tokens >= 1000
+        ? `${(tokens / 1000).toFixed(1)}k`
+        : String(tokens)
+
 export type SummaryHealth = "failed" | "stale" | "fresh" | "resolved"
 
 /** A summary is stale when what it covers changed since; one that failed has no text. */

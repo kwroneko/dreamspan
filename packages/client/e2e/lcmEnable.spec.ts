@@ -1,0 +1,159 @@
+// Enabling summaries on an imported chat (DESIGN §8.1, spec/LCM.md §2.7, §2.11) in the browser,
+// against the production server and a fake provider: a synthetic ST folder is imported through
+// the folder picker, and the enable dialog offers keeping ST's summary or starting over with
+// the estimate shown first; nothing is asked of the model until "Summarize now".
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { expect, type Page, test } from "@playwright/test"
+import { Effect } from "effect"
+import { type FakeProvider, startProvider } from "./support/provider.ts"
+import { loginCookie, withCookie } from "./support/rpc.ts"
+import { ADMIN, serverPerFile, withAdmin } from "./support/server.ts"
+import { IMPORTED_SUMMARY, writeStFolder } from "./support/stFiles.ts"
+
+const server = serverPerFile(withAdmin)
+// One server holds the imported chats, so the tests run in order in one worker.
+test.describe.configure({ mode: "serial" })
+let provider: FakeProvider
+let cookie: string
+let root = ""
+
+const CHATS = ["Bob - desktop", "Bob - phone", "Bob - scratch"]
+
+test.beforeAll(async () => {
+  provider = await startProvider()
+  root = mkdtempSync(join(tmpdir(), "rp-lcm-enable-"))
+  writeStFolder(root, CHATS)
+  cookie = await loginCookie(server(), ADMIN.handle, ADMIN.password)
+  await withCookie(server(), cookie, (api) =>
+    Effect.gen(function* () {
+      const connection = yield* api.CreateConnection({
+        kind: "openai-chat",
+        settings: {
+          name: "Local model server",
+          baseUrl: provider.baseUrl,
+          compat: {},
+          cacheTtlS: 300,
+          maxConcurrent: null,
+          presetOverrideRefId: null
+        },
+        apiKey: "sk-lcm-enable-key-0042"
+      })
+      const model = yield* api.AddUserModel({ connectionId: connection.id, key: "fake-small", overrides: {} })
+      yield* api.SetGenerationDefaults({
+        defaults: { model: { connection: connection.id, model: model.id }, preset: null }
+      })
+    })
+  )
+})
+test.afterAll(async () => {
+  await provider.stop()
+  rmSync(root, { recursive: true, force: true })
+})
+
+const signIn = async (page: Page) => {
+  const [name, ...value] = cookie.split("=")
+  await page.context().addCookies([{ name: name!, value: value.join("="), url: server().url }])
+}
+
+test("import the folder", async ({ page }) => {
+  await signIn(page)
+  await page.goto(`${server().url}/import/st`)
+  await page.getByLabel("Choose the folder").setInputFiles(join(root, "ST"))
+  await page.getByRole("button", { name: "Import", exact: true }).click()
+  await expect(page.getByRole("list", { name: "Imported" })).toContainText("Chats: 3 added")
+})
+
+const openChat = async (page: Page, title: string) => {
+  await signIn(page)
+  await page.goto(`${server().url}/chats`)
+  await page.getByRole("link", { name: title }).click()
+  await expect(page.getByRole("heading", { name: title })).toBeVisible()
+}
+
+const noSideways = async (page: Page) =>
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0)
+
+for (const [name, viewport, chat] of [
+  ["desktop", { width: 1280, height: 800 }, "Bob - desktop"],
+  ["phone", { width: 390, height: 844 }, "Bob - phone"]
+] as const) {
+  test.describe(name, () => {
+    test.use({ viewport })
+
+    test("keeping the imported summary shows the estimate first, spends nothing, and Summarize now backfills", async ({
+      page
+    }) => {
+      const before = provider.completions.length
+      await openChat(page, chat)
+      // Summaries are off for an imported chat, and turning them on is one click away.
+      await expect(page.getByRole("status").filter({ hasText: "aren't summarized" })).toBeVisible()
+      await page.getByRole("button", { name: "Enable summaries", exact: true }).click()
+
+      const dialog = page.getByRole("dialog", { name: "Summarize older messages" })
+      await expect(dialog.getByText(IMPORTED_SUMMARY)).toBeVisible()
+      const keep = dialog.getByRole("radio", {
+        name: /Keep the imported summary as the first level over messages 1–12/
+      })
+      await expect(keep).toBeChecked()
+      const estimate = dialog.getByRole("group", { name: "Estimate" })
+      await expect(estimate).toContainText("Summaries")
+      await expect(estimate).toContainText("Sent in full")
+      await expect(estimate).toContainText("Spending stops at 150% of this")
+      const kept = await estimate.innerText()
+      await noSideways(page)
+
+      // Starting over means more to summarize than keeping the summary.
+      await dialog.getByRole("radio", { name: "Summarize from scratch" }).click()
+      await expect(estimate).not.toHaveText(kept)
+      await keep.click()
+      await expect(keep).toBeChecked()
+
+      await dialog.getByRole("button", { name: "Enable summaries" }).click()
+      await expect(dialog).toHaveCount(0)
+      // The summary stands in for the run: one summary, and nothing has been asked of the model.
+      await expect(page.getByRole("button", { name: "Summaries", exact: true })).toBeVisible()
+      expect(provider.completions.length).toBe(before)
+
+      await page.getByRole("button", { name: "Summaries", exact: true }).click()
+      const summaries = page.getByRole("dialog", { name: "Summaries" })
+      await expect(summaries.getByTestId("summary-panel-heading")).toContainText("Older messages: 1 summary")
+      await expect(summaries.getByText("Imported from SillyTavern")).toBeVisible()
+      await expect(summaries.getByText(IMPORTED_SUMMARY)).toBeVisible()
+      const backfill = summaries.getByTestId("backfill")
+      await expect(backfill).toHaveAttribute("data-state", "waiting")
+      await expect(backfill).toContainText("Starts with your next reply, or now")
+      await expect(backfill.getByTestId("backfill-spent")).toContainText("Spent so far: 0 tokens")
+      await noSideways(page)
+
+      // Summarize now: the work runs without a reply, and the section goes when it is done.
+      await backfill.getByRole("button", { name: "Summarize now" }).click()
+      await expect(summaries.getByTestId("backfill")).toHaveCount(0, { timeout: 45_000 })
+      expect(provider.completions.length).toBeGreaterThan(before)
+      await expect(summaries.getByRole("list", { name: "Summaries in use" })).toBeVisible()
+      // The imported summary is still there, in its own note, and the run is in the context.
+      await summaries.getByRole("button", { name: "Done" }).click()
+      await expect(page.getByRole("button", { name: "Summaries", exact: true })).toBeVisible()
+    })
+  })
+}
+
+test("starting over shows the run again and summarizes it with the rest", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await openChat(page, "Bob - scratch")
+  await page.getByRole("button", { name: "Settings" }).click()
+  const settings = page.getByRole("dialog", { name: "Chat settings" })
+  await settings.getByRole("switch", { name: /Summarize older messages/ }).click()
+  const dialog = page.getByRole("dialog", { name: "Summarize older messages" })
+  await dialog.getByRole("radio", { name: "Summarize from scratch" }).click()
+  await dialog.getByRole("button", { name: "Enable summaries" }).click()
+  await expect(dialog).toHaveCount(0)
+  await settings.getByRole("button", { name: "Done" }).click()
+  // No summary stands in for anything yet, and the imported one is still in its note.
+  await page.getByRole("button", { name: "Summaries", exact: true }).click()
+  await expect(page.getByTestId("summary-panel-heading")).toContainText("none summarized yet")
+  await page.getByRole("dialog", { name: "Summaries" }).getByRole("button", { name: "Done" }).click()
+  await page.getByRole("button", { name: "Notes" }).click()
+  await expect(page.getByRole("dialog", { name: /Notes/ }).getByText("summary").first()).toBeVisible()
+})

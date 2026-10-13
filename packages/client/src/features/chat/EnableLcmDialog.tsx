@@ -1,0 +1,193 @@
+// Turning summaries on for a chat that has history already (DESIGN §8.1, spec/LCM.md §2.7,
+// §2.11): an imported chat chooses between keeping ST's summary as the first level over the
+// messages it covers and summarizing from scratch, and either way sees what it will cost before
+// anything is spent. Enabling generates nothing; the next reply or "Summarize now" begins.
+import { useEffect, useState } from "react"
+import type { BackfillEstimate, EnableChoice, LcmEnableOffer } from "@rp/shared/lcm.ts"
+import type { AppError } from "../../errors.ts"
+import { Button } from "../../ui/Button.tsx"
+import { RadioGroup } from "../../ui/Choice.tsx"
+import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
+import { Loading } from "../../ui/Spinner.tsx"
+import { Alert } from "../../ui/Surface.tsx"
+import { countText, durationText, moneyText, rangeText, tokensText } from "./lcm.ts"
+import type { ChatSession } from "./session.ts"
+
+/** Where spending stops, as a share of the estimate (spec/LCM.md §2.11). */
+const CAP_PERCENT = 150
+
+/** What the work comes to, in the terms of spec/LCM.md §2.11, with the limit that holds it. */
+export function EstimateList({ estimate, title }: { estimate: BackfillEstimate; title: string }) {
+  const jobs = estimate.l1Jobs + estimate.condensations
+  if (estimate.blocked === "no_model")
+    return (
+      <Alert tone="warning">
+        No model is chosen to summarize with. Choose one in the chat settings, or nothing will be summarized.
+      </Alert>
+    )
+  if (estimate.blocked === "runway")
+    return (
+      <Alert tone="warning">
+        The context is too small to leave room for two summaries between the ends of the window. Raise the context size
+        or the preset's response length before summarizing.
+      </Alert>
+    )
+  if (jobs === 0)
+    return (
+      <p aria-label={title} className="text-sm text-muted">
+        Nothing needs summarizing yet. Summaries start once the chat outgrows what the model is sent.
+      </p>
+    )
+  return (
+    <div aria-label={title} role="group" className="flex flex-col gap-2 rounded-md border border-border p-3 text-sm">
+      <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
+        <dt className="text-muted">Messages</dt>
+        <dd>
+          {estimate.messages} ({tokensText(estimate.tokens)})
+        </dd>
+        <dt className="text-muted">Summaries</dt>
+        <dd>
+          {estimate.l1Jobs}, and {estimate.condensations} condensing them
+        </dd>
+        <dt className="text-muted">Sent in full</dt>
+        <dd>{countText(estimate.uncachedInput)} tokens</dd>
+        {estimate.cached && (
+          <>
+            <dt className="text-muted">Read from cache</dt>
+            <dd>{countText(estimate.cachedInput)} tokens</dd>
+          </>
+        )}
+        {estimate.cacheWrite > 0 && (
+          <>
+            <dt className="text-muted">Written to cache</dt>
+            <dd>{countText(estimate.cacheWrite)} tokens</dd>
+          </>
+        )}
+        <dt className="text-muted">Returned</dt>
+        <dd>{countText(estimate.output)} tokens</dd>
+        <dt className="text-muted">Cost</dt>
+        <dd data-testid="estimate-cost">
+          {estimate.cost ? moneyText(estimate.cost.amount, estimate.cost.currency) : "Not priced for this model"}
+        </dd>
+        <dt className="text-muted">Time</dt>
+        <dd>
+          {estimate.seconds === null
+            ? "Unknown until this model has answered a few requests"
+            : durationText(estimate.seconds)}
+        </dd>
+      </dl>
+      <p className="text-muted">
+        {estimate.cached
+          ? "The preset and the summaries so far are read from the provider's cache while requests follow one another."
+          : "This model has no cache lifetime, so every request is sent in full."}
+        {estimate.model && !estimate.model.sharesCache
+          ? ` ${estimate.model.name} is not the chat's model, so the first request starts without the chat's cache.`
+          : ""}
+      </p>
+      <p>
+        Spending stops at {CAP_PERCENT}% of this
+        {estimate.cost
+          ? ` (${moneyText((estimate.cost.amount * CAP_PERCENT) / 100, estimate.cost.currency)})`
+          : ""}{" "}
+        until you continue.
+      </p>
+    </div>
+  )
+}
+
+export function EnableLcmDialog({
+  session,
+  onOpenChange
+}: {
+  session: ChatSession
+  onOpenChange: (open: boolean) => void
+}) {
+  const [offer, setOffer] = useState<LcmEnableOffer | null>(null)
+  const [error, setError] = useState<AppError | null>(null)
+  const [choice, setChoice] = useState<EnableChoice>("adopt")
+  const [pending, setPending] = useState(false)
+  // The branch shown when the dialog opened: what is asked and enabled is about its path.
+  const [leafSlotId] = useState(() => session.snapshot().leafSlotId)
+  useEffect(() => {
+    if (leafSlotId === null) return
+    let live = true
+    void session
+      .call((client) => client("GetLcmEnableOffer", { chatId: session.id, leafSlotId }))
+      .then((result) => {
+        if (!live) return
+        if (result.ok) {
+          setOffer(result.value)
+          setChoice(result.value.imported ? "adopt" : "scratch")
+        } else setError(result.error)
+      })
+    return () => {
+      live = false
+    }
+  }, [session, leafSlotId])
+  const enable = async () => {
+    if (offer === null) return
+    setPending(true)
+    const result = await session.call((client) =>
+      client("EnableLcm", { chatId: session.id, leafSlotId: offer.leafSlotId, choice })
+    )
+    setPending(false)
+    if (result.ok) onOpenChange(false)
+    else setError(result.error)
+  }
+  const estimate = offer === null ? null : choice === "adopt" && offer.adopted ? offer.adopted : offer.fromScratch
+  return (
+    <Dialog
+      open
+      onOpenChange={onOpenChange}
+      title="Summarize older messages"
+      description="Older messages are summarized so the chat can go on. Nothing is generated until your next reply, or until you choose Summarize now."
+    >
+      {offer === null ? (
+        error ? (
+          <Alert tone="danger">{error.message}</Alert>
+        ) : leafSlotId === null ? (
+          <Alert tone="warning">The chat has no messages to summarize yet.</Alert>
+        ) : (
+          <Loading label="Working out what it would take…" />
+        )
+      ) : (
+        <>
+          {offer.imported && (
+            <fieldset className="flex flex-col gap-2">
+              <legend className="mb-1 text-sm font-medium">This chat came with a summary from SillyTavern</legend>
+              <blockquote className="line-clamp-3 border-l-2 border-border pl-3 text-sm text-muted">
+                {offer.imported.preview}
+              </blockquote>
+              <RadioGroup<EnableChoice>
+                aria-label="How to start"
+                value={choice}
+                onValueChange={setChoice}
+                options={[
+                  {
+                    value: "adopt",
+                    label: `Keep the imported summary as the first level over ${rangeText(1, offer.imported.to).toLowerCase()}`,
+                    description: `It stands in for those messages (${tokensText(offer.imported.tokens)}); they are shown again, and the rest is summarized from there.`
+                  },
+                  {
+                    value: "scratch",
+                    label: "Summarize from scratch",
+                    description:
+                      "Those messages are shown again and summarized with the rest. The imported summary stays in its own note and is sent until the first summary exists."
+                  }
+                ]}
+              />
+            </fieldset>
+          )}
+          {estimate && <EstimateList estimate={estimate} title="Estimate" />}
+          {error && <Alert tone="danger">{error.message}</Alert>}
+          <DialogActions>
+            <Button onClick={() => onOpenChange(false)}>Cancel</Button>
+            <Button variant="primary" pending={pending} onClick={() => void enable()}>
+              Enable summaries
+            </Button>
+          </DialogActions>
+        </>
+      )}
+    </Dialog>
+  )
+}

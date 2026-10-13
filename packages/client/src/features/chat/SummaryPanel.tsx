@@ -3,13 +3,14 @@
 // a summary to be made again is a request the planner finds with the next reply.
 import { useSyncExternalStore, useEffect, useMemo, useRef, useState } from "react"
 import type { SlotId } from "@rp/shared/chat.ts"
-import type { LcmJob, LcmState, LcmSummary, SummaryRevision } from "@rp/shared/lcm.ts"
+import type { LcmBackfill, LcmJob, LcmState, LcmSummary, SummaryRevision } from "@rp/shared/lcm.ts"
 import type { AppError } from "../../errors.ts"
 import { Button } from "../../ui/Button.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { Textarea } from "../../ui/Field.tsx"
 import { Alert, Badge } from "../../ui/Surface.tsx"
-import { boundaryText, healthOf, jobText, originText, rangeText, tokensText } from "./lcm.ts"
+import { EstimateList } from "./EnableLcmDialog.tsx"
+import { boundaryText, countText, healthOf, jobText, moneyText, originText, rangeText, tokensText } from "./lcm.ts"
 import type { ChatSession } from "./session.ts"
 import { SummaryDraft } from "./summaryDraft.ts"
 
@@ -365,6 +366,100 @@ function JobRow({ session, job, onJump }: { session: ChatSession; job: LcmJob; o
   )
 }
 
+const backfillStates: Record<LcmBackfill["state"], string> = {
+  waiting: "Starts with your next reply, or now",
+  running: "In progress",
+  paused: "Paused",
+  capped: "Stopped at the spending limit",
+  done: "Done"
+}
+
+/**
+ * The backfill of a chat that summaries were enabled on (spec/LCM.md §2.11): what is left and
+ * what it costs, what has been spent against the limit, and the buttons. Summarize now is the
+ * one click here that starts work.
+ */
+function Backfill({ session, lcm }: { session: ChatSession; lcm: LcmState }) {
+  const [backfill, setBackfill] = useState<LcmBackfill | null>(null)
+  const [error, setError] = useState<AppError | null>(null)
+  const [pending, setPending] = useState<string | null>(null)
+  // Read again whenever the summaries were read: a job started, finished or was queued, or the backfill ended.
+  useEffect(() => {
+    let live = true
+    let read = 0
+    const load = () => {
+      const mine = ++read
+      void session
+        .call((client) => client("GetLcmBackfill", { chatId: session.id, leafSlotId: lcm.leafSlotId }))
+        .then((result) => {
+          if (!live || mine < read) return
+          if (result.ok) setBackfill(result.value)
+          else setError(result.error)
+        })
+    }
+    load()
+    const off = session.onLcmRead(load)
+    return () => {
+      live = false
+      off()
+    }
+  }, [session, lcm.leafSlotId])
+  const act = async (action: "pause" | "continue" | "summarizeNow") => {
+    setPending(action)
+    const result = await session.call((client) =>
+      client("SetLcmBackfill", { chatId: session.id, leafSlotId: lcm.leafSlotId, action })
+    )
+    setPending(null)
+    if (result.ok) {
+      setBackfill(result.value)
+      setError(null)
+    } else setError(result.error)
+  }
+  if (backfill === null || backfill.state === "done") return <Problem error={error} />
+  const jobs = backfill.remaining.l1Jobs + backfill.remaining.condensations
+  return (
+    <section aria-label="Backfill" data-testid="backfill" data-state={backfill.state} className="flex flex-col gap-2">
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        <span className="font-medium">Older messages</span>
+        <Badge tone={backfill.state === "capped" ? "warning" : "accent"}>{backfillStates[backfill.state]}</Badge>
+      </div>
+      {jobs > 0 && <EstimateList estimate={backfill.remaining} title="What is left" />}
+      <p className="text-sm text-muted" data-testid="backfill-spent">
+        Spent so far: {countText(backfill.spentTokens)} tokens
+        {backfill.spentCost !== null && backfill.currency
+          ? ` (${moneyText(backfill.spentCost, backfill.currency)})`
+          : ""}
+        , of up to {countText(backfill.capTokens)}
+        {backfill.capCost !== null && backfill.currency ? ` (${moneyText(backfill.capCost, backfill.currency)})` : ""}.
+      </p>
+      {backfill.state === "capped" && (
+        <Alert tone="warning">
+          Spending reached the limit, 150% of the estimate. Nothing more starts until you continue; the limit then
+          becomes 150% of what is left.
+        </Alert>
+      )}
+      <div className="flex flex-wrap gap-2">
+        {(backfill.state === "paused" || backfill.state === "capped") && (
+          <Button variant="primary" pending={pending === "continue"} onClick={() => void act("continue")}>
+            Continue
+          </Button>
+        )}
+        {(backfill.state === "waiting" || backfill.state === "running") && (
+          <Button variant="primary" pending={pending === "summarizeNow"} onClick={() => void act("summarizeNow")}>
+            Summarize now
+          </Button>
+        )}
+        {backfill.state === "running" && (
+          <Button pending={pending === "pause"} onClick={() => void act("pause")}>
+            Pause
+          </Button>
+        )}
+      </div>
+      <Problem error={error} />
+    </section>
+  )
+}
+
 /** The summaries on this branch, opened from the divider, the rail or the header. */
 export function SummaryPanel({
   session,
@@ -417,7 +512,7 @@ export function SummaryPanel({
       open
       onOpenChange={onOpenChange}
       title="Summaries"
-      description="What stands in for older messages on this branch. Nothing here runs until your next reply."
+      description="What stands in for older messages on this branch. Nothing here runs until your next reply, except Summarize now."
     >
       <p className="text-sm font-medium" data-testid="summary-panel-heading">
         {boundaryText(lcm)}
@@ -425,6 +520,7 @@ export function SummaryPanel({
       {!lcm.enabled && (
         <Alert tone="warning">Summaries are off for this chat. Turn them on in the chat settings.</Alert>
       )}
+      {lcm.enabled && <Backfill session={session} lcm={lcm} />}
       {unfinished.length > 0 && (
         <ul aria-label="Work in progress" className="flex flex-col divide-y divide-border">
           {unfinished.map((job) => (

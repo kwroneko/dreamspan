@@ -8,6 +8,7 @@ import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import type { ContextSnapshot } from "../assembler/types.ts"
 import { ownedModel } from "./generationSettings.ts"
+import { drivenSql, enforceCaps, heldSql } from "./lcmBackfill.ts"
 import { fallbackModel, type JobError, prefixAt, recordFailedSummary } from "./lcmFailures.ts"
 import { readSummary } from "./lcmReads.ts"
 import type { Summary } from "@rp/shared/lcm.ts"
@@ -291,6 +292,8 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
       }).pipe(transaction(sql, "ReconcileSummaryJobs")),
     ClaimSummaryJob: ({ userId }) =>
       Effect.gen(function* () {
+        // A chat whose backfill is paused or has reached its cap (spec/LCM.md §2.11) starts nothing.
+        yield* enforceCaps(sql, userId)
         const idle = yield* sql<{ id: string; chat_id: string; prefix_json: string | null }>`
           SELECT j.id,j.chat_id,j.prefix_json FROM summarization_jobs j JOIN chats c ON c.id=j.chat_id
           WHERE c.owner_user_id=${userId} AND c.deleted_at IS NULL AND j.status='pending' AND j.request_class='idle'`
@@ -304,19 +307,26 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
             ))
           )
             yield* sql`UPDATE summarization_jobs SET request_class='background' WHERE id=${job.id}`
-        const [next] = yield* sql<{ id: string }>`SELECT j.id FROM summarization_jobs j JOIN chats c ON c.id = j.chat_id
+        // Spending ahead is off for every chat but one whose user pressed "Summarize now".
+        const spends = (job: string) =>
+          `(coalesce((SELECT json_extract(value_json,'$.spendAhead') FROM user_settings WHERE user_id = ? AND key = 'generation.lcm'),1) <> 0 OR ${drivenSql(`${job}.chat_id`)})`
+        const [next] = yield* sql.unsafe<{ id: string }>(
+          `SELECT j.id FROM summarization_jobs j JOIN chats c ON c.id = j.chat_id
         JOIN slots start ON start.id = j.first_slot_id
-        WHERE c.owner_user_id = ${userId} AND c.deleted_at IS NULL AND j.status = 'pending'
-        AND (j.request_class = 'interactive' OR j.explicit_requested = 1 OR coalesce((SELECT json_extract(value_json,'$.spendAhead') FROM user_settings WHERE user_id = ${userId} AND key = 'generation.lcm'),1) <> 0)
+        WHERE c.owner_user_id = ? AND c.deleted_at IS NULL AND j.status = 'pending'
+        AND NOT ${heldSql("j.chat_id")}
+        AND (j.request_class = 'interactive' OR j.explicit_requested = 1 OR ${spends("j")})
         AND (SELECT count(*) FROM summarization_jobs busy JOIN chats bc ON bc.id = busy.chat_id
-          WHERE bc.owner_user_id = ${userId} AND busy.status = 'processing') < 2
+          WHERE bc.owner_user_id = ? AND busy.status = 'processing') < 2
         AND (j.level > 1 OR NOT EXISTS (SELECT 1 FROM summarization_jobs busy JOIN slots bs ON bs.id = busy.first_slot_id
           WHERE busy.chat_id = j.chat_id AND busy.level = 1 AND
             (busy.status = 'processing' OR (busy.status = 'pending'
-             AND (busy.request_class = 'interactive' OR busy.explicit_requested = 1 OR coalesce((SELECT json_extract(value_json,'$.spendAhead') FROM user_settings WHERE user_id = ${userId} AND key = 'generation.lcm'),1) <> 0
+             AND (busy.request_class = 'interactive' OR busy.explicit_requested = 1 OR ${spends("busy")}
                OR busy.last_slot_id IN (WITH RECURSIVE ancestors(id) AS (SELECT j.last_slot_id UNION ALL SELECT s.parent_slot_id FROM slots s JOIN ancestors a ON a.id=s.id WHERE s.parent_slot_id IS NOT NULL) SELECT id FROM ancestors))
              AND (bs.depth < start.depth OR (bs.depth = start.depth AND busy.id < j.id))))))
-        ORDER BY CASE j.request_class WHEN 'interactive' THEN 0 WHEN 'idle' THEN 1 ELSE 2 END, j.created_at, j.id LIMIT 1`
+        ORDER BY CASE j.request_class WHEN 'interactive' THEN 0 WHEN 'idle' THEN 1 ELSE 2 END, j.created_at, j.id LIMIT 1`,
+          [userId, userId, userId, userId]
+        )
         if (!next) return null
         yield* sql`UPDATE summarization_jobs SET status = 'processing', attempts = attempts + 1, claim_epoch = claim_epoch + 1, rollout_id = NULL,
         updated_at = ${Date.now()} WHERE id = ${next.id} AND status = 'pending'`

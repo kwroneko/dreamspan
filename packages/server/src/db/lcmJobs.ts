@@ -67,7 +67,17 @@ export const SummaryPlan = Schema.Struct({
   jobs: Schema.Array(SummaryJob),
   spendAhead: Schema.Boolean,
   /** Why nothing is planned although LCM is on: no model is chosen to summarize with. */
-  blocked: Schema.NullOr(Schema.Literal("no_model"))
+  blocked: Schema.NullOr(Schema.Literal("no_model")),
+  /** Jobs pending or processing on the path being planned, whatever their range. */
+  liveJobs: Schema.Int,
+  /**
+   * The chat's live backfill (spec/LCM.md §2.11): `armed` until a reply or "Summarize now" begins
+   * it, `held` while it is paused or at its cap, `drive` once the user asked to go on at once, and
+   * `settled` when this pass found nothing more to plan and nothing live.
+   */
+  backfill: Schema.NullOr(
+    Schema.Struct({ armed: Schema.Boolean, held: Schema.Boolean, drive: Schema.Boolean, settled: Schema.Boolean })
+  )
 })
 export const jobColumns = `j.id, j.chat_id AS chatId, c.owner_user_id AS userId,
  j.first_slot_id AS firstSlotId, j.last_slot_id AS lastSlotId, j.leaf_slot_id AS leafSlotId,

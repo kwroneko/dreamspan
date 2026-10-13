@@ -1,4 +1,5 @@
 import { makeLcmQueueHandlers } from "./lcmQueue.ts"
+import { makeLcmEnableWriteHandlers } from "./lcmEnableWrites.ts"
 import { makeLcmUiWriteHandlers } from "./lcmUiWrites.ts"
 import { makeLcmWriteHandlers } from "./lcmWrites.ts"
 // Writer worker entry point. Holds the only read-write connection to the database
@@ -64,7 +65,8 @@ RpcServer.layer(WriteOps, { concurrency: 1 }).pipe(
           ...generation,
           ...(yield* makeLcmWriteHandlers(bin)),
           ...(yield* makeLcmQueueHandlers),
-          ...(yield* makeLcmUiWriteHandlers)
+          ...(yield* makeLcmUiWriteHandlers),
+          ...(yield* makeLcmEnableWriteHandlers(bin))
         })
       })
     )

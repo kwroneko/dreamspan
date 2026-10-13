@@ -10,7 +10,11 @@ import {
   SummaryRevisionId,
   SummaryInput,
   SummaryChild,
-  SummaryChange
+  SummaryChange,
+  BackfillApproval,
+  BackfillBasis,
+  BackfillStatus,
+  EnableChoice
 } from "@rp/shared/lcm.ts"
 // Storage operations, executed inside the database worker threads (ARCHITECTURE.md §3).
 // Each write operation runs as one synchronous transaction inside the writer worker,
@@ -416,6 +420,30 @@ export class WriteOps extends RpcGroup.make(
       target: RerunTarget,
       requested: Schema.Boolean,
       model: Schema.optionalKey(ModelChoice)
+    },
+    error: Schema.Union([StorageError, NotFound])
+  }),
+  /**
+   * Enables LCM on a chat (spec/LCM.md §2.7): shows the run an imported summary covers and, if
+   * `adopt`, records that summary as the first level over it; writes the switch; and, when the
+   * work has jobs, records the backfill with the approved spend. Nothing is generated.
+   */
+  Rpc.make("EnableLcm", {
+    payload: { userId: UserId, chatId: ChatId, leafSlotId: SlotId, choice: EnableChoice, approved: BackfillApproval },
+    success: Schema.Struct({ unhidden: Schema.Int, summaryId: Schema.NullOr(Schema.String) }),
+    error: Schema.Union([StorageError, NotFound])
+  }),
+  /**
+   * Changes a chat's backfill: pause it; continue past the cap with a new one (`approved` is
+   * what is left); `begin` after the first reply planned it; `drive` for "Summarize now"
+   * (the work goes on without waiting for replies); `finish` when nothing is left.
+   */
+  Rpc.make("SetBackfill", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      action: Schema.Literals(["pause", "continue", "begin", "drive", "finish"]),
+      approved: Schema.optionalKey(BackfillApproval)
     },
     error: Schema.Union([StorageError, NotFound])
   }),
@@ -1410,6 +1438,18 @@ export class ReadOps extends RpcGroup.make(
   Rpc.make("ListSummaryRevisions", {
     payload: { userId: UserId, summaryId: SummaryId },
     success: Schema.Array(SummaryRevision),
+    error: Schema.Union([StorageError, NotFound])
+  }),
+  /** The imported summary a chat could adopt and the work enabling LCM would do, measured (priced by the caller). */
+  Rpc.make("EstimateBackfill", {
+    payload: { userId: UserId, chatId: ChatId, leafSlotId: SlotId },
+    success: BackfillBasis,
+    error: Schema.Union([StorageError, NotFound])
+  }),
+  /** The chat's newest backfill and what the ledger shows spent against it; null when it never had one. */
+  Rpc.make("GetBackfill", {
+    payload: { userId: UserId, chatId: ChatId },
+    success: Schema.NullOr(BackfillStatus),
     error: Schema.Union([StorageError, NotFound])
   }),
   Rpc.make("FindUserByHandle", {
