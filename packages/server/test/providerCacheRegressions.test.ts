@@ -90,7 +90,7 @@ for (const override of ["none", "model", "connection"] as const)
       assert.equal(reply.version.status, "complete")
       const me = yield* api.Whoami()
       const reader = yield* Reader
-      const warmth = yield* reader.CacheWarmth({ userId: me.id, chatId: reply.chat.id })
+      const warmth = (yield* reader.CacheWarmth({ userId: me.id, chatId: reply.chat.id })).warmth
       assert.equal(mock.requests().at(-1)!.body!.prompt_cache_retention, "24h")
       if (override === "none") assert.isNull(warmth)
       else assert.equal(warmth?.ttlS, override === "model" ? 888 : 777)
@@ -139,7 +139,7 @@ for (const edit of ["model", "connection", "policy"] as const)
       assert.equal(reply.version.status, "complete")
       const me = yield* api.Whoami()
       const reader = yield* Reader
-      const first = yield* reader.CacheWarmth({ userId: me.id, chatId: reply.chat.id })
+      const first = (yield* reader.CacheWarmth({ userId: me.id, chatId: reply.chat.id })).warmth
       if (edit === "model")
         yield* api.EditModel({
           modelId: reply.model.id,
@@ -159,7 +159,7 @@ for (const edit of ["model", "connection", "policy"] as const)
             presetOverrideRefId: null
           }
         })
-      const edited = yield* reader.CacheWarmth({ userId: me.id, chatId: reply.chat.id })
+      const edited = (yield* reader.CacheWarmth({ userId: me.id, chatId: reply.chat.id })).warmth
       assert.equal(edited?.expiresAt, first?.expiresAt)
       hit = true
       for (let n = 0; n < 2; n++) {
@@ -169,7 +169,7 @@ for (const edit of ["model", "connection", "policy"] as const)
         )
         yield* eventually(() => finished(reply.events, entry.version.id) !== undefined)
         assert.equal(finished(reply.events, entry.version.id)!.status, "complete")
-        const afterHit = yield* reader.CacheWarmth({ userId: me.id, chatId: reply.chat.id })
+        const afterHit = (yield* reader.CacheWarmth({ userId: me.id, chatId: reply.chat.id })).warmth
         assert.equal(afterHit!.expiresAt, first!.expiresAt)
       }
     }).pipe(Effect.scoped, Effect.provide(Layer.merge(serverLayer(config), Builtins.layer)))
@@ -221,7 +221,7 @@ it.live("Fireworks preserves a reported header hit on tool-only completion", () 
     assert.equal(reply.version.status, "complete")
     const me = yield* api.Whoami()
     const reader = yield* Reader
-    const warmth = yield* reader.CacheWarmth({ userId: me.id, chatId: reply.chat.id })
+    const warmth = (yield* reader.CacheWarmth({ userId: me.id, chatId: reply.chat.id })).warmth
     const ledger = (yield* api.ListLlmRequests({ limit: 1, before: null }))[0]!
     assert.equal(ledger.counts.cacheRead, 100)
     assert.equal(warmth?.verified, true)
@@ -267,7 +267,7 @@ it.live("Ordinary tool-schema cache_control properties do not select explicit ca
     assert.equal(reply.version.status, "complete")
     const me = yield* api.Whoami()
     const reader = yield* Reader
-    const warmth = yield* reader.CacheWarmth({ userId: me.id, chatId: reply.chat.id })
+    const warmth = (yield* reader.CacheWarmth({ userId: me.id, chatId: reply.chat.id })).warmth
     assert.equal(warmth?.ttlS, 180)
     assert.equal(warmth?.verified, true)
   }).pipe(Effect.scoped, Effect.provide(Layer.merge(serverLayer(config), Builtins.layer)))

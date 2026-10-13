@@ -1,5 +1,8 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Effect } from "effect"
+import { cacheIdentity } from "../src/providers/cacheIdentity.ts"
+import { markWireSources, wireContext } from "../src/assembler/wire.ts"
+import type { ContextSnapshot } from "../src/assembler/types.ts"
 import { tokensOf } from "../src/assembler/st.ts"
 import { prefixChange, lastBreakpoint } from "../src/assembler/warmth.ts"
 import { importStPreset } from "../src/formats/preset.ts"
@@ -50,8 +53,31 @@ describe("stepped history", () => {
             messages: messages(count),
             historyStart: previous.historyStart!
           })
+          const identity = (snapshot: ContextSnapshot, end = lastBreakpoint(snapshot)) => {
+            const sources = wireContext(snapshot.request, snapshot.inputs.model!)
+            const payload = {
+              messages: sources.messages.map(({ role, content, name }) => ({
+                role,
+                content,
+                ...(name ? { name } : {})
+              }))
+            }
+            markWireSources(payload, sources)
+            return cacheIdentity({
+              payload,
+              api: "openai-completions",
+              mode: "auto",
+              scope: ["synthetic-owner", "synthetic-route"],
+              sources,
+              end
+            })
+          }
+          const oldIdentity = identity(previous)
+          const newIdentity = identity(next)
+          assert.isNotNull(oldIdentity.requested)
           assert.isAtMost(cost(next), 400)
           if (next.historyMove === "maximum") {
+            assert.notInclude(newIdentity.prefixes, oldIdentity.requested!)
             jumps.push(count)
             assert.isAbove(next.historyStart!.depth, previous.historyStart!.depth)
             assert.isAtMost(cost(next), 320)
@@ -64,6 +90,8 @@ describe("stepped history", () => {
             const end = lastBreakpoint(previous)
             assert.deepStrictEqual(next.request.messages.slice(0, end + 1), previous.request.messages.slice(0, end + 1))
             assert.isNull(prefixChange(previous, next, () => ({ label: "Message" })))
+            assert.include(newIdentity.prefixes, oldIdentity.requested!)
+            assert.strictEqual(identity(next, lastBreakpoint(previous)).requested, oldIdentity.requested)
             held++
           }
           previous = next
@@ -343,7 +371,7 @@ describe("stepped history", () => {
     })
   )
 
-  it.effect("keeps clipped author notes and their history when lore surrounds the note", () =>
+  it.effect("keeps full author notes when lore surrounds the note", () =>
     Effect.gen(function* () {
       const fixture: AssemblyFixture = {
         ...base,
@@ -386,12 +414,11 @@ describe("stepped history", () => {
       }
       const built = yield* assembleFixture(fixture)
       const note = built.request.messages.find((message) => message.content.includes("QQ"))
-      assert.ok(note, "the clipped note must still be sent")
-      assert.strictEqual(note.content, `top\n${"Q".repeat(360)}\nbottom`)
+      assert.ok(note, "the full note must still be sent")
+      assert.strictEqual(note.content, `top\n${"Q".repeat(1000)}\nbottom`)
       const history = built.request.messages.filter((message) => message.content.startsWith("Turn "))
       assert.strictEqual(history.length, 24 - built.historyStart!.depth)
-      assert.isAbove(history.length, 0)
-      assert.isAtMost(cost(built), 320)
+      assert.isAtMost(cost(built), 400)
     })
   )
   it.effect("keeps a variable note reservation when the expansion is empty", () =>
@@ -420,7 +447,7 @@ describe("stepped history", () => {
       ]
       let previous = yield* assembleFixture({ ...fixture, messages: messages(12), events: variable("") })
       const nonempty = yield* assembleFixture({ ...fixture, messages: messages(12), events: variable("short") })
-      assert.deepStrictEqual(previous.historyStart, nonempty.historyStart, "empty notes reserve the same allowance")
+      assert.strictEqual(previous.historyStart!.depth, nonempty.historyStart!.depth)
       let held = 0
       for (const [i, value] of ["short", "", "Q".repeat(1000), "", "short"].entries()) {
         const next = yield* assembleFixture({
@@ -441,6 +468,293 @@ describe("stepped history", () => {
         previous = next
       }
       assert.isAbove(held, 0)
+    })
+  )
+  for (const layout of ["st", "concat", "swap_tail"] as const) {
+    for (const postprocess of ["none", "merge", "semi", "strict"] as const) {
+      for (const placement of [
+        { mode: "tail", role: "system" },
+        { mode: "depth", depth: 2, role: "user" },
+        { mode: "section", section: "before_main_prompt", role: "system" },
+        { mode: "section", section: "after_main_prompt", role: "assistant" }
+      ] as const) {
+        it.effect(`preserves full notes: ${layout}/${postprocess}/${JSON.stringify(placement)}`, () =>
+          Effect.gen(function* () {
+            const content = `${"Q".repeat(480)} KEEP THIS INSTRUCTION`
+            const built = yield* assembleFixture({
+              ...base,
+              preset: { ...preset, postprocess },
+              messages: messages(1),
+              notes: [
+                {
+                  entity: "full",
+                  revision: "nr",
+                  first: false,
+                  doc: {
+                    schema_version: 1,
+                    title: "Full",
+                    content: "{{getvar::long}} KEEP THIS INSTRUCTION",
+                    owner: { chat: "chat-1" as never },
+                    placement,
+                    exportable: false
+                  }
+                }
+              ],
+              events: [
+                ...(layout === "st"
+                  ? []
+                  : [{ depth: null, event: { scope: null, data: { key: "layout.cards" as const, value: layout } } }]),
+                {
+                  depth: null,
+                  event: { scope: null, data: { key: "note.activate", value: { note: "full" as never } } }
+                },
+                {
+                  depth: null,
+                  event: { scope: null, data: { key: "var.set", value: { name: "long", value: "Q".repeat(480) } } }
+                }
+              ]
+            })
+            assert.ok(built.request.messages.some((m) => m.content.includes(content)))
+            assert.strictEqual(built.pieces.find((p) => p.source.kind === "note")!.text, content)
+            assert.isFalse(built.issues.some((issue) => issue.kind === "macro_limit"))
+            assert.isAtMost(cost(built), 400)
+          })
+        )
+      }
+    }
+  }
+  it.effect("fits four short static macro notes without speculative per-note allowances", () =>
+    Effect.gen(function* () {
+      const notes = Array.from({ length: 4 }, (_, i) => ({
+        entity: `hello-${i}`,
+        revision: "nr",
+        first: false,
+        doc: {
+          schema_version: 1 as const,
+          title: "Hello",
+          content: "Hello {{char}}",
+          owner: { chat: "chat-1" as never },
+          placement: { mode: "tail" as const, role: "system" as const },
+          exportable: false
+        }
+      }))
+      const built = yield* assembleFixture({
+        ...base,
+        messages: messages(1),
+        notes,
+        events: notes.map((note) => ({
+          depth: null,
+          event: { scope: null, data: { key: "note.activate", value: { note: note.entity as never } } }
+        }))
+      })
+      assert.strictEqual(
+        built.request.messages
+          .map((m) => m.content)
+          .join("\n")
+          .split("Hello Mira").length - 1,
+        4
+      )
+      assert.isAtMost(cost(built), 140)
+      assert.strictEqual(built.historyStart!.depth, 0)
+    })
+  )
+
+  for (const postprocess of ["none", "merge", "semi", "strict"] as const) {
+    it.effect(`bounds shared skipped-note capacity including depth and role framing: ${postprocess}`, () =>
+      Effect.gen(function* () {
+        const notes: NonNullable<AssemblyFixture["notes"]> = Array.from({ length: 24 }, (_, i) => ({
+          entity: `padding-${i}`,
+          revision: "nr",
+          first: false,
+          doc: {
+            schema_version: 1,
+            title: "Padding",
+            content: "padding padding",
+            interval: 2,
+            owner: { chat: "chat-1" as never },
+            placement: { mode: "depth", depth: i + 1, role: (["system", "user", "assistant"] as const)[i % 3]! },
+            exportable: false
+          }
+        }))
+        const built = yield* assembleFixture({
+          ...base,
+          preset: { ...preset, postprocess },
+          messages: messages(49),
+          notes,
+          events: notes.map((note) => ({
+            depth: null,
+            event: { scope: null, data: { key: "note.activate", value: { note: note.entity as never } } }
+          }))
+        })
+        const allowance = built.historyStart!.state!.noteBudget!.allowance
+        assert.isAtMost(allowance, 90)
+        assert.isFalse(built.request.messages.some((message) => message.content.includes("padding")))
+        const worstAllowed = yield* assembleFixture({
+          ...base,
+          preset: { ...preset, postprocess, context_target: 320 - allowance },
+          messages: messages(49)
+        })
+        assert.isAtMost(
+          built.historyStart!.depth,
+          worstAllowed.historyStart!.depth,
+          "framing must not make speculative capacity discard more than its shared token ceiling"
+        )
+        assert.isAtMost(cost(built), 320)
+      })
+    )
+  }
+
+  for (const layout of ["st", "concat", "swap_tail"] as const) {
+    for (const postprocess of ["none", "merge", "semi", "strict"] as const) {
+      it.effect(`preserves full periodic expansions without repeated growth events: ${layout}/${postprocess}`, () =>
+        Effect.gen(function* () {
+          const fixture: AssemblyFixture = {
+            ...base,
+            preset: { ...preset, postprocess },
+            notes: [
+              {
+                entity: "periodic",
+                revision: "nr",
+                first: false,
+                doc: {
+                  schema_version: 1,
+                  title: "Periodic",
+                  content: "{{getvar::payload}} KEEP THIS INSTRUCTION",
+                  owner: { chat: "chat-1" as never },
+                  placement: { mode: "tail", role: "system" },
+                  interval: 2,
+                  exportable: false
+                }
+              }
+            ]
+          }
+          let previous: Effect.Success<ReturnType<typeof assembleFixture>> | undefined
+          let growthEvents = 0
+          for (let i = 0; i < 12; i++) {
+            const due = i % 2 === 1
+            const payload = i === 3 || i === 7 ? "short" : "Q".repeat(480)
+            const next = yield* assembleFixture({
+              ...fixture,
+              messages: messages(1 + 2 * i),
+              ...(previous ? { historyStart: previous.historyStart! } : {}),
+              events: [
+                ...(layout === "st"
+                  ? []
+                  : [{ depth: null, event: { scope: null, data: { key: "layout.cards" as const, value: layout } } }]),
+                {
+                  depth: null,
+                  event: { scope: null, data: { key: "note.activate", value: { note: "periodic" as never } } }
+                },
+                {
+                  depth: null,
+                  event: { scope: null, data: { key: "var.set", value: { name: "payload", value: payload } } }
+                }
+              ]
+            })
+            if (due)
+              assert.ok(
+                next.request.messages.some((message) => message.content.includes(`${payload} KEEP THIS INSTRUCTION`))
+              )
+            else
+              assert.isFalse(next.request.messages.some((message) => message.content.includes("KEEP THIS INSTRUCTION")))
+            assert.isFalse(next.issues.some((issue) => issue.kind === "macro_limit"))
+            assert.isAtMost(cost(next), 400)
+            if (next.historyMove === "budget") growthEvents++
+            if (i > 1)
+              assert.notStrictEqual(next.historyMove, "budget", "the same observed expansion is not new growth")
+            if (previous) {
+              assert.isAtLeast(next.historyStart!.depth, previous.historyStart!.depth)
+              if (next.historyMove === "unchanged")
+                assert.deepStrictEqual(
+                  next.request.messages.slice(0, lastBreakpoint(previous) + 1),
+                  previous.request.messages.slice(0, lastBreakpoint(previous) + 1)
+                )
+            }
+            previous = next
+          }
+          assert.strictEqual(growthEvents, 1)
+        })
+      )
+    }
+  }
+
+  it.effect("preserves the complete formatted summary expansion and trailing instructions", () =>
+    Effect.gen(function* () {
+      const content = "S".repeat(480)
+      const built = yield* assembleFixture({
+        ...base,
+        messages: messages(1),
+        notes: [
+          {
+            entity: "summary-full",
+            revision: "nr",
+            first: false,
+            doc: {
+              schema_version: 1,
+              title: "Summary",
+              kind: "imported_summary",
+              content: "{{getvar::summary_text}}",
+              template: "SUMMARY {{summary}} FINAL SUMMARY INSTRUCTION",
+              owner: { chat: "chat-1" as never },
+              placement: { mode: "section", section: "after_main_prompt", role: "system" },
+              exportable: false
+            }
+          }
+        ],
+        events: [
+          {
+            depth: null,
+            event: { scope: null, data: { key: "note.activate", value: { note: "summary-full" as never } } }
+          },
+          {
+            depth: null,
+            event: { scope: null, data: { key: "var.set", value: { name: "summary_text", value: content } } }
+          }
+        ]
+      })
+      const expanded = `SUMMARY ${content} FINAL SUMMARY INSTRUCTION`
+      assert.ok(built.request.messages.some((message) => message.content.includes(expanded)))
+      assert.strictEqual(built.pieces.find((piece) => piece.source.kind === "note")!.text, expanded)
+      assert.isAtMost(cost(built), 320)
+      assert.isFalse(built.issues.some((issue) => issue.kind === "macro_limit"))
+    })
+  )
+
+  it.effect("fails for genuine full-note overflow without sending shortened instructions", () =>
+    Effect.gen(function* () {
+      const error = yield* Effect.flip(
+        assembleFixture({
+          ...base,
+          messages: messages(1),
+          notes: [
+            {
+              entity: "oversized",
+              revision: "nr",
+              first: false,
+              doc: {
+                schema_version: 1,
+                title: "Oversized",
+                content: "{{getvar::payload}} KEEP THIS INSTRUCTION",
+                owner: { chat: "chat-1" as never },
+                placement: { mode: "tail", role: "system" },
+                exportable: false
+              }
+            }
+          ],
+          events: [
+            {
+              depth: null,
+              event: { scope: null, data: { key: "note.activate", value: { note: "oversized" as never } } }
+            },
+            {
+              depth: null,
+              event: { scope: null, data: { key: "var.set", value: { name: "payload", value: "Q".repeat(2000) } } }
+            }
+          ]
+        })
+      )
+      assert.strictEqual(error._tag, "AssemblyFailed")
+      if (error._tag === "AssemblyFailed") assert.strictEqual(error.reason, "budget")
     })
   )
 })

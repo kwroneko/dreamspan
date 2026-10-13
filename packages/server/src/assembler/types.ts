@@ -11,7 +11,7 @@ import type { PresetDoc } from "@rp/shared/docs/preset.ts"
 import { Schema } from "effect"
 
 /** Bump whenever identical inputs would assemble differently. Missing means version 0. */
-export const ASSEMBLER_VERSION = 9
+export const ASSEMBLER_VERSION = 10
 
 export type Role = "system" | "user" | "assistant"
 
@@ -168,6 +168,7 @@ export interface HistoryStart {
     readonly maximum: number
     readonly target: number
     readonly examples: number
+    readonly noteBudget?: { readonly sizes: Readonly<Record<string, number>>; readonly allowance: number }
     readonly revision: number
   }
   readonly slotId: string | null
@@ -177,7 +178,7 @@ export interface HistoryStart {
 /** A context as built, stored as its rollout's frozen snapshot (DATA-MODEL §7.1). */
 export interface ContextSnapshot {
   readonly historyStart?: HistoryStart
-  readonly historyMove?: "initial" | "maximum" | "restore" | "unchanged"
+  readonly historyMove?: "initial" | "maximum" | "budget" | "restore" | "unchanged"
   readonly schema: 1
   readonly assemblerVersion?: number
   readonly inputs: SnapshotInputs

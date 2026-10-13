@@ -3,6 +3,10 @@ import { assert, it } from "@effect/vitest"
 import { Effect, Fiber, Layer, Stream } from "effect"
 import type { IncomingHttpHeaders, ServerResponse } from "node:http"
 import type { AssembledRequest, ModelInput } from "../src/assembler/types.ts"
+import { assembleFixture, type AssemblyFixture } from "./support/assemblySources.ts"
+import { cardDoc } from "./support/docs.ts"
+import { importStPreset } from "../src/formats/preset.ts"
+import { prefixChange } from "../src/assembler/warmth.ts"
 import { providerRequest } from "../src/assembler/wire.ts"
 import * as Database from "../src/db/Database.ts"
 import * as Network from "../src/net/Network.ts"
@@ -124,7 +128,7 @@ const setup = (
           )
         return { events, fiber }
       })
-    return { pending, start, reader, userId, providers, connection }
+    return { pending, start, reader, userId, providers, connection, input }
   })
 const held = (events: Providers.ProviderEvent[]) => events.some((e) => e.type === "waiting-cache" && e.waiting)
 const tools = (name: string) => [
@@ -508,3 +512,66 @@ it.live("stagger hits use normalized Fireworks header counts", () =>
     assert.isTrue(follower.cacheStagger!.hit)
   }).pipe(Effect.scoped, Effect.provide(layer()))
 )
+
+for (const layout of ["st", "concat", "swap_tail"] as const)
+  it.live(`${layout}: a stepped cut starts a cold gate and subsequent swipes reuse its prefix`, () =>
+    Effect.gen(function* () {
+      const f = yield* setup("anthropic")
+      const fixture: AssemblyFixture = {
+        cards: [{ entity: "mira", doc: cardDoc("Mira") }],
+        participants: ["mira"],
+        model: { ...f.input, connectionRevision: 0 },
+        preset: importStPreset(JSON.stringify({ openai_max_context: 400, openai_max_tokens: 40 })).document!,
+        events:
+          layout === "st"
+            ? []
+            : [{ depth: null, event: { scope: null, data: { key: "layout.cards", value: layout } } }],
+        messages: []
+      }
+      let previous = yield* assembleFixture(fixture)
+      let cut: typeof previous | undefined
+      for (let count = 1; count < 60; count++) {
+        const next = yield* assembleFixture({
+          ...fixture,
+          messages: Array.from({ length: count }, (_, i) => ({
+            side: i % 2 ? "assistant" : "user",
+            content: `Turn ${i}: ${"x".repeat(70)}`
+          })),
+          historyStart: previous.historyStart!
+        })
+        if (next.historyMove === "maximum") {
+          cut = next
+          break
+        }
+        previous = next
+      }
+      assert.isDefined(cut)
+      assert.isAbove(cut!.historyStart!.depth, previous.historyStart!.depth)
+      assert.match(prefixChange(previous, cut!, () => ({ label: "Message" }))!.reason, /context reached its maximum/)
+      const prime = yield* f.start({}, previous.request)
+      yield* eventually(() => f.pending.length === 1)
+      finish("anthropic", f.pending[0]!.res)
+      yield* Fiber.join(prime.fiber)
+      const leader = yield* f.start({}, cut!.request)
+      yield* eventually(() => f.pending.length === 2)
+      const follower = yield* f.start({}, cut!.request)
+      yield* eventually(() => f.pending.length === 3 || held(follower.events))
+      assert.strictEqual(f.pending.length, 2, "the old history prefix cannot warm the cut")
+      assert.isTrue(held(follower.events))
+      finish("anthropic", f.pending[1]!.res)
+      yield* Fiber.join(leader.fiber)
+      yield* eventually(() => f.pending.length === 3)
+      finish("anthropic", f.pending[2]!.res)
+      yield* Fiber.join(follower.fiber)
+      const warm = yield* f.start({}, cut!.request)
+      yield* eventually(() => f.pending.length === 4)
+      const concurrent = yield* f.start({}, cut!.request)
+      yield* eventually(() => f.pending.length === 5 || held(concurrent.events))
+      assert.strictEqual(f.pending.length, 5, "the recorded cut prefix bypasses the cold gate")
+      assert.isFalse(held(warm.events) || held(concurrent.events))
+      finish("anthropic", f.pending[3]!.res)
+      finish("anthropic", f.pending[4]!.res)
+      yield* Fiber.join(warm.fiber)
+      yield* Fiber.join(concurrent.fiber)
+    }).pipe(Effect.scoped, Effect.provide(layer()))
+  )

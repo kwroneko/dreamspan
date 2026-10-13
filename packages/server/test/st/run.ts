@@ -14,6 +14,7 @@ import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { chromium } from "@playwright/test"
+import { checkPreviewOverlap } from "./previewOverlap.ts"
 import { compareAssembly } from "./assembly.ts"
 import { checkFixtures, compareMacros, comparePresetRoundTrips } from "./comparisons.ts"
 import { removeOrphans, ST_IMAGE, ST_VERSION, startSt } from "./container.ts"
@@ -63,7 +64,13 @@ const main = async () => {
     ["fixtures", async () => [await checkFixtures(browser, st.url, mock, fixtures)]],
     ["macros", () => compareMacros(browser, st.url, fixtures)],
     ["presets", async () => [await comparePresetRoundTrips(browser, st.url, mock, fixtures)]],
-    ["assembly", () => compareAssembly(browser, st.url, mock, fixtures)]
+    [
+      "assembly",
+      async () => [
+        await checkPreviewOverlap(browser, st.url, mock, fixtures),
+        ...(await compareAssembly(browser, st.url, mock, fixtures))
+      ]
+    ]
   ]
   const only = process.env.ST_DIFF_ONLY?.split(",")
   const sections: Array<Section> = []

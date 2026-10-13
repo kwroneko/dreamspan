@@ -3,6 +3,12 @@
 //
 // Functions passed to `page.evaluate` run in the page, where `SillyTavern.getContext()` is
 // ST's public extension API; `StContext` types only the parts used here.
+import {
+  armPreviewOverlap,
+  installPreviewOverlap,
+  withoutPromptPreviews,
+  withPreviewOverlap
+} from "./previewIsolation.ts"
 import type { Browser, Page } from "@playwright/test"
 import { readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
@@ -90,14 +96,25 @@ const WRITES = /\/api\/[^?]*(save|edit|merge-attributes|delete|rename|create|imp
  * A fresh browser context with ST loaded and initialized, in UTC. `now` fixes the page's
  * clock (timers still run).
  */
-const openPage = async (browser: Browser, url: string, options: { readOnly: boolean; now?: number }) => {
+const openPage = async (
+  browser: Browser,
+  url: string,
+  options: { readOnly: boolean; now?: number; previewOverlap?: "protected" | "unprotected" }
+) => {
   const context = await browser.newContext({ timezoneId: MACRO_TIME_ZONE, locale: "en-US" })
   if (options.now !== undefined) await context.clock.setFixedTime(options.now)
   if (options.readOnly) {
+    await context.route("**/scripts/PromptManager.js", async (route) => {
+      const response = await route.fetch()
+      const source = await response.text()
+      const isolated = options.previewOverlap === "unprotected" ? source : withoutPromptPreviews(source)
+      await route.fulfill({ response, body: options.previewOverlap ? withPreviewOverlap(isolated) : isolated })
+    })
     await context.route(WRITES, (route) =>
       route.fulfill({ status: 200, contentType: "application/json", body: '{"ok":true}' })
     )
   }
+  if (options.previewOverlap) await installPreviewOverlap(context)
   const page = await context.newPage()
   await page.goto(url)
   await page.waitForFunction(() => typeof SillyTavern !== "undefined" && typeof SillyTavern.getContext === "function")
@@ -311,6 +328,7 @@ const setAuthorNote = (page: Page, note: AuthorNote) =>
   }, note)
 
 export interface Capture {
+  readonly previewOverlap?: "protected" | "unprotected"
   /** Presets loaded into ST one after another, by name; none for the baseline settings. */
   readonly overMaximum?: boolean
   readonly presets: ReadonlyArray<string>
@@ -399,6 +417,7 @@ export const captureWithSettings = async (
         }))
         ;(ctx.chat as Array<unknown>).splice(0, ctx.chat.length, ...history)
       })
+    if (capture.previewOverlap) await armPreviewOverlap(page, capture.previewOverlap === "protected")
     settings = await settingsInForce(page)
   })
   return { body, settings }
@@ -416,7 +435,10 @@ export const captureRequest = async (
   capture: Capture,
   beforeSending?: (page: Page) => Promise<void>
 ) => {
-  const page = await openPage(browser, url, { readOnly: true })
+  const page = await openPage(browser, url, {
+    readOnly: true,
+    ...(capture.previewOverlap ? { previewOverlap: capture.previewOverlap } : {})
+  })
   const errors: Array<string> = []
   page.on("pageerror", (error) => errors.push(error.message))
   try {

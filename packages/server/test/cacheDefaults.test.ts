@@ -56,7 +56,7 @@ for (const [kind, key, ttl, field] of [
       assert.equal(reply.version.status, "complete")
       const me = yield* api.Whoami()
       const reader = yield* Reader
-      const warmth = yield* reader.CacheWarmth({ userId: me.id, chatId: reply.chat.id })
+      const warmth = (yield* reader.CacheWarmth({ userId: me.id, chatId: reply.chat.id })).warmth
       if (ttl === null) assert.isNull(warmth)
       else {
         assert.equal(warmth?.ttlS, ttl)
@@ -96,7 +96,7 @@ it.live("model TTL overrides connection TTL, and connection TTL overrides the bu
         model: override === undefined ? {} : { cacheTtlS: override },
         modelKey: "gpt-5.6"
       })
-      const warmth = yield* reader.CacheWarmth({ userId: me.id, chatId: reply.chat.id })
+      const warmth = (yield* reader.CacheWarmth({ userId: me.id, chatId: reply.chat.id })).warmth
       assert.equal(warmth!.ttlS, override ?? 700)
     }
   }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
@@ -143,7 +143,7 @@ for (const kind of ["cerebras", "openrouter"] as const) {
       })
       const me = yield* api.Whoami()
       const reader = yield* Reader
-      const initial = yield* reader.CacheWarmth({ userId: me.id, chatId: first.chat.id })
+      const initial = (yield* reader.CacheWarmth({ userId: me.id, chatId: first.chat.id })).warmth
       assert.equal(initial!.ttlS, 300)
       hits = true
       const current = yield* api.GetChat({ chatId: first.chat.id })
@@ -151,7 +151,7 @@ for (const kind of ["cerebras", "openrouter"] as const) {
         api.Generate({ chatId: first.chat.id, parentSlotId: current.activeLeafSlotId, branch: false })
       )
       yield* eventually(() => finished(first.events, entry.version.id) !== undefined)
-      const warm = yield* reader.CacheWarmth({ userId: me.id, chatId: first.chat.id })
+      const warm = (yield* reader.CacheWarmth({ userId: me.id, chatId: first.chat.id })).warmth
       assert.isNotNull(warm)
       assert.equal(warm!.verified, true)
       assert.equal(warm!.expiresAt, initial!.expiresAt)
@@ -213,7 +213,7 @@ for (const [kind, key, payload, ttl] of [
       const reply = yield* generateReply(api, { connection: { kind, baseUrl: mock.url }, model: {}, modelKey: key })
       const me = yield* api.Whoami()
       const reader = yield* Reader
-      const warmth = yield* reader.CacheWarmth({ userId: me.id, chatId: reply.chat.id })
+      const warmth = (yield* reader.CacheWarmth({ userId: me.id, chatId: reply.chat.id })).warmth
       const ledger = (yield* api.ListLlmRequests({ limit: 1, before: null }))[0]!
       assert.equal(warmth!.expiresAt, ledger.startedAt + ttl * 1000)
       assert.equal(warmth!.verified, true)
@@ -258,7 +258,7 @@ it.live("Google's cachedContentTokenCount verifies warmth with a user TTL", () =
       model: {}
     })
     assert.equal(reply.version.status, "complete")
-    const warmth = yield* reader.CacheWarmth({ userId: me.id, chatId: reply.chat.id })
+    const warmth = (yield* reader.CacheWarmth({ userId: me.id, chatId: reply.chat.id })).warmth
     assert.equal(warmth!.ttlS, 777)
     assert.equal(warmth!.verified, true)
     const ledger = (yield* api.ListLlmRequests({ limit: 1, before: null }))[0]!
@@ -340,7 +340,7 @@ for (const [kind, ttl] of [
       assert.equal(reply.version.status, "complete")
       const me = yield* api.Whoami()
       const reader = yield* Reader
-      const warmth = yield* reader.CacheWarmth({ userId: me.id, chatId: reply.chat.id })
+      const warmth = (yield* reader.CacheWarmth({ userId: me.id, chatId: reply.chat.id })).warmth
       assert.equal(warmth!.ttlS, ttl)
       assert.equal(warmth!.verified, true)
       const ledger = (yield* api.ListLlmRequests({ limit: 1, before: null }))[0]!
@@ -371,7 +371,7 @@ it.live("Fireworks' dedicated hit header verifies warmth without streamed usage"
     assert.equal(reply.version.status, "complete", JSON.stringify(reply.version.error))
     const me = yield* api.Whoami()
     const reader = yield* Reader
-    const warmth = yield* reader.CacheWarmth({ userId: me.id, chatId: reply.chat.id })
+    const warmth = (yield* reader.CacheWarmth({ userId: me.id, chatId: reply.chat.id })).warmth
     assert.equal(warmth!.verified, true)
     assert.equal((yield* api.ListLlmRequests({ limit: 1, before: null }))[0]!.counts.cacheRead, 100)
   }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))

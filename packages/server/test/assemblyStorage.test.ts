@@ -393,16 +393,46 @@ describe("context assembly from the database", () => {
           userId,
           refId: chosen.ref.id,
           expectedRowVersion: chosen.ref.rowVersion + 1,
+          doc: document as never,
+          message: null,
+          commitDraft: null
+        })
+        const variable = yield* entity("note", "Full instructions", {
+          schema_version: 1,
+          title: "Full instructions",
+          content: "{{getvar::long}} KEEP THIS INSTRUCTION",
+          owner: { chat: chat.id },
+          placement: { mode: "tail", role: "system" },
+          exportable: false
+        })
+        yield* state({ key: "note.activate", value: { note: variable.entityId } })
+        let withNote = raised
+        for (const value of ["short", "Q".repeat(480), "", "Q".repeat(480), "Q".repeat(600)]) {
+          yield* state({ key: "var.set", value: { name: "long", value } })
+          withNote = yield* generate((yield* send(withNote.slot)).slotId)
+          assert.ok(
+            withNote.snapshot.request.messages.some((m) => m.content.includes(`${value} KEEP THIS INSTRUCTION`.trim()))
+          )
+          assert.isAtMost(43 + withNote.snapshot.request.messages.reduce((n, m) => n + tokensOf(m), 0), 500)
+          assert.isAtLeast(
+            withNote.snapshot.historyStart!.state!.noteBudget!.sizes[variable.entityId]!,
+            value.length + 22
+          )
+        }
+        yield* writer.EditRef({
+          userId,
+          refId: chosen.ref.id,
+          expectedRowVersion: chosen.ref.rowVersion + 2,
           doc: { ...document, samplers: { ...document.samplers, openai_max_context: 20 } } as never,
           message: null,
           commitDraft: null
         })
         const fallback = yield* reader.CacheWarmth({ userId, chatId: chat.id })
         assert.deepStrictEqual(fallback.historyStart, {
-          slotId: raised.snapshot.historyStart!.slotId,
-          depth: raised.snapshot.historyStart!.depth
+          slotId: withNote.snapshot.historyStart!.slotId,
+          depth: withNote.snapshot.historyStart!.depth
         })
-        assert.strictEqual(fallback.leafSlotId, raised.slot)
+        assert.strictEqual(fallback.leafSlotId, withNote.slot)
         assert.isNull(fallback.warmth)
         for (const snapshot of snapshots) {
           const rebuilt = yield* reader.RebuildContext({ userId, snapshot: JSON.stringify(snapshot) })
@@ -742,7 +772,7 @@ describe("context assembly from the database", () => {
     Effect.gen(function* () {
       const { reader, userId, assemble } = yield* setup()
       const built = yield* assemble()
-      for (const version of [undefined, 0, 1, 2, 3, 4, 5, 6, 7, 8]) {
+      for (const version of [undefined, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9]) {
         const legacy = { ...built, assemblerVersion: version, sources: { ...built.sources, userMessages: [] } }
         const json = JSON.stringify(legacy)
         const result = yield* reader.RebuildContext({ userId, snapshot: json })
@@ -750,7 +780,7 @@ describe("context assembly from the database", () => {
         assert.ok(result._tag === "EarlierAssemblerVersion")
         assert.strictEqual(result.storedSnapshot, json)
       }
-      assert.strictEqual(built.assemblerVersion, 9)
+      assert.strictEqual(built.assemblerVersion, 10)
       const rebuilt = yield* reader.RebuildContext({ userId, snapshot: JSON.stringify(built) })
       assert.ok(rebuilt._tag === "Rebuilt")
       assert.deepStrictEqual(JSON.parse(rebuilt.snapshot), built)

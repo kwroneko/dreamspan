@@ -883,14 +883,15 @@ const placedNotes = (assembly: Assembly, cards: ReadonlyArray<CardInput>) => {
       return [
         {
           place,
-          capacity: (() => {
+          id: note.entity,
+          baseline: (() => {
             const content =
               note === summary
                 ? note.doc.template
                   ? note.doc.template.replace(/\{\{summary\}\}/gi, () => note.doc.content.trim())
                   : `Summary: ${note.doc.content.trim()}`
                 : note.doc.content.trim()
-            return content.includes("{{") ? Math.max(content.length, loreBudget(assembly) * 4) : content.length
+            return skipped && !content.includes("{{") ? content.length : 0
           })(),
           text: () => {
             // Every intermittent note is a potential writer; never expand a skipped one to find out.
@@ -1093,22 +1094,33 @@ const composeStage = sync("compose", (assembly) => {
     control.push({ role: "system", content: direction, pieces: [piece], kind: "volatile" })
   }
 
+  const previous = assembly.previousHistoryStart
+  const configuration = createHash("sha256")
+    .update(
+      JSON.stringify([
+        doc,
+        assembly.model,
+        mode,
+        [...cast.characters, ...cast.personas].map((c) => [c.entity, c.doc]),
+        [...(assembly.notes ?? []), ...(assembly.skippedNotes ?? [])].toSorted((a, b) =>
+          a.entity.localeCompare(b.entity)
+        ),
+        assembly.lorebooks
+      ])
+    )
+    .digest("hex")
+  const identity = JSON.stringify([need(assembly, "preset").ref, assembly.model?.connectionId, assembly.model?.modelId])
+  const prior = previous?.state
+  const configurationChanged = prior?.configuration !== configuration
+
   // Placement order is independent of expansion order: summaries see main's writes.
-  const notes = pendingNotes.flatMap(({ text, place, capacity }) => {
-    let expanded = text()
+  const notes = pendingNotes.flatMap(({ text, place, id, baseline }) => {
+    const expanded = text()
     if (!expanded) return []
-    if (expanded.text.length > capacity) {
-      assembly.issues.push({
-        kind: "macro_limit",
-        message: "A note expansion exceeded its reserved context allowance and was shortened."
-      })
-      expanded = { ...expanded, text: expanded.text.slice(0, capacity) }
-      assembly.pieces[expanded.piece] = { ...assembly.pieces[expanded.piece]!, text: expanded.text }
-    }
     const note = assembly.pieces[expanded.piece]?.source
     const input = note?.kind === "note" ? assembly.notes?.find((n) => n.entity === note.entity) : undefined
     const author = input && (input.doc.kind === "author_note" || input.entity === need(assembly, "state").authorNote)
-    if (!author) return [{ text: expanded, place, capacity }]
+    if (!author) return [{ text: expanded, place, id, baseline }]
     const top = loreBlock(
       "an-top",
       stLore.filter((e) => e.entry.position === "an_top")
@@ -1117,7 +1129,7 @@ const composeStage = sync("compose", (assembly) => {
       "an-bottom",
       stLore.filter((e) => e.entry.position === "an_bottom")
     )
-    if (!top && !bottom) return [{ text: expanded, place, capacity }]
+    if (!top && !bottom) return [{ text: expanded, place, id, baseline }]
     const parts = [top?.piece, expanded.piece, bottom?.piece].filter((p): p is number => p !== undefined)
     const combined = [top?.text, expanded.text, bottom?.text]
       .filter((text) => text !== undefined)
@@ -1135,7 +1147,8 @@ const composeStage = sync("compose", (assembly) => {
           )
         },
         place,
-        capacity: capacity + (top?.text.length ?? 0) + (bottom?.text.length ?? 0) + 2
+        id,
+        baseline
       }
     ]
   })
@@ -1229,12 +1242,7 @@ const composeStage = sync("compose", (assembly) => {
   }
   const baseCollection = collection
   const actualPlacement = placement(notes)
-  const reservedPlacement = placement(
-    notes.map((note) => ({
-      ...note,
-      text: { ...note.text, text: "x".repeat(note.capacity) }
-    }))
-  )
+  let reservedPlacement = actualPlacement
   const lines = projected.map((p, i) => chatLine(assembly, p, groupNames, scripted[i]!))
   prefill(assembly)
   const newExampleChat = optional("utility.new_example_chat_prompt", utility.new_example_chat_prompt)
@@ -1274,51 +1282,68 @@ const composeStage = sync("compose", (assembly) => {
     const tokens = (messages: ReadonlyArray<StMessage>) => messages.reduce((sum, message) => sum + tokensOf(message), 0)
     return 3 + Math.max(tokens(built.messages), tokens(processed))
   }
-  const previous = assembly.previousHistoryStart
-  const configuration = createHash("sha256")
-    .update(
-      JSON.stringify([
-        doc,
-        assembly.model,
-        mode,
-        [...cast.characters, ...cast.personas].map((c) => [c.entity, c.doc]),
-        [...(assembly.notes ?? []), ...(assembly.skippedNotes ?? [])].toSorted((a, b) =>
-          a.entity.localeCompare(b.entity)
-        ),
-        assembly.lorebooks
-      ])
-    )
-    .digest("hex")
-  const identity = JSON.stringify([need(assembly, "preset").ref, assembly.model?.connectionId, assembly.model?.modelId])
-  const prior = previous?.state
-  const configurationChanged = prior?.configuration !== configuration
-  const fixedCost = cost(candidate(projected.length, Number.POSITIVE_INFINITY, false, true))
+  const fixedCost = cost(candidate(projected.length, Number.POSITIVE_INFINITY, false))
   if (fixedCost > maximum)
     throw new AssemblyFailed({
       reason: "budget",
-      message: "The fixed context and response reserve don't fit the maximum context size."
+      message: "The full notes, fixed context and response reserve don't fit the maximum context size."
     })
+  const oldNotes = configurationChanged ? undefined : prior?.noteBudget
+  const sizes = Object.fromEntries(
+    notes.map((note) => [note.id, Math.max(oldNotes?.sizes[note.id] ?? 0, note.baseline, note.text.text.length)])
+  )
+  const noteBudgetChanged =
+    oldNotes !== undefined && notes.some((note) => note.text.text.length > (oldNotes.sizes[note.id] ?? 0))
+  // Only unused capacity is speculative. Actual note text is always present in both budgets.
+  const allowance = Math.max(
+    0,
+    Math.min(oldNotes?.allowance ?? Math.min(1024, loreBudget(assembly)), maximum - fixedCost)
+  )
+  const reserveNotes = (characters: number) => {
+    let left = characters
+    reservedPlacement = placement(
+      notes.map((note) => {
+        const extra = Math.min(left, sizes[note.id]! - note.text.text.length)
+        left -= extra
+        return { ...note, text: { ...note.text, text: note.text.text + "x".repeat(extra) } }
+      })
+    )
+    return cost(candidate(projected.length, Number.POSITIVE_INFINITY, false, true))
+  }
+  let lowReserve = 0,
+    highReserve = allowance * 4
+  while (lowReserve < highReserve) {
+    const mid = Math.ceil((lowReserve + highReserve) / 2)
+    if (reserveNotes(mid) <= fixedCost + allowance) lowReserve = mid
+    else highReserve = mid - 1
+  }
+  reserveNotes(lowReserve)
+  const budgetCost = (start: number, withExamples = true) => {
+    const actual = cost(candidate(start, Number.POSITIVE_INFINITY, withExamples))
+    const reserved = cost(candidate(start, Number.POSITIVE_INFINITY, withExamples, true))
+    return Math.max(actual, Math.min(reserved, actual + allowance))
+  }
   const admit = () => {
     let low = 0,
       high = examples.length
     while (low < high) {
       const mid = Math.ceil((low + high) / 2)
       admittedExamples = examples.slice(0, mid)
-      if (cost(candidate(projected.length, Number.POSITIVE_INFINITY, true, true)) <= maximum) low = mid
+      if (budgetCost(projected.length) <= maximum) low = mid
       else high = mid - 1
     }
     admittedExamples = examples.slice(0, low)
   }
-  if (configurationChanged) admit()
+  if (configurationChanged || noteBudgetChanged) admit()
   else admittedExamples = examples.slice(0, prior.examples)
-  const minimum = cost(candidate(projected.length, Number.POSITIVE_INFINITY, true, true))
+  const minimum = budgetCost(projected.length)
   let target = Math.max(desiredTarget, minimum)
   const fits = (start: number, budget: number) => {
     const built = candidate(start, Number.POSITIVE_INFINITY, true, true)
     const pieces = new Set(built.messages.flatMap((m) => m.pieces))
     return (
       lines.slice(start).every((line) => !line.content || line.pieces.every((piece) => pieces.has(piece))) &&
-      cost(built) <= budget
+      budgetCost(start) <= budget
     )
   }
   const earliestFit = (end: number) => {
@@ -1348,15 +1373,15 @@ const composeStage = sync("compose", (assembly) => {
       (assembly.historyOmitted ?? 0) > 0)
   if (exceeded) {
     admit()
-    target = Math.max(desiredTarget, cost(candidate(projected.length, Number.POSITIVE_INFINITY, true, true)))
+    target = Math.max(desiredTarget, budgetCost(projected.length))
   }
   const restored = mayRestore ? earliestFit(start) : start
   if (previous && restored < start) {
     start = restored
     budget = target
     assembly.historyMove = "restore"
-  } else if (exceeded) {
-    assembly.historyMove = "maximum"
+  } else if (exceeded || noteBudgetChanged) {
+    assembly.historyMove = exceeded ? "maximum" : "budget"
     start = Math.max(previous ? start : 0, earliestFit(projected.length))
     budget = target
   } else assembly.historyMove = previous ? "unchanged" : "initial"
@@ -1370,6 +1395,7 @@ const composeStage = sync("compose", (assembly) => {
       maximum: contextBudget(assembly),
       target: targetBudget(assembly),
       examples: admittedExamples.length,
+      noteBudget: { sizes, allowance },
       revision: assembly.historyRevision ?? 0
     }
   }

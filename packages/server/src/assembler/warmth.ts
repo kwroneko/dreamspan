@@ -26,7 +26,9 @@ const LAYOUT = "The context's layout changed: the cast, the chat's settings or t
 const budgetReason = (next: ContextSnapshot) =>
   next.historyMove === "maximum"
     ? "The context reached its maximum; older messages left."
-    : "The context budget changed where the history starts."
+    : next.historyMove === "budget"
+      ? "A note grew beyond its reserved allowance; the history budget was recalculated."
+      : "The context budget changed where the history starts."
 
 /** Why a message of the path that was sent reads differently, or isn't sent, now. */
 const messageReason = (
