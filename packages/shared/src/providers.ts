@@ -137,6 +137,8 @@ const capabilityFields = {
   context: Schema.optionalKey(Schema.Int),
   maxOutput: Schema.optionalKey(Schema.Int),
   vision: Schema.optionalKey(Schema.Boolean),
+  maxImages: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+  midChatSystem: Schema.optionalKey(Schema.Boolean),
   reasoning: Schema.optionalKey(Schema.Boolean),
   /** pi thinking level → provider value; null marks a level unsupported. */
   thinkingLevels: Schema.optionalKey(Schema.Record(Schema.String, Schema.NullOr(Schema.String))),
@@ -164,6 +166,8 @@ export interface EffectiveModel {
   readonly context: Resolved<number>
   readonly maxOutput: Resolved<number>
   readonly vision: Resolved<boolean>
+  readonly maxImages: Resolved<number>
+  readonly midChatSystem: Resolved<boolean>
   readonly reasoning: Resolved<boolean>
   readonly thinkingLevels: Resolved<Readonly<Record<string, string | null>> | null>
   readonly tools: Resolved<boolean>
@@ -202,6 +206,8 @@ export const resolveModel = (
     context: pick("context", DEFAULT_CONTEXT),
     maxOutput: pick("maxOutput", DEFAULT_MAX_OUTPUT),
     vision: pick("vision", false),
+    maxImages: pick("maxImages", 4),
+    midChatSystem: pick("midChatSystem", false),
     reasoning: pick("reasoning", false),
     thinkingLevels: pick("thinkingLevels", null),
     tools: pick("tools", false),

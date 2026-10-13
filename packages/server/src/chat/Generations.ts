@@ -1,3 +1,4 @@
+import { Summarizer } from "../lcm/Summarizer.ts"
 // Running generations (DESIGN §3.1): one fiber each, any number at once, several under one
 // slot. Their text streams to the chat's subscribers as deltas and is saved now and then,
 // so a crash keeps most of it. Stopping one keeps its text; a failure becomes a failed
@@ -48,6 +49,7 @@ export class Generations extends Context.Service<
   static readonly layer = Layer.effect(
     Generations,
     Effect.gen(function* () {
+      const summaries = yield* Summarizer
       const writer = yield* Writer
       const reader = yield* Reader
       const hub = yield* ChatHub
@@ -117,6 +119,8 @@ export class Generations extends Context.Service<
               status
             })
           }
+          if (status === "complete")
+            yield* summaries.afterReply({ userId: request.userId, chatId: request.chatId, leafSlotId: request.slotId })
           yield* continueQueue(request.userId, finished)
         })
 

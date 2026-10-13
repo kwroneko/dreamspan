@@ -128,7 +128,18 @@ export const migrations = {
     }>`SELECT (SELECT count(*) FROM summaries) + (SELECT count(*) FROM summary_revisions) + (SELECT count(*) FROM summary_inputs) + (SELECT count(*) FROM summary_parents) + (SELECT count(*) FROM summarization_jobs) AS n`
     if (row!.n !== 0) return yield* Effect.die(new Error("0023_lcm requires empty summary tables"))
     yield* runAll(lcm)
-  })
+  }),
+  "0024_summary_attempts": runAll([
+    `ALTER TABLE summarization_jobs ADD COLUMN clip_tokens INTEGER NOT NULL DEFAULT 6000 CHECK (clip_tokens > 0)`,
+    `ALTER TABLE summarization_jobs ADD COLUMN claim_epoch INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE summarization_jobs ADD COLUMN rollout_id TEXT REFERENCES rollouts(id)`,
+    `CREATE INDEX summarization_jobs_rollout ON summarization_jobs(rollout_id)`,
+    ...["INSERT", "UPDATE OF rollout_id, chat_id"].map(
+      (event, i) =>
+        `CREATE TRIGGER summarization_jobs_rollout_same_chat${i ? "_update" : ""} BEFORE ${event} ON summarization_jobs WHEN NEW.rollout_id IS NOT NULL AND (SELECT chat_id FROM rollouts WHERE id = NEW.rollout_id) IS NOT NEW.chat_id BEGIN SELECT RAISE(ABORT, 'summary rollout must belong to its job chat'); END`
+    ),
+    `CREATE INDEX summarization_jobs_chat_status ON summarization_jobs(chat_id, status, level)`
+  ])
 }
 
 export const Migrations = SqliteMigrator.layer({ loader: SqliteMigrator.fromRecord(migrations) })

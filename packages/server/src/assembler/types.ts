@@ -11,7 +11,7 @@ import type { PresetDoc } from "@rp/shared/docs/preset.ts"
 import { Schema } from "effect"
 
 /** Bump whenever identical inputs would assemble differently. Missing means version 0. */
-export const ASSEMBLER_VERSION = 11
+export const ASSEMBLER_VERSION = 12
 
 export type Role = "system" | "user" | "assistant"
 
@@ -20,7 +20,7 @@ export type Role = "system" | "user" | "assistant"
  * `normal`, a new version of a reply `swipe`, and generating for a character the user
  * plays `impersonate` (DESIGN §2.2).
  */
-export type GenerationType = "normal" | "swipe" | "impersonate"
+export type GenerationType = "normal" | "swipe" | "impersonate" | "quiet"
 
 /** Where a piece of the context came from, for the request inspector (DESIGN §7.4). */
 export type Source =
@@ -190,6 +190,14 @@ export interface HistoryStart {
 export interface ContextSnapshot {
   readonly historyStart?: HistoryStart
   readonly historyMove?: "initial" | "maximum" | "budget" | "restore" | "unchanged"
+  readonly historyBudget?: number
+  readonly summaryJob?: {
+    readonly id: string
+    readonly clipTokens: number
+    readonly inputs: ReadonlyArray<import("@rp/shared/lcm.ts").Summary["inputs"][number]>
+    readonly tail: string
+    readonly style: "direct" | "tool"
+  }
   readonly lcm?: {
     readonly cursor: string | null
     readonly selected: ReadonlyArray<{
@@ -410,6 +418,7 @@ export interface ModelInput {
   readonly mapping?: {
     readonly reasoning: boolean
     readonly supportsDeveloperRole: boolean
+    readonly midChatSystem?: boolean
     readonly revision: string
   }
   readonly cacheTtlS?: number | null

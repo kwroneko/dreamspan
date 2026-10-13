@@ -113,6 +113,9 @@ export class AssemblySources extends Context.Service<
 
 /** What a caller asks for, beyond what the sources say. */
 export interface AssemblyRequest {
+  readonly summarizing?: boolean
+  readonly summaryClipTokens?: number
+  readonly summaryMaxTokens?: number
   readonly now: number
   readonly timeZone: string
   /** Values drawn by an earlier assembly of this context, per piece: rebuilds it identically. */
@@ -251,6 +254,7 @@ export const assemble = (stages: StageRegistry, request: AssemblyRequest) =>
       schema: 1,
       historyStart: { ...historyStart, ...(historyStart.state ? { state: { ...historyStart.state, revision } } : {}) },
       historyMove: need(assembly, "historyMove"),
+      ...(assembly.lcm ? { historyBudget: need(assembly, "composition").historyBudget } : {}),
       assemblerVersion: ASSEMBLER_VERSION,
       inputs: {
         chatId: target.chatId,

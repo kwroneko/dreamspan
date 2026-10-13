@@ -169,7 +169,7 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
 
     InterruptRollouts: () =>
       sql`UPDATE rollouts SET status = 'interrupted', updated_at = ${Date.now()}
-          WHERE status IN ('created', 'running') RETURNING id`.pipe(
+          WHERE status IN ('created', 'running') AND kind = 'generation' RETURNING id`.pipe(
         Effect.map((rows) => ({ interrupted: rows.length })),
         transaction(sql, "InterruptRollouts")
       ),
@@ -185,6 +185,7 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
         }
         yield* putSetting(userId, DEFAULT_MODEL, model)
         yield* putSetting(userId, DEFAULT_PRESET, preset)
+        if (defaults.lcm !== undefined) yield* putSetting(userId, "generation.lcm", defaults.lcm)
         return yield* readDefaults(sql, userId)
       }).pipe(transaction(sql, "SetGenerationDefaults"))
   } satisfies Partial<Parameters<typeof WriteOps.of>[0]>

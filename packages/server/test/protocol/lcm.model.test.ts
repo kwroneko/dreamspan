@@ -1,3 +1,6 @@
+import { uuidv7 } from "@rp/shared/id.ts"
+import type { SummaryJob } from "../../src/db/lcmJobs.ts"
+import { Summarizer } from "../../src/lcm/Summarizer.ts"
 import { assert, it } from "@effect/vitest"
 import { NewVersion, type SlotId, type VersionId } from "@rp/shared/chat.ts"
 import type { Summary } from "@rp/shared/lcm.ts"
@@ -28,7 +31,11 @@ const kinds = [
   "condense",
   "edit-summary",
   "select-summary",
-  "settings"
+  "settings",
+  "enqueue",
+  "run-job",
+  "fail-job",
+  "release-job"
 ] as const
 interface Step {
   readonly kind: (typeof kinds)[number]
@@ -54,6 +61,7 @@ interface Version {
   amends: number
 }
 interface Artifact {
+  readonly batchId: string | null
   readonly id: Summary["id"]
   readonly first: SlotId
   readonly last: SlotId
@@ -134,6 +142,7 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
     const nodes = new Map<SlotId, Node>(),
       versions = new Map<VersionId, Version>(),
       artifacts = new Map<Summary["id"], Artifact>()
+    const jobs = new Map<string, SummaryJob>()
     const snapshots: Array<string> = []
     let leaf: SlotId | null = null,
       enabled = true
@@ -209,6 +218,7 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
       const text = JSON.stringify(children.length ? lineage.map((s) => [s.summaryId, s.revisionId]) : inputs)
       assert.strictEqual(summary.content, text)
       artifacts.set(summary.id, {
+        batchId: summary.batchId,
         id: summary.id,
         first: children[0]?.first ?? inputs[0]!.slotId,
         last: children.at(-1)?.last ?? inputs.at(-1)!.slotId,
@@ -226,7 +236,14 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
       let at = history.length - 1
       while (at >= 0) {
         const options = [...artifacts.values()]
-          .filter((s) => onPath.has(s.last) && s.last === history[at]!.id)
+          .filter(
+            (s) =>
+              onPath.has(s.last) &&
+              s.last === history[at]!.id &&
+              ![...jobs.values()].some(
+                (j) => j.batchId === s.batchId && s.batchId !== null && ["pending", "processing"].includes(j.status)
+              )
+          )
           .sort((a, b) => Number(fresh(b)) - Number(fresh(a)) || b.level - a.level || b.id.localeCompare(a.id))
         const chosen = options[0]
         if (chosen) {
@@ -452,7 +469,114 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
               versionId: effective(n),
               amendCount: effective(n) === null ? 0 : versions.get(n.selected)!.amends
             }))
-            remember(await call(completeFixture(config.dataDir, writer, user.id, chat.id, inputs)), inputs, [])
+            if (
+              ![...jobs.values()].some(
+                (j) =>
+                  ["pending", "processing"].includes(j.status) &&
+                  j.firstSlotId === inputs[0]!.slotId &&
+                  j.lastSlotId === inputs.at(-1)!.slotId
+              )
+            )
+              remember(await call(completeFixture(config.dataDir, writer, user.id, chat.id, inputs)), inputs, [])
+          }
+        } else if (step.kind === "enqueue" && leaf && enabled) {
+          const history = path(leaf)
+          if (history.length > 2 && ![...jobs.values()].some((j) => ["pending", "processing"].includes(j.status))) {
+            const split = Math.max(1, Math.floor(history.length / 3))
+            const chunks = [history.slice(0, split), history.slice(split, split * 2)].map((chunk) => ({
+              target: 600,
+              inputs: chunk.map((n) => ({
+                slotId: n.id,
+                versionId: effective(n),
+                amendCount: effective(n) === null ? 0 : versions.get(n.selected)!.amends
+              }))
+            }))
+            const added = await call(
+              writer.EnqueueSummaries({
+                userId: user.id,
+                chatId: chat.id,
+                leafSlotId: leaf,
+                chunks,
+                requestClass: "idle"
+              })
+            )
+            for (const job of added) jobs.set(job.id, job)
+            assert.lengthOf(
+              await call(
+                writer.EnqueueSummaries({
+                  userId: user.id,
+                  chatId: chat.id,
+                  leafSlotId: leaf,
+                  chunks,
+                  requestClass: "idle"
+                })
+              ),
+              0,
+              "I7: only one live job per chain"
+            )
+          }
+        } else if (["run-job", "fail-job", "release-job"].includes(step.kind)) {
+          const job = await call(writer.ClaimSummaryJob({ userId: user.id }))
+          if (job) {
+            jobs.set(job.id, job)
+            assert.isNull(await call(writer.ClaimSummaryJob({ userId: user.id })), "I7: one L1 per chat")
+            const earlier = [...jobs.values()].filter(
+              (j) => j.status === "pending" && nodes.get(j.firstSlotId)!.depth < nodes.get(job.firstSlotId)!.depth
+            )
+            assert.lengthOf(earlier, 0, "I7: oldest path segment first")
+            if (step.kind === "release-job") {
+              await call(writer.ReleaseSummaryJob({ userId: user.id, jobId: job.id, attempt: job.epoch }))
+              jobs.set(job.id, { ...job, status: "pending", attempts: job.attempts - 1 })
+            } else {
+              const assembly = await call(
+                Effect.exit(reader.AssembleSummary({ userId: user.id, jobId: job.id, attempt: job.epoch }))
+              )
+              if (step.kind === "fail-job" || Exit.isFailure(assembly)) {
+                await call(
+                  writer.FailSummaryAttempt({
+                    userId: user.id,
+                    jobId: job.id,
+                    attempt: job.epoch,
+                    rolloutId: null,
+                    error: "Synthetic failure"
+                  })
+                )
+                jobs.set(job.id, { ...job, status: job.attempts > 2 ? "failed" : "pending" })
+              } else {
+                const snapshot = JSON.parse(assembly.value.snapshot) as ContextSnapshot
+                const chain = path(job.lastSlotId).slice(nodes.get(job.firstSlotId)!.depth)
+                const expected = chain.map((n) => ({
+                  slotId: n.id,
+                  versionId: effective(n),
+                  amendCount: effective(n) === null ? 0 : versions.get(n.selected)!.amends
+                }))
+                assert.deepStrictEqual(snapshot.summaryJob!.inputs, expected, "I7: exact request versions")
+                const rolloutId = uuidv7()
+                await call(
+                  writer.StartSummaryRollout({
+                    userId: user.id,
+                    jobId: job.id,
+                    attempt: job.epoch,
+                    rolloutId,
+                    snapshot: assembly.value.snapshot
+                  })
+                )
+                const summary = await call(
+                  writer.CompleteSummary({
+                    userId: user.id,
+                    jobId: job.id,
+                    rolloutId,
+                    content: JSON.stringify(expected),
+                    status: "complete",
+                    inputs: expected,
+                    children: []
+                  })
+                )
+                remember(summary, expected, [])
+                jobs.set(job.id, { ...job, status: "complete" })
+                snapshots.push(assembly.value.snapshot)
+              }
+            }
           }
         } else if (step.kind === "condense") {
           const pairs: Array<ReadonlyArray<Artifact>> = []
@@ -537,7 +661,7 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
     }
     const exit = yield* Effect.tryPromise(run).pipe(Effect.exit)
     return { failure: Exit.isFailure(exit) ? Cause.pretty(exit.cause) : null, trace }
-  }).pipe(Effect.provide(serverLayer(config)))
+  }).pipe(Effect.provide(serverLayer(config, undefined, Summarizer.none)))
 }
 
 const shrink = (steps: ReadonlyArray<Step>) =>

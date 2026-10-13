@@ -1,3 +1,4 @@
+import { LcmSettings } from "./lcmSettings.ts"
 // Chat state on the graph (DESIGN §3.4, DATA-MODEL §5). Every change to chat state is
 // an event at a position; the state at a slot is the fold of the events on the path
 // to it. The fold is a pure function so the server and the client agree on it.
@@ -15,7 +16,7 @@ const event = <K extends string, V extends Schema.Top>(key: K, value: V) =>
  * use the id schemas, never a plain string, so `stateKeyProblems` can find them.
  */
 export const StateEventData = Schema.Union([
-  event("lcm.settings", Schema.Struct({ enabled: Schema.Boolean, tail: Schema.optionalKey(Schema.String) })),
+  event("lcm.settings", LcmSettings),
   event("participant.join", Schema.Struct({ entity: EntityId })),
   event("participant.leave", Schema.Struct({ entity: EntityId })),
   event("presence.set", Schema.Struct({ entity: EntityId, present: Schema.Boolean })),
@@ -211,7 +212,7 @@ interface Binding {
 }
 
 export interface ChatState {
-  readonly lcm: { readonly enabled: boolean; readonly tail?: string } | null
+  readonly lcm: typeof LcmSettings.Type | null
   /** In join order. */
   readonly participants: ReadonlyArray<string>
   readonly absent: ReadonlyArray<string>

@@ -1636,6 +1636,55 @@ const storage: Record<
   string,
   (reader: Reader["Service"], actor: Party, owner: Party, writer: Writer["Service"]) => Effect.Effect<void, unknown>
 > = {
+  EnqueueSummaries: (_reader, actor, owner, writer) =>
+    refused(
+      writer.EnqueueSummaries({
+        userId: actor.user.id,
+        chatId: owner.chat.chatId,
+        leafSlotId: owner.chat.slotId,
+        chunks: [],
+        requestClass: "idle"
+      }),
+      "NotFound"
+    ),
+  PlanSummaries: (reader, actor, owner) =>
+    refused(
+      reader.PlanSummaries({ userId: actor.user.id, chatId: owner.chat.chatId, leafSlotId: owner.chat.slotId }),
+      "NotFound"
+    ),
+  AssembleSummary: (reader, actor, owner) =>
+    refused(reader.AssembleSummary({ userId: actor.user.id, jobId: owner.summaryJob.jobId, attempt: 0 }), "NotFound"),
+  StartSummaryRollout: (_reader, actor, owner, writer) =>
+    refused(
+      writer.StartSummaryRollout({
+        userId: actor.user.id,
+        jobId: owner.summaryJob.jobId,
+        attempt: 0,
+        rolloutId: owner.summaryJob.rolloutId,
+        snapshot: "{}"
+      }),
+      "NotFound"
+    ),
+  FailSummaryAttempt: (_reader, actor, owner, writer) =>
+    refused(
+      writer.FailSummaryAttempt({
+        userId: actor.user.id,
+        jobId: owner.summaryJob.jobId,
+        attempt: 0,
+        rolloutId: owner.summaryJob.rolloutId,
+        error: "planted"
+      }),
+      "NotFound"
+    ),
+  ReleaseSummaryJob: (_reader, actor, owner, writer) =>
+    refused(writer.ReleaseSummaryJob({ userId: actor.user.id, jobId: owner.summaryJob.jobId, attempt: 0 }), "NotFound"),
+  EscalateSummaryJob: (_reader, actor, owner, writer) =>
+    refused(writer.EscalateSummaryJob({ userId: actor.user.id, jobId: owner.summaryJob.jobId }), "NotFound"),
+  ClaimSummaryJob: (_reader, actor, _owner, writer) =>
+    Effect.gen(function* () {
+      const job = yield* writer.ClaimSummaryJob({ userId: actor.user.id })
+      assert.isTrue(job === null || job.userId === actor.user.id)
+    }),
   CompleteSummary: (_reader, actor, owner, writer) =>
     refused(
       writer.CompleteSummary({

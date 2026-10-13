@@ -73,6 +73,13 @@ const sync = (id: string, run: (assembly: Assembly) => void): AssemblerStage => 
 /** How many messages one read of the path takes. */
 const HISTORY_WINDOW = 200
 
+const clipForSummary = (assembly: Assembly, text: string) => {
+  const cap = assembly.request.summaryClipTokens
+  if (cap === undefined || text.length <= cap * 4) return text
+  const marker = "\n[Message clipped for summarization.]"
+  return text.slice(0, Math.max(0, cap * 4 - marker.length)) + marker
+}
+
 const hasSummary = (assembly: Assembly, piece: number): boolean =>
   assembly.pieces[piece]?.source.kind === "summary" ||
   (assembly.pieces[piece]?.parts?.some((p) => hasSummary(assembly, p)) ?? false)
@@ -151,6 +158,7 @@ const castStage: AssemblerStage = {
     Effect.gen(function* () {
       const target = need(assembly, "target")
       assembly.cast = yield* castOf(need(assembly, "state"), target.speaker, target.ordinal)
+      if (assembly.request.summarizing) assembly.cast = { ...assembly.cast, type: "quiet" }
       return assembly
     })
 }
@@ -161,7 +169,12 @@ const modelStage: AssemblerStage = {
     Effect.gen(function* () {
       const sources = yield* AssemblySources
       const bindings = need(assembly, "state").modelBindings
-      assembly.model = yield* sources.model(bindings["narrator"] ?? bindings[""] ?? null)
+      assembly.model = yield* sources.model(
+        (assembly.request.summarizing ? bindings["summarizer"] : undefined) ??
+          bindings["narrator"] ??
+          bindings[""] ??
+          null
+      )
       return assembly
     })
 }
@@ -173,10 +186,18 @@ const presetStage: AssemblerStage = {
       const sources = yield* AssemblySources
       const bindings = need(assembly, "state").presetBindings
       assembly.preset = yield* sources.preset({
-        role: bindings["narrator"] ?? null,
+        role: (assembly.request.summarizing ? bindings["summarizer"] : undefined) ?? bindings["narrator"] ?? null,
         chat: bindings[""] ?? null,
         connection: assembly.model?.presetOverride ?? null
       })
+      if (assembly.request.summaryMaxTokens !== undefined)
+        assembly.preset = {
+          ...assembly.preset,
+          doc: {
+            ...assembly.preset.doc,
+            samplers: { ...assembly.preset.doc.samplers, openai_max_tokens: assembly.request.summaryMaxTokens }
+          }
+        }
       return assembly
     })
 }
@@ -398,8 +419,9 @@ const historyStage: AssemblerStage = {
           verbatim.map(({ entry, depth }) => ({ text: entry.content, placement: placementOf(entry, cast), depth }))
         )
         verbatim.forEach(({ entry, depth }, i) => {
-          scripted.set(entry.versionId, { ...results[i]!, depth })
-          tokens += tokensOf({ content: results[i]!.text })
+          const result = { ...results[i]!, text: clipForSummary(assembly, results[i]!.text) }
+          scripted.set(entry.versionId, { ...result, depth })
+          tokens += tokensOf({ content: result.text })
         })
         leaf = window.older
       }
@@ -675,6 +697,7 @@ const override = (
  * sent where the model can be prefilled, and otherwise dropped and reported (DESIGN §1.2).
  */
 const prefill = (assembly: Assembly) => {
+  if (assembly.request.summarizing) return
   const doc = need(assembly, "preset").doc
   const type = need(assembly, "cast").type
   const raw = type === "impersonate" ? doc.prefill.impersonation : doc.prefill.assistant
@@ -1046,7 +1069,7 @@ const composeStage = sync("compose", (assembly) => {
       const block = cardBlock(assembly, card, cardText)
       control.push({ role: "system", content: block.text, pieces: [block.piece], kind: "volatile" })
     }
-    const said = directive(assembly, presetText)
+    const said = assembly.request.summarizing ? "" : directive(assembly, presetText)
     if (said) control.push({ role: "system", content: said.text, pieces: [said.piece], kind: "volatile" })
   }
 
@@ -1137,7 +1160,7 @@ const composeStage = sync("compose", (assembly) => {
     control.unshift({ role: prompt.role, content: prompt.content, pieces: [impersonate.piece], kind: "volatile" })
   }
   const direction = need(assembly, "target").direction
-  if (direction) {
+  if (direction && !assembly.request.summarizing) {
     const piece = env.verbatim(
       "direction",
       { kind: "direction", version: need(assembly, "target").versionId },
@@ -1232,7 +1255,7 @@ const composeStage = sync("compose", (assembly) => {
       depth: projected.length - 1 - i
     }))
   )
-  rest.forEach((index, i) => (scripted[index] = ran[i]))
+  rest.forEach((index, i) => (scripted[index] = { ...ran[i]!, text: clipForSummary(assembly, ran[i]!.text) }))
   // Notes in-chat are extension prompts at their depth; the others go beside the main prompt,
   // one after another (injectToMain).
   // Lore above history can change per turn, even when this turn has no activated entry.

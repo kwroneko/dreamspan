@@ -4,7 +4,13 @@ import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import { readSummary } from "./lcmReads.ts"
 
-export const selectSummaryLayer = (sql: SqlClient.SqlClient, userId: UserId, chatId: string, leaf: string | null) =>
+export const selectSummaryLayer = (
+  sql: SqlClient.SqlClient,
+  userId: UserId,
+  chatId: string,
+  leaf: string | null,
+  partialBatch = false
+) =>
   Effect.gen(function* () {
     const [any] = yield* sql<{
       present: number
@@ -15,7 +21,7 @@ export const selectSummaryLayer = (sql: SqlClient.SqlClient, userId: UserId, cha
       UNION ALL SELECT s.parent_slot_id FROM slots s JOIN path p ON p.id = s.id WHERE s.parent_slot_id IS NOT NULL
     ) SELECT s.id FROM path JOIN summaries s INDEXED BY summaries_last_slot ON s.last_slot_id = path.id
       WHERE s.chat_id = ${chatId} AND s.status IN ('complete', 'truncated')
-        AND (s.batch_id IS NULL OR NOT EXISTS (SELECT 1 FROM summarization_jobs j INDEXED BY summarization_jobs_batch
+        AND (${partialBatch ? 1 : 0} OR s.batch_id IS NULL OR NOT EXISTS (SELECT 1 FROM summarization_jobs j INDEXED BY summarization_jobs_batch
           WHERE j.chat_id = s.chat_id AND j.batch_id = s.batch_id AND j.status IN ('pending', 'processing')))`
 
     const memo = new Map<string, Summary>()

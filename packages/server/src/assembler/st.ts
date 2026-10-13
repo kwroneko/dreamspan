@@ -222,6 +222,7 @@ export const exampleBlocks = (examples: string) => {
 }
 
 export interface Composition {
+  readonly historyBudget: number
   readonly messages: ReadonlyArray<StMessage>
   readonly historySent: number
   readonly historyTotal: number
@@ -332,6 +333,7 @@ export const compose = (input: {
 
   if (input.stableExamples) sendExamples()
 
+  const historyBudget = budget
   // The chat history, newest first, while the budget lasts.
   let historySent = 0
   if (has("chatHistory")) {
@@ -377,6 +379,7 @@ export const compose = (input: {
 
   const messages = [...slots.entries()].sort(([a], [b]) => a - b).flatMap(([, list]) => list)
   return {
+    historyBudget,
     messages: [...messages, ...control],
     historySent,
     historyTotal: input.chat.filter((line) => line.kind === "history").length,

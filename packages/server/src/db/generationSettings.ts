@@ -37,8 +37,10 @@ export const readDefaults = (sql: SqlClient.SqlClient, userId: UserId) =>
       typeof model.model === "string" &&
       (yield* ownedModel(sql, userId, model.connection, model.model))
     const presetOk = typeof preset === "string" && (yield* ownedPreset(sql, userId, preset))
+    const lcm = (yield* setting(sql, userId, "generation.lcm")) as GenerationDefaults["lcm"] | null
     return new GenerationDefaults({
       model: modelOk ? { connection: model!.connection as ConnectionId, model: model!.model as ModelId } : null,
+      ...(lcm ? { lcm } : {}),
       preset: presetOk ? (preset as RefId) : null
     })
   })

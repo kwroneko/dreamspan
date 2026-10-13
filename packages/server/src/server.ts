@@ -1,3 +1,4 @@
+import { Summarizer } from "./lcm/Summarizer.ts"
 import { makeLcmHandlers } from "./api/lcm.ts"
 // Composition of the HTTP server: the RPC endpoint over a WebSocket, login and logout,
 // a health route, and the client build served as a single-page app.
@@ -400,7 +401,12 @@ const FormatsLive = Layer.unwrap(
  * AppConfig, with port 0, and read the port the kernel picked from the HttpServer this exposes.
  */
 export const serverWith = <E>(
-  generator: Layer.Layer<Generator, E, AppConfig | Database.Reader | Database.Writer | Providers.Providers>
+  generator: Layer.Layer<
+    Generator,
+    E,
+    AppConfig | Database.Reader | Database.Writer | Providers.Providers | Summarizer
+  >,
+  summaries = Summarizer.layer
 ) =>
   HttpRouter.serve(
     Layer.mergeAll(
@@ -418,7 +424,8 @@ export const serverWith = <E>(
     Layer.provide(
       Layer.merge(Generations.layer, CacheWarmth.layer).pipe(
         Layer.provideMerge(ChatHub.layer),
-        Layer.provideMerge(generator)
+        Layer.provideMerge(generator),
+        Layer.provideMerge(summaries)
       )
     ),
     Layer.provideMerge(Notices.layer),

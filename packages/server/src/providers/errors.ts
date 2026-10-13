@@ -50,7 +50,7 @@ export const classify = (
   const text = message.errorMessage ?? message.rawStopReason ?? "request failed"
   const extra = { status: seen.status, retryAfterMs: seen.retryAfterMs, category: seen.category, afterTokens }
   if (message.stopReason === "aborted") return providerError("aborted", text, extra)
-  if (message.rawStopReason && REFUSAL_STOPS.has(message.rawStopReason)) {
+  if (seen.category || (message.rawStopReason && REFUSAL_STOPS.has(message.rawStopReason))) {
     return providerError("refused", text, extra)
   }
   // A completed generation is never turned into a failure after the fact. pi-ai can also

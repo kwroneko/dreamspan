@@ -1,3 +1,4 @@
+import type { ContextSnapshot } from "../assembler/types.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { Effect } from "effect"
@@ -24,6 +25,7 @@ export const makeLcmWriteHandlers = (bin: Bin) =>
       CompleteSummary: ({ userId, jobId, rolloutId, content, status, inputs, children }) =>
         Effect.gen(function* () {
           const [job] = yield* sql<{
+            rollout_id: string | null
             chat_id: string
             level: number
             first_slot_id: string
@@ -38,6 +40,20 @@ export const makeLcmWriteHandlers = (bin: Bin) =>
           const [rollout] = yield* sql`SELECT id FROM rollouts WHERE id = ${rolloutId} AND chat_id = ${job.chat_id}
         AND status = 'running' AND kind = ${job.level === 1 ? "summarize" : "condense"}`
           if (!rollout) return yield* new NotFound({ entity: "summary rollout", id: rolloutId })
+          if (job.rollout_id !== null) {
+            const [payload] = yield* sql<{
+              context_snapshot_json: string
+            }>`SELECT context_snapshot_json FROM rollout_payloads WHERE rollout_id = ${rolloutId}`
+            const frozen = payload
+              ? (JSON.parse(payload.context_snapshot_json) as ContextSnapshot).summaryJob
+              : undefined
+            if (
+              job.rollout_id !== rolloutId ||
+              frozen?.id !== jobId ||
+              JSON.stringify(frozen.inputs) !== JSON.stringify(inputs)
+            )
+              return yield* refused("Completion must use the inputs frozen for this job's active request")
+          }
           const chain = yield* sql<{
             id: string
             parent_slot_id: string | null

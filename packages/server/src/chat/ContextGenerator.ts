@@ -1,3 +1,4 @@
+import { Summarizer } from "../lcm/Summarizer.ts"
 // The real generator: assembly, rollout, provider stream (ARCHITECTURE §15, "Generation").
 import { uuidv7 } from "@rp/shared/id.ts"
 import type { SlotId, VersionId } from "@rp/shared/chat.ts"
@@ -20,6 +21,7 @@ const serverFailure = (operation: string) => (error: unknown) =>
 export const layer = Layer.effect(
   Generator,
   Effect.gen(function* () {
+    const summaries = yield* Summarizer
     const reader = yield* Reader
     const writer = yield* Writer
     const providers = yield* Providers
@@ -33,8 +35,22 @@ export const layer = Layer.effect(
       Stream.unwrap(
         Effect.gen(function* () {
           const { userId, chatId, slotId, versionId } = request
+          const slot = yield* reader
+            .GetSlot({ userId, slotId })
+            .pipe(Effect.catchTag(["StorageError", "RpcClientError", "NotFound"], serverFailure("GetSlot")))
+          const parent = slot.entry.parentSlotId
+          const partialBatch = parent ? yield* summaries.beforeReply({ userId, chatId, leafSlotId: parent }) : false
           const assembled = yield* reader
-            .AssembleContext({ userId, chatId, slotId, versionId, now: Date.now(), timeZone: "UTC", frozen: null })
+            .AssembleContext({
+              userId,
+              chatId,
+              slotId,
+              versionId,
+              now: Date.now(),
+              timeZone: "UTC",
+              frozen: null,
+              partialBatch
+            })
             .pipe(
               Effect.catchTag("AssemblyFailed", (error) =>
                 Effect.fail(new GenerationFailed({ class: error.reason, message: error.message }))

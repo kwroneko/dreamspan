@@ -1,3 +1,4 @@
+import { summaryTail } from "../lcm/request.ts"
 // Context assembly and rebuilding in the reader workers (ARCHITECTURE §15).
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
@@ -24,9 +25,15 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   const assembler = yield* makeAssembler
   const handlers = {
-    AssembleContext: ({ userId, chatId, slotId, versionId, now, timeZone, frozen }) =>
+    AssembleContext: ({ userId, chatId, slotId, versionId, now, timeZone, frozen, partialBatch }) =>
       Effect.suspend(() => {
-        const sources = sqlSources(sql, { userId, chatId, slotId, versionId })
+        const sources = sqlSources(sql, {
+          userId,
+          chatId,
+          slotId,
+          versionId,
+          ...(partialBatch === undefined ? {} : { partialBatch })
+        })
         return assembler.assemble({ now, timeZone, frozen: frozen ?? {}, random: Math.random }).pipe(
           Effect.provide(sources.layer),
           Effect.flatMap((built) =>
@@ -75,13 +82,26 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
             timeZone: inputs.timeZone,
             frozen: taken.frozen,
             random: Math.random,
+            ...(taken.summaryJob
+              ? {
+                  summarizing: true,
+                  summaryClipTokens: taken.summaryJob.clipTokens,
+                  summaryMaxTokens: taken.request.samplers.max_tokens
+                }
+              : {}),
             ...(taken.loreFallback ? { loreFallback: taken.loreFallback } : {})
           })
           .pipe(Effect.provide(sources.layer))
         return {
           _tag: "Rebuilt" as const,
           snapshot: JSON.stringify({
-            ...built,
+            ...(taken.summaryJob
+              ? summaryTail({
+                  ...built,
+                  summaryJob: taken.summaryJob,
+                  request: { ...built.request, samplers: taken.request.samplers }
+                })
+              : built),
             sources: sources.pins(),
             ...(taken.wire ? { wire: taken.wire } : {})
           })

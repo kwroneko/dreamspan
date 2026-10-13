@@ -114,7 +114,7 @@ export class RunContext extends Schema.Class<RunContext>("RunContext")({
   builtAt: Schema.Number,
   /** The rollout's status: running, completed, stopped, failed, interrupted. */
   status: Schema.String,
-  type: Schema.Literals(["normal", "swipe", "impersonate"]),
+  type: Schema.Literals(["normal", "swipe", "impersonate", "quiet"]),
   mode: Schema.Literals(["st", "layouts"]),
   capture: Schema.Literals(["captured", "unavailable"]),
   ...ContextDisplay.fields,

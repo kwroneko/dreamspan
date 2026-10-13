@@ -1,3 +1,4 @@
+import { SummaryJob, SummaryChunk, SummaryPlan } from "./lcmJobs.ts"
 import { Summary, SummaryId, SummaryRevisionId, SummaryInput, SummaryChild, SummaryChange } from "@rp/shared/lcm.ts"
 // Storage operations, executed inside the database worker threads (ARCHITECTURE.md §3).
 // Each write operation runs as one synchronous transaction inside the writer worker,
@@ -287,6 +288,55 @@ const StChatRecord = Schema.Struct({
 })
 
 export class WriteOps extends RpcGroup.make(
+  Rpc.make("EnqueueSummaries", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      leafSlotId: SlotId,
+      chunks: Schema.Array(SummaryChunk),
+      requestClass: SummaryJob.fields.requestClass
+    },
+    success: Schema.Array(SummaryJob),
+    error: Schema.Union([StorageError, NotFound])
+  }),
+  Rpc.make("ClaimSummaryJob", {
+    payload: { userId: UserId },
+    success: Schema.NullOr(SummaryJob),
+    error: StorageError
+  }),
+  Rpc.make("StartSummaryRollout", {
+    payload: {
+      userId: UserId,
+      jobId: Schema.String,
+      attempt: Schema.Int,
+      rolloutId: Schema.String,
+      snapshot: Schema.String
+    },
+    error: Schema.Union([StorageError, NotFound])
+  }),
+  Rpc.make("FailSummaryAttempt", {
+    payload: {
+      userId: UserId,
+      jobId: Schema.String,
+      attempt: Schema.Int,
+      rolloutId: Schema.NullOr(Schema.String),
+      draft: Schema.optionalKey(Schema.NullOr(Schema.String)),
+      error: Schema.String
+    },
+    error: Schema.Union([StorageError, NotFound])
+  }),
+  Rpc.make("ReleaseSummaryJob", {
+    payload: { userId: UserId, jobId: Schema.String, attempt: Schema.Int },
+    error: Schema.Union([StorageError, NotFound])
+  }),
+  Rpc.make("ResetSummaryJobs", {
+    success: Schema.Array(Schema.Struct({ userId: UserId, chatId: ChatId, leafSlotId: SlotId })),
+    error: StorageError
+  }),
+  Rpc.make("EscalateSummaryJob", {
+    payload: { userId: UserId, jobId: Schema.String },
+    error: Schema.Union([StorageError, NotFound])
+  }),
   Rpc.make("CompleteSummary", {
     payload: {
       userId: UserId,
@@ -1650,8 +1700,19 @@ export class ReadOps extends RpcGroup.make(
    * (`Generation` in assembler/types.ts), with what its sources read, pinned. `frozen` passes
    * back the values random and time macros drew.
    */
+  Rpc.make("PlanSummaries", {
+    payload: { userId: UserId, chatId: ChatId, leafSlotId: SlotId },
+    success: SummaryPlan,
+    error: Schema.Union([StorageError, NotFound, AssemblyFailed])
+  }),
+  Rpc.make("AssembleSummary", {
+    payload: { userId: UserId, jobId: Schema.String, attempt: Schema.Int },
+    success: Schema.Struct({ snapshot: Schema.String, generation: Schema.String }),
+    error: Schema.Union([StorageError, NotFound, AssemblyFailed])
+  }),
   Rpc.make("AssembleContext", {
     payload: {
+      partialBatch: Schema.optionalKey(Schema.Boolean),
       userId: UserId,
       chatId: ChatId,
       slotId: SlotId,

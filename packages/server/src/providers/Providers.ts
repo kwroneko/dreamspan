@@ -1,4 +1,5 @@
 import { documentedCachePolicy } from "./cachePolicy.ts"
+import { limitImages } from "./images.ts"
 // The provider layer (spec/PROVIDERS.md): one streaming entry point over pi-ai for the
 // assembler and, later, the agent loop, plus the connection operations that need the
 // server secret or the network (encrypting secrets, fetching model lists, testing).
@@ -887,7 +888,13 @@ export const layer = (options: ProvidersOptions = {}) =>
         const use = Effect.gen(function* () {
           offer({ type: "attempt", attempt: number, requestId })
           const transcript = yield* Effect.try({
-            try: () => normalizeContext(request.context),
+            try: () =>
+              normalizeContext(
+                limitImages(
+                  request.context,
+                  resolveModel(model.key, model.upstream, model.overrides, prepared.connection.compat).maxImages.value
+                )
+              ),
             catch: (error) => providerError("bad_request", `the request context is invalid: ${String(error)}`)
           })
           const onRoute = (description: string) => offer({ type: "route", description })
@@ -998,10 +1005,12 @@ export const layer = (options: ProvidersOptions = {}) =>
                   const initial =
                     overrides === undefined ? (payload as Record<string, unknown>) : merged(payload, overrides)
                   if (sources) markWireSources(initial, sources)
-                  const final = transforms.reduce(
+                  const transformed = transforms.reduce(
                     (current, t) => t.transform(current, { target, messages: request.context.messages, breakpoints }),
                     initial
                   )
+                  const effective = resolveModel(model.key, model.upstream, model.overrides, prepared.connection.compat)
+                  const final = limitImages(transformed, effective.maxImages.value)
                   const policy = documentedCachePolicy(
                     { provider: prepared.kind.piProvider, api: prepared.api, model: model.key },
                     final

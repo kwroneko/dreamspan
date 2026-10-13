@@ -93,9 +93,14 @@ interface HistoryRow {
  * The version being generated, or `next`: a reply not yet asked for, at the end of the
  * requested path (active by default), the request the cache-warmth estimate compares (DESIGN §5.5).
  */
-type Settings =
+type Settings = {
+  readonly cut?: string
+  readonly summaryBefore?: { readonly slot: string | null; readonly depth: number }
+  readonly partialBatch?: boolean
+} & (
   | { readonly userId: UserId; readonly chatId: ChatId; readonly slotId: string; readonly versionId: string }
   | { readonly userId: UserId; readonly chatId: ChatId; readonly next: true; readonly leafSlotId?: string | null }
+)
 
 /** A snapshot to read again: its pins and its inputs. */
 interface Replay {
@@ -245,7 +250,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
       Effect.tap(pinTarget)
     )
 
-  const viewedLeaf = "next" in settings ? (settings.leafSlotId ?? null) : null
+  const viewedLeaf = "next" in settings ? (settings.cut ?? settings.leafSlotId ?? null) : null
   const nextTarget = sql<{ leaf: string | null; depth: number | null }>`
     SELECT s.id AS leaf, s.depth FROM chats c LEFT JOIN slots s
       ON s.id = coalesce(${viewedLeaf}, c.active_leaf_slot_id) AND s.chat_id = c.id
@@ -271,7 +276,18 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
   const history = noteHistory(sql, userId, chatId)
   const live = AssemblySources.of({
     summaryLayer: (leaf) =>
-      selectSummaryLayer(sql, userId, chatId, leaf).pipe(
+      selectSummaryLayer(
+        sql,
+        userId,
+        chatId,
+        settings.summaryBefore ? settings.summaryBefore.slot : leaf,
+        settings.partialBatch
+      ).pipe(
+        Effect.map((layer) =>
+          settings.summaryBefore
+            ? { ...layer, cursor: settings.summaryBefore.slot, cursorDepth: settings.summaryBefore.depth }
+            : layer
+        ),
         Effect.tap((layer) =>
           Effect.sync(() => {
             layerPins = {

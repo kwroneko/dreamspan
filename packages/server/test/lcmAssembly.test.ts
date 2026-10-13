@@ -125,7 +125,7 @@ for (const [mode, anthropic] of [
         ])
         const json = rows![0]!.snapshot as string,
           snapshot = JSON.parse(json) as ContextSnapshot
-        assert.strictEqual(snapshot.assemblerVersion, 8)
+        assert.strictEqual(snapshot.assemblerVersion, 9)
         assert.strictEqual(snapshot.lcm!.cursor, second.slotId)
         assert.deepStrictEqual(
           snapshot.lcm!.selected.map((s) => s.id),
