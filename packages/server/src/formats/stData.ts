@@ -35,6 +35,8 @@ export interface StPersona {
 
 /** The Summarize extension's injection settings (`extension_settings.memory`). */
 interface StSummarySettings {
+  readonly prompt: string | null
+  readonly promptWords: number
   /** ST's extension_prompt_types: -1 none, 0 after the main prompt, 1 in-chat, 2 before it. */
   readonly position: number
   readonly depth: number
@@ -57,6 +59,8 @@ export interface StSettings {
 
 /** ST's defaults for the Summarize extension (`defaultSettings` in extensions/memory). */
 export const DEFAULT_SUMMARY_SETTINGS: StSummarySettings = {
+  prompt: null,
+  promptWords: 200,
   position: 0,
   depth: 2,
   role: 0,
@@ -142,6 +146,8 @@ export const parseStSettings = (bytes: Uint8Array, issues: ReportBuilder): StSet
       }
     ),
     summary: {
+      prompt: typeof memory.prompt === "string" ? memory.prompt : null,
+      promptWords: Math.max(1, Math.trunc(numberOr(memory.promptWords, DEFAULT_SUMMARY_SETTINGS.promptWords))),
       position: numberOr(memory.position, DEFAULT_SUMMARY_SETTINGS.position),
       depth: Math.max(0, Math.trunc(numberOr(memory.depth, DEFAULT_SUMMARY_SETTINGS.depth))),
       role: numberOr(memory.role, DEFAULT_SUMMARY_SETTINGS.role),

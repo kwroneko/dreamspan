@@ -61,7 +61,7 @@ reference-harness runs a separate agent session with a summary editor tool and i
   - For a condensation, the layer is cut after its last child, with no history, and the tail names the children ("parts 6 to 10").
 - **[P]** It uses ST's `quiet` generation type, as ST's Summarize extension does, so preset prompts trigger as they do there. The prefill, the speaker's tail directive and the one-turn direction are left out.
 - **[P]** The tail is the last message. It's a system message where the model's capabilities say mid-chat system messages are taken, otherwise the user's. Today `wire.ts` turns later system messages into the user's for some providers; this adds a capability flag, defaulting per provider kind and overridable per model.
-- **[P]** Tail text, in order: a per-chat override in `lcm.settings`, the user's default, a built-in default. The ST importer keeps the Summarize extension's prompt (`extension_settings.memory.prompt`) and offers it as the user's default. The tail says what it's for and asks for at most `target` words, in the story's language and voice. (The owner's preset needed a line acknowledging summary instructions, DESIGN §8 [D]; a tail that names its purpose serves the same end.)
+- **[P]** Tail text, in order: a per-chat override in `lcm.settings`, the user's default, a built-in default. Implemented (ARCHITECTURE §13/§16): the ST importer keeps the Summarize extension's prompt (`extension_settings.memory.prompt`) and mapped settings, fills an unset user default and preserves later edits; `{{words}}` expands to the job target. The tail says what it's for and asks for at most `target` words, in the story's language and voice. (The owner's preset needed a line acknowledging summary instructions, DESIGN §8 [D]; a tail that names its purpose serves the same end.)
 - **[P]** The summarizer resolves its preset and model through the existing scoped bindings (`preset.binding` and `model.binding` with scope `summarizer`, DATA-MODEL §5.3), defaulting to the narrator's. Another model or preset loses the shared cache, and the cost estimate says so.
 - **[P]** The reply is the summary, without its reasoning. `max_tokens` is the target × 2.5, reference-harness's overage factor (ref §2 Knobs). A reply cut by length is salvaged as `truncated` (ref §6).
 - **What's cached [P].** By construction the request matches the live one through the preset prefix and the summary layer, so with explicit breakpoints (Anthropic) those are cache reads. The chunk is read from cache only by providers with automatic prefix caching, and only up to the first in-chat injection. Summarization requests put no marker on the chunk, since nothing reuses it.
@@ -215,7 +215,7 @@ Other tests:
 
 ## 5. Slices
 
-Each slice moves its part of this document into ARCHITECTURE.md in the same commit. The last marks this document obsolete. All seven slices are built, but the document stays current for what is not: the Summarize prompt kept on import (§2.3), and the items §2.8 and §2.13 list as not built.
+Each slice moves its part of this document into ARCHITECTURE.md in the same commit. The last marks this document obsolete. All seven slices are built, but the document stays current for what is not: the items §2.8 and §2.13 list as not built.
 
 | # | Slice | Test oracle | Tier |
 |---|---|---|---|
@@ -224,7 +224,7 @@ Each slice moves its part of this document into ARCHITECTURE.md in the same comm
 | 3 ✓ | Planner, queue operations, `Summarizer`, summarization requests, use / wait / omit, batches, idle class | The model test with jobs (7, 8); the prefix comparison at a mock provider | A |
 | 4 ✓ | Hard refusals and the judge model for soft refusals, retries, failed summaries, Retry with…, marks on chat versions | A fake judge; the model test with planted refusals (5) | B |
 | 5 ✓ | Condensation, absorption, re-summarizing stale summaries | The model test with condensation and edits, run to quiescence | B |
-| 6 ✓ | Enabling LCM, adopting imported summaries, backfill with its estimate and spend cap. **Not built:** the ST Summarize prompt kept on import (§2.3) | A synthetic ST folder adopted and backfilled; the estimate within 25% of the ledger at a fake provider | A |
+| 6 ✓ | Enabling LCM, adopting imported summaries, backfill with its estimate and spend cap. The ST Summarize prompt and settings are retained as an editable user default (§2.3). | A synthetic ST folder adopted and backfilled; the estimate within 25% of the ledger at a fake provider | A |
 | 7 ✓ | UI: divider, summary panel, editing with drafts and revisions, coverage rail, context view | Browser flows at phone and desktop width; the performance harness with summaries | B |
 
 ---

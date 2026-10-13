@@ -901,11 +901,17 @@ export class StImports extends Context.Service<
               session.report.file(path, parsed.report)
               const settings = parsed.settings
               if (settings === null) return result("failed")
-              const size = settings.personas.reduce((sum, p) => sum + p.name.length + p.description.length, 0)
+              const size = JSON.stringify(settings).length
               session.held -= session.settingsHeld
               session.settingsHeld = 0
               if (!hold(session, path, "settings", size)) return result("failed", "too much in one import")
               session.settingsHeld = size
+              yield* writer.StImportSummarySettings({
+                userId: user.id,
+                importId,
+                prompt: settings.summary.prompt,
+                settings: JSON.stringify(settings.summary)
+              })
               session.settings = settings
               session.personaNames = new Map()
               for (const persona of settings.personas) {

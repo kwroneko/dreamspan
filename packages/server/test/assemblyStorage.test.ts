@@ -12,7 +12,7 @@ import type { ConnectionId } from "@rp/shared/providers.ts"
 import type { StateEventData } from "@rp/shared/state.ts"
 import { Effect } from "effect"
 import { readFileSync } from "node:fs"
-import { generationOf, type ContextSnapshot } from "../src/assembler/types.ts"
+import { ASSEMBLER_VERSION, generationOf, type ContextSnapshot } from "../src/assembler/types.ts"
 import { tokensOf } from "../src/assembler/st.ts"
 import { prefixChange } from "../src/assembler/warmth.ts"
 import * as Database from "../src/db/Database.ts"
@@ -782,7 +782,7 @@ describe("context assembly from the database", () => {
         assert.ok(result._tag === "EarlierAssemblerVersion")
         assert.strictEqual(result.storedSnapshot, json)
       }
-      assert.strictEqual(built.assemblerVersion, 17)
+      assert.strictEqual(built.assemblerVersion, ASSEMBLER_VERSION)
       const rebuilt = yield* reader.RebuildContext({ userId, snapshot: JSON.stringify(built) })
       assert.ok(rebuilt._tag === "Rebuilt")
       assert.deepStrictEqual(JSON.parse(rebuilt.snapshot), built)

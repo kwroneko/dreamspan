@@ -1765,6 +1765,14 @@ const storage: Record<
   string,
   (reader: Reader["Service"], actor: Party, owner: Party, writer: Writer["Service"]) => Effect.Effect<void, unknown>
 > = {
+  StImportSummarySettings: (_reader, actor, owner, writer) =>
+    Effect.gen(function* () {
+      const { importId } = yield* owner.api.StartStImport({ unsupported: [] })
+      yield* refused(
+        writer.StImportSummarySettings({ userId: actor.user.id, importId, prompt: "foreign", settings: "{}" }),
+        "ImportLeaseLost"
+      )
+    }),
   SaveLcmMaintenance: (_reader, actor, owner, writer) =>
     refused(
       writer.SaveLcmMaintenance({

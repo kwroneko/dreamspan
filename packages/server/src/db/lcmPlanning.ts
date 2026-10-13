@@ -270,7 +270,7 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
               defaults.lcm?.tail ??
               `Summarize the conversation since the previous summaries in at most ${job.target} words. Keep its language and voice, names, events and unresolved details. The preceding summaries are continuity, not material to summarize again.`)
         const tail =
-          instruction +
+          instruction.replace(/\{\{words\}\}/gi, String(job.target)) +
           (style === "tool"
             ? "\nWrite the summary with summary_tool. Create a draft and finalize it; assistant prose is not the summary."
             : "\nReturn only the summary, without commentary.")

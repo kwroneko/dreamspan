@@ -14,7 +14,7 @@ import { Avatar } from "../../ui/Avatar.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Checkbox, RadioGroup, Switch } from "../../ui/Choice.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
-import { Field } from "../../ui/Field.tsx"
+import { Field, Textarea } from "../../ui/Field.tsx"
 import { Select } from "../../ui/Select.tsx"
 import { Badge } from "../../ui/Surface.tsx"
 import { useCast } from "./cast.ts"
@@ -167,11 +167,17 @@ const NONE = "none"
 function DecisionModels({ models, open }: { models: Choices["models"]; open: boolean }) {
   const action = useAction()
   const [defaults, setDefaults] = useState<GenerationDefaults | null>(null)
+  const [tail, setTail] = useState("")
   useEffect(() => {
     if (!open) return
     void action
       .run((client) => client("GetGenerationDefaults", undefined))
-      .then((result) => result.ok && setDefaults(result.value))
+      .then((result) => {
+        if (result.ok) {
+          setDefaults(result.value)
+          setTail(result.value.lcm?.tail ?? "")
+        }
+      })
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once per opening
   }, [open])
   const items = [{ value: NONE, label: "None" }, ...models]
@@ -226,6 +232,22 @@ function DecisionModels({ models, open }: { models: Choices["models"]; open: boo
           }}
         />
       </Field>
+      <Field
+        label="Summarization instruction"
+        description="Your default for all chats. A chat's own instruction takes precedence. Use {{words}} for the summary's word limit; leave empty for the built-in instruction."
+      >
+        <Textarea value={tail} onChange={(event) => setTail(event.target.value)} rows={4} disabled={!defaults} />
+      </Field>
+      <Button
+        disabled={!defaults || action.pending}
+        onClick={() => {
+          if (!defaults) return
+          const { tail: _gone, ...rest } = defaults.lcm ?? {}
+          save(new GenerationDefaults({ ...defaults, lcm: tail ? { ...rest, tail } : rest }))
+        }}
+      >
+        Save summarization instruction
+      </Button>
       <Problem error={action.error} />
     </section>
   )

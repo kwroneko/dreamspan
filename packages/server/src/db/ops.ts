@@ -1188,6 +1188,11 @@ export class WriteOps extends RpcGroup.make(
    * Makes `importId` the user's current import run. Only the current run may claim a record,
    * start a chat or write one: every run before it is over, and the leases it holds expired.
    */
+  Rpc.make("StImportSummarySettings", {
+    payload: { userId: UserId, importId: Schema.String, prompt: Schema.NullOr(Schema.String), settings: Schema.String },
+    success: Schema.Void,
+    error: Schema.Union([ImportLeaseLost, StorageError])
+  }),
   Rpc.make("StImportBegin", {
     payload: { userId: UserId, importId: Schema.String },
     success: Schema.Void,

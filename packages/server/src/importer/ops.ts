@@ -121,6 +121,8 @@ export class StSettings extends Schema.Class<StSettings>("StSettings")({
   characterWorlds: Schema.Array(Schema.Struct({ card: Schema.String, worlds: Schema.Array(Schema.String) })),
   defaultAuthorNote: Schema.NullOr(StAuthorNote),
   summary: Schema.Struct({
+    prompt: Schema.NullOr(Schema.String),
+    promptWords: Schema.Int,
     position: Schema.Number,
     depth: Schema.Int,
     role: Schema.Number,

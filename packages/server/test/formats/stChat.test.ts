@@ -235,7 +235,15 @@ describe("ST settings and groups", () => {
       globalWorlds: ["W"],
       characterWorlds: [{ card: "Alice", worlds: ["X"] }],
       defaultAuthorNote: { content: "Default note.", position: 0, depth: 3, role: 2, interval: 2 },
-      summary: { position: -1, depth: 5, role: 1, template: "S: {{summary}}", enabled: false }
+      summary: {
+        prompt: null,
+        promptWords: 200,
+        position: -1,
+        depth: 5,
+        role: 1,
+        template: "S: {{summary}}",
+        enabled: false
+      }
     })
     expect(issues.build("x").issues.map((i) => i.code)).toEqual(["st_settings.character_author_notes"])
   })

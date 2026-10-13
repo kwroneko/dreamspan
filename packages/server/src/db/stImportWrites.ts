@@ -189,6 +189,19 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
     )
 
   const handlers = {
+    StImportSummarySettings: ({ userId, importId, prompt, settings }) =>
+      Effect.gen(function* () {
+        yield* current(userId, importId, importId)
+        yield* sql`INSERT INTO user_settings (user_id,key,value_json) VALUES (${userId},'import.st.memory',${settings})
+          ON CONFLICT(user_id,key) DO UPDATE SET value_json=excluded.value_json`
+        if (prompt === null) return
+        // Re-importing must not undo an instruction the user has chosen since the import.
+        yield* sql`INSERT INTO user_settings (user_id,key,value_json)
+          VALUES (${userId},'generation.lcm',${JSON.stringify({ tail: prompt })})
+          ON CONFLICT(user_id,key) DO UPDATE SET value_json=json_set(user_settings.value_json,'$.tail',${prompt})
+          WHERE json_type(user_settings.value_json,'$.tail') IS NULL`
+      }).pipe(transaction(sql, "StImportSummarySettings")),
+
     StImportBegin: ({ userId, importId }) =>
       Effect.gen(function* () {
         const at = Date.now()

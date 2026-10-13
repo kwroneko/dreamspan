@@ -1,5 +1,5 @@
 import { assert, it } from "@effect/vitest"
-import type { ContextSnapshot } from "../src/assembler/types.ts"
+import { ASSEMBLER_VERSION, type ContextSnapshot } from "../src/assembler/types.ts"
 import { NewVersion } from "@rp/shared/chat.ts"
 import { Effect } from "effect"
 import type { AppendResult } from "../src/db/ops.ts"
@@ -125,7 +125,7 @@ for (const [mode, anthropic] of [
         ])
         const json = rows![0]!.snapshot as string,
           snapshot = JSON.parse(json) as ContextSnapshot
-        assert.strictEqual(snapshot.assemblerVersion, 17)
+        assert.strictEqual(snapshot.assemblerVersion, ASSEMBLER_VERSION)
         assert.strictEqual(snapshot.lcm!.cursor, second.slotId)
         assert.deepStrictEqual(
           snapshot.lcm!.selected.map((s) => s.id),
