@@ -2,7 +2,8 @@ import { assert, it } from "@effect/vitest"
 import { NewVersion } from "@rp/shared/chat.ts"
 import { Effect } from "effect"
 import { Reader, Writer } from "../src/db/Database.ts"
-import { client, posted, serverLayer, testConfig } from "./support/config.ts"
+import { client, posted } from "./support/config.ts"
+import { lcmServer } from "./support/lcmHarness.ts"
 import { completionChunks, sse, startMockProvider } from "./support/mockProvider.ts"
 import { eventually, finished, generateReply } from "./support/generation.ts"
 import { completeFixture, fixtureSql } from "./support/lcmFixtures.ts"
@@ -10,7 +11,8 @@ import type { ContextSnapshot } from "../src/assembler/types.ts"
 
 for (const mode of ["direct", "tool", "refused", "partial", "gap"] as const) {
   const style = mode === "tool" ? "tool" : "direct"
-  const config = testConfig()
+  const server = lcmServer()
+  const config = server.config
   it.live(
     `${mode} summaries run after the reply, share its cached prefix and use the ledger`,
     () =>
@@ -166,6 +168,7 @@ for (const mode of ["direct", "tool", "refused", "partial", "gap"] as const) {
         }
         yield* Effect.sleep(350)
         assert.strictEqual(summaries, 0)
+        yield* server.startPoolAfterReply()
         const reply = yield* posted(api.Generate({ chatId: chat.id, parentSlotId: leaf, branch: false }))
         yield* eventually(() => finished(events, reply.entry.version.id) !== undefined, 60_000)
         assert.strictEqual(finished(events, reply.entry.version.id)!.status, "complete")
@@ -289,7 +292,7 @@ for (const mode of ["direct", "tool", "refused", "partial", "gap"] as const) {
           { sql: "SELECT count(*) AS n FROM llm_requests WHERE chat_id=? AND purpose='summarize'", params: [chat.id] }
         ])
         assert.isAbove(Number(ledger![0]!.n), 0)
-      }).pipe(Effect.provide(serverLayer(config))),
+      }).pipe(Effect.provide(server.layer)),
     120_000
   )
 }
