@@ -29,6 +29,7 @@ import { providerHeadersToRecord } from "@earendil-works/pi-ai/utils/headers"
 import { getPiUserAgent } from "@earendil-works/pi-ai/utils/pi-user-agent"
 import { sanitizeSurrogates } from "@earendil-works/pi-ai/utils/sanitize-unicode"
 import { Schema } from "effect"
+import { googleRequest } from "./googleRequest.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 
 const Part = Schema.Struct({
@@ -45,6 +46,7 @@ const Part = Schema.Struct({
 })
 const Chunk = Schema.StructWithRest(
   Schema.Struct({
+    error: Schema.optionalKey(Schema.JsonObject),
     responseId: Schema.optionalKey(Schema.String),
     candidates: Schema.optionalKey(
       Schema.Array(
@@ -69,7 +71,12 @@ const Chunk = Schema.StructWithRest(
   }),
   [Schema.Record(Schema.String, Schema.Unknown)]
 )
-const decodeChunk = Schema.decodeUnknownSync(Schema.fromJsonString(Chunk))
+const parseChunk = Schema.decodeUnknownSync(Schema.fromJsonString(Chunk))
+const decodeChunk = (value: string) => {
+  const chunk = parseChunk(value)
+  if (chunk.error) throw new Error(JSON.stringify({ error: chunk.error }))
+  return chunk
+}
 
 // SSE records can span arbitrary TCP chunks, and data lines can span a record.
 async function* chunks(response: Response) {
@@ -77,7 +84,9 @@ async function* chunks(response: Response) {
   if (!reader) throw new Error("Google response has no body")
   const decoder = new TextDecoder()
   let pending = "",
-    data: string[] = []
+    raw = "",
+    mode: "sse" | "json" | undefined
+  let data: string[] = []
   const parse = () => {
     const value = data.join("\n")
     data = []
@@ -87,17 +96,30 @@ async function* chunks(response: Response) {
     while (true) {
       const next = await reader.read()
       pending += next.done ? decoder.decode() : decoder.decode(next.value, { stream: true })
-      let end: number
-      while ((end = pending.indexOf("\n")) >= 0) {
-        const line = pending.slice(0, end).replace(/\r$/, "")
-        pending = pending.slice(end + 1)
-        if (line.startsWith("data:")) data.push(line.slice(5).trimStart())
-        else if (line === "") {
-          const chunk = parse()
-          if (chunk) yield chunk
+      if (!mode && pending.trimStart()) mode = pending.trimStart().startsWith("{") ? "json" : "sse"
+      if (mode === "json") {
+        raw += pending
+        pending = ""
+      } else {
+        let end: number
+        while ((end = pending.search(/[\r\n]/)) >= 0) {
+          // Wait for the next byte to distinguish CR from CRLF across chunks.
+          if (pending[end] === "\r" && end === pending.length - 1 && !next.done) break
+          const line = pending.slice(0, end)
+          const width = pending[end] === "\r" && pending[end + 1] === "\n" ? 2 : 1
+          pending = pending.slice(end + width)
+          if (line.startsWith("data:")) data.push(line.slice(5).trimStart())
+          else if (line === "") {
+            const chunk = parse()
+            if (chunk) yield chunk
+          }
         }
       }
       if (next.done) break
+    }
+    if (mode === "json") {
+      yield decodeChunk(raw)
+      return
     }
     if (pending.startsWith("data:")) data.push(pending.slice(5).trimStart())
     const chunk = parse()
@@ -138,6 +160,7 @@ export const stream: StreamFunction<"google-generative-ai", GoogleOptions> = (mo
       const strict = supportsGoogleStrictToolSampling(model.id)
       const mode = tools.length ? resolveGoogleFunctionCallingMode(tools, options.toolChoice, strict) : undefined
       const config: Record<string, unknown> = {
+        ...(options.signal ? { abortSignal: options.signal } : {}),
         ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
         ...(options.maxTokens !== undefined ? { maxOutputTokens: options.maxTokens } : {}),
         ...(system ? { systemInstruction: sanitizeSurrogates(getSystemMessageText(system)) } : {}),
@@ -150,7 +173,9 @@ export const stream: StreamFunction<"google-generative-ai", GoogleOptions> = (mo
                     includeThoughts: true,
                     ...(options.thinking.level !== undefined
                       ? { thinkingLevel: toGoogleSdkThinkingLevel(options.thinking.level) }
-                      : { thinkingBudget: options.thinking.budgetTokens ?? -1 })
+                      : options.thinking.budgetTokens !== undefined
+                        ? { thinkingBudget: options.thinking.budgetTokens }
+                        : {})
                   }
                 : getDisabledGoogleThinkingConfig(model)
             }
@@ -158,35 +183,8 @@ export const stream: StreamFunction<"google-generative-ai", GoogleOptions> = (mo
       }
       const original = { model: model.id, contents: convertMessages(model, normalized), config }
       const payload = ((await options.onPayload?.(original, model)) ?? original) as typeof original
-      // These fields live outside REST generationConfig. Abort and routing are always
-      // request-owned, so transforms cannot override the controlled fetch or signal.
-      const {
-        systemInstruction,
-        tools: wireTools,
-        toolConfig,
-        safetySettings,
-        cachedContent,
-        labels,
-        httpOptions: _httpOptions,
-        abortSignal: _abortSignal,
-        ...generationConfig
-      } = payload.config
-      const body = {
-        contents: payload.contents,
-        generationConfig,
-        ...(systemInstruction
-          ? {
-              systemInstruction:
-                typeof systemInstruction === "string" ? { parts: [{ text: systemInstruction }] } : systemInstruction
-            }
-          : {}),
-        ...(wireTools ? { tools: wireTools } : {}),
-        ...(toolConfig ? { toolConfig } : {}),
-        ...(safetySettings ? { safetySettings } : {}),
-        ...(cachedContent ? { cachedContent } : {}),
-        ...(labels ? { labels } : {})
-      }
-      const url = `${model.baseUrl.replace(/\/$/, "")}/models/${encodeURIComponent(payload.model.replace(/^models\//, ""))}:streamGenerateContent?alt=sse`
+      const { model: resource, body } = googleRequest(payload)
+      const url = `${model.baseUrl.replace(/\/$/, "")}/${resource}:streamGenerateContent?alt=sse`
       const response = await options.fetch(url, {
         method: "POST",
         ...(options.signal ? { signal: options.signal } : {}),
@@ -306,7 +304,11 @@ export const stream: StreamFunction<"google-generative-ai", GoogleOptions> = (mo
       finishBlock()
       options.signal?.throwIfAborted()
       if (!["stop", "length", "toolUse"].includes(output.stopReason))
-        throw new Error(`Google stream ended with ${output.rawStopReason ?? "no finish reason"}`)
+        throw new Error(
+          output.rawStopReason
+            ? `Google stream ended with ${output.rawStopReason}`
+            : "Google stream ended without a finish reason"
+        )
       events.push({ type: "done", reason: output.stopReason as "stop" | "length" | "toolUse", message: output })
     } catch (error) {
       output.stopReason = options.signal?.aborted ? "aborted" : "error"
@@ -323,7 +325,7 @@ const googleBudget = (model: string, level: string) => {
   const budgets = model.includes("2.5-pro")
     ? [128, 2048, 8192, 32768]
     : model.includes("2.5-flash-lite")
-      ? [512, 1024, 8192, 24576]
+      ? [512, 2048, 8192, 24576]
       : model.includes("2.5-flash")
         ? [128, 2048, 8192, 24576]
         : null

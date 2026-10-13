@@ -130,12 +130,15 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
           next.inputs.model.connectionId === previous.inputs.model?.connectionId
         const ttlS =
           !next.inputs.model.cacheTtlOverride && sameModel
-            ? (previous.wire?.cache?.ttlS ?? next.inputs.model.cacheTtlS)
+            ? previous.wire?.cache
+              ? previous.wire.cache.ttlS
+              : next.inputs.model.cacheTtlS
             : next.inputs.model.cacheTtlS
         if (ttlS == null) return null
         const changed = prefixChange(previous, next, yield* describer(sql, userId, chatId, [previous, next]))
         let origin = last.started_at
-        if (previous.wire?.cache?.fixed && (last.cache_read ?? 0) > 0 && (last.cache_write ?? 0) === 0) {
+        let originSnapshot = previous
+        if ((last.cache_read ?? 0) > 0 && (last.cache_write ?? 0) === 0) {
           // Fixed-lived caches (Cerebras, OpenRouter explicit Gemini) do not slide
           // on a hit. Find the matching prefix's write/miss, never a newer unrelated one.
           const candidates = yield* sql<{ started_at: number; snapshot: string; sent: string | null }>`
@@ -146,18 +149,30 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
               AND (q.cache_read = 0 OR q.cache_write > 0)
             ORDER BY q.started_at DESC, q.id DESC LIMIT 100`
           const descriptions = yield* describer(sql, userId, chatId, [previous])
-          const write = candidates.find((row) => {
+          let write: { startedAt: number; snapshot: ContextSnapshot } | undefined
+          for (const row of candidates) {
             const snapshot = {
               ...(JSON.parse(row.snapshot) as ContextSnapshot),
               ...(row.sent ? { wire: JSON.parse(row.sent) as WireContext } : {})
             }
-            return prefixChange(snapshot, previous, descriptions) === null
-          })
+            if (prefixChange(snapshot, previous, descriptions) === null) {
+              write = { startedAt: row.started_at, snapshot }
+              break
+            }
+          }
           // A hit proves reuse, but without its original write time cannot date expiry.
-          if (!write) return null
-          origin = write.started_at
+          if (previous.wire?.cache?.fixed && !write) return null
+          // A later transform can change the requested mode, but a hit cannot
+          // rewrite the lifetime established by an earlier fixed-cache write.
+          if (write && (previous.wire?.cache?.fixed || write.snapshot.wire?.cache?.fixed)) {
+            origin = write.startedAt
+            originSnapshot = write.snapshot
+          }
         }
-        const historicalTtl = previous.wire?.cache?.ttlS ?? previous.inputs.model?.cacheTtlS ?? 0
+        const historicalTtl = originSnapshot.wire?.cache
+          ? originSnapshot.wire.cache.ttlS
+          : originSnapshot.inputs.model?.cacheTtlS
+        if (historicalTtl == null) return null
         return {
           lastRequestAt: last.started_at,
           ttlS,

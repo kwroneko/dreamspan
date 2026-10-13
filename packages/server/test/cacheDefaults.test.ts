@@ -161,7 +161,14 @@ for (const kind of ["cerebras", "openrouter"] as const) {
 }
 
 for (const [kind, key, payload, ttl] of [
-  ["qwen", "qwen-plus", { cache_control: { type: "ephemeral" } }, 300],
+  [
+    "qwen",
+    "qwen-plus",
+    {
+      messages: [{ role: "user", content: [{ type: "text", text: "Synthetic", cache_control: { type: "ephemeral" } }] }]
+    },
+    300
+  ],
   ["openrouter", "anthropic/claude", { cache_control: { type: "ephemeral", ttl: "1h" } }, 600],
   [
     "openrouter",

@@ -145,7 +145,9 @@ export const finalCounts = (
       : { counts, source: "reported" }
   }
   if (text.length === 0 && message.stopReason !== "stop" && message.stopReason !== "length") {
-    return { counts: unknownCounts, source: "none" }
+    return capture.headerCacheRead === null
+      ? { counts: unknownCounts, source: "none" }
+      : { counts: { ...unknownCounts, cacheRead: capture.headerCacheRead }, source: "reported" }
   }
   return {
     counts: {

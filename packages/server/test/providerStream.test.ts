@@ -1671,7 +1671,7 @@ it.live("Google's REST adapter preserves fragmented SSE, thinking, tools and cac
     assert.equal(ledger.counts.cacheRead, 100)
     assert.include(JSON.stringify(rawChunks), '"syntheticExtraUsage":7')
     const body = server.requests()[0]!.body!
-    assert.deepEqual(body.systemInstruction, { parts: [{ text: "You are the narrator." }] })
+    assert.deepEqual(body.systemInstruction, { role: "user", parts: [{ text: "You are the narrator." }] })
     assert.deepEqual((body.generationConfig as Record<string, unknown>).thinkingConfig, {
       includeThoughts: true,
       thinkingBudget: 2048

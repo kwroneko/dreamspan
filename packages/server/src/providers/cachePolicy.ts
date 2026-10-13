@@ -14,17 +14,28 @@ interface Target {
 }
 const object = (value: unknown): Record<string, unknown> =>
   Predicate.isObject(value) ? (value as Record<string, unknown>) : {}
-const markers = (value: unknown): ReadonlyArray<Record<string, unknown>> => {
-  if (Array.isArray(value)) return value.flatMap(markers)
-  if (!Predicate.isObject(value)) return []
-  const o = object(value)
-  return [
-    ...(o.cache_control ? [object(o.cache_control)] : []),
-    ...(o.cachePoint ? [object(o.cachePoint)] : []),
-    ...Object.entries(o)
-      .filter(([k]) => k !== "cache_control" && k !== "cachePoint")
-      .flatMap(([, v]) => markers(v))
-  ]
+const array = (value: unknown): unknown[] => (Array.isArray(value) ? value : [])
+// Only wire control locations, never arbitrary schemas, function arguments or results.
+const markers = (target: Target, payload: Record<string, unknown>): ReadonlyArray<Record<string, unknown>> => {
+  const { api, provider } = target
+  const messages = array(payload.messages)
+  const content = messages.flatMap((m) => array(object(m).content))
+  let locations: unknown[]
+  if (api === "bedrock-converse-stream") {
+    locations = [...array(payload.system), ...content, ...array(object(payload.toolConfig).tools)]
+    return locations
+      .map((v) => object(object(v).cachePoint))
+      .filter((v) => v.type === "default" && (v.ttl === undefined || v.ttl === "5m" || v.ttl === "1h"))
+  }
+  if (["qwen", "dashscope"].includes(provider) && ["anthropic-messages", "openai-completions"].includes(api))
+    locations = content
+  else if (api === "anthropic-messages")
+    locations = [payload, ...array(payload.system), ...array(payload.tools), ...content]
+  else if (api === "openai-completions") locations = [payload, ...messages, ...array(payload.tools), ...content]
+  else return []
+  return locations
+    .map((v) => object(object(v).cache_control))
+    .filter((v) => v.type === "ephemeral" && (v.ttl === undefined || v.ttl === "5m" || v.ttl === "1h"))
 }
 const policy = (ttlS: number, source: string, fixed = false): CachePolicy => ({ ttlS, source, fixed })
 const claudeSource = "https://platform.claude.com/docs/en/build-with-claude/prompt-caching"
@@ -45,7 +56,7 @@ export const documentedCachePolicy = (target: Target, payload: Record<string, un
   const provider =
     target.provider === "openai-chat" || target.provider === "openai-responses" ? "openai" : target.provider
   const model = target.model.toLowerCase()
-  const cacheMarkers = markers(payload)
+  const cacheMarkers = markers(target, payload)
   const explicit = cacheMarkers.length > 0
   // Mixed Anthropic marker lifetimes expire at the shortest marked prefix.
   const hour = explicit && cacheMarkers.every((m) => m.ttl === "1h")
@@ -71,7 +82,7 @@ export const documentedCachePolicy = (target: Target, payload: Record<string, un
     // K3 Messages ignores per-message markers: only its top-level control writes.
     const long =
       target.api === "anthropic-messages"
-        ? object(payload.cache_control).ttl === "1h"
+        ? cacheMarkers.includes(object(payload.cache_control)) && object(payload.cache_control).ttl === "1h"
         : options.mode === "implicit" && options.ttl === "1h"
     return policy(long ? 3600 : 300, "https://platform.kimi.ai/docs/guide/context-caching")
   }

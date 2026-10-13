@@ -2,6 +2,7 @@ import { assert, it } from "@effect/vitest"
 import { documentedCachePolicy } from "../src/providers/cachePolicy.ts"
 
 const hour = { system: [{ cache_control: { type: "ephemeral", ttl: "1h" } }] }
+const chatHour = { messages: [{ content: [{ cache_control: { type: "ephemeral", ttl: "1h" } }] }] }
 const explicit = { messages: [{ content: [{ cache_control: { type: "ephemeral" } }] }] }
 for (const [provider, api, model, payload, ttl, fixed] of [
   ["anthropic", "anthropic-messages", "claude", {}, 300, false],
@@ -16,8 +17,15 @@ for (const [provider, api, model, payload, ttl, fixed] of [
   ["azure", "openai-responses", "gpt-4.1", {}, 300, false],
   ["azure", "openai-responses", "gpt-5.4", { prompt_cache_retention: "24h" }, null, false],
   ["openrouter", "openai-completions", "anthropic/claude", {}, 300, false],
-  ["openrouter", "openai-completions", "anthropic/claude", hour, 600, false],
-  ["openrouter", "openai-completions", "anthropic/claude", { ...hour, provider: { only: ["Anthropic"] } }, 3600, false],
+  ["openrouter", "openai-completions", "anthropic/claude", chatHour, 600, false],
+  [
+    "openrouter",
+    "openai-completions",
+    "anthropic/claude",
+    { ...chatHour, provider: { only: ["Anthropic"] } },
+    3600,
+    false
+  ],
   ["openrouter", "openai-completions", "google/gemini-2.5-pro", {}, 180, false],
   ["openrouter", "openai-completions", "google/gemini-2.5-pro", explicit, 300, true],
   ["openrouter", "openai-completions", "unknown/claude", {}, null, false],
@@ -84,3 +92,55 @@ for (const [provider, api, model, payload, ttl] of [
 for (const model of ["gpt-3.5-turbo", "gpt-4", "gpt-custom-local", "gpt-oss-120b"])
   it(`does not assign OpenAI caching to ${model} from the API family alone`, () =>
     assert.isNull(documentedCachePolicy({ provider: "openai", api: "openai-completions", model })))
+
+for (const payload of [
+  { tools: [{ function: { parameters: { properties: { cache_control: { type: "string" } } } } }] },
+  { messages: [{ content: [{ type: "tool_result", content: { cache_control: { type: "ephemeral" } } }] }] },
+  { messages: [{ tool_calls: [{ function: { arguments: { cache_control: { type: "ephemeral" } } } }] }] },
+  { cache_control: { type: "string" } },
+  { cache_control: {} },
+  { cache_control: { type: "ephemeral", ttl: "invalid" } },
+  { system: [{ cache_control: { type: "ephemeral" } }] }
+])
+  it(`ignores data and invalid Chat markers: ${JSON.stringify(payload)}`, () => {
+    assert.deepInclude(
+      documentedCachePolicy({ provider: "openrouter", api: "openai-completions", model: "google/gemini" }, payload),
+      { ttlS: 180, fixed: false }
+    )
+  })
+it("Anthropic schemas and tool arguments do not shorten a real hour marker", () => {
+  const payload = {
+    ...hour,
+    tools: [{ input_schema: { properties: { cache_control: { type: "string" } } } }],
+    messages: [{ content: [{ type: "tool_use", input: { cache_control: { type: "ephemeral" } } }] }]
+  }
+  assert.equal(
+    documentedCachePolicy({ provider: "anthropic", api: "anthropic-messages", model: "claude" }, payload)?.ttlS,
+    3600
+  )
+})
+it("Bedrock only recognizes shaped markers in system, content and toolConfig.tools", () => {
+  const target = { provider: "amazon-bedrock", api: "bedrock-converse-stream", model: "anthropic.claude" }
+  const cachePoint = { type: "default", ttl: "1h" }
+  for (const payload of [
+    { system: [{ cachePoint }] },
+    { messages: [{ content: [{ cachePoint }] }] },
+    { toolConfig: { tools: [{ cachePoint }] } }
+  ])
+    assert.equal(documentedCachePolicy(target, payload)?.ttlS, 3600)
+  assert.equal(
+    documentedCachePolicy(target, { toolConfig: { tools: [{ toolSpec: { inputSchema: { json: { cachePoint } } } }] } })
+      ?.ttlS,
+    300
+  )
+})
+
+it("Qwen only opts into caching through shaped content-block markers", () => {
+  const target = { provider: "qwen", api: "openai-completions", model: "qwen-plus" }
+  for (const payload of [
+    { cache_control: { type: "ephemeral" } },
+    { messages: [{ cache_control: { type: "ephemeral" }, content: "Synthetic" }] }
+  ])
+    assert.isNull(documentedCachePolicy(target, payload))
+  assert.equal(documentedCachePolicy(target, explicit)?.ttlS, 300)
+})

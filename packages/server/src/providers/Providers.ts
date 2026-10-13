@@ -941,9 +941,7 @@ export const layer = (options: ProvidersOptions = {}) =>
                     const wire = {
                       ...sentWire(final, sources, prepared.scrub),
                       cache: {
-                        ttlS: selected.cacheTtlOverride
-                          ? (selected.cacheTtlS ?? null)
-                          : (policy?.ttlS ?? selected.cacheTtlS ?? null),
+                        ttlS: selected.cacheTtlOverride ? (selected.cacheTtlS ?? null) : (policy?.ttlS ?? null),
                         fixed: policy?.fixed ?? false,
                         source: selected.cacheTtlOverride ? null : (policy?.source ?? null)
                       }
