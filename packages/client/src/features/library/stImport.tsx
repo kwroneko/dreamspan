@@ -1,8 +1,10 @@
-// Importing a SillyTavern data folder (DESIGN §1.4, ARCHITECTURE.md §13): pick the folder,
-// choose whose it is in ST's multi-user layout, send its files, then read the report and
+// Importing a SillyTavern data folder (DESIGN §1.4, ARCHITECTURE.md §13): name the folder's
+// path (or pick it in the browser, from another machine), choose whose it is in ST's
+// multi-user layout, import its files, then read the report and
 // act on it: un-hide a summarized run, pick the card of a chat the import couldn't link.
 // Report text quotes files, so it's rendered as text.
 import { RegistryContext, useAtomValue } from "@effect/atom-react"
+import type { EntityId } from "@rp/shared/chat.ts"
 import type { StHiddenRun, StImportReport, StLinkChoice } from "@rp/shared/stImportApi.ts"
 import type { StRoot } from "@rp/shared/stFolder.ts"
 import { Link } from "@tanstack/react-router"
@@ -11,14 +13,25 @@ import { useContext, useRef, useState } from "react"
 import { ErrorAlert, useAction } from "../../actions.tsx"
 import { sessionAtom } from "../../session.ts"
 import { Button, buttonClass } from "../../ui/Button.tsx"
-import { Field } from "../../ui/Field.tsx"
+import { Field, Input } from "../../ui/Field.tsx"
 import { FileDrop } from "../../ui/FileDrop.tsx"
 import { Select } from "../../ui/Select.tsx"
 import { Spinner } from "../../ui/Spinner.tsx"
 import { Alert, Badge, Card, CardHeader } from "../../ui/Surface.tsx"
 import { useTitle } from "../shell.tsx"
 import { libraryAtom } from "./data.ts"
-import { orderBranches, sendStFile, type StFolderFile, stPlan, stRoots } from "./stUpload.ts"
+import {
+  orderBranches,
+  pathFiles,
+  pickedFiles,
+  type ReadPart,
+  sendStFile,
+  type StExtra,
+  type StFolderFile,
+  type StFound,
+  stPlan,
+  stRoots
+} from "./stUpload.ts"
 
 const KINDS: ReadonlyArray<readonly [string, string]> = [
   ["card", "Cards"],
@@ -218,7 +231,10 @@ export function StImportPage() {
   useTitle("Import ST data")
   const registry = useContext(RegistryContext)
   const action = useAction()
-  const [files, setFiles] = useState<ReadonlyArray<File>>([])
+  // Each file's import reports its own failure in the list below, not as the page's error.
+  const fileAction = useAction()
+  const [folderPath, setFolderPath] = useState("")
+  const [files, setFiles] = useState<ReadonlyArray<StFound> | null>(null)
   const [roots, setRoots] = useState<ReadonlyArray<StRoot>>([])
   const [prefix, setPrefix] = useState<string | null>(null)
   const [progress, setProgress] = useState<Progress | null>(null)
@@ -228,16 +244,29 @@ export function StImportPage() {
   const sent = useRef<{ importId: string; byPath: Map<string, StFolderFile> } | null>(null)
   const running = progress !== null
 
-  const pick = (picked: ReadonlyArray<File>) => {
-    const found = stRoots(picked)
-    setFiles(picked)
-    setRoots(found)
-    setPrefix(found.length === 1 ? found[0]!.prefix : null)
+  const choose = (found: ReadonlyArray<StFound>) => {
+    const users = stRoots(found)
+    setFiles(found)
+    setRoots(users)
+    setPrefix(users.length === 1 ? users[0]!.prefix : null)
     setReport(null)
     setFailures([])
   }
 
-  const plan = prefix === null ? null : stPlan(files, prefix)
+  const scan = async () => {
+    const scanned = await action.run((client) => client("ScanStFolder", { path: folderPath.trim() }))
+    if (scanned.ok) choose(pathFiles(scanned.value.root, scanned.value.files))
+  }
+
+  const readPart: ReadPart = async (request) => {
+    const read = await fileAction.run((client) => client("ImportStFolderFile", request), ["library"])
+    if (read.ok) return { _tag: "Done", result: read.value }
+    return read.error.tag === "Unauthorized"
+      ? { _tag: "Unauthorized" }
+      : { _tag: "Failed", message: read.error.message }
+  }
+
+  const plan = prefix === null || files === null ? null : stPlan(files, prefix)
 
   const refreshReport = async (importId: string) => {
     const read = await action.run((client) => client("GetStImportReport", { importId }), ["library"])
@@ -252,23 +281,27 @@ export function StImportPage() {
     if (!started.ok) return
     const { importId } = started.value
     sent.current = { importId, byPath: new Map(files.map((entry) => [entry.path, entry])) }
-    const totalBytes = files.reduce((sum, entry) => sum + entry.file.size, 0)
+    const totalBytes = files.reduce((sum, entry) => sum + entry.size, 0)
     const lost: Array<{ path: string; message: string }> = []
     let bytesBefore = 0
     let done = 0
-    const send = async (entry: StFolderFile, extra: Record<string, string>) => {
+    const send = async (entry: StFolderFile, extra: StExtra) => {
       setProgress({ file: entry.path, done, total: files.length, bytes: bytesBefore, totalBytes })
-      let answer = await sendStFile(importId, entry, extra, (bytes) =>
-        setProgress({ file: entry.path, done, total: files.length, bytes: bytesBefore + bytes, totalBytes })
+      let answer = await sendStFile(
+        importId,
+        entry,
+        extra,
+        (bytes) => setProgress({ file: entry.path, done, total: files.length, bytes: bytesBefore + bytes, totalBytes }),
+        readPart
       )
       // The server lost the chat's earlier parts (it restarted): once more from the start.
       if (answer._tag === "Done" && answer.result.outcome === "restart") {
-        answer = await sendStFile(importId, entry, extra, () => {})
+        answer = await sendStFile(importId, entry, extra, () => {}, readPart)
       }
       return answer
     }
     let deferred: Array<StFolderFile> = []
-    const sendAll = async (entries: ReadonlyArray<StFolderFile>, extra: Record<string, string>) => {
+    const sendAll = async (entries: ReadonlyArray<StFolderFile>, extra: StExtra) => {
       for (const entry of entries) {
         const answer = await send(entry, extra)
         if (answer._tag === "Unauthorized") {
@@ -278,7 +311,7 @@ export function StImportPage() {
         if (answer._tag === "Failed") lost.push({ path: entry.path, message: answer.message })
         if (answer._tag === "Done" && answer.result.outcome === "deferred") deferred.push(entry)
         else {
-          bytesBefore += entry.file.size
+          bytesBefore += entry.size
           done++
         }
       }
@@ -293,7 +326,7 @@ export function StImportPage() {
       if (going && deferred.length === waiting.length) {
         const orphans = deferred
         deferred = []
-        going = await sendAll(orphans, { orphan: "1" })
+        going = await sendAll(orphans, { orphan: true })
       }
     }
     setProgress(null)
@@ -301,11 +334,12 @@ export function StImportPage() {
     if (going) await refreshReport(importId)
   }
 
-  const choose = async (path: string, card: string) => {
+  const link = async (path: string, card: string) => {
     const current = sent.current
     const entry = current?.byPath.get(path)
-    if (!current || !entry) return "Pick the folder again to import this chat."
-    const answer = await sendStFile(current.importId, entry, { card }, () => {})
+    if (!current || !entry) return "Choose the folder again to import this chat."
+    // The report's candidates are the user's cards, or "none".
+    const answer = await sendStFile(current.importId, entry, { card: card as EntityId | "none" }, () => {}, readPart)
     if (answer._tag === "Unauthorized") {
       registry.refresh(sessionAtom)
       return "Your session has ended."
@@ -333,19 +367,50 @@ export function StImportPage() {
       <Card>
         <CardHeader
           title="SillyTavern data folder"
-          description="Pick ST's data folder (or ST itself, or one user's folder inside data). Its cards, personas, lorebooks, chat-completion presets, groups and chats are sent from this browser; nothing else is. Importing the same folder again adds only what's new."
+          description="ST's data folder, ST itself, or one user's folder inside data. Its cards, personas, lorebooks, chat-completion presets, groups and chats are imported; nothing else is read. Importing the same folder again adds only what's new."
         />
+        <form
+          className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end"
+          onSubmit={(event) => {
+            event.preventDefault()
+            void scan()
+          }}
+        >
+          <Field label="Folder path">
+            <Input
+              value={folderPath}
+              onChange={(event) => setFolderPath(event.target.value)}
+              placeholder="/home/you/SillyTavern/data"
+              className="w-full"
+              spellCheck={false}
+              autoComplete="off"
+              disabled={running}
+            />
+          </Field>
+          <Button
+            type="submit"
+            variant="primary"
+            className="justify-self-start"
+            disabled={running || folderPath.trim() === "" || action.pending}
+          >
+            Look in this folder
+          </Button>
+        </form>
+        <p className="mt-4 mb-2 text-sm text-muted">
+          Using a browser on another computer, where the folder is? Choose it here instead, and it's sent from this
+          browser.
+        </p>
         <FileDrop
           label="Choose the folder"
           description={running ? "Wait until this import is done." : "Your browser asks before it shares the folder."}
           directory
           disabled={running}
-          onFiles={pick}
+          onFiles={(picked) => choose(pickedFiles(picked))}
         />
       </Card>
-      {files.length > 0 && roots.length === 0 && (
+      {files !== null && roots.length === 0 && (
         <Alert tone="warning" title="No SillyTavern data here">
-          <p>This folder has no characters, chats or settings in ST's layout. Pick ST's data folder.</p>
+          <p>This folder has no characters, chats or settings in ST's layout. Choose ST's data folder.</p>
         </Alert>
       )}
       {roots.length > 0 && !running && report === null && (
@@ -372,7 +437,7 @@ export function StImportPage() {
             )}
             {plan && (
               <p className="text-sm text-muted">
-                {plan.send.length} files to import ({megabytes(plan.send.reduce((sum, f) => sum + f.file.size, 0))})
+                {plan.send.length} files to import ({megabytes(plan.send.reduce((sum, f) => sum + f.size, 0))})
                 {plan.unsupported.length > 0 && `, ${plan.unsupported.length} that only text completion uses`}.
               </p>
             )}
@@ -420,7 +485,7 @@ export function StImportPage() {
           </ul>
         </Alert>
       )}
-      {report && <ReportView report={report} onUnhide={(run) => void unhide(run)} onChoose={choose} />}
+      {report && <ReportView report={report} onUnhide={(run) => void unhide(run)} onChoose={link} />}
     </div>
   )
 }

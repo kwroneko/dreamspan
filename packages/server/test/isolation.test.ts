@@ -972,6 +972,25 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
         yield* owner.api.GetStImportReport({ importId })
       })
   },
+  ScanStFolder: { adminOnly: (actor) => refused(actor.api.ScanStFolder({ path: "/" }), "Forbidden") },
+  ImportStFolderFile: {
+    adminOnly: (actor, owner) =>
+      Effect.gen(function* () {
+        const { importId } = yield* owner.api.StartStImport({ unsupported: [] })
+        yield* refused(
+          actor.api.ImportStFolderFile({
+            importId,
+            root: "/",
+            path: "settings.json",
+            start: 0,
+            part: 0,
+            card: null,
+            orphan: false
+          }),
+          "Forbidden"
+        )
+      })
+  },
   UnhideImportedRun: {
     probe: (actor, owner) =>
       refused(actor.api.UnhideImportedRun({ chatId: owner.chat.chatId, throughSlotId: owner.chat.slotId }), "NotFound")

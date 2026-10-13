@@ -1,10 +1,11 @@
 // Importing a SillyTavern data folder (DESIGN §1.4, ARCHITECTURE.md §13): the RPCs that
-// start an import, read its report and act on the report's offers, merged into AppApi. The
-// files themselves go over HTTP (POST /st-import/file), like library uploads.
+// start an import, read the folder from its path, read the report and act on the report's
+// offers, merged into AppApi. Files picked in a browser on another machine go over HTTP
+// instead (POST /st-import/file), like library uploads.
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
 import { ChatId, EntityId, SlotId } from "./chat.ts"
-import { NotFound, ServerError } from "./errors.ts"
+import { Forbidden, NotFound, ServerError } from "./errors.ts"
 import { ImportIssueLevel } from "./importReport.ts"
 
 const StImportId = Schema.String.check(Schema.isPattern(/^[0-9a-f-]{36}$/))
@@ -84,7 +85,51 @@ export class StFileResult extends Schema.Class<StFileResult>("StFileResult")({
   message: Schema.String
 }) {}
 
+/** A file in a folder named by its path, that the import reads or lists. */
+export class StFolderEntry extends Schema.Class<StFolderEntry>("StFolderEntry")({
+  /** Relative to the folder, `/`-separated. */
+  path: Schema.String,
+  size: Schema.Number,
+  /** The parent a branch chat names (`main_chat`), so parents are imported first. */
+  mainChat: Schema.NullOr(Schema.String)
+}) {}
+
+/** The folder or one of its files can't be read: missing, not a folder, or too large. */
+export class StFolderUnreadable extends Schema.TaggedError<StFolderUnreadable>()("StFolderUnreadable", {
+  message: Schema.String
+}) {}
+
+const FolderPath = Schema.String.check(Schema.isMaxLength(4096))
+
 export class StImportApi extends RpcGroup.make(
+  /**
+   * Lists the files of an ST folder at a path on the machine the app runs on (DESIGN §1.4).
+   * Admin only: on an instance with several users, anyone else could read any user's files.
+   */
+  Rpc.make("ScanStFolder", {
+    payload: { path: FolderPath },
+    success: Schema.Struct({ root: Schema.String, files: Schema.Array(StFolderEntry) }),
+    error: Schema.Union([Forbidden, StFolderUnreadable])
+  }),
+  /**
+   * Imports one file of a scanned folder, or the part of a chat file from byte `start`:
+   * `next` is where the next part starts, and `last` says the file is done.
+   */
+  Rpc.make("ImportStFolderFile", {
+    payload: {
+      importId: StImportId,
+      /** The ST user's folder: the scanned root joined with the chosen user's prefix. */
+      root: FolderPath,
+      path: FolderPath,
+      start: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+      part: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+      /** The user's answer to a link choice: one of their cards, or `none`. */
+      card: Schema.NullOr(Schema.Union([EntityId, Schema.Literal("none")])),
+      orphan: Schema.Boolean
+    },
+    success: Schema.Struct({ result: StFileResult, next: Schema.Number, last: Schema.Boolean }),
+    error: Schema.Union([Forbidden, NotFound, StFolderUnreadable, ServerError])
+  }),
   /**
    * Starts an import for the caller, ending any earlier one of theirs. `unsupported` lists
    * the paths of files the client found and won't send, for the report.

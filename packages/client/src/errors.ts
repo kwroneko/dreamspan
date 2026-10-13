@@ -15,6 +15,7 @@ import {
 } from "@rp/shared/errors.ts"
 import { GenerationUnavailable, NotAmendable } from "@rp/shared/chatApi.ts"
 import { EditConflict, EditRefused, InvalidDocument } from "@rp/shared/editorApi.ts"
+import { StFolderUnreadable } from "@rp/shared/stImportApi.ts"
 import { Cause } from "effect"
 import { RpcClientError } from "effect/rpc"
 
@@ -64,6 +65,7 @@ const describeError = (error: unknown): AppError => {
   if (error instanceof ProviderError) return make("ProviderError", sentence(error.message), error.reason)
   if (error instanceof AccountRejected) return make("AccountRejected", sentence(error.message), error.reason)
   if (error instanceof Forbidden) return make("Forbidden", sentence(error.message))
+  if (error instanceof StFolderUnreadable) return make("StFolderUnreadable", sentence(error.message))
   if (error instanceof InvalidNetworkSettings) {
     return make("InvalidNetworkSettings", "These settings can't be used:", null, error.problems.map(sentence))
   }
