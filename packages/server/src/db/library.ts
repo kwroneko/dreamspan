@@ -148,5 +148,45 @@ export const makeLibraryQueries = (sql: SqlClient.SqlClient) => {
         AND json_extract(h.doc_json, '$.owner.card') = ${cardEntityId}
       ORDER BY e.id LIMIT 1`.pipe(Effect.flatMap(([row]) => (row ? ownedRef(userId, row.id) : Effect.succeed(null))))
 
-  return { ownedRef, refsWhere, loadDoc, planMerge, cardNote }
+  /**
+   * The chats a change to this ref reaches: those whose state names it, those with an
+   * override following it, and, for the entity's upstream, those the card joined. A chat
+   * counts even if the card left it since: better to say too many than too few.
+   */
+  const usedByChats = (userId: UserId, ref: Pick<RefRow, "id" | "ref_kind" | "entity_id">) =>
+    sql<{ n: number }>`
+      SELECT count(*) AS n FROM chats c
+      WHERE c.owner_user_id = ${userId} AND c.deleted_at IS NULL AND (
+        EXISTS (SELECT 1 FROM state_events s WHERE s.chat_id = c.id
+          AND s.key IN ('card.binding', 'preset.binding', 'lorebook.attach')
+          AND json_extract(s.value_json, '$.ref') = ${ref.id})
+        OR EXISTS (SELECT 1 FROM entity_refs o WHERE o.chat_id = c.id AND o.follows_ref_id = ${ref.id})
+        OR (${ref.ref_kind === "upstream" ? 1 : 0} AND EXISTS (SELECT 1 FROM state_events s
+          WHERE s.chat_id = c.id AND s.key = 'participant.join'
+            AND json_extract(s.value_json, '$.entity') = ${ref.entity_id})))`.pipe(Effect.map(([row]) => row!.n))
+
+  /**
+   * A live card's library entry, the one chats show it from (cards.ts): its upstream, or its
+   * oldest variant without one. Null when it isn't the user's live card.
+   */
+  const cardLibraryRef = (userId: UserId, entityId: string) =>
+    sql<{ id: string }>`
+      SELECT r.id FROM entity_refs r JOIN entities e ON e.id = r.entity_id
+      WHERE r.entity_id = ${entityId} AND e.owner_user_id = ${userId} AND e.kind = 'card'
+        AND e.deleted_at IS NULL AND r.ref_kind <> 'chat_override'
+      ORDER BY r.ref_kind = 'upstream' DESC, r.created_at, r.id LIMIT 1`.pipe(
+      Effect.flatMap(([row]) => (row ? ownedRef(userId, row.id) : Effect.succeed(null)))
+    )
+
+  /** The chat's own version of an entity, if it has one. */
+  const chatOverride = (userId: UserId, chatId: string, entityId: string) =>
+    sql<{ id: string }>`
+      SELECT r.id FROM entity_refs r JOIN entities e ON e.id = r.entity_id
+      WHERE r.entity_id = ${entityId} AND r.chat_id = ${chatId} AND r.ref_kind = 'chat_override'
+        AND e.owner_user_id = ${userId} AND e.deleted_at IS NULL
+      ORDER BY r.created_at, r.id LIMIT 1`.pipe(
+      Effect.flatMap(([row]) => (row ? ownedRef(userId, row.id) : Effect.succeed(null)))
+    )
+
+  return { ownedRef, refsWhere, loadDoc, planMerge, cardNote, usedByChats, cardLibraryRef, chatOverride }
 }

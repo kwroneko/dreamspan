@@ -86,6 +86,34 @@ export class ChatNote extends Schema.Class<ChatNote>("ChatNote")({
   active: Schema.Boolean
 }) {}
 
+/** A card's definition as a chat shows it, read-only: the fields ST's character panel shows. */
+export class CardDefinition extends Schema.Class<CardDefinition>("CardDefinition")({
+  description: Schema.String,
+  personality: Schema.String,
+  scenario: Schema.String,
+  firstMessage: Schema.String,
+  exampleDialogue: Schema.String,
+  creatorNotes: Schema.String,
+  /** How many alternate greetings it has besides the first message. */
+  alternateGreetings: Schema.Int
+}) {}
+
+/**
+ * A card in a chat, as the Cast tab shows it (DESIGN §2.1, §4): the library entry an edit
+ * "everywhere" changes and how many chats that reaches, the chat's own version if it has one,
+ * and the definition this chat uses (its own version's, else the library entry's).
+ */
+export class ChatCard extends Schema.Class<ChatCard>("ChatCard")({
+  entityId: EntityId,
+  /** The library entry: the card's upstream, or its oldest variant without one. */
+  refId: RefId,
+  /** Chats a change to that entry reaches ("used by N chats", ARCHITECTURE §14.2). */
+  usedByChats: Schema.Int,
+  /** This chat's own version of the card (a `chat_override`), if it has one. */
+  overrideRefId: Schema.NullOr(RefId),
+  definition: CardDefinition
+}) {}
+
 const Errors = [NotFound, ServerError] as const
 
 export class ChatSetupApi extends RpcGroup.make(
@@ -129,6 +157,25 @@ export class ChatSetupApi extends RpcGroup.make(
   Rpc.make("GetCast", {
     payload: { chatId: ChatId, slotId: Schema.NullOr(SlotId) },
     success: Cast,
+    error: Schema.Union([...Errors])
+  }),
+  /**
+   * These cards as the chat uses them (the Cast tab): cards that aren't the user's are left
+   * out; another user's chat is NotFound.
+   */
+  Rpc.make("ListChatCards", {
+    payload: { chatId: ChatId, entityIds: Schema.Array(EntityId) },
+    success: Schema.Array(ChatCard),
+    error: Schema.Union([...Errors])
+  }),
+  /**
+   * The chat's own version of a card, to edit "only in this chat" (DESIGN §4): the existing
+   * one, or a new `chat_override` following the card's library entry. The context assembler
+   * uses it for this chat from then on.
+   */
+  Rpc.make("EditCardForChat", {
+    payload: { chatId: ChatId, entityId: EntityId },
+    success: LibraryRef,
     error: Schema.Union([...Errors])
   }),
   /** Changes the cast or a setting from `slotId` on, on that branch (DESIGN §3.4). */

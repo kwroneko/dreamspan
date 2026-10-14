@@ -873,6 +873,31 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
         yield* refused(actor.api.GetCast({ chatId: actor.chat.chatId, slotId: owner.chat.slotId }), "NotFound")
       })
   },
+  ListChatCards: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        yield* refused(actor.api.ListChatCards({ chatId: owner.chat.chatId, entityIds: [actor.cardId] }), "NotFound")
+        // Their card named in the actor's own chat is left out.
+        const cards = yield* actor.api.ListChatCards({
+          chatId: actor.chat.chatId,
+          entityIds: [owner.cardId, actor.cardId]
+        })
+        assert.deepStrictEqual(
+          cards.map((card) => card.entityId),
+          [actor.cardId]
+        )
+      })
+  },
+  EditCardForChat: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        yield* refused(actor.api.EditCardForChat({ chatId: owner.chat.chatId, entityId: actor.cardId }), "NotFound")
+        yield* refused(actor.api.EditCardForChat({ chatId: actor.chat.chatId, entityId: owner.cardId }), "NotFound")
+        // Nothing of the owner's got an override.
+        const [card] = yield* owner.api.ListChatCards({ chatId: owner.chat.chatId, entityIds: [owner.cardId] })
+        assert.isNull(card!.overrideRefId)
+      })
+  },
   ChangeCast: {
     probe: (actor, owner) =>
       Effect.gen(function* () {

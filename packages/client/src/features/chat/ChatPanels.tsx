@@ -1,7 +1,6 @@
 // The chat's side panels: who's in it (DESIGN §2.3, §3.5) and its settings (DATA-MODEL
 // §5.3). Every change is a state event at the leaf shown, so it applies from there on, on
 // this branch. The context assembler reads the settings; this only writes them.
-import type { CastCard, EntityId } from "@rp/shared/chat.ts"
 import type { CastChange } from "@rp/shared/chatSetupApi.ts"
 import type { LibraryRef } from "@rp/shared/library.ts"
 import { GenerationDefaults } from "@rp/shared/generation.ts"
@@ -10,14 +9,13 @@ import { Effect } from "effect"
 import { useEffect, useState, useSyncExternalStore } from "react"
 import { useAction } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"
-import { Avatar } from "../../ui/Avatar.tsx"
 import { Button } from "../../ui/Button.tsx"
-import { Checkbox, RadioGroup, Switch } from "../../ui/Choice.tsx"
+import { RadioGroup, Switch } from "../../ui/Choice.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { Field, Textarea } from "../../ui/Field.tsx"
 import { Select } from "../../ui/Select.tsx"
-import { Badge } from "../../ui/Surface.tsx"
 import { useCast } from "./cast.ts"
+import { CastTab } from "./CastTab.tsx"
 import { EnableLcmDialog } from "./EnableLcmDialog.tsx"
 import { modelValue, parseModelValue } from "./modelChoices.ts"
 import type { ChatSession } from "./session.ts"
@@ -39,7 +37,7 @@ function Problem({ error }: { error: AppError | null }) {
   ) : null
 }
 
-/** Members: present or absent, played by the user or not, removed; and anyone added. */
+/** Who's in the chat (TEMPORARY: shows the Cast tab until the chat's side panel mounts it). */
 export function CastDialog({
   session,
   open,
@@ -49,78 +47,9 @@ export function CastDialog({
   open: boolean
   onOpenChange: (open: boolean) => void
 }) {
-  const { cast, cards } = useCast()
-  const { change, error } = useChange(session)
-  const action = useAction()
-  const [all, setAll] = useState<ReadonlyArray<CastCard>>([])
-  useEffect(() => {
-    if (!open) return
-    void action.run((client) => client("ListCards", undefined)).then((result) => result.ok && setAll(result.value))
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per opening
-  }, [open])
-  const participants = cast?.participants ?? []
-  const playedByMe = cast?.playedByMe ?? []
-  const addable = all.filter((card) => !participants.includes(card.entityId))
-  const togglePlayed = (id: EntityId, on: boolean) =>
-    change({ _tag: "PlayedByMe", entityIds: on ? [...playedByMe, id] : playedByMe.filter((x) => x !== id) })
   return (
-    <Dialog
-      open={open}
-      onOpenChange={onOpenChange}
-      title="Who's here"
-      description="Changes apply from the latest message on, on this branch."
-    >
-      {participants.length === 0 ? (
-        <p className="text-sm text-muted">No one has joined this chat.</p>
-      ) : (
-        <ul aria-label="Members" className="flex flex-col divide-y divide-border">
-          {participants.map((id) => {
-            const card = cards.get(id)
-            const name = card?.name ?? "Unknown card"
-            return (
-              <li key={id} className="flex flex-col gap-2 py-3 first:pt-0 last:pb-0">
-                <div className="flex items-center gap-2">
-                  <Avatar id={id} name={name} />
-                  <span className="min-w-0 flex-1 truncate font-medium">{name}</span>
-                  {card?.persona && <Badge>persona</Badge>}
-                  <Button
-                    variant="ghost"
-                    aria-label={`Remove ${name}`}
-                    onClick={() => void change({ _tag: "Leave", entityId: id })}
-                  >
-                    Remove
-                  </Button>
-                </div>
-                <div className="flex flex-wrap gap-x-6 gap-y-2 pl-10">
-                  <Switch
-                    checked={!cast!.absent.includes(id)}
-                    onCheckedChange={(present) => void change({ _tag: "Presence", entityId: id, present })}
-                  >
-                    Present
-                  </Switch>
-                  <Checkbox checked={playedByMe.includes(id)} onCheckedChange={(on) => void togglePlayed(id, on)}>
-                    I play them
-                  </Checkbox>
-                </div>
-              </li>
-            )
-          })}
-        </ul>
-      )}
-      {addable.length > 0 && (
-        <Field label="Add someone">
-          <Select
-            items={addable.map((card) => ({
-              value: card.entityId,
-              label: card.label === card.name ? card.name : `${card.name} (${card.label})`
-            }))}
-            value={null}
-            placeholder="Pick a card"
-            onValueChange={(entityId) => void change({ _tag: "Join", entityId })}
-          />
-        </Field>
-      )}
-      <Problem error={error ?? action.error} />
+    <Dialog open={open} onOpenChange={onOpenChange} title="Cast">
+      <CastTab session={session} />
       <DialogActions>
         <Button onClick={() => onOpenChange(false)}>Done</Button>
       </DialogActions>

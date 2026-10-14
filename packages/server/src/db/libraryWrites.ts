@@ -57,6 +57,35 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
     const lib = makeLibraryQueries(sql)
     const { drafts } = bin
 
+    /** The user's live chat, or NotFound. */
+    const liveChat = (userId: UserId, chatId: string) =>
+      sql<{
+        id: string
+      }>`SELECT id FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`.pipe(
+        Effect.flatMap(([chat]) => (chat ? Effect.void : Effect.fail(new NotFound({ entity: "chat", id: chatId }))))
+      )
+
+    /** A chat override following `ref`, at its head: changes for that chat only (DESIGN §4). */
+    const insertOverride = (ref: RefRow, chatId: string) =>
+      Effect.gen(function* () {
+        const id = uuidv7()
+        const at = Date.now()
+        yield* sql`INSERT INTO entity_refs ${sql.insert({
+          id,
+          entity_id: ref.entity_id,
+          ref_kind: "chat_override",
+          head_revision_id: ref.head_revision_id,
+          follows_ref_id: ref.id,
+          merge_base_revision_id: ref.head_revision_id,
+          label: ref.label,
+          subtitle: "",
+          chat_id: chatId,
+          created_at: at,
+          updated_at: at
+        })}`
+        return toLibraryRef(yield* reload(id))
+      })
+
     const insertRevision = (options: {
       readonly entityId: string
       readonly schemaVersion: number
@@ -473,27 +502,19 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
           if (ref.ref_kind === "chat_override") {
             return yield* new RefOperationRefused({ refId, reason: "This is already a chat override." })
           }
-          const [chat] = yield* sql<{
-            id: string
-          }>`SELECT id FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`
-          if (!chat) return yield* new NotFound({ entity: "chat", id: chatId })
-          const id = uuidv7()
-          const at = Date.now()
-          yield* sql`INSERT INTO entity_refs ${sql.insert({
-            id,
-            entity_id: ref.entity_id,
-            ref_kind: "chat_override",
-            head_revision_id: ref.head_revision_id,
-            follows_ref_id: ref.id,
-            merge_base_revision_id: ref.head_revision_id,
-            label: ref.label,
-            subtitle: "",
-            chat_id: chatId,
-            created_at: at,
-            updated_at: at
-          })}`
-          return toLibraryRef(yield* reload(id))
+          yield* liveChat(userId, chatId)
+          return yield* insertOverride(ref, chatId)
         }).pipe(transaction(sql, "CreateChatOverride")),
+
+      OpenCardOverride: ({ userId, chatId, entityId }) =>
+        Effect.gen(function* () {
+          yield* liveChat(userId, chatId)
+          const existing = yield* lib.chatOverride(userId, chatId, entityId)
+          if (existing !== null) return toLibraryRef(existing)
+          const library = yield* lib.cardLibraryRef(userId, entityId)
+          if (library === null) return yield* new NotFound({ entity: "card", id: entityId })
+          return yield* insertOverride(library, chatId)
+        }).pipe(transaction(sql, "OpenCardOverride")),
 
       PromoteOverride: ({ userId, refId, label, subtitle, expectedRowVersion }) =>
         Effect.gen(function* () {

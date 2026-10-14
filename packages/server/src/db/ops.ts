@@ -72,7 +72,7 @@ import {
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
 import { CastCard, ChatSummary, FrozenMacros, QueuedMessage } from "@rp/shared/chat.ts"
-import { CardForChat, FirstTurn } from "@rp/shared/chatSetupApi.ts"
+import { CardForChat, ChatCard, FirstTurn } from "@rp/shared/chatSetupApi.ts"
 import { AssemblyFailed } from "../assembler/types.ts"
 
 const StorageErrorReason = Schema.Literals(["busy", "constraint", "corrupt", "other"])
@@ -727,6 +727,16 @@ export class WriteOps extends RpcGroup.make(
     payload: { userId: UserId, refId: RefId, chatId: ChatId },
     success: LibraryRef,
     error: Schema.Union([NotFound, RefOperationRefused, StorageError])
+  }),
+  /**
+   * The chat's own version of a card (DESIGN §4: "only in this chat"): its existing
+   * override, or a new one following the card's library entry (its upstream, or its oldest
+   * variant). Another user's chat or card, or one in the bin, is NotFound.
+   */
+  Rpc.make("OpenCardOverride", {
+    payload: { userId: UserId, chatId: ChatId, entityId: EntityId },
+    success: LibraryRef,
+    error: Schema.Union([NotFound, StorageError])
   }),
   /** Turns a chat override into a library variant (DESIGN §4). */
   Rpc.make("PromoteOverride", {
@@ -1794,6 +1804,15 @@ export class ReadOps extends RpcGroup.make(
     payload: { userId: UserId, entityIds: Schema.Array(EntityId) },
     success: Schema.Array(CastCard),
     error: StorageError
+  }),
+  /**
+   * These cards as the live chat uses them: library entry, its "used by N chats", the chat's
+   * override and the definition in use. Cards that aren't the user's are left out.
+   */
+  Rpc.make("ChatCards", {
+    payload: { userId: UserId, chatId: ChatId, entityIds: Schema.Array(EntityId) },
+    success: Schema.Array(ChatCard),
+    error: Schema.Union([NotFound, StorageError])
   }),
   Rpc.make("GetCardForChat", {
     payload: { userId: UserId, entityId: EntityId },

@@ -336,6 +336,58 @@ describe("chat setup", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
   )
 
+  it.live("a card edited only in this chat: its own version, made once, shown there and nowhere else", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const writer = yield* Writer
+      const me = yield* api.Whoami()
+      const miraId = yield* card(api, "Mira", { ...mira, description: "Mira keeps the harbor bell." })
+      const start = () =>
+        api.StartChat({
+          cards: [miraId],
+          persona: null,
+          greeting: 0,
+          first: { _tag: "Send", content: "Hello.", speakerEntityId: null }
+        })
+      const here = (yield* start()).chat.id
+      const there = (yield* start()).chat.id
+      const [before] = yield* api.ListChatCards({ chatId: here, entityIds: [miraId] })
+      assert.isNull(before!.overrideRefId)
+      assert.strictEqual(before!.usedByChats, 2)
+      assert.strictEqual(before!.definition.description, "Mira keeps the harbor bell.")
+      assert.strictEqual(before!.definition.alternateGreetings, 2)
+
+      // Made on first use, opened after that.
+      const override = yield* api.EditCardForChat({ chatId: here, entityId: miraId })
+      assert.strictEqual(override.refKind, "chat_override")
+      assert.strictEqual(override.chatId, here)
+      assert.strictEqual(override.followsRefId, before!.refId)
+      assert.strictEqual((yield* api.EditCardForChat({ chatId: here, entityId: miraId })).id, override.id)
+
+      const doc = (yield* api.OpenEditor({ refId: override.id })).doc
+      yield* writer.EditRef({
+        userId: me.id as UserId,
+        refId: override.id,
+        doc: { ...doc, description: "Mira rings the harbor bell." },
+        expectedRowVersion: override.rowVersion,
+        message: null,
+        commitDraft: null
+      })
+      const [edited] = yield* api.ListChatCards({ chatId: here, entityIds: [miraId] })
+      assert.strictEqual(edited!.overrideRefId, override.id)
+      assert.strictEqual(edited!.refId, before!.refId)
+      assert.strictEqual(edited!.definition.description, "Mira rings the harbor bell.")
+      const [elsewhere] = yield* api.ListChatCards({ chatId: there, entityIds: [miraId] })
+      assert.isNull(elsewhere!.overrideRefId)
+      assert.strictEqual(elsewhere!.definition.description, "Mira keeps the harbor bell.")
+      // The library entry is unchanged.
+      assert.strictEqual(
+        (yield* api.OpenEditor({ refId: before!.refId })).doc["description"],
+        "Mira keeps the harbor bell."
+      )
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
+  )
+
   it.live("a chat's notes: its own and its characters', each on or off per branch, made and binned", () =>
     Effect.gen(function* () {
       const api = yield* client()

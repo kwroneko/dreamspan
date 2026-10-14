@@ -1,16 +1,33 @@
 // Read handlers for chat setup, speakers and the send queue (DESIGN §2.1, §2.2). They run
 // in the reader workers; every one touches only the acting user's rows.
 import { ChatSummary, type EntityId } from "@rp/shared/chat.ts"
-import { CardForChat } from "@rp/shared/chatSetupApi.ts"
+import { CardDefinition, CardForChat, ChatCard } from "@rp/shared/chatSetupApi.ts"
+import type { RefId } from "@rp/shared/library.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { loadCards } from "./cards.ts"
+import { makeLibraryQueries } from "./library.ts"
 import { NotFound, type ReadOps } from "./ops.ts"
 import { chatQueue } from "./queueRows.ts"
 import { query } from "./tx.ts"
 
+const text = (value: unknown) => (typeof value === "string" ? value : "")
+
+/** The read-only definition the Cast tab shows; anything malformed reads as empty. */
+const definitionOf = (doc: Record<string, unknown>) =>
+  new CardDefinition({
+    description: text(doc.description),
+    personality: text(doc.personality),
+    scenario: text(doc.scenario),
+    firstMessage: text(doc.first_mes),
+    exampleDialogue: text(doc.mes_example),
+    creatorNotes: text(doc.creator_notes),
+    alternateGreetings: Array.isArray(doc.alternate_greetings) ? doc.alternate_greetings.length : 0
+  })
+
 export const makeChatSetupReadHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
+  const lib = makeLibraryQueries(sql)
   return {
     ListCards: ({ userId }) =>
       loadCards(sql, userId, null).pipe(
@@ -59,6 +76,32 @@ export const makeChatSetupReadHandlers = Effect.gen(function* () {
         Effect.map((cards) => cards.map(({ card }) => card)),
         query("CastCards")
       ),
+
+    // A handful of cards per chat: a few indexed reads each, and the usage count's scan of
+    // the user's chats, as the editor makes it.
+    ChatCards: ({ userId, chatId, entityIds }) =>
+      Effect.gen(function* () {
+        const [chat] = yield* sql<{ n: number }>`
+          SELECT count(*) AS n FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`
+        if (chat?.n !== 1) return yield* new NotFound({ entity: "chat", id: chatId })
+        const cards: Array<ChatCard> = []
+        for (const entityId of [...new Set(entityIds)].slice(0, 200)) {
+          const library = yield* lib.cardLibraryRef(userId, entityId)
+          if (library === null) continue
+          const override = yield* lib.chatOverride(userId, chatId, entityId)
+          const doc = yield* lib.loadDoc((override ?? library).head_revision_id)
+          cards.push(
+            new ChatCard({
+              entityId,
+              refId: library.id as RefId,
+              usedByChats: yield* lib.usedByChats(userId, library),
+              overrideRefId: (override?.id ?? null) as RefId | null,
+              definition: definitionOf(doc)
+            })
+          )
+        }
+        return cards
+      }).pipe(query("ChatCards")),
 
     GetCardForChat: ({ userId, entityId }) =>
       Effect.gen(function* () {

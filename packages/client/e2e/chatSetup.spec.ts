@@ -96,7 +96,7 @@ test("a new chat from a card: the greeting follows the persona until the first s
   await expect(greeting).toContainText("The bell rings for Ana.")
   // Opening a card made no chat (DESIGN §2.1).
   await page.goto(`${server().url}/chats`)
-  await expect(page.getByText("No chats yet")).toBeVisible()
+  await expect(page.getByText("No chats yet", { exact: true })).toBeVisible()
   await page.goBack()
 
   await greeting.getByRole("button", { name: "Next greeting" }).click()
@@ -122,15 +122,14 @@ test("a new chat from a card: the greeting follows the persona until the first s
 
   // Later, playing Ana from here on doesn't rewrite what was said before.
   await page.getByRole("button", { name: "Cast", exact: true }).click()
-  const dialog = page.getByRole("dialog", { name: "Who's here" })
-  await dialog.getByLabel("Add someone").click()
-  await page.getByRole("option", { name: "Ana" }).click()
-  await expect(dialog.getByRole("list", { name: "Members" })).toContainText("Ana")
+  await page.getByRole("button", { name: "Add character" }).click()
+  await page.getByRole("list", { name: "Cards to add" }).getByRole("button", { name: /^Ana/ }).click()
+  await expect(page.getByRole("list", { name: "Characters in this chat" })).toContainText("Ana")
   await page.keyboard.press("Escape")
   await expect(first).toContainText("Mira waves at Bo from the pier.")
   await page.reload()
   await expect(replies(page).first()).toContainText("Mira waves at Bo from the pier.")
-  await expect(page.getByText("No chats yet")).toHaveCount(0)
+  await expect(page.getByText("No chats yet", { exact: true })).toHaveCount(0)
   await page.getByRole("button", { name: "Settings", exact: true }).click()
   await expect(page.getByRole("dialog", { name: "Chat settings" })).toBeVisible()
   await page.getByText("Speaker's card last").click()

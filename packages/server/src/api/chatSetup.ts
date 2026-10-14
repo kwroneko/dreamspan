@@ -127,6 +127,17 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
     GetCast: ({ chatId, slotId }) =>
       Effect.flatMap(userId, (id) => castAt(id, chatId, slotId)).pipe(internal("GetCast")),
 
+    ListChatCards: ({ chatId, entityIds }) =>
+      Effect.flatMap(userId, (id) => reader.ChatCards({ userId: id, chatId, entityIds })).pipe(
+        internal("ListChatCards")
+      ),
+
+    // "Only in this chat": the chat's own version, made on first use; the assembler prefers it.
+    EditCardForChat: ({ chatId, entityId }) =>
+      Effect.flatMap(userId, (id) => writer.OpenCardOverride({ userId: id, chatId, entityId })).pipe(
+        internal("EditCardForChat")
+      ),
+
     ChangeCast: ({ chatId, slotId, change }) =>
       Effect.gen(function* () {
         const id = yield* userId
