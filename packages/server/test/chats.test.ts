@@ -19,7 +19,7 @@ import { GenerationFailed, Generator } from "../src/chat/Generator.ts"
 import { AppConfig, type AppConfigShape } from "../src/config.ts"
 import { Writer } from "../src/db/Database.ts"
 import { ServerLive } from "../src/server.ts"
-import { client, outcome, posted, serverLayer, testConfig } from "./support/config.ts"
+import { client, outcome, post, posted, serverLayer, testConfig } from "./support/config.ts"
 import { cardDoc } from "./support/docs.ts"
 import { tempDir } from "./support/tempDir.ts"
 
@@ -484,6 +484,39 @@ describe("chats", () => {
       })
       assert.strictEqual(mine.side, "user")
       assert.strictEqual(mine.version.speakerEntityId, sent.entry.version.speakerEntityId)
+    }).pipe(Effect.scoped, withGenerator(config, Generator.none))
+  })
+
+  it.live("a message editor's text kept in a browser is saved to its draft by POST /library/drafts", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const chat = yield* api.CreateChat({ title: "Copies" })
+      const sent: { entry: PathEntry } = yield* posted(
+        api.SendMessage({ chatId: chat.id, parentSlotId: null, branch: false, content: "First." })
+      )
+      const target = { _tag: "Write", slotId: sent.entry.slotId } as const
+      const saved = yield* api.SaveMessageDraft({
+        target,
+        draftId: null,
+        content: "Typed online.",
+        expectedRowVersion: null,
+        expectedSession: null
+      })
+      // The copy names the draft it was typed on, as Browser recovery's Retry saving sends it.
+      const copy = {
+        target,
+        draftId: saved.id,
+        content: "Typed online. And more while the server was down.",
+        expectedRowVersion: saved.rowVersion,
+        expectedSession: saved.session
+      }
+      const response = yield* post("/library/drafts", { drafts: [], messages: [copy] })
+      assert.strictEqual(response.status, 204)
+      assert.deepStrictEqual(
+        (yield* api.MessageDrafts({ chatId: chat.id })).map((d) => [d.key.targetKind, d.key.targetId, d.content]),
+        [["scratchpad", sent.entry.slotId, copy.content]]
+      )
     }).pipe(Effect.scoped, withGenerator(config, Generator.none))
   })
 

@@ -344,7 +344,8 @@ function OpenChat({
   panel: PanelTab | null
 }) {
   const registry = useContext(RegistryContext)
-  const [session] = useState(() => new ChatSession(chatId, leaf, registry))
+  const userId = useSession().user.id
+  const [session] = useState(() => new ChatSession(chatId, leaf, registry, userId))
   useLookingAt(chatId)
   // The slot the chat opened at; a deep link within the open chat moves the window instead.
   const [initialSlot] = useState(slot)

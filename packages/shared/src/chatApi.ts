@@ -7,7 +7,7 @@ import { BinItem } from "./bin.ts"
 import { Chat, ChatId, ChatSummary, EntityId, PathEntry, QueuedMessage, SlotId, Version, VersionId } from "./chat.ts"
 import { LeafMoved, NotFound, ServerError, StaleWrite } from "./errors.ts"
 import { TextTooLong } from "./composerApi.ts"
-import { Draft } from "./drafts.ts"
+import { Draft, DraftKey } from "./drafts.ts"
 import { NextContext } from "./inspectorApi.ts"
 import { ModelChoice } from "./lcmSettings.ts"
 
@@ -108,6 +108,24 @@ export const MessageDraftTarget = Schema.Union([
   Schema.TaggedStruct("Write", { slotId: SlotId })
 ])
 export type MessageDraftTarget = typeof MessageDraftTarget.Type
+
+/** A message editor's draft: an edit's is keyed by the version edited, a written version's by the slot. */
+export const messageDraftKey = (target: MessageDraftTarget) =>
+  target._tag === "Edit"
+    ? new DraftKey({ targetKind: "version_edit", targetId: target.versionId, field: "" })
+    : new DraftKey({ targetKind: "scratchpad", targetId: target.slotId, field: "" })
+
+/**
+ * Text typed into a message editor, onto the draft as the tab last saw it (null before it
+ * had one). Also what a browser copy replays (`messages` in `POST /library/drafts`).
+ */
+export const MessageDraftSave = Schema.Struct({
+  target: MessageDraftTarget,
+  draftId: Schema.NullOr(Schema.String),
+  content: Schema.String,
+  expectedRowVersion: Schema.NullOr(Schema.Int),
+  expectedSession: Schema.NullOr(Schema.Int)
+})
 
 const DraftCommit = Schema.optionalKey(Schema.Struct({ draftId: Schema.String, session: Schema.Int }))
 
@@ -286,13 +304,7 @@ export class ChatApi extends RpcGroup.make(
   }),
   /** Text typed into a message editor, onto the draft as this tab last saw it (null before it had one). */
   Rpc.make("SaveMessageDraft", {
-    payload: {
-      target: MessageDraftTarget,
-      draftId: Schema.NullOr(Schema.String),
-      content: Schema.String,
-      expectedRowVersion: Schema.NullOr(Schema.Int),
-      expectedSession: Schema.NullOr(Schema.Int)
-    },
+    payload: MessageDraftSave.fields,
     success: Draft,
     error: Schema.Union([...Errors, TextTooLong])
   }),

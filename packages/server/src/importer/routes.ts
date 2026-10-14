@@ -17,6 +17,7 @@ import { DraftKey } from "@rp/shared/drafts.ts"
 import { EditorDraftSave } from "@rp/shared/editorApi.ts"
 import { ComposerBeacon } from "@rp/shared/composerApi.ts"
 import { SummaryDraftSave } from "@rp/shared/lcm.ts"
+import { MessageDraftSave, messageDraftKey } from "@rp/shared/chatApi.ts"
 import { parseField } from "@rp/shared/editing.ts"
 import { ByteSize, Effect, Layer, Option, Schedule, Schema, Semaphore } from "effect"
 import { NodeHttpServerRequest } from "@effect/platform-node"
@@ -110,7 +111,9 @@ const LeavingDrafts = Schema.Struct({
   /** Chats' composers (DESIGN §6.2): one per open chat at most, in practice. */
   composers: Schema.optionalKey(Schema.Array(ComposerBeacon).check(Schema.isMaxLength(50))),
   /** Summaries' edits, from this browser's copies (`summaryDraft.ts`). */
-  summaries: Schema.optionalKey(Schema.Array(SummaryDraftSave).check(Schema.isMaxLength(50)))
+  summaries: Schema.optionalKey(Schema.Array(SummaryDraftSave).check(Schema.isMaxLength(50))),
+  /** Message editors' text, from this browser's copies (`messageDraft.ts`). */
+  messages: Schema.optionalKey(Schema.Array(MessageDraftSave).check(Schema.isMaxLength(50)))
 })
 
 const CONTENT_TYPES: Record<ExportFormat, readonly [mime: string, extension: string]> = {
@@ -542,7 +545,9 @@ export const layer = Layer.unwrap(
 
     /**
      * Editor and composer drafts a page sends as it closes (`fetch` with `keepalive`), since its
-     * WebSocket goes with it. Each is saved as `SaveEditorDraft` or `SaveComposer` would: the
+     * WebSocket goes with it, and the browser copies Browser recovery retries (summaries' and
+     * message editors' too). Each is saved as its own RPC (`SaveEditorDraft`, `SaveComposer`,
+     * `SaveSummaryDraft`, `SaveMessageDraft`) would: the
      * writer decides a conflict with another tab's save in the same transaction (drafts.ts).
      */
     const leavingDrafts = Effect.gen(function* () {
@@ -579,6 +584,18 @@ export const layer = Layer.unwrap(
           expectedRowVersion: summary.expectedRowVersion,
           expectedSession: summary.expectedSession,
           baseRevision: summary.baseRevisionId
+        })
+        recovered += saved.recovered
+      }
+      for (const message of input.value.messages ?? []) {
+        const saved = yield* writer.SaveDraft({
+          userId: user.id,
+          key: messageDraftKey(message.target),
+          draftId: message.draftId,
+          content: message.content,
+          expectedRowVersion: message.expectedRowVersion,
+          expectedSession: message.expectedSession,
+          baseRevision: null
         })
         recovered += saved.recovered
       }

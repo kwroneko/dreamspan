@@ -60,15 +60,18 @@ const window = (entries: Array<PathEntry>) =>
 
 /** A session whose reads wait until the test answers them. */
 const session = () => {
-  const s = new ChatSession(chatId, null, AtomRegistry.make())
+  const s = new ChatSession(chatId, null, AtomRegistry.make(), "user")
   const answers: Array<(window: PathWindow) => void> = []
   const internals = s as unknown as {
     read: () => Promise<PathWindow>
     refreshContext: () => Promise<void>
+    refreshEditors: () => Promise<void>
     call: () => Promise<unknown>
     receive: (batch: ReadonlyArray<ChatEvent>, anchor: SlotId | null) => void
   }
   internals.refreshContext = async () => {}
+  // The message editors' drafts are read with their own call, which the stub doesn't answer.
+  internals.refreshEditors = async () => {}
   internals.read = () => new Promise((answer) => answers.push(answer))
   internals.call = () => Promise.resolve({ ok: true, value: chat })
   return { s, answers, receive: (event: ChatEvent) => internals.receive([event], null) }
@@ -111,7 +114,7 @@ describe("ChatSession", () => {
   })
 
   it("doesn't let a queue read older than a Queue event bring back what it removed", async () => {
-    const s = new ChatSession(chatId, null, AtomRegistry.make())
+    const s = new ChatSession(chatId, null, AtomRegistry.make(), "user")
     const internals = s as unknown as {
       call: () => Promise<unknown>
       refreshQueue: () => Promise<void>

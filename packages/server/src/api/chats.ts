@@ -3,9 +3,8 @@
 // to the chat's subscribers, from every tab of the user, after it's committed.
 import { type AppApi, CurrentUser } from "@rp/shared/api.ts"
 import type { ChatId, EntityId, NewVersion, SlotId } from "@rp/shared/chat.ts"
-import { BranchSwitch, GenerationUnavailable, type MessageDraftTarget } from "@rp/shared/chatApi.ts"
+import { BranchSwitch, GenerationUnavailable, messageDraftKey } from "@rp/shared/chatApi.ts"
 import { TextTooLong } from "@rp/shared/composerApi.ts"
-import { DraftKey } from "@rp/shared/drafts.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { Effect, Option, Stream } from "effect"
 import { CacheWarmth } from "../chat/CacheWarmth.ts"
@@ -30,12 +29,6 @@ const userText = (
   origin,
   ...(sourceVersionId ? { sourceVersionId } : {})
 })
-
-/** A message editor's draft: an edit's is keyed by the version edited, a written version's by the slot. */
-const messageDraftKey = (target: MessageDraftTarget) =>
-  target._tag === "Edit"
-    ? new DraftKey({ targetKind: "version_edit", targetId: target.versionId, field: "" })
-    : new DraftKey({ targetKind: "scratchpad", targetId: target.slotId, field: "" })
 
 const generating = {
   speakerEntityId: null,

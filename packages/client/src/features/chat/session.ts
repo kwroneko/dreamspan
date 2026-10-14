@@ -37,7 +37,8 @@ import { AppClient } from "../../rpc.ts"
 import { sessionAtom } from "../../session.ts"
 import { mountedBodies, PERF, perf } from "./perf.ts"
 import type { ComposerSource } from "./composerDraft.ts"
-import { editorKey, MessageDraft, type MessageEditorKey, targetOf } from "./messageDraft.ts"
+import { type Copy, copiesOf, pendingOf } from "../editor/backup.ts"
+import { editorKey, MessageDraft, messageCopies, type MessageEditorKey, targetOf } from "./messageDraft.ts"
 
 /** How many slots one read asks for. */
 const PAGE = 60
@@ -143,8 +144,15 @@ export class ChatSession {
     return this.chatId
   }
 
-  constructor(chatId: ChatId, requestedLeaf: SlotId | null, registry: AtomRegistry.AtomRegistry) {
+  constructor(
+    chatId: ChatId,
+    requestedLeaf: SlotId | null,
+    registry: AtomRegistry.AtomRegistry,
+    /** The user signed in: whose browser copies of the message editors' text to replay. */
+    userId: string
+  ) {
     this.chatId = chatId
+    this.userId = userId
     this.requestedLeaf = requestedLeaf
     this.registry = registry
   }
@@ -475,6 +483,9 @@ export class ChatSession {
   // scrolled away; read from the server's drafts when the chat opens, so a reload opens them again.
 
   private readonly editors = new Map<MessageEditorKey, MessageDraft>()
+  private readonly userId: string
+  /** This browser's copies of the editors' text were sent (once, as the chat opens). */
+  private editorsRestored = false
   private readonly editorListeners = new Set<() => void>()
   private readonly saveEditors = () => {
     for (const editor of this.editors.values()) void editor.save()
@@ -501,7 +512,7 @@ export class ChatSession {
     const key = editorKey(target)
     const open = this.editors.get(key)
     if (open) return open
-    const editor = new MessageDraft(this, target, initial, null)
+    const editor = new MessageDraft(this, this.userId, target, initial, null)
     this.editors.set(key, editor)
     this.editorsChanged()
     return editor
@@ -525,8 +536,32 @@ export class ChatSession {
     for (const draft of result.value) {
       const target = targetOf(draft)
       if (target === null || this.editors.has(editorKey(target))) continue
-      this.editors.set(editorKey(target), new MessageDraft(this, target, draft.content, draft))
+      this.editors.set(editorKey(target), new MessageDraft(this, this.userId, target, draft.content, draft))
       changed = true
+    }
+    // Once the chat's drafts are read: text typed here that never reached the server goes
+    // to it now, each editor opened again with it, a draft or not.
+    const restore = !this.editorsRestored
+    this.editorsRestored = true
+    const copies = new Map<MessageEditorKey, { target: MessageDraftTarget; copies: Array<Copy> }>()
+    if (restore)
+      for (const copy of await copiesOf(this.userId, messageCopies(this.chatId))) {
+        const save = pendingOf(copy)
+        if (save?.kind !== "message") continue
+        const key = editorKey(save.payload.target)
+        const entry = copies.get(key) ?? { target: save.payload.target, copies: [] }
+        entry.copies.push(copy)
+        copies.set(key, entry)
+      }
+    if (this.disposed) return
+    for (const [key, { target, copies: theirs }] of copies) {
+      let editor = this.editors.get(key)
+      if (editor === undefined) {
+        editor = new MessageDraft(this, this.userId, target, "", null)
+        this.editors.set(key, editor)
+        changed = true
+      }
+      void editor.restore(theirs)
     }
     if (changed) this.editorsChanged()
   }

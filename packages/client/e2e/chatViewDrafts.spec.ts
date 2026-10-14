@@ -1,7 +1,8 @@
 // What a message keeps whatever happens around it: the text typed into its editor across a
-// reload, its version arrows on every reply, its speaker and side when the version it
-// started with is deleted, the text streamed so far when it's copied, and, on a phone, the
-// start of why it isn't sent when a tap reveals its actions.
+// reload, and across a closed tab while the server was down, its version arrows on every
+// reply, its speaker and side when the version it started with is deleted, the text
+// streamed so far when it's copied, and, on a phone, the start of why it isn't sent when a
+// tap reveals its actions.
 import { expect, type Page, test } from "@playwright/test"
 import type { ChatId } from "@rp/shared/chat.ts"
 import { Effect } from "effect"
@@ -63,6 +64,40 @@ test("the text of a version being written, and of an edit, survives a reload and
   await page.reload()
   await expect(row.locator(".markdown")).toHaveText("An irreplaceable draft assembled from several swipes.")
   await expect(row.getByLabel("Message text", { exact: true })).toHaveCount(0)
+})
+
+test("text typed into a message editor while the server is down survives closing the tab", async ({
+  page,
+  context
+}) => {
+  const chat = await create()
+  await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+    api.SendMessage({ chatId: chat.id, parentSlotId: null, branch: false, content: "The original turn." })
+  )
+  await open(page, chat.id)
+  const row = page.locator("article[data-slot]").first()
+  await messageMenu(row, "Write your own version")
+  await row.getByLabel("Your version", { exact: true }).fill("Server-saved prefix.")
+  await page.waitForTimeout(1000)
+  // The server goes away with the tab still open; what's typed now never reaches it.
+  await server().pause()
+  const text = "Server-saved prefix. An irreplaceable paragraph written while the connection is down."
+  await row.getByLabel("Your version", { exact: true }).fill(text)
+  await page.waitForTimeout(1000)
+  await page.close()
+  await server().restart()
+
+  // This browser kept a copy: opening the chat again sends it, and the editor has it all.
+  const reopened = await context.newPage()
+  await reopened.goto(`${server().url}/chats/${chat.id}`)
+  const again = reopened.locator("article[data-slot]").first()
+  await expect(again.getByLabel("Your version", { exact: true })).toHaveValue(text)
+  // On the server now: once the version is saved, a reload doesn't bring the editor back.
+  await again.getByRole("button", { name: "Add as a new version" }).click()
+  await expect(again.locator(".markdown")).toHaveText(text)
+  await reopened.reload()
+  await expect(again.locator(".markdown")).toHaveText(text)
+  await expect(again.getByLabel("Your version", { exact: true })).toHaveCount(0)
 })
 
 test("an older reply keeps its version arrows with one version", async ({ page }) => {

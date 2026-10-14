@@ -8,6 +8,7 @@ import { ComposerBeacon } from "@rp/shared/composerApi.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import { EditorDraftSave } from "@rp/shared/editorApi.ts"
 import { SummaryDraftSave } from "@rp/shared/lcm.ts"
+import { MessageDraftSave } from "@rp/shared/chatApi.ts"
 import { Option, Schema } from "effect"
 
 const PendingSave = Schema.Union([
@@ -18,6 +19,7 @@ const PendingSave = Schema.Union([
     payload: Schema.Struct({ entityId: Schema.String, name: Schema.String, content: Schema.String })
   }),
   Schema.Struct({ kind: Schema.Literal("summary"), payload: SummaryDraftSave }),
+  Schema.Struct({ kind: Schema.Literal("message"), payload: MessageDraftSave }),
   // Text typed into a setting saved only by its Save button (Settings → Chats): there's no
   // server draft to replay it to, so it stays here until saved or deleted, and the page
   // shows it again in its field.
@@ -200,7 +202,8 @@ export const flushCopies = async (userId: string) => {
     const body = JSON.stringify({
       drafts: save.kind === "editor" ? [save.payload] : [],
       composers: save.kind === "composer" ? [save.payload] : [],
-      summaries: save.kind === "summary" ? [save.payload] : []
+      summaries: save.kind === "summary" ? [save.payload] : [],
+      messages: save.kind === "message" ? [save.payload] : []
     })
     try {
       const response = await fetch("/library/drafts", {

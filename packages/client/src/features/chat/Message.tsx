@@ -738,6 +738,7 @@ export const Message = memo(function Message({
                   : await session.writeVersion(entry, text, draft)
               report(outcome)
               if (!outcome.ok) return
+              editor.saved()
               // Saved without naming its draft (it didn't hold exactly this text): it's ended unsaved.
               if (draft === null) await editor.discard()
               session.closeEditor(editor)

@@ -1628,6 +1628,26 @@ const routes: Record<string, Probe> = {
       assert.strictEqual(response.status, 404)
       assert.deepStrictEqual(yield* owner.api.GetSummaryDraft({ summaryId: owner.summary.id }), before)
     }),
+  "POST /library/drafts, with messages": (actor, owner) =>
+    Effect.gen(function* () {
+      const before = yield* owner.api.MessageDrafts({ chatId: owner.chat.chatId })
+      for (const target of [
+        { _tag: "Edit", versionId: owner.chat.versionId },
+        { _tag: "Write", slotId: owner.chat.slotId }
+      ]) {
+        const response = yield* http(
+          actor,
+          "/library/drafts",
+          JSON.stringify({
+            drafts: [],
+            messages: [{ target, draftId: null, content: "planted", expectedRowVersion: null, expectedSession: null }]
+          }),
+          "application/json"
+        )
+        assert.strictEqual(response.status, 404)
+      }
+      assert.deepStrictEqual(yield* owner.api.MessageDrafts({ chatId: owner.chat.chatId }), before)
+    }),
   "POST /library/export": (actor, owner) =>
     Effect.gen(function* () {
       const response = yield* http(
