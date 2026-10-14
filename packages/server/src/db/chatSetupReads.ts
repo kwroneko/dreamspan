@@ -178,7 +178,8 @@ export const makeChatSetupReadHandlers = Effect.gen(function* () {
               refId: library.id as RefId,
               usedByChats: yield* lib.usedByChats(userId, library),
               overrideRefId: (override?.id ?? null) as RefId | null,
-              binding: binding?.revision ? "revision" : binding?.ref ? "ref" : "default",
+              // A binding to the library entry itself reads the library entry: not another version.
+              binding: binding?.revision ? "revision" : binding?.ref && binding.ref !== library.id ? "ref" : "default",
               usesOverride,
               definition: definitionOf(yield* lib.loadDoc(used?.revisionId ?? library.head_revision_id))
             })

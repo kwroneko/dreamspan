@@ -177,6 +177,8 @@ describe("the Cast tab's cards are the versions the model reads", () => {
     Effect.gen(function* () {
       const s = yield* setup
       yield* s.bind({ ref: s.made.ref.id })
+      // Bound to the library entry itself: that's the library entry, not another version.
+      assert.strictEqual((yield* s.shown()).binding, "default")
       const opened = yield* s.api.EditCardForChat({ chatId: s.chatId, slotId: yield* s.leaf(), entityId: s.entityId })
       assert.isTrue(opened.bound)
       yield* s.edit(opened.ref.id, { description: "Edited local pilot." })

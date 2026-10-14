@@ -139,7 +139,8 @@ export class ChatCard extends Schema.Class<ChatCard>("ChatCard")({
   overrideRefId: Schema.NullOr(RefId),
   /**
    * How the chat's state picks the version there: `default` (its own version if it has
-   * one, else the upstream), or bound to a `ref` (a variant, say) or a fixed `revision`.
+   * one, else the library entry; also when it's bound to the library entry itself), or bound
+   * to another `ref` (a variant, say) or a fixed `revision`.
    */
   binding: Schema.Literals(["default", "ref", "revision"]),
   /** The definition in use is this chat's own version, at its latest edit. */
