@@ -104,14 +104,30 @@ export const bypassOnlyLookup =
       callback(null, allowed[0]!.address, allowed[0]!.family)
     })
 
+/**
+ * How long a response may go silent: before its headers, and between body chunks. A local
+ * model can spend minutes reading a long prompt before it sends anything, and undici's
+ * default of 300 s cut such a request off, only for the retry to start the prompt again.
+ * Stopping a generation still aborts at once.
+ */
+const RESPONSE_IDLE_TIMEOUT_MS = 30 * 60_000
+
+// Set per request, so it applies on every route: proxy agents don't pass their options
+// down to the pools they make for each origin.
+const idleTimeouts: Dispatcher.DispatcherComposeInterceptor = (dispatch) => (options, handler) =>
+  dispatch({ ...options, headersTimeout: RESPONSE_IDLE_TIMEOUT_MS, bodyTimeout: RESPONSE_IDLE_TIMEOUT_MS }, handler)
+
 const makeDispatcher = (route: Route, bypass: () => BypassList): Dispatcher => {
   if (route.via === "direct") {
-    return route.pinned ? new Agent({ connect: { lookup: bypassOnlyLookup(bypass) as never } }) : new Agent()
+    const agent = route.pinned ? new Agent({ connect: { lookup: bypassOnlyLookup(bypass) as never } }) : new Agent()
+    return agent.compose(idleTimeouts)
   }
   const url = new URL(route.proxy)
-  return url.protocol === "socks5:" || url.protocol === "socks5h:"
-    ? new Socks5ProxyAgent(url)
-    : new ProxyAgent({ uri: url.href })
+  const agent =
+    url.protocol === "socks5:" || url.protocol === "socks5h:"
+      ? new Socks5ProxyAgent(url)
+      : new ProxyAgent({ uri: url.href })
+  return agent.compose(idleTimeouts)
 }
 
 export const layer = Layer.effect(
