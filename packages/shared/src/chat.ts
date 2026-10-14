@@ -141,6 +141,11 @@ export class PathEntry extends Schema.Class<PathEntry>("PathEntry")({
    */
   side: Schema.Literals(["user", "assistant"]),
   /**
+   * Who its first version, deleted or not, names as the speaker: whom the message shows as
+   * when no live version names anyone (one written before written versions kept the speaker).
+   */
+  firstSpeakerEntityId: Schema.NullOr(EntityId),
+  /**
    * Whether this slot enters an assembled context. False for excluded slots and
    * for selections that are failed or still empty (DATA-MODEL §15, invariant 2).
    */

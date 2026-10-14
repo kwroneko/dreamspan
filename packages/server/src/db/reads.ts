@@ -60,7 +60,8 @@ const pathColumns = `v.id, v.slot_id, v.ordinal, v.status, v.speaker_entity_id, 
   (SELECT count(*) FROM versions c WHERE c.slot_id = s.id AND c.deleted_at IS NULL) AS version_count,
   ${siblingCount()} AS branch_count, ${siblingCount("AND x.id < s.id")} AS branch_index,
   (SELECT f.writer = 'human' AND f.origin <> 'greeting' FROM versions f WHERE f.slot_id = s.id
-    ORDER BY f.ordinal LIMIT 1) AS user_side`
+    ORDER BY f.ordinal LIMIT 1) AS user_side,
+  (SELECT f.speaker_entity_id FROM versions f WHERE f.slot_id = s.id ORDER BY f.ordinal LIMIT 1) AS first_speaker`
 
 /** The window of at most `limit` slots ending at `leaf`, root first, deleted ones included. */
 export const pathWindow = (sql: SqlClient.SqlClient, chatId: ChatId, leaf: SlotId, limit: number) =>

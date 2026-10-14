@@ -456,9 +456,12 @@ export const Message = memo(function Message({
   const report = (outcome: Outcome<unknown>) => setError(outcome.ok ? null : outcome.error)
   const { versions, position, load } = useVersions(session, entry, report)
   // Edits and versions the user writes keep the message's speaker; older ones may have none,
-  // and then another version's names it.
+  // and then another version's names it, or the first version's, deleted or not, so deleting
+  // the original never makes a character's message the model's.
   const speakerId =
-    version.speakerEntityId ?? versions?.find((v) => v.speakerEntityId !== null)?.speakerEntityId ?? null
+    version.speakerEntityId ??
+    versions?.find((v) => v.speakerEntityId !== null)?.speakerEntityId ??
+    entry.firstSpeakerEntityId
   const speaker = speakerId === null ? undefined : cast.cards.get(speakerId)
   // Its side as the context reads it (stages.ts `sideOf`): a card the user plays speaks on
   // the user's side, another of the cast on the model's, else the message's own, which its

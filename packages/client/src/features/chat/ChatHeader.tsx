@@ -41,8 +41,7 @@ function BranchMenu({
   if (forks.length === 0 && !off) return null
   const last = forks.at(-1)
   const speaker = (entry: PathEntry) =>
-    (entry.version.speakerEntityId &&
-      view.cast?.cards.find((c) => c.entityId === entry.version.speakerEntityId)?.name) ||
+    view.cast?.cards.find((c) => c.entityId === (entry.version.speakerEntityId ?? entry.firstSpeakerEntityId))?.name ||
     (entry.version.writer === "model" ? "Model" : "You")
   const summary = last ? `Branch ${last.branchIndex + 1} of ${last.branchCount}` : "Another branch"
   const label = `${summary}${last ? `, at message #${last.depth + 1}` : ""}${off ? ", not the latest" : ""}: switch branch`

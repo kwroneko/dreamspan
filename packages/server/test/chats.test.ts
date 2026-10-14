@@ -487,6 +487,72 @@ describe("chats", () => {
     }).pipe(Effect.scoped, withGenerator(config, Generator.none))
   })
 
+  it.live(
+    "a message names its first version's speaker, so one written before versions kept it isn't the model's",
+    () => {
+      const config = testConfig()
+      return Effect.gen(function* () {
+        const api = yield* client()
+        const writer = yield* Writer
+        const userId = (yield* api.Whoami()).id as UserId
+        const { entityId } = yield* writer.CreateEntity({
+          userId,
+          kind: "card",
+          label: "Mira",
+          subtitle: "",
+          doc: cardDoc("Mira"),
+          schemaVersion: 1,
+          origin: "user",
+          sourcePath: null
+        })
+        const mira = entityId as EntityId
+        const chat = yield* writer.CreateChat({
+          userId,
+          kind: "rp",
+          status: "active",
+          title: "Legacy",
+          participants: [mira],
+          greeting: new NewVersion({
+            speakerEntityId: mira,
+            writer: "model",
+            content: "Original reply.",
+            status: "complete",
+            macroMode: "verbatim",
+            origin: "greeting"
+          })
+        })
+        const slotId = chat.activeLeafSlotId!
+        const [original] = yield* api.ListVersions({ slotId })
+        // A version written by hand as WriteVersion saved it before it kept the speaker: none.
+        yield* writer.AddSelectedVersion({
+          userId,
+          slotId,
+          expectedRowVersion: 1,
+          version: new NewVersion({
+            speakerEntityId: null,
+            writer: "human",
+            content: "A reply written before the speaker was kept.",
+            status: "complete",
+            macroMode: "verbatim",
+            origin: "user_written"
+          })
+        })
+        yield* api.DeleteVersion({ versionId: original!.id })
+        const window = yield* api.ReadPath({ chatId: chat.id, leafSlotId: null, range: { _tag: "Bottom" }, limit: 10 })
+        const [entry] = window.entries
+        assert.strictEqual(entry!.version.speakerEntityId, null)
+        assert.strictEqual(entry!.versionCount, 1)
+        assert.strictEqual(entry!.firstSpeakerEntityId, mira)
+        assert.strictEqual(entry!.side, "assistant")
+        // A message the user sent names its own first speaker: nobody, as the user.
+        const sent: { entry: PathEntry } = yield* posted(
+          api.SendMessage({ chatId: chat.id, parentSlotId: slotId, branch: false, content: "Hm." })
+        )
+        assert.strictEqual(sent.entry.firstSpeakerEntityId, sent.entry.version.speakerEntityId)
+      }).pipe(Effect.scoped, withGenerator(config, Generator.none))
+    }
+  )
+
   it.live("a message editor's text kept in a browser is saved to its draft by POST /library/drafts", () => {
     const config = testConfig()
     return Effect.gen(function* () {
