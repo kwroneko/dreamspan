@@ -31,6 +31,10 @@ const toEvent = (change: CastChange): StateEventData => {
       return { key: "model.binding", value: { connection: change.connection, model: change.model } }
     case "Preset":
       return { key: "preset.binding", value: { ref: change.ref } }
+    case "DefaultModel":
+      return { key: "model.unbind", value: {} }
+    case "DefaultPreset":
+      return { key: "preset.unbind", value: {} }
     case "Layout":
       return { key: "layout.cards", value: change.layout }
     case "Roles":
@@ -97,6 +101,10 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
     ListCards: () => Effect.flatMap(userId, (id) => reader.ListCards({ userId: id })).pipe(internal("ListCards")),
     ListCardUsage: () =>
       Effect.flatMap(userId, (id) => reader.CardUsage({ userId: id })).pipe(internal("ListCardUsage")),
+    ListChatGroups: () =>
+      Effect.flatMap(userId, (id) => reader.ChatGroups({ userId: id })).pipe(internal("ListChatGroups")),
+    ListGroupChats: ({ chatId }) =>
+      Effect.flatMap(userId, (id) => reader.GroupChats({ userId: id, chatId })).pipe(internal("ListGroupChats")),
 
     SetPersona: ({ entityId, persona }) =>
       Effect.gen(function* () {

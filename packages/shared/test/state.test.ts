@@ -39,6 +39,21 @@ describe("foldState", () => {
     expect(state.modelBindings).toEqual({ "": { connection: "c1", model: "m2" } })
   })
 
+  it("takes a scope's binding off, so it follows the default again, and leaves other scopes alone", () => {
+    const bound = foldState([
+      e({ key: "preset.binding", value: { ref: ref("chat-default") } }),
+      e({ key: "preset.binding", value: { ref: ref("summary-preset") } }, "summarizer"),
+      e({ key: "model.binding", value: { connection, model: model("m1") } }),
+      e({ key: "model.binding", value: { connection, model: model("m2") } }, "summarizer")
+    ])
+    const cleared = foldState([e({ key: "preset.unbind", value: {} }), e({ key: "model.unbind", value: {} })], bound)
+    expect(cleared.presetBindings).toEqual({ summarizer: { ref: "summary-preset", revision: undefined } })
+    expect(cleared.modelBindings).toEqual({ summarizer: { connection: "c1", model: "m2" } })
+    // Bound again later on the path, it's the chat's own again.
+    const again = foldState([e({ key: "model.binding", value: { connection, model: model("m3") } })], cleared)
+    expect(again.modelBindings[""]).toEqual({ connection: "c1", model: "m3" })
+  })
+
   it("stashes a note without losing its binding", () => {
     const note = "outfit" as EntityId
     const state = foldState([

@@ -1,5 +1,5 @@
 // The home grid and a card's page (DESIGN §2.1): characters with their chat counts, personas
-// left out; one click continues a character's latest chat, or opens a never-used one's
+// left out, and the group chat as a group's tile among them (homeGroups.spec.ts has more); one click continues a character's latest chat, or opens a never-used one's
 // greeting without making a chat; Inspect shows the card and every chat it's in.
 import { expect, type Page, test } from "@playwright/test"
 import type { ChatId, EntityId } from "@rp/shared/chat.ts"
@@ -33,15 +33,21 @@ test.beforeAll(async () => {
 
 const chatCount = () => admin((api) => api.ListChats({ limit: 50, before: null })).then((chats) => chats.length)
 
-const grid = (page: Page) => page.getByRole("list", { name: "Characters" })
-const tile = (page: Page, label: string) => grid(page).getByRole("listitem").filter({ hasText: label })
+const grid = (page: Page) => page.getByRole("list", { name: "Characters and groups" })
+/** A character's tile, by its link ("Mira: continue the latest chat"), not a group naming it. */
+const tile = (page: Page, label: string) =>
+  grid(page)
+    .getByRole("listitem")
+    .filter({ has: page.getByRole("link", { name: new RegExp(`^${label}:`) }) })
 
 test("the grid shows characters with their chats, and one click goes into a conversation", async ({ page }) => {
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/`)
   await expect(page.getByRole("heading", { level: 1, name: "Characters" })).toBeVisible()
-  // Most recently chatted first, never used last; the persona isn't a character.
-  await expect(grid(page).getByRole("listitem")).toHaveCount(3)
+  // Most recently chatted first, never used last; the persona isn't a character. The group
+  // chat is a group's tile too, named as the chat is (its cast, the persona included).
+  await expect(grid(page).getByRole("listitem")).toHaveCount(4)
+  await expect(grid(page).getByRole("listitem").filter({ hasText: "Ana & Mira & Sam" })).toContainText("Ana, Mira")
   await expect(tile(page, "Mira")).toContainText("2 chats")
   await expect(tile(page, "Ana")).toContainText("1 chat")
   await expect(tile(page, "Fen")).toContainText("Never used")
@@ -49,9 +55,9 @@ test("the grid shows characters with their chats, and one click goes into a conv
   await expect(grid(page).getByRole("listitem").last()).toContainText("Fen")
 
   // Search and the never-used filter.
-  await page.getByLabel("Search characters").fill("an")
-  await expect(grid(page).getByRole("listitem")).toHaveText([/Ana/])
-  await page.getByLabel("Search characters").fill("")
+  await page.getByLabel("Search characters and groups").fill("fe")
+  await expect(grid(page).getByRole("listitem")).toHaveText([/Fen/])
+  await page.getByLabel("Search characters and groups").fill("")
   await page.getByRole("button", { name: /Never used/ }).click()
   await expect(grid(page).getByRole("listitem")).toHaveText([/Fen/])
   await page.getByRole("button", { name: /^All/ }).click()

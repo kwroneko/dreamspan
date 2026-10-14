@@ -2,6 +2,7 @@
 // next reply is sent with, each with its value and where it comes from, and the chat's own
 // settings. A change is a state event at the leaf shown, so from there on, on this branch.
 // The context assembler reads them; this only writes them.
+import type { GenerationDefaults } from "@rp/shared/generation.ts"
 import type { EffectivePreset } from "@rp/shared/inspectorApi.ts"
 import type { LibraryRef } from "@rp/shared/library.ts"
 import type { Connection, Model } from "@rp/shared/providers.ts"
@@ -11,6 +12,7 @@ import { Effect } from "effect"
 import { type ReactNode, useEffect, useState, useSyncExternalStore } from "react"
 import { useAction } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"
+import { Button } from "../../ui/Button.tsx"
 import { RadioGroup, Switch } from "../../ui/Choice.tsx"
 import { Field } from "../../ui/Field.tsx"
 import { Select } from "../../ui/Select.tsx"
@@ -26,6 +28,8 @@ interface Sources {
   /** Every visible model, by `modelValue`. */
   readonly models: ReadonlyMap<string, { readonly connection: Connection; readonly model: Model }>
   readonly presets: ReadonlyArray<LibraryRef>
+  /** The user's defaults, to name what "Use the default" goes back to. */
+  readonly defaults: GenerationDefaults
 }
 
 function Problem({ error }: { error: AppError | null }) {
@@ -62,6 +66,26 @@ function Setting({
   )
 }
 
+/** Takes the chat's own model or preset off, so it follows the default again, named in `then`. */
+function UseDefault({ then, onClick }: { then: ReactNode; onClick: () => Promise<void> }) {
+  const [pending, setPending] = useState(false)
+  return (
+    <div className="flex flex-col items-start gap-1">
+      <Button
+        pending={pending}
+        onClick={async () => {
+          setPending(true)
+          await onClick()
+          setPending(false)
+        }}
+      >
+        Use the default
+      </Button>
+      <p className="text-sm text-muted">{then}</p>
+    </div>
+  )
+}
+
 /**
  * The model as the server resolved it for the next reply (`GetNextContext` and `Cache`), so a
  * change made anywhere (another tab, Settings, a connection renamed) shows before a send uses it.
@@ -75,6 +99,7 @@ function ModelSetting({
   sources: Sources | null
   change: (next: CastChange) => Promise<void>
 }) {
+  const { cast } = useCast()
   const effective = useSyncExternalStore(session.subscribe, session.snapshot).history?.model
   // Only visible models are offered; a hidden one in use is still named above.
   const items = [...(sources?.models.entries() ?? [])].map(([value, { connection, model }]) => ({
@@ -149,8 +174,39 @@ function ModelSetting({
           />
         </Field>
       )}
+      {(effective?.scope === "chat" || cast?.model != null) && (
+        <UseDefault then={defaultModelThen(sources)} onClick={() => change({ _tag: "DefaultModel" })} />
+      )}
     </Setting>
   )
+}
+
+/** What the chat's model is once its own is taken off: the user's default, named. */
+const defaultModelThen = (sources: Sources | null): ReactNode => {
+  const choice = sources?.defaults.model ?? null
+  if (sources === null) return "Back to your default model from the latest message on."
+  if (choice === null) return "You have no default model: without one here, replies can't be generated."
+  const found = sources.models.get(modelValue(choice.connection, choice.model))
+  return found
+    ? `Back to your default from the latest message on: ${found.connection.name} · ${found.model.key}.`
+    : "Back to your default model (hidden in Connections) from the latest message on."
+}
+
+/**
+ * What the chat's preset is once its own is taken off, as the scope chain resolves it: the
+ * connection's preset when it overrides, else the user's default, else ST's built-in one.
+ */
+const defaultPresetThen = (sources: Sources | null, connectionId: string | null): ReactNode => {
+  if (sources === null) return "Back to your default preset from the latest message on."
+  const label = (ref: string | null) => sources.presets.find((preset) => preset.id === ref)?.label ?? null
+  const connection = sources.connections.find((c) => c.id === connectionId)
+  const override = label(connection?.presetOverrideRefId ?? null)
+  if (connection && override !== null)
+    return `Back to the preset of the connection “${connection.name}” from the latest message on: “${override}”.`
+  const user = label(sources.defaults.preset)
+  return user !== null
+    ? `Back to your default from the latest message on: “${user}”.`
+    : "Back to SillyTavern's default preset from the latest message on: you have no default preset."
 }
 
 const presetSource = (preset: EffectivePreset, connection: string | null): ReactNode => {
@@ -236,6 +292,12 @@ function PresetSetting({
           </p>
         )
       )}
+      {(preset?.scope === "chat" || cast?.preset != null) && (
+        <UseDefault
+          then={defaultPresetThen(sources, history?.model?.connection ?? null)}
+          onClick={() => change({ _tag: "DefaultPreset" })}
+        />
+      )}
     </Setting>
   )
 }
@@ -294,7 +356,8 @@ export function ThisChatTab({ session, active }: { session: ChatSession; active:
             )
           )
           const presets = yield* client("ListLibrary", { kind: "preset" })
-          return { connections, models: new Map(lists.flat()), presets }
+          const defaults = yield* client("GetGenerationDefaults", undefined)
+          return { connections, models: new Map(lists.flat()), presets, defaults }
         })
       )
       .then((result) => result.ok && setSources(result.value))

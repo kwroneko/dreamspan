@@ -284,6 +284,18 @@ describe("card usage", () => {
       console.log(`ListCardUsage: 1,000 cards, 5,000 chats in ${took.toFixed(0)} ms`)
       // Generous for a loaded shared host; one query takes tens of milliseconds.
       assert.isBelow(took, 2000)
+
+      // The groups (two or three characters a chat, each chat titled apart): one read too.
+      yield* api.ListChatGroups()
+      const groupsStarted = performance.now()
+      const groups = yield* api.ListChatGroups()
+      const groupsTook = performance.now() - groupsStarted
+      assert.strictEqual(
+        groups.reduce((sum, group) => sum + group.chats, 0),
+        [...Array(5000).keys()].filter((i) => distinctCards(i) >= 2).length
+      )
+      console.log(`ListChatGroups: 5,000 chats in ${groupsTook.toFixed(0)} ms`)
+      assert.isBelow(groupsTook, 2000)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config, Generator.none)))
   })
 })

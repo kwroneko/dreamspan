@@ -1,7 +1,7 @@
 // The chat list (DESIGN §2.1): every chat, most recent message first, each with its cast's
 // faces, a readable name (the group's or the character's, never ST's file name), when it
 // started, how long it is and how it ends. It's the sidebar on wide screens, the chats page
-// on phones and a card's chats on its page. It reads a page at a time, with Load more for
+// on phones, a card's chats on its page and a group's on its own. It reads a page at a time, with Load more for
 // older chats; finding a chat asks the server, so it finds chats not loaded yet.
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react"
 import type { Chat, ChatId, ChatSummary, EntityId } from "@rp/shared/chat.ts"
@@ -294,6 +294,39 @@ function Loaded({ first, query }: { first: ReadonlyArray<Chat>; query: Query }) 
   )
 }
 
+/**
+ * A list given whole, as a group's chats are: its pages' summaries are read as the full
+ * list's are. A chat deleted here stays hidden until the list is read again.
+ */
+function Given({ chats, onDeleted }: { chats: ReadonlyArray<Chat>; onDeleted?: ((chat: Chat) => void) | undefined }) {
+  const [gone, setGone] = useState<ReadonlyMap<string, ReadonlyArray<Chat>>>(new Map())
+  const action = useAction()
+  const deleted = useDeletedToast()
+  const shown = chats.filter((chat) => gone.get(chat.id) !== chats)
+  const remove = async (chat: Chat) => {
+    const result = await action.run((client) => client("DeleteChat", { chatId: chat.id }), ["chats"])
+    if (!result.ok) return
+    setGone(new Map([...gone, [chat.id, chats]]))
+    deleted(result.value)
+    onDeleted?.(chat)
+  }
+  const pages = Array.from({ length: Math.ceil(shown.length / PAGE) }, (_, i) => shown.slice(i * PAGE, (i + 1) * PAGE))
+  return (
+    <div className="-mx-1 flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-1">
+      {shown.length === 0 ? (
+        <p className="px-2 py-4 text-sm text-muted">No chats left.</p>
+      ) : (
+        <ul aria-label="Chats" className="flex flex-col gap-0.5">
+          {pages.map((page, i) => (
+            <Rows key={i} chats={page} onDelete={(chat) => void remove(chat)} />
+          ))}
+        </ul>
+      )}
+      <ErrorAlert error={action.error} />
+    </div>
+  )
+}
+
 function Pages({ entityId, search }: { entityId: EntityId | undefined; search: string }) {
   const query = useMemo<Query>(
     () => ({ ...(entityId === undefined ? {} : { entityId }), ...(search === "" ? {} : { search }) }),
@@ -320,12 +353,24 @@ const useSettled = (value: string, ms: number) => {
 }
 
 /**
- * A list of chats: all of them, or a card's (`entityId`). `findable` adds a box to find
- * one by title or character, among all of them, loaded or not.
+ * A list of chats: all of them, a card's (`entityId`), or those given (`chats`, a group's,
+ * with `onDeleted` told of each deleted here). `findable` adds a box to find one by title or
+ * character, among all of them, loaded or not.
  */
-export function ChatList({ entityId, findable = true }: { entityId?: EntityId; findable?: boolean }) {
+export function ChatList({
+  entityId,
+  chats,
+  onDeleted,
+  findable = true
+}: {
+  entityId?: EntityId
+  chats?: ReadonlyArray<Chat>
+  onDeleted?: (chat: Chat) => void
+  findable?: boolean
+}) {
   const [filter, setFilter] = useState("")
   const search = useSettled(filter.trim().slice(0, 200), 250)
+  if (chats !== undefined) return <Given chats={chats} onDeleted={onDeleted} />
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2">
       {findable && (

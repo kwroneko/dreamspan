@@ -31,6 +31,9 @@ export const StateEventData = Schema.Union([
   event("preset.binding", Schema.Struct({ ref: Schema.optional(RefId), revision: Schema.optional(RevisionId) })),
   event("preset_overlay.binding", Schema.Struct({ overlay: EntityId, on: Schema.Boolean })),
   event("model.binding", Schema.Struct({ connection: ConnectionId, model: ModelId })),
+  /** The scope's `preset.binding` or `model.binding` taken off: it follows the default again. */
+  event("preset.unbind", Schema.Struct({})),
+  event("model.unbind", Schema.Struct({})),
   event("layout.cards", Schema.Literals(["concat", "swap_tail"])),
   event("roles.projection", Schema.Literals(["by_writer", "alternate", "perspective"])),
   event("macro.binding", Schema.Struct({ name: Schema.String, value: Schema.String })),
@@ -106,6 +109,8 @@ export const stateKeyIds: { readonly [K in StateEventData["key"]]: StateKeyIds<V
   "model.binding": {
     ids: { connection: { table: "connection" }, model: { table: "model", connection: "connection" } }
   },
+  "preset.unbind": { ids: {} },
+  "model.unbind": { ids: {} },
   "layout.cards": { ids: {} },
   "roles.projection": { ids: {} },
   "macro.binding": { ids: {} },
@@ -311,6 +316,14 @@ const apply = (state: ChatState, { data, scope }: FoldableEvent): ChatState => {
       return { ...state, presetOverlays: { ...state.presetOverlays, [data.value.overlay]: data.value.on } }
     case "model.binding":
       return { ...state, modelBindings: { ...state.modelBindings, [at]: data.value } }
+    case "preset.unbind": {
+      const { [at]: _gone, ...presetBindings } = state.presetBindings
+      return { ...state, presetBindings }
+    }
+    case "model.unbind": {
+      const { [at]: _gone, ...modelBindings } = state.modelBindings
+      return { ...state, modelBindings }
+    }
     case "layout.cards":
       return { ...state, layoutCards: data.value }
     case "roles.projection":

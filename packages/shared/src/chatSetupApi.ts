@@ -44,6 +44,31 @@ export class CardUsage extends Schema.Class<CardUsage>("CardUsage")({
   latestChatId: Schema.NullOr(ChatId)
 }) {}
 
+/**
+ * A group on the home grid (DESIGN §2.1; ST's group tiles). There's no group entity: a group
+ * is the chats with the same readable name (`chatName`: an ST group's name, or the cast's
+ * names for a chat made here) and the same characters the user doesn't play, two or more.
+ * Chats in the bin aren't counted.
+ */
+export class ChatGroup extends Schema.Class<ChatGroup>("ChatGroup")({
+  name: Schema.String,
+  /** The characters in it (not the ones the user plays), in the latest chat's join order. */
+  members: Schema.Array(
+    Schema.Struct({
+      entityId: EntityId,
+      /** The in-chat name, else the label. */
+      name: Schema.String,
+      label: Schema.String,
+      avatarMediaId: Schema.NullOr(Schema.String)
+    })
+  ),
+  chats: Schema.Int,
+  /** The last message in any of its chats. */
+  lastMessageAt: Schema.NullOr(Schema.Number),
+  /** The one with the latest message (else the newest): what a click continues, and the group's id in links. */
+  latestChatId: ChatId
+}) {}
+
 const CardsLayout = Schema.Literals(["concat", "swap_tail"])
 const RolesProjection = Schema.Literals(["by_writer", "alternate", "perspective"])
 
@@ -87,6 +112,9 @@ export const CastChange = Schema.Union([
   Schema.TaggedStruct("PlayedByMe", { entityIds: Schema.Array(EntityId) }),
   Schema.TaggedStruct("Model", { connection: ConnectionId, model: ModelId }),
   Schema.TaggedStruct("Preset", { ref: RefId }),
+  /** The chat's own model or preset taken off (`model.unbind`, `preset.unbind`): it uses the default again. */
+  Schema.TaggedStruct("DefaultModel", {}),
+  Schema.TaggedStruct("DefaultPreset", {}),
   Schema.TaggedStruct("Layout", { layout: CardsLayout }),
   Schema.TaggedStruct("Roles", { projection: RolesProjection }),
   /** A note on or off (`note.activate`, `note.deactivate`): the chat's own, or a participant card's. */
@@ -165,6 +193,14 @@ export class ChatSetupApi extends RpcGroup.make(
   Rpc.make("ListCards", { success: Schema.Array(CastCard), error: ServerError }),
   /** Every live character card of the user's with its use, for the home grid, in one read. */
   Rpc.make("ListCardUsage", { success: Schema.Array(CardUsage), error: ServerError }),
+  /** The user's groups (`ChatGroup`), for the home grid, in one read. */
+  Rpc.make("ListChatGroups", { success: Schema.Array(ChatGroup), error: ServerError }),
+  /** The group a chat is in, with its chats, latest message first; NotFound when it's in none. */
+  Rpc.make("ListGroupChats", {
+    payload: { chatId: ChatId },
+    success: Schema.Struct({ group: ChatGroup, chats: Schema.Array(Chat) }),
+    error: Schema.Union([...Errors])
+  }),
   /** Puts a card in the persona folder, or takes it out (DESIGN §2.2). */
   Rpc.make("SetPersona", {
     payload: { entityId: EntityId, persona: Schema.Boolean },

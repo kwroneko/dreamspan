@@ -984,6 +984,12 @@ describe("context assembly from the database", () => {
         scope: "chat"
       })
       assert.strictEqual(texts(bound)[0], "system: You narrate a story starring Mira and Tobin.")
+
+      // Taken off again, the chat follows the default: here ST's built-in preset.
+      yield* state({ key: "preset.unbind", value: {} })
+      const cleared = yield* assemble()
+      assert.strictEqual(cleared.inputs.preset.scope, "builtin")
+      assert.deepStrictEqual(texts(cleared), texts(builtin))
     }).pipe(Effect.provide(database()))
   )
 

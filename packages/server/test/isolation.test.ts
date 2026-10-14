@@ -938,6 +938,19 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
         assert.include(seen, actor.editor.cardEntityId)
       })
   },
+  ListChatGroups: {
+    // The read is scoped by the caller in its query; its rules are in chatGroups.test.ts.
+    probe: (actor, owner) =>
+      Effect.map(actor.api.ListChatGroups(), (groups) =>
+        assert.notInclude(
+          groups.map((group) => group.latestChatId),
+          owner.chat.chatId
+        )
+      )
+  },
+  ListGroupChats: {
+    probe: (actor, owner) => refused(actor.api.ListGroupChats({ chatId: owner.chat.chatId }), "NotFound")
+  },
   SetPersona: {
     probe: (actor, owner) => refused(actor.api.SetPersona({ entityId: owner.cardId, persona: false }), "NotFound")
   },

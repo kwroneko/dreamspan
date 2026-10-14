@@ -1,6 +1,7 @@
 // The side panel and Settings → Chats keep what's typed and show what's in effect: an unsaved
 // instruction and a summary's edit survive leaving, a failed save and a tab switch; the model
-// named follows changes made elsewhere, hidden or not; one setting's change leaves the others;
+// named follows changes made elsewhere, hidden or not; a chat's own model and preset can be
+// taken off again; one setting's change leaves the others;
 // the own lorebook is named; the panel's remembered tab is each user's own.
 import { expect, test } from "@playwright/test"
 import { Effect } from "effect"
@@ -167,6 +168,50 @@ test("a hidden model in use is named, not described as gone", async ({ page }) =
   const setting = page.getByRole("region", { name: "Model" })
   await expect(page.getByTestId("model-in-effect")).toHaveText(`${connection.name} · model-a`)
   await expect(setting).toContainText("It's hidden in Connections")
+})
+
+test("a chat's own model and preset can be taken off, back to the defaults", async ({ page }) => {
+  const { connection, a, b } = await models()
+  const importPreset = async (name: string, context: number) => {
+    const response = await page.request.post(`${server().url}/library/import?name=${name}.json`, {
+      headers: { origin: server().url, "content-type": "application/octet-stream" },
+      data: Buffer.from(JSON.stringify({ openai_max_context: context, openai_max_tokens: 300, temperature: 1 }))
+    })
+    expect(response.status()).toBe(200)
+    return (await admin((api) => api.ListLibrary({ kind: "preset" }))).find((ref) => ref.label === name)!
+  }
+  const everyday = await importPreset("Everyday", 16000)
+  const roomy = await importPreset("Roomy", 32000)
+  await admin((api) =>
+    api.SetGenerationDefaults({ defaults: { model: { connection: connection.id, model: a.id }, preset: everyday.id } })
+  )
+  const chat = await emptyChat("Own model and preset")
+  for (const change of [
+    { _tag: "Model", connection: connection.id, model: b.id },
+    { _tag: "Preset", ref: roomy.id }
+  ] as const) {
+    await admin((api) => api.ChangeCast({ chatId: chat.id, slotId: null, change }))
+  }
+  await page.goto(`${server().url}/chats/${chat.id}?panel=chat`)
+  const model = page.getByRole("region", { name: "Model" })
+  const preset = page.getByRole("region", { name: "Preset" })
+  await expect(page.getByTestId("model-in-effect")).toHaveText(`${connection.name} · model-b`)
+  await expect(model).toContainText("Set in this chat.")
+  await expect(page.getByTestId("preset-in-effect")).toHaveText("Roomy")
+  await expect(preset).toContainText("Set in this chat.")
+
+  await model.getByRole("button", { name: "Use the default" }).click()
+  await expect(page.getByTestId("model-in-effect")).toHaveText(`${connection.name} · model-a`)
+  await expect(model).toContainText("Your default model")
+  await expect(model.getByRole("button", { name: "Use the default" })).toHaveCount(0)
+
+  await preset.getByRole("button", { name: "Use the default" }).click()
+  await expect(page.getByTestId("preset-in-effect")).toHaveText("Everyday")
+  await expect(preset).toContainText("Your default preset")
+  await expect(preset.getByRole("button", { name: "Use the default" })).toHaveCount(0)
+  const cast = await admin((api) => api.GetCast({ chatId: chat.id, slotId: null }))
+  expect([cast.model, cast.preset]).toEqual([null, null])
+  await admin((api) => api.SetGenerationDefaults({ defaults: { model: null, preset: null } }))
 })
 
 test("changing the refusal judge leaves a default model changed in another tab", async ({ page }) => {

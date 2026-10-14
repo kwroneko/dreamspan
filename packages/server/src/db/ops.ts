@@ -72,7 +72,7 @@ import {
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
 import { CastCard, ChatSummary, FrozenMacros, QueuedMessage } from "@rp/shared/chat.ts"
-import { CardForChat, CardOverrideOpened, CardUsage, ChatCard, FirstTurn } from "@rp/shared/chatSetupApi.ts"
+import { CardForChat, CardOverrideOpened, CardUsage, ChatCard, ChatGroup, FirstTurn } from "@rp/shared/chatSetupApi.ts"
 import { AssemblyFailed } from "../assembler/types.ts"
 
 const StorageErrorReason = Schema.Literals(["busy", "constraint", "corrupt", "other"])
@@ -1855,6 +1855,14 @@ export class ReadOps extends RpcGroup.make(
   Rpc.make("ListCards", { payload: { userId: UserId }, success: Schema.Array(CastCard), error: StorageError }),
   /** The user's live character cards (not personas) with their use, in one query (the home grid). */
   Rpc.make("CardUsage", { payload: { userId: UserId }, success: Schema.Array(CardUsage), error: StorageError }),
+  /** The user's groups of chats (the home grid), in one read of their chats' casts. */
+  Rpc.make("ChatGroups", { payload: { userId: UserId }, success: Schema.Array(ChatGroup), error: StorageError }),
+  /** The group `chatId` is in, with its chats, latest message first. */
+  Rpc.make("GroupChats", {
+    payload: { userId: UserId, chatId: ChatId },
+    success: Schema.Struct({ group: ChatGroup, chats: Schema.Array(Chat) }),
+    error: Schema.Union([NotFound, StorageError])
+  }),
   /** The chat list's details of these chats, as far as they're the user's; others are left out. */
   Rpc.make("ChatSummaries", {
     payload: { userId: UserId, chatIds: Schema.Array(ChatId) },

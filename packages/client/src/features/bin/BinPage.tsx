@@ -13,7 +13,8 @@ import { Textarea } from "../../ui/Field.tsx"
 import { Badge, Card, CardHeader, EmptyState } from "../../ui/Surface.tsx"
 import { Tabs } from "../../ui/Tabs.tsx"
 import { useTitle } from "../shell.tsx"
-import { RESTORED_KEYS, restoreItem } from "./deleted.ts"
+import { readableChatTitle, withReadableChatTitles } from "../chat/chatTitle.ts"
+import { binTitle, RESTORED_KEYS, restoreItem } from "./deleted.ts"
 
 const PAGE = 50
 
@@ -84,19 +85,20 @@ function ItemRow({ item, onGone }: { item: BinItem; onGone: (item: BinItem) => v
   const [restored, setRestored] = useState(false)
   const [error, setError] = useState<AppError | null>(null)
   const [confirming, setConfirming] = useState(false)
-  const chatTitle = typeof item.origin.chatTitle === "string" ? item.origin.chatTitle : null
+  const chatTitle = typeof item.origin.chatTitle === "string" ? readableChatTitle(item.origin.chatTitle) : null
+  const title = binTitle(item)
   return (
-    <li className="flex flex-col gap-2 py-3 first:pt-0 last:pb-0" aria-label={item.title}>
+    <li className="flex flex-col gap-2 py-3 first:pt-0 last:pb-0" aria-label={title}>
       <div className="flex flex-wrap items-center gap-2">
         <Badge>{kindLabel(item)}</Badge>
-        <span className="min-w-0 font-medium [overflow-wrap:anywhere]">{item.title}</span>
+        <span className="min-w-0 font-medium [overflow-wrap:anywhere]">{title}</span>
       </div>
       {item.excerpt && item.kind !== "entity" && item.kind !== "connection" && (
         <p className="line-clamp-3 text-sm whitespace-pre-wrap text-muted [overflow-wrap:anywhere]">{item.excerpt}</p>
       )}
       <p className="text-xs text-muted">
         Deleted {when(item.deletedAt)}
-        {chatTitle && item.kind !== "chat" ? ` from “${chatTitle}”` : ""}
+        {chatTitle && item.kind !== "chat" && !title.includes(chatTitle) ? ` from “${chatTitle}”` : ""}
       </p>
       {restored ? (
         <RestoredLink item={item} />
@@ -128,7 +130,7 @@ function ItemRow({ item, onGone }: { item: BinItem; onGone: (item: BinItem) => v
       <ConfirmDialog
         open={confirming}
         onOpenChange={setConfirming}
-        title={`Delete “${item.title}” for good?`}
+        title={`Delete “${title}” for good?`}
         description={`${purgeEffect(item)} This can't be undone.`}
         confirmLabel="Delete for good"
         pending={purge.pending}
@@ -220,11 +222,12 @@ function TextRow({ text, onGone }: { text: RecoveredText; onGone: (text: Recover
   const [full, setFull] = useState<string | null>(null)
   const [confirming, setConfirming] = useState(false)
   const [copied, setCopied] = useState(false)
+  const source = withReadableChatTitles(text.sourceLabel)
   return (
-    <li className="flex flex-col gap-2 py-3 first:pt-0 last:pb-0" aria-label={`Recovered from ${text.sourceLabel}`}>
+    <li className="flex flex-col gap-2 py-3 first:pt-0 last:pb-0" aria-label={`Recovered from ${source}`}>
       <div className="flex flex-wrap items-center gap-2">
         <Badge>{text.reason === "discard" ? "Discarded" : "Before a big change"}</Badge>
-        <span className="min-w-0 font-medium [overflow-wrap:anywhere]">{text.sourceLabel}</span>
+        <span className="min-w-0 font-medium [overflow-wrap:anywhere]">{source}</span>
       </div>
       <p className="line-clamp-3 text-sm whitespace-pre-wrap text-muted [overflow-wrap:anywhere]">{text.content}</p>
       <p className="text-xs text-muted">
@@ -254,7 +257,7 @@ function TextRow({ text, onGone }: { text: RecoveredText; onGone: (text: Recover
               setCopied(false)
             }
           }}
-          title={`Recovered from ${text.sourceLabel}`}
+          title={`Recovered from ${source}`}
           description="Copy what you need: it isn't put back anywhere by itself."
         >
           <Textarea aria-label="Recovered text" readOnly rows={10} value={full} />

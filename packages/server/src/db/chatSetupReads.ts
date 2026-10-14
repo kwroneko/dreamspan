@@ -1,14 +1,19 @@
 // Read handlers for chat setup, speakers and the send queue (DESIGN §2.1, §2.2). They run
 // in the reader workers; every one touches only the acting user's rows.
+import type { Chat } from "@rp/shared/chat.ts"
 import { type ChatId, ChatSummary, type EntityId } from "@rp/shared/chat.ts"
-import { CardDefinition, CardForChat, CardUsage, ChatCard } from "@rp/shared/chatSetupApi.ts"
+import { chatName } from "@rp/shared/chatName.ts"
+import { CardDefinition, CardForChat, CardUsage, ChatCard, ChatGroup } from "@rp/shared/chatSetupApi.ts"
+import type { UserId } from "@rp/shared/domain.ts"
 import type { RefId, RevisionId } from "@rp/shared/library.ts"
+import { importState } from "@rp/shared/stImportApi.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { castCardAt, loadCards } from "./cards.ts"
 import { type CardBinding, makeLibraryQueries } from "./library.ts"
 import { NotFound, type ReadOps } from "./ops.ts"
 import { chatQueue } from "./queueRows.ts"
+import { type ChatRow, toChat } from "./rows.ts"
 import { query } from "./tx.ts"
 
 /** A card's binding from the payload's, without the nulls; undefined for none. */
@@ -35,10 +40,101 @@ const definitionOf = (doc: Record<string, unknown>) =>
     alternateGreetings: Array.isArray(doc.alternate_greetings) ? doc.alternate_greetings.length : 0
   })
 
+type Member = ChatGroup["members"][number]
+
 export const makeChatSetupReadHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   const lib = makeLibraryQueries(sql)
+
+  /**
+   * The user's groups (`ChatGroup`), each with its chats latest first, the groups by their
+   * last message. Two queries: every chat with the cards that joined it on any branch (in
+   * join order) and those the user played on any, each a seek on its state events; then
+   * every card's name and avatar. Grouping happens here, on the reader, never in the client.
+   */
+  const groupsOf = (userId: UserId) =>
+    Effect.gen(function* () {
+      const chats = yield* sql<ChatRow & { joined: string; played: string }>`
+        SELECT c.*,
+          (SELECT json_group_array(entity) FROM (
+            SELECT json_extract(s.value_json, '$.entity') AS entity FROM state_events s
+            WHERE s.chat_id = c.id AND s.key = 'participant.join' AND s.superseded_by_changeset IS NULL
+            GROUP BY entity ORDER BY min(s.seq))) AS joined,
+          (SELECT json_group_array(DISTINCT j.value) FROM state_events s, json_each(s.value_json, '$.entities') j
+            WHERE s.chat_id = c.id AND s.key = 'played_by_me.set' AND s.superseded_by_changeset IS NULL) AS played
+        FROM chats c WHERE c.owner_user_id = ${userId} AND c.deleted_at IS NULL
+        ORDER BY c.last_message_at IS NOT NULL DESC, coalesce(c.last_message_at, c.created_at) DESC, c.id DESC`
+      if (chats.length === 0) return []
+      const cards = yield* sql<{
+        entity_id: string
+        label: string
+        name: unknown
+        avatar: unknown
+        persona: number
+      }>`
+        SELECT e.id AS entity_id, r.label, json_extract(rev.doc_json, '$.name') AS name,
+          json_extract(rev.doc_json, '$.avatar_media_id') AS avatar,
+          EXISTS (SELECT 1 FROM entity_tags t WHERE t.entity_id = e.id AND t.tag = 'persona') AS persona
+        FROM entities e
+        JOIN entity_refs r ON r.id = (
+          SELECT r2.id FROM entity_refs r2 WHERE r2.entity_id = e.id AND r2.ref_kind <> 'chat_override'
+          ORDER BY r2.ref_kind = 'upstream' DESC, r2.created_at, r2.id LIMIT 1)
+        JOIN entity_revisions rev ON rev.id = r.head_revision_id
+        WHERE e.owner_user_id = ${userId} AND e.kind = 'card' AND e.purged_at IS NULL`
+      const characters = new Map<string, Member>()
+      for (const card of cards) {
+        if (card.persona) continue
+        const name = typeof card.name === "string" ? card.name.trim() : ""
+        characters.set(card.entity_id, {
+          entityId: card.entity_id as EntityId,
+          name: name === "" ? card.label : name,
+          label: card.label,
+          avatarMediaId: typeof card.avatar === "string" ? card.avatar : null
+        })
+      }
+      // Chats come latest first, so a group's first chat is its latest.
+      const groups = new Map<string, { name: string; members: Array<Member>; chats: Array<Chat> }>()
+      for (const row of chats) {
+        const played = new Set(JSON.parse(row.played) as Array<string>)
+        const members = (JSON.parse(row.joined) as Array<string>).flatMap((id) =>
+          played.has(id) ? [] : (characters.get(id) ?? [])
+        )
+        if (members.length < 2) continue
+        const name = chatName(importState(row.title).title, members).name
+        const key = `${name}\n${members
+          .map((member) => member.entityId)
+          .sort()
+          .join(",")}`
+        const group = groups.get(key) ?? { name, members, chats: [] }
+        group.chats.push(toChat(row))
+        groups.set(key, group)
+      }
+      return [...groups.values()].map(({ name, members, chats }) => ({
+        group: new ChatGroup({
+          name,
+          members,
+          chats: chats.length,
+          lastMessageAt: chats[0]!.lastMessageAt,
+          latestChatId: chats[0]!.id
+        }),
+        chats
+      }))
+    })
+
   return {
+    ChatGroups: ({ userId }) =>
+      groupsOf(userId).pipe(
+        Effect.map((groups) => groups.map(({ group }) => group)),
+        query("ChatGroups")
+      ),
+
+    GroupChats: ({ userId, chatId }) =>
+      Effect.gen(function* () {
+        const found = (yield* groupsOf(userId)).find(({ chats }) => chats.some((chat) => chat.id === chatId))
+        if (found === undefined) return yield* new NotFound({ entity: "chat", id: chatId })
+        return found
+      }).pipe(query("GroupChats")),
+
     ListCards: ({ userId }) =>
       loadCards(sql, userId, null).pipe(
         Effect.map((cards) => cards.map(({ card }) => card)),
