@@ -156,3 +156,71 @@ test("a phone shows the full streaming speaker name and Stop", async ({ page }) 
   await expect(reply.getByRole("button", { name: "Stop", exact: true })).toBeInViewport()
   await page.screenshot({ path: test.info().outputPath("desktop-streaming.png") })
 })
+
+for (const target of ["card", "group"] as const) {
+  for (const width of [1440, 390]) {
+    test(`${target}: compact composer grows, keeps newlines and sends with Enter at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
+      await setup(page, `Compact composer ${width}`)
+      if (target === "card") {
+        const cards = await asUser(server(), ADMIN.handle, ADMIN.password, (api) => api.ListCards())
+        await page.goto(`${server().url}/cards/${cards.find((c) => c.name === "Tobias Wren")!.entityId}/chat`)
+      }
+      const composer = page.getByLabel("Message", { exact: true })
+      const send = page.getByRole("button", { name: "Send", exact: true })
+      const generate = page.getByRole("button", { name: /^Generate / })
+      await expect(composer).toBeEditable()
+      await expect(send).toBeDisabled()
+      await expect(generate).toHaveText("Generate")
+      await expect(send.locator("svg")).toBeVisible()
+      const empty = (await composer.boundingBox())!
+      expect(empty.height).toBeLessThan(45)
+      for (const control of [send, generate]) {
+        const box = (await control.boundingBox())!
+        expect(Math.abs(box.y - empty.y)).toBeLessThan(10)
+        expect(box.x).toBeGreaterThanOrEqual(empty.x + empty.width)
+        expect(box.x + box.width).toBeLessThanOrEqual(width)
+      }
+      const pendingUrl = page.url()
+      await composer.fill("First line")
+      await composer.press("Shift+Enter")
+      await composer.press("Shift+Enter")
+      await composer.press("Shift+Enter")
+      await composer.press("Shift+Enter")
+      await composer.pressSequentially("Second line")
+      await expect(composer).toHaveValue("First line\n\n\n\nSecond line")
+      expect((await composer.boundingBox())!.height).toBeGreaterThan(empty.height)
+      expect(page.url()).toBe(pendingUrl)
+      await page.reload()
+      await expect(composer).toHaveValue("First line\n\n\n\nSecond line")
+      await send.hover()
+      // The tooltip shows how to add a line (Base UI gives its popup no tooltip role).
+      await expect(page.getByText(/Shift\+Enter for a new line/)).toBeVisible()
+      await composer.press("Enter")
+      await expect(page).toHaveURL(/\/chats\/[^/?]+$/)
+      await expect(page.getByRole("article", { name: "Your message", exact: true })).toContainText("First line")
+      await expect(page.getByRole("article", { name: "Your message", exact: true }).locator(".markdown")).toContainText(
+        "Second line"
+      )
+    })
+  }
+}
+
+test("a touch keyboard keeps Enter for a newline; Ctrl+Enter creates the chat", async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
+  const page = await context.newPage()
+  try {
+    await setup(page, "Touch composer")
+    const composer = page.getByLabel("Message", { exact: true })
+    const pendingUrl = page.url()
+    await composer.fill("Touch keyboard")
+    await composer.press("Enter")
+    await expect(composer).toHaveValue("Touch keyboard\n")
+    expect(page.url()).toBe(pendingUrl)
+    await composer.press("Control+Enter")
+    await expect(page).toHaveURL(/\/chats\/[^/?]+$/)
+    await expect(page.getByRole("article", { name: "Your message", exact: true })).toContainText("Touch keyboard")
+  } finally {
+    await context.close()
+  }
+})

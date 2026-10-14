@@ -15,6 +15,10 @@ import { useNavigate, useParams } from "@tanstack/react-router"
 import { Effect } from "effect"
 import { useEffect, useRef, useState } from "react"
 import { ErrorAlert, useAction } from "../../actions.tsx"
+import { AutoGrowTextarea } from "../../ui/AutoGrowTextarea.tsx"
+import { SquareIconButton, Tooltip } from "../../ui/Tooltip.tsx"
+import { composerKeyDown } from "./composerKeys.ts"
+import { SendIcon } from "./icons.tsx"
 import { Avatar } from "../../ui/Avatar.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Field } from "../../ui/Field.tsx"
@@ -172,7 +176,7 @@ function Pending({
   }
 
   const start = async (first: "send" | "generate") => {
-    if (action.pending) return
+    if (action.pending || (first === "send" && text.trim() === "")) return
     const personaId = playing?.entityId ?? null
     // The text leaves the box as it's sent; whatever is typed while the chat is being made
     // goes along to its composer, and a failure puts the sent text back.
@@ -312,38 +316,58 @@ function Pending({
           </article>
         )}
       </div>
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-2 border-t border-border pt-3 pb-3">
-        <label htmlFor="composer" className="sr-only">
-          Message
-        </label>
-        <textarea
-          id="composer"
-          rows={3}
-          value={text}
-          placeholder={`Write to ${title}…`}
-          onChange={(event) => {
-            const value = event.currentTarget.value
-            typed.current = value
-            setText(value)
-            // While the first send is out, the copy keeps both, as a failed send leaves them.
-            const out = sending.current
-            void keep(out === null || out === "" ? value : value === "" ? out : `${out}\n\n${value}`)
-          }}
-          className="w-full resize-none rounded-md border border-border bg-surface px-3 py-2 text-base text-text outline-none placeholder:text-muted focus-visible:border-focus focus-visible:ring-2 focus-visible:ring-focus/40 sm:text-sm"
-        />
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
+      <div className="mx-auto flex w-full max-w-3xl flex-col gap-2 border-t border-border pt-2 pb-2">
+        <div className="flex min-w-0 items-end gap-1 rounded-lg border border-border bg-surface p-1 focus-within:border-focus focus-within:ring-2 focus-within:ring-focus/40">
+          <label htmlFor="composer" className="sr-only">
+            Message
+          </label>
+          <AutoGrowTextarea
+            id="composer"
+            value={text}
+            // Short, so it fits one line on a phone, as the chat's composer does.
+            placeholder="Write a message…"
+            aria-describedby={text.trim() !== "" ? "composer-hint" : undefined}
+            onKeyDown={(event) => composerKeyDown(() => start("send"))(event)}
+            onChange={(event) => {
+              const value = event.currentTarget.value
+              typed.current = value
+              setText(value)
+              // While the first send is out, the copy keeps both, as a failed send leaves them.
+              const out = sending.current
+              void keep(out === null || out === "" ? value : value === "" ? out : `${out}\n\n${value}`)
+            }}
+          />
+          <Tooltip
+            label={
+              text.trim() !== ""
+                ? `${replyName} writes the next turn, with your text as a one-turn direction`
+                : `${replyName} writes the next turn`
+            }
+          >
+            <Button
+              aria-label={`Generate ${replyName}`}
+              disabled={action.pending}
+              onClick={() => void start("generate")}
+            >
+              Generate
+            </Button>
+          </Tooltip>
+          <SquareIconButton
+            label={playing ? `Send as ${playing.name}` : "Send"}
+            hint={`${playing ? `Send as ${playing.name}` : "Send"} (Enter; Shift+Enter for a new line)`}
             variant="primary"
             pending={action.pending}
             disabled={text.trim() === ""}
             onClick={() => void start("send")}
           >
-            {playing ? `Send as ${playing.name}` : "Send"}
-          </Button>
-          <Button disabled={action.pending} onClick={() => void start("generate")}>
-            Generate {replyName}
-          </Button>
+            {!action.pending && <SendIcon />}
+          </SquareIconButton>
         </div>
+        {text.trim() !== "" && (
+          <p id="composer-hint" className="text-xs text-muted">
+            Generate instead makes this text a one-turn direction for {replyName}'s turn.
+          </p>
+        )}
         <ErrorAlert error={action.error} />
       </div>
     </>
