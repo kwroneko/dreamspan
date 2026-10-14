@@ -733,8 +733,9 @@ export const Message = memo(function Message({
         id={speakerId ?? (model ? "model" : "you")}
         name={name}
         mediaId={speaker?.avatarMediaId ?? null}
-        size="lg"
-        className={`mt-0.5 max-sm:size-8 ${hidden ? "opacity-50 grayscale" : ""}`}
+        size="chat"
+        preview={speaker !== undefined}
+        className={`mt-0.5 ${hidden ? "opacity-50 grayscale" : ""}`}
       />
       <div className={`flex min-w-0 flex-1 flex-col gap-1 ${hidden ? "opacity-60" : ""}`}>
         <header className="flex min-h-8 min-w-0 items-center gap-x-2 text-sm max-sm:flex-wrap max-sm:gap-y-1">

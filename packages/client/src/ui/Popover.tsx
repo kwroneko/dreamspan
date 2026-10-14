@@ -14,6 +14,7 @@ export function Popover({
   children,
   triggerClassName = `${buttonClass("secondary")} max-w-full`,
   hint,
+  hintSide = "top",
   side = "top",
   align = "start",
   initialFocus,
@@ -30,6 +31,7 @@ export function Popover({
   triggerClassName?: string
   /** A tooltip on the trigger, for one that shows only an icon or a name. */
   hint?: ReactNode
+  hintSide?: "top" | "bottom"
   side?: "top" | "bottom"
   align?: "start" | "end"
   /** What gets focus as it opens (a search field, say); otherwise the panel's first control. */
@@ -44,7 +46,13 @@ export function Popover({
   )
   return (
     <BasePopover.Root open={open} onOpenChange={(next) => onOpenChange(next)}>
-      {hint === undefined ? button : <Tooltip label={hint}>{button}</Tooltip>}
+      {hint === undefined ? (
+        button
+      ) : (
+        <Tooltip label={hint} side={hintSide}>
+          {button}
+        </Tooltip>
+      )}
       <BasePopover.Portal>
         <BasePopover.Positioner className="z-50 outline-none" side={side} align={align} sideOffset={6}>
           <BasePopover.Popup

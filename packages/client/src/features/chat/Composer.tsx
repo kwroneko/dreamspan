@@ -406,7 +406,7 @@ export function Composer({ session, view }: { session: ChatSession; view: ChatVi
   const shownError = error ?? saveError
 
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-col gap-2 border-t border-border pt-2 pb-2">
+    <div className="@container mx-auto flex w-full max-w-3xl flex-col gap-2 border-t border-border pt-2 pb-2">
       {view.queue.length > 0 && (
         <ul className="flex flex-col gap-2" aria-label="Queued messages">
           {view.queue.map((queued) => (
@@ -445,9 +445,9 @@ export function Composer({ session, view }: { session: ChatSession; view: ChatVi
           went over.
         </p>
       )}
-      <div className="flex flex-col gap-1.5 sm:flex-row sm:items-end">
+      <div className="flex flex-col gap-1.5 @min-[640px]:flex-row @min-[640px]:items-end">
         {/* Who's speaking, and the speakers used last: one tap each (DESIGN §2.2). */}
-        <div className="flex min-w-0 items-center gap-1 sm:h-11">
+        <div className="flex min-w-0 items-center gap-1 @min-[640px]:h-11">
           <SpeakerSwitcher session={session} speaker={speaker} recent={switcherRecent} onPick={onPick} />
           {recent.map((id) => {
             const who = nameOf(castView, id) ?? "?"
@@ -464,7 +464,7 @@ export function Composer({ session, view }: { session: ChatSession; view: ChatVi
               </Tooltip>
             )
           })}
-          <span className="ml-auto sm:hidden">
+          <span className="ml-auto @min-[640px]:hidden">
             <History draft={draft} />
           </span>
         </div>
@@ -483,7 +483,7 @@ export function Composer({ session, view }: { session: ChatSession; view: ChatVi
             onChange={(event) => draft.type(event.currentTarget.value)}
             onKeyDown={onKeyDown}
           />
-          <span className="hidden sm:inline-flex">
+          <span className="hidden @min-[640px]:inline-flex">
             <History draft={draft} />
           </span>
           {leaf?.version.writer === "model" && !leafGenerating && (

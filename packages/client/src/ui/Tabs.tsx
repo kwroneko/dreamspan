@@ -18,7 +18,7 @@ export function Tabs<Value extends string>({
   /** After a pointer clicks any tab, including the active one; keyboard focus stays on tabs. */
   onPointerActivate?: ((value: Value) => void) | undefined
   label: string
-  /** Fills its container's height, the open panel scrolling inside it; the tabs scroll sideways when narrow. */
+  /** Fills its container's height, the open panel scrolling inside it; the tabs wrap when narrow. */
   fill?: boolean | undefined
   /** Hidden panels stay mounted, keeping their state: text being typed, say. */
   keepMounted?: boolean | undefined
@@ -28,7 +28,7 @@ export function Tabs<Value extends string>({
   const list = (
     <BaseTabs.List
       aria-label={label}
-      className={fill ? "flex min-w-0 flex-1 gap-0.5 overflow-x-auto" : "flex gap-1 border-b border-border"}
+      className={fill ? "flex min-w-0 flex-1 flex-wrap gap-0.5" : "flex gap-1 border-b border-border"}
     >
       {tabs.map((tab) => (
         <BaseTabs.Tab

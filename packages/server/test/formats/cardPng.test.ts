@@ -1,3 +1,4 @@
+import { deflateSync } from "node:zlib"
 import { describe, expect, it } from "vitest"
 import { importCard } from "../../src/formats/cardImport.ts"
 import { decodeText, readChunks } from "../../src/formats/png.ts"
@@ -18,6 +19,21 @@ describe("PNG card import", () => {
     expect(result.avatar?.ext).toBe("png")
     expect(textKeywords(result.avatar!.bytes)).toEqual(["Comment"])
     expect(Buffer.from(result.avatar!.bytes)).toEqual(png(textChunk("Comment", "drawn by hand")))
+  })
+
+  it("keeps a wide original's image chunks and dimensions, with no thumbnail conversion", () => {
+    const header = Buffer.alloc(13)
+    header.writeUInt32BE(900, 0)
+    header.writeUInt32BE(600, 4)
+    header[8] = 8
+    header[9] = 2
+    const image = [chunk("IHDR", header), chunk("IDAT", deflateSync(Buffer.alloc((900 * 3 + 1) * 600)))]
+    const original = Buffer.concat([PNG_SIGNATURE, ...image, cardChunk("chara", stCardV2()), chunk("IEND")])
+    const imported = run(importCard(original)).avatar!.bytes
+    expect(Buffer.from(imported)).toEqual(Buffer.concat([PNG_SIGNATURE, ...image, chunk("IEND")]))
+    const dimensions = readChunks(imported, defaultLimits)[0]!.data
+    expect(Buffer.from(dimensions).readUInt32BE(0)).toBe(900)
+    expect(Buffer.from(dimensions).readUInt32BE(4)).toBe(600)
   })
 
   it("prefers ccv3 over chara, as ST does, and strips both", () => {

@@ -314,7 +314,7 @@ function Member({
   return (
     <li aria-label={name} className="flex flex-col gap-2 py-3 first:pt-0 last:pb-0">
       <div className={`flex items-start gap-3 ${present ? "" : "opacity-60"}`}>
-        <Avatar id={card.entityId} name={name} mediaId={card.avatarMediaId} size="lg" />
+        <Avatar id={card.entityId} name={name} mediaId={card.avatarMediaId} size="lg" preview />
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span className="truncate font-medium">{name}</span>
           {card.label !== name && <span className="truncate text-xs text-muted">{card.label}</span>}

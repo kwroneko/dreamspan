@@ -10,6 +10,8 @@ import { describeCause } from "../errors.ts"
 import { fullPath, navEntries, routes } from "../routes.tsx"
 import { logout, SessionContext, sessionAtom, useSession } from "../session.ts"
 import { Button } from "../ui/Button.tsx"
+import { ImageControls } from "../ui/ImageControls.tsx"
+import { ResizeHandle, usePanelWidth } from "../ui/ResizeHandle.tsx"
 import { Loading } from "../ui/Spinner.tsx"
 import { Toasts } from "../ui/Toast.tsx"
 import { ChatList } from "./chat/ChatList.tsx"
@@ -123,6 +125,7 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
           New chat
         </Link>
       </div>
+      <ImageControls />
       {onChats ? <div className="flex-1" /> : <ChatList />}
       <Navigation {...(onNavigate ? { onNavigate } : {})} />
     </div>
@@ -148,10 +151,13 @@ function PhoneBar() {
         >
           ☰
         </button>
-        <Link to="/" className="font-semibold">
+        <Link to="/" className="font-semibold max-sm:hidden">
           rp-harness
         </Link>
-        <nav aria-label="Screens" className="ml-auto flex gap-1">
+        <div className="ml-auto max-sm:order-2">
+          <ImageControls />
+        </div>
+        <nav aria-label="Screens" className="flex gap-1 max-sm:order-1">
           <Link to="/" activeOptions={{ exact: true }} className={navLink}>
             Characters
           </Link>
@@ -174,6 +180,29 @@ function PhoneBar() {
         </div>
       )}
     </>
+  )
+}
+
+function DesktopSidebar() {
+  const userId = useSession().user.id
+  const { ref, width, min, max, change, reset } = usePanelWidth(userId, "sidebar", 320, 220, 420, 700)
+  return (
+    <aside
+      ref={ref}
+      style={{ width, minWidth: 220, maxWidth: "calc(100% - 700px)" }}
+      className="relative hidden shrink-0 border-r border-border bg-surface lg:block"
+    >
+      <Sidebar />
+      <ResizeHandle
+        label="Resize sidebar"
+        width={width}
+        min={min}
+        max={max}
+        direction={1}
+        onChange={change}
+        onReset={reset}
+      />
+    </aside>
   )
 }
 
@@ -228,9 +257,7 @@ function AppShell() {
       </a>
       <Toasts>
         <div className="flex h-dvh">
-          <aside className="hidden w-80 shrink-0 border-r border-border bg-surface lg:block">
-            <Sidebar />
-          </aside>
+          <DesktopSidebar key={result.value.user.id} />
           <div className="flex min-w-0 flex-1 flex-col">
             <PhoneBar />
             <Main />

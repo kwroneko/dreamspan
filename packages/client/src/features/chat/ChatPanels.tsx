@@ -6,6 +6,9 @@
 import type { SlotId } from "@rp/shared/chat.ts"
 import { Component, lazy, type ReactNode, Suspense, useEffect, useState, useSyncExternalStore } from "react"
 import { Button } from "../../ui/Button.tsx"
+import { useSession } from "../../session.ts"
+import { PortraitView } from "../../ui/Portrait.tsx"
+import { ResizeHandle, usePanelWidth } from "../../ui/ResizeHandle.tsx"
 import { Sheet } from "../../ui/Sheet.tsx"
 import { Loading } from "../../ui/Spinner.tsx"
 import { Tabs } from "../../ui/Tabs.tsx"
@@ -48,6 +51,7 @@ class NotLoaded extends Component<{ children: ReactNode }, { failed: boolean }> 
 }
 
 const PANEL_TABS = [
+  { value: "portrait", label: "Portrait", icon: "people" },
   { value: "cast", label: "Cast", icon: "people" },
   { value: "chat", label: "This chat", icon: "sliders" },
   { value: "lorebooks", label: "Lorebooks", icon: "book" },
@@ -161,6 +165,8 @@ function TabContent({
   onEnable: () => void
 }) {
   switch (tab) {
+    case "portrait":
+      return <PortraitView />
     case "cast":
       return <CastTab session={session} />
     case "chat":
@@ -207,6 +213,8 @@ export function ChatSidePanel({
 }) {
   // A tab mounts when first shown and stays mounted, hidden, while the panel is open, so
   // switching tabs never ends what's in one: a summary's edit with its unsaved text, say.
+  const userId = useSession().user.id
+  const { ref, width, min, max, change, reset } = usePanelWidth(userId, "chat", 416, 260, 640, 426, wide)
   const [visited, setVisited] = useState<ReadonlySet<PanelTab>>(() => new Set([tab]))
   useEffect(() => {
     void loadNotes().catch(() => undefined)
@@ -229,8 +237,19 @@ export function ChatSidePanel({
   return (
     <aside
       aria-label="Chat panel"
-      className="flex w-[22.5rem] shrink-0 flex-col border-l border-border bg-surface xl:w-[26rem]"
+      ref={ref}
+      style={{ width, minWidth: 260, maxWidth: "calc(100% - 426px)" }}
+      className="relative flex min-w-0 shrink-0 flex-col border-l border-border bg-surface"
     >
+      <ResizeHandle
+        label="Resize chat panel"
+        width={width}
+        min={min}
+        max={max}
+        direction={-1}
+        onChange={change}
+        onReset={reset}
+      />
       <Tabs
         tabs={tabs}
         value={tab}

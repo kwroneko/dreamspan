@@ -372,12 +372,10 @@ export function ChatHeader({
         </Tooltip>
         {characters.length > 0 && (
           <Tooltip label={names.join(", ")}>
-            <span
-              tabIndex={0}
-              className="relative shrink-0 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-focus"
-            >
+            <span className="relative shrink-0 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-focus">
               <AvatarStack
                 size="md"
+                preview
                 faces={characters.map((card) => ({ id: card.entityId, name: card.name, mediaId: card.avatarMediaId }))}
               />
               {characters.length > 1 && (
