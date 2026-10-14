@@ -303,10 +303,23 @@ export class MessageDraft {
     )
     if (result.ok) {
       this.draft = result.value
+      // Typed while the discard was out: that text wasn't discarded, so the editor stays open
+      // with it, its copy and the base it was typed on.
+      if (this.local !== null) {
+        this.set({ error: typedDuringCancel })
+        return { ok: false, error: typedDuringCancel }
+      }
       this.base = baseOf(result.value)
     } else this.set({ error: result.error })
     return result
   }
+}
+
+const typedDuringCancel: AppError = {
+  tag: "NotSaved",
+  message: "You typed more while this was being cancelled, so it stays open with that text.",
+  problems: [],
+  reason: null
 }
 
 const notSaved: AppError = {

@@ -363,6 +363,12 @@ export class SummaryDraft {
     if (result.ok) {
       this.draft = null
       this.base = baseOf(null)
+      // Typed while the discard was out: that text wasn't discarded, so the edit stays open
+      // with it and its copy, and it's saved anew.
+      if (this.local !== null) {
+        this.refresh({ error: typedDuringCancel, recovered: this.view.recovered + result.value.recovered })
+        return { ok: false, error: typedDuringCancel }
+      }
       this.forget()
       this.refresh({ error: null, recovered: this.view.recovered + result.value.recovered })
     } else this.refresh({ error: result.error })
@@ -375,6 +381,13 @@ export class SummaryDraft {
     void this.save()
     this.disposed = true
   }
+}
+
+const typedDuringCancel: AppError = {
+  tag: "NotSaved",
+  message: "You typed more while the edit was being cancelled, so it stays open with that text.",
+  problems: [],
+  reason: null
 }
 
 const notSaved: AppError = {
