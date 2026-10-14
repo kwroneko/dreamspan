@@ -18,6 +18,7 @@ import {
   versionInContext
 } from "@rp/shared/chat.ts"
 import type { Cast, CastChange } from "@rp/shared/chatSetupApi.ts"
+import type { ComposerChoice } from "@rp/shared/composerApi.ts"
 import type { CardFields } from "@rp/shared/macros/context.ts"
 import { NotFound } from "@rp/shared/errors.ts"
 import type {
@@ -188,6 +189,18 @@ export class ChatSession {
       if (!this.view.loading) void this.refreshCast()
       void this.refreshContext()
       void this.refreshLcm()
+    }
+  }
+
+  private readonly choiceListeners = new Set<(choice: ComposerChoice | null) => void>()
+  /**
+   * Calls `listener` with each composer's speaker or reply choice published to this chat
+   * (speaker.ts), and with null after a reconnect, when one may have been missed.
+   */
+  readonly onComposerChoice = (listener: (choice: ComposerChoice | null) => void) => {
+    this.choiceListeners.add(listener)
+    return () => {
+      this.choiceListeners.delete(listener)
     }
   }
 
@@ -697,6 +710,7 @@ export class ChatSession {
         // event: its live text would hide the saved one.
         const live = new Set(event.live.map((l) => l.versionId))
         for (const id of [...this.live.keys()]) if (!live.has(id)) this.endLive(id)
+        for (const listener of this.choiceListeners) listener(null)
         this.reload()
         return
       }
@@ -718,6 +732,9 @@ export class ChatSession {
         return void this.refreshCast()
       case "Lcm":
         return this.scheduleLcm()
+      case "ComposerChoice":
+        for (const listener of this.choiceListeners) listener(event.choice)
+        return
       case "WaitingCache":
         if (!this.live.has(event.versionId)) this.setLive(event.versionId, "")
         this.registry.set(waitingCache(event.versionId), event.waiting)

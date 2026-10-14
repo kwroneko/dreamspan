@@ -1,4 +1,5 @@
 import { lcmEnableSchema } from "./schema/lcmEnable.ts"
+import { composerChoiceSchema } from "./schema/composerChoice.ts"
 import { historyChangesSchema } from "./historyChanges.ts"
 import { lcm } from "./schema/lcm.ts"
 import { SqliteMigrator } from "@effect/sql-sqlite-node"
@@ -222,7 +223,10 @@ export const migrations = {
   // came hidden from an ST import, so its mark says who hid it.
   "0035_hidden_by_user": runAll([
     `ALTER TABLE slots ADD COLUMN hidden_by_user INTEGER NOT NULL DEFAULT 0 CHECK (hidden_by_user IN (0, 1))`
-  ])
+  ]),
+  // Who a composer speaks as and who replies to its next send (ComposerChoice), on its draft
+  // row, so they move with the draft from tip to tip and survive a reload (ST-GRIPES D8).
+  "0036_composer_choice": runAll(composerChoiceSchema)
 }
 
 export const Migrations = SqliteMigrator.layer({ loader: SqliteMigrator.fromRecord(migrations) })

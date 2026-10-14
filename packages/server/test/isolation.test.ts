@@ -1502,6 +1502,36 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
         }
       })
   },
+  GetComposerChoice: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        for (const chatId of [owner.chat.chatId, actor.chat.chatId]) {
+          yield* refused(actor.api.GetComposerChoice({ chatId, draftId: owner.composerId }), "NotFound")
+        }
+      })
+  },
+  SetComposerChoice: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        for (const chatId of [owner.chat.chatId, actor.chat.chatId]) {
+          yield* refused(
+            actor.api.SetComposerChoice({ chatId, draftId: owner.composerId, speakerEntityId: actor.cardId }),
+            "NotFound"
+          )
+        }
+        // Their own composer can't name the owner's card.
+        for (const field of ["speakerEntityId", "replyFromEntityId"] as const) {
+          yield* refused(
+            actor.api.SetComposerChoice({
+              chatId: actor.chat.chatId,
+              draftId: actor.composerId,
+              [field]: owner.cardId
+            }),
+            "NotFound"
+          )
+        }
+      })
+  },
   SubscribeNotices: {
     probe: (actor, owner) =>
       Effect.scoped(
@@ -2263,7 +2293,8 @@ const snapshot = (owner: Party) =>
     outcome(owner.api.ListLibrary({ kind: "card" }), JSON.stringify),
     outcome(owner.api.ListBin({ limit: 500, before: null }), JSON.stringify),
     outcome(owner.api.ListRecoveredTexts({ limit: 500, before: null }), JSON.stringify),
-    outcome(owner.api.OpenComposer({ chatId: owner.chat.chatId, tipSlotId: owner.chat.replySlotId }), JSON.stringify)
+    outcome(owner.api.OpenComposer({ chatId: owner.chat.chatId, tipSlotId: owner.chat.replySlotId }), JSON.stringify),
+    outcome(owner.api.GetComposerChoice({ chatId: owner.chat.chatId, draftId: owner.composerId }), JSON.stringify)
   ])
 
 /** Runs a probe, then checks that it changed nothing of the owner's, whatever it returned. */

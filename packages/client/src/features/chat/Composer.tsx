@@ -7,7 +7,7 @@
 // so typing re-renders nothing else.
 import type { CastCard, EntityId, QueuedMessage } from "@rp/shared/chat.ts"
 import type { DraftState } from "@rp/shared/drafts.ts"
-import { memo, useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react"
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react"
 import { Link } from "@tanstack/react-router"
 import { useSession } from "../../session.ts"
 import type { AppError } from "../../errors.ts"
@@ -18,11 +18,12 @@ import { Button, buttonClass } from "../../ui/Button.tsx"
 import { Textarea } from "../../ui/Field.tsx"
 import { Popover } from "../../ui/Popover.tsx"
 import { Badge } from "../../ui/Surface.tsx"
-import { Tabs } from "../../ui/Tabs.tsx"
 import { SquareIconButton, Tooltip } from "../../ui/Tooltip.tsx"
-import { type CastView, nameOf, recentSpeakers, replySpeaker, useCast } from "./cast.ts"
-import { ChevronIcon, HistoryIcon, RegenerateIcon, SendIcon, StopIcon } from "./icons.tsx"
-import { speakerChoice, usePickedSpeaker } from "./speaker.ts"
+import { defaultSpeaker, nameOf, nextInTurn, recentSpeakers, replyCandidates, useCast } from "./cast.ts"
+import { HistoryIcon, RegenerateIcon, SendIcon, StopIcon } from "./icons.tsx"
+import { composerChoice, useComposerChoice } from "./speaker.ts"
+import { ReplyFrom } from "./ReplyFrom.tsx"
+import { SpeakerSwitcher } from "./SpeakerSwitcher.tsx"
 import { ReplayNotice } from "../editor/ReplayNotice.tsx"
 import { ComposerDraft, type ComposerSource, type Sent } from "./composerDraft.ts"
 import type { ChatSession, ChatView, Outcome } from "./session.ts"
@@ -34,153 +35,6 @@ const BRANCH_CHANGED: AppError = {
   problems: [],
   reason: null
 }
-
-type SwitcherTab = "members" | "personas" | "all"
-const TAB_KEY = "rp.speakerSwitcherTab"
-
-/** The tab the switcher opened on last time; storage can be unavailable, which is fine. */
-const savedTab = (): SwitcherTab => {
-  try {
-    const value = localStorage.getItem(TAB_KEY)
-    return value === "personas" || value === "all" ? value : "members"
-  } catch {
-    return "members"
-  }
-}
-const saveTab = (tab: SwitcherTab) => {
-  try {
-    localStorage.setItem(TAB_KEY, tab)
-  } catch {
-    // Not remembered, then.
-  }
-}
-
-function CardList({
-  cards,
-  current,
-  empty,
-  onPick
-}: {
-  cards: ReadonlyArray<CastCard>
-  current: EntityId | null
-  empty: string
-  onPick: (card: CastCard) => void
-}) {
-  if (cards.length === 0) return <p className="px-1 py-2 text-sm text-muted">{empty}</p>
-  return (
-    <ul className="flex flex-col">
-      {cards.map((card) => (
-        <li key={card.entityId}>
-          <button
-            type="button"
-            onClick={() => onPick(card)}
-            aria-current={card.entityId === current || undefined}
-            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm outline-none hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus aria-[current]:bg-surface-raised"
-          >
-            <Avatar id={card.entityId} name={card.name} mediaId={card.avatarMediaId} size="md" />
-            <span className="min-w-0 flex-1 truncate">{card.name}</span>
-            {card.persona && <Badge>persona</Badge>}
-            {card.label !== card.name && <span className="min-w-0 truncate text-xs text-muted">{card.label}</span>}
-          </button>
-        </li>
-      ))}
-    </ul>
-  )
-}
-
-const mediaOf = (view: CastView, id: EntityId) => view.cards.get(id)?.avatarMediaId ?? null
-
-/** The speaker, always visible; opens Members / Personas / All cards (DESIGN §2.2). */
-const SpeakerSwitcher = memo(function SpeakerSwitcher({
-  session,
-  speaker,
-  onPick
-}: {
-  session: ChatSession
-  speaker: EntityId | null
-  onPick: (card: CastCard) => void
-}) {
-  const view = useCast()
-  const [open, setOpen] = useState(false)
-  const [tab, setTab] = useState<SwitcherTab>(savedTab)
-  const [all, setAll] = useState<ReadonlyArray<CastCard> | null>(null)
-  const name = nameOf(view, speaker) ?? "You"
-  const members = (view.cast?.participants ?? []).flatMap((id) => {
-    const card = view.cards.get(id)
-    return card ? [card] : []
-  })
-  const openChange = (next: boolean) => {
-    setOpen(next)
-    if (next && all === null) void session.listCards().then((result) => setAll(result.ok ? result.value : []))
-  }
-  const pick = (card: CastCard) => {
-    setOpen(false)
-    onPick(card)
-  }
-  // A card in the chat by the name the chat uses for it (its own version's, say).
-  const cards = (all ?? []).map((card) => view.cards.get(card.entityId) ?? card)
-  return (
-    <Popover
-      open={open}
-      onOpenChange={openChange}
-      triggerLabel={`Speaking as ${name}. Change the speaker`}
-      hint={`Speaking as ${name}. Change who's speaking`}
-      triggerClassName="inline-flex h-9 max-w-44 min-w-0 shrink-0 items-center gap-1.5 rounded-full border border-border bg-surface-raised py-1 pr-2.5 pl-1 text-sm font-medium outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-focus"
-      title="Speak as"
-      trigger={
-        <>
-          {speaker !== null ? (
-            <Avatar id={speaker} name={name} mediaId={mediaOf(view, speaker)} size="sm" className="size-7" />
-          ) : (
-            <span aria-hidden="true" className="size-1" />
-          )}
-          <span className="min-w-0 truncate">{name}</span>
-          <ChevronIcon up />
-        </>
-      }
-    >
-      <Tabs
-        label="Cards to speak as"
-        value={tab}
-        onValueChange={(next) => {
-          setTab(next)
-          saveTab(next)
-        }}
-        tabs={[
-          {
-            value: "members",
-            label: "Members",
-            panel: <CardList cards={members} current={speaker} empty="No one has joined yet." onPick={pick} />
-          },
-          {
-            value: "personas",
-            label: "Personas",
-            panel: (
-              <CardList
-                cards={cards.filter((card) => card.persona)}
-                current={speaker}
-                empty={all === null ? "Loading…" : "No cards in the persona folder."}
-                onPick={pick}
-              />
-            )
-          },
-          {
-            value: "all",
-            label: "All cards",
-            panel: (
-              <CardList
-                cards={cards}
-                current={speaker}
-                empty={all === null ? "Loading…" : "No cards yet."}
-                onPick={pick}
-              />
-            )
-          }
-        ]}
-      />
-    </Popover>
-  )
-})
 
 function Queued({
   queued,
@@ -377,19 +231,31 @@ export function Composer({ session, view }: { session: ChatSession; view: ChatVi
   const [draft] = useState(() => new ComposerDraft(session, userId))
   const {
     text,
-    ready,
+    ready: textReady,
     restored,
     conflict,
     recovered,
-    error: saveError
+    error: saveError,
+    draftId
   } = useSyncExternalStore(draft.subscribe, draft.snapshot)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<AppError | null>(null)
-  // The speaker picked here or with "Write as" in the Cast tab; until then, the first card the user plays.
-  const picked = usePickedSpeaker(session)
-  const setPicked = (id: EntityId) => speakerChoice(session).set(id)
-  const speaker = picked !== undefined ? picked : (cast?.playedByMe[0] ?? null)
+  // The speaker and the reply picked here or with "Write as" in the Cast tab, kept on the
+  // server with this tip's draft (speaker.ts). Nothing is sent until they're read.
+  const choices = composerChoice(session)
+  const choice = useComposerChoice(session)
+  useEffect(() => choices.bind(draftId), [choices, draftId])
+  const ready = textReady && choice.loaded
+  const speaker = choice.speaker ?? defaultSpeaker(cast, view.entries)
+  const setPicked = (id: EntityId) => void choices.change({ speaker: id }).then(report)
   const name = nameOf(castView, speaker)
+  const speakerPlayed = speaker !== null && (cast?.playedByMe.includes(speaker) ?? false)
+  // Who replies to the next send: the face picked for it, else the next in turn (ReplyFrom.tsx).
+  const candidates = useMemo(() => replyCandidates(cast, speaker), [cast, speaker])
+  const next = useMemo(() => nextInTurn(cast, view.entries, speaker), [cast, view.entries, speaker])
+  const pickedReply = choice.replyFrom !== null && candidates.includes(choice.replyFrom) ? choice.replyFrom : null
+  const replier = pickedReply ?? next?.id ?? null
+  const replierName = nameOf(castView, replier)
   // Only known when the window reaches the leaf; otherwise the server takes the message anyway.
   const leaf = view.newer === null ? view.entries.at(-1) : undefined
   const leafGenerating = leaf?.version.status === "generating"
@@ -400,6 +266,8 @@ export function Composer({ session, view }: { session: ChatSession; view: ChatVi
         .slice(0, 3),
     [view.entries, speaker, castView.cards]
   )
+  // Listed first in the switcher, with nothing typed: who spoke last, the speaker too.
+  const switcherRecent = useMemo(() => recentSpeakers(view.entries, 8), [view.entries])
   const report = (outcome: Outcome<unknown>) => setError(outcome.ok ? null : outcome.error)
 
   /** The composer belongs to the tip of the path shown (DESIGN §6.2). */
@@ -436,13 +304,22 @@ export function Composer({ session, view }: { session: ChatSession; view: ChatVi
   /** A card that isn't in the chat joins it from here on (DESIGN §2.2). */
   const pick = useCallback(
     async (card: CastCard) => {
-      speakerChoice(session).set(card.entityId)
+      const picked = await choices.change({ speaker: card.entityId })
+      setError(picked.ok ? null : picked.error)
       if (cast !== null && !cast.participants.includes(card.entityId)) {
         const outcome = await session.changeCast({ _tag: "Join", entityId: card.entityId })
         setError(outcome.ok ? null : outcome.error)
+        // A persona picked to speak as is one the user plays, so it's never asked to reply.
+        if (outcome.ok && card.persona && !outcome.value.playedByMe.includes(card.entityId)) {
+          const played = await session.changeCast({
+            _tag: "PlayedByMe",
+            entityIds: [...outcome.value.playedByMe, card.entityId]
+          })
+          setError(played.ok ? null : played.error)
+        }
       }
     },
-    [cast, session]
+    [cast, choices, session]
   )
   const onPick = useCallback((card: CastCard) => void pick(card), [pick])
 
@@ -465,20 +342,31 @@ export function Composer({ session, view }: { session: ChatSession; view: ChatVi
     setBusy(false)
   }
 
+  /** A face picked for one reply goes back to the turn order once that reply is asked for. */
+  const replied = () => {
+    if (choice.replyFrom !== null) void choices.change({ replyFrom: null })
+  }
+
   const send = () =>
     text.trim() === ""
       ? Promise.resolve()
       : submit(async (from) => {
-          const { sent, outcome, draft, recovered } = await session.send(
-            from.text,
-            speaker,
-            replySpeaker(cast, speaker),
-            from
-          )
+          const { sent, outcome, draft, recovered } = await session.send(from.text, speaker, replier, from)
           report(outcome)
+          if (sent) replied()
           // A message that was sent (or queued) is gone from the box, even if its reply failed.
           return sent ? { sent, draft, recovered } : { sent }
         })
+
+  // With nothing typed, Send asks for the reply alone, as an empty send does in ST.
+  const replyNow = async () => {
+    if (busy || replier === null) return
+    setBusy(true)
+    const outcome = await session.generate(session.snapshot().leafSlotId, replier)
+    report(outcome)
+    if (outcome.ok) replied()
+    setBusy(false)
+  }
 
   // The text is this turn's direction (DESIGN §2.2): once asked for, it's on the reply.
   const generate = () =>
@@ -493,8 +381,21 @@ export function Composer({ session, view }: { session: ChatSession; view: ChatVi
   const onKeyDown = composerKeyDown(send)
 
   const hasText = text.trim() !== ""
-  const sendLabel = name ? `Send as ${name}` : "Send"
-  const generateLabel = name ? `Generate ${name}` : "Reply"
+  const sendLabel = hasText ? (name ? `Send as ${name}` : "Send") : replierName ? `${replierName} replies` : "Send"
+  const sendHint = hasText
+    ? `${sendLabel}${replierName ? `, then ${replierName} replies` : ""} (Enter; Shift+Enter for a new line)`
+    : replierName
+      ? `${replierName} replies now, with nothing sent from you`
+      : "Type a message to send"
+  // Generate writes the speaker's turn: for a card the user plays, the model writes it for them.
+  const generateText = name ? `Write for ${name}` : "Reply"
+  const generateHint = `${
+    name === null
+      ? "The model writes the next turn"
+      : speakerPlayed
+        ? `The model writes ${name}'s turn for you`
+        : `The model writes ${name}'s turn`
+  }${hasText ? ", with your text as a one-turn direction" : ""}`
   const shownError = error ?? saveError
 
   return (
@@ -540,7 +441,7 @@ export function Composer({ session, view }: { session: ChatSession; view: ChatVi
       <div className="flex flex-col gap-1.5 sm:flex-row sm:items-end">
         {/* Who's speaking, and the speakers used last: one tap each (DESIGN §2.2). */}
         <div className="flex min-w-0 items-center gap-1 sm:h-11">
-          <SpeakerSwitcher session={session} speaker={speaker} onPick={onPick} />
+          <SpeakerSwitcher session={session} speaker={speaker} recent={switcherRecent} onPick={onPick} />
           {recent.map((id) => {
             const who = nameOf(castView, id) ?? "?"
             return (
@@ -551,7 +452,7 @@ export function Composer({ session, view }: { session: ChatSession; view: ChatVi
                   onClick={() => setPicked(id)}
                   className="shrink-0 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-focus"
                 >
-                  <Avatar id={id} name={who} mediaId={mediaOf(castView, id)} size="md" />
+                  <Avatar id={id} name={who} mediaId={castView.cards.get(id)?.avatarMediaId ?? null} size="md" />
                 </button>
               </Tooltip>
             )
@@ -599,33 +500,39 @@ export function Composer({ session, view }: { session: ChatSession; view: ChatVi
               <StopIcon />
             </SquareIconButton>
           )}
-          <Tooltip
-            label={
-              hasText
-                ? `${name ?? "The model"} writes the next turn, with your text as a one-turn direction`
-                : `${name ?? "The model"} writes the next turn`
-            }
-          >
-            <Button aria-label={generateLabel} disabled={busy || !ready} onClick={generate}>
-              {name ? "Generate" : "Reply"}
+          <Tooltip label={generateHint}>
+            <Button
+              aria-label={generateText}
+              disabled={busy || !ready}
+              onClick={generate}
+              className="max-w-32 sm:max-w-56"
+            >
+              <span className="truncate">{generateText}</span>
             </Button>
           </Tooltip>
           <SquareIconButton
             label={sendLabel}
-            hint={`${sendLabel} (Enter; Shift+Enter for a new line)`}
+            hint={sendHint}
             variant="primary"
             pending={busy}
-            disabled={!hasText || !ready}
-            onClick={send}
+            disabled={!ready || (!hasText && replier === null)}
+            onClick={hasText ? send : replyNow}
           >
             {!busy && <SendIcon />}
           </SquareIconButton>
         </div>
       </div>
+      <ReplyFrom
+        candidates={candidates}
+        next={next}
+        picked={pickedReply}
+        disabled={!ready}
+        onPick={(id) => void choices.change({ replyFrom: id }).then(report)}
+      />
       {hasText && (
         <p id="composer-hint" className="text-xs text-muted">
           {name
-            ? `Generate instead makes this text a one-turn direction for ${name}'s turn.`
+            ? `${generateText} instead makes this text a one-turn direction for ${name}'s turn.`
             : "Reply instead makes this text a one-turn direction for the reply."}
         </p>
       )}

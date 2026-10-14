@@ -17,6 +17,8 @@ import {
   type Patch
 } from "@rp/shared/drafts.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
+import type { EntityId } from "@rp/shared/chat.ts"
+import { ComposerChoice } from "@rp/shared/composerApi.ts"
 import { Effect } from "effect"
 import type { SqlClient, SqlError } from "effect/sql"
 import { DraftTooLarge, NotFound, StaleWrite } from "./ops.ts"
@@ -36,6 +38,9 @@ interface DraftRow {
   readonly created_at: number
   readonly updated_at: number
   readonly history_length: number
+  /** The composer's choices (migration 0036); null for other drafts. */
+  readonly speaker_entity_id: string | null
+  readonly reply_from_entity_id: string | null
 }
 
 /** The draft a write took its text from: by its id, in the session it was typed in, with exactly that text. */
@@ -609,7 +614,53 @@ export const makeDraftStore = (
       let recovered = 0
       if (here === null) yield* insert(userId, key, copied, null)
       else if (copied !== "" && shown(here) === "") recovered = yield* update(here, copied, "edit", null)
-      return toDraft((yield* find(userId, key))!, recovered)
+      const opened = (yield* find(userId, key))!
+      // A branch keeps speaking as the card its composer was started from, unless its tip
+      // has a speaker of its own.
+      if (from !== null && from.speaker_entity_id !== null && opened.speaker_entity_id === null)
+        yield* sql`UPDATE drafts SET speaker_entity_id = ${from.speaker_entity_id} WHERE id = ${opened.id}`
+      return toDraft(opened, recovered)
+    })
+
+  const choiceOf = (row: DraftRow) =>
+    new ComposerChoice({
+      draftId: row.id,
+      speakerEntityId: row.speaker_entity_id as EntityId | null,
+      replyFromEntityId: row.reply_from_entity_id as EntityId | null
+    })
+
+  /** The speaker and reply choice of a composer draft of the user's chat. */
+  const composerChoice = (userId: UserId, chatId: string, draftId: string) =>
+    Effect.gen(function* () {
+      const draft = yield* findComposer(userId, chatId, draftId)
+      if (draft === null) return yield* new NotFound({ entity: "draft", id: draftId })
+      return choiceOf(draft)
+    })
+
+  /**
+   * Sets what's given of a composer draft's choices. A choice isn't text: the last one made
+   * wins, and the draft's row version, which its text saves name, doesn't change.
+   */
+  const setComposerChoice = (
+    userId: UserId,
+    chatId: string,
+    draftId: string,
+    change: { readonly speakerEntityId?: EntityId | null; readonly replyFromEntityId?: EntityId | null }
+  ) =>
+    Effect.gen(function* () {
+      const draft = yield* findComposer(userId, chatId, draftId)
+      if (draft === null) return yield* new NotFound({ entity: "draft", id: draftId })
+      for (const id of [change.speakerEntityId, change.replyFromEntityId]) {
+        if (id === undefined || id === null) continue
+        const [card] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM entities
+          WHERE id = ${id} AND owner_user_id = ${userId} AND kind = 'card' AND deleted_at IS NULL`
+        if (card!.n === 0) return yield* new NotFound({ entity: "entity", id })
+      }
+      const speaker = change.speakerEntityId === undefined ? draft.speaker_entity_id : change.speakerEntityId
+      const replyFrom = change.replyFromEntityId === undefined ? draft.reply_from_entity_id : change.replyFromEntityId
+      yield* sql`UPDATE drafts SET speaker_entity_id = ${speaker}, reply_from_entity_id = ${replyFrom}
+        WHERE id = ${draft.id}`
+      return choiceOf({ ...draft, speaker_entity_id: speaker, reply_from_entity_id: replyFrom })
     })
 
   /**
@@ -743,6 +794,8 @@ export const makeDraftStore = (
     commit,
     ownDraft,
     openComposer,
+    composerChoice,
+    setComposerChoice,
     saveComposer,
     restoreComposer
   }

@@ -32,11 +32,63 @@ export const useCast = () => useContext(CastContext)
 
 export const nameOf = (view: CastView, id: EntityId | null) => (id === null ? null : (view.cards.get(id)?.name ?? null))
 
-/** The default reply speaker: the first participant present that the user doesn't play. */
-export const replySpeaker = (cast: Cast | null, except: EntityId | null): EntityId | null =>
-  cast?.participants.find((id) => !cast.playedByMe.includes(id) && !cast.absent.includes(id) && id !== except) ??
-  cast?.participants.find((id) => !cast.playedByMe.includes(id) && !cast.absent.includes(id)) ??
-  null
+/**
+ * Who can reply to the composer's next send: the participants present that the user doesn't
+ * play, in the cast's order, less the composer's own speaker (one writing as a character
+ * isn't answered by that character), unless no one else is there.
+ */
+export const replyCandidates = (cast: Cast | null, speaker: EntityId | null): Array<EntityId> => {
+  const present = (cast?.participants ?? []).filter(
+    (id) => !cast!.playedByMe.includes(id) && !cast!.absent.includes(id)
+  )
+  const others = present.filter((id) => id !== speaker)
+  return others.length > 0 ? others : present
+}
+
+/** The next reply in turn, and whose turn it follows (null: no one's spoken yet). */
+export interface NextInTurn {
+  readonly id: EntityId
+  readonly after: EntityId | null
+}
+
+/**
+ * Turns go round the cast in its order (ST's "list order", one reply a turn): the candidate
+ * after the character who spoke last on the path, or the first when none has.
+ */
+export const nextInTurn = (
+  cast: Cast | null,
+  entries: ReadonlyArray<PathEntry>,
+  speaker: EntityId | null
+): NextInTurn | null => {
+  const candidates = replyCandidates(cast, speaker)
+  if (cast === null || candidates.length === 0) return null
+  const characters = cast.participants.filter((id) => !cast.playedByMe.includes(id))
+  let after: EntityId | null = null
+  for (let i = entries.length - 1; i >= 0 && after === null; i--) {
+    const id = entries[i]!.version.speakerEntityId
+    if (id !== null && characters.includes(id)) after = id
+  }
+  if (after === null) return { id: candidates[0]!, after: null }
+  const from = cast.participants.indexOf(after)
+  for (let step = 1; step <= cast.participants.length; step++) {
+    const id = cast.participants[(from + step) % cast.participants.length]!
+    if (candidates.includes(id)) return { id, after }
+  }
+  return { id: candidates[0]!, after }
+}
+
+/**
+ * The composer's speaker when none is picked at its tip: the card the user last wrote as on
+ * the path, if they still play it, else the first card they play.
+ */
+export const defaultSpeaker = (cast: Cast | null, entries: ReadonlyArray<PathEntry>): EntityId | null => {
+  const played = cast?.playedByMe ?? []
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const id = entries[i]!.version.speakerEntityId
+    if (id !== null && played.includes(id)) return id
+  }
+  return played[0] ?? null
+}
 
 /** Up to `count` speakers of the loaded messages, most recent first. */
 export const recentSpeakers = (entries: ReadonlyArray<PathEntry>, count: number): Array<EntityId> => {

@@ -29,6 +29,7 @@ import { ChatCursor, ChatSearch, NotAmendable, PathRange, PathWindow } from "@rp
 import { User, UserAccount, UserId, UserRole } from "@rp/shared/domain.ts"
 import { BinChanged, BinItem, RecoveredText } from "@rp/shared/bin.ts"
 import { Draft, DraftKey, DraftRestore, DraftState } from "@rp/shared/drafts.ts"
+import { ComposerChoice } from "@rp/shared/composerApi.ts"
 import { AccountRejected, LeafMoved, ModelKeyTaken, NotFound, StaleWrite } from "@rp/shared/errors.ts"
 import {
   Doc,
@@ -563,6 +564,21 @@ export class WriteOps extends RpcGroup.make(
       copyFrom: Schema.NullOr(Schema.String)
     },
     success: Draft,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * Changes a composer draft's speaker or reply choice (null clears one, a missing field
+   * stays). Each card named must be one of the user's live cards.
+   */
+  Rpc.make("SetComposerChoice", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      draftId: Schema.String,
+      speakerEntityId: Schema.optionalKey(Schema.NullOr(EntityId)),
+      replyFromEntityId: Schema.optionalKey(Schema.NullOr(EntityId))
+    },
+    success: ComposerChoice,
     error: Schema.Union([NotFound, StorageError])
   }),
   /**
@@ -1644,6 +1660,12 @@ export class ReadOps extends RpcGroup.make(
     payload: { userId: UserId, chatId: ChatId },
     success: Schema.Array(Draft),
     error: StorageError
+  }),
+  /** A chat's composer draft's speaker and reply choice, by the draft's id. */
+  Rpc.make("GetComposerChoice", {
+    payload: { userId: UserId, chatId: ChatId, draftId: Schema.String },
+    success: ComposerChoice,
+    error: Schema.Union([NotFound, StorageError])
   }),
   /** A chat's composer draft's restorable states, by the draft's id. */
   Rpc.make("ComposerHistory", {
