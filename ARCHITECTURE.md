@@ -219,7 +219,7 @@ Migrations (`migrations.ts`) run in the writer through Effect's `SqliteMigrator`
 - `0023_lcm` (§16): version-aware summary lineage, revisions, immutable retention and job path/batch references.
 - `0017_sent_context` (§15): `rollout_payloads.sent_context_json`, the sanitized final SDK message mapping, recorded before each attempt's HTTP request. The frozen assembly snapshot stays intact.
 
-- `0036_st_import_selection` (§13): `slots.st_import_row_version` records the slot revision last selected by import. A later local mutation prevents an import from replacing that selection; existing slots above revision 1 are conservatively kept.
+- `0041_st_import_selection` (§13): `slots.st_import_row_version` records the slot revision last selected by import. A later local mutation prevents an import from replacing that selection; existing slots above revision 1 are conservatively kept.
 
 Conventions:
 - **Tables:** all `STRICT`, with JSON columns guarded by `json_valid` CHECKs and timestamps in epoch milliseconds.
