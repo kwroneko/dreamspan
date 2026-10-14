@@ -127,6 +127,8 @@ export interface PathRow extends VersionRow {
   readonly version_count: number
   readonly branch_count: number
   readonly branch_index: number
+  /** Whether the slot's first version, deleted or not, is the user's (`PathEntry.side`). */
+  readonly user_side: number
 }
 
 export const toPathEntry = (row: PathRow) => {
@@ -143,6 +145,7 @@ export const toPathEntry = (row: PathRow) => {
     versionCount: row.version_count,
     branchCount: row.branch_count,
     branchIndex: row.branch_index,
+    side: row.user_side === 1 ? "user" : "assistant",
     inContext: versionInContext(version.status, version.content, contextExcluded)
   })
 }

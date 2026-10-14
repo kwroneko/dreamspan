@@ -36,6 +36,7 @@ import { castView, nameOf, useCast } from "./cast.ts"
 import { formatWhen } from "./chatTitle.ts"
 import { displayText } from "./macros.ts"
 import { parseModelValue, useModelChoices } from "./modelChoices.ts"
+import type { MessageDraft, MessageEditorKey } from "./messageDraft.ts"
 import { useMountedTracking, useRenderCount } from "./perf.ts"
 import { type ChatSession, liveText, type Outcome, waitingCache } from "./session.ts"
 
@@ -144,28 +145,33 @@ function VersionBody({
   )
 }
 
+/**
+ * A message's editor: an edit of the version shown, or a version of the user's own. Its
+ * text is a server draft kept by the session (messageDraft.ts), so scrolling the message
+ * away or reloading the page doesn't lose it, and the editor opens again where it was.
+ */
 function Editor({
-  initial,
+  draft,
   label,
   saveLabel,
   placeholder,
   onSave,
   onCancel
 }: {
-  initial: string
+  draft: MessageDraft
   label: string
   saveLabel: string
   placeholder?: string
-  onSave: (text: string) => void
+  onSave: () => void
   onCancel: () => void
 }) {
-  const [text, setText] = useState(initial)
+  const { text, error } = useSyncExternalStore(draft.subscribe, draft.snapshot)
   return (
     <form
       className="flex flex-col gap-2"
       onSubmit={(event) => {
         event.preventDefault()
-        onSave(text)
+        onSave()
       }}
       onKeyDown={(event) => {
         if (event.key === "Escape") onCancel()
@@ -177,8 +183,13 @@ function Editor({
         placeholder={placeholder}
         className="max-h-[60vh] [field-sizing:content]"
         autoFocus
-        onChange={(event) => setText(event.currentTarget.value)}
+        onChange={(event) => draft.setText(event.currentTarget.value)}
       />
+      {error && (
+        <p role="alert" className="text-sm text-danger">
+          The text isn’t saved as a draft yet: {error.message}
+        </p>
+      )}
       <div className="flex gap-2">
         <Button type="submit" variant="primary">
           <Icon name="check" />
@@ -389,6 +400,13 @@ const copy = async (text: string, what: string) => {
   }
 }
 
+/** The session's editor at `key`; the row re-renders only when that one opens or closes. */
+const useEditor = (session: ChatSession, key: MessageEditorKey) =>
+  useSyncExternalStore(
+    session.subscribeEditors,
+    useCallback(() => session.editor(key), [session, key])
+  )
+
 /** Whether a click or tap landed on something that acts on its own. */
 const onControl = (target: EventTarget | null) =>
   target instanceof Element && target.closest("button, a, input, textarea, select, summary, [role='menuitem']")
@@ -397,7 +415,6 @@ export const Message = memo(function Message({
   entry,
   session,
   highlighted,
-  last,
   context,
   revealed,
   onReveal,
@@ -407,8 +424,6 @@ export const Message = memo(function Message({
   entry: PathEntry
   session: ChatSession
   highlighted: boolean
-  /** The path's last message, which shows its version arrows even with one version, as in ST. */
-  last: boolean
   /** Why it isn't sent to the model, when it was left out or summarized (not hidden). */
   context: ContextMark | null
   /** Its actions are shown on a narrow screen, after a tap. */
@@ -423,12 +438,16 @@ export const Message = memo(function Message({
   useRenderCount("rowRenders")
   const cast = useCast()
   const { version } = entry
-  const [editing, setEditing] = useState<"edit" | "write" | null>(null)
+  // An editor open on this message: one of the version shown, or one writing a version of its own.
+  const editEditor = useEditor(session, `edit:${version.id}`)
+  const writeEditor = useEditor(session, `write:${entry.slotId}`)
+  const editor = writeEditor ?? editEditor
+  const editing = writeEditor ? "write" : editEditor ? "edit" : null
   const [error, setError] = useState<AppError | null>(null)
   const swipeStart = useRef<{ x: number; y: number } | null>(null)
   /** The last touch was a swipe, so the click it ends in isn't a tap. */
   const swiped = useRef(false)
-  const footer = useRef<HTMLElement>(null)
+  const footer = useRef<HTMLDivElement>(null)
   // A tap shows the actions at the end of the message, which may be past the screen's edge.
   useEffect(() => {
     if (revealed) footer.current?.scrollIntoView({ block: "nearest" })
@@ -436,13 +455,21 @@ export const Message = memo(function Message({
   const generating = version.status === "generating"
   const report = (outcome: Outcome<unknown>) => setError(outcome.ok ? null : outcome.error)
   const { versions, position, load } = useVersions(session, entry, report)
-  // An edit or a version the user wrote has no speaker of its own: the message stays its
-  // first version's, as the context reads it (ARCHITECTURE §15).
-  const first = versions?.[0]
-  const model = version.writer === "model" || first?.writer === "model"
+  // Edits and versions the user writes keep the message's speaker; older ones may have none,
+  // and then another version's names it.
   const speakerId =
     version.speakerEntityId ?? versions?.find((v) => v.speakerEntityId !== null)?.speakerEntityId ?? null
   const speaker = speakerId === null ? undefined : cast.cards.get(speakerId)
+  // Its side as the context reads it (stages.ts `sideOf`): a card the user plays speaks on
+  // the user's side, another of the cast on the model's, else the message's own, which its
+  // first version sets whichever versions are live (PathEntry.side).
+  const side =
+    speakerId !== null && cast.cast?.playedByMe.includes(speakerId)
+      ? "user"
+      : speakerId !== null && cast.cast?.participants.includes(speakerId)
+        ? "assistant"
+        : entry.side
+  const model = side === "assistant"
   const name = speaker?.name ?? (model ? "Model" : "You")
   const deleted = useDeletedToast()
   /** A delete says so, with Undo (DESIGN §6.2). */
@@ -480,7 +507,8 @@ export const Message = memo(function Message({
     onReveal(revealed ? null : entry.slotId)
   }
 
-  const showVersions = entry.versionCount > 1 || (model && last)
+  // Every reply has its arrows, to generate another; any message with versions, to step through them.
+  const showVersions = model || entry.versionCount > 1
   const deleteLabel = entry.versionCount > 1 ? "Delete version" : "Delete message"
   const linkSearch = branchLeaf === null ? { slot: entry.slotId } : { leaf: branchLeaf, slot: entry.slotId }
 
@@ -507,7 +535,7 @@ export const Message = memo(function Message({
         </Tooltip>
       }
     >
-      <MenuItem icon="write" onClick={() => setEditing("write")}>
+      <MenuItem icon="write" onClick={() => session.openEditor({ _tag: "Write", slotId: entry.slotId }, "")}>
         Write your own version
       </MenuItem>
       <MenuLinkItem
@@ -516,7 +544,7 @@ export const Message = memo(function Message({
       >
         Branch from here
       </MenuLinkItem>
-      <MenuItem icon="copy" onClick={() => void copy(version.content, "Text")}>
+      <MenuItem icon="copy" onClick={() => void copy(session.textOf(version), "Text")}>
         Copy text
       </MenuItem>
       <MenuItem
@@ -552,7 +580,13 @@ export const Message = memo(function Message({
 
   const actions = (
     <>
-      {!generating && <IconButton label="Edit" icon="edit" onClick={() => setEditing("edit")} />}
+      {!generating && (
+        <IconButton
+          label="Edit"
+          icon="edit"
+          onClick={() => session.openEditor({ _tag: "Edit", versionId: version.id }, version.content)}
+        />
+      )}
       {model && (
         <IconButton
           label="Regenerate"
@@ -679,30 +713,34 @@ export const Message = memo(function Message({
           )}
           {entry.branchCount > 1 && <Branches entry={entry} onBranch={onBranch} />}
         </header>
-        {revealed && reason !== null && <p className="text-xs text-muted sm:hidden">{reason}</p>}
-        {editing === "edit" ? (
+        {editor !== undefined ? (
           <Editor
-            initial={version.content}
-            label="Message text"
-            saveLabel="Save"
-            onCancel={() => setEditing(null)}
-            onSave={async (text) => {
-              const outcome = await session.edit(entry, text)
+            key={editing}
+            draft={editor}
+            {...(editing === "edit"
+              ? { label: "Message text", saveLabel: "Save" }
+              : {
+                  label: "Your version",
+                  saveLabel: "Add as a new version",
+                  placeholder: "Write your own version of this message…"
+                })}
+            onCancel={async () => {
+              // Its text goes to the bin's recovered texts, never nowhere (DESIGN §6.2).
+              const outcome = await editor.discard()
               report(outcome)
-              if (outcome.ok) setEditing(null)
+              if (outcome.ok) session.closeEditor(editor)
             }}
-          />
-        ) : editing === "write" ? (
-          <Editor
-            initial=""
-            label="Your version"
-            saveLabel="Add as a new version"
-            placeholder="Write your own version of this message…"
-            onCancel={() => setEditing(null)}
-            onSave={async (text) => {
-              const outcome = await session.writeVersion(entry, text)
+            onSave={async () => {
+              const { text, draft } = await editor.ready()
+              const outcome =
+                editing === "edit"
+                  ? await session.edit(entry, text, draft)
+                  : await session.writeVersion(entry, text, draft)
               report(outcome)
-              if (outcome.ok) setEditing(null)
+              if (!outcome.ok) return
+              // Saved without naming its draft (it didn't hold exactly this text): it's ended unsaved.
+              if (draft === null) await editor.discard()
+              session.closeEditor(editor)
             }}
           />
         ) : (
@@ -732,26 +770,31 @@ export const Message = memo(function Message({
           )}
         {(showVersions || (revealed && !editing)) && (
           // At the end of the message, as in ST: where reading it ends, and where a swipe
-          // that changes its length leaves the arrows on the last message.
-          <footer ref={footer} className="-mb-1 flex min-h-8 items-center">
-            {revealed && !editing && (
-              <div className="-ml-1.5 flex items-center sm:hidden" role="toolbar" aria-label="Message actions">
-                {actions}
-              </div>
-            )}
-            <span className="flex-1" />
-            {showVersions && (
-              <Versions
-                entry={entry}
-                model={model}
-                versions={versions}
-                position={position}
-                onStep={(step) => void swipe(step)}
-                onPick={async (picked) => report(await session.select(entry, picked))}
-                onOpen={() => void load()}
-              />
-            )}
-          </footer>
+          // that changes its length leaves the arrows. A tap on a phone shows why it isn't
+          // sent here too, beside the actions it reveals, so scrolling them into view never
+          // scrolls the start of the reason away.
+          <div ref={footer} className="flex flex-col gap-1">
+            {revealed && !editing && reason !== null && <p className="text-xs text-muted sm:hidden">{reason}</p>}
+            <footer className="-mb-1 flex min-h-8 items-center">
+              {revealed && !editing && (
+                <div className="-ml-1.5 flex items-center sm:hidden" role="toolbar" aria-label="Message actions">
+                  {actions}
+                </div>
+              )}
+              <span className="flex-1" />
+              {showVersions && (
+                <Versions
+                  entry={entry}
+                  model={model}
+                  versions={versions}
+                  position={position}
+                  onStep={(step) => void swipe(step)}
+                  onPick={async (picked) => report(await session.select(entry, picked))}
+                  onOpen={() => void load()}
+                />
+              )}
+            </footer>
+          </div>
         )}
         {error && (
           <p role="alert" className="text-sm text-danger">

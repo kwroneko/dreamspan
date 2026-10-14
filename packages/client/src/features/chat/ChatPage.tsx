@@ -316,7 +316,6 @@ function MessageList({
                     entry={row.entry}
                     session={session}
                     highlighted={row.entry.slotId === anchor}
-                    last={view.newer === null && row.entry === entries.at(-1)}
                     branchLeaf={view.leafSlotId === view.chat?.activeLeafSlotId ? null : view.leafSlotId}
                     onBranch={onBranch}
                   />

@@ -20,7 +20,14 @@ import {
 import type { Cast, CastChange } from "@rp/shared/chatSetupApi.ts"
 import type { CardFields } from "@rp/shared/macros/context.ts"
 import { NotFound } from "@rp/shared/errors.ts"
-import type { BranchSwitch, ChatEvent, PathRange, PathWindow, SendResult } from "@rp/shared/chatApi.ts"
+import type {
+  BranchSwitch,
+  ChatEvent,
+  MessageDraftTarget,
+  PathRange,
+  PathWindow,
+  SendResult
+} from "@rp/shared/chatApi.ts"
 import type { CacheWarmth, NextContext } from "@rp/shared/inspectorApi.ts"
 import type { LcmCoverage, LcmState } from "@rp/shared/lcm.ts"
 import { Cause, Context, Effect, Exit, Fiber, Schedule, Stream } from "effect"
@@ -30,6 +37,7 @@ import { AppClient } from "../../rpc.ts"
 import { sessionAtom } from "../../session.ts"
 import { mountedBodies, PERF, perf } from "./perf.ts"
 import type { ComposerSource } from "./composerDraft.ts"
+import { editorKey, MessageDraft, type MessageEditorKey, targetOf } from "./messageDraft.ts"
 
 /** How many slots one read asks for. */
 const PAGE = 60
@@ -77,6 +85,9 @@ type Client = AppClient["Service"]
 type Replayable = Extract<ChatEvent, { readonly _tag: "Slot" | "Version" | "Chat" }>
 /** What a send names of the composer draft it took its text from, which it commits. */
 const commitOf = ({ draftId, session, text }: ComposerSource) => ({ draftId, session, text })
+
+/** The draft an edit's text was typed into, to commit with it (messageDraft.ts). */
+type DraftCommit = { readonly draftId: string; readonly session: number }
 
 export type Outcome<A> = { readonly ok: true; readonly value: A } | { readonly ok: false; readonly error: AppError }
 
@@ -389,6 +400,9 @@ export class ChatSession {
 
   dispose() {
     this.disposed = true
+    // Text typed in a message editor and not saved yet goes to the server on the way out.
+    for (const editor of this.editors.values()) void editor.save()
+    if (typeof window !== "undefined") window.removeEventListener("pagehide", this.saveEditors)
     if (this.lcmTimer !== null) clearTimeout(this.lcmTimer)
     if (this.frame !== null) cancelAnimationFrame(this.frame)
     if (this.subscription) Effect.runFork(Fiber.interrupt(this.subscription))
@@ -453,7 +467,73 @@ export class ChatSession {
       for (const entry of window.entries) this.track(entry.version)
       void this.refreshCast()
       void this.refreshQueue()
+      void this.refreshEditors()
     })
+  }
+
+  // --- Message editors (messageDraft.ts): kept here, not in the rows, which unmount when
+  // scrolled away; read from the server's drafts when the chat opens, so a reload opens them again.
+
+  private readonly editors = new Map<MessageEditorKey, MessageDraft>()
+  private readonly editorListeners = new Set<() => void>()
+  private readonly saveEditors = () => {
+    for (const editor of this.editors.values()) void editor.save()
+  }
+
+  readonly subscribeEditors = (listener: () => void) => {
+    this.editorListeners.add(listener)
+    return () => {
+      this.editorListeners.delete(listener)
+    }
+  }
+
+  private editorsChanged() {
+    for (const listener of this.editorListeners) listener()
+  }
+
+  /** The open editor of a version's edit or of a version being written of a slot, if any. */
+  editor(key: MessageEditorKey): MessageDraft | undefined {
+    return this.editors.get(key)
+  }
+
+  /** Opens an editor, or the one already open there, with its text. */
+  openEditor(target: MessageDraftTarget, initial: string): MessageDraft {
+    const key = editorKey(target)
+    const open = this.editors.get(key)
+    if (open) return open
+    const editor = new MessageDraft(this, target, initial, null)
+    this.editors.set(key, editor)
+    this.editorsChanged()
+    return editor
+  }
+
+  closeEditor(editor: MessageDraft) {
+    const key = editorKey(editor.target)
+    if (this.editors.get(key) !== editor) return
+    this.editors.delete(key)
+    this.editorsChanged()
+  }
+
+  private async refreshEditors() {
+    if (typeof window !== "undefined") {
+      window.removeEventListener("pagehide", this.saveEditors)
+      window.addEventListener("pagehide", this.saveEditors)
+    }
+    const result = await this.call((client) => client("MessageDrafts", { chatId: this.chatId }))
+    if (!result.ok || this.disposed) return
+    let changed = false
+    for (const draft of result.value) {
+      const target = targetOf(draft)
+      if (target === null || this.editors.has(editorKey(target))) continue
+      this.editors.set(editorKey(target), new MessageDraft(this, target, draft.content, draft))
+      changed = true
+    }
+    if (changed) this.editorsChanged()
+  }
+
+  /** What a version shows now: the text streamed so far while it's generating. */
+  textOf(version: Version): string {
+    return this.registry.get(liveText(version.id)) ?? version.content
   }
 
   async loadOlder() {
@@ -905,11 +985,12 @@ export class ChatSession {
   }
 
   /** A finished version the user wrote changes in place; anything else gets a new version. */
-  async edit(entry: PathEntry, content: string): Promise<Outcome<unknown>> {
+  async edit(entry: PathEntry, content: string, draft: DraftCommit | null = null): Promise<Outcome<unknown>> {
     const { version } = entry
+    const commit = draft === null ? {} : { draft }
     if (version.writer === "human" && version.status !== "generating") {
       const result = await this.call((client) =>
-        client("AmendVersion", { versionId: version.id, content, expectedRowVersion: version.rowVersion })
+        client("AmendVersion", { versionId: version.id, content, expectedRowVersion: version.rowVersion, ...commit })
       )
       if (result.ok) this.applyVersion(result.value)
       else if (result.error.tag === "StaleWrite") void this.refreshSlot(entry.slotId)
@@ -920,15 +1001,21 @@ export class ChatSession {
         slotId: entry.slotId,
         sourceVersionId: version.id,
         content,
-        expectedRowVersion: entry.rowVersion
+        expectedRowVersion: entry.rowVersion,
+        ...commit
       })
     )
   }
 
   /** "Write your own version" (DESIGN §3.1): a new version of the user's, selected. */
-  writeVersion(entry: PathEntry, content: string): Promise<Outcome<unknown>> {
+  writeVersion(entry: PathEntry, content: string, draft: DraftCommit | null = null): Promise<Outcome<unknown>> {
     return this.slotWrite(entry.slotId, (client) =>
-      client("WriteVersion", { slotId: entry.slotId, content, expectedRowVersion: entry.rowVersion })
+      client("WriteVersion", {
+        slotId: entry.slotId,
+        content,
+        expectedRowVersion: entry.rowVersion,
+        ...(draft === null ? {} : { draft })
+      })
     )
   }
 

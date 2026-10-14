@@ -135,6 +135,12 @@ export class PathEntry extends Schema.Class<PathEntry>("PathEntry")({
   branchCount: Schema.Int,
   branchIndex: Schema.Int,
   /**
+   * The side the message is on when its speaker isn't one of the cast, as the context reads
+   * it (assemblySources.ts): its first version's, deleted or not, so which versions are
+   * live never changes it. A human's first version is the user's, unless it's a greeting.
+   */
+  side: Schema.Literals(["user", "assistant"]),
+  /**
    * Whether this slot enters an assembled context. False for excluded slots and
    * for selections that are failed or still empty (DATA-MODEL §15, invariant 2).
    */

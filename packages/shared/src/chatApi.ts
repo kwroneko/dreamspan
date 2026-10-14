@@ -6,6 +6,7 @@ import { Rpc, RpcGroup } from "effect/rpc"
 import { BinItem } from "./bin.ts"
 import { Chat, ChatId, ChatSummary, EntityId, PathEntry, QueuedMessage, SlotId, Version, VersionId } from "./chat.ts"
 import { LeafMoved, NotFound, ServerError, StaleWrite } from "./errors.ts"
+import { TextTooLong } from "./composerApi.ts"
 import { Draft } from "./drafts.ts"
 import { NextContext } from "./inspectorApi.ts"
 import { ModelChoice } from "./lcmSettings.ts"
@@ -95,6 +96,20 @@ const WriteErrors = [NotFound, StaleWrite, ServerError] as const
  * (DESIGN §6.2) and a send never ends text it didn't take.
  */
 const ComposerCommit = Schema.optionalKey(Schema.Struct({ draftId: Schema.String, session: Schema.Int }))
+
+/**
+ * A message editor's draft (DESIGN §6.2): the edit of a version, or a version of a
+ * message the user is writing. The text typed is saved to it as in every other field,
+ * so it survives a reload, and an edit or written version that saves it names it (by id
+ * and session) to commit it with exactly the text saved.
+ */
+export const MessageDraftTarget = Schema.Union([
+  Schema.TaggedStruct("Edit", { versionId: VersionId }),
+  Schema.TaggedStruct("Write", { slotId: SlotId })
+])
+export type MessageDraftTarget = typeof MessageDraftTarget.Type
+
+const DraftCommit = Schema.optionalKey(Schema.Struct({ draftId: Schema.String, session: Schema.Int }))
 
 /** Where a branch switch went: the sibling, and the chat with its leaf moved below it. */
 export class BranchSwitch extends Schema.Class<BranchSwitch>("BranchSwitch")({
@@ -218,21 +233,51 @@ export class ChatApi extends RpcGroup.make(
   }),
   /** An edit saved as a new version, "edited from" its source (DESIGN §3.1), and selected. */
   Rpc.make("EditVersion", {
-    payload: { slotId: SlotId, sourceVersionId: VersionId, content: Schema.String, expectedRowVersion: Schema.Int },
+    payload: {
+      slotId: SlotId,
+      sourceVersionId: VersionId,
+      content: Schema.String,
+      expectedRowVersion: Schema.Int,
+      draft: DraftCommit
+    },
     success: PathEntry,
     error: Schema.Union([...WriteErrors])
   }),
   /** "Write your own version" of any message, selected. */
   Rpc.make("WriteVersion", {
-    payload: { slotId: SlotId, content: Schema.String, expectedRowVersion: Schema.Int },
+    payload: { slotId: SlotId, content: Schema.String, expectedRowVersion: Schema.Int, draft: DraftCommit },
     success: PathEntry,
     error: Schema.Union([...WriteErrors])
   }),
   /** Changes a user-written version in place; its earlier text is kept in its history. */
   Rpc.make("AmendVersion", {
-    payload: { versionId: VersionId, content: Schema.String, expectedRowVersion: Schema.Int },
+    payload: { versionId: VersionId, content: Schema.String, expectedRowVersion: Schema.Int, draft: DraftCommit },
     success: Version,
     error: Schema.Union([...WriteErrors, NotAmendable])
+  }),
+  /** The chat's open message editors: the drafts with text of edits and versions being written. */
+  Rpc.make("MessageDrafts", {
+    payload: { chatId: ChatId },
+    success: Schema.Array(Draft),
+    error: Schema.Union([...Errors])
+  }),
+  /** Text typed into a message editor, onto the draft as this tab last saw it (null before it had one). */
+  Rpc.make("SaveMessageDraft", {
+    payload: {
+      target: MessageDraftTarget,
+      draftId: Schema.NullOr(Schema.String),
+      content: Schema.String,
+      expectedRowVersion: Schema.NullOr(Schema.Int),
+      expectedSession: Schema.NullOr(Schema.Int)
+    },
+    success: Draft,
+    error: Schema.Union([...Errors, TextTooLong])
+  }),
+  /** Closes a message editor unsaved: its text goes to the bin's recovered texts. */
+  Rpc.make("DiscardMessageDraft", {
+    payload: { target: MessageDraftTarget, draftId: Schema.String, expectedRowVersion: Schema.Int },
+    success: Draft,
+    error: Schema.Union([...WriteErrors])
   }),
   // --- Deleting goes to the recycle bin (ARCHITECTURE §3.11); generations under what was
   // deleted are stopped.

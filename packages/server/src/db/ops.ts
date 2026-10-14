@@ -1037,13 +1037,31 @@ export class WriteOps extends RpcGroup.make(
    * saw: a swipe, an edit saved as a new version, or the user's own version.
    */
   Rpc.make("AddSelectedVersion", {
-    payload: { userId: UserId, slotId: SlotId, version: NewVersion, expectedRowVersion: Schema.Int },
+    payload: {
+      userId: UserId,
+      slotId: SlotId,
+      version: NewVersion,
+      expectedRowVersion: Schema.Int,
+      /**
+       * The draft its text was typed into: an edit's (`version_edit`, its source version) or
+       * a version the user wrote (`scratchpad`, the slot), committed with it if it still
+       * holds that text.
+       */
+      commitDraft: Schema.optionalKey(CommitDraft)
+    },
     success: Schema.Struct({ chatId: ChatId, version: Version }),
     error: Schema.Union([NotFound, StaleWrite, StorageError])
   }),
   /** Changes a finished user-written version in place; the trigger keeps the earlier text. */
   Rpc.make("AmendVersion", {
-    payload: { userId: UserId, versionId: VersionId, content: Schema.String, expectedRowVersion: Schema.Int },
+    payload: {
+      userId: UserId,
+      versionId: VersionId,
+      content: Schema.String,
+      expectedRowVersion: Schema.Int,
+      /** The edit's draft (`version_edit`, this version), committed with it if it still holds that text. */
+      commitDraft: Schema.optionalKey(CommitDraft)
+    },
     success: Version,
     error: Schema.Union([NotFound, StaleWrite, NotAmendable, StorageError])
   }),
@@ -1572,6 +1590,15 @@ export class ReadOps extends RpcGroup.make(
   /** Drafts with unsent text, most recently edited first. */
   Rpc.make("ListActiveDrafts", {
     payload: { userId: UserId },
+    success: Schema.Array(Draft),
+    error: StorageError
+  }),
+  /**
+   * The chat's open message editors: drafts with text of an edit of one of its versions
+   * (`version_edit`) or of a version the user is writing of one of its messages (`scratchpad`).
+   */
+  Rpc.make("ListMessageDrafts", {
+    payload: { userId: UserId, chatId: ChatId },
     success: Schema.Array(Draft),
     error: StorageError
   }),
