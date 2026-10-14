@@ -13,7 +13,7 @@ export function ImageControls() {
   const label = prefs.mode === "show" ? `${prefs.conceal === "hide" ? "Hide" : "Blur"} all images` : "Show all images"
   return (
     <div className="flex shrink-0 items-center gap-1">
-      <Tooltip label={`${label} (${IMAGES_SHORTCUT})`}>
+      <Tooltip label={`${label} (${IMAGES_SHORTCUT})`} side="bottom">
         <Button
           variant="secondary"
           aria-label={label}
@@ -31,6 +31,7 @@ export function ImageControls() {
         trigger="⋯"
         triggerLabel="Image settings"
         hint="Image settings"
+        hintSide="bottom"
         title="Images in this browser"
         side="bottom"
         align="end"
