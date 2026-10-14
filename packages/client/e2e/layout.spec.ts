@@ -10,6 +10,7 @@ const server = serverPerFile(withAdmin)
 let provider: FakeProvider
 let connectionPath = ""
 let cardPath = ""
+let cardPagePath = ""
 
 test.beforeAll(async () => {
   provider = await startProvider()
@@ -33,13 +34,17 @@ test.beforeAll(async () => {
     api.CreateCard({ label: "Wren", name: "Wren" })
   )
   cardPath = `/library/${card.id}`
+  cardPagePath = `/cards/${card.entityId}`
 })
 test.afterAll(async () => {
   await provider.stop()
 })
 
 const screens = [
-  ["status", "/"],
+  ["characters", "/"],
+  ["card", () => cardPagePath],
+  ["chats", "/chats"],
+  ["status", "/settings/status"],
   ["connections", "/settings/connections"],
   ["new-connection", "/settings/connections/new"],
   ["connection", () => connectionPath],

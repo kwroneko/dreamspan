@@ -138,11 +138,17 @@ export const makeChatHandlers = Effect.gen(function* () {
 
   const handlers = {
     ListChatSummaries: ({ chatIds }) =>
-      Effect.flatMap(userId, (id) => reader.ChatSummaries({ userId: id, chatIds })).pipe(
-        internal("ListChatSummaries")
-      ),
-    ListChats: ({ limit, before }) =>
-      Effect.flatMap(userId, (id) => reader.ListChats({ userId: id, limit, before })).pipe(internal("ListChats")),
+      Effect.flatMap(userId, (id) => reader.ChatSummaries({ userId: id, chatIds })).pipe(internal("ListChatSummaries")),
+    ListChats: ({ limit, before, entityId, search }) =>
+      Effect.flatMap(userId, (id) =>
+        reader.ListChats({
+          userId: id,
+          limit,
+          before,
+          ...(entityId ? { entityId } : {}),
+          ...(search ? { search } : {})
+        })
+      ).pipe(internal("ListChats")),
 
     CreateChat: ({ title }) =>
       Effect.flatMap(userId, (id) =>

@@ -211,7 +211,13 @@ export const migrations = {
     `ALTER TABLE llm_requests ADD COLUMN reserved_currency TEXT`,
     `CREATE INDEX llm_requests_backfill ON llm_requests(backfill_id, status)`
   ]),
-  "0033_lcm_enable_staging": runAll(lcmEnableSchema)
+  "0033_lcm_enable_staging": runAll(lcmEnableSchema),
+  // The cards each chat joined, for the home grid's one read (CardUsage) and a card's chats
+  // (ListChats by card), without reading every other state event.
+  "0034_chat_participants": runAll([
+    `CREATE INDEX state_events_participants ON state_events(json_extract(value_json, '$.entity'), chat_id)
+      WHERE key = 'participant.join' AND superseded_by_changeset IS NULL`
+  ])
 }
 
 export const Migrations = SqliteMigrator.layer({ loader: SqliteMigrator.fromRecord(migrations) })

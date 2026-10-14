@@ -20,15 +20,9 @@ function Status() {
   }, [refreshHealth])
 
   return (
-    <div className="mx-auto flex max-w-xl flex-col gap-6">
-      <header>
-        <h1 className="text-2xl font-semibold">rp-harness</h1>
-        <p className="text-muted">
-          Signed in as {user.displayName} ({user.role}). Nothing to chat with yet.
-        </p>
-      </header>
+    <div className="flex max-w-xl flex-col gap-6">
       <Card>
-        <CardHeader title="Server" />
+        <CardHeader title="Server status" description={`Signed in as ${user.displayName} (${user.role}).`} />
         <AsyncView atom={healthAtom} loading="Connecting…">
           {(health) => (
             <dl className="grid grid-cols-2 gap-y-1 text-sm">
@@ -55,5 +49,12 @@ function Status() {
 }
 
 export const register = () => {
-  routes.register({ id: "status", parent: "app", path: "/", component: Status, nav: { label: "Status", order: 10 } })
+  // The server's health, a settings section since the home screen is the characters.
+  routes.register({
+    id: "settings.status",
+    parent: "settings",
+    path: "status",
+    component: Status,
+    nav: { label: "Status", order: 80 }
+  })
 }

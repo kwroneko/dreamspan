@@ -1,7 +1,8 @@
 // Read handlers for chat setup, speakers and the send queue (DESIGN §2.1, §2.2). They run
 // in the reader workers; every one touches only the acting user's rows.
-import { ChatSummary, type EntityId } from "@rp/shared/chat.ts"
-import { CardForChat } from "@rp/shared/chatSetupApi.ts"
+import { type ChatId, ChatSummary, type EntityId } from "@rp/shared/chat.ts"
+import { CardForChat, CardUsage } from "@rp/shared/chatSetupApi.ts"
+import type { RefId, RevisionId } from "@rp/shared/library.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { loadCards } from "./cards.ts"
@@ -16,6 +17,67 @@ export const makeChatSetupReadHandlers = Effect.gen(function* () {
       loadCards(sql, userId, null).pipe(
         Effect.map((cards) => cards.map(({ card }) => card)),
         query("ListCards")
+      ),
+
+    // One query for the whole grid (DESIGN §2.1): each live card that isn't a persona, read
+    // from the ref loadCards picks, with the chats it joined on any branch (a card that left a
+    // chat still took part in it), the last message among them, and the latest of them: the
+    // one with the last message, a chat without messages only when none has any. Per
+    // card, an index seek on the cards each chat joined (`state_events_participants`); the
+    // `+` keeps the column's affinity off the indexed expression, so the seek is used.
+    CardUsage: ({ userId }) =>
+      sql<{
+        entity_id: string
+        ref_id: string
+        head_revision_id: string
+        label: string
+        subtitle: string
+        name: unknown
+        avatar: unknown
+        used: string
+      }>`
+        WITH cards AS (
+          SELECT e.id AS entity_id, r.id AS ref_id, r.head_revision_id, r.label, r.subtitle
+          FROM entities e
+          JOIN entity_refs r ON r.id = (
+            SELECT r2.id FROM entity_refs r2 WHERE r2.entity_id = e.id AND r2.ref_kind <> 'chat_override'
+            ORDER BY r2.ref_kind = 'upstream' DESC, r2.created_at, r2.id LIMIT 1)
+          WHERE e.owner_user_id = ${userId} AND e.kind = 'card' AND e.purged_at IS NULL
+            AND e.deleted_at IS NULL AND e.archived_at IS NULL
+            AND NOT EXISTS (SELECT 1 FROM entity_tags t WHERE t.entity_id = e.id AND t.tag = 'persona')
+        )
+        SELECT cards.*, json_extract(rev.doc_json, '$.name') AS name,
+          json_extract(rev.doc_json, '$.avatar_media_id') AS avatar,
+          (SELECT json_object(
+              'chats', count(DISTINCT c.id),
+              'last', max(c.last_message_at),
+              'latest', substr(max(
+                (c.last_message_at IS NOT NULL) || printf('%016d', coalesce(c.last_message_at, c.created_at)) || c.id), 18))
+            FROM state_events s JOIN chats c ON c.id = s.chat_id
+            WHERE json_extract(s.value_json, '$.entity') = +cards.entity_id
+              AND s.key = 'participant.join' AND s.superseded_by_changeset IS NULL
+              AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL) AS used
+        FROM cards JOIN entity_revisions rev ON rev.id = cards.head_revision_id
+        ORDER BY cards.label COLLATE NOCASE, cards.entity_id`.pipe(
+        Effect.map((rows) =>
+          rows.map((row) => {
+            const used = JSON.parse(row.used) as { chats: number; last: number | null; latest: string | null }
+            const name = typeof row.name === "string" ? row.name.trim() : ""
+            return new CardUsage({
+              entityId: row.entity_id as EntityId,
+              refId: row.ref_id as RefId,
+              headRevisionId: row.head_revision_id as RevisionId,
+              label: row.label,
+              subtitle: row.subtitle,
+              name: name === "" ? row.label : name,
+              avatarMediaId: typeof row.avatar === "string" ? row.avatar : null,
+              chats: used.chats,
+              lastMessageAt: used.last,
+              latestChatId: (used.latest || null) as ChatId | null
+            })
+          })
+        ),
+        query("CardUsage")
       ),
 
     // One indexed read per chat: the cast is everyone a participant.join names on any branch

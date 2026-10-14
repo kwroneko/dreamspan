@@ -25,7 +25,7 @@ import {
 // NotFound, so their existence doesn't leak.
 import { Chat, ChatId, ChatKind, EntityId, NewVersion, PathEntry, SlotId, Version, VersionId } from "@rp/shared/chat.ts"
 import { ContextIssue, VersionError, VersionStatus } from "@rp/shared/chat.ts"
-import { NotAmendable, PathRange, PathWindow } from "@rp/shared/chatApi.ts"
+import { ChatCursor, ChatSearch, NotAmendable, PathRange, PathWindow } from "@rp/shared/chatApi.ts"
 import { User, UserAccount, UserId, UserRole } from "@rp/shared/domain.ts"
 import { BinChanged, BinItem, RecoveredText } from "@rp/shared/bin.ts"
 import { Draft, DraftKey, DraftRestore, DraftState } from "@rp/shared/drafts.ts"
@@ -72,7 +72,7 @@ import {
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
 import { CastCard, ChatSummary, FrozenMacros, QueuedMessage } from "@rp/shared/chat.ts"
-import { CardForChat, FirstTurn } from "@rp/shared/chatSetupApi.ts"
+import { CardForChat, CardUsage, FirstTurn } from "@rp/shared/chatSetupApi.ts"
 import { AssemblyFailed } from "../assembler/types.ts"
 
 const StorageErrorReason = Schema.Literals(["busy", "constraint", "corrupt", "other"])
@@ -1745,15 +1745,22 @@ export class ReadOps extends RpcGroup.make(
     error: StorageError
   }),
   // --- Chats: the chat RPCs beyond the graph operations above (reads.ts).
-  /** The user's chats, most recent first (DESIGN §2.1: by last message, else creation). */
+  /**
+   * The user's chats, most recent first (DESIGN §2.1: by last message, else creation); a
+   * card's, those with a message first. NotFound: the card isn't the user's.
+   */
   Rpc.make("ListChats", {
     payload: {
       userId: UserId,
       limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 500 })),
-      before: Schema.NullOr(Schema.Struct({ at: Schema.Number, id: ChatId }))
+      before: Schema.NullOr(ChatCursor),
+      /** Only the chats this card joined. */
+      entityId: Schema.optionalKey(EntityId),
+      /** Only the chats whose title, or a card in which, has this text. */
+      search: Schema.optionalKey(ChatSearch)
     },
     success: Schema.Array(Chat),
-    error: StorageError
+    error: Schema.Union([NotFound, StorageError])
   }),
   /** A window of a path, in either direction from where the client is (chatApi.ts). */
   Rpc.make("ReadPath", {
@@ -1789,6 +1796,8 @@ export class ReadOps extends RpcGroup.make(
   // --- Chat setup, speakers and the send queue (chatSetupReads.ts; DESIGN §2.1, §2.2).
   /** The user's live cards, by label. */
   Rpc.make("ListCards", { payload: { userId: UserId }, success: Schema.Array(CastCard), error: StorageError }),
+  /** The user's live character cards (not personas) with their use, in one query (the home grid). */
+  Rpc.make("CardUsage", { payload: { userId: UserId }, success: Schema.Array(CardUsage), error: StorageError }),
   /** The chat list's details of these chats, as far as they're the user's; others are left out. */
   Rpc.make("ChatSummaries", {
     payload: { userId: UserId, chatIds: Schema.Array(ChatId) },

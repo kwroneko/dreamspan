@@ -94,7 +94,12 @@ function Navigation({ onNavigate }: { onNavigate?: () => void }) {
         Bin
       </Link>
       <div className="mt-1 flex flex-wrap items-center gap-2 border-t border-border px-2.5 pt-2 text-sm">
-        <Link to="/settings/account" className="max-w-40 truncate text-muted hover:text-text" onClick={onNavigate}>
+        <Link
+          to="/settings/account"
+          title={`Signed in as ${session.user.displayName} (${session.user.role})`}
+          className="max-w-40 truncate text-muted hover:text-text"
+          onClick={onNavigate}
+        >
           {session.user.displayName}
         </Link>
         <BrowserRecovery userId={session.user.id} />
@@ -106,6 +111,8 @@ function Navigation({ onNavigate }: { onNavigate?: () => void }) {
 
 /** The sidebar: the chats first, as in any chat app, then the rest. */
 function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
+  // On the chats page the list is the page; the sidebar doesn't show it twice.
+  const onChats = useLocation({ select: (location) => location.pathname === "/chats" })
   return (
     <div className="flex h-full min-h-0 flex-col gap-3 p-3">
       <div className="flex items-center justify-between gap-2 px-1">
@@ -116,7 +123,7 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
           New chat
         </Link>
       </div>
-      <ChatList />
+      {onChats ? <div className="flex-1" /> : <ChatList />}
       <Navigation {...(onNavigate ? { onNavigate } : {})} />
     </div>
   )
@@ -124,9 +131,11 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
 
 /** Phones: a bar with the menu, which opens the sidebar over the page. */
 function PhoneBar() {
-  const [open, setOpen] = useState(false)
+  // Open on the page it was opened on: going anywhere closes it.
   const pathname = useLocation({ select: (location) => location.pathname })
-  useEffect(() => setOpen(false), [pathname])
+  const [openOn, setOpenOn] = useState<string | null>(null)
+  const open = openOn === pathname
+  const setOpen = (next: boolean) => setOpenOn(next ? pathname : null)
   return (
     <>
       <div className="flex items-center gap-2 border-b border-border bg-surface px-3 py-2 lg:hidden">
@@ -142,13 +151,26 @@ function PhoneBar() {
         <Link to="/" className="font-semibold">
           rp-harness
         </Link>
+        <nav aria-label="Screens" className="ml-auto flex gap-1">
+          <Link to="/" activeOptions={{ exact: true }} className={navLink}>
+            Characters
+          </Link>
+          <Link to="/chats" activeOptions={{ exact: true }} className={navLink}>
+            Chats
+          </Link>
+        </nav>
       </div>
       {open && (
         <div className="fixed inset-0 z-40 flex lg:hidden">
           <div className="flex w-[min(22rem,88vw)] flex-col border-r border-border bg-surface shadow-xl">
             <Sidebar onNavigate={() => setOpen(false)} />
           </div>
-          <button type="button" aria-label="Close the menu" className="flex-1 bg-overlay" onClick={() => setOpen(false)} />
+          <button
+            type="button"
+            aria-label="Close the menu"
+            className="flex-1 bg-overlay"
+            onClick={() => setOpen(false)}
+          />
         </div>
       )}
     </>

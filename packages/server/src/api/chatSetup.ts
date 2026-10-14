@@ -79,6 +79,8 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
 
   const handlers = {
     ListCards: () => Effect.flatMap(userId, (id) => reader.ListCards({ userId: id })).pipe(internal("ListCards")),
+    ListCardUsage: () =>
+      Effect.flatMap(userId, (id) => reader.CardUsage({ userId: id })).pipe(internal("ListCardUsage")),
 
     SetPersona: ({ entityId, persona }) =>
       Effect.gen(function* () {

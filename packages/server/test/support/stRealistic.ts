@@ -97,7 +97,10 @@ const message = (
     mes,
     ...(swipes ? { swipes, swipe_id: 0, swipe_info: swipes.map(() => ({ send_date: date, extra: {} })) } : {}),
     ...(input.avatar
-      ? { original_avatar: input.avatar, force_avatar: `/thumbnail?type=avatar&file=${encodeURIComponent(input.avatar)}` }
+      ? {
+          original_avatar: input.avatar,
+          force_avatar: `/thumbnail?type=avatar&file=${encodeURIComponent(input.avatar)}`
+        }
       : {}),
     ...(input.persona ? { force_avatar: `/thumbnail?type=persona&file=${encodeURIComponent(input.persona)}` } : {}),
     extra: input.memory ? { memory: input.memory } : {}
@@ -193,7 +196,16 @@ export const writeRealisticStFolder = (root: string) => {
         spec.name,
         `*${prose(next, 5)}* "Well, {{user}}? Are you coming or not?"`,
         { world: spec.book ? `${spec.file.replace("_spec_v2", "")}_sillytavern` : "", talkativeness: "0.5" },
-        { ...(book ? { character_book: book } : {}), alternate_greetings: [prose(next, 6), prose(next, 6)], tags: ["fantasy", "slow burn"] }
+        {
+          ...(book ? { character_book: book } : {}),
+          description,
+          personality: `Guarded, dry, loyal to a fault. ${prose(next, 4)}`,
+          scenario: `{{user}} meets ${spec.name} in Saltmarsh. ${prose(next, 6)}`,
+          mes_example: `<START>\n{{user}}: Where were you last night?\n{{char}}: *${prose(next, 3)}* "Out."`,
+          creator_notes: `<p>Made for slow-burn stories.</p><p>Works best with <b>long replies</b>.</p>`,
+          alternate_greetings: [prose(next, 6), prose(next, 6)],
+          tags: ["fantasy", "slow burn"]
+        }
       )
     )
   }
@@ -232,7 +244,10 @@ export const writeRealisticStFolder = (root: string) => {
   }
   // A card downloaded again: its old chats sit in the "(1)" folder.
   const rook = files_[8]!
-  put(`chats/${rook.file} (1)/${rook.name} - ${stamp(new Date(day + 3e8))}.jsonl`, jsonl(chatLines(next, [{ name: rook.name }], PERSONAS[0]!, 70, day)))
+  put(
+    `chats/${rook.file} (1)/${rook.name} - ${stamp(new Date(day + 3e8))}.jsonl`,
+    jsonl(chatLines(next, [{ name: rook.name }], PERSONAS[0]!, 70, day))
+  )
 
   // Group chats, which the owner uses most.
   const groups = [
@@ -250,7 +265,12 @@ export const writeRealisticStFolder = (root: string) => {
       const speakers = members.map((m) => ({ name: m.name, avatar: `${m.file}.png` }))
       put(
         `group chats/${id}.jsonl`,
-        jsonl(chatLines(next, speakers, PERSONAS[2]!, count, day, { group: true, ...(count > 300 ? { hiddenRun: 120 } : {}) }))
+        jsonl(
+          chatLines(next, speakers, PERSONAS[2]!, count, day, {
+            group: true,
+            ...(count > 300 ? { hiddenRun: 120 } : {})
+          })
+        )
       )
     }
     put(
@@ -266,7 +286,10 @@ export const writeRealisticStFolder = (root: string) => {
     )
   }
   // ST makes these just by opening a card: skipped on import.
-  put(`chats/${files_[10]!.file}/${files_[10]!.name} - ${stamp(new Date(day))}.jsonl`, jsonl([header({}), message(next, { name: files_[10]!.name, user: false, at: day })]))
+  put(
+    `chats/${files_[10]!.file}/${files_[10]!.name} - ${stamp(new Date(day))}.jsonl`,
+    jsonl([header({}), message(next, { name: files_[10]!.name, user: false, at: day })])
+  )
 
   const userRoot = join(root, "SillyTavern/data/default-user")
   for (const [path, bytes] of files) {

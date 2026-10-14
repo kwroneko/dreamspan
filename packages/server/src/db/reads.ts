@@ -381,15 +381,41 @@ export const makeReadHandlers = Effect.gen(function* () {
 
     // --- Chats
 
-    ListChats: ({ userId, limit, before }) =>
-      sql<ChatRow>`
-        SELECT * FROM chats WHERE owner_user_id = ${userId} AND deleted_at IS NULL
-          AND (${before?.id ?? null} IS NULL
-            OR (coalesce(last_message_at, created_at), id) < (${before?.at ?? null}, ${before?.id ?? null}))
-        ORDER BY coalesce(last_message_at, created_at) DESC, id DESC LIMIT ${limit}`.pipe(
-        Effect.map((rows) => rows.map(toChat)),
-        query("ListChats")
-      ),
+    // Most recent first, by last message, else creation (DESIGN §2.1). A card's list puts
+    // its chats with a message before those without, so its first is the chat Continue
+    // opens (CardUsage). `search` finds a chat by its title or by a card in it.
+    ListChats: ({ userId, limit, before, entityId, search }) =>
+      Effect.gen(function* () {
+        if (entityId !== undefined) {
+          const [card] = yield* sql<{ n: number }>`
+            SELECT count(*) AS n FROM entities
+            WHERE id = ${entityId} AND owner_user_id = ${userId} AND kind = 'card' AND purged_at IS NULL`
+          if (card?.n !== 1) return yield* new NotFound({ entity: "card", id: entityId })
+        }
+        const ranked = entityId === undefined ? 0 : 1
+        const pattern = search ? `%${search.replace(/[\\%_]/g, "\\$&")}%` : null
+        const rows = yield* sql<ChatRow>`
+          SELECT * FROM chats WHERE owner_user_id = ${userId} AND deleted_at IS NULL
+            AND (${before?.id ?? null} IS NULL
+              OR (${ranked} * (last_message_at IS NOT NULL), coalesce(last_message_at, created_at), id)
+                < (${ranked * (before?.empty === true ? 0 : 1)}, ${before?.at ?? null}, ${before?.id ?? null}))
+            AND (${entityId ?? null} IS NULL OR id IN (
+              SELECT s.chat_id FROM state_events s WHERE json_extract(s.value_json, '$.entity') = ${entityId ?? null}
+                AND s.key = 'participant.join' AND s.superseded_by_changeset IS NULL))
+            AND (${pattern} IS NULL OR title LIKE ${pattern} ESCAPE '\\' OR id IN (
+              SELECT s.chat_id FROM state_events s
+              WHERE s.key = 'participant.join' AND s.superseded_by_changeset IS NULL
+                AND json_extract(s.value_json, '$.entity') IN (
+                  SELECT e.id FROM entities e
+                  JOIN entity_refs r ON r.entity_id = e.id AND r.ref_kind <> 'chat_override'
+                  JOIN entity_revisions rev ON rev.id = r.head_revision_id
+                  WHERE e.owner_user_id = ${userId} AND e.kind = 'card' AND e.purged_at IS NULL
+                    AND (r.label LIKE ${pattern} ESCAPE '\\'
+                      OR json_extract(rev.doc_json, '$.name') LIKE ${pattern} ESCAPE '\\'))))
+          ORDER BY ${ranked} * (last_message_at IS NOT NULL) DESC, coalesce(last_message_at, created_at) DESC, id DESC
+          LIMIT ${limit}`
+        return rows.map(toChat)
+      }).pipe(query("ListChats")),
 
     ReadPath: ({ userId, chatId, leafSlotId, range, limit }) =>
       Effect.gen(function* () {
