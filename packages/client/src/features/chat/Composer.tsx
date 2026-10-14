@@ -7,21 +7,12 @@
 // so typing re-renders nothing else.
 import type { CastCard, EntityId, QueuedMessage } from "@rp/shared/chat.ts"
 import type { DraftState } from "@rp/shared/drafts.ts"
-import {
-  type ComponentProps,
-  type KeyboardEvent,
-  memo,
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-  useSyncExternalStore
-} from "react"
+import { memo, useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react"
 import { Link } from "@tanstack/react-router"
 import { useSession } from "../../session.ts"
 import type { AppError } from "../../errors.ts"
+import { AutoGrowTextarea } from "../../ui/AutoGrowTextarea.tsx"
+import { composerKeyDown } from "./composerKeys.ts"
 import { Avatar } from "../../ui/Avatar.tsx"
 import { Button, buttonClass } from "../../ui/Button.tsx"
 import { Textarea } from "../../ui/Field.tsx"
@@ -43,8 +34,6 @@ const BRANCH_CHANGED: AppError = {
   problems: [],
   reason: null
 }
-
-const coarsePointer = () => typeof matchMedia !== "undefined" && matchMedia("(pointer: coarse)").matches
 
 type SwitcherTab = "members" | "personas" | "all"
 const TAB_KEY = "rp.speakerSwitcherTab"
@@ -379,39 +368,6 @@ function History({ draft }: { draft: ComposerDraft }) {
   )
 }
 
-/** The composer's box: one line when empty, growing with its text up to a third of the screen. */
-function AutoGrowTextarea(props: ComponentProps<"textarea"> & { value: string }) {
-  const ref = useRef<HTMLTextAreaElement>(null)
-  const fit = useCallback(() => {
-    const box = ref.current
-    if (box === null) return
-    box.style.height = "auto"
-    box.style.height = `${Math.min(box.scrollHeight, Math.max(160, innerHeight / 3))}px`
-  }, [])
-  useLayoutEffect(fit, [fit, props.value])
-  // The same text takes more lines in a narrower box: a phone turned, a panel opened.
-  useEffect(() => {
-    const box = ref.current
-    if (box === null || typeof ResizeObserver === "undefined") return
-    let width = box.clientWidth
-    const observer = new ResizeObserver(() => {
-      if (box.clientWidth === width) return
-      width = box.clientWidth
-      fit()
-    })
-    observer.observe(box)
-    return () => observer.disconnect()
-  }, [fit])
-  return (
-    <textarea
-      ref={ref}
-      rows={1}
-      {...props}
-      className="max-h-[33vh] min-h-9 min-w-0 flex-1 resize-none bg-transparent px-2 py-1.5 text-base text-text outline-none placeholder:text-muted sm:text-sm"
-    />
-  )
-}
-
 export function Composer({ session, view }: { session: ChatSession; view: ChatView }) {
   const castView = useCast()
   const { cast } = castView
@@ -534,13 +490,7 @@ export function Composer({ session, view }: { session: ChatSession; view: ChatVi
         : { sent: false }
     })
 
-  const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key !== "Enter" || event.nativeEvent.isComposing) return
-    if (event.ctrlKey || event.metaKey || (!event.shiftKey && !coarsePointer())) {
-      event.preventDefault()
-      void send()
-    }
-  }
+  const onKeyDown = composerKeyDown(send)
 
   const hasText = text.trim() !== ""
   const sendLabel = name ? `Send as ${name}` : "Send"

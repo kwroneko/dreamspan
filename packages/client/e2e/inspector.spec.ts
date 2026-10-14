@@ -90,6 +90,30 @@ const shoot = async (page: Page, name: string) => {
 
 const reply = (page: Page) => page.getByRole("article", { name: "Reply" }).filter({ hasText: REPLY })
 
+test("usage headers fit without clipping on a 390px phone", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${server().url}/chats/${chat.id}/context/${chat.reply}`)
+  const headers = page.getByRole("columnheader")
+  await expect(headers).toHaveText(["Attempt", "Input", "Cache read", "Cache write", "Output", "Cost"])
+  const bounds = await headers.evaluateAll((nodes) =>
+    nodes.map((node) => {
+      const header = node as HTMLElement
+      const region = header.closest("table")!.parentElement!
+      const rect = header.getBoundingClientRect()
+      const container = region.getBoundingClientRect()
+      return {
+        text: header.textContent,
+        fits: header.scrollWidth <= header.clientWidth,
+        visible: rect.left >= container.left - 1 && rect.right <= container.right + 1 && rect.right <= innerWidth
+      }
+    })
+  )
+  expect(bounds).toEqual(bounds.map(({ text }) => ({ text, fits: true, visible: true })))
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
+  await shoot(page, "inspector-phone")
+})
+
 test("a reply's context opens from the reply, with its sources and the cache breakpoints", async ({ page }) => {
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/chats/${chat.id}`)

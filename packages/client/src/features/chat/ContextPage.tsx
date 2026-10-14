@@ -112,7 +112,7 @@ function Usage({ requests }: { requests: ReadonlyArray<InspectorUsage> }) {
   if (requests.length === 0) return <p className="text-sm text-muted">No request was sent.</p>
   return (
     <div className="overflow-x-auto">
-      <table className="w-full text-left text-sm tabular-nums">
+      <table className="w-full text-left text-sm tabular-nums max-sm:[&_td]:pr-1 max-sm:[&_td]:[overflow-wrap:anywhere] max-sm:[&_th]:pr-1">
         <thead className="text-muted">
           <tr>
             <th className="py-1 pr-3 font-medium">Attempt</th>
