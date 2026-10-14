@@ -29,3 +29,31 @@ for (const stopReason of ["toolUse", "aborted", "error"] as const)
     assert.isNull(result.counts.output)
     assert.equal(result.source, "reported")
   })
+
+for (const stopReason of ["toolUse", "aborted", "error"] as const)
+  it(`estimates schema-generated prose without provider usage after ${stopReason}`, () => {
+    const message: AssistantMessage = {
+      role: "assistant",
+      api: "openai-completions",
+      provider: "openai",
+      model: "synthetic",
+      timestamp: 0,
+      stopReason,
+      content: [
+        { type: "toolCall", name: "continue_reply", id: "reply", arguments: { text: "Prefix. Added suffix." } }
+      ],
+      usage: {
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 0,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
+      }
+    }
+    const result = finalCounts(message, emptyCapture(), [], "continue_reply")
+    assert.equal(result.source, "estimated")
+    assert.isAbove(result.counts.output ?? 0, 0)
+    // A real tool call still has the existing unknown-usage semantics.
+    assert.equal(finalCounts(message, emptyCapture(), []).source, "none")
+  })

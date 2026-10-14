@@ -15,7 +15,19 @@ export interface GenerationRequest {
   /** "Retry with…": generates with this model instead of the chat's. */
   readonly model?: { readonly connection: ConnectionId; readonly model: ModelId }
   readonly onWaitingCache?: (waiting: boolean) => void
+  /**
+   * Continue: the version starts with this text and reasoning (the version it continues),
+   * and what's generated is appended. The generator itself reads what it continues from the
+   * version (its source), as the context assembler does.
+   */
+  readonly initial?: { readonly text: string; readonly reasoning: string }
 }
+
+/**
+ * What a generator streams: text as plain strings, and the model's reasoning ("thinking")
+ * apart from it, kept on the version and never sent back (DESIGN §7.4).
+ */
+export type GenerationChunk = string | { readonly reasoning: string }
 
 /** Why a generation failed, as its failed version records it (DESIGN §3.1). */
 export class GenerationFailed extends Schema.TaggedError<GenerationFailed>()("GenerationFailed", {
@@ -25,7 +37,7 @@ export class GenerationFailed extends Schema.TaggedError<GenerationFailed>()("Ge
 
 export interface GeneratorShape {
   /** The text as it's produced. Interrupting the stream stops the generation. */
-  readonly generate: (request: GenerationRequest) => Stream.Stream<string, GenerationFailed>
+  readonly generate: (request: GenerationRequest) => Stream.Stream<GenerationChunk, GenerationFailed>
 }
 
 /** The generator, if this server has one. Without one, generating is refused up front. */

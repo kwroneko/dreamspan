@@ -1,5 +1,6 @@
 import { documentedCachePolicy } from "./cachePolicy.ts"
 import { limitImages } from "./images.ts"
+import { captureToolArguments } from "./toolArguments.ts"
 // The provider layer (spec/PROVIDERS.md): one streaming entry point over pi-ai for the
 // assembler and, later, the agent loop, plus the connection operations that need the
 // server secret or the network (encrypting secrets, fetching model lists, testing).
@@ -74,6 +75,8 @@ export interface StreamRequest {
     readonly display?: InspectionInputs | undefined
   }
   readonly options?: {
+    /** A forced tool used as generated prose, included in usage estimates. */
+    readonly replyTool?: string
     readonly reasoning?: ThinkingLevel
     readonly maxTokens?: number
     readonly temperature?: number
@@ -108,6 +111,7 @@ export type ProviderEvent =
   | { readonly type: "paused"; readonly delayMs: number }
   | { readonly type: "text"; readonly delta: string }
   | { readonly type: "thinking"; readonly delta: string }
+  | { readonly type: "toolcall"; readonly name: string; readonly arguments: unknown }
   | {
       readonly type: "retrying"
       readonly attempt: number
@@ -119,6 +123,7 @@ export type ProviderEvent =
       readonly type: "done"
       readonly requestId: LlmRequestId
       readonly message: AssistantMessage
+      readonly toolArguments: Readonly<Record<string, string>>
       readonly counts: TokenCounts
       readonly cost: Cost | null
     }
@@ -797,6 +802,7 @@ export const layer = (options: ProvidersOptions = {}) =>
       ) => {
         const requestId = uuidv7() as LlmRequestId
         const attribution = request.attribution
+        const toolArguments = captureToolArguments()
         const state = {
           opened: false,
           held: false,
@@ -835,7 +841,7 @@ export const layer = (options: ProvidersOptions = {}) =>
 
         const writeClose = (message: AssistantMessage, error: ProviderError | null, context: PiContext["messages"]) =>
           Effect.gen(function* () {
-            const { counts, source } = finalCounts(message, state.capture, context)
+            const { counts, source } = finalCounts(message, state.capture, context, request.options?.replyTool)
             if (!state.opened) return { counts, cost: null }
             const cost = costOf(
               registry.costs.list(),
@@ -1058,6 +1064,7 @@ export const layer = (options: ProvidersOptions = {}) =>
                 },
                 // Registered observers read the raw events (usage capture, PROVIDERS §9.2).
                 onProviderStreamEvent: (data) => {
+                  toolArguments.observe(data)
                   for (const observer of observers) observer.observe(data, state.capture)
                   if ((prepared.kind.cacheRelease ?? defaultCacheRelease).after === "first-chunk") {
                     state.gate?.release("first-chunk")
@@ -1160,6 +1167,11 @@ export const layer = (options: ProvidersOptions = {}) =>
                   state.firstTokenAt ??= Date.now()
                   if (event.type === "text_delta") offer({ type: "text", delta: event.delta })
                   if (event.type === "thinking_delta") offer({ type: "thinking", delta: event.delta })
+                  if (event.type === "toolcall_delta") {
+                    const call = event.partial.content[event.contentIndex]
+                    if (call?.type === "toolCall")
+                      offer({ type: "toolcall", name: call.name, arguments: structuredClone(call.arguments) })
+                  }
                 }
               }
               const result = await events.result()
@@ -1213,7 +1225,19 @@ export const layer = (options: ProvidersOptions = {}) =>
           Effect.flatMap(({ message, error }) =>
             writeClose(message, error, request.context.messages).pipe(
               Effect.map(({ counts, cost }): AttemptOutcome =>
-                error ? { ok: false, error } : { ok: true, event: { type: "done", requestId, message, counts, cost } }
+                error
+                  ? { ok: false, error }
+                  : {
+                      ok: true,
+                      event: {
+                        type: "done",
+                        requestId,
+                        message,
+                        toolArguments: toolArguments.argumentsById,
+                        counts,
+                        cost
+                      }
+                    }
               )
             )
           ),

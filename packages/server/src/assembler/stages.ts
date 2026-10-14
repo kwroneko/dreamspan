@@ -1,3 +1,4 @@
+import { schemaPrefillBudget } from "./prefill.ts"
 import { layerText, lcmStage } from "./lcm.ts"
 import { createHash } from "node:crypto"
 import { contextBudget, targetBudget, loreAllowance, loreBudget } from "./budget.ts"
@@ -161,6 +162,8 @@ const castStage: AssemblerStage = {
       const target = need(assembly, "target")
       assembly.cast = yield* castOf(need(assembly, "state"), target.speaker, target.ordinal)
       if (assembly.request.summarizing) assembly.cast = { ...assembly.cast, type: "quiet" }
+      // ST's Continue: its own generation type, which a preset prompt's trigger can name.
+      else if (target.continues) assembly.cast = { ...assembly.cast, type: "continue" }
       return assembly
     })
 }
@@ -708,13 +711,15 @@ const override = (
  */
 const prefill = (assembly: Assembly) => {
   if (assembly.request.summarizing) return
+  const continues = need(assembly, "target").continues
+  if (continues) return continuePrefill(assembly, continues.text)
   const doc = need(assembly, "preset").doc
   const type = need(assembly, "cast").type
   const raw = type === "impersonate" ? doc.prefill.impersonation : doc.prefill.assistant
   const id = type === "impersonate" ? "prefill.impersonation" : "prefill.assistant"
   const text = raw ? presetText(assembly, id, raw).text.trimEnd() : ""
   if (!text) return
-  if (assembly.model?.prefill === "assistant") {
+  if (assembly.model && assembly.model.prefill !== "none" && !assembly.model.continueUnavailable) {
     assembly.prefill = text
   } else {
     assembly.issues.push({
@@ -724,6 +729,26 @@ const prefill = (assembly: Assembly) => {
         : "The preset's prefill wasn't sent: no model is chosen."
     })
   }
+}
+
+/**
+ * Continue sends the text it continues as the start of the reply, in place of the preset's
+ * prefill (ST's "continue prefill"), so the model writes on from its end. Without a model
+ * that takes one it can't continue: the version fails and says so (DESIGN §7.5). Trailing
+ * whitespace goes, which Anthropic refuses at the end of a prefill.
+ */
+const continuePrefill = (assembly: Assembly, text: string) => {
+  const model = assembly.model
+  if (!model) {
+    throw new AssemblyFailed({ reason: "no_model", message: "Continue needs a model: none is chosen." })
+  }
+  if (model.prefill === "none" || model.continueUnavailable) {
+    throw new AssemblyFailed({
+      reason: "no_prefill",
+      message: `Continue isn't available with ${model.key}: ${model.continueUnavailable ?? "no prefill support is declared. Set its Prefill capability in Connections if supported."}`
+    })
+  }
+  assembly.prefill = model.prefill === "tool_schema" ? text : text.trimEnd()
 }
 
 /** A message of the path as ST sends it, with the preset's names behavior (setOpenAIMessages). */
@@ -1525,9 +1550,17 @@ const composeStage = sync("compose", (assembly) => {
   const lines = projected.map((p, i) => chatLine(assembly, p, groupNames, scripted[i]!))
   prefill(assembly)
   const newExampleChat = optional("utility.new_example_chat_prompt", utility.new_example_chat_prompt)
+  const schemaReserve =
+    assembly.prefill && assembly.model?.prefill === "tool_schema" ? schemaPrefillBudget(assembly.prefill) : null
+  const prefillInput = schemaReserve?.input ?? (assembly.prefill ? tokensOf({ content: assembly.prefill }) : 0)
+  const prefixOutput = schemaReserve?.output ?? 0
+  if (schemaReserve && doc.samplers.openai_max_tokens + prefixOutput > (assembly.model?.maxOutput ?? Infinity))
+    throw new AssemblyFailed({
+      reason: "budget",
+      message: `The source prefix and requested continuation need about ${doc.samplers.openai_max_tokens + prefixOutput} output tokens, beyond ${assembly.model!.key}'s ${assembly.model!.maxOutput}-token output limit. Choose a model with a larger output limit or reduce the preset's response length.`
+    })
   const reserve =
-    (assembly.prefill ? tokensOf({ content: assembly.prefill }) : 0) +
-    (!mode.st && assembly.lorebooks?.length ? loreAllowance(assembly) - loreCost : 0)
+    prefillInput + prefixOutput + (!mode.st && assembly.lorebooks?.length ? loreAllowance(assembly) - loreCost : 0)
   let maximum = contextBudget(assembly) - reserve
   let desiredTarget = targetBudget(assembly) - reserve
   let admittedExamples = examples
@@ -1596,8 +1629,8 @@ const composeStage = sync("compose", (assembly) => {
   const contextBudgetInfo = (nonHistoryTokens: number) => ({
     maximum: contextBudget(assembly) + doc.samplers.openai_max_tokens,
     target: targetBudget(assembly) + doc.samplers.openai_max_tokens,
-    responseReserve: doc.samplers.openai_max_tokens,
-    nonHistoryTokens: nonHistoryTokens + (assembly.prefill ? tokensOf({ content: assembly.prefill }) : 0)
+    responseReserve: doc.samplers.openai_max_tokens + prefixOutput,
+    nonHistoryTokens: nonHistoryTokens + prefillInput
   })
   if (fixedCost > maximum)
     throw new AssemblyFailed({

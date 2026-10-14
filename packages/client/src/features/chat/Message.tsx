@@ -36,6 +36,8 @@ import { IconButton, iconButtonClass, Tooltip } from "../../ui/Tooltip.tsx"
 import { useDeletedToast } from "../bin/deleted.ts"
 import { ReplayNotice } from "../editor/ReplayNotice.tsx"
 import { castView, nameOf, useCast } from "./cast.ts"
+import { ContinueAction } from "./ContinueAction.tsx"
+import { Reasoning } from "./Reasoning.tsx"
 import { formatWhen } from "./chatTitle.ts"
 import { displayText } from "./macros.ts"
 import { parseModelValue, useModelChoices } from "./modelChoices.ts"
@@ -177,6 +179,7 @@ function VersionBody({
   const text = live ?? version.content
   return (
     <div className="flex flex-col gap-2">
+      <Reasoning version={version} />
       {text === "" && generating ? (
         <p className="text-sm text-muted" aria-live="polite">
           {waiting ? "Waiting for the cache…" : "Writing…"}
@@ -276,10 +279,15 @@ function useVersions(session: ChatSession, entry: PathEntry, report: (outcome: O
     [session, entry.slotId]
   )
   const multiple = entry.versionCount > 1
-  // The list as read is current while it has as many versions as the slot, this one among them.
+  // Refresh when the selected record changes, including a generation finishing in place.
   const position =
     versions !== null && versions.length === entry.versionCount
-      ? versions.findIndex((v) => v.id === entry.version.id)
+      ? versions.findIndex(
+          (v) =>
+            v.id === entry.version.id &&
+            (entry.version.status === "generating" || v.rowVersion === entry.version.rowVersion) &&
+            v.status === entry.version.status
+        )
       : -1
   const stale = multiple && position < 0
   useEffect(() => {
@@ -291,9 +299,17 @@ function useVersions(session: ChatSession, entry: PathEntry, report: (outcome: O
     return () => {
       live = false
     }
-  }, [stale, session, entry.slotId, entry.versionCount, entry.version.id])
+  }, [
+    stale,
+    session,
+    entry.slotId,
+    entry.versionCount,
+    entry.version.id,
+    entry.version.rowVersion,
+    entry.version.status
+  ])
   const load = async (fresh = false) => {
-    if (position >= 0 && !fresh) return versions
+    if (position >= 0 && !fresh && versions!.every((version) => version.status !== "generating")) return versions
     const result = await session.listVersions(entry.slotId)
     if (!result.ok) {
       report(result)
@@ -667,6 +683,7 @@ export const Message = memo(function Message({
           onClick={async () => report(await session.regenerate(entry))}
         />
       )}
+      <ContinueAction entry={entry} session={session} report={report} />
       <IconButton
         label={deleteLabel}
         icon="trash"

@@ -40,7 +40,7 @@ const startOnce = async (env: Record<string, string>): Promise<TestServer | null
         PORT: String(serverPort),
         DATA_DIR: dataDir,
         DB_READERS: "1",
-        DB_WORKERS: "source",
+        DB_WORKERS: process.env.E2E_DB_WORKERS ?? "source",
         CLIENT_DIST: join(root, "packages/client/dist"),
         ...env
       },
@@ -72,7 +72,8 @@ const startOnce = async (env: Record<string, string>): Promise<TestServer | null
   }
   const url = `http://127.0.0.1:${serverPort}`
   const healthy = async () => {
-    for (let attempt = 0; attempt < 200; attempt++) {
+    const deadline = Date.now() + 90_000
+    while (Date.now() < deadline) {
       if (child.exitCode !== null || child.signalCode !== null) return false
       const ok = await fetch(`${url}/healthz`, { signal: AbortSignal.timeout(1000) }).then(
         (response) => response.ok,

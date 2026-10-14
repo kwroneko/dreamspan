@@ -3,7 +3,7 @@
 // to the chat's subscribers, from every tab of the user, after it's committed.
 import { type AppApi, CurrentUser } from "@rp/shared/api.ts"
 import type { ChatId, EntityId, NewVersion, PathEntry, SlotId } from "@rp/shared/chat.ts"
-import { BranchSwitch, GenerationUnavailable, messageDraftKey } from "@rp/shared/chatApi.ts"
+import { BranchSwitch, GenerationUnavailable, messageDraftKey, NotContinuable } from "@rp/shared/chatApi.ts"
 import { TextTooLong } from "@rp/shared/composerApi.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { foldState } from "@rp/shared/state.ts"
@@ -272,6 +272,42 @@ export const makeChatHandlers = Effect.gen(function* () {
         return entry
       }).pipe(Effect.uninterruptible, internal("Regenerate")),
 
+    // Continue (ST's, DESIGN §7.5): a new version that starts as the text continued and
+    // streams on from its end, the old version left as it was. The slot is published before
+    // the generation starts, so every tab has the starting text before the first delta.
+    ContinueVersion: ({ versionId, expectedRowVersion }) =>
+      Effect.gen(function* () {
+        yield* needGenerator
+        const id = yield* userId
+        const source = yield* reader.GetVersion({ userId: id, versionId })
+        const refuse = (message: string) => Effect.fail(new NotContinuable({ versionId, message }))
+        if (source.writer !== "model") return yield* refuse("Only a reply the model wrote can be continued.")
+        if (source.status === "generating") return yield* refuse("It's still being written.")
+        if (source.content.trim() === "") return yield* refuse("It has no text to continue.")
+        const added = yield* writer.AddSelectedVersion({
+          userId: id,
+          slotId: source.slotId,
+          version: {
+            ...generating,
+            content: source.content,
+            speakerEntityId: source.speakerEntityId,
+            sourceVersionId: source.id,
+            ...(source.direction ? { direction: source.direction } : {}),
+            ...(source.reasoning ? { reasoning: source.reasoning } : {})
+          },
+          expectedRowVersion
+        })
+        const entry = yield* publishSlot(id, source.slotId)
+        yield* generations.start({
+          userId: id,
+          chatId: added.chatId,
+          slotId: source.slotId,
+          versionId: added.version.id,
+          initial: { text: added.version.content, reasoning: added.version.reasoning ?? "" }
+        })
+        return entry
+      }).pipe(Effect.uninterruptible, internal("ContinueVersion")),
+
     StopGeneration: ({ versionId }) =>
       Effect.flatMap(userId, (id) =>
         generations.stop(id, versionId).pipe(
@@ -459,6 +495,11 @@ export const makeChatHandlers = Effect.gen(function* () {
         return new BranchSwitch({ slotId: target.slotId, chat })
       }).pipe(Effect.retry({ times: 2, while: (error) => error._tag === "StaleWrite" }), internal("SwitchBranch")),
 
+    GetDisplayPrefs: () =>
+      Effect.flatMap(userId, (id) => reader.GetDisplayPrefs({ userId: id })).pipe(internal("GetDisplayPrefs")),
+
+    SetDisplayPrefs: ({ prefs }) =>
+      Effect.flatMap(userId, (id) => writer.SetDisplayPrefs({ userId: id, prefs })).pipe(internal("SetDisplayPrefs")),
     ListBranches: ({ slotId }) =>
       Effect.flatMap(userId, (id) => reader.ListBranches({ userId: id, slotId })).pipe(internal("ListBranches")),
 

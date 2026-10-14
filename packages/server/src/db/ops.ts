@@ -25,7 +25,15 @@ import {
 // NotFound, so their existence doesn't leak.
 import { Chat, ChatId, ChatKind, EntityId, NewVersion, PathEntry, SlotId, Version, VersionId } from "@rp/shared/chat.ts"
 import { ContextIssue, VersionError, VersionStatus } from "@rp/shared/chat.ts"
-import { Branch, ChatCursor, ChatSearch, NotAmendable, PathRange, PathWindow } from "@rp/shared/chatApi.ts"
+import {
+  Branch,
+  ChatCursor,
+  ChatSearch,
+  DisplayPrefs,
+  NotAmendable,
+  PathRange,
+  PathWindow
+} from "@rp/shared/chatApi.ts"
 import { User, UserAccount, UserId, UserRole } from "@rp/shared/domain.ts"
 import { BinChanged, BinItem, RecoveredText } from "@rp/shared/bin.ts"
 import { Draft, DraftKey, DraftRestore, DraftState } from "@rp/shared/drafts.ts"
@@ -1151,6 +1159,8 @@ export class WriteOps extends RpcGroup.make(
       userId: UserId,
       versionId: VersionId,
       content: Schema.String,
+      /** The reasoning streamed so far; left as it is when absent. */
+      reasoning: Schema.optionalKey(Schema.String),
       status: VersionStatus,
       error: Schema.NullOr(VersionError)
     },
@@ -1287,6 +1297,8 @@ export class WriteOps extends RpcGroup.make(
       userId: UserId,
       versionId: VersionId,
       content: Schema.String,
+      /** The reasoning streamed; left as it is when absent. */
+      reasoning: Schema.optionalKey(Schema.String),
       status: VersionStatus,
       error: Schema.NullOr(VersionError)
     },
@@ -1561,6 +1573,12 @@ export class WriteOps extends RpcGroup.make(
     payload: { userId: UserId, change: GenerationDefaultsChange },
     success: GenerationDefaults,
     error: Schema.Union([NotFound, StorageError])
+  }),
+  /** The user's display choices (`user_prefs`, key `display`), stored whole. */
+  Rpc.make("SetDisplayPrefs", {
+    payload: { userId: UserId, prefs: DisplayPrefs },
+    success: DisplayPrefs,
+    error: StorageError
   }),
   // --- Branches (DESIGN §3.2).
   /**
@@ -2128,6 +2146,8 @@ export class ReadOps extends RpcGroup.make(
     success: GenerationDefaults,
     error: StorageError
   }),
+  /** The user's display choices; the defaults where none are stored. */
+  Rpc.make("GetDisplayPrefs", { payload: { userId: UserId }, success: DisplayPrefs, error: StorageError }),
   // --- Branches (DESIGN §3.2).
   /**
    * Where switching to the branch at `index` among `slotId`'s alternates leads: that

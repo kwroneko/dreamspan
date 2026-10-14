@@ -21,6 +21,10 @@ const SAVE_EVERY_MS = 2000
 interface Running {
   readonly request: GenerationRequest
   text: string
+  /** The reasoning streamed so far (DESIGN §7.4), kept apart from the text. */
+  reasoning: string
+  /** Whether this generation streamed any reasoning yet (a continuation starts with its source's). */
+  reasoned: boolean
   waitingCache: boolean
   savedAt: number
   /** Stopped by the user (`stopped`), as opposed to the server going down (`interrupted`). */
@@ -38,9 +42,12 @@ export class Generations extends Context.Service<
     /** Stops one generation and returns its version as saved; NotFound unless it's running and the user's. */
     readonly stop: (userId: UserId, versionId: VersionId) => Effect.Effect<Version, NotFound>
     /** The text so far of each version generating in a chat. */
-    readonly live: (
-      chatId: ChatId
-    ) => Array<{ readonly versionId: VersionId; readonly text: string; readonly waitingCache?: boolean }>
+    readonly live: (chatId: ChatId) => Array<{
+      readonly versionId: VersionId
+      readonly text: string
+      readonly waitingCache?: boolean
+      readonly reasoning?: string
+    }>
     /** The versions generating in a chat. */
     readonly runningIn: (chatId: ChatId) => Array<VersionId>
     /** After a write moved the send queue: starts the reply it posted, and publishes what changed. */
@@ -72,6 +79,7 @@ export class Generations extends Context.Service<
           userId: entry.request.userId,
           versionId: entry.request.versionId,
           content: entry.text,
+          ...(entry.reasoning ? { reasoning: entry.reasoning } : {}),
           status,
           error
         })
@@ -124,6 +132,7 @@ export class Generations extends Context.Service<
               userId: request.userId,
               versionId: request.versionId,
               content: entry.text,
+              ...(entry.reasoning ? { reasoning: entry.reasoning } : {}),
               status,
               error
             })
@@ -200,14 +209,28 @@ export class Generations extends Context.Service<
           .pipe(
             Stream.runForEach((chunk) =>
               Effect.suspend(() => {
-                const offset = entry.text.length
-                entry.text += chunk
-                hub.publish(entry.request.chatId, {
-                  _tag: "Delta",
-                  versionId: entry.request.versionId,
-                  offset,
-                  text: chunk
-                })
+                if (typeof chunk === "string") {
+                  const offset = entry.text.length
+                  entry.text += chunk
+                  hub.publish(entry.request.chatId, {
+                    _tag: "Delta",
+                    versionId: entry.request.versionId,
+                    offset,
+                    text: chunk
+                  })
+                } else {
+                  const offset = entry.reasoning.length
+                  // A continuation's own reasoning goes after its source's, a paragraph apart.
+                  const text = !entry.reasoned && offset > 0 ? `\n\n${chunk.reasoning}` : chunk.reasoning
+                  entry.reasoned = true
+                  entry.reasoning += text
+                  hub.publish(entry.request.chatId, {
+                    _tag: "Reasoning",
+                    versionId: entry.request.versionId,
+                    offset,
+                    text
+                  })
+                }
                 if (Date.now() - entry.savedAt < SAVE_EVERY_MS) return Effect.void
                 entry.savedAt = Date.now()
                 return save(entry, "generating", null).pipe(
@@ -235,7 +258,10 @@ export class Generations extends Context.Service<
           if (Option.isNone(generator)) return yield* Effect.die(new Error("no generator: refuse before writing"))
           const entry: Running = {
             request,
-            text: "",
+            // Continue starts from the text it continues: deltas go on from its end.
+            text: request.initial?.text ?? "",
+            reasoning: request.initial?.reasoning ?? "",
+            reasoned: false,
             waitingCache: false,
             savedAt: Date.now(),
             stopped: false,
@@ -266,7 +292,8 @@ export class Generations extends Context.Service<
             .map((entry) => ({
               versionId: entry.request.versionId,
               text: entry.text,
-              waitingCache: entry.waitingCache
+              waitingCache: entry.waitingCache,
+              ...(entry.reasoning ? { reasoning: entry.reasoning } : {})
             })),
         runningIn: (chatId) =>
           [...running.values()]

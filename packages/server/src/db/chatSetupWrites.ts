@@ -364,7 +364,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
           else yield* sql`DELETE FROM entity_tags WHERE entity_id = ${entityId} AND tag = 'persona'`
         }).pipe(transaction("SetPersona")),
 
-      FinishGeneration: ({ userId, versionId, content, status, error }) =>
+      FinishGeneration: ({ userId, versionId, content, reasoning, status, error }) =>
         Effect.gen(function* () {
           const row = yield* graph.ownedVersion(userId, versionId, false)
           // A version deleted for good stays empty, whatever was still generating into it.
@@ -378,6 +378,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
           }
           yield* recordHistoryReduction(sql, row.slot_id, content, versionId)
           yield* sql`UPDATE versions SET content = ${content}, status = ${status},
+            reasoning = CASE WHEN ${reasoning === undefined ? 1 : 0} THEN reasoning ELSE ${reasoning || null} END,
             error_json = ${error === null ? null : JSON.stringify(error)}, updated_at = ${Date.now()}
             WHERE id = ${versionId}`
           const version = toVersion(yield* graph.ownedVersion(userId, versionId, false))

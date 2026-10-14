@@ -1,6 +1,6 @@
 // Live updates to chats (CLIENT-FRAMEWORK §5): every change to a chat is published here,
 // and each subscriber gets the chat's events in batches, one per frame at most.
-import type { ChatId, VersionId } from "@rp/shared/chat.ts"
+import type { ChatId } from "@rp/shared/chat.ts"
 import type { ChatEvent } from "@rp/shared/chatApi.ts"
 import { type Cause, Context, Effect, Layer, Queue, type Scope } from "effect"
 
@@ -29,24 +29,26 @@ const deliver = (subscriber: Subscriber, batch: Batch, instead?: ChatEvent) => {
 }
 
 /**
- * Merges consecutive deltas of a version into one. Any other event is a barrier, so
- * every event keeps its place relative to the version's text.
+ * Merges consecutive deltas of a version into one, its text and its reasoning apart. Any
+ * other event is a barrier, so every event keeps its place relative to the version's text.
  */
 const coalesce = (events: ReadonlyArray<ChatEvent>): Array<ChatEvent> => {
   const out: Array<ChatEvent> = []
-  const lastDelta = new Map<VersionId, number>()
+  // By kind and version: a version's text and reasoning streams merge apart.
+  const lastDelta = new Map<string, number>()
   for (const event of events) {
-    if (event._tag !== "Delta") {
+    if (event._tag !== "Delta" && event._tag !== "Reasoning") {
       lastDelta.clear()
       out.push(event)
       continue
     }
-    const index = lastDelta.get(event.versionId)
+    const key = `${event._tag}:${event.versionId}`
+    const index = lastDelta.get(key)
     const previous = index === undefined ? undefined : out[index]
-    if (previous?._tag === "Delta" && previous.offset + previous.text.length === event.offset) {
+    if (previous?._tag === event._tag && previous.offset + previous.text.length === event.offset) {
       out[index!] = { ...previous, text: previous.text + event.text }
     } else {
-      lastDelta.set(event.versionId, out.length)
+      lastDelta.set(key, out.length)
       out.push(event)
     }
   }
@@ -103,7 +105,8 @@ export class ChatHub extends Context.Service<
         return ChatHub.of({
           publish: (chatId, event) => {
             if (!subscribers.has(chatId)) return
-            if (event._tag !== "Delta" && event._tag !== "Cache") for (const listener of listeners) listener(chatId)
+            if (event._tag !== "Delta" && event._tag !== "Reasoning" && event._tag !== "Cache")
+              for (const listener of listeners) listener(chatId)
             const events = pending.get(chatId)
             if (events) events.push(event)
             else pending.set(chatId, [event])

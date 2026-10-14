@@ -104,6 +104,11 @@ export class Version extends Schema.Class<Version>("Version")({
   /** Set on failed versions only. */
   error: Schema.NullOr(VersionError),
   /**
+   * The reasoning ("thinking") the model streamed before or beside its text, kept as it came
+   * and shown apart from it. Never sent back in a context (ARCHITECTURE §15). Absent without any.
+   */
+  reasoning: Schema.optionalKey(Schema.String),
+  /**
    * A judge model read this version's text and found a refusal (spec/LCM.md §2.4). The text
    * stays; a provider's own refusal makes a failed version instead.
    */
@@ -178,6 +183,8 @@ export class NewVersion extends Schema.Class<NewVersion>("NewVersion")({
   /** For a template: the values its volatile macros drew when it was shown, kept (DESIGN §5.6). */
   frozenMacros: Schema.optional(FrozenMacros),
   direction: Schema.optional(Schema.String),
+  /** A continued version starts with the reasoning of the version it continues. */
+  reasoning: Schema.optional(Schema.String),
   /** Required for failed versions: what went wrong (DESIGN §3.1). */
   error: Schema.optional(
     Schema.Struct({ class: Schema.String, message: Schema.String, detail: Schema.optional(Schema.Unknown) })

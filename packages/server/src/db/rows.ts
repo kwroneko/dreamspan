@@ -62,6 +62,8 @@ export interface VersionRow {
   readonly starred: number
   readonly created_at: number
   readonly error_json: string | null
+  /** Absent where a query doesn't select it. */
+  readonly reasoning?: string | null
   readonly mark?: "refused" | null
   readonly frozen_macros: string | null
   readonly rollout_id: string | null
@@ -107,6 +109,7 @@ export const toVersion = (row: VersionRow) =>
     createdAt: row.created_at,
     model: row.model_label ?? null,
     error: toVersionError(row.error_json),
+    ...(row.reasoning ? { reasoning: row.reasoning } : {}),
     mark: row.mark ?? null,
     frozenMacros: row.frozen_macros === null ? null : (JSON.parse(row.frozen_macros) as Record<string, string>),
     context: !row.has_context

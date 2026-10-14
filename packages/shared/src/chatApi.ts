@@ -21,6 +21,27 @@ export class NotAmendable extends Schema.TaggedError<NotAmendable>()("NotAmendab
   versionId: Schema.String
 }) {}
 
+/**
+ * Continue extends only a finished model-written version with text (ST's Continue, DESIGN
+ * §7.5): one still generating, a user's, or an empty one can't be.
+ */
+export class NotContinuable extends Schema.TaggedError<NotContinuable>()("NotContinuable", {
+  versionId: Schema.String,
+  message: Schema.String
+}) {}
+
+/**
+ * How streamed reasoning shows while a reply is written (DESIGN §7.4): open, or folded.
+ * Collapsing or expanding it during a run makes that the user's choice from then on.
+ * Finished replies show it folded either way.
+ */
+export const ReasoningDisplay = Schema.Literals(["expanded", "collapsed"])
+export type ReasoningDisplay = typeof ReasoningDisplay.Type
+
+/** The user's display choices that follow them across devices (`user_prefs`). */
+export const DisplayPrefs = Schema.Struct({ reasoning: ReasoningDisplay })
+export type DisplayPrefs = typeof DisplayPrefs.Type
+
 /** The largest window one ReadPath returns. */
 const MAX_WINDOW = 500
 
@@ -59,11 +80,19 @@ export const ChatEvent = Schema.Union([
   /** The first event of every subscription, with the text so far of each version generating now. */
   Schema.TaggedStruct("Hello", {
     live: Schema.Array(
-      Schema.Struct({ versionId: VersionId, text: Schema.String, waitingCache: Schema.optionalKey(Schema.Boolean) })
+      Schema.Struct({
+        versionId: VersionId,
+        text: Schema.String,
+        waitingCache: Schema.optionalKey(Schema.Boolean),
+        /** The reasoning streamed so far, when there is any. */
+        reasoning: Schema.optionalKey(Schema.String)
+      })
     )
   }),
   /** Text appended to a generating version at `offset`, so a client can tell a repeat from a gap. */
   Schema.TaggedStruct("Delta", { versionId: VersionId, offset: Schema.Int, text: Schema.String }),
+  /** Reasoning appended to a generating version at `offset`, as `Delta` is for its text. */
+  Schema.TaggedStruct("Reasoning", { versionId: VersionId, offset: Schema.Int, text: Schema.String }),
   Schema.TaggedStruct("WaitingCache", { versionId: VersionId, waiting: Schema.Boolean }),
   /** A slot was added, or its selection or versions changed. */
   Schema.TaggedStruct("Slot", { entry: PathEntry }),
@@ -296,6 +325,17 @@ export class ChatApi extends RpcGroup.make(
     success: PathEntry,
     error: Schema.Union([...WriteErrors, GenerationUnavailable])
   }),
+  /**
+   * Continue (ST's): a new version of the slot, selected, that starts as the text of
+   * `versionId` and streams on from its end. The text is sent as the start of the reply
+   * (a prefill), so only models that take one can continue; with another, the version
+   * fails saying so. The version continued stays as it was (DESIGN §3.1).
+   */
+  Rpc.make("ContinueVersion", {
+    payload: { versionId: VersionId, expectedRowVersion: Schema.Int },
+    success: PathEntry,
+    error: Schema.Union([...WriteErrors, GenerationUnavailable, NotContinuable])
+  }),
   /** Stops one generation; its text so far is kept. Returns the stopped version. */
   Rpc.make("StopGeneration", { payload: { versionId: VersionId }, success: Version, error: Schema.Union([...Errors]) }),
   Rpc.make("SelectVersion", {
@@ -383,6 +423,10 @@ export class ChatApi extends RpcGroup.make(
     success: BranchSwitch,
     error: Schema.Union([...WriteErrors])
   }),
+  /** The user's display choices (reasoning shown open or folded while it streams). */
+  Rpc.make("GetDisplayPrefs", { payload: {}, success: DisplayPrefs, error: ServerError }),
+  /** Changes the user's display choices; answers with them as now stored. */
+  Rpc.make("SetDisplayPrefs", { payload: { prefs: DisplayPrefs }, success: DisplayPrefs, error: ServerError }),
   /** The alternates at `slotId`'s place (it and its siblings a path can reach), oldest first. */
   Rpc.make("ListBranches", {
     payload: { slotId: SlotId },

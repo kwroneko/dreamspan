@@ -762,6 +762,33 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
     probe: (actor, owner) =>
       refused(actor.api.SetVersionFlags({ versionId: owner.chat.versionId, starred: true, hidden: true }), "NotFound")
   },
+  ContinueVersion: {
+    probe: (actor, owner) =>
+      Effect.flatMap(ownSlot(owner), (theirs) =>
+        refused(
+          actor.api.ContinueVersion({ versionId: owner.chat.versionId, expectedRowVersion: theirs.rowVersion }),
+          "NotFound"
+        )
+      )
+  },
+  GetDisplayPrefs: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const before = yield* actor.api.GetDisplayPrefs({})
+        const flipped = before.reasoning === "expanded" ? "collapsed" : "expanded"
+        yield* owner.api.SetDisplayPrefs({ prefs: { reasoning: flipped } })
+        assert.deepStrictEqual(yield* actor.api.GetDisplayPrefs({}), before)
+      })
+  },
+  SetDisplayPrefs: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const before = yield* owner.api.GetDisplayPrefs({})
+        const flipped = before.reasoning === "expanded" ? "collapsed" : "expanded"
+        yield* actor.api.SetDisplayPrefs({ prefs: { reasoning: flipped } })
+        assert.deepStrictEqual(yield* owner.api.GetDisplayPrefs({}), before)
+      })
+  },
   StopGeneration: {
     probe: (actor, owner) =>
       Effect.gen(function* () {
