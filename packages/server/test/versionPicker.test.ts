@@ -120,8 +120,12 @@ describe("version picker", () => {
       const unstarred = yield* api.SetVersionFlags({ versionId, starred: false, hidden: false })
       assert.isFalse(unstarred.starred || unstarred.hidden)
       // Nothing the model is sent changes: the message is still in context.
-      const [, entry] = (yield* api.ReadPath({ chatId: chat.id, leafSlotId: mine.slotId, range: { _tag: "Bottom" }, limit: 5 }))
-        .entries
+      const [, entry] = (yield* api.ReadPath({
+        chatId: chat.id,
+        leafSlotId: mine.slotId,
+        range: { _tag: "Bottom" },
+        limit: 5
+      })).entries
       assert.isTrue(entry!.inContext)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), fast)))
   )

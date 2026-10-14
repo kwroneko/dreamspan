@@ -119,6 +119,15 @@ export class ChatSession {
     lcmVersion: 0
   }
   private readonly listeners = new Set<() => void>()
+  private readonly versionListeners = new Set<(version: Version) => void>()
+
+  /** Picker lists also hear changes to versions that aren't currently selected. */
+  subscribeVersions = (listener: (version: Version) => void) => {
+    this.versionListeners.add(listener)
+    return () => {
+      this.versionListeners.delete(listener)
+    }
+  }
   /** Unmounts for the live atoms kept alive while their version generates, shown or not. */
   private readonly live = new Map<VersionId, () => void>()
   /** Deltas received since the last frame, by version. */
@@ -837,6 +846,7 @@ export class ChatSession {
   }
 
   private applyVersion(version: Version) {
+    for (const listener of this.versionListeners) listener(version)
     if (version.status !== "generating") this.endLive(version.id)
     const { entries } = this.view
     const index = entries.findIndex((e) => e.version.id === version.id)

@@ -267,6 +267,14 @@ function Editor({
 /** A slot's versions, read once it has more than one and again when they change. */
 function useVersions(session: ChatSession, entry: PathEntry, report: (outcome: Outcome<unknown>) => void) {
   const [versions, setVersions] = useState<ReadonlyArray<Version> | null>(null)
+  useEffect(
+    () =>
+      session.subscribeVersions((version) => {
+        if (version.slotId === entry.slotId)
+          setVersions((list) => list?.map((v) => (v.id === version.id ? version : v)) ?? list)
+      }),
+    [session, entry.slotId]
+  )
   const multiple = entry.versionCount > 1
   // The list as read is current while it has as many versions as the slot, this one among them.
   const position =
@@ -512,7 +520,7 @@ export const Message = memo(function Message({
   const model = side === "assistant"
   // A model writes its versions: a reply, or a turn on the user's side the model wrote (an
   // impersonation), so it has Regenerate and › generates another, written as its speaker.
-  const generated = model || version.writer === "model"
+  const generated = model || version.writer === "model" || versions?.at(-1)?.writer === "model"
   const name = speaker?.name ?? (model ? "Model" : "You")
   const deleted = useDeletedToast()
   /** A delete says so, with Undo (DESIGN §6.2). */

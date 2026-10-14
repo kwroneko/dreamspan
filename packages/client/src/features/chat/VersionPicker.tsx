@@ -40,7 +40,7 @@ const preview = (text: string) => {
 }
 
 /** Who wrote a version, or with which model: what tells versions apart besides their text. */
-export const writerOf = (version: Version, numberOf: (id: Version["id"]) => number | undefined) => {
+const writerOf = (version: Version, numberOf: (id: Version["id"]) => number | undefined) => {
   if (version.origin === "edited") {
     const source = version.sourceVersionId === null ? undefined : numberOf(version.sourceVersionId)
     return source === undefined ? "Edited by you" : `Edited from #${source}`
