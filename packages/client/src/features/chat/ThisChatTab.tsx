@@ -4,7 +4,6 @@
 // The context assembler reads them; this only writes them.
 import type { EffectivePreset } from "@rp/shared/inspectorApi.ts"
 import type { LibraryRef } from "@rp/shared/library.ts"
-import type { GenerationDefaults } from "@rp/shared/generation.ts"
 import type { Connection, Model } from "@rp/shared/providers.ts"
 import type { CastChange } from "@rp/shared/chatSetupApi.ts"
 import { Link } from "@tanstack/react-router"
@@ -27,7 +26,6 @@ interface Sources {
   /** Every visible model, by `modelValue`. */
   readonly models: ReadonlyMap<string, { readonly connection: Connection; readonly model: Model }>
   readonly presets: ReadonlyArray<LibraryRef>
-  readonly defaults: GenerationDefaults
 }
 
 function Problem({ error }: { error: AppError | null }) {
@@ -64,33 +62,37 @@ function Setting({
   )
 }
 
-const modelLabel = (sources: Sources | null, choice: { connection: string; model: string } | null) => {
-  if (choice === null) return null
-  const found = sources?.models.get(modelValue(choice.connection, choice.model))
-  return found ? `${found.connection.name} · ${found.model.key}` : null
-}
-
-function ModelSetting({ sources, change }: { sources: Sources | null; change: (next: CastChange) => Promise<void> }) {
-  const { cast } = useCast()
-  const own = cast?.model ?? null
-  const fallback = sources?.defaults.model ?? null
-  const chosen = own ?? fallback
-  const label = modelLabel(sources, chosen)
+/**
+ * The model as the server resolved it for the next reply (`GetNextContext` and `Cache`), so a
+ * change made anywhere (another tab, Settings, a connection renamed) shows before a send uses it.
+ */
+function ModelSetting({
+  session,
+  sources,
+  change
+}: {
+  session: ChatSession
+  sources: Sources | null
+  change: (next: CastChange) => Promise<void>
+}) {
+  const effective = useSyncExternalStore(session.subscribe, session.snapshot).history?.model
+  // Only visible models are offered; a hidden one in use is still named above.
   const items = [...(sources?.models.entries() ?? [])].map(([value, { connection, model }]) => ({
     value,
     label: `${connection.name} · ${model.key}`
   }))
+  const gone = effective != null && (effective.connectionName === null || effective.modelKey === null)
   let value: ReactNode
   let source: ReactNode
-  if (sources === null) {
+  if (effective === undefined) {
     value = "…"
-    source = "Reading your connections…"
-  } else if (chosen === null) {
+    source = "Worked out with the next reply's context."
+  } else if (effective === null) {
     value = "None"
     source = (
       <>
         No model is set in this chat and you have no default, so replies can't be generated.{" "}
-        {sources.connections.length === 0 ? (
+        {sources?.connections.length === 0 ? (
           <Link to="/settings/connections" className={link}>
             Add a connection
           </Link>
@@ -105,34 +107,43 @@ function ModelSetting({ sources, change }: { sources: Sources | null; change: (n
         .
       </>
     )
-  } else if (label === null) {
+  } else if (gone) {
     value = "A model that's gone"
     source =
-      own !== null
-        ? "Set in this chat, but its connection or the model was deleted or hidden. Choose another."
-        : "Your default, but its connection or the model was deleted or hidden. Choose another."
+      effective.scope === "chat"
+        ? "Set in this chat, but its connection or the model was deleted. Choose another."
+        : "Your default, but its connection or the model was deleted. Choose another."
   } else {
-    value = label
-    source =
-      own !== null ? (
-        "Set in this chat."
-      ) : (
-        <>
-          Your default model, from{" "}
-          <Link to="/settings/chats" className={link}>
-            Settings → Chats
-          </Link>
-          .
-        </>
-      )
+    value = `${effective.connectionName} · ${effective.modelKey}`
+    source = (
+      <>
+        {effective.scope === "chat" ? (
+          "Set in this chat."
+        ) : (
+          <>
+            Your default model, from{" "}
+            <Link to="/settings/chats" className={link}>
+              Settings → Chats
+            </Link>
+            .
+          </>
+        )}
+        {effective.hidden && (
+          <span className="block">
+            It's hidden in Connections, so it isn't offered in model lists, but this chat still uses it.
+          </span>
+        )}
+      </>
+    )
   }
+  const picked = effective ? modelValue(effective.connection, effective.model) : null
   return (
     <Setting title="Model" value={value} source={source}>
       {items.length > 0 && (
         <Field label="Use in this chat" description="From the latest message on, on this branch.">
           <Select
             items={items}
-            value={chosen && label !== null ? modelValue(chosen.connection, chosen.model) : null}
+            value={picked !== null && sources?.models.has(picked) ? picked : null}
             placeholder="Choose a model"
             onValueChange={(next) => void change({ _tag: "Model", ...parseModelValue(next) })}
           />
@@ -180,8 +191,7 @@ function PresetSetting({
   const history = useSyncExternalStore(session.subscribe, session.snapshot).history
   const preset = history?.preset ?? null
   const budget = history?.budget ?? null
-  const chosen = cast?.model ?? sources?.defaults.model ?? null
-  const connection = chosen ? (sources?.connections.find((c) => c.id === chosen.connection)?.name ?? null) : null
+  const connection = history?.model?.connectionName ?? null
   const name = preset === null ? "…" : preset.scope === "builtin" ? "SillyTavern's default preset" : preset.name
   const items = (sources?.presets ?? []).map((ref) => ({ value: ref.id as string, label: ref.label }))
   const value = cast?.preset ?? (preset?.scope === "builtin" ? null : (preset?.ref ?? null))
@@ -260,7 +270,7 @@ function SummariesSetting({ session }: { session: ChatSession }) {
   )
 }
 
-export function ThisChatTab({ session }: { session: ChatSession }) {
+export function ThisChatTab({ session, active }: { session: ChatSession; active: boolean }) {
   const { cast } = useCast()
   const action = useAction()
   const [error, setError] = useState<AppError | null>(null)
@@ -269,7 +279,9 @@ export function ThisChatTab({ session }: { session: ChatSession }) {
     setError(outcome.ok ? null : outcome.error)
   }
   const [sources, setSources] = useState<Sources | null>(null)
+  // The lists to choose from, read again each time the tab is shown.
   useEffect(() => {
+    if (!active) return
     void action
       .run((client) =>
         Effect.gen(function* () {
@@ -282,13 +294,12 @@ export function ThisChatTab({ session }: { session: ChatSession }) {
             )
           )
           const presets = yield* client("ListLibrary", { kind: "preset" })
-          const defaults = yield* client("GetGenerationDefaults", undefined)
-          return { connections, models: new Map(lists.flat()), presets, defaults }
+          return { connections, models: new Map(lists.flat()), presets }
         })
       )
       .then((result) => result.ok && setSources(result.value))
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per opening
-  }, [])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- each time it's shown
+  }, [active])
   const multi = (cast?.participants.length ?? 0) > 1
   return (
     <div className="flex flex-col gap-6">
@@ -296,7 +307,7 @@ export function ThisChatTab({ session }: { session: ChatSession }) {
         What the next reply is sent with, and where each comes from. Changes here apply from the latest message on, on
         this branch.
       </p>
-      <ModelSetting sources={sources} change={change} />
+      <ModelSetting session={session} sources={sources} change={change} />
       <PresetSetting session={session} sources={sources} change={change} />
       <SummariesSetting session={session} />
       <section aria-label="Card layout" className="flex flex-col gap-2">

@@ -612,7 +612,8 @@ export class ChatSession {
           historyStart: event.historyStart,
           summarizedThrough: event.summarizedThrough,
           ...(event.budget === undefined ? {} : { budget: event.budget }),
-          ...(event.preset === undefined ? {} : { preset: event.preset })
+          ...(event.preset === undefined ? {} : { preset: event.preset }),
+          ...(event.model === undefined ? {} : { model: event.model })
         }
         if (
           JSON.stringify(event.warmth) === JSON.stringify(this.view.cache) &&

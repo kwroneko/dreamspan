@@ -87,7 +87,9 @@ function Picker({
   )
 }
 
-export function LorebooksTab({ session }: { session: ChatSession }) {
+const entries = (count: number) => `${count.toLocaleString()} ${count === 1 ? "entry" : "entries"}`
+
+export function LorebooksTab({ session, active }: { session: ChatSession; active: boolean }) {
   const { cast, cards } = useCast()
   const action = useAction()
   const [error, setError] = useState<AppError | null>(null)
@@ -97,7 +99,9 @@ export function LorebooksTab({ session }: { session: ChatSession }) {
     const outcome = await session.changeCast(next)
     setError(outcome.ok ? null : outcome.error)
   }
+  // The library, read again each time the tab is shown.
   useEffect(() => {
+    if (!active) return
     void action
       .run((client) =>
         Effect.all({
@@ -116,8 +120,8 @@ export function LorebooksTab({ session }: { session: ChatSession }) {
             )
           })
       )
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per opening
-  }, [])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- each time it's shown
+  }, [active])
   const attached = cast?.lorebooks ?? []
   const own = (cast?.participants ?? []).flatMap((id) => {
     const card = cards.get(id)
@@ -164,6 +168,10 @@ export function LorebooksTab({ session }: { session: ChatSession }) {
           {own.map((card) => {
             const ref = library?.cards.get(card.entityId)
             const on = !cast?.cardLorebooksOff.includes(card.entityId)
+            const from = [
+              `${card.name}'s own lorebook`,
+              ...(card.lorebookEntries === undefined ? [] : [entries(card.lorebookEntries)])
+            ].join(" · ")
             return (
               <li key={card.entityId} className="flex items-start gap-2 py-3 first:pt-0">
                 <div className="min-w-0 flex-1">
@@ -172,11 +180,11 @@ export function LorebooksTab({ session }: { session: ChatSession }) {
                     onCheckedChange={(next) => void change({ _tag: "CardLorebook", entityId: card.entityId, on: next })}
                     description={
                       on
-                        ? `Part of ${card.name}'s card.`
-                        : `Part of ${card.name}'s card. Off in this chat, so its entries aren't sent. An import from SillyTavern turns it off where ST hadn't imported the card's book either.`
+                        ? from
+                        : `${from}. Off in this chat, so its entries aren't sent. An import from SillyTavern turns it off where ST hadn't imported the card's book either.`
                     }
                   >
-                    {card.name}'s lorebook
+                    {card.lorebookName ?? `${card.name}'s lorebook`}
                   </Switch>
                 </div>
                 {ref && (

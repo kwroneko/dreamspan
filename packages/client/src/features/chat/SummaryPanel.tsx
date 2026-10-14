@@ -5,6 +5,7 @@ import { useSyncExternalStore, useEffect, useMemo, useRef, useState } from "reac
 import type { SlotId } from "@rp/shared/chat.ts"
 import type { LcmBackfill, LcmJob, LcmState, LcmSummary, SummaryRevision } from "@rp/shared/lcm.ts"
 import type { AppError } from "../../errors.ts"
+import { useSession } from "../../session.ts"
 import { Button } from "../../ui/Button.tsx"
 import { Switch } from "../../ui/Choice.tsx"
 import { Textarea } from "../../ui/Field.tsx"
@@ -51,7 +52,8 @@ function StateBadges({ summary }: { summary: LcmSummary }) {
 
 /** The text of a summary being edited, saved as a draft while typing and as a revision on Save. */
 function Editor({ session, summary, onDone }: { session: ChatSession; summary: LcmSummary; onDone: () => void }) {
-  const [store] = useState(() => new SummaryDraft(session, summary))
+  const userId = useSession().user.id
+  const [store] = useState(() => new SummaryDraft(session, userId, summary))
   const view = useSyncExternalStore(store.subscribe, store.snapshot)
   useEffect(() => {
     void store.open()
@@ -80,7 +82,13 @@ function Editor({ session, summary, onDone }: { session: ChatSession; summary: L
         onChange={(event) => store.setText(event.currentTarget.value)}
       />
       <p className="text-xs text-muted" aria-live="polite">
-        {view.unsaved ? "Keeping your text…" : view.changed ? "Your text is kept as a draft." : "Unchanged."}
+        {view.unsaved
+          ? view.error
+            ? "Not on the server yet: kept in this browser, and sent again when you open this edit."
+            : "Keeping your text…"
+          : view.changed
+            ? "Your text is kept as a draft."
+            : "Unchanged."}
         {summary.fresh ? "" : " It stays as you write it even though the messages changed."}
       </p>
       {view.outdated && (
@@ -89,6 +97,7 @@ function Editor({ session, summary, onDone }: { session: ChatSession; summary: L
       {view.displaced !== null && (
         <Alert tone="warning">Another tab had typed here too; its text is one step back in the undo history.</Alert>
       )}
+      {view.restored > 0 && <Alert>Text typed here earlier and kept in this browser is back in the box.</Alert>}
       {view.recovered > 0 && <Alert>Earlier text from this edit is in the bin's recovered texts.</Alert>}
       <Problem error={view.error} />
       <div className="flex flex-wrap gap-2">

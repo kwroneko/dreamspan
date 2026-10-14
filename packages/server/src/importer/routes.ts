@@ -16,6 +16,7 @@ import { RefId } from "@rp/shared/library.ts"
 import { DraftKey } from "@rp/shared/drafts.ts"
 import { EditorDraftSave } from "@rp/shared/editorApi.ts"
 import { ComposerBeacon } from "@rp/shared/composerApi.ts"
+import { SummaryDraftSave } from "@rp/shared/lcm.ts"
 import { parseField } from "@rp/shared/editing.ts"
 import { ByteSize, Effect, Layer, Option, Schedule, Schema, Semaphore } from "effect"
 import { NodeHttpServerRequest } from "@effect/platform-node"
@@ -107,7 +108,9 @@ const ExportRequest = Schema.Struct({ refId: RefId, format: ExportFormatSchema }
 const LeavingDrafts = Schema.Struct({
   drafts: Schema.Array(EditorDraftSave).check(Schema.isMaxLength(500)),
   /** Chats' composers (DESIGN §6.2): one per open chat at most, in practice. */
-  composers: Schema.optionalKey(Schema.Array(ComposerBeacon).check(Schema.isMaxLength(50)))
+  composers: Schema.optionalKey(Schema.Array(ComposerBeacon).check(Schema.isMaxLength(50))),
+  /** Summaries' edits, from this browser's copies (`summaryDraft.ts`). */
+  summaries: Schema.optionalKey(Schema.Array(SummaryDraftSave).check(Schema.isMaxLength(50)))
 })
 
 const CONTENT_TYPES: Record<ExportFormat, readonly [mime: string, extension: string]> = {
@@ -564,6 +567,18 @@ export const layer = Layer.unwrap(
           expectedRowVersion: draft.expectedRowVersion,
           expectedSession: draft.expectedSession,
           baseRevision: draft.baseRevisionId
+        })
+        recovered += saved.recovered
+      }
+      for (const summary of input.value.summaries ?? []) {
+        const saved = yield* writer.SaveDraft({
+          userId: user.id,
+          key: new DraftKey({ targetKind: "summary_edit", targetId: summary.summaryId, field: "" }),
+          draftId: summary.draftId,
+          content: summary.content,
+          expectedRowVersion: summary.expectedRowVersion,
+          expectedSession: summary.expectedSession,
+          baseRevision: summary.baseRevisionId
         })
         recovered += saved.recovered
       }

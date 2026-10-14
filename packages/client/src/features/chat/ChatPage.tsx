@@ -18,6 +18,7 @@ import { Button } from "../../ui/Button.tsx"
 import { Loading } from "../../ui/Spinner.tsx"
 import { Alert } from "../../ui/Surface.tsx"
 import { useLookingAt } from "../notices.tsx"
+import { useSession } from "../../session.ts"
 import { useTitle } from "../shell.tsx"
 import { ChatBadges, chatTitle } from "./ChatsPage.tsx"
 import { CacheIndicator } from "./CacheIndicator.tsx"
@@ -332,8 +333,11 @@ function OpenChat({
 function usePanel(urlPanel: PanelTab | null) {
   const navigate = useNavigate()
   const wide = useWide()
-  const [remembered, setRemembered] = useState(rememberedPanel)
-  const panel = urlPanel ?? (wide ? remembered : null)
+  const userId = useSession().user.id
+  // Each user's own, read again when another signs in.
+  const [remembered, setRemembered] = useState(() => ({ userId, tab: rememberedPanel(userId) }))
+  const rememberedTab = remembered.userId === userId ? remembered.tab : rememberedPanel(userId)
+  const panel = urlPanel ?? (wide ? rememberedTab : null)
   // The URL names the tab shown, so a refresh or a copied link keeps it.
   useEffect(() => {
     if (urlPanel === null && panel !== null)
@@ -341,8 +345,8 @@ function usePanel(urlPanel: PanelTab | null) {
   }, [navigate, urlPanel, panel])
   const show = useCallback(
     (next: PanelTab | null) => {
-      rememberPanel(next)
-      setRemembered(next)
+      rememberPanel(userId, next)
+      setRemembered({ userId, tab: next })
       void navigate({
         to: ".",
         search: ({ panel: _gone, ...prev }: Record<string, unknown>) =>
@@ -351,9 +355,9 @@ function usePanel(urlPanel: PanelTab | null) {
         replace: wide || next === null || urlPanel !== null
       })
     },
-    [navigate, wide, urlPanel]
+    [navigate, wide, urlPanel, userId]
   )
-  return { panel, show, wide }
+  return { panel, show, wide, userId }
 }
 
 function ChatSurface({
@@ -369,7 +373,7 @@ function ChatSurface({
 }) {
   const view = useSyncExternalStore(session.subscribe, session.snapshot)
   const navigate = useNavigate()
-  const { panel, show, wide } = usePanel(urlPanel)
+  const { panel, show, wide, userId } = usePanel(urlPanel)
   /** Search params that keep the panel's tab. */
   const withPanel = useCallback(
     (search: Record<string, string>) => (panel === null ? search : { ...search, panel }),
@@ -435,14 +439,14 @@ function ChatSurface({
   // Beside the chat the panel stays open; a phone's sheet closes to show the message.
   const jump = useCallback(
     (target: SlotId) => {
-      if (!wide) rememberPanel(null)
+      if (!wide) rememberPanel(userId, null)
       const at = branchLeaf === null ? { slot: target } : { leaf: branchLeaf, slot: target }
       if (target === slot) {
         if (!wide) show(null)
         void session.open(target)
       } else void navigate({ to: ".", search: wide ? withPanel(at) : at })
     },
-    [session, navigate, show, withPanel, wide, slot, branchLeaf]
+    [session, navigate, show, withPanel, wide, slot, branchLeaf, userId]
   )
   const title = view.chat ? chatTitle(view.chat) : "Chat"
   const panelOpen = panel !== null
@@ -461,7 +465,12 @@ function ChatSurface({
                 Back to the latest branch
               </Link>
             )}
-            <PanelToggles open={panel} wide={wide} onToggle={(tab) => show(panel === tab ? null : tab)} />
+            <PanelToggles
+              userId={userId}
+              open={panel}
+              wide={wide}
+              onToggle={(tab) => show(panel === tab ? null : tab)}
+            />
           </header>
           {/* A chat that has outgrown its context with summaries off (spec/LCM.md §2.13): easy to turn on. */}
           {view.lcm !== null &&

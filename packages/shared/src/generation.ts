@@ -16,3 +16,18 @@ export class GenerationDefaults extends Schema.Class<GenerationDefaults>("Genera
   /** The preset a chat without a `preset.binding` uses; none, and it's ST's default preset. */
   preset: Schema.NullOr(RefId)
 }) {}
+
+/**
+ * Some of the defaults, each given one replacing the stored one and the rest left as they are,
+ * so a page changing one setting doesn't write back what another tab has changed since.
+ * `tail` is the default summarization instruction (`lcm.tail`), `fallback` the fallback
+ * summarizer (`lcm.fallback`); null removes either.
+ */
+export const GenerationDefaultsChange = Schema.Struct({
+  model: Schema.optionalKey(Schema.NullOr(ModelChoice)),
+  preset: Schema.optionalKey(Schema.NullOr(RefId)),
+  judge: Schema.optionalKey(Schema.NullOr(ModelChoice)),
+  fallback: Schema.optionalKey(Schema.NullOr(ModelChoice)),
+  tail: Schema.optionalKey(Schema.NullOr(Schema.String))
+})
+export type GenerationDefaultsChange = typeof GenerationDefaultsChange.Type

@@ -180,6 +180,10 @@ export class CastCard extends Schema.Class<CastCard>("CastCard")({
   inBin: Schema.Boolean,
   /** It carries its own lorebook (`character_book`), which a chat can turn off. */
   lorebook: Schema.Boolean,
+  /** That lorebook's own name (`character_book.name`), when it has one. */
+  lorebookName: Schema.optionalKey(Schema.String),
+  /** How many entries that lorebook has. */
+  lorebookEntries: Schema.optionalKey(Schema.Int),
   /** Its avatar, served at `/library/media?id=`; null without one. */
   avatarMediaId: Schema.NullOr(Schema.String)
 }) {}

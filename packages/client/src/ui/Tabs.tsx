@@ -8,6 +8,7 @@ export function Tabs<Value extends string>({
   onValueChange,
   label,
   fill = false,
+  keepMounted = false,
   end
 }: {
   tabs: ReadonlyArray<{ readonly value: Value; readonly label: string; readonly panel: ReactNode }>
@@ -16,6 +17,8 @@ export function Tabs<Value extends string>({
   label: string
   /** Fills its container's height, the open panel scrolling inside it; the tabs scroll sideways when narrow. */
   fill?: boolean | undefined
+  /** Hidden panels stay mounted, keeping their state: text being typed, say. */
+  keepMounted?: boolean | undefined
   /** Beside the tabs, at the end of their row: a close button, say. */
   end?: ReactNode
 }) {
@@ -53,6 +56,7 @@ export function Tabs<Value extends string>({
         <BaseTabs.Panel
           key={tab.value}
           value={tab.value}
+          keepMounted={keepMounted}
           className={`min-h-0 overflow-y-auto outline-none ${fill ? "flex-1 px-4 py-4" : ""}`}
         >
           {tab.panel}

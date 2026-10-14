@@ -34,7 +34,7 @@ import {
   ProviderKindInfo,
   ProxyMode
 } from "./providers.ts"
-import { GenerationDefaults } from "./generation.ts"
+import { GenerationDefaults, GenerationDefaultsChange } from "./generation.ts"
 import { LlmRequest } from "./usage.ts"
 import { EntityKind, LibraryRef } from "./library.ts"
 
@@ -284,6 +284,12 @@ export class AppApi extends RpcGroup.make(
   /** Both defaults at once; NotFound when either isn't one of the user's own. */
   Rpc.make("SetGenerationDefaults", {
     payload: { defaults: GenerationDefaults },
+    success: GenerationDefaults,
+    error: Schema.Union([NotFound, ServerError])
+  }),
+  /** Only the defaults named, the others as stored; NotFound when one names what isn't the user's. */
+  Rpc.make("ChangeGenerationDefaults", {
+    payload: { change: GenerationDefaultsChange },
     success: GenerationDefaults,
     error: Schema.Union([NotFound, ServerError])
   })

@@ -4,11 +4,13 @@
 // (id, row version, session), it changes only together with the text shown or when the
 // server answered a save with exactly the text sent, and a save never waits on another.
 //
-// Unlike the library's fields, no copy of unsent text is kept in this browser yet: text
-// that never reached the server is only in the box until it does.
+// As in the library's fields, text typed is copied into this browser (`editor/backup.ts`)
+// until the server has it: a save that fails, a closed tab or panel, or a reload leaves the
+// copy, which opening the edit again replays, with the base it was typed on.
 import type { Draft } from "@rp/shared/drafts.ts"
 import type { LcmSummary } from "@rp/shared/lcm.ts"
 import type { AppError } from "../../errors.ts"
+import { type Copy, copiesOf, dropCopy, keepCopy, makeCopy, pendingOf } from "../editor/backup.ts"
 import type { ChatSession, Outcome } from "./session.ts"
 
 /** How long typing pauses before the text is saved. */
@@ -22,6 +24,8 @@ export interface SummaryDraftView {
   readonly changed: boolean
   /** Typed text not on the server yet. */
   readonly unsaved: boolean
+  /** How many copies kept in this browser opening the edit sent to the server. */
+  readonly restored: number
   readonly error: AppError | null
   /** Another tab's text this tab's save went over: kept one step back in the history. */
   readonly displaced: string | null
@@ -37,6 +41,7 @@ export class SummaryDraft {
     text: "",
     changed: false,
     unsaved: false,
+    restored: 0,
     error: null,
     displaced: null,
     outdated: false,
@@ -46,14 +51,20 @@ export class SummaryDraft {
   private draft: Draft | null = null
   /** Typed here and not saved yet. */
   private local: string | null = null
+  /** The browser copy of `local`. */
+  private pending: Copy | null = null
+  /** Copies on their way to the server, which a newer one mustn't replace. */
+  private readonly sending = new Set<Copy>()
   private timer: ReturnType<typeof setTimeout> | null = null
   private inFlight: Promise<void> | null = null
   private summary: LcmSummary
   private disposed = false
   private readonly session: ChatSession
+  private readonly userId: string
 
-  constructor(session: ChatSession, summary: LcmSummary) {
+  constructor(session: ChatSession, userId: string, summary: LcmSummary) {
     this.session = session
+    this.userId = userId
     this.summary = summary
   }
 
@@ -96,11 +107,75 @@ export class SummaryDraft {
     const result = await this.session.call((client) => client("GetSummaryDraft", { summaryId: this.summary.id }))
     if (this.disposed) return
     if (result.ok) this.draft = result.value
-    this.refresh({ loading: false, error: result.ok ? null : result.error })
+    let error = result.ok ? null : result.error
+    let restored = 0
+    let displaced = this.view.displaced
+    // Text that never reached the server, oldest first: each goes on top of the draft as it
+    // was typed, and a newer one from another tab stays one step back in its history.
+    const copies = [...(await copiesOf(this.userId, this.summary.id))].sort((a, b) => a.at - b.at)
+    for (const copy of copies) {
+      const save = pendingOf(copy)
+      if (save?.kind !== "summary") continue
+      this.sending.add(copy)
+      const replayed = await this.session.call((client) => client("SaveSummaryDraft", save.payload))
+      this.sending.delete(copy)
+      restored++
+      if (replayed.ok) {
+        if (this.local === null) this.draft = replayed.value
+        displaced = replayed.value.displaced?.content ?? displaced
+        void dropCopy(copy)
+      } else {
+        // Still not on the server: the box shows it, and the copy stays until it is.
+        if (this.pending !== null && this.pending.at < copy.at) this.pending = null
+        if (this.pending === null) {
+          this.local = copy.content
+          this.pending = copy
+        }
+        error = replayed.error
+      }
+    }
+    if (this.disposed) return
+    this.refresh({ loading: false, error, restored, displaced })
+  }
+
+  /** The save of `content` as typed on the draft this tab has now. */
+  private payload(content: string) {
+    const base = this.draft
+    return {
+      summaryId: this.summary.id,
+      draftId: base?.id ?? null,
+      content,
+      expectedRowVersion: base?.rowVersion ?? null,
+      expectedSession: base?.session ?? null,
+      baseRevisionId: base?.baseRevision ? (base.baseRevision as LcmSummary["revisionId"]) : this.summary.revisionId
+    }
+  }
+
+  /** Copies `content` into this browser, in place of the last copy unless that one is being sent. */
+  private keep(content: string) {
+    const previous = this.pending
+    const replaces = previous !== null && !this.sending.has(previous)
+    const copy = makeCopy(
+      this.userId,
+      this.summary.id,
+      "summary",
+      { kind: "summary", payload: this.payload(content) },
+      Date.now(),
+      previous === null ? [] : [previous]
+    )
+    this.pending = copy
+    void keepCopy(copy, replaces ? previous : null)
+  }
+
+  /** The copy, once the text it holds is on the server or thrown away on purpose. */
+  private forget() {
+    if (this.pending !== null) void dropCopy(this.pending)
+    this.pending = null
   }
 
   setText(text: string) {
     this.local = text
+    this.keep(text)
     this.refresh()
     if (this.timer !== null) clearTimeout(this.timer)
     this.timer = setTimeout(() => void this.save(), SAVE_DELAY_MS)
@@ -113,23 +188,29 @@ export class SummaryDraft {
     while (this.inFlight) await this.inFlight
     const sent = this.local
     if (sent === null) return
-    const base = this.draft
+    const payload = this.payload(sent)
+    const copy = this.pending
     const run = async () => {
-      const result = await this.session.call((client) =>
-        client("SaveSummaryDraft", {
-          summaryId: this.summary.id,
-          draftId: base?.id ?? null,
-          content: sent,
-          expectedRowVersion: base?.rowVersion ?? null,
-          expectedSession: base?.session ?? null,
-          baseRevisionId: base?.baseRevision ? (base.baseRevision as LcmSummary["revisionId"]) : this.summary.revisionId
-        })
-      )
-      if (this.disposed) return
-      if (!result.ok) return this.refresh({ error: result.error })
+      if (copy !== null) this.sending.add(copy)
+      const result = await this.session.call((client) => client("SaveSummaryDraft", payload))
+      if (copy !== null) this.sending.delete(copy)
+      // The copies are settled even once the edit is closed: that's when they matter most.
+      if (!result.ok) {
+        // A newer copy, typed from this one, has everything this one has.
+        if (copy !== null && this.pending !== copy && this.pending?.ancestors.includes(copy.key)) void dropCopy(copy)
+        if (!this.disposed) this.refresh({ error: result.error })
+        return
+      }
       this.draft = result.value
-      // More typed since: it goes on top of this save, on the draft as the server now has it.
-      if (this.local === sent) this.local = null
+      if (copy !== null) void dropCopy(copy)
+      if (this.local === sent) {
+        this.local = null
+        if (this.pending === copy) this.pending = null
+      } else if (this.local !== null && this.pending !== null && !this.sending.has(this.pending)) {
+        // More typed since: its copy now names the draft as the server has it.
+        this.keep(this.local)
+      }
+      if (this.disposed) return
       this.refresh({
         error: null,
         recovered: this.view.recovered + result.value.recovered,
@@ -187,6 +268,7 @@ export class SummaryDraft {
     if (result.ok) {
       this.draft = null
       this.local = null
+      this.forget()
       this.refresh({ error: null, recovered: this.view.recovered + result.value.recovered })
     } else this.refresh({ error: result.error })
     return result
@@ -198,6 +280,7 @@ export class SummaryDraft {
     const draft = this.draft
     if (draft === null || draft.status !== "active") {
       this.local = null
+      this.forget()
       this.refresh({ error: null })
       return { ok: true, value: null }
     }
@@ -211,6 +294,7 @@ export class SummaryDraft {
     if (result.ok) {
       this.draft = null
       this.local = null
+      this.forget()
       this.refresh({ error: null, recovered: this.view.recovered + result.value.recovered })
     } else this.refresh({ error: result.error })
     return result

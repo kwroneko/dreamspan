@@ -56,7 +56,7 @@ import {
   ProviderKind,
   ProxyMode
 } from "@rp/shared/providers.ts"
-import { GenerationDefaults } from "@rp/shared/generation.ts"
+import { GenerationDefaults, GenerationDefaultsChange } from "@rp/shared/generation.ts"
 import { NextContext, RunContext } from "@rp/shared/inspectorApi.ts"
 import { FoldableEvent, StateEventData } from "@rp/shared/state.ts"
 import {
@@ -1437,6 +1437,12 @@ export class WriteOps extends RpcGroup.make(
   /** The user's default model and preset; NotFound when either isn't the user's and live. */
   Rpc.make("SetGenerationDefaults", {
     payload: { userId: UserId, defaults: GenerationDefaults },
+    success: GenerationDefaults,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** Only the defaults named, merged into the stored ones in the same transaction. */
+  Rpc.make("ChangeGenerationDefaults", {
+    payload: { userId: UserId, change: GenerationDefaultsChange },
     success: GenerationDefaults,
     error: Schema.Union([NotFound, StorageError])
   }),

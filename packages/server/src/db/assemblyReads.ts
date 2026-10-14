@@ -161,7 +161,28 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
               WHERE r.id = ${preset.ref} AND e.owner_user_id = ${userId}`
           : []
         const presetName = presetRef?.label ?? (preset?.scope === "builtin" ? "Default" : "Unnamed")
+        // The model by name, as the panel shows it: also a hidden one, which is still used.
+        const chosen = sources.chosenModel()
+        const [named] = chosen
+          ? yield* sql<{ connection_name: string; model_key: string | null; hidden: number | null }>`
+              SELECT c.name AS connection_name, m.model_key, m.hidden
+              FROM connections c LEFT JOIN models m ON m.id = ${chosen.model} AND m.connection_id = c.id
+              WHERE c.id = ${chosen.connection} AND c.owner_user_id = ${userId}
+                AND c.deleted_at IS NULL AND c.purged_at IS NULL`
+          : []
         const boundary = {
+          ...(chosen === undefined
+            ? {}
+            : {
+                model: chosen && {
+                  connection: chosen.connection,
+                  model: chosen.model,
+                  connectionName: named?.connection_name ?? null,
+                  modelKey: named?.model_key ?? null,
+                  hidden: named?.hidden === 1,
+                  scope: chosen.scope
+                }
+              }),
           preset: preset
             ? { ref: preset.ref, name: presetName, scope: preset.scope as EffectivePreset["scope"] }
             : null,
