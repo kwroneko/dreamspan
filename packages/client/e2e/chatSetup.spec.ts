@@ -96,7 +96,7 @@ test("a new chat from a card: the greeting follows the persona until the first s
   await expect(greeting).toContainText("The bell rings for Ana.")
   // Opening a card made no chat (DESIGN §2.1).
   await page.goto(`${server().url}/chats`)
-  await expect(page.getByText("No chats yet", { exact: true })).toBeVisible()
+  await expect(page.getByText(/^No chats yet\./)).toBeVisible()
   await page.goBack()
 
   await greeting.getByRole("button", { name: "Next greeting" }).click()
@@ -132,7 +132,7 @@ test("a new chat from a card: the greeting follows the persona until the first s
   await expect(page).toHaveURL(/panel=cast/)
   await page.reload()
   await expect(replies(page).first()).toContainText("Mira waves at Bo from the pier.")
-  await expect(page.getByText("No chats yet", { exact: true })).toHaveCount(0)
+  await expect(page.getByText(/^No chats yet\./)).toHaveCount(0)
   await expect(page.getByRole("tabpanel", { name: "Cast" })).toBeVisible()
   await page.getByRole("tab", { name: "This chat" }).click()
   const settings = page.getByRole("tabpanel", { name: "This chat" })
@@ -158,7 +158,8 @@ test("Send as another card, and Generate with a one-turn direction that swipes r
   await page.getByRole("button", { name: "Tobin" }).click()
   await composer(page).fill("Tobin pushes off from the dock.")
   await page.getByRole("button", { name: "Send as Tobin" }).click()
-  const mine = page.getByRole("article", { name: "Your message" }).last()
+  // A cast member the user doesn't play speaks on the model's side, whoever wrote it.
+  const mine = page.getByRole("article").filter({ hasText: "Tobin pushes off from the dock." })
   await expect(mine.locator("header")).toContainText("Tobin")
   await expect(generating(page)).toHaveCount(0, { timeout: 20_000 })
   // The switcher remembers its tab; recent speakers are one tap away.

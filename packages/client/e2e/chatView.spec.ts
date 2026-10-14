@@ -47,7 +47,7 @@ test("the header names the chat as people do and switches branches from anywhere
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/chats/${chatId}`)
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Harbor")
-  await expect(page.getByText("started Apr 3, 2026", { exact: true })).toBeVisible()
+  await expect(page.getByRole("main").getByText("started Apr 3, 2026", { exact: true })).toBeVisible()
   await expect(page).toHaveTitle(/Harbor/)
   // The newest branch is shown; the header says so and offers the other.
   const branches = page.getByRole("button", { name: /switch branch/ })

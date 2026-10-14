@@ -70,7 +70,8 @@ test("import the folder", async ({ page }) => {
 const openChat = async (page: Page, title: string) => {
   await signIn(page)
   await page.goto(`${server().url}/chats`)
-  await page.getByRole("link", { name: title, exact: true }).click()
+  // A row's link reads its name, then when it was last used and what was said last.
+  await page.getByRole("main").getByRole("list", { name: "Chats" }).getByRole("link", { name: title }).click()
   await expect(page.getByRole("heading", { name: title })).toBeVisible()
 }
 

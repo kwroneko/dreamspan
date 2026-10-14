@@ -184,7 +184,7 @@ test("another user can't open someone's chat", async ({ browser }) => {
   const dana = await browser.newPage()
   await apiLogin(dana.request, server(), "dana", "dana-password-1")
   await dana.goto(`${server().url}/chats`)
-  await expect(dana.getByText("No chats yet", { exact: true })).toBeVisible()
+  await expect(dana.getByText(/^No chats yet\./)).toBeVisible()
   await dana.goto(`${server().url}/chats/${chat.id}`)
   await expect(dana.getByRole("alert")).toContainText("doesn't exist")
   await expect(dana.getByText("Private")).toHaveCount(0)

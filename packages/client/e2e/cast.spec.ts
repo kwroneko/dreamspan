@@ -74,8 +74,12 @@ const chatWithMira = async (page: Page) => {
   return page.url()
 }
 
+/** The side panel at its Cast tab: the panel's own tab when it's open, else the header's button. */
 const openCast = async (page: Page) => {
-  await page.getByRole("button", { name: "Cast", exact: true }).click()
+  const tab = page.getByRole("tab", { name: "Cast", exact: true })
+  const toggle = page.getByRole("group", { name: "Chat panel" }).getByRole("button", { name: "Cast", exact: true })
+  await expect(tab.or(toggle)).toBeVisible()
+  await ((await tab.isVisible()) ? tab : toggle).click()
   await expect(members(page)).toBeVisible()
 }
 
@@ -121,7 +125,9 @@ test("the Cast tab: absent, speak now, write as, the card, add and remove", asyn
   await expect(page.getByRole("button", { name: /^Speaking as Tobin/ })).toBeVisible()
   await composer(page).fill("Tobin pushes off from the dock.")
   await page.getByRole("button", { name: "Send as Tobin" }).click()
-  await expect(page.getByRole("article", { name: "Your message" }).last().locator("header")).toContainText("Tobin")
+  // A cast member the user doesn't play speaks on the model's side, whoever wrote it.
+  const sent = page.getByRole("article").filter({ hasText: "Tobin pushes off from the dock." })
+  await expect(sent.locator("header")).toContainText("Tobin")
   await expect(generating(page)).toHaveCount(0, { timeout: 20_000 })
 
   // Removed from here on.
@@ -195,7 +201,7 @@ test("a name edited only in this chat is the name the chat shows, in the Cast an
   await expect(row).toBeVisible()
   await expect(row).toContainText("Mira")
   await shoot(page, "cast-local-rename-row")
-  await page.keyboard.press("Escape")
+  await page.getByRole("button", { name: "Close the panel" }).click()
   await expect(members(page)).toHaveCount(0)
 
   // The composer's recent speakers, then the speaker chip, Send and Generate.
