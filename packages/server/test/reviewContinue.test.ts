@@ -241,3 +241,134 @@ describe("R4-C review acceptance regressions", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 })
+
+// Provider SDKs repair incomplete JSON for streaming previews; completion must
+// validate the original bytes instead of treating that repaired object as final.
+for (const adapter of ["openai-chat", "openai-responses"] as const) {
+  for (const mode of ["malformed", "no-usage"] as const) {
+    it.live(`schema continuation ${adapter} ${mode} validates completion and records usage`, () => {
+      const config = testConfig()
+      return Effect.gen(function* () {
+        const mock = yield* Effect.acquireRelease(
+          Effect.promise(() =>
+            startMockProvider((request, res) => {
+              const body = request.body as {
+                tools?: Array<{ function: { parameters: { properties: { text: { description: string } } } } }>
+              }
+              const tool = request.path.endsWith("/responses")
+                ? (request.body as { tools?: Array<{ parameters: { properties: { text: { description: string } } } }> })
+                    .tools?.[0]
+                : body.tools?.[0]?.function
+              if (!tool) {
+                if (request.path.endsWith("/responses")) {
+                  const item = {
+                    type: "message",
+                    id: "msg_1",
+                    role: "assistant",
+                    content: [{ type: "output_text", text: "Prefix." }]
+                  }
+                  return sse(res, [
+                    { type: "response.output_item.added", output_index: 0, item: { ...item, content: [] } },
+                    { type: "response.output_text.delta", output_index: 0, delta: "Prefix." },
+                    { type: "response.output_item.done", output_index: 0, item },
+                    {
+                      type: "response.completed",
+                      response: {
+                        id: "resp_1",
+                        status: "completed",
+                        model: "mock",
+                        output: [item],
+                        usage: { input_tokens: 20, output_tokens: 5 }
+                      }
+                    }
+                  ])
+                }
+                return sse(res, completionChunks(["Prefix."], { prompt_tokens: 20, completion_tokens: 5 }))
+              }
+              const full = JSON.stringify({ text: tool.parameters.properties.text.description + " Added suffix." })
+              const args = mode === "malformed" ? full.slice(0, -2) : full
+              if (request.path.endsWith("/responses")) {
+                const call = {
+                  type: "function_call",
+                  id: "fc_1",
+                  call_id: "call_1",
+                  name: "continue_reply",
+                  arguments: args
+                }
+                return sse(res, [
+                  { type: "response.output_item.added", output_index: 0, item: { ...call, arguments: "" } },
+                  { type: "response.function_call_arguments.delta", output_index: 0, delta: args },
+                  { type: "response.function_call_arguments.done", output_index: 0, arguments: args },
+                  { type: "response.output_item.done", output_index: 0, item: call },
+                  {
+                    type: "response.completed",
+                    response: { id: "resp_2", status: "completed", model: "mock", output: [call] }
+                  }
+                ])
+              }
+              sse(res, [
+                {
+                  id: "cmpl-1",
+                  object: "chat.completion.chunk",
+                  model: "mock",
+                  choices: [
+                    {
+                      index: 0,
+                      delta: {
+                        role: "assistant",
+                        tool_calls: [
+                          {
+                            index: 0,
+                            id: "call_1",
+                            type: "function",
+                            function: {
+                              name: "continue_reply",
+                              arguments: args
+                            }
+                          }
+                        ]
+                      },
+                      finish_reason: null
+                    }
+                  ]
+                },
+                {
+                  id: "cmpl-1",
+                  object: "chat.completion.chunk",
+                  model: "mock",
+                  choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }]
+                }
+              ])
+            })
+          ),
+          (mock) => Effect.promise(() => mock.close())
+        )
+        const api = yield* client()
+        const { chat, version, events } = yield* generateReply(api, {
+          connection: { kind: adapter, baseUrl: `${mock.url}/v1`, apiKey: "sk-synthetic-only" },
+          model: { prefill: "tool_schema" }
+        })
+        const path = yield* api.ReadPath({ chatId: chat.id, leafSlotId: null, range: { _tag: "Bottom" }, limit: 10 })
+        const continued = yield* api.ContinueVersion({
+          versionId: version.id,
+          expectedRowVersion: path.entries.at(-1)!.rowVersion
+        })
+        yield* eventually(() => finished(events, continued.version.id) !== undefined)
+        const done = finished(events, continued.version.id)!
+        if (mode === "malformed") {
+          assert.strictEqual(done.status, "failed")
+          assert.strictEqual(done.error?.class, "bad_prefill")
+        } else {
+          assert.strictEqual(done.status, "complete")
+          assert.strictEqual(done.content, version.content + " Added suffix.")
+          const inspection = yield* api.GetRunContext({ versionId: done.id })
+          assert.strictEqual(inspection.requests[0]!.usageSource, "estimated")
+          assert.isAbove(inspection.requests[0]!.counts.output ?? 0, 0)
+          assert.isAbove(inspection.requests[0]!.counts.inputUncached ?? 0, 0)
+        }
+        const versions = yield* api.ListVersions({ slotId: done.slotId })
+        assert.strictEqual(versions[0]!.content, version.content)
+      }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+    })
+  }
+}

@@ -147,6 +147,7 @@ export const layer = Layer.effect(
               context: wire.context,
               inspection: { request: generation.request, model, display: generation.inspection },
               options: {
+                ...(prefix !== null ? { replyTool: REPLY_TOOL } : {}),
                 ...(wire.temperature !== undefined ? { temperature: wire.temperature } : {}),
                 ...(wire.maxTokens !== undefined ? { maxTokens: wire.maxTokens } : {}),
                 sessionId: chatId,
@@ -180,7 +181,18 @@ export const layer = Layer.effect(
                           message: "The provider did not return the required reply tool."
                         })
                       )
-                    return suffix(calls[0]!.arguments, true).pipe(
+                    let args: unknown
+                    try {
+                      args = JSON.parse(event.toolArguments[calls[0]!.id] ?? "")
+                    } catch {
+                      return Effect.fail(
+                        new GenerationFailed({
+                          class: "bad_prefill",
+                          message: "The provider returned malformed reply tool JSON."
+                        })
+                      )
+                    }
+                    return suffix(args, true).pipe(
                       Effect.map((delta) => (delta ? Result.succeed<GenerationChunk>(delta) : Result.failVoid))
                     )
                   }
