@@ -91,7 +91,7 @@ for (const [name, viewport, chat] of [
       const before = provider.completions.length
       await openChat(page, chat)
       // Summaries are off for an imported chat, and turning them on is one click away.
-      await expect(page.getByRole("status").filter({ hasText: "aren't summarized" })).toBeVisible()
+      await expect(page.getByRole("status").filter({ hasText: "summaries are off" })).toBeVisible()
       await page.getByRole("button", { name: "Enable summaries", exact: true }).click()
 
       const dialog = page.getByRole("dialog", { name: "Summarize older messages" })

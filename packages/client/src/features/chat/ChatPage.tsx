@@ -502,17 +502,20 @@ function ChatSurface({
             !view.lcm.enabled &&
             view.lcm.leafSlotId === view.leafSlotId &&
             (view.history?.historyStart?.depth ?? 0) > 0 && (
-              <div className="mx-auto w-full max-w-3xl pb-2">
-                <Alert
-                  title="Older messages beyond the context aren't summarized"
-                  actions={
-                    <Button variant="primary" onClick={() => setEnabling(true)}>
-                      Enable summaries
-                    </Button>
-                  }
+              // One line, not a block: it stays while the chat is read for hours.
+              <div
+                role="status"
+                className="mx-auto flex w-full max-w-3xl items-center gap-2 border-b border-border px-2 pb-1 text-sm text-muted"
+              >
+                <span className="min-w-0 flex-1">The oldest messages aren&rsquo;t sent: summaries are off.</span>
+                <Button
+                  variant="ghost"
+                  className="h-7 shrink-0 px-2 text-accent"
+                  title="Summaries keep what happened in older messages in the context"
+                  onClick={() => setEnabling(true)}
                 >
-                  The model no longer sees them. Summaries keep what happened in them in the context.
-                </Alert>
+                  Enable summaries
+                </Button>
               </div>
             )}
           {(view.error ?? branchError) && (

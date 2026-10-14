@@ -9,6 +9,7 @@ import { Button } from "../../ui/Button.tsx"
 import { Sheet } from "../../ui/Sheet.tsx"
 import { Loading } from "../../ui/Spinner.tsx"
 import { Tabs } from "../../ui/Tabs.tsx"
+import { IconButton } from "../../ui/Tooltip.tsx"
 import { CastTab } from "./CastTab.tsx"
 import { LorebooksTab } from "./LorebooksTab.tsx"
 import type { ChatSession, ChatView } from "./session.ts"
@@ -47,11 +48,11 @@ class NotLoaded extends Component<{ children: ReactNode }, { failed: boolean }> 
 }
 
 const PANEL_TABS = [
-  { value: "cast", label: "Cast" },
-  { value: "chat", label: "This chat" },
-  { value: "lorebooks", label: "Lorebooks" },
-  { value: "notes", label: "Notes" },
-  { value: "summaries", label: "Summaries" }
+  { value: "cast", label: "Cast", icon: "people" },
+  { value: "chat", label: "This chat", icon: "sliders" },
+  { value: "lorebooks", label: "Lorebooks", icon: "book" },
+  { value: "notes", label: "Notes", icon: "note" },
+  { value: "summaries", label: "Summaries", icon: "summary" }
 ] as const
 
 export type PanelTab = (typeof PANEL_TABS)[number]["value"]
@@ -132,17 +133,10 @@ export function PanelToggles({
       </Button>
     )
   return (
-    <div role="group" aria-label="Chat panel" className="flex flex-wrap gap-0.5">
+    // Icons, as ST's panel buttons are, so the header keeps room for the chat's name.
+    <div role="group" aria-label="Chat panel" className="flex shrink-0 gap-0.5">
       {PANEL_TABS.map((tab) => (
-        <Button
-          key={tab.value}
-          variant="ghost"
-          title={`Open ${tab.label} in the side panel`}
-          className="h-8 px-2.5"
-          onClick={() => onToggle(tab.value)}
-        >
-          {tab.label}
-        </Button>
+        <IconButton key={tab.value} label={tab.label} icon={tab.icon} onClick={() => onToggle(tab.value)} />
       ))}
     </div>
   )
