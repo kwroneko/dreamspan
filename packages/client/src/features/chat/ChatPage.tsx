@@ -1,3 +1,4 @@
+import { PortraitProvider } from "../../ui/Portrait.tsx"
 // A chat (DESIGN §10.1): a URL per chat and per message, the path in a virtualized list
 // anchored at the bottom, and the composer. Nothing here locks while replies generate.
 import { RegistryContext } from "@effect/atom-react"
@@ -374,13 +375,13 @@ function usePanel(urlPanel: PanelTab | null) {
       void navigate({ to: ".", search: (prev: Record<string, unknown>) => ({ ...prev, panel }), replace: true })
   }, [navigate, urlPanel, panel])
   const show = useCallback(
-    (next: PanelTab | null) => {
+    (next: PanelTab | null, portrait?: string) => {
       rememberPanel(userId, next)
       setRemembered({ userId, tab: next })
       void navigate({
         to: ".",
         search: ({ panel: _gone, ...prev }: Record<string, unknown>) =>
-          next === null ? prev : { ...prev, panel: next },
+          next === null ? prev : { ...prev, panel: next, ...(portrait === undefined ? {} : { portrait }) },
         // On a phone, opening the sheet is a step in the history, so Back closes it.
         replace: wide || next === null || urlPanel !== null
       })
@@ -480,87 +481,96 @@ function ChatSurface({
   const title = chatDisplayName(view)
   const panelOpen = panel !== null
   return (
-    <CastContext value={cast}>
-      <div className="flex min-h-0 flex-1">
-        <div className="flex min-w-0 flex-1 flex-col">
-          <ChatHeader
-            session={session}
-            view={view}
-            onBranch={switchBranch}
-            onJump={jump}
-            actions={
-              <PanelToggles
-                userId={userId}
-                open={panel}
-                wide={wide}
-                onToggle={(tab) => show(panel === tab ? null : tab)}
-              />
-            }
-          />
-          {/* A chat that has outgrown its context with summaries off (spec/LCM.md §2.13): easy to turn on. */}
-          {view.lcm !== null &&
-            !view.lcm.enabled &&
-            view.lcm.leafSlotId === view.leafSlotId &&
-            (view.history?.historyStart?.depth ?? 0) > 0 && (
-              // One line, not a block: it stays while the chat is read for hours.
-              <div
-                role="status"
-                className="mx-auto flex w-full max-w-3xl items-center gap-2 border-b border-border px-2 pb-1 text-sm text-muted"
-              >
-                {/* A phone's line has room for the gist only; the button says the rest. */}
-                <span className="min-w-0 flex-1 truncate">
-                  <span className="sm:hidden">Summaries are off.</span>
-                  <span className="hidden sm:inline">The oldest messages aren&rsquo;t sent: summaries are off.</span>
-                </span>
-                <Button
-                  variant="ghost"
-                  className="h-7 shrink-0 px-2 text-accent"
-                  title="The oldest messages aren’t sent to the model. Summaries keep what happened in them in the context."
-                  aria-description="The oldest messages aren’t sent to the model. Summaries keep what happened in them in the context."
-                  onClick={() => setEnabling(true)}
-                >
-                  Enable summaries
-                </Button>
-              </div>
-            )}
-          {(view.error ?? branchError) && (
-            <div className="mx-auto w-full max-w-3xl">
-              <Alert tone="danger">{view.error ?? branchError}</Alert>
-            </div>
-          )}
-          {view.loading ? (
-            <Loading label="Loading the chat…" />
-          ) : (
-            <MessageList
+    <PortraitProvider
+      onOpen={(id) => show("portrait", id)}
+      faces={[...cast.cards.values()].map((card) => ({
+        id: card.entityId,
+        name: card.name,
+        mediaId: card.avatarMediaId
+      }))}
+    >
+      <CastContext value={cast}>
+        <div className="flex min-h-0 flex-1">
+          <div className="flex min-w-0 flex-1 flex-col">
+            <ChatHeader
               session={session}
               view={view}
-              anchor={slot}
-              rail={rail}
               onBranch={switchBranch}
-              onOpenSummaries={openSummaries}
+              onJump={jump}
+              actions={
+                <PanelToggles
+                  userId={userId}
+                  open={panel}
+                  wide={wide}
+                  onToggle={(tab) => show(panel === tab ? null : tab)}
+                />
+              }
+            />
+            {/* A chat that has outgrown its context with summaries off (spec/LCM.md §2.13): easy to turn on. */}
+            {view.lcm !== null &&
+              !view.lcm.enabled &&
+              view.lcm.leafSlotId === view.leafSlotId &&
+              (view.history?.historyStart?.depth ?? 0) > 0 && (
+                // One line, not a block: it stays while the chat is read for hours.
+                <div
+                  role="status"
+                  className="mx-auto flex w-full max-w-3xl items-center gap-2 border-b border-border px-2 pb-1 text-sm text-muted"
+                >
+                  {/* A phone's line has room for the gist only; the button says the rest. */}
+                  <span className="min-w-0 flex-1 truncate">
+                    <span className="sm:hidden">Summaries are off.</span>
+                    <span className="hidden sm:inline">The oldest messages aren&rsquo;t sent: summaries are off.</span>
+                  </span>
+                  <Button
+                    variant="ghost"
+                    className="h-7 shrink-0 px-2 text-accent"
+                    title="The oldest messages aren’t sent to the model. Summaries keep what happened in them in the context."
+                    aria-description="The oldest messages aren’t sent to the model. Summaries keep what happened in them in the context."
+                    onClick={() => setEnabling(true)}
+                  >
+                    Enable summaries
+                  </Button>
+                </div>
+              )}
+            {(view.error ?? branchError) && (
+              <div className="mx-auto w-full max-w-3xl">
+                <Alert tone="danger">{view.error ?? branchError}</Alert>
+              </div>
+            )}
+            {view.loading ? (
+              <Loading label="Loading the chat…" />
+            ) : (
+              <MessageList
+                session={session}
+                view={view}
+                anchor={slot}
+                rail={rail}
+                onBranch={switchBranch}
+                onOpenSummaries={openSummaries}
+              />
+            )}
+            <CacheIndicator warmth={view.cache} />
+            <Composer session={session} view={view} />
+          </div>
+          {/* Mounted only while open: the surface re-renders with every page of history. */}
+          {panelOpen && (
+            <ChatSidePanel
+              tab={panel}
+              wide={wide}
+              title={title}
+              onTab={show}
+              onClose={() => show(null)}
+              session={session}
+              view={view}
+              focus={focus}
+              onJump={jump}
+              onEnable={() => setEnabling(true)}
             />
           )}
-          <CacheIndicator warmth={view.cache} />
-          <Composer session={session} view={view} />
         </div>
-        {/* Mounted only while open: the surface re-renders with every page of history. */}
-        {panelOpen && (
-          <ChatSidePanel
-            tab={panel}
-            wide={wide}
-            title={title}
-            onTab={show}
-            onClose={() => show(null)}
-            session={session}
-            view={view}
-            focus={focus}
-            onJump={jump}
-            onEnable={() => setEnabling(true)}
-          />
-        )}
-      </div>
-      {enabling && <EnableLcmDialog session={session} onOpenChange={setEnabling} />}
-    </CastContext>
+        {enabling && <EnableLcmDialog session={session} onOpenChange={setEnabling} />}
+      </CastContext>
+    </PortraitProvider>
   )
 }
 

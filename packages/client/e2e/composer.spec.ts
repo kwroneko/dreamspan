@@ -57,7 +57,7 @@ test("the composer's text is on the server: a reload and another tab show it, an
   await expect(box(other)).toHaveValue("Half a thought about the harbor")
   await other.close()
 
-  await page.getByRole("button", { name: "Send" }).click()
+  await page.getByRole("button", { name: "Send", exact: true }).click()
   await expect(page.getByRole("article", { name: "Your message" })).toHaveText(/Half a thought/)
   await expect(page.getByText("generating", { exact: true })).toHaveCount(0, { timeout: 20_000 })
   // Typed while the reply came: it moves on with the chat, and stays after a reload.
@@ -194,7 +194,7 @@ test("a send takes the text as it was at the click; typing while it's saved is t
   const long = "This is the message as it was when Send was clicked. ".repeat(10).trim()
   await box(page).fill(long)
   save.arm()
-  await page.getByRole("button", { name: "Send" }).click()
+  await page.getByRole("button", { name: "Send", exact: true }).click()
   await expect.poll(save.held).toBe(true)
   await box(page).fill("x")
   save.release()
@@ -222,7 +222,7 @@ test("a send whose branch changed before it went isn't sent, and stays in that b
   await expect(box(page)).toHaveValue("saved draft B")
   save.arm()
   await box(page).fill("new typing for B")
-  await page.getByRole("button", { name: "Send" }).click()
+  await page.getByRole("button", { name: "Send", exact: true }).click()
   await expect.poll(save.held).toBe(true)
   await page.getByRole("button", { name: "Previous branch" }).click()
   await expect(message(page, "branch A")).toBeVisible()
@@ -293,7 +293,7 @@ test("a send that another tab typed past keeps that tab's text in the composer",
   await box(page).fill("text sent from this tab")
   await expect.poll(() => onServer(chatId, null)).toBe("text sent from this tab")
   sending.arm()
-  await page.getByRole("button", { name: "Send" }).click()
+  await page.getByRole("button", { name: "Send", exact: true }).click()
   await expect.poll(sending.held).toBe(true)
   const newer = "newer text typed in another tab"
   await admin((api) => typeInto(api, chatId, null, newer))
@@ -330,7 +330,7 @@ test("text typed while an earlier text is being restored stays, on top of it", a
 test("going back to a branch's tip shows its own composer, not the one typed in on the way", async ({ page }) => {
   const chatId = await newChat(page, "Back")
   await box(page).fill("a message made in this tab")
-  await page.getByRole("button", { name: "Send" }).click()
+  await page.getByRole("button", { name: "Send", exact: true }).click()
   await expect(message(page, "a message made in this tab")).toBeVisible()
   await replied(page)
   await box(page).fill("draft at the tip")
@@ -383,7 +383,7 @@ test("closing while a send is out keeps what was typed after it", async ({ page 
   await box(page).fill("the first message")
   await expect.poll(() => onServer(chatId, null)).toBe("the first message")
   armed = true
-  await page.getByRole("button", { name: "Send" }).click()
+  await page.getByRole("button", { name: "Send", exact: true }).click()
   await expect.poll(() => cut).toBe(true)
   await box(page).fill("the next message")
   await expect.poll(() => leaf(chatId)).not.toBeNull()

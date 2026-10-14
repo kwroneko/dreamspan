@@ -740,9 +740,54 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
   },
   Regenerate: {
     probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const theirs = yield* ownSlot(owner)
+        yield* refused(
+          actor.api.Regenerate({ slotId: owner.chat.slotId, expectedRowVersion: theirs.rowVersion }),
+          "NotFound"
+        )
+        // "Regenerate with…" the other's model, on a message of one's own.
+        const mine = yield* ownSlot(actor)
+        yield* refused(
+          actor.api.Regenerate({
+            slotId: actor.chat.slotId,
+            expectedRowVersion: mine.rowVersion,
+            model: { connection: owner.connectionId, model: owner.modelId }
+          }),
+          "NotFound"
+        )
+      })
+  },
+  SetVersionFlags: {
+    probe: (actor, owner) =>
+      refused(actor.api.SetVersionFlags({ versionId: owner.chat.versionId, starred: true, hidden: true }), "NotFound")
+  },
+  ContinueVersion: {
+    probe: (actor, owner) =>
       Effect.flatMap(ownSlot(owner), (theirs) =>
-        refused(actor.api.Regenerate({ slotId: owner.chat.slotId, expectedRowVersion: theirs.rowVersion }), "NotFound")
+        refused(
+          actor.api.ContinueVersion({ versionId: owner.chat.versionId, expectedRowVersion: theirs.rowVersion }),
+          "NotFound"
+        )
       )
+  },
+  GetDisplayPrefs: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const before = yield* actor.api.GetDisplayPrefs({})
+        const flipped = before.reasoning === "expanded" ? "collapsed" : "expanded"
+        yield* owner.api.SetDisplayPrefs({ prefs: { reasoning: flipped } })
+        assert.deepStrictEqual(yield* actor.api.GetDisplayPrefs({}), before)
+      })
+  },
+  SetDisplayPrefs: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const before = yield* owner.api.GetDisplayPrefs({})
+        const flipped = before.reasoning === "expanded" ? "collapsed" : "expanded"
+        yield* actor.api.SetDisplayPrefs({ prefs: { reasoning: flipped } })
+        assert.deepStrictEqual(yield* owner.api.GetDisplayPrefs({}), before)
+      })
   },
   StopGeneration: {
     probe: (actor, owner) =>
@@ -867,6 +912,15 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
   DeleteMessage: {
     probe: (actor, owner) => refused(actor.api.DeleteMessage({ slotId: owner.chat.slotId }), "NotFound")
   },
+  RenameChat: {
+    probe: (actor, owner) => refused(actor.api.RenameChat({ chatId: owner.chat.chatId, name: "x" }), "NotFound")
+  },
+  ListBranches: {
+    probe: (actor, owner) => refused(actor.api.ListBranches({ slotId: owner.chat.slotId }), "NotFound")
+  },
+  NameBranch: {
+    probe: (actor, owner) => refused(actor.api.NameBranch({ slotId: owner.chat.slotId, name: "x" }), "NotFound")
+  },
   DeleteBranch: {
     probe: (actor, owner) => refused(actor.api.DeleteBranch({ slotId: owner.chat.slotId }), "NotFound")
   },
@@ -955,6 +1009,9 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
   ListGroupChats: {
     probe: (actor, owner) => refused(actor.api.ListGroupChats({ chatId: owner.chat.chatId }), "NotFound")
   },
+  RenameGroup: {
+    probe: (actor, owner) => refused(actor.api.RenameGroup({ chatId: owner.chat.chatId, name: "x" }), "NotFound")
+  },
   SetPersona: {
     probe: (actor, owner) => refused(actor.api.SetPersona({ entityId: owner.cardId, persona: false }), "NotFound")
   },
@@ -976,6 +1033,17 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
         )
         yield* refused(
           actor.api.StartChat({ cards: [actor.cardId], persona: null, greeting: null, first: send(owner.cardId) }),
+          "NotFound"
+        )
+        // Their card as a greeter.
+        yield* refused(
+          actor.api.StartChat({
+            cards: [actor.cardId],
+            persona: null,
+            greeting: null,
+            greeters: [{ entityId: owner.cardId, greeting: 0 }],
+            first: send(null)
+          }),
           "NotFound"
         )
       })
@@ -1502,6 +1570,36 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
         }
       })
   },
+  GetComposerChoice: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        for (const chatId of [owner.chat.chatId, actor.chat.chatId]) {
+          yield* refused(actor.api.GetComposerChoice({ chatId, draftId: owner.composerId }), "NotFound")
+        }
+      })
+  },
+  SetComposerChoice: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        for (const chatId of [owner.chat.chatId, actor.chat.chatId]) {
+          yield* refused(
+            actor.api.SetComposerChoice({ chatId, draftId: owner.composerId, speakerEntityId: actor.cardId }),
+            "NotFound"
+          )
+        }
+        // Their own composer can't name the owner's card.
+        for (const field of ["speakerEntityId", "replyFromEntityId", "consumeReplyFromEntityId"] as const) {
+          yield* refused(
+            actor.api.SetComposerChoice({
+              chatId: actor.chat.chatId,
+              draftId: actor.composerId,
+              [field]: owner.cardId
+            }),
+            "NotFound"
+          )
+        }
+      })
+  },
   SubscribeNotices: {
     probe: (actor, owner) =>
       Effect.scoped(
@@ -1997,6 +2095,19 @@ const storage: Record<
   string,
   (reader: Reader["Service"], actor: Party, owner: Party, writer: Writer["Service"]) => Effect.Effect<void, unknown>
 > = {
+  RenameChats: (_reader, actor, owner, writer) =>
+    refused(
+      writer.RenameChats({
+        userId: actor.user.id,
+        chats: [{ chatId: owner.chat.chatId, from: null }],
+        name: "foreign"
+      }),
+      "NotFound"
+    ),
+  SetBranchName: (_reader, actor, owner, writer) =>
+    refused(writer.SetBranchName({ userId: actor.user.id, slotId: owner.chat.slotId, name: "foreign" }), "NotFound"),
+  ListBranches: (reader, actor, owner) =>
+    refused(reader.ListBranches({ userId: actor.user.id, slotId: owner.chat.slotId }), "NotFound"),
   StImportDefaultPreset: (_reader, actor, owner, writer) =>
     Effect.gen(function* () {
       const { importId } = yield* owner.api.StartStImport({ unsupported: [] })
@@ -2263,7 +2374,8 @@ const snapshot = (owner: Party) =>
     outcome(owner.api.ListLibrary({ kind: "card" }), JSON.stringify),
     outcome(owner.api.ListBin({ limit: 500, before: null }), JSON.stringify),
     outcome(owner.api.ListRecoveredTexts({ limit: 500, before: null }), JSON.stringify),
-    outcome(owner.api.OpenComposer({ chatId: owner.chat.chatId, tipSlotId: owner.chat.replySlotId }), JSON.stringify)
+    outcome(owner.api.OpenComposer({ chatId: owner.chat.chatId, tipSlotId: owner.chat.replySlotId }), JSON.stringify),
+    outcome(owner.api.GetComposerChoice({ chatId: owner.chat.chatId, draftId: owner.composerId }), JSON.stringify)
   ])
 
 /** Runs a probe, then checks that it changed nothing of the owner's, whatever it returned. */

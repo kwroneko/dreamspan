@@ -91,9 +91,17 @@ const countsFromUsage = (usage: Usage): TokenCounts => ({
   reasoning: usage.reasoning ?? null
 })
 
-const messageText = (message: AssistantMessage) =>
+const messageText = (message: AssistantMessage, replyTool?: string) =>
   message.content
-    .map((block) => (block.type === "text" ? block.text : block.type === "thinking" ? block.thinking : ""))
+    .map((block) =>
+      block.type === "text"
+        ? block.text
+        : block.type === "thinking"
+          ? block.thinking
+          : block.type === "toolCall" && block.name === replyTool
+            ? JSON.stringify(block.arguments)
+            : ""
+    )
     .join("")
 
 /**
@@ -104,9 +112,10 @@ const messageText = (message: AssistantMessage) =>
 export const finalCounts = (
   message: AssistantMessage,
   capture: Capture,
-  context: ReadonlyArray<Message>
+  context: ReadonlyArray<Message>,
+  replyTool?: string
 ): { counts: TokenCounts; source: UsageSource } => {
-  const text = messageText(message)
+  const text = messageText(message, replyTool)
   const finished = message.stopReason === "stop" || message.stopReason === "length" || message.stopReason === "toolUse"
   if (capture.rawUsage !== null) {
     let counts = countsFromUsage(message.usage)

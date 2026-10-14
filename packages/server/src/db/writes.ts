@@ -1,16 +1,18 @@
 import { recordHistoryReduction } from "./historyChanges.ts"
 import { contextExcluded } from "./lcmVisibility.ts"
 // Write operation handlers. They run inside the writer worker, each as one transaction.
-import type { ChatId } from "@rp/shared/chat.ts"
+import type { ChatId, VersionId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import { Effect } from "effect"
 import { SqlClient, type SqlError } from "effect/sql"
+import { cleanName, renamedTitle } from "@rp/shared/chatName.ts"
 import { composerKey, type DraftKey } from "@rp/shared/drafts.ts"
 import type { Bin } from "./bin.ts"
 import { NotAmendable } from "@rp/shared/chatApi.ts"
 import { makeGraphWrites } from "./graphWrites.ts"
 import { NotFound, StaleWrite, WriteOps } from "./ops.ts"
+import { ownedModel } from "./generationSettings.ts"
 import { type ChatRow, toChat, toVersion } from "./rows.ts"
 import { transaction as runTransaction } from "./tx.ts"
 
@@ -104,6 +106,15 @@ export const makeWriteHandlers = (bin: Bin) =>
           if (copyFrom !== null && from === null) return yield* new NotFound({ entity: "draft", id: copyFrom })
           return yield* drafts.openComposer(userId, key, from)
         }).pipe(transaction("OpenComposer")),
+
+      SetComposerChoice: ({ userId, chatId, draftId, speakerEntityId, replyFromEntityId, consumeReplyFromEntityId }) =>
+        drafts
+          .setComposerChoice(userId, chatId, draftId, {
+            ...(speakerEntityId === undefined ? {} : { speakerEntityId }),
+            ...(replyFromEntityId === undefined ? {} : { replyFromEntityId }),
+            ...(consumeReplyFromEntityId === undefined ? {} : { consumeReplyFromEntityId })
+          })
+          .pipe(transaction("SetComposerChoice")),
 
       // Into a chat of the user's, live or in the bin: text typed as it was deleted is kept too.
       SaveComposer: ({ userId, chatId, draftId, rowVersion, session, next, operationId, content }) =>
@@ -205,7 +216,7 @@ export const makeWriteHandlers = (bin: Bin) =>
 
       // --- Chats
 
-      AddSelectedVersion: ({ userId, slotId, version, expectedRowVersion, commitDraft }) =>
+      AddSelectedVersion: ({ userId, slotId, version, expectedRowVersion, model, commitDraft }) =>
         Effect.gen(function* () {
           const slot = yield* ownedSlot(userId, slotId)
           if (slot.row_version !== expectedRowVersion) {
@@ -217,10 +228,17 @@ export const makeWriteHandlers = (bin: Bin) =>
             })
           }
           yield* checkSpeaker(userId, version.speakerEntityId)
+          if (model && (version.writer !== "model" || !(yield* ownedModel(sql, userId, model.connection, model.model))))
+            return yield* new NotFound({ entity: "model", id: model.model })
           const [next] = yield* sql<{
             n: number
           }>`SELECT coalesce(max(ordinal), -1) + 1 AS n FROM versions WHERE slot_id = ${slotId}`
-          const row = yield* insertVersion(slotId, next!.n, version, Date.now())
+          const inserted = yield* insertVersion(slotId, next!.n, version, Date.now())
+          // The model chosen for it shows from the start; its rollout records the same one.
+          if (model)
+            yield* sql`UPDATE versions SET connection_id = ${model.connection}, model_id = ${model.model}
+              WHERE id = ${inserted.id}`
+          const row = model ? yield* ownedVersion(userId, inserted.id as VersionId, true) : inserted
           yield* recordHistoryReduction(sql, slotId, row.content)
           yield* sql`UPDATE slots SET selected_version_id = ${row.id}, row_version = row_version + 1 WHERE id = ${slotId}`
           // An edit's text was typed into the edit of its source; a version of one's own, into the slot's.
@@ -259,7 +277,7 @@ export const makeWriteHandlers = (bin: Bin) =>
           return toVersion(yield* ownedVersion(userId, versionId, true))
         }).pipe(transaction("AmendVersion")),
 
-      SaveGeneration: ({ userId, versionId, content, status, error }) =>
+      SaveGeneration: ({ userId, versionId, content, reasoning, status, error }) =>
         Effect.gen(function* () {
           const row = yield* ownedVersion(userId, versionId, false)
           // A version deleted for good stays empty, whatever was still generating into it.
@@ -268,10 +286,24 @@ export const makeWriteHandlers = (bin: Bin) =>
           }
           yield* recordHistoryReduction(sql, row.slot_id, content, versionId)
           yield* sql`UPDATE versions SET content = ${content}, status = ${status},
+            reasoning = CASE WHEN ${reasoning === undefined ? 1 : 0} THEN reasoning ELSE ${reasoning || null} END,
             error_json = ${error === null ? null : JSON.stringify(error)}, updated_at = ${Date.now()}
             WHERE id = ${versionId}`
           return toVersion(yield* ownedVersion(userId, versionId, false))
         }).pipe(transaction("SaveGeneration")),
+
+      SetVersionFlags: ({ userId, versionId, starred, hidden }) =>
+        Effect.gen(function* () {
+          const row = yield* ownedVersion(userId, versionId, true)
+          const flag = (value: boolean | undefined, now: number) => (value === undefined ? now : value ? 1 : 0)
+          yield* sql`UPDATE versions SET starred = ${flag(starred, row.starred)}, hidden = ${flag(hidden, row.hidden)}
+            WHERE id = ${versionId}`
+          const [slot] = yield* sql<{ chat_id: string }>`SELECT chat_id FROM slots WHERE id = ${row.slot_id}`
+          return {
+            chatId: slot!.chat_id as ChatId,
+            version: toVersion(yield* ownedVersion(userId, versionId, true))
+          }
+        }).pipe(transaction("SetVersionFlags")),
 
       MarkVersion: ({ userId, versionId, mark }) =>
         Effect.gen(function* () {
@@ -282,7 +314,29 @@ export const makeWriteHandlers = (bin: Bin) =>
           return toVersion(yield* ownedVersion(userId, versionId, true))
         }).pipe(transaction("MarkVersion")),
 
+      RenameChats: ({ userId, chats, name }) =>
+        Effect.gen(function* () {
+          const renamed: Array<ReturnType<typeof toChat>> = []
+          for (const { chatId, from } of chats) {
+            const chat = yield* ownedChat(userId, chatId)
+            if (from !== null && chat.title !== from) continue
+            const [row] = yield* sql<ChatRow>`
+              UPDATE chats SET title = ${renamedTitle(chat.title, name)}, title_source = 'user',
+                row_version = row_version + 1
+              WHERE id = ${chatId} RETURNING *`
+            renamed.push(toChat(row!))
+          }
+          return renamed
+        }).pipe(transaction("RenameChats")),
+
       // --- Branches (DESIGN §3.2)
+
+      SetBranchName: ({ userId, slotId, name }) =>
+        Effect.gen(function* () {
+          yield* ownedSlot(userId, slotId)
+          const clean = cleanName(name)
+          yield* sql`UPDATE slots SET branch_name = ${clean === "" ? null : clean}, row_version = row_version + 1 WHERE id = ${slotId}`
+        }).pipe(transaction("SetBranchName")),
 
       SetActiveLeaf: ({ userId, chatId, slotId, expectedRowVersion }) =>
         Effect.gen(function* () {

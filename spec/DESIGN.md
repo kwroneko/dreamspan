@@ -110,6 +110,8 @@ Where the owner corrected an earlier proposal, the corrected version is recorded
 ## 3. The message graph: versions, branches, threads, state
 
 ### 3.1 Slots and versions
+**[O]** **How the model is presented to users** (owner, 2026-10-14): "the UX for how we translate our immutable and version controlled data model to something that users understand and which doesn't cause surprises for them still hasn't been worked out or discussed properly." The rules below (generated text frozen, edits of it as new versions, the user's own text amended with undo history, branches as forks, layered cards, re-imports merged) are decided; how each shows up in the UI, and what the user is told when one applies, is open and needs a discussion with the owner before more UI is built on it.
+
 - **[D]** **Versions belong to a message slot, and the continuation belongs to the slot**, not to a version. Swapping, regenerating or editing a version at *any* depth replaces that message in place and keeps what follows. This is a version, not a branch.
 - **[D]** Any message can get a new version, including the user's own messages and messages in the middle of the history.
 - **[P]** Regenerating in the middle of the history can optionally show the model what follows ("write a replacement consistent with what comes after").

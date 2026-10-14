@@ -25,10 +25,19 @@ import {
 // NotFound, so their existence doesn't leak.
 import { Chat, ChatId, ChatKind, EntityId, NewVersion, PathEntry, SlotId, Version, VersionId } from "@rp/shared/chat.ts"
 import { ContextIssue, VersionError, VersionStatus } from "@rp/shared/chat.ts"
-import { ChatCursor, ChatSearch, NotAmendable, PathRange, PathWindow } from "@rp/shared/chatApi.ts"
+import {
+  Branch,
+  ChatCursor,
+  ChatSearch,
+  DisplayPrefs,
+  NotAmendable,
+  PathRange,
+  PathWindow
+} from "@rp/shared/chatApi.ts"
 import { User, UserAccount, UserId, UserRole } from "@rp/shared/domain.ts"
 import { BinChanged, BinItem, RecoveredText } from "@rp/shared/bin.ts"
 import { Draft, DraftKey, DraftRestore, DraftState } from "@rp/shared/drafts.ts"
+import { ComposerChoice } from "@rp/shared/composerApi.ts"
 import { AccountRejected, LeafMoved, ModelKeyTaken, NotFound, StaleWrite } from "@rp/shared/errors.ts"
 import {
   Doc,
@@ -566,6 +575,23 @@ export class WriteOps extends RpcGroup.make(
     error: Schema.Union([NotFound, StorageError])
   }),
   /**
+   * Changes a composer draft's speaker or reply choice (null clears one, a missing field
+   * stays). Each card named must be one of the user's live cards.
+   */
+  Rpc.make("SetComposerChoice", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      draftId: Schema.String,
+      speakerEntityId: Schema.optionalKey(Schema.NullOr(EntityId)),
+      replyFromEntityId: Schema.optionalKey(Schema.NullOr(EntityId)),
+      /** Consume a one-reply pick only if it still names this card. */
+      consumeReplyFromEntityId: Schema.optionalKey(EntityId)
+    },
+    success: ComposerChoice,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
    * Composer text onto the draft it was typed into, wherever that draft's tip is now
    * (drafts.ts `saveComposer`): on top of another tab's newer text, or to the recovered
    * texts if the draft's session ended or the draft is gone.
@@ -617,6 +643,27 @@ export class WriteOps extends RpcGroup.make(
   }),
   // --- Recycle bin (DESIGN §6.2). Deletes need no confirmation: each returns the bin
   // item for the "deleted, open the bin" toast, and can be undone from the bin.
+  /**
+   * Names chats (DESIGN §2.1): each title becomes `renamedTitle(its title, name)`, and the
+   * chat's row version moves on. With `from`, a chat is renamed only while its title is
+   * still that (a group read before; one renamed meanwhile keeps its name). Returns the
+   * chats renamed; NotFound when one isn't the user's live chat.
+   */
+  Rpc.make("RenameChats", {
+    payload: {
+      userId: UserId,
+      chats: Schema.Array(Schema.Struct({ chatId: ChatId, from: Schema.NullOr(Schema.String) })),
+      name: Schema.String
+    },
+    success: Schema.Array(Chat),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** Names the branch a live slot of the user's starts; empty: no name. */
+  Rpc.make("SetBranchName", {
+    payload: { userId: UserId, slotId: SlotId, name: Schema.String },
+    success: Schema.Void,
+    error: Schema.Union([NotFound, StorageError])
+  }),
   Rpc.make("DeleteChat", {
     payload: { userId: UserId, chatId: ChatId },
     success: BinItem,
@@ -1077,6 +1124,8 @@ export class WriteOps extends RpcGroup.make(
       slotId: SlotId,
       version: NewVersion,
       expectedRowVersion: Schema.Int,
+      /** For a swipe with a model chosen ("Regenerate with…"): that model, recorded on it at once. */
+      model: Schema.optionalKey(ModelChoice),
       /**
        * The draft its text was typed into: an edit's (`version_edit`, its source version) or
        * a version the user wrote (`scratchpad`, the slot), committed with it if it still
@@ -1110,10 +1159,23 @@ export class WriteOps extends RpcGroup.make(
       userId: UserId,
       versionId: VersionId,
       content: Schema.String,
+      /** The reasoning streamed so far; left as it is when absent. */
+      reasoning: Schema.optionalKey(Schema.String),
       status: VersionStatus,
       error: Schema.NullOr(VersionError)
     },
     success: Version,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** Stars a live version or hides it from the arrows' cycle, or undoes either; one write. */
+  Rpc.make("SetVersionFlags", {
+    payload: {
+      userId: UserId,
+      versionId: VersionId,
+      starred: Schema.optionalKey(Schema.Boolean),
+      hidden: Schema.optionalKey(Schema.Boolean)
+    },
+    success: Schema.Struct({ chatId: ChatId, version: Version }),
     error: Schema.Union([NotFound, StorageError])
   }),
   /** A judge model's finding on a finished model version: its text stays (spec/LCM.md §2.4). */
@@ -1142,10 +1204,19 @@ export class WriteOps extends RpcGroup.make(
       userId: UserId,
       cards: Schema.Array(EntityId),
       persona: Schema.NullOr(EntityId),
-      greeting: Schema.NullOr(Schema.Int),
+      /**
+       * Who greets, in order, each as a message of its own (one of `cards`; one without
+       * greetings is skipped): the greeting picked, and each greeting's frozen values in
+       * `GetCardForChat` order (null: none to freeze).
+       */
+      greeters: Schema.Array(
+        Schema.Struct({
+          entityId: EntityId,
+          greeting: Schema.NullOr(Schema.Int),
+          frozen: Schema.Array(Schema.NullOr(FrozenMacros))
+        })
+      ),
       first: FirstTurn,
-      /** Each greeting's frozen values, in `GetCardForChat` order; null: none to freeze. */
-      frozen: Schema.Array(Schema.NullOr(FrozenMacros)),
       /** The chat's title; null or blank: its cast's names. */
       title: Schema.NullOr(Schema.String)
     },
@@ -1226,6 +1297,8 @@ export class WriteOps extends RpcGroup.make(
       userId: UserId,
       versionId: VersionId,
       content: Schema.String,
+      /** The reasoning streamed; left as it is when absent. */
+      reasoning: Schema.optionalKey(Schema.String),
       status: VersionStatus,
       error: Schema.NullOr(VersionError)
     },
@@ -1504,6 +1577,12 @@ export class WriteOps extends RpcGroup.make(
     success: GenerationDefaults,
     error: Schema.Union([NotFound, StorageError])
   }),
+  /** The user's display choices (`user_prefs`, key `display`), stored whole. */
+  Rpc.make("SetDisplayPrefs", {
+    payload: { userId: UserId, prefs: DisplayPrefs },
+    success: DisplayPrefs,
+    error: StorageError
+  }),
   // --- Branches (DESIGN §3.2).
   /**
    * Moves the chat's active leaf to one of its live slots, if the chat is still at the row
@@ -1647,6 +1726,12 @@ export class ReadOps extends RpcGroup.make(
     payload: { userId: UserId, chatId: ChatId },
     success: Schema.Array(Draft),
     error: StorageError
+  }),
+  /** A chat's composer draft's speaker and reply choice, by the draft's id. */
+  Rpc.make("GetComposerChoice", {
+    payload: { userId: UserId, chatId: ChatId, draftId: Schema.String },
+    success: ComposerChoice,
+    error: Schema.Union([NotFound, StorageError])
   }),
   /** A chat's composer draft's restorable states, by the draft's id. */
   Rpc.make("ComposerHistory", {
@@ -2064,6 +2149,8 @@ export class ReadOps extends RpcGroup.make(
     success: GenerationDefaults,
     error: StorageError
   }),
+  /** The user's display choices; the defaults where none are stored. */
+  Rpc.make("GetDisplayPrefs", { payload: { userId: UserId }, success: DisplayPrefs, error: StorageError }),
   // --- Branches (DESIGN §3.2).
   /**
    * Where switching to the branch at `index` among `slotId`'s alternates leads: that
@@ -2078,6 +2165,12 @@ export class ReadOps extends RpcGroup.make(
       index: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
     },
     success: Schema.Struct({ slotId: SlotId, tipSlotId: SlotId, chatRowVersion: Schema.Int }),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** The alternates at a live slot's place, as BranchTip counts them, oldest first, with names. */
+  Rpc.make("ListBranches", {
+    payload: { userId: UserId, slotId: SlotId },
+    success: Schema.Array(Branch),
     error: Schema.Union([NotFound, StorageError])
   })
 ) {}

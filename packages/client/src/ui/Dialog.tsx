@@ -15,19 +15,22 @@ export function Dialog({
   onOpenChange,
   title,
   description,
+  wide = false,
   children
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   title: ReactNode
   description?: ReactNode
+  /** Room for two columns side by side on a wide screen. */
+  wide?: boolean
   children: ReactNode
 }) {
   return (
     <BaseDialog.Root open={open} onOpenChange={(next) => onOpenChange(next)}>
       <BaseDialog.Portal>
         <BaseDialog.Backdrop className={backdrop} />
-        <BaseDialog.Popup className={popup}>
+        <BaseDialog.Popup className={wide ? `${popup} sm:max-w-5xl` : popup}>
           <div className="flex flex-col gap-1">
             <BaseDialog.Title className="text-base font-semibold">{title}</BaseDialog.Title>
             {description && (

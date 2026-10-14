@@ -18,6 +18,7 @@ import {
   versionInContext
 } from "@rp/shared/chat.ts"
 import type { Cast, CastChange } from "@rp/shared/chatSetupApi.ts"
+import type { ComposerChoice } from "@rp/shared/composerApi.ts"
 import type { CardFields } from "@rp/shared/macros/context.ts"
 import { NotFound } from "@rp/shared/errors.ts"
 import type {
@@ -51,11 +52,16 @@ export const waitingCache = Atom.family((_id: VersionId) => Atom.make(false))
 /** The text so far of a version that's generating, by its id; null when it isn't. */
 export const liveText = Atom.family((_id: VersionId) => Atom.make<string | null>(null))
 
+/** The reasoning streamed so far by a version that's generating (DESIGN §7.4); null when it isn't. */
+export const liveReasoning = Atom.family((_id: VersionId) => Atom.make<string | null>(null))
+
 export interface ChatView {
   readonly chat: Chat | null
   /** The path's leaf, as the server resolved it. */
   readonly leafSlotId: SlotId | null
   readonly entries: ReadonlyArray<PathEntry>
+  /** Live naming metadata, including fork points outside the message window. */
+  readonly branchNames: ReadonlyMap<SlotId, { readonly name: string | undefined; readonly rowVersion: number }>
   /** Where to continue reading older history; null at the root. */
   readonly older: SlotId | null
   /** Where to continue reading newer history; null when the window reaches the leaf. */
@@ -64,6 +70,8 @@ export interface ChatView {
   readonly follow: boolean
   /** Bumped when the window is replaced rather than extended, so the list can position it. */
   readonly opened: number
+  /** History changed, including outside the loaded window; streamed text doesn't bump this. */
+  readonly pathRevision: number
   readonly loading: boolean
   readonly error: string | null
   /** The chat went to the bin while open, here or elsewhere. */
@@ -104,10 +112,12 @@ export class ChatSession {
     chat: null,
     leafSlotId: null,
     entries: [],
+    branchNames: new Map(),
     older: null,
     newer: null,
     follow: true,
     opened: 0,
+    pathRevision: 0,
     loading: true,
     error: null,
     deleted: false,
@@ -119,10 +129,21 @@ export class ChatSession {
     lcmVersion: 0
   }
   private readonly listeners = new Set<() => void>()
+  private readonly versionListeners = new Set<(version: Version) => void>()
+
+  /** Picker lists also hear changes to versions that aren't currently selected. */
+  subscribeVersions = (listener: (version: Version) => void) => {
+    this.versionListeners.add(listener)
+    return () => {
+      this.versionListeners.delete(listener)
+    }
+  }
   /** Unmounts for the live atoms kept alive while their version generates, shown or not. */
   private readonly live = new Map<VersionId, () => void>()
   /** Deltas received since the last frame, by version. */
   private readonly pending = new Map<VersionId, Array<{ readonly offset: number; readonly text: string }>>()
+  /** Reasoning received since the last frame, by version, applied as the text's deltas are. */
+  private readonly pendingReasoning = new Map<VersionId, Array<{ readonly offset: number; readonly text: string }>>()
   private frame: number | null = null
   private hellos = 0
   private subscription: Fiber.Fiber<void, unknown> | null = null
@@ -188,6 +209,18 @@ export class ChatSession {
       if (!this.view.loading) void this.refreshCast()
       void this.refreshContext()
       void this.refreshLcm()
+    }
+  }
+
+  private readonly choiceListeners = new Set<(choice: ComposerChoice | null) => void>()
+  /**
+   * Calls `listener` with each composer's speaker or reply choice published to this chat
+   * (speaker.ts), and with null after a reconnect, when one may have been missed.
+   */
+  readonly onComposerChoice = (listener: (choice: ComposerChoice | null) => void) => {
+    this.choiceListeners.add(listener)
+    return () => {
+      this.choiceListeners.delete(listener)
     }
   }
 
@@ -427,6 +460,7 @@ export class ChatSession {
     for (const [id, unmount] of this.live) {
       this.registry.set(waitingCache(id), false)
       this.registry.set(liveText(id), null)
+      this.registry.set(liveReasoning(id), null)
       unmount()
     }
     this.live.clear()
@@ -434,10 +468,12 @@ export class ChatSession {
 
   // --- Reading windows
 
-  private async read(range: PathRange, limit = PAGE): Promise<PathWindow | null> {
-    const result = await this.call((client) =>
-      client("ReadPath", { chatId: this.chatId, leafSlotId: this.view.leafSlotId ?? this.requestedLeaf, range, limit })
-    )
+  private async read(
+    range: PathRange,
+    limit = PAGE,
+    leafSlotId = this.view.leafSlotId ?? this.requestedLeaf
+  ): Promise<PathWindow | null> {
+    const result = await this.call((client) => client("ReadPath", { chatId: this.chatId, leafSlotId, range, limit }))
     if (result.ok) return result.value
     if (!this.disposed) this.update({ error: result.error.message, loading: false })
     return null
@@ -462,12 +498,16 @@ export class ChatSession {
   }
 
   /** Replaces the window: at the bottom, or around a slot; `reposition` scrolls to it. */
-  open(anchor: SlotId | null, limit = PAGE, reposition = true) {
+  open(anchor: SlotId | null, limit = PAGE, reposition = true, followActive = false) {
     const generation = ++this.generation
     this.update({ loading: this.view.entries.length === 0 })
     return this.reading(async () => {
       const [window, chat] = await Promise.all([
-        this.read(anchor === null ? { _tag: "Bottom" } : { _tag: "Around", slot: anchor }, limit),
+        this.read(
+          anchor === null ? { _tag: "Bottom" } : { _tag: "Around", slot: anchor },
+          limit,
+          followActive ? null : undefined
+        ),
         this.call((client) => client("GetChat", { chatId: this.chatId }))
       ])
       if (window === null || this.disposed || generation !== this.generation) return
@@ -670,11 +710,17 @@ export class ChatSession {
         else this.pending.set(event.versionId, [event])
         continue
       }
+      if (event._tag === "Reasoning") {
+        const list = this.pendingReasoning.get(event.versionId)
+        if (list) list.push(event)
+        else this.pendingReasoning.set(event.versionId, [event])
+        continue
+      }
       // Anything else applies after the text that came before it.
       this.flush()
       this.apply(event, anchor)
     }
-    if (this.pending.size > 0 && this.frame === null) {
+    if ((this.pending.size > 0 || this.pendingReasoning.size > 0) && this.frame === null) {
       this.frame = requestAnimationFrame(() => {
         this.frame = null
         this.flush()
@@ -684,6 +730,18 @@ export class ChatSession {
 
   /** Applies the deltas received so far: one atom update per version. */
   private flush() {
+    if (this.pendingReasoning.size > 0) {
+      Atom.batch(() => {
+        for (const [id, deltas] of this.pendingReasoning) {
+          let text = this.registry.get(liveReasoning(id)) ?? this.storedReasoning(id)
+          for (const { offset, text: added } of deltas) {
+            if (offset <= text.length && offset + added.length > text.length) text = text.slice(0, offset) + added
+          }
+          this.setLiveReasoning(id, text)
+        }
+      })
+      this.pendingReasoning.clear()
+    }
     if (this.pending.size === 0) return
     Atom.batch(() => {
       for (const [id, deltas] of this.pending) {
@@ -703,12 +761,14 @@ export class ChatSession {
     this.pending.clear()
   }
 
-  private apply(event: Exclude<ChatEvent, { readonly _tag: "Delta" }>, anchor: SlotId | null) {
+  private apply(event: Exclude<ChatEvent, { readonly _tag: "Delta" | "Reasoning" }>, anchor: SlotId | null) {
     switch (event._tag) {
       case "Hello": {
-        for (const { versionId, text, waitingCache: waiting } of event.live) {
+        for (const { versionId, text, waitingCache: waiting, reasoning } of event.live) {
           this.registry.set(waitingCache(versionId), waiting ?? false)
           if (text.length >= (this.registry.get(liveText(versionId)) ?? "").length) this.setLive(versionId, text)
+          if (reasoning && reasoning.length >= (this.registry.get(liveReasoning(versionId)) ?? "").length)
+            this.setLiveReasoning(versionId, reasoning)
         }
         // The first Hello opens the chat. Another means the socket reconnected, and
         // anything may have changed meanwhile.
@@ -717,11 +777,15 @@ export class ChatSession {
         // event: its live text would hide the saved one.
         const live = new Set(event.live.map((l) => l.versionId))
         for (const id of [...this.live.keys()]) if (!live.has(id)) this.endLive(id)
+        for (const listener of this.choiceListeners) listener(null)
         this.reload()
         return
       }
       case "Slot":
       case "Version":
+        this.update({ pathRevision: this.view.pathRevision + 1 })
+        if (this.reads > 0) this.missed.push(event)
+        return this.applyState(event)
       case "Chat":
         if (this.reads > 0) this.missed.push(event)
         return this.applyState(event)
@@ -738,6 +802,9 @@ export class ChatSession {
         return void this.refreshCast()
       case "Lcm":
         return this.scheduleLcm()
+      case "ComposerChoice":
+        for (const listener of this.choiceListeners) listener(event.choice)
+        return
       case "WaitingCache":
         if (!this.live.has(event.versionId)) this.setLive(event.versionId, "")
         this.registry.set(waitingCache(event.versionId), event.waiting)
@@ -786,11 +853,15 @@ export class ChatSession {
 
   /** Reads the loaded range again, as far as one read goes, keeping the same slots in view. */
   private reload() {
+    this.update({ pathRevision: this.view.pathRevision + 1 })
     this.scheduleLcm()
     const { entries, newer } = this.view
     const limit = Math.min(MAX_LOADED, Math.max(PAGE, entries.length))
-    if (newer === null || entries.length === 0) return void this.open(null, limit, entries.length === 0)
-    void this.open(entries[Math.floor(entries.length / 2)]!.slotId, limit, false)
+    // A restore can move the active tip. Follow it only if this tab was already there;
+    // tabs explicitly showing another path keep their own leaf.
+    const followActive = this.requestedLeaf === null && this.view.leafSlotId === this.view.chat?.activeLeafSlotId
+    if (newer === null || entries.length === 0) return void this.open(null, limit, entries.length === 0, followActive)
+    void this.open(entries[Math.floor(entries.length / 2)]!.slotId, limit, false, followActive)
   }
 
   /**
@@ -798,6 +869,18 @@ export class ChatSession {
    * continues the loaded bottom of the path.
    */
   private applySlot(entry: PathEntry): boolean {
+    const known = this.view.branchNames.get(entry.slotId)
+    if (
+      (entry.branchCount > 1 || entry.branchName !== undefined || known !== undefined) &&
+      (known === undefined || known.rowVersion < entry.rowVersion)
+    ) {
+      this.update({
+        branchNames: new Map(this.view.branchNames).set(entry.slotId, {
+          name: entry.branchName,
+          rowVersion: entry.rowVersion
+        })
+      })
+    }
     const { entries } = this.view
     const index = entries.findIndex((e) => e.slotId === entry.slotId)
     if (index >= 0) {
@@ -857,6 +940,7 @@ export class ChatSession {
   }
 
   private applyVersion(version: Version) {
+    for (const listener of this.versionListeners) listener(version)
     if (version.status !== "generating") this.endLive(version.id)
     const { entries } = this.view
     const index = entries.findIndex((e) => e.version.id === version.id)
@@ -876,13 +960,17 @@ export class ChatSession {
     const known = this.registry.get(liveText(version.id))
     this.live.set(version.id, this.mountLive(version.id))
     if (known === null) this.registry.set(liveText(version.id), version.content)
+    if (this.registry.get(liveReasoning(version.id)) === null)
+      this.registry.set(liveReasoning(version.id), version.reasoning ?? "")
   }
 
   private mountLive(id: VersionId) {
     const text = this.registry.mount(liveText(id))
+    const reasoning = this.registry.mount(liveReasoning(id))
     const waiting = this.registry.mount(waitingCache(id))
     return () => {
       text()
+      reasoning()
       waiting()
     }
   }
@@ -892,10 +980,22 @@ export class ChatSession {
     this.registry.set(liveText(id), text)
   }
 
+  /** A loaded version's saved reasoning: where a continuation's streamed reasoning goes on from. */
+  private storedReasoning(id: VersionId) {
+    return this.view.entries.find((e) => e.version.id === id)?.version.reasoning ?? ""
+  }
+
+  private setLiveReasoning(id: VersionId, text: string) {
+    if (!this.live.has(id)) this.live.set(id, this.mountLive(id))
+    this.registry.set(liveReasoning(id), text)
+  }
+
   private endLive(id: VersionId) {
     this.pending.delete(id)
+    this.pendingReasoning.delete(id)
     this.registry.set(waitingCache(id), false)
     this.registry.set(liveText(id), null)
+    this.registry.set(liveReasoning(id), null)
     this.live.get(id)?.()
     this.live.delete(id)
   }
@@ -1028,7 +1128,7 @@ export class ChatSession {
     return result
   }
 
-  /** A swipe; with a `model`, "Retry with…" that one instead of the chat's. */
+  /** A swipe; with a `model`, "Retry with…" or "Regenerate with…" that one instead of the chat's. */
   async regenerate(
     entry: PathEntry,
     model?: { readonly connection: Connection["id"]; readonly model: Model["id"] }
@@ -1039,6 +1139,16 @@ export class ChatSession {
         expectedRowVersion: entry.rowVersion,
         ...(model ? { model } : {})
       })
+    )
+  }
+
+  /**
+   * Continue (ST's): a new version that starts as this one's text and streams on from its
+   * end, sent as the start of the reply to models that take one (DESIGN §7.5).
+   */
+  async continueVersion(entry: PathEntry): Promise<Outcome<unknown>> {
+    return this.slotWrite(entry.slotId, (client) =>
+      client("ContinueVersion", { versionId: entry.version.id, expectedRowVersion: entry.rowVersion })
     )
   }
 
@@ -1104,6 +1214,70 @@ export class ChatSession {
 
   deleteVersion(versionId: VersionId) {
     return this.call((client) => client("DeleteVersion", { versionId }))
+  }
+
+  /** Stars a version or hides it from the arrows (the version picker), or undoes either. */
+  async setVersionFlags(
+    version: Version,
+    flags: { readonly starred?: boolean; readonly hidden?: boolean }
+  ): Promise<Outcome<Version>> {
+    const result = await this.call((client) => client("SetVersionFlags", { versionId: version.id, ...flags }))
+    if (result.ok) this.applyVersion(result.value)
+    return result
+  }
+
+  /** Deletes the branch a message starts (it and everything below it) to the bin. */
+  async deleteBranch(slotId: SlotId) {
+    const result = await this.call((client) => client("DeleteBranch", { slotId }))
+    // A reload at the old window can still name a tip inside the deleted subtree.
+    // Follow the writer's surviving active path, fencing every earlier window read.
+    if (result.ok) this.showBranch(null, null)
+    return result
+  }
+
+  /** The alternates where `slotId` is one, with their names. */
+  listBranches(slotId: SlotId) {
+    return this.call((client) => client("ListBranches", { slotId }))
+  }
+
+  /** Names the branch a message starts; the slot comes back with its name. */
+  async nameBranch(slotId: SlotId, name: string): Promise<Outcome<PathEntry>> {
+    const result = await this.call((client) => client("NameBranch", { slotId, name }))
+    if (result.ok) this.applySlot(result.value)
+    return result
+  }
+
+  /** Names the chat; the header shows it at once, other tabs on the `Chat` event, lists read again. */
+  async rename(name: string): Promise<Outcome<Chat>> {
+    const result = await this.call((client) => client("RenameChat", { chatId: this.chatId, name }))
+    if (result.ok) {
+      this.applyState({ _tag: "Chat", chat: result.value })
+      this.invalidate(["chats"])
+    }
+    return result
+  }
+
+  /** Names the group the chat is in: all its chats, this one included. */
+  async renameGroup(name: string) {
+    const result = await this.call((client) => client("RenameGroup", { chatId: this.chatId, name }))
+    if (result.ok) {
+      const own = result.value.chats.find((chat) => chat.id === this.chatId)
+      if (own) this.applyState({ _tag: "Chat", chat: own })
+      this.invalidate(["chats"])
+    }
+    return result
+  }
+
+  /** Has the queries with these reactivity keys (the chat list, the home grid) read again. */
+  private invalidate(keys: ReadonlyArray<string>) {
+    void Effect.runPromise(
+      Effect.map(Registry.getResult(this.registry, AppClient.runtime), (services) =>
+        Context.get(
+          services as unknown as Context.Context<Reactivity.Reactivity>,
+          Reactivity.Reactivity
+        ).invalidateUnsafe(keys)
+      )
+    )
   }
 
   listVersions(slotId: SlotId) {

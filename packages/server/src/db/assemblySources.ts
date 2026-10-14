@@ -4,6 +4,7 @@ import { readSummary } from "./lcmReads.ts"
 // The assembler's sources over the database, every read the acting user's, and the pins a
 // rebuild reads again (ARCHITECTURE §15).
 import { documentedCachePolicy } from "../providers/cachePolicy.ts"
+import { prefillUnavailable } from "../assembler/prefill.ts"
 import { mappingCapabilities } from "../providers/mapping.ts"
 import type { ChatId } from "@rp/shared/chat.ts"
 import { CardDoc } from "@rp/shared/docs/card.ts"
@@ -20,6 +21,7 @@ import type { SqlClient, SqlError } from "effect/sql"
 import { AssemblySources, type PositionedEvent } from "../assembler/pipeline.ts"
 import {
   AssemblyFailed,
+  type ModelInput,
   type CardInput,
   type HistoryEntry,
   type NoteInput,
@@ -213,6 +215,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
     })
 
   let layerPins: SourcePins["lcm"]
+  let resolvedModel: ModelInput | null = null
   /** The model the chat's binding or the user's default chose, read or not; unset before the model is read. */
   let chosenModel: ChosenModel | null | undefined
   const pins = {
@@ -240,8 +243,14 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
       ordinal: number
       speaker_entity_id: string | null
       direction: string | null
+      continues: string | null
+      continued_text: string | null
     }>`
-      SELECT s.depth, s.parent_slot_id, v.ordinal, v.speaker_entity_id, v.direction
+      SELECT s.depth, s.parent_slot_id, v.ordinal, v.speaker_entity_id, v.direction,
+        -- A generated version with a source continues it (ContinueVersion); the source is
+        -- a version of the same slot (graphIntegrity.ts), frozen once it was written.
+        CASE WHEN v.writer = 'model' AND v.origin = 'generated' THEN v.source_version_id END AS continues,
+        (SELECT x.content FROM versions x WHERE x.id = v.source_version_id AND x.slot_id = v.slot_id) AS continued_text
       FROM versions v JOIN slots s ON s.id = v.slot_id JOIN chats c ON c.id = s.chat_id
       WHERE v.id = ${versionId} AND s.id = ${slotId} AND c.id = ${chatId} AND c.owner_user_id = ${userId}
         AND v.deleted_at IS NULL AND s.deleted_at IS NULL AND c.deleted_at IS NULL`.pipe(
@@ -255,7 +264,10 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
               parentSlotId: row.parent_slot_id,
               ordinal: row.ordinal,
               speaker: row.speaker_entity_id,
-              direction: row.direction
+              direction: row.direction,
+              ...(row.continues === null
+                ? {}
+                : { continues: { version: row.continues, text: row.continued_text ?? "" } })
             })
           : Effect.fail(new NotFound({ entity: "version", id: versionId }))
       ),
@@ -587,7 +599,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
         const c = toConnection(connection)
         const m = toModel(model)
         const effective = resolveModel(m.key, m.upstream, m.overrides, c.compat)
-        return {
+        resolvedModel = {
           connectionId: c.id,
           connectionRevision: connection.cache_revision,
           mapping: mappingCapabilities(effective),
@@ -604,10 +616,16 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
           api: c.api,
           key: m.key,
           prefill: effective.prefill.value,
+          continueUnavailable: prefillUnavailable(
+            { kind: c.kind, api: c.api, key: m.key, prefill: effective.prefill.value },
+            c.baseUrl
+          ),
           cacheBreakpoints: effective.cacheBreakpoints.value,
           context: effective.context.source === "unknown" ? null : effective.context.value,
+          maxOutput: effective.maxOutput.source === "unknown" ? null : effective.maxOutput.value,
           presetOverride: c.presetOverrideRefId
         }
+        return resolvedModel
       }),
 
     // The scope chain (DATA-MODEL §5.4): the chat's role binding, the chat's own, the
@@ -651,6 +669,8 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
     layer: Layer.succeed(AssemblySources)(sources),
     /** What the sources read; a replay's are the pins it was given. */
     pins: (): SourcePins => replay?.pins ?? { ...pins, target: pins.target!, ...(layerPins ? { lcm: layerPins } : {}) },
+    /** Capabilities survive later assembly failures, including budget rejection. */
+    resolvedModel: () => resolvedModel,
     /** The model chosen and where from, also when it's gone and the assembly failed on it. */
     chosenModel: () => chosenModel
   }

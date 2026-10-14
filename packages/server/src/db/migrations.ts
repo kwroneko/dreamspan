@@ -1,4 +1,5 @@
 import { lcmEnableSchema } from "./schema/lcmEnable.ts"
+import { composerChoiceSchema } from "./schema/composerChoice.ts"
 import { historyChangesSchema } from "./historyChanges.ts"
 import { lcm } from "./schema/lcm.ts"
 import { SqliteMigrator } from "@effect/sql-sqlite-node"
@@ -223,6 +224,12 @@ export const migrations = {
   "0035_hidden_by_user": runAll([
     `ALTER TABLE slots ADD COLUMN hidden_by_user INTEGER NOT NULL DEFAULT 0 CHECK (hidden_by_user IN (0, 1))`
   ]),
+  // Who a composer speaks as and who replies to its next send (ComposerChoice), on its draft
+  // row, so they move with the draft from tip to tip and survive a reload (ST-GRIPES D8).
+  "0036_composer_choice": runAll(composerChoiceSchema),
+  // A branch's name, on the message that starts it (the slot among its alternates; NameBranch).
+  // Null: unnamed, shown as "Branch k".
+  "0039_branch_names": runAll([`ALTER TABLE slots ADD COLUMN branch_name TEXT`]),
   // Imports may select changed ST text until a local slot mutation takes over. Existing
   // slots at revision 1 have never been changed here; others are conservatively kept.
   "0041_st_import_selection": runAll([

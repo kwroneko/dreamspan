@@ -94,22 +94,20 @@ test("usage headers fit without clipping on a 390px phone", async ({ page }) => 
   await page.setViewportSize({ width: 390, height: 844 })
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/chats/${chat.id}/context/${chat.reply}`)
-  const headers = page.getByRole("columnheader")
-  await expect(headers).toHaveText(["Attempt", "Input", "Cache read", "Cache write", "Output", "Cost"])
-  const bounds = await headers.evaluateAll((nodes) =>
+  const usage = page.getByLabel("Usage by attempt")
+  const labels = usage.locator("dt")
+  await expect(labels).toHaveText(["Attempt", "Input", "Cache read", "Cache write", "Output", "Cost"])
+  const values = usage.locator("dd")
+  const wrapping = await values.evaluateAll((nodes) =>
     nodes.map((node) => {
-      const header = node as HTMLElement
-      const region = header.closest("table")!.parentElement!
-      const rect = header.getBoundingClientRect()
-      const container = region.getBoundingClientRect()
-      return {
-        text: header.textContent,
-        fits: header.scrollWidth <= header.clientWidth,
-        visible: rect.left >= container.left - 1 && rect.right <= container.right + 1 && rect.right <= innerWidth
-      }
+      const range = document.createRange()
+      range.selectNodeContents(node)
+      const text = range.getBoundingClientRect()
+      const cell = node.getBoundingClientRect()
+      return { lines: range.getClientRects().length, fits: text.right <= cell.right + 1 }
     })
   )
-  expect(bounds).toEqual(bounds.map(({ text }) => ({ text, fits: true, visible: true })))
+  expect(wrapping.every(({ lines, fits }) => lines === 1 && fits)).toBe(true)
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
   await shoot(page, "inspector-phone")
 })

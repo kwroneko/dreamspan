@@ -64,6 +64,12 @@ const BreakpointReason = Schema.Literals(["prefix", "summary", "history"])
 export const ContextMessage = Schema.Struct({
   role: Schema.Literals(["system", "developer", "user", "assistant", "model"]),
   name: Schema.NullOr(Schema.String),
+  prefill: Schema.optionalKey(
+    Schema.Struct({
+      protocol: Schema.Literals(["deepseek_prefix", "tool_schema"]),
+      schema: Schema.optionalKey(Schema.String)
+    })
+  ),
   content: Schema.String,
   /** The assembler's estimate: a token per four characters, plus three per message. */
   tokens: Schema.Int,
@@ -114,7 +120,7 @@ export class RunContext extends Schema.Class<RunContext>("RunContext")({
   builtAt: Schema.Number,
   /** The rollout's status: running, completed, stopped, failed, interrupted. */
   status: Schema.String,
-  type: Schema.Literals(["normal", "swipe", "impersonate", "quiet"]),
+  type: Schema.Literals(["normal", "swipe", "impersonate", "continue", "quiet"]),
   mode: Schema.Literals(["st", "layouts"]),
   capture: Schema.Literals(["captured", "unavailable"]),
   ...ContextDisplay.fields,
@@ -176,7 +182,13 @@ const EffectiveModel = Schema.Struct({
   connectionName: Schema.NullOr(Schema.String),
   modelKey: Schema.NullOr(Schema.String),
   hidden: Schema.Boolean,
-  scope: Schema.Literals(["chat", "user"])
+  scope: Schema.Literals(["chat", "user"]),
+  /**
+   * Whether the model takes the start of its reply (a prefill), as its capabilities say:
+   * Resolved independently of whether the context can be assembled.
+   */
+  prefill: Schema.optionalKey(Schema.Literals(["none", "assistant", "tool_schema"])),
+  continueUnavailable: Schema.optionalKey(Schema.String)
 })
 
 /** The next request boundary, also available before a first send or without a cache TTL. */

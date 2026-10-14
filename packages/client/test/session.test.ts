@@ -7,7 +7,7 @@ import { describe, expect, it, vi } from "vitest"
 
 // rpc.ts reads the page's location when imported.
 vi.stubGlobal("location", { protocol: "http:", host: "127.0.0.1" })
-const { ChatSession } = await import("../src/features/chat/session.ts")
+const { ChatSession, liveReasoning, liveText } = await import("../src/features/chat/session.ts")
 
 const chatId = "chat-1" as ChatId
 const chat = {
@@ -61,7 +61,8 @@ const window = (entries: Array<PathEntry>) =>
 
 /** A session whose reads wait until the test answers them. */
 const session = () => {
-  const s = new ChatSession(chatId, null, AtomRegistry.make(), "user")
+  const registry = AtomRegistry.make()
+  const s = new ChatSession(chatId, null, registry, "user")
   const answers: Array<(window: PathWindow) => void> = []
   const internals = s as unknown as {
     read: () => Promise<PathWindow>
@@ -69,13 +70,20 @@ const session = () => {
     refreshEditors: () => Promise<void>
     call: () => Promise<unknown>
     receive: (batch: ReadonlyArray<ChatEvent>, anchor: SlotId | null) => void
+    flush: () => void
   }
   internals.refreshContext = async () => {}
   // The message editors' drafts are read with their own call, which the stub doesn't answer.
   internals.refreshEditors = async () => {}
   internals.read = () => new Promise((answer) => answers.push(answer))
   internals.call = () => Promise.resolve({ ok: true, value: chat })
-  return { s, answers, receive: (event: ChatEvent) => internals.receive([event], null) }
+  return {
+    s,
+    registry,
+    answers,
+    receive: (event: ChatEvent) => internals.receive([event], null),
+    flush: () => internals.flush()
+  }
 }
 
 const first = entry("s1", null, version("v1", "s1", "complete", "Hello."))
@@ -83,6 +91,64 @@ const reply = version("v2", "s2", "generating", "The tide")
 const second = entry("s2", "s1", reply)
 
 describe("ChatSession", () => {
+  it("appends reasoning to a continuation's saved reasoning independently of text", async () => {
+    vi.stubGlobal("requestAnimationFrame", () => 1)
+    vi.stubGlobal("cancelAnimationFrame", () => {})
+    const { s, registry, answers, receive, flush } = session()
+    const opening = s.open(null)
+    answers[0]!(window([first, entry("s2", "s1", { ...reply, reasoning: "Plan one." } as Version)]))
+    await opening
+    receive({ _tag: "Reasoning", versionId: reply.id, offset: 9, text: " Plan two." })
+    receive({ _tag: "Delta", versionId: reply.id, offset: 8, text: " turned." })
+    flush()
+    expect(registry.get(liveReasoning(reply.id))).toBe("Plan one. Plan two.")
+    expect(registry.get(liveText(reply.id))).toBe("The tide turned.")
+    // A repeated delta does not duplicate reasoning, and finishing removes both live atoms.
+    receive({ _tag: "Reasoning", versionId: reply.id, offset: 9, text: " Plan two." })
+    receive({ _tag: "Version", version: { ...reply, status: "complete", reasoning: "Plan one. Plan two." } as Version })
+    expect(s.snapshot().entries[1]!.version.reasoning).toBe("Plan one. Plan two.")
+    expect(registry.get(liveReasoning(reply.id))).toBeNull()
+    expect(registry.get(liveText(reply.id))).toBeNull()
+  })
+
+  it("loads live reasoning from Hello before a window arrives", async () => {
+    const { s, registry, answers, receive } = session()
+    receive({
+      _tag: "Hello",
+      live: [{ versionId: reply.id, text: "The tide turned", reasoning: "Plan one. Plan two." }]
+    })
+    answers[0]!(window([first, entry("s2", "s1", { ...reply, reasoning: "Plan one." } as Version)]))
+    await vi.waitFor(() => expect(s.snapshot().entries).toHaveLength(2))
+    expect(registry.get(liveReasoning(reply.id))).toBe("Plan one. Plan two.")
+    expect(s.snapshot().entries[1]!.version.id).toBe(reply.id)
+  })
+
+  it("invalidates history for changes outside the window and reloads, without token updates or read replay", async () => {
+    vi.stubGlobal("requestAnimationFrame", () => 1)
+    vi.stubGlobal("cancelAnimationFrame", () => {})
+    const { s, answers, receive } = session()
+    const opening = s.open(null)
+    const revision = s.snapshot().pathRevision
+    receive({ _tag: "Slot", entry: first })
+    expect(s.snapshot().pathRevision).toBe(revision + 1)
+    // Replaying that event after an in-flight read isn't another history change.
+    answers[0]!(window([first, second]))
+    await opening
+    expect(s.snapshot().pathRevision).toBe(revision + 1)
+    receive({ _tag: "Version", version: version("old-version", "old-slot", "complete", "Outside the window.") })
+    expect(s.snapshot().pathRevision).toBe(revision + 2)
+    receive({ _tag: "Delta", versionId: reply.id, offset: reply.content.length, text: " rises" })
+    expect(s.snapshot().pathRevision).toBe(revision + 2)
+    receive({ _tag: "Cache", leafSlotId: null, warmth: null, historyStart: null, summarizedThrough: null })
+    expect(s.snapshot().pathRevision).toBe(revision + 2)
+    // Deletion/restoration and reconnects reload even when the tip doesn't move.
+    receive({ _tag: "Reload" })
+    expect(s.snapshot().pathRevision).toBe(revision + 3)
+    answers[1]!(window([first, second]))
+    await Promise.resolve()
+    s.dispose()
+  })
+
   it("keeps a message that arrived while the window was being read", async () => {
     const { s, answers, receive } = session()
     const opening = s.open(null)

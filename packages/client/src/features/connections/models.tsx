@@ -52,6 +52,28 @@ const triItems = [
   { value: "no" as const, label: "No" }
 ]
 
+type PrefillChoice = "auto" | NonNullable<ModelOverrides["prefill"]>
+/**
+ * Whether the model takes the start of its reply natively or through a strict tool schema.
+ * Absent provider information stays unknown until the user declares support.
+ */
+const prefillItems = (upstream: ModelOverrides["prefill"]) => [
+  {
+    value: "auto" as const,
+    label:
+      upstream === undefined
+        ? "Unknown: no provider information"
+        : upstream === "assistant"
+          ? "Provider: assistant prefill"
+          : upstream === "tool_schema"
+            ? "Provider: tool schema"
+            : "Provider: no prefill"
+  },
+  { value: "assistant" as const, label: "Yes: start an assistant reply" },
+  { value: "none" as const, label: "No" },
+  { value: "tool_schema" as const, label: "Through a tool schema" }
+]
+
 /** Edits the user's overrides. Empty fields fall back to what the provider reports. */
 function EditModelDialog({ model, onOpenChange }: { model: Model; onOpenChange: (open: boolean) => void }) {
   const action = useAction()
@@ -61,6 +83,7 @@ function EditModelDialog({ model, onOpenChange }: { model: Model; onOpenChange: 
   const [vision, setVision] = useState<Tri>(triOf(model.overrides.vision))
   const [reasoning, setReasoning] = useState<Tri>(triOf(model.overrides.reasoning))
   const [tools, setTools] = useState<Tri>(triOf(model.overrides.tools))
+  const [prefill, setPrefill] = useState<PrefillChoice>(model.overrides.prefill ?? "auto")
   const contextValue = parseOptionalInt(context, 1)
   const maxOutputValue = parseOptionalInt(maxOutput, 1)
 
@@ -76,7 +99,8 @@ function EditModelDialog({ model, onOpenChange }: { model: Model; onOpenChange: 
         maxOutput: maxOutputValue.value ?? undefined,
         vision: flag(vision),
         reasoning: flag(reasoning),
-        tools: flag(tools)
+        tools: flag(tools),
+        prefill: prefill === "auto" ? undefined : prefill
       }).filter(([, value]) => value !== undefined)
     )
     const result = await action.run(
@@ -126,6 +150,12 @@ function EditModelDialog({ model, onOpenChange }: { model: Model; onOpenChange: 
             <Select items={triItems} value={tools} onValueChange={setTools} />
           </Field>
         </div>
+        <Field
+          label="Prefill"
+          description="Whether it takes the start of its reply: the preset's prefill and Continue need it. Unknown support leaves Continue unavailable until declared."
+        >
+          <Select items={prefillItems(model.upstream.prefill)} value={prefill} onValueChange={setPrefill} />
+        </Field>
         <ErrorAlert
           error={action.error}
           title="Not saved"
@@ -219,6 +249,7 @@ function ModelRow({ model, compat }: { model: Model; compat: ConnectionSectionPr
               {label}
             </Badge>
           ))}
+          {resolved.prefill.value === "assistant" && <Badge tone="accent">prefill</Badge>}
         </p>
         <ErrorAlert error={hide.error} />
       </div>

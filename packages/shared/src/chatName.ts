@@ -23,3 +23,22 @@ export const chatName = (title: string, cast: ReadonlyArray<{ readonly name: str
   }
   return { name: title.trim() || castNames || "New chat", started: null }
 }
+
+/** The date part of an ST file name, with its separator: what a rename keeps. */
+const ST_TAIL = /(?: - |: |)(\d{4}-\d{1,2}-\d{1,2}\s*@\d{2}h\d{2}m\d{2}s\d{1,3}ms(?: - Branch #\d+)?)$/
+
+/** A name as typed, on one line: runs of white space (new lines too) become one space. */
+export const cleanName = (name: string) => name.replace(/\s+/gu, " ").trim()
+
+/**
+ * The title a chat gets when the user names it: the name, and for a chat imported from ST the
+ * day ST started it, kept from its file name so lists still say when it began. An empty
+ * name gives the chat its automatic name back (its cast's names). The unfinished-import
+ * mark goes: the import leaves a renamed chat's title alone.
+ */
+export const renamedTitle = (title: string, name: string) => {
+  const clean = cleanName(name)
+  const tail = ST_STAMP.test(title.trim()) ? ST_TAIL.exec(title.trim())?.[1] : undefined
+  if (tail === undefined) return clean
+  return clean === "" ? tail : `${clean} - ${tail}`
+}

@@ -83,6 +83,29 @@ export const syntheticMarkdown = (seed: number, wordCount: number): string => {
   return blocks.join("\n\n")
 }
 
+const PLANS = [
+  "The scene is at {place}, so I should keep the weather and the light consistent with the last reply.",
+  "{name} is wary here; their lines should stay short and guarded.",
+  "I shouldn't speak for the user's character, only describe what {name} does and says.",
+  "The letter was mentioned earlier, so a callback to it would keep the thread going.",
+  "Pacing: one beat of action, then dialogue, then end on something the user can answer.",
+  "Check the tone against the card: dry humor, never cruel.",
+  "Maybe {name} notices the bell first, since they were listening for it."
+]
+
+/** A model's reasoning before it writes, as plain sentences, the same for the same seed. */
+export const syntheticReasoning = (seed: number, wordCount: number): string => {
+  const next = random(seed ^ 0x5eed)
+  const lines: Array<string> = []
+  let total = 0
+  while (total < wordCount) {
+    const line = pick(next, PLANS).replace("{place}", pick(next, PLACES)).replace("{name}", pick(next, NAMES))
+    lines.push(line)
+    total += line.split(/\s+/).length
+  }
+  return lines.join(" ")
+}
+
 /** Text in streaming tokens, a word with its trailing space each; they join back to the text. */
 export const tokenize = (text: string): Array<string> => text.match(/\s*\S+\s*/g) ?? []
 

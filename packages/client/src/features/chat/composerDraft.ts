@@ -54,6 +54,8 @@ export interface ComposerState {
   readonly recovered: boolean
   /** The last save that failed, until one succeeds. */
   readonly error: AppError | null
+  /** The draft the box shows, once ready: its speaker and reply choice go with it (speaker.ts). */
+  readonly draftId: string | null
 }
 
 /** The draft a send takes its text from: its tip, and what commits it (chatApi.ts `composer`). */
@@ -103,7 +105,8 @@ export class ComposerDraft {
     restored: false,
     conflict: null,
     recovered: false,
-    error: null
+    error: null,
+    draftId: null
   }
 
   private readonly session: ChatSession
@@ -129,7 +132,8 @@ export class ComposerDraft {
 
   private emit() {
     const { text, ready, restored, conflict, recovered, error } = this
-    this.state = { text, ready, restored, conflict, recovered, error }
+    const draftId = ready ? (this.base?.id ?? null) : null
+    this.state = { text, ready, restored, conflict, recovered, error, draftId }
     for (const listener of this.listeners) listener()
   }
 

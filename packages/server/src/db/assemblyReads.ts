@@ -21,6 +21,7 @@ import {
 import { sqlSources } from "./assemblySources.ts"
 import { previousHistoryStart } from "./historyStart.ts"
 import { readDefaults } from "./generationSettings.ts"
+import { makeDisplayPrefsReadHandlers } from "./displayPrefs.ts"
 import type { ReadOps } from "./ops.ts"
 import { query } from "./tx.ts"
 
@@ -28,6 +29,7 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   const assembler = yield* makeAssembler
   const handlers = {
+    ...(yield* makeDisplayPrefsReadHandlers),
     AssembleContext: ({ userId, chatId, slotId, versionId, now, timeZone, frozen, partialBatch, model }) =>
       Effect.suspend(() => {
         const sources = sqlSources(sql, {
@@ -163,6 +165,7 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
         const presetName = presetRef?.label ?? (preset?.scope === "builtin" ? "Default" : "Unnamed")
         // The model by name, as the panel shows it: also a hidden one, which is still used.
         const chosen = sources.chosenModel()
+        const resolved = sources.resolvedModel()
         const [named] = chosen
           ? yield* sql<{ connection_name: string; model_key: string | null; hidden: number | null }>`
               SELECT c.name AS connection_name, m.model_key, m.hidden
@@ -180,7 +183,14 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
                   connectionName: named?.connection_name ?? null,
                   modelKey: named?.model_key ?? null,
                   hidden: named?.hidden === 1,
-                  scope: chosen.scope
+                  scope: chosen.scope,
+                  // Whether Continue can use it (a prefill), as the next request would read it.
+                  ...(resolved
+                    ? {
+                        prefill: resolved.prefill,
+                        ...(resolved.continueUnavailable ? { continueUnavailable: resolved.continueUnavailable } : {})
+                      }
+                    : {})
                 }
               }),
           preset: preset

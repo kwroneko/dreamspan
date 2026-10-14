@@ -165,7 +165,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
       })
 
     const handlers = {
-      StartChat: ({ userId, cards, persona, greeting, first, frozen, title }) =>
+      StartChat: ({ userId, cards, persona, greeters, first, title }) =>
         Effect.gen(function* () {
           const ids = [...new Set([...cards, ...(persona === null ? [] : [persona])])]
           const loaded = yield* loadCards(sql, userId, ids)
@@ -175,7 +175,9 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
             }
           }
           const byId = new Map(loaded.map((card) => [card.card.entityId as string, card]))
-          const lead = byId.get(cards[0]!)!
+          for (const greeter of greeters) {
+            if (!cards.includes(greeter.entityId)) return yield* new NotFound({ entity: "card", id: greeter.entityId })
+          }
           const at = Date.now()
           const chatId = uuidv7() as ChatId
           const laneId = uuidv7()
@@ -205,30 +207,37 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
               value: { entities: [persona] }
             })
           }
-          // Every greeting is a version of the first message, its macros kept for display
+          // Each greeter's greeting is a message of its own, in order, as ST starts a group
+          // chat; every greeting of its card is a version of it, its macros kept for display
           // and assembly to resolve against the chat's state (DESIGN §5.6).
           let root: SlotId | null = null
-          const greetingVersion = (i: number) =>
-            new NewVersion({
-              speakerEntityId: lead.card.entityId,
-              writer: "model",
-              content: lead.greetings[i]!,
-              status: "complete",
-              macroMode: "template",
-              origin: "greeting",
-              greetingRef: { entity: lead.card.entityId, index: lead.greetingIndexes[i]! },
-              ...(frozen[i] && Object.keys(frozen[i]).length > 0 ? { frozenMacros: frozen[i] } : {})
-            })
-          if (lead.greetings.length > 0) {
-            const { slotId, version } = yield* graph.insertSlot(chatId, laneId, null, greetingVersion(0), at)
-            let selected = version.id
-            for (let i = 1; i < lead.greetings.length; i++) {
+          let depth = -1
+          for (const { entityId, greeting, frozen } of greeters) {
+            const greeter = byId.get(entityId)!
+            if (greeter.greetings.length === 0) continue
+            const greetingVersion = (i: number) =>
+              new NewVersion({
+                speakerEntityId: greeter.card.entityId,
+                writer: "model",
+                content: greeter.greetings[i]!,
+                status: "complete",
+                macroMode: "template",
+                origin: "greeting",
+                greetingRef: { entity: greeter.card.entityId, index: greeter.greetingIndexes[i]! },
+                ...(frozen[i] && Object.keys(frozen[i]).length > 0 ? { frozenMacros: frozen[i] } : {})
+              })
+            const parent = root === null ? null : { id: root, depth }
+            const inserted = yield* graph.insertSlot(chatId, laneId, parent, greetingVersion(0), at)
+            const slotId = inserted.slotId as SlotId
+            let selected = inserted.version.id
+            for (let i = 1; i < greeter.greetings.length; i++) {
               const row = yield* graph.insertVersion(slotId, i, greetingVersion(i), at)
               if (i === greeting) selected = row.id
             }
             yield* sql`UPDATE slots SET selected_version_id = ${selected} WHERE id = ${slotId}`
             yield* sql`UPDATE chats SET active_leaf_slot_id = ${slotId}, last_message_at = ${at} WHERE id = ${chatId}`
-            root = slotId as SlotId
+            root = slotId
+            depth++
           }
           const version =
             first._tag === "Send"
@@ -355,7 +364,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
           else yield* sql`DELETE FROM entity_tags WHERE entity_id = ${entityId} AND tag = 'persona'`
         }).pipe(transaction("SetPersona")),
 
-      FinishGeneration: ({ userId, versionId, content, status, error }) =>
+      FinishGeneration: ({ userId, versionId, content, reasoning, status, error }) =>
         Effect.gen(function* () {
           const row = yield* graph.ownedVersion(userId, versionId, false)
           // A version deleted for good stays empty, whatever was still generating into it.
@@ -369,6 +378,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
           }
           yield* recordHistoryReduction(sql, row.slot_id, content, versionId)
           yield* sql`UPDATE versions SET content = ${content}, status = ${status},
+            reasoning = CASE WHEN ${reasoning === undefined ? 1 : 0} THEN reasoning ELSE ${reasoning || null} END,
             error_json = ${error === null ? null : JSON.stringify(error)}, updated_at = ${Date.now()}
             WHERE id = ${versionId}`
           const version = toVersion(yield* graph.ownedVersion(userId, versionId, false))

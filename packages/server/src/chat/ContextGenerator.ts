@@ -3,12 +3,13 @@ import { Summarizer } from "../lcm/Summarizer.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import type { SlotId, VersionId } from "@rp/shared/chat.ts"
 import type { ConnectionId, ModelId } from "@rp/shared/providers.ts"
-import { Cause, Effect, Exit, Layer, Option, Stream } from "effect"
+import { Cause, Effect, Exit, Layer, Option, Result, Schema, Stream } from "effect"
 import type { Generation } from "../assembler/types.ts"
+import { REPLY_TOOL } from "../assembler/prefill.ts"
 import { providerRequest } from "../assembler/wire.ts"
 import { Reader, Writer } from "../db/Database.ts"
 import { Providers } from "../providers/Providers.ts"
-import { GenerationFailed, type GenerationRequest, Generator } from "./Generator.ts"
+import { GenerationFailed, type GenerationChunk, type GenerationRequest, Generator } from "./Generator.ts"
 
 /** What a failed storage or worker call says on the version: the details stay in the log. */
 const serverFailure = (operation: string) => (error: unknown) =>
@@ -113,6 +114,31 @@ export const layer = Layer.effect(
             Effect.catchTag(["StorageError", "RpcClientError"], serverFailure("StartRollout"))
           )
           const wire = providerRequest(generation.request, model)
+          const prefix = model.prefill === "tool_schema" ? generation.request.prefill : null
+          let emitted = ""
+          const decodeReply = Schema.decodeUnknownOption(Schema.Struct({ text: Schema.String }))
+          const suffix = (args: unknown, final: boolean): Effect.Effect<string, GenerationFailed> => {
+            const decoded = decodeReply(args)
+            const text = Option.isSome(decoded) ? decoded.value.text : null
+            if (text === null || !text.startsWith(prefix!)) {
+              return final
+                ? Effect.fail(
+                    new GenerationFailed({
+                      class: "bad_prefill",
+                      message: "The provider did not return the required reply prefix."
+                    })
+                  )
+                : Effect.succeed("")
+            }
+            const next = text.slice(prefix!.length)
+            if (!next.startsWith(emitted))
+              return Effect.fail(
+                new GenerationFailed({ class: "bad_prefill", message: "The provider changed text already streamed." })
+              )
+            const delta = next.slice(emitted.length)
+            emitted = next
+            return Effect.succeed(delta)
+          }
           return providers
             .stream({
               userId,
@@ -121,6 +147,7 @@ export const layer = Layer.effect(
               context: wire.context,
               inspection: { request: generation.request, model, display: generation.inspection },
               options: {
+                ...(prefix !== null ? { replyTool: REPLY_TOOL } : {}),
                 ...(wire.temperature !== undefined ? { temperature: wire.temperature } : {}),
                 ...(wire.maxTokens !== undefined ? { maxTokens: wire.maxTokens } : {}),
                 sessionId: chatId,
@@ -135,12 +162,53 @@ export const layer = Layer.effect(
                   if (event.type === "waiting-cache") request.onWaitingCache?.(event.waiting)
                 })
               ),
-              Stream.filter((event) => event.type === "text"),
-              Stream.map((event) => event.delta),
+              // Schema arguments are text only: no tool execution or tool loop. Strip the
+              // constrained prefix as it streams, and validate the completed call too.
+              Stream.mapEffect((event) => {
+                if (event.type === "thinking")
+                  return Effect.succeed(Result.succeed<GenerationChunk>({ reasoning: event.delta }))
+                if (prefix !== null) {
+                  if (event.type === "toolcall" && event.name === REPLY_TOOL)
+                    return suffix(event.arguments, false).pipe(
+                      Effect.map((delta) => (delta ? Result.succeed<GenerationChunk>(delta) : Result.failVoid))
+                    )
+                  if (event.type === "done") {
+                    const calls = event.message.content.filter((block) => block.type === "toolCall")
+                    if (calls.length !== 1 || calls[0]!.name !== REPLY_TOOL)
+                      return Effect.fail(
+                        new GenerationFailed({
+                          class: "bad_prefill",
+                          message: "The provider did not return the required reply tool."
+                        })
+                      )
+                    let args: unknown
+                    try {
+                      args = JSON.parse(event.toolArguments[calls[0]!.id] ?? "")
+                    } catch {
+                      return Effect.fail(
+                        new GenerationFailed({
+                          class: "bad_prefill",
+                          message: "The provider returned malformed reply tool JSON."
+                        })
+                      )
+                    }
+                    return suffix(args, true).pipe(
+                      Effect.map((delta) => (delta ? Result.succeed<GenerationChunk>(delta) : Result.failVoid))
+                    )
+                  }
+                  return Effect.succeed(Result.failVoid)
+                }
+                return Effect.succeed(
+                  event.type === "text" ? Result.succeed<GenerationChunk>(event.delta) : Result.failVoid
+                )
+              }),
+              Stream.filterMap((chunk) => chunk),
               Stream.mapError((error) =>
-                error._tag === "ProviderError"
-                  ? new GenerationFailed({ class: error.reason, message: error.message })
-                  : new GenerationFailed({ class: "server", message: error.message })
+                error._tag === "GenerationFailed"
+                  ? error
+                  : error._tag === "ProviderError"
+                    ? new GenerationFailed({ class: error.reason, message: error.message })
+                    : new GenerationFailed({ class: "server", message: error.message })
               )
             )
         })

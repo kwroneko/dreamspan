@@ -208,8 +208,9 @@ test("a name edited only in this chat is the name the chat shows, in the Cast an
   // The composer's recent speakers, then the speaker chip, Send and Generate.
   await page.getByRole("button", { name: "Speak as Harbor Mira" }).click()
   await expect(page.getByRole("button", { name: "Speaking as Harbor Mira. Change the speaker" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Write for Harbor Mira" })).toBeVisible()
+  await page.getByLabel("Message", { exact: true }).fill("Harbor Mira checks the tide.")
   await expect(page.getByRole("button", { name: "Send as Harbor Mira" })).toBeVisible()
-  await expect(page.getByRole("button", { name: "Generate Harbor Mira" })).toBeVisible()
   await shoot(page, "cast-local-rename-composer")
 })
 

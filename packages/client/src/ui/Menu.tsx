@@ -11,7 +11,8 @@ export function Menu({
   children,
   side = "bottom",
   align = "end",
-  label
+  label,
+  onOpenChange
 }: {
   /** The element that opens it, usually a button; it receives the trigger's props. */
   trigger: ReactElement
@@ -20,9 +21,11 @@ export function Menu({
   align?: "start" | "center" | "end"
   /** An accessible name for the list, when the trigger's text doesn't say what it holds. */
   label?: string
+  /** Told when it opens and closes: to read what it lists, say. */
+  onOpenChange?: (open: boolean) => void
 }) {
   return (
-    <BaseMenu.Root modal={false}>
+    <BaseMenu.Root modal={false} {...(onOpenChange ? { onOpenChange: (open: boolean) => onOpenChange(open) } : {})}>
       <BaseMenu.Trigger render={trigger} />
       <BaseMenu.Portal>
         <BaseMenu.Positioner className="z-50 outline-none" side={side} align={align} sideOffset={4}>

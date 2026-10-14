@@ -214,3 +214,47 @@ main:has(> [data-fill]) {
 .rail-stale {
   background-image: repeating-linear-gradient(135deg, var(--warning) 0 2px, transparent 2px 5px);
 }
+
+/*
+ * Images in public (ui/imagePrefs.ts): the root's `data-images` blurs or hides every image
+ * on every screen, a new one included, from the first frame (it's set before the app
+ * renders). Images are only ever <img> elements (test/imageSurfaces.test.ts keeps it so);
+ * the rest are listed so a later surface is covered too. A hidden image leaves its box: the
+ * element marked `data-image-fallback` beside it (initials, a name) shows instead.
+ */
+:root[data-images="blur"] :is(img, video, canvas, picture, image) {
+  filter: blur(var(--image-blur, 14px)) saturate(0.6) !important;
+  clip-path: inset(0);
+}
+:root[data-images="hide"] :is(img, video, canvas, picture, image) {
+  visibility: hidden !important;
+}
+[data-image-fallback] {
+  display: none;
+}
+:root[data-images="hide"] [data-image-fallback] {
+  display: flex;
+}
+
+/*
+ * A portrait in the chat, sized and shaped as ST's avatar styles (`--avatar-base-*` in its
+ * style.css and toggle-dependent.css): Rectangular, ST's "big avatars", 60×90 with 10px
+ * corners (the default here); Circle, Square (2px) and Rounded (10px) at 50×50.
+ */
+.chat-portrait {
+  width: 60px;
+  height: 90px;
+  border-radius: 10px;
+}
+:root[data-avatars="round"] .chat-portrait,
+:root[data-avatars="square"] .chat-portrait,
+:root[data-avatars="rounded"] .chat-portrait {
+  width: 50px;
+  height: 50px;
+}
+:root[data-avatars="round"] .chat-portrait {
+  border-radius: 9999px;
+}
+:root[data-avatars="square"] .chat-portrait {
+  border-radius: 2px;
+}
