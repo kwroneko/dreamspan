@@ -92,6 +92,7 @@ Bun was measured as an alternative (2026-10-10) and not adopted. On this server 
   - a failed DNS lookup leaves the target to the proxy
 - **The route is reported:** `fetchFor(override, onRoute)` gives a `fetch` for one connection's requests and reports each request's route, e.g. "direct: 192.168.1.20 is in the bypass list" or "via proxy socks5://vpn:1080".
 - **One undici dispatcher per route** (`Agent`, `ProxyAgent`, `Socks5ProxyAgent`), reused across requests and closed with the layer. undici marks its SOCKS5 support experimental. SOCKS5 sends the hostname to the proxy, so DNS for proxied targets resolves remotely.
+- **A response may stay silent for 30 minutes,** before its headers and between body chunks, on every route (an interceptor sets undici's `headersTimeout` and `bodyTimeout` per request, since proxy agents don't pass their options to their per-origin pools). undici's default of 300 s cut off local models still reading a long prompt, and the retry started the prompt again. Stopping a generation aborts at once, as before.
 - `test/network.test.ts` runs real requests through a local HTTP proxy (CONNECT and absolute-URI forwarding) and a SOCKS5 proxy with credentials (`test/support/proxies.ts`), counting the tunnels.
 - **pi-ai:** all four built-in wire adapters use our `fetch`. Startup removes SDK environment defaults; the app-owned Gemini REST adapter uses the same controlled transport (§6). Node environment proxies cannot choose a provider route.
 
