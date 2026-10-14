@@ -615,10 +615,11 @@ export const makeDraftStore = (
       if (here === null) yield* insert(userId, key, copied, null)
       else if (copied !== "" && shown(here) === "") recovered = yield* update(here, copied, "edit", null)
       const opened = (yield* find(userId, key))!
-      // A branch keeps speaking as the card its composer was started from, unless its tip
-      // has a speaker of its own.
-      if (from !== null && from.speaker_entity_id !== null && opened.speaker_entity_id === null)
-        yield* sql`UPDATE drafts SET speaker_entity_id = ${from.speaker_entity_id} WHERE id = ${opened.id}`
+      // Only a new branch inherits choices. Reopening an existing tip must keep even an
+      // explicit reset to turn order (null), as switching branches keeps their text.
+      if (from !== null && here === null)
+        yield* sql`UPDATE drafts SET speaker_entity_id = ${from.speaker_entity_id},
+          reply_from_entity_id = ${from.reply_from_entity_id} WHERE id = ${opened.id}`
       return toDraft(opened, recovered)
     })
 
@@ -645,19 +646,30 @@ export const makeDraftStore = (
     userId: UserId,
     chatId: string,
     draftId: string,
-    change: { readonly speakerEntityId?: EntityId | null; readonly replyFromEntityId?: EntityId | null }
+    change: {
+      readonly speakerEntityId?: EntityId | null
+      readonly replyFromEntityId?: EntityId | null
+      readonly consumeReplyFromEntityId?: EntityId
+    }
   ) =>
     Effect.gen(function* () {
       const draft = yield* findComposer(userId, chatId, draftId)
       if (draft === null) return yield* new NotFound({ entity: "draft", id: draftId })
-      for (const id of [change.speakerEntityId, change.replyFromEntityId]) {
+      for (const id of [change.speakerEntityId, change.replyFromEntityId, change.consumeReplyFromEntityId]) {
         if (id === undefined || id === null) continue
         const [card] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM entities
           WHERE id = ${id} AND owner_user_id = ${userId} AND kind = 'card' AND deleted_at IS NULL`
         if (card!.n === 0) return yield* new NotFound({ entity: "entity", id })
       }
       const speaker = change.speakerEntityId === undefined ? draft.speaker_entity_id : change.speakerEntityId
-      const replyFrom = change.replyFromEntityId === undefined ? draft.reply_from_entity_id : change.replyFromEntityId
+      const replyFrom =
+        change.consumeReplyFromEntityId !== undefined
+          ? draft.reply_from_entity_id === change.consumeReplyFromEntityId
+            ? null
+            : draft.reply_from_entity_id
+          : change.replyFromEntityId === undefined
+            ? draft.reply_from_entity_id
+            : change.replyFromEntityId
       yield* sql`UPDATE drafts SET speaker_entity_id = ${speaker}, reply_from_entity_id = ${replyFrom}
         WHERE id = ${draft.id}`
       return choiceOf({ ...draft, speaker_entity_id: speaker, reply_from_entity_id: replyFrom })

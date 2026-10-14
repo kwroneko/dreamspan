@@ -106,7 +106,9 @@ export class ComposerApi extends RpcGroup.make(
       chatId: ChatId,
       draftId: Schema.String,
       speakerEntityId: Schema.optionalKey(Schema.NullOr(EntityId)),
-      replyFromEntityId: Schema.optionalKey(Schema.NullOr(EntityId))
+      replyFromEntityId: Schema.optionalKey(Schema.NullOr(EntityId)),
+      /** Consume a one-reply pick only if it still names this card. */
+      consumeReplyFromEntityId: Schema.optionalKey(EntityId)
     },
     success: ComposerChoice,
     error: Schema.Union([...Errors])

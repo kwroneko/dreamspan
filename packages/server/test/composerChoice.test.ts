@@ -78,9 +78,30 @@ describe("the composer's choice", () => {
       const branch = yield* api.OpenComposer({ chatId: chat.id, tipSlotId: null, copyFrom: moved.id })
       assert.notStrictEqual(branch.id, moved.id)
       assert.strictEqual((yield* api.GetComposerChoice({ chatId: chat.id, draftId: branch.id })).speakerEntityId, bo)
+      assert.strictEqual(
+        (yield* api.GetComposerChoice({ chatId: chat.id, draftId: branch.id })).replyFromEntityId,
+        mira
+      )
       // ...unless that tip had a speaker of its own.
-      yield* api.SetComposerChoice({ chatId: chat.id, draftId: branch.id, speakerEntityId: ana })
+      yield* api.SetComposerChoice({
+        chatId: chat.id,
+        draftId: branch.id,
+        speakerEntityId: ana,
+        replyFromEntityId: null
+      })
       yield* api.OpenComposer({ chatId: chat.id, tipSlotId: null, copyFrom: moved.id })
+      assert.strictEqual((yield* api.GetComposerChoice({ chatId: chat.id, draftId: branch.id })).speakerEntityId, ana)
+      assert.strictEqual(
+        (yield* api.GetComposerChoice({ chatId: chat.id, draftId: branch.id })).replyFromEntityId,
+        null
+      )
+
+      // A send uses its original draft's pick, without erasing a different newer pick.
+      yield* api.SetComposerChoice({ chatId: chat.id, draftId: draft.id, replyFromEntityId: ana })
+      yield* api.SetComposerChoice({ chatId: chat.id, draftId: draft.id, consumeReplyFromEntityId: mira })
+      assert.strictEqual((yield* api.GetComposerChoice({ chatId: chat.id, draftId: draft.id })).replyFromEntityId, ana)
+      yield* api.SetComposerChoice({ chatId: chat.id, draftId: draft.id, consumeReplyFromEntityId: ana })
+      assert.strictEqual((yield* api.GetComposerChoice({ chatId: chat.id, draftId: draft.id })).replyFromEntityId, null)
       assert.strictEqual((yield* api.GetComposerChoice({ chatId: chat.id, draftId: branch.id })).speakerEntityId, ana)
 
       // Only the caller's cards, and only drafts of that chat.

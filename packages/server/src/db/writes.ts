@@ -105,11 +105,12 @@ export const makeWriteHandlers = (bin: Bin) =>
           return yield* drafts.openComposer(userId, key, from)
         }).pipe(transaction("OpenComposer")),
 
-      SetComposerChoice: ({ userId, chatId, draftId, speakerEntityId, replyFromEntityId }) =>
+      SetComposerChoice: ({ userId, chatId, draftId, speakerEntityId, replyFromEntityId, consumeReplyFromEntityId }) =>
         drafts
           .setComposerChoice(userId, chatId, draftId, {
             ...(speakerEntityId === undefined ? {} : { speakerEntityId }),
-            ...(replyFromEntityId === undefined ? {} : { replyFromEntityId })
+            ...(replyFromEntityId === undefined ? {} : { replyFromEntityId }),
+            ...(consumeReplyFromEntityId === undefined ? {} : { consumeReplyFromEntityId })
           })
           .pipe(transaction("SetComposerChoice")),
 

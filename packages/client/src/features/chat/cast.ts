@@ -52,7 +52,7 @@ export interface NextInTurn {
 }
 
 /**
- * Turns go round the cast in its order (ST's "list order", one reply a turn): the candidate
+ * Turns go round the cast in its order (a round-robin default, one reply a turn): the candidate
  * after the character who spoke last on the path, or the first when none has.
  */
 export const nextInTurn = (
@@ -78,17 +78,9 @@ export const nextInTurn = (
 }
 
 /**
- * The composer's speaker when none is picked at its tip: the card the user last wrote as on
- * the path, if they still play it, else the first card they play.
+ * The composer's speaker when none is picked at its tip: the first card they play.
  */
-export const defaultSpeaker = (cast: Cast | null, entries: ReadonlyArray<PathEntry>): EntityId | null => {
-  const played = cast?.playedByMe ?? []
-  for (let i = entries.length - 1; i >= 0; i--) {
-    const id = entries[i]!.version.speakerEntityId
-    if (id !== null && played.includes(id)) return id
-  }
-  return played[0] ?? null
-}
+export const defaultSpeaker = (cast: Cast | null): EntityId | null => cast?.playedByMe[0] ?? null
 
 /** Up to `count` speakers of the loaded messages, most recent first. */
 export const recentSpeakers = (entries: ReadonlyArray<PathEntry>, count: number): Array<EntityId> => {

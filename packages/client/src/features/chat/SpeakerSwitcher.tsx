@@ -4,6 +4,7 @@
 // typed, the speakers used last come first, then the chat's members. A library of hundreds
 // of cards is filtered in memory and only the first rows are drawn.
 import type { CastCard, EntityId } from "@rp/shared/chat.ts"
+import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual"
 import { type KeyboardEvent, memo, useEffect, useId, useMemo, useRef, useState } from "react"
 import { Avatar } from "../../ui/Avatar.tsx"
 import { Input } from "../../ui/Field.tsx"
@@ -16,8 +17,6 @@ import type { ChatSession } from "./session.ts"
 
 type SwitcherTab = "members" | "personas" | "all"
 const TAB_KEY = "rp.speakerSwitcherTab"
-/** The most rows drawn at once; typing narrows the rest. */
-const SHOWN = 150
 
 /** The tab the switcher opened on last time; storage can be unavailable, which is fine. */
 const savedTab = (): SwitcherTab => {
@@ -87,42 +86,58 @@ function CardOptions({
   onActive: (index: number) => void
   onPick: (card: CastCard) => void
 }) {
-  const list = useRef<HTMLUListElement>(null)
+  "use no memo"
+  const list = useRef<HTMLDivElement>(null)
+  // eslint-disable-next-line react-hooks/incompatible-library -- mutable instance; memoization is disabled above
+  const virtualizer = useVirtualizer({
+    count: cards.length,
+    getScrollElement: () => list.current,
+    estimateSize: () => 44,
+    overscan: 4,
+    rangeExtractor: (range) => {
+      const visible = defaultRangeExtractor(range)
+      return active < 0 || active >= cards.length || visible.includes(active)
+        ? visible
+        : [...visible, active].sort((a, b) => a - b)
+    }
+  })
   useEffect(() => {
-    list.current?.querySelector(`[data-index="${active}"]`)?.scrollIntoView({ block: "nearest" })
-  }, [active])
+    if (cards.length > 0) virtualizer.scrollToIndex(active, { align: "auto" })
+  }, [active, cards, virtualizer])
   if (cards.length === 0) return <p className="px-1 py-2 text-sm text-muted">{empty}</p>
   return (
-    <>
-      <ul ref={list} id={id} role="listbox" aria-label="Cards" className="flex flex-col">
-        {cards.slice(0, SHOWN).map((card, index) => (
-          <li
-            key={card.entityId}
-            id={`${id}-${index}`}
-            data-index={index}
-            role="option"
-            aria-selected={index === active}
-            aria-current={card.entityId === current || undefined}
-            // The pointer picks without taking focus from the search field.
-            onPointerDown={(event) => event.preventDefault()}
-            onPointerMove={() => index !== active && onActive(index)}
-            onClick={() => onPick(card)}
-            className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm aria-[current]:font-medium aria-selected:bg-surface-raised aria-selected:ring-1 aria-selected:ring-border"
-          >
-            <Avatar id={card.entityId} name={card.name} mediaId={card.avatarMediaId} size="md" />
-            <span className="min-w-0 flex-1 truncate">{card.name}</span>
-            {card.entityId === current && <Badge>speaking</Badge>}
-            {card.persona && <Badge>persona</Badge>}
-            {card.label !== card.name && <span className="min-w-0 truncate text-xs text-muted">{card.label}</span>}
-          </li>
-        ))}
-      </ul>
-      {cards.length > SHOWN && (
-        <p className="px-1 py-2 text-xs text-muted">
-          {cards.length - SHOWN} more: type part of a name to narrow the list.
-        </p>
-      )}
-    </>
+    <div ref={list} id={id} role="listbox" aria-label="Cards" className="max-h-64 overflow-y-auto">
+      <div className="relative" style={{ height: cards.length * 44 }}>
+        {virtualizer.getVirtualItems().map((item) => {
+          const index = item.index
+          const card = cards[index]!
+          return (
+            <div
+              key={card.entityId}
+              id={`${id}-${index}`}
+              data-index={index}
+              role="option"
+              aria-selected={index === active}
+              aria-current={card.entityId === current || undefined}
+              aria-posinset={index + 1}
+              aria-setsize={cards.length}
+              // The pointer picks without taking focus from the search field.
+              onPointerDown={(event) => event.preventDefault()}
+              onPointerMove={() => index !== active && onActive(index)}
+              onClick={() => onPick(card)}
+              className="absolute top-0 left-0 flex h-11 w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm aria-[current]:font-medium aria-selected:bg-surface-raised aria-selected:ring-1 aria-selected:ring-border"
+              style={{ transform: `translateY(${item.start}px)` }}
+            >
+              <Avatar id={card.entityId} name={card.name} mediaId={card.avatarMediaId} size="md" />
+              <span className="min-w-0 flex-1 truncate">{card.name}</span>
+              {card.entityId === current && <Badge>speaking</Badge>}
+              {card.persona && <Badge>persona</Badge>}
+              {card.label !== card.name && <span className="min-w-0 truncate text-xs text-muted">{card.label}</span>}
+            </div>
+          )
+        })}
+      </div>
+    </div>
   )
 }
 
@@ -177,13 +192,17 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault()
-      const last = Math.min(shown.length, SHOWN) - 1
+      const last = Math.max(0, shown.length - 1)
       setActive((at) => (event.key === "ArrowDown" ? Math.min(at + 1, last) : Math.max(at - 1, 0)))
+    } else if (event.key === "Home" || event.key === "End") {
+      event.preventDefault()
+      setActive(event.key === "Home" ? 0 : Math.max(0, shown.length - 1))
     } else if (event.key === "Escape") {
       // Closes at once, typed text or not (a search field would clear itself first).
       event.preventDefault()
       openChange(false)
     } else if (event.key === "Enter") {
+      if (event.nativeEvent.isComposing) return
       event.preventDefault()
       const card = shown[active]
       if (card !== undefined) pick(card)

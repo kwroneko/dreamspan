@@ -125,3 +125,120 @@ test("a one-card chat has no Reply from, and an empty Send asks its character", 
   await page.getByRole("button", { name: "Mira replies" }).click()
   await expect(lastHeader(page)).toContainText("Mira")
 })
+
+test("hundreds of cards stay searchable and reachable by keyboard on a phone", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  const chatId = await chatWith(["Mira"])
+  const cardCount = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+    Effect.gen(function* () {
+      for (let index = 0; index < 240; index++) {
+        const name = `Visitor ${String(index).padStart(3, "0")}`
+        yield* api.CreateCard({ label: name, name })
+      }
+      return (yield* api.ListCards()).length
+    })
+  )
+  await page.goto(`${server().url}/chats/${chatId}`)
+  await speakerChip(page).click()
+  await page.getByRole("tab", { name: "All cards" }).click()
+  const search = page.getByRole("combobox", { name: "Find a card to speak as" })
+  await expect(search).toBeFocused()
+  await expect(page.getByRole("option").first()).toHaveAttribute("aria-setsize", String(cardCount))
+  expect(await page.getByRole("option").count()).toBeLessThan(30)
+  // The file shares a library with other scenarios; isolate the rows this test created.
+  await search.fill("Visitor")
+  await expect(page.getByRole("option").first()).toHaveAttribute("aria-setsize", "240")
+  await search.press("End")
+  await search.press("ArrowUp")
+  await expect(page.getByRole("option", { name: "Visitor 238" })).toHaveAttribute("aria-selected", "true")
+  await expect(search).toBeInViewport()
+  await search.fill("239")
+  await expect(page.getByRole("option")).toHaveCount(1)
+  await search.press("Enter")
+  await expect(speakerChip(page)).toHaveAccessibleName(/^Speaking as Visitor 239/)
+  await page.reload()
+  await expect(speakerChip(page)).toHaveAccessibleName(/^Speaking as Visitor 239/)
+})
+
+test("a phone shows the full named Write for action and keeps an empty input compact", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  const chatId = await chatWith(["Mira", "Captain Rhee"])
+  await page.goto(`${server().url}/chats/${chatId}`)
+  await speakerChip(page).click()
+  await page.getByRole("tab", { name: "All cards" }).click()
+  await page.getByRole("combobox", { name: "Find a card to speak as" }).fill("rhee")
+  await page.keyboard.press("Enter")
+  await expect(speakerChip(page)).toHaveAccessibleName(/^Speaking as Captain Rhee/)
+  const write = page.getByRole("button", { name: "Write for Captain Rhee" })
+  await expect(write).toBeEnabled()
+  const label = write.locator("span").first()
+  expect(await label.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true)
+  expect((await composer(page).boundingBox())!.height).toBeLessThan(45)
+})
+
+test("reply order follows the branch tip, including a character turn beyond the loaded window", async ({ page }) => {
+  const chatId = await chatWith(["Mira", "Tobin", "Wren"])
+  const firstSlot = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+    Effect.gen(function* () {
+      const cards = yield* api.ListCards()
+      const entity = (name: string) => cards.find((card) => card.name === name)!.entityId
+      let parent = null as import("@rp/shared/chat.ts").SlotId | null
+      let first = parent
+      for (let index = 0; index < 82; index++) {
+        const sent = yield* api.SendMessage({
+          chatId,
+          parentSlotId: parent,
+          branch: false,
+          content: `Turn ${index}: the room is quiet.`,
+          speakerEntityId: entity(index === 0 ? "Mira" : index === 1 ? "Tobin" : "Ana")
+        })
+        if (sent._tag === "Posted") {
+          parent = sent.entry.slotId
+          first ??= parent
+        }
+      }
+      return first
+    })
+  )
+  // An old-message deep link opens around Mira, not the actual last character, Tobin.
+  await page.goto(`${server().url}/chats/${chatId}?slot=${firstSlot}`)
+  await expect(replyFrom(page)).toContainText("Next in turn: Wren, after Tobin")
+  await expect(page.getByRole("button", { name: "Wren replies" })).toBeEnabled()
+  await page.goto(`${server().url}/chats/${chatId}`)
+  await expect(replyFrom(page)).toContainText("Next in turn: Wren, after Tobin")
+})
+
+test("typing stays available while the saved speaker is loading; sending waits for it", async ({ page }) => {
+  const chatId = await chatWith(["Mira"])
+  let waiting = false
+  let release: (() => void) | null = null
+  await page.routeWebSocket("**/rpc", (socket) => {
+    const upstream = socket.connectToServer()
+    const held: Array<string | Buffer> = []
+    let resumed = false
+    release = () => {
+      resumed = true
+      for (const message of held) upstream.send(message)
+    }
+    socket.onMessage((message) => {
+      if (!resumed && String(message).includes('"tag":"GetComposerChoice"')) {
+        waiting = true
+        held.push(message)
+      } else upstream.send(message)
+    })
+    upstream.onMessage((message) => socket.send(message))
+  })
+  await page.goto(`${server().url}/chats/${chatId}`)
+  await expect.poll(() => waiting).toBe(true)
+  await expect(composer(page)).toBeEditable()
+  await composer(page).fill("Kept while the speaker loads.")
+  const send = page.getByRole("button", { name: "Send as Ana" })
+  await expect(send).toBeDisabled()
+  release!()
+  await expect(send).toBeEnabled()
+  await expect(composer(page)).toHaveValue("Kept while the speaker loads.")
+  await send.click()
+  await expect(page.getByRole("article", { name: "Your message", exact: true }).last()).toContainText(
+    "Kept while the speaker loads."
+  )
+})

@@ -1520,7 +1520,7 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
           )
         }
         // Their own composer can't name the owner's card.
-        for (const field of ["speakerEntityId", "replyFromEntityId"] as const) {
+        for (const field of ["speakerEntityId", "replyFromEntityId", "consumeReplyFromEntityId"] as const) {
           yield* refused(
             actor.api.SetComposerChoice({
               chatId: actor.chat.chatId,

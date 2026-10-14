@@ -24,6 +24,7 @@ import { HistoryIcon, RegenerateIcon, SendIcon, StopIcon } from "./icons.tsx"
 import { composerChoice, useComposerChoice } from "./speaker.ts"
 import { ReplyFrom } from "./ReplyFrom.tsx"
 import { SpeakerSwitcher } from "./SpeakerSwitcher.tsx"
+import { useComposerTurn } from "./composerTurn.ts"
 import { ReplayNotice } from "../editor/ReplayNotice.tsx"
 import { ComposerDraft, type ComposerSource, type Sent } from "./composerDraft.ts"
 import type { ChatSession, ChatView, Outcome } from "./session.ts"
@@ -245,14 +246,18 @@ export function Composer({ session, view }: { session: ChatSession; view: ChatVi
   const choices = composerChoice(session)
   const choice = useComposerChoice(session)
   useEffect(() => choices.bind(draftId), [choices, draftId])
-  const ready = textReady && choice.loaded
-  const speaker = choice.speaker ?? defaultSpeaker(cast, view.entries)
+  const turnEntries = useComposerTurn(session, view, cast)
+  const ready = textReady && choice.loaded && !choice.saving && choice.draftId === draftId && turnEntries !== null
+  const speaker = choice.speaker ?? defaultSpeaker(cast)
   const setPicked = (id: EntityId) => void choices.change({ speaker: id }).then(report)
   const name = nameOf(castView, speaker)
   const speakerPlayed = speaker !== null && (cast?.playedByMe.includes(speaker) ?? false)
   // Who replies to the next send: the face picked for it, else the next in turn (ReplyFrom.tsx).
   const candidates = useMemo(() => replyCandidates(cast, speaker), [cast, speaker])
-  const next = useMemo(() => nextInTurn(cast, view.entries, speaker), [cast, view.entries, speaker])
+  const next = useMemo(
+    () => (turnEntries === null ? null : nextInTurn(cast, turnEntries, speaker)),
+    [cast, turnEntries, speaker]
+  )
   const pickedReply = choice.replyFrom !== null && candidates.includes(choice.replyFrom) ? choice.replyFrom : null
   const replier = pickedReply ?? next?.id ?? null
   const replierName = nameOf(castView, replier)
@@ -304,11 +309,10 @@ export function Composer({ session, view }: { session: ChatSession; view: ChatVi
   /** A card that isn't in the chat joins it from here on (DESIGN §2.2). */
   const pick = useCallback(
     async (card: CastCard) => {
-      const picked = await choices.change({ speaker: card.entityId })
-      setError(picked.ok ? null : picked.error)
       if (cast !== null && !cast.participants.includes(card.entityId)) {
         const outcome = await session.changeCast({ _tag: "Join", entityId: card.entityId })
         setError(outcome.ok ? null : outcome.error)
+        if (!outcome.ok) return
         // A persona picked to speak as is one the user plays, so it's never asked to reply.
         if (outcome.ok && card.persona && !outcome.value.playedByMe.includes(card.entityId)) {
           const played = await session.changeCast({
@@ -316,8 +320,11 @@ export function Composer({ session, view }: { session: ChatSession; view: ChatVi
             entityIds: [...outcome.value.playedByMe, card.entityId]
           })
           setError(played.ok ? null : played.error)
+          if (!played.ok) return
         }
       }
+      const picked = await choices.change({ speaker: card.entityId })
+      setError(picked.ok ? null : picked.error)
     },
     [cast, choices, session]
   )
@@ -330,7 +337,7 @@ export function Composer({ session, view }: { session: ChatSession; view: ChatVi
    * sent. Text that isn't sent comes back, ahead of anything typed since (composerDraft.ts).
    */
   const submit = async (run: (from: ComposerSource) => Promise<Sent>) => {
-    if (busy) return
+    if (busy || !ready) return
     setBusy(true)
     await draft.submit((from) => {
       if (from.tip !== session.snapshot().leafSlotId) {
@@ -343,8 +350,8 @@ export function Composer({ session, view }: { session: ChatSession; view: ChatVi
   }
 
   /** A face picked for one reply goes back to the turn order once that reply is asked for. */
-  const replied = () => {
-    if (choice.replyFrom !== null) void choices.change({ replyFrom: null })
+  const replied = (draftId: string) => {
+    if (pickedReply !== null) void choices.consume(draftId, pickedReply).then(report)
   }
 
   const send = () =>
@@ -353,18 +360,18 @@ export function Composer({ session, view }: { session: ChatSession; view: ChatVi
       : submit(async (from) => {
           const { sent, outcome, draft, recovered } = await session.send(from.text, speaker, replier, from)
           report(outcome)
-          if (sent) replied()
+          if (sent) replied(from.draftId)
           // A message that was sent (or queued) is gone from the box, even if its reply failed.
           return sent ? { sent, draft, recovered } : { sent }
         })
 
   // With nothing typed, Send asks for the reply alone, as an empty send does in ST.
   const replyNow = async () => {
-    if (busy || replier === null) return
+    if (busy || !ready || replier === null || choice.draftId === null) return
     setBusy(true)
     const outcome = await session.generate(session.snapshot().leafSlotId, replier)
     report(outcome)
-    if (outcome.ok) replied()
+    if (outcome.ok) replied(choice.draftId)
     setBusy(false)
   }
 
@@ -469,12 +476,10 @@ export function Composer({ session, view }: { session: ChatSession; view: ChatVi
             id="composer"
             data-testid="composer"
             value={text}
-            readOnly={!ready}
-            aria-busy={!ready}
+            readOnly={!textReady}
+            aria-busy={!textReady}
             aria-describedby={hasText ? "composer-hint" : undefined}
-            placeholder={
-              !ready ? "Loading what you typed here…" : leafGenerating ? "Queue a message…" : "Write a message…"
-            }
+            placeholder={!textReady ? "Loading…" : leafGenerating ? "Queue…" : "Message…"}
             onChange={(event) => draft.type(event.currentTarget.value)}
             onKeyDown={onKeyDown}
           />
@@ -505,7 +510,7 @@ export function Composer({ session, view }: { session: ChatSession; view: ChatVi
               aria-label={generateText}
               disabled={busy || !ready}
               onClick={generate}
-              className="max-w-32 sm:max-w-56"
+              className="max-w-52 sm:max-w-56"
             >
               <span className="truncate">{generateText}</span>
             </Button>

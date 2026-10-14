@@ -15,6 +15,7 @@ export interface ChoiceState {
   readonly draftId: string | null
   /** Whether the choice for `draftId` has been read: until then, nothing is sent. */
   readonly loaded: boolean
+  readonly saving: boolean
   /** The card picked to speak as; null: none picked, so the composer's default. */
   readonly speaker: EntityId | null
   /** Who replies to the next send, picked for that one reply; null: the next in turn. */
@@ -27,12 +28,13 @@ type Change = { readonly speaker?: EntityId | null; readonly replyFrom?: EntityI
 const RETRY_MS = 2000
 
 class ComposerChoices {
-  private state: ChoiceState = { draftId: null, loaded: false, speaker: null, replyFrom: null }
+  private state: ChoiceState = { draftId: null, loaded: false, saving: false, speaker: null, replyFrom: null }
   private readonly listeners = new Set<() => void>()
   /** Bumped by each read and change, so an older read's answer is dropped. */
   private reads = 0
   /** Changes on their way: a published choice that arrives meanwhile is older than them. */
   private writing = 0
+  private writes: Promise<unknown> = Promise.resolve()
   /** A speaker picked before the composer's draft was known ("Write as" as the chat opens). */
   private early: EntityId | null = null
 
@@ -61,7 +63,7 @@ class ComposerChoices {
   bind(draftId: string | null) {
     if (draftId === this.state.draftId) return
     this.reads++
-    this.setState({ draftId, loaded: false, speaker: null, replyFrom: null })
+    this.setState({ draftId, loaded: false, saving: false, speaker: null, replyFrom: null })
     if (draftId !== null) void this.read()
   }
 
@@ -83,6 +85,7 @@ class ComposerChoices {
     this.setState({
       draftId,
       loaded: true,
+      saving: false,
       speaker: choice?.speakerEntityId ?? null,
       replyFrom: choice?.replyFromEntityId ?? null
     })
@@ -99,12 +102,20 @@ class ComposerChoices {
     this.setState({
       ...this.state,
       loaded: true,
+      saving: false,
       speaker: choice.speakerEntityId,
       replyFrom: choice.replyFromEntityId
     })
   }
 
-  /** Shows the change at once and keeps it on the server, which tells the chat's other tabs. */
+  /** Clears the pick used by a send, on the draft it came from, without clearing a newer pick. */
+  consume(draftId: string, replyFrom: EntityId): Promise<Outcome<unknown>> {
+    return this.session.call((client) =>
+      client("SetComposerChoice", { chatId: this.session.id, draftId, consumeReplyFromEntityId: replyFrom })
+    )
+  }
+
+  /** Keeps the choice on the server, which tells the chat's other tabs. */
   async change(change: Change): Promise<Outcome<unknown>> {
     const { draftId } = this.state
     if (draftId === null || !this.state.loaded) {
@@ -113,24 +124,26 @@ class ComposerChoices {
     }
     this.reads++
     this.writing++
-    this.setState({
-      ...this.state,
-      ...(change.speaker === undefined ? {} : { speaker: change.speaker }),
-      ...(change.replyFrom === undefined ? {} : { replyFrom: change.replyFrom })
-    })
-    const result = await this.session.call((client) =>
-      client("SetComposerChoice", {
-        chatId: this.session.id,
-        draftId,
-        ...(change.speaker === undefined ? {} : { speakerEntityId: change.speaker }),
-        ...(change.replyFrom === undefined ? {} : { replyFromEntityId: change.replyFrom })
-      })
+    this.setState({ ...this.state, saving: true })
+    // Rapid picks leave in click order. Keep the acknowledged choice visible and block a
+    // send until it is saved, so a failed pick can't produce a wrong-persona message.
+    const request = this.writes.then(() =>
+      this.session.call((client) =>
+        client("SetComposerChoice", {
+          chatId: this.session.id,
+          draftId,
+          ...(change.speaker === undefined ? {} : { speakerEntityId: change.speaker }),
+          ...(change.replyFrom === undefined ? {} : { replyFromEntityId: change.replyFrom })
+        })
+      )
     )
+    this.writes = request
+    const result = await request
     this.writing--
-    if (this.writing === 0 && draftId === this.state.draftId) {
-      // The server's answer to the last change is the choice as it is; a refusal reads it again.
-      if (result.ok) this.receive(result.value)
-      else void this.read()
+    if (this.writing === 0) {
+      // Read again even after success: a different tab's newer event may have arrived
+      // while writing. Also loads a different draft bound during this request.
+      await this.read()
     }
     return result
   }
