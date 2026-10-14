@@ -179,16 +179,24 @@ export const copiesOfUser = async (userId: string): Promise<ReadonlyArray<Copy>>
 }
 
 /**
+ * A copy that has no server draft to go to: a first message before its chat exists, and a
+ * setting's text. It stays in this browser, for this user, until sent or saved from its
+ * page or deleted, so it doesn't need the session and doesn't hold up logout.
+ */
+export const browserOnly = (copy: Copy) => {
+  const save = pendingOf(copy)
+  return save !== null && (save.kind === "pendingChat" || save.kind === "setting")
+}
+
+/**
  * Try every exact copy before logout or at the user's request. Failures stay recoverable
- * here, as do first messages of chats not made yet.
+ * here, as do the copies that stay in this browser (`browserOnly`).
  */
 export const flushCopies = async (userId: string) => {
   let recovered = 0
   for (const copy of await copiesOfUser(userId)) {
     const save = pendingOf(copy)
-    // A first message before its chat exists, and a setting's text, have no draft to go to:
-    // they're sent or saved from their page.
-    if (save === null || save.kind === "pendingChat" || save.kind === "setting") continue
+    if (save === null || browserOnly(copy)) continue
     const body = JSON.stringify({
       drafts: save.kind === "editor" ? [save.payload] : [],
       composers: save.kind === "composer" ? [save.payload] : [],

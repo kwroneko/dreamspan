@@ -12,9 +12,6 @@ import { Badge, Card, CardHeader } from "../../ui/Surface.tsx"
 import { useTitle } from "../shell.tsx"
 import { ChatList, useRefreshChats } from "./ChatList.tsx"
 
-/** A chat's title as shown, without the unfinished-import marker, which shows as a badge. */
-const chatTitle = (chat: Pick<Chat, "title">) => importState(chat.title).title || "Untitled chat"
-
 /** The badges a chat's title gets: an import still unfinished (ARCHITECTURE §13). */
 export function ChatBadges({ chat }: { chat: Pick<Chat, "title"> }) {
   return importState(chat.title).unfinished ? <Badge tone="warning">import unfinished</Badge> : null

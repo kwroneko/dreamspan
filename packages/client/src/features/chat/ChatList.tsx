@@ -182,7 +182,11 @@ function Rows({ chats, onDelete }: { chats: ReadonlyArray<Chat>; onDelete: (chat
 function Loaded({ first, query }: { first: ReadonlyArray<Chat>; query: Query }) {
   const [older, setOlder] = useState<ReadonlyArray<Chat>>([])
   const [end, setEnd] = useState(false)
-  const [gone, setGone] = useState<ReadonlySet<string>>(new Set())
+  /**
+   * Chats deleted here, hidden until the list they were in is read again from the server:
+   * each with the first page and the older pages as they were when it was deleted.
+   */
+  const [gone, setGone] = useState<ReadonlyMap<string, readonly [ReadonlyArray<Chat>, ReadonlyArray<Chat>]>>(new Map())
   const more = useAction()
   const fill = useAction()
   const action = useAction()
@@ -195,7 +199,10 @@ function Loaded({ first, query }: { first: ReadonlyArray<Chat>; query: Query }) 
     ...(firstEnd || last === undefined
       ? []
       : older.filter((chat) => !inFirst.has(chat.id) && after(keyOf(chat, query), keyOf(last, query))))
-  ].filter((chat) => !gone.has(chat.id))
+  ].filter((chat) => {
+    const at = gone.get(chat.id)
+    return at === undefined || (inFirst.has(chat.id) ? at[0] !== first : at[1] !== older)
+  })
 
   /** The page after `from`. */
   const pageAfter = (from: Chat) => (client: AppClient["Service"]) =>
@@ -225,19 +232,40 @@ function Loaded({ first, query }: { first: ReadonlyArray<Chat>; query: Query }) 
     const result = await more.run(pageAfter(from))
     if (result.ok) cover(from, result.value)
   }
-  const loaded = older.length > 0
+  // The first page read again (a chat deleted, restored or added, here or elsewhere): the
+  // older pages loaded are read again as far as they went, so they agree with the server.
   useEffect(() => {
-    if (!loaded || firstEnd || last === undefined) return
-    void fill.run(pageAfter(last)).then((result) => {
-      if (result.ok) cover(last, result.value)
-    })
+    if (older.length === 0 || firstEnd || last === undefined) return
+    const target = older.length
+    let live = true
+    void (async () => {
+      const rows: Array<Chat> = []
+      let from = last
+      let complete = false
+      while (rows.length < target) {
+        const result = await fill.run(pageAfter(from))
+        if (!live || !result.ok) return
+        rows.push(...result.value)
+        const next = result.value.at(-1)
+        if (result.value.length < PAGE || next === undefined) {
+          complete = true
+          break
+        }
+        from = next
+      }
+      setOlder(rows)
+      setEnd(complete)
+    })()
+    return () => {
+      live = false
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- when the first page is read again
   }, [first])
 
   const remove = async (chat: Chat) => {
     const result = await action.run((client) => client("DeleteChat", { chatId: chat.id }), ["chats"])
     if (!result.ok) return
-    setGone(new Set([...gone, chat.id]))
+    setGone(new Map([...gone, [chat.id, [first, older] as const]]))
     deleted(result.value)
   }
   const pages = Array.from({ length: Math.ceil(chats.length / PAGE) }, (_, i) => chats.slice(i * PAGE, (i + 1) * PAGE))
