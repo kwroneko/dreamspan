@@ -3,6 +3,7 @@
 // hidden ones leave the arrows' cycle and are listed apart. A filter shows only the starred,
 // and two can be compared side by side. The counter `k/n` opens it: a popover on a wide
 // screen, a sheet on a phone.
+import { useAtomValue } from "@effect/atom-react"
 import type { PathEntry, Version } from "@rp/shared/chat.ts"
 import { type ReactNode, useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { Button } from "../../ui/Button.tsx"
@@ -16,6 +17,7 @@ import { Badge } from "../../ui/Surface.tsx"
 import { IconButton } from "../../ui/Tooltip.tsx"
 import { ValueDiff } from "../editor/diff.tsx"
 import { formatWhen } from "./chatTitle.ts"
+import { liveText } from "./session.ts"
 
 const NARROW = "(max-width: 639px)"
 const subscribeNarrow = (listener: () => void) => {
@@ -68,7 +70,6 @@ type Flags = { readonly starred?: boolean; readonly hidden?: boolean }
 interface PickerProps {
   readonly entry: PathEntry
   readonly versions: ReadonlyArray<Version> | null
-  readonly textOf: (version: Version) => string
   readonly onPick: (version: Version) => void
   readonly onFlag: (version: Version, flags: Flags) => void
 }
@@ -79,7 +80,6 @@ function Row({
   number,
   current,
   writer,
-  text,
   comparing,
   ticked,
   onPick,
@@ -90,13 +90,13 @@ function Row({
   number: number
   current: boolean
   writer: string
-  text: string
   comparing: boolean
   ticked: boolean
   onPick: () => void
   onTick: () => void
   onFlag: (flags: Flags) => void
 }) {
+  const text = useAtomValue(liveText(version.id)) ?? version.content
   const body = (
     <>
       <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-muted">
@@ -175,12 +175,11 @@ function Row({
 function PickerBody({
   entry,
   versions,
-  textOf,
   onPick,
   onFlag,
   onCompare,
   open
-}: PickerProps & { onCompare: (pair: readonly [Version, Version]) => void; open: boolean }) {
+}: PickerProps & { onCompare: (pair: readonly [Version["id"], Version["id"]]) => void; open: boolean }) {
   const [filter, setFilter] = useState<"all" | "starred">("all")
   const [ticked, setTicked] = useState<ReadonlyArray<Version["id"]> | null>(null)
   const list = useRef<HTMLDivElement>(null)
@@ -209,7 +208,7 @@ function PickerBody({
     if (next.length < 2) return setTicked(next)
     const pair = next.map((t) => versions.find((v) => v.id === t)!).sort((a, b) => a.ordinal - b.ordinal)
     setTicked(null)
-    onCompare([pair[0]!, pair[1]!])
+    onCompare([pair[0]!.id, pair[1]!.id])
   }
   const row = (version: Version) => (
     <Row
@@ -218,7 +217,6 @@ function PickerBody({
       number={numbers.get(version.id)!}
       current={version.id === entry.version.id}
       writer={writerOf(version, numberOf)}
-      text={textOf(version)}
       comparing={comparing}
       ticked={ticked?.includes(version.id) ?? false}
       onPick={() => onPick(version)}
@@ -290,18 +288,18 @@ function PickerBody({
 function Compare({
   pair,
   numberOf,
-  textOf,
   onClose,
   onPick
 }: {
-  pair: readonly [Version, Version] | null
+  pair: readonly [Version, Version]
   numberOf: (id: Version["id"]) => number | undefined
-  textOf: (version: Version) => string
   onClose: () => void
   onPick: (version: Version) => void
 }) {
   const [view, setView] = useState<"side" | "changes">("side")
-  const column = (version: Version) => {
+  const firstText = useAtomValue(liveText(pair[0].id)) ?? pair[0].content
+  const secondText = useAtomValue(liveText(pair[1].id)) ?? pair[1].content
+  const column = (version: Version, index: number) => {
     const number = numberOf(version.id) ?? 0
     return (
       <section key={version.id} aria-label={`Version ${number}`} className="flex min-w-0 flex-col gap-2">
@@ -321,44 +319,42 @@ function Compare({
           </Button>
         </header>
         <div className="max-h-[60vh] overflow-y-auto rounded-md border border-border p-3 max-sm:max-h-none">
-          <Markdown text={textOf(version)} streaming={version.status === "generating"} />
+          <Markdown text={index === 0 ? firstText : secondText} streaming={version.status === "generating"} />
         </div>
       </section>
     )
   }
   return (
     <Dialog
-      open={pair !== null}
+      open
       onOpenChange={(open) => !open && onClose()}
       wide
-      title={pair ? `Version ${numberOf(pair[0].id)} and version ${numberOf(pair[1].id)}` : "Compare versions"}
+      title={`Version ${numberOf(pair[0].id)} and version ${numberOf(pair[1].id)}`}
     >
-      {pair && (
-        <>
-          <div>
-            <Segmented
-              label="Compare as"
-              value={view}
-              onValueChange={setView}
-              options={[
-                { value: "side", label: "Both texts" },
-                { value: "changes", label: "What changed" }
-              ]}
-            />
+      <>
+        <div>
+          <Segmented
+            label="Compare as"
+            value={view}
+            onValueChange={setView}
+            options={[
+              { value: "side", label: "Both texts" },
+              { value: "changes", label: "What changed" }
+            ]}
+          />
+        </div>
+        {view === "side" ? (
+          <div className="grid gap-4 sm:grid-cols-2">{pair.map(column)}</div>
+        ) : (
+          <div className="flex flex-col gap-1">
+            <p className="text-sm text-muted">
+              From #{numberOf(pair[0].id)} to #{numberOf(pair[1].id)}: the stretch between their first and last
+              difference.
+            </p>
+            <ValueDiff before={firstText} after={secondText} />
           </div>
-          {view === "side" ? (
-            <div className="grid gap-4 sm:grid-cols-2">{pair.map(column)}</div>
-          ) : (
-            <div className="flex flex-col gap-1">
-              <p className="text-sm text-muted">
-                From #{numberOf(pair[0].id)} to #{numberOf(pair[1].id)}: the stretch between their first and last
-                difference.
-              </p>
-              <ValueDiff before={textOf(pair[0])} after={textOf(pair[1])} />
-            </div>
-          )}
-        </>
-      )}
+        )}
+      </>
       <DialogActions>
         <Button onClick={onClose}>Close</Button>
       </DialogActions>
@@ -374,14 +370,17 @@ export function VersionPicker({
   entry,
   versions,
   position,
-  textOf,
   onOpen,
   onPick,
   onFlag
 }: PickerProps & { position: number; onOpen: () => void }) {
   const narrow = useNarrow()
   const [open, setOpen] = useState(false)
-  const [pair, setPair] = useState<readonly [Version, Version] | null>(null)
+  const [pairIds, setPairIds] = useState<readonly [Version["id"], Version["id"]] | null>(null)
+  // Keep identities, not snapshots: completion replaces content and metadata in the list.
+  const first = versions?.find((version) => version.id === pairIds?.[0])
+  const second = versions?.find((version) => version.id === pairIds?.[1])
+  const pair = first && second ? ([first, second] as const) : null
   const count = entry.versionCount
   const hiddenCount = versions?.filter((v) => v.hidden).length ?? 0
   const counter = position >= 0 ? `${position + 1}/${count}` : `${count}`
@@ -399,7 +398,6 @@ export function VersionPicker({
     <PickerBody
       entry={entry}
       versions={versions}
-      textOf={textOf}
       open={open}
       onPick={(version) => {
         setOpen(false)
@@ -408,7 +406,7 @@ export function VersionPicker({
       onFlag={onFlag}
       onCompare={(next) => {
         setOpen(false)
-        setPair(next)
+        setPairIds(next)
       }}
     />
   )
@@ -450,10 +448,9 @@ export function VersionPicker({
         <Compare
           pair={pair}
           numberOf={(id) => numbers.get(id)}
-          textOf={textOf}
-          onClose={() => setPair(null)}
+          onClose={() => setPairIds(null)}
           onPick={(version) => {
-            setPair(null)
+            setPairIds(null)
             onPick(version)
           }}
         />

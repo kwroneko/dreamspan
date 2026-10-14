@@ -321,7 +321,6 @@ function Versions({
   generated,
   versions,
   position,
-  session,
   onStep,
   onPick,
   onFlag,
@@ -332,7 +331,6 @@ function Versions({
   generated: boolean
   versions: ReadonlyArray<Version> | null
   position: number
-  session: ChatSession
   onStep: (step: -1 | 1) => void
   onPick: (version: Version) => void
   onFlag: (version: Version, flags: { starred?: boolean; hidden?: boolean }) => void
@@ -342,7 +340,6 @@ function Versions({
   const listed = versions !== null && position >= 0
   const before = listed ? stepFrom(versions, position, -1) !== undefined : position !== 0
   const after = listed ? stepFrom(versions, position, 1) !== undefined : position < entry.versionCount - 1
-  const textOf = useCallback((version: Version) => session.textOf(version), [session])
   return (
     <div className="flex shrink-0 items-center" role="group" aria-label="Versions">
       <IconButton
@@ -357,7 +354,6 @@ function Versions({
           entry={entry}
           versions={versions}
           position={position}
-          textOf={textOf}
           onOpen={onOpen}
           onPick={onPick}
           onFlag={onFlag}
@@ -880,7 +876,6 @@ export const Message = memo(function Message({
                   generated={generated}
                   versions={versions}
                   position={position}
-                  session={session}
                   onStep={(step) => void swipe(step)}
                   onPick={async (picked) => report(await session.select(entry, picked))}
                   onFlag={(target, flags) => void flag(target, flags)}
