@@ -50,6 +50,7 @@ const entry = (slot: string, parent: string | null, v: Version, rowVersion = 1) 
     depth: parent === null ? 0 : 1,
     rowVersion,
     contextExcluded: false,
+    hiddenByUser: false,
     version: v,
     versionCount: 1,
     inContext: v.content.length > 0

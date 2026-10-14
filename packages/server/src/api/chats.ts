@@ -275,6 +275,15 @@ export const makeChatHandlers = Effect.gen(function* () {
         return yield* publishSlot(id, slotId)
       }).pipe(Effect.uninterruptible, internal("SelectVersion")),
 
+    // Hiding is an edit (DESIGN §8): it changes what's sent next and starts nothing. The
+    // slot's event also has the cache estimate read again (CacheWarmth listens).
+    SetMessageHidden: ({ slotId, hidden }) =>
+      Effect.gen(function* () {
+        const id = yield* userId
+        yield* writer.SetSlotHidden({ userId: id, slotId, hidden })
+        return yield* publishSlot(id, slotId)
+      }).pipe(Effect.uninterruptible, internal("SetMessageHidden")),
+
     // An edit or a version the user writes is still the message's speaker's, as a swipe is:
     // an edit its source's, a written version the one shown's.
     EditVersion: ({ slotId, sourceVersionId, content, expectedRowVersion, draft }) =>

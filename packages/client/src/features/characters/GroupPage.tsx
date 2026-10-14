@@ -1,5 +1,5 @@
 // A group's page (DESIGN §2.1; ST's group tile opened): who's in it, Continue (its latest
-// chat), and every chat of the group, latest message first. A group is named by any of its
+// chat), New chat (`/groups/$chatId/new`, made on its first send), and every chat of the group, latest message first. A group is named by any of its
 // chats (`/groups/$chatId`); a group is the chats with the same name and characters
 // (`ChatGroup`), worked out on the server.
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react"
@@ -42,6 +42,9 @@ function Page({ group, chats }: { group: ChatGroup; chats: ReadonlyArray<Chat> }
           <div className="mt-2 flex flex-wrap gap-2">
             <Link to="/chats/$chatId" params={{ chatId: group.latestChatId }} className={buttonClass("primary")}>
               Continue the latest chat
+            </Link>
+            <Link to="/groups/$chatId/new" params={{ chatId: group.latestChatId }} className={buttonClass()}>
+              New chat
             </Link>
           </div>
         </div>

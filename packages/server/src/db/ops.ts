@@ -1005,6 +1005,17 @@ export class WriteOps extends RpcGroup.make(
     error: Schema.Union([NotFound, StaleWrite, StorageError])
   }),
   /**
+   * Hides a live message of the user's from the model, or shows it again (ST's ghost
+   * toggle): the slot's `context_excluded`, marked as the user's doing. Writes nothing
+   * else but the history reduction a hide records (historyChanges.ts); summaries read
+   * visibility when they're checked (lcmReads.ts). `changed`: whether it wasn't so already.
+   */
+  Rpc.make("SetSlotHidden", {
+    payload: { userId: UserId, slotId: SlotId, hidden: Schema.Boolean },
+    success: Schema.Struct({ changed: Schema.Boolean }),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
    * Records a user's state change (origin `user`) at a position: after `slotId` (null:
    * the chat's initial state), and if `versionId` is set, only while that version is
    * selected. Every entity, ref, revision, connection and model the value names must be
@@ -1134,7 +1145,9 @@ export class WriteOps extends RpcGroup.make(
       greeting: Schema.NullOr(Schema.Int),
       first: FirstTurn,
       /** Each greeting's frozen values, in `GetCardForChat` order; null: none to freeze. */
-      frozen: Schema.Array(Schema.NullOr(FrozenMacros))
+      frozen: Schema.Array(Schema.NullOr(FrozenMacros)),
+      /** The chat's title; null or blank: its cast's names. */
+      title: Schema.NullOr(Schema.String)
     },
     success: AppendResult,
     error: Schema.Union([NotFound, StorageError])

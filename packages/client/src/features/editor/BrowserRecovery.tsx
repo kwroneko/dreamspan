@@ -67,7 +67,14 @@ export function BrowserRecovery({
                 {first !== null ? (
                   <p className="text-sm text-muted">
                     First message to {first.name}, not sent yet:{" "}
-                    <a href={`/cards/${encodeURIComponent(first.entityId)}/chat`} className="underline">
+                    <a
+                      href={
+                        first.groupChatId === undefined
+                          ? `/cards/${encodeURIComponent(first.entityId)}/chat`
+                          : `/groups/${encodeURIComponent(first.groupChatId)}/new`
+                      }
+                      className="underline"
+                    >
                       open the new chat
                     </a>
                   </p>

@@ -7,6 +7,9 @@ import { ChatsPage } from "./ChatsPage.tsx"
 // The chat view carries the Markdown renderer, most of the bundle: it loads with the first chat opened.
 const ChatPage = lazy(() => import("./ChatPage.tsx").then((module) => ({ default: module.ChatPage })))
 const StartChatPage = lazy(() => import("./StartChatPage.tsx").then((module) => ({ default: module.StartChatPage })))
+const StartGroupChatPage = lazy(() =>
+  import("./StartChatPage.tsx").then((module) => ({ default: module.StartGroupChatPage }))
+)
 const ContextPage = lazy(() => import("./ContextPage.tsx").then((module) => ({ default: module.ContextPage })))
 
 function LazyChatPage() {
@@ -21,6 +24,14 @@ function LazyContextPage() {
   return (
     <Suspense fallback={<Loading label="Loading the context…" />}>
       <ContextPage />
+    </Suspense>
+  )
+}
+
+function LazyStartGroupChatPage() {
+  return (
+    <Suspense fallback={<Loading label="Loading the group…" />}>
+      <StartGroupChatPage />
     </Suspense>
   )
 }
@@ -59,4 +70,10 @@ export const register = () => {
   })
   // A chat with a card, before it exists (DESIGN §2.1).
   routes.register({ id: "chat.start", parent: "app", path: "/cards/$entityId/chat", component: LazyStartChatPage })
+  routes.register({
+    id: "chat.startGroup",
+    parent: "app",
+    path: "/groups/$chatId/new",
+    component: LazyStartGroupChatPage
+  })
 }

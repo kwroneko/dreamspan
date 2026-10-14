@@ -125,6 +125,8 @@ export class PathEntry extends Schema.Class<PathEntry>("PathEntry")({
   depth: Schema.Int,
   rowVersion: Schema.Int,
   contextExcluded: Schema.Boolean,
+  /** Excluded because the user hid it here (SetMessageHidden), not because an import brought it hidden. */
+  hiddenByUser: Schema.Boolean,
   version: Version,
   versionCount: Schema.Int,
   /**

@@ -105,12 +105,16 @@ test("the bin names a message's chat by its readable name", async ({ page }) => 
   await expect(main).not.toContainText("@09h30m")
 })
 
-test("on a phone, a group's tile shows its action", async ({ browser }) => {
+test("on a phone, a group's tile shows its actions", async ({ browser }) => {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
   const page = await context.newPage()
   await apiLogin(context.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/`)
   await expect(page.getByRole("link", { name: "All chats of The Lantern Inn" })).toBeVisible()
+  // Each on one line: a narrow tile puts the second under the first.
+  const fresh = page.getByRole("link", { name: "New chat with The Lantern Inn" })
+  await expect(fresh).toBeVisible()
+  expect(await fresh.evaluate((node) => node.scrollWidth <= node.clientWidth && node.clientHeight <= 32)).toBe(true)
   await context.close()
 })
 

@@ -522,7 +522,10 @@ export const Message = memo(function Message({
   const linkSearch = branchLeaf === null ? { slot: entry.slotId } : { leaf: branchLeaf, slot: entry.slotId }
 
   const hidden = entry.contextExcluded
-  const hiddenReason = `Hidden: never sent to the model.${version.origin === "imported" ? " It was hidden in SillyTavern." : ""}`
+  // Who hid it: the user here (SetMessageHidden), else it came hidden from an ST import.
+  const hiddenReason = entry.hiddenByUser
+    ? "Hidden: you hid it from the model, so it isn't sent. To send it again: More actions → Show to the model again."
+    : `Hidden: not sent to the model.${version.origin === "imported" ? " It was hidden in SillyTavern." : ""}`
   const empty = !hidden && !entry.inContext && !generating && version.status !== "failed" && context === null
   const reason = hidden
     ? hiddenReason
@@ -553,6 +556,9 @@ export const Message = memo(function Message({
       >
         Branch from here
       </MenuLinkItem>
+      <MenuItem icon={hidden ? "eye" : "ghost"} onClick={async () => report(await session.setHidden(entry, !hidden))}>
+        {hidden ? "Show to the model again" : "Hide from the model"}
+      </MenuItem>
       <MenuItem icon="copy" onClick={() => void copy(session.textOf(version), "Text")}>
         Copy text
       </MenuItem>

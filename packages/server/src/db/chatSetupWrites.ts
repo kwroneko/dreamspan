@@ -165,7 +165,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
       })
 
     const handlers = {
-      StartChat: ({ userId, cards, persona, greeting, first, frozen }) =>
+      StartChat: ({ userId, cards, persona, greeting, first, frozen, title }) =>
         Effect.gen(function* () {
           const ids = [...new Set([...cards, ...(persona === null ? [] : [persona])])]
           const loaded = yield* loadCards(sql, userId, ids)
@@ -185,7 +185,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
             owner_user_id: userId,
             kind: "rp",
             status: "active",
-            title: titleFor(names, at),
+            title: title?.trim() || titleFor(names, at),
             created_at: at
           })}`
           yield* sql`INSERT INTO lanes ${sql.insert({ id: laneId, chat_id: chatId, name: "main", created_at: at })}`

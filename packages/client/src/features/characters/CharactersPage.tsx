@@ -51,7 +51,7 @@ type Filter = "all" | "groups" | "unused"
 // Buttons over the picture: on a mouse, they show on hover or focus; on a touch screen,
 // where nothing hovers, always.
 const tileAction =
-  "pointer-events-auto inline-flex h-7 items-center rounded-md border border-border bg-surface/95 px-2 text-xs font-medium text-text shadow-sm outline-none hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus"
+  "pointer-events-auto inline-flex h-7 items-center whitespace-nowrap rounded-md border border-border bg-surface/95 px-2 text-xs font-medium text-text shadow-sm outline-none hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus"
 
 /** A group's tile: its members' faces, its name, its use and who's in it. */
 function GroupTile({ group }: { group: ChatGroup }) {
@@ -84,7 +84,16 @@ function GroupTile({ group }: { group: ChatGroup }) {
           Group · {group.members.length}
         </span>
       </span>
-      <span className="pointer-events-none absolute inset-x-0 top-0 flex aspect-[4/5] items-end justify-end gap-1.5 p-2 transition-opacity pointer-fine:opacity-0 pointer-fine:group-focus-within:opacity-100 pointer-fine:group-hover:opacity-100 motion-reduce:transition-none">
+      {/* Two actions: on a narrow tile the second goes under the first rather than squeezing both. */}
+      <span className="pointer-events-none absolute inset-x-0 top-0 flex aspect-[4/5] flex-wrap content-end items-end justify-between gap-1.5 p-2 transition-opacity pointer-fine:opacity-0 pointer-fine:group-focus-within:opacity-100 pointer-fine:group-hover:opacity-100 motion-reduce:transition-none">
+        <Link
+          to="/groups/$chatId/new"
+          params={{ chatId: group.latestChatId }}
+          aria-label={`New chat with ${group.name}`}
+          className={tileAction}
+        >
+          New chat
+        </Link>
         <Link
           to="/groups/$chatId"
           params={{ chatId: group.latestChatId }}

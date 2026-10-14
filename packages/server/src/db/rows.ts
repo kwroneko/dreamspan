@@ -123,6 +123,7 @@ export interface PathRow extends VersionRow {
   readonly depth: number
   readonly row_version: number
   readonly context_excluded: number
+  readonly hidden_by_user: number
   readonly slot_deleted: number
   readonly version_count: number
   readonly branch_count: number
@@ -143,6 +144,7 @@ export const toPathEntry = (row: PathRow) => {
     depth: row.depth,
     rowVersion: row.row_version,
     contextExcluded,
+    hiddenByUser: contextExcluded && row.hidden_by_user === 1,
     version,
     versionCount: row.version_count,
     branchCount: row.branch_count,

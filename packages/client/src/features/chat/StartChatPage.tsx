@@ -3,8 +3,13 @@
 // until the first send, so opening cards never leaves greeting-only chats behind. What's
 // typed is kept in this browser (editor/backup.ts) until that send makes the chat, whose
 // own composer draft takes over: leaving and coming back finds it (DESIGN §6.2).
-import type { CastCard, EntityId } from "@rp/shared/chat.ts"
-import type { CardForChat } from "@rp/shared/chatSetupApi.ts"
+//
+// A new chat of a group (`/groups/$chatId/new`) is the same, with the group's characters:
+// its first character greets, as the first of ST's group greetings (ST adds each member's
+// greeting in turn; one keeps the start short), the reply comes from the character picked,
+// and the chat is titled with the group's name, so it's one of the group's chats.
+import type { CastCard, ChatId, EntityId } from "@rp/shared/chat.ts"
+import type { CardForChat, ChatGroup } from "@rp/shared/chatSetupApi.ts"
 import type { FrozenValues } from "@rp/shared/macros/expand.ts"
 import { useNavigate, useParams } from "@tanstack/react-router"
 import { Effect } from "effect"
@@ -17,7 +22,16 @@ import { Markdown } from "../../ui/Markdown.tsx"
 import { Select } from "../../ui/Select.tsx"
 import { Loading } from "../../ui/Spinner.tsx"
 import { useSession } from "../../session.ts"
-import { copiesOf, type Copy, dropCopy, keepCopy, makeCopy, pendingChatCopy } from "../editor/backup.ts"
+import {
+  copiesOf,
+  type Copy,
+  dropCopy,
+  keepCopy,
+  makeCopy,
+  pendingChatCopy,
+  pendingGroupChatCopy
+} from "../editor/backup.ts"
+import { GroupFaces } from "../characters/GroupFaces.tsx"
 import { useTitle } from "../shell.tsx"
 import { carryComposerText } from "./composerCarry.ts"
 import { expandForDisplay } from "./macros.ts"
@@ -40,7 +54,22 @@ const savePersona = (id: string) => {
   }
 }
 
-function Pending({ card, personas }: { card: CardForChat; personas: ReadonlyArray<CastCard> }) {
+/** A group the new chat is of: its name, its characters, and the chat that names it. */
+interface PendingGroup {
+  readonly group: ChatGroup
+  readonly chatId: ChatId
+}
+
+function Pending({
+  card,
+  personas,
+  group = null
+}: {
+  /** The card that greets: the chat's card, or the group's first character. */
+  card: CardForChat
+  personas: ReadonlyArray<CastCard>
+  group?: PendingGroup | null
+}) {
   const action = useAction()
   const navigate = useNavigate()
   const [persona, setPersona] = useState<string>(() => {
@@ -48,6 +77,9 @@ function Pending({ card, personas }: { card: CardForChat; personas: ReadonlyArra
     return personas.find((p) => p.entityId === saved)?.entityId ?? personas[0]?.entityId ?? NONE
   })
   const [greeting, setGreeting] = useState(0)
+  const members = group?.group.members ?? null
+  // Who replies: in a group, the character picked (its first, as the chat's default speaker).
+  const [replier, setReplier] = useState<string>(card.card.entityId)
   const [text, setTextState] = useState("")
   // The latest text, for what's typed while the first send is on its way (read after it).
   const typed = useRef("")
@@ -60,6 +92,13 @@ function Pending({ card, personas }: { card: CardForChat; personas: ReadonlyArra
   // This browser's copy of the text, and the text on its way in the first send.
   const userId = useSession().user.id
   const entityId = card.card.entityId
+  const copyKey =
+    group === null
+      ? pendingChatCopy(entityId)
+      : pendingGroupChatCopy(
+          group.group.name,
+          group.group.members.map((member) => member.entityId)
+        )
   const copy = useRef<Copy | null>(null)
   const sending = useRef<string | null>(null)
   const keep = (content: string) => {
@@ -71,9 +110,15 @@ function Pending({ card, personas }: { card: CardForChat; personas: ReadonlyArra
     }
     copy.current = makeCopy(
       userId,
-      pendingChatCopy(entityId),
+      copyKey,
       "first message",
-      { kind: "pendingChat", payload: { entityId, name: card.card.name, content } },
+      {
+        kind: "pendingChat",
+        payload:
+          group === null
+            ? { entityId, name: card.card.name, content }
+            : { entityId, name: group.group.name, content, groupChatId: group.chatId }
+      },
       Date.now()
     )
     void keepCopy(copy.current, previous)
@@ -82,7 +127,7 @@ function Pending({ card, personas }: { card: CardForChat; personas: ReadonlyArra
   // several tabs left one (the others stay in Browser recovery).
   useEffect(() => {
     let current = true
-    void copiesOf(userId, pendingChatCopy(entityId)).then((copies) => {
+    void copiesOf(userId, copyKey).then((copies) => {
       const newest = [...copies].sort((a, b) => b.at - a.at)[0]
       if (!current || newest === undefined || copy.current !== null || typed.current !== "") return
       copy.current = newest
@@ -92,10 +137,14 @@ function Pending({ card, personas }: { card: CardForChat; personas: ReadonlyArra
     return () => {
       current = false
     }
-  }, [userId, entityId])
+  }, [userId, copyKey])
   const playing = personas.find((p) => p.entityId === persona) ?? null
   const shown = card.greetings[greeting]
   const name = card.card.name
+  /** What the chat is with: the card, or the group. */
+  const title = group?.group.name ?? name
+  const replyId = (members === null ? entityId : replier) as EntityId
+  const replyName = members?.find((member) => member.entityId === replyId)?.name ?? name
   const fields = { description: card.description, personality: card.personality, scenario: card.scenario }
   // What each greeting's random and time macros drew when first shown: the chat keeps them,
   // so a greeting reads the same after the send as before it (DESIGN §5.6).
@@ -125,7 +174,9 @@ function Pending({ card, personas }: { card: CardForChat; personas: ReadonlyArra
       (client) =>
         Effect.gen(function* () {
           const started = yield* client("StartChat", {
-            cards: [card.card.entityId],
+            // The greeting card leads; a group's chat has all its characters, under its name.
+            cards: members === null ? [entityId] : members.map((member) => member.entityId),
+            ...(group === null ? {} : { title: group.group.name }),
             persona: personaId,
             greeting: card.greetings.length > 0 ? greeting : null,
             // The picked greeting as it was shown; the server freezes the rest itself.
@@ -133,7 +184,7 @@ function Pending({ card, personas }: { card: CardForChat; personas: ReadonlyArra
             first:
               first === "send"
                 ? { _tag: "Send", content: submitted, speakerEntityId: personaId }
-                : { _tag: "Generate", speakerEntityId: card.card.entityId, direction: submitted }
+                : { _tag: "Generate", speakerEntityId: replyId, direction: submitted }
           })
           // A message gets its reply, as after any send; a server without a generator still keeps the message.
           if (first === "send") {
@@ -142,7 +193,7 @@ function Pending({ card, personas }: { card: CardForChat; personas: ReadonlyArra
                 chatId: started.chat.id,
                 parentSlotId: started.entry.slotId,
                 branch: false,
-                speakerEntityId: card.card.entityId
+                speakerEntityId: replyId
               })
             )
           }
@@ -169,21 +220,48 @@ function Pending({ card, personas }: { card: CardForChat; personas: ReadonlyArra
   return (
     <>
       <header className="mx-auto flex w-full max-w-3xl flex-wrap items-center gap-3 pb-2">
-        <Avatar id={card.card.entityId} name={name} mediaId={card.card.avatarMediaId} />
-        <h1 className="min-w-0 flex-1 truncate text-lg font-semibold">{name}</h1>
-        <Field label="Playing as" className="w-56">
-          <Select
-            items={[
-              ...personas.map((p) => ({ value: p.entityId as string, label: p.name })),
-              { value: NONE, label: "No persona" }
-            ]}
-            value={persona}
-            onValueChange={(next) => {
-              setPersona(next)
-              savePersona(next)
-            }}
-          />
-        </Field>
+        {members === null ? (
+          <Avatar id={card.card.entityId} name={name} mediaId={card.card.avatarMediaId} />
+        ) : (
+          <span className="block size-12 shrink-0 overflow-hidden rounded-lg">
+            <GroupFaces members={members} />
+          </span>
+        )}
+        <div className="flex min-w-0 flex-1 flex-col">
+          <h1 className="text-lg font-semibold [overflow-wrap:anywhere]">
+            {members === null ? name : `New chat: ${title}`}
+          </h1>
+          {members !== null && (
+            <p className="text-sm text-muted [overflow-wrap:anywhere]">
+              With {members.map((member) => member.name).join(", ")}. Saved when you send the first message.
+            </p>
+          )}
+        </div>
+        {/* A group's chat picks who replies too: both fields on a row of their own. */}
+        <div className={`flex gap-3 ${members === null ? "w-full sm:w-56" : "w-full"}`}>
+          <Field label="Playing as" className={members === null ? "w-full" : "flex-1 sm:w-56 sm:flex-none"}>
+            <Select
+              items={[
+                ...personas.map((p) => ({ value: p.entityId as string, label: p.name })),
+                { value: NONE, label: "No persona" }
+              ]}
+              value={persona}
+              onValueChange={(next) => {
+                setPersona(next)
+                savePersona(next)
+              }}
+            />
+          </Field>
+          {members !== null && (
+            <Field label="Reply from" className="flex-1 sm:w-56 sm:flex-none">
+              <Select
+                items={members.map((member) => ({ value: member.entityId as string, label: member.name }))}
+                value={replyId}
+                onValueChange={setReplier}
+              />
+            </Field>
+          )}
+        </div>
       </header>
       <div className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col gap-3 overflow-y-auto py-2">
         {shown === undefined ? (
@@ -195,6 +273,7 @@ function Pending({ card, personas }: { card: CardForChat; personas: ReadonlyArra
           >
             <header className="flex items-center gap-2 text-sm">
               <span className="font-medium">{name}</span>
+              {members !== null && <span className="text-muted"> greets first</span>}
               {card.greetings.length > 1 && (
                 <div className="ml-auto flex items-center gap-1" role="group" aria-label="Greetings">
                   <Button
@@ -231,7 +310,7 @@ function Pending({ card, personas }: { card: CardForChat; personas: ReadonlyArra
           id="composer"
           rows={3}
           value={text}
-          placeholder={`Write to ${name}…`}
+          placeholder={`Write to ${title}…`}
           onChange={(event) => {
             const value = event.currentTarget.value
             typed.current = value
@@ -252,7 +331,7 @@ function Pending({ card, personas }: { card: CardForChat; personas: ReadonlyArra
             {playing ? `Send as ${playing.name}` : "Send"}
           </Button>
           <Button disabled={action.pending} onClick={() => void start("generate")}>
-            Generate {name}
+            Generate {replyName}
           </Button>
         </div>
         <ErrorAlert error={action.error} />
@@ -291,6 +370,52 @@ export function StartChatPage() {
         <ErrorAlert error={action.error} />
       ) : (
         <Loading label="Loading the card…" />
+      )}
+    </div>
+  )
+}
+
+/** /groups/$chatId/new: a new chat with a group's characters, made on its first send. */
+export function StartGroupChatPage() {
+  const { chatId } = useParams({ strict: false }) as { chatId: ChatId }
+  const action = useAction()
+  const [loaded, setLoaded] = useState<{
+    group: ChatGroup
+    card: CardForChat
+    personas: ReadonlyArray<CastCard>
+  } | null>(null)
+  useTitle(loaded ? `New chat: ${loaded.group.name}` : "New chat")
+  useEffect(() => {
+    void action
+      .run((client) =>
+        Effect.gen(function* () {
+          const { group } = yield* client("ListGroupChats", { chatId })
+          const { card, cards } = yield* Effect.all(
+            {
+              card: client("GetCardForChat", { entityId: group.members[0]!.entityId }),
+              cards: client("ListCards", undefined)
+            },
+            { concurrency: "unbounded" }
+          )
+          return { group, card, cards }
+        })
+      )
+      .then((result) => {
+        if (!result.ok) return
+        const { group, card, cards } = result.value
+        const inGroup = new Set<string>(group.members.map((member) => member.entityId))
+        setLoaded({ group, card, personas: cards.filter((c) => c.persona && !inGroup.has(c.entityId)) })
+      })
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per group
+  }, [chatId])
+  return (
+    <div data-fill className="flex min-h-0 flex-1 flex-col">
+      {loaded ? (
+        <Pending key={chatId} card={loaded.card} personas={loaded.personas} group={{ group: loaded.group, chatId }} />
+      ) : action.error ? (
+        <ErrorAlert error={action.error} />
+      ) : (
+        <Loading label="Loading the group…" />
       )}
     </div>
   )

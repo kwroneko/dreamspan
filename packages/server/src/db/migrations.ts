@@ -217,6 +217,11 @@ export const migrations = {
   "0034_chat_participants": runAll([
     `CREATE INDEX state_events_participants ON state_events(json_extract(value_json, '$.entity'), chat_id)
       WHERE key = 'participant.join' AND superseded_by_changeset IS NULL`
+  ]),
+  // A message the user hid from the model here (SetSlotHidden), told apart from one that
+  // came hidden from an ST import, so its mark says who hid it.
+  "0035_hidden_by_user": runAll([
+    `ALTER TABLE slots ADD COLUMN hidden_by_user INTEGER NOT NULL DEFAULT 0 CHECK (hidden_by_user IN (0, 1))`
   ])
 }
 

@@ -1,4 +1,5 @@
 import { recordHistoryReduction } from "./historyChanges.ts"
+import { contextExcluded } from "./lcmVisibility.ts"
 // Write operation handlers. They run inside the writer worker, each as one transaction.
 import type { ChatId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
@@ -161,6 +162,26 @@ export const makeWriteHandlers = (bin: Bin) =>
           Effect.map(({ rowVersion }) => ({ rowVersion })),
           transaction("SelectVersion")
         ),
+
+      SetSlotHidden: ({ userId, slotId, hidden }) =>
+        Effect.gen(function* () {
+          yield* ownedSlot(userId, slotId)
+          // What the context reads: a staged LCM unhide shows a slot whose flag is still set.
+          const [row] = yield* sql<{ raw: number; effective: number }>`
+            SELECT s.context_excluded AS raw, ${sql.literal(contextExcluded("s"))} AS effective
+            FROM slots s WHERE s.id = ${slotId}`
+          if ((row!.effective === 1) === hidden) return { changed: false }
+          const flag = hidden ? 1 : 0
+          // Setting the flag ends a staged unhide's overlay (lcm_enable_explicit_visibility),
+          // and a hide records a history reduction (history_reduced_slot) for stepped history.
+          yield* sql`UPDATE slots SET context_excluded = ${flag}, hidden_by_user = ${flag},
+            row_version = row_version + 1 WHERE id = ${slotId}`
+          // Hidden under the overlay, the flag was set already, so the trigger saw no change.
+          if (hidden && row!.raw === 1)
+            yield* sql`INSERT INTO history_changes SELECT id, chat_id, depth, 1 FROM slots WHERE id = ${slotId}
+              ON CONFLICT(slot_id) DO UPDATE SET revision = revision + 1`
+          return { changed: true }
+        }).pipe(transaction("SetSlotHidden")),
 
       AddStateEvent: ({ userId, chatId, slotId, versionId, scope, data }) =>
         Effect.gen(function* () {

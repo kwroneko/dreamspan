@@ -55,7 +55,7 @@ const siblingCount = (also = "") => {
 const pathColumns = `v.id, v.slot_id, v.ordinal, v.status, v.speaker_entity_id, v.writer, v.content,
   v.macro_mode, v.origin, v.source_version_id, v.direction, v.hidden, v.starred, v.created_at, v.error_json, v.mark,
   v.frozen_macros, v.rollout_id,
-  ${versionExtras("v")}, s.lane_id, s.parent_slot_id, s.depth, s.row_version, ${contextExcluded()} AS context_excluded,
+  ${versionExtras("v")}, s.lane_id, s.parent_slot_id, s.depth, s.row_version, ${contextExcluded()} AS context_excluded, s.hidden_by_user,
   s.deleted_at IS NOT NULL AS slot_deleted,
   (SELECT count(*) FROM versions c WHERE c.slot_id = s.id AND c.deleted_at IS NULL) AS version_count,
   ${siblingCount()} AS branch_count, ${siblingCount("AND x.id < s.id")} AS branch_index,
