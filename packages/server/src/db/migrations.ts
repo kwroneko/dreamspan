@@ -222,6 +222,11 @@ export const migrations = {
   // came hidden from an ST import, so its mark says who hid it.
   "0035_hidden_by_user": runAll([
     `ALTER TABLE slots ADD COLUMN hidden_by_user INTEGER NOT NULL DEFAULT 0 CHECK (hidden_by_user IN (0, 1))`
+  ]),
+  // Imports may select changed ST text until a local slot mutation takes over. Existing
+  // slots at revision 1 have never been changed here; others are conservatively kept.
+  "0036_st_import_selection": runAll([
+    `ALTER TABLE slots ADD COLUMN st_import_row_version INTEGER NOT NULL DEFAULT 1 CHECK (st_import_row_version > 0)`
   ])
 }
 

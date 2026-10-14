@@ -171,6 +171,7 @@ interface ChatProgress {
   readonly spoke: Set<EntityId>
   readonly partHashes: Array<string>
   added: number
+  updated: number
   differing: number
 }
 
@@ -551,6 +552,7 @@ export class StImports extends Context.Service<
           progress.cursor = written.slotIds.at(-1) ?? progress.cursor
           progress.matching = written.matching
           progress.added += written.added
+          progress.updated += written.updated
           progress.differing += written.differing
         })
 
@@ -680,7 +682,7 @@ export class StImports extends Context.Service<
               })
             )
           }
-          return applies && !progress.isNew ? "updated" : progress.isNew ? "added" : "unchanged"
+          return progress.isNew ? "added" : applies || progress.updated > 0 ? "updated" : "unchanged"
         })
 
       /** Reads a chat's first part: what it's linked to, and where its messages go. */
@@ -812,6 +814,7 @@ export class StImports extends Context.Service<
           spoke: new Set(),
           partHashes: [],
           added: 0,
+          updated: 0,
           differing: 0
         }
       }

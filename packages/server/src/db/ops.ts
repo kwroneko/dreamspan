@@ -1276,7 +1276,8 @@ export class WriteOps extends RpcGroup.make(
    * A batch of messages under `parentSlotId` (null: the chat's first). While `matching`, a
    * message that matches a child already there (a version with the same text, or the text it
    * had before the user amended it, and time, by the same kind of writer) is that child, taking any versions it lacks; the first that
-   * doesn't starts new slots. Returns each message's slot, in order.
+   * doesn't starts new slots. On this file's recorded prior path, position and writer
+   * identify a live slot even when ST overwrote its text. Returns each slot, in order.
    */
   Rpc.make("StImportMessages", {
     payload: {
@@ -1303,6 +1304,8 @@ export class WriteOps extends RpcGroup.make(
       slotIds: Schema.Array(SlotId),
       matching: Schema.Boolean,
       added: Schema.Int,
+      /** Matched slots with added versions or an imported selection change. */
+      updated: Schema.Int,
       /** Matched messages shown or hidden differently here than in the file. */
       differing: Schema.Int
     }),

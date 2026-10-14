@@ -1,4 +1,5 @@
 import { contextExcluded } from "./lcmVisibility.ts"
+import { recordHistoryReduction } from "./historyChanges.ts"
 // Write handlers for the ST data folder import (ARCHITECTURE.md §13). Each is one
 // transaction in the writer, and a chat goes in over several: its start, its messages in
 // batches, its state. Nothing here reads a file: the format worker parsed them, and the main
@@ -325,6 +326,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
           let matching = input.matching
           let added = 0
           let differing = 0
+          let updated = 0
           let branchDeleted = payload.branchDeleted ?? false
           let firstAdded: string | null = null
           const slotIds: Array<SlotId> = []
@@ -353,6 +355,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
               // oldest history entry), so it isn't imported again beside the amended one.
               const children = yield* sql<{
                 slot_id: string
+                version_id: string
                 depth: number
                 hidden: number
                 selected: number
@@ -364,11 +367,18 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
                 slot_purged: number
                 version_purged: number
                 branch_deleted: number
+                deleted: number
+                version_deleted: number
+                locally_changed: number
               }>`
-                SELECT s.id AS slot_id, s.depth, ${sql.literal(contextExcluded())} AS hidden, v.id = s.selected_version_id AS selected,
+                SELECT s.id AS slot_id, v.id AS version_id, s.depth, ${sql.literal(contextExcluded())} AS hidden, v.id = s.selected_version_id AS selected,
                   v.content, v.created_at, v.writer, v.ordinal,
                   s.purged_at IS NOT NULL AS slot_purged, v.purged_at IS NOT NULL AS version_purged,
                   s.branch_deleted,
+                  s.deleted_at IS NOT NULL AS deleted, v.deleted_at IS NOT NULL AS version_deleted,
+                  s.row_version <> s.st_import_row_version OR EXISTS (
+                    SELECT 1 FROM version_history h WHERE h.version_id = s.selected_version_id
+                  ) AS locally_changed,
                   coalesce((SELECT h.content FROM version_history h WHERE h.version_id = v.id ORDER BY h.id LIMIT 1),
                     v.content) AS original
                 FROM slots s JOIN versions v ON v.slot_id = s.id
@@ -405,25 +415,49 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
                   message.versions.some((version) => row.created_at === version.at)
               )
               const mine =
-                (exact !== undefined && purged.length === 0) || (candidates.length === 0 && purged.length === 0)
+                exact !== undefined && purged.length === 0 && new Set(children.map((row) => row.slot_id)).size === 1
                   ? undefined
                   : yield* priorAt(parent === null ? 0 : parent.depth + 1)
-              const earlier = mine === undefined ? undefined : candidates.find((slot) => slot[0]!.slot_id === mine)
+              // On this file's recorded path, ST may have overwritten every old swipe.
+              // Position identifies the slot even when text and swipe dates changed. A
+              // different writer still starts a new path; purged text is never restored.
+              const earlier = mine === undefined ? undefined : versionsOf(mine)
+              const recorded = earlier?.some((row) => row.writer === writer && row.slot_purged === 0)
+                ? earlier
+                : undefined
               const placeholder = mine === undefined ? undefined : purged.find((row) => row.slot_id === mine)
               // A branch merged into another file's chat is that file's only where it reads
               // the same: a branch from another swipe, or with messages hidden only in it,
               // diverges there, so its own path keeps what ST had on it.
-              const own = exact ?? earlier ?? (input.strict ? undefined : candidates[0])
+              const own = recorded ?? exact ?? (input.strict ? undefined : candidates[0])
               const match = placeholder ?? own?.[0]
               if (match !== undefined) {
                 branchDeleted ||= match.branch_deleted === 1
-                if (exact === undefined && placeholder === undefined) differing++
+                let showsSelected = own?.some((row) => row.selected === 1 && same(row, shown)) ?? false
                 if (own !== undefined && match.slot_purged === 0) {
                   let next = Math.max(...own.map((row) => row.ordinal)) + 1
+                  let changed = false
+                  let selected = own.find((row) => same(row, shown) && row.version_deleted === 0)?.version_id
                   for (const version of message.versions) {
-                    if (!own.some((row) => same(row, version))) yield* insertVersion(match.slot_id, next++, version)
+                    if (!own.some((row) => same(row, version))) {
+                      const id = yield* insertVersion(match.slot_id, next++, version)
+                      if (version === shown) selected = id
+                      changed = true
+                    }
                   }
+                  // A local selection, edit, hide or deletion stays the user's. Import
+                  // selections advance their baseline with the slot's optimistic revision.
+                  if (!showsSelected && selected !== undefined && match.locally_changed === 0 && match.deleted === 0) {
+                    yield* recordHistoryReduction(sql, match.slot_id, shown.content)
+                    yield* sql`UPDATE slots SET selected_version_id = ${selected}, row_version = row_version + 1,
+                      st_import_row_version = row_version + 1 WHERE id = ${match.slot_id}`
+                    showsSelected = true
+                    changed = true
+                  }
+                  if (changed) updated++
                 }
+                if (placeholder === undefined && (!showsSelected || match.hidden !== (message.hidden ? 1 : 0)))
+                  differing++
                 parent = { id: match.slot_id, depth: match.depth, lane_id: laneId }
                 slotIds.push(match.slot_id as SlotId)
                 continue
@@ -476,7 +510,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
           }
           yield* sql`UPDATE jobs SET updated_at = ${Date.now()}, payload_json = ${JSON.stringify(progress)}
             WHERE id = ${input.recordId}`
-          return { slotIds, matching, added, differing }
+          return { slotIds, matching, added, updated, differing }
         }).pipe(transaction(sql, "StImportMessages"))
       ),
 
