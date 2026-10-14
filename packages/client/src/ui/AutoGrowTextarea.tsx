@@ -9,7 +9,7 @@ export function AutoGrowTextarea(props: ComponentProps<"textarea"> & { value: st
     box.style.height = "auto"
     box.style.height = `${Math.min(box.scrollHeight, Math.max(160, innerHeight / 3))}px`
   }, [])
-  useLayoutEffect(fit, [fit, props.value])
+  useLayoutEffect(fit, [fit, props.value, props.placeholder])
   // The same text takes more lines in a narrower box: a phone turned, a panel opened.
   useEffect(() => {
     const box = ref.current

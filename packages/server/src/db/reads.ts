@@ -290,6 +290,9 @@ export const makeReadHandlers = Effect.gen(function* () {
     ListMessageDrafts: ({ userId, chatId }) =>
       drafts.listMessageDrafts(userId, chatId).pipe(query("ListMessageDrafts")),
 
+    GetComposerChoice: ({ userId, chatId, draftId }) =>
+      drafts.composerChoice(userId, chatId, draftId).pipe(query("GetComposerChoice")),
+
     ComposerHistory: ({ userId, chatId, draftId, limit }) =>
       Effect.gen(function* () {
         const draft = yield* drafts.findComposer(userId, chatId, draftId)

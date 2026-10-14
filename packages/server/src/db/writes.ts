@@ -105,6 +105,15 @@ export const makeWriteHandlers = (bin: Bin) =>
           return yield* drafts.openComposer(userId, key, from)
         }).pipe(transaction("OpenComposer")),
 
+      SetComposerChoice: ({ userId, chatId, draftId, speakerEntityId, replyFromEntityId, consumeReplyFromEntityId }) =>
+        drafts
+          .setComposerChoice(userId, chatId, draftId, {
+            ...(speakerEntityId === undefined ? {} : { speakerEntityId }),
+            ...(replyFromEntityId === undefined ? {} : { replyFromEntityId }),
+            ...(consumeReplyFromEntityId === undefined ? {} : { consumeReplyFromEntityId })
+          })
+          .pipe(transaction("SetComposerChoice")),
+
       // Into a chat of the user's, live or in the bin: text typed as it was deleted is kept too.
       SaveComposer: ({ userId, chatId, draftId, rowVersion, session, next, operationId, content }) =>
         Effect.gen(function* () {

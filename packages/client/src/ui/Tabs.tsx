@@ -6,6 +6,7 @@ export function Tabs<Value extends string>({
   tabs,
   value,
   onValueChange,
+  onPointerActivate,
   label,
   fill = false,
   keepMounted = false,
@@ -14,6 +15,8 @@ export function Tabs<Value extends string>({
   tabs: ReadonlyArray<{ readonly value: Value; readonly label: string; readonly panel: ReactNode }>
   value: Value
   onValueChange: (value: Value) => void
+  /** After a pointer clicks any tab, including the active one; keyboard focus stays on tabs. */
+  onPointerActivate?: ((value: Value) => void) | undefined
   label: string
   /** Fills its container's height, the open panel scrolling inside it; the tabs scroll sideways when narrow. */
   fill?: boolean | undefined
@@ -31,6 +34,9 @@ export function Tabs<Value extends string>({
         <BaseTabs.Tab
           key={tab.value}
           value={tab.value}
+          onClick={(event) => {
+            if (event.detail > 0) onPointerActivate?.(tab.value)
+          }}
           className={`${fill ? "shrink-0 px-1.5" : "-mb-px px-3"} rounded-t-md border-b-2 border-transparent py-1.5 text-sm whitespace-nowrap text-muted outline-none hover:text-text focus-visible:ring-2 focus-visible:ring-focus data-active:border-accent data-active:text-text`}
         >
           {tab.label}

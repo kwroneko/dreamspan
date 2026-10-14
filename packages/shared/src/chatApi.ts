@@ -6,7 +6,7 @@ import { Rpc, RpcGroup } from "effect/rpc"
 import { BinItem } from "./bin.ts"
 import { Chat, ChatId, ChatSummary, EntityId, PathEntry, QueuedMessage, SlotId, Version, VersionId } from "./chat.ts"
 import { LeafMoved, NotFound, ServerError, StaleWrite } from "./errors.ts"
-import { TextTooLong } from "./composerApi.ts"
+import { ComposerChoice, TextTooLong } from "./composerApi.ts"
 import { Draft, DraftKey } from "./drafts.ts"
 import { NextContext } from "./inspectorApi.ts"
 import { ModelChoice } from "./lcmSettings.ts"
@@ -82,7 +82,9 @@ export const ChatEvent = Schema.Union([
   /** The chat's summaries changed (made, edited, selected, failed, asked for again) or LCM was switched: read GetLcmState again. */
   Schema.TaggedStruct("Lcm", {}),
   /** The cache-warmth estimate changed; null when there's none to show (DESIGN §5.5). */
-  Schema.TaggedStruct("Cache", NextContext.fields)
+  Schema.TaggedStruct("Cache", NextContext.fields),
+  /** A composer's speaker or reply choice changed, in this tab or another. */
+  Schema.TaggedStruct("ComposerChoice", { choice: ComposerChoice })
 ])
 export type ChatEvent = typeof ChatEvent.Type
 

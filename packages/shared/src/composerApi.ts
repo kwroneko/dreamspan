@@ -7,7 +7,7 @@
 // the tip: the server saves the text onto that draft wherever it is now (ARCHITECTURE §3.10).
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
-import { ChatId, SlotId } from "./chat.ts"
+import { ChatId, EntityId, SlotId } from "./chat.ts"
 import { Draft, DraftRestore, DraftState } from "./drafts.ts"
 import { NotFound, ServerError, StaleWrite } from "./errors.ts"
 
@@ -18,6 +18,19 @@ export class TextTooLong extends Schema.TaggedError<TextTooLong>()("TextTooLong"
 }) {}
 
 const Errors = [NotFound, ServerError] as const
+
+/**
+ * Who a composer speaks as, and who replies to its next send (DESIGN §2.2), kept with its
+ * draft on the server: they move with the draft to the next tip, so a reload, another tab
+ * or another device finds the same speaker, never a reset to the first card (ST-GRIPES D8).
+ */
+export class ComposerChoice extends Schema.Class<ComposerChoice>("ComposerChoice")({
+  draftId: Schema.String,
+  /** The card picked to speak as; null until one is, when the composer picks its default. */
+  speakerEntityId: Schema.NullOr(EntityId),
+  /** Who replies to the next send, picked for that one reply; null: the next in turn. */
+  replyFromEntityId: Schema.NullOr(EntityId)
+}) {}
 
 /**
  * Text typed into a composer: the draft it was typed into, as the client last had it, and
@@ -76,5 +89,28 @@ export class ComposerApi extends RpcGroup.make(
     payload: { chatId: ChatId, draftId: Schema.String, ...DraftRestore },
     success: Draft,
     error: Schema.Union([NotFound, StaleWrite, ServerError])
+  }),
+  /** The speaker and reply choice kept with a composer draft. */
+  Rpc.make("GetComposerChoice", {
+    payload: { chatId: ChatId, draftId: Schema.String },
+    success: ComposerChoice,
+    error: Schema.Union([...Errors])
+  }),
+  /**
+   * Changes what's given of the speaker and the reply choice (null clears it) and publishes
+   * the result to the chat's subscribers (`ComposerChoice`), so every open tab shows it. A
+   * choice, not text: the last one made wins, with no history.
+   */
+  Rpc.make("SetComposerChoice", {
+    payload: {
+      chatId: ChatId,
+      draftId: Schema.String,
+      speakerEntityId: Schema.optionalKey(Schema.NullOr(EntityId)),
+      replyFromEntityId: Schema.optionalKey(Schema.NullOr(EntityId)),
+      /** Consume a one-reply pick only if it still names this card. */
+      consumeReplyFromEntityId: Schema.optionalKey(EntityId)
+    },
+    success: ComposerChoice,
+    error: Schema.Union([...Errors])
   })
 ) {}

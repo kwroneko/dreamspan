@@ -18,6 +18,7 @@ import {
   versionInContext
 } from "@rp/shared/chat.ts"
 import type { Cast, CastChange } from "@rp/shared/chatSetupApi.ts"
+import type { ComposerChoice } from "@rp/shared/composerApi.ts"
 import type { CardFields } from "@rp/shared/macros/context.ts"
 import { NotFound } from "@rp/shared/errors.ts"
 import type {
@@ -64,6 +65,8 @@ export interface ChatView {
   readonly follow: boolean
   /** Bumped when the window is replaced rather than extended, so the list can position it. */
   readonly opened: number
+  /** History changed, including outside the loaded window; streamed text doesn't bump this. */
+  readonly pathRevision: number
   readonly loading: boolean
   readonly error: string | null
   /** The chat went to the bin while open, here or elsewhere. */
@@ -108,6 +111,7 @@ export class ChatSession {
     newer: null,
     follow: true,
     opened: 0,
+    pathRevision: 0,
     loading: true,
     error: null,
     deleted: false,
@@ -188,6 +192,18 @@ export class ChatSession {
       if (!this.view.loading) void this.refreshCast()
       void this.refreshContext()
       void this.refreshLcm()
+    }
+  }
+
+  private readonly choiceListeners = new Set<(choice: ComposerChoice | null) => void>()
+  /**
+   * Calls `listener` with each composer's speaker or reply choice published to this chat
+   * (speaker.ts), and with null after a reconnect, when one may have been missed.
+   */
+  readonly onComposerChoice = (listener: (choice: ComposerChoice | null) => void) => {
+    this.choiceListeners.add(listener)
+    return () => {
+      this.choiceListeners.delete(listener)
     }
   }
 
@@ -697,11 +713,15 @@ export class ChatSession {
         // event: its live text would hide the saved one.
         const live = new Set(event.live.map((l) => l.versionId))
         for (const id of [...this.live.keys()]) if (!live.has(id)) this.endLive(id)
+        for (const listener of this.choiceListeners) listener(null)
         this.reload()
         return
       }
       case "Slot":
       case "Version":
+        this.update({ pathRevision: this.view.pathRevision + 1 })
+        if (this.reads > 0) this.missed.push(event)
+        return this.applyState(event)
       case "Chat":
         if (this.reads > 0) this.missed.push(event)
         return this.applyState(event)
@@ -718,6 +738,9 @@ export class ChatSession {
         return void this.refreshCast()
       case "Lcm":
         return this.scheduleLcm()
+      case "ComposerChoice":
+        for (const listener of this.choiceListeners) listener(event.choice)
+        return
       case "WaitingCache":
         if (!this.live.has(event.versionId)) this.setLive(event.versionId, "")
         this.registry.set(waitingCache(event.versionId), event.waiting)
@@ -766,6 +789,7 @@ export class ChatSession {
 
   /** Reads the loaded range again, as far as one read goes, keeping the same slots in view. */
   private reload() {
+    this.update({ pathRevision: this.view.pathRevision + 1 })
     this.scheduleLcm()
     const { entries, newer } = this.view
     const limit = Math.min(MAX_LOADED, Math.max(PAGE, entries.length))

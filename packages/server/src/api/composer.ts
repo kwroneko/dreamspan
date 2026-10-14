@@ -5,12 +5,14 @@ import { type AppApi, CurrentUser } from "@rp/shared/api.ts"
 import { TextTooLong } from "@rp/shared/composerApi.ts"
 import { composerKey } from "@rp/shared/drafts.ts"
 import { Effect } from "effect"
+import { ChatHub } from "../chat/ChatHub.ts"
 import { Reader, Writer } from "../db/Database.ts"
 import { internal } from "./internal.ts"
 
 export const makeComposerHandlers = Effect.gen(function* () {
   const reader = yield* Reader
   const writer = yield* Writer
+  const hub = yield* ChatHub
 
   const userId = Effect.map(CurrentUser, (user) => user.id)
 
@@ -42,6 +44,18 @@ export const makeComposerHandlers = Effect.gen(function* () {
     RestoreComposer: (payload) =>
       Effect.flatMap(userId, (id) => writer.RestoreComposer({ userId: id, ...payload })).pipe(
         internal("RestoreComposer")
+      ),
+
+    GetComposerChoice: ({ chatId, draftId }) =>
+      Effect.flatMap(userId, (id) => reader.GetComposerChoice({ userId: id, chatId, draftId })).pipe(
+        internal("GetComposerChoice")
+      ),
+
+    // Every tab of the chat shows the composer's speaker as it is now (ST-GRIPES D8).
+    SetComposerChoice: (payload) =>
+      Effect.flatMap(userId, (id) => writer.SetComposerChoice({ userId: id, ...payload })).pipe(
+        Effect.tap((choice) => Effect.sync(() => hub.publish(payload.chatId, { _tag: "ComposerChoice", choice }))),
+        internal("SetComposerChoice")
       )
   } satisfies Partial<Parameters<typeof AppApi.of>[0]>
   return handlers
