@@ -13,9 +13,6 @@ export type ImageMode = "show" | "blur" | "hide"
 /** ST's avatar styles: Rectangular (2:3, ST's "big avatars"), Circle, Square, Rounded square. */
 export type AvatarStyle = "portrait" | "round" | "square" | "rounded"
 
-export const IMAGE_MODES: ReadonlyArray<ImageMode> = ["show", "blur", "hide"]
-export const AVATAR_STYLES: ReadonlyArray<AvatarStyle> = ["portrait", "round", "square", "rounded"]
-
 const MODE_KEY = "rp.images"
 /** The concealment the toggle switches to: the one last picked, blur at first. */
 const CONCEAL_KEY = "rp.images.conceal"
@@ -39,13 +36,12 @@ const set = (key: string, value: string) => {
 const memory = new Map<string, string>()
 const read = (key: string) => memory.get(key) ?? get(key)
 
-export const parseMode = (value: string | null): ImageMode =>
-  value === "blur" || value === "hide" ? value : "show"
-export const parseStyle = (value: string | null): AvatarStyle =>
+const parseMode = (value: string | null): ImageMode => (value === "blur" || value === "hide" ? value : "show")
+const parseStyle = (value: string | null): AvatarStyle =>
   value === "round" || value === "square" || value === "rounded" ? value : "portrait"
 const parseConceal = (value: string | null): Exclude<ImageMode, "show"> => (value === "hide" ? "hide" : "blur")
 
-export interface ImagePrefs {
+interface ImagePrefs {
   readonly mode: ImageMode
   readonly conceal: Exclude<ImageMode, "show">
   readonly avatars: AvatarStyle
@@ -89,7 +85,14 @@ export const applyImagePrefs = () => {
   window.addEventListener(
     "keydown",
     (event) => {
-      if (event.code === "KeyB" && event.altKey && event.shiftKey && !event.ctrlKey && !event.metaKey) {
+      if (
+        !event.repeat &&
+        event.code === "KeyB" &&
+        event.altKey &&
+        event.shiftKey &&
+        !event.ctrlKey &&
+        !event.metaKey
+      ) {
         event.preventDefault()
         toggleImages()
       }

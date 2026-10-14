@@ -223,11 +223,11 @@ main:has(> [data-fill]) {
  * element marked `data-image-fallback` beside it (initials, a name) shows instead.
  */
 :root[data-images="blur"] :is(img, video, canvas, picture, image) {
-  filter: blur(var(--image-blur, 14px)) saturate(0.6);
+  filter: blur(var(--image-blur, 14px)) saturate(0.6) !important;
   clip-path: inset(0);
 }
 :root[data-images="hide"] :is(img, video, canvas, picture, image) {
-  visibility: hidden;
+  visibility: hidden !important;
 }
 [data-image-fallback] {
   display: none;
