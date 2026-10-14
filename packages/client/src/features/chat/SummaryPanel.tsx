@@ -6,11 +6,22 @@ import type { SlotId } from "@rp/shared/chat.ts"
 import type { LcmBackfill, LcmJob, LcmState, LcmSummary, SummaryRevision } from "@rp/shared/lcm.ts"
 import type { AppError } from "../../errors.ts"
 import { Button } from "../../ui/Button.tsx"
-import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
+import { Switch } from "../../ui/Choice.tsx"
 import { Textarea } from "../../ui/Field.tsx"
 import { Alert, Badge } from "../../ui/Surface.tsx"
 import { EstimateList } from "./EnableLcmDialog.tsx"
-import { boundaryText, countText, healthOf, jobText, moneyText, originText, rangeText, tokensText } from "./lcm.ts"
+import {
+  boundaryText,
+  countText,
+  healthOf,
+  jobText,
+  moneyText,
+  originText,
+  rangeText,
+  setRail,
+  tokensText,
+  useRail
+} from "./lcm.ts"
 import type { ChatSession } from "./session.ts"
 import { SummaryDraft } from "./summaryDraft.ts"
 
@@ -473,21 +484,23 @@ function Backfill({ session, lcm }: { session: ChatSession; lcm: LcmState }) {
   )
 }
 
-/** The summaries on this branch, opened from the divider, the rail or the header. */
+/** The side panel's Summaries tab: the summaries on this branch, opened from the divider, the rail or the header. */
 export function SummaryPanel({
   session,
   lcm,
   focus,
   onJump,
-  onOpenChange
+  onEnable
 }: {
   session: ChatSession
   lcm: LcmState
   /** A summary to show even when it isn't in use (a click on the rail). */
   focus: string | null
   onJump: (slot: SlotId) => void
-  onOpenChange: (open: boolean) => void
+  /** Turns summaries on for the chat, asking first what it costs. */
+  onEnable: () => void
 }) {
+  const rail = useRail()
   const inUse = useMemo(() => new Set<string>(lcm.layer.map((s) => s.id)), [lcm.layer])
   const version = useSyncExternalStore(session.subscribe, session.snapshot).lcmVersion
   const [fetched, setFetched] = useState<LcmSummary | null>(null)
@@ -521,17 +534,32 @@ export function SummaryPanel({
       !lcm.failed.some((s) => s.level === job.level && s.from === job.from && s.to === job.to)
   )
   return (
-    <Dialog
-      open
-      onOpenChange={onOpenChange}
-      title="Summaries"
-      description="What stands in for older messages on this branch. Nothing here runs until your next reply, except Summarize now."
-    >
+    <div className="flex flex-col gap-4">
+      <p className="text-sm text-muted">
+        What stands in for older messages on this branch. Nothing here runs until your next reply, except Summarize now.
+      </p>
       <p className="text-sm font-medium" data-testid="summary-panel-heading">
         {boundaryText(lcm)}
       </p>
-      {!lcm.enabled && (
-        <Alert tone="warning">Summaries are off for this chat. Turn them on in the chat settings.</Alert>
+      {lcm.enabled ? (
+        <Switch
+          checked={rail}
+          onCheckedChange={setRail}
+          description="Bars beside the messages showing which summary covers them, in this browser."
+        >
+          Coverage rail
+        </Switch>
+      ) : (
+        <Alert
+          tone="warning"
+          actions={
+            <Button variant="primary" onClick={onEnable}>
+              Enable summaries
+            </Button>
+          }
+        >
+          Summaries are off for this chat.
+        </Alert>
       )}
       {lcm.enabled && <Backfill session={session} lcm={lcm} />}
       {unfinished.length > 0 && (
@@ -587,9 +615,6 @@ export function SummaryPanel({
           </ul>
         </section>
       )}
-      <DialogActions>
-        <Button onClick={() => onOpenChange(false)}>Done</Button>
-      </DialogActions>
-    </Dialog>
+    </div>
   )
 }

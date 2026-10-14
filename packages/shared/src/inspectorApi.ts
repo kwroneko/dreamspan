@@ -152,8 +152,22 @@ export const ContextBudget = Schema.Struct({
 })
 export type ContextBudget = typeof ContextBudget.Type
 
+/**
+ * The preset the next request uses and the level of the scope chain it comes from
+ * (DATA-MODEL §5.4): the chat's role binding, the chat's own, the connection's override, the
+ * user's default, or ST's built-in default.
+ */
+export const EffectivePreset = Schema.Struct({
+  /** Null for ST's built-in default. */
+  ref: Schema.NullOr(Schema.String),
+  name: Schema.String,
+  scope: Schema.Literals(["role", "chat", "connection", "user", "builtin"])
+})
+export type EffectivePreset = typeof EffectivePreset.Type
+
 /** The next request boundary, also available before a first send or without a cache TTL. */
 export const NextContext = Schema.Struct({
+  preset: Schema.optionalKey(Schema.NullOr(EffectivePreset)),
   budget: Schema.optionalKey(
     Schema.NullOr(
       Schema.Struct({

@@ -5,8 +5,6 @@ import type { ChatId, PathEntry, SlotId } from "@rp/shared/chat.ts"
 import { Link, useNavigate, useParams, useSearch } from "@tanstack/react-router"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import {
-  lazy,
-  Suspense,
   useCallback,
   useContext,
   useEffect,
@@ -24,19 +22,23 @@ import { useTitle } from "../shell.tsx"
 import { ChatBadges, chatTitle } from "./ChatsPage.tsx"
 import { CacheIndicator } from "./CacheIndicator.tsx"
 import { CastContext, castView } from "./cast.ts"
-import { CastDialog, SettingsDialog } from "./ChatPanels.tsx"
+import {
+  ChatSidePanel,
+  isPanelTab,
+  PanelToggles,
+  type PanelTab,
+  rememberedPanel,
+  rememberPanel,
+  useWide
+} from "./ChatPanels.tsx"
 import { EnableLcmDialog } from "./EnableLcmDialog.tsx"
 import { Composer } from "./Composer.tsx"
 import { CoverageRail, LANE_PX, useCoverage } from "./CoverageRail.tsx"
 import { LcmBoundary } from "./LcmBoundary.tsx"
-import { setRail, useRail } from "./lcm.ts"
+import { useRail } from "./lcm.ts"
 import { Message } from "./Message.tsx"
 import { useRenderCount } from "./perf.ts"
 import { ChatSession, type ChatView } from "./session.ts"
-import { SummaryPanel } from "./SummaryPanel.tsx"
-
-// Loaded when first opened: it carries the note editor.
-const NotesDialog = lazy(() => import("./ChatNotes.tsx").then((module) => ({ default: module.NotesDialog })))
 
 /** Load more history when the first or last rendered message is this close to the loaded edge. */
 const EDGE = 5
@@ -300,7 +302,17 @@ function MessageList({
   )
 }
 
-function OpenChat({ chatId, leaf, slot }: { chatId: ChatId; leaf: SlotId | null; slot: SlotId | null }) {
+function OpenChat({
+  chatId,
+  leaf,
+  slot,
+  panel
+}: {
+  chatId: ChatId
+  leaf: SlotId | null
+  slot: SlotId | null
+  panel: PanelTab | null
+}) {
   const registry = useContext(RegistryContext)
   const [session] = useState(() => new ChatSession(chatId, leaf, registry))
   useLookingAt(chatId)
@@ -310,12 +322,59 @@ function OpenChat({ chatId, leaf, slot }: { chatId: ChatId; leaf: SlotId | null;
     session.start(initialSlot)
     return () => session.dispose()
   }, [session, initialSlot])
-  return <ChatSurface session={session} leaf={leaf} slot={slot} />
+  return <ChatSurface session={session} leaf={leaf} slot={slot} panel={panel} />
 }
 
-function ChatSurface({ session, leaf, slot }: { session: ChatSession; leaf: SlotId | null; slot: SlotId | null }) {
+/**
+ * The side panel's tab: the URL's, else on a wide screen the one this browser last had open
+ * (a link to a message drops the URL's). A phone opens it only when asked: it covers the chat.
+ */
+function usePanel(urlPanel: PanelTab | null) {
+  const navigate = useNavigate()
+  const wide = useWide()
+  const [remembered, setRemembered] = useState(rememberedPanel)
+  const panel = urlPanel ?? (wide ? remembered : null)
+  // The URL names the tab shown, so a refresh or a copied link keeps it.
+  useEffect(() => {
+    if (urlPanel === null && panel !== null)
+      void navigate({ to: ".", search: (prev: Record<string, unknown>) => ({ ...prev, panel }), replace: true })
+  }, [navigate, urlPanel, panel])
+  const show = useCallback(
+    (next: PanelTab | null) => {
+      rememberPanel(next)
+      setRemembered(next)
+      void navigate({
+        to: ".",
+        search: ({ panel: _gone, ...prev }: Record<string, unknown>) =>
+          next === null ? prev : { ...prev, panel: next },
+        // On a phone, opening the sheet is a step in the history, so Back closes it.
+        replace: wide || next === null || urlPanel !== null
+      })
+    },
+    [navigate, wide, urlPanel]
+  )
+  return { panel, show, wide }
+}
+
+function ChatSurface({
+  session,
+  leaf,
+  slot,
+  panel: urlPanel
+}: {
+  session: ChatSession
+  leaf: SlotId | null
+  slot: SlotId | null
+  panel: PanelTab | null
+}) {
   const view = useSyncExternalStore(session.subscribe, session.snapshot)
   const navigate = useNavigate()
+  const { panel, show, wide } = usePanel(urlPanel)
+  /** Search params that keep the panel's tab. */
+  const withPanel = useCallback(
+    (search: Record<string, string>) => (panel === null ? search : { ...search, panel }),
+    [panel]
+  )
   useTitle(view.chat ? chatTitle(view.chat) : "Chat")
   const shown = useRef({ leaf, slot })
   // Another message or branch of the open chat moves the window; a URL catching up with
@@ -339,20 +398,23 @@ function ChatSurface({ session, leaf, slot }: { session: ChatSession; leaf: Slot
     const from = viewLeaf.current
     viewLeaf.current = view.leafSlotId
     if (leaf !== null && from === leaf && view.leafSlotId !== leaf && view.leafSlotId === view.chat?.activeLeafSlotId) {
-      void navigate({ to: ".", search: slot === null ? {} : { slot }, replace: true })
+      void navigate({ to: ".", search: withPanel(slot === null ? {} : { slot }), replace: true })
     }
-  }, [navigate, leaf, slot, view.leafSlotId, view.chat])
+  }, [navigate, withPanel, leaf, slot, view.leafSlotId, view.chat])
   // Rows read the cast from context: it's the same object until the cast changes.
   const cast = useMemo(() => castView(view.cast), [view.cast])
-  const [panel, setPanel] = useState<"cast" | "settings" | "notes" | "summaries" | "enable" | null>(null)
+  /** Turning summaries on, which asks first what it costs. */
+  const [enabling, setEnabling] = useState(false)
   /** The summary the panel opens at: one clicked on the rail, or none. */
   const [focus, setFocus] = useState<string | null>(null)
   const rail = useRail()
-  const openSummaries = useCallback((summaryId: string | null) => {
-    setFocus(summaryId)
-    setPanel("summaries")
-  }, [])
-  const lcmOn = view.lcm?.enabled === true && view.lcm.leafSlotId === view.leafSlotId
+  const openSummaries = useCallback(
+    (summaryId: string | null) => {
+      setFocus(summaryId)
+      show("summaries")
+    },
+    [show]
+  )
   // Another branch (DESIGN §3.2): the chat's leaf moves to it, and the window opens at the
   // message switched to, which the URL then names.
   const [branchError, setBranchError] = useState<string | null>(null)
@@ -363,122 +425,99 @@ function ChatSurface({ session, leaf, slot }: { session: ChatSession; leaf: Slot
       setBranchError(null)
       const sibling = result.value.slotId
       if (sibling === slot && leaf === null) void session.open(sibling)
-      else void navigate({ to: ".", search: { slot: sibling } })
+      else void navigate({ to: ".", search: withPanel({ slot: sibling }) })
     },
-    [session, navigate, slot, leaf]
+    [session, navigate, withPanel, slot, leaf]
   )
   const switchBranch = useCallback((entry: PathEntry, index: number) => void onBranch(entry, index), [onBranch])
   // A summary's range opens the window at its first message, as a link to that message does.
   const branchLeaf = view.leafSlotId === view.chat?.activeLeafSlotId ? null : view.leafSlotId
+  // Beside the chat the panel stays open; a phone's sheet closes to show the message.
   const jump = useCallback(
     (target: SlotId) => {
-      setPanel(null)
-      if (target === slot) void session.open(target)
-      else
-        void navigate({ to: ".", search: branchLeaf === null ? { slot: target } : { leaf: branchLeaf, slot: target } })
+      if (!wide) rememberPanel(null)
+      const at = branchLeaf === null ? { slot: target } : { leaf: branchLeaf, slot: target }
+      if (target === slot) {
+        if (!wide) show(null)
+        void session.open(target)
+      } else void navigate({ to: ".", search: wide ? withPanel(at) : at })
     },
-    [session, navigate, slot, branchLeaf]
+    [session, navigate, show, withPanel, wide, slot, branchLeaf]
   )
+  const title = view.chat ? chatTitle(view.chat) : "Chat"
+  const panelOpen = panel !== null
   return (
     <CastContext value={cast}>
-      <header className="mx-auto flex w-full max-w-3xl flex-wrap items-center gap-x-3 gap-y-1 pb-2">
-        <Link to="/chats" className="text-sm text-muted hover:text-text">
-          ← Chats
-        </Link>
-        <h1 className="min-w-0 flex-1 truncate text-lg font-semibold">{view.chat ? chatTitle(view.chat) : "Chat"}</h1>
-        {view.chat && <ChatBadges chat={view.chat} />}
-        {view.leafSlotId !== null && view.chat !== null && view.leafSlotId !== view.chat.activeLeafSlotId && (
-          <Link to="." search={{}} className="text-sm text-accent hover:underline">
-            Back to the latest branch
-          </Link>
-        )}
-        <div className="flex flex-wrap gap-1">
-          <Button variant="ghost" onClick={() => setPanel("cast")}>
-            Cast
-          </Button>
-          <Button variant="ghost" onClick={() => setPanel("notes")}>
-            Notes
-          </Button>
-          {lcmOn && (
-            <>
-              <Button variant="ghost" onClick={() => openSummaries(null)}>
-                Summaries
-              </Button>
-              <Button variant="ghost" aria-pressed={rail} onClick={() => setRail(!rail)}>
-                Coverage rail
-              </Button>
-            </>
+      <div className="flex min-h-0 flex-1">
+        <div className="flex min-w-0 flex-1 flex-col">
+          <header className="mx-auto flex w-full max-w-3xl flex-wrap items-center gap-x-3 gap-y-1 pb-2">
+            <Link to="/chats" className="text-sm text-muted hover:text-text">
+              ← Chats
+            </Link>
+            <h1 className="min-w-0 flex-1 truncate text-lg font-semibold">{title}</h1>
+            {view.chat && <ChatBadges chat={view.chat} />}
+            {view.leafSlotId !== null && view.chat !== null && view.leafSlotId !== view.chat.activeLeafSlotId && (
+              <Link to="." search={withPanel({})} className="text-sm text-accent hover:underline">
+                Back to the latest branch
+              </Link>
+            )}
+            <PanelToggles open={panel} wide={wide} onToggle={(tab) => show(panel === tab ? null : tab)} />
+          </header>
+          {/* A chat that has outgrown its context with summaries off (spec/LCM.md §2.13): easy to turn on. */}
+          {view.lcm !== null &&
+            !view.lcm.enabled &&
+            view.lcm.leafSlotId === view.leafSlotId &&
+            (view.history?.historyStart?.depth ?? 0) > 0 && (
+              <div className="mx-auto w-full max-w-3xl pb-2">
+                <Alert
+                  title="Older messages beyond the context aren't summarized"
+                  actions={
+                    <Button variant="primary" onClick={() => setEnabling(true)}>
+                      Enable summaries
+                    </Button>
+                  }
+                >
+                  The model no longer sees them. Summaries keep what happened in them in the context.
+                </Alert>
+              </div>
+            )}
+          {(view.error ?? branchError) && (
+            <div className="mx-auto w-full max-w-3xl">
+              <Alert tone="danger">{view.error ?? branchError}</Alert>
+            </div>
           )}
-          <Button variant="ghost" onClick={() => setPanel("settings")}>
-            Settings
-          </Button>
+          {view.loading ? (
+            <Loading label="Loading the chat…" />
+          ) : (
+            <MessageList
+              session={session}
+              view={view}
+              anchor={slot}
+              rail={rail}
+              onBranch={switchBranch}
+              onOpenSummaries={openSummaries}
+            />
+          )}
+          <CacheIndicator warmth={view.cache} />
+          <Composer session={session} view={view} />
         </div>
-      </header>
-      {/* Mounted only while open: the surface re-renders with every page of history. */}
-      {panel === "cast" && (
-        <CastDialog session={session} open onOpenChange={(open) => setPanel(open ? "cast" : null)} />
-      )}
-      {panel === "settings" && (
-        <SettingsDialog session={session} open onOpenChange={(open) => setPanel(open ? "settings" : null)} />
-      )}
-      {panel === "summaries" && view.lcm !== null && (
-        <SummaryPanel
-          session={session}
-          lcm={view.lcm}
-          focus={focus}
-          onJump={jump}
-          onOpenChange={(open) => setPanel(open ? "summaries" : null)}
-        />
-      )}
-      {panel === "enable" && (
-        <EnableLcmDialog session={session} onOpenChange={(open) => setPanel(open ? "enable" : null)} />
-      )}
-      {panel === "notes" && (
-        <Suspense>
-          <NotesDialog
+        {/* Mounted only while open: the surface re-renders with every page of history. */}
+        {panelOpen && (
+          <ChatSidePanel
+            tab={panel}
+            wide={wide}
+            title={title}
+            onTab={show}
+            onClose={() => show(null)}
             session={session}
-            leafSlotId={view.leafSlotId}
-            onOpenChange={(open) => setPanel(open ? "notes" : null)}
+            view={view}
+            focus={focus}
+            onJump={jump}
+            onEnable={() => setEnabling(true)}
           />
-        </Suspense>
-      )}
-      {/* A chat that has outgrown its context with summaries off (spec/LCM.md §2.13): easy to turn on. */}
-      {view.lcm !== null &&
-        !view.lcm.enabled &&
-        view.lcm.leafSlotId === view.leafSlotId &&
-        (view.history?.historyStart?.depth ?? 0) > 0 && (
-          <div className="mx-auto w-full max-w-3xl pb-2">
-            <Alert
-              title="Older messages beyond the context aren't summarized"
-              actions={
-                <Button variant="primary" onClick={() => setPanel("enable")}>
-                  Enable summaries
-                </Button>
-              }
-            >
-              The model no longer sees them. Summaries keep what happened in them in the context.
-            </Alert>
-          </div>
         )}
-      {(view.error ?? branchError) && (
-        <div className="mx-auto w-full max-w-3xl">
-          <Alert tone="danger">{view.error ?? branchError}</Alert>
-        </div>
-      )}
-      {view.loading ? (
-        <Loading label="Loading the chat…" />
-      ) : (
-        <MessageList
-          session={session}
-          view={view}
-          anchor={slot}
-          rail={rail}
-          onBranch={switchBranch}
-          onOpenSummaries={openSummaries}
-        />
-      )}
-      <CacheIndicator warmth={view.cache} />
-      <Composer session={session} view={view} />
+      </div>
+      {enabling && <EnableLcmDialog session={session} onOpenChange={setEnabling} />}
     </CastContext>
   )
 }
@@ -486,12 +525,13 @@ function ChatSurface({ session, leaf, slot }: { session: ChatSession; leaf: Slot
 /** /chats/$chatId, with `leaf` for a branch other than the active one and `slot` for a message. */
 export function ChatPage() {
   const { chatId } = useParams({ strict: false }) as { chatId: ChatId }
-  const search = useSearch({ strict: false }) as { leaf?: unknown; slot?: unknown }
+  const search = useSearch({ strict: false }) as { leaf?: unknown; slot?: unknown; panel?: unknown }
   const leaf = typeof search.leaf === "string" && search.leaf !== "" ? (search.leaf as SlotId) : null
   const slot = typeof search.slot === "string" ? (search.slot as SlotId) : null
+  const panel = isPanelTab(search.panel) ? search.panel : null
   return (
     <div data-fill className="flex min-h-0 flex-1 flex-col">
-      <OpenChat key={chatId} chatId={chatId} leaf={leaf} slot={slot} />
+      <OpenChat key={chatId} chatId={chatId} leaf={leaf} slot={slot} panel={panel} />
     </div>
   )
 }

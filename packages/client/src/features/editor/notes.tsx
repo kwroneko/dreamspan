@@ -88,8 +88,9 @@ export function PlacementField({
   // A place this list leaves out still shows, when the note is there already.
   const items = places ? PLACES.filter((p) => places.includes(p.value) || p.value === placeOf(placement)) : PLACES
   return (
-    <div className="flex min-w-0 flex-col gap-2">
-      <div className="grid gap-3 sm:grid-cols-3">
+    // Three across when its container is wide enough, not the window: it's in the chat's side panel too.
+    <div className="@container flex min-w-0 flex-col gap-2">
+      <div className="grid gap-3 @md:grid-cols-3">
         <Field label={label}>
           <Select items={items} value={placeOf(placement)} onValueChange={(place) => set(place)} />
         </Field>

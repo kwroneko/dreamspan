@@ -6,6 +6,7 @@ import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { makeAssembler } from "../assembler/assembler.ts"
 import type { ChatId } from "@rp/shared/chat.ts"
+import type { EffectivePreset } from "@rp/shared/inspectorApi.ts"
 import { wireContext } from "../assembler/wire.ts"
 import { lastBreakpoint, prefixChange, tokensBetween } from "../assembler/warmth.ts"
 import { describer, inspectionInputs } from "./inspectorReads.ts"
@@ -159,12 +160,16 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
           ? yield* sql<{ label: string }>`SELECT r.label FROM entity_refs r JOIN entities e ON e.id = r.entity_id
               WHERE r.id = ${preset.ref} AND e.owner_user_id = ${userId}`
           : []
+        const presetName = presetRef?.label ?? (preset?.scope === "builtin" ? "Default" : "Unnamed")
         const boundary = {
+          preset: preset
+            ? { ref: preset.ref, name: presetName, scope: preset.scope as EffectivePreset["scope"] }
+            : null,
           budget:
             budget && preset
               ? {
                   ...budget,
-                  presetName: presetRef?.label ?? (preset.scope === "builtin" ? "Default" : "Unnamed"),
+                  presetName,
                   builtinPreset: preset.scope === "builtin"
                 }
               : null,

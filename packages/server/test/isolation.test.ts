@@ -812,10 +812,12 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
           "budget",
           "historyStart",
           "leafSlotId",
+          "preset",
           "summarizedThrough",
           "warmth"
         ])
         if (own.historyStart) assert.deepStrictEqual(Object.keys(own.historyStart).sort(), ["depth", "slotId"])
+        if (own.preset) assert.deepStrictEqual(Object.keys(own.preset).sort(), ["name", "ref", "scope"])
       })
   },
   SubscribeChat: {

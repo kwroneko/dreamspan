@@ -22,7 +22,8 @@ export function EstimateList({ estimate, title }: { estimate: BackfillEstimate; 
   if (estimate.blocked === "no_model")
     return (
       <Alert tone="warning">
-        No model is chosen to summarize with. Choose one in the chat settings, or nothing will be summarized.
+        No model is chosen to summarize with. Choose one in the side panel's This chat tab, or nothing will be
+        summarized.
       </Alert>
     )
   if (estimate.blocked === "runway")
