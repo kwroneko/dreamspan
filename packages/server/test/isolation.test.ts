@@ -607,8 +607,20 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
           (yield* actor.api.ListChats(page)).map((c) => c.id),
           owner.chat.chatId
         )
-        // A card's chats: another user's card names none of the caller's.
-        assert.lengthOf(yield* actor.api.ListChats({ ...page, entityId: owner.editor.cardEntityId }), 0)
+        // A card's chats: another user's card is as unknown as a missing one, and the
+        // owner's own card lists.
+        const card = owner.editor.cardEntityId
+        yield* refused(actor.api.ListChats({ ...page, entityId: card }), "NotFound")
+        yield* refused(actor.api.ListChats({ ...page, entityId: "no-such-card" as EntityId }), "NotFound")
+        yield* owner.api.ListChats({ ...page, entityId: card })
+        // Searching by the title or a card's name finds only the caller's chats.
+        const [chat] = (yield* owner.api.ListChats(page)).filter((c) => c.id === owner.chat.chatId)
+        for (const search of [chat!.title, ...(yield* owner.api.ListCards()).map((c) => c.name)].filter(Boolean)) {
+          assert.notInclude(
+            (yield* actor.api.ListChats({ ...page, search })).map((c) => c.id),
+            owner.chat.chatId
+          )
+        }
       })
   },
   ListChatSummaries: {

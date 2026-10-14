@@ -11,7 +11,7 @@ import { AppClient } from "../../rpc.ts"
 import { Avatar } from "../../ui/Avatar.tsx"
 import { buttonClass } from "../../ui/Button.tsx"
 import { Badge, Card, CardHeader, EmptyState } from "../../ui/Surface.tsx"
-import { ChatRows } from "../chat/ChatList.tsx"
+import { ChatList } from "../chat/ChatList.tsx"
 import { useTitle } from "../shell.tsx"
 import { openTarget, usageAtom, usageLine } from "./data.ts"
 
@@ -38,9 +38,16 @@ function Folded({ title, children }: { title: string; children: string }) {
   const [open, setOpen] = useState(false)
   const [long, setLong] = useState(false)
   const body = useRef<HTMLParagraphElement>(null)
+  // Measured again whenever its width changes (a window resized, a phone turned), which can
+  // fold text that fit before; open or not stays as the user left it.
   useLayoutEffect(() => {
     const element = body.current
-    if (element && !open) setLong(element.scrollHeight > element.clientHeight + 1)
+    if (!element || open) return
+    const measure = () => setLong(element.scrollHeight > element.clientHeight + 1)
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(element)
+    return () => observer.disconnect()
   }, [children, open])
   return (
     <section className="flex flex-col gap-1">
@@ -125,27 +132,12 @@ function Definition({ doc }: { doc: Doc }) {
 }
 
 function Chats({ card }: { card: CardUsage }) {
-  const atom = useMemo(
-    () =>
-      AppClient.query(
-        "ListChats",
-        { limit: 200, before: null, entityId: card.entityId },
-        { reactivityKeys: ["chats"] }
-      ),
-    [card.entityId]
-  )
-  return (
-    <AsyncView atom={atom} loading="Loading its chats…">
-      {(chats) =>
-        chats.length === 0 ? (
-          <EmptyState title="No chats yet">
-            <p>New chat shows its greeting; nothing is saved until you send the first message.</p>
-          </EmptyState>
-        ) : (
-          <ChatRows chats={chats} findable={chats.length > 8} />
-        )
-      }
-    </AsyncView>
+  return card.chats === 0 ? (
+    <EmptyState title="No chats yet">
+      <p>New chat shows its greeting; nothing is saved until you send the first message.</p>
+    </EmptyState>
+  ) : (
+    <ChatList entityId={card.entityId} findable={card.chats > 8} />
   )
 }
 

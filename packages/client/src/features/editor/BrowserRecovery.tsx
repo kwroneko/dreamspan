@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react"
 import { Button } from "../../ui/Button.tsx"
 import { ConfirmDialog, Dialog, DialogActions } from "../../ui/Dialog.tsx"
-import { copiesOfUser, type Copy, dropCopy, flushCopies } from "./backup.ts"
+import { copiesOfUser, type Copy, dropCopy, flushCopies, pendingOf } from "./backup.ts"
 
 export function RecoveryNotice() {
   return (
@@ -59,22 +59,35 @@ export function BrowserRecovery({
         {copies.length === 0 ? (
           <p>No unsaved browser copies.</p>
         ) : (
-          copies.map((copy) => (
-            <div key={copy.key} className="flex flex-col gap-2">
-              <p className="text-sm text-muted">
-                {copy.refId} · {copy.field}
-              </p>
-              <textarea
-                aria-label="Recovery text"
-                readOnly
-                value={copy.content}
-                className="max-h-64 min-h-24 rounded-md border border-border bg-surface p-2"
-              />
-              <Button variant="danger" onClick={() => setDeleting(copy)}>
-                Delete this copy
-              </Button>
-            </div>
-          ))
+          copies.map((copy) => {
+            const save = pendingOf(copy)
+            const first = save?.kind === "pendingChat" ? save.payload : null
+            return (
+              <div key={copy.key} className="flex flex-col gap-2">
+                {first !== null ? (
+                  <p className="text-sm text-muted">
+                    First message to {first.name}, not sent yet:{" "}
+                    <a href={`/cards/${encodeURIComponent(first.entityId)}/chat`} className="underline">
+                      open the new chat
+                    </a>
+                  </p>
+                ) : (
+                  <p className="text-sm text-muted">
+                    {copy.refId} · {copy.field}
+                  </p>
+                )}
+                <textarea
+                  aria-label="Recovery text"
+                  readOnly
+                  value={copy.content}
+                  className="max-h-64 min-h-24 rounded-md border border-border bg-surface p-2"
+                />
+                <Button variant="danger" onClick={() => setDeleting(copy)}>
+                  Delete this copy
+                </Button>
+              </div>
+            )
+          })
         )}
         <DialogActions>
           <Button onClick={() => setOpen(false)}>Keep copies</Button>

@@ -1,6 +1,8 @@
 // Pending saves kept in this browser until the exact copy is acknowledged. Tabs own
 // independent copies; a newer edit may replace only this store's unsent copy. The payload
-// is the save as typed, including its base, and replay never refreshes that base.
+// is the save as typed, including its base, and replay never refreshes that base. A first
+// message typed in a chat not made yet (StartChatPage) has nowhere on the server to go:
+// its copy stays here until that chat is made by sending it, or the user deletes it.
 import type { DraftDisplacement } from "@rp/shared/drafts.ts"
 import { ComposerBeacon } from "@rp/shared/composerApi.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
@@ -9,7 +11,11 @@ import { Option, Schema } from "effect"
 
 const PendingSave = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("editor"), payload: EditorDraftSave }),
-  Schema.Struct({ kind: Schema.Literal("composer"), payload: ComposerBeacon })
+  Schema.Struct({ kind: Schema.Literal("composer"), payload: ComposerBeacon }),
+  Schema.Struct({
+    kind: Schema.Literal("pendingChat"),
+    payload: Schema.Struct({ entityId: Schema.String, name: Schema.String, content: Schema.String })
+  })
 ])
 type PendingSave = typeof PendingSave.Type
 
@@ -156,6 +162,9 @@ export const copiesOf = async (userId: string, refId: string): Promise<ReadonlyA
   return copies
 }
 
+/** Where the first message typed in a chat with this card, not made yet, is kept. */
+export const pendingChatCopy = (entityId: string) => `pending-chat:${entityId}`
+
 /** All the user's copies. */
 export const copiesOfUser = async (userId: string): Promise<ReadonlyArray<Copy>> => {
   const copies: Array<Copy> = []
@@ -163,12 +172,15 @@ export const copiesOfUser = async (userId: string): Promise<ReadonlyArray<Copy>>
   return copies
 }
 
-/** Try every exact copy before logout or at the user's request. Failures stay recoverable here. */
+/**
+ * Try every exact copy before logout or at the user's request. Failures stay recoverable
+ * here, as do first messages of chats not made yet.
+ */
 export const flushCopies = async (userId: string) => {
   let recovered = 0
   for (const copy of await copiesOfUser(userId)) {
     const save = pendingOf(copy)
-    if (save === null) continue
+    if (save === null || save.kind === "pendingChat") continue
     const body = JSON.stringify({
       drafts: save.kind === "editor" ? [save.payload] : [],
       composers: save.kind === "composer" ? [save.payload] : []

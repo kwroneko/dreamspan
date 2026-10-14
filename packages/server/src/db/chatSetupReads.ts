@@ -21,7 +21,8 @@ export const makeChatSetupReadHandlers = Effect.gen(function* () {
 
     // One query for the whole grid (DESIGN §2.1): each live card that isn't a persona, read
     // from the ref loadCards picks, with the chats it joined on any branch (a card that left a
-    // chat still took part in it), the last message among them, and the latest of them. Per
+    // chat still took part in it), the last message among them, and the latest of them: the
+    // one with the last message, a chat without messages only when none has any. Per
     // card, an index seek on the cards each chat joined (`state_events_participants`); the
     // `+` keeps the column's affinity off the indexed expression, so the seek is used.
     CardUsage: ({ userId }) =>
@@ -50,7 +51,8 @@ export const makeChatSetupReadHandlers = Effect.gen(function* () {
           (SELECT json_object(
               'chats', count(DISTINCT c.id),
               'last', max(c.last_message_at),
-              'latest', substr(max(printf('%016d', coalesce(c.last_message_at, c.created_at)) || c.id), 17))
+              'latest', substr(max(
+                (c.last_message_at IS NOT NULL) || printf('%016d', coalesce(c.last_message_at, c.created_at)) || c.id), 18))
             FROM state_events s JOIN chats c ON c.id = s.chat_id
             WHERE json_extract(s.value_json, '$.entity') = +cards.entity_id
               AND s.key = 'participant.join' AND s.superseded_by_changeset IS NULL

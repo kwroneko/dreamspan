@@ -119,19 +119,38 @@ export const SendResult = Schema.Union([
 ])
 export type SendResult = typeof SendResult.Type
 
+/**
+ * Where a page of chats ends: its last chat's last message time (else its creation time)
+ * and id; `empty` when that chat has no message (a card's list puts those last).
+ */
+export const ChatCursor = Schema.Struct({ at: Schema.Number, id: ChatId, empty: Schema.optionalKey(Schema.Boolean) })
+
+/** The cursor after `chat` in a list of chats. */
+export const chatCursor = (chat: Pick<Chat, "id" | "createdAt" | "lastMessageAt">) => ({
+  at: chat.lastMessageAt ?? chat.createdAt,
+  id: chat.id,
+  empty: chat.lastMessageAt === null
+})
+
+/** Text to find chats by (ListChats). */
+export const ChatSearch = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200))
+
 export class ChatApi extends RpcGroup.make(
   /**
    * The user's chats, most recent first. `before` is the last chat of the previous page.
-   * With `entityId`, only the chats that card joined (a card's page).
+   * With `entityId`, only the chats that card joined (a card's page), those with a message
+   * first; NotFound if the card isn't the user's. With `search`, only the chats whose title,
+   * or the name of a card in which, has that text.
    */
   Rpc.make("ListChats", {
     payload: {
       limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 500 })),
-      before: Schema.NullOr(Schema.Struct({ at: Schema.Number, id: ChatId })),
-      entityId: Schema.optionalKey(EntityId)
+      before: Schema.NullOr(ChatCursor),
+      entityId: Schema.optionalKey(EntityId),
+      search: Schema.optionalKey(ChatSearch)
     },
     success: Schema.Array(Chat),
-    error: ServerError
+    error: Schema.Union([...Errors])
   }),
   /** The chat list's details of these chats (cast, message count, last message); others' are left out. */
   Rpc.make("ListChatSummaries", {

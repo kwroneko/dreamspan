@@ -1,6 +1,8 @@
 // A chat that doesn't exist yet (DESIGN §2.1): a card's greeting, with its alternates to
 // pick from and `{{user}}` following the persona picked, and a composer. Nothing is saved
-// until the first send, so opening cards never leaves greeting-only chats behind.
+// until the first send, so opening cards never leaves greeting-only chats behind. What's
+// typed is kept in this browser (editor/backup.ts) until that send makes the chat, whose
+// own composer draft takes over: leaving and coming back finds it (DESIGN §6.2).
 import type { CastCard, EntityId } from "@rp/shared/chat.ts"
 import type { CardForChat } from "@rp/shared/chatSetupApi.ts"
 import type { FrozenValues } from "@rp/shared/macros/expand.ts"
@@ -14,6 +16,8 @@ import { Field } from "../../ui/Field.tsx"
 import { Markdown } from "../../ui/Markdown.tsx"
 import { Select } from "../../ui/Select.tsx"
 import { Loading } from "../../ui/Spinner.tsx"
+import { useSession } from "../../session.ts"
+import { copiesOf, type Copy, dropCopy, keepCopy, makeCopy, pendingChatCopy } from "../editor/backup.ts"
 import { useTitle } from "../shell.tsx"
 import { carryComposerText } from "./composerCarry.ts"
 import { expandForDisplay } from "./macros.ts"
@@ -53,6 +57,42 @@ function Pending({ card, personas }: { card: CardForChat; personas: ReadonlyArra
       typed.current = value
       return value
     })
+  // This browser's copy of the text, and the text on its way in the first send.
+  const userId = useSession().user.id
+  const entityId = card.card.entityId
+  const copy = useRef<Copy | null>(null)
+  const sending = useRef<string | null>(null)
+  const keep = (content: string) => {
+    const previous = copy.current
+    copy.current = null
+    if (content.trim() === "") {
+      if (previous !== null) void dropCopy(previous)
+      return
+    }
+    copy.current = makeCopy(
+      userId,
+      pendingChatCopy(entityId),
+      "first message",
+      { kind: "pendingChat", payload: { entityId, name: card.card.name, content } },
+      Date.now()
+    )
+    void keepCopy(copy.current, previous)
+  }
+  // The text left here before, if nothing's been typed since; the newest of them, when
+  // several tabs left one (the others stay in Browser recovery).
+  useEffect(() => {
+    let current = true
+    void copiesOf(userId, pendingChatCopy(entityId)).then((copies) => {
+      const newest = [...copies].sort((a, b) => b.at - a.at)[0]
+      if (!current || newest === undefined || copy.current !== null || typed.current !== "") return
+      copy.current = newest
+      typed.current = newest.content
+      setTextState(newest.content)
+    })
+    return () => {
+      current = false
+    }
+  }, [userId, entityId])
   const playing = personas.find((p) => p.entityId === persona) ?? null
   const shown = card.greetings[greeting]
   const name = card.card.name
@@ -78,6 +118,7 @@ function Pending({ card, personas }: { card: CardForChat; personas: ReadonlyArra
     // The text leaves the box as it's sent; whatever is typed while the chat is being made
     // goes along to its composer, and a failure puts the sent text back.
     const submitted = text
+    sending.current = submitted
     setText("")
     const shownFrozen = card.greetings.length > 0 ? frozen.get(greeting) : undefined
     const result = await action.run(
@@ -109,10 +150,18 @@ function Pending({ card, personas }: { card: CardForChat; personas: ReadonlyArra
         }),
       ["chats"]
     )
+    sending.current = null
     if (!result.ok) {
-      if (submitted !== "") setText((current) => (current === "" ? submitted : `${submitted}\n\n${current}`))
+      if (submitted !== "") {
+        const restored = typed.current === "" ? submitted : `${submitted}\n\n${typed.current}`
+        setText(restored)
+        keep(restored)
+      }
       return
     }
+    // The chat has the message now; what was typed since goes on in its composer.
+    if (copy.current !== null) void dropCopy(copy.current)
+    copy.current = null
     carryComposerText(result.value.chat.id, typed.current)
     void navigate({ to: "/chats/$chatId", params: { chatId: result.value.chat.id } })
   }
@@ -184,8 +233,12 @@ function Pending({ card, personas }: { card: CardForChat; personas: ReadonlyArra
           value={text}
           placeholder={`Write to ${name}…`}
           onChange={(event) => {
-            typed.current = event.currentTarget.value
-            setText(event.currentTarget.value)
+            const value = event.currentTarget.value
+            typed.current = value
+            setText(value)
+            // While the first send is out, the copy keeps both, as a failed send leaves them.
+            const out = sending.current
+            keep(out === null || out === "" ? value : value === "" ? out : `${out}\n\n${value}`)
           }}
           className="w-full resize-none rounded-md border border-border bg-surface px-3 py-2 text-base text-text outline-none placeholder:text-muted focus-visible:border-focus focus-visible:ring-2 focus-visible:ring-focus/40 sm:text-sm"
         />

@@ -1,11 +1,14 @@
 // The home grid's read (DESIGN §2.1): every character card with the chats it joined, group
 // chats included, the last message among them and the latest of them; personas, cards in the
-// bin and chats in the bin left out; and a card's own chats through ListChats. It's one
+// bin and chats in the bin left out; and a card's own chats through ListChats, those with a
+// message first, and chats found by title or card name, page by page. It's one
 // query for the whole grid, checked at 1,000 cards and 5,000 chats. Cross-user access is in
 // the isolation matrix.
 import { readdirSync, readFileSync } from "node:fs"
 import { join, relative } from "node:path"
 import { assert, describe, it } from "@effect/vitest"
+import type { Chat } from "@rp/shared/chat.ts"
+import { chatCursor } from "@rp/shared/chatApi.ts"
 import type { CardDoc } from "@rp/shared/docs/card.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { Effect } from "effect"
@@ -102,6 +105,85 @@ describe("card usage", () => {
       )
       assert.lengthOf(yield* api.ListChats({ ...page, entityId: ghost }), 0)
       assert.lengthOf(yield* api.ListChats(page), 2)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
+  )
+
+  it.live("continues the chat with the latest message, not a newer chat without messages", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const mira = yield* card(api, "Mira", { name: "Mira", first_mes: "Hi." })
+      const used = yield* api.StartChat({
+        cards: [mira],
+        persona: null,
+        greeting: null,
+        first: { _tag: "Send", content: "A conversation.", speakerEntityId: null }
+      })
+      yield* Effect.sleep("20 millis")
+      const empty = yield* api.CreateChat({ title: "Empty, newly opened" })
+      yield* api.ChangeCast({ chatId: empty.id, slotId: null, change: { _tag: "Join", entityId: mira } })
+      const row = (yield* api.ListCardUsage()).find((c) => c.entityId === mira)!
+      assert.strictEqual(row.lastMessageAt, used.chat.lastMessageAt)
+      assert.strictEqual(row.latestChatId, used.chat.id)
+      // The card's list agrees: chats with messages first, page by page.
+      const first = yield* api.ListChats({ limit: 1, before: null, entityId: mira })
+      assert.deepStrictEqual(
+        first.map((chat) => chat.id),
+        [used.chat.id]
+      )
+      const second = yield* api.ListChats({ limit: 1, before: chatCursor(first[0]!), entityId: mira })
+      assert.deepStrictEqual(
+        second.map((chat) => chat.id),
+        [empty.id]
+      )
+      assert.lengthOf(yield* api.ListChats({ limit: 1, before: chatCursor(second[0]!), entityId: mira }), 0)
+      // The whole list stays by last message, else creation: the new chat first.
+      assert.strictEqual((yield* api.ListChats({ limit: 1, before: null }))[0]!.id, empty.id)
+
+      // With none of its chats messaged, the latest made is the one to continue.
+      const ana = yield* card(api, "Ana", { name: "Ana", first_mes: "Hi." })
+      const older = yield* api.CreateChat({ title: "Older" })
+      yield* Effect.sleep("5 millis")
+      const newer = yield* api.CreateChat({ title: "Newer" })
+      for (const chat of [older, newer]) {
+        yield* api.ChangeCast({ chatId: chat.id, slotId: null, change: { _tag: "Join", entityId: ana } })
+      }
+      assert.strictEqual((yield* api.ListCardUsage()).find((c) => c.entityId === ana)!.latestChatId, newer.id)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
+  )
+
+  it.live("finds chats beyond the first page by title or by a card's name, page by page", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const mira = yield* card(api, "Mira (harbor)", { name: "Mirabel", first_mes: "Hi." })
+      const made: Array<Chat["id"]> = []
+      for (let i = 0; i < 5; i++) {
+        made.push((yield* api.CreateChat({ title: `Night 100%_${i}` })).id)
+        yield* Effect.sleep("2 millis")
+      }
+      const plain = yield* api.CreateChat({ title: "Unrelated" })
+      yield* api.ChangeCast({ chatId: made[0]!, slotId: null, change: { _tag: "Join", entityId: mira } })
+      // By title, with LIKE's wildcards taken as text, in pages of two.
+      const found: Array<Chat["id"]> = []
+      let before: ReturnType<typeof chatCursor> | null = null
+      for (;;) {
+        const page: ReadonlyArray<Chat> = yield* api.ListChats({ limit: 2, before, search: "100%_" })
+        found.push(...page.map((chat) => chat.id))
+        if (page.length < 2) break
+        before = chatCursor(page.at(-1)!)
+      }
+      assert.deepStrictEqual(found, [...made].reverse())
+      assert.lengthOf(yield* api.ListChats({ limit: 50, before: null, search: "100x" }), 0)
+      // By the label or the in-chat name of a card in it, any case.
+      for (const search of ["HARBOR", "mirabel"]) {
+        assert.deepStrictEqual(
+          (yield* api.ListChats({ limit: 50, before: null, search })).map((chat) => chat.id),
+          [made[0]]
+        )
+      }
+      assert.notInclude(
+        (yield* api.ListChats({ limit: 50, before: null, search: "Night" })).map((chat) => chat.id),
+        plain.id
+      )
     }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
   )
 
