@@ -57,9 +57,12 @@ type PrefillChoice = "auto" | NonNullable<ModelOverrides["prefill"]>
  * Whether the model takes the start of its reply as a trailing assistant message: the
  * preset's prefill and Continue need it. No provider reports it, so it's the user's to say.
  */
-const prefillItems = (current: PrefillChoice) => [
-  { value: "auto" as const, label: "As the provider says (no)" },
-  { value: "assistant" as const, label: "Yes: an assistant message at the end" },
+const prefillItems = (current: PrefillChoice, upstream: ModelOverrides["prefill"]) => [
+  {
+    value: "auto" as const,
+    label: upstream === "assistant" ? "As the provider says (yes)" : "As the provider says (no)"
+  },
+  { value: "assistant" as const, label: "Yes: start an assistant reply" },
   { value: "none" as const, label: "No" },
   ...(current === "tool_schema" ? [{ value: "tool_schema" as const, label: "Through a tool schema" }] : [])
 ]
@@ -144,7 +147,7 @@ function EditModelDialog({ model, onOpenChange }: { model: Model; onOpenChange: 
           label="Prefill"
           description="Whether it takes the start of its reply: the preset's prefill and Continue need it."
         >
-          <Select items={prefillItems(prefill)} value={prefill} onValueChange={setPrefill} />
+          <Select items={prefillItems(prefill, model.upstream.prefill)} value={prefill} onValueChange={setPrefill} />
         </Field>
         <ErrorAlert
           error={action.error}

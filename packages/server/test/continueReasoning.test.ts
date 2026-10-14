@@ -7,7 +7,7 @@ import type { Version } from "@rp/shared/chat.ts"
 import { Effect } from "effect"
 import { client, serverLayer, testConfig } from "./support/config.ts"
 import { eventually, finished, generateReply } from "./support/generation.ts"
-import { type Recorded, sse, startMockProvider } from "./support/mockProvider.ts"
+import { anthropicSse, type Recorded, sse, startMockProvider } from "./support/mockProvider.ts"
 
 const chunk = (delta: Record<string, unknown>, finish: string | null = null) => ({
   id: "cmpl-1",
@@ -118,6 +118,69 @@ describe("continue and reasoning", () => {
       assert.strictEqual(last.role, "assistant")
       assert.strictEqual(last.content, "The ledger says otherwise,")
       assert.match(last.sources[0]!.label, /^Message 3 as it was, continued from its end$/)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("continues through Anthropic's trailing assistant message and preserves whitespace in storage", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const mock = yield* Effect.acquireRelease(
+        Effect.promise(() =>
+          startMockProvider((_request, res) =>
+            anthropicSse(res, [
+              {
+                type: "message_start",
+                message: {
+                  id: "msg_1",
+                  type: "message",
+                  role: "assistant",
+                  model: "mock-model",
+                  content: [],
+                  stop_reason: null,
+                  usage: { input_tokens: 10, output_tokens: 1 }
+                }
+              },
+              { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+              { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "The tide.  " } },
+              { type: "content_block_stop", index: 0 },
+              {
+                type: "message_delta",
+                delta: { stop_reason: "end_turn", stop_sequence: null },
+                usage: { output_tokens: 3 }
+              },
+              { type: "message_stop" }
+            ])
+          )
+        ),
+        (m) => Effect.promise(() => m.close())
+      )
+      const api = yield* client()
+      const { version, chat, events } = yield* generateReply(api, {
+        connection: { kind: "anthropic", baseUrl: mock.url, apiKey: "sk-ant-synthetic-only" },
+        model: { prefill: "assistant" }
+      })
+      assert.strictEqual(version.content, "The tide.  ")
+      const path = yield* api.ReadPath({ chatId: chat.id, leafSlotId: null, range: { _tag: "Bottom" }, limit: 10 })
+      const continued = yield* api.ContinueVersion({
+        versionId: version.id,
+        expectedRowVersion: path.entries.at(-1)!.rowVersion
+      })
+      assert.strictEqual(continued.version.content, version.content)
+      yield* eventually(() => finished(events, continued.version.id) !== undefined)
+      assert.strictEqual(finished(events, continued.version.id)!.content, "The tide.  The tide.  ")
+      const sent = mock.requests().filter((r) => r.path.startsWith("/v1/messages"))
+      const last = (
+        sent[1]!.body as { messages: Array<{ role: string; content: Array<{ text: string }> }> }
+      ).messages.at(-1)!
+      assert.strictEqual(last.role, "assistant")
+      assert.strictEqual(last.content.at(-1)!.text, "The tide.")
+      const captured = yield* api.GetRunContext({ versionId: continued.version.id })
+      assert.strictEqual(captured.messages.at(-1)!.content, "The tide.")
+      // Concurrent clicks use the slot row version and cannot replace another selection.
+      const stale = yield* Effect.flip(
+        api.ContinueVersion({ versionId: version.id, expectedRowVersion: path.entries.at(-1)!.rowVersion })
+      )
+      assert.strictEqual(stale._tag, "StaleWrite")
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 

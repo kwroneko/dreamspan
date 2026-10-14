@@ -264,7 +264,7 @@ export const makeChatHandlers = Effect.gen(function* () {
           slotId: source.slotId,
           version: {
             ...generating,
-            content: source.content.trimEnd(),
+            content: source.content,
             speakerEntityId: source.speakerEntityId,
             sourceVersionId: source.id,
             ...(source.direction ? { direction: source.direction } : {}),

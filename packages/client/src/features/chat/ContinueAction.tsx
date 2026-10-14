@@ -11,7 +11,7 @@ import type { ChatSession, Outcome } from "./session.ts"
 type NextModel = NonNullable<ReturnType<ChatSession["snapshot"]>["history"]>["model"]
 
 /** Why Continue can't be used with the next request's model; null when it can (or isn't known yet). */
-export const continueBlocked = (model: NextModel): string | null => {
+const continueBlocked = (model: NextModel): string | null => {
   if (model === undefined) return null
   if (model === null) return "Continue needs a model: none is chosen for this chat. Choose one in This chat."
   if (model.prefill === undefined || model.prefill === "assistant") return null
@@ -57,9 +57,8 @@ function ContinueButton({
   if (blocked !== null) {
     return (
       <IconButton
-        label={`Continue: not available with ${model?.modelKey ?? "no model"}`}
+        label={blocked}
         icon="continue"
-        aria-disabled="true"
         className="opacity-50"
         onClick={() =>
           report({ ok: false, error: { tag: "ContinueUnavailable", message: blocked, problems: [], reason: null } })

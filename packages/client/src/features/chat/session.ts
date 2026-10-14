@@ -882,6 +882,8 @@ export class ChatSession {
     const known = this.registry.get(liveText(version.id))
     this.live.set(version.id, this.mountLive(version.id))
     if (known === null) this.registry.set(liveText(version.id), version.content)
+    if (this.registry.get(liveReasoning(version.id)) === null)
+      this.registry.set(liveReasoning(version.id), version.reasoning ?? "")
   }
 
   private mountLive(id: VersionId) {

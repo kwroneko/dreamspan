@@ -24,7 +24,7 @@ export function Reasoning({ version }: { version: Version }) {
   const live = useAtomValue(liveReasoning(version.id))
   const text = live ?? version.reasoning ?? ""
   if (text === "") return null
-  return <ReasoningBlock text={text} streaming={version.status === "generating"} />
+  return <ReasoningBlock key={version.id} text={text} streaming={version.status === "generating"} />
 }
 
 function ReasoningBlock({ text, streaming }: { text: string; streaming: boolean }) {
