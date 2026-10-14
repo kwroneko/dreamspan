@@ -123,6 +123,15 @@ export class ChatSession {
     lcmVersion: 0
   }
   private readonly listeners = new Set<() => void>()
+  private readonly versionListeners = new Set<(version: Version) => void>()
+
+  /** Picker lists also hear changes to versions that aren't currently selected. */
+  subscribeVersions = (listener: (version: Version) => void) => {
+    this.versionListeners.add(listener)
+    return () => {
+      this.versionListeners.delete(listener)
+    }
+  }
   /** Unmounts for the live atoms kept alive while their version generates, shown or not. */
   private readonly live = new Map<VersionId, () => void>()
   /** Deltas received since the last frame, by version. */
@@ -861,6 +870,7 @@ export class ChatSession {
   }
 
   private applyVersion(version: Version) {
+    for (const listener of this.versionListeners) listener(version)
     if (version.status !== "generating") this.endLive(version.id)
     const { entries } = this.view
     const index = entries.findIndex((e) => e.version.id === version.id)
@@ -1032,7 +1042,7 @@ export class ChatSession {
     return result
   }
 
-  /** A swipe; with a `model`, "Retry with…" that one instead of the chat's. */
+  /** A swipe; with a `model`, "Retry with…" or "Regenerate with…" that one instead of the chat's. */
   async regenerate(
     entry: PathEntry,
     model?: { readonly connection: Connection["id"]; readonly model: Model["id"] }
@@ -1108,6 +1118,16 @@ export class ChatSession {
 
   deleteVersion(versionId: VersionId) {
     return this.call((client) => client("DeleteVersion", { versionId }))
+  }
+
+  /** Stars a version or hides it from the arrows (the version picker), or undoes either. */
+  async setVersionFlags(
+    version: Version,
+    flags: { readonly starred?: boolean; readonly hidden?: boolean }
+  ): Promise<Outcome<Version>> {
+    const result = await this.call((client) => client("SetVersionFlags", { versionId: version.id, ...flags }))
+    if (result.ok) this.applyVersion(result.value)
+    return result
   }
 
   listVersions(slotId: SlotId) {

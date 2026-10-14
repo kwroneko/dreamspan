@@ -2,10 +2,11 @@
 // storage enforces ownership, so another user's ids are NotFound. Each change is published
 // to the chat's subscribers, from every tab of the user, after it's committed.
 import { type AppApi, CurrentUser } from "@rp/shared/api.ts"
-import type { ChatId, EntityId, NewVersion, SlotId } from "@rp/shared/chat.ts"
+import type { ChatId, EntityId, NewVersion, PathEntry, SlotId } from "@rp/shared/chat.ts"
 import { BranchSwitch, GenerationUnavailable, messageDraftKey } from "@rp/shared/chatApi.ts"
 import { TextTooLong } from "@rp/shared/composerApi.ts"
 import type { UserId } from "@rp/shared/domain.ts"
+import { foldState } from "@rp/shared/state.ts"
 import { Effect, Option, Stream } from "effect"
 import { CacheWarmth } from "../chat/CacheWarmth.ts"
 import { ChatHub } from "../chat/ChatHub.ts"
@@ -53,6 +54,21 @@ export const makeChatHandlers = Effect.gen(function* () {
     message: "This server has nothing to generate with."
   })
   const needGenerator = Option.isSome(generator) ? Effect.void : Effect.fail(unavailable)
+
+  /**
+   * Whom a new model version of a message speaks as when the one it replaces names no one
+   * (older text written before versions kept their speaker): another version's speaker, else
+   * the first version's, else, on the user's side, the first card the user plays there, so
+   * a version of the user's own turn is never written as a character (DESIGN §3.1).
+   */
+  const speakerOf = (user: UserId, chatId: ChatId, entry: PathEntry) =>
+    Effect.gen(function* () {
+      const versions = yield* reader.ListVersions({ userId: user, slotId: entry.slotId })
+      const named = versions.find((v) => v.speakerEntityId !== null)?.speakerEntityId ?? entry.firstSpeakerEntityId
+      if (named !== null || entry.side !== "user") return named
+      const state = foldState(yield* reader.StateEventsAt({ userId: user, chatId, slotId: entry.parentSlotId }))
+      return (state.playedByMe[0] as EntityId | undefined) ?? null
+    })
 
   /** A slot as it is now, published to its chat. */
   const publishSlot = (user: UserId, slotId: SlotId) =>
@@ -224,16 +240,17 @@ export const makeChatHandlers = Effect.gen(function* () {
         const id = yield* userId
         // A swipe keeps the speaker and the one-turn direction of the version it replaces
         // (DESIGN §2.2): the direction belongs to that turn, never to later ones.
-        const { entry: before } = yield* reader.GetSlot({ userId: id, slotId })
+        const { chatId, entry: before } = yield* reader.GetSlot({ userId: id, slotId })
         const added = yield* writer.AddSelectedVersion({
           userId: id,
           slotId,
           version: {
             ...generating,
-            speakerEntityId: before.version.speakerEntityId,
+            speakerEntityId: before.version.speakerEntityId ?? (yield* speakerOf(id, chatId, before)),
             ...(before.version.direction ? { direction: before.version.direction } : {})
           },
-          expectedRowVersion
+          expectedRowVersion,
+          ...(model ? { model } : {})
         })
         yield* generations.start({
           userId: id,
@@ -274,6 +291,20 @@ export const makeChatHandlers = Effect.gen(function* () {
         yield* generations.continueQueue(id, outcome)
         return yield* publishSlot(id, slotId)
       }).pipe(Effect.uninterruptible, internal("SelectVersion")),
+
+    // Starring and hiding a version change only the picker and the arrows, never the context.
+    SetVersionFlags: ({ versionId, starred, hidden }) =>
+      Effect.gen(function* () {
+        const id = yield* userId
+        const { chatId, version } = yield* writer.SetVersionFlags({
+          userId: id,
+          versionId,
+          ...(starred === undefined ? {} : { starred }),
+          ...(hidden === undefined ? {} : { hidden })
+        })
+        hub.publish(chatId, { _tag: "Version", version })
+        return version
+      }).pipe(Effect.uninterruptible, internal("SetVersionFlags")),
 
     // Hiding is an edit (DESIGN §8): it changes what's sent next and starts nothing. The
     // slot's event also has the cache estimate read again (CacheWarmth listens).

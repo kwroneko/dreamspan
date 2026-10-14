@@ -255,13 +255,14 @@ export class ChatApi extends RpcGroup.make(
   }),
   /**
    * A swipe: a new model version of a slot, selected and streamed, with the speaker and
-   * the one-turn direction of the version it replaces. Several can run at once.
+   * the one-turn direction of the version it replaces. Several can run at once. Any message
+   * takes one, the user's own included (DESIGN §3.1): the model writes as its speaker.
    */
   Rpc.make("Regenerate", {
     payload: {
       slotId: SlotId,
       expectedRowVersion: Schema.Int,
-      /** "Retry with…": this swipe uses another model of the user's. */
+      /** "Retry with…" or "Regenerate with…": this swipe uses another model of the user's, recorded on it. */
       model: Schema.optionalKey(ModelChoice)
     },
     success: PathEntry,
@@ -273,6 +274,19 @@ export class ChatApi extends RpcGroup.make(
     payload: { slotId: SlotId, versionId: VersionId, expectedRowVersion: Schema.Int },
     success: PathEntry,
     error: Schema.Union([...WriteErrors])
+  }),
+  /**
+   * Stars a version, or hides it from the arrows' cycle (the version picker, DESIGN §3.1),
+   * or undoes either. What's sent to the model doesn't change.
+   */
+  Rpc.make("SetVersionFlags", {
+    payload: {
+      versionId: VersionId,
+      starred: Schema.optionalKey(Schema.Boolean),
+      hidden: Schema.optionalKey(Schema.Boolean)
+    },
+    success: Version,
+    error: Schema.Union([...Errors])
   }),
   /**
    * Hides a message from the model, or shows it to the model again (ST's ghost toggle): it

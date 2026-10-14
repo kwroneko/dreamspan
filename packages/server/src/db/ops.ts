@@ -1095,6 +1095,8 @@ export class WriteOps extends RpcGroup.make(
       slotId: SlotId,
       version: NewVersion,
       expectedRowVersion: Schema.Int,
+      /** For a swipe with a model chosen ("Regenerate with…"): that model, recorded on it at once. */
+      model: Schema.optionalKey(ModelChoice),
       /**
        * The draft its text was typed into: an edit's (`version_edit`, its source version) or
        * a version the user wrote (`scratchpad`, the slot), committed with it if it still
@@ -1132,6 +1134,17 @@ export class WriteOps extends RpcGroup.make(
       error: Schema.NullOr(VersionError)
     },
     success: Version,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** Stars a live version or hides it from the arrows' cycle, or undoes either; one write. */
+  Rpc.make("SetVersionFlags", {
+    payload: {
+      userId: UserId,
+      versionId: VersionId,
+      starred: Schema.optionalKey(Schema.Boolean),
+      hidden: Schema.optionalKey(Schema.Boolean)
+    },
+    success: Schema.Struct({ chatId: ChatId, version: Version }),
     error: Schema.Union([NotFound, StorageError])
   }),
   /** A judge model's finding on a finished model version: its text stays (spec/LCM.md §2.4). */
