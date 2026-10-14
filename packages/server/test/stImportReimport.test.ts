@@ -1,28 +1,32 @@
 // Old messages changed in ST 1.19, using only synthetic JSONL through the real upload.
-import { DatabaseSync } from "node:sqlite"
 import { assert, layer } from "@effect/vitest"
 import type { ChatId, SlotId } from "@rp/shared/chat.ts"
 import { Effect } from "effect"
-import { databaseFile } from "../src/db/connection.ts"
+import { vi } from "vitest"
+import { stImportGraph } from "./support/stImportGraph.ts"
 import { posted, serverLayer, testConfig, typeInto } from "./support/config.ts"
 import { card, header, jsonl, message } from "./support/stFolder.ts"
 import { importStFolder } from "./support/stUpload.ts"
 
-const config = testConfig()
-const graph = (chatId: ChatId) => {
-  const conn = new DatabaseSync(databaseFile(config.dataDir), { readOnly: true })
-  try {
-    return conn
-      .prepare(
-        `SELECT s.id, s.parent_slot_id AS parent, s.selected_version_id AS selected,
-      v.content, v.reasoning, v.created_at AS at, v.origin, v.macro_mode AS macroMode, v.status
-      FROM slots s JOIN versions v ON v.slot_id = s.id WHERE s.chat_id = ? ORDER BY s.depth, s.id, v.ordinal`
-      )
-      .all(chatId)
-  } finally {
-    conn.close()
+// The startup instance lock is the sole main-thread SQLite exception. Workers load
+// their own modules, so this guard catches graph assertions that bypass them.
+vi.mock("node:sqlite", async (original) => {
+  const sqlite = await original<typeof import("node:sqlite")>()
+  return {
+    ...sqlite,
+    DatabaseSync: new Proxy(sqlite.DatabaseSync, {
+      construct(target, args) {
+        if (!String(args[0]).endsWith("/instance.lock")) {
+          throw new Error("SQLite graph assertions must run in a worker")
+        }
+        return Reflect.construct(target, args)
+      }
+    })
   }
-}
+})
+
+const config = testConfig()
+const graph = (chatId: ChatId) => stImportGraph(config.dataDir, chatId)
 
 const lines = (tag: string, count = 10) =>
   Array.from({ length: count }, (_, i) =>
@@ -95,7 +99,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
         if (kind !== "swipe") changed[4] = edit(changed[4]!, `${kind} edited text`)
         const second = yield* importStFolder(folder(kind, changed, kind !== "swipe"), { partBytes: 1024 })
         const path = `chats/Alice/${kind}.jsonl`
-        const after = graph(chat.id)
+        const after = yield* graph(chat.id)
         // Log all four observed outcomes before asserting, so the unfixed run is reviewable.
         const current = yield* api.GetChat({ chatId: chat.id })
         const oldPath = yield* api.ReadPath({
@@ -171,7 +175,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
         // Same changed file again: no extra version, slot, leaf or composer movement.
         const repeated = yield* importStFolder(folder(kind, changed, kind !== "swipe"), { partBytes: 1024 })
         assert.strictEqual(repeated.answers.get(path)?.outcome, "unchanged")
-        assert.deepStrictEqual(graph(chat.id), after)
+        assert.deepStrictEqual(yield* graph(chat.id), after)
         assert.strictEqual((yield* api.GetChat({ chatId: chat.id })).activeLeafSlotId, expectedLeaf)
         assert.strictEqual((yield* api.OpenComposer({ chatId: chat.id, tipSlotId: expectedLeaf })).id, draft.id)
         // Another ST edit must still follow the import's own selection revision.
@@ -184,7 +188,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
             .entries[4]!.version.content,
           changed[4]!.mes
         )
-        assert.strictEqual(new Set(graph(chat.id).map((r) => r.id)).size, expectedCount)
+        assert.strictEqual(new Set((yield* graph(chat.id)).map((r) => r.id)).size, expectedCount)
       })
     )
   }
@@ -223,13 +227,13 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
         }
         original[4] = edit(original[4]!, "ST edited text")
         const second = yield* importStFolder(folder(tag, original, true), { partBytes: 1024 })
-        assert.strictEqual(new Set(graph(chat.id).map((r) => r.id)).size, 10)
+        assert.strictEqual(new Set((yield* graph(chat.id)).map((r) => r.id)).size, 10)
         const after = yield* api.ReadPath({ chatId: chat.id, leafSlotId: null, range: { _tag: "Bottom" }, limit: 100 })
         assert.strictEqual((yield* api.GetChat({ chatId: chat.id })).activeLeafSlotId, chat.activeLeafSlotId)
         if (local === "delete" || local === "purge") {
           assert.isFalse(after.entries.some((e) => e.slotId === target.slotId))
           if (local === "purge") {
-            assert.isFalse(graph(chat.id).some((r) => r.content === "ST edited text"))
+            assert.isFalse((yield* graph(chat.id)).some((r) => r.content === "ST edited text"))
             assert.strictEqual(second.answers.get(`chats/Alice/${tag}.jsonl`)?.outcome, "unchanged")
           }
         } else {
@@ -237,7 +241,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
           assert.strictEqual(after.entries[4]!.contextExcluded, local === "hide")
         }
         if (local !== "purge") {
-          assert.isTrue(graph(chat.id).some((r) => r.id === target.slotId && r.content === "ST edited text"))
+          assert.isTrue((yield* graph(chat.id)).some((r) => r.id === target.slotId && r.content === "ST edited text"))
           assert.isTrue(second.report.issues.some((i) => i.code === "st.differing"))
           assert.strictEqual(second.answers.get(`chats/Alice/${tag}.jsonl`)?.outcome, "updated")
         }
@@ -260,7 +264,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
       original[4] = edit(original[4]!, "Branch text")
       yield* importStFolder(folder(tag, original, true), { partBytes: 1024 })
       const after = yield* api.ReadPath({ chatId: chat.id, leafSlotId: null, range: { _tag: "Bottom" }, limit: 100 })
-      assert.strictEqual(new Set(graph(chat.id).map((r) => r.id)).size, 16)
+      assert.strictEqual(new Set((yield* graph(chat.id)).map((r) => r.id)).size, 16)
       assert.deepStrictEqual(
         after.entries.map((e) => e.slotId),
         before.entries.map((e) => e.slotId)

@@ -7,21 +7,25 @@ import type { Writer } from "../../src/db/Database.ts"
 
 export const fixtureSql = (
   dataDir: string,
-  statements: ReadonlyArray<{ sql: string; params?: ReadonlyArray<string | number | null> }>
+  statements: ReadonlyArray<{ sql: string; params?: ReadonlyArray<string | number | null> }>,
+  options: { readonly readOnly?: boolean } = {}
 ) =>
   Effect.tryPromise(
     () =>
       new Promise<Array<Array<Record<string, unknown>>>>((resolve, reject) => {
         const worker = new Worker(new URL("./lcmFixtureWorker.ts", import.meta.url), {
-          workerData: { dbPath: databaseFile(dataDir), statements }
+          workerData: { dbPath: databaseFile(dataDir), statements, readOnly: options.readOnly ?? false }
         })
-        worker.once("message", (result: { error?: string; results: Array<Array<Record<string, unknown>>> }) => {
-          if (result.error) reject(new Error(result.error))
-          else resolve(result.results)
+        let result: { error?: string; results: Array<Array<Record<string, unknown>>> } | undefined
+        worker.once("message", (message: typeof result) => {
+          result = message
         })
         worker.once("error", reject)
         worker.once("exit", (code) => {
-          if (code !== 0) reject(new Error(`fixture worker exited ${code}`))
+          // The helper completes only once the worker closed its connection and exited.
+          if (code !== 0 || result === undefined) reject(new Error(`fixture worker exited ${code} without a result`))
+          else if (result.error) reject(new Error(result.error))
+          else resolve(result.results)
         })
       })
   )

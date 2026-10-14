@@ -323,6 +323,27 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
               }
               return priorPath.get(depth)
             })
+          // A slot can be on several imported files' paths. Its selection is global,
+          // so advancing it for one file would silently change the others. Walk the
+          // other records only when the imported selection differs from the slot's.
+          let sharedPath: Set<string> | null = null
+          const shared = (slotId: string) =>
+            Effect.gen(function* () {
+              if (sharedPath === null) {
+                const rows = yield* sql<{ id: string }>`
+                  WITH RECURSIVE paths(id, parent) AS (
+                    SELECT s.id, s.parent_slot_id FROM jobs j JOIN slots s
+                      ON s.id IN (json_extract(j.payload_json, '$.last'), json_extract(j.payload_json, '$.end'),
+                        json_extract(j.payload_json, '$.prior'))
+                    WHERE j.owner_user_id = ${userId} AND j.kind = ${ST_CHAT_RECORD}
+                      AND j.id <> ${input.recordId} AND s.chat_id = ${chatId}
+                    UNION
+                    SELECT s.id, s.parent_slot_id FROM slots s JOIN paths p ON s.id = p.parent
+                  ) SELECT id FROM paths`
+                sharedPath = new Set(rows.map((row) => row.id))
+              }
+              return sharedPath.has(slotId)
+            })
           let matching = input.matching
           let added = 0
           let differing = 0
@@ -447,7 +468,13 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
                   }
                   // A local selection, edit, hide or deletion stays the user's. Import
                   // selections advance their baseline with the slot's optimistic revision.
-                  if (!showsSelected && selected !== undefined && match.locally_changed === 0 && match.deleted === 0) {
+                  if (
+                    !showsSelected &&
+                    selected !== undefined &&
+                    match.locally_changed === 0 &&
+                    match.deleted === 0 &&
+                    !(yield* shared(match.slot_id))
+                  ) {
                     yield* recordHistoryReduction(sql, match.slot_id, shown.content)
                     yield* sql`UPDATE slots SET selected_version_id = ${selected}, row_version = row_version + 1,
                       st_import_row_version = row_version + 1 WHERE id = ${match.slot_id}`

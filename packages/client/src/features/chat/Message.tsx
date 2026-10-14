@@ -147,7 +147,7 @@ function VersionBody({
 }
 
 /**
- * A message's editor: an edit of the version shown, or a version of the user's own. Its
+ * A message's editor: an edit of its original source, or a version of the user's own. Its
  * text is a server draft kept by the session (messageDraft.ts), so scrolling the message
  * away or reloading the page doesn't lose it, and the editor opens again where it was.
  */
@@ -444,11 +444,6 @@ export const Message = memo(function Message({
   useRenderCount("rowRenders")
   const cast = useCast()
   const { version } = entry
-  // An editor open on this message: one of the version shown, or one writing a version of its own.
-  const editEditor = useEditor(session, `edit:${version.id}`)
-  const writeEditor = useEditor(session, `write:${entry.slotId}`)
-  const editor = writeEditor ?? editEditor
-  const editing = writeEditor ? "write" : editEditor ? "edit" : null
   const [error, setError] = useState<AppError | null>(null)
   const swipeStart = useRef<{ x: number; y: number } | null>(null)
   /** The last touch was a swipe, so the click it ends in isn't a tap. */
@@ -461,6 +456,22 @@ export const Message = memo(function Message({
   const generating = version.status === "generating"
   const report = (outcome: Outcome<unknown>) => setError(outcome.ok ? null : outcome.error)
   const { versions, position, load } = useVersions(session, entry, report)
+  const editEditor = useSyncExternalStore(
+    session.subscribeEditors,
+    useCallback(
+      () => session.editForSlot(entry.slotId, versions ?? [version]),
+      [session, entry.slotId, versions, version]
+    )
+  )
+  // Drafts restored after reload learn their slot from the versions read above.
+  // Keep that association while a later import's version list is still loading.
+  useEffect(() => {
+    if (editEditor !== undefined) session.bindEditor(editEditor, entry.slotId)
+  }, [session, editEditor, entry.slotId])
+  const writeEditor = useEditor(session, `write:${entry.slotId}`)
+  const editor = writeEditor ?? editEditor
+  const editing = writeEditor ? "write" : editEditor ? "edit" : null
+  const editingAnotherVersion = editEditor?.target._tag === "Edit" && editEditor.target.versionId !== version.id
   // Edits and versions the user writes keep the message's speaker; older ones may have none,
   // and then another version's names it, or the first version's, deleted or not, so deleting
   // the original never makes a character's message the model's.
@@ -547,7 +558,10 @@ export const Message = memo(function Message({
         </Tooltip>
       }
     >
-      <MenuItem icon="write" onClick={() => session.openEditor({ _tag: "Write", slotId: entry.slotId }, "")}>
+      <MenuItem
+        icon="write"
+        onClick={() => session.openEditor({ _tag: "Write", slotId: entry.slotId }, "", entry.slotId)}
+      >
         Write your own version
       </MenuItem>
       <MenuLinkItem
@@ -599,7 +613,7 @@ export const Message = memo(function Message({
         <IconButton
           label="Edit"
           icon="edit"
-          onClick={() => session.openEditor({ _tag: "Edit", versionId: version.id }, version.content)}
+          onClick={() => session.openEditor({ _tag: "Edit", versionId: version.id }, version.content, entry.slotId)}
         />
       )}
       {model && (
@@ -730,6 +744,11 @@ export const Message = memo(function Message({
           )}
           {entry.branchCount > 1 && <Branches entry={entry} onBranch={onBranch} />}
         </header>
+        {editingAnotherVersion && (
+          <p role="note" className="text-sm text-muted">
+            Another version is selected. Your edit still belongs to the version you opened.
+          </p>
+        )}
         {editor !== undefined ? (
           <Editor
             key={editing}
@@ -748,11 +767,19 @@ export const Message = memo(function Message({
               if (outcome.ok) session.closeEditor(editor)
             }}
             onSave={async () => {
+              // Saving an open edit names its original source, even if an import
+              // selected another version while its draft save was still in flight.
+              const target = editor.target
+              const source =
+                target._tag === "Edit"
+                  ? (await load())?.find((candidate) => candidate.id === target.versionId)
+                  : undefined
+              if (target._tag === "Edit" && source === undefined) return
               const submitted = await editor.ready()
               const { text, draft } = submitted
               const outcome =
                 editing === "edit"
-                  ? await session.edit(entry, text, draft)
+                  ? await session.edit({ ...entry, version: source! }, text, draft)
                   : await session.writeVersion(entry, text, draft)
               report(outcome)
               if (!outcome.ok) return
