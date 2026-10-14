@@ -29,16 +29,25 @@ const options = Config.all({
   /** About how many tokens each generation has. */
   tokens: Config.Int(serverEnvironment.FAKE_GENERATOR_TOKENS).pipe(Config.withDefault(400)),
   /** Set, tokens come in bursts this many milliseconds apart (the performance harness). */
-  burstMs: Config.option(Config.Int(serverEnvironment.FAKE_GENERATOR_BURST_MS))
+  burstMs: Config.option(Config.Int(serverEnvironment.FAKE_GENERATOR_BURST_MS)),
+  /** Set, each fake reply streams about this many tokens of reasoning first, as a reasoning model's. */
+  reasoningTokens: Config.option(Config.Int(serverEnvironment.FAKE_GENERATOR_REASONING))
 })
 
 Effect.gen(function* () {
   if (process.env[serverEnvironment.NODE_ENV] === "production") return yield* new FakeGeneratorInProduction()
-  const { tokensPerSecond, tokens, burstMs } = yield* options
+  const { tokensPerSecond, tokens, burstMs, reasoningTokens } = yield* options
   const server = Option.match(tokensPerSecond, {
     onNone: () => serverWith(ContextGenerator.layer),
     onSome: (rate) =>
-      serverWith(FakeGenerator.layer({ tokensPerSecond: rate, tokens, burstMs: Option.getOrUndefined(burstMs) }))
+      serverWith(
+        FakeGenerator.layer({
+          tokensPerSecond: rate,
+          tokens,
+          burstMs: Option.getOrUndefined(burstMs),
+          reasoningTokens: Option.getOrUndefined(reasoningTokens)
+        })
+      )
   })
   return yield* Layer.launch(server.pipe(Layer.provide(AppConfig.layer)))
 }).pipe(NodeRuntime.runMain({ teardown }))

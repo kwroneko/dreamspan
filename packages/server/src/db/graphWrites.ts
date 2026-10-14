@@ -81,6 +81,7 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
         greeting_ref: version.greetingRef ? JSON.stringify(version.greetingRef) : null,
         frozen_macros: version.frozenMacros ? JSON.stringify(version.frozenMacros) : null,
         direction: version.direction ?? null,
+        reasoning: version.reasoning || null,
         error_json: version.error ? JSON.stringify(version.error) : null,
         created_at: at,
         updated_at: at

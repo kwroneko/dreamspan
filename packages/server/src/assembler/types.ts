@@ -20,9 +20,9 @@ export type Role = "system" | "user" | "assistant"
 /**
  * ST's generation types, which a preset prompt's `injection_trigger` names. Generate is
  * `normal`, a new version of a reply `swipe`, and generating for a character the user
- * plays `impersonate` (DESIGN §2.2).
+ * plays `impersonate` (DESIGN §2.2), and Continue `continue`.
  */
-export type GenerationType = "normal" | "swipe" | "impersonate" | "quiet"
+export type GenerationType = "normal" | "swipe" | "impersonate" | "continue" | "quiet"
 
 /** Where a piece of the context came from, for the request inspector (DESIGN §7.4). */
 export type Source =
@@ -365,6 +365,11 @@ export interface Target {
   readonly ordinal: number
   readonly speaker: string | null
   readonly direction: string | null
+  /**
+   * Continue (ST's): the finished version this one extends, and its text, sent as the start
+   * of the reply. Pinned here, so a rebuild sends the same text.
+   */
+  readonly continues?: { readonly version: string; readonly text: string } | undefined
 }
 
 /** One message of the path, as assembly reads it. */
@@ -465,7 +470,7 @@ export interface ModelInput {
 
 /** Why a context couldn't be built: the generation fails with this, as its failed version shows. */
 export class AssemblyFailed extends Schema.TaggedError<AssemblyFailed>()("AssemblyFailed", {
-  reason: Schema.Literals(["no_model", "budget", "invalid_document"]),
+  reason: Schema.Literals(["no_model", "budget", "invalid_document", "no_prefill"]),
   message: Schema.String,
   contextBudget: Schema.optionalKey(ContextBudget),
   preset: Schema.optionalKey(Schema.Struct({ ref: Schema.NullOr(Schema.String), scope: Schema.String }))

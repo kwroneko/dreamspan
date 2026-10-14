@@ -177,6 +177,21 @@ export const inspectionInputs = (sql: SqlClient.SqlClient, userId: UserId, snaps
         if (!sources[i]!.some((s) => s.id === source.id)) sources[i]!.push(source)
       }
     }
+    // Continue's prefill, the message after the assembled ones, is the text it continues.
+    const target = snapshot.sources?.target
+    if (target?.continues && snapshot.request.prefill !== null) {
+      sources.push([
+        {
+          id: createHash("sha256")
+            .update(JSON.stringify(["continue", target.continues.version]))
+            .digest("hex"),
+          kind: "message",
+          label: `Message ${target.depth + 1} as it was, continued from its end`,
+          slotId: target.slotId as SlotId,
+          activation: null
+        }
+      ])
+    }
     return {
       model: model && {
         connection: connection?.name ?? "a deleted connection",

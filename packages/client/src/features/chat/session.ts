@@ -51,6 +51,9 @@ export const waitingCache = Atom.family((_id: VersionId) => Atom.make(false))
 /** The text so far of a version that's generating, by its id; null when it isn't. */
 export const liveText = Atom.family((_id: VersionId) => Atom.make<string | null>(null))
 
+/** The reasoning streamed so far by a version that's generating (DESIGN §7.4); null when it isn't. */
+export const liveReasoning = Atom.family((_id: VersionId) => Atom.make<string | null>(null))
+
 export interface ChatView {
   readonly chat: Chat | null
   /** The path's leaf, as the server resolved it. */
@@ -123,6 +126,8 @@ export class ChatSession {
   private readonly live = new Map<VersionId, () => void>()
   /** Deltas received since the last frame, by version. */
   private readonly pending = new Map<VersionId, Array<{ readonly offset: number; readonly text: string }>>()
+  /** Reasoning received since the last frame, by version, applied as the text's deltas are. */
+  private readonly pendingReasoning = new Map<VersionId, Array<{ readonly offset: number; readonly text: string }>>()
   private frame: number | null = null
   private hellos = 0
   private subscription: Fiber.Fiber<void, unknown> | null = null
@@ -427,6 +432,7 @@ export class ChatSession {
     for (const [id, unmount] of this.live) {
       this.registry.set(waitingCache(id), false)
       this.registry.set(liveText(id), null)
+      this.registry.set(liveReasoning(id), null)
       unmount()
     }
     this.live.clear()
@@ -650,11 +656,17 @@ export class ChatSession {
         else this.pending.set(event.versionId, [event])
         continue
       }
+      if (event._tag === "Reasoning") {
+        const list = this.pendingReasoning.get(event.versionId)
+        if (list) list.push(event)
+        else this.pendingReasoning.set(event.versionId, [event])
+        continue
+      }
       // Anything else applies after the text that came before it.
       this.flush()
       this.apply(event, anchor)
     }
-    if (this.pending.size > 0 && this.frame === null) {
+    if ((this.pending.size > 0 || this.pendingReasoning.size > 0) && this.frame === null) {
       this.frame = requestAnimationFrame(() => {
         this.frame = null
         this.flush()
@@ -664,6 +676,18 @@ export class ChatSession {
 
   /** Applies the deltas received so far: one atom update per version. */
   private flush() {
+    if (this.pendingReasoning.size > 0) {
+      Atom.batch(() => {
+        for (const [id, deltas] of this.pendingReasoning) {
+          let text = this.registry.get(liveReasoning(id)) ?? this.storedReasoning(id)
+          for (const { offset, text: added } of deltas) {
+            if (offset <= text.length && offset + added.length > text.length) text = text.slice(0, offset) + added
+          }
+          this.setLiveReasoning(id, text)
+        }
+      })
+      this.pendingReasoning.clear()
+    }
     if (this.pending.size === 0) return
     Atom.batch(() => {
       for (const [id, deltas] of this.pending) {
@@ -683,12 +707,14 @@ export class ChatSession {
     this.pending.clear()
   }
 
-  private apply(event: Exclude<ChatEvent, { readonly _tag: "Delta" }>, anchor: SlotId | null) {
+  private apply(event: Exclude<ChatEvent, { readonly _tag: "Delta" | "Reasoning" }>, anchor: SlotId | null) {
     switch (event._tag) {
       case "Hello": {
-        for (const { versionId, text, waitingCache: waiting } of event.live) {
+        for (const { versionId, text, waitingCache: waiting, reasoning } of event.live) {
           this.registry.set(waitingCache(versionId), waiting ?? false)
           if (text.length >= (this.registry.get(liveText(versionId)) ?? "").length) this.setLive(versionId, text)
+          if (reasoning && reasoning.length >= (this.registry.get(liveReasoning(versionId)) ?? "").length)
+            this.setLiveReasoning(versionId, reasoning)
         }
         // The first Hello opens the chat. Another means the socket reconnected, and
         // anything may have changed meanwhile.
@@ -860,9 +886,11 @@ export class ChatSession {
 
   private mountLive(id: VersionId) {
     const text = this.registry.mount(liveText(id))
+    const reasoning = this.registry.mount(liveReasoning(id))
     const waiting = this.registry.mount(waitingCache(id))
     return () => {
       text()
+      reasoning()
       waiting()
     }
   }
@@ -872,10 +900,22 @@ export class ChatSession {
     this.registry.set(liveText(id), text)
   }
 
+  /** A loaded version's saved reasoning: where a continuation's streamed reasoning goes on from. */
+  private storedReasoning(id: VersionId) {
+    return this.view.entries.find((e) => e.version.id === id)?.version.reasoning ?? ""
+  }
+
+  private setLiveReasoning(id: VersionId, text: string) {
+    if (!this.live.has(id)) this.live.set(id, this.mountLive(id))
+    this.registry.set(liveReasoning(id), text)
+  }
+
   private endLive(id: VersionId) {
     this.pending.delete(id)
+    this.pendingReasoning.delete(id)
     this.registry.set(waitingCache(id), false)
     this.registry.set(liveText(id), null)
+    this.registry.set(liveReasoning(id), null)
     this.live.get(id)?.()
     this.live.delete(id)
   }
@@ -1019,6 +1059,16 @@ export class ChatSession {
         expectedRowVersion: entry.rowVersion,
         ...(model ? { model } : {})
       })
+    )
+  }
+
+  /**
+   * Continue (ST's): a new version that starts as this one's text and streams on from its
+   * end, sent as the start of the reply to models that take one (DESIGN §7.5).
+   */
+  async continueVersion(entry: PathEntry): Promise<Outcome<unknown>> {
+    return this.slotWrite(entry.slotId, (client) =>
+      client("ContinueVersion", { versionId: entry.version.id, expectedRowVersion: entry.rowVersion })
     )
   }
 

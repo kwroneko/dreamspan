@@ -34,6 +34,8 @@ import { IconButton, iconButtonClass, Tooltip } from "../../ui/Tooltip.tsx"
 import { useDeletedToast } from "../bin/deleted.ts"
 import { ReplayNotice } from "../editor/ReplayNotice.tsx"
 import { castView, nameOf, useCast } from "./cast.ts"
+import { ContinueAction } from "./ContinueAction.tsx"
+import { Reasoning } from "./Reasoning.tsx"
 import { formatWhen } from "./chatTitle.ts"
 import { displayText } from "./macros.ts"
 import { parseModelValue, useModelChoices } from "./modelChoices.ts"
@@ -123,6 +125,7 @@ function VersionBody({
   const text = live ?? version.content
   return (
     <div className="flex flex-col gap-2">
+      <Reasoning version={version} />
       {text === "" && generating ? (
         <p className="text-sm text-muted" aria-live="polite">
           {waiting ? "Waiting for the cache…" : "Writing…"}
@@ -609,6 +612,7 @@ export const Message = memo(function Message({
           onClick={async () => report(await session.regenerate(entry))}
         />
       )}
+      <ContinueAction entry={entry} session={session} report={report} />
       <IconButton
         label={deleteLabel}
         icon="trash"

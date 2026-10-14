@@ -3,12 +3,12 @@ import { Summarizer } from "../lcm/Summarizer.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import type { SlotId, VersionId } from "@rp/shared/chat.ts"
 import type { ConnectionId, ModelId } from "@rp/shared/providers.ts"
-import { Cause, Effect, Exit, Layer, Option, Stream } from "effect"
+import { Cause, Effect, Exit, Layer, Option, Result, Stream } from "effect"
 import type { Generation } from "../assembler/types.ts"
 import { providerRequest } from "../assembler/wire.ts"
 import { Reader, Writer } from "../db/Database.ts"
 import { Providers } from "../providers/Providers.ts"
-import { GenerationFailed, type GenerationRequest, Generator } from "./Generator.ts"
+import { GenerationFailed, type GenerationChunk, type GenerationRequest, Generator } from "./Generator.ts"
 
 /** What a failed storage or worker call says on the version: the details stay in the log. */
 const serverFailure = (operation: string) => (error: unknown) =>
@@ -135,8 +135,14 @@ export const layer = Layer.effect(
                   if (event.type === "waiting-cache") request.onWaitingCache?.(event.waiting)
                 })
               ),
-              Stream.filter((event) => event.type === "text"),
-              Stream.map((event) => event.delta),
+              // Text becomes the version's; reasoning is kept beside it (DESIGN §7.4).
+              Stream.filterMap((event) =>
+                event.type === "text"
+                  ? Result.succeed<GenerationChunk>(event.delta)
+                  : event.type === "thinking"
+                    ? Result.succeed<GenerationChunk>({ reasoning: event.delta })
+                    : Result.failVoid
+              ),
               Stream.mapError((error) =>
                 error._tag === "ProviderError"
                   ? new GenerationFailed({ class: error.reason, message: error.message })

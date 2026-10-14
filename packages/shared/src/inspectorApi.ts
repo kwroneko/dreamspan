@@ -114,7 +114,7 @@ export class RunContext extends Schema.Class<RunContext>("RunContext")({
   builtAt: Schema.Number,
   /** The rollout's status: running, completed, stopped, failed, interrupted. */
   status: Schema.String,
-  type: Schema.Literals(["normal", "swipe", "impersonate", "quiet"]),
+  type: Schema.Literals(["normal", "swipe", "impersonate", "continue", "quiet"]),
   mode: Schema.Literals(["st", "layouts"]),
   capture: Schema.Literals(["captured", "unavailable"]),
   ...ContextDisplay.fields,
@@ -176,7 +176,12 @@ const EffectiveModel = Schema.Struct({
   connectionName: Schema.NullOr(Schema.String),
   modelKey: Schema.NullOr(Schema.String),
   hidden: Schema.Boolean,
-  scope: Schema.Literals(["chat", "user"])
+  scope: Schema.Literals(["chat", "user"]),
+  /**
+   * Whether the model takes the start of its reply (a prefill), as its capabilities say:
+   * Continue needs `assistant`. Absent when the next request couldn't be assembled.
+   */
+  prefill: Schema.optionalKey(Schema.Literals(["none", "assistant", "tool_schema"]))
 })
 
 /** The next request boundary, also available before a first send or without a cache TTL. */

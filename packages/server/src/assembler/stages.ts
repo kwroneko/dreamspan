@@ -161,6 +161,8 @@ const castStage: AssemblerStage = {
       const target = need(assembly, "target")
       assembly.cast = yield* castOf(need(assembly, "state"), target.speaker, target.ordinal)
       if (assembly.request.summarizing) assembly.cast = { ...assembly.cast, type: "quiet" }
+      // ST's Continue: its own generation type, which a preset prompt's trigger can name.
+      else if (target.continues) assembly.cast = { ...assembly.cast, type: "continue" }
       return assembly
     })
 }
@@ -708,6 +710,8 @@ const override = (
  */
 const prefill = (assembly: Assembly) => {
   if (assembly.request.summarizing) return
+  const continues = need(assembly, "target").continues
+  if (continues) return continuePrefill(assembly, continues.text)
   const doc = need(assembly, "preset").doc
   const type = need(assembly, "cast").type
   const raw = type === "impersonate" ? doc.prefill.impersonation : doc.prefill.assistant
@@ -724,6 +728,26 @@ const prefill = (assembly: Assembly) => {
         : "The preset's prefill wasn't sent: no model is chosen."
     })
   }
+}
+
+/**
+ * Continue sends the text it continues as the start of the reply, in place of the preset's
+ * prefill (ST's "continue prefill"), so the model writes on from its end. Without a model
+ * that takes one it can't continue: the version fails and says so (DESIGN §7.5). Trailing
+ * whitespace goes, which Anthropic refuses at the end of a prefill.
+ */
+const continuePrefill = (assembly: Assembly, text: string) => {
+  const model = assembly.model
+  if (!model) {
+    throw new AssemblyFailed({ reason: "no_model", message: "Continue needs a model: none is chosen." })
+  }
+  if (model.prefill !== "assistant") {
+    throw new AssemblyFailed({
+      reason: "no_prefill",
+      message: `Continue isn't available with ${model.key}: it isn't known to take the start of its reply (a prefill). If it does, set its Prefill capability in Connections.`
+    })
+  }
+  assembly.prefill = text.trimEnd()
 }
 
 /** A message of the path as ST sends it, with the preset's names behavior (setOpenAIMessages). */

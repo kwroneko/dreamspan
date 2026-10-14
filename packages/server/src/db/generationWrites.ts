@@ -13,6 +13,7 @@ import {
   ownedPreset,
   readDefaults
 } from "./generationSettings.ts"
+import { makeDisplayPrefsWriteHandlers } from "./displayPrefs.ts"
 import type { WriteOps } from "./ops.ts"
 import { transaction } from "./tx.ts"
 
@@ -65,6 +66,7 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
           ON CONFLICT (user_id, key) DO UPDATE SET value_json = excluded.value_json`
 
   const handlers = {
+    ...(yield* makeDisplayPrefsWriteHandlers),
     StartRollout: ({
       userId,
       chatId,

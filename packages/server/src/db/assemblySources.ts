@@ -240,8 +240,14 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
       ordinal: number
       speaker_entity_id: string | null
       direction: string | null
+      continues: string | null
+      continued_text: string | null
     }>`
-      SELECT s.depth, s.parent_slot_id, v.ordinal, v.speaker_entity_id, v.direction
+      SELECT s.depth, s.parent_slot_id, v.ordinal, v.speaker_entity_id, v.direction,
+        -- A generated version with a source continues it (ContinueVersion); the source is
+        -- a version of the same slot (graphIntegrity.ts), frozen once it was written.
+        CASE WHEN v.writer = 'model' AND v.origin = 'generated' THEN v.source_version_id END AS continues,
+        (SELECT x.content FROM versions x WHERE x.id = v.source_version_id AND x.slot_id = v.slot_id) AS continued_text
       FROM versions v JOIN slots s ON s.id = v.slot_id JOIN chats c ON c.id = s.chat_id
       WHERE v.id = ${versionId} AND s.id = ${slotId} AND c.id = ${chatId} AND c.owner_user_id = ${userId}
         AND v.deleted_at IS NULL AND s.deleted_at IS NULL AND c.deleted_at IS NULL`.pipe(
@@ -255,7 +261,10 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
               parentSlotId: row.parent_slot_id,
               ordinal: row.ordinal,
               speaker: row.speaker_entity_id,
-              direction: row.direction
+              direction: row.direction,
+              ...(row.continues === null
+                ? {}
+                : { continues: { version: row.continues, text: row.continued_text ?? "" } })
             })
           : Effect.fail(new NotFound({ entity: "version", id: versionId }))
       ),
