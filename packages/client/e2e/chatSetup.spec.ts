@@ -170,7 +170,7 @@ test("Send as another card, and Generate with a one-turn direction that swipes r
   await shoot(page, "generate-with-direction")
   // A swipe of that turn keeps its direction.
   await reply.getByRole("button", { name: "Generate another version" }).click()
-  await expect(reply.getByText("2 / 2")).toBeVisible()
+  await expect(reply.getByRole("group", { name: "Versions" })).toContainText("2/2")
   await expect(reply).toContainText("Direction: Mira tells a story about the storm.")
   await expect(generating(page)).toHaveCount(0, { timeout: 20_000 })
   // The next turn doesn't inherit it.

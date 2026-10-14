@@ -8,6 +8,7 @@ import { expect, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
 import { type FakeProvider, REPLY, startProvider } from "./support/provider.ts"
 import { asUser } from "./support/rpc.ts"
+import { messageMenu, showActions } from "./support/message.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
 const server = serverPerFile(withAdmin)
@@ -93,7 +94,7 @@ test("a reply's context opens from the reply, with its sources and the cache bre
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/chats/${chat.id}`)
   await expect(reply(page)).toContainText(REPLY)
-  await reply(page).getByRole("link", { name: "Context" }).click()
+  await messageMenu(reply(page), "Context it was generated from")
   await expect(page).toHaveURL(new RegExp(`/chats/${chat.id}/context/${chat.reply}$`))
   const messages = page.getByRole("region", { name: "Messages" })
   await expect(messages.getByText("Card “Mira”: description")).toBeVisible()
@@ -125,6 +126,7 @@ test("the cache indicator is warm after a reply, and cold once an earlier messag
   await shoot(page, "cache-warm")
 
   const mine = page.getByRole("article", { name: "Your message" })
+  await showActions(mine)
   await mine.getByRole("button", { name: "Edit" }).click()
   await mine.getByLabel("Message text").fill("The road washed out.")
   await mine.getByRole("button", { name: "Save" }).click()

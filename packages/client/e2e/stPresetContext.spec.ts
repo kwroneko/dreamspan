@@ -60,7 +60,7 @@ for (const chars of [14_000, 20_000]) {
     expect(next.historyStart?.depth ?? null).toBe(chars === 14_000 ? 50 : null)
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
     await page.goto(`${server().url}/chats/${chat.id}`)
-    const explanation = page.getByRole("status").filter({ hasText: "Not sent: the preset" })
+    const explanation = page.getByRole("status").filter({ hasText: "aren’t sent to the model: the preset" })
     await expect(explanation).toBeVisible()
     await expect(explanation).toContainText("“Default” (ST’s built-in default) allows 4,095 tokens")
     await expect(explanation).toContainText("targets 3,276, reserves 300 for the reply")

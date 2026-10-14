@@ -17,7 +17,7 @@ const PAGE = 50
 const chatsAtom = AppClient.query("ListChats", { limit: PAGE, before: null }, { reactivityKeys: ["chats"] })
 
 /** A chat's title as shown, without the unfinished-import marker, which shows as a badge. */
-export const chatTitle = (chat: Pick<Chat, "title">) => importState(chat.title).title || "Untitled chat"
+const chatTitle = (chat: Pick<Chat, "title">) => importState(chat.title).title || "Untitled chat"
 
 /** The badges a chat's title gets: an import still unfinished (ARCHITECTURE §13). */
 export function ChatBadges({ chat }: { chat: Pick<Chat, "title"> }) {

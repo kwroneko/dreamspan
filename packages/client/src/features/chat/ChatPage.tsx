@@ -2,7 +2,7 @@
 // anchored at the bottom, and the composer. Nothing here locks while replies generate.
 import { RegistryContext } from "@effect/atom-react"
 import type { ChatId, PathEntry, SlotId } from "@rp/shared/chat.ts"
-import { Link, useNavigate, useParams, useSearch } from "@tanstack/react-router"
+import { useNavigate, useParams, useSearch } from "@tanstack/react-router"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import {
   lazy,
@@ -19,18 +19,18 @@ import {
 import { Button } from "../../ui/Button.tsx"
 import { Loading } from "../../ui/Spinner.tsx"
 import { Alert } from "../../ui/Surface.tsx"
+import { TooltipProvider } from "../../ui/Tooltip.tsx"
 import { useLookingAt } from "../notices.tsx"
-import { useTitle } from "../shell.tsx"
-import { ChatBadges, chatTitle } from "./ChatsPage.tsx"
 import { CacheIndicator } from "./CacheIndicator.tsx"
 import { CastContext, castView } from "./cast.ts"
 import { CastDialog, SettingsDialog } from "./ChatPanels.tsx"
+import { ChatHeader } from "./ChatHeader.tsx"
 import { EnableLcmDialog } from "./EnableLcmDialog.tsx"
 import { Composer } from "./Composer.tsx"
 import { CoverageRail, LANE_PX, useCoverage } from "./CoverageRail.tsx"
 import { LcmBoundary } from "./LcmBoundary.tsx"
 import { setRail, useRail } from "./lcm.ts"
-import { Message } from "./Message.tsx"
+import { type ContextMark, Message } from "./Message.tsx"
 import { useRenderCount } from "./perf.ts"
 import { ChatSession, type ChatView } from "./session.ts"
 import { SummaryPanel } from "./SummaryPanel.tsx"
@@ -42,6 +42,11 @@ const NotesDialog = lazy(() => import("./ChatNotes.tsx").then((module) => ({ def
 const EDGE = 5
 /** Within this many pixels of the end counts as at the end. */
 const END_PX = 48
+
+const SUMMARIZED: ContextMark = {
+  kind: "summarized",
+  reason: "Summarized: a summary stands in for this message in the context."
+}
 
 /**
  * Where the divider between summarized and verbatim history goes: the index among `entries`
@@ -95,6 +100,26 @@ function MessageList({
     entry.depth < history.historyStart.depth &&
     entry.depth > (through ?? -1)
   const budget = history?.budget
+  /** Why a message left the context, said the same way on each (DESIGN §5.5). */
+  const droppedReason = history?.historyStart
+    ? `Not sent to the model: the history sent starts at #${history.historyStart.depth + 1}${
+        budget
+          ? `, to fit the preset “${budget.presetName}”${budget.builtinPreset ? " (ST’s built-in default)" : ""} (at most ${budget.maximum.toLocaleString()} tokens; when it's full, older messages leave until it's down to ${budget.target.toLocaleString()})`
+          : ""
+      }.${lcm === null && through === null ? " Summaries are off, so nothing stands in for it." : ""}`
+    : "Not sent to the model: it's before where the history sent starts."
+  // The same object while the reason holds, so rows that didn't change don't render again.
+  const droppedMark = useMemo<ContextMark>(() => ({ kind: "dropped", reason: droppedReason }), [droppedReason])
+  const contextOf = (entry: PathEntry): ContextMark | null =>
+    entry.contextExcluded
+      ? null
+      : through !== null && entry.depth <= through
+        ? SUMMARIZED
+        : outOfContext(entry)
+          ? droppedMark
+          : null
+  /** The message whose actions show after a tap, on a narrow screen. */
+  const [revealed, setRevealed] = useState<SlotId | null>(null)
   let historyDivider = -1
   if (budget && entries.length > 0) {
     const start = history.historyStart
@@ -122,7 +147,7 @@ function MessageList({
   const virtualizer = useVirtualizer({
     count: rowCount,
     getScrollElement: () => parent.current,
-    estimateSize: (row) => (rows[row]!.kind === "message" ? 180 : rows[row]!.kind === "lcm" ? 44 : 64),
+    estimateSize: (row) => (rows[row]!.kind === "message" ? 160 : rows[row]!.kind === "lcm" ? 44 : 64),
     getItemKey: (row) => {
       const item = rows[row]!
       return item.kind === "message" ? item.entry.slotId : `${item.kind}-boundary`
@@ -132,7 +157,7 @@ function MessageList({
     followOnAppend: view.follow,
     paddingStart: 16,
     paddingEnd: 16,
-    gap: 12,
+    gap: 6,
     // TanStack Virtual follows a row growing at the very end itself; once the user lets go,
     // it mustn't (below).
     scrollEndThreshold: follow.stuck ? 1 : -1
@@ -250,53 +275,58 @@ function MessageList({
   }
 
   return (
-    <div
-      ref={parent}
-      data-testid="messages"
-      className="min-h-0 flex-1 overflow-y-auto overscroll-contain [overflow-anchor:none]"
-    >
-      <div className="relative mx-auto w-full max-w-3xl" style={{ height: virtualizer.getTotalSize() }}>
-        {showRail && (
-          <CoverageRail entries={entries} rows={railRows} lcm={lcm} position={position} onOpen={onOpenSummaries} />
-        )}
-        {items.map((item) => {
-          const row = rows[item.index]!
-          return (
-            <div
-              key={item.key}
-              data-index={item.index}
-              ref={virtualizer.measureElement}
-              className="chat-row absolute top-0 left-0 w-full"
-              style={{
-                transform: `translateY(${item.start}px)`,
-                ...(railPx > 0 ? { left: railPx, width: `calc(100% - ${railPx}px)` } : {})
-              }}
-            >
-              {row.kind === "lcm" ? (
-                <LcmBoundary lcm={lcm!} onOpen={() => onOpenSummaries(null)} />
-              ) : row.kind === "history" ? (
-                <Alert>
-                  Not sent: the preset “{budget!.presetName}”{budget!.builtinPreset ? " (ST’s built-in default)" : ""}{" "}
-                  allows {budget!.maximum.toLocaleString()} tokens, targets {budget!.target.toLocaleString()}, reserves{" "}
-                  {budget!.responseReserve.toLocaleString()} for the reply, and the card, prompts and other fixed
-                  content take ~{budget!.nonHistoryTokens.toLocaleString()}.
-                </Alert>
-              ) : (
-                <Message
-                  summarized={!row.entry.contextExcluded && through !== null && row.entry.depth <= through}
-                  outOfContext={outOfContext(row.entry)}
-                  entry={row.entry}
-                  session={session}
-                  highlighted={row.entry.slotId === anchor}
-                  branchLeaf={view.leafSlotId === view.chat?.activeLeafSlotId ? null : view.leafSlotId}
-                  onBranch={onBranch}
-                />
-              )}
-            </div>
-          )
-        })}
+    <TooltipProvider>
+      <div
+        ref={parent}
+        data-testid="messages"
+        className="min-h-0 flex-1 overflow-y-auto overscroll-contain [overflow-anchor:none]"
+      >
+        <div className="relative mx-auto w-full max-w-3xl" style={{ height: virtualizer.getTotalSize() }}>
+          {showRail && (
+            <CoverageRail entries={entries} rows={railRows} lcm={lcm} position={position} onOpen={onOpenSummaries} />
+          )}
+          {items.map((item) => {
+            const row = rows[item.index]!
+            return (
+              <div
+                key={item.key}
+                data-index={item.index}
+                ref={virtualizer.measureElement}
+                className="chat-row absolute top-0 left-0 w-full"
+                style={{
+                  transform: `translateY(${item.start}px)`,
+                  ...(railPx > 0 ? { left: railPx, width: `calc(100% - ${railPx}px)` } : {})
+                }}
+              >
+                {row.kind === "lcm" ? (
+                  <LcmBoundary lcm={lcm!} onOpen={() => onOpenSummaries(null)} />
+                ) : row.kind === "history" ? (
+                  <Alert>
+                    Messages above this aren&rsquo;t sent to the model: the preset “{budget!.presetName}”
+                    {budget!.builtinPreset ? " (ST’s built-in default)" : ""} allows {budget!.maximum.toLocaleString()}{" "}
+                    tokens, targets {budget!.target.toLocaleString()}, reserves{" "}
+                    {budget!.responseReserve.toLocaleString()} for the reply, and the card, prompts and other fixed
+                    content take ~{budget!.nonHistoryTokens.toLocaleString()}.
+                  </Alert>
+                ) : (
+                  <Message
+                    context={contextOf(row.entry)}
+                    revealed={revealed === row.entry.slotId}
+                    onReveal={setRevealed}
+                    entry={row.entry}
+                    session={session}
+                    highlighted={row.entry.slotId === anchor}
+                    last={view.newer === null && row.entry === entries.at(-1)}
+                    branchLeaf={view.leafSlotId === view.chat?.activeLeafSlotId ? null : view.leafSlotId}
+                    onBranch={onBranch}
+                  />
+                )}
+              </div>
+            )
+          })}
+        </div>
       </div>
-    </div>
+    </TooltipProvider>
   )
 }
 
@@ -316,7 +346,6 @@ function OpenChat({ chatId, leaf, slot }: { chatId: ChatId; leaf: SlotId | null;
 function ChatSurface({ session, leaf, slot }: { session: ChatSession; leaf: SlotId | null; slot: SlotId | null }) {
   const view = useSyncExternalStore(session.subscribe, session.snapshot)
   const navigate = useNavigate()
-  useTitle(view.chat ? chatTitle(view.chat) : "Chat")
   const shown = useRef({ leaf, slot })
   // Another message or branch of the open chat moves the window; a URL catching up with
   // where the window already is doesn't.
@@ -381,39 +410,35 @@ function ChatSurface({ session, leaf, slot }: { session: ChatSession; leaf: Slot
   )
   return (
     <CastContext value={cast}>
-      <header className="mx-auto flex w-full max-w-3xl flex-wrap items-center gap-x-3 gap-y-1 pb-2">
-        <Link to="/chats" className="text-sm text-muted hover:text-text">
-          ← Chats
-        </Link>
-        <h1 className="min-w-0 flex-1 truncate text-lg font-semibold">{view.chat ? chatTitle(view.chat) : "Chat"}</h1>
-        {view.chat && <ChatBadges chat={view.chat} />}
-        {view.leafSlotId !== null && view.chat !== null && view.leafSlotId !== view.chat.activeLeafSlotId && (
-          <Link to="." search={{}} className="text-sm text-accent hover:underline">
-            Back to the latest branch
-          </Link>
-        )}
-        <div className="flex flex-wrap gap-1">
-          <Button variant="ghost" onClick={() => setPanel("cast")}>
-            Cast
-          </Button>
-          <Button variant="ghost" onClick={() => setPanel("notes")}>
-            Notes
-          </Button>
-          {lcmOn && (
-            <>
-              <Button variant="ghost" onClick={() => openSummaries(null)}>
-                Summaries
-              </Button>
-              <Button variant="ghost" aria-pressed={rail} onClick={() => setRail(!rail)}>
-                Coverage rail
-              </Button>
-            </>
-          )}
-          <Button variant="ghost" onClick={() => setPanel("settings")}>
-            Settings
-          </Button>
-        </div>
-      </header>
+      <ChatHeader
+        session={session}
+        view={view}
+        onBranch={switchBranch}
+        onJump={jump}
+        actions={
+          <>
+            <Button variant="ghost" onClick={() => setPanel("cast")}>
+              Cast
+            </Button>
+            <Button variant="ghost" onClick={() => setPanel("notes")}>
+              Notes
+            </Button>
+            {lcmOn && (
+              <>
+                <Button variant="ghost" onClick={() => openSummaries(null)}>
+                  Summaries
+                </Button>
+                <Button variant="ghost" aria-pressed={rail} onClick={() => setRail(!rail)}>
+                  Coverage rail
+                </Button>
+              </>
+            )}
+            <Button variant="ghost" onClick={() => setPanel("settings")}>
+              Settings
+            </Button>
+          </>
+        }
+      />
       {/* Mounted only while open: the surface re-renders with every page of history. */}
       {panel === "cast" && (
         <CastDialog session={session} open onOpenChange={(open) => setPanel(open ? "cast" : null)} />

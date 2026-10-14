@@ -4,6 +4,7 @@ import { Effect } from "effect"
 import type { ChatId, PathEntry } from "@rp/shared/chat.ts"
 import type { RefId } from "@rp/shared/library.ts"
 import { asUser, loginCookie } from "./support/rpc.ts"
+import { messageMenu } from "./support/message.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { startProvider, type FakeProvider, REPLY } from "./support/provider.ts"
 
@@ -91,7 +92,7 @@ test("dropped messages have a faded border and accessible icon distinct from hid
   )
   const firstSent = entries.find((e) => e.depth >= next.historyStart!.depth)!
   await page.goto(`${server().url}/chats/${chatId}?slot=${firstSent.slotId}`)
-  const explanation = page.getByRole("status").filter({ hasText: "Not sent: the preset" })
+  const explanation = page.getByRole("status").filter({ hasText: "aren’t sent to the model: the preset" })
   await expect(explanation).toContainText("“Stepped” allows 400 tokens")
   const sent = page.locator(`article[data-slot="${firstSent.slotId}"]`)
   await expect(sent).toBeVisible()
@@ -121,7 +122,7 @@ test("a changed prefix shows the rewrite estimate without a TTL or countdown", a
   await expect(estimate).toContainText(/Next send rewrites ~[\d,]+ tokens/)
   await expect(estimate).not.toContainText(/\d:\d\d left/)
   await expect(estimate.getByRole("button", { name: /countdown/ })).toHaveCount(0)
-  await reply.getByRole("link", { name: "Context" }).click()
+  await messageMenu(reply, "Context it was generated from")
   await expect(page.getByText(/older ones don't fit/)).toBeVisible()
 })
 

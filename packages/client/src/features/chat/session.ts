@@ -925,6 +925,13 @@ export class ChatSession {
     )
   }
 
+  /** "Write your own version" (DESIGN §3.1): a new version of the user's, selected. */
+  writeVersion(entry: PathEntry, content: string): Promise<Outcome<unknown>> {
+    return this.slotWrite(entry.slotId, (client) =>
+      client("WriteVersion", { slotId: entry.slotId, content, expectedRowVersion: entry.rowVersion })
+    )
+  }
+
   async stop(versionId: VersionId): Promise<Outcome<unknown>> {
     const result = await this.call((client) => client("StopGeneration", { versionId }))
     if (result.ok) this.applyVersion(result.value)
