@@ -1008,7 +1008,7 @@ export class ChatSession {
     return result
   }
 
-  /** A swipe; with a `model`, "Retry with…" that one instead of the chat's. */
+  /** A swipe; with a `model`, "Retry with…" or "Regenerate with…" that one instead of the chat's. */
   async regenerate(
     entry: PathEntry,
     model?: { readonly connection: Connection["id"]; readonly model: Model["id"] }
@@ -1084,6 +1084,16 @@ export class ChatSession {
 
   deleteVersion(versionId: VersionId) {
     return this.call((client) => client("DeleteVersion", { versionId }))
+  }
+
+  /** Stars a version or hides it from the arrows (the version picker), or undoes either. */
+  async setVersionFlags(
+    version: Version,
+    flags: { readonly starred?: boolean; readonly hidden?: boolean }
+  ): Promise<Outcome<Version>> {
+    const result = await this.call((client) => client("SetVersionFlags", { versionId: version.id, ...flags }))
+    if (result.ok) this.applyVersion(result.value)
+    return result
   }
 
   listVersions(slotId: SlotId) {

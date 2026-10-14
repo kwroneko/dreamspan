@@ -1,5 +1,6 @@
-// One message: who wrote it (avatar, name, time, its number on the path), its versions
-// (swipe through them, pick one, or generate another), its text, whether it's sent to the
+// One message: who wrote it (avatar, name, time, its number on the path, the model of a
+// generated version), its versions (swipe through them, pick one in the version picker, or
+// generate another, on any message: DESIGN §3.1), its text, whether it's sent to the
 // model and why not, and what can be done with it. The actions show on hover or focus on
 // a wide screen, and on a tap of the message on a narrow one. Rows only re-render when
 // their slot changes; the text of a generating version comes from its own atom, so a token
@@ -26,7 +27,8 @@ import { Button } from "../../ui/Button.tsx"
 import { Textarea } from "../../ui/Field.tsx"
 import { Icon, type IconName } from "../../ui/Icon.tsx"
 import { Markdown } from "../../ui/Markdown.tsx"
-import { Menu, MenuItem, MenuLinkItem, MenuRadioGroup, MenuRadioItem, MenuSeparator } from "../../ui/Menu.tsx"
+import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
+import { Menu, MenuItem, MenuLinkItem, MenuSeparator } from "../../ui/Menu.tsx"
 import { Select } from "../../ui/Select.tsx"
 import { Badge } from "../../ui/Surface.tsx"
 import { showToast } from "../../ui/Toast.tsx"
@@ -40,6 +42,7 @@ import { parseModelValue, useModelChoices } from "./modelChoices.ts"
 import type { MessageDraft, MessageEditorKey } from "./messageDraft.ts"
 import { useMountedTracking, useRenderCount } from "./perf.ts"
 import { type ChatSession, liveText, type Outcome, waitingCache } from "./session.ts"
+import { VersionPicker } from "./VersionPicker.tsx"
 
 /** A horizontal drag this long on a message swipes to the next or previous version. */
 const SWIPE_PX = 60
@@ -103,6 +106,57 @@ function RetryWith({ onPick }: { onPick: (model: ReturnType<typeof parseModelVal
         onValueChange={(value) => void onPick(parseModelValue(value))}
       />
     </div>
+  )
+}
+
+/**
+ * "Regenerate with…": a new version of the message from a model the user picks, from the
+ * same list as "Retry with…". Mounted only while open, so rows don't follow the session.
+ */
+function RegenerateWith({
+  session,
+  title,
+  onClose,
+  onPick
+}: {
+  session: ChatSession
+  title: string
+  onClose: () => void
+  onPick: (model: ReturnType<typeof parseModelValue>) => void
+}) {
+  const models = useModelChoices(true)
+  // The model the chat goes on using, named, so the choice here reads as a one-off.
+  const effective = useSyncExternalStore(session.subscribe, session.snapshot).history?.model
+  const chatModel =
+    effective?.connectionName && effective.modelKey
+      ? `${effective.connectionName} · ${effective.modelKey} (${effective.scope === "chat" ? "this chat's" : "your default"})`
+      : null
+  return (
+    <Dialog
+      open
+      onOpenChange={(open) => !open && onClose()}
+      title={title}
+      description={`A new version of this message, written by the model you pick. The chat keeps its own model${
+        chatModel ? `: ${chatModel}` : ""
+      }.`}
+    >
+      {models.length === 0 ? (
+        <p className="text-sm text-muted">Loading your models… None are listed until a connection has one.</p>
+      ) : (
+        <Select
+          items={models}
+          value={null}
+          placeholder="Pick a model…"
+          onValueChange={(value) => {
+            onClose()
+            onPick(parseModelValue(value))
+          }}
+        />
+      )}
+      <DialogActions>
+        <Button onClick={onClose}>Cancel</Button>
+      </DialogActions>
+    </Dialog>
   )
 }
 
@@ -230,8 +284,8 @@ function useVersions(session: ChatSession, entry: PathEntry, report: (outcome: O
       live = false
     }
   }, [stale, session, entry.slotId, entry.versionCount, entry.version.id])
-  const load = async () => {
-    if (position >= 0) return versions
+  const load = async (fresh = false) => {
+    if (position >= 0 && !fresh) return versions
     const result = await session.listVersions(entry.slotId)
     if (!result.ok) {
       report(result)
@@ -240,98 +294,74 @@ function useVersions(session: ChatSession, entry: PathEntry, report: (outcome: O
     setVersions(result.value)
     return result.value
   }
-  return { versions: position >= 0 ? versions : null, position, load }
+  /** A version as a write returned it, in its place in the list. */
+  const replace = (version: Version) =>
+    setVersions((list) => list?.map((v) => (v.id === version.id ? version : v)) ?? list)
+  return { versions: position >= 0 ? versions : null, position, load, replace }
 }
 
-const preview = (text: string) => {
-  const flat = text.replace(/\s+/g, " ").trim()
-  return flat === "" ? "(empty)" : flat.length > 90 ? `${flat.slice(0, 90)}…` : flat
+/** The next version the arrows reach from `index` going `step`: hidden ones are skipped. */
+const stepFrom = (versions: ReadonlyArray<Version>, index: number, step: -1 | 1) => {
+  let i = index + step
+  while (versions[i]?.hidden) i += step
+  return versions[i]
 }
 
-/** `‹ 3/7 ›`: the versions of a message, with the list of them on the counter. */
+/** `‹ 3/7 ›`: the versions of a message, with the version picker on the counter. */
 function Versions({
   entry,
-  model,
+  generated,
   versions,
   position,
+  session,
   onStep,
   onPick,
+  onFlag,
   onOpen
 }: {
   entry: PathEntry
-  model: boolean
+  /** A model writes this message's versions, so › past the last one generates another. */
+  generated: boolean
   versions: ReadonlyArray<Version> | null
   position: number
+  session: ChatSession
   onStep: (step: -1 | 1) => void
   onPick: (version: Version) => void
+  onFlag: (version: Version, flags: { starred?: boolean; hidden?: boolean }) => void
   onOpen: () => void
 }) {
-  const last = position === entry.versionCount - 1
-  const counter = position >= 0 ? `${position + 1}/${entry.versionCount}` : `${entry.versionCount}`
+  // Until the list is read, the arrows go by the count; then they skip hidden versions.
+  const listed = versions !== null && position >= 0
+  const before = listed ? stepFrom(versions, position, -1) !== undefined : position !== 0
+  const after = listed ? stepFrom(versions, position, 1) !== undefined : position < entry.versionCount - 1
+  const textOf = useCallback((version: Version) => session.textOf(version), [session])
   return (
     <div className="flex shrink-0 items-center" role="group" aria-label="Versions">
       <IconButton
         label="Previous version"
         icon="left"
         className="max-sm:size-7"
-        disabled={entry.versionCount <= 1 || position === 0}
+        disabled={entry.versionCount <= 1 || !before}
         onClick={() => onStep(-1)}
       />
       {entry.versionCount > 1 ? (
-        <Menu
-          align="end"
-          label="Versions"
-          trigger={
-            <Tooltip label="Choose a version">
-              <button
-                type="button"
-                aria-label={
-                  position >= 0
-                    ? `Version ${position + 1} of ${entry.versionCount}: choose a version`
-                    : `${entry.versionCount} versions: choose one`
-                }
-                onPointerEnter={onOpen}
-                onFocus={onOpen}
-                className="h-8 min-w-9 rounded-md px-1 text-xs text-muted tabular-nums outline-none hover:bg-surface-raised hover:text-text focus-visible:ring-2 focus-visible:ring-focus data-popup-open:bg-surface-raised"
-              >
-                {counter}
-              </button>
-            </Tooltip>
-          }
-        >
-          {versions === null ? (
-            <p className="px-2.5 py-1.5 text-sm text-muted">Loading the versions…</p>
-          ) : (
-            <MenuRadioGroup
-              value={entry.version.id as string}
-              onValueChange={(id) => {
-                const picked = versions.find((v) => v.id === id)
-                if (picked) onPick(picked)
-              }}
-            >
-              {versions.map((v, i) => (
-                <MenuRadioItem key={v.id} value={v.id as string}>
-                  <span className="flex min-w-0 flex-col">
-                    <span className="text-xs text-muted">
-                      {i + 1}
-                      {v.status !== "complete" ? ` · ${v.status}` : ""}
-                      {v.origin === "edited" ? " · edited" : v.origin === "user_written" ? " · written by you" : ""}
-                    </span>
-                    <span className="line-clamp-2">{preview(v.content)}</span>
-                  </span>
-                </MenuRadioItem>
-              ))}
-            </MenuRadioGroup>
-          )}
-        </Menu>
+        <VersionPicker
+          entry={entry}
+          versions={versions}
+          position={position}
+          textOf={textOf}
+          onOpen={onOpen}
+          onPick={onPick}
+          onFlag={onFlag}
+        />
       ) : (
         <span className="min-w-6 text-center text-xs text-muted tabular-nums">1/1</span>
       )}
       <IconButton
-        label={model && (position === -1 || last) ? "Generate another version" : "Next version"}
+        label={generated && (position === -1 || !after) ? "Generate another version" : "Next version"}
         icon="right"
         className="max-sm:size-7"
-        disabled={!model && (entry.versionCount <= 1 || last)}
+        disabled={!generated && (entry.versionCount <= 1 || !after)}
         onClick={() => onStep(1)}
       />
     </div>
@@ -460,7 +490,8 @@ export const Message = memo(function Message({
   }, [revealed])
   const generating = version.status === "generating"
   const report = (outcome: Outcome<unknown>) => setError(outcome.ok ? null : outcome.error)
-  const { versions, position, load } = useVersions(session, entry, report)
+  const { versions, position, load, replace } = useVersions(session, entry, report)
+  const [regenerateWith, setRegenerateWith] = useState(false)
   // Edits and versions the user writes keep the message's speaker; older ones may have none,
   // and then another version's names it, or the first version's, deleted or not, so deleting
   // the original never makes a character's message the model's.
@@ -479,6 +510,9 @@ export const Message = memo(function Message({
         ? "assistant"
         : entry.side
   const model = side === "assistant"
+  // A model writes its versions: a reply, or a turn on the user's side the model wrote (an
+  // impersonation), so it has Regenerate and › generates another, written as its speaker.
+  const generated = model || version.writer === "model"
   const name = speaker?.name ?? (model ? "Model" : "You")
   const deleted = useDeletedToast()
   /** A delete says so, with Undo (DESIGN §6.2). */
@@ -490,15 +524,26 @@ export const Message = memo(function Message({
   const swipe = async (step: -1 | 1) => {
     const all = entry.versionCount > 1 ? await load() : [version]
     if (all === null) return
-    const index = all.findIndex((v) => v.id === version.id)
-    const target = all[index + step]
+    const target = stepFrom(
+      all,
+      all.findIndex((v) => v.id === version.id),
+      step
+    )
     if (target) return report(await session.select(entry, target))
-    // Past the last version of a reply, a swipe generates another, as in SillyTavern.
-    if (step === 1 && model) report(await session.regenerate(entry))
+    // Past the last version of a generated message, a swipe generates another, as in SillyTavern.
+    if (step === 1 && generated) report(await session.regenerate(entry))
+  }
+  const flag = async (target: Version, flags: { starred?: boolean; hidden?: boolean }) => {
+    const outcome = await session.setVersionFlags(target, flags)
+    report(outcome)
+    if (outcome.ok) replace(outcome.value)
   }
 
+  // The version picker, its sheet and its dialogs are portals: their events reach this
+  // article through React, but a drag or a tap in them is no swipe or tap on the message.
+  const outside = (event: PointerEvent | MouseEvent) => !event.currentTarget.contains(event.target as Node)
   const onPointerDown = (event: PointerEvent) => {
-    if (event.pointerType === "touch") swipeStart.current = { x: event.clientX, y: event.clientY }
+    if (event.pointerType === "touch" && !outside(event)) swipeStart.current = { x: event.clientX, y: event.clientY }
   }
   const onPointerUp = (event: PointerEvent) => {
     const start = swipeStart.current
@@ -511,13 +556,13 @@ export const Message = memo(function Message({
   // On a narrow screen a tap on the message shows its actions; on a wide one they show on hover.
   const onClick = (event: MouseEvent) => {
     if (swiped.current) return void (swiped.current = false)
-    if (editing || onControl(event.target) || !window.matchMedia("(max-width: 639px)").matches) return
+    if (editing || outside(event) || onControl(event.target) || !window.matchMedia("(max-width: 639px)").matches) return
     if (window.getSelection()?.toString()) return
     onReveal(revealed ? null : entry.slotId)
   }
 
-  // Every reply has its arrows, to generate another; any message with versions, to step through them.
-  const showVersions = model || entry.versionCount > 1
+  // Every generated message has its arrows, to generate another; any with versions, to step through them.
+  const showVersions = generated || entry.versionCount > 1
   const deleteLabel = entry.versionCount > 1 ? "Delete version" : "Delete message"
   const linkSearch = branchLeaf === null ? { slot: entry.slotId } : { leaf: branchLeaf, slot: entry.slotId }
 
@@ -549,6 +594,15 @@ export const Message = memo(function Message({
     >
       <MenuItem icon="write" onClick={() => session.openEditor({ _tag: "Write", slotId: entry.slotId }, "")}>
         Write your own version
+      </MenuItem>
+      {!generated && (
+        // A version of the user's own turn written by the model, as its speaker (DESIGN §3.1).
+        <MenuItem icon="regenerate" onClick={async () => report(await session.regenerate(entry))}>
+          Generate a version
+        </MenuItem>
+      )}
+      <MenuItem icon="regenerate" onClick={() => setRegenerateWith(true)}>
+        {generated ? "Regenerate with…" : "Generate a version with…"}
       </MenuItem>
       <MenuLinkItem
         icon="branch"
@@ -602,7 +656,7 @@ export const Message = memo(function Message({
           onClick={() => session.openEditor({ _tag: "Edit", versionId: version.id }, version.content)}
         />
       )}
-      {model && (
+      {generated && (
         <IconButton
           label="Regenerate"
           icon="regenerate"
@@ -693,6 +747,16 @@ export const Message = memo(function Message({
             </time>
           </Tooltip>
           <span className="shrink-0 text-xs text-muted tabular-nums">#{entry.depth + 1}</span>
+          {version.writer === "model" && version.model !== null ? (
+            <Tooltip label={`Generated with ${version.model}`}>
+              <span tabIndex={0} className="min-w-0 truncate text-xs text-muted outline-none sm:max-w-64">
+                {version.model}
+              </span>
+            </Tooltip>
+          ) : (
+            // A turn on the user's side the model wrote says so, as a reply the user wrote does.
+            version.writer === "model" && !model && <span className="shrink-0 text-xs text-muted">generated</span>
+          )}
           {version.origin === "edited" && <span className="shrink-0 text-xs text-muted">edited</span>}
           {version.origin === "user_written" && model && (
             <span className="shrink-0 text-xs text-muted">written by you</span>
@@ -779,12 +843,12 @@ export const Message = memo(function Message({
             </ul>
           </details>
         )}
-        {model && version.direction && (
+        {version.writer === "model" && version.direction && (
           <p className="text-xs text-muted">
             <span className="font-medium">Direction:</span> {version.direction}
           </p>
         )}
-        {model &&
+        {generated &&
           (version.mark === "refused" || (version.status === "failed" && version.error?.class === "refused")) && (
             <RetryWith onPick={async (choice) => report(await session.regenerate(entry, choice))} />
           )}
@@ -805,12 +869,14 @@ export const Message = memo(function Message({
               {showVersions && (
                 <Versions
                   entry={entry}
-                  model={model}
+                  generated={generated}
                   versions={versions}
                   position={position}
+                  session={session}
                   onStep={(step) => void swipe(step)}
                   onPick={async (picked) => report(await session.select(entry, picked))}
-                  onOpen={() => void load()}
+                  onFlag={(target, flags) => void flag(target, flags)}
+                  onOpen={() => void load(true)}
                 />
               )}
             </footer>
@@ -820,6 +886,14 @@ export const Message = memo(function Message({
           <p role="alert" className="text-sm text-danger">
             {error.message}
           </p>
+        )}
+        {regenerateWith && (
+          <RegenerateWith
+            session={session}
+            title={generated ? "Regenerate with another model" : "Generate a version with a model"}
+            onClose={() => setRegenerateWith(false)}
+            onPick={async (choice) => report(await session.regenerate(entry, choice))}
+          />
         )}
       </div>
     </article>

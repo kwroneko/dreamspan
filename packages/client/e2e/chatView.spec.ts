@@ -77,7 +77,10 @@ test("a message shows its number and versions; one is picked from the list, and 
   const versions = first.getByRole("group", { name: "Versions" })
   await expect(versions).toContainText("2/2")
   await versions.getByRole("button", { name: /choose a version/ }).click()
-  await page.getByRole("menuitemradio", { name: /The tide is out\./ }).click()
+  await page
+    .getByRole("dialog", { name: "Versions of message #1" })
+    .getByRole("button", { name: /^Version 1, .*The tide is out\./ })
+    .click()
   await expect(message(page, "The tide is out.").getByRole("group", { name: "Versions" })).toContainText("1/2")
 
   // Its actions show on hover; the rarer ones are in its menu.

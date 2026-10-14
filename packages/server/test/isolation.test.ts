@@ -740,9 +740,27 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
   },
   Regenerate: {
     probe: (actor, owner) =>
-      Effect.flatMap(ownSlot(owner), (theirs) =>
-        refused(actor.api.Regenerate({ slotId: owner.chat.slotId, expectedRowVersion: theirs.rowVersion }), "NotFound")
-      )
+      Effect.gen(function* () {
+        const theirs = yield* ownSlot(owner)
+        yield* refused(
+          actor.api.Regenerate({ slotId: owner.chat.slotId, expectedRowVersion: theirs.rowVersion }),
+          "NotFound"
+        )
+        // "Regenerate with…" the other's model, on a message of one's own.
+        const mine = yield* ownSlot(actor)
+        yield* refused(
+          actor.api.Regenerate({
+            slotId: actor.chat.slotId,
+            expectedRowVersion: mine.rowVersion,
+            model: { connection: owner.connectionId, model: owner.modelId }
+          }),
+          "NotFound"
+        )
+      })
+  },
+  SetVersionFlags: {
+    probe: (actor, owner) =>
+      refused(actor.api.SetVersionFlags({ versionId: owner.chat.versionId, starred: true, hidden: true }), "NotFound")
   },
   StopGeneration: {
     probe: (actor, owner) =>

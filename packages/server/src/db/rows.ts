@@ -70,14 +70,18 @@ export interface VersionRow {
   /** Its rollout's context issues as JSON (`versionExtras`); absent on a row just inserted. */
   readonly context_issues?: string | null
   readonly has_context?: number
+  /** Its model as "connection · model" (`versionExtras`); absent on a row just inserted. */
+  readonly model_label?: string | null
 }
 
-/** The columns `toVersion` reads beyond the version's own: its row version and its context's issues. */
+/** The columns `toVersion` reads beyond the version's own: its row version, its context's issues and its model's name. */
 export const versionExtras = (alias: string) =>
   `(SELECT count(*) FROM version_history h WHERE h.version_id = ${alias}.id) AS amend_count,
   (SELECT r.context_issues_json FROM rollouts r WHERE r.id = ${alias}.rollout_id) AS context_issues,
   EXISTS (SELECT 1 FROM rollout_payloads p WHERE p.rollout_id = ${alias}.rollout_id
-    AND p.context_snapshot_json IS NOT NULL) AS has_context`
+    AND p.context_snapshot_json IS NOT NULL) AS has_context,
+  (SELECT c.name || ' · ' || m.model_key FROM models m JOIN connections c ON c.id = m.connection_id
+    WHERE m.id = ${alias}.model_id) AS model_label`
 
 const toVersionError = (json: string | null) => {
   if (json === null) return null
@@ -101,6 +105,7 @@ export const toVersion = (row: VersionRow) =>
     hidden: row.hidden === 1,
     starred: row.starred === 1,
     createdAt: row.created_at,
+    model: row.model_label ?? null,
     error: toVersionError(row.error_json),
     mark: row.mark ?? null,
     frozenMacros: row.frozen_macros === null ? null : (JSON.parse(row.frozen_macros) as Record<string, string>),

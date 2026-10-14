@@ -52,16 +52,17 @@ export function IconButton({
   label,
   icon,
   tone = "muted",
+  filled = false,
   className = "",
   ...props
-}: { label: string; icon: IconName; tone?: "muted" | "danger" } & Omit<
+}: { label: string; icon: IconName; tone?: "muted" | "danger"; filled?: boolean } & Omit<
   ComponentProps<typeof BaseButton>,
   "children" | "aria-label"
 >) {
   return (
     <Tooltip label={label}>
       <BaseButton aria-label={label} className={`${iconButtonClass(tone)} ${className}`} {...props}>
-        <Icon name={icon} />
+        <Icon name={icon} filled={filled} />
       </BaseButton>
     </Tooltip>
   )

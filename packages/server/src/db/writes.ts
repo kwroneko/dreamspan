@@ -1,7 +1,7 @@
 import { recordHistoryReduction } from "./historyChanges.ts"
 import { contextExcluded } from "./lcmVisibility.ts"
 // Write operation handlers. They run inside the writer worker, each as one transaction.
-import type { ChatId } from "@rp/shared/chat.ts"
+import type { ChatId, VersionId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import { Effect } from "effect"
@@ -11,6 +11,7 @@ import type { Bin } from "./bin.ts"
 import { NotAmendable } from "@rp/shared/chatApi.ts"
 import { makeGraphWrites } from "./graphWrites.ts"
 import { NotFound, StaleWrite, WriteOps } from "./ops.ts"
+import { ownedModel } from "./generationSettings.ts"
 import { type ChatRow, toChat, toVersion } from "./rows.ts"
 import { transaction as runTransaction } from "./tx.ts"
 
@@ -205,7 +206,7 @@ export const makeWriteHandlers = (bin: Bin) =>
 
       // --- Chats
 
-      AddSelectedVersion: ({ userId, slotId, version, expectedRowVersion, commitDraft }) =>
+      AddSelectedVersion: ({ userId, slotId, version, expectedRowVersion, model, commitDraft }) =>
         Effect.gen(function* () {
           const slot = yield* ownedSlot(userId, slotId)
           if (slot.row_version !== expectedRowVersion) {
@@ -217,10 +218,17 @@ export const makeWriteHandlers = (bin: Bin) =>
             })
           }
           yield* checkSpeaker(userId, version.speakerEntityId)
+          if (model && (version.writer !== "model" || !(yield* ownedModel(sql, userId, model.connection, model.model))))
+            return yield* new NotFound({ entity: "model", id: model.model })
           const [next] = yield* sql<{
             n: number
           }>`SELECT coalesce(max(ordinal), -1) + 1 AS n FROM versions WHERE slot_id = ${slotId}`
-          const row = yield* insertVersion(slotId, next!.n, version, Date.now())
+          const inserted = yield* insertVersion(slotId, next!.n, version, Date.now())
+          // The model chosen for it shows from the start; its rollout records the same one.
+          if (model)
+            yield* sql`UPDATE versions SET connection_id = ${model.connection}, model_id = ${model.model}
+              WHERE id = ${inserted.id}`
+          const row = model ? yield* ownedVersion(userId, inserted.id as VersionId, true) : inserted
           yield* recordHistoryReduction(sql, slotId, row.content)
           yield* sql`UPDATE slots SET selected_version_id = ${row.id}, row_version = row_version + 1 WHERE id = ${slotId}`
           // An edit's text was typed into the edit of its source; a version of one's own, into the slot's.
@@ -272,6 +280,19 @@ export const makeWriteHandlers = (bin: Bin) =>
             WHERE id = ${versionId}`
           return toVersion(yield* ownedVersion(userId, versionId, false))
         }).pipe(transaction("SaveGeneration")),
+
+      SetVersionFlags: ({ userId, versionId, starred, hidden }) =>
+        Effect.gen(function* () {
+          const row = yield* ownedVersion(userId, versionId, true)
+          const flag = (value: boolean | undefined, now: number) => (value === undefined ? now : value ? 1 : 0)
+          yield* sql`UPDATE versions SET starred = ${flag(starred, row.starred)}, hidden = ${flag(hidden, row.hidden)}
+            WHERE id = ${versionId}`
+          const [slot] = yield* sql<{ chat_id: string }>`SELECT chat_id FROM slots WHERE id = ${row.slot_id}`
+          return {
+            chatId: slot!.chat_id as ChatId,
+            version: toVersion(yield* ownedVersion(userId, versionId, true))
+          }
+        }).pipe(transaction("SetVersionFlags")),
 
       MarkVersion: ({ userId, versionId, mark }) =>
         Effect.gen(function* () {
