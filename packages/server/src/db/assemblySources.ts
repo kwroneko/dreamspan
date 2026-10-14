@@ -4,6 +4,7 @@ import { readSummary } from "./lcmReads.ts"
 // The assembler's sources over the database, every read the acting user's, and the pins a
 // rebuild reads again (ARCHITECTURE §15).
 import { documentedCachePolicy } from "../providers/cachePolicy.ts"
+import { prefillUnavailable } from "../assembler/prefill.ts"
 import { mappingCapabilities } from "../providers/mapping.ts"
 import type { ChatId } from "@rp/shared/chat.ts"
 import { CardDoc } from "@rp/shared/docs/card.ts"
@@ -20,6 +21,7 @@ import type { SqlClient, SqlError } from "effect/sql"
 import { AssemblySources, type PositionedEvent } from "../assembler/pipeline.ts"
 import {
   AssemblyFailed,
+  type ModelInput,
   type CardInput,
   type HistoryEntry,
   type NoteInput,
@@ -213,6 +215,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
     })
 
   let layerPins: SourcePins["lcm"]
+  let resolvedModel: ModelInput | null = null
   /** The model the chat's binding or the user's default chose, read or not; unset before the model is read. */
   let chosenModel: ChosenModel | null | undefined
   const pins = {
@@ -596,7 +599,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
         const c = toConnection(connection)
         const m = toModel(model)
         const effective = resolveModel(m.key, m.upstream, m.overrides, c.compat)
-        return {
+        resolvedModel = {
           connectionId: c.id,
           connectionRevision: connection.cache_revision,
           mapping: mappingCapabilities(effective),
@@ -613,10 +616,16 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
           api: c.api,
           key: m.key,
           prefill: effective.prefill.value,
+          continueUnavailable: prefillUnavailable(
+            { kind: c.kind, api: c.api, key: m.key, prefill: effective.prefill.value },
+            c.baseUrl
+          ),
           cacheBreakpoints: effective.cacheBreakpoints.value,
           context: effective.context.source === "unknown" ? null : effective.context.value,
+          maxOutput: effective.maxOutput.source === "unknown" ? null : effective.maxOutput.value,
           presetOverride: c.presetOverrideRefId
         }
+        return resolvedModel
       }),
 
     // The scope chain (DATA-MODEL §5.4): the chat's role binding, the chat's own, the
@@ -660,6 +669,8 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
     layer: Layer.succeed(AssemblySources)(sources),
     /** What the sources read; a replay's are the pins it was given. */
     pins: (): SourcePins => replay?.pins ?? { ...pins, target: pins.target!, ...(layerPins ? { lcm: layerPins } : {}) },
+    /** Capabilities survive later assembly failures, including budget rejection. */
+    resolvedModel: () => resolvedModel,
     /** The model chosen and where from, also when it's gone and the assembly failed on it. */
     chosenModel: () => chosenModel
   }

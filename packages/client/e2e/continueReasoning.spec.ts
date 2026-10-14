@@ -1,4 +1,5 @@
-import { expect, test } from "@playwright/test"
+import { join } from "node:path"
+import { expect, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
 import { MORE, THOUGHT, startContinueProvider } from "./support/continueProvider.ts"
 import { messageMenu, showActions } from "./support/message.ts"
@@ -14,15 +15,23 @@ test.afterAll(async () => {
   await provider.stop()
 })
 
-const setup = () =>
+const shoot = async (page: Page, state: string) => {
+  if (process.env.SCREENSHOT_DIR) {
+    await page.waitForTimeout(250)
+    await page.screenshot({ path: join(process.env.SCREENSHOT_DIR, `${state}-${page.viewportSize()!.width}.png`) })
+  }
+}
+
+const setup = (kind = "openai-chat", prefill: "assistant" | "tool_schema" = "assistant", beta = false) =>
   asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
     Effect.gen(function* () {
       yield* api.SetDisplayPrefs({ prefs: { reasoning: "expanded" } })
       const connection = yield* api.CreateConnection({
-        kind: "openai-chat",
+        kind,
+        ...(kind === "deepseek" ? { apiKey: "sk-synthetic-only" } : {}),
         settings: {
           name: "Synthetic native prefill",
-          baseUrl: provider.baseUrl,
+          baseUrl: beta ? provider.baseUrl.replace("/v1", "/beta") : provider.baseUrl,
           compat: {},
           cacheTtlS: null,
           maxConcurrent: null,
@@ -32,9 +41,13 @@ const setup = () =>
       const model = yield* api.AddUserModel({
         connectionId: connection.id,
         key: "native-prefill",
-        overrides: { prefill: "assistant" }
+        overrides: { prefill }
       })
-      const plain = yield* api.AddUserModel({ connectionId: connection.id, key: "no-prefill", overrides: {} })
+      const plain = yield* api.AddUserModel({
+        connectionId: connection.id,
+        key: "no-prefill",
+        overrides: { prefill: "none", context: 1 }
+      })
       yield* api.SetGenerationDefaults({
         defaults: { model: { connection: connection.id, model: model.id }, preset: null }
       })
@@ -57,6 +70,7 @@ for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
     const { chat } = await setup()
+    provider.holdNextReply()
     await page.goto(`${server().url}/chats/${chat.id}`)
     await page
       .getByRole("button", { name: /^(Reply$|Generate(?! another))/ })
@@ -67,10 +81,12 @@ for (const width of [1440, 390]) {
     await expect(reasoning).toHaveAttribute("aria-expanded", "true")
     await expect(reply.getByRole("region", { name: "Reasoning" })).toContainText("Mira keeps")
     await expect(reply.locator(".markdown").last()).toContainText("The ledger says otherwise")
+    await shoot(page, "01-reasoning-streaming")
     await showActions(reply)
     await reply.getByRole("button", { name: "Stop", exact: true }).click()
     await expect(reply.getByText("stopped", { exact: true })).toBeVisible()
     await expect(reasoning).toHaveAttribute("aria-expanded", "false")
+    await shoot(page, "02-stopped")
     const original = await reply.locator(".markdown").last().innerText()
     const source = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
       api.ReadPath({ chatId: chat.id, leafSlotId: null, range: { _tag: "Bottom" }, limit: 10 })
@@ -81,14 +97,25 @@ for (const width of [1440, 390]) {
     await expect(reply.getByText("generating", { exact: true })).toBeVisible()
     await expect(reply.locator(".markdown").last()).toContainText(original)
     await expect(reasoning).toHaveAttribute("aria-expanded", "true")
+    await shoot(page, "03-continuing")
     await expect(reply.locator(".markdown").last()).toContainText("Before the watch changes")
     await expect(reply.getByText("generating", { exact: true })).toHaveCount(0)
     await expect(reasoning).toHaveAttribute("aria-expanded", "false")
+    await shoot(page, "04-complete-collapsed")
     await showActions(reply)
     await reply.getByRole("button", { name: /choose a version/ }).click()
     await expect(page.getByRole("menu")).toContainText("stopped")
+    await expect(page.getByRole("menu")).not.toContainText("generating")
     await expect(page.getByRole("menu")).toContainText("The ledger says")
+    await shoot(page, "05-picker-complete")
     await page.keyboard.press("Escape")
+    // Cached completion must remain correct after selecting the original too.
+    await reply.getByRole("button", { name: "Previous version", exact: true }).click()
+    await reply.getByRole("button", { name: /choose a version/ }).click()
+    await expect(page.getByRole("menu")).not.toContainText("generating")
+    await page.keyboard.press("Escape")
+    await reply.getByRole("button", { name: "Next version", exact: true }).click()
+    await expect(reply.getByRole("button", { name: /Version 2 of 2/ })).toBeVisible()
     const versions = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
       api.ListVersions({ slotId: originalVersion.slotId })
     )
@@ -102,15 +129,22 @@ for (const width of [1440, 390]) {
     expect(JSON.stringify(provider.requests.at(-1))).not.toContain("reasoning_content")
     await reasoning.click()
     await expect(reply.getByRole("region", { name: "Reasoning" })).toContainText(THOUGHT)
+    await shoot(page, "06-reasoning-expanded")
     await page.reload()
     await expect(reasoning).toHaveAttribute("aria-expanded", "false")
     await reasoning.click()
     await expect(reply.getByRole("region", { name: "Reasoning" })).toContainText("Finish the thought.")
+    await shoot(page, "07-reasoning-reloaded")
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
     await messageMenu(reply, "Context it was generated from")
     const prefill = page.getByRole("link", { name: /as it was, continued from its end/ })
     await prefill.scrollIntoViewIfNeeded()
     await expect(prefill).toBeVisible()
+    await prefill
+      .locator("xpath=ancestor::details")
+      .locator("summary")
+      .click({ position: { x: 15, y: 10 } })
+    await shoot(page, "08-inspector-prefill")
     await expect(page.getByRole("region", { name: "Messages" })).toContainText("The ledger says")
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
   })
@@ -151,7 +185,8 @@ for (const width of [1440, 390]) {
     const unavailable = reply.getByRole("button", { name: /Continue isn't available with no-prefill/ })
     await expect(unavailable).toBeEnabled()
     await unavailable.click()
-    await expect(page.getByRole("alert")).toContainText("a prefill")
+    await expect(page.getByRole("alert")).toContainText("prefill")
+    await shoot(page, "09-unavailable-budget")
     const versions = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
       api.ReadPath({ chatId: chat.id, leafSlotId: null, range: { _tag: "Bottom" }, limit: 10 })
     )
@@ -159,5 +194,65 @@ for (const width of [1440, 390]) {
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
     await reasoning.click()
     await expect(reply.getByRole("region", { name: "Reasoning" })).toContainText(THOUGHT)
+  })
+  for (const adapter of ["deepseek", "schema"] as const) {
+    test(`${adapter} Continue sends its protocol and exposes it in inspection at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
+      await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+      const { chat } = await setup(
+        adapter === "deepseek" ? "deepseek" : "openai-chat",
+        adapter === "schema" ? "tool_schema" : "assistant",
+        adapter === "deepseek"
+      )
+      provider.holdNextReply()
+      await page.goto(`${server().url}/chats/${chat.id}`)
+      await page
+        .getByRole("button", { name: /^(Reply$|Generate(?! another))/ })
+        .last()
+        .click()
+      const reply = page.getByRole("article").last()
+      await expect(reply.locator(".markdown").last()).toContainText("The ledger says otherwise")
+      await showActions(reply)
+      await reply.getByRole("button", { name: "Stop", exact: true }).click()
+      await expect(reply.getByText("stopped", { exact: true })).toBeVisible()
+      const original = await reply.locator(".markdown").last().innerText()
+      await showActions(reply)
+      await reply.getByRole("button", { name: /^Continue:/ }).click()
+      await expect(reply.locator(".markdown").last()).toContainText(original)
+      await expect(reply.locator(".markdown").last()).toContainText("Before the watch changes", { timeout: 30000 })
+      await expect(reply.getByText("generating", { exact: true })).toHaveCount(0)
+      await shoot(page, `${adapter}-complete`)
+      const sent = provider.requests.at(-1)!
+      if (adapter === "deepseek") expect(sent.messages.at(-1)?.prefix).toBe(true)
+      else expect(sent.tools).toHaveLength(1)
+      await messageMenu(reply, "Context it was generated from")
+      const label = adapter === "deepseek" ? "DeepSeek prefix: true" : "Forced tool schema prefill"
+      await expect(page.getByText(label, { exact: true })).toBeVisible()
+      if (adapter === "schema") {
+        await page
+          .getByText(label, { exact: true })
+          .locator("xpath=ancestor::details")
+          .locator("summary")
+          .click({ position: { x: 15, y: 10 } })
+        await expect(page.getByLabel("Prefill schema")).toContainText("pattern")
+      }
+      await shoot(page, `${adapter}-inspector`)
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
+    })
+  }
+}
+
+for (const width of [1440, 390]) {
+  test(`unknown prefill in the model editor does not claim a provider reported no at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
+    await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+    const { connection } = await setup()
+    await page.goto(`${server().url}/settings/connections/${connection.id}`)
+    await page.getByRole("button", { name: "Edit native-prefill", exact: true }).click()
+    const prefill = page.getByRole("combobox", { name: "Prefill", exact: true })
+    await prefill.click()
+    await expect(page.getByRole("option", { name: "Unknown: no provider information", exact: true })).toBeVisible()
+    await expect(page.getByRole("option", { name: "Through a tool schema", exact: true })).toBeVisible()
+    await shoot(page, "10-model-capabilities")
   })
 }

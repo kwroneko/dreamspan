@@ -54,17 +54,24 @@ const triItems = [
 
 type PrefillChoice = "auto" | NonNullable<ModelOverrides["prefill"]>
 /**
- * Whether the model takes the start of its reply as a trailing assistant message: the
- * preset's prefill and Continue need it. No provider reports it, so it's the user's to say.
+ * Whether the model takes the start of its reply natively or through a strict tool schema.
+ * Absent provider information stays unknown until the user declares support.
  */
-const prefillItems = (current: PrefillChoice, upstream: ModelOverrides["prefill"]) => [
+const prefillItems = (upstream: ModelOverrides["prefill"]) => [
   {
     value: "auto" as const,
-    label: upstream === "assistant" ? "As the provider says (yes)" : "As the provider says (no)"
+    label:
+      upstream === undefined
+        ? "Unknown: no provider information"
+        : upstream === "assistant"
+          ? "Provider: assistant prefill"
+          : upstream === "tool_schema"
+            ? "Provider: tool schema"
+            : "Provider: no prefill"
   },
   { value: "assistant" as const, label: "Yes: start an assistant reply" },
   { value: "none" as const, label: "No" },
-  ...(current === "tool_schema" ? [{ value: "tool_schema" as const, label: "Through a tool schema" }] : [])
+  { value: "tool_schema" as const, label: "Through a tool schema" }
 ]
 
 /** Edits the user's overrides. Empty fields fall back to what the provider reports. */
@@ -145,9 +152,9 @@ function EditModelDialog({ model, onOpenChange }: { model: Model; onOpenChange: 
         </div>
         <Field
           label="Prefill"
-          description="Whether it takes the start of its reply: the preset's prefill and Continue need it."
+          description="Whether it takes the start of its reply: the preset's prefill and Continue need it. Unknown support leaves Continue unavailable until declared."
         >
-          <Select items={prefillItems(prefill, model.upstream.prefill)} value={prefill} onValueChange={setPrefill} />
+          <Select items={prefillItems(model.upstream.prefill)} value={prefill} onValueChange={setPrefill} />
         </Field>
         <ErrorAlert
           error={action.error}

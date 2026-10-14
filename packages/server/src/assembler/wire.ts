@@ -3,6 +3,7 @@ import { convertResponsesMessages } from "@earendil-works/pi-ai/api/openai-respo
 import { normalizeContext } from "@earendil-works/pi-ai/utils/transcript"
 import { createHash } from "node:crypto"
 import { Predicate } from "effect"
+import { REPLY_TOOL, replyTool, schemaPrefillBudget } from "./prefill.ts"
 import type { Api, AssistantMessage, Context, Message, Model } from "@earendil-works/pi-ai"
 import type { AssembledRequest, ModelInput, RequestMessage, WireContext } from "./types.ts"
 
@@ -55,7 +56,12 @@ const modelRules = (fields: Record<string, unknown>, kind: string, key: string) 
 export const chatCompletionsFields = (request: AssembledRequest, kind: string, key = ""): Record<string, unknown> => {
   const s = request.samplers
   const fields: Record<string, unknown> = {
-    messages: withPrefill(request).map(({ role, content, name }) => ({ role, content, ...(name ? { name } : {}) })),
+    messages: withPrefill(request).map(({ role, content, name }, i, all) => ({
+      role,
+      content,
+      ...(name ? { name } : {}),
+      ...(kind === "deepseek" && request.prefill && i === all.length - 1 ? { prefix: true } : {})
+    })),
     temperature: s.temperature,
     frequency_penalty: s.frequency_penalty,
     presence_penalty: s.presence_penalty,
@@ -128,6 +134,33 @@ const text = (content: string) => ({ type: "text" as const, text: content })
  * context pi-ai gets only feeds its usage estimate); other APIs get a context pi-ai converts.
  */
 export const providerRequest = (request: AssembledRequest, model: ModelInput): ProviderRequest => {
+  if (request.prefill && model.prefill === "tool_schema") {
+    // A schema encodes the prefix, rather than sending a completed assistant history turn.
+    const ordinary = providerRequest(
+      {
+        ...request,
+        prefill: null,
+        samplers: {
+          ...request.samplers,
+          max_tokens: request.samplers.max_tokens + schemaPrefillBudget(request.prefill).output
+        }
+      },
+      model
+    )
+    const tool = replyTool(request.prefill)
+    const responses = model.api === "openai-responses"
+    return {
+      ...ordinary,
+      payload: {
+        ...ordinary.payload,
+        tools: [responses ? { type: "function", ...tool } : { type: "function", function: tool }],
+        tool_choice: responses
+          ? { type: "function", name: REPLY_TOOL }
+          : { type: "function", function: { name: REPLY_TOOL } },
+        parallel_tool_calls: false
+      }
+    }
+  }
   if (model.api === "openai-completions") {
     return {
       context: { messages: withPrefill(request).map((m) => ({ role: "user", content: m.content, timestamp: 0 })) },
@@ -192,6 +225,31 @@ export const providerRequest = (request: AssembledRequest, model: ModelInput): P
 
 /** The mapped request for inspection and cache comparison, with source indices only. */
 export const wireContext = (request: AssembledRequest, model: ModelInput): WireContext => {
+  if (request.prefill && model.prefill === "tool_schema") {
+    const ordinary = wireContext(
+      {
+        ...request,
+        prefill: null,
+        samplers: {
+          ...request.samplers,
+          max_tokens: request.samplers.max_tokens + schemaPrefillBudget(request.prefill).output
+        }
+      },
+      model
+    )
+    return {
+      ...ordinary,
+      messages: [
+        ...ordinary.messages,
+        {
+          role: "assistant",
+          content: request.prefill,
+          inputs: [request.messages.length],
+          prefill: { protocol: "tool_schema", schema: JSON.stringify(replyTool(request.prefill).parameters, null, 2) }
+        }
+      ]
+    }
+  }
   const wire = providerRequest(request, model)
   const input = withPrefill(request)
   const samplers: Record<string, number> = {}
@@ -258,7 +316,7 @@ export const wireContext = (request: AssembledRequest, model: ModelInput): WireC
 }
 
 type WireMessage = WireContext["messages"][number]
-type TextMessage = Pick<WireMessage, "role" | "content" | "name">
+type TextMessage = Pick<WireMessage, "role" | "content" | "name" | "prefill">
 
 /** Only stored server-side; display redaction must not change cache identity. */
 export const wireDigest = (message: TextMessage): string =>
@@ -298,11 +356,39 @@ const wireRows = (payload: Record<string, unknown>) => {
         row: {
           role,
           content: textContent(message.content ?? message.parts),
-          ...(typeof message.name === "string" ? { name: message.name } : {})
+          ...(typeof message.name === "string" ? { name: message.name } : {}),
+          ...(message.prefix === true && role === "assistant"
+            ? { prefill: { protocol: "deepseek_prefix" as const } }
+            : {})
         },
         carrier: message
       })
     }
+  // Inspect only this generator's forced text tool; never store arbitrary tool definitions.
+  const choice = Predicate.isObject(payload.tool_choice) ? payload.tool_choice : {}
+  const chosen = Predicate.isObject(choice.function) ? choice.function.name : choice.name
+  if (chosen === REPLY_TOOL && Array.isArray(payload.tools)) {
+    for (const item of payload.tools) {
+      if (!Predicate.isObject(item)) continue
+      const tool = Predicate.isObject(item.function) ? item.function : item
+      if (tool.name !== REPLY_TOOL || tool.strict !== true || !Predicate.isObject(tool.parameters)) continue
+      const props = tool.parameters.properties
+      const field = Predicate.isObject(props) ? props.text : undefined
+      if (!Predicate.isObject(field) || typeof field.description !== "string" || typeof field.pattern !== "string")
+        continue
+      rows.push({
+        row: {
+          role: "assistant",
+          content: field.description,
+          prefill: {
+            protocol: "tool_schema",
+            schema: JSON.stringify(tool.parameters, null, 2)
+          }
+        },
+        carrier: tool
+      })
+    }
+  }
   return rows
 }
 
@@ -359,6 +445,9 @@ export const sentWire = (
       ...row,
       digest: wireDigest(row),
       content: scrub(row.content),
+      ...(row.prefill
+        ? { prefill: { ...row.prefill, ...(row.prefill.schema ? { schema: scrub(row.prefill.schema) } : {}) } }
+        : {}),
       ...(row.name ? { name: scrub(row.name) } : {}),
       inputs: system
         ? carrier[systemProvenance]?.content === row.content

@@ -10,13 +10,16 @@ import type { ChatSession, Outcome } from "./session.ts"
 
 type NextModel = NonNullable<ReturnType<ChatSession["snapshot"]>["history"]>["model"]
 
-/** Why Continue can't be used with the next request's model; null when it can (or isn't known yet). */
+/** Why Continue can't be used with the next request's model; null when it can. */
 const continueBlocked = (model: NextModel): string | null => {
-  if (model === undefined) return null
+  if (model === undefined) return "Continue is waiting for the next model’s prefill capability."
   if (model === null) return "Continue needs a model: none is chosen for this chat. Choose one in This chat."
-  if (model.prefill === undefined || model.prefill === "assistant") return null
   const name = model.modelKey ?? "this model"
   const where = model.connectionName ? ` (${model.connectionName})` : ""
+  if (model.prefill === undefined)
+    return "Continue is unavailable while the next model’s prefill capability is unresolved."
+  if (model.continueUnavailable) return `Continue isn't available with ${name}${where}: ${model.continueUnavailable}`
+  if (model.prefill === "assistant" || model.prefill === "tool_schema") return null
   return `Continue isn't available with ${name}${where}: it isn't known to take the start of its reply (a prefill). If it does, set its Prefill capability in Settings → Connections.`
 }
 

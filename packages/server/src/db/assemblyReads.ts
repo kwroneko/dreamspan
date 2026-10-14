@@ -165,6 +165,7 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
         const presetName = presetRef?.label ?? (preset?.scope === "builtin" ? "Default" : "Unnamed")
         // The model by name, as the panel shows it: also a hidden one, which is still used.
         const chosen = sources.chosenModel()
+        const resolved = sources.resolvedModel()
         const [named] = chosen
           ? yield* sql<{ connection_name: string; model_key: string | null; hidden: number | null }>`
               SELECT c.name AS connection_name, m.model_key, m.hidden
@@ -184,9 +185,12 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
                   hidden: named?.hidden === 1,
                   scope: chosen.scope,
                   // Whether Continue can use it (a prefill), as the next request would read it.
-                  ...(next instanceof AssemblyFailed || !next.inputs.model
-                    ? {}
-                    : { prefill: next.inputs.model.prefill })
+                  ...(resolved
+                    ? {
+                        prefill: resolved.prefill,
+                        ...(resolved.continueUnavailable ? { continueUnavailable: resolved.continueUnavailable } : {})
+                      }
+                    : {})
                 }
               }),
           preset: preset

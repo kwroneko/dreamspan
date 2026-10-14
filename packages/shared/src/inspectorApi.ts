@@ -64,6 +64,12 @@ const BreakpointReason = Schema.Literals(["prefix", "summary", "history"])
 export const ContextMessage = Schema.Struct({
   role: Schema.Literals(["system", "developer", "user", "assistant", "model"]),
   name: Schema.NullOr(Schema.String),
+  prefill: Schema.optionalKey(
+    Schema.Struct({
+      protocol: Schema.Literals(["deepseek_prefix", "tool_schema"]),
+      schema: Schema.optionalKey(Schema.String)
+    })
+  ),
   content: Schema.String,
   /** The assembler's estimate: a token per four characters, plus three per message. */
   tokens: Schema.Int,
@@ -179,9 +185,10 @@ const EffectiveModel = Schema.Struct({
   scope: Schema.Literals(["chat", "user"]),
   /**
    * Whether the model takes the start of its reply (a prefill), as its capabilities say:
-   * Continue needs `assistant`. Absent when the next request couldn't be assembled.
+   * Resolved independently of whether the context can be assembled.
    */
-  prefill: Schema.optionalKey(Schema.Literals(["none", "assistant", "tool_schema"]))
+  prefill: Schema.optionalKey(Schema.Literals(["none", "assistant", "tool_schema"])),
+  continueUnavailable: Schema.optionalKey(Schema.String)
 })
 
 /** The next request boundary, also available before a first send or without a cache TTL. */

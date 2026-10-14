@@ -108,6 +108,7 @@ export type ProviderEvent =
   | { readonly type: "paused"; readonly delayMs: number }
   | { readonly type: "text"; readonly delta: string }
   | { readonly type: "thinking"; readonly delta: string }
+  | { readonly type: "toolcall"; readonly name: string; readonly arguments: unknown }
   | {
       readonly type: "retrying"
       readonly attempt: number
@@ -1160,6 +1161,11 @@ export const layer = (options: ProvidersOptions = {}) =>
                   state.firstTokenAt ??= Date.now()
                   if (event.type === "text_delta") offer({ type: "text", delta: event.delta })
                   if (event.type === "thinking_delta") offer({ type: "thinking", delta: event.delta })
+                  if (event.type === "toolcall_delta") {
+                    const call = event.partial.content[event.contentIndex]
+                    if (call?.type === "toolCall")
+                      offer({ type: "toolcall", name: call.name, arguments: structuredClone(call.arguments) })
+                  }
                 }
               }
               const result = await events.result()

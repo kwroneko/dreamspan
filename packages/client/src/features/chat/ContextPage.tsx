@@ -68,6 +68,13 @@ function Message({
           <span className="flex flex-wrap items-center gap-2 text-sm">
             <span className="text-muted tabular-nums">#{index + 1}</span>
             <span className="font-medium">{message.role}</span>
+            {message.prefill && (
+              <Badge>
+                {message.prefill.protocol === "deepseek_prefix"
+                  ? "DeepSeek prefix: true"
+                  : "Forced tool schema prefill"}
+              </Badge>
+            )}
             {message.name && <span className="text-muted">({message.name})</span>}
             <span className="text-muted tabular-nums">~{message.tokens.toLocaleString()} tokens</span>
           </span>
@@ -95,6 +102,11 @@ function Message({
           </span>
           {!open && <span className="line-clamp-2 text-sm break-words text-muted">{preview}</span>}
         </summary>
+        {message.prefill?.schema && (
+          <pre className="overflow-x-auto border-t border-border px-3 py-2 text-xs" aria-label="Prefill schema">
+            {message.prefill.schema}
+          </pre>
+        )}
         {open && (
           <p className="border-t border-border px-3 py-2 text-sm break-words whitespace-pre-wrap">{message.content}</p>
         )}
@@ -111,8 +123,30 @@ function Message({
 function Usage({ requests }: { requests: ReadonlyArray<InspectorUsage> }) {
   if (requests.length === 0) return <p className="text-sm text-muted">No request was sent.</p>
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-left text-sm tabular-nums max-sm:[&_td]:pr-1 max-sm:[&_td]:[overflow-wrap:anywhere] max-sm:[&_th]:pr-1">
+    <div>
+      <div className="flex flex-col gap-3 sm:hidden" aria-label="Usage by attempt">
+        {requests.map((request, i) => (
+          <dl
+            key={request.id}
+            className="grid grid-cols-2 gap-x-3 gap-y-2 border-t border-border py-2 text-sm tabular-nums"
+          >
+            {[
+              ["Attempt", `${i + 1}: ${request.status}${request.usageSource === "estimated" ? " (estimated)" : ""}`],
+              ["Input", count(request.counts.inputUncached)],
+              ["Cache read", count(request.counts.cacheRead)],
+              ["Cache write", count(request.counts.cacheWrite)],
+              ["Output", count(request.counts.output)],
+              ["Cost", request.cost ? `${request.cost.amount.toFixed(4)} ${request.cost.currency}` : "unknown"]
+            ].map(([label, value]) => (
+              <div key={label} className={label === "Attempt" ? "col-span-2" : ""}>
+                <dt className="text-muted">{label}</dt>
+                <dd className="whitespace-nowrap">{value}</dd>
+              </div>
+            ))}
+          </dl>
+        ))}
+      </div>
+      <table className="w-full text-left text-sm tabular-nums max-sm:hidden [&_td]:whitespace-nowrap">
         <thead className="text-muted">
           <tr>
             <th className="py-1 pr-3 font-medium">Attempt</th>

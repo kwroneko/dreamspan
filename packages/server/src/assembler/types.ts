@@ -13,7 +13,7 @@ import type { PresetDoc } from "@rp/shared/docs/preset.ts"
 import { Schema } from "effect"
 
 /** Bump whenever identical inputs would assemble differently. Missing means version 0. */
-export const ASSEMBLER_VERSION = 20
+export const ASSEMBLER_VERSION = 21
 
 export type Role = "system" | "user" | "assistant"
 
@@ -164,6 +164,7 @@ export interface WireContext {
   readonly messages: ReadonlyArray<
     Omit<RequestMessage, "role"> & {
       readonly role: Role | "developer" | "model"
+      readonly prefill?: ContextMessage["prefill"]
       readonly sources?: ContextMessage["sources"]
       readonly breakpoint?: ContextMessage["breakpoint"]
       /** Digest of final, unredacted text/role/name. Never projected into an RPC DTO. */
@@ -461,9 +462,12 @@ export interface ModelInput {
   readonly api: string
   readonly key: string
   readonly prefill: "none" | "assistant" | "tool_schema"
+  readonly continueUnavailable?: string | undefined
   readonly cacheBreakpoints: "auto" | "explicit" | "none"
   /** The context window when some source reported it. */
   readonly context: number | null
+  /** A reported output ceiling; absent on older snapshots. */
+  readonly maxOutput?: number | null
   /** The connection's one-way preset override (DESIGN §9). */
   readonly presetOverride: string | null
 }

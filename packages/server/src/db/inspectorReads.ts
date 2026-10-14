@@ -252,6 +252,7 @@ export const makeInspectorReadHandlers = Effect.gen(function* () {
           messages: display
             ? wire!.messages.map((message) => ({
                 role: message.role,
+                ...(message.prefill ? { prefill: message.prefill } : {}),
                 name: message.name ?? null,
                 content: message.content,
                 tokens: tokensOf(message),

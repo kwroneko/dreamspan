@@ -217,10 +217,15 @@ function Editor({
 function useVersions(session: ChatSession, entry: PathEntry, report: (outcome: Outcome<unknown>) => void) {
   const [versions, setVersions] = useState<ReadonlyArray<Version> | null>(null)
   const multiple = entry.versionCount > 1
-  // The list as read is current while it has as many versions as the slot, this one among them.
+  // Refresh when the selected record changes, including a generation finishing in place.
   const position =
     versions !== null && versions.length === entry.versionCount
-      ? versions.findIndex((v) => v.id === entry.version.id)
+      ? versions.findIndex(
+          (v) =>
+            v.id === entry.version.id &&
+            (entry.version.status === "generating" || v.rowVersion === entry.version.rowVersion) &&
+            v.status === entry.version.status
+        )
       : -1
   const stale = multiple && position < 0
   useEffect(() => {
@@ -232,9 +237,17 @@ function useVersions(session: ChatSession, entry: PathEntry, report: (outcome: O
     return () => {
       live = false
     }
-  }, [stale, session, entry.slotId, entry.versionCount, entry.version.id])
+  }, [
+    stale,
+    session,
+    entry.slotId,
+    entry.versionCount,
+    entry.version.id,
+    entry.version.rowVersion,
+    entry.version.status
+  ])
   const load = async () => {
-    if (position >= 0) return versions
+    if (position >= 0 && versions!.every((version) => version.status !== "generating")) return versions
     const result = await session.listVersions(entry.slotId)
     if (!result.ok) {
       report(result)
