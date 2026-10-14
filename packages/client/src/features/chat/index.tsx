@@ -1,6 +1,7 @@
 import { lazy, Suspense } from "react"
 import { routes } from "../../routes.tsx"
 import { Loading } from "../../ui/Spinner.tsx"
+import { ChatDefaultsPage } from "./ChatDefaults.tsx"
 import { ChatsPage } from "./ChatsPage.tsx"
 
 // The chat view carries the Markdown renderer, most of the bundle: it loads with the first chat opened.
@@ -47,6 +48,14 @@ export const register = () => {
     parent: "app",
     path: "/chats/$chatId/context/$versionId",
     component: LazyContextPage
+  })
+  // What applies to all of the user's chats.
+  routes.register({
+    id: "settings.chats",
+    parent: "settings",
+    path: "chats",
+    component: ChatDefaultsPage,
+    nav: { label: "Chats", order: 15 }
   })
   // A chat with a card, before it exists (DESIGN §2.1).
   routes.register({ id: "chat.start", parent: "app", path: "/cards/$entityId/chat", component: LazyStartChatPage })

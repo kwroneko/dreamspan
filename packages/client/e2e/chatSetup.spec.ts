@@ -96,7 +96,7 @@ test("a new chat from a card: the greeting follows the persona until the first s
   await expect(greeting).toContainText("The bell rings for Ana.")
   // Opening a card made no chat (DESIGN §2.1).
   await page.goto(`${server().url}/chats`)
-  await expect(page.getByText("No chats yet")).toBeVisible()
+  await expect(page.getByText(/^No chats yet\./)).toBeVisible()
   await page.goBack()
 
   await greeting.getByRole("button", { name: "Next greeting" }).click()
@@ -121,25 +121,31 @@ test("a new chat from a card: the greeting follows the persona until the first s
   await expect(replies(page).last().locator("header")).toContainText("Mira")
 
   // Later, playing Ana from here on doesn't rewrite what was said before.
-  await page.getByRole("button", { name: "Cast", exact: true }).click()
-  const dialog = page.getByRole("dialog", { name: "Who's here" })
-  await dialog.getByLabel("Add someone").click()
-  await page.getByRole("option", { name: "Ana" }).click()
-  await expect(dialog.getByRole("list", { name: "Members" })).toContainText("Ana")
+  await page.getByRole("group", { name: "Chat panel" }).getByRole("button", { name: "Cast", exact: true }).click()
+  const cast = page.getByRole("tabpanel", { name: "Cast" })
+  await cast.getByRole("button", { name: "Add character" }).click()
+  await page.getByRole("list", { name: "Cards to add" }).getByRole("button", { name: /^Ana/ }).click()
+  await expect(cast.getByRole("list", { name: "Characters in this chat" })).toContainText("Ana")
   await page.keyboard.press("Escape")
   await expect(first).toContainText("Mira waves at Bo from the pier.")
+  // The panel's tab is in the URL: a reload keeps it open there.
+  await expect(page).toHaveURL(/panel=cast/)
   await page.reload()
   await expect(replies(page).first()).toContainText("Mira waves at Bo from the pier.")
-  await expect(page.getByText("No chats yet")).toHaveCount(0)
-  await page.getByRole("button", { name: "Settings", exact: true }).click()
-  await expect(page.getByRole("dialog", { name: "Chat settings" })).toBeVisible()
-  await page.getByText("Speaker's card last").click()
+  await expect(page.getByText(/^No chats yet\./)).toHaveCount(0)
+  await expect(page.getByRole("tabpanel", { name: "Cast" })).toBeVisible()
+  await page.getByRole("tab", { name: "This chat" }).click()
+  const settings = page.getByRole("tabpanel", { name: "This chat" })
+  await settings.getByText("Speaker's card last").click()
   await shoot(page, "chat-settings")
-  await page.keyboard.press("Escape")
   // Settings are state from the leaf on: read back after a reload.
   await page.reload()
-  await page.getByRole("button", { name: "Settings", exact: true }).click()
   await expect(page.getByRole("radio", { name: /Speaker's card last/ })).toBeChecked()
+  // Closed, it stays closed.
+  await page.getByRole("button", { name: "Close the panel" }).click()
+  await expect(page).not.toHaveURL(/panel=/)
+  await page.reload()
+  await expect(page.getByRole("complementary", { name: "Chat panel" })).toHaveCount(0)
 })
 
 test("Send as another card, and Generate with a one-turn direction that swipes reuse", async ({ page }) => {
@@ -152,8 +158,10 @@ test("Send as another card, and Generate with a one-turn direction that swipes r
   await page.getByRole("button", { name: "Tobin" }).click()
   await composer(page).fill("Tobin pushes off from the dock.")
   await page.getByRole("button", { name: "Send as Tobin" }).click()
-  const mine = page.getByRole("article", { name: "Your message" }).last()
+  // A cast member the user doesn't play speaks on the model's side, whoever wrote it.
+  const mine = page.getByRole("article").filter({ hasText: "Tobin pushes off from the dock." })
   await expect(mine.locator("header")).toContainText("Tobin")
+  await expect(mine).toHaveAttribute("aria-label", "Reply")
   await expect(generating(page)).toHaveCount(0, { timeout: 20_000 })
   // The switcher remembers its tab; recent speakers are one tap away.
   await page.getByRole("button", { name: /^Speaking as Tobin/ }).click()
@@ -170,7 +178,7 @@ test("Send as another card, and Generate with a one-turn direction that swipes r
   await shoot(page, "generate-with-direction")
   // A swipe of that turn keeps its direction.
   await reply.getByRole("button", { name: "Generate another version" }).click()
-  await expect(reply.getByText("2 / 2")).toBeVisible()
+  await expect(reply.getByRole("group", { name: "Versions" })).toContainText("2/2")
   await expect(reply).toContainText("Direction: Mira tells a story about the storm.")
   await expect(generating(page)).toHaveCount(0, { timeout: 20_000 })
   // The next turn doesn't inherit it.

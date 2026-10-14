@@ -135,6 +135,17 @@ export class PathEntry extends Schema.Class<PathEntry>("PathEntry")({
   branchCount: Schema.Int,
   branchIndex: Schema.Int,
   /**
+   * The side the message is on when its speaker isn't one of the cast, as the context reads
+   * it (assemblySources.ts): its first version's, deleted or not, so which versions are
+   * live never changes it. A human's first version is the user's, unless it's a greeting.
+   */
+  side: Schema.Literals(["user", "assistant"]),
+  /**
+   * Who its first version, deleted or not, names as the speaker: whom the message shows as
+   * when no live version names anyone (one written before written versions kept the speaker).
+   */
+  firstSpeakerEntityId: Schema.NullOr(EntityId),
+  /**
    * Whether this slot enters an assembled context. False for excluded slots and
    * for selections that are failed or still empty (DATA-MODEL §15, invariant 2).
    */
@@ -179,7 +190,24 @@ export class CastCard extends Schema.Class<CastCard>("CastCard")({
   /** In the recycle bin: still named where a chat refers to it, but not offered. */
   inBin: Schema.Boolean,
   /** It carries its own lorebook (`character_book`), which a chat can turn off. */
-  lorebook: Schema.Boolean
+  lorebook: Schema.Boolean,
+  /** That lorebook's own name (`character_book.name`), when it has one. */
+  lorebookName: Schema.optionalKey(Schema.String),
+  /** How many entries that lorebook has. */
+  lorebookEntries: Schema.optionalKey(Schema.Int),
+  /** Its avatar, served at `/library/media?id=`; null without one. */
+  avatarMediaId: Schema.NullOr(Schema.String)
+}) {}
+
+/** What the chat list shows of a chat besides its title (DESIGN §2.1). */
+export class ChatSummary extends Schema.Class<ChatSummary>("ChatSummary")({
+  chatId: ChatId,
+  /** Everyone who joined the chat, in join order, with their cards. */
+  cast: Schema.Array(CastCard),
+  /** Messages on the active path. */
+  messages: Schema.Int,
+  /** The active path's last message: who spoke it and its start. */
+  last: Schema.NullOr(Schema.Struct({ speaker: Schema.NullOr(EntityId), writer: Schema.String, text: Schema.String }))
 }) {}
 
 /**

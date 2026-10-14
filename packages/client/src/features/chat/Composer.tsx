@@ -7,17 +7,31 @@
 // so typing re-renders nothing else.
 import type { CastCard, EntityId, QueuedMessage } from "@rp/shared/chat.ts"
 import type { DraftState } from "@rp/shared/drafts.ts"
-import { type KeyboardEvent, memo, useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react"
+import {
+  type ComponentProps,
+  type KeyboardEvent,
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore
+} from "react"
 import { Link } from "@tanstack/react-router"
 import { useSession } from "../../session.ts"
 import type { AppError } from "../../errors.ts"
 import { Avatar } from "../../ui/Avatar.tsx"
-import { Button } from "../../ui/Button.tsx"
+import { Button, buttonClass } from "../../ui/Button.tsx"
 import { Textarea } from "../../ui/Field.tsx"
 import { Popover } from "../../ui/Popover.tsx"
 import { Badge } from "../../ui/Surface.tsx"
 import { Tabs } from "../../ui/Tabs.tsx"
-import { nameOf, recentSpeakers, replySpeaker, useCast } from "./cast.ts"
+import { SquareIconButton, Tooltip } from "../../ui/Tooltip.tsx"
+import { type CastView, nameOf, recentSpeakers, replySpeaker, useCast } from "./cast.ts"
+import { ChevronIcon, HistoryIcon, RegenerateIcon, SendIcon, StopIcon } from "./icons.tsx"
+import { speakerChoice, usePickedSpeaker } from "./speaker.ts"
 import { carriedComposerText, dropCarriedComposerText } from "./composerCarry.ts"
 import { ReplayNotice } from "../editor/ReplayNotice.tsx"
 import { ComposerDraft, type ComposerSource, type Sent } from "./composerDraft.ts"
@@ -75,8 +89,9 @@ function CardList({
             aria-current={card.entityId === current || undefined}
             className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm outline-none hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus aria-[current]:bg-surface-raised"
           >
-            <Avatar id={card.entityId} name={card.name} size="sm" />
+            <Avatar id={card.entityId} name={card.name} mediaId={card.avatarMediaId} size="md" />
             <span className="min-w-0 flex-1 truncate">{card.name}</span>
+            {card.persona && <Badge>persona</Badge>}
             {card.label !== card.name && <span className="min-w-0 truncate text-xs text-muted">{card.label}</span>}
           </button>
         </li>
@@ -84,6 +99,8 @@ function CardList({
     </ul>
   )
 }
+
+const mediaOf = (view: CastView, id: EntityId) => view.cards.get(id)?.avatarMediaId ?? null
 
 /** The speaker, always visible; opens Members / Personas / All cards (DESIGN §2.2). */
 const SpeakerSwitcher = memo(function SpeakerSwitcher({
@@ -112,17 +129,25 @@ const SpeakerSwitcher = memo(function SpeakerSwitcher({
     setOpen(false)
     onPick(card)
   }
-  const cards = all ?? []
+  // A card in the chat by the name the chat uses for it (its own version's, say).
+  const cards = (all ?? []).map((card) => view.cards.get(card.entityId) ?? card)
   return (
     <Popover
       open={open}
       onOpenChange={openChange}
       triggerLabel={`Speaking as ${name}. Change the speaker`}
+      hint={`Speaking as ${name}. Change who's speaking`}
+      triggerClassName="inline-flex h-9 max-w-44 min-w-0 shrink-0 items-center gap-1.5 rounded-full border border-border bg-surface-raised py-1 pr-2.5 pl-1 text-sm font-medium outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-focus"
       title="Speak as"
       trigger={
         <>
-          {speaker !== null && <Avatar id={speaker} name={name} size="sm" />}
+          {speaker !== null ? (
+            <Avatar id={speaker} name={name} mediaId={mediaOf(view, speaker)} size="sm" className="size-7" />
+          ) : (
+            <span aria-hidden="true" className="size-1" />
+          )}
           <span className="min-w-0 truncate">{name}</span>
+          <ChevronIcon up />
         </>
       }
     >
@@ -308,8 +333,12 @@ function History({ draft }: { draft: ComposerDraft }) {
       open={open}
       onOpenChange={openChange}
       triggerLabel="Earlier text of this message"
+      hint="Earlier text of this message"
+      triggerClassName={`${buttonClass("ghost")} w-9 px-0!`}
+      side="top"
+      align="end"
       title="Earlier text"
-      trigger="History"
+      trigger={<HistoryIcon />}
     >
       {states === null ? (
         <p className="px-1 py-2 text-sm text-muted">{error ? error.message : "Loading…"}</p>
@@ -351,6 +380,39 @@ function History({ draft }: { draft: ComposerDraft }) {
   )
 }
 
+/** The composer's box: one line when empty, growing with its text up to a third of the screen. */
+function AutoGrowTextarea(props: ComponentProps<"textarea"> & { value: string }) {
+  const ref = useRef<HTMLTextAreaElement>(null)
+  const fit = useCallback(() => {
+    const box = ref.current
+    if (box === null) return
+    box.style.height = "auto"
+    box.style.height = `${Math.min(box.scrollHeight, Math.max(160, innerHeight / 3))}px`
+  }, [])
+  useLayoutEffect(fit, [fit, props.value])
+  // The same text takes more lines in a narrower box: a phone turned, a panel opened.
+  useEffect(() => {
+    const box = ref.current
+    if (box === null || typeof ResizeObserver === "undefined") return
+    let width = box.clientWidth
+    const observer = new ResizeObserver(() => {
+      if (box.clientWidth === width) return
+      width = box.clientWidth
+      fit()
+    })
+    observer.observe(box)
+    return () => observer.disconnect()
+  }, [fit])
+  return (
+    <textarea
+      ref={ref}
+      rows={1}
+      {...props}
+      className="max-h-[33vh] min-h-9 min-w-0 flex-1 resize-none bg-transparent px-2 py-1.5 text-base text-text outline-none placeholder:text-muted sm:text-sm"
+    />
+  )
+}
+
 export function Composer({ session, view }: { session: ChatSession; view: ChatView }) {
   const castView = useCast()
   const { cast } = castView
@@ -369,8 +431,9 @@ export function Composer({ session, view }: { session: ChatSession; view: ChatVi
   } = useSyncExternalStore(draft.subscribe, draft.snapshot)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<AppError | null>(null)
-  // The speaker picked here; until then, the first card the user plays.
-  const [picked, setPicked] = useState<EntityId | null | undefined>(undefined)
+  // The speaker picked here or with "Write as" in the Cast tab; until then, the first card the user plays.
+  const picked = usePickedSpeaker(session)
+  const setPicked = (id: EntityId) => speakerChoice(session).set(id)
   const speaker = picked !== undefined ? picked : (cast?.playedByMe[0] ?? null)
   const name = nameOf(castView, speaker)
   // Only known when the window reaches the leaf; otherwise the server takes the message anyway.
@@ -419,7 +482,7 @@ export function Composer({ session, view }: { session: ChatSession; view: ChatVi
   /** A card that isn't in the chat joins it from here on (DESIGN §2.2). */
   const pick = useCallback(
     async (card: CastCard) => {
-      setPicked(card.entityId)
+      speakerChoice(session).set(card.entityId)
       if (cast !== null && !cast.participants.includes(card.entityId)) {
         const outcome = await session.changeCast({ _tag: "Join", entityId: card.entityId })
         setError(outcome.ok ? null : outcome.error)
@@ -481,8 +544,13 @@ export function Composer({ session, view }: { session: ChatSession; view: ChatVi
     }
   }
 
+  const hasText = text.trim() !== ""
+  const sendLabel = name ? `Send as ${name}` : "Send"
+  const generateLabel = name ? `Generate ${name}` : "Reply"
+  const shownError = error ?? saveError
+
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-col gap-2 border-t border-border pt-3 pb-3">
+    <div className="mx-auto flex w-full max-w-3xl flex-col gap-2 border-t border-border pt-2 pb-2">
       {view.queue.length > 0 && (
         <ul className="flex flex-col gap-2" aria-label="Queued messages">
           {view.queue.map((queued) => (
@@ -499,20 +567,6 @@ export function Composer({ session, view }: { session: ChatSession; view: ChatVi
           ))}
         </ul>
       )}
-      <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <SpeakerSwitcher session={session} speaker={speaker} onPick={onPick} />
-        {recent.map((id) => (
-          <button
-            key={id}
-            type="button"
-            aria-label={`Speak as ${nameOf(castView, id)}`}
-            onClick={() => setPicked(id)}
-            className="rounded-full outline-none focus-visible:ring-2 focus-visible:ring-focus"
-          >
-            <Avatar id={id} name={nameOf(castView, id) ?? "?"} size="sm" />
-          </button>
-        ))}
-      </div>
       {conflict && (
         <ReplayNotice
           conflict={conflict}
@@ -535,55 +589,103 @@ export function Composer({ session, view }: { session: ChatSession; view: ChatVi
           went over.
         </p>
       )}
-      <label htmlFor="composer" className="sr-only">
-        Message
-      </label>
-      <textarea
-        id="composer"
-        data-testid="composer"
-        rows={3}
-        value={text}
-        readOnly={!ready}
-        aria-busy={!ready}
-        placeholder={
-          !ready
-            ? "Loading what you typed here…"
-            : leafGenerating
-              ? "Write a message: it posts when the reply finishes…"
-              : "Write a message…"
-        }
-        onChange={(event) => draft.type(event.currentTarget.value)}
-        onKeyDown={onKeyDown}
-        className="w-full resize-none rounded-md border border-border bg-surface px-3 py-2 text-base text-text outline-none placeholder:text-muted focus-visible:border-focus focus-visible:ring-2 focus-visible:ring-focus/40 sm:text-sm"
-      />
-      <div className="flex flex-wrap items-center gap-2">
-        <Button variant="primary" pending={busy} disabled={text.trim() === "" || !ready} onClick={send}>
-          {name ? `Send as ${name}` : "Send"}
-        </Button>
-        <Button
-          disabled={busy || !ready}
-          title={text.trim() === "" ? undefined : "The text becomes this turn's direction"}
-          onClick={generate}
-        >
-          {name ? `Generate ${name}` : "Reply"}
-        </Button>
-        {leaf?.version.writer === "model" && (
-          <Button variant="ghost" onClick={async () => report(await session.regenerate(leaf))}>
-            Regenerate
-          </Button>
-        )}
-        {leafGenerating && (
-          <Button variant="secondary" onClick={async () => report(await session.stop(leaf.version.id))}>
-            Stop
-          </Button>
-        )}
-        <History draft={draft} />
-        {(error ?? saveError) && (
-          <p role="alert" className="text-sm text-danger">
-            {(error ?? saveError)!.message}
-          </p>
-        )}
+      <div className="flex flex-col gap-1.5 sm:flex-row sm:items-end">
+        {/* Who's speaking, and the speakers used last: one tap each (DESIGN §2.2). */}
+        <div className="flex min-w-0 items-center gap-1 sm:h-11">
+          <SpeakerSwitcher session={session} speaker={speaker} onPick={onPick} />
+          {recent.map((id) => {
+            const who = nameOf(castView, id) ?? "?"
+            return (
+              <Tooltip key={id} label={`Speak as ${who}`}>
+                <button
+                  type="button"
+                  aria-label={`Speak as ${who}`}
+                  onClick={() => setPicked(id)}
+                  className="shrink-0 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                >
+                  <Avatar id={id} name={who} mediaId={mediaOf(castView, id)} size="md" />
+                </button>
+              </Tooltip>
+            )
+          })}
+          <span className="ml-auto sm:hidden">
+            <History draft={draft} />
+          </span>
+        </div>
+        <div className="flex min-w-0 flex-1 items-end gap-1 rounded-lg border border-border bg-surface p-1 focus-within:border-focus focus-within:ring-2 focus-within:ring-focus/40">
+          <label htmlFor="composer" className="sr-only">
+            Message
+          </label>
+          <AutoGrowTextarea
+            id="composer"
+            data-testid="composer"
+            value={text}
+            readOnly={!ready}
+            aria-busy={!ready}
+            aria-describedby={hasText ? "composer-hint" : undefined}
+            placeholder={
+              !ready ? "Loading what you typed here…" : leafGenerating ? "Queue a message…" : "Write a message…"
+            }
+            onChange={(event) => draft.type(event.currentTarget.value)}
+            onKeyDown={onKeyDown}
+          />
+          <span className="hidden sm:inline-flex">
+            <History draft={draft} />
+          </span>
+          {leaf?.version.writer === "model" && !leafGenerating && (
+            <SquareIconButton
+              label="Regenerate the latest reply"
+              hint="Regenerate the latest reply: a new version of it, in its place"
+              variant="ghost"
+              onClick={async () => report(await session.regenerate(leaf))}
+            >
+              <RegenerateIcon />
+            </SquareIconButton>
+          )}
+          {leafGenerating && (
+            <SquareIconButton
+              label="Stop the reply"
+              variant="ghost"
+              onClick={async () => report(await session.stop(leaf.version.id))}
+            >
+              <StopIcon />
+            </SquareIconButton>
+          )}
+          <Tooltip
+            label={
+              hasText
+                ? `${name ?? "The model"} writes the next turn, with your text as a one-turn direction`
+                : `${name ?? "The model"} writes the next turn`
+            }
+          >
+            <Button aria-label={generateLabel} disabled={busy || !ready} onClick={generate}>
+              {name ? "Generate" : "Reply"}
+            </Button>
+          </Tooltip>
+          <SquareIconButton
+            label={sendLabel}
+            hint={`${sendLabel} (Enter; Shift+Enter for a new line)`}
+            variant="primary"
+            pending={busy}
+            disabled={!hasText || !ready}
+            onClick={send}
+          >
+            {!busy && <SendIcon />}
+          </SquareIconButton>
+        </div>
       </div>
+      {hasText && (
+        <p id="composer-hint" className="text-xs text-muted">
+          {name
+            ? `Generate instead makes this text a one-turn direction for ${name}'s turn.`
+            : "Reply instead makes this text a one-turn direction for the reply."}
+        </p>
+      )}
+      {shownError && (
+        <p role="alert" className="text-sm text-danger">
+          {shownError.message}
+        </p>
+      )}
     </div>
   )
 }

@@ -594,6 +594,27 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
         assert.deepStrictEqual(yield* owner.api.GetGenerationDefaults(), before)
       })
   },
+  ChangeGenerationDefaults: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const before = yield* owner.api.GetGenerationDefaults()
+        const theirs = { connection: owner.connectionId, model: owner.modelId }
+        yield* refused(actor.api.ChangeGenerationDefaults({ change: { model: theirs } }), "NotFound")
+        yield* refused(actor.api.ChangeGenerationDefaults({ change: { preset: owner.refId } }), "NotFound")
+        yield* refused(actor.api.ChangeGenerationDefaults({ change: { judge: theirs } }), "NotFound")
+        yield* refused(actor.api.ChangeGenerationDefaults({ change: { fallback: theirs } }), "NotFound")
+        // Another user's model on the caller's own connection is no better.
+        yield* refused(
+          actor.api.ChangeGenerationDefaults({
+            change: { model: { connection: actor.connectionId, model: owner.modelId } }
+          }),
+          "NotFound"
+        )
+        // The caller's own instruction is theirs alone.
+        yield* actor.api.ChangeGenerationDefaults({ change: { tail: "Actor's instruction." } })
+        assert.deepStrictEqual(yield* owner.api.GetGenerationDefaults(), before)
+      })
+  },
   // --- Chats
   ListChats: {
     probe: (actor, owner) =>
@@ -607,6 +628,28 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
           (yield* actor.api.ListChats(page)).map((c) => c.id),
           owner.chat.chatId
         )
+        // A card's chats: another user's card is as unknown as a missing one, and the
+        // owner's own card lists.
+        const card = owner.editor.cardEntityId
+        yield* refused(actor.api.ListChats({ ...page, entityId: card }), "NotFound")
+        yield* refused(actor.api.ListChats({ ...page, entityId: "no-such-card" as EntityId }), "NotFound")
+        yield* owner.api.ListChats({ ...page, entityId: card })
+        // Searching by the title or a card's name finds only the caller's chats.
+        const [chat] = (yield* owner.api.ListChats(page)).filter((c) => c.id === owner.chat.chatId)
+        for (const search of [chat!.title, ...(yield* owner.api.ListCards()).map((c) => c.name)].filter(Boolean)) {
+          assert.notInclude(
+            (yield* actor.api.ListChats({ ...page, search })).map((c) => c.id),
+            owner.chat.chatId
+          )
+        }
+      })
+  },
+  ListChatSummaries: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const chatIds = [owner.chat.chatId]
+        assert.lengthOf(yield* owner.api.ListChatSummaries({ chatIds }), 1)
+        assert.lengthOf(yield* actor.api.ListChatSummaries({ chatIds }), 0)
       })
   },
   CreateChat: { createOnly: "starts an empty chat for the caller" },
@@ -777,6 +820,45 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
         "NotFound"
       )
   },
+  MessageDrafts: {
+    probe: (actor, owner) => refused(actor.api.MessageDrafts({ chatId: owner.chat.chatId }), "NotFound")
+  },
+  SaveMessageDraft: {
+    probe: (actor, owner) =>
+      Effect.all([
+        refused(
+          actor.api.SaveMessageDraft({
+            target: { _tag: "Edit", versionId: owner.chat.versionId },
+            draftId: null,
+            content: "planted",
+            expectedRowVersion: null,
+            expectedSession: null
+          }),
+          "NotFound"
+        ),
+        refused(
+          actor.api.SaveMessageDraft({
+            target: { _tag: "Write", slotId: owner.chat.slotId },
+            draftId: null,
+            content: "planted",
+            expectedRowVersion: null,
+            expectedSession: null
+          }),
+          "NotFound"
+        )
+      ]).pipe(Effect.asVoid)
+  },
+  DiscardMessageDraft: {
+    probe: (actor, owner) =>
+      refused(
+        actor.api.DiscardMessageDraft({
+          target: { _tag: "Write", slotId: owner.chat.slotId },
+          draftId: "none",
+          expectedRowVersion: 1
+        }),
+        "NotFound"
+      )
+  },
   DeleteChat: { probe: (actor, owner) => refused(actor.api.DeleteChat({ chatId: owner.chat.chatId }), "NotFound") },
   DeleteMessage: {
     probe: (actor, owner) => refused(actor.api.DeleteMessage({ slotId: owner.chat.slotId }), "NotFound")
@@ -804,10 +886,15 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
           "budget",
           "historyStart",
           "leafSlotId",
+          "model",
+          "preset",
           "summarizedThrough",
           "warmth"
         ])
         if (own.historyStart) assert.deepStrictEqual(Object.keys(own.historyStart).sort(), ["depth", "slotId"])
+        if (own.preset) assert.deepStrictEqual(Object.keys(own.preset).sort(), ["name", "ref", "scope"])
+        // The model is the owner's own, named from the owner's connection.
+        if (own.model) assert.strictEqual(own.model.connection, owner.connectionId)
       })
   },
   SubscribeChat: {
@@ -837,6 +924,18 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
       Effect.map(actor.api.ListCards(), (cards) => {
         assert.isTrue(cards.some((c) => c.entityId === actor.cardId))
         assert.isFalse(cards.some((c) => c.entityId === owner.cardId))
+      })
+  },
+  ListCardUsage: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const own = (yield* owner.api.ListCardUsage()).map((card) => card.entityId)
+        assert.include(own, owner.editor.cardEntityId)
+        // Personas aren't characters on the grid.
+        assert.notInclude(own, owner.cardId)
+        const seen = (yield* actor.api.ListCardUsage()).map((card) => card.entityId)
+        assert.notInclude(seen, owner.editor.cardEntityId)
+        assert.include(seen, actor.editor.cardEntityId)
       })
   },
   SetPersona: {
@@ -869,6 +968,50 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
       Effect.gen(function* () {
         yield* refused(actor.api.GetCast({ chatId: owner.chat.chatId, slotId: null }), "NotFound")
         yield* refused(actor.api.GetCast({ chatId: actor.chat.chatId, slotId: owner.chat.slotId }), "NotFound")
+      })
+  },
+  ListChatCards: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        yield* refused(
+          actor.api.ListChatCards({ chatId: owner.chat.chatId, slotId: null, entityIds: [actor.cardId] }),
+          "NotFound"
+        )
+        yield* refused(
+          actor.api.ListChatCards({ chatId: actor.chat.chatId, slotId: owner.chat.slotId, entityIds: [actor.cardId] }),
+          "NotFound"
+        )
+        // Their card named in the actor's own chat is NotFound, as a missing one is.
+        yield* refused(
+          actor.api.ListChatCards({ chatId: actor.chat.chatId, slotId: null, entityIds: [owner.cardId, actor.cardId] }),
+          "NotFound"
+        )
+        const cards = yield* actor.api.ListChatCards({
+          chatId: actor.chat.chatId,
+          slotId: null,
+          entityIds: [actor.cardId]
+        })
+        assert.deepStrictEqual(
+          cards.map((card) => card.entityId),
+          [actor.cardId]
+        )
+      })
+  },
+  EditCardForChat: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const edit = (chatId: ChatId, slotId: SlotId | null, entityId: EntityId) =>
+          actor.api.EditCardForChat({ chatId, slotId, entityId })
+        yield* refused(edit(owner.chat.chatId, null, actor.cardId), "NotFound")
+        yield* refused(edit(actor.chat.chatId, null, owner.cardId), "NotFound")
+        yield* refused(edit(actor.chat.chatId, owner.chat.slotId, actor.cardId), "NotFound")
+        // Nothing of the owner's got an override.
+        const [card] = yield* owner.api.ListChatCards({
+          chatId: owner.chat.chatId,
+          slotId: null,
+          entityIds: [owner.cardId]
+        })
+        assert.isNull(card!.overrideRefId)
       })
   },
   ChangeCast: {
@@ -1460,6 +1603,50 @@ const routes: Record<string, Probe> = {
       assert.strictEqual((yield* leaving(owner.chat.chatId)).status, 404)
       // Enclosing ownership does not authorize an independently supplied foreign draft id.
       assert.strictEqual((yield* leaving(actor.chat.chatId)).status, 404)
+    }),
+  "POST /library/drafts, with summaries": (actor, owner) =>
+    Effect.gen(function* () {
+      const before = yield* owner.api.GetSummaryDraft({ summaryId: owner.summary.id })
+      const response = yield* http(
+        actor,
+        "/library/drafts",
+        JSON.stringify({
+          drafts: [],
+          summaries: [
+            {
+              summaryId: owner.summary.id,
+              draftId: null,
+              content: "planted",
+              expectedRowVersion: null,
+              expectedSession: null,
+              baseRevisionId: owner.summary.revisionId
+            }
+          ]
+        }),
+        "application/json"
+      )
+      assert.strictEqual(response.status, 404)
+      assert.deepStrictEqual(yield* owner.api.GetSummaryDraft({ summaryId: owner.summary.id }), before)
+    }),
+  "POST /library/drafts, with messages": (actor, owner) =>
+    Effect.gen(function* () {
+      const before = yield* owner.api.MessageDrafts({ chatId: owner.chat.chatId })
+      for (const target of [
+        { _tag: "Edit", versionId: owner.chat.versionId },
+        { _tag: "Write", slotId: owner.chat.slotId }
+      ]) {
+        const response = yield* http(
+          actor,
+          "/library/drafts",
+          JSON.stringify({
+            drafts: [],
+            messages: [{ target, draftId: null, content: "planted", expectedRowVersion: null, expectedSession: null }]
+          }),
+          "application/json"
+        )
+        assert.strictEqual(response.status, 404)
+      }
+      assert.deepStrictEqual(yield* owner.api.MessageDrafts({ chatId: owner.chat.chatId }), before)
     }),
   "POST /library/export": (actor, owner) =>
     Effect.gen(function* () {

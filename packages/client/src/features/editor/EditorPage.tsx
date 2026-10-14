@@ -1,14 +1,19 @@
 // A library entry's editor (ARCHITECTURE.md §14): which entry and scope you're editing, how
 // many chats the change reaches, and the state you're in: saved, or changes kept as drafts.
+import { useAtomValue } from "@effect/atom-react"
+import type { ChatId } from "@rp/shared/chat.ts"
 import type { SavedRef } from "@rp/shared/editorApi.ts"
 import type { RefId } from "@rp/shared/library.ts"
 import { Link, useParams } from "@tanstack/react-router"
-import { useEffect, useState } from "react"
+import { AsyncResult } from "effect/reactivity"
+import { useEffect, useMemo, useState } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import { Button, buttonClass } from "../../ui/Button.tsx"
 import { Loading } from "../../ui/Spinner.tsx"
 import { Alert, Badge, Card } from "../../ui/Surface.tsx"
+import { AppClient } from "../../rpc.ts"
 import { useSession } from "../../session.ts"
+import { chatName, formatDay } from "../chat/chatTitle.ts"
 import { useTitle } from "../shell.tsx"
 import { useCaller } from "./caller.ts"
 import { RecoveredNotice, RestoredNotice } from "./controls.tsx"
@@ -45,6 +50,18 @@ const savedNotice = (saved: SavedRef) => {
   ]
     .filter((part) => part !== "")
     .join(" ")
+}
+
+/** The chat a chat override belongs to, by name, as a link back to it. */
+function OverrideChat({ chatId, prefix = "" }: { chatId: ChatId; prefix?: string }) {
+  const result = useAtomValue(useMemo(() => AppClient.query("GetChat", { chatId }), [chatId]))
+  const name = AsyncResult.isSuccess(result) ? chatName(result.value.title, []) : null
+  return (
+    <Link to="/chats/$chatId" params={{ chatId }} className="text-accent underline-offset-4 hover:underline">
+      {prefix}
+      {name ? `${name.name}${name.started ? ` (started ${formatDay(name.started)})` : ""}` : "the chat"}
+    </Link>
+  )
 }
 
 function Editor({ refId }: { refId: RefId }) {
@@ -94,22 +111,37 @@ function Editor({ refId }: { refId: RefId }) {
   return (
     <div className="flex flex-col gap-6">
       <header className="flex flex-col gap-2">
-        <Link to="/library" className="text-sm text-muted underline-offset-4 hover:text-text hover:underline">
-          ← Library
-        </Link>
+        {ref.chatId !== null ? (
+          <span className="text-sm">
+            <OverrideChat chatId={ref.chatId} prefix="← Back to " />
+          </span>
+        ) : (
+          <Link to="/library" className="text-sm text-muted underline-offset-4 hover:text-text hover:underline">
+            ← Library
+          </Link>
+        )}
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           <h1 className="min-w-0 text-2xl font-semibold [overflow-wrap:anywhere]">{ref.label}</h1>
           <Badge>{KINDS[ref.kind] ?? ref.kind}</Badge>
           <Badge tone={ref.refKind === "variant" ? "accent" : "neutral"}>
-            {ref.refKind === "variant" ? "variant" : ref.refKind === "upstream" ? "original" : "this chat only"}
+            {ref.refKind === "variant" ? "variant" : ref.refKind === "upstream" ? "original" : "edited for this chat"}
           </Badge>
         </div>
         {ref.subtitle && <p className="text-muted [overflow-wrap:anywhere]">{ref.subtitle}</p>}
-        <p className="text-sm">
-          Saving changes this {ref.refKind === "variant" ? "variant" : KINDS[ref.kind]} everywhere it's used:{" "}
-          <strong>used by {plural(usedByChats, "chat", "chats")}</strong>.
-          {ref.kind !== "note" && " To change it for some chats only, make a variant."}
-        </p>
+        {ref.chatId !== null ? (
+          // A chat override (DESIGN §4): this chat's own version of the entry.
+          <p className="text-sm">
+            <strong>Edited for this chat.</strong> This version of the {KINDS[ref.kind]} is used only in{" "}
+            <OverrideChat chatId={ref.chatId} />, and saving changes it only there; other chats keep the original.
+            Changes to the original still reach it where you haven't edited the same text.
+          </p>
+        ) : (
+          <p className="text-sm">
+            Saving changes this {ref.refKind === "variant" ? "variant" : KINDS[ref.kind]} everywhere it's used:{" "}
+            <strong>used by {plural(usedByChats, "chat", "chats")}</strong>.
+            {ref.kind !== "note" && " To change it for some chats only, make a variant."}
+          </p>
+        )}
         {variants.length > 1 && (
           <nav aria-label="Variants" className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
             <span className="text-muted">Variants:</span>

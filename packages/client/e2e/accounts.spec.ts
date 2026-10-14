@@ -51,7 +51,7 @@ test.describe("with an admin password", () => {
     await carol.getByLabel("Handle").fill("carol")
     await carol.getByLabel("Password").fill("carol-password-3")
     await carol.getByRole("button", { name: "Log in" }).click()
-    await expect(carol.getByText("Signed in as Carol (user)")).toBeVisible()
+    await expect(carol.getByTitle("Signed in as Carol (user)")).toBeVisible()
     await carol.close()
 
     await users.locator("li", { hasText: "Carol" }).getByRole("button", { name: "Disable" }).click()
@@ -84,6 +84,6 @@ test.describe("without passwords", () => {
     await page.getByLabel("Handle").fill("local")
     await page.getByLabel("Password").fill("local-password-1")
     await page.getByRole("button", { name: "Log in" }).click()
-    await expect(page.getByText("Signed in as local (admin)")).toBeVisible()
+    await expect(page.getByTitle("Signed in as local (admin)")).toBeVisible()
   })
 })

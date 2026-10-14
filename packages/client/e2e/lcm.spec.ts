@@ -13,6 +13,8 @@ import { type Client, loginCookie, withCookie } from "./support/rpc.ts"
 import { ADMIN, serverPerFile, withAdmin } from "./support/server.ts"
 import { fixtureSql } from "../../server/test/support/lcmFixtures.ts"
 import { condensed, count, failedJob, level1 } from "./support/summaries.ts"
+import { closePanel, openPanel } from "./support/panel.ts"
+import { makeCopy } from "../src/features/editor/backup.ts"
 
 const server = serverPerFile(withAdmin)
 let provider: FakeProvider
@@ -59,7 +61,7 @@ interface Fixture {
   /** Messages 1–4 and 5–8, and the level-2 summary over both. */
   readonly first: { readonly id: string; readonly revisionId: string }
   readonly second: { readonly id: string }
-  readonly top: { readonly id: string }
+  readonly top: { readonly id: string; readonly revisionId: string }
 }
 
 /** A chat of twelve messages, the first eight summarized: two level-1 summaries and a level 2. */
@@ -104,7 +106,7 @@ const open = async (page: Page, fixture: Fixture, search = "") => {
 const article = (page: Page, fixture: Fixture, n: number) =>
   page.locator(`article[data-slot="${fixture.entries[n - 1]!.slotId}"]`)
 
-const panel = (page: Page) => page.getByRole("dialog", { name: "Summaries" })
+const panel = (page: Page) => page.getByRole("tabpanel", { name: "Summaries" })
 
 for (const [name, viewport] of [
   ["desktop", { width: 1280, height: 800 }],
@@ -174,7 +176,9 @@ for (const [name, viewport] of [
       await expect(children).toContainText("Messages 5–8")
       // A range scrolls to its first message.
       await children.getByRole("button", { name: "Messages 5–8" }).click()
-      await expect(dialog).toHaveCount(0)
+      // Beside the chat the panel stays open; a phone's sheet closes to show the message.
+      if (name === "phone") await expect(dialog).toHaveCount(0)
+      else await expect(dialog).toBeVisible()
       await expect(page).toHaveURL(new RegExp(`slot=${fixture.entries[4]!.slotId}`))
       await expect(article(page, fixture, 5)).toHaveClass(/border-accent/)
     })
@@ -190,9 +194,9 @@ for (const [name, viewport] of [
       await expect(box).toHaveValue("A flood closed the road; Mira saved the ledger.")
       await box.fill("The road flooded. Mira saved the ledger.")
       await expect(dialog.getByText("Your text is kept as a draft.")).toBeVisible()
-      // The draft is on the server: a reload offers it again.
+      // The draft is on the server: a reload offers it again, with the panel still open at it.
       await page.reload()
-      await page.getByTestId("lcm-boundary").click()
+      await expect(dialog).toBeVisible()
       await row.getByRole("button", { name: /Edit the summary of messages 1–8/ }).click()
       await expect(box).toHaveValue("The road flooded. Mira saved the ledger.")
       await dialog.getByRole("button", { name: "Save revision" }).click()
@@ -259,7 +263,8 @@ for (const [name, viewport] of [
       const fixture = await makeChat(`rail-${name}`)
       await open(page, fixture)
       await expect(page.getByTestId("coverage-rail")).toHaveCount(0)
-      await page.getByRole("button", { name: "Coverage rail" }).click()
+      await (await openPanel(page, "Summaries")).getByRole("switch", { name: /Coverage rail/ }).click()
+      await closePanel(page)
       const rail = page.getByTestId("coverage-rail")
       await expect(rail.getByRole("button")).toHaveCount(3)
       await expect(rail.locator('[data-level="1"]')).toHaveCount(2)
@@ -280,7 +285,7 @@ for (const [name, viewport] of [
       await page.getByTestId("coverage-rail").locator('[data-level="1"]').nth(1).click()
       const dialog = panel(page)
       await expect(dialog.locator(`[data-summary="${fixture.second.id}"]`)).toContainText("Mira found the ledger")
-      await dialog.getByRole("button", { name: "Done" }).click()
+      await closePanel(page)
       // A stale message makes the bars over it hatched.
       await admin((api) =>
         api.AmendVersion({
@@ -290,25 +295,22 @@ for (const [name, viewport] of [
         })
       )
       await expect(page.getByTestId("coverage-rail").getByRole("button", { name: /stale/ })).toHaveCount(2)
-      await page.getByRole("button", { name: "Coverage rail" }).click()
+      await (await openPanel(page, "Summaries")).getByRole("switch", { name: /Coverage rail/ }).click()
       await expect(page.getByTestId("coverage-rail")).toHaveCount(0)
     })
 
-    test("LCM is a switch in the chat settings", async ({ page }) => {
+    test("LCM is a switch in the chat's side panel", async ({ page }) => {
       const fixture = await makeChat(`switch-${name}`)
       await open(page, fixture)
-      await page.getByRole("button", { name: "Settings" }).click()
-      const dialog = page.getByRole("dialog", { name: "Chat settings" })
-      const toggle = dialog.getByRole("switch", { name: /Summarize older messages/ })
+      const settings = await openPanel(page, "This chat")
+      const toggle = settings.getByRole("switch", { name: /Summarize older messages/ })
       await expect(toggle).toBeChecked()
       await toggle.click()
       await expect(toggle).not.toBeChecked()
-      await dialog.getByRole("button", { name: "Done" }).click()
       await expect(page.getByTestId("lcm-boundary")).toHaveCount(0)
       await expect(article(page, fixture, 8)).not.toHaveAttribute("data-summarized")
-      await expect(page.getByRole("button", { name: "Summaries", exact: true })).toHaveCount(0)
-      await page.getByRole("button", { name: "Settings" }).click()
-      await dialog.getByRole("switch", { name: /Summarize older messages/ }).click()
+      await expect((await openPanel(page, "Summaries")).getByText("Summaries are off for this chat.")).toBeVisible()
+      await (await openPanel(page, "This chat")).getByRole("switch", { name: /Summarize older messages/ }).click()
       // Turning it on for a chat with messages asks how to start and what it costs first.
       const enable = page.getByRole("dialog", { name: "Summarize older messages" })
       await expect(
@@ -316,12 +318,12 @@ for (const [name, viewport] of [
       ).toBeVisible()
       await enable.getByRole("button", { name: "Enable summaries" }).click()
       await expect(enable).toHaveCount(0)
-      await dialog.getByRole("button", { name: "Done" }).click()
+      await closePanel(page)
       await expect(page.getByTestId("lcm-boundary")).toBeVisible()
       await expect(article(page, fixture, 8)).toHaveAttribute("data-summarized", "true")
     })
 
-    test("the refusal judge and the fallback summarizer are chosen in the settings and kept", async ({ page }) => {
+    test("the refusal judge and the fallback summarizer are chosen in Settings → Chats and kept", async ({ page }) => {
       const fixture = await makeChat(`models-${name}`)
       // Whatever an earlier run chose: none.
       await admin((api) =>
@@ -331,8 +333,10 @@ for (const [name, viewport] of [
         })
       )
       await open(page, fixture)
-      await page.getByRole("button", { name: "Settings" }).click()
-      const dialog = page.getByRole("dialog", { name: "Chat settings" })
+      // For all chats, so not in the chat's panel: it links there.
+      await (await openPanel(page, "This chat")).getByRole("link", { name: "Settings → Chats" }).last().click()
+      await expect(page).toHaveURL(/\/settings\/chats$/)
+      const dialog = page.getByRole("region", { name: "Models for summaries" })
       const pick = async (select: Locator, option: string | RegExp) => {
         await select.click()
         await page.getByRole("listbox").getByRole("option", { name: option }).click()
@@ -401,7 +405,7 @@ for (const [name, viewport] of [
 test("rail child rerun exposes cancel action", async ({ page }) => {
   const fixture = await makeChat("review-child-rerun")
   await open(page, fixture)
-  await page.getByRole("button", { name: "Coverage rail", exact: true }).click()
+  await (await openPanel(page, "Summaries")).getByRole("switch", { name: /Coverage rail/ }).click()
   await page
     .getByTestId("coverage-rail")
     .getByRole("button", { name: /Level 1, messages 1–4/ })
@@ -434,4 +438,156 @@ test("rail child rerun exposes cancel action", async ({ page }) => {
   await expect(
     row.getByText("Edit or re-summarize the covering summary to change this part of the context.")
   ).toBeVisible()
+})
+
+// A summary's edit keeps its text through the same races as every other field (ARCHITECTURE §3.10).
+test.describe("the text of a summary's edit", () => {
+  test.use({ viewport: { width: 1280, height: 800 } })
+
+  const editTop = async (page: Page, fixture: Fixture) => {
+    await page.getByTestId("lcm-boundary").click()
+    const dialog = panel(page)
+    await dialog
+      .locator(`[data-summary="${fixture.top.id}"]`)
+      .getByRole("button", { name: /Edit the summary of messages 1–8/ })
+      .click()
+    return dialog
+  }
+  const box = (dialog: Locator) => dialog.getByRole("textbox", { name: /Text of the summary of messages 1–8/ })
+
+  test("text typed while the revision is being saved stays in the edit", async ({ page }) => {
+    const fixture = await makeChat("summary-typed-during-save")
+    let release: (() => void) | null = null
+    await page.routeWebSocket(/\/rpc$/, (socket) => {
+      const upstream = socket.connectToServer()
+      socket.onMessage((data) => {
+        if (typeof data === "string" && JSON.parse(data).tag === "EditSummary") release = () => upstream.send(data)
+        else upstream.send(data)
+      })
+    })
+    await open(page, fixture)
+    const dialog = await editTop(page, fixture)
+    const submitted = "The road flooded. Mira saved the ledger."
+    const later = "The road flooded. Mira saved the ledger, and more typed while it was being saved."
+    await box(dialog).fill(submitted)
+    await expect(dialog.getByText("Your text is kept as a draft.")).toBeVisible()
+    await dialog.getByRole("button", { name: "Save revision" }).click()
+    await expect.poll(() => release !== null).toBe(true)
+    await box(dialog).fill(later)
+    release!()
+    // The revision is what was submitted; the edit stays open with what was typed since.
+    await expect
+      .poll(async () => (await admin((api) => api.GetSummary({ summaryId: fixture.top.id as never }))).content)
+      .toBe(submitted)
+    await expect(box(dialog)).toHaveValue(later)
+    await expect
+      .poll(async () => (await admin((api) => api.GetSummaryDraft({ summaryId: fixture.top.id as never })))?.content)
+      .toBe(later)
+    // Typed on the revision just saved: the draft isn't marked as started from an older one.
+    await expect(dialog.getByText("The draft started from an older revision")).toHaveCount(0)
+  })
+
+  test("text replayed from this browser that the server refused is retried on the draft it was typed on", async ({
+    page
+  }) => {
+    const fixture = await makeChat("summary-replay-retried")
+    const summaryId = fixture.top.id as never
+    const first = await admin((api) =>
+      api.SaveSummaryDraft({
+        summaryId,
+        draftId: null,
+        content: "A flood closed the road; Mira saved the ledger. Shared.",
+        expectedRowVersion: null,
+        expectedSession: null,
+        baseRevisionId: fixture.top.revisionId as never
+      })
+    )
+    let fail = true
+    const sent: Array<{ expectedRowVersion: number | null }> = []
+    await page.routeWebSocket(/\/rpc$/, (socket) => {
+      const upstream = socket.connectToServer()
+      socket.onMessage((data) => {
+        const request =
+          typeof data === "string" ? (JSON.parse(data) as { tag?: string; id?: string; payload?: never }) : null
+        if (request?.tag === "SaveSummaryDraft") {
+          sent.push(request.payload!)
+          if (fail) {
+            fail = false
+            const error = { _tag: "ServerError", message: "Synthetic transient failure" }
+            const exit = { _tag: "Failure", cause: [{ _tag: "Fail", error }] }
+            socket.send(JSON.stringify({ _tag: "Exit", requestId: request.id, exit }))
+            return
+          }
+        }
+        upstream.send(data)
+      })
+    })
+    await open(page, fixture)
+    // This browser kept text typed on the first save; another device then saved a small change.
+    const { id: me } = await admin((api) => api.Whoami())
+    const offline = `${first.content} offline A`
+    const copy = makeCopy(
+      me,
+      fixture.top.id,
+      "summary",
+      {
+        kind: "summary",
+        payload: {
+          summaryId,
+          draftId: first.id,
+          content: offline,
+          expectedRowVersion: first.rowVersion,
+          expectedSession: first.session,
+          baseRevisionId: fixture.top.revisionId as never
+        }
+      },
+      Date.now()
+    )
+    await page.evaluate(
+      (copy) =>
+        new Promise<void>((resolve) => {
+          const request = indexedDB.open("rp-editor-copies", 1)
+          request.onupgradeneeded = () => {
+            const store = request.result.createObjectStore("copies", { keyPath: "key" })
+            store.createIndex("userId", "userId")
+            store.createIndex("ref", ["userId", "refId"])
+          }
+          request.onsuccess = () => {
+            const db = request.result
+            const transaction = db.transaction("copies", "readwrite")
+            transaction.objectStore("copies").put(copy)
+            transaction.oncomplete = () => {
+              db.close()
+              resolve()
+            }
+          }
+        }),
+      copy
+    )
+    const elsewhere = `${first.content} other B`
+    await admin((api) =>
+      api.SaveSummaryDraft({
+        summaryId,
+        draftId: first.id,
+        content: elsewhere,
+        expectedRowVersion: first.rowVersion,
+        expectedSession: first.session,
+        baseRevisionId: fixture.top.revisionId as never
+      })
+    )
+    // The replay fails once: the box shows this browser's text; more is typed and saved.
+    const dialog = await editTop(page, fixture)
+    await expect(box(dialog)).toHaveValue(offline)
+    await box(dialog).fill(`${offline}!`)
+    await expect
+      .poll(async () => (await admin((api) => api.GetSummaryDraft({ summaryId })))?.content)
+      .toBe(`${offline}!`)
+    // Every attempt named the draft as this browser had it, not as the other device left it.
+    expect(sent.map((payload) => payload.expectedRowVersion)).toEqual([first.rowVersion, first.rowVersion])
+    await dialog.getByRole("button", { name: "Save revision" }).click()
+    await expect(box(dialog)).toHaveCount(0)
+    // The other device's text was one step back, and the revision sends it to the recovered texts.
+    const recovered = await admin((api) => api.ListRecoveredTexts({ limit: 100, before: null }))
+    expect(recovered.map((text) => text.content)).toContain(elsewhere)
+  })
 })

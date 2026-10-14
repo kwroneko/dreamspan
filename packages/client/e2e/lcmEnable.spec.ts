@@ -12,6 +12,7 @@ import { loginCookie, withCookie } from "./support/rpc.ts"
 import { ADMIN, serverPerFile, withAdmin } from "./support/server.ts"
 import { fixtureSql } from "../../server/test/support/lcmFixtures.ts"
 import { IMPORTED_SUMMARY, writeStFolder } from "./support/stFiles.ts"
+import { closePanel, openPanel } from "./support/panel.ts"
 
 const server = serverPerFile(withAdmin)
 // One server holds the imported chats, so the tests run in order in one worker.
@@ -69,7 +70,8 @@ test("import the folder", async ({ page }) => {
 const openChat = async (page: Page, title: string) => {
   await signIn(page)
   await page.goto(`${server().url}/chats`)
-  await page.getByRole("link", { name: title }).click()
+  // A row's link reads its name, then when it was last used and what was said last.
+  await page.getByRole("main").getByRole("list", { name: "Chats" }).getByRole("link", { name: title }).click()
   await expect(page.getByRole("heading", { name: title })).toBeVisible()
 }
 
@@ -88,8 +90,20 @@ for (const [name, viewport, chat] of [
     }) => {
       const before = provider.completions.length
       await openChat(page, chat)
-      // Summaries are off for an imported chat, and turning them on is one click away.
-      await expect(page.getByRole("status").filter({ hasText: "aren't summarized" })).toBeVisible()
+      // Summaries are off for an imported chat, and turning them on is one click away, on one line.
+      const off = page.getByRole("status").filter({ hasText: "summaries are off" })
+      await expect(off).toBeVisible()
+      const label = await off
+        .locator("span")
+        .first()
+        .evaluate((span) => ({
+          height: span.getBoundingClientRect().height,
+          line: Number.parseFloat(getComputedStyle(span).lineHeight),
+          cut: span.scrollWidth > span.clientWidth
+        }))
+      // One line, and the words shown fit it whole.
+      expect(label.height).toBeLessThanOrEqual(label.line + 1)
+      expect(label.cut).toBe(false)
       await page.getByRole("button", { name: "Enable summaries", exact: true }).click()
 
       const dialog = page.getByRole("dialog", { name: "Summarize older messages" })
@@ -114,11 +128,9 @@ for (const [name, viewport, chat] of [
       await dialog.getByRole("button", { name: "Enable summaries" }).click()
       await expect(dialog).toHaveCount(0)
       // The summary stands in for the run: one summary, and nothing has been asked of the model.
-      await expect(page.getByRole("button", { name: "Summaries", exact: true })).toBeVisible()
       expect(provider.completions.length).toBe(before)
 
-      await page.getByRole("button", { name: "Summaries", exact: true }).click()
-      const summaries = page.getByRole("dialog", { name: "Summaries" })
+      const summaries = await openPanel(page, "Summaries")
       await expect(summaries.getByTestId("summary-panel-heading")).toContainText("Older messages: 1 summary")
       await expect(summaries.getByText("Imported from SillyTavern")).toBeVisible()
       await expect(summaries.getByText(IMPORTED_SUMMARY)).toBeVisible()
@@ -134,8 +146,8 @@ for (const [name, viewport, chat] of [
       expect(provider.completions.length).toBeGreaterThan(before)
       await expect(summaries.getByRole("list", { name: "Summaries in use" })).toBeVisible()
       // The imported summary is still there, in its own note, and the run is in the context.
-      await summaries.getByRole("button", { name: "Done" }).click()
-      await expect(page.getByRole("button", { name: "Summaries", exact: true })).toBeVisible()
+      await closePanel(page)
+      await expect(page.getByRole("tablist", { name: "Chat panel" })).toHaveCount(0)
     })
   })
 }
@@ -143,20 +155,18 @@ for (const [name, viewport, chat] of [
 test("starting over shows the run again and summarizes it with the rest", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 })
   await openChat(page, "Bob - scratch")
-  await page.getByRole("button", { name: "Settings" }).click()
-  const settings = page.getByRole("dialog", { name: "Chat settings" })
+  const settings = await openPanel(page, "This chat")
   await settings.getByRole("switch", { name: /Summarize older messages/ }).click()
   const dialog = page.getByRole("dialog", { name: "Summarize older messages" })
   await dialog.getByRole("radio", { name: "Summarize from scratch" }).click()
   await dialog.getByRole("button", { name: "Enable summaries" }).click()
   await expect(dialog).toHaveCount(0)
-  await settings.getByRole("button", { name: "Done" }).click()
+  await expect(settings.getByRole("switch", { name: /Summarize older messages/ })).toBeChecked()
   // No summary stands in for anything yet, and the imported one is still in its note.
-  await page.getByRole("button", { name: "Summaries", exact: true }).click()
-  await expect(page.getByTestId("summary-panel-heading")).toContainText("none summarized yet")
-  await page.getByRole("dialog", { name: "Summaries" }).getByRole("button", { name: "Done" }).click()
-  await page.getByRole("button", { name: "Notes" }).click()
-  await expect(page.getByRole("dialog", { name: /Notes/ }).getByText("summary").first()).toBeVisible()
+  const summaries = await openPanel(page, "Summaries")
+  await expect(summaries.getByTestId("summary-panel-heading")).toContainText("none summarized yet")
+  const notes = await openPanel(page, "Notes")
+  await expect(notes.getByText("summary").first()).toBeVisible()
 })
 
 test("a higher estimate stays in the dialog until the new figures are confirmed", async ({ page }) => {

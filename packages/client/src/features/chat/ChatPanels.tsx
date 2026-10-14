@@ -1,397 +1,255 @@
-// The chat's side panels: who's in it (DESIGN §2.3, §3.5) and its settings (DATA-MODEL
-// §5.3). Every change is a state event at the leaf shown, so it applies from there on, on
-// this branch. The context assembler reads the settings; this only writes them.
-import type { CastCard, EntityId } from "@rp/shared/chat.ts"
-import type { CastChange } from "@rp/shared/chatSetupApi.ts"
-import type { LibraryRef } from "@rp/shared/library.ts"
-import { GenerationDefaults } from "@rp/shared/generation.ts"
-import type { Connection, Model } from "@rp/shared/providers.ts"
-import { Effect } from "effect"
-import { useEffect, useState, useSyncExternalStore } from "react"
-import { useAction } from "../../actions.tsx"
-import type { AppError } from "../../errors.ts"
-import { Avatar } from "../../ui/Avatar.tsx"
+// The chat's side panel (DESIGN §10.1): who's here, what the chat sends with, its lorebooks,
+// notes and summaries, beside the messages as ST's panels are, so the chat stays readable and
+// usable while it's open. On a phone it's a sheet over the chat. The open tab is in the URL
+// (`?panel=`), and this browser remembers it, for each user, for the next chat opened on a
+// wide screen.
+import type { SlotId } from "@rp/shared/chat.ts"
+import { Component, lazy, type ReactNode, Suspense, useEffect, useState, useSyncExternalStore } from "react"
 import { Button } from "../../ui/Button.tsx"
-import { Checkbox, RadioGroup, Switch } from "../../ui/Choice.tsx"
-import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
-import { Field, Textarea } from "../../ui/Field.tsx"
-import { Select } from "../../ui/Select.tsx"
-import { Badge } from "../../ui/Surface.tsx"
-import { useCast } from "./cast.ts"
-import { EnableLcmDialog } from "./EnableLcmDialog.tsx"
-import { modelValue, parseModelValue } from "./modelChoices.ts"
-import type { ChatSession } from "./session.ts"
+import { Sheet } from "../../ui/Sheet.tsx"
+import { Loading } from "../../ui/Spinner.tsx"
+import { Tabs } from "../../ui/Tabs.tsx"
+import { IconButton } from "../../ui/Tooltip.tsx"
+import { CastTab } from "./CastTab.tsx"
+import { LorebooksTab } from "./LorebooksTab.tsx"
+import type { ChatSession, ChatView } from "./session.ts"
+import { SummaryPanel } from "./SummaryPanel.tsx"
+import { ThisChatTab } from "./ThisChatTab.tsx"
 
-function useChange(session: ChatSession) {
-  const [error, setError] = useState<AppError | null>(null)
-  const change = async (next: CastChange) => {
-    const outcome = await session.changeCast(next)
-    setError(outcome.ok ? null : outcome.error)
+// Loaded with the panel, not with the chat: it carries the note editor. Fetched as the panel
+// opens, so a tab first shown while the server can't be reached still has it.
+const loadNotes = () => import("./ChatNotes.tsx").then((module) => ({ default: module.NotesTab }))
+let NotesTab = lazy(loadNotes)
+
+/** A tab's code that couldn't be fetched says so in the tab, the chat and other tabs unharmed. */
+class NotLoaded extends Component<{ children: ReactNode }, { failed: boolean }> {
+  override state = { failed: false }
+  static getDerivedStateFromError() {
+    return { failed: true }
   }
-  return { change, error }
+  override render() {
+    if (!this.state.failed) return this.props.children
+    return (
+      <div className="flex flex-col items-start gap-2">
+        <p role="alert" className="text-sm text-danger">
+          The notes couldn't be loaded: the server can't be reached.
+        </p>
+        <Button
+          onClick={() => {
+            NotesTab = lazy(loadNotes)
+            this.setState({ failed: false })
+          }}
+        >
+          Try again
+        </Button>
+      </div>
+    )
+  }
 }
 
-function Problem({ error }: { error: AppError | null }) {
-  return error ? (
-    <p role="alert" className="text-sm text-danger">
-      {error.message}
-    </p>
-  ) : null
+const PANEL_TABS = [
+  { value: "cast", label: "Cast", icon: "people" },
+  { value: "chat", label: "This chat", icon: "sliders" },
+  { value: "lorebooks", label: "Lorebooks", icon: "book" },
+  { value: "notes", label: "Notes", icon: "note" },
+  { value: "summaries", label: "Summaries", icon: "summary" }
+] as const
+
+export type PanelTab = (typeof PANEL_TABS)[number]["value"]
+
+export const isPanelTab = (value: unknown): value is PanelTab => PANEL_TABS.some((tab) => tab.value === value)
+
+// --- Whether the panel is open and at which tab: each user's choice in this browser, kept in
+// its storage under keys naming the user, so another account signing in here has its own.
+
+/** The tab open, absent while the panel is closed. */
+const panelKey = (userId: string) => `rp.chatPanel.${userId}`
+/** The tab last open, closed since or not: where the panel opens on a phone. */
+const tabKey = (userId: string) => `rp.chatPanelTab.${userId}`
+
+const read = (key: string): PanelTab | null => {
+  try {
+    const value = localStorage.getItem(key)
+    return isPanelTab(value) ? value : null
+  } catch {
+    return null
+  }
 }
 
-/** Members: present or absent, played by the user or not, removed; and anyone added. */
-export function CastDialog({
-  session,
-  open,
-  onOpenChange
-}: {
-  session: ChatSession
-  open: boolean
-  onOpenChange: (open: boolean) => void
-}) {
-  const { cast, cards } = useCast()
-  const { change, error } = useChange(session)
-  const action = useAction()
-  const [all, setAll] = useState<ReadonlyArray<CastCard>>([])
-  useEffect(() => {
-    if (!open) return
-    void action.run((client) => client("ListCards", undefined)).then((result) => result.ok && setAll(result.value))
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per opening
-  }, [open])
-  const participants = cast?.participants ?? []
-  const playedByMe = cast?.playedByMe ?? []
-  const addable = all.filter((card) => !participants.includes(card.entityId))
-  const togglePlayed = (id: EntityId, on: boolean) =>
-    change({ _tag: "PlayedByMe", entityIds: on ? [...playedByMe, id] : playedByMe.filter((x) => x !== id) })
-  return (
-    <Dialog
-      open={open}
-      onOpenChange={onOpenChange}
-      title="Who's here"
-      description="Changes apply from the latest message on, on this branch."
-    >
-      {participants.length === 0 ? (
-        <p className="text-sm text-muted">No one has joined this chat.</p>
-      ) : (
-        <ul aria-label="Members" className="flex flex-col divide-y divide-border">
-          {participants.map((id) => {
-            const card = cards.get(id)
-            const name = card?.name ?? "Unknown card"
-            return (
-              <li key={id} className="flex flex-col gap-2 py-3 first:pt-0 last:pb-0">
-                <div className="flex items-center gap-2">
-                  <Avatar id={id} name={name} />
-                  <span className="min-w-0 flex-1 truncate font-medium">{name}</span>
-                  {card?.persona && <Badge>persona</Badge>}
-                  <Button
-                    variant="ghost"
-                    aria-label={`Remove ${name}`}
-                    onClick={() => void change({ _tag: "Leave", entityId: id })}
-                  >
-                    Remove
-                  </Button>
-                </div>
-                <div className="flex flex-wrap gap-x-6 gap-y-2 pl-10">
-                  <Switch
-                    checked={!cast!.absent.includes(id)}
-                    onCheckedChange={(present) => void change({ _tag: "Presence", entityId: id, present })}
-                  >
-                    Present
-                  </Switch>
-                  <Checkbox checked={playedByMe.includes(id)} onCheckedChange={(on) => void togglePlayed(id, on)}>
-                    I play them
-                  </Checkbox>
-                </div>
-              </li>
-            )
-          })}
-        </ul>
-      )}
-      {addable.length > 0 && (
-        <Field label="Add someone">
-          <Select
-            items={addable.map((card) => ({
-              value: card.entityId,
-              label: card.label === card.name ? card.name : `${card.name} (${card.label})`
-            }))}
-            value={null}
-            placeholder="Pick a card"
-            onValueChange={(entityId) => void change({ _tag: "Join", entityId })}
-          />
-        </Field>
-      )}
-      <Problem error={error ?? action.error} />
-      <DialogActions>
-        <Button onClick={() => onOpenChange(false)}>Done</Button>
-      </DialogActions>
-    </Dialog>
-  )
+/** The tab open when the user last used the panel, or null when they last closed it. */
+export const rememberedPanel = (userId: string) => read(panelKey(userId))
+
+export const rememberPanel = (userId: string, tab: PanelTab | null) => {
+  try {
+    if (tab === null) localStorage.removeItem(panelKey(userId))
+    else {
+      localStorage.setItem(panelKey(userId), tab)
+      localStorage.setItem(tabKey(userId), tab)
+    }
+  } catch {
+    // Storage off: the URL still carries the tab.
+  }
 }
+
+// --- Wide enough for the panel beside the chat (Tailwind's `lg`, where the sidebar shows too).
+
+const WIDE = "(min-width: 1024px)"
+const subscribeWide = (listener: () => void) => {
+  const query = matchMedia(WIDE)
+  query.addEventListener("change", listener)
+  return () => query.removeEventListener("change", listener)
+}
+export const useWide = () => useSyncExternalStore(subscribeWide, () => matchMedia(WIDE).matches)
 
 /**
- * LCM for the whole chat (DESIGN §8): on for new chats, off for imported ones. Turning it on
- * for a chat with messages asks how to start and what it costs first (spec/LCM.md §2.7, §2.11).
+ * The header's buttons for the panel. On a wide screen with the panel closed, one per tab;
+ * open, its own tabs take over and the header keeps one button to hide it. On a phone, one
+ * button opens the sheet at the tab last used.
  */
-function Summaries({ session }: { session: ChatSession }) {
-  const view = useSyncExternalStore(session.subscribe, session.snapshot)
-  const [error, setError] = useState<AppError | null>(null)
-  const [enabling, setEnabling] = useState(false)
-  const enabled = view.lcm?.enabled ?? false
-  return (
-    <div className="flex flex-col gap-1">
-      <Switch
-        checked={enabled}
-        onCheckedChange={(on) => {
-          if (on && view.leafSlotId !== null) return setEnabling(true)
-          void session
-            .call((client) => client("SetLcmEnabled", { chatId: session.id, enabled: on }))
-            .then((result) => setError(result.ok ? null : result.error))
-        }}
-        description="Older messages are summarized so the chat can go on. For the whole chat, not from here on. Nothing is generated until your next reply."
+export function PanelToggles({
+  userId,
+  open,
+  wide,
+  onToggle
+}: {
+  userId: string
+  open: PanelTab | null
+  wide: boolean
+  /** Opens the panel at a tab, or closes it when that tab is the one open. */
+  onToggle: (tab: PanelTab) => void
+}) {
+  if (!wide || open !== null)
+    return (
+      <Button
+        variant="ghost"
+        aria-expanded={open !== null}
+        title={
+          open === null ? "Open the chat panel: cast, settings, lorebooks, notes and summaries" : "Hide the chat panel"
+        }
+        className="h-8 px-2.5"
+        onClick={() => onToggle(open ?? read(tabKey(userId)) ?? "chat")}
       >
-        Summarize older messages
-      </Switch>
-      {enabling && <EnableLcmDialog session={session} onOpenChange={setEnabling} />}
-      <Problem error={error} />
+        {open === null ? "Chat panel" : "Hide panel"}
+      </Button>
+    )
+  return (
+    // Icons, as ST's panel buttons are, so the header keeps room for the chat's name.
+    <div role="group" aria-label="Chat panel" className="flex shrink-0 gap-0.5">
+      {PANEL_TABS.map((tab) => (
+        <IconButton key={tab.value} label={tab.label} icon={tab.icon} onClick={() => onToggle(tab.value)} />
+      ))}
     </div>
   )
 }
 
-const NONE = "none"
-
-/**
- * The two models LCM can use besides the summarizer, for all of the user's chats: a judge that
- * reads replies and summaries and says whether they are refusals, and a fallback summarizer
- * tried once when the summarizer's retries run out. Both are optional.
- */
-function DecisionModels({ models, open }: { models: Choices["models"]; open: boolean }) {
-  const action = useAction()
-  const [defaults, setDefaults] = useState<GenerationDefaults | null>(null)
-  const [tail, setTail] = useState("")
-  useEffect(() => {
-    if (!open) return
-    void action
-      .run((client) => client("GetGenerationDefaults", undefined))
-      .then((result) => {
-        if (result.ok) {
-          setDefaults(result.value)
-          setTail(result.value.lcm?.tail ?? "")
-        }
-      })
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per opening
-  }, [open])
-  const items = [{ value: NONE, label: "None" }, ...models]
-  const save = (next: GenerationDefaults) =>
-    void action
-      .run((client) => client("SetGenerationDefaults", { defaults: next }))
-      .then((result) => {
-        if (result.ok) setDefaults(result.value)
-      })
-  const judge = defaults?.judge ? modelValue(defaults.judge.connection, defaults.judge.model) : NONE
-  const fallback = defaults?.lcm?.fallback
-    ? modelValue(defaults.lcm.fallback.connection, defaults.lcm.fallback.model)
-    : NONE
-  return (
-    <section aria-label="Models for summaries" className="flex flex-col gap-3">
-      <Field
-        label="Refusal judge"
-        description="A model that reads replies and summaries and says whether they are refusals. Without one, only the provider's own refusals are caught. For all your chats."
-      >
-        <Select
-          items={items}
-          value={defaults ? judge : null}
-          placeholder="None"
-          onValueChange={(value) =>
-            defaults &&
-            save(
-              new GenerationDefaults({
-                ...defaults,
-                judge: value === NONE ? null : parseModelValue(value)
-              })
-            )
-          }
-        />
-      </Field>
-      <Field
-        label="Fallback summarizer"
-        description="Tried once when a summary keeps failing on its own model. For all your chats."
-      >
-        <Select
-          items={items}
-          value={defaults ? fallback : null}
-          placeholder="None"
-          onValueChange={(value) => {
-            if (!defaults) return
-            const { fallback: _gone, ...rest } = defaults.lcm ?? {}
-            save(
-              new GenerationDefaults({
-                ...defaults,
-                lcm: value === NONE ? rest : { ...rest, fallback: parseModelValue(value) }
-              })
-            )
-          }}
-        />
-      </Field>
-      <Field
-        label="Summarization instruction"
-        description="Your default for all chats. A chat's own instruction takes precedence. Use {{words}} for the summary's word limit; leave empty for the built-in instruction."
-      >
-        <Textarea value={tail} onChange={(event) => setTail(event.target.value)} rows={4} disabled={!defaults} />
-      </Field>
-      <Button
-        disabled={!defaults || action.pending}
-        onClick={() => {
-          if (!defaults) return
-          const { tail: _gone, ...rest } = defaults.lcm ?? {}
-          save(new GenerationDefaults({ ...defaults, lcm: tail ? { ...rest, tail } : rest }))
-        }}
-      >
-        Save summarization instruction
-      </Button>
-      <Problem error={action.error} />
-    </section>
-  )
-}
-
-interface Choices {
-  readonly models: ReadonlyArray<{ readonly value: string; readonly label: string }>
-  readonly presets: ReadonlyArray<LibraryRef>
-  readonly lorebooks: ReadonlyArray<LibraryRef>
-}
-
-/** Model, preset, card layout and role projection for the chat (DESIGN §5.2, §5.4). */
-export function SettingsDialog({
+function TabContent({
+  tab,
+  active,
   session,
-  open,
-  onOpenChange
+  view,
+  focus,
+  onJump,
+  onEnable
 }: {
+  tab: PanelTab
+  /** The tab shown: one kept mounted while another is reads its lists again when shown. */
+  active: boolean
   session: ChatSession
-  open: boolean
-  onOpenChange: (open: boolean) => void
+  view: ChatView
+  focus: string | null
+  onJump: (slot: SlotId) => void
+  onEnable: () => void
 }) {
-  const { cast } = useCast()
-  const { change, error } = useChange(session)
-  const action = useAction()
-  const [choices, setChoices] = useState<Choices | null>(null)
-  useEffect(() => {
-    if (!open) return
-    void action
-      .run((client) =>
-        Effect.gen(function* () {
-          const connections: ReadonlyArray<Connection> = yield* client("ListConnections", undefined)
-          const models = yield* Effect.forEach(connections, (connection) =>
-            Effect.map(
-              client("ListModels", { connectionId: connection.id, includeHidden: false }),
-              (list: ReadonlyArray<Model>) =>
-                list.map((model) => ({
-                  value: modelValue(connection.id, model.id),
-                  label: `${connection.name} · ${model.key}`
-                }))
-            )
-          )
-          const presets = yield* client("ListLibrary", { kind: "preset" })
-          const lorebooks = yield* client("ListLibrary", { kind: "lorebook" })
-          return { models: models.flat(), presets, lorebooks }
-        })
+  switch (tab) {
+    case "cast":
+      return <CastTab session={session} />
+    case "chat":
+      return <ThisChatTab session={session} active={active} />
+    case "lorebooks":
+      return <LorebooksTab session={session} active={active} />
+    case "notes":
+      return (
+        <NotLoaded>
+          <Suspense fallback={<Loading label="Loading the notes…" />}>
+            <NotesTab session={session} leafSlotId={view.leafSlotId} />
+          </Suspense>
+        </NotLoaded>
       )
-      .then((result) => result.ok && setChoices(result.value))
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per opening
-  }, [open])
-  const model = cast?.model ? modelValue(cast.model.connection, cast.model.model) : null
+    case "summaries":
+      return view.lcm === null ? (
+        <Loading label="Loading the summaries…" />
+      ) : (
+        <SummaryPanel session={session} lcm={view.lcm} focus={focus} onJump={onJump} onEnable={onEnable} />
+      )
+  }
+}
+
+/** The panel: beside the chat on a wide screen, a sheet over it on a phone. */
+export function ChatSidePanel({
+  tab,
+  wide,
+  title,
+  onTab,
+  onClose,
+  ...content
+}: {
+  tab: PanelTab
+  wide: boolean
+  /** The chat's title, so a phone's sheet says which chat it's about. */
+  title: string
+  onTab: (tab: PanelTab) => void
+  onClose: () => void
+  session: ChatSession
+  view: ChatView
+  focus: string | null
+  onJump: (slot: SlotId) => void
+  onEnable: () => void
+}) {
+  // A tab mounts when first shown and stays mounted, hidden, while the panel is open, so
+  // switching tabs never ends what's in one: a summary's edit with its unsaved text, say.
+  const [visited, setVisited] = useState<ReadonlySet<PanelTab>>(() => new Set([tab]))
+  useEffect(() => {
+    void loadNotes().catch(() => undefined)
+  }, [])
+  if (!visited.has(tab)) setVisited(new Set([...visited, tab]))
+  const tabs = PANEL_TABS.map((t) => ({
+    value: t.value,
+    label: t.label,
+    panel:
+      visited.has(t.value) || t.value === tab ? (
+        <TabContent tab={t.value} active={t.value === tab} {...content} />
+      ) : null
+  }))
+  if (!wide)
+    return (
+      <Sheet open onOpenChange={(open) => !open && onClose()} title={title} closeLabel="Close">
+        <Tabs tabs={tabs} value={tab} onValueChange={onTab} label="Chat panel" fill keepMounted />
+      </Sheet>
+    )
   return (
-    <Dialog
-      open={open}
-      onOpenChange={onOpenChange}
-      title="Chat settings"
-      description="Changes apply from the latest message on, on this branch."
+    <aside
+      aria-label="Chat panel"
+      className="flex w-[22.5rem] shrink-0 flex-col border-l border-border bg-surface xl:w-[26rem]"
     >
-      <Field
-        label="Model"
-        description={choices?.models.length === 0 ? "Add a connection with models first." : undefined}
-      >
-        <Select
-          items={choices?.models ?? []}
-          value={model}
-          placeholder="The default model"
-          onValueChange={(value) => {
-            const [connection, id] = value.split(" ") as [Connection["id"], Model["id"]]
-            void change({ _tag: "Model", connection, model: id })
-          }}
-        />
-      </Field>
-      <Field label="Preset" description={choices?.presets.length === 0 ? "Import a preset first." : undefined}>
-        <Select
-          items={(choices?.presets ?? []).map((preset) => ({ value: preset.id, label: preset.label }))}
-          value={cast?.preset ?? null}
-          placeholder="The default preset"
-          onValueChange={(ref) => void change({ _tag: "Preset", ref })}
-        />
-      </Field>
-      <Summaries session={session} />
-      <DecisionModels models={choices?.models ?? []} open={open} />
-      <section aria-label="Lorebooks" className="flex flex-col gap-2">
-        <h3 className="text-sm font-medium">Lorebooks</h3>
-        {(cast?.cards ?? [])
-          .filter((card) => card.lorebook && !card.inBin && cast?.participants.includes(card.entityId))
-          .map((card) => (
-            <Switch
-              key={card.entityId}
-              checked={!cast?.cardLorebooksOff.includes(card.entityId)}
-              onCheckedChange={(on) => void change({ _tag: "CardLorebook", entityId: card.entityId, on })}
-            >
-              {card.name}'s own lorebook
-            </Switch>
-          ))}
-        {choices?.lorebooks.length === 0 && (
-          <p className="text-sm text-muted">Import a lorebook in the library first.</p>
-        )}
-        {choices?.lorebooks.map((book) => (
-          <Switch
-            key={book.id}
-            checked={cast?.lorebooks.includes(book.id) ?? false}
-            onCheckedChange={(active) => void change({ _tag: "Lorebook", ref: book.id, active })}
+      <Tabs
+        tabs={tabs}
+        value={tab}
+        onValueChange={onTab}
+        label="Chat panel"
+        fill
+        keepMounted
+        end={
+          <Button
+            variant="ghost"
+            aria-label="Close the panel"
+            title="Close the panel"
+            className="mb-1 h-8 w-8 shrink-0 px-0 text-lg leading-none"
+            onClick={onClose}
           >
-            {book.label}
-          </Switch>
-        ))}
-      </section>
-      <div className="flex flex-col gap-2">
-        <span id="layout-label" className="text-sm font-medium">
-          Card layout
-        </span>
-        <RadioGroup
-          aria-labelledby="layout-label"
-          value={cast?.layoutCards ?? "concat"}
-          onValueChange={(layout) => void change({ _tag: "Layout", layout })}
-          options={[
-            { value: "concat", label: "All cards together", description: "Each card in its own labelled block." },
-            {
-              value: "swap_tail",
-              label: "Speaker's card last",
-              description: "The active card goes at the end of the context."
-            }
-          ]}
-        />
-      </div>
-      <div className="flex flex-col gap-2">
-        <span id="roles-label" className="text-sm font-medium">
-          Roles
-        </span>
-        <RadioGroup
-          aria-labelledby="roles-label"
-          value={cast?.rolesProjection ?? "by_writer"}
-          onValueChange={(projection) => void change({ _tag: "Roles", projection })}
-          options={[
-            { value: "by_writer", label: "By writer", description: "Yours as user, the model's as assistant." },
-            { value: "alternate", label: "Alternating", description: "Strictly alternating by position." },
-            { value: "perspective", label: "By perspective", description: "The speaker's own turns as assistant." }
-          ]}
-        />
-      </div>
-      <Problem error={error ?? action.error} />
-      <DialogActions>
-        <Button onClick={() => onOpenChange(false)}>Done</Button>
-      </DialogActions>
-    </Dialog>
+            <span aria-hidden="true">×</span>
+          </Button>
+        }
+      />
+    </aside>
   )
 }

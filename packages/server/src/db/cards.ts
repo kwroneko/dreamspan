@@ -40,6 +40,11 @@ const parse = (row: CardRow): CardText => {
   const all = [text(doc.first_mes), ...alternates]
   const greetingIndexes = all.flatMap((greeting, index) => (greeting.trim() === "" ? [] : [index]))
   const name = text(doc.name).trim()
+  const book =
+    typeof doc.character_book === "object" && doc.character_book !== null
+      ? (doc.character_book as Record<string, unknown>)
+      : null
+  const bookName = text(book?.name).trim()
   return {
     card: new CastCard({
       entityId: row.entity_id as EntityId,
@@ -47,7 +52,10 @@ const parse = (row: CardRow): CardText => {
       label: row.label,
       persona: row.persona === 1,
       inBin: row.in_bin === 1,
-      lorebook: typeof doc.character_book === "object" && doc.character_book !== null
+      lorebook: book !== null,
+      ...(bookName === "" ? {} : { lorebookName: bookName }),
+      ...(book === null ? {} : { lorebookEntries: Array.isArray(book.entries) ? book.entries.length : 0 }),
+      avatarMediaId: typeof doc.avatar_media_id === "string" ? doc.avatar_media_id : null
     }),
     greetings: greetingIndexes.map((index) => all[index]!),
     greetingIndexes,
@@ -77,3 +85,24 @@ export const loadCards = (sql: SqlClient.SqlClient, userId: UserId, ids: Readonl
         WHERE e.owner_user_id = ${userId} AND e.kind = 'card' AND e.purged_at IS NULL
           AND ${ids === null ? sql`e.deleted_at IS NULL AND e.archived_at IS NULL` : sql.in("e.id", ids)}
         ORDER BY r.label COLLATE NOCASE, e.id`.pipe(Effect.map((rows) => rows.map(parse)))
+
+/**
+ * `card` as a chat uses it: the name, avatar and lorebook flag of `revisionId` (the version
+ * the chat reads, `cardInChat` in library.ts); its label and persona mark stay the library's.
+ */
+export const castCardAt = (sql: SqlClient.SqlClient, card: CastCard, revisionId: string) =>
+  sql<{ name: unknown; avatar: unknown; book: string | null }>`
+    SELECT json_extract(doc_json, '$.name') AS name, json_extract(doc_json, '$.avatar_media_id') AS avatar,
+      json_type(doc_json, '$.character_book') AS book
+    FROM entity_revisions WHERE id = ${revisionId}`.pipe(
+    Effect.map(([row]) => {
+      if (!row) return card
+      const name = text(row.name).trim()
+      return new CastCard({
+        ...card,
+        name: name === "" ? card.label : name,
+        avatarMediaId: typeof row.avatar === "string" ? row.avatar : null,
+        lorebook: row.book === "object"
+      })
+    })
+  )

@@ -184,7 +184,7 @@ export const makeWriteHandlers = (bin: Bin) =>
 
       // --- Chats
 
-      AddSelectedVersion: ({ userId, slotId, version, expectedRowVersion }) =>
+      AddSelectedVersion: ({ userId, slotId, version, expectedRowVersion, commitDraft }) =>
         Effect.gen(function* () {
           const slot = yield* ownedSlot(userId, slotId)
           if (slot.row_version !== expectedRowVersion) {
@@ -202,10 +202,18 @@ export const makeWriteHandlers = (bin: Bin) =>
           const row = yield* insertVersion(slotId, next!.n, version, Date.now())
           yield* recordHistoryReduction(sql, slotId, row.content)
           yield* sql`UPDATE slots SET selected_version_id = ${row.id}, row_version = row_version + 1 WHERE id = ${slotId}`
+          // An edit's text was typed into the edit of its source; a version of one's own, into the slot's.
+          yield* drafts.commit(
+            userId,
+            commitDraft ?? null,
+            version.sourceVersionId
+              ? { targetKind: "version_edit", targetId: version.sourceVersionId, content: row.content }
+              : { targetKind: "scratchpad", targetId: slotId, content: row.content }
+          )
           return { chatId: slot.chat_id as ChatId, version: toVersion(row) }
         }).pipe(transaction("AddSelectedVersion")),
 
-      AmendVersion: ({ userId, versionId, content, expectedRowVersion }) =>
+      AmendVersion: ({ userId, versionId, content, expectedRowVersion, commitDraft }) =>
         Effect.gen(function* () {
           const row = yield* ownedVersion(userId, versionId, true)
           if (row.writer !== "human") return yield* new NotAmendable({ versionId })
@@ -218,6 +226,11 @@ export const makeWriteHandlers = (bin: Bin) =>
               actual: rowVersion
             })
           }
+          yield* drafts.commit(userId, commitDraft ?? null, {
+            targetKind: "version_edit",
+            targetId: versionId,
+            content
+          })
           if (content === row.content) return toVersion(row)
           // The trigger keeps the previous text in version_history (DESIGN §3.1).
           yield* recordHistoryReduction(sql, row.slot_id, content, versionId)

@@ -25,7 +25,7 @@ import {
 // NotFound, so their existence doesn't leak.
 import { Chat, ChatId, ChatKind, EntityId, NewVersion, PathEntry, SlotId, Version, VersionId } from "@rp/shared/chat.ts"
 import { ContextIssue, VersionError, VersionStatus } from "@rp/shared/chat.ts"
-import { NotAmendable, PathRange, PathWindow } from "@rp/shared/chatApi.ts"
+import { ChatCursor, ChatSearch, NotAmendable, PathRange, PathWindow } from "@rp/shared/chatApi.ts"
 import { User, UserAccount, UserId, UserRole } from "@rp/shared/domain.ts"
 import { BinChanged, BinItem, RecoveredText } from "@rp/shared/bin.ts"
 import { Draft, DraftKey, DraftRestore, DraftState } from "@rp/shared/drafts.ts"
@@ -56,7 +56,7 @@ import {
   ProviderKind,
   ProxyMode
 } from "@rp/shared/providers.ts"
-import { GenerationDefaults } from "@rp/shared/generation.ts"
+import { GenerationDefaults, GenerationDefaultsChange } from "@rp/shared/generation.ts"
 import { NextContext, RunContext } from "@rp/shared/inspectorApi.ts"
 import { FoldableEvent, StateEventData } from "@rp/shared/state.ts"
 import {
@@ -71,8 +71,8 @@ import {
 } from "@rp/shared/usage.ts"
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
-import { CastCard, FrozenMacros, QueuedMessage } from "@rp/shared/chat.ts"
-import { CardForChat, FirstTurn } from "@rp/shared/chatSetupApi.ts"
+import { CastCard, ChatSummary, FrozenMacros, QueuedMessage } from "@rp/shared/chat.ts"
+import { CardForChat, CardOverrideOpened, CardUsage, ChatCard, FirstTurn } from "@rp/shared/chatSetupApi.ts"
 import { AssemblyFailed } from "../assembler/types.ts"
 
 const StorageErrorReason = Schema.Literals(["busy", "constraint", "corrupt", "other"])
@@ -115,6 +115,11 @@ export class RefChange extends Schema.Class<RefChange>("RefChange")({
 
 /** What merging a ref did, and the change that flowed on from it. */
 const MergeAndFlow = Schema.Struct({ outcome: MergeOutcome, change: RefChange })
+
+/** A chat's `card.binding` for one card where it's read (the state fold's), null for none. */
+const CardBinding = Schema.Struct({ ref: Schema.NullOr(Schema.String), revision: Schema.NullOr(Schema.String) })
+/** Every card's binding at a position, by entity id. */
+const CardBindings = Schema.Record(Schema.String, CardBinding)
 
 export class DraftTooLarge extends Schema.TaggedError<DraftTooLarge>()("DraftTooLarge", {
   length: Schema.Int,
@@ -728,6 +733,25 @@ export class WriteOps extends RpcGroup.make(
     success: LibraryRef,
     error: Schema.Union([NotFound, RefOperationRefused, StorageError])
   }),
+  /**
+   * The chat's own version of a card (DESIGN §4: "only in this chat"): its existing
+   * override, or a new one started from the version the chat uses after `slotId`, which
+   * `binding` (the chat's `card.binding` there) picks as the context assembler does: a bound
+   * revision or ref, else the card's library entry. Where `binding` names another version,
+   * the override is bound instead from `slotId` on (a `card.binding` event), so the
+   * assembler reads it. Another user's chat, slot or card, or one in the bin, is NotFound.
+   */
+  Rpc.make("OpenCardOverride", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      slotId: Schema.NullOr(SlotId),
+      entityId: EntityId,
+      binding: Schema.NullOr(CardBinding)
+    },
+    success: CardOverrideOpened,
+    error: Schema.Union([NotFound, StorageError])
+  }),
   /** Turns a chat override into a library variant (DESIGN §4). */
   Rpc.make("PromoteOverride", {
     payload: {
@@ -1037,13 +1061,31 @@ export class WriteOps extends RpcGroup.make(
    * saw: a swipe, an edit saved as a new version, or the user's own version.
    */
   Rpc.make("AddSelectedVersion", {
-    payload: { userId: UserId, slotId: SlotId, version: NewVersion, expectedRowVersion: Schema.Int },
+    payload: {
+      userId: UserId,
+      slotId: SlotId,
+      version: NewVersion,
+      expectedRowVersion: Schema.Int,
+      /**
+       * The draft its text was typed into: an edit's (`version_edit`, its source version) or
+       * a version the user wrote (`scratchpad`, the slot), committed with it if it still
+       * holds that text.
+       */
+      commitDraft: Schema.optionalKey(CommitDraft)
+    },
     success: Schema.Struct({ chatId: ChatId, version: Version }),
     error: Schema.Union([NotFound, StaleWrite, StorageError])
   }),
   /** Changes a finished user-written version in place; the trigger keeps the earlier text. */
   Rpc.make("AmendVersion", {
-    payload: { userId: UserId, versionId: VersionId, content: Schema.String, expectedRowVersion: Schema.Int },
+    payload: {
+      userId: UserId,
+      versionId: VersionId,
+      content: Schema.String,
+      expectedRowVersion: Schema.Int,
+      /** The edit's draft (`version_edit`, this version), committed with it if it still holds that text. */
+      commitDraft: Schema.optionalKey(CommitDraft)
+    },
     success: Version,
     error: Schema.Union([NotFound, StaleWrite, NotAmendable, StorageError])
   }),
@@ -1440,6 +1482,12 @@ export class WriteOps extends RpcGroup.make(
     success: GenerationDefaults,
     error: Schema.Union([NotFound, StorageError])
   }),
+  /** Only the defaults named, merged into the stored ones in the same transaction. */
+  Rpc.make("ChangeGenerationDefaults", {
+    payload: { userId: UserId, change: GenerationDefaultsChange },
+    success: GenerationDefaults,
+    error: Schema.Union([NotFound, StorageError])
+  }),
   // --- Branches (DESIGN §3.2).
   /**
    * Moves the chat's active leaf to one of its live slots, if the chat is still at the row
@@ -1572,6 +1620,15 @@ export class ReadOps extends RpcGroup.make(
   /** Drafts with unsent text, most recently edited first. */
   Rpc.make("ListActiveDrafts", {
     payload: { userId: UserId },
+    success: Schema.Array(Draft),
+    error: StorageError
+  }),
+  /**
+   * The chat's open message editors: drafts with text of an edit of one of its versions
+   * (`version_edit`) or of a version the user is writing of one of its messages (`scratchpad`).
+   */
+  Rpc.make("ListMessageDrafts", {
+    payload: { userId: UserId, chatId: ChatId },
     success: Schema.Array(Draft),
     error: StorageError
   }),
@@ -1745,15 +1802,22 @@ export class ReadOps extends RpcGroup.make(
     error: StorageError
   }),
   // --- Chats: the chat RPCs beyond the graph operations above (reads.ts).
-  /** The user's chats, most recent first (DESIGN §2.1: by last message, else creation). */
+  /**
+   * The user's chats, most recent first (DESIGN §2.1: by last message, else creation); a
+   * card's, those with a message first. NotFound: the card isn't the user's.
+   */
   Rpc.make("ListChats", {
     payload: {
       userId: UserId,
       limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 500 })),
-      before: Schema.NullOr(Schema.Struct({ at: Schema.Number, id: ChatId }))
+      before: Schema.NullOr(ChatCursor),
+      /** Only the chats this card joined. */
+      entityId: Schema.optionalKey(EntityId),
+      /** Only the chats whose title, or a card in which, has this text. */
+      search: Schema.optionalKey(ChatSearch)
     },
     success: Schema.Array(Chat),
-    error: StorageError
+    error: Schema.Union([NotFound, StorageError])
   }),
   /** A window of a path, in either direction from where the client is (chatApi.ts). */
   Rpc.make("ReadPath", {
@@ -1789,11 +1853,38 @@ export class ReadOps extends RpcGroup.make(
   // --- Chat setup, speakers and the send queue (chatSetupReads.ts; DESIGN §2.1, §2.2).
   /** The user's live cards, by label. */
   Rpc.make("ListCards", { payload: { userId: UserId }, success: Schema.Array(CastCard), error: StorageError }),
-  /** These cards, as far as they're the user's (binned ones included); others are left out. */
+  /** The user's live character cards (not personas) with their use, in one query (the home grid). */
+  Rpc.make("CardUsage", { payload: { userId: UserId }, success: Schema.Array(CardUsage), error: StorageError }),
+  /** The chat list's details of these chats, as far as they're the user's; others are left out. */
+  Rpc.make("ChatSummaries", {
+    payload: { userId: UserId, chatIds: Schema.Array(ChatId) },
+    success: Schema.Array(ChatSummary),
+    error: StorageError
+  }),
+  /**
+   * These cards, as far as they're the user's (binned ones included); others are left out.
+   * With `chat`, each card's name, avatar and lorebook are those of the version the chat
+   * uses where `bindings` were folded (`ChatCards`' rules); its label stays the library's.
+   */
   Rpc.make("CastCards", {
-    payload: { userId: UserId, entityIds: Schema.Array(EntityId) },
+    payload: {
+      userId: UserId,
+      entityIds: Schema.Array(EntityId),
+      chat: Schema.optionalKey(Schema.Struct({ chatId: ChatId, bindings: CardBindings }))
+    },
     success: Schema.Array(CastCard),
     error: StorageError
+  }),
+  /**
+   * These cards as the live chat uses them where `bindings` (the chat's `card.binding`s
+   * there) were folded: library entry, its "used by N chats", the chat's override, and the
+   * definition the context assembler reads, picked by its rules (assemblySources.ts). A card
+   * that isn't the user's live card is NotFound, as a missing one.
+   */
+  Rpc.make("ChatCards", {
+    payload: { userId: UserId, chatId: ChatId, entityIds: Schema.Array(EntityId), bindings: CardBindings },
+    success: Schema.Array(ChatCard),
+    error: Schema.Union([NotFound, StorageError])
   }),
   Rpc.make("GetCardForChat", {
     payload: { userId: UserId, entityId: EntityId },

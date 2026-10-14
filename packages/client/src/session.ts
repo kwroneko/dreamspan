@@ -2,7 +2,7 @@
 // are plain HTTP because only a response can set the session cookie (ARCHITECTURE §4).
 import type { Session } from "@rp/shared/api.ts"
 import { createContext, useContext } from "react"
-import { flushCopies } from "./features/editor/backup.ts"
+import { browserOnly, flushCopies } from "./features/editor/backup.ts"
 import { AppClient } from "./rpc.ts"
 
 export const sessionAtom = AppClient.query("GetSession", undefined)
@@ -52,7 +52,8 @@ export const login = async (handle: string, password: string): Promise<LoginOutc
 export const logout = async (userId: string): Promise<{ readonly error: string; readonly recovered: number }> => {
   const { copies, recovered } = await flushCopies(userId)
   const failed = (error: string) => ({ error, recovered })
-  if (copies.length > 0)
+  // A copy that stays in this browser anyway (`browserOnly`) waits for this user's next login.
+  if (copies.some((copy) => !browserOnly(copy)))
     return failed("Some text could not be saved. Recover it or explicitly delete its browser copy before logging out.")
   let response: Response
   try {

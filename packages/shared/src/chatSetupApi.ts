@@ -6,7 +6,7 @@ import { Rpc, RpcGroup } from "effect/rpc"
 import { CastCard, Chat, ChatId, EntityId, FrozenMacros, PathEntry, QueuedMessage, SlotId } from "./chat.ts"
 import { GenerationUnavailable } from "./chatApi.ts"
 import { NotFound, ServerError, StaleWrite } from "./errors.ts"
-import { Doc, LibraryRef, RefId } from "./library.ts"
+import { Doc, LibraryRef, RefId, RevisionId } from "./library.ts"
 import { ConnectionId, ModelId } from "./providers.ts"
 
 /** A card's greetings and the fields its macros read, for a chat that isn't made yet. */
@@ -17,6 +17,31 @@ export class CardForChat extends Schema.Class<CardForChat>("CardForChat")({
   description: Schema.String,
   personality: Schema.String,
   scenario: Schema.String
+}) {}
+
+/**
+ * A character on the home grid (DESIGN §2.1): what lists show of it, and how it's been used.
+ * Personas aren't characters here; cards in the bin aren't listed.
+ */
+export class CardUsage extends Schema.Class<CardUsage>("CardUsage")({
+  entityId: EntityId,
+  /** The ref it's shown from (its upstream, else its oldest variant): the editor's `/library/$refId`. */
+  refId: RefId,
+  /** That ref's head, the definition the card page shows. */
+  headRevisionId: RevisionId,
+  /** The library label (DESIGN §4): title and free-text subtitle. */
+  label: Schema.String,
+  subtitle: Schema.String,
+  /** The in-chat name, what `{{char}}` resolves to. */
+  name: Schema.String,
+  /** Its avatar, served at `/library/media?id=`; null without one. */
+  avatarMediaId: Schema.NullOr(Schema.String),
+  /** Chats it has joined, group chats included; chats in the bin don't count. */
+  chats: Schema.Int,
+  /** The last message in any of them. */
+  lastMessageAt: Schema.NullOr(Schema.Number),
+  /** The one of them with the latest message (else the newest): what Continue opens. */
+  latestChatId: Schema.NullOr(ChatId)
 }) {}
 
 const CardsLayout = Schema.Literals(["concat", "swap_tail"])
@@ -86,11 +111,60 @@ export class ChatNote extends Schema.Class<ChatNote>("ChatNote")({
   active: Schema.Boolean
 }) {}
 
+/** A card's definition as a chat shows it, read-only: the fields ST's character panel shows. */
+export class CardDefinition extends Schema.Class<CardDefinition>("CardDefinition")({
+  description: Schema.String,
+  personality: Schema.String,
+  scenario: Schema.String,
+  firstMessage: Schema.String,
+  exampleDialogue: Schema.String,
+  creatorNotes: Schema.String,
+  /** How many alternate greetings it has besides the first message. */
+  alternateGreetings: Schema.Int
+}) {}
+
+/**
+ * A card in a chat, as the Cast tab shows it (DESIGN §2.1, §4): the library entry an edit
+ * "everywhere" changes and how many chats that reaches, the chat's own version if it has one,
+ * and the definition the next request reads at the position asked about, picked as the
+ * context assembler picks it (ARCHITECTURE §library).
+ */
+export class ChatCard extends Schema.Class<ChatCard>("ChatCard")({
+  entityId: EntityId,
+  /** The library entry: the card's upstream, or its oldest variant without one. */
+  refId: RefId,
+  /** Chats a change to that entry reaches ("used by N chats", ARCHITECTURE §14.2). */
+  usedByChats: Schema.Int,
+  /** This chat's own version of the card (a `chat_override`), if it has one. */
+  overrideRefId: Schema.NullOr(RefId),
+  /**
+   * How the chat's state picks the version there: `default` (its own version if it has
+   * one, else the library entry; also when it's bound to the library entry itself), or bound
+   * to another `ref` (a variant, say) or a fixed `revision`.
+   */
+  binding: Schema.Literals(["default", "ref", "revision"]),
+  /** The definition in use is this chat's own version, at its latest edit. */
+  usesOverride: Schema.Boolean,
+  definition: CardDefinition
+}) {}
+
+/**
+ * The chat's own version of a card, opened to edit "only in this chat". `bound`: the chat
+ * had bound another version of the card there (a variant or a fixed revision), so its own
+ * version is now bound instead, from that position on (a `card.binding` state event).
+ */
+export class CardOverrideOpened extends Schema.Class<CardOverrideOpened>("CardOverrideOpened")({
+  ref: LibraryRef,
+  bound: Schema.Boolean
+}) {}
+
 const Errors = [NotFound, ServerError] as const
 
 export class ChatSetupApi extends RpcGroup.make(
   /** Every live card of the user's, by label: the speaker switcher's All cards and Personas. */
   Rpc.make("ListCards", { success: Schema.Array(CastCard), error: ServerError }),
+  /** Every live character card of the user's with its use, for the home grid, in one read. */
+  Rpc.make("ListCardUsage", { success: Schema.Array(CardUsage), error: ServerError }),
   /** Puts a card in the persona folder, or takes it out (DESIGN §2.2). */
   Rpc.make("SetPersona", {
     payload: { entityId: EntityId, persona: Schema.Boolean },
@@ -129,6 +203,26 @@ export class ChatSetupApi extends RpcGroup.make(
   Rpc.make("GetCast", {
     payload: { chatId: ChatId, slotId: Schema.NullOr(SlotId) },
     success: Cast,
+    error: Schema.Union([...Errors])
+  }),
+  /**
+   * These cards as the chat uses them after `slotId` (the Cast tab, at the leaf shown).
+   * Another user's chat or slot, or a card that isn't the user's live card, is NotFound.
+   */
+  Rpc.make("ListChatCards", {
+    payload: { chatId: ChatId, slotId: Schema.NullOr(SlotId), entityIds: Schema.Array(EntityId) },
+    success: Schema.Array(ChatCard),
+    error: Schema.Union([...Errors])
+  }),
+  /**
+   * The chat's own version of a card, to edit "only in this chat" (DESIGN §4): the existing
+   * one, or a new `chat_override` started from the version the chat uses after `slotId`
+   * (a bound variant or revision included). The context assembler uses it for this chat;
+   * where the chat had bound another version, it's bound instead from `slotId` on.
+   */
+  Rpc.make("EditCardForChat", {
+    payload: { chatId: ChatId, slotId: Schema.NullOr(SlotId), entityId: EntityId },
+    success: CardOverrideOpened,
     error: Schema.Union([...Errors])
   }),
   /** Changes the cast or a setting from `slotId` on, on that branch (DESIGN §3.4). */

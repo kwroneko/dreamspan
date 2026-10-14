@@ -1,15 +1,29 @@
 // Pending saves kept in this browser until the exact copy is acknowledged. Tabs own
 // independent copies; a newer edit may replace only this store's unsent copy. The payload
-// is the save as typed, including its base, and replay never refreshes that base.
+// is the save as typed, including its base, and replay never refreshes that base. A first
+// message typed in a chat not made yet (StartChatPage) has nowhere on the server to go:
+// its copy stays here until that chat is made by sending it, or the user deletes it.
 import type { DraftDisplacement } from "@rp/shared/drafts.ts"
 import { ComposerBeacon } from "@rp/shared/composerApi.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import { EditorDraftSave } from "@rp/shared/editorApi.ts"
+import { SummaryDraftSave } from "@rp/shared/lcm.ts"
+import { MessageDraftSave } from "@rp/shared/chatApi.ts"
 import { Option, Schema } from "effect"
 
 const PendingSave = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("editor"), payload: EditorDraftSave }),
-  Schema.Struct({ kind: Schema.Literal("composer"), payload: ComposerBeacon })
+  Schema.Struct({ kind: Schema.Literal("composer"), payload: ComposerBeacon }),
+  Schema.Struct({
+    kind: Schema.Literal("pendingChat"),
+    payload: Schema.Struct({ entityId: Schema.String, name: Schema.String, content: Schema.String })
+  }),
+  Schema.Struct({ kind: Schema.Literal("summary"), payload: SummaryDraftSave }),
+  Schema.Struct({ kind: Schema.Literal("message"), payload: MessageDraftSave }),
+  // Text typed into a setting saved only by its Save button (Settings → Chats): there's no
+  // server draft to replay it to, so it stays here until saved or deleted, and the page
+  // shows it again in its field.
+  Schema.Struct({ kind: Schema.Literal("setting"), payload: Schema.Struct({ content: Schema.String }) })
 ])
 type PendingSave = typeof PendingSave.Type
 
@@ -156,6 +170,9 @@ export const copiesOf = async (userId: string, refId: string): Promise<ReadonlyA
   return copies
 }
 
+/** Where the first message typed in a chat with this card, not made yet, is kept. */
+export const pendingChatCopy = (entityId: string) => `pending-chat:${entityId}`
+
 /** All the user's copies. */
 export const copiesOfUser = async (userId: string): Promise<ReadonlyArray<Copy>> => {
   const copies: Array<Copy> = []
@@ -163,15 +180,30 @@ export const copiesOfUser = async (userId: string): Promise<ReadonlyArray<Copy>>
   return copies
 }
 
-/** Try every exact copy before logout or at the user's request. Failures stay recoverable here. */
+/**
+ * A copy that has no server draft to go to: a first message before its chat exists, and a
+ * setting's text. It stays in this browser, for this user, until sent or saved from its
+ * page or deleted, so it doesn't need the session and doesn't hold up logout.
+ */
+export const browserOnly = (copy: Copy) => {
+  const save = pendingOf(copy)
+  return save !== null && (save.kind === "pendingChat" || save.kind === "setting")
+}
+
+/**
+ * Try every exact copy before logout or at the user's request. Failures stay recoverable
+ * here, as do the copies that stay in this browser (`browserOnly`).
+ */
 export const flushCopies = async (userId: string) => {
   let recovered = 0
   for (const copy of await copiesOfUser(userId)) {
     const save = pendingOf(copy)
-    if (save === null) continue
+    if (save === null || browserOnly(copy)) continue
     const body = JSON.stringify({
       drafts: save.kind === "editor" ? [save.payload] : [],
-      composers: save.kind === "composer" ? [save.payload] : []
+      composers: save.kind === "composer" ? [save.payload] : [],
+      summaries: save.kind === "summary" ? [save.payload] : [],
+      messages: save.kind === "message" ? [save.payload] : []
     })
     try {
       const response = await fetch("/library/drafts", {

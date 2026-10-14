@@ -5,12 +5,24 @@ import { useSyncExternalStore, useEffect, useMemo, useRef, useState } from "reac
 import type { SlotId } from "@rp/shared/chat.ts"
 import type { LcmBackfill, LcmJob, LcmState, LcmSummary, SummaryRevision } from "@rp/shared/lcm.ts"
 import type { AppError } from "../../errors.ts"
+import { useSession } from "../../session.ts"
 import { Button } from "../../ui/Button.tsx"
-import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
+import { Switch } from "../../ui/Choice.tsx"
 import { Textarea } from "../../ui/Field.tsx"
 import { Alert, Badge } from "../../ui/Surface.tsx"
 import { EstimateList } from "./EnableLcmDialog.tsx"
-import { boundaryText, countText, healthOf, jobText, moneyText, originText, rangeText, tokensText } from "./lcm.ts"
+import {
+  boundaryText,
+  countText,
+  healthOf,
+  jobText,
+  moneyText,
+  originText,
+  rangeText,
+  setRail,
+  tokensText,
+  useRail
+} from "./lcm.ts"
 import type { ChatSession } from "./session.ts"
 import { SummaryDraft } from "./summaryDraft.ts"
 
@@ -40,7 +52,8 @@ function StateBadges({ summary }: { summary: LcmSummary }) {
 
 /** The text of a summary being edited, saved as a draft while typing and as a revision on Save. */
 function Editor({ session, summary, onDone }: { session: ChatSession; summary: LcmSummary; onDone: () => void }) {
-  const [store] = useState(() => new SummaryDraft(session, summary))
+  const userId = useSession().user.id
+  const [store] = useState(() => new SummaryDraft(session, userId, summary))
   const view = useSyncExternalStore(store.subscribe, store.snapshot)
   useEffect(() => {
     void store.open()
@@ -59,7 +72,11 @@ function Editor({ session, summary, onDone }: { session: ChatSession; summary: L
       className="flex flex-col gap-2"
       onSubmit={(event) => {
         event.preventDefault()
-        void finish(() => store.commit())
+        // Text typed while the revision was being saved keeps the edit open.
+        void finish(async () => {
+          const outcome = await store.commit()
+          return { ok: outcome.ok && outcome.value.done }
+        })
       }}
     >
       <Textarea
@@ -69,7 +86,13 @@ function Editor({ session, summary, onDone }: { session: ChatSession; summary: L
         onChange={(event) => store.setText(event.currentTarget.value)}
       />
       <p className="text-xs text-muted" aria-live="polite">
-        {view.unsaved ? "Keeping your text…" : view.changed ? "Your text is kept as a draft." : "Unchanged."}
+        {view.unsaved
+          ? view.error
+            ? "Not on the server yet: kept in this browser, and sent again when you open this edit."
+            : "Keeping your text…"
+          : view.changed
+            ? "Your text is kept as a draft."
+            : "Unchanged."}
         {summary.fresh ? "" : " It stays as you write it even though the messages changed."}
       </p>
       {view.outdated && (
@@ -78,6 +101,7 @@ function Editor({ session, summary, onDone }: { session: ChatSession; summary: L
       {view.displaced !== null && (
         <Alert tone="warning">Another tab had typed here too; its text is one step back in the undo history.</Alert>
       )}
+      {view.restored > 0 && <Alert>Text typed here earlier and kept in this browser is back in the box.</Alert>}
       {view.recovered > 0 && <Alert>Earlier text from this edit is in the bin's recovered texts.</Alert>}
       <Problem error={view.error} />
       <div className="flex flex-wrap gap-2">
@@ -473,21 +497,23 @@ function Backfill({ session, lcm }: { session: ChatSession; lcm: LcmState }) {
   )
 }
 
-/** The summaries on this branch, opened from the divider, the rail or the header. */
+/** The side panel's Summaries tab: the summaries on this branch, opened from the divider, the rail or the header. */
 export function SummaryPanel({
   session,
   lcm,
   focus,
   onJump,
-  onOpenChange
+  onEnable
 }: {
   session: ChatSession
   lcm: LcmState
   /** A summary to show even when it isn't in use (a click on the rail). */
   focus: string | null
   onJump: (slot: SlotId) => void
-  onOpenChange: (open: boolean) => void
+  /** Turns summaries on for the chat, asking first what it costs. */
+  onEnable: () => void
 }) {
+  const rail = useRail()
   const inUse = useMemo(() => new Set<string>(lcm.layer.map((s) => s.id)), [lcm.layer])
   const version = useSyncExternalStore(session.subscribe, session.snapshot).lcmVersion
   const [fetched, setFetched] = useState<LcmSummary | null>(null)
@@ -521,17 +547,32 @@ export function SummaryPanel({
       !lcm.failed.some((s) => s.level === job.level && s.from === job.from && s.to === job.to)
   )
   return (
-    <Dialog
-      open
-      onOpenChange={onOpenChange}
-      title="Summaries"
-      description="What stands in for older messages on this branch. Nothing here runs until your next reply, except Summarize now."
-    >
+    <div className="flex flex-col gap-4">
+      <p className="text-sm text-muted">
+        What stands in for older messages on this branch. Nothing here runs until your next reply, except Summarize now.
+      </p>
       <p className="text-sm font-medium" data-testid="summary-panel-heading">
         {boundaryText(lcm)}
       </p>
-      {!lcm.enabled && (
-        <Alert tone="warning">Summaries are off for this chat. Turn them on in the chat settings.</Alert>
+      {lcm.enabled ? (
+        <Switch
+          checked={rail}
+          onCheckedChange={setRail}
+          description="Bars beside the messages showing which summary covers them, in this browser."
+        >
+          Coverage rail
+        </Switch>
+      ) : (
+        <Alert
+          tone="warning"
+          actions={
+            <Button variant="primary" onClick={onEnable}>
+              Enable summaries
+            </Button>
+          }
+        >
+          Summaries are off for this chat.
+        </Alert>
       )}
       {lcm.enabled && <Backfill session={session} lcm={lcm} />}
       {unfinished.length > 0 && (
@@ -587,9 +628,6 @@ export function SummaryPanel({
           </ul>
         </section>
       )}
-      <DialogActions>
-        <Button onClick={() => onOpenChange(false)}>Done</Button>
-      </DialogActions>
-    </Dialog>
+    </div>
   )
 }

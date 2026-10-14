@@ -213,6 +213,8 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
     })
 
   let layerPins: SourcePins["lcm"]
+  /** The model the chat's binding or the user's default chose, read or not; unset before the model is read. */
+  let chosenModel: ChosenModel | null | undefined
   const pins = {
     target: null as Target | null,
     historyStart: null as NonNullable<SourcePins["historyStart"]> | null,
@@ -566,6 +568,8 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
     model: (binding) =>
       Effect.gen(function* () {
         const chosen = settings.modelOverride ?? binding ?? (yield* defaults).model
+        if (!settings.modelOverride)
+          chosenModel = chosen === null ? null : { ...chosen, scope: binding ? "chat" : "user" }
         if (chosen === null) return null
         const [connection] = yield* sql<ConnectionRow>`
           SELECT ${sql.literal(connectionColumns)} FROM ${sql.literal(connectionFrom)}
@@ -646,8 +650,17 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
   return {
     layer: Layer.succeed(AssemblySources)(sources),
     /** What the sources read; a replay's are the pins it was given. */
-    pins: (): SourcePins => replay?.pins ?? { ...pins, target: pins.target!, ...(layerPins ? { lcm: layerPins } : {}) }
+    pins: (): SourcePins => replay?.pins ?? { ...pins, target: pins.target!, ...(layerPins ? { lcm: layerPins } : {}) },
+    /** The model chosen and where from, also when it's gone and the assembly failed on it. */
+    chosenModel: () => chosenModel
   }
+}
+
+/** A model choice and the level it comes from: the chat's binding or the user's default. */
+interface ChosenModel {
+  readonly connection: string
+  readonly model: string
+  readonly scope: "chat" | "user"
 }
 
 /** The sources a replay reads: what the pins name, as it was then. */

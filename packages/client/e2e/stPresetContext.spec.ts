@@ -4,6 +4,7 @@ import { Effect } from "effect"
 import { card, encode, header, jsonl, message } from "../../server/test/support/stFolder.ts"
 import { asUser, loginCookie } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { closePanel, openPanel } from "./support/panel.ts"
 
 const server = serverPerFile(withAdmin)
 
@@ -60,7 +61,7 @@ for (const chars of [14_000, 20_000]) {
     expect(next.historyStart?.depth ?? null).toBe(chars === 14_000 ? 50 : null)
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
     await page.goto(`${server().url}/chats/${chat.id}`)
-    const explanation = page.getByRole("status").filter({ hasText: "Not sent: the preset" })
+    const explanation = page.getByRole("status").filter({ hasText: "aren’t sent to the model: the preset" })
     await expect(explanation).toBeVisible()
     await expect(explanation).toContainText("“Default” (ST’s built-in default) allows 4,095 tokens")
     await expect(explanation).toContainText("targets 3,276, reserves 300 for the reply")
@@ -69,6 +70,13 @@ for (const chars of [14_000, 20_000]) {
     await expect(last).toBeVisible()
     expect((await explanation.boundingBox())!.y).toBeGreaterThan((await last.boundingBox())!.y)
     if (chars === 14_000) await expect(last).toHaveAttribute("data-out-of-context", "true")
+    // The chat's panel names the preset in effect and where it comes from, never a placeholder.
+    const settings = await openPanel(page, "This chat")
+    const preset = settings.getByRole("region", { name: "Preset" })
+    await expect(preset.getByTestId("preset-in-effect")).toHaveText("SillyTavern's default preset")
+    await expect(preset).toContainText("SillyTavern's built-in default: no preset is set")
+    await expect(preset).toContainText("Context: 4,095 tokens, 300 of them for the reply.")
+    await closePanel(page)
     // The later preset upload adopts the named default and brings the whole history back.
     await upload("OpenAI Settings/Roomy.json", encode({ openai_max_context: 32000, openai_max_tokens: 300 }))
     await page.reload()
@@ -76,5 +84,10 @@ for (const chars of [14_000, 20_000]) {
     await expect(last).not.toHaveAttribute("data-out-of-context")
     await expect(explanation).toHaveCount(0)
     await expect(page.locator('[data-out-of-context="true"]')).toHaveCount(0)
+    const roomy = (await openPanel(page, "This chat")).getByRole("region", { name: "Preset" })
+    await expect(roomy.getByTestId("preset-in-effect")).toHaveText("Roomy")
+    await expect(roomy).toContainText("Your default preset")
+    await expect(roomy).toContainText("Context: 32,000 tokens")
+    await expect(roomy.getByRole("link", { name: "Open “Roomy” in the editor" })).toBeVisible()
   })
 }

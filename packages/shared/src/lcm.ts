@@ -259,6 +259,20 @@ export class LcmBackfill extends Schema.Class<LcmBackfill>("LcmBackfill")({
 }) {}
 
 export const SummaryChange = Schema.Struct({ summary: Summary, recovered: Schema.Int })
+
+/**
+ * Text typed into a summary's edit: the draft it was typed into as the client last had it,
+ * and the text now. Also what a browser copy replays (`summaries` in `POST /library/drafts`).
+ */
+export const SummaryDraftSave = Schema.Struct({
+  summaryId: SummaryId,
+  draftId: Schema.NullOr(Schema.String),
+  content: Schema.String,
+  expectedRowVersion: Schema.NullOr(Schema.Int),
+  expectedSession: Schema.NullOr(Schema.Int),
+  /** The revision the text started from. */
+  baseRevisionId: Schema.NullOr(SummaryRevisionId)
+})
 export class LcmApi extends RpcGroup.make(
   Rpc.make("GetSummary", {
     payload: { summaryId: SummaryId },
@@ -373,15 +387,7 @@ export class LcmApi extends RpcGroup.make(
     error: Schema.Union([NotFound, ServerError])
   }),
   Rpc.make("SaveSummaryDraft", {
-    payload: {
-      summaryId: SummaryId,
-      draftId: Schema.NullOr(Schema.String),
-      content: Schema.String,
-      expectedRowVersion: Schema.NullOr(Schema.Int),
-      expectedSession: Schema.NullOr(Schema.Int),
-      /** The revision the text started from. */
-      baseRevisionId: Schema.NullOr(SummaryRevisionId)
-    },
+    payload: SummaryDraftSave.fields,
     success: Draft,
     error: Schema.Union([NotFound, StaleWrite, TextTooLong, ServerError])
   }),

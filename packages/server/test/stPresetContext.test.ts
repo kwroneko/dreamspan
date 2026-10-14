@@ -47,6 +47,7 @@ layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "90 secon
           presetName: "Roomy",
           builtinPreset: false
         })
+        assert.deepInclude(next.preset, { name: "Roomy", scope: "user" })
         assert.isAbove(next.budget!.nonHistoryTokens, chars / 4)
         assert.isBelow(next.budget!.nonHistoryTokens, chars / 4 + 200)
         const defaults = yield* api.GetGenerationDefaults()
@@ -119,6 +120,7 @@ layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "90 secon
         presetName: "Default",
         builtinPreset: true
       })
+      assert.deepStrictEqual(next.preset, { ref: null, name: "Default", scope: "builtin" })
       assert.isAbove(next.budget!.nonHistoryTokens, 5000)
       const chosen = (yield* api.ListLibrary({ kind: "preset" })).find((ref) => ref.label === "Roomy")!.id
       yield* api.SetGenerationDefaults({ defaults: { model: null, preset: chosen } })

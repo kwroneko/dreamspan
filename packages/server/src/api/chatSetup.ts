@@ -7,7 +7,7 @@ import type { ChatId, EntityId, SlotId } from "@rp/shared/chat.ts"
 import { GenerationUnavailable } from "@rp/shared/chatApi.ts"
 import { Cast, type CastChange, ChatNote } from "@rp/shared/chatSetupApi.ts"
 import type { UserId } from "@rp/shared/domain.ts"
-import { foldState, noteSwitches, type StateEventData } from "@rp/shared/state.ts"
+import { type ChatState, foldState, noteSwitches, type StateEventData } from "@rp/shared/state.ts"
 import { Effect, Option } from "effect"
 import { ChatHub } from "../chat/ChatHub.ts"
 import { Generations } from "../chat/Generations.ts"
@@ -44,6 +44,15 @@ const toEvent = (change: CastChange): StateEventData => {
   }
 }
 
+/** The chat's `card.binding`s in a fold, as the database operations take them. */
+const bindingsOf = (state: ChatState) =>
+  Object.fromEntries(
+    Object.entries(state.cardBindings).map(([entity, { ref, revision }]) => [
+      entity,
+      { ref: ref ?? null, revision: revision ?? null }
+    ])
+  )
+
 export const makeChatSetupHandlers = Effect.gen(function* () {
   const reader = yield* Reader
   const writer = yield* Writer
@@ -53,12 +62,19 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
 
   const userId = Effect.map(CurrentUser, (user) => user.id)
 
-  /** The fold of the chat's state after `slotId`, with every card it names. */
+  /**
+   * The fold of the chat's state after `slotId`, with every card it names, by the name and
+   * avatar of the version the chat uses there (its own version's, say).
+   */
   const castAt = (user: UserId, chatId: ChatId, slotId: SlotId | null) =>
     Effect.gen(function* () {
       const state = foldState(yield* reader.StateEventsAt({ userId: user, chatId, slotId }))
       const ids = [...new Set([...state.participants, ...state.playedByMe])]
-      const cards = yield* reader.CastCards({ userId: user, entityIds: ids as Array<Cast["participants"][number]> })
+      const cards = yield* reader.CastCards({
+        userId: user,
+        entityIds: ids as Array<Cast["participants"][number]>,
+        chat: { chatId, bindings: bindingsOf(state) }
+      })
       const model = state.modelBindings[""]
       return new Cast({
         slotId,
@@ -79,6 +95,8 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
 
   const handlers = {
     ListCards: () => Effect.flatMap(userId, (id) => reader.ListCards({ userId: id })).pipe(internal("ListCards")),
+    ListCardUsage: () =>
+      Effect.flatMap(userId, (id) => reader.CardUsage({ userId: id })).pipe(internal("ListCardUsage")),
 
     SetPersona: ({ entityId, persona }) =>
       Effect.gen(function* () {
@@ -126,6 +144,26 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
 
     GetCast: ({ chatId, slotId }) =>
       Effect.flatMap(userId, (id) => castAt(id, chatId, slotId)).pipe(internal("GetCast")),
+
+    // The cards as the next request reads them after `slotId`: the bindings there decide.
+    ListChatCards: ({ chatId, slotId, entityIds }) =>
+      Effect.gen(function* () {
+        const id = yield* userId
+        const state = foldState(yield* reader.StateEventsAt({ userId: id, chatId, slotId }))
+        return yield* reader.ChatCards({ userId: id, chatId, entityIds, bindings: bindingsOf(state) })
+      }).pipe(internal("ListChatCards")),
+
+    // "Only in this chat": the chat's own version, made on first use from the version the
+    // chat uses at `slotId`; if the chat bound another version there, its own is bound instead.
+    EditCardForChat: ({ chatId, slotId, entityId }) =>
+      Effect.gen(function* () {
+        const id = yield* userId
+        const state = foldState(yield* reader.StateEventsAt({ userId: id, chatId, slotId }))
+        const binding = bindingsOf(state)[entityId] ?? null
+        const opened = yield* writer.OpenCardOverride({ userId: id, chatId, slotId, entityId, binding })
+        if (opened.bound) hub.publish(chatId, { _tag: "State" })
+        return opened
+      }).pipe(internal("EditCardForChat")),
 
     ChangeCast: ({ chatId, slotId, change }) =>
       Effect.gen(function* () {

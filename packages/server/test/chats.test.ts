@@ -2,7 +2,16 @@
 // both directions, versions with optimistic concurrency, and generations streamed as
 // deltas, stopped, failed and deleted. Cross-user access is in the isolation matrix.
 import { assert, describe, it } from "@effect/vitest"
-import type { Chat, PathEntry, SlotId, Version, VersionId } from "@rp/shared/chat.ts"
+import {
+  type Chat,
+  type EntityId,
+  NewVersion,
+  type PathEntry,
+  type SlotId,
+  type Version,
+  type VersionId
+} from "@rp/shared/chat.ts"
+import type { UserId } from "@rp/shared/domain.ts"
 import type { ChatEvent, PathRange, PathWindow } from "@rp/shared/chatApi.ts"
 import { ConfigProvider, Effect, Fiber, Layer, Option, Stream } from "effect"
 import * as FakeGenerator from "../src/dev/fakeGenerator.ts"
@@ -10,7 +19,8 @@ import { GenerationFailed, Generator } from "../src/chat/Generator.ts"
 import { AppConfig, type AppConfigShape } from "../src/config.ts"
 import { Writer } from "../src/db/Database.ts"
 import { ServerLive } from "../src/server.ts"
-import { client, outcome, posted, serverLayer, testConfig } from "./support/config.ts"
+import { client, outcome, post, posted, serverLayer, testConfig } from "./support/config.ts"
+import { cardDoc } from "./support/docs.ts"
 import { tempDir } from "./support/tempDir.ts"
 
 type Api = Effect.Success<ReturnType<typeof client>>
@@ -374,6 +384,204 @@ describe("chats", () => {
       assert.deepStrictEqual(
         versions.map((v) => v.content),
         ["m0", "mine", "again"]
+      )
+    }).pipe(Effect.scoped, withGenerator(config, Generator.none))
+  })
+
+  it.live("an edit or a version of one's own keeps the message's speaker and side, and commits its draft", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const writer = yield* Writer
+      const me = yield* api.Whoami()
+      const userId = me.id as UserId
+      const { entityId: mira } = yield* writer.CreateEntity({
+        userId,
+        kind: "card",
+        label: "Mira",
+        subtitle: "",
+        doc: cardDoc("Mira"),
+        schemaVersion: 1,
+        origin: "user",
+        sourcePath: null
+      })
+      const chat = yield* writer.CreateChat({
+        userId,
+        kind: "rp",
+        status: "active",
+        title: "Ledger",
+        participants: [mira as EntityId],
+        greeting: new NewVersion({
+          speakerEntityId: mira as EntityId,
+          writer: "model",
+          content: "Late again.",
+          status: "complete",
+          macroMode: "template",
+          origin: "greeting"
+        })
+      })
+      const slotId = chat.activeLeafSlotId!
+      const [greeting] = yield* api.ListVersions({ slotId })
+      const write = { _tag: "Write", slotId } as const
+
+      // Text typed into "write your own version" is a draft the chat lists until it's saved.
+      const draft = yield* api.SaveMessageDraft({
+        target: write,
+        draftId: null,
+        content: "My own greeting.",
+        expectedRowVersion: null,
+        expectedSession: null
+      })
+      assert.deepStrictEqual(
+        (yield* api.MessageDrafts({ chatId: chat.id })).map((d) => [d.key.targetKind, d.key.targetId, d.content]),
+        [["scratchpad", slotId, "My own greeting."]]
+      )
+      const written = yield* api.WriteVersion({
+        slotId,
+        content: "My own greeting.",
+        expectedRowVersion: 1,
+        draft: { draftId: draft.id, session: draft.session }
+      })
+      assert.strictEqual(written.version.speakerEntityId, mira)
+      assert.strictEqual(written.side, "assistant")
+      assert.deepStrictEqual(yield* api.MessageDrafts({ chatId: chat.id }), [])
+
+      // An edit is its source's speaker's; a discarded edit leaves no open editor.
+      const edit = { _tag: "Edit", versionId: greeting!.id } as const
+      const editing = yield* api.SaveMessageDraft({
+        target: edit,
+        draftId: null,
+        content: "Late again, edited.",
+        expectedRowVersion: null,
+        expectedSession: null
+      })
+      assert.strictEqual((yield* api.MessageDrafts({ chatId: chat.id })).length, 1)
+      yield* api.DiscardMessageDraft({ target: edit, draftId: editing.id, expectedRowVersion: editing.rowVersion })
+      assert.deepStrictEqual(yield* api.MessageDrafts({ chatId: chat.id }), [])
+      const edited = yield* api.EditVersion({
+        slotId,
+        sourceVersionId: greeting!.id,
+        content: "Late again, edited.",
+        expectedRowVersion: written.rowVersion
+      })
+      assert.strictEqual(edited.version.speakerEntityId, mira)
+
+      // Which versions are live never changes the message's side: its first version's is kept.
+      yield* api.DeleteVersion({ versionId: greeting!.id })
+      const window = yield* api.ReadPath({ chatId: chat.id, leafSlotId: null, range: { _tag: "Bottom" }, limit: 10 })
+      assert.strictEqual(window.entries[0]!.side, "assistant")
+      assert.strictEqual(window.entries[0]!.versionCount, 2)
+
+      // The user's own messages stay on the user's side.
+      const sent: { entry: PathEntry } = yield* posted(
+        api.SendMessage({ chatId: chat.id, parentSlotId: slotId, branch: false, content: "Again?" })
+      )
+      assert.strictEqual(sent.entry.side, "user")
+      const mine = yield* api.WriteVersion({
+        slotId: sent.entry.slotId,
+        content: "Again.",
+        expectedRowVersion: sent.entry.rowVersion
+      })
+      assert.strictEqual(mine.side, "user")
+      assert.strictEqual(mine.version.speakerEntityId, sent.entry.version.speakerEntityId)
+    }).pipe(Effect.scoped, withGenerator(config, Generator.none))
+  })
+
+  it.live(
+    "a message names its first version's speaker, so one written before versions kept it isn't the model's",
+    () => {
+      const config = testConfig()
+      return Effect.gen(function* () {
+        const api = yield* client()
+        const writer = yield* Writer
+        const userId = (yield* api.Whoami()).id as UserId
+        const { entityId } = yield* writer.CreateEntity({
+          userId,
+          kind: "card",
+          label: "Mira",
+          subtitle: "",
+          doc: cardDoc("Mira"),
+          schemaVersion: 1,
+          origin: "user",
+          sourcePath: null
+        })
+        const mira = entityId as EntityId
+        const chat = yield* writer.CreateChat({
+          userId,
+          kind: "rp",
+          status: "active",
+          title: "Legacy",
+          participants: [mira],
+          greeting: new NewVersion({
+            speakerEntityId: mira,
+            writer: "model",
+            content: "Original reply.",
+            status: "complete",
+            macroMode: "verbatim",
+            origin: "greeting"
+          })
+        })
+        const slotId = chat.activeLeafSlotId!
+        const [original] = yield* api.ListVersions({ slotId })
+        // A version written by hand as WriteVersion saved it before it kept the speaker: none.
+        yield* writer.AddSelectedVersion({
+          userId,
+          slotId,
+          expectedRowVersion: 1,
+          version: new NewVersion({
+            speakerEntityId: null,
+            writer: "human",
+            content: "A reply written before the speaker was kept.",
+            status: "complete",
+            macroMode: "verbatim",
+            origin: "user_written"
+          })
+        })
+        yield* api.DeleteVersion({ versionId: original!.id })
+        const window = yield* api.ReadPath({ chatId: chat.id, leafSlotId: null, range: { _tag: "Bottom" }, limit: 10 })
+        const [entry] = window.entries
+        assert.strictEqual(entry!.version.speakerEntityId, null)
+        assert.strictEqual(entry!.versionCount, 1)
+        assert.strictEqual(entry!.firstSpeakerEntityId, mira)
+        assert.strictEqual(entry!.side, "assistant")
+        // A message the user sent names its own first speaker: nobody, as the user.
+        const sent: { entry: PathEntry } = yield* posted(
+          api.SendMessage({ chatId: chat.id, parentSlotId: slotId, branch: false, content: "Hm." })
+        )
+        assert.strictEqual(sent.entry.firstSpeakerEntityId, sent.entry.version.speakerEntityId)
+      }).pipe(Effect.scoped, withGenerator(config, Generator.none))
+    }
+  )
+
+  it.live("a message editor's text kept in a browser is saved to its draft by POST /library/drafts", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const chat = yield* api.CreateChat({ title: "Copies" })
+      const sent: { entry: PathEntry } = yield* posted(
+        api.SendMessage({ chatId: chat.id, parentSlotId: null, branch: false, content: "First." })
+      )
+      const target = { _tag: "Write", slotId: sent.entry.slotId } as const
+      const saved = yield* api.SaveMessageDraft({
+        target,
+        draftId: null,
+        content: "Typed online.",
+        expectedRowVersion: null,
+        expectedSession: null
+      })
+      // The copy names the draft it was typed on, as Browser recovery's Retry saving sends it.
+      const copy = {
+        target,
+        draftId: saved.id,
+        content: "Typed online. And more while the server was down.",
+        expectedRowVersion: saved.rowVersion,
+        expectedSession: saved.session
+      }
+      const response = yield* post("/library/drafts", { drafts: [], messages: [copy] })
+      assert.strictEqual(response.status, 204)
+      assert.deepStrictEqual(
+        (yield* api.MessageDrafts({ chatId: chat.id })).map((d) => [d.key.targetKind, d.key.targetId, d.content]),
+        [["scratchpad", sent.entry.slotId, copy.content]]
       )
     }).pipe(Effect.scoped, withGenerator(config, Generator.none))
   })

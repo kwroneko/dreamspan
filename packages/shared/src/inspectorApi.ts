@@ -152,8 +152,38 @@ export const ContextBudget = Schema.Struct({
 })
 export type ContextBudget = typeof ContextBudget.Type
 
+/**
+ * The preset the next request uses and the level of the scope chain it comes from
+ * (DATA-MODEL §5.4): the chat's role binding, the chat's own, the connection's override, the
+ * user's default, or ST's built-in default.
+ */
+export const EffectivePreset = Schema.Struct({
+  /** Null for ST's built-in default. */
+  ref: Schema.NullOr(Schema.String),
+  name: Schema.String,
+  scope: Schema.Literals(["role", "chat", "connection", "user", "builtin"])
+})
+export type EffectivePreset = typeof EffectivePreset.Type
+
+/**
+ * The model the next request uses and where the choice comes from: the chat's binding or the
+ * user's default. Names are null when the connection or the model is gone; a hidden model is
+ * still used, only left out of the lists to choose from.
+ */
+const EffectiveModel = Schema.Struct({
+  connection: Schema.String,
+  model: Schema.String,
+  connectionName: Schema.NullOr(Schema.String),
+  modelKey: Schema.NullOr(Schema.String),
+  hidden: Schema.Boolean,
+  scope: Schema.Literals(["chat", "user"])
+})
+
 /** The next request boundary, also available before a first send or without a cache TTL. */
 export const NextContext = Schema.Struct({
+  /** Null when neither the chat nor the user's defaults name a model. */
+  model: Schema.optionalKey(Schema.NullOr(EffectiveModel)),
+  preset: Schema.optionalKey(Schema.NullOr(EffectivePreset)),
   budget: Schema.optionalKey(
     Schema.NullOr(
       Schema.Struct({

@@ -6,6 +6,7 @@ import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import {
   DEFAULT_JUDGE,
+  DEFAULT_LCM,
   DEFAULT_MODEL,
   DEFAULT_PRESET,
   ownedModel,
@@ -196,10 +197,42 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
             return yield* new NotFound({ entity: "model", id: choice.model })
         yield* putSetting(userId, DEFAULT_MODEL, model)
         yield* putSetting(userId, DEFAULT_PRESET, preset)
-        if (defaults.lcm !== undefined) yield* putSetting(userId, "generation.lcm", defaults.lcm)
+        if (defaults.lcm !== undefined) yield* putSetting(userId, DEFAULT_LCM, defaults.lcm)
         if (defaults.judge !== undefined) yield* putSetting(userId, DEFAULT_JUDGE, defaults.judge)
         return yield* readDefaults(sql, userId)
-      }).pipe(transaction(sql, "SetGenerationDefaults"))
+      }).pipe(transaction(sql, "SetGenerationDefaults")),
+
+    // One transaction from the read of the stored summary defaults to the write, so another
+    // tab's change to a setting not named here stays.
+    ChangeGenerationDefaults: ({ userId, change }) =>
+      Effect.gen(function* () {
+        if (change.model && !(yield* ownedModel(sql, userId, change.model.connection, change.model.model)))
+          return yield* new NotFound({ entity: "model", id: change.model.model })
+        if (change.preset && !(yield* ownedPreset(sql, userId, change.preset)))
+          return yield* new NotFound({ entity: "ref", id: change.preset })
+        for (const choice of [change.judge, change.fallback])
+          if (choice && !(yield* ownedModel(sql, userId, choice.connection, choice.model)))
+            return yield* new NotFound({ entity: "model", id: choice.model })
+        if (change.model !== undefined) yield* putSetting(userId, DEFAULT_MODEL, change.model)
+        if (change.preset !== undefined) yield* putSetting(userId, DEFAULT_PRESET, change.preset)
+        if (change.judge !== undefined) yield* putSetting(userId, DEFAULT_JUDGE, change.judge)
+        if (change.tail !== undefined || change.fallback !== undefined) {
+          const [row] = yield* sql<{ value_json: string }>`
+            SELECT value_json FROM user_settings WHERE user_id = ${userId} AND key = ${DEFAULT_LCM}`
+          const stored = row ? (JSON.parse(row.value_json) as Record<string, unknown>) : {}
+          const lcm: Record<string, unknown> = { ...stored }
+          if (change.tail !== undefined) {
+            if (change.tail) lcm.tail = change.tail
+            else delete lcm.tail
+          }
+          if (change.fallback !== undefined) {
+            if (change.fallback) lcm.fallback = change.fallback
+            else delete lcm.fallback
+          }
+          yield* putSetting(userId, DEFAULT_LCM, lcm)
+        }
+        return yield* readDefaults(sql, userId)
+      }).pipe(transaction(sql, "ChangeGenerationDefaults"))
   } satisfies Partial<Parameters<typeof WriteOps.of>[0]>
   return handlers
 })
