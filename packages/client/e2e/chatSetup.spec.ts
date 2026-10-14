@@ -351,7 +351,7 @@ test("a card with 1,001 greetings and a huge random draw starts like any other",
   await expect(generating(page)).toHaveCount(0, { timeout: 20_000 })
 })
 
-test("a new chat of a group: its first character greets, and the first send makes one of its chats", async ({
+test("a new chat of a group: each character greets in turn, and the first send makes one of its chats", async ({
   page
 }) => {
   await login(page)
@@ -376,10 +376,14 @@ test("a new chat of a group: its first character greets, and the first send make
   await tile.getByRole("link", { name: "New chat with The Pier" }).click()
   await expect(page).toHaveURL(`${server().url}/groups/${chatId}/new`)
   await expect(page.getByRole("heading", { level: 1, name: "New chat: The Pier" })).toBeVisible()
-  await expect(page.getByText("With Mira, Tobin. Saved when you send the first message.")).toBeVisible()
-  const greeting = page.getByRole("article", { name: "Greeting" })
-  await expect(greeting).toContainText("Mira greets first")
-  await expect(greeting).toContainText("The bell rings for Ana.")
+  await expect(page.getByText("With Mira, Tobin, who greet in turn. Saved when you send the first message.")).toBeVisible()
+  // Each member's greeting, in the group's order, as ST starts a group chat; each has its alternates.
+  const greetings = page.getByRole("article", { name: /^Greeting from / })
+  await expect(greetings).toHaveCount(2)
+  await expect(greetings.nth(0)).toContainText("Mira")
+  await expect(greetings.nth(0)).toContainText("The bell rings for Ana.")
+  await expect(greetings.nth(0)).toContainText("1 / 2")
+  await expect(greetings.nth(1)).toContainText("Tobin nods.")
   // Opening it made no chat: the group still has one.
   await page.goto(`${server().url}/groups/${chatId}`)
   await expect(page.getByRole("heading", { level: 2, name: "Chats (1)" })).toBeVisible()
@@ -395,11 +399,16 @@ test("a new chat of a group: its first character greets, and the first send make
   await expect(page.getByRole("button", { name: "Generate Tobin" })).toBeVisible()
   await shoot(page, "new-group-chat")
 
+  // Mira's alternate greeting, picked before the send, is the one the chat shows.
+  await greetings.nth(0).getByRole("button", { name: "Next greeting from Mira" }).click()
+  await expect(greetings.nth(0)).toContainText("Mira waves at Ana from the pier.")
   await page.getByRole("button", { name: "Send as Ana" }).click()
   await expect(page).toHaveURL(/\/chats\/[^/?]+$/)
   await expect(page.getByRole("heading", { level: 1, name: "The Pier" })).toBeVisible()
-  await expect(replies(page).first()).toContainText("The bell rings for Ana.")
-  await expect(replies(page)).toHaveCount(2)
+  // Both greetings, the alternate picked shown, then the message and Tobin's reply.
+  await expect(replies(page).first()).toContainText("Mira waves at Ana from the pier.")
+  await expect(replies(page).nth(1)).toContainText("Tobin nods.")
+  await expect(replies(page)).toHaveCount(3)
   await expect(replies(page).last().locator("header")).toContainText("Tobin")
   await expect(generating(page)).toHaveCount(0, { timeout: 20_000 })
 

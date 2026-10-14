@@ -136,6 +136,8 @@ export class PathEntry extends Schema.Class<PathEntry>("PathEntry")({
    */
   branchCount: Schema.Int,
   branchIndex: Schema.Int,
+  /** The name the user gave the branch this slot starts among its alternates (NameBranch); absent: unnamed. */
+  branchName: Schema.optionalKey(Schema.String),
   /**
    * The side the message is on when its speaker isn't one of the cast, as the context reads
    * it (assemblySources.ts): its first version's, deleted or not, so which versions are

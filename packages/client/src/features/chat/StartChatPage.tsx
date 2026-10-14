@@ -5,9 +5,10 @@
 // own composer draft takes over: leaving and coming back finds it (DESIGN §6.2).
 //
 // A new chat of a group (`/groups/$chatId/new`) is the same, with the group's characters:
-// its first character greets, as the first of ST's group greetings (ST adds each member's
-// greeting in turn; one keeps the start short), the reply comes from the character picked,
-// and the chat is titled with the group's name, so it's one of the group's chats.
+// each member greets in turn, as ST starts a group chat (`getGroupChat` in its
+// group-chats.js: the group's members in order, a member without a greeting skipped), each
+// greeting with its card's alternates to pick from; the reply comes from the character
+// picked, and the chat is titled with the group's name, so it's one of the group's chats.
 import type { CastCard, ChatId, EntityId } from "@rp/shared/chat.ts"
 import type { CardForChat, ChatGroup } from "@rp/shared/chatSetupApi.ts"
 import type { FrozenValues } from "@rp/shared/macros/expand.ts"
@@ -58,10 +59,64 @@ const savePersona = (id: string) => {
   }
 }
 
-/** A group the new chat is of: its name, its characters, and the chat that names it. */
+/** A group the new chat is of: its name, its characters, the chat that names it, and each character's greetings. */
 interface PendingGroup {
   readonly group: ChatGroup
   readonly chatId: ChatId
+  /** Each member's card, in the group's order: each greets in turn. */
+  readonly cards: ReadonlyArray<CardForChat>
+}
+
+/** One greeting of the chat not made yet, with its card's alternates to pick from. */
+function Greeting({
+  card,
+  index,
+  onIndex,
+  text
+}: {
+  card: CardForChat
+  index: number
+  onIndex: (index: number) => void
+  /** The greeting shown, its macros expanded. */
+  text: string
+}) {
+  const name = card.card.name
+  const count = card.greetings.length
+  return (
+    <article
+      aria-label={`Greeting from ${name}`}
+      className="flex flex-col gap-2 rounded-lg border border-border bg-surface px-4 py-3"
+    >
+      <header className="flex items-center gap-2 text-sm">
+        <Avatar id={card.card.entityId} name={name} mediaId={card.card.avatarMediaId} size="sm" />
+        <span className="min-w-0 truncate font-medium">{name}</span>
+        {count > 1 && (
+          <div className="ml-auto flex shrink-0 items-center gap-1" role="group" aria-label={`${name}'s greetings`}>
+            <Button
+              variant="ghost"
+              aria-label={`Previous greeting from ${name}`}
+              disabled={index === 0}
+              onClick={() => onIndex(index - 1)}
+            >
+              ‹
+            </Button>
+            <span className="min-w-12 text-center text-muted tabular-nums">
+              {index + 1} / {count}
+            </span>
+            <Button
+              variant="ghost"
+              aria-label={`Next greeting from ${name}`}
+              disabled={index === count - 1}
+              onClick={() => onIndex(index + 1)}
+            >
+              ›
+            </Button>
+          </div>
+        )}
+      </header>
+      <Markdown text={text} streaming={false} />
+    </article>
+  )
 }
 
 function Pending({
@@ -80,7 +135,10 @@ function Pending({
     const saved = savedPersona()
     return personas.find((p) => p.entityId === saved)?.entityId ?? personas[0]?.entityId ?? NONE
   })
-  const [greeting, setGreeting] = useState(0)
+  // Who greets: the card, or each of the group's characters in turn; the greeting picked of each.
+  const greeters = group?.cards ?? [card]
+  const [picks, setPicks] = useState<ReadonlyArray<number>>(() => greeters.map(() => 0))
+  const greeting = picks[0] ?? 0
   const members = group?.group.members ?? null
   // Who replies: in a group, the character picked (its first, as the chat's default speaker).
   const [replier, setReplier] = useState<string>(card.card.entityId)
@@ -153,25 +211,29 @@ function Pending({
     }
   }, [userId, copyKey])
   const playing = personas.find((p) => p.entityId === persona) ?? null
-  const shown = card.greetings[greeting]
   const name = card.card.name
   /** What the chat is with: the card, or the group. */
   const title = group?.group.name ?? name
   const replyId = (members === null ? entityId : replier) as EntityId
   const replyName = members?.find((member) => member.entityId === replyId)?.name ?? name
-  const fields = { description: card.description, personality: card.personality, scenario: card.scenario }
-  // What each greeting's random and time macros drew when first shown: the chat keeps them,
-  // so a greeting reads the same after the send as before it (DESIGN §5.6).
-  const [frozen] = useState(() => new Map<number, FrozenValues>())
-  const expandGreeting = (index: number) => {
+  // What each greeting's random and time macros drew when first shown, by greeter and
+  // greeting: the chat keeps them, so a greeting reads the same after the send (DESIGN §5.6).
+  const [frozen] = useState(() => greeters.map(() => new Map<number, FrozenValues>()))
+  const expandGreeting = (at: number, index: number) => {
+    const greeter = greeters[at]!
+    const fields = {
+      description: greeter.description,
+      personality: greeter.personality,
+      scenario: greeter.scenario
+    }
     const result = expandForDisplay(
-      card.greetings[index]!,
+      greeter.greetings[index]!,
       "template",
-      { user: playing?.name ?? "User", char: name },
+      { user: playing?.name ?? "User", char: greeter.card.name },
       fields,
-      frozen.get(index) ?? {}
+      frozen[at]!.get(index) ?? {}
     )
-    frozen.set(index, result.frozen)
+    frozen[at]!.set(index, result.frozen)
     return result.text
   }
 
@@ -183,18 +245,33 @@ function Pending({
     const submitted = text
     sending.current = submitted
     setText("")
-    const shownFrozen = card.greetings.length > 0 ? frozen.get(greeting) : undefined
+    const shownFrozen = card.greetings.length > 0 ? frozen[0]!.get(greeting) : undefined
     const result = await action.run(
       (client) =>
         Effect.gen(function* () {
           const started = yield* client("StartChat", {
             // The greeting card leads; a group's chat has all its characters, under its name.
             cards: members === null ? [entityId] : members.map((member) => member.entityId),
-            ...(group === null ? {} : { title: group.group.name }),
             persona: personaId,
-            greeting: card.greetings.length > 0 ? greeting : null,
-            // The picked greeting as it was shown; the server freezes the rest itself.
-            ...(shownFrozen === undefined ? {} : { frozen: shownFrozen }),
+            ...(group === null
+              ? {
+                  greeting: card.greetings.length > 0 ? greeting : null,
+                  // The picked greeting as it was shown; the server freezes the rest itself.
+                  ...(shownFrozen === undefined ? {} : { frozen: shownFrozen })
+                }
+              : {
+                  title: group.group.name,
+                  greeting: null,
+                  // Each member greets in turn, with the greeting picked as it was shown.
+                  greeters: group.cards.map((greeter, at) => {
+                    const shown = frozen[at]!.get(picks[at] ?? 0)
+                    return {
+                      entityId: greeter.card.entityId,
+                      greeting: picks[at] ?? 0,
+                      ...(shown === undefined ? {} : { frozen: shown })
+                    }
+                  })
+                }),
             first:
               first === "send"
                 ? { _tag: "Send", content: submitted, speakerEntityId: personaId }
@@ -247,7 +324,8 @@ function Pending({
           </h1>
           {members !== null && (
             <p className="text-sm text-muted [overflow-wrap:anywhere]">
-              With {members.map((member) => member.name).join(", ")}. Saved when you send the first message.
+              With {members.map((member) => member.name).join(", ")}, who greet in turn. Saved when you send the first
+              message.
             </p>
           )}
         </div>
@@ -278,42 +356,28 @@ function Pending({
         </div>
       </header>
       <div className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col gap-3 overflow-y-auto py-2">
-        {shown === undefined ? (
-          <p className="text-sm text-muted">{name} has no greeting. Your first message starts the chat.</p>
-        ) : (
-          <article
-            aria-label="Greeting"
-            className="flex flex-col gap-2 rounded-lg border border-border bg-surface px-4 py-3"
-          >
-            <header className="flex items-center gap-2 text-sm">
-              <span className="font-medium">{name}</span>
-              {members !== null && <span className="text-muted"> greets first</span>}
-              {card.greetings.length > 1 && (
-                <div className="ml-auto flex items-center gap-1" role="group" aria-label="Greetings">
-                  <Button
-                    variant="ghost"
-                    aria-label="Previous greeting"
-                    disabled={greeting === 0}
-                    onClick={() => setGreeting(greeting - 1)}
-                  >
-                    ‹
-                  </Button>
-                  <span className="min-w-12 text-center text-muted tabular-nums">
-                    {greeting + 1} / {card.greetings.length}
-                  </span>
-                  <Button
-                    variant="ghost"
-                    aria-label="Next greeting"
-                    disabled={greeting === card.greetings.length - 1}
-                    onClick={() => setGreeting(greeting + 1)}
-                  >
-                    ›
-                  </Button>
-                </div>
-              )}
-            </header>
-            <Markdown text={expandGreeting(greeting)} streaming={false} />
-          </article>
+        {greeters.every((greeter) => greeter.greetings.length === 0) && (
+          <p className="text-sm text-muted">
+            {members === null ? `${name} has no greeting.` : "None of them has a greeting."} Your first message starts
+            the chat.
+          </p>
+        )}
+        {greeters.map((greeter, at) =>
+          greeter.greetings.length === 0 ? (
+            members !== null && (
+              <p key={greeter.card.entityId} className="text-sm text-muted">
+                {greeter.card.name} has no greeting.
+              </p>
+            )
+          ) : (
+            <Greeting
+              key={greeter.card.entityId}
+              card={greeter}
+              index={picks[at] ?? 0}
+              onIndex={(index) => setPicks((current) => current.map((pick, i) => (i === at ? index : pick)))}
+              text={expandGreeting(at, picks[at] ?? 0)}
+            />
+          )
         )}
       </div>
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-2 border-t border-border pt-2 pb-2">
@@ -397,7 +461,7 @@ export function StartChatPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once per card
   }, [entityId])
   return (
-    <div data-fill className="flex min-h-0 flex-1 flex-col">
+    <div data-fill className="flex min-h-0 flex-1 flex-col px-4 pt-4">
       {loaded ? (
         <Pending key={entityId} card={loaded.card} personas={loaded.personas} />
       ) : action.error ? (
@@ -415,7 +479,7 @@ export function StartGroupChatPage() {
   const action = useAction()
   const [loaded, setLoaded] = useState<{
     group: ChatGroup
-    card: CardForChat
+    cards: ReadonlyArray<CardForChat>
     personas: ReadonlyArray<CastCard>
   } | null>(null)
   useTitle(loaded ? `New chat: ${loaded.group.name}` : "New chat")
@@ -424,28 +488,38 @@ export function StartGroupChatPage() {
       .run((client) =>
         Effect.gen(function* () {
           const { group } = yield* client("ListGroupChats", { chatId })
-          const { card, cards } = yield* Effect.all(
+          // Every member's greetings: each greets in turn.
+          const { greeters, cards } = yield* Effect.all(
             {
-              card: client("GetCardForChat", { entityId: group.members[0]!.entityId }),
+              greeters: Effect.forEach(
+                group.members,
+                (member) => client("GetCardForChat", { entityId: member.entityId }),
+                { concurrency: "unbounded" }
+              ),
               cards: client("ListCards", undefined)
             },
             { concurrency: "unbounded" }
           )
-          return { group, card, cards }
+          return { group, greeters, cards }
         })
       )
       .then((result) => {
         if (!result.ok) return
-        const { group, card, cards } = result.value
+        const { group, greeters, cards } = result.value
         const inGroup = new Set<string>(group.members.map((member) => member.entityId))
-        setLoaded({ group, card, personas: cards.filter((c) => c.persona && !inGroup.has(c.entityId)) })
+        setLoaded({ group, cards: greeters, personas: cards.filter((c) => c.persona && !inGroup.has(c.entityId)) })
       })
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once per group
   }, [chatId])
   return (
-    <div data-fill className="flex min-h-0 flex-1 flex-col">
+    <div data-fill className="flex min-h-0 flex-1 flex-col px-4 pt-4">
       {loaded ? (
-        <Pending key={chatId} card={loaded.card} personas={loaded.personas} group={{ group: loaded.group, chatId }} />
+        <Pending
+          key={chatId}
+          card={loaded.cards[0]!}
+          personas={loaded.personas}
+          group={{ group: loaded.group, chatId, cards: loaded.cards }}
+        />
       ) : action.error ? (
         <ErrorAlert error={action.error} />
       ) : (

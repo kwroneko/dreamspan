@@ -1086,6 +1086,56 @@ export class ChatSession {
     return this.call((client) => client("DeleteVersion", { versionId }))
   }
 
+  /** Deletes the branch a message starts (it and everything below it) to the bin. */
+  deleteBranch(slotId: SlotId) {
+    return this.call((client) => client("DeleteBranch", { slotId }))
+  }
+
+  /** The alternates where `slotId` is one, with their names. */
+  listBranches(slotId: SlotId) {
+    return this.call((client) => client("ListBranches", { slotId }))
+  }
+
+  /** Names the branch a message starts; the slot comes back with its name. */
+  async nameBranch(slotId: SlotId, name: string): Promise<Outcome<PathEntry>> {
+    const result = await this.call((client) => client("NameBranch", { slotId, name }))
+    if (result.ok) this.applySlot(result.value)
+    return result
+  }
+
+  /** Names the chat; the header shows it at once, other tabs on the `Chat` event, lists read again. */
+  async rename(name: string): Promise<Outcome<Chat>> {
+    const result = await this.call((client) => client("RenameChat", { chatId: this.chatId, name }))
+    if (result.ok) {
+      this.applyState({ _tag: "Chat", chat: result.value })
+      this.invalidate(["chats"])
+    }
+    return result
+  }
+
+  /** Names the group the chat is in: all its chats, this one included. */
+  async renameGroup(name: string) {
+    const result = await this.call((client) => client("RenameGroup", { chatId: this.chatId, name }))
+    if (result.ok) {
+      const own = result.value.chats.find((chat) => chat.id === this.chatId)
+      if (own) this.applyState({ _tag: "Chat", chat: own })
+      this.invalidate(["chats"])
+    }
+    return result
+  }
+
+  /** Has the queries with these reactivity keys (the chat list, the home grid) read again. */
+  private invalidate(keys: ReadonlyArray<string>) {
+    void Effect.runPromise(
+      Effect.map(Registry.getResult(this.registry, AppClient.runtime), (services) =>
+        Context.get(
+          services as unknown as Context.Context<Reactivity.Reactivity>,
+          Reactivity.Reactivity
+        ).invalidateUnsafe(keys)
+      )
+    )
+  }
+
   listVersions(slotId: SlotId) {
     return this.call((client) => client("ListVersions", { slotId }))
   }

@@ -106,6 +106,20 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
     ListGroupChats: ({ chatId }) =>
       Effect.flatMap(userId, (id) => reader.GroupChats({ userId: id, chatId })).pipe(internal("ListGroupChats")),
 
+    // The group read, then its chats renamed only while still named as read; each open chat hears.
+    RenameGroup: ({ chatId, name }) =>
+      Effect.gen(function* () {
+        const id = yield* userId
+        const { chats } = yield* reader.GroupChats({ userId: id, chatId })
+        const renamed = yield* writer.RenameChats({
+          userId: id,
+          chats: chats.map((chat) => ({ chatId: chat.id, from: chat.title })),
+          name
+        })
+        for (const chat of renamed) hub.publish(chat.id, { _tag: "Chat", chat })
+        return yield* reader.GroupChats({ userId: id, chatId })
+      }).pipe(internal("RenameGroup")),
+
     SetPersona: ({ entityId, persona }) =>
       Effect.gen(function* () {
         const id = yield* userId
@@ -118,7 +132,7 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
       Effect.flatMap(userId, (id) => reader.GetCardForChat({ userId: id, entityId })).pipe(internal("GetCardForChat")),
 
     // Once the chat is written, a first reply starts even if the caller has gone.
-    StartChat: ({ cards, persona, greeting, first, frozen, title }) =>
+    StartChat: ({ cards, persona, greeting, first, frozen, greeters, title }) =>
       Effect.gen(function* () {
         if (first._tag === "Generate" && Option.isNone(generator)) {
           return yield* new GenerationUnavailable({
@@ -126,24 +140,32 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
           })
         }
         const id = yield* userId
+        // The names the greetings show with: the persona's and each card's, as in the preview.
+        const [player] = persona === null ? [] : yield* reader.CastCards({ userId: id, entityIds: [persona] })
+        // Who greets: those asked for (a group's members, in turn), else the first card.
+        const asked = greeters ?? [{ entityId: cards[0]!, greeting: greeting ?? 0, frozen }]
         // Every greeting's random and time macros are frozen here, whatever the client sent:
         // the values it saw in the preview are kept, and any it didn't send are drawn now.
-        const lead = yield* reader.GetCardForChat({ userId: id, entityId: cards[0]! })
-        const fields = { description: lead.description, personality: lead.personality, scenario: lead.scenario }
-        // The names the greeting shows with: the persona's and the card's, as in the preview.
-        const [player] = persona === null ? [] : yield* reader.CastCards({ userId: id, entityIds: [persona] })
-        const names = { user: player?.name ?? "User", char: lead.card.name }
-        const picked = greeting ?? 0
-        const drawn = lead.greetings.map((text, i) =>
-          freezeTemplate(text, fields, names, i === picked ? (frozen ?? {}) : {})
+        const drawn = yield* Effect.forEach(asked, (greeter) =>
+          Effect.map(reader.GetCardForChat({ userId: id, entityId: greeter.entityId }), (card) => {
+            const fields = { description: card.description, personality: card.personality, scenario: card.scenario }
+            const names = { user: player?.name ?? "User", char: card.card.name }
+            return {
+              entityId: greeter.entityId,
+              // The first card's greeting as asked (null: its first), else the one picked.
+              greeting: greeters === undefined ? greeting : greeter.greeting,
+              frozen: card.greetings.map((text, i) =>
+                freezeTemplate(text, fields, names, i === greeter.greeting ? (greeter.frozen ?? {}) : {})
+              )
+            }
+          })
         )
         const result = yield* writer.StartChat({
           userId: id,
           cards,
           persona,
-          greeting,
+          greeters: drawn,
           first,
-          frozen: drawn,
           title: title ?? null
         })
         if (first._tag === "Generate") {

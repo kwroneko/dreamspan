@@ -241,10 +241,13 @@ function AppShell() {
   )
 }
 
-/** Chats fill the height and scroll their own messages; other screens scroll as pages. */
+/**
+ * Chats, and chats not made yet (a card's or a group's first greetings), fill the height and
+ * scroll their own messages, the composer always in view; other screens scroll as pages.
+ */
 function Main() {
   const pathname = useLocation({ select: (location) => location.pathname })
-  const fill = /^\/chats\/[^/]+$/.test(pathname)
+  const fill = /^\/(?:chats\/[^/]+|cards\/[^/]+\/chat|groups\/[^/]+\/new)$/.test(pathname)
   return (
     <main id="content" className={`min-h-0 flex-1 ${fill ? "flex flex-col" : "overflow-y-auto"}`}>
       {fill ? (

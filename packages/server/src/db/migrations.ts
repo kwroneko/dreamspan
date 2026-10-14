@@ -222,7 +222,10 @@ export const migrations = {
   // came hidden from an ST import, so its mark says who hid it.
   "0035_hidden_by_user": runAll([
     `ALTER TABLE slots ADD COLUMN hidden_by_user INTEGER NOT NULL DEFAULT 0 CHECK (hidden_by_user IN (0, 1))`
-  ])
+  ]),
+  // A branch's name, on the message that starts it (the slot among its alternates; NameBranch).
+  // Null: unnamed, shown as "Branch k".
+  "0039_branch_names": runAll([`ALTER TABLE slots ADD COLUMN branch_name TEXT`])
 }
 
 export const Migrations = SqliteMigrator.layer({ loader: SqliteMigrator.fromRecord(migrations) })

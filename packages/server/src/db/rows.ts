@@ -124,6 +124,7 @@ export interface PathRow extends VersionRow {
   readonly row_version: number
   readonly context_excluded: number
   readonly hidden_by_user: number
+  readonly branch_name: string | null
   readonly slot_deleted: number
   readonly version_count: number
   readonly branch_count: number
@@ -149,6 +150,7 @@ export const toPathEntry = (row: PathRow) => {
     versionCount: row.version_count,
     branchCount: row.branch_count,
     branchIndex: row.branch_index,
+    ...(row.branch_name === null ? {} : { branchName: row.branch_name }),
     side: row.user_side === 1 ? "user" : "assistant",
     firstSpeakerEntityId: row.first_speaker as EntityId | null,
     inContext: versionInContext(version.status, version.content, contextExcluded)

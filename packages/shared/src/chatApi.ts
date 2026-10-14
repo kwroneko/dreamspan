@@ -165,6 +165,24 @@ export const chatCursor = (chat: Pick<Chat, "id" | "createdAt" | "lastMessageAt"
   empty: chat.lastMessageAt === null
 })
 
+/** A name the user gives a chat or a group (RenameChat, RenameGroup); empty: the automatic name. */
+export const ChatNameInput = Schema.String.check(Schema.isMaxLength(200))
+
+/** A name the user gives a branch (NameBranch); empty: unnamed again. */
+export const BranchNameInput = Schema.String.check(Schema.isMaxLength(100))
+
+/** One of the alternates at a place the path branches, as the header's branch menu lists it. */
+export class Branch extends Schema.Class<Branch>("Branch")({
+  /** The message that starts it. */
+  slotId: SlotId,
+  /** Its place among the alternates, oldest first (`PathEntry.branchIndex`). */
+  index: Schema.Int,
+  /** Its name; null when it has none. */
+  name: Schema.NullOr(Schema.String),
+  /** The start of its first message's text; empty for a message deleted on its own. */
+  preview: Schema.String
+}) {}
+
 /** Text to find chats by (ListChats). */
 export const ChatSearch = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200))
 
@@ -192,6 +210,16 @@ export class ChatApi extends RpcGroup.make(
     error: ServerError
   }),
   Rpc.make("CreateChat", { payload: { title: Schema.String }, success: Chat, error: ServerError }),
+  /**
+   * Names a chat (DESIGN §2.1): its title becomes the name, and a chat imported from ST keeps
+   * the day ST started it. An empty name gives back the automatic one. Open tabs get `Chat`.
+   * A chat of a group leaves it for a group of its own name (RenameGroup renames them all).
+   */
+  Rpc.make("RenameChat", {
+    payload: { chatId: ChatId, name: ChatNameInput },
+    success: Chat,
+    error: Schema.Union([...Errors])
+  }),
   Rpc.make("GetChat", { payload: { chatId: ChatId }, success: Chat, error: Schema.Union([...Errors]) }),
   /** A window of the path ending at `leafSlotId` (null: the chat's active leaf). */
   Rpc.make("ReadPath", {
@@ -338,6 +366,21 @@ export class ChatApi extends RpcGroup.make(
     payload: { chatId: ChatId, slotId: SlotId, index: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)) },
     success: BranchSwitch,
     error: Schema.Union([...WriteErrors])
+  }),
+  /** The alternates at `slotId`'s place (it and its siblings a path can reach), oldest first. */
+  Rpc.make("ListBranches", {
+    payload: { slotId: SlotId },
+    success: Schema.Array(Branch),
+    error: Schema.Union([...Errors])
+  }),
+  /**
+   * Names the branch `slotId` starts (one of the alternates where the path branches); an
+   * empty name takes the name off. Returns the slot, which subscribers get as `Slot`.
+   */
+  Rpc.make("NameBranch", {
+    payload: { slotId: SlotId, name: BranchNameInput },
+    success: PathEntry,
+    error: Schema.Union([...Errors])
   }),
   /** Next request at the displayed leaf; Cache events invalidate this read. */
   Rpc.make("GetNextContext", {

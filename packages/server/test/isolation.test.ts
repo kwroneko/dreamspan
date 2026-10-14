@@ -867,6 +867,15 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
   DeleteMessage: {
     probe: (actor, owner) => refused(actor.api.DeleteMessage({ slotId: owner.chat.slotId }), "NotFound")
   },
+  RenameChat: {
+    probe: (actor, owner) => refused(actor.api.RenameChat({ chatId: owner.chat.chatId, name: "x" }), "NotFound")
+  },
+  ListBranches: {
+    probe: (actor, owner) => refused(actor.api.ListBranches({ slotId: owner.chat.slotId }), "NotFound")
+  },
+  NameBranch: {
+    probe: (actor, owner) => refused(actor.api.NameBranch({ slotId: owner.chat.slotId, name: "x" }), "NotFound")
+  },
   DeleteBranch: {
     probe: (actor, owner) => refused(actor.api.DeleteBranch({ slotId: owner.chat.slotId }), "NotFound")
   },
@@ -955,6 +964,9 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
   ListGroupChats: {
     probe: (actor, owner) => refused(actor.api.ListGroupChats({ chatId: owner.chat.chatId }), "NotFound")
   },
+  RenameGroup: {
+    probe: (actor, owner) => refused(actor.api.RenameGroup({ chatId: owner.chat.chatId, name: "x" }), "NotFound")
+  },
   SetPersona: {
     probe: (actor, owner) => refused(actor.api.SetPersona({ entityId: owner.cardId, persona: false }), "NotFound")
   },
@@ -976,6 +988,17 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
         )
         yield* refused(
           actor.api.StartChat({ cards: [actor.cardId], persona: null, greeting: null, first: send(owner.cardId) }),
+          "NotFound"
+        )
+        // Their card as a greeter.
+        yield* refused(
+          actor.api.StartChat({
+            cards: [actor.cardId],
+            persona: null,
+            greeting: null,
+            greeters: [{ entityId: owner.cardId, greeting: 0 }],
+            first: send(null)
+          }),
           "NotFound"
         )
       })
