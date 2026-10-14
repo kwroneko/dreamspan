@@ -65,6 +65,8 @@ export interface ChatView {
   readonly follow: boolean
   /** Bumped when the window is replaced rather than extended, so the list can position it. */
   readonly opened: number
+  /** History changed, including outside the loaded window; streamed text doesn't bump this. */
+  readonly pathRevision: number
   readonly loading: boolean
   readonly error: string | null
   /** The chat went to the bin while open, here or elsewhere. */
@@ -109,6 +111,7 @@ export class ChatSession {
     newer: null,
     follow: true,
     opened: 0,
+    pathRevision: 0,
     loading: true,
     error: null,
     deleted: false,
@@ -716,6 +719,9 @@ export class ChatSession {
       }
       case "Slot":
       case "Version":
+        this.update({ pathRevision: this.view.pathRevision + 1 })
+        if (this.reads > 0) this.missed.push(event)
+        return this.applyState(event)
       case "Chat":
         if (this.reads > 0) this.missed.push(event)
         return this.applyState(event)
@@ -783,6 +789,7 @@ export class ChatSession {
 
   /** Reads the loaded range again, as far as one read goes, keeping the same slots in view. */
   private reload() {
+    this.update({ pathRevision: this.view.pathRevision + 1 })
     this.scheduleLcm()
     const { entries, newer } = this.view
     const limit = Math.min(MAX_LOADED, Math.max(PAGE, entries.length))

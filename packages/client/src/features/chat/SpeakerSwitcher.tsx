@@ -283,8 +283,8 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
           setTab(next)
           setActive(0)
           saveTab(next)
-          search.current?.focus()
         }}
+        onPointerActivate={() => search.current?.focus()}
         tabs={[
           { value: "members", label: "Members", panel: tab === "members" ? options : null },
           { value: "personas", label: "Personas", panel: tab === "personas" ? options : null },

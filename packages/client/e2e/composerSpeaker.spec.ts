@@ -42,6 +42,86 @@ test.beforeEach(async ({ page }) => {
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
 })
 
+for (const [width, height] of [
+  [1440, 900],
+  [390, 844]
+] as const) {
+  for (const turns of [2, 82]) {
+    test(`reply order refreshes after deleting and restoring an earlier turn (${turns} turns, ${width}px)`, async ({
+      page
+    }) => {
+      await page.setViewportSize({ width, height })
+      const chatId = await chatWith(["Mira", "Tobin"])
+      const first = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+        Effect.gen(function* () {
+          const cards = yield* api.ListCards()
+          const entity = (name: string) => cards.find((card) => card.name === name)!.entityId
+          let parent = null as import("@rp/shared/chat.ts").SlotId | null
+          let first = parent
+          for (let index = 0; index < turns; index++) {
+            const sent = yield* api.SendMessage({
+              chatId,
+              parentSlotId: parent,
+              branch: false,
+              content: index === 0 ? "Mira's earlier turn" : `Ana's turn ${index}`,
+              speakerEntityId: entity(index === 0 ? "Mira" : "Ana")
+            })
+            if (sent._tag !== "Posted") throw new Error("Expected a posted turn")
+            parent = sent.entry.slotId
+            first ??= parent
+          }
+          return first!
+        })
+      )
+      await page.goto(`${server().url}/chats/${chatId}`)
+      await expect(replyFrom(page)).toContainText("Next in turn: Tobin, after Mira")
+      if (turns > 60) await expect(page.getByText("Mira's earlier turn", { exact: true })).toHaveCount(0)
+      const deleted = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+        api.DeleteMessage({ slotId: first })
+      )
+      await expect(replyFrom(page)).toContainText("Next in turn: Mira, first in the cast")
+      await expect(page.getByRole("button", { name: "Mira replies", exact: true })).toBeEnabled()
+      await asUser(server(), ADMIN.handle, ADMIN.password, (api) => api.RestoreBinItem({ itemId: deleted.id }))
+      await expect(replyFrom(page)).toContainText("Next in turn: Tobin, after Mira")
+      // Delete again, then verify both send paths actually use the corrected order.
+      await asUser(server(), ADMIN.handle, ADMIN.password, (api) => api.DeleteMessage({ slotId: first }))
+      await expect(replyFrom(page)).toContainText("Next in turn: Mira, first in the cast")
+      if (turns === 2) {
+        await composer(page).fill("A new persona turn after deletion.")
+        await page.getByRole("button", { name: "Send as Ana", exact: true }).click()
+      } else await page.getByRole("button", { name: "Mira replies", exact: true }).click()
+      await expect(lastHeader(page)).toContainText("Mira")
+      await expect(generating(page)).toHaveCount(0, { timeout: 20_000 })
+    })
+  }
+
+  test(`clicking a remembered tab keeps search ready; keyboard tabs retain focus (${width}px)`, async ({ page }) => {
+    await page.setViewportSize({ width, height })
+    const chatId = await chatWith(["Mira", "Tobin"])
+    await page.goto(`${server().url}/chats/${chatId}`)
+    const search = page.getByRole("combobox", { name: "Find a card to speak as" })
+    await speakerChip(page).click()
+    await page.getByRole("tab", { name: "All cards" }).click()
+    await expect(search).toBeFocused()
+    await search.press("Escape")
+    await speakerChip(page).click()
+    await expect(search).toBeFocused()
+    await page.getByRole("tab", { name: "All cards" }).click()
+    await expect(search).toBeFocused()
+    await page.keyboard.type("Bo")
+    await expect(search).toHaveValue("Bo")
+    await search.press("Enter")
+    await expect(speakerChip(page)).toHaveAccessibleName(/^Speaking as Bo/)
+    await speakerChip(page).click()
+    await search.press("Tab")
+    await expect(page.getByRole("tab", { name: "All cards" })).toBeFocused()
+    await page.keyboard.press("ArrowLeft")
+    await expect(page.getByRole("tab", { name: "Personas" })).toBeFocused()
+    await page.keyboard.press("ArrowLeft")
+    await expect(page.getByRole("tab", { name: "Members" })).toBeFocused()
+  })
+}
+
 test("Reply from: the next in turn, a pick for one reply, and an empty Send", async ({ page }) => {
   const chatId = await chatWith(["Mira", "Tobin", "Wren"])
   await page.goto(`${server().url}/chats/${chatId}`)

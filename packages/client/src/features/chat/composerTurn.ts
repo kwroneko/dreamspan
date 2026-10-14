@@ -6,8 +6,14 @@ import { useEffect, useState } from "react"
 import type { ChatSession, ChatView } from "./session.ts"
 
 export function useComposerTurn(session: ChatSession, view: ChatView, cast: Cast | null) {
-  const [tail, setTail] = useState<{ leaf: SlotId | null; cast: Cast; entries: ReadonlyArray<PathEntry> } | null>(null)
+  const [tail, setTail] = useState<{
+    leaf: SlotId | null
+    cast: Cast
+    revision: number
+    entries: ReadonlyArray<PathEntry>
+  } | null>(null)
   const leaf = view.leafSlotId
+  const revision = view.pathRevision
   useEffect(() => {
     if (cast === null) return
     let cancelled = false
@@ -32,7 +38,7 @@ export function useComposerTurn(session: ChatSession, view: ChatView, cast: Cast
             (entry) => entry.version.speakerEntityId !== null && characters.includes(entry.version.speakerEntityId)
           )
         ) {
-          setTail({ leaf, cast, entries })
+          setTail({ leaf, cast, revision, entries })
           return
         }
         range = { _tag: "Older", from: older }
@@ -43,6 +49,6 @@ export function useComposerTurn(session: ChatSession, view: ChatView, cast: Cast
       cancelled = true
       clearTimeout(timer)
     }
-  }, [session, leaf, cast])
-  return tail?.leaf === leaf && tail.cast === cast ? tail.entries : null
+  }, [session, leaf, cast, revision])
+  return tail?.leaf === leaf && tail.cast === cast && tail.revision === revision ? tail.entries : null
 }
