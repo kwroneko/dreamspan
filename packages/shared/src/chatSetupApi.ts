@@ -111,6 +111,52 @@ export class ChatNote extends Schema.Class<ChatNote>("ChatNote")({
   active: Schema.Boolean
 }) {}
 
+/** A card's definition as a chat shows it, read-only: the fields ST's character panel shows. */
+export class CardDefinition extends Schema.Class<CardDefinition>("CardDefinition")({
+  description: Schema.String,
+  personality: Schema.String,
+  scenario: Schema.String,
+  firstMessage: Schema.String,
+  exampleDialogue: Schema.String,
+  creatorNotes: Schema.String,
+  /** How many alternate greetings it has besides the first message. */
+  alternateGreetings: Schema.Int
+}) {}
+
+/**
+ * A card in a chat, as the Cast tab shows it (DESIGN §2.1, §4): the library entry an edit
+ * "everywhere" changes and how many chats that reaches, the chat's own version if it has one,
+ * and the definition the next request reads at the position asked about, picked as the
+ * context assembler picks it (ARCHITECTURE §library).
+ */
+export class ChatCard extends Schema.Class<ChatCard>("ChatCard")({
+  entityId: EntityId,
+  /** The library entry: the card's upstream, or its oldest variant without one. */
+  refId: RefId,
+  /** Chats a change to that entry reaches ("used by N chats", ARCHITECTURE §14.2). */
+  usedByChats: Schema.Int,
+  /** This chat's own version of the card (a `chat_override`), if it has one. */
+  overrideRefId: Schema.NullOr(RefId),
+  /**
+   * How the chat's state picks the version there: `default` (its own version if it has
+   * one, else the upstream), or bound to a `ref` (a variant, say) or a fixed `revision`.
+   */
+  binding: Schema.Literals(["default", "ref", "revision"]),
+  /** The definition in use is this chat's own version, at its latest edit. */
+  usesOverride: Schema.Boolean,
+  definition: CardDefinition
+}) {}
+
+/**
+ * The chat's own version of a card, opened to edit "only in this chat". `bound`: the chat
+ * had bound another version of the card there (a variant or a fixed revision), so its own
+ * version is now bound instead, from that position on (a `card.binding` state event).
+ */
+export class CardOverrideOpened extends Schema.Class<CardOverrideOpened>("CardOverrideOpened")({
+  ref: LibraryRef,
+  bound: Schema.Boolean
+}) {}
+
 const Errors = [NotFound, ServerError] as const
 
 export class ChatSetupApi extends RpcGroup.make(
@@ -156,6 +202,26 @@ export class ChatSetupApi extends RpcGroup.make(
   Rpc.make("GetCast", {
     payload: { chatId: ChatId, slotId: Schema.NullOr(SlotId) },
     success: Cast,
+    error: Schema.Union([...Errors])
+  }),
+  /**
+   * These cards as the chat uses them after `slotId` (the Cast tab, at the leaf shown).
+   * Another user's chat or slot, or a card that isn't the user's live card, is NotFound.
+   */
+  Rpc.make("ListChatCards", {
+    payload: { chatId: ChatId, slotId: Schema.NullOr(SlotId), entityIds: Schema.Array(EntityId) },
+    success: Schema.Array(ChatCard),
+    error: Schema.Union([...Errors])
+  }),
+  /**
+   * The chat's own version of a card, to edit "only in this chat" (DESIGN §4): the existing
+   * one, or a new `chat_override` started from the version the chat uses after `slotId`
+   * (a bound variant or revision included). The context assembler uses it for this chat;
+   * where the chat had bound another version, it's bound instead from `slotId` on.
+   */
+  Rpc.make("EditCardForChat", {
+    payload: { chatId: ChatId, slotId: Schema.NullOr(SlotId), entityId: EntityId },
+    success: CardOverrideOpened,
     error: Schema.Union([...Errors])
   }),
   /** Changes the cast or a setting from `slotId` on, on that branch (DESIGN §3.4). */

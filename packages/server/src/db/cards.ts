@@ -85,3 +85,24 @@ export const loadCards = (sql: SqlClient.SqlClient, userId: UserId, ids: Readonl
         WHERE e.owner_user_id = ${userId} AND e.kind = 'card' AND e.purged_at IS NULL
           AND ${ids === null ? sql`e.deleted_at IS NULL AND e.archived_at IS NULL` : sql.in("e.id", ids)}
         ORDER BY r.label COLLATE NOCASE, e.id`.pipe(Effect.map((rows) => rows.map(parse)))
+
+/**
+ * `card` as a chat uses it: the name, avatar and lorebook flag of `revisionId` (the version
+ * the chat reads, `cardInChat` in library.ts); its label and persona mark stay the library's.
+ */
+export const castCardAt = (sql: SqlClient.SqlClient, card: CastCard, revisionId: string) =>
+  sql<{ name: unknown; avatar: unknown; book: string | null }>`
+    SELECT json_extract(doc_json, '$.name') AS name, json_extract(doc_json, '$.avatar_media_id') AS avatar,
+      json_type(doc_json, '$.character_book') AS book
+    FROM entity_revisions WHERE id = ${revisionId}`.pipe(
+    Effect.map(([row]) => {
+      if (!row) return card
+      const name = text(row.name).trim()
+      return new CastCard({
+        ...card,
+        name: name === "" ? card.label : name,
+        avatarMediaId: typeof row.avatar === "string" ? row.avatar : null,
+        lorebook: row.book === "object"
+      })
+    })
+  )

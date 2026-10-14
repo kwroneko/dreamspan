@@ -1,17 +1,43 @@
 // Read handlers for chat setup, speakers and the send queue (DESIGN §2.1, §2.2). They run
 // in the reader workers; every one touches only the acting user's rows.
 import { type ChatId, ChatSummary, type EntityId } from "@rp/shared/chat.ts"
-import { CardForChat, CardUsage } from "@rp/shared/chatSetupApi.ts"
+import { CardDefinition, CardForChat, CardUsage, ChatCard } from "@rp/shared/chatSetupApi.ts"
 import type { RefId, RevisionId } from "@rp/shared/library.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
-import { loadCards } from "./cards.ts"
+import { castCardAt, loadCards } from "./cards.ts"
+import { type CardBinding, makeLibraryQueries } from "./library.ts"
 import { NotFound, type ReadOps } from "./ops.ts"
 import { chatQueue } from "./queueRows.ts"
 import { query } from "./tx.ts"
 
+/** A card's binding from the payload's, without the nulls; undefined for none. */
+const bindingOf = (
+  bindings: Readonly<Record<string, { readonly ref: string | null; readonly revision: string | null }>>,
+  entityId: string
+): CardBinding | undefined => {
+  const binding = bindings[entityId]
+  if (binding === undefined || (binding.ref === null && binding.revision === null)) return undefined
+  return { ref: binding.ref ?? undefined, revision: binding.revision ?? undefined }
+}
+
+const text = (value: unknown) => (typeof value === "string" ? value : "")
+
+/** The read-only definition the Cast tab shows; anything malformed reads as empty. */
+const definitionOf = (doc: Record<string, unknown>) =>
+  new CardDefinition({
+    description: text(doc.description),
+    personality: text(doc.personality),
+    scenario: text(doc.scenario),
+    firstMessage: text(doc.first_mes),
+    exampleDialogue: text(doc.mes_example),
+    creatorNotes: text(doc.creator_notes),
+    alternateGreetings: Array.isArray(doc.alternate_greetings) ? doc.alternate_greetings.length : 0
+  })
+
 export const makeChatSetupReadHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
+  const lib = makeLibraryQueries(sql)
   return {
     ListCards: ({ userId }) =>
       loadCards(sql, userId, null).pipe(
@@ -116,11 +142,50 @@ export const makeChatSetupReadHandlers = Effect.gen(function* () {
         return summaries
       }).pipe(query("ChatSummaries")),
 
-    CastCards: ({ userId, entityIds }) =>
-      loadCards(sql, userId, entityIds).pipe(
-        Effect.map((cards) => cards.map(({ card }) => card)),
-        query("CastCards")
-      ),
+    CastCards: ({ userId, entityIds, chat }) =>
+      Effect.gen(function* () {
+        const cards = (yield* loadCards(sql, userId, entityIds)).map(({ card }) => card)
+        if (chat === undefined) return cards
+        // The name the chat uses is the one the model reads: its own version's, say.
+        return yield* Effect.forEach(cards, (card) =>
+          Effect.flatMap(
+            lib.cardInChat(userId, chat.chatId, card.entityId, bindingOf(chat.bindings, card.entityId)),
+            (used) => (used === null ? Effect.succeed(card) : castCardAt(sql, card, used.revisionId))
+          )
+        )
+      }).pipe(query("CastCards")),
+
+    // A handful of cards per chat: a few indexed reads each, and the usage count's scan of
+    // the user's chats, as the editor makes it.
+    ChatCards: ({ userId, chatId, entityIds, bindings }) =>
+      Effect.gen(function* () {
+        const [chat] = yield* sql<{ n: number }>`
+          SELECT count(*) AS n FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`
+        if (chat?.n !== 1) return yield* new NotFound({ entity: "chat", id: chatId })
+        const cards: Array<ChatCard> = []
+        for (const entityId of [...new Set(entityIds)].slice(0, 200)) {
+          // Another user's card, or one in the bin, reads as a missing one.
+          const library = yield* lib.cardLibraryRef(userId, entityId)
+          if (library === null) return yield* new NotFound({ entity: "card", id: entityId })
+          const override = yield* lib.chatOverride(userId, chatId, entityId)
+          const binding = bindingOf(bindings, entityId)
+          // What the context assembler reads here; a card it can't resolve shows its library entry.
+          const used = yield* lib.cardInChat(userId, chatId, entityId, binding)
+          const usesOverride = override !== null && used?.refId === override.id && !binding?.revision
+          cards.push(
+            new ChatCard({
+              entityId,
+              refId: library.id as RefId,
+              usedByChats: yield* lib.usedByChats(userId, library),
+              overrideRefId: (override?.id ?? null) as RefId | null,
+              binding: binding?.revision ? "revision" : binding?.ref ? "ref" : "default",
+              usesOverride,
+              definition: definitionOf(yield* lib.loadDoc(used?.revisionId ?? library.head_revision_id))
+            })
+          )
+        }
+        return cards
+      }).pipe(query("ChatCards")),
 
     GetCardForChat: ({ userId, entityId }) =>
       Effect.gen(function* () {
