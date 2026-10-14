@@ -18,7 +18,7 @@ import { Button } from "../../ui/Button.tsx"
 import { Switch } from "../../ui/Choice.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { Input } from "../../ui/Field.tsx"
-import { Menu } from "../../ui/Menu.tsx"
+import { ActionMenu } from "../../ui/Menu.tsx"
 import { Popover } from "../../ui/Popover.tsx"
 import { Badge } from "../../ui/Surface.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
@@ -341,7 +341,7 @@ function Member({
           <span className="sr-only">{name} is </span>Present
         </Switch>
         <span className="-mt-1 -mr-2">
-          <Menu
+          <ActionMenu
             label={`More for ${name}`}
             trigger={<MoreIcon />}
             items={[

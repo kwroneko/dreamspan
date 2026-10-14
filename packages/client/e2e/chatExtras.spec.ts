@@ -8,6 +8,7 @@ import type { SendResult } from "@rp/shared/chatApi.ts"
 import { Effect } from "effect"
 import { typeInto } from "./support/composer.ts"
 import { asUser } from "./support/rpc.ts"
+import { showActions } from "./support/message.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
 // About two seconds a reply.
@@ -46,7 +47,7 @@ test("switching between branches moves the chat to them, each with its own compo
   await login(page)
   await page.goto(`${server().url}/chats/${chatId}`)
   const right = message(page, "Take the right road.")
-  await expect(right.getByText("branch 2 of 2")).toBeVisible()
+  await expect(right.getByRole("group", { name: "Branches: 2 of 2" })).toBeVisible()
   await expect(message(page, "The left road floods.")).toHaveCount(0)
   await box(page).fill("On the right, a toll.")
   await expect
@@ -58,7 +59,7 @@ test("switching between branches moves the chat to them, each with its own compo
 
   await right.getByRole("button", { name: "Previous branch" }).click()
   const left = message(page, "Take the left road.")
-  await expect(left.getByText("branch 1 of 2")).toBeVisible()
+  await expect(left.getByRole("group", { name: "Branches: 1 of 2" })).toBeVisible()
   await expect(message(page, "The left road floods.")).toBeVisible()
   await expect(box(page)).toHaveValue("")
   // The chat opens on the branch switched to from now on.
@@ -83,7 +84,8 @@ test("a deleted message comes back with Undo, and the bin restores and deletes f
   )
   await login(page)
   await page.goto(`${server().url}/chats/${chatId}`)
-  await message(page, "A ship answers.").getByRole("button", { name: "Delete", exact: true }).click()
+  await showActions(message(page, "A ship answers."))
+  await message(page, "A ship answers.").getByRole("button", { name: "Delete message", exact: true }).click()
   await expect(message(page, "A ship answers.")).toHaveCount(0)
   const toast = page.getByText('Deleted: Message in "Lighthouse"')
   await expect(toast).toBeVisible()
@@ -92,7 +94,8 @@ test("a deleted message comes back with Undo, and the bin restores and deletes f
   // Back at the end of the chat, where it was.
   await expect(message(page, "A ship answers.")).toBeVisible()
 
-  await message(page, "A ship answers.").getByRole("button", { name: "Delete", exact: true }).click()
+  await showActions(message(page, "A ship answers."))
+  await message(page, "A ship answers.").getByRole("button", { name: "Delete message", exact: true }).click()
   await page.getByRole("button", { name: "Open the bin" }).click()
   await expect(page).toHaveURL(/\/bin$/)
   const item = page.getByRole("listitem", { name: 'Message in "Lighthouse"' })
@@ -232,7 +235,7 @@ for (const scheme of ["light", "dark"] as const) {
       )
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
       await page.goto(`${server().url}/chats/${chatId}`)
-      await expect(page.getByText("branch 2 of 2")).toBeVisible()
+      await expect(page.getByRole("group", { name: "Branches: 2 of 2" })).toBeVisible()
       await shoot("branches")
       await page.goto(`${server().url}/bin`)
       await expect(page.getByText("A message to delete.").first()).toBeVisible()

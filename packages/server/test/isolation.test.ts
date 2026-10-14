@@ -820,6 +820,45 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
         "NotFound"
       )
   },
+  MessageDrafts: {
+    probe: (actor, owner) => refused(actor.api.MessageDrafts({ chatId: owner.chat.chatId }), "NotFound")
+  },
+  SaveMessageDraft: {
+    probe: (actor, owner) =>
+      Effect.all([
+        refused(
+          actor.api.SaveMessageDraft({
+            target: { _tag: "Edit", versionId: owner.chat.versionId },
+            draftId: null,
+            content: "planted",
+            expectedRowVersion: null,
+            expectedSession: null
+          }),
+          "NotFound"
+        ),
+        refused(
+          actor.api.SaveMessageDraft({
+            target: { _tag: "Write", slotId: owner.chat.slotId },
+            draftId: null,
+            content: "planted",
+            expectedRowVersion: null,
+            expectedSession: null
+          }),
+          "NotFound"
+        )
+      ]).pipe(Effect.asVoid)
+  },
+  DiscardMessageDraft: {
+    probe: (actor, owner) =>
+      refused(
+        actor.api.DiscardMessageDraft({
+          target: { _tag: "Write", slotId: owner.chat.slotId },
+          draftId: "none",
+          expectedRowVersion: 1
+        }),
+        "NotFound"
+      )
+  },
   DeleteChat: { probe: (actor, owner) => refused(actor.api.DeleteChat({ chatId: owner.chat.chatId }), "NotFound") },
   DeleteMessage: {
     probe: (actor, owner) => refused(actor.api.DeleteMessage({ slotId: owner.chat.slotId }), "NotFound")

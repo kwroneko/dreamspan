@@ -8,6 +8,7 @@ import type { ChatId, SlotId } from "@rp/shared/chat.ts"
 import type { SendResult } from "@rp/shared/chatApi.ts"
 import { Effect } from "effect"
 import { typeInto } from "./support/composer.ts"
+import { messageMenu } from "./support/message.ts"
 import { type Client, loginCookie, withCookie } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
@@ -276,9 +277,9 @@ test("going through branches quickly saves each text on the branch it was typed 
   await box(page).fill("unsaved typing for A")
   await page.getByRole("button", { name: "Next branch" }).click()
   await expect.poll(open.held).toBe(true)
-  await expect(page.getByText("branch 2 of 3")).toBeVisible()
+  await expect(page.getByRole("group", { name: "Branches: 2 of 3" })).toBeVisible()
   await page.getByRole("button", { name: "Next branch" }).click()
-  await expect(page.getByText("branch 3 of 3")).toBeVisible()
+  await expect(page.getByRole("group", { name: "Branches: 3 of 3" })).toBeVisible()
   open.release()
   await expect(box(page)).toBeEditable()
   await expect(box(page)).toHaveValue("")
@@ -334,10 +335,11 @@ test("going back to a branch's tip shows its own composer, not the one typed in 
   await replied(page)
   await box(page).fill("draft at the tip")
   await expect.poll(async () => onServer(chatId, await leaf(chatId))).toBe("draft at the tip")
-  await message(page, "a message made in this tab").getByRole("link", { name: "Branch from here" }).click()
+  await messageMenu(message(page, "a message made in this tab"), "Branch from here")
   await expect(box(page)).toBeEditable()
   await box(page).fill("draft for a branch from the first message")
-  await page.getByRole("link", { name: "Back to the latest branch" }).click()
+  await page.getByRole("button", { name: /switch branch/ }).click()
+  await page.getByRole("menuitem", { name: "Back to the latest branch" }).click()
   await expect(box(page)).toBeEditable()
   await expect(box(page)).toHaveValue("draft at the tip")
 })
@@ -355,7 +357,7 @@ test("starting a branch copies the composer into it", async ({ page }) => {
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/chats/${setup.chatId}`)
   await expect(box(page)).toHaveValue("half typed continuation")
-  await message(page, "root to branch from").getByRole("link", { name: "Branch from here" }).click()
+  await messageMenu(message(page, "root to branch from"), "Branch from here")
   await expect(box(page)).toBeEditable()
   await expect(box(page)).toHaveValue("half typed continuation")
   expect(await onServer(setup.chatId, setup.root)).toBe("half typed continuation")

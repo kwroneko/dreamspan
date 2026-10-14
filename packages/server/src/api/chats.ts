@@ -3,7 +3,9 @@
 // to the chat's subscribers, from every tab of the user, after it's committed.
 import { type AppApi, CurrentUser } from "@rp/shared/api.ts"
 import type { ChatId, EntityId, NewVersion, SlotId } from "@rp/shared/chat.ts"
-import { BranchSwitch, GenerationUnavailable } from "@rp/shared/chatApi.ts"
+import { BranchSwitch, GenerationUnavailable, type MessageDraftTarget } from "@rp/shared/chatApi.ts"
+import { TextTooLong } from "@rp/shared/composerApi.ts"
+import { DraftKey } from "@rp/shared/drafts.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { Effect, Option, Stream } from "effect"
 import { CacheWarmth } from "../chat/CacheWarmth.ts"
@@ -11,10 +13,16 @@ import { ChatHub } from "../chat/ChatHub.ts"
 import { Generator } from "../chat/Generator.ts"
 import { Generations } from "../chat/Generations.ts"
 import { Reader, Writer } from "../db/Database.ts"
+import { DraftTooLarge } from "../db/ops.ts"
 import { internal, toServerError } from "./internal.ts"
 
-const userText = (content: string, origin: NewVersion["origin"], sourceVersionId?: NewVersion["sourceVersionId"]) => ({
-  speakerEntityId: null,
+const userText = (
+  content: string,
+  origin: NewVersion["origin"],
+  speakerEntityId: EntityId | null,
+  sourceVersionId?: NewVersion["sourceVersionId"]
+) => ({
+  speakerEntityId,
   writer: "human" as const,
   content,
   status: "complete" as const,
@@ -22,6 +30,12 @@ const userText = (content: string, origin: NewVersion["origin"], sourceVersionId
   origin,
   ...(sourceVersionId ? { sourceVersionId } : {})
 })
+
+/** A message editor's draft: an edit's is keyed by the version edited, a written version's by the slot. */
+const messageDraftKey = (target: MessageDraftTarget) =>
+  target._tag === "Edit"
+    ? new DraftKey({ targetKind: "version_edit", targetId: target.versionId, field: "" })
+    : new DraftKey({ targetKind: "scratchpad", targetId: target.slotId, field: "" })
 
 const generating = {
   speakerEntityId: null,
@@ -268,26 +282,86 @@ export const makeChatHandlers = Effect.gen(function* () {
         return yield* publishSlot(id, slotId)
       }).pipe(Effect.uninterruptible, internal("SelectVersion")),
 
-    EditVersion: ({ slotId, sourceVersionId, content, expectedRowVersion }) =>
+    // An edit or a version the user writes is still the message's speaker's, as a swipe is:
+    // an edit its source's, a written version the one shown's.
+    EditVersion: ({ slotId, sourceVersionId, content, expectedRowVersion, draft }) =>
       Effect.gen(function* () {
         const id = yield* userId
-        const version = userText(content, "edited", sourceVersionId)
-        yield* writer.AddSelectedVersion({ userId: id, slotId, version, expectedRowVersion })
+        const source = yield* reader.GetVersion({ userId: id, versionId: sourceVersionId })
+        const version = userText(content, "edited", source.speakerEntityId, sourceVersionId)
+        yield* writer.AddSelectedVersion({
+          userId: id,
+          slotId,
+          version,
+          expectedRowVersion,
+          commitDraft: draft ?? null
+        })
         return yield* publishSlot(id, slotId)
       }).pipe(internal("EditVersion")),
 
-    WriteVersion: ({ slotId, content, expectedRowVersion }) =>
+    WriteVersion: ({ slotId, content, expectedRowVersion, draft }) =>
       Effect.gen(function* () {
         const id = yield* userId
-        const version = userText(content, "user_written")
-        yield* writer.AddSelectedVersion({ userId: id, slotId, version, expectedRowVersion })
+        const { entry } = yield* reader.GetSlot({ userId: id, slotId })
+        const version = userText(content, "user_written", entry.version.speakerEntityId)
+        yield* writer.AddSelectedVersion({
+          userId: id,
+          slotId,
+          version,
+          expectedRowVersion,
+          commitDraft: draft ?? null
+        })
         return yield* publishSlot(id, slotId)
       }).pipe(internal("WriteVersion")),
 
-    AmendVersion: ({ versionId, content, expectedRowVersion }) =>
+    MessageDrafts: ({ chatId }) =>
       Effect.gen(function* () {
         const id = yield* userId
-        const version = yield* writer.AmendVersion({ userId: id, versionId, content, expectedRowVersion })
+        // Drafts are the user's own already; the chat must be too, as for every other read.
+        yield* reader.GetChat({ userId: id, chatId })
+        return yield* reader.ListMessageDrafts({ userId: id, chatId })
+      }).pipe(internal("MessageDrafts")),
+
+    SaveMessageDraft: ({ target, draftId, content, expectedRowVersion, expectedSession }) =>
+      Effect.flatMap(userId, (id) =>
+        writer.SaveDraft({
+          userId: id,
+          key: messageDraftKey(target),
+          draftId,
+          content,
+          expectedRowVersion,
+          expectedSession,
+          baseRevision: null
+        })
+      ).pipe(
+        Effect.catchIf(
+          (error): error is DraftTooLarge => error instanceof DraftTooLarge,
+          ({ length, max }) => Effect.fail(new TextTooLong({ length, max }))
+        ),
+        internal("SaveMessageDraft")
+      ),
+
+    DiscardMessageDraft: ({ target, draftId, expectedRowVersion }) =>
+      Effect.flatMap(userId, (id) =>
+        writer.ClearDraft({
+          userId: id,
+          key: messageDraftKey(target),
+          draftId,
+          outcome: "discarded",
+          expectedRowVersion
+        })
+      ).pipe(internal("DiscardMessageDraft")),
+
+    AmendVersion: ({ versionId, content, expectedRowVersion, draft }) =>
+      Effect.gen(function* () {
+        const id = yield* userId
+        const version = yield* writer.AmendVersion({
+          userId: id,
+          versionId,
+          content,
+          expectedRowVersion,
+          commitDraft: draft ?? null
+        })
         const { chatId } = yield* reader.GetSlot({ userId: id, slotId: version.slotId })
         hub.publish(chatId, { _tag: "Version", version })
         return version

@@ -58,7 +58,9 @@ const pathColumns = `v.id, v.slot_id, v.ordinal, v.status, v.speaker_entity_id, 
   ${versionExtras("v")}, s.lane_id, s.parent_slot_id, s.depth, s.row_version, ${contextExcluded()} AS context_excluded,
   s.deleted_at IS NOT NULL AS slot_deleted,
   (SELECT count(*) FROM versions c WHERE c.slot_id = s.id AND c.deleted_at IS NULL) AS version_count,
-  ${siblingCount()} AS branch_count, ${siblingCount("AND x.id < s.id")} AS branch_index`
+  ${siblingCount()} AS branch_count, ${siblingCount("AND x.id < s.id")} AS branch_index,
+  (SELECT f.writer = 'human' AND f.origin <> 'greeting' FROM versions f WHERE f.slot_id = s.id
+    ORDER BY f.ordinal LIMIT 1) AS user_side`
 
 /** The window of at most `limit` slots ending at `leaf`, root first, deleted ones included. */
 export const pathWindow = (sql: SqlClient.SqlClient, chatId: ChatId, leaf: SlotId, limit: number) =>
@@ -283,6 +285,9 @@ export const makeReadHandlers = Effect.gen(function* () {
       ),
 
     ListActiveDrafts: ({ userId }) => drafts.listActive(userId).pipe(query("ListActiveDrafts")),
+
+    ListMessageDrafts: ({ userId, chatId }) =>
+      drafts.listMessageDrafts(userId, chatId).pipe(query("ListMessageDrafts")),
 
     ComposerHistory: ({ userId, chatId, draftId, limit }) =>
       Effect.gen(function* () {

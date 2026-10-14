@@ -28,7 +28,7 @@ import { Textarea } from "../../ui/Field.tsx"
 import { Popover } from "../../ui/Popover.tsx"
 import { Badge } from "../../ui/Surface.tsx"
 import { Tabs } from "../../ui/Tabs.tsx"
-import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
+import { SquareIconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import { type CastView, nameOf, recentSpeakers, replySpeaker, useCast } from "./cast.ts"
 import { ChevronIcon, HistoryIcon, RegenerateIcon, SendIcon, StopIcon } from "./icons.tsx"
 import { speakerChoice, usePickedSpeaker } from "./speaker.ts"
@@ -633,23 +633,23 @@ export function Composer({ session, view }: { session: ChatSession; view: ChatVi
             <History draft={draft} />
           </span>
           {leaf?.version.writer === "model" && !leafGenerating && (
-            <IconButton
+            <SquareIconButton
               label="Regenerate the latest reply"
               hint="Regenerate the latest reply: a new version of it, in its place"
               variant="ghost"
               onClick={async () => report(await session.regenerate(leaf))}
             >
               <RegenerateIcon />
-            </IconButton>
+            </SquareIconButton>
           )}
           {leafGenerating && (
-            <IconButton
+            <SquareIconButton
               label="Stop the reply"
               variant="ghost"
               onClick={async () => report(await session.stop(leaf.version.id))}
             >
               <StopIcon />
-            </IconButton>
+            </SquareIconButton>
           )}
           <Tooltip
             label={
@@ -662,7 +662,7 @@ export function Composer({ session, view }: { session: ChatSession; view: ChatVi
               {name ? "Generate" : "Reply"}
             </Button>
           </Tooltip>
-          <IconButton
+          <SquareIconButton
             label={sendLabel}
             hint={`${sendLabel} (Enter; Shift+Enter for a new line)`}
             variant="primary"
@@ -671,7 +671,7 @@ export function Composer({ session, view }: { session: ChatSession; view: ChatVi
             onClick={send}
           >
             {!busy && <SendIcon />}
-          </IconButton>
+          </SquareIconButton>
         </div>
       </div>
       {hasText && (

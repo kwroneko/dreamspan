@@ -1,29 +1,55 @@
-// One message: who wrote it, its versions (swipe through them, or generate another), its
-// text, and what can be done with it. Rows only re-render when their slot changes; the
-// text of a generating version comes from its own atom, so a token re-renders the body.
+// One message: who wrote it (avatar, name, time, its number on the path), its versions
+// (swipe through them, pick one, or generate another), its text, whether it's sent to the
+// model and why not, and what can be done with it. The actions show on hover or focus on
+// a wide screen, and on a tap of the message on a narrow one. Rows only re-render when
+// their slot changes; the text of a generating version comes from its own atom, so a token
+// re-renders the body.
 import { useAtomValue } from "@effect/atom-react"
+import type { BinItem } from "@rp/shared/bin.ts"
 import type { PathEntry, SlotId, Version } from "@rp/shared/chat.ts"
 import { Link } from "@tanstack/react-router"
-import { memo, type PointerEvent, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
-import type { BinItem } from "@rp/shared/bin.ts"
+import {
+  memo,
+  type MouseEvent,
+  type PointerEvent,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore
+} from "react"
 import type { AppError } from "../../errors.ts"
-import { useDeletedToast } from "../bin/deleted.ts"
+import { Avatar } from "../../ui/Avatar.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Textarea } from "../../ui/Field.tsx"
+import { Icon, type IconName } from "../../ui/Icon.tsx"
 import { Markdown } from "../../ui/Markdown.tsx"
+import { Menu, MenuItem, MenuLinkItem, MenuRadioGroup, MenuRadioItem, MenuSeparator } from "../../ui/Menu.tsx"
 import { Select } from "../../ui/Select.tsx"
 import { Badge } from "../../ui/Surface.tsx"
+import { showToast } from "../../ui/Toast.tsx"
+import { IconButton, iconButtonClass, Tooltip } from "../../ui/Tooltip.tsx"
+import { useDeletedToast } from "../bin/deleted.ts"
 import { castView, nameOf, useCast } from "./cast.ts"
+import { formatWhen } from "./chatTitle.ts"
 import { displayText } from "./macros.ts"
 import { parseModelValue, useModelChoices } from "./modelChoices.ts"
+import type { MessageDraft, MessageEditorKey } from "./messageDraft.ts"
 import { useMountedTracking, useRenderCount } from "./perf.ts"
-import { type ChatSession, liveText, waitingCache, type Outcome } from "./session.ts"
+import { type ChatSession, liveText, type Outcome, waitingCache } from "./session.ts"
 
 /** A horizontal drag this long on a message swipes to the next or previous version. */
 const SWIPE_PX = 60
 
-/** Statuses shown as a badge; `complete` needs none. */
-const flagged = new Set<Version["status"]>(["generating", "stopped", "interrupted", "failed"])
+const fullTime = new Intl.DateTimeFormat(undefined, { dateStyle: "full", timeStyle: "short" })
+
+/** Why a message isn't sent to the model, as the list works it out (null: it is). */
+export interface ContextMark {
+  readonly kind: "dropped" | "summarized"
+  readonly reason: string
+}
 
 /**
  * Text whose macros resolve against the chat's state at its position (DESIGN §5.6): a
@@ -119,80 +145,87 @@ function VersionBody({
   )
 }
 
+/**
+ * A message's editor: an edit of the version shown, or a version of the user's own. Its
+ * text is a server draft kept by the session (messageDraft.ts), so scrolling the message
+ * away or reloading the page doesn't lose it, and the editor opens again where it was.
+ */
 function Editor({
-  initial,
+  draft,
+  label,
+  saveLabel,
+  placeholder,
   onSave,
   onCancel
 }: {
-  initial: string
-  onSave: (text: string) => void
+  draft: MessageDraft
+  label: string
+  saveLabel: string
+  placeholder?: string
+  onSave: () => void
   onCancel: () => void
 }) {
-  const [text, setText] = useState(initial)
+  const { text, error } = useSyncExternalStore(draft.subscribe, draft.snapshot)
   return (
     <form
       className="flex flex-col gap-2"
       onSubmit={(event) => {
         event.preventDefault()
-        onSave(text)
+        onSave()
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") onCancel()
       }}
     >
-      <Textarea aria-label="Message text" value={text} onChange={(event) => setText(event.currentTarget.value)} />
+      <Textarea
+        aria-label={label}
+        value={text}
+        placeholder={placeholder}
+        className="max-h-[60vh] [field-sizing:content]"
+        autoFocus
+        onChange={(event) => draft.setText(event.currentTarget.value)}
+      />
+      {error && (
+        <p role="alert" className="text-sm text-danger">
+          The text isn’t saved as a draft yet: {error.message}
+        </p>
+      )}
       <div className="flex gap-2">
         <Button type="submit" variant="primary">
-          Save
+          <Icon name="check" />
+          {saveLabel}
         </Button>
-        <Button onClick={onCancel}>Cancel</Button>
+        <Button onClick={onCancel}>
+          <Icon name="close" />
+          Cancel
+        </Button>
       </div>
     </form>
   )
 }
 
-export const Message = memo(function Message({
-  entry,
-  session,
-  highlighted,
-  outOfContext,
-  summarized,
-  branchLeaf,
-  onBranch
-}: {
-  entry: PathEntry
-  session: ChatSession
-  highlighted: boolean
-  outOfContext: boolean
-  summarized: boolean
-  /** The leaf of the branch shown, when it isn't the chat's active one: links keep to it. */
-  branchLeaf: SlotId | null
-  /** Switches to another of the alternate branches at this message. */
-  onBranch: (entry: PathEntry, index: number) => void
-}) {
-  useRenderCount("rowRenders")
-  const cast = useCast()
-  const { version } = entry
+/** A slot's versions, read once it has more than one and again when they change. */
+function useVersions(session: ChatSession, entry: PathEntry, report: (outcome: Outcome<unknown>) => void) {
   const [versions, setVersions] = useState<ReadonlyArray<Version> | null>(null)
-  const [editing, setEditing] = useState(false)
-  const [error, setError] = useState<AppError | null>(null)
-  const swipeStart = useRef<{ x: number; y: number } | null>(null)
-  const model = version.writer === "model"
-  const generating = version.status === "generating"
-
-  // A slot that gained or lost versions needs its list read again.
+  const multiple = entry.versionCount > 1
   // The list as read is current while it has as many versions as the slot, this one among them.
   const position =
-    versions !== null && versions.length === entry.versionCount ? versions.findIndex((v) => v.id === version.id) : -1
-  const known = position >= 0
-
-  const report = (outcome: Outcome<unknown>) => setError(outcome.ok ? null : outcome.error)
-  const deleted = useDeletedToast()
-  /** A delete says so, with Undo (DESIGN §6.2). */
-  const toast = (outcome: Outcome<BinItem>) => {
-    report(outcome)
-    if (outcome.ok) deleted(outcome.value)
-  }
-
-  const loadVersions = async () => {
-    if (known) return versions
+    versions !== null && versions.length === entry.versionCount
+      ? versions.findIndex((v) => v.id === entry.version.id)
+      : -1
+  const stale = multiple && position < 0
+  useEffect(() => {
+    if (!stale) return
+    let live = true
+    void session.listVersions(entry.slotId).then((result) => {
+      if (live && result.ok) setVersions(result.value)
+    })
+    return () => {
+      live = false
+    }
+  }, [stale, session, entry.slotId, entry.versionCount, entry.version.id])
+  const load = async () => {
+    if (position >= 0) return versions
     const result = await session.listVersions(entry.slotId)
     if (!result.ok) {
       report(result)
@@ -201,18 +234,252 @@ export const Message = memo(function Message({
     setVersions(result.value)
     return result.value
   }
+  return { versions: position >= 0 ? versions : null, position, load }
+}
 
-  // Once read, the list follows the slot: a new swipe or a deleted one reads it again.
-  const stale = versions !== null && !known
+const preview = (text: string) => {
+  const flat = text.replace(/\s+/g, " ").trim()
+  return flat === "" ? "(empty)" : flat.length > 90 ? `${flat.slice(0, 90)}…` : flat
+}
+
+/** `‹ 3/7 ›`: the versions of a message, with the list of them on the counter. */
+function Versions({
+  entry,
+  model,
+  versions,
+  position,
+  onStep,
+  onPick,
+  onOpen
+}: {
+  entry: PathEntry
+  model: boolean
+  versions: ReadonlyArray<Version> | null
+  position: number
+  onStep: (step: -1 | 1) => void
+  onPick: (version: Version) => void
+  onOpen: () => void
+}) {
+  const last = position === entry.versionCount - 1
+  const counter = position >= 0 ? `${position + 1}/${entry.versionCount}` : `${entry.versionCount}`
+  return (
+    <div className="flex shrink-0 items-center" role="group" aria-label="Versions">
+      <IconButton
+        label="Previous version"
+        icon="left"
+        className="max-sm:size-7"
+        disabled={entry.versionCount <= 1 || position === 0}
+        onClick={() => onStep(-1)}
+      />
+      {entry.versionCount > 1 ? (
+        <Menu
+          align="end"
+          label="Versions"
+          trigger={
+            <Tooltip label="Choose a version">
+              <button
+                type="button"
+                aria-label={
+                  position >= 0
+                    ? `Version ${position + 1} of ${entry.versionCount}: choose a version`
+                    : `${entry.versionCount} versions: choose one`
+                }
+                onPointerEnter={onOpen}
+                onFocus={onOpen}
+                className="h-8 min-w-9 rounded-md px-1 text-xs text-muted tabular-nums outline-none hover:bg-surface-raised hover:text-text focus-visible:ring-2 focus-visible:ring-focus data-popup-open:bg-surface-raised"
+              >
+                {counter}
+              </button>
+            </Tooltip>
+          }
+        >
+          {versions === null ? (
+            <p className="px-2.5 py-1.5 text-sm text-muted">Loading the versions…</p>
+          ) : (
+            <MenuRadioGroup
+              value={entry.version.id as string}
+              onValueChange={(id) => {
+                const picked = versions.find((v) => v.id === id)
+                if (picked) onPick(picked)
+              }}
+            >
+              {versions.map((v, i) => (
+                <MenuRadioItem key={v.id} value={v.id as string}>
+                  <span className="flex min-w-0 flex-col">
+                    <span className="text-xs text-muted">
+                      {i + 1}
+                      {v.status !== "complete" ? ` · ${v.status}` : ""}
+                      {v.origin === "edited" ? " · edited" : v.origin === "user_written" ? " · written by you" : ""}
+                    </span>
+                    <span className="line-clamp-2">{preview(v.content)}</span>
+                  </span>
+                </MenuRadioItem>
+              ))}
+            </MenuRadioGroup>
+          )}
+        </Menu>
+      ) : (
+        <span className="min-w-6 text-center text-xs text-muted tabular-nums">1/1</span>
+      )}
+      <IconButton
+        label={model && (position === -1 || last) ? "Generate another version" : "Next version"}
+        icon="right"
+        className="max-sm:size-7"
+        disabled={!model && (entry.versionCount <= 1 || last)}
+        onClick={() => onStep(1)}
+      />
+    </div>
+  )
+}
+
+/** Where this message sits among the alternate branches of the story here (DESIGN §3.2). */
+function Branches({ entry, onBranch }: { entry: PathEntry; onBranch: (entry: PathEntry, index: number) => void }) {
+  return (
+    <div
+      className="flex shrink-0 items-center rounded-md border border-border"
+      role="group"
+      aria-label={`Branches: ${entry.branchIndex + 1} of ${entry.branchCount}`}
+    >
+      <IconButton
+        label="Previous branch"
+        icon="left"
+        className="size-7"
+        disabled={entry.branchIndex === 0}
+        onClick={() => onBranch(entry, entry.branchIndex - 1)}
+      />
+      <Tooltip label={`Branch ${entry.branchIndex + 1} of ${entry.branchCount} at this message`}>
+        <span tabIndex={0} className="flex items-center gap-1 px-0.5 text-xs text-muted tabular-nums outline-none">
+          <Icon name="branch" size={13} />
+          {entry.branchIndex + 1}/{entry.branchCount}
+        </span>
+      </Tooltip>
+      <IconButton
+        label="Next branch"
+        icon="right"
+        className="size-7"
+        disabled={entry.branchIndex === entry.branchCount - 1}
+        onClick={() => onBranch(entry, entry.branchIndex + 1)}
+      />
+    </div>
+  )
+}
+
+/** A mark for whether the message is sent: an icon with its name, and why in a tooltip. */
+function Mark({
+  icon,
+  name,
+  label,
+  reason,
+  className = ""
+}: {
+  icon: IconName
+  name: string
+  label: string
+  reason: string
+  className?: string
+}) {
+  return (
+    <Tooltip label={reason}>
+      <span tabIndex={0} className={`inline-flex shrink-0 items-center gap-1 text-xs outline-none ${className}`}>
+        <span role="img" aria-label={name}>
+          <Icon name={icon} size={14} />
+        </span>
+        <span>{label}</span>
+        <span className="sr-only">: {reason}</span>
+      </span>
+    </Tooltip>
+  )
+}
+
+const copy = async (text: string, what: string) => {
+  try {
+    await navigator.clipboard.writeText(text)
+    showToast({ title: `${what} copied` })
+  } catch {
+    showToast({ title: `Couldn't copy the ${what.toLowerCase()}`, description: "The browser didn't allow it." })
+  }
+}
+
+/** The session's editor at `key`; the row re-renders only when that one opens or closes. */
+const useEditor = (session: ChatSession, key: MessageEditorKey) =>
+  useSyncExternalStore(
+    session.subscribeEditors,
+    useCallback(() => session.editor(key), [session, key])
+  )
+
+/** Whether a click or tap landed on something that acts on its own. */
+const onControl = (target: EventTarget | null) =>
+  target instanceof Element && target.closest("button, a, input, textarea, select, summary, [role='menuitem']")
+
+export const Message = memo(function Message({
+  entry,
+  session,
+  highlighted,
+  context,
+  revealed,
+  onReveal,
+  branchLeaf,
+  onBranch
+}: {
+  entry: PathEntry
+  session: ChatSession
+  highlighted: boolean
+  /** Why it isn't sent to the model, when it was left out or summarized (not hidden). */
+  context: ContextMark | null
+  /** Its actions are shown on a narrow screen, after a tap. */
+  revealed: boolean
+  /** Shows its actions (or hides them, given null) on a narrow screen. */
+  onReveal: (slotId: SlotId | null) => void
+  /** The leaf of the branch shown, when it isn't the chat's active one: links keep to it. */
+  branchLeaf: SlotId | null
+  /** Switches to another of the alternate branches at this message. */
+  onBranch: (entry: PathEntry, index: number) => void
+}) {
+  useRenderCount("rowRenders")
+  const cast = useCast()
+  const { version } = entry
+  // An editor open on this message: one of the version shown, or one writing a version of its own.
+  const editEditor = useEditor(session, `edit:${version.id}`)
+  const writeEditor = useEditor(session, `write:${entry.slotId}`)
+  const editor = writeEditor ?? editEditor
+  const editing = writeEditor ? "write" : editEditor ? "edit" : null
+  const [error, setError] = useState<AppError | null>(null)
+  const swipeStart = useRef<{ x: number; y: number } | null>(null)
+  /** The last touch was a swipe, so the click it ends in isn't a tap. */
+  const swiped = useRef(false)
+  const footer = useRef<HTMLDivElement>(null)
+  // A tap shows the actions at the end of the message, which may be past the screen's edge.
   useEffect(() => {
-    if (!stale) return
-    void session.listVersions(entry.slotId).then((result) => {
-      if (result.ok) setVersions(result.value)
-    })
-  }, [stale, session, entry.slotId, entry.versionCount])
+    if (revealed) footer.current?.scrollIntoView({ block: "nearest" })
+  }, [revealed])
+  const generating = version.status === "generating"
+  const report = (outcome: Outcome<unknown>) => setError(outcome.ok ? null : outcome.error)
+  const { versions, position, load } = useVersions(session, entry, report)
+  // Edits and versions the user writes keep the message's speaker; older ones may have none,
+  // and then another version's names it.
+  const speakerId =
+    version.speakerEntityId ?? versions?.find((v) => v.speakerEntityId !== null)?.speakerEntityId ?? null
+  const speaker = speakerId === null ? undefined : cast.cards.get(speakerId)
+  // Its side as the context reads it (stages.ts `sideOf`): a card the user plays speaks on
+  // the user's side, another of the cast on the model's, else the message's own, which its
+  // first version sets whichever versions are live (PathEntry.side).
+  const side =
+    speakerId !== null && cast.cast?.playedByMe.includes(speakerId)
+      ? "user"
+      : speakerId !== null && cast.cast?.participants.includes(speakerId)
+        ? "assistant"
+        : entry.side
+  const model = side === "assistant"
+  const name = speaker?.name ?? (model ? "Model" : "You")
+  const deleted = useDeletedToast()
+  /** A delete says so, with Undo (DESIGN §6.2). */
+  const toast = (outcome: Outcome<BinItem>) => {
+    report(outcome)
+    if (outcome.ok) deleted(outcome.value)
+  }
 
   const swipe = async (step: -1 | 1) => {
-    const all = await loadVersions()
+    const all = entry.versionCount > 1 ? await load() : [version]
     if (all === null) return
     const index = all.findIndex((v) => v.id === version.id)
     const target = all[index + step]
@@ -229,200 +496,312 @@ export const Message = memo(function Message({
     swipeStart.current = null
     if (!start) return
     const dx = event.clientX - start.x
-    if (Math.abs(dx) > SWIPE_PX && Math.abs(dx) > 2 * Math.abs(event.clientY - start.y)) void swipe(dx < 0 ? 1 : -1)
+    swiped.current = Math.abs(dx) > SWIPE_PX && Math.abs(dx) > 2 * Math.abs(event.clientY - start.y)
+    if (swiped.current) void swipe(dx < 0 ? 1 : -1)
   }
+  // On a narrow screen a tap on the message shows its actions; on a wide one they show on hover.
+  const onClick = (event: MouseEvent) => {
+    if (swiped.current) return void (swiped.current = false)
+    if (editing || onControl(event.target) || !window.matchMedia("(max-width: 639px)").matches) return
+    if (window.getSelection()?.toString()) return
+    onReveal(revealed ? null : entry.slotId)
+  }
+
+  // Every reply has its arrows, to generate another; any message with versions, to step through them.
+  const showVersions = model || entry.versionCount > 1
+  const deleteLabel = entry.versionCount > 1 ? "Delete version" : "Delete message"
+  const linkSearch = branchLeaf === null ? { slot: entry.slotId } : { leaf: branchLeaf, slot: entry.slotId }
+
+  const hidden = entry.contextExcluded
+  const hiddenReason = `Hidden: never sent to the model.${version.origin === "imported" ? " It was hidden in SillyTavern." : ""}`
+  const empty = !hidden && !entry.inContext && !generating && version.status !== "failed" && context === null
+  const reason = hidden
+    ? hiddenReason
+    : context !== null
+      ? context.reason
+      : empty
+        ? "Empty: there's no text to send to the model."
+        : null
+
+  const more = (
+    <Menu
+      align="end"
+      label="More actions"
+      trigger={
+        <Tooltip label="More actions">
+          <button type="button" aria-label="More actions" className={iconButtonClass()}>
+            <Icon name="more" />
+          </button>
+        </Tooltip>
+      }
+    >
+      <MenuItem icon="write" onClick={() => session.openEditor({ _tag: "Write", slotId: entry.slotId }, "")}>
+        Write your own version
+      </MenuItem>
+      <MenuLinkItem
+        icon="branch"
+        render={<Link to="." search={{ leaf: entry.slotId }} onClick={() => session.startBranch(entry.slotId)} />}
+      >
+        Branch from here
+      </MenuLinkItem>
+      <MenuItem icon="copy" onClick={() => void copy(session.textOf(version), "Text")}>
+        Copy text
+      </MenuItem>
+      <MenuItem
+        icon="link"
+        onClick={() => {
+          const url = new URL(`/chats/${session.id}`, window.location.origin)
+          for (const [key, value] of Object.entries(linkSearch)) url.searchParams.set(key, value)
+          void copy(url.toString(), "Link")
+        }}
+      >
+        Copy link
+      </MenuItem>
+      {version.context !== null && (
+        <MenuLinkItem
+          icon="layers"
+          render={
+            <Link to="/chats/$chatId/context/$versionId" params={{ chatId: session.id, versionId: version.id }} />
+          }
+        >
+          Context it was generated from
+        </MenuLinkItem>
+      )}
+      {entry.versionCount > 1 && (
+        <>
+          <MenuSeparator />
+          <MenuItem icon="trash" tone="danger" onClick={async () => toast(await session.deleteMessage(entry.slotId))}>
+            Delete message (all {entry.versionCount} versions)
+          </MenuItem>
+        </>
+      )}
+    </Menu>
+  )
+
+  const actions = (
+    <>
+      {!generating && (
+        <IconButton
+          label="Edit"
+          icon="edit"
+          onClick={() => session.openEditor({ _tag: "Edit", versionId: version.id }, version.content)}
+        />
+      )}
+      {model && (
+        <IconButton
+          label="Regenerate"
+          icon="regenerate"
+          onClick={async () => report(await session.regenerate(entry))}
+        />
+      )}
+      <IconButton
+        label={deleteLabel}
+        icon="trash"
+        tone="danger"
+        onClick={async () =>
+          toast(
+            entry.versionCount > 1 ? await session.deleteVersion(version.id) : await session.deleteMessage(entry.slotId)
+          )
+        }
+      />
+      {more}
+    </>
+  )
+
+  let marks: ReactNode = null
+  if (hidden)
+    marks = <Mark icon="ghost" name="Hidden from context" label="Hidden" reason={hiddenReason} className="text-muted" />
+  else if (context?.kind === "summarized")
+    marks = (
+      <Mark
+        icon="summary"
+        name="Summarized: a summary stands in for this message"
+        label="Summarized"
+        reason={context.reason}
+        className="text-accent"
+      />
+    )
+  else if (context?.kind === "dropped")
+    marks = (
+      <Mark
+        icon="dropped"
+        name="Not in the context"
+        label="Out of context"
+        reason={context.reason}
+        className="text-muted"
+      />
+    )
+  else if (empty)
+    marks = <Mark icon="dropped" name="Not in the context" label="Not sent" reason={reason!} className="text-muted" />
 
   return (
     <article
       aria-label={model ? "Reply" : "Your message"}
       data-slot={entry.slotId}
-      data-summarized={summarized || undefined}
-      data-out-of-context={outOfContext || undefined}
-      className={`flex touch-pan-y flex-col gap-2 rounded-lg border px-4 py-3 ${outOfContext ? "text-muted border-dashed " : ""}${
-        summarized && !entry.contextExcluded ? "border-l-4 border-l-accent/50 " : ""
-      }${entry.contextExcluded ? "opacity-60 " : ""}${
+      data-summarized={context?.kind === "summarized" || undefined}
+      data-out-of-context={context?.kind === "dropped" || undefined}
+      data-hidden={hidden || undefined}
+      className={`group flex touch-pan-y gap-3 rounded-lg border px-3 py-2.5 max-sm:gap-2.5 max-sm:px-2.5 ${
+        context?.kind === "dropped" ? "text-muted border-dashed " : ""
+      }${context?.kind === "summarized" ? "border-l-4 border-l-accent/50 " : ""}${
         highlighted
-          ? "border-accent bg-surface"
-          : model
-            ? "border-border bg-surface"
-            : "border-transparent bg-surface-raised"
+          ? "border-accent bg-accent/5"
+          : context?.kind === "dropped"
+            ? "border-border"
+            : model
+              ? "border-transparent hover:bg-surface-raised/40"
+              : "border-transparent bg-surface-raised"
       }`}
       onPointerDown={onPointerDown}
       onPointerUp={onPointerUp}
+      onClick={onClick}
     >
-      <header className="flex flex-wrap items-center gap-2 text-sm">
-        <span className="font-medium">{nameOf(cast, version.speakerEntityId) ?? (model ? "Model" : "You")}</span>
-        {flagged.has(version.status) && (
-          <Badge tone={version.status === "failed" ? "danger" : version.status === "generating" ? "accent" : "warning"}>
-            {version.status}
-          </Badge>
-        )}
-        {version.mark === "refused" && <Badge tone="warning">refused</Badge>}
-        {entry.contextExcluded ? (
-          <span role="img" aria-label="Hidden from context" title="Hidden from context">
-            👻
-          </span>
-        ) : summarized ? (
-          <>
-            <span
-              role="img"
-              aria-label="Summarized: a summary stands in for this message"
-              title="Summarized: a summary stands in for this message"
-              className="text-muted"
+      <Avatar
+        id={speakerId ?? (model ? "model" : "you")}
+        name={name}
+        mediaId={speaker?.avatarMediaId ?? null}
+        size="lg"
+        className={`mt-0.5 max-sm:size-8 ${hidden ? "opacity-50 grayscale" : ""}`}
+      />
+      <div className={`flex min-w-0 flex-1 flex-col gap-1 ${hidden ? "opacity-60" : ""}`}>
+        <header className="flex min-h-8 min-w-0 items-center gap-x-2 text-sm">
+          <span className="min-w-0 truncate font-semibold">{name}</span>
+          <Tooltip label={fullTime.format(version.createdAt)}>
+            <time
+              tabIndex={0}
+              dateTime={new Date(version.createdAt).toISOString()}
+              className="shrink-0 text-xs text-muted outline-none"
             >
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" aria-hidden="true">
-                <path d="M2 3.5h12M2 7h12M2 10.5h8" strokeWidth="1.6" strokeLinecap="round" />
-              </svg>
-            </span>
-            <Badge>Summarized</Badge>
-          </>
-        ) : outOfContext ? (
-          <span role="img" aria-label="Not in the context" title="Not in the context">
-            ⊘
-          </span>
-        ) : !entry.inContext && !generating && version.status !== "failed" ? (
-          <Badge>not in context</Badge>
-        ) : null}
-        {entry.branchCount > 1 && (
-          // Alternate branches of the story here (DESIGN §3.2), told apart from versions.
-          <div className="ml-auto flex items-center gap-1" role="group" aria-label="Branches">
+              {formatWhen(version.createdAt)}
+            </time>
+          </Tooltip>
+          <span className="shrink-0 text-xs text-muted tabular-nums">#{entry.depth + 1}</span>
+          {version.origin === "edited" && <span className="shrink-0 text-xs text-muted">edited</span>}
+          {version.origin === "user_written" && model && (
+            <span className="shrink-0 text-xs text-muted">written by you</span>
+          )}
+          {(version.status === "stopped" || version.status === "interrupted") && (
+            <Badge tone="warning">{version.status}</Badge>
+          )}
+          {version.status === "failed" && <Badge tone="danger">failed</Badge>}
+          {generating && <Badge tone="accent">generating</Badge>}
+          {version.mark === "refused" && <Badge tone="warning">refused</Badge>}
+          {marks}
+          <span className="flex-1" />
+          {generating && (
             <Button
-              variant="ghost"
-              aria-label="Previous branch"
-              disabled={entry.branchIndex === 0}
-              onClick={() => onBranch(entry, entry.branchIndex - 1)}
+              variant="secondary"
+              className="h-7 px-2"
+              onClick={async () => report(await session.stop(version.id))}
             >
-              ‹
+              <Icon name="stop" size={12} />
+              Stop
             </Button>
-            <span className="text-center text-muted tabular-nums">
-              branch {entry.branchIndex + 1} of {entry.branchCount}
-            </span>
-            <Button
-              variant="ghost"
-              aria-label="Next branch"
-              disabled={entry.branchIndex === entry.branchCount - 1}
-              onClick={() => onBranch(entry, entry.branchIndex + 1)}
+          )}
+          {!editing && (
+            <div
+              className={`hidden items-center transition-opacity duration-100 sm:flex ${
+                revealed
+                  ? "opacity-100"
+                  : "opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 has-[[data-popup-open]]:opacity-100 [@media(hover:none)]:opacity-100"
+              }`}
+              role="toolbar"
+              aria-label="Message actions"
             >
-              ›
-            </Button>
-          </div>
+              {actions}
+            </div>
+          )}
+          {entry.branchCount > 1 && <Branches entry={entry} onBranch={onBranch} />}
+        </header>
+        {editor !== undefined ? (
+          <Editor
+            key={editing}
+            draft={editor}
+            {...(editing === "edit"
+              ? { label: "Message text", saveLabel: "Save" }
+              : {
+                  label: "Your version",
+                  saveLabel: "Add as a new version",
+                  placeholder: "Write your own version of this message…"
+                })}
+            onCancel={async () => {
+              // Its text goes to the bin's recovered texts, never nowhere (DESIGN §6.2).
+              const outcome = await editor.discard()
+              report(outcome)
+              if (outcome.ok) session.closeEditor(editor)
+            }}
+            onSave={async () => {
+              const { text, draft } = await editor.ready()
+              const outcome =
+                editing === "edit"
+                  ? await session.edit(entry, text, draft)
+                  : await session.writeVersion(entry, text, draft)
+              report(outcome)
+              if (!outcome.ok) return
+              // Saved without naming its draft (it didn't hold exactly this text): it's ended unsaved.
+              if (draft === null) await editor.discard()
+              session.closeEditor(editor)
+            }}
+          />
+        ) : (
+          <VersionBody version={version} session={session} parentSlotId={entry.parentSlotId} />
         )}
-        {(model || entry.versionCount > 1) && (
-          <div
-            className={`${entry.branchCount > 1 ? "" : "ml-auto "}flex items-center gap-1`}
-            role="group"
-            aria-label="Versions"
-          >
-            <Button variant="ghost" aria-label="Previous version" disabled={position === 0} onClick={() => swipe(-1)}>
-              ‹
-            </Button>
-            <span className="min-w-12 text-center text-muted tabular-nums" onPointerEnter={() => void loadVersions()}>
-              {position >= 0 ? `${position + 1} / ${entry.versionCount}` : `${entry.versionCount}`}
-            </span>
-            <Button
-              variant="ghost"
-              aria-label={
-                model && (position === -1 || position === entry.versionCount - 1)
-                  ? "Generate another version"
-                  : "Next version"
-              }
-              disabled={!model && position === entry.versionCount - 1}
-              onClick={() => swipe(1)}
-            >
-              ›
-            </Button>
-          </div>
+        {version.context !== null && version.context.issues.length > 0 && (
+          // What the user should know about the context it was generated from (ARCHITECTURE §15).
+          <details className="text-xs text-warning">
+            <summary className="cursor-pointer">
+              {version.context.issues.length === 1 ? "1 note" : `${version.context.issues.length} notes`} on its context
+            </summary>
+            <ul className="mt-1 list-disc pl-5">
+              {version.context.issues.map((issue, i) => (
+                <li key={i}>{issue.message}</li>
+              ))}
+            </ul>
+          </details>
         )}
-      </header>
-      {editing ? (
-        <Editor
-          initial={version.content}
-          onCancel={() => setEditing(false)}
-          onSave={async (text) => {
-            const outcome = await session.edit(entry, text)
-            report(outcome)
-            if (outcome.ok) setEditing(false)
-          }}
-        />
-      ) : (
-        <VersionBody version={version} session={session} parentSlotId={entry.parentSlotId} />
-      )}
-      {version.context !== null && version.context.issues.length > 0 && (
-        // What the user should know about the context it was generated from (ARCHITECTURE §15).
-        <details className="text-xs text-warning">
-          <summary className="cursor-pointer">
-            {version.context.issues.length === 1 ? "1 note" : `${version.context.issues.length} notes`} on its context
-          </summary>
-          <ul className="mt-1 list-disc pl-5">
-            {version.context.issues.map((issue, i) => (
-              <li key={i}>{issue.message}</li>
-            ))}
-          </ul>
-        </details>
-      )}
-      {model && version.direction && (
-        <p className="text-xs text-muted">
-          <span className="font-medium">Direction:</span> {version.direction}
-        </p>
-      )}
-      <footer className="flex flex-wrap gap-1">
-        {generating && (
-          <Button variant="secondary" onClick={async () => report(await session.stop(version.id))}>
-            Stop
-          </Button>
-        )}
-        {model && (
-          <Button variant="ghost" onClick={async () => report(await session.regenerate(entry))}>
-            Regenerate
-          </Button>
+        {model && version.direction && (
+          <p className="text-xs text-muted">
+            <span className="font-medium">Direction:</span> {version.direction}
+          </p>
         )}
         {model &&
           (version.mark === "refused" || (version.status === "failed" && version.error?.class === "refused")) && (
             <RetryWith onPick={async (choice) => report(await session.regenerate(entry, choice))} />
           )}
-        {!editing && !generating && (
-          <Button variant="ghost" onClick={() => setEditing(true)}>
-            Edit
-          </Button>
+        {(showVersions || (revealed && !editing)) && (
+          // At the end of the message, as in ST: where reading it ends, and where a swipe
+          // that changes its length leaves the arrows. A tap on a phone shows why it isn't
+          // sent here too, beside the actions it reveals, so scrolling them into view never
+          // scrolls the start of the reason away.
+          <div ref={footer} className="flex flex-col gap-1">
+            {revealed && !editing && reason !== null && <p className="text-xs text-muted sm:hidden">{reason}</p>}
+            <footer className="-mb-1 flex min-h-8 items-center">
+              {revealed && !editing && (
+                <div className="-ml-1.5 flex items-center sm:hidden" role="toolbar" aria-label="Message actions">
+                  {actions}
+                </div>
+              )}
+              <span className="flex-1" />
+              {showVersions && (
+                <Versions
+                  entry={entry}
+                  model={model}
+                  versions={versions}
+                  position={position}
+                  onStep={(step) => void swipe(step)}
+                  onPick={async (picked) => report(await session.select(entry, picked))}
+                  onOpen={() => void load()}
+                />
+              )}
+            </footer>
+          </div>
         )}
-        {version.context !== null && (
-          <Link
-            to="/chats/$chatId/context/$versionId"
-            params={{ chatId: session.id, versionId: version.id }}
-            className="inline-flex h-9 items-center rounded-md px-3 text-sm text-muted hover:bg-surface-raised hover:text-text"
-          >
-            Context
-          </Link>
+        {error && (
+          <p role="alert" className="text-sm text-danger">
+            {error.message}
+          </p>
         )}
-        <Link
-          to="."
-          search={{ leaf: entry.slotId }}
-          onClick={() => session.startBranch(entry.slotId)}
-          className="inline-flex h-9 items-center rounded-md px-3 text-sm text-muted hover:bg-surface-raised hover:text-text"
-        >
-          Branch from here
-        </Link>
-        <Link
-          to="."
-          search={branchLeaf === null ? { slot: entry.slotId } : { leaf: branchLeaf, slot: entry.slotId }}
-          className="inline-flex h-9 items-center rounded-md px-3 text-sm text-muted hover:bg-surface-raised hover:text-text"
-        >
-          Link
-        </Link>
-        {entry.versionCount > 1 && (
-          <Button variant="ghost" onClick={async () => toast(await session.deleteVersion(version.id))}>
-            Delete version
-          </Button>
-        )}
-        <Button variant="ghost" onClick={async () => toast(await session.deleteMessage(entry.slotId))}>
-          Delete
-        </Button>
-      </footer>
-      {error && (
-        <p role="alert" className="text-sm text-danger">
-          {error.message}
-        </p>
-      )}
+      </div>
     </article>
   )
 })

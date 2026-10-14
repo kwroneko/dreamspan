@@ -6,6 +6,7 @@ import { expect, type Locator, type Page, test } from "@playwright/test"
 import type { Chat, SlotId } from "@rp/shared/chat.ts"
 import type { SendResult } from "@rp/shared/chatApi.ts"
 import { Effect } from "effect"
+import { messageMenu, showActions } from "./support/message.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
@@ -54,13 +55,13 @@ test("a message gets a streamed reply, with versions to swipe through", async ({
 
   // Past the last version, a swipe generates another; swiping back shows the first again.
   await reply.getByRole("button", { name: "Generate another version" }).click()
-  await expect(reply.getByText("2 / 2")).toBeVisible()
+  await expect(reply.getByRole("group", { name: "Versions" })).toContainText("2/2")
   await expect(reply.getByText("generating", { exact: true })).toBeVisible()
   await expect(generating(page)).toHaveCount(0, { timeout: 20_000 })
   const second = await textOf(reply)
   expect(second).not.toEqual(first)
   await reply.getByRole("button", { name: "Previous version" }).click()
-  await expect(reply.getByText("1 / 2")).toBeVisible()
+  await expect(reply.getByRole("group", { name: "Versions" })).toContainText("1/2")
   await expect.poll(() => textOf(reply)).toBe(first)
 
   // The reload shows the same, from the server.
@@ -83,6 +84,7 @@ test("a stopped reply keeps its text, and a message can be edited, linked to, br
 
   // A message the user wrote is changed in place.
   const mine = page.getByRole("article", { name: "Your message" }).first()
+  await showActions(mine)
   await mine.getByRole("button", { name: "Edit" }).click()
   await mine.getByLabel("Message text").fill("Knock three times.")
   await mine.getByRole("button", { name: "Save" }).click()
@@ -90,18 +92,17 @@ test("a stopped reply keeps its text, and a message can be edited, linked to, br
   // Amended in place: still its only version.
   await expect(mine.getByRole("group", { name: "Versions" })).toHaveCount(0)
 
-  // A link opens the chat at that message.
-  await mine.getByRole("link", { name: "Link" }).click()
-  await expect(page).toHaveURL(/slot=/)
-  await page.reload()
+  // A copied link opens the chat at that message.
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"])
+  await messageMenu(mine, "Copy link")
+  await expect(page.getByText("Link copied")).toBeVisible()
+  const link = await page.evaluate(() => navigator.clipboard.readText())
+  expect(link).toMatch(/slot=/)
+  await page.goto(link)
   await expect(page.locator("article[data-slot]").first()).toHaveClass(/border-accent/)
 
   // A branch from the first message: the reply below it isn't on it.
-  await page
-    .getByRole("article", { name: "Your message" })
-    .first()
-    .getByRole("link", { name: "Branch from here" })
-    .click()
+  await messageMenu(page.getByRole("article", { name: "Your message" }).first(), "Branch from here")
   await expect(page).toHaveURL(/leaf=/)
   await expect(replies(page)).toHaveCount(0)
   await send(page, "Walk away instead.")
@@ -114,7 +115,8 @@ test("a stopped reply keeps its text, and a message can be edited, linked to, br
 
   // Deleting goes to the bin; the message is gone from the path.
   const walk = page.getByRole("article", { name: "Your message" }).filter({ hasText: "Walk away" })
-  await walk.getByRole("button", { name: "Delete", exact: true }).click()
+  await showActions(walk)
+  await walk.getByRole("button", { name: "Delete message", exact: true }).click()
   await expect(page.getByText("Walk away instead.")).toHaveCount(0)
 })
 
@@ -155,7 +157,7 @@ test("a branch's URL follows the messages sent on it", async ({ page }) => {
   await newChat(page, "Fork")
   await send(page, "First")
   await repliesDone(page, 1)
-  await page.getByRole("article", { name: "Your message" }).getByRole("link", { name: "Branch from here" }).click()
+  await messageMenu(page.getByRole("article", { name: "Your message" }), "Branch from here")
   await expect(replies(page)).toHaveCount(0)
   await send(page, "Second, on the branch")
   await repliesDone(page, 1)
@@ -242,7 +244,7 @@ test("a branch reply stays at the end when its summary divider arrives during an
   await newChat(page, "Divider race")
   await send(page, "First")
   await repliesDone(page, 1)
-  await page.getByRole("article", { name: "Your message" }).getByRole("link", { name: "Branch from here" }).click()
+  await messageMenu(page.getByRole("article", { name: "Your message" }), "Branch from here")
   await expect(replies(page)).toHaveCount(0)
   await expect(page.getByTestId("lcm-boundary")).toHaveCount(1)
 
