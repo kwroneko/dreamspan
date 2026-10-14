@@ -244,3 +244,31 @@ test("the panel's remembered tab is the signed-in user's own", async ({ page }) 
   await page.goto(`${server().url}/chats/${first.id}`)
   await expect(page.getByRole("tabpanel", { name: "Notes" })).toBeVisible()
 })
+
+test("an instruction typed back to its old text while Save is in flight survives a reload", async ({ page }) => {
+  await admin((api) => api.ChangeGenerationDefaults({ change: { tail: "Original persisted instruction" } }))
+  // Holds the page's Save until the edit after it is typed.
+  let release: (() => void) | null = null
+  await page.routeWebSocket("**/rpc", (socket) => {
+    const upstream = socket.connectToServer()
+    socket.onMessage((message) => {
+      if (release === null && String(message).includes('"tag":"ChangeGenerationDefaults"'))
+        release = () => upstream.send(message)
+      else upstream.send(message)
+    })
+    upstream.onMessage((message) => socket.send(message))
+  })
+  await page.goto(`${server().url}/settings/chats`)
+  const field = page.getByLabel("Summarization instruction", { exact: true })
+  await expect(field).toHaveValue("Original persisted instruction")
+  await field.fill("First edit sent to Save")
+  await page.getByRole("button", { name: "Save summarization instruction" }).click()
+  await expect.poll(() => release !== null).toBe(true)
+  await field.fill("Original persisted instruction")
+  release!()
+  await expect
+    .poll(async () => (await admin((api) => api.GetGenerationDefaults())).lcm?.tail)
+    .toBe("First edit sent to Save")
+  await page.reload()
+  await expect(field).toHaveValue("Original persisted instruction")
+})

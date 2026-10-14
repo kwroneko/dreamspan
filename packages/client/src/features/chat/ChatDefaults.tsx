@@ -88,12 +88,18 @@ export function ChatDefaultsPage() {
     return write
   }
 
-  /** Keeps the instruction typed in this browser, or drops the copy once it matches what's saved. */
+  /** Saves of the instruction not answered yet: until they are, what's saved may still change. */
+  const saving = useRef(0)
+
+  /**
+   * Keeps the instruction typed in this browser, or drops the copy once it matches what's
+   * saved. While a save is in flight the saved value is about to change, so the copy stays.
+   */
   const type = (text: string) => {
     setTail(text)
     setSaved(false)
     const previous = copy.current
-    if (text === savedTail(defaults)) {
+    if (text === savedTail(defaults) && saving.current === 0) {
       copy.current = null
       if (previous !== null) void dropCopy(previous)
       return
@@ -113,7 +119,10 @@ export function ChatDefaultsPage() {
   const saveTail = async () => {
     const sent = tail
     const kept = copy.current
-    const ok = await change({ tail: sent === "" ? null : sent })
+    saving.current += 1
+    const ok = await change({ tail: sent === "" ? null : sent }).finally(() => {
+      saving.current -= 1
+    })
     // What was saved is on the server: its copy goes, unless more was typed since.
     if (ok && kept !== null && copy.current === kept) {
       copy.current = null
