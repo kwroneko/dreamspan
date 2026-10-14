@@ -189,6 +189,14 @@ export const makeChatHandlers = Effect.gen(function* () {
         internal("CreateChat")
       ),
 
+    RenameChat: ({ chatId, name }) =>
+      Effect.gen(function* () {
+        const id = yield* userId
+        const [chat] = yield* writer.RenameChats({ userId: id, chats: [{ chatId, from: null }], name })
+        hub.publish(chatId, { _tag: "Chat", chat: chat! })
+        return chat!
+      }).pipe(internal("RenameChat")),
+
     GetChat: ({ chatId }) =>
       Effect.flatMap(userId, (id) => reader.GetChat({ userId: id, chatId })).pipe(internal("GetChat")),
 
@@ -450,6 +458,16 @@ export const makeChatHandlers = Effect.gen(function* () {
         hub.publish(chatId, { _tag: "Chat", chat })
         return new BranchSwitch({ slotId: target.slotId, chat })
       }).pipe(Effect.retry({ times: 2, while: (error) => error._tag === "StaleWrite" }), internal("SwitchBranch")),
+
+    ListBranches: ({ slotId }) =>
+      Effect.flatMap(userId, (id) => reader.ListBranches({ userId: id, slotId })).pipe(internal("ListBranches")),
+
+    NameBranch: ({ slotId, name }) =>
+      Effect.gen(function* () {
+        const id = yield* userId
+        yield* writer.SetBranchName({ userId: id, slotId, name })
+        return yield* publishSlot(id, slotId)
+      }).pipe(internal("NameBranch")),
 
     GetNextContext: ({ chatId, leafSlotId }) =>
       Effect.flatMap(userId, (id) => reader.CacheWarmth({ userId: id, chatId, leafSlotId })).pipe(

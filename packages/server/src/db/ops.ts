@@ -25,7 +25,7 @@ import {
 // NotFound, so their existence doesn't leak.
 import { Chat, ChatId, ChatKind, EntityId, NewVersion, PathEntry, SlotId, Version, VersionId } from "@rp/shared/chat.ts"
 import { ContextIssue, VersionError, VersionStatus } from "@rp/shared/chat.ts"
-import { ChatCursor, ChatSearch, NotAmendable, PathRange, PathWindow } from "@rp/shared/chatApi.ts"
+import { Branch, ChatCursor, ChatSearch, NotAmendable, PathRange, PathWindow } from "@rp/shared/chatApi.ts"
 import { User, UserAccount, UserId, UserRole } from "@rp/shared/domain.ts"
 import { BinChanged, BinItem, RecoveredText } from "@rp/shared/bin.ts"
 import { Draft, DraftKey, DraftRestore, DraftState } from "@rp/shared/drafts.ts"
@@ -635,6 +635,27 @@ export class WriteOps extends RpcGroup.make(
   }),
   // --- Recycle bin (DESIGN §6.2). Deletes need no confirmation: each returns the bin
   // item for the "deleted, open the bin" toast, and can be undone from the bin.
+  /**
+   * Names chats (DESIGN §2.1): each title becomes `renamedTitle(its title, name)`, and the
+   * chat's row version moves on. With `from`, a chat is renamed only while its title is
+   * still that (a group read before; one renamed meanwhile keeps its name). Returns the
+   * chats renamed; NotFound when one isn't the user's live chat.
+   */
+  Rpc.make("RenameChats", {
+    payload: {
+      userId: UserId,
+      chats: Schema.Array(Schema.Struct({ chatId: ChatId, from: Schema.NullOr(Schema.String) })),
+      name: Schema.String
+    },
+    success: Schema.Array(Chat),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** Names the branch a live slot of the user's starts; empty: no name. */
+  Rpc.make("SetBranchName", {
+    payload: { userId: UserId, slotId: SlotId, name: Schema.String },
+    success: Schema.Void,
+    error: Schema.Union([NotFound, StorageError])
+  }),
   Rpc.make("DeleteChat", {
     payload: { userId: UserId, chatId: ChatId },
     success: BinItem,
@@ -1173,10 +1194,19 @@ export class WriteOps extends RpcGroup.make(
       userId: UserId,
       cards: Schema.Array(EntityId),
       persona: Schema.NullOr(EntityId),
-      greeting: Schema.NullOr(Schema.Int),
+      /**
+       * Who greets, in order, each as a message of its own (one of `cards`; one without
+       * greetings is skipped): the greeting picked, and each greeting's frozen values in
+       * `GetCardForChat` order (null: none to freeze).
+       */
+      greeters: Schema.Array(
+        Schema.Struct({
+          entityId: EntityId,
+          greeting: Schema.NullOr(Schema.Int),
+          frozen: Schema.Array(Schema.NullOr(FrozenMacros))
+        })
+      ),
       first: FirstTurn,
-      /** Each greeting's frozen values, in `GetCardForChat` order; null: none to freeze. */
-      frozen: Schema.Array(Schema.NullOr(FrozenMacros)),
       /** The chat's title; null or blank: its cast's names. */
       title: Schema.NullOr(Schema.String)
     },
@@ -2112,6 +2142,12 @@ export class ReadOps extends RpcGroup.make(
       index: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
     },
     success: Schema.Struct({ slotId: SlotId, tipSlotId: SlotId, chatRowVersion: Schema.Int }),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** The alternates at a live slot's place, as BranchTip counts them, oldest first, with names. */
+  Rpc.make("ListBranches", {
+    payload: { userId: UserId, slotId: SlotId },
+    success: Schema.Array(Branch),
     error: Schema.Union([NotFound, StorageError])
   })
 ) {}

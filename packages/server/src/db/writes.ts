@@ -6,6 +6,7 @@ import type { UserId } from "@rp/shared/domain.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import { Effect } from "effect"
 import { SqlClient, type SqlError } from "effect/sql"
+import { cleanName, renamedTitle } from "@rp/shared/chatName.ts"
 import { composerKey, type DraftKey } from "@rp/shared/drafts.ts"
 import type { Bin } from "./bin.ts"
 import { NotAmendable } from "@rp/shared/chatApi.ts"
@@ -312,7 +313,29 @@ export const makeWriteHandlers = (bin: Bin) =>
           return toVersion(yield* ownedVersion(userId, versionId, true))
         }).pipe(transaction("MarkVersion")),
 
+      RenameChats: ({ userId, chats, name }) =>
+        Effect.gen(function* () {
+          const renamed: Array<ReturnType<typeof toChat>> = []
+          for (const { chatId, from } of chats) {
+            const chat = yield* ownedChat(userId, chatId)
+            if (from !== null && chat.title !== from) continue
+            const [row] = yield* sql<ChatRow>`
+              UPDATE chats SET title = ${renamedTitle(chat.title, name)}, title_source = 'user',
+                row_version = row_version + 1
+              WHERE id = ${chatId} RETURNING *`
+            renamed.push(toChat(row!))
+          }
+          return renamed
+        }).pipe(transaction("RenameChats")),
+
       // --- Branches (DESIGN §3.2)
+
+      SetBranchName: ({ userId, slotId, name }) =>
+        Effect.gen(function* () {
+          yield* ownedSlot(userId, slotId)
+          const clean = cleanName(name)
+          yield* sql`UPDATE slots SET branch_name = ${clean === "" ? null : clean}, row_version = row_version + 1 WHERE id = ${slotId}`
+        }).pipe(transaction("SetBranchName")),
 
       SetActiveLeaf: ({ userId, chatId, slotId, expectedRowVersion }) =>
         Effect.gen(function* () {

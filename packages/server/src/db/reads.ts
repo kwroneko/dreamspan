@@ -1,7 +1,7 @@
 import { contextExcluded } from "./lcmVisibility.ts"
 // Read operation handlers. They run inside the reader workers on read-only connections.
 import type { ChatId, SlotId, VersionId } from "@rp/shared/chat.ts"
-import { PathWindow } from "@rp/shared/chatApi.ts"
+import { Branch, PathWindow } from "@rp/shared/chatApi.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { MergePreview, Revision, type RevisionId } from "@rp/shared/library.ts"
 import { FoldableEvent } from "@rp/shared/state.ts"
@@ -55,7 +55,7 @@ const siblingCount = (also = "") => {
 const pathColumns = `v.id, v.slot_id, v.ordinal, v.status, v.speaker_entity_id, v.writer, v.content,
   v.macro_mode, v.origin, v.source_version_id, v.direction, v.hidden, v.starred, v.created_at, v.error_json, v.mark,
   v.frozen_macros, v.rollout_id,
-  ${versionExtras("v")}, s.lane_id, s.parent_slot_id, s.depth, s.row_version, ${contextExcluded()} AS context_excluded, s.hidden_by_user,
+  ${versionExtras("v")}, s.lane_id, s.parent_slot_id, s.depth, s.row_version, ${contextExcluded()} AS context_excluded, s.hidden_by_user, s.branch_name,
   s.deleted_at IS NOT NULL AS slot_deleted,
   (SELECT count(*) FROM versions c WHERE c.slot_id = s.id AND c.deleted_at IS NULL) AS version_count,
   ${siblingCount()} AS branch_count, ${siblingCount("AND x.id < s.id")} AS branch_index,
@@ -498,6 +498,30 @@ export const makeReadHandlers = Effect.gen(function* () {
         if (!sibling) return yield* new NotFound({ entity: "branch", id: `${slotId}#${index}` })
         return { slotId: sibling.id, tipSlotId: yield* latestDescendant(sibling.id), chatRowVersion: chat.row_version }
       }).pipe(query("BranchTip")),
+
+    // The siblings BranchTip counts, in its order, with each one's name and first words.
+    ListBranches: ({ userId, slotId }) =>
+      Effect.gen(function* () {
+        const [slot] = yield* sql<{ chat_id: string; parent_slot_id: string | null; lane_id: string }>`
+          SELECT s.chat_id, s.parent_slot_id, s.lane_id FROM slots s JOIN chats c ON c.id = s.chat_id
+          WHERE s.id = ${slotId} AND c.owner_user_id = ${userId} AND s.deleted_at IS NULL AND c.deleted_at IS NULL`
+        if (!slot) return yield* new NotFound({ entity: "slot", id: slotId })
+        const columns = sql.literal(`x.id, x.branch_name, CASE WHEN x.deleted_at IS NULL
+          THEN substr((SELECT v.content FROM versions v WHERE v.id = x.selected_version_id), 1, 160) ELSE '' END AS preview`)
+        const rows =
+          slot.parent_slot_id === null
+            ? yield* sql<{ id: SlotId; branch_name: string | null; preview: string }>`
+                SELECT ${columns} FROM slots x INDEXED BY slots_chat_depth WHERE x.chat_id = ${slot.chat_id}
+                  AND x.depth = 0 AND x.lane_id = ${slot.lane_id} AND ${sql.literal(reachableSlot("x"))}
+                ORDER BY x.id`
+            : yield* sql<{ id: SlotId; branch_name: string | null; preview: string }>`
+                SELECT ${columns} FROM slots x INDEXED BY slots_parent WHERE x.parent_slot_id = ${slot.parent_slot_id}
+                  AND x.lane_id = ${slot.lane_id} AND ${sql.literal(reachableSlot("x"))}
+                ORDER BY x.id`
+        return rows.map(
+          (row, index) => new Branch({ slotId: row.id, index, name: row.branch_name, preview: row.preview })
+        )
+      }).pipe(query("ListBranches")),
 
     GetSlot: ({ userId, slotId }) =>
       sql<PathRow & { chat_id: ChatId }>`

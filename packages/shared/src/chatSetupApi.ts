@@ -4,7 +4,7 @@
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
 import { CastCard, Chat, ChatId, EntityId, FrozenMacros, PathEntry, QueuedMessage, SlotId } from "./chat.ts"
-import { GenerationUnavailable } from "./chatApi.ts"
+import { ChatNameInput, GenerationUnavailable } from "./chatApi.ts"
 import { NotFound, ServerError, StaleWrite } from "./errors.ts"
 import { Doc, LibraryRef, RefId, RevisionId } from "./library.ts"
 import { ConnectionId, ModelId } from "./providers.ts"
@@ -201,6 +201,16 @@ export class ChatSetupApi extends RpcGroup.make(
     success: Schema.Struct({ group: ChatGroup, chats: Schema.Array(Chat) }),
     error: Schema.Union([...Errors])
   }),
+  /**
+   * Names the group `chatId` is in: every chat of it is renamed (as RenameChat), so the group
+   * stays one, under its new name, and its new chats take that name. A chat renamed
+   * elsewhere meanwhile keeps that name. Returns the group as it is now.
+   */
+  Rpc.make("RenameGroup", {
+    payload: { chatId: ChatId, name: ChatNameInput },
+    success: Schema.Struct({ group: ChatGroup, chats: Schema.Array(Chat) }),
+    error: Schema.Union([...Errors])
+  }),
   /** Puts a card in the persona folder, or takes it out (DESIGN §2.2). */
   Rpc.make("SetPersona", {
     payload: { entityId: EntityId, persona: Schema.Boolean },
@@ -215,8 +225,8 @@ export class ChatSetupApi extends RpcGroup.make(
   }),
   /**
    * Makes a chat from cards on its first turn, never before (DESIGN §2.1): the cards and
-   * the persona join at the start, the persona is played by the user, and every greeting
-   * becomes a version of the first message (`greeting` selected). Then the first turn:
+   * the persona join at the start, the persona is played by the user, and each member's
+   * greeting is a message with its card's greetings as versions. Then the first turn:
    * the user's message (the client asks for the reply, as after any send), or a reply.
    */
   Rpc.make("StartChat", {
@@ -231,6 +241,23 @@ export class ChatSetupApi extends RpcGroup.make(
        * these and draws whatever is missing.
        */
       frozen: Schema.optionalKey(FrozenMacros),
+      /**
+       * Who greets, in order, each greeting as its own message with all its card's greetings
+       * as versions (the one picked selected) and its preview's frozen values, as ST starts a
+       * group chat with each member's greeting in turn. Each must be one of `cards`; a card
+       * without greetings is skipped. Absent: every card greets in cards order, randomly
+       * for a group as in ST (an explicit `greeting` still chooses the first card's);
+       * a single card uses `greeting` and `frozen`.
+       */
+      greeters: Schema.optionalKey(
+        Schema.Array(
+          Schema.Struct({
+            entityId: EntityId,
+            greeting: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+            frozen: Schema.optionalKey(FrozenMacros)
+          })
+        ).check(Schema.isMaxLength(100))
+      ),
       /**
        * The chat's title; absent or blank, its cast's names. A new chat of a group takes the
        * group's name, so it's one of the group's chats (`ChatGroup`).

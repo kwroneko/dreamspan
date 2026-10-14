@@ -226,7 +226,10 @@ export const migrations = {
   ]),
   // Who a composer speaks as and who replies to its next send (ComposerChoice), on its draft
   // row, so they move with the draft from tip to tip and survive a reload (ST-GRIPES D8).
-  "0036_composer_choice": runAll(composerChoiceSchema)
+  "0036_composer_choice": runAll(composerChoiceSchema),
+  // A branch's name, on the message that starts it (the slot among its alternates; NameBranch).
+  // Null: unnamed, shown as "Branch k".
+  "0039_branch_names": runAll([`ALTER TABLE slots ADD COLUMN branch_name TEXT`])
 }
 
 export const Migrations = SqliteMigrator.layer({ loader: SqliteMigrator.fromRecord(migrations) })

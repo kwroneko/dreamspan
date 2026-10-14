@@ -57,6 +57,8 @@ export interface ChatView {
   /** The path's leaf, as the server resolved it. */
   readonly leafSlotId: SlotId | null
   readonly entries: ReadonlyArray<PathEntry>
+  /** Live naming metadata, including fork points outside the message window. */
+  readonly branchNames: ReadonlyMap<SlotId, { readonly name: string | undefined; readonly rowVersion: number }>
   /** Where to continue reading older history; null at the root. */
   readonly older: SlotId | null
   /** Where to continue reading newer history; null when the window reaches the leaf. */
@@ -107,6 +109,7 @@ export class ChatSession {
     chat: null,
     leafSlotId: null,
     entries: [],
+    branchNames: new Map(),
     older: null,
     newer: null,
     follow: true,
@@ -459,10 +462,12 @@ export class ChatSession {
 
   // --- Reading windows
 
-  private async read(range: PathRange, limit = PAGE): Promise<PathWindow | null> {
-    const result = await this.call((client) =>
-      client("ReadPath", { chatId: this.chatId, leafSlotId: this.view.leafSlotId ?? this.requestedLeaf, range, limit })
-    )
+  private async read(
+    range: PathRange,
+    limit = PAGE,
+    leafSlotId = this.view.leafSlotId ?? this.requestedLeaf
+  ): Promise<PathWindow | null> {
+    const result = await this.call((client) => client("ReadPath", { chatId: this.chatId, leafSlotId, range, limit }))
     if (result.ok) return result.value
     if (!this.disposed) this.update({ error: result.error.message, loading: false })
     return null
@@ -487,12 +492,16 @@ export class ChatSession {
   }
 
   /** Replaces the window: at the bottom, or around a slot; `reposition` scrolls to it. */
-  open(anchor: SlotId | null, limit = PAGE, reposition = true) {
+  open(anchor: SlotId | null, limit = PAGE, reposition = true, followActive = false) {
     const generation = ++this.generation
     this.update({ loading: this.view.entries.length === 0 })
     return this.reading(async () => {
       const [window, chat] = await Promise.all([
-        this.read(anchor === null ? { _tag: "Bottom" } : { _tag: "Around", slot: anchor }, limit),
+        this.read(
+          anchor === null ? { _tag: "Bottom" } : { _tag: "Around", slot: anchor },
+          limit,
+          followActive ? null : undefined
+        ),
         this.call((client) => client("GetChat", { chatId: this.chatId }))
       ])
       if (window === null || this.disposed || generation !== this.generation) return
@@ -802,8 +811,11 @@ export class ChatSession {
     this.scheduleLcm()
     const { entries, newer } = this.view
     const limit = Math.min(MAX_LOADED, Math.max(PAGE, entries.length))
-    if (newer === null || entries.length === 0) return void this.open(null, limit, entries.length === 0)
-    void this.open(entries[Math.floor(entries.length / 2)]!.slotId, limit, false)
+    // A restore can move the active tip. Follow it only if this tab was already there;
+    // tabs explicitly showing another path keep their own leaf.
+    const followActive = this.requestedLeaf === null && this.view.leafSlotId === this.view.chat?.activeLeafSlotId
+    if (newer === null || entries.length === 0) return void this.open(null, limit, entries.length === 0, followActive)
+    void this.open(entries[Math.floor(entries.length / 2)]!.slotId, limit, false, followActive)
   }
 
   /**
@@ -811,6 +823,18 @@ export class ChatSession {
    * continues the loaded bottom of the path.
    */
   private applySlot(entry: PathEntry): boolean {
+    const known = this.view.branchNames.get(entry.slotId)
+    if (
+      (entry.branchCount > 1 || entry.branchName !== undefined || known !== undefined) &&
+      (known === undefined || known.rowVersion < entry.rowVersion)
+    ) {
+      this.update({
+        branchNames: new Map(this.view.branchNames).set(entry.slotId, {
+          name: entry.branchName,
+          rowVersion: entry.rowVersion
+        })
+      })
+    }
     const { entries } = this.view
     const index = entries.findIndex((e) => e.slotId === entry.slotId)
     if (index >= 0) {
@@ -1128,6 +1152,60 @@ export class ChatSession {
     const result = await this.call((client) => client("SetVersionFlags", { versionId: version.id, ...flags }))
     if (result.ok) this.applyVersion(result.value)
     return result
+  }
+
+  /** Deletes the branch a message starts (it and everything below it) to the bin. */
+  async deleteBranch(slotId: SlotId) {
+    const result = await this.call((client) => client("DeleteBranch", { slotId }))
+    // A reload at the old window can still name a tip inside the deleted subtree.
+    // Follow the writer's surviving active path, fencing every earlier window read.
+    if (result.ok) this.showBranch(null, null)
+    return result
+  }
+
+  /** The alternates where `slotId` is one, with their names. */
+  listBranches(slotId: SlotId) {
+    return this.call((client) => client("ListBranches", { slotId }))
+  }
+
+  /** Names the branch a message starts; the slot comes back with its name. */
+  async nameBranch(slotId: SlotId, name: string): Promise<Outcome<PathEntry>> {
+    const result = await this.call((client) => client("NameBranch", { slotId, name }))
+    if (result.ok) this.applySlot(result.value)
+    return result
+  }
+
+  /** Names the chat; the header shows it at once, other tabs on the `Chat` event, lists read again. */
+  async rename(name: string): Promise<Outcome<Chat>> {
+    const result = await this.call((client) => client("RenameChat", { chatId: this.chatId, name }))
+    if (result.ok) {
+      this.applyState({ _tag: "Chat", chat: result.value })
+      this.invalidate(["chats"])
+    }
+    return result
+  }
+
+  /** Names the group the chat is in: all its chats, this one included. */
+  async renameGroup(name: string) {
+    const result = await this.call((client) => client("RenameGroup", { chatId: this.chatId, name }))
+    if (result.ok) {
+      const own = result.value.chats.find((chat) => chat.id === this.chatId)
+      if (own) this.applyState({ _tag: "Chat", chat: own })
+      this.invalidate(["chats"])
+    }
+    return result
+  }
+
+  /** Has the queries with these reactivity keys (the chat list, the home grid) read again. */
+  private invalidate(keys: ReadonlyArray<string>) {
+    void Effect.runPromise(
+      Effect.map(Registry.getResult(this.registry, AppClient.runtime), (services) =>
+        Context.get(
+          services as unknown as Context.Context<Reactivity.Reactivity>,
+          Reactivity.Reactivity
+        ).invalidateUnsafe(keys)
+      )
+    )
   }
 
   listVersions(slotId: SlotId) {

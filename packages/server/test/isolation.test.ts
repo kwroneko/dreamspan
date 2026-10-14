@@ -885,6 +885,15 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
   DeleteMessage: {
     probe: (actor, owner) => refused(actor.api.DeleteMessage({ slotId: owner.chat.slotId }), "NotFound")
   },
+  RenameChat: {
+    probe: (actor, owner) => refused(actor.api.RenameChat({ chatId: owner.chat.chatId, name: "x" }), "NotFound")
+  },
+  ListBranches: {
+    probe: (actor, owner) => refused(actor.api.ListBranches({ slotId: owner.chat.slotId }), "NotFound")
+  },
+  NameBranch: {
+    probe: (actor, owner) => refused(actor.api.NameBranch({ slotId: owner.chat.slotId, name: "x" }), "NotFound")
+  },
   DeleteBranch: {
     probe: (actor, owner) => refused(actor.api.DeleteBranch({ slotId: owner.chat.slotId }), "NotFound")
   },
@@ -973,6 +982,9 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
   ListGroupChats: {
     probe: (actor, owner) => refused(actor.api.ListGroupChats({ chatId: owner.chat.chatId }), "NotFound")
   },
+  RenameGroup: {
+    probe: (actor, owner) => refused(actor.api.RenameGroup({ chatId: owner.chat.chatId, name: "x" }), "NotFound")
+  },
   SetPersona: {
     probe: (actor, owner) => refused(actor.api.SetPersona({ entityId: owner.cardId, persona: false }), "NotFound")
   },
@@ -994,6 +1006,17 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
         )
         yield* refused(
           actor.api.StartChat({ cards: [actor.cardId], persona: null, greeting: null, first: send(owner.cardId) }),
+          "NotFound"
+        )
+        // Their card as a greeter.
+        yield* refused(
+          actor.api.StartChat({
+            cards: [actor.cardId],
+            persona: null,
+            greeting: null,
+            greeters: [{ entityId: owner.cardId, greeting: 0 }],
+            first: send(null)
+          }),
           "NotFound"
         )
       })
@@ -2045,6 +2068,19 @@ const storage: Record<
   string,
   (reader: Reader["Service"], actor: Party, owner: Party, writer: Writer["Service"]) => Effect.Effect<void, unknown>
 > = {
+  RenameChats: (_reader, actor, owner, writer) =>
+    refused(
+      writer.RenameChats({
+        userId: actor.user.id,
+        chats: [{ chatId: owner.chat.chatId, from: null }],
+        name: "foreign"
+      }),
+      "NotFound"
+    ),
+  SetBranchName: (_reader, actor, owner, writer) =>
+    refused(writer.SetBranchName({ userId: actor.user.id, slotId: owner.chat.slotId, name: "foreign" }), "NotFound"),
+  ListBranches: (reader, actor, owner) =>
+    refused(reader.ListBranches({ userId: actor.user.id, slotId: owner.chat.slotId }), "NotFound"),
   StImportDefaultPreset: (_reader, actor, owner, writer) =>
     Effect.gen(function* () {
       const { importId } = yield* owner.api.StartStImport({ unsupported: [] })

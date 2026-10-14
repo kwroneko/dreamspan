@@ -35,7 +35,7 @@
 | A5 | "that marks it as 'just opened' which swaps their order in the search results" | P 13:09, D §2.1 [P] | has | Home sort "Recent" and the chat list both go by last message |
 | A6 | "filter cards by 'never used' (something really basic which ST somehow cannot do)" | P 15:58, D §2.1 [D] | has | Home grid: "Never used N" filter |
 | A7 | The chat list "dumps a full list of what looks like individual branches of chats … titles like Karen - 2026-05-11@07h51m55s691ms" | V | has | ST branch files import into one chat's graph; readable names with start dates (`chatName`) |
-| A8 | Group chats' "name is the name of the first character"; editable titles | P 13:58, D §2.1 [P] | partial | Names are made from the cast, never ST's file name. **No way to rename a chat or group** (there's no rename RPC) |
+| A8 | Group chats' "name is the name of the first character"; editable titles | P 13:58, D §2.1 [P] | has | Editable header title; Rename group on its page updates all its chats. Renaming one chat explains its move to a tile under the new name (R4-D) |
 | A9 | "their thumbnail is a 2x2 with the first 4 … (which isn't a bad idea in itself)" | P 13:58, D §2.1 [P] | has | `GroupFaces` collage on group tiles; `AvatarStack` in the header and chat list |
 
 ## 2. Chat view and messages
@@ -75,7 +75,7 @@
 | C10 | "This makes me branch at the latest message every time I want to edit the author's note, as a checkpoint" | P 13:23, D §3.4 [D] | has | Notes, cast, model, preset and layout changes are state events "from the latest message on, on this branch" |
 | C11 | A branch is an explicit fork, never a side effect of swiping | D §3.2 [D] | has | ⋯ → Branch from here; branch arrows on the forking message; header branch menu |
 | C12 | "if you want to consult an old branch … it means opening it, copying parts, and then going back" | P 15:58, D §10.1 [D] | has | A branch has a URL (`?leaf=`); open it in another tab |
-| C13 | Branches are deletable like messages and swipes | D §6.2 [D] | partial | No Delete branch control (the `DeleteBranch` RPC exists). Branches have no names: "Branch k" only (PLAN f/u) |
+| C13 | Branches are deletable like messages and swipes | D §6.2 [D] | has | Header branch menu names/renames each shown branch and deletes it to the bin with Undo (R4-D) |
 | C14 | Deleting a single swipe is the normal, most available delete | D §6.2 [D] | has | Trash icon = Delete version; ⋯ → Delete message (all versions); toast to the bin |
 | C15 | "two parallel forking and merging chat threads … send a message to both at the same time" | P 16:05, D §3.3 [D] | missing (later) | Architecture only; the UX comes later |
 
@@ -104,7 +104,7 @@
 | E2 | Groups are made by "promoting it' into a groupchat which copies it and changes it irreversibly" | P 13:58 | has | Adding a character joins from the latest message on; no copy |
 | E3 | "One of my biggest gripes with ST is its handling of group chats, and personas in relation to them" | P 12:53 | partial | Group tiles on home, group page, New chat for a group (R2-A/B). Gaps are E4, E5, A8 and D8 |
 | E4 | Who replies next (ST's group reply order and per-member trigger) | P 12:53, PLAN f/u (R2-B) | partial | **Send always gets the first present character you don't play** (`replySpeaker` in `cast.ts`); plain Generate with your persona selected writes your persona. Another character needs Cast → Speak now, or switching the speaker first. No turn order, no "next speaker" choice at the composer |
-| E5 | A new group chat starts with each member's greeting, as ST does | PLAN f/u (R2-B) | partial | Only the first character greets |
+| E5 | A new group chat starts with each member's greeting, as ST does | PLAN f/u (R2-B) | has | Every member greets in order, with random initial choices as in ST and independent alternate greeting controls; previews survive the first send (R4-D) |
 | E6 | "kind of like how chars can be muted in group convos in ST" | P 13:42, D §3.5 [D] | has | Cast → Present switch per member (state event, per branch) |
 | E7 | Presence set by tool, decision model, or `send_message` argument | P 13:42, D §3.5 [D] | missing (later) | Manual only |
 | E8 | "it also concatenates cards *by field* rather than making them sequential" | P 13:36, D §5.2 [D] | has | This chat → Card layout: all cards in labelled blocks, or speaker's card last |
