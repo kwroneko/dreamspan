@@ -3,6 +3,7 @@ import { expect, type Page, test } from "@playwright/test"
 import { type FakeProvider, startProvider } from "./support/provider.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { openPanel } from "./support/panel.ts"
 
 const server = serverPerFile(withAdmin)
 let provider: FakeProvider
@@ -80,16 +81,24 @@ test("attach a lorebook, send a keyword, and detach it from the provider request
   })
   await expect.poll(async () => (await admin((api) => api.ListLibrary({ kind: "lorebook" }))).length).toBe(1)
   await page.goto(`${server().url}/chats/${chatId}`)
-  await page.getByRole("button", { name: "Settings", exact: true }).click()
-  const dialog = page.getByRole("dialog", { name: "Chat settings" })
-  const toggle = dialog.getByRole("switch", { name: "Lantern lore" })
-  await toggle.click()
-  await expect(toggle).toBeChecked()
-  await dialog.getByRole("button", { name: "Done" }).click()
+  // What the chat sends with, and where it comes from.
+  const settings = await openPanel(page, "This chat")
+  await expect(settings.getByTestId("model-in-effect")).toHaveText("Local model server · fake-small")
+  await expect(settings.getByRole("region", { name: "Model" })).toContainText("Your default model")
+  // Only the lorebooks that apply are listed; the library's are a search away.
+  const tab = await openPanel(page, "Lorebooks")
+  const inChat = tab.getByRole("list", { name: "Lorebooks in this chat" })
+  await expect(tab.getByText("No lorebook applies to this chat.")).toBeVisible()
+  await tab.getByRole("button", { name: "Add lorebook" }).click()
+  await tab.getByRole("searchbox").fill("lantern")
+  await tab
+    .getByRole("list", { name: "Lorebooks to add" })
+    .getByRole("button", { name: /Lantern lore/ })
+    .click()
+  await expect(inChat.getByText("Attached to this chat")).toBeVisible()
+  // The chat stays usable beside the panel.
   expect(await send(page, "Where is the lantern?")).toContain("The watch lights seven lanterns.")
-  await page.getByRole("button", { name: "Settings", exact: true }).click()
-  await toggle.click()
-  await expect(toggle).not.toBeChecked()
-  await dialog.getByRole("button", { name: "Done" }).click()
+  await inChat.getByRole("button", { name: "Detach Lantern lore" }).click()
+  await expect(inChat).toBeHidden()
   expect(await send(page, "And the lantern now?")).not.toContain("The watch lights seven lanterns.")
 })

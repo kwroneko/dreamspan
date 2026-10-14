@@ -7,6 +7,7 @@ import type { DraftDisplacement } from "@rp/shared/drafts.ts"
 import { ComposerBeacon } from "@rp/shared/composerApi.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import { EditorDraftSave } from "@rp/shared/editorApi.ts"
+import { SummaryDraftSave } from "@rp/shared/lcm.ts"
 import { Option, Schema } from "effect"
 
 const PendingSave = Schema.Union([
@@ -15,7 +16,12 @@ const PendingSave = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("pendingChat"),
     payload: Schema.Struct({ entityId: Schema.String, name: Schema.String, content: Schema.String })
-  })
+  }),
+  Schema.Struct({ kind: Schema.Literal("summary"), payload: SummaryDraftSave }),
+  // Text typed into a setting saved only by its Save button (Settings → Chats): there's no
+  // server draft to replay it to, so it stays here until saved or deleted, and the page
+  // shows it again in its field.
+  Schema.Struct({ kind: Schema.Literal("setting"), payload: Schema.Struct({ content: Schema.String }) })
 ])
 type PendingSave = typeof PendingSave.Type
 
@@ -180,10 +186,13 @@ export const flushCopies = async (userId: string) => {
   let recovered = 0
   for (const copy of await copiesOfUser(userId)) {
     const save = pendingOf(copy)
-    if (save === null || save.kind === "pendingChat") continue
+    // A first message before its chat exists, and a setting's text, have no draft to go to:
+    // they're sent or saved from their page.
+    if (save === null || save.kind === "pendingChat" || save.kind === "setting") continue
     const body = JSON.stringify({
       drafts: save.kind === "editor" ? [save.payload] : [],
-      composers: save.kind === "composer" ? [save.payload] : []
+      composers: save.kind === "composer" ? [save.payload] : [],
+      summaries: save.kind === "summary" ? [save.payload] : []
     })
     try {
       const response = await fetch("/library/drafts", {

@@ -40,6 +40,11 @@ const parse = (row: CardRow): CardText => {
   const all = [text(doc.first_mes), ...alternates]
   const greetingIndexes = all.flatMap((greeting, index) => (greeting.trim() === "" ? [] : [index]))
   const name = text(doc.name).trim()
+  const book =
+    typeof doc.character_book === "object" && doc.character_book !== null
+      ? (doc.character_book as Record<string, unknown>)
+      : null
+  const bookName = text(book?.name).trim()
   return {
     card: new CastCard({
       entityId: row.entity_id as EntityId,
@@ -47,7 +52,9 @@ const parse = (row: CardRow): CardText => {
       label: row.label,
       persona: row.persona === 1,
       inBin: row.in_bin === 1,
-      lorebook: typeof doc.character_book === "object" && doc.character_book !== null,
+      lorebook: book !== null,
+      ...(bookName === "" ? {} : { lorebookName: bookName }),
+      ...(book === null ? {} : { lorebookEntries: Array.isArray(book.entries) ? book.entries.length : 0 }),
       avatarMediaId: typeof doc.avatar_media_id === "string" ? doc.avatar_media_id : null
     }),
     greetings: greetingIndexes.map((index) => all[index]!),

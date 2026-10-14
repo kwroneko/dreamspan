@@ -14,7 +14,6 @@ import type { AppError } from "../../errors.ts"
 import { AppClient } from "../../rpc.ts"
 import { Button } from "../../ui/Button.tsx"
 import { Switch } from "../../ui/Choice.tsx"
-import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { Alert, Badge } from "../../ui/Surface.tsx"
 import { useDeletedToast } from "../bin/deleted.ts"
 import { useCaller } from "../editor/caller.ts"
@@ -79,14 +78,18 @@ function NoteRow({
   return (
     <li className="flex flex-col gap-2 py-3 first:pt-0 last:pb-0">
       <div className="flex items-start gap-2">
-        <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
           <Switch checked={note.active} onCheckedChange={onToggle} description={whereOf(note)}>
             {title}
           </Switch>
+          {(kind === "author_note" || kind === "imported_summary" || note.first) && (
+            <div className="flex flex-wrap gap-1 pl-12">
+              {kind === "author_note" && <Badge>author's note</Badge>}
+              {kind === "imported_summary" && <Badge>summary</Badge>}
+              {note.first && <Badge>Character's Note</Badge>}
+            </div>
+          )}
         </div>
-        {kind === "author_note" && <Badge>author's note</Badge>}
-        {kind === "imported_summary" && <Badge>summary</Badge>}
-        {note.first && <Badge>Character's Note</Badge>}
         <Button variant="ghost" aria-label={`${editing ? "Close" : "Edit"} ${title}`} onClick={onEdit}>
           {editing ? "Close" : "Edit"}
         </Button>
@@ -119,16 +122,8 @@ function NoteRow({
   )
 }
 
-/** The chat's notes at the leaf shown, to turn on and off, make, edit and delete. */
-export function NotesDialog({
-  session,
-  leafSlotId,
-  onOpenChange
-}: {
-  session: ChatSession
-  leafSlotId: SlotId | null
-  onOpenChange: (open: boolean) => void
-}) {
+/** The side panel's Notes tab: the chat's notes at the leaf shown, to turn on and off, make, edit and delete. */
+export function NotesTab({ session, leafSlotId }: { session: ChatSession; leafSlotId: SlotId | null }) {
   const chatId = session.id
   // Library changes (a save, a delete, an undo from the bin) read the list again.
   const atom = useMemo(
@@ -182,12 +177,11 @@ export function NotesDialog({
     </ul>
   )
   return (
-    <Dialog
-      open
-      onOpenChange={onOpenChange}
-      title="Notes"
-      description="Turning a note on or off applies from the latest message on, on this branch."
-    >
+    <div className="flex flex-col gap-4">
+      <p className="text-sm text-muted">
+        Notes are sent with the chat where each says. Turning one on or off applies from the latest message on, on this
+        branch.
+      </p>
       <AsyncView atom={atom} loading="Loading the notes…">
         {(notes) => {
           const own = notes.filter((n) => n.card === null)
@@ -219,9 +213,6 @@ export function NotesDialog({
         }}
       </AsyncView>
       <ErrorAlert error={error} />
-      <DialogActions>
-        <Button onClick={() => onOpenChange(false)}>Done</Button>
-      </DialogActions>
-    </Dialog>
+    </div>
   )
 }

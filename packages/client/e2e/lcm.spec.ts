@@ -13,6 +13,7 @@ import { type Client, loginCookie, withCookie } from "./support/rpc.ts"
 import { ADMIN, serverPerFile, withAdmin } from "./support/server.ts"
 import { fixtureSql } from "../../server/test/support/lcmFixtures.ts"
 import { condensed, count, failedJob, level1 } from "./support/summaries.ts"
+import { closePanel, openPanel } from "./support/panel.ts"
 
 const server = serverPerFile(withAdmin)
 let provider: FakeProvider
@@ -104,7 +105,7 @@ const open = async (page: Page, fixture: Fixture, search = "") => {
 const article = (page: Page, fixture: Fixture, n: number) =>
   page.locator(`article[data-slot="${fixture.entries[n - 1]!.slotId}"]`)
 
-const panel = (page: Page) => page.getByRole("dialog", { name: "Summaries" })
+const panel = (page: Page) => page.getByRole("tabpanel", { name: "Summaries" })
 
 for (const [name, viewport] of [
   ["desktop", { width: 1280, height: 800 }],
@@ -174,7 +175,9 @@ for (const [name, viewport] of [
       await expect(children).toContainText("Messages 5–8")
       // A range scrolls to its first message.
       await children.getByRole("button", { name: "Messages 5–8" }).click()
-      await expect(dialog).toHaveCount(0)
+      // Beside the chat the panel stays open; a phone's sheet closes to show the message.
+      if (name === "phone") await expect(dialog).toHaveCount(0)
+      else await expect(dialog).toBeVisible()
       await expect(page).toHaveURL(new RegExp(`slot=${fixture.entries[4]!.slotId}`))
       await expect(article(page, fixture, 5)).toHaveClass(/border-accent/)
     })
@@ -190,9 +193,9 @@ for (const [name, viewport] of [
       await expect(box).toHaveValue("A flood closed the road; Mira saved the ledger.")
       await box.fill("The road flooded. Mira saved the ledger.")
       await expect(dialog.getByText("Your text is kept as a draft.")).toBeVisible()
-      // The draft is on the server: a reload offers it again.
+      // The draft is on the server: a reload offers it again, with the panel still open at it.
       await page.reload()
-      await page.getByTestId("lcm-boundary").click()
+      await expect(dialog).toBeVisible()
       await row.getByRole("button", { name: /Edit the summary of messages 1–8/ }).click()
       await expect(box).toHaveValue("The road flooded. Mira saved the ledger.")
       await dialog.getByRole("button", { name: "Save revision" }).click()
@@ -259,7 +262,8 @@ for (const [name, viewport] of [
       const fixture = await makeChat(`rail-${name}`)
       await open(page, fixture)
       await expect(page.getByTestId("coverage-rail")).toHaveCount(0)
-      await page.getByRole("button", { name: "Coverage rail" }).click()
+      await (await openPanel(page, "Summaries")).getByRole("switch", { name: /Coverage rail/ }).click()
+      await closePanel(page)
       const rail = page.getByTestId("coverage-rail")
       await expect(rail.getByRole("button")).toHaveCount(3)
       await expect(rail.locator('[data-level="1"]')).toHaveCount(2)
@@ -280,7 +284,7 @@ for (const [name, viewport] of [
       await page.getByTestId("coverage-rail").locator('[data-level="1"]').nth(1).click()
       const dialog = panel(page)
       await expect(dialog.locator(`[data-summary="${fixture.second.id}"]`)).toContainText("Mira found the ledger")
-      await dialog.getByRole("button", { name: "Done" }).click()
+      await closePanel(page)
       // A stale message makes the bars over it hatched.
       await admin((api) =>
         api.AmendVersion({
@@ -290,25 +294,22 @@ for (const [name, viewport] of [
         })
       )
       await expect(page.getByTestId("coverage-rail").getByRole("button", { name: /stale/ })).toHaveCount(2)
-      await page.getByRole("button", { name: "Coverage rail" }).click()
+      await (await openPanel(page, "Summaries")).getByRole("switch", { name: /Coverage rail/ }).click()
       await expect(page.getByTestId("coverage-rail")).toHaveCount(0)
     })
 
-    test("LCM is a switch in the chat settings", async ({ page }) => {
+    test("LCM is a switch in the chat's side panel", async ({ page }) => {
       const fixture = await makeChat(`switch-${name}`)
       await open(page, fixture)
-      await page.getByRole("button", { name: "Settings" }).click()
-      const dialog = page.getByRole("dialog", { name: "Chat settings" })
-      const toggle = dialog.getByRole("switch", { name: /Summarize older messages/ })
+      const settings = await openPanel(page, "This chat")
+      const toggle = settings.getByRole("switch", { name: /Summarize older messages/ })
       await expect(toggle).toBeChecked()
       await toggle.click()
       await expect(toggle).not.toBeChecked()
-      await dialog.getByRole("button", { name: "Done" }).click()
       await expect(page.getByTestId("lcm-boundary")).toHaveCount(0)
       await expect(article(page, fixture, 8)).not.toHaveAttribute("data-summarized")
-      await expect(page.getByRole("button", { name: "Summaries", exact: true })).toHaveCount(0)
-      await page.getByRole("button", { name: "Settings" }).click()
-      await dialog.getByRole("switch", { name: /Summarize older messages/ }).click()
+      await expect((await openPanel(page, "Summaries")).getByText("Summaries are off for this chat.")).toBeVisible()
+      await (await openPanel(page, "This chat")).getByRole("switch", { name: /Summarize older messages/ }).click()
       // Turning it on for a chat with messages asks how to start and what it costs first.
       const enable = page.getByRole("dialog", { name: "Summarize older messages" })
       await expect(
@@ -316,12 +317,12 @@ for (const [name, viewport] of [
       ).toBeVisible()
       await enable.getByRole("button", { name: "Enable summaries" }).click()
       await expect(enable).toHaveCount(0)
-      await dialog.getByRole("button", { name: "Done" }).click()
+      await closePanel(page)
       await expect(page.getByTestId("lcm-boundary")).toBeVisible()
       await expect(article(page, fixture, 8)).toHaveAttribute("data-summarized", "true")
     })
 
-    test("the refusal judge and the fallback summarizer are chosen in the settings and kept", async ({ page }) => {
+    test("the refusal judge and the fallback summarizer are chosen in Settings → Chats and kept", async ({ page }) => {
       const fixture = await makeChat(`models-${name}`)
       // Whatever an earlier run chose: none.
       await admin((api) =>
@@ -331,8 +332,10 @@ for (const [name, viewport] of [
         })
       )
       await open(page, fixture)
-      await page.getByRole("button", { name: "Settings" }).click()
-      const dialog = page.getByRole("dialog", { name: "Chat settings" })
+      // For all chats, so not in the chat's panel: it links there.
+      await (await openPanel(page, "This chat")).getByRole("link", { name: "Settings → Chats" }).last().click()
+      await expect(page).toHaveURL(/\/settings\/chats$/)
+      const dialog = page.getByRole("region", { name: "Models for summaries" })
       const pick = async (select: Locator, option: string | RegExp) => {
         await select.click()
         await page.getByRole("listbox").getByRole("option", { name: option }).click()
@@ -401,7 +404,7 @@ for (const [name, viewport] of [
 test("rail child rerun exposes cancel action", async ({ page }) => {
   const fixture = await makeChat("review-child-rerun")
   await open(page, fixture)
-  await page.getByRole("button", { name: "Coverage rail", exact: true }).click()
+  await (await openPanel(page, "Summaries")).getByRole("switch", { name: /Coverage rail/ }).click()
   await page
     .getByTestId("coverage-rail")
     .getByRole("button", { name: /Level 1, messages 1–4/ })

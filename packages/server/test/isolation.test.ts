@@ -594,6 +594,27 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
         assert.deepStrictEqual(yield* owner.api.GetGenerationDefaults(), before)
       })
   },
+  ChangeGenerationDefaults: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const before = yield* owner.api.GetGenerationDefaults()
+        const theirs = { connection: owner.connectionId, model: owner.modelId }
+        yield* refused(actor.api.ChangeGenerationDefaults({ change: { model: theirs } }), "NotFound")
+        yield* refused(actor.api.ChangeGenerationDefaults({ change: { preset: owner.refId } }), "NotFound")
+        yield* refused(actor.api.ChangeGenerationDefaults({ change: { judge: theirs } }), "NotFound")
+        yield* refused(actor.api.ChangeGenerationDefaults({ change: { fallback: theirs } }), "NotFound")
+        // Another user's model on the caller's own connection is no better.
+        yield* refused(
+          actor.api.ChangeGenerationDefaults({
+            change: { model: { connection: actor.connectionId, model: owner.modelId } }
+          }),
+          "NotFound"
+        )
+        // The caller's own instruction is theirs alone.
+        yield* actor.api.ChangeGenerationDefaults({ change: { tail: "Actor's instruction." } })
+        assert.deepStrictEqual(yield* owner.api.GetGenerationDefaults(), before)
+      })
+  },
   // --- Chats
   ListChats: {
     probe: (actor, owner) =>
@@ -826,10 +847,15 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
           "budget",
           "historyStart",
           "leafSlotId",
+          "model",
+          "preset",
           "summarizedThrough",
           "warmth"
         ])
         if (own.historyStart) assert.deepStrictEqual(Object.keys(own.historyStart).sort(), ["depth", "slotId"])
+        if (own.preset) assert.deepStrictEqual(Object.keys(own.preset).sort(), ["name", "ref", "scope"])
+        // The model is the owner's own, named from the owner's connection.
+        if (own.model) assert.strictEqual(own.model.connection, owner.connectionId)
       })
   },
   SubscribeChat: {
@@ -1494,6 +1520,30 @@ const routes: Record<string, Probe> = {
       assert.strictEqual((yield* leaving(owner.chat.chatId)).status, 404)
       // Enclosing ownership does not authorize an independently supplied foreign draft id.
       assert.strictEqual((yield* leaving(actor.chat.chatId)).status, 404)
+    }),
+  "POST /library/drafts, with summaries": (actor, owner) =>
+    Effect.gen(function* () {
+      const before = yield* owner.api.GetSummaryDraft({ summaryId: owner.summary.id })
+      const response = yield* http(
+        actor,
+        "/library/drafts",
+        JSON.stringify({
+          drafts: [],
+          summaries: [
+            {
+              summaryId: owner.summary.id,
+              draftId: null,
+              content: "planted",
+              expectedRowVersion: null,
+              expectedSession: null,
+              baseRevisionId: owner.summary.revisionId
+            }
+          ]
+        }),
+        "application/json"
+      )
+      assert.strictEqual(response.status, 404)
+      assert.deepStrictEqual(yield* owner.api.GetSummaryDraft({ summaryId: owner.summary.id }), before)
     }),
   "POST /library/export": (actor, owner) =>
     Effect.gen(function* () {

@@ -6,6 +6,7 @@ import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { makeAssembler } from "../assembler/assembler.ts"
 import type { ChatId } from "@rp/shared/chat.ts"
+import type { EffectivePreset } from "@rp/shared/inspectorApi.ts"
 import { wireContext } from "../assembler/wire.ts"
 import { lastBreakpoint, prefixChange, tokensBetween } from "../assembler/warmth.ts"
 import { describer, inspectionInputs } from "./inspectorReads.ts"
@@ -159,12 +160,37 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
           ? yield* sql<{ label: string }>`SELECT r.label FROM entity_refs r JOIN entities e ON e.id = r.entity_id
               WHERE r.id = ${preset.ref} AND e.owner_user_id = ${userId}`
           : []
+        const presetName = presetRef?.label ?? (preset?.scope === "builtin" ? "Default" : "Unnamed")
+        // The model by name, as the panel shows it: also a hidden one, which is still used.
+        const chosen = sources.chosenModel()
+        const [named] = chosen
+          ? yield* sql<{ connection_name: string; model_key: string | null; hidden: number | null }>`
+              SELECT c.name AS connection_name, m.model_key, m.hidden
+              FROM connections c LEFT JOIN models m ON m.id = ${chosen.model} AND m.connection_id = c.id
+              WHERE c.id = ${chosen.connection} AND c.owner_user_id = ${userId}
+                AND c.deleted_at IS NULL AND c.purged_at IS NULL`
+          : []
         const boundary = {
+          ...(chosen === undefined
+            ? {}
+            : {
+                model: chosen && {
+                  connection: chosen.connection,
+                  model: chosen.model,
+                  connectionName: named?.connection_name ?? null,
+                  modelKey: named?.model_key ?? null,
+                  hidden: named?.hidden === 1,
+                  scope: chosen.scope
+                }
+              }),
+          preset: preset
+            ? { ref: preset.ref, name: presetName, scope: preset.scope as EffectivePreset["scope"] }
+            : null,
           budget:
             budget && preset
               ? {
                   ...budget,
-                  presetName: presetRef?.label ?? (preset.scope === "builtin" ? "Default" : "Unnamed"),
+                  presetName,
                   builtinPreset: preset.scope === "builtin"
                 }
               : null,

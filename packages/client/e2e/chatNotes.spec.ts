@@ -69,8 +69,8 @@ test("a note made in the chat goes into the request once on, and out once off", 
   await page.goto(`${server().url}/chats/${chatId}`)
   await expect(page.getByText("The river is rising.")).toBeVisible()
 
-  await page.getByRole("button", { name: "Notes" }).click()
-  const dialog = page.getByRole("dialog", { name: "Notes" })
+  await page.getByRole("group", { name: "Chat panel" }).getByRole("button", { name: "Notes" }).click()
+  const dialog = page.getByRole("tabpanel", { name: "Notes" })
   await dialog.getByRole("button", { name: "New note" }).click()
   const editor = dialog.getByRole("region", { name: "Note Note" })
   await editor.getByLabel("Content").fill("Lanterns burn along the levee.")
@@ -97,14 +97,12 @@ test("a note made in the chat goes into the request once on, and out once off", 
   await hers.getByRole("button", { name: "Edit Outfit" }).click()
   await expect(hers.getByText("saving it changes it in the library, in every chat with Mira")).toBeVisible()
   await expect(hers.getByRole("button", { name: "Delete the note" })).toHaveCount(0)
-  await dialog.getByRole("button", { name: "Done" }).click()
 
+  // The panel stays open beside the chat while sending.
   expect(await send(page, "Is the levee holding?")).toContain("Lanterns burn along the levee.")
 
-  await page.getByRole("button", { name: "Notes" }).click()
   await own.getByRole("switch", { name: "Note" }).click()
   await expect(own.getByRole("switch", { name: "Note" })).not.toBeChecked()
-  await dialog.getByRole("button", { name: "Done" }).click()
   expect(await send(page, "And now?")).not.toContain("Lanterns burn")
 })
 
@@ -117,8 +115,10 @@ test("the notes fit a phone, under the Content-Security-Policy", async ({ browse
   })
   await apiLogin(context.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/chats/${chatId}`)
-  await page.getByRole("button", { name: "Notes" }).click()
-  const hers = page.getByRole("dialog", { name: "Notes" }).getByRole("region", { name: "Mira's notes" })
+  // A phone opens the panel as a sheet over the chat.
+  await page.getByRole("button", { name: "Chat panel" }).click()
+  await page.getByRole("dialog").getByRole("tab", { name: "Notes" }).click()
+  const hers = page.getByRole("tabpanel", { name: "Notes" }).getByRole("region", { name: "Mira's notes" })
   await hers.getByRole("button", { name: "Edit Outfit" }).click()
   await expect(hers.getByLabel("Content")).toBeVisible()
   expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0)
@@ -126,12 +126,12 @@ test("the notes fit a phone, under the Content-Security-Policy", async ({ browse
   await context.close()
 })
 
-test("an open Notes dialog follows another connection's State changes", async ({ page }) => {
+test("an open Notes tab follows another connection's State changes", async ({ page }) => {
   const note = await admin((api) => api.CreateChatNote({ chatId: chatId as never, title: "Remote" }))
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/chats/${chatId}`)
-  await page.getByRole("button", { name: "Notes" }).click()
-  const toggle = page.getByRole("dialog", { name: "Notes" }).getByRole("switch", { name: "Remote" })
+  await page.getByRole("group", { name: "Chat panel" }).getByRole("button", { name: "Notes" }).click()
+  const toggle = page.getByRole("tabpanel", { name: "Notes" }).getByRole("switch", { name: "Remote" })
   await expect(toggle).not.toBeChecked()
   const chat = await admin((api) => api.GetChat({ chatId: chatId as never }))
   for (const active of [true, false]) {
@@ -198,8 +198,8 @@ test("editing at a displayed leaf keeps the sibling branch's note revision", asy
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   const editor = page.getByRole("region", { name: "Note Weather" })
   const openAt = async (leaf: string) => {
-    await page.goto(`${server().url}/chats/${chat.id}?leaf=${leaf}`)
-    await page.getByRole("button", { name: "Notes" }).click()
+    // A link can open the panel at a tab.
+    await page.goto(`${server().url}/chats/${chat.id}?leaf=${leaf}&panel=notes`)
     await page.getByRole("button", { name: "Edit Weather" }).click()
   }
   await openAt(left)

@@ -23,6 +23,10 @@ export const makeGenerationHandlers = Effect.gen(function* () {
     SetGenerationDefaults: ({ defaults }) =>
       Effect.flatMap(CurrentUser, (user) =>
         writer.SetGenerationDefaults({ userId: user.id, defaults }).pipe(Effect.tap(() => warmth.refreshUser(user.id)))
-      ).pipe(Effect.catchTag(["StorageError", "RpcClientError"], serverError("SetGenerationDefaults")))
+      ).pipe(Effect.catchTag(["StorageError", "RpcClientError"], serverError("SetGenerationDefaults"))),
+    ChangeGenerationDefaults: ({ change }) =>
+      Effect.flatMap(CurrentUser, (user) =>
+        writer.ChangeGenerationDefaults({ userId: user.id, change }).pipe(Effect.tap(() => warmth.refreshUser(user.id)))
+      ).pipe(Effect.catchTag(["StorageError", "RpcClientError"], serverError("ChangeGenerationDefaults")))
   } satisfies Partial<Parameters<typeof AppApi.of>[0]>
 })
