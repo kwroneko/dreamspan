@@ -1,5 +1,6 @@
 // What a message keeps whatever happens around it: the text typed into its editor across a
-// reload, and across a closed tab while the server was down, its version arrows on every
+// reload, across a closed tab while the server was down, while its version is being saved and
+// when replayed from this browser over text saved elsewhere, its version arrows on every
 // reply, its speaker and side when the version it started with is deleted, the text
 // streamed so far when it's copied, and, on a phone, the start of why it isn't sent when a
 // tap reveals its actions.
@@ -7,8 +8,9 @@ import { expect, type Page, test } from "@playwright/test"
 import type { ChatId } from "@rp/shared/chat.ts"
 import { Effect } from "effect"
 import { card, header, jsonl, message } from "../../server/test/support/stFolder.ts"
+import { type Copy, makeCopy } from "../src/features/editor/backup.ts"
 import { messageMenu, showActions } from "./support/message.ts"
-import { asUser, loginCookie } from "./support/rpc.ts"
+import { asUser, type Client, loginCookie } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "60", FAKE_GENERATOR_TOKENS: "600" })
@@ -98,6 +100,250 @@ test("text typed into a message editor while the server is down survives closing
   await reopened.reload()
   await expect(again.locator(".markdown")).toHaveText(text)
   await expect(again.getByLabel("Your version", { exact: true })).toHaveCount(0)
+})
+
+const admin = <A>(use: (api: Client) => Effect.Effect<A, unknown>) =>
+  asUser(server(), ADMIN.handle, ADMIN.password, use)
+
+/** This browser's copies of text not on the server yet (editor/backup.ts). */
+const copies = (page: Page) =>
+  page.evaluate(
+    () =>
+      new Promise<Array<Copy>>((resolve) => {
+        const request = indexedDB.open("rp-editor-copies", 1)
+        request.onupgradeneeded = () => {
+          const store = request.result.createObjectStore("copies", { keyPath: "key" })
+          store.createIndex("userId", "userId")
+          store.createIndex("ref", ["userId", "refId"])
+        }
+        request.onsuccess = () => {
+          const db = request.result
+          const all = db.transaction("copies").objectStore("copies").getAll()
+          all.onsuccess = () => {
+            db.close()
+            resolve(all.result as Array<Copy>)
+          }
+        }
+      })
+  )
+const contents = async (page: Page) => (await copies(page)).map((copy) => copy.content)
+
+/** A chat with one message of the user's, and the user. */
+const oneMessage = () =>
+  admin((api) =>
+    Effect.gen(function* () {
+      const chat = yield* api.CreateChat({ title: "Drafts" })
+      const sent = yield* api.SendMessage({ chatId: chat.id, parentSlotId: null, branch: false, content: "The turn." })
+      if (sent._tag !== "Posted") return yield* Effect.die(new Error("the message was queued"))
+      return { chat, entry: sent.entry, me: yield* api.Whoami() }
+    })
+  )
+
+for (const kind of ["Write", "Edit"] as const) {
+  test(`${kind}: text typed while the version is being saved stays in the editor`, async ({ page }) => {
+    const { chat, entry } = await oneMessage()
+    // The version's save waits until released; the box stays usable meanwhile.
+    const commit = kind === "Write" ? "WriteVersion" : "AmendVersion"
+    let release: (() => void) | null = null
+    await page.routeWebSocket(/\/rpc$/, (socket) => {
+      const upstream = socket.connectToServer()
+      socket.onMessage((data) => {
+        if (typeof data === "string" && JSON.parse(data).tag === commit) release = () => upstream.send(data)
+        else upstream.send(data)
+      })
+    })
+    await open(page, chat.id)
+    const row = page.locator(`article[data-slot="${entry.slotId}"]`)
+    if (kind === "Write") await messageMenu(row, "Write your own version")
+    else {
+      await showActions(row)
+      await row.getByRole("button", { name: "Edit", exact: true }).click()
+    }
+    const box = row.getByLabel(kind === "Write" ? "Your version" : "Message text", { exact: true })
+    const submitted = "The text saved as the version."
+    const later = "The text saved as the version. More typed while it was being saved."
+    await box.fill(submitted)
+    await expect
+      .poll(async () => (await admin((api) => api.MessageDrafts({ chatId: chat.id })))[0]?.content)
+      .toBe(submitted)
+    await row.getByRole("button", { name: kind === "Write" ? "Add as a new version" : "Save", exact: true }).click()
+    await expect.poll(() => release !== null).toBe(true)
+    await box.fill(later)
+    await expect.poll(() => contents(page)).toContain(later)
+    // Answered before the newer text's own save: the version holds what was submitted, and
+    // the editor stays open with what was typed since, its copy kept until the server has it.
+    release!()
+    await expect
+      .poll(async () => (await admin((api) => api.ListVersions({ slotId: entry.slotId }))).map((v) => v.content))
+      .toContain(submitted)
+    await expect(box).toHaveValue(later)
+    await expect
+      .poll(async () => (await admin((api) => api.MessageDrafts({ chatId: chat.id })))[0]?.content)
+      .toBe(later)
+    await expect.poll(() => copies(page)).toEqual([])
+    await page.reload()
+    await expect(box).toHaveValue(later)
+  })
+}
+
+test("text replayed from this browser that the server refused is retried on the draft it was typed on", async ({
+  page,
+  context
+}) => {
+  const { chat, entry } = await oneMessage()
+  const target = { _tag: "Write", slotId: entry.slotId } as const
+  const first = await admin((api) =>
+    api.SaveMessageDraft({
+      target,
+      draftId: null,
+      content: "A shared prefix for a paragraph.",
+      expectedRowVersion: null,
+      expectedSession: null
+    })
+  )
+  // Typed here while this browser can't reach the server, then the tab is closed.
+  await page.routeWebSocket(/\/rpc$/, (socket) => {
+    const upstream = socket.connectToServer()
+    socket.onMessage((data) => {
+      if (typeof data === "string" && JSON.parse(data).tag === "SaveMessageDraft") return
+      upstream.send(data)
+    })
+  })
+  await open(page, chat.id)
+  const offline = `${first.content} offline A`
+  await page.getByLabel("Your version", { exact: true }).fill(offline)
+  await expect.poll(() => contents(page)).toContain(offline)
+  await page.close()
+  // Another device saves a small change to the same draft.
+  const elsewhere = `${first.content} other B`
+  await admin((api) =>
+    api.SaveMessageDraft({
+      target,
+      draftId: first.id,
+      content: elsewhere,
+      expectedRowVersion: first.rowVersion,
+      expectedSession: first.session
+    })
+  )
+  // Reopened, the replay fails once; the text is retried, with more typed, and saved as a version.
+  const back = await context.newPage()
+  const sent: Array<{ expectedRowVersion: number | null }> = []
+  let fail = true
+  await back.routeWebSocket(/\/rpc$/, (socket) => {
+    const upstream = socket.connectToServer()
+    socket.onMessage((data) => {
+      const request =
+        typeof data === "string" ? (JSON.parse(data) as { tag?: string; id?: string; payload?: never }) : null
+      if (request?.tag === "SaveMessageDraft") {
+        sent.push(request.payload!)
+        if (fail) {
+          fail = false
+          const error = { _tag: "ServerError", message: "Synthetic transient failure" }
+          const exit = { _tag: "Failure", cause: [{ _tag: "Fail", error }] }
+          socket.send(JSON.stringify({ _tag: "Exit", requestId: request.id, exit }))
+          return
+        }
+      }
+      upstream.send(data)
+    })
+  })
+  await back.goto(`${server().url}/chats/${chat.id}`)
+  const box = back.getByLabel("Your version", { exact: true })
+  await expect(box).toHaveValue(offline)
+  await expect(back.getByRole("alert")).toContainText("The text isn’t saved as a draft yet")
+  await box.fill(`${offline}!`)
+  await expect
+    .poll(async () => (await admin((api) => api.MessageDrafts({ chatId: chat.id })))[0]?.content)
+    .toBe(`${offline}!`)
+  // Every attempt named the draft as this browser had it, not as the other device left it.
+  expect(sent.map((payload) => payload.expectedRowVersion)).toEqual([first.rowVersion, first.rowVersion])
+  // So the other device's text went one step back, and the editor says so.
+  await expect(back.getByText("This browser's text replaced text saved elsewhere")).toBeVisible()
+  await back.getByRole("button", { name: "Add as a new version" }).click()
+  await expect(box).toHaveCount(0)
+  // Saved as a version, the other device's text is in the recovered texts.
+  const recovered = await admin((api) => api.ListRecoveredTexts({ limit: 100, before: null }))
+  expect(recovered.map((text) => text.content)).toContain(elsewhere)
+})
+
+test("a replay from this browser that goes over text saved elsewhere says so until acknowledged", async ({ page }) => {
+  const { chat, entry, me } = await oneMessage()
+  const target = { _tag: "Write", slotId: entry.slotId } as const
+  const first = await admin((api) =>
+    api.SaveMessageDraft({
+      target,
+      draftId: null,
+      content: "Shared prefix.",
+      expectedRowVersion: null,
+      expectedSession: null
+    })
+  )
+  const elsewhere = "Shared prefix. Typed on the other device."
+  await admin((api) =>
+    api.SaveMessageDraft({
+      target,
+      draftId: first.id,
+      content: elsewhere,
+      expectedRowVersion: first.rowVersion,
+      expectedSession: first.session
+    })
+  )
+  // This browser kept text typed on the first save, which never reached the server.
+  await open(page, chat.id)
+  await expect(page.getByLabel("Your version", { exact: true })).toHaveValue(elsewhere)
+  const offline = "Shared prefix. Typed offline here."
+  const copy = makeCopy(
+    me.id,
+    `messages:${chat.id}`,
+    `write:${entry.slotId}`,
+    {
+      kind: "message",
+      payload: {
+        target,
+        draftId: first.id,
+        content: offline,
+        expectedRowVersion: first.rowVersion,
+        expectedSession: first.session
+      }
+    },
+    Date.now()
+  )
+  await copies(page)
+  await page.evaluate(
+    (copy) =>
+      new Promise<void>((resolve) => {
+        const request = indexedDB.open("rp-editor-copies", 1)
+        request.onsuccess = () => {
+          const db = request.result
+          const transaction = db.transaction("copies", "readwrite")
+          transaction.objectStore("copies").put(copy)
+          transaction.oncomplete = () => {
+            db.close()
+            resolve()
+          }
+        }
+      }),
+    copy
+  )
+  await page.reload()
+  const box = page.getByLabel("Your version", { exact: true })
+  await expect(box).toHaveValue(offline)
+  await expect.poll(() => copies(page)).toEqual([])
+  const notice = page.getByRole("status").filter({ hasText: "This browser's text replaced text saved elsewhere" })
+  await expect(notice).toBeVisible()
+  await notice.getByText("View the other text").click()
+  await expect(notice.getByText(elsewhere, { exact: true })).toBeVisible()
+  // Typing keeps it; acknowledging dismisses it.
+  await box.fill(`${offline} More.`)
+  await expect(notice).toBeVisible()
+  await notice.getByRole("button", { name: "Keep this browser's text" }).click()
+  await expect(notice).toHaveCount(0)
+  await expect(box).toHaveValue(`${offline} More.`)
+  // Saved as a version, the other text is in the recovered texts.
+  await page.getByRole("button", { name: "Add as a new version" }).click()
+  await expect(box).toHaveCount(0)
+  const recovered = await admin((api) => api.ListRecoveredTexts({ limit: 100, before: null }))
+  expect(recovered.map((text) => text.content)).toContain(elsewhere)
 })
 
 test("an older reply keeps its version arrows with one version", async ({ page }) => {

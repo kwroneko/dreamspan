@@ -507,11 +507,16 @@ function ChatSurface({
                 role="status"
                 className="mx-auto flex w-full max-w-3xl items-center gap-2 border-b border-border px-2 pb-1 text-sm text-muted"
               >
-                <span className="min-w-0 flex-1">The oldest messages aren&rsquo;t sent: summaries are off.</span>
+                {/* A phone's line has room for the gist only; the button says the rest. */}
+                <span className="min-w-0 flex-1 truncate">
+                  <span className="sm:hidden">Summaries are off.</span>
+                  <span className="hidden sm:inline">The oldest messages aren&rsquo;t sent: summaries are off.</span>
+                </span>
                 <Button
                   variant="ghost"
                   className="h-7 shrink-0 px-2 text-accent"
-                  title="Summaries keep what happened in older messages in the context"
+                  title="The oldest messages aren’t sent to the model. Summaries keep what happened in them in the context."
+                  aria-description="The oldest messages aren’t sent to the model. Summaries keep what happened in them in the context."
                   onClick={() => setEnabling(true)}
                 >
                   Enable summaries

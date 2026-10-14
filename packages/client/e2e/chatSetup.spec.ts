@@ -161,6 +161,7 @@ test("Send as another card, and Generate with a one-turn direction that swipes r
   // A cast member the user doesn't play speaks on the model's side, whoever wrote it.
   const mine = page.getByRole("article").filter({ hasText: "Tobin pushes off from the dock." })
   await expect(mine.locator("header")).toContainText("Tobin")
+  await expect(mine).toHaveAttribute("aria-label", "Reply")
   await expect(generating(page)).toHaveCount(0, { timeout: 20_000 })
   // The switcher remembers its tab; recent speakers are one tap away.
   await page.getByRole("button", { name: /^Speaking as Tobin/ }).click()

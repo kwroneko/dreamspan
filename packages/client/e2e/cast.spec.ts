@@ -128,6 +128,7 @@ test("the Cast tab: absent, speak now, write as, the card, add and remove", asyn
   // A cast member the user doesn't play speaks on the model's side, whoever wrote it.
   const sent = page.getByRole("article").filter({ hasText: "Tobin pushes off from the dock." })
   await expect(sent.locator("header")).toContainText("Tobin")
+  await expect(sent).toHaveAttribute("aria-label", "Reply")
   await expect(generating(page)).toHaveCount(0, { timeout: 20_000 })
 
   // Removed from here on.

@@ -90,8 +90,20 @@ for (const [name, viewport, chat] of [
     }) => {
       const before = provider.completions.length
       await openChat(page, chat)
-      // Summaries are off for an imported chat, and turning them on is one click away.
-      await expect(page.getByRole("status").filter({ hasText: "summaries are off" })).toBeVisible()
+      // Summaries are off for an imported chat, and turning them on is one click away, on one line.
+      const off = page.getByRole("status").filter({ hasText: "summaries are off" })
+      await expect(off).toBeVisible()
+      const label = await off
+        .locator("span")
+        .first()
+        .evaluate((span) => ({
+          height: span.getBoundingClientRect().height,
+          line: Number.parseFloat(getComputedStyle(span).lineHeight),
+          cut: span.scrollWidth > span.clientWidth
+        }))
+      // One line, and the words shown fit it whole.
+      expect(label.height).toBeLessThanOrEqual(label.line + 1)
+      expect(label.cut).toBe(false)
       await page.getByRole("button", { name: "Enable summaries", exact: true }).click()
 
       const dialog = page.getByRole("dialog", { name: "Summarize older messages" })

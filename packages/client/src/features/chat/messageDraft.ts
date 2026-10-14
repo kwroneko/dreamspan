@@ -12,7 +12,7 @@ import type { SlotId, VersionId } from "@rp/shared/chat.ts"
 import type { MessageDraftTarget } from "@rp/shared/chatApi.ts"
 import type { Draft } from "@rp/shared/drafts.ts"
 import type { AppError } from "../../errors.ts"
-import { type Copy, dropCopy, keepCopy, makeCopy, pendingOf } from "../editor/backup.ts"
+import { type Copy, dropCopy, keepCopy, makeCopy, pendingOf, type ReplayConflict } from "../editor/backup.ts"
 import type { ChatSession, Outcome } from "./session.ts"
 
 /** How long typing pauses before the text is saved. */
@@ -40,13 +40,40 @@ export interface MessageDraftView {
   /** Typed text not on the server yet. */
   readonly unsaved: boolean
   readonly error: AppError | null
+  /** A replay of this browser's text went over text saved elsewhere: kept until acknowledged or switched. */
+  readonly conflict: ReplayConflict | null
+}
+
+/** What the text a save sends was typed on (§3.10, "a field's base"): the draft as the tab had it. */
+interface Base {
+  readonly draftId: string | null
+  readonly rowVersion: number | null
+  readonly session: number | null
+}
+const baseOf = (draft: Draft | null): Base => ({
+  draftId: draft?.id ?? null,
+  rowVersion: draft?.rowVersion ?? null,
+  session: draft?.session ?? null
+})
+
+/** The text a commit took, from `ready()`. */
+export interface Submission {
+  readonly text: string
+  readonly draft: { readonly draftId: string; readonly session: number } | null
 }
 
 export class MessageDraft {
   readonly target: MessageDraftTarget
   private view: MessageDraftView
   private readonly listeners = new Set<() => void>()
+  /** The draft as the server last answered with it. */
   private draft: Draft | null
+  /**
+   * What the text shown was typed on, which its saves name. It changes only with the text
+   * shown, or when the server answers a save with exactly the text sent: text restored from
+   * a copy keeps the copy's base until the server has it, whatever the server holds now.
+   */
+  private base: Base
   /** Typed here and not saved yet. */
   private local: string | null = null
   /** The browser copy of `local`. */
@@ -54,7 +81,10 @@ export class MessageDraft {
   /** Copies on their way to the server, which a newer one mustn't replace. */
   private readonly sending = new Set<Copy>()
   private timer: ReturnType<typeof setTimeout> | null = null
-  private inFlight: Promise<void> | null = null
+  /** Replays and saves run one at a time, in order. */
+  private queue: Promise<unknown> = Promise.resolve()
+  /** When the copy shown was typed, while its replay hasn't reached the server. */
+  private replayedAt: number | null = null
   private readonly session: ChatSession
   private readonly userId: string
 
@@ -63,7 +93,13 @@ export class MessageDraft {
     this.userId = userId
     this.target = target
     this.draft = draft
-    this.view = { text: draft?.status === "active" ? draft.content : initial, unsaved: false, error: null }
+    this.base = baseOf(draft)
+    this.view = {
+      text: draft?.status === "active" ? draft.content : initial,
+      unsaved: false,
+      error: null,
+      conflict: null
+    }
   }
 
   readonly subscribe = (listener: () => void) => {
@@ -79,48 +115,69 @@ export class MessageDraft {
     for (const listener of this.listeners) listener()
   }
 
+  private serial<A>(task: () => Promise<A>): Promise<A> {
+    const run = this.queue.then(task, task)
+    this.queue = run.catch(() => undefined)
+    return run
+  }
+
   /**
    * Sends this browser's copies of the editor's text that never reached the server, oldest
    * first, each onto the draft it was typed on (another tab's newer text stays one step back
-   * in the draft's history). One the server still doesn't take is shown, and kept.
+   * in the draft's history, and the editor says so). One the server still doesn't take is
+   * shown, and kept, on the base it was typed on.
    */
-  async restore(copies: ReadonlyArray<Copy>) {
-    let error: AppError | null = null
-    for (const copy of [...copies].sort((a, b) => a.at - b.at)) {
-      const save = pendingOf(copy)
-      if (save?.kind !== "message") continue
-      this.sending.add(copy)
-      const replayed = await this.session.call((client) => client("SaveMessageDraft", save.payload))
-      this.sending.delete(copy)
-      if (replayed.ok) {
-        if (this.local === null) this.draft = replayed.value
-        void dropCopy(copy)
-      } else {
-        if (this.pending !== null && this.pending.at < copy.at) this.pending = null
-        if (this.pending === null) {
-          this.local = copy.content
-          this.pending = copy
+  restore(copies: ReadonlyArray<Copy>) {
+    return this.serial(async () => {
+      let error: AppError | null = null
+      let conflict = this.view.conflict
+      for (const copy of [...copies].sort((a, b) => a.at - b.at)) {
+        const save = pendingOf(copy)
+        if (save?.kind !== "message") continue
+        this.sending.add(copy)
+        const replayed = await this.session.call((client) => client("SaveMessageDraft", save.payload))
+        this.sending.delete(copy)
+        if (replayed.ok) {
+          this.draft = replayed.value
+          // The text it holds is shown, unless something was typed here meanwhile.
+          if (this.local === null) this.base = baseOf(replayed.value)
+          if (replayed.value.displaced !== null) conflict = { ...replayed.value.displaced, typedAt: copy.at }
+          void dropCopy(copy)
+        } else {
+          // Still not on the server: the box shows it, on the base it was typed on.
+          if (this.pending !== null && this.pending.at < copy.at) this.pending = null
+          if (this.pending === null) {
+            this.local = copy.content
+            this.pending = copy
+            this.base = {
+              draftId: save.payload.draftId,
+              rowVersion: save.payload.expectedRowVersion,
+              session: save.payload.expectedSession
+            }
+            this.replayedAt = copy.at
+          }
+          error = replayed.error
         }
-        error = replayed.error
       }
-    }
-    const draft = this.draft
-    this.set({
-      text: this.local ?? (draft?.status === "active" ? draft.content : this.view.text),
-      unsaved: this.local !== null,
-      error
+      const draft = this.draft
+      this.set({
+        text: this.local ?? (draft?.status === "active" ? draft.content : this.view.text),
+        unsaved: this.local !== null,
+        error,
+        conflict
+      })
     })
   }
 
-  /** The save of `content` as typed on the draft this tab has now. */
+  /** The save of `content` as typed on the base of the text shown. */
   private payload(content: string) {
-    const base = this.draft
+    const base = this.base
     return {
       target: this.target,
-      draftId: base?.id ?? null,
+      draftId: base.draftId,
       content,
-      expectedRowVersion: base?.rowVersion ?? null,
-      expectedSession: base?.session ?? null
+      expectedRowVersion: base.rowVersion,
+      expectedSession: base.session
     }
   }
 
@@ -146,24 +203,27 @@ export class MessageDraft {
     this.pending = null
   }
 
+  private cancelTimer() {
+    if (this.timer !== null) clearTimeout(this.timer)
+    this.timer = null
+  }
+
   setText(text: string) {
     this.local = text
     this.keep(text)
     this.set({ text, unsaved: true })
-    if (this.timer !== null) clearTimeout(this.timer)
+    this.cancelTimer()
     this.timer = setTimeout(() => void this.save(), SAVE_DELAY_MS)
   }
 
-  /** Saves what was typed now. Saves run one at a time. */
-  async save(): Promise<void> {
-    if (this.timer !== null) clearTimeout(this.timer)
-    this.timer = null
-    while (this.inFlight) await this.inFlight
-    const sent = this.local
-    if (sent === null) return
-    const payload = this.payload(sent)
-    const copy = this.pending
-    const run = async () => {
+  /** Saves what was typed now. Saves run one at a time, after a replay. */
+  save(): Promise<void> {
+    this.cancelTimer()
+    return this.serial(async () => {
+      const sent = this.local
+      if (sent === null) return
+      const payload = this.payload(sent)
+      const copy = this.pending
       if (copy !== null) this.sending.add(copy)
       const result = await this.session.call((client) => client("SaveMessageDraft", payload))
       if (copy !== null) this.sending.delete(copy)
@@ -172,7 +232,9 @@ export class MessageDraft {
         if (copy !== null && this.pending !== copy && this.pending?.ancestors.includes(copy.key)) void dropCopy(copy)
         return this.set({ error: result.error })
       }
+      // The server has exactly the text sent: what's typed from it is on the draft as it is now.
       this.draft = result.value
+      this.base = baseOf(result.value)
       if (copy !== null) void dropCopy(copy)
       if (this.local === sent) {
         this.local = null
@@ -181,18 +243,22 @@ export class MessageDraft {
         // More typed since: its copy now names the draft as the server has it.
         this.keep(this.local)
       }
-      this.set({ error: null, unsaved: this.local !== null })
-    }
-    this.inFlight = run()
-    await this.inFlight
-    this.inFlight = null
+      // The first save of text replayed from this browser can go over text saved elsewhere too.
+      const conflict =
+        this.replayedAt !== null && result.value.displaced !== null
+          ? { ...result.value.displaced, typedAt: this.replayedAt }
+          : this.view.conflict
+      this.replayedAt = null
+      this.set({ error: null, unsaved: this.local !== null, conflict })
+    })
   }
 
   /**
-   * Everything typed, on the server; then the draft to commit with the text shown, if it
-   * holds exactly that text (otherwise the text is saved without naming it).
+   * Everything typed, on the server; then the text to commit, the text shown, and the draft
+   * to commit with it if it holds exactly that text (otherwise the text is saved without
+   * naming it).
    */
-  async ready(): Promise<{ readonly text: string; readonly draft: { draftId: string; session: number } | null }> {
+  async ready(): Promise<Submission> {
     await this.save()
     const text = this.view.text
     const draft = this.draft
@@ -205,12 +271,21 @@ export class MessageDraft {
     }
   }
 
-  /** The text shown is saved as a version: no copy of it is needed any more. */
-  saved() {
-    if (this.timer !== null) clearTimeout(this.timer)
-    this.timer = null
+  /**
+   * The submitted text is saved as a version: no copy of it is needed any more. Whether the
+   * edit is done: text typed while the version was being saved stays in the box, with its
+   * copy, its pending save and its base, and the editor stays open with it.
+   */
+  committed(submitted: Submission): boolean {
+    if (this.view.text !== submitted.text) return false
+    this.cancelTimer()
     this.local = null
     this.forget()
+    return true
+  }
+
+  acknowledgeConflict() {
+    this.set({ conflict: null })
   }
 
   /**
@@ -226,8 +301,10 @@ export class MessageDraft {
     const result = await this.session.call((client) =>
       client("DiscardMessageDraft", { target: this.target, draftId: draft.id, expectedRowVersion: draft.rowVersion })
     )
-    if (result.ok) this.draft = result.value
-    else this.set({ error: result.error })
+    if (result.ok) {
+      this.draft = result.value
+      this.base = baseOf(result.value)
+    } else this.set({ error: result.error })
     return result
   }
 }

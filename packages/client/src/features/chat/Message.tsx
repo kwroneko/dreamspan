@@ -32,6 +32,7 @@ import { Badge } from "../../ui/Surface.tsx"
 import { showToast } from "../../ui/Toast.tsx"
 import { IconButton, iconButtonClass, Tooltip } from "../../ui/Tooltip.tsx"
 import { useDeletedToast } from "../bin/deleted.ts"
+import { ReplayNotice } from "../editor/ReplayNotice.tsx"
 import { castView, nameOf, useCast } from "./cast.ts"
 import { formatWhen } from "./chatTitle.ts"
 import { displayText } from "./macros.ts"
@@ -165,7 +166,7 @@ function Editor({
   onSave: () => void
   onCancel: () => void
 }) {
-  const { text, error } = useSyncExternalStore(draft.subscribe, draft.snapshot)
+  const { text, error, conflict } = useSyncExternalStore(draft.subscribe, draft.snapshot)
   return (
     <form
       className="flex flex-col gap-2"
@@ -189,6 +190,11 @@ function Editor({
         <p role="alert" className="text-sm text-danger">
           The text isn’t saved as a draft yet: {error.message}
         </p>
+      )}
+      {conflict && (
+        // No history to switch back from here: the other text stays one step back, and goes to
+        // the recovered texts when the edit is saved or cancelled.
+        <ReplayNotice conflict={conflict} acknowledge={() => draft.acknowledgeConflict()} />
       )}
       <div className="flex gap-2">
         <Button type="submit" variant="primary">
@@ -734,14 +740,16 @@ export const Message = memo(function Message({
               if (outcome.ok) session.closeEditor(editor)
             }}
             onSave={async () => {
-              const { text, draft } = await editor.ready()
+              const submitted = await editor.ready()
+              const { text, draft } = submitted
               const outcome =
                 editing === "edit"
                   ? await session.edit(entry, text, draft)
                   : await session.writeVersion(entry, text, draft)
               report(outcome)
               if (!outcome.ok) return
-              editor.saved()
+              // Text typed while it was being saved stays in the editor, which stays open.
+              if (!editor.committed(submitted)) return
               // Saved without naming its draft (it didn't hold exactly this text): it's ended unsaved.
               if (draft === null) await editor.discard()
               session.closeEditor(editor)

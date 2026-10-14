@@ -14,6 +14,7 @@ import { ADMIN, serverPerFile, withAdmin } from "./support/server.ts"
 import { fixtureSql } from "../../server/test/support/lcmFixtures.ts"
 import { condensed, count, failedJob, level1 } from "./support/summaries.ts"
 import { closePanel, openPanel } from "./support/panel.ts"
+import { makeCopy } from "../src/features/editor/backup.ts"
 
 const server = serverPerFile(withAdmin)
 let provider: FakeProvider
@@ -60,7 +61,7 @@ interface Fixture {
   /** Messages 1–4 and 5–8, and the level-2 summary over both. */
   readonly first: { readonly id: string; readonly revisionId: string }
   readonly second: { readonly id: string }
-  readonly top: { readonly id: string }
+  readonly top: { readonly id: string; readonly revisionId: string }
 }
 
 /** A chat of twelve messages, the first eight summarized: two level-1 summaries and a level 2. */
@@ -437,4 +438,156 @@ test("rail child rerun exposes cancel action", async ({ page }) => {
   await expect(
     row.getByText("Edit or re-summarize the covering summary to change this part of the context.")
   ).toBeVisible()
+})
+
+// A summary's edit keeps its text through the same races as every other field (ARCHITECTURE §3.10).
+test.describe("the text of a summary's edit", () => {
+  test.use({ viewport: { width: 1280, height: 800 } })
+
+  const editTop = async (page: Page, fixture: Fixture) => {
+    await page.getByTestId("lcm-boundary").click()
+    const dialog = panel(page)
+    await dialog
+      .locator(`[data-summary="${fixture.top.id}"]`)
+      .getByRole("button", { name: /Edit the summary of messages 1–8/ })
+      .click()
+    return dialog
+  }
+  const box = (dialog: Locator) => dialog.getByRole("textbox", { name: /Text of the summary of messages 1–8/ })
+
+  test("text typed while the revision is being saved stays in the edit", async ({ page }) => {
+    const fixture = await makeChat("summary-typed-during-save")
+    let release: (() => void) | null = null
+    await page.routeWebSocket(/\/rpc$/, (socket) => {
+      const upstream = socket.connectToServer()
+      socket.onMessage((data) => {
+        if (typeof data === "string" && JSON.parse(data).tag === "EditSummary") release = () => upstream.send(data)
+        else upstream.send(data)
+      })
+    })
+    await open(page, fixture)
+    const dialog = await editTop(page, fixture)
+    const submitted = "The road flooded. Mira saved the ledger."
+    const later = "The road flooded. Mira saved the ledger, and more typed while it was being saved."
+    await box(dialog).fill(submitted)
+    await expect(dialog.getByText("Your text is kept as a draft.")).toBeVisible()
+    await dialog.getByRole("button", { name: "Save revision" }).click()
+    await expect.poll(() => release !== null).toBe(true)
+    await box(dialog).fill(later)
+    release!()
+    // The revision is what was submitted; the edit stays open with what was typed since.
+    await expect
+      .poll(async () => (await admin((api) => api.GetSummary({ summaryId: fixture.top.id as never }))).content)
+      .toBe(submitted)
+    await expect(box(dialog)).toHaveValue(later)
+    await expect
+      .poll(async () => (await admin((api) => api.GetSummaryDraft({ summaryId: fixture.top.id as never })))?.content)
+      .toBe(later)
+    // Typed on the revision just saved: the draft isn't marked as started from an older one.
+    await expect(dialog.getByText("The draft started from an older revision")).toHaveCount(0)
+  })
+
+  test("text replayed from this browser that the server refused is retried on the draft it was typed on", async ({
+    page
+  }) => {
+    const fixture = await makeChat("summary-replay-retried")
+    const summaryId = fixture.top.id as never
+    const first = await admin((api) =>
+      api.SaveSummaryDraft({
+        summaryId,
+        draftId: null,
+        content: "A flood closed the road; Mira saved the ledger. Shared.",
+        expectedRowVersion: null,
+        expectedSession: null,
+        baseRevisionId: fixture.top.revisionId as never
+      })
+    )
+    let fail = true
+    const sent: Array<{ expectedRowVersion: number | null }> = []
+    await page.routeWebSocket(/\/rpc$/, (socket) => {
+      const upstream = socket.connectToServer()
+      socket.onMessage((data) => {
+        const request =
+          typeof data === "string" ? (JSON.parse(data) as { tag?: string; id?: string; payload?: never }) : null
+        if (request?.tag === "SaveSummaryDraft") {
+          sent.push(request.payload!)
+          if (fail) {
+            fail = false
+            const error = { _tag: "ServerError", message: "Synthetic transient failure" }
+            const exit = { _tag: "Failure", cause: [{ _tag: "Fail", error }] }
+            socket.send(JSON.stringify({ _tag: "Exit", requestId: request.id, exit }))
+            return
+          }
+        }
+        upstream.send(data)
+      })
+    })
+    await open(page, fixture)
+    // This browser kept text typed on the first save; another device then saved a small change.
+    const { id: me } = await admin((api) => api.Whoami())
+    const offline = `${first.content} offline A`
+    const copy = makeCopy(
+      me,
+      fixture.top.id,
+      "summary",
+      {
+        kind: "summary",
+        payload: {
+          summaryId,
+          draftId: first.id,
+          content: offline,
+          expectedRowVersion: first.rowVersion,
+          expectedSession: first.session,
+          baseRevisionId: fixture.top.revisionId as never
+        }
+      },
+      Date.now()
+    )
+    await page.evaluate(
+      (copy) =>
+        new Promise<void>((resolve) => {
+          const request = indexedDB.open("rp-editor-copies", 1)
+          request.onupgradeneeded = () => {
+            const store = request.result.createObjectStore("copies", { keyPath: "key" })
+            store.createIndex("userId", "userId")
+            store.createIndex("ref", ["userId", "refId"])
+          }
+          request.onsuccess = () => {
+            const db = request.result
+            const transaction = db.transaction("copies", "readwrite")
+            transaction.objectStore("copies").put(copy)
+            transaction.oncomplete = () => {
+              db.close()
+              resolve()
+            }
+          }
+        }),
+      copy
+    )
+    const elsewhere = `${first.content} other B`
+    await admin((api) =>
+      api.SaveSummaryDraft({
+        summaryId,
+        draftId: first.id,
+        content: elsewhere,
+        expectedRowVersion: first.rowVersion,
+        expectedSession: first.session,
+        baseRevisionId: fixture.top.revisionId as never
+      })
+    )
+    // The replay fails once: the box shows this browser's text; more is typed and saved.
+    const dialog = await editTop(page, fixture)
+    await expect(box(dialog)).toHaveValue(offline)
+    await box(dialog).fill(`${offline}!`)
+    await expect
+      .poll(async () => (await admin((api) => api.GetSummaryDraft({ summaryId })))?.content)
+      .toBe(`${offline}!`)
+    // Every attempt named the draft as this browser had it, not as the other device left it.
+    expect(sent.map((payload) => payload.expectedRowVersion)).toEqual([first.rowVersion, first.rowVersion])
+    await dialog.getByRole("button", { name: "Save revision" }).click()
+    await expect(box(dialog)).toHaveCount(0)
+    // The other device's text was one step back, and the revision sends it to the recovered texts.
+    const recovered = await admin((api) => api.ListRecoveredTexts({ limit: 100, before: null }))
+    expect(recovered.map((text) => text.content)).toContain(elsewhere)
+  })
 })

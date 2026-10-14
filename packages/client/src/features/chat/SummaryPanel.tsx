@@ -72,7 +72,11 @@ function Editor({ session, summary, onDone }: { session: ChatSession; summary: L
       className="flex flex-col gap-2"
       onSubmit={(event) => {
         event.preventDefault()
-        void finish(() => store.commit())
+        // Text typed while the revision was being saved keeps the edit open.
+        void finish(async () => {
+          const outcome = await store.commit()
+          return { ok: outcome.ok && outcome.value.done }
+        })
       }}
     >
       <Textarea
