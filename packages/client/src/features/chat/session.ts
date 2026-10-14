@@ -1087,8 +1087,12 @@ export class ChatSession {
   }
 
   /** Deletes the branch a message starts (it and everything below it) to the bin. */
-  deleteBranch(slotId: SlotId) {
-    return this.call((client) => client("DeleteBranch", { slotId }))
+  async deleteBranch(slotId: SlotId) {
+    const result = await this.call((client) => client("DeleteBranch", { slotId }))
+    // A reload at the old window can still name a tip inside the deleted subtree.
+    // Follow the writer's surviving active path, fencing every earlier window read.
+    if (result.ok) this.showBranch(null, null)
+    return result
   }
 
   /** The alternates where `slotId` is one, with their names. */

@@ -142,20 +142,30 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
         const id = yield* userId
         // The names the greetings show with: the persona's and each card's, as in the preview.
         const [player] = persona === null ? [] : yield* reader.CastCards({ userId: id, entityIds: [persona] })
-        // Who greets: those asked for (a group's members, in turn), else the first card.
-        const asked = greeters ?? [{ entityId: cards[0]!, greeting: greeting ?? 0, frozen }]
+        // Who greets: the preview's choices, else every card in the supplied order.
+        const asked =
+          greeters ??
+          cards.map((entityId, index) => ({
+            entityId,
+            greeting: index === 0 ? (greeting ?? 0) : 0,
+            frozen: index === 0 ? frozen : undefined
+          }))
         // Every greeting's random and time macros are frozen here, whatever the client sent:
         // the values it saw in the preview are kept, and any it didn't send are drawn now.
         const drawn = yield* Effect.forEach(asked, (greeter) =>
           Effect.map(reader.GetCardForChat({ userId: id, entityId: greeter.entityId }), (card) => {
+            const picked =
+              greeters === undefined && cards.length > 1 && !(greeter.entityId === cards[0] && greeting !== null)
+                ? Math.floor(Math.random() * card.greetings.length)
+                : greeter.greeting
             const fields = { description: card.description, personality: card.personality, scenario: card.scenario }
             const names = { user: player?.name ?? "User", char: card.card.name }
             return {
               entityId: greeter.entityId,
-              // The first card's greeting as asked (null: its first), else the one picked.
-              greeting: greeters === undefined ? greeting : greeter.greeting,
+              // A single card's greeting as asked, or a group's preview/random choice.
+              greeting: picked,
               frozen: card.greetings.map((text, i) =>
-                freezeTemplate(text, fields, names, i === greeter.greeting ? (greeter.frozen ?? {}) : {})
+                freezeTemplate(text, fields, names, i === picked ? (greeter.frozen ?? {}) : {})
               )
             }
           })

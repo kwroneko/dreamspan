@@ -137,7 +137,9 @@ function Pending({
   })
   // Who greets: the card, or each of the group's characters in turn; the greeting picked of each.
   const greeters = group?.cards ?? [card]
-  const [picks, setPicks] = useState<ReadonlyArray<number>>(() => greeters.map(() => 0))
+  const [picks, setPicks] = useState<ReadonlyArray<number>>(() =>
+    greeters.map((greeter) => (group === null ? 0 : Math.floor(Math.random() * Math.max(1, greeter.greetings.length))))
+  )
   const greeting = picks[0] ?? 0
   const members = group?.group.members ?? null
   // Who replies: in a group, the character picked (its first, as the chat's default speaker).

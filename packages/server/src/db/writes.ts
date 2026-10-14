@@ -304,7 +304,7 @@ export const makeWriteHandlers = (bin: Bin) =>
         Effect.gen(function* () {
           yield* ownedSlot(userId, slotId)
           const clean = cleanName(name)
-          yield* sql`UPDATE slots SET branch_name = ${clean === "" ? null : clean} WHERE id = ${slotId}`
+          yield* sql`UPDATE slots SET branch_name = ${clean === "" ? null : clean}, row_version = row_version + 1 WHERE id = ${slotId}`
         }).pipe(transaction("SetBranchName")),
 
       SetActiveLeaf: ({ userId, chatId, slotId, expectedRowVersion }) =>

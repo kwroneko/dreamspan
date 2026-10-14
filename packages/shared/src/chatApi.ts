@@ -169,7 +169,7 @@ export const chatCursor = (chat: Pick<Chat, "id" | "createdAt" | "lastMessageAt"
 export const ChatNameInput = Schema.String.check(Schema.isMaxLength(200))
 
 /** A name the user gives a branch (NameBranch); empty: unnamed again. */
-export const BranchNameInput = Schema.String.check(Schema.isMaxLength(100))
+const BranchNameInput = Schema.String.check(Schema.isMaxLength(100))
 
 /** One of the alternates at a place the path branches, as the header's branch menu lists it. */
 export class Branch extends Schema.Class<Branch>("Branch")({

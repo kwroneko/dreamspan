@@ -510,11 +510,11 @@ export const makeReadHandlers = Effect.gen(function* () {
             ? yield* sql<{ id: SlotId; branch_name: string | null; preview: string }>`
                 SELECT ${columns} FROM slots x INDEXED BY slots_chat_depth WHERE x.chat_id = ${slot.chat_id}
                   AND x.depth = 0 AND x.lane_id = ${slot.lane_id} AND ${sql.literal(reachableSlot("x"))}
-                ORDER BY x.id LIMIT 500`
+                ORDER BY x.id`
             : yield* sql<{ id: SlotId; branch_name: string | null; preview: string }>`
                 SELECT ${columns} FROM slots x INDEXED BY slots_parent WHERE x.parent_slot_id = ${slot.parent_slot_id}
                   AND x.lane_id = ${slot.lane_id} AND ${sql.literal(reachableSlot("x"))}
-                ORDER BY x.id LIMIT 500`
+                ORDER BY x.id`
         return rows.map(
           (row, index) => new Branch({ slotId: row.id, index, name: row.branch_name, preview: row.preview })
         )

@@ -2020,6 +2020,19 @@ const storage: Record<
   string,
   (reader: Reader["Service"], actor: Party, owner: Party, writer: Writer["Service"]) => Effect.Effect<void, unknown>
 > = {
+  RenameChats: (_reader, actor, owner, writer) =>
+    refused(
+      writer.RenameChats({
+        userId: actor.user.id,
+        chats: [{ chatId: owner.chat.chatId, from: null }],
+        name: "foreign"
+      }),
+      "NotFound"
+    ),
+  SetBranchName: (_reader, actor, owner, writer) =>
+    refused(writer.SetBranchName({ userId: actor.user.id, slotId: owner.chat.slotId, name: "foreign" }), "NotFound"),
+  ListBranches: (reader, actor, owner) =>
+    refused(reader.ListBranches({ userId: actor.user.id, slotId: owner.chat.slotId }), "NotFound"),
   StImportDefaultPreset: (_reader, actor, owner, writer) =>
     Effect.gen(function* () {
       const { importId } = yield* owner.api.StartStImport({ unsupported: [] })

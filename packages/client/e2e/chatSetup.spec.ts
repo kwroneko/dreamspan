@@ -94,7 +94,7 @@ test("a new chat from a card: the greeting follows the persona until the first s
   await login(page)
   await page.goto(`${server().url}/library`)
   await page.getByRole("link", { name: "Start a chat with Mira" }).click()
-  const greeting = page.getByRole("article", { name: "Greeting" })
+  const greeting = page.getByRole("article", { name: /^Greeting from / })
   await expect(greeting).toContainText("The bell rings for Ana.")
   // Opening a card made no chat (DESIGN §2.1).
   await page.goto(`${server().url}/chats`)
@@ -299,7 +299,7 @@ test("a saved greeting keeps its card's fields and the date it showed", async ({
   await login(page)
   await page.goto(`${server().url}/library`)
   await page.getByRole("link", { name: "Start a chat with Wren" }).click()
-  const greeting = page.getByRole("article", { name: "Greeting" })
+  const greeting = page.getByRole("article", { name: /^Greeting from / })
   await expect(greeting).toContainText("A lighthouse keeper. The log says Wren, 2026-03-01.")
   await composer(page).fill("Hello, keeper.")
   await page.getByRole("button", { name: /^Send/ }).click()
@@ -343,7 +343,7 @@ test("a card with 1,001 greetings and a huge random draw starts like any other",
   await login(page)
   await page.goto(`${server().url}/library`)
   await page.getByRole("link", { name: "Start a chat with Crowd" }).click()
-  await expect(page.getByRole("article", { name: "Greeting" })).toContainText("1 / 1001")
+  await expect(page.getByRole("article", { name: /^Greeting from / })).toContainText("1 / 1001")
   await composer(page).fill("Hello, everyone.")
   await page.getByRole("button", { name: /^Send/ }).click()
   await expect(page).toHaveURL(/\/chats\/[^/?]+$/)
@@ -376,11 +376,16 @@ test("a new chat of a group: each character greets in turn, and the first send m
   await tile.getByRole("link", { name: "New chat with The Pier" }).click()
   await expect(page).toHaveURL(`${server().url}/groups/${chatId}/new`)
   await expect(page.getByRole("heading", { level: 1, name: "New chat: The Pier" })).toBeVisible()
-  await expect(page.getByText("With Mira, Tobin, who greet in turn. Saved when you send the first message.")).toBeVisible()
+  await expect(
+    page.getByText("With Mira, Tobin, who greet in turn. Saved when you send the first message.")
+  ).toBeVisible()
   // Each member's greeting, in the group's order, as ST starts a group chat; each has its alternates.
   const greetings = page.getByRole("article", { name: /^Greeting from / })
   await expect(greetings).toHaveCount(2)
   await expect(greetings.nth(0)).toContainText("Mira")
+  // ST draws an initial greeting; choose the first for this assertion.
+  const previous = greetings.nth(0).getByRole("button", { name: "Previous greeting from Mira" })
+  if (await previous.isEnabled()) await previous.click()
   await expect(greetings.nth(0)).toContainText("The bell rings for Ana.")
   await expect(greetings.nth(0)).toContainText("1 / 2")
   await expect(greetings.nth(1)).toContainText("Tobin nods.")
@@ -399,6 +404,9 @@ test("a new chat of a group: each character greets in turn, and the first send m
   await expect(page.getByRole("button", { name: "Generate Tobin" })).toBeVisible()
   await shoot(page, "new-group-chat")
 
+  // Reopening draws again. Pick the alternate explicitly before sending.
+  const before = greetings.nth(0).getByRole("button", { name: "Previous greeting from Mira" })
+  if (await before.isEnabled()) await before.click()
   // Mira's alternate greeting, picked before the send, is the one the chat shows.
   await greetings.nth(0).getByRole("button", { name: "Next greeting from Mira" }).click()
   await expect(greetings.nth(0)).toContainText("Mira waves at Ana from the pier.")

@@ -1,13 +1,13 @@
 // The open chat's header: whose chat it is (the cast's faces and a readable name, never
 // ST's file name), which branch is shown with a way to switch, and the chat's actions,
-// which the page passes in. On a phone it's one line: the name truncates and the names of
-// the cast go.
+// which the page passes in. On a phone the title can wrap, and the branch and actions
+// have a second row so they don't crowd its name.
 import type { Chat, PathEntry, SlotId } from "@rp/shared/chat.ts"
 import type { Branch } from "@rp/shared/chatApi.ts"
 import type { ChatName } from "@rp/shared/chatName.ts"
 import type { ChatGroup } from "@rp/shared/chatSetupApi.ts"
 import { importState } from "@rp/shared/stImportApi.ts"
-import { Link } from "@tanstack/react-router"
+import { Link, useNavigate, useSearch } from "@tanstack/react-router"
 import { type ReactNode, useState } from "react"
 import type { AppError } from "../../errors.ts"
 import { RadioGroup } from "../../ui/Choice.tsx"
@@ -73,12 +73,16 @@ function BranchMenu({
   // branch: a fork found by the scan above what's loaded isn't kept current by the session.
   const [names, setNames] = useState<ReadonlyMap<SlotId, string | null>>(new Map())
   const nameOf = (fork: PathEntry) => {
+    const loaded = view.entries.find((entry) => entry.slotId === fork.slotId)
+    if (loaded !== undefined) return loaded.branchName
     const known = names.get(fork.slotId)
     return known === undefined ? fork.branchName : (known ?? undefined)
   }
   const [naming, setNaming] = useState<PathEntry | null>(null)
   const write = useWrite()
   const deleted = useDeletedToast()
+  const navigate = useNavigate()
+  const search = useSearch({ strict: false }) as { panel?: string }
   const off = view.leafSlotId !== null && view.chat !== null && view.leafSlotId !== view.chat.activeLeafSlotId
   if (forks.length === 0 && !off) return null
   const last = forks.at(-1)
@@ -101,11 +105,23 @@ function BranchMenu({
     setNames(new Map(listed.flatMap(([, all]) => all.map((branch) => [branch.slotId, branch.name] as const))))
   }
   const remove = async (fork: PathEntry) => {
+    const listed = await session.listBranches(fork.slotId)
+    if (!listed.ok) return showToast({ title: "Couldn't read the branches", description: listed.error.message })
+    const survivors = listed.value.filter((branch) => branch.slotId !== fork.slotId)
+    const index = Math.max(0, fork.branchIndex - 1)
+    const sibling = survivors[index]
     const result = await session.deleteBranch(fork.slotId)
     if (!result.ok) return showToast({ title: "Couldn't delete the branch", description: result.error.message })
     deleted(result.value)
-    // The branch before it shows in its place (the next one, for the first); Undo brings it back.
-    if (fork.branchCount > 1) onBranch(fork, Math.max(0, fork.branchIndex - 1))
+    if (sibling) {
+      const switched = await session.switchBranch({ ...fork, slotId: sibling.slotId } as PathEntry, index)
+      if (!switched.ok) showToast({ title: "Couldn't switch branches", description: switched.error.message })
+      // A deletion reload can still be reading the old tip. Reset and fence that window
+      // after the switch has committed, rather than opening around its deleted anchor.
+      session.showBranch(null, null)
+    }
+    // The old URL may name the deleted branch's tip or fork. Keep the panel, follow latest.
+    void navigate({ to: ".", search: search.panel ? { panel: search.panel } : {}, replace: true })
   }
   return (
     <>
@@ -120,7 +136,7 @@ function BranchMenu({
             <button
               type="button"
               aria-label={label}
-              className={`inline-flex h-8 max-w-72 min-w-0 shrink-0 items-center gap-1.5 rounded-md border px-2 text-sm outline-none hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus data-popup-open:bg-surface-raised max-sm:max-w-28 ${
+              className={`inline-flex h-8 max-w-72 min-w-0 shrink-0 items-center gap-1.5 rounded-md border px-2 text-sm outline-none hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus data-popup-open:bg-surface-raised max-sm:mr-auto max-sm:max-w-[calc(100%-5.5rem)] ${
                 off ? "border-warning/60 text-warning" : "border-border text-text"
               }`}
             >
@@ -129,11 +145,9 @@ function BranchMenu({
                 {summary}
                 {off && <span className="text-xs"> · not the latest</span>}
               </span>
-              {last && (
-                <span className="truncate tabular-nums sm:hidden">
-                  {named ?? `${last.branchIndex + 1}/${last.branchCount}`}
-                </span>
-              )}
+              <span className="truncate tabular-nums sm:hidden">
+                {last ? (named ?? `${last.branchIndex + 1}/${last.branchCount}`) : "Another branch"}
+              </span>
               <Icon name="down" size={14} className="shrink-0 text-muted max-sm:hidden" />
             </button>
           </Tooltip>
@@ -182,7 +196,7 @@ function BranchMenu({
                 {shownName === undefined ? `Name ${shownLabel}…` : `Rename “${shownLabel}”…`}
               </MenuItem>
               <MenuItem icon="trash" tone="danger" onClick={() => void remove(fork)}>
-                Delete {shownName === undefined ? shownLabel : `“${shownLabel}”`}
+                Delete this branch: {shownName === undefined ? shownLabel : `“${shownLabel}”`}
               </MenuItem>
               <MenuItem icon="right" onClick={() => onJump(fork.slotId)}>
                 Go to message #{fork.depth + 1}
@@ -237,9 +251,13 @@ function ChatTitle({ session, view, name }: { session: ChatSession; view: ChatVi
     setGroup(null)
     setScope("chat")
     write.clear()
-    setOpen(true)
     const result = await session.call((client) => client("ListGroupChats", { chatId: view.chat!.id }))
+    if (!result.ok && result.error.tag !== "NotFound") {
+      showToast({ title: "Couldn't check this chat's group", description: result.error.message })
+      return
+    }
     setGroup(result.ok ? result.value : null)
+    setOpen(true)
   }
   const many = group !== null && group.chats.length > 1
   return (
@@ -253,12 +271,8 @@ function ChatTitle({ session, view, name }: { session: ChatSession; view: ChatVi
             onClick={() => void begin()}
             className="group/title flex max-w-full min-w-0 items-center gap-1.5 rounded-md text-left outline-none hover:text-accent focus-visible:ring-2 focus-visible:ring-focus"
           >
-            <span className="truncate">{shown}</span>
-            <Icon
-              name="edit"
-              size={14}
-              className="shrink-0 text-muted group-hover/title:text-accent"
-            />
+            <span className="line-clamp-2 [overflow-wrap:anywhere]">{shown}</span>
+            <Icon name="edit" size={14} className="shrink-0 text-muted group-hover/title:text-accent" />
           </button>
         </Tooltip>
       </h1>
@@ -296,7 +310,7 @@ function ChatTitle({ session, view, name }: { session: ChatSession; view: ChatVi
                   {
                     value: "chat",
                     label: "Only this chat",
-                    description: `It leaves “${group.group.name}” and gets a tile of its own on Characters.`
+                    description: `It leaves “${group.group.name}” and appears under its new name on Characters. Chats with the same name and characters share a tile.`
                   },
                   {
                     value: "group",
@@ -351,7 +365,7 @@ export function ChatHeader({
   ].filter(Boolean)
   return (
     <TooltipProvider>
-      <header className="mx-auto flex w-full max-w-3xl min-w-0 items-center gap-1.5 pb-2 sm:gap-3">
+      <header className="mx-auto flex w-full max-w-3xl min-w-0 items-center gap-1.5 pb-2 max-sm:flex-wrap sm:gap-3">
         <Tooltip label="All chats">
           <Link
             to="/chats"
@@ -387,9 +401,11 @@ export function ChatHeader({
           </div>
           {about.length > 0 && <p className="truncate text-xs text-muted max-sm:hidden">{about.join(" · ")}</p>}
         </div>
-        <BranchMenu session={session} view={view} onBranch={onBranch} onJump={onJump} />
-        <div className="flex min-w-0 flex-wrap items-center justify-end gap-0.5 max-sm:[&_button]:px-1.5 max-sm:[&_button]:text-xs">
-          {actions}
+        <div className="flex min-w-0 items-center justify-end gap-1.5 max-sm:w-full sm:gap-3">
+          <BranchMenu session={session} view={view} onBranch={onBranch} onJump={onJump} />
+          <div className="flex min-w-0 flex-wrap items-center justify-end gap-0.5 max-sm:[&_button]:px-1.5 max-sm:[&_button]:text-xs">
+            {actions}
+          </div>
         </div>
       </header>
     </TooltipProvider>

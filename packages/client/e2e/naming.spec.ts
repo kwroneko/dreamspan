@@ -1,0 +1,221 @@
+// Naming from the surfaces the user has open, including another tab and the bin;
+// deleting a named branch must navigate through a surviving sibling, then Undo restores it.
+import { expect, type Page, test } from "@playwright/test"
+import { Effect } from "effect"
+import { asUser } from "./support/rpc.ts"
+import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+
+const server = serverPerFile({
+  ...withAdmin,
+  DB_WORKERS: "bundle",
+  FAKE_GENERATOR_TPS: "300",
+  FAKE_GENERATOR_TOKENS: "60"
+})
+type Api = Parameters<Parameters<typeof asUser>[3]>[0]
+const admin = <A>(use: (api: Api) => Effect.Effect<A, unknown>) => asUser(server(), ADMIN.handle, ADMIN.password, use)
+const rename = async (page: Page, title: string, name: string) => {
+  await page.getByRole("heading", { level: 1 }).getByRole("button").click()
+  const dialog = page.getByRole("dialog", { name: title })
+  await dialog.getByLabel("Name", { exact: true }).fill(name)
+  await dialog.getByRole("button", { name: "Rename", exact: true }).click()
+  await expect(dialog).toHaveCount(0)
+}
+const importCard = async (page: Page, name: string) => {
+  const response = await page.request.post(`${server().url}/library/import?name=${name}.json`, {
+    data: Buffer.from(
+      JSON.stringify({
+        spec: "chara_card_v2",
+        spec_version: "2.0",
+        data: {
+          name,
+          first_mes: `${name} greets {{user}} at {{time}}.`,
+          alternate_greetings: [`${name} waves at {{user}}.`]
+        }
+      })
+    ),
+    headers: { origin: server().url, "content-type": "application/octet-stream" }
+  })
+  expect(response.status()).toBe(200)
+}
+
+for (const width of [1440, 390]) {
+  test(`chat and group names, four greetings and the bin at ${width}`, async ({ page, context }) => {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
+    await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+    const names = ["Mira", "Tobin", "Wren", "Lark"].map((name) => `${name}${width}`)
+    for (const name of names) await importCard(page, name)
+    const ids = await admin((api) =>
+      Effect.map(api.ListCards(), (cards) => names.map((name) => cards.find((c) => c.name === name)!.entityId))
+    )
+    const started = await admin((api) =>
+      Effect.gen(function* () {
+        const start = (cards = ids, title = "The Lantern Inn") =>
+          api.StartChat({
+            cards,
+            persona: null,
+            greeting: 0,
+            title,
+            first: { _tag: "Send", content: "A beginning.", speakerEntityId: null }
+          })
+        const single = yield* start([ids[0]!], "Single")
+        const first = yield* start()
+        const second = yield* start()
+        return { single: single.chat.id, first: first.chat.id, second: second.chat.id }
+      })
+    )
+    await page.goto(`${server().url}/chats/${started.single}`)
+    const other = await context.newPage()
+    await other.goto(page.url())
+    await rename(page, "Rename chat", `A renamed chat ${width}`)
+    await expect(other.getByRole("heading", { level: 1 })).toHaveText(`A renamed chat ${width}`)
+    await other.close()
+    await page.goto(`${server().url}/groups/${started.first}`)
+    await page.getByRole("button", { name: "Rename group" }).click()
+    const groupDialog = page.getByRole("dialog", { name: "Rename group" })
+    await groupDialog.getByLabel("Name", { exact: true }).fill(`Winter inn ${width}`)
+    await groupDialog.getByRole("button", { name: "Rename", exact: true }).click()
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(`Winter inn ${width}`)
+    await expect(page.getByRole("heading", { name: "Chats (2)" })).toBeVisible()
+    await page.goto(`${server().url}/`)
+    await expect(page.getByRole("link", { name: `All chats of Winter inn ${width}`, exact: true })).toBeVisible()
+    await page.goto(`${server().url}/chats/${started.second}`)
+    await page.getByRole("heading", { level: 1 }).getByRole("button").click()
+    const dialog = page.getByRole("dialog", { name: "Rename chat" })
+    await expect(dialog.getByText(/It leaves/)).toContainText("appears under its new name")
+    await dialog.getByLabel("Name", { exact: true }).fill(`Side story ${width}`)
+    await dialog.getByRole("button", { name: "Rename", exact: true }).click()
+    await page.goto(`${server().url}/groups/${started.first}/new`)
+    const greetings = page.getByRole("article", { name: /^Greeting from / })
+    await expect(greetings).toHaveCount(4)
+    // Select the alternate of each member explicitly, and keep the previews after sending.
+    for (let i = 0; i < names.length; i++) {
+      const next = greetings.nth(i).getByRole("button", { name: `Next greeting from ${names[i]}` })
+      if (await next.isEnabled()) await next.click()
+    }
+    const previews = await greetings.locator(".markdown").allTextContents()
+    await page.getByLabel("Message", { exact: true }).fill("Hello everyone.")
+    await page.getByRole("button", { name: "Send", exact: true }).click()
+    await expect(page).toHaveURL(/\/chats\/[^/?]+$/)
+    const replies = page.getByRole("article", { name: "Reply" })
+    await expect(replies).toHaveCount(5)
+    for (let i = 0; i < previews.length; i++) await expect(replies.nth(i)).toContainText(previews[i]!)
+    await page.goto(`${server().url}/chats`)
+    const row = page
+      .getByRole("main")
+      .getByRole("listitem")
+      .filter({ has: page.getByRole("link", { name: /A renamed chat/ }) })
+    await row.hover()
+    await row.getByRole("button", { name: /Delete/ }).click()
+    await expect(page.getByText(`Deleted: A renamed chat ${width}`, { exact: true })).toBeVisible()
+    await page.getByRole("button", { name: "Open the bin" }).click()
+    await expect(page.getByRole("main").getByText(`A renamed chat ${width}`, { exact: true })).toBeVisible()
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
+  })
+
+  test(`name, switch, delete and undo a branch at ${width}`, async ({ page, context }) => {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
+    await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+    const chatId = await admin((api) =>
+      Effect.gen(function* () {
+        const chat = yield* api.CreateChat({ title: "Forks" })
+        const root = yield* api.SendMessage({ chatId: chat.id, parentSlotId: null, branch: false, content: "Root" })
+        if (root._tag !== "Posted") throw new Error("expected a posted message")
+        for (const content of ["The tavern", "The road"])
+          yield* api.SendMessage({ chatId: chat.id, parentSlotId: root.entry.slotId, branch: true, content })
+        return chat.id
+      })
+    )
+    await page.goto(`${server().url}/chats/${chatId}`)
+    const other = await context.newPage()
+    await other.goto(page.url())
+    await other.getByRole("button", { name: /switch branch/ }).click()
+    await other.keyboard.press("Escape")
+    const branches = page.getByRole("button", { name: /switch branch/ })
+    await branches.click()
+    await page.getByRole("menuitem", { name: "Name Branch 2…" }).click()
+    const dialog = page.getByRole("dialog", { name: /Name branch 2/ })
+    await dialog.getByLabel("Branch name").fill("Road trip")
+    await dialog.getByRole("button", { name: "Save", exact: true }).click()
+    await expect(branches).toHaveAccessibleName(/Road trip/)
+    await expect(other.getByRole("button", { name: /switch branch/ })).toHaveAccessibleName(/Road trip/)
+    await other.close()
+    await branches.click()
+    await page.getByRole("menuitemradio", { name: /Branch 1/ }).click()
+    await expect(page.getByTestId("messages").getByText("The tavern", { exact: true })).toBeVisible()
+    await branches.click()
+    await page.getByRole("menuitemradio", { name: /Road trip/ }).click()
+    await expect(page.getByTestId("messages").getByText("The road", { exact: true })).toBeVisible()
+    await branches.click()
+    await page.getByRole("menuitem", { name: "Delete this branch: “Road trip”" }).click()
+    await expect(page.getByTestId("messages").getByText("The tavern", { exact: true })).toBeVisible()
+    await expect(page.getByTestId("messages").getByText("The road", { exact: true })).toHaveCount(0)
+    await page.getByRole("button", { name: "Undo", exact: true }).click()
+    await expect(branches).toBeVisible()
+    await branches.click()
+    await page.getByRole("menuitemradio", { name: /Road trip/ }).click()
+    await expect(page.getByTestId("messages").getByText("The road", { exact: true })).toBeVisible()
+    await branches.click()
+    await page.getByRole("menuitem", { name: "Rename “Road trip”…" }).click()
+    await page.getByRole("dialog").getByLabel("Branch name").fill("")
+    await page.getByRole("dialog").getByRole("button", { name: "Save", exact: true }).click()
+    await expect(branches).toHaveAccessibleName(/Branch 2 of 2/)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
+    await expect(page.getByRole("alert")).toHaveCount(0)
+  })
+}
+
+test("deleting a named branch from the middle of a long chat follows the surviving tip", async ({ page }) => {
+  test.setTimeout(120_000)
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  const chatId = await admin((api) =>
+    Effect.gen(function* () {
+      const chat = yield* api.CreateChat({ title: "A long fork" })
+      const root = yield* api.SendMessage({
+        chatId: chat.id,
+        parentSlotId: null,
+        branch: false,
+        content: "Common root"
+      })
+      if (root._tag !== "Posted") throw new Error("expected a posted message")
+      let tip = root.entry.slotId
+      let fork = tip
+      for (let i = 0; i < 90; i++) {
+        const sent = yield* api.SendMessage({
+          chatId: chat.id,
+          parentSlotId: tip,
+          branch: false,
+          content: `Long path ${i}`
+        })
+        if (sent._tag !== "Posted") throw new Error("expected a posted message")
+        tip = sent.entry.slotId
+        if (i === 0) {
+          fork = tip
+          yield* api.NameBranch({ slotId: tip, name: "Long road" })
+        }
+      }
+      yield* api.SendMessage({
+        chatId: chat.id,
+        parentSlotId: root.entry.slotId,
+        branch: true,
+        content: "Surviving tip"
+      })
+      yield* api.SwitchBranch({ chatId: chat.id, slotId: fork, index: 0 })
+      return chat.id
+    })
+  )
+  await page.goto(`${server().url}/chats/${chatId}`)
+  const branches = page.getByRole("button", { name: /switch branch/ })
+  await branches.click()
+  await page.getByRole("menuitem", { name: "Go to message #2" }).click()
+  await expect(page).toHaveURL(/\?slot=/)
+  await branches.click()
+  await page.getByRole("menuitem", { name: "Delete this branch: “Long road”" }).click()
+  await expect(page).toHaveURL(`${server().url}/chats/${chatId}`)
+  await expect(page.getByTestId("messages").getByText("Surviving tip", { exact: true })).toBeVisible()
+  await expect(branches).toHaveCount(0)
+  await expect(page.getByLabel("Message", { exact: true })).toBeEditable()
+  await page.getByRole("button", { name: "Undo", exact: true }).click()
+  await branches.click()
+  await page.getByRole("menuitemradio", { name: /Long road/ }).click()
+  await expect(page.getByTestId("messages").getByText("Long path 0", { exact: true })).toBeVisible()
+})

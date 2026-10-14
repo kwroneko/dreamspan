@@ -55,10 +55,7 @@ describe("naming", () => {
         (yield* api.RenameChat({ chatId: imported.id, name: "Winter at the inn" })).title,
         "Winter at the inn - 2026-4-3@19h02m11s123ms"
       )
-      assert.strictEqual(
-        (yield* api.RenameChat({ chatId: imported.id, name: "" })).title,
-        "2026-4-3@19h02m11s123ms"
-      )
+      assert.strictEqual((yield* api.RenameChat({ chatId: imported.id, name: "" })).title, "2026-4-3@19h02m11s123ms")
       const deleted = yield* api.CreateChat({ title: "Gone" })
       yield* api.DeleteChat({ chatId: deleted.id })
       assert.strictEqual(yield* outcome(api.RenameChat({ chatId: deleted.id, name: "x" })), "NotFound")
@@ -110,9 +107,17 @@ describe("naming", () => {
   it.live("a group's new chat starts with each member's greeting in turn, each with its alternates", () =>
     Effect.gen(function* () {
       const api = yield* client()
-      const ana = yield* card(api, "Ana", { name: "Ana", first_mes: "Ana: hi, {{user}}.", alternate_greetings: ["Ana nods."] })
+      const ana = yield* card(api, "Ana", {
+        name: "Ana",
+        first_mes: "Ana: hi, {{user}}.",
+        alternate_greetings: ["Ana nods."]
+      })
       const quiet = yield* card(api, "Quiet", { name: "Quiet", first_mes: "" })
-      const mira = yield* card(api, "Mira", { name: "Mira", first_mes: "Mira: hello.", alternate_greetings: ["Mira waves."] })
+      const mira = yield* card(api, "Mira", {
+        name: "Mira",
+        first_mes: "Mira: hello.",
+        alternate_greetings: ["Mira waves."]
+      })
       const sam = yield* card(api, "Sam", { name: "Sam" }, true)
       const started = yield* api.StartChat({
         cards: [ana, quiet, mira],
@@ -137,6 +142,31 @@ describe("naming", () => {
         ]
       )
       assert.strictEqual(entries[1]!.version.origin, "greeting")
+
+      // Direct callers get every member too, even without the preview's choices.
+      const automatic = yield* api.StartChat({
+        cards: [ana, quiet, mira],
+        persona: sam,
+        greeting: null,
+        first: { _tag: "Send", content: "Another beginning.", speakerEntityId: sam }
+      })
+      const autoPath = yield* path(api, automatic.chat.id)
+      assert.deepStrictEqual(
+        autoPath.map((e) => e.version.speakerEntityId),
+        [ana, mira, sam]
+      )
+      assert.deepStrictEqual(
+        autoPath.map((e) => e.versionCount),
+        [2, 2, 1]
+      )
+
+      const pickedFirst = yield* api.StartChat({
+        cards: [ana, quiet, mira],
+        persona: sam,
+        greeting: 1,
+        first: { _tag: "Send", content: "With a chosen first greeting.", speakerEntityId: sam }
+      })
+      assert.strictEqual((yield* path(api, pickedFirst.chat.id))[0]!.version.content, "Ana nods.")
 
       const stranger = yield* card(api, "Tobin", { name: "Tobin", first_mes: "Hey." })
       assert.strictEqual(
@@ -172,7 +202,12 @@ describe("naming", () => {
       assert.strictEqual(leaf.slotId, b)
       assert.strictEqual(leaf.branchName, "Road trip")
       assert.deepStrictEqual(
-        (yield* api.ListBranches({ slotId: a })).map((branch) => [branch.slotId, branch.index, branch.name, branch.preview]),
+        (yield* api.ListBranches({ slotId: a })).map((branch) => [
+          branch.slotId,
+          branch.index,
+          branch.name,
+          branch.preview
+        ]),
         [
           [a, 0, null, "the tavern"],
           [b, 1, "Road trip", "the road"]
@@ -180,6 +215,7 @@ describe("naming", () => {
       )
       const cleared = yield* api.NameBranch({ slotId: b, name: " " })
       assert.isUndefined(cleared.branchName)
+      assert.isAbove(cleared.rowVersion, named.rowVersion)
       // A deleted branch is no longer among them.
       yield* api.DeleteBranch({ slotId: a })
       assert.deepStrictEqual(
