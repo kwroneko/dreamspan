@@ -5,11 +5,21 @@ import { CardDefinition, CardForChat, ChatCard } from "@rp/shared/chatSetupApi.t
 import type { RefId } from "@rp/shared/library.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
-import { loadCards } from "./cards.ts"
-import { makeLibraryQueries } from "./library.ts"
+import { castCardAt, loadCards } from "./cards.ts"
+import { type CardBinding, makeLibraryQueries } from "./library.ts"
 import { NotFound, type ReadOps } from "./ops.ts"
 import { chatQueue } from "./queueRows.ts"
 import { query } from "./tx.ts"
+
+/** A card's binding from the payload's, without the nulls; undefined for none. */
+const bindingOf = (
+  bindings: Readonly<Record<string, { readonly ref: string | null; readonly revision: string | null }>>,
+  entityId: string
+): CardBinding | undefined => {
+  const binding = bindings[entityId]
+  if (binding === undefined || (binding.ref === null && binding.revision === null)) return undefined
+  return { ref: binding.ref ?? undefined, revision: binding.revision ?? undefined }
+}
 
 const text = (value: unknown) => (typeof value === "string" ? value : "")
 
@@ -71,32 +81,45 @@ export const makeChatSetupReadHandlers = Effect.gen(function* () {
         return summaries
       }).pipe(query("ChatSummaries")),
 
-    CastCards: ({ userId, entityIds }) =>
-      loadCards(sql, userId, entityIds).pipe(
-        Effect.map((cards) => cards.map(({ card }) => card)),
-        query("CastCards")
-      ),
+    CastCards: ({ userId, entityIds, chat }) =>
+      Effect.gen(function* () {
+        const cards = (yield* loadCards(sql, userId, entityIds)).map(({ card }) => card)
+        if (chat === undefined) return cards
+        // The name the chat uses is the one the model reads: its own version's, say.
+        return yield* Effect.forEach(cards, (card) =>
+          Effect.flatMap(
+            lib.cardInChat(userId, chat.chatId, card.entityId, bindingOf(chat.bindings, card.entityId)),
+            (used) => (used === null ? Effect.succeed(card) : castCardAt(sql, card, used.revisionId))
+          )
+        )
+      }).pipe(query("CastCards")),
 
     // A handful of cards per chat: a few indexed reads each, and the usage count's scan of
     // the user's chats, as the editor makes it.
-    ChatCards: ({ userId, chatId, entityIds }) =>
+    ChatCards: ({ userId, chatId, entityIds, bindings }) =>
       Effect.gen(function* () {
         const [chat] = yield* sql<{ n: number }>`
           SELECT count(*) AS n FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`
         if (chat?.n !== 1) return yield* new NotFound({ entity: "chat", id: chatId })
         const cards: Array<ChatCard> = []
         for (const entityId of [...new Set(entityIds)].slice(0, 200)) {
+          // Another user's card, or one in the bin, reads as a missing one.
           const library = yield* lib.cardLibraryRef(userId, entityId)
-          if (library === null) continue
+          if (library === null) return yield* new NotFound({ entity: "card", id: entityId })
           const override = yield* lib.chatOverride(userId, chatId, entityId)
-          const doc = yield* lib.loadDoc((override ?? library).head_revision_id)
+          const binding = bindingOf(bindings, entityId)
+          // What the context assembler reads here; a card it can't resolve shows its library entry.
+          const used = yield* lib.cardInChat(userId, chatId, entityId, binding)
+          const usesOverride = override !== null && used?.refId === override.id && !binding?.revision
           cards.push(
             new ChatCard({
               entityId,
               refId: library.id as RefId,
               usedByChats: yield* lib.usedByChats(userId, library),
               overrideRefId: (override?.id ?? null) as RefId | null,
-              definition: definitionOf(doc)
+              binding: binding?.revision ? "revision" : binding?.ref ? "ref" : "default",
+              usesOverride,
+              definition: definitionOf(yield* lib.loadDoc(used?.revisionId ?? library.head_revision_id))
             })
           )
         }

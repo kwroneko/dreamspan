@@ -351,18 +351,23 @@ describe("chat setup", () => {
         })
       const here = (yield* start()).chat.id
       const there = (yield* start()).chat.id
-      const [before] = yield* api.ListChatCards({ chatId: here, entityIds: [miraId] })
+      const [before] = yield* api.ListChatCards({ chatId: here, slotId: null, entityIds: [miraId] })
       assert.isNull(before!.overrideRefId)
       assert.strictEqual(before!.usedByChats, 2)
       assert.strictEqual(before!.definition.description, "Mira keeps the harbor bell.")
       assert.strictEqual(before!.definition.alternateGreetings, 2)
 
       // Made on first use, opened after that.
-      const override = yield* api.EditCardForChat({ chatId: here, entityId: miraId })
+      const opened = yield* api.EditCardForChat({ chatId: here, slotId: null, entityId: miraId })
+      assert.isFalse(opened.bound)
+      const override = opened.ref
       assert.strictEqual(override.refKind, "chat_override")
       assert.strictEqual(override.chatId, here)
       assert.strictEqual(override.followsRefId, before!.refId)
-      assert.strictEqual((yield* api.EditCardForChat({ chatId: here, entityId: miraId })).id, override.id)
+      assert.strictEqual(
+        (yield* api.EditCardForChat({ chatId: here, slotId: null, entityId: miraId })).ref.id,
+        override.id
+      )
 
       const doc = (yield* api.OpenEditor({ refId: override.id })).doc
       yield* writer.EditRef({
@@ -373,11 +378,13 @@ describe("chat setup", () => {
         message: null,
         commitDraft: null
       })
-      const [edited] = yield* api.ListChatCards({ chatId: here, entityIds: [miraId] })
+      const [edited] = yield* api.ListChatCards({ chatId: here, slotId: null, entityIds: [miraId] })
       assert.strictEqual(edited!.overrideRefId, override.id)
+      assert.isTrue(edited!.usesOverride)
+      assert.strictEqual(edited!.binding, "default")
       assert.strictEqual(edited!.refId, before!.refId)
       assert.strictEqual(edited!.definition.description, "Mira rings the harbor bell.")
-      const [elsewhere] = yield* api.ListChatCards({ chatId: there, entityIds: [miraId] })
+      const [elsewhere] = yield* api.ListChatCards({ chatId: there, slotId: null, entityIds: [miraId] })
       assert.isNull(elsewhere!.overrideRefId)
       assert.strictEqual(elsewhere!.definition.description, "Mira keeps the harbor bell.")
       // The library entry is unchanged.

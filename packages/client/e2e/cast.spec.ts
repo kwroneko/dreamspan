@@ -176,3 +176,43 @@ test("a card edited only in this chat, and everywhere", async ({ page }) => {
   await expect(page.getByText(/used by \d+ chats/)).toBeVisible()
   await expect(page.getByRole("textbox", { name: "Description" })).toHaveValue("A harbor pilot who reads the tides.")
 })
+
+test("a name edited only in this chat is the name the chat shows, in the Cast and the composer", async ({ page }) => {
+  await chatWithMira(page)
+  await openCast(page)
+  await page.getByRole("button", { name: "Edit Mira" }).click()
+  await page.getByRole("button", { name: /^Only in this chat/ }).click()
+  await expect(page.getByText("Edited for this chat.")).toBeVisible()
+  await page.getByRole("textbox", { name: "Name", exact: true }).fill("Harbor Mira")
+  await page.getByRole("button", { name: /^Save/ }).first().click()
+  await page.getByRole("dialog", { name: "Save a revision" }).getByRole("button", { name: "Save revision" }).click()
+  await expect(page.getByText("Saved a revision.")).toBeVisible()
+  await page.getByRole("link", { name: /^← Back to / }).click()
+
+  // The row has the chat's name, and the library label beside it.
+  await openCast(page)
+  const row = member(page, "Harbor Mira")
+  await expect(row).toBeVisible()
+  await expect(row).toContainText("Mira")
+  await shoot(page, "cast-local-rename-row")
+  await page.keyboard.press("Escape")
+  await expect(members(page)).toHaveCount(0)
+
+  // The composer's recent speakers, then the speaker chip, Send and Generate.
+  await page.getByRole("button", { name: "Speak as Harbor Mira" }).click()
+  await expect(page.getByRole("button", { name: "Speaking as Harbor Mira. Change the speaker" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Send as Harbor Mira" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Generate Harbor Mira" })).toBeVisible()
+  await shoot(page, "cast-local-rename-composer")
+})
+
+test("the composer regenerates the latest reply, apart from Generate", async ({ page }) => {
+  await chatWithMira(page)
+  const latest = replies(page).last()
+  await page.getByRole("button", { name: "Regenerate the latest reply" }).click()
+  await expect(generating(page)).toHaveCount(1)
+  await expect(generating(page)).toHaveCount(0, { timeout: 20_000 })
+  // A new version of that reply, not a new turn.
+  await expect(replies(page)).toHaveCount(2)
+  await expect(latest.getByRole("group", { name: "Versions" })).toContainText("2")
+})

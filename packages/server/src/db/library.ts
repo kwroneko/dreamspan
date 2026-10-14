@@ -18,6 +18,12 @@ import { merge3 } from "@rp/shared/merge.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import { docHash } from "./documents.ts"
+
+/** A chat's `card.binding` for one card, as the state fold leaves it. */
+export interface CardBinding {
+  readonly ref?: string | undefined
+  readonly revision?: string | undefined
+}
 import { NotFound } from "./ops.ts"
 
 export interface RefRow {
@@ -188,5 +194,41 @@ export const makeLibraryQueries = (sql: SqlClient.SqlClient) => {
       Effect.flatMap(([row]) => (row ? ownedRef(userId, row.id) : Effect.succeed(null)))
     )
 
-  return { ownedRef, refsWhere, loadDoc, planMerge, cardNote, usedByChats, cardLibraryRef, chatOverride }
+  /**
+   * The version of a card a chat reads at a position, by the context assembler's rules
+   * (assemblySources.ts `card`): a revision the chat's state binds, else the head of a ref
+   * it binds, else the head of the chat's own version, else the upstream's. `binding` is
+   * the folded `card.binding` there. Null when that isn't the user's live card.
+   */
+  const cardInChat = (userId: UserId, chatId: string, entityId: string, binding: CardBinding | undefined) =>
+    Effect.gen(function* () {
+      if (binding?.revision) {
+        const [row] = yield* sql<{ id: string }>`
+          SELECT v.id FROM entity_revisions v JOIN entities e ON e.id = v.entity_id
+          WHERE v.id = ${binding.revision} AND e.id = ${entityId} AND e.owner_user_id = ${userId}
+            AND e.kind = 'card' AND e.deleted_at IS NULL`
+        return row ? { refId: binding.ref ?? null, revisionId: row.id } : null
+      }
+      const which = binding?.ref
+        ? sql`r.id = ${binding.ref} AND (r.chat_id IS NULL OR r.chat_id = ${chatId})`
+        : sql`((r.ref_kind = 'chat_override' AND r.chat_id = ${chatId}) OR r.ref_kind = 'upstream')`
+      const [row] = yield* sql<{ id: string; head_revision_id: string }>`
+        SELECT r.id, r.head_revision_id FROM entity_refs r JOIN entities e ON e.id = r.entity_id
+        WHERE r.entity_id = ${entityId} AND e.owner_user_id = ${userId} AND e.kind = 'card'
+          AND e.deleted_at IS NULL AND ${which}
+        ORDER BY r.ref_kind = 'chat_override' DESC LIMIT 1`
+      return row ? { refId: row.id as string | null, revisionId: row.head_revision_id } : null
+    })
+
+  return {
+    ownedRef,
+    refsWhere,
+    loadDoc,
+    planMerge,
+    cardNote,
+    usedByChats,
+    cardLibraryRef,
+    chatOverride,
+    cardInChat
+  }
 }

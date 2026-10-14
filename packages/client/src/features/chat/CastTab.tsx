@@ -5,7 +5,7 @@
 // they apply from the latest message on, on this branch.
 import { useAtomValue } from "@effect/atom-react"
 import type { CastCard, EntityId } from "@rp/shared/chat.ts"
-import type { CardDefinition, CastChange, ChatCard } from "@rp/shared/chatSetupApi.ts"
+import type { CastChange, ChatCard } from "@rp/shared/chatSetupApi.ts"
 import type { RefId } from "@rp/shared/library.ts"
 import { Link, useNavigate } from "@tanstack/react-router"
 import { AsyncResult } from "effect/reactivity"
@@ -60,8 +60,20 @@ function DefinitionField({ label, text }: { label: string; text: string }) {
   )
 }
 
+/** Which version a chat reads, in words, when it isn't simply the library's latest. */
+const versionNote = (info: ChatCard) =>
+  info.usesOverride
+    ? "This chat's own version of the card."
+    : info.binding === "revision"
+      ? "This chat uses an earlier saved version of the card here, not the library's latest."
+      : info.binding === "ref"
+        ? "This chat uses another version of the card here (a variant), not the library entry."
+        : null
+
 /** The card's definition as this chat uses it, read-only (ST's character panel). */
-function Definition({ name, definition, edited }: { name: string; definition: CardDefinition; edited: boolean }) {
+function Definition({ name, info }: { name: string; info: ChatCard }) {
+  const { definition } = info
+  const note = versionNote(info)
   const fields: ReadonlyArray<readonly [string, string]> = [
     ["Description", definition.description],
     ["Personality", definition.personality],
@@ -77,7 +89,7 @@ function Definition({ name, definition, edited }: { name: string; definition: Ca
       aria-label={`${name}'s card`}
       className="flex flex-col gap-3 rounded-md border border-border bg-canvas p-3"
     >
-      {edited && <p className="text-xs text-muted">This chat's own version of the card.</p>}
+      {note && <p className="text-xs text-muted">{note}</p>}
       {shown.length > 0 && (
         <dl className="flex flex-col gap-3">
           {shown.map(([label, text]) => (
@@ -114,13 +126,21 @@ function EditScope({
   const navigate = useNavigate()
   const action = useAction()
   const open = (refId: RefId) => void navigate({ to: "/library/$refId", params: { refId } })
+  // Where the chat reads another version (a variant or an earlier one), its own version
+  // starts from that one and is used instead, from the latest message on.
+  const pinned = info !== undefined && info.binding !== "default" && !info.usesOverride
   const here = async () => {
-    if (info?.overrideRefId) return open(info.overrideRefId)
+    if (info?.usesOverride && info.overrideRefId) return open(info.overrideRefId)
     const made = await action.run(
-      (client) => client("EditCardForChat", { chatId: session.id, entityId: card.entityId }),
+      (client) =>
+        client("EditCardForChat", {
+          chatId: session.id,
+          slotId: session.snapshot().leafSlotId,
+          entityId: card.entityId
+        }),
       [`chat-cards:${session.id}`]
     )
-    if (made.ok) open(made.value.id)
+    if (made.ok) open(made.value.ref.id)
   }
   const option =
     "flex w-full flex-col items-start gap-0.5 rounded-lg border border-border bg-surface px-3 py-2.5 text-left outline-none hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus disabled:opacity-50"
@@ -136,9 +156,13 @@ function EditScope({
         <button type="button" className={option} disabled={action.pending || !info} onClick={() => void here()}>
           <span className="font-medium">Only in this chat</span>
           <span className="text-sm text-muted">
-            {info?.overrideRefId
-              ? "Opens this chat's own version of the card, edited before."
-              : "Makes a version of the card for this chat. Other chats keep the original."}
+            {pinned
+              ? info.overrideRefId
+                ? "This chat uses another version of the card here. Its own version, edited before, is used instead from the latest message on."
+                : "This chat uses another version of the card here. Makes this chat's own version from that one, used from the latest message on. Other chats keep theirs."
+              : info?.overrideRefId
+                ? "Opens this chat's own version of the card, edited before."
+                : "Makes a version of the card for this chat. Other chats keep the original."}
           </span>
         </button>
         <button
@@ -151,7 +175,11 @@ function EditScope({
           <span className="font-medium">Everywhere{chats && ` (used by ${chats})`}</span>
           <span className="text-sm text-muted">
             Changes the card in your library, for every chat it's in
-            {info?.overrideRefId ? "; this chat's own version takes the change where you haven't edited it." : "."}
+            {info?.usesOverride
+              ? "; this chat's own version takes the change where you haven't edited it."
+              : pinned
+                ? "; this chat uses another version of it here."
+                : "."}
           </span>
         </button>
       </div>
@@ -274,7 +302,7 @@ function Member({
   const [showCard, setShowCard] = useState(false)
   const [speaking, setSpeaking] = useState(false)
   const name = card.name
-  const edited = info?.overrideRefId != null
+  const edited = info?.usesOverride === true && info.overrideRefId !== null
   const speak = async () => {
     setSpeaking(true)
     // The composer's Generate for this speaker, without a direction: the model writes their turn.
@@ -367,11 +395,7 @@ function Member({
         </Button>
       </div>
       {showCard &&
-        (info ? (
-          <Definition name={name} definition={info.definition} edited={edited} />
-        ) : (
-          <p className="text-sm text-muted">Loading the card…</p>
-        ))}
+        (info ? <Definition name={name} info={info} /> : <p className="text-sm text-muted">Loading the card…</p>)}
     </li>
   )
 }
@@ -388,17 +412,21 @@ export function CastTab({ session }: { session: ChatSession }) {
   })
   const participants = useMemo(() => cast?.participants ?? [], [cast])
   const chatId = session.id
-  const key = participants.join(" ")
-  // The library entry, "used by N chats", this chat's own version and the definition in use;
-  // read again after any library change, or an override made here.
+  // The leaf shown: what the next request reads depends on the state there.
+  const leafSlotId = useSyncExternalStore(session.subscribe, () => session.snapshot().leafSlotId)
+  // Cards in the bin, or purged, have no definition to read.
+  const key = participants.filter((id) => view.cards.get(id)?.inBin === false).join(" ")
+  // The library entry, "used by N chats", this chat's own version and the definition the
+  // next request reads; read again at a new leaf, after any library change (an editor
+  // save), or an override made here.
   const infoAtom = useMemo(
     () =>
       AppClient.query(
         "ListChatCards",
-        { chatId, entityIds: key === "" ? [] : (key.split(" ") as Array<EntityId>) },
+        { chatId, slotId: leafSlotId, entityIds: key === "" ? [] : (key.split(" ") as Array<EntityId>) },
         { reactivityKeys: ["library", `chat-cards:${chatId}`] }
       ),
-    [chatId, key]
+    [chatId, leafSlotId, key]
   )
   const infoResult = useAtomValue(infoAtom)
   const info = useMemo(

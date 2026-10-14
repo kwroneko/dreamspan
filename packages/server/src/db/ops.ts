@@ -72,7 +72,7 @@ import {
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
 import { CastCard, ChatSummary, FrozenMacros, QueuedMessage } from "@rp/shared/chat.ts"
-import { CardForChat, ChatCard, FirstTurn } from "@rp/shared/chatSetupApi.ts"
+import { CardForChat, CardOverrideOpened, ChatCard, FirstTurn } from "@rp/shared/chatSetupApi.ts"
 import { AssemblyFailed } from "../assembler/types.ts"
 
 const StorageErrorReason = Schema.Literals(["busy", "constraint", "corrupt", "other"])
@@ -115,6 +115,11 @@ export class RefChange extends Schema.Class<RefChange>("RefChange")({
 
 /** What merging a ref did, and the change that flowed on from it. */
 const MergeAndFlow = Schema.Struct({ outcome: MergeOutcome, change: RefChange })
+
+/** A chat's `card.binding` for one card where it's read (the state fold's), null for none. */
+const CardBinding = Schema.Struct({ ref: Schema.NullOr(Schema.String), revision: Schema.NullOr(Schema.String) })
+/** Every card's binding at a position, by entity id. */
+const CardBindings = Schema.Record(Schema.String, CardBinding)
 
 export class DraftTooLarge extends Schema.TaggedError<DraftTooLarge>()("DraftTooLarge", {
   length: Schema.Int,
@@ -730,12 +735,21 @@ export class WriteOps extends RpcGroup.make(
   }),
   /**
    * The chat's own version of a card (DESIGN §4: "only in this chat"): its existing
-   * override, or a new one following the card's library entry (its upstream, or its oldest
-   * variant). Another user's chat or card, or one in the bin, is NotFound.
+   * override, or a new one started from the version the chat uses after `slotId`, which
+   * `binding` (the chat's `card.binding` there) picks as the context assembler does: a bound
+   * revision or ref, else the card's library entry. Where `binding` names another version,
+   * the override is bound instead from `slotId` on (a `card.binding` event), so the
+   * assembler reads it. Another user's chat, slot or card, or one in the bin, is NotFound.
    */
   Rpc.make("OpenCardOverride", {
-    payload: { userId: UserId, chatId: ChatId, entityId: EntityId },
-    success: LibraryRef,
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      slotId: Schema.NullOr(SlotId),
+      entityId: EntityId,
+      binding: Schema.NullOr(CardBinding)
+    },
+    success: CardOverrideOpened,
     error: Schema.Union([NotFound, StorageError])
   }),
   /** Turns a chat override into a library variant (DESIGN §4). */
@@ -1799,18 +1813,28 @@ export class ReadOps extends RpcGroup.make(
     success: Schema.Array(ChatSummary),
     error: StorageError
   }),
-  /** These cards, as far as they're the user's (binned ones included); others are left out. */
+  /**
+   * These cards, as far as they're the user's (binned ones included); others are left out.
+   * With `chat`, each card's name, avatar and lorebook are those of the version the chat
+   * uses where `bindings` were folded (`ChatCards`' rules); its label stays the library's.
+   */
   Rpc.make("CastCards", {
-    payload: { userId: UserId, entityIds: Schema.Array(EntityId) },
+    payload: {
+      userId: UserId,
+      entityIds: Schema.Array(EntityId),
+      chat: Schema.optionalKey(Schema.Struct({ chatId: ChatId, bindings: CardBindings }))
+    },
     success: Schema.Array(CastCard),
     error: StorageError
   }),
   /**
-   * These cards as the live chat uses them: library entry, its "used by N chats", the chat's
-   * override and the definition in use. Cards that aren't the user's are left out.
+   * These cards as the live chat uses them where `bindings` (the chat's `card.binding`s
+   * there) were folded: library entry, its "used by N chats", the chat's override, and the
+   * definition the context assembler reads, picked by its rules (assemblySources.ts). A card
+   * that isn't the user's live card is NotFound, as a missing one.
    */
   Rpc.make("ChatCards", {
-    payload: { userId: UserId, chatId: ChatId, entityIds: Schema.Array(EntityId) },
+    payload: { userId: UserId, chatId: ChatId, entityIds: Schema.Array(EntityId), bindings: CardBindings },
     success: Schema.Array(ChatCard),
     error: Schema.Union([NotFound, StorageError])
   }),

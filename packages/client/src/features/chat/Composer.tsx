@@ -30,7 +30,7 @@ import { Badge } from "../../ui/Surface.tsx"
 import { Tabs } from "../../ui/Tabs.tsx"
 import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import { type CastView, nameOf, recentSpeakers, replySpeaker, useCast } from "./cast.ts"
-import { ChevronIcon, HistoryIcon, SendIcon, StopIcon } from "./icons.tsx"
+import { ChevronIcon, HistoryIcon, RegenerateIcon, SendIcon, StopIcon } from "./icons.tsx"
 import { speakerChoice, usePickedSpeaker } from "./speaker.ts"
 import { carriedComposerText, dropCarriedComposerText } from "./composerCarry.ts"
 import { ReplayNotice } from "../editor/ReplayNotice.tsx"
@@ -129,7 +129,8 @@ const SpeakerSwitcher = memo(function SpeakerSwitcher({
     setOpen(false)
     onPick(card)
   }
-  const cards = all ?? []
+  // A card in the chat by the name the chat uses for it (its own version's, say).
+  const cards = (all ?? []).map((card) => view.cards.get(card.entityId) ?? card)
   return (
     <Popover
       open={open}
@@ -631,6 +632,16 @@ export function Composer({ session, view }: { session: ChatSession; view: ChatVi
           <span className="hidden sm:inline-flex">
             <History draft={draft} />
           </span>
+          {leaf?.version.writer === "model" && !leafGenerating && (
+            <IconButton
+              label="Regenerate the latest reply"
+              hint="Regenerate the latest reply: a new version of it, in its place"
+              variant="ghost"
+              onClick={async () => report(await session.regenerate(leaf))}
+            >
+              <RegenerateIcon />
+            </IconButton>
+          )}
           {leafGenerating && (
             <IconButton
               label="Stop the reply"

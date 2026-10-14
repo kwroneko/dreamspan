@@ -50,3 +50,9 @@ export const PlusIcon = () => (
     <path d="M8 3v10M3 8h10" />
   </svg>
 )
+
+export const RegenerateIcon = () => (
+  <svg {...base}>
+    <path d="M13 8a5 5 0 1 1-1.5-3.6M13 2.5V5h-2.5" />
+  </svg>
+)

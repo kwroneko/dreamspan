@@ -14,12 +14,14 @@ import {
   validateDoc,
   withoutGrantedAgentEdits
 } from "@rp/shared/editing.ts"
+import { CardOverrideOpened } from "@rp/shared/chatSetupApi.ts"
 import { InvalidDocument } from "@rp/shared/editorApi.ts"
 import { Effect, Predicate } from "effect"
 import { SqlClient } from "effect/sql"
 import type { Bin } from "./bin.ts"
 import { docHash, searchText } from "./documents.ts"
 import { makeEditorWriteHandlers } from "./editorWrites.ts"
+import { makeGraphWrites } from "./graphWrites.ts"
 import { makeLibraryQueries, type RefRow, toLibraryRef } from "./library.ts"
 import { mediaPath } from "./media.ts"
 import { FollowerMerge, NotFound, RefChange, RefOperationRefused, StaleWrite, WriteOps } from "./ops.ts"
@@ -65,8 +67,11 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
         Effect.flatMap(([chat]) => (chat ? Effect.void : Effect.fail(new NotFound({ entity: "chat", id: chatId }))))
       )
 
-    /** A chat override following `ref`, at its head: changes for that chat only (DESIGN §4). */
-    const insertOverride = (ref: RefRow, chatId: string) =>
+    /**
+     * A chat override following `ref`, starting at `head` (its head unless the chat used an
+     * older revision): changes for that chat only (DESIGN §4).
+     */
+    const insertOverride = (ref: RefRow, chatId: string, head: string = ref.head_revision_id) =>
       Effect.gen(function* () {
         const id = uuidv7()
         const at = Date.now()
@@ -74,16 +79,16 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
           id,
           entity_id: ref.entity_id,
           ref_kind: "chat_override",
-          head_revision_id: ref.head_revision_id,
+          head_revision_id: head,
           follows_ref_id: ref.id,
-          merge_base_revision_id: ref.head_revision_id,
+          merge_base_revision_id: head,
           label: ref.label,
           subtitle: "",
           chat_id: chatId,
           created_at: at,
           updated_at: at
         })}`
-        return toLibraryRef(yield* reload(id))
+        return yield* reload(id)
       })
 
     const insertRevision = (options: {
@@ -503,17 +508,45 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
             return yield* new RefOperationRefused({ refId, reason: "This is already a chat override." })
           }
           yield* liveChat(userId, chatId)
-          return yield* insertOverride(ref, chatId)
+          return toLibraryRef(yield* insertOverride(ref, chatId))
         }).pipe(transaction(sql, "CreateChatOverride")),
 
-      OpenCardOverride: ({ userId, chatId, entityId }) =>
+      OpenCardOverride: ({ userId, chatId, slotId, entityId, binding }) =>
         Effect.gen(function* () {
           yield* liveChat(userId, chatId)
-          const existing = yield* lib.chatOverride(userId, chatId, entityId)
-          if (existing !== null) return toLibraryRef(existing)
+          const graph = makeGraphWrites(sql, drafts)
+          if (slotId !== null) {
+            yield* graph.found(
+              sql`SELECT count(*) AS n FROM slots WHERE id = ${slotId} AND chat_id = ${chatId} AND deleted_at IS NULL`,
+              "slot",
+              slotId
+            )
+          }
           const library = yield* lib.cardLibraryRef(userId, entityId)
           if (library === null) return yield* new NotFound({ entity: "card", id: entityId })
-          return yield* insertOverride(library, chatId)
+          const pinned =
+            binding === null || (binding.ref === null && binding.revision === null)
+              ? undefined
+              : { ref: binding.ref ?? undefined, revision: binding.revision ?? undefined }
+          let override = yield* lib.chatOverride(userId, chatId, entityId)
+          if (override === null) {
+            // Started from the version the chat reads here, as the assembler picks it: a bound
+            // variant or revision, else the library entry.
+            const used = yield* lib.cardInChat(userId, chatId, entityId, pinned)
+            const bound = used?.refId ? yield* lib.ownedRef(userId, used.refId) : null
+            const follows = bound !== null && bound.ref_kind !== "chat_override" ? bound : library
+            override = yield* insertOverride(follows, chatId, used?.revisionId ?? follows.head_revision_id)
+          }
+          // A chat that binds another version here would never read its own: bind it instead,
+          // from this position on, as any cast change is.
+          const rebind = pinned !== undefined && (pinned.revision !== undefined || pinned.ref !== override.id)
+          if (rebind) {
+            yield* graph.insertStateEvent(userId, chatId, slotId, null, null, {
+              key: "card.binding",
+              value: { entity: entityId as EntityId, ref: override.id as RefId }
+            })
+          }
+          return new CardOverrideOpened({ ref: toLibraryRef(override), bound: rebind })
         }).pipe(transaction(sql, "OpenCardOverride")),
 
       PromoteOverride: ({ userId, refId, label, subtitle, expectedRowVersion }) =>

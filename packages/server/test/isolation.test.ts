@@ -876,11 +876,23 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
   ListChatCards: {
     probe: (actor, owner) =>
       Effect.gen(function* () {
-        yield* refused(actor.api.ListChatCards({ chatId: owner.chat.chatId, entityIds: [actor.cardId] }), "NotFound")
-        // Their card named in the actor's own chat is left out.
+        yield* refused(
+          actor.api.ListChatCards({ chatId: owner.chat.chatId, slotId: null, entityIds: [actor.cardId] }),
+          "NotFound"
+        )
+        yield* refused(
+          actor.api.ListChatCards({ chatId: actor.chat.chatId, slotId: owner.chat.slotId, entityIds: [actor.cardId] }),
+          "NotFound"
+        )
+        // Their card named in the actor's own chat is NotFound, as a missing one is.
+        yield* refused(
+          actor.api.ListChatCards({ chatId: actor.chat.chatId, slotId: null, entityIds: [owner.cardId, actor.cardId] }),
+          "NotFound"
+        )
         const cards = yield* actor.api.ListChatCards({
           chatId: actor.chat.chatId,
-          entityIds: [owner.cardId, actor.cardId]
+          slotId: null,
+          entityIds: [actor.cardId]
         })
         assert.deepStrictEqual(
           cards.map((card) => card.entityId),
@@ -891,10 +903,17 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
   EditCardForChat: {
     probe: (actor, owner) =>
       Effect.gen(function* () {
-        yield* refused(actor.api.EditCardForChat({ chatId: owner.chat.chatId, entityId: actor.cardId }), "NotFound")
-        yield* refused(actor.api.EditCardForChat({ chatId: actor.chat.chatId, entityId: owner.cardId }), "NotFound")
+        const edit = (chatId: ChatId, slotId: SlotId | null, entityId: EntityId) =>
+          actor.api.EditCardForChat({ chatId, slotId, entityId })
+        yield* refused(edit(owner.chat.chatId, null, actor.cardId), "NotFound")
+        yield* refused(edit(actor.chat.chatId, null, owner.cardId), "NotFound")
+        yield* refused(edit(actor.chat.chatId, owner.chat.slotId, actor.cardId), "NotFound")
         // Nothing of the owner's got an override.
-        const [card] = yield* owner.api.ListChatCards({ chatId: owner.chat.chatId, entityIds: [owner.cardId] })
+        const [card] = yield* owner.api.ListChatCards({
+          chatId: owner.chat.chatId,
+          slotId: null,
+          entityIds: [owner.cardId]
+        })
         assert.isNull(card!.overrideRefId)
       })
   },
