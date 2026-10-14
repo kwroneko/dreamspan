@@ -1,0 +1,58 @@
+import { expect, test } from "vitest"
+import { BinItem } from "@rp/shared/bin.ts"
+import { formatDay } from "../src/features/chat/chatTitle.ts"
+import { binTitle, recoveredSource } from "../src/features/bin/titles.ts"
+
+test("bin readable chat names preserve quotes in an imported group name", () => {
+  const title = 'The "Lantern" Inn: 2026-4-3@18h00m00s000ms'
+  const day = formatDay(new Date(Date.UTC(2026, 3, 3, 18)))
+  const item = new BinItem({
+    id: "bin",
+    kind: "version",
+    targetId: "version",
+    title: `Version of a message in "${title}"`,
+    excerpt: "",
+    origin: { chatTitle: title },
+    byteSize: 0,
+    deletedAt: 0
+  })
+  expect(binTitle(item)).toBe(`Version of a message in “The "Lantern" Inn, started ${day}”`)
+})
+
+test("bin labels use structured kind and origin rather than arbitrary display quotes", () => {
+  for (const [kind, label] of [
+    ["message", "Message"],
+    ["version", "Version of a message"],
+    ["branch", "Branch of 3 messages"]
+  ] as const) {
+    const item = new BinItem({
+      id: "bin",
+      kind,
+      targetId: "target",
+      title: 'Stale "display" text',
+      excerpt: "",
+      origin: { chatTitle: 'The "Lantern" Inn', messages: 3 },
+      byteSize: 0,
+      deletedAt: 0
+    })
+    expect(binTitle(item)).toBe(`${label} in “The "Lantern" Inn”`)
+  }
+})
+
+test("recovered sources preserve embedded quotes using the source kind's full label format", () => {
+  const title = 'The "Lantern" Inn: 2026-4-3@18h00m00s000ms'
+  const day = formatDay(new Date(Date.UTC(2026, 3, 3, 18)))
+  for (const [sourceKind, prefix] of [
+    ["composer", "Composer in "],
+    ["version_edit", "Edit of a message in "],
+    ["scratchpad", "Scratchpad in "],
+    ["summary_edit", "Summary in "]
+  ] as const) {
+    expect(recoveredSource({ sourceKind, sourceLabel: `${prefix}"${title}"` })).toBe(
+      `${prefix}“The "Lantern" Inn, started ${day}”`
+    )
+  }
+  expect(recoveredSource({ sourceKind: "entity_field", sourceLabel: `Card "${title}" › name` })).toBe(
+    `Card "${title}" › name`
+  )
+})

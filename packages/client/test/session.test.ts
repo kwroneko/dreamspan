@@ -130,4 +130,25 @@ describe("ChatSession", () => {
     await reading
     expect(s.snapshot().queue.map((q) => q.content)).toEqual(["new"])
   })
+
+  it("notifies prospective default readers even when a Cache event leaves effective context unchanged", () => {
+    const { s, receive } = session()
+    const changed = vi.fn()
+    const unsubscribe = s.subscribeContext(changed)
+    const event = {
+      _tag: "Cache",
+      leafSlotId: null,
+      warmth: null,
+      historyStart: null,
+      summarizedThrough: null
+    } as const
+    receive(event)
+    const history = s.snapshot().history
+    receive(event)
+    expect(s.snapshot().history).toBe(history)
+    expect(changed).toHaveBeenCalledTimes(2)
+    unsubscribe()
+    receive(event)
+    expect(changed).toHaveBeenCalledTimes(2)
+  })
 })

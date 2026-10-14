@@ -13,8 +13,9 @@ import { Textarea } from "../../ui/Field.tsx"
 import { Badge, Card, CardHeader, EmptyState } from "../../ui/Surface.tsx"
 import { Tabs } from "../../ui/Tabs.tsx"
 import { useTitle } from "../shell.tsx"
-import { readableChatTitle, withReadableChatTitles } from "../chat/chatTitle.ts"
-import { binTitle, RESTORED_KEYS, restoreItem } from "./deleted.ts"
+import { readableChatTitle } from "../chat/chatTitle.ts"
+import { RESTORED_KEYS, restoreItem } from "./deleted.ts"
+import { binTitle, recoveredSource } from "./titles.ts"
 
 const PAGE = 50
 
@@ -222,7 +223,7 @@ function TextRow({ text, onGone }: { text: RecoveredText; onGone: (text: Recover
   const [full, setFull] = useState<string | null>(null)
   const [confirming, setConfirming] = useState(false)
   const [copied, setCopied] = useState(false)
-  const source = withReadableChatTitles(text.sourceLabel)
+  const source = recoveredSource(text)
   return (
     <li className="flex flex-col gap-2 py-3 first:pt-0 last:pb-0" aria-label={`Recovered from ${source}`}>
       <div className="flex flex-wrap items-center gap-2">

@@ -68,10 +68,10 @@ function GroupTile({ group }: { group: ChatGroup }) {
           <GroupFaces members={group.members} />
         </span>
         <span className="flex min-w-0 flex-col gap-0.5 px-2.5 pt-2 pb-2.5">
-          <span className="truncate text-sm font-medium" title={group.name}>
+          <span className="text-sm font-medium [overflow-wrap:anywhere]" title={group.name}>
             {group.name}
           </span>
-          <span className="truncate text-xs text-muted" title={`Group: ${members}`}>
+          <span className="text-xs text-muted [overflow-wrap:anywhere]" title={`Group: ${members}`}>
             {members}
           </span>
           <span className="truncate text-xs text-muted" title={usageLine(group)}>

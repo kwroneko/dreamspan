@@ -7,14 +7,16 @@ import { CardDefinition, CardForChat, CardUsage, ChatCard, ChatGroup } from "@rp
 import type { UserId } from "@rp/shared/domain.ts"
 import type { RefId, RevisionId } from "@rp/shared/library.ts"
 import { importState } from "@rp/shared/stImportApi.ts"
-import { Effect } from "effect"
+import { FoldableEvent, foldState } from "@rp/shared/state.ts"
+import { Effect, Schema } from "effect"
 import { SqlClient } from "effect/sql"
 import { castCardAt, loadCards } from "./cards.ts"
 import { type CardBinding, makeLibraryQueries } from "./library.ts"
-import { NotFound, type ReadOps } from "./ops.ts"
+import { NotFound, type ReadOps, StorageError } from "./ops.ts"
 import { chatQueue } from "./queueRows.ts"
 import { type ChatRow, toChat } from "./rows.ts"
 import { query } from "./tx.ts"
+import { withoutPurged } from "./stateRefs.ts"
 
 /** A card's binding from the payload's, without the nulls; undefined for none. */
 const bindingOf = (
@@ -46,22 +48,29 @@ export const makeChatSetupReadHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   const lib = makeLibraryQueries(sql)
 
-  /**
-   * The user's groups (`ChatGroup`), each with its chats latest first, the groups by their
-   * last message. Two queries: every chat with the cards that joined it on any branch (in
-   * join order) and those the user played on any, each a seek on its state events; then
-   * every card's name and avatar. Grouping happens here, on the reader, never in the client.
+  /** One owner-scoped read: only cast events on each active path, then card metadata.
+   * Slot deletion, selected versions and supersession follow StateEventsAt. Walking
+   * slots never reads message text; folding shares GetCast's replacement/join/leave rules.
    */
   const groupsOf = (userId: UserId) =>
     Effect.gen(function* () {
-      const chats = yield* sql<ChatRow & { joined: string; played: string }>`
+      const chats = yield* sql<ChatRow & { events: string }>`
         SELECT c.*,
-          (SELECT json_group_array(entity) FROM (
-            SELECT json_extract(s.value_json, '$.entity') AS entity FROM state_events s
-            WHERE s.chat_id = c.id AND s.key = 'participant.join' AND s.superseded_by_changeset IS NULL
-            GROUP BY entity ORDER BY min(s.seq))) AS joined,
-          (SELECT json_group_array(DISTINCT j.value) FROM state_events s, json_each(s.value_json, '$.entities') j
-            WHERE s.chat_id = c.id AND s.key = 'played_by_me.set' AND s.superseded_by_changeset IS NULL) AS played
+          (WITH RECURSIVE path(id) AS (
+            SELECT id FROM slots WHERE id = c.active_leaf_slot_id AND chat_id = c.id
+            UNION ALL
+            SELECT s.parent_slot_id FROM slots s JOIN path p ON s.id = p.id WHERE s.parent_slot_id IS NOT NULL
+          )
+          SELECT json_group_array(json(event)) FROM (
+            SELECT json_object('scope', e.scope, 'data', json_object('key', e.key, 'value', json(e.value_json))) AS event
+            FROM state_events e
+            LEFT JOIN path p ON p.id = e.slot_id
+            LEFT JOIN slots s ON s.id = p.id
+            WHERE e.chat_id = c.id AND e.key IN ('participant.join', 'participant.leave', 'played_by_me.set')
+              AND e.superseded_by_changeset IS NULL
+              AND (e.slot_id IS NULL OR (p.id IS NOT NULL AND s.deleted_at IS NULL))
+              AND (c.active_leaf_slot_id IS NULL OR e.version_id IS NULL OR e.version_id = s.selected_version_id)
+            ORDER BY coalesce(s.depth, -1), e.seq)) AS events
         FROM chats c WHERE c.owner_user_id = ${userId} AND c.deleted_at IS NULL
         ORDER BY c.last_message_at IS NOT NULL DESC, coalesce(c.last_message_at, c.created_at) DESC, c.id DESC`
       if (chats.length === 0) return []
@@ -70,11 +79,9 @@ export const makeChatSetupReadHandlers = Effect.gen(function* () {
         label: string
         name: unknown
         avatar: unknown
-        persona: number
       }>`
         SELECT e.id AS entity_id, r.label, json_extract(rev.doc_json, '$.name') AS name,
-          json_extract(rev.doc_json, '$.avatar_media_id') AS avatar,
-          EXISTS (SELECT 1 FROM entity_tags t WHERE t.entity_id = e.id AND t.tag = 'persona') AS persona
+          json_extract(rev.doc_json, '$.avatar_media_id') AS avatar
         FROM entities e
         JOIN entity_refs r ON r.id = (
           SELECT r2.id FROM entity_refs r2 WHERE r2.entity_id = e.id AND r2.ref_kind <> 'chat_override'
@@ -83,7 +90,6 @@ export const makeChatSetupReadHandlers = Effect.gen(function* () {
         WHERE e.owner_user_id = ${userId} AND e.kind = 'card' AND e.purged_at IS NULL`
       const characters = new Map<string, Member>()
       for (const card of cards) {
-        if (card.persona) continue
         const name = typeof card.name === "string" ? card.name.trim() : ""
         characters.set(card.entity_id, {
           entityId: card.entity_id as EntityId,
@@ -92,13 +98,29 @@ export const makeChatSetupReadHandlers = Effect.gen(function* () {
           avatarMediaId: typeof card.avatar === "string" ? card.avatar : null
         })
       }
+      const decoded = yield* Effect.forEach(chats, (row) =>
+        Schema.decodeUnknownEffect(Schema.Array(FoldableEvent))(JSON.parse(row.events)).pipe(
+          Effect.map((events) => events.map((event) => ({ ...event, chatId: row.id }))),
+          Effect.mapError(
+            (error) => new StorageError({ reason: "corrupt", operation: "ChatGroups", message: error.message })
+          )
+        )
+      )
+      // Filter purged references once for all chats, including participant scopes, just
+      // as StateEventsAt does. The per-event chat id survives a PlayedByMe replacement.
+      const kept = (yield* withoutPurged(sql, decoded.flat())) as Array<FoldableEvent & { chatId: string }>
+      const eventsByChat = new Map<string, Array<FoldableEvent>>()
+      for (const event of kept) {
+        const events = eventsByChat.get(event.chatId) ?? []
+        events.push(event)
+        eventsByChat.set(event.chatId, events)
+      }
       // Chats come latest first, so a group's first chat is its latest.
       const groups = new Map<string, { name: string; members: Array<Member>; chats: Array<Chat> }>()
       for (const row of chats) {
-        const played = new Set(JSON.parse(row.played) as Array<string>)
-        const members = (JSON.parse(row.joined) as Array<string>).flatMap((id) =>
-          played.has(id) ? [] : (characters.get(id) ?? [])
-        )
+        const state = foldState(eventsByChat.get(row.id) ?? [])
+        const played = new Set(state.playedByMe)
+        const members = state.participants.flatMap((id) => (played.has(id) ? [] : (characters.get(id) ?? [])))
         if (members.length < 2) continue
         const name = chatName(importState(row.title).title, members).name
         const key = `${name}\n${members

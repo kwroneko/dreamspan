@@ -27,12 +27,3 @@ export const readableChatTitle = (title: string) => {
   const name = chatName(importState(title).title, [])
   return name.started ? `${name.name}, started ${formatDay(name.started)}` : name.name
 }
-
-/**
- * A text that quotes chat titles, as the bin's do ("Message in "<title>""), with each ST
- * file name read as its chat's name. Other quoted text is left as it is.
- */
-export const withReadableChatTitles = (text: string) =>
-  text.replace(/"([^"]*)"/g, (quoted, title: string) =>
-    chatName(importState(title).title, []).started ? `“${readableChatTitle(title)}”` : quoted
-  )

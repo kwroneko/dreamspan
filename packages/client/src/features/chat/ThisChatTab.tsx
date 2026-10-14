@@ -25,7 +25,7 @@ const link = "text-accent hover:underline"
 
 interface Sources {
   readonly connections: ReadonlyArray<Connection>
-  /** Every visible model, by `modelValue`. */
+  /** Every model, including hidden defaults, by `modelValue`. */
   readonly models: ReadonlyMap<string, { readonly connection: Connection; readonly model: Model }>
   readonly presets: ReadonlyArray<LibraryRef>
   /** The user's defaults, to name what "Use the default" goes back to. */
@@ -102,10 +102,12 @@ function ModelSetting({
   const { cast } = useCast()
   const effective = useSyncExternalStore(session.subscribe, session.snapshot).history?.model
   // Only visible models are offered; a hidden one in use is still named above.
-  const items = [...(sources?.models.entries() ?? [])].map(([value, { connection, model }]) => ({
-    value,
-    label: `${connection.name} · ${model.key}`
-  }))
+  const items = [...(sources?.models.entries() ?? [])]
+    .filter(([, { model }]) => !model.hidden)
+    .map(([value, { connection, model }]) => ({
+      value,
+      label: `${connection.name} · ${model.key}`
+    }))
   const gone = effective != null && (effective.connectionName === null || effective.modelKey === null)
   let value: ReactNode
   let source: ReactNode
@@ -168,7 +170,7 @@ function ModelSetting({
         <Field label="Use in this chat" description="From the latest message on, on this branch.">
           <Select
             items={items}
-            value={picked !== null && sources?.models.has(picked) ? picked : null}
+            value={picked !== null && sources?.models.get(picked)?.model.hidden === false ? picked : null}
             placeholder="Choose a model"
             onValueChange={(next) => void change({ _tag: "Model", ...parseModelValue(next) })}
           />
@@ -188,8 +190,8 @@ const defaultModelThen = (sources: Sources | null): ReactNode => {
   if (choice === null) return "You have no default model: without one here, replies can't be generated."
   const found = sources.models.get(modelValue(choice.connection, choice.model))
   return found
-    ? `Back to your default from the latest message on: ${found.connection.name} · ${found.model.key}.`
-    : "Back to your default model (hidden in Connections) from the latest message on."
+    ? `Back to your default from the latest message on: ${found.connection.name} · ${found.model.key}.${found.model.hidden ? " It's hidden in Connections." : ""}`
+    : "Your default model's connection or model was deleted. Choose another default in Settings → Chats."
 }
 
 /**
@@ -341,28 +343,41 @@ export function ThisChatTab({ session, active }: { session: ChatSession; active:
     setError(outcome.ok ? null : outcome.error)
   }
   const [sources, setSources] = useState<Sources | null>(null)
-  // The lists to choose from, read again each time the tab is shown.
+  // Refresh choices and prospective defaults with the same notifications as next context.
   useEffect(() => {
     if (!active) return
-    void action
-      .run((client) =>
-        Effect.gen(function* () {
-          const connections: ReadonlyArray<Connection> = yield* client("ListConnections", undefined)
-          const lists = yield* Effect.forEach(connections, (connection) =>
-            Effect.map(
-              client("ListModels", { connectionId: connection.id, includeHidden: false }),
-              (list: ReadonlyArray<Model>) =>
-                list.map((model) => [modelValue(connection.id, model.id), { connection, model }] as const)
+    let live = true
+    let latest = 0
+    const refresh = () => {
+      const read = ++latest
+      void action
+        .run((client) =>
+          Effect.gen(function* () {
+            const connections: ReadonlyArray<Connection> = yield* client("ListConnections", undefined)
+            const lists = yield* Effect.forEach(connections, (connection) =>
+              Effect.map(
+                client("ListModels", { connectionId: connection.id, includeHidden: true }),
+                (list: ReadonlyArray<Model>) =>
+                  list.map((model) => [modelValue(connection.id, model.id), { connection, model }] as const)
+              )
             )
-          )
-          const presets = yield* client("ListLibrary", { kind: "preset" })
-          const defaults = yield* client("GetGenerationDefaults", undefined)
-          return { connections, models: new Map(lists.flat()), presets, defaults }
+            const presets = yield* client("ListLibrary", { kind: "preset" })
+            const defaults = yield* client("GetGenerationDefaults", undefined)
+            return { connections, models: new Map(lists.flat()), presets, defaults }
+          })
+        )
+        .then((result) => {
+          if (live && read === latest && result.ok) setSources(result.value)
         })
-      )
-      .then((result) => result.ok && setSources(result.value))
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- each time it's shown
-  }, [active])
+    }
+    const unsubscribe = session.subscribeContext(refresh)
+    refresh()
+    return () => {
+      live = false
+      unsubscribe()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- action.run uses the same registry
+  }, [active, session])
   const multi = (cast?.participants.length ?? 0) > 1
   return (
     <div className="flex flex-col gap-6">

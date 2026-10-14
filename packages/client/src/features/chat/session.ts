@@ -166,6 +166,16 @@ export class ChatSession {
     }
   }
 
+  private readonly contextListeners = new Set<() => void>()
+
+  /** Context notifications also invalidate prospective defaults hidden by chat bindings. */
+  readonly subscribeContext = (listener: () => void) => {
+    this.contextListeners.add(listener)
+    return () => {
+      this.contextListeners.delete(listener)
+    }
+  }
+
   readonly snapshot = () => this.view
 
   private update(change: Partial<ChatView>) {
@@ -713,6 +723,7 @@ export class ChatSession {
         this.registry.set(waitingCache(event.versionId), event.waiting)
         return
       case "Cache": {
+        for (const listener of this.contextListeners) listener()
         // An edit, a swipe, a delete or a hide can make a summary stale; the estimate follows
         // every such change, so the layer is read again with it.
         this.scheduleLcm()

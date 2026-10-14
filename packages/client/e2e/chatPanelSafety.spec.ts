@@ -6,7 +6,7 @@
 import { expect, test } from "@playwright/test"
 import { Effect } from "effect"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
-import { asUser } from "./support/rpc.ts"
+import { asUser, withCookie } from "./support/rpc.ts"
 import { level1 } from "./support/summaries.ts"
 import type { SummaryId } from "@rp/shared/lcm.ts"
 
@@ -316,4 +316,132 @@ test("an instruction typed back to its old text while Save is in flight survives
     .toBe("First edit sent to Save")
   await page.reload()
   await expect(field).toHaveValue("Original persisted instruction")
+})
+
+test("clear guidance follows defaults changed while This chat remains open", async ({ page }) => {
+  const s = await admin((api) =>
+    Effect.gen(function* () {
+      const connection = yield* api.CreateConnection({
+        kind: "openai-chat",
+        settings: {
+          name: "Changing defaults",
+          baseUrl: "http://127.0.0.1:9/v1",
+          compat: {},
+          cacheTtlS: null,
+          maxConcurrent: null,
+          presetOverrideRefId: null
+        }
+      })
+      const a = yield* api.AddUserModel({ connectionId: connection.id, key: "old-default", overrides: {} })
+      const b = yield* api.AddUserModel({ connectionId: connection.id, key: "new-default", overrides: {} })
+      const c = yield* api.AddUserModel({ connectionId: connection.id, key: "chat-model", overrides: {} })
+      const chat = yield* api.CreateChat({ title: "Changed defaults" })
+      yield* api.SetGenerationDefaults({
+        defaults: { model: { connection: connection.id, model: a.id }, preset: null }
+      })
+      yield* api.ChangeCast({
+        chatId: chat.id,
+        slotId: null,
+        change: { _tag: "Model", connection: connection.id, model: c.id }
+      })
+      return { connection, a, b, chat }
+    })
+  )
+  await page.goto(`${server().url}/chats/${s.chat.id}?panel=chat`)
+  const model = page.getByRole("region", { name: "Model", exact: true })
+  await expect(model).toContainText("Back to your default from the latest message on: Changing defaults · old-default.")
+  await admin((api) =>
+    api.SetGenerationDefaults({ defaults: { model: { connection: s.connection.id, model: s.b.id }, preset: null } })
+  )
+  await expect(model).toContainText("Back to your default from the latest message on: Changing defaults · new-default.")
+})
+
+test("a hidden default is still named before clearing a chat model", async ({ page }) => {
+  const s = await admin((api) =>
+    Effect.gen(function* () {
+      const connection = yield* api.CreateConnection({
+        kind: "openai-chat",
+        settings: {
+          name: "Hidden connection",
+          baseUrl: "http://127.0.0.1:9/v1",
+          compat: {},
+          cacheTtlS: null,
+          maxConcurrent: null,
+          presetOverrideRefId: null
+        }
+      })
+      const a = yield* api.AddUserModel({ connectionId: connection.id, key: "hidden-default", overrides: {} })
+      const b = yield* api.AddUserModel({ connectionId: connection.id, key: "chat-model", overrides: {} })
+      const chat = yield* api.CreateChat({ title: "Hidden default" })
+      yield* api.SetGenerationDefaults({
+        defaults: { model: { connection: connection.id, model: a.id }, preset: null }
+      })
+      yield* api.SetModelHidden({ modelId: a.id, hidden: true })
+      yield* api.ChangeCast({
+        chatId: chat.id,
+        slotId: null,
+        change: { _tag: "Model", connection: connection.id, model: b.id }
+      })
+      return { chat }
+    })
+  )
+  await page.goto(`${server().url}/chats/${s.chat.id}?panel=chat`)
+  const model = page.getByRole("region", { name: "Model", exact: true })
+  await expect(model.getByRole("button", { name: "Use the default" })).toBeVisible()
+  await expect(model).toContainText("Hidden connection · hidden-default")
+})
+
+test("clear preset guidance follows defaults and connection overrides changed by another client", async ({ page }) => {
+  const cookie = (await page.context().cookies(server().url)).map((c) => `${c.name}=${c.value}`).join("; ")
+  const other = <A>(use: Parameters<typeof withCookie<A>>[2]) => withCookie(server(), cookie, use)
+  const settings = {
+    name: "Preset connection",
+    baseUrl: "http://127.0.0.1:9/v1",
+    compat: {},
+    cacheTtlS: null,
+    maxConcurrent: null,
+    presetOverrideRefId: null
+  }
+  const { connection, a, chat } = await other((api) =>
+    Effect.gen(function* () {
+      const connection = yield* api.CreateConnection({ kind: "openai-chat", settings })
+      const a = yield* api.AddUserModel({ connectionId: connection.id, key: "preset-model", overrides: {} })
+      const chat = yield* api.CreateChat({ title: "Changed preset defaults" })
+      return { connection, a, chat }
+    })
+  )
+  const importPreset = async (name: string) => {
+    const response = await page.request.post(`${server().url}/library/import?name=${name}.json`, {
+      headers: { origin: server().url, "content-type": "application/octet-stream" },
+      data: Buffer.from(JSON.stringify({ openai_max_context: 16000, openai_max_tokens: 300 }))
+    })
+    expect(response.status()).toBe(200)
+    return (await other((api) => api.ListLibrary({ kind: "preset" }))).find((ref) => ref.label === name)!
+  }
+  const old = await importPreset("First default")
+  const next = await importPreset("Changed default")
+  const own = await importPreset("Own preset")
+  await other((api) =>
+    api.SetGenerationDefaults({ defaults: { model: { connection: connection.id, model: a.id }, preset: old.id } })
+  )
+  await other((api) => api.ChangeCast({ chatId: chat.id, slotId: null, change: { _tag: "Preset", ref: own.id } }))
+  await page.goto(`${server().url}/chats/${chat.id}?panel=chat`)
+  const preset = page.getByRole("region", { name: "Preset", exact: true })
+  await expect(preset).toContainText("Back to your default from the latest message on: “First default”.")
+  await other((api) =>
+    api.SetGenerationDefaults({ defaults: { model: { connection: connection.id, model: a.id }, preset: next.id } })
+  )
+  await expect(preset).toContainText("Back to your default from the latest message on: “Changed default”.")
+  await other((api) =>
+    api.UpdateConnection({
+      connectionId: connection.id,
+      expectedRowVersion: connection.rowVersion,
+      settings: { ...settings, name: "Override connection", presetOverrideRefId: old.id }
+    })
+  )
+  await expect(preset).toContainText(
+    "Back to the preset of the connection “Override connection” from the latest message on: “First default”."
+  )
+  await preset.getByRole("button", { name: "Use the default" }).click()
+  await expect(page.getByTestId("preset-in-effect")).toHaveText("First default")
 })

@@ -113,3 +113,26 @@ test("on a phone, a group's tile shows its action", async ({ browser }) => {
   await expect(page.getByRole("link", { name: "All chats of The Lantern Inn" })).toBeVisible()
   await context.close()
 })
+
+test("long group and member names are readable on a touch screen", async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
+  const page = await context.newPage()
+  const names = ["Alexandria Corvina", "Mirabelle Windward", "Tobias Lanternkeeper"]
+  const cards = await admin((api) => Effect.forEach(names, (name) => api.CreateCard({ label: name, name })))
+  await groupChat(
+    "Masquerade at Corvina Hall: 2026-4-3@18h00m00s000ms",
+    cards.map((card) => card.entityId),
+    "The guests arrive."
+  )
+  await apiLogin(context.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${server().url}/`)
+  const tile = grid(page).getByRole("listitem").filter({ hasText: "Masquerade at Corvina Hall" })
+  for (const text of ["Masquerade at Corvina Hall", names.join(", ")]) {
+    const label = tile.getByText(text, { exact: true })
+    await expect(label).toBeVisible()
+    expect(
+      await label.evaluate((node) => node.scrollWidth <= node.clientWidth && node.scrollHeight <= node.clientHeight)
+    ).toBe(true)
+  }
+  await context.close()
+})

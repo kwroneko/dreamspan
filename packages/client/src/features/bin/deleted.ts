@@ -9,22 +9,7 @@ import { useCallback, useContext } from "react"
 import { describeCause } from "../../errors.ts"
 import { AppClient } from "../../rpc.ts"
 import { showToast } from "../../ui/Toast.tsx"
-import { readableChatTitle, withReadableChatTitles } from "../chat/chatTitle.ts"
-
-/** What a bin item is called, with its chat named by its readable name, never ST's file name. */
-export const binTitle = (item: BinItem) => {
-  switch (item.kind) {
-    case "chat":
-      return item.title === "" ? "Untitled chat" : readableChatTitle(item.title)
-    case "message":
-    case "branch":
-    case "version":
-      return withReadableChatTitles(item.title)
-    case "entity":
-    case "connection":
-      return item.title
-  }
-}
+import { binTitle } from "./titles.ts"
 
 /** What a restore can bring back, for the lists showing it to read again. */
 export const RESTORED_KEYS = ["bin", "chats", "library", "connections"]
