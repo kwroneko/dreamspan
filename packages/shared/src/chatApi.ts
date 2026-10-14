@@ -120,11 +120,15 @@ export const SendResult = Schema.Union([
 export type SendResult = typeof SendResult.Type
 
 export class ChatApi extends RpcGroup.make(
-  /** The user's chats, most recent first. `before` is the last chat of the previous page. */
+  /**
+   * The user's chats, most recent first. `before` is the last chat of the previous page.
+   * With `entityId`, only the chats that card joined (a card's page).
+   */
   Rpc.make("ListChats", {
     payload: {
       limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 500 })),
-      before: Schema.NullOr(Schema.Struct({ at: Schema.Number, id: ChatId }))
+      before: Schema.NullOr(Schema.Struct({ at: Schema.Number, id: ChatId })),
+      entityId: Schema.optionalKey(EntityId)
     },
     success: Schema.Array(Chat),
     error: ServerError

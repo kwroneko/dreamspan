@@ -6,7 +6,7 @@ import { Rpc, RpcGroup } from "effect/rpc"
 import { CastCard, Chat, ChatId, EntityId, FrozenMacros, PathEntry, QueuedMessage, SlotId } from "./chat.ts"
 import { GenerationUnavailable } from "./chatApi.ts"
 import { NotFound, ServerError, StaleWrite } from "./errors.ts"
-import { Doc, LibraryRef, RefId } from "./library.ts"
+import { Doc, LibraryRef, RefId, RevisionId } from "./library.ts"
 import { ConnectionId, ModelId } from "./providers.ts"
 
 /** A card's greetings and the fields its macros read, for a chat that isn't made yet. */
@@ -17,6 +17,31 @@ export class CardForChat extends Schema.Class<CardForChat>("CardForChat")({
   description: Schema.String,
   personality: Schema.String,
   scenario: Schema.String
+}) {}
+
+/**
+ * A character on the home grid (DESIGN §2.1): what lists show of it, and how it's been used.
+ * Personas aren't characters here; cards in the bin aren't listed.
+ */
+export class CardUsage extends Schema.Class<CardUsage>("CardUsage")({
+  entityId: EntityId,
+  /** The ref it's shown from (its upstream, else its oldest variant): the editor's `/library/$refId`. */
+  refId: RefId,
+  /** That ref's head, the definition the card page shows. */
+  headRevisionId: RevisionId,
+  /** The library label (DESIGN §4): title and free-text subtitle. */
+  label: Schema.String,
+  subtitle: Schema.String,
+  /** The in-chat name, what `{{char}}` resolves to. */
+  name: Schema.String,
+  /** Its avatar, served at `/library/media?id=`; null without one. */
+  avatarMediaId: Schema.NullOr(Schema.String),
+  /** Chats it has joined, group chats included; chats in the bin don't count. */
+  chats: Schema.Int,
+  /** The last message in any of them. */
+  lastMessageAt: Schema.NullOr(Schema.Number),
+  /** The one of them with the latest message (else the newest): what Continue opens. */
+  latestChatId: Schema.NullOr(ChatId)
 }) {}
 
 const CardsLayout = Schema.Literals(["concat", "swap_tail"])
@@ -91,6 +116,8 @@ const Errors = [NotFound, ServerError] as const
 export class ChatSetupApi extends RpcGroup.make(
   /** Every live card of the user's, by label: the speaker switcher's All cards and Personas. */
   Rpc.make("ListCards", { success: Schema.Array(CastCard), error: ServerError }),
+  /** Every live character card of the user's with its use, for the home grid, in one read. */
+  Rpc.make("ListCardUsage", { success: Schema.Array(CardUsage), error: ServerError }),
   /** Puts a card in the persona folder, or takes it out (DESIGN §2.2). */
   Rpc.make("SetPersona", {
     payload: { entityId: EntityId, persona: Schema.Boolean },

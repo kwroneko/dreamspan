@@ -3,7 +3,8 @@
 // "<card> - 2026-5-11@07h51m55s691ms" or "<group>: <date>"; those show the card or group
 // name, with the date they were started beside it.
 
-const ST_STAMP = /^(.*?)(?: - |: |)(\d{4})-(\d{1,2})-(\d{1,2})\s*@(\d{2})h(\d{2})m(\d{2})s(\d{1,3})ms(?: - Branch #\d+)?$/
+const ST_STAMP =
+  /^(.*?)(?: - |: |)(\d{4})-(\d{1,2})-(\d{1,2})\s*@(\d{2})h(\d{2})m(\d{2})s(\d{1,3})ms(?: - Branch #\d+)?$/
 
 export interface ChatName {
   readonly name: string

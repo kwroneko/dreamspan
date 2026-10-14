@@ -607,6 +607,8 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
           (yield* actor.api.ListChats(page)).map((c) => c.id),
           owner.chat.chatId
         )
+        // A card's chats: another user's card names none of the caller's.
+        assert.lengthOf(yield* actor.api.ListChats({ ...page, entityId: owner.editor.cardEntityId }), 0)
       })
   },
   ListChatSummaries: {
@@ -839,6 +841,18 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
       Effect.map(actor.api.ListCards(), (cards) => {
         assert.isTrue(cards.some((c) => c.entityId === actor.cardId))
         assert.isFalse(cards.some((c) => c.entityId === owner.cardId))
+      })
+  },
+  ListCardUsage: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const own = (yield* owner.api.ListCardUsage()).map((card) => card.entityId)
+        assert.include(own, owner.editor.cardEntityId)
+        // Personas aren't characters on the grid.
+        assert.notInclude(own, owner.cardId)
+        const seen = (yield* actor.api.ListCardUsage()).map((card) => card.entityId)
+        assert.notInclude(seen, owner.editor.cardEntityId)
+        assert.include(seen, actor.editor.cardEntityId)
       })
   },
   SetPersona: {

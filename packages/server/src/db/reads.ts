@@ -381,11 +381,14 @@ export const makeReadHandlers = Effect.gen(function* () {
 
     // --- Chats
 
-    ListChats: ({ userId, limit, before }) =>
+    ListChats: ({ userId, limit, before, entityId }) =>
       sql<ChatRow>`
         SELECT * FROM chats WHERE owner_user_id = ${userId} AND deleted_at IS NULL
           AND (${before?.id ?? null} IS NULL
             OR (coalesce(last_message_at, created_at), id) < (${before?.at ?? null}, ${before?.id ?? null}))
+          AND (${entityId ?? null} IS NULL OR id IN (
+            SELECT s.chat_id FROM state_events s WHERE json_extract(s.value_json, '$.entity') = ${entityId ?? null}
+              AND s.key = 'participant.join' AND s.superseded_by_changeset IS NULL))
         ORDER BY coalesce(last_message_at, created_at) DESC, id DESC LIMIT ${limit}`.pipe(
         Effect.map((rows) => rows.map(toChat)),
         query("ListChats")

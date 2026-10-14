@@ -2,8 +2,8 @@
 // faces, a readable name (the group's or the character's, never ST's file name), when it
 // started, how long it is and how it ends. It's the sidebar on wide screens and the home
 // screen on phones.
-import { useAtomValue } from "@effect/atom-react"
-import type { Chat, ChatSummary } from "@rp/shared/chat.ts"
+import { useAtomRefresh, useAtomValue } from "@effect/atom-react"
+import type { Chat, ChatId, ChatSummary } from "@rp/shared/chat.ts"
 import { importState } from "@rp/shared/stImportApi.ts"
 import { Link, useRouterState } from "@tanstack/react-router"
 import { AsyncResult } from "effect/reactivity"
@@ -48,7 +48,7 @@ function Row({
         to="/chats/$chatId"
         params={{ chatId: chat.id }}
         aria-current={active ? "page" : undefined}
-        className={`flex gap-3 rounded-lg px-2.5 py-2 outline-none focus-visible:ring-2 focus-visible:ring-focus ${
+        className={`flex gap-3 rounded-lg px-2.5 py-2 outline-none focus-visible:ring-2 focus-visible:ring-focus pointer-coarse:pr-16 ${
           active ? "bg-surface-raised" : "hover:bg-surface-raised/60"
         }`}
       >
@@ -81,7 +81,7 @@ function Row({
             <span className="mt-0.5 flex gap-1.5 text-xs">
               {unseen > 0 && (
                 <span className="rounded-full bg-accent px-1.5 text-accent-contrast">
-                  {unseen === 1 ? "new reply" : `${unseen} new replies`}
+                  {unseen === 1 ? "1 new reply" : `${unseen} new replies`}
                 </span>
               )}
               {unfinished && <span className="text-warning">import unfinished</span>}
@@ -94,7 +94,7 @@ function Row({
         onClick={onDelete}
         aria-label={`Delete ${name.name}${name.started ? `, started ${formatDay(name.started)}` : ""}`}
         title="Delete (to the bin)"
-        className="absolute top-2 right-2 hidden rounded px-1.5 py-0.5 text-xs text-muted group-hover:block hover:bg-surface hover:text-danger focus-visible:block"
+        className="absolute top-2 right-2 hidden rounded bg-surface-raised px-1.5 py-0.5 text-xs text-muted outline-none group-focus-within:block group-hover:block hover:text-danger focus-visible:ring-2 focus-visible:ring-focus pointer-coarse:top-auto pointer-coarse:bottom-2 pointer-coarse:block"
       >
         Delete
       </button>
@@ -102,11 +102,22 @@ function Row({
   )
 }
 
-function Rows({ chats }: { chats: ReadonlyArray<Chat> }) {
-  const ids = chats.map((chat) => chat.id)
-  const key = ids.join()
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed by the ids, not the array
-  const summariesAtom = useMemo(() => AppClient.query("ListChatSummaries", { chatIds: ids }, { reactivityKeys: ["chats"] }), [key])
+/**
+ * Chats as the list shows them, each with its cast, length and last message. `findable`
+ * adds a box to find one by title or character.
+ */
+export function ChatRows({ chats, findable = true }: { chats: ReadonlyArray<Chat>; findable?: boolean }) {
+  // Keyed by the ids, not the array, which is new on every read.
+  const key = chats.map((chat) => chat.id).join()
+  const summariesAtom = useMemo(
+    () =>
+      AppClient.query(
+        "ListChatSummaries",
+        { chatIds: key === "" ? [] : (key.split(",") as Array<ChatId>) },
+        { reactivityKeys: ["chats"] }
+      ),
+    [key]
+  )
   const summaries = useAtomValue(summariesAtom)
   const byId = new Map(
     (AsyncResult.isSuccess(summaries) ? summaries.value : []).map((summary) => [summary.chatId as string, summary])
@@ -129,12 +140,14 @@ function Rows({ chats }: { chats: ReadonlyArray<Chat> }) {
     : chats
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2">
-      <Input
-        aria-label="Find a chat"
-        placeholder="Find a chat or character"
-        value={filter}
-        onChange={(event) => setFilter(event.currentTarget.value)}
-      />
+      {findable && (
+        <Input
+          aria-label="Find a chat"
+          placeholder="Find a chat or character"
+          value={filter}
+          onChange={(event) => setFilter(event.currentTarget.value)}
+        />
+      )}
       {chats.length === 0 ? (
         <p className="px-2 py-4 text-sm text-muted">
           No chats yet. Pick a character to start one, or import your SillyTavern folder.
@@ -157,9 +170,12 @@ function Rows({ chats }: { chats: ReadonlyArray<Chat> }) {
   )
 }
 
+/** Reads the chats again: a chat deleted or made in another tab isn't announced to the list. */
+export const useRefreshChats = () => useAtomRefresh(chatsAtom)
+
 export function ChatList() {
   const result = useAtomValue(chatsAtom)
-  if (AsyncResult.isSuccess(result)) return <Rows chats={result.value} />
+  if (AsyncResult.isSuccess(result)) return <ChatRows chats={result.value} />
   if (AsyncResult.isFailure(result)) return <p className="px-2 text-sm text-danger">The chats couldn't be loaded.</p>
   return <Spinner />
 }

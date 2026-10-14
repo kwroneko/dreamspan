@@ -170,7 +170,8 @@ test("a chat deleted elsewhere while open goes back to the chats", async ({ page
   const chatId = page.url().split("/chats/")[1]!.split("?")[0]! as Chat["id"]
   await asUser(server(), ADMIN.handle, ADMIN.password, (api) => api.DeleteChat({ chatId }))
   await expect(page).toHaveURL(/\/chats$/)
-  await expect(page.getByRole("link", { name: "Ember" })).toHaveCount(0)
+  // By its title: a row's name also carries its last message, which may mention embers.
+  await expect(page.getByRole("link", { name: /^Ember\b/ })).toHaveCount(0)
 })
 
 test("another user can't open someone's chat", async ({ browser }) => {

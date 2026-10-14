@@ -106,9 +106,10 @@ test("a deleted message comes back with Undo, and the bin restores and deletes f
 
   // A chat deleted from the list comes back from the bin.
   await page.goto(`${server().url}/chats`)
+  await page.getByRole("listitem").filter({ hasText: "Lighthouse" }).hover()
   await page.getByRole("button", { name: "Delete Lighthouse" }).click()
   await expect(page.getByRole("link", { name: "Lighthouse" })).toHaveCount(0)
-  await page.getByRole("banner").getByRole("link", { name: "Bin" }).click()
+  await page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Bin" }).click()
   await page.getByRole("listitem", { name: "Lighthouse" }).getByRole("button", { name: "Restore" }).click()
   await page.getByRole("link", { name: "Open it" }).click()
   await expect(page.getByRole("heading", { level: 1, name: "Lighthouse" })).toBeVisible()

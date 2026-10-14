@@ -58,7 +58,7 @@ test("refused live typing: logout retains it; explicit deletion permits logout; 
   const text = "UNACKNOWLEDGED-" + "z".repeat(1_000_001)
   await page.getByRole("textbox", { name: /^Description/ }).fill(text)
   await expect.poll(async () => (await copies(page)).map((x) => x.content)).toContain(text)
-  await page.getByRole("banner").getByRole("button", { name: "Log out", exact: true }).click()
+  await page.getByRole("navigation", { name: "Main" }).getByRole("button", { name: "Log out", exact: true }).click()
   const recovery = page.getByRole("dialog", { name: "Text kept in this browser", exact: true })
   await expect(recovery.getByRole("textbox", { name: "Recovery text" })).toHaveValue(text)
   await expect(page).toHaveURL(/\/library\//)
@@ -70,7 +70,7 @@ test("refused live typing: logout retains it; explicit deletion permits logout; 
   await expect.poll(() => copies(page)).toEqual([])
   await recovery.getByRole("button", { name: "Keep copies" }).click()
   page.on("dialog", (d) => d.accept())
-  await page.getByRole("banner").getByRole("button", { name: "Log out", exact: true }).click()
+  await page.getByRole("navigation", { name: "Main" }).getByRole("button", { name: "Log out", exact: true }).click()
   await expect(page).toHaveURL(/\/login/)
   await apiLogin(page.request, server(), "final-reader", "reader-password-2")
   await page.goto(server().url)
@@ -120,7 +120,7 @@ test("expired A session retains its unsaved copy through B login and B logout", 
   await expect(page.getByText("No unsaved browser copies.", { exact: true })).toBeVisible()
   expect((await copies(page)).map((x) => x.content)).toEqual([text])
   await page.getByRole("button", { name: "Keep copies", exact: true }).click()
-  await page.getByRole("banner").getByRole("button", { name: "Log out", exact: true }).click()
+  await page.getByRole("navigation", { name: "Main" }).getByRole("button", { name: "Log out", exact: true }).click()
   await expect(page).toHaveURL(/\/login/)
   expect((await copies(page)).map((x) => x.content)).toEqual([text])
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
@@ -207,7 +207,10 @@ for (const action of ["retry", "logout", "logout retry", "logout unsaved"] as co
             }
           }
         })
-        await page.getByRole("banner").getByRole("button", { name: "Log out", exact: true }).click()
+        await page
+          .getByRole("navigation", { name: "Main" })
+          .getByRole("button", { name: "Log out", exact: true })
+          .click()
         const recovery = page.getByRole("dialog", { name: "Text kept in this browser", exact: true })
         await expect(recovery.locator('a[href="/bin?section=recovered"]')).toBeVisible()
         await expect(recovery.getByRole("textbox", { name: "Recovery text" })).toHaveValue(content)
@@ -220,11 +223,14 @@ for (const action of ["retry", "logout", "logout retry", "logout unsaved"] as co
       }
       if (action === "logout retry") {
         await page.route("**/auth/logout", (route) => route.fulfill({ status: 503 }), { times: 1 })
-        await page.getByRole("banner").getByRole("button", { name: "Log out", exact: true }).click()
+        await page
+          .getByRole("navigation", { name: "Main" })
+          .getByRole("button", { name: "Log out", exact: true })
+          .click()
         await expect(page.getByRole("alert")).toContainText("couldn't log you out")
         await expect(page.locator('a[href="/bin?section=recovered"]')).toBeVisible()
       }
-      await page.getByRole("banner").getByRole("button", { name: "Log out", exact: true }).click()
+      await page.getByRole("navigation", { name: "Main" }).getByRole("button", { name: "Log out", exact: true }).click()
       await expect(page).toHaveURL(/\/login/)
       await expect(page.locator('a[href="/bin?section=recovered"]')).toBeVisible()
       await page.reload()

@@ -27,7 +27,10 @@ const SIZES = {
   sm: "size-6 text-[0.625rem]",
   md: "size-8 text-xs",
   lg: "size-10 text-sm",
-  xl: "size-16 text-lg"
+  xl: "size-16 text-lg",
+  "2xl": "size-24 text-2xl",
+  /** Fills its box: a grid tile's picture. */
+  fill: "size-full text-4xl"
 } as const
 
 export type AvatarSize = keyof typeof SIZES
@@ -37,28 +40,32 @@ export function Avatar({
   name,
   mediaId = null,
   size = "md",
+  shape = "circle",
   className = ""
 }: {
   id: string
   name: string
   mediaId?: string | null
   size?: AvatarSize
+  /** A square fills a tile whose own corners round it. */
+  shape?: "circle" | "square"
   className?: string
 }) {
+  const round = shape === "circle" ? "rounded-full" : ""
   if (mediaId !== null) {
     return (
       <img
         src={`/library/media?id=${encodeURIComponent(mediaId)}`}
         alt=""
         loading="lazy"
-        className={`shrink-0 rounded-full bg-surface-raised object-cover ${SIZES[size]} ${className}`}
+        className={`shrink-0 bg-surface-raised object-cover ${round} ${SIZES[size]} ${className}`}
       />
     )
   }
   return (
     <span
       aria-hidden="true"
-      className={`inline-flex shrink-0 items-center justify-center rounded-full font-semibold select-none ${tint(id)} ${SIZES[size]} ${className}`}
+      className={`inline-flex shrink-0 items-center justify-center font-semibold select-none ${round} ${tint(id)} ${SIZES[size]} ${className}`}
     >
       {initials(name)}
     </span>

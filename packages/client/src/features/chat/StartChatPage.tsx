@@ -120,7 +120,7 @@ function Pending({ card, personas }: { card: CardForChat; personas: ReadonlyArra
   return (
     <>
       <header className="mx-auto flex w-full max-w-3xl flex-wrap items-center gap-3 pb-2">
-        <Avatar id={card.card.entityId} name={name} />
+        <Avatar id={card.card.entityId} name={name} mediaId={card.card.avatarMediaId} />
         <h1 className="min-w-0 flex-1 truncate text-lg font-semibold">{name}</h1>
         <Field label="Playing as" className="w-56">
           <Select
