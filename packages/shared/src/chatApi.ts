@@ -272,6 +272,15 @@ export class ChatApi extends RpcGroup.make(
     success: PathEntry,
     error: Schema.Union([...WriteErrors])
   }),
+  /**
+   * Hides a message from the model, or shows it to the model again (ST's ghost toggle): it
+   * stays in the chat, marked, and isn't sent. Like any edit it never starts a generation.
+   */
+  Rpc.make("SetMessageHidden", {
+    payload: { slotId: SlotId, hidden: Schema.Boolean },
+    success: PathEntry,
+    error: Schema.Union([...Errors])
+  }),
   /** An edit saved as a new version, "edited from" its source (DESIGN §3.1), and selected. */
   Rpc.make("EditVersion", {
     payload: {

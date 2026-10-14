@@ -66,8 +66,17 @@ export function BrowserRecovery({
               <div key={copy.key} className="flex flex-col gap-2">
                 {first !== null ? (
                   <p className="text-sm text-muted">
-                    First message to {first.name}, not sent yet:{" "}
-                    <a href={`/cards/${encodeURIComponent(first.entityId)}/chat`} className="underline">
+                    {first.chatId === undefined ? "First message to" : "Next message in"} {first.name}, not sent yet:{" "}
+                    <a
+                      href={
+                        first.chatId !== undefined
+                          ? `/chats/${encodeURIComponent(first.chatId)}`
+                          : first.groupChatId === undefined
+                            ? `/cards/${encodeURIComponent(first.entityId)}/chat`
+                            : `/groups/${encodeURIComponent(first.groupChatId)}/new`
+                      }
+                      className="underline"
+                    >
                       open the new chat
                     </a>
                   </p>

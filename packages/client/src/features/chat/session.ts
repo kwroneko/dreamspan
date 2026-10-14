@@ -1032,6 +1032,11 @@ export class ChatSession {
     return result
   }
 
+  /** Hides the message from the model, or shows it to the model again (ST's ghost toggle). */
+  setHidden(entry: PathEntry, hidden: boolean): Promise<Outcome<PathEntry>> {
+    return this.slotWrite(entry.slotId, (client) => client("SetMessageHidden", { slotId: entry.slotId, hidden }))
+  }
+
   /** A finished version the user wrote changes in place; anything else gets a new version. */
   async edit(entry: PathEntry, content: string, draft: DraftCommit | null = null): Promise<Outcome<unknown>> {
     const { version } = entry

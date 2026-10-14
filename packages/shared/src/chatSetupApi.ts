@@ -230,7 +230,12 @@ export class ChatSetupApi extends RpcGroup.make(
        * it was seen (DESIGN §5.6). The server freezes every greeting either way: it checks
        * these and draws whatever is missing.
        */
-      frozen: Schema.optionalKey(FrozenMacros)
+      frozen: Schema.optionalKey(FrozenMacros),
+      /**
+       * The chat's title; absent or blank, its cast's names. A new chat of a group takes the
+       * group's name, so it's one of the group's chats (`ChatGroup`).
+       */
+      title: Schema.optionalKey(Schema.String)
     },
     success: Schema.Struct({ entry: PathEntry, chat: Chat }),
     error: Schema.Union([...Errors, GenerationUnavailable])

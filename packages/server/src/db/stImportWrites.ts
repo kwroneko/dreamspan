@@ -577,7 +577,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
             UNION ALL
             SELECT s.id, s.parent_slot_id FROM slots s JOIN path p ON s.id = p.parent
           )
-          UPDATE slots SET context_excluded = 0, row_version = row_version + 1
+          UPDATE slots SET context_excluded = 0, hidden_by_user = 0, row_version = row_version + 1
           WHERE id IN (SELECT id FROM path) AND context_excluded = 1 RETURNING id`
         return { unhidden: rows.length }
       }).pipe(transaction(sql, "StImportUnhide")),

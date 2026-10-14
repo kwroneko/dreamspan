@@ -752,6 +752,10 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
         yield* refused(actor.api.StopGeneration({ versionId: owner.chat.versionId }), "NotFound")
       })
   },
+  SetMessageHidden: {
+    probe: (actor, owner) =>
+      refused(actor.api.SetMessageHidden({ slotId: owner.chat.slotId, hidden: true }), "NotFound")
+  },
   SelectVersion: {
     probe: (actor, owner) =>
       Effect.gen(function* () {

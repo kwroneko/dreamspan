@@ -522,7 +522,10 @@ export const Message = memo(function Message({
   const linkSearch = branchLeaf === null ? { slot: entry.slotId } : { leaf: branchLeaf, slot: entry.slotId }
 
   const hidden = entry.contextExcluded
-  const hiddenReason = `Hidden: never sent to the model.${version.origin === "imported" ? " It was hidden in SillyTavern." : ""}`
+  // Who hid it: the user here (SetMessageHidden), else it came hidden from an ST import.
+  const hiddenReason = entry.hiddenByUser
+    ? "Hidden: you hid it from the model, so it isn't sent. To send it again: More actions → Show to the model again."
+    : `Hidden: not sent to the model.${version.origin === "imported" ? " It was hidden in SillyTavern." : ""}`
   const empty = !hidden && !entry.inContext && !generating && version.status !== "failed" && context === null
   const reason = hidden
     ? hiddenReason
@@ -553,6 +556,9 @@ export const Message = memo(function Message({
       >
         Branch from here
       </MenuLinkItem>
+      <MenuItem icon={hidden ? "eye" : "ghost"} onClick={async () => report(await session.setHidden(entry, !hidden))}>
+        {hidden ? "Show to the model again" : "Hide from the model"}
+      </MenuItem>
       <MenuItem icon="copy" onClick={() => void copy(session.textOf(version), "Text")}>
         Copy text
       </MenuItem>
@@ -673,8 +679,10 @@ export const Message = memo(function Message({
         className={`mt-0.5 max-sm:size-8 ${hidden ? "opacity-50 grayscale" : ""}`}
       />
       <div className={`flex min-w-0 flex-1 flex-col gap-1 ${hidden ? "opacity-60" : ""}`}>
-        <header className="flex min-h-8 min-w-0 items-center gap-x-2 text-sm">
-          <span className="min-w-0 truncate font-semibold">{name}</span>
+        <header className="flex min-h-8 min-w-0 items-center gap-x-2 text-sm max-sm:flex-wrap max-sm:gap-y-1">
+          <span className="min-w-0 font-semibold max-sm:w-full max-sm:[overflow-wrap:anywhere] sm:truncate">
+            {name}
+          </span>
           <Tooltip label={fullTime.format(version.createdAt)}>
             <time
               tabIndex={0}
@@ -700,7 +708,7 @@ export const Message = memo(function Message({
           {generating && (
             <Button
               variant="secondary"
-              className="h-7 px-2"
+              className="h-7 shrink-0 px-2"
               onClick={async () => report(await session.stop(version.id))}
             >
               <Icon name="stop" size={12} />

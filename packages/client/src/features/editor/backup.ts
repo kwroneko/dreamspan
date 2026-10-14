@@ -16,7 +16,15 @@ const PendingSave = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("composer"), payload: ComposerBeacon }),
   Schema.Struct({
     kind: Schema.Literal("pendingChat"),
-    payload: Schema.Struct({ entityId: Schema.String, name: Schema.String, content: Schema.String })
+    payload: Schema.Struct({
+      entityId: Schema.String,
+      name: Schema.String,
+      content: Schema.String,
+      /** A new chat of a group: one of the group's chats, which names its page (`/groups/$chatId/new`). */
+      groupChatId: Schema.optionalKey(Schema.String),
+      /** Extra unsent text after StartChat succeeded, addressed to its saved chat. */
+      chatId: Schema.optionalKey(Schema.String)
+    })
   }),
   Schema.Struct({ kind: Schema.Literal("summary"), payload: SummaryDraftSave }),
   Schema.Struct({ kind: Schema.Literal("message"), payload: MessageDraftSave }),
@@ -172,6 +180,10 @@ export const copiesOf = async (userId: string, refId: string): Promise<ReadonlyA
 
 /** Where the first message typed in a chat with this card, not made yet, is kept. */
 export const pendingChatCopy = (entityId: string) => `pending-chat:${entityId}`
+
+/** Where the first message typed in a new chat of a group is kept: per group, its name and characters. */
+export const pendingGroupChatCopy = (name: string, memberIds: ReadonlyArray<string>) =>
+  `pending-group-chat:${[...memberIds].sort().join(",")}:${name}`
 
 /** All the user's copies. */
 export const copiesOfUser = async (userId: string): Promise<ReadonlyArray<Copy>> => {

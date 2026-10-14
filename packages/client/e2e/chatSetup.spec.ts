@@ -1,10 +1,12 @@
 // Starting chats from cards, speakers and the send queue (DESIGN §2.1, §2.2), against a
 // server with the fake generator: a card's greeting follows the persona picked until the
 // first send makes the chat; Send as and Generate with a one-turn direction; and messages
-// sent during a reply wait, post when it ends or is stopped, and can be withdrawn. Every
-// card here is made up.
+// sent during a reply wait, post when it ends or is stopped, and can be withdrawn; and a
+// new chat of a group, from its tile. Every card here is made up.
 import { join } from "node:path"
 import { expect, type Page, test } from "@playwright/test"
+import { Effect } from "effect"
+import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
 // About four seconds a reply: long enough to queue behind and to stop.
@@ -347,4 +349,63 @@ test("a card with 1,001 greetings and a huge random draw starts like any other",
   await expect(page).toHaveURL(/\/chats\/[^/?]+$/)
   await expect(page.getByRole("article", { name: "Your message" })).toContainText("Hello, everyone.")
   await expect(generating(page)).toHaveCount(0, { timeout: 20_000 })
+})
+
+test("a new chat of a group: its first character greets, and the first send makes one of its chats", async ({
+  page
+}) => {
+  await login(page)
+  // A group: a chat with Mira and Tobin, named "The Pier".
+  const chatId = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+    Effect.gen(function* () {
+      const cards = yield* api.ListCards()
+      const id = (name: string) => cards.find((card) => card.name === name)!.entityId
+      const chat = yield* api.CreateChat({ title: "The Pier" })
+      for (const entityId of [id("Mira"), id("Tobin")])
+        yield* api.ChangeCast({ chatId: chat.id, slotId: null, change: { _tag: "Join", entityId } })
+      yield* api.SendMessage({ chatId: chat.id, parentSlotId: null, branch: false, content: "Low tide." })
+      return chat.id
+    })
+  )
+  await page.goto(`${server().url}/`)
+  const tile = page
+    .getByRole("list", { name: "Characters and groups" })
+    .getByRole("listitem")
+    .filter({ hasText: "The Pier" })
+  await tile.hover()
+  await tile.getByRole("link", { name: "New chat with The Pier" }).click()
+  await expect(page).toHaveURL(`${server().url}/groups/${chatId}/new`)
+  await expect(page.getByRole("heading", { level: 1, name: "New chat: The Pier" })).toBeVisible()
+  await expect(page.getByText("With Mira, Tobin. Saved when you send the first message.")).toBeVisible()
+  const greeting = page.getByRole("article", { name: "Greeting" })
+  await expect(greeting).toContainText("Mira greets first")
+  await expect(greeting).toContainText("The bell rings for Ana.")
+  // Opening it made no chat: the group still has one.
+  await page.goto(`${server().url}/groups/${chatId}`)
+  await expect(page.getByRole("heading", { level: 2, name: "Chats (1)" })).toBeVisible()
+  await page.getByRole("main").getByRole("link", { name: "New chat", exact: true }).click()
+  await expect(page).toHaveURL(`${server().url}/groups/${chatId}/new`)
+
+  // What's typed is kept in this browser, per group, until it's sent.
+  await composer(page).fill("Is the ferry running?")
+  await page.reload()
+  await expect(composer(page)).toHaveValue("Is the ferry running?")
+  await page.getByLabel("Reply from").click()
+  await page.getByRole("option", { name: "Tobin" }).click()
+  await expect(page.getByRole("button", { name: "Generate Tobin" })).toBeVisible()
+  await shoot(page, "new-group-chat")
+
+  await page.getByRole("button", { name: "Send as Ana" }).click()
+  await expect(page).toHaveURL(/\/chats\/[^/?]+$/)
+  await expect(page.getByRole("heading", { level: 1, name: "The Pier" })).toBeVisible()
+  await expect(replies(page).first()).toContainText("The bell rings for Ana.")
+  await expect(replies(page)).toHaveCount(2)
+  await expect(replies(page).last().locator("header")).toContainText("Tobin")
+  await expect(generating(page)).toHaveCount(0, { timeout: 20_000 })
+
+  // One of the group's chats now: two on its page and its tile.
+  await page.goto(`${server().url}/groups/${chatId}`)
+  await expect(page.getByRole("heading", { level: 2, name: "Chats (2)" })).toBeVisible()
+  await page.goto(`${server().url}/`)
+  await expect(tile).toContainText("2 chats")
 })

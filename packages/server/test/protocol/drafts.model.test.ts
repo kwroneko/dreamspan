@@ -281,7 +281,7 @@ class Page {
     this.world = world
     this.tab = tab
     const session = { id: world.chatId, call: (rpc: Rpc) => this.call(rpc) }
-    this.composer = new ComposerDraft(session as never, USER, "", this.env)
+    this.composer = new ComposerDraft(session as never, USER, this.env)
     this.ref = ref
     this.editor = this.store(ref)
     this.tip = tip
