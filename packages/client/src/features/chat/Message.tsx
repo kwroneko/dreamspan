@@ -679,8 +679,10 @@ export const Message = memo(function Message({
         className={`mt-0.5 max-sm:size-8 ${hidden ? "opacity-50 grayscale" : ""}`}
       />
       <div className={`flex min-w-0 flex-1 flex-col gap-1 ${hidden ? "opacity-60" : ""}`}>
-        <header className="flex min-h-8 min-w-0 items-center gap-x-2 text-sm">
-          <span className="min-w-0 truncate font-semibold">{name}</span>
+        <header className="flex min-h-8 min-w-0 items-center gap-x-2 text-sm max-sm:flex-wrap max-sm:gap-y-1">
+          <span className="min-w-0 font-semibold max-sm:w-full max-sm:[overflow-wrap:anywhere] sm:truncate">
+            {name}
+          </span>
           <Tooltip label={fullTime.format(version.createdAt)}>
             <time
               tabIndex={0}
@@ -706,7 +708,7 @@ export const Message = memo(function Message({
           {generating && (
             <Button
               variant="secondary"
-              className="h-7 px-2"
+              className="h-7 shrink-0 px-2"
               onClick={async () => report(await session.stop(version.id))}
             >
               <Icon name="stop" size={12} />

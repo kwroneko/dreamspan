@@ -21,7 +21,9 @@ const PendingSave = Schema.Union([
       name: Schema.String,
       content: Schema.String,
       /** A new chat of a group: one of the group's chats, which names its page (`/groups/$chatId/new`). */
-      groupChatId: Schema.optionalKey(Schema.String)
+      groupChatId: Schema.optionalKey(Schema.String),
+      /** Extra unsent text after StartChat succeeded, addressed to its saved chat. */
+      chatId: Schema.optionalKey(Schema.String)
     })
   }),
   Schema.Struct({ kind: Schema.Literal("summary"), payload: SummaryDraftSave }),

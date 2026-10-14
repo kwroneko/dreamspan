@@ -32,7 +32,6 @@ import { SquareIconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import { type CastView, nameOf, recentSpeakers, replySpeaker, useCast } from "./cast.ts"
 import { ChevronIcon, HistoryIcon, RegenerateIcon, SendIcon, StopIcon } from "./icons.tsx"
 import { speakerChoice, usePickedSpeaker } from "./speaker.ts"
-import { carriedComposerText, dropCarriedComposerText } from "./composerCarry.ts"
 import { ReplayNotice } from "../editor/ReplayNotice.tsx"
 import { ComposerDraft, type ComposerSource, type Sent } from "./composerDraft.ts"
 import type { ChatSession, ChatView, Outcome } from "./session.ts"
@@ -419,8 +418,7 @@ export function Composer({ session, view }: { session: ChatSession; view: ChatVi
   const userId = useSession().user.id
   // The text is a server draft per branch tip (composerDraft.ts). Text typed on the card's
   // page while this chat was being made comes along (composerCarry.ts).
-  const [draft] = useState(() => new ComposerDraft(session, userId, carriedComposerText(session.id)))
-  useEffect(() => dropCarriedComposerText(session.id), [session])
+  const [draft] = useState(() => new ComposerDraft(session, userId))
   const {
     text,
     ready,

@@ -108,14 +108,11 @@ export class ComposerDraft {
 
   private readonly session: ChatSession
   private readonly userId: string
-  /** Text carried over from the card's page (composerCarry.ts), for an empty composer. */
-  private carried: string
   private readonly env: PageEnv
 
-  constructor(session: ChatSession, userId: string, carried: string, env: PageEnv = browserEnv) {
+  constructor(session: ChatSession, userId: string, env: PageEnv = browserEnv) {
     this.session = session
     this.userId = userId
-    this.carried = carried
     this.env = env
   }
 
@@ -282,8 +279,6 @@ export class ComposerDraft {
     // was lost there, and this is where the user still is.
     this.recovered ||= recovered
     if (this.requested !== tip) return
-    if (this.carried !== "" && this.text === "") this.text = this.carried
-    this.carried = ""
     this.ready = true
     this.emit()
     if (this.unsaved) this.schedule(0)
@@ -303,6 +298,31 @@ export class ComposerDraft {
     let unsent: Copy | null = null
     // Another draft's copy only once it's stale: a tab still typing there makes its own saves.
     const now = this.env.now()
+    // A pending page knows the new chat but not its draft yet. Keep its exact text
+    // durable while opening, then replace it atomically with a replayable draft copy.
+    for (const copy of await copiesOfUser(this.userId)) {
+      const save = pendingOf(copy)
+      if (save?.kind !== "pendingChat" || save.payload.chatId !== this.chatId) continue
+      const adopted = makeCopy(
+        this.userId,
+        copyTarget(this.chatId),
+        opened.id,
+        {
+          kind: "composer",
+          payload: {
+            chatId: this.chatId,
+            draftId: opened.id,
+            rowVersion: opened.rowVersion,
+            session: opened.session,
+            next: false,
+            content: copy.content
+          }
+        },
+        copy.at,
+        [copy]
+      )
+      await keepCopy(adopted, copy)
+    }
     const copies = (await copiesOfUser(this.userId)).filter(
       (copy) => copy.refId.startsWith(COPIES) && (copy.field === opened.id || now - copy.at > STALE_COPY_MS)
     )

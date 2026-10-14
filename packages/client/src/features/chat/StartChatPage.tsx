@@ -33,7 +33,7 @@ import {
 } from "../editor/backup.ts"
 import { GroupFaces } from "../characters/GroupFaces.tsx"
 import { useTitle } from "../shell.tsx"
-import { carryComposerText } from "./composerCarry.ts"
+import { composerCarryCopy } from "./composerCarry.ts"
 import { expandForDisplay } from "./macros.ts"
 
 const PERSONA_KEY = "rp.lastPersona"
@@ -101,27 +101,37 @@ function Pending({
         )
   const copy = useRef<Copy | null>(null)
   const sending = useRef<string | null>(null)
+  const destination = useRef<string | null>(null)
   const keep = (content: string) => {
     const previous = copy.current
     copy.current = null
-    if (content.trim() === "") {
-      if (previous !== null) void dropCopy(previous)
-      return
+    if (content === "") {
+      return previous === null ? Promise.resolve() : dropCopy(previous)
     }
-    copy.current = makeCopy(
-      userId,
-      copyKey,
-      "first message",
-      {
-        kind: "pendingChat",
-        payload:
-          group === null
-            ? { entityId, name: card.card.name, content }
-            : { entityId, name: group.group.name, content, groupChatId: group.chatId }
-      },
-      Date.now()
-    )
-    void keepCopy(copy.current, previous)
+    copy.current =
+      destination.current !== null
+        ? composerCarryCopy(
+            userId,
+            destination.current,
+            entityId,
+            group?.group.name ?? card.card.name,
+            content,
+            previous
+          )
+        : makeCopy(
+            userId,
+            copyKey,
+            "first message",
+            {
+              kind: "pendingChat",
+              payload:
+                group === null
+                  ? { entityId, name: card.card.name, content }
+                  : { entityId, name: group.group.name, content, groupChatId: group.chatId }
+            },
+            Date.now()
+          )
+    return keepCopy(copy.current, previous)
   }
   // The text left here before, if nothing's been typed since; the newest of them, when
   // several tabs left one (the others stay in Browser recovery).
@@ -206,14 +216,14 @@ function Pending({
       if (submitted !== "") {
         const restored = typed.current === "" ? submitted : `${submitted}\n\n${typed.current}`
         setText(restored)
-        keep(restored)
+        void keep(restored)
       }
       return
     }
-    // The chat has the message now; what was typed since goes on in its composer.
-    if (copy.current !== null) void dropCopy(copy.current)
-    copy.current = null
-    carryComposerText(result.value.chat.id, typed.current)
+    // Only submitted text was acknowledged. Atomically replace the pending copy with
+    // the extra text addressed to the saved chat, before navigating or opening its draft.
+    destination.current = result.value.chat.id
+    await keep(typed.current)
     void navigate({ to: "/chats/$chatId", params: { chatId: result.value.chat.id } })
   }
 
@@ -317,7 +327,7 @@ function Pending({
             setText(value)
             // While the first send is out, the copy keeps both, as a failed send leaves them.
             const out = sending.current
-            keep(out === null || out === "" ? value : value === "" ? out : `${out}\n\n${value}`)
+            void keep(out === null || out === "" ? value : value === "" ? out : `${out}\n\n${value}`)
           }}
           className="w-full resize-none rounded-md border border-border bg-surface px-3 py-2 text-base text-text outline-none placeholder:text-muted focus-visible:border-focus focus-visible:ring-2 focus-visible:ring-focus/40 sm:text-sm"
         />
