@@ -130,7 +130,7 @@ export const makeBin = (sql: SqlClient.SqlClient, limits: BinLimits, now: () => 
    * If the chat's active leaf was deleted, moves it to the nearest ancestor that wasn't,
    * and takes the composer there with it (unless that tip has text of its own).
    */
-  const relocateLeaf = (userId: UserId, chatId: string) =>
+  const relocateLeaf = (userId: UserId, chatId: string, carryComposer = true) =>
     Effect.gen(function* () {
       const [chat] = yield* sql<{ active_leaf_slot_id: string | null }>`
         SELECT active_leaf_slot_id FROM chats WHERE id = ${chatId}`
@@ -146,14 +146,14 @@ export const makeBin = (sql: SqlClient.SqlClient, limits: BinLimits, now: () => 
         SELECT (SELECT id FROM up WHERE NOT deleted ORDER BY n LIMIT 1) AS id,
                (SELECT deleted FROM up WHERE n = 0) AS deleted`
       if (!target?.deleted) return
-      yield* moveLeaf(userId, chatId, leaf, target.id)
+      yield* moveLeaf(userId, chatId, leaf, target.id, carryComposer)
     })
 
   /** Moves a chat's leaf, and the composer with it unless the new tip has text of its own. */
-  const moveLeaf = (userId: UserId, chatId: string, from: string | null, to: string | null) =>
+  const moveLeaf = (userId: UserId, chatId: string, from: string | null, to: string | null, carryComposer = true) =>
     Effect.gen(function* () {
       yield* sql`UPDATE chats SET active_leaf_slot_id = ${to}, row_version = row_version + 1 WHERE id = ${chatId}`
-      yield* drafts.moveComposer(userId, chatId, from, to)
+      if (carryComposer) yield* drafts.moveComposer(userId, chatId, from, to)
     })
 
   /**
@@ -174,7 +174,7 @@ export const makeBin = (sql: SqlClient.SqlClient, limits: BinLimits, now: () => 
    * After a restore: a leaf that was a tip follows what came back below it, on the newest
    * reply at each step, so a message deleted from the end of the chat is at its end again.
    */
-  const followRestored = (userId: UserId, chatId: string, leaf: string | null) =>
+  const followRestored = (userId: UserId, chatId: string, leaf: string | null, carryComposer = true) =>
     Effect.gen(function* () {
       const [tip] = yield* sql<{ id: string }>`
         WITH RECURSIVE down(id, n) AS (
@@ -187,7 +187,7 @@ export const makeBin = (sql: SqlClient.SqlClient, limits: BinLimits, now: () => 
           FROM down d WHERE d.id IS NOT NULL OR d.n = 0
         )
         SELECT id FROM down WHERE id IS NOT NULL ORDER BY n DESC LIMIT 1`
-      if (tip && tip.id !== leaf) yield* moveLeaf(userId, chatId, leaf, tip.id)
+      if (tip && tip.id !== leaf) yield* moveLeaf(userId, chatId, leaf, tip.id, carryComposer)
     })
 
   // --- Deleting -----------------------------------------------------------------------
@@ -258,7 +258,8 @@ export const makeBin = (sql: SqlClient.SqlClient, limits: BinLimits, now: () => 
         UPDATE slots SET deleted_at = ${Date.now()}, bin_item_id = ${itemId} WHERE id IN sub AND deleted_at IS NULL`
       yield* sql`UPDATE slots SET branch_deleted = 1 WHERE id = ${slotId}`
       yield* sql`UPDATE chats SET row_version = row_version + 1 WHERE id = ${slot.chat_id}`
-      yield* relocateLeaf(userId, slot.chat_id)
+      // The deleted branch keeps its own composer address for Undo, including late saves.
+      yield* relocateLeaf(userId, slot.chat_id, false)
       return itemId
     })
 
@@ -405,7 +406,7 @@ export const makeBin = (sql: SqlClient.SqlClient, limits: BinLimits, now: () => 
       if ((messages || item.kind === "chat") && item.chat_id !== null) {
         yield* sql`UPDATE chats SET row_version = row_version + 1 WHERE id = ${item.chat_id}`
       }
-      if (tip !== null) yield* followRestored(userId, item.chat_id!, tip.leaf)
+      if (tip !== null) yield* followRestored(userId, item.chat_id!, tip.leaf, item.kind !== "branch")
       return toBinItem(item)
     })
 

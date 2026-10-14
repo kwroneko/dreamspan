@@ -69,15 +69,7 @@ function BranchMenu({
   const { forks, complete } = useForks(session, view)
   // The alternates at each place, with their names: read each time the menu opens.
   const [branches, setBranches] = useState<ReadonlyMap<SlotId, ReadonlyArray<Branch>>>(new Map())
-  // Names read or given here since the path was scanned, by the message that starts each
-  // branch: a fork found by the scan above what's loaded isn't kept current by the session.
-  const [names, setNames] = useState<ReadonlyMap<SlotId, string | null>>(new Map())
-  const nameOf = (fork: PathEntry) => {
-    const loaded = view.entries.find((entry) => entry.slotId === fork.slotId)
-    if (loaded !== undefined) return loaded.branchName
-    const known = names.get(fork.slotId)
-    return known === undefined ? fork.branchName : (known ?? undefined)
-  }
+  const nameOf = (fork: PathEntry) => fork.branchName
   const [naming, setNaming] = useState<PathEntry | null>(null)
   const write = useWrite()
   const deleted = useDeletedToast()
@@ -92,17 +84,19 @@ function BranchMenu({
   const named = last === undefined ? undefined : nameOf(last)
   const summary = last
     ? named !== undefined
-      ? `${named} (${last.branchIndex + 1} of ${last.branchCount})`
+      ? last.branchCount === 1
+        ? named
+        : `${named} (${last.branchIndex + 1} of ${last.branchCount})`
       : `Branch ${last.branchIndex + 1} of ${last.branchCount}`
     : "Another branch"
-  const label = `${summary}${last ? `, at message #${last.depth + 1}` : ""}${off ? ", not the latest" : ""}: switch branch`
+  const canSwitch = forks.some((fork) => fork.branchCount > 1) || off
+  const label = `${summary}${last ? `, at message #${last.depth + 1}` : ""}${off ? ", not the latest" : ""}: ${canSwitch ? "switch branch" : "branch actions"}`
   const load = async () => {
     const read = await Promise.all(
       forks.map(async (fork) => [fork.slotId, await session.listBranches(fork.slotId)] as const)
     )
     const listed = read.flatMap(([slotId, result]) => (result.ok ? [[slotId, result.value] as const] : []))
     setBranches(new Map(listed))
-    setNames(new Map(listed.flatMap(([, all]) => all.map((branch) => [branch.slotId, branch.name] as const))))
   }
   const remove = async (fork: PathEntry) => {
     const listed = await session.listBranches(fork.slotId)
@@ -171,27 +165,29 @@ function BranchMenu({
           return (
             <MenuGroup
               key={fork.slotId}
-              label={`${i === 0 ? "Branches" : "Earlier"} at message #${fork.depth + 1} (${speaker(fork)})`}
+              label={`${fork.branchCount === 1 ? "Branch" : i === 0 ? "Branches" : "Earlier"} at message #${fork.depth + 1} (${speaker(fork)})`}
             >
-              <MenuRadioGroup value={fork.branchIndex} onValueChange={(index: number) => onBranch(fork, index)}>
-                {Array.from({ length: fork.branchCount }, (_, index) => {
-                  const branch = listed?.[index]
-                  const name = index === fork.branchIndex ? shownName : (branch?.name ?? undefined)
-                  return (
-                    <MenuRadioItem key={index} value={index}>
-                      <span className="flex min-w-0 flex-col">
-                        <span className="truncate">
-                          {branchLabel(index, name)}
-                          {index === fork.branchIndex ? <span className="text-muted"> (shown)</span> : null}
+              {fork.branchCount > 1 && (
+                <MenuRadioGroup value={fork.branchIndex} onValueChange={(index: number) => onBranch(fork, index)}>
+                  {Array.from({ length: fork.branchCount }, (_, index) => {
+                    const branch = listed?.[index]
+                    const name = index === fork.branchIndex ? shownName : (branch?.name ?? undefined)
+                    return (
+                      <MenuRadioItem key={index} value={index}>
+                        <span className="flex min-w-0 flex-col">
+                          <span className="truncate">
+                            {branchLabel(index, name)}
+                            {index === fork.branchIndex ? <span className="text-muted"> (shown)</span> : null}
+                          </span>
+                          {branch !== undefined && branch.preview !== "" && (
+                            <span className="truncate text-xs text-muted">{branch.preview}</span>
+                          )}
                         </span>
-                        {branch !== undefined && branch.preview !== "" && (
-                          <span className="truncate text-xs text-muted">{branch.preview}</span>
-                        )}
-                      </span>
-                    </MenuRadioItem>
-                  )
-                })}
-              </MenuRadioGroup>
+                      </MenuRadioItem>
+                    )
+                  })}
+                </MenuRadioGroup>
+              )}
               <MenuItem icon="edit" onClick={() => setNaming(fork)}>
                 {shownName === undefined ? `Name ${shownLabel}…` : `Rename “${shownLabel}”…`}
               </MenuItem>
@@ -229,7 +225,6 @@ function BranchMenu({
           if (naming === null) return
           const result = await write.run(() => session.nameBranch(naming.slotId, name))
           if (!result.ok) return
-          setNames((current) => new Map(current).set(naming.slotId, result.value.branchName ?? null))
           setNaming(null)
         }}
       />

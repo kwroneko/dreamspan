@@ -148,6 +148,50 @@ describe("recycle bin", () => {
     }).pipe(Effect.provide(database()))
   )
 
+  it.live("deleting and restoring a branch keeps its draft separate from surviving composers", () =>
+    Effect.gen(function* () {
+      const { writer, reader, userId, chat, b, c } = yield* setup()
+      const key = composerKey(chat.id, c.slotId)
+      const draft = yield* writer.SaveDraft({
+        draftId: null,
+        expectedSession: null,
+        userId,
+        key,
+        content: "Important unsent paragraph",
+        expectedRowVersion: null,
+        baseRevision: null
+      })
+      const item = yield* writer.DeleteBranch({ userId, slotId: c.slotId })
+      assert.strictEqual((yield* reader.GetDraft({ userId, key }))?.content, "Important unsent paragraph")
+      // A save already in flight still names the deleted branch's draft.
+      yield* writer.SaveDraft({
+        draftId: draft.id,
+        expectedSession: draft.session,
+        userId,
+        key,
+        content: "Important unsent paragraph, continued",
+        expectedRowVersion: draft.rowVersion,
+        baseRevision: null
+      })
+      yield* writer.SaveDraft({
+        draftId: null,
+        expectedSession: null,
+        userId,
+        key: composerKey(chat.id, b.slotId),
+        content: "Text typed after deletion",
+        expectedRowVersion: null,
+        baseRevision: null
+      })
+      yield* writer.RestoreBinItem({ userId, itemId: item.id })
+      assert.strictEqual((yield* reader.GetChat({ userId, chatId: chat.id })).activeLeafSlotId, c.slotId)
+      assert.strictEqual((yield* reader.GetDraft({ userId, key }))?.content, "Important unsent paragraph, continued")
+      assert.strictEqual(
+        (yield* reader.GetDraft({ userId, key: composerKey(chat.id, b.slotId) }))?.content,
+        "Text typed after deletion"
+      )
+    }).pipe(Effect.provide(database()))
+  )
+
   it.live("moving the tip back never deletes a composer's history without recovering its text", () =>
     Effect.gen(function* () {
       const { writer, reader, userId, chat, b, c, append } = yield* setup()
@@ -173,8 +217,9 @@ describe("recycle bin", () => {
         baseRevision: null
       })
       yield* writer.DeleteMessage({ userId, slotId: d.slotId }) // the wiped composer moves to b
-      yield* append(c.slotId, "e", true)
-      yield* writer.DeleteBranch({ userId, slotId: c.slotId }) // back to b again
+      const e = yield* append(c.slotId, "e", true)
+      yield* writer.DeleteMessage({ userId, slotId: c.slotId })
+      yield* writer.DeleteMessage({ userId, slotId: e.slotId }) // back to b again
       const texts = yield* reader.ListRecoveredTexts({ userId, source: null, limit: 10, before: null })
       assert.deepStrictEqual(
         texts.map((t) => t.content),
