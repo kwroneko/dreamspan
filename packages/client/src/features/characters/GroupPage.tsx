@@ -7,15 +7,17 @@ import type { Chat, ChatId } from "@rp/shared/chat.ts"
 import type { ChatGroup } from "@rp/shared/chatSetupApi.ts"
 import { Link, useNavigate, useParams } from "@tanstack/react-router"
 import { AsyncResult } from "effect/reactivity"
-import { useMemo } from "react"
-import { FailureView } from "../../actions.tsx"
+import { useMemo, useState } from "react"
+import { FailureView, useAction } from "../../actions.tsx"
 import { describeCause } from "../../errors.ts"
 import { AppClient } from "../../rpc.ts"
 import { Avatar } from "../../ui/Avatar.tsx"
-import { buttonClass } from "../../ui/Button.tsx"
+import { Button, buttonClass } from "../../ui/Button.tsx"
+import { Icon } from "../../ui/Icon.tsx"
 import { Card, CardHeader, EmptyState } from "../../ui/Surface.tsx"
 import { Loading } from "../../ui/Spinner.tsx"
 import { ChatList } from "../chat/ChatList.tsx"
+import { NameDialog } from "../chat/NameDialog.tsx"
 import { useTitle } from "../shell.tsx"
 import { usageLine } from "./data.ts"
 import { GroupFaces } from "./GroupFaces.tsx"
@@ -24,6 +26,8 @@ function Page({ group, chats }: { group: ChatGroup; chats: ReadonlyArray<Chat> }
   useTitle(group.name)
   const { chatId } = useParams({ strict: false }) as { chatId: ChatId }
   const navigate = useNavigate()
+  const [renaming, setRenaming] = useState(false)
+  const rename = useAction()
   return (
     <div className="flex flex-col gap-5">
       <Link to="/" className="self-start text-sm text-muted hover:text-text">
@@ -46,6 +50,15 @@ function Page({ group, chats }: { group: ChatGroup; chats: ReadonlyArray<Chat> }
             <Link to="/groups/$chatId/new" params={{ chatId: group.latestChatId }} className={buttonClass()}>
               New chat
             </Link>
+            <Button
+              onClick={() => {
+                rename.clearError()
+                setRenaming(true)
+              }}
+            >
+              <Icon name="edit" />
+              Rename group
+            </Button>
           </div>
         </div>
       </header>
@@ -85,6 +98,22 @@ function Page({ group, chats }: { group: ChatGroup; chats: ReadonlyArray<Chat> }
           </ul>
         </Card>
       </div>
+      <NameDialog
+        open={renaming}
+        onOpenChange={setRenaming}
+        title="Rename group"
+        label="Name"
+        initial={group.name}
+        description={`All ${chats.length.toLocaleString()} of its chats take the name, and so do the chats you start from here. A chat imported from SillyTavern keeps the day it started. Leave it empty to name them after their characters.`}
+        maxLength={200}
+        saveLabel="Rename"
+        pending={rename.pending}
+        error={rename.error}
+        onSave={async (name) => {
+          const result = await rename.run((client) => client("RenameGroup", { chatId, name }), ["chats"])
+          if (result.ok) setRenaming(false)
+        }}
+      />
     </div>
   )
 }

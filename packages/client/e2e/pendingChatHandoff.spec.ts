@@ -43,7 +43,7 @@ const setup = async (page: Page, title: string) => {
     })
   )
   await page.goto(`${server().url}/groups/${chat.id}/new`)
-  await expect(page.getByRole("article", { name: "Greeting" })).toBeVisible()
+  await expect(page.getByRole("article", { name: /^Greeting from / })).toHaveCount(2)
   return chat
 }
 
@@ -88,7 +88,7 @@ for (const target of ["group", "card"] as const) {
     if (target === "card") {
       const cards = await asUser(server(), ADMIN.handle, ADMIN.password, (api) => api.ListCards())
       await page.goto(`${server().url}/cards/${cards.find((c) => c.name === "Tobias Wren")!.entityId}/chat`)
-      await expect(page.getByRole("article", { name: "Greeting" })).toBeVisible()
+      await expect(page.getByRole("article", { name: /^Greeting from / })).toHaveCount(1)
     }
     const composer = page.getByLabel("Message", { exact: true })
     await composer.fill("The first message that will be saved.")

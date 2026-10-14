@@ -32,8 +32,8 @@ export function Tooltip({
     <BaseTooltip.Root>
       <BaseTooltip.Trigger {...props} render={children} />
       <BaseTooltip.Portal>
-        <BaseTooltip.Positioner side={side} sideOffset={6} className="z-50">
-          <BaseTooltip.Popup className="max-w-72 origin-[var(--transform-origin)] rounded-md bg-text px-2 py-1 text-xs text-canvas shadow-md transition-[scale,opacity] duration-100 data-ending-style:opacity-0 data-instant:transition-none data-starting-style:scale-95 data-starting-style:opacity-0 motion-reduce:transition-none">
+        <BaseTooltip.Positioner side={side} sideOffset={6} className="pointer-events-none z-50">
+          <BaseTooltip.Popup className="pointer-events-none max-w-72 origin-[var(--transform-origin)] rounded-md bg-text px-2 py-1 text-xs text-canvas shadow-md transition-[scale,opacity] duration-100 data-ending-style:opacity-0 data-instant:transition-none data-starting-style:scale-95 data-starting-style:opacity-0 motion-reduce:transition-none">
             {label}
           </BaseTooltip.Popup>
         </BaseTooltip.Positioner>
@@ -52,16 +52,17 @@ export function IconButton({
   label,
   icon,
   tone = "muted",
+  filled = false,
   className = "",
   ...props
-}: { label: string; icon: IconName; tone?: "muted" | "danger" } & Omit<
+}: { label: string; icon: IconName; tone?: "muted" | "danger"; filled?: boolean } & Omit<
   ComponentProps<typeof BaseButton>,
   "children" | "aria-label"
 >) {
   return (
     <Tooltip label={label}>
       <BaseButton aria-label={label} className={`${iconButtonClass(tone)} ${className}`} {...props}>
-        <Icon name={icon} />
+        <Icon name={icon} filled={filled} />
       </BaseButton>
     </Tooltip>
   )

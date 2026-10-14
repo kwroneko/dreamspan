@@ -6,6 +6,7 @@ import { uuidv7 } from "@rp/shared/id.ts"
 import { useEffect, useState } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"
+import { Avatar as CardAvatar } from "../../ui/Avatar.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Field, Fieldset, Input, Textarea } from "../../ui/Field.tsx"
 import { FileDrop } from "../../ui/FileDrop.tsx"
@@ -16,14 +17,19 @@ import { NoteEditor, PlacementField } from "./notes.tsx"
 import { type EditorStore, useValue } from "./store.ts"
 
 function Avatar({ store, onUpload }: { store: EditorStore; onUpload: (file: File) => void }) {
+  const name = useValue<string>(store, ["name"]) ?? "Card"
   const media = useValue<string | null>(store, ["avatar_media_id"])
   return (
     <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
       {media ? (
-        <img
-          src={`/library/media?id=${encodeURIComponent(media)}`}
+        <CardAvatar
           alt="The card's avatar"
-          className="size-24 shrink-0 rounded-lg border border-border object-cover"
+          id="editor"
+          name={name}
+          mediaId={media}
+          size="2xl"
+          shape="square"
+          className="rounded-lg border border-border"
         />
       ) : (
         <div className="flex size-24 shrink-0 items-center justify-center rounded-lg border border-dashed border-border text-sm text-muted">

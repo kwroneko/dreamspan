@@ -123,6 +123,32 @@ describe("ChatSession", () => {
     expect(s.snapshot().entries[1]!.version.id).toBe(reply.id)
   })
 
+  it("invalidates history for changes outside the window and reloads, without token updates or read replay", async () => {
+    vi.stubGlobal("requestAnimationFrame", () => 1)
+    vi.stubGlobal("cancelAnimationFrame", () => {})
+    const { s, answers, receive } = session()
+    const opening = s.open(null)
+    const revision = s.snapshot().pathRevision
+    receive({ _tag: "Slot", entry: first })
+    expect(s.snapshot().pathRevision).toBe(revision + 1)
+    // Replaying that event after an in-flight read isn't another history change.
+    answers[0]!(window([first, second]))
+    await opening
+    expect(s.snapshot().pathRevision).toBe(revision + 1)
+    receive({ _tag: "Version", version: version("old-version", "old-slot", "complete", "Outside the window.") })
+    expect(s.snapshot().pathRevision).toBe(revision + 2)
+    receive({ _tag: "Delta", versionId: reply.id, offset: reply.content.length, text: " rises" })
+    expect(s.snapshot().pathRevision).toBe(revision + 2)
+    receive({ _tag: "Cache", leafSlotId: null, warmth: null, historyStart: null, summarizedThrough: null })
+    expect(s.snapshot().pathRevision).toBe(revision + 2)
+    // Deletion/restoration and reconnects reload even when the tip doesn't move.
+    receive({ _tag: "Reload" })
+    expect(s.snapshot().pathRevision).toBe(revision + 3)
+    answers[1]!(window([first, second]))
+    await Promise.resolve()
+    s.dispose()
+  })
+
   it("keeps a message that arrived while the window was being read", async () => {
     const { s, answers, receive } = session()
     const opening = s.open(null)

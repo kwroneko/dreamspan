@@ -104,15 +104,21 @@ for (const width of [1440, 390]) {
     await shoot(page, "04-complete-collapsed")
     await showActions(reply)
     await reply.getByRole("button", { name: /choose a version/ }).click()
-    await expect(page.getByRole("menu")).toContainText("stopped")
-    await expect(page.getByRole("menu")).not.toContainText("generating")
-    await expect(page.getByRole("menu")).toContainText("The ledger says")
+    await expect(page.getByRole("dialog", { name: "Versions of message #2", exact: true })).toContainText("stopped")
+    await expect(page.getByRole("dialog", { name: "Versions of message #2", exact: true })).not.toContainText(
+      "generating"
+    )
+    await expect(page.getByRole("dialog", { name: "Versions of message #2", exact: true })).toContainText(
+      "The ledger says"
+    )
     await shoot(page, "05-picker-complete")
     await page.keyboard.press("Escape")
     // Cached completion must remain correct after selecting the original too.
     await reply.getByRole("button", { name: "Previous version", exact: true }).click()
     await reply.getByRole("button", { name: /choose a version/ }).click()
-    await expect(page.getByRole("menu")).not.toContainText("generating")
+    await expect(page.getByRole("dialog", { name: "Versions of message #2", exact: true })).not.toContainText(
+      "generating"
+    )
     await page.keyboard.press("Escape")
     await reply.getByRole("button", { name: "Next version", exact: true }).click()
     await expect(reply.getByRole("button", { name: /Version 2 of 2/ })).toBeVisible()

@@ -90,9 +90,17 @@ export class Version extends Schema.Class<Version>("Version")({
   origin: VersionOrigin,
   sourceVersionId: Schema.NullOr(VersionId),
   direction: Schema.NullOr(Schema.String),
+  /** Left out of the arrows' cycle; still listed in the version picker, under Hidden. */
   hidden: Schema.Boolean,
+  /** Starred in the version picker, which can show only these. */
   starred: Schema.Boolean,
   createdAt: Schema.Number,
+  /**
+   * The model it was generated with, as "connection · model", when one is recorded: from
+   * the start for "Regenerate with…", otherwise once its context is assembled. Null for
+   * text a person wrote, and for imported versions.
+   */
+  model: Schema.NullOr(Schema.String),
   /** Set on failed versions only. */
   error: Schema.NullOr(VersionError),
   /**
@@ -141,6 +149,8 @@ export class PathEntry extends Schema.Class<PathEntry>("PathEntry")({
    */
   branchCount: Schema.Int,
   branchIndex: Schema.Int,
+  /** The name the user gave the branch this slot starts among its alternates (NameBranch); absent: unnamed. */
+  branchName: Schema.optionalKey(Schema.String),
   /**
    * The side the message is on when its speaker isn't one of the cast, as the context reads
    * it (assemblySources.ts): its first version's, deleted or not, so which versions are

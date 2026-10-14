@@ -25,6 +25,9 @@ export interface Forks {
   readonly complete: boolean
 }
 
+/** A named branch stays manageable after its last sibling is deleted. */
+const manageable = (entry: PathEntry) => entry.branchCount > 1 || entry.branchName !== undefined
+
 export function useForks(session: ChatSession, view: ChatView): Forks {
   const action = useAction()
   const [scan, setScan] = useState<Scan | null>(null)
@@ -42,7 +45,7 @@ export function useForks(session: ChatSession, view: ChatView): Forks {
           client("ReadPath", { chatId: session.id, leafSlotId: leaf, range, limit: PAGE })
         )
         if (!live || !result.ok) return
-        found.unshift(...result.value.entries.filter((e) => e.branchCount > 1))
+        found.unshift(...result.value.entries.filter(manageable))
         const older = result.value.older
         if (older === null) return setScan({ leaf, forks: found, complete: true })
         range = { _tag: "Older", from: older }
@@ -55,12 +58,20 @@ export function useForks(session: ChatSession, view: ChatView): Forks {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `action` is a new object each render
   }, [leaf, current, session])
   if (scan === null || !current) {
-    return { forks: view.entries.filter((e) => e.branchCount > 1), complete: false }
+    return { forks: view.entries.filter(manageable), complete: false }
   }
   // What's loaded is newer than the scan: it replaces the scan's entry at its depth.
   const loaded = new Map(view.entries.map((e) => [e.depth, e]))
   const byDepth = new Map(scan.forks.map((e) => [e.depth, e]))
   for (const [depth, entry] of loaded) byDepth.set(depth, entry)
-  const forks = [...byDepth.values()].filter((e) => e.branchCount > 1).sort((a, b) => a.depth - b.depth)
+  const forks = [...byDepth.values()]
+    .map((entry) => {
+      const live = view.branchNames.get(entry.slotId)
+      return live !== undefined && live.rowVersion >= entry.rowVersion
+        ? ({ ...entry, branchName: live.name, rowVersion: live.rowVersion } as PathEntry)
+        : entry
+    })
+    .filter(manageable)
+    .sort((a, b) => a.depth - b.depth)
   return { forks, complete: scan.complete }
 }

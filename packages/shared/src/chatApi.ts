@@ -6,7 +6,7 @@ import { Rpc, RpcGroup } from "effect/rpc"
 import { BinItem } from "./bin.ts"
 import { Chat, ChatId, ChatSummary, EntityId, PathEntry, QueuedMessage, SlotId, Version, VersionId } from "./chat.ts"
 import { LeafMoved, NotFound, ServerError, StaleWrite } from "./errors.ts"
-import { TextTooLong } from "./composerApi.ts"
+import { ComposerChoice, TextTooLong } from "./composerApi.ts"
 import { Draft, DraftKey } from "./drafts.ts"
 import { NextContext } from "./inspectorApi.ts"
 import { ModelChoice } from "./lcmSettings.ts"
@@ -111,7 +111,9 @@ export const ChatEvent = Schema.Union([
   /** The chat's summaries changed (made, edited, selected, failed, asked for again) or LCM was switched: read GetLcmState again. */
   Schema.TaggedStruct("Lcm", {}),
   /** The cache-warmth estimate changed; null when there's none to show (DESIGN §5.5). */
-  Schema.TaggedStruct("Cache", NextContext.fields)
+  Schema.TaggedStruct("Cache", NextContext.fields),
+  /** A composer's speaker or reply choice changed, in this tab or another. */
+  Schema.TaggedStruct("ComposerChoice", { choice: ComposerChoice })
 ])
 export type ChatEvent = typeof ChatEvent.Type
 
@@ -194,6 +196,24 @@ export const chatCursor = (chat: Pick<Chat, "id" | "createdAt" | "lastMessageAt"
   empty: chat.lastMessageAt === null
 })
 
+/** A name the user gives a chat or a group (RenameChat, RenameGroup); empty: the automatic name. */
+export const ChatNameInput = Schema.String.check(Schema.isMaxLength(200))
+
+/** A name the user gives a branch (NameBranch); empty: unnamed again. */
+const BranchNameInput = Schema.String.check(Schema.isMaxLength(100))
+
+/** One of the alternates at a place the path branches, as the header's branch menu lists it. */
+export class Branch extends Schema.Class<Branch>("Branch")({
+  /** The message that starts it. */
+  slotId: SlotId,
+  /** Its place among the alternates, oldest first (`PathEntry.branchIndex`). */
+  index: Schema.Int,
+  /** Its name; null when it has none. */
+  name: Schema.NullOr(Schema.String),
+  /** The start of its first message's text; empty for a message deleted on its own. */
+  preview: Schema.String
+}) {}
+
 /** Text to find chats by (ListChats). */
 export const ChatSearch = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200))
 
@@ -221,6 +241,16 @@ export class ChatApi extends RpcGroup.make(
     error: ServerError
   }),
   Rpc.make("CreateChat", { payload: { title: Schema.String }, success: Chat, error: ServerError }),
+  /**
+   * Names a chat (DESIGN §2.1): its title becomes the name, and a chat imported from ST keeps
+   * the day ST started it. An empty name gives back the automatic one. Open tabs get `Chat`.
+   * A chat of a group leaves it for a group of its own name (RenameGroup renames them all).
+   */
+  Rpc.make("RenameChat", {
+    payload: { chatId: ChatId, name: ChatNameInput },
+    success: Chat,
+    error: Schema.Union([...Errors])
+  }),
   Rpc.make("GetChat", { payload: { chatId: ChatId }, success: Chat, error: Schema.Union([...Errors]) }),
   /** A window of the path ending at `leafSlotId` (null: the chat's active leaf). */
   Rpc.make("ReadPath", {
@@ -282,13 +312,14 @@ export class ChatApi extends RpcGroup.make(
   }),
   /**
    * A swipe: a new model version of a slot, selected and streamed, with the speaker and
-   * the one-turn direction of the version it replaces. Several can run at once.
+   * the one-turn direction of the version it replaces. Several can run at once. Any message
+   * takes one, the user's own included (DESIGN §3.1): the model writes as its speaker.
    */
   Rpc.make("Regenerate", {
     payload: {
       slotId: SlotId,
       expectedRowVersion: Schema.Int,
-      /** "Retry with…": this swipe uses another model of the user's. */
+      /** "Retry with…" or "Regenerate with…": this swipe uses another model of the user's, recorded on it. */
       model: Schema.optionalKey(ModelChoice)
     },
     success: PathEntry,
@@ -311,6 +342,19 @@ export class ChatApi extends RpcGroup.make(
     payload: { slotId: SlotId, versionId: VersionId, expectedRowVersion: Schema.Int },
     success: PathEntry,
     error: Schema.Union([...WriteErrors])
+  }),
+  /**
+   * Stars a version, or hides it from the arrows' cycle (the version picker, DESIGN §3.1),
+   * or undoes either. What's sent to the model doesn't change.
+   */
+  Rpc.make("SetVersionFlags", {
+    payload: {
+      versionId: VersionId,
+      starred: Schema.optionalKey(Schema.Boolean),
+      hidden: Schema.optionalKey(Schema.Boolean)
+    },
+    success: Version,
+    error: Schema.Union([...Errors])
   }),
   /**
    * Hides a message from the model, or shows it to the model again (ST's ghost toggle): it
@@ -383,6 +427,21 @@ export class ChatApi extends RpcGroup.make(
   Rpc.make("GetDisplayPrefs", { payload: {}, success: DisplayPrefs, error: ServerError }),
   /** Changes the user's display choices; answers with them as now stored. */
   Rpc.make("SetDisplayPrefs", { payload: { prefs: DisplayPrefs }, success: DisplayPrefs, error: ServerError }),
+  /** The alternates at `slotId`'s place (it and its siblings a path can reach), oldest first. */
+  Rpc.make("ListBranches", {
+    payload: { slotId: SlotId },
+    success: Schema.Array(Branch),
+    error: Schema.Union([...Errors])
+  }),
+  /**
+   * Names the branch `slotId` starts (one of the alternates where the path branches); an
+   * empty name takes the name off. Returns the slot, which subscribers get as `Slot`.
+   */
+  Rpc.make("NameBranch", {
+    payload: { slotId: SlotId, name: BranchNameInput },
+    success: PathEntry,
+    error: Schema.Union([...Errors])
+  }),
   /** Next request at the displayed leaf; Cache events invalidate this read. */
   Rpc.make("GetNextContext", {
     payload: { chatId: ChatId, leafSlotId: Schema.NullOr(SlotId) },

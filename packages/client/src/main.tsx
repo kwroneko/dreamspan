@@ -7,6 +7,9 @@ import { registerFeatures } from "./features/index.ts"
 import { buildRouter } from "./routes.tsx"
 import { CspProvider } from "./ui/CspProvider.tsx"
 
+import { applyImagePrefs } from "./ui/imagePrefs.ts"
+
+applyImagePrefs()
 registerFeatures()
 const router = buildRouter()
 

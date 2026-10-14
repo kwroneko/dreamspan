@@ -18,6 +18,7 @@ import {
   versionInContext
 } from "@rp/shared/chat.ts"
 import type { Cast, CastChange } from "@rp/shared/chatSetupApi.ts"
+import type { ComposerChoice } from "@rp/shared/composerApi.ts"
 import type { CardFields } from "@rp/shared/macros/context.ts"
 import { NotFound } from "@rp/shared/errors.ts"
 import type {
@@ -59,6 +60,8 @@ export interface ChatView {
   /** The path's leaf, as the server resolved it. */
   readonly leafSlotId: SlotId | null
   readonly entries: ReadonlyArray<PathEntry>
+  /** Live naming metadata, including fork points outside the message window. */
+  readonly branchNames: ReadonlyMap<SlotId, { readonly name: string | undefined; readonly rowVersion: number }>
   /** Where to continue reading older history; null at the root. */
   readonly older: SlotId | null
   /** Where to continue reading newer history; null when the window reaches the leaf. */
@@ -67,6 +70,8 @@ export interface ChatView {
   readonly follow: boolean
   /** Bumped when the window is replaced rather than extended, so the list can position it. */
   readonly opened: number
+  /** History changed, including outside the loaded window; streamed text doesn't bump this. */
+  readonly pathRevision: number
   readonly loading: boolean
   readonly error: string | null
   /** The chat went to the bin while open, here or elsewhere. */
@@ -107,10 +112,12 @@ export class ChatSession {
     chat: null,
     leafSlotId: null,
     entries: [],
+    branchNames: new Map(),
     older: null,
     newer: null,
     follow: true,
     opened: 0,
+    pathRevision: 0,
     loading: true,
     error: null,
     deleted: false,
@@ -122,6 +129,15 @@ export class ChatSession {
     lcmVersion: 0
   }
   private readonly listeners = new Set<() => void>()
+  private readonly versionListeners = new Set<(version: Version) => void>()
+
+  /** Picker lists also hear changes to versions that aren't currently selected. */
+  subscribeVersions = (listener: (version: Version) => void) => {
+    this.versionListeners.add(listener)
+    return () => {
+      this.versionListeners.delete(listener)
+    }
+  }
   /** Unmounts for the live atoms kept alive while their version generates, shown or not. */
   private readonly live = new Map<VersionId, () => void>()
   /** Deltas received since the last frame, by version. */
@@ -193,6 +209,18 @@ export class ChatSession {
       if (!this.view.loading) void this.refreshCast()
       void this.refreshContext()
       void this.refreshLcm()
+    }
+  }
+
+  private readonly choiceListeners = new Set<(choice: ComposerChoice | null) => void>()
+  /**
+   * Calls `listener` with each composer's speaker or reply choice published to this chat
+   * (speaker.ts), and with null after a reconnect, when one may have been missed.
+   */
+  readonly onComposerChoice = (listener: (choice: ComposerChoice | null) => void) => {
+    this.choiceListeners.add(listener)
+    return () => {
+      this.choiceListeners.delete(listener)
     }
   }
 
@@ -440,10 +468,12 @@ export class ChatSession {
 
   // --- Reading windows
 
-  private async read(range: PathRange, limit = PAGE): Promise<PathWindow | null> {
-    const result = await this.call((client) =>
-      client("ReadPath", { chatId: this.chatId, leafSlotId: this.view.leafSlotId ?? this.requestedLeaf, range, limit })
-    )
+  private async read(
+    range: PathRange,
+    limit = PAGE,
+    leafSlotId = this.view.leafSlotId ?? this.requestedLeaf
+  ): Promise<PathWindow | null> {
+    const result = await this.call((client) => client("ReadPath", { chatId: this.chatId, leafSlotId, range, limit }))
     if (result.ok) return result.value
     if (!this.disposed) this.update({ error: result.error.message, loading: false })
     return null
@@ -468,12 +498,16 @@ export class ChatSession {
   }
 
   /** Replaces the window: at the bottom, or around a slot; `reposition` scrolls to it. */
-  open(anchor: SlotId | null, limit = PAGE, reposition = true) {
+  open(anchor: SlotId | null, limit = PAGE, reposition = true, followActive = false) {
     const generation = ++this.generation
     this.update({ loading: this.view.entries.length === 0 })
     return this.reading(async () => {
       const [window, chat] = await Promise.all([
-        this.read(anchor === null ? { _tag: "Bottom" } : { _tag: "Around", slot: anchor }, limit),
+        this.read(
+          anchor === null ? { _tag: "Bottom" } : { _tag: "Around", slot: anchor },
+          limit,
+          followActive ? null : undefined
+        ),
         this.call((client) => client("GetChat", { chatId: this.chatId }))
       ])
       if (window === null || this.disposed || generation !== this.generation) return
@@ -723,11 +757,15 @@ export class ChatSession {
         // event: its live text would hide the saved one.
         const live = new Set(event.live.map((l) => l.versionId))
         for (const id of [...this.live.keys()]) if (!live.has(id)) this.endLive(id)
+        for (const listener of this.choiceListeners) listener(null)
         this.reload()
         return
       }
       case "Slot":
       case "Version":
+        this.update({ pathRevision: this.view.pathRevision + 1 })
+        if (this.reads > 0) this.missed.push(event)
+        return this.applyState(event)
       case "Chat":
         if (this.reads > 0) this.missed.push(event)
         return this.applyState(event)
@@ -744,6 +782,9 @@ export class ChatSession {
         return void this.refreshCast()
       case "Lcm":
         return this.scheduleLcm()
+      case "ComposerChoice":
+        for (const listener of this.choiceListeners) listener(event.choice)
+        return
       case "WaitingCache":
         if (!this.live.has(event.versionId)) this.setLive(event.versionId, "")
         this.registry.set(waitingCache(event.versionId), event.waiting)
@@ -792,11 +833,15 @@ export class ChatSession {
 
   /** Reads the loaded range again, as far as one read goes, keeping the same slots in view. */
   private reload() {
+    this.update({ pathRevision: this.view.pathRevision + 1 })
     this.scheduleLcm()
     const { entries, newer } = this.view
     const limit = Math.min(MAX_LOADED, Math.max(PAGE, entries.length))
-    if (newer === null || entries.length === 0) return void this.open(null, limit, entries.length === 0)
-    void this.open(entries[Math.floor(entries.length / 2)]!.slotId, limit, false)
+    // A restore can move the active tip. Follow it only if this tab was already there;
+    // tabs explicitly showing another path keep their own leaf.
+    const followActive = this.requestedLeaf === null && this.view.leafSlotId === this.view.chat?.activeLeafSlotId
+    if (newer === null || entries.length === 0) return void this.open(null, limit, entries.length === 0, followActive)
+    void this.open(entries[Math.floor(entries.length / 2)]!.slotId, limit, false, followActive)
   }
 
   /**
@@ -804,6 +849,18 @@ export class ChatSession {
    * continues the loaded bottom of the path.
    */
   private applySlot(entry: PathEntry): boolean {
+    const known = this.view.branchNames.get(entry.slotId)
+    if (
+      (entry.branchCount > 1 || entry.branchName !== undefined || known !== undefined) &&
+      (known === undefined || known.rowVersion < entry.rowVersion)
+    ) {
+      this.update({
+        branchNames: new Map(this.view.branchNames).set(entry.slotId, {
+          name: entry.branchName,
+          rowVersion: entry.rowVersion
+        })
+      })
+    }
     const { entries } = this.view
     const index = entries.findIndex((e) => e.slotId === entry.slotId)
     if (index >= 0) {
@@ -863,6 +920,7 @@ export class ChatSession {
   }
 
   private applyVersion(version: Version) {
+    for (const listener of this.versionListeners) listener(version)
     if (version.status !== "generating") this.endLive(version.id)
     const { entries } = this.view
     const index = entries.findIndex((e) => e.version.id === version.id)
@@ -1050,7 +1108,7 @@ export class ChatSession {
     return result
   }
 
-  /** A swipe; with a `model`, "Retry with…" that one instead of the chat's. */
+  /** A swipe; with a `model`, "Retry with…" or "Regenerate with…" that one instead of the chat's. */
   async regenerate(
     entry: PathEntry,
     model?: { readonly connection: Connection["id"]; readonly model: Model["id"] }
@@ -1136,6 +1194,70 @@ export class ChatSession {
 
   deleteVersion(versionId: VersionId) {
     return this.call((client) => client("DeleteVersion", { versionId }))
+  }
+
+  /** Stars a version or hides it from the arrows (the version picker), or undoes either. */
+  async setVersionFlags(
+    version: Version,
+    flags: { readonly starred?: boolean; readonly hidden?: boolean }
+  ): Promise<Outcome<Version>> {
+    const result = await this.call((client) => client("SetVersionFlags", { versionId: version.id, ...flags }))
+    if (result.ok) this.applyVersion(result.value)
+    return result
+  }
+
+  /** Deletes the branch a message starts (it and everything below it) to the bin. */
+  async deleteBranch(slotId: SlotId) {
+    const result = await this.call((client) => client("DeleteBranch", { slotId }))
+    // A reload at the old window can still name a tip inside the deleted subtree.
+    // Follow the writer's surviving active path, fencing every earlier window read.
+    if (result.ok) this.showBranch(null, null)
+    return result
+  }
+
+  /** The alternates where `slotId` is one, with their names. */
+  listBranches(slotId: SlotId) {
+    return this.call((client) => client("ListBranches", { slotId }))
+  }
+
+  /** Names the branch a message starts; the slot comes back with its name. */
+  async nameBranch(slotId: SlotId, name: string): Promise<Outcome<PathEntry>> {
+    const result = await this.call((client) => client("NameBranch", { slotId, name }))
+    if (result.ok) this.applySlot(result.value)
+    return result
+  }
+
+  /** Names the chat; the header shows it at once, other tabs on the `Chat` event, lists read again. */
+  async rename(name: string): Promise<Outcome<Chat>> {
+    const result = await this.call((client) => client("RenameChat", { chatId: this.chatId, name }))
+    if (result.ok) {
+      this.applyState({ _tag: "Chat", chat: result.value })
+      this.invalidate(["chats"])
+    }
+    return result
+  }
+
+  /** Names the group the chat is in: all its chats, this one included. */
+  async renameGroup(name: string) {
+    const result = await this.call((client) => client("RenameGroup", { chatId: this.chatId, name }))
+    if (result.ok) {
+      const own = result.value.chats.find((chat) => chat.id === this.chatId)
+      if (own) this.applyState({ _tag: "Chat", chat: own })
+      this.invalidate(["chats"])
+    }
+    return result
+  }
+
+  /** Has the queries with these reactivity keys (the chat list, the home grid) read again. */
+  private invalidate(keys: ReadonlyArray<string>) {
+    void Effect.runPromise(
+      Effect.map(Registry.getResult(this.registry, AppClient.runtime), (services) =>
+        Context.get(
+          services as unknown as Context.Context<Reactivity.Reactivity>,
+          Reactivity.Reactivity
+        ).invalidateUnsafe(keys)
+      )
+    )
   }
 
   listVersions(slotId: SlotId) {
