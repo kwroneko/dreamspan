@@ -2,6 +2,7 @@
 // id, so the same card always looks the same. A stack shows a chat's cast together.
 
 import { useOpenPortrait } from "./Portrait.tsx"
+import { mediaUrl, useMediaWidth } from "./mediaImage.ts"
 
 const TINTS = [
   "bg-accent/15 text-accent",
@@ -59,15 +60,17 @@ export function Avatar({
   alt?: string
 }) {
   const open = useOpenPortrait()
+  const { ref, width } = useMediaWidth()
   const round = size === "chat" ? "" : shape === "circle" ? "rounded-full" : ""
   const box = `relative inline-flex shrink-0 overflow-hidden ${round} ${SIZES[size]} ${className}`
   const content = (
     <>
-      {mediaId !== null && (
+      {mediaId !== null && width !== undefined && (
         <img
-          src={`/library/media?id=${encodeURIComponent(mediaId)}`}
+          src={mediaUrl(mediaId, width)}
           alt={alt}
           loading="lazy"
+          decoding="async"
           className="absolute inset-0 size-full bg-surface-raised object-cover"
         />
       )}
@@ -82,6 +85,7 @@ export function Avatar({
   )
   return preview && open ? (
     <button
+      ref={ref}
       type="button"
       aria-label={`View ${name}'s portrait`}
       title={`View ${name}'s full portrait`}
@@ -94,7 +98,9 @@ export function Avatar({
       {content}
     </button>
   ) : (
-    <span className={box}>{content}</span>
+    <span ref={ref} className={box}>
+      {content}
+    </span>
   )
 }
 
