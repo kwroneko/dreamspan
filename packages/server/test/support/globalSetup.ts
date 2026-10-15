@@ -10,7 +10,8 @@
 // load average of 85, a build in a beforeAll hook overran its 60 s. A build usually takes
 // about 2 s, and 10 to 17 s of CPU (rolldown uses every core). Files that change a build
 // copy it first.
-import { mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync } from "node:fs"
+import { fileURLToPath } from "node:url"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { TestProject } from "vitest/node"
@@ -31,6 +32,13 @@ export default async function setup(project: TestProject) {
   const bundleDir = join(runDir, BUNDLES)
   mkdirSync(bundleDir)
   await buildWorkers(bundleDir)
+  // Bundled native dependencies stay external. These throwaway bundles are outside the
+  // repository's node_modules ancestry; production bundles live inside it.
+  mkdirSync(join(bundleDir, "node_modules"))
+  symlinkSync(
+    fileURLToPath(new URL("../../../../node_modules/sharp", import.meta.url)),
+    join(bundleDir, "node_modules/sharp")
+  )
   project.provide("bundleDir", bundleDir)
   return () => {
     const left = readdirSync(runDir).filter((name) => name !== BUNDLES)

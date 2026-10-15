@@ -7,6 +7,12 @@ import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
 import { Transferable } from "effect/workers"
 import { ImportedMedia, Sha256 } from "../db/ops.ts"
+import { MEDIA_WIDTHS } from "@rp/shared/media.ts"
+
+export class ThumbnailFailed extends Schema.TaggedError<ThumbnailFailed>()("ThumbnailFailed", {}) {}
+
+const ThumbnailResult = Schema.Struct({ path: Schema.String, original: Schema.Boolean })
+export type ThumbnailResult = typeof ThumbnailResult.Type
 
 /**
  * The bytes with a buffer of their own, so they can be transferred. A view into a larger
@@ -155,6 +161,11 @@ export class StLibraryFile extends Schema.Class<StLibraryFile>("StLibraryFile")(
 }) {}
 
 export class FormatOps extends RpcGroup.make(
+  Rpc.make("Thumbnail", {
+    payload: { dataDir: Schema.String, path: Schema.String, width: Schema.Literals(MEDIA_WIDTHS) },
+    success: ThumbnailResult,
+    error: ThumbnailFailed
+  }),
   Rpc.make("Parse", {
     payload: { bytes: Transferable.Uint8Array, fileName: Schema.String },
     success: ParsedFile

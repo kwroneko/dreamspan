@@ -12,6 +12,7 @@ RpcServer.layer(FormatOps, { concurrency: 1, disableFatalDefects: true }).pipe(
     FormatOps.toLayer(
       Effect.map(Importers.Importers, (registry) =>
         FormatOps.of({
+          Thumbnail: () => Effect.die("not used by this test"),
           Parse: ({ bytes, fileName }) =>
             fileName === "crash"
               ? Effect.sync(() => process.exit(1))

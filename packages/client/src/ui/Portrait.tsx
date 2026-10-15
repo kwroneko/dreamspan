@@ -6,6 +6,7 @@ import { Button } from "./Button.tsx"
 import { initials } from "./Avatar.tsx"
 import { useImagePrefs } from "./imagePrefs.ts"
 import { Sheet } from "./Sheet.tsx"
+import { mediaUrl, useMediaWidth } from "./mediaImage.ts"
 
 interface Portrait {
   readonly id: string
@@ -34,6 +35,7 @@ export function PortraitView() {
   const portrait = useContext(Context)?.portrait
   const { mode } = useImagePrefs()
   const [full, setFull] = useState(false)
+  const { ref, width } = useMediaWidth()
   if (!portrait)
     return (
       <p className="text-sm text-muted">
@@ -44,10 +46,11 @@ export function PortraitView() {
     <div
       className={`relative flex items-center justify-center ${natural ? "min-h-full w-max min-w-full" : "h-full w-full"}`}
     >
-      {portrait.mediaId ? (
+      {portrait.mediaId && (natural || width !== undefined) ? (
         <>
           <img
-            src={`/library/media?id=${encodeURIComponent(portrait.mediaId)}`}
+            src={mediaUrl(portrait.mediaId, natural ? undefined : width)}
+            decoding="async"
             alt={`${portrait.name}'s full portrait`}
             className={natural ? "max-w-none shrink-0" : "h-full w-full object-contain"}
           />
@@ -76,6 +79,7 @@ export function PortraitView() {
       )}
       {!portrait.mediaId && <p className="text-sm text-muted">This card has no image.</p>}
       <button
+        ref={ref}
         type="button"
         aria-label={`Open ${portrait.name}'s portrait full size`}
         disabled={!portrait.mediaId || mode !== "show"}

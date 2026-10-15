@@ -35,6 +35,9 @@ import { classifyStPath, ST_CHAT_PART_BYTES } from "@rp/shared/stFolder.ts"
 import { StFileResult } from "@rp/shared/stImportApi.ts"
 import { describeImage } from "./images.ts"
 import { readMedia, storeMedia, sweepMedia } from "./mediaFiles.ts"
+import { readFile, stat } from "node:fs/promises"
+import { join } from "node:path"
+import { mediaWidth } from "@rp/shared/media.ts"
 
 /** The largest upload: the parsers' own cap on any file (ARCHITECTURE.md §8). */
 const MAX_UPLOAD_BYTES = defaultLimits.maxFileBytes
@@ -79,6 +82,7 @@ const MAX_AVATAR_BYTES = 16 * 1024 * 1024
 
 /** Images served back to the browser, and the only types an avatar upload takes. */
 const INLINE_IMAGES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"])
+const WidthQuery = Schema.NumberFromString.check(Schema.isInt(), Schema.isGreaterThan(0))
 
 const jsonError = (status: number, message: string) => HttpServerResponse.jsonUnsafe({ error: message }, { status })
 
@@ -138,6 +142,22 @@ export const layer = Layer.unwrap(
     const config = yield* AppConfig
     const accounts = yield* Accounts
     const formats = yield* Formats
+    // Only pending jobs live in memory; completed bytes live on disk. An abandoned HTTP
+    // request doesn't cancel a native job and let its replacement generate it twice.
+    const thumbnails = new Map<string, ReturnType<typeof formats.thumbnail>>()
+    const thumbnail = Effect.fnUntraced(function* (path: string, width: ReturnType<typeof mediaWidth>) {
+      const key = `${path}:${width}`
+      let job = thumbnails.get(key)
+      if (!job) {
+        job = yield* Effect.cached(
+          formats
+            .thumbnail({ dataDir: config.dataDir, path, width })
+            .pipe(Effect.ensuring(Effect.sync(() => thumbnails.delete(key))), Effect.uninterruptible)
+        )
+        thumbnails.set(key, job)
+      }
+      return yield* job
+    })
     const reader = yield* Reader
     const writer = yield* Writer
     // Media an import has written and not yet recorded, which the sweep leaves alone.
@@ -526,18 +546,46 @@ export const layer = Layer.unwrap(
     const mediaFile = Effect.gen(function* () {
       const request = yield* HttpServerRequest.HttpServerRequest
       const user = yield* CurrentUser
-      const mediaId = new URL(request.url, "http://media").searchParams.get("id") ?? ""
+      const query = new URL(request.url, "http://media").searchParams
+      const mediaId = query.get("id") ?? ""
       const file = yield* reader.GetMediaFile({ userId: user.id, mediaId })
       // Only images a browser shows as images; anything else stored is never served inline.
       if (!INLINE_IMAGES.has(file.mime)) return jsonError(404, "there's no such image")
-      const bytes = yield* readMedia(config.dataDir, file.path)
-      if (bytes === undefined) return jsonError(404, "there's no such image")
+      const requested = query.get("w")
+      const width = requested === null ? Option.none<number>() : Schema.decodeUnknownOption(WidthQuery)(requested)
+      if (requested !== null && Option.isNone(width)) {
+        return jsonError(400, "w must be a positive pixel width")
+      }
+      const derivative = Option.isNone(width) ? null : yield* thumbnail(file.path, mediaWidth(width.value))
+      const path = derivative?.path ?? file.path
+      const original = derivative === null || derivative.original
+      const headers = {
+        "cache-control": "private, max-age=31536000, immutable",
+        "x-content-type-options": "nosniff",
+        etag: `"${path.split("/").pop()!}"`
+      }
+      const exists = yield* Effect.promise(() =>
+        stat(join(config.dataDir, path)).then(
+          () => true,
+          () => false
+        )
+      )
+      if (!exists) return jsonError(404, "there's no such image")
+      if (
+        request.headers["if-none-match"]
+          ?.split(",")
+          .some((tag) => tag.trim().replace(/^W\//, "") === headers.etag || tag.trim() === "*")
+      ) {
+        return HttpServerResponse.empty({ status: 304, headers })
+      }
+      const bytes = yield* Effect.tryPromise(() => readFile(join(config.dataDir, path)))
       return HttpServerResponse.uint8Array(bytes, {
-        contentType: file.mime,
-        headers: { "cache-control": "private, no-store", "x-content-type-options": "nosniff" }
+        contentType: original ? file.mime : "image/webp",
+        headers
       })
     }).pipe(
       Effect.catchTag("NotFound", () => Effect.succeed(jsonError(404, "there's no such image"))),
+      Effect.catchTag("ThumbnailFailed", () => Effect.succeed(jsonError(404, "there's no such image"))),
       Effect.catch((error) =>
         Effect.logError("reading a media file failed", error).pipe(Effect.as(jsonError(500, "the file can't be read")))
       )
