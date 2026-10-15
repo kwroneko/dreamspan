@@ -72,6 +72,9 @@ describe("media files", () => {
       const derivative = `${recorded!}.thumb-v1-192.webp`
       writeFileSync(derivative, "synthetic derivative")
       utimesSync(derivative, twoHoursAgo(), twoHoursAgo())
+      const fallback = `${recorded!}.original-v1`
+      writeFileSync(fallback, "")
+      utimesSync(fallback, twoHoursAgo(), twoHoursAgo())
       const folder = join(config.dataDir, "media", "ab")
       mkdirSync(folder, { recursive: true })
       const orphan = join(folder, "ab".padEnd(64, "0"))
@@ -80,6 +83,9 @@ describe("media files", () => {
       const orphanDerivative = `${orphan}.thumb-v1-192.webp`
       writeFileSync(orphanDerivative, "synthetic orphan derivative")
       utimesSync(orphanDerivative, twoHoursAgo(), twoHoursAgo())
+      const orphanFallback = `${orphan}.original-v1`
+      writeFileSync(orphanFallback, "")
+      utimesSync(orphanFallback, twoHoursAgo(), twoHoursAgo())
       for (const file of [orphan, leftover, recent]) writeFileSync(file, "x")
       for (const file of [orphan, leftover, recorded!]) utimesSync(file, twoHoursAgo(), twoHoursAgo())
 
@@ -91,7 +97,9 @@ describe("media files", () => {
       assert.isFalse(existsSync(orphan))
       assert.isFalse(existsSync(leftover))
       assert.isFalse(existsSync(orphanDerivative))
+      assert.isFalse(existsSync(orphanFallback))
       assert.isTrue(existsSync(derivative))
+      assert.isTrue(existsSync(fallback))
       assert.isTrue(existsSync(recent))
       assert.isTrue(existsSync(recorded!))
     })

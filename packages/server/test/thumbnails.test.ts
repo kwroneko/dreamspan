@@ -1,10 +1,10 @@
 import { assert, layer } from "@effect/vitest"
 import { Effect } from "effect"
 import sharp from "sharp"
-import { readdirSync, statSync, writeFileSync, watch } from "node:fs"
+import { readdirSync, rmSync, statSync, writeFileSync, watch } from "node:fs"
 import { basename, dirname, join } from "node:path"
 import { client, serverLayer, serverPort, testConfig } from "./support/config.ts"
-import { largeImagePng } from "./support/stLargeImages.ts"
+import { largeImagePng, oversizedPortraitPng } from "./support/stLargeImages.ts"
 import { chunk } from "./formats/support.ts"
 import { Reader } from "../src/db/Database.ts"
 
@@ -32,6 +32,41 @@ const get = (id: string, suffix = "", headers: Record<string, string> = alice) =
 const bytesOf = (response: Response) => Effect.promise(async () => Buffer.from(await response.arrayBuffer()))
 
 layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" })("image thumbnails", (it) => {
+  it.effect("review: accepted large valid PNG avatars remain displayable through sized URLs", () =>
+    Effect.gen(function* () {
+      const bytes = yield* Effect.promise(oversizedPortraitPng)
+      const { id } = yield* upload(bytes, "Review 48MP")
+      assert.strictEqual((yield* get(id)).status, 200)
+      assert.strictEqual(
+        (yield* get(id, "&w=192")).status,
+        200,
+        "a valid avatar accepted by upload must remain visible in the grid"
+      )
+      const reader = yield* Reader
+      const api = yield* client(alice)
+      const user = yield* api.Whoami()
+      const source = yield* reader.GetMediaFile({ userId: user.id, mediaId: id })
+      const marker = join(config.dataDir, `${source.path}.original-v1`)
+      const modified = statSync(marker).mtimeMs
+      const original = yield* get(id)
+      yield* bytesOf(original)
+      for (const width of [96, 192, 384, 768]) {
+        const response = yield* get(id, `&w=${width}`)
+        assert.strictEqual(response.status, 200)
+        assert.strictEqual(response.headers.get("content-type"), "image/png")
+        assert.strictEqual(response.headers.get("etag"), original.headers.get("etag"))
+        assert.strictEqual(response.headers.get("cache-control"), "private, max-age=31536000, immutable")
+        assert.deepStrictEqual(yield* bytesOf(response), bytes)
+        assert.strictEqual(statSync(marker).mtimeMs, modified)
+      }
+      assert.strictEqual(
+        (yield* get(id, "&w=96", { ...alice, "If-None-Match": original.headers.get("etag")! })).status,
+        304
+      )
+      assert.strictEqual((yield* get(id, "&w=96", { "Remote-User": "thumb-bob" })).status, 404)
+    })
+  )
+
   it.effect("snaps up, outputs WebP, keeps aspect ratio, never enlarges, and keeps originals", () =>
     Effect.gen(function* () {
       const original = largeImagePng(42, 1000, 500)
@@ -124,7 +159,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
     })
   )
 
-  it.effect("returns a controlled error for corrupt pixels and preserves APNG animation", () =>
+  it.effect("returns 404 for corrupt or missing files and preserves APNG animation", () =>
     Effect.gen(function* () {
       const broken = yield* upload(largeImagePng(46, 100, 50))
       const reader = yield* Reader
@@ -132,7 +167,9 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
       const user = yield* api.Whoami()
       const file = yield* reader.GetMediaFile({ userId: user.id, mediaId: broken.id })
       writeFileSync(join(config.dataDir, file.path), "broken")
-      assert.strictEqual((yield* get(broken.id, "&w=96")).status, 422)
+      assert.strictEqual((yield* get(broken.id, "&w=96")).status, 404)
+      rmSync(join(config.dataDir, file.path))
+      assert.strictEqual((yield* get(broken.id, "&w=96")).status, 404)
       const png = largeImagePng(47, 100, 50)
       const animation = Buffer.concat([
         png.subarray(0, 33),

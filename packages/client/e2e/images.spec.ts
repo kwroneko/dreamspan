@@ -1,6 +1,6 @@
 import { join } from "node:path"
 import { expect, test } from "@playwright/test"
-import { writeLargeImageStFolder } from "../../server/test/support/stLargeImages.ts"
+import { oversizedPortraitPng, writeLargeImageStFolder } from "../../server/test/support/stLargeImages.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "60" })
@@ -66,5 +66,37 @@ for (const width of [1440, 390]) {
     } finally {
       await context.close()
     }
+  })
+}
+
+for (const width of [1440, 390]) {
+  test(`accepted 48MP avatars display through sized URLs at ${width}`, async ({ page }) => {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
+    await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+    const name = `Large avatar ${width}`
+    const imported = await page.request.post(`${server().url}/library/import?name=large-${width}.json`, {
+      data: Buffer.from(JSON.stringify({ spec: "chara_card_v2", spec_version: "2.0", data: { name } })),
+      headers: { origin: server().url, "content-type": "application/octet-stream" }
+    })
+    expect(imported.ok()).toBeTruthy()
+    await page.goto(`${server().url}/library`)
+    await page.getByRole("link", { name: `Edit ${name}`, exact: true }).click()
+    const bytes = await oversizedPortraitPng()
+    const uploaded = page.waitForResponse((response) => response.url().includes("/library/avatar?"))
+    await page.getByLabel("Choose an avatar, or drop it here").setInputFiles({
+      name: "large.png",
+      mimeType: "image/png",
+      buffer: bytes
+    })
+    expect((await uploaded).status()).toBe(200)
+    const avatar = page.getByRole("img", { name: "The card's avatar" })
+    await expect(avatar).toHaveAttribute("src", /&w=(96|192|384|768)$/)
+    await expect.poll(() => avatar.evaluate((img) => (img as HTMLImageElement).naturalWidth)).toBe(8000)
+    await avatar.evaluate((img) => (img as HTMLImageElement).decode())
+    if (process.env.SCREENSHOT_DIR)
+      await page.screenshot({ path: join(process.env.SCREENSHOT_DIR, `large-avatar-${width}.png`) })
+    await page.reload()
+    await expect.poll(() => avatar.evaluate((img) => (img as HTMLImageElement).naturalHeight)).toBe(6000)
+    await avatar.evaluate((img) => (img as HTMLImageElement).decode())
   })
 }

@@ -585,7 +585,7 @@ export const layer = Layer.unwrap(
       })
     }).pipe(
       Effect.catchTag("NotFound", () => Effect.succeed(jsonError(404, "there's no such image"))),
-      Effect.catchTag("ThumbnailFailed", () => Effect.succeed(jsonError(422, "the image can't be resized"))),
+      Effect.catchTag("ThumbnailFailed", () => Effect.succeed(jsonError(404, "there's no such image"))),
       Effect.catch((error) =>
         Effect.logError("reading a media file failed", error).pipe(Effect.as(jsonError(500, "the file can't be read")))
       )

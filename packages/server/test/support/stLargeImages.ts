@@ -3,8 +3,15 @@
 import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { crc32, deflateSync } from "node:zlib"
+import sharp from "sharp"
 import { cardChunk } from "../formats/support.ts"
 import { writeRealisticStFolder } from "./stRealistic.ts"
+
+/** A valid 48MP portrait compressed below the avatar upload's 16 MiB byte limit. */
+export const oversizedPortraitPng = () =>
+  sharp({ create: { width: 8000, height: 6000, channels: 3, background: "#884422" } })
+    .png()
+    .toBuffer()
 
 const chunk = (type: string, data = Buffer.alloc(0)) => {
   const out = Buffer.alloc(data.length + 12)
