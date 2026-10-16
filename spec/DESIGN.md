@@ -183,6 +183,8 @@ Where the owner corrected an earlier proposal, the corrected version is recorded
   - the **in-character name**: what `{{char}}` resolves to and what the model sees
   - a **display name**: the in-character name by default, but it can be set to something else, and then it's the name the UI shows the card by, while the in-character name stays the one sent to the model and used in templates
   - a **subtitle**: the version string
+- **[D]** Making a variant is called **forking** the card, with the semantics that go with it: a fork is the child of the card it was forked from, its parent (owner, 2026-10-16).
+- **[D]** There must be an easy way to find all the variants of a card (owner, 2026-10-16).
 - **[D]** ST's problems with this (owner, 2026-10-16): cards have a `character_version` field that ST can show as a subtitle, but it's hidden until enabled in settings, it's settable only in the advanced definitions, and cloning sets neither it nor the display name, so a clone is an identical card and the original can only be told apart by the chats tied to it.
 - **[P]** Three layers, the same mechanism for cards, presets and lorebooks:
   - **Base:** the imported or upstream version. Re-importing a new version adds a base revision.
