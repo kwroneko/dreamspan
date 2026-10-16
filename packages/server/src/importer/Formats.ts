@@ -21,6 +21,8 @@ import {
   type StPersona,
   type StSettings
 } from "./ops.ts"
+import type { ThumbnailFailed, ThumbnailResult } from "./ops.ts"
+import type { MEDIA_WIDTHS } from "@rp/shared/media.ts"
 
 /**
  * The format worker failed while it had the file: it crashed, ran out of memory, ran past
@@ -36,6 +38,11 @@ export class FormatWorkerFailed extends Schema.TaggedError<FormatWorkerFailed>()
 export class Formats extends Context.Service<
   Formats,
   {
+    readonly thumbnail: (input: {
+      readonly dataDir: string
+      readonly path: string
+      readonly width: (typeof MEDIA_WIDTHS)[number]
+    }) => Effect.Effect<ThumbnailResult, ThumbnailFailed | FormatWorkerFailed>
     /** Parses a file in a worker. A buffer of its own is transferred, and unusable here afterwards. */
     readonly parse: (bytes: Uint8Array, fileName: string) => Effect.Effect<ParsedFile, FormatWorkerFailed>
     /** Writes a document as a file in a worker. Files' buffers of their own are transferred. */
@@ -118,6 +125,7 @@ export const layer = (options: FormatsOptions) =>
         Formats,
         Effect.map(ReaderPool.client(FormatOps), (client) =>
           Formats.of({
+            thumbnail: (input) => workerFailures(client.Thumbnail(input)),
             parse: (bytes, fileName) => workerFailures(client.Parse({ bytes: ownBuffer(bytes), fileName })),
             export: (input) =>
               workerFailures(

@@ -27,6 +27,8 @@ FROM node:24-slim
 WORKDIR /app
 ENV NODE_ENV=production HOST=0.0.0.0 PORT=8080 DATA_DIR=/data
 COPY --from=prod-deps /app/node_modules ./node_modules
+# sharp is external to the formats bundle. npm's production optional dependencies above
+# include its platform-specific native addon and libvips (no system packages/downloads).
 COPY package.json package-lock.json ./
 COPY packages/shared/package.json packages/shared/
 COPY packages/shared/src packages/shared/src
