@@ -44,7 +44,7 @@ The new card opens in the editor. The parent and every chat using it are untouch
 Revised 2026-10-16 from the owner's decisions (DESIGN §3.4, §4). The earlier "chat fork" and the timeline copy as the main mechanism are withdrawn.
 
 - **Which card a chat uses belongs to the branch, not to a message.** A new fork of the chat, made from any point, starts with the cards its branch uses now; existing forks keep theirs.
-- **Fork for this chat** is the typical way to customize a card for one chat: it forks the card (surface 1's dialog, subtitle prefilled with the chat's name) and swaps this branch to the fork. Going back a few messages, or redoing much of the story, keeps it.
+- **Fork for this chat** is the typical way to customize a card for one chat: it forks the card (surface 1's dialog) and swaps this branch to the fork. The result is an ordinary fork, with its tile in the grid like any other, so it can't get lost and a branch switched away from it can switch back (surface 3). Going back a few messages, or redoing much of the story, keeps it.
 - **Editing a card edits it wherever it's used**, every chat and branch bound to it included. A card made with Fork for this chat is used by this branch and the forks made from it since, so editing it changes all of them; a fork of the chat that should differ gets its own Fork for this chat.
 - **What you're editing is chosen before typing.** The card panel in a chat names the card the branch uses, with "used by N chats", and offers Fork for this chat. A text box always edits one definite card.
 - **Explicit Save, with the draft kept on the server** (DESIGN §6.2); applying fields as you type was withdrawn (owner: with continuous saving there's no real revision and no diff view). A draft of a card shows wherever that card is opened, marked unsaved, with Save and Discard, and never reaches the model; the panel says so while one exists.
@@ -54,7 +54,6 @@ Revised 2026-10-16 from the owner's decisions (DESIGN §3.4, §4). The earlier "
 
 ## Open
 
-- Whether forks made with Fork for this chat get their own tile in the grid like any fork, or show only in their family's Forks tree and in their chat.
 - Which kinds of chat state follow the messages and which belong to the branch (DESIGN §3.4).
 
 - What chats using a deleted card do (surface 11).
