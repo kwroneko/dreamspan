@@ -4,7 +4,7 @@
 
 ## The model in one paragraph
 
-A fork is a card of its own from the moment it's made: a full copy of its parent's current revision, with its own names, its own revisions and its own chats. Its only tie to the parent is the recorded relationship. A card's **family** is every card connected by fork relationships. A **chat fork** is a fork made from inside a chat for that chat alone: it has no place in the library or the grid, and "Save as a library card" turns it into an ordinary fork.
+A fork is a card of its own from the moment it's made: a full copy of its parent's current revision, with its own names, its own revisions and its own chats. Its only tie to the parent is the recorded relationship. A card's **family** is every card connected by fork relationships. Forks exist only in the library. A chat's own changes to a card are not a fork: see "A chat's changes to a card" below (revised 2026-10-16 after the owner's questions; the earlier "chat fork" is withdrawn).
 
 ## Surfaces
 
@@ -15,21 +15,19 @@ A fork is a card of its own from the moment it's made: a full copy of its parent
 
 The new card opens in the editor. The parent and every chat using it are untouched.
 
-**2. Changing a card from inside a chat.** The card's definition sits in the right-hand panel of the chat. Editing it there ends in an explicit Save that asks the scope:
-- **This chat only**, from the message shown, on this branch (or on every branch of this chat). The first such save makes a chat fork and switches this chat to it from that position, as a state event with a marker in the stream. Later saves from the same chat edit that chat fork.
-- **Everywhere**: edits the card itself, listing the chats it changes (used by N chats). Its forks and chat forks are not affected, and the dialog says so if it has any.
+**2. Editing a card in a chat.** This is the main way cards get edited, as in ST. See "A chat's changes to a card" below.
 
-**3. Switching a chat to another fork.** In the chat's cast, each character has **Use another version**. It shows the family tree, the chat forks of this chat included. Picking one applies from the message shown on this branch, as a state event. This is how a story that moved on picks up a fork made for it.
+**3. Switching a chat to another fork.** In the chat's cast, each character has **Use another version**. It shows the family tree. Picking one applies from the message shown on this branch, as a state event. This is how a story that moved on picks up a fork made for it.
 
-**4. Finding every fork of a card.** The card panel has a **Forks** section: the whole family as a tree, from the card nobody forked down to every fork of a fork. Each entry shows display name, subtitle, when it was last used and how many chats use it, and opens in one click. The tree is the same from any member. Chat forks appear under their parent in a collapsed "Made in chats" group, each naming its chat.
+**4. Finding every fork of a card.** The card panel has a **Forks** section: the whole family as a tree, from the card nobody forked down to every fork of a fork. Each entry shows display name, subtitle, when it was last used and how many chats use it, and opens in one click. The tree is the same from any member.
 
-**5. Telling forks apart elsewhere.** Every place that lists cards shows the display name with the subtitle: the grid, the speaker switcher's tabs, the cast, search results, pickers. Search matches display name, subtitle and in-character name. Forks are separate tiles in the grid; chat forks never are.
+**5. Telling forks apart elsewhere.** Every place that lists cards shows the display name with the subtitle: the grid, the speaker switcher's tabs, the cast, search results, pickers. Search matches display name, subtitle and in-character name. Forks are separate tiles in the grid.
 
 **6. Chats of a fork.** Opening a fork lists exactly the chats that use it (CHATS.md), so finding "the chat with that version" is opening that version.
 
 **7. Comparing with the parent.** Any fork can **Compare with parent**, or with any other member of the family: a read-only field diff. Taking something over is ordinary editing.
 
-**8. Saving a chat fork to the library.** **Save as a library card** on a chat fork opens the Fork dialog (surface 1). The chat goes on using the same card, now a library fork.
+**8. Making a fork from a chat's changes.** **Fork with this chat's changes** opens the Fork dialog (surface 1) with the card as this chat has it at the message shown. The chat can then switch to it (surface 3).
 
 **9. Imported ST duplicates.** **Mark as a fork of…** on a card picks its parent from the library. Only the relationship is recorded; neither card's content changes. **Unlink** removes it. A card's ST `character_version` imports as its subtitle and exports from it.
 
@@ -41,7 +39,20 @@ The new card opens in the editor. The parent and every chat using it are untouch
 
 **13. Personas** are cards, so all of the above applies to them unchanged.
 
+## A chat's changes to a card
+
+- **Two things you can edit, chosen before typing, never at save time.** The card panel in a chat shows the card as this chat has it at the message shown, and says which you're editing: **the card** (used by N chats; the default, since users expect a card edit to change it everywhere) or **this chat's changes**. A text box always edits one definite thing, so what you see when you come back to it is never ambiguous.
+- **No unsaved state.** Card fields apply as you type, as in ST, with the undo history kept on the server. There is no Save, so there are no unsaved changes to find or lose. For the card itself, each editing session becomes a revision (History). This departs from DESIGN §6.2's [P] "explicit commit" for cards and needs the owner's confirmation; message edits keep their explicit commit, because there it decides between a new version and an amendment.
+- **This chat's changes live on the timeline**, like every other piece of chat state (DESIGN §3.4) and like the agent's card edits (§4.1a): each is a field patch, an event at the end of the branch shown. The card this chat sees at any message is the card plus the patches on the path up to that message. So:
+  - a later change (at message 200) is a new event at 200; at message 150 the chat still has only the change made at 100
+  - branching at the point of a change gives the card as it was then, without later changes
+  - branching before the first change gives the card without any of this chat's changes
+  - to change the card from an earlier point, branch there first; changes never apply backwards
+- **The card itself is not on the timeline.** An edit to the card applies everywhere it's used, old branches of every chat included, because that is what "the card" means. This chat's patched fields keep their patched text; the panel marks them ("changed in this chat").
+- **Each generation records the card exactly as it used it** (revision plus patches), shown in its run inspector.
+
 ## Open
 
 - What chats using a deleted card do (surface 11).
-- Whether "on every branch of this chat" belongs in the scope choice of surface 2, given DESIGN §3.4's open question about identity.
+- Card fields applying as you type, without Save (above): needs the owner's confirmation.
+- A card edit can change text the chat's patches were written against (a description fixed in the library while this chat patched the outfit). The panel shows both, but nothing checks that they still agree.
