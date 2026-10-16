@@ -16,9 +16,10 @@
 - **[D]** The character view (owner's sketch): chat selector on the left, the chat in the middle, character data on the right.
 - **[P]** A character's chats are ordered by when that character last spoke in them, so a chat they left sinks as the story goes on without them. Opening a chat from a character lands on the line where that character spoke last. Chats they're no longer in on any line go in a "Was in" section.
 - **[P]** The selector has two sections: "Just X" (X is the only character the model writes; personas and cards you play don't count) and "With others". The portrait opens the chat X spoke in last.
-- **[P]** A chat is listed under the character, with a badge for the variant it uses; opening a variant filters to its chats.
+- **[P], superseded below** A chat is listed under the character, with a badge for the variant it uses; opening a variant filters to its chats.
 - **[O]** That assumes a well-defined main variant (owner, 2026-10-16), and there isn't one. The data model has a root (the imported or upstream base) with variants as changes over it, possibly variants of variants; but the root is just where the lineage started, often a version the user no longer uses. And duplicates imported from ST are separate cards with no lineage at all.
-- **[P]** A character in the grid is a lineage: its base and every variant of it, with none of them "main". Its tile shows the variant used most recently (label and subtitle, so it's recognizable); the character view lists the chats of every variant in the lineage with their badges. Cards imported as separate ST duplicates stay separate characters until the user links one to another ("this is a version of ⟨card⟩"), which re-expresses it as a variant over the other.
+- **[D] Rejected:** one tile per lineage showing its most recently used variant (owner, 2026-10-16: "I don't get what purpose this serves"). It adds a layer, and a UI to pick the variant, everywhere a character is chosen.
+- **[P]** Each variant is a card of its own wherever cards appear, told apart by its display name and subtitle (DESIGN §4). The lineage is a relationship, like a named fork's: the card shows "variant of ⟨card⟩" and its other versions, without grouping them. A chat is listed under the exact card it uses, so no variant badge is needed. Making a variant asks for the display name and subtitle up front. ST's `character_version` imports as the subtitle and exports from it.
 - **[O]** Whether "last spoke" should count a character who is present but silent for a long stretch.
 
 ## Chats with several characters
