@@ -42,7 +42,11 @@ The new card opens in the editor. The parent and every chat using it are untouch
 ## A chat's changes to a card
 
 - **Two things you can edit, chosen before typing, never at save time.** The card panel in a chat shows the card as this chat has it at the message shown, and says which you're editing: **the card** (used by N chats; the default, since users expect a card edit to change it everywhere) or **this chat's changes**. A text box always edits one definite thing, so what you see when you come back to it is never ambiguous.
-- **No unsaved state.** Card fields apply as you type, as in ST, with the undo history kept on the server. There is no Save, so there are no unsaved changes to find or lose. For the card itself, each editing session becomes a revision (History). This departs from DESIGN §6.2's [P] "explicit commit" for cards and needs the owner's confirmation; message edits keep their explicit commit, because there it decides between a new version and an amendment.
+- **Explicit Save, with the draft kept on the server** (DESIGN §6.2). Applying fields as you type was proposed and withdrawn (owner, 2026-10-16: with continuous saving there's no real revision and no diff view). Automatic snapshots would only be arbitrary slices of typing, and a diff of what you're about to save needs a point you choose.
+  - **What you see when you come back to a box:** your draft, marked unsaved, with Save (showing the diff against the saved text) and Discard. Because the target is chosen before typing, a draft belongs to one definite thing: a draft of the card shows wherever that card is opened, in the library or any chat; a draft of this chat's changes belongs to the branch, as the composer does (DESIGN §6.2), and shows only there.
+  - **A draft never reaches the model.** The panel says so while one exists ("not saved: the next reply uses the saved card").
+  - Saving this chat's changes places them at the end of the branch as it is when you save, and the Save says at which message.
+
 - **This chat's changes live on the timeline**, like every other piece of chat state (DESIGN §3.4). The first change takes a **copy of the whole card** as it is at that moment, as an event at the end of the branch shown, with the change applied; later changes are further events on that copy. The card this chat sees at any message is what the path up to that message says. So:
   - a later change (at message 200) is a new event at 200; at message 150 the chat still has only the change made at 100
   - branching at the point of a change gives the card as it was then, without later changes
@@ -57,4 +61,3 @@ The new card opens in the editor. The parent and every chat using it are untouch
 ## Open
 
 - What chats using a deleted card do (surface 11).
-- Card fields applying as you type, without Save (above): needs the owner's confirmation.
