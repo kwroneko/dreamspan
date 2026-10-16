@@ -533,6 +533,7 @@ export class ChatSession {
   // scrolled away; read from the server's drafts when the chat opens, so a reload opens them again.
 
   private readonly editors = new Map<MessageEditorKey, MessageDraft>()
+  private readonly editSlots = new Map<VersionId, SlotId>()
   private readonly userId: string
   /** This browser's copies of the editors' text were sent (once, as the chat opens). */
   private editorsRestored = false
@@ -557,8 +558,26 @@ export class ChatSession {
     return this.editors.get(key)
   }
 
+  /** An edit stays on its slot when an import or another tab selects another version. */
+  editForSlot(slotId: SlotId, versions: ReadonlyArray<Version>): MessageDraft | undefined {
+    for (const editor of this.editors.values()) {
+      if (editor.target._tag !== "Edit") continue
+      const id = editor.target.versionId
+      if (this.editSlots.get(id) === slotId || versions.some((version) => version.id === id)) return editor
+    }
+    return undefined
+  }
+
+  /** Remembers the slot of a restored edit once its source version was read. */
+  bindEditor(editor: MessageDraft, slotId: SlotId) {
+    if (editor.target._tag === "Edit" && this.editors.get(editorKey(editor.target)) === editor) {
+      this.editSlots.set(editor.target.versionId, slotId)
+    }
+  }
+
   /** Opens an editor, or the one already open there, with its text. */
-  openEditor(target: MessageDraftTarget, initial: string): MessageDraft {
+  openEditor(target: MessageDraftTarget, initial: string, slotId: SlotId): MessageDraft {
+    if (target._tag === "Edit") this.editSlots.set(target.versionId, slotId)
     const key = editorKey(target)
     const open = this.editors.get(key)
     if (open) return open
@@ -572,6 +591,7 @@ export class ChatSession {
     const key = editorKey(editor.target)
     if (this.editors.get(key) !== editor) return
     this.editors.delete(key)
+    if (editor.target._tag === "Edit") this.editSlots.delete(editor.target.versionId)
     this.editorsChanged()
   }
 

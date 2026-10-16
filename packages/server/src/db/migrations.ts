@@ -229,7 +229,27 @@ export const migrations = {
   "0036_composer_choice": runAll(composerChoiceSchema),
   // A branch's name, on the message that starts it (the slot among its alternates; NameBranch).
   // Null: unnamed, shown as "Branch k".
-  "0039_branch_names": runAll([`ALTER TABLE slots ADD COLUMN branch_name TEXT`])
+  "0039_branch_names": runAll([`ALTER TABLE slots ADD COLUMN branch_name TEXT`]),
+  // Imports may select changed ST text until a local slot mutation takes over. Existing
+  // slots at revision 1 have never been changed here; others are conservatively kept.
+  "0041_st_import_selection": runAll([
+    `ALTER TABLE slots ADD COLUMN st_import_row_version INTEGER NOT NULL DEFAULT 1 CHECK (st_import_row_version > 0)`
+  ]),
+  // An import that forks a shared ST path copies deleted messages and swipes with their bin
+  // item, so one deletion still covers both copies. Deleting it for good may empty every
+  // row that carries the item, not only the row the item names.
+  "0042_bin_item_copies": runAll([
+    `DROP TRIGGER versions_model_content_frozen`,
+    `CREATE TRIGGER versions_model_content_frozen BEFORE UPDATE OF content ON versions
+      WHEN OLD.writer = 'model' AND OLD.status <> 'generating' AND NEW.content IS NOT OLD.content
+        AND NOT (NEW.purged_at IS NOT NULL AND NEW.content = '' AND EXISTS (
+          SELECT 1 FROM slots s JOIN chats c ON c.id = s.chat_id
+            JOIN bin_items b ON b.user_id = c.owner_user_id AND b.chat_id = c.id
+          WHERE s.id = OLD.slot_id AND (
+            (b.id = OLD.bin_item_id AND b.kind = 'version')
+            OR (b.id = s.bin_item_id AND b.kind IN ('message', 'branch')))))
+      BEGIN SELECT RAISE(ABORT, 'model-written versions are immutable once generated; create a new version'); END`
+  ])
 }
 
 export const Migrations = SqliteMigrator.layer({ loader: SqliteMigrator.fromRecord(migrations) })

@@ -400,8 +400,11 @@ export const makeBin = (sql: SqlClient.SqlClient, limits: BinLimits, now: () => 
         entity: "entities",
         connection: "connections"
       }[item.kind]
+      // An import's copy of a deleted branch root carries the item and the root's marker too.
+      if (item.kind === "branch") {
+        yield* sql`UPDATE slots SET branch_deleted = 0 WHERE bin_item_id = ${itemId} AND branch_deleted = 1`
+      }
       yield* sql.unsafe(`UPDATE ${table} SET deleted_at = NULL, bin_item_id = NULL WHERE bin_item_id = ?`, [itemId])
-      if (item.kind === "branch") yield* sql`UPDATE slots SET branch_deleted = 0 WHERE id = ${item.target_id}`
       yield* sql`DELETE FROM bin_items WHERE id = ${itemId}`
       if ((messages || item.kind === "chat") && item.chat_id !== null) {
         yield* sql`UPDATE chats SET row_version = row_version + 1 WHERE id = ${item.chat_id}`
