@@ -1,6 +1,6 @@
 # Where the build copied ST instead of the design
 
-**Status**: Audit and proposal, 2026-10-16. Everything under "Corrections" is **Proposed**; nothing here is Decided until the owner confirms it.
+**Status**: Audit, 2026-10-16. Its proposed corrections were rejected by the owner the same day (see the end).
 
 ## Why this exists
 
@@ -44,23 +44,6 @@ Method: two read-only code audits (chat side; library, settings and context side
 
 Speaker always visible, with Members / Personas / All cards tabs, recent speakers and joining on pick; composer text with Generate as a one-turn direction; queued sends; a composer per branch; versions on every message, "Write your own version", failed generations as versions, explicit branches; chat state as events on the graph; stable `{{char}}`/`{{user}}` bindings (in our layouts); card page with Continue, New chat and all chats as peers; pending chats; Never used; recents by last message; card edits from a chat scoped "Only in this chat" or "Everywhere (used by N)"; connections without profiles, a base URL on every kind; server drafts, revisions, History, three-way merge on re-import; the ST import mapping itself.
 
-## Corrections (Proposed)
+## Corrections: rejected
 
-A correction round, built and walked through on the realistic synthetic data before anything else:
-
-1. **Assembly.** Make the layout always explicit and shown: ST-compatible becomes one named layout, the default for chats imported from ST (§8.1 [O] proposes "an imported chat sends what ST sent") and never picked silently by cast size. New chats use the design's labelled blocks. The tail directive names the speaker and who not to write for on its own, using the preset's prompts only when they exist. No phantom author's note outside ST mode. Send card system prompts and post-history instructions in our layouts (where the preset's markers allow them), and send card modules at their placement.
-2. **Notes as the design's object.** Owners: card, chat, persona, global. Conditions: always, on this character's turn, while this character is present (decision model later). A card's notes are off in other chats unless imported from `depth_prompt`. New notes default to the tail. Stash = off without loss (already true). No "author's note" kind or ST labels in the UI; imported author's notes become ordinary chat notes at their depth.
-3. **Chats, not groups.** Remove group tiles, group pages and the three group RPCs. Home is the chat list, recent first by last message, each chat with its cast collage; the character grid moves to the library and keeps one click into a conversation. New chat picks any number of cards up front. Titles are generated from the chat (not the first character's name) and renaming never changes anything else.
-4. **Composer.** Send as X and Generate X only. Remove the turn-order widget and the empty-Send reply; choosing who replies is choosing the speaker. Greetings: the pending chat shows the chosen card's greeting with alternates selectable, not every member at random.
-5. **Presets.** The composer strip shows the active preset and where it comes from. Per-chat prompt toggles as state events (the chat layer for presets). Rename "SillyTavern's default preset" to the app default.
-6. **Lorebooks.** Keep keyword matching as the fallback; keep the tail block's entries until the next compaction boundary so it stops changing every turn; entry editing.
-7. **Library.** Variants grouped under one character; a Promote button for chat overrides.
-8. **Strings.** No "ST's …" in user-visible text except in import reports and the ST-compatible layout's own description.
-
-**ST-COMPARISON items not to build as written:** #2 (ST's Natural/Pooled/Auto group modes; orchestration modes replace them), #14 (group names), #15 (every member greets), #23–#24 (move messages, range delete; keep only if the owner wants them), #27 (ST extension actions, out of scope per §1.5). #7 becomes the notes work above, not a lighter single author's note.
-
-## Decisions for the owner
-
-- **Home screen:** the chat list (DESIGN §2.1 [P], recommended) or the character grid.
-- **Groups:** remove the concept (recommended), or keep a saved cast as a shortcut for starting chats with the same characters.
-- **Imported chats' layout:** ST-compatible by default, so an imported chat sends what ST sent (recommended), or the design's layout from the first send.
+A list of corrections and three "decisions for the owner" (chat list or character grid as home, removing groups, which layout imported chats use) were here. The owner rejected them on 2026-10-16: "These are all bad ideas aside from what you directly quoted from me and even then you don't actually have any good design for it." They patched findings one by one, choosing between ST's shape and a thin alternative, with no design behind them. The findings above stand as facts about the code. What replaces them has to come from design work done with the owner, not from this list.
