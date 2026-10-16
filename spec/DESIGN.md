@@ -187,6 +187,8 @@ Where the owner corrected an earlier proposal, the corrected version is recorded
   - a **subtitle**: the version string. It is the card's own version field, ST's `character_version`, a real card field that ST can show as the subtitle: so it's part of the card's content, with its revisions, and goes in and out with the card file. It's not a separate label the app keeps beside the card (owner, 2026-10-16). Today's build has it as a separate library `subtitle`, apart from `character_version`.
 - **[D]** Making a variant is called **forking** the card, with the semantics that go with it: a fork is the child of the card it was forked from, its parent (owner, 2026-10-16).
 - **[D]** There must be an easy way to find all the variants of a card (owner, 2026-10-16).
+- **[D]** No two cards may have both the same display name and the same version: one of the two must differ. The UI enforces it when making forks or new cards, where it's required. It isn't a data-model rule, because imported cards won't respect it (owner, 2026-10-16).
+- **[P]** The same check applies when an existing card's display name or version is changed. Imported cards that collide are left as they are.
 - **[D]** ST's problems with this (owner, 2026-10-16): cards have a `character_version` field that ST can show as a subtitle, but it's hidden until enabled in settings, it's settable only in the advanced definitions, and cloning sets neither it nor the display name, so a clone is an identical card and the original can only be told apart by the chats tied to it.
 - **[P]** Three layers, the same mechanism for cards, presets and lorebooks:
   - **Base:** the imported or upstream version. Re-importing a new version adds a base revision.

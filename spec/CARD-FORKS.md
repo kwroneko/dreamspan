@@ -13,7 +13,7 @@ A fork is a card of its own from the moment it's made: a full copy of its parent
 - subtitle: the card's version field (`character_version`), focused, labelled as what tells this fork from its parent
 - in-character name: prefilled, editable, because a new premise sometimes renames the character
 
-The new card opens in the editor. The parent and every chat using it are untouched.
+The display name and version together must not match an existing card's (DESIGN §4); the dialog won't create the fork until one of them differs. The new card opens in the editor. The parent and every chat using it are untouched.
 
 **2. Editing a card in a chat.** This is the main way cards get edited, as in ST. See "A card in a chat" below.
 
