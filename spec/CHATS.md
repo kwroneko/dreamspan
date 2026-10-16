@@ -34,7 +34,7 @@
 - **[P]** Activity on a named fork bumps the fork, not its parent. Unnamed forks count toward their parent.
 - **[P]** Removing the name returns it to its parent's lines; nothing moves in the data. A named fork of a named fork points at its immediate parent.
 - **[P]** History before the fork point is shared: an edit or a new version there shows in both, and the editor says so ("also in ⟨fork⟩").
-- **[P]** Imported ST checkpoints whose name the user gave arrive as named forks; ST's automatic branch names don't count as names.
+- **[P]** Forks the user named in ST arrive as named forks. ST names a fork file `Branch #<message> - <date>`, or `Checkpoint #<n> - <date>` (`Bookmark #` in older versions) when the name is left empty; any other name is the user's, minus the ` - <date>` suffix, and so is a fork file renamed in ST's chat list. **Today the importer drops it:** a branch file merges into its parent chat and its file name is discarded (`stImportWrites.ts`, title applied only when not merged).
 - **[O]** Which version is selected in shared history: per line or shared.
 - **[O]** How long a chat's list of lines gets before the selector needs more than expanding it.
 
