@@ -146,6 +146,8 @@ Where the owner corrected an earlier proposal, the corrected version is recorded
 
 ### 3.4 Chat state lives on the graph
 - **[D] Problem:** in ST the author's note state is not tied to branch points, so the owner branches at the latest message as a checkpoint before every author's-note edit.
+- **[D]** Following the messages has a cost (owner, 2026-10-16): branching from an earlier point resets everything that follows the chat's messages. That's less intuitive than it seems, and it's a problem for everything that works this way: not every change is specific to that exact chat state, and many are wanted even in a fork that goes back earlier.
+- **[O]** So each kind of chat state has to be classed as either following the messages (causal: it belongs to what happened at that point) or belonging to the branch (kept by new forks made from any earlier point, while existing forks keep what they had). Cards are classed below (§4); notes, preset switches and toggles, presence and the "played by me" set are not yet.
 - **[P]** **Every change to chat state is an event at a position in the graph.** The state at any message is the result of replaying the events on the path to it. Chat state covers:
   - notes and which notes are active
   - card overrides
@@ -190,6 +192,9 @@ Where the owner corrected an earlier proposal, the corrected version is recorded
   - **Base:** the imported or upstream version. Re-importing a new version adds a base revision.
   - **Variant:** a named fork, stored as changes on top of the base, so upstream updates flow through. *(Rejected for forks, below.)*
   - **Chat-local override:** changes for one chat only, with no library entry. It can be **promoted** to a variant.
+- **[D]** Customizing a card for one chat is the typical case, and it's done by **forking and swapping** ("Fork for this chat" or similar): it makes a concrete card, a fork, and the chat uses it instead. Forking the chat from anywhere earlier keeps the changed card; *existing* forks of the chat keep whatever they had. This covers refining a card for a chat and then going back a few messages, or redoing much of the story (owner, 2026-10-16).
+- **[D]** Card changes that follow the messages (made at a point in the timeline, reset by branching before it) are the specific case, not the default, and users wouldn't find them intuitive. They also invalidate the cache in a default configuration. Their main purpose is tool-based autonomous card rewriting, which must always work this way: the model can't change the card for anyone else as part of a chat turn without losing every property of chat turns and swipes, and this keeps swipes redoable and reversible. They can make sense manually for the same reason, character progression (owner, 2026-10-16).
+- **[D]** Character progression needs a more convenient path that's typically used instead: not editing the card, but adding and changing other things connected to it, tied to the card *and* the chat, such as author's notes for characters (owner, 2026-10-16).
 - **[D] Rejected:** forks that follow their parent, with the parent's later changes merged into them (owner, 2026-10-16). There's no way to keep that from overwriting the changes the user made, nor for the user to make sure the result in the downstream cards is coherent; it's an effect hidden from the user and surprising; and the point of forking is to replace duplicating cards, which this doesn't allow. (It's what the build does today: a variant stores only its changes over its parent.)
 - **[P]** So a fork is a card of its own from the moment it's made: a full copy whose only tie to its parent is the recorded relationship. Nothing done to the parent changes it. The same holds for a chat's own changes to a card. Re-importing a new version of the *same* card or preset (the preset case below) is different: it's an explicit act on that one entity, merged into the user's edits there with conflicts shown, and it doesn't reach the entity's forks.
 - **[P]** Chats point to a variant and follow its latest version by default, or are pinned to a fixed revision.
@@ -328,6 +333,10 @@ Stepped history, dropped-message display and rewrite warnings without a TTL are 
 - **[P]** Creating versions or named revisions needs an explicit commit, and a commit is a clear action.
 - **[P]** Every write carries the revision it was based on, so a stale tab can never silently overwrite newer state.
 - **[D]** Search, and search and replace, everywhere: preset prompts, cards and chats.
+- **[D]** Text boxes work like a code editor (owner, 2026-10-16), and almost every text box needs it:
+  - the left edge marks new, modified and unchanged lines
+  - a diff view of the current changes against the last revision
+  - a diff browser for every earlier revision
 
 ### 6.3 Per-card preset overlays
 - **[P]** Prompt toggles or replacements attached to a card (or a card within one chat), applied when the card is present or speaking. The owner's example: "you may impersonate" for a narrator card. Cache cost is shown when an overlay changes text above the tail.

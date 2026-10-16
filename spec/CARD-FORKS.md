@@ -4,7 +4,7 @@
 
 ## The model in one paragraph
 
-A fork is a card of its own from the moment it's made: a full copy of its parent's current revision, with its own names, its own revisions and its own chats. Its only tie to the parent is the recorded relationship. A card's **family** is every card connected by fork relationships. Forks exist only in the library. A chat's own changes to a card are not a fork: see "A chat's changes to a card" below (revised 2026-10-16 after the owner's questions; the earlier "chat fork" is withdrawn).
+A fork is a card of its own from the moment it's made: a full copy of its parent's current revision, with its own names, its own revisions and its own chats. Its only tie to the parent is the recorded relationship. A card's **family** is every card connected by fork relationships. Forks exist only in the library. A chat customizes a card by forking it and swapping: see "A card in a chat" below.
 
 ## Surfaces
 
@@ -15,9 +15,9 @@ A fork is a card of its own from the moment it's made: a full copy of its parent
 
 The new card opens in the editor. The parent and every chat using it are untouched.
 
-**2. Editing a card in a chat.** This is the main way cards get edited, as in ST. See "A chat's changes to a card" below.
+**2. Editing a card in a chat.** This is the main way cards get edited, as in ST. See "A card in a chat" below.
 
-**3. Switching a chat to another fork.** In the chat's cast, each character has **Use another version**. It shows the family tree. Picking one applies from the message shown on this branch, as a state event. This is how a story that moved on picks up a fork made for it.
+**3. Switching a chat to another fork.** In the chat's cast, each character has **Use another version**. It shows the family tree. Picking one swaps the card this branch uses (see below). This is how a story that moved on picks up a fork made for it.
 
 **4. Finding every fork of a card.** The card panel has a **Forks** section: the whole family as a tree, from the card nobody forked down to every fork of a fork. Each entry shows display name, subtitle, when it was last used and how many chats use it, and opens in one click. The tree is the same from any member.
 
@@ -27,7 +27,7 @@ The new card opens in the editor. The parent and every chat using it are untouch
 
 **7. Comparing with the parent.** Any fork can **Compare with parent**, or with any other member of the family: a read-only field diff. Taking something over is ordinary editing.
 
-**8. Making a fork from a chat's changes.** **Fork with this chat's changes** opens the Fork dialog (surface 1) with the card as this chat has it at the message shown. The chat can then switch to it (surface 3).
+**8. Fork for this chat.** See "A card in a chat" below.
 
 **9. Imported ST duplicates.** **Mark as a fork of…** on a card picks its parent from the library. Only the relationship is recorded; neither card's content changes. **Unlink** removes it. A card's ST `character_version` imports as its subtitle and exports from it.
 
@@ -39,25 +39,22 @@ The new card opens in the editor. The parent and every chat using it are untouch
 
 **13. Personas** are cards, so all of the above applies to them unchanged.
 
-## A chat's changes to a card
+## A card in a chat
 
-- **Two things you can edit, chosen before typing, never at save time.** The card panel in a chat shows the card as this chat has it at the message shown, and says which you're editing: **the card** (used by N chats; the default, since users expect a card edit to change it everywhere) or **this chat's changes**. A text box always edits one definite thing, so what you see when you come back to it is never ambiguous.
-- **Explicit Save, with the draft kept on the server** (DESIGN §6.2). Applying fields as you type was proposed and withdrawn (owner, 2026-10-16: with continuous saving there's no real revision and no diff view). Automatic snapshots would only be arbitrary slices of typing, and a diff of what you're about to save needs a point you choose.
-  - **What you see when you come back to a box:** your draft, marked unsaved, with Save (showing the diff against the saved text) and Discard. Because the target is chosen before typing, a draft belongs to one definite thing: a draft of the card shows wherever that card is opened, in the library or any chat; a draft of this chat's changes belongs to the branch, as the composer does (DESIGN §6.2), and shows only there.
-  - **A draft never reaches the model.** The panel says so while one exists ("not saved: the next reply uses the saved card").
-  - Saving this chat's changes places them at the end of the branch as it is when you save, and the Save says at which message.
+Revised 2026-10-16 from the owner's decisions (DESIGN §3.4, §4). The earlier "chat fork" and the timeline copy as the main mechanism are withdrawn.
 
-- **This chat's changes live on the timeline**, like every other piece of chat state (DESIGN §3.4). The first change takes a **copy of the whole card** as it is at that moment, as an event at the end of the branch shown, with the change applied; later changes are further events on that copy. The card this chat sees at any message is what the path up to that message says. So:
-  - a later change (at message 200) is a new event at 200; at message 150 the chat still has only the change made at 100
-  - branching at the point of a change gives the card as it was then, without later changes
-  - branching before the first change gives the card itself, as it is now
-  - to change the card from an earlier point, branch there first; changes never apply backwards
-- **From its first change on, a chat no longer follows the card.** A chat without changes of its own uses the card as it is now (editing a card changes it everywhere, as users expect). Once a chat has its own copy, edits to the card don't reach it at those positions, so nothing is ever merged into the chat's text and no conflict can arise (owner, 2026-10-16: patches over a card that keeps changing "quite literally causes conflicts with per-chat changes"; the earlier field patches over the moving card are withdrawn).
-  - Editing the card says how many chats will change and how many have their own copy and won't.
-  - A chat with its own copy says so in its card panel ("this chat's own copy since message N"), and when the card has changed since, offers **Compare with the card** and **Use the card as it is now, from here**, an explicit event that leaves the earlier copy on the earlier positions.
-- **Each generation records the card exactly as it used it**, shown in its run inspector.
-- DESIGN §4.1a [P] has the agent's card edits as "field patches … on top of whatever card revision is bound, so upstream fixes still arrive". That has the same conflict and would follow this rule: the agent's first change takes the chat's copy.
+- **Which card a chat uses belongs to the branch, not to a message.** A new fork of the chat, made from any point, starts with the cards its branch uses now; existing forks keep theirs.
+- **Fork for this chat** is the typical way to customize a card for one chat: it forks the card (surface 1's dialog, subtitle prefilled with the chat's name) and swaps this branch to the fork. Going back a few messages, or redoing much of the story, keeps it.
+- **Editing a card edits it wherever it's used**, every chat and branch bound to it included. A card made with Fork for this chat is used by this branch and the forks made from it since, so editing it changes all of them; a fork of the chat that should differ gets its own Fork for this chat.
+- **What you're editing is chosen before typing.** The card panel in a chat names the card the branch uses, with "used by N chats", and offers Fork for this chat. A text box always edits one definite card.
+- **Explicit Save, with the draft kept on the server** (DESIGN §6.2); applying fields as you type was withdrawn (owner: with continuous saving there's no real revision and no diff view). A draft of a card shows wherever that card is opened, marked unsaved, with Save and Discard, and never reaches the model; the panel says so while one exists.
+- **Editor**: every card field is a code-editor-like box (DESIGN §6.2): new, modified and unchanged lines marked at the left edge; a diff of the current changes against the last revision; a diff browser for every earlier revision. Save shows that diff.
+- **Changes that follow the messages** are a separate, specific mechanism: a change made at a point in the timeline, attached to the message (or the version that made it), reset by branching before it. It's mainly for the agent's card rewriting in a turn, which must work this way so swipes stay reversible, and it's available manually for character progression. It takes a copy of the whole card at its first change, so later edits to the card never merge into it.
+- **Character progression** mostly goes through notes tied to the card and the chat (DESIGN §4.1), not edits of the card. Not designed yet.
 
 ## Open
+
+- Whether forks made with Fork for this chat get their own tile in the grid like any fork, or show only in their family's Forks tree and in their chat.
+- Which kinds of chat state follow the messages and which belong to the branch (DESIGN §3.4).
 
 - What chats using a deleted card do (surface 11).
