@@ -38,9 +38,9 @@ const scenario = (dataDir: string, remove: (api: Api, child: PathWindow) => Effe
     const user = yield* api.Whoami()
     const reader = yield* Reader
     const record = () =>
-      reader.StImportSources({ userId: user.id }).pipe(
-        Effect.map((s) => s.chats.find((r) => r.source === "chats/Alice/child.jsonl")!)
-      )
+      reader
+        .StImportSources({ userId: user.id })
+        .pipe(Effect.map((s) => s.chats.find((r) => r.source === "chats/Alice/child.jsonl")!))
     const childPath = (end: string) =>
       api.ReadPath({ chatId: chat.id, leafSlotId: end as never, range: { _tag: "Bottom" }, limit: 100 })
     const before = yield* childPath((yield* record()).end!)
@@ -95,9 +95,11 @@ deleteForGood("ST fork copies a deleted model message", (api, child) =>
 )
 
 deleteForGood("ST fork copies a deleted model swipe", (api, child) =>
-  api.ListVersions({ slotId: child.entries[8]!.slotId }).pipe(
-    Effect.flatMap((versions) => api.DeleteVersion({ versionId: versions.find((v) => v.content === "other 8")!.id }))
-  )
+  api
+    .ListVersions({ slotId: child.entries[8]!.slotId })
+    .pipe(
+      Effect.flatMap((versions) => api.DeleteVersion({ versionId: versions.find((v) => v.content === "other 8")!.id }))
+    )
 )
 
 const config = testConfig()
