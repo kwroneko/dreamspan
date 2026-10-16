@@ -220,6 +220,7 @@ Migrations (`migrations.ts`) run in the writer through Effect's `SqliteMigrator`
 - `0017_sent_context` (§15): `rollout_payloads.sent_context_json`, the sanitized final SDK message mapping, recorded before each attempt's HTTP request. The frozen assembly snapshot stays intact.
 
 - `0041_st_import_selection` (§13): `slots.st_import_row_version` records the slot revision last selected by import. A later local mutation prevents an import from replacing that selection; existing slots above revision 1 are conservatively kept.
+- `0042_bin_item_copies` (§13): an import's copy of a deleted message or swipe carries the original's bin item, so deleting that item for good may empty model output on every row that carries it, not only the row it names.
 
 Conventions:
 - **Tables:** all `STRICT`, with JSON columns guarded by `json_valid` CHECKs and timestamps in epoch milliseconds.
@@ -229,7 +230,7 @@ Conventions:
 
 **Invariants enforced by the database** (`schema/integrity.ts`, `schema/graphIntegrity.ts`). Triggers check each statement, so no single statement can break these, and `test/schema.test.ts` checks each one on a bare connection. A sequence of statements still can, for example deleting a selected model version and inserting another under its id in one transaction: no trigger can tell that from a legitimate insert. The writer is the only code path that writes, and these back it up:
 - **Edits are non-destructive.** Changing content creates new rows; it never overwrites. Deliberate deletion is allowed, and foreign keys keep it consistent: for example, a slot can't be left selecting a deleted version, and deleting a chat removes everything in it, its chat-local overrides and drafts included.
-  - Model-written versions are frozen once they stop generating, and a version never goes back to generating. Only deleting for good from the recycle bin empties one: `purged_at` set, under a bin item of the chat's owner for that version, its message, or a branch in its chat. `purged_at` is never cleared on versions and slots.
+  - Model-written versions are frozen once they stop generating, and a version never goes back to generating. Only deleting for good from the recycle bin empties one: `purged_at` set, under a bin item of the chat's owner that the version, or its slot, carries (a swipe, message or branch item; an import's copy carries the original's, migration 0042). `purged_at` is never cleared on versions and slots.
   - Amending a user-written version copies the previous content into `version_history` automatically.
   - Entity revisions and summary revisions are immutable.
   - A rollout's context snapshot is frozen once written.
@@ -438,7 +439,7 @@ Deleting is deliberate and fundamentally non-destructive (DESIGN §6.2): deletes
 **Deleting for good** (`PurgeBinItem`, `EmptyBin`; the UI confirms these):
 - **A chat** is deleted, with everything in it and its other bin items. A connection whose preset was one of its chat overrides loses that preset.
 - **An entity** loses its refs, revisions and tags. The entity row stays, so messages that named it as their speaker still point somewhere.
-- **A message, branch or swipe** has its versions emptied: content, reasoning, display forms, amend history and attachments. Its slots stay as placeholders, so the conversation's structure and any summaries over it remain valid. This is the one exception to model output being frozen: a version may be emptied only as part of a purge of its own bin item (§3.7).
+- **A message, branch or swipe** has its versions emptied: content, reasoning, display forms, amend history and attachments. Its slots stay as placeholders, so the conversation's structure and any summaries over it remain valid. This is the one exception to model output being frozen: a version may be emptied only as part of a purge of its own bin item (§3.7). An ST re-import that forks a shared path (§13) copies deleted messages, swipes and branches with the original's bin item: restoring the item brings back every copy, and deleting it for good empties every copy (`test/stImportForkBin.test.ts`).
 - `EmptyBin` takes the exact item ids shown for confirmation. In the writer transaction it compares them with the user's current bin; additions, removals or replacements return `BinChanged` without purging anything. The client loads all pages before enabling Empty the bin, captures the ids when the dialog opens, and reloads on closing a changed confirmation. Purging those ids is set-based; unposted queue text is recovered before any purge can remove it.
 
 **Two independent sections**, each evicting its own oldest entries past its own limits, never the other's:
