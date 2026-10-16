@@ -10,7 +10,7 @@ A fork is a card of its own from the moment it's made: a full copy of its parent
 
 **1. Forking from the library.** The card panel and the editor have **Fork**. The dialog asks for the three names before anything is created:
 - display name: prefilled with the parent's
-- subtitle: empty, focused, labelled as what tells this fork from its parent
+- subtitle: the card's version field (`character_version`), focused, labelled as what tells this fork from its parent
 - in-character name: prefilled, editable, because a new premise sometimes renames the character
 
 The new card opens in the editor. The parent and every chat using it are untouched.
@@ -29,13 +29,13 @@ The new card opens in the editor. The parent and every chat using it are untouch
 
 **8. Fork for this chat.** See "A card in a chat" below.
 
-**9. Imported ST duplicates.** **Mark as a fork of…** on a card picks its parent from the library. Only the relationship is recorded; neither card's content changes. **Unlink** removes it. A card's ST `character_version` imports as its subtitle and exports from it.
+**9. Imported ST duplicates.** **Mark as a fork of…** on a card picks its parent from the library. Only the relationship is recorded; neither card's content changes. **Unlink** removes it. The subtitle *is* the card's `character_version` field, so imported cards show theirs as they are, and exports carry it unchanged.
 
 **10. Re-importing a card file.** It updates that card only, merged into the user's edits on it with conflicts shown (DESIGN §4). Its forks are untouched; their Compare shows the difference.
 
 **11. Deleting.** Deleting a card leaves its forks as they are; they show "forked from ⟨card⟩ (in the bin)". **[O]** What chats using a deleted card do.
 
-**12. Exporting.** A fork exports as a standard card: in-character name as the card's name, subtitle as `character_version`. The display name has no ST field.
+**12. Exporting.** A fork exports as a standard card: in-character name as the card's name, its version field (the subtitle) as it is. The display name has no ST field.
 
 **13. Personas** are cards, so all of the above applies to them unchanged.
 
