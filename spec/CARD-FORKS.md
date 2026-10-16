@@ -43,16 +43,18 @@ The new card opens in the editor. The parent and every chat using it are untouch
 
 - **Two things you can edit, chosen before typing, never at save time.** The card panel in a chat shows the card as this chat has it at the message shown, and says which you're editing: **the card** (used by N chats; the default, since users expect a card edit to change it everywhere) or **this chat's changes**. A text box always edits one definite thing, so what you see when you come back to it is never ambiguous.
 - **No unsaved state.** Card fields apply as you type, as in ST, with the undo history kept on the server. There is no Save, so there are no unsaved changes to find or lose. For the card itself, each editing session becomes a revision (History). This departs from DESIGN §6.2's [P] "explicit commit" for cards and needs the owner's confirmation; message edits keep their explicit commit, because there it decides between a new version and an amendment.
-- **This chat's changes live on the timeline**, like every other piece of chat state (DESIGN §3.4) and like the agent's card edits (§4.1a): each is a field patch, an event at the end of the branch shown. The card this chat sees at any message is the card plus the patches on the path up to that message. So:
+- **This chat's changes live on the timeline**, like every other piece of chat state (DESIGN §3.4). The first change takes a **copy of the whole card** as it is at that moment, as an event at the end of the branch shown, with the change applied; later changes are further events on that copy. The card this chat sees at any message is what the path up to that message says. So:
   - a later change (at message 200) is a new event at 200; at message 150 the chat still has only the change made at 100
   - branching at the point of a change gives the card as it was then, without later changes
-  - branching before the first change gives the card without any of this chat's changes
+  - branching before the first change gives the card itself, as it is now
   - to change the card from an earlier point, branch there first; changes never apply backwards
-- **The card itself is not on the timeline.** An edit to the card applies everywhere it's used, old branches of every chat included, because that is what "the card" means. This chat's patched fields keep their patched text; the panel marks them ("changed in this chat").
-- **Each generation records the card exactly as it used it** (revision plus patches), shown in its run inspector.
+- **From its first change on, a chat no longer follows the card.** A chat without changes of its own uses the card as it is now (editing a card changes it everywhere, as users expect). Once a chat has its own copy, edits to the card don't reach it at those positions, so nothing is ever merged into the chat's text and no conflict can arise (owner, 2026-10-16: patches over a card that keeps changing "quite literally causes conflicts with per-chat changes"; the earlier field patches over the moving card are withdrawn).
+  - Editing the card says how many chats will change and how many have their own copy and won't.
+  - A chat with its own copy says so in its card panel ("this chat's own copy since message N"), and when the card has changed since, offers **Compare with the card** and **Use the card as it is now, from here**, an explicit event that leaves the earlier copy on the earlier positions.
+- **Each generation records the card exactly as it used it**, shown in its run inspector.
+- DESIGN §4.1a [P] has the agent's card edits as "field patches … on top of whatever card revision is bound, so upstream fixes still arrive". That has the same conflict and would follow this rule: the agent's first change takes the chat's copy.
 
 ## Open
 
 - What chats using a deleted card do (surface 11).
 - Card fields applying as you type, without Save (above): needs the owner's confirmation.
-- A card edit can change text the chat's patches were written against (a description fixed in the library while this chat patched the outfit). The panel shows both, but nothing checks that they still agree.
