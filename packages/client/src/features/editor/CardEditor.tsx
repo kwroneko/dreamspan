@@ -8,13 +8,14 @@ import { ErrorAlert } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"
 import { Avatar as CardAvatar } from "../../ui/Avatar.tsx"
 import { Button } from "../../ui/Button.tsx"
-import { Field, Fieldset, Input, Textarea } from "../../ui/Field.tsx"
+import { Field, Fieldset, Input } from "../../ui/Field.tsx"
 import { FileDrop } from "../../ui/FileDrop.tsx"
 import { Card, CardHeader, EmptyState } from "../../ui/Surface.tsx"
 import type { Caller } from "./caller.ts"
 import { FieldTools, SwitchField, TextField } from "./controls.tsx"
 import { NoteEditor, PlacementField } from "./notes.tsx"
 import { type EditorStore, useValue } from "./store.ts"
+import { CardTextEditor } from "./CardTextEditor.tsx"
 
 function Avatar({ store, onUpload }: { store: EditorStore; onUpload: (file: File) => void }) {
   const name = useValue<string>(store, ["name"]) ?? "Card"
@@ -56,11 +57,15 @@ function Greetings({ store }: { store: EditorStore }) {
       {greetings.map((greeting, index) => (
         <div key={index} className="flex flex-col gap-1">
           <Field label={`Alternate greeting ${index + 1}`}>
-            <Textarea
+            <CardTextEditor
+              store={store}
+              field={valueField(path)}
+              path={[...path, index]}
+              label={`Alternate greeting ${index + 1}`}
               rows={4}
-              className="resize-y"
               value={greeting}
-              onChange={(event) => store.setValue(path, greetings.with(index, event.currentTarget.value))}
+              onChange={(value) => store.setValue(path, greetings.with(index, value))}
+              onBlur={() => void store.save(valueField(path))}
             />
           </Field>
           <div>

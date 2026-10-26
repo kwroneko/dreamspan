@@ -1,3 +1,4 @@
+import { expectTextBox } from "./support/textbox.ts"
 // The card and preset editors (ARCHITECTURE.md §14) in a real browser against the real
 // server: edits kept as drafts, saved as revisions, undone, restored, forked, reordered,
 // approved, searched and resolved. Every card and preset here is made up.
@@ -109,14 +110,17 @@ test("a new card's fields save as a revision, after a diff, and survive a reload
   const changes = dialog.getByRole("list", { name: "Changes" })
   await expect(changes.getByRole("listitem")).toHaveCount(2)
   await expect(changes.getByRole("listitem").first()).toContainText("Description")
-  await expect(changes.getByLabel("Added").first()).toHaveText("A lighthouse keeper who talks to gulls.")
+  await expectTextBox(
+    changes.getByRole("textbox", { name: "After", exact: true }).first(),
+    "A lighthouse keeper who talks to gulls."
+  )
   await dialog.getByRole("textbox", { name: "What changed (optional)" }).fill("First pass")
   await dialog.getByRole("button", { name: "Save revision" }).click()
   await expect(page.getByText("Saved a revision.")).toBeVisible()
   await expect(state(page)).toHaveText("Everything is saved.")
 
   await page.reload()
-  await expect(field(page, "Description")).toHaveValue("A lighthouse keeper who talks to gulls.")
+  await expectTextBox(field(page, "Description"), "A lighthouse keeper who talks to gulls.")
   await page.getByRole("button", { name: "History", exact: true }).click()
   const revisions = page.getByRole("list", { name: "Revisions" }).getByRole("listitem")
   await expect(revisions).toHaveCount(2)
@@ -133,7 +137,7 @@ test("undo brings a field's text back after select-all and a stray key", async (
   await greeting.fill("x")
   await kept(page)
   await page.getByRole("button", { name: "Undo First message" }).click()
-  await expect(greeting).toHaveValue("The lamp needs oil before the storm comes in from the west.")
+  await expectTextBox(greeting, "The lamp needs oil before the storm comes in from the west.")
   // The history: the text as first saved, the wipe, and the undo, which can be undone too.
   await page.getByRole("button", { name: "History of First message" }).click()
   const states = page.getByRole("list", { name: "Earlier states" }).getByRole("listitem")
@@ -201,17 +205,20 @@ test("an earlier revision restores as a new one", async ({ page }) => {
     })
   )
   await open(page, refId)
-  await expect(field(page, "Scenario")).toHaveValue("A calm sea.")
+  await expectTextBox(field(page, "Scenario"), "A calm sea.")
   await page.getByRole("button", { name: "History", exact: true }).click()
   const revisions = page.getByRole("list", { name: "Revisions" }).getByRole("listitem")
   await expect(revisions).toHaveCount(3)
-  await revisions.nth(1).getByRole("button", { name: "Compare" }).click()
-  await expect(revisions.nth(1).getByLabel("Removed")).toHaveText("storm")
-  await revisions.nth(1).getByRole("button", { name: "Restore" }).click()
+  await revisions.nth(1).getByRole("button").click()
+  await page.getByRole("dialog").getByRole("radio", { name: "Current draft / head" }).click()
+  await page.getByRole("dialog").getByText("Scenario", { exact: true }).click()
+  await expectTextBox(page.getByRole("dialog").getByRole("textbox", { name: "Before", exact: true }), "A storm.")
+  await expectTextBox(page.getByRole("dialog").getByRole("textbox", { name: "After", exact: true }), "A calm sea.")
+  await page.getByRole("dialog").getByRole("button", { name: "Restore", exact: true }).click()
   await expect(revisions).toHaveCount(4)
   await expect(revisions.first()).toContainText("Restored the revision of")
   await page.getByRole("button", { name: "Close" }).click()
-  await expect(field(page, "Scenario")).toHaveValue("A storm.")
+  await expectTextBox(field(page, "Scenario"), "A storm.")
 })
 
 test("making a variant is one action, and takes the unsaved changes along", async ({ page }) => {
@@ -226,11 +233,11 @@ test("making a variant is one action, and takes the unsaved changes along", asyn
   await dialog.getByRole("button", { name: "Make the variant" }).click()
   await expect(page.getByRole("heading", { level: 1, name: "Noir Wren" })).toBeVisible()
   await expect(page.getByText("variant", { exact: true })).toBeVisible()
-  await expect(field(page, "Description")).toHaveValue("A keeper in the rain.")
+  await expectTextBox(field(page, "Description"), "A keeper in the rain.")
   const variants = page.getByRole("navigation", { name: "Variants" })
   await variants.getByRole("link", { name: "Wren" }).click()
   await expect(page.getByRole("heading", { level: 1, name: "Wren" })).toBeVisible()
-  await expect(field(page, "Description")).toHaveValue("A keeper.")
+  await expectTextBox(field(page, "Description"), "A keeper.")
   await expect(state(page)).toHaveText("Everything is saved.")
 })
 
@@ -317,11 +324,11 @@ test("search and replace runs across fields, and a pattern that backtracks forev
   await expect(dialog.getByText(/took over 2 seconds, so it was stopped/)).toBeVisible()
   await dialog.press("Escape")
 
-  await expect(field(page, "Description")).toHaveValue("The warden keeps the great lamp.")
-  await expect(field(page, "First message")).toHaveValue("Hello, warden.")
+  await expectTextBox(field(page, "Description"), "The warden keeps the great lamp.")
+  await expectTextBox(field(page, "First message"), "Hello, warden.")
   // The page stayed responsive: typing still works.
   await field(page, "Scenario").fill("Still here.")
-  await expect(field(page, "Scenario")).toHaveValue("Still here.")
+  await expectTextBox(field(page, "Scenario"), "Still here.")
 })
 
 test("an update with a conflict is resolved field by field", async ({ page }) => {
@@ -361,7 +368,7 @@ test("an update with a conflict is resolved field by field", async ({ page }) =>
   await dialog.getByRole("button", { name: "Apply these" }).click()
   await expect(page.getByText("A newer version of the file was imported")).toHaveCount(0)
   await page.getByRole("button", { name: "Edit Main Prompt" }).click()
-  await expect(page.getByRole("textbox", { name: /^Prompt/ })).toHaveValue("Write terse, calm prose.")
+  await expectTextBox(page.getByRole("textbox", { name: /^Prompt/ }), "Write terse, calm prose.")
 })
 
 /** Records each request to /library/drafts: whether it was sent with `keepalive`, and how it went. */
@@ -475,7 +482,7 @@ test("text too long to send as the page goes: the warning stops a close, and a r
   await content().fill("y".repeat(70_000))
   await page.reload()
   await expect(page.getByText("Brought back from this browser")).toBeVisible()
-  await expect(content()).toHaveValue("y".repeat(70_000))
+  await expectTextBox(content(), "y".repeat(70_000))
   await expect
     .poll(async () => (await admin((api) => api.OpenEditor({ refId: note.id }))).drafts[0]?.content[0])
     .toBe("y")
@@ -593,7 +600,8 @@ test("copies stay with a note in the bin and survive age and capacity limits", a
   const [item] = await admin((api) => api.ListBin({ limit: 10, before: null }))
   await admin((api) => api.RestoreBinItem({ itemId: item!.id }))
   await page.reload()
-  await expect(page.getByRole("region", { name: "Note Gone" }).getByRole("textbox", { name: /^Content/ })).toHaveValue(
+  await expectTextBox(
+    page.getByRole("region", { name: "Note Gone" }).getByRole("textbox", { name: /^Content/ }),
     "Unsent."
   )
   await expect.poll(async () => (await storedCopies(page)).filter((c) => c.refId === note.id)).toEqual([])

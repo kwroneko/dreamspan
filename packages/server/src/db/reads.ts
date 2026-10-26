@@ -332,9 +332,17 @@ export const makeReadHandlers = Effect.gen(function* () {
         return { ref: toLibraryRef(ref), doc: yield* lib.loadDoc(ref.head_revision_id) }
       }).pipe(query("GetRef")),
 
-    RefHistory: ({ userId, refId, limit }) =>
+    RefHistory: ({ userId, refId, limit, before }) =>
       Effect.gen(function* () {
         const ref = yield* lib.ownedRef(userId, refId)
+        let start: string | null = ref.head_revision_id
+        if (before !== undefined) {
+          const [cursor] = yield* sql<{ parent: string | null }>`
+            SELECT json_extract(parents, '$[0]') AS parent FROM entity_revisions
+            WHERE id = ${before} AND entity_id = ${ref.entity_id}`
+          if (!cursor) return yield* new NotFound({ entity: "revision", id: before })
+          start = cursor.parent
+        }
         const rows = yield* sql<{
           id: string
           parents: string
@@ -344,7 +352,7 @@ export const makeReadHandlers = Effect.gen(function* () {
           created_at: number
         }>`
           WITH RECURSIVE history(id, n) AS (
-            SELECT ${ref.head_revision_id}, 1
+            SELECT ${start}, 1
             UNION ALL
             SELECT json_extract(r.parents, '$[0]'), h.n + 1 FROM entity_revisions r JOIN history h ON r.id = h.id
             WHERE json_extract(r.parents, '$[0]') IS NOT NULL AND h.n < ${limit}

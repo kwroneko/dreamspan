@@ -266,6 +266,10 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
       // The drafts ended with the commit, which emptied them.
       assert.isTrue(opened.drafts.every((d) => d.status === "committed" && d.content === ""))
       const revisions = yield* api.ListRevisions({ refId: card.id, limit: 10 })
+      const firstPage = yield* api.ListRevisions({ refId: card.id, limit: 1 })
+      const nextPage = yield* api.ListRevisions({ refId: card.id, limit: 1, before: firstPage[0]!.id })
+      assert.deepStrictEqual([...firstPage, ...nextPage], revisions)
+      assert.deepStrictEqual(yield* api.ListRevisions({ refId: card.id, limit: 1, before: nextPage[0]!.id }), [])
       assert.deepStrictEqual(
         revisions.map((r) => [r.origin, r.message]),
         [

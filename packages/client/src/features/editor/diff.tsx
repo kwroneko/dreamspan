@@ -1,6 +1,7 @@
 // How a field changed, as one stretch of removed and inserted text with a little context
 // around it: linear in the text's length, so a 50 KB description compares at once.
 import { diffPatch } from "@rp/shared/drafts.ts"
+import { RevisionDiff } from "../../ui/RevisionDiff.tsx"
 
 /** Characters of unchanged text shown on each side of the change. */
 const CONTEXT = 80
@@ -12,9 +13,10 @@ const asText = (value: unknown) =>
 
 const cut = (text: string) => (text.length <= SHOWN ? text : `${text.slice(0, SHOWN)}… (${text.length - SHOWN} more)`)
 
-export function ValueDiff({ before, after }: { before: unknown; after: unknown }) {
+export function ValueDiff({ before, after, rich = false }: { before: unknown; after: unknown; rich?: boolean }) {
   const a = asText(before)
   const b = asText(after)
+  if (rich) return <RevisionDiff before={a} after={b} />
   const patch = diffPatch(a, b)
   const prefix = a.slice(Math.max(0, patch.start - CONTEXT), patch.start)
   const end = patch.start + patch.removed.length

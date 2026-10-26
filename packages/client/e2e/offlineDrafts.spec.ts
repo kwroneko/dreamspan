@@ -1,3 +1,4 @@
+import { expectTextBox } from "./support/textbox.ts"
 // Real shutdowns and persistent profiles: no injected copies or simulated RPC failures.
 import { expect, test, type BrowserContext, type Page } from "@playwright/test"
 import { Effect } from "effect"
@@ -97,7 +98,7 @@ for (const kind of ["composer", "editor"] as const) {
             if (kind === "composer") {
               await other.getByRole("button", { name: "Send", exact: true }).click()
               await expect(other.getByRole("article", { name: "Your message" })).toContainText(elsewhere)
-              await expect(box(other)).toHaveValue("")
+              await expectTextBox(box(other), "")
             } else {
               await other.getByRole("button", { name: /^Save/ }).click()
               await other.getByRole("dialog").getByRole("button", { name: /^Save/ }).click()
@@ -112,7 +113,7 @@ for (const kind of ["composer", "editor"] as const) {
         // Login cookie and IndexedDB both survive reopening this profile.
         await back.goto(`${server.url}${path}`)
         if (kind === "composer" && variant === "committed elsewhere") {
-          await expect(box(back)).toHaveValue("")
+          await expectTextBox(box(back), "")
           await expect(back.getByRole("article", { name: "Your message" })).toContainText(elsewhere)
           const notice = back.getByRole("status").filter({ hasText: "typed in this browser while offline" })
           await expect(notice).toContainText("recovered text")
@@ -120,7 +121,7 @@ for (const kind of ["composer", "editor"] as const) {
           await expect(back.getByText(offline, { exact: true })).toBeVisible()
           expect((await saved())?.content).toBe("")
         } else {
-          await expect(box(back)).toHaveValue(offline)
+          await expectTextBox(box(back), offline)
           await expect.poll(async () => (await saved())?.content).toBe(offline)
           if (variant === "conflicting draft") {
             const notice = back
@@ -147,7 +148,7 @@ for (const kind of ["composer", "editor"] as const) {
             )
             expect(history[1]?.length).toBe(elsewhere.length) // the displaced text is one step back
             await notice.getByRole("button", { name: "Use the other text" }).click()
-            await expect(box(back)).toHaveValue(elsewhere)
+            await expectTextBox(box(back), elsewhere)
             await expect(notice).toHaveCount(0)
             await expect.poll(async () => (await saved())?.content).toBe(elsewhere)
             if (kind === "composer") {
@@ -161,7 +162,7 @@ for (const kind of ["composer", "editor"] as const) {
             } else {
               await back.getByRole("button", { name: "Undo Description", exact: true }).click()
             }
-            await expect(box(back)).toHaveValue(offline)
+            await expectTextBox(box(back), offline)
             await expect.poll(async () => (await saved())?.content).toBe(offline)
           } else {
             await expect(
