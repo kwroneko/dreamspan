@@ -708,7 +708,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
               )
               SELECT s.id, s.depth, s.branch_name, s.branch_name_user FROM mine m JOIN slots s ON s.id = m.id
               WHERE m.id NOT IN (SELECT id FROM theirs) ORDER BY m.depth LIMIT 1`
-            const [own] = yield* divergence(input.end)
+            let [own] = yield* divergence(input.end)
             if (own === undefined) fork = "same"
             else {
               // Old records have only `named`: recover their original placement from the
@@ -719,6 +719,11 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
                   ? yield* divergence(payload.end ?? null)
                   : yield* sql<NameSlot>`SELECT id, depth, branch_name, branch_name_user FROM slots
                       WHERE id = ${nameSlot} AND chat_id = ${chatId}`
+              // A parent can move away while this file keeps its original path. Its
+              // new divergence may then be another file's shared prefix, not a new
+              // switch point for this name. Retain the existing placement unless this
+              // file copied its own path; only that copy needs naming reconciliation.
+              if (previous !== undefined && payload.forkPrior == null) own = previous
               const moving = previous !== undefined && previous.id !== own.id && previous.depth >= own.depth
               const canName =
                 own.branch_name_user === 0 &&

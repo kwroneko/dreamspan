@@ -205,6 +205,88 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
         })
       )
     }
+    for (const [index, localName] of [null, "My inner", ""].entries()) {
+      it.effect(
+        `parent movement preserves nested naming and the shared main prefix (${JSON.stringify(localName)})`,
+        () =>
+          Effect.gen(function* () {
+            const folder = `MoveParent${index}`
+            const files = pair(folder, "Outer road")
+            files.push([
+              `chats/${folder}/Inner road.jsonl`,
+              bytes([
+                { chat_metadata: { main_chat: "Outer road" } },
+                msg(`${folder} greeting`, 0),
+                msg(`${folder} hello`, 1),
+                msg(`${folder} fork`, 2),
+                msg(`${folder} inner reply`, 3)
+              ])
+            ])
+            const api = yield* run(files)
+            const originalGreeting = yield* nameOf(`${folder} greeting`)
+            const inner = yield* nameOf(`${folder} inner reply`)
+            assert.isNull(originalGreeting.name)
+            assert.strictEqual(inner.name, "Inner road")
+            if (localName !== null) yield* api.NameBranch({ slotId: inner.id, name: localName })
+            const user = yield* api.Whoami()
+            const reader = yield* Reader
+            const paths = Effect.fnUntraced(function* () {
+              const records = (yield* reader.StImportSources({ userId: user.id })).chats
+              return yield* Effect.forEach([files[0]!, files[2]!], ([source]) => {
+                const record = records.find((r) => r.source === source)!
+                return api.ReadPath({
+                  chatId: record.chatId,
+                  leafSlotId: record.end,
+                  range: { _tag: "Bottom" },
+                  limit: 100
+                })
+              })
+            })
+            const naming = () =>
+              fixtureSql(
+                config.dataDir,
+                [
+                  {
+                    sql: "SELECT id, branch_name, branch_name_user FROM slots WHERE id IN (?, ?)",
+                    params: [originalGreeting.id, inner.id]
+                  }
+                ],
+                { readOnly: true }
+              )
+            const before = yield* paths()
+            const namesBefore = yield* naming()
+            const changed = bytes([
+              { chat_metadata: { main_chat: "main" } },
+              msg(`Changed ${folder} greeting`, 0, {
+                swipes: [`${folder} greeting`, `Changed ${folder} greeting`],
+                swipe_id: 1,
+                swipe_info: [{ send_date: 1730000000000 }, { send_date: 1730000000000 }]
+              }),
+              msg(`${folder} hello`, 1),
+              msg(`${folder} fork`, 2),
+              msg(`${folder} reply`, 3)
+            ])
+            const reimport: [string, Uint8Array][] = [files[0]!, [files[1]![0], changed], files[2]!]
+            for (let pass = 0; pass < 2; pass++) {
+              yield* run(reimport)
+              const after = yield* paths()
+              const expected = localName === "" ? undefined : (localName ?? "Inner road")
+              assert.strictEqual(
+                after[1]!.entries.filter((e) => e.branchName === expected && e.slotId === inner.id).length,
+                1
+              )
+              if (expected !== undefined)
+                assert.strictEqual(after[1]!.entries.filter((e) => e.branchName === expected).length, 1)
+              assert.deepStrictEqual(yield* naming(), namesBefore, "main and nested naming provenance must stay intact")
+              // Sibling counts change when the outer path is copied; these paths' slots,
+              // names and selected versions must not change, including on replay.
+              const contents = (path: (typeof before)[number]) =>
+                path.entries.map((e) => ({ slot: e.slotId, name: e.branchName, version: e.version }))
+              assert.deepStrictEqual(after.map(contents), before.map(contents))
+            }
+          })
+      )
+    }
     it.effect("keeps nested names on their respective divergence slots", () =>
       Effect.gen(function* () {
         const files = pair("Nested", "Outer road")
