@@ -357,7 +357,9 @@ Stepped history, dropped-message display and rewrite warnings without a TTL are 
 - **[D]** The current preset and model are switched from the composer bar, one click each, their settings opening in the right panel; space in the bar is a concern with everything else there (owner, 2026-10-27).
 
 - **[D]** Model settings move out of the preset into the model/connection settings: samplers and much more (owner, 2026-10-27).
-- **[P]** The split: **the model's settings** are what depends on the model or provider: samplers (temperature, top-p/k, min-p, penalties, seed, logit bias), context window and response length, reasoning or thinking effort, stop strings, streaming, caching options, provider routing, how roles go on the wire (system role support, squashing, names), the image limit, and whether prefill is supported. **The preset** keeps what is written: its prompts, their order, roles and positions, the "Newest message" marker, the prompts used only in certain moments (impersonation, group nudge, continue), the prefill text, and its regex scripts. Importing an ST preset or folder puts its sampler values on the model it was used with (the folder's active connection), and says so in the report.
+- **[P]** The split: **the model's settings** are what depends on the model or provider: samplers (temperature, top-p/k, min-p, penalties, seed, logit bias), context window and response length, reasoning or thinking effort, stop strings, streaming, caching options, provider routing, how roles go on the wire (system role support, squashing, names), the image limit, and whether prefill is supported. **The prompt preset** keeps what is written: its prompts, their order, roles and positions, the "Newest message" marker, the prompts used only in certain moments (impersonation, group nudge, continue), the prefill text, and its regex scripts.
+- **[D]** What ST calls a "preset" bundles three things the app keeps apart: the **prompt preset**, the **model (LLM) settings**, and **connection settings** with the model name (owner, 2026-10-27). An ST preset JSON (shared and imported by hand) can contain all three, so there are three import surfaces, each taking the parts it applies to.
+- **[O]** The ST folder import today imports every chat-completion preset file and adopts ST's selected one as the default prompt preset; it reads no connection settings and never `secrets.json`. Where each preset file's model settings go, and whether connections (without keys) are imported, is undecided.
 
 ### 6.2 Saving (ST's gripe #1)
 - **[D]** In ST, some fields autosave, some have save buttons, and preset field edits lived in limbo: they survived restarts but vanished on a preset switch.
@@ -389,6 +391,12 @@ Stepped history, dropped-message display and rewrite warnings without a TTL are 
   - the left edge marks new, modified and unchanged lines
   - a diff view of the current changes against the last revision
   - a diff browser for every earlier revision
+
+### 6.2a The prompt preset editor (owner, 2026-10-27)
+- **[D]** Search, and search and replace, across the whole prompt preset. In ST it's impossible; the owner edits presets as JSON in an external editor to do it.
+- **[D]** The biggest annoyance in ST's editor: twenty prompts in a row that can't be seen or edited as a whole. Finding something means opening each one, checking it, closing it, opening the next. The preset must be readable and editable as one document you scroll through.
+- **[D] Rejected:** ST's separate pool of prompts. Adding a prompt means creating it with a button, then finding it in a dropdown and adding it to the list; disabled prompts may or may not be in the list. Here a new prompt goes straight into the list where you add it, and a prompt that's off stays in the list, off. (The build copied the pool: "prompts out of the order are listed to add back".)
+- **[O]** Token counts per prompt for the current chat: ST updates them only after a message is sent with the preset. Whether to update them continuously is open.
 
 ### 6.3 Per-card preset overlays
 - **[P]** Prompt toggles or replacements attached to a card (or a card within one chat), applied when the card is present or speaking. The owner's example: "you may impersonate" for a narrator card. Cache cost is shown when an overlay changes text above the tail.
