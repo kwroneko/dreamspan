@@ -36,6 +36,7 @@
 - **P** The card's own aspect ratio, 2:3 (ST's thumbnails and card images), at every size.
 
 ### Forks of chats
+- **D** For the user, forks are separate chats that don't influence each other (owner, 2026-10-26). They are connected by history and in the data model, and as siblings when browsing chats (and can be named and promoted), but nothing done in one silently changes another: a fork is an explicit deviation, and any other model is incredibly confusing.
 - **D** ("probably") A named fork is shown at the top level like any other chat, keeping its fork relationship.
 - **D** Forks can already be named in ST; those names must be used (built on the branch above).
 
@@ -102,7 +103,7 @@
 - What a usable UX is on data made entirely in this app, with nothing imported.
 
 **Forks**
-- Which version is selected in history shared by forks: per line or shared.
+- ~~Which version is selected in history shared by forks~~: decided 2026-10-26, forks act as separate chats (CHATS.md); every edit in shared history (message edits, swipe choice, deletion, history edits) affects only the fork it's made in.
 - How long a chat's list of lines gets before the selector needs more than expanding.
 - Reviewing and merging the fork-name import branch.
 

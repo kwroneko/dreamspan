@@ -44,9 +44,10 @@
 - **[P]** A named fork appears wherever chats appear (recents, pins, character selectors) with its own faces, excerpt and title, and "forked from ⟨chat⟩ at message N". Its parent lists it by name among its lines.
 - **[P]** Activity on a named fork bumps the fork, not its parent. Unnamed forks count toward their parent.
 - **[P]** Removing the name returns it to its parent's lines; nothing moves in the data. A named fork of a named fork points at its immediate parent.
-- **[P]** History before the fork point is shared: an edit or a new version there shows in both, and the editor says so ("also in ⟨fork⟩").
+- **[D]** For the user, forks are separate chats that don't influence each other (owner, 2026-10-26). They are connected by history and in the data model, and as siblings when browsing chats (and can be named and promoted), but nothing done in one silently changes another: a fork is an explicit deviation, and any other model is incredibly confusing.
+- **[P], rejected by the decision above** History before the fork point is shared: an edit or a new version there shows in both, and the editor says so ("also in ⟨fork⟩").
 - **[P]** Forks the user named in ST arrive as named forks. ST names a fork file `Branch #<message> - <date>`, or `Checkpoint #<n> - <date>` (`Bookmark #` in older versions) when the name is left empty; any other name is the user's, minus the ` - <date>` suffix, and so is a fork file renamed in ST's chat list. The importer now keeps it as the branch's name where the fork leaves its parent (ARCHITECTURE.md §13, "A fork's name from ST"); current ST names an unnamed fork `<chat> - Branch #<n>` or `<chat> - Checkpoint #<n>`, which also gives no name.
-- **[O]** Which version is selected in shared history: per line or shared.
+- **[D]** Which version is selected in shared history: per fork, by the decision above (owner, 2026-10-26).
 - **[O]** How long a chat's list of lines gets before the selector needs more than expanding it.
 
 ## Not yet discussed
