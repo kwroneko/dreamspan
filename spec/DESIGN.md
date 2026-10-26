@@ -242,9 +242,14 @@ Where the owner corrected an earlier proposal, the corrected version is recorded
 - **[D]** Positions (owner confirmed 2026-10-26), relative to the preset's own sections (§5.0): start of context; with the definitions (after the main prompt); at depth N in the history; start of the tail; end of the tail (default: the last thing before the newest message, or the very end when the preset puts the newest message earlier). Each note has a role.
 
 - **[D]** Any note can be named, since there is more than one, and the notes need a collapsed view (owner, 2026-10-26).
-- **[D]** A global "database" of named notes, usable from anywhere: when adding a note anywhere, instead of writing one you can pick an existing shared note, filterable by name, which fills that note slot; changes to a shared note are global (owner, 2026-10-26). **[O]** A "save as local note" button that copies a shared note into a note of this chat only (the owner isn't sure it's worth the complexity).
+- **[D]** A global "database" of named notes, usable from anywhere: when adding a note anywhere, instead of writing one you can pick an existing shared note, filterable by name, which fills that note slot; changes to a shared note are global (owner, 2026-10-26). ("Save as local note" is the unlink below.)
 - **[O]** A note that applies in every chat whatever the preset: it extends a preset without modifying it and stays when the preset changes, which makes it somewhat useful, but it's close to being a preset itself and its UX is unclear (owner, 2026-10-26).
 - **[P]** So a note *slot* belongs to a chat or a card (the only two owners), and its content is either its own text or a link to a shared named note.
+
+- **[D]** When a note applies: always, or only on a given character's turn. "While X is present in the chat" was dropped: cards are rarely removed and re-added (owner, 2026-10-26). **[P]** "While X isn't muted" instead, if muting is how presence works (§3.5).
+- **[D]** Each note has a switch for whether lorebook entries can trigger on its text (ST's "Include in World Info Scanning") (owner, 2026-10-26).
+- **[D]** Importing ST's notes (owner, 2026-10-26): the chat's Author's Note becomes a chat note, on only if it was on in ST (non-empty, frequency not 0); the card's Character's Note (`depth_prompt`) a card note, on in every chat as ST always applies it; the private Character Author's Note a private card note, on where ST had "Use character author's note" ticked.
+- **[D]** A note slot linked to a shared note can be unlinked, which turns it into its own copy in that slot (owner, 2026-10-26).
 
 - **[D]** No insertion frequency (ST's "every Nth user message" for the Author's Note): a note that comes and goes breaks the cache and serves no real purpose (owner, 2026-10-26). On import, ST's 0 becomes off, any other value on.
 
