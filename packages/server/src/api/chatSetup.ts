@@ -98,6 +98,14 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
     })
 
   const handlers = {
+    GetShellLibrary: () =>
+      Effect.flatMap(userId, (id) => reader.ShellLibrary({ userId: id })).pipe(internal("GetShellLibrary")),
+    SetChatPin: (input) =>
+      Effect.flatMap(userId, (id) => writer.SetChatPin({ ...input, userId: id })).pipe(internal("SetChatPin")),
+    SetHomePinsCollapsed: (input) =>
+      Effect.flatMap(userId, (id) => writer.SetHomePinsCollapsed({ ...input, userId: id })).pipe(
+        internal("SetHomePinsCollapsed")
+      ),
     ListCards: () => Effect.flatMap(userId, (id) => reader.ListCards({ userId: id })).pipe(internal("ListCards")),
     ListCardUsage: () =>
       Effect.flatMap(userId, (id) => reader.CardUsage({ userId: id })).pipe(internal("ListCardUsage")),

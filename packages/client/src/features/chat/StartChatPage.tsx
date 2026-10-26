@@ -12,10 +12,14 @@
 import type { CastCard, ChatId, EntityId } from "@rp/shared/chat.ts"
 import type { CardForChat, ChatGroup } from "@rp/shared/chatSetupApi.ts"
 import type { FrozenValues } from "@rp/shared/macros/expand.ts"
-import { useNavigate, useParams } from "@tanstack/react-router"
+import { useNavigate, useParams, useSearch } from "@tanstack/react-router"
 import { Effect } from "effect"
 import { useEffect, useRef, useState } from "react"
 import { ErrorAlert, useAction } from "../../actions.tsx"
+import { CharacterPanel } from "../characters/CharacterPanel.tsx"
+import { rememberPanel, useWide } from "./ChatPanels.tsx"
+import { Sheet } from "../../ui/Sheet.tsx"
+import { type ReactNode } from "react"
 import { AutoGrowTextarea } from "../../ui/AutoGrowTextarea.tsx"
 import { SquareIconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import { composerKeyDown } from "./composerKeys.ts"
@@ -131,6 +135,7 @@ function Pending({
 }) {
   const action = useAction()
   const navigate = useNavigate()
+  const navigationSearch = useSearch({ strict: false }) as { panel?: string; character?: string }
   const [persona, setPersona] = useState<string>(() => {
     const saved = savedPersona()
     return personas.find((p) => p.entityId === saved)?.entityId ?? personas[0]?.entityId ?? NONE
@@ -307,16 +312,36 @@ function Pending({
     // the extra text addressed to the saved chat, before navigating or opening its draft.
     destination.current = result.value.chat.id
     await keep(typed.current)
-    void navigate({ to: "/chats/$chatId", params: { chatId: result.value.chat.id } })
+    void navigate({
+      to: "/chats/$chatId",
+      params: { chatId: result.value.chat.id },
+      search: {
+        ...(navigationSearch.panel ? { panel: navigationSearch.panel } : {}),
+        ...(navigationSearch.character ? { character: navigationSearch.character } : {})
+      }
+    })
   }
 
   return (
     <>
       <header className="mx-auto flex w-full max-w-3xl flex-wrap items-center gap-3 pb-2">
         {members === null ? (
-          <Avatar id={card.card.entityId} name={name} mediaId={card.card.avatarMediaId} />
+          <button
+            type="button"
+            aria-label={`Show ${name}'s card`}
+            className="rounded-md outline-none focus-visible:ring-2 focus-visible:ring-focus"
+            onClick={() => {
+              rememberPanel(userId, `card:${card.card.entityId}`)
+              void navigate({
+                to: ".",
+                search: (prev: Record<string, unknown>) => ({ ...prev, panel: `card:${card.card.entityId}` })
+              })
+            }}
+          >
+            <Avatar id={card.card.entityId} name={name} mediaId={card.card.avatarMediaId} />
+          </button>
         ) : (
-          <span className="block size-12 shrink-0 overflow-hidden rounded-lg">
+          <span className="block aspect-[2/3] w-12 shrink-0 overflow-hidden rounded-lg">
             <GroupFaces members={members} />
           </span>
         )}
@@ -463,15 +488,17 @@ export function StartChatPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once per card
   }, [entityId])
   return (
-    <div data-fill className="flex min-h-0 flex-1 flex-col px-4 pt-4">
-      {loaded ? (
-        <Pending key={entityId} card={loaded.card} personas={loaded.personas} />
-      ) : action.error ? (
-        <ErrorAlert error={action.error} />
-      ) : (
-        <Loading label="Loading the card…" />
-      )}
-    </div>
+    <PendingLayout entityId={entityId}>
+      <div data-fill className="flex min-h-0 flex-1 flex-col px-4 pt-4">
+        {loaded ? (
+          <Pending key={entityId} card={loaded.card} personas={loaded.personas} />
+        ) : action.error ? (
+          <ErrorAlert error={action.error} />
+        ) : (
+          <Loading label="Loading the card…" />
+        )}
+      </div>
+    </PendingLayout>
   )
 }
 
@@ -527,6 +554,44 @@ export function StartGroupChatPage() {
       ) : (
         <Loading label="Loading the group…" />
       )}
+    </div>
+  )
+}
+
+function PendingLayout({ entityId, children }: { entityId: EntityId; children: ReactNode }) {
+  const search = useSearch({ strict: false }) as { panel?: string }
+  const navigate = useNavigate()
+  const wide = useWide()
+  const open = search.panel?.startsWith("card:") ?? false
+  const userId = useSession().user.id
+  const close = () => {
+    rememberPanel(userId, null)
+    void navigate({ to: ".", search: ({ panel: _panel, ...prev }: Record<string, unknown>) => prev, replace: true })
+  }
+  const body = (
+    <>
+      <Button variant="ghost" onClick={close}>
+        Close the panel
+      </Button>
+      <CharacterPanel entityId={entityId} />
+    </>
+  )
+  return (
+    <div className="flex min-h-0 flex-1">
+      {children}
+      {open &&
+        (wide ? (
+          <aside
+            aria-label="Character panel"
+            className="w-80 shrink-0 overflow-y-auto border-l border-border bg-surface p-4"
+          >
+            {body}
+          </aside>
+        ) : (
+          <Sheet open onOpenChange={(v) => !v && close()} title="Character">
+            {body}
+          </Sheet>
+        ))}
     </div>
   )
 }

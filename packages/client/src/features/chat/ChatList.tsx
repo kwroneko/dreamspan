@@ -7,7 +7,7 @@ import { useAtomRefresh, useAtomValue } from "@effect/atom-react"
 import type { Chat, ChatId, ChatSummary, EntityId } from "@rp/shared/chat.ts"
 import { chatCursor } from "@rp/shared/chatApi.ts"
 import { importState } from "@rp/shared/stImportApi.ts"
-import { Link, useRouterState } from "@tanstack/react-router"
+import { Link, useRouterState, useSearch } from "@tanstack/react-router"
 import { AsyncResult } from "effect/reactivity"
 import { type MouseEvent, useEffect, useMemo, useState } from "react"
 import { ErrorAlert, useAction } from "../../actions.tsx"
@@ -18,6 +18,8 @@ import { Input } from "../../ui/Field.tsx"
 import { Spinner } from "../../ui/Spinner.tsx"
 import { useDeletedToast } from "../bin/deleted.ts"
 import { useUnseen } from "../notices.tsx"
+import { shellAtom } from "../characters/shellData.tsx"
+import { PinButton } from "../characters/ShellBrowser.tsx"
 import { chatName, formatDay, formatWhen } from "./chatTitle.ts"
 
 const PAGE = 50
@@ -67,6 +69,11 @@ function Row({
   onDelete: () => void
 }) {
   const unseen = useUnseen(chat.id)
+  const search = useSearch({ strict: false }) as { panel?: string }
+  const shell = useAtomValue(shellAtom)
+  const fork = AsyncResult.isSuccess(shell)
+    ? shell.value.forks.find((f) => f.chat.id === chat.id && f.current)
+    : undefined
   const { title, unfinished } = importState(chat.title)
   const characters = (summary?.cast ?? []).filter((card) => !card.persona)
   const name = chatName(title, characters)
@@ -79,6 +86,7 @@ function Row({
       <Link
         to="/chats/$chatId"
         params={{ chatId: chat.id }}
+        search={search.panel ? { panel: search.panel } : {}}
         aria-current={active ? "page" : undefined}
         className={`flex gap-3 rounded-lg px-2.5 py-2 outline-none focus-visible:ring-2 focus-visible:ring-focus pointer-coarse:pr-16 ${
           active ? "bg-surface-raised" : "hover:bg-surface-raised/60"
@@ -132,6 +140,11 @@ function Row({
           )}
         </span>
       </Link>
+      {fork && (
+        <span className="absolute right-2 bottom-1">
+          <PinButton fork={fork} />
+        </span>
+      )}
       <button
         type="button"
         onClick={onDelete}

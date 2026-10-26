@@ -86,7 +86,13 @@ for (const width of [1440, 390]) {
     await expect(page.getByRole("img", { name: "Bo's full portrait" })).toBeVisible()
     if (width === 390) await page.getByRole("button", { name: "Close", exact: true }).click()
     else await page.getByRole("button", { name: "Close the panel" }).click()
-    await page.locator("header").getByRole("button", { name: "View Mira's portrait", exact: true }).first().click()
+    await page.locator("header").getByRole("button", { name: "Show Mira's card", exact: true }).first().click()
+    await expect(page.getByRole("link", { name: "Edit card", exact: true })).toBeVisible()
+    await page.getByRole("tab", { name: "Cast", exact: true }).click()
+    await page
+      .getByRole("list", { name: "Characters in this chat" })
+      .getByRole("button", { name: "View Mira's portrait", exact: true })
+      .click()
     await expect(page.getByRole("img", { name: "Mira's full portrait" })).toBeVisible()
     await page.getByRole("tab", { name: "Cast", exact: true }).click()
     await page
@@ -96,15 +102,14 @@ for (const width of [1440, 390]) {
     await expect(page.getByRole("img", { name: "Bo's full portrait" })).toBeVisible()
     if (width === 390) await page.getByRole("button", { name: "Close", exact: true }).click()
     else await page.getByRole("button", { name: "Close the panel" }).click()
-    for (const [label, radius] of [
-      ["Circle (50 × 50)", "9999px"],
-      ["Square (50 × 50)", "2px"],
-      ["Rounded square (50 × 50)", "10px"]
+    for (const [label, width, height] of [
+      ["Small (48 × 72)", "48px", "72px"],
+      ["Large (72 × 108)", "72px", "108px"],
+      ["Rectangular (60 × 90)", "60px", "90px"]
     ]) {
       await select(page, "Chat portraits", label!)
-      await expect(portrait).toHaveCSS("width", "50px")
-      await expect(portrait).toHaveCSS("height", "50px")
-      await expect(portrait).toHaveCSS("border-radius", radius!)
+      await expect(portrait).toHaveCSS("width", width!)
+      await expect(portrait).toHaveCSS("height", height!)
     }
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy()
   })

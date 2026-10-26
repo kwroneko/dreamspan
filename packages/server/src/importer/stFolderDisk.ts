@@ -175,7 +175,7 @@ export const readStFolderFile = (
       if (!isAbsolute(root)) throw new Refused("Enter the folder's full path.")
       const handle = await open(join(root, path), "r")
       try {
-        const { size, mtimeMs } = await handle.stat()
+        const { size, mtimeMs, ctimeMs } = await handle.stat()
         // A chat ST is still writing to: its parts would mix two versions of the file.
         if (size !== seen.size || mtimeMs !== seen.modifiedMs)
           throw new Refused("It changed after the folder was read. Look in the folder again, then import it.")
@@ -191,7 +191,7 @@ export const readStFolderFile = (
           bytes = bytes.subarray(0, end + 1)
         }
         const next = start + bytes.byteLength
-        return { bytes, next, last: next >= size }
+        return { bytes, next, last: next >= size, ctimeMs }
       } finally {
         await handle.close()
       }

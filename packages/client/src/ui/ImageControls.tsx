@@ -54,9 +54,8 @@ export function ImageControls() {
             onValueChange={setAvatarStyle}
             items={[
               { value: "portrait", label: "Rectangular (60 × 90)" },
-              { value: "round", label: "Circle (50 × 50)" },
-              { value: "square", label: "Square (50 × 50)" },
-              { value: "rounded", label: "Rounded square (50 × 50)" }
+              { value: "large", label: "Large (72 × 108)" },
+              { value: "square", label: "Small (48 × 72)" }
             ]}
           />
         </Field>

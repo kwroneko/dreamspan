@@ -22,6 +22,7 @@ import { ActionMenu } from "../../ui/Menu.tsx"
 import { Popover } from "../../ui/Popover.tsx"
 import { Badge } from "../../ui/Surface.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
+import { useOpenCharacter } from "../characters/shellData.tsx"
 import { castView } from "./cast.ts"
 import { MoreIcon, PlusIcon } from "./icons.tsx"
 import type { ChatSession } from "./session.ts"
@@ -302,6 +303,7 @@ function Member({
   const [showCard, setShowCard] = useState(false)
   const [speaking, setSpeaking] = useState(false)
   const name = card.name
+  const openCharacter = useOpenCharacter()
   const edited = info?.usesOverride === true && info.overrideRefId !== null
   const speak = async () => {
     setSpeaking(true)
@@ -316,7 +318,13 @@ function Member({
       <div className={`flex items-start gap-3 ${present ? "" : "opacity-60"}`}>
         <Avatar id={card.entityId} name={name} mediaId={card.avatarMediaId} size="lg" preview />
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <span className="truncate font-medium">{name}</span>
+          <button
+            type="button"
+            onClick={() => openCharacter(card.entityId)}
+            className="truncate text-left font-medium text-accent"
+          >
+            {name}
+          </button>
           {card.label !== name && <span className="truncate text-xs text-muted">{card.label}</span>}
           <span className="flex flex-wrap items-center gap-1">
             {played && <Badge tone="accent">played by you</Badge>}

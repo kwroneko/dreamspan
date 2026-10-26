@@ -32,6 +32,7 @@ export class ParsedMedia extends Schema.Class<ParsedMedia>("ParsedMedia")({
 
 /** A parsed file: its report, and what goes into the library, if anything. */
 export class ParsedFile extends Schema.Class<ParsedFile>("ParsedFile")({
+  stCreatedAt: Schema.optionalKey(Schema.NullOr(Schema.Number)),
   report: ImportReport,
   /** Of the file's bytes. */
   sha256: Sha256,

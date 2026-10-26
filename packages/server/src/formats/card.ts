@@ -2,6 +2,7 @@
 // follows ST's import (src/endpoints/characters.js): any `spec` means V2 or V3, otherwise a
 // `name` means V1. The specs: github.com/malfoyslastname/character-card-spec-v2 and
 // github.com/kwaroran/character-card-spec-v3.
+import { parseStCreatedAt } from "./stCreatedAt.ts"
 import { CARD_SCHEMA_VERSION, CardAsset, type CardDoc, type CardModule } from "@rp/shared/docs/card.ts"
 import { Placement } from "@rp/shared/docs/note.ts"
 import type { ReportBuilder } from "@rp/shared/importReport.ts"
@@ -176,8 +177,9 @@ export const cardFromJson = (
   root: unknown,
   limits: Limits,
   issues: ReportBuilder
-): { card: CardDoc; version: CardVersion } => {
+): { card: CardDoc; version: CardVersion; stCreatedAt: number | null } => {
   if (!Predicate.isObject(root)) return fail("card.not_a_card", "The file isn't a character card.")
+  const stCreatedAt = parseStCreatedAt(root.create_date)
   if (root.spec !== undefined && Predicate.isObject(root.data)) {
     const version: CardVersion = root.spec === "chara_card_v2" ? "v2" : "v3"
     if (root.spec !== "chara_card_v2" && root.spec !== "chara_card_v3") {
@@ -193,7 +195,7 @@ export const cardFromJson = (
     }
     const card = fromData(root.data, ["data"], limits, issues)
     const { unknown_fields } = new Fields(root, [], issues).unknown(ROOT_KEYS)
-    return { card: unknown_fields ? { ...card, unknown_root_fields: unknown_fields } : card, version }
+    return { card: unknown_fields ? { ...card, unknown_root_fields: unknown_fields } : card, version, stCreatedAt }
   }
   if (root.spec !== undefined) {
     issues.add(
@@ -203,6 +205,6 @@ export const cardFromJson = (
       ["data"]
     )
   }
-  if (typeof root.name === "string") return { card: fromV1(root, limits, issues), version: "v1" }
+  if (typeof root.name === "string") return { card: fromV1(root, limits, issues), version: "v1", stCreatedAt }
   return fail("card.not_a_card", "The file isn't a character card.")
 }

@@ -179,7 +179,7 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
         }>`SELECT id FROM lanes WHERE chat_id = ${chatId} ORDER BY created_at, id LIMIT 1`)[0]!.id
       const { slotId, version: row } = yield* insertSlot(chatId, laneId, parent, version, at)
       const [chat] = yield* sql<ChatRow>`
-          UPDATE chats SET active_leaf_slot_id = ${keepLeaf ? current.active_leaf_slot_id : slotId}, last_message_at = ${at},
+          UPDATE chats SET active_leaf_slot_id = ${keepLeaf ? current.active_leaf_slot_id : slotId}, current_leaf_slot_id = ${slotId}, last_message_at = ${at},
             status = CASE WHEN status = 'pending' THEN 'active' ELSE status END,
             row_version = row_version + 1
           WHERE id = ${chatId} RETURNING *`

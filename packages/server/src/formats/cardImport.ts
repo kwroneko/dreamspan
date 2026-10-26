@@ -17,6 +17,7 @@ export interface CardFile {
 }
 
 export interface CardImport {
+  readonly stCreatedAt: number | null
   readonly card: CardDoc
   readonly avatar: CardFile | null
   /** Embedded assets other than the avatar. */
@@ -132,13 +133,17 @@ export const importCard = (bytes: Uint8Array, limits: Limits = defaultLimits): E
     const issues = new ReportBuilder()
     const report = (version: string, container: string) => issues.build(`card-${version}-${container}`)
     if (isPng(bytes)) {
-      const { card, version, avatar } = fromPng(bytes, limits, issues)
-      return { card, avatar, assets: [], report: report(version, "png") }
+      const { card, version, avatar, stCreatedAt } = fromPng(bytes, limits, issues)
+      return { card, stCreatedAt, avatar, assets: [], report: report(version, "png") }
     }
     if (isZip(bytes)) {
-      const { card, version, avatar, assets } = fromCharx(bytes, limits, issues)
-      return { card, avatar, assets, report: report(version, "charx") }
+      const { card, version, avatar, assets, stCreatedAt } = fromCharx(bytes, limits, issues)
+      return { card, stCreatedAt, avatar, assets, report: report(version, "charx") }
     }
-    const { card, version } = cardFromJson(parseJson(bytes, limits.maxCardJsonBytes, limits, issues), limits, issues)
-    return { card, avatar: null, assets: [], report: report(version, "json") }
+    const { card, version, stCreatedAt } = cardFromJson(
+      parseJson(bytes, limits.maxCardJsonBytes, limits, issues),
+      limits,
+      issues
+    )
+    return { card, stCreatedAt, avatar: null, assets: [], report: report(version, "json") }
   })

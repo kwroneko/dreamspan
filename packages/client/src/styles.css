@@ -249,12 +249,12 @@ main:has(> [data-fill]) {
 :root[data-avatars="round"] .chat-portrait,
 :root[data-avatars="square"] .chat-portrait,
 :root[data-avatars="rounded"] .chat-portrait {
-  width: 50px;
-  height: 50px;
+  width: 48px;
+  height: 72px;
+  border-radius: 4px;
 }
-:root[data-avatars="round"] .chat-portrait {
-  border-radius: 9999px;
-}
-:root[data-avatars="square"] .chat-portrait {
-  border-radius: 2px;
+
+:root[data-avatars="large"] .chat-portrait {
+  width: 72px;
+  height: 108px;
 }

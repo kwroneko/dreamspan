@@ -2,18 +2,21 @@
 // chat), New chat and every chat it's in as peers, then its definition to read, each field
 // folded to a few lines. Its library label is the title; the in-chat name, what `{{char}}`
 // resolves to, is shown apart when it differs.
-import type { CardUsage } from "@rp/shared/chatSetupApi.ts"
+import type { CardUsage, ShellFork } from "@rp/shared/chatSetupApi.ts"
 import type { Doc } from "@rp/shared/library.ts"
 import { Link, useParams } from "@tanstack/react-router"
 import { useLayoutEffect, useMemo, useRef, useState } from "react"
 import { AsyncView } from "../../actions.tsx"
 import { AppClient } from "../../rpc.ts"
 import { Avatar } from "../../ui/Avatar.tsx"
-import { buttonClass } from "../../ui/Button.tsx"
+import { Input } from "../../ui/Field.tsx"
+import { Button, buttonClass } from "../../ui/Button.tsx"
 import { Badge, Card, CardHeader, EmptyState } from "../../ui/Surface.tsx"
-import { ChatList } from "../chat/ChatList.tsx"
+import { ForkRow } from "./ShellBrowser.tsx"
+import { shellAtom } from "./shellData.tsx"
+import { useOpenCharacter } from "./shellData.tsx"
 import { useTitle } from "../shell.tsx"
-import { openTarget, usageAtom, usageLine } from "./data.ts"
+import { usageLine } from "./data.ts"
 
 const text = (value: unknown) => (typeof value === "string" ? value.trim() : "")
 const texts = (value: unknown) => (Array.isArray(value) ? value.map(text).filter((item) => item !== "") : [])
@@ -73,7 +76,7 @@ function Folded({ title, children }: { title: string; children: string }) {
   )
 }
 
-function Definition({ doc }: { doc: Doc }) {
+export function Definition({ doc }: { doc: Doc }) {
   const alternates = texts(doc.alternate_greetings)
   const fields: ReadonlyArray<readonly [string, string]> = [
     ["Description", text(doc.description)],
@@ -131,18 +134,63 @@ function Definition({ doc }: { doc: Doc }) {
   )
 }
 
+function CharacterChats({ card, forks }: { card: CardUsage; forks: ReadonlyArray<ShellFork> }) {
+  const [search, setSearch] = useState("")
+  const [limit, setLimit] = useState(50)
+  const needle = search.trim().toLowerCase()
+  const rows = forks
+    .filter(
+      (f) =>
+        f.joined.includes(card.entityId) &&
+        [f.name, ...f.cast.flatMap((c) => [c.label, c.name])].some((name) => name.toLowerCase().includes(needle))
+    )
+    .sort(
+      (a, b) =>
+        (b.activity.find((a) => a.entityId === card.entityId)?.at ?? -1) -
+          (a.activity.find((a) => a.entityId === card.entityId)?.at ?? -1) || b.recentAt - a.recentAt
+    )
+  return (
+    <div className="flex flex-col gap-2">
+      <Input
+        aria-label="Find a chat"
+        value={search}
+        onChange={(e) => {
+          setSearch(e.currentTarget.value)
+          setLimit(50)
+        }}
+        placeholder="Find a chat or character"
+      />
+      <ul aria-label="Chats" className="flex flex-col gap-2">
+        {rows.slice(0, limit).map((fork) => (
+          <li key={`${fork.chat.id}/${fork.leaf}`}>
+            <ForkRow fork={fork} details />
+          </li>
+        ))}
+      </ul>
+      {!rows.length && <p className="text-sm text-muted">No chat's title or characters have “{search}”.</p>}
+      {limit < rows.length && (
+        <Button variant="ghost" onClick={() => setLimit((n) => n + 50)}>
+          Load more
+        </Button>
+      )}
+    </div>
+  )
+}
 function Chats({ card }: { card: CardUsage }) {
   return card.chats === 0 ? (
     <EmptyState title="No chats yet">
       <p>New chat shows its greeting; nothing is saved until you send the first message.</p>
     </EmptyState>
   ) : (
-    <ChatList entityId={card.entityId} findable={card.chats > 8} />
+    <AsyncView atom={shellAtom} loading="Loading chats…">
+      {(data) => <CharacterChats card={card} forks={data.forks} />}
+    </AsyncView>
   )
 }
 
 function Page({ card }: { card: CardUsage }) {
   useTitle(card.label)
+  const openCharacter = useOpenCharacter()
   const docAtom = useMemo(
     () =>
       AppClient.query(
@@ -177,11 +225,7 @@ function Page({ card }: { card: CardUsage }) {
           )}
           <p className="text-sm text-muted">{usageLine(card)}</p>
           <div className="mt-2 flex flex-wrap gap-2">
-            {used && (
-              <Link {...openTarget(card)} className={buttonClass("primary")}>
-                Continue
-              </Link>
-            )}
+            {used && <Button onClick={() => openCharacter(card.entityId)}>Continue</Button>}
             <Link
               to="/cards/$entityId/chat"
               params={{ entityId: card.entityId }}
@@ -199,7 +243,7 @@ function Page({ card }: { card: CardUsage }) {
         <Card className="lg:order-2">
           <CardHeader
             title={used ? `Chats (${card.chats.toLocaleString()})` : "Chats"}
-            description={used ? "Latest message first." : undefined}
+            description={used ? "When this character last spoke, most recent first." : undefined}
           />
           <Chats card={card} />
         </Card>
@@ -217,9 +261,9 @@ function Page({ card }: { card: CardUsage }) {
 export function CardPage() {
   const { entityId } = useParams({ strict: false })
   return (
-    <AsyncView atom={usageAtom} loading="Loading the card…">
-      {(cards) => {
-        const card = cards.find((it) => it.entityId === entityId)
+    <AsyncView atom={shellAtom} loading="Loading the card…">
+      {({ cards }) => {
+        const card = cards.map((c) => c.card).find((it) => it.entityId === entityId)
         return card ? (
           <Page key={card.entityId} card={card} />
         ) : (

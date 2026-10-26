@@ -281,12 +281,13 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
       readonly originRef: string | null
       readonly sourcePath: string | null
       readonly sourceHash: string | null
+      readonly createdAt?: number
     }) =>
       Effect.gen(function* () {
         const at = Date.now()
         const entityId = uuidv7()
         const refId = uuidv7()
-        yield* sql`INSERT INTO entities ${sql.insert({ id: entityId, owner_user_id: options.userId, kind: options.kind, created_at: at })}`
+        yield* sql`INSERT INTO entities ${sql.insert({ id: entityId, owner_user_id: options.userId, kind: options.kind, created_at: options.createdAt ?? at })}`
         const first = yield* insertRevision({
           entityId,
           schemaVersion: options.schemaVersion,
@@ -673,6 +674,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
               userId,
               kind,
               label: input.label,
+              ...(input.createdAt === undefined ? {} : { createdAt: input.createdAt }),
               subtitle: "",
               doc,
               schemaVersion: input.schemaVersion,

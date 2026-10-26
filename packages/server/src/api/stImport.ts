@@ -39,7 +39,13 @@ export const makeStImportHandlers = Effect.gen(function* () {
         if (!imports.exists(user, importId)) return yield* new NotFound({ entity: "import", id: importId })
         const chat = file.kind === "chat" || file.kind === "group_chat"
         const read = yield* readStFolderFile(root, path, { size, modifiedMs }, start, chat)
-        const result = yield* imports.file(user, importId, path, read.bytes, { part, last: read.last, card, orphan })
+        const result = yield* imports.file(user, importId, path, read.bytes, {
+          part,
+          last: read.last,
+          card,
+          orphan,
+          createdAt: read.ctimeMs
+        })
         return { result, next: read.next, last: read.last }
       }).pipe(Effect.catchTag("StImportFailed", (error) => Effect.fail(new ServerError({ message: error.message })))),
     GetStImportReport: ({ importId }) => Effect.flatMap(CurrentUser, (user) => imports.report(user, importId)),

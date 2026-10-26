@@ -3,6 +3,8 @@
 // usable while it's open. On a phone it's a sheet over the chat. The open tab is in the URL
 // (`?panel=`), and this browser remembers it, for each user, for the next chat opened on a
 // wide screen.
+import { CharacterPanel } from "../characters/CharacterPanel.tsx"
+import type { EntityId } from "@rp/shared/chat.ts"
 import type { SlotId } from "@rp/shared/chat.ts"
 import { Component, lazy, type ReactNode, Suspense, useEffect, useState, useSyncExternalStore } from "react"
 import { Button } from "../../ui/Button.tsx"
@@ -59,9 +61,10 @@ const PANEL_TABS = [
   { value: "summaries", label: "Summaries", icon: "summary" }
 ] as const
 
-export type PanelTab = (typeof PANEL_TABS)[number]["value"]
+export type PanelTab = (typeof PANEL_TABS)[number]["value"] | `card:${string}`
 
-export const isPanelTab = (value: unknown): value is PanelTab => PANEL_TABS.some((tab) => tab.value === value)
+export const isPanelTab = (value: unknown): value is PanelTab =>
+  (typeof value === "string" && /^card:[0-9a-f-]{36}$/.test(value)) || PANEL_TABS.some((tab) => tab.value === value)
 
 // --- Whether the panel is open and at which tab: each user's choice in this browser, kept in
 // its storage under keys naming the user, so another account signing in here has its own.
@@ -164,6 +167,7 @@ function TabContent({
   onJump: (slot: SlotId) => void
   onEnable: () => void
 }) {
+  if (tab.startsWith("card:")) return <CharacterPanel entityId={tab.slice(5) as EntityId} />
   switch (tab) {
     case "portrait":
       return <PortraitView />
@@ -220,7 +224,13 @@ export function ChatSidePanel({
     void loadNotes().catch(() => undefined)
   }, [])
   if (!visited.has(tab)) setVisited(new Set([...visited, tab]))
-  const tabs = PANEL_TABS.map((t) => ({
+  const characterTabs = (content.view.cast?.cards ?? []).map((c) => ({
+    value: `card:${c.entityId}` as PanelTab,
+    label: c.label
+  }))
+  if (tab.startsWith("card:") && !characterTabs.some((t) => t.value === tab))
+    characterTabs.push({ value: tab, label: "Character" })
+  const tabs = [...PANEL_TABS, ...characterTabs].map((t) => ({
     value: t.value,
     label: t.label,
     panel:

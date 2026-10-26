@@ -1,5 +1,6 @@
 // Read handlers for chat setup, speakers and the send queue (DESIGN §2.1, §2.2). They run
 // in the reader workers; every one touches only the acting user's rows.
+import { makeShellReadHandlers } from "./shellReads.ts"
 import type { Chat } from "@rp/shared/chat.ts"
 import { type ChatId, ChatSummary, type EntityId } from "@rp/shared/chat.ts"
 import { chatName } from "@rp/shared/chatName.ts"
@@ -144,6 +145,7 @@ export const makeChatSetupReadHandlers = Effect.gen(function* () {
     })
 
   return {
+    ...(yield* makeShellReadHandlers),
     ChatGroups: ({ userId }) =>
       groupsOf(userId).pipe(
         Effect.map((groups) => groups.map(({ group }) => group)),

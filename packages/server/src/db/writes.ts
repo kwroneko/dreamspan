@@ -78,7 +78,7 @@ export const makeWriteHandlers = (bin: Bin) =>
           if (greeting) {
             yield* checkSpeaker(userId, greeting.speakerEntityId)
             const { slotId } = yield* insertSlot(chatId, laneId, null, greeting, at)
-            yield* sql`UPDATE chats SET active_leaf_slot_id = ${slotId} WHERE id = ${chatId}`
+            yield* sql`UPDATE chats SET active_leaf_slot_id = ${slotId}, current_leaf_slot_id = ${slotId} WHERE id = ${chatId}`
           }
           const [row] = yield* sql<ChatRow>`SELECT * FROM chats WHERE id = ${chatId}`
           return toChat(row!)
