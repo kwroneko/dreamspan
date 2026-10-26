@@ -31,6 +31,21 @@
 - **D** The character grid keeps a **Groups** filter even without a group-chat concept: it shows chats with more than one character (plus the user) in the same kind of tile. That switches the same place from showing cards to showing chats under a filter; acceptable for now (owner, 2026-10-26). **O** Whether that turns out too inconsistent.
 - **D** **Never used** is a good distinction and stays (owner, 2026-10-26).
 
+### Home page and the left panel (owner, 2026-10-26, from the layout mockups)
+- **D** `/` is the home page with the character grid, as now. Once in a chat you never *need* to go back to it, but it's what `/` shows. Whether home has a grid and whether the side panel has one are separate questions: both do.
+- **D** The left panel shows a chat list with breadcrumbs inside a more specific context (a character, a chat), and can also switch to a character thumbnail grid like the home page's, to jump between characters quickly.
+- **D** Home's tabs: **All | With chats | Never used | Groups | Archive** (the archive tab's name is to be decided). Sort: **Recent | Created | Name**. *Recent* is the card's most recent change: added, modified, or it emitted a turn. *Created* is when the card was added and never changes; imports must take it from ST (`create_date`, else the file's creation time, as ST does).
+- **D** **Groups** shows, instead of characters, a grid of chats with more than one character (plus the user): a top-level way into group chats without going through a character, as ST mixed group chats in with characters. It isn't mixed into the other tabs, for now.
+- **D** A chat's **current fork** is the one last chatted in or created by forking, whichever is more recent. Forks promoted to peers (named, pinned) have equal status. The Groups grid shows each chat's current fork and its peers, and a click opens the current fork; the chat's other forks are then selectable in the left panel, which scopes to that chat. (This corrects the earlier note that there is no current fork.)
+- **D** **Pinned chats** sit above the tabs at the top of the home page, only when there are any. They're also at the top of the left panel, scoped to its level: with a character selected, only pins with that character; inside a chat, only that chat's pinned forks. Pinned chats have their own Recent | Created | Name sort and nothing else. The pinned group can be collapsed, remembered per account.
+- **D Rejected** (the mockups' home): "My cards | Archive" above "Pinned chats", which isn't coherent; and dropping **Never used**, which is extremely useful.
+
+### The chat view (owner, 2026-10-26, from the layout mockups)
+- **D** Portraits in the chat are ST's size, with a setting to make them bigger or smaller.
+- **D** Clicking a portrait in the chat shows the full image in a large panel beside it, as ST does. Fundamental.
+- **D** The composer has at least everything today's composer has.
+- **D Rejected** in the right panel: a "lines and forks" section, and a full section for the chat's origin (not something you need to keep looking at).
+
 ### Portraits
 - **D** Portraits are rectangular, the shape of a card, everywhere: character tiles, chat rows, messages, cast chips, panels. ST uses rectangular avatars and thumbnails; the app mixes round and square (chats have round avatars), which makes no sense. One shape, used consistently (owner, 2026-10-26).
 - **P** The card's own aspect ratio, 2:3 (ST's thumbnails and card images), at every size.
