@@ -109,7 +109,11 @@ function mountEditor(host: HTMLElement, initial: CodeEditorProps) {
     host.style.setProperty("--editor-font", next.mono ? "var(--font-mono)" : "var(--font-sans)")
     host.style.setProperty("--editor-min-height", `${Math.min(next.rows ?? 4, 10) * 1.6}em`)
     if (view.composing && next.value !== view.state.doc.toString()) deferred = next.value
-    else replace(next.value)
+    else {
+      // An equal-text echo also supersedes any earlier queued external value.
+      deferred = null
+      replace(next.value)
+    }
     if (base !== next.base) {
       base = next.base
       view.dispatch({ effects: comparisonBase.of(base) })

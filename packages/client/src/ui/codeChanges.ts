@@ -38,7 +38,8 @@ export function lineKind(base: Text, doc: Text, chunks: readonly Chunk[], positi
         }
         continue
       }
-      if (toB <= line.from || fromB > line.to) continue
+      // An inserted newline also creates the empty line at its end boundary.
+      if (toB < line.from || (toB === line.from && line.length !== 0) || fromB > line.to) continue
       const oldLines = fromA === toA ? 0 : base.lineAt(toA - 1).number - base.lineAt(fromA).number + 1
       const offset = line.number - doc.lineAt(fromB).number
       // A whole inserted line can precede, follow, or sit beside a modified line.

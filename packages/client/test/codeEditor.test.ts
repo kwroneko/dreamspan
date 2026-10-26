@@ -24,6 +24,15 @@ describe("code editor line comparisons", () => {
   it("normalizes imported CRLF in both the value and comparison", () => {
     expect(markers(compared("First.\r\nLast.", "First.\r\nLast."))).toEqual(["unchanged", "unchanged"])
   })
+  it.each([1, 2, 3])("marks every empty line added by %i trailing newlines", (count) => {
+    const expected = ["modified", ...Array<string>(count).fill("added")]
+    expect(markers(compared("A", `A${"\n".repeat(count)}`))).toEqual(expected)
+    // Exercise the incremental path used when Enter is pressed at EOF too.
+    let state = compared("A", "A")
+    for (let index = 0; index < count; index++)
+      state = state.update({ changes: { from: state.doc.length, insert: "\n" } }).state
+    expect(markers(state)).toEqual(expected)
+  })
   it("marks where whole lines were deleted, including the end of the document", () => {
     expect(markers(compared("First.\nRemoved.\nLast.", "First.\nLast."))).toContain("deleted")
     expect(markers(compared("First.\nRemoved.", "First."))).toContain("deleted")
