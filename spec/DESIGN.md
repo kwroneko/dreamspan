@@ -256,6 +256,13 @@ Where the owner corrected an earlier proposal, the corrected version is recorded
 
 ## 5. Context assembly
 
+### 5.0 Layout belongs to the preset (owner, 2026-10-26)
+- **[D]** The context layout is the preset's, not a fixed one: presets are made by users, mostly for ST's layout, and their tail can be far longer than reference-harness's (whose single fixed layout is not a model to copy).
+- **[D]** Everything after the chat history is the **tail prompt** (the satellite system prompt, for its system parts). It sits at the end so the model attends to it most and the history can't causally override its instructions (style, rules), and it can change every turn without breaking the cache. Presets put most of their weight there; so does the Author's Note.
+- **[D]** Where the newest message goes is the preset's to control. Since a long tail can separate the newest message from the history, neither ST's placement (newest message at the end of the history, the tail after it) nor reference-harness's (tail, then the newest message last) is right for every preset. **[P]** A "Newest message" marker in the preset's prompt order, next to "Chat history": imported ST presets get it right after the history (ST's behaviour); a preset can move it after the tail.
+- **[D]** Every section of a preset can be system, user or assistant, as in ST's preset editor, which the app needs too.
+- **[D]** Later, not now: modes where the card definitions move into the tail and are swapped every turn for the character speaking. The layout must allow it.
+
 ### 5.1 Pipeline [P]
 1. Take the path (§3.3).
 2. Replay state events along it (§3.4).
