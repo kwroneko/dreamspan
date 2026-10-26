@@ -237,6 +237,8 @@ Where the owner corrected an earlier proposal, the corrected version is recorded
   - **[D]** a note created in a chat starts on, from the message shown (owner, 2026-10-13)
   - an exportable or private flag
 
+- **[D]** No insertion frequency (ST's "every Nth user message" for the Author's Note): a note that comes and goes breaks the cache and serves no real purpose (owner, 2026-10-26). On import, ST's 0 becomes off, any other value on.
+
 #### 4.1a State the agent changes during a chat
 - **[D]** Cards often hold things that change over a conversation, such as costumes. Today they stay at the top of the context, and the model works out the latest state by reading the chat. That usually works, because the chat is in causal order (owner, 2026-10-11).
 - **[D]** In agentic RP, the agent should be able to change the card and the notes **for that chat**.
