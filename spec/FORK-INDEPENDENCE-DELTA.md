@@ -140,6 +140,13 @@ One writer migration. Nothing a user sees changes; the only new rows are structu
 
 ## 6. Open questions for the owner
 
+**Answered by the owner, 2026-10-27** (the sections above need updating to match):
+- Q2: (a) deleting a fork removes only that fork; forks made from it keep their shared history.
+- Q3: (b) "delete for good" erases the text everywhere, after a warning naming the forks that show it. This happens in the bin, never from the regular UI, which only sends things to the bin.
+- Q4: (a) a fork becomes current when something adds a message or a swipe: send, reply, swipe, continue.
+- Q5: (b) chat-wide settings (summarization on/off and its settings) are per fork. How summarization carries over from ST, how it's turned on and how summaries are first generated in chats that had none still need discussing.
+
+
 1. **Answered by the owner, 2026-10-26 (CHATS.md): (b).** Swipes belong to the message and appear in every fork that shares it; only the selection is per fork. The sections above that assume (a) need updating to this.
    **A new swipe or edit at a shared message: does it appear in the other forks?**
    - (a) Only in the fork it was made in, and in forks made from it afterwards (proposed). Each fork's picker is its own; nothing appears from elsewhere. Stars and "hidden from picker" are per fork the same way.

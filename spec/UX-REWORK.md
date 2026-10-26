@@ -134,6 +134,9 @@
 **Snippets**
 - The whole UI: how text moves between any field and a snippet, where snippets live on screen, how they're found.
 
+**Summarization** (owner, 2026-10-27: not discussed properly yet)
+- How summaries carry over from ST, how summarization is turned on, and how summaries are first generated in chats that had none. Its settings are per fork.
+
 **How the versioned model reaches users** (DESIGN §3.1 [O])
 - Still open as a whole. [MODEL-UX.md](MODEL-UX.md) lists the concrete questions: messages and provenance, branches and positions, entities and scope, deletion and recovery, context and summaries, imports and drafts.
 
