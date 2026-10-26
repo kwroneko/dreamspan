@@ -237,6 +237,10 @@ Where the owner corrected an earlier proposal, the corrected version is recorded
   - **[D]** a note created in a chat starts on, from the message shown (owner, 2026-10-13)
   - an exportable or private flag
 
+- **[D]** There are no personas apart from cards: a card can be played by the user and roles can be swapped, so a "persona note" is just a card's note (owner, 2026-10-26). A note's owner is a card or a chat (global notes: open). Ownership decides where a note is found and edited, which chats it can be switched on in, and whether it travels when the card is exported (unless private) or forked (copied); a chat's note is inherited by a fork as it is at that point, then independent.
+- **[D]** Every note has an on/off switch, not a number to type (owner, 2026-10-26).
+- **[P]** Positions, relative to the preset's own sections (§5.0): start of context; with the definitions (after the main prompt); at depth N in the history; start of the tail; end of the tail (default: the last thing before the newest message, or the very end when the preset puts the newest message earlier). Each note has a role.
+
 - **[D]** No insertion frequency (ST's "every Nth user message" for the Author's Note): a note that comes and goes breaks the cache and serves no real purpose (owner, 2026-10-26). On import, ST's 0 becomes off, any other value on.
 
 #### 4.1a State the agent changes during a chat
