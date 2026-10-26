@@ -38,8 +38,10 @@ export function lineKind(base: Text, doc: Text, chunks: readonly Chunk[], positi
         }
         continue
       }
-      // An inserted newline also creates the empty line at its end boundary.
-      if (toB < line.from || (toB === line.from && line.length !== 0) || fromB > line.to) continue
+      if (toB < line.from || fromB > line.to) continue
+      // Include an empty boundary line only when it was split off a base line.
+      // A boundary already at a base line start belongs to the unchanged suffix.
+      if (toB === line.from && (line.length !== 0 || base.lineAt(toA).from === toA)) continue
       const oldLines = fromA === toA ? 0 : base.lineAt(toA - 1).number - base.lineAt(fromA).number + 1
       const offset = line.number - doc.lineAt(fromB).number
       // A whole inserted line can precede, follow, or sit beside a modified line.

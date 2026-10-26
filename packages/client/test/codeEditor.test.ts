@@ -33,6 +33,16 @@ describe("code editor line comparisons", () => {
       state = state.update({ changes: { from: state.doc.length, insert: "\n" } }).state
     expect(markers(state)).toEqual(expected)
   })
+  it.each([
+    { base: "A\n\nZ", insert: "B\n", expected: ["unchanged", "added", "unchanged", "unchanged"] },
+    { base: "A\n", insert: "B\n", expected: ["unchanged", "added", "unchanged"] },
+    { base: "A\n\nZ", insert: "B\nC\n", expected: ["unchanged", "added", "added", "unchanged", "unchanged"] }
+  ])("preserves the existing blank line in $base after inserting $insert", ({ base, insert, expected }) => {
+    const value = base.slice(0, 2) + insert + base.slice(2)
+    expect(markers(compared(base, value))).toEqual(expected)
+    const state = compared(base, base).update({ changes: { from: 2, insert } }).state
+    expect(markers(state)).toEqual(expected)
+  })
   it("marks where whole lines were deleted, including the end of the document", () => {
     expect(markers(compared("First.\nRemoved.\nLast.", "First.\nLast."))).toContain("deleted")
     expect(markers(compared("First.\nRemoved.", "First."))).toContain("deleted")
