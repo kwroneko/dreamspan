@@ -134,6 +134,11 @@
 **Snippets**
 - The whole UI: how text moves between any field and a snippet, where snippets live on screen, how they're found.
 
+**The RP loop** (owner, 2026-10-27: "quite literally the core of the RP loop", not discussed properly yet)
+- Switching the character that represents you, speaking for other characters, making other characters speak, and having the model speak for you.
+
+**The preset editor** (owner, 2026-10-27: not designed at all; ST's is somewhat sophisticated and extremely confusing and clunky)
+
 **Summarization** (owner, 2026-10-27: not discussed properly yet)
 - How summaries carry over from ST, how summarization is turned on, and how summaries are first generated in chats that had none. Its settings are per fork.
 

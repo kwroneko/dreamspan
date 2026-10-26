@@ -353,7 +353,8 @@ Stepped history, dropped-message display and rewrite warnings without a TTL are 
 - **[D]** A connection can optionally **lock a preset**, one way: choosing that connection sets that preset, and the lock is visible in the connection's settings.
 - **[D] Rejected:** per-chat changes to a preset (a chat's own prompt switches over the preset): too confusing to make sense.
 - **[O]** Locking a preset to a chat: potentially useful, never the default. The future agent chat (not agentic RP) will need a separate preset that works differently.
-- **[P]** The same holds for the model: global by default, a chat doesn't own one. Today's build binds model and preset per chat (`model.bind`/`preset.bind` state events, the This chat tab's "where each comes from"); that becomes the optional chat lock, if kept.
+- **[D]** Models, presets and connections are fundamentally global (owner, 2026-10-27). Locking one to a chat is a specific, rare choice (the owner never made it in nearly four years of ST), never the default. The build's per-chat model and preset binding (`model.bind`/`preset.bind`, the This chat tab's "where each comes from") was never asked for: drift to remove, keeping at most an explicit lock.
+- **[D]** The current preset and model are switched from the composer bar, one click each, their settings opening in the right panel; space in the bar is a concern with everything else there (owner, 2026-10-27).
 
 ### 6.2 Saving (ST's gripe #1)
 - **[D]** In ST, some fields autosave, some have save buttons, and preset field edits lived in limbo: they survived restarts but vanished on a preset switch.
