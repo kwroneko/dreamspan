@@ -173,6 +173,8 @@ Where the owner corrected an earlier proposal, the corrected version is recorded
   - by a required `send_message` argument
   - by a decision model reading the message
 - **[P]** All of these produce the same presence event.
+- **[D]** Muting is not presence (owner, 2026-10-26). **Muting** is a concrete user action with no fixed RP meaning: the character doesn't talk, whether it's away or you're just having a long one-on-one with someone else while it stays in the scene. It's shown as an explicit option, the one that isn't confusing for users. **Presence** was meant for agentic RP: the model or a decision model marks that a character *isn't there*, so it won't talk. The two overlap (an absent character can't talk). **[O]** Whether presence stays a separate concept or is redundant with muting.
+- **[P]** Muting does what it does in ST (`group-chats.js`): a muted character is never picked to reply automatically (it can still be made to speak), and its card and card notes leave the context unless it is the one speaking or the chat joins all cards including muted ones. Per fork, switched from the cast.
 
 ---
 
@@ -250,6 +252,8 @@ Where the owner corrected an earlier proposal, the corrected version is recorded
 - **[D]** Each note has a switch for whether lorebook entries can trigger on its text (ST's "Include in World Info Scanning") (owner, 2026-10-26).
 - **[D]** Importing ST's notes (owner, 2026-10-26): the chat's Author's Note becomes a chat note, on only if it was on in ST (non-empty, frequency not 0); the card's Character's Note (`depth_prompt`) a card note, on in every chat as ST always applies it; the private Character Author's Note a private card note, on where ST had "Use character author's note" ticked.
 - **[D]** A note slot linked to a shared note can be unlinked, which turns it into its own copy in that slot (owner, 2026-10-26).
+
+- **[D]** Notes also let users keep notes to themselves: a note switched off never reaches the prompt, and can be saved as a shared named note (a global snippet) for use elsewhere (owner, 2026-10-26).
 
 - **[D]** No insertion frequency (ST's "every Nth user message" for the Author's Note): a note that comes and goes breaks the cache and serves no real purpose (owner, 2026-10-26). On import, ST's 0 becomes off, any other value on.
 
