@@ -174,7 +174,7 @@ Where the owner corrected an earlier proposal, the corrected version is recorded
   - by a decision model reading the message
 - **[P]** All of these produce the same presence event.
 - **[D]** Muting is not presence (owner, 2026-10-26). **Muting** is a concrete user action with no fixed RP meaning: the character doesn't talk, whether it's away or you're just having a long one-on-one with someone else while it stays in the scene. It's shown as an explicit option, the one that isn't confusing for users. **Presence** was meant for agentic RP: the model or a decision model marks that a character *isn't there*, so it won't talk. The two overlap (an absent character can't talk). **[O]** Whether presence stays a separate concept or is redundant with muting.
-- **[P]** Muting does what it does in ST (`group-chats.js`): a muted character is never picked to reply automatically (it can still be made to speak), and its card and card notes leave the context unless it is the one speaking or the chat joins all cards including muted ones. Per fork, switched from the cast.
+- **[D]** Muting only stops the character talking: it is never picked to reply automatically (it can still be made to speak explicitly). It **doesn't remove its card from the context**: taking cards out or swapping them busts the KV cache every turn, the worst possible default (the owner rejected it in the first design session; §5.2). Cards are only swapped in the opt-in card-swap layout, at the tail (owner, 2026-10-26). **[P]** Per fork, switched from the cast; a note can be conditioned on "while X isn't muted", which is cheap only for notes placed in the tail.
 
 ---
 
