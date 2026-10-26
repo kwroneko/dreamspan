@@ -2,6 +2,7 @@
 // with, who spoke, and the chat state its metadata maps to, as events against what an
 // earlier import made of it. Pure: the import (StImports.ts) does the storing.
 import type { EntityId, SlotId } from "@rp/shared/chat.ts"
+import { cleanName } from "@rp/shared/chatName.ts"
 import { noteDepth, type NoteDoc } from "@rp/shared/docs/note.ts"
 import { shownText } from "@rp/shared/importReport.ts"
 import type { RefId } from "@rp/shared/library.ts"
@@ -19,6 +20,39 @@ const MAX_SUMMARY_REVISIONS = 200
 const MAX_SUMMARY_HISTORY_CHARS = 256 * 1024
 
 export const stem = (file: string) => file.replace(/\.[^.]*$/, "")
+
+/** ST's humanized date in a file name: `2024-7-12@01h31m37s123ms`, older ones without ms. */
+const ST_DATE = String.raw`\d{4}-\d{1,2}-\d{1,2} ?@\d{1,2}h ?\d{1,2}m ?\d{1,2}s(?: ?\d{1,3}ms)?`
+/**
+ * The names ST gives a fork file the user didn't name (`bookmarks.js`): `<chat> - Branch #<n>`
+ * and `<chat> - Checkpoint #<n>` now, `Branch #<message> - <date>`, `Checkpoint #<n> - <date>`
+ * and `Bookmark #<n> - <date>` in older versions.
+ */
+const AUTOMATIC_FORK = new RegExp(
+  String.raw`^(?:(?:Branch|Checkpoint|Bookmark) #\d+(?: - ${ST_DATE})?|.* - (?:Branch|Checkpoint|Bookmark) #\d+)$`,
+  "su"
+)
+const DATE_SUFFIX = new RegExp(String.raw` - ${ST_DATE}$`, "u")
+const BARE_DATE = new RegExp(String.raw`^${ST_DATE}$`, "u")
+/** As long as a branch name the user types here may be (`chatApi.ts`). */
+const MAX_BRANCH_NAME = 100
+
+/**
+ * The name the user gave a fork in ST, from its file's name without `.jsonl`: a checkpoint
+ * they named (older versions add ` - <date>`, which goes) or a file they renamed in ST's chat
+ * list. Null for a name ST made up.
+ */
+export const stForkName = (fileName: string): string | null => {
+  if (AUTOMATIC_FORK.test(fileName)) return null
+  const name = cleanName(fileName.replace(DATE_SUFFIX, ""))
+  if (name === "" || BARE_DATE.test(name)) return null
+  let kept = ""
+  for (const char of name) {
+    if (kept.length + char.length > MAX_BRANCH_NAME) break
+    kept += char
+  }
+  return kept.trim()
+}
 const hash = (text: string) => createHash("sha256").update(text).digest("hex")
 
 export interface CardInfo {

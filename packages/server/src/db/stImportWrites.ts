@@ -63,6 +63,8 @@ interface RecordPayload {
   readonly forkPrior?: string | null
   /** This pass matched a deleted subtree root; later live additions remain behind it. */
   readonly branchDeleted?: boolean
+  /** A branch whose ST name the import has placed (or found a name where it would go). */
+  readonly named?: boolean
 }
 
 export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: ReturnType<typeof makeBin>) {
@@ -679,8 +681,47 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
             row_version = row_version + 1
           WHERE id = ${chatId}`
         if (moveLeaf) yield* bin.drafts.moveComposer(userId, chatId, leaf, input.leaf)
+        // A branch's ST name goes on the first slot of its path that isn't on its parent
+        // file's: where it leaves it. Once per record, so a name cleared here stays cleared,
+        // and never over a name the slot has.
+        let fork: "named" | "kept" | "same" | null = null
+        let named = payload.named ?? false
+        if (input.fork !== null && !named && input.end !== null) {
+          const [parentRow] = yield* sql<{ payload_json: string }>`
+            SELECT payload_json FROM jobs WHERE id = ${input.fork.parentRecordId} AND owner_user_id = ${userId}
+              AND kind = ${ST_CHAT_RECORD}`
+          const parent = parentRow === undefined ? null : (JSON.parse(parentRow.payload_json) as RecordPayload)
+          const parentEnd = parent?.chatId === chatId ? (parent.end ?? parent.last ?? null) : null
+          if (parentEnd !== null) {
+            const [own] = yield* sql<{ id: string; branch_name: string | null }>`
+              WITH RECURSIVE theirs(id, parent) AS (
+                SELECT id, parent_slot_id FROM slots WHERE id = ${parentEnd} AND chat_id = ${chatId}
+                UNION ALL
+                SELECT s.id, s.parent_slot_id FROM slots s JOIN theirs t ON s.id = t.parent
+              ), mine(id, parent, depth) AS (
+                SELECT id, parent_slot_id, depth FROM slots WHERE id = ${input.end} AND chat_id = ${chatId}
+                UNION ALL
+                SELECT s.id, s.parent_slot_id, s.depth FROM slots s JOIN mine m ON s.id = m.parent
+              )
+              SELECT s.id, s.branch_name FROM mine m JOIN slots s ON s.id = m.id
+              WHERE m.id NOT IN (SELECT id FROM theirs) ORDER BY m.depth LIMIT 1`
+            if (own === undefined) fork = "same"
+            else {
+              named = true
+              fork = own.branch_name === null ? "named" : "kept"
+              // A name isn't a local change: the slot stays as changed or unchanged as it was.
+              if (fork === "named") {
+                yield* sql`UPDATE slots SET branch_name = ${input.fork.name}, row_version = row_version + 1,
+                  st_import_row_version = CASE WHEN st_import_row_version = row_version
+                    THEN row_version + 1 ELSE st_import_row_version END
+                  WHERE id = ${own.id}`
+              }
+            }
+          }
+        }
         const updated: RecordPayload = {
           ...payload,
+          named,
           sha256: input.sha256,
           state: input.stateJson,
           notes,
@@ -693,7 +734,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
         }
         yield* sql`UPDATE jobs SET status = 'complete', payload_json = ${JSON.stringify(updated)}, updated_at = ${Date.now()}
           WHERE id = ${input.recordId}`
-        return { notes }
+        return { notes, fork }
       }).pipe(transaction(sql, "StImportFinishChat")),
 
     StImportUnhide: ({ userId, chatId, throughSlotId }) =>
