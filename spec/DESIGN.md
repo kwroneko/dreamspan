@@ -560,6 +560,15 @@ Stepped history, dropped-message display and rewrite warnings without a TTL are 
   "All chats with Aria" counts forks as chats.
 - **[P]** A history edit in a chat includes the swipes of its messages (owner leaning yes, 2026-10-26). A swipe shared with an existing fork then reads differently there, since that fork isn't touched.
 - **[P]** After Fork for this chat, the character is new: replacing the old name in that chat's past messages is offered for this chat only, or not at all.
+- **[D]** Search and replace over a chat works like a code editor's: case-sensitive or not, whole word, regular expression (with capture groups in the replacement), and every match is previewable, matches in summaries included (owner, 2026-10-26).
+- **[P]** The flow (2026-10-26):
+  - Opened from the chat's menu, the chat's list of history edits, or Ctrl+H, in the right panel (a sheet on phones) so the chat stays in view.
+  - One Find and one Replace field with code-editor toggles: **Aa** match case, **ab** whole word, **.\*** regular expression (invalid patterns say why, live), and **preserve case** (Aria → Ari also turns ARIA into ARI and aria into ari). Enter / Shift+Enter step through matches; ＋ adds another Find/Replace pair to the same set.
+  - Where to look: messages, their swipes, summaries (each a toggle). Always this chat only; forks and other chats are never touched, and the panel says so.
+  - Matches as you type: a count by kind ("42 in 17 messages, 3 in swipes, 2 in summaries"); message matches highlighted in the chat with before → after shown inline (the replacement expanded, capture groups included); a list grouped Messages / Swipes / Summaries. A summary match opens that summary in the panel, with its level, the messages it covers and before → after highlighted, since summaries aren't otherwise in the stream. Each match can be skipped.
+  - What it costs: the line "The model will re-read N messages and M summaries on the next reply (cache: ~X tokens)".
+  - **Replace** (the current match) and **Replace all**; everything replaced while the panel is open is one changeset, applied at once, with Undo in a toast and an entry in the chat's history edits (before/after per message and summary, undo per item or all).
+  - The pattern runs in a worker with a time limit, as the card editor's search does (ARCHITECTURE §14.6), so a runaway regular expression stops with a message.
 - **[D]** Wide-range edits reach beyond one chat: replacing strings and names across chat history, for example when a card is renamed or a renamed fork is used where the old name appears (owner, 2026-10-26; §4).
 
 ### 10.4 Stack reasoning
