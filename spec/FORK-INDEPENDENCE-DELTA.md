@@ -140,7 +140,8 @@ One writer migration. Nothing a user sees changes; the only new rows are structu
 
 ## 6. Open questions for the owner
 
-1. **A new swipe or edit at a shared message: does it appear in the other forks?**
+1. **Answered by the owner, 2026-10-26 (CHATS.md): (b).** Swipes belong to the message and appear in every fork that shares it; only the selection is per fork. The sections above that assume (a) need updating to this.
+   **A new swipe or edit at a shared message: does it appear in the other forks?**
    - (a) Only in the fork it was made in, and in forks made from it afterwards (proposed). Each fork's picker is its own; nothing appears from elsewhere. Stars and "hidden from picker" are per fork the same way.
    - (b) In every fork's picker, unselected. Alternatives made anywhere stay at hand everywhere, but another fork's list of swipes changes without the user doing anything there.
 2. **Deleting a fork that other forks were made from, at its messages.**
