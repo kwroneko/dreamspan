@@ -411,6 +411,8 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
                 slot_id: string
                 version_id: string
                 depth: number
+                branch_name: string | null
+                branch_name_user: number
                 hidden: number
                 selected: number
                 content: string
@@ -425,7 +427,8 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
                 version_deleted: number
                 locally_changed: number
               }>`
-                SELECT s.id AS slot_id, v.id AS version_id, s.depth, ${sql.literal(contextExcluded())} AS hidden, v.id = s.selected_version_id AS selected,
+                SELECT s.id AS slot_id, v.id AS version_id, s.depth, s.branch_name, s.branch_name_user,
+                  ${sql.literal(contextExcluded())} AS hidden, v.id = s.selected_version_id AS selected,
                   v.content, v.created_at, v.writer, v.ordinal,
                   s.purged_at IS NOT NULL AS slot_purged, v.purged_at IS NOT NULL AS version_purged,
                   s.branch_deleted,
@@ -485,6 +488,34 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
               // diverges there, so its own path keeps what ST had on it.
               let own = recorded ?? exact ?? (input.strict ? undefined : candidates[0])
               let match = placeholder ?? own?.[0]
+              // A replacement may match another fork's named path. If our old naming
+              // choice is no longer on that prefix, adopting its slot would strand our
+              // choice or overwrite theirs. Start an independent path at the collision.
+              // A parent extending after its own remembered slot may still share a
+              // child's named continuation; its existing placement remains reachable.
+              if (
+                match !== undefined &&
+                copied === null &&
+                placeholder === undefined &&
+                payload.nameSlot != null &&
+                (match.branch_name !== null || match.branch_name_user === 1) &&
+                match.slot_id !== (yield* priorAt(match.depth))
+              ) {
+                const [collision] = yield* sql<{ conflict: number }>`
+                  WITH RECURSIVE prefix(id, parent) AS (
+                    SELECT id, parent_slot_id FROM slots WHERE id = ${match.slot_id} AND chat_id = ${chatId}
+                    UNION ALL
+                    SELECT s.id, s.parent_slot_id FROM slots s JOIN prefix p ON s.id = p.parent
+                  )
+                  SELECT EXISTS (SELECT 1 FROM slots choice WHERE choice.id = ${payload.nameSlot}
+                    AND choice.chat_id = ${chatId}
+                    AND (choice.branch_name IS NOT ${match.branch_name} OR choice.branch_name_user <> ${match.branch_name_user})
+                    AND NOT EXISTS (SELECT 1 FROM prefix WHERE id = choice.id)) AS conflict`
+                if (collision?.conflict === 1) {
+                  own = undefined
+                  match = undefined
+                }
+              }
               // A real change in one file's shared selection needs its own immutable
               // path, as when the branch was first imported from a different swipe.
               // Copy the recorded suffix one position at a time, keeping local choices,
@@ -683,8 +714,16 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
             row_version = row_version + 1
           WHERE id = ${chatId}`
         if (moveLeaf) yield* bin.drafts.moveComposer(userId, chatId, leaf, input.leaf)
-        // Resolve placement every time: a shared-prefix selection change can move the
-        // divergence. User naming choices live on slots, independently of source filenames.
+        // Naming invariant (also ARCHITECTURE.md §13): a recorded fork owns one naming
+        // choice (branch_name, branch_name_user), including (null, 1) for a local clear.
+        // Keep its remembered slot while reachable on this file's path, even if its
+        // parent adopts that slot or moves away. Otherwise place the choice at the new
+        // first divergence, respecting an existing local choice there. Remove only the
+        // redundant copy of this choice on a newly copied suffix. Relocation never
+        // clears or renames original choices on other recorded/abandoned paths; matching
+        // isolates a replacement that would collide with another choice (above).
+        // Automatic filenames need the same bookkeeping, with an initial (null, 0).
+        // If no divergence exists, retain the remembered slot for a later regrowth.
         let fork: "named" | "kept" | "same" | null = null
         let named = payload.named ?? false
         let nameSlot = payload.nameSlot ?? null
@@ -694,7 +733,10 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
               AND kind = ${ST_CHAT_RECORD}`
           const parent = parentRow === undefined ? null : (JSON.parse(parentRow.payload_json) as RecordPayload)
           const parentEnd = parent?.chatId === chatId ? (parent.end ?? parent.last ?? null) : null
-          if (parentEnd !== null) {
+          // A renamed main file may now have a record in a different chat. It has
+          // no shared slots here, so use an empty parent path instead of skipping
+          // transfer of this file's remembered naming choice.
+          if (parent !== null) {
             type NameSlot = { id: string; depth: number; branch_name: string | null; branch_name_user: number }
             const divergence = (end: string | null, placement: string | null = null) => sql<
               NameSlot & { keeps_placement: number }
@@ -709,25 +751,22 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
                 SELECT s.id, s.parent_slot_id, s.depth FROM slots s JOIN mine m ON s.id = m.parent
               )
               SELECT s.id, s.depth, s.branch_name, s.branch_name_user,
-                EXISTS (SELECT 1 FROM mine WHERE id = ${placement}) AND
-                  NOT EXISTS (SELECT 1 FROM theirs WHERE id = ${placement}) AS keeps_placement
+                EXISTS (SELECT 1 FROM mine WHERE id = ${placement}) AS keeps_placement
               FROM mine m JOIN slots s ON s.id = m.id
               WHERE m.id NOT IN (SELECT id FROM theirs) ORDER BY m.depth LIMIT 1`
-            // Old records have only `named`: recover their original placement from the
-            // previous end. `nameSlot` also survives an interrupted, batched suffix copy.
-            const [previous] = !named
-              ? []
-              : nameSlot === null
+            // Older custom-name records have only `named`; automatic-name records
+            // have neither field. Recover both from their prior path, including local
+            // choices. `nameSlot` also survives an interrupted, batched suffix copy.
+            const [previous] =
+              nameSlot === null
                 ? yield* divergence(payload.end ?? null)
                 : yield* sql<NameSlot>`SELECT id, depth, branch_name, branch_name_user FROM slots
-                    WHERE id = ${nameSlot} AND chat_id = ${chatId}`
+                  WHERE id = ${nameSlot} AND chat_id = ${chatId}`
             const [current] = yield* divergence(input.end, previous?.id ?? null)
             if (current === undefined) fork = "same"
             else {
-              // The remembered switch point remains valid only on this file's current
-              // path, outside the parent's. A parent moving away leaves that placement
-              // intact. If this file replaces its path (with or without a suffix copy),
-              // or the parent now shares the old switch point, use the first divergence.
+              // Parent-only changes cannot relocate a reachable naming choice. A
+              // replacement path (with or without a suffix copy) needs a new placement.
               const own = current.keeps_placement === 1 && previous !== undefined ? previous : current
               const moving = previous !== undefined && previous.id !== own.id
               const canName =
