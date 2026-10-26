@@ -8,6 +8,7 @@ import { Button } from "../../ui/Button.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { Badge } from "../../ui/Surface.tsx"
 import type { Caller } from "./caller.ts"
+import { CardRevisionBrowser } from "./CardRevisionBrowser.tsx"
 import { ValueDiff } from "./diff.tsx"
 import { changedFields, fieldLabel } from "./fields.ts"
 import { type EditorStore, useEditorState } from "./store.ts"
@@ -114,22 +115,26 @@ export function RevisionsDialog({ store, call, onClose }: { store: EditorStore; 
   const [revisions, setRevisions] = useState<ReadonlyArray<Revision> | null>(null)
   const [error, setError] = useState<AppError | null>(null)
   const head = useEditorState(store).snapshot!.ref.headRevisionId
+  const card = useEditorState(store).snapshot!.ref.kind === "card"
 
   useEffect(() => {
+    if (card) return
     void call((client) => client("ListRevisions", { refId: store.refId, limit: 100 })).then((result) =>
       result.ok ? setRevisions(result.value) : setError(result.error)
     )
-  }, [call, store, head])
+  }, [call, store, head, card])
 
   return (
     <Dialog
+      wide={card}
       open
       onOpenChange={(open) => !open && onClose()}
       title="History"
       description="Restoring makes a new revision with that content: the revisions after it stay."
     >
       <ErrorAlert error={error} />
-      {revisions === null && error === null && <p className="text-sm text-muted">Loading…</p>}
+      {card && <CardRevisionBrowser store={store} call={call} />}
+      {!card && revisions === null && error === null && <p className="text-sm text-muted">Loading…</p>}
       {revisions !== null && (
         <ol aria-label="Revisions" className="flex flex-col divide-y divide-border">
           {revisions.map((revision) => (

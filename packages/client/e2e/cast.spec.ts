@@ -1,3 +1,4 @@
+import { expectTextBox } from "./support/textbox.ts"
 // The Cast tab (DESIGN §2.1, §2.2, §3.5, §4), against a server with the fake generator:
 // everyone in the chat with what ST's group panel offers (absent, speak now, write as, the
 // card shown, remove, add), and a card edited only in this chat or everywhere. Every card
@@ -153,7 +154,7 @@ test("a card edited only in this chat, and everywhere", async ({ page }) => {
   await expect(page).toHaveURL(/\/library\/[^/?]+$/)
   await expect(page.getByText("Edited for this chat.")).toBeVisible()
   const description = page.getByRole("textbox", { name: "Description" })
-  await expect(description).toHaveValue("A harbor pilot who reads the tides.")
+  await expectTextBox(description, "A harbor pilot who reads the tides.")
   await description.fill("A river pilot who reads the tides.")
   await page.getByRole("button", { name: /^Save/ }).first().click()
   await page.getByRole("dialog", { name: "Save a revision" }).getByRole("button", { name: "Save revision" }).click()
@@ -181,7 +182,7 @@ test("a card edited only in this chat, and everywhere", async ({ page }) => {
   await page.getByRole("button", { name: "Edit Mira" }).click()
   await page.getByRole("button", { name: /^Everywhere/ }).click()
   await expect(page.getByText(/used by \d+ chats/)).toBeVisible()
-  await expect(page.getByRole("textbox", { name: "Description" })).toHaveValue("A harbor pilot who reads the tides.")
+  await expectTextBox(page.getByRole("textbox", { name: "Description" }), "A harbor pilot who reads the tides.")
 })
 
 test("a name edited only in this chat is the name the chat shows, in the Cast and the composer", async ({ page }) => {

@@ -41,11 +41,15 @@ export function SaveDialog({
 
   // Everything typed goes to the server first, so the diff is what will be saved.
   useEffect(() => {
-    void store.flush().then(() => {
-      const working = store.working()
-      setView({ working, changes: changedFields(store.head, working.doc) })
-    })
-  }, [store])
+    void store
+      .flush()
+      .then(async () => {
+        const working = store.working()
+        const changes = kind === "card" ? await store.comparisonChanges() : changedFields(store.head, working.doc)
+        setView({ working, changes })
+      })
+      .catch((error: AppError) => setError(error))
+  }, [store, kind])
 
   const save = async (event: FormEvent) => {
     event.preventDefault()
@@ -82,10 +86,16 @@ export function SaveDialog({
     }
     setPending(false)
     setConflicts([])
+    const working = store.working()
+    setView({
+      working,
+      changes: kind === "card" ? await store.comparisonChanges() : changedFields(store.head, working.doc)
+    })
   }
 
   return (
     <Dialog
+      wide={kind === "card"}
       open
       onOpenChange={(open) => !open && onClose()}
       title={conflicts.length > 0 ? "Changed meanwhile" : "Save a revision"}
@@ -130,7 +140,7 @@ export function SaveDialog({
                 return (
                   <li key={label} className="flex flex-col gap-1">
                     <span className="text-sm font-medium [overflow-wrap:anywhere]">{label}</span>
-                    <ValueDiff before={change.before} after={change.after} />
+                    <ValueDiff before={change.before} after={change.after} rich={kind === "card"} />
                   </li>
                 )
               })}

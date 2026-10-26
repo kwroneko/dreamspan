@@ -1,3 +1,4 @@
+import { expectTextBox } from "./support/textbox.ts"
 import { expect, type Page, test } from "@playwright/test"
 import { textField } from "@rp/shared/editing.ts"
 import { Effect } from "effect"
@@ -79,7 +80,7 @@ for (const kind of ["card", "preset"] as const) {
     await page.goto(`${server().url}/library/${refId}`)
     const box = () => page.getByRole("textbox", { name: kind === "card" ? /^Description/ : /^Prompt/ })
     if (kind === "preset") await page.getByRole("button", { name: "Edit Main Prompt", exact: true }).click()
-    await expect(box()).toHaveValue("hello")
+    await expectTextBox(box(), "hello")
     await offlineBeacon(page)
     await box().fill("hello A")
     await expect.poll(async () => (await copies(page)).map(text)).toContain("hello A")
@@ -98,7 +99,7 @@ for (const kind of ["card", "preset"] as const) {
     block = false
     await page.reload()
     if (kind === "preset") await page.getByRole("button", { name: "Edit Main Prompt", exact: true }).click()
-    await expect(box()).toHaveValue("hello A")
+    await expectTextBox(box(), "hello A")
     await expect
       .poll(
         async () =>
@@ -146,7 +147,7 @@ test("two offline composer tabs retain independent pending copies and acknowledg
   await page.close()
   const opened = await context.newPage()
   await opened.goto(`${server().url}/chats/${chat.id}`)
-  await expect(message(opened)).toHaveValue("UNSAVED FROM B")
+  await expectTextBox(message(opened), "UNSAVED FROM B")
   await expect.poll(() => copies(opened)).toEqual([])
   const recovered = await admin((api) =>
     Effect.gen(function* () {
@@ -184,7 +185,7 @@ test("a stale active editor meets the conflict picker after another tab commits"
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/library/${ref.id}`)
   const box = page.getByRole("textbox", { name: /^Description/ })
-  await expect(box).toHaveValue("hello")
+  await expectTextBox(box, "hello")
   await admin((api) =>
     Effect.gen(function* () {
       const b = yield* api.SaveEditorDraft({
@@ -245,7 +246,7 @@ test("typing during a save deletes exactly the acknowledged copy and never recov
   await expect.poll(() => copies(page)).toEqual([])
   await page.getByRole("button", { name: "Send", exact: true }).click()
   await expect(page.getByRole("article", { name: "Your message" })).toContainText("hello plus")
-  await expect(message(page)).toHaveValue("")
+  await expectTextBox(message(page), "")
   await page.reload()
   await expect(message(page)).toBeEditable()
   const recovered = await admin((api) => api.ListRecoveredTexts({ limit: 100, before: null }))
@@ -291,7 +292,7 @@ test("a keepalive and its later live save acknowledge the same pending operation
     })
   )
   release!()
-  await expect(message(page)).toHaveValue("")
+  await expectTextBox(message(page), "")
   const recovered = await admin((api) => api.ListRecoveredTexts({ limit: 100, before: null }))
   expect(recovered.map((r) => r.content)).not.toContain("kept once")
 })
@@ -350,7 +351,7 @@ test("a send of text a replayed save answered for keeps another tab's newer text
   )
   hold.release()
   await expect(page.getByRole("article", { name: "Your message" })).toContainText("alpha")
-  await expect(message(page)).toHaveValue(newer)
+  await expectTextBox(message(page), newer)
   const chatNow = await admin((api) => api.GetChat({ chatId: chat.id }))
   const draft = await admin((api) => api.OpenComposer({ chatId: chat.id, tipSlotId: chatNow.activeLeafSlotId }))
   expect([draft.status, draft.content]).toEqual(["active", newer])
@@ -375,7 +376,7 @@ test("typing on another branch keeps the copy of a branch's text the server refu
   await message(page).fill(huge)
   await expect(page.getByRole("alert")).toBeVisible()
   await page.getByRole("button", { name: "Previous branch", exact: true }).click()
-  await expect(message(page)).toHaveValue("")
+  await expectTextBox(message(page), "")
   await message(page).fill("new text on branch A")
   await expect
     .poll(async () => (await admin((api) => api.OpenComposer({ chatId: seeded.chat.id, tipSlotId: seeded.a }))).content)
@@ -383,7 +384,7 @@ test("typing on another branch keeps the copy of a branch's text the server refu
   expect((await copies(page)).some((copy) => text(copy) === huge)).toBe(true)
   // Back on branch B, the text is in the box again.
   await page.getByRole("button", { name: "Next branch", exact: true }).click()
-  await expect(message(page)).toHaveValue(huge)
+  await expectTextBox(message(page), huge)
 })
 
 test("text typed while an editor's Undo is on its way stays, saved on top of the earlier text", async ({ page }) => {
@@ -417,7 +418,7 @@ test("text typed while an editor's Undo is on its way stays, saved on top of the
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/library/${card.id}`)
   const box = page.getByRole("textbox", { name: /^Description/ })
-  await expect(box).toHaveValue("x")
+  await expectTextBox(box, "x")
   await page.getByRole("button", { name: "Undo Description", exact: true }).click()
   await expect.poll(hold.held).toBe(1)
   const typed = "Unique keystrokes during undo 847261"
@@ -431,7 +432,7 @@ test("text typed while an editor's Undo is on its way stays, saved on top of the
       ).map((state) => state.kind)
     )
     .toContain("restore")
-  await expect(box).toHaveValue(typed)
+  await expectTextBox(box, typed)
   await expect
     .poll(async () => (await admin((api) => api.OpenEditor({ refId: card.id }))).drafts[0]!.content)
     .toBe(typed)
@@ -463,7 +464,7 @@ test("a change that can't reach the server survives its note going to the bin an
   await page.unroute("**/library/drafts")
   await admin((api) => api.RestoreBinItem({ itemId: item.id }))
   await page.reload()
-  await expect(box).toHaveValue(unsent)
+  await expectTextBox(box, unsent)
   await expect.poll(() => copies(page)).toEqual([])
 })
 
@@ -486,7 +487,7 @@ test("text a revision's save sent to the recovered texts is pointed to from the 
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/library/${card.id}`)
   const box = page.getByRole("textbox", { name: /^Description/ })
-  await expect(box).toHaveValue("hello")
+  await expectTextBox(box, "hello")
   // Another tab saves the field; this one hasn't seen it, and its save goes on top.
   await admin((api) =>
     Effect.gen(function* () {
