@@ -396,6 +396,14 @@ Stepped history, dropped-message display and rewrite warnings without a TTL are 
 - **[D]** Search, and search and replace, across the whole prompt preset. In ST it's impossible; the owner edits presets as JSON in an external editor to do it.
 - **[D]** The biggest annoyance in ST's editor: twenty prompts in a row that can't be seen or edited as a whole. Finding something means opening each one, checking it, closing it, opening the next. The preset must be readable and editable as one document you scroll through.
 - **[D] Rejected:** ST's separate pool of prompts. Adding a prompt means creating it with a button, then finding it in a dropdown and adding it to the list; disabled prompts may or may not be in the list. Here a new prompt goes straight into the list where you add it, and a prompt that's off stays in the list, off. (The build copied the pool: "prompts out of the order are listed to add back".)
+- **[D]** The shape (owner confirmed 2026-10-27, from the coordinator's proposal):
+  - The preset is one scrolling document. Each prompt is a block: a header (name, role, position or depth, an on/off switch, its token count) above its full text in the code-editor box, always visible. "Collapse all" gives an outline of headers; any block collapses on its own.
+  - Markers are slim rows saying what fills them in the current chat ("Chat history (3,875 tokens)", "Definitions: Aria Vance, Rook"); dividers mark where the history starts, where the tail starts, and where the cached part ends.
+  - Order by dragging a block's handle, or names in an outline column beside the document, which also jumps to a prompt. A "＋" between any two blocks inserts a new prompt there.
+  - The code-editor style search and replace bar (as in the chat: case, whole word, regex, preserve case, previews) sits at the top and **stays in view while scrolling**.
+  - Explicit Save with the diff of every changed prompt; revisions.
+  - **The editor overlays the centre column**, as ST's does: it never navigates to another page, so editing the preset while chatting stays convenient.
+  - The right panel's Preset tab has the on/off switches and token counts, and **Edit on each block**, which opens the editor overlay scrolled to that prompt. A switch flipped there is an edit of the (global) preset and shows Save.
 - **[O]** Token counts per prompt for the current chat: ST updates them only after a message is sent with the preset. Whether to update them continuously is open.
 
 ### 6.3 Per-card preset overlays
