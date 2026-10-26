@@ -14,6 +14,7 @@
 
 - **[D]** These are separate ideas. A grid of characters you click opens a character, with the chats associated with it, not "a chat". A list of the last few chats, with an excerpt of their last message, sits alongside the grid, ordered by latest message by default.
 - **[D]** The character view (owner's sketch): chat selector on the left, the chat in the middle, character data on the right.
+- **[D]** The screen is three independent parts that some actions switch together (owner, 2026-10-26), refining the sketch above: the **left panel** usually shows a chat list; the **right panel**, when open, shows chat details and/or character details; the **middle** is the chat. There is no separate "character view" that every chat must belong to. Clicking a character switches the left panel to "chats with this character", ordered by when that character spoke, and opens that character in the right panel.
 - **[P]** A character's chats are ordered by when that character last spoke in them, so a chat they left sinks as the story goes on without them. Opening a chat from a character lands on the line where that character spoke last. Chats they're no longer in on any line go in a "Was in" section.
 - **[P]** The selector has two sections: "Just X" (X is the only character the model writes; personas and cards you play don't count) and "With others". The portrait opens the chat X spoke in last.
 - **[P], superseded below** A chat is listed under the character, with a badge for the variant it uses; opening a variant filters to its chats.
