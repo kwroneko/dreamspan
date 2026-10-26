@@ -162,8 +162,10 @@ export const makeEditorHandlers = Effect.gen(function* () {
         settle("CommitEditorDrafts")
       ),
 
-    ListRevisions: ({ refId, limit }) =>
-      Effect.flatMap(userId, (id) => reader.RefHistory({ userId: id, refId, limit })).pipe(settle("ListRevisions")),
+    ListRevisions: ({ refId, limit, before }) =>
+      Effect.flatMap(userId, (id) =>
+        reader.RefHistory({ userId: id, refId, limit, ...(before ? { before } : {}) })
+      ).pipe(settle("ListRevisions")),
 
     GetRevision: ({ refId, revisionId }) =>
       Effect.flatMap(userId, (id) => reader.GetRevisionDoc({ userId: id, refId, revisionId })).pipe(

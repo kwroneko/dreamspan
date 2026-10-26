@@ -147,7 +147,11 @@ export class EditorApi extends RpcGroup.make(
   }),
   // --- Revisions.
   Rpc.make("ListRevisions", {
-    payload: { refId: RefId, limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 500 })) },
+    payload: {
+      refId: RefId,
+      limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 500 })),
+      before: Schema.optionalKey(RevisionId)
+    },
     success: Schema.Array(Revision),
     error: Schema.Union([...Errors])
   }),
