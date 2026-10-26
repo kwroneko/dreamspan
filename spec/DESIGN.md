@@ -239,7 +239,12 @@ Where the owner corrected an earlier proposal, the corrected version is recorded
 
 - **[D]** There are no personas apart from cards: a card can be played by the user and roles can be swapped, so a "persona note" is just a card's note (owner, 2026-10-26). A note's owner is a card or a chat (global notes: open). Ownership decides where a note is found and edited, which chats it can be switched on in, and whether it travels when the card is exported (unless private) or forked (copied); a chat's note is inherited by a fork as it is at that point, then independent.
 - **[D]** Every note has an on/off switch, not a number to type (owner, 2026-10-26).
-- **[P]** Positions, relative to the preset's own sections (§5.0): start of context; with the definitions (after the main prompt); at depth N in the history; start of the tail; end of the tail (default: the last thing before the newest message, or the very end when the preset puts the newest message earlier). Each note has a role.
+- **[D]** Positions (owner confirmed 2026-10-26), relative to the preset's own sections (§5.0): start of context; with the definitions (after the main prompt); at depth N in the history; start of the tail; end of the tail (default: the last thing before the newest message, or the very end when the preset puts the newest message earlier). Each note has a role.
+
+- **[D]** Any note can be named, since there is more than one, and the notes need a collapsed view (owner, 2026-10-26).
+- **[D]** A global "database" of named notes, usable from anywhere: when adding a note anywhere, instead of writing one you can pick an existing shared note, filterable by name, which fills that note slot; changes to a shared note are global (owner, 2026-10-26). **[O]** A "save as local note" button that copies a shared note into a note of this chat only (the owner isn't sure it's worth the complexity).
+- **[O]** A note that applies in every chat whatever the preset: it extends a preset without modifying it and stays when the preset changes, which makes it somewhat useful, but it's close to being a preset itself and its UX is unclear (owner, 2026-10-26).
+- **[P]** So a note *slot* belongs to a chat or a card (the only two owners), and its content is either its own text or a link to a shared named note.
 
 - **[D]** No insertion frequency (ST's "every Nth user message" for the Author's Note): a note that comes and goes breaks the cache and serves no real purpose (owner, 2026-10-26). On import, ST's 0 becomes off, any other value on.
 
