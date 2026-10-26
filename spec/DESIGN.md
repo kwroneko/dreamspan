@@ -449,6 +449,9 @@ Stepped history, dropped-message display and rewrite warnings without a TTL are 
   - it shares the cache prefix with the normal conversation, as reference-harness's does
 - **[D]** **Refusal detection** is needed on this surface, so a refusal is never saved as a summary. reference-harness has one, which may need refining for our cases later. Refusal detection is useful for every message, not only summaries (owner, 2026-10-12).
 
+- **[D]** The summary divider and the summary panel have a toggle for what the timeline shows before the summary line: the original messages, or the summaries themselves in the chat. It can be switched at any time, including while previewing a search and replace (owner, 2026-10-26). **[O]** Whether the choice is saved per chat or per account.
+- **[P]** "Summaries in the chat" shows the layer the model actually reads, in path order, each in place of the messages it covers, with its level and range; each expands to its messages (a level above 1 to the summaries it condenses). So the timeline can show exactly what the model sees.
+
 ### 8.1 Imported summaries
 - **[D]** Importing a chat also imports its summary, if it has one. **This is required before the owner starts using the harness** (owner, 2026-10-12).
 - **[D]** The custom single-field summary is kept in its own field, even where LCM makes it technically obsolete. A chat that already has a summary keeps it.
