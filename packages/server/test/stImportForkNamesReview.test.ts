@@ -205,6 +205,85 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
         })
       )
     }
+    for (const [index, localName] of [null, "My replacement", ""].entries()) {
+      it.effect(`names the replacement path after a writer change (${JSON.stringify(localName)})`, () =>
+        Effect.gen(function* () {
+          const folder = `WriterReplacement${index}`
+          const files = pair(folder, "Named road")
+          const api = yield* run(files)
+          const old = yield* nameOf(`${folder} fork`)
+          if (localName !== null) yield* api.NameBranch({ slotId: old.id, name: localName })
+          const user = yield* api.Whoami()
+          const reader = yield* Reader
+          const source = Effect.fnUntraced(function* () {
+            return (yield* reader.StImportSources({ userId: user.id })).chats.find((r) => r.source === files[1]![0])!
+          })
+          const original = yield* source()
+          const originalPath = yield* api.ReadPath({
+            chatId: original.chatId,
+            leafSlotId: original.end,
+            range: { _tag: "Bottom" },
+            limit: 100
+          })
+          // A different writer cannot reuse a recorded slot. It starts a new path
+          // without copying a suffix, even though text and timestamps are unchanged.
+          const changed = bytes([
+            { chat_metadata: { main_chat: "main" } },
+            msg(`${folder} greeting`, 0, { is_user: true, name: "User" }),
+            msg(`${folder} hello`, 1),
+            msg(`${folder} fork`, 2),
+            msg(`${folder} reply`, 3)
+          ])
+          const contents = (path: typeof originalPath) =>
+            path.entries.map((e) => ({ slot: e.slotId, name: e.branchName, version: e.version }))
+          let replacement: typeof originalPath | undefined
+          for (let pass = 0; pass < 2; pass++) {
+            yield* run([files[0]!, [files[1]![0], changed]])
+            const record = yield* source()
+            const path = yield* api.ReadPath({
+              chatId: record.chatId,
+              leafSlotId: record.end,
+              range: { _tag: "Bottom" },
+              limit: 100
+            })
+            assert.notStrictEqual(path.entries[0]!.slotId, originalPath.entries[0]!.slotId)
+            assert.strictEqual(path.entries[0]!.version.writer, "human")
+            const [rows] = yield* fixtureSql(
+              config.dataDir,
+              [
+                {
+                  sql: "SELECT branch_name, branch_name_user FROM slots WHERE id = ?",
+                  params: [path.entries[0]!.slotId]
+                }
+              ],
+              { readOnly: true }
+            )
+            const expected = localName === "" ? null : (localName ?? "Named road")
+            assert.strictEqual(rows![0]!.branch_name, expected, "the first divergent slot must carry the name")
+            assert.strictEqual(
+              rows![0]!.branch_name_user,
+              localName === null ? 0 : 1,
+              "the replacement must retain local naming provenance"
+            )
+            assert.deepStrictEqual(
+              path.entries.slice(1).map((e) => e.branchName),
+              [undefined, undefined, undefined]
+            )
+            const menu = yield* api.ListBranches({ slotId: originalPath.entries[0]!.slotId })
+            assert.strictEqual(menu.find((b) => b.slotId === path.entries[0]!.slotId)?.name, expected)
+            const oldAfter = yield* api.ReadPath({
+              chatId: original.chatId,
+              leafSlotId: original.end,
+              range: { _tag: "Bottom" },
+              limit: 100
+            })
+            assert.deepStrictEqual(contents(oldAfter), contents(originalPath))
+            if (replacement !== undefined) assert.deepStrictEqual(path, replacement)
+            replacement = path
+          }
+        })
+      )
+    }
     for (const [index, localName] of [null, "My inner", ""].entries()) {
       it.effect(
         `parent movement preserves nested naming and the shared main prefix (${JSON.stringify(localName)})`,

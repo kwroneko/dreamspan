@@ -696,7 +696,9 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
           const parentEnd = parent?.chatId === chatId ? (parent.end ?? parent.last ?? null) : null
           if (parentEnd !== null) {
             type NameSlot = { id: string; depth: number; branch_name: string | null; branch_name_user: number }
-            const divergence = (end: string | null) => sql<NameSlot>`
+            const divergence = (end: string | null, placement: string | null = null) => sql<
+              NameSlot & { keeps_placement: number }
+            >`
               WITH RECURSIVE theirs(id, parent) AS (
                 SELECT id, parent_slot_id FROM slots WHERE id = ${parentEnd} AND chat_id = ${chatId}
                 UNION ALL
@@ -706,25 +708,28 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
                 UNION ALL
                 SELECT s.id, s.parent_slot_id, s.depth FROM slots s JOIN mine m ON s.id = m.parent
               )
-              SELECT s.id, s.depth, s.branch_name, s.branch_name_user FROM mine m JOIN slots s ON s.id = m.id
+              SELECT s.id, s.depth, s.branch_name, s.branch_name_user,
+                EXISTS (SELECT 1 FROM mine WHERE id = ${placement}) AND
+                  NOT EXISTS (SELECT 1 FROM theirs WHERE id = ${placement}) AS keeps_placement
+              FROM mine m JOIN slots s ON s.id = m.id
               WHERE m.id NOT IN (SELECT id FROM theirs) ORDER BY m.depth LIMIT 1`
-            let [own] = yield* divergence(input.end)
-            if (own === undefined) fork = "same"
+            // Old records have only `named`: recover their original placement from the
+            // previous end. `nameSlot` also survives an interrupted, batched suffix copy.
+            const [previous] = !named
+              ? []
+              : nameSlot === null
+                ? yield* divergence(payload.end ?? null)
+                : yield* sql<NameSlot>`SELECT id, depth, branch_name, branch_name_user FROM slots
+                    WHERE id = ${nameSlot} AND chat_id = ${chatId}`
+            const [current] = yield* divergence(input.end, previous?.id ?? null)
+            if (current === undefined) fork = "same"
             else {
-              // Old records have only `named`: recover their original placement from the
-              // previous end. `nameSlot` also survives an interrupted, batched suffix copy.
-              const [previous] = !named
-                ? []
-                : nameSlot === null
-                  ? yield* divergence(payload.end ?? null)
-                  : yield* sql<NameSlot>`SELECT id, depth, branch_name, branch_name_user FROM slots
-                      WHERE id = ${nameSlot} AND chat_id = ${chatId}`
-              // A parent can move away while this file keeps its original path. Its
-              // new divergence may then be another file's shared prefix, not a new
-              // switch point for this name. Retain the existing placement unless this
-              // file copied its own path; only that copy needs naming reconciliation.
-              if (previous !== undefined && payload.forkPrior == null) own = previous
-              const moving = previous !== undefined && previous.id !== own.id && previous.depth >= own.depth
+              // The remembered switch point remains valid only on this file's current
+              // path, outside the parent's. A parent moving away leaves that placement
+              // intact. If this file replaces its path (with or without a suffix copy),
+              // or the parent now shares the old switch point, use the first divergence.
+              const own = current.keeps_placement === 1 && previous !== undefined ? previous : current
+              const moving = previous !== undefined && previous.id !== own.id
               const canName =
                 own.branch_name_user === 0 &&
                 ((own.branch_name === null && !(named && previous?.id === own.id)) ||
