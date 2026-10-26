@@ -550,6 +550,16 @@ Stepped history, dropped-message display and rewrite warnings without a TTL are 
 - **[P]** A **changeset** is one atomic batch of new versions across slots and summaries, with a title and one entry in the chat's history.
 - **[D]** It's applied directly, with no review gate since everything is reversible. Afterwards you can inspect the diff and revert all of it or individual messages. (The earlier "draft, then review" proposal was rejected.)
 - **[P]** Scope options: the current path, all branches, or chosen threads; messages, summaries, notes, and card overrides. Drastic rewrites can be applied as a new chat.
+- **[D]** Nothing changes that the user doesn't see: an edit to history applies to the chat it's made in, and a fork made afterwards inherits it (forking from an earlier point must never undo it, or the fork would show something different from what was in front of the user). Each fork is effectively its own chat, connected to its siblings only by shared history; there is no "current chat" or "current timeline" (owner, 2026-10-26). **[P]** The owner leans towards edits applying only to the chat (timeline) they're made in, for now.
+- **[D]** Renaming a card asks, in the owner's wording (2026-10-26):
+  > "Aria" will be renamed to "Ari"
+  > Replace "Aria" with "Ari" in past messages?
+  > - No. Past messages will keep "Aria".
+  > - Yes, only in this chat. (Does not touch any forks of this chat or any other chats)
+  > - Yes, in all 37 chats with Aria
+  "All chats with Aria" counts forks as chats.
+- **[P]** A history edit in a chat includes the swipes of its messages (owner leaning yes, 2026-10-26). A swipe shared with an existing fork then reads differently there, since that fork isn't touched.
+- **[P]** After Fork for this chat, the character is new: replacing the old name in that chat's past messages is offered for this chat only, or not at all.
 - **[D]** Wide-range edits reach beyond one chat: replacing strings and names across chat history, for example when a card is renamed or a renamed fork is used where the old name appears (owner, 2026-10-26; §4).
 
 ### 10.4 Stack reasoning
