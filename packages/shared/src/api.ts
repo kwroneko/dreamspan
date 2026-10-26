@@ -274,7 +274,7 @@ export class AppApi extends RpcGroup.make(
   // (POST /library/import, /library/export), since RPC messages are JSON.
   /** The user's upstream refs and variants of one kind, by label. */
   Rpc.make("ListLibrary", {
-    payload: { kind: EntityKind },
+    payload: { kind: EntityKind, archived: Schema.optionalKey(Schema.Boolean) },
     success: Schema.Array(LibraryRef),
     error: ServerError
   }),

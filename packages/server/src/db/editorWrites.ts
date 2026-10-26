@@ -33,6 +33,7 @@ type Sql<A> = Effect.Effect<A, SqlError.SqlError>
 
 /** The library's write steps the editors share (libraryWrites.ts). */
 export interface LibrarySteps {
+  readonly namedCardRevision: (ref: RefRow, label: string, subtitle: string) => Sql<string>
   readonly sql: SqlClient.SqlClient
   readonly lib: ReturnType<typeof makeLibraryQueries>
   readonly drafts: ReturnType<typeof makeDraftStore>
@@ -248,7 +249,7 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps) => {
           id,
           entity_id: ref.entity_id,
           ref_kind: "variant",
-          head_revision_id: ref.head_revision_id,
+          head_revision_id: yield* steps.namedCardRevision(ref, label, subtitle),
           follows_ref_id: ref.id,
           merge_base_revision_id: ref.head_revision_id,
           label,
@@ -258,7 +259,8 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps) => {
         })}`
         if (moveDrafts) {
           yield* sql`UPDATE drafts SET target_id = ${id}, row_version = row_version + 1, updated_at = ${at}
-            WHERE user_id = ${userId} AND target_kind = 'entity_field' AND target_id = ${refId} AND status = 'active'`
+            WHERE user_id = ${userId} AND target_kind = 'entity_field' AND target_id = ${refId} AND status = 'active'
+              AND (${ref.kind !== "card" ? 1 : 0} OR field NOT IN ('["name"]', '["character_version"]', '=["name"]', '=["character_version"]'))`
         }
         return toLibraryRef(yield* steps.reload(id))
       }).pipe(transaction(sql, "ForkWithDrafts")),
@@ -267,6 +269,15 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps) => {
       Effect.gen(function* () {
         const ref = yield* lib.ownedRef(userId, refId)
         yield* steps.checkRowVersion(ref, expectedRowVersion)
+        if (ref.kind === "card") {
+          const head = yield* lib.loadDoc(ref.head_revision_id)
+          return (yield* userEdit(
+            ref,
+            { ...head, name: label, character_version: subtitle },
+            "Changed card display name and version",
+            null
+          )).ref
+        }
         yield* sql`UPDATE entity_refs SET label = ${label}, subtitle = ${subtitle}, row_version = row_version + 1,
                    updated_at = ${Date.now()} WHERE id = ${refId}`
         return toLibraryRef(yield* steps.reload(refId))

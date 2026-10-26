@@ -355,7 +355,11 @@ export function ChatHeader({
   const names = characters.map((card) => card.name)
   const others = names.filter((n) => n !== name?.name)
   const about = [
-    others.length > 0 ? others.join(", ") : null,
+    characters.some((card) => card.subtitle)
+      ? characters.map((card) => `${card.name}${card.subtitle ? ` · ${card.subtitle}` : ""}`).join(", ")
+      : others.length > 0
+        ? others.join(", ")
+        : null,
     name?.started ? `started ${formatDay(name.started)}` : null
   ].filter(Boolean)
   return (
@@ -392,7 +396,7 @@ export function ChatHeader({
             <ChatTitle session={session} view={view} name={name} />
             {view.chat && <ChatBadges chat={view.chat} />}
           </div>
-          {about.length > 0 && <p className="truncate text-xs text-muted max-sm:hidden">{about.join(" · ")}</p>}
+          {about.length > 0 && <p className="truncate text-xs text-muted">{about.join(" · ")}</p>}
         </div>
         <div className="flex min-w-0 items-center justify-end gap-1.5 max-sm:w-full sm:gap-3">
           <BranchMenu session={session} view={view} onBranch={onBranch} onJump={onJump} />

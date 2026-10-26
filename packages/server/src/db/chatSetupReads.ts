@@ -1,3 +1,4 @@
+import { cardNames, modelName } from "@rp/shared/cardNames.ts"
 // Read handlers for chat setup, speakers and the send queue (DESIGN §2.1, §2.2). They run
 // in the reader workers; every one touches only the acting user's rows.
 import type { Chat } from "@rp/shared/chat.ts"
@@ -10,7 +11,7 @@ import { importState } from "@rp/shared/stImportApi.ts"
 import { FoldableEvent, foldState } from "@rp/shared/state.ts"
 import { Effect, Schema } from "effect"
 import { SqlClient } from "effect/sql"
-import { castCardAt, loadCards } from "./cards.ts"
+import { cardBindingsAt, castCardAt, loadCards } from "./cards.ts"
 import { type CardBinding, makeLibraryQueries } from "./library.ts"
 import { NotFound, type ReadOps, StorageError } from "./ops.ts"
 import { chatQueue } from "./queueRows.ts"
@@ -66,7 +67,7 @@ export const makeChatSetupReadHandlers = Effect.gen(function* () {
             FROM state_events e
             LEFT JOIN path p ON p.id = e.slot_id
             LEFT JOIN slots s ON s.id = p.id
-            WHERE e.chat_id = c.id AND e.key IN ('participant.join', 'participant.leave', 'played_by_me.set')
+            WHERE e.chat_id = c.id AND e.key IN ('participant.join', 'participant.leave', 'played_by_me.set', 'card.binding')
               AND e.superseded_by_changeset IS NULL
               AND (e.slot_id IS NULL OR (p.id IS NOT NULL AND s.deleted_at IS NULL))
               AND (c.active_leaf_slot_id IS NULL OR e.version_id IS NULL OR e.version_id = s.selected_version_id)
@@ -77,10 +78,11 @@ export const makeChatSetupReadHandlers = Effect.gen(function* () {
       const cards = yield* sql<{
         entity_id: string
         label: string
+        subtitle: string
         name: unknown
         avatar: unknown
       }>`
-        SELECT e.id AS entity_id, r.label, json_extract(rev.doc_json, '$.name') AS name,
+        SELECT e.id AS entity_id, r.label, r.subtitle, json_extract(rev.doc_json, '$.name') AS name,
           json_extract(rev.doc_json, '$.avatar_media_id') AS avatar
         FROM entities e
         JOIN entity_refs r ON r.id = (
@@ -90,11 +92,12 @@ export const makeChatSetupReadHandlers = Effect.gen(function* () {
         WHERE e.owner_user_id = ${userId} AND e.kind = 'card' AND e.purged_at IS NULL`
       const characters = new Map<string, Member>()
       for (const card of cards) {
-        const name = typeof card.name === "string" ? card.name.trim() : ""
+        const name = typeof card.name === "string" ? card.name : ""
         characters.set(card.entity_id, {
           entityId: card.entity_id as EntityId,
           name: name === "" ? card.label : name,
           label: card.label,
+          subtitle: card.subtitle,
           avatarMediaId: typeof card.avatar === "string" ? card.avatar : null
         })
       }
@@ -115,12 +118,47 @@ export const makeChatSetupReadHandlers = Effect.gen(function* () {
         events.push(event)
         eventsByChat.set(event.chatId, events)
       }
+      // Ordinary groups use the metadata already loaded above. Fetch overrides once,
+      // rather than looking up every card in every chat (thousands on a large library).
+      const overrides = yield* sql<{ chat_id: string; entity_id: string; doc_json: string }>`
+        SELECT r.chat_id, r.entity_id, v.doc_json FROM entity_refs r
+        JOIN entities e ON e.id = r.entity_id JOIN entity_revisions v ON v.id = r.head_revision_id
+        WHERE r.ref_kind = 'chat_override' AND e.kind = 'card' AND e.owner_user_id = ${userId} AND e.purged_at IS NULL`
+      const overrideDocs = new Map(overrides.map((row) => [`${row.chat_id}:${row.entity_id}`, row.doc_json]))
       // Chats come latest first, so a group's first chat is its latest.
       const groups = new Map<string, { name: string; members: Array<Member>; chats: Array<Chat> }>()
       for (const row of chats) {
         const state = foldState(eventsByChat.get(row.id) ?? [])
         const played = new Set(state.playedByMe)
-        const members = state.participants.flatMap((id) => (played.has(id) ? [] : (characters.get(id) ?? [])))
+        const baseMembers = state.participants.flatMap((id) => (played.has(id) ? [] : (characters.get(id) ?? [])))
+        const needsResolution = baseMembers.some(
+          (member) =>
+            state.cardBindings[member.entityId] !== undefined || overrideDocs.has(`${row.id}:${member.entityId}`)
+        )
+        const members = needsResolution
+          ? yield* Effect.forEach(baseMembers, (member) =>
+              Effect.gen(function* () {
+                const binding = state.cardBindings[member.entityId]
+                const overrideDoc = overrideDocs.get(`${row.id}:${member.entityId}`)
+                if (binding === undefined && overrideDoc === undefined) return member
+                const used =
+                  binding === undefined ? null : yield* lib.cardInChat(userId, row.id, member.entityId, binding)
+                if (binding !== undefined && used === null) return member
+                const doc =
+                  used === null
+                    ? (JSON.parse(overrideDoc!) as Record<string, unknown>)
+                    : yield* lib.loadDoc(used.revisionId)
+                const names = cardNames(doc)
+                return {
+                  ...member,
+                  name: names.displayName,
+                  label: names.displayName,
+                  subtitle: names.version,
+                  avatarMediaId: typeof doc.avatar_media_id === "string" ? doc.avatar_media_id : null
+                }
+              })
+            )
+          : baseMembers
         if (members.length < 2) continue
         const name = chatName(importState(row.title).title, members).name
         const key = `${name}\n${members
@@ -176,6 +214,7 @@ export const makeChatSetupReadHandlers = Effect.gen(function* () {
         head_revision_id: string
         label: string
         subtitle: string
+        nickname: unknown
         name: unknown
         avatar: unknown
         used: string
@@ -190,7 +229,7 @@ export const makeChatSetupReadHandlers = Effect.gen(function* () {
             AND e.deleted_at IS NULL AND e.archived_at IS NULL
             AND NOT EXISTS (SELECT 1 FROM entity_tags t WHERE t.entity_id = e.id AND t.tag = 'persona')
         )
-        SELECT cards.*, json_extract(rev.doc_json, '$.name') AS name,
+        SELECT cards.*, json_extract(rev.doc_json, '$.name') AS name, json_extract(rev.doc_json, '$.nickname') AS nickname,
           json_extract(rev.doc_json, '$.avatar_media_id') AS avatar,
           (SELECT json_object(
               'chats', count(DISTINCT c.id),
@@ -206,7 +245,7 @@ export const makeChatSetupReadHandlers = Effect.gen(function* () {
         Effect.map((rows) =>
           rows.map((row) => {
             const used = JSON.parse(row.used) as { chats: number; last: number | null; latest: string | null }
-            const name = typeof row.name === "string" ? row.name.trim() : ""
+            const name = typeof row.name === "string" ? row.name : ""
             return new CardUsage({
               entityId: row.entity_id as EntityId,
               refId: row.ref_id as RefId,
@@ -214,6 +253,7 @@ export const makeChatSetupReadHandlers = Effect.gen(function* () {
               label: row.label,
               subtitle: row.subtitle,
               name: name === "" ? row.label : name,
+              modelName: modelName({ name, nickname: text(row.nickname) }),
               avatarMediaId: typeof row.avatar === "string" ? row.avatar : null,
               chats: used.chats,
               lastMessageAt: used.last,
@@ -240,7 +280,14 @@ export const makeChatSetupReadHandlers = Effect.gen(function* () {
             GROUP BY entity ORDER BY min(seq)`
           const ids = joined.map((row) => row.entity as EntityId)
           const cards = ids.length === 0 ? [] : yield* loadCards(sql, userId, ids)
-          const byId = new Map(cards.map(({ card }) => [card.entityId as string, card]))
+          const bindings = yield* cardBindingsAt(sql, chatId, chat.leaf)
+          const resolved = yield* Effect.forEach(cards, ({ card }) =>
+            Effect.gen(function* () {
+              const used = yield* lib.cardInChat(userId, chatId, card.entityId, bindings[card.entityId])
+              return used === null ? card : yield* castCardAt(sql, card, used.revisionId)
+            })
+          )
+          const byId = new Map(resolved.map((card) => [card.entityId as string, card]))
           const [leaf] =
             chat.leaf === null
               ? []

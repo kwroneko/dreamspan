@@ -20,6 +20,7 @@ interface BinRow {
   readonly chat_id: string | null
   readonly title: string
   readonly excerpt: string
+  readonly card_doc_json?: string | null
   readonly origin_json: string
   readonly byte_size: number
   readonly deleted_at: number
@@ -30,9 +31,12 @@ export const toBinItem = (row: BinRow) =>
     id: row.id,
     kind: row.kind,
     targetId: row.target_id,
-    title: row.title,
+    title: row.card_doc_json ? String(JSON.parse(row.card_doc_json).name ?? "") : row.title,
     excerpt: row.excerpt,
-    origin: JSON.parse(row.origin_json) as Record<string, unknown>,
+    origin: {
+      ...(JSON.parse(row.origin_json) as Record<string, unknown>),
+      ...(row.card_doc_json ? { subtitle: JSON.parse(row.card_doc_json).character_version ?? "" } : {})
+    },
     byteSize: row.byte_size,
     deletedAt: row.deleted_at
   })

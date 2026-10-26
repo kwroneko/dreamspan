@@ -86,9 +86,13 @@ export const makeEditorHandlers = Effect.gen(function* () {
         settle("OpenEditor")
       ),
 
-    CreateCard: ({ label, name }) =>
+    CreateCard: ({ label, name, nickname, version }) =>
       Effect.gen(function* () {
-        const valid = validateDoc("card", newCardDoc(name))
+        const valid = validateDoc("card", {
+          ...newCardDoc(name),
+          nickname: nickname ?? "",
+          character_version: version ?? ""
+        })
         if (!valid.ok) return yield* new InvalidDocument({ problems: valid.problems })
         const { ref } = yield* writer.CreateEntity({
           userId: yield* userId,

@@ -1,3 +1,5 @@
+import { cardNames } from "@rp/shared/cardNames.ts"
+import { useCardNameCheck } from "./cardNameCheck.ts"
 // A ref's revisions, newest first (DESIGN §4: revisions sit behind a History button). Each
 // compares with the saved version, and restores as a new revision, so nothing is lost.
 import type { Doc, Revision } from "@rp/shared/library.ts"
@@ -38,6 +40,14 @@ function RevisionRow({
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<AppError | null>(null)
   const snapshot = useEditorState(store).snapshot!
+  const names = cardNames(doc ?? snapshot.doc)
+  const nameCheck = useCardNameCheck(names.displayName, names.version, snapshot.ref)
+  const clash =
+    snapshot.ref.kind === "card"
+      ? doc === null
+        ? "Compare this revision to check its card names before restoring."
+        : nameCheck
+      : null
 
   const compare = async () => {
     setOpen(!open)
@@ -48,6 +58,7 @@ function RevisionRow({
   }
 
   const restore = async () => {
+    if (clash) return
     setPending(true)
     const result = await call(
       (client) =>
@@ -80,12 +91,17 @@ function RevisionRow({
             <Button variant="ghost" aria-expanded={open} onClick={() => void compare()}>
               Compare
             </Button>
-            <Button pending={pending} onClick={() => void restore()}>
+            <Button pending={pending} disabled={clash !== null} onClick={() => void restore()}>
               Restore
             </Button>
           </div>
         )}
       </div>
+      {!current && clash && (
+        <p role="status" className="text-sm text-muted">
+          {clash}
+        </p>
+      )}
       <ErrorAlert error={error} />
       {open && doc !== null && (
         <div className="flex flex-col gap-2">

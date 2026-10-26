@@ -1696,3 +1696,37 @@ describe("lorebook assembly", () => {
     expect(await assembled(f, { frozen: first.frozen, random: () => 0.9 })).toEqual(first)
   })
 })
+
+it.each([undefined, "", "Captain Aria"])(
+  "uses nickname %s for macros, group nudges and transcript names",
+  async (nickname) => {
+    const expected = nickname || "Aria Vance"
+    const snapshot = await assembled(
+      chat({
+        cards: [
+          {
+            entity: "mira",
+            doc: card("Aria Vance", {
+              ...(nickname === undefined ? {} : { nickname }),
+              description: "{{char}} greets {{user}}."
+            })
+          },
+          { entity: "oren", doc: oren },
+          { entity: "tobin", doc: card("Tobin Display", { nickname: "Tobin" }) }
+        ],
+        participants: ["mira", "oren"],
+        messages: [
+          { side: "assistant", content: "{{char}} speaks.", macroMode: "template" },
+          { side: "user", content: "Hello" }
+        ],
+        preset: preset({ names_behavior: 1, group_nudge_prompt: "Reply as {{char}}." })
+      })
+    )
+    const text = contents(snapshot).join("\n")
+    expect(text).toContain(`${expected} greets Tobin.`)
+    expect(text).toContain(`${expected} speaks.`)
+    expect(text).toContain(`Reply as ${expected}.`)
+    expect(snapshot.request.messages.some((m) => m.name === expected.replaceAll(" ", "_"))).toBe(true)
+    if (nickname) expect(text).not.toContain("Aria Vance")
+  }
+)

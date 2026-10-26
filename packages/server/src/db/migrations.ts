@@ -1,3 +1,4 @@
+import { cardNamesMigration } from "./cardNamesMigration.ts"
 import { lcmEnableSchema } from "./schema/lcmEnable.ts"
 import { composerChoiceSchema } from "./schema/composerChoice.ts"
 import { historyChangesSchema } from "./historyChanges.ts"
@@ -235,6 +236,7 @@ export const migrations = {
   "0041_st_import_selection": runAll([
     `ALTER TABLE slots ADD COLUMN st_import_row_version INTEGER NOT NULL DEFAULT 1 CHECK (st_import_row_version > 0)`
   ]),
+  "0043_card_names": cardNamesMigration,
   // An import that forks a shared ST path copies deleted messages and swipes with their bin
   // item, so one deletion still covers both copies. Deleting it for good may empty every
   // row that carries the item, not only the row the item names.

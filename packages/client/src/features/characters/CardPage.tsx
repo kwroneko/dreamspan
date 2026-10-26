@@ -170,9 +170,9 @@ function Page({ card }: { card: CardUsage }) {
         <div className="flex min-w-0 flex-1 flex-col gap-1">
           <h1 className="text-xl font-semibold [overflow-wrap:anywhere]">{card.label}</h1>
           {card.subtitle && <p className="text-muted [overflow-wrap:anywhere]">{card.subtitle}</p>}
-          {card.name !== card.label && (
+          {card.modelName && card.modelName !== card.label && (
             <p className="text-sm text-muted">
-              In chats as <span className="font-medium text-text">{card.name}</span>
+              Model sees <span className="font-medium text-text">{card.modelName}</span>
             </p>
           )}
           <p className="text-sm text-muted">{usageLine(card)}</p>

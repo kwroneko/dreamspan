@@ -56,7 +56,7 @@ describe("chat setup", () => {
       const shown = yield* api.GetCardForChat({ entityId: miraId })
       assert.deepStrictEqual(shown.greetings, ["The bell rings for {{user}}.", "Mira waves."])
       assert.strictEqual(shown.card.name, "Mira")
-      assert.strictEqual(shown.card.label, "Mira (harbor)")
+      assert.strictEqual(shown.card.label, "Mira")
       // Opening a card makes no chat (DESIGN §2.1).
       assert.lengthOf(yield* api.ListChats({ limit: 10, before: null }), 0)
 

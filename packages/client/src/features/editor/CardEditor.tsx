@@ -233,8 +233,14 @@ export function CardEditor({
       <Card>
         <CardHeader title="Identity" />
         <div className="flex flex-col gap-4">
+          <TextField store={store} path={["name"]} label="Display name" />
+          <TextField
+            store={store}
+            path={["nickname"]}
+            label="Name the model sees (leave empty to use the display name)"
+          />
+          <TextField store={store} path={["character_version"]} label="Version (shown as subtitle)" />
           <Avatar store={store} onUpload={onUpload} />
-          <TextField store={store} path={["name"]} label="Name" description="What {{char}} becomes in chats." />
         </div>
       </Card>
       <Card>
@@ -278,7 +284,6 @@ export function CardEditor({
           <Tags store={store} />
           <div className="grid gap-4 sm:grid-cols-2">
             <TextField store={store} path={["creator"]} label="Creator" />
-            <TextField store={store} path={["character_version"]} label="Character version" />
           </div>
         </div>
       </Card>

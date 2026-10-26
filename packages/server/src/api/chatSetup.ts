@@ -159,7 +159,10 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
                 ? Math.floor(Math.random() * card.greetings.length)
                 : greeter.greeting
             const fields = { description: card.description, personality: card.personality, scenario: card.scenario }
-            const names = { user: player?.name ?? "User", char: card.card.name }
+            const names = {
+              user: player?.modelName ?? player?.name ?? "User",
+              char: card.card.modelName ?? card.card.name
+            }
             return {
               entityId: greeter.entityId,
               // A single card's greeting as asked, or a group's preview/random choice.

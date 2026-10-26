@@ -21,8 +21,8 @@ export const castView = (cast: Cast | null, extra: ReadonlyArray<CastCard> = [])
   return {
     cast,
     cards,
-    user: (played && cards.get(played)?.name) || "User",
-    char: (other && cards.get(other)?.name) || "Character"
+    user: (played && (cards.get(played)?.modelName ?? cards.get(played)?.name)) || "User",
+    char: (other && (cards.get(other)?.modelName ?? cards.get(other)?.name)) || "Character"
   }
 }
 
@@ -91,3 +91,6 @@ export const recentSpeakers = (entries: ReadonlyArray<PathEntry>, count: number)
   }
   return seen
 }
+
+export const modelNameOf = (view: CastView, id: EntityId | null) =>
+  id === null ? null : (view.cards.get(id)?.modelName ?? view.cards.get(id)?.name ?? null)

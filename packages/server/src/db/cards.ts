@@ -1,5 +1,8 @@
-// Cards as chats see them (DESIGN §2.1, §2.2): the in-chat name and greetings from the
-// document a card is shown from, its library label, and whether it's a persona. Shared by
+import { type FoldableEvent, foldState } from "@rp/shared/state.ts"
+import { withoutPurged } from "./stateRefs.ts"
+import { cardNames } from "@rp/shared/cardNames.ts"
+// Cards as chats see them: display name, model name, version and greetings from the
+// selected card revision, and whether it is a persona. Shared by
 // the readers and the writer (chatSetupReads.ts, chatSetupWrites.ts).
 import { CastCard, type EntityId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
@@ -39,7 +42,7 @@ const parse = (row: CardRow): CardText => {
   const alternates = Array.isArray(doc.alternate_greetings) ? doc.alternate_greetings.map(text) : []
   const all = [text(doc.first_mes), ...alternates]
   const greetingIndexes = all.flatMap((greeting, index) => (greeting.trim() === "" ? [] : [index]))
-  const name = text(doc.name).trim()
+  const names = cardNames(doc)
   const book =
     typeof doc.character_book === "object" && doc.character_book !== null
       ? (doc.character_book as Record<string, unknown>)
@@ -48,8 +51,10 @@ const parse = (row: CardRow): CardText => {
   return {
     card: new CastCard({
       entityId: row.entity_id as EntityId,
-      name: name === "" ? row.label : name,
-      label: row.label,
+      name: names.displayName,
+      label: names.displayName,
+      modelName: names.modelName,
+      subtitle: names.version,
       persona: row.persona === 1,
       inBin: row.in_bin === 1,
       lorebook: book !== null,
@@ -88,21 +93,46 @@ export const loadCards = (sql: SqlClient.SqlClient, userId: UserId, ids: Readonl
 
 /**
  * `card` as a chat uses it: the name, avatar and lorebook flag of `revisionId` (the version
- * the chat reads, `cardInChat` in library.ts); its label and persona mark stay the library's.
+ * the chat reads, `cardInChat` in library.ts). Its persona mark stays the library's.
  */
 export const castCardAt = (sql: SqlClient.SqlClient, card: CastCard, revisionId: string) =>
-  sql<{ name: unknown; avatar: unknown; book: string | null }>`
-    SELECT json_extract(doc_json, '$.name') AS name, json_extract(doc_json, '$.avatar_media_id') AS avatar,
-      json_type(doc_json, '$.character_book') AS book
-    FROM entity_revisions WHERE id = ${revisionId}`.pipe(
+  sql<{ doc_json: string }>`SELECT doc_json FROM entity_revisions WHERE id = ${revisionId}`.pipe(
     Effect.map(([row]) => {
       if (!row) return card
-      const name = text(row.name).trim()
+      const doc = JSON.parse(row.doc_json) as Record<string, unknown>
+      const names = cardNames(doc)
       return new CastCard({
         ...card,
-        name: name === "" ? card.label : name,
-        avatarMediaId: typeof row.avatar === "string" ? row.avatar : null,
-        lorebook: row.book === "object"
+        name: names.displayName,
+        label: names.displayName,
+        modelName: names.modelName,
+        subtitle: names.version,
+        avatarMediaId: typeof doc.avatar_media_id === "string" ? doc.avatar_media_id : null,
+        lorebook: typeof doc.character_book === "object" && doc.character_book !== null
       })
     })
   )
+
+/** Card bindings on the active path, for names in chat lists and search results. */
+export const cardBindingsAt = (sql: SqlClient.SqlClient, chatId: string, leaf: string | null) =>
+  Effect.gen(function* () {
+    const rows = yield* sql<{ scope: string | null; value_json: string }>`
+      WITH RECURSIVE path(id) AS (
+        SELECT ${leaf} WHERE ${leaf} IS NOT NULL
+        UNION ALL SELECT s.parent_slot_id FROM slots s JOIN path p ON p.id = s.id WHERE s.parent_slot_id IS NOT NULL
+      )
+      SELECT e.scope, e.value_json FROM state_events e
+      LEFT JOIN path p ON p.id = e.slot_id LEFT JOIN slots s ON s.id = p.id
+      WHERE e.chat_id = ${chatId} AND e.key = 'card.binding' AND e.superseded_by_changeset IS NULL
+        AND (e.slot_id IS NULL OR (p.id IS NOT NULL AND s.deleted_at IS NULL))
+        AND (${leaf} IS NULL OR e.version_id IS NULL OR e.version_id = s.selected_version_id)
+      ORDER BY coalesce(s.depth, -1), e.seq`
+    const kept = yield* withoutPurged(
+      sql,
+      rows.map((row) => ({
+        scope: row.scope,
+        data: { key: "card.binding", value: JSON.parse(row.value_json) }
+      })) as ReadonlyArray<FoldableEvent>
+    )
+    return foldState(kept).cardBindings
+  })

@@ -251,7 +251,11 @@ export const makeReadHandlers = Effect.gen(function* () {
 
     ListBin: ({ userId, limit, before }) =>
       sql<Parameters<typeof toBinItem>[0]>`
-        SELECT * FROM bin_items WHERE user_id = ${userId}
+        SELECT b.*, (SELECT v.doc_json FROM entity_refs r JOIN entities e ON e.id = r.entity_id
+          JOIN entity_revisions v ON v.id = r.head_revision_id
+          WHERE b.kind = 'entity' AND e.kind = 'card' AND e.id = b.target_id
+          ORDER BY r.ref_kind = 'upstream' DESC, r.created_at, r.id LIMIT 1) AS card_doc_json
+        FROM bin_items b WHERE user_id = ${userId}
           AND (${before?.id ?? null} IS NULL OR (deleted_at, id) < (${before?.deletedAt ?? null}, ${before?.id ?? null}))
         ORDER BY deleted_at DESC, id DESC LIMIT ${limit}`.pipe(
         Effect.map((rows) => rows.map(toBinItem)),
@@ -420,7 +424,8 @@ export const makeReadHandlers = Effect.gen(function* () {
                   JOIN entity_revisions rev ON rev.id = r.head_revision_id
                   WHERE e.owner_user_id = ${userId} AND e.kind = 'card' AND e.purged_at IS NULL
                     AND (r.label LIKE ${pattern} ESCAPE '\\'
-                      OR json_extract(rev.doc_json, '$.name') LIKE ${pattern} ESCAPE '\\'))))
+                      OR r.subtitle LIKE ${pattern} ESCAPE '\\'
+                      OR json_extract(rev.doc_json, '$.nickname') LIKE ${pattern} ESCAPE '\\'))))
           ORDER BY ${ranked} * (last_message_at IS NOT NULL) DESC, coalesce(last_message_at, created_at) DESC, id DESC
           LIMIT ${limit}`
         return rows.map(toChat)

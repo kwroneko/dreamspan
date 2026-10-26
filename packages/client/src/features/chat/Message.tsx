@@ -35,7 +35,7 @@ import { showToast } from "../../ui/Toast.tsx"
 import { IconButton, iconButtonClass, Tooltip } from "../../ui/Tooltip.tsx"
 import { useDeletedToast } from "../bin/deleted.ts"
 import { ReplayNotice } from "../editor/ReplayNotice.tsx"
-import { castView, nameOf, useCast } from "./cast.ts"
+import { castView, modelNameOf, useCast } from "./cast.ts"
 import { ContinueAction } from "./ContinueAction.tsx"
 import { Reasoning } from "./Reasoning.tsx"
 import { formatWhen } from "./chatTitle.ts"
@@ -89,7 +89,7 @@ function TemplateText({
   const text = displayText(
     version.content,
     version.macroMode,
-    { user: here.user, char: nameOf(here, version.speakerEntityId) ?? here.char },
+    { user: here.user, char: modelNameOf(here, version.speakerEntityId) ?? here.char },
     fields ?? {},
     version.frozenMacros ?? {}
   )

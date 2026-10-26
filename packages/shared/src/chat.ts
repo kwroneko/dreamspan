@@ -197,12 +197,16 @@ export const versionInContext = (status: VersionStatus, content: string, context
 
 // --- Chat setup, speakers and the send queue (DESIGN §2.1, §2.2)
 
-/** A card as a chat shows it: its in-chat name (`{{char}}`), its library label, its folders. */
+/** A card as a chat shows it, from the revision selected by its binding. */
 export class CastCard extends Schema.Class<CastCard>("CastCard")({
   entityId: EntityId,
-  /** The name in the card's document, which is what the chat shows and macros use. */
+  /** The card document's display name. */
   name: Schema.String,
-  /** The library label, for telling apart cards with the same name. */
+  /** CCv3 nickname, falling back to name, for template expansion. */
+  modelName: Schema.optionalKey(Schema.String),
+  /** The card revision's character_version. */
+  subtitle: Schema.optionalKey(Schema.String),
+  /** Derived display name, retained for existing library consumers. */
   label: Schema.String,
   /** In the persona folder (DESIGN §2.2). */
   persona: Schema.Boolean,

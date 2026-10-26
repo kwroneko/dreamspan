@@ -1,3 +1,4 @@
+import { useCardNameCheck } from "./cardNameCheck.ts"
 // Saving: what changed, field by field, then one revision with an optional message
 // (DESIGN §6.2). Fields another tab or an update changed meanwhile are picked one by one.
 import { parseField } from "@rp/shared/editing.ts"
@@ -12,7 +13,7 @@ import { Alert } from "../../ui/Surface.tsx"
 import { type Choice, type Conflict, ConflictPicker, chosen } from "./conflicts.tsx"
 import { ValueDiff } from "./diff.tsx"
 import { changedFields, draftLabel, type FieldChange, fieldLabel } from "./fields.ts"
-import { type EditorStore, useEditorState } from "./store.ts"
+import { type EditorStore, useEditorState, useText } from "./store.ts"
 
 /** Whether a draft's content is text or JSON, for putting a picked value back. */
 const contentOf = (field: string, value: unknown) =>
@@ -27,7 +28,12 @@ export function SaveDialog({
   onClose: () => void
   onSaved: (saved: SavedRef) => void
 }) {
-  const kind = useEditorState(store).snapshot!.ref.kind
+  const ref = useEditorState(store).snapshot!.ref
+  const kind = ref.kind
+  const name = useText(store, ["name"]) ?? ""
+  const version = useText(store, ["character_version"]) ?? ""
+  const nameCheck = useCardNameCheck(name, version, ref)
+  const clash = kind === "card" ? nameCheck : null
   /** What will be saved: worked out once everything typed is on the server. */
   const [view, setView] = useState<{
     readonly working: ReturnType<EditorStore["working"]>
@@ -49,6 +55,7 @@ export function SaveDialog({
 
   const save = async (event: FormEvent) => {
     event.preventDefault()
+    if (clash) return
     setPending(true)
     const result = await store.commit(message.trim() === "" ? null : message.trim())
     setPending(false)
@@ -95,6 +102,11 @@ export function SaveDialog({
           : "Your changes become one revision in the history. Earlier revisions stay, and can be restored."
       }
     >
+      {clash && (
+        <p role="status" className="text-sm text-muted">
+          {clash}
+        </p>
+      )}
       <ErrorAlert error={error} />
       {conflicts.length > 0 ? (
         <>
@@ -152,7 +164,7 @@ export function SaveDialog({
           </Field>
           <DialogActions>
             <Button onClick={onClose}>Cancel</Button>
-            <Button type="submit" variant="primary" pending={pending} disabled={view === null}>
+            <Button type="submit" variant="primary" pending={pending} disabled={view === null || clash !== null}>
               Save revision
             </Button>
           </DialogActions>

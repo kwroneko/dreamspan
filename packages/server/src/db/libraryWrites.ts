@@ -132,6 +132,25 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
         return id
       })
 
+    // Card names are revision content; the legacy label RPC arguments map to standard fields.
+    const namedCardRevision = (ref: RefRow, label: string, subtitle: string) =>
+      Effect.gen(function* () {
+        if (ref.kind !== "card") return ref.head_revision_id
+        const doc = yield* lib.loadDoc(ref.head_revision_id)
+        const current = yield* revision(ref.head_revision_id)
+        const encoded = encode({ ...doc, name: label, character_version: subtitle })
+        if (encoded.hash === current.doc_hash) return ref.head_revision_id
+        return yield* insertRevision({
+          entityId: ref.entity_id,
+          schemaVersion: current.schema_version,
+          doc: encoded,
+          parents: [ref.head_revision_id],
+          origin: "user",
+          originRef: null,
+          message: "Changed card display name and version"
+        })
+      })
+
     const reload = (refId: string) => lib.refsWhere("r.id = ?", [refId]).pipe(Effect.map(([row]) => row!))
 
     const moveHead = (refId: string, head: string, mergeBase: string | null) =>
@@ -490,7 +509,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
             id,
             entity_id: ref.entity_id,
             ref_kind: "variant",
-            head_revision_id: ref.head_revision_id,
+            head_revision_id: yield* namedCardRevision(ref, label, subtitle),
             follows_ref_id: ref.id,
             merge_base_revision_id: ref.head_revision_id,
             label,
@@ -556,7 +575,8 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
             return yield* new RefOperationRefused({ refId, reason: "Only chat overrides can be promoted." })
           }
           yield* checkRowVersion(ref, expectedRowVersion)
-          yield* sql`UPDATE entity_refs SET ref_kind = 'variant', chat_id = NULL, label = ${label}, subtitle = ${subtitle},
+          const head = yield* namedCardRevision(ref, label, subtitle)
+          yield* sql`UPDATE entity_refs SET head_revision_id = ${head}, ref_kind = 'variant', chat_id = NULL, label = ${label}, subtitle = ${subtitle},
                      row_version = row_version + 1, updated_at = ${Date.now()}
                    WHERE id = ${refId}`
           return toLibraryRef(yield* reload(refId))
@@ -713,7 +733,8 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
       checkRowVersion,
       revision,
       recordMedia,
-      createUpstream
+      createUpstream,
+      namedCardRevision
     })
     return { ...handlers, ...editor }
   })
