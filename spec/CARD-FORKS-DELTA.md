@@ -116,6 +116,15 @@ Client:
 
 ## 8. Open questions for the owner
 
+**Answered 2026-10-26** (recorded in DESIGN §4 and §10.3; the sections above still need updating to match):
+- Q1: no single answer. Messages keep the card that wrote them; renaming a card offers, as ST does, to replace its name in past chats, through wide-range history edits (DESIGN §10.3), which also cover a renamed fork used where the old name appears.
+- Q2: a card's own notes are forked with it. Named notes shared between things are likely later.
+- Q3: cards only. Presets, lorebooks and notes can't work the same way and get their own designs.
+- Q4: no migration. The app refuses to start on a database with card variants or chat overrides; unit 4 becomes that check plus removing the card paths of following.
+- Q5: moot.
+
+The original questions, for the record:
+
 1. **Who wrote the earlier messages after a swap.** Messages are tied to the card that wrote them, so after Fork for this chat the transcript holds the parent's messages and then the fork's.
    - (a) Keep each message's own card (proposed). History is exact, and the parent's chat list keeps the chat for what it said. If the fork's in-character name differs, the model sees two names for what the user thinks of as one character.
    - (b) Read earlier messages through the line's swaps, so on a line that swapped to the fork, the parent's messages show and are sent as the fork. One continuous character, and the chat moves to the fork's list entirely. But the same message then reads differently on two lines, and "chats with this character" depends on which line is current.
