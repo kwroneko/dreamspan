@@ -348,6 +348,13 @@ Stepped history, dropped-message display and rewrite warnings without a TTL are 
 - **[P]** Inheritance chain: app default → default for the chat kind (RP or workshop) → chat → per-role override (narrator, character agent, summarizer) → card overlays and per-turn conditions.
 - **[P]** The composer strip shows the active preset and where it comes from. Changing it uses the same scope prompt as card edits. A preset switch is a state event.
 
+- **[D]** (owner, 2026-10-27) **A preset is global by default**: chats and forks don't own one. Which preset is right usually depends on the model.
+- **[D]** **Presets and models (connections) are separate by default**: switching either is easy and doesn't touch the other. ST links them (switching model switches to whatever preset was last used or saved with it), which is extremely confusing: having switched or edited your preset, moving the same work from OpenRouter to the OpenAI API changes the preset without you noticing.
+- **[D]** A connection can optionally **lock a preset**, one way: choosing that connection sets that preset, and the lock is visible in the connection's settings.
+- **[D] Rejected:** per-chat changes to a preset (a chat's own prompt switches over the preset): too confusing to make sense.
+- **[O]** Locking a preset to a chat: potentially useful, never the default. The future agent chat (not agentic RP) will need a separate preset that works differently.
+- **[P]** The same holds for the model: global by default, a chat doesn't own one. Today's build binds model and preset per chat (`model.bind`/`preset.bind` state events, the This chat tab's "where each comes from"); that becomes the optional chat lock, if kept.
+
 ### 6.2 Saving (ST's gripe #1)
 - **[D]** In ST, some fields autosave, some have save buttons, and preset field edits lived in limbo: they survived restarts but vanished on a preset switch.
 - **[D] Principle:** nothing is ever lost, and it's always clear which state you're in. (The earlier "autosave everything, no commits" proposal was rejected because it doesn't work for creating versions.)
