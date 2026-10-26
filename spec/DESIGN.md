@@ -564,7 +564,7 @@ Stepped history, dropped-message display and rewrite warnings without a TTL are 
 - **[P]** A history edit in a chat includes the swipes of its messages (owner leaning yes, 2026-10-26). A swipe shared with an existing fork then reads differently there, since that fork isn't touched.
 - **[P]** After Fork for this chat, the character is new: replacing the old name in that chat's past messages is offered for this chat only, or not at all.
 - **[D]** Search and replace over a chat works like a code editor's: case-sensitive or not, whole word, regular expression (with capture groups in the replacement), and every match is previewable, matches in summaries included (owner, 2026-10-26).
-- **[P]** The flow (2026-10-26):
+- **[D]** The flow (owner confirmed, 2026-10-26):
   - Opened from the chat's menu, the chat's list of history edits, or Ctrl+H, in the right panel (a sheet on phones) so the chat stays in view.
   - One Find and one Replace field with code-editor toggles: **Aa** match case, **ab** whole word, **.\*** regular expression (invalid patterns say why, live), and **preserve case** (Aria → Ari also turns ARIA into ARI and aria into ari). Enter / Shift+Enter step through matches; ＋ adds another Find/Replace pair to the same set.
   - Where to look: messages, their swipes, summaries (each a toggle). Always this chat only; forks and other chats are never touched, and the panel says so.
