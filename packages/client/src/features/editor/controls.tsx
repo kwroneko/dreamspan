@@ -13,8 +13,9 @@ import { Field, Input, Textarea } from "../../ui/Field.tsx"
 import { Select } from "../../ui/Select.tsx"
 import { Alert, Badge } from "../../ui/Surface.tsx"
 import { ReplayNotice } from "./ReplayNotice.tsx"
+import { CardTextEditor } from "./CardTextEditor.tsx"
 import type { CallResult } from "./caller.ts"
-import { type EditorStore, useDirty, useText, useValue } from "./store.ts"
+import { type EditorStore, useDirty, useEditorKind, useText, useValue } from "./store.ts"
 
 /** "Edited" while the field has changes, with its undo, history and revert. */
 function FieldLabel({ store, field, label }: { store: EditorStore; field: string; label: string }) {
@@ -140,6 +141,7 @@ export function TextField({
   readOnly?: boolean
 }) {
   const value = useText(store, path)
+  const card = useEditorKind(store) === "card"
   const field = textField(path)
   const props = {
     value,
@@ -153,6 +155,19 @@ export function TextField({
       <Field label={<FieldLabel store={store} field={field} label={label} />} description={description}>
         {rows === undefined ? (
           <Input {...props} onChange={(event) => store.setText(path, event.currentTarget.value)} />
+        ) : card ? (
+          <CardTextEditor
+            store={store}
+            field={field}
+            path={path}
+            value={value}
+            label={label}
+            rows={rows}
+            mono={mono}
+            readOnly={readOnly}
+            onChange={(value) => store.setText(path, value)}
+            onBlur={props.onBlur}
+          />
         ) : (
           <Textarea
             {...props}

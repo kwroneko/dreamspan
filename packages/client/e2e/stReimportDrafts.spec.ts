@@ -1,3 +1,4 @@
+import { expectTextBox } from "./support/textbox.ts"
 import { expect, test } from "@playwright/test"
 import { Effect } from "effect"
 import { card, header, jsonl, message } from "../../server/test/support/stFolder.ts"
@@ -95,7 +96,7 @@ for (const width of [1440, 390]) {
             ).entries[4]!.version.content
         )
         .toBe("ST overwrote the selected text")
-      await expect(box).toHaveValue(pending)
+      await expectTextBox(box, pending)
       await expect(
         row.getByText("Another version is selected. Your edit still belongs to the version you opened.")
       ).toBeVisible()
@@ -107,7 +108,7 @@ for (const width of [1440, 390]) {
           .toBe(pending)
       }
       await page.reload()
-      await expect(box).toHaveValue(pending)
+      await expectTextBox(box, pending)
       // A restored edit must also remain visible during a second re-import, even
       // while the new version list cannot be fetched. Hold that RPC explicitly.
       const releaseVersions: Array<() => void> = []
@@ -126,13 +127,13 @@ for (const width of [1440, 390]) {
       await expect.poll(() => releaseVersions.length).toBeGreaterThan(0)
       holdVersions = false
       for (const release of releaseVersions.splice(0)) release()
-      await expect(box).toHaveValue(pending)
+      await expectTextBox(box, pending)
       holdVersions = true
       const editedAgain = { ...original[4]!, mes: "ST edited again", swipes: ["ST edited again"] }
       original[4] = editedAgain
       await upload(original)
       await expect.poll(() => releaseVersions.length).toBeGreaterThan(0)
-      await expect(box).toHaveValue(pending)
+      await expectTextBox(box, pending)
       await expect(
         row.getByText("Another version is selected. Your edit still belongs to the version you opened.")
       ).toBeVisible()

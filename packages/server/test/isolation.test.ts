@@ -1337,7 +1337,14 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
   },
 
   ListRevisions: {
-    probe: (actor, owner) => refused(actor.api.ListRevisions({ refId: owner.editor.cardRefId, limit: 10 }), "NotFound")
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        yield* refused(actor.api.ListRevisions({ refId: owner.editor.cardRefId, limit: 10 }), "NotFound")
+        yield* refused(
+          actor.api.ListRevisions({ refId: actor.editor.cardRefId, limit: 10, before: owner.editor.revisionId }),
+          "NotFound"
+        )
+      })
   },
   GetRevision: {
     probe: (actor, owner) =>

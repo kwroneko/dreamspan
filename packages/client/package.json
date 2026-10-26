@@ -9,6 +9,10 @@
   },
   "dependencies": {
     "@base-ui/react": "1.8.0",
+    "@codemirror/commands": "6.11.1",
+    "@codemirror/merge": "6.12.3",
+    "@codemirror/state": "6.7.6",
+    "@codemirror/view": "6.43.15",
     "@effect/atom-react": "4.0.1",
     "@tanstack/react-router": "1.170.41",
     "@tanstack/react-virtual": "3.14.13",

@@ -11,11 +11,12 @@ import { applyDrafts, type FieldPath, getAt, parseField, textField, valueField }
 import type { Draft } from "@rp/shared/drafts.ts"
 import type { ChatNotePosition, EditorSnapshot } from "@rp/shared/editorApi.ts"
 import type { Doc, RefId, RevisionId } from "@rp/shared/library.ts"
-import { useEffect, useSyncExternalStore } from "react"
+import { useEffect, useMemo, useSyncExternalStore } from "react"
 import type { AppError } from "../../errors.ts"
 import { browserEnv, type Copy, copiesOf, dropCopy, keepCopy, makeCopy, type PageEnv, pendingOf } from "./backup.ts"
 import type { ReplayConflict } from "./backup.ts"
 import type { Caller } from "./caller.ts"
+import { changedFields, type FieldChange } from "./fields.ts"
 
 /** How long typing pauses before the text is saved. */
 const SAVE_DELAY_MS = 600
@@ -71,6 +72,8 @@ export class EditorStore {
   private readonly subscribers = new Map<string, (listener: () => void) => () => void>()
   /** The head with the value drafts applied: what fields read when they have no draft of their own. */
   private valueDoc: Doc = {}
+  private readonly revisionDocs = new Map<RevisionId, Doc>()
+  private readonly revisionReads = new Map<RevisionId, Promise<Doc>>()
 
   readonly refId: RefId
   /** The signed-in user, whose copies in this browser (backup.ts) are the only ones read. */
@@ -134,6 +137,8 @@ export class EditorStore {
       this.versions.set(channel, this.version(channel) + 1)
       this.listeners.get(channel)?.forEach((listener) => listener())
     }
+    this.versions.set("working", this.version("working") + 1)
+    this.listeners.get("working")?.forEach((listener) => listener())
   }
 
   private bumpAll() {
@@ -246,6 +251,7 @@ export class EditorStore {
    */
   private apply(snapshot: EditorSnapshot) {
     this.snapshot = snapshot
+    this.revisionDocs.set(snapshot.ref.headRevisionId, snapshot.doc)
     this.loadError = null
     for (const field of this.fields.values()) {
       if (field.local !== null) continue
@@ -282,6 +288,59 @@ export class EditorStore {
 
   value(path: FieldPath): unknown {
     return getAt(this.valueDoc, path)
+  }
+
+  /** The immutable revision the visible text was typed on, even after a stale refresh. */
+  comparisonRevision(key: string): RevisionId | null {
+    const field = this.fields.get(key)
+    return (this.isDirty(key) ? field?.baseRevision : null) ?? this.snapshot?.ref.headRevisionId ?? null
+  }
+
+  async revisionDoc(id: RevisionId): Promise<Doc> {
+    const cached = this.revisionDocs.get(id)
+    if (cached) return cached
+    const pending = this.revisionReads.get(id)
+    if (pending) return pending
+    const reading = this.call((client) => client("GetRevision", { refId: this.refId, revisionId: id })).then(
+      (result) => {
+        this.revisionReads.delete(id)
+        if (!result.ok) throw result.error
+        this.revisionDocs.set(id, result.value)
+        return result.value
+      }
+    )
+    this.revisionReads.set(id, reading)
+    return reading
+  }
+
+  /** Each draft can have its own revision base; a concurrent save doesn't rewrite it. */
+  async comparisonChanges(): Promise<ReadonlyArray<FieldChange>> {
+    const working = this.working().doc
+    const keys = this.dirtyFields()
+    const based = await Promise.all(
+      keys.map(async (field) => {
+        const parsed = parseField(field)!
+        const id = this.comparisonRevision(field)
+        const base = id === null ? this.head : await this.revisionDoc(id)
+        return { path: parsed.path, before: getAt(base, parsed.path), after: getAt(working, parsed.path) }
+      })
+    )
+    // Deep drafts override their enclosing value draft's comparison where both exist.
+    const changes = new Map<string, FieldChange>()
+    for (const field of based.sort((a, b) => a.path.length - b.path.length)) {
+      const key = JSON.stringify(field.path)
+      if (
+        [...changes.values()].some(
+          (change) =>
+            change.path.length < field.path.length && change.path.every((part, index) => part === field.path[index])
+        )
+      )
+        continue
+      changes.delete(key)
+      for (const change of changedFields(field.before, field.after, field.path))
+        changes.set(JSON.stringify(change.path), change)
+    }
+    return [...changes.values()]
   }
 
   setText(path: FieldPath, text: string) {
@@ -678,6 +737,19 @@ export const useText = (store: EditorStore, path: FieldPath) =>
 /** A value from the document with the value drafts applied. */
 export const useValue = <A>(store: EditorStore, path: FieldPath) =>
   useSyncExternalStore(store.subscribe(STRUCTURE), () => store.value(path)) as A
+
+export const useComparisonRevision = (store: EditorStore, field: string) =>
+  useSyncExternalStore(store.subscribe(field, STRUCTURE), () => store.comparisonRevision(field))
+
+export const useEditorKind = (store: EditorStore) =>
+  useSyncExternalStore(store.subscribe(STRUCTURE), () => store.snapshot?.ref.kind)
+
+export const useWorkingDoc = (store: EditorStore) => {
+  const version = useSyncExternalStore(store.subscribe("working"), () => store.version("working"))
+  // The version is the snapshot of all fields, including typing within a dirty field.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  return useMemo(() => store.working().doc, [store, version])
+}
 
 /** Whether a field has changes, saved as a draft or not yet. */
 export const useDirty = (store: EditorStore, field: string) =>

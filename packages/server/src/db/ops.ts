@@ -1808,7 +1808,12 @@ export class ReadOps extends RpcGroup.make(
   }),
   /** The ref's revisions, newest first, following first parents. */
   Rpc.make("RefHistory", {
-    payload: { userId: UserId, refId: RefId, limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 500 })) },
+    payload: {
+      userId: UserId,
+      refId: RefId,
+      limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 500 })),
+      before: Schema.optionalKey(RevisionId)
+    },
     success: Schema.Array(Revision),
     error: Schema.Union([NotFound, StorageError])
   }),
