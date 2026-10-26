@@ -1408,9 +1408,18 @@ export class WriteOps extends RpcGroup.make(
       end: Schema.NullOr(SlotId),
       lastMessageAt: Schema.NullOr(Schema.Number),
       sha256: Schema.String,
-      stateJson: Schema.String
+      stateJson: Schema.String,
+      /**
+       * A branch's name from ST, for the slot where its path leaves its parent file's
+       * (`parentRecordId`'s): set there unless that slot has a name, once per record.
+       */
+      fork: Schema.NullOr(Schema.Struct({ name: Schema.String, parentRecordId: Schema.String }))
     },
-    success: Schema.Struct({ notes: Schema.Record(Schema.String, EntityId) }),
+    success: Schema.Struct({
+      notes: Schema.Record(Schema.String, EntityId),
+      /** What became of `fork`: set, kept (the slot had a name), or no slot of its own. */
+      fork: Schema.NullOr(Schema.Literals(["named", "kept", "same"]))
+    }),
     error: Schema.Union([NotFound, ImportLeaseLost, StorageError])
   }),
   /**

@@ -39,7 +39,8 @@ import {
   type Link,
   linkChat,
   speakerMap,
-  stem
+  stem,
+  stForkName
 } from "./stMapping.ts"
 
 const IDLE_MS = 60 * 60_000
@@ -136,6 +137,8 @@ interface ChatProgress {
   readonly into: ChatId | null
   readonly isNew: boolean
   readonly branch: boolean
+  /** A branch's name from ST, and its parent file's record, where the name goes. */
+  readonly fork: { readonly name: string; readonly parentRecordId: string } | null
   readonly prevState: ChatState | null
   readonly prevNotes: Readonly<Record<string, EntityId>>
   /** Where the file ended when last imported, and the first slot an unfinished run added. */
@@ -646,8 +649,17 @@ export class StImports extends Context.Service<
             end: progress.cursor,
             lastMessageAt: progress.lastMessageAt,
             sha256: hash(progress.partHashes.join("")),
-            stateJson: JSON.stringify(applies ? change.state : progress.prevState)
+            stateJson: JSON.stringify(applies ? change.state : progress.prevState),
+            fork: progress.fork
           })
+          if (finished.fork === "same") {
+            report.issue(
+              progress.path,
+              "info",
+              "st.fork_same",
+              `This branch is named “${shownText(progress.fork!.name)}” in ST, but it has no message of its own apart from its parent chat's, so no branch was given the name.`
+            )
+          }
           session.records.set(progress.path, {
             ...target,
             complete: true,
@@ -775,6 +787,7 @@ export class StImports extends Context.Service<
         // A branch is a file that went into another file's chat; an orphan is a chat of its own.
         const branch = own !== undefined ? own.merged : parentLive !== undefined
         const into = own === undefined && branch ? parentLive! : undefined
+        const forkName = branch && parent !== undefined ? stForkName(file.name, mainChat) : null
         // Its state so far: the record's when complete; for a branch not yet finished, its parent's.
         const previous = own?.complete ? own : branch ? parentLive : undefined
         return {
@@ -789,6 +802,7 @@ export class StImports extends Context.Service<
           // A chat whose first import never finished has no state yet: it's finished as new.
           isNew: !branch && !(own?.complete ?? false),
           branch,
+          fork: forkName === null ? null : { name: forkName, parentRecordId: parent!.recordId },
           prevState: previous?.state ?? null,
           prevNotes: previous?.notes ?? {},
           prevEnd: own?.complete ? own.end : null,
