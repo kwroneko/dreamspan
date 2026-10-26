@@ -787,7 +787,7 @@ export class StImports extends Context.Service<
         // A branch is a file that went into another file's chat; an orphan is a chat of its own.
         const branch = own !== undefined ? own.merged : parentLive !== undefined
         const into = own === undefined && branch ? parentLive! : undefined
-        const forkName = branch && parent !== undefined ? stForkName(file.name) : null
+        const forkName = branch && parent !== undefined ? stForkName(file.name, mainChat) : null
         // Its state so far: the record's when complete; for a branch not yet finished, its parent's.
         const previous = own?.complete ? own : branch ? parentLive : undefined
         return {

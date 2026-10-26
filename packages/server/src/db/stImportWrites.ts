@@ -65,6 +65,8 @@ interface RecordPayload {
   readonly branchDeleted?: boolean
   /** A branch whose ST name the import has placed (or found a name where it would go). */
   readonly named?: boolean
+  /** Where that naming choice belongs; resolved again when a reimport forks earlier. */
+  readonly nameSlot?: string | null
 }
 
 export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: ReturnType<typeof makeBin>) {
@@ -681,47 +683,86 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
             row_version = row_version + 1
           WHERE id = ${chatId}`
         if (moveLeaf) yield* bin.drafts.moveComposer(userId, chatId, leaf, input.leaf)
-        // A branch's ST name goes on the first slot of its path that isn't on its parent
-        // file's: where it leaves it. Once per record, so a name cleared here stays cleared,
-        // and never over a name the slot has.
+        // Resolve placement every time: a shared-prefix selection change can move the
+        // divergence. User naming choices live on slots, independently of source filenames.
         let fork: "named" | "kept" | "same" | null = null
         let named = payload.named ?? false
-        if (input.fork !== null && !named && input.end !== null) {
+        let nameSlot = payload.nameSlot ?? null
+        if (input.fork !== null && input.end !== null) {
           const [parentRow] = yield* sql<{ payload_json: string }>`
             SELECT payload_json FROM jobs WHERE id = ${input.fork.parentRecordId} AND owner_user_id = ${userId}
               AND kind = ${ST_CHAT_RECORD}`
           const parent = parentRow === undefined ? null : (JSON.parse(parentRow.payload_json) as RecordPayload)
           const parentEnd = parent?.chatId === chatId ? (parent.end ?? parent.last ?? null) : null
           if (parentEnd !== null) {
-            const [own] = yield* sql<{ id: string; branch_name: string | null }>`
+            type NameSlot = { id: string; depth: number; branch_name: string | null; branch_name_user: number }
+            const divergence = (end: string | null) => sql<NameSlot>`
               WITH RECURSIVE theirs(id, parent) AS (
                 SELECT id, parent_slot_id FROM slots WHERE id = ${parentEnd} AND chat_id = ${chatId}
                 UNION ALL
                 SELECT s.id, s.parent_slot_id FROM slots s JOIN theirs t ON s.id = t.parent
               ), mine(id, parent, depth) AS (
-                SELECT id, parent_slot_id, depth FROM slots WHERE id = ${input.end} AND chat_id = ${chatId}
+                SELECT id, parent_slot_id, depth FROM slots WHERE id = ${end} AND chat_id = ${chatId}
                 UNION ALL
                 SELECT s.id, s.parent_slot_id, s.depth FROM slots s JOIN mine m ON s.id = m.parent
               )
-              SELECT s.id, s.branch_name FROM mine m JOIN slots s ON s.id = m.id
+              SELECT s.id, s.depth, s.branch_name, s.branch_name_user FROM mine m JOIN slots s ON s.id = m.id
               WHERE m.id NOT IN (SELECT id FROM theirs) ORDER BY m.depth LIMIT 1`
+            const [own] = yield* divergence(input.end)
             if (own === undefined) fork = "same"
             else {
-              named = true
-              fork = own.branch_name === null ? "named" : "kept"
-              // A name isn't a local change: the slot stays as changed or unchanged as it was.
-              if (fork === "named") {
-                yield* sql`UPDATE slots SET branch_name = ${input.fork.name}, row_version = row_version + 1,
-                  st_import_row_version = CASE WHEN st_import_row_version = row_version
-                    THEN row_version + 1 ELSE st_import_row_version END
-                  WHERE id = ${own.id}`
+              // Old records have only `named`: recover their original placement from the
+              // previous end. `nameSlot` also survives an interrupted, batched suffix copy.
+              const [previous] = !named
+                ? []
+                : nameSlot === null
+                  ? yield* divergence(payload.end ?? null)
+                  : yield* sql<NameSlot>`SELECT id, depth, branch_name, branch_name_user FROM slots
+                      WHERE id = ${nameSlot} AND chat_id = ${chatId}`
+              const moving = previous !== undefined && previous.id !== own.id && previous.depth >= own.depth
+              const canName =
+                own.branch_name_user === 0 &&
+                ((own.branch_name === null && !(named && previous?.id === own.id)) ||
+                  // A copied import label at the new divergence may belong to the parent.
+                  (moving && payload.forkPrior != null))
+              const name = moving ? previous.branch_name : input.fork.name
+              const local = moving ? previous.branch_name_user : 0
+              fork = canName && name !== null ? "named" : "kept"
+              if (canName) {
+                // Import-only naming keeps the selection baseline aligned. Carrying a
+                // local naming choice keeps it local at its new switch point too.
+                if (own.branch_name !== name || own.branch_name_user !== local) {
+                  yield* sql`UPDATE slots SET branch_name = ${name}, branch_name_user = ${local}, row_version = row_version + 1,
+                    st_import_row_version = CASE WHEN ${local} = 0 AND st_import_row_version = row_version
+                      THEN row_version + 1 ELSE st_import_row_version END
+                    WHERE id = ${own.id}`
+                }
+                if (moving && payload.forkPrior != null && previous.depth > own.depth) {
+                  // Remove only this label's copy farther down the new suffix. The original
+                  // path and unrelated names on the copied suffix retain their choices.
+                  yield* sql`
+                    WITH RECURSIVE mine(id, parent, depth) AS (
+                      SELECT id, parent_slot_id, depth FROM slots WHERE id = ${input.end} AND chat_id = ${chatId}
+                      UNION ALL
+                      SELECT s.id, s.parent_slot_id, s.depth FROM slots s JOIN mine m ON s.id = m.parent
+                        WHERE m.depth > ${previous.depth}
+                    )
+                    UPDATE slots SET branch_name = NULL, branch_name_user = 0, row_version = row_version + 1,
+                      st_import_row_version = CASE WHEN st_import_row_version = row_version
+                        THEN row_version + 1 ELSE st_import_row_version END
+                    WHERE id IN (SELECT id FROM mine WHERE depth = ${previous.depth}) AND id <> ${previous.id}
+                      AND branch_name IS ${previous.branch_name} AND branch_name_user = ${previous.branch_name_user}`
+                }
               }
+              named = true
+              nameSlot = own.id
             }
           }
         }
         const updated: RecordPayload = {
           ...payload,
           named,
+          nameSlot,
           sha256: input.sha256,
           state: input.stateJson,
           notes,

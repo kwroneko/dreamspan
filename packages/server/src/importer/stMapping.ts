@@ -28,12 +28,9 @@ const ST_DATE = String.raw`\d{4}-\d{1,2}-\d{1,2} ?@\d{1,2}h ?\d{1,2}m ?\d{1,2}s(
  * and `<chat> - Checkpoint #<n>` now, `Branch #<message> - <date>`, `Checkpoint #<n> - <date>`
  * and `Bookmark #<n> - <date>` in older versions.
  */
-const AUTOMATIC_FORK = new RegExp(
-  String.raw`^(?:(?:Branch|Checkpoint|Bookmark) #\d+(?: - ${ST_DATE})?|.* - (?:Branch|Checkpoint|Bookmark) #\d+)$`,
-  "su"
-)
+const AUTOMATIC_FORK = new RegExp(String.raw`^(?:Branch|Checkpoint|Bookmark) #\d+ - ${ST_DATE}$`, "u")
+const CURRENT_FORK = / - (Branch|Checkpoint) #[1-9]\d*$/u
 const DATE_SUFFIX = new RegExp(String.raw` - ${ST_DATE}$`, "u")
-const BARE_DATE = new RegExp(String.raw`^${ST_DATE}$`, "u")
 /** As long as a branch name the user types here may be (`chatApi.ts`). */
 const MAX_BRANCH_NAME = 100
 
@@ -42,10 +39,20 @@ const MAX_BRANCH_NAME = 100
  * they named (older versions add ` - <date>`, which goes) or a file they renamed in ST's chat
  * list. Null for a name ST made up.
  */
-export const stForkName = (fileName: string): string | null => {
+export const stForkName = (fileName: string, parentName: string | null = null): string | null => {
   if (AUTOMATIC_FORK.test(fileName)) return null
+  // ST 1.19 bookmarks.js:88–110, 209–217 strips only the matching kind from the
+  // actual parent. A suffix on an unrelated prefix, or without a known parent, is a name.
+  const current = CURRENT_FORK.exec(fileName)
+  if (parentName !== null && current !== null) {
+    const kind = current[1]!
+    const base = parentName
+      .replace(new RegExp(` - ${kind} #\\d+$`, "u"), "")
+      .replace(new RegExp(`^${kind} #\\d+ - `, "u"), "")
+    if (fileName === `${base}${current[0]}`) return null
+  }
   const name = cleanName(fileName.replace(DATE_SUFFIX, ""))
-  if (name === "" || BARE_DATE.test(name)) return null
+  if (name === "") return null
   let kept = ""
   for (const char of name) {
     if (kept.length + char.length > MAX_BRANCH_NAME) break

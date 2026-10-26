@@ -92,13 +92,12 @@ describe("stForkName", () => {
       "Checkpoint #3 - 2024-07-12@01h31m37s",
       "Bookmark #2 - 2023-6-19@14h20m12s",
       "Bookmark #2 - 2023-6-19 @14h 20m 12s 123ms",
-      `Bot - ${DATE} - Branch #1`,
-      "A renamed chat - Checkpoint #4",
-      DATE,
       "   "
     ]) {
       assert.isNull(stForkName(name), name)
     }
+    assert.isNull(stForkName(`Bot - ${DATE} - Branch #1`, `Bot - ${DATE}`))
+    assert.isNull(stForkName("A renamed chat - Checkpoint #4", "A renamed chat"))
   })
   it("keeps the user's name without ST's date", () => {
     assert.strictEqual(stForkName(`Before the duel - ${DATE}`), "Before the duel")
