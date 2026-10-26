@@ -74,6 +74,10 @@
 - A note belongs to the branch by default; each generation records which note revisions it used; forking from an earlier point lists the notes changed since, each with "as it was then" / "as it is now" (default now). Agent-made note changes always follow the messages.
 - Snippets kept on the server like drafts (live across tabs), scoped global or one chat including its forks; the composition scratchpad becomes one use of snippets; notes stay simple and can be filled from a snippet.
 
+## 4a. Later, recorded 2026-10-26 (not part of the current design topics)
+
+- **D** (as wanted, later) Card archive integration: search an archive as a separate section beside the local cards, open an archive card with the same UI as a local one without adding it, and it becomes a local card on Save of an edit, an explicit Add, or (mainly) the first message sent. Blind roleplay: a random card's greeting from the local set or the archive, pass or start, with name and picture optionally hidden. Detail in DESIGN §12.
+
 ## 5. Open
 
 **Chats**
