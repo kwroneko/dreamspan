@@ -33,6 +33,9 @@ export function TimelineSummary({
   const pathRevision = useSyncExternalStore(session.subscribe, () => session.snapshot().pathRevision)
   // Keep every page already expanded when an edit, swipe, hide or reconnect invalidates it.
   const loaded = useRef<{ first: number; last: SlotId; targetId: SlotId | null } | null>(null)
+  // Advances whenever a read starts or replaces the rows: a page response from before
+  // (another link's window, or rows since refreshed) mustn't land in the current rows.
+  const generation = useRef(0)
   const [children, setChildren] = useState<ReadonlyArray<Summary> | null>(null)
   const [messages, setMessages] = useState<ReadonlyArray<PathEntry> | null>(null)
   const [before, setBefore] = useState<PathEntry["slotId"] | null>(null)
@@ -45,6 +48,7 @@ export function TimelineSummary({
   useEffect(() => {
     if (!open) return
     let live = true
+    generation.current++
     const load = async () => {
       setError(null)
       if (summary.level > 1) {
@@ -86,7 +90,6 @@ export function TimelineSummary({
         let from = previous?.last ?? summary.lastSlotId
         let firstPage = true
         let older: SlotId | null = null
-        let newer: SlotId | null = null
         do {
           const result = await session.call((client) =>
             client("ReadPath", {
@@ -101,7 +104,6 @@ export function TimelineSummary({
           )
           if (!live) return
           if (!result.ok) return setError(result.error.message)
-          if (firstPage) newer = result.value.newer
           rows.unshift(...result.value.entries.filter((e) => e.depth >= summary.from - 1 && e.depth < summary.to))
           older = (result.value.entries[0]?.depth ?? -1) > summary.from - 1 ? result.value.older : null
           if (older === null || previous === null || (rows[0]?.depth ?? -1) <= previous.first) break
@@ -111,9 +113,12 @@ export function TimelineSummary({
         const first = rows[0]
         const last = rows.at(-1)
         if (first && last) loaded.current = { first: first.depth, last: last.slotId, targetId }
+        generation.current++
         setMessages(rows)
         setBefore(older)
-        setAfter((last?.depth ?? summary.to) < summary.to - 1 ? newer : null)
+        // A refresh reads backwards from the last loaded original, so its window has no
+        // forward cursor of its own; the next page starts after that original either way.
+        setAfter(last && last.depth < summary.to - 1 ? last.slotId : null)
       }
     }
     void load()
@@ -138,6 +143,7 @@ export function TimelineSummary({
     const from = direction === "earlier" ? before : after
     if (from === null) return
     const revision = session.snapshot().pathRevision
+    const current = generation.current
     setPending(true)
     const result = await session.call((client) =>
       client("ReadPath", {
@@ -147,8 +153,9 @@ export function TimelineSummary({
         limit: 100
       })
     )
+    // Pending disables both buttons, so this is the only page request in flight.
     setPending(false)
-    if (session.snapshot().pathRevision !== revision) return
+    if (generation.current !== current || session.snapshot().pathRevision !== revision) return
     if (!result.ok) return setError(result.error.message)
     const entries = result.value.entries.filter((e) => e.depth >= summary.from - 1 && e.depth < summary.to)
     const bounds = loaded.current
