@@ -2,18 +2,14 @@
 // default, and folds when the reply is done; one click opens it again. Folding or opening it
 // while the reply is still being written becomes the user's choice for every reply after
 // (`user_prefs`, so it follows them to other devices). It's never sent back to the model.
+import { useViewPrefs } from "../../ui/viewPrefs.ts"
 import { useAtomValue } from "@effect/atom-react"
 import type { Version } from "@rp/shared/chat.ts"
 import type { ReasoningDisplay } from "@rp/shared/chatApi.ts"
-import { AsyncResult } from "effect/reactivity"
 import { useId, useState } from "react"
-import { useAction } from "../../actions.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { Markdown } from "../../ui/Markdown.tsx"
-import { AppClient } from "../../rpc.ts"
 import { liveReasoning } from "./session.ts"
-
-const prefsAtom = AppClient.query("GetDisplayPrefs", {}, { reactivityKeys: ["displayPrefs"] })
 
 const words = (text: string) => {
   const count = text.trim() === "" ? 0 : text.trim().split(/\s+/).length
@@ -29,12 +25,11 @@ export function Reasoning({ version }: { version: Version }) {
 
 function ReasoningBlock({ text, streaming }: { text: string; streaming: boolean }) {
   const id = useId()
-  const prefs = useAtomValue(prefsAtom)
-  const preferred: ReasoningDisplay = AsyncResult.isSuccess(prefs) ? prefs.value.reasoning : "expanded"
+  const viewer = useViewPrefs()
+  const preferred: ReasoningDisplay = viewer.prefs.reasoning
   // What the user chose for this block; until then, open while streaming (as they prefer),
   // folded once the reply is done.
   const [chosen, setChosen] = useState<{ open: boolean; streaming: boolean } | null>(null)
-  const save = useAction()
   const open =
     chosen !== null && chosen.streaming === streaming ? chosen.open : streaming ? preferred === "expanded" : false
 
@@ -43,8 +38,7 @@ function ReasoningBlock({ text, streaming }: { text: string; streaming: boolean 
     // During a run the choice sticks: later replies stream that way too (DESIGN §7.4).
     if (streaming) {
       const reasoning: ReasoningDisplay = open ? "collapsed" : "expanded"
-      if (reasoning !== preferred)
-        void save.run((client) => client("SetDisplayPrefs", { prefs: { reasoning } }), ["displayPrefs"])
+      if (reasoning !== preferred) void viewer.change({ reasoning })
     }
   }
 
@@ -68,9 +62,9 @@ function ReasoningBlock({ text, streaming }: { text: string; streaming: boolean 
           <Markdown text={text} streaming={streaming} />
         </div>
       )}
-      {save.error && (
+      {viewer.error && (
         <p role="alert" className="text-xs text-danger">
-          Your choice wasn’t saved: {save.error.message}
+          Your choice wasn’t saved: {viewer.error.message}
         </p>
       )}
     </div>

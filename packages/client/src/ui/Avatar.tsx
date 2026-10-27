@@ -28,6 +28,7 @@ const tint = (id: string) => {
 const SIZES = {
   xs: "h-7.5 w-5 text-[0.5625rem]",
   sm: "h-9 w-6 text-[0.625rem]",
+  chip: "h-7 w-[18.667px] text-[0.625rem]",
   md: "h-12 w-8 text-xs",
   lg: "h-15 w-10 text-sm",
   chat: "chat-portrait text-lg",
@@ -44,6 +45,7 @@ export function Avatar({
   name,
   mediaId = null,
   size = "md",
+  shape: _shape,
   className = "",
   preview = false,
   alt = ""
@@ -52,7 +54,7 @@ export function Avatar({
   name: string
   mediaId?: string | null
   size?: AvatarSize
-  /** A square fills a tile whose own corners round it. */
+  /** Compatibility for tile callers; portraits always use rectangular corners. */
   shape?: "circle" | "square"
   className?: string
   preview?: boolean
@@ -60,7 +62,7 @@ export function Avatar({
 }) {
   const open = useOpenPortrait()
   const { ref, width } = useMediaWidth()
-  const box = `relative inline-flex shrink-0 overflow-hidden ${SIZES[size]} ${className}`
+  const box = `relative inline-flex shrink-0 overflow-hidden rounded-sm ${SIZES[size]} ${className}`
   const content = (
     <>
       {mediaId !== null && width !== undefined && (
@@ -84,6 +86,7 @@ export function Avatar({
   return preview && open ? (
     <button
       ref={ref}
+      data-portrait
       type="button"
       aria-label={`View ${name}'s portrait`}
       title={`View ${name}'s full portrait`}
@@ -96,7 +99,7 @@ export function Avatar({
       <PortraitFrame className="size-full">{content}</PortraitFrame>
     </button>
   ) : (
-    <span ref={ref} className={box}>
+    <span ref={ref} data-portrait className={box}>
       <PortraitFrame className="size-full">{content}</PortraitFrame>
     </span>
   )

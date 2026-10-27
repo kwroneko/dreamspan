@@ -244,13 +244,7 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
       trigger={
         <>
           {speaker !== null ? (
-            <Avatar
-              id={speaker}
-              name={name}
-              mediaId={view.cards.get(speaker)?.avatarMediaId ?? null}
-              size="sm"
-              className="size-7"
-            />
+            <Avatar id={speaker} name={name} mediaId={view.cards.get(speaker)?.avatarMediaId ?? null} size="chip" />
           ) : (
             <span aria-hidden="true" className="size-1" />
           )}

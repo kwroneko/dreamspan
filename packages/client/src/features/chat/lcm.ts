@@ -1,7 +1,6 @@
 // What the summary screens share (DESIGN §8, ARCHITECTURE §16): how a range, a size and a
-// state are said, the boundary's text, and whether this browser draws the coverage rail.
+// state are said and the boundary's text.
 import type { LcmJob, LcmState, LcmSummary } from "@rp/shared/lcm.ts"
-import { useSyncExternalStore } from "react"
 
 /** Message numbers are one-based and count the path's messages, as the context view does. */
 export const rangeText = (from: number, to: number) => (from === to ? `Message ${from}` : `Messages ${from}–${to}`)
@@ -98,48 +97,3 @@ export const countsOf = (lcm: LcmState): BoundaryCounts => ({
     lcm.jobs.filter((j) => j.rerun).length +
     lcm.failed.filter((s) => s.rerun).length
 })
-
-// --- Whether the coverage rail is drawn: a choice of this browser, kept in its storage.
-
-const RAIL_KEY = "rp.lcmRail"
-const railListeners = new Set<() => void>()
-
-const readRail = () => {
-  try {
-    return localStorage.getItem(RAIL_KEY) === "1"
-  } catch {
-    return false
-  }
-}
-let railValue = readRail()
-
-export const setRail = (on: boolean) => {
-  railValue = on
-  try {
-    localStorage.setItem(RAIL_KEY, on ? "1" : "0")
-  } catch {
-    // Storage is blocked: the choice lasts until the page is closed.
-  }
-  for (const listener of railListeners) listener()
-}
-
-const subscribeRail = (listener: () => void) => {
-  railListeners.add(listener)
-  const onStorage = (event: StorageEvent) => {
-    if (event.key !== RAIL_KEY) return
-    railValue = readRail()
-    listener()
-  }
-  addEventListener("storage", onStorage)
-  return () => {
-    railListeners.delete(listener)
-    removeEventListener("storage", onStorage)
-  }
-}
-
-export const useRail = () =>
-  useSyncExternalStore(
-    subscribeRail,
-    () => railValue,
-    () => false
-  )

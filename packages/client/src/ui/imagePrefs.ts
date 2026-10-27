@@ -1,8 +1,6 @@
-// How images show in this browser: every image shown, blurred or hidden (for a public
-// place), and the shape of the chat's portraits (ST's avatar styles). Both are kept per
-// browser, not per user: images are concealed on the device that's out in public.
+// Images shown, blurred or hidden on this device, including before the first render.
 //
-// They're applied as attributes on the root element (`data-images`, `data-avatars`) that
+// They're applied as attributes on the root element (`data-images`) that
 // one rule each in styles.css reads, so every image surface, a new one included, follows
 // them without knowing about them. `applyImagePrefs` runs before the first render
 // (main.tsx), so no image is ever painted unblurred after a reload; another tab's change
@@ -10,13 +8,9 @@
 import { useSyncExternalStore } from "react"
 
 export type ImageMode = "show" | "blur" | "hide"
-/** ST's avatar styles: Rectangular (2:3, ST's "big avatars"), Circle, Square, Rounded square. */
-export type AvatarStyle = "portrait" | "round" | "square" | "rounded" | "large"
-
 const MODE_KEY = "rp.images"
 /** The concealment the toggle switches to: the one last picked, blur at first. */
 const CONCEAL_KEY = "rp.images.conceal"
-const STYLE_KEY = "rp.avatarStyle"
 
 const get = (key: string) => {
   try {
@@ -37,31 +31,26 @@ const memory = new Map<string, string>()
 const read = (key: string) => memory.get(key) ?? get(key)
 
 const parseMode = (value: string | null): ImageMode => (value === "blur" || value === "hide" ? value : "show")
-const parseStyle = (value: string | null): AvatarStyle =>
-  value === "large" ? "large" : value === "round" || value === "square" || value === "rounded" ? "square" : "portrait"
 const parseConceal = (value: string | null): Exclude<ImageMode, "show"> => (value === "hide" ? "hide" : "blur")
 
 interface ImagePrefs {
   readonly mode: ImageMode
   readonly conceal: Exclude<ImageMode, "show">
-  readonly avatars: AvatarStyle
 }
 
-let current: ImagePrefs = { mode: "show", conceal: "blur", avatars: "portrait" }
+let current: ImagePrefs = { mode: "show", conceal: "blur" }
 const listeners = new Set<() => void>()
 
 const load = (): ImagePrefs => ({
   mode: parseMode(read(MODE_KEY)),
-  conceal: parseConceal(read(CONCEAL_KEY)),
-  avatars: parseStyle(read(STYLE_KEY))
+  conceal: parseConceal(read(CONCEAL_KEY))
 })
 
 const apply = () => {
   const next = load()
   const root = document.documentElement
   root.dataset.images = next.mode
-  root.dataset.avatars = next.avatars
-  if (next.mode !== current.mode || next.conceal !== current.conceal || next.avatars !== current.avatars) {
+  if (next.mode !== current.mode || next.conceal !== current.conceal) {
     current = next
     for (const listener of listeners) listener()
   }
@@ -75,7 +64,7 @@ export const applyImagePrefs = () => {
   if (installed) return
   installed = true
   window.addEventListener("storage", (event) => {
-    if (event.key === null || event.key === MODE_KEY || event.key === CONCEAL_KEY || event.key === STYLE_KEY) {
+    if (event.key === null || event.key === MODE_KEY || event.key === CONCEAL_KEY) {
       memory.clear()
       apply()
     }
@@ -117,8 +106,6 @@ export const setImageMode = (mode: ImageMode) => {
 
 /** Show ↔ the concealment last picked: the one-click toggle. */
 export const toggleImages = () => setImageMode(current.mode === "show" ? current.conceal : "show")
-
-export const setAvatarStyle = (style: AvatarStyle) => store(STYLE_KEY, style)
 
 export const IMAGES_SHORTCUT = "Alt+Shift+B"
 

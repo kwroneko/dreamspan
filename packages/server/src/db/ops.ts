@@ -31,6 +31,7 @@ import {
   ChatCursor,
   ChatSearch,
   DisplayPrefs,
+  DisplayPrefsChange,
   NotAmendable,
   PathRange,
   PathWindow
@@ -1604,9 +1605,9 @@ export class WriteOps extends RpcGroup.make(
     success: GenerationDefaults,
     error: Schema.Union([NotFound, StorageError])
   }),
-  /** The user's display choices (`user_prefs`, key `display`), stored whole. */
+  /** The user's display choices, merged in one writer transaction. */
   Rpc.make("SetDisplayPrefs", {
-    payload: { userId: UserId, prefs: DisplayPrefs },
+    payload: { userId: UserId, prefs: DisplayPrefsChange },
     success: DisplayPrefs,
     error: StorageError
   }),

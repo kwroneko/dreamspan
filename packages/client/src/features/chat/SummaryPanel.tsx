@@ -11,19 +11,10 @@ import { Switch } from "../../ui/Choice.tsx"
 import { Textarea } from "../../ui/Field.tsx"
 import { Alert, Badge } from "../../ui/Surface.tsx"
 import { EstimateList } from "./EnableLcmDialog.tsx"
-import {
-  boundaryText,
-  countText,
-  healthOf,
-  jobText,
-  moneyText,
-  originText,
-  rangeText,
-  setRail,
-  tokensText,
-  useRail
-} from "./lcm.ts"
+import { boundaryText, countText, healthOf, jobText, moneyText, originText, rangeText, tokensText } from "./lcm.ts"
 import type { ChatSession } from "./session.ts"
+import { TimelineToggle } from "./TimelineToggle.tsx"
+import { useViewPrefs } from "../../ui/viewPrefs.ts"
 import { SummaryDraft } from "./summaryDraft.ts"
 
 function Problem({ error }: { error: AppError | null }) {
@@ -513,7 +504,7 @@ export function SummaryPanel({
   /** Turns summaries on for the chat, asking first what it costs. */
   onEnable: () => void
 }) {
-  const rail = useRail()
+  const viewer = useViewPrefs()
   const inUse = useMemo(() => new Set<string>(lcm.layer.map((s) => s.id)), [lcm.layer])
   const version = useSyncExternalStore(session.subscribe, session.snapshot).lcmVersion
   const [fetched, setFetched] = useState<LcmSummary | null>(null)
@@ -554,11 +545,14 @@ export function SummaryPanel({
       <p className="text-sm font-medium" data-testid="summary-panel-heading">
         {boundaryText(lcm)}
       </p>
+      <TimelineToggle />
+      {viewer.error && <Problem error={viewer.error} />}
       {lcm.enabled ? (
         <Switch
-          checked={rail}
-          onCheckedChange={setRail}
-          description="Bars beside the messages showing which summary covers them, in this browser."
+          checked={viewer.prefs.coverageRail}
+          disabled={!viewer.ready || viewer.pending}
+          onCheckedChange={(coverageRail) => void viewer.change({ coverageRail })}
+          description="Bars beside the messages showing which summary covers them. Saved for your account."
         >
           Coverage rail
         </Switch>

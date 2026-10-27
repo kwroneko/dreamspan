@@ -37,7 +37,10 @@ import { EnableLcmDialog } from "./EnableLcmDialog.tsx"
 import { Composer } from "./Composer.tsx"
 import { CoverageRail, LANE_PX, useCoverage } from "./CoverageRail.tsx"
 import { LcmBoundary } from "./LcmBoundary.tsx"
-import { useRail } from "./lcm.ts"
+import { useViewPrefs } from "../../ui/viewPrefs.ts"
+import { TimelineSummary } from "./TimelineSummary.tsx"
+import type { LcmSummary } from "@rp/shared/lcm.ts"
+import type { CSSProperties } from "react"
 import { type ContextMark, Message } from "./Message.tsx"
 import { useRenderCount } from "./perf.ts"
 import { ChatSession, type ChatView } from "./session.ts"
@@ -94,6 +97,8 @@ function MessageList({
   /** Whether the list stays at the end as messages grow or arrive (below). */
   const [follow] = useState({ stuck: true })
   const { entries } = view
+  const { prefs } = useViewPrefs()
+  const summaries = prefs.timeline === "summaries"
   useRenderCount("listRenders")
   const lcm = view.lcm?.enabled === true && view.lcm.leafSlotId === view.leafSlotId ? view.lcm : null
   const history = view.history?.leafSlotId === view.leafSlotId ? view.history : null
@@ -137,16 +142,40 @@ function MessageList({
     }
   }
   // The divider is a row of its own, before the entry at `divider` (-1: none).
-  const divider = boundaryIndex(view) ?? -1
-  const rows = Array.from({ length: entries.length + 1 }, (_, index) => [
+  const divider =
+    summaries && lcm && lcm.layer.length > 0 && (entries[0]?.depth ?? -1) > lcm.cursorDepth
+      ? 0
+      : (boundaryIndex(view) ?? -1)
+  const originalRows = Array.from({ length: entries.length + 1 }, (_, index) => [
     ...(index === divider ? [{ kind: "lcm" as const }] : []),
     ...(index === historyDivider ? [{ kind: "history" as const }] : []),
     ...(index < entries.length ? [{ kind: "message" as const, entry: entries[index]! }] : [])
   ]).flat()
+  type TimelineRow = (typeof originalRows)[number] | { kind: "summary"; summary: LcmSummary }
+  // The server's selected layer is already in path order. Include its prefix even when
+  // originals are outside the loaded window; expanding reads those messages separately.
+  const layer = summaries ? (lcm?.layer ?? []).filter((s) => s.from <= (entries.at(-1)?.depth ?? -1) + 1) : []
+  const rows: TimelineRow[] = []
+  let nextSummary = 0
+  for (const row of originalRows) {
+    const depth =
+      row.kind === "message" ? row.entry.depth : row.kind === "lcm" ? (lcm?.cursorDepth ?? -1) + 1 : Infinity
+    while (nextSummary < layer.length && layer[nextSummary]!.from - 1 <= depth)
+      rows.push({ kind: "summary", summary: layer[nextSummary++]! })
+    if (row.kind !== "message" || !layer.some((s) => row.entry.depth >= s.from - 1 && row.entry.depth < s.to))
+      rows.push(row)
+  }
+  while (nextSummary < layer.length) rows.push({ kind: "summary", summary: layer[nextSummary++]! })
   const rowCount = rows.length
   /** The row an entry is shown at. */
   const rowOf = (entry: number) =>
-    entry + (divider >= 0 && entry >= divider ? 1 : 0) + (historyDivider >= 0 && entry >= historyDivider ? 1 : 0)
+    rows.findIndex((row) =>
+      row.kind === "message"
+        ? row.entry.slotId === entries[entry]!.slotId
+        : row.kind === "summary" &&
+          entries[entry]!.depth >= row.summary.from - 1 &&
+          entries[entry]!.depth < row.summary.to
+    )
   // eslint-disable-next-line react-hooks/incompatible-library -- this component opts out of memoization above
   const virtualizer = useVirtualizer({
     count: rowCount,
@@ -154,7 +183,11 @@ function MessageList({
     estimateSize: (row) => (rows[row]!.kind === "message" ? 160 : rows[row]!.kind === "lcm" ? 44 : 64),
     getItemKey: (row) => {
       const item = rows[row]!
-      return item.kind === "message" ? item.entry.slotId : `${item.kind}-boundary`
+      return item.kind === "message"
+        ? item.entry.slotId
+        : item.kind === "summary"
+          ? item.summary.id
+          : `${item.kind}-boundary`
     },
     overscan: 4,
     anchorTo: "end",
@@ -180,12 +213,63 @@ function MessageList({
     if (view.opened === positioned.current || entries.length === 0) return
     positioned.current = view.opened
     settled.current = false
-    const index = anchor === null ? -1 : entries.findIndex((e) => e.slotId === anchor)
-    if (index >= 0) virtualizer.scrollToIndex(rowOf(index), { align: "center" })
+    const requested = anchor ?? (summaries ? (lcm?.layer.at(-1)?.lastSlotId ?? null) : null)
+    const entryIndex = entries.findIndex((entry) => entry.slotId === requested)
+    const row =
+      entryIndex >= 0
+        ? rowOf(entryIndex)
+        : rows.findIndex((row) => row.kind === "summary" && row.summary.lastSlotId === requested)
+    if (row >= 0) virtualizer.scrollToIndex(row, { align: rows[row]?.kind === "summary" ? "start" : "center" })
     else virtualizer.scrollToEnd()
-    hold(index < 0)
+    hold(row < 0)
     requestAnimationFrame(() => requestAnimationFrame(() => (settled.current = true)))
   })
+
+  // Expansions load asynchronously, possibly through several summary levels. Position
+  // the linked article each time a new one mounts, after the virtualizer measures its row:
+  // the uncovered original can render first, before the selected layer replaces it.
+  // Until the user takes over, the list mustn't hold at the end either: a collapsed
+  // summary can fit the viewport, and holding there would follow its expansion down.
+  const revealing = useRef(false)
+  useEffect(() => {
+    const list = parent.current
+    if (!summaries || anchor === null || list === null) return
+    revealing.current = true
+    let frame = 0
+    let shown: Element | null = null
+    const reveal = () => {
+      const article = list.querySelector(`article[data-slot="${anchor}"]`)
+      if (!article || article === shown) return
+      shown = article
+      cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(() => {
+        frame = requestAnimationFrame(() => {
+          // Replace the pending summary-row scroll with an offset inside that row.
+          // Otherwise its measurement pass can scroll back to the summary's edge.
+          const offset =
+            list.scrollTop +
+            article.getBoundingClientRect().top -
+            list.getBoundingClientRect().top -
+            (list.clientHeight - article.getBoundingClientRect().height) / 2
+          virtualizer.scrollToOffset(Math.max(0, offset))
+        })
+      })
+    }
+    const stop = () => {
+      revealing.current = false
+      observer.disconnect()
+      for (const event of inputs) list.removeEventListener(event, stop)
+    }
+    const inputs = ["wheel", "touchmove", "keydown", "pointerdown"] as const
+    for (const event of inputs) list.addEventListener(event, stop, { passive: true })
+    const observer = new MutationObserver(reveal)
+    observer.observe(list, { childList: true, subtree: true })
+    reveal()
+    return () => {
+      stop()
+      cancelAnimationFrame(frame)
+    }
+  }, [anchor, summaries, view.opened, virtualizer])
 
   // An end scroll remains pending by row index while the virtualizer measures it.
   // Appending or inserting the summary divider can move the last message to another
@@ -248,7 +332,7 @@ function MessageList({
     const list = parent.current
     if (list === null || entries.length === 0 || !view.follow) return
     const fromEnd = list.scrollHeight - list.scrollTop - list.clientHeight
-    if (!follow.stuck && fromEnd <= END_PX && performance.now() - intent.current > 300) hold(true)
+    if (!follow.stuck && !revealing.current && fromEnd <= END_PX && performance.now() - intent.current > 300) hold(true)
     if (follow.stuck && fromEnd > 1) virtualizer.scrollToEnd()
   })
 
@@ -257,7 +341,8 @@ function MessageList({
   const last = items.at(-1)?.index
   useEffect(() => {
     if (!settled.current || first === undefined || last === undefined) return
-    if (first < EDGE) void session.loadOlder()
+    if (first < EDGE && (!summaries || lcm === null || (entries[0]?.depth ?? 0) > lcm.cursorDepth + 1))
+      void session.loadOlder()
     if (last >= rowCount - EDGE) void session.loadNewer()
     if (view.newer === null && virtualizer.isAtEnd(END_PX)) session.followAtBottom()
   })
@@ -274,9 +359,23 @@ function MessageList({
   const railPx = showRail ? railLevels * LANE_PX + 6 : 0
   /** Where an entry's row is, from the virtualizer's measurements (estimates for rows not seen yet). */
   const position = (index: number) => {
-    const item = virtualizer.measurementsCache[rowOf(index)]
+    const row = rowOf(index)
+    const item = row < 0 ? undefined : virtualizer.measurementsCache[row]
     return item ? { start: item.start, end: item.end } : null
   }
+
+  const renderMessage = (entry: PathEntry) => (
+    <Message
+      context={contextOf(entry)}
+      revealed={revealed === entry.slotId}
+      onReveal={setRevealed}
+      entry={entry}
+      session={session}
+      highlighted={entry.slotId === anchor}
+      branchLeaf={view.leafSlotId === view.chat?.activeLeafSlotId ? null : view.leafSlotId}
+      onBranch={onBranch}
+    />
+  )
 
   return (
     <TooltipProvider>
@@ -304,6 +403,17 @@ function MessageList({
               >
                 {row.kind === "lcm" ? (
                   <LcmBoundary lcm={lcm!} onOpen={() => onOpenSummaries(null)} />
+                ) : row.kind === "summary" ? (
+                  <TimelineSummary
+                    session={session}
+                    summary={row.summary}
+                    renderMessage={renderMessage}
+                    target={
+                      entries.find(
+                        (e) => e.slotId === anchor && e.depth >= row.summary.from - 1 && e.depth < row.summary.to
+                      ) ?? null
+                    }
+                  />
                 ) : row.kind === "history" ? (
                   <Alert>
                     Messages above this aren&rsquo;t sent to the model: the preset “{budget!.presetName}”
@@ -313,16 +423,7 @@ function MessageList({
                     content take ~{budget!.nonHistoryTokens.toLocaleString()}.
                   </Alert>
                 ) : (
-                  <Message
-                    context={contextOf(row.entry)}
-                    revealed={revealed === row.entry.slotId}
-                    onReveal={setRevealed}
-                    entry={row.entry}
-                    session={session}
-                    highlighted={row.entry.slotId === anchor}
-                    branchLeaf={view.leafSlotId === view.chat?.activeLeafSlotId ? null : view.leafSlotId}
-                    onBranch={onBranch}
-                  />
+                  renderMessage(row.entry)
                 )}
               </div>
             )
@@ -441,7 +542,8 @@ function ChatSurface({
   const [enabling, setEnabling] = useState(false)
   /** The summary the panel opens at: one clicked on the rail, or none. */
   const [focus, setFocus] = useState<string | null>(null)
-  const rail = useRail()
+  const { prefs } = useViewPrefs()
+  const rail = prefs.coverageRail
   const openSummaries = useCallback(
     (summaryId: string | null) => {
       setFocus(summaryId)
@@ -490,7 +592,14 @@ function ChatSurface({
       }))}
     >
       <CastContext value={cast}>
-        <div className="flex min-h-0 flex-1">
+        <div
+          className="flex min-h-0 flex-1"
+          style={
+            {
+              "--chat-portrait-width": `${{ small: 48, default: 60, large: 72, largest: 84 }[prefs.portraitSize]}px`
+            } as CSSProperties
+          }
+        >
           <div className="flex min-w-0 flex-1 flex-col">
             <ChatHeader
               session={session}
@@ -541,6 +650,9 @@ function ChatSurface({
               <Loading label="Loading the chat…" />
             ) : (
               <MessageList
+                // A replacement layer has different row coordinates. Give it fresh
+                // virtualizer measurements rather than inheriting the old pixel anchor.
+                key={prefs.timeline}
                 session={session}
                 view={view}
                 anchor={slot}

@@ -86,13 +86,7 @@ for (const width of [1440, 390]) {
     await expect(page.getByRole("img", { name: "Bo's full portrait" })).toBeVisible()
     if (width === 390) await page.getByRole("button", { name: "Close", exact: true }).click()
     else await page.getByRole("button", { name: "Close the panel" }).click()
-    await page.locator("header").getByRole("button", { name: "Show Mira's card", exact: true }).first().click()
-    await expect(page.getByRole("link", { name: "Edit card", exact: true })).toBeVisible()
-    await page.getByRole("tab", { name: "Cast", exact: true }).click()
-    await page
-      .getByRole("list", { name: "Characters in this chat" })
-      .getByRole("button", { name: "View Mira's portrait", exact: true })
-      .click()
+    await page.locator("header").getByRole("button", { name: "View Mira's portrait", exact: true }).first().click()
     await expect(page.getByRole("img", { name: "Mira's full portrait" })).toBeVisible()
     await page.getByRole("tab", { name: "Cast", exact: true }).click()
     await page
@@ -102,15 +96,26 @@ for (const width of [1440, 390]) {
     await expect(page.getByRole("img", { name: "Bo's full portrait" })).toBeVisible()
     if (width === 390) await page.getByRole("button", { name: "Close", exact: true }).click()
     else await page.getByRole("button", { name: "Close the panel" }).click()
-    for (const [label, width, height] of [
-      ["Small (48 × 72)", "48px", "72px"],
-      ["Large (72 × 108)", "72px", "108px"],
-      ["Rectangular (60 × 90)", "60px", "90px"]
-    ]) {
-      await select(page, "Chat portraits", label!)
-      await expect(portrait).toHaveCSS("width", width!)
-      await expect(portrait).toHaveCSS("height", height!)
+    for (const [label, pixels] of [
+      ["Small (48 × 72)", 48],
+      ["Large (72 × 108)", 72],
+      ["Largest (84 × 126)", 84],
+      ["SillyTavern default (60 × 90)", 60]
+    ] as const) {
+      await select(page, "Message portrait size (account)", label)
+      await expect(portrait).toHaveCSS("width", `${pixels}px`)
+      await expect(portrait).toHaveCSS("height", `${pixels * 1.5}px`)
+      await expect(portrait).toHaveCSS("border-radius", "10px")
     }
+    // Measure the rendered shape, including header, recent speakers and reply-from.
+    const ratios = await page.locator("main [data-portrait]").evaluateAll((nodes) =>
+      nodes.map((node) => {
+        const box = node.getBoundingClientRect()
+        return box.width / box.height
+      })
+    )
+    expect(ratios.length).toBeGreaterThan(3)
+    for (const ratio of ratios) expect(ratio).toBeCloseTo(2 / 3, 2)
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy()
   })
 }
