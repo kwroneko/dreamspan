@@ -74,6 +74,34 @@ describe("estimateBackfill", () => {
     assert.isAtLeast(totals.l1Jobs, Math.ceil(totals.summarized / (128 * 4)))
   })
 
+  it("condenses as the planner does: a pass's condensations run after its chunks, over the layer up to their parts", () => {
+    // Eight chunks in two passes of four, condensed three at a time.
+    const totals = estimateBackfill({
+      ...story,
+      tokens: 7000,
+      messages: 50,
+      windowMax: 3000,
+      layerMax: 100_000,
+      prefix: 40,
+      leafInput: 600,
+      leafTarget: 100,
+      fanout: 3,
+      condenseTarget: 150
+    })
+    assert.deepStrictEqual(
+      totals.plannedRequests.map((r) => r.output),
+      [100, 100, 100, 100, 100, 100, 100, 100, 150, 150]
+    )
+    // The layer grows through the second pass: each summary request reads one summary more.
+    const reads = totals.plannedRequests.map((r) => r.cachedInput)
+    for (let n = 2; n < 8; n++) assert.isAbove(reads[n]!, reads[n - 1]!)
+    // The first condensation sends the layer up to its three parts, all of them read back; the
+    // second follows the first one's summary, so it reads only the prefix.
+    assert.isBelow(reads[8]!, reads[7]!)
+    assert.closeTo(reads[8]!, reads[4]!, 1)
+    assert.strictEqual(reads[9], 40)
+  })
+
   it("handles an empty chat and a missing window", () => {
     assert.strictEqual(estimateBackfill({ ...story, tokens: 0, messages: 0 }).l1Jobs, 0)
     assert.strictEqual(estimateBackfill({ ...story, windowMax: 0 }).l1Jobs, 0)
