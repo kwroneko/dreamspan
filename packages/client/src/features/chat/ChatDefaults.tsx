@@ -32,8 +32,11 @@ export function ChatDefaultsPage() {
   useTitle("Chats")
   const action = useAction()
   const userId = useSession().user.id
-  const models = useModelChoices(true)
   const [defaults, setDefaults] = useState<GenerationDefaults | null>(null)
+  const models = useModelChoices(
+    true,
+    defaults?.model ? modelValue(defaults.model.connection, defaults.model.model) : null
+  )
   const [presets, setPresets] = useState<ReadonlyArray<LibraryRef>>([])
   const [tail, setTail] = useState("")
   const [saved, setSaved] = useState(false)

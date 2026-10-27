@@ -62,12 +62,14 @@ export const withModelSettings = (
   const { context_target, ...text } = doc
   void context_target
   const window = context ?? FALLBACK_CONTEXT
+  // The context size the budget will use: the model's own, within its reported window.
+  const size = Math.min(settings.samplers?.openai_max_context ?? window, context ?? Number.POSITIVE_INFINITY)
   return {
     ...text,
     samplers: {
       ...DEFAULT_SAMPLERS,
       openai_max_context: window,
-      openai_max_tokens: Math.max(1, Math.min(maxOutput ?? DEFAULT_RESPONSE, DEFAULT_RESPONSE, Math.floor(window / 2))),
+      openai_max_tokens: Math.max(1, Math.min(maxOutput ?? DEFAULT_RESPONSE, DEFAULT_RESPONSE, Math.floor(size / 2))),
       ...settings.samplers
     },
     names_behavior: settings.names_behavior ?? "default",

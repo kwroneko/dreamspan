@@ -1109,7 +1109,7 @@ const placedNotes = (assembly: Assembly, cards: ReadonlyArray<CardInput>, person
 
 /** The context as ST's populateChatCompletion builds it, with our layouts' blocks and tail outside ST mode. */
 const composeStage = sync("compose", (assembly) => {
-  const doc = need(assembly, "preset").doc
+  let doc = need(assembly, "preset").doc
   const cast = need(assembly, "cast")
   const mode = need(assembly, "mode")
   const env = need(assembly, "macros")
@@ -1550,6 +1550,18 @@ const composeStage = sync("compose", (assembly) => {
     assembly.prefill && assembly.model?.prefill === "tool_schema" ? schemaPrefillBudget(assembly.prefill) : null
   const prefillInput = schemaReserve?.input ?? (assembly.prefill ? tokensOf({ content: assembly.prefill }) : 0)
   const prefixOutput = schemaReserve?.output ?? 0
+  // A default response length gives way to the source prefix; only the model's own can exceed the limit.
+  const outputLimit = assembly.model?.maxOutput
+  if (
+    schemaReserve &&
+    outputLimit != null &&
+    assembly.model?.settings?.samplers?.openai_max_tokens === undefined &&
+    outputLimit - prefixOutput > 0 &&
+    doc.samplers.openai_max_tokens + prefixOutput > outputLimit
+  ) {
+    doc = { ...doc, samplers: { ...doc.samplers, openai_max_tokens: outputLimit - prefixOutput } }
+    assembly.preset = { ...need(assembly, "preset"), doc }
+  }
   if (schemaReserve && doc.samplers.openai_max_tokens + prefixOutput > (assembly.model?.maxOutput ?? Infinity))
     throw new AssemblyFailed({
       reason: "budget",

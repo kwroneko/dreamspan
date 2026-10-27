@@ -53,7 +53,8 @@ export function GenerationControls({
   onSettings: (tab: "model" | "preset") => void
 }) {
   const { action, defaults, presets } = useSelections(session)
-  const models = useModelChoices(true)
+  const current = defaults?.model ? modelValue(defaults.model.connection, defaults.model.model) : null
+  const models = useModelChoices(true, current)
   return (
     <div className="flex flex-col gap-1">
       <div className="grid grid-cols-2 gap-2" aria-label="Current generation settings">
@@ -62,7 +63,7 @@ export function GenerationControls({
             <Field label="Model">
               <Select
                 items={models}
-                value={defaults?.model ? modelValue(defaults.model.connection, defaults.model.model) : null}
+                value={current}
                 placeholder="Choose a model"
                 onValueChange={(value) =>
                   void action.run(
