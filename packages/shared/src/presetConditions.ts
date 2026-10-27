@@ -147,6 +147,38 @@ export const withConditions = <D extends ConditionedDoc>(doc: D): { doc: D; chan
   return { doc: { ...doc, prompts, order, utility_prompts: utility }, changes }
 }
 
+/**
+ * What the preset editor warns about (DESIGN §2.2), for the order as it reads: `endsOn`, the
+ * prompt a plain character turn ends on after the history, when that's an assistant prompt and
+ * nothing prefills (the assembler then adds a user turn), and whether any prompt that's on sends the
+ * direction. A plain turn has no direction, so the direction prompt last in an imported preset
+ * doesn't hide an assistant prompt before it.
+ */
+export const presetWarnings = (
+  order: ReadonlyArray<PromptOrderEntry>,
+  prompts: ReadonlyMap<string, PresetPrompt>,
+  prefill: string
+): { endsOn: PresetPrompt | null; direction: boolean } => {
+  const history = order.findIndex((e) => e.identifier === "chatHistory")
+  const sent = order.flatMap((e, index) => {
+    const prompt = prompts.get(e.identifier)
+    return e.enabled && prompt && !prompt.marker && prompt.content.trim() !== "" ? [{ index, prompt }] : []
+  })
+  const last = sent
+    .filter(
+      ({ index, prompt }) =>
+        index > history &&
+        prompt.injection_position === "relative" &&
+        (conditionOf(prompt) === "always" || conditionOf(prompt) === "as_character") &&
+        triggersFor(prompt, "normal")
+    )
+    .findLast(({ prompt }) => prompt.role !== "system")?.prompt
+  return {
+    endsOn: history >= 0 && last?.role === "assistant" && prefill.trim() === "" ? last : null,
+    direction: sent.some(({ prompt }) => readsDirection(prompt.content))
+  }
+}
+
 /** The editor's names for the conditions; the inspector says which one admitted a prompt. */
 export const CONDITION_LABELS: Readonly<Record<PromptCondition, string>> = {
   always: "Always",

@@ -153,6 +153,12 @@ export const CastChange = Schema.Union([
   Schema.TaggedStruct("Leave", { entityId: EntityId }),
   Schema.TaggedStruct("Presence", { entityId: EntityId, present: Schema.Boolean }),
   Schema.TaggedStruct("PlayedByMe", { entityIds: Schema.Array(EntityId) }),
+  /**
+   * The one persona from here on (DESIGN §2.2, who `{{user}}` is), in one write: the card joins
+   * if it isn't in the chat, and a persona-folder card played until now leaves, since it isn't
+   * one of the characters.
+   */
+  Schema.TaggedStruct("Persona", { entityId: EntityId }),
   Schema.TaggedStruct("Model", { connection: ConnectionId, model: ModelId }),
   Schema.TaggedStruct("Preset", { ref: RefId }),
   /** The chat's own model or preset taken off (`model.unbind`, `preset.unbind`): it uses the default again. */

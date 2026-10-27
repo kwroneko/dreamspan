@@ -1099,6 +1099,20 @@ export class WriteOps extends RpcGroup.make(
     success: Schema.Struct({ id: Schema.String, seq: Schema.Int }),
     error: Schema.Union([NotFound, StorageError])
   }),
+  /**
+   * Several user state changes at one position, in order, as `AddStateEvent` records each, in
+   * one transaction: all of them or none (a persona switch, DESIGN §2.2).
+   */
+  Rpc.make("AddStateEvents", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      slotId: Schema.NullOr(SlotId),
+      data: Schema.Array(StateEventData)
+    },
+    success: Schema.Void,
+    error: Schema.Union([NotFound, StorageError])
+  }),
   // --- Library import (ARCHITECTURE.md §11). The file was parsed in a format worker;
   // documents cross as JSON text, which costs the main thread a copy, not a walk.
   /**

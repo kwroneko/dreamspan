@@ -452,23 +452,12 @@ export function CastTab({ session }: { session: ChatSession }) {
   const playedByMe = cast?.playedByMe ?? []
   const muted = cast?.absent.filter((id) => participants.includes(id) && !playedByMe.includes(id)).length ?? 0
   /**
-   * Who `{{user}}` is from here on (DESIGN §2.2): one persona. A card not in the chat joins;
-   * a persona-folder card played until now leaves, since it isn't one of the characters.
+   * Who `{{user}}` is from here on (DESIGN §2.2): one persona, in one write. A card not in the
+   * chat joins; a persona-folder card played until now leaves, since it isn't one of the characters.
    */
   const choosePersona = async (card: CastCard) => {
     if (cast === null || (playedByMe.length === 1 && playedByMe[0] === card.entityId)) return
-    const steps: Array<CastChange> = [
-      ...(participants.includes(card.entityId) ? [] : [{ _tag: "Join" as const, entityId: card.entityId }]),
-      { _tag: "PlayedByMe", entityIds: [card.entityId] },
-      ...playedByMe
-        .filter((id) => id !== card.entityId && participants.includes(id) && view.cards.get(id)?.persona === true)
-        .map((id) => ({ _tag: "Leave" as const, entityId: id }))
-    ]
-    for (const step of steps) {
-      const outcome = await session.changeCast(step)
-      setError(outcome.ok ? null : outcome.error)
-      if (!outcome.ok) return
-    }
+    await change({ _tag: "Persona", entityId: card.entityId })
   }
   const listCards = useCallback(() => session.listCards(), [session])
   const persona = playedByMe[0] ?? null

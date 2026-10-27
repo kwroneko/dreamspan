@@ -18,7 +18,7 @@ import { freezeTemplate } from "../chat/macros.ts"
 import { internal } from "./internal.ts"
 
 /** A cast change as the state event it records (DATA-MODEL §5.3), chat-wide. */
-const toEvent = (change: CastChange): StateEventData => {
+const toEvent = (change: Exclude<CastChange, { readonly _tag: "Persona" }>): StateEventData => {
   switch (change._tag) {
     case "Join":
       return { key: "participant.join", value: { entity: change.entityId } }
@@ -240,6 +240,23 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
                   : { preset: null }
           yield* writer.ChangeGenerationDefaults({ userId: id, change: selection })
           yield* warmth.refreshUser(id)
+        } else if (change._tag === "Persona") {
+          const before = yield* castAt(id, chatId, slotId)
+          const persona = new Set(before.cards.flatMap((card) => (card.persona ? [card.entityId] : [])))
+          yield* writer.AddStateEvents({
+            userId: id,
+            chatId,
+            slotId,
+            data: [
+              ...(before.participants.includes(change.entityId)
+                ? []
+                : [toEvent({ _tag: "Join", entityId: change.entityId })]),
+              toEvent({ _tag: "PlayedByMe", entityIds: [change.entityId] }),
+              ...before.playedByMe
+                .filter((e) => e !== change.entityId && before.participants.includes(e) && persona.has(e))
+                .map((e) => toEvent({ _tag: "Leave", entityId: e }))
+            ]
+          })
         } else {
           yield* writer.AddStateEvent({
             userId: id,

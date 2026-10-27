@@ -1,7 +1,7 @@
 import { recordHistoryReduction } from "./historyChanges.ts"
 import { contextExcluded } from "./lcmVisibility.ts"
 // Write operation handlers. They run inside the writer worker, each as one transaction.
-import type { ChatId, VersionId } from "@rp/shared/chat.ts"
+import type { ChatId, SlotId, VersionId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import { Effect } from "effect"
@@ -60,6 +60,19 @@ export const makeWriteHandlers = (bin: Bin) =>
     }
     const draftTarget = (userId: UserId, key: DraftKey) =>
       found(Effect.orDie(draftTargets[key.targetKind](userId, key)), key.targetKind, key.targetId)
+
+    /** A position for state events: the user's chat, and a live slot of it unless it's the start. */
+    const ownedPosition = (userId: UserId, chatId: ChatId, slotId: SlotId | null) =>
+      Effect.gen(function* () {
+        yield* ownedChat(userId, chatId)
+        if (slotId !== null) {
+          yield* found(
+            sql`SELECT count(*) AS n FROM slots WHERE id = ${slotId} AND chat_id = ${chatId} AND deleted_at IS NULL`,
+            "slot",
+            slotId
+          )
+        }
+      })
 
     const handlers = {
       Ready: () => Effect.void,
@@ -196,14 +209,7 @@ export const makeWriteHandlers = (bin: Bin) =>
 
       AddStateEvent: ({ userId, chatId, slotId, versionId, scope, data }) =>
         Effect.gen(function* () {
-          yield* ownedChat(userId, chatId)
-          if (slotId !== null) {
-            yield* found(
-              sql`SELECT count(*) AS n FROM slots WHERE id = ${slotId} AND chat_id = ${chatId} AND deleted_at IS NULL`,
-              "slot",
-              slotId
-            )
-          }
+          yield* ownedPosition(userId, chatId, slotId)
           if (versionId !== null) {
             yield* found(
               sql`SELECT count(*) AS n FROM versions WHERE id = ${versionId} AND slot_id IS ${slotId} AND deleted_at IS NULL`,
@@ -213,6 +219,12 @@ export const makeWriteHandlers = (bin: Bin) =>
           }
           return yield* insertStateEvent(userId, chatId, slotId, versionId, scope, data)
         }).pipe(transaction("AddStateEvent")),
+
+      AddStateEvents: ({ userId, chatId, slotId, data }) =>
+        Effect.gen(function* () {
+          yield* ownedPosition(userId, chatId, slotId)
+          for (const event of data) yield* insertStateEvent(userId, chatId, slotId, null, null, event)
+        }).pipe(transaction("AddStateEvents")),
 
       // --- Chats
 

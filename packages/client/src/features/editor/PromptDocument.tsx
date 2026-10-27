@@ -7,7 +7,7 @@ import {
   conditionFromTriggers,
   conditionOf,
   directionPrompt,
-  readsDirection
+  presetWarnings
 } from "@rp/shared/presetConditions.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import { type ReactNode, useEffect, useRef, useState } from "react"
@@ -378,16 +378,7 @@ export function PresetWarnings({ store }: { store: EditorStore }) {
   const prefill = useValue<string>(store, ["prefill", "assistant"]) ?? ""
   const order = presetOrder(prompts, savedOrder)
   const byId = new Map(prompts.map((p) => [p.identifier, p]))
-  const history = order.findIndex((e) => e.identifier === "chatHistory")
-  const sent = order.flatMap((e) => {
-    const prompt = byId.get(e.identifier)
-    return e.enabled && prompt && !prompt.marker && prompt.content.trim() !== "" ? [{ e, prompt }] : []
-  })
-  const last = sent
-    .filter(({ e, prompt }) => order.indexOf(e) > history && prompt.injection_position === "relative")
-    .findLast(({ prompt }) => prompt.role !== "system")
-  const endsOnAssistant = history >= 0 && last?.prompt.role === "assistant" && prefill.trim() === ""
-  const direction = sent.some(({ prompt }) => readsDirection(prompt.content))
+  const { endsOn, direction } = presetWarnings(order, byId, prefill)
   const jump = (identifier: string) =>
     document.querySelector<HTMLElement>(`[data-prompt="${CSS.escape(identifier)}"]`)?.scrollIntoView({ block: "start" })
   const addDirection = () => {
@@ -396,17 +387,17 @@ export function PresetWarnings({ store }: { store: EditorStore }) {
     store.setValue(at(identifier), { ...prompt, identifier })
     writePresetOrder(store, [...order, { identifier, enabled: true }])
   }
-  if (!endsOnAssistant && direction) return null
+  if (endsOn === null && direction) return null
   return (
     <div className="flex flex-col gap-2" aria-label="Preset warnings" role="group">
-      {endsOnAssistant && (
+      {endsOn !== null && (
         <div role="alert" className="rounded-md border border-warning/40 px-3 py-2 text-sm">
-          The prompts after the chat history end on an assistant prompt, “{last.prompt.name || last.prompt.identifier}”,
-          and the preset doesn't prefill: a user turn asking for the next message will be added after it.{" "}
+          The prompts after the chat history end on an assistant prompt, “{endsOn.name || endsOn.identifier}”, and the
+          preset doesn't prefill: a user turn asking for the next message will be added after it.{" "}
           <button
             type="button"
             className="text-accent underline-offset-4 hover:underline"
-            onClick={() => jump(last.prompt.identifier)}
+            onClick={() => jump(endsOn.identifier)}
           >
             Go to the prompt
           </button>

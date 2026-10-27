@@ -336,6 +336,48 @@ describe("chat setup", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
   )
 
+  it.live("a persona switch is one write: the card joins, becomes the persona, the old persona card leaves", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const miraId = yield* card(api, "Mira", mira)
+      const ana = yield* card(api, "Ana", { name: "Ana" }, true)
+      const bo = yield* card(api, "Bo", { name: "Bo" }, true)
+      const tobin = yield* card(api, "Tobin", { name: "Tobin" })
+      const started = yield* api.StartChat({
+        cards: [miraId],
+        persona: null,
+        greeting: 0,
+        first: { _tag: "Send", content: "Hello.", speakerEntityId: null }
+      })
+      const at = started.entry.slotId
+      const change = (c: Parameters<Api["ChangeCast"]>[0]["change"]) =>
+        api.ChangeCast({ chatId: started.chat.id, slotId: at, change: c })
+      const reader = yield* Reader
+      const me = yield* api.Whoami()
+      const events = () => reader.StateEventsAt({ userId: me.id as UserId, chatId: started.chat.id, slotId: at })
+      // A persona-folder card in the chat and played, as speaking as one used to make it.
+      yield* change({ _tag: "Join", entityId: ana })
+      yield* change({ _tag: "PlayedByMe", entityIds: [ana] })
+      const count = (yield* events()).length
+
+      const switched = yield* change({ _tag: "Persona", entityId: bo })
+      assert.deepStrictEqual(switched.playedByMe, [bo])
+      assert.deepStrictEqual(switched.participants, [miraId, bo])
+      assert.lengthOf(yield* events(), count + 3)
+      // A card that isn't a persona stays when it stops being played; one already in the chat doesn't join again.
+      yield* change({ _tag: "Join", entityId: tobin })
+      yield* change({ _tag: "PlayedByMe", entityIds: [tobin] })
+      const back = yield* change({ _tag: "Persona", entityId: bo })
+      assert.deepStrictEqual(back.playedByMe, [bo])
+      assert.deepStrictEqual(back.participants, [miraId, bo, tobin])
+
+      // A card that isn't the user's: nothing is written, not even part of the switch.
+      const before = (yield* events()).length
+      yield* Effect.flip(change({ _tag: "Persona", entityId: "0190f000-0000-7000-8000-000000000000" as EntityId }))
+      assert.lengthOf(yield* events(), before)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
+  )
+
   it.live("a card edited only in this chat: its own version, made once, shown there and nowhere else", () =>
     Effect.gen(function* () {
       const api = yield* client()
