@@ -58,7 +58,7 @@ const fixture = (placement: NoteDoc["placement"], presetFields: Record<string, u
     }
   ],
   events: [
-    // Turning summarization on switched the imported note off; its placement still places the layer.
+    // Turning summarization on switched the imported note off.
     { depth: null, event: { scope: null, data: { key: "lcm.settings", value: { enabled: true } } } }
   ]
 })
@@ -378,7 +378,8 @@ it.effect("a summary note switched on is sent beside the summaries, and {{summar
     })
     const text = on.request.messages.map((m) => m.content).join("\n")
     assert.include(text, "Summary: old summary")
-    assert.include(text, "Story: LAYER CONTENT 0")
+    // One assembly path: `{{summary}}` reads the `<summaries>` block.
+    assert.match(text, /Story: <summaries>\n<summary level="1"[^>]*>\nLAYER CONTENT 0/)
     const off = yield* assembleFixture(input)
     assert.notInclude(off.request.messages.map((m) => m.content).join("\n"), "old summary")
   })
