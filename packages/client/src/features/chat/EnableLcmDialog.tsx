@@ -29,8 +29,8 @@ export function EstimateList({ estimate, title }: { estimate: BackfillEstimate; 
   if (estimate.blocked === "runway")
     return (
       <Alert tone="warning">
-        The context is too small to leave room for two summaries between the ends of the window. Raise the context size
-        or the preset's response length before summarizing.
+        Two summary chunks don't fit between the recent messages' target and maximum. Move them further apart, or make
+        the chunk size smaller, in the side panel's This chat tab.
       </Alert>
     )
   if (jobs === 0)
@@ -189,11 +189,17 @@ export function EnableLcmDialog({
                     value: "scratch",
                     label: "Summarize from scratch",
                     description:
-                      "Those messages are shown again and summarized with the rest. The imported summary stays in its own note and is sent until the first summary exists."
+                      "Those messages are shown again and summarized with the rest. The imported summary stays in its own note."
                   }
                 ]}
               />
             </fieldset>
+          )}
+          {offer.summaryNoteOn && (
+            <p role="note" className="text-sm text-muted">
+              The imported summary's note is switched off in the same step, so it isn't sent beside the summaries. You
+              can switch it back on in the Notes tab.
+            </p>
           )}
           {estimate && <EstimateList estimate={estimate} title="Estimate" />}
           {error && <Alert tone="danger">{error.message}</Alert>}

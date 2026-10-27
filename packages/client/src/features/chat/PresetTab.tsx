@@ -9,6 +9,8 @@ import { Button } from "../../ui/Button.tsx"
 import { Switch } from "../../ui/Choice.tsx"
 import { ConfirmDialog } from "../../ui/Dialog.tsx"
 import { valueField } from "@rp/shared/editing.ts"
+import { Badge } from "../../ui/Surface.tsx"
+import { summaryBadge } from "../editor/summaryBadge.ts"
 import { usePresetWorkspace } from "../editor/PresetWorkspace.tsx"
 import { type EditorStore, useEditorState, useLeaveGuard, useValue, useWorkingDoc } from "../editor/store.ts"
 import type { ChatView } from "./session.ts"
@@ -101,7 +103,13 @@ function PresetSwitches({ store }: { store: EditorStore }) {
                   <span className="sr-only">Send {p.name}</span>
                 </Switch>
               )}
-              <span className="min-w-0 flex-1 text-sm break-words">{p.name}</span>
+              {/* The badge goes under the name, so the name keeps the row's width. */}
+              <span className="flex min-w-0 flex-1 flex-col items-start gap-1">
+                <span className="text-sm break-words">{p.name}</span>
+                {!p.marker && /\{\{summary\}\}/i.test(content) && workspace.context?.summary && (
+                  <Badge>{summaryBadge(workspace.context.summary)}</Badge>
+                )}
+              </span>
               <span className="text-xs text-muted">
                 ~{(p.marker ? (filled?.tokens ?? 0) : Math.ceil(content.length / 4)).toLocaleString()} tokens
               </span>

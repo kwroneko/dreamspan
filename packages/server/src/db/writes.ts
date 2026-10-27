@@ -12,7 +12,7 @@ import type { Bin } from "./bin.ts"
 import { NotAmendable } from "@rp/shared/chatApi.ts"
 import { makeGraphWrites } from "./graphWrites.ts"
 import { NotFound, StaleWrite, WriteOps } from "./ops.ts"
-import { ownedModel } from "./generationSettings.ts"
+import { newChatLcmSettings, ownedModel } from "./generationSettings.ts"
 import { type ChatRow, toChat, toVersion } from "./rows.ts"
 import { transaction as runTransaction } from "./tx.ts"
 
@@ -84,7 +84,10 @@ export const makeWriteHandlers = (bin: Bin) =>
           const laneId = uuidv7()
           yield* sql`INSERT INTO chats ${sql.insert({ id: chatId, owner_user_id: userId, kind, status, title, created_at: at })}`
           yield* sql`INSERT INTO lanes ${sql.insert({ id: laneId, chat_id: chatId, name: "main", created_at: at })}`
-          yield* insertStateEvent(userId, chatId, null, null, null, { key: "lcm.settings", value: { enabled: true } })
+          yield* insertStateEvent(userId, chatId, null, null, null, {
+            key: "lcm.settings",
+            value: yield* newChatLcmSettings(sql, userId)
+          })
           for (const entity of participants) {
             yield* insertStateEvent(userId, chatId, null, null, null, { key: "participant.join", value: { entity } })
           }

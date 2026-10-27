@@ -13,7 +13,7 @@ import type { LegacyPresetDoc as PresetDoc, PromptCondition } from "@rp/shared/d
 import { Schema } from "effect"
 
 /** Bump whenever identical inputs would assemble differently. Missing means version 0. */
-export const ASSEMBLER_VERSION = 27
+export const ASSEMBLER_VERSION = 28
 
 export type Role = "system" | "user" | "assistant"
 
@@ -219,6 +219,8 @@ export interface CardOverride {
 /** A context as built, stored as its rollout's frozen snapshot (DATA-MODEL §7.1). */
 export interface ContextSnapshot {
   readonly contextBudget?: ContextBudget
+  /** What `{{summary}}` filled in, for the preset editor and the Notes tab. */
+  readonly summaryFill?: import("@rp/shared/inspectorApi.ts").SummaryFill
   readonly historyStart?: HistoryStart
   readonly historyMove?: "initial" | "maximum" | "budget" | "restore" | "unchanged"
   readonly historyBudget?: number
@@ -230,6 +232,8 @@ export interface ContextSnapshot {
     readonly children?: ReadonlyArray<import("@rp/shared/lcm.ts").Summary["children"][number]>
     readonly tail: string
     readonly style: "direct" | "tool"
+    /** False: sent without the preset, the instruction and messages only (DESIGN §8); absent is with it. */
+    readonly withPreset?: boolean
     readonly prefix?: SummaryPrefix
   }
   readonly lcm?: {
@@ -244,8 +248,20 @@ export interface ContextSnapshot {
     }>
     readonly failures?: ReadonlyArray<{ readonly from: number; readonly to: number }>
     readonly omitted: ReadonlyArray<{ readonly from: number; readonly to: number }>
-    /** The layer's target (15% of the context) and maximum (25%) in tokens, which condensation measures against. */
+    /** The summary block's pair (DESIGN §8), fitted to the context: what condensation measures against. */
     readonly layerBudget?: { readonly target: number; readonly maximum: number }
+    /** The recent messages' pair, fitted to the history allowance: what the planner keeps and triggers at. */
+    readonly recentBudget?: { readonly target: number; readonly maximum: number }
+    /** What the settings panel shows: the model's room, the current figures, and whether a pair was scaled down. */
+    readonly measure?: {
+      readonly context: number
+      readonly fixed: number
+      readonly reply: number
+      readonly recentNow: number
+      readonly layerNow: number
+      readonly recentClamped: boolean
+      readonly layerClamped: boolean
+    }
     readonly verbatim: { readonly from: number; readonly to: number } | null
   }
   readonly schema: 1
@@ -293,6 +309,8 @@ export interface SummaryLayer {
 
 /** What one context's sources read, by id and revision, each read keyed by its request (invariant 6). */
 export interface SourcePins {
+  /** The account's summarization defaults as the assembly read them (absent before they were pinned). */
+  readonly lcmDefaults?: import("@rp/shared/lcmSettings.ts").LcmDefaults | null | undefined
   readonly lcm?: {
     readonly failures?: ReadonlyArray<FailedSummaryRange>
     readonly cursor: string | null

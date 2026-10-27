@@ -1,8 +1,8 @@
 // What summarizing a chat's older history takes (spec/LCM.md §2.11): the work the planner
 // would do from the chat's state now, counted in jobs and tokens. Pure: the reader supplies the
 // chat's measurements, the main thread prices the counts. It follows the planner's rules
-// (ARCHITECTURE §16): the newest half of the window is kept, a pass is triggered above three
-// quarters of it, a pass plans at most `MAX_JOBS_PER_PLAN` chunks, a chunk takes whole messages
+// (ARCHITECTURE §16): recent messages are kept down to their target, a pass is triggered above
+// the midpoint of their target and maximum, a pass plans at most `MAX_JOBS_PER_PLAN` chunks, a chunk takes whole messages
 // until it holds `leafInput` tokens, and `fanout` summaries of a level are condensed into one by
 // the next pass, after its chunks.
 
@@ -25,9 +25,15 @@ export interface BackfillInput {
   /** The tokens and messages after the summaries' cursor, as the planner costs them. */
   readonly tokens: number
   readonly messages: number
-  /** The window's budget for history (the assembler's), and the layer's maximum. */
-  readonly windowMax: number
+  /** Recent messages' pair as the assembler fitted it, and the layer's maximum. */
+  readonly recentTarget: number
+  readonly recentMax: number
   readonly layerMax: number
+  /**
+   * False: requests without the preset (DESIGN §8), whose cached part is the instruction and the
+   * continuity; with the preset it is the preset prefix and the layer, the instruction after the chunk.
+   */
+  readonly withPreset?: boolean
   /** The preset and cards that open every request. */
   readonly prefix: number
   /** What the layer holds before the work starts, in tokens, tags included (`layerTokens`). */
@@ -90,20 +96,24 @@ interface Simulated {
  * `fanout` summaries of a level the layer held when it planned (`planMaintenance`); the
  * chunks run first, then the condensations. Passes go on until neither is left. A summary
  * request sends the preset, the layer and its chunk; a condensation sends the preset and the
- * layer up to its last part. With caching, a request reads back what it shares with the one
+ * layer up to its last part. Without the preset, the instruction takes the preset's place. With caching, a request reads back what it shares with the one
  * before from the start, and pays for the rest.
  */
 export const estimateBackfill = (input: BackfillInput): BackfillTotals => {
-  const { windowMax, leafInput, fanout } = input
-  if (input.messages <= 0 || input.tokens <= 0 || windowMax <= 0 || leafInput <= 0) return EMPTY
-  const keep = windowMax * 0.5
-  const trigger = windowMax * 0.75
+  const { recentTarget, recentMax, leafInput, fanout } = input
+  if (input.messages <= 0 || input.tokens <= 0 || recentMax <= 0 || leafInput <= 0) return EMPTY
+  const keep = recentTarget
+  const trigger = (recentTarget + recentMax) / 2
+  const raw = input.withPreset === false
+  // Without the preset the instruction opens the request and is read back with the continuity.
+  const prefixTokens = raw ? TAIL_TOKENS : input.prefix
+  const tailTokens = raw ? 0 : TAIL_TOKENS
   if (input.tokens <= trigger) return EMPTY
   // A chunk ends once it holds `leafInput` tokens, so it overshoots by half a message on average.
   const average = input.tokens / input.messages
   const chunk = Math.min(leafInput + average / 2, MAX_CHUNK_SLOTS * average)
-  // Passes: each plans up to four chunks from what lies before the kept half, until the window is
-  // under its trigger. The last chunk of a pass is whatever is left, so it can be small.
+  // Passes: each plans up to four chunks from what lies before the kept target, until recent
+  // messages are under their trigger. The last chunk of a pass is whatever is left, so it can be small.
   let total = input.tokens
   const passes: Array<Array<number>> = []
   let l1Jobs = 0
@@ -139,7 +149,7 @@ export const estimateBackfill = (input: BackfillInput): BackfillTotals => {
   const request = (body: number, parts: ReadonlyArray<Simulated>, returned: number) => {
     const before = [uncached, read, write]
     const layerSent = sentLayer(parts)
-    if (!input.cached) uncached += body + input.prefix + layerSent
+    if (!input.cached) uncached += body + prefixTokens + layerSent
     else {
       uncached += body
       // The preset and the layer before the work are the same in every request; the summaries
@@ -148,9 +158,9 @@ export const estimateBackfill = (input: BackfillInput): BackfillTotals => {
       if (previous) {
         let same = 0
         while (same < parts.length && same < previous.length && parts[same] === previous[same]) same++
-        shared = input.prefix + Math.min(layerSent, sentLayer(parts.slice(0, same)))
+        shared = prefixTokens + Math.min(layerSent, sentLayer(parts.slice(0, same)))
       }
-      const cold = input.prefix + layerSent - shared
+      const cold = prefixTokens + layerSent - shared
       // What the provider has to be given afresh is written to the cache when it charges for that.
       if (input.cacheWrites) write += cold
       else uncached += cold
@@ -182,14 +192,14 @@ export const estimateBackfill = (input: BackfillInput): BackfillTotals => {
     if (!chunks.length && !groups.length) break
     for (const body of chunks) {
       summarized += body
-      request(body + TAIL_TOKENS, layer.slice(), input.leafTarget)
+      request(body + tailTokens, layer.slice(), input.leafTarget)
       layer.push({ level: 1, tokens: input.leafTarget + SUMMARY_TAGS })
     }
     // One at a time, each in the layer as the ones before it left it.
     for (const first of groups) {
       const at = layer.indexOf(first)
       condensations++
-      request(TAIL_TOKENS, layer.slice(0, at + fanout), input.condenseTarget)
+      request(tailTokens, layer.slice(0, at + fanout), input.condenseTarget)
       layer.splice(at, fanout, { level: first.level + 1, tokens: input.condenseTarget + SUMMARY_TAGS })
     }
   }

@@ -18,6 +18,7 @@ import { Menu, MenuItem } from "../../ui/Menu.tsx"
 import { SortableList } from "../../ui/SortableList.tsx"
 import { Badge } from "../../ui/Surface.tsx"
 import { NumberField, SelectField, SwitchField, TextField } from "./controls.tsx"
+import { summaryBadge } from "./summaryBadge.ts"
 import { type EditorStore, useText, useValue } from "./store.ts"
 
 const at = (id: string) => ["prompts", `identifier=${id}`]
@@ -100,6 +101,9 @@ function Block({
           </>
         )}
         {prompt.marker && !entry.enabled && <Badge>off</Badge>}
+        {!prompt.marker && /\{\{summary\}\}/i.test(content) && context?.summary && (
+          <Badge>{summaryBadge(context.summary)}</Badge>
+        )}
         <span className="text-xs text-muted">
           {prompt.marker
             ? filled

@@ -94,6 +94,8 @@ export interface FolderContext {
   readonly personaNames: ReadonlyMap<string, ReadonlyArray<string>>
   /** Lorebooks by name. */
   readonly worlds: ReadonlyMap<string, RefId>
+  /** An enabled prompt of the preset ST used holds `{{summary}}`, so ST sent the summary through it. */
+  readonly summaryMacro?: boolean
 }
 
 /** What an import made of a chat file's state, kept in its record to tell what changed. */
@@ -338,6 +340,11 @@ const summaryOf = (
     chars += summary.text.length
   }
   const { position, depth, role, template, enabled } = folder.settings?.summary ?? DEFAULT_SUMMARY_SETTINGS
+  // ST 1.19 sends the summary only while the extension is enabled (a disabled extension isn't
+  // loaded, so neither its injection nor its macro exists): injected unless its position is
+  // None (-1), and through `{{summary}}` wherever the preset holds it. The note is on exactly
+  // when ST sent it; one sent only through the macro isn't placed as well.
+  const sent = enabled && (position !== -1 || folder.summaryMacro === true)
   const covers =
     run.length >= HIDDEN_RUN_MIN &&
     run.firstSlot !== null &&
@@ -347,13 +354,13 @@ const summaryOf = (
       : undefined
   const note: StImportNote = {
     kind: "imported_summary",
-    title: "Summary",
+    title: "Summary (from ST)",
     contents: history as [string, ...Array<string>],
     ...(sources.some((s) => s !== null) ? { sources } : {}),
-    placement: placementOf(position, depth, role),
+    placement: enabled ? placementOf(position, depth, role) : { mode: "none" },
     template,
     ...(covers ? { covers } : {}),
-    activate: enabled
+    activate: sent
   }
   return { note, index: current.index, trimmed }
 }

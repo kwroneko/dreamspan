@@ -19,6 +19,8 @@ import {
 } from "./generationSettings.ts"
 import { makeDisplayPrefsWriteHandlers } from "./displayPrefs.ts"
 import type { WriteOps } from "./ops.ts"
+import { LcmSettingsInvalid } from "@rp/shared/lcm.ts"
+import { orderProblem } from "./lcmEnableWrites.ts"
 import { transaction } from "./tx.ts"
 
 export const makeGenerationWriteHandlers = Effect.gen(function* () {
@@ -247,7 +249,7 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
         if (change.model !== undefined) yield* putSetting(userId, DEFAULT_MODEL, change.model)
         if (change.preset !== undefined) yield* putSetting(userId, DEFAULT_PRESET, change.preset)
         if (change.judge !== undefined) yield* putSetting(userId, DEFAULT_JUDGE, change.judge)
-        if (change.tail !== undefined || change.fallback !== undefined) {
+        if (change.tail !== undefined || change.fallback !== undefined || change.lcm !== undefined) {
           const [row] = yield* sql<{ value_json: string }>`
             SELECT value_json FROM user_settings WHERE user_id = ${userId} AND key = ${DEFAULT_LCM}`
           const stored = row ? (JSON.parse(row.value_json) as Record<string, unknown>) : {}
@@ -260,6 +262,15 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
             if (change.fallback) lcm.fallback = change.fallback
             else delete lcm.fallback
           }
+          for (const [key, value] of Object.entries(change.lcm ?? {})) {
+            if (value === undefined) continue
+            if (value === null) delete lcm[key]
+            else lcm[key] = value
+          }
+          // `when` replaces its old name, which is read only while `when` is absent.
+          if (change.lcm?.when !== undefined) delete lcm.spendAhead
+          const problem = orderProblem(lcm)
+          if (problem) return yield* new LcmSettingsInvalid({ message: problem })
           yield* putSetting(userId, DEFAULT_LCM, lcm)
         }
         return yield* readDefaults(sql, userId)

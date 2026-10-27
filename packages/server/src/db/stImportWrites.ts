@@ -19,7 +19,7 @@ import { docHash, searchText } from "./documents.ts"
 import { ImportLeaseLost, NotFound, ST_CHAT_RECORD, ST_IMPORT_RUN, type StImportNote, WriteOps } from "./ops.ts"
 import { checkStateReferences } from "./stateRefs.ts"
 import { transaction } from "./tx.ts"
-import { DEFAULT_PRESET, ownedPreset } from "./generationSettings.ts"
+import { DEFAULT_PRESET, newChatLcmSettings, ownedPreset } from "./generationSettings.ts"
 
 /** A message as the format worker wrote it (formats/stChat.ts). */
 const Message = Schema.Struct({
@@ -269,7 +269,8 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
             version_id: null,
             seq: 0,
             key: "lcm.settings",
-            value_json: JSON.stringify({ enabled: false }),
+            // The account default copied, off until the user turns it on (DESIGN §8.1).
+            value_json: JSON.stringify(yield* newChatLcmSettings(sql, userId, false)),
             origin: "import",
             created_at: at
           })}`

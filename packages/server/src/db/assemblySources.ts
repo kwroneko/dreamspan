@@ -234,7 +234,8 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
     globalLorebooks: [] as Array<string>,
     notes: [] as Array<SourcePins["notes"][number]>,
     messageCount: [] as Array<NonNullable<SourcePins["messageCount"]>[number]>,
-    userMessages: [] as Array<NonNullable<SourcePins["userMessages"]>[number]>
+    userMessages: [] as Array<NonNullable<SourcePins["userMessages"]>[number]>,
+    lcmDefaults: undefined as SourcePins["lcmDefaults"]
   }
 
   const pinTarget = (target: Target) =>
@@ -642,6 +643,11 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
     // The scope chain (DATA-MODEL §5.4): the chat's role binding, the chat's own, the
     // connection's override, the user's default, the instance's, then ST's default. A level
     // that names something deleted is passed over.
+    lcmDefaults: () =>
+      Effect.map(defaults, (read) => {
+        pins.lcmDefaults = read.lcm ?? null
+        return pins.lcmDefaults
+      }),
     preset: () =>
       Effect.gen(function* () {
         const user = (yield* defaults).preset
@@ -741,6 +747,7 @@ const replaySources = (
     ),
 
     historyStart: () => Effect.succeed(pins.historyStart ?? null),
+    lcmDefaults: () => Effect.succeed(pins.lcmDefaults ?? null),
     historyRevision: (leaf, before) => Effect.succeed(pins.historyRevisions?.[keyOf(leaf, before)] ?? 0),
 
     events: () =>

@@ -1,5 +1,5 @@
 import { StSettingsImport } from "./modelSettings.ts"
-import { LcmApi } from "./lcm.ts"
+import { LcmApi, LcmSettingsInvalid } from "./lcm.ts"
 // The client-facing contract. Every UI action is an RPC in this group (DESIGN §7.7).
 import { Context, Schema } from "effect"
 import { Rpc, RpcGroup, RpcMiddleware } from "effect/rpc"
@@ -300,7 +300,7 @@ export class AppApi extends RpcGroup.make(
   Rpc.make("ChangeGenerationDefaults", {
     payload: { change: GenerationDefaultsChange },
     success: GenerationDefaults,
-    error: Schema.Union([NotFound, ServerError])
+    error: Schema.Union([NotFound, ServerError, LcmSettingsInvalid])
   })
 )
   // --- Chats (chatApi.ts).

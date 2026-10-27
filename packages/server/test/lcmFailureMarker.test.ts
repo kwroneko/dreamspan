@@ -204,7 +204,8 @@ lcmTest("unused failure markers consume no space while many short originals stil
 
 lcmTest("an adjacent failed range keeps its originals when only the older one must leave", (server) =>
   Effect.gen(function* () {
-    const h = yield* lcmHarness(server, { messages: 0 })
+    // The cut's target holds the later range (about 4,100 tokens), the maximum not both.
+    const h = yield* lcmHarness(server, { messages: 0, settings: { recentTarget: 4_300, recentMax: 5_400 } })
     for (let n = 0; n < 32; n++) yield* h.append(`${n < 16 ? "Older" : "Later"} original ${n}. ` + "x".repeat(1000))
     yield* h.append("target")
     yield* fixtureSql(

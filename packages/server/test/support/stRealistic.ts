@@ -230,8 +230,18 @@ const nightRp = (base: Record<string, unknown>) => {
   }
 }
 
-/** Writes the folder under `root` (ST's `data/default-user` layout) and returns that path. */
-export const writeRealisticStFolder = (root: string) => {
+/**
+ * Writes the folder under `root` (ST's `data/default-user` layout) and returns that path.
+ * `summary` is how ST sent the hidden run's summary: injected at depth 3 (the default), only
+ * through `{{summary}}` in the selected preset's main prompt (the Summarize extension on with
+ * its position None), or not at all (the extension disabled, the macro still in the preset).
+ * Only settings and the preset differ; every count stays the same.
+ */
+export const writeRealisticStFolder = (
+  root: string,
+  options: { readonly summary?: "injected" | "macro" | "disabled" } = {}
+) => {
+  const summary = options.summary ?? "injected"
   const next = rng(20261014)
   const files = new Map<string, Uint8Array>()
   const put = (path: string, bytes: Uint8Array) => files.set(path, bytes)
@@ -239,7 +249,17 @@ export const writeRealisticStFolder = (root: string) => {
   const defaultPreset = JSON.parse(
     readFileSync(new URL("../fixtures/presets/default.json", import.meta.url), "utf8")
   ) as Record<string, unknown>
-  put("OpenAI Settings/Celia 4.2.json", encode(presetFile(defaultPreset, "Celia 4.2", 128_000)))
+  // The macro variant sends the summary through the selected preset's main prompt.
+  const withMacro = (preset: Record<string, unknown>) => ({
+    ...preset,
+    prompts: (preset.prompts as Array<Record<string, unknown>>).map((p) =>
+      p.identifier === "main" ? { ...p, content: `${String(p.content)}\n\n[Story so far: {{summary}}]` } : p
+    )
+  })
+  put(
+    "OpenAI Settings/Celia 4.2.json",
+    encode(presetFile(summary === "injected" ? defaultPreset : withMacro(defaultPreset), "Celia 4.2", 128_000))
+  )
   put("OpenAI Settings/Pixijb v18.json", encode(presetFile(defaultPreset, "Pixijb v18", 64_000)))
   put("OpenAI Settings/Default.json", encode(defaultPreset))
   put("OpenAI Settings/Night RP 3.1.json", encode(nightRp(defaultPreset)))
@@ -281,9 +301,14 @@ export const writeRealisticStFolder = (root: string) => {
       },
       world_info_settings: { world_info: { globalSelect: ["Harbor Almanac"] } },
       extension_settings: {
-        memory: { position: 1, depth: 3, role: 0, template: "[Story so far: {{summary}}]" },
+        memory: {
+          position: summary === "macro" ? -1 : 1,
+          depth: 3,
+          role: 0,
+          template: "[Story so far: {{summary}}]"
+        },
         note: { default: "", defaultPosition: 1, defaultDepth: 4, defaultRole: 0, defaultInterval: 1 },
-        disabledExtensions: []
+        disabledExtensions: summary === "disabled" ? ["memory"] : []
       },
       oai_settings: { preset_settings_openai: "Celia 4.2" }
     })

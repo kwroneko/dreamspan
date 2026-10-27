@@ -40,7 +40,7 @@ for (const style of ["direct", "tool"] as const) {
           reader = yield* Reader
         const { chat, connection, model, version } = yield* generateReply(api, {
           connection: { kind: "openai-chat", baseUrl: mock.url + "/v1", cacheTtlS: 300 },
-          model: { context: 4096, tools: true },
+          model: { context: 4096, maxOutput: 512, tools: true },
           preset: { openai_max_context: 4096, openai_max_tokens: 512 },
           example: "<START>\nTobin: EXAMPLE " + "x".repeat(10000) + "\nMira: EXAMPLE_REPLY."
         })

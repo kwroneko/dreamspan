@@ -1,5 +1,6 @@
 import { modelName } from "@rp/shared/cardNames.ts"
 import { withModelSettings } from "@rp/shared/modelSettings.ts"
+import { fitPair, resolveLcm, summaryMacroPrompts } from "@rp/shared/lcmSettings.ts"
 import { charDefinitions, newestMessage, presetOrder } from "@rp/shared/presetOrder.ts"
 import { CARD_JOIN_PREFIX, CARD_JOIN_SUFFIX, type PromptCondition } from "@rp/shared/docs/preset.ts"
 import {
@@ -52,7 +53,8 @@ import {
   type StMessage,
   type StPrompt,
   type Text,
-  tokensOf
+  tokensOf,
+  estimateTokens
 } from "./st.ts"
 import {
   AssemblyFailed,
@@ -369,6 +371,16 @@ const macroCard = (cast: Cast, notes: ReadonlyArray<NoteInput> | undefined) => {
 const macrosStage = sync("macros", (assembly) => {
   const cast = need(assembly, "cast")
   const preset = need(assembly, "preset").doc
+  const layer = assembly.lcm?.summaries.filter((s) => s.content !== "") ?? []
+  const switchedOn = summaryNotes(assembly).filter((note) => note.doc.content.trim() !== "")
+  const filled = layer.length ? layerText(layer) : switchedOn.map((note) => note.doc.content.trim()).join("\n\n")
+  assembly.summaryFill = {
+    prompts: summaryMacroPrompts(preset),
+    kind: layer.length ? "summaries" : switchedOn.length ? "notes" : "none",
+    count: layer.length || switchedOn.length,
+    tokens: estimateTokens(filled),
+    titles: layer.length ? [] : switchedOn.map((note) => note.doc.title)
+  }
   assembly.macros = makeMacroEnvironment(assembly, {
     names: namesFor(need(assembly, "state"), cast),
     card: macroCard(cast, assembly.notes),
@@ -379,9 +391,10 @@ const macrosStage = sync("macros", (assembly) => {
     type: cast.type,
     chatId: need(assembly, "target").chatId,
     variables: need(assembly, "state").vars,
-    summary: assembly.lcm?.summaries.length
-      ? layerText(assembly.lcm.summaries)
-      : (summaryNote(assembly)?.doc.content ?? ""),
+    // `{{summary}}` is explicit (DESIGN §8 [P]): the summaries when summarization is on and has
+    // some, else the chat's switched-on summary notes on this path, in note order; a note that is
+    // off sends nothing anywhere.
+    summary: filled,
     // Who the model writes as, and the direction (DESIGN §2.2); a summary has neither.
     ...(assembly.request.summarizing
       ? {}
@@ -943,9 +956,11 @@ const exampleLines = (assembly: Assembly, card: CardInput, char: string, prefixN
   )
 }
 
-/** The chat's summary as ST's Summarize extension kept it, when the chat has it on (DESIGN §8.1). */
-const summaryNote = (assembly: Assembly, notes = assembly.notes) =>
-  notes?.findLast((note) => note.doc.kind === "imported_summary" && noteCard(note.doc) === null)
+/** A summary note of the chat's: kind `imported_summary`, as ST's Summarize extension kept it (DESIGN §8.1). */
+const isSummaryNote = (note: NoteInput) => note.doc.kind === "imported_summary" && noteCard(note.doc) === null
+
+/** The chat's summary notes that are switched on, in note order. */
+const summaryNotes = (assembly: Assembly, notes = assembly.notes) => (notes ?? []).filter(isSummaryNote)
 
 const noteSource = (assembly: Assembly, note: NoteInput): Source => ({
   kind: "note",
@@ -1091,16 +1106,14 @@ const withCardNotes = (assembly: Assembly, card: CardInput, owner: CardInput | n
 const placedNotes = (assembly: Assembly, cards: ReadonlyArray<CardInput>, personas: ReadonlyArray<CardInput>) => {
   const env = need(assembly, "macros")
   const state = need(assembly, "state")
-  const hasLayer = (assembly.lcm?.summaries.length ?? 0) > 0
-  const candidates = [...need(assembly, "notes"), ...(assembly.skippedNotes ?? [])].filter(
-    (n) => !hasLayer || n.doc.kind !== "imported_summary"
-  )
-  const summary = summaryNote(assembly, candidates)
+  // A summary note is placed by its own switch alone, also beside summaries (DESIGN §8 [P]).
+  const candidates = [...need(assembly, "notes"), ...(assembly.skippedNotes ?? [])]
+  const isSummary = (note: NoteInput) => isSummaryNote(note)
   const isPersona = (note: NoteInput) => personas.some((p) => p.entity === noteCard(note.doc))
   const rank = (note: NoteInput) =>
-    note === summary ? 0 : isPersona(note) ? 4 : noteCard(note.doc) !== null ? 3 : isAuthorNote(state, note) ? 1 : 2
+    isSummary(note) ? 0 : isPersona(note) ? 4 : noteCard(note.doc) !== null ? 3 : isAuthorNote(state, note) ? 1 : 2
   const sorted = candidates
-    .filter((note) => note.doc.kind !== "imported_summary" || note === summary)
+    .filter((note) => note.doc.kind !== "imported_summary" || isSummary(note))
     .toSorted((a, b) => rank(a) - rank(b) || (a.entity < b.entity ? -1 : a.entity > b.entity ? 1 : 0))
   const authorNote = sorted.find((note) => isAuthorNote(state, note))
   const authorState: AuthorState = authorNote
@@ -1117,7 +1130,7 @@ const placedNotes = (assembly: Assembly, cards: ReadonlyArray<CardInput>, person
     if ((note.doc.interval ?? 0) > 1) env.potentialVariableWrite()
     return skipped
       ? { text: "", piece: env.verbatim(`note:${note.entity}`, noteSource(assembly, note), "") }
-      : note === summary
+      : isSummary(note)
         ? summaryText(assembly, note)
         : noteText(assembly, note, owner)
   }
@@ -1151,12 +1164,11 @@ const placedNotes = (assembly: Assembly, cards: ReadonlyArray<CardInput>, person
     const place = placeOf(note)
     if (place === null || (card !== null && owner === null && !isPersona(note))) return []
     const skipped = assembly.skippedNotes?.includes(note)
-    const content =
-      note === summary
-        ? note.doc.template
-          ? note.doc.template.replace(/\{\{summary\}\}/gi, () => note.doc.content.trim())
-          : `Summary: ${note.doc.content.trim()}`
-        : note.doc.content.trim()
+    const content = isSummary(note)
+      ? note.doc.template
+        ? note.doc.template.replace(/\{\{summary\}\}/gi, () => note.doc.content.trim())
+        : `Summary: ${note.doc.content.trim()}`
+      : note.doc.content.trim()
     return [
       {
         place,
@@ -1905,14 +1917,18 @@ const composeStage = sync("compose", (assembly) => {
       contextBudget: contextBudgetInfo(fixedCost),
       preset: { ref: need(assembly, "preset").ref, scope: need(assembly, "preset").scope }
     })
-  const layerReserve = assembly.lcm
-    ? Math.max(0, Math.min(maximum - fixedCost, Math.ceil(contextBudget(assembly) * 0.15) - actualPlacement.layerCost))
+  // The pairs (DESIGN §8). When both maxima don't fit beside the fixed part and the reply, both
+  // pairs are scaled down by one factor, keeping their proportions; the total limit always wins.
+  const settings = assembly.lcm ? (assembly.lcmSettings ?? resolveLcm(need(assembly, "state").lcm, null)) : null
+  const room = Math.max(0, contextBudget(assembly) - (fixedCost - actualPlacement.layerCost))
+  const scale = settings ? Math.min(1, room / Math.max(1, settings.recentMax + settings.layerMax)) : 1
+  const layerPair = settings
+    ? fitPair(Math.floor(settings.layerTarget * scale), Math.floor(settings.layerMax * scale), contextBudget(assembly))
+    : null
+  const layerReserve = layerPair
+    ? Math.max(0, Math.min(maximum - fixedCost, layerPair.target - actualPlacement.layerCost))
     : 0
-  if (assembly.lcm)
-    assembly.lcmBudget = {
-      target: Math.ceil(contextBudget(assembly) * 0.15),
-      maximum: Math.ceil(contextBudget(assembly) * 0.25)
-    }
+  if (layerPair) assembly.lcmBudget = { target: layerPair.target, maximum: layerPair.maximum }
   maximum -= layerReserve
   desiredTarget -= layerReserve
   const oldNotes = configurationChanged ? undefined : prior?.noteBudget
@@ -1969,6 +1985,24 @@ const composeStage = sync("compose", (assembly) => {
   if (configurationChanged || noteBudgetChanged) admit()
   else admittedExamples = examples.slice(0, prior.examples)
   const minimum = budgetCost(projected.length, true, false)
+  // With LCM on, recent messages kept as written have their own pair (DESIGN §8): stepped history
+  // holds until they pass its maximum, then cuts toward its target. The pair is scaled down whole
+  // when the history allowance is smaller; the total limit always wins.
+  const recentPair = settings
+    ? fitPair(
+        Math.floor(settings.recentTarget * scale),
+        Math.floor(settings.recentMax * scale),
+        Math.max(0, maximum - minimum)
+      )
+    : null
+  // The history allowance before the recent pair caps it: fresh failed ranges stay raw within it.
+  const windowMaximum = maximum
+  // A summary request is cut at its chunk's end and needs the whole chunk: only the window bounds it.
+  if (recentPair && !assembly.request.summarizing) {
+    maximum = Math.min(maximum, minimum + recentPair.maximum)
+    desiredTarget = Math.min(desiredTarget, minimum + recentPair.target)
+    assembly.lcmRecent = { target: recentPair.target, maximum: recentPair.maximum }
+  }
   let target = Math.max(desiredTarget, minimum)
   const fits = (start: number, budget: number) => {
     start = normalizedStart(start)
@@ -2019,6 +2053,18 @@ const composeStage = sync("compose", (assembly) => {
     start = Math.max(previous ? start : 0, earliestFit(projected.length))
     budget = target
   } else assembly.historyMove = previous ? "unchanged" : "initial"
+  // The recent pair cuts only messages that can be summarized: fresh failed leaf ranges beyond the
+  // cursor remain raw while the window fits (§16), the earliest first. A start at a range's first
+  // message keeps that range and every later one raw, and turns no other range into a marker.
+  if (maximum < windowMaximum) {
+    const kept = failuresBefore(normalizedStart(start))
+      .map((failure) => projected.findIndex((p) => p.entry.depth + 1 >= failure.from))
+      .find((from) => from >= 0 && fits(from, windowMaximum))
+    if (kept !== undefined) {
+      start = kept
+      budget = windowMaximum
+    }
+  }
   start = normalizedStart(start)
   const first = projected[start]?.entry
   const startDepth = first?.depth ?? need(assembly, "target").depth
@@ -2071,6 +2117,16 @@ const composeStage = sync("compose", (assembly) => {
   }
   assembly.postNames = postNames
   assembly.composition = composition
+  if (recentPair && layerPair)
+    assembly.lcmMeasure = {
+      context: contextBudget(assembly) + doc.samplers.openai_max_tokens,
+      fixed: Math.max(0, minimum - actualPlacement.layerCost),
+      reply: doc.samplers.openai_max_tokens + prefixOutput,
+      recentNow: Math.max(0, budgetCost(start) - minimum),
+      layerNow: actualPlacement.layerCost,
+      recentClamped: scale < 1 || recentPair.clamped,
+      layerClamped: scale < 1 || layerPair.clamped
+    }
   if (assembly.lcm) {
     assembly.lcmFailures = failuresBefore(start).map(({ from, to }) => ({ from, to }))
     for (const failure of assembly.lcmFailures)

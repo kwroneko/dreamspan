@@ -62,7 +62,7 @@ it.live(
       const model = yield* api.AddUserModel({
         connectionId: connection.id,
         key: "synthetic",
-        overrides: { context: 4096 }
+        overrides: { context: 4096, maxOutput: 256 }
       })
       const preset = yield* writer.CreateEntity({
         userId: user.id,
@@ -125,13 +125,8 @@ it.live(
         }),
         0
       )
-      yield* api.SetGenerationDefaults({
-        defaults: {
-          model: { connection: connection.id, model: model.id },
-          preset: preset.ref.id,
-          lcm: { spendAhead: false }
-        }
-      })
+      // The chat copied "right after a reply" when it was made; it now runs with the next reply.
+      yield* api.ChangeLcmSettings({ chatId: chat.id, change: { when: "next-reply" } })
       assert.isNull(yield* writer.ClaimSummaryJob({ userId: user.id }))
       yield* writer.EscalateSummaryJob({ userId: user.id, jobId: jobs[0]!.id })
       let claimed = (yield* writer.ClaimSummaryJob({ userId: user.id }))!

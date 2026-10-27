@@ -3,7 +3,8 @@ import { contextExcluded } from "./lcmVisibility.ts"
 // imported summary that could stand in for its hidden run, and the work the planner would do
 // from the first message or after that summary. The counts are priced on the main thread, where
 // the cost formulas are.
-import { foldState } from "@rp/shared/state.ts"
+import { foldState, noteSwitches } from "@rp/shared/state.ts"
+import type { EntityId } from "@rp/shared/chat.ts"
 import type { BackfillCounts } from "@rp/shared/lcm.ts"
 import { Effect, Layer } from "effect"
 import { SqlClient } from "effect/sql"
@@ -14,11 +15,13 @@ import { estimateTokens, tokensOf } from "../assembler/st.ts"
 import { backfillSeconds, estimateBackfill, layerTokens } from "../lcm/backfill.ts"
 import { sqlSources } from "./assemblySources.ts"
 import { backfillOf, overCap, spentSince } from "./lcmBackfill.ts"
-import { importedSummary } from "./lcmImported.ts"
+import { importedSummary, importedSummaryNotes } from "./lcmImported.ts"
 import { selectSummaryLayer } from "./lcmLayer.ts"
 import { lcmPath } from "./lcmPath.ts"
 import { NotFound, type ReadOps, StorageError } from "./ops.ts"
 import { query } from "./tx.ts"
+import { readDefaults } from "./generationSettings.ts"
+import { chunkSize, lcmMisfits, resolveLcm } from "@rp/shared/lcmSettings.ts"
 
 /** The speed of the model's last requests, for how long the work takes; null without any. */
 const recentSpeed = (sql: SqlClient.SqlClient, userId: string, modelId: string) =>
@@ -51,6 +54,60 @@ export const makeLcmEnableReadHandlers = Effect.gen(function* () {
           AND length(v.content) > 0`.pipe(Effect.map(([row]) => row ?? { n: 0, tokens: 0 }))
 
   return {
+    // The settings panel (DESIGN §8): what the chat stores, what applies, and the fit, measured on
+    // one assembly of the next context with LCM on, as the planner would see it.
+    LcmSettingsAt: ({ userId, chatId, leafSlotId }) =>
+      Effect.gen(function* () {
+        const [chat] =
+          yield* sql`SELECT 1 FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`
+        if (!chat) return yield* new NotFound({ entity: "chat", id: chatId })
+        const sources = sqlSources(sql, { userId, chatId, next: true, leafSlotId })
+        const base = yield* Effect.map(AssemblySources, (s) => s).pipe(Effect.provide(sources.layer))
+        const at = (yield* base.target).parentSlotId
+        const state = foldState((yield* base.events(at)).map((e) => e.event))
+        const account = (yield* readDefaults(sql, userId)).lcm ?? null
+        const resolved = resolveLcm(state.lcm, account)
+        const forced: PositionedEvent = {
+          depth: null,
+          event: { scope: null, data: { key: "lcm.settings", value: { ...state.lcm, enabled: true } } }
+        }
+        const layer = Layer.succeed(AssemblySources)({
+          ...base,
+          events: (slot) => Effect.map(base.events(slot), (read) => [...read, forced])
+        })
+        const built = yield* assembler
+          .assemble({ now: Date.now(), timeZone: "UTC", frozen: {}, random: Math.random })
+          .pipe(
+            Effect.provide(layer),
+            Effect.map((snapshot) => snapshot.lcm ?? null),
+            Effect.catchTag("AssemblyFailed", () => Effect.succeed(null))
+          )
+        const measure = built?.measure
+        const fitted =
+          built?.recentBudget && built.layerBudget && measure
+            ? {
+                recent: { ...built.recentBudget, clamped: measure.recentClamped },
+                layer: { ...built.layerBudget, clamped: measure.layerClamped },
+                chunk: chunkSize(resolved.leafInput, built.recentBudget)
+              }
+            : null
+        const room = measure ? { context: measure.context, fixed: measure.fixed, reply: measure.reply } : null
+        return {
+          stored: state.lcm,
+          resolved,
+          account,
+          fitted,
+          room,
+          now: measure ? { recent: measure.recentNow, layer: measure.layerNow } : null,
+          fit: lcmMisfits(resolved, room, built?.recentBudget)
+        }
+      }).pipe(
+        // Only reading the leaf's state can fail this way: a leaf that isn't the chat's.
+        Effect.catchTag("AssemblyFailed", () =>
+          Effect.fail(new NotFound({ entity: "slot", id: leafSlotId ?? chatId }))
+        ),
+        query("LcmSettingsAt")
+      ),
     ReadLcmImported: ({ userId, chatId, leafSlotId }) =>
       Effect.gen(function* () {
         const [owned] = yield* sql`SELECT 1 FROM slots s JOIN chats c ON c.id = s.chat_id
@@ -131,6 +188,10 @@ export const makeLcmEnableReadHandlers = Effect.gen(function* () {
           seconds: null
         } satisfies BackfillCounts
         const enabled = state.lcm?.enabled === true
+        // Enabling switches the imported summary off where it's on (DESIGN §8 [P]); the dialog says so.
+        const switches = noteSwitches(events.map((e) => e.event))
+        const notesOn = (yield* importedSummaryNotes(sql, userId, chatId)).filter((id) => switches.get(id) === true)
+        const noted = notesOn.length ? { summaryNotesOn: notesOn as Array<EntityId> } : {}
         const summaries = yield* selectSummaryLayer(sql, userId, chatId, leafSlotId)
         const imported = yield* importedSummary(sql, userId, chatId, leafSlotId)
         const [lastRow] = imported
@@ -147,7 +208,7 @@ export const makeLcmEnableReadHandlers = Effect.gen(function* () {
           : null
         if (model === null) {
           const blocked = { ...none, blocked: "no_model" as const }
-          return { enabled, imported: offer, fromScratch: blocked, adopted: offer ? blocked : null }
+          return { enabled, imported: offer, fromScratch: blocked, adopted: offer ? blocked : null, ...noted }
         }
         const built = yield* assembler
           .assemble({ now: Date.now(), timeZone: "UTC", frozen: {}, random: Math.random })
@@ -162,13 +223,14 @@ export const makeLcmEnableReadHandlers = Effect.gen(function* () {
         const blockedWith = (blocked: "runway") => ({ ...none, model: info, blocked })
         if (built instanceof AssemblyFailed) {
           const blocked = blockedWith("runway")
-          return { enabled, imported: offer, fromScratch: blocked, adopted: offer ? blocked : null }
+          return { enabled, imported: offer, fromScratch: blocked, adopted: offer ? blocked : null, ...noted }
         }
-        const windowMax = Math.max(0, Math.floor(built.historyBudget ?? 0))
-        const leafInput = state.lcm?.leafInput ?? Math.min(4000, Math.floor(windowMax / 8))
-        if (leafInput < 1 || leafInput * 2 > windowMax / 4) {
+        const settings = resolveLcm(state.lcm, (yield* readDefaults(sql, userId)).lcm)
+        const recent = built.lcm?.recentBudget ?? { target: 0, maximum: 0 }
+        const leafInput = chunkSize(settings.leafInput, recent)
+        if (leafInput < 1 || leafInput * 2 > recent.maximum - recent.target) {
           const blocked = blockedWith("runway")
-          return { enabled, imported: offer, fromScratch: blocked, adopted: offer ? blocked : null }
+          return { enabled, imported: offer, fromScratch: blocked, adopted: offer ? blocked : null, ...noted }
         }
         // What opens every request: the messages that are neither history nor summaries, nor
         // what only a reply sends (a conditioned prompt, the user turn that ends a reply's request:
@@ -195,12 +257,14 @@ export const makeLcmEnableReadHandlers = Effect.gen(function* () {
             const totals = estimateBackfill({
               tokens: rest.tokens,
               messages: rest.n,
-              windowMax,
+              recentTarget: recent.target,
+              recentMax: recent.maximum,
+              withPreset: settings.withPreset,
               layerMax: built.lcm?.layerBudget?.maximum ?? Number.MAX_SAFE_INTEGER,
               prefix,
               layer: layerBefore,
               leafInput,
-              leafTarget: state.lcm?.leafTarget ?? 600,
+              leafTarget: settings.leafTarget,
               fanout: state.lcm?.fanout ?? 5,
               condenseTarget: state.lcm?.condenseTarget ?? 800,
               cached: (model.cacheTtlS ?? 0) > 0,
@@ -231,7 +295,7 @@ export const makeLcmEnableReadHandlers = Effect.gen(function* () {
               layerTokens([...sizes, estimateTokens(imported.content)])
             )
           : null
-        return { enabled, imported: offer, fromScratch, adopted }
+        return { enabled, imported: offer, fromScratch, adopted, ...noted }
       }).pipe(
         // A document the sources can't read means nothing can be assembled to measure.
         Effect.catchTag("AssemblyFailed", (error) =>

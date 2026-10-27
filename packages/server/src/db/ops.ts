@@ -1,6 +1,6 @@
 import { PlannedJob, SummaryJob, SummaryChunk, SummaryPlan } from "./lcmJobs.ts"
 import { ShellLibrary } from "@rp/shared/chatSetupApi.ts"
-import { ModelChoice } from "@rp/shared/lcmSettings.ts"
+import { LcmSettingsChange, ModelChoice } from "@rp/shared/lcmSettings.ts"
 import {
   LcmCoverage,
   LcmState,
@@ -15,7 +15,9 @@ import {
   BackfillApproval,
   BackfillBasis,
   BackfillStatus,
-  EnableChoice
+  EnableChoice,
+  LcmSettingsInvalid,
+  LcmSettingsView
 } from "@rp/shared/lcm.ts"
 // Storage operations, executed inside the database worker threads (ARCHITECTURE.md §3).
 // Each write operation runs as one synchronous transaction inside the writer worker,
@@ -500,7 +502,9 @@ export class WriteOps extends RpcGroup.make(
       leafSlotId: SlotId,
       choice: EnableChoice,
       approved: BackfillApproval,
-      runId: Schema.optionalKey(Schema.String)
+      runId: Schema.optionalKey(Schema.String),
+      /** Imported summary notes switched on at the leaf: switched off in the same write (an ordinary note switch). */
+      switchOff: Schema.optionalKey(Schema.Array(EntityId))
     },
     success: Schema.Struct({ unhidden: Schema.Int, summaryId: Schema.NullOr(Schema.String) }),
     error: Schema.Union([StorageError, NotFound])
@@ -1638,11 +1642,20 @@ export class WriteOps extends RpcGroup.make(
     success: Schema.Array(RefId),
     error: Schema.Union([NotFound, StorageError])
   }),
+  /**
+   * A chat's summarization settings changed field by field (DESIGN §8): read and written as a
+   * new chat-wide `lcm.settings` event in one transaction; null removes a field.
+   */
+  Rpc.make("ChangeLcmSettings", {
+    payload: { userId: UserId, chatId: ChatId, change: LcmSettingsChange },
+    success: Schema.Void,
+    error: Schema.Union([NotFound, StorageError, LcmSettingsInvalid])
+  }),
   /** Only the defaults named, merged into the stored ones in the same transaction. */
   Rpc.make("ChangeGenerationDefaults", {
     payload: { userId: UserId, change: GenerationDefaultsChange },
     success: GenerationDefaults,
-    error: Schema.Union([NotFound, StorageError])
+    error: Schema.Union([NotFound, StorageError, LcmSettingsInvalid])
   }),
   /** The user's display choices, merged in one writer transaction. */
   Rpc.make("SetDisplayPrefs", {
@@ -2222,6 +2235,12 @@ export class ReadOps extends RpcGroup.make(
       now: Schema.Number
     },
     success: Schema.Boolean,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** A chat's summarization settings, resolved and fitted to the next context at the leaf. */
+  Rpc.make("LcmSettingsAt", {
+    payload: { userId: UserId, chatId: ChatId, leafSlotId: Schema.NullOr(SlotId) },
+    success: LcmSettingsView,
     error: Schema.Union([NotFound, StorageError])
   }),
   Rpc.make("CacheWarmth", {

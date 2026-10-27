@@ -1,11 +1,11 @@
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
-import { ChatId, SlotId, VersionId } from "./chat.ts"
+import { ChatId, EntityId, SlotId, VersionId } from "./chat.ts"
 import { TextTooLong } from "./composerApi.ts"
 import { Draft, DraftRestore, DraftState } from "./drafts.ts"
 import { NotFound, ServerError, StaleWrite } from "./errors.ts"
 import { idSchema } from "./id.ts"
-import { ModelChoice } from "./lcmSettings.ts"
+import { LcmDefaults, LcmSettings, LcmSettingsChange, LcmWhen, ModelChoice } from "./lcmSettings.ts"
 import { ConnectionId, ModelId } from "./providers.ts"
 
 export const SummaryId = idSchema("SummaryId", "summaries")
@@ -172,6 +172,50 @@ export class LcmEstimateChanged extends Schema.TaggedError<LcmEstimateChanged>()
   estimate: BackfillEstimate
 }) {}
 
+const Source = Schema.Literals(["chat", "account", "builtin"])
+const Pair = Schema.Struct({ target: Schema.Int, maximum: Schema.Int, clamped: Schema.Boolean })
+
+/** A chat's summarization settings (DESIGN §8): what it stores, what applies, and how that fits the model. */
+export const LcmSettingsView = Schema.Struct({
+  /** The chat's own `lcm.settings`; null for a chat from before they existed. */
+  stored: Schema.NullOr(LcmSettings),
+  /** What applies, each field from the chat, the account default or the built-in. */
+  resolved: Schema.Struct({
+    enabled: Schema.Boolean,
+    withPreset: Schema.Boolean,
+    tail: Schema.NullOr(Schema.String),
+    recentTarget: Schema.Int,
+    recentMax: Schema.Int,
+    layerTarget: Schema.Int,
+    layerMax: Schema.Int,
+    when: LcmWhen,
+    leafInput: Schema.NullOr(Schema.Int),
+    leafTarget: Schema.Int,
+    from: Schema.Record(Schema.String, Source)
+  }),
+  /** The account default, for "Reset to account default". */
+  account: Schema.NullOr(LcmDefaults),
+  /** The pairs as assembly uses them, scaled to what the model leaves, and the chunk; null without a model. */
+  fitted: Schema.NullOr(Schema.Struct({ recent: Pair, layer: Pair, chunk: Schema.Int })),
+  /** The model's room: its context, the fixed part (preset, cards, notes) and the reply reserve. */
+  room: Schema.NullOr(Schema.Struct({ context: Schema.Int, fixed: Schema.Int, reply: Schema.Int })),
+  /** The current figures of the next context: recent messages kept as written and the summary block. */
+  now: Schema.NullOr(Schema.Struct({ recent: Schema.Int, layer: Schema.Int })),
+  /** One sentence per setting that doesn't fit, under the field it is about. */
+  fit: Schema.Array(
+    Schema.Struct({
+      field: Schema.Literals(["recentMax", "recentTarget", "layerMax", "layerTarget", "leafInput"]),
+      message: Schema.String
+    })
+  )
+})
+export type LcmSettingsView = typeof LcmSettingsView.Type
+
+/** A change would leave a target at or above its maximum in the chat's own settings. */
+export class LcmSettingsInvalid extends Schema.TaggedError<LcmSettingsInvalid>()("LcmSettingsInvalid", {
+  message: Schema.String
+}) {}
+
 /** An ST summary the chat can adopt as the first level over the run it covers (DESIGN §8.1). */
 const ImportedSummaryOffer = Schema.Struct({
   /** Messages 1 to `to`. */
@@ -188,7 +232,9 @@ export const BackfillBasis = Schema.Struct({
   imported: Schema.NullOr(ImportedSummaryOffer),
   /** The work from the first message (or from the summaries' cursor), with the imported run shown. */
   fromScratch: BackfillCounts,
-  adopted: Schema.NullOr(BackfillCounts)
+  adopted: Schema.NullOr(BackfillCounts),
+  /** The chat's imported summary notes switched on at the leaf: enabling switches them off in the same write. */
+  summaryNotesOn: Schema.optionalKey(Schema.Array(EntityId))
 })
 export type BackfillBasis = typeof BackfillBasis.Type
 
@@ -228,7 +274,9 @@ export class LcmEnableOffer extends Schema.Class<LcmEnableOffer>("LcmEnableOffer
   imported: Schema.NullOr(ImportedSummaryOffer),
   fromScratch: BackfillEstimate,
   /** What is left after the imported summary stands in for its run; null without an offer. */
-  adopted: Schema.NullOr(BackfillEstimate)
+  adopted: Schema.NullOr(BackfillEstimate),
+  /** The imported summary note is switched on: enabling switches it off (DESIGN §8 [P], Q4). */
+  summaryNoteOn: Schema.optionalKey(Schema.Boolean)
 }) {}
 
 export const EnableChoice = Schema.Literals(["adopt", "scratch"])
@@ -374,7 +422,22 @@ export class LcmApi extends RpcGroup.make(
     success: Schema.NullOr(LcmBackfill),
     error: Schema.Union([NotFound, ServerError, LcmEstimateChanged])
   }),
-  /** Turns LCM on or off for the whole chat; it keeps its other settings. */
+  /** The chat's summarization settings, at the leaf whose next context they are measured against. */
+  Rpc.make("GetLcmSettings", {
+    payload: { chatId: ChatId, leafSlotId: Schema.NullOr(SlotId) },
+    success: LcmSettingsView,
+    error: Schema.Union([NotFound, ServerError])
+  }),
+  /**
+   * Changes the chat's settings, the others kept; null makes a field follow the account default
+   * again. Turning summarizing on for a chat with messages goes through `EnableLcm`.
+   */
+  Rpc.make("ChangeLcmSettings", {
+    payload: { chatId: ChatId, change: LcmSettingsChange },
+    success: Schema.Void,
+    error: Schema.Union([NotFound, ServerError, LcmSettingsInvalid])
+  }),
+  /** Turns LCM on or off for the whole chat; it keeps its other settings. `ChangeLcmSettings` with `enabled` only. */
   Rpc.make("SetLcmEnabled", {
     payload: { chatId: ChatId, enabled: Schema.Boolean },
     success: Schema.Void,

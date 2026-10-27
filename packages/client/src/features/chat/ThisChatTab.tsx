@@ -4,12 +4,19 @@
 // The context assembler reads them; this only writes them.
 import type { CastChange } from "@rp/shared/chatSetupApi.ts"
 import { Link } from "@tanstack/react-router"
-import { useState, useSyncExternalStore } from "react"
+import { BUILTIN_SUMMARY_INSTRUCTION, type LcmSettingsChange, resolveLcm } from "@rp/shared/lcmSettings.ts"
+import type { LcmSettingsView } from "@rp/shared/lcm.ts"
+import { useEffect, useState, useSyncExternalStore } from "react"
 import { useAction } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"
+import { Button } from "../../ui/Button.tsx"
 import { RadioGroup, Switch } from "../../ui/Choice.tsx"
+import { CodeEditor } from "../../ui/CodeEditor.tsx"
+import { Fieldset } from "../../ui/Field.tsx"
+import { Loading } from "../../ui/Spinner.tsx"
 import { useCast } from "./cast.ts"
 import { EnableLcmDialog } from "./EnableLcmDialog.tsx"
+import { LcmFields, type Write } from "./LcmFields.tsx"
 import type { ChatSession } from "./session.ts"
 
 const link = "text-accent hover:underline"
@@ -22,31 +29,128 @@ function Problem({ error }: { error: AppError | null }) {
   ) : null
 }
 
+/** The instruction in the code editor, saved by its button; "Use account default" drops the chat's own. */
+function Instruction({ view, write, disabled }: { view: LcmSettingsView; write: Write; disabled: boolean }) {
+  const saved = view.resolved.tail ?? BUILTIN_SUMMARY_INSTRUCTION
+  const [text, setText] = useState(saved)
+  const [base, setBase] = useState(saved)
+  const [problem, setProblem] = useState<string | null>(null)
+  const [pending, setPending] = useState(false)
+  // Another tab's save shows here unless something is typed.
+  if (saved !== base) {
+    setBase(saved)
+    if (text === base) setText(saved)
+  }
+  const own = view.resolved.from.tail === "chat"
+  const save = async (change: LcmSettingsChange) => {
+    setPending(true)
+    const message = await write(change)
+    setPending(false)
+    setProblem(message)
+  }
+  return (
+    <Fieldset
+      legend="Instruction"
+      description="What the summary request asks for. {{words}} is the summary length (under Advanced)."
+    >
+      <CodeEditor label="This chat's summarization instruction" value={text} base={base} rows={5} onChange={setText} />
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          disabled={disabled || text === saved || text.trim() === ""}
+          pending={pending}
+          onClick={() => void save({ tail: text })}
+        >
+          Save instruction
+        </Button>
+        {own && (
+          <Button variant="ghost" disabled={disabled || pending} onClick={() => void save({ tail: null })}>
+            Use account default
+          </Button>
+        )}
+        <span className="text-xs text-muted">
+          {own
+            ? "This chat's own."
+            : view.resolved.from.tail === "account"
+              ? "The account default."
+              : "The built-in instruction."}
+          {text !== saved && " Not saved yet."}
+        </span>
+      </div>
+      {problem && <p className="text-sm text-danger">{problem}</p>}
+    </Fieldset>
+  )
+}
+
 /**
- * LCM for the whole chat (DESIGN §8): on for new chats, off for imported ones. Turning it on
- * for a chat with messages asks how to start and what it costs first (spec/LCM.md §2.7, §2.11).
+ * Summarization for the whole chat (DESIGN §8): on for new chats, off for imported ones, and its
+ * settings, each the chat's own or the account default's. Turning it on for a chat with messages
+ * asks how to start and what it costs first (spec/LCM.md §2.7, §2.11).
  */
 function SummariesSetting({ session }: { session: ChatSession }) {
   const view = useSyncExternalStore(session.subscribe, session.snapshot)
   const [error, setError] = useState<AppError | null>(null)
   const [enabling, setEnabling] = useState(false)
-  const enabled = view.lcm?.enabled ?? false
+  const [settings, setSettings] = useState<LcmSettingsView | null>(null)
+  const [reads, setReads] = useState(0)
+  useEffect(() => {
+    let live = true
+    void session
+      .call((client) => client("GetLcmSettings", { chatId: session.id, leafSlotId: view.leafSlotId }))
+      .then((result) => {
+        if (!live) return
+        if (result.ok) setSettings(result.value)
+        else setError(result.error)
+      })
+    return () => {
+      live = false
+    }
+  }, [session, view.leafSlotId, view.lcmVersion, view.history, reads])
+  const enabled = settings?.resolved.enabled ?? view.lcm?.enabled ?? false
+  const write: Write = async (change) => {
+    const result = await session.call((client) => client("ChangeLcmSettings", { chatId: session.id, change }))
+    setReads((n) => n + 1)
+    if (result.ok) return null
+    return result.error.message
+  }
   return (
-    <section aria-label="Summaries" className="flex flex-col gap-2">
+    <section aria-label="Summaries" className="flex flex-col gap-4">
       <h3 className="text-xs font-medium tracking-wide text-muted uppercase">Summaries</h3>
       <Switch
         checked={enabled}
         onCheckedChange={(on) => {
           if (on && view.leafSlotId !== null) return setEnabling(true)
           void session
-            .call((client) => client("SetLcmEnabled", { chatId: session.id, enabled: on }))
-            .then((result) => setError(result.ok ? null : result.error))
+            .call((client) => client("ChangeLcmSettings", { chatId: session.id, change: { enabled: on } }))
+            .then((result) => {
+              setError(result.ok ? null : result.error)
+              setReads((n) => n + 1)
+            })
         }}
         description="Older messages are summarized so the chat can go on. For the whole chat, not from here on. Nothing is generated until your next reply."
       >
         Summarize older messages
       </Switch>
-      {enabling && <EnableLcmDialog session={session} onOpenChange={setEnabling} />}
+      {enabling && (
+        <EnableLcmDialog
+          session={session}
+          onOpenChange={(open) => {
+            setEnabling(open)
+            if (!open) setReads((n) => n + 1)
+          }}
+        />
+      )}
+      {settings === null ? (
+        <Loading />
+      ) : (
+        <LcmFields
+          scope="chat"
+          view={settings}
+          fallback={resolveLcm(null, settings.account)}
+          write={write}
+          disabled={false}
+          instruction={<Instruction view={settings} write={write} disabled={false} />}
+        />
+      )}
       <Problem error={error} />
     </section>
   )
@@ -88,7 +192,7 @@ export function ThisChatTab({ session }: { session: ChatSession; active: boolean
         />
       </section>
       <p className="text-sm text-muted">
-        The refusal judge, the fallback summarizer and the default summarization instruction apply to all your chats:
+        The refusal judge, the fallback summarizer and the summarization defaults for new chats apply to all your chats:
         they're in{" "}
         <Link to="/settings/chats" className={link}>
           Settings → Chats

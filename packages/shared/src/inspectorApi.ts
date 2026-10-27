@@ -194,6 +194,15 @@ const EffectiveModel = Schema.Struct({
   continueUnavailable: Schema.optionalKey(Schema.String)
 })
 
+export const SummaryFill = Schema.Struct({
+  prompts: Schema.Array(Schema.String),
+  kind: Schema.Literals(["summaries", "notes", "none"]),
+  count: Schema.Int,
+  tokens: Schema.Int,
+  titles: Schema.Array(Schema.String)
+})
+export type SummaryFill = typeof SummaryFill.Type
+
 export const PresetContext = Schema.Struct({
   blocks: Schema.Array(
     Schema.Struct({ identifier: Schema.String, tokens: Schema.Int, labels: Schema.Array(Schema.String) })
@@ -215,7 +224,12 @@ export const PresetContext = Schema.Struct({
   ),
   notes: Schema.Array(
     Schema.Struct({ title: Schema.String, placement: Placement, due: Schema.optionalKey(Schema.Boolean) })
-  )
+  ),
+  /**
+   * What `{{summary}}` fills in for this chat (DESIGN §8 [P]): the prompts of the preset that hold
+   * it, and the summaries when summarization is on and has some, else the switched-on summary notes.
+   */
+  summary: Schema.optionalKey(SummaryFill)
 })
 export type PresetContext = typeof PresetContext.Type
 

@@ -1,5 +1,6 @@
 import { Effect } from "effect"
 import type { Summary } from "@rp/shared/lcm.ts"
+import { resolveLcm } from "@rp/shared/lcmSettings.ts"
 import { AssemblySources, need, type AssemblerStage } from "./pipeline.ts"
 
 export const layerText = (summaries: ReadonlyArray<Summary>) => {
@@ -14,6 +15,10 @@ export const lcmStage: AssemblerStage = {
     Effect.gen(function* () {
       if (!need(assembly, "state").lcm?.enabled) return assembly
       const sources = yield* AssemblySources
+      assembly.lcmSettings = resolveLcm(
+        need(assembly, "state").lcm,
+        sources.lcmDefaults ? yield* sources.lcmDefaults() : null
+      )
       assembly.lcm = yield* sources.summaryLayer(need(assembly, "target").parentSlotId)
       assembly.lcmPieces = assembly.lcm.summaries.map((summary) => {
         assembly.pieces.push({

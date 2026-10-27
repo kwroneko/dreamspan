@@ -31,6 +31,7 @@ import type {
   Target
 } from "./types.ts"
 import { ASSEMBLER_VERSION, AssemblyFailed } from "./types.ts"
+import type { LcmDefaults, ResolvedLcm } from "@rp/shared/lcmSettings.ts"
 
 export type SourceError = AssemblyFailed | NotFound | SqlError.SqlError
 
@@ -111,6 +112,8 @@ export class AssemblySources extends Context.Service<
     ) => Effect.Effect<ModelInput | null, SourceError>
     /** The preset the chain picks, else the user's default, else ST's default preset. */
     readonly preset: (chain: PresetChain) => Effect.Effect<PresetInput, SourceError>
+    /** The account's summarization defaults (DESIGN §8), which a chat's settings fall back to; none: built-ins. */
+    readonly lcmDefaults?: () => Effect.Effect<LcmDefaults | null, SourceError>
   }
 >()("rp/assembler/AssemblySources") {}
 
@@ -181,6 +184,11 @@ export interface Assembly {
   lcmVerbatim?: { readonly from: number; readonly to: number } | null
   lcmOmitted?: ReadonlyArray<{ readonly from: number; readonly to: number }>
   lcmBudget?: { readonly target: number; readonly maximum: number }
+  /** The chat's summarization settings as they resolve (DESIGN §8), read by the lcm stage. */
+  lcmSettings?: ResolvedLcm
+  summaryFill?: ContextSnapshot["summaryFill"]
+  lcmRecent?: { readonly target: number; readonly maximum: number }
+  lcmMeasure?: NonNullable<ContextSnapshot["lcm"]>["measure"]
   readonly request: AssemblyRequest
   target?: Target
   events?: ReadonlyArray<PositionedEvent>
@@ -274,6 +282,7 @@ export const assemble = (stages: StageRegistry, request: AssemblyRequest) =>
     const snapshot: ContextSnapshot = {
       schema: 1,
       ...(assembly.contextBudget ? { contextBudget: assembly.contextBudget } : {}),
+      ...(assembly.summaryFill ? { summaryFill: assembly.summaryFill } : {}),
       historyStart: { ...historyStart, ...(historyStart.state ? { state: { ...historyStart.state, revision } } : {}) },
       historyMove: need(assembly, "historyMove"),
       ...(assembly.lcm ? { historyBudget: need(assembly, "composition").historyBudget } : {}),
@@ -315,6 +324,8 @@ export const assemble = (stages: StageRegistry, request: AssemblyRequest) =>
               failures: assembly.lcmFailures ?? [],
               omitted: assembly.lcmOmitted ?? [],
               ...(assembly.lcmBudget ? { layerBudget: assembly.lcmBudget } : {}),
+              ...(assembly.lcmRecent ? { recentBudget: assembly.lcmRecent } : {}),
+              ...(assembly.lcmMeasure ? { measure: assembly.lcmMeasure } : {}),
               verbatim: assembly.lcmVerbatim ?? null
             }
           }

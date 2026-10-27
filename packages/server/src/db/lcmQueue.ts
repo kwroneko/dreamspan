@@ -307,9 +307,16 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
             ))
           )
             yield* sql`UPDATE summarization_jobs SET request_class='background' WHERE id=${job.id}`
-        // Spending ahead is off for every chat but one whose user pressed "Summarize now".
+        // "When it runs" (DESIGN §8): the chat's setting, else the account default's (`spendAhead`
+        // is its old name). With the next reply, nothing runs ahead but a driven backfill's work.
         const spends = (job: string) =>
-          `(coalesce((SELECT json_extract(value_json,'$.spendAhead') FROM user_settings WHERE user_id = ? AND key = 'generation.lcm'),1) <> 0 OR ${drivenSql(`${job}.chat_id`)})`
+          `(coalesce((SELECT json_extract(e.value_json,'$.when') FROM state_events e
+              WHERE e.chat_id = ${job}.chat_id AND e.slot_id IS NULL AND e.scope IS NULL AND e.key = 'lcm.settings'
+              ORDER BY e.seq DESC LIMIT 1),
+            (SELECT coalesce(json_extract(value_json,'$.when'),
+                CASE json_extract(value_json,'$.spendAhead') WHEN 0 THEN 'next-reply' END)
+              FROM user_settings WHERE user_id = ? AND key = 'generation.lcm'),
+            'after-reply') <> 'next-reply' OR ${drivenSql(`${job}.chat_id`)})`
         const [next] = yield* sql.unsafe<{ id: string }>(
           `SELECT j.id FROM summarization_jobs j JOIN chats c ON c.id = j.chat_id
         JOIN slots start ON start.id = j.first_slot_id

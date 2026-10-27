@@ -1,16 +1,17 @@
 import { MAX_CHUNK_SLOTS } from "./lcmLimits.ts"
-import { applySummaryPrefix, type SummaryPrefix } from "../lcm/prefix.ts"
+import type { SummaryPrefix } from "../lcm/prefix.ts"
 import { completedCoverage, failedHold } from "./lcmCoverage.ts"
 import { maintain, MAX_JOBS_PER_PLAN } from "./lcmMaintain.ts"
 import { tokensOf } from "../assembler/st.ts"
 import { foldState } from "@rp/shared/state.ts"
+import { BUILTIN_SUMMARY_INSTRUCTION, chunkSize, resolveLcm } from "@rp/shared/lcmSettings.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { AssemblySources } from "../assembler/pipeline.ts"
 import { makeAssembler } from "../assembler/assembler.ts"
 import { AssemblyFailed, generationOf, type ContextSnapshot } from "../assembler/types.ts"
 import { wireContext } from "../assembler/wire.ts"
-import { summaryTail } from "../lcm/request.ts"
+import { summaryRequest } from "../lcm/request.ts"
 import { sqlSources } from "./assemblySources.ts"
 import { readDefaults } from "./generationSettings.ts"
 import { backfillOf, overCap, spentSince } from "./lcmBackfill.ts"
@@ -50,7 +51,8 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
           partialBatch: false,
           windowMax: 0,
           jobs: [],
-          spendAhead: defaults.lcm?.spendAhead !== false,
+          // "When it runs" (DESIGN §8): the chat's, else the account default's.
+          spendAhead: resolveLcm(state.lcm, defaults.lcm).when !== "next-reply",
           blocked: null as "no_model" | null,
           liveJobs: 0,
           backfill: null as { armed: boolean; held: boolean; drive: boolean; settled: boolean } | null
@@ -81,19 +83,24 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
         const built = yield* assembler
           .assemble({ now: Date.now(), timeZone: "UTC", frozen: {}, random: Math.random })
           .pipe(Effect.provide(sources.layer))
-        const windowMax = Math.max(0, Math.floor(built.historyBudget ?? 0))
-        const leafInput = state.lcm.leafInput ?? Math.min(4000, Math.floor(windowMax / 8))
-        if (leafInput < 1 || leafInput * 2 > windowMax / 4)
+        // Recent messages kept as written (DESIGN §8): their pair as the assembly fitted it to the
+        // history allowance. Planning starts at the midpoint, so summaries are usually ready before
+        // the maximum, and keeps the target.
+        const recent = built.lcm?.recentBudget ?? { target: 0, maximum: 0 }
+        const windowMax = recent.maximum
+        const leafInput = chunkSize(resolveLcm(state.lcm, defaults.lcm).leafInput, recent)
+        if (leafInput < 1 || leafInput * 2 > recent.maximum - recent.target)
           return yield* new AssemblyFailed({
             reason: "budget",
-            message: "LCM's runway must fit two summary chunks; increase the context or reduce leafInput."
+            message:
+              "Two summary chunks must fit between the recent messages' target and maximum; widen the pair or reduce the chunk size."
           })
         const maintenance = reason
           ? yield* maintain(sql, userId, chatId, leafSlotId, layer, {
               reason,
               fanout: state.lcm.fanout,
               condenseTarget: state.lcm.condenseTarget,
-              leafTarget: state.lcm.leafTarget ?? 600,
+              leafTarget: resolveLcm(state.lcm, defaults.lcm).leafTarget,
               clipTokens: Math.max(1, Math.floor(leafInput * 1.5)),
               budget: built.lcm?.layerBudget ?? { target: Number.MAX_SAFE_INTEGER, maximum: Number.MAX_SAFE_INTEGER }
             })
@@ -122,10 +129,11 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
           over: remaining.reduce((n, s) => n + cost(s), 0) > windowMax,
           jobs: active.filter((j) => j.firstSlotId === remaining[0]?.id)
         }
-        if (active.length || total <= windowMax * 0.75) return { ...result, backfill: settled(result) }
+        if (active.length || total <= (recent.target + recent.maximum) / 2)
+          return { ...result, backfill: settled(result) }
         let keep = 0,
           end = raw.length
-        while (end > 0 && keep < windowMax * 0.5) keep += cost(raw[--end]!)
+        while (end > 0 && keep < recent.target) keep += cost(raw[--end]!)
         // A failed summary holds its range while its inputs are unchanged (spec/LCM.md §2.8).
         const held = yield* failedHold(sql, userId, chatId, path)
         const chunks: Array<{ inputs: ReturnType<typeof slotInput>[]; target: number; clipTokens: number }> = []
@@ -136,7 +144,7 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
           if (chunk.length)
             chunks.push({
               inputs: chunk.map(slotInput),
-              target: state.lcm!.leafTarget ?? 600,
+              target: resolveLcm(state.lcm, defaults.lcm).leafTarget,
               clipTokens: Math.max(1, Math.floor(leafInput * 1.5))
             })
           chunk = []
@@ -263,41 +271,40 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
             message: "The summary request cannot render its whole declared chunk."
           })
         const style = state.lcm.style ?? "direct"
+        const settings = resolveLcm(state.lcm, defaults.lcm)
+        const range = job.level > 1 ? `(messages ${children[0]!.from} to ${children.at(-1)!.to})` : ""
+        // Without the preset the parts follow the instruction instead of preceding it.
         const instruction =
           job.level > 1
-            ? `Condense the last ${children.length} summaries above (messages ${children[0]!.from} to ${children.at(-1)!.to}) into one summary of at most ${job.target} words. Keep its language and voice, names, events and unresolved details. The earlier summaries are continuity, not material to condense again.`
-            : (state.lcm.tail ??
-              defaults.lcm?.tail ??
-              `Summarize the conversation since the previous summaries in at most ${job.target} words. Keep its language and voice, names, events and unresolved details. The preceding summaries are continuity, not material to summarize again.`)
+            ? settings.withPreset
+              ? `Condense the last ${children.length} summaries above ${range} into one summary of at most ${job.target} words. Keep its language and voice, names, events and unresolved details. The earlier summaries are continuity, not material to condense again.`
+              : `Condense the last ${children.length} summaries ${range} into one summary of at most ${job.target} words. Keep their language and voice, names, events and unresolved details. Any summaries before them are continuity, not material to condense again.`
+            : (settings.tail ?? BUILTIN_SUMMARY_INSTRUCTION)
         const tail =
           instruction.replace(/\{\{words\}\}/gi, String(job.target)) +
           (style === "tool"
             ? "\nWrite the summary with summary_tool. Create a draft and finalize it; assistant prose is not the summary."
             : "\nReturn only the summary, without commentary.")
-        const snapshot: ContextSnapshot = summaryTail(
-          applySummaryPrefix(
-            {
-              ...built,
-              sources: sources.pins(),
-              summaryJob: {
-                id: jobId,
-                clipTokens,
-                inputs: job.level > 1 ? [] : chain.map(slotInput),
-                ...(job.level > 1
-                  ? { children: children.map((c) => ({ summaryId: c.id, revisionId: c.revisionId })) }
-                  : {}),
-                tail,
-                style,
-                ...(prefix ? { prefix } : {})
-              },
-              request: {
-                ...built.request,
-                samplers: { ...built.request.samplers, max_tokens: Math.ceil(job.target * 2.5) }
-              }
-            },
-            prefix
-          )
-        )
+        const snapshot: ContextSnapshot = summaryRequest({
+          ...built,
+          sources: sources.pins(),
+          summaryJob: {
+            id: jobId,
+            clipTokens,
+            inputs: job.level > 1 ? [] : chain.map(slotInput),
+            ...(job.level > 1
+              ? { children: children.map((c) => ({ summaryId: c.id, revisionId: c.revisionId })) }
+              : {}),
+            tail,
+            style,
+            ...(settings.withPreset ? {} : { withPreset: false }),
+            ...(prefix ? { prefix } : {})
+          },
+          request: {
+            ...built.request,
+            samplers: { ...built.request.samplers, max_tokens: Math.ceil(job.target * 2.5) }
+          }
+        })
         const availableOutput = Math.floor(
           (snapshot.inputs.model?.context ?? Infinity) - snapshot.request.messages.reduce((n, m) => n + tokensOf(m), 0)
         )

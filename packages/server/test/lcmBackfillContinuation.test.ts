@@ -37,6 +37,8 @@ for (const phase of ["reply", "completion"] as const)
       })
       const defaults = yield* h.api.GetGenerationDefaults()
       yield* h.api.SetGenerationDefaults({ defaults: { ...defaults, lcm: { ...defaults.lcm, spendAhead: false } } })
+      // The imported chat copied the default when it was made: its own setting changes too.
+      yield* h.api.ChangeLcmSettings({ chatId: p.chatId, change: { when: "next-reply" } })
       const source = (yield* h.api.GetLcmState(at)).layer[0]!
       yield* h.api.SetSummaryRerun({
         chatId: p.chatId,

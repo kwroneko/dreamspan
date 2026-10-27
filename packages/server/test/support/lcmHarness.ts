@@ -107,6 +107,12 @@ export const lcmTest = <E, R>(
     options.timeout ?? 60_000
   )
 
+/**
+ * Pairs close to the old fractions of an 8,192-token window (layer 15%/25%, the rest for recent
+ * messages), for tests of mechanisms that don't depend on the pairs; `lcmSettings.test.ts` tests them.
+ */
+export const PAIRS_8K = { recentTarget: 3200, recentMax: 5400, layerTarget: 1152, layerMax: 1920 } as const
+
 export const lcmHarness = (
   server: { readonly config: AppConfigShape; readonly summarizer: () => Summarizer["Service"] },
   options: {
@@ -212,7 +218,16 @@ export const lcmHarness = (
       slotId: null,
       versionId: null,
       scope: null,
-      data: { key: "lcm.settings", value: { enabled: true, leafInput: 500, leafTarget: 100, ...options.settings } }
+      data: {
+        key: "lcm.settings",
+        value: {
+          enabled: true,
+          leafInput: 500,
+          leafTarget: 100,
+          ...PAIRS_8K,
+          ...options.settings
+        }
+      }
     })
     const rows: Array<AppendResult> = []
     const append = (content: string, parent: SlotId | null = rows.at(-1)?.slotId ?? null, branch = false) =>
