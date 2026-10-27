@@ -883,7 +883,14 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
           const user = yield* first.api.Whoami()
           const slot = query("SELECT slot_id FROM versions WHERE content = ?", `${tag}-reply`)[0]!.slot_id as SlotId
           const alt = query("SELECT id FROM versions WHERE content = ?", `${tag}-alt`)[0]!.id as VersionId
-          yield* (yield* Writer).SelectVersion({ userId: user.id, slotId: slot, versionId: alt, expectedRowVersion: 1 })
+          // The file's name names the branch at this slot, which counts as a write.
+          const rowVersion = Number(query("SELECT row_version FROM slots WHERE id = ?", slot)[0]!.row_version)
+          yield* (yield* Writer).SelectVersion({
+            userId: user.id,
+            slotId: slot,
+            versionId: alt,
+            expectedRowVersion: rowVersion
+          })
           const binned = query("SELECT slot_id FROM versions WHERE content = ?", `${tag}-bin`)[0]!.slot_id as SlotId
           yield* first.api.DeleteMessage({ slotId: binned })
           const next = yield* begin

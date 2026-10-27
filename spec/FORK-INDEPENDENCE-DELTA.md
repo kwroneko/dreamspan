@@ -1,0 +1,189 @@
+# Forks that don't influence each other: delta from the build
+
+**Status**: Proposed, 2026-10-26. Delta from master c1081db, and from reference-harness (`reference-harness`: `src/agent/fork.ts`, `src/agent/recovery.ts`, its ARCHITECTURE §7 and "Redo and branches"). **[D]** = the owner's decision, cited; **[P]** = proposed here, not confirmed.
+
+The decisions this implements:
+- **[D]** For the user, forks are separate chats that don't influence each other. They are connected by history, in the data model and as siblings when browsing; nothing done in one silently changes another (CHATS.md "Forks"; UX-REWORK §3 "Forks of chats", 2026-10-26).
+- **[D]** Which version is selected in shared history is per fork. Every edit in shared history (message edits, swipe choice, deletion, history edits) affects only the fork it's made in (CHATS.md; UX-REWORK §5 "Forks").
+- **[D]** A chat's current fork is the one last chatted in or created by forking, whichever is more recent. Named or pinned forks are its peers (UX-REWORK §3 "Home page and the left panel").
+- **[D]** A history edit applies to the chat (fork) it's made in, swipes included ([P] in DESIGN §10.3, owner leaning yes). A fork made afterwards inherits it, and forking from an earlier point must never undo it. Each chat lists its history edits, each undoable in that chat only. A card rename applies in "only this chat" or in "all chats with X", and forks count as chats (DESIGN §10.3).
+- **[P]** `card.swap` is the first state that belongs to the branch rather than to a message, and new branches get it (CARD-FORKS-DELTA §3).
+
+In this document a **fork** is what the user sees as one chat line: history from the first message to a tip. Today's code says "branch" for the same thing.
+
+## 1. What's built
+
+There is no fork in the data. A chat is a tree of slots (`db/schema/chats.ts`). A line is the path from the root to a leaf, and the chat has one `chats.active_leaf_slot_id`. Everything a user changes is stored on the shared slot, version or summary, so every line that passes through it sees the change. The operations that change something visible on more than one fork:
+
+| Operation | What it writes | Where |
+|---|---|---|
+| Select a swipe (`SelectVersion`, `SelectAndDrain`) | `slots.selected_version_id` | `graphWrites.ts` `selectVersion`; `chatSetupWrites.ts:391` |
+| Add a version selected: swipe, edit, write your own (`AddVersion` with `select`, `AddSelectedVersion`) | a version on the shared slot, and the slot's selection | `writes.ts` |
+| Add a version unselected | a new entry in the picker of every line through the slot | `writes.ts` `AddVersion`; read by `ListVersions` |
+| Amend a user-written message (`AmendVersion`) | `versions.content` in place (old text into `version_history`) | `writes.ts` |
+| Star, hide from picker, mark refused (`SetVersionFlags`, `MarkVersion`) | `versions.starred`, `hidden`, `mark` | `writes.ts` |
+| Delete a message / restore / delete for good | `slots.deleted_at`, `bin_item_id`, `purged_at` | `bin.ts` `deleteMessage`, `restore`, `purgeWhere` |
+| Delete a swipe | `versions.deleted_at`, and the slot's selection moves to a neighbour | `bin.ts` `deleteVersion` |
+| Delete a branch | the whole subtree, including every line that forked below it, and `slots.branch_deleted` | `bin.ts` `deleteBranch` |
+| Leaf movement on delete and restore | the chat's one `active_leaf_slot_id` | `bin.ts` `relocateLeaf`, `followRestored` |
+| Hide from the model (`SetSlotHidden`, `StImportUnhide`, LCM enable's staged unhide) | `slots.context_excluded`, `hidden_by_user`; `lcm_enable_slots` overlay | `writes.ts`; `stImportWrites.ts:791`; `lcmVisibility.ts` |
+| History reductions (stepped history for the cache) | `history_changes` per slot | `historyChanges.ts` |
+| Name a branch (`SetBranchName`) | `slots.branch_name` | `writes.ts:334` |
+| User state event at a slot (`AddStateEvent`) | applies on every path through the slot, including lines that were forked below it before the event was written | `writes.ts`; read in `assemblySources.ts:390`, `reads.ts:240`, `noteAt.ts:44`, `chatSetupReads.ts:72` |
+| Version-attached state events | follow the shared selection, so a swipe in one line switches rollout effects in another | same readers |
+| Chat-wide state (`lcm.settings`, slot null) | every line | `chatSetupWrites.ts:195`, `lcmEnableWrites.ts:159` |
+| Edit a summary, choose a rerun (`EditSummary`, `SelectSummaryRevision`, `SetSummaryRerun`) | `summaries.selected_revision_id`, `lcm_summary_choices` | `lcmWrites.ts:163,177`; `lcmUiWrites.ts:13` |
+| Summary staleness | derived from `slots.selected_version_id`, so a swipe in one line makes summaries stale in every line, and the planner resummarizes for all | `lcmPath.ts`, `lcmCoverage.ts`, `lcmReads.ts:55` |
+| Changesets (tables only, nothing writes them) | DATA-MODEL §9's items target the shared slot selection, summary revision, state event (`superseded_by_changeset`) and ref head, so they would apply to every line | `schema/history.ts` |
+
+One place already keeps lines apart. When an ST re-import changes the selection on a slot that another imported file shares, the writer copies the rest of the path into an independent suffix, because "selection is global per slot and parent links are immutable" (`stImportFork.ts`; ARCHITECTURE §13 "Old ST messages").
+
+**reference-harness** gets independence by copying. A chat's timeline (ARCHITECTURE §7) is one linear append-only record per timeline key. It never forks, edits apply in place (latest wins), and deletions are markers. Agent sessions fork (`forkSession`): the live transcript keeps the prefix, and the discarded span is serialized into `agent_session_branches`. Branch 0 stays live, and a stored branch is frozen, so no state is shared between branches and nothing written to one can reach another. Reply-resume (`loadCompletedSessionMaterial`) also starts from a copy of the material. rp-harness can't copy that way: its forks are live peers that the user browses and continues, and copying a 100,000-message path for each fork would cost O(depth) rows and time. The ST import's suffix copy shows the cost. This design keeps rp-harness's sharing of slots and versions, and gets reference-harness's guarantee another way: whatever a user changes is written as the fork's own row, never as a change to a shared one.
+
+## 2. Target model
+
+### 2.1 Structure: chains (immutable) and forks (rows)
+
+- **[P] Chains.** Each slot gets `slots.chain_id`, set at insert and never changed. A slot inserted as the *first* child of its parent (in its lane) takes the parent's chain. Any later child starts a chain whose id is its own id, and so does a root. A chain is therefore a run of slots at consecutive depths. A path from the root to a slot T is a short list of **segments** `(chain, max depth)`: T's chain up to T's depth, then the chain of its head's parent up to that parent's depth, and so on up to the root. Getting the list is one recursive query over chain heads, so its cost grows with the number of branch points on the path, not the path's length. A slot X is on the path iff some segment has `chain = X.chain_id` and `max depth ≥ X.depth`. This is the "index branch segments" fix that ARCHITECTURE §3.8 lists under known limits.
+- **[P] A fork is a row**, because a leaf can't serve as its identity. A fork's leaf moves on every message, moves up when its last message is deleted, and may be a message shared with another fork (a fork made at a message, before anything is sent in it: ST's checkpoint). The table:
+
+  `forks(id, chat_id, parent_fork_id, branched_at, base_slot_id, tip_slot_id, name, name_user, pinned_at, created_at, last_chatted_at, deleted_at, bin_item_id, purged_at, row_version)`
+
+  - `parent_fork_id`: the fork it was made from (lineage). Null for the chat's first fork.
+  - `branched_at`: the chat's state sequence number when it was made (below).
+  - `base_slot_id`: the message it was made at. Its history is `root → base`, followed by whatever it appends.
+  - `tip_slot_id`: its path ends there; it replaces `chats.active_leaf_slot_id` per fork.
+  - `slots.fork_id`: the fork that created the slot. It's provenance only; the path is defined by `tip_slot_id`.
+- **[P] Making a fork** is one writer operation, `CreateFork { chatId, fromForkId, atSlotId }`. `atSlotId` must be on the parent's path. The new fork's tip is `atSlotId`, and it becomes the current fork. `AppendMessage` with `branch: true` is `CreateFork` followed by an append in the new fork. Appending in a fork F requires the parent to be F's tip, otherwise `LeafMoved` (as today with the active leaf). Every branch is a fork: DESIGN §3.2 [D] says a branch is an explicit fork of the path.
+- **[D] The current fork** is the most recent of last chatted in and created by forking (UX-REWORK §3). **[P]** It's stored as `chats.current_fork_id` and updated in the same transaction as `CreateFork` (`created_at`) and as anything that chats in a fork (`last_chatted_at`; what counts is §6 Q4). When the current fork is deleted, it's recomputed as the argmax over live forks. **[D]** Named or pinned forks are peers. **[P]** `forks.name` and `forks.pinned_at` hold that, and a named fork is listed at the top level (CHATS.md "Forks").
+
+### 2.2 One mechanism for what belongs to a fork
+
+- **[P] A state sequence per chat.** `chats.state_seq` is incremented by every per-fork write, inside its transaction.
+- **[P] Lineage with bounds.** Fork G sees its own rows, its parent's rows with `seq ≤ G.branched_at`, its grandparent's rows with `seq ≤ parent.branched_at`, and so on. The bounds decrease up the chain, because a parent always existed before its child was made from it. The chain is stored on the fork as `forks.lineage_json = [[G, ∞], [P, b₁], [PP, b₂], …]`. It's computed once at `CreateFork` and never changes (deletion keeps rows, below).
+- **[P] Effective value** of a key in G: take the first lineage entry that has a row for the key with `seq ≤` its bound, and within that entry the row with the highest seq. With no such row, use the **base value**: the shared column as it was at insert, or at migration (§5).
+- **[P] Base columns are frozen.** After migration nothing updates `slots.selected_version_id`, `context_excluded`, `hidden_by_user`, `deleted_at` or `branch_name`, `versions.starred` or `hidden`, or `summaries.selected_revision_id`. Triggers raise on such an update, the way `0011_ownership` raises on owner changes. So the database itself rules out a change visible in two forks. The exceptions are whole-fork operations on `forks` rows, and purging content no live fork can see (§2.4).
+- **[P] The overlay table**, holding everything that belongs to a fork rather than to a message:
+
+  `fork_overrides(id, chat_id, fork_id, seq, kind, target_id, slot_id, slot_depth, value_id, flag, bin_item_id, changeset_id, summaries_done)`
+
+  | `kind` | `target_id` | value | Meaning in the fork |
+  |---|---|---|---|
+  | `select` | slot | `value_id` = version | which swipe is shown [D] |
+  | `replace` | version X | `value_id` = X′ (null: undone) | X is shown as X′, wherever X would show, as the selection or in the picker. Used by history edits and by amending a shared message [D] |
+  | `delete_slot`, `delete_version` | slot / version | `flag`, `bin_item_id` | deleted in this fork only [D] |
+  | `hide` | slot | `flag` | hidden from the model in this fork |
+  | `star`, `picker_hide` | version | `flag` | swipe metadata (§6 Q1) |
+  | `summary_revision` | summary | `value_id` = revision | the summary text this fork uses |
+  | `summary_choice` | summary | `value_id` = summary | the rerun this fork uses (`lcm_summary_choices`) |
+  | `suppress_event` | state event | `flag` | the event doesn't apply in this fork (changesets, §4) |
+
+  `slot_id`/`slot_depth` are the slot the row is about, or the covered chain's first slot for summary rows. They're denormalized for window reads (§3).
+- **[P] Versions and state events carry their fork.** `versions.fork_id, fork_seq` and `state_events.fork_id, fork_seq` are null for rows that predate migration. A null row is visible wherever its slot is on the path, as today. A set row is visible to G iff its fork is in G's lineage within the bound. So:
+  - a swipe or edit made in F at a shared message appears only in F and in forks made from F afterwards (§6 Q1);
+  - a user event written at a shared slot (for example at the tip of a fork made at a message, before anything is sent in it) never reaches the other forks through that slot.
+  Version-attached rollout events still apply only while their version is F's effective selection.
+- **[P] Branch-owned events** (`card.swap`, and any key later classed as belonging to the branch, DESIGN §3.4 [O]) are fork-scoped events at slot null. The fold applies them after every positional event up to the read position, in seq order, which is CARD-FORKS-DELTA §3 rule 1. A fork made later from any point inherits them through its lineage bound, and existing forks don't see them because their bounds are earlier. That **replaces CARD-FORKS-DELTA §3 rules 2 and 3**: nothing is copied onto new slots on branching, and nothing is copied to a new leaf on delete.
+- **[P] Writes go into the overlay.** `SelectVersion`, `AddVersion`/`AddSelectedVersion` selecting, and `deleteVersion`'s reselection each write a `select` row in F. A new slot's first selection is its base value. `SelectVersion` takes `forkId` and checks staleness against the effective selection the tab saw (`expectedVersionId`) instead of `slots.row_version`.
+- **[P] Amending a shared message.** `AmendVersion` on a version that another live fork can see inserts a copy X′ (origin `edited`, `source_version_id` X, `version_history` copied) and a `replace` X→X′ in F. Otherwise it amends in place as now: a version created in F, at a slot on no other live fork's path, that no fork was made from since.
+- **[P] Bounding the row count.** A row may be updated in place, instead of appending another, when no fork has `parent_fork_id = F AND branched_at ≥ row.seq`. Grandchildren read F only through a child's bound, which is earlier. So swiping back and forth at the tip of a fork nobody forked from leaves one row.
+- **[P] Long lineages.** `CreateFork` copies the effective rows of the parent's lineage into the new fork and starts a fresh lineage when the lineage would exceed 64 forks. The copy costs the number of overrides, not the path's length.
+
+### 2.3 Inheritance at the fork point
+
+A fork G made from F at slot Y sees exactly what F showed at that moment, for every slot on `root → Y`. That covers selections, replacements, deletions, hides, summary texts, fork-scoped and branch-owned events, and versions made in F. Nothing F does afterwards reaches G (their seq is above G's bound), and nothing G does reaches F (F's lineage doesn't contain G). Forking from an earlier point never undoes a history edit: `replace` rows are keyed by version, not by position, so every replaced version on `root → Y` is still replaced in G [D].
+
+### 2.4 Deletion and restore
+
+- **[P] Delete a message or a swipe in F**: a `delete_slot`/`delete_version` row in F with a bin item whose origin names the fork. Restoring writes the row with `flag = 0`. If F's tip was at the deleted message, the tip moves to the nearest live ancestor (as `relocateLeaf` does today, per fork). After a restore, a tip that was a tip follows what came back below it (`followRestored`, per fork). If F appended something in the meantime, the restored message is no longer on F's path, so the restore makes it a fork of its own (parent F, base its parent). That's what today's restore shows: an alternate branch at that point.
+- **[P] Delete a fork** (today's Delete branch): `forks.deleted_at` and a bin item of kind `branch` naming the fork. Its tip and path drop out of lists. Forks made from its messages keep them (§6 Q2). Its rows stay as long as a live descendant's lineage reads them. Restore clears the mark. Deleting the chat deletes every fork.
+- **[P] Delete for good.** A version's or slot's content is emptied (`purged_at`, as today) only when no live fork shows it. Otherwise the bin item goes, and the per-fork deletion becomes permanent in that fork (§6 Q3). A purged fork keeps its row and overrides while descendants inherit from it; only its name and tip are cleared.
+- **[P] `reachableSlot`'s barriers** (`slots.branch_deleted`) apply only to pre-migration deletions. New ones are per fork.
+
+## 3. Reads
+
+- **[P] The lineage CTE.** Every per-fork read starts from `json_each(forks.lineage_json)` as `lineage(fork_id, bound, rank)` and `effective` = the overlay rows joined to it on `fork_id` and `seq ≤ bound`, ranked by `row_number() OVER (PARTITION BY kind, target_id ORDER BY rank, seq DESC)`. For a window it's filtered on `slot_depth BETWEEN d₀ AND d₁`. A helper in `db/forkState.ts` builds it, the way `contextExcluded` and `reachableSlot` are shared today.
+- **[P] The path** (`GetPath`/`ReadPath`, `pathWindow`): the segments of the fork's tip, then a range scan of `slots(chain_id, depth)` per segment for the window's depths. That replaces the recursive walk up `parent_slot_id`. The window's rows are joined to `effective` for `select`, then to `versions` (`coalesce(select, base)`), then `replace` gives the shown version, and the deletion and hide rows apply. `version_count` and the picker (`ListVersions`) count the versions visible to the fork, with replacements in place of their originals.
+- **[P] The branch switcher** (`ListBranches`, `BranchTip`, `siblingCount`) keeps counting siblings that are reachable in this fork's view, ordered by id as now. Picking a sibling opens the most recently current fork whose path goes through it.
+- **[P] The assembler** (`assemblySources.ts` `history`, `events`) reads the same window rows. Events come from `state_events` joined to the path by `(slot_chain_id, slot_depth)`: two denormalized, immutable columns with an index on `(chat_id, slot_chain_id, slot_depth)`. They're filtered by fork visibility and suppression, and by the effective selection for version-attached events. Branch-owned events are folded last. `StateEventsAt` becomes O(events on the path) instead of a walk to the root, which fixes the other known limit in ARCHITECTURE §3.8.
+- **[P] Summaries and LCM.** A summary is still shared by every fork whose path contains its chain (DATA-MODEL §8.2). It's fresh in fork F iff each input `(slot, version X)` matches F's effective selection, and F's replacement of X (if any) was made by a changeset that also ran over summaries (`summaries_done`, §4). An amend, or an edit with summaries out of scope, makes it stale in F only. `lcmPath` produces the fork's effective versions. `completedCoverage`/`failedHold` take the fork. Jobs and `summarization_jobs` carry `fork_id` instead of only a leaf, so a swipe in F queues work for F and none for G. The summary text in F is its `summary_revision` override, or else the shared selected revision.
+- **[P] Search** (FTS on `versions.content` and `summary_revisions.content`, `schema/search.ts`): match first, then keep candidates on the fork's path (segment membership, one join with the segment list), visible to the fork, effective there (selected, or a swipe when swipes are in scope), and not deleted there. One statement: its cost is the number of matches, not the path. Regular expressions can't use FTS. Search and replace scans the path in windows of the read above, in the worker that DESIGN §10.3 already requires.
+- **[P] Performance on a 100,000-message chat with many forks.** Indexes: `slots(chain_id, depth)`, `fork_overrides(fork_id, slot_depth, seq)` for windows, `fork_overrides(fork_id, kind, target_id, seq)` for point reads (a picker, one slot), `state_events(chat_id, slot_chain_id, slot_depth)`, and partial `versions(fork_id)`/`state_events(fork_id, fork_seq)` where not null. A window of W slots on a fork with g segments and lineage depth k costs g range scans on `slots` returning W rows, k range scans on `fork_overrides` returning only the overrides in the window, and W version lookups by primary key. Nothing grows with the chat's length or its number of forks. Tests check this the way `graph.test.ts` does today, without a clock: `EXPLAIN QUERY PLAN` shows every table reached by index, and rows-visited counters stay flat between a 2,000-message and a 100,000-message fixture (the existing perf fixture, extended with 200 forks, lineage depth 40 and 20,000 overrides).
+
+## 4. History edits (changesets)
+
+- **[D]** Applied directly, then inspected and undone, whole or per message (DESIGN §10.3). **[D]** It applies in the fork it's made in, and the panel says so (DESIGN §10.3, the flow).
+- **[P] Application record.** `changesets` gains `fork_id` (the one fork it applied in), `seq`, and `group_id`. Each item it applies is one `fork_overrides` row with `changeset_id`. Item kinds, which replace DATA-MODEL §9's:
+  - `version_replace {slot, X, X′}`: one for each matching version visible in the fork at a slot on its path, swipes included [D]
+  - `summary_revision {summary, R, R′}`
+  - `state_event {suppressed, added}`, for agentic edits to state
+  - `slot_selection` and `ref_head` go: there is no shared selection to change, and card overrides are gone under CARD-FORKS-DELTA.
+
+  The new versions X′ are ordinary rows (origin `changeset`, `source_version_id` X, `changeset_id`, `fork_id`). The replacements carry `summaries_done = 1` when summaries were in scope, which keeps the covering summaries fresh (§3).
+- **[P] A multi-chat rename** ("Yes, in all 37 chats with Aria" [D]) is a `changeset_groups(id, owner_user_id, title, origin, created_at)` row and one changeset per live fork that the rename touches, since forks count as chats [D]. When forks share a version X, they get the same X′ (one per group and X), so they keep sharing its row and their summaries' inputs still agree.
+- **[P] Undo in fork F**, whole or for selected items (per message = that slot's items, offered together with the summaries covering it): for each item whose target's effective value in F is still its `after`, append an override in F restoring `before` (`replace` X→null, the earlier revision). Items that have moved on since are reported, not overwritten (DATA-MODEL §9). Undo writes only in F, so it changes nothing in another fork, including forks made from F afterwards, which keep the edit until undone there [D]. `changeset_reverts(changeset_id, fork_id, item_id, seq)` records it. The changeset's status in a fork (applied, partly undone, undone) is derived from these.
+- **[P] Inheritance.** A fork's list of history edits holds the changesets in its lineage within the bounds. Inherited ones are labelled "made in ⟨fork⟩", and undoing one in this fork is the same per-fork undo. A fork made at an earlier point inherits the edit through its lineage (§2.3), so it can't lose it [D].
+- **[P] A card rename "only in this chat"** is one changeset in the current fork. "No" writes nothing.
+
+## 5. Migration of existing data
+
+One writer migration. Nothing a user sees changes; the only new rows are structure.
+
+1. **Chains.** `slots.chain_id` and the state events' `slot_chain_id`/`slot_depth`, computed by depth: per parent, children by id; the first continues the parent's chain, each other one starts its own; roots start their own. The migration refuses to run if any slot is outside its chat's first lane: the writer has never made a second lane, so a failure means corrupted data, not a case to handle.
+2. **Forks.** One fork per leaf of the graph as paths reach it today: a slot not under a deleted-branch barrier, with no child the path would follow (`reachableSlot`). Tip = that leaf. Base = the parent of the head of its last segment. Parent fork = the fork of the oldest other leaf below that base (the line it diverged from). `branched_at = 0`. A fork is made for each deleted branch's leaves too, with the branch's bin item, so Restore and Delete for good still work: `bin_items.target_id` becomes the fork for `kind = 'branch'`, and its origin keeps the slot. Purged subtrees get purged fork rows.
+3. **Current fork** = the fork whose path holds `active_leaf_slot_id`, preferring the one whose tip it is. If the active leaf isn't a tip (a leaf set by `SetActiveLeaf` above live messages), a fork with that tip is made (no slots of its own, like a checkpoint), so the chat opens on the same messages.
+4. **Names.** A `branch_name` on the first slot of a fork's own segment becomes `forks.name`, and `branch_name_user` becomes `name_user`. A name on a slot that continues its parent's chain (a "Branch 1" alternate named here) stays on the slot as the switcher's label at that point, since the fork through it may carry another name. The switcher shows a slot's own label when it has one.
+5. **Everything else is base.** No overrides are written. `versions.fork_id` and `state_events.fork_id` stay null. `slots.selected_version_id`, `deleted_at`, `context_excluded`, the LCM overlay and summary selections keep their values, and only now become frozen. Pre-migration bin items of kind message and version stay slot- and version-level: they were deleted in every line, and restoring one brings it back in every line, as it would have.
+6. **ST import records** map each file to the fork of its recorded path's end. A later shared-prefix selection change writes a `select` override in that file's fork instead of copying the suffix (`stImportFork.ts` stays for records written before).
+
+**Why nothing visible changes.** Every read after migration is a function of the base columns, the overlay, versions' and events' forks, and the fork rows. With no overrides, null forks and bounds of 0, the effective value of every key in every fork is the base column. That's the single value every line reads today. The path from a fork's tip is the same slots, because chains only index the existing parent links. The fork opened by default has the active leaf as its tip. Siblings in the switcher are the same slots in the same order, with the same labels. Summaries' freshness compares the same inputs with the same selections. The migration test checks this directly. On the realistic synthetic import (`writeRealisticStFolder`) plus a graph built with today's writer (branches at the root and mid-path, a deleted message, a deleted branch, a purged branch, a deleted and a selected swipe, a hidden run, a staged LCM unhide, named branches including a continuation, the active leaf above live messages, notes and version-attached events), it captures before and after, for every leaf: `GetPath` in windows, `ListVersions` at every slot, `ListBranches` at every branch point, `StateEventsAt`, the assembler's output, LCM coverage, `ListBin` and the opened chat. They must be equal. It also asserts that the base-column triggers raise afterwards.
+
+## 6. Open questions for the owner
+
+**Answered by the owner, 2026-10-27** (the sections above need updating to match):
+- Q2: (a) deleting a fork removes only that fork; forks made from it keep their shared history.
+- Q3: (b) "delete for good" erases the text everywhere, after a warning naming the forks that show it. This happens in the bin, never from the regular UI, which only sends things to the bin.
+- Q4: (a) a fork becomes current when something adds a message or a swipe: send, reply, swipe, continue.
+- Q5: (b) chat-wide settings (summarization on/off and its settings) are per fork. How summarization carries over from ST, how it's turned on and how summaries are first generated in chats that had none still need discussing.
+
+
+1. **Answered by the owner, 2026-10-26 (CHATS.md): (b).** Swipes belong to the message and appear in every fork that shares it; only the selection is per fork. The sections above that assume (a) need updating to this.
+   **A new swipe or edit at a shared message: does it appear in the other forks?**
+   - (a) Only in the fork it was made in, and in forks made from it afterwards (proposed). Each fork's picker is its own; nothing appears from elsewhere. Stars and "hidden from picker" are per fork the same way.
+   - (b) In every fork's picker, unselected. Alternatives made anywhere stay at hand everywhere, but another fork's list of swipes changes without the user doing anything there.
+2. **Deleting a fork that other forks were made from, at its messages.**
+   - (a) Only that fork goes; forks made from it keep their shared history (proposed). It follows "nothing done in one changes another", but the deleted fork's messages stay on disk while a fork shows them.
+   - (b) As today: the subtree goes, with the confirmation listing the forks that go with it. Simpler to reason about as "delete everything below here", but one deletion removes other chats.
+3. **Delete for good, of a message another fork still shows.**
+   - (a) It's removed from this fork for good; its text stays while another fork shows it, and the bin says so (proposed).
+   - (b) The text is erased everywhere, after a warning naming the forks that show it. Matches "delete for good" for privacy, but it changes other forks, by explicit choice.
+4. **What counts as "chatted in" for the current fork.**
+   - (a) Anything that adds a message or a version: send, reply, swipe, continue (proposed).
+   - (b) Only new messages; swiping at the tip doesn't make a fork current.
+   - (c) Any change, edits and deletions included; the fork you last touched opens.
+5. **Chat-wide settings** (`lcm.settings`, written at slot null). DESIGN §3.4 [O] still has to class chat state. This design can make them per fork at no extra cost.
+   - (a) Per chat, as now (proposed): they're settings of the chat, not history, and a fork made to test a setting would need its own.
+   - (b) Per fork: forking to compare summarization on and off works, but every fork needs its settings set.
+
+## 7. Implementation units
+
+Each one is one implementer's work, with ARCHITECTURE.md updated in the same commit and `npm run check` green. They're in order; each one depends on the ones before it.
+
+1. **Chains and segments.** `slots.chain_id`, the state events' chain columns, indexes, `pathSegments`, and `pathWindow` and `StateEventsAt` reading by segment. No behaviour change.
+   - Tests: chain assignment for first and later children and roots; paging back through a 100,000-slot path with 200 branch points reconstructs it without gaps (as `graph.test.ts` does); query plans by index; rows visited flat from 2,000 to 100,000 slots; the planted-cycle probe still returns.
+2. **Fork rows and migration.** `forks`, `chats.current_fork_id`/`state_seq`, the migration of §5 (without the frozen-column triggers), and tips per fork in `AppendMessage`, `relocateLeaf` and `followRestored`. Also `CreateFork`; `GetPath`/`ReadPath` by fork; `ListForks` (name, pin, tip excerpt, last chatted); `SetForkName` and `SetForkPinned` replacing `SetBranchName`; composer drafts keyed by fork instead of tip slot; `rollouts.fork_id`; the URL's `?fork=`.
+   - Tests: the migration equality test of §5; every live leaf in exactly one fork; the checkpoint fork for an interior active leaf; the current-fork rule [D] (append, create, delete current); `LeafMoved` against the fork's tip; two forks at the same tip keep separate composers; isolation-matrix probes for every new operation.
+3. **The overlay and per-fork selection.** `fork_overrides`, `lineage_json`, the `effective` helper, writes for select, and every reader of `selected_version_id` (see the grep in §1: path, assembler, `noteAt`, `chatSetupReads`, LCM, bin), plus the frozen-column trigger for selections.
+   - Tests: select in F, G unchanged; a fork made after inherits; a fork made before doesn't; a fork from an earlier point inherits the selections above its point; in-place compaction only when no child was made since; the lineage cap copy; window performance with 20,000 overrides; summaries stay fresh in G when F swipes, and only F's planner queues work.
+4. **Fork-owned versions, amend and flags.** `versions.fork_id`, picker visibility (per Q1), `AmendVersion` copy-and-replace, star and picker-hide overrides, and `replace` in every reader.
+   - Tests: a swipe at a shared message is absent from the other fork (or present, per Q1); amend in F leaves G's text and `version_history`; in-place amend when exclusive; replaced versions shown in the picker in their original's place.
+5. **Per-fork deletion, hiding and fork deletion.** Delete, restore and purge of messages and swipes as overrides (§2.4); `DeleteBranch` becomes delete fork (per Q2); restore that makes a fork of its own; `SetSlotHidden`, `StImportUnhide` and LCM enable per fork; `history_changes` per fork; base-column triggers for the rest.
+   - Tests: delete in F, G untouched, both in the bin view and in context; restore after F appended gives a fork; purge only when no live fork shows it (per Q3); deleting a fork keeps forks made from it (per Q2); stepped history in G unchanged by a hide in F.
+6. **Fork-scoped and branch-owned state events.** `state_events.fork_id`/`fork_seq`, `AddStateEvent` scoping, fold order, `suppress_event`. Built before or together with CARD-FORKS-DELTA unit 2, which then needs no copy-on-branch or copy-on-delete.
+   - Tests: an event at a shared tip doesn't reach the other fork; a branch-owned event applies to regenerating an earlier message, reaches forks made later from any point, and doesn't reach earlier forks; version-attached events follow per-fork selection; `stateKeys.test.ts` extended.
+7. **Summaries per fork.** `EditSummary`, `SelectSummaryRevision` and `SetSummaryRerun` as overrides; freshness with `summaries_done`; jobs carry `fork_id`.
+   - Tests: an edit in F leaves G's text; a fork made after inherits it; coverage and planning per fork on two forks that disagree on one swipe.
+8. **History edits.** Changeset writes, groups, per-fork and per-message undo, inheritance labels; search and replace's backend (FTS prefilter, windowed regex scan in the worker with a time limit); the rename-across-chats count and application.
+   - Tests: replace in F, G untouched, swipes included; a fork made after inherits it, from the tip and from an earlier point; undo in G leaves F; undo per message; an item that moved on is reported; summaries stay fresh after a replace that covered them and go stale after an amend; a two-chat, three-fork rename group shares X′; 100,000-message scan within the worker's limit; e2e for the panel at 1440 and 390 px.
+9. **ST import on forks.** Records map to forks; shared-prefix selection changes write overrides; imported fork names go to `forks.name`.
+   - Tests: `stImportSharedSelection.test.ts` rewritten to expect overrides and no suffix copy; replay unchanged; the name-placement tests on forks.

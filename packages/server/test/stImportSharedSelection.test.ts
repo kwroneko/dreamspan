@@ -126,6 +126,8 @@ for (const count of [10, 205]) {
           )
           assert.strictEqual(parentAfter.entries[4]!.version.content, "parent 4")
           assert.strictEqual(branchAfter.entries[4]!.version.content, "Only the ST branch chose this")
+          assert.strictEqual(branchAfter.entries[4]!.branchName, "branch")
+          assert.isUndefined(branchAfter.entries[5]!.branchName)
           assert.strictEqual(branchAfter.entries[8]!.version.content, "Local suffix amended")
           const suffixVersions = yield* api.ListVersions({ slotId: branchAfter.entries[8]!.slotId })
           assert.deepStrictEqual(
