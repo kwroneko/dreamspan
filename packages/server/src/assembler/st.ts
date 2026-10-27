@@ -369,15 +369,24 @@ export const compose = (input: {
     spend(-reserved)
     if (newChat && newChat.content) history.unshift(newChat)
     if (layer.length) history.splice(newChat && newChat.content ? 1 : 0, 0, ...layer)
+    const newestAt = index("newestMessage")
+    if (newestAt >= 0 && !input.disabled("newestMessage")) {
+      const latest = history.findLastIndex((m) => m.kind === "history")
+      if (latest >= 0) slots.set(newestAt, history.splice(latest))
+    }
     slots.set(index("chatHistory"), history)
   }
 
   if (!input.stableExamples) sendExamples()
 
-  const messages = [...slots.entries()].sort(([a], [b]) => a - b).flatMap(([, list]) => list)
+  const ordered = [...slots.entries()].sort(([a], [b]) => a - b)
+  const newestAt = index("newestMessage")
+  const afterTail =
+    newestAt > index("chatHistory") + 1 && ordered.findLast(([, list]) => list.some((m) => m.content))?.[0] === newestAt
+  const messages = ordered.flatMap(([at, list]) => (afterTail && at === newestAt ? [...control, ...list] : list))
   return {
     historyBudget,
-    messages: [...messages, ...control],
+    messages: afterTail ? messages : [...messages, ...control],
     historySent,
     historyTotal: input.chat.filter((line) => line.kind === "history").length,
     examplesSent,

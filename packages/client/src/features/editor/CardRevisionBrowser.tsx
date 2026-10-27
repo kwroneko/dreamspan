@@ -86,7 +86,7 @@ function RevisionComparison({ store, call, revision }: { store: EditorStore; cal
       ) : (
         <div aria-label="Revision changes" className="flex min-w-0 flex-col gap-2">
           {changes.map((change) => {
-            const label = fieldLabel("card", mode === "parent" ? docs!.doc : current, change.path)
+            const label = fieldLabel(state.snapshot!.ref.kind, mode === "parent" ? docs!.doc : current, change.path)
             return (
               <details key={JSON.stringify(change.path)} className="min-w-0 rounded-md border border-border p-2">
                 <summary className="cursor-pointer text-sm font-medium [overflow-wrap:anywhere]">{label}</summary>

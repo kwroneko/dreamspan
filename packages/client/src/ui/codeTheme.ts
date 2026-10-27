@@ -10,7 +10,7 @@ export const proseTheme = EditorView.theme({
     fontFamily: "var(--editor-font, var(--font-sans))",
     lineHeight: "1.6",
     overflow: "auto",
-    maxHeight: "min(60vh, 32rem)"
+    maxHeight: "var(--editor-max-height, min(60vh, 32rem))"
   },
   ".cm-content": {
     padding: "8px 0",

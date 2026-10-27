@@ -29,11 +29,16 @@ const placed = (placement: Placement) => {
       return `At the end of the chat, as ${placement.role}`
     case "section":
       return (
-        (placement.section === "before_main_prompt"
-          ? "Before the main prompt"
-          : placement.section === "after_main_prompt"
-            ? "After the main prompt"
-            : "Not sent: nothing places notes there yet") + (placement.role ? `, as ${placement.role}` : "")
+        {
+          context_start: "Start of context",
+          tail_start: "Start of tail",
+          tail_end: "End of tail",
+          card: "With the definitions",
+          before_main_prompt: "Before the main prompt",
+          after_main_prompt: "After the main prompt",
+          author_note_top: "At the top of the author's note",
+          author_note_bottom: "At the bottom of the author's note"
+        }[placement.section] + (placement.role ? `, as ${placement.role}` : "")
       )
     case "none":
       return "Not placed: only a macro reads it"

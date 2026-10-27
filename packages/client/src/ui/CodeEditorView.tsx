@@ -107,6 +107,7 @@ function mountEditor(host: HTMLElement, initial: CodeEditorProps) {
     const oldProps = props
     props = next
     host.style.setProperty("--editor-font", next.mono ? "var(--font-mono)" : "var(--font-sans)")
+    host.style.setProperty("--editor-max-height", next.fullHeight ? "none" : "min(60vh, 32rem)")
     host.style.setProperty("--editor-min-height", `${Math.min(next.rows ?? 4, 10) * 1.6}em`)
     if (view.composing && next.value !== view.state.doc.toString()) deferred = next.value
     else {

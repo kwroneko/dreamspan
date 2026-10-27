@@ -17,6 +17,7 @@ import {
 } from "@rp/shared/docs/preset.ts"
 import { type ImportReport, ReportBuilder, shownList, shownText } from "@rp/shared/importReport.ts"
 import { Schema } from "effect"
+import { newestMessage, presetOrder } from "@rp/shared/presetOrder.ts"
 import { defaultLimits, FormatError, parseJson } from "./safety.ts"
 
 const ST_PRESET_FORMAT = "st-chat-completion-preset"
@@ -400,7 +401,18 @@ const readPreset = (file: Json, r: ReportBuilder): PresetDoc => {
   }
 
   const { prompts, neverSent } = readPrompts(field("prompts"), r)
-  const order = readOrder(field("prompt_order"), prompts, neverSent, r)
+  const importedOrder = readOrder(field("prompt_order"), prompts, neverSent, r)
+  const included = new Set(importedOrder.map((e) => e.identifier))
+  const outside = prompts.filter((p) => !included.has(p.identifier) && p.identifier !== "newestMessage")
+  if (outside.length)
+    r.add(
+      "info",
+      "preset.prompts_appended_off",
+      `Prompts outside the ST order were appended, off: ${shownList(outside.map((p) => p.name || p.identifier))}.`,
+      ["prompt_order"]
+    )
+  if (!prompts.some((p) => p.identifier === newestMessage.identifier)) prompts.push(newestMessage)
+  const order = presetOrder(prompts, importedOrder)
   const extensions: Json = isObject(src.extensions) ? { ...src.extensions } : {}
   consumed.add("extensions")
   const regex = readRegex(extensions.regex_scripts, r)

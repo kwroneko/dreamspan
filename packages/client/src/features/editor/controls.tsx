@@ -141,7 +141,8 @@ export function TextField({
   readOnly?: boolean
 }) {
   const value = useText(store, path)
-  const card = useEditorKind(store) === "card"
+  const kind = useEditorKind(store)
+  const card = kind === "card" || kind === "preset"
   const field = textField(path)
   const props = {
     value,
@@ -163,6 +164,7 @@ export function TextField({
             value={value}
             label={label}
             rows={rows}
+            fullHeight={kind === "preset"}
             mono={mono}
             readOnly={readOnly}
             onChange={(value) => store.setText(path, value)}

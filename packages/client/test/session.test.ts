@@ -91,6 +91,21 @@ const reply = version("v2", "s2", "generating", "The tide")
 const second = entry("s2", "s1", reply)
 
 describe("ChatSession", () => {
+  it("retains preset annotations from Cache events, including changed counts", () => {
+    const { s, receive } = session()
+    const base = { _tag: "Cache", leafSlotId: null, warmth: null, historyStart: null, summarizedThrough: null } as const
+    const preview = {
+      blocks: [{ identifier: "chatHistory", tokens: 3875, labels: [] }],
+      cacheAfter: [{ identifier: "chatHistory", reason: "history" as const }],
+      notes: []
+    }
+    receive({ ...base, presetContext: preview })
+    expect(s.snapshot().history?.presetContext).toEqual(preview)
+    const next = { ...preview, blocks: [{ identifier: "chatHistory", tokens: 4000, labels: [] }] }
+    receive({ ...base, presetContext: next })
+    expect(s.snapshot().history?.presetContext).toEqual(next)
+  })
+
   it("appends reasoning to a continuation's saved reasoning independently of text", async () => {
     vi.stubGlobal("requestAnimationFrame", () => 1)
     vi.stubGlobal("cancelAnimationFrame", () => {})
