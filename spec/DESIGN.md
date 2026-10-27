@@ -46,6 +46,10 @@ Where the owner corrected an earlier proposal, the corrected version is recorded
 - **[D]** A card's own lorebook (`character_book`) is used in new chats automatically, with no "import card lore" dialog. A chat imported from ST keeps what ST sent: the card's lorebook only if ST had imported it as a lorebook file. Each chat's settings can turn a card's lorebook on or off (owner, 2026-10-14).
 - **[P]** Placement is cache-friendly: entries are never inserted above the history. They go in a block near the tail, where they stay until the next compaction boundary.
 
+- **[D]** (owner, 2026-10-27) Wherever lorebooks are selected there is a setting, **on by default**, that overrides entries' positions so lorebook entries are only placed **below the history**. What it does is made very clear, with a popover explaining why (entries that come and go above the history invalidate the cache for everything after them) and how, right where lorebooks are selected.
+- **[D]** With that setting off, entries placed above the history stay activated ("pinned") until the history's start next moves; entries after the history are never pinned and are evaluated every turn, as in ST.
+- **[D]** When the history's start moves, the cache should still not be lost entirely: the prefix before the history (preset, cards, high-level summaries) is preserved, through cache breakpoints where the provider has them (not every cache system does; with few breakpoints it may not always be possible).
+
 ### 1.4 ST data folder import
 - **[D]** Point the importer at an ST data folder. It finds the chats and their cards and adds them seamlessly. Exporting chats back to ST is secondary.
 - **[D]** ST has a single hidden flag. If a long consecutive run of hidden messages starts at message 0 (the manual-summary pattern), the importer offers to un-hide them so LCM can take over. Other hidden messages stay excluded from context.
