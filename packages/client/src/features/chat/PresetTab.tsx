@@ -7,9 +7,24 @@ import { lazy, Suspense, useEffect, useState } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Switch } from "../../ui/Choice.tsx"
+import { ConfirmDialog } from "../../ui/Dialog.tsx"
+import { valueField } from "@rp/shared/editing.ts"
 import { usePresetWorkspace } from "../editor/PresetWorkspace.tsx"
 import { type EditorStore, useEditorState, useLeaveGuard, useValue, useWorkingDoc } from "../editor/store.ts"
 import type { ChatView } from "./session.ts"
+
+/** What flipping a switch writes: the order, and the newest-message marker an older revision gains. */
+const switchFields = new Set([valueField(["order"]), valueField(["prompts", "identifier=newestMessage"])])
+
+/** Whether the drafts are only switch flips: the switch fields, with the saved order's sequence. */
+function onlySwitches(store: EditorStore) {
+  if (!store.dirtyFields().every((field) => switchFields.has(field))) return false
+  const sequence = (prompts: unknown, order: unknown) =>
+    presetOrder((prompts ?? []) as ReadonlyArray<PresetPrompt>, (order ?? []) as ReadonlyArray<PromptOrderEntry>)
+      .map((e) => e.identifier)
+      .join("\n")
+  return sequence(store.head.prompts, store.head.order) === sequence(store.value(["prompts"]), store.value(["order"]))
+}
 
 const SaveDialog = lazy(() => import("../editor/SaveDialog.tsx").then((m) => ({ default: m.SaveDialog })))
 
@@ -21,6 +36,7 @@ function PresetSwitches({ store }: { store: EditorStore }) {
   const order = useValue<ReadonlyArray<PromptOrderEntry>>(store, ["order"]) ?? []
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<AppError | null>(null)
+  const [confirming, setConfirming] = useState(false)
   useEffect(() => {
     void store.load()
   }, [store])
@@ -28,6 +44,16 @@ function PresetSwitches({ store }: { store: EditorStore }) {
   if (state.loadError) return <ErrorAlert error={state.loadError} />
   if (!state.snapshot) return <p role="status">Loading preset…</p>
   const all = [...prompts, newestMessage]
+  const discard = async () => {
+    setConfirming(false)
+    for (const field of store.dirtyFields()) {
+      const result = await store.discard(field)
+      if (result && !result.ok) {
+        setError(result.error)
+        break
+      }
+    }
+  }
   return (
     <div className="flex flex-col gap-3">
       <p className="font-medium">{state.snapshot.ref.label}</p>
@@ -41,14 +67,11 @@ function PresetSwitches({ store }: { store: EditorStore }) {
             Save
           </Button>
           <Button
-            onClick={async () => {
-              for (const field of store.dirtyFields()) {
-                const result = await store.discard(field)
-                if (result && !result.ok) {
-                  setError(result.error)
-                  break
-                }
-              }
+            onClick={() => {
+              // The switches alone go at once; anything else edited in the overlay, a reorder
+              // included, is confirmed first.
+              if (onlySwitches(store)) void discard()
+              else setConfirming(true)
             }}
           >
             Discard
@@ -93,6 +116,14 @@ function PresetSwitches({ store }: { store: EditorStore }) {
           )
         })}
       </ol>
+      <ConfirmDialog
+        open={confirming}
+        onOpenChange={setConfirming}
+        title={`Discard ${state.dirty} unsaved ${state.dirty === 1 ? "change" : "changes"}?`}
+        description="This includes changes made in the preset editor, such as prompt text or the order, not only the switches. Discarded text is kept in the bin's recovered texts."
+        confirmLabel="Discard them"
+        onConfirm={() => void discard()}
+      />
       {saving && (
         <Suspense>
           <SaveDialog store={store} onClose={() => setSaving(false)} onSaved={() => setSaving(false)} />

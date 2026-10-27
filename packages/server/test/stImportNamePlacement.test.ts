@@ -703,6 +703,72 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
             )
           })
         )
+    // A legacy custom-name record with a deeper local choice on its path: a slot changed before
+    // migration 0043 (which marked every revision mismatch local), or a deeper fork point named
+    // here. With the parent resolving, its own divergence still carries its choice.
+    for (const deeper of ["migrated-hide", "named-deeper"])
+      for (const choice of [null, "Local outer"])
+        it.effect(`legacy record with a deeper local choice (${deeper}): ${JSON.stringify(choice)}`, () =>
+          Effect.gen(function* () {
+            const folder = `Verify6-${deeper}-${choice === null ? 0 : 1}`
+            const common = [msg(folder + " greeting", 0), msg(folder + " hello", 1)]
+            const outer = [
+              ...common,
+              msg(folder + " fork", 2),
+              msg(folder + " reply", 3),
+              msg(folder + " more", 4),
+              msg(folder + " last", 5)
+            ]
+            const mainFile = pair(folder, "Outer road")[0]!
+            const source = `chats/${folder}/Outer road.jsonl`
+            const api = yield* run([mainFile, [source, bytes([{ chat_metadata: { main_chat: "main" } }, ...outer])]])
+            const base = yield* snapshot(api, source)
+            if (choice !== null) yield* api.NameBranch({ slotId: base.entries[2]!.slotId, name: choice })
+            if (deeper === "migrated-hide") {
+              // A local change from before the upgrade, then migration 0043's statement.
+              yield* api.SetMessageHidden({ slotId: base.entries[5]!.slotId, hidden: true })
+              yield* fixtureSql(config.dataDir, [
+                {
+                  sql: "UPDATE slots SET branch_name_user = 1 WHERE row_version <> st_import_row_version AND id = ?",
+                  params: [base.entries[5]!.slotId]
+                }
+              ])
+            } else yield* api.NameBranch({ slotId: base.entries[4]!.slotId, name: "Later scene" })
+            const before = yield* snapshot(api, source)
+            yield* fixtureSql(config.dataDir, [
+              {
+                sql: "UPDATE jobs SET payload_json=json_remove(payload_json, '$.nameSlot', '$.parentRecordId') WHERE id=?",
+                params: [before.record.recordId]
+              }
+            ])
+            const replacement = bytes([
+              { chat_metadata: { main_chat: "main" } },
+              { ...outer[0]!, is_user: true, name: "User" },
+              ...outer.slice(1)
+            ])
+            let after: Snapshot | undefined
+            for (let pass = 0; pass < 2; pass++) {
+              yield* run([mainFile, [source, replacement]])
+              const current = yield* snapshot(api, source)
+              if (after) assert.deepStrictEqual(contents(current.entries), contents(after.entries), "unchanged replay")
+              after = current
+            }
+            assert.notStrictEqual(after!.entries[0]!.slotId, before.entries[0]!.slotId, "path replaced")
+            const oldPath = yield* api.ReadPath({
+              chatId: before.record.chatId,
+              leafSlotId: before.record.end,
+              range: { _tag: "Bottom" },
+              limit: 100
+            })
+            assert.deepStrictEqual(contents(oldPath.entries), contents(before.entries), "original path and versions")
+            const row = after!.rows.find((r) => r.id === after!.entries[0]!.slotId)!
+            assert.deepStrictEqual(
+              { name: row.branch_name, user: row.branch_name_user },
+              { name: choice ?? "Outer road", user: choice === null ? 0 : 1 },
+              "the fork's own choice follows replacement"
+            )
+          })
+        )
     // A legacy parent that extended through its child's named slot: the deeper choice is
     // the child's (its record remembers it), so the parent recovers its own.
     for (const choice of [null, "Local outer", ""])

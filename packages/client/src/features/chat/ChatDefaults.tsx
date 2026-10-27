@@ -7,7 +7,7 @@
 // instruction is saved by its button; until then what's typed is copied into this browser
 // (`editor/backup.ts`), shown again here after leaving the page or a reload, and listed in
 // Browser recovery.
-import type { GenerationDefaults, GenerationDefaultsChange } from "@rp/shared/generation.ts"
+import { BUILTIN_PRESET_LABEL, type GenerationDefaults, type GenerationDefaultsChange } from "@rp/shared/generation.ts"
 import type { LibraryRef } from "@rp/shared/library.ts"
 import { Effect } from "effect"
 import { useEffect, useRef, useState } from "react"
@@ -32,8 +32,11 @@ export function ChatDefaultsPage() {
   useTitle("Chats")
   const action = useAction()
   const userId = useSession().user.id
-  const models = useModelChoices(true)
   const [defaults, setDefaults] = useState<GenerationDefaults | null>(null)
+  const models = useModelChoices(
+    true,
+    defaults?.model ? modelValue(defaults.model.connection, defaults.model.model) : null
+  )
   const [presets, setPresets] = useState<ReadonlyArray<LibraryRef>>([])
   const [tail, setTail] = useState("")
   const [saved, setSaved] = useState(false)
@@ -161,15 +164,15 @@ export function ChatDefaultsPage() {
           </Field>
           <Field
             label="Default preset"
-            description="Without one, the built-in prompt preset named Default is used. Switching connections may select a locked preset."
+            description="Without one, the built-in prompt preset is used. Switching connections may select a locked preset."
           >
             <Select
               items={[
-                { value: NONE, label: "Default" },
+                { value: NONE, label: BUILTIN_PRESET_LABEL },
                 ...presets.map((ref) => ({ value: ref.id as string, label: ref.label }))
               ]}
               value={defaults ? (defaults.preset ?? NONE) : null}
-              placeholder="Default"
+              placeholder={BUILTIN_PRESET_LABEL}
               onValueChange={(value) => void change({ preset: value === NONE ? null : (value as LibraryRef["id"]) })}
             />
           </Field>

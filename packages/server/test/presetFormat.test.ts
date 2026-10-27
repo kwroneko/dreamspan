@@ -209,8 +209,15 @@ describe("ST's prompt and order sanitizing", () => {
     for (const doc of [fromEmpty, fromPartial])
       expect(doc.prompts.map((p) => p.identifier)).toEqual(expect.arrayContaining(builtIns))
     expect(prompt(fromPartial, "main")?.content).toBe("Hi")
+    // An empty ST order still sends the markers ST appends after the other prompts.
     expect(fromPartial.order.filter((e) => e.enabled).map((e) => e.identifier)).toEqual([
       "newestMessage",
+      "worldInfoBefore",
+      "worldInfoAfter",
+      "charDescription",
+      "charPersonality",
+      "scenario",
+      "personaDescription",
       "groupNudge",
       "impersonationPrompt",
       "direction"
@@ -739,6 +746,13 @@ describe("the document order", () => {
     expect(result.doc.order.find((e) => e.identifier === "parked")).toEqual({ identifier: "parked", enabled: false })
     expect(result.doc.order.map((e) => e.identifier).sort()).toEqual(result.doc.prompts.map((p) => p.identifier).sort())
     expect(issue(result, "preset.prompts_appended_off")?.message).toContain("Parked prompt")
+    // ST still sends the markers its order leaves out, after the other prompts: they stay on.
+    expect(result.doc.order.find((e) => e.identifier === "charDescription")).toEqual({
+      identifier: "charDescription",
+      enabled: true
+    })
+    expect(issue(result, "preset.prompts_appended_off")?.message).not.toContain("Char Description")
+    expect(issue(result, "preset.markers_appended_on")?.message).toContain("Char Description")
     const history = result.doc.order.findIndex((e) => e.identifier === "chatHistory")
     expect(result.doc.order[history + 1]?.identifier).toBe("newestMessage")
   })

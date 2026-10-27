@@ -1,12 +1,12 @@
 // The side panel and Settings → Chats keep what's typed and show what's in effect: an unsaved
-// instruction and a summary's edit survive leaving, a failed save and a tab switch; the model
-// named follows changes made elsewhere, hidden or not; a chat's own model and preset can be
-// taken off again; one setting's change leaves the others;
+// instruction and a summary's edit survive leaving, a failed save and a tab switch; the
+// composer's model follows changes made elsewhere, hidden or not; one setting's change leaves
+// the others;
 // the own lorebook is named; the panel's remembered tab is each user's own.
 import { expect, test } from "@playwright/test"
 import { Effect } from "effect"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
-import { asUser, withCookie } from "./support/rpc.ts"
+import { asUser } from "./support/rpc.ts"
 import { level1 } from "./support/summaries.ts"
 import type { SummaryId } from "@rp/shared/lcm.ts"
 
@@ -130,31 +130,19 @@ test("summary text survives a failed save and switching to another tab", async (
     .toBe("Offline text must survive switching tabs.")
 })
 
-test("the model named in This chat follows a default changed in another tab", async ({ page }) => {
-  const { connection, settings, a, b } = await models()
+test("the composer's model follows a default changed in another tab", async ({ page }) => {
+  const { connection, a, b } = await models()
   const chat = await emptyChat("Model defaults")
   await admin((api) =>
     api.SetGenerationDefaults({ defaults: { model: { connection: connection.id, model: a.id }, preset: null } })
   )
-  await page.goto(`${server().url}/chats/${chat.id}?panel=chat`)
-  const model = page.getByTestId("model-in-effect")
+  await page.goto(`${server().url}/chats/${chat.id}`)
+  const model = page.getByRole("combobox", { name: "Model", exact: true })
   await expect(model).toHaveText(`${connection.name} · model-a`)
   await admin((api) =>
     api.SetGenerationDefaults({ defaults: { model: { connection: connection.id, model: b.id }, preset: null } })
   )
   await expect(model).toHaveText(`${connection.name} · model-b`)
-  // A rename shows as well.
-  await admin((api) =>
-    api.UpdateConnection({
-      connectionId: connection.id,
-      expectedRowVersion: connection.rowVersion,
-      settings: { ...settings, name: "Renamed connection" }
-    })
-  )
-  await admin((api) =>
-    api.SetGenerationDefaults({ defaults: { model: { connection: connection.id, model: a.id }, preset: null } })
-  )
-  await expect(model).toHaveText("Renamed connection · model-a")
 })
 
 test("a hidden model in use is named, not described as gone", async ({ page }) => {
@@ -164,54 +152,14 @@ test("a hidden model in use is named, not described as gone", async ({ page }) =
     api.SetGenerationDefaults({ defaults: { model: { connection: connection.id, model: a.id }, preset: null } })
   )
   await admin((api) => api.SetModelHidden({ modelId: a.id, hidden: true }))
-  await page.goto(`${server().url}/chats/${chat.id}?panel=chat`)
-  const setting = page.getByRole("region", { name: "Model" })
-  await expect(page.getByTestId("model-in-effect")).toHaveText(`${connection.name} · model-a`)
-  await expect(setting).toContainText("It's hidden in Connections")
-})
-
-test("a chat's own model and preset can be taken off, back to the defaults", async ({ page }) => {
-  const { connection, a, b } = await models()
-  const importPreset = async (name: string, context: number) => {
-    const response = await page.request.post(`${server().url}/library/import?name=${name}.json`, {
-      headers: { origin: server().url, "content-type": "application/octet-stream" },
-      data: Buffer.from(JSON.stringify({ openai_max_context: context, openai_max_tokens: 300, temperature: 1 }))
-    })
-    expect(response.status()).toBe(200)
-    return (await admin((api) => api.ListLibrary({ kind: "preset" }))).find((ref) => ref.label === name)!
-  }
-  const everyday = await importPreset("Everyday", 16000)
-  const roomy = await importPreset("Roomy", 32000)
-  await admin((api) =>
-    api.SetGenerationDefaults({ defaults: { model: { connection: connection.id, model: a.id }, preset: everyday.id } })
+  await page.goto(`${server().url}/chats/${chat.id}`)
+  await expect(page.getByRole("combobox", { name: "Model", exact: true })).toHaveText(
+    `${connection.name} · model-a (hidden)`
   )
-  const chat = await emptyChat("Own model and preset")
-  for (const change of [
-    { _tag: "Model", connection: connection.id, model: b.id },
-    { _tag: "Preset", ref: roomy.id }
-  ] as const) {
-    await admin((api) => api.ChangeCast({ chatId: chat.id, slotId: null, change }))
-  }
-  await page.goto(`${server().url}/chats/${chat.id}?panel=chat`)
-  const model = page.getByRole("region", { name: "Model" })
-  const preset = page.getByRole("region", { name: "Preset" })
-  await expect(page.getByTestId("model-in-effect")).toHaveText(`${connection.name} · model-b`)
-  await expect(model).toContainText("Set in this chat.")
-  await expect(page.getByTestId("preset-in-effect")).toHaveText("Roomy")
-  await expect(preset).toContainText("Set in this chat.")
-
-  await model.getByRole("button", { name: "Use the default" }).click()
-  await expect(page.getByTestId("model-in-effect")).toHaveText(`${connection.name} · model-a`)
-  await expect(model).toContainText("Your default model")
-  await expect(model.getByRole("button", { name: "Use the default" })).toHaveCount(0)
-
-  await preset.getByRole("button", { name: "Use the default" }).click()
-  await expect(page.getByTestId("preset-in-effect")).toHaveText("Everyday")
-  await expect(preset).toContainText("Your default preset")
-  await expect(preset.getByRole("button", { name: "Use the default" })).toHaveCount(0)
-  const cast = await admin((api) => api.GetCast({ chatId: chat.id, slotId: null }))
-  expect([cast.model, cast.preset]).toEqual([null, null])
-  await admin((api) => api.SetGenerationDefaults({ defaults: { model: null, preset: null } }))
+  await page.goto(`${server().url}/settings/chats`)
+  await expect(page.getByRole("combobox", { name: "Default model" })).toHaveText(
+    `${connection.name} · model-a (hidden)`
+  )
 })
 
 test("changing the refusal judge leaves a default model changed in another tab", async ({ page }) => {
@@ -316,132 +264,4 @@ test("an instruction typed back to its old text while Save is in flight survives
     .toBe("First edit sent to Save")
   await page.reload()
   await expect(field).toHaveValue("Original persisted instruction")
-})
-
-test("clear guidance follows defaults changed while This chat remains open", async ({ page }) => {
-  const s = await admin((api) =>
-    Effect.gen(function* () {
-      const connection = yield* api.CreateConnection({
-        kind: "openai-chat",
-        settings: {
-          name: "Changing defaults",
-          baseUrl: "http://127.0.0.1:9/v1",
-          compat: {},
-          cacheTtlS: null,
-          maxConcurrent: null,
-          presetOverrideRefId: null
-        }
-      })
-      const a = yield* api.AddUserModel({ connectionId: connection.id, key: "old-default", overrides: {} })
-      const b = yield* api.AddUserModel({ connectionId: connection.id, key: "new-default", overrides: {} })
-      const c = yield* api.AddUserModel({ connectionId: connection.id, key: "chat-model", overrides: {} })
-      const chat = yield* api.CreateChat({ title: "Changed defaults" })
-      yield* api.SetGenerationDefaults({
-        defaults: { model: { connection: connection.id, model: a.id }, preset: null }
-      })
-      yield* api.ChangeCast({
-        chatId: chat.id,
-        slotId: null,
-        change: { _tag: "Model", connection: connection.id, model: c.id }
-      })
-      return { connection, a, b, chat }
-    })
-  )
-  await page.goto(`${server().url}/chats/${s.chat.id}?panel=chat`)
-  const model = page.getByRole("region", { name: "Model", exact: true })
-  await expect(model).toContainText("Back to your default from the latest message on: Changing defaults · old-default.")
-  await admin((api) =>
-    api.SetGenerationDefaults({ defaults: { model: { connection: s.connection.id, model: s.b.id }, preset: null } })
-  )
-  await expect(model).toContainText("Back to your default from the latest message on: Changing defaults · new-default.")
-})
-
-test("a hidden default is still named before clearing a chat model", async ({ page }) => {
-  const s = await admin((api) =>
-    Effect.gen(function* () {
-      const connection = yield* api.CreateConnection({
-        kind: "openai-chat",
-        settings: {
-          name: "Hidden connection",
-          baseUrl: "http://127.0.0.1:9/v1",
-          compat: {},
-          cacheTtlS: null,
-          maxConcurrent: null,
-          presetOverrideRefId: null
-        }
-      })
-      const a = yield* api.AddUserModel({ connectionId: connection.id, key: "hidden-default", overrides: {} })
-      const b = yield* api.AddUserModel({ connectionId: connection.id, key: "chat-model", overrides: {} })
-      const chat = yield* api.CreateChat({ title: "Hidden default" })
-      yield* api.SetGenerationDefaults({
-        defaults: { model: { connection: connection.id, model: a.id }, preset: null }
-      })
-      yield* api.SetModelHidden({ modelId: a.id, hidden: true })
-      yield* api.ChangeCast({
-        chatId: chat.id,
-        slotId: null,
-        change: { _tag: "Model", connection: connection.id, model: b.id }
-      })
-      return { chat }
-    })
-  )
-  await page.goto(`${server().url}/chats/${s.chat.id}?panel=chat`)
-  const model = page.getByRole("region", { name: "Model", exact: true })
-  await expect(model.getByRole("button", { name: "Use the default" })).toBeVisible()
-  await expect(model).toContainText("Hidden connection · hidden-default")
-})
-
-test("clear preset guidance follows defaults and connection overrides changed by another client", async ({ page }) => {
-  const cookie = (await page.context().cookies(server().url)).map((c) => `${c.name}=${c.value}`).join("; ")
-  const other = <A>(use: Parameters<typeof withCookie<A>>[2]) => withCookie(server(), cookie, use)
-  const settings = {
-    name: "Preset connection",
-    baseUrl: "http://127.0.0.1:9/v1",
-    compat: {},
-    cacheTtlS: null,
-    maxConcurrent: null,
-    presetOverrideRefId: null
-  }
-  const { connection, a, chat } = await other((api) =>
-    Effect.gen(function* () {
-      const connection = yield* api.CreateConnection({ kind: "openai-chat", settings })
-      const a = yield* api.AddUserModel({ connectionId: connection.id, key: "preset-model", overrides: {} })
-      const chat = yield* api.CreateChat({ title: "Changed preset defaults" })
-      return { connection, a, chat }
-    })
-  )
-  const importPreset = async (name: string) => {
-    const response = await page.request.post(`${server().url}/library/import?name=${name}.json`, {
-      headers: { origin: server().url, "content-type": "application/octet-stream" },
-      data: Buffer.from(JSON.stringify({ openai_max_context: 16000, openai_max_tokens: 300 }))
-    })
-    expect(response.status()).toBe(200)
-    return (await other((api) => api.ListLibrary({ kind: "preset" }))).find((ref) => ref.label === name)!
-  }
-  const old = await importPreset("First default")
-  const next = await importPreset("Changed default")
-  const own = await importPreset("Own preset")
-  await other((api) =>
-    api.SetGenerationDefaults({ defaults: { model: { connection: connection.id, model: a.id }, preset: old.id } })
-  )
-  await other((api) => api.ChangeCast({ chatId: chat.id, slotId: null, change: { _tag: "Preset", ref: own.id } }))
-  await page.goto(`${server().url}/chats/${chat.id}?panel=chat`)
-  const preset = page.getByRole("region", { name: "Preset", exact: true })
-  await expect(preset).toContainText("Back to your default from the latest message on: “First default”.")
-  await other((api) =>
-    api.SetGenerationDefaults({ defaults: { model: { connection: connection.id, model: a.id }, preset: next.id } })
-  )
-  await expect(preset).toContainText("Back to your default from the latest message on: “Changed default”.")
-  await other((api) =>
-    api.UpdateConnection({
-      connectionId: connection.id,
-      expectedRowVersion: connection.rowVersion,
-      settings: { ...settings, name: "Override connection", presetOverrideRefId: old.id }
-    })
-  )
-  await expect(preset).toContainText(
-    "Back to the preset of the connection “Override connection” from the latest message on: “First default”."
-  )
-  await preset.getByRole("button", { name: "Use the default" }).click()
-  await expect(page.getByTestId("preset-in-effect")).toHaveText("First default")
 })
