@@ -138,7 +138,7 @@ interface ChatProgress {
   readonly isNew: boolean
   readonly branch: boolean
   /** A branch's name from ST, and its parent file's record, where the name goes. */
-  readonly fork: { readonly name: string; readonly parentRecordId: string } | null
+  readonly fork: { readonly name: string | null; readonly parentRecordId: string } | null
   readonly prevState: ChatState | null
   readonly prevNotes: Readonly<Record<string, EntityId>>
   /** Where the file ended when last imported, and the first slot an unfinished run added. */
@@ -652,7 +652,7 @@ export class StImports extends Context.Service<
             stateJson: JSON.stringify(applies ? change.state : progress.prevState),
             fork: progress.fork
           })
-          if (finished.fork === "same") {
+          if (finished.fork === "same" && progress.fork?.name != null) {
             report.issue(
               progress.path,
               "info",
@@ -802,7 +802,7 @@ export class StImports extends Context.Service<
           // A chat whose first import never finished has no state yet: it's finished as new.
           isNew: !branch && !(own?.complete ?? false),
           branch,
-          fork: forkName === null ? null : { name: forkName, parentRecordId: parent!.recordId },
+          fork: branch && parent !== undefined ? { name: forkName, parentRecordId: parent.recordId } : null,
           prevState: previous?.state ?? null,
           prevNotes: previous?.notes ?? {},
           prevEnd: own?.complete ? own.end : null,
@@ -863,10 +863,15 @@ export class StImports extends Context.Service<
             // A file imported before: this run takes its record over, as the record is now.
             const cached = session.records.get(path)
             if (cached !== undefined && !cached.binned) {
+              const parentRecordId =
+                part.header?.mainChat == null
+                  ? undefined
+                  : session.records.get(stParentPath(file, part.header.mainChat))?.recordId
               const claimed = yield* writer.StImportClaim({
                 userId: user.id,
                 recordId: cached.recordId,
-                lease: session.id
+                lease: session.id,
+                ...(parentRecordId === undefined ? {} : { parentRecordId })
               })
               session.records.set(path, { ...claimed, state: JSON.parse(claimed.stateJson) as ChatState | null })
             }

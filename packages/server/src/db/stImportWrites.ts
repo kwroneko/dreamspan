@@ -67,6 +67,8 @@ interface RecordPayload {
   readonly named?: boolean
   /** Where that naming choice belongs; resolved again when a reimport forks earlier. */
   readonly nameSlot?: string | null
+  /** Last resolved parent, retained when a later header loses main_chat. */
+  readonly parentRecordId?: string
 }
 
 export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: ReturnType<typeof makeBin>) {
@@ -363,6 +365,24 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
               }
               return sharedPath.has(slotId)
             })
+          // This file's remembered naming choice, and whether it's on the path down to
+          // `parent`. Matching only walks down, so the path is walked once per batch and
+          // then follows each adopted slot: a long run of matches costs no ancestry scans.
+          let choice: { branch_name: string | null; branch_name_user: number; above: boolean } | null | undefined
+          const remembered = Effect.gen(function* () {
+            if (choice === undefined) {
+              const [row] = yield* sql<{ branch_name: string | null; branch_name_user: number; above: number }>`
+                WITH RECURSIVE prefix(id, parent) AS (
+                  SELECT id, parent_slot_id FROM slots WHERE id = ${parent?.id ?? null} AND chat_id = ${chatId}
+                  UNION ALL
+                  SELECT s.id, s.parent_slot_id FROM slots s JOIN prefix p ON s.id = p.parent
+                )
+                SELECT branch_name, branch_name_user, EXISTS (SELECT 1 FROM prefix WHERE id = choice.id) AS above
+                FROM slots choice WHERE choice.id = ${payload.nameSlot ?? null} AND choice.chat_id = ${chatId}`
+              choice = row === undefined ? null : { ...row, above: row.above === 1 }
+            }
+            return choice
+          })
           let matching = input.matching
           let added = 0
           let differing = 0
@@ -411,6 +431,8 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
                 slot_id: string
                 version_id: string
                 depth: number
+                branch_name: string | null
+                branch_name_user: number
                 hidden: number
                 selected: number
                 content: string
@@ -425,7 +447,8 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
                 version_deleted: number
                 locally_changed: number
               }>`
-                SELECT s.id AS slot_id, v.id AS version_id, s.depth, ${sql.literal(contextExcluded())} AS hidden, v.id = s.selected_version_id AS selected,
+                SELECT s.id AS slot_id, v.id AS version_id, s.depth, s.branch_name, s.branch_name_user,
+                  ${sql.literal(contextExcluded())} AS hidden, v.id = s.selected_version_id AS selected,
                   v.content, v.created_at, v.writer, v.ordinal,
                   s.purged_at IS NOT NULL AS slot_purged, v.purged_at IS NOT NULL AS version_purged,
                   s.branch_deleted,
@@ -485,6 +508,29 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
               // diverges there, so its own path keeps what ST had on it.
               let own = recorded ?? exact ?? (input.strict ? undefined : candidates[0])
               let match = placeholder ?? own?.[0]
+              // A replacement may match another fork's path, including an unnamed one. If our old naming
+              // choice is no longer on that prefix, adopting its slot would strand our
+              // choice or overwrite theirs. Start an independent path at the collision.
+              // A parent extending after its own remembered slot may still share a
+              // child's named continuation; its existing placement remains reachable.
+              if (
+                match !== undefined &&
+                copied === null &&
+                placeholder === undefined &&
+                payload.nameSlot != null &&
+                match.slot_id !== payload.nameSlot &&
+                match.slot_id !== (yield* priorAt(match.depth))
+              ) {
+                const mine = yield* remembered
+                if (
+                  mine !== null &&
+                  !mine.above &&
+                  (mine.branch_name !== match.branch_name || mine.branch_name_user !== match.branch_name_user)
+                ) {
+                  own = undefined
+                  match = undefined
+                }
+              }
               // A real change in one file's shared selection needs its own immutable
               // path, as when the branch was first imported from a different swipe.
               // Copy the recorded suffix one position at a time, keeping local choices,
@@ -555,6 +601,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
                 if (placeholder === undefined && (!showsSelected || match.hidden !== (message.hidden ? 1 : 0)))
                   differing++
                 parent = { id: match.slot_id, depth: match.depth, lane_id: laneId }
+                if (choice != null && match.slot_id === payload.nameSlot) choice.above = true
                 slotIds.push(match.slot_id as SlotId)
                 continue
               }
@@ -683,18 +730,29 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
             row_version = row_version + 1
           WHERE id = ${chatId}`
         if (moveLeaf) yield* bin.drafts.moveComposer(userId, chatId, leaf, input.leaf)
-        // Resolve placement every time: a shared-prefix selection change can move the
-        // divergence. User naming choices live on slots, independently of source filenames.
+        // Naming invariant (also ARCHITECTURE.md §13): a recorded fork owns one naming
+        // choice (branch_name, branch_name_user), including (null, 1) for a local clear.
+        // Keep its remembered slot while reachable on this file's path, even if its
+        // parent adopts that slot or moves away. Otherwise place the choice at the new
+        // first divergence, respecting an existing local choice there. Remove only the
+        // redundant copy of this choice on a newly copied suffix. Relocation never
+        // clears or renames original choices on other recorded/abandoned paths; matching
+        // isolates a replacement that would collide with another choice (above).
+        // Automatic filenames need the same bookkeeping, with an initial (null, 0).
+        // If no divergence exists, retain the remembered slot for a later regrowth.
         let fork: "named" | "kept" | "same" | null = null
         let named = payload.named ?? false
         let nameSlot = payload.nameSlot ?? null
-        if (input.fork !== null && input.end !== null) {
+        if ((input.fork !== null || payload.merged) && input.end !== null) {
           const [parentRow] = yield* sql<{ payload_json: string }>`
-            SELECT payload_json FROM jobs WHERE id = ${input.fork.parentRecordId} AND owner_user_id = ${userId}
+            SELECT payload_json FROM jobs WHERE id = ${input.fork?.parentRecordId ?? payload.parentRecordId ?? ""} AND owner_user_id = ${userId}
               AND kind = ${ST_CHAT_RECORD}`
           const parent = parentRow === undefined ? null : (JSON.parse(parentRow.payload_json) as RecordPayload)
           const parentEnd = parent?.chatId === chatId ? (parent.end ?? parent.last ?? null) : null
-          if (parentEnd !== null) {
+          // A renamed main file may now have a record in a different chat. It has
+          // no shared slots here, so use an empty parent path instead of skipping
+          // transfer of this file's remembered naming choice.
+          {
             type NameSlot = { id: string; depth: number; branch_name: string | null; branch_name_user: number }
             const divergence = (end: string | null, placement: string | null = null) => sql<
               NameSlot & { keeps_placement: number }
@@ -709,25 +767,27 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
                 SELECT s.id, s.parent_slot_id, s.depth FROM slots s JOIN mine m ON s.id = m.parent
               )
               SELECT s.id, s.depth, s.branch_name, s.branch_name_user,
-                EXISTS (SELECT 1 FROM mine WHERE id = ${placement}) AND
-                  NOT EXISTS (SELECT 1 FROM theirs WHERE id = ${placement}) AS keeps_placement
+                EXISTS (SELECT 1 FROM mine WHERE id = ${placement}) AS keeps_placement
               FROM mine m JOIN slots s ON s.id = m.id
-              WHERE m.id NOT IN (SELECT id FROM theirs) ORDER BY m.depth LIMIT 1`
-            // Old records have only `named`: recover their original placement from the
-            // previous end. `nameSlot` also survives an interrupted, batched suffix copy.
-            const [previous] = !named
-              ? []
-              : nameSlot === null
+              WHERE m.id NOT IN (SELECT id FROM theirs)
+                -- A transferred choice must start on this run's independent suffix,
+                -- never on an older shared prefix outside the parent's current path.
+                AND (${placement} IS NULL OR EXISTS (SELECT 1 FROM mine WHERE id = ${placement})
+                  OR s.depth >= (SELECT depth FROM slots WHERE id = ${payload.firstAdded ?? null}))
+              ORDER BY m.depth LIMIT 1`
+            // Claim recovered older records' placement (StImportClaim, below); one it
+            // couldn't (an automatic name without a parent) falls back to the divergence
+            // of its prior path. `nameSlot` also survives an interrupted, batched suffix copy.
+            const [previous] =
+              nameSlot === null
                 ? yield* divergence(payload.end ?? null)
                 : yield* sql<NameSlot>`SELECT id, depth, branch_name, branch_name_user FROM slots
-                    WHERE id = ${nameSlot} AND chat_id = ${chatId}`
+                  WHERE id = ${nameSlot} AND chat_id = ${chatId}`
             const [current] = yield* divergence(input.end, previous?.id ?? null)
             if (current === undefined) fork = "same"
             else {
-              // The remembered switch point remains valid only on this file's current
-              // path, outside the parent's. A parent moving away leaves that placement
-              // intact. If this file replaces its path (with or without a suffix copy),
-              // or the parent now shares the old switch point, use the first divergence.
+              // Parent-only changes cannot relocate a reachable naming choice. A
+              // replacement path (with or without a suffix copy) needs a new placement.
               const own = current.keeps_placement === 1 && previous !== undefined ? previous : current
               const moving = previous !== undefined && previous.id !== own.id
               const canName =
@@ -735,7 +795,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
                 ((own.branch_name === null && !(named && previous?.id === own.id)) ||
                   // A copied import label at the new divergence may belong to the parent.
                   (moving && payload.forkPrior != null))
-              const name = moving ? previous.branch_name : input.fork.name
+              const name = moving ? previous.branch_name : (input.fork?.name ?? null)
               const local = moving ? previous.branch_name_user : 0
               fork = canName && name !== null ? "named" : "kept"
               if (canName) {
@@ -773,6 +833,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
           ...payload,
           named,
           nameSlot,
+          ...(input.fork === null ? {} : { parentRecordId: input.fork.parentRecordId }),
           sha256: input.sha256,
           state: input.stateJson,
           notes,
@@ -803,7 +864,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
         return { unhidden: rows.length }
       }).pipe(transaction(sql, "StImportUnhide")),
 
-    StImportClaim: ({ userId, recordId, lease }) =>
+    StImportClaim: ({ userId, recordId, lease, parentRecordId }) =>
       Effect.gen(function* () {
         const [row] = yield* sql<{ status: string; payload_json: string; deleted_at: number | null }>`
           SELECT j.status, j.payload_json, c.deleted_at FROM jobs j
@@ -815,7 +876,66 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
         yield* current(userId, lease, recordId)
         const payload = JSON.parse(row.payload_json) as RecordPayload
         const prior = payload.last ?? payload.end ?? null
-        yield* sql`UPDATE jobs SET payload_json = ${JSON.stringify({ ...payload, lease, prior, branchDeleted: false })}, updated_at = ${Date.now()}
+        let nameSlot = payload.nameSlot ?? null
+        const parentId = parentRecordId ?? payload.parentRecordId
+        let parentPayload: RecordPayload | undefined
+        if (parentId !== undefined) {
+          const [parent] = yield* sql<{ payload_json: string }>`SELECT payload_json FROM jobs
+            WHERE id = ${parentId} AND owner_user_id = ${userId} AND kind = ${ST_CHAT_RECORD}`
+          if (!parent) return yield* new NotFound({ entity: "import record", id: parentId })
+          parentPayload = JSON.parse(parent.payload_json) as RecordPayload
+        }
+        // Legacy records must recover their choice before message matching can
+        // adopt another fork's occupied placement. Keep placeholders in the walk.
+        if (payload.merged && nameSlot === null && prior !== null && parentPayload !== undefined) {
+          // Automatic-name records have neither field, and their own choice is
+          // usually (null, 0): only the parent's path tells it from an ancestor's.
+          const parentEnd =
+            parentPayload.chatId === payload.chatId ? (parentPayload.end ?? parentPayload.last ?? null) : null
+          const [placement] = yield* sql<{ id: string; chosen: number }>`
+            WITH RECURSIVE theirs(id, parent) AS (
+              SELECT id, parent_slot_id FROM slots WHERE id = ${parentEnd} AND chat_id = ${payload.chatId}
+              UNION ALL
+              SELECT s.id, s.parent_slot_id FROM slots s JOIN theirs t ON s.id = t.parent
+            ), mine(id, parent, depth) AS (
+              SELECT id, parent_slot_id, depth FROM slots WHERE id = ${prior} AND chat_id = ${payload.chatId}
+              UNION ALL
+              SELECT s.id, s.parent_slot_id, s.depth FROM slots s JOIN mine m ON s.id = m.parent
+            ) SELECT s.id, s.branch_name IS NOT NULL OR s.branch_name_user = 1 AS chosen
+            FROM mine m JOIN slots s ON s.id = m.id
+            WHERE m.id NOT IN (SELECT id FROM theirs) ORDER BY m.depth LIMIT 1`
+          // A custom-name record's divergence carries its choice, unless the parent's
+          // path has moved off the old shared prefix since (handled below).
+          if (placement !== undefined && (!payload.named || placement.chosen === 1)) nameSlot = placement.id
+        }
+        if (payload.merged && nameSlot === null && prior !== null && payload.named) {
+          // An older custom-name record put its name at its divergence (or found one
+          // there), and only a local choice, (name, 1) or (null, 1), replaced it since.
+          // Ancestors' choices lie above it on the path and children's below its end,
+          // so without a parent path to go by, the deepest choice no other record
+          // remembers is taken as its own: the parent may be gone, or its path may have
+          // moved off the old one. A deeper local choice on its path (a renamed fork
+          // point, or a revision mismatch migration 0043 marked) is taken instead then.
+          const [placement] = yield* sql<{ id: string }>`
+            WITH RECURSIVE mine(id, parent, depth) AS (
+              SELECT id, parent_slot_id, depth FROM slots WHERE id = ${prior} AND chat_id = ${payload.chatId}
+              UNION ALL
+              SELECT s.id, s.parent_slot_id, s.depth FROM slots s JOIN mine m ON s.id = m.parent
+            ) SELECT s.id FROM mine m JOIN slots s ON s.id = m.id
+            WHERE (s.branch_name IS NOT NULL OR s.branch_name_user = 1)
+              AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.owner_user_id = ${userId} AND j.kind = ${ST_CHAT_RECORD}
+                AND j.id <> ${recordId} AND json_extract(j.payload_json, '$.nameSlot') = s.id)
+            ORDER BY m.depth DESC LIMIT 1`
+          nameSlot = placement?.id ?? null
+        }
+        yield* sql`UPDATE jobs SET payload_json = ${JSON.stringify({
+          ...payload,
+          lease,
+          prior,
+          nameSlot,
+          ...(parentId === undefined ? {} : { parentRecordId: parentId }),
+          branchDeleted: false
+        })}, updated_at = ${Date.now()}
           WHERE id = ${recordId}`
         return {
           recordId,

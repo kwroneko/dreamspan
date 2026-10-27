@@ -2128,6 +2128,44 @@ const storage: Record<
         "NotFound"
       )
     }),
+  StImportClaim: (_reader, actor, owner, writer) =>
+    Effect.gen(function* () {
+      const theirs = yield* owner.api.StartStImport({ unsupported: [] })
+      const parent = yield* writer.StImportStartChat({
+        userId: owner.user.id,
+        source: `chats/Isolation/parent-${actor.user.id}.jsonl`,
+        title: "Synthetic parent",
+        createdAt: 1730000000000,
+        chatId: owner.chat.chatId,
+        lease: theirs.importId
+      })
+      const mine = yield* actor.api.StartStImport({ unsupported: [] })
+      const child = yield* writer.StImportStartChat({
+        userId: actor.user.id,
+        source: `chats/Isolation/child-${owner.user.id}.jsonl`,
+        title: "Synthetic child",
+        createdAt: 1730000000000,
+        chatId: actor.chat.chatId,
+        lease: mine.importId
+      })
+      yield* refused(
+        writer.StImportClaim({
+          userId: actor.user.id,
+          recordId: child.recordId,
+          lease: mine.importId,
+          parentRecordId: parent.recordId
+        }),
+        "NotFound"
+      )
+      yield* refused(
+        writer.StImportClaim({
+          userId: actor.user.id,
+          recordId: parent.recordId,
+          lease: mine.importId
+        }),
+        "NotFound"
+      )
+    }),
   StImportSummarySettings: (_reader, actor, owner, writer) =>
     Effect.gen(function* () {
       const { importId } = yield* owner.api.StartStImport({ unsupported: [] })
