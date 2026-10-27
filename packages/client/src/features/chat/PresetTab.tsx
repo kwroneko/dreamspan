@@ -16,6 +16,16 @@ import type { ChatView } from "./session.ts"
 /** What flipping a switch writes: the order, and the newest-message marker an older revision gains. */
 const switchFields = new Set([valueField(["order"]), valueField(["prompts", "identifier=newestMessage"])])
 
+/** Whether the drafts are only switch flips: the switch fields, with the saved order's sequence. */
+function onlySwitches(store: EditorStore) {
+  if (!store.dirtyFields().every((field) => switchFields.has(field))) return false
+  const sequence = (prompts: unknown, order: unknown) =>
+    presetOrder((prompts ?? []) as ReadonlyArray<PresetPrompt>, (order ?? []) as ReadonlyArray<PromptOrderEntry>)
+      .map((e) => e.identifier)
+      .join("\n")
+  return sequence(store.head.prompts, store.head.order) === sequence(store.value(["prompts"]), store.value(["order"]))
+}
+
 const SaveDialog = lazy(() => import("../editor/SaveDialog.tsx").then((m) => ({ default: m.SaveDialog })))
 
 function PresetSwitches({ store }: { store: EditorStore }) {
@@ -58,8 +68,9 @@ function PresetSwitches({ store }: { store: EditorStore }) {
           </Button>
           <Button
             onClick={() => {
-              // The switches alone go at once; anything else edited in the overlay is confirmed first.
-              if (store.dirtyFields().every((field) => switchFields.has(field))) void discard()
+              // The switches alone go at once; anything else edited in the overlay, a reorder
+              // included, is confirmed first.
+              if (onlySwitches(store)) void discard()
               else setConfirming(true)
             }}
           >
@@ -109,7 +120,7 @@ function PresetSwitches({ store }: { store: EditorStore }) {
         open={confirming}
         onOpenChange={setConfirming}
         title={`Discard ${state.dirty} unsaved ${state.dirty === 1 ? "change" : "changes"}?`}
-        description="This includes changes made in the preset editor, such as prompt text, not only the switches. Discarded text is kept in the bin's recovered texts."
+        description="This includes changes made in the preset editor, such as prompt text or the order, not only the switches. Discarded text is kept in the bin's recovered texts."
         confirmLabel="Discard them"
         onConfirm={() => void discard()}
       />
