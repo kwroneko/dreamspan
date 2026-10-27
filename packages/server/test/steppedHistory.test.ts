@@ -85,6 +85,13 @@ describe("stepped history", () => {
               prefixChange(previous, next, () => ({ label: "Message" }))!.reason,
               /context reached its maximum/
             )
+            // The cut keeps the prefix before the history (DESIGN §1.3): (a) comes first and is unchanged.
+            const prefix = next.request.breakpoints[0]!
+            assert.strictEqual(prefix.reason, "prefix")
+            assert.deepStrictEqual(
+              next.request.messages.slice(0, prefix.message + 1),
+              previous.request.messages.slice(0, prefix.message + 1)
+            )
           } else {
             assert.deepStrictEqual(next.historyStart, previous.historyStart)
             const end = lastBreakpoint(previous)

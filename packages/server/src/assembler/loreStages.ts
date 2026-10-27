@@ -228,6 +228,15 @@ export const loreActivationStage: AssemblerStage = {
           pinnedOnly: true
         })
       }
+      // A pin takes the place activation would give it, so the pinned blocks stay byte for byte.
+      const rank = new Map(
+        books
+          .flatMap((book) => book.document.entries.map((entry) => ({ key: `${book.id}:${entry.uid}`, entry })))
+          .toSorted((a, b) => b.entry.order - a.entry.order)
+          .map(({ key }, i) => [key, i])
+      )
+      const rankOf = (e: (typeof lore)[number]) => rank.get(`${e.book}:${e.entry.uid}`) ?? rank.size
+      if (lore.some((e) => e.pinnedOnly)) lore.sort((a, b) => rankOf(a) - rankOf(b))
       assembly.lore = lore
       for (const s of result.skipped)
         if (!lore.some((e) => e.pinnedOnly && e.book === s.book && e.entry.uid === s.entry.uid))

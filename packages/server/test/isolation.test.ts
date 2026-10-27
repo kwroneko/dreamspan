@@ -9,6 +9,7 @@ import { completeFixture, fixtureSql, summaryJob } from "./support/lcmFixtures.t
 import { readFileSync } from "node:fs"
 import { assert, describe, it, layer } from "@effect/vitest"
 import { AppApi } from "@rp/shared/api.ts"
+import { BUILTIN_PRESET_LABEL } from "@rp/shared/generation.ts"
 import type { ChatId, EntityId, SlotId, VersionId } from "@rp/shared/chat.ts"
 import type { User } from "@rp/shared/domain.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
@@ -661,8 +662,8 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
         const kept = yield* actor.api.GetGenerationDefaults()
         yield* actor.api.SetGenerationDefaults({ defaults: { model: kept.model, preset: null } })
         yield* owner.api.SetGenerationDefaults({ defaults: { model: null, preset: owner.refId } })
-        assert.notStrictEqual((yield* owner.api.GetCardPromptUse()).preset, "Default")
-        assert.strictEqual((yield* actor.api.GetCardPromptUse()).preset, "Default")
+        assert.notStrictEqual((yield* owner.api.GetCardPromptUse()).preset, BUILTIN_PRESET_LABEL)
+        assert.strictEqual((yield* actor.api.GetCardPromptUse()).preset, BUILTIN_PRESET_LABEL)
         yield* actor.api.SetGenerationDefaults({ defaults: { model: kept.model, preset: kept.preset } })
       })
   },

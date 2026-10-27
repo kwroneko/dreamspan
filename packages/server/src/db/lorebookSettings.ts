@@ -1,6 +1,7 @@
 // What the preset in use does with a card's own prompts (DESIGN §5.0), read in the reader workers.
 import { CardPromptUse } from "@rp/shared/chatSetupApi.ts"
 import type { UserId } from "@rp/shared/domain.ts"
+import { BUILTIN_PRESET_LABEL } from "@rp/shared/generation.ts"
 import { LegacyPresetDoc } from "@rp/shared/docs/preset.ts"
 import { presetOrder } from "@rp/shared/presetOrder.ts"
 import { Effect, Exit, Schema } from "effect"
@@ -42,7 +43,7 @@ export const readCardPromptUse = (sql: SqlClient.SqlClient, userId: UserId) =>
       }
     }
     return new CardPromptUse({
-      preset: row && decoded && Exit.isSuccess(decoded) ? row.label : "Default",
+      preset: row && decoded && Exit.isSuccess(decoded) ? row.label : BUILTIN_PRESET_LABEL,
       main: use("main", "Main Prompt"),
       jailbreak: use("jailbreak", "Post-History Instructions")
     })

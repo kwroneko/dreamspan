@@ -2104,8 +2104,28 @@ describe("lorebooks: global books, placement and pins (DESIGN §1.3)", () => {
       expect(moved.pieces.find((p) => p.id === "lore:pinning:0")?.source).toMatchObject({
         activation: { status: "skipped", reason: "pin released: the history's start moved" }
       })
-      // After a move, the prefix marker comes first.
+      // After a move, the prefix marker comes first, and it and everything before it are unchanged.
       expect(moved.request.breakpoints[0]?.reason).toBe("prefix")
+      const prefixAt = moved.request.breakpoints[0]!.message
+      expect(contents(moved).slice(0, prefixAt + 1)).toEqual(contents(one).slice(0, prefixAt + 1))
+    })
+
+    it("keeps the pinned prefix byte for byte when a pinned entry stops matching", async () => {
+      const both: ReadonlyArray<FixtureMessage> = [
+        ...first.messages.slice(0, -1),
+        { side: "user", content: "The road flooded on a sunny day." }
+      ]
+      const one = await assembled({ ...first, messages: both })
+      expect(text(one)).toContain("PIN_LEVEE")
+      expect(text(one)).toContain("PIN_SUN")
+      const two = await assembled({
+        ...first,
+        messages: [...both, { side: "assistant", content: "Then wait." }, { side: "user", content: "It's sunny now." }],
+        historyStart: one.historyStart ?? null
+      })
+      expect(two.historyMove).toBe("unchanged")
+      const pinnedAt = two.request.breakpoints.find((b) => b.reason === "pinned")!.message
+      expect(contents(two).slice(0, pinnedAt + 1)).toEqual(contents(one).slice(0, pinnedAt + 1))
     })
 
     it("drops pins when a book is edited or the setting changes", async () => {
