@@ -110,12 +110,13 @@ test("viewer preferences belong to the account and patches preserve independent 
   const patch = { portraitSize: "largest", timeline: "summaries", coverageRail: true } as const
   await admin((api) => api.SetDisplayPrefs({ prefs: patch }))
   await admin((api) => api.SetDisplayPrefs({ prefs: { reasoning: "collapsed" } }))
-  expect(await admin((api) => api.GetDisplayPrefs({}))).toEqual({ ...patch, reasoning: "collapsed" })
+  expect(await admin((api) => api.GetDisplayPrefs({}))).toEqual({ ...patch, reasoning: "collapsed", guidance: false })
   expect(await withCookie(server(), otherCookie, (api) => api.GetDisplayPrefs({}))).toEqual({
     reasoning: "expanded",
     portraitSize: "default",
     timeline: "originals",
-    coverageRail: false
+    coverageRail: false,
+    guidance: false
   })
   const chat = await fixture("Preferences across fresh browsers")
   // A fresh browser has no localStorage: the account still has the selected layer and size.

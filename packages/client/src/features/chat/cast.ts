@@ -37,12 +37,22 @@ export const nameOf = (view: CastView, id: EntityId | null) => (id === null ? nu
  * play, in the cast's order, less the composer's own speaker (one writing as a character
  * isn't answered by that character), unless no one else is there.
  */
-export const replyCandidates = (cast: Cast | null, speaker: EntityId | null): Array<EntityId> => {
+const replyCandidates = (cast: Cast | null, speaker: EntityId | null): Array<EntityId> => {
   const present = (cast?.participants ?? []).filter(
     (id) => !cast!.playedByMe.includes(id) && !cast!.absent.includes(id)
   )
   const others = present.filter((id) => id !== speaker)
   return others.length > 0 ? others : present
+}
+
+/**
+ * The faces Reply from offers: the candidates and the muted characters, who are never next in
+ * turn but can still be picked to reply (DESIGN §3.5), in the cast's order.
+ */
+export const replyFaces = (cast: Cast | null, speaker: EntityId | null): Array<EntityId> => {
+  const characters = (cast?.participants ?? []).filter((id) => !cast!.playedByMe.includes(id))
+  const others = characters.filter((id) => id !== speaker)
+  return others.length > 0 ? others : characters
 }
 
 /** The next reply in turn, and whose turn it follows (null: no one's spoken yet). */

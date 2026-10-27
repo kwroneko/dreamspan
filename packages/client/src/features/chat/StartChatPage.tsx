@@ -23,7 +23,7 @@ import { type ReactNode } from "react"
 import { AutoGrowTextarea } from "../../ui/AutoGrowTextarea.tsx"
 import { SquareIconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import { composerKeyDown } from "./composerKeys.ts"
-import { RegenerateIcon, SendIcon } from "./icons.tsx"
+import { GenerateIcon, SendIcon } from "./icons.tsx"
 import { SpeakerSwitcher } from "./SpeakerSwitcher.tsx"
 import { CastContext, castView } from "./cast.ts"
 import { Switch } from "../../ui/Choice.tsx"
@@ -457,7 +457,7 @@ function Pending({
               : "border-border bg-surface focus-within:border-focus focus-within:ring-focus/40"
           }`}
         >
-          <div className="flex min-w-0 flex-1 flex-col">
+          <div className="grid min-w-0 flex-1">
             {guidance && (
               <span aria-hidden className="px-2 pt-0.5 text-xs font-medium text-guidance">
                 Guidance
@@ -492,7 +492,7 @@ function Pending({
               pending={action.pending}
               onClick={() => void start("generate")}
             >
-              {!action.pending && <RegenerateIcon />}
+              {!action.pending && <GenerateIcon />}
             </SquareIconButton>
           ) : (
             <>

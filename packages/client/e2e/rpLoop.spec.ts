@@ -9,14 +9,17 @@ import type { ChatId } from "@rp/shared/chat.ts"
 import type { LibraryRef } from "@rp/shared/library.ts"
 import { Effect } from "effect"
 import { writeRealisticStFolder } from "../../server/test/support/stRealistic.ts"
-import { openPanel } from "./support/panel.ts"
+import { closePanel, openPanel } from "./support/panel.ts"
 import { type FakeProvider, startProvider } from "./support/provider.ts"
-import { asUser } from "./support/rpc.ts"
+import { loginCookie, withCookie } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { expectTextBox } from "./support/textbox.ts"
 
 const server = serverPerFile(withAdmin)
-const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)
+// One session for the whole file: logging in for every call runs into the login rate limit.
+let cookie: string | null = null
+const admin = async <A>(use: Parameters<typeof withCookie<A>>[2]) =>
+  withCookie(server(), (cookie ??= await loginCookie(server(), ADMIN.handle, ADMIN.password)), use)
 const shots = resolve(process.env.SCREENSHOT_DIR ?? "p1-1-work/screenshots")
 let provider: FakeProvider
 let presets: ReadonlyArray<LibraryRef>
@@ -106,6 +109,19 @@ const shoot = async (page: Page, name: string, width: number, theme: string) => 
 const composerBox = (page: Page) => page.locator("#composer")
 const guidanceSwitch = (page: Page) => page.getByRole("switch", { name: "Guidance", exact: true })
 const lastMessage = (page: Page) => page.locator("article[data-slot]").last()
+/** The inspector's list draws rows as they scroll in: its end, where the tail is. */
+const inspectorEnd = async (page: Page, text: string) => {
+  await expect
+    .poll(async () => {
+      await page.evaluate(() => {
+        for (const element of [document.scrollingElement, ...document.querySelectorAll("main, main *")])
+          if (element && element.scrollHeight > element.clientHeight) element.scrollTop = element.scrollHeight
+      })
+      return page.getByText(text).count()
+    })
+    .toBeGreaterThan(0)
+  await page.getByText(text).last().scrollIntoViewIfNeeded()
+}
 
 for (const width of [1440, 390])
   for (const theme of ["light", "dark"] as const)
@@ -179,7 +195,7 @@ for (const width of [1440, 390])
 
       // The request inspector for the directed reply: the direction prompt, and who it was for.
       await page.goto(`${server().url}/chats/${inn}/context/${directed}`)
-      await expect(page.getByText(direction).first()).toBeVisible()
+      await inspectorEnd(page, direction)
       await shot("07-inspector-directed")
       await page.goto(`${server().url}/chats/${inn}`)
       await expect(composerBox(page)).toBeEditable()
@@ -195,17 +211,34 @@ for (const width of [1440, 390])
       await page.keyboard.press("Escape")
       await expect(cast.getByText("muted", { exact: true }).first()).toBeVisible()
       await expect(cast.getByRole("heading", { level: 2 })).toContainText("1 muted")
-      const mutedRow = cast.getByRole("listitem").filter({ hasText: "muted" }).first()
+      const mutedRow = cast
+        .getByRole("list", { name: "Characters in this chat" })
+        .getByRole("listitem")
+        .filter({ has: page.getByText("muted", { exact: true }) })
+        .first()
       const mutedName = (await mutedRow.getAttribute("aria-label"))!
       await expect(mutedRow.getByRole("switch")).toBeChecked()
       await shot("09-cast-tab-muted")
       // Never picked automatically: it's not offered to reply.
-      await expect(page.getByRole("group", { name: "Reply from" })).not.toContainText(mutedName)
+      if (width < 1024) await closePanel(page)
+      const replyFrom = page.getByRole("group", { name: "Reply from" })
+      await expect(replyFrom.getByRole("status")).toContainText("Next in turn")
+      await expect(replyFrom.getByRole("status")).not.toContainText(mutedName)
+      // It can still be picked for one reply, explicitly.
+      await replyFrom.getByRole("button", { name: `Reply from ${mutedName} (muted)` }).click()
+      await expect(replyFrom.getByRole("status")).toContainText(`${mutedName} replies next: your pick`)
+      await replyFrom.getByRole("button", { name: "Back to turn order" }).click()
+      await expect(replyFrom.getByRole("status")).toContainText("Next in turn")
+      // Writing as a member (the muted one, explicitly) doesn't change who {{user}} is.
       await page.getByRole("button", { name: /^Speaking as / }).click()
       await page.getByRole("tab", { name: "Members", exact: true }).click()
       await page.getByRole("option", { name: mutedName, exact: true }).click()
       await expect(page.getByRole("button", { name: `Speaking as ${mutedName}. Change the speaker` })).toBeVisible()
-      await expect(you.getByRole("button", { name: /^Playing as / })).toHaveAttribute("aria-label", personaLabel!)
+      const castAgain = await openPanel(page, "Cast")
+      await expect(
+        castAgain.getByRole("group", { name: "Your persona" }).getByRole("button", { name: /^Playing as / })
+      ).toHaveAttribute("aria-label", personaLabel!)
+      if (width < 1024) await closePanel(page)
 
       // Writing for the persona: an impersonation, with the preset's impersonation prompt.
       await page.getByRole("button", { name: /^Speaking as / }).click()
@@ -225,7 +258,7 @@ for (const width of [1440, 390])
       // Night RP 3.1 has its impersonation prompt: no notice.
       await expect(page.getByText(/may need “not when writing as/)).toHaveCount(0)
       await page.goto(`${server().url}/chats/${inn}/context/${(await newestVersion()).id}`)
-      await expect(page.getByText("sent when writing as {{user}}").first()).toBeVisible()
+      await inspectorEnd(page, "sent when writing as {{user}}")
       await shot("10-inspector-impersonation")
 
       // The preset editor: conditions, the import's prompt, and both warnings.
@@ -240,8 +273,9 @@ for (const width of [1440, 390])
       const style = editor.locator('[data-prompt="night-impersonation-style"]')
       await expect(style).toContainText("as {{user}}")
       await expect(style.getByRole("combobox", { name: "Condition" })).toContainText("When writing as {{user}}")
+      await style.scrollIntoViewIfNeeded()
       await shot("11-editor-conditions")
-      await direct.getByRole("switch").click()
+      await direct.getByRole("switch", { name: "Send Direction" }).click()
       const nudge = editor.locator('[data-prompt="groupNudge"]')
       await nudge.getByRole("combobox", { name: "Role" }).click()
       await page.getByRole("option", { name: "assistant", exact: true }).click()
@@ -255,7 +289,7 @@ for (const width of [1440, 390])
       // Put both back as they were (the drafts are this account's).
       await nudge.getByRole("combobox", { name: "Role" }).click()
       await page.getByRole("option", { name: "system", exact: true }).click()
-      await direct.getByRole("switch").click()
+      await direct.getByRole("switch", { name: "Send Direction" }).click()
       await expect(warnings).toHaveCount(0)
       await editor.getByRole("button", { name: "Close preset editor", exact: true }).click()
 
@@ -265,7 +299,7 @@ for (const width of [1440, 390])
         await usePreset(label)
         await page.goto(`${server().url}/library`)
         await page.getByRole("button", { name: `Edit ${label}`, exact: true }).click()
-        await editor.locator('[data-prompt="impersonationPrompt"]').getByRole("switch").click()
+        await editor.getByRole("switch", { name: "Send Impersonation prompt" }).click()
         await editor.getByRole("button", { name: /^Save \(/ }).click()
         await page
           .getByRole("dialog", { name: "Save a revision" })

@@ -40,6 +40,12 @@ const shoot = async (page: Page, name: string) => {
 const replies = (page: Page) => page.getByRole("article", { name: "Reply" })
 const generating = (page: Page) => page.getByText("generating", { exact: true })
 const composer = (page: Page) => page.getByLabel("Message", { exact: true })
+/** The account's guidance toggle (DESIGN §2.2), on or off whatever an earlier test left. */
+const setGuidance = async (page: Page, on: boolean) => {
+  const toggle = page.getByRole("switch", { name: "Guidance", exact: true })
+  if ((await toggle.getAttribute("aria-checked")) !== String(on)) await toggle.click()
+  await expect(toggle).toHaveAttribute("aria-checked", String(on))
+}
 
 let cast: Promise<void> | null = null
 /** Mira and Tobin to talk to, Ana and Bo in the persona folder: once per file, through the library. */
@@ -150,7 +156,7 @@ test("a new chat from a card: the greeting follows the persona until the first s
   await expect(page.getByRole("complementary", { name: "Chat panel" })).toHaveCount(0)
 })
 
-test("Send as another card, and Generate with a one-turn direction that swipes reuse", async ({ page }) => {
+test("Send as another card, and Generate with guidance that a swipe takes only while it's on", async ({ page }) => {
   await login(page)
   await chatWithMira(page)
   // The speaker is always visible; picking a card that isn't in the chat adds it.
@@ -171,22 +177,31 @@ test("Send as another card, and Generate with a one-turn direction that swipes r
   await page.keyboard.press("Escape")
   await page.getByRole("button", { name: "Speak as Mira" }).click()
 
-  await composer(page).fill("Mira tells a story about the storm.")
+  // With guidance on, the box is a one-turn direction, and it stays (DESIGN §2.2).
+  await setGuidance(page, true)
+  const guidance = page.getByRole("textbox", { name: "Guidance", exact: true })
+  await guidance.fill("Mira tells a story about the storm.")
   await page.getByRole("button", { name: "Write for Mira" }).click()
-  await expect(composer(page)).toHaveValue("")
   const reply = replies(page).last()
   await expect(reply).toContainText("Direction: Mira tells a story about the storm.")
+  await expect(guidance).toHaveValue("Mira tells a story about the storm.")
   await expect(generating(page)).toHaveCount(0, { timeout: 20_000 })
   await shoot(page, "generate-with-direction")
-  // A swipe of that turn keeps its direction.
+  // A swipe takes the guidance too.
   await reply.getByRole("button", { name: "Generate another version" }).click()
   await expect(reply.getByRole("group", { name: "Versions" })).toContainText("2/2")
   await expect(reply).toContainText("Direction: Mira tells a story about the storm.")
   await expect(generating(page)).toHaveCount(0, { timeout: 20_000 })
-  // The next turn doesn't inherit it.
+  // With guidance off, nothing is reused: neither by a swipe nor by the next turn.
+  await setGuidance(page, false)
+  await reply.getByRole("button", { name: "Generate another version" }).click()
+  await expect(reply.getByRole("group", { name: "Versions" })).toContainText("3/3")
+  await expect(reply).not.toContainText("Direction:")
+  await expect(generating(page)).toHaveCount(0, { timeout: 20_000 })
   await page.getByRole("button", { name: "Write for Mira" }).click()
   await expect(replies(page).last()).not.toContainText("Direction:")
   await expect(generating(page)).toHaveCount(0, { timeout: 20_000 })
+  await composer(page).fill("")
 })
 
 test("a message sent during a reply waits, then posts after it", async ({ page }) => {
@@ -284,14 +299,17 @@ test("text typed while Generate is on its way stays in the composer", async ({ p
   await login(page)
   await chatWithMira(page)
   await page.getByRole("button", { name: "Speak as Mira" }).click()
-  await composer(page).fill("A held direction.")
+  await setGuidance(page, true)
+  const guidance = page.getByRole("textbox", { name: "Guidance", exact: true })
+  await guidance.fill("A held direction.")
   await page.getByRole("button", { name: "Write for Mira" }).click()
   await expect.poll(() => release !== null).toBe(true)
-  await composer(page).fill("Typed while it was on its way.")
+  await guidance.fill("Typed while it was on its way.")
   release!()
   await expect(replies(page).last()).toContainText("Direction: A held direction.")
-  await expect(composer(page)).toHaveValue("Typed while it was on its way.")
+  await expect(guidance).toHaveValue("Typed while it was on its way.")
   await expect(generating(page)).toHaveCount(0, { timeout: 20_000 })
+  await setGuidance(page, false)
 })
 
 test("a saved greeting keeps its card's fields and the date it showed", async ({ page }) => {

@@ -1021,7 +1021,7 @@ export class ChatSession {
 
   /**
    * The user's message at the leaf, as `speaker` (Send as X), then a reply to it by
-   * `replySpeaker`, unless there's no one to reply. Onto a reply still being written, it's queued and the server posts it,
+   * `replySpeaker`, unless `reply` is false. Onto a reply still being written, it's queued and the server posts it,
    * with its reply, when that one ends (DESIGN §2.2). `sent` says whether the message went,
    * and `draft` is the composer draft as the send left it.
    */
@@ -1030,7 +1030,9 @@ export class ChatSession {
     speaker: EntityId | null = null,
     replySpeaker: EntityId | null = null,
     /** The composer draft the text came from, which the send commits (DESIGN §6.2). */
-    composer?: ComposerSource
+    composer?: ComposerSource,
+    /** False when no one may reply (every character muted, DESIGN §3.5): the message is only posted. */
+    reply = true
   ): Promise<{
     readonly sent: boolean
     readonly outcome: Outcome<unknown>
@@ -1060,8 +1062,7 @@ export class ChatSession {
     const { draft, recovered } = result.value
     if (result.value._tag === "Queued") return { sent: true, outcome: result, draft, recovered }
     this.appended(result.value.entry, result.value.chat)
-    // No one to reply (every character muted, DESIGN §3.5): the message is posted, and that's all.
-    if (replySpeaker === null) return { sent: true, outcome: result, draft, recovered }
+    if (!reply) return { sent: true, outcome: result, draft, recovered }
     return { sent: true, outcome: await this.generate(result.value.entry.slotId, replySpeaker), draft, recovered }
   }
 

@@ -24,8 +24,8 @@ import { Switch } from "../../ui/Choice.tsx"
 import { useViewPrefs } from "../../ui/viewPrefs.ts"
 import { Badge } from "../../ui/Surface.tsx"
 import { SquareIconButton, Tooltip } from "../../ui/Tooltip.tsx"
-import { defaultSpeaker, nameOf, nextInTurn, recentSpeakers, replyCandidates, useCast } from "./cast.ts"
-import { HistoryIcon, RegenerateIcon, SendIcon, StopIcon } from "./icons.tsx"
+import { defaultSpeaker, nameOf, nextInTurn, recentSpeakers, replyFaces, useCast } from "./cast.ts"
+import { GenerateIcon, HistoryIcon, RegenerateIcon, SendIcon, StopIcon } from "./icons.tsx"
 import { composerChoice, useComposerChoice } from "./speaker.ts"
 import { ReplyFrom } from "./ReplyFrom.tsx"
 import { SpeakerSwitcher } from "./SpeakerSwitcher.tsx"
@@ -273,12 +273,16 @@ export function Composer({
   const name = nameOf(castView, speaker)
   const speakerPlayed = speaker !== null && (cast?.playedByMe.includes(speaker) ?? false)
   // Who replies to the next send: the face picked for it, else the next in turn (ReplyFrom.tsx).
-  const candidates = useMemo(() => replyCandidates(cast, speaker), [cast, speaker])
   const next = useMemo(
     () => (turnEntries === null ? null : nextInTurn(cast, turnEntries, speaker)),
     [cast, turnEntries, speaker]
   )
-  const pickedReply = choice.replyFrom !== null && candidates.includes(choice.replyFrom) ? choice.replyFrom : null
+  // Every character muted (DESIGN §3.5): Send posts the message and asks for no reply.
+  const characters = (cast?.participants ?? []).filter((id) => !cast!.playedByMe.includes(id))
+  const everyoneMuted = characters.length > 0 && characters.every((id) => cast!.absent.includes(id))
+  // A muted character is never next in turn, but can be picked for one reply.
+  const faces = useMemo(() => replyFaces(cast, speaker), [cast, speaker])
+  const pickedReply = choice.replyFrom !== null && faces.includes(choice.replyFrom) ? choice.replyFrom : null
   const replier = pickedReply ?? next?.id ?? null
   const replierName = nameOf(castView, replier)
   // Only known when the window reaches the leaf; otherwise the server takes the message anyway.
@@ -373,7 +377,13 @@ export function Composer({
     text.trim() === ""
       ? Promise.resolve()
       : submit(async (from) => {
-          const { sent, outcome, draft, recovered } = await session.send(from.text, speaker, replier, from)
+          const { sent, outcome, draft, recovered } = await session.send(
+            from.text,
+            speaker,
+            replier,
+            from,
+            !everyoneMuted || pickedReply !== null
+          )
           report(outcome)
           if (sent) replied(from.draftId)
           // A message that was sent (or queued) is gone from the box, even if its reply failed.
@@ -496,19 +506,8 @@ export function Composer({
               </Tooltip>
             )
           })}
-          <span className="ml-auto flex items-center gap-1">
-            <span className="text-sm whitespace-nowrap">
-              <Switch
-                checked={guidance}
-                disabled={!viewPrefs.ready}
-                onCheckedChange={(next) => void viewPrefs.change({ guidance: next })}
-              >
-                Guidance
-              </Switch>
-            </span>
-            <span className="@min-[640px]:hidden">
-              <History draft={draft} />
-            </span>
+          <span className="ml-auto @min-[640px]:hidden">
+            <History draft={draft} />
           </span>
         </div>
         <div
@@ -519,7 +518,7 @@ export function Composer({
               : "border-border bg-surface focus-within:border-focus focus-within:ring-focus/40"
           }`}
         >
-          <div className="flex min-w-0 flex-1 flex-col">
+          <div className="grid min-w-0 flex-1">
             {guidance && (
               <span aria-hidden className="px-2 pt-0.5 text-xs font-medium text-guidance">
                 Guidance
@@ -590,7 +589,7 @@ export function Composer({
               disabled={!ready || replier === null}
               onClick={replyDirected}
             >
-              {!busy && <RegenerateIcon />}
+              {!busy && <GenerateIcon />}
             </SquareIconButton>
           ) : (
             <SquareIconButton
@@ -606,20 +605,33 @@ export function Composer({
           )}
         </div>
       </div>
+      {/* The guidance toggle, under the input so it never narrows it (DESIGN §2.2). */}
+      <div className="flex flex-wrap items-start gap-x-3 gap-y-1">
+        <span className="shrink-0 text-sm">
+          <Switch
+            checked={guidance}
+            disabled={!viewPrefs.ready}
+            onCheckedChange={(next) => void viewPrefs.change({ guidance: next })}
+          >
+            Guidance
+          </Switch>
+        </span>
+        {(guidance || hasText) && (
+          <p id="composer-hint" className="min-w-0 flex-1 basis-60 pt-0.5 text-xs text-muted">
+            {guidance
+              ? "A one-turn direction for the next reply, Write for, a new version or Continue. It stays here until you change it."
+              : `${generateText} doesn't use this text: turn guidance on to direct the next message with it.`}
+          </p>
+        )}
+      </div>
       <ReplyFrom
-        candidates={candidates}
+        candidates={faces}
+        muted={cast?.absent ?? []}
         next={next}
         picked={pickedReply}
         disabled={!ready}
         onPick={(id) => void choices.change({ replyFrom: id }).then(report)}
       />
-      {(guidance || hasText) && (
-        <p id="composer-hint" className="text-xs text-muted">
-          {guidance
-            ? "Guidance: a one-turn direction for the next reply, Write for, a new version or Continue. It stays here until you change it."
-            : `${generateText} doesn't use this text: turn guidance on to direct the next message with it.`}
-        </p>
-      )}
       {impersonationNotice && (
         <div
           role="status"

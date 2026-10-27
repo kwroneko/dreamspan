@@ -9,12 +9,15 @@ import { nameOf, type NextInTurn, useCast } from "./cast.ts"
 
 export function ReplyFrom({
   candidates,
+  muted,
   next,
   picked,
   disabled,
   onPick
 }: {
   candidates: ReadonlyArray<EntityId>
+  /** Muted characters: offered for an explicit pick, never next in turn (DESIGN §3.5). */
+  muted: ReadonlyArray<EntityId>
   next: NextInTurn | null
   /** The face picked for the next reply; null: the next in turn replies. */
   picked: EntityId | null
@@ -40,12 +43,17 @@ export function ReplyFrom({
         {candidates.map((id) => {
           const who = name(id)
           const chosen = id === replier
-          const label = chosen ? `${who} replies next` : `Reply from ${who}`
+          const quiet = muted.includes(id)
+          const label = chosen
+            ? `${who} replies next`
+            : quiet
+              ? `Reply from ${who}, muted: only when you pick them`
+              : `Reply from ${who}`
           return (
             <Tooltip key={id} label={label}>
               <button
                 type="button"
-                aria-label={`Reply from ${who}`}
+                aria-label={`Reply from ${who}${quiet ? " (muted)" : ""}`}
                 aria-pressed={chosen}
                 disabled={disabled}
                 // The next in turn needs no pick; picking them again goes back to the turn order.
@@ -53,7 +61,7 @@ export function ReplyFrom({
                 className="inline-flex h-8 max-w-40 min-w-0 shrink-0 items-center gap-1.5 rounded-full border border-border py-0.5 pr-2.5 pl-0.5 text-xs outline-none hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus disabled:opacity-40 aria-pressed:border-accent aria-pressed:bg-accent/10 aria-pressed:font-medium aria-pressed:ring-1 aria-pressed:ring-accent"
               >
                 <Avatar id={id} name={who} mediaId={view.cards.get(id)?.avatarMediaId ?? null} size="chip" />
-                <span className="min-w-0 truncate">{who}</span>
+                <span className={`min-w-0 truncate ${quiet ? "text-muted line-through" : ""}`}>{who}</span>
               </button>
             </Tooltip>
           )

@@ -124,7 +124,8 @@ for (const width of [1440, 390])
         e.scrollTop = 0
       })
       const find = overlay.getByRole("textbox", { name: "Find", exact: true })
-      await find.fill("{{char}}")
+      // Any macro: the group nudge's {{speaker}} stays after the light run's save removes {{char}}.
+      await find.fill("{{")
       await overlay.getByRole("textbox", { name: "Replace with", exact: true }).fill("{{cast}}")
       await overlay.getByRole("button", { name: "Find", exact: true }).click()
       await expect(overlay.getByRole("list", { name: "Matches", exact: true })).toContainText("→")

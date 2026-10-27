@@ -1,6 +1,6 @@
 import { expectTextBox } from "./support/textbox.ts"
 // The Cast tab (DESIGN §2.1, §2.2, §3.5, §4), against a server with the fake generator:
-// everyone in the chat with what ST's group panel offers (absent, speak now, write as, the
+// everyone in the chat with what ST's group panel offers (mute, speak now, write as, the
 // card shown, remove, add), and a card edited only in this chat or everywhere. Every card
 // here is made up.
 import { join } from "node:path"
@@ -84,18 +84,19 @@ const openCast = async (page: Page) => {
   await expect(members(page)).toBeVisible()
 }
 
-test("the Cast tab: absent, speak now, write as, the card, add and remove", async ({ page }) => {
+test("the Cast tab: mute, speak now, write as, the card, add and remove", async ({ page }) => {
   await chatWithMira(page)
   await openCast(page)
   await expect(page.getByText("Changes here apply from the latest message on, on this branch.")).toBeVisible()
   await expect(members(page).getByRole("listitem")).toHaveCount(2)
-  await expect(member(page, "Bo")).toContainText("played by you")
+  await expect(member(page, "Bo")).toContainText("your persona")
 
   // Absent from here on, like ST's mute; and back.
   await member(page, "Mira").getByRole("switch").click()
-  await expect(member(page, "Mira")).toContainText("absent")
+  await expect(member(page, "Mira")).toContainText("muted")
+  await expect(page.getByRole("heading", { name: /1 muted/ })).toBeVisible()
   await member(page, "Mira").getByRole("switch").click()
-  await expect(member(page, "Mira")).not.toContainText("absent")
+  await expect(member(page, "Mira").getByText("muted", { exact: true })).toHaveCount(0)
 
   // The card as this chat uses it, read-only.
   await page.getByRole("button", { name: "Show card: Mira" }).click()
