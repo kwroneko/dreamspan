@@ -1257,6 +1257,8 @@ export class WriteOps extends RpcGroup.make(
       speakerEntityId: Schema.NullOr(EntityId),
       /** For a message that's queued: who replies once it posts. */
       replySpeakerEntityId: Schema.NullOr(EntityId),
+      /** For a message that's queued: true when it posts without a reply (every character muted). */
+      noReply: Schema.optionalKey(Schema.Boolean),
       direction: Schema.NullOr(Schema.String),
       /** The composer the text came from, committed with the post or the queued entry. */
       commitDraft: CommitDraft

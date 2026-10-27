@@ -312,6 +312,11 @@ export class ChatApi extends RpcGroup.make(
        * would have asked for it after an immediate send.
        */
       replySpeakerEntityId: Schema.optionalKey(Schema.NullOr(EntityId)),
+      /**
+       * False: no reply follows it (every character muted, DESIGN §3.5). Queued, it posts alone;
+       * posted at once, the client asks for no reply.
+       */
+      reply: Schema.optionalKey(Schema.Boolean),
       composer: ComposerCommit
     },
     success: SendResult,

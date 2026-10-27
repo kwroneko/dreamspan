@@ -288,6 +288,61 @@ describe("send queue", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), gated)))
   )
 
+  it.live("a message queued with no one to reply posts alone, and the entries after it post on from it", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const { chat, reply } = yield* generatingChat(api)
+      // Every character muted (DESIGN §3.5): the composer asks for no reply.
+      const muted = yield* api.SendMessage({
+        chatId: chat.id,
+        parentSlotId: reply.slotId,
+        branch: false,
+        content: "m1",
+        reply: false
+      })
+      assert.strictEqual(muted._tag, "Queued")
+      yield* api.SendMessage({
+        chatId: chat.id,
+        parentSlotId: reply.slotId,
+        branch: false,
+        content: "m2",
+        reply: false
+      })
+      yield* release(reply.version.id)
+      yield* pathBecomes(api, chat.id, ["you: m0", "model (complete)", "you: m1", "you: m2"])
+      assert.lengthOf(yield* api.ListQueued({ chatId: chat.id }), 0)
+      // Nothing else starts: no reply was asked for.
+      yield* Effect.sleep(100)
+      assert.lengthOf(yield* path(api, chat.id), 4)
+
+      // A muted message ahead of one that wants a reply: the reply follows the later one.
+      const second = yield* posted(
+        api.Generate({ chatId: chat.id, parentSlotId: (yield* path(api, chat.id))[3]!.slotId, branch: false })
+      )
+      yield* api.SendMessage({
+        chatId: chat.id,
+        parentSlotId: second.entry.slotId,
+        branch: false,
+        content: "m3",
+        reply: false
+      })
+      yield* api.SendMessage({ chatId: chat.id, parentSlotId: second.entry.slotId, branch: false, content: "m4" })
+      yield* release(second.entry.version.id)
+      const entries = yield* pathBecomes(api, chat.id, [
+        "you: m0",
+        "model (complete)",
+        "you: m1",
+        "you: m2",
+        "model (complete)",
+        "you: m3",
+        "you: m4",
+        "model (generating)"
+      ])
+      assert.lengthOf(yield* api.ListQueued({ chatId: chat.id }), 0)
+      yield* release(entries[7]!.version.id)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), gated)))
+  )
+
   it.live("several entries post one reply at a time, and Generate queues under the same rule", () =>
     Effect.gen(function* () {
       const api = yield* client()

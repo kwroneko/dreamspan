@@ -125,6 +125,8 @@ export const makeChatHandlers = Effect.gen(function* () {
       readonly content: string
       readonly speakerEntityId: EntityId | null
       readonly replySpeakerEntityId: EntityId | null
+      /** A message that posts without a reply (every character muted, DESIGN §3.5). */
+      readonly noReply?: boolean
       readonly direction: string | null
       readonly composer: { readonly draftId: string; readonly session: number } | undefined
     }
@@ -210,7 +212,7 @@ export const makeChatHandlers = Effect.gen(function* () {
     ListVersions: ({ slotId }) =>
       Effect.flatMap(userId, (id) => reader.ListVersions({ userId: id, slotId })).pipe(internal("ListVersions")),
 
-    SendMessage: ({ chatId, parentSlotId, branch, content, speakerEntityId, replySpeakerEntityId, composer }) =>
+    SendMessage: ({ chatId, parentSlotId, branch, content, speakerEntityId, replySpeakerEntityId, reply, composer }) =>
       Effect.flatMap(userId, (id) =>
         sendOrQueue(id, {
           chatId,
@@ -220,6 +222,7 @@ export const makeChatHandlers = Effect.gen(function* () {
           content,
           speakerEntityId: speakerEntityId ?? null,
           replySpeakerEntityId: replySpeakerEntityId ?? null,
+          ...(reply === false ? { noReply: true } : {}),
           direction: null,
           composer
         })

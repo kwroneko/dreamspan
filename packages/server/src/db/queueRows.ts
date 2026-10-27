@@ -15,6 +15,8 @@ export interface QueuedRow {
   readonly speaker_entity_id: string | null
   readonly reply_speaker_entity_id: string | null
   readonly direction: string | null
+  /** For 'message': 1 when it posts without a reply (every character muted, migration 0048). */
+  readonly no_reply: number
   readonly row_version: number
   readonly created_at: number
 }

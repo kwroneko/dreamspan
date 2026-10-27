@@ -143,13 +143,31 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
           yield* sql`DELETE FROM queued_messages WHERE reply_slot_id = ${replySlotId}`
           return { ...nothing, posted, queueChanged: true, queue: yield* chatQueue(sql, chatId) }
         }
-        const [first] = entries
+        // Messages sent with no one to reply (every character muted, DESIGN §3.5) post at
+        // once, one after another, as they would have then; the first entry that wants a
+        // reply goes on from the last of them.
+        let replyParent = replySlotId
+        let waiting = entries
+        while (waiting[0]?.kind === "message" && waiting[0].no_reply === 1) {
+          const entry = waiting[0]
+          const message = yield* append(
+            replyParent,
+            userMessage(entry.content, yield* liveSpeaker(owner, entry.speaker_entity_id))
+          )
+          posted.push(message.slotId)
+          replyParent = message.slotId
+          waiting = waiting.slice(1)
+        }
+        if (waiting.length === 0) {
+          yield* sql`DELETE FROM queued_messages WHERE reply_slot_id = ${replySlotId}`
+          return { ...nothing, posted, queueChanged: true, queue: yield* chatQueue(sql, chatId) }
+        }
+        const [first] = waiting
         // A message's reply comes from whoever was picked when it was sent, as for a send then.
         const replySpeaker = yield* liveSpeaker(owner, first!.reply_speaker_entity_id)
         const speaker = yield* liveSpeaker(owner, first!.speaker_entity_id)
-        let replyParent = replySlotId
         if (first!.kind === "message") {
-          const message = yield* append(replySlotId, userMessage(first!.content, speaker))
+          const message = yield* append(replyParent, userMessage(first!.content, speaker))
           posted.push(message.slotId)
           replyParent = message.slotId
         }
@@ -158,7 +176,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
           first!.kind === "message" ? reply(replySpeaker, null) : reply(speaker, first!.direction)
         )
         posted.push(next.slotId)
-        yield* sql`DELETE FROM queued_messages WHERE id = ${first!.id}`
+        yield* sql`DELETE FROM queued_messages WHERE id IN ${sql.in(entries.slice(0, entries.length - waiting.length + 1).map((e) => e.id))}`
         yield* sql`UPDATE queued_messages SET reply_slot_id = ${next.slotId}, updated_at = ${Date.now()}
           WHERE reply_slot_id = ${replySlotId}`
         return {
@@ -267,6 +285,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
         content,
         speakerEntityId,
         replySpeakerEntityId,
+        noReply,
         direction,
         commitDraft
       }) =>
@@ -296,6 +315,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
                 content: kind === "message" ? content : "",
                 speaker_entity_id: speakerEntityId,
                 reply_speaker_entity_id: kind === "message" ? replySpeakerEntityId : null,
+                no_reply: kind === "message" && noReply === true ? 1 : 0,
                 direction: kind === "generate" && direction !== null && direction.trim() !== "" ? direction : null,
                 created_at: at,
                 updated_at: at

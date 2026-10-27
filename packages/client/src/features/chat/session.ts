@@ -1050,6 +1050,8 @@ export class ChatSession {
           speakerEntityId: speaker,
           // If it's queued, the server asks for the reply when it posts, from the same speaker.
           replySpeakerEntityId: replySpeaker,
+          // Queued with no one to reply, it posts alone, as it does at once.
+          ...(reply ? {} : { reply: false }),
           ...(composer === undefined ? {} : { composer: commitOf(composer) })
         })
       ),

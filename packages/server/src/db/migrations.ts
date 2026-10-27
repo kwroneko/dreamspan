@@ -301,7 +301,12 @@ export const migrations = {
     }
     // Legacy model/preset state events stay as historical data. Live assembly ignores them;
     // none is adopted as an account default and no sampler is copied to any model.
-  })
+  }),
+  // A queued message sent with every character muted posts without a reply (DESIGN §3.5),
+  // as an immediate send does.
+  "0048_queued_no_reply": runAll([
+    `ALTER TABLE queued_messages ADD COLUMN no_reply INTEGER NOT NULL DEFAULT 0 CHECK (no_reply IN (0, 1))`
+  ])
 }
 
 export const Migrations = SqliteMigrator.layer({ loader: SqliteMigrator.fromRecord(migrations) })
