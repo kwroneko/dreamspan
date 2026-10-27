@@ -238,7 +238,10 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
                 : change._tag === "DefaultModel"
                   ? { model: null }
                   : { preset: null }
-          yield* writer.ChangeGenerationDefaults({ userId: id, change: selection })
+          // A model or preset change names no summarization setting, so it can't be refused as one.
+          yield* writer
+            .ChangeGenerationDefaults({ userId: id, change: selection })
+            .pipe(Effect.catchTag("LcmSettingsInvalid", (error) => Effect.die(error)))
           yield* warmth.refreshUser(id)
         } else {
           yield* writer.AddStateEvent({

@@ -31,7 +31,7 @@ it.live(
       const model = yield* api.AddUserModel({
         connectionId: connection.id,
         key: "synthetic",
-        overrides: { context: 4096 }
+        overrides: { context: 4096, maxOutput: 256 }
       })
       const preset = yield* writer.CreateEntity({
         userId: user.id,

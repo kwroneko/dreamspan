@@ -9,16 +9,19 @@
 // Browser recovery.
 import type { GenerationDefaults, GenerationDefaultsChange } from "@rp/shared/generation.ts"
 import type { LibraryRef } from "@rp/shared/library.ts"
+import { LCM_BUILTIN, lcmMisfits, resolveLcm } from "@rp/shared/lcmSettings.ts"
 import { Effect } from "effect"
 import { useEffect, useRef, useState } from "react"
 import { useAction } from "../../actions.tsx"
 import { useSession } from "../../session.ts"
 import { useTitle } from "../shell.tsx"
 import { Button } from "../../ui/Button.tsx"
+import { Switch } from "../../ui/Choice.tsx"
 import { Field, Textarea } from "../../ui/Field.tsx"
 import { Select } from "../../ui/Select.tsx"
 import { Card, CardHeader } from "../../ui/Surface.tsx"
 import { type Copy, copiesOf, dropCopy, keepCopy, makeCopy, pendingOf } from "../editor/backup.ts"
+import { LcmFields, type Write } from "./LcmFields.tsx"
 import { modelValue, parseModelValue, useModelChoices } from "./modelChoices.ts"
 
 const NONE = "none"
@@ -87,6 +90,19 @@ export function ChatDefaultsPage() {
     queue.current = write
     return write
   }
+  /** A summarization default, one field at a time; the refusal is shown under that field. */
+  const writeLcm: Write = (lcm) => {
+    const write = queue.current.then(() =>
+      action
+        .run((client) => client("ChangeGenerationDefaults", { change: { lcm } }))
+        .then((result) => {
+          if (result.ok) setDefaults(result.value)
+          return result.ok ? null : result.error.message
+        })
+    )
+    queue.current = write
+    return write
+  }
 
   /** Saves of the instruction not answered yet: until they are, what's saved may still change. */
   const saving = useRef(0)
@@ -136,6 +152,7 @@ export function ChatDefaultsPage() {
   const choice = (picked: { connection: string; model: string } | null | undefined) =>
     picked ? modelValue(picked.connection, picked.model) : NONE
   const unsaved = defaults !== null && tail !== savedTail(defaults)
+  const account = resolveLcm(null, defaults?.lcm)
   return (
     <div className="flex flex-col gap-6">
       <Card>
@@ -200,9 +217,17 @@ export function ChatDefaultsPage() {
               onValueChange={(value) => void change({ fallback: value === NONE ? null : parseModelValue(value) })}
             />
           </Field>
+          <Switch
+            checked={account.enabled}
+            disabled={!defaults}
+            onCheckedChange={(enabled) => void writeLcm({ enabled })}
+            description="Chats imported from SillyTavern start with summaries off whatever this says."
+          >
+            New chats summarize older messages
+          </Switch>
           <Field
             label="Summarization instruction"
-            description="Your default for all chats. A chat's own instruction takes precedence. Use {{words}} for the summary's word limit; leave empty for the built-in instruction."
+            description="The default for new chats, which copy it when they're made; a chat's own instruction takes precedence. Use {{words}} for the summary's length; leave empty for the built-in instruction."
           >
             <Textarea value={tail} onChange={(event) => type(event.target.value)} rows={5} disabled={!defaults} />
           </Field>
@@ -223,6 +248,20 @@ export function ChatDefaultsPage() {
               )
             )}
           </div>
+        </section>
+        <section aria-label="Summary defaults for new chats" className="mt-6 flex flex-col gap-3">
+          <h3 className="text-sm font-medium text-text">For new chats</h3>
+          <p className="text-sm text-muted">
+            A new chat copies these when it's made and keeps them; change a chat's own in its side panel's This chat
+            tab. Chats from before these settings follow them until they set their own.
+          </p>
+          <LcmFields
+            scope="account"
+            view={{ resolved: account, fit: lcmMisfits(account, null), now: null, fitted: null }}
+            fallback={LCM_BUILTIN}
+            write={writeLcm}
+            disabled={!defaults}
+          />
         </section>
         {action.error && (
           <p role="alert" className="mt-3 text-sm text-danger">

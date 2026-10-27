@@ -1,4 +1,5 @@
 import { assert, it } from "@effect/vitest"
+import { uuidv7 } from "@rp/shared/id.ts"
 import { Effect } from "effect"
 
 import { spawn } from "node:child_process"
@@ -46,7 +47,7 @@ it.live(
             reader = yield* Reader
           const { chat } = yield* generateReply(api, {
             connection: { kind: "openai-chat", baseUrl: mock.url + "/v1", cacheTtlS: 1 },
-            model: { context: 8192 },
+            model: { context: 8192, maxOutput: 256 },
             preset: { openai_max_context: 8192, openai_max_tokens: 256 }
           })
           const path = yield* reader.GetPath({ userId: user.id, chatId: chat.id, leafSlotId: null, limit: 100 })
@@ -63,6 +64,8 @@ it.live(
           assert.isTrue(cold.warmth === null || (cold.warmth.expiresAt ?? 0) < Date.now() || cold.warmth.changed)
           const defaults = yield* api.GetGenerationDefaults()
           yield* api.SetGenerationDefaults({ defaults: { ...defaults, lcm: { spendAhead: false } } })
+          // The chat copied "right after a reply" when it was made: it holds its own claims too.
+          yield* api.ChangeLcmSettings({ chatId: chat.id, change: { when: "next-reply" } })
           return { chatId: chat.id, jobId: jobs[0]!.id, cold }
         }).pipe(Effect.provide(serverLayer(config, undefined, Summarizer.none)))
       )
@@ -126,7 +129,14 @@ it.live(
           const child = yield* start()
           yield* eventually(() => childOutput.includes("Listening on"), 60_000)
           yield* fixtureSql(config.dataDir, [
-            { sql: "UPDATE user_settings SET value_json='{}' WHERE key='generation.lcm'" }
+            { sql: "UPDATE user_settings SET value_json='{}' WHERE key='generation.lcm'" },
+            {
+              sql: `INSERT INTO state_events (id, chat_id, slot_id, version_id, seq, key, scope, value_json, origin, created_at)
+                SELECT ?, ?, NULL, NULL, (SELECT max(seq) + 1 FROM state_events WHERE chat_id = ?2 AND slot_id IS NULL),
+                  'lcm.settings', NULL, json_set(value_json, '$.when', 'after-reply'), 'user', 0
+                FROM state_events WHERE chat_id = ?2 AND slot_id IS NULL AND key = 'lcm.settings' ORDER BY seq DESC LIMIT 1`,
+              params: [uuidv7(), seeded.chatId]
+            }
           ])
           let rows = yield* inspect()
           for (let i = 0; rows[0]![0]!.status !== "processing" && i < 200; i++) {

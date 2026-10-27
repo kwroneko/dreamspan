@@ -75,3 +75,15 @@ export const importedSummary = (sql: SqlClient.SqlClient, userId: UserId, chatId
     }
     return null
   })
+
+/** The chat's imported summary notes (kind `imported_summary`), by entity id. */
+export const importedSummaryNotes = (sql: SqlClient.SqlClient, userId: UserId, chatId: string) =>
+  Effect.map(
+    makeLibraryQueries(sql).refsWhere(
+      `e.owner_user_id = ? AND e.kind = 'note' AND e.deleted_at IS NULL AND r.ref_kind = 'upstream'
+       AND EXISTS (SELECT 1 FROM entity_revisions h WHERE h.id = r.head_revision_id
+         AND json_extract(h.doc_json, '$.owner.chat') = ? AND json_extract(h.doc_json, '$.kind') = 'imported_summary')`,
+      [userId, chatId]
+    ),
+    (rows) => rows.map((row) => row.entity_id)
+  )

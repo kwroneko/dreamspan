@@ -1,9 +1,10 @@
 // What summarizing a chat's older history takes (spec/LCM.md §2.11): the work the planner
 // would do from the chat's state now, counted in jobs and tokens. Pure: the reader supplies the
 // chat's measurements, the main thread prices the counts. It follows the planner's rules
-// (ARCHITECTURE §16): the newest half of the window is kept, a pass is triggered above three
-// quarters of it, a pass plans at most `MAX_JOBS_PER_PLAN` chunks, a chunk takes whole messages
-// until it holds `leafInput` tokens, and `fanout` summaries of a level are condensed into one.
+// (ARCHITECTURE §16): recent messages are kept down to their target, a pass is triggered above
+// the midpoint of their target and maximum, a pass plans at most `MAX_JOBS_PER_PLAN` chunks, a
+// chunk takes whole messages until it holds `leafInput` tokens, and `fanout` summaries of a
+// level are condensed into one.
 
 import { MAX_CHUNK_SLOTS } from "../db/lcmLimits.ts"
 import { MAX_JOBS_PER_PLAN } from "../db/lcmMaintain.ts"
@@ -15,9 +16,15 @@ export interface BackfillInput {
   /** The tokens and messages after the summaries' cursor, as the planner costs them. */
   readonly tokens: number
   readonly messages: number
-  /** The window's budget for history (the assembler's), and the layer's maximum. */
-  readonly windowMax: number
+  /** Recent messages' pair as the assembler fitted it, and the layer's maximum. */
+  readonly recentTarget: number
+  readonly recentMax: number
   readonly layerMax: number
+  /**
+   * False: requests without the preset (DESIGN §8), whose cached part is the instruction and the
+   * continuity; with the preset it is the preset prefix and the layer, the instruction after the chunk.
+   */
+  readonly withPreset?: boolean
   /** The preset and cards that open every request. */
   readonly prefix: number
   /** What the layer holds before the work starts, in tokens. */
@@ -75,10 +82,14 @@ const MAX_L1 = 2_000_000
  * request that was not in the one before.
  */
 export const estimateBackfill = (input: BackfillInput): BackfillTotals => {
-  const { windowMax, leafInput, fanout } = input
-  if (input.messages <= 0 || input.tokens <= 0 || windowMax <= 0 || leafInput <= 0) return EMPTY
-  const keep = windowMax * 0.5
-  const trigger = windowMax * 0.75
+  const { recentTarget, recentMax, leafInput, fanout } = input
+  if (input.messages <= 0 || input.tokens <= 0 || recentMax <= 0 || leafInput <= 0) return EMPTY
+  const keep = recentTarget
+  const trigger = (recentTarget + recentMax) / 2
+  const raw = input.withPreset === false
+  // Without the preset the instruction opens the request and is read back with the continuity.
+  const prefixTokens = raw ? TAIL_TOKENS : input.prefix
+  const tailTokens = raw ? 0 : TAIL_TOKENS
   if (input.tokens <= trigger) return EMPTY
   // A chunk ends once it holds `leafInput` tokens, so it overshoots by half a message on average.
   const average = input.tokens / input.messages
@@ -87,6 +98,8 @@ export const estimateBackfill = (input: BackfillInput): BackfillTotals => {
   // under its trigger. The last chunk of a pass is whatever is left, so it can be small.
   let total = input.tokens
   const chunks: Array<number> = []
+  // The last chunk of each pass: condensations are planned by the pass after the jobs finish.
+  const passEnds = new Set<number>()
   while (total > trigger && chunks.length < MAX_L1) {
     let room = total - keep
     let made = 0
@@ -98,6 +111,7 @@ export const estimateBackfill = (input: BackfillInput): BackfillTotals => {
       made++
     }
     if (made === 0) break
+    passEnds.add(chunks.length - 1)
   }
 
   // The layer as the jobs build it: counts of summaries per level.
@@ -120,20 +134,20 @@ export const estimateBackfill = (input: BackfillInput): BackfillTotals => {
   let fresh = 0
   const request = (chunkTokens: number, layerBefore: number, newest: number) => {
     requests++
-    const body = chunkTokens + TAIL_TOKENS
+    const body = chunkTokens + tailTokens
     if (!input.cached) {
-      uncached += body + input.prefix + layerBefore
+      uncached += body + prefixTokens + layerBefore
       return
     }
     uncached += body
     const warm = requests > 1
-    const cold = warm ? newest : input.prefix + layerBefore
+    const cold = warm ? newest : prefixTokens + layerBefore
     // What the provider has to be given afresh is written to the cache when it charges for that.
     if (input.cacheWrites) write += cold
     else uncached += cold
-    if (warm) read += input.prefix + Math.max(0, layerBefore - newest)
+    if (warm) read += prefixTokens + Math.max(0, layerBefore - newest)
   }
-  for (const body of chunks) {
+  for (const [at, body] of chunks.entries()) {
     summarized += body
     const before = [uncached, read, write]
     request(body, layerNow(), fresh)
@@ -146,7 +160,9 @@ export const estimateBackfill = (input: BackfillInput): BackfillTotals => {
     output += input.leafTarget
     counts[1] = (counts[1] ?? 0) + 1
     fresh = input.leafTarget
-    // Condense whenever a level holds `fanout` summaries; a condensation can fill the level above.
+    // After a pass's chunks, condense each level that holds `fanout` summaries; a condensation
+    // can fill the level above.
+    if (!passEnds.has(at)) continue
     for (let level = 1; (counts[level] ?? 0) >= fanout; level++) {
       const previous = [uncached, read, write]
       requests++
@@ -154,14 +170,14 @@ export const estimateBackfill = (input: BackfillInput): BackfillTotals => {
       // Its request is the layer before its parts, the parts, and the instruction; the newest part is new.
       const parts = fanout * size(level)
       const before = Math.max(0, layerNow() - parts)
-      const body = TAIL_TOKENS
-      if (!input.cached) uncached += body + input.prefix + layerNow()
+      const body = tailTokens
+      if (!input.cached) uncached += body + prefixTokens + layerNow()
       else {
         uncached += body
         const cold = fresh
         if (input.cacheWrites) write += cold
         else uncached += cold
-        read += input.prefix + Math.max(0, before + parts - cold)
+        read += prefixTokens + Math.max(0, before + parts - cold)
       }
       plannedRequests.push({
         uncachedInput: Math.round(uncached - previous[0]!),

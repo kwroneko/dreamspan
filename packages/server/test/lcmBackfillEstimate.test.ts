@@ -7,7 +7,9 @@ import { backfillSeconds, estimateBackfill } from "../src/lcm/backfill.ts"
 const story = {
   tokens: 840_000,
   messages: 3360,
-  windowMax: 120_000,
+  // The old window of 120,000: kept down to half, triggered above three quarters.
+  recentTarget: 60_000,
+  recentMax: 120_000,
   layerMax: 30_000,
   prefix: 6000,
   layer: 0,
@@ -76,6 +78,6 @@ describe("estimateBackfill", () => {
 
   it("handles an empty chat and a missing window", () => {
     assert.strictEqual(estimateBackfill({ ...story, tokens: 0, messages: 0 }).l1Jobs, 0)
-    assert.strictEqual(estimateBackfill({ ...story, windowMax: 0 }).l1Jobs, 0)
+    assert.strictEqual(estimateBackfill({ ...story, recentTarget: 0, recentMax: 0 }).l1Jobs, 0)
   })
 })

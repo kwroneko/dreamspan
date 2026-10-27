@@ -1,6 +1,7 @@
 // The user's generation defaults in `user_settings`; one naming something gone reads as none.
 import type { UserId } from "@rp/shared/domain.ts"
 import { GenerationDefaults } from "@rp/shared/generation.ts"
+import { newChatLcm } from "@rp/shared/lcmSettings.ts"
 import type { RefId } from "@rp/shared/library.ts"
 import type { ConnectionId, ModelId } from "@rp/shared/providers.ts"
 import { Effect } from "effect"
@@ -57,3 +58,13 @@ export const readDefaults = (sql: SqlClient.SqlClient, userId: UserId) =>
       preset: presetOk ? (preset as RefId) : null
     })
   })
+
+/**
+ * The `lcm.settings` a new chat stores: a full copy of the account default as it resolves now
+ * (DESIGN §8), so changing the default later leaves the chat as it was. An imported chat
+ * starts off whatever the default says.
+ */
+export const newChatLcmSettings = (sql: SqlClient.SqlClient, userId: UserId, enabled?: boolean) =>
+  Effect.map(setting(sql, userId, DEFAULT_LCM), (stored) =>
+    newChatLcm(stored as GenerationDefaults["lcm"] | null, enabled)
+  )

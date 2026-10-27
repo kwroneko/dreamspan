@@ -11,7 +11,6 @@ import {
 import type { ChatId, SlotId } from "@rp/shared/chat.ts"
 import { NotFound } from "@rp/shared/errors.ts"
 import type { UserId } from "@rp/shared/domain.ts"
-import { foldState } from "@rp/shared/state.ts"
 import { Effect } from "effect"
 import { ChatHub } from "../chat/ChatHub.ts"
 import { CacheWarmth } from "../chat/CacheWarmth.ts"
@@ -187,7 +186,8 @@ export const makeLcmHandlers = Effect.gen(function* () {
           enabled: basis.enabled,
           imported: basis.imported,
           fromScratch: yield* priced(id, basis.fromScratch),
-          adopted: basis.adopted ? yield* priced(id, basis.adopted) : null
+          adopted: basis.adopted ? yield* priced(id, basis.adopted) : null,
+          ...(basis.summaryNotesOn?.length ? { summaryNoteOn: true } : {})
         })
       }).pipe(internal("GetLcmEnableOffer")),
     EnableLcm: ({ chatId, leafSlotId, choice, approved }) =>
@@ -229,7 +229,8 @@ export const makeLcmHandlers = Effect.gen(function* () {
           chatId,
           leafSlotId,
           choice,
-          approved: approval(approved!)
+          approved: approval(approved!),
+          ...(refreshed.summaryNotesOn?.length ? { switchOff: refreshed.summaryNotesOn } : {})
         })
         // The run is shown again: open tabs read the chat anew.
         hub.publish(chatId, done.unhidden > 0 ? { _tag: "Reload" } : { _tag: "State" })
@@ -257,19 +258,26 @@ export const makeLcmHandlers = Effect.gen(function* () {
         yield* changed(chatId, id)
         return yield* backfillOf(id, chatId, leafSlotId)
       }).pipe(internal("SetLcmBackfill")),
+    // One write of the chat's settings, the others kept (DESIGN §8); nothing is planned by it.
+    ChangeLcmSettings: ({ chatId, change }) =>
+      Effect.gen(function* () {
+        const id = yield* userId
+        yield* writer.ChangeLcmSettings({ userId: id, chatId, change })
+        hub.publish(chatId, { _tag: "State" })
+        yield* changed(chatId, id)
+      }).pipe(internal("ChangeLcmSettings")),
+    GetLcmSettings: ({ chatId, leafSlotId }) =>
+      Effect.flatMap(userId, (id) => reader.LcmSettingsAt({ userId: id, chatId, leafSlotId })).pipe(
+        internal("GetLcmSettings")
+      ),
     SetLcmEnabled: ({ chatId, enabled }) =>
       Effect.gen(function* () {
         const id = yield* userId
-        const state = foldState(yield* reader.StateEventsAt({ userId: id, chatId, slotId: null }))
         // The other settings stay as they are; only the switch moves.
-        yield* writer.AddStateEvent({
-          userId: id,
-          chatId,
-          slotId: null,
-          versionId: null,
-          scope: null,
-          data: { key: "lcm.settings", value: { ...state.lcm, enabled } }
-        })
+        // The switch alone can't put a target above its maximum.
+        yield* writer
+          .ChangeLcmSettings({ userId: id, chatId, change: { enabled } })
+          .pipe(Effect.catchTag("LcmSettingsInvalid", (error) => Effect.die(error)))
         hub.publish(chatId, { _tag: "State" })
         yield* changed(chatId, id)
       }).pipe(internal("SetLcmEnabled")),

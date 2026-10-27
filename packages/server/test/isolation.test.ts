@@ -247,6 +247,20 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
   SetLcmEnabled: {
     probe: (actor, owner) => refused(actor.api.SetLcmEnabled({ chatId: owner.chat.chatId, enabled: false }), "NotFound")
   },
+  ChangeLcmSettings: {
+    probe: (actor, owner) =>
+      Effect.all([
+        refused(actor.api.ChangeLcmSettings({ chatId: owner.chat.chatId, change: { recentMax: 30_000 } }), "NotFound"),
+        refused(actor.api.ChangeLcmSettings({ chatId: owner.chat.chatId, change: { enabled: false } }), "NotFound")
+      ]).pipe(Effect.asVoid)
+  },
+  GetLcmSettings: {
+    probe: (actor, owner) =>
+      Effect.all([
+        refused(actor.api.GetLcmSettings({ chatId: owner.chat.chatId, leafSlotId: owner.chat.slotId }), "NotFound"),
+        refused(actor.api.GetLcmSettings({ chatId: owner.chat.chatId, leafSlotId: null }), "NotFound")
+      ]).pipe(Effect.asVoid)
+  },
   GetLcmEnableOffer: {
     probe: (actor, owner) =>
       refused(actor.api.GetLcmEnableOffer({ chatId: owner.chat.chatId, leafSlotId: owner.chat.slotId }), "NotFound")
@@ -2303,6 +2317,23 @@ const storage: Record<
     ),
   GetSummary: (reader, actor, owner) =>
     refused(reader.GetSummary({ userId: actor.user.id, summaryId: owner.summary.id }), "NotFound"),
+  ChangeLcmSettings: (_reader, actor, owner, writer) =>
+    refused(
+      writer.ChangeLcmSettings({ userId: actor.user.id, chatId: owner.chat.chatId, change: { when: "next-reply" } }),
+      "NotFound"
+    ),
+  LcmSettingsAt: (reader, actor, owner) =>
+    Effect.all([
+      refused(
+        reader.LcmSettingsAt({ userId: actor.user.id, chatId: owner.chat.chatId, leafSlotId: owner.chat.slotId }),
+        "NotFound"
+      ),
+      // The actor's own chat with the owner's leaf reads nothing of the owner's either.
+      refused(
+        reader.LcmSettingsAt({ userId: actor.user.id, chatId: actor.chat.chatId, leafSlotId: owner.chat.slotId }),
+        "NotFound"
+      )
+    ]).pipe(Effect.asVoid),
   EstimateBackfill: (reader, actor, owner) =>
     refused(
       reader.EstimateBackfill({ userId: actor.user.id, chatId: owner.chat.chatId, leafSlotId: owner.chat.slotId }),

@@ -1,4 +1,5 @@
 import { assert, it } from "@effect/vitest"
+import { PAIRS_8K } from "./support/lcmHarness.ts"
 import { NewVersion } from "@rp/shared/chat.ts"
 import { Effect } from "effect"
 import { Reader, Writer } from "../src/db/Database.ts"
@@ -114,7 +115,7 @@ for (const mode of ["direct", "tool", "refused", "partial", "gap"] as const) {
           user = yield* api.Whoami()
         const { chat, events } = yield* generateReply(api, {
           connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1`, cacheTtlS: 300 },
-          model: { context: 8192, tools: true },
+          model: { context: 8192, maxOutput: 512, tools: true },
           preset: {
             openai_max_context: 8192,
             openai_max_tokens: 512,
@@ -136,7 +137,7 @@ for (const mode of ["direct", "tool", "refused", "partial", "gap"] as const) {
           slotId: null,
           versionId: null,
           scope: null,
-          data: { key: "lcm.settings", value: { enabled: true, style, leafInput: 500, leafTarget: 100 } }
+          data: { key: "lcm.settings", value: { enabled: true, style, leafInput: 500, leafTarget: 100, ...PAIRS_8K } }
         })
         const path = yield* reader.GetPath({ userId: user.id, chatId: chat.id, leafSlotId: null, limit: 100 })
         yield* completeFixture(

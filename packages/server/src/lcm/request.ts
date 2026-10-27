@@ -1,6 +1,7 @@
-import type { ContextSnapshot } from "../assembler/types.ts"
+import type { ContextSnapshot, Piece, RequestMessage } from "../assembler/types.ts"
+import { applySummaryPrefix } from "./prefix.ts"
 
-export const summaryTail = (snapshot: ContextSnapshot): ContextSnapshot => {
+const summaryTail = (snapshot: ContextSnapshot): ContextSnapshot => {
   const job = snapshot.summaryJob!
   const request = snapshot.request
   return {
@@ -24,3 +25,79 @@ export const summaryTail = (snapshot: ContextSnapshot): ContextSnapshot => {
     }
   }
 }
+
+/** Summaries as one block, as our layouts send the layer. */
+const block = (pieces: ReadonlyArray<Piece>) =>
+  `<summaries>\n${pieces
+    .map((p) =>
+      p.source.kind === "summary"
+        ? `<summary level="${p.source.level}" from="${p.source.from}" to="${p.source.to}">\n${p.text}\n</summary>`
+        : p.text
+    )
+    .join("\n")}\n</summaries>`
+
+/**
+ * A summary request without the preset (DESIGN §8; ST's "Raw"): the instruction as the system
+ * message, the earlier coverage as one continuity message, then the material: a level-1 job's
+ * messages in their roles, or a condensation's parts as one block. Built from the assembled
+ * context, so the chunk is exactly the one the full-preset path would render and clip; nothing
+ * of the preset, cards or notes is sent. It shares no prefix with the chat: its own breakpoint
+ * after the continuity lets consecutive chunks read it back.
+ */
+const rawSummary = (snapshot: ContextSnapshot): ContextSnapshot => {
+  const job = snapshot.summaryJob!
+  const request = snapshot.request
+  const summaries = snapshot.pieces.flatMap((p, at) => (p.source.kind === "summary" && p.text !== "" ? [at] : []))
+  const parts = job.children?.length ?? 0
+  const continuity = summaries.slice(0, summaries.length - parts)
+  const material = parts ? summaries.slice(-parts) : []
+  const messages: Array<RequestMessage> = [{ role: "system", content: job.tail }]
+  const placed = new Map<number, Array<number>>()
+  const place = (pieces: ReadonlyArray<number>) => {
+    messages.push({ role: "user", content: block(pieces.map((at) => snapshot.pieces[at]!)) })
+    for (const at of pieces) placed.set(at, [messages.length - 1])
+  }
+  if (continuity.length) place(continuity)
+  const cached = messages.length - 1
+  // A message is history when it holds a message piece; its index in the new request.
+  const moved = new Map<number, number>()
+  if (parts) place(material)
+  else
+    request.messages.forEach((message, at) => {
+      if (snapshot.pieces.some((p) => p.source.kind === "message" && p.messages.includes(at))) {
+        moved.set(at, messages.length)
+        messages.push(message)
+      }
+    })
+  // Every piece keeps its index (a piece's `parts` name others by it); unsent ones hold no message.
+  const pieces: Array<Piece> = [
+    ...snapshot.pieces.map((p, at) => ({
+      ...p,
+      messages: placed.get(at) ?? p.messages.flatMap((i) => (moved.has(i) ? [moved.get(i)!] : []))
+    })),
+    {
+      id: "lcm:instruction",
+      source: { kind: "assembler", what: "summary instruction" },
+      text: job.tail,
+      messages: [0]
+    }
+  ]
+  const { summaryStart: _start, ...rest } = request
+  return {
+    ...snapshot,
+    pieces,
+    request: {
+      ...rest,
+      prefill: null,
+      messages,
+      ...(continuity.length ? { summaryStart: 1 } : {}),
+      breakpoints: [{ message: cached, reason: continuity.length ? "summary" : "prefix" }]
+    }
+  }
+}
+
+/** The request a summary job sends: with the chat's preset and its pinned prefix, or without the preset. */
+export const summaryRequest = (snapshot: ContextSnapshot): ContextSnapshot =>
+  snapshot.summaryJob?.withPreset === false
+    ? rawSummary(snapshot)
+    : summaryTail(applySummaryPrefix(snapshot, snapshot.summaryJob?.prefix))

@@ -228,7 +228,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
       assert.strictEqual(summary!.revisions, 2)
       assert.deepStrictEqual(summary!.doc, {
         schema_version: 1,
-        title: "Summary",
+        title: "Summary (from ST)",
         content: "Bob and Sam met, then argued.",
         placement: { mode: "depth", depth: 3, role: "system" },
         owner: { chat: bob },

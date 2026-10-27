@@ -1,4 +1,4 @@
-import { LcmDefaults, ModelChoice } from "./lcmSettings.ts"
+import { LcmDefaults, LcmSettingsChange, ModelChoice } from "./lcmSettings.ts"
 // What a user's generations use when a chat doesn't choose (DATA-MODEL §5.4): a default
 // model and a default preset, both the user's own.
 import { Schema } from "effect"
@@ -28,6 +28,8 @@ export const GenerationDefaultsChange = Schema.Struct({
   preset: Schema.optionalKey(Schema.NullOr(RefId)),
   judge: Schema.optionalKey(Schema.NullOr(ModelChoice)),
   fallback: Schema.optionalKey(Schema.NullOr(ModelChoice)),
-  tail: Schema.optionalKey(Schema.NullOr(Schema.String))
+  tail: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  /** The summarization defaults for new chats (DESIGN §8), one at a time; null restores the built-in. */
+  lcm: Schema.optionalKey(LcmSettingsChange)
 })
 export type GenerationDefaultsChange = typeof GenerationDefaultsChange.Type

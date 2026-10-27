@@ -7,6 +7,8 @@ import { lazy, Suspense, useEffect, useState } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Switch } from "../../ui/Choice.tsx"
+import { Badge } from "../../ui/Surface.tsx"
+import { summaryBadge } from "../editor/summaryBadge.ts"
 import { usePresetWorkspace } from "../editor/PresetWorkspace.tsx"
 import { type EditorStore, useEditorState, useLeaveGuard, useValue, useWorkingDoc } from "../editor/store.ts"
 import type { ChatView } from "./session.ts"
@@ -79,6 +81,9 @@ function PresetSwitches({ store }: { store: EditorStore }) {
                 </Switch>
               )}
               <span className="min-w-0 flex-1 text-sm break-words">{p.name}</span>
+              {!p.marker && /\{\{summary\}\}/i.test(content) && workspace.context?.summary && (
+                <Badge>{summaryBadge(workspace.context.summary)}</Badge>
+              )}
               <span className="text-xs text-muted">
                 ~{(p.marker ? (filled?.tokens ?? 0) : Math.ceil(content.length / 4)).toLocaleString()} tokens
               </span>

@@ -1,3 +1,4 @@
+import { newChatLcmSettings } from "./generationSettings.ts"
 import { makeShellWriteHandlers } from "./shellWrites.ts"
 import { recordHistoryReduction } from "./historyChanges.ts"
 // Write handlers for chat setup, speakers and the send queue (DESIGN §2.1, §2.2). They run
@@ -200,7 +201,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
           yield* sql`INSERT INTO lanes ${sql.insert({ id: laneId, chat_id: chatId, name: "main", created_at: at })}`
           yield* graph.insertStateEvent(userId, chatId, null, null, null, {
             key: "lcm.settings",
-            value: { enabled: true }
+            value: yield* newChatLcmSettings(sql, userId)
           })
           for (const entity of ids) {
             yield* graph.insertStateEvent(userId, chatId, null, null, null, {

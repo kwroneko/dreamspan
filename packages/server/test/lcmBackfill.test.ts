@@ -3,6 +3,7 @@
 // reads and writes through the RPCs, summaries planned and written by the real summarizer
 // against a fake provider that caches prefixes as a provider would, and the estimate checked
 // against the usage ledger. Cross-user probes are in isolation.test.ts.
+import { PAIRS_8K } from "./support/lcmHarness.ts"
 import type { ServerResponse } from "node:http"
 import { assert } from "@effect/vitest"
 import type { ChatId, SlotId } from "@rp/shared/chat.ts"
@@ -117,7 +118,7 @@ const environment = (server: ReturnType<typeof lcmServer>, names: ReadonlyArray<
     const model = yield* api.AddUserModel({
       connectionId: connection.id,
       key: "primary-model",
-      overrides: { context: 8192 }
+      overrides: { context: 8192, maxOutput: 512 }
     })
     yield* fixtureSql(server.config.dataDir, [
       {
@@ -146,7 +147,14 @@ const environment = (server: ReturnType<typeof lcmServer>, names: ReadonlyArray<
     const chats = yield* api.ListChats({ limit: 50, before: null })
     const chatNamed = (name: string) => chats.find((c) => c.title === name)!
 
-    const knobs = { enabled: false, leafInput: 600, leafTarget: L1_TOKENS, fanout: 3, condenseTarget: CONDENSED_TOKENS }
+    const knobs = {
+      enabled: false,
+      leafInput: 600,
+      leafTarget: L1_TOKENS,
+      fanout: 3,
+      condenseTarget: CONDENSED_TOKENS,
+      ...PAIRS_8K
+    }
     const prepare = (name: string) =>
       Effect.gen(function* () {
         const chat = chatNamed(name)

@@ -109,7 +109,7 @@ export const environment = (
     const model = yield* api.AddUserModel({
       connectionId: connection.id,
       key: "primary-model",
-      overrides: { context: 8192 }
+      overrides: { context: 8192, maxOutput: 512 }
     })
     yield* fixtureSql(server.config.dataDir, [
       {

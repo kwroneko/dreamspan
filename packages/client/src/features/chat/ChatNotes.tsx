@@ -7,8 +7,9 @@ import type { BinItem } from "@rp/shared/bin.ts"
 import type { SlotId } from "@rp/shared/chat.ts"
 import type { ChatNotePosition } from "@rp/shared/editorApi.ts"
 import type { ChatNote } from "@rp/shared/chatSetupApi.ts"
+import type { SummaryFill } from "@rp/shared/inspectorApi.ts"
 import type { Placement } from "@rp/shared/docs/note.ts"
-import { useMemo, useState } from "react"
+import { useMemo, useState, useSyncExternalStore } from "react"
 import { AsyncView, ErrorAlert } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"
 import { AppClient } from "../../rpc.ts"
@@ -57,6 +58,22 @@ const whereOf = (note: ChatNote) => {
   return `${placed(placement)}${every}`
 }
 
+/** How a summary note and the preset's `{{summary}}` meet (DESIGN §8 [P]). */
+function SummaryMacroLine({ note, summary }: { note: ChatNote; summary: SummaryFill }) {
+  const placement = (note.doc["placement"] as Placement).mode
+  const text =
+    summary.prompts.length > 0
+      ? summary.kind === "summaries"
+        ? "Summaries are on: {{summary}} in your preset sends the summaries instead."
+        : note.active
+          ? "Your preset includes this through {{summary}}."
+          : "Your preset has {{summary}}; it sends nothing while this is off."
+      : note.active && placement === "none"
+        ? "Not placed, and your preset has no {{summary}}: nothing sends it."
+        : null
+  return text ? <p className="pl-12 text-sm text-muted">{text}</p> : null
+}
+
 const titleOf = (note: ChatNote) => (note.doc["title"] as string | undefined) || note.ref.label
 
 function NoteRow({
@@ -66,9 +83,12 @@ function NoteRow({
   onToggle,
   onEdit,
   onDeleted,
-  position
+  position,
+  summary
 }: {
   note: ChatNote
+  /** What `{{summary}}` fills in for the next reply, for a summary note's line about it. */
+  summary: SummaryFill | undefined
   /** The card's name, for a card's note. */
   card: string | null
   editing: boolean
@@ -94,6 +114,7 @@ function NoteRow({
               {note.first && <Badge>Character's Note</Badge>}
             </div>
           )}
+          {kind === "imported_summary" && summary && <SummaryMacroLine note={note} summary={summary} />}
         </div>
         <Button variant="ghost" aria-label={`${editing ? "Close" : "Edit"} ${title}`} onClick={onEdit}>
           {editing ? "Close" : "Edit"}
@@ -146,6 +167,7 @@ export function NotesTab({ session, leafSlotId }: { session: ChatSession; leafSl
   const { cards } = useCast()
   const [editing, setEditing] = useState<string | null>(null)
   const [error, setError] = useState<AppError | null>(null)
+  const summaryFill = useSyncExternalStore(session.subscribe, session.snapshot).history?.presetContext?.summary
 
   const toggle = async (note: ChatNote, active: boolean) => {
     const outcome = await session.changeCast({ _tag: "Note", entityId: note.ref.entityId, active })
@@ -177,6 +199,7 @@ export function NotesTab({ session, leafSlotId }: { session: ChatSession; leafSl
           onToggle={(active) => void toggle(note, active)}
           onEdit={() => setEditing(editing === note.ref.id ? null : note.ref.id)}
           onDeleted={onDeleted}
+          summary={summaryFill}
         />
       ))}
     </ul>

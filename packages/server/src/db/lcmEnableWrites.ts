@@ -12,7 +12,19 @@ import { makeGraphWrites } from "./graphWrites.ts"
 import { BACKFILL_KIND, type BackfillPayload, backfillOf, capFor, spentSince } from "./lcmBackfill.ts"
 import type { ImportedSummary } from "./lcmImported.ts"
 import { NotFound, StorageError, type WriteOps } from "./ops.ts"
+import { LcmSettingsInvalid } from "@rp/shared/lcm.ts"
 import { transaction } from "./tx.ts"
+
+/** Why settings with a target at or above its maximum can't be stored, or null. */
+export const orderProblem = (s: Record<string, unknown>) => {
+  const over = (target: string, max: string) =>
+    typeof s[target] === "number" && typeof s[max] === "number" && (s[target] as number) >= (s[max] as number)
+  return over("recentTarget", "recentMax")
+    ? `The recent messages' target (${(s.recentTarget as number).toLocaleString("en-US")}) must be below their maximum (${(s.recentMax as number).toLocaleString("en-US")}).`
+    : over("layerTarget", "layerMax")
+      ? `The summary block's target (${(s.layerTarget as number).toLocaleString("en-US")}) must be below its maximum (${(s.layerMax as number).toLocaleString("en-US")}).`
+      : null
+}
 
 /** The effective version after the covered run is shown; deleted/failed text still has none. */
 const EFFECTIVE = `s.deleted_at IS NULL AND s.purged_at IS NULL
@@ -125,7 +137,29 @@ export const makeLcmEnableWriteHandlers = (bin: Bin) =>
           return { runId, ready: updated!.phase === "ready" }
         }).pipe(transaction(sql, "StageLcmEnable")),
 
-      EnableLcm: ({ userId, chatId, leafSlotId, choice, approved, runId }) =>
+      ChangeLcmSettings: ({ userId, chatId, change }) =>
+        Effect.gen(function* () {
+          yield* ownedChat(userId, chatId, null)
+          const [latest] = yield* sql<{ value_json: string }>`SELECT value_json FROM state_events
+            WHERE chat_id = ${chatId} AND slot_id IS NULL AND scope IS NULL AND key = 'lcm.settings'
+            ORDER BY seq DESC LIMIT 1`
+          const settings: Record<string, unknown> = latest
+            ? (JSON.parse(latest.value_json) as Record<string, unknown>)
+            : { enabled: false }
+          for (const [key, value] of Object.entries(change)) {
+            if (value === undefined) continue
+            if (value === null) delete settings[key]
+            else settings[key] = value
+          }
+          const problem = orderProblem(settings)
+          if (problem) return yield* new LcmSettingsInvalid({ message: problem })
+          yield* graph.insertStateEvent(userId, chatId, null, null, null, {
+            key: "lcm.settings",
+            value: settings as never
+          })
+        }).pipe(transaction(sql, "ChangeLcmSettings")),
+
+      EnableLcm: ({ userId, chatId, leafSlotId, choice, approved, runId, switchOff }) =>
         Effect.gen(function* () {
           yield* ownedChat(userId, chatId, leafSlotId)
           let unhidden = 0
@@ -159,6 +193,12 @@ export const makeLcmEnableWriteHandlers = (bin: Bin) =>
             key: "lcm.settings",
             value: { ...settings, enabled: true } as never
           })
+          // The imported summary note goes off with it, visibly: an ordinary switch at the leaf (DESIGN §8 [P]).
+          for (const note of switchOff ?? [])
+            yield* graph.insertStateEvent(userId, chatId, leafSlotId, null, null, {
+              key: "note.deactivate",
+              value: { note }
+            })
           // A previous backfill of this chat is over once the user chooses again.
           yield* sql`UPDATE jobs SET status = 'complete', updated_at = ${now}
             WHERE kind = ${BACKFILL_KIND} AND status = 'processing' AND json_extract(payload_json, '$.chatId') = ${chatId}`

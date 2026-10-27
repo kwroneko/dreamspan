@@ -1,4 +1,5 @@
 // The recycle bin (DESIGN §6.2), through the real workers.
+import { newChatLcm } from "@rp/shared/lcmSettings.ts"
 import { DatabaseSync } from "node:sqlite"
 import { assert, describe, it } from "@effect/vitest"
 import type { BinItem, BinLimits, RecoveredText } from "@rp/shared/bin.ts"
@@ -529,11 +530,11 @@ describe("recycle bin", () => {
       // Each later item leaves out what's already in the bin under an earlier one.
       assert.strictEqual((yield* writer.DeleteMessage({ userId, slotId: b.slotId })).byteSize, 1) // "b"
       assert.strictEqual((yield* writer.DeleteBranch({ userId, slotId: a.slotId })).byteSize, 2) // "a", "c"
-      // "root", the participant join and the initial LCM setting
+      // "root", the participant join and the initial LCM setting (a copy of the default settings)
       const joined = JSON.stringify({ entity: card.entityId }).length
       assert.strictEqual(
         (yield* writer.DeleteChat({ userId, chatId: chat.id })).byteSize,
-        4 + joined + JSON.stringify({ enabled: true }).length
+        4 + joined + JSON.stringify(newChatLcm(null)).length
       )
     }).pipe(Effect.provide(database()))
   )
@@ -564,7 +565,7 @@ describe("recycle bin", () => {
       // "oops", {"a":1}, ["猫"], {"messages":[]}, "雨" and the initial LCM setting
       assert.strictEqual(
         (yield* writer.DeleteChat({ userId, chatId: story.id })).byteSize,
-        4 + 7 + 7 + 15 + 5 + JSON.stringify({ enabled: true }).length
+        4 + 7 + 7 + 15 + 5 + JSON.stringify(newChatLcm(null)).length
       )
       assert.strictEqual((yield* writer.DeleteEntity({ userId, entityId: card.entityId })).byteSize, entityBytes!.n)
     }).pipe(Effect.provide(database(dir)))

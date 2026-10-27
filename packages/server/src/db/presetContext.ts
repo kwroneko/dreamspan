@@ -92,6 +92,7 @@ export const presetContext = (sql: SqlClient.SqlClient, userId: UserId, snapshot
               }
             ]
           : []
-      )
+      ),
+      ...(snapshot.summaryFill ? { summary: snapshot.summaryFill } : {})
     } satisfies PresetContext
   })

@@ -10,6 +10,8 @@
 // marked complete with the chat state it mapped and the file's last slot (`end`). A run
 // that finds a record goes on from it: an unfinished one is finished as the run that
 // started it would have, a complete one takes only what's new.
+import { summaryMacroPrompts } from "@rp/shared/lcmSettings.ts"
+import type { PresetDoc } from "@rp/shared/docs/preset.ts"
 import type { ChatId, EntityId, SlotId } from "@rp/shared/chat.ts"
 import type { User } from "@rp/shared/domain.ts"
 import { NotFound, ServerError } from "@rp/shared/errors.ts"
@@ -184,6 +186,7 @@ interface Session extends FolderContext {
   touched: number
   readonly report: Report
   settings: StSettings | null
+  summaryMacro: boolean
   personaNames: Map<string, ReadonlyArray<string>>
   /** Characters held, against MAX_HELD_CHARS, and the settings' share of them. */
   held: number
@@ -259,6 +262,7 @@ export class StImports extends Context.Service<
             touched: Date.now(),
             report: new Report(),
             settings: null,
+            summaryMacro: false,
             personaNames: new Map(),
             held: 0,
             settingsHeld: 0,
@@ -470,6 +474,10 @@ export class StImports extends Context.Service<
           const parsed = yield* formats.st.libraryFile(bytes, file, kind)
           const imported = yield* importLibrary(session, user, path, kind, parsed.parsed)
           if (imported.entity !== null && kind === "lorebook") session.worlds.set(name, imported.entity.refId)
+          // Whether ST sent the summary through `{{summary}}` in the preset it used (DESIGN §8 [P]).
+          if (parsed.parsed.library && kind === "preset" && session.settings?.selectedPreset === name)
+            session.summaryMacro =
+              summaryMacroPrompts(JSON.parse(parsed.parsed.library.docJson) as PresetDoc).length > 0
           if (imported.entity !== null && kind === "preset" && session.settings?.selectedPreset === name) {
             const adopted = yield* writer.StImportDefaultPreset({
               userId: user.id,

@@ -58,10 +58,13 @@ const fixture = (placement: NoteDoc["placement"], presetFields: Record<string, u
     }
   ],
   events: [
-    { depth: null, event: { scope: null, data: { key: "lcm.settings", value: { enabled: true } } } },
-    { depth: null, event: { scope: null, data: { key: "note.activate", value: { note: "imported" as never } } } }
+    // Turning summarization on switched the imported note off; its placement still places the layer.
+    { depth: null, event: { scope: null, data: { key: "lcm.settings", value: { enabled: true } } } }
   ]
 })
+
+/** The old fractions of a 512-token window (layer 15%/25%), for the examples' reservation tests. */
+const smallWindow = { enabled: true, recentTarget: 100, recentMax: 200, layerTarget: 77, layerMax: 128 }
 
 for (const depth of [1, 2])
   it.effect(`ST depth-${depth} layer stays ahead of raw history even when older raw is omitted`, () =>
@@ -173,7 +176,8 @@ it.effect("rendered layer framing stays inside the example-prefix allowance", ()
         ],
         events: [
           ...input.events!,
-          { depth: null, event: { scope: null, data: { key: "layout.cards", value: "concat" } } }
+          { depth: null, event: { scope: null, data: { key: "layout.cards", value: "concat" } } },
+          { depth: null, event: { scope: null, data: { key: "lcm.settings", value: smallWindow } } }
         ]
       })
     }
@@ -256,6 +260,10 @@ it.effect("the first ST summary keeps framing inside the example reservation", (
         ...input,
         notes: [],
         summaries: count ? [summary(0)] : [],
+        events: [
+          ...input.events!,
+          { depth: null, event: { scope: null, data: { key: "lcm.settings", value: smallWindow } } }
+        ],
         cards: [
           {
             entity: "mira",
@@ -352,5 +360,26 @@ it.effect("unused layer allowance never rejects fixed content that fits", () =>
     )
     const built = yield* assembleFixture({ ...input, notes: [], messages: [], summaries: [] })
     assert.isTrue(built.request.messages.some((m) => m.content.length === 3500))
+  })
+)
+
+it.effect("a summary note switched on is sent beside the summaries, and {{summary}} reads the summaries", () =>
+  Effect.gen(function* () {
+    const input = fixture(
+      { mode: "depth", depth: 1, role: "system" },
+      { prompts: [{ identifier: "main", role: "system", content: "Story: {{summary}}", system_prompt: true }] }
+    )
+    const on = yield* assembleFixture({
+      ...input,
+      events: [
+        ...input.events!,
+        { depth: null, event: { scope: null, data: { key: "note.activate", value: { note: "imported" as never } } } }
+      ]
+    })
+    const text = on.request.messages.map((m) => m.content).join("\n")
+    assert.include(text, "Summary: old summary")
+    assert.include(text, "Story: LAYER CONTENT 0")
+    const off = yield* assembleFixture(input)
+    assert.notInclude(off.request.messages.map((m) => m.content).join("\n"), "old summary")
   })
 )

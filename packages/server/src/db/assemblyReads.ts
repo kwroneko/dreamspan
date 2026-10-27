@@ -1,7 +1,6 @@
 import { presetContext } from "./presetContext.ts"
 import { cacheExpiry } from "./cacheExpiry.ts"
-import { applySummaryPrefix } from "../lcm/prefix.ts"
-import { summaryTail } from "../lcm/request.ts"
+import { summaryRequest } from "../lcm/request.ts"
 // Context assembly and rebuilding in the reader workers (ARCHITECTURE §15).
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
@@ -102,16 +101,11 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
           _tag: "Rebuilt" as const,
           snapshot: JSON.stringify({
             ...(taken.summaryJob
-              ? summaryTail(
-                  applySummaryPrefix(
-                    {
-                      ...built,
-                      summaryJob: taken.summaryJob,
-                      request: { ...built.request, samplers: taken.request.samplers }
-                    },
-                    taken.summaryJob.prefix
-                  )
-                )
+              ? summaryRequest({
+                  ...built,
+                  summaryJob: taken.summaryJob,
+                  request: { ...built.request, samplers: taken.request.samplers }
+                })
               : built),
             sources: sources.pins(),
             ...(taken.wire ? { wire: taken.wire } : {})
