@@ -37,11 +37,7 @@ export function PortraitView() {
   const [full, setFull] = useState(false)
   const { ref, width } = useMediaWidth()
   if (!portrait)
-    return (
-      <p className="text-sm text-muted">
-        Click a portrait in a message, the header or Cast to see the whole image here.
-      </p>
-    )
+    return <p className="text-sm text-muted">Click a portrait in a message or Cast to see the whole image here.</p>
   const image = (natural = false) => (
     <div
       className={`relative flex items-center justify-center ${natural ? "min-h-full w-max min-w-full" : "h-full w-full"}`}
@@ -95,4 +91,9 @@ export function PortraitView() {
       )}
     </section>
   )
+}
+
+/** Shared 2:3 frame for every cropped card portrait. */
+export function PortraitFrame({ children, className = "" }: { children: ReactNode; className?: string }) {
+  return <span className={`relative inline-flex aspect-[2/3] shrink-0 overflow-hidden ${className}`}>{children}</span>
 }

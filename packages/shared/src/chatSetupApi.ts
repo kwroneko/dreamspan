@@ -71,6 +71,43 @@ export class ChatGroup extends Schema.Class<ChatGroup>("ChatGroup")({
   latestChatId: ChatId
 }) {}
 
+/** The independent shell's cards and individual fork rows. */
+export class ShellCard extends Schema.Class<ShellCard>("ShellCard")({
+  /** The shell uses character_version as the subtitle, independent of a legacy ref subtitle. */
+  card: CardUsage,
+  createdAt: Schema.Number,
+  recentAt: Schema.Number
+}) {}
+export class ShellFork extends Schema.Class<ShellFork>("ShellFork")({
+  forkId: Schema.String,
+  preview: Schema.String,
+  messages: Schema.Int,
+  chat: Chat,
+  leaf: Schema.NullOr(SlotId),
+  name: Schema.String,
+  current: Schema.Boolean,
+  named: Schema.Boolean,
+  pinned: Schema.Boolean,
+  createdAt: Schema.Number,
+  recentAt: Schema.Number,
+  cast: Schema.Array(CastCard),
+  joined: Schema.Array(EntityId),
+  departed: Schema.Array(EntityId),
+  activity: Schema.Array(
+    Schema.Struct({
+      entityId: EntityId,
+      at: Schema.Number,
+      slot: SlotId,
+      category: Schema.Literals(["just", "with", "was"])
+    })
+  )
+}) {}
+export class ShellLibrary extends Schema.Class<ShellLibrary>("ShellLibrary")({
+  cards: Schema.Array(ShellCard),
+  forks: Schema.Array(ShellFork),
+  pinsCollapsed: Schema.Boolean
+}) {}
+
 const CardsLayout = Schema.Literals(["concat", "swap_tail"])
 const RolesProjection = Schema.Literals(["by_writer", "alternate", "perspective"])
 
@@ -191,6 +228,22 @@ export class CardOverrideOpened extends Schema.Class<CardOverrideOpened>("CardOv
 const Errors = [NotFound, ServerError] as const
 
 export class ChatSetupApi extends RpcGroup.make(
+  Rpc.make("GetShellLibrary", { success: ShellLibrary, error: Schema.Union([...Errors]) }),
+  Rpc.make("SetChatPin", {
+    payload: {
+      chatId: ChatId,
+      leaf: Schema.NullOr(SlotId),
+      pinned: Schema.Boolean,
+      forkId: Schema.optional(Schema.String)
+    },
+    success: Schema.Void,
+    error: Schema.Union([...Errors])
+  }),
+  Rpc.make("SetHomePinsCollapsed", {
+    payload: { collapsed: Schema.Boolean },
+    success: Schema.Void,
+    error: Schema.Union([...Errors])
+  }),
   /** Every live card of the user's, by label: the speaker switcher's All cards and Personas. */
   Rpc.make("ListCards", { success: Schema.Array(CastCard), error: ServerError }),
   /** Every live character card of the user's with its use, for the home grid, in one read. */

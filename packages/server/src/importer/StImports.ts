@@ -81,6 +81,7 @@ const hash = (text: string) => createHash("sha256").update(text).digest("hex")
 
 /** What a chat request names besides its path. */
 export interface ChatRequest {
+  readonly createdAt?: number
   readonly part: number
   /** The file's last part: the client needn't know how many parts it has. */
   readonly last: boolean
@@ -325,7 +326,14 @@ export class StImports extends Context.Service<
       // --- Library files: cards, personas, lorebooks, presets.
 
       /** A parsed library file into the library, or found there from an earlier import. */
-      const importLibrary = (session: Session, user: User, path: string, countAs: string, parsed: ParsedFile) =>
+      const importLibrary = (
+        session: Session,
+        user: User,
+        path: string,
+        countAs: string,
+        parsed: ParsedFile,
+        createdAt?: number
+      ) =>
         Effect.gen(function* () {
           const { report } = session
           report.file(path, parsed.report)
@@ -360,6 +368,7 @@ export class StImports extends Context.Service<
               return yield* writer.ImportFile({
                 userId: user.id,
                 intoRefId: earlier?.refId ?? null,
+                ...(createdAt === undefined ? {} : { createdAt }),
                 ...library,
                 sourceName: path,
                 sourceHash: parsed.sha256,
@@ -423,13 +432,20 @@ export class StImports extends Context.Service<
           return imported.outcome
         })
 
-      const cardFile = (session: Session, user: User, path: string, file: string, bytes: Uint8Array) =>
+      const cardFile = (session: Session, user: User, path: string, file: string, bytes: Uint8Array, ctime?: number) =>
         Effect.gen(function* () {
           const parsed = yield* formats.st.libraryFile(bytes, file, "card")
           const card = parsed.card
           const size = card === null ? 0 : card.name.length + card.greetings.reduce((sum, g) => sum + g.length, 0)
           if (!hold(session, path, "card", size + file.length)) return result("failed", "too much in one import")
-          const imported = yield* importLibrary(session, user, path, "card", parsed.parsed)
+          const imported = yield* importLibrary(
+            session,
+            user,
+            path,
+            "card",
+            parsed.parsed,
+            Math.trunc(parsed.parsed.stCreatedAt ?? ctime ?? Date.now())
+          )
           if (imported.entity !== null && card !== null) {
             session.cards.set(stem(file), {
               ...card,
@@ -987,7 +1003,7 @@ export class StImports extends Context.Service<
             case "persona_avatar":
               return yield* personaFile(session, user, path, kind.file, bytes)
             case "card":
-              return yield* cardFile(session, user, path, kind.file, bytes)
+              return yield* cardFile(session, user, path, kind.file, bytes, request.createdAt)
             case "world":
               return yield* libraryFile(session, user, path, `${kind.name}.json`, bytes, "lorebook", kind.name)
             case "preset":

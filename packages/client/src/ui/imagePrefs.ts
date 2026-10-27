@@ -11,7 +11,7 @@ import { useSyncExternalStore } from "react"
 
 export type ImageMode = "show" | "blur" | "hide"
 /** ST's avatar styles: Rectangular (2:3, ST's "big avatars"), Circle, Square, Rounded square. */
-export type AvatarStyle = "portrait" | "round" | "square" | "rounded"
+export type AvatarStyle = "portrait" | "round" | "square" | "rounded" | "large"
 
 const MODE_KEY = "rp.images"
 /** The concealment the toggle switches to: the one last picked, blur at first. */
@@ -38,7 +38,7 @@ const read = (key: string) => memory.get(key) ?? get(key)
 
 const parseMode = (value: string | null): ImageMode => (value === "blur" || value === "hide" ? value : "show")
 const parseStyle = (value: string | null): AvatarStyle =>
-  value === "round" || value === "square" || value === "rounded" ? value : "portrait"
+  value === "large" ? "large" : value === "round" || value === "square" || value === "rounded" ? "square" : "portrait"
 const parseConceal = (value: string | null): Exclude<ImageMode, "show"> => (value === "hide" ? "hide" : "blur")
 
 interface ImagePrefs {

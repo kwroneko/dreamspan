@@ -151,6 +151,26 @@ const ownModel = (party: Party) =>
   )
 
 const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry } = {
+  GetShellLibrary: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const data = yield* actor.api.GetShellLibrary()
+        assert.isFalse(data.forks.some((f) => f.chat.id === owner.chat.chatId))
+        assert.isFalse(data.cards.some((c) => c.card.refId === owner.refId))
+      })
+  },
+  SetChatPin: {
+    probe: (actor, owner) =>
+      refused(actor.api.SetChatPin({ chatId: owner.chat.chatId, leaf: owner.chat.slotId, pinned: true }), "NotFound")
+  },
+  SetHomePinsCollapsed: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const before = yield* owner.api.GetShellLibrary()
+        yield* actor.api.SetHomePinsCollapsed({ collapsed: !before.pinsCollapsed })
+        assert.strictEqual((yield* owner.api.GetShellLibrary()).pinsCollapsed, before.pinsCollapsed)
+      })
+  },
   GetSummary: { probe: (actor, owner) => refused(actor.api.GetSummary({ summaryId: owner.summary.id }), "NotFound") },
   EditSummary: {
     probe: (actor, owner) =>

@@ -588,7 +588,9 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
           // unless the user moved it: only from unset, or where the import last put it.
           let advanced = payload.advanced ?? null
           if (input.advanceLeaf && !branchDeleted && slotIds.length > 0) {
-            const moved = yield* sql<{ id: string }>`UPDATE chats SET active_leaf_slot_id = ${slotIds.at(-1)!}
+            const moved = yield* sql<{
+              id: string
+            }>`UPDATE chats SET active_leaf_slot_id = ${slotIds.at(-1)!}, current_leaf_slot_id = ${slotIds.at(-1)!}
               WHERE id = ${chatId} AND (active_leaf_slot_id IS NULL OR active_leaf_slot_id = ${advanced ?? ""})
               AND EXISTS (SELECT 1 FROM slots WHERE id = ${slotIds.at(-1)!} AND deleted_at IS NULL)
               RETURNING id`
@@ -679,6 +681,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
         }
         yield* sql`UPDATE chats SET status = CASE WHEN status = 'pending' THEN 'active' ELSE status END,
             active_leaf_slot_id = ${moveLeaf ? input.leaf : leaf},
+            current_leaf_slot_id = CASE WHEN ${moveLeaf ? 1 : 0} THEN ${input.leaf} ELSE current_leaf_slot_id END,
             last_message_at = max(coalesce(last_message_at, 0), coalesce(${input.lastMessageAt}, 0)),
             row_version = row_version + 1
           WHERE id = ${chatId}`

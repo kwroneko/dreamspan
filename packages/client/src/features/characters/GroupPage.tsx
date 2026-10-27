@@ -20,12 +20,14 @@ import { ChatList } from "../chat/ChatList.tsx"
 import { NameDialog } from "../chat/NameDialog.tsx"
 import { useTitle } from "../shell.tsx"
 import { usageLine } from "./data.ts"
+import { useOpenCharacter } from "./shellData.tsx"
 import { GroupFaces } from "./GroupFaces.tsx"
 
 function Page({ group, chats }: { group: ChatGroup; chats: ReadonlyArray<Chat> }) {
   useTitle(group.name)
   const { chatId } = useParams({ strict: false }) as { chatId: ChatId }
   const navigate = useNavigate()
+  const openCharacter = useOpenCharacter()
   const [renaming, setRenaming] = useState(false)
   const rename = useAction()
   return (
@@ -34,7 +36,7 @@ function Page({ group, chats }: { group: ChatGroup; chats: ReadonlyArray<Chat> }
         ← Characters
       </Link>
       <header className="flex flex-col gap-4 sm:flex-row sm:items-start">
-        <span className="block size-24 shrink-0 overflow-hidden rounded-xl">
+        <span className="block aspect-[2/3] w-24 shrink-0 overflow-hidden rounded-xl">
           <GroupFaces members={group.members} />
         </span>
         <div className="flex min-w-0 flex-1 flex-col gap-1">
@@ -80,9 +82,9 @@ function Page({ group, chats }: { group: ChatGroup; chats: ReadonlyArray<Chat> }
           <ul aria-label="Characters in the group" className="flex flex-col gap-1">
             {group.members.map((member) => (
               <li key={member.entityId}>
-                <Link
-                  to="/cards/$entityId"
-                  params={{ entityId: member.entityId }}
+                <button
+                  type="button"
+                  onClick={() => openCharacter(member.entityId)}
                   className="flex items-center gap-3 rounded-lg px-2 py-1.5 outline-none hover:bg-surface-raised/60 focus-visible:ring-2 focus-visible:ring-focus"
                 >
                   <Avatar id={member.entityId} name={member.name} mediaId={member.avatarMediaId} size="lg" />
@@ -90,7 +92,7 @@ function Page({ group, chats }: { group: ChatGroup; chats: ReadonlyArray<Chat> }
                     <span className="truncate font-medium">{member.name}</span>
                     {member.subtitle && <span className="truncate text-xs text-muted">{member.subtitle}</span>}
                   </span>
-                </Link>
+                </button>
               </li>
             ))}
           </ul>

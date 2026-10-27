@@ -429,6 +429,16 @@ export class ChatSession {
                 Reactivity.Reactivity
               ).invalidateUnsafe([`chat-notes:${this.chatId}`])
             }
+            if (
+              batch.some((event) =>
+                ["Hello", "Chat", "Slot", "Version", "State", "Reload", "Deleted"].includes(event._tag)
+              )
+            ) {
+              Context.get(
+                services as unknown as Context.Context<Reactivity.Reactivity>,
+                Reactivity.Reactivity
+              ).invalidateUnsafe(["chats"])
+            }
             this.receive(batch, anchor)
           })
         )

@@ -40,41 +40,30 @@ test.beforeAll(async () => {
   latest = (await groupChat("The Lantern Inn: 2026-5-1@20h00m00s000ms", [ana, mira, tobin], "Back at the inn.")).chat.id
 })
 
-const grid = (page: Page) => page.getByRole("list", { name: "Characters and groups" })
-const groupTile = (page: Page) => grid(page).getByRole("listitem").filter({ hasText: "The Lantern Inn" })
+const grid = (page: Page) => page.getByRole("main").getByLabel("Groups", { exact: true })
 
-test("a group is one tile among the characters; a click continues its latest chat", async ({ page }) => {
+test("Groups lists each multi-character chat as a tile and scopes its forks on opening", async ({ page }) => {
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
-  await page.goto(`${server().url}/`)
-  // The group first (its chat is the latest), then the characters; never ST's file name.
-  await expect(grid(page).getByRole("listitem")).toHaveCount(5)
-  await expect(groupTile(page)).toContainText("Ana, Mira, Tobin")
-  await expect(groupTile(page)).toContainText("2 chats")
-  await expect(groupTile(page)).toContainText("Group · 3")
-  await expect(grid(page)).not.toContainText("2026-5-1@")
-
-  // The Groups filter, and search by a member's name finds the group.
-  await page.getByRole("button", { name: /^Groups 1/ }).click()
-  await expect(grid(page).getByRole("listitem")).toHaveText([/The Lantern Inn/])
-  await page.getByRole("button", { name: /^All/ }).click()
-  await page.getByLabel("Search characters and groups").fill("tobin")
-  await expect(grid(page).getByRole("listitem")).toHaveText([/The Lantern Inn/, /Tobin/])
-  await page.getByLabel("Search characters and groups").fill("")
-
-  await page.getByRole("link", { name: /^The Lantern Inn, a group with Ana, Mira, Tobin: continue/ }).click()
-  await expect(page).toHaveURL(`${server().url}/chats/${latest}`)
+  await page.goto(server().url)
+  await page
+    .getByRole("group", { name: "Show", exact: true })
+    .getByRole("button", { name: "Groups", exact: true })
+    .click()
+  await expect(grid(page).getByRole("button", { name: "Open chat The Lantern Inn", exact: true })).toHaveCount(2)
+  await expect(grid(page)).toContainText("Ana, Mira, Tobin")
+  await grid(page).getByRole("button", { name: "Open chat The Lantern Inn", exact: true }).first().click()
+  await expect(page).toHaveURL(new RegExp(`/chats/${latest}`))
+  await expect(page.getByRole("navigation", { name: "Chat breadcrumbs" })).toContainText("The Lantern Inn")
 })
 
 test("a group's chats are listed on its page, and deleting one names it readably", async ({ page }) => {
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
-  await page.goto(`${server().url}/`)
-  await groupTile(page).hover()
-  await page.getByRole("link", { name: "All chats of The Lantern Inn" }).click()
+  await page.goto(`${server().url}/groups/${latest}`)
   await expect(page).toHaveURL(`${server().url}/groups/${latest}`)
   const main = page.getByRole("main")
   await expect(main.getByRole("heading", { level: 1, name: "The Lantern Inn" })).toBeVisible()
   await expect(main.getByRole("link", { name: "Continue the latest chat" })).toHaveAttribute("href", `/chats/${latest}`)
-  await expect(main.getByRole("list", { name: "Characters in the group" }).getByRole("link")).toHaveText([
+  await expect(main.getByRole("list", { name: "Characters in the group" }).getByRole("button")).toHaveText([
     /Ana/,
     /Mira/,
     /Tobin/
@@ -105,17 +94,16 @@ test("the bin names a message's chat by its readable name", async ({ page }) => 
   await expect(main).not.toContainText("@09h30m")
 })
 
-test("on a phone, a group's tile shows its actions", async ({ browser }) => {
-  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
-  const page = await context.newPage()
-  await apiLogin(context.request, server(), ADMIN.handle, ADMIN.password)
-  await page.goto(`${server().url}/`)
-  await expect(page.getByRole("link", { name: "All chats of The Lantern Inn" })).toBeVisible()
-  // Each on one line: a narrow tile puts the second under the first.
-  const fresh = page.getByRole("link", { name: "New chat with The Lantern Inn" })
-  await expect(fresh).toBeVisible()
-  expect(await fresh.evaluate((node) => node.scrollWidth <= node.clientWidth && node.clientHeight <= 32)).toBe(true)
-  await context.close()
+test("on a phone group tiles open their current fork", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(server().url)
+  await page
+    .getByRole("group", { name: "Show", exact: true })
+    .getByRole("button", { name: "Groups", exact: true })
+    .click()
+  await grid(page).getByRole("button", { name: "Open chat The Lantern Inn", exact: true }).first().click()
+  await expect(page).toHaveURL(new RegExp(`/chats/${latest}`))
 })
 
 test("long group and member names are readable on a touch screen", async ({ browser }) => {
@@ -130,7 +118,11 @@ test("long group and member names are readable on a touch screen", async ({ brow
   )
   await apiLogin(context.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/`)
-  const tile = grid(page).getByRole("listitem").filter({ hasText: "Masquerade at Corvina Hall" })
+  await page
+    .getByRole("group", { name: "Show", exact: true })
+    .getByRole("button", { name: "Groups", exact: true })
+    .click()
+  const tile = grid(page).getByRole("button", { name: "Open chat Masquerade at Corvina Hall", exact: true })
   for (const text of ["Masquerade at Corvina Hall", names.join(", ")]) {
     const label = tile.getByText(text, { exact: true })
     await expect(label).toBeVisible()

@@ -4,11 +4,13 @@ import type { ReactNode } from "react"
 
 export function Segmented<Value extends string>({
   label,
+  wrap = false,
   options,
   value,
   onValueChange
 }: {
   label: string
+  wrap?: boolean
   options: ReadonlyArray<{ readonly value: Value; readonly label: ReactNode }>
   value: Value
   onValueChange: (value: Value) => void
@@ -17,7 +19,7 @@ export function Segmented<Value extends string>({
     <div
       role="group"
       aria-label={label}
-      className="inline-flex shrink-0 rounded-md border border-border bg-surface p-0.5"
+      className={`inline-flex rounded-md border border-border bg-surface p-0.5 ${wrap ? "max-w-full flex-wrap" : "shrink-0"}`}
     >
       {options.map((option) => (
         <button
