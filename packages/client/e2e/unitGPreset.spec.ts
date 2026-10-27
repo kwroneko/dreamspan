@@ -1,4 +1,5 @@
 import { mkdirSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { expect, test } from "@playwright/test"
 import { Effect } from "effect"
@@ -12,7 +13,7 @@ import { expectTextBox } from "./support/textbox.ts"
 
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "60" })
 const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)
-const shots = resolve(process.env.SCREENSHOT_DIR ?? "unit-g-work/screenshots")
+const shots = resolve(process.env.SCREENSHOT_DIR ?? join(tmpdir(), "rp-preset-screenshots"))
 let library: ShellLibrary
 let preset: LibraryRef
 
@@ -89,6 +90,21 @@ for (const width of [1440, 390])
       await overlay.getByRole("textbox", { name: "Replace with", exact: true }).fill("{{cast}}")
       await overlay.getByRole("button", { name: "Find", exact: true }).click()
       await expect(overlay.getByRole("list", { name: "Matches", exact: true })).toContainText("→")
+      // The sticky bar, with its matches, leaves most of a phone's screen to the document.
+      const sticky = await overlay
+        .getByRole("region", { name: "Search and replace", exact: true })
+        .evaluate((element) => {
+          let at: HTMLElement | null = element as HTMLElement
+          while (at && getComputedStyle(at).position !== "sticky") at = at.parentElement
+          return at!.getBoundingClientRect().height
+        })
+      if (width < 640) {
+        expect(sticky).toBeLessThan(400)
+        const options = overlay.getByRole("button", { name: "Options", exact: true })
+        await options.click()
+        await expect(overlay.getByRole("checkbox", { name: "Whole word", exact: true })).toBeVisible()
+        await options.click()
+      }
       await shoot("search-preview")
       await overlay.getByRole("button", { name: "Close preset editor", exact: true }).click()
       await expect(overlay).toHaveCount(0)
@@ -161,4 +177,26 @@ test("panel toggles share drafts with the overlay and discard restores the saved
     )
   )
   expect(opened).toHaveLength(0)
+})
+
+test("the panel's Discard asks first when the overlay changed more than the switches", async ({ page }) => {
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${server().url}/chats/${library.forks.find((f) => f.current)!.chat.id}`)
+  const panel = await openPanel(page, "Preset")
+  await panel.getByRole("button", { name: "Edit Main Prompt", exact: true }).click()
+  const overlay = page.getByRole("dialog", { name: "Preset editor", exact: true })
+  const main = overlay.getByRole("textbox", { name: "Prompt: Main Prompt", exact: true })
+  await main.fill("An hour of careful prompt work.")
+  await expect(overlay.getByText("1 field has changes")).toBeVisible()
+  await overlay.getByRole("button", { name: "Close preset editor", exact: true }).click()
+  await panel.getByRole("button", { name: "Discard", exact: true }).click()
+  const confirm = page.getByRole("alertdialog", { name: "Discard 1 unsaved change?" })
+  await expect(confirm).toContainText("prompt text")
+  await confirm.getByRole("button", { name: "Cancel", exact: true }).click()
+  await panel.getByRole("button", { name: "Edit Main Prompt", exact: true }).click()
+  await expectTextBox(main, "An hour of careful prompt work.")
+  await overlay.getByRole("button", { name: "Close preset editor", exact: true }).click()
+  await panel.getByRole("button", { name: "Discard", exact: true }).click()
+  await page.getByRole("button", { name: "Discard them", exact: true }).click()
+  await expect(panel.getByRole("button", { name: "Save", exact: true })).toHaveCount(0)
 })

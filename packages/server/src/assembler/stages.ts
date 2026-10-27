@@ -1476,6 +1476,8 @@ const composeStage = sync("compose", (assembly) => {
         text: { text: env.text(e.piece), piece: e.piece }
       })
     const beside: Array<{ readonly message: StMessage; readonly at: "start" | "end" }> = []
+    // Notes already put at a slot's start, so the next one follows them and the notes keep their order.
+    const before = { context_start: 0, tail_start: 0 }
     for (const { text, place, id } of placed) {
       if (place.at === "chat") continue
       if (place.at === "context_start" || place.at === "tail_start" || place.at === "tail_end") {
@@ -1484,7 +1486,12 @@ const composeStage = sync("compose", (assembly) => {
           history < 0 ? collection.length : history + (collection[history + 1]?.identifier === "newestMessage" ? 2 : 1)
         const newest = collection.findIndex((p) => p.identifier === "newestMessage")
         const tailEnd = newest > history + 1 ? newest : collection.length
-        const index = place.at === "context_start" ? 0 : place.at === "tail_start" ? tail : tailEnd
+        const index =
+          place.at === "context_start"
+            ? before.context_start++
+            : place.at === "tail_start"
+              ? tail + before.tail_start++
+              : tailEnd
         collection.splice(index, 0, {
           identifier: `note:${id}`,
           role: place.role,

@@ -79,6 +79,36 @@ describe("Newest message", () => {
     expect(built.historySent).toBe(2)
   })
   for (const position of ["context_start", "tail_start", "tail_end"] as const) {
+    it(`keeps several notes at ${position} in their order`, async () => {
+      const note = (entity: string) => ({
+        entity,
+        revision: `revision-${entity}`,
+        first: true,
+        doc: {
+          schema_version: 1 as const,
+          title: entity,
+          content: `NOTE-${entity}`,
+          owner: { chat: "chat" as never },
+          placement: { mode: "section" as const, section: position },
+          exportable: true
+        }
+      })
+      const result = await Effect.runPromise(
+        assembleFixture({
+          preset: importStPreset(JSON.stringify({ frequency_penalty: 0 })).document!,
+          participants: [],
+          cards: [],
+          messages: [{ content: "LATEST", side: "user" }],
+          notes: [note("a"), note("b"), note("c")]
+        })
+      )
+      const sent = result.request.messages.map((m) => m.content)
+      const at = ["a", "b", "c"].map((id) => sent.findIndex((content) => content.includes(`NOTE-${id}`)))
+      expect(at.every((i) => i >= 0)).toBe(true)
+      expect(at).toEqual([...at].sort((x, y) => x - y))
+    })
+  }
+  for (const position of ["context_start", "tail_start", "tail_end"] as const) {
     it(`assembles notes at ${position}`, async () => {
       const preset = importStPreset(
         JSON.stringify({

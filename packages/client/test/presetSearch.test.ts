@@ -35,6 +35,17 @@ describe("preset search", () => {
     expect(search({ regex: true, find: "(" })).toMatchObject({ ok: false })
     expect(search({ max: 1 })).toMatchObject({ truncated: true, replaced: ["rook rook rook rookdne", "rook waits"] })
   })
+  it("still runs patterns that only plain (non-Unicode) regular expressions accept", () => {
+    const text = [`it's a-b, say "hi"`]
+    for (const find of ["\\'", "\\-", '\\"hi\\"', "a\\-b"])
+      expect(search({ texts: text, find, regex: true, replace: null })).toMatchObject({ ok: true })
+    expect(search({ texts: text, find: "a\\-b", regex: true, replace: "x" })).toMatchObject({
+      replaced: [`it's x, say "hi"`]
+    })
+    expect(search({ texts: ["a-b ab-c"], find: "a\\-b", regex: true, wholeWord: true, replace: "x" })).toMatchObject({
+      replaced: ["x ab-c"]
+    })
+  })
   it("advances empty Unicode matches without hanging", () => {
     expect(search({ texts: ["🙂"], regex: true, find: "(?:)", replace: "x" })).toMatchObject({ replaced: ["x🙂x"] })
   })
