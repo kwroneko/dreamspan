@@ -1429,10 +1429,10 @@ export class WriteOps extends RpcGroup.make(
       sha256: Schema.String,
       stateJson: Schema.String,
       /**
-       * A branch's name from ST, for the slot where its path leaves its parent file's
-       * (`parentRecordId`'s): set there unless that slot has a name, once per record.
+       * A branch's parent and optional ST name. Automatic names still need placement
+       * context so local names and explicit clears follow replacement paths.
        */
-      fork: Schema.NullOr(Schema.Struct({ name: Schema.String, parentRecordId: Schema.String }))
+      fork: Schema.NullOr(Schema.Struct({ name: Schema.NullOr(Schema.String), parentRecordId: Schema.String }))
     },
     success: Schema.Struct({
       notes: Schema.Record(Schema.String, EntityId),
@@ -1448,7 +1448,13 @@ export class WriteOps extends RpcGroup.make(
    * own already, or one of a run that's over.
    */
   Rpc.make("StImportClaim", {
-    payload: { userId: UserId, recordId: Schema.String, lease: Schema.String },
+    payload: {
+      userId: UserId,
+      recordId: Schema.String,
+      lease: Schema.String,
+      /** Resolvable current parent, used to recover legacy placement before matching. */
+      parentRecordId: Schema.optionalKey(Schema.String)
+    },
     /** The record as it is now, which an earlier view of it may be behind. */
     success: StChatRecord,
     error: Schema.Union([NotFound, ImportLeaseLost, StorageError])
