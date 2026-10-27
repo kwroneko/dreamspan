@@ -1797,6 +1797,8 @@ const composeStage = sync("compose", (assembly) => {
         Math.max(0, maximum - minimum)
       )
     : null
+  // The history allowance before the recent pair caps it: fresh failed ranges stay raw within it.
+  const windowMaximum = maximum
   // A summary request is cut at its chunk's end and needs the whole chunk: only the window bounds it.
   if (recentPair && !assembly.request.summarizing) {
     maximum = Math.min(maximum, minimum + recentPair.maximum)
@@ -1853,6 +1855,18 @@ const composeStage = sync("compose", (assembly) => {
     start = Math.max(previous ? start : 0, earliestFit(projected.length))
     budget = target
   } else assembly.historyMove = previous ? "unchanged" : "initial"
+  // The recent pair cuts only messages that can be summarized: fresh failed leaf ranges beyond the
+  // cursor remain raw while the window fits (§16), the earliest first. A start at a range's first
+  // message keeps that range and every later one raw, and turns no other range into a marker.
+  if (maximum < windowMaximum) {
+    const kept = failuresBefore(normalizedStart(start))
+      .map((failure) => projected.findIndex((p) => p.entry.depth + 1 >= failure.from))
+      .find((from) => from >= 0 && fits(from, windowMaximum))
+    if (kept !== undefined) {
+      start = kept
+      budget = windowMaximum
+    }
+  }
   start = normalizedStart(start)
   assembly.contextBudget = contextBudgetInfo(cost(candidate(start, Number.POSITIVE_INFINITY, true, false, true, true)))
   const first = projected[start]?.entry
