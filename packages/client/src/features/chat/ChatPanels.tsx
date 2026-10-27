@@ -60,7 +60,6 @@ const PANEL_TABS = [
   { value: "portrait", label: "Portrait", icon: "people" },
   { value: "cast", label: "Cast", icon: "people" },
   { value: "chat", label: "This chat", icon: "sliders" },
-  { value: "preset", label: "Preset", icon: "sliders" },
   { value: "lorebooks", label: "Lorebooks", icon: "book" },
   { value: "notes", label: "Notes", icon: "note" },
   { value: "summaries", label: "Summaries", icon: "summary" }
@@ -175,7 +174,6 @@ function TabContent({
   if (tab.startsWith("card:")) return <CharacterPanel entityId={tab.slice(5) as EntityId} />
   switch (tab) {
     case "model":
-    case "preset":
       return <GenerationSettingsPanel session={session} kind={tab} />
     case "portrait":
       return <PortraitView />
