@@ -1,7 +1,7 @@
 // A card's avatar: its image when it has one, else its initials on a tint picked from its
 // id, so the same card always looks the same. A stack shows a chat's cast together.
 
-import { useOpenPortrait } from "./Portrait.tsx"
+import { PortraitFrame, useOpenPortrait } from "./Portrait.tsx"
 import { mediaUrl, useMediaWidth } from "./mediaImage.ts"
 
 const TINTS = [
@@ -26,16 +26,16 @@ const tint = (id: string) => {
 }
 
 const SIZES = {
-  xs: "h-5 w-[13.333px] text-[0.5625rem]",
-  sm: "h-6 w-4 text-[0.625rem]",
+  xs: "h-7.5 w-5 text-[0.5625rem]",
+  sm: "h-9 w-6 text-[0.625rem]",
   chip: "h-7 w-[18.667px] text-[0.625rem]",
-  md: "h-8 w-[21.333px] text-xs",
-  lg: "h-10 w-[26.667px] text-sm",
+  md: "h-12 w-8 text-xs",
+  lg: "h-15 w-10 text-sm",
   chat: "chat-portrait text-lg",
-  xl: "h-16 w-[42.667px] text-lg",
-  "2xl": "h-24 w-16 text-2xl",
+  xl: "h-24 w-16 text-lg",
+  "2xl": "h-36 w-24 text-2xl",
   /** Fills its box: a grid tile's picture. */
-  fill: "size-full text-4xl"
+  fill: "aspect-[2/3] w-full text-4xl"
 } as const
 
 export type AvatarSize = keyof typeof SIZES
@@ -96,11 +96,11 @@ export function Avatar({
         open({ id, name, mediaId })
       }}
     >
-      {content}
+      <PortraitFrame className="size-full">{content}</PortraitFrame>
     </button>
   ) : (
     <span ref={ref} data-portrait className={box}>
-      {content}
+      <PortraitFrame className="size-full">{content}</PortraitFrame>
     </span>
   )
 }
@@ -111,7 +111,7 @@ interface Face {
   readonly mediaId?: string | null
 }
 
-/** Each cast member keeps the card's 2:3 shape, including in a compact header. */
+/** A chat's cast as a compact row of consistently shaped portraits. */
 export function AvatarStack({
   faces,
   size = "lg",
@@ -121,10 +121,10 @@ export function AvatarStack({
   size?: "md" | "lg"
   preview?: boolean
 }) {
-  const shown = faces.length === 0 ? [{ id: "", name: "?" }] : faces.slice(0, 4)
+  const shown = faces.slice(0, 3)
   return (
     <span className="inline-flex shrink-0 gap-0.5">
-      {shown.map((face) => (
+      {(shown.length ? shown : [{ id: "", name: "?" }]).map((face) => (
         <Avatar
           key={face.id}
           id={face.id}

@@ -368,12 +368,7 @@ test("a new chat of a group: each character greets in turn, and the first send m
     })
   )
   await page.goto(`${server().url}/`)
-  const tile = page
-    .getByRole("list", { name: "Characters and groups" })
-    .getByRole("listitem")
-    .filter({ hasText: "The Pier" })
-  await tile.hover()
-  await tile.getByRole("link", { name: "New chat with The Pier" }).click()
+  await page.goto(`${server().url}/groups/${chatId}/new`)
   await expect(page).toHaveURL(`${server().url}/groups/${chatId}/new`)
   await expect(page.getByRole("heading", { level: 1, name: "New chat: The Pier" })).toBeVisible()
   await expect(
@@ -424,5 +419,9 @@ test("a new chat of a group: each character greets in turn, and the first send m
   await page.goto(`${server().url}/groups/${chatId}`)
   await expect(page.getByRole("heading", { level: 2, name: "Chats (2)" })).toBeVisible()
   await page.goto(`${server().url}/`)
-  await expect(tile).toContainText("2 chats")
+  await page
+    .getByRole("group", { name: "Show", exact: true })
+    .getByRole("button", { name: "Groups", exact: true })
+    .click()
+  await expect(page.getByRole("main").getByRole("button", { name: "Open chat The Pier", exact: true })).toHaveCount(2)
 })

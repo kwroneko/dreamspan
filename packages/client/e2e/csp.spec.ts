@@ -102,8 +102,7 @@ test("every screen runs under the Content-Security-Policy", async ({ page }) => 
   await expect(page.getByRole("dialog").getByRole("status")).toHaveText("1 match.")
   // The character grid and the card's page, with its avatar and its definition.
   await page.goto(`${server().url}/`)
-  await page.getByRole("link", { name: "Inspect Wren" }).click()
-  await expect(page.getByRole("heading", { level: 1, name: "Wren" })).toBeVisible()
-  await expect(page.getByRole("heading", { name: "Definition" })).toBeVisible()
+  await page.getByRole("main").getByRole("button", { name: "Open Wren", exact: true }).click()
+  await expect(page.getByRole("link", { name: "Edit card", exact: true })).toBeVisible()
   expect(violations).toEqual([])
 })

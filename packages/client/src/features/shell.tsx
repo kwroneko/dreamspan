@@ -14,7 +14,8 @@ import { ImageControls } from "../ui/ImageControls.tsx"
 import { ResizeHandle, usePanelWidth } from "../ui/ResizeHandle.tsx"
 import { Loading } from "../ui/Spinner.tsx"
 import { Toasts } from "../ui/Toast.tsx"
-import { ChatList } from "./chat/ChatList.tsx"
+import { ShellBrowser } from "./characters/ShellBrowser.tsx"
+import { ShellNavigation, useShellNavigation } from "./characters/shellData.tsx"
 import { setPageTitle, useNotices } from "./notices.tsx"
 
 /** Sets the tab's title while a screen is shown. */
@@ -126,7 +127,7 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
         </Link>
       </div>
       <ImageControls />
-      {onChats ? <div className="flex-1" /> : <ChatList />}
+      {onChats ? <div className="flex-1" /> : <ShellBrowser />}
       <Navigation {...(onNavigate ? { onNavigate } : {})} />
     </div>
   )
@@ -135,7 +136,9 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
 /** Phones: a bar with the menu, which opens the sidebar over the page. */
 function PhoneBar() {
   // Open on the page it was opened on: going anywhere closes it.
-  const pathname = useLocation({ select: (location) => location.pathname })
+  const href = useLocation({ select: (location) => location.href })
+  const { selection } = useShellNavigation()
+  const pathname = `${href}/${selection}`
   const [openOn, setOpenOn] = useState<string | null>(null)
   const open = openOn === pathname
   const setOpen = (next: boolean) => setOpenOn(next ? pathname : null)
@@ -248,22 +251,24 @@ function AppShell() {
   }
   return (
     <SessionContext value={result.value}>
-      <Notices />
-      <a
-        href="#content"
-        className="sr-only rounded-md bg-surface px-3 py-2 focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus:ring-2 focus:ring-focus"
-      >
-        Skip to content
-      </a>
-      <Toasts>
-        <div className="flex h-dvh">
-          <DesktopSidebar key={result.value.user.id} />
-          <div className="flex min-w-0 flex-1 flex-col">
-            <PhoneBar />
-            <Main />
+      <ShellNavigation key={result.value.user.id}>
+        <Notices />
+        <a
+          href="#content"
+          className="sr-only rounded-md bg-surface px-3 py-2 focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus:ring-2 focus:ring-focus"
+        >
+          Skip to content
+        </a>
+        <Toasts>
+          <div className="flex h-dvh">
+            <DesktopSidebar key={result.value.user.id} />
+            <div className="flex min-w-0 flex-1 flex-col">
+              <PhoneBar />
+              <Main />
+            </div>
           </div>
-        </div>
-      </Toasts>
+        </Toasts>
+      </ShellNavigation>
     </SessionContext>
   )
 }

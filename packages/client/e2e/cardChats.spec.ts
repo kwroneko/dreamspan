@@ -103,7 +103,10 @@ const phone = async (browser: import("@playwright/test").Browser) => {
   return { context, page: await context.newPage() }
 }
 
-const chatLinks = (page: Page) => page.getByRole("main").getByRole("list", { name: "Chats" }).getByRole("link")
+const chatLinks = (page: Page) => {
+  const list = page.getByRole("main").getByRole("list", { name: "Chats" })
+  return list.getByRole("link").or(list.getByRole("button", { name: /^Open chat / }))
+}
 
 test("a first message typed before the chat exists survives leaving it, and goes once sent", async ({ browser }) => {
   const { context, page } = await phone(browser)
@@ -112,7 +115,8 @@ test("a first message typed before the chat exists survives leaving it, and goes
   await page.goto(`${server().url}/cards/${fen}/chat`)
   await box.fill(text)
   await page.getByRole("navigation", { name: "Screens" }).getByRole("link", { name: "Characters" }).click()
-  await page.getByRole("link", { name: "Fen: start a chat", exact: true }).click()
+  await page.getByRole("main").getByRole("button", { name: "Open Fen", exact: true }).click()
+  await page.getByRole("button", { name: "Close", exact: true }).click()
   await expect(box).toHaveValue(text)
   // A reload, too: it's kept in the browser, not the page.
   await page.reload()
@@ -138,7 +142,7 @@ test("a card's page reaches all its chats a page at a time, and finds those not 
   // Searching asks the server: the oldest chat is found before it's loaded.
   await main.getByLabel("Find a chat").fill("Scale chat 000")
   await expect(chatLinks(page)).toHaveCount(1)
-  await expect(chatLinks(page)).toHaveAttribute("href", "/chats/scale-000")
+  await expect(chatLinks(page)).toHaveAttribute("data-chat-id", "scale-000")
   await main.getByLabel("Find a chat").fill("Nothing like this")
   await expect(main.getByText("No chat's title or characters have “Nothing like this”.")).toBeVisible()
   await main.getByLabel("Find a chat").fill("")
@@ -148,8 +152,8 @@ test("a card's page reaches all its chats a page at a time, and finds those not 
   }
   await expect(main.getByRole("button", { name: "Load more" })).toHaveCount(0)
   // Only the card's chats, on every page; newest first.
-  await expect(chatLinks(page).first()).toHaveAttribute("href", `/chats/scale-${String(MANY - 1).padStart(3, "0")}`)
-  await expect(chatLinks(page).last()).toHaveAttribute("href", "/chats/scale-000")
+  await expect(chatLinks(page).first()).toHaveAttribute("data-chat-id", `scale-${String(MANY - 1).padStart(3, "0")}`)
+  await expect(chatLinks(page).last()).toHaveAttribute("data-chat-id", "scale-000")
 })
 
 test("the phone's chats page loads older chats and finds those not loaded", async ({ browser }) => {
@@ -167,16 +171,13 @@ test("the phone's chats page loads older chats and finds those not loaded", asyn
 test("Continue and the tile open the chat with the last message, not a newer empty one", async ({ page }) => {
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/`)
-  await expect(page.getByRole("link", { name: "Aria Vance: continue the latest chat", exact: true })).toHaveAttribute(
-    "href",
-    `/chats/${used}`
-  )
+  await page.getByRole("main").getByRole("button", { name: "Open Aria Vance", exact: true }).click()
+  await expect(page).toHaveURL(new RegExp(`/chats/${used}`))
   await page.goto(`${server().url}/cards/${aria}`)
   const main = page.getByRole("main")
-  await expect(main.getByRole("link", { name: "Continue", exact: true })).toHaveAttribute("href", `/chats/${used}`)
-  // The card's list agrees: the chat with a message first, the empty ones after.
-  await expect(chatLinks(page)).toHaveCount(3)
-  await expect(chatLinks(page).first()).toHaveAttribute("href", `/chats/${used}`)
+  await expect(main.getByRole("button", { name: /^Open chat / })).toHaveCount(3)
+  await main.getByRole("button", { name: "Continue", exact: true }).click()
+  await expect(page).toHaveURL(new RegExp(`/chats/${used}`))
 })
 
 test("on a phone, a group chat's row shows when it started and its length in full", async ({ browser }) => {
@@ -187,7 +188,7 @@ test("on a phone, a group chat's row shows when it started and its length in ful
   await expect(meta).toHaveText("started Apr 6, 2024 · 0 messages")
   const fits = await meta.evaluate((element) => {
     const box = element.getBoundingClientRect()
-    const link = element.closest("a")!.getBoundingClientRect()
+    const link = element.closest("a,button")!.getBoundingClientRect()
     return element.scrollWidth <= element.clientWidth && box.right <= link.right
   })
   expect(fits).toBe(true)

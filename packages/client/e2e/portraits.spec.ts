@@ -86,7 +86,13 @@ for (const width of [1440, 390]) {
     await expect(page.getByRole("img", { name: "Bo's full portrait" })).toBeVisible()
     if (width === 390) await page.getByRole("button", { name: "Close", exact: true }).click()
     else await page.getByRole("button", { name: "Close the panel" }).click()
-    await page.locator("header").getByRole("button", { name: "View Mira's portrait", exact: true }).first().click()
+    await page.locator("header").getByRole("button", { name: "Show Mira's card", exact: true }).first().click()
+    await expect(page.getByRole("link", { name: "Edit card", exact: true })).toBeVisible()
+    await page.getByRole("tab", { name: "Cast", exact: true }).click()
+    await page
+      .getByRole("list", { name: "Characters in this chat" })
+      .getByRole("button", { name: "View Mira's portrait", exact: true })
+      .click()
     await expect(page.getByRole("img", { name: "Mira's full portrait" })).toBeVisible()
     await page.getByRole("tab", { name: "Cast", exact: true }).click()
     await page

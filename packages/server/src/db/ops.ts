@@ -1,4 +1,5 @@
 import { PlannedJob, SummaryJob, SummaryChunk, SummaryPlan } from "./lcmJobs.ts"
+import { ShellLibrary } from "@rp/shared/chatSetupApi.ts"
 import { ModelChoice } from "@rp/shared/lcmSettings.ts"
 import {
   LcmCoverage,
@@ -331,6 +332,22 @@ const StChatRecord = Schema.Struct({
 })
 
 export class WriteOps extends RpcGroup.make(
+  Rpc.make("SetChatPin", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      leaf: Schema.NullOr(SlotId),
+      pinned: Schema.Boolean,
+      forkId: Schema.optional(Schema.String)
+    },
+    success: Schema.Void,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  Rpc.make("SetHomePinsCollapsed", {
+    payload: { userId: UserId, collapsed: Schema.Boolean },
+    success: Schema.Void,
+    error: StorageError
+  }),
   Rpc.make("SaveLcmMaintenance", {
     payload: { userId: UserId, chatId: ChatId, leafSlotId: SlotId, pins: Schema.String },
     error: Schema.Union([StorageError, NotFound])
@@ -1092,6 +1109,7 @@ export class WriteOps extends RpcGroup.make(
    */
   Rpc.make("ImportFile", {
     payload: {
+      createdAt: Schema.optionalKey(Schema.Number),
       userId: UserId,
       intoRefId: Schema.NullOr(RefId),
       kind: EntityKind,
@@ -1613,6 +1631,11 @@ export class WriteOps extends RpcGroup.make(
 ) {}
 
 export class ReadOps extends RpcGroup.make(
+  Rpc.make("ShellLibrary", {
+    payload: { userId: UserId },
+    success: ShellLibrary,
+    error: Schema.Union([NotFound, StorageError])
+  }),
   Rpc.make("GetSummary", {
     payload: { userId: UserId, summaryId: SummaryId },
     success: Summary,

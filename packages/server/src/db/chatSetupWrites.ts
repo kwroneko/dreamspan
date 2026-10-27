@@ -1,3 +1,4 @@
+import { makeShellWriteHandlers } from "./shellWrites.ts"
 import { recordHistoryReduction } from "./historyChanges.ts"
 // Write handlers for chat setup, speakers and the send queue (DESIGN §2.1, §2.2). They run
 // in the writer worker, each as one transaction.
@@ -96,7 +97,12 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
         if (slot!.slot_deleted !== null || slot!.chat_deleted !== null) {
           yield* bin.recoverQueued(owner, entries)
           yield* sql`DELETE FROM queued_messages WHERE reply_slot_id = ${replySlotId}`
-          return { ...nothing, withdrawn: entries.length, queueChanged: true, queue: yield* chatQueue(sql, chatId) }
+          return {
+            ...nothing,
+            withdrawn: entries.length,
+            queueChanged: true,
+            queue: yield* chatQueue(sql, chatId)
+          }
         }
         // Still being written: another version of the slot is selected and generating.
         if (slot!.status === "generating") return nothing
@@ -165,6 +171,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
       })
 
     const handlers = {
+      ...(yield* makeShellWriteHandlers),
       StartChat: ({ userId, cards, persona, greeters, first, title }) =>
         Effect.gen(function* () {
           const ids = [...new Set([...cards, ...(persona === null ? [] : [persona])])]

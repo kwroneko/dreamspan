@@ -15,7 +15,11 @@ import { Fieldset } from "../../ui/Field.tsx"
 import { showToast } from "../../ui/Toast.tsx"
 import { useDeletedToast } from "../bin/deleted.ts"
 import { NameDialog } from "./NameDialog.tsx"
-import { AvatarStack } from "../../ui/Avatar.tsx"
+import { Avatar } from "../../ui/Avatar.tsx"
+import { useAtomValue } from "@effect/atom-react"
+import { AsyncResult } from "effect/reactivity"
+import { PinButton } from "../characters/ShellBrowser.tsx"
+import { shellAtom } from "../characters/shellData.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import {
   Menu,
@@ -58,10 +62,12 @@ function useWrite() {
 function BranchMenu({
   session,
   view,
+  currentLeaf,
   onBranch,
   onJump
 }: {
   session: ChatSession
+  currentLeaf: SlotId | null
   view: ChatView
   onBranch: (entry: PathEntry, index: number) => void
   onJump: (slotId: SlotId) => void
@@ -75,7 +81,7 @@ function BranchMenu({
   const deleted = useDeletedToast()
   const navigate = useNavigate()
   const search = useSearch({ strict: false }) as { panel?: string }
-  const off = view.leafSlotId !== null && view.chat !== null && view.leafSlotId !== view.chat.activeLeafSlotId
+  const off = view.leafSlotId !== null && currentLeaf !== null && view.leafSlotId !== currentLeaf
   if (forks.length === 0 && !off) return null
   const last = forks.at(-1)
   const speaker = (entry: PathEntry) =>
@@ -150,9 +156,20 @@ function BranchMenu({
         {off && (
           <>
             <p className="px-2.5 py-1.5 text-xs text-muted">
-              This isn&rsquo;t the branch the chat continues on: sending here makes it the latest.
+              This isn&rsquo;t the current fork. Sending here makes it current.
             </p>
-            <MenuLinkItem icon="back" render={<Link to="." search={{}} />}>
+            <MenuLinkItem
+              icon="back"
+              render={
+                <Link
+                  to="."
+                  search={{
+                    ...(currentLeaf ? { leaf: currentLeaf } : {}),
+                    ...(search.panel ? { panel: search.panel } : {})
+                  }}
+                />
+              }
+            >
               Back to the latest branch
             </MenuLinkItem>
             {forks.length > 0 && <MenuSeparator />}
@@ -350,6 +367,16 @@ export function ChatHeader({
   onJump: (slotId: SlotId) => void
 }) {
   const characters = castCharacters(view)
+  const navigate = useNavigate()
+  const shell = useAtomValue(shellAtom)
+  const fork = AsyncResult.isSuccess(shell)
+    ? shell.value.forks.find((f) => f.chat.id === view.chat?.id && f.leaf === view.leafSlotId)
+    : undefined
+  const currentLeaf = AsyncResult.isSuccess(shell)
+    ? (shell.value.forks.find((f) => f.chat.id === view.chat?.id && f.current)?.leaf ??
+      view.chat?.activeLeafSlotId ??
+      null)
+    : (view.chat?.activeLeafSlotId ?? null)
   const name = view.chat ? chatName(importState(view.chat.title).title, characters) : null
   useTitle(name?.name ?? "Chat")
   const names = characters.map((card) => card.name)
@@ -374,23 +401,23 @@ export function ChatHeader({
             <Icon name="back" />
           </Link>
         </Tooltip>
-        {characters.length > 0 && (
-          <Tooltip label={names.join(", ")}>
-            <span className="relative shrink-0 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-focus">
-              <AvatarStack
-                size="md"
-                preview
-                faces={characters.map((card) => ({ id: card.entityId, name: card.name, mediaId: card.avatarMediaId }))}
-              />
-              {characters.length > 1 && (
-                <span className="absolute -right-1 -bottom-1 rounded-full border border-canvas bg-surface-raised px-1 text-[0.625rem] leading-4 font-medium text-muted tabular-nums sm:hidden">
-                  {characters.length}
-                </span>
-              )}
-              <span className="sr-only">{names.join(", ")}</span>
-            </span>
-          </Tooltip>
-        )}
+        <div className="flex max-w-40 gap-1 overflow-x-auto">
+          {characters.map((c) => (
+            <button
+              key={c.entityId}
+              type="button"
+              aria-label={`Show ${c.label}'s card`}
+              onClick={() =>
+                void navigate({
+                  to: ".",
+                  search: (prev: Record<string, unknown>) => ({ ...prev, panel: `card:${c.entityId}` })
+                })
+              }
+            >
+              <Avatar id={c.entityId} name={c.name} mediaId={c.avatarMediaId} size="md" />
+            </button>
+          ))}
+        </div>
         <div className="flex min-w-16 sm:min-w-24 flex-1 flex-col">
           <div className="flex min-w-0 items-center gap-2">
             <ChatTitle session={session} view={view} name={name} />
@@ -399,7 +426,8 @@ export function ChatHeader({
           {about.length > 0 && <p className="truncate text-xs text-muted">{about.join(" · ")}</p>}
         </div>
         <div className="flex min-w-0 items-center justify-end gap-1.5 max-sm:w-full sm:gap-3">
-          <BranchMenu session={session} view={view} onBranch={onBranch} onJump={onJump} />
+          {fork && <PinButton fork={fork} />}
+          <BranchMenu session={session} view={view} currentLeaf={currentLeaf} onBranch={onBranch} onJump={onJump} />
           <div className="flex min-w-0 flex-wrap items-center justify-end gap-0.5 max-sm:[&_button]:px-1.5 max-sm:[&_button]:text-xs">
             {actions}
           </div>
