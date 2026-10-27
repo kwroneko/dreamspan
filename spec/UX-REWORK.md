@@ -46,6 +46,13 @@
 - **D** The composer has at least everything today's composer has.
 - **D Rejected** in the right panel: a "lines and forks" section, and a full section for the chat's origin (not something you need to keep looking at).
 
+### Snippets (owner confirmed 2026-10-27)
+- **D** Snippets and shared named notes are one store: a named piece of text, belonging to one chat (and its forks) or global; a note slot can link to one.
+- **D** A Snippets tab in the right panel: search, the list, each opened in the code-editor box; saved continuously as a draft like every field, explicit Save only where versions matter.
+- **D** From any field to a snippet: select text, "Send to snippet" (context menu or shortcut) appends it to the open snippet or makes a new one; works on messages and swipes, so text from another fork can be carried over.
+- **D** From a snippet to a field: "Insert" puts the snippet, or its selected part, at the cursor of the field last focused, the composer included.
+- **D** A new snippet belongs to this chat and its forks; one click makes it global.
+
 ### Portraits
 - **D** Portraits are rectangular, the shape of a card, everywhere: character tiles, chat rows, messages, cast chips, panels. ST uses rectangular avatars and thumbnails; the app mixes round and square (chats have round avatars), which makes no sense. One shape, used consistently (owner, 2026-10-26).
 - **P** The card's own aspect ratio, 2:3 (ST's thumbnails and card images), at every size.
