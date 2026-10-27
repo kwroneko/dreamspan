@@ -80,7 +80,8 @@ export class ShellFork extends Schema.Class<ShellFork>("ShellFork")({
   forkId: Schema.String,
   preview: Schema.String,
   messages: Schema.Int,
-  chat: Chat,
+  /** Only what the rows show; the chat's own record is read when it opens. */
+  chat: Schema.Struct({ id: ChatId, title: Schema.String }),
   leaf: Schema.NullOr(SlotId),
   name: Schema.String,
   current: Schema.Boolean,
@@ -88,7 +89,8 @@ export class ShellFork extends Schema.Class<ShellFork>("ShellFork")({
   pinned: Schema.Boolean,
   createdAt: Schema.Number,
   recentAt: Schema.Number,
-  cast: Schema.Array(CastCard),
+  /** Present characters the model writes, by id; `ShellLibrary.people` describes each once. */
+  cast: Schema.Array(EntityId),
   joined: Schema.Array(EntityId),
   departed: Schema.Array(EntityId),
   activity: Schema.Array(
@@ -103,6 +105,8 @@ export class ShellFork extends Schema.Class<ShellFork>("ShellFork")({
 export class ShellLibrary extends Schema.Class<ShellLibrary>("ShellLibrary")({
   cards: Schema.Array(ShellCard),
   forks: Schema.Array(ShellFork),
+  /** Every card some fork's cast names, once, rather than repeated in each of 5,000 rows. */
+  people: Schema.Array(CastCard),
   pinsCollapsed: Schema.Boolean
 }) {}
 

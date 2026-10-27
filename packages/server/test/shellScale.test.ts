@@ -93,10 +93,15 @@ describe("group read scale", () => {
         const groups = yield* api.GetShellLibrary()
         const groupsTook = performance.now() - groupsStarted
         assert.lengthOf(groups.forks, 5000)
+        const bytes = JSON.stringify(groups).length
         console.log(
-          `GetShellLibrary: 1,000 cards / 5,000 chats / 50,000 slots: ${groupsTook.toFixed(0)} ms; wire JSON ${JSON.stringify(groups).length} bytes`
+          `GetShellLibrary: 1,000 cards / 5,000 chats / 50,000 slots: ${groupsTook.toFixed(0)} ms; wire JSON ${bytes} bytes`
         )
         assert.isBelow(groupsTook, 2000)
+        // Cards are described once in people, not repeated in every fork (3.8 MB when they were).
+        assert.isBelow(bytes, 2_000_000)
+        const people = new Set(groups.people.map((c) => c.entityId))
+        assert.isTrue(groups.forks.every((f) => f.cast.every((id) => people.has(id))))
       }).pipe(Effect.scoped, Effect.provide(serverLayer(config, Generator.none)))
     },
     120_000

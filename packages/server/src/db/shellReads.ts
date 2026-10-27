@@ -1,5 +1,5 @@
 // Graph metadata and bounded excerpts at visible endpoints. Runs in a reader worker.
-import { type ChatId, type EntityId, type SlotId } from "@rp/shared/chat.ts"
+import { type CastCard, type ChatId, type EntityId, type SlotId } from "@rp/shared/chat.ts"
 import { chatName } from "@rp/shared/chatName.ts"
 import { CardUsage, ShellCard, ShellFork, ShellLibrary } from "@rp/shared/chatSetupApi.ts"
 import type { RefId, RevisionId } from "@rp/shared/library.ts"
@@ -10,7 +10,7 @@ import { SqlClient } from "effect/sql"
 import { shellSlotsQuery, shellEventsQuery } from "./shellQueries.ts"
 import { loadCards } from "./cards.ts"
 import type { ReadOps } from "./ops.ts"
-import { type ChatRow, toChat } from "./rows.ts"
+import type { ChatRow } from "./rows.ts"
 import { withoutPurged } from "./stateRefs.ts"
 import { query } from "./tx.ts"
 
@@ -29,6 +29,8 @@ type Slot = {
   depth: number
 }
 type Event = FoldableEvent & { chat_id: string; slot_id: string | null; version_id: string | null }
+// Built plainly during the walk; each becomes a ShellFork once, with its excerpt.
+type Fork = Omit<ShellFork, "cast"> & { cast: Array<CastCard> }
 
 export const makeShellReadHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
@@ -87,7 +89,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
           list.push(s)
           children.set(key, list)
         }
-        const forks: Array<ShellFork> = []
+        const forks: Array<Fork> = []
         // Iterative walk: avoids recursion limits on long imported conversations.
         for (const row of chats) {
           const firstFork = forks.length
@@ -116,15 +118,16 @@ export const makeShellReadHandlers = Effect.gen(function* () {
             recent: row.created_at,
             current: false
           }))
-          const emptyFork = () => {
+          const chat = { id: row.id as ChatId, title: row.title }
+          const emptyFork = (): Fork => {
             const cast = base.participants
               .filter((id) => !base.playedByMe.includes(id))
               .flatMap((id) => byCard.get(id) ?? [])
-            return new ShellFork({
+            return {
               forkId: "",
               preview: "",
               messages: 0,
-              chat: toChat(row),
+              chat,
               leaf: null,
               name: chatName(importState(row.title).title, cast).name,
               current: true,
@@ -136,7 +139,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
               joined: base.participants as Array<EntityId>,
               departed: [],
               activity: []
-            })
+            }
           }
           if (stack.length === 0) forks.push(emptyFork())
           while (stack.length) {
@@ -188,34 +191,32 @@ export const makeShellReadHandlers = Effect.gen(function* () {
               const cast = state.participants
                 .filter((id) => !state.playedByMe.includes(id))
                 .flatMap((id) => byCard.get(id) ?? [])
-              forks.push(
-                new ShellFork({
-                  forkId: fork,
-                  preview: "",
-                  messages: liveLeaf ? (slotById.get(liveLeaf)?.depth ?? -1) + 1 : 0,
-                  chat: toChat(row),
-                  leaf: liveLeaf as SlotId | null,
-                  name: name ?? chatName(importState(row.title).title, cast).name,
-                  named: name !== null,
-                  current:
-                    s.id === row.current_leaf_slot_id ||
-                    (row.current_leaf_slot_id === null && s.id === row.active_leaf_slot_id),
-                  pinned: pinned.has(`${row.id}/${fork}`),
-                  createdAt: fork !== item.fork ? s.created_at : item.created,
-                  recentAt: recent,
-                  cast,
-                  joined: [...joined] as Array<EntityId>,
-                  departed: [...joined].filter((id) => !state.participants.includes(id)) as Array<EntityId>,
-                  activity: [...activity.values()].map((a) => ({
-                    ...a,
-                    category: !state.participants.includes(a.entityId)
-                      ? ("was" as const)
-                      : present.some((id) => id !== a.entityId)
-                        ? ("with" as const)
-                        : ("just" as const)
-                  }))
-                })
-              )
+              forks.push({
+                forkId: fork,
+                preview: "",
+                messages: liveLeaf ? (slotById.get(liveLeaf)?.depth ?? -1) + 1 : 0,
+                chat,
+                leaf: liveLeaf as SlotId | null,
+                name: name ?? chatName(importState(row.title).title, cast).name,
+                named: name !== null,
+                current:
+                  s.id === row.current_leaf_slot_id ||
+                  (row.current_leaf_slot_id === null && s.id === row.active_leaf_slot_id),
+                pinned: pinned.has(`${row.id}/${fork}`),
+                createdAt: fork !== item.fork ? s.created_at : item.created,
+                recentAt: recent,
+                cast,
+                joined: [...joined] as Array<EntityId>,
+                departed: [...joined].filter((id) => !state.participants.includes(id)) as Array<EntityId>,
+                activity: [...activity.values()].map((a) => ({
+                  ...a,
+                  category: !state.participants.includes(a.entityId)
+                    ? ("was" as const)
+                    : present.some((id) => id !== a.entityId)
+                      ? ("with" as const)
+                      : ("just" as const)
+                }))
+              })
             }
           }
           if (forks.length === firstFork) forks.push(emptyFork())
@@ -224,8 +225,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
             const fallback =
               visible.find((f) => f.leaf === row.active_leaf_slot_id) ??
               [...visible].sort((a, b) => b.recentAt - a.recentAt)[0]!
-            const at = forks.indexOf(fallback)
-            forks[at] = new ShellFork({ ...fallback, current: true })
+            forks[forks.indexOf(fallback)] = { ...fallback, current: true }
           }
         }
         // Only the visible endpoints need text, and only a bounded excerpt.
@@ -238,10 +238,8 @@ export const makeShellReadHandlers = Effect.gen(function* () {
           }>`SELECT s.id, substr(v.content,1,160) AS preview FROM slots s JOIN versions v ON v.id = s.selected_version_id WHERE s.id IN ${sql.in(leaves.slice(at, at + 200))} AND s.deleted_at IS NULL`
           for (const row of rows) previewByLeaf.set(row.id, row.preview)
         }
-        for (let at = 0; at < forks.length; at++) {
-          const f = forks[at]!
-          forks[at] = new ShellFork({ ...f, preview: f.leaf ? (previewByLeaf.get(f.leaf) ?? "") : "" })
-        }
+        const people = new Map<string, CastCard>()
+        for (const f of forks) for (const c of f.cast) people.set(c.entityId, c)
         const shellCards = metadata
           .filter((m) => !m.persona && byCard.has(m.id))
           .map((m) => {
@@ -281,7 +279,17 @@ export const makeShellReadHandlers = Effect.gen(function* () {
         }>`SELECT pins_collapsed FROM shell_preferences WHERE user_id = ${userId}`
         return new ShellLibrary({
           cards: shellCards,
-          forks: forks.sort((a, b) => b.recentAt - a.recentAt || a.chat.id.localeCompare(b.chat.id)),
+          forks: forks
+            .sort((a, b) => b.recentAt - a.recentAt || a.chat.id.localeCompare(b.chat.id))
+            .map(
+              (f) =>
+                new ShellFork({
+                  ...f,
+                  preview: f.leaf ? (previewByLeaf.get(f.leaf) ?? "") : "",
+                  cast: f.cast.map((c) => c.entityId)
+                })
+            ),
+          people: [...people.values()],
           pinsCollapsed: prefs?.pins_collapsed === 1
         })
       }).pipe(query("ShellLibrary"))

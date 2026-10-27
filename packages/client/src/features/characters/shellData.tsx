@@ -1,14 +1,27 @@
 import { useAtomValue } from "@effect/atom-react"
-import type { EntityId } from "@rp/shared/chat.ts"
-import type { ShellCard, ShellFork } from "@rp/shared/chatSetupApi.ts"
+import type { CastCard, EntityId } from "@rp/shared/chat.ts"
+import type { ShellCard, ShellFork as ShellForkRow, ShellLibrary as ShellLibraryRows } from "@rp/shared/chatSetupApi.ts"
 import { useNavigate, useSearch } from "@tanstack/react-router"
-import { AsyncResult } from "effect/reactivity"
+import { AsyncResult, Atom } from "effect/reactivity"
 import { createContext, type ReactNode, useContext, useState } from "react"
 import { AppClient } from "../../rpc.ts"
 import { useSession } from "../../session.ts"
 import { Avatar } from "../../ui/Avatar.tsx"
 
-export const shellAtom = AppClient.query("GetShellLibrary", undefined, { reactivityKeys: ["chats", "library", "pins"] })
+/** A fork row with its cast's cards, which the wire names once in `people`. */
+export type ShellFork = Omit<ShellForkRow, "cast"> & { readonly cast: ReadonlyArray<CastCard> }
+export type ShellLibrary = Omit<ShellLibraryRows, "forks" | "people"> & { readonly forks: ReadonlyArray<ShellFork> }
+const withCast = (data: ShellLibraryRows): ShellLibrary => {
+  const people = new Map(data.people.map((c) => [c.entityId, c]))
+  return {
+    ...data,
+    forks: data.forks.map((f) => ({ ...f, cast: f.cast.flatMap((id) => people.get(id) ?? []) }))
+  }
+}
+export const shellAtom = Atom.mapResult(
+  AppClient.query("GetShellLibrary", undefined, { reactivityKeys: ["chats", "library", "pins"] }),
+  withCast
+)
 type Scope = { entity: EntityId | null; chat: string | null }
 const Context = createContext<{
   scope: Scope

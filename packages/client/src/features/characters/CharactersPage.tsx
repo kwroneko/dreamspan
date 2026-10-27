@@ -1,12 +1,11 @@
 import { useState } from "react"
 import { Link } from "@tanstack/react-router"
-import type { ShellLibrary } from "@rp/shared/chatSetupApi.ts"
 import { AsyncView } from "../../actions.tsx"
 import { Input } from "../../ui/Field.tsx"
 import { Segmented } from "../../ui/Segmented.tsx"
 import { EmptyState } from "../../ui/Surface.tsx"
 import { useTitle } from "../shell.tsx"
-import { CharacterTile, shellAtom, useShellNavigation } from "./shellData.tsx"
+import { CharacterTile, shellAtom, useShellNavigation, type ShellLibrary } from "./shellData.tsx"
 import { GroupTile, PinnedChats, SortSwitch, sortForks, type ShellSort } from "./ShellBrowser.tsx"
 
 type Filter = "all" | "used" | "unused" | "groups" | "archive"
