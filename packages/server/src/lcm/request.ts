@@ -26,23 +26,23 @@ const summaryTail = (snapshot: ContextSnapshot): ContextSnapshot => {
   }
 }
 
+const element = (p: Piece) =>
+  p.source.kind === "summary"
+    ? `<summary level="${p.source.level}" from="${p.source.from}" to="${p.source.to}">\n${p.text}\n</summary>`
+    : p.text
+
 /** Summaries as one block, as our layouts send the layer. */
-const block = (pieces: ReadonlyArray<Piece>) =>
-  `<summaries>\n${pieces
-    .map((p) =>
-      p.source.kind === "summary"
-        ? `<summary level="${p.source.level}" from="${p.source.from}" to="${p.source.to}">\n${p.text}\n</summary>`
-        : p.text
-    )
-    .join("\n")}\n</summaries>`
+const block = (pieces: ReadonlyArray<Piece>) => `<summaries>\n${pieces.map(element).join("\n")}\n</summaries>`
 
 /**
  * A summary request without the preset (DESIGN §8; ST's "Raw"): the instruction as the system
- * message, the earlier coverage as one continuity message, then the material: a level-1 job's
- * messages in their roles, or a condensation's parts as one block. Built from the assembled
- * context, so the chunk is exactly the one the full-preset path would render and clip; nothing
- * of the preset, cards or notes is sent. It shares no prefix with the chat: its own breakpoint
- * after the continuity lets consecutive chunks read it back.
+ * message, the earlier coverage as continuity, one message per summary, then the material: a
+ * level-1 job's messages in their roles, or a condensation's parts as one block. Built from the
+ * assembled context, so the chunk is exactly the one the full-preset path would render and clip;
+ * nothing of the preset, cards or notes is sent. It shares no prefix with the chat: its own
+ * breakpoint after the continuity lets the next chunk read it back, since that chunk's request
+ * repeats these messages and adds the new summary after them (one message for all of them would
+ * change with every summary, and a provider cache matches whole messages).
  */
 const rawSummary = (snapshot: ContextSnapshot): ContextSnapshot => {
   const job = snapshot.summaryJob!
@@ -57,7 +57,10 @@ const rawSummary = (snapshot: ContextSnapshot): ContextSnapshot => {
     messages.push({ role: "user", content: block(pieces.map((at) => snapshot.pieces[at]!)) })
     for (const at of pieces) placed.set(at, [messages.length - 1])
   }
-  if (continuity.length) place(continuity)
+  for (const at of continuity) {
+    messages.push({ role: "user", content: element(snapshot.pieces[at]!) })
+    placed.set(at, [messages.length - 1])
+  }
   const cached = messages.length - 1
   // A message is history when it holds a message piece; its index in the new request.
   const moved = new Map<number, number>()

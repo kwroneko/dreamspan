@@ -219,6 +219,9 @@ for (const width of [390, 1440])
     await expect(row).toContainText("Your preset includes this through {{summary}}.")
     const preset = await openPanel(page, "Prompt preset")
     await expect(preset.getByText(/\{\{summary\}\}: Summary \(from ST\) note \(~[\d,]+ tokens\)/)).toBeVisible()
+    // The badge sits under the prompt's name and leaves it its width: the name stays on one line.
+    const name = (await preset.getByText("Main Prompt", { exact: true }).boundingBox())!
+    expect(name.height).toBeLessThan(30)
     if (width === 1440) {
       // The enable dialog says the note goes off, and turning summaries on does it.
       const section = await summaries(page)
@@ -233,6 +236,7 @@ for (const width of [390, 1440])
       await expect(off).toContainText("Summaries are on: {{summary}} in your preset sends the summaries instead.")
       const badge = await openPanel(page, "Prompt preset")
       await expect(badge.getByText(/\{\{summary\}\}: Summaries \(1, ~[\d,]+ tokens\)/)).toBeVisible()
+      expect((await badge.getByText("Main Prompt", { exact: true }).boundingBox())!.height).toBeLessThan(30)
     }
   })
 

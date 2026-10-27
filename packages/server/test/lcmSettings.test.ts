@@ -235,21 +235,25 @@ lcmTest("without the preset a summary is the instruction, the earlier summaries,
       // Nothing of the preset: its main prompt is not there.
       assert.isFalse(messages.some((m) => m.content.includes("in a fictional chat")))
     }
-    // The first chunk alone; then one continuity message with what came before, then the chunk.
+    // The first chunk alone; then the continuity, one message per earlier summary, then the chunk.
     assert.deepStrictEqual(
       sent[0]!.slice(1).map((m) => m.content.slice(0, 10)),
       ["Message 0.", "Message 1.", "Message 2."]
     )
     assert.strictEqual(sent[1]![1]!.role, "user")
-    assert.match(
-      sent[1]![1]!.content,
-      /^<summaries>\n<summary level="1" from="1" to="3">\nA summary\.\n<\/summary>\n<\/summaries>$/
-    )
+    assert.match(sent[1]![1]!.content, /^<summary level="1" from="1" to="3">\nA summary\.\n<\/summary>$/)
     assert.deepStrictEqual(
       sent[1]!.slice(2).map((m) => m.content.slice(0, 10)),
       ["Message 3.", "Message 4.", "Message 5."]
     )
-    assert.include(sent[2]![1]!.content, 'from="4" to="6"')
+    // The next chunk repeats the continuity before it byte for byte and adds the new summary after
+    // it, so the breakpoint the previous request set is a prefix of this one.
+    assert.deepStrictEqual(sent[2]!.slice(0, 2), sent[1]!.slice(0, 2))
+    assert.match(sent[2]![2]!.content, /^<summary level="1" from="4" to="6">/)
+    assert.deepStrictEqual(
+      sent[2]!.slice(3).map((m) => m.content.slice(0, 10)),
+      ["Message 6.", "Message 7.", "Message 8."]
+    )
     // The breakpoint is after the continuity (after the instruction when there is none), and the
     // instruction opens every request byte for byte, so consecutive chunks read it back.
     const [snapshots] = yield* fixtureSql(h.dataDir, [
@@ -262,6 +266,7 @@ lcmTest("without the preset a summary is the instruction, the earlier summaries,
     const contexts = snapshots!.map((row) => JSON.parse(row.s as string) as ContextSnapshot)
     assert.deepStrictEqual(contexts[0]!.request.breakpoints, [{ message: 0, reason: "prefix" }])
     assert.deepStrictEqual(contexts[1]!.request.breakpoints, [{ message: 1, reason: "summary" }])
+    assert.deepStrictEqual(contexts[2]!.request.breakpoints, [{ message: 2, reason: "summary" }])
     assert.isFalse(contexts[1]!.summaryJob!.withPreset)
     // Its inspector pieces name the instruction, the summaries and the messages.
     assert.isTrue(contexts[1]!.pieces.some((p) => p.id === "lcm:instruction" && p.messages[0] === 0))
