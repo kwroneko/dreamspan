@@ -6,6 +6,7 @@ import { Effect } from "effect"
 import type { ShellLibrary } from "@rp/shared/chatSetupApi.ts"
 import type { LibraryRef } from "@rp/shared/library.ts"
 import { writeRealisticStFolder } from "../../server/test/support/stRealistic.ts"
+import { type FakeProvider, startProvider } from "./support/provider.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { openPanel } from "./support/panel.ts"
@@ -16,6 +17,7 @@ const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMI
 const shots = resolve(process.env.SCREENSHOT_DIR ?? join(tmpdir(), "rp-preset-screenshots"))
 let library: ShellLibrary
 let preset: LibraryRef
+let provider: FakeProvider
 
 test.setTimeout(240_000)
 test.beforeAll(async ({ browser }) => {
@@ -31,12 +33,49 @@ test.beforeAll(async ({ browser }) => {
   library = await admin((api) => api.GetShellLibrary())
   preset = (await admin((api) => api.ListLibrary({ kind: "preset" }))).find((p) => p.label === "Celia 4.2")!
   expect(preset).toBeTruthy()
+  // Unit I made the model and prompt preset account selections and moved the context size onto
+  // the model: select Celia 4.2 and a model with the 128000-token context its ST preset had.
+  provider = await startProvider()
+  const connection = await admin((api) =>
+    api.CreateConnection({
+      kind: "openai-chat",
+      settings: {
+        name: "Local model server",
+        baseUrl: provider.baseUrl,
+        compat: {},
+        cacheTtlS: null,
+        maxConcurrent: null,
+        presetOverrideRefId: null
+      },
+      apiKey: "sk-preset-test-key-0042"
+    })
+  )
+  await admin((api) => api.RefreshModels({ connectionId: connection.id }))
+  const model = (await admin((api) => api.ListModels({ connectionId: connection.id, includeHidden: false }))).find(
+    (m) => m.key === "fake-small"
+  )!
+  await admin((api) =>
+    api.EditModel({
+      modelId: model.id,
+      overrides: { context: 128000, settings: { samplers: { openai_max_context: 128000 } } },
+      expectedRowVersion: model.rowVersion
+    })
+  )
+  await admin((api) =>
+    api.SetGenerationDefaults({
+      defaults: { model: { connection: connection.id, model: model.id }, preset: preset.id }
+    })
+  )
   const context = await admin((api) =>
     api.GetNextContext({ chatId: library.forks.find((f) => f.current)!.chat.id, leafSlotId: null })
   )
   expect(context.budget?.maximum).toBe(128000)
   expect(context.presetContext?.blocks.length).toBeGreaterThan(0)
   await page.close()
+})
+
+test.afterAll(async () => {
+  await provider?.stop()
 })
 
 for (const width of [1440, 390])
