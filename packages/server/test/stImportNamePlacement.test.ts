@@ -303,7 +303,7 @@ const checkPlacement = (
   const target =
     previous && path.some((s) => s.id === previous.id)
       ? after.slots.get(previous.id)
-      : path.find((s) => !parentIds.has(s.id))
+      : path.find((s) => !parentIds.has(s.id) && (!previous || !before.slots.has(s.id)))
   if (parent !== null && target) {
     assert.strictEqual(record.nameSlot, target.id, `${source}: remembered placement`)
     const targetBefore = before.slots.get(target.id)
@@ -339,7 +339,7 @@ const checkPlacement = (
   // This includes omitted files and abandoned paths. Import must never move/clear an
   // existing slot's decision to repair a different path, even if another file shares it.
   for (const [id, slot] of before.slots) {
-    if (id === target?.id && parent !== null && slot.name === null && slot.user === 0) continue
+    if (id === target?.id && parent !== null && !previous && slot.name === null && slot.user === 0) continue
     assert.deepStrictEqual(naming(after.slots.get(id)!), naming(slot), `existing slot ${id}`)
   }
   for (const [pathSource, r] of before.records) {
@@ -553,6 +553,23 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
           { kind: "extend", file: 1, at: 5 }
         ])
       )
+    for (const choice of [null, "local", "clear"] as const)
+      it.effect(`protects shared history after parent writer then child swipe (${choice})`, () =>
+        replayTrace(7, [
+          ...(choice === null ? [] : ([{ kind: choice, file: 3, at: 0 }] satisfies Edit[])),
+          { kind: "writer", file: 1, at: 0 },
+          { kind: "swipe", file: 3, at: 1 }
+        ])
+      )
+    for (const choice of [null, "local", "clear"] as const)
+      it.effect(`retains an unreachable choice when truncation creates no suffix (${choice})`, () =>
+        replayTrace(8, [
+          ...(choice === null ? [] : ([{ kind: choice, file: 3, at: 0 }] satisfies Edit[])),
+          { kind: "writer", file: 1, at: 0 },
+          { kind: "delete", file: 3, at: 3 },
+          { kind: "delete", file: 3, at: 3 }
+        ])
+      )
     it.effect("keeps the choice when a renamed main file belongs to another chat", () =>
       replayTrace(914, [
         { kind: "rename", file: 0, at: 0 },
@@ -574,6 +591,181 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
             }
           }),
         { timeout: 180_000 }
+      )
+  }
+)
+
+layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" })(
+  "legacy collision and missing parent regressions",
+  (it) => {
+    for (const mode of ["legacy-custom", "legacy-auto", "missing-parent", "unresolved-parent"])
+      for (const choice of [null, "Local outer", ""])
+        it.effect(`${mode}: ${JSON.stringify(choice)}`, () =>
+          Effect.gen(function* () {
+            const folder = `Fix5-${mode}-${choice === null ? 0 : choice === "" ? 2 : 1}`
+            const outerName = mode === "legacy-auto" ? "main - Branch #1" : "Outer road"
+            const files = pair(folder, outerName)
+            const common = [msg(folder + " greeting", 0), msg(folder + " hello", 1)]
+            const outer = [...common, msg(folder + " fork", 2), msg(folder + " reply", 3)]
+            const api = yield* run(files)
+            const base = yield* snapshot(api, files[1]![0])
+            if (choice !== null) yield* api.NameBranch({ slotId: base.entries[2]!.slotId, name: choice })
+            const before = yield* snapshot(api, files[1]![0])
+            let childBefore: Snapshot | undefined
+            const childSource = `chats/${folder}/Inner road.jsonl`
+            let replacement: Uint8Array
+            if (mode === "missing-parent" || mode === "unresolved-parent") {
+              replacement = bytes([
+                { chat_metadata: mode === "unresolved-parent" ? { main_chat: "Missing parent" } : {} },
+                { ...outer[0]!, is_user: true, name: "User" },
+                ...outer.slice(1)
+              ])
+            } else {
+              const child = [
+                { ...outer[0]!, is_user: true, name: "User" },
+                ...outer.slice(1, 3),
+                msg(folder + " inner", 3),
+                msg(folder + " child tail", 4)
+              ]
+              yield* run([
+                [
+                  childSource,
+                  bytes([{ chat_metadata: { main_chat: outerName } }, ...outer.slice(0, 3), ...child.slice(3)])
+                ]
+              ])
+              yield* run([[childSource, bytes([{ chat_metadata: { main_chat: outerName } }, ...child])]])
+              childBefore = yield* snapshot(api, childSource)
+              yield* fixtureSql(config.dataDir, [
+                {
+                  sql:
+                    mode === "legacy-auto"
+                      ? "UPDATE jobs SET payload_json=json_remove(payload_json, '$.nameSlot', '$.named', '$.parentRecordId') WHERE id=?"
+                      : "UPDATE jobs SET payload_json=json_remove(payload_json, '$.nameSlot', '$.parentRecordId') WHERE id=?",
+                  params: [before.record.recordId]
+                }
+              ])
+              replacement = bytes([
+                { chat_metadata: { main_chat: "main" } },
+                ...child.slice(0, -1),
+                msg(folder + " extended", 4)
+              ])
+            }
+            let after: Snapshot | undefined
+            for (let pass = 0; pass < 2; pass++) {
+              yield* run([files[0]!, [files[1]![0], replacement]])
+              const current = yield* snapshot(api, files[1]![0])
+              if (after) assert.deepStrictEqual(contents(current.entries), contents(after.entries), "unchanged replay")
+              after = current
+            }
+            const expected = {
+              name: choice === "" ? null : (choice ?? (mode === "legacy-auto" ? null : outerName)),
+              user: choice === null ? 0 : 1
+            }
+            const old = after!.rows.find((r) => r.id === before.entries[2]!.slotId)!
+            assert.deepStrictEqual(
+              { name: old.branch_name, user: old.branch_name_user },
+              expected,
+              "original naming choice"
+            )
+            const oldPath = yield* api.ReadPath({
+              chatId: before.record.chatId,
+              leafSlotId: before.record.end,
+              range: { _tag: "Bottom" },
+              limit: 100
+            })
+            assert.deepStrictEqual(contents(oldPath.entries), contents(before.entries), "original path and versions")
+            if (childBefore)
+              assert.deepStrictEqual(
+                contents((yield* snapshot(api, childSource)).entries),
+                contents(childBefore.entries),
+                "other file path and naming"
+              )
+            const row = after!.rows.find((r) => r.id === after!.entries[0]!.slotId)!
+            assert.deepStrictEqual(
+              { name: row.branch_name, user: row.branch_name_user },
+              expected,
+              "remembered choice follows replacement"
+            )
+          })
+        )
+  }
+)
+
+layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" })(
+  "parent divergence then child swipe preserves main",
+  (it) => {
+    for (const choice of [null, "My inner", ""])
+      it.effect(`raw shared-root and abandoned-path fields (${JSON.stringify(choice)})`, () =>
+        Effect.gen(function* () {
+          const folder = `N7-${choice === null ? 0 : choice === "" ? 2 : 1}`
+          const files = pair(folder, "Outer road")
+          const outer = [
+            msg(folder + " greeting", 0),
+            msg(folder + " hello", 1),
+            msg(folder + " fork", 2),
+            msg(folder + " reply", 3)
+          ]
+          const child = [...outer.slice(0, 3), msg(folder + " inner", 3), msg(folder + " tail", 4)]
+          const source = `chats/${folder}/Inner road.jsonl`
+          const childFile = (): [string, Uint8Array] => [
+            source,
+            bytes([{ chat_metadata: { main_chat: "Outer road" } }, ...child])
+          ]
+          const api = yield* run([...files, childFile()])
+          const initial = yield* snapshot(api, source)
+          if (choice !== null) yield* api.NameBranch({ slotId: initial.entries[3]!.slotId, name: choice })
+          const before = yield* snapshot(api, source)
+          const main = yield* snapshot(api, files[0]![0])
+          outer[0] = { ...outer[0]!, is_user: true, name: "User" }
+          const outerFile: [string, Uint8Array] = [
+            files[1]![0],
+            bytes([{ chat_metadata: { main_chat: "main" } }, ...outer])
+          ]
+          yield* run([files[0]!, outerFile, childFile()])
+          assert.deepStrictEqual(
+            contents((yield* snapshot(api, source)).entries),
+            contents(before.entries),
+            "parent-only change"
+          )
+          const original = child[1]!
+          child[1] = msg(folder + " changed user", 1, {
+            swipes: [original.mes, folder + " changed user"],
+            swipe_id: 1,
+            swipe_info: [{ send_date: original.send_date }, { send_date: original.send_date }]
+          })
+          let after: Snapshot | undefined
+          for (let pass = 0; pass < 2; pass++) {
+            yield* run([files[0]!, outerFile, childFile()])
+            const current = yield* snapshot(api, source)
+            if (after) assert.deepStrictEqual(current, after, "stable replay")
+            after = current
+          }
+          const mainAfter = yield* snapshot(api, files[0]![0])
+          assert.deepStrictEqual(contents(mainAfter.entries), contents(main.entries), "main path and selected versions")
+          const root = main.rows.find((r) => r.id === main.entries[0]!.slotId)!
+          assert.deepStrictEqual(
+            mainAfter.rows.find((r) => r.id === root.id),
+            root,
+            "raw main root naming and provenance"
+          )
+          const oldPath = yield* api.ReadPath({
+            chatId: before.record.chatId,
+            leafSlotId: before.record.end,
+            range: { _tag: "Bottom" },
+            limit: 100
+          })
+          assert.deepStrictEqual(
+            contents(oldPath.entries),
+            contents(before.entries),
+            "abandoned child path and selected versions"
+          )
+          const row = after!.rows.find((r) => r.id === after!.entries[1]!.slotId)!
+          assert.deepStrictEqual(
+            { name: row.branch_name, user: row.branch_name_user },
+            { name: choice === "" ? null : (choice ?? "Inner road"), user: choice === null ? 0 : 1 },
+            "choice placed on independent suffix"
+          )
+        })
       )
   }
 )

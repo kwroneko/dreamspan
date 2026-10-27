@@ -863,10 +863,15 @@ export class StImports extends Context.Service<
             // A file imported before: this run takes its record over, as the record is now.
             const cached = session.records.get(path)
             if (cached !== undefined && !cached.binned) {
+              const parentRecordId =
+                part.header?.mainChat == null
+                  ? undefined
+                  : session.records.get(stParentPath(file, part.header.mainChat))?.recordId
               const claimed = yield* writer.StImportClaim({
                 userId: user.id,
                 recordId: cached.recordId,
-                lease: session.id
+                lease: session.id,
+                ...(parentRecordId === undefined ? {} : { parentRecordId })
               })
               session.records.set(path, { ...claimed, state: JSON.parse(claimed.stateJson) as ChatState | null })
             }

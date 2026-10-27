@@ -67,6 +67,8 @@ interface RecordPayload {
   readonly named?: boolean
   /** Where that naming choice belongs; resolved again when a reimport forks earlier. */
   readonly nameSlot?: string | null
+  /** Last resolved parent, retained when a later header loses main_chat. */
+  readonly parentRecordId?: string
 }
 
 export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: ReturnType<typeof makeBin>) {
@@ -488,7 +490,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
               // diverges there, so its own path keeps what ST had on it.
               let own = recorded ?? exact ?? (input.strict ? undefined : candidates[0])
               let match = placeholder ?? own?.[0]
-              // A replacement may match another fork's named path. If our old naming
+              // A replacement may match another fork's path, including an unnamed one. If our old naming
               // choice is no longer on that prefix, adopting its slot would strand our
               // choice or overwrite theirs. Start an independent path at the collision.
               // A parent extending after its own remembered slot may still share a
@@ -498,7 +500,6 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
                 copied === null &&
                 placeholder === undefined &&
                 payload.nameSlot != null &&
-                (match.branch_name !== null || match.branch_name_user === 1) &&
                 match.slot_id !== (yield* priorAt(match.depth))
               ) {
                 const [collision] = yield* sql<{ conflict: number }>`
@@ -727,16 +728,16 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
         let fork: "named" | "kept" | "same" | null = null
         let named = payload.named ?? false
         let nameSlot = payload.nameSlot ?? null
-        if (input.fork !== null && input.end !== null) {
+        if ((input.fork !== null || payload.merged) && input.end !== null) {
           const [parentRow] = yield* sql<{ payload_json: string }>`
-            SELECT payload_json FROM jobs WHERE id = ${input.fork.parentRecordId} AND owner_user_id = ${userId}
+            SELECT payload_json FROM jobs WHERE id = ${input.fork?.parentRecordId ?? payload.parentRecordId ?? ""} AND owner_user_id = ${userId}
               AND kind = ${ST_CHAT_RECORD}`
           const parent = parentRow === undefined ? null : (JSON.parse(parentRow.payload_json) as RecordPayload)
           const parentEnd = parent?.chatId === chatId ? (parent.end ?? parent.last ?? null) : null
           // A renamed main file may now have a record in a different chat. It has
           // no shared slots here, so use an empty parent path instead of skipping
           // transfer of this file's remembered naming choice.
-          if (parent !== null) {
+          {
             type NameSlot = { id: string; depth: number; branch_name: string | null; branch_name_user: number }
             const divergence = (end: string | null, placement: string | null = null) => sql<
               NameSlot & { keeps_placement: number }
@@ -753,7 +754,12 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
               SELECT s.id, s.depth, s.branch_name, s.branch_name_user,
                 EXISTS (SELECT 1 FROM mine WHERE id = ${placement}) AS keeps_placement
               FROM mine m JOIN slots s ON s.id = m.id
-              WHERE m.id NOT IN (SELECT id FROM theirs) ORDER BY m.depth LIMIT 1`
+              WHERE m.id NOT IN (SELECT id FROM theirs)
+                -- A transferred choice must start on this run's independent suffix,
+                -- never on an older shared prefix outside the parent's current path.
+                AND (${placement} IS NULL OR EXISTS (SELECT 1 FROM mine WHERE id = ${placement})
+                  OR s.depth >= (SELECT depth FROM slots WHERE id = ${payload.firstAdded ?? null}))
+              ORDER BY m.depth LIMIT 1`
             // Older custom-name records have only `named`; automatic-name records
             // have neither field. Recover both from their prior path, including local
             // choices. `nameSlot` also survives an interrupted, batched suffix copy.
@@ -774,7 +780,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
                 ((own.branch_name === null && !(named && previous?.id === own.id)) ||
                   // A copied import label at the new divergence may belong to the parent.
                   (moving && payload.forkPrior != null))
-              const name = moving ? previous.branch_name : input.fork.name
+              const name = moving ? previous.branch_name : (input.fork?.name ?? null)
               const local = moving ? previous.branch_name_user : 0
               fork = canName && name !== null ? "named" : "kept"
               if (canName) {
@@ -812,6 +818,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
           ...payload,
           named,
           nameSlot,
+          ...(input.fork === null ? {} : { parentRecordId: input.fork.parentRecordId }),
           sha256: input.sha256,
           state: input.stateJson,
           notes,
@@ -842,7 +849,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
         return { unhidden: rows.length }
       }).pipe(transaction(sql, "StImportUnhide")),
 
-    StImportClaim: ({ userId, recordId, lease }) =>
+    StImportClaim: ({ userId, recordId, lease, parentRecordId }) =>
       Effect.gen(function* () {
         const [row] = yield* sql<{ status: string; payload_json: string; deleted_at: number | null }>`
           SELECT j.status, j.payload_json, c.deleted_at FROM jobs j
@@ -854,7 +861,39 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
         yield* current(userId, lease, recordId)
         const payload = JSON.parse(row.payload_json) as RecordPayload
         const prior = payload.last ?? payload.end ?? null
-        yield* sql`UPDATE jobs SET payload_json = ${JSON.stringify({ ...payload, lease, prior, branchDeleted: false })}, updated_at = ${Date.now()}
+        let nameSlot = payload.nameSlot ?? null
+        const parentId = parentRecordId ?? payload.parentRecordId
+        if (parentId !== undefined) {
+          const [parent] = yield* sql<{ payload_json: string }>`SELECT payload_json FROM jobs
+            WHERE id = ${parentId} AND owner_user_id = ${userId} AND kind = ${ST_CHAT_RECORD}`
+          if (!parent) return yield* new NotFound({ entity: "import record", id: parentId })
+          const parentPayload = JSON.parse(parent.payload_json) as RecordPayload
+          if (payload.merged && nameSlot === null && prior !== null) {
+            // Legacy records must recover their choice before message matching can
+            // adopt another fork's occupied placement. Keep placeholders in the walk.
+            const parentEnd =
+              parentPayload.chatId === payload.chatId ? (parentPayload.end ?? parentPayload.last ?? null) : null
+            const [placement] = yield* sql<{ id: string }>`
+              WITH RECURSIVE theirs(id, parent) AS (
+                SELECT id, parent_slot_id FROM slots WHERE id = ${parentEnd} AND chat_id = ${payload.chatId}
+                UNION ALL
+                SELECT s.id, s.parent_slot_id FROM slots s JOIN theirs t ON s.id = t.parent
+              ), mine(id, parent, depth) AS (
+                SELECT id, parent_slot_id, depth FROM slots WHERE id = ${prior} AND chat_id = ${payload.chatId}
+                UNION ALL
+                SELECT s.id, s.parent_slot_id, s.depth FROM slots s JOIN mine m ON s.id = m.parent
+              ) SELECT id FROM mine WHERE id NOT IN (SELECT id FROM theirs) ORDER BY depth LIMIT 1`
+            nameSlot = placement?.id ?? null
+          }
+        }
+        yield* sql`UPDATE jobs SET payload_json = ${JSON.stringify({
+          ...payload,
+          lease,
+          prior,
+          nameSlot,
+          ...(parentId === undefined ? {} : { parentRecordId: parentId }),
+          branchDeleted: false
+        })}, updated_at = ${Date.now()}
           WHERE id = ${recordId}`
         return {
           recordId,
