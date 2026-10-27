@@ -457,7 +457,7 @@ export function Composer({ session, view }: { session: ChatSession; view: ChatVi
                   type="button"
                   aria-label={`Speak as ${who}`}
                   onClick={() => setPicked(id)}
-                  className="shrink-0 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                  className="shrink-0 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-focus"
                 >
                   <Avatar id={id} name={who} mediaId={castView.cards.get(id)?.avatarMediaId ?? null} size="md" />
                 </button>

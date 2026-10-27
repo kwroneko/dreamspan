@@ -51,16 +51,19 @@ export function Switch({
   checked,
   onCheckedChange,
   children,
-  description
+  description,
+  disabled = false
 }: {
   checked: boolean
   onCheckedChange: (checked: boolean) => void
   children: ReactNode
   description?: ReactNode
+  disabled?: boolean
 }) {
   return (
     <label className="flex items-start gap-3">
       <BaseSwitch.Root
+        disabled={disabled}
         checked={checked}
         onCheckedChange={(next) => onCheckedChange(next)}
         className={`mt-0.5 flex h-5 w-9 shrink-0 rounded-full border border-border bg-surface-raised p-0.5 transition-colors data-checked:border-accent data-checked:bg-accent data-disabled:opacity-50 ${focusRing}`}

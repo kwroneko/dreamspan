@@ -39,7 +39,27 @@ export const ReasoningDisplay = Schema.Literals(["expanded", "collapsed"])
 export type ReasoningDisplay = typeof ReasoningDisplay.Type
 
 /** The user's display choices that follow them across devices (`user_prefs`). */
-export const DisplayPrefs = Schema.Struct({ reasoning: ReasoningDisplay })
+const displayFields = {
+  reasoning: ReasoningDisplay,
+  portraitSize: Schema.Literals(["small", "default", "large", "largest"]),
+  timeline: Schema.Literals(["originals", "summaries"]),
+  coverageRail: Schema.Boolean
+}
+export const DisplayPrefs = Schema.Struct(displayFields)
+/** Writes merge only the named choices, so independent controls never reset each other. */
+export const DisplayPrefsChange = Schema.Struct({
+  reasoning: Schema.optionalKey(displayFields.reasoning),
+  portraitSize: Schema.optionalKey(displayFields.portraitSize),
+  timeline: Schema.optionalKey(displayFields.timeline),
+  coverageRail: Schema.optionalKey(displayFields.coverageRail)
+})
+export type DisplayPrefsChange = typeof DisplayPrefsChange.Type
+export const DEFAULT_DISPLAY_PREFS: DisplayPrefs = {
+  reasoning: "expanded",
+  portraitSize: "default",
+  timeline: "originals",
+  coverageRail: false
+}
 export type DisplayPrefs = typeof DisplayPrefs.Type
 
 /** The largest window one ReadPath returns. */
@@ -426,7 +446,7 @@ export class ChatApi extends RpcGroup.make(
   /** The user's display choices (reasoning shown open or folded while it streams). */
   Rpc.make("GetDisplayPrefs", { payload: {}, success: DisplayPrefs, error: ServerError }),
   /** Changes the user's display choices; answers with them as now stored. */
-  Rpc.make("SetDisplayPrefs", { payload: { prefs: DisplayPrefs }, success: DisplayPrefs, error: ServerError }),
+  Rpc.make("SetDisplayPrefs", { payload: { prefs: DisplayPrefsChange }, success: DisplayPrefs, error: ServerError }),
   /** The alternates at `slotId`'s place (it and its siblings a path can reach), oldest first. */
   Rpc.make("ListBranches", {
     payload: { slotId: SlotId },

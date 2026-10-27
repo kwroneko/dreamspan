@@ -307,7 +307,7 @@ test("scroll the full length of 100,000 messages", async ({ page }) => {
 test("a summarized chat: the divider and the coverage rail, scrolling up across the boundary", async ({ page }) => {
   await openPage(page)
   // The rail is drawn: its bars are part of what must stay smooth.
-  await page.addInitScript(() => localStorage.setItem("rp.lcmRail", "1"))
+  await withClient(server, (api) => api.SetDisplayPrefs({ prefs: { coverageRail: true } }))
   const { chatId, boundary, covered } = fixture.summarized
   const openStart = Date.now()
   await page.goto(chatUrl(chatId))

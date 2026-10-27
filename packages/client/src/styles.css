@@ -236,25 +236,10 @@ main:has(> [data-fill]) {
   display: flex;
 }
 
-/*
- * A portrait in the chat, sized and shaped as ST's avatar styles (`--avatar-base-*` in its
- * style.css and toggle-dependent.css): Rectangular, ST's "big avatars", 60×90 with 10px
- * corners (the default here); Circle, Square (2px) and Rounded (10px) at 50×50.
- */
+/* SillyTavern 1.19 rectangular defaults: 50px × (1.2, 1.8), 2px × 5 corners.
+ * Account-owned size is inherited from the chat surface; shape is always 2:3. */
 .chat-portrait {
-  width: 60px;
-  height: 90px;
+  width: var(--chat-portrait-width, 60px);
+  height: calc(var(--chat-portrait-width, 60px) * 1.5);
   border-radius: 10px;
-}
-:root[data-avatars="round"] .chat-portrait,
-:root[data-avatars="square"] .chat-portrait,
-:root[data-avatars="rounded"] .chat-portrait {
-  width: 50px;
-  height: 50px;
-}
-:root[data-avatars="round"] .chat-portrait {
-  border-radius: 9999px;
-}
-:root[data-avatars="square"] .chat-portrait {
-  border-radius: 2px;
 }

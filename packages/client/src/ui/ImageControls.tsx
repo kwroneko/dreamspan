@@ -1,14 +1,16 @@
-// A one-click public-place toggle, with the three modes and chat portrait styles beside it.
+// A one-click public-place toggle, with concealment modes and account-owned portrait size.
+import { useViewPrefs } from "./viewPrefs.ts"
 import { useState } from "react"
 import { Button } from "./Button.tsx"
 import { Field } from "./Field.tsx"
 import { Popover } from "./Popover.tsx"
 import { Select } from "./Select.tsx"
 import { Tooltip } from "./Tooltip.tsx"
-import { IMAGES_SHORTCUT, setAvatarStyle, setImageMode, toggleImages, useImagePrefs } from "./imagePrefs.ts"
+import { IMAGES_SHORTCUT, setImageMode, toggleImages, useImagePrefs } from "./imagePrefs.ts"
 
 export function ImageControls() {
   const prefs = useImagePrefs()
+  const viewer = useViewPrefs()
   const [open, setOpen] = useState(false)
   const label = prefs.mode === "show" ? `${prefs.conceal === "hide" ? "Hide" : "Blur"} all images` : "Show all images"
   return (
@@ -48,20 +50,26 @@ export function ImageControls() {
             ]}
           />
         </Field>
-        <Field label="Chat portraits">
-          <Select
-            value={prefs.avatars}
-            onValueChange={setAvatarStyle}
+        <Field label="Message portrait size (account)">
+          <Select<typeof viewer.prefs.portraitSize>
+            value={viewer.prefs.portraitSize}
+            onValueChange={(portraitSize) => void viewer.change({ portraitSize })}
             items={[
-              { value: "portrait", label: "Rectangular (60 × 90)" },
-              { value: "round", label: "Circle (50 × 50)" },
-              { value: "square", label: "Square (50 × 50)" },
-              { value: "rounded", label: "Rounded square (50 × 50)" }
+              { value: "small", label: "Small (48 × 72)" },
+              { value: "default", label: "SillyTavern default (60 × 90)" },
+              { value: "large", label: "Large (72 × 108)" },
+              { value: "largest", label: "Largest (84 × 126)" }
             ]}
           />
         </Field>
+        {viewer.error && (
+          <p role="alert" className="text-xs text-danger">
+            {viewer.error.message}
+          </p>
+        )}
         <p className="text-xs text-muted">
-          Kept on this device. {IMAGES_SHORTCUT} toggles images anywhere. Blurred images stay blurred on hover and tap.
+          Image concealment stays on this device. Portrait size follows your account. {IMAGES_SHORTCUT} toggles images
+          anywhere. Blurred images stay blurred on hover and tap.
         </p>
       </Popover>
     </div>

@@ -171,7 +171,7 @@ for (const width of [1440, 390]) {
     await expect(reasoning).toHaveAttribute("aria-expanded", "false")
     await expect
       .poll(() => asUser(server(), ADMIN.handle, ADMIN.password, (api) => api.GetDisplayPrefs({})))
-      .toEqual({ reasoning: "collapsed" })
+      .toMatchObject({ reasoning: "collapsed" })
     await expect(reply.getByText("generating", { exact: true })).toHaveCount(0, { timeout: 20000 })
     await showActions(reply)
     await reply.getByRole("button", { name: "Generate another version" }).click()

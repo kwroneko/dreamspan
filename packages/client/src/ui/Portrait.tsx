@@ -25,8 +25,22 @@ export function PortraitProvider({
   faces: ReadonlyArray<Portrait>
 }) {
   const search = useSearch({ strict: false }) as { portrait?: unknown }
-  const portrait = faces.find((face) => face.id === search.portrait) ?? null
-  return <Context value={{ portrait, open: (next) => onOpen(next.id) }}>{children}</Context>
+  const [clicked, setClicked] = useState<Portrait | null>(null)
+  const portrait =
+    faces.find((face) => face.id === search.portrait) ?? (clicked?.id === search.portrait ? clicked : null)
+  return (
+    <Context
+      value={{
+        portrait,
+        open: (next) => {
+          setClicked(next)
+          onOpen(next.id)
+        }
+      }}
+    >
+      {children}
+    </Context>
+  )
 }
 
 export const useOpenPortrait = () => useContext(Context)?.open

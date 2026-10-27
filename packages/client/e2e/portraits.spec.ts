@@ -96,16 +96,26 @@ for (const width of [1440, 390]) {
     await expect(page.getByRole("img", { name: "Bo's full portrait" })).toBeVisible()
     if (width === 390) await page.getByRole("button", { name: "Close", exact: true }).click()
     else await page.getByRole("button", { name: "Close the panel" }).click()
-    for (const [label, radius] of [
-      ["Circle (50 × 50)", "9999px"],
-      ["Square (50 × 50)", "2px"],
-      ["Rounded square (50 × 50)", "10px"]
-    ]) {
-      await select(page, "Chat portraits", label!)
-      await expect(portrait).toHaveCSS("width", "50px")
-      await expect(portrait).toHaveCSS("height", "50px")
-      await expect(portrait).toHaveCSS("border-radius", radius!)
+    for (const [label, pixels] of [
+      ["Small (48 × 72)", 48],
+      ["Large (72 × 108)", 72],
+      ["Largest (84 × 126)", 84],
+      ["SillyTavern default (60 × 90)", 60]
+    ] as const) {
+      await select(page, "Message portrait size (account)", label)
+      await expect(portrait).toHaveCSS("width", `${pixels}px`)
+      await expect(portrait).toHaveCSS("height", `${pixels * 1.5}px`)
+      await expect(portrait).toHaveCSS("border-radius", "10px")
     }
+    // Measure the rendered shape, including header, recent speakers and reply-from.
+    const ratios = await page.locator("main [data-portrait]").evaluateAll((nodes) =>
+      nodes.map((node) => {
+        const box = node.getBoundingClientRect()
+        return box.width / box.height
+      })
+    )
+    expect(ratios.length).toBeGreaterThan(3)
+    for (const ratio of ratios) expect(ratio).toBeCloseTo(2 / 3, 2)
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy()
   })
 }

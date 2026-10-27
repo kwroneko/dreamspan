@@ -1,6 +1,6 @@
 // The user's display choices in `user_prefs` (DESIGN §7.4: reasoning's sticky open or folded
-// state while a reply streams). One row per user, key `display`, stored whole.
-import { DisplayPrefs } from "@rp/shared/chatApi.ts"
+// state while a reply streams). One row per user, key `display`, merged atomically.
+import { DEFAULT_DISPLAY_PREFS, DisplayPrefs } from "@rp/shared/chatApi.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { Effect, Schema } from "effect"
 import { SqlClient } from "effect/sql"
@@ -10,7 +10,7 @@ import { query, transaction } from "./tx.ts"
 const KEY = "display"
 
 /** Reasoning streams open until the user folds it during a run (DESIGN §7.4). */
-const DEFAULTS: DisplayPrefs = { reasoning: "expanded" }
+const DEFAULTS = DEFAULT_DISPLAY_PREFS
 
 const decode = Schema.decodeUnknownOption(DisplayPrefs)
 
@@ -36,7 +36,8 @@ export const makeDisplayPrefsWriteHandlers = Effect.gen(function* () {
   return {
     SetDisplayPrefs: ({ userId, prefs }) =>
       Effect.gen(function* () {
-        yield* sql`INSERT INTO user_prefs (user_id, key, value_json) VALUES (${userId}, ${KEY}, ${JSON.stringify(prefs)})
+        const merged = { ...(yield* read(sql, userId)), ...prefs }
+        yield* sql`INSERT INTO user_prefs (user_id, key, value_json) VALUES (${userId}, ${KEY}, ${JSON.stringify(merged)})
           ON CONFLICT (user_id, key) DO UPDATE SET value_json = excluded.value_json`
         return yield* read(sql, userId)
       }).pipe(transaction(sql, "SetDisplayPrefs"))

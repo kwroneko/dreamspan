@@ -52,13 +52,7 @@ export function ReplyFrom({
                 onClick={() => onPick(id === next?.id || id === picked ? null : id)}
                 className="inline-flex h-8 max-w-40 min-w-0 shrink-0 items-center gap-1.5 rounded-full border border-border py-0.5 pr-2.5 pl-0.5 text-xs outline-none hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus disabled:opacity-40 aria-pressed:border-accent aria-pressed:bg-accent/10 aria-pressed:font-medium aria-pressed:ring-1 aria-pressed:ring-accent"
               >
-                <Avatar
-                  id={id}
-                  name={who}
-                  mediaId={view.cards.get(id)?.avatarMediaId ?? null}
-                  size="sm"
-                  className="size-7"
-                />
+                <Avatar id={id} name={who} mediaId={view.cards.get(id)?.avatarMediaId ?? null} size="chip" />
                 <span className="min-w-0 truncate">{who}</span>
               </button>
             </Tooltip>

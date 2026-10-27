@@ -372,7 +372,7 @@ export function ChatHeader({
         </Tooltip>
         {characters.length > 0 && (
           <Tooltip label={names.join(", ")}>
-            <span className="relative shrink-0 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-focus">
+            <span className="relative shrink-0 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-focus">
               <AvatarStack
                 size="md"
                 preview

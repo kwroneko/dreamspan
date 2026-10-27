@@ -26,13 +26,14 @@ const tint = (id: string) => {
 }
 
 const SIZES = {
-  xs: "size-5 text-[0.5625rem]",
-  sm: "size-6 text-[0.625rem]",
-  md: "size-8 text-xs",
-  lg: "size-10 text-sm",
+  xs: "h-5 w-[13.333px] text-[0.5625rem]",
+  sm: "h-6 w-4 text-[0.625rem]",
+  chip: "h-7 w-[18.667px] text-[0.625rem]",
+  md: "h-8 w-[21.333px] text-xs",
+  lg: "h-10 w-[26.667px] text-sm",
   chat: "chat-portrait text-lg",
-  xl: "size-16 text-lg",
-  "2xl": "size-24 text-2xl",
+  xl: "h-16 w-[42.667px] text-lg",
+  "2xl": "h-24 w-16 text-2xl",
   /** Fills its box: a grid tile's picture. */
   fill: "size-full text-4xl"
 } as const
@@ -44,7 +45,7 @@ export function Avatar({
   name,
   mediaId = null,
   size = "md",
-  shape = "circle",
+  shape: _shape,
   className = "",
   preview = false,
   alt = ""
@@ -53,7 +54,7 @@ export function Avatar({
   name: string
   mediaId?: string | null
   size?: AvatarSize
-  /** A square fills a tile whose own corners round it. */
+  /** Compatibility for tile callers; portraits always use rectangular corners. */
   shape?: "circle" | "square"
   className?: string
   preview?: boolean
@@ -61,8 +62,7 @@ export function Avatar({
 }) {
   const open = useOpenPortrait()
   const { ref, width } = useMediaWidth()
-  const round = size === "chat" ? "" : shape === "circle" ? "rounded-full" : ""
-  const box = `relative inline-flex shrink-0 overflow-hidden ${round} ${SIZES[size]} ${className}`
+  const box = `relative inline-flex shrink-0 overflow-hidden rounded-sm ${SIZES[size]} ${className}`
   const content = (
     <>
       {mediaId !== null && width !== undefined && (
@@ -86,6 +86,7 @@ export function Avatar({
   return preview && open ? (
     <button
       ref={ref}
+      data-portrait
       type="button"
       aria-label={`View ${name}'s portrait`}
       title={`View ${name}'s full portrait`}
@@ -98,7 +99,7 @@ export function Avatar({
       {content}
     </button>
   ) : (
-    <span ref={ref} className={box}>
+    <span ref={ref} data-portrait className={box}>
       {content}
     </span>
   )
@@ -110,7 +111,7 @@ interface Face {
   readonly mediaId?: string | null
 }
 
-/** A chat's cast in one square: one face, two side by side, or up to four in a grid. */
+/** Each cast member keeps the card's 2:3 shape, including in a compact header. */
 export function AvatarStack({
   faces,
   size = "lg",
@@ -120,29 +121,18 @@ export function AvatarStack({
   size?: "md" | "lg"
   preview?: boolean
 }) {
-  const box = size === "lg" ? "size-10" : "size-8"
-  const shown = faces.slice(0, 4)
-  if (shown.length <= 1) {
-    const face = shown[0] ?? { id: "", name: "?" }
-    return <Avatar id={face.id} name={face.name} mediaId={face.mediaId ?? null} size={size} preview={preview} />
-  }
+  const shown = faces.length === 0 ? [{ id: "", name: "?" }] : faces.slice(0, 4)
   return (
-    <span className={`grid shrink-0 grid-cols-2 gap-px overflow-hidden rounded-full ${box}`}>
-      {shown.map((face, i) => (
-        <span
+    <span className="inline-flex shrink-0 gap-0.5">
+      {shown.map((face) => (
+        <Avatar
           key={face.id}
-          className={`overflow-hidden ${shown.length === 2 ? "row-span-2" : shown.length === 3 && i === 0 ? "row-span-2" : ""}`}
-        >
-          <Avatar
-            id={face.id}
-            name={face.name}
-            mediaId={face.mediaId ?? null}
-            size="fill"
-            shape="square"
-            preview={preview}
-            className="text-[0.5rem]!"
-          />
-        </span>
+          id={face.id}
+          name={face.name}
+          mediaId={face.mediaId ?? null}
+          size={size}
+          preview={preview}
+        />
       ))}
     </span>
   )
