@@ -138,40 +138,49 @@ test("expanded pages refresh originals outside the main window without losing ea
   await expect(summary.locator("article")).toHaveCount(120)
 })
 
-test("links traverse nested summaries and page directly to early originals", async ({ page }) => {
-  const chat = await fixture(130, 120)
-  const top = await condensed(server().dataDir, chat.id, [chat.summary], "Nested retained summary")
-  await admin((api) =>
-    Effect.gen(function* () {
-      const current = yield* api.GetSummary({ summaryId: top.id as never })
-      yield* api.EditSummary({
-        summaryId: current.id,
-        content: current.content,
-        expectedRowVersion: current.rowVersion,
-        commitDraft: null
+for (const width of [1440, 390])
+  test(`links traverse nested summaries and page directly to early originals ${width}`, async ({ page }) => {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
+    const chat = await fixture(130, 120)
+    // The fixture's edit made a new revision of the child; a parent pinning the old one is stale.
+    const child = await admin((api) => api.GetSummary({ summaryId: chat.summary.id as never }))
+    const top = await condensed(
+      server().dataDir,
+      chat.id,
+      [{ ...chat.summary, revisionId: child.revisionId }],
+      "Nested retained summary"
+    )
+    await admin((api) =>
+      Effect.gen(function* () {
+        const current = yield* api.GetSummary({ summaryId: top.id as never })
+        yield* api.EditSummary({
+          summaryId: current.id,
+          content: current.content,
+          expectedRowVersion: current.rowVersion,
+          commitDraft: null
+        })
       })
-    })
-  )
-  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
-  const base = `${server().url}/chats/${chat.id}`
-  await page.goto(`${base}?slot=${chat.entries[1]!.slotId}`)
-  const summary = page.locator(`[data-timeline-summary="${top.id}"]`)
-  const message = (index: number) => page.locator(`article[data-slot="${chat.entries[index]!.slotId}"]`)
-  await expect(summary).toBeVisible()
-  await expect(message(1)).toBeInViewport()
-  await expect(message(1)).toHaveClass(/border-accent/)
-  await expect(summary.locator("article")).toHaveCount(100)
-  await summary.getByRole("button", { name: "Load later messages in this summary" }).click()
-  await expect(summary.locator("article")).toHaveCount(120)
-  // Navigate within the mounted chat, then follow a range link from its summary panel.
-  await page.evaluate((url) => {
-    history.pushState({}, "", url)
-    dispatchEvent(new PopStateEvent("popstate"))
-  }, `${base}?slot=${chat.entries[110]!.slotId}`)
-  await expect(message(110)).toBeInViewport()
-  await expect(message(110)).toHaveClass(/border-accent/)
-  const panel = await openPanel(page, "Summaries")
-  await panel.getByRole("button", { name: "Messages 1–120: show the first message", exact: true }).click()
-  await expect(message(0)).toBeInViewport()
-  await expect(message(0)).toHaveClass(/border-accent/)
-})
+    )
+    await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+    const base = `${server().url}/chats/${chat.id}`
+    await page.goto(`${base}?slot=${chat.entries[1]!.slotId}`)
+    const summary = page.locator(`[data-timeline-summary="${top.id}"]`)
+    const message = (index: number) => page.locator(`article[data-slot="${chat.entries[index]!.slotId}"]`)
+    await expect(summary).toBeVisible()
+    await expect(message(1)).toBeInViewport()
+    await expect(message(1)).toHaveClass(/border-accent/)
+    await expect(summary.locator("article")).toHaveCount(100)
+    await summary.getByRole("button", { name: "Load later messages in this summary" }).click()
+    await expect(summary.locator("article")).toHaveCount(120)
+    // Navigate within the mounted chat, then follow a range link from its summary panel.
+    await page.evaluate((url) => {
+      history.pushState({}, "", url)
+      dispatchEvent(new PopStateEvent("popstate"))
+    }, `${base}?slot=${chat.entries[110]!.slotId}`)
+    await expect(message(110)).toBeInViewport()
+    await expect(message(110)).toHaveClass(/border-accent/)
+    const panel = await openPanel(page, "Summaries")
+    await panel.getByRole("button", { name: "Messages 1–120: show the first message", exact: true }).click()
+    await expect(message(0)).toBeInViewport()
+    await expect(message(0)).toHaveClass(/border-accent/)
+  })

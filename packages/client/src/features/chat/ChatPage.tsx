@@ -226,15 +226,22 @@ function MessageList({
   })
 
   // Expansions load asynchronously, possibly through several summary levels. Position
-  // the actual linked article once it exists, after the virtualizer measures the row.
+  // the linked article each time a new one mounts, after the virtualizer measures its row:
+  // the uncovered original can render first, before the selected layer replaces it.
+  // Until the user takes over, the list mustn't hold at the end either: a collapsed
+  // summary can fit the viewport, and holding there would follow its expansion down.
+  const revealing = useRef(false)
   useEffect(() => {
     const list = parent.current
     if (!summaries || anchor === null || list === null) return
+    revealing.current = true
     let frame = 0
+    let shown: Element | null = null
     const reveal = () => {
       const article = list.querySelector(`article[data-slot="${anchor}"]`)
-      if (!article) return
-      observer.disconnect()
+      if (!article || article === shown) return
+      shown = article
+      cancelAnimationFrame(frame)
       frame = requestAnimationFrame(() => {
         frame = requestAnimationFrame(() => {
           // Replace the pending summary-row scroll with an offset inside that row.
@@ -248,11 +255,18 @@ function MessageList({
         })
       })
     }
+    const stop = () => {
+      revealing.current = false
+      observer.disconnect()
+      for (const event of inputs) list.removeEventListener(event, stop)
+    }
+    const inputs = ["wheel", "touchmove", "keydown", "pointerdown"] as const
+    for (const event of inputs) list.addEventListener(event, stop, { passive: true })
     const observer = new MutationObserver(reveal)
     observer.observe(list, { childList: true, subtree: true })
     reveal()
     return () => {
-      observer.disconnect()
+      stop()
       cancelAnimationFrame(frame)
     }
   }, [anchor, summaries, view.opened, virtualizer])
@@ -318,7 +332,7 @@ function MessageList({
     const list = parent.current
     if (list === null || entries.length === 0 || !view.follow) return
     const fromEnd = list.scrollHeight - list.scrollTop - list.clientHeight
-    if (!follow.stuck && fromEnd <= END_PX && performance.now() - intent.current > 300) hold(true)
+    if (!follow.stuck && !revealing.current && fromEnd <= END_PX && performance.now() - intent.current > 300) hold(true)
     if (follow.stuck && fromEnd > 1) virtualizer.scrollToEnd()
   })
 
