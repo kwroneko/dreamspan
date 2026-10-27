@@ -221,7 +221,12 @@ const ourRequest = async (
   const parsed = importStPreset(JSON.stringify(settings)).document
   if (parsed === null) return { body: null, problem: "our importer didn't take the settings ST had in force" }
   // The harness allows the fixture presets' regex scripts in ST, as a user would.
-  const document = { ...parsed, regex_approved: true }
+  // ST joins no wrapper around a single character's fields: the gate compares with them empty.
+  const document = {
+    ...parsed,
+    regex_approved: true,
+    utility_prompts: { ...parsed.utility_prompts, card_join_prefix: "", card_join_suffix: "" }
+  }
   const card = await imported(fixtures.cards.find((c) => c.name === character)!.png, character)
   const persona = run(importCard(json({ name: fixtures.persona.name, description: fixtures.persona.description }))).card
   const importedAuthorNote = config.authorNote ? authorNoteInput(config.authorNote, config.defaultAuthorNote) : null
@@ -280,6 +285,11 @@ const ourRequest = async (
               {
                 depth: null,
                 event: { scope: null, data: { key: "lorebook.attach" as const, value: { ref: gateLore.id as never } } }
+              },
+              // Entries where their positions say, as ST places them.
+              {
+                depth: null,
+                event: { scope: null, data: { key: "lorebook.below_history" as const, value: { on: false } } }
               }
             ]
           : []),

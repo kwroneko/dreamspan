@@ -112,7 +112,6 @@ export class ShellLibrary extends Schema.Class<ShellLibrary>("ShellLibrary")({
   pinsCollapsed: Schema.Boolean
 }) {}
 
-const CardsLayout = Schema.Literals(["concat", "swap_tail"])
 const RolesProjection = Schema.Literals(["by_writer", "alternate", "perspective"])
 
 /**
@@ -134,7 +133,10 @@ export class Cast extends Schema.Class<Cast>("Cast")({
   lorebooks: Schema.Array(RefId),
   /** Cards whose own lorebook this chat has turned off. */
   cardLorebooksOff: Schema.Array(EntityId),
-  layoutCards: Schema.NullOr(CardsLayout),
+  /** Global lorebooks this chat has turned off. */
+  globalLorebooksOff: Schema.Array(RefId),
+  /** Lorebook entries only below the history (DESIGN §1.3); on unless the chat turned it off. */
+  loreBelowHistory: Schema.Boolean,
   rolesProjection: Schema.NullOr(RolesProjection),
   /** Every card named above. */
   cards: Schema.Array(CastCard)
@@ -164,12 +166,15 @@ export const CastChange = Schema.Union([
   /** The chat's own model or preset taken off (`model.unbind`, `preset.unbind`): it uses the default again. */
   Schema.TaggedStruct("DefaultModel", {}),
   Schema.TaggedStruct("DefaultPreset", {}),
-  Schema.TaggedStruct("Layout", { layout: CardsLayout }),
   Schema.TaggedStruct("Roles", { projection: RolesProjection }),
   /** A note on or off (`note.activate`, `note.deactivate`): the chat's own, or a participant card's. */
   Schema.TaggedStruct("Lorebook", { ref: RefId, active: Schema.Boolean }),
   /** A card's own lorebook on or off (`lorebook.embedded`). */
   Schema.TaggedStruct("CardLorebook", { entityId: EntityId, on: Schema.Boolean }),
+  /** A global lorebook on or off for this chat (`lorebook.global`). */
+  Schema.TaggedStruct("GlobalLorebook", { ref: RefId, on: Schema.Boolean }),
+  /** Lorebook entries only below the history, or where their positions say (`lorebook.below_history`). */
+  Schema.TaggedStruct("LoreBelowHistory", { on: Schema.Boolean }),
   Schema.TaggedStruct("Note", { entityId: EntityId, active: Schema.Boolean })
 ])
 export type CastChange = typeof CastChange.Type
@@ -186,6 +191,24 @@ export class ChatNote extends Schema.Class<ChatNote>("ChatNote")({
   /** The card's first note, ST's Character's Note: on unless the chat turns it off. */
   first: Schema.Boolean,
   active: Schema.Boolean
+}) {}
+
+/** What a preset does with a card's prompt in place of one of its own (DESIGN §5.0). */
+const PromptUse = Schema.Struct({
+  /** The preset prompt's name, as the editor shows it. */
+  name: Schema.String,
+  /** A card's text replaces it; it forbids that; it's off; or the preset has none. */
+  state: Schema.Literals(["replaceable", "forbidden", "disabled", "missing"])
+})
+
+/**
+ * Whether a card's system prompt and post-history instructions are used: in place of the
+ * Main Prompt and the post-history prompt of the preset chats use now.
+ */
+export class CardPromptUse extends Schema.Class<CardPromptUse>("CardPromptUse")({
+  preset: Schema.String,
+  main: PromptUse,
+  jailbreak: PromptUse
 }) {}
 
 /** A card's definition as a chat shows it, read-only: the fields ST's character panel shows. */
@@ -359,6 +382,16 @@ export class ChatSetupApi extends RpcGroup.make(
     error: Schema.Union([...Errors])
   }),
   /** Changes the cast or a setting from `slotId` on, on that branch (DESIGN §3.4). */
+  /** The user's global lorebooks (DESIGN §5.0), in every chat unless a chat turns one off. */
+  Rpc.make("GetGlobalLorebooks", { success: Schema.Array(RefId), error: Schema.Union([...Errors]) }),
+  /** Marks a lorebook of the user's global, or not; returns the list as it is now. */
+  Rpc.make("SetGlobalLorebook", {
+    payload: { ref: RefId, global: Schema.Boolean },
+    success: Schema.Array(RefId),
+    error: Schema.Union([...Errors])
+  }),
+  /** What the preset in use does with a card's own prompts, for the card editor. */
+  Rpc.make("GetCardPromptUse", { success: CardPromptUse, error: Schema.Union([...Errors]) }),
   Rpc.make("ChangeCast", {
     payload: { chatId: ChatId, slotId: Schema.NullOr(SlotId), change: CastChange },
     success: Cast,

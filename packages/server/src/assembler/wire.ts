@@ -175,8 +175,19 @@ const baseProviderRequest = (request: AssembledRequest, model: ModelInput): Prov
     request.useSystemPrompt || (model.api !== "anthropic-messages" && model.api !== "google-generative-ai")
   const system: Array<string> = []
   let first = 0
+  // Lore pinned above the history changes when its start moves: Anthropic's system prompt ends
+  // with the prefix before it, so the marker pi-ai puts there keeps the prefix cached (DESIGN §1.3).
+  const pinnedAt =
+    model.api === "anthropic-messages" && request.breakpoints.some((b) => b.reason === "pinned")
+      ? (request.breakpoints.find((b) => b.reason === "prefix")?.message ?? -1) + 1
+      : Infinity
   if (systemParameter) {
-    while (first < messages.length && messages[first]!.role === "system" && first < (request.summaryStart ?? Infinity))
+    while (
+      first < messages.length &&
+      messages[first]!.role === "system" &&
+      first < (request.summaryStart ?? Infinity) &&
+      first < pinnedAt
+    )
       system.push(named(messages[first++]!, request.names))
   }
   // One message each: consecutive turns of a role stay apart, so a breakpoint on one

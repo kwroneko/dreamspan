@@ -15,6 +15,32 @@ export const newestMessage: PresetPrompt = {
 }
 
 /**
+ * The whole-card "Definitions" marker (DESIGN §5.0): each character in its labelled block and
+ * each persona in its own. Never added to existing orders; the editor inserts it.
+ */
+export const charDefinitions: PresetPrompt = {
+  identifier: "charDefinitions",
+  name: "Definitions",
+  role: "system",
+  content: "",
+  system_prompt: true,
+  marker: true,
+  injection_position: "relative",
+  injection_depth: 4,
+  injection_order: 100,
+  injection_trigger: [],
+  forbid_overrides: true
+}
+
+/** The per-field markers the Definitions marker leaves empty when an order has both. */
+export const perFieldMarkers: ReadonlyArray<string> = [
+  "charDescription",
+  "charPersonality",
+  "scenario",
+  "personaDescription"
+]
+
+/**
  * The markers ST sends even when its prompt order leaves them out: it appends them, in this
  * order, after the ordered prompts (preparePromptsForChatCompletion). Appended on here, so an
  * imported preset still sends them where ST does; any other prompt outside the order is off.

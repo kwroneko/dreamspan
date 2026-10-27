@@ -22,6 +22,7 @@ const count = (n: number | null) => (n === null ? "unknown" : n.toLocaleString()
 const breakpointText = {
   summary: "Cache breakpoint: the end of the summary layer",
   prefix: "Cache breakpoint: the end of the preset's part",
+  pinned: "Cache breakpoint: the end of the lore pinned above the history",
   history: "Cache breakpoint: the end of the history the next request repeats"
 } as const
 
@@ -40,7 +41,9 @@ const activationText = (activation: SourceActivation): string => {
   const why =
     activation.why.kind === "constant"
       ? "constant entry"
-      : `keyword “${activation.why.primaryKey}”${activation.why.secondaryKeys.length ? `; ${activation.why.logic ?? "and_any"}: ${activation.why.secondaryKeys.map((key) => `“${key}”`).join(", ")}` : ""}`
+      : activation.why.kind === "pinned"
+        ? "pinned above the history until its start moves"
+        : `keyword “${activation.why.primaryKey}”${activation.why.secondaryKeys.length ? `; ${activation.why.logic ?? "and_any"}: ${activation.why.secondaryKeys.map((key) => `“${key}”`).join(", ")}` : ""}`
   return `Activated at step ${activation.step}: ${why}.`
 }
 
@@ -256,7 +259,8 @@ function Inspector({ run }: { run: RunContext }) {
           </dd>
           <dt className="text-muted">Generation</dt>
           <dd>
-            {run.type}, {run.mode === "st" ? "SillyTavern-compatible" : "our layouts"}; {run.status}
+            {run.type}, {run.mode === "st" ? "SillyTavern-compatible (earlier assembler)" : "the preset's layout"};{" "}
+            {run.status}
           </dd>
           <dt className="text-muted">Breakpoints</dt>
           <dd>

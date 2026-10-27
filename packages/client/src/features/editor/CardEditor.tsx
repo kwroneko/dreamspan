@@ -16,6 +16,7 @@ import { FieldTools, SwitchField, TextField } from "./controls.tsx"
 import { NoteEditor, PlacementField } from "./notes.tsx"
 import { type EditorStore, useValue } from "./store.ts"
 import { CardTextEditor } from "./CardTextEditor.tsx"
+import { PromptUseNote } from "./PromptUseNote.tsx"
 
 function Avatar({ store, onUpload }: { store: EditorStore; onUpload: (file: File) => void }) {
   const name = useValue<string>(store, ["name"]) ?? "Card"
@@ -267,8 +268,14 @@ export function CardEditor({
       <Card>
         <CardHeader title="Prompts" description="The card's own prompts, used where the preset allows them." />
         <div className="flex flex-col gap-4">
-          <TextField store={store} path={["system_prompt"]} label="System prompt" rows={4} />
-          <TextField store={store} path={["post_history_instructions"]} label="Post-history instructions" rows={4} />
+          <div className="flex flex-col gap-1">
+            <TextField store={store} path={["system_prompt"]} label="System prompt" rows={4} />
+            <PromptUseNote store={store} call={call} field="system_prompt" />
+          </div>
+          <div className="flex flex-col gap-1">
+            <TextField store={store} path={["post_history_instructions"]} label="Post-history instructions" rows={4} />
+            <PromptUseNote store={store} call={call} field="post_history_instructions" />
+          </div>
         </div>
       </Card>
       <Card>

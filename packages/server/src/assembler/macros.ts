@@ -49,6 +49,8 @@ export interface MacroEnvironment {
   readonly potentialVariableWrite: () => void
   readonly isVolatile: (piece: number) => boolean
   readonly text: (piece: number) => string
+  /** The card fields preset and chat text read from now on: the joined fields, once composed. */
+  readonly setCard: (card: CardFields) => void
   /** The messages of the path, resolved, for macros that read the chat. */
   readonly setMessages: (messages: ReadonlyArray<ChatMessage>) => void
   /**
@@ -249,6 +251,9 @@ export const makeMacroEnvironment = (
     },
     isVolatile,
     text: (piece) => assembly.pieces[piece]!.text,
+    setCard: (card) => {
+      base = { ...base, card }
+    },
     setMessages: (messages) => {
       base = { ...base, messages }
     },

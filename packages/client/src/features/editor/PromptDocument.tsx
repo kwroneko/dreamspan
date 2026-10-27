@@ -1,7 +1,7 @@
 import { writePresetOrder } from "./presetDraft.ts"
 import type { PresetPrompt, PromptOrderEntry } from "@rp/shared/docs/preset.ts"
 import type { PresetContext } from "@rp/shared/inspectorApi.ts"
-import { newestMessage, presetOrder } from "@rp/shared/presetOrder.ts"
+import { charDefinitions, newestMessage, perFieldMarkers, presetOrder } from "@rp/shared/presetOrder.ts"
 import {
   CONDITION_LABELS,
   conditionFromTriggers,
@@ -9,10 +9,12 @@ import {
   directionPrompt,
   presetWarnings
 } from "@rp/shared/presetConditions.ts"
+import { Link } from "@tanstack/react-router"
 import { uuidv7 } from "@rp/shared/id.ts"
 import { type ReactNode, useEffect, useRef, useState } from "react"
 import { Button } from "../../ui/Button.tsx"
 import { Switch } from "../../ui/Choice.tsx"
+import { Menu, MenuItem } from "../../ui/Menu.tsx"
 import { SortableList } from "../../ui/SortableList.tsx"
 import { Badge } from "../../ui/Surface.tsx"
 import { NumberField, SelectField, SwitchField, TextField } from "./controls.tsx"
@@ -42,7 +44,8 @@ function Block({
   collapsed,
   toggle,
   remove,
-  context
+  context,
+  definitions
 }: {
   store: EditorStore
   entry: PromptOrderEntry
@@ -51,9 +54,14 @@ function Block({
   toggle: () => void
   remove: () => void
   context: PresetContext | null | undefined
+  /** The order sends the Definitions marker, which leaves the per-field markers empty. */
+  definitions: boolean
 }) {
   const path = at(entry.identifier)
   const prompt = useValue<PresetPrompt | undefined>(store, path) ?? newestMessage
+  const forbids = useValue<boolean | undefined>(store, [...path, "forbid_overrides"]) ?? false
+  const override = context?.overrides?.find((o) => o.identifier === entry.identifier)
+  const byDefinitions = definitions && perFieldMarkers.includes(entry.identifier)
   const name = useText(store, [...path, "name"]) || prompt.name
   const content = useText(store, [...path, "content"])
   const condition = conditionOf(prompt)
@@ -114,15 +122,50 @@ function Block({
           </Button>
         )}
       </header>
+      {(entry.identifier === "main" || entry.identifier === "jailbreak") && (
+        <p className="pl-10 text-xs text-muted" data-override={override?.status ?? (forbids ? "forbidden" : "none")}>
+          {override?.status === "replaced" ? (
+            <>
+              Replaced in this chat by{" "}
+              <Link
+                to="/cards/$entityId"
+                params={{ entityId: override.card }}
+                className="text-accent underline-offset-4 hover:underline"
+              >
+                {override.name}
+              </Link>
+              's {entry.identifier === "main" ? "system prompt" : "post-history instructions"}
+            </>
+          ) : override?.status === "forbidden" ? (
+            <>
+              <Link
+                to="/cards/$entityId"
+                params={{ entityId: override.card }}
+                className="text-accent underline-offset-4 hover:underline"
+              >
+                {override.name}
+              </Link>{" "}
+              has {entry.identifier === "main" ? "a system prompt" : "post-history instructions"}; this prompt forbids
+              it
+            </>
+          ) : forbids ? (
+            "A card can't replace it"
+          ) : (
+            "A card's own prompt replaces it"
+          )}
+        </p>
+      )}
       {prompt.marker && (
         <p className="pl-10 text-xs text-muted">
-          {filled?.labels.length
-            ? `Definitions: ${filled.labels.join(", ")}`
-            : entry.identifier === "chatHistory"
-              ? "Earlier messages in the current context"
-              : entry.identifier === "newestMessage"
-                ? "The latest message, placed here"
-                : "Filled from the current chat"}
+          {byDefinitions
+            ? "Filled by Definitions"
+            : filled?.labels.length
+              ? `Definitions: ${filled.labels.join(", ")}`
+              : entry.identifier === "chatHistory"
+                ? "Earlier messages in the current context"
+                : entry.identifier === "newestMessage"
+                  ? "The latest message, placed here"
+                  : "Filled from the current chat"}
         </p>
       )}
       {!prompt.marker && !collapsed && (
@@ -188,6 +231,7 @@ export function PromptDocument({
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
   const root = useRef<HTMLDivElement>(null)
   const names = new Map([...prompts, newestMessage].map((p) => [p.identifier, p.name]))
+  if (!names.has(charDefinitions.identifier)) names.set(charDefinitions.identifier, charDefinitions.name)
   const jump = (identifier: string) => {
     setCollapsed((current) => new Set([...current].filter((id) => id !== identifier)))
     requestAnimationFrame(() => {
@@ -220,13 +264,43 @@ export function PromptDocument({
       role: "system",
       marker: false,
       system_prompt: false,
-      forbid_overrides: false
+      // A card can't replace a prompt made here unless the user allows it (DESIGN §5.0).
+      forbid_overrides: true
     })
     const next = [...order]
     next.splice(index, 0, { identifier, enabled: true })
     setOrder(next)
     jump(identifier)
   }
+  const hasDefinitions = order.some((e) => e.identifier === charDefinitions.identifier)
+  const definitionsOn = order.some((e) => e.identifier === charDefinitions.identifier && e.enabled)
+  const addDefinitions = (index: number) => {
+    if (!prompts.some((p) => p.identifier === charDefinitions.identifier))
+      store.setValue(at(charDefinitions.identifier), charDefinitions)
+    const next = [...order]
+    next.splice(index, 0, { identifier: charDefinitions.identifier, enabled: true })
+    setOrder(next)
+    jump(charDefinitions.identifier)
+  }
+  const insert = (index: number, label: string, className?: string) =>
+    hasDefinitions ? (
+      <Button variant="ghost" className={className} aria-label={label} onClick={() => add(index)}>
+        ＋
+      </Button>
+    ) : (
+      <Menu
+        label={label}
+        align="center"
+        trigger={
+          <Button variant="ghost" className={className} aria-label={label}>
+            ＋
+          </Button>
+        }
+      >
+        <MenuItem onClick={() => add(index)}>New prompt</MenuItem>
+        <MenuItem onClick={() => addDefinitions(index)}>Definitions marker (every card whole)</MenuItem>
+      </Menu>
+    )
   const slot = (label: string, predicate: (p: PresetContext["notes"][number]["placement"]) => boolean) => (
     <div className="border-l-2 border-border px-2 py-1 text-xs text-muted">
       <strong>{label}</strong>:{" "}
@@ -274,9 +348,7 @@ export function PromptDocument({
                 Cached part ends · {b.reason}
               </p>
             ))}
-          <Button variant="ghost" aria-label="Insert prompt at start" onClick={() => add(0)}>
-            ＋
-          </Button>
+          {insert(0, "Insert prompt at start")}
           <SortableList
             items={order}
             itemKey={(e) => e.identifier}
@@ -317,6 +389,7 @@ export function PromptDocument({
                   entry={entry}
                   handle={handle}
                   context={context}
+                  definitions={definitionsOn}
                   collapsed={collapsed.has(entry.identifier)}
                   toggle={() =>
                     setCollapsed(
@@ -347,14 +420,11 @@ export function PromptDocument({
                     </p>
                   ))}
                 <div className="flex justify-center">
-                  <Button
-                    variant="ghost"
-                    className="w-full rounded-none"
-                    aria-label={`Insert prompt after ${names.get(entry.identifier)}`}
-                    onClick={() => add(order.indexOf(entry) + 1)}
-                  >
-                    ＋
-                  </Button>
+                  {insert(
+                    order.indexOf(entry) + 1,
+                    `Insert prompt after ${names.get(entry.identifier)}`,
+                    "w-full rounded-none"
+                  )}
                 </div>
               </>
             )}

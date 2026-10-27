@@ -1,7 +1,7 @@
 // The preset editor (DESIGN §1.2, §6): the prompt list in order, with enable switches and
 // drag to reorder; each prompt's role, position and depth; prefill text;
 // and the regex scripts, which run only once the user allows them (ARCHITECTURE.md §9).
-import type { RegexScript } from "@rp/shared/docs/preset.ts"
+import { CARD_JOIN_PREFIX, CARD_JOIN_SUFFIX, type RegexScript } from "@rp/shared/docs/preset.ts"
 import { type FieldPath } from "@rp/shared/editing.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import { useState } from "react"
@@ -24,6 +24,29 @@ const POSTFIXES = [
   { value: "\n", label: "A new line" },
   { value: "\n\n", label: "Two new lines" }
 ] as const
+
+/**
+ * What wraps each character's part of a per-field marker (DESIGN §5.0, ST's group join prefix
+ * and suffix). Absent, the default applies, which an empty field doesn't show.
+ */
+function JoinWrapper({ store, which }: { store: EditorStore; which: "card_join_prefix" | "card_join_suffix" }) {
+  const stored = useValue<string | undefined>(store, ["utility_prompts", which])
+  const fallback = which === "card_join_prefix" ? CARD_JOIN_PREFIX : CARD_JOIN_SUFFIX
+  return (
+    <TextField
+      store={store}
+      path={["utility_prompts", which]}
+      label={which === "card_join_prefix" ? "Before each character's part" : "After each character's part"}
+      rows={2}
+      mono
+      description={
+        stored === undefined
+          ? `Not set: ${JSON.stringify(fallback)} is used. {{char}} is the character, <FIELDNAME> the field.`
+          : "{{char}} is the character, <FIELDNAME> the field. Empty: nothing, as SillyTavern sends one character."
+      }
+    />
+  )
+}
 
 // The group nudge and impersonation prompt are prompts in the list, with conditions (DESIGN §2.2).
 const UTILITY: ReadonlyArray<readonly [key: string, label: string]> = [
@@ -269,6 +292,8 @@ export function PresetEditor({
             {UTILITY.map(([key, label]) => (
               <TextField key={key} store={store} path={["utility_prompts", key]} label={label} rows={3} />
             ))}
+            <JoinWrapper store={store} which="card_join_prefix" />
+            <JoinWrapper store={store} which="card_join_suffix" />
           </div>
         </details>
       </Card>

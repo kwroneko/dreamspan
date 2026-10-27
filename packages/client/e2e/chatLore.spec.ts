@@ -85,18 +85,18 @@ test("attach a lorebook, send a keyword, and detach it from the provider request
   await expect(page.getByRole("combobox", { name: "Model", exact: true })).toHaveText("Local model server · fake-small")
   // Only the lorebooks that apply are listed; the library's are a search away.
   const tab = await openPanel(page, "Lorebooks")
-  const inChat = tab.getByRole("list", { name: "Lorebooks in this chat" })
-  await expect(tab.getByText("No lorebook applies to this chat.")).toBeVisible()
+  const inChat = tab.getByRole("list", { name: "Added to this chat" })
+  await expect(tab.getByRole("region", { name: "Added to this chat" }).getByText("None yet.")).toBeVisible()
   await tab.getByRole("button", { name: "Add lorebook" }).click()
   await tab.getByRole("searchbox").fill("lantern")
   await tab
     .getByRole("list", { name: "Lorebooks to add" })
     .getByRole("button", { name: /Lantern lore/ })
     .click()
-  await expect(inChat.getByText("Attached to this chat")).toBeVisible()
+  await expect(inChat.getByRole("switch", { name: "Lantern lore" })).toBeChecked()
   // The chat stays usable beside the panel.
   expect(await send(page, "Where is the lantern?")).toContain("The watch lights seven lanterns.")
-  await inChat.getByRole("button", { name: "Detach Lantern lore" }).click()
-  await expect(inChat).toBeHidden()
+  await inChat.getByRole("switch", { name: "Lantern lore" }).click()
+  await expect(inChat.getByRole("switch", { name: "Lantern lore" })).not.toBeChecked()
   expect(await send(page, "And the lantern now?")).not.toContain("The watch lights seven lanterns.")
 })

@@ -10,6 +10,8 @@ export const DEFAULT_MODEL = "generation.model"
 export const DEFAULT_PRESET = "generation.preset"
 export const DEFAULT_JUDGE = "generation.judge"
 export const DEFAULT_LCM = "generation.lcm"
+/** The user's global lorebooks (DESIGN §5.0): their ref ids, in the order they were marked. */
+export const GLOBAL_LOREBOOKS = "lorebooks.global"
 
 /** A live connection of the user's and a model of it. */
 export const ownedModel = (sql: SqlClient.SqlClient, userId: UserId, connection: string, model: string) =>
@@ -56,4 +58,25 @@ export const readDefaults = (sql: SqlClient.SqlClient, userId: UserId) =>
         : {}),
       preset: presetOk ? (preset as RefId) : null
     })
+  })
+
+/** The refs of the user's global lorebooks as stored; a ref gone since is passed over where it's read. */
+export const globalLorebookRefs = (sql: SqlClient.SqlClient, userId: UserId) =>
+  Effect.map(setting(sql, userId, GLOBAL_LOREBOOKS), (stored): ReadonlyArray<string> =>
+    Array.isArray(stored) ? stored.filter((ref): ref is string => typeof ref === "string") : []
+  )
+
+/** A live library lorebook of the user's: not binned, not a chat's own copy. */
+export const ownedLorebook = (sql: SqlClient.SqlClient, userId: UserId, ref: string) =>
+  sql<{ n: number }>`
+    SELECT count(*) AS n FROM entity_refs r JOIN entities e ON e.id = r.entity_id
+    WHERE r.id = ${ref} AND e.owner_user_id = ${userId} AND e.kind = 'lorebook' AND e.deleted_at IS NULL
+      AND r.ref_kind <> 'chat_override'`.pipe(Effect.map(([row]) => row?.n === 1))
+
+/** The global lorebooks as stored, less those gone since (binned, deleted). */
+export const readGlobalLorebooks = (sql: SqlClient.SqlClient, userId: UserId) =>
+  Effect.gen(function* () {
+    const refs = yield* globalLorebookRefs(sql, userId)
+    const live = yield* Effect.filter(refs, (ref) => ownedLorebook(sql, userId, ref))
+    return live.map((ref) => ref as RefId)
   })

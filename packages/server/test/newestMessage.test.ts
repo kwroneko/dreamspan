@@ -103,12 +103,13 @@ describe("Newest message", () => {
         messages: [{ content: "LATEST", side: "user" }]
       })
     )
-    // The imported group nudge stays right after the history, as ST sends it, before the appended markers.
+    // The imported group nudge stays right after the history, as ST sends it, before the appended
+    // markers, each character's part in the preset's join wrapper (DESIGN §5.0), here the default.
     expect(result.request.messages.map((m) => m.content).slice(-4)).toEqual([
       "LATEST",
       "[Write the next reply only as Mira.]",
-      "DESCRIPTION",
-      "SCENARIO"
+      "<Mira>\nDESCRIPTION\n</Mira>",
+      "<Mira>\nSCENARIO\n</Mira>"
     ])
   })
   for (const position of ["context_start", "tail_start", "tail_end"] as const) {

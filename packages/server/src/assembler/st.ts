@@ -1,5 +1,5 @@
 // SillyTavern 1.19's chat-completion prompt building, function by function (ARCHITECTURE §15,
-// "ST-compatible mode"; each function names the ST one it follows).
+// "The one assembly path"; each function names the ST one it follows).
 import type { LegacyPresetDoc as PresetDoc } from "@rp/shared/docs/preset.ts"
 import { AssemblyFailed, type Role } from "./types.ts"
 
@@ -35,11 +35,12 @@ export interface StMessage {
 
 /**
  * Whether a message comes back the same in the next turn's request, for cache breakpoints
- * (DESIGN §5.5): the preset's and cards' prompts ahead of the chat (`prefix`), the
- * chat's own messages (`history`), and what moves or changes every turn (`volatile`): in-chat
- * prompts and notes, which keep their depth as the chat grows, and the tail.
+ * (DESIGN §5.5): the preset's and cards' prompts ahead of the chat (`prefix`), lore pinned
+ * above the history until its start moves (`pinned`), the chat's own messages (`history`),
+ * and what moves or changes every turn (`volatile`): in-chat prompts and notes, which keep
+ * their depth as the chat grows, and the tail.
  */
-export type Stability = "prefix" | "summary" | "history" | "volatile"
+export type Stability = "prefix" | "summary" | "pinned" | "history" | "volatile"
 
 /** What a message merged from two is, for caching. */
 const mergedKind = (a: Stability, b: Stability): Stability =>
@@ -47,9 +48,11 @@ const mergedKind = (a: Stability, b: Stability): Stability =>
     ? "volatile"
     : a === "history" || b === "history"
       ? "history"
-      : a === "summary" || b === "summary"
-        ? "summary"
-        : "prefix"
+      : a === "pinned" || b === "pinned"
+        ? "pinned"
+        : a === "summary" || b === "summary"
+          ? "summary"
+          : "prefix"
 
 /** Text the pipeline expanded, with the piece it was recorded as. */
 export interface Text {
@@ -266,12 +269,20 @@ export const compose = (input: {
       role: prompt.role,
       content: prompt.content,
       pieces: prompt.piece === null ? [] : [prompt.piece],
-      kind: prompt.barrier ? "volatile" : (prompt.kind ?? "prefix")
+      kind: prompt.kind === "pinned" ? "pinned" : prompt.barrier ? "volatile" : (prompt.kind ?? "prefix")
     }
     slots.set(at, [message])
     spend(tokensOf(message))
   }
-  for (const id of ["worldInfoBefore", "main", "worldInfoAfter", "charDescription", "charPersonality", "scenario"]) {
+  for (const id of [
+    "worldInfoBefore",
+    "main",
+    "worldInfoAfter",
+    "charDefinitions",
+    "charDescription",
+    "charPersonality",
+    "scenario"
+  ]) {
     relative(id)
   }
   relative("personaDescription")

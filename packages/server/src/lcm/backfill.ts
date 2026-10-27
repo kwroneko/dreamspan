@@ -3,13 +3,23 @@
 // chat's measurements, the main thread prices the counts. It follows the planner's rules
 // (ARCHITECTURE §16): the newest half of the window is kept, a pass is triggered above three
 // quarters of it, a pass plans at most `MAX_JOBS_PER_PLAN` chunks, a chunk takes whole messages
-// until it holds `leafInput` tokens, and `fanout` summaries of a level are condensed into one.
+// until it holds `leafInput` tokens, and `fanout` summaries of a level are condensed into one by
+// the next pass, after its chunks.
 
+import { estimateTokens } from "../assembler/st.ts"
 import { MAX_CHUNK_SLOTS } from "../db/lcmLimits.ts"
 import { MAX_JOBS_PER_PLAN } from "../db/lcmMaintain.ts"
 
 /** The summarization instruction after the chunk, in estimated tokens. */
 const TAIL_TOKENS = 80
+
+/** The tags the layer puts around each summary and around them all (`layerText`), in estimated tokens. */
+const SUMMARY_TAGS = estimateTokens('<summary level="1" from="1000" to="1100">\n\n</summary>\n')
+const LAYER_TAGS = estimateTokens("<summaries>\n</summaries>")
+
+/** A layer of summaries of these sizes as it is sent, tags included. */
+export const layerTokens = (summaries: ReadonlyArray<number>) =>
+  summaries.length ? LAYER_TAGS + summaries.reduce((n, tokens) => n + tokens + SUMMARY_TAGS, 0) : 0
 
 export interface BackfillInput {
   /** The tokens and messages after the summaries' cursor, as the planner costs them. */
@@ -20,7 +30,7 @@ export interface BackfillInput {
   readonly layerMax: number
   /** The preset and cards that open every request. */
   readonly prefix: number
-  /** What the layer holds before the work starts, in tokens. */
+  /** What the layer holds before the work starts, in tokens, tags included (`layerTokens`). */
   readonly layer: number
   readonly leafInput: number
   readonly leafTarget: number
@@ -68,11 +78,20 @@ const EMPTY: BackfillTotals = {
 /** A guard on the simulation: a chat of this many chunks is far past anything the estimate is for. */
 const MAX_L1 = 2_000_000
 
+/** A summary the simulated work adds to the layer: its level and its size as sent, tags included. */
+interface Simulated {
+  readonly level: number
+  readonly tokens: number
+}
+
 /**
  * The jobs the planner would run for a chat with these measurements, and what each sends
- * and returns. With caching, the first request pays for the preset and the layer, and each
- * after it reads them back; a summary newly added to the layer is the one part of the next
- * request that was not in the one before.
+ * and returns, in the planner's order: a pass plans its chunks, and condenses the runs of
+ * `fanout` summaries of a level the layer held when it planned (`planMaintenance`); the
+ * chunks run first, then the condensations. Passes go on until neither is left. A summary
+ * request sends the preset, the layer and its chunk; a condensation sends the preset and the
+ * layer up to its last part. With caching, a request reads back what it shares with the one
+ * before from the start, and pays for the rest.
  */
 export const estimateBackfill = (input: BackfillInput): BackfillTotals => {
   const { windowMax, leafInput, fanout } = input
@@ -86,98 +105,98 @@ export const estimateBackfill = (input: BackfillInput): BackfillTotals => {
   // Passes: each plans up to four chunks from what lies before the kept half, until the window is
   // under its trigger. The last chunk of a pass is whatever is left, so it can be small.
   let total = input.tokens
-  const chunks: Array<number> = []
-  while (total > trigger && chunks.length < MAX_L1) {
+  const passes: Array<Array<number>> = []
+  let l1Jobs = 0
+  while (total > trigger && l1Jobs < MAX_L1) {
     let room = total - keep
-    let made = 0
-    while (room > 0 && made < MAX_JOBS_PER_PLAN) {
+    const pass: Array<number> = []
+    while (room > 0 && pass.length < MAX_JOBS_PER_PLAN) {
       const size = Math.min(chunk, room)
-      chunks.push(size)
+      pass.push(size)
       room -= size
       total -= size
-      made++
     }
-    if (made === 0) break
+    if (pass.length === 0) break
+    passes.push(pass)
+    l1Jobs += pass.length
   }
 
-  // The layer as the jobs build it: counts of summaries per level.
-  const counts: Array<number> = [0]
-  const size = (level: number) => (level === 1 ? input.leafTarget : input.condenseTarget)
-  const layerNow = () => {
-    let tokens = input.layer
-    for (let level = 1; level < counts.length; level++) tokens += (counts[level] ?? 0) * size(level)
-    return Math.min(tokens, input.layerMax)
-  }
+  // The summaries the work adds, oldest first, after what the layer held before it.
+  const layer: Array<Simulated> = []
+  // What a request sent before its own text: the layer before the work, then these summaries.
+  let previous: ReadonlyArray<Simulated> | null = null
   const plannedRequests: PlannedRequest[] = []
   let uncached = 0
   let read = 0
   let write = 0
   let output = 0
   let condensations = 0
-  let requests = 0
   let summarized = 0
-  // What of the layer the last request did not have: the summary added after it.
-  let fresh = 0
-  const request = (chunkTokens: number, layerBefore: number, newest: number) => {
-    requests++
-    const body = chunkTokens + TAIL_TOKENS
-    if (!input.cached) {
-      uncached += body + input.prefix + layerBefore
-      return
-    }
-    uncached += body
-    const warm = requests > 1
-    const cold = warm ? newest : input.prefix + layerBefore
-    // What the provider has to be given afresh is written to the cache when it charges for that.
-    if (input.cacheWrites) write += cold
-    else uncached += cold
-    if (warm) read += input.prefix + Math.max(0, layerBefore - newest)
+  const sentLayer = (parts: ReadonlyArray<Simulated>) => {
+    const tokens = parts.reduce((n, s) => n + s.tokens, input.layer)
+    return Math.min(input.layer === 0 && parts.length ? tokens + LAYER_TAGS : tokens, input.layerMax)
   }
-  for (const body of chunks) {
-    summarized += body
+  const request = (body: number, parts: ReadonlyArray<Simulated>, returned: number) => {
     const before = [uncached, read, write]
-    request(body, layerNow(), fresh)
+    const layerSent = sentLayer(parts)
+    if (!input.cached) uncached += body + input.prefix + layerSent
+    else {
+      uncached += body
+      // The preset and the layer before the work are the same in every request; the summaries
+      // the work added are shared as far as both requests hold the same ones.
+      let shared = 0
+      if (previous) {
+        let same = 0
+        while (same < parts.length && same < previous.length && parts[same] === previous[same]) same++
+        shared = input.prefix + Math.min(layerSent, sentLayer(parts.slice(0, same)))
+      }
+      const cold = input.prefix + layerSent - shared
+      // What the provider has to be given afresh is written to the cache when it charges for that.
+      if (input.cacheWrites) write += cold
+      else uncached += cold
+      read += shared
+    }
+    previous = parts
+    output += returned
     plannedRequests.push({
       uncachedInput: Math.round(uncached - before[0]!),
       cachedInput: Math.round(read - before[1]!),
       cacheWrite: Math.round(write - before[2]!),
-      output: input.leafTarget
+      output: returned
     })
-    output += input.leafTarget
-    counts[1] = (counts[1] ?? 0) + 1
-    fresh = input.leafTarget
-    // Condense whenever a level holds `fanout` summaries; a condensation can fill the level above.
-    for (let level = 1; (counts[level] ?? 0) >= fanout; level++) {
-      const previous = [uncached, read, write]
-      requests++
-      condensations++
-      // Its request is the layer before its parts, the parts, and the instruction; the newest part is new.
-      const parts = fanout * size(level)
-      const before = Math.max(0, layerNow() - parts)
-      const body = TAIL_TOKENS
-      if (!input.cached) uncached += body + input.prefix + layerNow()
-      else {
-        uncached += body
-        const cold = fresh
-        if (input.cacheWrites) write += cold
-        else uncached += cold
-        read += input.prefix + Math.max(0, before + parts - cold)
+  }
+  for (let pass = 0; ; pass++) {
+    // The planner condenses the runs of one level as the layer stands when it plans, `fanout` at a
+    // time, the lowest level first.
+    const groups: Array<Simulated> = []
+    for (const level of [...new Set(layer.map((s) => s.level))].sort((x, y) => x - y))
+      for (let at = 0; at < layer.length;) {
+        let end = at
+        while (end < layer.length && layer[end]!.level === layer[at]!.level) end++
+        if (layer[at]!.level === level)
+          for (let start = at; start + fanout <= end; start += fanout) groups.push(layer[start]!)
+        at = end
       }
-      plannedRequests.push({
-        uncachedInput: Math.round(uncached - previous[0]!),
-        cachedInput: Math.round(read - previous[1]!),
-        cacheWrite: Math.round(write - previous[2]!),
-        output: input.condenseTarget
-      })
-      output += input.condenseTarget
-      counts[level] = (counts[level] ?? 0) - fanout
-      counts[level + 1] = (counts[level + 1] ?? 0) + 1
-      fresh = input.condenseTarget
+    groups.splice(MAX_JOBS_PER_PLAN)
+    const chunks = passes[pass] ?? []
+    if (!chunks.length && !groups.length) break
+    for (const body of chunks) {
+      summarized += body
+      request(body + TAIL_TOKENS, layer.slice(), input.leafTarget)
+      layer.push({ level: 1, tokens: input.leafTarget + SUMMARY_TAGS })
+    }
+    // One at a time, each in the layer as the ones before it left it.
+    for (const first of groups) {
+      const at = layer.indexOf(first)
+      condensations++
+      request(TAIL_TOKENS, layer.slice(0, at + fanout), input.condenseTarget)
+      layer.splice(at, fanout, { level: first.level + 1, tokens: input.condenseTarget + SUMMARY_TAGS })
     }
   }
+  const requests = l1Jobs + condensations
   return {
     plannedRequests,
-    l1Jobs: chunks.length,
+    l1Jobs,
     condensations,
     uncachedInput: Math.round(uncached),
     cachedInput: Math.round(read),

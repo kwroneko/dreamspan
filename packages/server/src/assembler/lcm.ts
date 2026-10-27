@@ -2,12 +2,10 @@ import { Effect } from "effect"
 import type { Summary } from "@rp/shared/lcm.ts"
 import { AssemblySources, need, type AssemblerStage } from "./pipeline.ts"
 
-export const layerText = (summaries: ReadonlyArray<Summary>, st: boolean) => {
+export const layerText = (summaries: ReadonlyArray<Summary>) => {
   const visible = summaries.filter((s) => s.content !== "")
   if (!visible.length) return ""
-  return st
-    ? visible.map((s) => s.content).join("\n\n")
-    : `<summaries>\n${visible.map((s) => `<summary level="${s.level}" from="${s.from}" to="${s.to}">\n${s.content}\n</summary>`).join("\n")}\n</summaries>`
+  return `<summaries>\n${visible.map((s) => `<summary level="${s.level}" from="${s.from}" to="${s.to}">\n${s.content}\n</summary>`).join("\n")}\n</summaries>`
 }
 
 export const lcmStage: AssemblerStage = {

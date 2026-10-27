@@ -144,11 +144,13 @@ test("a new chat from a card: the greeting follows the persona until the first s
   await expect(page.getByRole("tabpanel", { name: "Cast" })).toBeVisible()
   await page.getByRole("tab", { name: "This chat" }).click()
   const settings = page.getByRole("tabpanel", { name: "This chat" })
-  await settings.getByText("Speaker's card last").click()
+  // The card layout is the preset's, never a chat's: no selector here.
+  await expect(settings.getByText("Card layout")).toHaveCount(0)
+  await settings.getByText("By perspective").click()
   await shoot(page, "chat-settings")
   // Settings are state from the leaf on: read back after a reload.
   await page.reload()
-  await expect(page.getByRole("radio", { name: /Speaker's card last/ })).toBeChecked()
+  await expect(page.getByRole("radio", { name: /By perspective/ })).toBeChecked()
   // Closed, it stays closed.
   await page.getByRole("button", { name: "Close the panel" }).click()
   await expect(page).not.toHaveURL(/panel=/)

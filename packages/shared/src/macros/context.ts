@@ -37,6 +37,15 @@ export interface CardFields {
   readonly version?: string
   readonly firstMessage?: string
   readonly alternateGreetings?: ReadonlyArray<string>
+  /**
+   * Every character's field joined as the per-field markers fill it (ST's group join), already
+   * expanded: `{{description}}`, `{{personality}}` and `{{scenario}}` read these as they are.
+   */
+  readonly joined?: {
+    readonly description: string
+    readonly personality: string
+    readonly scenario: string
+  }
 }
 
 export interface ChatMessage {

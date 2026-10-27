@@ -1020,7 +1020,7 @@ describe("context assembly from the database", () => {
       assert.strictEqual(builtin.inputs.preset.scope, "builtin")
       assert.include(texts(builtin), "assistant: *Mira looks up.* Late again, Tobin.")
       assert.include(texts(builtin), "user: The road flooded.")
-      assert.include(texts(builtin), "system: Mira keeps the ledger for Tobin.")
+      assert.include(texts(builtin), "system: <Mira>\nMira keeps the ledger for Tobin.\n</Mira>")
 
       yield* state({ key: "preset.binding", value: { ref: preset.ref.id } })
       const bound = yield* assemble()
@@ -1051,9 +1051,9 @@ describe("context assembly from the database", () => {
         message: null,
         commitDraft: null
       })
-      assert.include(texts(yield* assemble()), "system: Mira has given up the ledger.")
+      assert.include(texts(yield* assemble()), "system: <Mira>\nMira has given up the ledger.\n</Mira>")
       yield* state({ key: "card.binding", value: { entity: mira.entityId, revision: mira.ref.headRevisionId } })
-      assert.include(texts(yield* assemble()), "system: Mira keeps the ledger for Tobin.")
+      assert.include(texts(yield* assemble()), "system: <Mira>\nMira keeps the ledger for Tobin.\n</Mira>")
     }).pipe(Effect.provide(database()))
   )
 

@@ -85,6 +85,13 @@ describe("stepped history", () => {
               prefixChange(previous, next, () => ({ label: "Message" }))!.reason,
               /context reached its maximum/
             )
+            // The cut keeps the prefix before the history (DESIGN §1.3): (a) comes first and is unchanged.
+            const prefix = next.request.breakpoints[0]!
+            assert.strictEqual(prefix.reason, "prefix")
+            assert.deepStrictEqual(
+              next.request.messages.slice(0, prefix.message + 1),
+              previous.request.messages.slice(0, prefix.message + 1)
+            )
           } else {
             assert.deepStrictEqual(next.historyStart, previous.historyStart)
             const end = lastBreakpoint(previous)
@@ -382,7 +389,9 @@ describe("stepped history", () => {
             event: { scope: null, data: { key: "var.set", value: { name: "long", value: "Q".repeat(1000) } } }
           },
           { depth: null, event: { scope: null, data: { key: "note.activate", value: { note: "author" as never } } } },
-          { depth: null, event: { scope: null, data: { key: "lorebook.attach", value: { ref: "book" as never } } } }
+          { depth: null, event: { scope: null, data: { key: "lorebook.attach", value: { ref: "book" as never } } } },
+          // Entries by position: these ride on the author's note.
+          { depth: null, event: { scope: null, data: { key: "lorebook.below_history", value: { on: false } } } }
         ],
         notes: [
           {

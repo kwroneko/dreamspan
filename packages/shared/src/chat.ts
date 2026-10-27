@@ -74,7 +74,9 @@ export const ContextIssue = Schema.Struct({
     "regex_skipped",
     "lorebook_issue",
     "last_turn_filled",
-    "direction_prompt_missing"
+    "direction_prompt_missing",
+    "layout_ignored",
+    "cache_breakpoints"
   ]),
   message: Schema.String
 })

@@ -9,6 +9,7 @@ import { completeFixture, fixtureSql, summaryJob } from "./support/lcmFixtures.t
 import { readFileSync } from "node:fs"
 import { assert, describe, it, layer } from "@effect/vitest"
 import { AppApi } from "@rp/shared/api.ts"
+import { BUILTIN_PRESET_LABEL } from "@rp/shared/generation.ts"
 import type { ChatId, EntityId, SlotId, VersionId } from "@rp/shared/chat.ts"
 import type { User } from "@rp/shared/domain.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
@@ -634,6 +635,36 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
         // The caller's own instruction is theirs alone.
         yield* actor.api.ChangeGenerationDefaults({ change: { tail: "Actor's instruction." } })
         assert.deepStrictEqual(yield* owner.api.GetGenerationDefaults(), before)
+      })
+  },
+  GetGlobalLorebooks: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        assert.include(yield* owner.api.SetGlobalLorebook({ ref: owner.loreRefId, global: true }), owner.loreRefId)
+        assert.notInclude(yield* actor.api.GetGlobalLorebooks(), owner.loreRefId)
+      })
+  },
+  SetGlobalLorebook: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const before = yield* owner.api.GetGlobalLorebooks()
+        yield* refused(actor.api.SetGlobalLorebook({ ref: owner.loreRefId, global: true }), "NotFound")
+        // Taking another user's book off the caller's own list touches nothing of theirs.
+        yield* actor.api.SetGlobalLorebook({ ref: owner.loreRefId, global: false })
+        assert.notInclude(yield* actor.api.GetGlobalLorebooks(), owner.loreRefId)
+        assert.deepStrictEqual(yield* owner.api.GetGlobalLorebooks(), before)
+      })
+  },
+  GetCardPromptUse: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        // The owner's preset, which the owner's chats use, is never what the caller's read names.
+        const kept = yield* actor.api.GetGenerationDefaults()
+        yield* actor.api.SetGenerationDefaults({ defaults: { model: kept.model, preset: null } })
+        yield* owner.api.SetGenerationDefaults({ defaults: { model: null, preset: owner.refId } })
+        assert.notStrictEqual((yield* owner.api.GetCardPromptUse()).preset, BUILTIN_PRESET_LABEL)
+        assert.strictEqual((yield* actor.api.GetCardPromptUse()).preset, BUILTIN_PRESET_LABEL)
+        yield* actor.api.SetGenerationDefaults({ defaults: { model: kept.model, preset: kept.preset } })
       })
   },
   // --- Chats

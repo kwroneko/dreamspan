@@ -11,7 +11,7 @@ const activationOf = (
   return {
     ...activation,
     why:
-      activation.why.kind === "constant"
+      activation.why.kind === "constant" || activation.why.kind === "pinned"
         ? activation.why
         : {
             ...activation.why,

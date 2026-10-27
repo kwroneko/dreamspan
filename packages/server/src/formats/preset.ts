@@ -104,6 +104,18 @@ const ST_DEFAULT_PROMPTS: ReadonlyArray<Json> = [
   { identifier: "personaDescription", name: "Persona Description", system_prompt: true, marker: true }
 ]
 
+/** The prompts a card's system prompt and post-history instructions replace (DESIGN §5.0). */
+const OVERRIDABLE = new Set(["main", "jailbreak"])
+
+/**
+ * A preset made here: ST's, but with card prompt overrides forbidden on the prompts they could
+ * replace, as DESIGN §5.0 has it for a new preset.
+ */
+export const forbidCardOverrides = (doc: PresetDoc): PresetDoc => ({
+  ...doc,
+  prompts: doc.prompts.map((p) => (OVERRIDABLE.has(p.identifier) ? { ...p, forbid_overrides: true } : p))
+})
+
 /** ST's default prompt order (`promptManagerDefaultPromptOrder`). */
 const DEFAULT_ORDER_ENTRIES: ReadonlyArray<PromptOrderEntry> = [
   "main",
@@ -436,6 +448,15 @@ const readPreset = (file: Json, r: ReportBuilder): PresetDoc => {
       ["prompt_order"]
     )
   if (!prompts.some((p) => p.identifier === newestMessage.identifier)) prompts.push(newestMessage)
+  // The file's `forbid_overrides` is kept, as ST reads it; say which prompts a card can replace.
+  const replaceable = prompts.filter((p) => OVERRIDABLE.has(p.identifier) && !p.forbid_overrides)
+  if (replaceable.length)
+    r.add(
+      "info",
+      "preset.overrides_allowed",
+      `A card's own prompts can replace ${shownList(replaceable.map((p) => p.name || p.identifier))}, as the file allows.`,
+      ["prompts"]
+    )
   const order = presetOrder(prompts, importedOrder)
   const extensions: Json = isObject(src.extensions) ? { ...src.extensions } : {}
   consumed.add("extensions")

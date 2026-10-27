@@ -34,7 +34,7 @@ import {
   type SourcePins,
   type Target
 } from "../assembler/types.ts"
-import { importStPreset } from "../formats/preset.ts"
+import { forbidCardOverrides, importStPreset } from "../formats/preset.ts"
 import {
   connectionColumns,
   connectionFrom,
@@ -44,7 +44,7 @@ import {
   toModel
 } from "./providers.ts"
 import type { GenerationDefaults } from "@rp/shared/generation.ts"
-import { readDefaults } from "./generationSettings.ts"
+import { globalLorebookRefs, readDefaults } from "./generationSettings.ts"
 import { historyRevision } from "./historyChanges.ts"
 import { previousHistoryStart } from "./historyStart.ts"
 import { noteHistory } from "./noteHistory.ts"
@@ -57,7 +57,7 @@ const decodeNote = Schema.decodeUnknownExit(NoteDoc)
 const decodePreset = Schema.decodeUnknownExit(PresetDoc)
 
 /** ST's default chat-completion preset: what generation uses when nothing chooses one. */
-export const builtinPreset = importStPreset(JSON.stringify({ frequency_penalty: 0 })).document!
+export const builtinPreset = forbidCardOverrides(importStPreset(JSON.stringify({ frequency_penalty: 0 })).document!)
 
 const invalid = (what: string) =>
   new AssemblyFailed({
@@ -231,6 +231,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
     history: [] as Array<SourcePins["history"][number]>,
     cards: [] as Array<SourcePins["cards"][number]>,
     lorebooks: [] as Array<NonNullable<SourcePins["lorebooks"]>[number]>,
+    globalLorebooks: [] as Array<string>,
     notes: [] as Array<SourcePins["notes"][number]>,
     messageCount: [] as Array<NonNullable<SourcePins["messageCount"]>[number]>,
     userMessages: [] as Array<NonNullable<SourcePins["userMessages"]>[number]>
@@ -464,6 +465,11 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
           return cards
         }
       ),
+
+    globalLorebooks: Effect.map(globalLorebookRefs(sql, userId), (refs) => {
+      pins.globalLorebooks = [...refs]
+      return refs
+    }),
 
     lorebooks: (refs) =>
       Effect.gen(function* () {
@@ -797,6 +803,9 @@ const replaySources = (
           })
         )
       }),
+
+    // Absent in snapshots from before global books: there were none.
+    globalLorebooks: Effect.succeed(pins.globalLorebooks ?? []),
 
     lorebooks: (refs) =>
       Effect.gen(function* () {

@@ -11,13 +11,14 @@ import { anthropicSse, completionChunks, sse, startMockProvider } from "./suppor
 import { placeBreakpoints } from "../src/assembler/breakpoints.ts"
 import { providerRequest as anthropicWire } from "../src/assembler/wire.ts"
 
-it("prioritizes stable history, the layer, and the prefix", () => {
+it("prioritizes stable history, the prefix, and the layer", () => {
+  // With two markers the prefix beats the layer: it survives a move of the history's start.
   assert.deepStrictEqual(
     placeBreakpoints([{ kind: "prefix" }, { kind: "summary" }, { kind: "history" }, { kind: "volatile" }]),
     [
       { message: 2, reason: "history" },
-      { message: 1, reason: "summary" },
-      { message: 0, reason: "prefix" }
+      { message: 0, reason: "prefix" },
+      { message: 1, reason: "summary" }
     ]
   )
 })

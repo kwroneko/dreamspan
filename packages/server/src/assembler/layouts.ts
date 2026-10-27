@@ -1,5 +1,5 @@
 import { modelName } from "@rp/shared/cardNames.ts"
-// Our layouts' card blocks (DESIGN §5.2, §5.3; ARCHITECTURE §15).
+// The Definitions marker's card blocks (DESIGN §5.0, §5.2, §5.3; ARCHITECTURE §15).
 import type { Names } from "./macros.ts"
 import { type Assembly, need } from "./pipeline.ts"
 import type { Text } from "./st.ts"
