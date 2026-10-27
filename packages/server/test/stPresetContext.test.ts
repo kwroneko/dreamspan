@@ -145,10 +145,10 @@ layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "90 secon
         maximum: 8192,
         target: 6553,
         responseReserve: 4096,
-        presetName: "Default",
+        presetName: "Default (built-in)",
         builtinPreset: true
       })
-      assert.deepStrictEqual(next.preset, { ref: null, name: "Default", scope: "builtin" })
+      assert.deepStrictEqual(next.preset, { ref: null, name: "Default (built-in)", scope: "builtin" })
       assert.isAbove(next.budget!.nonHistoryTokens, 5000)
       const chosen = (yield* api.ListLibrary({ kind: "preset" })).find((ref) => ref.label === "Roomy")!.id
       yield* api.SetGenerationDefaults({ defaults: { model: null, preset: chosen } })

@@ -13,7 +13,7 @@ import type { LegacyPresetDoc as PresetDoc } from "@rp/shared/docs/preset.ts"
 import { Schema } from "effect"
 
 /** Bump whenever identical inputs would assemble differently. Missing means version 0. */
-export const ASSEMBLER_VERSION = 25
+export const ASSEMBLER_VERSION = 26
 
 export type Role = "system" | "user" | "assistant"
 
@@ -497,8 +497,9 @@ export interface ModelInput {
   readonly context: number | null
   /** A reported output ceiling; absent on older snapshots. */
   readonly maxOutput?: number | null
-  /** The connection's one-way preset override (DESIGN §9). */
+  /** The model's own generation settings; absent on older snapshots. */
   readonly settings?: import("@rp/shared/modelSettings.ts").ModelSettings
+  /** The connection's one-way preset override (DESIGN §9). */
   readonly presetOverride: string | null
 }
 

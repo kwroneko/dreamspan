@@ -15,10 +15,13 @@ export const parseModelValue = (value: string) => {
   return { connection, model }
 }
 
-/** Loaded once `enabled` turns true. */
-export function useModelChoices(enabled: boolean) {
+/**
+ * Loaded once `enabled` turns true. Hidden models are left out, except `current` (a `modelValue`),
+ * which is still in use and named as hidden.
+ */
+export function useModelChoices(enabled: boolean, current: string | null = null): ReadonlyArray<ModelChoice> {
   const action = useAction()
-  const [models, setModels] = useState<ReadonlyArray<ModelChoice>>([])
+  const [models, setModels] = useState<ReadonlyArray<ModelChoice & { readonly hidden: boolean }>>([])
   useEffect(() => {
     if (!enabled) return
     void action
@@ -27,11 +30,12 @@ export function useModelChoices(enabled: boolean) {
           const connections: ReadonlyArray<Connection> = yield* client("ListConnections", undefined)
           const lists = yield* Effect.forEach(connections, (connection) =>
             Effect.map(
-              client("ListModels", { connectionId: connection.id, includeHidden: false }),
+              client("ListModels", { connectionId: connection.id, includeHidden: true }),
               (list: ReadonlyArray<Model>) =>
                 list.map((model) => ({
                   value: modelValue(connection.id, model.id),
-                  label: `${connection.name} · ${model.key}`
+                  label: `${connection.name} · ${model.key}`,
+                  hidden: model.hidden
                 }))
             )
           )
@@ -41,5 +45,7 @@ export function useModelChoices(enabled: boolean) {
       .then((result) => result.ok && setModels(result.value))
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once, when enabled
   }, [enabled])
-  return models
+  return models.flatMap(({ hidden, ...choice }) =>
+    !hidden ? [choice] : choice.value === current ? [{ ...choice, label: `${choice.label} (hidden)` }] : []
+  )
 }

@@ -22,20 +22,24 @@ export function searchTexts({
   max
 }: SearchRequest): SearchResponse {
   let pattern: RegExp
+  const source = regex ? find : escape(find)
+  const flags = caseSensitive ? "g" : "gi"
   try {
-    const source = regex ? find : escape(find)
-    pattern = new RegExp(
-      wholeWord ? `(?<![\\p{L}\\p{N}_])(?:${source})(?![\\p{L}\\p{N}_])` : source,
-      caseSensitive ? "gu" : "giu"
-    )
-  } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : "This isn't a valid pattern." }
+    pattern = new RegExp(wholeWord ? `(?<![\\p{L}\\p{N}_])(?:${source})(?![\\p{L}\\p{N}_])` : source, flags + "u")
+  } catch {
+    // Unicode mode rejects escapes plain patterns accept (`\'`, `\-`): those still run without it,
+    // with ASCII word boundaries.
+    try {
+      pattern = new RegExp(wholeWord ? `(?<!\\w)(?:${source})(?!\\w)` : source, flags)
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : "This isn't a valid pattern." }
+    }
   }
   const matches: Array<{ index: number; at: number; length: number; replacement: string | null }> = []
   let total = 0
   const replaced = texts.map((text, index) => {
     pattern.lastIndex = 0
-    // matchAll advances empty Unicode matches correctly, including surrogate pairs.
+    // matchAll advances empty matches (by code point under `u`).
     const found = text.matchAll(pattern)
     let result = "",
       end = 0

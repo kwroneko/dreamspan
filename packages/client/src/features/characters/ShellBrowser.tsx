@@ -1,6 +1,6 @@
 import { chatName, formatDay } from "../chat/chatTitle.ts"
+import type { EntityId } from "@rp/shared/chat.ts"
 import { importState } from "@rp/shared/stImportApi.ts"
-import type { ShellFork, ShellLibrary } from "@rp/shared/chatSetupApi.ts"
 import { useNavigate, useSearch } from "@tanstack/react-router"
 import { useState } from "react"
 import { AsyncView, ErrorAlert, useAction } from "../../actions.tsx"
@@ -12,7 +12,7 @@ import { Button } from "../../ui/Button.tsx"
 import { Input } from "../../ui/Field.tsx"
 import { Segmented } from "../../ui/Segmented.tsx"
 import { GroupFaces } from "./GroupFaces.tsx"
-import { CharacterTile, shellAtom, useShellNavigation } from "./shellData.tsx"
+import { CharacterTile, shellAtom, useShellNavigation, type ShellFork, type ShellLibrary } from "./shellData.tsx"
 
 export function PinButton({ fork }: { fork: ShellFork }) {
   const action = useAction()
@@ -55,12 +55,11 @@ function useOpenFork(fork: ShellFork, scopeChat: boolean) {
       navigation.setScope({ entity: null, chat: fork.chat.id })
       navigation.setGrid(false)
     }
-    // A list changes only the middle. Keep a character tab while that character still applies.
+    // A list changes only the middle. Keep a character tab while that character is in the
+    // chat, played by the model or by the user; else This chat.
     const previous = search.panel ?? (wide ? rememberedPanel(userId) : null)
-    const panel =
-      previous?.startsWith("card:") && !fork.cast.some((card) => card.entityId === previous.slice(5))
-        ? "chat"
-        : previous
+    const id = previous?.startsWith("card:") ? (previous.slice(5) as EntityId) : null
+    const panel = id !== null && (!fork.joined.includes(id) || fork.departed.includes(id)) ? "chat" : previous
     void navigate({
       to: "/chats/$chatId",
       params: { chatId: fork.chat.id },

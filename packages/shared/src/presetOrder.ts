@@ -40,6 +40,20 @@ export const perFieldMarkers: ReadonlyArray<string> = [
   "personaDescription"
 ]
 
+/**
+ * The markers ST sends even when its prompt order leaves them out: it appends them, in this
+ * order, after the ordered prompts (preparePromptsForChatCompletion). Appended on here, so an
+ * imported preset still sends them where ST does; any other prompt outside the order is off.
+ */
+export const sentOutsideTheOrder = [
+  "worldInfoBefore",
+  "worldInfoAfter",
+  "charDescription",
+  "charPersonality",
+  "scenario",
+  "personaDescription"
+]
+
 /** Older revisions remain readable without rewriting them. Off prompts keep their place. */
 export function presetOrder(prompts: ReadonlyArray<PresetPrompt>, order: ReadonlyArray<PromptOrderEntry>) {
   const next = [...order]
@@ -49,10 +63,8 @@ export function presetOrder(prompts: ReadonlyArray<PresetPrompt>, order: Readonl
     next.splice(history < 0 ? next.length : history + 1, 0, { identifier: newestMessage.identifier, enabled: true })
     included.add(newestMessage.identifier)
   }
-  for (const p of prompts)
-    if (!included.has(p.identifier)) {
-      next.push({ identifier: p.identifier, enabled: false })
-      included.add(p.identifier)
-    }
+  const outside = new Set(prompts.map((p) => p.identifier).filter((id) => !included.has(id)))
+  for (const identifier of sentOutsideTheOrder) if (outside.delete(identifier)) next.push({ identifier, enabled: true })
+  for (const identifier of outside) next.push({ identifier, enabled: false })
   return next
 }

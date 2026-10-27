@@ -4,6 +4,7 @@
 // Text is shown as text. Measured virtual rows keep dense contexts bounded; collapsed
 // messages render only their previews.
 import type { ChatId, VersionId } from "@rp/shared/chat.ts"
+import { BUILTIN_PRESET_LABEL } from "@rp/shared/generation.ts"
 import type { ContextMessage, RunContext, InspectorUsage, SourceActivation } from "@rp/shared/inspectorApi.ts"
 import { Link, Navigate, useParams } from "@tanstack/react-router"
 import { useMemo, useRef, useState } from "react"
@@ -254,7 +255,7 @@ function Inspector({ run }: { run: RunContext }) {
           <dd>{run.model ? `${run.model.model} on ${run.model.connection} (${run.model.kind})` : "none"}</dd>
           <dt className="text-muted">Preset</dt>
           <dd>
-            {run.preset.label ?? "Default"} ({run.preset.scope})
+            {run.preset.label ?? BUILTIN_PRESET_LABEL} ({run.preset.scope})
           </dd>
           <dt className="text-muted">Generation</dt>
           <dd>

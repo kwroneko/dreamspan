@@ -7,6 +7,7 @@ import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { makeAssembler } from "../assembler/assembler.ts"
 import type { ChatId } from "@rp/shared/chat.ts"
+import { BUILTIN_PRESET_LABEL } from "@rp/shared/generation.ts"
 import type { EffectivePreset } from "@rp/shared/inspectorApi.ts"
 import { wireContext } from "../assembler/wire.ts"
 import { lastBreakpoint, prefixChange, tokensBetween } from "../assembler/warmth.ts"
@@ -164,7 +165,7 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
           ? yield* sql<{ label: string }>`SELECT r.label FROM entity_refs r JOIN entities e ON e.id = r.entity_id
               WHERE r.id = ${preset.ref} AND e.owner_user_id = ${userId}`
           : []
-        const presetName = presetRef?.label ?? (preset?.scope === "builtin" ? "Default" : "Unnamed")
+        const presetName = presetRef?.label ?? (preset?.scope === "builtin" ? BUILTIN_PRESET_LABEL : "Unnamed")
         // The model by name, as the panel shows it: also a hidden one, which is still used.
         const chosen = sources.chosenModel()
         const resolved = sources.resolvedModel()

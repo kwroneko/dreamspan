@@ -1,4 +1,4 @@
-import { DEFAULT_SAMPLERS, ModelSettings } from "@rp/shared/modelSettings.ts"
+import { DEFAULT_RESPONSE, DEFAULT_SAMPLERS, ModelSettings } from "@rp/shared/modelSettings.ts"
 import { Schema } from "effect"
 import { StSettingsImporter } from "./StSettingsImport.tsx"
 // A connection's models: what the provider lists, merged with the user's edits
@@ -77,24 +77,57 @@ const prefillItems = (upstream: ModelOverrides["prefill"]) => [
   { value: "tool_schema" as const, label: "Through a tool schema" }
 ]
 
+type SamplerKey = keyof NonNullable<ModelSettings["samplers"]>
+
+/** The generation settings with fields of their own; the rest are in the JSON below them. */
+const SETTING_FIELDS: ReadonlyArray<readonly [key: SamplerKey, label: string, numeric: boolean]> = [
+  ["openai_max_context", "Context size (tokens)", true],
+  ["openai_max_tokens", "Response length (tokens)", true],
+  ["temperature", "Temperature", true],
+  ["top_p", "Top P", true],
+  ["top_k", "Top K", true],
+  ["min_p", "Min P", true],
+  ["top_a", "Top A", true],
+  ["frequency_penalty", "Frequency penalty", true],
+  ["presence_penalty", "Presence penalty", true],
+  ["repetition_penalty", "Repetition penalty", true],
+  ["seed", "Seed (-1: none)", true],
+  ["reasoning_effort", "Reasoning effort", false],
+  ["verbosity", "Verbosity", false]
+]
+
+/** What an empty field means where the default isn't a fixed number. */
+const DEFAULT_LABELS: Partial<Record<SamplerKey, string>> = {
+  openai_max_context: "Its window",
+  openai_max_tokens: `Up to ${DEFAULT_RESPONSE}`
+}
+
 /** Edits the user's overrides. Empty fields fall back to what the provider reports. */
 export function ModelSettingsEditor({ model, onSaved }: { model: Model; onSaved?: () => void }) {
   const action = useAction()
   const [rowVersion, setRowVersion] = useState(model.rowVersion)
   const [name, setName] = useState(model.overrides.name ?? "")
-  const [context, setContext] = useState(
-    (model.overrides.settings?.samplers?.openai_max_context ?? model.overrides.context)?.toString() ?? ""
-  )
-  const [maxOutput, setMaxOutput] = useState(
-    (model.overrides.settings?.samplers?.openai_max_tokens ?? model.overrides.maxOutput)?.toString() ?? ""
-  )
+  const [context, setContext] = useState(model.overrides.context?.toString() ?? "")
+  const [maxOutput, setMaxOutput] = useState(model.overrides.maxOutput?.toString() ?? "")
   const [vision, setVision] = useState<Tri>(triOf(model.overrides.vision))
   const [reasoning, setReasoning] = useState<Tri>(triOf(model.overrides.reasoning))
   const [tools, setTools] = useState<Tri>(triOf(model.overrides.tools))
   const [prefill, setPrefill] = useState<PrefillChoice>(model.overrides.prefill ?? "auto")
   const [capabilities, setCapabilities] = useState(JSON.stringify(model.overrides, null, 2))
   const [settings, setSettings] = useState(JSON.stringify(model.overrides.settings ?? {}, null, 2))
+  // Number fields as typed, until they parse: "0." on the way to "0.7", or empty.
+  const [drafts, setDrafts] = useState<Readonly<Record<string, string>>>({})
   const [problem, setProblem] = useState<string | null>(null)
+  let current: typeof ModelSettings.Type | null = null
+  try {
+    current = Schema.decodeUnknownSync(ModelSettings)(JSON.parse(settings))
+  } catch {
+    // The JSON editor shows the problem on save; the fields wait until it's valid.
+  }
+  const replaceSettings = (next: string) => {
+    setSettings(next)
+    setDrafts({})
+  }
   const contextValue = parseOptionalInt(context, 1)
   const maxOutputValue = parseOptionalInt(maxOutput, 1)
 
@@ -115,23 +148,15 @@ export function ModelSettingsEditor({ model, onSaved }: { model: Model; onSaved?
       setProblem("Check the advanced settings JSON and its values.")
       return
     }
-    if (parsed.samplers) {
-      const { openai_max_context, openai_max_tokens, ...rest } = parsed.samplers
-      void [openai_max_context, openai_max_tokens]
-      parsed = { ...parsed, samplers: rest }
+    if (Object.values(drafts).some((text) => text.trim() !== "" && !Number.isFinite(Number(text)))) {
+      setProblem("Check the generation settings: each takes a number, or nothing for the default.")
+      return
     }
     const flag = (tri: Tri) => (tri === "auto" ? undefined : tri === "yes")
     const overrides: ModelOverrides = Object.fromEntries(
       Object.entries({
         ...extra,
-        settings: {
-          ...parsed,
-          samplers: {
-            ...parsed.samplers,
-            ...(contextValue.value ? { openai_max_context: contextValue.value } : {}),
-            ...(maxOutputValue.value ? { openai_max_tokens: maxOutputValue.value } : {})
-          }
-        },
+        settings: parsed,
         name: name.trim() || undefined,
         context: contextValue.value ?? undefined,
         maxOutput: maxOutputValue.value ?? undefined,
@@ -157,7 +182,11 @@ export function ModelSettingsEditor({ model, onSaved }: { model: Model; onSaved?
         <Input value={name} onValueChange={setName} placeholder={model.upstream.name ?? model.key} />
       </Field>
       <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="Context (tokens)" error={contextValue.problem}>
+        <Field
+          label="Context window (tokens)"
+          description="The most the model takes. Empty: what the provider reports."
+          error={contextValue.problem}
+        >
           <Input
             value={context}
             onValueChange={setContext}
@@ -165,7 +194,11 @@ export function ModelSettingsEditor({ model, onSaved }: { model: Model; onSaved?
             placeholder={model.upstream.context?.toString()}
           />
         </Field>
-        <Field label="Max output (tokens)" error={maxOutputValue.problem}>
+        <Field
+          label="Max output (tokens)"
+          description="The most it writes in one reply. Empty: what the provider reports."
+          error={maxOutputValue.problem}
+        >
           <Input
             value={maxOutput}
             onValueChange={setMaxOutput}
@@ -192,40 +225,31 @@ export function ModelSettingsEditor({ model, onSaved }: { model: Model; onSaved?
         <Select items={prefillItems(model.upstream.prefill)} value={prefill} onValueChange={setPrefill} />
       </Field>
       <div className="grid gap-3 sm:grid-cols-2">
-        {(
-          [
-            "temperature",
-            "top_p",
-            "top_k",
-            "min_p",
-            "top_a",
-            "frequency_penalty",
-            "presence_penalty",
-            "repetition_penalty",
-            "seed",
-            "reasoning_effort",
-            "verbosity"
-          ] as const
-        ).map((key) => {
-          let parsed: typeof ModelSettings.Type = {}
-          try {
-            parsed = Schema.decodeUnknownSync(ModelSettings)(JSON.parse(settings))
-          } catch {
-            /* The JSON editor shows the problem on save. */
-          }
+        {SETTING_FIELDS.map(([key, label, numeric]) => {
+          const value = current?.samplers?.[key]
           return (
-            <Field key={key} label={key.replaceAll("_", " ")}>
+            <Field key={key} label={label}>
               <Input
-                value={String(parsed.samplers?.[key] ?? DEFAULT_SAMPLERS[key])}
-                onValueChange={(value) => {
-                  const text = key === "reasoning_effort" || key === "verbosity"
-                  setSettings(
-                    JSON.stringify(
-                      { ...parsed, samplers: { ...parsed.samplers, [key]: text ? value : Number(value) } },
-                      null,
-                      2
-                    )
-                  )
+                value={drafts[key] ?? (value === undefined ? "" : String(value))}
+                placeholder={DEFAULT_LABELS[key] ?? String(DEFAULT_SAMPLERS[key])}
+                inputMode={numeric ? "decimal" : undefined}
+                disabled={current === null}
+                onValueChange={(text) => {
+                  if (current === null) return
+                  const { [key]: _, ...rest } = current.samplers ?? {}
+                  void _
+                  const number = Number(text)
+                  // Empty means the default; a number not yet complete stays a draft.
+                  const samplers =
+                    text.trim() === ""
+                      ? rest
+                      : !numeric
+                        ? { ...rest, [key]: text }
+                        : Number.isFinite(number)
+                          ? { ...rest, [key]: number }
+                          : (current.samplers ?? {})
+                  setSettings(JSON.stringify({ ...current, samplers }, null, 2))
+                  setDrafts((previous) => ({ ...previous, [key]: text }))
                 }}
               />
             </Field>
@@ -239,7 +263,7 @@ export function ModelSettingsEditor({ model, onSaved }: { model: Model; onSaved?
         <Textarea
           className="min-h-40 w-full rounded-md border border-border bg-surface p-2 font-mono text-sm text-text"
           value={settings}
-          onChange={(event) => setSettings(event.currentTarget.value)}
+          onChange={(event) => replaceSettings(event.currentTarget.value)}
         />
       </Field>
       <details>
@@ -266,19 +290,10 @@ export function ModelSettingsEditor({ model, onSaved }: { model: Model; onSaved?
         surface="model"
         apply={async (preview) => {
           if (!preview.model) return
-          if (preview.model.samplers?.openai_max_context !== undefined)
-            setContext(String(preview.model.samplers.openai_max_context))
-          if (preview.model.samplers?.openai_max_tokens !== undefined)
-            setMaxOutput(String(preview.model.samplers.openai_max_tokens))
-          let current: typeof ModelSettings.Type
-          try {
-            current = Schema.decodeUnknownSync(ModelSettings)(JSON.parse(settings))
-          } catch {
-            current = {}
-          }
-          setSettings(
+          const base = current ?? {}
+          replaceSettings(
             JSON.stringify(
-              { ...current, ...preview.model, samplers: { ...current.samplers, ...preview.model.samplers } },
+              { ...base, ...preview.model, samplers: { ...base.samplers, ...preview.model.samplers } },
               null,
               2
             )

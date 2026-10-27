@@ -2,7 +2,8 @@
 // name and the same characters the user doesn't play, two or more, worked out on the server
 // in one read; a group's chats, latest message first; and a chat's own model and preset
 // taken off again (`model.unbind`, `preset.unbind`), so it follows the default. Cross-user
-// access is in the isolation matrix; the active-path read at 5,000 chats is timed below.
+// access is in the isolation matrix; the active-path read and chat search at 5,000 chats are
+// timed below.
 import { readdirSync, readFileSync } from "node:fs"
 import { join, relative } from "node:path"
 import { assert, describe, it } from "@effect/vitest"
@@ -352,7 +353,7 @@ describe("group event validity", () => {
 })
 
 describe("group read scale", () => {
-  it.live("groups 5,000 active ten-message paths within the read budget", () => {
+  it.live("groups and searches 5,000 active ten-message paths within the read budget", () => {
     const config = testConfig()
     return Effect.gen(function* () {
       const api = yield* client()
@@ -432,6 +433,20 @@ describe("group read scale", () => {
       )
       process.stdout.write(`ListChatGroups: 5,000 active ten-message paths in ${groupsTook.toFixed(0)} ms\n`)
       assert.isBelow(groupsTook, 2000)
+      // Search resolves the cast only for chats a card in them could match: a search that
+      // matches nothing mustn't resolve all 5,000.
+      for (const [search, hits] of [
+        ["Card 1", 50],
+        ["no-such-name", 0]
+      ] as const) {
+        yield* api.ListChats({ limit: 50, before: null, search })
+        const searchStarted = performance.now()
+        const found = yield* api.ListChats({ limit: 50, before: null, search })
+        const searchTook = performance.now() - searchStarted
+        assert.strictEqual(found.length, hits)
+        process.stdout.write(`ListChats search ${JSON.stringify(search)}: 5,000 chats in ${searchTook.toFixed(0)} ms\n`)
+        assert.isBelow(searchTook, 500)
+      }
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config, Generator.none)))
   })
 })

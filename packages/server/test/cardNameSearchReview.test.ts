@@ -74,12 +74,12 @@ it.live("search finds the display name and version shown by a pinned card revisi
     yield* writer.EditRef({
       userId,
       refId: local.id,
-      doc: { ...doc, name: "Local Display", character_version: "local-version" },
+      doc: { ...doc, name: "Local Display", nickname: "LocalModel", character_version: "local-version" },
       expectedRowVersion: local.rowVersion,
       message: null,
       commitDraft: null
     })
-    for (const search of ["Local Display", "local-version"]) {
+    for (const search of ["Local Display", "local-version", "LocalModel", "local display"]) {
       assert.include(
         (yield* api.ListChats({ limit: 50, before: null, search })).map((chat) => chat.id),
         started.chat.id

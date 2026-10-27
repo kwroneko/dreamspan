@@ -117,7 +117,7 @@ const environment = (server: ReturnType<typeof lcmServer>, names: ReadonlyArray<
     const model = yield* api.AddUserModel({
       connectionId: connection.id,
       key: "primary-model",
-      overrides: { context: 8192 }
+      overrides: { context: 8192, settings: { samplers: { openai_max_context: 8192, openai_max_tokens: 512 } } }
     })
     yield* fixtureSql(server.config.dataDir, [
       {
