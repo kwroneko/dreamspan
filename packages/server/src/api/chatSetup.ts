@@ -36,8 +36,6 @@ const toEvent = (change: CastChange): StateEventData => {
       return { key: "model.unbind", value: {} }
     case "DefaultPreset":
       return { key: "preset.unbind", value: {} }
-    case "Layout":
-      return { key: "layout.cards", value: change.layout }
     case "Roles":
       return { key: "roles.projection", value: change.projection }
     case "Lorebook":
@@ -46,6 +44,10 @@ const toEvent = (change: CastChange): StateEventData => {
       return { key: change.active ? "note.activate" : "note.deactivate", value: { note: change.entityId } }
     case "CardLorebook":
       return { key: "lorebook.embedded", value: { entity: change.entityId, on: change.on } }
+    case "GlobalLorebook":
+      return { key: "lorebook.global", value: { ref: change.ref, on: change.on } }
+    case "LoreBelowHistory":
+      return { key: "lorebook.below_history", value: { on: change.on } }
   }
 }
 
@@ -92,7 +94,10 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
         cardLorebooksOff: Object.entries(state.embeddedLorebooks).flatMap(([entity, on]) =>
           on ? [] : [entity as Cast["cardLorebooksOff"][number]]
         ),
-        layoutCards: state.layoutCards,
+        globalLorebooksOff: Object.entries(state.globalLorebooks).flatMap(([ref, on]) =>
+          on ? [] : [ref as Cast["globalLorebooksOff"][number]]
+        ),
+        loreBelowHistory: state.loreBelowHistory ?? true,
         rolesProjection: state.rolesProjection,
         cards
       })
@@ -108,6 +113,14 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
         internal("SetHomePinsCollapsed")
       ),
     ListCards: () => Effect.flatMap(userId, (id) => reader.ListCards({ userId: id })).pipe(internal("ListCards")),
+    GetGlobalLorebooks: () =>
+      Effect.flatMap(userId, (id) => reader.GetGlobalLorebooks({ userId: id })).pipe(internal("GetGlobalLorebooks")),
+    SetGlobalLorebook: ({ ref, global }) =>
+      Effect.flatMap(userId, (id) =>
+        writer.SetGlobalLorebook({ userId: id, ref, global }).pipe(Effect.tap(() => warmth.refreshUser(id)))
+      ).pipe(internal("SetGlobalLorebook")),
+    GetCardPromptUse: () =>
+      Effect.flatMap(userId, (id) => reader.GetCardPromptUse({ userId: id })).pipe(internal("GetCardPromptUse")),
     ListCardUsage: () =>
       Effect.flatMap(userId, (id) => reader.CardUsage({ userId: id })).pipe(internal("ListCardUsage")),
     ListChatGroups: () =>

@@ -237,10 +237,8 @@ for (const placement of [null, "before_main_prompt", "after_main_prompt"] as con
       )
       const snapshot = yield* assembleFixture({ ...input, ...(placement === null ? { notes: [] } : {}) })
       const messages = snapshot.request.messages
-      assert.strictEqual(
-        messages.find((m) => m.content.includes("LAYER CONTENT"))!.role,
-        placement === null ? "system" : "user"
-      )
+      // One assembly path: the layer is the system block before the history, whatever the imported note's role.
+      assert.strictEqual(messages.find((m) => m.content.includes("LAYER CONTENT"))!.role, "system")
       assert.isBelow(
         messages.findIndex((m) => m.content.includes("LAYER CONTENT")),
         messages.findIndex((m) => m.content.includes("RAW FIRST"))

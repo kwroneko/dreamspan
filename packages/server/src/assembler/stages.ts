@@ -1,9 +1,10 @@
 import { modelName } from "@rp/shared/cardNames.ts"
 import { withModelSettings } from "@rp/shared/modelSettings.ts"
-import { newestMessage, presetOrder } from "@rp/shared/presetOrder.ts"
+import { charDefinitions, newestMessage, presetOrder } from "@rp/shared/presetOrder.ts"
+import { CARD_JOIN_PREFIX, CARD_JOIN_SUFFIX } from "@rp/shared/docs/preset.ts"
 import { schemaPrefillBudget } from "./prefill.ts"
 import { layerText, lcmStage } from "./lcm.ts"
-import { createHash } from "node:crypto"
+import { configurationOf, previousStart } from "./cutState.ts"
 import { contextBudget, targetBudget, loreAllowance, loreBudget } from "./budget.ts"
 // The built-in assembler stages, in registration order (ARCHITECTURE §15 lists them).
 import type { ChatMessage } from "@rp/shared/macros/context.ts"
@@ -255,8 +256,7 @@ const notesStage: AssemblerStage = {
       const state = need(assembly, "state")
       const cast = need(assembly, "cast")
       const target = need(assembly, "target")
-      // ST has one persona; its note is the one that matters in its mode.
-      const personas = modeOf(state, cast).st ? cast.personas.slice(0, 1) : cast.personas
+      const personas = cast.personas
       const notes = yield* sources.notes(
         [...cast.characters, ...personas].map((c) => c.entity),
         state.noteRevisions
@@ -311,30 +311,29 @@ const noteGateStage = sync("note-gate", (assembly) => {
   assembly.notes = active.filter((note) => due(note.doc.interval, count))
 })
 
-const modeOf = (state: ChatState, cast: Cast): Mode => {
-  const layout = state.layoutCards
-  const projection = state.rolesProjection
-  return {
-    st: cast.characters.length === 1 && layout === null && (projection === null || projection === "by_writer"),
-    layout: layout ?? "concat",
-    projection: projection ?? "by_writer"
-  }
-}
-
-const modeStage = sync("mode", (assembly) => {
-  assembly.mode = modeOf(need(assembly, "state"), need(assembly, "cast"))
+const modeOf = (state: ChatState): Mode => ({
+  projection: state.rolesProjection ?? "by_writer",
+  loreBelowHistory: state.loreBelowHistory ?? true
 })
 
-/** The bindings macros see (DESIGN §5.3): ST's names for one character, the cast's otherwise. */
-const namesFor = (state: ChatState, cast: Cast, mode: Mode): Names => {
+const modeStage = sync("mode", (assembly) => {
+  const state = need(assembly, "state")
+  assembly.mode = modeOf(state)
+  // Card layout is the preset's, never the chat's (DESIGN §5.0): an old choice is ignored, and said once.
+  if (state.layoutCards !== null)
+    assembly.issues.push({
+      kind: "layout_ignored",
+      message: `This chat chose the "${state.layoutCards}" card layout, which no longer applies: the preset's markers place the cards.`
+    })
+})
+
+/**
+ * The bindings macros see (DESIGN §5.3): in preset text `{{char}}` is the cast and `{{user}}`
+ * the characters the user plays, which for one character and one persona are ST's.
+ */
+const namesFor = (state: ChatState, cast: Cast): Names => {
   const pinned = state.macroBindings
   const join = (cards: ReadonlyArray<CardInput>) => cards.map((c) => modelName(c.doc)).join(", ")
-  if (mode.st) {
-    return {
-      user: pinned["user"] ?? (cast.personas[0] ? modelName(cast.personas[0].doc) : undefined) ?? "User",
-      char: pinned["char"] ?? modelName(cast.characters[0]!.doc)
-    }
-  }
   const everyone = [...cast.characters, ...cast.personas]
   return {
     user: pinned["user"] ?? (join(cast.personas) || "User"),
@@ -363,7 +362,7 @@ const macrosStage = sync("macros", (assembly) => {
   const cast = need(assembly, "cast")
   const preset = need(assembly, "preset").doc
   assembly.macros = makeMacroEnvironment(assembly, {
-    names: namesFor(need(assembly, "state"), cast, need(assembly, "mode")),
+    names: namesFor(need(assembly, "state"), cast),
     card: macroCard(cast, assembly.notes),
     messages: [],
     model: assembly.model?.key ?? "",
@@ -373,7 +372,7 @@ const macrosStage = sync("macros", (assembly) => {
     chatId: need(assembly, "target").chatId,
     variables: need(assembly, "state").vars,
     summary: assembly.lcm?.summaries.length
-      ? layerText(assembly.lcm.summaries, need(assembly, "mode").st)
+      ? layerText(assembly.lcm.summaries)
       : (summaryNote(assembly)?.doc.content ?? "")
   })
 })
@@ -494,7 +493,7 @@ const positionOf = (state: ChatState, events: ReadonlyArray<PositionedEvent>) =>
     const cast = yield* castOf(state, null, 0)
     const card = cast.characters[0]
     const notes = card ? activeNotes(events, yield* sources.notes([card.entity], state.noteRevisions)) : []
-    const position: Position = { cast, names: namesFor(state, cast, modeOf(state, cast)), card: macroCard(cast, notes) }
+    const position: Position = { cast, names: namesFor(state, cast), card: macroCard(cast, notes) }
     return position
   })
 
@@ -627,7 +626,7 @@ const presetText = (assembly: Assembly, id: string, text: string, names: Partial
   if (
     assembly.lcm?.summaries.length &&
     /\{\{\s*summary\s*\}\}/i.test(text) &&
-    expanded.includes(layerText(assembly.lcm.summaries, need(assembly, "mode").st))
+    expanded.includes(layerText(assembly.lcm.summaries))
   )
     assembly.pieces[piece] = { ...assembly.pieces[piece]!, parts: assembly.lcmPieces ?? [] }
   return { text: expanded, piece, volatile: env.isVolatile(piece) }
@@ -656,7 +655,7 @@ const collectionOf = (assembly: Assembly): Array<StPrompt> => {
     const text = allowed && prompt.content ? presetText(assembly, prompt.identifier, prompt.content) : null
     collection.push({
       identifier: prompt.identifier,
-      role: text && !need(assembly, "mode").st && hasSummary(assembly, text.piece) ? "system" : prompt.role,
+      role: text && hasSummary(assembly, text.piece) ? "system" : prompt.role,
       ...(text && hasSummary(assembly, text.piece) ? { kind: "summary" as const } : {}),
       content: text?.text ?? "",
       piece: text?.piece ?? null,
@@ -679,8 +678,8 @@ const place = (collection: Array<StPrompt>, identifier: string, role: Role, text
 }
 
 /**
- * A card's prompt override replaces a preset prompt unless the preset forbids it or turned it
- * off. ST expands the override with the card's other fields, before the preset's prompts,
+ * A card's prompt override (the speaker's, DESIGN §5.0) replaces a preset prompt unless the
+ * preset forbids it or turned it off. ST expands the override with the card's other fields, before the preset's prompts,
  * and fills `{{original}}` (the prompt it replaces) once the prompt is known: the first
  * `{{original}}` becomes it and any other nothing, as ST's macro does.
  */
@@ -689,10 +688,22 @@ const override = (
   collection: Array<StPrompt>,
   disabled: (identifier: string) => boolean,
   identifier: "main" | "jailbreak",
-  text: Text
+  text: Text,
+  card: CardInput
 ) => {
+  // An empty card prompt does nothing, and isn't worth showing in the editors.
+  if (!text.text) return
   const at = collection.findIndex((p) => p.identifier === identifier)
-  if (at === -1 || !text.text || collection[at]!.forbid_overrides || disabled(identifier)) return
+  const status =
+    at === -1
+      ? "missing"
+      : collection[at]!.forbid_overrides
+        ? "forbidden"
+        : disabled(identifier)
+          ? "disabled"
+          : "replaced"
+  assembly.cardOverrides?.push({ identifier, entity: card.entity, revision: card.revision, status })
+  if (status !== "replaced") return
   const original = collection[at]!
   let first = true
   const content = text.text.replace(/\{\{original\}\}/gi, () => {
@@ -1105,32 +1116,10 @@ const placedNotes = (assembly: Assembly, cards: ReadonlyArray<CardInput>, person
       }
     ]
   })
-  if (hasLayer && need(assembly, "mode").st) {
-    const imported = summaryNote(assembly)
-    const place = imported ? placeOf(imported) : { at: "end" as const, volatile: false, role: "system" as const }
-    if (place)
-      placed.unshift({
-        place,
-        id: "lcm:placement",
-        rank: 0,
-        baseline: 0,
-        text: () => {
-          const piece = env.piece(
-            "lcm:placement",
-            { kind: "assembler", what: "summary placement" },
-            imported?.doc.template || "Summary: {{summary}}"
-          )
-          const text = env.text(piece)
-          if (text.includes(layerText(assembly.lcm!.summaries, true)))
-            assembly.pieces[piece] = { ...assembly.pieces[piece]!, parts: assembly.lcmPieces ?? [] }
-          return { piece, text }
-        }
-      })
-  }
   return { placed, attachments, authorState }
 }
 
-/** The context as ST's populateChatCompletion builds it, with our layouts' blocks and tail outside ST mode. */
+/** The context as ST's populateChatCompletion builds it, filled the way the preset says. */
 const composeStage = sync("compose", (assembly) => {
   const doc = need(assembly, "preset").doc
   const cast = need(assembly, "cast")
@@ -1142,90 +1131,195 @@ const composeStage = sync("compose", (assembly) => {
   const optional = (id: string, text: string, options?: Partial<Names>) =>
     text ? presetText(assembly, id, text, options) : null
   const control: Array<StMessage> = []
-  let markers: { description: Text | null; personality: Text | null; scenario: Text | null; persona: Text | null }
-  let examples: Array<Array<ChatLine>>
-  let pendingNotes: ReturnType<typeof placedNotes>
-  let newChat: Text | null
+  const characters = cast.characters
+  const group = characters.length > 1
+  const speaker = cast.speaker && !cast.personas.includes(cast.speaker) ? cast.speaker : null
+  const own = (card: CardInput) => ({ char: modelName(card.doc) })
 
-  // ST's card overrides, expanded with the card's fields, ahead of everything else.
-  const overrides =
-    mode.st && cast.characters[0]
-      ? {
-          main: cardText(assembly, cast.characters[0], "system_prompt"),
-          jailbreak: cardText(assembly, cast.characters[0], "post_history_instructions")
-        }
-      : null
-  if (mode.st) {
-    const char = cast.characters[0]!
-    const persona = cast.personas[0]
-    examples = exampleLines(assembly, char, names.char, false)
-    const description = cardText(assembly, char, "description")
-    const personality = cardText(assembly, char, "personality")
-    const scenario = cardText(assembly, char, "scenario")
-    // A field with a format is the format expanded, which reads the field: ST's
-    // scenario_format and personality_format.
-    const formatted = (field: Text, format: string, id: string) =>
-      field.text && format ? presetText(assembly, id, format) : field.text ? field : null
-    markers = {
-      description: withCardNotes(assembly, char, char, description.text ? description : null),
-      personality: formatted(personality, utility.personality_format, "utility.personality_format"),
-      scenario: formatted(scenario, utility.scenario_format, "utility.scenario_format"),
-      persona: persona
-        ? withCardNotes(
-            assembly,
-            persona,
-            null,
-            persona.doc.description && !assembly.placedPersonas?.has(persona.entity)
-              ? (() => {
-                  const piece = env.piece(
-                    `card:${persona.entity}:description`,
-                    cardSource(persona, "description"),
-                    persona.doc.description
-                  )
-                  return { text: env.text(piece), piece }
-                })()
-              : null
-          )
-        : null
+  // The speaker's card prompts, as ST's group generation takes them, expanded with the card's
+  // fields ahead of everything else.
+  const overrides = speaker
+    ? {
+        main: cardText(assembly, speaker, "system_prompt", own(speaker)),
+        jailbreak: cardText(assembly, speaker, "post_history_instructions", own(speaker))
+      }
+    : null
+
+  // Each card field is expanded once, whichever marker it goes to.
+  const fields = new Map<string, Text>()
+  const field = (card: CardInput, name: "description" | "personality" | "scenario") => {
+    const key = `${card.entity}:${name}`
+    const found = fields.get(key) ?? cardText(assembly, card, name, own(card))
+    fields.set(key, found)
+    return found
+  }
+  const definitions =
+    presetOrder(doc.prompts, doc.order).some((e) => e.identifier === charDefinitions.identifier && e.enabled) &&
+    doc.prompts.some((p) => p.identifier === charDefinitions.identifier && triggers(p, cast.type))
+
+  // ST's group join (getGroupCharacterCardsLazy): each character's trimmed field wrapped in the
+  // preset's join prefix and suffix, with `{{char}}` that character and `<FIELDNAME>` the field,
+  // empty fields skipped, joined with newlines in cast order, muted members included.
+  const prefix = utility.card_join_prefix ?? CARD_JOIN_PREFIX
+  const suffix = utility.card_join_suffix ?? CARD_JOIN_SUFFIX
+  const wrap = (card: CardInput, label: string, id: string, body: ReadonlyArray<Text>): Text | null => {
+    if (body.length === 0) return null
+    const wrapper = (raw: string, which: string) => {
+      const text = raw.replace(/<FIELDNAME>/gi, () => label)
+      if (!text) return null
+      // One piece per card and field, so each keeps its draws; the source is the utility prompt.
+      const piece = env.piece(
+        `preset:utility.card_join_${which}:${card.entity}:${id}`,
+        presetSource(assembly, `utility.card_join_${which}`),
+        text,
+        { names: own(card) }
+      )
+      return { text: env.text(piece), piece }
     }
-    pendingNotes = placedNotes(assembly, [char], persona ? [persona] : [])
-    newChat = optional("utility.new_chat_prompt", utility.new_chat_prompt)
-  } else {
-    const blocks = (cards: ReadonlyArray<CardInput>, block: typeof cardBlock | typeof personaBlock, persona = false) =>
-      cards.flatMap((card) => {
-        const text = block(assembly, card, cardText, cardNotes(assembly, card, persona ? null : card))
-        return text ? [text] : []
+    const before = wrapper(prefix, "prefix")
+    const after = wrapper(suffix, "suffix")
+    const text = `${before?.text ?? ""}${body.map((part) => part.text).join("\n")}${after?.text ?? ""}`
+    const parts = [before, ...body, after].flatMap((part) => (part ? [part.piece] : []))
+    return {
+      text,
+      piece: env.verbatim(
+        `card-part:${card.entity}:${id}`,
+        { kind: "assembler", what: `${modelName(card.doc)}'s ${label.toLowerCase()}` },
+        text,
+        parts
+      )
+    }
+  }
+  const joined = (id: string, parts: ReadonlyArray<Text | null>, separator = "\n"): Text | null => {
+    const present = parts.filter((part): part is Text => part !== null && part.text !== "")
+    if (present.length === 0) return null
+    const text = present.map((part) => part.text).join(separator)
+    return {
+      text,
+      piece: env.verbatim(
+        `cards:${id}`,
+        { kind: "assembler", what: "the characters' definitions" },
+        text,
+        present.map((part) => part.piece)
+      )
+    }
+  }
+  const labels = { description: "Description", personality: "Personality", scenario: "Scenario" } as const
+  // What `{{description}}` and the others read in preset text: the joined fields, without notes.
+  const joinedField = (name: keyof typeof labels) =>
+    joined(
+      `macro:${name}`,
+      characters.map((card) => {
+        const value = field(card, name)
+        return value.text ? wrap(card, labels[name], `macro:${name}`, [value]) : null
       })
-    const characters = mode.layout === "swap_tail" ? [] : blocks(cast.characters, cardBlock)
-    const joined = (id: string, texts: ReadonlyArray<Text>): Text | null => {
-      if (texts.length === 0) return null
-      const text = texts.map((t) => t.text).join("\n\n")
-      const parts = texts.map((t) => t.piece)
-      return { text, piece: env.verbatim(`layout:${id}`, { kind: "assembler", what: "labelled blocks" }, text, parts) }
+    )
+  const macroFields = {
+    description: joinedField("description"),
+    personality: joinedField("personality"),
+    scenario: joinedField("scenario")
+  }
+  env.setCard({
+    ...macroCard(cast, assembly.notes),
+    joined: {
+      description: macroFields.description?.text ?? "",
+      personality: macroFields.personality?.text ?? "",
+      scenario: macroFields.scenario?.text ?? ""
     }
+  })
+
+  let markers: {
+    definitions: Text | null
+    description: Text | null
+    personality: Text | null
+    scenario: Text | null
+    persona: Text | null
+  }
+  if (definitions) {
+    // The whole-card marker: each character in its labelled block, then each persona.
+    const memo = (assembly: Assembly, card: CardInput, name: keyof CardInput["doc"], names?: Partial<Names>) =>
+      name === "description" || name === "personality" || name === "scenario"
+        ? cast.personas.includes(card)
+          ? cardText(assembly, card, name, names)
+          : field(card, name)
+        : cardText(assembly, card, name, names)
     markers = {
-      description: joined("characters", characters),
+      definitions: joined(
+        "definitions",
+        [
+          ...characters.map((card) => cardBlock(assembly, card, memo, cardNotes(assembly, card, card))),
+          ...cast.personas.map((card) => personaBlock(assembly, card, memo, cardNotes(assembly, card, null)))
+        ],
+        "\n\n"
+      ),
+      description: null,
       personality: null,
       scenario: null,
-      persona: joined("personas", blocks(cast.personas, personaBlock, true))
+      persona: null
     }
-    const tailCards =
-      mode.layout === "swap_tail" && cast.speaker && !cast.personas.includes(cast.speaker) ? [cast.speaker] : []
-    examples = (mode.layout === "swap_tail" ? tailCards : cast.characters).flatMap((card) =>
-      exampleLines(assembly, card, modelName(card.doc), true)
-    )
-    pendingNotes = placedNotes(assembly, mode.layout === "swap_tail" ? tailCards : cast.characters, cast.personas)
-    newChat =
-      cast.characters.length > 1
-        ? optional("utility.new_group_chat_prompt", utility.new_group_chat_prompt)
-        : optional("utility.new_chat_prompt", utility.new_chat_prompt)
-    for (const card of tailCards) {
-      const block = cardBlock(assembly, card, cardText, cardNotes(assembly, card, card))
-      control.push({ role: "system", content: block.text, pieces: [block.piece], kind: "volatile" })
+  } else {
+    const perField = (name: keyof typeof labels) =>
+      joined(
+        name,
+        characters.map((card) => {
+          const value = field(card, name)
+          // Notes placed with the definitions go at the top of their card's part.
+          const notes = name === "description" ? cardNotes(assembly, card, card) : []
+          return wrap(card, labels[name], name, [...notes, ...(value.text ? [value] : [])])
+        })
+      )
+    // A field with a format is the format expanded, which reads the joined field: ST's
+    // scenario_format and personality_format.
+    const formatted = (text: Text | null, format: string, id: string) =>
+      text && format ? presetText(assembly, id, format) : text
+    const persona = (card: CardInput) =>
+      withCardNotes(
+        assembly,
+        card,
+        null,
+        card.doc.description && !assembly.placedPersonas?.has(card.entity)
+          ? (() => {
+              const piece = env.piece(
+                `card:${card.entity}:description`,
+                cardSource(card, "description"),
+                card.doc.description
+              )
+              return { text: env.text(piece), piece }
+            })()
+          : null
+      )
+    markers = {
+      definitions: null,
+      description: perField("description"),
+      personality: formatted(perField("personality"), utility.personality_format, "utility.personality_format"),
+      scenario: formatted(perField("scenario"), utility.scenario_format, "utility.scenario_format"),
+      // ST has one persona, sent as it is; several are wrapped and joined like the characters.
+      persona:
+        cast.personas.length > 1
+          ? joined(
+              "personas",
+              cast.personas.map((card) => {
+                const text = persona(card)
+                return text ? wrap(card, "Persona", "persona", [text]) : null
+              })
+            )
+          : cast.personas[0]
+            ? persona(cast.personas[0])
+            : null
     }
-    const said = assembly.request.summarizing ? "" : directive(assembly, presetText)
-    if (said) control.push({ role: "system", content: said.text, pieces: [said.piece], kind: "volatile" })
   }
+  // Examples keep their own handling: parsed per card into example chats, named in a group.
+  const examples0 = characters.flatMap((card) =>
+    group ? exampleLines(assembly, card, modelName(card.doc), true) : exampleLines(assembly, card, names.char, false)
+  )
+  let examples: Array<Array<ChatLine>> = examples0
+  const pendingNotes = placedNotes(assembly, characters, cast.personas)
+  const newChat = group
+    ? optional("utility.new_group_chat_prompt", utility.new_group_chat_prompt)
+    : optional("utility.new_chat_prompt", utility.new_chat_prompt)
+  // The group nudge names the speaker when there's more than one character to choose from.
+  const said = group && !assembly.request.summarizing ? directive(assembly, presetText) : null
+  if (said) control.push({ role: "system", content: said.text, pieces: [said.piece], kind: "volatile" })
 
   const collection = collectionOf(assembly)
   const lore = assembly.lore ?? []
@@ -1241,73 +1335,85 @@ const composeStage = sync("compose", (assembly) => {
     }
     return { text, piece: env.verbatim(`lore:block:${id}`, { kind: "assembler", what: "lorebook block" }, text, parts) }
   }
-  const stLore = mode.st ? lore.toReversed() : []
-  place(
-    collection,
-    "worldInfoBefore",
-    "system",
-    loreBlock(
-      "before",
-      stLore.filter((e) => e.entry.position === "before_char"),
-      true
-    )
-  )
-  place(
-    collection,
-    "worldInfoAfter",
-    "system",
-    loreBlock(
-      "after",
-      stLore.filter((e) => e.entry.position === "after_char"),
-      true
-    )
-  )
-  let loreCost = 0
-  if (!mode.st) {
-    const block = loreBlock("tail", lore)
-    loreCost = tokensOf({ content: block?.text ?? "" })
-    // Always reserve the volatility boundary, including when activation produced nothing.
-    control.unshift({
-      role: "system",
-      content: block?.text ?? "",
-      pieces: block ? [block.piece] : [],
-      kind: "volatile"
-    })
+  const belowHistory = mode.loreBelowHistory
+  // With "only below the history" off, entries go where their position says, as ST places them.
+  let positioned = belowHistory ? [] : lore.toReversed()
+  const historyAt = collection.findIndex((p) => p.identifier === "chatHistory")
+  // A marker the order lacks is appended after everything, so it's never above the history.
+  const aboveHistory = (identifier: string) => {
+    const at = collection.findIndex((p) => p.identifier === identifier)
+    return at >= 0 && historyAt >= 0 && at < historyAt
   }
-  const loreExamples = (position: "em_top" | "em_bottom") =>
-    (position === "em_top" ? stLore.toReversed() : stLore)
-      .filter((e) => e.entry.position === position)
-      .flatMap((e) =>
-        exampleBlocks(env.text(e.piece)).map((block) =>
-          parseExampleBlock(block, names.user, names.char, false).map((line): ChatLine => ({
-            role: "system",
-            content: line.content,
-            name: line.name,
-            pieces: [e.piece],
-            kind: "volatile"
-          }))
+  const pinnable = (position: string) =>
+    !belowHistory &&
+    (position === "before_char"
+      ? aboveHistory("worldInfoBefore")
+      : position === "after_char"
+        ? aboveHistory("worldInfoAfter")
+        : (position === "em_top" || position === "em_bottom") && aboveHistory("dialogueExamples"))
+  const placeLore = () => {
+    for (const [identifier, position, id] of [
+      ["worldInfoBefore", "before_char", "before"],
+      ["worldInfoAfter", "after_char", "after"]
+    ] as const) {
+      place(
+        collection,
+        identifier,
+        "system",
+        loreBlock(
+          id,
+          positioned.filter((e) => e.entry.position === position),
+          true
         )
       )
-  examples = [...loreExamples("em_top"), ...examples, ...loreExamples("em_bottom")]
-  for (const e of stLore.filter((e) => e.entry.position === "outlet"))
+      if (pinnable(position)) {
+        const at = collection.findIndex((p) => p.identifier === identifier)
+        collection[at] = { ...collection[at]!, kind: "pinned" }
+      }
+    }
+    const loreExamples = (position: "em_top" | "em_bottom") =>
+      (position === "em_top" ? positioned.toReversed() : positioned)
+        .filter((e) => e.entry.position === position)
+        .flatMap((e) =>
+          exampleBlocks(env.text(e.piece)).map((block) =>
+            parseExampleBlock(block, names.user, names.char, false).map((line): ChatLine => ({
+              role: "system",
+              content: line.content,
+              name: line.name,
+              pieces: [e.piece],
+              kind: pinnable(position) ? "pinned" : "volatile"
+            }))
+          )
+        )
+    examples = [...loreExamples("em_top"), ...examples0, ...loreExamples("em_bottom")]
+  }
+  placeLore()
+  for (const e of positioned.filter((e) => e.entry.position === "outlet"))
     assembly.issues.push({
       kind: "lorebook_issue",
       message: `Lorebook outlet ${e.entry.outlet_name} has no prompt outlet; entry ${e.entry.uid} was not placed.`
     })
+  // Below the history: every activated entry, whatever its position, in one block at the start of
+  // the tail, re-evaluated every turn.
+  const tailLore = belowHistory ? loreBlock("tail", lore) : null
+  const loreCost = tokensOf({ content: tailLore?.text ?? "" })
+  // When the order has both, Definitions wins and the per-field markers stay empty.
+  if (definitions) place(collection, "charDefinitions", "system", markers.definitions)
   place(collection, "charDescription", "system", markers.description)
   place(collection, "charPersonality", "system", markers.personality)
   place(collection, "scenario", "system", markers.scenario)
   const impersonate =
-    mode.st && cast.type === "impersonate"
-      ? optional("utility.impersonation_prompt", utility.impersonation_prompt)
+    cast.type === "impersonate" && speaker === null && cast.speaker
+      ? optional("utility.impersonation_prompt", utility.impersonation_prompt, { user: modelName(cast.speaker.doc) })
       : null
   place(collection, "impersonate", "system", impersonate)
   place(collection, "quietPrompt", "system", null)
   place(collection, "bias", "assistant", null)
   if (markers.persona) place(collection, "personaDescription", "system", markers.persona)
-  if (mode.st) {
-    override(assembly, collection, disabled, "main", overrides!.main)
-    override(assembly, collection, disabled, "jailbreak", overrides!.jailbreak)
+  if (overrides && speaker) {
+    assembly.cardOverrides = []
+    override(assembly, collection, disabled, "main", overrides.main, speaker)
+    override(assembly, collection, disabled, "jailbreak", overrides.jailbreak, speaker)
   }
   if (impersonate) {
     const prompt = collection.find((p) => p.identifier === "impersonate")!
@@ -1323,24 +1429,8 @@ const composeStage = sync("compose", (assembly) => {
     control.push({ role: "system", content: direction, pieces: [piece], kind: "volatile" })
   }
 
-  const previous =
-    assembly.previousHistoryStart && assembly.previousHistoryStart.depth <= need(assembly, "target").depth
-      ? assembly.previousHistoryStart
-      : null
-  const configuration = createHash("sha256")
-    .update(
-      JSON.stringify([
-        doc,
-        assembly.model,
-        mode,
-        [...cast.characters, ...cast.personas].map((c) => [c.entity, c.doc]),
-        [...(assembly.notes ?? []), ...(assembly.skippedNotes ?? [])].toSorted((a, b) =>
-          a.entity.localeCompare(b.entity)
-        ),
-        assembly.lorebooks
-      ])
-    )
-    .digest("hex")
+  const previous = previousStart(assembly)
+  const configuration = configurationOf(assembly)
   const identity = JSON.stringify([need(assembly, "preset").ref, assembly.model?.connectionId, assembly.model?.modelId])
   const prior = previous?.state
   const configurationChanged = prior?.configuration !== configuration
@@ -1367,12 +1457,12 @@ const composeStage = sync("compose", (assembly) => {
   const loreTop = () =>
     loreBlock(
       "an-top",
-      stLore.filter((e) => e.entry.position === "an_top")
+      positioned.filter((e) => e.entry.position === "an_top")
     )
   const loreBottom = () =>
     loreBlock(
       "an-bottom",
-      stLore.filter((e) => e.entry.position === "an_bottom")
+      positioned.filter((e) => e.entry.position === "an_bottom")
     )
   const { attachments, authorState } = pendingNotes
   // ST adds what rides on the author's note to its text, persona outermost: the lore first
@@ -1420,7 +1510,7 @@ const composeStage = sync("compose", (assembly) => {
           kind: "volatile" as const
         }
       : null
-  const groupNames = !mode.st
+  const groupNames = group
   const projected = need(assembly, "projected")
   // The history stage ran the scripts on the verbatim messages it read; templates run here.
   const read = need(assembly, "scripted")
@@ -1440,28 +1530,33 @@ const composeStage = sync("compose", (assembly) => {
   rest.forEach((index, i) => (scripted[index] = { ...ran[i]!, text: clipForSummary(assembly, ran[i]!.text) }))
   // Notes in-chat are extension prompts at their depth; the others go beside the main prompt,
   // one after another (injectToMain).
-  // Lore above history can change per turn, even when this turn has no activated entry.
-  if (
-    mode.st &&
-    need(assembly, "lorebooks").some((b) =>
-      b.doc.entries.some(
-        (e) =>
-          e.enabled && ["before_char", "after_char", "em_top", "em_bottom", "an_top", "an_bottom"].includes(e.position)
-      )
+  // Lore above the history is pinned: what follows the first place it can go is stable only
+  // until the history's start moves, even on a turn with no entry there.
+  const slots = [
+    ["worldInfoBefore", "before_char"],
+    ["worldInfoAfter", "after_char"],
+    ["dialogueExamples", "em_top"],
+    ["dialogueExamples", "em_bottom"]
+  ] as const
+  const filled = new Set(
+    need(assembly, "lorebooks").flatMap((b) => b.doc.entries.flatMap((e) => (e.enabled ? [e.position] : [])))
+  )
+  const boundary = Math.min(
+    ...slots.flatMap(([identifier, position]) =>
+      filled.has(position) && pinnable(position) ? [collection.findIndex((p) => p.identifier === identifier)] : []
     )
-  ) {
-    const prompt = collection[0]
-    if (prompt)
-      collection.splice(collection.indexOf(prompt), 0, {
-        ...prompt,
-        identifier: "lore-cache-boundary",
-        content: "",
-        piece: null,
-        system_prompt: false,
-        injection_position: "relative",
-        barrier: true
-      })
-  }
+  )
+  if (Number.isFinite(boundary))
+    collection.splice(boundary, 0, {
+      ...collection[boundary]!,
+      identifier: "lore-pinned-boundary",
+      content: "",
+      piece: null,
+      system_prompt: false,
+      injection_position: "relative",
+      kind: "pinned",
+      barrier: true
+    })
   const placement = (placed: typeof notes) => {
     const collection = [...baseCollection]
     const layer: Array<StMessage> = placed.flatMap(({ text, place }) =>
@@ -1472,7 +1567,7 @@ const composeStage = sync("compose", (assembly) => {
     const injections: Array<Injection> = placed.flatMap(({ text, place }) =>
       place.at === "chat" && !hasSummary(assembly, text.piece) ? [{ depth: place.depth, role: place.role, text }] : []
     )
-    for (const e of stLore.filter((e) => e.entry.position === "at_depth"))
+    for (const e of positioned.filter((e) => e.entry.position === "at_depth"))
       injections.push({
         depth: Math.max(0, Math.min(10000, e.entry.depth)),
         role: e.entry.role,
@@ -1522,6 +1617,25 @@ const composeStage = sync("compose", (assembly) => {
         beside.push({ message: { role: place.role, content: text.text, pieces: [text.piece], kind }, at: place.at })
       }
     }
+    if (belowHistory) {
+      // The lore block opens the tail, before its notes; empty, it still bounds the cache.
+      const history = collection.findIndex((p) => p.identifier === "chatHistory")
+      const tail =
+        history < 0 ? collection.length : history + (collection[history + 1]?.identifier === "newestMessage" ? 2 : 1)
+      collection.splice(tail, 0, {
+        identifier: "lore:tail",
+        role: "system",
+        content: tailLore?.text ?? "",
+        piece: tailLore?.piece ?? null,
+        system_prompt: false,
+        injection_position: "relative",
+        injection_depth: 0,
+        injection_order: 100,
+        forbid_overrides: true,
+        kind: "volatile",
+        barrier: true
+      })
+    }
     for (let i = collection.length - 1; i >= 0; i--) {
       const prompt = collection[i]!
       if (prompt.piece === null || !hasSummary(assembly, prompt.piece) || disabled(prompt.identifier)) continue
@@ -1565,11 +1679,11 @@ const composeStage = sync("compose", (assembly) => {
     )
       layer.push({
         role: "system",
-        content: (mode.st ? "Summary: " : "") + layerText(assembly.lcm.summaries, mode.st),
+        content: layerText(assembly.lcm.summaries),
         pieces: [...(assembly.lcmPieces ?? [])],
         kind: "summary"
       })
-    const renderedLayer = assembly.lcm ? layerText(assembly.lcm.summaries, mode.st) : ""
+    const renderedLayer = assembly.lcm ? layerText(assembly.lcm.summaries) : ""
     const embeddedCost = (content: string) =>
       renderedLayer ? tokensOf({ content }) - tokensOf({ content: content.split(renderedLayer).join("") }) : 0
     const layerCost =
@@ -1589,7 +1703,7 @@ const composeStage = sync("compose", (assembly) => {
     if (prompt.piece !== null) assembly.pieces[prompt.piece]!.marker = prompt.identifier
   }
   const baseCollection = collection
-  const actualPlacement = placement(notes)
+  let actualPlacement = placement(notes)
   let reservedPlacement = actualPlacement
   const lines = projected.map((p, i) => chatLine(assembly, p, groupNames, scripted[i]!))
   prefill(assembly)
@@ -1604,7 +1718,7 @@ const composeStage = sync("compose", (assembly) => {
       message: `The source prefix and requested continuation need about ${doc.samplers.openai_max_tokens + prefixOutput} output tokens, beyond ${assembly.model!.key}'s ${assembly.model!.maxOutput}-token output limit. Choose a model with a larger output limit or reduce the model's response length.`
     })
   const reserve =
-    prefillInput + prefixOutput + (!mode.st && assembly.lorebooks?.length ? loreAllowance(assembly) - loreCost : 0)
+    prefillInput + prefixOutput + (belowHistory && assembly.lorebooks?.length ? loreAllowance(assembly) - loreCost : 0)
   let maximum = contextBudget(assembly) - reserve
   let desiredTarget = targetBudget(assembly) - reserve
   let admittedExamples = examples
@@ -1798,11 +1912,37 @@ const composeStage = sync("compose", (assembly) => {
     budget = target
   } else assembly.historyMove = previous ? "unchanged" : "initial"
   start = normalizedStart(start)
-  assembly.contextBudget = contextBudgetInfo(cost(candidate(start, Number.POSITIVE_INFINITY, true, false, true, true)))
   const first = projected[start]?.entry
+  const startDepth = first?.depth ?? need(assembly, "target").depth
+  // Pins hold while the history's start does: when it moves (a cut, a restore, LCM's cursor),
+  // entries kept only by their pin go, and what matched this turn is pinned in their place.
+  const released = lore.filter((e) => e.pinnedOnly)
+  if (released.length && (!previous || previous.depth !== startDepth || assembly.historyMove !== "unchanged")) {
+    const gone = new Set(released.map((e) => e.piece))
+    positioned = positioned.filter((e) => !gone.has(e.piece))
+    placeLore()
+    admittedExamples = admittedExamples.filter((block) => !block.some((line) => line.pieces.some((p) => gone.has(p))))
+    actualPlacement = placement(notes)
+    for (const piece of gone) {
+      const record = assembly.pieces[piece]!
+      if (record.source.kind === "lorebook")
+        assembly.pieces[piece] = {
+          ...record,
+          text: "",
+          source: {
+            ...record.source,
+            activation: { status: "skipped", step: 0, reason: "pin released: the history's start moved" }
+          }
+        }
+    }
+  }
+  const pinnedLore = positioned.flatMap((e) =>
+    pinnable(e.entry.position) ? [{ book: e.book, revision: e.revision, uid: e.entry.uid }] : []
+  )
+  assembly.contextBudget = contextBudgetInfo(cost(candidate(start, Number.POSITIVE_INFINITY, true, false, true, true)))
   assembly.historyStart = {
     slotId: first?.slotId ?? null,
-    depth: first?.depth ?? need(assembly, "target").depth,
+    depth: startDepth,
     state: {
       configuration,
       identity,
@@ -1810,7 +1950,8 @@ const composeStage = sync("compose", (assembly) => {
       target: targetBudget(assembly),
       examples: admittedExamples.length,
       noteBudget: { sizes, allowance },
-      revision: assembly.historyRevision ?? 0
+      revision: assembly.historyRevision ?? 0,
+      ...(belowHistory ? {} : { pinnedLore })
     }
   }
   const composition = {
@@ -1862,12 +2003,21 @@ const messagesStage = sync("messages", (assembly) => {
   const doc = need(assembly, "preset").doc
   // An empty skipped note still marks the next sent message as the potential boundary.
   let barrier = false
+  // After the first place pinned lore can go, the prefix holds only until the history's start moves.
+  let pinned = false
   let messages: Array<StMessage> = need(assembly, "composition").messages.map((message) => {
     if (message.kind === "volatile" || message.pieces.some(need(assembly, "macros").isVolatile)) barrier = true
+    if (message.kind === "pinned") pinned = true
     const summary = message.pieces.some((p) => hasSummary(assembly, p))
     return {
       ...message,
-      ...(barrier ? { kind: "volatile" as const } : summary ? { kind: "summary" as const } : {}),
+      ...(barrier
+        ? { kind: "volatile" as const }
+        : pinned && message.kind !== "history"
+          ? { kind: "pinned" as const }
+          : summary
+            ? { kind: "summary" as const }
+            : {}),
       summary
     }
   })
@@ -1924,10 +2074,25 @@ const requestStage = sync("request", (assembly) => {
   })
 })
 
+/** Free explicit markers beside the one pi-ai puts on the last message (Anthropic's four, less it). */
+const EXPLICIT_MARKERS = 3
+
 const breakpointsStage = sync("breakpoints", (assembly) => {
+  const previous = previousStart(assembly)
+  const moved =
+    previous !== null &&
+    (assembly.historyMove !== "unchanged" || previous.depth !== need(assembly, "historyStart").depth)
   assembly.breakpoints = placeBreakpoints(
-    need(assembly, "messages").map((m) => ({ ...m, summary: m.pieces.some((p) => hasSummary(assembly, p)) }))
+    need(assembly, "messages").map((m) => ({ ...m, summary: m.pieces.some((p) => hasSummary(assembly, p)) })),
+    moved
   )
+  // A provider that can't mark every boundary keeps the first ones; say which it can't keep.
+  const dropped = assembly.breakpoints.slice(EXPLICIT_MARKERS)
+  if (assembly.model?.cacheBreakpoints === "explicit" && dropped.length)
+    assembly.issues.push({
+      kind: "cache_breakpoints",
+      message: `The provider takes ${EXPLICIT_MARKERS} cache markers here; ${dropped.map((b) => `"${b.reason}"`).join(", ")} isn't marked.`
+    })
 })
 
 const builtinStages: ReadonlyArray<AssemblerStage> = [

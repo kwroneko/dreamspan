@@ -21,7 +21,8 @@ import {
 } from "../assembler/types.ts"
 import { sqlSources } from "./assemblySources.ts"
 import { previousHistoryStart } from "./historyStart.ts"
-import { readDefaults } from "./generationSettings.ts"
+import { readDefaults, readGlobalLorebooks } from "./generationSettings.ts"
+import { readCardPromptUse } from "./lorebookSettings.ts"
 import { makeDisplayPrefsReadHandlers } from "./displayPrefs.ts"
 import type { ReadOps } from "./ops.ts"
 import { query } from "./tx.ts"
@@ -246,7 +247,9 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
         }
       }).pipe(query("CacheWarmth")),
 
-    GetGenerationDefaults: ({ userId }) => readDefaults(sql, userId).pipe(query("GetGenerationDefaults"))
+    GetGenerationDefaults: ({ userId }) => readDefaults(sql, userId).pipe(query("GetGenerationDefaults")),
+    GetGlobalLorebooks: ({ userId }) => readGlobalLorebooks(sql, userId).pipe(query("GetGlobalLorebooks")),
+    GetCardPromptUse: ({ userId }) => readCardPromptUse(sql, userId).pipe(query("GetCardPromptUse"))
   } satisfies Partial<Parameters<typeof ReadOps.of>[0]>
   return handlers
 })

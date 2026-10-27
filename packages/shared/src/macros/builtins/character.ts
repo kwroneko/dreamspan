@@ -4,7 +4,7 @@
 import type { CardFields } from "../context.ts"
 import type { MacroCall, MacroSpec } from "../registry.ts"
 
-type TextField = Exclude<keyof CardFields, "alternateGreetings" | "version">
+type TextField = Exclude<keyof CardFields, "alternateGreetings" | "version" | "joined">
 
 /** ST's baseChatReplace: trimmed, expanded without card fields, carriage returns removed. */
 const expanded = (call: MacroCall, text: string | undefined, scope: string) => {
@@ -17,7 +17,13 @@ export const cardField = (call: MacroCall, key: TextField) => expanded(call, cal
 const fieldMacro = (name: string, key: TextField, aliases?: ReadonlyArray<string>): MacroSpec => ({
   name,
   ...(aliases ? { aliases } : {}),
-  handler: (call) => cardField(call, key)
+  handler: (call) => {
+    const joined = call.context.card?.joined
+    // The characters' joined fields are expanded already: their macros never expand again.
+    return joined && (key === "description" || key === "personality" || key === "scenario")
+      ? joined[key]
+      : cardField(call, key)
+  }
 })
 
 /** ST's parseMesExamples for chat completion: each example block headed by `<START>`. */

@@ -7,6 +7,7 @@ import { estimateTokens } from "./st.ts"
 import { cardFields } from "./macros.ts"
 import { AssemblySources, type AssemblerStage, need } from "./pipeline.ts"
 import type { LorebookInput, LoreRecord } from "./types.ts"
+import { configurationOf, previousStart } from "./cutState.ts"
 
 /** A separate stream: probability never consumes the macros' random draws. */
 const randomFor = (input: string) => {
@@ -27,7 +28,11 @@ export const lorebooksStage: AssemblerStage = {
       const sources = yield* AssemblySources
       const cast = need(assembly, "cast")
       const state = need(assembly, "state")
-      const attached = yield* sources.lorebooks(state.lorebooks)
+      // The chat's own books, then the user's global ones the chat didn't turn off.
+      const globals = (yield* sources.globalLorebooks).filter(
+        (ref) => !state.lorebooks.includes(ref) && state.globalLorebooks[ref] !== false
+      )
+      const attached = yield* sources.lorebooks([...state.lorebooks, ...globals])
       const embedded: Array<LorebookInput> = [...cast.characters, ...cast.personas].flatMap((card) =>
         card.doc.character_book &&
         // Turned off for this chat: an ST import of a card whose book ST never imported.
@@ -148,7 +153,7 @@ export const loreActivationStage: AssemblerStage = {
           scan,
           {
             budget: loreBudget(assembly),
-            ...(!need(assembly, "mode").st ? { hardBudget: loreAllowance(assembly) } : {}),
+            ...(need(assembly, "mode").loreBelowHistory ? { hardBudget: loreAllowance(assembly) } : {}),
             scanDepth: 2,
             wholeWords: true,
             recursive: true
@@ -195,12 +200,38 @@ export const loreActivationStage: AssemblerStage = {
           text
         )
       }
-      assembly.lore = result.activated.map((a) => ({
+      const lore: Array<NonNullable<typeof assembly.lore>[number]> = result.activated.map((a) => ({
         entry: a.entry,
-        piece: record(a.book, a.entry.uid, { status: "activated", step: a.step, why: a.why }, a.entry.content)
+        piece: record(a.book, a.entry.uid, { status: "activated", step: a.step, why: a.why }, a.entry.content),
+        book: a.book,
+        revision: inputs.find((b) => b.id === a.book)!.revision
       }))
+      // Entries pinned above the history stay while its start holds (DESIGN §1.3), matched or
+      // not; composition lets them go if the start moves this turn. A changed configuration
+      // (a book switched or edited, the preset, the setting) re-evaluates everything.
+      const prior = previousStart(assembly)?.state
+      const pins =
+        !need(assembly, "mode").loreBelowHistory && prior?.configuration === configurationOf(assembly)
+          ? (prior.pinnedLore ?? [])
+          : []
+      for (const pin of pins) {
+        if (lore.some((e) => e.book === pin.book && e.entry.uid === pin.uid)) continue
+        const book = inputs.find((b) => b.id === pin.book && b.revision === pin.revision)
+        const entry = book?.doc.entries.find((e) => e.uid === pin.uid && e.enabled)
+        if (!book || !entry) continue
+        const content = env.preview(`lore:${book.id}:${entry.uid}:content`, entry.content, optionsFor(book))
+        lore.push({
+          entry: { ...entry, content },
+          piece: record(book.id, entry.uid, { status: "activated", step: 0, why: { kind: "pinned" } }, content),
+          book: book.id,
+          revision: book.revision,
+          pinnedOnly: true
+        })
+      }
+      assembly.lore = lore
       for (const s of result.skipped)
-        record(s.book, s.entry.uid, { status: "skipped", step: s.step, reason: s.reason }, "")
+        if (!lore.some((e) => e.pinnedOnly && e.book === s.book && e.entry.uid === s.entry.uid))
+          record(s.book, s.entry.uid, { status: "skipped", step: s.step, reason: s.reason }, "")
       for (const issue of result.issues)
         assembly.issues.push({
           kind: "lorebook_issue",

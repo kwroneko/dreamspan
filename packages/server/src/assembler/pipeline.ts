@@ -14,6 +14,7 @@ import type { Composition, Stability } from "./st.ts"
 import type {
   AssembledRequest,
   CardInput,
+  CardOverride,
   ContextSnapshot,
   GenerationType,
   HistoryStart,
@@ -76,6 +77,8 @@ export class AssemblySources extends Context.Service<
     ) => Effect.Effect<ReadonlyArray<CardInput>, SourceError>
     readonly messageCount: (leaf: string | null) => Effect.Effect<number, SourceError>
     readonly lorebooks: (refs: ReadonlyArray<string>) => Effect.Effect<ReadonlyArray<LorebookInput>, SourceError>
+    /** The refs of the lorebooks the user marked global (DESIGN §5.0), in the order they were marked. */
+    readonly globalLorebooks: Effect.Effect<ReadonlyArray<string>, SourceError>
     /** The notes these cards own, at the revision `bound` pins or their head. */
     readonly notes: (
       cards: ReadonlyArray<string>,
@@ -137,12 +140,14 @@ export interface Cast {
   readonly type: GenerationType
 }
 
-/** How the context is laid out (DATA-MODEL §5.3: `layout.cards`, `roles.projection`). */
+/**
+ * How the chat's history takes roles (DATA-MODEL §5.3: `roles.projection`). Card layout is the
+ * preset's (DESIGN §5.0): `layout.cards` events are ignored.
+ */
 export interface Mode {
-  /** ST-compatible: one character, ST's markers and roles. Otherwise our layouts. */
-  readonly st: boolean
-  readonly layout: "concat" | "swap_tail"
   readonly projection: "by_writer" | "alternate" | "perspective"
+  /** Lorebook entries only below the history (DESIGN §1.3): the chat's setting, on unless turned off. */
+  readonly loreBelowHistory: boolean
 }
 
 /** A message's text after the regex scripts, at the depth they ran at. */
@@ -187,7 +192,17 @@ export interface Assembly {
   lorebooks?: ReadonlyArray<LorebookInput>
   loreScanDepth?: number
   loreMessageCount?: number
-  lore?: ReadonlyArray<{ readonly entry: import("@rp/shared/docs/lorebook.ts").LorebookEntry; readonly piece: number }>
+  lore?: ReadonlyArray<{
+    readonly entry: import("@rp/shared/docs/lorebook.ts").LorebookEntry
+    readonly piece: number
+    readonly book: string
+    readonly revision: string
+    /** Kept from the previous context's pins without matching this turn. */
+    readonly pinnedOnly?: true
+  }>
+  /** What the history's cut state is valid for (preset, model, cards, notes, books, settings). */
+  configuration?: string
+  cardOverrides?: Array<CardOverride>
   notes?: ReadonlyArray<NoteInput>
   skippedNotes?: ReadonlyArray<NoteInput>
   /** The personas whose description a note places, so the persona description marker leaves them out. */
@@ -253,7 +268,6 @@ export const assemble = (stages: StageRegistry, request: AssemblyRequest) =>
     const target = need(assembly, "target")
     const preset = need(assembly, "preset")
     const cast = need(assembly, "cast")
-    const mode = need(assembly, "mode")
     const historyStart = need(assembly, "historyStart")
     const sources = yield* AssemblySources
     const revision = yield* sources.historyRevision(target.parentSlotId, historyStart.depth)
@@ -273,7 +287,7 @@ export const assemble = (stages: StageRegistry, request: AssemblyRequest) =>
         timeZone: request.timeZone,
         type: cast.type,
         speaker: cast.speaker?.entity ?? null,
-        mode: mode.st ? "st" : "layouts",
+        mode: "layouts",
         preset: { ref: preset.ref, revision: preset.revision, scope: preset.scope },
         cards: [...cast.characters, ...cast.personas].map(({ entity, ref, revision }) => ({ entity, ref, revision })),
         model: assembly.model ?? null
@@ -284,6 +298,7 @@ export const assemble = (stages: StageRegistry, request: AssemblyRequest) =>
       frozen: assembly.frozen,
       effects: assembly.effects,
       ...(assembly.loreFallback ? { loreFallback: assembly.loreFallback } : {}),
+      ...(assembly.cardOverrides?.length ? { cardOverrides: assembly.cardOverrides } : {}),
       templateWrites: assembly.templateWrites,
       ...(assembly.lcm
         ? {

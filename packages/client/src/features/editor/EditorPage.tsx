@@ -7,6 +7,7 @@ import type { ChatId } from "@rp/shared/chat.ts"
 import type { SavedRef } from "@rp/shared/editorApi.ts"
 import type { RefId } from "@rp/shared/library.ts"
 import { Link, useParams } from "@tanstack/react-router"
+import { GlobalLorebook } from "./GlobalLorebook.tsx"
 import { AsyncResult } from "effect/reactivity"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { ErrorAlert } from "../../actions.tsx"
@@ -279,6 +280,11 @@ export function Editor({
       {ref.kind === "note" && (
         <Card>
           <NoteFields store={store} />
+        </Card>
+      )}
+      {ref.kind === "lorebook" && (
+        <Card>
+          <GlobalLorebook refId={ref.id} call={call} />
         </Card>
       )}
       {ref.kind === "lorebook" && (

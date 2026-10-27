@@ -15,6 +15,8 @@ export const SourceActivation = Schema.Union([
     step: Schema.Int,
     why: Schema.Union([
       Schema.Struct({ kind: Schema.Literal("constant") }),
+      /** Kept from an earlier turn while the history's start holds (DESIGN §1.3). */
+      Schema.Struct({ kind: Schema.Literal("pinned") }),
       Schema.Struct({
         kind: Schema.Literal("keys"),
         primaryKey: Schema.String,
@@ -60,7 +62,7 @@ export const ContextSource = Schema.Struct({
 export type ContextSource = typeof ContextSource.Type
 
 /** Why a cache breakpoint follows a message: the end of the preset's prefix, or of the stable history. */
-const BreakpointReason = Schema.Literals(["prefix", "summary", "history"])
+const BreakpointReason = Schema.Literals(["prefix", "summary", "history", "pinned"])
 
 export const ContextMessage = Schema.Struct({
   role: Schema.Literals(["system", "developer", "user", "assistant", "model"]),
@@ -197,6 +199,20 @@ export const PresetContext = Schema.Struct({
     Schema.Struct({ identifier: Schema.String, tokens: Schema.Int, labels: Schema.Array(Schema.String) })
   ),
   cacheAfter: Schema.Array(Schema.Struct({ identifier: Schema.String, reason: BreakpointReason })),
+  /**
+   * The speaker's card prompts at `main` and `jailbreak` (DESIGN §5.0): used in place of the
+   * prompt, or kept out because it forbids them, is off, or the preset has none.
+   */
+  overrides: Schema.optionalKey(
+    Schema.Array(
+      Schema.Struct({
+        identifier: Schema.Literals(["main", "jailbreak"]),
+        card: Schema.String,
+        name: Schema.String,
+        status: Schema.Literals(["replaced", "forbidden", "disabled", "missing"])
+      })
+    )
+  ),
   notes: Schema.Array(
     Schema.Struct({ title: Schema.String, placement: Placement, due: Schema.optionalKey(Schema.Boolean) })
   )

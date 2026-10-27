@@ -81,9 +81,19 @@ const UtilityPrompts = Schema.Struct({
   /** `{0}` is replaced with the world info text. */
   wi_format: Schema.String,
   scenario_format: Schema.String,
-  personality_format: Schema.String
+  personality_format: Schema.String,
+  /**
+   * What wraps each character's part of a per-field marker (ST's group join prefix and suffix):
+   * `{{char}}` is that character and `<FIELDNAME>` the field. Absent means the defaults
+   * (`CARD_JOIN_PREFIX`, `CARD_JOIN_SUFFIX`).
+   */
+  card_join_prefix: Schema.optionalKey(Schema.String),
+  card_join_suffix: Schema.optionalKey(Schema.String)
 })
 export type UtilityPrompts = typeof UtilityPrompts.Type
+
+export const CARD_JOIN_PREFIX = "<{{char}}>\n"
+export const CARD_JOIN_SUFFIX = "\n</{{char}}>"
 
 /**
  * How ST adds speaker names to messages: `none`; `default` (names only in groups and for

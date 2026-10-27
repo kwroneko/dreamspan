@@ -45,6 +45,10 @@ export const StateEventData = Schema.Union([
   event("lorebook.detach", Schema.Struct({ ref: RefId })),
   /** A card's own lorebook (`character_book`) used or not; on unless a chat turns it off. */
   event("lorebook.embedded", Schema.Struct({ entity: EntityId, on: Schema.Boolean })),
+  /** A global lorebook used in this chat or not; absent is on (DESIGN §5.0). */
+  event("lorebook.global", Schema.Struct({ ref: RefId, on: Schema.Boolean })),
+  /** Lorebook entries only below the history, whatever their position; absent is on (DESIGN §1.3). */
+  event("lorebook.below_history", Schema.Struct({ on: Schema.Boolean })),
   event("var.set", Schema.Struct({ name: Schema.String, value: Schema.Unknown })),
   event("author_note.set", Schema.Struct({ note: EntityId }))
 ])
@@ -121,6 +125,8 @@ export const stateKeyIds: { readonly [K in StateEventData["key"]]: StateKeyIds<V
   "lorebook.attach": { ids: { ref: { table: "ref", kind: "lorebook" } } },
   "lorebook.detach": { ids: { ref: { table: "ref", kind: "lorebook" } }, removes: true },
   "lorebook.embedded": { ids: { entity: { table: "entity", kind: "card" } } },
+  "lorebook.global": { ids: { ref: { table: "ref", kind: "lorebook" } } },
+  "lorebook.below_history": { ids: {} },
   "var.set": { ids: {} },
   "author_note.set": { ids: { note: { table: "entity", kind: "note", chatOwned: true } } }
 }
@@ -242,6 +248,10 @@ export interface ChatState {
   readonly lorebooks: ReadonlyArray<string>
   /** Cards whose own lorebook is turned off (false) or back on; absent is on. */
   readonly embeddedLorebooks: Readonly<Record<string, boolean>>
+  /** Global lorebooks this chat turned off (false) or back on; absent is on. */
+  readonly globalLorebooks: Readonly<Record<string, boolean>>
+  /** Whether lorebook entries go only below the history; null (no event) is on. */
+  readonly loreBelowHistory: boolean | null
   readonly vars: Readonly<Record<string, unknown>>
   readonly authorNote: string | null
 }
@@ -266,6 +276,8 @@ const emptyChatState: ChatState = {
   lorebookBindings: {},
   lorebooks: [],
   embeddedLorebooks: {},
+  globalLorebooks: {},
+  loreBelowHistory: null,
   vars: {},
   authorNote: null
 }
@@ -344,6 +356,10 @@ const apply = (state: ChatState, { data, scope }: FoldableEvent): ChatState => {
       return { ...state, lorebooks: remove(state.lorebooks, data.value.ref) }
     case "lorebook.embedded":
       return { ...state, embeddedLorebooks: { ...state.embeddedLorebooks, [data.value.entity]: data.value.on } }
+    case "lorebook.global":
+      return { ...state, globalLorebooks: { ...state.globalLorebooks, [data.value.ref]: data.value.on } }
+    case "lorebook.below_history":
+      return { ...state, loreBelowHistory: data.value.on }
     case "var.set":
       return { ...state, vars: { ...state.vars, [data.value.name]: data.value.value } }
     case "author_note.set":

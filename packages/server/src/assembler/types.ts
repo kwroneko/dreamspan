@@ -13,7 +13,7 @@ import type { LegacyPresetDoc as PresetDoc } from "@rp/shared/docs/preset.ts"
 import { Schema } from "effect"
 
 /** Bump whenever identical inputs would assemble differently. Missing means version 0. */
-export const ASSEMBLER_VERSION = 24
+export const ASSEMBLER_VERSION = 25
 
 export type Role = "system" | "user" | "assistant"
 
@@ -66,7 +66,7 @@ export type LoreRecord =
   | {
       readonly status: "activated"
       readonly step: number
-      readonly why: ReturnType<typeof matchLorebooks>["activated"][number]["why"]
+      readonly why: ReturnType<typeof matchLorebooks>["activated"][number]["why"] | { readonly kind: "pinned" }
     }
   | { readonly status: "skipped"; readonly step: number; readonly reason: string }
 
@@ -121,7 +121,7 @@ interface Samplers {
 }
 
 /** Why a cache breakpoint is where it is (DESIGN §5.5, reference-harness's scheme). */
-type BreakpointReason = "prefix" | "summary" | "history"
+type BreakpointReason = "prefix" | "summary" | "history" | "pinned"
 
 export interface AssembledRequest {
   readonly summaryStart?: number
@@ -150,6 +150,7 @@ export interface SnapshotInputs {
   readonly timeZone: string
   readonly type: GenerationType
   readonly speaker: string | null
+  /** `st` only in snapshots from before the one assembly path (version 25). */
   readonly mode: "st" | "layouts"
   readonly preset: { readonly ref: string | null; readonly revision: string | null; readonly scope: PresetScope }
   readonly cards: ReadonlyArray<{ readonly entity: string; readonly ref: string | null; readonly revision: string }>
@@ -186,9 +187,31 @@ export interface HistoryStart {
     readonly examples: number
     readonly noteBudget?: { readonly sizes: Readonly<Record<string, number>>; readonly allowance: number }
     readonly revision: number
+    /**
+     * Lore entries placed above the history, kept activated until its start next moves
+     * (DESIGN §1.3); absent when lore goes only below the history.
+     */
+    readonly pinnedLore?: ReadonlyArray<PinnedLore>
   }
   readonly slotId: string | null
   readonly depth: number
+}
+
+/** A lorebook entry pinned above the history: its book, the revision read and its uid. */
+interface PinnedLore {
+  readonly book: string
+  readonly revision: string
+  readonly uid: number
+}
+
+/** Whether a card's prompt replaced a preset prompt (DESIGN §5.0), for the editors. */
+export interface CardOverride {
+  readonly identifier: "main" | "jailbreak"
+  /** The card whose prompt it is: the speaker's. */
+  readonly entity: string
+  readonly revision: string
+  /** Replaced, or kept because the prompt forbids it, is off, or the preset has none. */
+  readonly status: "replaced" | "forbidden" | "disabled" | "missing"
 }
 
 /** A context as built, stored as its rollout's frozen snapshot (DATA-MODEL §7.1). */
@@ -240,6 +263,8 @@ export interface ContextSnapshot {
       readonly issues: ReadonlyArray<Issue>
     }
   }
+  /** The speaker's card prompts and what became of them; absent when it has none. */
+  readonly cardOverrides?: ReadonlyArray<CardOverride>
   /** What the sources read, by id and revision, so the context can be read again exactly. */
   readonly wire?: WireContext
   readonly sources?: SourcePins
@@ -290,6 +315,8 @@ export interface SourcePins {
     readonly key: string
     readonly found: ReadonlyArray<{ readonly entity: string; readonly ref: string | null; readonly revision: string }>
   }>
+  /** The user's global lorebook refs; absent in snapshots from before global books. */
+  readonly globalLorebooks?: ReadonlyArray<string>
   readonly lorebooks?: ReadonlyArray<{
     readonly key: string
     readonly found: ReadonlyArray<{

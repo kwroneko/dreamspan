@@ -46,8 +46,13 @@ export const presetContext = (sql: SqlClient.SqlClient, userId: UserId, snapshot
         p.source.kind === "note" ? [[p.source.revision, p.source.activation?.due ?? true] as const] : []
       )
     )
+    const overrides = snapshot.cardOverrides ?? []
     const revisions = [
-      ...new Set([...sent.flatMap((p) => (p.source.kind === "card" ? [p.source.revision] : [])), ...activeNotes.keys()])
+      ...new Set([
+        ...sent.flatMap((p) => (p.source.kind === "card" ? [p.source.revision] : [])),
+        ...activeNotes.keys(),
+        ...overrides.map((o) => o.revision)
+      ])
     ]
     const rows = revisions.length
       ? yield* sql<{ id: string; name: string | null; title: string | null; placement: string | null }>`
@@ -82,6 +87,12 @@ export const presetContext = (sql: SqlClient.SqlClient, userId: UserId, snapshot
         }
         return { identifier, reason: b.reason }
       }),
+      overrides: overrides.map(({ identifier, entity, revision, status }) => ({
+        identifier,
+        card: entity,
+        name: names.get(revision) ?? "A card",
+        status
+      })),
       notes: rows.flatMap((r) =>
         r.title !== null && r.placement !== null
           ? [

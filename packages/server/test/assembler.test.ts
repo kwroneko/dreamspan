@@ -14,7 +14,10 @@ import type { ContextSnapshot, ModelInput, NoteInput } from "../src/assembler/ty
 import { matchLorebooks } from "../src/assembler/lorebook.ts"
 import { chatCompletionsFields } from "../src/assembler/wire.ts"
 import { importCard } from "../src/formats/cardImport.ts"
-import { importStPreset } from "../src/formats/preset.ts"
+import { forbidCardOverrides, importStPreset } from "../src/formats/preset.ts"
+import { placeBreakpoints } from "../src/assembler/breakpoints.ts"
+import type { Stability } from "../src/assembler/st.ts"
+import { charDefinitions } from "@rp/shared/presetOrder.ts"
 import { loreBook, loreEntry } from "./support/loreFixtures.ts"
 import { json, run } from "./formats/support.ts"
 import { type AssemblyFixture, assembleFixture, type FixtureMessage } from "./support/assemblySources.ts"
@@ -52,6 +55,28 @@ const presetFile = (name: string) =>
 /** ST's default preset with these fields changed (ST's names, as a preset file has them). */
 const preset = (fields: Record<string, unknown> = {}): PresetDoc =>
   importStPreset(JSON.stringify({ frequency_penalty: 0, ...fields })).document!
+
+/** ST's single-character output: the per-field markers without the join wrapper. */
+const unwrapped = (doc: PresetDoc): PresetDoc => ({
+  ...doc,
+  utility_prompts: { ...doc.utility_prompts, card_join_prefix: "", card_join_suffix: "" }
+})
+
+/** The whole-card Definitions marker in the order, before `before` (or in place of the per-field markers). */
+const withDefinitions = (doc: PresetDoc, before = "charDescription"): PresetDoc => {
+  const at = doc.order.findIndex((e) => e.identifier === before)
+  return {
+    ...doc,
+    prompts: [...doc.prompts, charDefinitions],
+    order: [...doc.order.slice(0, at), { identifier: "charDefinitions", enabled: true }, ...doc.order.slice(at)]
+  }
+}
+
+/** Lorebook entries where their positions say, as ST places them. */
+const loreByPosition = {
+  depth: null,
+  event: { scope: null, data: { key: "lorebook.below_history", value: { on: false } } }
+} as const
 
 const model = (fields: Partial<ModelInput> = {}): ModelInput => ({
   connectionId: "connection",
@@ -133,8 +158,8 @@ const note = (content: string, depth: number, role: "system" | "user" | "assista
 })
 
 describe("the context assembler", () => {
-  it("lays out ST's default preset for one character as ST does", async () => {
-    const snapshot = await assembled(chat({ preset: presetFile("default") }))
+  it("lays out ST's default preset for one character as ST does, without the join wrapper", async () => {
+    const snapshot = await assembled(chat({ preset: unwrapped(presetFile("default")) }))
     expect(contents(snapshot)).toEqual([
       "system: You narrate a story starring Mira and Tobin.",
       "system: Tobin draws maps.",
@@ -145,7 +170,13 @@ describe("the context assembler", () => {
       "assistant: You're late.",
       "user: The road flooded."
     ])
-    expect(snapshot.inputs.mode).toBe("st")
+    expect(snapshot.inputs.mode).toBe("layouts")
+    const wrapped = await assembled(chat({ preset: presetFile("default") }))
+    expect(contents(wrapped).slice(2, 5)).toEqual([
+      "system: <Mira>\nMira keeps the ledger for Tobin.\n</Mira>",
+      "system: <Mira>\nExact.\n</Mira>",
+      "system: <Mira>\nA flood.\n</Mira>"
+    ])
     // Every piece names where it came from and which message it went into.
     const description = snapshot.pieces.find((p) => p.id === "card:mira:description")!
     expect(description.source).toEqual({ kind: "card", entity: "mira", revision: "rev-mira", field: "description" })
@@ -555,7 +586,8 @@ describe("the context assembler", () => {
         expect(sent(every)).toEqual(["system: Tobin draws maps.\nTobin is soaked."])
       })
 
-      for (const layout of ["concat", "swap_tail"] as const) {
+      {
+        const layout = "the Definitions marker"
         for (const legacy of [false, true]) {
           const description = (placement: NoteDoc["placement"]) => {
             const note = persona(placement)
@@ -567,10 +599,12 @@ describe("the context assembler", () => {
             const snapshot = await assembled(
               chat({
                 notes: [description({ mode: "section", section: "card" })],
-                events: [at(null, { key: "layout.cards", value: layout })]
+                preset: withDefinitions(preset())
               })
             )
-            expect(sent(snapshot)).toEqual(['system: <persona name="Tobin">\nTobin draws maps.\n</persona>'])
+            expect(sent(snapshot)).toEqual([
+              'system: <character name="Mira">\nMira keeps the ledger for Tobin.\n\nExact.\n\nA flood.\n</character>\n\n<persona name="Tobin">\nTobin draws maps.\n</persona>'
+            ])
             expect(contents(snapshot).join("\n").split("Tobin draws maps.")).toHaveLength(2)
           })
           it(`keeps ordinary card notes beside a relocated ${legacy ? "legacy" : "current"} persona in ${layout}`, async () => {
@@ -589,17 +623,18 @@ describe("the context assembler", () => {
             const snapshot = await assembled(
               chat({
                 notes: [description({ mode: "depth", depth: 0, role: "user" }), extra],
-                events: [...on("ordinary-note"), at(null, { key: "layout.cards", value: layout })]
+                events: on("ordinary-note"),
+                preset: withDefinitions(preset())
               })
             )
             expect(sent(snapshot)).toEqual(["user: Tobin draws maps."])
             expect(contents(snapshot).filter((line) => line.includes("ORDINARY_CARD_NOTE"))).toEqual([
-              'system: <persona name="Tobin">\nORDINARY_CARD_NOTE\n</persona>'
+              'system: <character name="Mira">\nMira keeps the ledger for Tobin.\n\nExact.\n\nA flood.\n</character>\n\n<persona name="Tobin">\nORDINARY_CARD_NOTE\n</persona>'
             ])
             const empty = await assembled(
               chat({
                 notes: [description({ mode: "depth", depth: 0, role: "user" })],
-                events: [at(null, { key: "layout.cards", value: layout })]
+                preset: withDefinitions(preset())
               })
             )
             expect(contents(empty).join("\n")).not.toContain("<persona")
@@ -607,21 +642,21 @@ describe("the context assembler", () => {
         }
       }
 
-      for (const layout of [null, "concat", "swap_tail"] as const) {
+      for (const layout of [null, "below the history"] as const) {
         for (const attachment of [top, bottom]) {
-          it(`turning an active author's note interval from 1 to 0 disables its attachments in ${layout ?? "ST"} at ${attachment.doc.placement.mode === "section" ? attachment.doc.placement.section : ""}`, async () => {
+          it(`turning an active author's note interval from 1 to 0 disables its attachments ${layout ?? "with lore by position"} at ${attachment.doc.placement.mode === "section" ? attachment.doc.placement.section : ""}`, async () => {
             const book = loreBook([
               loreEntry({ content: "LORE_TOP", constant: true, position: "an_top" }, 0),
               loreEntry({ content: "LORE_BOTTOM", constant: true, position: "an_bottom" }, 1)
             ])
             const fixture = chat({
               notes: [attachment, authorNote(inChat, { interval: 1 })],
-              // Our layouts put all lore at the tail; ST attaches these entries to the note.
+              // Below the history all lore is at the tail; by position, these entries ride on the note.
               lorebooks: layout ? [] : [{ id: "book", entity: "book", revision: "book-rev", doc: book.document }],
               events: [
                 ...on("note-z-author"),
                 at(null, { key: "lorebook.attach", value: { ref: "book" as never } }),
-                ...(layout ? [at(null, { key: "layout.cards", value: layout })] : [])
+                ...(layout ? [] : [loreByPosition])
               ]
             })
             expect(sent(await assembled(fixture))).toHaveLength(1)
@@ -670,7 +705,7 @@ describe("the context assembler", () => {
         })
       )
       expect(contents(snapshot).filter((line) => line.includes("keeps the ledger"))).toEqual([
-        "system: Tide tables.\nMira keeps the ledger for Tobin."
+        "system: <Mira>\nTide tables.\nMira keeps the ledger for Tobin.\n</Mira>"
       ])
     })
 
@@ -1295,7 +1330,7 @@ describe("the context assembler", () => {
   })
 })
 
-describe("our layouts (DESIGN §5.2–§5.4)", () => {
+describe("several characters (DESIGN §5.0–§5.4)", () => {
   const group = (fields: Partial<AssemblyFixture> = {}) =>
     chat({
       participants: ["mira", "oren"],
@@ -1308,21 +1343,24 @@ describe("our layouts (DESIGN §5.2–§5.4)", () => {
       ...fields
     })
 
-  it("puts each card in a labelled block, with stable bindings and the speaker named at the tail", async () => {
+  it("puts each card in a labelled block at the Definitions marker, with stable bindings and the speaker named at the tail", async () => {
     const snapshot = await assembled(
       group({
-        preset: preset({
-          prompts: [{ identifier: "main", role: "system", content: "Write for {{char}}; {{user}} is the user." }]
-        })
+        preset: withDefinitions(
+          preset({
+            prompts: [{ identifier: "main", role: "system", content: "Write for {{char}}; {{user}} is the user." }]
+          })
+        )
       })
     )
     const messages = contents(snapshot)
     expect(snapshot.inputs.mode).toBe("layouts")
     expect(messages[0]).toBe("system: Write for Mira, Oren; Tobin is the user.")
     expect(messages).toContain(
-      'system: <character name="Mira">\nMira keeps the ledger for Tobin.\n\nExact.\n\nA flood.\n</character>\n\n<character name="Oren">\nOren runs the ferry.\n</character>'
+      'system: <character name="Mira">\nMira keeps the ledger for Tobin.\n\nExact.\n\nA flood.\n</character>\n\n<character name="Oren">\nOren runs the ferry.\n</character>\n\n<persona name="Tobin">\nTobin draws maps.\n</persona>'
     )
-    expect(messages).toContain('system: <persona name="Tobin">\nTobin draws maps.\n</persona>')
+    // Definitions wins: the per-field markers stay empty.
+    expect(messages.filter((m) => m.includes("Mira keeps the ledger"))).toHaveLength(1)
     // ST's group names: everyone but the user's character is named in the text.
     expect(messages).toContain("assistant: Mira: Ledger's open.")
     expect(messages).toContain("user: Both of you, listen.")
@@ -1333,14 +1371,12 @@ describe("our layouts (DESIGN §5.2–§5.4)", () => {
     ])
   })
 
-  it("swaps the speaker's card to the tail in card-swap mode", async () => {
-    const snapshot = await assembled(group({ events: [at(null, { key: "layout.cards", value: "swap_tail" })] }))
-    const messages = contents(snapshot)
-    expect(messages.join("\n")).not.toContain('<character name="Mira">')
-    expect(messages.slice(-2)).toEqual([
-      'system: <character name="Oren">\nOren runs the ferry.\n</character>',
-      "system: [Write the next reply only as Oren.]"
-    ])
+  it("ignores a chat's old card layout choice, and says so once", async () => {
+    for (const layout of ["concat", "swap_tail"] as const) {
+      const snapshot = await assembled(group({ events: [at(null, { key: "layout.cards", value: layout })] }))
+      expect(contents(snapshot)).toEqual(contents(await assembled(group())))
+      expect(snapshot.issues.filter((i) => i.kind === "layout_ignored")).toHaveLength(1)
+    }
   })
 
   it("projects roles by alternation and by perspective", async () => {
@@ -1367,11 +1403,17 @@ describe("our layouts (DESIGN §5.2–§5.4)", () => {
     expect(contents(snapshot)[0]).toBe("system: Write for the cast.")
   })
 
-  it("uses our layouts for one character when the chat picks one", async () => {
-    const snapshot = await assembled(chat({ events: [at(null, { key: "layout.cards", value: "concat" })] }))
-    expect(snapshot.inputs.mode).toBe("layouts")
-    expect(contents(snapshot).join("\n")).toContain('<character name="Mira">')
-    expect(snapshot.pieces.find((p) => p.text === "[Start a new Chat]")!.id).toBe("preset:utility.new_chat_prompt")
+  it("fills the per-field markers field by field, each character's part wrapped, in cast order", async () => {
+    const snapshot = await assembled(group())
+    const messages = contents(snapshot)
+    expect(messages).toContain(
+      "system: <Mira>\nMira keeps the ledger for Tobin.\n</Mira>\n<Oren>\nOren runs the ferry.\n</Oren>"
+    )
+    // Oren has no personality or scenario: his parts are left out.
+    expect(messages).toContain("system: <Mira>\nExact.\n</Mira>")
+    expect(messages).toContain("system: <Mira>\nA flood.\n</Mira>")
+    expect(snapshot.pieces.find((p) => p.text === "[Start a new group chat. Group members: {{group}}]")).toBeUndefined()
+    expect(snapshot.pieces.some((p) => p.id === "preset:utility.new_group_chat_prompt")).toBe(true)
   })
 })
 
@@ -1556,7 +1598,9 @@ describe("lorebook assembly", () => {
         )
       )
     ).document
-    const result = await assembled(fixture({ lorebooks: [{ ...attached, doc }] }))
+    const result = await assembled(
+      fixture({ lorebooks: [{ ...attached, doc }], events: [...fixture().events!, loreByPosition] })
+    )
     expect(result.request.messages.filter((m) => m.content.includes("EXAMPLE_")).map((m) => m.content)).toEqual(
       (position === "em_top" ? [200, 100] : [100, 200]).flatMap((order) => [`EXAMPLE_${order}?`, `EXAMPLE_${order}.`])
     )
@@ -1572,7 +1616,9 @@ describe("lorebook assembly", () => {
     })
   })
   it("places ST markers and depth entries, records keys and skips, and surfaces refused regex", async () => {
-    const result = await assembled(fixture({ preset: preset({ wi_format: "[{{char}}] {0}" }) }))
+    const result = await assembled(
+      fixture({ preset: preset({ wi_format: "[{{char}}] {0}" }), events: [...fixture().events!, loreByPosition] })
+    )
     expect(contents(result).join("\n")).toContain("[Mira] The levee is guarded.")
     expect(contents(result).join("\n")).toContain("The toll is waived.")
     expect(contents(result).at(-1)).toBe("user: The river runs north.")
@@ -1730,3 +1776,385 @@ it.each([undefined, "", "Captain Aria"])(
     if (nickname) expect(text).not.toContain("Aria Vance")
   }
 )
+
+describe("card definitions the way the preset says (DESIGN §5.0)", () => {
+  const rook = card("Rook", { description: "{{char}} counts boats.", scenario: "A harbor." })
+  const cards = [
+    { entity: "mira", doc: mira },
+    { entity: "oren", doc: oren },
+    { entity: "rook", doc: rook },
+    { entity: "tobin", doc: tobin }
+  ]
+  const cast = (participants: ReadonlyArray<string>, fields: Partial<AssemblyFixture> = {}) =>
+    chat({ cards, participants, ...fields })
+  const marker = (snapshot: ContextSnapshot, identifier: string) =>
+    snapshot.request.messages.find((_, i) =>
+      snapshot.pieces.some((p) => p.marker === identifier && p.messages.includes(i))
+    )?.content
+
+  it("joins each field over 1, 2 and 3 characters in cast order, skipping empty fields", async () => {
+    const one = await assembled(cast(["mira"]))
+    expect(marker(one, "charDescription")).toBe("<Mira>\nMira keeps the ledger for Tobin.\n</Mira>")
+    const two = await assembled(cast(["mira", "oren"]))
+    expect(marker(two, "charDescription")).toBe(
+      "<Mira>\nMira keeps the ledger for Tobin.\n</Mira>\n<Oren>\nOren runs the ferry.\n</Oren>"
+    )
+    const three = await assembled(cast(["rook", "mira", "oren"]))
+    expect(marker(three, "charDescription")).toBe(
+      "<Rook>\nRook counts boats.\n</Rook>\n<Mira>\nMira keeps the ledger for Tobin.\n</Mira>\n<Oren>\nOren runs the ferry.\n</Oren>"
+    )
+    // Oren has no scenario and Rook no personality: their parts are left out.
+    expect(marker(three, "scenario")).toBe("<Rook>\nA harbor.\n</Rook>\n<Mira>\nA flood.\n</Mira>")
+    expect(marker(three, "charPersonality")).toBe("<Mira>\nExact.\n</Mira>")
+  })
+
+  it("takes the preset's join prefix and suffix, with {{char}} and <FIELDNAME> per part, or none", async () => {
+    const custom = (prefix: string, suffix: string) =>
+      cast(["mira", "oren"], {
+        preset: {
+          ...preset(),
+          utility_prompts: { ...preset().utility_prompts, card_join_prefix: prefix, card_join_suffix: suffix }
+        }
+      })
+    const labelled = await assembled(custom("[{{char}}'s <FIELDNAME>: ", "]"))
+    expect(marker(labelled, "charDescription")).toBe(
+      "[Mira's Description: Mira keeps the ledger for Tobin.]\n[Oren's Description: Oren runs the ferry.]"
+    )
+    expect(marker(labelled, "scenario")).toBe("[Mira's Scenario: A flood.]")
+    const bare = await assembled(custom("", ""))
+    expect(marker(bare, "charDescription")).toBe("Mira keeps the ledger for Tobin.\nOren runs the ferry.")
+  })
+
+  it("applies personality_format and scenario_format to the joined text, as do the macros in preset text", async () => {
+    const snapshot = await assembled(
+      cast(["mira", "rook"], {
+        preset: preset({
+          personality_format: "Personalities: {{personality}}",
+          scenario_format: "[{{scenario}}]",
+          prompts: [{ identifier: "main", role: "system", content: "All: {{description}}" }]
+        })
+      })
+    )
+    expect(marker(snapshot, "charPersonality")).toBe("Personalities: <Mira>\nExact.\n</Mira>")
+    expect(marker(snapshot, "scenario")).toBe("[<Mira>\nA flood.\n</Mira>\n<Rook>\nA harbor.\n</Rook>]")
+    expect(contents(snapshot)[0]).toBe(
+      "system: All: <Mira>\nMira keeps the ledger for Tobin.\n</Mira>\n<Rook>\nRook counts boats.\n</Rook>"
+    )
+  })
+
+  it("keeps a muted member's definition, and puts card notes at the top of their card's part", async () => {
+    const tide: NoteInput = {
+      ...note("Tide tables.", 1, "system"),
+      entity: "note-oren",
+      doc: {
+        ...note("Tide tables.", 1, "system").doc,
+        owner: { card: "oren" as never },
+        placement: { mode: "section", section: "card" }
+      }
+    }
+    const snapshot = await assembled(
+      cast(["mira", "oren"], {
+        notes: [tide],
+        events: [at(null, { key: "presence.set", value: { entity: "oren" as EntityId, present: false } })]
+      })
+    )
+    expect(marker(snapshot, "charDescription")).toBe(
+      "<Mira>\nMira keeps the ledger for Tobin.\n</Mira>\n<Oren>\nTide tables.\nOren runs the ferry.\n</Oren>"
+    )
+  })
+
+  it("doesn't change the definitions with the number of characters beyond the group rules", async () => {
+    const silent = card("Silent")
+    const alone = await assembled(cast(["mira"]))
+    const joined = await assembled(
+      chat({ cards: [...cards, { entity: "silent", doc: silent }], participants: ["mira", "silent"] })
+    )
+    for (const id of ["charDescription", "charPersonality", "scenario", "personaDescription"])
+      expect(marker(joined, id)).toBe(marker(alone, id))
+    // What changes is the group rules: names on messages, the group's new-chat prompt and the nudge.
+    expect(contents(alone)).toContain("assistant: You're late.")
+    expect(contents(joined)).toContain("assistant: Mira: You're late.")
+    expect(contents(joined).at(-1)).toBe("system: [Write the next reply only as Mira.]")
+    expect(contents(alone).at(-1)).toBe("user: The road flooded.")
+  })
+
+  it("puts every card whole at the Definitions marker, which wins over the per-field markers", async () => {
+    const snapshot = await assembled(cast(["mira", "oren"], { preset: withDefinitions(preset()) }))
+    expect(marker(snapshot, "charDefinitions")).toBe(
+      '<character name="Mira">\nMira keeps the ledger for Tobin.\n\nExact.\n\nA flood.\n</character>\n\n<character name="Oren">\nOren runs the ferry.\n</character>\n\n<persona name="Tobin">\nTobin draws maps.\n</persona>'
+    )
+    for (const id of ["charDescription", "charPersonality", "scenario", "personaDescription"])
+      expect(marker(snapshot, id)).toBeUndefined()
+    // Alone, without the per-field markers, it's the same.
+    const doc = withDefinitions(preset())
+    const alone = await assembled(
+      cast(["mira", "oren"], {
+        preset: {
+          ...doc,
+          order: doc.order.filter((e) => !["charDescription", "charPersonality", "scenario"].includes(e.identifier))
+        }
+      })
+    )
+    expect(marker(alone, "charDefinitions")).toBe(marker(snapshot, "charDefinitions"))
+  })
+
+  describe("card prompt overrides", () => {
+    const strict = card("Strict", {
+      description: "{{char}} rules.",
+      system_prompt: "{{char}} first. {{original}} {{original}}",
+      post_history_instructions: "Stay {{char}}."
+    })
+    const overriding = (fields: Partial<AssemblyFixture> = {}, doc = preset()) =>
+      chat({
+        cards: [...cards, { entity: "strict", doc: strict }],
+        participants: ["mira", "strict"],
+        target: { speaker: "strict" },
+        preset: doc,
+        ...fields
+      })
+    const allow = (doc: PresetDoc, allowed: boolean): PresetDoc => ({
+      ...doc,
+      prompts: doc.prompts.map((p) =>
+        p.identifier === "main" || p.identifier === "jailbreak" ? { ...p, forbid_overrides: !allowed } : p
+      )
+    })
+    const base = preset({
+      prompts: [
+        { identifier: "main", role: "system", content: "MAIN" },
+        { identifier: "jailbreak", role: "system", content: "AFTER" }
+      ]
+    })
+
+    it("takes the speaker's card prompts in place of main and jailbreak, the first {{original}} the replaced text", async () => {
+      const snapshot = await assembled(overriding({}, allow(base, true)))
+      expect(contents(snapshot)[0]).toBe("system: Strict first. MAIN ")
+      expect(contents(snapshot)).toContain("system: Stay Strict.")
+      expect(contents(snapshot)).not.toContain("system: AFTER")
+      expect(snapshot.cardOverrides).toEqual([
+        { identifier: "main", entity: "strict", revision: "rev-strict", status: "replaced" },
+        { identifier: "jailbreak", entity: "strict", revision: "rev-strict", status: "replaced" }
+      ])
+      // Another speaker's card has none: the preset's prompts stay.
+      const mira = await assembled(overriding({ target: { speaker: "mira" } }, allow(base, true)))
+      expect(contents(mira)[0]).toBe("system: MAIN")
+      expect(mira.cardOverrides).toBeUndefined()
+    })
+
+    it("keeps a prompt that forbids overrides or is off, and does nothing with an empty override", async () => {
+      const forbidden = await assembled(overriding({}, allow(base, false)))
+      expect(contents(forbidden)[0]).toBe("system: MAIN")
+      expect(forbidden.cardOverrides?.map((o) => o.status)).toEqual(["forbidden", "forbidden"])
+      const off = allow(base, true)
+      const disabled = await assembled(
+        overriding(
+          {},
+          { ...off, order: off.order.map((e) => (e.identifier === "main" ? { ...e, enabled: false } : e)) }
+        )
+      )
+      expect(contents(disabled).join("\n")).not.toContain("Strict first.")
+      expect(disabled.cardOverrides?.find((o) => o.identifier === "main")?.status).toBe("disabled")
+      const empty = await assembled(
+        overriding(
+          {
+            cards: [
+              ...cards,
+              { entity: "strict", doc: { ...strict, system_prompt: "", post_history_instructions: "" } }
+            ]
+          },
+          allow(base, true)
+        )
+      )
+      expect(contents(empty)[0]).toBe("system: MAIN")
+      expect(empty.cardOverrides).toBeUndefined()
+    })
+
+    it("lets no card prompt replace a prompt of a preset made here, while an imported one keeps its file's value", async () => {
+      const made = forbidCardOverrides(preset())
+      expect(
+        made.prompts
+          .filter((p) => p.identifier === "main" || p.identifier === "jailbreak")
+          .map((p) => p.forbid_overrides)
+      ).toEqual([true, true])
+      expect(preset().prompts.find((p) => p.identifier === "main")!.forbid_overrides).toBe(false)
+      const file = importStPreset(
+        JSON.stringify({ prompts: [{ identifier: "main", name: "Main Prompt", content: "M", forbid_overrides: true }] })
+      )
+      expect(file.document!.prompts.find((p) => p.identifier === "main")!.forbid_overrides).toBe(true)
+      // The report names the prompts a card can replace.
+      expect(file.report.issues.find((i) => i.code === "preset.overrides_allowed")?.message).toContain(
+        "Post-History Instructions"
+      )
+      expect(file.report.issues.find((i) => i.code === "preset.overrides_allowed")?.message).not.toContain(
+        "Main Prompt"
+      )
+    })
+  })
+})
+
+describe("lorebooks: global books, placement and pins (DESIGN §1.3)", () => {
+  const book = (id: string, entries: ReadonlyArray<ReturnType<typeof loreEntry>>, revision = `${id}-rev`) => ({
+    id,
+    entity: `${id}-entity`,
+    revision,
+    doc: loreBook(entries, {}, id).document
+  })
+  const attach = (ref: string) => at(null, { key: "lorebook.attach", value: { ref: ref as never } })
+
+  it("reads global books unless the chat turns one off, and once when it's also attached", async () => {
+    const world = book("world", [loreEntry({ constant: true, content: "GLOBAL_FACT" })])
+    const f = chat({ lorebooks: [world], globalLorebooks: ["world"] })
+    expect(contents(await assembled(f)).join("\n")).toContain("GLOBAL_FACT")
+    const off = { ...f, events: [at(null, { key: "lorebook.global", value: { ref: "world" as never, on: false } })] }
+    expect(contents(await assembled(off)).join("\n")).not.toContain("GLOBAL_FACT")
+    const both = { ...f, events: [attach("world")] }
+    expect(
+      contents(await assembled(both))
+        .join("\n")
+        .match(/GLOBAL_FACT/g)
+    ).toHaveLength(1)
+    expect(contents(await assembled({ ...f, globalLorebooks: [] })).join("\n")).not.toContain("GLOBAL_FACT")
+  })
+
+  const positions = book("positions", [
+    loreEntry({ constant: true, content: "AT_BEFORE", position: "before_char" }, 0),
+    loreEntry({ constant: true, content: "AT_AFTER", position: "after_char" }, 1),
+    loreEntry({ constant: true, content: "AT_DEPTH", position: "at_depth", depth: 1, role: "system" }, 2),
+    loreEntry({ constant: true, content: "AT_AN_TOP", position: "an_top" }, 3),
+    loreEntry({ constant: true, content: "<START>\n{{user}}: EM?\n{{char}}: EM.", position: "em_top" }, 4)
+  ])
+
+  it("puts every position in one block at the start of the tail when only below the history", async () => {
+    const snapshot = await assembled(chat({ lorebooks: [positions], events: [attach("positions")] }))
+    const block = contents(snapshot).find((m) => m.includes("AT_BEFORE"))!
+    for (const text of ["AT_AFTER", "AT_DEPTH", "AT_AN_TOP", "EM?"]) expect(block).toContain(text)
+    // After the history's last message, before the tail: here, at the end.
+    expect(contents(snapshot).indexOf(block)).toBe(contents(snapshot).indexOf("user: The road flooded.") + 1)
+    expect(snapshot.historyStart?.state?.pinnedLore).toBeUndefined()
+    // Every breakpoint comes before it.
+    expect(snapshot.request.breakpoints.every((b) => b.message < contents(snapshot).indexOf(block))).toBe(true)
+  })
+
+  it("places entries by position with the setting off", async () => {
+    const snapshot = await assembled(
+      chat({ lorebooks: [positions], events: [attach("positions"), loreByPosition], notes: [] })
+    )
+    const messages = contents(snapshot)
+    expect(messages.findIndex((m) => m.includes("AT_BEFORE"))).toBeLessThan(
+      messages.findIndex((m) => m.includes("keeps the ledger"))
+    )
+    expect(messages.find((m) => m.includes("AT_DEPTH"))).toBe("system: AT_DEPTH")
+    expect(messages.indexOf("system: AT_DEPTH")).toBe(messages.indexOf("user: The road flooded.") - 1)
+  })
+
+  describe("pins above the history, with the setting off", () => {
+    const pinning = book("pinning", [
+      loreEntry({ keys: ["flooded"], content: "PIN_LEVEE", position: "before_char" }, 0),
+      loreEntry({ keys: ["sunny"], content: "PIN_SUN", position: "before_char" }, 1),
+      loreEntry({ keys: ["flooded"], content: "DEPTH_FLOOD", position: "at_depth", depth: 0, role: "system" }, 2)
+    ])
+    const first = chat({ lorebooks: [pinning], events: [attach("pinning"), loreByPosition] })
+    const later: ReadonlyArray<FixtureMessage> = [
+      ...first.messages,
+      { side: "assistant", content: "Then wait." },
+      { side: "user", content: "It's sunny now." }
+    ]
+    const next = (previous: ContextSnapshot, fields: Partial<AssemblyFixture> = {}) =>
+      assembled({ ...first, messages: later, historyStart: previous.historyStart ?? null, ...fields })
+    const text = (snapshot: ContextSnapshot) => contents(snapshot).join("\n")
+
+    it("records entries above the history, never those after it", async () => {
+      const snapshot = await assembled(first)
+      expect(snapshot.historyStart?.state?.pinnedLore).toEqual([{ book: "pinning", revision: "pinning-rev", uid: 0 }])
+      expect(text(snapshot)).toContain("DEPTH_FLOOD")
+    })
+
+    it("keeps them while the start holds, adds and pins a new match, and re-evaluates entries after the history", async () => {
+      const one = await assembled(first)
+      const two = await next(one)
+      expect(text(two)).toContain("PIN_LEVEE")
+      expect(text(two)).toContain("PIN_SUN")
+      expect(text(two)).not.toContain("DEPTH_FLOOD")
+      expect(two.historyMove).toBe("unchanged")
+      expect(two.historyStart?.state?.pinnedLore?.map((p) => p.uid).toSorted()).toEqual([0, 1])
+      expect(two.pieces.find((p) => p.id === "lore:pinning:0")?.source).toMatchObject({
+        activation: { status: "activated", why: { kind: "pinned" } }
+      })
+      // Without the previous context, nothing is pinned: the levee no longer matches.
+      expect(text(await assembled({ ...first, messages: later }))).not.toContain("PIN_LEVEE")
+      // Pinned lore keeps the prefix stable until the start moves: (a) ends before it, the pinned marker after.
+      const pinnedAt = two.request.breakpoints.find((b) => b.reason === "pinned")
+      expect(pinnedAt).toBeDefined()
+    })
+
+    it("drops pins when the history's start moves, and re-evaluates", async () => {
+      const one = await assembled(first)
+      // The previous start was later, and a raised maximum lets it go back: the start moves.
+      const moved = await next(one, {
+        historyStart: {
+          ...one.historyStart!,
+          slotId: "slot-2",
+          depth: 2,
+          state: { ...one.historyStart!.state!, maximum: 1 }
+        }
+      })
+      expect(moved.historyMove).toBe("restore")
+      expect(text(moved)).not.toContain("PIN_LEVEE")
+      expect(text(moved)).toContain("PIN_SUN")
+      expect(moved.historyStart?.state?.pinnedLore).toEqual([{ book: "pinning", revision: "pinning-rev", uid: 1 }])
+      expect(moved.pieces.find((p) => p.id === "lore:pinning:0")?.source).toMatchObject({
+        activation: { status: "skipped", reason: "pin released: the history's start moved" }
+      })
+      // After a move, the prefix marker comes first.
+      expect(moved.request.breakpoints[0]?.reason).toBe("prefix")
+    })
+
+    it("drops pins when a book is edited or the setting changes", async () => {
+      const one = await assembled(first)
+      const edited = await next(one, { lorebooks: [{ ...pinning, revision: "pinning-rev-2" }] })
+      expect(text(edited)).not.toContain("PIN_LEVEE")
+      const below = await next(one, { events: [attach("pinning")] })
+      expect(below.historyStart?.state?.pinnedLore).toBeUndefined()
+      expect(text(below)).not.toContain("PIN_LEVEE")
+    })
+  })
+})
+
+describe("cache breakpoints with pinned lore (DESIGN §1.3, §5.5)", () => {
+  const kinds = (...list: ReadonlyArray<Stability>) => list.map((kind) => ({ kind }))
+  const messages = kinds("prefix", "prefix", "pinned", "pinned", "summary", "history", "history", "volatile")
+  it("puts (c) first while the start holds, then (a) before (b), then after the pinned lore", () => {
+    expect(placeBreakpoints(messages).map((b) => [b.reason, b.message])).toEqual([
+      ["history", 6],
+      ["prefix", 1],
+      ["summary", 4],
+      ["pinned", 3]
+    ])
+  })
+  it("puts (a) first after a move of the history's start", () => {
+    expect(placeBreakpoints(messages, true).map((b) => b.reason)).toEqual(["prefix", "history", "summary", "pinned"])
+  })
+  it("reaches the history with (a) when nothing is pinned", () => {
+    expect(placeBreakpoints(kinds("prefix", "prefix", "history", "volatile"), true)).toEqual([
+      { message: 1, reason: "prefix" },
+      { message: 2, reason: "history" }
+    ])
+  })
+  it("marks the history, the prefix and the pinned lore for an explicit provider, within its markers", async () => {
+    const pinning = {
+      id: "pinning",
+      entity: "pinning-entity",
+      revision: "pinning-rev",
+      doc: loreBook([loreEntry({ constant: true, content: "PINNED", position: "before_char" })]).document
+    }
+    const snapshot = await assembled(
+      chat({
+        lorebooks: [pinning],
+        model: model({ cacheBreakpoints: "explicit" }),
+        events: [at(null, { key: "lorebook.attach", value: { ref: "pinning" as never } }), loreByPosition],
+        summaries: []
+      })
+    )
+    expect(snapshot.request.breakpoints.map((b) => b.reason)).toEqual(["history", "prefix", "pinned"])
+    expect(snapshot.issues.some((i) => i.kind === "cache_breakpoints")).toBe(false)
+  })
+})

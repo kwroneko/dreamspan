@@ -72,7 +72,9 @@ export const ContextIssue = Schema.Struct({
     "summary_failed",
     "examples_truncated",
     "regex_skipped",
-    "lorebook_issue"
+    "lorebook_issue",
+    "layout_ignored",
+    "cache_breakpoints"
   ]),
   message: Schema.String
 })

@@ -382,7 +382,9 @@ describe("stepped history", () => {
             event: { scope: null, data: { key: "var.set", value: { name: "long", value: "Q".repeat(1000) } } }
           },
           { depth: null, event: { scope: null, data: { key: "note.activate", value: { note: "author" as never } } } },
-          { depth: null, event: { scope: null, data: { key: "lorebook.attach", value: { ref: "book" as never } } } }
+          { depth: null, event: { scope: null, data: { key: "lorebook.attach", value: { ref: "book" as never } } } },
+          // Entries by position: these ride on the author's note.
+          { depth: null, event: { scope: null, data: { key: "lorebook.below_history", value: { on: false } } } }
         ],
         notes: [
           {

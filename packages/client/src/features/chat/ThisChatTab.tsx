@@ -1,4 +1,4 @@
-// The side panel's "This chat" tab (DESIGN §5.2, §5.4, §8; DATA-MODEL §5.3, §5.4): what the
+// The side panel's "This chat" tab (DESIGN §5.4, §8; DATA-MODEL §5.3, §5.4): what the
 // next reply is sent with, each with its value and where it comes from, and the chat's own
 // settings. A change is a state event at the leaf shown, so from there on, on this branch.
 // The context assembler reads them; this only writes them.
@@ -60,35 +60,9 @@ export function ThisChatTab({ session }: { session: ChatSession; active: boolean
     const outcome = await session.changeCast(next)
     setError(outcome.ok ? null : outcome.error)
   }
-  const multi = (cast?.participants.length ?? 0) > 1
   return (
     <div className="flex flex-col gap-6">
       <SummariesSetting session={session} />
-      <section aria-label="Card layout" className="flex flex-col gap-2">
-        <h3 id="layout-label" className="text-xs font-medium tracking-wide text-muted uppercase">
-          Card layout
-        </h3>
-        <p className="text-sm text-muted">
-          Where the members' cards go in what's sent{multi ? "" : "; it matters once a chat has several characters"}.
-        </p>
-        <RadioGroup
-          aria-labelledby="layout-label"
-          value={cast?.layoutCards ?? "concat"}
-          onValueChange={(layout) => void change({ _tag: "Layout", layout })}
-          options={[
-            {
-              value: "concat",
-              label: "All cards together",
-              description: "Every character's card, each in its own labelled block where the preset puts the card."
-            },
-            {
-              value: "swap_tail",
-              label: "Speaker's card last",
-              description: "Only the replying character's card, at the end of the context, as ST's card swap does."
-            }
-          ]}
-        />
-      </section>
       <section aria-label="Roles" className="flex flex-col gap-2">
         <h3 id="roles-label" className="text-xs font-medium tracking-wide text-muted uppercase">
           Roles

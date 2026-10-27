@@ -250,7 +250,7 @@ export const maintain = (
         condenseTarget,
         eagerMinChildren: 2,
         absorbMaxChildren: fanout * 2,
-        layerCost: layer.summaries.length ? Math.ceil(layerText(layer.summaries, false).length / 4) + 3 : 0,
+        layerCost: layer.summaries.length ? Math.ceil(layerText(layer.summaries).length / 4) + 3 : 0,
         layerTarget: options.budget.target,
         layerMax: options.budget.maximum,
         lastFinishedEager: last?.eager === 1

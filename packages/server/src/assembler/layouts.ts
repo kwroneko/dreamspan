@@ -1,5 +1,5 @@
 import { modelName } from "@rp/shared/cardNames.ts"
-// Our layouts' card blocks and tail directive (DESIGN §5.2, §5.3; ARCHITECTURE §15).
+// The Definitions marker's card blocks and the group nudge (DESIGN §5.0, §5.2, §5.3; ARCHITECTURE §15).
 import type { Names } from "./macros.ts"
 import { type Assembly, need } from "./pipeline.ts"
 import type { Text } from "./st.ts"
@@ -56,19 +56,14 @@ export const personaBlock = (
 }
 
 /**
- * The tail directive (DESIGN §5.3): the preset's own group nudge naming the speaker, or,
- * when the speaker is a character the user plays, its impersonation prompt naming them,
- * which is what lets the model write for them despite the preset's rules against it.
+ * The tail directive (DESIGN §5.3): the preset's own group nudge naming the speaker, sent
+ * when there's more than one character to choose from.
  */
 export const directive = (assembly: Assembly, presetText: PresetText): Text | null => {
   const cast = need(assembly, "cast")
   const utility = need(assembly, "preset").doc.utility_prompts
   const speaker = cast.speaker
-  if (!speaker) return null
-  if (cast.personas.includes(speaker)) {
-    const text = utility.impersonation_prompt
-    return text ? presetText(assembly, "utility.impersonation_prompt", text, { user: modelName(speaker.doc) }) : null
-  }
+  if (!speaker || cast.personas.includes(speaker)) return null
   const text = utility.group_nudge_prompt
   return text ? presetText(assembly, "utility.group_nudge_prompt", text, { char: modelName(speaker.doc) }) : null
 }

@@ -70,7 +70,7 @@ describe("generation", () => {
       assert.deepStrictEqual(body.messages, [
         { role: "system", content: "Write Mira's next reply in a fictional chat between Mira and Tobin." },
         { role: "system", content: "Tobin draws maps." },
-        { role: "system", content: "Mira keeps the ledger for Tobin." },
+        { role: "system", content: "<Mira>\nMira keeps the ledger for Tobin.\n</Mira>" },
         { role: "system", content: "[Start a new Chat]" },
         { role: "assistant", content: "*Mira looks up.* Late again, Tobin." },
         { role: "user", content: "The road flooded." }
@@ -351,7 +351,7 @@ describe("generation", () => {
         body.system.map((block) => block.text),
         [
           "Write Mira's next reply in a fictional chat between Mira and Tobin.\n\nTobin draws maps.\n\n" +
-            "Mira keeps the ledger for Tobin.\n\n[Start a new Chat]"
+            "<Mira>\nMira keeps the ledger for Tobin.\n</Mira>\n\n[Start a new Chat]"
         ]
       )
       assert.deepStrictEqual(

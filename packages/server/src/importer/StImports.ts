@@ -469,7 +469,12 @@ export class StImports extends Context.Service<
         Effect.gen(function* () {
           const parsed = yield* formats.st.libraryFile(bytes, file, kind)
           const imported = yield* importLibrary(session, user, path, kind, parsed.parsed)
-          if (imported.entity !== null && kind === "lorebook") session.worlds.set(name, imported.entity.refId)
+          if (imported.entity !== null && kind === "lorebook") {
+            session.worlds.set(name, imported.entity.refId)
+            // ST applies its global books to every chat: here they're the user's global lorebooks.
+            if (session.settings?.globalWorlds.includes(name))
+              yield* writer.SetGlobalLorebook({ userId: user.id, ref: imported.entity.refId, global: true })
+          }
           if (imported.entity !== null && kind === "preset" && session.settings?.selectedPreset === name) {
             const adopted = yield* writer.StImportDefaultPreset({
               userId: user.id,
@@ -996,11 +1001,15 @@ export class StImports extends Context.Service<
                 ])
               }
               if (settings.globalWorlds.length > 0) {
+                for (const name of settings.globalWorlds) {
+                  const ref = session.worlds.get(name)
+                  if (ref) yield* writer.SetGlobalLorebook({ userId: user.id, ref, global: true })
+                }
                 session.report.issue(
                   path,
                   "info",
                   "st.global_worlds",
-                  `ST applies ${shownList(settings.globalWorlds)} to every chat; they're imported, but not attached to any.`
+                  `ST applies ${shownList(settings.globalWorlds)} to every chat; here they're marked “Use in every chat”, which each chat's Lorebooks tab can turn off.`
                 )
               }
               return result("added")

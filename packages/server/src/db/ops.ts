@@ -83,7 +83,15 @@ import {
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
 import { CastCard, ChatSummary, FrozenMacros, QueuedMessage } from "@rp/shared/chat.ts"
-import { CardForChat, CardOverrideOpened, CardUsage, ChatCard, ChatGroup, FirstTurn } from "@rp/shared/chatSetupApi.ts"
+import {
+  CardForChat,
+  CardOverrideOpened,
+  CardPromptUse,
+  CardUsage,
+  ChatCard,
+  ChatGroup,
+  FirstTurn
+} from "@rp/shared/chatSetupApi.ts"
 import { AssemblyFailed } from "../assembler/types.ts"
 
 const StorageErrorReason = Schema.Literals(["busy", "constraint", "corrupt", "other"])
@@ -1605,6 +1613,15 @@ export class WriteOps extends RpcGroup.make(
     success: GenerationDefaults,
     error: Schema.Union([NotFound, StorageError])
   }),
+  /**
+   * Marks a lorebook of the user's global (DESIGN §5.0) or not, in `lorebooks.global`;
+   * NotFound when it isn't a live library lorebook of the user's. Returns the list as stored.
+   */
+  Rpc.make("SetGlobalLorebook", {
+    payload: { userId: UserId, ref: RefId, global: Schema.Boolean },
+    success: Schema.Array(RefId),
+    error: Schema.Union([NotFound, StorageError])
+  }),
   /** Only the defaults named, merged into the stored ones in the same transaction. */
   Rpc.make("ChangeGenerationDefaults", {
     payload: { userId: UserId, change: GenerationDefaultsChange },
@@ -2193,6 +2210,10 @@ export class ReadOps extends RpcGroup.make(
     success: GenerationDefaults,
     error: StorageError
   }),
+  /** The user's global lorebooks: live library lorebooks of theirs, in the order marked. */
+  Rpc.make("GetGlobalLorebooks", { payload: { userId: UserId }, success: Schema.Array(RefId), error: StorageError }),
+  /** What the preset the user's chats use does with a card's own prompts (DESIGN §5.0). */
+  Rpc.make("GetCardPromptUse", { payload: { userId: UserId }, success: CardPromptUse, error: StorageError }),
   /** The user's display choices; the defaults where none are stored. */
   Rpc.make("GetDisplayPrefs", { payload: { userId: UserId }, success: DisplayPrefs, error: StorageError }),
   // --- Branches (DESIGN §3.2).

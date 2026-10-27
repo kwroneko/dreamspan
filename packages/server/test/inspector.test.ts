@@ -62,7 +62,16 @@ describe("the request inspector", () => {
         [
           [["Preset prompt “Main Prompt”"], null],
           [["Card “Tobin”: description"], null],
-          [["Card “Mira”: description"], null],
+          [
+            [
+              "Card “Mira”: description",
+              "Preset: card join prefix",
+              "Preset: card join suffix",
+              "Mira's description",
+              "The characters' definitions"
+            ],
+            null
+          ],
           [["Preset: new chat prompt"], "prefix"],
           [["Message 1"], null],
           [["Message 2"], "history"]
