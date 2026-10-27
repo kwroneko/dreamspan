@@ -1,3 +1,4 @@
+import { importPromptPreset } from "../formats/presetSettings.ts"
 // The importer registry (PLUGINS §8): each importer reads one family of files into a
 // library document. The built-ins register through it as a plugin's importer will. They
 // run in a format worker (Formats.ts), never on the main thread, so this registry lives
@@ -11,7 +12,7 @@ import { ImportIssue, ImportReport } from "@rp/shared/importReport.ts"
 import type { Doc, EntityKind } from "@rp/shared/library.ts"
 import { Context, Effect, Layer, Predicate, Schema } from "effect"
 import { importCard } from "../formats/cardImport.ts"
-import { importStPreset, isStPresetFile } from "../formats/preset.ts"
+import { isStPresetFile } from "../formats/preset.ts"
 import { attempt, type FormatError } from "../formats/safety.ts"
 import { importLorebook } from "../formats/worldInfo.ts"
 import { docHash, searchText } from "../db/documents.ts"
@@ -166,7 +167,7 @@ const presetImporter: Importer = {
   // ST names a preset after its file.
   parse: (bytes, fileName) =>
     attempt(() => {
-      const { document, report } = importStPreset(bytes)
+      const { document, report } = importPromptPreset(bytes)
       return {
         report,
         library: document && {

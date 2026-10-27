@@ -64,7 +64,7 @@ function OverrideChat({ chatId, prefix = "" }: { chatId: ChatId; prefix?: string
   )
 }
 
-function Editor({ refId }: { refId: RefId }) {
+export function Editor({ refId }: { refId: RefId }) {
   const call = useCaller()
   const userId = useSession().user.id
   const [store] = useState(() => new EditorStore(refId, userId, call))

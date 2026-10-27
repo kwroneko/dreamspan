@@ -2,7 +2,7 @@
 // test's card or preset is a real one, with only what the test cares about changed.
 import { readFileSync } from "node:fs"
 import type { CardDoc } from "@rp/shared/docs/card.ts"
-import type { PresetDoc } from "@rp/shared/docs/preset.ts"
+import type { LegacyPresetDoc as PresetDoc } from "@rp/shared/docs/preset.ts"
 import type { EntityId } from "@rp/shared/chat.ts"
 import { LOREBOOK_SCHEMA_VERSION } from "@rp/shared/docs/lorebook.ts"
 import { newCardDoc, newCardNote } from "@rp/shared/editing.ts"

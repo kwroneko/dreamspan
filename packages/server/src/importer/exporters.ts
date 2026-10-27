@@ -1,12 +1,13 @@
+import { importStPreset } from "../formats/preset.ts"
 // Library documents back out as files (ARCHITECTURE.md §11.4), in the format worker: a
 // large lorebook takes as long to write as to read.
 import { CardDoc } from "@rp/shared/docs/card.ts"
 import { LorebookDoc } from "@rp/shared/docs/lorebook.ts"
 import { NoteDoc } from "@rp/shared/docs/note.ts"
-import { PresetDoc } from "@rp/shared/docs/preset.ts"
+import { LegacyPresetDoc as PresetDoc } from "@rp/shared/docs/preset.ts"
 import { Effect, Schema } from "effect"
 import { exportCardCharx, exportCardJson, exportCardPng } from "../formats/cardExport.ts"
-import { exportStPreset } from "../formats/preset.ts"
+import { exportPromptPreset } from "../formats/presetSettings.ts"
 import { exportLorebook } from "../formats/worldInfo.ts"
 import { type ExportInput, ExportRefused } from "./ops.ts"
 
@@ -90,7 +91,13 @@ export const exportFile = (input: ExportInput): Effect.Effect<Uint8Array, Export
     case "st-world-info":
       return Effect.map(decode(LorebookDoc, "lorebook")(input.docJson), exportLorebook)
     case "st-preset":
-      return Effect.map(decode(PresetDoc, "preset")(input.docJson), (doc) => json(exportStPreset(doc)))
+      return Effect.map(
+        decode(
+          PresetDoc,
+          "preset"
+        )(JSON.stringify({ ...importStPreset('{"temperature":1}').document, ...JSON.parse(input.docJson) })),
+        (doc) => json(exportPromptPreset(doc))
+      )
     default:
       return exportCard(input)
   }

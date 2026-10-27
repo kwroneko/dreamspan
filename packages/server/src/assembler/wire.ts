@@ -121,6 +121,8 @@ export interface ProviderRequest {
   readonly context: Context
   readonly temperature?: number
   readonly maxTokens?: number
+  readonly reasoning?: import("@earendil-works/pi-ai").ThinkingLevel
+  readonly cacheRetention?: "none" | "short" | "long"
   /** Fields merged over the body pi-ai built. */
   readonly payload: Readonly<Record<string, unknown>>
   /** Indices into `context.messages`, most important first. */
@@ -133,7 +135,7 @@ const text = (content: string) => ({ type: "text" as const, text: content })
  * The request for a model: Chat Completions gets the messages as they are, in `payload` (the
  * context pi-ai gets only feeds its usage estimate); other APIs get a context pi-ai converts.
  */
-export const providerRequest = (request: AssembledRequest, model: ModelInput): ProviderRequest => {
+const baseProviderRequest = (request: AssembledRequest, model: ModelInput): ProviderRequest => {
   if (request.prefill && model.prefill === "tool_schema") {
     // A schema encodes the prefix, rather than sending a completed assistant history turn.
     const ordinary = providerRequest(
@@ -220,6 +222,48 @@ export const providerRequest = (request: AssembledRequest, model: ModelInput): P
       model.cacheBreakpoints === "explicit"
         ? request.breakpoints.flatMap((b) => (b.message < first ? [] : [b.message - first]))
         : []
+  }
+}
+
+/** Apply model-owned provider options after prompt composition. */
+export const providerRequest = (request: AssembledRequest, model: ModelInput): ProviderRequest => {
+  const wire = baseProviderRequest(request, model)
+  const settings = model.settings
+  if (!settings) return wire
+  const effort = settings.samplers?.reasoning_effort
+  const verbosity = settings.samplers?.verbosity
+  return {
+    ...wire,
+    ...(settings.cacheRetention ? { cacheRetention: settings.cacheRetention } : {}),
+    ...(["minimal", "low", "medium", "high", "xhigh", "max"].includes(effort ?? "")
+      ? { reasoning: effort as import("@earendil-works/pi-ai").ThinkingLevel }
+      : {}),
+    payload: {
+      ...wire.payload,
+      ...(settings.stop?.length
+        ? model.api === "anthropic-messages"
+          ? { stop_sequences: settings.stop }
+          : model.api === "google-generative-ai"
+            ? { config: { ...(wire.payload.config as object), stopSequences: settings.stop } }
+            : { stop: settings.stop }
+        : {}),
+      ...(settings.logit_bias && model.api === "openai-completions" ? { logit_bias: settings.logit_bias } : {}),
+      ...(effort && effort !== "auto"
+        ? model.api === "openai-responses"
+          ? { reasoning: { effort } }
+          : model.api === "openai-completions"
+            ? { reasoning_effort: effort }
+            : {}
+        : {}),
+      ...(verbosity && verbosity !== "auto"
+        ? model.api === "openai-responses"
+          ? { text: { verbosity } }
+          : model.api === "openai-completions"
+            ? { verbosity }
+            : {}
+        : {}),
+      ...(model.kind === "openrouter" && settings.routing ? { provider: settings.routing } : {})
+    }
   }
 }
 

@@ -1,3 +1,4 @@
+import type { StSettingsImport } from "@rp/shared/modelSettings.ts"
 // Main-thread access to the format workers (ARCHITECTURE.md §11.3). The pool is the
 // database readers' (db/readerPool.ts): a worker is busy until it answers, a crashed one
 // fails only the request it was running and is respawned, and requests beyond the pool's
@@ -38,6 +39,10 @@ export class FormatWorkerFailed extends Schema.TaggedError<FormatWorkerFailed>()
 export class Formats extends Context.Service<
   Formats,
   {
+    readonly previewStSettings: (
+      text: string,
+      surface: "model" | "connection"
+    ) => Effect.Effect<StSettingsImport, FormatWorkerFailed>
     readonly thumbnail: (input: {
       readonly dataDir: string
       readonly path: string
@@ -125,6 +130,7 @@ export const layer = (options: FormatsOptions) =>
         Formats,
         Effect.map(ReaderPool.client(FormatOps), (client) =>
           Formats.of({
+            previewStSettings: (text, surface) => workerFailures(client.PreviewStSettings({ text, surface })),
             thumbnail: (input) => workerFailures(client.Thumbnail(input)),
             parse: (bytes, fileName) => workerFailures(client.Parse({ bytes: ownBuffer(bytes), fileName })),
             export: (input) =>

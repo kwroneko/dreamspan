@@ -1,3 +1,4 @@
+import { CacheWarmth } from "../chat/CacheWarmth.ts"
 import type { RevisionId } from "@rp/shared/library.ts"
 // RPC handlers for chat setup, speakers and the send queue (@rp/shared/chatSetupApi.ts).
 // Every handler acts as the authenticated user; storage enforces ownership, so another
@@ -60,6 +61,7 @@ const bindingsOf = (state: ChatState) =>
 export const makeChatSetupHandlers = Effect.gen(function* () {
   const reader = yield* Reader
   const writer = yield* Writer
+  const warmth = yield* CacheWarmth
   const hub = yield* ChatHub
   const generations = yield* Generations
   const generator = yield* Generator
@@ -79,14 +81,13 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
         entityIds: ids as Array<Cast["participants"][number]>,
         chat: { chatId, bindings: bindingsOf(state) }
       })
-      const model = state.modelBindings[""]
       return new Cast({
         slotId,
         participants: state.participants as Cast["participants"],
         absent: state.absent as Cast["absent"],
         playedByMe: state.playedByMe as Cast["playedByMe"],
-        model: model ? (model as NonNullable<Cast["model"]>) : null,
-        preset: (state.presetBindings[""]?.ref ?? null) as Cast["preset"],
+        model: null,
+        preset: null,
         lorebooks: state.lorebooks as Cast["lorebooks"],
         cardLorebooksOff: Object.entries(state.embeddedLorebooks).flatMap(([entity, on]) =>
           on ? [] : [entity as Cast["cardLorebooksOff"][number]]
@@ -216,7 +217,28 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
     ChangeCast: ({ chatId, slotId, change }) =>
       Effect.gen(function* () {
         const id = yield* userId
-        yield* writer.AddStateEvent({ userId: id, chatId, slotId, versionId: null, scope: null, data: toEvent(change) })
+        if (["Model", "Preset", "DefaultModel", "DefaultPreset"].includes(change._tag)) {
+          yield* reader.StateEventsAt({ userId: id, chatId, slotId })
+          const selection =
+            change._tag === "Model"
+              ? { model: { connection: change.connection, model: change.model } }
+              : change._tag === "Preset"
+                ? { preset: change.ref }
+                : change._tag === "DefaultModel"
+                  ? { model: null }
+                  : { preset: null }
+          yield* writer.ChangeGenerationDefaults({ userId: id, change: selection })
+          yield* warmth.refreshUser(id)
+        } else {
+          yield* writer.AddStateEvent({
+            userId: id,
+            chatId,
+            slotId,
+            versionId: null,
+            scope: null,
+            data: toEvent(change)
+          })
+        }
         hub.publish(chatId, { _tag: "State" })
         return yield* castAt(id, chatId, slotId)
       }).pipe(internal("ChangeCast")),

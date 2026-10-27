@@ -1,3 +1,4 @@
+import { importStPreset } from "../src/formats/preset.ts"
 // Migrations through the real migrator and writer connection settings.
 import { ContextIssue } from "@rp/shared/chat.ts"
 import { join } from "node:path"
@@ -129,5 +130,40 @@ describe("0016_inspector", () => {
         [null, null, null, null, null, null, null, null, [], valid]
       )
     }).pipe(Effect.provide(writerConnection(join(tempDir("inspector-migration"), "db.sqlite"))))
+  )
+})
+
+describe("0044_global_model_settings", () => {
+  it.effect(
+    "keeps sampler history and old chat events, creates prompt-only heads, and never guesses model settings",
+    () =>
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(before("0044_global_model_settings")) })
+        yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES ('u', 'u', 'u', 'admin', 1)`
+        const original = JSON.stringify(importStPreset('{"temperature":0.25,"openai_max_context":32000}').document!)
+        yield* sql`INSERT INTO entities (id, owner_user_id, kind, created_at) VALUES ('preset', 'u', 'preset', 1)`
+        yield* sql`INSERT INTO entity_revisions (id, entity_id, doc_json, doc_hash, schema_version, origin, created_at) VALUES ('old', 'preset', ${original}, 'oldhash', 1, 'user', 1)`
+        yield* sql`INSERT INTO entity_refs (id, entity_id, ref_kind, head_revision_id, label, created_at, updated_at) VALUES ('ref', 'preset', 'upstream', 'old', 'Named preset', 1, 1)`
+        yield* sql`INSERT INTO chats (id, owner_user_id, kind, status, created_at) VALUES ('chat', 'u', 'rp', 'active', 1)`
+        yield* sql`INSERT INTO state_events (id, chat_id, seq, key, value_json, origin, created_at) VALUES ('event', 'chat', 0, 'preset.binding', '{"ref":"ref"}', 'user', 1)`
+        yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(migrations) })
+        assert.strictEqual(
+          (yield* sql<{ doc_json: string }>`SELECT doc_json FROM entity_revisions WHERE id = 'old'`)[0]!.doc_json,
+          original
+        )
+        const [head] = yield* sql<{
+          doc_json: string
+          parents: string
+        }>`SELECT v.doc_json, v.parents FROM entity_revisions v JOIN entity_refs r ON r.head_revision_id = v.id WHERE r.id = 'ref'`
+        assert.notProperty(JSON.parse(head!.doc_json), "samplers")
+        assert.deepStrictEqual(JSON.parse(head!.parents), ["old"])
+        assert.lengthOf(yield* sql`SELECT * FROM state_events WHERE id = 'event'`, 1)
+        assert.lengthOf(
+          yield* sql`SELECT * FROM user_settings WHERE key IN ('generation.model', 'generation.preset')`,
+          0
+        )
+        assert.lengthOf(yield* sql`SELECT * FROM models`, 0)
+      }).pipe(Effect.provide(writerConnection(join(tempDir("global-settings-migration"), "db.sqlite"))))
   )
 })

@@ -4,7 +4,7 @@
 import { readFileSync } from "node:fs"
 import { assert, layer } from "@effect/vitest"
 import type { ChatId } from "@rp/shared/chat.ts"
-import type { PresetDoc } from "@rp/shared/docs/preset.ts"
+import type { LegacyPresetDoc as PresetDoc } from "@rp/shared/docs/preset.ts"
 import { textField, validateDoc, valueField } from "@rp/shared/editing.ts"
 import { ImportResult } from "@rp/shared/libraryImport.ts"
 import type { RefId } from "@rp/shared/library.ts"

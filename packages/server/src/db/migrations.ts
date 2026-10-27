@@ -1,3 +1,7 @@
+import { promptPreset, LegacyPresetDoc } from "@rp/shared/docs/preset.ts"
+import { uuidv7 } from "@rp/shared/id.ts"
+import { Schema } from "effect"
+import { docHash, searchText } from "./documents.ts"
 import { lcmEnableSchema } from "./schema/lcmEnable.ts"
 import { composerChoiceSchema } from "./schema/composerChoice.ts"
 import { historyChangesSchema } from "./historyChanges.ts"
@@ -255,7 +259,38 @@ export const migrations = {
   "0043_branch_name_user": runAll([
     `ALTER TABLE slots ADD COLUMN branch_name_user INTEGER NOT NULL DEFAULT 0 CHECK (branch_name_user IN (0, 1))`,
     `UPDATE slots SET branch_name_user = 1 WHERE row_version <> st_import_row_version`
-  ])
+  ]),
+  "0044_global_model_settings": Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const heads = yield* sql<{
+      id: string
+      entity_id: string
+      doc_json: string
+    }>`SELECT DISTINCT v.id, v.entity_id, v.doc_json
+      FROM entity_refs r JOIN entities e ON e.id = r.entity_id JOIN entity_revisions v ON v.id = r.head_revision_id
+      WHERE e.kind = 'preset'`
+    for (const head of heads) {
+      const decoded = Schema.decodeUnknownExit(LegacyPresetDoc)(JSON.parse(head.doc_json))
+      if (decoded._tag !== "Success") continue
+      const doc = promptPreset(decoded.value)
+      const id = uuidv7()
+      yield* sql`INSERT INTO entity_revisions ${sql.insert({
+        id,
+        entity_id: head.entity_id,
+        parents: JSON.stringify([head.id]),
+        doc_json: JSON.stringify(doc),
+        doc_hash: docHash(doc),
+        schema_version: doc.schema_version,
+        origin: "user",
+        message: "Move model settings out of the prompt preset; original settings remain in the parent revision.",
+        search_text: searchText(doc),
+        created_at: Date.now()
+      })}`
+      yield* sql`UPDATE entity_refs SET head_revision_id = ${id}, row_version = row_version + 1 WHERE head_revision_id = ${head.id}`
+    }
+    // Legacy model/preset state events stay as historical data. Live assembly ignores them;
+    // none is adopted as an account default and no sampler is copied to any model.
+  })
 }
 
 export const Migrations = SqliteMigrator.layer({ loader: SqliteMigrator.fromRecord(migrations) })

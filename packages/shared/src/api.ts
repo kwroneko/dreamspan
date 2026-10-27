@@ -1,3 +1,4 @@
+import { StSettingsImport } from "./modelSettings.ts"
 import { LcmApi } from "./lcm.ts"
 // The client-facing contract. Every UI action is an RPC in this group (DESIGN §7.7).
 import { Context, Schema } from "effect"
@@ -280,6 +281,14 @@ export class AppApi extends RpcGroup.make(
   }),
   // --- Generation (ARCHITECTURE.md §15).
   /** The model and preset the user's chats generate with when they don't choose. */
+  Rpc.make("PreviewStSettings", {
+    payload: {
+      text: Schema.String.check(Schema.isMaxLength(2_000_000)),
+      surface: Schema.Literals(["model", "connection"])
+    },
+    success: StSettingsImport,
+    error: ServerError
+  }),
   Rpc.make("GetGenerationDefaults", { success: GenerationDefaults, error: ServerError }),
   /** Both defaults at once; NotFound when either isn't one of the user's own. */
   Rpc.make("SetGenerationDefaults", {

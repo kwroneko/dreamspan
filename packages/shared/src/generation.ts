@@ -5,7 +5,7 @@ import { Schema } from "effect"
 import { RefId } from "./library.ts"
 
 export class GenerationDefaults extends Schema.Class<GenerationDefaults>("GenerationDefaults")({
-  /** The model a chat without a `model.binding` generates with; none, and it can't generate. */
+  /** The current account model; none, and replies cannot be generated. */
   model: Schema.NullOr(ModelChoice),
   lcm: Schema.optionalKey(LcmDefaults),
   /**
@@ -13,7 +13,7 @@ export class GenerationDefaults extends Schema.Class<GenerationDefaults>("Genera
    * provider's own refusal signal is detected.
    */
   judge: Schema.optionalKey(Schema.NullOr(ModelChoice)),
-  /** The preset a chat without a `preset.binding` uses; none, and it's ST's default preset. */
+  /** The current account prompt preset; none selects the built-in preset named Default. */
   preset: Schema.NullOr(RefId)
 }) {}
 

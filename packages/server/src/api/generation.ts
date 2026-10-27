@@ -1,3 +1,4 @@
+import { Formats } from "../importer/Formats.ts"
 // Client RPC handlers for the user's generation defaults (ARCHITECTURE §15). Storage checks
 // that the model and the preset are the user's own: anything else is NotFound.
 import { type AppApi, CurrentUser } from "@rp/shared/api.ts"
@@ -12,10 +13,15 @@ const serverError = (operation: string) => (error: unknown) =>
   )
 
 export const makeGenerationHandlers = Effect.gen(function* () {
+  const formats = yield* Formats
   const reader = yield* Reader
   const writer = yield* Writer
   const warmth = yield* CacheWarmth
   return {
+    PreviewStSettings: ({ text, surface }) =>
+      formats
+        .previewStSettings(text, surface)
+        .pipe(Effect.catchTag("FormatWorkerFailed", serverError("PreviewStSettings"))),
     GetGenerationDefaults: () =>
       Effect.flatMap(CurrentUser, (user) => reader.GetGenerationDefaults({ userId: user.id })).pipe(
         Effect.catchTag(["StorageError", "RpcClientError"], serverError("GetGenerationDefaults"))

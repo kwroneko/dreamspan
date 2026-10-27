@@ -1,5 +1,5 @@
 // The preset editor (DESIGN §1.2, §6): the prompt list in order, with enable switches and
-// drag to reorder; each prompt's role, position and depth; samplers, prefill, formatting;
+// drag to reorder; each prompt's role, position and depth; prefill text;
 // and the regex scripts, which run only once the user allows them (ARCHITECTURE.md §9).
 import type { PresetPrompt, PromptOrderEntry, RegexScript } from "@rp/shared/docs/preset.ts"
 import { type FieldPath, valueField } from "@rp/shared/editing.ts"
@@ -227,39 +227,6 @@ function Prompts({ store }: { store: EditorStore }) {
   )
 }
 
-const SAMPLERS: ReadonlyArray<readonly [key: string, label: string, integer?: boolean]> = [
-  ["temperature", "Temperature"],
-  ["top_p", "Top P"],
-  ["top_k", "Top K", true],
-  ["top_a", "Top A"],
-  ["min_p", "Min P"],
-  ["frequency_penalty", "Frequency penalty"],
-  ["presence_penalty", "Presence penalty"],
-  ["repetition_penalty", "Repetition penalty"],
-  ["openai_max_context", "Context size (tokens)", true],
-  ["openai_max_tokens", "Reply length (tokens)", true],
-  ["seed", "Seed (-1: none)", true],
-  ["n", "Replies per request", true]
-]
-
-const POSTPROCESS = [
-  { value: "none", label: "None" },
-  { value: "merge", label: "Merge consecutive roles" },
-  { value: "merge_tools", label: "Merge, keeping tools" },
-  { value: "semi", label: "Semi-strict" },
-  { value: "semi_tools", label: "Semi-strict, keeping tools" },
-  { value: "strict", label: "Strict" },
-  { value: "strict_tools", label: "Strict, keeping tools" },
-  { value: "single", label: "One user message" }
-] as const
-
-const NAMES = [
-  { value: "none", label: "No names" },
-  { value: "default", label: "Names in groups and examples" },
-  { value: "completion", label: "In the message's name field" },
-  { value: "content", label: "Before each message's text" }
-] as const
-
 const POSTFIXES = [
   { value: "", label: "Nothing" },
   { value: " ", label: "A space" },
@@ -475,27 +442,6 @@ export function PresetEditor({ store, call }: { store: EditorStore; call: Caller
         <Prompts store={store} />
       </Card>
       <Card>
-        <CardHeader title="Samplers" />
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {SAMPLERS.map(([key, label, integer]) => (
-            <NumberField key={key} store={store} path={["samplers", key]} label={label} integer={integer ?? false} />
-          ))}
-          <NumberField
-            store={store}
-            path={["context_target"]}
-            label="Target context (tokens; empty: 80% of maximum)"
-            integer
-            min={1}
-            optional
-          />
-          <TextField store={store} path={["samplers", "reasoning_effort"]} label="Reasoning effort" />
-          <TextField store={store} path={["samplers", "verbosity"]} label="Verbosity" />
-        </div>
-        <div className="mt-3">
-          <SwitchField store={store} path={["samplers", "max_context_unlocked"]} label="Unlocked context size" />
-        </div>
-      </Card>
-      <Card>
         <CardHeader title="Prefill" description="Dropped where the provider can't take it." />
         <div className="flex flex-col gap-3">
           <TextField store={store} path={["prefill", "assistant"]} label="Start of the reply" rows={3} />
@@ -511,21 +457,6 @@ export function PresetEditor({ store, call }: { store: EditorStore; call: Caller
             path={["prefill", "continue_postfix"]}
             label="After a continued message"
             items={POSTFIXES}
-          />
-        </div>
-      </Card>
-      <Card>
-        <CardHeader title="Formatting" />
-        <div className="flex flex-col gap-3">
-          <div className="grid gap-3 sm:grid-cols-2">
-            <SelectField store={store} path={["postprocess"]} label="Post-processing" items={POSTPROCESS} />
-            <SelectField store={store} path={["names_behavior"]} label="Speaker names" items={NAMES} />
-          </div>
-          <SwitchField store={store} path={["squash"]} label="Join consecutive system messages" />
-          <SwitchField
-            store={store}
-            path={["use_sysprompt"]}
-            label="Send the system prompt as the provider's system parameter"
           />
         </div>
       </Card>
