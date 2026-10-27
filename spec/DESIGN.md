@@ -526,6 +526,18 @@ Stepped history, dropped-message display and rewrite warnings without a TTL are 
 - **[D] Rejected:** `{{summary}}` silently reading the imported summary whatever its note's switch (the build's behaviour): ad-hoc logic the user can't see or turn off. The summary is a note like any other (owner, 2026-10-27).
 - **[D]** The summarization settings must be designed properly (owner, 2026-10-27).
 
+- **[D]** The summarization settings (owner confirmed 2026-10-27), per fork, with an account default for new chats, in the right panel's Chat tab:
+  - on/off;
+  - with the full preset (default; the owner's Sum2) or without it (instruction plus messages only);
+  - the instruction, editable (default close to the owner's Sum2 wording, neutral);
+  - **recent messages kept as written: a maximum and a target** (above the maximum, the oldest are summarized until the recent part is back at the target), reference-harness's hysteresis as already decided above and built as stepped history;
+  - **the summary block: a maximum and a target** (above the maximum, the oldest summaries are condensed into higher levels until it's back at the target);
+  - the total context limit stays with the model's settings; the section shows when the pairs don't fit inside it;
+  - when it runs: with the next reply, or right after one while the cache is warm;
+  - under Advanced: chunk size and summary length.
+  - Rejected: a manual "summarize up to here". The point is automation, and it can't work with several levels.
+- **[P]** Imported ST summaries are plain notes: "Summary (from ST)", switched on if ST was sending it (injected or through `{{summary}}` in the active preset), controlled only by its switch. `{{summary}}` in a preset is explicit: it inserts the chat's switched-on summary notes, or the summaries when summarization is on; the preset editor marks each `{{summary}}` with what it fills in, and the note says the preset includes it.
+
 ### 8.1 Imported summaries
 - **[D]** Importing a chat also imports its summary, if it has one. **This is required before the owner starts using the harness** (owner, 2026-10-12).
 - **[D]** The custom single-field summary is kept in its own field, even where LCM makes it technically obsolete. A chat that already has a summary keeps it.
