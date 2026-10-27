@@ -519,6 +519,13 @@ Stepped history, dropped-message display and rewrite warnings without a TTL are 
 - **[D]** The summary divider and the summary panel have a toggle for what the timeline shows before the summary line: the original messages, or the summaries themselves in the chat. It can be switched at any time, including while previewing a search and replace (owner, 2026-10-26). It is saved per account: the toggle belongs to the chat viewer itself, not to the chat or anything about it (owner, 2026-10-26).
 - **[P]** "Summaries in the chat" shows the layer the model actually reads, in path order, each in place of the messages it covers, with its level and range; each expands to its messages (a level above 1 to the summaries it condenses). So the timeline can show exactly what the model sees.
 
+- **[D]** (owner, 2026-10-27) The owner's actual ST method is the "Sum2" Quick Reply: pick a message range, hide everything outside it, generate **with the full preset** and an instruction ("Pause your roleplay. Context usage has reached a critical level… If there is already a summary, your new summary should start where the previous one stopped…"), unhide, post the result. ST's Summarize extension offers the same choice: "Classic" (full context plus the instruction, optionally without lorebook and Author's Note) or "Raw" (the instruction as system prompt plus the messages).
+- **[D]** Catching up a chat that has no summaries is done up front; the main cost is reading the context (owner, 2026-10-27).
+- **[D]** Summarizing must hit the chat's cache prefix: breakpoints set carefully where applicable, working as well for Anthropic and OpenAI models called natively as through OpenRouter or AWS (reference-harness is set up for this). Continuous summarizing should then be cheap and relatively rare (owner, 2026-10-27).
+- **[D]** A separate summarization model may make sense in some cases (the owner doesn't usually use one: for a first catch-up you can switch model, summarize, switch back). How to configure it is open and can be deferred if its UX is too hard (owner, 2026-10-27).
+- **[D] Rejected:** `{{summary}}` silently reading the imported summary whatever its note's switch (the build's behaviour): ad-hoc logic the user can't see or turn off. The summary is a note like any other (owner, 2026-10-27).
+- **[D]** The summarization settings must be designed properly (owner, 2026-10-27).
+
 ### 8.1 Imported summaries
 - **[D]** Importing a chat also imports its summary, if it has one. **This is required before the owner starts using the harness** (owner, 2026-10-12).
 - **[D]** The custom single-field summary is kept in its own field, even where LCM makes it technically obsolete. A chat that already has a summary keeps it.
