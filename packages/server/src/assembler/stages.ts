@@ -1,4 +1,5 @@
 import { modelName } from "@rp/shared/cardNames.ts"
+import { withModelSettings } from "@rp/shared/modelSettings.ts"
 import { schemaPrefillBudget } from "./prefill.ts"
 import { layerText, lcmStage } from "./lcm.ts"
 import { createHash } from "node:crypto"
@@ -174,13 +175,7 @@ const modelStage: AssemblerStage = {
   run: (assembly) =>
     Effect.gen(function* () {
       const sources = yield* AssemblySources
-      const bindings = need(assembly, "state").modelBindings
-      assembly.model = yield* sources.model(
-        (assembly.request.summarizing ? bindings["summarizer"] : undefined) ??
-          bindings["narrator"] ??
-          bindings[""] ??
-          null
-      )
+      assembly.model = yield* sources.model(null)
       return assembly
     })
 }
@@ -190,12 +185,13 @@ const presetStage: AssemblerStage = {
   run: (assembly) =>
     Effect.gen(function* () {
       const sources = yield* AssemblySources
-      const bindings = need(assembly, "state").presetBindings
-      assembly.preset = yield* sources.preset({
-        role: (assembly.request.summarizing ? bindings["summarizer"] : undefined) ?? bindings["narrator"] ?? null,
-        chat: bindings[""] ?? null,
-        connection: assembly.model?.presetOverride ?? null
-      })
+      assembly.preset = yield* sources.preset({ role: null, chat: null, connection: null })
+      const model = assembly.model
+      if (model?.settings)
+        assembly.preset = {
+          ...assembly.preset,
+          doc: withModelSettings(assembly.preset.doc, model.settings, model.context, model.maxOutput)
+        }
       return assembly
     })
 }
@@ -1120,7 +1116,7 @@ const placedNotes = (assembly: Assembly, cards: ReadonlyArray<CardInput>, person
 
 /** The context as ST's populateChatCompletion builds it, with our layouts' blocks and tail outside ST mode. */
 const composeStage = sync("compose", (assembly) => {
-  const doc = need(assembly, "preset").doc
+  let doc = need(assembly, "preset").doc
   const cast = need(assembly, "cast")
   const mode = need(assembly, "mode")
   const env = need(assembly, "macros")
@@ -1561,10 +1557,22 @@ const composeStage = sync("compose", (assembly) => {
     assembly.prefill && assembly.model?.prefill === "tool_schema" ? schemaPrefillBudget(assembly.prefill) : null
   const prefillInput = schemaReserve?.input ?? (assembly.prefill ? tokensOf({ content: assembly.prefill }) : 0)
   const prefixOutput = schemaReserve?.output ?? 0
+  // A default response length gives way to the source prefix; only the model's own can exceed the limit.
+  const outputLimit = assembly.model?.maxOutput
+  if (
+    schemaReserve &&
+    outputLimit != null &&
+    assembly.model?.settings?.samplers?.openai_max_tokens === undefined &&
+    outputLimit - prefixOutput > 0 &&
+    doc.samplers.openai_max_tokens + prefixOutput > outputLimit
+  ) {
+    doc = { ...doc, samplers: { ...doc.samplers, openai_max_tokens: outputLimit - prefixOutput } }
+    assembly.preset = { ...need(assembly, "preset"), doc }
+  }
   if (schemaReserve && doc.samplers.openai_max_tokens + prefixOutput > (assembly.model?.maxOutput ?? Infinity))
     throw new AssemblyFailed({
       reason: "budget",
-      message: `The source prefix and requested continuation need about ${doc.samplers.openai_max_tokens + prefixOutput} output tokens, beyond ${assembly.model!.key}'s ${assembly.model!.maxOutput}-token output limit. Choose a model with a larger output limit or reduce the preset's response length.`
+      message: `The source prefix and requested continuation need about ${doc.samplers.openai_max_tokens + prefixOutput} output tokens, beyond ${assembly.model!.key}'s ${assembly.model!.maxOutput}-token output limit. Choose a model with a larger output limit or reduce the model's response length.`
     })
   const reserve =
     prefillInput + prefixOutput + (!mode.st && assembly.lorebooks?.length ? loreAllowance(assembly) - loreCost : 0)

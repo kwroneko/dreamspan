@@ -7,7 +7,7 @@ import { request } from "node:http"
 import { join } from "node:path"
 import { DatabaseSync } from "node:sqlite"
 import { assert, describe, layer } from "@effect/vitest"
-import type { PresetDoc } from "@rp/shared/docs/preset.ts"
+import type { LegacyPresetDoc as PresetDoc } from "@rp/shared/docs/preset.ts"
 import { ImportResult } from "@rp/shared/libraryImport.ts"
 import type { RefId } from "@rp/shared/library.ts"
 import { Effect, Option, Redacted, Schema } from "effect"
@@ -289,12 +289,16 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
       const preset = yield* imported(presetFile("Write vivid prose."), "Narrator.json")
       assert.strictEqual(preset.library!.ref.label, "Narrator")
       const presetOut = yield* exported(preset.library!.ref.id, "st-preset")
+      assert.strictEqual(presetOut.status, 200)
       const file = JSON.parse(new TextDecoder().decode(presetOut.bytes))
       assert.strictEqual(
         file.prompts.find((p: { identifier: string }) => p.identifier === "main").content,
         "Write vivid prose."
       )
       assert.notProperty(file, "proxy_password")
+      assert.notProperty(file, "temperature")
+      assert.notProperty(file, "openai_max_context")
+      assert.notProperty(file, "names_behavior")
     })
   )
 

@@ -146,7 +146,20 @@ const uniqueBy =
     return undefined
   }
 
-export const PresetDoc = Schema.Struct({
+/** Every order entry names a prompt in `prompts`: the library merge matches them by identity. */
+const ordersNamePrompts = () =>
+  Schema.makeFilter(
+    (doc: {
+      readonly prompts: ReadonlyArray<{ readonly identifier: string }>
+      readonly order: ReadonlyArray<{ readonly identifier: string }>
+    }) => {
+      const ids = new Set(doc.prompts.map((p) => p.identifier))
+      const i = doc.order.findIndex((e) => !ids.has(e.identifier))
+      return i === -1 ? undefined : { path: ["order", i], issue: "names no prompt" }
+    }
+  )
+
+export const LegacyPresetDoc = Schema.Struct({
   schema_version: Schema.Literal(PRESET_SCHEMA_VERSION),
   prompts: Schema.Array(PresetPrompt).check(
     Schema.makeFilter(uniqueBy((p: PresetPrompt) => p.identifier, "identifier"))
@@ -187,11 +200,36 @@ export const PresetDoc = Schema.Struct({
   extensions: Json,
   /** Top-level ST fields this document doesn't model, kept for export. */
   unsupported: Json
-}).check(
-  Schema.makeFilter((doc) => {
-    const ids = new Set(doc.prompts.map((p) => p.identifier))
-    const i = doc.order.findIndex((e) => !ids.has(e.identifier))
-    return i === -1 ? undefined : { path: ["order", i], issue: "names no prompt" }
-  })
-)
+}).check(ordersNamePrompts())
+export type LegacyPresetDoc = typeof LegacyPresetDoc.Type
+
+/** Prompt content only. Legacy revisions retain their original model settings in history. */
+export const PresetDoc = LegacyPresetDoc.mapFields((fields) => {
+  const { samplers, context_target, names_behavior, squash, postprocess, use_sysprompt, ...prompts } = fields
+  void [samplers, context_target, names_behavior, squash, postprocess, use_sysprompt]
+  return prompts
+}).check(ordersNamePrompts())
 export type PresetDoc = typeof PresetDoc.Type
+
+export const promptPreset = (doc: LegacyPresetDoc): PresetDoc => {
+  const prompt = Schema.decodeUnknownSync(PresetDoc)(doc)
+  const modelKeys = new Set([
+    "stop",
+    "stopping_strings",
+    "logit_bias",
+    "stream_openai",
+    "reasoning_effort",
+    "verbosity",
+    "cache_control",
+    "cacheRetention",
+    "provider"
+  ])
+  return {
+    ...prompt,
+    unsupported: Object.fromEntries(
+      Object.entries(prompt.unsupported).filter(
+        ([key]) => !modelKeys.has(key) && !/^(openrouter|vertexai|azure|nanogpt)_/.test(key)
+      )
+    )
+  }
+}

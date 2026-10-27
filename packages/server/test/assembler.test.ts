@@ -4,7 +4,7 @@
 import type { EntityId } from "@rp/shared/chat.ts"
 import type { CardDoc } from "@rp/shared/docs/card.ts"
 import type { NoteDoc } from "@rp/shared/docs/note.ts"
-import type { PresetDoc } from "@rp/shared/docs/preset.ts"
+import type { LegacyPresetDoc as PresetDoc } from "@rp/shared/docs/preset.ts"
 import type { StateEventData } from "@rp/shared/state.ts"
 import { Effect } from "effect"
 import { readFileSync } from "node:fs"

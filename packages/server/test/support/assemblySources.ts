@@ -2,7 +2,7 @@
 // pipeline the reader worker runs, without a database.
 import type { CardDoc } from "@rp/shared/docs/card.ts"
 import type { NoteDoc } from "@rp/shared/docs/note.ts"
-import type { PresetDoc } from "@rp/shared/docs/preset.ts"
+import type { LegacyPresetDoc as PresetDoc } from "@rp/shared/docs/preset.ts"
 import type { FoldableEvent } from "@rp/shared/state.ts"
 import { Effect, Layer, Scope } from "effect"
 import { type Assembler, makeAssembler } from "../../src/assembler/assembler.ts"

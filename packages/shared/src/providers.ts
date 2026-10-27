@@ -1,5 +1,6 @@
 // Connections and models (spec/PROVIDERS.md §2, §3). Shared so the client can show the
 // same kinds, fields and merged model descriptions the server uses.
+import { ModelSettings } from "./modelSettings.ts"
 import { Schema } from "effect"
 import { idSchema } from "./id.ts"
 import { RefId } from "./library.ts"
@@ -133,6 +134,7 @@ export type Price = typeof Price.Type
 
 /** The capability fields a user can edit (PROVIDERS §3.2). Every field may be unknown. */
 const capabilityFields = {
+  settings: Schema.optionalKey(ModelSettings),
   name: Schema.optionalKey(Schema.String),
   context: Schema.optionalKey(Schema.Int),
   maxOutput: Schema.optionalKey(Schema.Int),
@@ -176,6 +178,7 @@ export interface EffectiveModel {
   readonly cacheBreakpoints: Resolved<typeof CacheBreakpoints.Type>
   readonly compat: Readonly<Record<string, unknown>>
   readonly sampling: Readonly<Record<string, unknown>>
+  readonly settings: ModelSettings
   readonly price: ModelUpstream["price"] | null
 }
 
@@ -216,6 +219,7 @@ export const resolveModel = (
     cacheBreakpoints: pick("cacheBreakpoints", "auto" as const),
     compat: { ...connectionCompat, ...upstream.compat, ...overrides.compat },
     sampling: { ...upstream.sampling, ...overrides.sampling },
+    settings: { ...upstream.settings, ...overrides.settings },
     price: upstream.price ?? null
   }
 }

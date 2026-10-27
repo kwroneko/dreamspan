@@ -1,3 +1,4 @@
+import { GenerationControls } from "./GenerationControls.tsx"
 // The composer (DESIGN §2.2): who's speaking, always visible, with a switcher and the
 // speakers used most recently; Send as them, or Generate their turn, the text then being a
 // one-turn direction. A send while a reply is still being written is queued by the
@@ -223,7 +224,15 @@ function History({ draft }: { draft: ComposerDraft }) {
   )
 }
 
-export function Composer({ session, view }: { session: ChatSession; view: ChatView }) {
+export function Composer({
+  session,
+  view,
+  onSettings
+}: {
+  session: ChatSession
+  view: ChatView
+  onSettings: (tab: "model" | "preset") => void
+}) {
   const castView = useCast()
   const { cast } = castView
   const userId = useSession().user.id
@@ -407,6 +416,7 @@ export function Composer({ session, view }: { session: ChatSession; view: ChatVi
 
   return (
     <div className="@container mx-auto flex w-full max-w-3xl flex-col gap-2 border-t border-border pt-2 pb-2">
+      <GenerationControls session={session} onSettings={onSettings} />
       {view.queue.length > 0 && (
         <ul className="flex flex-col gap-2" aria-label="Queued messages">
           {view.queue.map((queued) => (

@@ -7,7 +7,7 @@
 // instruction is saved by its button; until then what's typed is copied into this browser
 // (`editor/backup.ts`), shown again here after leaving the page or a reload, and listed in
 // Browser recovery.
-import type { GenerationDefaults, GenerationDefaultsChange } from "@rp/shared/generation.ts"
+import { BUILTIN_PRESET_LABEL, type GenerationDefaults, type GenerationDefaultsChange } from "@rp/shared/generation.ts"
 import type { LibraryRef } from "@rp/shared/library.ts"
 import { Effect } from "effect"
 import { useEffect, useRef, useState } from "react"
@@ -32,8 +32,11 @@ export function ChatDefaultsPage() {
   useTitle("Chats")
   const action = useAction()
   const userId = useSession().user.id
-  const models = useModelChoices(true)
   const [defaults, setDefaults] = useState<GenerationDefaults | null>(null)
+  const models = useModelChoices(
+    true,
+    defaults?.model ? modelValue(defaults.model.connection, defaults.model.model) : null
+  )
   const [presets, setPresets] = useState<ReadonlyArray<LibraryRef>>([])
   const [tail, setTail] = useState("")
   const [saved, setSaved] = useState(false)
@@ -140,8 +143,8 @@ export function ChatDefaultsPage() {
     <div className="flex flex-col gap-6">
       <Card>
         <CardHeader
-          title="New chats and chats without their own"
-          description="A chat uses these unless it sets its own model or preset, in its side panel's This chat tab."
+          title="Current model and prompt preset"
+          description="These account settings apply to every chat. You can also switch them in the composer."
         />
         <div className="flex flex-col gap-4">
           <Field
@@ -149,7 +152,7 @@ export function ChatDefaultsPage() {
             description={
               models.length === 0
                 ? "Add a connection with models first, in Connections."
-                : "Without one, a chat that sets no model can't generate."
+                : "Choose a model to generate replies."
             }
           >
             <Select
@@ -161,15 +164,15 @@ export function ChatDefaultsPage() {
           </Field>
           <Field
             label="Default preset"
-            description="Without one, SillyTavern's built-in default. A connection's own preset takes precedence over this."
+            description="Without one, the built-in prompt preset is used. Switching connections may select a locked preset."
           >
             <Select
               items={[
-                { value: NONE, label: "SillyTavern's default preset" },
+                { value: NONE, label: BUILTIN_PRESET_LABEL },
                 ...presets.map((ref) => ({ value: ref.id as string, label: ref.label }))
               ]}
               value={defaults ? (defaults.preset ?? NONE) : null}
-              placeholder="SillyTavern's default preset"
+              placeholder={BUILTIN_PRESET_LABEL}
               onValueChange={(value) => void change({ preset: value === NONE ? null : (value as LibraryRef["id"]) })}
             />
           </Field>

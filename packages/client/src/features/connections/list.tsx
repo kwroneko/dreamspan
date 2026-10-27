@@ -1,3 +1,5 @@
+import { StSettingsImporter } from "./StSettingsImport.tsx"
+import { Dialog } from "../../ui/Dialog.tsx"
 // The connection list and the form for a new connection.
 import type { Credential, CredentialId, ProviderKindInfo } from "@rp/shared/providers.ts"
 import { originOf } from "@rp/shared/providers.ts"
@@ -14,17 +16,63 @@ import { effectiveOrigin, parseOptionalInt, providerSetupAtom } from "./data.ts"
 
 export function ConnectionsPage() {
   useTitle("Connections")
+  const [importing, setImporting] = useState(false)
+  const action = useAction()
+  const navigate = useNavigate()
   return (
     <Card>
       <CardHeader
         title="Connections"
         description="Each connection is one provider API at one address, with the key it sends."
         actions={
-          <Link to="/settings/connections/new" className={buttonClass("primary")}>
-            New connection
-          </Link>
+          <>
+            <Button onClick={() => setImporting(true)}>Import connection settings</Button>
+            <Link to="/settings/connections/new" className={buttonClass("primary")}>
+              New connection
+            </Link>
+          </>
         }
       />
+      {importing && (
+        <Dialog
+          open
+          onOpenChange={setImporting}
+          title="Import connection settings"
+          description="Import API type, URL and model name from a shared ST preset. Keys and passwords are ignored."
+        >
+          <StSettingsImporter
+            surface="connection"
+            apply={async (preview) => {
+              const value = preview.connection
+              if (!value) return
+              const created = await action.run(
+                (client) =>
+                  client("CreateConnection", {
+                    kind: value.kind,
+                    settings: {
+                      name: value.model ?? "Imported connection",
+                      baseUrl: value.baseUrl,
+                      compat: {},
+                      cacheTtlS: null,
+                      maxConcurrent: null,
+                      presetOverrideRefId: null
+                    }
+                  }),
+                ["connections"]
+              )
+              if (!created.ok) return
+              if (value.model)
+                await action.run(
+                  (client) =>
+                    client("AddUserModel", { connectionId: created.value.id, key: value.model!, overrides: {} }),
+                  ["models"]
+                )
+              void navigate({ to: "/settings/connections/$connectionId", params: { connectionId: created.value.id } })
+            }}
+          />
+          <ErrorAlert error={action.error} />
+        </Dialog>
+      )}
       <AsyncView atom={providerSetupAtom} loading="Loading connections…">
         {({ kinds, connections }) =>
           connections.length === 0 ? (

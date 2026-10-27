@@ -126,7 +126,7 @@ describe("chat groups", () => {
     120_000
   )
 
-  it.live("takes a chat's own model and preset off, from a position on", () =>
+  it.live("compatibility model/preset changes update account settings without chat bindings", () =>
     Effect.gen(function* () {
       const api = yield* client()
       const mira = yield* card(api, "Mira", { name: "Mira", first_mes: "Hello." })
@@ -171,14 +171,17 @@ describe("chat groups", () => {
         slotId: at,
         change: { _tag: "Preset", ref: preset.ref.id }
       })
-      assert.strictEqual(bound.model?.model, model.id)
-      assert.strictEqual(bound.preset, preset.ref.id)
+      assert.isNull(bound.model)
+      assert.isNull(bound.preset)
+      const defaults = yield* api.GetGenerationDefaults()
+      assert.strictEqual(defaults.model?.model, model.id)
+      assert.strictEqual(defaults.preset, preset.ref.id)
 
       yield* api.ChangeCast({ chatId, slotId: at, change: { _tag: "DefaultModel" } })
       const cleared = yield* api.ChangeCast({ chatId, slotId: at, change: { _tag: "DefaultPreset" } })
       assert.isNull(cleared.model)
       assert.isNull(cleared.preset)
-      // Before those events, at the chat's start, nothing was ever set.
+      // No model or preset events were written, at any position.
       const before = yield* api.GetCast({ chatId, slotId: null })
       assert.isNull(before.model)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))

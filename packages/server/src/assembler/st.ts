@@ -1,6 +1,6 @@
 // SillyTavern 1.19's chat-completion prompt building, function by function (ARCHITECTURE §15,
 // "ST-compatible mode"; each function names the ST one it follows).
-import type { PresetDoc, PresetPrompt } from "@rp/shared/docs/preset.ts"
+import type { LegacyPresetDoc as PresetDoc, PresetPrompt } from "@rp/shared/docs/preset.ts"
 import { AssemblyFailed, type GenerationType, type Role } from "./types.ts"
 
 /** A prompt of the collection, as ST's PromptManager prepares it. */

@@ -9,7 +9,17 @@ const folder = (descriptionChars = 20_000) =>
   new Map([
     ["settings.json", encode({ oai_settings: { preset_settings_openai: "Roomy" } })],
     ["characters/Mira.png", card("Mira", "Hello.", {}, { description: "x".repeat(descriptionChars) })],
-    ["OpenAI Settings/Roomy.json", encode({ openai_max_context: 32000, openai_max_tokens: 300 })],
+    [
+      "OpenAI Settings/Roomy.json",
+      encode({
+        openai_max_context: 32000,
+        openai_max_tokens: 300,
+        temperature: 0.17,
+        chat_completion_source: "custom",
+        custom_url: "http://localhost:9999/v1",
+        custom_model: "ignored-folder-model"
+      })
+    ],
     [
       "chats/Mira/Imported.jsonl",
       jsonl([
@@ -28,7 +38,7 @@ const folder = (descriptionChars = 20_000) =>
 
 layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "90 seconds" })("ST selected preset", (it) => {
   for (const chars of [14_000, 20_000]) {
-    it.effect(`keeps all 50 imported messages in context with a ${chars / 4}-token card`, () =>
+    it.effect(`uses explicit model settings for all 50 imported messages with a ${chars / 4}-token card`, () =>
       Effect.gen(function* () {
         const api = yield* client()
         // The first import has no setting row; the second has an explicitly unset default.
@@ -37,6 +47,24 @@ layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "90 secon
         const chat = (yield* api.ListChats({ limit: 10, before: null }))[0]!
         const path = yield* api.ReadPath({ chatId: chat.id, leafSlotId: null, range: { _tag: "Bottom" }, limit: 100 })
         assert.lengthOf(path.entries, 50)
+        assert.lengthOf(yield* api.ListConnections(), chars === 14000 ? 0 : 1)
+        const connection = yield* api.CreateConnection({
+          kind: "openai-chat",
+          settings: {
+            name: "Synthetic local",
+            baseUrl: "http://localhost:1234/v1",
+            compat: {},
+            cacheTtlS: null,
+            maxConcurrent: null,
+            presetOverrideRefId: null
+          }
+        })
+        const model = yield* api.AddUserModel({
+          connectionId: connection.id,
+          key: `synthetic-${chars}`,
+          overrides: { context: 32000, maxOutput: 300 }
+        })
+        yield* api.ChangeGenerationDefaults({ change: { model: { connection: connection.id, model: model.id } } })
         const next = yield* api.GetNextContext({ chatId: chat.id, leafSlotId: null })
         assert.strictEqual(next.historyStart?.depth, 0)
         assert.strictEqual(next.historyStart?.slotId, path.entries[0]!.slotId)
@@ -114,13 +142,13 @@ layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "90 secon
       const next = yield* api.GetNextContext({ chatId: chat.id, leafSlotId: null })
       assert.isNull(next.historyStart)
       assert.deepInclude(next.budget, {
-        maximum: 4095,
-        target: 3276,
-        responseReserve: 300,
-        presetName: "Default",
+        maximum: 8192,
+        target: 6553,
+        responseReserve: 4096,
+        presetName: "Default (built-in)",
         builtinPreset: true
       })
-      assert.deepStrictEqual(next.preset, { ref: null, name: "Default", scope: "builtin" })
+      assert.deepStrictEqual(next.preset, { ref: null, name: "Default (built-in)", scope: "builtin" })
       assert.isAbove(next.budget!.nonHistoryTokens, 5000)
       const chosen = (yield* api.ListLibrary({ kind: "preset" })).find((ref) => ref.label === "Roomy")!.id
       yield* api.SetGenerationDefaults({ defaults: { model: null, preset: chosen } })

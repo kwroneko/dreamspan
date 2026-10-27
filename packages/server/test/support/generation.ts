@@ -69,7 +69,15 @@ export const generateReply = (
     const model = yield* api.AddUserModel({
       connectionId: connection.id,
       key: options.modelKey ?? "mock-model",
-      overrides: options.model
+      // Explicit fixture model settings preserve the old test scenarios; production imports never do this.
+      overrides: {
+        ...options.model,
+        settings: {
+          ...presetDoc(options.preset ?? {}),
+          ...options.model.settings,
+          samplers: { ...presetDoc(options.preset ?? {}).samplers, ...options.model.settings?.samplers }
+        }
+      }
     })
     const entity = (kind: "card" | "preset", label: string, doc: object) =>
       writer.CreateEntity({

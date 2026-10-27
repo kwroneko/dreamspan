@@ -1,4 +1,4 @@
-import { PresetDoc } from "@rp/shared/docs/preset.ts"
+import { LegacyPresetDoc as PresetDoc } from "@rp/shared/docs/preset.ts"
 import { Schema } from "effect"
 import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
