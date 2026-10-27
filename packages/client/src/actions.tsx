@@ -1,3 +1,4 @@
+import { notifyLibraryChange } from "./libraryChanges.ts"
 // Calling the server from components: queries render through `AsyncView`, and actions
 // (writes) run through `useAction`, which tracks their pending state and error. Both send
 // the user back to login when the session has ended.
@@ -39,8 +40,12 @@ export function useAction() {
           Reactivity.Reactivity
         )
         const outcome = yield* Effect.exit(call(Context.get(services, AppClient)))
-        const stale = Exit.isFailure(outcome) && describeCause(outcome.cause).tag === "StaleWrite"
-        if ((Exit.isSuccess(outcome) || stale) && invalidates.length > 0) reactivity.invalidateUnsafe(invalidates)
+        const stale =
+          Exit.isFailure(outcome) && ["StaleWrite", "EditRefused"].includes(describeCause(outcome.cause).tag)
+        if ((Exit.isSuccess(outcome) || stale) && invalidates.length > 0) {
+          reactivity.invalidateUnsafe(invalidates)
+          notifyLibraryChange(invalidates)
+        }
         return yield* outcome
       })
     )

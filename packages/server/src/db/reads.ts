@@ -1,3 +1,4 @@
+import { chatCast } from "./cards.ts"
 import { contextExcluded } from "./lcmVisibility.ts"
 // Read operation handlers. They run inside the reader workers on read-only connections.
 import type { ChatId, SlotId, VersionId } from "@rp/shared/chat.ts"
@@ -414,7 +415,9 @@ export const makeReadHandlers = Effect.gen(function* () {
           if (card?.n !== 1) return yield* new NotFound({ entity: "card", id: entityId })
         }
         const ranked = entityId === undefined ? 0 : 1
-        const pattern = search ? `%${search.replace(/[\\%_]/g, "\\$&")}%` : null
+        // SQLite LIKE's case folding is ASCII-only. Treat wildcard characters literally.
+        const fold = (text: string) => text.replace(/[A-Z]/g, (c) => c.toLowerCase())
+        const needle = search ? fold(search) : null
         const rows = yield* sql<ChatRow>`
           SELECT * FROM chats WHERE owner_user_id = ${userId} AND deleted_at IS NULL
             AND (${before?.id ?? null} IS NULL
@@ -423,20 +426,24 @@ export const makeReadHandlers = Effect.gen(function* () {
             AND (${entityId ?? null} IS NULL OR id IN (
               SELECT s.chat_id FROM state_events s WHERE json_extract(s.value_json, '$.entity') = ${entityId ?? null}
                 AND s.key = 'participant.join' AND s.superseded_by_changeset IS NULL))
-            AND (${pattern} IS NULL OR title LIKE ${pattern} ESCAPE '\\' OR id IN (
-              SELECT s.chat_id FROM state_events s
-              WHERE s.key = 'participant.join' AND s.superseded_by_changeset IS NULL
-                AND json_extract(s.value_json, '$.entity') IN (
-                  SELECT e.id FROM entities e
-                  JOIN entity_refs r ON r.entity_id = e.id AND r.ref_kind <> 'chat_override'
-                  JOIN entity_revisions rev ON rev.id = r.head_revision_id
-                  WHERE e.owner_user_id = ${userId} AND e.kind = 'card' AND e.purged_at IS NULL
-                    AND (r.label LIKE ${pattern} ESCAPE '\\'
-                      OR r.subtitle LIKE ${pattern} ESCAPE '\\'
-                      OR json_extract(rev.doc_json, '$.nickname') LIKE ${pattern} ESCAPE '\\'))))
           ORDER BY ${ranked} * (last_message_at IS NOT NULL) DESC, coalesce(last_message_at, created_at) DESC, id DESC
-          LIMIT ${limit}`
-        return rows.map(toChat)
+          LIMIT ${needle === null ? limit : -1}`
+        if (needle === null) return rows.map(toChat)
+        const found: Array<ChatRow> = []
+        for (const row of rows) {
+          const cast = fold(row.title).includes(needle)
+            ? []
+            : yield* chatCast(sql, userId, row.id as ChatId, row.active_leaf_slot_id)
+          if (
+            fold(row.title).includes(needle) ||
+            cast.some((card) =>
+              [card.name, card.subtitle, card.modelName].some((text) => fold(text ?? "").includes(needle))
+            )
+          )
+            found.push(row)
+          if (found.length === limit) break
+        }
+        return found.map(toChat)
       }).pipe(query("ListChats")),
 
     ReadPath: ({ userId, chatId, leafSlotId, range, limit }) =>

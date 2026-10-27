@@ -1,3 +1,7 @@
+import { cardNames } from "@rp/shared/cardNames.ts"
+import { Effect } from "effect"
+import { useCardNameCheck } from "./cardNameCheck.ts"
+import { checkCardNames } from "./checkCardNames.ts"
 // Compare immutable revisions with their first parent or the live working document.
 import type { Doc, Revision } from "@rp/shared/library.ts"
 import { useEffect, useState } from "react"
@@ -34,13 +38,19 @@ function RevisionComparison({ store, call, revision }: { store: EditorStore; cal
       live = false
     }
   }, [store, revision])
+  const names = cardNames(docs?.doc ?? {})
+  const clash = useCardNameCheck(names.displayName, names.version, state.snapshot!.ref)
   const restore = async () => {
+    if (!docs || clash) return
     const result = await call(
       (client) =>
-        client("RestoreRevision", {
-          refId: store.refId,
-          revisionId: revision.id,
-          expectedRowVersion: state.snapshot!.ref.rowVersion
+        Effect.gen(function* () {
+          yield* checkCardNames(client, names.displayName, names.version, state.snapshot!.ref)
+          return yield* client("RestoreRevision", {
+            refId: store.refId,
+            revisionId: revision.id,
+            expectedRowVersion: state.snapshot!.ref.rowVersion
+          })
         }),
       ["library"]
     )
@@ -90,7 +100,14 @@ function RevisionComparison({ store, call, revision }: { store: EditorStore; cal
       )}
       {revision.id !== state.snapshot!.ref.headRevisionId && (
         <div>
-          <Button onClick={() => void restore()}>Restore</Button>
+          <Button disabled={!docs || clash !== null} onClick={() => void restore()}>
+            Restore
+          </Button>
+          {docs && clash && (
+            <p role="status" className="text-sm text-muted">
+              {clash}
+            </p>
+          )}
         </div>
       )}
     </div>

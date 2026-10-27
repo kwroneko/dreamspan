@@ -12,10 +12,10 @@ import { tempDir } from "./support/tempDir.ts"
 import { cardDoc } from "./support/docs.ts"
 import { writeRealisticStFolder } from "./support/stRealistic.ts"
 
-it.effect("0043 preserves previous names, revisions, draft bases and divergent refs on realistic synthetic cards", () =>
+it.effect("0044 preserves previous names, revisions, draft bases and divergent refs on realistic synthetic cards", () =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
-    const previous = Object.fromEntries(Object.entries(migrations).filter(([key]) => key < "0043"))
+    const previous = Object.fromEntries(Object.entries(migrations).filter(([key]) => key < "0044"))
     yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(previous) })
     yield* sql`INSERT INTO users(id,handle,display_name,role,created_at) VALUES('u','u','u','admin',1)`
     const folder = writeRealisticStFolder(join(tempDir("card-names-st"), "st"))

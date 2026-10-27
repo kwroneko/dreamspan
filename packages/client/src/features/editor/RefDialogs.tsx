@@ -1,4 +1,6 @@
+import { Effect } from "effect"
 import { useCardNameCheck } from "./cardNameCheck.ts"
+import { checkCardNames } from "./checkCardNames.ts"
 // Edit scope: making a named variant is one action. Card names live in revision content;
 // other library entries retain their separate labels.
 import type { LibraryRef } from "@rp/shared/library.ts"
@@ -28,7 +30,16 @@ export function ForkDialog({ store, onClose }: { store: EditorStore; onClose: ()
     if (clash) return
     await store.flush()
     const result = await action.run(
-      (client) => client("ForkVariant", { refId: ref.id, label: label.trim(), subtitle: subtitle.trim(), moveDrafts }),
+      (client) =>
+        Effect.gen(function* () {
+          if (ref.kind === "card") yield* checkCardNames(client, label.trim(), subtitle.trim())
+          return yield* client("ForkVariant", {
+            refId: ref.id,
+            label: label.trim(),
+            subtitle: subtitle.trim(),
+            moveDrafts
+          })
+        }),
       ["library"]
     )
     if (result.ok) void navigate({ to: "/library/$refId", params: { refId: result.value.id } })
@@ -96,11 +107,14 @@ export function RenameDialog({
     if (clash) return
     const result = await action.run(
       (client) =>
-        client("RenameRef", {
-          refId: ref.id,
-          label: label.trim(),
-          subtitle: subtitle.trim(),
-          expectedRowVersion: ref.rowVersion
+        Effect.gen(function* () {
+          if (ref.kind === "card") yield* checkCardNames(client, label.trim(), subtitle.trim(), ref)
+          return yield* client("RenameRef", {
+            refId: ref.id,
+            label: label.trim(),
+            subtitle: subtitle.trim(),
+            expectedRowVersion: ref.rowVersion
+          })
         }),
       ["library"]
     )

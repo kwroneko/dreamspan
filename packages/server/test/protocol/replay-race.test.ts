@@ -141,19 +141,20 @@ it.live("an offline copy restored after a newer server save must retain its base
         )
       )
       let saves = 0
+      // Runs the whole call: a commit reads the library before it writes.
       const call = async (rpc: (client: never) => Effect.Effect<unknown, unknown>) => {
-        let tag = ""
-        let payload: unknown
-        rpc(((t: string, p: unknown) => {
-          tag = t
-          payload = p
-          return Effect.void
-        }) as never)
-        if (tag === "SaveEditorDraft" && ++saves === 1)
-          return { ok: false, error: { tag: "Offline", message: "no connection" } }
-        const exit = await Effect.runPromiseExit(
-          (api as unknown as Record<string, (payload: unknown) => Effect.Effect<unknown, unknown>>)[tag]!(payload)
-        )
+        let offline = false
+        const client = (tag: string, payload: unknown) => {
+          if (tag === "SaveEditorDraft" && ++saves === 1) {
+            offline = true
+            return Effect.fail("offline")
+          }
+          return (api as unknown as Record<string, (payload: unknown) => Effect.Effect<unknown, unknown>>)[tag]!(
+            payload
+          )
+        }
+        const exit = await Effect.runPromiseExit(rpc(client as never))
+        if (offline) return { ok: false, error: { tag: "Offline", message: "no connection" } }
         return Exit.isSuccess(exit)
           ? { ok: true, value: exit.value }
           : { ok: false, error: { tag: "Failed", message: String(exit.cause) } }

@@ -1,4 +1,6 @@
+import { Effect } from "effect"
 import { useCardNameCheck } from "./cardNameCheck.ts"
+import { checkCardNames } from "./checkCardNames.ts"
 // A card from scratch: the three standard names, then the editor for the rest.
 import { useNavigate } from "@tanstack/react-router"
 import { type FormEvent, useState } from "react"
@@ -21,7 +23,11 @@ export function NewCardButton() {
     if (clash) return
     const trimmed = name.trim()
     const result = await action.run(
-      (client) => client("CreateCard", { label: trimmed, name: trimmed, nickname, version: version.trim() }),
+      (client) =>
+        Effect.gen(function* () {
+          yield* checkCardNames(client, trimmed, version.trim())
+          return yield* client("CreateCard", { label: trimmed, name: trimmed, nickname, version: version.trim() })
+        }),
       ["library"]
     )
     if (result.ok) void navigate({ to: "/library/$refId", params: { refId: result.value.id } })
