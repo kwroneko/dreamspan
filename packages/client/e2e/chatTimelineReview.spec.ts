@@ -5,15 +5,19 @@ import { Effect } from "effect"
 import type { SlotId } from "@rp/shared/chat.ts"
 import type { SendResult } from "@rp/shared/chatApi.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
-import { type Client, asUser } from "./support/rpc.ts"
+import { type Client, loginCookie, withCookie } from "./support/rpc.ts"
 import { condensed, level1 } from "./support/summaries.ts"
 import { showActions } from "./support/message.ts"
 import { openPanel } from "./support/panel.ts"
 
 const server = serverPerFile(withAdmin)
 test.setTimeout(180_000)
-const admin = <A>(use: (api: Client) => Effect.Effect<A, unknown>) =>
-  asUser(server(), ADMIN.handle, ADMIN.password, use)
+// One API session for the file: a login per call would reach the per-address login throttle.
+let cookie = ""
+const admin = <A>(use: (api: Client) => Effect.Effect<A, unknown>) => withCookie(server(), cookie, use)
+test.beforeAll(async () => {
+  cookie = await loginCookie(server(), ADMIN.handle, ADMIN.password)
+})
 const fixture = async (count = 8, covered = 4) => {
   const chat = await admin((api) =>
     Effect.gen(function* () {
@@ -184,3 +188,92 @@ for (const width of [1440, 390])
     await expect(message(0)).toBeInViewport()
     await expect(message(0)).toHaveClass(/border-accent/)
   })
+
+for (const width of [1440, 390])
+  test(`a refreshed linked page retains access to later originals ${width}`, async ({ page }) => {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
+    const chat = await fixture(130, 120)
+    await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+    await page.goto(`${server().url}/chats/${chat.id}?slot=${chat.entries[1]!.slotId}`)
+    const summary = page.locator(`[data-timeline-summary="${chat.summary.id}"]`)
+    await expect(summary.locator("article")).toHaveCount(100)
+    const later = summary.getByRole("button", { name: "Load later messages in this summary" })
+    await expect(later).toHaveCount(1)
+    // Another tab selects a new version: the refresh reads backwards from the last loaded original.
+    const original = chat.entries[1]!
+    await admin((api) =>
+      api.WriteVersion({
+        slotId: original.slotId,
+        content: "A selected version that refreshes the linked page",
+        expectedRowVersion: original.rowVersion
+      })
+    )
+    await expect(summary.locator(`article[data-slot="${original.slotId}"] .markdown`)).toHaveText(
+      "A selected version that refreshes the linked page"
+    )
+    await expect(summary.locator("article")).toHaveCount(100)
+    await expect(later).toHaveCount(1)
+    await shoot(page, `refreshed-link-${width}`)
+    await later.click()
+    await expect(summary.locator("article")).toHaveCount(120)
+    await expect(later).toHaveCount(0)
+  })
+
+test("a delayed page response cannot land in another link's page", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  const chat = await fixture(250, 240)
+  let release: (() => void) | null = null
+  let answered = false
+  let held: unknown = null
+  await page.routeWebSocket(/\/rpc$/, (socket) => {
+    const upstream = socket.connectToServer()
+    upstream.onMessage((data) => {
+      if (held !== null && typeof data === "string" && (JSON.parse(data) as { requestId?: unknown }).requestId === held)
+        answered = true
+      socket.send(data)
+    })
+    socket.onMessage((data) => {
+      const request =
+        typeof data === "string"
+          ? (JSON.parse(data) as {
+              tag?: string
+              id?: unknown
+              payload?: { leafSlotId?: string; range?: { _tag: string } }
+            })
+          : null
+      if (
+        held === null &&
+        request?.tag === "ReadPath" &&
+        request.payload?.leafSlotId === chat.summary.lastSlotId &&
+        request.payload.range?._tag === "Newer"
+      ) {
+        held = request.id
+        release = () => upstream.send(data)
+        return
+      }
+      upstream.send(data)
+    })
+  })
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  const base = `${server().url}/chats/${chat.id}`
+  await page.goto(`${base}?slot=${chat.entries[1]!.slotId}`)
+  const summary = page.locator(`[data-timeline-summary="${chat.summary.id}"]`)
+  await expect(summary.locator("article")).toHaveCount(100)
+  await summary.getByRole("button", { name: "Load later messages in this summary" }).click()
+  await expect.poll(() => release !== null).toBe(true)
+  // Follow a link to another page of the same summary while the old page is still on its way.
+  await page.evaluate((url) => {
+    history.pushState({}, "", url)
+    dispatchEvent(new PopStateEvent("popstate"))
+  }, `${base}?slot=${chat.entries[219]!.slotId}`)
+  const slots = () => summary.locator("article").evaluateAll((rows) => rows.map((row) => row.dataset.slot))
+  await expect.poll(async () => (await slots())[0]).toBe(chat.entries[140]!.slotId)
+  await expect(summary.locator("article")).toHaveCount(100)
+  release!()
+  await expect.poll(() => answered).toBe(true)
+  // Responses arrive in order, so once the next page has rendered the stale one has been handled.
+  // The new page pages on from its own window, without the old page appended.
+  await summary.getByRole("button", { name: "Load earlier messages in this summary" }).click()
+  await expect(summary.locator("article")).toHaveCount(200)
+  expect(await slots()).toEqual(chat.entries.slice(40, 240).map((entry) => entry.slotId))
+})
