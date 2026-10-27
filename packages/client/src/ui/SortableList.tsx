@@ -14,6 +14,8 @@ export function SortableList<Item>({
   itemLabel,
   onMove,
   label,
+  namesAsHandles = false,
+  onSelect,
   children
 }: {
   items: ReadonlyArray<Item>
@@ -22,6 +24,8 @@ export function SortableList<Item>({
   itemLabel: (item: Item) => string
   onMove: (from: number, to: number) => void
   label: string
+  namesAsHandles?: boolean
+  onSelect?: (item: Item) => void
   /** An item's row, with its handle to place. */
   children: (item: Item, handle: ReactNode) => ReactNode
 }) {
@@ -48,9 +52,10 @@ export function SortableList<Item>({
           if (element) handles.current.set(key, element)
           else handles.current.delete(key)
         }}
+        onClick={() => onSelect?.(item)}
         aria-label={`Move ${itemLabel(item)}`}
         aria-describedby={hint}
-        className="flex size-8 shrink-0 cursor-grab touch-none items-center justify-center rounded-md text-muted outline-none hover:bg-surface-raised hover:text-text focus-visible:ring-2 focus-visible:ring-focus active:cursor-grabbing"
+        className={`${namesAsHandles ? "w-full gap-2 px-1 text-left text-xs" : "size-8"} flex min-h-8 shrink-0 cursor-grab touch-none items-center justify-center rounded-md text-muted outline-none hover:bg-surface-raised hover:text-text focus-visible:ring-2 focus-visible:ring-focus active:cursor-grabbing`}
         onKeyDown={(event) => {
           const to = event.key === "ArrowUp" ? index - 1 : event.key === "ArrowDown" ? index + 1 : null
           if (to === null || to < 0 || to >= items.length) return
@@ -84,6 +89,7 @@ export function SortableList<Item>({
           <circle cx="5.5" cy="12.5" r="1.25" />
           <circle cx="10.5" cy="12.5" r="1.25" />
         </svg>
+        {namesAsHandles && <span className="min-w-0 flex-1 break-words">{itemLabel(item)}</span>}
       </button>
     )
   }

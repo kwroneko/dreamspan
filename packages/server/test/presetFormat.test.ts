@@ -40,6 +40,7 @@ describe("importing an ST chat-completion preset", () => {
       "worldInfoAfter",
       "dialogueExamples",
       "chatHistory",
+      "newestMessage",
       "jailbreak"
     ])
     expect(doc.order.find((e) => e.identifier === "enhanceDefinitions")?.enabled).toBe(false)
@@ -122,7 +123,12 @@ describe("importing an ST chat-completion preset", () => {
       unsupported: { enabled: true, example_prompt_extra: "kept" }
     })
     expect(codes(result).filter((c) => c === "preset.unknown_field")).toHaveLength(2)
-    expect(doc.order.slice(12).map((e) => e.enabled)).toEqual([true, true, false, true])
+    expect(
+      doc.order
+        .filter((e) => e.identifier !== "newestMessage")
+        .slice(12)
+        .map((e) => e.enabled)
+    ).toEqual([true, true, false, true])
     expect(issue(result, "preset.prompt_orders_dropped")?.message).toContain("7")
 
     expect(doc.regex.map((s) => [s.prompt_only, s.markdown_only])).toEqual([
@@ -194,7 +200,17 @@ describe("ST's prompt and order sanitizing", () => {
     for (const doc of [fromEmpty, fromPartial])
       expect(doc.prompts.map((p) => p.identifier)).toEqual(expect.arrayContaining(builtIns))
     expect(prompt(fromPartial, "main")?.content).toBe("Hi")
-    expect(fromPartial.order).toEqual([])
+    // An empty ST order still sends the markers ST appends after the other prompts.
+    expect(fromPartial.order.filter((e) => e.enabled).map((e) => e.identifier)).toEqual([
+      "newestMessage",
+      "worldInfoBefore",
+      "worldInfoAfter",
+      "charDescription",
+      "charPersonality",
+      "scenario",
+      "personaDescription"
+    ])
+    expect(fromPartial.order).toHaveLength(fromPartial.prompts.length)
   })
 
   it("treats a prompt without `system_prompt` as ST does: not sent from the order", () => {
@@ -222,7 +238,7 @@ describe("ST's prompt and order sanitizing", () => {
         { character_id: 100001, order: ["a", "b", "c", "d"].map((identifier) => ({ identifier, enabled: true })) }
       ]
     })
-    expect(result.doc.order.map((e) => e.enabled)).toEqual([false, false, false, true])
+    expect(result.doc.order.slice(0, 4).map((e) => e.enabled)).toEqual([false, false, false, true])
     expect(codes(result).filter((c) => c === "preset.prompt_never_sent")).toHaveLength(3)
   })
 
@@ -248,7 +264,7 @@ describe("ST's prompt and order sanitizing", () => {
     })
     expect(prompt(result.doc, "a")?.content).toBe("first")
     expect(prompt(result.doc, "imported-3")?.content).toBe("no identifier")
-    expect(result.doc.order).toEqual([{ identifier: "a", enabled: true }])
+    expect(result.doc.order.slice(0, 1)).toEqual([{ identifier: "a", enabled: true }])
     expect(codes(result)).toEqual(
       expect.arrayContaining([
         "preset.prompt_duplicate",
@@ -262,7 +278,7 @@ describe("ST's prompt and order sanitizing", () => {
 
   it("uses ST's default order when the preset has no global order", () => {
     const result = load({ prompts: [], prompt_order: [{ character_id: 100000, order: [] }] })
-    expect(result.doc.order).toHaveLength(12)
+    expect(result.doc.order).toHaveLength(13)
     expect(codes(result, "warning")).toContain("preset.no_global_order")
     expect(issue(result, "preset.prompt_orders_dropped")?.message).toContain("100000")
   })
@@ -363,7 +379,12 @@ describe("exporting to an ST chat-completion preset", () => {
         for (const p of value as Array<Item>) expect(prompts.get(p.identifier)).toMatchObject(p)
       } else if (key === "prompt_order") {
         const global = (value as Array<Item>).find((o) => o.character_id === 100001)
-        expect(file.prompt_order).toEqual([global])
+        expect(
+          (file.prompt_order as Array<{ character_id: number; order: Array<{ identifier: string }> }>).map((o) => ({
+            ...o,
+            order: o.order.filter((e) => e.identifier !== "newestMessage")
+          }))
+        ).toEqual([global])
       } else if (key === "extensions") {
         const { regex_scripts, ...rest } = value as Item
         const scripts = (file.extensions as Item).regex_scripts as Array<Item> | undefined
@@ -609,7 +630,7 @@ describe("cases where ST's behaviour is easy to miss", () => {
       ],
       prompt_order: order(["charDescription", true], ["chatHistory", true])
     })
-    expect(result.doc.order).toEqual([
+    expect(result.doc.order.slice(0, 2)).toEqual([
       { identifier: "charDescription", enabled: true },
       { identifier: "chatHistory", enabled: false }
     ])
@@ -620,20 +641,20 @@ describe("cases where ST's behaviour is easy to miss", () => {
       { identifier: "x", system_prompt: false, role: "system", content: "n", injection_position: 1, injection_depth: 1 }
     ]
     const once = load({ prompts, prompt_order: order(["x", false], ["x", true]) })
-    expect(once.doc.order).toEqual([{ identifier: "x", enabled: true }])
+    expect(once.doc.order.slice(0, 1)).toEqual([{ identifier: "x", enabled: true }])
     expect(codes(once)).not.toContain("preset.order_repeated")
     const twice = load({ prompts, prompt_order: order(["x", true], ["x", true]) })
-    expect(twice.doc.order).toEqual([{ identifier: "x", enabled: true }])
+    expect(twice.doc.order.slice(0, 1)).toEqual([{ identifier: "x", enabled: true }])
     expect(issue(twice, "preset.order_repeated")?.message).toContain("2 times")
   })
 
   it("reads a relative prompt listed twice by its first entry, as ST does", () => {
     const prompts = [{ identifier: "x", system_prompt: false, role: "user", content: "rel" }]
     const off = load({ prompts, prompt_order: order(["x", false], ["x", true]) })
-    expect(off.doc.order).toEqual([{ identifier: "x", enabled: false }])
+    expect(off.doc.order.slice(0, 1)).toEqual([{ identifier: "x", enabled: false }])
     // ST sends it once: the second copy overwrites the first's slot.
     const on = load({ prompts, prompt_order: order(["x", true], ["x", true]) })
-    expect(on.doc.order).toEqual([{ identifier: "x", enabled: true }])
+    expect(on.doc.order.slice(0, 1)).toEqual([{ identifier: "x", enabled: true }])
     expect(codes(on)).not.toContain("preset.order_repeated")
   })
 
@@ -645,7 +666,7 @@ describe("cases where ST's behaviour is easy to miss", () => {
       ],
       prompt_order: order(["a", true], ["b", true])
     })
-    expect(result.doc.order.map((e) => e.enabled)).toEqual([false, true])
+    expect(result.doc.order.slice(0, 2).map((e) => e.enabled)).toEqual([false, true])
     expect(prompt(result.doc, "b")?.injection_trigger).toEqual(["normal"])
     expect(issue(result, "preset.prompt_never_sent")?.message).toContain("generation types")
   })
@@ -667,7 +688,7 @@ describe("cases where ST's behaviour is easy to miss", () => {
 
   it("says where a global order without a list differs from ST", () => {
     const result = load({ prompts: [], prompt_order: [{ character_id: 100001 }] })
-    expect(result.doc.order).toHaveLength(12)
+    expect(result.doc.order).toHaveLength(13)
     expect(issue(result, "preset.no_global_order")?.message).toContain("ST would send none")
   })
 
@@ -691,5 +712,45 @@ describe("cases where ST's behaviour is easy to miss", () => {
     // Whether the file claimed it or the user later approved, the export carries nothing.
     for (const doc of [result.doc, { ...result.doc, regex_approved: true }])
       expect(JSON.stringify(exportStPreset(doc))).not.toContain("regex_approved")
+  })
+})
+
+describe("the document order", () => {
+  it("appends prompts outside the ST order off and reports their names", () => {
+    const result = load({
+      prompts: [{ identifier: "parked", name: "Parked prompt", system_prompt: false, content: "Keep me" }],
+      prompt_order: [
+        {
+          character_id: 100001,
+          order: [
+            { identifier: "main", enabled: true },
+            { identifier: "chatHistory", enabled: true }
+          ]
+        }
+      ]
+    })
+    expect(result.doc.order.find((e) => e.identifier === "parked")).toEqual({ identifier: "parked", enabled: false })
+    expect(result.doc.order.map((e) => e.identifier).sort()).toEqual(result.doc.prompts.map((p) => p.identifier).sort())
+    expect(issue(result, "preset.prompts_appended_off")?.message).toContain("Parked prompt")
+    // ST still sends the markers its order leaves out, after the other prompts: they stay on.
+    expect(result.doc.order.find((e) => e.identifier === "charDescription")).toEqual({
+      identifier: "charDescription",
+      enabled: true
+    })
+    expect(issue(result, "preset.prompts_appended_off")?.message).not.toContain("Char Description")
+    expect(issue(result, "preset.markers_appended_on")?.message).toContain("Char Description")
+    const history = result.doc.order.findIndex((e) => e.identifier === "chatHistory")
+    expect(result.doc.order[history + 1]?.identifier).toBe("newestMessage")
+  })
+  it("round trips the newest message after the tail", () => {
+    const original = load(fixture("default")).doc
+    const moved = {
+      ...original,
+      order: [
+        ...original.order.filter((e) => e.identifier !== "newestMessage"),
+        { identifier: "newestMessage", enabled: true }
+      ]
+    }
+    expect(load(exportStPreset(moved)).doc.order).toEqual(moved.order)
   })
 })

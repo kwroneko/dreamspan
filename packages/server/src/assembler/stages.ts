@@ -1,5 +1,6 @@
 import { modelName } from "@rp/shared/cardNames.ts"
 import { withModelSettings } from "@rp/shared/modelSettings.ts"
+import { newestMessage, presetOrder } from "@rp/shared/presetOrder.ts"
 import { schemaPrefillBudget } from "./prefill.ts"
 import { layerText, lcmStage } from "./lcm.ts"
 import { createHash } from "node:crypto"
@@ -640,9 +641,14 @@ const presetText = (assembly: Assembly, id: string, text: string, names: Partial
 const collectionOf = (assembly: Assembly): Array<StPrompt> => {
   const doc = need(assembly, "preset").doc
   const type = need(assembly, "cast").type
-  const prompts = new Map(doc.prompts.map((p) => [p.identifier, p]))
+  const prompts = new Map(
+    [...doc.prompts, ...(doc.prompts.some((p) => p.identifier === "newestMessage") ? [] : [newestMessage])].map((p) => [
+      p.identifier,
+      p
+    ])
+  )
   const collection: Array<StPrompt> = []
-  for (const entry of doc.order) {
+  for (const entry of presetOrder(doc.prompts, doc.order)) {
     const prompt = prompts.get(entry.identifier)
     if (!prompt) continue
     const allowed = entry.enabled && triggers(prompt, type)
@@ -920,7 +926,11 @@ const noteText = (assembly: Assembly, note: NoteInput, owner: CardInput | null):
  */
 type NotePlace =
   | { readonly at: "chat"; readonly depth: number; readonly role: Role }
-  | { readonly at: "start" | "end"; readonly volatile: boolean; readonly role: Role }
+  | {
+      readonly at: "start" | "end" | "context_start" | "tail_start" | "tail_end"
+      readonly volatile: boolean
+      readonly role: Role
+    }
 
 const placeOf = (note: NoteInput): NotePlace | null => {
   const { placement } = note.doc
@@ -930,6 +940,12 @@ const placeOf = (note: NoteInput): NotePlace | null => {
     case "tail":
       return { at: "chat", depth: 0, role: placement.role }
     case "section":
+      if (["context_start", "tail_start", "tail_end"].includes(placement.section))
+        return {
+          at: placement.section as "context_start" | "tail_start" | "tail_end",
+          role: placement.role ?? "system",
+          volatile: (note.doc.interval ?? 0) > 1
+        }
       if (placement.section !== "before_main_prompt" && placement.section !== "after_main_prompt") return null
       return {
         at: placement.section === "before_main_prompt" ? "start" : "end",
@@ -1463,8 +1479,37 @@ const composeStage = sync("compose", (assembly) => {
         text: { text: env.text(e.piece), piece: e.piece }
       })
     const beside: Array<{ readonly message: StMessage; readonly at: "start" | "end" }> = []
-    for (const { text, place } of placed) {
+    // Notes already put at a slot's start, so the next one follows them and the notes keep their order.
+    const before = { context_start: 0, tail_start: 0 }
+    for (const { text, place, id } of placed) {
       if (place.at === "chat") continue
+      if (place.at === "context_start" || place.at === "tail_start" || place.at === "tail_end") {
+        const history = collection.findIndex((p) => p.identifier === "chatHistory")
+        const tail =
+          history < 0 ? collection.length : history + (collection[history + 1]?.identifier === "newestMessage" ? 2 : 1)
+        const newest = collection.findIndex((p) => p.identifier === "newestMessage")
+        const tailEnd = newest > history + 1 ? newest : collection.length
+        const index =
+          place.at === "context_start"
+            ? before.context_start++
+            : place.at === "tail_start"
+              ? tail + before.tail_start++
+              : tailEnd
+        collection.splice(index, 0, {
+          identifier: `note:${id}`,
+          role: place.role,
+          content: text.text,
+          piece: text.piece,
+          system_prompt: false,
+          injection_position: "relative",
+          injection_depth: 0,
+          injection_order: 100,
+          forbid_overrides: true,
+          kind: place.at === "context_start" && !place.volatile ? "prefix" : "volatile",
+          barrier: place.volatile && !text.text
+        })
+        continue
+      }
       const main = collection.findIndex((p) => p.identifier === "main")
       const mainPrompt = collection[main]
       if (mainPrompt?.injection_position === "absolute") {
@@ -1546,6 +1591,9 @@ const composeStage = sync("compose", (assembly) => {
         0
       )
     return { collection, beside, injections, layer, layerCost }
+  }
+  for (const prompt of collection) {
+    if (prompt.piece !== null) assembly.pieces[prompt.piece]!.marker = prompt.identifier
   }
   const baseCollection = collection
   const actualPlacement = placement(notes)

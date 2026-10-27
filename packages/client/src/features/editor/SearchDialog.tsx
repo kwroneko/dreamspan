@@ -1,6 +1,6 @@
 // Search and replace across an editor's text fields, as plain text or a regular expression
 // (DESIGN §6.2, §5.3). Replacing edits each field through its draft, like typing would.
-import { type FormEvent, useState } from "react"
+import { type FormEvent, type ReactNode, useState } from "react"
 import { Button } from "../../ui/Button.tsx"
 import { Checkbox } from "../../ui/Choice.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
@@ -27,11 +27,24 @@ const write = (store: EditorStore, field: Searchable, text: string) => {
   } else store.setText(field.path, text)
 }
 
-export function SearchDialog({ store, onClose }: { store: EditorStore; onClose: () => void }) {
+export function SearchDialog({
+  store,
+  onClose,
+  inline = false
+}: {
+  store: EditorStore
+  onClose?: () => void
+  inline?: boolean
+}) {
   const [find, setFind] = useState("")
   const [replace, setReplace] = useState("")
+  const [wholeWord, setWholeWord] = useState(false)
+  const [preserveCase, setPreserveCase] = useState(false)
   const [regex, setRegex] = useState(false)
   const [caseSensitive, setCaseSensitive] = useState(false)
+  // On a phone the options fold away, so the sticky bar leaves room for the document.
+  const [options, setOptions] = useState(false)
+  const chosen = [wholeWord, preserveCase, regex, caseSensitive].filter(Boolean).length
   const [found, setFound] = useState<Found | null>(null)
   const [pending, setPending] = useState(false)
 
@@ -43,6 +56,8 @@ export function SearchDialog({ store, onClose }: { store: EditorStore; onClose: 
       find,
       regex,
       caseSensitive,
+      wholeWord,
+      preserveCase,
       replace: replacement,
       max: MAX_MATCHES
     })
@@ -52,25 +67,60 @@ export function SearchDialog({ store, onClose }: { store: EditorStore; onClose: 
 
   const submit = async (event: FormEvent) => {
     event.preventDefault()
-    if (find !== "") setFound(await search(null))
+    if (find !== "") setFound(await search(replace))
   }
 
   /** Replaces in the fields `only` names, or in every field. */
   const replaceIn = async (only: number | null) => {
     const result = await search(replace)
+    const current = searchable(store.snapshot!.ref.kind, store.working().doc)
+    if (
+      result.fields.some(
+        (field, index) =>
+          field.text !== current[index]?.text || JSON.stringify(field.path) !== JSON.stringify(current[index]?.path)
+      )
+    ) {
+      setFound({
+        fields: result.fields,
+        response: {
+          ok: false,
+          error: "Text changed while the search was running. Find again to preview the current text."
+        }
+      })
+      return
+    }
     if (result.response.ok && result.response.replaced) {
       const replaced = result.response.replaced
       result.fields.forEach((field, index) => {
         if ((only === null || only === index) && replaced[index] !== field.text) write(store, field, replaced[index]!)
       })
     }
-    setFound(result.response.ok ? await search(null) : result)
+    setFound(result.response.ok ? await search(replace) : result)
   }
 
   const response = found?.response
-  return (
-    <Dialog open onOpenChange={(open) => !open && onClose()} title="Search and replace">
-      <form onSubmit={(event) => void submit(event)} className="flex flex-col gap-3">
+  const actions = (children: ReactNode) =>
+    inline ? (
+      <div className="col-span-2 flex items-center justify-end gap-2 sm:col-span-1">{children}</div>
+    ) : (
+      <DialogActions>{children}</DialogActions>
+    )
+  const wrap = (children: ReactNode) =>
+    inline ? (
+      <section aria-label="Search and replace" className="flex flex-col gap-2">
+        {children}
+      </section>
+    ) : (
+      <Dialog open onOpenChange={(open) => !open && onClose?.()} title="Search and replace">
+        {children}
+      </Dialog>
+    )
+  return wrap(
+    <>
+      <form
+        onSubmit={(event) => void submit(event)}
+        className={inline ? "grid grid-cols-2 gap-2" : "grid gap-2 sm:grid-cols-2"}
+      >
         <Field label="Find">
           <Input
             value={find}
@@ -81,7 +131,16 @@ export function SearchDialog({ store, onClose }: { store: EditorStore; onClose: 
         <Field label="Replace with">
           <Input value={replace} onChange={(event) => setReplace(event.currentTarget.value)} />
         </Field>
-        <div className="flex flex-wrap gap-4">
+        <div
+          id={inline ? "search-options" : undefined}
+          className={`${inline ? `col-span-2 sm:col-span-1 ${options ? "flex" : "hidden"} sm:flex` : "flex"} flex-wrap gap-4`}
+        >
+          <Checkbox checked={wholeWord} onCheckedChange={setWholeWord}>
+            Whole word
+          </Checkbox>
+          <Checkbox checked={preserveCase} onCheckedChange={setPreserveCase}>
+            Preserve case
+          </Checkbox>
           <Checkbox checked={regex} onCheckedChange={setRegex}>
             Regular expression
           </Checkbox>
@@ -89,18 +148,31 @@ export function SearchDialog({ store, onClose }: { store: EditorStore; onClose: 
             Match case
           </Checkbox>
         </div>
-        <DialogActions>
-          <Button
-            disabled={find === "" || !response?.ok || response.matches.length === 0}
-            pending={pending}
-            onClick={() => void replaceIn(null)}
-          >
-            Replace all
-          </Button>
-          <Button type="submit" variant="primary" pending={pending} disabled={find === ""}>
-            Find
-          </Button>
-        </DialogActions>
+        {actions(
+          <>
+            {inline && (
+              <Button
+                variant="ghost"
+                className="mr-auto sm:hidden"
+                aria-expanded={options}
+                aria-controls="search-options"
+                onClick={() => setOptions(!options)}
+              >
+                Options{chosen > 0 ? ` (${chosen})` : ""}
+              </Button>
+            )}
+            <Button
+              disabled={find === "" || !response?.ok || response.matches.length === 0}
+              pending={pending}
+              onClick={() => void replaceIn(null)}
+            >
+              Replace all
+            </Button>
+            <Button type="submit" variant="primary" pending={pending} disabled={find === ""}>
+              Find
+            </Button>
+          </>
+        )}
       </form>
       {response && !response.ok && (
         <Alert tone="danger" title="The search didn't run">
@@ -114,7 +186,10 @@ export function SearchDialog({ store, onClose }: { store: EditorStore; onClose: 
               ? "No matches."
               : `${response.truncated ? "At least " : ""}${response.matches.length} ${response.matches.length === 1 ? "match" : "matches"}.`}
           </p>
-          <ol aria-label="Matches" className="flex flex-col divide-y divide-border">
+          <ol
+            aria-label="Matches"
+            className={`flex ${inline ? "max-h-28 sm:max-h-48" : "max-h-48"} flex-col divide-y divide-border overflow-y-auto`}
+          >
             {response.matches.map((match, index) => {
               const field = found.fields[match.index]!
               const text = field.text
@@ -128,6 +203,7 @@ export function SearchDialog({ store, onClose }: { store: EditorStore; onClose: 
                       <mark className="bg-warning/30 text-text">{text.slice(match.at, match.at + match.length)}</mark>
                       {text.slice(match.at + match.length, match.at + match.length + AROUND)}
                     </span>
+                    <span className="text-success [overflow-wrap:anywhere]">→ {match.replacement}</span>
                   </div>
                   <Button
                     variant="ghost"
@@ -142,6 +218,6 @@ export function SearchDialog({ store, onClose }: { store: EditorStore; onClose: 
           </ol>
         </div>
       )}
-    </Dialog>
+    </>
   )
 }

@@ -126,6 +126,45 @@ const setup = (handle = "ana") =>
 const texts = (snapshot: ContextSnapshot) => snapshot.request.messages.map((m) => `${m.role}: ${m.content}`)
 
 describe("context assembly from the database", () => {
+  it.live("projects current preset fills, note slots and real cache boundaries without prompt text", () =>
+    Effect.gen(function* () {
+      const { reader, userId, chat, sent, entity, state } = yield* setup()
+      const note = yield* entity("note", "Continuity", {
+        schema_version: 1,
+        title: "Continuity",
+        content: "Keep the weather consistent.",
+        owner: { chat: chat.id },
+        placement: { mode: "section", section: "tail_end" },
+        exportable: true
+      })
+      yield* state({ key: "note.activate", value: { note: note.entityId } })
+      const empty = yield* entity("note", "Empty active note", {
+        schema_version: 1,
+        title: "Empty active note",
+        content: "",
+        owner: { chat: chat.id },
+        placement: { mode: "section", section: "tail_start" },
+        exportable: true
+      })
+      yield* state({ key: "note.activate", value: { note: empty.entityId } })
+      const next = yield* reader.CacheWarmth({ userId, chatId: chat.id, leafSlotId: sent.slotId })
+      const context = next.presetContext!
+      assert.isNotNull(context)
+      assert.isAbove(context.blocks.find((b) => b.identifier === "chatHistory")!.tokens, 0)
+      assert.isAbove(context.blocks.find((b) => b.identifier === "newestMessage")!.tokens, 0)
+      assert.include(context.blocks.find((b) => b.identifier === "charDescription")!.labels, "Mira")
+      assert.includeDeepMembers(
+        [...context.notes],
+        [
+          { title: "Continuity", placement: { mode: "section", section: "tail_end" }, due: true },
+          { title: "Empty active note", placement: { mode: "section", section: "tail_start" }, due: true }
+        ]
+      )
+      assert.isAbove(context.cacheAfter.length, 0)
+      assert.notInclude(JSON.stringify(context), "The road flooded.")
+    }).pipe(Effect.provide(database()))
+  )
+
   for (const [label, original, shortened] of [
     ["astral characters", "😀".repeat(500), "a".repeat(500)],
     ["embedded NULs", "\0" + "a".repeat(1000), "\0" + "a".repeat(500)]

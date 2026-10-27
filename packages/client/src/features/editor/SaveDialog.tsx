@@ -51,7 +51,10 @@ export function SaveDialog({
       .flush()
       .then(async () => {
         const working = store.working()
-        const changes = kind === "card" ? await store.comparisonChanges() : changedFields(store.head, working.doc)
+        const changes =
+          kind === "card" || kind === "preset"
+            ? await store.comparisonChanges()
+            : changedFields(store.head, working.doc)
         setView({ working, changes })
       })
       .catch((error: AppError) => setError(error))
@@ -96,13 +99,14 @@ export function SaveDialog({
     const working = store.working()
     setView({
       working,
-      changes: kind === "card" ? await store.comparisonChanges() : changedFields(store.head, working.doc)
+      changes:
+        kind === "card" || kind === "preset" ? await store.comparisonChanges() : changedFields(store.head, working.doc)
     })
   }
 
   return (
     <Dialog
-      wide={kind === "card"}
+      wide={kind === "card" || kind === "preset"}
       open
       onOpenChange={(open) => !open && onClose()}
       title={conflicts.length > 0 ? "Changed meanwhile" : "Save a revision"}
@@ -152,7 +156,11 @@ export function SaveDialog({
                 return (
                   <li key={label} className="flex flex-col gap-1">
                     <span className="text-sm font-medium [overflow-wrap:anywhere]">{label}</span>
-                    <ValueDiff before={change.before} after={change.after} rich={kind === "card"} />
+                    <ValueDiff
+                      before={change.before}
+                      after={change.after}
+                      rich={kind === "card" || kind === "preset"}
+                    />
                   </li>
                 )
               })}

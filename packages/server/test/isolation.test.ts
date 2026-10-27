@@ -967,9 +967,17 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
           "leafSlotId",
           "model",
           "preset",
+          "presetContext",
           "summarizedThrough",
           "warmth"
         ])
+        if (own.presetContext) {
+          assert.deepStrictEqual(Object.keys(own.presetContext).sort(), ["blocks", "cacheAfter", "notes"])
+          for (const block of own.presetContext.blocks)
+            assert.deepStrictEqual(Object.keys(block).sort(), ["identifier", "labels", "tokens"])
+          for (const boundary of own.presetContext.cacheAfter)
+            assert.deepStrictEqual(Object.keys(boundary).sort(), ["identifier", "reason"])
+        }
         if (own.historyStart) assert.deepStrictEqual(Object.keys(own.historyStart).sort(), ["depth", "slotId"])
         if (own.preset) assert.deepStrictEqual(Object.keys(own.preset).sort(), ["name", "ref", "scope"])
         // The model is the owner's own, named from the owner's connection.

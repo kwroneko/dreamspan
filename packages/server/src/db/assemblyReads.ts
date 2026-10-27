@@ -1,3 +1,4 @@
+import { presetContext } from "./presetContext.ts"
 import { cacheExpiry } from "./cacheExpiry.ts"
 import { applySummaryPrefix } from "../lcm/prefix.ts"
 import { summaryTail } from "../lcm/request.ts"
@@ -175,6 +176,7 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
                 AND c.deleted_at IS NULL AND c.purged_at IS NULL`
           : []
         const boundary = {
+          presetContext: next instanceof AssemblyFailed ? null : yield* presetContext(sql, userId, next),
           ...(chosen === undefined
             ? {}
             : {

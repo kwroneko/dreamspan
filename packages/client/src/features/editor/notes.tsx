@@ -32,7 +32,10 @@ type Section = Extract<Placement, { mode: "section" }>["section"]
 /** Where a note or module can go: the placement's mode, or a section by name. */
 const PLACES = [
   { value: "depth", label: "In the chat, at a depth" },
-  { value: "tail", label: "At the end of the chat" },
+  { value: "tail", label: "After the newest message (ST depth 0)" },
+  { value: "section:context_start", label: "Start of context" },
+  { value: "section:tail_start", label: "Start of tail" },
+  { value: "section:tail_end", label: "End of tail" },
   { value: "section:card", label: "With the card's definition" },
   { value: "section:before_main_prompt", label: "Before the main prompt" },
   { value: "section:after_main_prompt", label: "After the main prompt" },
@@ -47,6 +50,9 @@ type Place = (typeof PLACES)[number]["value"]
 const CHAT_PLACES: ReadonlyArray<Place> = [
   "depth",
   "tail",
+  "section:context_start",
+  "section:tail_start",
+  "section:tail_end",
   "section:before_main_prompt",
   "section:after_main_prompt",
   "none"
@@ -86,7 +92,12 @@ export function PlacementField({
     store.setValue(path, next)
   }
   // A place this list leaves out still shows, when the note is there already.
-  const items = places ? PLACES.filter((p) => places.includes(p.value) || p.value === placeOf(placement)) : PLACES
+  const module = path[0] === "modules"
+  const items = PLACES.filter(
+    (p) =>
+      (!places || places.includes(p.value) || p.value === placeOf(placement)) &&
+      (!module || !["section:context_start", "section:tail_start", "section:tail_end"].includes(p.value))
+  )
   return (
     // Three across when its container is wide enough, not the window: it's in the chat's side panel too.
     <div className="@container flex min-w-0 flex-col gap-2">

@@ -6,6 +6,8 @@ export interface SearchRequest {
   readonly find: string
   readonly regex: boolean
   readonly caseSensitive: boolean
+  readonly wholeWord?: boolean
+  readonly preserveCase?: boolean
   /** The replacement for every match, or null to only find. */
   readonly replace: string | null
   /** At most this many matches are listed. */
@@ -16,7 +18,12 @@ export type SearchResponse =
   | {
       readonly ok: true
       /** Each match: which text, where, how long. */
-      readonly matches: ReadonlyArray<{ readonly index: number; readonly at: number; readonly length: number }>
+      readonly matches: ReadonlyArray<{
+        readonly index: number
+        readonly at: number
+        readonly length: number
+        readonly replacement: string | null
+      }>
       readonly truncated: boolean
       /** Every text with its matches replaced, when a replacement was given. */
       readonly replaced: ReadonlyArray<string> | null

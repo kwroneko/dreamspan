@@ -1,231 +1,22 @@
 // The preset editor (DESIGN §1.2, §6): the prompt list in order, with enable switches and
 // drag to reorder; each prompt's role, position and depth; prefill text;
 // and the regex scripts, which run only once the user allows them (ARCHITECTURE.md §9).
-import type { PresetPrompt, PromptOrderEntry, RegexScript } from "@rp/shared/docs/preset.ts"
-import { type FieldPath, valueField } from "@rp/shared/editing.ts"
+import type { RegexScript } from "@rp/shared/docs/preset.ts"
+import { type FieldPath } from "@rp/shared/editing.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
-import { type ReactNode, useState } from "react"
+import { useState } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"
 import { Button } from "../../ui/Button.tsx"
-import { Checkbox, Switch } from "../../ui/Choice.tsx"
+import { Checkbox } from "../../ui/Choice.tsx"
 import { ConfirmDialog } from "../../ui/Dialog.tsx"
 import { Fieldset } from "../../ui/Field.tsx"
-import { SortableList } from "../../ui/SortableList.tsx"
+import { PromptDocument } from "./PromptDocument.tsx"
+import type { PresetContext } from "@rp/shared/inspectorApi.ts"
 import { Alert, Badge, Card, CardHeader, EmptyState } from "../../ui/Surface.tsx"
 import type { Caller } from "./caller.ts"
-import { FieldTools, NumberField, SelectField, SwitchField, TextField } from "./controls.tsx"
+import { NumberField, SelectField, SwitchField, TextField } from "./controls.tsx"
 import { type EditorStore, useEditorState, useText, useValue } from "./store.ts"
-
-/** What the assembler puts in place of each marker. */
-const MARKERS: Record<string, string> = {
-  chatHistory: "the chat's messages",
-  dialogueExamples: "the card's example messages",
-  worldInfoBefore: "lorebook entries placed before the card",
-  worldInfoAfter: "lorebook entries placed after the card",
-  charDescription: "the card's description",
-  charPersonality: "the card's personality",
-  scenario: "the card's scenario",
-  personaDescription: "your persona's description"
-}
-
-const ROLES = [
-  { value: "system", label: "System" },
-  { value: "user", label: "User" },
-  { value: "assistant", label: "Assistant" }
-] as const
-
-const POSITIONS = [
-  { value: "relative", label: "In the prompt, in this order" },
-  { value: "absolute", label: "In the chat, at a depth" }
-] as const
-
-const prompt = (identifier: string): FieldPath => ["prompts", `identifier=${identifier}`]
-
-function PromptEditor({
-  store,
-  identifier,
-  onRemove
-}: {
-  store: EditorStore
-  identifier: string
-  onRemove: () => void
-}) {
-  const at = prompt(identifier)
-  const value = useValue<PresetPrompt>(store, at)
-  return (
-    <div className="flex flex-col gap-3 border-t border-border pt-3 pb-1 sm:pl-10">
-      <TextField store={store} path={[...at, "name"]} label="Name" />
-      <div className="grid gap-3 sm:grid-cols-2">
-        <SelectField store={store} path={[...at, "role"]} label="Role" items={ROLES} />
-        <SelectField store={store} path={[...at, "injection_position"]} label="Position" items={POSITIONS} />
-      </div>
-      {value.injection_position === "absolute" && (
-        <div className="grid gap-3 sm:grid-cols-2">
-          <NumberField store={store} path={[...at, "injection_depth"]} label="Depth" integer min={0} max={10000} />
-          <NumberField store={store} path={[...at, "injection_order"]} label="Order at that depth" />
-        </div>
-      )}
-      {value.marker ? (
-        <p className="text-sm text-muted">
-          A marker: when the prompt is assembled, {MARKERS[identifier] ?? "the assembler's text"} goes here. It has no
-          text of its own.
-        </p>
-      ) : (
-        <TextField store={store} path={[...at, "content"]} label="Prompt" rows={8} />
-      )}
-      <SwitchField
-        store={store}
-        path={[...at, "forbid_overrides"]}
-        label="A card can't replace it"
-        description="Cards with their own system prompt or post-history instructions leave this one as it is."
-      />
-      {!value.system_prompt && !value.marker && (
-        <div>
-          <Button variant="ghost" onClick={onRemove}>
-            Delete the prompt
-          </Button>
-        </div>
-      )}
-    </div>
-  )
-}
-
-function PromptRow({
-  store,
-  entry,
-  handle,
-  onToggle,
-  onTakeOut,
-  onRemove
-}: {
-  store: EditorStore
-  entry: PromptOrderEntry
-  handle: ReactNode
-  onToggle: (enabled: boolean) => void
-  onTakeOut: () => void
-  onRemove: () => void
-}) {
-  const at = prompt(entry.identifier)
-  const value = useValue<PresetPrompt | undefined>(store, at)
-  const name = useText(store, [...at, "name"]) || entry.identifier
-  const [open, setOpen] = useState(false)
-  if (value === undefined) return null
-  return (
-    <div className="flex flex-col gap-2 py-1.5">
-      <div className="flex min-w-0 items-center gap-2">
-        {handle}
-        <Switch checked={entry.enabled} onCheckedChange={onToggle}>
-          <span className="sr-only">Send {name}</span>
-        </Switch>
-        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
-          <span className={`min-w-0 text-sm font-medium [overflow-wrap:anywhere] ${entry.enabled ? "" : "text-muted"}`}>
-            {name}
-          </span>
-          {value.marker && <Badge>marker</Badge>}
-          {value.role !== "system" && <Badge>{value.role}</Badge>}
-          {value.injection_position === "absolute" && (
-            <Badge tone="accent">in chat, depth {value.injection_depth}</Badge>
-          )}
-        </div>
-        <Button variant="ghost" aria-expanded={open} aria-label={`Edit ${name}`} onClick={() => setOpen(!open)}>
-          {open ? "Close" : "Edit"}
-        </Button>
-      </div>
-      {open && (
-        <>
-          <PromptEditor store={store} identifier={entry.identifier} onRemove={onRemove} />
-          <div className="sm:pl-10">
-            <Button variant="ghost" onClick={onTakeOut}>
-              Take it out of the order
-            </Button>
-          </div>
-        </>
-      )}
-    </div>
-  )
-}
-
-function Prompts({ store }: { store: EditorStore }) {
-  const order = useValue<ReadonlyArray<PromptOrderEntry>>(store, ["order"]) ?? []
-  const prompts = useValue<ReadonlyArray<PresetPrompt>>(store, ["prompts"]) ?? []
-  const ordered = new Set(order.map((entry) => entry.identifier))
-  const unordered = prompts.filter((p) => !ordered.has(p.identifier))
-  const names = new Map(prompts.map((p) => [p.identifier, p.name || p.identifier]))
-  const setOrder = (next: ReadonlyArray<PromptOrderEntry>) => store.setValue(["order"], next)
-
-  const add = () => {
-    const identifier = uuidv7()
-    store.setValue(prompt(identifier), {
-      identifier,
-      name: "New prompt",
-      role: "system",
-      content: "",
-      system_prompt: false,
-      marker: false,
-      injection_position: "relative",
-      injection_depth: 4,
-      injection_order: 100,
-      injection_trigger: [],
-      forbid_overrides: false
-    })
-    setOrder([...order, { identifier, enabled: true }])
-  }
-
-  const remove = (identifier: string) => {
-    setOrder(order.filter((entry) => entry.identifier !== identifier))
-    void store.removeItem(prompt(identifier))
-  }
-
-  return (
-    <div className="flex flex-col gap-3">
-      <SortableList
-        items={order}
-        itemKey={(entry) => entry.identifier}
-        itemLabel={(entry) => names.get(entry.identifier) ?? entry.identifier}
-        label="Prompt order"
-        onMove={(from, to) => {
-          const next = [...order]
-          next.splice(to, 0, ...next.splice(from, 1))
-          setOrder(next)
-        }}
-      >
-        {(entry, handle) => (
-          <PromptRow
-            store={store}
-            entry={entry}
-            handle={handle}
-            onToggle={(enabled) => setOrder(order.map((e) => (e === entry ? { ...e, enabled } : e)))}
-            onTakeOut={() => setOrder(order.filter((e) => e !== entry))}
-            onRemove={() => remove(entry.identifier)}
-          />
-        )}
-      </SortableList>
-      <FieldTools store={store} field={valueField(["order"])} label="Prompt order" />
-      <div>
-        <Button onClick={add}>Add a prompt</Button>
-      </div>
-      {unordered.length > 0 && (
-        <Fieldset legend="Not in the order" description="These prompts are kept, but never sent.">
-          <ul className="flex flex-col divide-y divide-border">
-            {unordered.map((p) => (
-              <li key={p.identifier} className="flex items-center justify-between gap-2 py-1.5">
-                <span className="min-w-0 text-sm [overflow-wrap:anywhere]">{p.name || p.identifier}</span>
-                <Button
-                  variant="ghost"
-                  aria-label={`Add ${p.name || p.identifier} to the order`}
-                  onClick={() => setOrder([...order, { identifier: p.identifier, enabled: true }])}
-                >
-                  Add to the order
-                </Button>
-              </li>
-            ))}
-          </ul>
-        </Fieldset>
-      )}
-    </div>
-  )
-}
 
 const POSTFIXES = [
   { value: "", label: "Nothing" },
@@ -431,15 +222,25 @@ function Regex({ store, call }: { store: EditorStore; call: Caller }) {
   )
 }
 
-export function PresetEditor({ store, call }: { store: EditorStore; call: Caller }) {
+export function PresetEditor({
+  store,
+  call,
+  context,
+  focus
+}: {
+  store: EditorStore
+  call: Caller
+  context?: PresetContext | null | undefined
+  focus?: string | undefined
+}) {
   return (
     <>
       <Card>
         <CardHeader
           title="Prompts"
-          description="Sent in this order. Drag a prompt by its handle, or focus it and use the arrow keys."
+          description="Sent in this order. Drag a handle or an outline name; arrow keys move a focused handle."
         />
-        <Prompts store={store} />
+        <PromptDocument store={store} context={context} focus={focus} />
       </Card>
       <Card>
         <CardHeader title="Prefill" description="Dropped where the provider can't take it." />

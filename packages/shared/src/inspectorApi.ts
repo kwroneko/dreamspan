@@ -1,3 +1,4 @@
+import { Placement } from "./docs/note.ts"
 // The request inspector and the cache-warmth estimate (DESIGN §5.5, §7.4), merged into AppApi.
 import { SelectiveLogic } from "./docs/lorebook.ts"
 import { Schema } from "effect"
@@ -191,8 +192,20 @@ const EffectiveModel = Schema.Struct({
   continueUnavailable: Schema.optionalKey(Schema.String)
 })
 
+export const PresetContext = Schema.Struct({
+  blocks: Schema.Array(
+    Schema.Struct({ identifier: Schema.String, tokens: Schema.Int, labels: Schema.Array(Schema.String) })
+  ),
+  cacheAfter: Schema.Array(Schema.Struct({ identifier: Schema.String, reason: BreakpointReason })),
+  notes: Schema.Array(
+    Schema.Struct({ title: Schema.String, placement: Placement, due: Schema.optionalKey(Schema.Boolean) })
+  )
+})
+export type PresetContext = typeof PresetContext.Type
+
 /** The next request boundary, also available before a first send or without a cache TTL. */
 export const NextContext = Schema.Struct({
+  presetContext: Schema.optionalKey(Schema.NullOr(PresetContext)),
   /** Null when neither the chat nor the user's defaults name a model. */
   model: Schema.optionalKey(Schema.NullOr(EffectiveModel)),
   preset: Schema.optionalKey(Schema.NullOr(EffectivePreset)),
