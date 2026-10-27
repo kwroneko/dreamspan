@@ -365,6 +365,24 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
               }
               return sharedPath.has(slotId)
             })
+          // This file's remembered naming choice, and whether it's on the path down to
+          // `parent`. Matching only walks down, so the path is walked once per batch and
+          // then follows each adopted slot: a long run of matches costs no ancestry scans.
+          let choice: { branch_name: string | null; branch_name_user: number; above: boolean } | null | undefined
+          const remembered = Effect.gen(function* () {
+            if (choice === undefined) {
+              const [row] = yield* sql<{ branch_name: string | null; branch_name_user: number; above: number }>`
+                WITH RECURSIVE prefix(id, parent) AS (
+                  SELECT id, parent_slot_id FROM slots WHERE id = ${parent?.id ?? null} AND chat_id = ${chatId}
+                  UNION ALL
+                  SELECT s.id, s.parent_slot_id FROM slots s JOIN prefix p ON s.id = p.parent
+                )
+                SELECT branch_name, branch_name_user, EXISTS (SELECT 1 FROM prefix WHERE id = choice.id) AS above
+                FROM slots choice WHERE choice.id = ${payload.nameSlot ?? null} AND choice.chat_id = ${chatId}`
+              choice = row === undefined ? null : { ...row, above: row.above === 1 }
+            }
+            return choice
+          })
           let matching = input.matching
           let added = 0
           let differing = 0
@@ -500,19 +518,15 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
                 copied === null &&
                 placeholder === undefined &&
                 payload.nameSlot != null &&
+                match.slot_id !== payload.nameSlot &&
                 match.slot_id !== (yield* priorAt(match.depth))
               ) {
-                const [collision] = yield* sql<{ conflict: number }>`
-                  WITH RECURSIVE prefix(id, parent) AS (
-                    SELECT id, parent_slot_id FROM slots WHERE id = ${match.slot_id} AND chat_id = ${chatId}
-                    UNION ALL
-                    SELECT s.id, s.parent_slot_id FROM slots s JOIN prefix p ON s.id = p.parent
-                  )
-                  SELECT EXISTS (SELECT 1 FROM slots choice WHERE choice.id = ${payload.nameSlot}
-                    AND choice.chat_id = ${chatId}
-                    AND (choice.branch_name IS NOT ${match.branch_name} OR choice.branch_name_user <> ${match.branch_name_user})
-                    AND NOT EXISTS (SELECT 1 FROM prefix WHERE id = choice.id)) AS conflict`
-                if (collision?.conflict === 1) {
+                const mine = yield* remembered
+                if (
+                  mine !== null &&
+                  !mine.above &&
+                  (mine.branch_name !== match.branch_name || mine.branch_name_user !== match.branch_name_user)
+                ) {
                   own = undefined
                   match = undefined
                 }
@@ -587,6 +601,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
                 if (placeholder === undefined && (!showsSelected || match.hidden !== (message.hidden ? 1 : 0)))
                   differing++
                 parent = { id: match.slot_id, depth: match.depth, lane_id: laneId }
+                if (choice != null && match.slot_id === payload.nameSlot) choice.above = true
                 slotIds.push(match.slot_id as SlotId)
                 continue
               }
@@ -760,9 +775,9 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
                 AND (${placement} IS NULL OR EXISTS (SELECT 1 FROM mine WHERE id = ${placement})
                   OR s.depth >= (SELECT depth FROM slots WHERE id = ${payload.firstAdded ?? null}))
               ORDER BY m.depth LIMIT 1`
-            // Older custom-name records have only `named`; automatic-name records
-            // have neither field. Recover both from their prior path, including local
-            // choices. `nameSlot` also survives an interrupted, batched suffix copy.
+            // Claim recovered older records' placement (StImportClaim, below); one it
+            // couldn't (an automatic name without a parent) falls back to the divergence
+            // of its prior path. `nameSlot` also survives an interrupted, batched suffix copy.
             const [previous] =
               nameSlot === null
                 ? yield* divergence(payload.end ?? null)
@@ -863,14 +878,37 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
         const prior = payload.last ?? payload.end ?? null
         let nameSlot = payload.nameSlot ?? null
         const parentId = parentRecordId ?? payload.parentRecordId
+        let parentPayload: RecordPayload | undefined
         if (parentId !== undefined) {
           const [parent] = yield* sql<{ payload_json: string }>`SELECT payload_json FROM jobs
             WHERE id = ${parentId} AND owner_user_id = ${userId} AND kind = ${ST_CHAT_RECORD}`
           if (!parent) return yield* new NotFound({ entity: "import record", id: parentId })
-          const parentPayload = JSON.parse(parent.payload_json) as RecordPayload
+          parentPayload = JSON.parse(parent.payload_json) as RecordPayload
+        }
+        // Legacy records must recover their choice before message matching can
+        // adopt another fork's occupied placement. Keep placeholders in the walk.
+        if (payload.merged && nameSlot === null && prior !== null && payload.named) {
+          // An older custom-name record put its name at its divergence (or found one
+          // there), and only a local choice, (name, 1) or (null, 1), replaced it since.
+          // Ancestors' choices lie above it on the path and children's below its end,
+          // so the deepest choice no other record remembers is its own. This needs no
+          // parent: the parent may be gone, or its path may have moved off the old one.
+          const [placement] = yield* sql<{ id: string }>`
+            WITH RECURSIVE mine(id, parent, depth) AS (
+              SELECT id, parent_slot_id, depth FROM slots WHERE id = ${prior} AND chat_id = ${payload.chatId}
+              UNION ALL
+              SELECT s.id, s.parent_slot_id, s.depth FROM slots s JOIN mine m ON s.id = m.parent
+            ) SELECT s.id FROM mine m JOIN slots s ON s.id = m.id
+            WHERE (s.branch_name IS NOT NULL OR s.branch_name_user = 1)
+              AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.owner_user_id = ${userId} AND j.kind = ${ST_CHAT_RECORD}
+                AND j.id <> ${recordId} AND json_extract(j.payload_json, '$.nameSlot') = s.id)
+            ORDER BY m.depth DESC LIMIT 1`
+          nameSlot = placement?.id ?? null
+        }
+        if (parentPayload !== undefined) {
           if (payload.merged && nameSlot === null && prior !== null) {
-            // Legacy records must recover their choice before message matching can
-            // adopt another fork's occupied placement. Keep placeholders in the walk.
+            // Automatic-name records have neither field, and their own choice is
+            // usually (null, 0): only the parent's path tells it from an ancestor's.
             const parentEnd =
               parentPayload.chatId === payload.chatId ? (parentPayload.end ?? parentPayload.last ?? null) : null
             const [placement] = yield* sql<{ id: string }>`
