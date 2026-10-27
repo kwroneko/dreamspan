@@ -1,3 +1,4 @@
+import { PresetTab } from "./PresetTab.tsx"
 // The chat's side panel (DESIGN §10.1): who's here, what the chat sends with, its lorebooks,
 // notes and summaries, beside the messages as ST's panels are, so the chat stays readable and
 // usable while it's open. On a phone it's a sheet over the chat. The open tab is in the URL
@@ -56,6 +57,7 @@ const PANEL_TABS = [
   { value: "portrait", label: "Portrait", icon: "people" },
   { value: "cast", label: "Cast", icon: "people" },
   { value: "chat", label: "This chat", icon: "sliders" },
+  { value: "preset", label: "Preset", icon: "sliders" },
   { value: "lorebooks", label: "Lorebooks", icon: "book" },
   { value: "notes", label: "Notes", icon: "note" },
   { value: "summaries", label: "Summaries", icon: "summary" }
@@ -173,6 +175,8 @@ function TabContent({
       return <PortraitView />
     case "cast":
       return <CastTab session={session} />
+    case "preset":
+      return <PresetTab view={view} />
     case "chat":
       return <ThisChatTab session={session} active={active} />
     case "lorebooks":

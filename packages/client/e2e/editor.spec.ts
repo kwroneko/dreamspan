@@ -242,6 +242,7 @@ test("making a variant is one action, and takes the unsaved changes along", asyn
 })
 
 test("a preset's prompts reorder by dragging and by keyboard, and toggle", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1200 })
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   const refId = await importPreset(page, await presetFile("default"))
   await open(page, refId)
@@ -252,8 +253,9 @@ test("a preset's prompts reorder by dragging and by keyboard, and toggle", async
       .evaluateAll((handles) => handles.map((handle) => handle.getAttribute("aria-label")!.slice("Move ".length)))
   expect((await names()).slice(0, 3)).toEqual(["Main Prompt", "World Info (before)", "Persona Description"])
 
+  await page.getByRole("button", { name: "Collapse all", exact: true }).click()
   // Drag "Persona Description" above "Main Prompt".
-  const handle = page.getByRole("button", { name: "Move Persona Description" })
+  const handle = order.getByRole("button", { name: "Move Persona Description" })
   const target = (await order.getByRole("listitem").first().boundingBox())!
   const from = (await handle.boundingBox())!
   await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2)
@@ -263,9 +265,9 @@ test("a preset's prompts reorder by dragging and by keyboard, and toggle", async
   expect((await names()).slice(0, 3)).toEqual(["Persona Description", "Main Prompt", "World Info (before)"])
 
   // The keyboard: the handle keeps its focus as its prompt moves.
-  await page.getByRole("button", { name: "Move Main Prompt" }).focus()
+  await order.getByRole("button", { name: "Move Main Prompt" }).focus()
   await page.keyboard.press("ArrowDown")
-  await expect(page.getByRole("button", { name: "Move Main Prompt" })).toBeFocused()
+  await expect(order.getByRole("button", { name: "Move Main Prompt" })).toBeFocused()
   expect((await names()).slice(0, 3)).toEqual(["Persona Description", "World Info (before)", "Main Prompt"])
 
   await page.getByRole("switch", { name: "Send Chat Examples" }).click()
@@ -367,8 +369,7 @@ test("an update with a conflict is resolved field by field", async ({ page }) =>
   await conflict.getByRole("textbox").fill("Write terse, calm prose.")
   await dialog.getByRole("button", { name: "Apply these" }).click()
   await expect(page.getByText("A newer version of the file was imported")).toHaveCount(0)
-  await page.getByRole("button", { name: "Edit Main Prompt" }).click()
-  await expectTextBox(page.getByRole("textbox", { name: /^Prompt/ }), "Write terse, calm prose.")
+  await expectTextBox(page.getByRole("textbox", { name: /^Prompt: Main Prompt/ }), "Write terse, calm prose.")
 })
 
 /** Records each request to /library/drafts: whether it was sent with `keepalive`, and how it went. */
@@ -496,11 +497,11 @@ interface StoredCopy {
   readonly at: number
 }
 
-/** The editors' copies in this browser (backup.ts), as stored. */
+/** Copy identities only: transferring multi-megabyte payloads makes the capacity poll time out. */
 const storedCopies = (page: Page) =>
   page.evaluate(
     () =>
-      new Promise<Array<StoredCopy>>((resolve) => {
+      new Promise<Array<Pick<StoredCopy, "refId">>>((resolve) => {
         const request = indexedDB.open("rp-editor-copies", 1)
         request.onupgradeneeded = () => {
           const store = request.result.createObjectStore("copies", { keyPath: "key" })
@@ -512,7 +513,7 @@ const storedCopies = (page: Page) =>
           const all = db.transaction("copies").objectStore("copies").getAll()
           all.onsuccess = () => {
             db.close()
-            resolve(all.result as Array<StoredCopy>)
+            resolve((all.result as Array<StoredCopy>).map(({ refId }) => ({ refId })))
           }
         }
       })

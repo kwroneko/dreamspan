@@ -659,7 +659,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
       const library = yield* importPreset(preset("default"))
       const refId = library.ref.id
       const before = (yield* doc(api, refId)) as unknown as PresetDoc
-      const added = Array.from({ length: 88 }, (_, i) => ({
+      const added = Array.from({ length: 100 - before.prompts.length }, (_, i) => ({
         ...before.prompts[0]!,
         identifier: `extra-${i}`,
         name: `Extra ${i}`,
@@ -677,7 +677,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
         refId,
         revisionId: library.ref.headRevisionId
       })) as unknown as PresetDoc
-      assert.strictEqual(imported.prompts.length, 12)
+      assert.strictEqual(imported.prompts.length, 13)
     })
   )
 })

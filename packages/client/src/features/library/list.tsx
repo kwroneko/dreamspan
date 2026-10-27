@@ -1,3 +1,4 @@
+import { PresetWorkspace, PresetOverlayHost, usePresetWorkspace } from "../editor/PresetWorkspace.tsx"
 // The library: cards, lorebooks and presets by label, each exportable as a file.
 import type { LibraryRef } from "@rp/shared/library.ts"
 import { type ExportFormat, exportFormats } from "@rp/shared/libraryImport.ts"
@@ -37,6 +38,7 @@ function PersonaToggle({ entry, persona }: { entry: LibraryRef; persona: boolean
 }
 
 function LibraryRow({ entry, persona }: { entry: LibraryRef; persona?: boolean | undefined }) {
+  const workspace = usePresetWorkspace()
   const formats = exportFormats[entry.kind] ?? []
   const [format, setFormat] = useState<ExportFormat | null>(formats[0] ?? null)
   const [pending, setPending] = useState(false)
@@ -78,15 +80,21 @@ function LibraryRow({ entry, persona }: { entry: LibraryRef; persona?: boolean |
             Chat
           </Link>
         )}
-        {entry.kind !== "lorebook" && (
-          <Link
-            to="/library/$refId"
-            params={{ refId: entry.id }}
-            aria-label={`Edit ${entry.label}`}
-            className={buttonClass("secondary")}
-          >
+        {entry.kind === "preset" ? (
+          <Button aria-label={`Edit ${entry.label}`} onClick={() => workspace.open(entry.id)}>
             Edit
-          </Link>
+          </Button>
+        ) : (
+          entry.kind !== "lorebook" && (
+            <Link
+              to="/library/$refId"
+              params={{ refId: entry.id }}
+              aria-label={`Edit ${entry.label}`}
+              className={buttonClass("secondary")}
+            >
+              Edit
+            </Link>
+          )
         )}
         {entry.refKind === "upstream" && (
           <Link
@@ -115,7 +123,7 @@ function LibraryRow({ entry, persona }: { entry: LibraryRef; persona?: boolean |
   )
 }
 
-export function LibraryPage() {
+function LibraryContent() {
   useTitle("Library")
   return (
     <div className="flex flex-col gap-6">
@@ -157,5 +165,14 @@ export function LibraryPage() {
         }
       </AsyncView>
     </div>
+  )
+}
+
+export function LibraryPage() {
+  return (
+    <PresetWorkspace>
+      <LibraryContent />
+      <PresetOverlayHost page />
+    </PresetWorkspace>
   )
 }

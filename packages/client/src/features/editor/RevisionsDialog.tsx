@@ -115,7 +115,8 @@ export function RevisionsDialog({ store, call, onClose }: { store: EditorStore; 
   const [revisions, setRevisions] = useState<ReadonlyArray<Revision> | null>(null)
   const [error, setError] = useState<AppError | null>(null)
   const head = useEditorState(store).snapshot!.ref.headRevisionId
-  const card = useEditorState(store).snapshot!.ref.kind === "card"
+  const kind = useEditorState(store).snapshot!.ref.kind
+  const card = kind === "card" || kind === "preset"
 
   useEffect(() => {
     if (card) return

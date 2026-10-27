@@ -13,7 +13,7 @@ import type { PresetDoc } from "@rp/shared/docs/preset.ts"
 import { Schema } from "effect"
 
 /** Bump whenever identical inputs would assemble differently. Missing means version 0. */
-export const ASSEMBLER_VERSION = 21
+export const ASSEMBLER_VERSION = 22
 
 export type Role = "system" | "user" | "assistant"
 
@@ -83,6 +83,8 @@ export interface LorebookInput {
 
 /** One piece of the context: a prompt, a card field, a message, as it was sent. */
 export interface Piece {
+  /** The prompt-order slot filled by this root piece, before wire transformations. */
+  marker?: string
   readonly id: string
   readonly source: Source
   readonly text: string

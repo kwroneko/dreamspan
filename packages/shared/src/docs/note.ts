@@ -37,6 +37,9 @@ export const Placement = Schema.Union([
   Schema.Struct({
     mode: Schema.Literal("section"),
     section: Schema.Literals([
+      "context_start",
+      "tail_start",
+      "tail_end",
       "card",
       "before_main_prompt",
       "after_main_prompt",

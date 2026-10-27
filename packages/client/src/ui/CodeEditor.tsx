@@ -5,6 +5,7 @@ export interface CodeEditorProps {
   /** Text at the revision this draft was typed against. */
   base: string
   label: string
+  fullHeight?: boolean | undefined
   rows?: number | undefined
   mono?: boolean | undefined
   readOnly?: boolean | undefined

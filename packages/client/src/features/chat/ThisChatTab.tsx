@@ -1,3 +1,5 @@
+import { usePresetWorkspace } from "../editor/PresetWorkspace.tsx"
+import type { RefId } from "@rp/shared/library.ts"
 // The side panel's "This chat" tab (DESIGN §5.2, §5.4, §8; DATA-MODEL §5.3, §5.4): what the
 // next reply is sent with, each with its value and where it comes from, and the chat's own
 // settings. A change is a state event at the leaf shown, so from there on, on this branch.
@@ -245,6 +247,7 @@ function PresetSetting({
   sources: Sources | null
   change: (next: CastChange) => Promise<void>
 }) {
+  const workspace = usePresetWorkspace()
   const { cast } = useCast()
   const history = useSyncExternalStore(session.subscribe, session.snapshot).history
   const preset = history?.preset ?? null
@@ -267,9 +270,9 @@ function PresetSetting({
             </span>
           )}
           {preset?.ref && (
-            <Link to="/library/$refId" params={{ refId: preset.ref }} className={`block ${link}`}>
+            <Button variant="ghost" onClick={() => workspace.open(preset.ref as RefId)}>
               Open “{preset.name}” in the editor
-            </Link>
+            </Button>
           )}
         </>
       }

@@ -13,6 +13,7 @@ export function CardTextEditor({
   value,
   label,
   rows,
+  fullHeight,
   mono,
   readOnly,
   onChange,
@@ -23,6 +24,7 @@ export function CardTextEditor({
   path: FieldPath
   value: string
   label: string
+  fullHeight?: boolean | undefined
   rows?: number | undefined
   mono?: boolean | undefined
   readOnly?: boolean | undefined
@@ -59,6 +61,7 @@ export function CardTextEditor({
         base={comparison?.revision === revision ? comparison.value : value}
         label={label}
         rows={rows}
+        fullHeight={fullHeight}
         mono={mono}
         readOnly={readOnly}
         onChange={onChange}
