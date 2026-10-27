@@ -91,11 +91,13 @@ export const exportFile = (input: ExportInput): Effect.Effect<Uint8Array, Export
     case "st-world-info":
       return Effect.map(decode(LorebookDoc, "lorebook")(input.docJson), exportLorebook)
     case "st-preset":
+      // Hydrate legacy export fields from a recognized chat-completion document.
+      // Prompt-only revisions deliberately have no sampler or wire fields.
       return Effect.map(
         decode(
           PresetDoc,
           "preset"
-        )(JSON.stringify({ ...importStPreset('{"temperature":1}').document, ...JSON.parse(input.docJson) })),
+        )(JSON.stringify({ ...importStPreset('{"main_prompt":""}').document, ...JSON.parse(input.docJson) })),
         (doc) => json(exportPromptPreset(doc))
       )
     default:

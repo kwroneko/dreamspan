@@ -80,6 +80,7 @@ const prefillItems = (upstream: ModelOverrides["prefill"]) => [
 /** Edits the user's overrides. Empty fields fall back to what the provider reports. */
 export function ModelSettingsEditor({ model, onSaved }: { model: Model; onSaved?: () => void }) {
   const action = useAction()
+  const [rowVersion, setRowVersion] = useState(model.rowVersion)
   const [name, setName] = useState(model.overrides.name ?? "")
   const [context, setContext] = useState(
     (model.overrides.settings?.samplers?.openai_max_context ?? model.overrides.context)?.toString() ?? ""
@@ -141,14 +142,17 @@ export function ModelSettingsEditor({ model, onSaved }: { model: Model; onSaved?
       }).filter(([, value]) => value !== undefined)
     )
     const result = await action.run(
-      (client) => client("EditModel", { modelId: model.id, overrides, expectedRowVersion: model.rowVersion }),
+      (client) => client("EditModel", { modelId: model.id, overrides, expectedRowVersion: rowVersion }),
       ["models"]
     )
-    if (result.ok) onSaved?.()
+    if (result.ok) {
+      setRowVersion(result.value.rowVersion)
+      onSaved?.()
+    }
   }
 
   return (
-    <form onSubmit={submit} className="flex flex-col gap-4" noValidate>
+    <form onSubmit={submit} className="flex min-w-0 flex-col gap-4 [overflow-wrap:anywhere]" noValidate>
       <Field label="Display name">
         <Input value={name} onValueChange={setName} placeholder={model.upstream.name ?? model.key} />
       </Field>

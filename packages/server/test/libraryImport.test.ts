@@ -289,12 +289,16 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
       const preset = yield* imported(presetFile("Write vivid prose."), "Narrator.json")
       assert.strictEqual(preset.library!.ref.label, "Narrator")
       const presetOut = yield* exported(preset.library!.ref.id, "st-preset")
+      assert.strictEqual(presetOut.status, 200)
       const file = JSON.parse(new TextDecoder().decode(presetOut.bytes))
       assert.strictEqual(
         file.prompts.find((p: { identifier: string }) => p.identifier === "main").content,
         "Write vivid prose."
       )
       assert.notProperty(file, "proxy_password")
+      assert.notProperty(file, "temperature")
+      assert.notProperty(file, "openai_max_context")
+      assert.notProperty(file, "names_behavior")
     })
   )
 
