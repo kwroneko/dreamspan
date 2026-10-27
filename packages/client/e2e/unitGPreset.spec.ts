@@ -221,7 +221,7 @@ test("panel toggles share drafts with the overlay and discard restores the saved
 test("the panel's Discard asks first when the overlay changed more than the switches", async ({ page }) => {
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/chats/${library.forks.find((f) => f.current)!.chat.id}`)
-  const panel = await openPanel(page, "Preset")
+  const panel = await openPanel(page, "Prompt preset")
   await panel.getByRole("button", { name: "Edit Main Prompt", exact: true }).click()
   const overlay = page.getByRole("dialog", { name: "Preset editor", exact: true })
   const main = overlay.getByRole("textbox", { name: "Prompt: Main Prompt", exact: true })
@@ -243,7 +243,7 @@ test("the panel's Discard asks first when the overlay changed more than the swit
 test("the panel's Discard asks first when the overlay reordered blocks", async ({ page }) => {
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/chats/${library.forks.find((f) => f.current)!.chat.id}`)
-  const panel = await openPanel(page, "Preset")
+  const panel = await openPanel(page, "Prompt preset")
   const names = async () =>
     (await panel.getByRole("list", { name: "Preset blocks" }).getByRole("listitem").allTextContents()).join("|")
   const before = await names()
