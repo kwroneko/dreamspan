@@ -20,11 +20,7 @@ test.beforeAll(async () => {
   const preset = await fetch(`${server().url}/library/import?name=Stepped.json`, {
     method: "POST",
     headers,
-    body: JSON.stringify({
-      openai_max_context: 400,
-      openai_max_tokens: 40,
-      frequency_penalty: 0
-    })
+    body: JSON.stringify({ frequency_penalty: 0 })
   })
   expect(preset.status).toBe(200)
   const refId = ((await preset.json()) as { library: { ref: { id: RefId } } }).library.ref.id
@@ -62,7 +58,12 @@ test.beforeAll(async () => {
           presetOverrideRefId: null
         }
       })
-      const model = yield* api.AddUserModel({ connectionId: connection.id, key: "fake-small", overrides: {} })
+      // The small budget is the model's own setting; the prompt preset carries none.
+      const model = yield* api.AddUserModel({
+        connectionId: connection.id,
+        key: "fake-small",
+        overrides: { settings: { samplers: { openai_max_context: 400, openai_max_tokens: 40 } } }
+      })
       yield* api.SetGenerationDefaults({
         defaults: { model: { connection: connection.id, model: model.id }, preset: refId }
       })
@@ -92,8 +93,8 @@ test("dropped messages have a faded border and accessible icon distinct from hid
   )
   const firstSent = entries.find((e) => e.depth >= next.historyStart!.depth)!
   await page.goto(`${server().url}/chats/${chatId}?slot=${firstSent.slotId}`)
-  const explanation = page.getByRole("status").filter({ hasText: "aren’t sent to the model: the preset" })
-  await expect(explanation).toContainText("“Stepped” allows 400 tokens")
+  const explanation = page.getByRole("status").filter({ hasText: "aren’t sent to the model: the model’s context" })
+  await expect(explanation).toContainText("context budget allows 400 tokens")
   const sent = page.locator(`article[data-slot="${firstSent.slotId}"]`)
   await expect(sent).toBeVisible()
   await expect(sent).not.toHaveAttribute("data-out-of-context")

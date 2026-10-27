@@ -115,7 +115,7 @@ const mockWith = (handler: Parameters<typeof startMockProvider>[0]) =>
   )
 
 describe("generation at the edges", () => {
-  it.live("Google: the preset's top_p and top_k reach generationConfig", () => {
+  it.live("Google: the model's top_p and top_k reach generationConfig", () => {
     const config = testConfig()
     return Effect.gen(function* () {
       const mock = yield* mockWith((_r, res) => {
@@ -125,7 +125,7 @@ describe("generation at the edges", () => {
       const api = yield* client()
       const { chat, parent } = yield* setup(api, {
         connection: { kind: "google", baseUrl: mock.url, apiKey: "made-up-google-key-0000" },
-        preset: { top_p: 0.5, top_k: 40, temperature: 0.7 }
+        model: { settings: { samplers: { top_p: 0.5, top_k: 40, temperature: 0.7 } } }
       })
       yield* api.Generate({ chatId: chat.id, parentSlotId: parent, branch: false })
       yield* waitFor(() => mock.requests().some((r) => r.body !== null))
@@ -134,7 +134,7 @@ describe("generation at the edges", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
-  it.live("o3 on OpenAI: one max-tokens field, the preset's", () => {
+  it.live("o3 on OpenAI: one max-tokens field, the model's", () => {
     const config = testConfig()
     return Effect.gen(function* () {
       const mock = yield* mockWith(completion)
@@ -142,7 +142,7 @@ describe("generation at the edges", () => {
       const { chat, parent } = yield* setup(api, {
         connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
         key: "o3-mini",
-        preset: { openai_max_tokens: 333 }
+        model: { settings: { samplers: { openai_max_tokens: 333 } } }
       })
       yield* api.Generate({ chatId: chat.id, parentSlotId: parent, branch: false })
       yield* waitFor(() => mock.requests().some((r) => r.path === "/v1/chat/completions"))

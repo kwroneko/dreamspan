@@ -626,12 +626,8 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
             c.baseUrl
           ),
           cacheBreakpoints: effective.cacheBreakpoints.value,
-          context:
-            effective.settings.samplers?.openai_max_context ??
-            (effective.context.source === "unknown" ? null : effective.context.value),
-          maxOutput:
-            effective.settings.samplers?.openai_max_tokens ??
-            (effective.maxOutput.source === "unknown" ? null : effective.maxOutput.value),
+          context: effective.context.source === "unknown" ? null : effective.context.value,
+          maxOutput: effective.maxOutput.source === "unknown" ? null : effective.maxOutput.value,
           presetOverride: c.presetOverrideRefId
         }
         return resolvedModel
@@ -656,8 +652,8 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
               doc: withModelSettings(
                 found.doc,
                 resolvedModel?.settings ?? {},
-                resolvedModel?.context ?? 8192,
-                resolvedModel?.maxOutput ?? 4096
+                resolvedModel?.context,
+                resolvedModel?.maxOutput
               )
             }
         }
@@ -665,7 +661,12 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
           ref: null,
           revision: null,
           scope: "builtin",
-          doc: withModelSettings(builtinPreset, {}, 8192, 4096)
+          doc: withModelSettings(
+            builtinPreset,
+            resolvedModel?.settings ?? {},
+            resolvedModel?.context,
+            resolvedModel?.maxOutput
+          )
         } satisfies PresetInput
       })
   })
@@ -853,8 +854,8 @@ const replaySources = (
             doc: withModelSettings(
               builtinPreset,
               inputs.model?.settings ?? {},
-              inputs.model?.context ?? 8192,
-              inputs.model?.maxOutput ?? 4096
+              inputs.model?.context,
+              inputs.model?.maxOutput
             )
           } satisfies PresetInput
         const row = yield* revisionDoc(revision, "preset")
@@ -867,12 +868,7 @@ const replaySources = (
           ref,
           revision,
           scope,
-          doc: withModelSettings(
-            doc,
-            inputs.model?.settings ?? {},
-            inputs.model?.context ?? 8192,
-            inputs.model?.maxOutput ?? 4096
-          )
+          doc: withModelSettings(doc, inputs.model?.settings ?? {}, inputs.model?.context, inputs.model?.maxOutput)
         } satisfies PresetInput
       })
   }

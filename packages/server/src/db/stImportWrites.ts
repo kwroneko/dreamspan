@@ -891,12 +891,35 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
         }
         // Legacy records must recover their choice before message matching can
         // adopt another fork's occupied placement. Keep placeholders in the walk.
+        if (payload.merged && nameSlot === null && prior !== null && parentPayload !== undefined) {
+          // Automatic-name records have neither field, and their own choice is
+          // usually (null, 0): only the parent's path tells it from an ancestor's.
+          const parentEnd =
+            parentPayload.chatId === payload.chatId ? (parentPayload.end ?? parentPayload.last ?? null) : null
+          const [placement] = yield* sql<{ id: string; chosen: number }>`
+            WITH RECURSIVE theirs(id, parent) AS (
+              SELECT id, parent_slot_id FROM slots WHERE id = ${parentEnd} AND chat_id = ${payload.chatId}
+              UNION ALL
+              SELECT s.id, s.parent_slot_id FROM slots s JOIN theirs t ON s.id = t.parent
+            ), mine(id, parent, depth) AS (
+              SELECT id, parent_slot_id, depth FROM slots WHERE id = ${prior} AND chat_id = ${payload.chatId}
+              UNION ALL
+              SELECT s.id, s.parent_slot_id, s.depth FROM slots s JOIN mine m ON s.id = m.parent
+            ) SELECT s.id, s.branch_name IS NOT NULL OR s.branch_name_user = 1 AS chosen
+            FROM mine m JOIN slots s ON s.id = m.id
+            WHERE m.id NOT IN (SELECT id FROM theirs) ORDER BY m.depth LIMIT 1`
+          // A custom-name record's divergence carries its choice, unless the parent's
+          // path has moved off the old shared prefix since (handled below).
+          if (placement !== undefined && (!payload.named || placement.chosen === 1)) nameSlot = placement.id
+        }
         if (payload.merged && nameSlot === null && prior !== null && payload.named) {
           // An older custom-name record put its name at its divergence (or found one
           // there), and only a local choice, (name, 1) or (null, 1), replaced it since.
           // Ancestors' choices lie above it on the path and children's below its end,
-          // so the deepest choice no other record remembers is its own. This needs no
-          // parent: the parent may be gone, or its path may have moved off the old one.
+          // so without a parent path to go by, the deepest choice no other record
+          // remembers is taken as its own: the parent may be gone, or its path may have
+          // moved off the old one. A deeper local choice on its path (a renamed fork
+          // point, or a revision mismatch migration 0043 marked) is taken instead then.
           const [placement] = yield* sql<{ id: string }>`
             WITH RECURSIVE mine(id, parent, depth) AS (
               SELECT id, parent_slot_id, depth FROM slots WHERE id = ${prior} AND chat_id = ${payload.chatId}
@@ -908,25 +931,6 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
                 AND j.id <> ${recordId} AND json_extract(j.payload_json, '$.nameSlot') = s.id)
             ORDER BY m.depth DESC LIMIT 1`
           nameSlot = placement?.id ?? null
-        }
-        if (parentPayload !== undefined) {
-          if (payload.merged && nameSlot === null && prior !== null) {
-            // Automatic-name records have neither field, and their own choice is
-            // usually (null, 0): only the parent's path tells it from an ancestor's.
-            const parentEnd =
-              parentPayload.chatId === payload.chatId ? (parentPayload.end ?? parentPayload.last ?? null) : null
-            const [placement] = yield* sql<{ id: string }>`
-              WITH RECURSIVE theirs(id, parent) AS (
-                SELECT id, parent_slot_id FROM slots WHERE id = ${parentEnd} AND chat_id = ${payload.chatId}
-                UNION ALL
-                SELECT s.id, s.parent_slot_id FROM slots s JOIN theirs t ON s.id = t.parent
-              ), mine(id, parent, depth) AS (
-                SELECT id, parent_slot_id, depth FROM slots WHERE id = ${prior} AND chat_id = ${payload.chatId}
-                UNION ALL
-                SELECT s.id, s.parent_slot_id, s.depth FROM slots s JOIN mine m ON s.id = m.parent
-              ) SELECT id FROM mine WHERE id NOT IN (SELECT id FROM theirs) ORDER BY depth LIMIT 1`
-            nameSlot = placement?.id ?? null
-          }
         }
         yield* sql`UPDATE jobs SET payload_json = ${JSON.stringify({
           ...payload,

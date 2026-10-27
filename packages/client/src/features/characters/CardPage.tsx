@@ -2,7 +2,7 @@
 // chat), New chat and every chat it's in as peers, then its definition to read, each field
 // folded to a few lines. Its library label is the title; the in-chat name, what `{{char}}`
 // resolves to, is shown apart when it differs.
-import type { CardUsage, ShellFork } from "@rp/shared/chatSetupApi.ts"
+import type { CardUsage } from "@rp/shared/chatSetupApi.ts"
 import type { Doc } from "@rp/shared/library.ts"
 import { Link, useParams } from "@tanstack/react-router"
 import { useLayoutEffect, useMemo, useRef, useState } from "react"
@@ -13,7 +13,7 @@ import { Input } from "../../ui/Field.tsx"
 import { Button, buttonClass } from "../../ui/Button.tsx"
 import { Badge, Card, CardHeader, EmptyState } from "../../ui/Surface.tsx"
 import { ForkRow } from "./ShellBrowser.tsx"
-import { shellAtom } from "./shellData.tsx"
+import { shellAtom, type ShellFork } from "./shellData.tsx"
 import { useOpenCharacter } from "./shellData.tsx"
 import { useTitle } from "../shell.tsx"
 import { usageLine } from "./data.ts"

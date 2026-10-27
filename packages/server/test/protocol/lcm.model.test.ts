@@ -157,7 +157,7 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
     const model = yield* api.AddUserModel({
       connectionId: connection.id,
       key: "synthetic-model",
-      overrides: { context: 2048, maxOutput: 300 }
+      overrides: { context: 2048, settings: { samplers: { openai_max_tokens: 300 } } }
     })
     const judgeModel = yield* api.AddUserModel({ connectionId: connection.id, key: "judge-model", overrides: {} })
     const fallbackModel = yield* api.AddUserModel({ connectionId: connection.id, key: "fallback-model", overrides: {} })

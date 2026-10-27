@@ -81,10 +81,8 @@ test("attach a lorebook, send a keyword, and detach it from the provider request
   })
   await expect.poll(async () => (await admin((api) => api.ListLibrary({ kind: "lorebook" }))).length).toBe(1)
   await page.goto(`${server().url}/chats/${chatId}`)
-  // What the chat sends with, and where it comes from.
-  const settings = await openPanel(page, "This chat")
-  await expect(settings.getByTestId("model-in-effect")).toHaveText("Local model server · fake-small")
-  await expect(settings.getByRole("region", { name: "Model" })).toContainText("Your default model")
+  // What the chat sends with: the account's current model, in the composer.
+  await expect(page.getByRole("combobox", { name: "Model", exact: true })).toHaveText("Local model server · fake-small")
   // Only the lorebooks that apply are listed; the library's are a search away.
   const tab = await openPanel(page, "Lorebooks")
   const inChat = tab.getByRole("list", { name: "Lorebooks in this chat" })

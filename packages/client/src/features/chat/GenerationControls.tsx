@@ -1,5 +1,5 @@
 // Account selections and their small panel integration. Unit E can move the panel shell.
-import type { GenerationDefaults } from "@rp/shared/generation.ts"
+import { BUILTIN_PRESET_LABEL, type GenerationDefaults } from "@rp/shared/generation.ts"
 import type { LibraryRef } from "@rp/shared/library.ts"
 import type { Model } from "@rp/shared/providers.ts"
 import { Link } from "@tanstack/react-router"
@@ -53,7 +53,8 @@ export function GenerationControls({
   onSettings: (tab: "model" | "preset") => void
 }) {
   const { action, defaults, presets } = useSelections(session)
-  const models = useModelChoices(true)
+  const current = defaults?.model ? modelValue(defaults.model.connection, defaults.model.model) : null
+  const models = useModelChoices(true, current)
   return (
     <div className="flex flex-col gap-1">
       <div className="grid grid-cols-2 gap-2" aria-label="Current generation settings">
@@ -62,7 +63,7 @@ export function GenerationControls({
             <Field label="Model">
               <Select
                 items={models}
-                value={defaults?.model ? modelValue(defaults.model.connection, defaults.model.model) : null}
+                value={current}
                 placeholder="Choose a model"
                 onValueChange={(value) =>
                   void action.run(
@@ -82,7 +83,7 @@ export function GenerationControls({
             <Field label="Prompt preset">
               <Select
                 items={[
-                  { value: "builtin", label: "Default" },
+                  { value: "builtin", label: BUILTIN_PRESET_LABEL },
                   ...presets.map((preset) => ({ value: preset.id as string, label: preset.label }))
                 ]}
                 value={defaults?.preset ?? "builtin"}
@@ -128,7 +129,7 @@ export function GenerationSettingsPanel({ session, kind }: { session: ChatSessio
       <Editor key={defaults.preset} refId={defaults.preset} />
     ) : (
       <p className="text-sm text-muted">
-        Default is the built-in prompt preset. Import a prompt preset from the{" "}
+        {BUILTIN_PRESET_LABEL} is the built-in prompt preset. Import a prompt preset from the{" "}
         <Link to="/import" className="text-accent">
           Import page
         </Link>{" "}

@@ -42,6 +42,9 @@ export function SearchDialog({
   const [preserveCase, setPreserveCase] = useState(false)
   const [regex, setRegex] = useState(false)
   const [caseSensitive, setCaseSensitive] = useState(false)
+  // On a phone the options fold away, so the sticky bar leaves room for the document.
+  const [options, setOptions] = useState(false)
+  const chosen = [wholeWord, preserveCase, regex, caseSensitive].filter(Boolean).length
   const [found, setFound] = useState<Found | null>(null)
   const [pending, setPending] = useState(false)
 
@@ -128,7 +131,10 @@ export function SearchDialog({
         <Field label="Replace with">
           <Input value={replace} onChange={(event) => setReplace(event.currentTarget.value)} />
         </Field>
-        <div className={`${inline ? "col-span-2 sm:col-span-1" : ""} flex flex-wrap gap-4`}>
+        <div
+          id={inline ? "search-options" : undefined}
+          className={`${inline ? `col-span-2 sm:col-span-1 ${options ? "flex" : "hidden"} sm:flex` : "flex"} flex-wrap gap-4`}
+        >
           <Checkbox checked={wholeWord} onCheckedChange={setWholeWord}>
             Whole word
           </Checkbox>
@@ -144,6 +150,17 @@ export function SearchDialog({
         </div>
         {actions(
           <>
+            {inline && (
+              <Button
+                variant="ghost"
+                className="mr-auto sm:hidden"
+                aria-expanded={options}
+                aria-controls="search-options"
+                onClick={() => setOptions(!options)}
+              >
+                Options{chosen > 0 ? ` (${chosen})` : ""}
+              </Button>
+            )}
             <Button
               disabled={find === "" || !response?.ok || response.matches.length === 0}
               pending={pending}
@@ -169,7 +186,10 @@ export function SearchDialog({
               ? "No matches."
               : `${response.truncated ? "At least " : ""}${response.matches.length} ${response.matches.length === 1 ? "match" : "matches"}.`}
           </p>
-          <ol aria-label="Matches" className="flex max-h-48 flex-col divide-y divide-border overflow-y-auto">
+          <ol
+            aria-label="Matches"
+            className={`flex ${inline ? "max-h-28 sm:max-h-48" : "max-h-48"} flex-col divide-y divide-border overflow-y-auto`}
+          >
             {response.matches.map((match, index) => {
               const field = found.fields[match.index]!
               const text = field.text

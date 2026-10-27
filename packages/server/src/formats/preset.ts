@@ -17,7 +17,7 @@ import {
 } from "@rp/shared/docs/preset.ts"
 import { type ImportReport, ReportBuilder, shownList, shownText } from "@rp/shared/importReport.ts"
 import { Schema } from "effect"
-import { newestMessage, presetOrder } from "@rp/shared/presetOrder.ts"
+import { newestMessage, presetOrder, sentOutsideTheOrder } from "@rp/shared/presetOrder.ts"
 import { defaultLimits, FormatError, parseJson } from "./safety.ts"
 
 const ST_PRESET_FORMAT = "st-chat-completion-preset"
@@ -404,11 +404,20 @@ const readPreset = (file: Json, r: ReportBuilder): PresetDoc => {
   const importedOrder = readOrder(field("prompt_order"), prompts, neverSent, r)
   const included = new Set(importedOrder.map((e) => e.identifier))
   const outside = prompts.filter((p) => !included.has(p.identifier) && p.identifier !== "newestMessage")
-  if (outside.length)
+  const on = outside.filter((p) => sentOutsideTheOrder.includes(p.identifier))
+  const off = outside.filter((p) => !sentOutsideTheOrder.includes(p.identifier))
+  if (on.length)
+    r.add(
+      "info",
+      "preset.markers_appended_on",
+      `Markers outside the ST order were appended, on, since ST still sends them after the other prompts: ${shownList(on.map((p) => p.name || p.identifier))}.`,
+      ["prompt_order"]
+    )
+  if (off.length)
     r.add(
       "info",
       "preset.prompts_appended_off",
-      `Prompts outside the ST order were appended, off: ${shownList(outside.map((p) => p.name || p.identifier))}.`,
+      `Prompts outside the ST order were appended, off: ${shownList(off.map((p) => p.name || p.identifier))}.`,
       ["prompt_order"]
     )
   if (!prompts.some((p) => p.identifier === newestMessage.identifier)) prompts.push(newestMessage)

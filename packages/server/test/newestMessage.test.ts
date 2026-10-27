@@ -2,6 +2,7 @@ import { Effect } from "effect"
 import { describe, expect, it } from "vitest"
 import { importStPreset } from "../src/formats/preset.ts"
 import { assembleFixture } from "./support/assemblySources.ts"
+import { cardDoc } from "./support/docs.ts"
 import { compose, injectInChat, type StPrompt } from "../src/assembler/st.ts"
 
 const p = (identifier: string, content = ""): StPrompt => ({
@@ -78,6 +79,62 @@ describe("Newest message", () => {
     expect(built.messages.map((m) => m.content)).toEqual(["EARLIER", "TAIL", "LATEST", "D0"])
     expect(built.historySent).toBe(2)
   })
+  it("still sends the markers an imported ST order leaves out, after the other prompts, as ST does", async () => {
+    const preset = importStPreset(
+      JSON.stringify({
+        frequency_penalty: 0,
+        prompts: [{ identifier: "main", role: "system", content: "MAIN", system_prompt: true }],
+        prompt_order: [
+          {
+            character_id: 100001,
+            order: [
+              { identifier: "main", enabled: true },
+              { identifier: "chatHistory", enabled: true }
+            ]
+          }
+        ]
+      })
+    ).document!
+    const result = await Effect.runPromise(
+      assembleFixture({
+        preset,
+        participants: ["mira"],
+        cards: [{ entity: "mira", doc: cardDoc("Mira", { description: "DESCRIPTION", scenario: "SCENARIO" }) }],
+        messages: [{ content: "LATEST", side: "user" }]
+      })
+    )
+    expect(result.request.messages.map((m) => m.content).slice(-3)).toEqual(["LATEST", "DESCRIPTION", "SCENARIO"])
+  })
+  for (const position of ["context_start", "tail_start", "tail_end"] as const) {
+    it(`keeps several notes at ${position} in their order`, async () => {
+      const note = (entity: string) => ({
+        entity,
+        revision: `revision-${entity}`,
+        first: true,
+        doc: {
+          schema_version: 1 as const,
+          title: entity,
+          content: `NOTE-${entity}`,
+          owner: { chat: "chat" as never },
+          placement: { mode: "section" as const, section: position },
+          exportable: true
+        }
+      })
+      const result = await Effect.runPromise(
+        assembleFixture({
+          preset: importStPreset(JSON.stringify({ frequency_penalty: 0 })).document!,
+          participants: [],
+          cards: [],
+          messages: [{ content: "LATEST", side: "user" }],
+          notes: [note("a"), note("b"), note("c")]
+        })
+      )
+      const sent = result.request.messages.map((m) => m.content)
+      const at = ["a", "b", "c"].map((id) => sent.findIndex((content) => content.includes(`NOTE-${id}`)))
+      expect(at.every((i) => i >= 0)).toBe(true)
+      expect(at).toEqual([...at].sort((x, y) => x - y))
+    })
+  }
   for (const position of ["context_start", "tail_start", "tail_end"] as const) {
     it(`assembles notes at ${position}`, async () => {
       const preset = importStPreset(

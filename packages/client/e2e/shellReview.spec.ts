@@ -148,3 +148,44 @@ test("a silent present character played by the user is not classified as departe
   await expect(page.getByRole("region", { name: "With others", exact: true })).toBeVisible()
   await expect(page.getByRole("region", { name: "Was in", exact: true })).toHaveCount(0)
 })
+
+test("home pins keep a remembered tab for a character the user plays there", async ({ page }) => {
+  const { played } = await admin((api) =>
+    Effect.gen(function* () {
+      const played = yield* api.CreateCard({ label: "Played by me", name: "Played by me" })
+      const partner = yield* api.CreateCard({ label: "Model partner", name: "Model partner" })
+      const chat = yield* api.StartChat({
+        cards: [played.entityId, partner.entityId],
+        persona: null,
+        greeting: null,
+        first: { _tag: "Send", content: "Synthetic start", speakerEntityId: null }
+      })
+      yield* api.ChangeCast({
+        chatId: chat.chat.id,
+        slotId: chat.chat.activeLeafSlotId,
+        change: { _tag: "PlayedByMe", entityIds: [played.entityId] }
+      })
+      yield* api.RenameChat({ chatId: chat.chat.id, name: "Played pair" })
+      yield* api.SetChatPin({ chatId: chat.chat.id, leaf: chat.chat.activeLeafSlotId, pinned: true })
+      return { played }
+    })
+  )
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(server().url)
+  await page
+    .getByRole("main")
+    .getByRole("button", { name: `Open ${played.label}`, exact: true })
+    .click()
+  await expect(page.getByRole("tab", { name: played.label, exact: true })).toHaveAttribute("aria-selected", "true")
+  await page
+    .getByRole("navigation", { name: "Main", exact: true })
+    .getByRole("link", { name: "Characters", exact: true })
+    .click()
+  await page
+    .getByRole("main")
+    .getByRole("region", { name: "Pinned chats", exact: true })
+    .getByRole("button", { name: "Open chat Played pair", exact: true })
+    .click()
+  await expect(page.getByRole("tab", { name: played.label, exact: true })).toHaveAttribute("aria-selected", "true")
+})

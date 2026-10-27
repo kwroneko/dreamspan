@@ -168,7 +168,12 @@ export const lcmHarness = (
         api.AddUserModel({
           connectionId: connection.id,
           key,
-          overrides: { context: 8192, maxOutput: 512, tools: true }
+          overrides: {
+            context: 8192,
+            tools: true,
+            // The response length the old preset fixture set, now the model's own setting.
+            settings: { samplers: { openai_max_context: 8192, openai_max_tokens: 512 } }
+          }
         }),
         (m) => ({ connection: connection.id, model: m.id })
       )

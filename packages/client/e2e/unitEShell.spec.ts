@@ -126,7 +126,7 @@ for (const width of [1440, 390]) {
       api.SendMessage({
         chatId: group.chat.id,
         parentSlotId: group.leaf,
-        speakerEntityId: group.cast[0]!.entityId,
+        speakerEntityId: group.cast[0]!,
         branch: true,
         content: "Synthetic navigation regression: the pinned fork continues."
       })
@@ -142,7 +142,7 @@ for (const width of [1440, 390]) {
         const forked = yield* api.SendMessage({
           chatId: group.chat.id,
           parentSlotId: group.leaf,
-          speakerEntityId: group.cast[0]!.entityId,
+          speakerEntityId: group.cast[0]!,
           branch: true,
           content: "A separate synthetic fork."
         })
@@ -200,7 +200,7 @@ for (const width of [1440, 390]) {
       }
       const fork = data.forks.find((f) => f.current && f.cast.length > 1)!
       const card = fork.cast[0]!
-      await page.goto(`${server().url}/chats/${fork.chat.id}?panel=card:${card.entityId}&forks=${fork.chat.id}`)
+      await page.goto(`${server().url}/chats/${fork.chat.id}?panel=card:${card}&forks=${fork.chat.id}`)
       await expect(page.getByRole("link", { name: "Edit card", exact: true })).toBeVisible()
       await expect(page.getByLabel("Message", { exact: true })).toBeEditable()
       await shoot("chat-card")
@@ -253,7 +253,7 @@ for (const width of [1440, 390]) {
       await shoot("new-chat")
       await page.getByRole("button", { name: `Show ${unused.card.name}'s card`, exact: true }).click()
       await expect(page.getByRole("link", { name: "Edit card", exact: true })).toBeVisible()
-      await page.goto(`${server().url}/cards/${card.entityId}`)
+      await page.goto(`${server().url}/cards/${card}`)
       await expect(page.getByRole("heading", { name: "Definition", exact: true })).toBeVisible()
       await shoot("card-page")
       await page.goto(`${server().url}/groups/${fork.chat.id}`)

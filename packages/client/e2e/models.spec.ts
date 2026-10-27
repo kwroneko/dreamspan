@@ -49,3 +49,41 @@ test("refresh, hide, edit and add models", async ({ page }) => {
   await page.getByRole("dialog").getByRole("button", { name: "Add model" }).click()
   await expect(models.locator("li", { hasText: "fake-unlisted" })).toContainText("added by you")
 })
+
+test("model generation settings take typed decimals and keep the reply length apart from the output limit", async ({
+  page
+}) => {
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${server().url}/settings/connections/new`)
+  await page.getByLabel("Name").fill("Settings test")
+  await page.getByLabel("Base URL").fill(provider.baseUrl)
+  await page.getByRole("radio", { name: "No key" }).click()
+  await page.getByRole("button", { name: "Create connection" }).click()
+  await page.getByRole("button", { name: "Refresh from provider" }).click()
+  await expect(page.getByText("2 added, 0 updated")).toBeVisible()
+
+  const models = page.getByRole("list", { name: "Models" })
+  const dialog = page.getByRole("dialog")
+  await page.getByRole("button", { name: "Edit fake-large" }).click()
+  // Typed key by key, as a person types: "0." on the way to "0.7" must survive.
+  await dialog.getByLabel("Temperature").pressSequentially("0.7")
+  await expect(dialog.getByLabel("Temperature")).toHaveValue("0.7")
+  await dialog.getByLabel("Top P").pressSequentially("0.95")
+  await dialog.getByLabel("Top P").clear()
+  await dialog.getByLabel("Response length (tokens)").pressSequentially("1200")
+  await dialog.getByLabel("Seed (-1: none)").pressSequentially("-")
+  await dialog.getByRole("button", { name: "Save" }).click()
+  await expect(dialog.getByText("each takes a number")).toBeVisible()
+  await dialog.getByLabel("Seed (-1: none)").clear()
+  await dialog.getByRole("button", { name: "Save" }).click()
+  await expect(dialog).toBeHidden()
+  // The reply length is a setting; the output limit the provider reports is unchanged.
+  await expect(models.locator("li", { hasText: "Fake Large" })).toContainText("Output 4.1k?")
+
+  await page.getByRole("button", { name: "Edit fake-large" }).click()
+  await expect(dialog.getByLabel("Temperature")).toHaveValue("0.7")
+  await expect(dialog.getByLabel("Top P")).toHaveValue("")
+  await expect(dialog.getByLabel("Response length (tokens)")).toHaveValue("1200")
+  await expect(dialog.getByLabel("Max output (tokens)")).toHaveValue("")
+  await expect(dialog.getByLabel("Advanced model settings (JSON)")).toHaveValue(/"temperature": 0.7/)
+})

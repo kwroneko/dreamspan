@@ -152,6 +152,15 @@ lcmTest("unused failure markers consume no space while many short originals stil
       doc: importStPreset(JSON.stringify({ openai_max_context: 512, openai_max_tokens: 64 })).document!
     })
     yield* h.api.SetGenerationDefaults({ defaults: { model: h.primary, preset: preset.ref.id } })
+    // The small budget is the model's own setting.
+    const primary = (yield* h.api.ListModels({ connectionId: h.connection.id, includeHidden: true })).find(
+      (m) => m.id === h.primary.model
+    )!
+    yield* h.api.EditModel({
+      modelId: primary.id,
+      expectedRowVersion: primary.rowVersion,
+      overrides: { ...primary.overrides, settings: { samplers: { openai_max_context: 512, openai_max_tokens: 64 } } }
+    })
     for (let n = 0; n < 80; n++) yield* h.append(`m${n}`)
     yield* h.append("target")
     yield* fixtureSql(

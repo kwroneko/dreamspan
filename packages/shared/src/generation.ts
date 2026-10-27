@@ -4,6 +4,9 @@ import { LcmDefaults, LcmSettingsChange, ModelChoice } from "./lcmSettings.ts"
 import { Schema } from "effect"
 import { RefId } from "./library.ts"
 
+/** How the built-in prompt preset is named, apart from an imported preset that ST also calls Default. */
+export const BUILTIN_PRESET_LABEL = "Default (built-in)"
+
 export class GenerationDefaults extends Schema.Class<GenerationDefaults>("GenerationDefaults")({
   /** The current account model; none, and replies cannot be generated. */
   model: Schema.NullOr(ModelChoice),
