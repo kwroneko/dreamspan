@@ -1,3 +1,4 @@
+import { notifyLibraryChange } from "../../libraryChanges.ts"
 // RPCs from the editor's store, outside a component: the same client and reactivity as
 // `useAction`, without a component's pending state. A write invalidates the library's lists.
 import { RegistryContext } from "@effect/atom-react"
@@ -31,11 +32,13 @@ const makeCaller =
       Effect.gen(function* () {
         const services = yield* AtomRegistry.getResult(registry, AppClient.runtime)
         const outcome = yield* Effect.exit(call(Context.get(services, AppClient)))
-        if (Exit.isSuccess(outcome) && invalidates.length > 0) {
+        const refused = Exit.isFailure(outcome) && describeCause(outcome.cause).tag === "EditRefused"
+        if ((Exit.isSuccess(outcome) || refused) && invalidates.length > 0) {
           Context.get(
             services as unknown as Context.Context<Reactivity.Reactivity>,
             Reactivity.Reactivity
           ).invalidateUnsafe(invalidates)
+          notifyLibraryChange(invalidates)
         }
         return yield* outcome
       })

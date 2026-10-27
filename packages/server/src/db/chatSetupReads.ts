@@ -11,7 +11,7 @@ import { importState } from "@rp/shared/stImportApi.ts"
 import { FoldableEvent, foldState } from "@rp/shared/state.ts"
 import { Effect, Schema } from "effect"
 import { SqlClient } from "effect/sql"
-import { cardBindingsAt, castCardAt, loadCards } from "./cards.ts"
+import { chatCast, castCardAt, loadCards } from "./cards.ts"
 import { type CardBinding, makeLibraryQueries } from "./library.ts"
 import { NotFound, type ReadOps, StorageError } from "./ops.ts"
 import { chatQueue } from "./queueRows.ts"
@@ -274,20 +274,7 @@ export const makeChatSetupReadHandlers = Effect.gen(function* () {
             SELECT active_leaf_slot_id AS leaf FROM chats
             WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`
           if (!chat) continue
-          const joined = yield* sql<{ entity: string }>`
-            SELECT json_extract(value_json, '$.entity') AS entity FROM state_events
-            WHERE chat_id = ${chatId} AND key = 'participant.join' AND superseded_by_changeset IS NULL
-            GROUP BY entity ORDER BY min(seq)`
-          const ids = joined.map((row) => row.entity as EntityId)
-          const cards = ids.length === 0 ? [] : yield* loadCards(sql, userId, ids)
-          const bindings = yield* cardBindingsAt(sql, chatId, chat.leaf)
-          const resolved = yield* Effect.forEach(cards, ({ card }) =>
-            Effect.gen(function* () {
-              const used = yield* lib.cardInChat(userId, chatId, card.entityId, bindings[card.entityId])
-              return used === null ? card : yield* castCardAt(sql, card, used.revisionId)
-            })
-          )
-          const byId = new Map(resolved.map((card) => [card.entityId as string, card]))
+          const cast = yield* chatCast(sql, userId, chatId, chat.leaf)
           const [leaf] =
             chat.leaf === null
               ? []
@@ -298,7 +285,7 @@ export const makeChatSetupReadHandlers = Effect.gen(function* () {
           summaries.push(
             new ChatSummary({
               chatId,
-              cast: ids.flatMap((id) => byId.get(id) ?? []),
+              cast,
               messages: leaf ? leaf.depth + 1 : 0,
               last: leaf ? { speaker: leaf.speaker as EntityId | null, writer: leaf.writer, text: leaf.text } : null
             })

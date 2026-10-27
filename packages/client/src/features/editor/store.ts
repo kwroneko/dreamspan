@@ -1,3 +1,6 @@
+import { Effect } from "effect"
+import { checkCardNames } from "./checkCardNames.ts"
+import { cardNames } from "@rp/shared/cardNames.ts"
 // One ref being edited (ARCHITECTURE.md §14): its saved document, and a draft per field the
 // user changed, saved to the server as they type. Components subscribe to one field each,
 // so typing in a 50 KB description re-renders that field only.
@@ -526,14 +529,23 @@ export class EditorStore {
         ? []
         : [{ field, draftId: draft.draftId, expectedRowVersion: draft.rowVersion }]
     )
+    const workingDoc = this.working().doc
+    const refId = this.refId
+    const chatNote = this.chatNote
     const result = await this.call(
       (client) =>
-        client("CommitEditorDrafts", {
-          refId: this.refId,
-          expectedRowVersion: snapshot.ref.rowVersion,
-          ...(this.chatNote ? { chatNote: this.chatNote } : {}),
-          fields,
-          message
+        Effect.gen(function* () {
+          if (snapshot.ref.kind === "card") {
+            const names = cardNames(workingDoc)
+            yield* checkCardNames(client, names.displayName, names.version, snapshot.ref)
+          }
+          return yield* client("CommitEditorDrafts", {
+            refId,
+            expectedRowVersion: snapshot.ref.rowVersion,
+            ...(chatNote ? { chatNote } : {}),
+            fields,
+            message
+          })
         }),
       ["library"]
     )
