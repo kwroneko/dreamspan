@@ -48,6 +48,7 @@
 - **[P], rejected by the decision above** History before the fork point is shared: an edit or a new version there shows in both, and the editor says so ("also in ⟨fork⟩").
 - **[P]** Forks the user named in ST arrive as named forks. ST names a fork file `Branch #<message> - <date>`, or `Checkpoint #<n> - <date>` (`Bookmark #` in older versions) when the name is left empty; any other name is the user's, minus the ` - <date>` suffix, and so is a fork file renamed in ST's chat list. The importer now keeps it as the branch's name where the fork leaves its parent (ARCHITECTURE.md §13, "A fork's name from ST"); current ST names an unnamed fork `<chat> - Branch #<n>` or `<chat> - Checkpoint #<n>`, which also gives no name.
 - **[D]** Which version is selected in shared history: per fork, by the decision above (owner, 2026-10-26).
+- **[D]** Swipes belong to the message: a swipe made in one fork on a message its siblings share appears in their swipe lists too (it changes nothing until selected); only which swipe is selected is per fork. The owner left this to the cleaner implementation (2026-10-26).
 - **[O]** How long a chat's list of lines gets before the selector needs more than expanding it.
 
 ## Not yet discussed
