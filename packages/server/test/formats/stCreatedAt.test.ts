@@ -7,10 +7,10 @@ describe("ST installation creation time", () => {
   it.each([
     ["2024-07-12T01:31:37.123Z", Date.parse("2024-07-12T01:31:37.123Z")],
     [1720747897123, 1720747897123],
-    ["2024-07-12@01h31m37s123ms", new Date(2024, 6, 12, 1, 31, 37, 123).getTime()],
-    ["2024-7-12@01h31m37s", new Date(2024, 6, 12, 1, 31, 37).getTime()],
-    ["2024-6-5 @14h 56m 50s 682ms", new Date(2024, 5, 5, 14, 56, 50, 682).getTime()],
-    ["June 19, 2023 2:20pm", new Date(2023, 5, 19, 14, 20).getTime()]
+    ["2024-07-12@01h31m37s123ms", Date.UTC(2024, 6, 12, 1, 31, 37, 123)],
+    ["2024-7-12@01h31m37s", Date.UTC(2024, 6, 12, 1, 31, 37)],
+    ["2024-6-5 @14h 56m 50s 682ms", Date.UTC(2024, 5, 5, 14, 56, 50, 682)],
+    ["June 19, 2023 2:20pm", Date.UTC(2023, 5, 19, 14, 20)]
   ])("parses %s", (input, expected) => expect(parseStCreatedAt(input)).toBe(expected))
   it.each([undefined, null, "", "nonsense", {}, Infinity, NaN, 1e100, "2024-13-40@01h31m37s"])(
     "rejects invalid input %s",
@@ -19,7 +19,7 @@ describe("ST installation creation time", () => {
   it("carries local creation metadata separately from the card definition", () => {
     const source = { ...stCardV2(), create_date: "2024-7-12@01h31m37s" }
     const result = run(importCard(json(source)))
-    expect(result.stCreatedAt).toBe(new Date(2024, 6, 12, 1, 31, 37).getTime())
+    expect(result.stCreatedAt).toBe(Date.UTC(2024, 6, 12, 1, 31, 37))
     expect(result.card.unknown_root_fields).not.toHaveProperty("create_date")
   })
 })

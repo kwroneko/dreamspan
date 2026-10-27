@@ -203,7 +203,7 @@ describe("independent shell reads", () => {
         const api = yield* client()
         const folder = tempDir("shell-st-dates")
         mkdirSync(join(folder, "characters"))
-        const stored = new Date(2024, 6, 12, 1, 31, 37).getTime()
+        const stored = Date.UTC(2024, 6, 12, 1, 31, 37)
         const source = { ...stCardV2(), create_date: "2024-7-12@01h31m37s" }
         const file = join(folder, "characters", "Wren.json")
         writeFileSync(file, json(source))

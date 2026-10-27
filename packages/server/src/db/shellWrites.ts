@@ -6,11 +6,16 @@ import { transaction } from "./tx.ts"
 export const makeShellWriteHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   return {
-    SetChatPin: ({ userId, chatId, leaf, pinned }) =>
+    SetChatPin: ({ userId, chatId, leaf, pinned, forkId }) =>
       Effect.gen(function* () {
         const [chat] =
           yield* sql`SELECT id FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`
         if (!chat) return yield* new NotFound({ entity: "chat", id: chatId })
+        // Unpin the row's identity even when deletion moved its navigable leaf to an ancestor.
+        if (!pinned && forkId !== undefined) {
+          yield* sql`DELETE FROM chat_pins WHERE user_id = ${userId} AND chat_id = ${chatId} AND fork_id = ${forkId}`
+          return
+        }
         // The stable fork id is its first divergent slot, not its moving tip.
         let fork = ""
         if (leaf !== null) {

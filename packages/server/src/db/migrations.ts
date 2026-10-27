@@ -261,6 +261,9 @@ export const migrations = {
     `UPDATE chats SET current_leaf_slot_id = active_leaf_slot_id`,
     `CREATE TABLE chat_pins (user_id TEXT NOT NULL REFERENCES users(id), chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, fork_id TEXT NOT NULL, PRIMARY KEY(user_id, chat_id, fork_id))`,
     `CREATE TABLE shell_preferences (user_id TEXT PRIMARY KEY REFERENCES users(id), pins_collapsed INTEGER NOT NULL DEFAULT 0)`
+  ]),
+  "0045_shell_owner_reads": runAll([
+    `CREATE INDEX chats_owner_live ON chats(owner_user_id, id) WHERE deleted_at IS NULL`
   ])
 }
 

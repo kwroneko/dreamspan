@@ -7,6 +7,7 @@ import { importState } from "@rp/shared/stImportApi.ts"
 import { foldState, type FoldableEvent } from "@rp/shared/state.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
+import { shellSlotsQuery, shellEventsQuery } from "./shellQueries.ts"
 import { loadCards } from "./cards.ts"
 import type { ReadOps } from "./ops.ts"
 import { type ChatRow, toChat } from "./rows.ts"
@@ -53,18 +54,15 @@ export const makeShellReadHandlers = Effect.gen(function* () {
         const chats = yield* sql<
           ChatRow & { current_leaf_slot_id: string | null }
         >`SELECT * FROM chats WHERE owner_user_id = ${userId} AND deleted_at IS NULL`
-        const slots =
-          yield* sql<Slot>`SELECT s.id, s.depth, s.chat_id, s.parent_slot_id, s.created_at, s.branch_name, s.selected_version_id, s.deleted_at, s.branch_deleted,
-        v.speaker_entity_id AS speaker, v.writer, CASE WHEN v.origin IN ('edited', 'changeset') THEN s.created_at ELSE v.created_at END AS at FROM slots s JOIN chats c ON c.id = s.chat_id JOIN versions v ON v.id = s.selected_version_id
-        WHERE c.owner_user_id = ${userId} AND c.deleted_at IS NULL ORDER BY s.depth, s.id`
-        const raw = yield* sql<{
+        const slots = yield* sql.unsafe<Slot>(shellSlotsQuery, [userId])
+        const raw = yield* sql.unsafe<{
           chat_id: string
           slot_id: string | null
           version_id: string | null
           scope: string
           key: string
           value_json: string
-        }>`SELECT e.chat_id, e.slot_id, e.version_id, e.scope, e.key, e.value_json FROM state_events e JOIN chats c ON c.id = e.chat_id WHERE c.owner_user_id = ${userId} AND c.deleted_at IS NULL AND e.superseded_by_changeset IS NULL ORDER BY e.seq`
+        }>(shellEventsQuery, [userId])
         const events = (yield* withoutPurged(
           sql,
           raw.map((e) => ({ ...e, data: { key: e.key, value: JSON.parse(e.value_json) } })) as Array<Event>
@@ -123,6 +121,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
               .filter((id) => !base.playedByMe.includes(id))
               .flatMap((id) => byCard.get(id) ?? [])
             return new ShellFork({
+              forkId: "",
               preview: "",
               messages: 0,
               chat: toChat(row),
@@ -135,6 +134,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
               recentAt: row.last_message_at ?? row.created_at,
               cast,
               joined: base.participants as Array<EntityId>,
+              departed: [],
               activity: []
             })
           }
@@ -190,6 +190,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
                 .flatMap((id) => byCard.get(id) ?? [])
               forks.push(
                 new ShellFork({
+                  forkId: fork,
                   preview: "",
                   messages: liveLeaf ? (slotById.get(liveLeaf)?.depth ?? -1) + 1 : 0,
                   chat: toChat(row),
@@ -204,6 +205,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
                   recentAt: recent,
                   cast,
                   joined: [...joined] as Array<EntityId>,
+                  departed: [...joined].filter((id) => !state.participants.includes(id)) as Array<EntityId>,
                   activity: [...activity.values()].map((a) => ({
                     ...a,
                     category: !state.participants.includes(a.entityId)

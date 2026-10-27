@@ -77,6 +77,7 @@ export class ShellCard extends Schema.Class<ShellCard>("ShellCard")({
   recentAt: Schema.Number
 }) {}
 export class ShellFork extends Schema.Class<ShellFork>("ShellFork")({
+  forkId: Schema.String,
   preview: Schema.String,
   messages: Schema.Int,
   chat: Chat,
@@ -89,6 +90,7 @@ export class ShellFork extends Schema.Class<ShellFork>("ShellFork")({
   recentAt: Schema.Number,
   cast: Schema.Array(CastCard),
   joined: Schema.Array(EntityId),
+  departed: Schema.Array(EntityId),
   activity: Schema.Array(
     Schema.Struct({
       entityId: EntityId,
@@ -226,7 +228,12 @@ const Errors = [NotFound, ServerError] as const
 export class ChatSetupApi extends RpcGroup.make(
   Rpc.make("GetShellLibrary", { success: ShellLibrary, error: Schema.Union([...Errors]) }),
   Rpc.make("SetChatPin", {
-    payload: { chatId: ChatId, leaf: Schema.NullOr(SlotId), pinned: Schema.Boolean },
+    payload: {
+      chatId: ChatId,
+      leaf: Schema.NullOr(SlotId),
+      pinned: Schema.Boolean,
+      forkId: Schema.optional(Schema.String)
+    },
     success: Schema.Void,
     error: Schema.Union([...Errors])
   }),

@@ -332,7 +332,13 @@ const StChatRecord = Schema.Struct({
 
 export class WriteOps extends RpcGroup.make(
   Rpc.make("SetChatPin", {
-    payload: { userId: UserId, chatId: ChatId, leaf: Schema.NullOr(SlotId), pinned: Schema.Boolean },
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      leaf: Schema.NullOr(SlotId),
+      pinned: Schema.Boolean,
+      forkId: Schema.optional(Schema.String)
+    },
     success: Schema.Void,
     error: Schema.Union([NotFound, StorageError])
   }),

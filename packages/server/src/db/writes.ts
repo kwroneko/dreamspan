@@ -241,6 +241,8 @@ export const makeWriteHandlers = (bin: Bin) =>
           const row = model ? yield* ownedVersion(userId, inserted.id as VersionId, true) : inserted
           yield* recordHistoryReduction(sql, slotId, row.content)
           yield* sql`UPDATE slots SET selected_version_id = ${row.id}, row_version = row_version + 1 WHERE id = ${slotId}`
+          if (version.origin === "generated")
+            yield* sql`UPDATE chats SET current_leaf_slot_id = ${slotId} WHERE id = ${slot.chat_id}`
           // An edit's text was typed into the edit of its source; a version of one's own, into the slot's.
           yield* drafts.commit(
             userId,

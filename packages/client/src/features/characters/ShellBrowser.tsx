@@ -5,6 +5,9 @@ import { useNavigate, useSearch } from "@tanstack/react-router"
 import { useState } from "react"
 import { AsyncView, ErrorAlert, useAction } from "../../actions.tsx"
 import { Avatar } from "../../ui/Avatar.tsx"
+import { useSession } from "../../session.ts"
+import { rememberedPanel } from "../chat/ChatPanels.tsx"
+import { useWide } from "../chat/ChatPanels.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Input } from "../../ui/Field.tsx"
 import { Segmented } from "../../ui/Segmented.tsx"
@@ -23,7 +26,13 @@ export function PinButton({ fork }: { fork: ShellFork }) {
         className="h-8 px-2"
         onClick={() =>
           void action.run(
-            (client) => client("SetChatPin", { chatId: fork.chat.id, leaf: fork.leaf, pinned: !fork.pinned }),
+            (client) =>
+              client("SetChatPin", {
+                chatId: fork.chat.id,
+                leaf: fork.leaf,
+                forkId: fork.forkId,
+                pinned: !fork.pinned
+              }),
             ["pins"]
           )
         }
@@ -39,11 +48,19 @@ function useOpenFork(fork: ShellFork, scopeChat: boolean) {
   const navigate = useNavigate()
   const search = useSearch({ strict: false }) as { panel?: string }
   const navigation = useShellNavigation()
+  const userId = useSession().user.id
+  const wide = useWide()
   const open = () => {
-    if (scopeChat) navigation.setScope({ ...navigation.scope, chat: fork.chat.id })
+    if (scopeChat) {
+      navigation.setScope({ entity: null, chat: fork.chat.id })
+      navigation.setGrid(false)
+    }
     // A list changes only the middle. Keep a character tab while that character still applies.
+    const previous = search.panel ?? (wide ? rememberedPanel(userId) : null)
     const panel =
-      search.panel?.startsWith("card:") && !fork.joined.includes(search.panel.slice(5) as never) ? "chat" : search.panel
+      previous?.startsWith("card:") && !fork.cast.some((card) => card.entityId === previous.slice(5))
+        ? "chat"
+        : previous
     void navigate({
       to: "/chats/$chatId",
       params: { chatId: fork.chat.id },
@@ -322,7 +339,8 @@ function Browser({ data }: { data: ShellLibrary }) {
                     .filter(
                       (f) =>
                         f.activity.find((a) => a.entityId === scope.entity)?.category === category ||
-                        (category === "with" && !f.activity.some((a) => a.entityId === scope.entity))
+                        (!f.activity.some((a) => a.entityId === scope.entity) &&
+                          category === (f.departed.some((id) => id === scope.entity) ? "was" : "with"))
                     )
                     .sort(
                       (a, b) =>
