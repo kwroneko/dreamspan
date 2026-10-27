@@ -468,8 +468,9 @@ export interface ModelInput {
   readonly context: number | null
   /** A reported output ceiling; absent on older snapshots. */
   readonly maxOutput?: number | null
-  /** The connection's one-way preset override (DESIGN §9). */
+  /** The model's own generation settings; absent on older snapshots. */
   readonly settings?: import("@rp/shared/modelSettings.ts").ModelSettings
+  /** The connection's one-way preset override (DESIGN §9). */
   readonly presetOverride: string | null
 }
 

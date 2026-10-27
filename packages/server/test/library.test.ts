@@ -7,6 +7,7 @@ import type { Doc, EntityKind, RefId } from "@rp/shared/library.ts"
 import { Effect } from "effect"
 import * as Database from "../src/db/Database.ts"
 import { docHash, searchText } from "../src/db/documents.ts"
+import { promptPreset } from "@rp/shared/docs/preset.ts"
 import { cardDoc, presetDoc } from "./support/docs.ts"
 import { tempDir } from "./support/tempDir.ts"
 
@@ -18,8 +19,14 @@ const database = () =>
     workers: "source"
   })
 
-const preset = (main: string, extra: ReadonlyArray<{ identifier: string; content: string }> = [], temperature = 1) =>
-  presetDoc([{ identifier: "main", content: main }, ...extra], { temperature })
+/**
+ * A prompt preset. `prefill` stands in for a single setting both sides can change, as the
+ * temperature did before model settings left the preset.
+ */
+const preset = (main: string, extra: ReadonlyArray<{ identifier: string; content: string }> = [], prefill = 1) => {
+  const doc = promptPreset(presetDoc([{ identifier: "main", content: main }, ...extra]))
+  return { ...doc, prefill: { ...doc.prefill, assistant: String(prefill) } }
+}
 
 /**
  * A document imported into an upstream ref, as an uploaded file is (ImportFile): what the
@@ -121,7 +128,7 @@ describe("library", () => {
         )
       )
 
-      // Upstream v2 rewrites the first sentence and lowers the temperature.
+      // Upstream v2 rewrites the first sentence and changes the prefill.
       const v2 = preset(MAIN.replace("You are {{char}}.", "You are {{char}}, the narrator."), [], 0.8)
       const { change } = yield* reimport(v2)
       assert.deepStrictEqual(
@@ -183,7 +190,7 @@ describe("library", () => {
         preview.conflicts.map((c) => c.path),
         [["prompts", "identifier=main", "content"]]
       )
-      assert.strictEqual((preview.merged as ReturnType<typeof preset>).samplers.temperature, 0.8)
+      assert.strictEqual((preview.merged as ReturnType<typeof preset>).prefill.assistant, "0.8")
 
       // The user keeps their wording and commits.
       const resolved = yield* writer.ResolveMerge({
@@ -194,7 +201,7 @@ describe("library", () => {
         expectedRowVersion: yield* rowVersion(mine.id)
       })
       assert.isFalse(resolved.ref.updateAvailable)
-      assert.strictEqual((yield* doc(mine.id)).samplers.temperature, 0.8)
+      assert.strictEqual((yield* doc(mine.id)).prefill.assistant, "0.8")
       assert.strictEqual((yield* reader.PreviewMerge({ userId, refId: mine.id })).outcome, "up_to_date")
     }).pipe(Effect.provide(database()))
   )
@@ -245,7 +252,7 @@ describe("library", () => {
         ]
       )
       const overridden = yield* doc(override.id)
-      assert.strictEqual(overridden.samplers.temperature, 0.5)
+      assert.strictEqual(overridden.prefill.assistant, "0.5")
       assert.deepStrictEqual(
         overridden.prompts.map((p) => p.identifier),
         ["main", "scene"]
@@ -466,7 +473,7 @@ describe("library", () => {
         accepted.change.followers.map((f) => f.outcome),
         ["fast_forward"]
       )
-      assert.deepStrictEqual(yield* doc(variant.id), { ...v2, samplers: { ...v2.samplers, temperature: 0.7 } })
+      assert.deepStrictEqual(yield* doc(variant.id), { ...v2, prefill: { ...v2.prefill, assistant: "0.7" } })
     }).pipe(Effect.provide(database()))
   )
 

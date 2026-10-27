@@ -260,7 +260,7 @@ export const migrations = {
     `ALTER TABLE slots ADD COLUMN branch_name_user INTEGER NOT NULL DEFAULT 0 CHECK (branch_name_user IN (0, 1))`,
     `UPDATE slots SET branch_name_user = 1 WHERE row_version <> st_import_row_version`
   ]),
-  "0044_global_model_settings": Effect.gen(function* () {
+  "0046_global_model_settings": Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const heads = yield* sql<{
       id: string

@@ -43,18 +43,33 @@ export const ModelSettings = Schema.Struct({
 })
 export type ModelSettings = typeof ModelSettings.Type
 
-/** Compatibility view for the ST composer; never persisted as a prompt document. */
+/** The context size assumed when no source reports the model's window. */
+const FALLBACK_CONTEXT = 8192
+/** The response length a model without its own gets, within its output limit and half its context. */
+export const DEFAULT_RESPONSE = 4096
+
+/**
+ * Compatibility view for the ST composer; never persisted as a prompt document. `context` and
+ * `maxOutput` are the model's reported limits (null when unknown); the model's own context size
+ * and response length win over the defaults derived from them.
+ */
 export const withModelSettings = (
   doc: LegacyPresetDoc,
   settings: ModelSettings,
-  context = 8192,
-  output = 4096
+  context: number | null | undefined,
+  maxOutput: number | null | undefined
 ): LegacyPresetDoc => {
   const { context_target, ...text } = doc
   void context_target
+  const window = context ?? FALLBACK_CONTEXT
   return {
     ...text,
-    samplers: { ...DEFAULT_SAMPLERS, openai_max_context: context, openai_max_tokens: output, ...settings.samplers },
+    samplers: {
+      ...DEFAULT_SAMPLERS,
+      openai_max_context: window,
+      openai_max_tokens: Math.max(1, Math.min(maxOutput ?? DEFAULT_RESPONSE, DEFAULT_RESPONSE, Math.floor(window / 2))),
+      ...settings.samplers
+    },
     names_behavior: settings.names_behavior ?? "default",
     squash: settings.squash ?? false,
     postprocess: settings.postprocess ?? "none",

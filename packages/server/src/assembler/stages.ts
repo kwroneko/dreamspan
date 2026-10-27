@@ -189,7 +189,7 @@ const presetStage: AssemblerStage = {
       if (model?.settings)
         assembly.preset = {
           ...assembly.preset,
-          doc: withModelSettings(assembly.preset.doc, model.settings, model.context ?? 8192, model.maxOutput ?? 4096)
+          doc: withModelSettings(assembly.preset.doc, model.settings, model.context, model.maxOutput)
         }
       return assembly
     })

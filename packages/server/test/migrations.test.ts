@@ -133,13 +133,13 @@ describe("0016_inspector", () => {
   )
 })
 
-describe("0044_global_model_settings", () => {
+describe("0046_global_model_settings", () => {
   it.effect(
     "keeps sampler history and old chat events, creates prompt-only heads, and never guesses model settings",
     () =>
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
-        yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(before("0044_global_model_settings")) })
+        yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(before("0046_global_model_settings")) })
         yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES ('u', 'u', 'u', 'admin', 1)`
         const original = JSON.stringify(importStPreset('{"temperature":0.25,"openai_max_context":32000}').document!)
         yield* sql`INSERT INTO entities (id, owner_user_id, kind, created_at) VALUES ('preset', 'u', 'preset', 1)`

@@ -1,5 +1,5 @@
 // Account selections and their small panel integration. Unit E can move the panel shell.
-import type { GenerationDefaults } from "@rp/shared/generation.ts"
+import { BUILTIN_PRESET_LABEL, type GenerationDefaults } from "@rp/shared/generation.ts"
 import type { LibraryRef } from "@rp/shared/library.ts"
 import type { Model } from "@rp/shared/providers.ts"
 import { Link } from "@tanstack/react-router"
@@ -82,7 +82,7 @@ export function GenerationControls({
             <Field label="Prompt preset">
               <Select
                 items={[
-                  { value: "builtin", label: "Default" },
+                  { value: "builtin", label: BUILTIN_PRESET_LABEL },
                   ...presets.map((preset) => ({ value: preset.id as string, label: preset.label }))
                 ]}
                 value={defaults?.preset ?? "builtin"}
@@ -128,7 +128,7 @@ export function GenerationSettingsPanel({ session, kind }: { session: ChatSessio
       <Editor key={defaults.preset} refId={defaults.preset} />
     ) : (
       <p className="text-sm text-muted">
-        Default is the built-in prompt preset. Import a prompt preset from the{" "}
+        {BUILTIN_PRESET_LABEL} is the built-in prompt preset. Import a prompt preset from the{" "}
         <Link to="/import" className="text-accent">
           Import page
         </Link>{" "}

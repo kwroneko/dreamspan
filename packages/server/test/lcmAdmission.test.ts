@@ -31,7 +31,7 @@ it.live(
       const model = yield* api.AddUserModel({
         connectionId: connection.id,
         key: "synthetic",
-        overrides: { context: 4096 }
+        overrides: { context: 4096, settings: { samplers: { openai_max_context: 4096, openai_max_tokens: 256 } } }
       })
       const preset = yield* writer.CreateEntity({
         userId: user.id,
