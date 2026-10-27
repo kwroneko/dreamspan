@@ -172,10 +172,6 @@ export function Editor({
             <OverrideChat chatId={ref.chatId} />, and saving changes it only there; other chats keep the original.
             Changes to the original still reach it where you haven't edited the same text.
           </p>
-        ) : ref.kind === "preset" ? (
-          <p className="text-sm">
-            Saving changes this preset everywhere it is used, including chats that follow it as a default.
-          </p>
         ) : (
           <p className="text-sm">
             Saving changes this {ref.refKind === "variant" ? "variant" : KINDS[ref.kind]} everywhere it's used:{" "}
