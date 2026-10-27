@@ -32,7 +32,7 @@ const card = (api: Api, label: string, doc: Partial<CardDoc>, persona = false) =
       kind: "card",
       label,
       subtitle: persona ? "" : "harbor",
-      doc: cardDoc(label, doc),
+      doc: cardDoc(label, { character_version: persona ? "" : "harbor", ...doc }),
       schemaVersion: 1,
       origin: "user",
       sourcePath: null
@@ -45,10 +45,10 @@ describe("card usage", () => {
   it.live("counts each card's chats, group chats included, and leaves out personas and the bin", () =>
     Effect.gen(function* () {
       const api = yield* client()
-      const mira = yield* card(api, "Mira (harbor)", { name: "Mira", first_mes: "Hello." })
+      const mira = yield* card(api, "Mira (harbor)", { nickname: "Mira", first_mes: "Hello." })
       const ana = yield* card(api, "Ana", { name: "Ana", first_mes: "Hi." })
       const ghost = yield* card(api, "Ghost", { name: "Ghost", first_mes: "Boo." })
-      const fresh = yield* card(api, "Fresh", { name: "", first_mes: "New here." })
+      const fresh = yield* card(api, "Fresh", { nickname: "", first_mes: "New here." })
       const binned = yield* card(api, "Binned", { name: "Binned", first_mes: "Gone." })
       const sam = yield* card(api, "Sam", { name: "Sam" }, true)
       const start = (cards: ReadonlyArray<typeof mira>) =>
@@ -80,7 +80,8 @@ describe("card usage", () => {
       assert.strictEqual(miraRow.chats, 2)
       assert.strictEqual(miraRow.latestChatId, group.chat.id)
       assert.strictEqual(miraRow.lastMessageAt, group.chat.lastMessageAt)
-      assert.strictEqual(miraRow.name, "Mira")
+      assert.strictEqual(miraRow.name, "Mira (harbor)")
+      assert.strictEqual(miraRow.modelName, "Mira")
       assert.strictEqual(miraRow.subtitle, "harbor")
       assert.strictEqual(by.get(ana)!.chats, 1)
       assert.strictEqual(by.get(ana)!.latestChatId, group.chat.id)
@@ -88,7 +89,7 @@ describe("card usage", () => {
       assert.strictEqual(by.get(ghost)!.chats, 0)
       assert.isNull(by.get(ghost)!.latestChatId)
       assert.isNull(by.get(ghost)!.lastMessageAt)
-      // A card without an in-chat name shows its label.
+      // An empty nickname falls back to the display name.
       assert.strictEqual(by.get(fresh)!.name, "Fresh")
       assert.strictEqual(by.get(fresh)!.chats, 0)
 
@@ -154,7 +155,7 @@ describe("card usage", () => {
   it.live("finds chats beyond the first page by title or by a card's name, page by page", () =>
     Effect.gen(function* () {
       const api = yield* client()
-      const mira = yield* card(api, "Mira (harbor)", { name: "Mirabel", first_mes: "Hi." })
+      const mira = yield* card(api, "Mira (harbor)", { nickname: "Mirabel", first_mes: "Hi." })
       const made: Array<Chat["id"]> = []
       for (let i = 0; i < 5; i++) {
         made.push((yield* api.CreateChat({ title: `Night 100%_${i}` })).id)

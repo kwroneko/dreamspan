@@ -55,7 +55,9 @@ const tileAction =
 
 /** A group's tile: its members' faces, its name, its use and who's in it. */
 function GroupTile({ group }: { group: ChatGroup }) {
-  const members = group.members.map((member) => member.name).join(", ")
+  const members = group.members
+    .map((member) => `${member.name}${member.subtitle ? ` · ${member.subtitle}` : ""}`)
+    .join(", ")
   return (
     <li className="group relative flex min-w-0 flex-col overflow-hidden rounded-lg border border-border bg-surface transition-colors focus-within:border-focus hover:border-focus/60">
       <Link

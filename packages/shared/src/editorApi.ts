@@ -99,7 +99,12 @@ export class EditorApi extends RpcGroup.make(
   }),
   /** A card from scratch: an upstream with every field empty but its name. */
   Rpc.make("CreateCard", {
-    payload: { label: Label, name: Schema.String },
+    payload: {
+      label: Label,
+      name: Schema.String,
+      nickname: Schema.optionalKey(Schema.String),
+      version: Schema.optionalKey(Schema.String)
+    },
     success: LibraryRef,
     error: Schema.Union([InvalidDocument, ServerError])
   }),

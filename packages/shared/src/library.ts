@@ -30,7 +30,7 @@ export class LibraryRef extends Schema.Class<LibraryRef>("LibraryRef")({
   entityId: EntityId,
   kind: EntityKind,
   refKind: RefKind,
-  /** The library label; the in-chat name lives in the document (DESIGN §4). */
+  /** For cards, label and subtitle derive from this revision’s name and character_version. */
   label: Schema.String,
   subtitle: Schema.String,
   headRevisionId: RevisionId,

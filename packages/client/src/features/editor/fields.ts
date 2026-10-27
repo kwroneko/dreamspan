@@ -4,7 +4,8 @@ import { canonicalJson, type FieldPath, getAt, parseField } from "@rp/shared/edi
 import type { Doc, EntityKind } from "@rp/shared/library.ts"
 
 const CARD_LABELS: Record<string, string> = {
-  name: "Name",
+  name: "Display name",
+  nickname: "Name the model sees",
   description: "Description",
   personality: "Personality",
   scenario: "Scenario",
@@ -17,7 +18,7 @@ const CARD_LABELS: Record<string, string> = {
   creator_notes: "Creator's notes",
   tags: "Tags",
   creator: "Creator",
-  character_version: "Character version",
+  character_version: "Version (shown as subtitle)",
   modules: "Modules",
   avatar_media_id: "Avatar",
   character_book: "Lorebook",
@@ -115,7 +116,7 @@ const identified = (doc: Doc, list: string, key: string, fields: ReadonlyArray<s
 export const searchable = (kind: EntityKind, doc: Doc): ReadonlyArray<Searchable> => {
   const label = (entry: { path: FieldPath; text: string }) => ({ ...entry, label: fieldLabel(kind, doc, entry.path) })
   if (kind === "card") {
-    const top = ["name", "description", "personality", "scenario", "first_mes"].map((key) => [key])
+    const top = ["name", "nickname", "description", "personality", "scenario", "first_mes"].map((key) => [key])
     const greetings = getAt(doc, ["alternate_greetings"])
     const rest = [
       "mes_example",

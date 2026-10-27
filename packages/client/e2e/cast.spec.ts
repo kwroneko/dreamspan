@@ -191,7 +191,7 @@ test("a name edited only in this chat is the name the chat shows, in the Cast an
   await page.getByRole("button", { name: "Edit Mira" }).click()
   await page.getByRole("button", { name: /^Only in this chat/ }).click()
   await expect(page.getByText("Edited for this chat.")).toBeVisible()
-  await page.getByRole("textbox", { name: "Name", exact: true }).fill("Harbor Mira")
+  await page.getByRole("textbox", { name: "Display name", exact: true }).fill("Harbor Mira")
   await page.getByRole("button", { name: /^Save/ }).first().click()
   await page.getByRole("dialog", { name: "Save a revision" }).getByRole("button", { name: "Save revision" }).click()
   await expect(page.getByText("Saved a revision.")).toBeVisible()

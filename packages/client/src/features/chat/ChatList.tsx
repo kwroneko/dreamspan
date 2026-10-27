@@ -29,7 +29,7 @@ interface Query {
 }
 
 const firstPage = (query: Query) =>
-  AppClient.query("ListChats", { limit: PAGE, before: null, ...query }, { reactivityKeys: ["chats"] })
+  AppClient.query("ListChats", { limit: PAGE, before: null, ...query }, { reactivityKeys: ["chats", "library"] })
 
 /** All the chats' first page: the sidebar's, refreshed on its own. */
 const chatsAtom = firstPage({})
@@ -73,7 +73,9 @@ function Row({
   const speaker = summary?.last?.speaker
     ? summary.cast.find((card) => card.entityId === summary.last!.speaker)?.name
     : null
-  const others = characters.map((card) => card.name).filter((n) => n !== name.name)
+  const others = characters
+    .filter((card) => card.name !== name.name || card.subtitle)
+    .map((card) => `${card.name}${card.subtitle ? ` · ${card.subtitle}` : ""}`)
   return (
     <li className="group relative">
       <Link
@@ -154,7 +156,7 @@ function Rows({ chats, onDelete }: { chats: ReadonlyArray<Chat>; onDelete: (chat
       AppClient.query(
         "ListChatSummaries",
         { chatIds: key === "" ? [] : (key.split(",") as Array<ChatId>) },
-        { reactivityKeys: ["chats"] }
+        { reactivityKeys: ["chats", "library"] }
       ),
     [key]
   )

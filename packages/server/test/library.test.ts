@@ -493,12 +493,15 @@ describe("library", () => {
       const origins = (refId: RefId) =>
         reader.RefHistory({ userId, refId, limit: 10 }).pipe(Effect.map((revs) => revs.map((r) => r.origin)))
       assert.deepStrictEqual(yield* origins(created.ref.id), ["user"])
-      assert.deepStrictEqual(yield* origins(variant.id), ["user"])
+      assert.deepStrictEqual(yield* origins(variant.id), ["user", "user"])
 
       // That import is now the merge base, so the next one merges cleanly.
       const next = yield* reimport(cardDoc("Mira Vale"))
       assert.strictEqual(next.outcome, "merged")
-      assert.deepStrictEqual((yield* reader.GetRef({ userId, refId: variant.id })).doc, cardDoc("Mira Vale"))
+      assert.deepStrictEqual(
+        (yield* reader.GetRef({ userId, refId: variant.id })).doc,
+        cardDoc("Mira Vale", { character_version: "v" })
+      )
     }).pipe(Effect.provide(database()))
   )
 

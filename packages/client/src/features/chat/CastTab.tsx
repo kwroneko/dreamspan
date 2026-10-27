@@ -217,7 +217,9 @@ function AddCharacter({
   const addable = (all ?? []).filter(
     (card) =>
       !participants.includes(card.entityId) &&
-      (needle === "" || card.name.toLowerCase().includes(needle) || card.label.toLowerCase().includes(needle))
+      (needle === "" ||
+        card.name.toLowerCase().includes(needle) ||
+        (card.subtitle ?? "").toLowerCase().includes(needle))
   )
   return (
     <Popover
@@ -263,7 +265,7 @@ function AddCharacter({
                 <Avatar id={card.entityId} name={card.name} mediaId={card.avatarMediaId} size="md" />
                 <span className="flex min-w-0 flex-1 flex-col">
                   <span className="truncate">{card.name}</span>
-                  {card.label !== card.name && <span className="truncate text-xs text-muted">{card.label}</span>}
+                  {card.subtitle && <span className="truncate text-xs text-muted">{card.subtitle}</span>}
                 </span>
                 {card.persona && <Badge>persona</Badge>}
               </button>
@@ -317,7 +319,7 @@ function Member({
         <Avatar id={card.entityId} name={name} mediaId={card.avatarMediaId} size="lg" preview />
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span className="truncate font-medium">{name}</span>
-          {card.label !== name && <span className="truncate text-xs text-muted">{card.label}</span>}
+          {card.subtitle && <span className="truncate text-xs text-muted">{card.subtitle}</span>}
           <span className="flex flex-wrap items-center gap-1">
             {played && <Badge tone="accent">played by you</Badge>}
             {writing && <Badge tone="success">writing…</Badge>}

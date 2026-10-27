@@ -94,6 +94,9 @@ function ItemRow({ item, onGone }: { item: BinItem; onGone: (item: BinItem) => v
         <Badge>{kindLabel(item)}</Badge>
         <span className="min-w-0 font-medium [overflow-wrap:anywhere]">{title}</span>
       </div>
+      {typeof item.origin.subtitle === "string" && item.origin.subtitle && (
+        <p className="text-sm text-muted">{item.origin.subtitle}</p>
+      )}
       {item.excerpt && item.kind !== "entity" && item.kind !== "connection" && (
         <p className="line-clamp-3 text-sm whitespace-pre-wrap text-muted [overflow-wrap:anywhere]">{item.excerpt}</p>
       )}

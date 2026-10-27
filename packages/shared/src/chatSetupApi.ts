@@ -29,11 +29,12 @@ export class CardUsage extends Schema.Class<CardUsage>("CardUsage")({
   refId: RefId,
   /** That ref's head, the definition the card page shows. */
   headRevisionId: RevisionId,
-  /** The library label (DESIGN §4): title and free-text subtitle. */
+  /** Display name and version from the listed revision’s standard card fields. */
   label: Schema.String,
   subtitle: Schema.String,
-  /** The in-chat name, what `{{char}}` resolves to. */
+  /** Standard display name. */
   name: Schema.String,
+  modelName: Schema.optionalKey(Schema.String),
   /** Its avatar, served at `/library/media?id=`; null without one. */
   avatarMediaId: Schema.NullOr(Schema.String),
   /** Chats it has joined, group chats included; chats in the bin don't count. */
@@ -56,9 +57,10 @@ export class ChatGroup extends Schema.Class<ChatGroup>("ChatGroup")({
   members: Schema.Array(
     Schema.Struct({
       entityId: EntityId,
-      /** The in-chat name, else the label. */
+      /** Display name from the selected card revision. */
       name: Schema.String,
       label: Schema.String,
+      subtitle: Schema.optionalKey(Schema.String),
       avatarMediaId: Schema.NullOr(Schema.String)
     })
   ),

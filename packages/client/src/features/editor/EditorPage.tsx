@@ -1,3 +1,4 @@
+import { useCardNameCheck } from "./cardNameCheck.ts"
 // A library entry's editor (ARCHITECTURE.md §14): which entry and scope you're editing, how
 // many chats the change reaches, and the state you're in: saved, or changes kept as drafts.
 import { useAtomValue } from "@effect/atom-react"
@@ -24,7 +25,7 @@ import { ForkDialog, RenameDialog } from "./RefDialogs.tsx"
 import { RevisionsDialog } from "./RevisionsDialog.tsx"
 import { SaveDialog } from "./SaveDialog.tsx"
 import { SearchDialog } from "./SearchDialog.tsx"
-import { EditorStore, useEditorState, useLeaveGuard } from "./store.ts"
+import { EditorStore, useEditorState, useLeaveGuard, useText } from "./store.ts"
 import { UpdateDialog } from "./UpdateDialog.tsx"
 
 const KINDS: Record<string, string> = { card: "card", preset: "preset", note: "note", lorebook: "lorebook" }
@@ -74,6 +75,10 @@ function Editor({ refId }: { refId: RefId }) {
   // The page shows the state: loads, and fields starting or ending unsaved changes.
   const state = useEditorState(store)
   useTitle(state.snapshot?.ref.label ?? "Editor")
+  const workingName = useText(store, ["name"]) ?? ""
+  const workingVersion = useText(store, ["character_version"]) ?? ""
+  const nameCheck = useCardNameCheck(workingName, workingVersion, state.snapshot?.ref)
+  const clash = state.snapshot?.ref.kind === "card" ? nameCheck : null
 
   useEffect(() => {
     void store.load()
@@ -149,6 +154,7 @@ function Editor({ refId }: { refId: RefId }) {
               variant.id === ref.id ? (
                 <span key={variant.id} aria-current="page" className="font-medium">
                   {variant.label}
+                  {variant.subtitle ? ` · ${variant.subtitle}` : ""}
                 </span>
               ) : (
                 <Link
@@ -158,6 +164,7 @@ function Editor({ refId }: { refId: RefId }) {
                   className="text-accent underline-offset-4 hover:underline"
                 >
                   {variant.label}
+                  {variant.subtitle ? ` · ${variant.subtitle}` : ""}
                 </Link>
               )
             )}
@@ -167,7 +174,7 @@ function Editor({ refId }: { refId: RefId }) {
 
       <div className="sticky top-0 z-10 -mx-4 flex flex-col gap-2 border-b border-border bg-canvas/95 px-4 py-2 backdrop-blur sm:mx-0 sm:rounded-lg sm:border sm:px-3">
         <div className="flex flex-wrap items-center gap-2">
-          <Button variant="primary" disabled={dirty === 0} onClick={() => setOpen("save")}>
+          <Button variant="primary" disabled={dirty === 0 || clash !== null} onClick={() => setOpen("save")}>
             Save{dirty > 0 ? ` (${dirty})` : ""}
           </Button>
           <Button onClick={() => setOpen("search")}>Search</Button>
@@ -175,10 +182,17 @@ function Editor({ refId }: { refId: RefId }) {
           {ref.kind !== "note" && ref.refKind !== "chat_override" && (
             <Button onClick={() => setOpen("fork")}>Make a variant</Button>
           )}
-          <Button variant="ghost" onClick={() => setOpen("rename")}>
-            Rename
-          </Button>
+          {ref.kind !== "card" && (
+            <Button variant="ghost" onClick={() => setOpen("rename")}>
+              Rename
+            </Button>
+          )}
         </div>
+        {clash && (
+          <p role="status" className="text-sm text-muted">
+            {clash}
+          </p>
+        )}
         <p role="status" className="text-sm text-muted">
           {state.saving
             ? "Keeping your changes…"

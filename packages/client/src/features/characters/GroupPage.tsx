@@ -88,9 +88,7 @@ function Page({ group, chats }: { group: ChatGroup; chats: ReadonlyArray<Chat> }
                   <Avatar id={member.entityId} name={member.name} mediaId={member.avatarMediaId} size="lg" />
                   <span className="flex min-w-0 flex-col">
                     <span className="truncate font-medium">{member.name}</span>
-                    {member.label !== member.name && (
-                      <span className="truncate text-xs text-muted">{member.label}</span>
-                    )}
+                    {member.subtitle && <span className="truncate text-xs text-muted">{member.subtitle}</span>}
                   </span>
                 </Link>
               </li>

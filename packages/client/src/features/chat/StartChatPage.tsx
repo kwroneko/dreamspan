@@ -231,7 +231,7 @@ function Pending({
     const result = expandForDisplay(
       greeter.greetings[index]!,
       "template",
-      { user: playing?.name ?? "User", char: greeter.card.name },
+      { user: playing?.modelName ?? playing?.name ?? "User", char: greeter.card.modelName ?? greeter.card.name },
       fields,
       frozen[at]!.get(index) ?? {}
     )
@@ -324,6 +324,7 @@ function Pending({
           <h1 className="text-lg font-semibold [overflow-wrap:anywhere]">
             {members === null ? name : `New chat: ${title}`}
           </h1>
+          {members === null && card.card.subtitle && <p className="text-sm text-muted">{card.card.subtitle}</p>}
           {members !== null && (
             <p className="text-sm text-muted [overflow-wrap:anywhere]">
               With {members.map((member) => member.name).join(", ")}, who greet in turn. Saved when you send the first
@@ -336,7 +337,10 @@ function Pending({
           <Field label="Playing as" className={members === null ? "w-full" : "flex-1 sm:w-56 sm:flex-none"}>
             <Select
               items={[
-                ...personas.map((p) => ({ value: p.entityId as string, label: p.name })),
+                ...personas.map((p) => ({
+                  value: p.entityId as string,
+                  label: `${p.name}${p.subtitle ? ` · ${p.subtitle}` : ""}`
+                })),
                 { value: NONE, label: "No persona" }
               ]}
               value={persona}
@@ -349,7 +353,10 @@ function Pending({
           {members !== null && (
             <Field label="Reply from" className="flex-1 sm:w-56 sm:flex-none">
               <Select
-                items={members.map((member) => ({ value: member.entityId as string, label: member.name }))}
+                items={members.map((member) => ({
+                  value: member.entityId as string,
+                  label: `${member.name}${member.subtitle ? ` · ${member.subtitle}` : ""}`
+                }))}
                 value={replyId}
                 onValueChange={setReplier}
               />

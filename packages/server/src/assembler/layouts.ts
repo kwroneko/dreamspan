@@ -1,3 +1,4 @@
+import { modelName } from "@rp/shared/cardNames.ts"
 // Our layouts' card blocks and tail directive (DESIGN §5.2, §5.3; ARCHITECTURE §15).
 import type { Names } from "./macros.ts"
 import { type Assembly, need } from "./pipeline.ts"
@@ -12,7 +13,7 @@ const label = (name: string) => name.replace(/"/g, "'")
 const block = (assembly: Assembly, tag: string, card: CardInput, parts: ReadonlyArray<Text>): Text => {
   const env = need(assembly, "macros")
   const present = parts.filter((part) => part.text)
-  const text = `<${tag} name="${label(card.doc.name)}">\n${present.map((part) => part.text).join("\n\n")}\n</${tag}>`
+  const text = `<${tag} name="${label(modelName(card.doc))}">\n${present.map((part) => part.text).join("\n\n")}\n</${tag}>`
   const piece = env.verbatim(
     `layout:${tag}:${card.entity}`,
     { kind: "assembler", what: `${tag} block` },
@@ -29,7 +30,7 @@ export const cardBlock = (
   cardText: CardText,
   top: ReadonlyArray<Text> = []
 ): Text => {
-  const own = { char: card.doc.name }
+  const own = { char: modelName(card.doc) }
   return block(assembly, "character", card, [
     ...top,
     cardText(assembly, card, "description", own),
@@ -49,7 +50,7 @@ export const personaBlock = (
     ...top,
     ...(assembly.placedPersonas?.has(card.entity)
       ? []
-      : [cardText(assembly, card, "description", { user: card.doc.name })])
+      : [cardText(assembly, card, "description", { user: modelName(card.doc) })])
   ]
   return parts.some((part) => part.text) ? block(assembly, "persona", card, parts) : null
 }
@@ -66,8 +67,8 @@ export const directive = (assembly: Assembly, presetText: PresetText): Text | nu
   if (!speaker) return null
   if (cast.personas.includes(speaker)) {
     const text = utility.impersonation_prompt
-    return text ? presetText(assembly, "utility.impersonation_prompt", text, { user: speaker.doc.name }) : null
+    return text ? presetText(assembly, "utility.impersonation_prompt", text, { user: modelName(speaker.doc) }) : null
   }
   const text = utility.group_nudge_prompt
-  return text ? presetText(assembly, "utility.group_nudge_prompt", text, { char: speaker.doc.name }) : null
+  return text ? presetText(assembly, "utility.group_nudge_prompt", text, { char: modelName(speaker.doc) }) : null
 }

@@ -1,3 +1,4 @@
+import { modelName } from "@rp/shared/cardNames.ts"
 import { schemaPrefillBudget } from "./prefill.ts"
 import { layerText, lcmStage } from "./lcm.ts"
 import { createHash } from "node:crypto"
@@ -330,11 +331,11 @@ const modeStage = sync("mode", (assembly) => {
 /** The bindings macros see (DESIGN §5.3): ST's names for one character, the cast's otherwise. */
 const namesFor = (state: ChatState, cast: Cast, mode: Mode): Names => {
   const pinned = state.macroBindings
-  const join = (cards: ReadonlyArray<CardInput>) => cards.map((c) => c.doc.name).join(", ")
+  const join = (cards: ReadonlyArray<CardInput>) => cards.map((c) => modelName(c.doc)).join(", ")
   if (mode.st) {
     return {
-      user: pinned["user"] ?? cast.personas[0]?.doc.name ?? "User",
-      char: pinned["char"] ?? cast.characters[0]!.doc.name
+      user: pinned["user"] ?? (cast.personas[0] ? modelName(cast.personas[0].doc) : undefined) ?? "User",
+      char: pinned["char"] ?? modelName(cast.characters[0]!.doc)
     }
   }
   const everyone = [...cast.characters, ...cast.personas]
@@ -538,7 +539,7 @@ const resolveStage: AssemblerStage = {
           const position = positions.get(key) ?? (yield* positionOf(state, before))
           positions.set(key, position)
           const speaker = speakerOf(entry, position.cast)
-          const own = speaker && !position.cast.personas.includes(speaker) ? { char: speaker.doc.name } : {}
+          const own = speaker && !position.cast.personas.includes(speaker) ? { char: modelName(speaker.doc) } : {}
           at = {
             names: { ...position.names, ...own },
             card: position.card,
@@ -599,7 +600,13 @@ const rolesStage = sync("roles", (assembly) => {
             ? "assistant"
             : "user"
           : side
-    return { entry, role, name: speaker?.doc.name ?? (persona ? names.user : names.char), persona, piece }
+    return {
+      entry,
+      role,
+      name: (speaker ? modelName(speaker.doc) : undefined) ?? (persona ? names.user : names.char),
+      persona,
+      piece
+    }
   })
 })
 
@@ -904,7 +911,7 @@ const noteText = (assembly: Assembly, note: NoteInput, owner: CardInput | null):
     `note:${note.entity}`,
     noteSource(assembly, note),
     note.doc.content.trim(),
-    owner ? { withoutCard: true, names: { char: owner.doc.name } } : {}
+    owner ? { withoutCard: true, names: { char: modelName(owner.doc) } } : {}
   )
   const text = env.text(piece)
   return { text, piece }
@@ -1193,7 +1200,7 @@ const composeStage = sync("compose", (assembly) => {
     const tailCards =
       mode.layout === "swap_tail" && cast.speaker && !cast.personas.includes(cast.speaker) ? [cast.speaker] : []
     examples = (mode.layout === "swap_tail" ? tailCards : cast.characters).flatMap((card) =>
-      exampleLines(assembly, card, card.doc.name, true)
+      exampleLines(assembly, card, modelName(card.doc), true)
     )
     pendingNotes = placedNotes(assembly, mode.layout === "swap_tail" ? tailCards : cast.characters, cast.personas)
     newChat =
@@ -1617,7 +1624,7 @@ const composeStage = sync("compose", (assembly) => {
   const postNames = {
     user: names.user,
     char: names.char,
-    group: cast.characters.length > 1 ? cast.characters.map((c) => c.doc.name) : []
+    group: cast.characters.length > 1 ? cast.characters.map((c) => modelName(c.doc)) : []
   }
   const cost = (built: ReturnType<typeof compose>) => {
     const messages = built.messages.filter((message) => message.content)

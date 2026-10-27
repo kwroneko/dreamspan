@@ -103,33 +103,48 @@ const setup = Effect.gen(function* () {
 })
 
 describe("the Cast tab's cards are the versions the model reads", () => {
-  it.live("a name edited only in this chat is the chat's name for the card; the label stays the library's", () =>
-    Effect.gen(function* () {
-      const s = yield* setup
-      const opened = yield* s.api.EditCardForChat({ chatId: s.chatId, slotId: yield* s.leaf(), entityId: s.entityId })
-      yield* s.edit(opened.ref.id, { name: "Chat Mira" })
-      assert.include(yield* s.assembled(), "Chat Mira")
-      const cast = yield* s.api.GetCast({ chatId: s.chatId, slotId: yield* s.leaf() })
-      const card = cast.cards.find((c) => c.entityId === s.entityId)!
-      assert.strictEqual(card.name, "Chat Mira")
-      assert.strictEqual(card.label, "Mira library")
-      // Another chat with the card still calls it Mira.
-      const other = yield* s.api.StartChat({
-        cards: [s.entityId],
-        persona: null,
-        greeting: 0,
-        first: { _tag: "Send", content: "Hi", speakerEntityId: null }
-      })
-      const elsewhere = yield* s.api.GetCast({ chatId: other.chat.id, slotId: null })
-      assert.strictEqual(elsewhere.cards.find((c) => c.entityId === s.entityId)!.name, "Mira")
-    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
+  it.live(
+    "a name edited only in this chat is the chat's name for the card; the display name and subtitle follow that revision",
+    () =>
+      Effect.gen(function* () {
+        const s = yield* setup
+        const opened = yield* s.api.EditCardForChat({ chatId: s.chatId, slotId: yield* s.leaf(), entityId: s.entityId })
+        yield* s.edit(opened.ref.id, { name: "Chat Mira", nickname: "Mira model", character_version: "chat version" })
+        assert.include(yield* s.assembled(), "Mira model")
+        const cast = yield* s.api.GetCast({ chatId: s.chatId, slotId: yield* s.leaf() })
+        const card = cast.cards.find((c) => c.entityId === s.entityId)!
+        assert.strictEqual(card.name, "Chat Mira")
+        assert.strictEqual(card.label, "Chat Mira")
+        assert.strictEqual(card.modelName, "Mira model")
+        assert.strictEqual(card.subtitle, "chat version")
+        // Another chat with the card still calls it Mira.
+        const other = yield* s.api.StartChat({
+          cards: [s.entityId],
+          persona: null,
+          greeting: 0,
+          first: { _tag: "Send", content: "Hi", speakerEntityId: null }
+        })
+        const elsewhere = yield* s.api.GetCast({ chatId: other.chat.id, slotId: null })
+        assert.strictEqual(elsewhere.cards.find((c) => c.entityId === s.entityId)!.name, "Mira")
+      }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
   )
 
   it.live("a pinned revision is shown, an edit only here starts from it, and binds the chat's own version", () =>
     Effect.gen(function* () {
       const s = yield* setup
       yield* s.bind({ revision: s.made.ref.headRevisionId })
-      yield* s.edit(s.made.ref.id, { description: "Changed library head." })
+      yield* s.edit(s.made.ref.id, {
+        description: "Changed library head.",
+        name: "New library name",
+        nickname: "New model name",
+        character_version: "new"
+      })
+      const pinnedCast = yield* s.api.GetCast({ chatId: s.chatId, slotId: yield* s.leaf() })
+      const pinnedCard = pinnedCast.cards.find((c) => c.entityId === s.entityId)!
+      assert.deepStrictEqual([pinnedCard.name, pinnedCard.modelName, pinnedCard.subtitle], ["Mira", "Mira", ""])
+      const [summary] = yield* s.api.ListChatSummaries({ chatIds: [s.chatId] })
+      const listed = summary!.cast.find((c) => c.entityId === s.entityId)!
+      assert.deepStrictEqual([listed.name, listed.modelName, listed.subtitle], ["Mira", "Mira", ""])
       const pinned = yield* s.shown()
       assert.strictEqual(pinned.definition.description, "Original harbor pilot.")
       assert.strictEqual(pinned.binding, "revision")

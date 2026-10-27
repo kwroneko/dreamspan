@@ -42,12 +42,12 @@ describe("editor fields", () => {
   it("searches every text field, greetings as elements of their list", () => {
     const card = { name: "Wren", description: "A keeper.", alternate_greetings: ["Hi.", "Hello."], modules: [] }
     expect(searchable("card", card).map((f) => [f.label, f.text, f.inList?.index])).toEqual([
-      ["Name", "Wren", undefined],
+      ["Display name", "Wren", undefined],
       ["Description", "A keeper.", undefined],
       ["Alternate greetings 1", "Hi.", 0],
       ["Alternate greetings 2", "Hello.", 1]
     ])
-    expect(searchable("card", { character_version: "v2" }).map((f) => f.label)).toEqual(["Character version"])
+    expect(searchable("card", { character_version: "v2" }).map((f) => f.label)).toEqual(["Version (shown as subtitle)"])
   })
 })
 

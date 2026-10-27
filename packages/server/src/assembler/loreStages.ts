@@ -1,3 +1,4 @@
+import { modelName } from "@rp/shared/cardNames.ts"
 // Lorebook reads and keyword activation, in the reader worker's registered pipeline.
 import { Effect } from "effect"
 import { matchLorebooks } from "./lorebook.ts"
@@ -81,7 +82,9 @@ export const loreActivationStage: AssemblerStage = {
       const sharedWork = { remaining: 4_000_000 }
       const optionsFor = (book: LorebookInput) => ({
         sharedWork,
-        ...(book.card ? { names: { char: book.card.doc.name }, card: cardFields(book.card, cast.personas[0]) } : {})
+        ...(book.card
+          ? { names: { char: modelName(book.card.doc) }, card: cardFields(book.card, cast.personas[0]) }
+          : {})
       })
       const books = inputs.map((book) => {
         const options = optionsFor(book)

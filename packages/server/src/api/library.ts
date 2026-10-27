@@ -8,9 +8,9 @@ import { Reader } from "../db/Database.ts"
 export const makeLibraryHandlers = Effect.gen(function* () {
   const reader = yield* Reader
   return {
-    ListLibrary: ({ kind }) =>
+    ListLibrary: ({ kind, archived }) =>
       Effect.flatMap(CurrentUser, (user) =>
-        reader.ListLibrary({ userId: user.id, kind, tag: null, archived: false })
+        reader.ListLibrary({ userId: user.id, kind, tag: null, archived: archived ?? false })
       ).pipe(
         Effect.catchTag(["StorageError", "RpcClientError"], (error) =>
           Effect.logError("ListLibrary failed", error).pipe(

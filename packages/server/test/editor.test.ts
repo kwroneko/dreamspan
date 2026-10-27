@@ -84,6 +84,59 @@ const commit = (api: Api, refId: RefId, message: string | null = null) =>
 const doc = (api: Api, refId: RefId) => Effect.map(api.OpenEditor({ refId }), (opened) => opened.doc)
 
 layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" })("editing the library", (it) => {
+  it.effect("standard card names survive create, rename, fork, revision history and V3 export", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const card = yield* api.CreateCard({
+        label: "Ignored legacy label",
+        name: "Display",
+        nickname: "Model",
+        version: "1.0"
+      })
+      assert.strictEqual(card.label, "Display")
+      assert.strictEqual(card.subtitle, "1.0")
+      const first = yield* doc(api, card.id)
+      assert.deepStrictEqual([first.name, first.nickname, first.character_version], ["Display", "Model", "1.0"])
+      yield* draft(api, card.id, textField(["name"]), "Renamed display")
+      yield* draft(api, card.id, textField(["character_version"]), "2.0")
+      const saved = yield* commit(api, card.id)
+      assert.deepStrictEqual([saved.ref.label, saved.ref.subtitle], ["Renamed display", "2.0"])
+      const old = yield* api.GetRevision({ refId: card.id, revisionId: card.headRevisionId })
+      assert.deepStrictEqual([old.name, old.nickname, old.character_version], ["Display", "Model", "1.0"])
+      yield* draft(api, card.id, textField(["name"]), "Pending display")
+      const fork = yield* api.ForkVariant({ refId: card.id, label: "Fork display", subtitle: "3.0", moveDrafts: true })
+      const source = yield* api.OpenEditor({ refId: card.id })
+      assert.strictEqual(source.drafts.find((d) => d.key.field === textField(["name"]))!.content, "Pending display")
+      const forkDoc = yield* doc(api, fork.id)
+      assert.deepStrictEqual(
+        [forkDoc.name, forkDoc.nickname, forkDoc.character_version],
+        ["Fork display", "Model", "3.0"]
+      )
+      const renamed = yield* api.RenameRef({
+        refId: fork.id,
+        label: "RPC rename",
+        subtitle: "4.0",
+        expectedRowVersion: fork.rowVersion
+      })
+      assert.notStrictEqual(renamed.headRevisionId, fork.headRevisionId)
+      const url = yield* base
+      const response = yield* Effect.promise(() =>
+        fetch(`${url}/library/export`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ refId: renamed.id, format: "card-v3-json" })
+        })
+      )
+      const file = (yield* Effect.promise(() => response.json())) as {
+        data: { name: string; nickname: string; character_version: string }
+      }
+      assert.deepStrictEqual(
+        [file.data.name, file.data.nickname, file.data.character_version],
+        ["RPC rename", "Model", "4.0"]
+      )
+    })
+  )
+
   it.effect("a save names its draft: one that moved to a variant never takes over the new draft here", () =>
     Effect.gen(function* () {
       const api = yield* client()
@@ -317,12 +370,12 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
       const variant = yield* api.ForkVariant({ refId: card.id, label: "Variant", subtitle: "", moveDrafts: false })
       yield* draft(api, variant.id, textField(["description"]), "Mine.")
       yield* draft(api, variant.id, textField(["personality"]), "Quiet.")
-      // The upstream changes the description; the variant follows it (a fast-forward).
+      // The upstream changes the description; the variant merges it, keeping its own standard name.
       yield* draft(api, card.id, textField(["description"]), "Theirs.")
       const upstream = yield* commit(api, card.id)
       assert.deepStrictEqual(
         upstream.followers.map((f) => f.outcome),
-        ["fast_forward"]
+        ["merged"]
       )
       const conflict = yield* Effect.flip(commit(api, variant.id))
       assert.strictEqual(conflict._tag, "EditConflict")

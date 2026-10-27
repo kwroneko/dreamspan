@@ -1,0 +1,192 @@
+// Synthetic path import, standard card metadata, draft revisions and UI-only uniqueness.
+import { join } from "node:path"
+import { mkdirSync } from "node:fs"
+import { expect, test } from "@playwright/test"
+import { Effect } from "effect"
+import { textField } from "@rp/shared/editing.ts"
+import { writeRealisticStFolder } from "../../server/test/support/stRealistic.ts"
+import { asUser } from "./support/rpc.ts"
+import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+
+const server = serverPerFile(withAdmin)
+const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)
+let imported = false
+const screens = process.env.SCREENSHOT_DIR
+if (screens) mkdirSync(screens, { recursive: true })
+
+for (const width of [1440, 390]) {
+  test(`standard names and clash messages on realistic synthetic data at ${width}`, async ({ page }) => {
+    test.setTimeout(180_000)
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
+    await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+    if (!imported) {
+      const folder = writeRealisticStFolder(join(server().dataDir, "st"))
+      await page.goto(`${server().url}/import/st`)
+      await page.getByLabel("Folder path").fill(folder)
+      await page.getByRole("button", { name: "Look in this folder" }).click()
+      await page.getByRole("button", { name: "Import", exact: true }).click()
+      await expect(page.getByRole("list", { name: "Imported" })).toBeVisible({ timeout: 120_000 })
+      imported = true
+    }
+    const shoot = async (name: string) => {
+      expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(0)
+      if (screens) await page.screenshot({ path: join(screens, `${name}-${width}.png`) })
+    }
+    await page.goto(server().url)
+    await expect(page.getByRole("link", { name: "Inspect Aria Vance", exact: true }).first()).toBeVisible()
+    await shoot("grid")
+    const groups = await admin((api) => api.ListChatGroups())
+    const group = groups[0]!
+    await page.goto(`${server().url}/groups/${group.latestChatId}`)
+    const members = page.getByRole("list", { name: "Characters in the group" })
+    for (const member of group.members) {
+      if (member.subtitle) await expect(members).toContainText(member.subtitle)
+    }
+    await shoot("group-members")
+    await page.goto(server().url)
+    await page.getByRole("link", { name: "Inspect Aria Vance", exact: true }).first().click()
+    await expect(page.getByRole("heading", { name: "Aria Vance", exact: true })).toBeVisible()
+    await expect(page.locator("main header")).toContainText("1")
+    await shoot("card")
+    const refs = await admin((api) => api.ListLibrary({ kind: "card" }))
+    const aria = refs.find((ref) => ref.label === "Aria Vance")!
+    await page.goto(`${server().url}/library/${aria.id}`)
+    await expect(page.getByRole("textbox", { name: "Display name", exact: true })).toHaveValue("Aria Vance")
+    await expect(page.getByRole("textbox", { name: "Version (shown as subtitle)", exact: true })).toHaveValue("1")
+    await expect(
+      page.getByRole("textbox", { name: "Name the model sees (leave empty to use the display name)", exact: true })
+    ).toBeVisible()
+    await shoot("editor")
+    if (screens)
+      await page
+        .locator("section")
+        .filter({ has: page.getByRole("heading", { name: "Identity", exact: true }) })
+        .screenshot({ path: join(screens, `editor-fields-${width}.png`) })
+    // Fork pair checks; the chosen names become the fork revision, with parent unchanged.
+    await page.getByRole("button", { name: "Make a variant", exact: true }).click()
+    const fork = page.getByRole("dialog", { name: "Make a variant" })
+    await fork.getByRole("textbox", { name: "Display name", exact: true }).fill("Aria Vance")
+    await fork.getByRole("textbox", { name: "Version (shown as subtitle)", exact: true }).fill("1")
+    const clash = "Another card is already called Aria Vance · 1: change the display name or the version"
+    await expect(fork.getByRole("status")).toHaveText(clash)
+    await expect(fork.getByRole("button", { name: "Make the variant" })).toBeDisabled()
+    await shoot("fork-clash")
+    await fork.getByRole("textbox", { name: "Version (shown as subtitle)", exact: true }).fill(`fork-${width}`)
+    await expect(fork.getByRole("button", { name: "Make the variant" })).toBeEnabled()
+    await fork.getByRole("button", { name: "Make the variant" }).click()
+    await expect(page.getByRole("textbox", { name: "Version (shown as subtitle)", exact: true })).toHaveValue(
+      `fork-${width}`
+    )
+    const variants = page.getByRole("navigation", { name: "Variants" })
+    await expect(variants).toContainText(`fork-${width}`)
+    await shoot("variants")
+    // Existing card rename also checks the pair before Save.
+    await page.getByRole("textbox", { name: "Version (shown as subtitle)", exact: true }).fill("1")
+    await expect(page.getByRole("button", { name: /^Save(?: \(|$)/ })).toBeDisabled()
+    await expect(page.getByRole("status").filter({ hasText: "Another card is already called" })).toHaveText(clash)
+    await shoot("rename-clash")
+    await page.getByRole("textbox", { name: /^Version \(shown as subtitle\)/ }).fill(`fork-${width}`)
+    // New card check, then choose a distinct version.
+    await page.goto(`${server().url}/library`)
+    await page.getByRole("button", { name: "New card", exact: true }).click()
+    const dialog = page.getByRole("dialog", { name: "New card" })
+    await dialog.getByRole("textbox", { name: "Display name", exact: true }).fill("Aria Vance")
+    await dialog.getByRole("textbox", { name: "Version (shown as subtitle)", exact: true }).fill("1")
+    await expect(dialog.getByRole("status")).toHaveText(clash)
+    await expect(dialog.getByRole("button", { name: "Create", exact: true })).toBeDisabled()
+    await shoot("new-clash")
+    await dialog.getByRole("textbox", { name: "Version (shown as subtitle)", exact: true }).fill(`new-${width}`)
+    await expect(dialog.getByRole("button", { name: "Create", exact: true })).toBeEnabled()
+    await dialog.getByRole("button", { name: "Cancel" }).click()
+    // An imported collision remains editable when only other fields change.
+    await page.request.post(`${server().url}/library/import?name=collision.json`, {
+      data: Buffer.from(
+        JSON.stringify({
+          spec: "chara_card_v3",
+          spec_version: "3.0",
+          data: { name: "Aria Vance", character_version: "1", nickname: "Aria" }
+        })
+      ),
+      headers: { origin: server().url, "content-type": "application/octet-stream" }
+    })
+    const duplicates = await admin((api) => api.ListLibrary({ kind: "card" }))
+    expect(duplicates.filter((ref) => ref.label === "Aria Vance" && ref.subtitle === "1").length).toBeGreaterThan(1)
+    await page.goto(`${server().url}/library/${aria.id}`)
+    await page.getByRole("textbox", { name: "Description", exact: true }).fill(`Synthetic edit ${width}`)
+    await expect(page.getByRole("button", { name: /^Save(?: \(|$)/ })).toBeEnabled()
+    await page.getByRole("button", { name: /^Save(?: \(|$)/ }).click()
+    await expect(page.getByRole("button", { name: "Save revision", exact: true })).toBeEnabled()
+    await page.getByRole("button", { name: "Save revision", exact: true }).click()
+    await expect(page.getByRole("dialog")).toHaveCount(0)
+    // Keep the greeting / cast names visibly different from the model name.
+    await admin((api) =>
+      Effect.gen(function* () {
+        const opened = yield* api.OpenEditor({ refId: aria.id })
+        const saved = yield* api.SaveEditorDraft({
+          refId: aria.id,
+          field: textField(["nickname"]),
+          content: "Aria model",
+          draftId: null,
+          expectedRowVersion: null,
+          expectedSession: null,
+          baseRevisionId: opened.ref.headRevisionId
+        })
+        yield* api.CommitEditorDrafts({
+          refId: aria.id,
+          expectedRowVersion: opened.ref.rowVersion,
+          fields: [{ field: saved.key.field, draftId: saved.id, expectedRowVersion: saved.rowVersion }],
+          message: null
+        })
+      })
+    )
+    const usage = await admin((api) => api.ListCardUsage())
+    const chatId = usage.find((card) => card.entityId === aria.entityId)!.latestChatId!
+    await page.goto(`${server().url}/chats/${chatId}`)
+    await expect(page.getByRole("textbox", { name: "Message", exact: true })).toBeVisible()
+    await shoot("chat-header")
+    const tab = page.getByRole("tab", { name: "Cast", exact: true })
+    if (width === 390) {
+      await page.getByRole("button", { name: "Chat panel", exact: true }).click()
+      await tab.click()
+    } else if (await tab.isVisible()) await tab.click()
+    else
+      await page.getByRole("group", { name: "Chat panel" }).getByRole("button", { name: "Cast", exact: true }).click()
+    const castList = page.getByRole("list", { name: "Characters in this chat" })
+    await expect(castList).toContainText("Aria Vance")
+    await expect(castList.getByRole("listitem", { name: "Aria Vance", exact: true })).toContainText("1")
+    await shoot("chat-cast")
+    // A normal name/version save refreshes the mounted sidebar, and History cannot
+    // restore an occupied imported pair. All surrounding data is the realistic import.
+    await page.goto(`${server().url}/library/${aria.id}`)
+    await page.getByRole("textbox", { name: /^Display name/ }).fill(`Aria revised ${width}`)
+    await page.getByRole("textbox", { name: /^Version \(shown as subtitle\)/ }).fill(`revised-${width}`)
+    await page.getByRole("button", { name: "Save (2)", exact: true }).click()
+    await page
+      .getByRole("dialog", { name: "Save a revision" })
+      .getByRole("button", { name: "Save revision", exact: true })
+      .click()
+    await expect(page.getByRole("dialog")).toHaveCount(0)
+    if (width === 1440)
+      await expect(page.getByRole("complementary")).toContainText(`with Aria revised ${width} · revised-${width}`)
+    await shoot("sidebar-save")
+    await page.getByRole("button", { name: "History", exact: true }).click()
+    const history = page.getByRole("dialog", { name: "History" })
+    await history.getByRole("list", { name: "Revisions" }).getByRole("listitem").last().getByRole("button").click()
+    await expect(history.getByRole("status")).toContainText("Another card is already called Aria Vance · 1")
+    await expect(history.getByRole("button", { name: "Restore", exact: true })).toBeDisabled()
+    await history.getByRole("status").scrollIntoViewIfNeeded()
+    await shoot("history-clash")
+    // Restore the synthetic fixture for the next viewport through the storage-compatible API.
+    await admin((api) =>
+      Effect.gen(function* () {
+        const opened = yield* api.OpenEditor({ refId: aria.id })
+        yield* api.RenameRef({
+          refId: aria.id,
+          label: "Aria Vance",
+          subtitle: "1",
+          expectedRowVersion: opened.ref.rowVersion
+        })
+      })
+    )
+  })
+}

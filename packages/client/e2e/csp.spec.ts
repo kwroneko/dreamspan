@@ -88,7 +88,7 @@ test("every screen runs under the Content-Security-Policy", async ({ page }) => 
   // The card editor, with its avatar from /library/media and its search in a worker.
   await page.goto(`${server().url}/library`)
   await page.getByRole("button", { name: "New card" }).click()
-  await page.getByRole("textbox", { name: "Name" }).fill("Wren")
+  await page.getByRole("textbox", { name: "Display name", exact: true }).fill("Wren")
   await page.getByRole("button", { name: "Create" }).click()
   await page.getByLabel("Choose an avatar, or drop it here").setInputFiles({
     name: "wren.png",

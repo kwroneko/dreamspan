@@ -60,7 +60,7 @@ const ranked = (
     let first = 0
     if (q !== "") {
       if (name.startsWith(q)) first = 0
-      else if (name.includes(q) || fold(card.label).includes(q)) first = 1
+      else if (name.includes(q) || fold(card.subtitle ?? "").includes(q)) first = 1
       else return
     }
     scored.push({ card, first, rank: rank(card), index })
@@ -129,10 +129,12 @@ function CardOptions({
               style={{ transform: `translateY(${item.start}px)` }}
             >
               <Avatar id={card.entityId} name={card.name} mediaId={card.avatarMediaId} size="md" />
-              <span className="min-w-0 flex-1 truncate">{card.name}</span>
+              <span className="flex min-w-0 flex-1 flex-col">
+                <span className="truncate">{card.name}</span>
+                {card.subtitle && <span className="truncate text-xs text-muted">{card.subtitle}</span>}
+              </span>
               {card.entityId === current && <Badge>speaking</Badge>}
               {card.persona && <Badge>persona</Badge>}
-              {card.label !== card.name && <span className="min-w-0 truncate text-xs text-muted">{card.label}</span>}
             </div>
           )
         })}
