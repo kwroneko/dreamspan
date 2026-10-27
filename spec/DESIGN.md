@@ -298,6 +298,11 @@ Where the owner corrected an earlier proposal, the corrected version is recorded
 - **[D]** Every section of a preset can be system, user or assistant, as in ST's preset editor, which the app needs too.
 - **[D]** Later, not now: modes where the card definitions move into the tail and are swapped every turn for the character speaking. The layout must allow it.
 
+- **[D]** (owner confirmed 2026-10-27) **Card definitions are filled the way the preset says**, globally, never per chat: ST's per-field markers and macros (`{{description}}`, Char Description, Char Personality, Scenario…) are filled field by field, each character's part wrapped in `<{{char}}>` … `</{{char}}>` by default (the owner's ST setting; ST's join prefix/suffix); the whole-card "Definitions" marker puts each card in whole, in a labelled block (§5.2). The build's hidden switch to ST-compatible assembly for one-character chats is removed.
+- **[D]** (owner confirmed 2026-10-27) **A card's system prompt and post-history instructions** replace the preset's Main Prompt and post-history prompt, as in ST, with `{{original}}` for the replaced text, unless that prompt **forbids overrides**. These card prompts are usually an awkward attempt at a jailbreak, though not always; they must stay usable and not counterintuitive. **Forbidding overrides is on by default** for a new preset and for any new prompt it can apply to. Visible from both sides: the preset editor shows "replaced in this chat by Aria's system prompt" at that prompt, the card editor shows whether its prompt is used.
+- **[D]** (owner confirmed 2026-10-27) **Card modules are card notes**: the 2026-10-09 "extended prompts attached to a card, swapped per chat or situation, possibly private" are what card notes now do (position, per-chat switch, conditions, private flag). One concept.
+- **[D]** (owner confirmed 2026-10-27) **Choosing lorebooks**: a Lorebooks tab in the right panel, per chat (fork), listing each character's embedded book (on by default), books added from the library, and the global books, each with its switch; the "only below the history" setting (§1.3) sits there.
+
 ### 5.1 Pipeline [P]
 1. Take the path (§3.3).
 2. Replay state events along it (§3.4).
