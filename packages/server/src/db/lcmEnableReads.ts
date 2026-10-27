@@ -170,12 +170,21 @@ export const makeLcmEnableReadHandlers = Effect.gen(function* () {
           const blocked = blockedWith("runway")
           return { enabled, imported: offer, fromScratch: blocked, adopted: offer ? blocked : null }
         }
-        // What opens every request: the messages that are neither history nor summaries.
-        const inHistory = new Set<number>()
-        for (const piece of built.pieces)
+        // What opens every request: the messages that are neither history nor summaries, nor
+        // what only a reply sends (a conditioned prompt, the user turn that ends a reply's request:
+        // a summary request sends neither, DESIGN §2.2).
+        const notPrefix = new Set<number>()
+        const replyOnly = new Map<number, boolean>()
+        for (const piece of built.pieces) {
           if (piece.source.kind === "message" || piece.source.kind === "summary")
-            for (const message of piece.messages) inHistory.add(message)
-        const prefix = built.request.messages.reduce((n, m, at) => n + (inHistory.has(at) ? 0 : tokensOf(m)), 0)
+            for (const message of piece.messages) notPrefix.add(message)
+          const only =
+            (piece.source.kind === "preset" && piece.source.condition !== undefined) ||
+            (piece.source.kind === "assembler" && piece.id === "assembler:last-turn")
+          for (const message of piece.messages) replyOnly.set(message, (replyOnly.get(message) ?? true) && only)
+        }
+        for (const [message, only] of replyOnly) if (only) notPrefix.add(message)
+        const prefix = built.request.messages.reduce((n, m, at) => n + (notPrefix.has(at) ? 0 : tokensOf(m)), 0)
         const speed = yield* recentSpeed(sql, userId, model.modelId)
         const [priced] = yield* sql<{ write: number | null }>`
           SELECT json_extract(upstream_json, '$.price.cacheWrite') AS write FROM models WHERE id = ${model.modelId}`
