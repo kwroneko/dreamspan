@@ -46,6 +46,10 @@ Where the owner corrected an earlier proposal, the corrected version is recorded
 - **[D]** A card's own lorebook (`character_book`) is used in new chats automatically, with no "import card lore" dialog. A chat imported from ST keeps what ST sent: the card's lorebook only if ST had imported it as a lorebook file. Each chat's settings can turn a card's lorebook on or off (owner, 2026-10-14).
 - **[P]** Placement is cache-friendly: entries are never inserted above the history. They go in a block near the tail, where they stay until the next compaction boundary.
 
+- **[D]** (owner, 2026-10-27) Wherever lorebooks are selected there is a setting, **on by default**, that overrides entries' positions so lorebook entries are only placed **below the history**. What it does is made very clear, with a popover explaining why (entries that come and go above the history invalidate the cache for everything after them) and how, right where lorebooks are selected.
+- **[D]** With that setting off, entries placed above the history stay activated ("pinned") until the history's start next moves; entries after the history are never pinned and are evaluated every turn, as in ST.
+- **[D]** When the history's start moves, the cache should still not be lost entirely: the prefix before the history (preset, cards, high-level summaries) is preserved, through cache breakpoints where the provider has them (not every cache system does; with few breakpoints it may not always be possible).
+
 ### 1.4 ST data folder import
 - **[D]** Point the importer at an ST data folder. It finds the chats and their cards and adds them seamlessly. Exporting chats back to ST is secondary.
 - **[D]** ST has a single hidden flag. If a long consecutive run of hidden messages starts at message 0 (the manual-summary pattern), the importer offers to un-hide them so LCM can take over. Other hidden messages stay excluded from context.
@@ -107,6 +111,19 @@ Where the owner corrected an earlier proposal, the corrected version is recorded
   - **Send as X**: you wrote it.
   - **Generate X**: the model writes X's turn, as a real generation. Not a fake turn inserted into the history, and no command to remember.
 - **[P]** **Composer text used with Generate becomes a one-turn direction**, stored on that generated turn. Swiping reuses it, going back restores it, and it never leaks into later turns. This replaces "put next-turn guidance in the author's note and remember to remove it".
+- **[D]** `{{user}}` (who the persona is) and the speaker (who is writing this turn) are separate (owner, 2026-10-27). `{{user}}` is relatively fixed and only changes sometimes. The persona can be any card; persona cards sit in their own folder, whose tab opens by default when switching persona. The persona role exists so the model maps intuitively for ST users.
+- **[D]** Roleplaying as any other character is as easy as writing as yourself and never invalidates the cache: selecting a speaker means writing as it (owner, 2026-10-27).
+- **[D]** Guidance instead of a written turn (owner, 2026-10-27): the owner usually doesn't write the turn but a `[Next: …]` direction (in ST, in the Author's Note, or with the Guided Generations Quick Reply set, which injects `[<text>]` at chat depth 0 and generates). Here: type in the composer and Generate, and the text is a prompt for that generation, not a sent message. (A popover on Generate was asked for first, then made unnecessary by the guidance toggle below.)
+- **[D]** Impersonation, the model generating as `{{user}}`, must work as seamlessly as possible, with or without a direction, and the model must be able to take the user's role or another role in the RP. Presets often have strong anti-impersonation prompts; the owner adds an exception ("unless the prompt explicitly says you may speak for {{user}} next") and states it in the `[Next: …]` (owner, 2026-10-27).
+- **[D]** Roles: the last turns being user matters most. Presets can have system sections near the end too (Anthropic supports system content there), so the end of the context isn't one block (owner, 2026-10-27).
+
+- **[D]** A **guidance toggle** on the composer (owner, 2026-10-27): on, the composer's contents are used as guidance wherever applicable (Generate, a new swipe, Continue); off, they never are, Generate included. Rejected: using composer text as guidance on a swipe implicitly (too non-obvious: the composer may hold your own next message), and a "new version with direction" box on every swipe control (redundant surfaces, more annoying).
+- **[D]** (owner confirmed 2026-10-27) Consequences: with guidance on, the box reads as guidance (its own look and placeholder) and Send is replaced by the generate actions, so guidance is never sent as a message by mistake; the text stays after generating, so swiping again reuses it; with guidance off nothing is reused implicitly (this replaces "swiping reuses the stored direction": each version still shows the direction it was generated with). The popover on Generate becomes unnecessary while the toggle shows the mode. The toggle's state is remembered per account, like other viewer settings. **Enter submits as Generate while guidance is on**, the same key that sends a message while it's off (owner, 2026-10-27).
+
+- **[D]** (owner confirmed 2026-10-27) Directions and "who writes next" are ordinary prompts in the preset: the macros `{{speaker}}` (who the model writes as) and `{{direction}}` (the composer text); every prompt has a condition (always / only when the model writes as a character / only when it writes as `{{user}}` / only when there's a direction). Default direction prompt, user role: `[The user has written a direction for {{speaker}}'s next message. It is not part of the story; follow it closely: {{direction}}]`. "Who writes next" is one prompt (`Write {{speaker}}'s next message.`); impersonation needs nothing extra. Anti-impersonation prompts get "not when writing as `{{user}}`". ST's group nudge, impersonation prompt and prompt Triggers map onto conditions on import. The app guarantees the last non-system message before the model writes is a user message; the preset editor warns when a preset would end on assistant (unless it prefills), and so does sending.
+- **[D]** Importing an ST preset appends the default direction prompt at the very end, marked "added on import" (owner, 2026-10-27). Acceptable only because it never applies normally: only when a direction is given, a feature ST doesn't have. A re-import of the same file therefore differs from the stored preset by that prompt.
+- **[D]** (owner confirmed 2026-10-27) Nothing else is added on import: ST presets already carry their group nudge and impersonation prompt, which map to conditioned prompts; adding a "who writes next" prompt would change normal generations. The first impersonation with a preset that has no "writing as `{{user}}`" conditions says once that its anti-impersonation prompts may need marking, with a link to the editor.
+
 - **[P]** Impersonation is just Generate for a character you play. The output lands as a real turn with versions. A "draft into composer" option is available.
 - **[D]** Sending into a chat that's still generating **queues** the message (owner, 2026-10-12). It shows as pending under the streaming reply and posts as soon as the reply finishes. If the reply is stopped, it posts right after the stopped version. Typing and sending are never blocked; to interject, press Stop first.
 - **[P]** The queued message is held by the server, so it survives closing the tab. It attaches to the reply's slot, not to a version, so it posts after whichever version ends up selected, including a failed one (which stays out of the context). Posting it starts the next reply as a normal Send does. A queued message can be edited or withdrawn until it posts.
@@ -173,6 +190,8 @@ Where the owner corrected an earlier proposal, the corrected version is recorded
   - by a required `send_message` argument
   - by a decision model reading the message
 - **[P]** All of these produce the same presence event.
+- **[D]** Muting is not presence (owner, 2026-10-26). **Muting** is a concrete user action with no fixed RP meaning: the character doesn't talk, whether it's away or you're just having a long one-on-one with someone else while it stays in the scene. It's shown as an explicit option, the one that isn't confusing for users. **Presence** was meant for agentic RP: the model or a decision model marks that a character *isn't there*, so it won't talk. The two overlap (an absent character can't talk). **[O]** Whether presence stays a separate concept or is redundant with muting.
+- **[D]** Muting only stops the character talking: it is never picked to reply automatically (it can still be made to speak explicitly). It **doesn't remove its card from the context**: taking cards out or swapping them busts the KV cache every turn, the worst possible default (the owner rejected it in the first design session; §5.2). Cards are only swapped in the opt-in card-swap layout, at the tail (owner, 2026-10-26). **[P]** Per fork, switched from the cast.
 
 ---
 
@@ -237,6 +256,24 @@ Where the owner corrected an earlier proposal, the corrected version is recorded
   - **[D]** a note created in a chat starts on, from the message shown (owner, 2026-10-13)
   - an exportable or private flag
 
+- **[D]** There are no personas apart from cards: a card can be played by the user and roles can be swapped, so a "persona note" is just a card's note (owner, 2026-10-26). A note's owner is a card or a chat (global notes: open). Ownership decides where a note is found and edited, which chats it can be switched on in, and whether it travels when the card is exported (unless private) or forked (copied); a chat's note is inherited by a fork as it is at that point, then independent.
+- **[D]** Every note has an on/off switch, not a number to type (owner, 2026-10-26).
+- **[D]** Positions (owner confirmed 2026-10-26), relative to the preset's own sections (§5.0): start of context; with the definitions (after the main prompt); at depth N in the history; start of the tail; end of the tail (default: the last thing before the newest message, or the very end when the preset puts the newest message earlier). Each note has a role.
+
+- **[D]** Any note can be named, since there is more than one, and the notes need a collapsed view (owner, 2026-10-26).
+- **[D]** A global "database" of named notes, usable from anywhere: when adding a note anywhere, instead of writing one you can pick an existing shared note, filterable by name, which fills that note slot; changes to a shared note are global (owner, 2026-10-26). ("Save as local note" is the unlink below.)
+- **[O]** A note that applies in every chat whatever the preset: it extends a preset without modifying it and stays when the preset changes, which makes it somewhat useful, but it's close to being a preset itself and its UX is unclear (owner, 2026-10-26).
+- **[P]** So a note *slot* belongs to a chat or a card (the only two owners), and its content is either its own text or a link to a shared named note.
+
+- **[D]** When a note applies: always, or only on a given character's turn. "While X is present in the chat" was dropped: cards are rarely removed and re-added (owner, 2026-10-26). **[D]** "While X isn't muted" is a condition too; both it and "on X's turn" are the user's choice, and placed sensibly (not above the cached part of the context) neither invalidates the cache (owner, 2026-10-26).
+- **[D]** Each note has a switch for whether lorebook entries can trigger on its text (ST's "Include in World Info Scanning") (owner, 2026-10-26).
+- **[D]** Importing ST's notes (owner, 2026-10-26): the chat's Author's Note becomes a chat note, on only if it was on in ST (non-empty, frequency not 0); the card's Character's Note (`depth_prompt`) a card note, on in every chat as ST always applies it; the private Character Author's Note a private card note, on where ST had "Use character author's note" ticked.
+- **[D]** A note slot linked to a shared note can be unlinked, which turns it into its own copy in that slot (owner, 2026-10-26).
+
+- **[D]** Notes also let users keep notes to themselves: a note switched off never reaches the prompt, and can be saved as a shared named note (a global snippet) for use elsewhere (owner, 2026-10-26).
+
+- **[D]** No insertion frequency (ST's "every Nth user message" for the Author's Note): a note that comes and goes breaks the cache and serves no real purpose (owner, 2026-10-26). On import, ST's 0 becomes off, any other value on.
+
 #### 4.1a State the agent changes during a chat
 - **[D]** Cards often hold things that change over a conversation, such as costumes. Today they stay at the top of the context, and the model works out the latest state by reading the chat. That usually works, because the chat is in causal order (owner, 2026-10-11).
 - **[D]** In agentic RP, the agent should be able to change the card and the notes **for that chat**.
@@ -253,6 +290,18 @@ Where the owner corrected an earlier proposal, the corrected version is recorded
 ---
 
 ## 5. Context assembly
+
+### 5.0 Layout belongs to the preset (owner, 2026-10-26)
+- **[D]** The context layout is the preset's, not a fixed one: presets are made by users, mostly for ST's layout, and their tail can be far longer than reference-harness's (whose single fixed layout is not a model to copy).
+- **[D]** Everything after the chat history is the **tail prompt** (the satellite system prompt, for its system parts). It sits at the end so the model attends to it most and the history can't causally override its instructions (style, rules), and it can change every turn without breaking the cache. Presets put most of their weight there; so does the Author's Note.
+- **[D]** Where the newest message goes is the preset's to control. Since a long tail can separate the newest message from the history, neither ST's placement (newest message at the end of the history, the tail after it) nor reference-harness's (tail, then the newest message last) is right for every preset. **[P]** A "Newest message" marker in the preset's prompt order, next to "Chat history": imported ST presets get it right after the history (ST's behaviour); a preset can move it after the tail.
+- **[D]** Every section of a preset can be system, user or assistant, as in ST's preset editor, which the app needs too.
+- **[D]** Later, not now: modes where the card definitions move into the tail and are swapped every turn for the character speaking. The layout must allow it.
+
+- **[D]** (owner confirmed 2026-10-27) **Card definitions are filled the way the preset says**, globally, never per chat: ST's per-field markers and macros (`{{description}}`, Char Description, Char Personality, Scenario…) are filled field by field, each character's part wrapped in `<{{char}}>` … `</{{char}}>` by default (the owner's ST setting; ST's join prefix/suffix); the whole-card "Definitions" marker puts each card in whole, in a labelled block (§5.2). The build's hidden switch to ST-compatible assembly for one-character chats is removed.
+- **[D]** (owner confirmed 2026-10-27) **A card's system prompt and post-history instructions** replace the preset's Main Prompt and post-history prompt, as in ST, with `{{original}}` for the replaced text, unless that prompt **forbids overrides**. These card prompts are usually an awkward attempt at a jailbreak, though not always; they must stay usable and not counterintuitive. **Forbidding overrides is on by default** for a new preset and for any new prompt it can apply to. Visible from both sides: the preset editor shows "replaced in this chat by Aria's system prompt" at that prompt, the card editor shows whether its prompt is used.
+- **[D]** (owner confirmed 2026-10-27) **Card modules are card notes**: the 2026-10-09 "extended prompts attached to a card, swapped per chat or situation, possibly private" are what card notes now do (position, per-chat switch, conditions, private flag). One concept.
+- **[D]** (owner confirmed 2026-10-27) **Choosing lorebooks**: a Lorebooks tab in the right panel, per chat (fork), listing each character's embedded book (on by default), books added from the library, and the global books, each with its switch; the "only below the history" setting (§1.3) sits there.
 
 ### 5.1 Pipeline [P]
 1. Take the path (§3.3).
@@ -321,6 +370,19 @@ Stepped history, dropped-message display and rewrite warnings without a TTL are 
 - **[P]** Inheritance chain: app default → default for the chat kind (RP or workshop) → chat → per-role override (narrator, character agent, summarizer) → card overlays and per-turn conditions.
 - **[P]** The composer strip shows the active preset and where it comes from. Changing it uses the same scope prompt as card edits. A preset switch is a state event.
 
+- **[D]** (owner, 2026-10-27) **A preset is global by default**: chats and forks don't own one. Which preset is right usually depends on the model.
+- **[D]** **Presets and models (connections) are separate by default**: switching either is easy and doesn't touch the other. ST links them (switching model switches to whatever preset was last used or saved with it), which is extremely confusing: having switched or edited your preset, moving the same work from OpenRouter to the OpenAI API changes the preset without you noticing.
+- **[D]** A connection can optionally **lock a preset**, one way: choosing that connection sets that preset, and the lock is visible in the connection's settings.
+- **[D] Rejected:** per-chat changes to a preset (a chat's own prompt switches over the preset): too confusing to make sense.
+- **[O]** Locking a preset to a chat: potentially useful, never the default. The future agent chat (not agentic RP) will need a separate preset that works differently.
+- **[D]** Models, presets and connections are fundamentally global (owner, 2026-10-27). Locking one to a chat is a specific, rare choice (the owner never made it in nearly four years of ST), never the default. The build's per-chat model and preset binding (`model.bind`/`preset.bind`, the This chat tab's "where each comes from") was never asked for: drift to remove, keeping at most an explicit lock.
+- **[D]** The current preset and model are switched from the composer bar, one click each, their settings opening in the right panel; space in the bar is a concern with everything else there (owner, 2026-10-27).
+
+- **[D]** Model settings move out of the preset into the model/connection settings: samplers and much more (owner, 2026-10-27).
+- **[P]** The split: **the model's settings** are what depends on the model or provider: samplers (temperature, top-p/k, min-p, penalties, seed, logit bias), context window and response length, reasoning or thinking effort, stop strings, streaming, caching options, provider routing, how roles go on the wire (system role support, squashing, names), the image limit, and whether prefill is supported. **The prompt preset** keeps what is written: its prompts, their order, roles and positions, the "Newest message" marker, the prompts used only in certain moments (impersonation, group nudge, continue), the prefill text, and its regex scripts.
+- **[D]** What ST calls a "preset" bundles three things the app keeps apart: the **prompt preset**, the **model (LLM) settings**, and **connection settings** with the model name (owner, 2026-10-27). An ST preset JSON (shared and imported by hand) can contain all three, so there are three import surfaces, each taking the parts it applies to.
+- **[D]** The ST folder import takes the prompt presets (every chat-completion preset file; ST's selected one becomes the default) and **neither model settings nor connections** (owner, 2026-10-27). Keys are never read (`secrets.json`). Model settings can still be taken from one preset file by hand through the model-settings import surface.
+
 ### 6.2 Saving (ST's gripe #1)
 - **[D]** In ST, some fields autosave, some have save buttons, and preset field edits lived in limbo: they survived restarts but vanished on a preset switch.
 - **[D] Principle:** nothing is ever lost, and it's always clear which state you're in. (The earlier "autosave everything, no commits" proposal was rejected because it doesn't work for creating versions.)
@@ -351,6 +413,20 @@ Stepped history, dropped-message display and rewrite warnings without a TTL are 
   - the left edge marks new, modified and unchanged lines
   - a diff view of the current changes against the last revision
   - a diff browser for every earlier revision
+
+### 6.2a The prompt preset editor (owner, 2026-10-27)
+- **[D]** Search, and search and replace, across the whole prompt preset. In ST it's impossible; the owner edits presets as JSON in an external editor to do it.
+- **[D]** The biggest annoyance in ST's editor: twenty prompts in a row that can't be seen or edited as a whole. Finding something means opening each one, checking it, closing it, opening the next. The preset must be readable and editable as one document you scroll through.
+- **[D] Rejected:** ST's separate pool of prompts. Adding a prompt means creating it with a button, then finding it in a dropdown and adding it to the list; disabled prompts may or may not be in the list. Here a new prompt goes straight into the list where you add it, and a prompt that's off stays in the list, off. (The build copied the pool: "prompts out of the order are listed to add back".)
+- **[D]** The shape (owner confirmed 2026-10-27, from the coordinator's proposal):
+  - The preset is one scrolling document. Each prompt is a block: a header (name, role, position or depth, an on/off switch, its token count) above its full text in the code-editor box, always visible. "Collapse all" gives an outline of headers; any block collapses on its own.
+  - Markers are slim rows saying what fills them in the current chat ("Chat history (3,875 tokens)", "Definitions: Aria Vance, Rook"); dividers mark where the history starts, where the tail starts, and where the cached part ends.
+  - Order by dragging a block's handle, or names in an outline column beside the document, which also jumps to a prompt. A "＋" between any two blocks inserts a new prompt there.
+  - The code-editor style search and replace bar (as in the chat: case, whole word, regex, preserve case, previews) sits at the top and **stays in view while scrolling**.
+  - Explicit Save with the diff of every changed prompt; revisions.
+  - **The editor overlays the centre column**, as ST's does: it never navigates to another page, so editing the preset while chatting stays convenient.
+  - The right panel's Preset tab has the on/off switches and token counts, and **Edit on each block**, which opens the editor overlay scrolled to that prompt. A switch flipped there is an edit of the (global) preset and shows Save.
+- **[O]** Token counts per prompt for the current chat: ST updates them only after a message is sent with the preset. Whether to update them continuously is open.
 
 ### 6.3 Per-card preset overlays
 - **[P]** Prompt toggles or replacements attached to a card (or a card within one chat), applied when the card is present or speaking. The owner's example: "you may impersonate" for a narrator card. Cache cost is shown when an overlay changes text above the tail.
@@ -451,6 +527,25 @@ Stepped history, dropped-message display and rewrite warnings without a TTL are 
 
 - **[D]** The summary divider and the summary panel have a toggle for what the timeline shows before the summary line: the original messages, or the summaries themselves in the chat. It can be switched at any time, including while previewing a search and replace (owner, 2026-10-26). It is saved per account: the toggle belongs to the chat viewer itself, not to the chat or anything about it (owner, 2026-10-26).
 - **[P]** "Summaries in the chat" shows the layer the model actually reads, in path order, each in place of the messages it covers, with its level and range; each expands to its messages (a level above 1 to the summaries it condenses). So the timeline can show exactly what the model sees.
+
+- **[D]** (owner, 2026-10-27) The owner's actual ST method is the "Sum2" Quick Reply: pick a message range, hide everything outside it, generate **with the full preset** and an instruction ("Pause your roleplay. Context usage has reached a critical level… If there is already a summary, your new summary should start where the previous one stopped…"), unhide, post the result. ST's Summarize extension offers the same choice: "Classic" (full context plus the instruction, optionally without lorebook and Author's Note) or "Raw" (the instruction as system prompt plus the messages).
+- **[D]** Catching up a chat that has no summaries is done up front; the main cost is reading the context (owner, 2026-10-27).
+- **[D]** Summarizing must hit the chat's cache prefix: breakpoints set carefully where applicable, working as well for Anthropic and OpenAI models called natively as through OpenRouter or AWS (reference-harness is set up for this). Continuous summarizing should then be cheap and relatively rare (owner, 2026-10-27).
+- **[D]** A separate summarization model may make sense in some cases (the owner doesn't usually use one: for a first catch-up you can switch model, summarize, switch back). How to configure it is open and can be deferred if its UX is too hard (owner, 2026-10-27).
+- **[D] Rejected:** `{{summary}}` silently reading the imported summary whatever its note's switch (the build's behaviour): ad-hoc logic the user can't see or turn off. The summary is a note like any other (owner, 2026-10-27).
+- **[D]** The summarization settings must be designed properly (owner, 2026-10-27).
+
+- **[D]** The summarization settings (owner confirmed 2026-10-27), per fork, with an account default for new chats, in the right panel's Chat tab:
+  - on/off;
+  - with the full preset (default; the owner's Sum2) or without it (instruction plus messages only);
+  - the instruction, editable (default close to the owner's Sum2 wording, neutral);
+  - **recent messages kept as written: a maximum and a target** (above the maximum, the oldest are summarized until the recent part is back at the target), reference-harness's hysteresis as already decided above and built as stepped history;
+  - **the summary block: a maximum and a target** (above the maximum, the oldest summaries are condensed into higher levels until it's back at the target);
+  - the total context limit stays with the model's settings; the section shows when the pairs don't fit inside it;
+  - when it runs: with the next reply, or right after one while the cache is warm;
+  - under Advanced: chunk size and summary length.
+  - Rejected: a manual "summarize up to here". The point is automation, and it can't work with several levels.
+- **[P]** Imported ST summaries are plain notes: "Summary (from ST)", switched on if ST was sending it (injected or through `{{summary}}` in the active preset), controlled only by its switch. `{{summary}}` in a preset is explicit: it inserts the chat's switched-on summary notes, or the summaries when summarization is on; the preset editor marks each `{{summary}}` with what it fills in, and the note says the preset includes it.
 
 ### 8.1 Imported summaries
 - **[D]** Importing a chat also imports its summary, if it has one. **This is required before the owner starts using the harness** (owner, 2026-10-12).
