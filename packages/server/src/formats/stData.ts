@@ -55,6 +55,19 @@ export interface StSettings {
   readonly characterWorlds: ReadonlyArray<{ readonly card: string; readonly worlds: ReadonlyArray<string> }>
   /** The note ST gives a chat that has none of its own (`extension_settings.note`). */
   readonly defaultAuthorNote: StAuthorNote | null
+  /**
+   * Characters' own author's notes (`extension_settings.note.chara`), by the card's avatar
+   * file name without its extension. `position`: 0 replaces the chat's note, 1 goes before
+   * it, 2 after (`chara_note_position`). ST applies one only where `useChara` is set.
+   */
+  readonly characterNotes: ReadonlyArray<{
+    readonly card: string
+    readonly prompt: string
+    readonly useChara: boolean
+    readonly position: number
+  }>
+  /** ST's "Include in World Info Scanning" for its author's notes (`note.allowWIScan`). */
+  readonly allowWIScan: boolean
   readonly summary: StSummarySettings
 }
 
@@ -120,16 +133,19 @@ export const parseStSettings = (bytes: Uint8Array, issues: ReportBuilder): StSet
   const hasNoteSettings = [note.defaultPosition, note.defaultDepth, note.defaultRole, note.defaultInterval].some(
     (value) => typeof value === "number" && Number.isFinite(value)
   )
-  const characterNotes = (Array.isArray(note.chara) ? note.chara : []).filter(
-    (entry) => object(entry).useChara === true
-  )
-  if (characterNotes.length > 0) {
-    issues.add(
-      "warning",
-      "st_settings.character_author_notes",
-      `${characterNotes.length} characters have an author's note of their own in ST's settings; those aren't imported.`
-    )
-  }
+  const characterNotes = (Array.isArray(note.chara) ? note.chara : []).slice(0, 10_000).flatMap((entry) => {
+    const chara = object(entry)
+    return typeof chara.name === "string" && typeof chara.prompt === "string"
+      ? [
+          {
+            card: bounded(chara.name),
+            prompt: chara.prompt,
+            useChara: chara.useChara === true,
+            position: numberOr(chara.position, 0)
+          }
+        ]
+      : []
+  })
   return {
     selectedPreset: typeof selectedPreset === "string" && selectedPreset !== "" ? bounded(selectedPreset) : null,
     personas,
@@ -148,6 +164,8 @@ export const parseStSettings = (bytes: Uint8Array, issues: ReportBuilder): StSet
         interval: "defaultInterval"
       }
     ),
+    characterNotes,
+    allowWIScan: note.allowWIScan === true,
     summary: {
       prompt: typeof memory.prompt === "string" ? memory.prompt : null,
       promptWords: Math.max(1, Math.trunc(numberOr(memory.promptWords, DEFAULT_SUMMARY_SETTINGS.promptWords))),
@@ -208,6 +226,5 @@ export const personaCard = (persona: StPersona): CardDoc => ({
   creator: "",
   character_version: "",
   avatar_media_id: null,
-  modules: [],
   extensions: {}
 })

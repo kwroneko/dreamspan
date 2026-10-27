@@ -34,6 +34,23 @@ const messages = (count: number): AssemblyFixture["messages"] =>
     side: i % 2 ? "assistant" : "user",
     content: `Turn ${i}: ${"x".repeat(70)}`
   }))
+/**
+ * Mira and Oren, Mira always speaking: a note "while Oren isn't muted" comes and goes as Oren
+ * is muted and unmuted, which changes neither the speaker nor the cards sent.
+ */
+const pair = {
+  cards: [
+    { entity: "mira", doc: cardDoc("Mira") },
+    { entity: "oren", doc: cardDoc("Oren") }
+  ],
+  participants: ["mira", "oren"],
+  target: { speaker: "mira" }
+} satisfies Partial<AssemblyFixture>
+const whileOren = { condition: { when: "not_muted", card: "oren" as never } } as const
+const oren = (present: boolean) => ({
+  depth: null,
+  event: { scope: null, data: { key: "presence.set" as const, value: { entity: "oren" as never, present } } }
+})
 const cost = (snapshot: Effect.Success<ReturnType<typeof assembleFixture>>) =>
   3 + 40 + snapshot.request.messages.reduce((sum, m) => sum + tokensOf(m), 0)
 
@@ -113,11 +130,12 @@ describe("stepped history", () => {
     for (const postprocess of ["none", "merge", "semi", "strict"] as const) {
       for (const withExamples of [false, true]) {
         it.effect(
-          `keeps the entire prefix over due and skipped intervals: ${layout}/${postprocess}/examples=${withExamples}`,
+          `keeps the entire prefix over due and skipped conditioned notes: ${layout}/${postprocess}/examples=${withExamples}`,
           () =>
             Effect.gen(function* () {
               const fixture: AssemblyFixture = {
                 ...base,
+                ...pair,
                 preset: { ...preset, postprocess },
                 cards: [
                   {
@@ -128,7 +146,8 @@ describe("stepped history", () => {
                         ? `<START>\nUser: ${"E".repeat(300)}\nMira: yes\n<START>\nUser: ${"F".repeat(500)}\nMira: no`
                         : ""
                     }
-                  }
+                  },
+                  { entity: "oren", doc: cardDoc("Oren") }
                 ],
                 events: [
                   ...(layout === "st"
@@ -146,21 +165,26 @@ describe("stepped history", () => {
                     first: false,
                     doc: {
                       schema_version: 1,
-                      title: "Interval",
+                      title: "While Oren isn't muted",
                       content: "N".repeat(withExamples ? 480 : 400),
                       owner: { chat: "chat-1" as never },
                       placement: { mode: "depth", depth: 0, role: "system" },
-                      interval: 2,
+                      ...whileOren,
                       exportable: false
                     }
                   }
                 ]
               }
-              let previous = yield* assembleFixture({ ...fixture, messages: messages(1) })
+              let previous = yield* assembleFixture({
+                ...fixture,
+                events: [...fixture.events!, oren(false)],
+                messages: messages(1)
+              })
               let held = 0
               for (let n = 3; n < 32; n += 2) {
                 const next = yield* assembleFixture({
                   ...fixture,
+                  events: [...fixture.events!, oren(n % 4 === 3)],
                   messages: messages(n),
                   historyStart: previous.historyStart!
                 })
@@ -579,7 +603,7 @@ describe("stepped history", () => {
             schema_version: 1,
             title: "Padding",
             content: "padding padding",
-            interval: 2,
+            ...whileOren,
             owner: { chat: "chat-1" as never },
             placement: { mode: "depth", depth: i + 1, role: (["system", "user", "assistant"] as const)[i % 3]! },
             exportable: false
@@ -587,21 +611,27 @@ describe("stepped history", () => {
         }))
         const built = yield* assembleFixture({
           ...base,
+          ...pair,
           preset: { ...preset, postprocess },
           messages: messages(49),
           notes,
-          events: notes.map((note) => ({
-            depth: null,
-            event: { scope: null, data: { key: "note.activate", value: { note: note.entity as never } } }
-          }))
+          events: [
+            oren(false),
+            ...notes.map((note) => ({
+              depth: null,
+              event: { scope: null, data: { key: "note.activate" as const, value: { note: note.entity as never } } }
+            }))
+          ]
         })
         const allowance = built.historyStart!.state!.noteBudget!.allowance
         assert.isAtMost(allowance, 90)
         assert.isFalse(built.request.messages.some((message) => message.content.includes("padding")))
         const worstAllowed = yield* assembleFixture({
           ...base,
+          ...pair,
           preset: { ...preset, postprocess, context_target: 320 - allowance },
-          messages: messages(49)
+          messages: messages(49),
+          events: [oren(false)]
         })
         assert.isAtMost(
           built.historyStart!.depth,
@@ -619,6 +649,7 @@ describe("stepped history", () => {
         Effect.gen(function* () {
           const fixture: AssemblyFixture = {
             ...base,
+            ...pair,
             preset: { ...preset, postprocess },
             notes: [
               {
@@ -631,7 +662,7 @@ describe("stepped history", () => {
                   content: "{{getvar::payload}} KEEP THIS INSTRUCTION",
                   owner: { chat: "chat-1" as never },
                   placement: { mode: "tail", role: "system" },
-                  interval: 2,
+                  ...whileOren,
                   exportable: false
                 }
               }
@@ -657,7 +688,8 @@ describe("stepped history", () => {
                 {
                   depth: null,
                   event: { scope: null, data: { key: "var.set", value: { name: "payload", value: payload } } }
-                }
+                },
+                oren(due)
               ]
             })
             if (due)

@@ -219,12 +219,12 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
         placement: { mode: "depth", depth: 4, role: "system" },
         owner: { chat: bob },
         exportable: true,
-        kind: "author_note",
-        interval: 1
+        kind: "author_note"
       })
+      // Empty, it's kept for what rides on it, but off: ST sent nothing of it (DESIGN §4.1).
       const bobState = yield* stateAt(bob, null)
       assert.strictEqual(bobState.authorNote, emptyAuthor.id)
-      assert.include(bobState.activeNotes, emptyAuthor.id)
+      assert.notInclude(bobState.activeNotes, emptyAuthor.id)
       assert.strictEqual(summary!.revisions, 2)
       assert.deepStrictEqual(summary!.doc, {
         schema_version: 1,

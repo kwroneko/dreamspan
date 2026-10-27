@@ -6,7 +6,7 @@ import { loreAllowance, loreBudget } from "./budget.ts"
 import { estimateTokens } from "./st.ts"
 import { cardFields } from "./macros.ts"
 import { AssemblySources, type AssemblerStage, need } from "./pipeline.ts"
-import type { LorebookInput, LoreRecord } from "./types.ts"
+import { type LorebookInput, type LoreRecord, noteCard } from "./types.ts"
 import { configurationOf, previousStart } from "./cutState.ts"
 
 /** A separate stream: probability never consumes the macros' random draws. */
@@ -122,7 +122,21 @@ export const loreActivationStage: AssemblerStage = {
         })
       const char = cast.characters[0]
       const preview = (field: string, text: string) => env.preview(`lore:scan:${field}`, text, { sharedWork })
+      // Due notes with `scan_lore`, whole and expanded, as ST's `addInject` scans its extension
+      // prompts: whatever their placement and the scan depth. A card's is expanded as it's sent
+      // (`noteText`): `{{char}}` bound to the card, without card fields.
+      const injections = (assembly.notes ?? []).flatMap((note) => {
+        if (note.doc.scan_lore !== true || note.doc.kind === "imported_summary") return []
+        const owner = [...cast.characters, ...cast.personas].find((c) => c.entity === noteCard(note.doc))
+        const text = env.preview(
+          `lore:scan:note:${note.entity}`,
+          note.doc.content.trim(),
+          owner ? { sharedWork, withoutCard: true, names: { char: modelName(owner.doc) } } : { sharedWork }
+        )
+        return [{ text, scan: true, name: note.doc.title || "Untitled note" }]
+      })
       const scan = {
+        injections,
         messages,
         messageCount: need(assembly, "loreMessageCount"),
         trigger: cast.type,

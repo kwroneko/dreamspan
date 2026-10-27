@@ -19,9 +19,9 @@ describe("JSON card import", () => {
       system_prompt: "Stay in character.",
       alternate_greetings: ["Another storm.", "Fog again."],
       character_version: "1.2",
-      avatar_media_id: null,
-      modules: []
+      avatar_media_id: null
     })
+    expect(card).not.toHaveProperty("modules")
     expect(card.extensions).toEqual(stCardV2().data.extensions)
     expect(card.unknown_fields).toEqual({ an_unknown_field: { kept: true } })
     // ST's V1 copies and local state aren't kept; other top-level keys are.
@@ -158,16 +158,14 @@ describe("JSON card import", () => {
     expect(exported.character_book.entries.map((e) => e.id)).toEqual(["intro", 0, 2, 1e300])
   })
 
-  it("lifts modules a previous export stored in its extension", () => {
+  it("leaves the notes a previous export stored in its extension for the importer, which makes them card notes", () => {
     const card = stCardV2()
-    const extensions = {
-      ...card.data.extensions,
-      rp_harness: { modules: [{ id: "m1", title: "Outfit", content: "Oilskin." }, { id: 2 }], other: 1 }
-    }
+    const rp_harness = { modules: [{ id: "m1", title: "Outfit", content: "Oilskin." }], other: 1 }
+    const extensions = { ...card.data.extensions, rp_harness }
     const result = run(importCard(json({ ...card, data: { ...card.data, extensions } })))
-    expect(result.card.modules).toEqual([{ id: "m1", title: "Outfit", content: "Oilskin.", exportable: true }])
-    expect(result.card.extensions.rp_harness).toEqual({ other: 1 })
-    expect(codes(result)).toEqual(["card.invalid_module"])
+    expect(result.card).not.toHaveProperty("modules")
+    expect(result.card.extensions.rp_harness).toEqual(rp_harness)
+    expect(codes(result)).toEqual([])
   })
 
   it("refuses files that aren't cards", () => {

@@ -19,6 +19,7 @@ import type { ChatMessage } from "@rp/shared/macros/context.ts"
 import type { CardFields } from "@rp/shared/macros/context.ts"
 import type { VariableEffect } from "@rp/shared/macros/variables.ts"
 import { type ChatState, foldState, noteSwitches } from "@rp/shared/state.ts"
+import { noteCondition } from "@rp/shared/docs/note.ts"
 import { Effect, type Scope } from "effect"
 import { loreActivationStage, lorebooksStage } from "./loreStages.ts"
 import { SUMMARY_HISTORY, summaryOnPath as selectSummary } from "./summary.ts"
@@ -211,29 +212,50 @@ const presetStage: AssemblerStage = {
 /** Whether each note the events turned on or off is on, as they last left it. */
 const switchesOf = (events: ReadonlyArray<PositionedEvent>) => noteSwitches(events.map((e) => e.event))
 
+/** A card's note on in every chat unless the chat switches it off (`on_by_default`). */
+const onByDefault = (note: NoteInput) => noteCard(note.doc) !== null && note.doc.on_by_default === true
+
 /**
- * The notes that are on (DESIGN §4.1): a card's first note is ST's Character's Note, which
- * ST always sends, so it's on unless the chat turned it off; any other note, the chat's own
- * included, is on once the chat turns it on (`note.activate`).
+ * The notes that are on (DESIGN §4.1): a card's note with `on_by_default` (an imported
+ * Character's Note, which ST always sends) unless the chat turned it off; any other note,
+ * the chat's own included, once the chat turns it on (`note.activate`). A slot linked to a
+ * shared note that's gone (in the bin) sends nothing.
  */
 const activeNotes = (events: ReadonlyArray<PositionedEvent>, notes: ReadonlyArray<NoteInput>) => {
   const last = switchesOf(events)
-  return notes.filter((note) => last.get(note.entity) ?? note.first)
+  return notes.filter((note) => (last.get(note.entity) ?? onByDefault(note)) && note.link?.revision !== null)
+}
+
+/** Whether a note has a condition, which makes it come and go with the turn (DESIGN §4.1). */
+const conditioned = (note: NoteInput) => noteCondition(note.doc).when !== "always"
+
+/**
+ * Whether a note's condition holds for the message being generated: on a card's turn, when
+ * that card is its speaker (a swipe's or continuation's included); while a card isn't muted.
+ * A card that isn't in the cast at the leaf holds neither.
+ */
+const noteConditionHolds = (note: NoteInput, cast: Cast) => {
+  const condition = noteCondition(note.doc)
+  if (condition.when === "always") return true
+  if (![...cast.characters, ...cast.personas].some((c) => c.entity === condition.card)) return false
+  return condition.when === "turn" ? cast.speaker?.entity === condition.card : !isMuted(cast, condition.card)
+}
+
+/** Whether a card is muted at the leaf (DESIGN §3.5): unit P1-1's mute is `presence.set`. */
+const isMuted = (cast: Cast, entity: string) => cast.absent.has(entity)
+
+/** A condition in words, for the request inspector. */
+const conditionText = (note: NoteInput, cast: Cast) => {
+  const condition = noteCondition(note.doc)
+  if (condition.when === "always") return undefined
+  const card = [...cast.characters, ...cast.personas].find((c) => c.entity === condition.card)
+  const name = card ? modelName(card.doc) : "a card not in the chat"
+  return condition.when === "turn" ? `on ${name}'s turn` : `while ${name} isn't muted`
 }
 
 /** The chat's author's note, whose place ST's persona descriptions and lore at its top or bottom ride on. */
 const isAuthorNote = (state: ChatState, note: NoteInput) =>
   note.doc.kind === "author_note" || note.entity === state.authorNote
-
-/**
- * Whether a note with an interval goes this turn, as ST's author's note does
- * (setFloatingPrompt): every `interval` messages of the user's, counted over the whole path;
- * an interval of 1 always, 0 never, and none (a note without one) always.
- */
-const due = (interval: number | undefined, userMessages: number) =>
-  interval === undefined ||
-  interval === 1 ||
-  (interval > 1 && userMessages >= interval && userMessages % interval === 0)
 
 /**
  * An imported summary as ST would send it on this path: the newest of its texts saved on a
@@ -278,47 +300,44 @@ const notesStage: AssemblerStage = {
           return card !== null && placesDescription(note) && personas.some((p) => p.entity === card) ? [card] : []
         })
       )
-      // Interval zero remains off even when activated, rather than becoming a missing note after gating.
-      assembly.authorNoteOff = notes.some(
-        (note) => isAuthorNote(state, note) && (!active.includes(note) || note.doc.interval === 0)
-      )
-      // The path is counted only for an interval that needs it: it's a walk to the root.
-      const userMessages = active.some((note) => (note.doc.interval ?? 0) > 1)
-        ? yield* sources.userMessages(
-            target.parentSlotId,
-            cast.personas.map((c) => c.entity),
-            cast.characters.map((c) => c.entity)
-          )
-        : 0
+      const off = notes.find((note) => isAuthorNote(state, note) && !active.includes(note))
+      if (off) assembly.offAuthorNote = off
       assembly.notes = active
-      assembly.noteUserMessages = userMessages
       return assembly
     })
 }
 
-/** Gate after the history's roles exist, before any note can change its last role. */
+/**
+ * Gate after the history's roles exist, before any note can change its last role: a note
+ * whose condition doesn't hold this turn isn't due. It sends no text and has no macro
+ * effects, but keeps its place as a cache boundary. A note's old `interval` is ignored.
+ */
 const noteGateStage = sync("note-gate", (assembly) => {
-  const fill =
+  assembly.sendIfEmpty =
     need(assembly, "projected").at(-1)?.role === "assistant" &&
     need(assembly, "preset").doc.utility_prompts.send_if_empty !== ""
-  assembly.sendIfEmpty = fill
-  const count = need(assembly, "noteUserMessages") + (fill && need(assembly, "cast").type === "normal" ? 1 : 0)
+  const cast = need(assembly, "cast")
   const active = need(assembly, "notes")
   const switches = switchesOf(need(assembly, "events"))
+  const holds = new Map(active.map((note) => [note.entity, noteConditionHolds(note, cast)]))
   assembly.noteDecisions = new Map(
-    active.map((note) => [
-      note.entity,
-      {
-        kind: "note" as const,
-        activation: switches.get(note.entity) === true ? ("explicit" as const) : ("default" as const),
-        interval: note.doc.interval ?? null,
-        userMessages: (note.doc.interval ?? 0) > 1 ? count : null,
-        due: due(note.doc.interval, count)
-      }
-    ])
+    active.map((note) => {
+      const condition = conditionText(note, cast)
+      return [
+        note.entity,
+        {
+          kind: "note" as const,
+          activation: switches.get(note.entity) === true ? ("explicit" as const) : ("default" as const),
+          interval: null,
+          userMessages: null,
+          ...(condition === undefined ? {} : { condition }),
+          due: holds.get(note.entity)!
+        }
+      ]
+    })
   )
-  assembly.skippedNotes = active.filter((note) => !due(note.doc.interval, count) && (note.doc.interval ?? 0) > 1)
-  assembly.notes = active.filter((note) => due(note.doc.interval, count))
+  assembly.skippedNotes = active.filter((note) => !holds.get(note.entity))
+  assembly.notes = active.filter((note) => holds.get(note.entity))
 })
 
 const modeOf = (state: ChatState): Mode => ({
@@ -372,7 +391,10 @@ const macrosStage = sync("macros", (assembly) => {
   const cast = need(assembly, "cast")
   const preset = need(assembly, "preset").doc
   const layer = assembly.lcm?.summaries.filter((s) => s.content !== "") ?? []
-  const switchedOn = summaryNotes(assembly).filter((note) => note.doc.content.trim() !== "")
+  // The note gate comes later; a summary note not due by its condition fills nothing, as it sends nothing.
+  const switchedOn = summaryNotes(assembly).filter(
+    (note) => note.doc.content.trim() !== "" && noteConditionHolds(note, cast)
+  )
   const filled = layer.length ? layerText(layer) : switchedOn.map((note) => note.doc.content.trim()).join("\n\n")
   assembly.summaryFill = {
     prompts: summaryMacroPrompts(preset),
@@ -392,8 +414,8 @@ const macrosStage = sync("macros", (assembly) => {
     chatId: need(assembly, "target").chatId,
     variables: need(assembly, "state").vars,
     // `{{summary}}` is explicit (DESIGN §8 [P]): the summaries when summarization is on and has
-    // some, else the chat's switched-on summary notes on this path, in note order; a note that is
-    // off sends nothing anywhere.
+    // some, else the chat's switched-on summary notes on this path that are due by their condition,
+    // in note order; a note that is off sends nothing anywhere.
     summary: filled,
     // Who the model writes as, and the direction (DESIGN §2.2); a summary has neither.
     ...(assembly.request.summarizing
@@ -1022,13 +1044,13 @@ const placeOf = (note: NoteInput): NotePlace | null => {
         return {
           at: placement.section as "context_start" | "tail_start" | "tail_end",
           role: placement.role ?? "system",
-          volatile: (note.doc.interval ?? 0) > 1
+          volatile: conditioned(note)
         }
       if (placement.section !== "before_main_prompt" && placement.section !== "after_main_prompt") return null
       return {
         at: placement.section === "before_main_prompt" ? "start" : "end",
-        // A note that comes and goes with its interval changes the prefix it's in.
-        volatile: (note.doc.interval ?? 0) > 1,
+        // A note that comes and goes with its condition changes the prefix it's in.
+        volatile: conditioned(note),
         role: placement.role ?? "system"
       }
     case "none":
@@ -1057,9 +1079,10 @@ interface Attachments {
 /**
  * Where the chat stands with the author's note, which ST's persona descriptions and lore
  * placed at its top or bottom ride on (`setFloatingPrompt`, `addPersonaDescriptionExtensionPrompt`):
- * it goes this turn (`due`); it doesn't, by its interval (`skipped`) or because it is
- * switched off (`off`), so nothing rides along; or the chat has none (`none`), which ST
- * treats as its default note, empty, in-chat at depth 4 as the system, every message.
+ * it goes this turn (`due`); it doesn't by its condition (`skipped`), so nothing rides along;
+ * it's switched off (`off`), so what rides on it goes where it sits without its text (owner
+ * question 6; ST sends nothing of a frequency-0 note); or the chat has none (`none`), which
+ * ST treats as its default note, empty, in-chat at depth 4 as the system, every message.
  */
 type AuthorState = "due" | "skipped" | "off" | "none"
 
@@ -1116,18 +1139,19 @@ const placedNotes = (assembly: Assembly, cards: ReadonlyArray<CardInput>, person
     .filter((note) => note.doc.kind !== "imported_summary" || isSummary(note))
     .toSorted((a, b) => rank(a) - rank(b) || (a.entity < b.entity ? -1 : a.entity > b.entity ? 1 : 0))
   const authorNote = sorted.find((note) => isAuthorNote(state, note))
+  const offNote = authorNote ? undefined : assembly.offAuthorNote
   const authorState: AuthorState = authorNote
     ? assembly.skippedNotes?.includes(authorNote)
       ? "skipped"
       : "due"
-    : assembly.authorNoteOff
+    : offNote
       ? "off"
       : "none"
   // A persona's text keeps the page's bindings: `{{char}}` is the character, not the persona.
   const textOf = (note: NoteInput, owner: CardInput | null) => (): Text | null => {
     const skipped = assembly.skippedNotes?.includes(note)
-    // Every intermittent note is a potential writer; never expand a skipped one to find out.
-    if ((note.doc.interval ?? 0) > 1) env.potentialVariableWrite()
+    // Every conditioned note is a potential writer; never expand a skipped one to find out.
+    if (conditioned(note)) env.potentialVariableWrite()
     return skipped
       ? { text: "", piece: env.verbatim(`note:${note.entity}`, noteSource(assembly, note), "") }
       : isSummary(note)
@@ -1140,7 +1164,7 @@ const placedNotes = (assembly: Assembly, cards: ReadonlyArray<CardInput>, person
   }
   const section = (note: NoteInput) => (note.doc.placement.mode === "section" ? note.doc.placement.section : null)
   const attached = (which: "author_note_top" | "author_note_bottom") =>
-    authorState === "due" || authorState === "none"
+    authorState !== "skipped"
       ? sorted.filter(
           (note) =>
             section(note) === which &&
@@ -1180,6 +1204,19 @@ const placedNotes = (assembly: Assembly, cards: ReadonlyArray<CardInput>, person
       }
     ]
   })
+  // A switched-off author's note keeps its place, empty, for what rides on it.
+  const offPlace = offNote ? placeOf(offNote) : null
+  if (offNote && offPlace) {
+    const after = placed.findIndex((note) => note.rank > rank(offNote))
+    placed.splice(after < 0 ? placed.length : after, 0, {
+      place: offPlace,
+      id: offNote.entity,
+      rank: rank(offNote),
+      baseline: 0,
+      author: true,
+      text: () => ({ text: "", piece: env.verbatim(`note:${offNote.entity}`, noteSource(assembly, offNote), "") })
+    })
+  }
   return { placed, attachments, authorState }
 }
 

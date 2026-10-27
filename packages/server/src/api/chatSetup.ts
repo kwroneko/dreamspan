@@ -293,29 +293,39 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
         const id = yield* userId
         const events = yield* reader.StateEventsAt({ userId: id, chatId, slotId })
         const state = foldState(events)
-        const played = new Set(state.playedByMe)
-        const cards = state.participants.filter((entity) => !played.has(entity)) as Array<EntityId>
+        // Every card of the cast, the ones the user plays included: a persona note is a card's note.
+        const cards = [...state.participants, ...state.playedByMe.filter((e) => !state.participants.includes(e))]
         const switches = noteSwitches(events)
-        const entries = yield* reader.ChatNoteEntries({ userId: id, chatId, slotId, cards })
+        const entries = yield* reader.ChatNoteEntries({ userId: id, chatId, slotId, cards: cards as Array<EntityId> })
         return yield* Effect.forEach(entries, (entry) =>
           Effect.gen(function* () {
             const revisionId = state.noteRevisions[entry.ref.entityId] as RevisionId | undefined
-            const resolved =
+            const pinned =
               entry.card !== null && revisionId
-                ? {
-                    ref: { ...entry.ref, headRevisionId: revisionId },
-                    doc: yield* reader.GetRevisionDoc({ userId: id, refId: entry.ref.id, revisionId })
-                  }
-                : entry
-            return new ChatNote({ ...entry, ...resolved, active: switches.get(entry.ref.entityId) ?? entry.first })
+                ? yield* reader.GetRevisionDoc({ userId: id, refId: entry.ref.id, revisionId })
+                : null
+            const resolved = pinned
+              ? {
+                  ref: { ...entry.ref, headRevisionId: revisionId! },
+                  // A linked slot keeps showing its shared note's text.
+                  doc: entry.linked ? { ...pinned, content: entry.doc["content"] } : pinned
+                }
+              : entry
+            const onByDefault = entry.card !== null && resolved.doc["on_by_default"] === true
+            return new ChatNote({
+              ...entry,
+              ...resolved,
+              onByDefault,
+              active: switches.get(entry.ref.entityId) ?? onByDefault
+            })
           })
         )
       }).pipe(internal("ListChatNotes")),
 
-    CreateChatNote: ({ chatId, title }) =>
-      Effect.flatMap(userId, (id) => writer.CreateChatNote({ userId: id, chatId, title })).pipe(
-        internal("CreateChatNote")
-      ),
+    CreateChatNote: ({ chatId, title, link }) =>
+      Effect.flatMap(userId, (id) =>
+        writer.CreateChatNote({ userId: id, chatId, title, ...(link === undefined ? {} : { link }) })
+      ).pipe(internal("CreateChatNote")),
 
     ListQueued: ({ chatId }) =>
       Effect.flatMap(userId, (id) => reader.ListQueued({ userId: id, chatId })).pipe(internal("ListQueued")),

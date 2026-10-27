@@ -28,14 +28,17 @@ const breakpointText = {
 
 const activationText = (activation: SourceActivation): string => {
   if (activation.kind === "note") {
-    const on = activation.activation === "explicit" ? "Activated by this chat" : "Active by default"
-    const interval =
-      activation.interval === null || activation.interval === 1
-        ? "every turn"
-        : activation.interval === 0
-          ? "never due"
-          : `every ${activation.interval} user messages; counted ${activation.userMessages}`
-    return `${on}; ${interval}; ${activation.due ? "due this turn" : "skipped this turn"}.`
+    const on = activation.activation === "explicit" ? "Activated by this chat" : "On in every chat"
+    // Older snapshots kept ST's interval; notes go every turn since (DESIGN §4.1).
+    const when =
+      activation.condition !== undefined
+        ? activation.condition
+        : activation.interval === null || activation.interval === 1
+          ? "every turn"
+          : activation.interval === 0
+            ? "never due"
+            : `every ${activation.interval} user messages; counted ${activation.userMessages}`
+    return `${on}; ${when}; ${activation.due ? "due this turn" : "skipped this turn"}.`
   }
   if (activation.status === "skipped") return `Skipped at step ${activation.step}: ${activation.reason}`
   const why =
@@ -44,7 +47,11 @@ const activationText = (activation: SourceActivation): string => {
       : activation.why.kind === "pinned"
         ? "pinned above the history until its start moves"
         : `keyword “${activation.why.primaryKey}”${activation.why.secondaryKeys.length ? `; ${activation.why.logic ?? "and_any"}: ${activation.why.secondaryKeys.map((key) => `“${key}”`).join(", ")}` : ""}`
-  return `Activated at step ${activation.step}: ${why}.`
+  const notes =
+    activation.why.kind === "keys" && activation.why.notes?.length
+      ? `; found in the note${activation.why.notes.length > 1 ? "s" : ""} ${activation.why.notes.map((note) => `“${note}”`).join(", ")}`
+      : ""
+  return `Activated at step ${activation.step}: ${why}${notes}.`
 }
 
 function Message({

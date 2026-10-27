@@ -16,6 +16,10 @@ const p = (identifier: string, content = ""): StPrompt => ({
   injection_order: 100,
   forbid_overrides: true
 })
+/** A chat's note switched on at the chat's start. */
+const activate = (note: string) =>
+  ({ depth: null, event: { scope: null, data: { key: "note.activate", value: { note } } } }) as never
+
 const run = (ids: string[], withControl = false) =>
   compose({
     collection: ids.map((id) => p(id, id === "tail" ? "TAIL" : "")),
@@ -133,7 +137,8 @@ describe("Newest message", () => {
           participants: [],
           cards: [],
           messages: [{ content: "LATEST", side: "user" }],
-          notes: [note("a"), note("b"), note("c")]
+          notes: [note("a"), note("b"), note("c")],
+          events: ["a", "b", "c"].map(activate)
         })
       )
       const sent = result.request.messages.map((m) => m.content)
@@ -182,7 +187,8 @@ describe("Newest message", () => {
                 exportable: true
               }
             }
-          ]
+          ],
+          events: [activate("note")]
         })
       )
       const messages = result.request.messages.map((m) => m.content)

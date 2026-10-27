@@ -38,6 +38,7 @@ import {
 const KINDS: ReadonlyArray<readonly [string, string]> = [
   ["card", "Cards"],
   ["persona", "Personas"],
+  ["character_note", "Character author's notes"],
   ["lorebook", "Lorebooks"],
   ["preset", "Presets"],
   ["chat", "Chats"],

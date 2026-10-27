@@ -3,7 +3,7 @@ import { getAt, parseField } from "@rp/shared/editing.ts"
 // Library write handlers (DATA-MODEL §3.2). They run in the writer worker, each as one
 // transaction. Every change to a ref flows on to the refs that follow it.
 import type { EntityId } from "@rp/shared/chat.ts"
-import { NOTE_SCHEMA_VERSION } from "@rp/shared/docs/note.ts"
+import { NOTE_SCHEMA_VERSION, type NoteDoc } from "@rp/shared/docs/note.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import type { Doc, EntityKind, MergeOutcome, RefId } from "@rp/shared/library.ts"
 import { ImportedFollower, LibraryImport } from "@rp/shared/libraryImport.ts"
@@ -25,6 +25,7 @@ import { makeEditorWriteHandlers } from "./editorWrites.ts"
 import { makeGraphWrites } from "./graphWrites.ts"
 import { makeLibraryQueries, type RefRow, toLibraryRef } from "./library.ts"
 import { mediaPath } from "./media.ts"
+import { sharedNote } from "./sharedNotes.ts"
 import { FollowerMerge, NotFound, RefChange, RefOperationRefused, StaleWrite, WriteOps } from "./ops.ts"
 import { transaction } from "./tx.ts"
 
@@ -178,7 +179,10 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
           : next
       })
 
-    /** Media and cards a document names that aren't the user's, as NotFound. */
+    /**
+     * Media, cards and shared notes a document names that aren't the user's, as NotFound: a
+     * note's owner card and condition card, and the shared note a slot links to (§14.3).
+     */
     const checkReferences = (userId: string, doc: Doc) =>
       Effect.gen(function* () {
         const media = [
@@ -190,12 +194,21 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
             SELECT count(*) AS n FROM media_refs WHERE media_id = ${String(id)} AND owner_user_id = ${userId}`
           if (typeof id !== "string" || held!.n === 0) return yield* new NotFound({ entity: "media", id: String(id) })
         }
-        const card = Predicate.isObject(doc.owner) ? doc.owner.card : undefined
-        if (card !== undefined) {
+        const cards = [
+          Predicate.isObject(doc.owner) ? doc.owner.card : undefined,
+          Predicate.isObject(doc.condition) ? doc.condition.card : undefined
+        ].filter((card) => card !== undefined)
+        for (const card of cards) {
           const [owned] = yield* sql<{ n: number }>`
             SELECT count(*) AS n FROM entities WHERE id = ${String(card)} AND owner_user_id = ${userId} AND kind = 'card'`
           if (typeof card !== "string" || owned!.n === 0)
             return yield* new NotFound({ entity: "card", id: String(card) })
+        }
+        if (doc.link !== undefined) {
+          // A shared note links to nothing: it is what slots link to.
+          const shared = Predicate.isObject(doc.owner) && doc.owner.shared !== undefined
+          if (typeof doc.link !== "string" || shared || (yield* sharedNote(sql, userId as UserId, doc.link)) === null)
+            return yield* new NotFound({ entity: "note", id: String(doc.link) })
         }
       })
 
@@ -424,7 +437,82 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
         })
       })
 
+    /**
+     * A card's other note an export carried (a former card module included): a new note, or a
+     * new import of the one an earlier import made from the same id, merged with the user's edits.
+     */
+    const importOtherNote = (userId: string, cardEntityId: string, noteDocJson: string, source: ImportSource) =>
+      Effect.gen(function* () {
+        const doc: Doc = { ...(JSON.parse(noteDocJson) as Doc), owner: { card: cardEntityId } }
+        const existing =
+          typeof doc.module_id === "string"
+            ? yield* lib.cardNoteFrom(userId as UserId, cardEntityId, doc.module_id)
+            : null
+        if (existing !== null) {
+          yield* importInto(existing, { doc: encode(doc), schemaVersion: NOTE_SCHEMA_VERSION, ...source })
+          return
+        }
+        yield* createUpstream({
+          userId,
+          kind: "note",
+          label: typeof doc.title === "string" && doc.title !== "" ? doc.title : "Note",
+          subtitle: "",
+          doc: encode(doc),
+          schemaVersion: NOTE_SCHEMA_VERSION,
+          origin: "import",
+          ...source
+        })
+      })
+
     const handlers = {
+      StImportCharacterNote: ({ userId, cardEntityId, prompt, useChara, position, scanLore, sourcePath }) =>
+        Effect.gen(function* () {
+          const [card] = yield* sql<{ n: number }>`
+            SELECT count(*) AS n FROM entities WHERE id = ${cardEntityId} AND owner_user_id = ${userId} AND kind = 'card'`
+          if (card!.n === 0) return yield* new NotFound({ entity: "card", id: cardEntityId })
+          // Before or after the chat's note is its top or bottom; ST's "replace" keeps both,
+          // the character's at the top [owner question 5].
+          const doc: NoteDoc = {
+            schema_version: NOTE_SCHEMA_VERSION,
+            title: "Character author's note",
+            content: prompt,
+            placement: { mode: "section", section: position === 2 ? "author_note_bottom" : "author_note_top" },
+            owner: { card: cardEntityId },
+            exportable: false,
+            kind: "character_author_note",
+            on_by_default: useChara,
+            ...(scanLore ? { scan_lore: true } : {})
+          }
+          const source = {
+            originRef: JSON.stringify({ file: sourcePath }),
+            sourcePath: `${sourcePath}#character_author_note`,
+            sourceHash: null
+          }
+          const [existing] = yield* sql<{ id: string }>`
+            SELECT r.id FROM entity_refs r JOIN entities e ON e.id = r.entity_id
+            JOIN entity_revisions h ON h.id = r.head_revision_id
+            WHERE e.owner_user_id = ${userId} AND e.kind = 'note' AND e.deleted_at IS NULL AND r.ref_kind = 'upstream'
+              AND json_extract(h.doc_json, '$.owner.card') = ${cardEntityId}
+              AND json_extract(h.doc_json, '$.kind') = 'character_author_note'
+            ORDER BY e.id LIMIT 1`
+          if (existing) {
+            const ref = yield* lib.ownedRef(userId, existing.id)
+            yield* importInto(ref, { doc: encode(doc), schemaVersion: NOTE_SCHEMA_VERSION, ...source })
+            return { entity: ref.entity_id as EntityId, created: false }
+          }
+          const made = yield* createUpstream({
+            userId,
+            kind: "note",
+            label: doc.title,
+            subtitle: "",
+            doc: encode(doc),
+            schemaVersion: NOTE_SCHEMA_VERSION,
+            origin: "import",
+            ...source
+          })
+          return { entity: made.entity_id as EntityId, created: true }
+        }).pipe(transaction(sql, "StImportCharacterNote")),
+
       CreateEntity: ({ userId, kind, label, subtitle, doc, schemaVersion, origin, sourcePath }) =>
         createUpstream({
           userId,
@@ -708,8 +796,12 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
             outcome = merged.outcome
             followers = merged.change.followers
           }
-          const note =
-            input.noteDocJson === null ? null : yield* importNote(userId, upstream.entity_id, input.noteDocJson, source)
+          const noteDocJson =
+            input.noteDocJson !== null && input.characterNoteScan
+              ? JSON.stringify({ ...(JSON.parse(input.noteDocJson) as Doc), scan_lore: true })
+              : input.noteDocJson
+          const note = noteDocJson === null ? null : yield* importNote(userId, upstream.entity_id, noteDocJson, source)
+          for (const json of input.notesDocJson ?? []) yield* importOtherNote(userId, upstream.entity_id, json, source)
           return new LibraryImport({
             created: intoRefId === null,
             ref: toLibraryRef(upstream),
@@ -737,7 +829,8 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
       revision,
       recordMedia,
       createUpstream,
-      namedCardRevision
+      namedCardRevision,
+      checkReferences
     })
     return { ...handlers, ...editor }
   })

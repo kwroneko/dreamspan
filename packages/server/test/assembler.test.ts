@@ -157,7 +157,8 @@ const note = (content: string, depth: number, role: "system" | "user" | "assista
     content,
     placement: { mode: "depth", depth, role },
     owner: { card: "mira" as never },
-    exportable: true
+    exportable: true,
+    ...(first ? { on_by_default: true } : {})
   }
 })
 
@@ -411,6 +412,14 @@ describe("the context assembler", () => {
     const authorNote = (placement: NoteDoc["placement"], fields: Partial<NoteDoc> = {}) =>
       chatNote("note-z-author", "{{user}} is soaked.", placement, { kind: "author_note", ...fields })
     const main = "system: Write Mira's next reply in a fictional chat between Mira and Tobin."
+    // A condition that never holds here (Oren isn't in the cast), and a group whose turns
+    // alternate a note on Mira's turn between due (Mira speaks) and not (Oren does).
+    const never = { condition: { when: "turn", card: "oren" } } as Partial<NoteDoc>
+    const onMirasTurn = { condition: { when: "turn", card: "mira" } } as Partial<NoteDoc>
+    const turnOf = (due: boolean): Partial<AssemblyFixture> => ({
+      participants: ["mira", "oren"],
+      target: { speaker: due ? "mira" : "oren" }
+    })
 
     it("sends one once the chat turns it on, with the chat's bindings", async () => {
       const scene = chatNote("note-scene", "{{char}} and {{user}} wait out the storm.", {
@@ -537,6 +546,7 @@ describe("the context assembler", () => {
           placement,
           owner: { card: "tobin" as never },
           exportable: true,
+          on_by_default: true,
           kind: "persona_description"
         }
       })
@@ -587,15 +597,17 @@ describe("the context assembler", () => {
         }
       })
 
-      it("sends nothing of it while the author's note is switched off or not due, as ST does", async () => {
-        const off = authorNote(inChat, { interval: 0 })
-        expect(sent(await assembled(chat({ notes: [top, off] })))).toEqual([])
-        const skipped = authorNote(inChat, { interval: 3 })
+      it("sends nothing of it while the author's note is not due, and it alone where it sits while it's off", async () => {
+        // Switched off, the note's text goes, but what rides on it doesn't (owner question 6).
+        const off = await assembled(chat({ notes: [top, authorNote(inChat)] }))
+        expect(sent(off)).toEqual(["system: Tobin draws maps."])
+        expect(contents(off).join("\n")).not.toContain("soaked")
+        const skipped = authorNote(inChat, never)
         expect(sent(await assembled(chat({ notes: [top, skipped], events: on("note-z-author") })))).toEqual([])
-        const every = await assembled(
-          chat({ notes: [top, authorNote(inChat, { interval: 1 })], events: on("note-z-author") })
+        const due = await assembled(
+          chat({ notes: [top, authorNote(inChat, onMirasTurn)], events: on("note-z-author") })
         )
-        expect(sent(every)).toEqual(["system: Tobin draws maps.\nTobin is soaked."])
+        expect(sent(due)).toEqual(["system: Tobin draws maps.\nTobin is soaked."])
       })
 
       {
@@ -656,28 +668,41 @@ describe("the context assembler", () => {
 
       for (const layout of [null, "below the history"] as const) {
         for (const attachment of [top, bottom]) {
-          it(`turning an active author's note interval from 1 to 0 disables its attachments ${layout ?? "with lore by position"} at ${attachment.doc.placement.mode === "section" ? attachment.doc.placement.section : ""}`, async () => {
+          it(`switching the author's note off leaves its attachments where it sits ${layout ?? "with lore by position"} at ${attachment.doc.placement.mode === "section" ? attachment.doc.placement.section : ""}`, async () => {
             const book = loreBook([
               loreEntry({ content: "LORE_TOP", constant: true, position: "an_top" }, 0),
               loreEntry({ content: "LORE_BOTTOM", constant: true, position: "an_bottom" }, 1)
             ])
-            const fixture = chat({
-              notes: [attachment, authorNote(inChat, { interval: 1 })],
-              // Below the history all lore is at the tail; by position, these entries ride on the note.
-              lorebooks: layout ? [] : [{ id: "book", entity: "book", revision: "book-rev", doc: book.document }],
-              events: [
-                ...on("note-z-author"),
-                at(null, { key: "lorebook.attach", value: { ref: "book" as never } }),
-                ...(layout ? [] : [loreByPosition])
-              ]
-            })
-            expect(sent(await assembled(fixture))).toHaveLength(1)
-            const snapshot = await assembled({ ...fixture, notes: [attachment, authorNote(inChat, { interval: 0 })] })
+            const fixture = (switched: boolean) =>
+              chat({
+                notes: [attachment, authorNote(inChat)],
+                // Below the history all lore is at the tail; by position, these entries ride on the note.
+                lorebooks: layout ? [] : [{ id: "book", entity: "book", revision: "book-rev", doc: book.document }],
+                events: [
+                  ...on("note-z-author"),
+                  at(null, { key: "lorebook.attach", value: { ref: "book" as never } }),
+                  ...(layout ? [] : [loreByPosition]),
+                  ...(switched ? [at(1, { key: "note.deactivate", value: { note: "note-z-author" as never } })] : [])
+                ]
+              })
+            expect(sent(await assembled(fixture(false)))).toHaveLength(1)
+            const snapshot = await assembled(fixture(true))
             const text = contents(snapshot).join("\n")
-            expect(text).not.toContain("draws maps")
+            expect(text).toContain("draws maps")
             expect(text).not.toContain("is soaked")
-            expect(text).not.toContain("LORE_TOP")
-            expect(text).not.toContain("LORE_BOTTOM")
+            // By position the lore rides on the note too; below the history it is at the tail anyway.
+            if (!layout) {
+              expect(text).toContain("LORE_TOP")
+              expect(text).toContain("LORE_BOTTOM")
+            }
+            // Not due by its condition, nothing rides on it, as ST's skipped turn.
+            const skipped = await assembled({
+              ...fixture(false),
+              notes: [attachment, authorNote(inChat, never)]
+            })
+            const none = contents(skipped).join("\n")
+            expect(none).not.toContain("draws maps")
+            expect(none).not.toContain("LORE_TOP")
           })
         }
       }
@@ -778,7 +803,7 @@ describe("the context assembler", () => {
             { mode: "section", section: "after_main_prompt", role },
             { mode: "depth", depth: 0, role }
           ] as const) {
-            const build = (interval: number) =>
+            const build = (fields: Partial<NoteDoc> | null) =>
               assembled(
                 chat({
                   target,
@@ -791,12 +816,12 @@ describe("the context assembler", () => {
                     send_if_empty: "FILLER",
                     prompts: [{ identifier: "main", role: "system", content: "MAIN" }]
                   }),
-                  notes: [authorNote(placement, { interval })],
-                  events: on("note-z-author")
+                  notes: [authorNote(placement, fields ?? {})],
+                  events: fields ? on("note-z-author") : []
                 })
               )
-            const absent = await build(0)
-            const skipped = await build(99)
+            const absent = await build(null)
+            const skipped = await build(never)
             expect(skipped.request.messages, JSON.stringify({ target, placement })).toEqual(absent.request.messages)
             expect(skipped.request.breakpoints.length).toBeLessThanOrEqual(absent.request.breakpoints.length)
           }
@@ -810,10 +835,11 @@ describe("the context assembler", () => {
         snapshots.push(
           await assembled(
             chat({
+              ...turnOf(users === 2),
               messages: Array.from({ length: users }, (_, i) => ({ side: "user", content: `USER ${i}` })),
               preset: preset({ prompts: [{ identifier: "main", role: "system", content: "{{setvar::x::MAIN}}MAIN" }] }),
               notes: [
-                authorNote({ mode: "tail", role: "system" }, { content: "WRITER{{setvar::x::DUE}}", interval: 2 }),
+                authorNote({ mode: "tail", role: "system" }, { content: "WRITER{{setvar::x::DUE}}", ...onMirasTurn }),
                 chatNote(
                   "card",
                   "PREFIX={{getvar::x}}",
@@ -844,11 +870,12 @@ describe("the context assembler", () => {
         for (const users of [1, 2]) {
           const snapshot = await assembled(
             chat({
+              ...turnOf(users === 2),
               messages: Array.from({ length: users }, (_, i) => ({ side: "user", content: `USER ${i}` })),
               notes: [
                 authorNote(
                   { mode: "tail", role: "system" },
-                  { content: "{{setvar::x::DUE}}{{setglobalvar::g::DUE}}{{setvarkey::obj::key::DUE}}", interval: 2 }
+                  { content: "{{setvar::x::DUE}}{{setglobalvar::g::DUE}}{{setvarkey::obj::key::DUE}}", ...onMirasTurn }
                 ),
                 chatNote("reader", content, { mode: "section", section: "before_main_prompt" })
               ],
@@ -864,6 +891,7 @@ describe("the context assembler", () => {
       for (const users of [1, 2]) {
         const snapshot = await assembled(
           chat({
+            ...turnOf(users === 2),
             messages: Array.from({ length: users }, (_, i) => ({ side: "user", content: `USER ${i}` })),
             notes: [
               chatNote(
@@ -872,7 +900,7 @@ describe("the context assembler", () => {
                 { mode: "section", section: "before_main_prompt" },
                 { kind: "imported_summary", template: "{{getvar::x}} {{summary}}" }
               ),
-              authorNote({ mode: "tail", role: "system" }, { content: "{{setvar::x::DUE}}", interval: 2 }),
+              authorNote({ mode: "tail", role: "system" }, { content: "{{setvar::x::DUE}}", ...onMirasTurn }),
               chatNote("literal", "STATIC", { mode: "section", section: "before_main_prompt" })
             ],
             events: on("summary", "note-z-author", "literal")
@@ -887,13 +915,15 @@ describe("the context assembler", () => {
         for (const users of [1, 2]) {
           const snapshot = await assembled(
             chat({
+              ...turnOf(users === 2),
               cards: [
                 { entity: "mira", doc: card("Mira", { mes_example: "<START>\nTobin: Hello\nMira: Hi" }) },
+                { entity: "oren", doc: card("Oren", { mes_example: "<START>\nTobin: Hello\nOren: Hi" }) },
                 { entity: "tobin", doc: tobin }
               ],
               messages: Array.from({ length: users }, (_, i) => ({ side: "user", content: `USER ${i}` })),
               preset: preset({ new_example_chat_prompt: content }),
-              notes: [authorNote({ mode: "tail", role: "system" }, { content: "{{setvar::x::DUE}}", interval: 2 })],
+              notes: [authorNote({ mode: "tail", role: "system" }, { content: "{{setvar::x::DUE}}", ...onMirasTurn })],
               events: on("note-z-author")
             })
           )
@@ -908,13 +938,14 @@ describe("the context assembler", () => {
       }
     })
 
-    it("keeps a skipped interval's potential cache boundary beside main", async () => {
+    it("keeps a skipped conditioned note's potential cache boundary beside main", async () => {
       for (const section of ["before_main_prompt", "after_main_prompt"] as const) {
         for (const users of [1, 2]) {
           const snapshot = await assembled(
             chat({
+              ...turnOf(users === 2),
               messages: Array.from({ length: users }, (_, i) => ({ side: "user", content: `USER ${i}` })),
-              notes: [authorNote({ mode: "section", section }, { interval: 2 })],
+              notes: [authorNote({ mode: "section", section }, onMirasTurn)],
               events: on("note-z-author")
             })
           )
@@ -930,12 +961,7 @@ describe("the context assembler", () => {
         chat({
           messages: [{ side: "user", content: "USER" }],
           notes: [
-            chatNote(
-              "depth",
-              "{{setvar::skipped::BAD}}Note",
-              { mode: "depth", depth: 1, role: "system" },
-              { interval: 2 }
-            )
+            chatNote("depth", "{{setvar::skipped::BAD}}Note", { mode: "depth", depth: 1, role: "system" }, never)
           ],
           events: on("depth")
         })
@@ -952,7 +978,7 @@ describe("the context assembler", () => {
         chat({
           notes: [
             chatNote("a", "First.", { mode: "depth", depth: 0, role: "system" }),
-            chatNote("b", "Skipped.", { mode: "depth", depth: 0, role: "system" }, { interval: 2 }),
+            chatNote("b", "Skipped.", { mode: "depth", depth: 0, role: "system" }, never),
             chatNote("c", "Last.", { mode: "depth", depth: 0, role: "system" })
           ],
           events: on("a", "b", "c")
@@ -961,38 +987,22 @@ describe("the context assembler", () => {
       expect(contents(snapshot).at(-1)).toBe("system: First.\nLast.")
     })
 
-    it("counts normal send_if_empty before gating and puts depth-zero notes after it", async () => {
-      for (const users of [1, 2]) {
+    it("puts a due depth-zero note after send_if_empty's filler, and a skipped one nowhere", async () => {
+      for (const fields of [onMirasTurn, never]) {
         const snapshot = await assembled(
           chat({
-            messages: [
-              ...Array.from({ length: users }, (_, i): FixtureMessage => ({ side: "user", content: `USER ${i}` })),
-              { side: "assistant", content: "Reply." }
-            ],
-            preset: preset({ send_if_empty: "Continue." }),
-            notes: [authorNote({ mode: "depth", depth: 0, role: "system" }, { interval: 2 })],
-            events: on("note-z-author")
-          })
-        )
-        expect(contents(snapshot).slice(-1 - (users === 1 ? 1 : 0))).toEqual(
-          users === 1 ? ["user: Continue.", "system: Tobin is soaked."] : ["user: Continue."]
-        )
-      }
-      // Swipes and impersonation don't store a new user turn in ST and don't count one.
-      for (const target of [{ ordinal: 1 }, { speaker: "tobin" }]) {
-        const snapshot = await assembled(
-          chat({
-            target,
             messages: [
               { side: "user", content: "USER" },
               { side: "assistant", content: "Reply." }
             ],
             preset: preset({ send_if_empty: "Continue." }),
-            notes: [authorNote({ mode: "depth", depth: 0, role: "system" }, { interval: 2 })],
+            notes: [authorNote({ mode: "depth", depth: 0, role: "system" }, fields)],
             events: on("note-z-author")
           })
         )
-        expect(contents(snapshot).join("\n")).not.toContain("soaked")
+        expect(contents(snapshot).slice(-2)).toEqual(
+          fields === never ? ["assistant: Reply.", "user: Continue."] : ["user: Continue.", "system: Tobin is soaked."]
+        )
       }
     })
 
@@ -1024,41 +1034,19 @@ describe("the context assembler", () => {
       }
     })
 
-    it("sends a note with an interval every that many of the user's messages, as ST's author's note", async () => {
-      const every = (interval: number, messages: ReadonlyArray<FixtureMessage>) =>
-        assembled(
+    it("sends an older import's note with an interval every turn: notes no longer come and go (DESIGN §4.1)", async () => {
+      for (const interval of [0, 1, 2, 3]) {
+        const snapshot = await assembled(
           chat({
-            messages,
             notes: [authorNote({ mode: "depth", depth: 0, role: "system" }, { interval })],
             events: on("note-z-author")
           })
-        ).then((snapshot) => contents(snapshot).join("\n").includes("soaked"))
-      const turns = (users: number): Array<FixtureMessage> => [
-        { side: "assistant", content: "You're late." },
-        ...Array.from({ length: users }, (_, i): Array<FixtureMessage> => [
-          { side: "user", content: `Turn ${i}.` },
-          { side: "assistant", content: `Reply ${i}.` }
-        ]).flat()
-      ]
-      // Hidden messages count, as ST counts every message of the user's.
-      const hidden = turns(2).map((m, i) => (i === 1 ? { ...m, inContext: false } : m))
-      expect(await every(2, turns(1))).toBe(false)
-      expect(await every(2, turns(2))).toBe(true)
-      expect(await every(2, hidden)).toBe(true)
-      expect(await every(2, turns(3))).toBe(false)
-      expect(await every(3, turns(3))).toBe(true)
-      expect(await every(0, turns(3))).toBe(false)
-      // 1 is every turn, even before the user's first message.
-      expect(await every(1, turns(0))).toBe(true)
-      expect(await every(2, turns(0))).toBe(false)
-      // A message the user's character speaks counts as theirs, whoever wrote it; one a
-      // character speaks doesn't.
-      const spoken: Array<FixtureMessage> = [
-        { side: "assistant", content: "Impersonated.", speaker: "tobin" },
-        { side: "user", content: "Sent as Mira.", speaker: "mira" }
-      ]
-      expect(await every(2, [...turns(1), ...spoken])).toBe(true)
-      expect(await every(2, [...turns(0), spoken[1]!, { side: "user", content: "Mine." }])).toBe(false)
+        )
+        expect(contents(snapshot).join("\n")).toContain("soaked")
+        expect(snapshot.pieces.find((p) => p.id === "note:note-z-author")?.source).toMatchObject({
+          activation: { kind: "note", interval: null, userMessages: null, due: true }
+        })
+      }
     })
   })
 

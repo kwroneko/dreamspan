@@ -151,7 +151,8 @@ const indexIntoIdentified = (kind: EntityKind, doc: unknown, path: FieldPath) =>
 const PROTECTED: Partial<Record<EntityKind, ReadonlySet<string>>> = {
   card: new Set(["schema_version", "avatar_media_id", "asset_media_ids"]),
   preset: new Set(["schema_version", "regex_approved"]),
-  note: new Set(["schema_version", "owner"])
+  // A slot's link changes only by picking, saving as or unlinking a shared note.
+  note: new Set(["schema_version", "owner", "link"])
 }
 
 /**
@@ -340,28 +341,46 @@ export const newCardDoc = (name: string): CardDoc => ({
   creator: "",
   character_version: "",
   avatar_media_id: null,
-  modules: [],
   extensions: {}
 })
 
-/** A new note on a card: in-chat at ST's default depth for its Character's Note. */
-export const newCardNote = (card: EntityId, title: string): NoteDoc => ({
+/** Where a new note goes (DESIGN §4.1): the end of the tail, as the system. */
+const NEW_NOTE_PLACEMENT = { mode: "section", section: "tail_end", role: "system" } as const
+
+/**
+ * A new note on a card, off in chats until switched on there; with `link`, a slot showing
+ * that shared note.
+ */
+export const newCardNote = (card: EntityId, title: string, link?: EntityId): NoteDoc => ({
   schema_version: NOTE_SCHEMA_VERSION,
   title,
   content: "",
-  placement: { mode: "depth", depth: 4, role: "system" },
+  placement: NEW_NOTE_PLACEMENT,
   owner: { card },
   exportable: true,
-  agent_editable: false
+  agent_editable: false,
+  ...(link ? { link } : {})
 })
 
-/** A new note of a chat's own: in-chat at ST's default depth for its author's note. */
-export const newChatNote = (chat: ChatId, title: string): NoteDoc => ({
+/** A new note of a chat's own; with `link`, a slot showing that shared note. */
+export const newChatNote = (chat: ChatId, title: string, link?: EntityId): NoteDoc => ({
   schema_version: NOTE_SCHEMA_VERSION,
   title,
   content: "",
-  placement: { mode: "depth", depth: 4, role: "system" },
+  placement: NEW_NOTE_PLACEMENT,
   owner: { chat },
+  exportable: false,
+  agent_editable: false,
+  ...(link ? { link } : {})
+})
+
+/** A shared named note (DESIGN §4.1): a named text a note slot can link to, global for now. */
+export const newSharedNote = (title: string, content: string): NoteDoc => ({
+  schema_version: NOTE_SCHEMA_VERSION,
+  title,
+  content,
+  placement: NEW_NOTE_PLACEMENT,
+  owner: { shared: "global" },
   exportable: false,
   agent_editable: false
 })

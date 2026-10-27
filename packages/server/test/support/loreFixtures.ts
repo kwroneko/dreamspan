@@ -133,7 +133,9 @@ export const gateLore = loreBook(
         content: "<START>\n{{user}}: Which bank is safe?\n{{char}}: Follow the copper lamps."
       },
       11
-    )
+    ),
+    // Its key is only in the author's note: it triggers only when ST scans the note (allowWIScan).
+    loreEntry({ keys: ["soaked"], content: "Wet boots squeak on the boards.", position: "after_char" }, 90)
   ],
   {},
   "st-diff assembly lore"

@@ -168,7 +168,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
     })
   )
 
-  it.effect("an author's note emptied in ST keeps its settings from the new messages on", () =>
+  it.effect("an author's note emptied in ST keeps its settings, off, from the new messages on", () =>
     Effect.gen(function* () {
       const path = "chats/Bot/note-clear.jsonl"
       const first = yield* begin
@@ -188,9 +188,10 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
         message("later", 2)
       )
       yield* sendStFile(second.importId, path, cleared, { card: "none" })
+      // Kept, for what rides on the author's note, but off: ST sends nothing of an empty one.
       const state = yield* stateAtLeaf(chatOf(path))
-      assert.lengthOf(state.activeNotes, 1)
-      assert.strictEqual(state.activeNotes[0], state.authorNote)
+      assert.lengthOf(state.activeNotes, 0)
+      assert.isNotNull(state.authorNote)
       const doc = query(
         "SELECT doc_json FROM entity_revisions WHERE entity_id = ? ORDER BY created_at DESC LIMIT 1",
         state.authorNote!

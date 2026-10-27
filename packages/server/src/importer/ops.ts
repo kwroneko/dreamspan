@@ -46,7 +46,9 @@ export class ParsedFile extends Schema.Class<ParsedFile>("ParsedFile")({
       docHash: Schema.String,
       searchText: Schema.String,
       schemaVersion: Schema.Int,
-      noteDocJson: Schema.NullOr(Schema.String)
+      noteDocJson: Schema.NullOr(Schema.String),
+      /** A card's other notes, without their owner. */
+      notesDocJson: Schema.optionalKey(Schema.Array(Schema.String))
     })
   ),
   media: Schema.Array(ParsedMedia)
@@ -63,6 +65,8 @@ export const ExportInput = Schema.Struct({
   format: ExportFormat,
   docJson: Schema.String,
   noteDocJson: Schema.NullOr(Schema.String),
+  /** A card's other exportable notes, a linked one with its shared note's text. */
+  notesDocJson: Schema.Array(Schema.String),
   avatar: Schema.NullOr(ExportedFile),
   /** A card's embedded assets, by the URI its assets name them with. */
   assets: Schema.Array(Schema.Struct({ ...ExportedFile.fields, uri: Schema.String }))
@@ -129,6 +133,10 @@ export class StSettings extends Schema.Class<StSettings>("StSettings")({
   globalWorlds: Schema.Array(Schema.String),
   characterWorlds: Schema.Array(Schema.Struct({ card: Schema.String, worlds: Schema.Array(Schema.String) })),
   defaultAuthorNote: Schema.NullOr(StAuthorNote),
+  characterNotes: Schema.Array(
+    Schema.Struct({ card: Schema.String, prompt: Schema.String, useChara: Schema.Boolean, position: Schema.Number })
+  ),
+  allowWIScan: Schema.Boolean,
   summary: Schema.Struct({
     prompt: Schema.NullOr(Schema.String),
     promptWords: Schema.Int,

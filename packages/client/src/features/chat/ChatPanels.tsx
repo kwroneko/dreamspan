@@ -159,6 +159,8 @@ function TabContent({
   session,
   view,
   focus,
+  notesFocus,
+  onNotes,
   onJump,
   onEnable
 }: {
@@ -168,10 +170,15 @@ function TabContent({
   session: ChatSession
   view: ChatView
   focus: string | null
+  /** The card whose notes the Notes tab shows first. */
+  notesFocus: EntityId | null
+  /** Opens the Notes tab at a card's notes. */
+  onNotes: (card: EntityId) => void
   onJump: (slot: SlotId) => void
   onEnable: () => void
 }) {
-  if (tab.startsWith("card:")) return <CharacterPanel entityId={tab.slice(5) as EntityId} />
+  if (tab.startsWith("card:"))
+    return <CharacterPanel entityId={tab.slice(5) as EntityId} onNotes={() => onNotes(tab.slice(5) as EntityId)} />
   switch (tab) {
     case "model":
       return <GenerationSettingsPanel session={session} kind={tab} />
@@ -189,7 +196,7 @@ function TabContent({
       return (
         <NotLoaded>
           <Suspense fallback={<Loading label="Loading the notes…" />}>
-            <NotesTab session={session} leafSlotId={view.leafSlotId} />
+            <NotesTab session={session} leafSlotId={view.leafSlotId} focusCard={notesFocus} />
           </Suspense>
         </NotLoaded>
       )
@@ -228,6 +235,11 @@ export function ChatSidePanel({
   const userId = useSession().user.id
   const { ref, width, min, max, change, reset } = usePanelWidth(userId, "chat", 416, 260, 640, 426, wide)
   const [visited, setVisited] = useState<ReadonlySet<PanelTab>>(() => new Set([tab]))
+  const [notesFocus, setNotesFocus] = useState<EntityId | null>(null)
+  const notes = (card: EntityId) => {
+    setNotesFocus(card)
+    onTab("notes")
+  }
   useEffect(() => {
     void loadNotes().catch(() => undefined)
   }, [])
@@ -243,7 +255,7 @@ export function ChatSidePanel({
     label: t.label,
     panel:
       visited.has(t.value) || t.value === tab ? (
-        <TabContent tab={t.value} active={t.value === tab} {...content} />
+        <TabContent tab={t.value} active={t.value === tab} notesFocus={notesFocus} onNotes={notes} {...content} />
       ) : null
   }))
   if (!wide)

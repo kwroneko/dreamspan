@@ -446,7 +446,18 @@ describe("chat setup", () => {
       const tobinRef = yield* api.CreateCard({ label: "Tobin", name: "Tobin" })
       const outfit = yield* api.CreateCardNote({ cardRefId: miraRef.id, title: "Outfit" })
       const mood = yield* api.CreateCardNote({ cardRefId: miraRef.id, title: "Mood" })
-      // The user plays Tobin: a persona's notes aren't the chat's to place.
+      // Outfit is on in every chat with Mira unless a chat switches it off.
+      const me = yield* api.Whoami()
+      const outfitDoc = (yield* api.OpenEditor({ refId: outfit.id })).doc
+      yield* writer.EditRef({
+        userId: me.id as UserId,
+        refId: outfit.id,
+        doc: { ...outfitDoc, on_by_default: true },
+        expectedRowVersion: outfit.rowVersion,
+        message: null,
+        commitDraft: null
+      })
+      // The user plays Tobin: a persona note is a card's note, listed and switched like any.
       yield* api.CreateCardNote({ cardRefId: tobinRef.id, title: "Persona note" })
       const started = yield* api.StartChat({
         cards: [miraRef.entityId],
@@ -460,29 +471,34 @@ describe("chat setup", () => {
         Effect.map(api.ListChatNotes({ chatId, slotId }), (notes) =>
           notes.map((n) => `${n.ref.label}${n.card === null ? " (chat)" : ""}: ${n.active ? "on" : "off"}`)
         )
-      assert.deepStrictEqual(yield* listed(at), ["Outfit: on", "Mood: off"])
+      assert.deepStrictEqual(yield* listed(at), ["Outfit: on", "Mood: off", "Persona note: off"])
 
       const scene = yield* api.CreateChatNote({ chatId, title: "  Scene  " })
       assert.strictEqual(scene.label, "Scene")
-      assert.deepStrictEqual(yield* listed(at), ["Scene (chat): off", "Outfit: on", "Mood: off"])
+      assert.deepStrictEqual(yield* listed(at), ["Scene (chat): off", "Outfit: on", "Mood: off", "Persona note: off"])
       const change = (entityId: EntityId, active: boolean) =>
         api.ChangeCast({ chatId, slotId: at, change: { _tag: "Note", entityId, active } })
       yield* change(scene.entityId, true)
       yield* change(outfit.entityId, false)
       yield* change(mood.entityId, true)
-      assert.deepStrictEqual(yield* listed(at), ["Scene (chat): on", "Outfit: off", "Mood: on"])
+      assert.deepStrictEqual(yield* listed(at), ["Scene (chat): on", "Outfit: off", "Mood: on", "Persona note: off"])
       // Only from that message on, and only on its branch.
-      assert.deepStrictEqual(yield* listed(null), ["Scene (chat): off", "Outfit: on", "Mood: off"])
+      assert.deepStrictEqual(yield* listed(null), ["Scene (chat): off", "Outfit: on", "Mood: off", "Persona note: off"])
       const other = yield* posted(
         api.SendMessage({ chatId, parentSlotId: null, branch: true, content: "Another start." })
       )
-      assert.deepStrictEqual(yield* listed(other.entry.slotId), ["Scene (chat): off", "Outfit: on", "Mood: off"])
+      assert.deepStrictEqual(yield* listed(other.entry.slotId), [
+        "Scene (chat): off",
+        "Outfit: on",
+        "Mood: off",
+        "Persona note: off"
+      ])
 
       // To the bin and back, like any delete.
       const binned = yield* api.DeleteNote({ noteRefId: scene.id })
-      assert.deepStrictEqual(yield* listed(at), ["Outfit: off", "Mood: on"])
+      assert.deepStrictEqual(yield* listed(at), ["Outfit: off", "Mood: on", "Persona note: off"])
       yield* api.RestoreBinItem({ itemId: binned.id })
-      assert.deepStrictEqual(yield* listed(at), ["Scene (chat): on", "Outfit: off", "Mood: on"])
+      assert.deepStrictEqual(yield* listed(at), ["Scene (chat): on", "Outfit: off", "Mood: on", "Persona note: off"])
 
       // Another user's reads and writes see nothing of it.
       const bo = yield* writer.EnsureUser({ handle: "bo", displayName: "Bo" })

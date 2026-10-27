@@ -222,6 +222,20 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
   let layerPins: SourcePins["lcm"]
   let resolvedModel: ModelInput | null = null
   /** The model the chat's binding or the user's default chose, read or not; unset before the model is read. */
+  /** A shared note's library head, which a linked slot shows; a binned or missing one has none. */
+  const sharedHead = (entity: string) =>
+    Effect.gen(function* () {
+      const [row] = yield* sql<{ revision: string; doc_json: string }>`
+        SELECT r.head_revision_id AS revision, h.doc_json FROM entities e
+        JOIN entity_refs r ON r.entity_id = e.id AND r.ref_kind = 'upstream'
+        JOIN entity_revisions h ON h.id = r.head_revision_id
+        WHERE e.id = ${entity} AND e.owner_user_id = ${userId} AND e.kind = 'note' AND e.deleted_at IS NULL
+          AND json_extract(h.doc_json, '$.owner.shared') IS NOT NULL`
+      if (!row) return { entity, revision: null, doc: null }
+      const doc = yield* decoded<NoteDoc>(decodeNote(JSON.parse(row.doc_json)), "A shared note")
+      return { entity, revision: row.revision, doc }
+    })
+
   let chosenModel: ChosenModel | null | undefined
   const pins = {
     target: null as Target | null,
@@ -234,7 +248,6 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
     globalLorebooks: [] as Array<string>,
     notes: [] as Array<SourcePins["notes"][number]>,
     messageCount: [] as Array<NonNullable<SourcePins["messageCount"]>[number]>,
-    userMessages: [] as Array<NonNullable<SourcePins["userMessages"]>[number]>,
     lcmDefaults: undefined as SourcePins["lcmDefaults"]
   }
 
@@ -513,23 +526,37 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
         const seen = new Set<string>()
         return yield* Effect.forEach(rows, (row) =>
           Effect.gen(function* () {
-            // A chat's note is on only once the chat turned it on.
-            const first = row.card !== null && !seen.has(row.card)
-            if (row.card !== null) seen.add(row.card)
             const pinned = bound[row.entity]
             const json = pinned ? (yield* revisionDoc(pinned, "note", row.entity))?.doc_json : row.doc_json
             if (json === undefined) return []
             const doc = yield* decoded<NoteDoc>(decodeNote(JSON.parse(json)), "A note")
             const card = noteCard(doc)
             if (card === null ? "chat" in doc.owner && doc.owner.chat !== chatId : !cards.includes(card)) return []
-            return [{ entity: row.entity, revision: pinned ?? row.revision, doc, first } satisfies NoteInput]
+            // The card's Character's Note is its first that isn't a module or ST's Character Author's Note.
+            const first =
+              card !== null && !seen.has(card) && doc.module_id === undefined && doc.kind !== "character_author_note"
+            if (first) seen.add(card)
+            const linked = doc.link === undefined ? null : yield* sharedHead(doc.link)
+            const note: NoteInput = {
+              entity: row.entity,
+              revision: pinned ?? row.revision,
+              doc: linked?.doc ? { ...doc, content: linked.doc.content } : doc,
+              first,
+              ...(linked ? { link: { entity: linked.entity, revision: linked.revision } } : {})
+            }
+            return [note]
           })
         ).pipe(
           Effect.map((lists) => {
             const notes = lists.flat()
             pins.notes.push({
               key: keyOf(cards, bound),
-              found: notes.map(({ entity, revision, first }) => ({ entity, revision, first }))
+              found: notes.map(({ entity, revision, first, link }) => ({
+                entity,
+                revision,
+                first,
+                ...(link ? { link } : {})
+              }))
             })
             return notes
           })
@@ -561,31 +588,6 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
         WHERE s.deleted_at IS NULL AND ${sql.literal(contextExcluded())} = 0 AND v.status <> 'failed' AND length(v.content) > 0`
         const count = row?.n ?? 0
         pins.messageCount.push({ key: keyOf(leaf), count })
-        return count
-      }),
-
-    // A message's side as the history reads it (`sideOf` in the stages): its speaker's, when
-    // that's one of the cast, else its first version's writer.
-    userMessages: (leaf, personas, characters) =>
-      Effect.gen(function* () {
-        if (leaf === null) {
-          pins.userMessages.push({ key: keyOf(leaf, personas, characters), count: 0 })
-          return 0
-        }
-        const [row] = yield* sql<{ n: number }>`
-          WITH RECURSIVE path(id) AS (
-            SELECT id FROM slots WHERE id = ${leaf} AND chat_id = ${chatId} AND ${owned}
-            UNION ALL
-            SELECT s.parent_slot_id FROM slots s JOIN path p ON s.id = p.id WHERE s.parent_slot_id IS NOT NULL
-          )
-          SELECT count(*) AS n FROM path JOIN slots s ON s.id = path.id
-          JOIN versions v ON v.id = s.selected_version_id
-          JOIN versions f ON f.id = (SELECT id FROM versions x WHERE x.slot_id = s.id ORDER BY x.ordinal LIMIT 1)
-          WHERE s.deleted_at IS NULL AND (v.speaker_entity_id IN (SELECT value FROM json_each(${JSON.stringify(personas)}))
-            OR (coalesce(v.speaker_entity_id IN (SELECT value FROM json_each(${JSON.stringify(characters)})), 0) = 0
-              AND f.writer = 'human' AND f.origin <> 'greeting'))`
-        const count = row?.n ?? 0
-        pins.userMessages.push({ key: keyOf(leaf, personas, characters), count })
         return count
       }),
 
@@ -830,12 +832,17 @@ const replaySources = (
     notes: (cards, bound) =>
       Effect.gen(function* () {
         const { found } = yield* pinned(pins.notes, keyOf(cards, bound), "a note")
-        return yield* Effect.forEach(found, ({ entity, revision, first }) =>
+        return yield* Effect.forEach(found, ({ entity, revision, first, link }) =>
           Effect.gen(function* () {
             const row = yield* revisionDoc(revision, "note", entity)
             if (!row) return yield* unpinned("a note")
             const doc = yield* decoded<NoteDoc>(decodeNote(JSON.parse(row.doc_json)), "A note")
-            return { entity, revision, doc, first } satisfies NoteInput
+            if (!link) return { entity, revision, doc, first } satisfies NoteInput
+            if (link.revision === null) return { entity, revision, doc, first, link } satisfies NoteInput
+            const shared = yield* revisionDoc(link.revision, "note", link.entity)
+            if (!shared) return yield* unpinned("a shared note")
+            const content = (yield* decoded<NoteDoc>(decodeNote(JSON.parse(shared.doc_json)), "A shared note")).content
+            return { entity, revision, doc: { ...doc, content }, first, link } satisfies NoteInput
           })
         )
       }),
@@ -844,12 +851,6 @@ const replaySources = (
     onPath: live.onPath,
     messageCount: (leaf) =>
       Effect.map(pinned(pins.messageCount ?? [], keyOf(leaf), "the path message count"), ({ count }) => count),
-    // Which messages are the user's can change (another version selected): the count is pinned.
-    userMessages: (leaf, personas, characters) =>
-      Effect.map(
-        pinned(pins.userMessages ?? [], keyOf(leaf, personas, characters), "part of the chat"),
-        ({ count }) => count
-      ),
 
     model: () => Effect.succeed(inputs.model),
 

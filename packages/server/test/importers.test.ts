@@ -69,7 +69,9 @@ describe("the built-in importers", () => {
       title: "Character's Note",
       content: "Wren smells of oil.",
       placement: { mode: "depth", depth: 4, role: "system" },
-      exportable: true
+      exportable: true,
+      // ST always sends it (DESIGN §4.1).
+      on_by_default: true
     })
     assert.include(
       parsed.report.issues.map((issue) => issue.code),

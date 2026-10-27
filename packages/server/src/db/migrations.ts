@@ -1,4 +1,5 @@
 import { cardNamesMigration } from "./cardNamesMigration.ts"
+import { notesMigration } from "./notesMigration.ts"
 import { promptPreset, LegacyPresetDoc } from "@rp/shared/docs/preset.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import { Schema } from "effect"
@@ -306,7 +307,8 @@ export const migrations = {
   // as an immediate send does.
   "0048_queued_no_reply": runAll([
     `ALTER TABLE queued_messages ADD COLUMN no_reply INTEGER NOT NULL DEFAULT 0 CHECK (no_reply IN (0, 1))`
-  ])
+  ]),
+  "0049_notes": notesMigration
 }
 
 export const Migrations = SqliteMigrator.layer({ loader: SqliteMigrator.fromRecord(migrations) })

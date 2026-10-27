@@ -6,12 +6,28 @@ import { useMemo } from "react"
 import { AsyncView } from "../../actions.tsx"
 import { AppClient } from "../../rpc.ts"
 import { Avatar } from "../../ui/Avatar.tsx"
-import { buttonClass } from "../../ui/Button.tsx"
+import { Button, buttonClass } from "../../ui/Button.tsx"
 import { Definition } from "./CardPage.tsx"
 import { shellAtom, useShellNavigation } from "./shellData.tsx"
 
 const refsAtom = AppClient.query("ListLibrary", { kind: "card" }, { reactivityKeys: ["library"] })
-export function CharacterPanel({ entityId }: { entityId: EntityId }) {
+
+/** "Notes (N)": the card's notes, opening the chat's Notes tab at the card's group. */
+function NotesLine({ refId, onOpen }: { refId: string; onOpen: () => void }) {
+  const atom = useMemo(
+    () => AppClient.query("ListCardNotes", { cardRefId: refId as never }, { reactivityKeys: ["library"] }),
+    [refId]
+  )
+  const notes = useAtomValue(atom)
+  return (
+    <Button variant="ghost" onClick={onOpen} className="justify-start">
+      Notes{AsyncResult.isSuccess(notes) ? ` (${notes.value.length})` : ""}
+    </Button>
+  )
+}
+
+/** A card's details; in a chat's panel, `onNotes` opens the chat's notes at the card's. */
+export function CharacterPanel({ entityId, onNotes }: { entityId: EntityId; onNotes?: () => void }) {
   const navigation = useShellNavigation()
   const data = useAtomValue(shellAtom)
   const refs = useAtomValue(refsAtom)
@@ -55,6 +71,7 @@ export function CharacterPanel({ entityId }: { entityId: EntityId }) {
       <Link to="/library/$refId" params={{ refId: ref }} className={buttonClass()}>
         Edit card
       </Link>
+      {onNotes && <NotesLine refId={ref} onOpen={onNotes} />}
       <AsyncView atom={atom} loading="Loading the definition…">
         {(doc) => <Definition doc={doc} />}
       </AsyncView>

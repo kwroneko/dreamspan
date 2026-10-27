@@ -306,13 +306,16 @@ export interface AuthorNote {
   readonly role: number
   /** Sent every this many of the user's messages; 0 never. */
   readonly interval: number
+  /** ST's "Include in World Info Scanning" (`extension_settings.note.allowWIScan`). */
+  readonly scan?: boolean
 }
 
 /** Sets the chat's author's note, and has the extension read the chat again, as when it opens. */
 const setAuthorNote = (page: Page, note: AuthorNote) =>
-  page.evaluate(async ({ text, position, depth, role, interval }) => {
+  page.evaluate(async ({ text, position, depth, role, interval, scan }) => {
     const ctx = SillyTavern.getContext() as unknown as {
       chatMetadata: Record<string, unknown>
+      extensionSettings: { note?: Record<string, unknown> }
       eventSource: { emit: (event: string, ...args: Array<unknown>) => Promise<void> }
       eventTypes: Record<string, string>
       getCurrentChatId: () => string
@@ -324,6 +327,7 @@ const setAuthorNote = (page: Page, note: AuthorNote) =>
       note_role: role,
       note_interval: interval
     })
+    ctx.extensionSettings.note = { ...ctx.extensionSettings.note, allowWIScan: scan === true }
     await ctx.eventSource.emit(ctx.eventTypes.CHAT_CHANGED!, ctx.getCurrentChatId())
   }, note)
 

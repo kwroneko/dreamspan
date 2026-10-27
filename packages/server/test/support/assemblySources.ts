@@ -141,17 +141,6 @@ const fixtureSources = (fixture: AssemblyFixture) => {
         entries.slice(0, leaf === null ? 0 : entries.findIndex((e) => e.slotId === leaf) + 1).filter((e) => e.inContext)
           .length
       ),
-    userMessages: (leaf, personas, characters) =>
-      Effect.sync(() => {
-        const end = leaf === null ? -1 : entries.findIndex((e) => e.slotId === leaf)
-        return entries
-          .slice(0, end + 1)
-          .filter((e) =>
-            e.speaker !== null && personas.includes(e.speaker)
-              ? true
-              : !(e.speaker !== null && characters.includes(e.speaker)) && e.side === "user"
-          ).length
-      }),
     model: () => Effect.succeed(fixture.model ?? null),
     preset: () => Effect.succeed({ ref: "ref-preset", revision: "rev-preset", scope: "chat", doc: fixture.preset })
   })

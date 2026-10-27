@@ -186,21 +186,23 @@ export const makeMacroEnvironment = (
 
   return {
     names: setup.names,
-    preview: (id, text, options = {}) =>
-      run(
+    preview: (id, text, options = {}) => {
+      const { card, ...rest } = base
+      return run(
         id,
         text,
         { kind: "card" },
         {
-          ...base,
-          ...(options.card ? { card: options.card } : {}),
+          ...rest,
+          ...(options.withoutCard ? {} : { card: options.card ?? card }),
           names: { ...setup.names, ...options.names },
           variables: { local, global }
         },
         () => {},
         undefined,
         options.sharedWork
-      ).text,
+      ).text
+    },
     piece: (id, source, text, options = {}) => {
       const { card, ...rest } = base
       const context: MacroContext = {

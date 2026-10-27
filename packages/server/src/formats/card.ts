@@ -3,12 +3,11 @@
 // `name` means V1. The specs: github.com/malfoyslastname/character-card-spec-v2 and
 // github.com/kwaroran/character-card-spec-v3.
 import { parseStCreatedAt } from "./stCreatedAt.ts"
-import { CARD_SCHEMA_VERSION, CardAsset, type CardDoc, type CardModule } from "@rp/shared/docs/card.ts"
-import { Placement } from "@rp/shared/docs/note.ts"
+import { CARD_SCHEMA_VERSION, CardAsset, type CardDoc } from "@rp/shared/docs/card.ts"
 import type { ReportBuilder } from "@rp/shared/importReport.ts"
 import { Predicate, Schema } from "effect"
-import { Fields, hasKeys, isFiniteNumber } from "./fields.ts"
-import { lorebookFromCharacterBook, OUR_EXTENSION } from "./lorebook.ts"
+import { Fields, isFiniteNumber } from "./fields.ts"
+import { lorebookFromCharacterBook } from "./lorebook.ts"
 import { fail, type Limits, type Path } from "./safety.ts"
 
 type CardVersion = "v1" | "v2" | "v3"
@@ -73,40 +72,10 @@ const specVersion = (value: unknown) =>
 const isLanguageMap = (value: unknown): value is Record<string, string> =>
   Predicate.isObject(value) && Object.values(value).every(Predicate.isString)
 
-/** Modules a previous export put in `extensions.rp_harness.modules`, back as modules. */
-const liftModules = (extensions: Record<string, unknown>, dataPath: Path, issues: ReportBuilder) => {
-  const ours = extensions[OUR_EXTENSION]
-  if (!Predicate.isObject(ours) || ours.modules === undefined) return { extensions, modules: [] }
-  const path = [...dataPath, "extensions", OUR_EXTENSION]
-  const modules: Array<CardModule> = []
-  new Fields(ours, path, issues).list("modules").forEach((item, index) => {
-    if (
-      Predicate.isObject(item) &&
-      Predicate.isString(item.id) &&
-      Predicate.isString(item.title) &&
-      Predicate.isString(item.content)
-    ) {
-      // A placement that isn't valid is dropped, so the module goes in the card's section.
-      // `agent_editable` is never read: a file doesn't grant the agent anything (DESIGN §11).
-      const placement = Schema.is(Placement)(item.placement) ? { placement: item.placement } : {}
-      modules.push({ id: item.id, title: item.title, content: item.content, exportable: true, ...placement })
-    } else {
-      issues.add("warning", "card.invalid_module", `Module ${index} isn't valid; it was dropped.`, [
-        ...path,
-        "modules",
-        index
-      ])
-    }
-  })
-  // Deleted in place rather than copied without, so a huge `extensions` isn't copied.
-  delete ours.modules
-  if (!hasKeys(ours)) delete extensions[OUR_EXTENSION]
-  return { extensions, modules }
-}
-
 const fromData = (data: Record<string, unknown>, path: Path, limits: Limits, issues: ReportBuilder): CardDoc => {
   const fields = new Fields(data, path, issues)
-  const { extensions, modules } = liftModules(fields.object("extensions"), path, issues)
+  // Notes an export put in `extensions.rp_harness` stay there: the importer makes them card notes.
+  const extensions = fields.object("extensions")
   const book = fields.value<Record<string, unknown> | undefined>(
     "character_book",
     undefined,
@@ -141,7 +110,6 @@ const fromData = (data: Record<string, unknown>, path: Path, limits: Limits, iss
     avatar_media_id: null,
     ...(fields.has("assets") ? { assets: assets.filter(isAsset) } : {}),
     ...(book ? { character_book: lorebookFromCharacterBook(book, [...path, "character_book"], limits, issues) } : {}),
-    modules,
     extensions,
     ...fields.unknown(DATA_KEYS)
   }

@@ -54,7 +54,14 @@ import {
   RevisionId
 } from "@rp/shared/library.ts"
 import { LibraryImport } from "@rp/shared/libraryImport.ts"
-import { ChatNotePosition, EditConflict, EditorSnapshot, InvalidDocument, NoteEntry } from "@rp/shared/editorApi.ts"
+import {
+  ChatNotePosition,
+  EditConflict,
+  EditorSnapshot,
+  InvalidDocument,
+  NoteEntry,
+  SharedNote
+} from "@rp/shared/editorApi.ts"
 import { NoteDoc } from "@rp/shared/docs/note.ts"
 import {
   Connection,
@@ -92,7 +99,8 @@ import {
   CardUsage,
   ChatCard,
   ChatGroup,
-  FirstTurn
+  FirstTurn,
+  LinkedNote
 } from "@rp/shared/chatSetupApi.ts"
 import { AssemblyFailed } from "../assembler/types.ts"
 
@@ -289,6 +297,8 @@ export class ExportSource extends Schema.Class<ExportSource>("ExportSource")({
   label: Schema.String,
   docJson: Schema.String,
   noteDocJson: Schema.NullOr(Schema.String),
+  /** A card's other notes (exportable or not: the format worker leaves the private ones out). */
+  notesDocJson: Schema.Array(Schema.String),
   avatar: Schema.NullOr(StoredFile),
   /** Embedded assets, by the `uri` the card's assets name them with. */
   assets: Schema.Array(Schema.Struct({ ...StoredFile.fields, uri: Schema.String }))
@@ -313,7 +323,8 @@ export const StImportNote = Schema.Struct({
   /** For a summary, the message each text was saved on, in the same order, where it's known. */
   sources: Schema.optionalKey(Schema.Array(Schema.NullOr(SlotId))),
   placement: NoteDoc.fields.placement,
-  interval: Schema.optionalKey(Schema.Int),
+  /** Lorebook entries can trigger on it (ST's `allowWIScan`). */
+  scanLore: Schema.optionalKey(Schema.Boolean),
   template: Schema.optionalKey(Schema.String),
   covers: NoteDoc.fields.covers,
   /** Whether ST sent it: an active note, or one kept for the record. */
@@ -1153,7 +1164,11 @@ export class WriteOps extends RpcGroup.make(
       sourceHash: Sha256,
       media: Schema.Array(ImportedMedia),
       /** A note document without its owner, which is the card. */
-      noteDocJson: Schema.NullOr(Schema.String)
+      noteDocJson: Schema.NullOr(Schema.String),
+      /** The card's other notes, without their owner, each matched to an earlier import's by `module_id`. */
+      notesDocJson: Schema.optionalKey(Schema.Array(Schema.String)),
+      /** ST scans its notes for lorebook entries (`allowWIScan`): so does the card's Character's Note. */
+      characterNoteScan: Schema.optionalKey(Schema.Boolean)
     },
     success: LibraryImport,
     error: Schema.Union([NotFound, RefOperationRefused, StorageError])
@@ -1368,6 +1383,25 @@ export class WriteOps extends RpcGroup.make(
     success: Schema.Void,
     error: Schema.Union([ImportLeaseLost, StorageError])
   }),
+  /**
+   * A card's Character Author's Note from ST's settings (DESIGN §4.1): a private card note,
+   * on in every chat where ST had "Use character author's note" ticked. A re-import merges
+   * into the one an earlier import made. Returns the note's entity, and whether it's new.
+   */
+  Rpc.make("StImportCharacterNote", {
+    payload: {
+      userId: UserId,
+      cardEntityId: EntityId,
+      prompt: Schema.String,
+      useChara: Schema.Boolean,
+      /** ST's `chara_note_position`: 0 replace, 1 before the chat's note, 2 after. */
+      position: Schema.Number,
+      scanLore: Schema.Boolean,
+      sourcePath: Schema.String
+    },
+    success: Schema.Struct({ entity: EntityId, created: Schema.Boolean }),
+    error: Schema.Union([NotFound, RefOperationRefused, StorageError])
+  }),
   /** Adopts ST's selected preset only while the user has no stored default. */
   Rpc.make("StImportDefaultPreset", {
     payload: { userId: UserId, importId: Schema.String, refId: RefId },
@@ -1552,16 +1586,38 @@ export class WriteOps extends RpcGroup.make(
     success: RefChange,
     error: Schema.Union([NotFound, StaleWrite, RefOperationRefused, StorageError])
   }),
+  /** A new note on the card; with `link`, a slot showing that shared note of the user's. */
   Rpc.make("CreateCardNote", {
-    payload: { userId: UserId, cardRefId: RefId, title: Schema.String },
+    payload: { userId: UserId, cardRefId: RefId, title: Schema.String, link: Schema.optionalKey(EntityId) },
     success: LibraryRef,
     error: Schema.Union([NotFound, StorageError])
   }),
-  /** A note of the live chat's own (DESIGN §4.1), an upstream like a card's note. */
+  /** A note of the live chat's own (DESIGN §4.1), an upstream like a card's note; `link` as above. */
   Rpc.make("CreateChatNote", {
-    payload: { userId: UserId, chatId: ChatId, title: Schema.String },
+    payload: { userId: UserId, chatId: ChatId, title: Schema.String, link: Schema.optionalKey(EntityId) },
     success: LibraryRef,
     error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * A shared named note (DESIGN §4.1). With `fromNoteRefId`, from that slot, which is linked
+   * to it in the same transaction: a chat's note at `chatNote`, by a branch-local revision.
+   */
+  Rpc.make("CreateSharedNote", {
+    payload: {
+      userId: UserId,
+      title: Schema.String,
+      content: Schema.String,
+      fromNoteRefId: Schema.optionalKey(RefId),
+      chatNote: Schema.optionalKey(ChatNotePosition)
+    },
+    success: LibraryRef,
+    error: Schema.Union([NotFound, StaleWrite, RefOperationRefused, StorageError])
+  }),
+  /** A linked slot becomes its own copy of the shared note's text, as `CreateSharedNote` writes a slot. */
+  Rpc.make("UnlinkNote", {
+    payload: { userId: UserId, noteRefId: RefId, chatNote: Schema.optionalKey(ChatNotePosition) },
+    success: LibraryRef,
+    error: Schema.Union([NotFound, StaleWrite, RefOperationRefused, StorageError])
   }),
   // --- Generation (ARCHITECTURE.md §15).
   /**
@@ -2105,14 +2161,28 @@ export class ReadOps extends RpcGroup.make(
     error: Schema.Union([NotFound, StorageError])
   }),
   /**
-   * The live chat's own notes, then these cards', by their upstream refs, oldest first; `first`
-   * marks each card's first note (ST's Character's Note).
+   * The live chat's own notes, then these cards', by their upstream refs, oldest first, each
+   * linked one with its shared note (whose text is in `doc.content`).
    */
   Rpc.make("ChatNoteEntries", {
     payload: { userId: UserId, chatId: ChatId, slotId: Schema.NullOr(SlotId), cards: Schema.Array(EntityId) },
     success: Schema.Array(
-      Schema.Struct({ ref: LibraryRef, doc: Doc, card: Schema.NullOr(EntityId), first: Schema.Boolean })
+      Schema.Struct({ ref: LibraryRef, doc: Doc, card: Schema.NullOr(EntityId), linked: Schema.NullOr(LinkedNote) })
     ),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * The user's shared notes not in the bin whose title has `query` (all without one), or the
+   * one `refId` or `entityId` names.
+   */
+  Rpc.make("ListSharedNotes", {
+    payload: {
+      userId: UserId,
+      query: Schema.optionalKey(Schema.String),
+      refId: Schema.optionalKey(RefId),
+      entityId: Schema.optionalKey(EntityId)
+    },
+    success: Schema.Array(SharedNote),
     error: Schema.Union([NotFound, StorageError])
   }),
   // --- ST data folder import (ARCHITECTURE.md §13).

@@ -209,7 +209,7 @@ it.live("inspector exposes activation reasons for every activated lore entry and
       assert.deepStrictEqual(sources.find((s) => s.kind === "note")!.activation, {
         kind: "note",
         activation: "explicit",
-        interval: 1,
+        interval: null,
         userMessages: null,
         due: true
       })

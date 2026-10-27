@@ -96,16 +96,6 @@ export class AssemblySources extends Context.Service<
       leaf: string | null,
       slots: ReadonlyArray<string>
     ) => Effect.Effect<ReadonlySet<string>, SourceError>
-    /**
-     * How many messages of the path, up to `leaf`, are on the user's side: those spoken by one
-     * of `personas`, else, unless spoken by one of `characters`, the user's own (ST counts
-     * `is_user` messages for its author's note's interval).
-     */
-    readonly userMessages: (
-      leaf: string | null,
-      personas: ReadonlyArray<string>,
-      characters: ReadonlyArray<string>
-    ) => Effect.Effect<number, SourceError>
     /** The model `binding` names, else the user's default; null when there's neither. */
     readonly model: (
       binding: { readonly connection: string; readonly model: string } | null
@@ -215,10 +205,12 @@ export interface Assembly {
   skippedNotes?: ReadonlyArray<NoteInput>
   /** The personas whose description a note places, so the persona description marker leaves them out. */
   placedPersonas?: ReadonlySet<string>
-  /** The chat has an author's note that is switched off: ST sends nothing that rides on it. */
-  authorNoteOff?: boolean
+  /**
+   * The chat's author's note while it's switched off: what rides on it still goes where it
+   * sits, without its own text (owner question 6 of DESIGN §4.1's notes).
+   */
+  offAuthorNote?: NoteInput
   noteDecisions?: ReadonlyMap<string, Extract<SourceActivation, { kind: "note" }>>
-  noteUserMessages?: number
   sendIfEmpty?: boolean
   mode?: Mode
   macros?: MacroEnvironment

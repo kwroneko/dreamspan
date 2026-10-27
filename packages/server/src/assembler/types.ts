@@ -13,7 +13,7 @@ import type { LegacyPresetDoc as PresetDoc, PromptCondition } from "@rp/shared/d
 import { Schema } from "effect"
 
 /** Bump whenever identical inputs would assemble differently. Missing means version 0. */
-export const ASSEMBLER_VERSION = 28
+export const ASSEMBLER_VERSION = 29
 
 export type Role = "system" | "user" | "assistant"
 
@@ -348,7 +348,12 @@ export interface SourcePins {
   }>
   readonly notes: ReadonlyArray<{
     readonly key: string
-    readonly found: ReadonlyArray<{ readonly entity: string; readonly revision: string; readonly first: boolean }>
+    readonly found: ReadonlyArray<{
+      readonly entity: string
+      readonly revision: string
+      readonly first: boolean
+      readonly link?: { readonly entity: string; readonly revision: string | null }
+    }>
   }>
   /** Absent in snapshots from before notes had intervals, which never counted. */
   readonly messageCount?: ReadonlyArray<{ readonly key: string; readonly count: number }>
@@ -464,9 +469,15 @@ export interface CardInput {
 export interface NoteInput {
   readonly entity: string
   readonly revision: string
+  /** The slot's document; a linked slot's `content` is its shared note's, read with it. */
   readonly doc: NoteDoc
-  /** The card's first note: ST's Character's Note, on unless the chat turned it off. */
+  /**
+   * The card's Character's Note: its first note that isn't a migrated module or a Character
+   * Author's Note, which ST's macros and lorebook matching read.
+   */
   readonly first: boolean
+  /** The shared note a linked slot showed, at its library head; null when it's gone (binned). */
+  readonly link?: { readonly entity: string; readonly revision: string | null }
 }
 
 /** The card whose note it is; null for the chat's own. */

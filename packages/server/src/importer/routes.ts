@@ -353,6 +353,7 @@ export const layer = Layer.unwrap(
               format,
               docJson: source.docJson,
               noteDocJson: source.noteDocJson,
+              notesDocJson: source.notesDocJson,
               avatar: avatar ?? null,
               assets: assets.flat()
             })

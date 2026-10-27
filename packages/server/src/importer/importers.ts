@@ -6,7 +6,7 @@ import { importPromptPreset } from "../formats/presetSettings.ts"
 import { createHash } from "node:crypto"
 import type { CardDoc } from "@rp/shared/docs/card.ts"
 import { LoreRole } from "@rp/shared/docs/lorebook.ts"
-import { MAX_NOTE_DEPTH, NOTE_SCHEMA_VERSION, noteDepth, type NoteDoc } from "@rp/shared/docs/note.ts"
+import { MAX_NOTE_DEPTH, NOTE_SCHEMA_VERSION, noteDepth, type NoteDoc, Placement } from "@rp/shared/docs/note.ts"
 import { PRESET_SCHEMA_VERSION } from "@rp/shared/docs/preset.ts"
 import { ImportIssue, ImportReport } from "@rp/shared/importReport.ts"
 import type { Doc, EntityKind } from "@rp/shared/library.ts"
@@ -15,6 +15,7 @@ import { importCard } from "../formats/cardImport.ts"
 import { isStPresetFile } from "../formats/preset.ts"
 import { attempt, type FormatError } from "../formats/safety.ts"
 import { importLorebook } from "../formats/worldInfo.ts"
+import { OUR_EXTENSION } from "../formats/lorebook.ts"
 import { docHash, searchText } from "../db/documents.ts"
 import { makeRegistry, type Registry } from "../registry.ts"
 import { type Sniffed, sniff } from "./detect.ts"
@@ -40,6 +41,8 @@ export interface Imported {
     readonly schemaVersion: number
     /** A card's note, without its owner: the card, which doesn't exist yet. */
     readonly note: Omit<NoteDoc, "owner"> | null
+    /** The card's other notes an export carried (`extensions.rp_harness`), without their owner. */
+    readonly notes?: ReadonlyArray<Omit<NoteDoc, "owner">>
   } | null
   readonly files: ReadonlyArray<ImportedFile>
 }
@@ -91,10 +94,74 @@ const characterNote = (card: CardDoc) => {
     title: "Character's Note",
     content: depthPrompt.prompt,
     placement: { mode: "depth", depth, role },
-    exportable: true
+    exportable: true,
+    // ST always sends it (DESIGN §4.1).
+    on_by_default: true
   }
   return { card: { ...card, extensions }, note, clamped }
 }
+
+/** Where a card module without a placement goes: with the definitions (DESIGN §4.1). */
+const WITH_THE_DEFINITIONS = { mode: "section", section: "after_main_prompt", role: "system" } as const
+
+/**
+ * The card notes an export put in our extension namespace (`extensions.rp_harness.notes`,
+ * or `modules` from before card modules became card notes, DESIGN §5.0), out of it. Each
+ * keeps its id as `module_id`, so a re-import finds it. `agent_editable` is never read: a
+ * file doesn't grant the agent anything (DESIGN §11). Invalid entries are dropped and reported.
+ */
+const exportedNotes = (card: CardDoc) => {
+  const ours = card.extensions[OUR_EXTENSION]
+  const issues: Array<ImportIssue> = []
+  if (!Predicate.isObject(ours) || (ours.notes === undefined && ours.modules === undefined))
+    return { card, notes: [], issues }
+  const notes: Array<Omit<NoteDoc, "owner">> = []
+  for (const key of ["modules", "notes"] as const) {
+    const list = ours[key]
+    if (list === undefined) continue
+    const items = Array.isArray(list) ? list : [list]
+    items.slice(0, MAX_EXPORTED_NOTES).forEach((item, index) => {
+      if (
+        !Predicate.isObject(item) ||
+        !Predicate.isString(item.id) ||
+        !Predicate.isString(item.title) ||
+        !Predicate.isString(item.content)
+      ) {
+        issues.push(
+          new ImportIssue({
+            level: "warning",
+            code: "card.invalid_note",
+            message: `${key === "modules" ? "Module" : "Note"} ${index} isn't valid; it was dropped.`,
+            path: ["data", "extensions", OUR_EXTENSION, key, index]
+          })
+        )
+        return
+      }
+      // A placement that isn't valid is dropped, so the note goes with the definitions.
+      const placement = Schema.is(Placement)(item.placement) ? item.placement : WITH_THE_DEFINITIONS
+      notes.push({
+        schema_version: NOTE_SCHEMA_VERSION,
+        title: item.title,
+        content: item.content,
+        placement,
+        exportable: true,
+        module_id: item.id,
+        ...(item.scan_lore === true ? { scan_lore: true } : {}),
+        ...(item.on_by_default === true ? { on_by_default: true } : {})
+      })
+    })
+  }
+  const { notes: _notes, modules: _modules, ...rest } = ours
+  const { [OUR_EXTENSION]: _ours, ...extensions } = card.extensions
+  return {
+    card: { ...card, extensions: Object.keys(rest).length > 0 ? { ...extensions, [OUR_EXTENSION]: rest } : extensions },
+    notes,
+    issues
+  }
+}
+
+/** At most this many notes come in with a card, as the card's other lists are bounded. */
+const MAX_EXPORTED_NOTES = 1000
 
 const cardImporter: Importer = {
   id: "card",
@@ -102,10 +169,12 @@ const cardImporter: Importer = {
   detect: (file) => file.container === "png" || file.container === "zip" || file.keys.has("spec"),
   parse: (bytes, fileName) =>
     Effect.map(importCard(bytes), (imported) => {
-      const { card, note, clamped } = characterNote(imported.card)
+      const lifted = exportedNotes(imported.card)
+      const { card, note, clamped } = characterNote(lifted.card)
+      const carried = lifted.issues.reduce(withIssue, imported.report)
       const noted = note
         ? withIssue(
-            imported.report,
+            carried,
             new ImportIssue({
               level: "info",
               code: "card.character_note",
@@ -113,7 +182,7 @@ const cardImporter: Importer = {
               path: ["data", "extensions", "depth_prompt"]
             })
           )
-        : imported.report
+        : carried
       const report =
         clamped === null
           ? noted
@@ -134,7 +203,8 @@ const cardImporter: Importer = {
           label: labelFrom(card.name, baseName(fileName)),
           doc: card,
           schemaVersion: card.schema_version,
-          note
+          note,
+          notes: lifted.notes
         },
         files: [
           ...(imported.avatar
@@ -220,9 +290,10 @@ export const parsedFile = ({ report, library, files, stCreatedAt }: Imported, fi
   // invalid is an importer bug, and is never stored. The note is checked as a card's, which
   // the writer makes it.
   const docCheck = library && validateDoc(library.kind, library.doc)
-  const noteCheck =
-    library?.note && validateDoc("note", { ...library.note, owner: { card: "0190a000-0000-7000-8000-000000000000" } })
-  const check = docCheck && !docCheck.ok ? docCheck : noteCheck
+  const asCards = [...(library?.note ? [library.note] : []), ...(library?.notes ?? [])].map((note) =>
+    validateDoc("note", { ...note, owner: { card: "0190a000-0000-7000-8000-000000000000" } })
+  )
+  const check = docCheck && !docCheck.ok ? docCheck : asCards.find((c) => !c.ok)
   if (check && !check.ok) {
     return new ParsedFile({
       report: failed(
@@ -244,7 +315,8 @@ export const parsedFile = ({ report, library, files, stCreatedAt }: Imported, fi
       label: library.label,
       ...encoded(library.doc),
       schemaVersion: library.schemaVersion,
-      noteDocJson: library.note && JSON.stringify(library.note)
+      noteDocJson: library.note && JSON.stringify(library.note),
+      ...(library.notes?.length ? { notesDocJson: library.notes.map((note) => JSON.stringify(note)) } : {})
     },
     media: library
       ? files.map(

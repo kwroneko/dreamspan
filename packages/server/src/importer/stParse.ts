@@ -115,7 +115,9 @@ const personaNote = (persona: StPersona): Omit<NoteDoc, "owner"> | null => {
       content: persona.description,
       placement,
       exportable: true,
-      kind: "persona_description"
+      kind: "persona_description",
+      // ST sends it in every chat with the persona (DESIGN §4.1).
+      on_by_default: true
     }
   )
 }

@@ -214,9 +214,45 @@ export const makeEditorHandlers = Effect.gen(function* () {
     ListCardNotes: ({ cardRefId }) =>
       Effect.flatMap(userId, (id) => reader.ListCardNotes({ userId: id, cardRefId })).pipe(settle("ListCardNotes")),
 
-    CreateCardNote: ({ cardRefId, title }) =>
-      Effect.flatMap(userId, (id) => writer.CreateCardNote({ userId: id, cardRefId, title }).pipe(changed(id))).pipe(
-        settle("CreateCardNote")
+    CreateCardNote: ({ cardRefId, title, link }) =>
+      Effect.flatMap(userId, (id) =>
+        writer
+          .CreateCardNote({ userId: id, cardRefId, title, ...(link === undefined ? {} : { link }) })
+          .pipe(changed(id))
+      ).pipe(settle("CreateCardNote")),
+
+    ListSharedNotes: ({ query, refId, entityId }) =>
+      Effect.flatMap(userId, (id) =>
+        reader.ListSharedNotes({
+          userId: id,
+          ...(query === undefined ? {} : { query }),
+          ...(refId === undefined ? {} : { refId }),
+          ...(entityId === undefined ? {} : { entityId })
+        })
+      ).pipe(settle("ListSharedNotes")),
+
+    CreateSharedNote: ({ title, content, fromNoteRefId, chatNote }) =>
+      Effect.flatMap(userId, (id) =>
+        writer
+          .CreateSharedNote({
+            userId: id,
+            title,
+            content,
+            ...(fromNoteRefId === undefined ? {} : { fromNoteRefId }),
+            ...(chatNote === undefined ? {} : { chatNote })
+          })
+          .pipe(changed(id))
+      ).pipe(
+        Effect.tap(() => Effect.sync(() => chatNote && hub.publish(chatNote.chatId, { _tag: "State" }))),
+        settle("CreateSharedNote")
+      ),
+
+    UnlinkNote: ({ noteRefId, chatNote }) =>
+      Effect.flatMap(userId, (id) =>
+        writer.UnlinkNote({ userId: id, noteRefId, ...(chatNote === undefined ? {} : { chatNote }) }).pipe(changed(id))
+      ).pipe(
+        Effect.tap(() => Effect.sync(() => chatNote && hub.publish(chatNote.chatId, { _tag: "State" }))),
+        settle("UnlinkNote")
       ),
 
     DeleteNote: ({ noteRefId }) =>

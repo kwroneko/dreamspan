@@ -1,8 +1,7 @@
-// The card editor: every card field, the card's modules and its notes (DESIGN §4.1, §4.1a).
-import type { CardModule } from "@rp/shared/docs/card.ts"
+// The card editor: every card field and the card's notes (DESIGN §4.1, §4.1a). Card modules
+// are card notes (§5.0).
 import { valueField } from "@rp/shared/editing.ts"
-import type { NoteEntry } from "@rp/shared/editorApi.ts"
-import { uuidv7 } from "@rp/shared/id.ts"
+import type { NoteEntry, SharedNote } from "@rp/shared/editorApi.ts"
 import { useEffect, useState } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"
@@ -12,9 +11,9 @@ import { Field, Fieldset, Input } from "../../ui/Field.tsx"
 import { FileDrop } from "../../ui/FileDrop.tsx"
 import { Card, CardHeader, EmptyState } from "../../ui/Surface.tsx"
 import type { Caller } from "./caller.ts"
-import { FieldTools, SwitchField, TextField } from "./controls.tsx"
-import { NoteEditor, PlacementField } from "./notes.tsx"
-import { type EditorStore, useValue } from "./store.ts"
+import { FieldTools, TextField } from "./controls.tsx"
+import { AddNoteMenu, NoteEditor, NoteRow, SharedNotePicker } from "./notes.tsx"
+import { type EditorStore, useEditorState, useValue } from "./store.ts"
 import { CardTextEditor } from "./CardTextEditor.tsx"
 import { PromptUseNote } from "./PromptUseNote.tsx"
 
@@ -140,87 +139,79 @@ function Tags({ store }: { store: EditorStore }) {
   )
 }
 
-function Modules({ store }: { store: EditorStore }) {
-  const modules = useValue<ReadonlyArray<CardModule>>(store, ["modules"]) ?? []
-  const add = () => {
-    const id = uuidv7()
-    store.setValue(["modules", `id=${id}`], { id, title: "New module", content: "", exportable: true })
-  }
-  return (
-    <div className="flex flex-col gap-4">
-      {modules.length === 0 && (
-        <EmptyState title="No modules">
-          <p>Modules are extra prompts that travel with the card: outfits, situations, private notes.</p>
-        </EmptyState>
-      )}
-      {modules.map((module) => {
-        const at = ["modules", `id=${module.id}`]
-        return (
-          <section
-            key={module.id}
-            aria-label={`Module ${module.title}`}
-            className="flex flex-col gap-3 rounded-md border border-border p-3"
-          >
-            <TextField store={store} path={[...at, "title"]} label="Title" />
-            <TextField store={store} path={[...at, "content"]} label="Content" rows={5} />
-            <PlacementField store={store} path={[...at, "placement"]} label="Placement" />
-            <SwitchField
-              store={store}
-              path={[...at, "exportable"]}
-              label="Exported with the card"
-              description="A private module never leaves in an export."
-            />
-            <SwitchField
-              store={store}
-              path={[...at, "agent_editable"]}
-              label="The agent may edit it"
-              description="Kept for agents, which aren't built yet. A file never turns this on."
-            />
-            <div>
-              <Button variant="ghost" onClick={() => void store.removeItem(at)}>
-                Remove the module
-              </Button>
-            </div>
-          </section>
-        )
-      })}
-      <div>
-        <Button onClick={add}>Add a module</Button>
-      </div>
-    </div>
-  )
-}
+/** The card's notes (DESIGN §4.1), each collapsed to a row: they travel with the card to every chat. */
 function Notes({ store, call }: { store: EditorStore; call: Caller }) {
   const [notes, setNotes] = useState<ReadonlyArray<NoteEntry> | null>(null)
   const [error, setError] = useState<AppError | null>(null)
   const [version, setVersion] = useState(0)
+  const [open, setOpen] = useState<string | null>(null)
+  const [picking, setPicking] = useState(false)
+  const name = useValue<string>(store, ["name"]) || "This card"
+  const entity = useEditorState(store).snapshot?.ref.entityId
   useEffect(() => {
     void call((client) => client("ListCardNotes", { cardRefId: store.refId })).then((result) =>
       result.ok ? setNotes(result.value) : setError(result.error)
     )
   }, [call, store, version])
-  const add = async () => {
+  const add = async (shared?: SharedNote) => {
+    const link = shared ? { link: shared.ref.entityId } : {}
     const result = await call(
-      (client) => client("CreateCardNote", { cardRefId: store.refId, title: "Note" }),
+      (client) => client("CreateCardNote", { cardRefId: store.refId, title: "Note", ...link }),
       ["library"]
     )
-    if (result.ok) setVersion(version + 1)
-    else setError(result.error)
+    if (!result.ok) return setError(result.error)
+    setOpen(result.value.id)
+    setVersion(version + 1)
   }
+  // A card's notes can only be conditioned on the card itself here; a chat offers its cast.
+  const cards = entity ? [{ entity, name }] : []
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-3">
       <ErrorAlert error={error} />
       {notes?.length === 0 && (
         <EmptyState title="No notes">
-          <p>Notes go into the chat where you place them, like ST's Character's Note, and you can have several.</p>
+          <p>
+            Notes travel with the card: outfits, situations, private notes. Each is switched on in the chats that use
+            it, or on in every chat.
+          </p>
         </EmptyState>
       )}
-      {notes?.map((entry) => (
-        <NoteEditor key={entry.ref.id} noteRef={entry.ref} call={call} onDeleted={() => setVersion(version + 1)} />
-      ))}
+      {notes && notes.length > 0 && (
+        <ul aria-label="The card's notes" className="flex flex-col">
+          {notes.map((entry) => (
+            <NoteRow
+              key={entry.ref.id}
+              doc={entry.doc}
+              label={entry.ref.label}
+              cards={cards}
+              open={open === entry.ref.id}
+              onOpenChange={(next) => setOpen(next ? entry.ref.id : null)}
+              keepMounted
+            >
+              <NoteEditor
+                key={`${entry.ref.id}:${version}`}
+                noteRef={entry.ref}
+                call={call}
+                cards={cards}
+                onDeleted={() => setVersion(version + 1)}
+                onRelinked={() => setVersion(version + 1)}
+              />
+            </NoteRow>
+          ))}
+        </ul>
+      )}
       <div>
-        <Button onClick={() => void add()}>Add a note</Button>
+        <AddNoteMenu onNew={() => void add()} onPick={() => setPicking(true)} />
       </div>
+      <SharedNotePicker
+        open={picking}
+        onOpenChange={setPicking}
+        call={call}
+        onPick={(note) => {
+          setPicking(false)
+          void add(note)
+        }}
+      />
     </div>
   )
 }
@@ -279,13 +270,9 @@ export function CardEditor({
         </div>
       </Card>
       <Card>
-        <CardHeader title="Modules" description="Extra prompts that travel with the card (saved with the card)." />
-        <Modules store={store} />
-      </Card>
-      <Card>
         <CardHeader
           title="Notes"
-          description="Each note is saved on its own, and can be placed anywhere in the chat."
+          description="Each note is saved on its own, and goes where it says in the chats it's on in."
         />
         <Notes store={store} call={call} />
       </Card>

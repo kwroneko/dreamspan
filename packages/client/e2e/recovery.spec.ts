@@ -269,27 +269,3 @@ test("reverting a field links to its recovered text", async ({ page }) => {
   const links = await page.locator('a[href="/bin?section=recovered"]').count()
   expect(links).toBeGreaterThan(0)
 })
-
-test("removing a module keeps its source recovery link", async ({ page }) => {
-  const card = await admin((api) => api.CreateCard({ label: "Module recovery", name: "Synthetic" }))
-  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
-  await page.goto(`${server().url}/library/${card.id}`)
-  await page.getByRole("button", { name: "Add a module", exact: true }).click()
-  const module = page.getByRole("region", { name: "Module New module", exact: true })
-  await module.getByRole("textbox", { name: /^Content/ }).fill("Module text kept after removal")
-  await expect
-    .poll(() =>
-      admin((api) => api.OpenEditor({ refId: card.id })).then((editor) =>
-        editor.drafts.some((draft) => draft.content === "Module text kept after removal")
-      )
-    )
-    .toBe(true)
-  await module.getByRole("button", { name: "Remove the module", exact: true }).click()
-  await expect(module).toHaveCount(0)
-  await expect(page.locator('a[href="/bin?section=recovered"]')).toHaveCount(1)
-  expect(
-    (await admin((api) => api.ListRecoveredTexts({ limit: 10, before: null }))).some(
-      (text) => text.content === "Module text kept after removal"
-    )
-  ).toBe(true)
-})

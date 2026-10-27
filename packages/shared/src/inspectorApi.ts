@@ -21,7 +21,9 @@ export const SourceActivation = Schema.Union([
         kind: Schema.Literal("keys"),
         primaryKey: Schema.String,
         secondaryKeys: Schema.Array(Schema.String),
-        logic: Schema.optionalKey(SelectiveLogic)
+        logic: Schema.optionalKey(SelectiveLogic),
+        /** The notes scanned for lorebook entries (`scan_lore`) whose text has the primary key. */
+        notes: Schema.optionalKey(Schema.Array(Schema.String))
       })
     ])
   }),
@@ -34,8 +36,11 @@ export const SourceActivation = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("note"),
     activation: Schema.Literals(["explicit", "default"]),
+    /** Only in snapshots from before intervals were dropped; null since. */
     interval: Schema.NullOr(Schema.Int),
     userMessages: Schema.NullOr(Schema.Int),
+    /** When the note applies, for one with a condition: "on Aria's turn", "while Bram isn't muted". */
+    condition: Schema.optionalKey(Schema.String),
     due: Schema.Boolean
   })
 ])

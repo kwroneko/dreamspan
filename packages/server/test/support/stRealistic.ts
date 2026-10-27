@@ -61,6 +61,25 @@ const CARDS: ReadonlyArray<CardSpec> = [
   { name: "Captain Osei", hash: "d5a2e60c", role: "the stern captain of the survey ship Kepler" }
 ]
 
+/**
+ * ST's characters' own author's notes (`extension_settings.note.chara`), by avatar file name:
+ * Aria's used before the chat's note, Aria being in the inn's group too; Karen's not used.
+ */
+const CHARACTER_NOTES = [
+  {
+    name: chubFile(CARDS[0]!.name, CARDS[0]!.hash),
+    prompt: "Aria counts coins when she lies.",
+    useChara: true,
+    position: 1
+  },
+  {
+    name: chubFile(CARDS[1]!.name, CARDS[1]!.hash),
+    prompt: "Karen's case notes go here.",
+    useChara: false,
+    position: 2
+  }
+]
+
 const PERSONAS = [
   { file: "sam.png", name: "Sam", description: "Sam is a wandering scribe with ink-stained fingers." },
   { file: "kim.png", name: "Kim", description: "Kim carries a lantern and asks too many questions." },
@@ -114,9 +133,9 @@ const chatLines = (
   persona: (typeof PERSONAS)[number],
   count: number,
   start: number,
-  options: { hiddenRun?: number; group?: boolean } = {}
+  options: { hiddenRun?: number; group?: boolean; metadata?: Record<string, unknown> } = {}
 ) => {
-  const lines: Array<unknown> = [header({})]
+  const lines: Array<unknown> = [header(options.metadata ?? {})]
   let at = start
   for (let i = 0; i < count; i++) {
     at += 60_000 + Math.floor(next() * 600_000)
@@ -231,6 +250,22 @@ const nightRp = (base: Record<string, unknown>) => {
 }
 
 /**
+ * Chats' author's notes, by card and chat: one sent every message, one with text that ST
+ * never sent (frequency 0), and one empty.
+ */
+const AUTHOR_NOTES: Record<string, Record<string, unknown>> = {
+  "0:0": {
+    note_prompt: "Keep the tone wry; the harbor is always cold.",
+    note_interval: 1,
+    note_position: 1,
+    note_depth: 4,
+    note_role: 0
+  },
+  "1:0": { note_prompt: "Mention the storm warning.", note_interval: 0, note_position: 1, note_depth: 2, note_role: 0 },
+  "1:1": { note_prompt: "", note_interval: 1, note_position: 1, note_depth: 4, note_role: 0 }
+}
+
+/**
  * Writes the folder under `root` (ST's `data/default-user` layout) and returns that path.
  * `summary` is how ST sent the hidden run's summary: injected at depth 3 (the default), only
  * through `{{summary}}` in the selected preset's main prompt (the Summarize extension on with
@@ -307,7 +342,16 @@ export const writeRealisticStFolder = (
           role: 0,
           template: "[Story so far: {{summary}}]"
         },
-        note: { default: "", defaultPosition: 1, defaultDepth: 4, defaultRole: 0, defaultInterval: 1 },
+        note: {
+          default: "",
+          defaultPosition: 1,
+          defaultDepth: 4,
+          defaultRole: 0,
+          defaultInterval: 1,
+          // Lorebook entries trigger on the notes; two characters have an author's note of their own.
+          allowWIScan: true,
+          chara: CHARACTER_NOTES
+        },
         disabledExtensions: summary === "disabled" ? ["memory"] : []
       },
       oai_settings: { preset_settings_openai: "Celia 4.2" }
@@ -316,6 +360,12 @@ export const writeRealisticStFolder = (
   for (const persona of PERSONAS) put(`User Avatars/${persona.file}`, card(persona.name, ""))
 
   const files_ = CARDS.map((spec) => ({ ...spec, file: chubFile(spec.name, spec.hash) }))
+  // A card with a multi-line Character's Note.
+  const depthPrompt = {
+    prompt: "{{char}} wears a salt-stained coat.\n{{char}} never takes off the brass ring.",
+    depth: 4,
+    role: "system"
+  }
   for (const spec of files_) {
     const description = `${spec.name} is ${spec.role}. ${prose(next, 30)}\n\n${prose(next, 30)}`
     const book = spec.book
@@ -326,7 +376,11 @@ export const writeRealisticStFolder = (
       card(
         spec.name,
         `*${prose(next, 5)}* "Well, {{user}}? Are you coming or not?"`,
-        { world: spec.book ? `${spec.file.replace("_spec_v2", "")}_sillytavern` : "", talkativeness: "0.5" },
+        {
+          world: spec.book ? `${spec.file.replace("_spec_v2", "")}_sillytavern` : "",
+          talkativeness: "0.5",
+          ...(spec === files_[2] ? { depth_prompt: depthPrompt } : {})
+        },
         {
           ...(book ? { character_book: book } : {}),
           description,
@@ -365,7 +419,8 @@ export const writeRealisticStFolder = (
       day += 86_400_000 * (1 + Math.floor(next() * 9))
       const name = `${spec.name} - ${stamp(new Date(day))}`
       const lines = chatLines(next, [{ name: spec.name }], PERSONAS[n % 2]!, count, day, {
-        ...(count > 200 ? { hiddenRun: Math.floor(count / 2) } : {})
+        ...(count > 200 ? { hiddenRun: Math.floor(count / 2) } : {}),
+        ...(AUTHOR_NOTES[`${index}:${n}`] ? { metadata: AUTHOR_NOTES[`${index}:${n}`] } : {})
       })
       put(`chats/${spec.file}/${name}.jsonl`, jsonl(lines))
       // A branch off the longest chat, as ST saves one.

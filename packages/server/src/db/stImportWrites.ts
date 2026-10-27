@@ -136,7 +136,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
           owner: { chat: chatId as ChatId },
           exportable: true,
           kind: note.kind,
-          ...(note.interval === undefined || !current ? {} : { interval: note.interval }),
+          ...(note.scanLore ? { scan_lore: true } : {}),
           ...(note.template === undefined || !current ? {} : { template: note.template }),
           ...(note.covers === undefined || !current ? {} : { covers: note.covers }),
           ...(note.sources?.[index] ? { source_slot_id: note.sources[index] } : {})

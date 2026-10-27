@@ -76,6 +76,8 @@ export interface CardInfo {
    * card's own book off in a chat unless that file is in the folder.
    */
   readonly book: boolean
+  /** Its Character Author's Note from ST's settings, when the import made one and ST applies it. */
+  readonly characterNote?: EntityId | null
 }
 
 export interface Link {
@@ -110,6 +112,8 @@ export interface ChatState {
   readonly vars: Readonly<Record<string, string>>
   readonly authorNote: string | null
   readonly summary: string | null
+  /** Character Author's Notes a group chat switched off, as ST ignores them there. */
+  readonly characterNotesOff?: ReadonlyArray<string>
 }
 
 /** Where ST put an extension prompt (`extension_prompt_types`), as a note's placement. */
@@ -293,9 +297,11 @@ const authorNoteOf = (folder: FolderContext, header: StChatHeader | null): StImp
     title: "Author's Note",
     contents: [note.content],
     placement: placementOf(note.position === -1 ? 1 : note.position, note.depth, note.role),
-    interval: Math.max(0, note.interval),
-    // ST never sends a note whose frequency is 0.
-    activate: note.interval > 0
+    ...(folder.settings?.allowWIScan ? { scanLore: true } : {}),
+    // On only if ST sent it: it has text and its frequency isn't 0 (DESIGN §4.1). No
+    // frequency is kept: a note goes every turn. An empty one is kept, off, as what rides
+    // on the author's note goes where it is.
+    activate: note.content.trim() !== "" && note.interval !== 0
   }
 }
 
@@ -387,7 +393,7 @@ export const chatStateChange = (
   const mapped = membership(folder, file.link, file.header, file.spoke)
   const authorNote = authorNoteOf(folder, file.header)
   const summary = summaryOf(folder, file.summaries, file.messages, file.run)
-  const state: ChatState = {
+  const state: { -readonly [K in keyof ChatState]: ChatState[K] } = {
     participants: mapped.participants,
     lorebooks: mapped.lorebooks,
     lorebookBindings: mapped.lorebookBindings,
@@ -437,6 +443,22 @@ export const chatStateChange = (
   for (const [name, value] of mapped.vars) {
     if (previous?.vars[name] !== state.vars[name]) events.push({ key: "var.set", value: { name, value } })
   }
+  // ST applies a card's own author's note only in one-to-one chats: a group chat has it off.
+  const byEntity = new Map([...folder.cards.values()].map((card) => [card.entityId as string, card]))
+  const characterNotesOff = file.link.group
+    ? mapped.participants.flatMap((entity) => {
+        const note = byEntity.get(entity)?.characterNote
+        return note ? [note] : []
+      })
+    : []
+  for (const note of characterNotesOff) {
+    if (!previous?.characterNotesOff?.includes(note)) events.push({ key: "note.deactivate", value: { note } })
+  }
+  if (characterNotesOff.length > 0) state.characterNotesOff = characterNotesOff
+  // ST would have sent the character's note in place of the chat's own, which isn't empty.
+  const chara = file.link.group ? null : (file.link.card?.file ?? null)
+  const replacing = folder.settings?.characterNotes.find((n) => n.card === chara && n.useChara && n.position === 0)
+  const replacedAuthorNote = replacing !== undefined && (file.header?.authorNote?.content.trim() ?? "") !== ""
   const notes: Array<StImportNote> = []
   const removedNotes: Array<StImportNote["kind"]> = []
   if (authorNote !== null && state.authorNote !== previous?.authorNote) notes.push(authorNote)
@@ -451,6 +473,7 @@ export const chatStateChange = (
     missingWorlds: mapped.missingWorlds,
     summaryIndex: summary?.index ?? null,
     summaryOnLast: file.summaries.some((s) => s.index >= file.messages - 1),
-    summaryTrimmed: summary?.trimmed ?? false
+    summaryTrimmed: summary?.trimmed ?? false,
+    replacedAuthorNote
   }
 }

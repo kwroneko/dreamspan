@@ -179,17 +179,30 @@ export const CastChange = Schema.Union([
 ])
 export type CastChange = typeof CastChange.Type
 
+/** The shared note a slot links to (DESIGN §4.1): in the bin, the slot sends nothing. */
+export const LinkedNote = Schema.Struct({
+  refId: RefId,
+  entityId: EntityId,
+  title: Schema.String,
+  binned: Schema.Boolean,
+  /** How many slots link to it. */
+  usedBy: Schema.Int
+})
+export type LinkedNote = typeof LinkedNote.Type
+
 /**
- * A note a chat can use (DESIGN §4.1): the chat's own, or one of a participant card's, by its
- * upstream ref, and whether it's on at the position asked about.
+ * A note a chat can use (DESIGN §4.1): the chat's own, or one of a cast card's (a card the
+ * user plays included), by its upstream ref, and whether it's on at the position asked
+ * about. A linked slot's `doc.content` is its shared note's text.
  */
 export class ChatNote extends Schema.Class<ChatNote>("ChatNote")({
   ref: LibraryRef,
   doc: Doc,
   /** The card whose note it is; null for the chat's own. */
   card: Schema.NullOr(EntityId),
-  /** The card's first note, ST's Character's Note: on unless the chat turns it off. */
-  first: Schema.Boolean,
+  /** A card's note on in every chat unless the chat switches it off (`on_by_default`). */
+  onByDefault: Schema.Boolean,
+  linked: Schema.NullOr(LinkedNote),
   active: Schema.Boolean
 }) {}
 
@@ -398,7 +411,7 @@ export class ChatSetupApi extends RpcGroup.make(
     error: Schema.Union([...Errors])
   }),
   /**
-   * The chat's own notes, then its characters' (participants the user doesn't play), each
+   * The chat's own notes, then each cast card's (the ones the user plays included), each
    * with whether it's on after `slotId` (null: at the start).
    */
   Rpc.make("ListChatNotes", {
@@ -406,9 +419,12 @@ export class ChatSetupApi extends RpcGroup.make(
     success: Schema.Array(ChatNote),
     error: Schema.Union([...Errors])
   }),
-  /** A note of the chat's own, off until the chat turns it on (`ChangeCast` with `Note`). */
+  /**
+   * A note of the chat's own, off until the chat turns it on (`ChangeCast` with `Note`); with
+   * `link`, a slot showing that shared note.
+   */
   Rpc.make("CreateChatNote", {
-    payload: { chatId: ChatId, title: Schema.String },
+    payload: { chatId: ChatId, title: Schema.String, link: Schema.optionalKey(EntityId) },
     success: LibraryRef,
     error: Schema.Union([...Errors])
   }),

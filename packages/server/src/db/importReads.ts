@@ -34,7 +34,15 @@ export const makeImportReadHandlers = Effect.gen(function* () {
       Effect.gen(function* () {
         const ref = yield* lib.ownedRef(userId, refId)
         const json = yield* docJson(ref.head_revision_id)
-        const source = { kind: ref.kind, label: ref.label, docJson: json, noteDocJson: null, avatar: null, assets: [] }
+        const source = {
+          kind: ref.kind,
+          label: ref.label,
+          docJson: json,
+          noteDocJson: null,
+          notesDocJson: [],
+          avatar: null,
+          assets: []
+        }
         if (ref.kind !== "card") return new ExportSource(source)
         const note = yield* lib.cardNote(userId, ref.entity_id)
         const doc = JSON.parse(json) as Record<string, unknown>
@@ -42,9 +50,32 @@ export const makeImportReadHandlers = Effect.gen(function* () {
         const assets = yield* Effect.forEach(assetIds, ([uri, id]) =>
           Effect.map(ownedMedia(userId, id), (file) => (file ? [{ uri, ...file }] : []))
         )
+        // The card's notes, a linked one with its shared note's text, and none of one whose
+        // shared note is in the bin: it has nothing to send. The first is ST's Character's Note.
+        const notes = yield* sql<{ id: string; doc_json: string; shared: string | null }>`
+          SELECT r.id, h.doc_json, (SELECT json_extract(sh.doc_json, '$.content') FROM entities se
+              JOIN entity_refs sr ON sr.entity_id = se.id AND sr.ref_kind = 'upstream'
+              JOIN entity_revisions sh ON sh.id = sr.head_revision_id
+              WHERE se.id = json_extract(h.doc_json, '$.link') AND se.owner_user_id = ${userId}
+                AND se.kind = 'note' AND se.deleted_at IS NULL) AS shared
+          FROM entities e JOIN entity_refs r ON r.entity_id = e.id AND r.ref_kind = 'upstream'
+          JOIN entity_revisions h ON h.id = r.head_revision_id
+          WHERE e.owner_user_id = ${userId} AND e.kind = 'note' AND e.deleted_at IS NULL
+            AND json_extract(h.doc_json, '$.owner.card') = ${ref.entity_id}
+          ORDER BY e.id`
+        const resolved = (row: (typeof notes)[number]) => {
+          const doc = JSON.parse(row.doc_json) as Record<string, unknown>
+          if (doc.link === undefined) return row.doc_json
+          return row.shared === null ? null : JSON.stringify({ ...doc, content: row.shared })
+        }
+        const first = notes.find((row) => row.id === note?.id)
         return new ExportSource({
           ...source,
-          noteDocJson: note && (yield* docJson(note.head_revision_id)),
+          noteDocJson: first ? resolved(first) : null,
+          notesDocJson: notes.flatMap((row) => {
+            const json = row === first ? null : resolved(row)
+            return json === null ? [] : [json]
+          }),
           avatar: (yield* ownedMedia(userId, doc.avatar_media_id)) ?? null,
           assets: assets.flat()
         })

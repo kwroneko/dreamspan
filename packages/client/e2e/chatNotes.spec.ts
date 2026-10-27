@@ -8,6 +8,7 @@ import { Effect } from "effect"
 import type { RefId } from "@rp/shared/library.ts"
 import { type FakeProvider, startProvider } from "./support/provider.ts"
 import { asUser } from "./support/rpc.ts"
+import { expectTextBox } from "./support/textbox.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
 const server = serverPerFile(withAdmin)
@@ -71,14 +72,12 @@ test("a note made in the chat goes into the request once on, and out once off", 
 
   await page.getByRole("group", { name: "Chat panel" }).getByRole("button", { name: "Notes" }).click()
   const dialog = page.getByRole("tabpanel", { name: "Notes" })
-  await dialog.getByRole("button", { name: "New note" }).click()
+  await dialog.getByRole("region", { name: "This chat's notes" }).getByRole("button", { name: "Add note" }).click()
+  await page.getByRole("menuitem", { name: "New note" }).click()
   const editor = dialog.getByRole("region", { name: "Note Note" })
-  await editor.getByLabel("Content").fill("Lanterns burn along the levee.")
-  const interval = editor.getByRole("spinbutton", { name: "Every how many of your messages" })
-  await interval.fill("2")
-  await interval.fill("")
-  await editor.getByRole("textbox", { name: "Content" }).focus()
-  await expect(interval).toHaveValue("")
+  await editor.getByRole("textbox", { name: /^Content/ }).fill("Lanterns burn along the levee.")
+  // No frequency: a note goes every turn (DESIGN §4.1).
+  await expect(editor.getByRole("spinbutton")).toHaveCount(0)
   await editor.getByRole("button", { name: "Save the note" }).click()
   await page.getByRole("dialog", { name: "Save a revision" }).getByRole("button", { name: "Save revision" }).click()
   await expect(editor.getByText("unsaved changes")).toHaveCount(0)
@@ -91,18 +90,20 @@ test("a note made in the chat goes into the request once on, and out once off", 
   ).toBeUndefined()
   // Made here, it's on from here.
   const own = dialog.getByRole("region", { name: "This chat's notes" })
-  await expect(own.getByRole("switch", { name: "Note" })).toBeChecked()
-  // Mira's note is hers: editing it here says so.
+  await expect(own.getByRole("switch", { name: "Note: on in this chat" })).toBeChecked()
+  // Mira's note is hers: editing it here says so, and it isn't deleted from here.
   const hers = dialog.getByRole("region", { name: "Mira's notes" })
-  await hers.getByRole("button", { name: "Edit Outfit" }).click()
+  await hers.getByRole("button", { name: /^Outfit/ }).click()
   await expect(hers.getByText("saving it changes it in the library, in every chat with Mira")).toBeVisible()
-  await expect(hers.getByRole("button", { name: "Delete the note" })).toHaveCount(0)
+  await hers.getByRole("button", { name: "More actions for Outfit" }).click()
+  await expect(page.getByRole("menuitem", { name: "Delete the note" })).toHaveCount(0)
+  await page.keyboard.press("Escape")
 
   // The panel stays open beside the chat while sending.
   expect(await send(page, "Is the levee holding?")).toContain("Lanterns burn along the levee.")
 
-  await own.getByRole("switch", { name: "Note" }).click()
-  await expect(own.getByRole("switch", { name: "Note" })).not.toBeChecked()
+  await own.getByRole("switch", { name: "Note: on in this chat" }).click()
+  await expect(own.getByRole("switch", { name: "Note: on in this chat" })).not.toBeChecked()
   expect(await send(page, "And now?")).not.toContain("Lanterns burn")
 })
 
@@ -119,8 +120,8 @@ test("the notes fit a phone, under the Content-Security-Policy", async ({ browse
   await page.getByRole("button", { name: "Chat panel" }).click()
   await page.getByRole("dialog").getByRole("tab", { name: "Notes" }).click()
   const hers = page.getByRole("tabpanel", { name: "Notes" }).getByRole("region", { name: "Mira's notes" })
-  await hers.getByRole("button", { name: "Edit Outfit" }).click()
-  await expect(hers.getByLabel("Content")).toBeVisible()
+  await hers.getByRole("button", { name: /^Outfit/ }).click()
+  await expect(hers.getByRole("textbox", { name: /^Content/ })).toBeVisible()
   expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0)
   expect(violations).toEqual([])
   await context.close()
@@ -200,10 +201,10 @@ test("editing at a displayed leaf keeps the sibling branch's note revision", asy
   const openAt = async (leaf: string) => {
     // A link can open the panel at a tab.
     await page.goto(`${server().url}/chats/${chat.id}?leaf=${leaf}&panel=notes`)
-    await page.getByRole("button", { name: "Edit Weather" }).click()
+    await page.getByRole("button", { name: /^Weather/ }).click()
   }
   await openAt(left)
-  await expect(editor.getByRole("textbox", { name: "Content" })).toHaveValue("RAIN")
+  await expectTextBox(editor.getByRole("textbox", { name: "Content" }), "RAIN")
   await editor.getByRole("textbox", { name: "Content" }).fill("SUN")
   await editor.getByRole("button", { name: "Save the note" }).click()
   await page.getByRole("dialog", { name: "Save a revision" }).getByRole("button", { name: "Save revision" }).click()
@@ -211,7 +212,7 @@ test("editing at a displayed leaf keeps the sibling branch's note revision", asy
   const listed = await admin((api) => api.ListChatNotes({ chatId: chat.id, slotId: left }))
   expect(listed.find((n) => n.ref.id === note.id)?.doc.content).toBe("SUN")
   await openAt(right)
-  await expect(editor.getByRole("textbox", { name: "Content" })).toHaveValue("RAIN")
+  await expectTextBox(editor.getByRole("textbox", { name: "Content" }), "RAIN")
   await openAt(left)
-  await expect(editor.getByRole("textbox", { name: "Content" })).toHaveValue("SUN")
+  await expectTextBox(editor.getByRole("textbox", { name: "Content" }), "SUN")
 })

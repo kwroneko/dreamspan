@@ -3,7 +3,7 @@
 // saving commits the drafts as one revision. Writes carry the row version the client saw.
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
-import { ChatId, SlotId } from "./chat.ts"
+import { ChatId, EntityId, SlotId } from "./chat.ts"
 import { BinItem } from "./bin.ts"
 import { Draft, DraftRestore, DraftState } from "./drafts.ts"
 import { NotFound, ServerError, StaleWrite } from "./errors.ts"
@@ -63,6 +63,16 @@ export class EditorSnapshot extends Schema.Class<EditorSnapshot>("EditorSnapshot
 }) {}
 
 export class NoteEntry extends Schema.Class<NoteEntry>("NoteEntry")({ ref: LibraryRef, doc: Doc }) {}
+
+/** A shared named note (DESIGN §4.1), as the picker lists it: how many slots link to it. */
+export class SharedNote extends Schema.Class<SharedNote>("SharedNote")({
+  ref: LibraryRef,
+  title: Schema.String,
+  /** The start of its text, on one line. */
+  excerpt: Schema.String,
+  /** The note slots (cards' and chats' notes) whose library head links to it. */
+  usedBy: Schema.Int
+}) {}
 
 /** A label as the library shows it: one line, trimmed, not empty. */
 const Label = Schema.Trimmed.check(Schema.isMinLength(1), Schema.isMaxLength(200), Schema.isPattern(/^\P{Cc}*$/u))
@@ -214,10 +224,48 @@ export class EditorApi extends RpcGroup.make(
     success: Schema.Array(NoteEntry),
     error: Schema.Union([...Errors])
   }),
+  /** A new note on the card, off in chats; with `link`, a slot showing that shared note. */
   Rpc.make("CreateCardNote", {
-    payload: { cardRefId: RefId, title: Schema.String },
+    payload: { cardRefId: RefId, title: Schema.String, link: Schema.optionalKey(EntityId) },
     success: LibraryRef,
     error: Schema.Union([...Errors])
+  }),
+  // --- Shared named notes (DESIGN §4.1): note entities owned by no card or chat.
+  /**
+   * The shared notes not in the bin, by title (`query` filters it), or just the one `refId`
+   * or `entityId` (a slot's `link`) names.
+   */
+  Rpc.make("ListSharedNotes", {
+    payload: {
+      query: Schema.optionalKey(Schema.String),
+      refId: Schema.optionalKey(RefId),
+      entityId: Schema.optionalKey(EntityId)
+    },
+    success: Schema.Array(SharedNote),
+    error: Schema.Union([...Errors])
+  }),
+  /**
+   * A new shared note. With `fromNoteRefId`, made from that slot's text and title, and the
+   * slot linked to it in the same transaction: a chat's note at `chatNote`, on that branch.
+   */
+  Rpc.make("CreateSharedNote", {
+    payload: {
+      title: Schema.String,
+      content: Schema.String,
+      fromNoteRefId: Schema.optionalKey(RefId),
+      chatNote: Schema.optionalKey(ChatNotePosition)
+    },
+    success: LibraryRef,
+    error: Schema.Union([...Writes])
+  }),
+  /**
+   * Turns a linked slot into its own copy: the shared note's text (its last revision, even
+   * in the bin) as the slot's content, and no link. A chat's note at `chatNote`, on that branch.
+   */
+  Rpc.make("UnlinkNote", {
+    payload: { noteRefId: RefId, chatNote: Schema.optionalKey(ChatNotePosition) },
+    success: LibraryRef,
+    error: Schema.Union([...Writes])
   }),
   /** A card's note or a chat's, to the bin like any delete. */
   Rpc.make("DeleteNote", { payload: { noteRefId: RefId }, success: BinItem, error: Schema.Union([...Errors]) })

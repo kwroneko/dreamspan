@@ -369,7 +369,7 @@ const apply = (state: ChatState, { data, scope }: FoldableEvent): ChatState => {
 
 /**
  * The notes the events turned on or off, as they last left each (DESIGN §4.1). A note they
- * never named keeps its default: a card's first note is on, every other note off.
+ * never named keeps its default: a card's note with `on_by_default` is on, every other note off.
  */
 export const noteSwitches = (events: Iterable<FoldableEvent>) => {
   const last = new Map<string, boolean>()

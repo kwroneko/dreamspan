@@ -11,20 +11,23 @@ import {
   keepsRegexApproval,
   newCardNote,
   newChatNote,
+  newSharedNote,
   parseField,
   validateDoc,
   withoutGrantedAgentEdits
 } from "@rp/shared/editing.ts"
-import { EditConflict, InvalidDocument } from "@rp/shared/editorApi.ts"
+import { type ChatNotePosition, EditConflict, InvalidDocument } from "@rp/shared/editorApi.ts"
 import type { ChatId, EntityId } from "@rp/shared/chat.ts"
+import type { UserId } from "@rp/shared/domain.ts"
 import type { Doc, EntityKind } from "@rp/shared/library.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import { editedDoc } from "@rp/shared/presetConditions.ts"
-import { Effect } from "effect"
+import { Effect, Predicate } from "effect"
 import type { SqlClient, SqlError } from "effect/sql"
 import type { makeDraftStore } from "./drafts.ts"
 import { makeGraphWrites } from "./graphWrites.ts"
 import { noteAt } from "./noteAt.ts"
+import { sharedNote } from "./sharedNotes.ts"
 import { type makeLibraryQueries, type RefRow, toLibraryRef } from "./library.ts"
 import type { EncodedDoc } from "./libraryWrites.ts"
 import { NotFound, RefChange, RefOperationRefused, StaleWrite, type WriteOps } from "./ops.ts"
@@ -69,6 +72,7 @@ export interface LibrarySteps {
     readonly sourcePath: string | null
     readonly sourceHash: string | null
   }) => Sql<RefRow>
+  readonly checkReferences: (userId: string, doc: Doc) => Effect.Effect<void, NotFound | SqlError.SqlError>
 }
 
 const parseValue = (content: string): unknown => {
@@ -103,6 +107,52 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps) => {
       return yield* steps.changed(ref.id)
     })
 
+  /**
+   * A chat's note edited from a position: a revision on the one bound there, and the binding
+   * event from there on, on that branch (DESIGN §3.4), leaving the library head and sibling
+   * branches as they are.
+   */
+  const chatNoteEdit = (userId: UserId, ref: RefRow, doc: Doc, message: string | null, position: ChatNotePosition) =>
+    Effect.gen(function* () {
+      const current = yield* steps.revision(ref.head_revision_id)
+      // The binding supplies applicability for an edit; the import's source no longer does.
+      const { source_slot_id: _source, ...edited } = doc
+      const encoded = steps.encode(doc.kind === "imported_summary" ? edited : doc)
+      if (encoded.hash === current.doc_hash) return new RefChange({ ref: toLibraryRef(ref), followers: [] })
+      const revision = yield* steps.insertRevision({
+        entityId: ref.entity_id,
+        schemaVersion: current.schema_version,
+        doc: encoded,
+        parents: [ref.head_revision_id],
+        origin: "user",
+        originRef: null,
+        message
+      })
+      yield* makeGraphWrites(sql, drafts).insertStateEvent(userId, position.chatId, position.slotId, null, null, {
+        key: "note.binding",
+        value: { note: ref.entity_id as EntityId, revision: revision as never }
+      })
+      return new RefChange({ ref: toLibraryRef({ ...ref, head_revision_id: revision }), followers: [] })
+    })
+
+  /**
+   * A note slot as it stands where it's edited: a chat's note at `position` when given (its
+   * branch-local revision), else the library head; and the write for its change there.
+   */
+  const noteSlot = (userId: UserId, refId: string, position: ChatNotePosition | undefined) =>
+    Effect.gen(function* () {
+      const owned = yield* lib.ownedRef(userId, refId)
+      if (owned.kind !== "note") return yield* new NotFound({ entity: "note", id: refId })
+      const head = yield* lib.loadDoc(owned.head_revision_id)
+      const chat = Predicate.isObject(head.owner) && head.owner.chat !== undefined
+      const resolved = chat && position ? yield* noteAt(sql, lib, userId, owned, position) : null
+      const ref = resolved?.ref ?? owned
+      const doc = resolved?.doc ?? head
+      const write = (next: Doc, message: string) =>
+        resolved && position ? chatNoteEdit(userId, ref, next, message, position) : userEdit(ref, next, message, null)
+      return { ref, doc, write }
+    })
+
   /** A revision of the ref's own entity, or none. */
   const entityRevision = (ref: RefRow, revisionId: string) =>
     sql<{ doc_json: string; schema_version: number; created_at: number }>`
@@ -110,6 +160,15 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps) => {
       WHERE id = ${revisionId} AND entity_id = ${ref.entity_id}`.pipe(Effect.map(([row]) => row ?? null))
 
   const refused = (ref: RefRow, reason: string) => new RefOperationRefused({ refId: ref.id, reason })
+
+  /** A new slot linked to a shared note takes its title; the shared note must be the user's, live. */
+  const linkTitle = (userId: UserId, link: EntityId | undefined) =>
+    Effect.gen(function* () {
+      if (link === undefined) return null
+      const shared = yield* sharedNote(sql, userId, link)
+      if (shared === null || shared.deleted === 1) return yield* new NotFound({ entity: "note", id: link })
+      return shared.title || null
+    })
 
   const handlers = {
     CommitEditorDrafts: ({ userId, refId, expectedRowVersion, fields, message, chatNote }) =>
@@ -173,35 +232,10 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps) => {
             problems: dropped.map(({ field }) => `${field}: a ${ref.kind} has no such field, so this can't be saved.`)
           })
         }
+        // A note's condition card and link name only the user's own (§14.3).
+        if (ref.kind === "note") yield* steps.checkReferences(userId, valid.doc)
         const change = yield* chatNote
-          ? Effect.gen(function* () {
-              const current = yield* steps.revision(ref.head_revision_id)
-              // The binding supplies applicability for an edit; the import's source no longer does.
-              const { source_slot_id: _source, ...edited } = valid.doc
-              const encoded = steps.encode(valid.doc.kind === "imported_summary" ? edited : valid.doc)
-              if (encoded.hash === current.doc_hash) return new RefChange({ ref: toLibraryRef(ref), followers: [] })
-              const revision = yield* steps.insertRevision({
-                entityId: ref.entity_id,
-                schemaVersion: current.schema_version,
-                doc: encoded,
-                parents: [ref.head_revision_id],
-                origin: "user",
-                originRef: null,
-                message
-              })
-              yield* makeGraphWrites(sql, drafts).insertStateEvent(
-                userId,
-                chatNote.chatId,
-                chatNote.slotId,
-                null,
-                null,
-                {
-                  key: "note.binding",
-                  value: { note: ref.entity_id as EntityId, revision: revision as never }
-                }
-              )
-              return new RefChange({ ref: toLibraryRef({ ...ref, head_revision_id: revision }), followers: [] })
-            })
+          ? chatNoteEdit(userId, ref, valid.doc, message, chatNote)
           : userEdit(ref, valid.doc, message, null)
         let recovered = 0
         for (const row of rows) {
@@ -304,17 +338,17 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps) => {
         return yield* userEdit(ref, { ...head, avatar_media_id: mediaId }, "Changed the avatar", null)
       }).pipe(transaction(sql, "SetCardAvatar")),
 
-    CreateCardNote: ({ userId, cardRefId, title }) =>
+    CreateCardNote: ({ userId, cardRefId, title, link }) =>
       Effect.gen(function* () {
         const card = yield* lib.ownedRef(userId, cardRefId)
         if (card.kind !== "card") return yield* new NotFound({ entity: "card", id: cardRefId })
-        const label = title.trim().slice(0, 200) || "Note"
+        const label = (yield* linkTitle(userId, link)) ?? (title.trim().slice(0, 200) || "Note")
         const note = yield* steps.createUpstream({
           userId,
           kind: "note",
           label,
           subtitle: "",
-          doc: steps.encode(newCardNote(card.entity_id as EntityId, label)),
+          doc: steps.encode(newCardNote(card.entity_id as EntityId, label, link)),
           schemaVersion: NOTE_SCHEMA_VERSION,
           origin: "user",
           originRef: null,
@@ -324,18 +358,18 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps) => {
         return toLibraryRef(note)
       }).pipe(transaction(sql, "CreateCardNote")),
 
-    CreateChatNote: ({ userId, chatId, title }) =>
+    CreateChatNote: ({ userId, chatId, title, link }) =>
       Effect.gen(function* () {
         const [chat] = yield* sql<{ id: ChatId }>`
           SELECT id FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`
         if (!chat) return yield* new NotFound({ entity: "chat", id: chatId })
-        const label = title.trim().slice(0, 200) || "Note"
+        const label = (yield* linkTitle(userId, link)) ?? (title.trim().slice(0, 200) || "Note")
         const note = yield* steps.createUpstream({
           userId,
           kind: "note",
           label,
           subtitle: "",
-          doc: steps.encode(newChatNote(chat.id, label)),
+          doc: steps.encode(newChatNote(chat.id, label, link)),
           schemaVersion: NOTE_SCHEMA_VERSION,
           origin: "user",
           originRef: null,
@@ -343,7 +377,47 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps) => {
           sourceHash: null
         })
         return toLibraryRef(note)
-      }).pipe(transaction(sql, "CreateChatNote"))
+      }).pipe(transaction(sql, "CreateChatNote")),
+
+    CreateSharedNote: ({ userId, title, content, fromNoteRefId, chatNote }) =>
+      Effect.gen(function* () {
+        const from = fromNoteRefId === undefined ? null : yield* noteSlot(userId, fromNoteRefId, chatNote)
+        if (from && from.doc.link !== undefined)
+          return yield* refused(from.ref, "This note already shows a shared note; unlink it first.")
+        if (from && Predicate.isObject(from.doc.owner) && from.doc.owner.shared !== undefined)
+          return yield* refused(from.ref, "This is a shared note already.")
+        const label = title.trim().slice(0, 200) || (from ? String(from.doc.title ?? "") : "") || "Shared note"
+        const shared = yield* steps.createUpstream({
+          userId,
+          kind: "note",
+          label,
+          subtitle: "",
+          doc: steps.encode(newSharedNote(label, from ? String(from.doc.content ?? "") : content)),
+          schemaVersion: NOTE_SCHEMA_VERSION,
+          origin: "user",
+          originRef: null,
+          sourcePath: null,
+          sourceHash: null
+        })
+        // The slot shows the shared note from now on; its own text is ignored while linked.
+        if (from) yield* from.write({ ...from.doc, link: shared.entity_id }, "Saved as a shared note")
+        return toLibraryRef(shared)
+      }).pipe(transaction(sql, "CreateSharedNote")),
+
+    UnlinkNote: ({ userId, noteRefId, chatNote }) =>
+      Effect.gen(function* () {
+        const slot = yield* noteSlot(userId, noteRefId, chatNote)
+        if (typeof slot.doc.link !== "string")
+          return yield* refused(slot.ref, "This note isn't linked to a shared note.")
+        // The shared note's last revision, in the bin or not.
+        const shared = yield* sharedNote(sql, userId, slot.doc.link)
+        const { link: _link, ...own } = slot.doc
+        const change = yield* slot.write(
+          { ...own, content: shared?.content ?? String(slot.doc.content ?? "") },
+          "Unlinked from the shared note"
+        )
+        return change.ref
+      }).pipe(transaction(sql, "UnlinkNote"))
   } satisfies Partial<Parameters<typeof WriteOps.of>[0]>
   return handlers
 }

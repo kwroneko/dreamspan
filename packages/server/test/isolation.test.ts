@@ -15,7 +15,7 @@ import type { User } from "@rp/shared/domain.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import type { ConnectionSettings, ConnectionId, CredentialId, ModelId } from "@rp/shared/providers.ts"
 import type { RefId, RevisionId } from "@rp/shared/library.ts"
-import { textField } from "@rp/shared/editing.ts"
+import { textField, valueField } from "@rp/shared/editing.ts"
 import type { LlmRequestId } from "@rp/shared/usage.ts"
 import { Context, Effect, Fiber, Layer, Option, Stream } from "effect"
 import type { Rpc, RpcGroup } from "effect/rpc"
@@ -86,6 +86,9 @@ interface OwnEditor {
   /** A variant of the card, and one of the note, each with an update waiting to be resolved. */
   readonly pendingCardRefId: RefId
   readonly pendingNoteRefId: RefId
+  /** A shared named note, which the card's note links to. */
+  readonly sharedRefId: RefId
+  readonly sharedEntityId: EntityId
 }
 
 /** A chat with the user's message and a model reply still generating under it, and a note of its own. */
@@ -1245,7 +1248,14 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
   },
   CreateChatNote: {
     probe: (actor, owner) =>
-      refused(actor.api.CreateChatNote({ chatId: owner.chat.chatId, title: "Planted" }), "NotFound")
+      Effect.gen(function* () {
+        yield* refused(actor.api.CreateChatNote({ chatId: owner.chat.chatId, title: "Planted" }), "NotFound")
+        // A slot of one's own chat linked to the owner's shared note.
+        yield* refused(
+          actor.api.CreateChatNote({ chatId: actor.chat.chatId, title: "Planted", link: owner.editor.sharedEntityId }),
+          "NotFound"
+        )
+      })
   },
   ListQueued: {
     probe: (actor, owner) => refused(actor.api.ListQueued({ chatId: owner.chat.chatId }), "NotFound")
@@ -1416,6 +1426,32 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
             }),
             "NotFound"
           )
+        // A note of one's own whose condition names the owner's card.
+        const note = yield* actor.api.OpenEditor({ refId: actor.editor.noteRefId })
+        const draft = yield* actor.api.SaveEditorDraft({
+          draftId: null,
+          expectedSession: null,
+          refId: actor.editor.noteRefId,
+          field: valueField(["condition"]),
+          content: JSON.stringify({ when: "turn", card: owner.editor.cardEntityId }),
+          expectedRowVersion: null,
+          baseRevisionId: null
+        })
+        yield* refused(
+          actor.api.CommitEditorDrafts({
+            refId: actor.editor.noteRefId,
+            expectedRowVersion: note.ref.rowVersion,
+            fields: [{ field: draft.key.field, draftId: draft.id, expectedRowVersion: draft.rowVersion }],
+            message: "planted"
+          }),
+          "NotFound"
+        )
+        yield* actor.api.DiscardEditorDraft({
+          refId: actor.editor.noteRefId,
+          field: draft.key.field,
+          draftId: draft.id,
+          expectedRowVersion: draft.rowVersion
+        })
       })
   },
 
@@ -1527,6 +1563,11 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
           ...merged,
           owner: { card: owner.editor.cardEntityId }
         }))
+        yield* resolveOwn(actor.editor.pendingNoteRefId, (merged) => ({
+          ...merged,
+          condition: { when: "not_muted", card: owner.editor.cardEntityId }
+        }))
+        yield* resolveOwn(actor.editor.pendingNoteRefId, (merged) => ({ ...merged, link: owner.editor.sharedEntityId }))
       })
   },
   ListCardNotes: {
@@ -1534,7 +1575,67 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
   },
   CreateCardNote: {
     probe: (actor, owner) =>
-      refused(actor.api.CreateCardNote({ cardRefId: owner.editor.cardRefId, title: "Planted" }), "NotFound")
+      Effect.gen(function* () {
+        yield* refused(actor.api.CreateCardNote({ cardRefId: owner.editor.cardRefId, title: "Planted" }), "NotFound")
+        yield* refused(
+          actor.api.CreateCardNote({
+            cardRefId: actor.editor.cardRefId,
+            title: "Planted",
+            link: owner.editor.sharedEntityId
+          }),
+          "NotFound"
+        )
+      })
+  },
+  ListSharedNotes: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        assert.deepStrictEqual(yield* actor.api.ListSharedNotes({ refId: owner.editor.sharedRefId }), [])
+        const mine = yield* actor.api.ListSharedNotes({})
+        assert.isFalse(mine.some((note) => note.ref.id === owner.editor.sharedRefId))
+      })
+  },
+  CreateSharedNote: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        // From the owner's card note, and from the owner's chat note at a position in their chat.
+        yield* refused(
+          actor.api.CreateSharedNote({ title: "Taken", content: "", fromNoteRefId: owner.editor.noteRefId }),
+          "NotFound"
+        )
+        yield* refused(
+          actor.api.CreateSharedNote({
+            title: "Taken",
+            content: "",
+            fromNoteRefId: owner.chat.noteRefId,
+            chatNote: { chatId: owner.chat.chatId, slotId: owner.chat.slotId }
+          }),
+          "NotFound"
+        )
+        // One's own chat note, at a position in the owner's chat.
+        yield* refused(
+          actor.api.CreateSharedNote({
+            title: "Taken",
+            content: "",
+            fromNoteRefId: actor.chat.noteRefId,
+            chatNote: { chatId: owner.chat.chatId, slotId: owner.chat.slotId }
+          }),
+          "NotFound"
+        )
+      })
+  },
+  UnlinkNote: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        yield* refused(actor.api.UnlinkNote({ noteRefId: owner.editor.noteRefId }), "NotFound")
+        yield* refused(
+          actor.api.UnlinkNote({
+            noteRefId: owner.chat.noteRefId,
+            chatNote: { chatId: owner.chat.chatId, slotId: owner.chat.slotId }
+          }),
+          "NotFound"
+        )
+      })
   },
   DeleteNote: {
     probe: (actor, owner) =>
@@ -2047,6 +2148,8 @@ const seed = Effect.gen(function* () {
       )
       assert.strictEqual(uploaded.status, 200)
       const note = yield* api.CreateCardNote({ cardRefId: editorCard.id, title: "Outfit" })
+      const shared = yield* api.CreateSharedNote({ title: "Rain", content: "It is raining." })
+      yield* api.CreateCardNote({ cardRefId: editorCard.id, title: "Weather", link: shared.entityId })
       const field = textField(["description"])
       const fieldDraft = yield* api.SaveEditorDraft({
         draftId: null,
@@ -2153,6 +2256,8 @@ const seed = Effect.gen(function* () {
           revisionId: opened.ref.headRevisionId,
           noteRefId: note.id,
           noteEntityId: note.entityId,
+          sharedRefId: shared.id,
+          sharedEntityId: shared.entityId,
           avatarMediaId: opened.doc.avatar_media_id as string,
           field,
           draftId: fieldDraft.id
@@ -2516,6 +2621,7 @@ const snapshot = (owner: Party) =>
     outcome(owner.api.OpenEditor({ refId: owner.editor.cardRefId }), JSON.stringify),
     outcome(owner.api.ListRevisions({ refId: owner.editor.cardRefId, limit: 100 }), JSON.stringify),
     outcome(owner.api.ListCardNotes({ cardRefId: owner.editor.cardRefId }), JSON.stringify),
+    outcome(owner.api.ListSharedNotes({}), JSON.stringify),
     outcome(owner.api.ListLibrary({ kind: "card" }), JSON.stringify),
     outcome(owner.api.ListBin({ limit: 500, before: null }), JSON.stringify),
     outcome(owner.api.ListRecoveredTexts({ limit: 500, before: null }), JSON.stringify),

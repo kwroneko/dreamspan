@@ -68,6 +68,13 @@ const open = async (page: Page, refId: string) => {
 }
 
 const field = (page: Page, name: string) => page.getByRole("textbox", { name: new RegExp(`^${name}`) })
+
+/** Opens a card's note from its collapsed row (DESIGN §4.1). */
+const openNote = (page: Page, title: string) =>
+  page
+    .getByRole("list", { name: "The card's notes" })
+    .getByRole("button", { name: new RegExp(`^${title}`) })
+    .click()
 const state = (page: Page) => page.getByRole("status").filter({ hasText: /saved|changes|Keeping/ })
 
 /** Waits until what was typed is kept on the server as a draft. */
@@ -398,6 +405,7 @@ test("note text typed just before closing the tab is kept, with a warning first"
   )
   await open(page, card.id)
   await recordBeacons(page)
+  await openNote(page, "Outfit")
   const content = page.getByRole("region", { name: "Note Outfit" }).getByRole("textbox", { name: /^Content/ })
   await content.fill("A grey coat, typed in the last moment.")
   const warned = await page.evaluate(() => {
@@ -418,26 +426,22 @@ test("note text typed just before closing the tab is kept, with a warning first"
     .toEqual(["A grey coat, typed in the last moment."])
 })
 
-test("removing an edited module takes its drafts with it, and the card still saves", async ({ page }) => {
-  const refId = await savedCard("Modules", {})
+test("a card's notes are collapsed rows, and the card has no modules section (DESIGN §5.0)", async ({ page }) => {
+  const refId = await savedCard("Rows", {})
+  await admin((api) => api.CreateCardNote({ cardRefId: refId as RefId, title: "Scarf" }))
   await open(page, refId)
-  await page.getByRole("button", { name: "Add a module", exact: true }).click()
-  const module = page.getByRole("region", { name: "Module New module" })
-  await module.getByRole("textbox", { name: /^Content/ }).fill("A draft that goes with its module.")
-  await kept(page)
-  await page.getByRole("button", { name: "Remove the module", exact: true }).click()
-  await field(page, "Scenario").fill("Still saved.")
-  await kept(page)
-  // The module's content draft ended with it; nothing hidden is left to save.
-  const drafts = await admin((api) => api.OpenEditor({ refId: refId as RefId }))
-  expect(drafts.drafts.filter((d) => d.status === "active" && d.key.field.endsWith('"content"]'))).toEqual([])
-  await page.getByRole("button", { name: /^Save \(/ }).click()
-  await page.getByRole("dialog", { name: "Save a revision" }).getByRole("button", { name: "Save revision" }).click()
-  await expect(page.getByText("Saved a revision.")).toBeVisible()
-  await expect(state(page)).toHaveText("Everything is saved.")
-  const opened = await admin((api) => api.OpenEditor({ refId: refId as RefId }))
-  expect(opened.doc.modules).toEqual([])
-  expect(opened.doc.scenario).toBe("Still saved.")
+  await expect(page.getByRole("button", { name: "Add a module" })).toHaveCount(0)
+  const row = page.getByRole("list", { name: "The card's notes" }).getByRole("button", { name: /^Scarf/ })
+  await expect(row).toContainText("End of tail")
+  await expect(page.getByRole("region", { name: "Note Scarf" })).toBeHidden()
+  await row.click()
+  await expect(page.getByRole("region", { name: "Note Scarf" })).toBeVisible()
+  // In the card editor, a note's condition can name the card itself.
+  await page.getByRole("region", { name: "Note Scarf" }).getByRole("combobox", { name: "When it applies" }).click()
+  await page.getByRole("option", { name: "On a character's turn" }).click()
+  await expect(
+    page.getByRole("region", { name: "Note Scarf" }).getByRole("combobox", { name: "Character" })
+  ).toContainText("Rows")
 })
 
 test("a send that failed as the page went is sent again the next time it goes", async ({ page }) => {
@@ -462,6 +466,7 @@ test("text too long to send as the page goes: the warning stops a close, and a r
     })
   )
   await open(page, card.id)
+  await openNote(page, "Long")
   const content = () => page.getByRole("region", { name: "Note Long" }).getByRole("textbox", { name: /^Content/ })
   const saved = async () => {
     const opened = await admin((api) => api.OpenEditor({ refId: note.id }))
@@ -482,6 +487,7 @@ test("text too long to send as the page goes: the warning stops a close, and a r
   // A reload that goes ahead anyway: too long for the request, the copy in the browser keeps it.
   await content().fill("y".repeat(70_000))
   await page.reload()
+  await openNote(page, "Long")
   await expect(page.getByText("Brought back from this browser")).toBeVisible()
   await expectTextBox(content(), "y".repeat(70_000))
   await expect
@@ -591,7 +597,9 @@ test("copies stay with a note in the bin and survive age and capacity limits", a
   )
   await open(page, card.id)
   const field = textField(["content"])
-  await page.getByRole("region", { name: "Note Gone" }).getByRole("button", { name: "Delete the note" }).click()
+  await openNote(page, "Gone")
+  await page.getByRole("button", { name: "More actions for Gone" }).click()
+  await page.getByRole("menuitem", { name: "Delete the note" }).click()
   await expect(page.getByRole("region", { name: "Note Gone" })).toHaveCount(0)
   // A copy of the note left behind: kept while the note is in the bin, saved once it's back.
   await leaveCopy(page, { userId: me.id, refId: note.id, field, content: "Unsent.", at: Date.now() })
@@ -601,6 +609,7 @@ test("copies stay with a note in the bin and survive age and capacity limits", a
   const [item] = await admin((api) => api.ListBin({ limit: 10, before: null }))
   await admin((api) => api.RestoreBinItem({ itemId: item!.id }))
   await page.reload()
+  await openNote(page, "Gone")
   await expectTextBox(
     page.getByRole("region", { name: "Note Gone" }).getByRole("textbox", { name: /^Content/ }),
     "Unsent."

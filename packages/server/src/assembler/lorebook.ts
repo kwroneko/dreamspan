@@ -20,7 +20,11 @@ interface Scan {
   /** Eligible messages on the full path, independently of the scan window. */
   readonly messageCount?: number
   readonly descriptions?: Partial<Record<Description, string>>
-  readonly injections?: ReadonlyArray<{ readonly text: string; readonly scan: boolean }>
+  /**
+   * Extension prompts scanned as ST's `addInject` adds them: all of them, whatever the scan
+   * depth. `name` names one in an activation's reason when its text has the primary key.
+   */
+  readonly injections?: ReadonlyArray<{ readonly text: string; readonly scan: boolean; readonly name?: string }>
   readonly trigger?: string
 }
 
@@ -68,6 +72,8 @@ type Why =
       readonly primaryKey: string
       readonly secondaryKeys: ReadonlyArray<string>
       readonly logic?: SelectiveLogic
+      /** The scanned extension prompts whose own text has the primary key, by name. */
+      readonly notes?: ReadonlyArray<string>
     }
 
 interface Activation extends Source {
@@ -385,9 +391,12 @@ export const matchLorebooks = (
   while (messageLength && !scan.messages[messageLength - 1]) messageLength--
   const messages: Array<string> = new Array(messageLength)
   let preparedDepth = 0
-  const injections = (scan.injections ?? [])
-    .filter((injection) => injection.scan && injection.text)
-    .map((injection) => injection.text)
+  const scanned = (scan.injections ?? []).filter((injection) => injection.scan && injection.text)
+  const injections = scanned.map((injection) => injection.text)
+  // Each named prompt on its own, to say which of them has an entry's primary key.
+  const named = scanned.flatMap((injection) =>
+    injection.name === undefined ? [] : [{ name: injection.name, buffer: { text: "\x01" + injection.text } as Buffer }]
+  )
   const recursion: Array<string> = []
   const chats = new Map<number, string>()
   const buffers = new Map<string, Buffer>()
@@ -515,11 +524,14 @@ export const matchLorebooks = (
               continue
             }
           }
+          const key = primaryKey
+          const notes = named.filter((injection) => keyMatch(source, injection.buffer, key, true)).map((i) => i.name)
           why = {
             kind: "keys",
             primaryKey,
             secondaryKeys,
-            ...(entry.selective && entry.secondary_keys.length ? { logic: entry.selective_logic } : {})
+            ...(entry.selective && entry.secondary_keys.length ? { logic: entry.selective_logic } : {}),
+            ...(notes.length ? { notes } : {})
           }
         }
         let score = 0

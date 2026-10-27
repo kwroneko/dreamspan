@@ -144,7 +144,10 @@ export const makeLibraryQueries = (sql: SqlClient.SqlClient) => {
       }
     })
 
-  /** The upstream ref of the card's first note, the one ST's Character's Note maps to. */
+  /**
+   * The upstream ref of the card's first note, the one ST's Character's Note maps to: not a
+   * module made a note, nor ST's Character Author's Note.
+   */
   const cardNote = (userId: UserId, cardEntityId: string) =>
     sql<{ id: string }>`
       SELECT r.id FROM entity_refs r
@@ -152,6 +155,19 @@ export const makeLibraryQueries = (sql: SqlClient.SqlClient) => {
       JOIN entity_revisions h ON h.id = r.head_revision_id
       WHERE e.owner_user_id = ${userId} AND e.kind = 'note' AND e.deleted_at IS NULL AND r.ref_kind = 'upstream'
         AND json_extract(h.doc_json, '$.owner.card') = ${cardEntityId}
+        AND json_extract(h.doc_json, '$.module_id') IS NULL
+        AND coalesce(json_extract(h.doc_json, '$.kind'), '') <> 'character_author_note'
+      ORDER BY e.id LIMIT 1`.pipe(Effect.flatMap(([row]) => (row ? ownedRef(userId, row.id) : Effect.succeed(null))))
+
+  /** The upstream ref of the card's note an import made from the card module or exported note `id`. */
+  const cardNoteFrom = (userId: UserId, cardEntityId: string, id: string) =>
+    sql<{ id: string }>`
+      SELECT r.id FROM entity_refs r
+      JOIN entities e ON e.id = r.entity_id
+      JOIN entity_revisions h ON h.id = r.head_revision_id
+      WHERE e.owner_user_id = ${userId} AND e.kind = 'note' AND e.deleted_at IS NULL AND r.ref_kind = 'upstream'
+        AND json_extract(h.doc_json, '$.owner.card') = ${cardEntityId}
+        AND json_extract(h.doc_json, '$.module_id') = ${id}
       ORDER BY e.id LIMIT 1`.pipe(Effect.flatMap(([row]) => (row ? ownedRef(userId, row.id) : Effect.succeed(null))))
 
   /**
@@ -226,6 +242,7 @@ export const makeLibraryQueries = (sql: SqlClient.SqlClient) => {
     loadDoc,
     planMerge,
     cardNote,
+    cardNoteFrom,
     usedByChats,
     cardLibraryRef,
     chatOverride,

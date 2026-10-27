@@ -1,26 +1,15 @@
 // Card export: our card document flattened to a standard V2 or V3 card, as JSON, inside a
-// PNG, or as CHARX. Private card modules (DESIGN §4.1) never leave.
+// PNG, or as CHARX. The card's notes are added before (importer/exporters.ts).
 import type { CardAsset, CardDoc } from "@rp/shared/docs/card.ts"
-import { type Effect, Predicate } from "effect"
+import type { Effect } from "effect"
 import { type CardFile, embeddedPath } from "./cardImport.ts"
 import { present } from "./fields.ts"
-import { characterBookFromLorebook, OUR_EXTENSION } from "./lorebook.ts"
+import { characterBookFromLorebook } from "./lorebook.ts"
 import { cardTextChunk, readChunks, replaceCardChunks } from "./png.ts"
 import { attempt, defaultLimits, type FormatError, type Limits } from "./safety.ts"
 import { isSafePath, writeZip } from "./zip.ts"
 
 export type ExportVersion = "v2" | "v3"
-
-/** Exportable modules go in our extension namespace, where an import finds them again. */
-const extensionsWithModules = (card: CardDoc) => {
-  const modules = card.modules
-    .filter((module) => module.exportable)
-    // `agent_editable` stays behind: a file never grants the agent anything (DESIGN §11).
-    .map(({ id, title, content, placement }) => ({ id, title, content, ...(placement ? { placement } : {}) }))
-  if (modules.length === 0) return card.extensions
-  const ours = card.extensions[OUR_EXTENSION]
-  return { ...card.extensions, [OUR_EXTENSION]: { ...(Predicate.isObject(ours) ? ours : {}), modules } }
-}
 
 /**
  * The card as V2 or V3 JSON. Both carry the same `data`, V3's fields included, as ST's
@@ -53,7 +42,7 @@ export const cardToJson = (card: CardDoc, version: ExportVersion) => {
       modification_date: card.modification_date,
       assets: card.assets
     }),
-    extensions: extensionsWithModules(card)
+    extensions: card.extensions
   }
   const v1 = {
     name: card.name,

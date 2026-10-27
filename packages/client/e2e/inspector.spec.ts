@@ -391,7 +391,7 @@ test("source explanations retain distinct equal labels and show historical activ
   await expect(
     messages.getByText("Activated by this chat; every 2 user messages; counted 20; due this turn.", { exact: true })
   ).toBeVisible()
-  await expect(messages.getByText("Active by default; every turn; due this turn.", { exact: true })).toBeVisible()
+  await expect(messages.getByText("On in every chat; every turn; due this turn.", { exact: true })).toBeVisible()
 })
 
 test("a held branch reply says waiting for the cache, including after reload", async ({ page }) => {

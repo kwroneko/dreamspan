@@ -376,7 +376,9 @@ export class StImports extends Context.Service<
                 ...library,
                 sourceName: path,
                 sourceHash: parsed.sha256,
-                media: parsed.media.map(({ bytes: _, ...file }) => file)
+                media: parsed.media.map(({ bytes: _, ...file }) => file),
+                // ST scans its notes for lorebook entries, the Character's Note included.
+                ...(session.settings?.allowWIScan ? { characterNoteScan: true } : {})
               })
             })
           ).pipe(
@@ -436,6 +438,39 @@ export class StImports extends Context.Service<
           return imported.outcome
         })
 
+      /**
+       * The card's Character Author's Note from ST's settings (`note.chara`, by the card's
+       * avatar file name), as a private card note (DESIGN §4.1); an empty one isn't imported.
+       * Its entity when ST applies it (`useChara`), which a group chat then switches off.
+       */
+      const characterAuthorNote = (session: Session, user: User, path: string, name: string, card: EntityId) =>
+        Effect.gen(function* () {
+          const settings = session.settings
+          const chara = settings?.characterNotes.find((note) => note.card === name)
+          if (!settings || !chara || chara.prompt.trim() === "") return null
+          const imported = yield* writer
+            .StImportCharacterNote({
+              userId: user.id,
+              cardEntityId: card,
+              prompt: chara.prompt,
+              useChara: chara.useChara,
+              position: chara.position,
+              scanLore: settings.allowWIScan,
+              sourcePath: path
+            })
+            .pipe(
+              Effect.catchTags({
+                NotFound: () => Effect.succeed(null),
+                RefOperationRefused: (error) => {
+                  session.report.issue(path, "error", "st.not_updated", error.reason)
+                  return Effect.succeed(null)
+                }
+              })
+            )
+          session.report.count("character_note", imported === null ? "failed" : imported.created ? "added" : "updated")
+          return imported !== null && chara.useChara ? imported.entity : null
+        })
+
       const cardFile = (session: Session, user: User, path: string, file: string, bytes: Uint8Array, ctime?: number) =>
         Effect.gen(function* () {
           const parsed = yield* formats.st.libraryFile(bytes, file, "card")
@@ -451,11 +486,13 @@ export class StImports extends Context.Service<
             Math.trunc(parsed.parsed.stCreatedAt ?? ctime ?? Date.now())
           )
           if (imported.entity !== null && card !== null) {
+            const characterNote = yield* characterAuthorNote(session, user, path, stem(file), imported.entity.entityId)
             session.cards.set(stem(file), {
               ...card,
               entityId: imported.entity.entityId,
               label: imported.entity.label,
-              file: stem(file)
+              file: stem(file),
+              characterNote
             })
           }
           return imported.outcome
@@ -630,6 +667,14 @@ export class StImports extends Context.Service<
               "info",
               "st.summary_defaults",
               "settings.json wasn't imported first, so the summary is placed as ST places it by default."
+            )
+          }
+          if (change.replacedAuthorNote) {
+            report.issue(
+              progress.path,
+              "info",
+              "st.character_note_replaced",
+              "ST sent the character's own author's note in place of this chat's; both are kept here, the character's at the top of the chat's."
             )
           }
           if (change.summaryTrimmed) {

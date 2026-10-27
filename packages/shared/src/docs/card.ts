@@ -1,5 +1,6 @@
-// The card document (DATA-MODEL §3.3): the union of Character Card V2 and V3, plus card
-// modules (DESIGN §4.1). Field names follow the card specs, so an export maps one to one.
+// The card document (DATA-MODEL §3.3): the union of Character Card V2 and V3. Field names
+// follow the card specs, so an export maps one to one. Card modules are card notes now
+// (DESIGN §5.0); older revisions keep their `modules`.
 import { Schema } from "effect"
 import { LorebookDoc } from "./lorebook.ts"
 import { Placement } from "./note.ts"
@@ -17,8 +18,8 @@ export const CardAsset = Schema.Struct({
 })
 export type CardAsset = typeof CardAsset.Type
 
-/** An extended prompt attached to the card. Private modules never leave in an export. */
-export const CardModule = Schema.Struct({
+/** Deprecated: an extended prompt attached to the card, before card modules became card notes. */
+const CardModule = Schema.Struct({
   id: Schema.String,
   title: Schema.String,
   content: Schema.String,
@@ -28,7 +29,6 @@ export const CardModule = Schema.Struct({
   /** As a note's (note.ts): stored only, off when absent, and no file sets it. */
   agent_editable: Schema.optionalKey(Schema.Boolean)
 })
-export type CardModule = typeof CardModule.Type
 
 export const CardDoc = Schema.Struct({
   schema_version: Schema.Literal(CARD_SCHEMA_VERSION),
@@ -60,7 +60,8 @@ export const CardDoc = Schema.Struct({
   /** The stored files of embedded assets, by their `uri`. Set by the importer like the avatar. */
   asset_media_ids: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
   character_book: Schema.optionalKey(LorebookDoc),
-  modules: Schema.Array(CardModule),
+  /** Deprecated: read only by the migration that made them card notes (DESIGN §5.0). */
+  modules: Schema.optionalKey(Schema.Array(CardModule)),
   /** The card's `data.extensions`, verbatim, with plugin namespaces (PLUGINS §3.3). */
   extensions: Extensions,
   /** Keys in `data` the specs don't define, kept so an export writes them back. */

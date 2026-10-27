@@ -245,6 +245,8 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
       yield* draft(api, card.id, textField(["description"]), "A keeper.")
       yield* draft(api, card.id, textField(["description"]), "A lighthouse keeper.")
       yield* draft(api, card.id, valueField(["tags"]), '["sea","night"]')
+      // A list with ids, here an older card's modules, which a new card no longer has.
+      yield* draft(api, card.id, valueField(["modules"]), "[]")
       const module = { id: "m1", title: "Outfit", content: "", exportable: false, agent_editable: true }
       yield* draft(api, card.id, valueField(["modules", "id=m1"]), JSON.stringify(module))
       yield* draft(api, card.id, textField(["modules", "id=m1", "content"]), "A grey coat.")
@@ -594,6 +596,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
       yield* draft(api, note.id, textField(["content"]), "A grey coat.")
       yield* draft(api, note.id, valueField(["placement"]), '{"mode":"tail","role":"user"}')
       yield* draft(api, note.id, valueField(["agent_editable"]), "true")
+      yield* draft(api, note.id, valueField(["on_by_default"]), "true")
       yield* commit(api, note.id)
       const [listed] = yield* api.ListCardNotes({ cardRefId: card.id })
       assert.deepStrictEqual(listed!.doc, {
@@ -603,9 +606,11 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
         placement: { mode: "tail", role: "user" },
         owner: { card: card.entityId },
         exportable: true,
-        agent_editable: true
+        agent_editable: true,
+        on_by_default: true
       })
-      // ST's Character's Note is in-chat: the tail exports as its depth 0, the card's section not at all.
+      // ST's Character's Note is in-chat and on in every chat: the tail exports as its depth 0,
+      // a note off by default or the card's section not at all.
       const depthPrompt = Effect.gen(function* () {
         const url = yield* base
         const response = yield* Effect.promise(() =>
@@ -619,6 +624,11 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
         return file.data.extensions.depth_prompt
       })
       assert.deepStrictEqual(yield* depthPrompt, { prompt: "A grey coat.", depth: 0, role: "user" })
+      yield* draft(api, note.id, valueField(["on_by_default"]), "false")
+      yield* commit(api, note.id)
+      assert.isUndefined(yield* depthPrompt)
+      yield* draft(api, note.id, valueField(["on_by_default"]), "true")
+      yield* commit(api, note.id)
       yield* draft(api, note.id, valueField(["placement"]), '{"mode":"section","section":"card"}')
       yield* commit(api, note.id)
       assert.isUndefined(yield* depthPrompt)
@@ -912,6 +922,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
     Effect.gen(function* () {
       const api = yield* client()
       const card = yield* api.CreateCard({ label: "Removed", name: "Removed" })
+      yield* draft(api, card.id, valueField(["modules"]), "[]")
       yield* draft(
         api,
         card.id,

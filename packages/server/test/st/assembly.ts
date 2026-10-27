@@ -37,7 +37,26 @@ const DOCUMENTED: ReadonlyArray<{
     matches: (line, config) => config.overMaximum === true && line.startsWith("messages")
   },
   { why: "we always stream (ST sends the preset's stream_openai)", matches: (line) => line.startsWith("stream:") },
+  {
+    // Unit P1-1's owner question 3; ARCHITECTURE §15 "Conditions".
+    why: "the group nudge is a prompt after the history, sent whenever the model writes as a character, one or many (ST: in group chats only)",
+    matches: (line) =>
+      line.startsWith("messages") &&
+      /\[Write the next reply only as |speaks next\.\]|\[As [^\]]+ only\.\]|Write only [^"]+'s next reply/.test(line)
+  },
   { why: "no multi-swipe requests (ST sends the preset's n above 1)", matches: (line) => line.startsWith("n:") },
+  {
+    why: "a note goes every turn (DESIGN §4.1): ST skips its author's note on the turns its frequency doesn't fall on, and never sends one at frequency 0 that a chat had on",
+    matches: (line, config) =>
+      config.authorNote !== undefined &&
+      (config.authorNote.interval > 1 || config.activeAuthorNote === true) &&
+      line.startsWith("messages")
+  },
+  {
+    why: "what rides on an author's note imported off (frequency 0) still goes where it sits (owner question 6); ST sends none of it",
+    matches: (line, config) =>
+      config.authorNote !== undefined && config.authorNote.interval === 0 && line.startsWith("messages")
+  },
   {
     why: "the preset's send_if_empty is expanded when it fills the user's turn (ST sends it as written before an impersonation)",
     matches: (line, config, settings) =>
@@ -112,7 +131,10 @@ const authorNote = (position: number, depth: number, role: number, interval = 1)
 })
 
 /** The note our ST import makes of it (importer/stMapping.ts), and whether it turns it on. */
-const authorNoteInput = (note: AuthorNote, defaults = false): NoteInput | null => {
+const authorNoteInput = (
+  note: AuthorNote,
+  defaults = false
+): { readonly input: NoteInput; readonly activate: boolean } | null => {
   const issues = new ReportBuilder()
   const header = parseStChatPart(
     json({
@@ -132,15 +154,18 @@ const authorNoteInput = (note: AuthorNote, defaults = false): NoteInput | null =
   const settings = parseStSettings(
     json({
       extension_settings: {
-        note: defaults
-          ? {
-              default: note.text,
-              defaultPosition: note.position,
-              defaultDepth: note.depth,
-              defaultRole: note.role,
-              defaultInterval: note.interval
-            }
-          : {}
+        note: {
+          allowWIScan: note.scan === true,
+          ...(defaults
+            ? {
+                default: note.text,
+                defaultPosition: note.position,
+                defaultDepth: note.depth,
+                defaultRole: note.role,
+                defaultInterval: note.interval
+              }
+            : {})
+        }
       }
     }),
     issues
@@ -160,18 +185,21 @@ const authorNoteInput = (note: AuthorNote, defaults = false): NoteInput | null =
   ).notes.find((n) => n.kind === "author_note")
   return mapped
     ? {
-        entity: "author-note",
-        revision: "author-note-rev",
-        first: false,
-        doc: {
-          schema_version: 1,
-          title: mapped.title,
-          content: mapped.contents[0]!,
-          placement: mapped.placement,
-          owner: { chat: "chat-1" as never },
-          exportable: true,
-          kind: "author_note",
-          ...(mapped.interval !== undefined ? { interval: mapped.interval } : {})
+        activate: mapped.activate,
+        input: {
+          entity: "author-note",
+          revision: "author-note-rev",
+          first: false,
+          doc: {
+            schema_version: 1,
+            title: mapped.title,
+            content: mapped.contents[0]!,
+            placement: mapped.placement,
+            owner: { chat: "chat-1" as never },
+            exportable: true,
+            kind: "author_note",
+            ...(mapped.scanLore ? { scan_lore: true } : {})
+          }
         }
       }
     : null
@@ -274,7 +302,7 @@ const ourRequest = async (
           : []),
         ...(personaNote ? [personaNote] : []),
         ...(config.summary ? [summaryNote(config.summary)] : []),
-        ...(importedAuthorNote ? [importedAuthorNote] : [])
+        ...(importedAuthorNote ? [importedAuthorNote.input] : [])
       ],
       lorebooks: config.lorebook
         ? [{ id: gateLore.id, entity: "gate-book", revision: "gate-rev", doc: gateLore.document }]
@@ -294,7 +322,9 @@ const ourRequest = async (
             ]
           : []),
         ...(config.summary ? [activate("summary")] : []),
-        ...(config.authorNote && (config.activeAuthorNote || config.authorNote.interval > 0)
+        // On as our import turns it on (text, and a frequency other than 0), or as a chat that
+        // turned it on before keeps it.
+        ...(importedAuthorNote && (config.activeAuthorNote || importedAuthorNote.activate)
           ? [activate("author-note")]
           : [])
       ],
@@ -352,6 +382,13 @@ export const compareAssembly = async (
     // message of the user's, which one card's chat reaches with the message sent and the
     // other's doesn't.
     { name: "default, author's note in-chat", presets: ["default"], authorNote: authorNote(1, 1, 1) },
+    // ST's "Include in World Info Scanning": an entry keyed only on the author's note's text.
+    {
+      name: "default, author's note scanned for lore",
+      presets: ["default"],
+      lorebook: true,
+      authorNote: { ...authorNote(1, 1, 1), scan: true }
+    },
     { name: "default, author's note after main", presets: ["default"], authorNote: authorNote(0, 4, 0) },
     {
       name: "default, author's note and summary before main",
@@ -522,6 +559,10 @@ export const compareAssembly = async (
       )
       if (config.lorebook && !JSON.stringify(body).includes("A copper bell marks the crossing."))
         differences.push(`${character}, ${config.name}: ST sent no keyword lore`)
+      if (config.authorNote?.scan && !JSON.stringify(body).includes("Wet boots squeak"))
+        differences.push(
+          `${character}, ${config.name}: ST didn't trigger lore on the author's note, so this compares nothing`
+        )
       const ours = await ourRequest(fixtures, character, config, settings)
       const label = `${character}, ${config.name}`
       // Both sides leaving it out would compare equal: ST must have sent it.

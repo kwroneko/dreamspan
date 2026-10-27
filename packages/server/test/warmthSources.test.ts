@@ -109,7 +109,7 @@ it.effect("lorebook-specific warmth reasons: changed/removed entry and assembled
     assert.include(prefixChange(wrapper, b, describe)!.reason, "lorebook entries that activated changed")
   })
 )
-it.effect("an intermittent note preserves a held prefix until the maximum forces history out", () =>
+it.effect("a conditioned note preserves a held prefix until the maximum forces history out", () =>
   Effect.gen(function* () {
     const note: NoteInput = {
       entity: "note",
@@ -117,16 +117,20 @@ it.effect("an intermittent note preserves a held prefix until the maximum forces
       first: false,
       doc: {
         schema_version: 1,
-        title: "Interval",
+        title: "Mira's turn",
         content: "INTERMITTENT NOTE",
         owner: { chat: "chat-1" as ChatId },
         placement: { mode: "depth", depth: 0, role: "system" },
         exportable: false,
-        interval: 2
+        condition: { when: "turn", card: "mira" as EntityId }
       }
     }
+    // Two characters taking turns: the note goes on Mira's, not on Oren's.
     const base: AssemblyFixture = {
       ...fixture,
+      cards: [...fixture.cards, { entity: "oren", doc: cardDoc("Oren") }],
+      participants: ["mira", "oren"],
+      target: { speaker: "mira" },
       notes: [note],
       events: [
         ...fixture.events!,
@@ -137,6 +141,7 @@ it.effect("an intermittent note preserves a held prefix until the maximum forces
     const a = yield* assembleFixture(base)
     const b = yield* assembleFixture({
       ...base,
+      target: { speaker: "oren" },
       historyStart: a.historyStart!,
       messages: [...base.messages, { side: "user", content: "hidden", inContext: false }]
     })
@@ -145,28 +150,13 @@ it.effect("an intermittent note preserves a held prefix until the maximum forces
       const source = snapshot.pieces.find((p) => p.source.kind === "note")!.source
       return source.kind === "note" ? source.activation : null
     }
-    assert.deepStrictEqual(activation(a), {
-      kind: "note",
-      activation: "explicit",
-      interval: 2,
-      userMessages: 20,
-      due: true
-    })
-    assert.deepStrictEqual(activation(b), {
-      kind: "note",
-      activation: "explicit",
-      interval: 2,
-      userMessages: 21,
-      due: false
-    })
-    const defaultOn = yield* assembleFixture({ ...base, notes: [{ ...note, first: true }], events: fixture.events! })
-    assert.deepStrictEqual(activation(defaultOn), {
-      kind: "note",
-      activation: "default",
-      interval: 2,
-      userMessages: 20,
-      due: true
-    })
+    const decision = { kind: "note" as const, interval: null, userMessages: null, condition: "on Mira's turn" }
+    assert.deepStrictEqual(activation(a), { ...decision, activation: "explicit", due: true })
+    assert.deepStrictEqual(activation(b), { ...decision, activation: "explicit", due: false })
+    // A card's note on in every chat is on without the chat switching it on.
+    const cardNote = { ...note, doc: { ...note.doc, owner: { card: "mira" as EntityId }, on_by_default: true } }
+    const defaultOn = yield* assembleFixture({ ...base, notes: [cardNote], events: fixture.events! })
+    assert.deepStrictEqual(activation(defaultOn), { ...decision, activation: "default", due: true })
     assert.notEqual(sent(a), sent(b))
     assert.deepStrictEqual(prefix(a), prefix(b))
     assert.isNull(prefixChange(a, b, describe))
@@ -177,6 +167,7 @@ it.effect("an intermittent note preserves a held prefix until the maximum forces
     const c = yield* assembleFixture(roomy)
     const d = yield* assembleFixture({
       ...roomy,
+      target: { speaker: "oren" },
       messages: [...roomy.messages, { side: "user", content: "hidden", inContext: false }]
     })
     assert.deepStrictEqual(prefix(c), prefix(d))
@@ -186,6 +177,7 @@ it.effect("an intermittent note preserves a held prefix until the maximum forces
     for (let count = 1; count <= 12; count++) {
       const next = yield* assembleFixture({
         ...base,
+        target: { speaker: "oren" },
         historyStart: previous.historyStart!,
         messages: [
           ...base.messages,

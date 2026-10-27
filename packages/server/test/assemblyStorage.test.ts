@@ -951,7 +951,7 @@ describe("context assembly from the database", () => {
     }).pipe(Effect.provide(database()))
   )
 
-  it.live("pins an empty path's zero user count for an immediate rebuild", () =>
+  it.live("rebuilds an empty path's context with an old note's interval at once", () =>
     Effect.gen(function* () {
       const writer = yield* Database.Writer
       const reader = yield* Database.Reader
@@ -1006,7 +1006,8 @@ describe("context assembly from the database", () => {
         timeZone: "UTC",
         frozen: null
       })
-      assert.strictEqual((JSON.parse(snapshot) as ContextSnapshot).sources?.userMessages?.[0]?.count, 0)
+      // Nothing counts the user's messages any more: an interval is ignored (DESIGN §4.1).
+      assert.isUndefined((JSON.parse(snapshot) as ContextSnapshot).sources?.userMessages)
       const rebuilt = yield* reader.RebuildContext({ userId, snapshot })
       assert.ok(rebuilt._tag === "Rebuilt")
       assert.deepStrictEqual(JSON.parse(rebuilt.snapshot), JSON.parse(snapshot))
@@ -1084,9 +1085,9 @@ describe("context assembly from the database", () => {
     }).pipe(Effect.provide(database()))
   )
 
-  it.live("places the chat's own note on the branch that turned it on, every interval of the user's messages", () =>
+  it.live("places the chat's own note on the branch that turned it on, on the turn its condition names", () =>
     Effect.gen(function* () {
-      const { writer, reader, userId, tobin, chat, sent, generating: reply, state } = yield* setup()
+      const { writer, reader, userId, mira, tobin, chat, sent, generating: reply, state } = yield* setup()
       const created = yield* writer.CreateChatNote({ userId, chatId: chat.id, title: "Weather" })
       const note = (fields: Record<string, unknown>, expectedRowVersion: number) =>
         writer.EditRef({
@@ -1149,22 +1150,30 @@ describe("context assembly from the database", () => {
       assert.isTrue(yield* listed(sent.slotId))
       assert.isFalse(yield* listed(elsewhere.slotId))
 
-      // Every second message of the user's: the path to the reply has one so far.
-      yield* note({ interval: 2 }, edited.ref.rowVersion)
-      assert.isFalse(raining(yield* assembleAt(reply)))
-      const second = yield* append(sent.slotId, true, "Still raining?", true)
-      const later = yield* append(second.slotId, false, "")
-      const snapshot = yield* assembleAt(later)
+      // On Tobin's turn only: Mira writes the reply, so it isn't due; on Mira's, it is.
+      const onTobin = yield* note({ condition: { when: "turn", card: tobin.entityId } }, edited.ref.rowVersion)
+      const skipped = yield* assembleAt(reply)
+      assert.isFalse(raining(skipped))
+      assert.deepInclude(skipped.pieces.find((p) => p.id === `note:${created.entityId}`)!.source, {
+        activation: {
+          kind: "note",
+          activation: "explicit",
+          interval: null,
+          userMessages: null,
+          condition: "on Tobin's turn",
+          due: false
+        }
+      })
+      yield* note({ condition: { when: "turn", card: mira.entityId } }, onTobin.ref.rowVersion)
+      const snapshot = yield* assembleAt(reply)
       assert.isTrue(raining(snapshot))
-      // The count is pinned: deleting a message of the user's since rebuilds the same context.
-      yield* writer.DeleteMessage({ userId, slotId: second.slotId })
       const rebuilt = yield* reader.RebuildContext({ userId, snapshot: JSON.stringify(snapshot) })
       assert.ok(rebuilt._tag === "Rebuilt")
       assert.deepStrictEqual(JSON.parse(rebuilt.snapshot), snapshot)
     }).pipe(Effect.provide(database()))
   )
 
-  it.live("injects the card's first note, and reads the model the chat binds", () =>
+  it.live("injects the card's note on in every chat, and reads the model the chat binds", () =>
     Effect.gen(function* () {
       const { writer, userId, entity, mira, state, assemble } = yield* setup()
       yield* entity("note", "Character's Note", {
@@ -1173,7 +1182,8 @@ describe("context assembly from the database", () => {
         content: "{{char}} never guesses.",
         placement: { mode: "depth", depth: 0, role: "system" },
         owner: { card: mira.entityId },
-        exportable: true
+        exportable: true,
+        on_by_default: true
       })
       const connectionId = uuidv7() as ConnectionId
       yield* writer.CreateConnection({

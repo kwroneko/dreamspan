@@ -1,12 +1,62 @@
+import type { EntityId } from "@rp/shared/chat.ts"
 import type { CardDoc } from "@rp/shared/docs/card.ts"
+import type { NoteDoc } from "@rp/shared/docs/note.ts"
+import { Effect } from "effect"
 import { describe, expect, it } from "vitest"
-import { cardToJson, exportCardCharx, exportCardJson, exportCardPng } from "../../src/formats/cardExport.ts"
+import { exportFile } from "../../src/importer/exporters.ts"
+import * as Importers from "../../src/importer/importers.ts"
+import { cardToJson, exportCardCharx, exportCardPng } from "../../src/formats/cardExport.ts"
 import { importCard } from "../../src/formats/cardImport.ts"
 import { decodeText, readChunks } from "../../src/formats/png.ts"
 import { defaultLimits } from "../../src/formats/safety.ts"
 import { cardChunk, cardV3, failure, json, png, run, stCardV2, textChunk, zip } from "./support.ts"
 
 const imported = (value: unknown) => run(importCard(json(value))).card
+
+const OWNER = "0190a000-0000-7000-8000-000000000000" as EntityId
+
+const cardNote = (fields: Partial<NoteDoc>): NoteDoc => ({
+  schema_version: 1,
+  title: "",
+  content: "",
+  placement: { mode: "section", section: "tail_end", role: "system" },
+  owner: { card: OWNER },
+  exportable: true,
+  ...fields
+})
+
+const characterNote = (content: string) =>
+  cardNote({
+    title: "Character's Note",
+    content,
+    placement: { mode: "depth", depth: 4, role: "system" },
+    on_by_default: true
+  })
+
+/** A card exported with its notes, as the export route sends them to the format worker. */
+const exportNotes = (card: CardDoc, note: NoteDoc | null, notes: ReadonlyArray<NoteDoc>) =>
+  Effect.runPromise(
+    exportFile({
+      format: "card-v2-json",
+      docJson: JSON.stringify(card),
+      noteDocJson: note && JSON.stringify(note),
+      notesDocJson: notes.map((n) => JSON.stringify(n)),
+      avatar: null,
+      assets: []
+    })
+  )
+
+/** A file through the card importer: the card, its Character's Note and its other notes. */
+const parsed = async (bytes: Uint8Array) => {
+  const file = await Effect.runPromise(Importers.parseFile(bytes, "card.json").pipe(Effect.provide(Importers.layer)))
+  const library = file.library!
+  return {
+    card: JSON.parse(library.docJson) as CardDoc,
+    note: library.noteDocJson === null ? null : (JSON.parse(library.noteDocJson) as Record<string, unknown>),
+    notes: (library.notesDocJson ?? []).map((n) => JSON.parse(n) as Record<string, unknown>),
+    report: JSON.stringify(file.report.issues)
+  }
+}
 
 /** Every key and value of `expected` is in `actual`; `actual` may have more keys. */
 const expectSuperset = (actual: unknown, expected: unknown, path = "") => {
@@ -54,40 +104,109 @@ describe("card export", () => {
     })
   })
 
-  it("exports exportable modules only, and an import brings them back", () => {
-    const card: CardDoc = {
-      ...imported(stCardV2()),
-      modules: [
-        { id: "outfit", title: "Outfit", content: "Oilskin coat.", exportable: true },
-        { id: "secret", title: "Secret", content: "Private plans.", exportable: false }
-      ]
-    }
-    const text = new TextDecoder().decode(exportCardJson(card, "v2"))
+  it("exports exportable notes only, and an import brings them back as card notes", async () => {
+    const card = imported(stCardV2())
+    const { extensions: _dropped, ...rest } = card
+    const plain = { ...rest, extensions: {} }
+    const placed = { mode: "section", section: "tail_end", role: "system" } as const
+    const exported = await exportNotes(plain, characterNote("She hums when nervous."), [
+      cardNote({ title: "Outfit", content: "Oilskin coat.", placement: placed, module_id: "outfit", scan_lore: true }),
+      cardNote({ title: "Secret", content: "Private plans.", exportable: false }),
+      // A linked note comes as its shared note's text, which the reader put in it.
+      cardNote({ title: "Weather", content: "It is raining.", link: OWNER })
+    ])
+    const text = new TextDecoder().decode(exported)
     expect(text).not.toContain("Private plans.")
-    expect(imported(JSON.parse(text)).modules).toEqual([card.modules[0]])
+    expect(text).not.toContain(OWNER)
+    const data = (JSON.parse(text) as { data: CardDoc }).data
+    expect(data.extensions["depth_prompt"]).toEqual({ prompt: "She hums when nervous.", depth: 4, role: "system" })
+    expect(data.extensions["rp_harness"]).toEqual({
+      notes: [
+        { id: "outfit", title: "Outfit", content: "Oilskin coat.", placement: placed, scan_lore: true },
+        { id: "note-2", title: "Weather", content: "It is raining.", placement: placed }
+      ]
+    })
+    const back = await parsed(exported)
+    expect(back.note).toMatchObject({ content: "She hums when nervous.", on_by_default: true })
+    expect(back.notes).toEqual([
+      {
+        schema_version: 1,
+        title: "Outfit",
+        content: "Oilskin coat.",
+        placement: placed,
+        exportable: true,
+        module_id: "outfit",
+        scan_lore: true
+      },
+      {
+        schema_version: 1,
+        title: "Weather",
+        content: "It is raining.",
+        placement: placed,
+        exportable: true,
+        module_id: "note-2"
+      }
+    ])
+    // Our namespace is emptied into the notes, so a re-export doesn't double them.
+    expect(back.card.extensions).not.toHaveProperty("rp_harness")
   })
 
-  it("brings a module's placement back, but never the agent's permission to edit it", () => {
+  it("keeps a depth note that isn't on in every chat out of depth_prompt, so an import doesn't switch it on everywhere", async () => {
+    const { extensions: _dropped, ...rest } = imported(stCardV2())
+    const off = cardNote({
+      title: "Outfit",
+      content: "Oilskin coat.",
+      placement: { mode: "depth", depth: 2, role: "system" }
+    })
+    const exported = await exportNotes({ ...rest, extensions: {} }, off, [])
+    const data = (JSON.parse(new TextDecoder().decode(exported)) as { data: CardDoc }).data
+    expect(data.extensions).not.toHaveProperty("depth_prompt")
+    const back = await parsed(exported)
+    expect(back.note).toBeNull()
+    expect(back.notes).toHaveLength(1)
+    expect(back.notes[0]).toMatchObject({ title: "Outfit", placement: off.placement })
+    expect(back.notes[0]).not.toHaveProperty("on_by_default")
+  })
+
+  it("reads an older export's modules as card notes, never the agent's permission to edit them", async () => {
     const placed = { mode: "depth", depth: 2, role: "system" } as const
-    const card: CardDoc = {
-      ...imported(stCardV2()),
-      modules: [
-        { id: "outfit", title: "Outfit", content: "Coat.", exportable: true, placement: placed, agent_editable: true }
-      ]
+    const old = stCardV2()
+    const file = {
+      ...old,
+      data: {
+        ...old.data,
+        extensions: {
+          rp_harness: {
+            modules: [
+              { id: "outfit", title: "Outfit", content: "Coat.", placement: placed, agent_editable: true },
+              { id: "bad", title: "Bad", content: "Nowhere.", placement: { mode: "depth", depth: -1, role: "system" } },
+              { title: "No id" }
+            ]
+          }
+        }
+      }
     }
-    const text = new TextDecoder().decode(exportCardJson(card, "v3"))
-    expect(text).not.toContain("agent_editable")
-    expect(imported(JSON.parse(text)).modules).toEqual([
-      { id: "outfit", title: "Outfit", content: "Coat.", exportable: true, placement: placed }
+    const back = await parsed(json(file))
+    expect(back.notes).toEqual([
+      {
+        schema_version: 1,
+        title: "Outfit",
+        content: "Coat.",
+        placement: placed,
+        exportable: true,
+        module_id: "outfit"
+      },
+      {
+        schema_version: 1,
+        title: "Bad",
+        content: "Nowhere.",
+        // An invalid placement goes with the definitions.
+        placement: { mode: "section", section: "after_main_prompt", role: "system" },
+        exportable: true,
+        module_id: "bad"
+      }
     ])
-    // A file that names the permission itself, or an invalid placement, gets neither.
-    const planted = JSON.parse(text)
-    planted.data.extensions.rp_harness.modules[0] = {
-      ...planted.data.extensions.rp_harness.modules[0],
-      agent_editable: true,
-      placement: { mode: "depth", depth: -1, role: "system" }
-    }
-    expect(imported(planted).modules).toEqual([{ id: "outfit", title: "Outfit", content: "Coat.", exportable: true }])
+    expect(back.report).toContain("card.invalid_note")
   })
 
   it("never lets unknown fields override defined ones", () => {

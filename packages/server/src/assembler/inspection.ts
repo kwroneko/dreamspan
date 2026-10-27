@@ -6,7 +6,9 @@ const activationOf = (
   activation: SourceActivation | null,
   scrub: (text: string) => string
 ): SourceActivation | null => {
-  if (!activation || activation.kind === "note") return activation
+  if (!activation) return activation
+  if (activation.kind === "note")
+    return activation.condition === undefined ? activation : { ...activation, condition: scrub(activation.condition) }
   if (activation.status === "skipped") return { ...activation, reason: scrub(activation.reason) }
   return {
     ...activation,
@@ -16,7 +18,8 @@ const activationOf = (
         : {
             ...activation.why,
             primaryKey: scrub(activation.why.primaryKey),
-            secondaryKeys: activation.why.secondaryKeys.map(scrub)
+            secondaryKeys: activation.why.secondaryKeys.map(scrub),
+            ...(activation.why.notes ? { notes: activation.why.notes.map(scrub) } : {})
           }
   }
 }

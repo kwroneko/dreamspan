@@ -195,7 +195,7 @@ describe("ST chat parts", () => {
 })
 
 describe("ST settings and groups", () => {
-  it("reads personas, lorebooks, the default note and the summary settings, and nothing else", () => {
+  it("reads personas, lorebooks, the notes and the summary settings, and nothing else", () => {
     const issues = new ReportBuilder()
     const settings = parseStSettings(
       new TextEncoder().encode(
@@ -218,7 +218,8 @@ describe("ST settings and groups", () => {
               defaultDepth: 3,
               defaultRole: 2,
               defaultInterval: 2,
-              chara: [{ name: "Alice", prompt: "x", useChara: true }]
+              chara: [{ name: "Alice", prompt: "x", useChara: true }],
+              allowWIScan: true
             },
             disabledExtensions: ["memory"]
           },
@@ -236,6 +237,9 @@ describe("ST settings and groups", () => {
       globalWorlds: ["W"],
       characterWorlds: [{ card: "Alice", worlds: ["X"] }],
       defaultAuthorNote: { content: "Default note.", position: 0, depth: 3, role: 2, interval: 2 },
+      // ST's position defaults to 0 (replace) when a character's note has none.
+      characterNotes: [{ card: "Alice", prompt: "x", useChara: true, position: 0 }],
+      allowWIScan: true,
       summary: {
         prompt: null,
         promptWords: 200,
@@ -246,7 +250,7 @@ describe("ST settings and groups", () => {
         enabled: false
       }
     })
-    expect(issues.build("x").issues.map((i) => i.code)).toEqual(["st_settings.character_author_notes"])
+    expect(issues.build("x").issues.map((i) => i.code)).toEqual([])
   })
 
   it("reads a group's members, muted members and chats", () => {
