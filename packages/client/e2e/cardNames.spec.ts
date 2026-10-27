@@ -33,7 +33,8 @@ for (const width of [1440, 390]) {
       if (screens) await page.screenshot({ path: join(screens, `${name}-${width}.png`) })
     }
     await page.goto(server().url)
-    await expect(page.getByRole("link", { name: "Inspect Aria Vance", exact: true }).first()).toBeVisible()
+    // The shell's home tiles name each card with its version (unit E's grid).
+    await expect(page.getByRole("button", { name: "Open Aria Vance · 1", exact: true }).first()).toBeVisible()
     await shoot("grid")
     const groups = await admin((api) => api.ListChatGroups())
     const group = groups[0]!
@@ -43,13 +44,12 @@ for (const width of [1440, 390]) {
       if (member.subtitle) await expect(members).toContainText(member.subtitle)
     }
     await shoot("group-members")
-    await page.goto(server().url)
-    await page.getByRole("link", { name: "Inspect Aria Vance", exact: true }).first().click()
+    const refs = await admin((api) => api.ListLibrary({ kind: "card" }))
+    const aria = refs.find((ref) => ref.label === "Aria Vance")!
+    await page.goto(`${server().url}/cards/${aria.entityId}`)
     await expect(page.getByRole("heading", { name: "Aria Vance", exact: true })).toBeVisible()
     await expect(page.locator("main header")).toContainText("1")
     await shoot("card")
-    const refs = await admin((api) => api.ListLibrary({ kind: "card" }))
-    const aria = refs.find((ref) => ref.label === "Aria Vance")!
     await page.goto(`${server().url}/library/${aria.id}`)
     await expect(page.getByRole("textbox", { name: "Display name", exact: true })).toHaveValue("Aria Vance")
     await expect(page.getByRole("textbox", { name: "Version (shown as subtitle)", exact: true })).toHaveValue("1")
@@ -166,8 +166,17 @@ for (const width of [1440, 390]) {
       .getByRole("button", { name: "Save revision", exact: true })
       .click()
     await expect(page.getByRole("dialog")).toHaveCount(0)
-    if (width === 1440)
-      await expect(page.getByRole("complementary")).toContainText(`with Aria revised ${width} · revised-${width}`)
+    if (width === 1440) {
+      // The shell's left panel lists cards with their versions under Characters (unit E).
+      const sidebar = page.getByRole("complementary")
+      await sidebar
+        .getByRole("group", { name: "Left panel", exact: true })
+        .getByRole("button", { name: "Characters", exact: true })
+        .click()
+      await expect(
+        sidebar.getByRole("button", { name: `Open Aria revised ${width} · revised-${width}`, exact: true })
+      ).toBeVisible()
+    }
     await shoot("sidebar-save")
     await page.getByRole("button", { name: "History", exact: true }).click()
     const history = page.getByRole("dialog", { name: "History" })

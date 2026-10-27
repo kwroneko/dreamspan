@@ -43,17 +43,14 @@ test("group member listing includes the card version", async ({ page }) => {
   await expect(members).toContainText("Review A")
   await expect(members).toContainText("distinctive-version-7")
   await page.goto(server().url)
+  await page
+    .getByRole("group", { name: "Show", exact: true })
+    .getByRole("button", { name: "Groups", exact: true })
+    .click()
+  const groups = page.getByRole("main").getByLabel("Groups", { exact: true })
+  await expect(groups.getByRole("button").filter({ hasText: "Review A, Review B" })).toHaveCount(0)
   await expect(
-    page
-      .getByRole("list", { name: "Characters and groups" })
-      .getByRole("listitem")
-      .filter({ hasText: "Review A, Review B" })
-  ).toHaveCount(0)
-  await expect(
-    page
-      .getByRole("list", { name: "Characters and groups" })
-      .getByRole("link")
-      .filter({ hasText: "Review A · distinctive-version-7, Review B · distinctive-version-9" })
+    groups.getByRole("button").filter({ hasText: "Review A · distinctive-version-7, Review B · distinctive-version-9" })
   ).toBeVisible()
 })
 test("the sidebar refreshes card name and version after an ordinary editor Save", async ({ page }) => {
@@ -73,7 +70,13 @@ test("the sidebar refreshes card name and version after an ordinary editor Save"
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/library/${ref.id}`)
   const sidebar = page.getByRole("complementary")
-  await expect(sidebar).toContainText("with Cache original · 1")
+  // The shell's left panel lists cards with their versions under Characters (unit E).
+  await sidebar
+    .getByRole("group", { name: "Left panel", exact: true })
+    .getByRole("button", { name: "Characters" })
+    .click()
+  await expect(sidebar).toContainText("Cache original")
+  await expect(sidebar.getByRole("button", { name: "Open Cache original · 1", exact: true })).toBeVisible()
   await page.getByRole("textbox", { name: "Display name", exact: true }).fill("Cache renamed")
   await page.getByRole("textbox", { name: "Version (shown as subtitle)", exact: true }).fill("2")
   await page.getByRole("button", { name: "Save (2)", exact: true }).click()
@@ -82,7 +85,7 @@ test("the sidebar refreshes card name and version after an ordinary editor Save"
     .getByRole("button", { name: "Save revision", exact: true })
     .click()
   await expect(page.getByRole("heading", { name: "Cache renamed", exact: true })).toBeVisible()
-  await expect(sidebar).toContainText("with Cache renamed · 2")
+  await expect(sidebar.getByRole("button", { name: "Open Cache renamed · 2", exact: true })).toBeVisible()
 })
 test("three name drafts and diffs work, but history must refuse a colliding restore", async ({ page }) => {
   test.setTimeout(180000)
