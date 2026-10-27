@@ -53,7 +53,7 @@ for (const width of [1440, 390])
       await composer.fill(`An unfinished message ${width} ${theme}`)
       const chatUrl = new URL(page.url()).pathname
       const outerScroll = await page.evaluate(() => scrollY)
-      const panel = await openPanel(page, "Preset")
+      const panel = await openPanel(page, "Prompt preset")
       await expect(panel.getByRole("list", { name: "Preset blocks" })).toBeVisible()
       await expect(panel.getByRole("listitem").filter({ hasText: "Chat History" })).toContainText(/~[1-9][\d,]+ tokens/)
       const shoot = async (name: string) => {
@@ -160,7 +160,7 @@ for (const width of [1440, 390])
 test("panel toggles share drafts with the overlay and discard restores the saved switch", async ({ page }) => {
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/chats/${library.forks.find((f) => f.current)!.chat.id}`)
-  const panel = await openPanel(page, "Preset")
+  const panel = await openPanel(page, "Prompt preset")
   const toggle = panel.getByRole("switch", { name: "Send Main Prompt", exact: true })
   const was = await toggle.isChecked()
   await toggle.click()
