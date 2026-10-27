@@ -2029,7 +2029,7 @@ describe("conditioned prompts, {{speaker}} and {{direction}} (DESIGN §2.2)", ()
       })
     )
     const text = contents(muted).join("\n")
-    expect(text).toContain('<character name="Mira">')
+    expect(text).toContain("<Mira>\nMira keeps the ledger for Tobin.\n</Mira>")
     expect(text).toContain("Oren hates the rain.")
     // No speaker named: the first character not muted writes.
     expect(contents(muted)).toContain("system: [Only Oren next.]")
@@ -2042,7 +2042,7 @@ describe("conditioned prompts, {{speaker}} and {{direction}} (DESIGN §2.2)", ()
       })
     )
     expect(contents(mutedNote).join("\n")).toContain("Oren hates the rain.")
-    expect(contents(mutedNote).join("\n")).toContain('<character name="Oren">')
+    expect(contents(mutedNote).join("\n")).toContain("<Oren>\nOren runs the ferry.\n</Oren>")
   })
 })
 
@@ -2134,17 +2134,20 @@ describe("card definitions the way the preset says (DESIGN §5.0)", () => {
 
   it("doesn't change the definitions with the number of characters beyond the group rules", async () => {
     const silent = card("Silent")
-    const alone = await assembled(cast(["mira"]))
+    const nudge = preset({ group_nudge_prompt: "[Write the next reply only as {{char}}.]" })
+    const alone = await assembled(cast(["mira"], { preset: nudge }))
     const joined = await assembled(
-      chat({ cards: [...cards, { entity: "silent", doc: silent }], participants: ["mira", "silent"] })
+      chat({ cards: [...cards, { entity: "silent", doc: silent }], participants: ["mira", "silent"], preset: nudge })
     )
     for (const id of ["charDescription", "charPersonality", "scenario", "personaDescription"])
       expect(marker(joined, id)).toBe(marker(alone, id))
-    // What changes is the group rules: names on messages, the group's new-chat prompt and the nudge.
+    // What changes is the group rules: names on messages and the group's new-chat prompt. The
+    // group nudge is a prompt sent whenever the model writes as a character (DESIGN §2.2), one
+    // character or many.
     expect(contents(alone)).toContain("assistant: You're late.")
     expect(contents(joined)).toContain("assistant: Mira: You're late.")
     expect(contents(joined).at(-1)).toBe("system: [Write the next reply only as Mira.]")
-    expect(contents(alone).at(-1)).toBe("user: The road flooded.")
+    expect(contents(alone).at(-1)).toBe("system: [Write the next reply only as Mira.]")
   })
 
   it("puts every card whole at the Definitions marker, which wins over the per-field markers", async () => {
