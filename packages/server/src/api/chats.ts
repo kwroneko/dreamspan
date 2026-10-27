@@ -6,6 +6,8 @@ import type { ChatId, EntityId, NewVersion, PathEntry, SlotId } from "@rp/shared
 import { BranchSwitch, GenerationUnavailable, messageDraftKey, NotContinuable } from "@rp/shared/chatApi.ts"
 import { TextTooLong } from "@rp/shared/composerApi.ts"
 import type { UserId } from "@rp/shared/domain.ts"
+import type { PresetPrompt, PromptOrderEntry } from "@rp/shared/docs/preset.ts"
+import { conditionOf } from "@rp/shared/presetConditions.ts"
 import { foldState } from "@rp/shared/state.ts"
 import { Effect, Option, Stream } from "effect"
 import { CacheWarmth } from "../chat/CacheWarmth.ts"
@@ -242,12 +244,12 @@ export const makeChatHandlers = Effect.gen(function* () {
         })
       }).pipe(Effect.uninterruptible, internal("Generate")),
 
-    Regenerate: ({ slotId, expectedRowVersion, model }) =>
+    Regenerate: ({ slotId, expectedRowVersion, model, direction }) =>
       Effect.gen(function* () {
         yield* needGenerator
         const id = yield* userId
-        // A swipe keeps the speaker and the one-turn direction of the version it replaces
-        // (DESIGN §2.2): the direction belongs to that turn, never to later ones.
+        // A swipe keeps the speaker of the version it replaces. Its direction is only the one
+        // given now (DESIGN §2.2, the guidance toggle): nothing is reused implicitly.
         const { chatId, entry: before } = yield* reader.GetSlot({ userId: id, slotId })
         const added = yield* writer.AddSelectedVersion({
           userId: id,
@@ -255,7 +257,7 @@ export const makeChatHandlers = Effect.gen(function* () {
           version: {
             ...generating,
             speakerEntityId: before.version.speakerEntityId ?? (yield* speakerOf(id, chatId, before)),
-            ...(before.version.direction ? { direction: before.version.direction } : {})
+            ...(direction?.trim() ? { direction } : {})
           },
           expectedRowVersion,
           ...(model ? { model } : {})
@@ -275,7 +277,7 @@ export const makeChatHandlers = Effect.gen(function* () {
     // Continue (ST's, DESIGN §7.5): a new version that starts as the text continued and
     // streams on from its end, the old version left as it was. The slot is published before
     // the generation starts, so every tab has the starting text before the first delta.
-    ContinueVersion: ({ versionId, expectedRowVersion }) =>
+    ContinueVersion: ({ versionId, expectedRowVersion, direction }) =>
       Effect.gen(function* () {
         yield* needGenerator
         const id = yield* userId
@@ -292,7 +294,7 @@ export const makeChatHandlers = Effect.gen(function* () {
             content: source.content,
             speakerEntityId: source.speakerEntityId,
             sourceVersionId: source.id,
-            ...(source.direction ? { direction: source.direction } : {}),
+            ...(direction?.trim() ? { direction } : {}),
             ...(source.reasoning ? { reasoning: source.reasoning } : {})
           },
           expectedRowVersion
@@ -500,6 +502,27 @@ export const makeChatHandlers = Effect.gen(function* () {
 
     SetDisplayPrefs: ({ prefs }) =>
       Effect.flatMap(userId, (id) => writer.SetDisplayPrefs({ userId: id, prefs })).pipe(internal("SetDisplayPrefs")),
+
+    // Once per preset per account (DESIGN §2.2): the built-in preset has ST's impersonation
+    // prompt, so it never needs the notice.
+    ImpersonationNotice: () =>
+      Effect.gen(function* () {
+        const id = yield* userId
+        const { preset } = yield* reader.GetGenerationDefaults({ userId: id })
+        if (preset === null) return { show: false, preset }
+        const { doc } = yield* reader.OpenEditor({ userId: id, refId: preset })
+        const enabled = new Set(
+          ((doc.order ?? []) as ReadonlyArray<PromptOrderEntry>).filter((e) => e.enabled).map((e) => e.identifier)
+        )
+        const marked = ((doc.prompts ?? []) as ReadonlyArray<PresetPrompt>).some(
+          (p) => enabled.has(p.identifier) && conditionOf(p) === "as_user"
+        )
+        if (marked) return { show: false, preset }
+        return { show: yield* writer.MarkNoticeShown({ userId: id, notice: "impersonation", key: preset }), preset }
+      }).pipe(
+        Effect.catchTag("NotFound", () => Effect.succeed({ show: false, preset: null })),
+        internal("ImpersonationNotice")
+      ),
     ListBranches: ({ slotId }) =>
       Effect.flatMap(userId, (id) => reader.ListBranches({ userId: id, slotId })).pipe(internal("ListBranches")),
 

@@ -1,8 +1,10 @@
 import { GenerationControls } from "./GenerationControls.tsx"
 // The composer (DESIGN §2.2): who's speaking, always visible, with a switcher and the
-// speakers used most recently; Send as them, or Generate their turn, the text then being a
-// one-turn direction. A send while a reply is still being written is queued by the
-// server and shows here, pending, until it posts; it can be edited or taken back.
+// speakers used most recently; Send as them, or Generate a turn. With the guidance toggle
+// on, the text is guidance instead: a one-turn direction for Generate, a swipe or Continue,
+// never sent as a message, and kept after generating. A send while a reply is still being
+// written is queued by the server and shows here, pending, until it posts; it can be edited
+// or taken back.
 //
 // The text is a server draft per branch tip (composerDraft.ts), held in a store of its own,
 // so typing re-renders nothing else.
@@ -18,6 +20,8 @@ import { Avatar } from "../../ui/Avatar.tsx"
 import { Button, buttonClass } from "../../ui/Button.tsx"
 import { Textarea } from "../../ui/Field.tsx"
 import { Popover } from "../../ui/Popover.tsx"
+import { Switch } from "../../ui/Choice.tsx"
+import { useViewPrefs } from "../../ui/viewPrefs.ts"
 import { Badge } from "../../ui/Surface.tsx"
 import { SquareIconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import { defaultSpeaker, nameOf, nextInTurn, recentSpeakers, replyCandidates, useCast } from "./cast.ts"
@@ -250,6 +254,13 @@ export function Composer({
   } = useSyncExternalStore(draft.subscribe, draft.snapshot)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<AppError | null>(null)
+  // The guidance toggle, per account (DESIGN §2.2). Swipes and Continue read the guidance
+  // from the session as they're asked for.
+  const viewPrefs = useViewPrefs()
+  const guidance = viewPrefs.prefs.guidance
+  useEffect(() => session.provideGuidance(() => (guidance ? draft.snapshot().text : "")), [session, draft, guidance])
+  // Said once per preset when writing for a card the user plays (DESIGN §2.2).
+  const [impersonationNotice, setImpersonationNotice] = useState(false)
   // The speaker and the reply picked here or with "Write as" in the Cast tab, kept on the
   // server with this tip's draft (speaker.ts). Nothing is sent until they're read.
   const choices = composerChoice(session)
@@ -315,22 +326,16 @@ export function Composer({
     }
   }, [draft])
 
-  /** A card that isn't in the chat joins it from here on (DESIGN §2.2). */
+  /**
+   * A card that isn't in the chat joins it from here on (DESIGN §2.2). Picking a speaker only
+   * picks who writes: who `{{user}}` is (the persona) stays as it is, so the cached prefix does.
+   */
   const pick = useCallback(
     async (card: CastCard) => {
       if (cast !== null && !cast.participants.includes(card.entityId)) {
         const outcome = await session.changeCast({ _tag: "Join", entityId: card.entityId })
         setError(outcome.ok ? null : outcome.error)
         if (!outcome.ok) return
-        // A persona picked to speak as is one the user plays, so it's never asked to reply.
-        if (outcome.ok && card.persona && !outcome.value.playedByMe.includes(card.entityId)) {
-          const played = await session.changeCast({
-            _tag: "PlayedByMe",
-            entityIds: [...outcome.value.playedByMe, card.entityId]
-          })
-          setError(played.ok ? null : played.error)
-          if (!played.ok) return
-        }
       }
       const picked = await choices.change({ speaker: card.entityId })
       setError(picked.ok ? null : picked.error)
@@ -338,6 +343,7 @@ export function Composer({
     [cast, choices, session]
   )
   const onPick = useCallback((card: CastCard) => void pick(card), [pick])
+  const listCards = useCallback(() => session.listCards(), [session])
 
   /**
    * The text leaves the box as it's submitted, so whatever is typed while the request is out
@@ -384,17 +390,29 @@ export function Composer({
     setBusy(false)
   }
 
-  // The text is this turn's direction (DESIGN §2.2): once asked for, it's on the reply.
-  const generate = () =>
-    submit(async (from) => {
-      const outcome = await session.generate(from.tip, speaker, from.text, from)
-      report(outcome)
-      return outcome.ok
-        ? { sent: true, draft: outcome.value.draft, recovered: outcome.value.recovered }
-        : { sent: false }
-    })
+  /**
+   * The model writes a turn: with guidance on, the text is its one-turn direction and stays
+   * in the box, so a swipe can use it again; with guidance off, the text isn't used.
+   */
+  const generateFor = async (who: EntityId | null, consumePick: boolean) => {
+    if (busy || !ready) return
+    setBusy(true)
+    const draftId = choice.draftId
+    const outcome = await session.generate(session.snapshot().leafSlotId, who, guidance ? text : "")
+    report(outcome)
+    if (outcome.ok && consumePick && draftId !== null) replied(draftId)
+    setBusy(false)
+    if (outcome.ok && who !== null && cast?.playedByMe.includes(who)) {
+      const notice = await session.impersonationNotice()
+      if (notice.ok && notice.value.show) setImpersonationNotice(true)
+    }
+  }
+  /** Write for the speaker (an impersonation when it's a card the user plays). */
+  const generate = () => generateFor(speaker, false)
+  /** With guidance on, Enter and the primary action: the reply-from character's turn, directed. */
+  const replyDirected = () => (replier === null ? Promise.resolve() : generateFor(replier, true))
 
-  const onKeyDown = composerKeyDown(send)
+  const onKeyDown = composerKeyDown(guidance ? replyDirected : send)
 
   const hasText = text.trim() !== ""
   const sendLabel = hasText ? (name ? `Send as ${name}` : "Send") : replierName ? `${replierName} replies` : "Send"
@@ -411,7 +429,11 @@ export function Composer({
       : speakerPlayed
         ? `The model writes ${name}'s turn for you`
         : `The model writes ${name}'s turn`
-  }${hasText ? ", with your text as a one-turn direction" : ""}`
+  }${guidance && hasText ? ", with the guidance as a one-turn direction" : ""}`
+  const directedLabel = replierName ? `${replierName} replies` : "Reply"
+  const directedHint = `${replierName ? `${replierName} replies` : "No one to reply: every character is muted"}${
+    hasText ? ", following the guidance" : ""
+  } (Enter). The guidance stays here.`
   const shownError = error ?? saveError
 
   return (
@@ -458,7 +480,7 @@ export function Composer({
       <div className="flex flex-col gap-1.5 @min-[640px]:flex-row @min-[640px]:items-end">
         {/* Who's speaking, and the speakers used last: one tap each (DESIGN §2.2). */}
         <div className="flex min-w-0 items-center gap-1 @min-[640px]:h-11">
-          <SpeakerSwitcher session={session} speaker={speaker} recent={switcherRecent} onPick={onPick} />
+          <SpeakerSwitcher listCards={listCards} speaker={speaker} recent={switcherRecent} onPick={onPick} />
           {recent.map((id) => {
             const who = nameOf(castView, id) ?? "?"
             return (
@@ -474,25 +496,58 @@ export function Composer({
               </Tooltip>
             )
           })}
-          <span className="ml-auto @min-[640px]:hidden">
-            <History draft={draft} />
+          <span className="ml-auto flex items-center gap-1">
+            <span className="text-sm whitespace-nowrap">
+              <Switch
+                checked={guidance}
+                disabled={!viewPrefs.ready}
+                onCheckedChange={(next) => void viewPrefs.change({ guidance: next })}
+              >
+                Guidance
+              </Switch>
+            </span>
+            <span className="@min-[640px]:hidden">
+              <History draft={draft} />
+            </span>
           </span>
         </div>
-        <div className="flex min-w-0 flex-1 items-end gap-1 rounded-lg border border-border bg-surface p-1 focus-within:border-focus focus-within:ring-2 focus-within:ring-focus/40">
-          <label htmlFor="composer" className="sr-only">
-            Message
-          </label>
-          <AutoGrowTextarea
-            id="composer"
-            data-testid="composer"
-            value={text}
-            readOnly={!textReady}
-            aria-busy={!textReady}
-            aria-describedby={hasText ? "composer-hint" : undefined}
-            placeholder={!textReady ? "Loading…" : leafGenerating ? "Queue…" : "Message…"}
-            onChange={(event) => draft.type(event.currentTarget.value)}
-            onKeyDown={onKeyDown}
-          />
+        <div
+          data-guidance={guidance || undefined}
+          className={`flex min-w-0 flex-1 items-end gap-1 rounded-lg border p-1 focus-within:ring-2 ${
+            guidance
+              ? "border-guidance bg-guidance-surface focus-within:ring-guidance/40"
+              : "border-border bg-surface focus-within:border-focus focus-within:ring-focus/40"
+          }`}
+        >
+          <div className="flex min-w-0 flex-1 flex-col">
+            {guidance && (
+              <span aria-hidden className="px-2 pt-0.5 text-xs font-medium text-guidance">
+                Guidance
+              </span>
+            )}
+            <label htmlFor="composer" className="sr-only">
+              {guidance ? "Guidance" : "Message"}
+            </label>
+            <AutoGrowTextarea
+              id="composer"
+              data-testid="composer"
+              value={text}
+              readOnly={!textReady}
+              aria-busy={!textReady}
+              aria-describedby={hasText || guidance ? "composer-hint" : undefined}
+              placeholder={
+                !textReady
+                  ? "Loading…"
+                  : guidance
+                    ? "Direction for the next message…"
+                    : leafGenerating
+                      ? "Queue…"
+                      : "Message…"
+              }
+              onChange={(event) => draft.type(event.currentTarget.value)}
+              onKeyDown={onKeyDown}
+            />
+          </div>
           <span className="hidden @min-[640px]:inline-flex">
             <History draft={draft} />
           </span>
@@ -525,16 +580,30 @@ export function Composer({
               <span className="truncate">{generateText}</span>
             </Button>
           </Tooltip>
-          <SquareIconButton
-            label={sendLabel}
-            hint={sendHint}
-            variant="primary"
-            pending={busy}
-            disabled={!ready || (!hasText && replier === null)}
-            onClick={hasText ? send : replyNow}
-          >
-            {!busy && <SendIcon />}
-          </SquareIconButton>
+          {guidance ? (
+            // Guidance is never sent as a message by mistake: Send gives way to generating.
+            <SquareIconButton
+              label={directedLabel}
+              hint={directedHint}
+              variant="primary"
+              pending={busy}
+              disabled={!ready || replier === null}
+              onClick={replyDirected}
+            >
+              {!busy && <RegenerateIcon />}
+            </SquareIconButton>
+          ) : (
+            <SquareIconButton
+              label={sendLabel}
+              hint={sendHint}
+              variant="primary"
+              pending={busy}
+              disabled={!ready || (!hasText && replier === null)}
+              onClick={hasText ? send : replyNow}
+            >
+              {!busy && <SendIcon />}
+            </SquareIconButton>
+          )}
         </div>
       </div>
       <ReplyFrom
@@ -544,12 +613,35 @@ export function Composer({
         disabled={!ready}
         onPick={(id) => void choices.change({ replyFrom: id }).then(report)}
       />
-      {hasText && (
+      {(guidance || hasText) && (
         <p id="composer-hint" className="text-xs text-muted">
-          {name
-            ? `${generateText} instead makes this text a one-turn direction for ${name}'s turn.`
-            : "Reply instead makes this text a one-turn direction for the reply."}
+          {guidance
+            ? "Guidance: a one-turn direction for the next reply, Write for, a new version or Continue. It stays here until you change it."
+            : `${generateText} doesn't use this text: turn guidance on to direct the next message with it.`}
         </p>
+      )}
+      {impersonationNotice && (
+        <div
+          role="status"
+          className="flex flex-wrap items-center gap-2 rounded-md border border-warning/40 px-3 py-2 text-sm"
+        >
+          <span className="min-w-0 flex-1">
+            This preset's rules against writing for {"{{user}}"} may need “not when writing as {"{{user}}"}”: in the
+            preset, set their condition to “When writing as a character”.
+          </span>
+          <Button
+            variant="ghost"
+            onClick={() => {
+              setImpersonationNotice(false)
+              onSettings("preset")
+            }}
+          >
+            Open the preset
+          </Button>
+          <Button variant="ghost" onClick={() => setImpersonationNotice(false)}>
+            Dismiss
+          </Button>
+        </div>
       )}
       {shownError && (
         <p role="alert" className="text-sm text-danger">

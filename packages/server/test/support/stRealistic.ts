@@ -146,6 +146,64 @@ const presetFile = (base: Record<string, unknown>, name: string, context: number
   name
 })
 
+/**
+ * A group-RP preset as people write them (synthetic): a Main with a rule against writing for
+ * {{user}}, prompts limited to impersonation, to replies and to summaries by ST's triggers,
+ * and its own group nudge and impersonation prompt (DESIGN §2.2's conditions map from these).
+ */
+const nightRp = (base: Record<string, unknown>) => {
+  const prompts = (base.prompts as Array<Record<string, unknown>>).map((p) =>
+    p.identifier === "main"
+      ? {
+          ...p,
+          content:
+            "You are the narrator of a group roleplay with {{user}}. Write vivid, grounded prose.\nNever write dialogue, actions or thoughts for {{user}}: {{user}} is played by the user."
+        }
+      : p
+  )
+  const own = [
+    {
+      identifier: "night-impersonation-style",
+      name: "Impersonation style",
+      role: "system",
+      content: "Match {{user}}'s voice from their earlier messages: short, wry, first person.",
+      system_prompt: false,
+      injection_trigger: ["impersonate"]
+    },
+    {
+      identifier: "night-reply-length",
+      name: "Reply length",
+      role: "system",
+      content: "Keep replies to two or three paragraphs; end on something {{user}} can answer.",
+      system_prompt: false,
+      injection_trigger: ["normal", "swipe"]
+    },
+    {
+      identifier: "night-summary-focus",
+      name: "Summary focus",
+      role: "system",
+      content: "When summarizing, keep names, promises and injuries.",
+      system_prompt: false,
+      injection_trigger: ["quiet"]
+    }
+  ]
+  const orders = base.prompt_order as Array<{ character_id: number; order: Array<Record<string, unknown>> }>
+  return {
+    ...base,
+    openai_max_context: 96_000,
+    openai_max_tokens: 1000,
+    name: "Night RP 3.1",
+    group_nudge_prompt: "[It's {{char}}'s turn. Write only {{char}}'s next reply.]",
+    impersonation_prompt: "[Write {{user}}'s next reply in their voice, first person, one paragraph.]",
+    prompts: [...prompts, ...own],
+    prompt_order: orders.map((o) =>
+      o.character_id === 100001
+        ? { ...o, order: [...o.order, ...own.map((p) => ({ identifier: p.identifier, enabled: true }))] }
+        : o
+    )
+  }
+}
+
 /** Writes the folder under `root` (ST's `data/default-user` layout) and returns that path. */
 export const writeRealisticStFolder = (root: string) => {
   const next = rng(20261014)
@@ -158,6 +216,7 @@ export const writeRealisticStFolder = (root: string) => {
   put("OpenAI Settings/Celia 4.2.json", encode(presetFile(defaultPreset, "Celia 4.2", 128_000)))
   put("OpenAI Settings/Pixijb v18.json", encode(presetFile(defaultPreset, "Pixijb v18", 64_000)))
   put("OpenAI Settings/Default.json", encode(defaultPreset))
+  put("OpenAI Settings/Night RP 3.1.json", encode(nightRp(defaultPreset)))
   put("worlds/Saltmarsh.json", encode(worldInfo()))
   put("worlds/Kepler Station.json", encode(worldInfo()))
 
@@ -279,7 +338,8 @@ export const writeRealisticStFolder = (root: string) => {
         id: group.id,
         name: group.name,
         members: members.map((m) => `${m.file}.png`),
-        disabled_members: [],
+        // One muted member in the inn (ST's disabled members import as muted, DESIGN §3.5).
+        disabled_members: group.id === "1712345678901" ? [`${members[2]!.file}.png`] : [],
         chats: chatIds,
         chat_id: chatIds[0]
       })

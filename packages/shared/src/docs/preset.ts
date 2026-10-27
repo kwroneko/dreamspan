@@ -9,6 +9,9 @@ export const PRESET_SCHEMA_VERSION = 1
 export const PromptRole = Schema.Literals(["system", "user", "assistant"])
 export type PromptRole = typeof PromptRole.Type
 
+export const PromptCondition = Schema.Literals(["always", "as_character", "as_user", "with_direction"])
+export type PromptCondition = typeof PromptCondition.Type
+
 const Json = Schema.Record(Schema.String, Schema.Unknown)
 /** ST injects at depths 0 to 10000 (`MAX_INJECTION_DEPTH`). */
 export const InjectionDepth = Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 10_000 }))
@@ -36,6 +39,14 @@ const PresetPrompt = Schema.Struct({
   injection_trigger: Schema.Array(Schema.String),
   /** A card's own main prompt or post-history instructions don't replace this one. */
   forbid_overrides: Schema.Boolean,
+  /**
+   * When the prompt is sent (DESIGN §2.2): always, only when the model writes as a character,
+   * only when it writes as `{{user}}`, or only when the generation has a direction. Absent: as
+   * its ST trigger maps (`conditionFromTriggers`), which is always for a prompt without one.
+   */
+  condition: Schema.optionalKey(PromptCondition),
+  /** Added by the import (the default direction prompt), not by the file: the editor marks it. */
+  added_on_import: Schema.optionalKey(Schema.Boolean),
   /** Fields of the ST prompt this document doesn't model, kept for export. */
   unsupported: Schema.optionalKey(Json)
 })

@@ -19,6 +19,7 @@ import { EditConflict, InvalidDocument } from "@rp/shared/editorApi.ts"
 import type { ChatId, EntityId } from "@rp/shared/chat.ts"
 import type { Doc, EntityKind } from "@rp/shared/library.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
+import { editedDoc } from "@rp/shared/presetConditions.ts"
 import { Effect } from "effect"
 import type { SqlClient, SqlError } from "effect/sql"
 import type { makeDraftStore } from "./drafts.ts"
@@ -118,7 +119,7 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps) => {
         const ref = resolved?.ref ?? owned
         for (const { draftId } of fields) yield* drafts.checkIdentity(userId, draftId)
         yield* steps.checkRowVersion(ref, expectedRowVersion)
-        const head = resolved?.doc ?? (yield* lib.loadDoc(ref.head_revision_id))
+        const head = editedDoc(ref.kind, resolved?.doc ?? (yield* lib.loadDoc(ref.head_revision_id)))
         const rows = []
         for (const { field, draftId, expectedRowVersion: expected } of fields) {
           const row = yield* drafts.find(userId, new DraftKey({ targetKind: "entity_field", targetId: refId, field }))
@@ -147,7 +148,7 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps) => {
           if (orphans.has(row.field)) continue
           if (!bases.has(row.base_revision)) {
             const base = yield* entityRevision(ref, row.base_revision)
-            bases.set(row.base_revision, base === null ? {} : (JSON.parse(base.doc_json) as Doc))
+            bases.set(row.base_revision, base === null ? {} : editedDoc(ref.kind, JSON.parse(base.doc_json) as Doc))
           }
           const saved = getAt(head, field.path)
           const draft = field.kind === "value" ? parseValue(row.content) : row.content

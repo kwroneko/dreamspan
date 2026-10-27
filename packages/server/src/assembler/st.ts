@@ -1,7 +1,7 @@
 // SillyTavern 1.19's chat-completion prompt building, function by function (ARCHITECTURE §15,
 // "ST-compatible mode"; each function names the ST one it follows).
-import type { LegacyPresetDoc as PresetDoc, PresetPrompt } from "@rp/shared/docs/preset.ts"
-import { AssemblyFailed, type GenerationType, type Role } from "./types.ts"
+import type { LegacyPresetDoc as PresetDoc } from "@rp/shared/docs/preset.ts"
+import { AssemblyFailed, type Role } from "./types.ts"
 
 /** A prompt of the collection, as ST's PromptManager prepares it. */
 export interface StPrompt {
@@ -57,10 +57,6 @@ export interface Text {
   readonly text: string
   readonly piece: number
 }
-
-/** ST's shouldTrigger: a prompt with no generation types is sent for all of them. */
-export const triggers = (prompt: PresetPrompt, type: GenerationType) =>
-  prompt.injection_trigger.length === 0 || prompt.injection_trigger.includes(type)
 
 /** Whether the order disables this prompt (ST's isPromptDisabledForActiveCharacter). */
 export const disabledIn = (doc: PresetDoc) => {

@@ -8,6 +8,7 @@ import type { ReadOps, WriteOps } from "./ops.ts"
 import { query, transaction } from "./tx.ts"
 
 const KEY = "display"
+const NOTICES = "notices"
 
 /** Reasoning streams open until the user folds it during a run (DESIGN §7.4). */
 const DEFAULTS = DEFAULT_DISPLAY_PREFS
@@ -40,6 +41,19 @@ export const makeDisplayPrefsWriteHandlers = Effect.gen(function* () {
         yield* sql`INSERT INTO user_prefs (user_id, key, value_json) VALUES (${userId}, ${KEY}, ${JSON.stringify(merged)})
           ON CONFLICT (user_id, key) DO UPDATE SET value_json = excluded.value_json`
         return yield* read(sql, userId)
-      }).pipe(transaction(sql, "SetDisplayPrefs"))
+      }).pipe(transaction(sql, "SetDisplayPrefs")),
+    // One-time notices, by notice, as the keys they were shown for (key `notices`).
+    MarkNoticeShown: ({ userId, notice, key }) =>
+      Effect.gen(function* () {
+        const [row] = yield* sql<{ value_json: string }>`
+          SELECT value_json FROM user_prefs WHERE user_id = ${userId} AND key = ${NOTICES}`
+        const stored = row ? (JSON.parse(row.value_json) as Record<string, unknown>) : {}
+        const shown = Array.isArray(stored[notice]) ? (stored[notice] as Array<unknown>) : []
+        if (shown.includes(key)) return false
+        const value = JSON.stringify({ ...stored, [notice]: [...shown, key] })
+        yield* sql`INSERT INTO user_prefs (user_id, key, value_json) VALUES (${userId}, ${NOTICES}, ${value})
+          ON CONFLICT (user_id, key) DO UPDATE SET value_json = excluded.value_json`
+        return true
+      }).pipe(transaction(sql, "MarkNoticeShown"))
   } satisfies Partial<Parameters<typeof WriteOps.of>[0]>
 })

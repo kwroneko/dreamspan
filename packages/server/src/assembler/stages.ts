@@ -1,6 +1,14 @@
 import { modelName } from "@rp/shared/cardNames.ts"
 import { withModelSettings } from "@rp/shared/modelSettings.ts"
 import { newestMessage, presetOrder } from "@rp/shared/presetOrder.ts"
+import type { PromptCondition } from "@rp/shared/docs/preset.ts"
+import {
+  conditionOf,
+  DIRECTION_TEXT,
+  LAST_TURN_TEXT,
+  readsDirection,
+  triggersFor
+} from "@rp/shared/presetConditions.ts"
 import { schemaPrefillBudget } from "./prefill.ts"
 import { layerText, lcmStage } from "./lcm.ts"
 import { createHash } from "node:crypto"
@@ -14,7 +22,7 @@ import { Effect, type Scope } from "effect"
 import { loreActivationStage, lorebooksStage } from "./loreStages.ts"
 import { SUMMARY_HISTORY, summaryOnPath as selectSummary } from "./summary.ts"
 import { placeBreakpoints } from "./breakpoints.ts"
-import { cardBlock, directive, personaBlock } from "./layouts.ts"
+import { cardBlock, personaBlock } from "./layouts.ts"
 import { cardFields, makeMacroEnvironment, type MessagePosition, type Names } from "./macros.ts"
 import { compile, makeScriptRunner, PLACEMENT, type PromptScript, type ScriptRunner } from "./regex.ts"
 import {
@@ -44,8 +52,7 @@ import {
   type StMessage,
   type StPrompt,
   type Text,
-  tokensOf,
-  triggers
+  tokensOf
 } from "./st.ts"
 import {
   AssemblyFailed,
@@ -90,9 +97,13 @@ const hasSummary = (assembly: Assembly, piece: number): boolean =>
   (assembly.lcmFailurePieces?.some((failure) => failure.piece === piece) ?? false) ||
   (assembly.pieces[piece]?.parts?.some((p) => hasSummary(assembly, p)) ?? false)
 
-const presetSource = (assembly: Assembly, identifier: string): Source => {
+const presetSource = (
+  assembly: Assembly,
+  identifier: string,
+  condition?: Exclude<PromptCondition, "always">
+): Source => {
   const preset = need(assembly, "preset")
-  return { kind: "preset", ref: preset.ref, revision: preset.revision, identifier }
+  return { kind: "preset", ref: preset.ref, revision: preset.revision, identifier, ...(condition ? { condition } : {}) }
 }
 
 const cardSource = (card: CardInput, field: string): Source => ({
@@ -147,11 +158,9 @@ const castOf = (state: ChatState, speakerId: string | null, ordinal: number) =>
     const characters = wanted.filter((e) => !played.has(e)).flatMap((e) => cards.get(e) ?? [])
     const personas = state.playedByMe.flatMap((e) => cards.get(e) ?? [])
     const absent = new Set(state.absent)
+    // A muted character is never picked to speak (DESIGN §3.5); it speaks only when named.
     const speaker =
-      (speakerId ? cards.get(speakerId) : undefined) ??
-      characters.find((c) => !absent.has(c.entity)) ??
-      characters[0] ??
-      null
+      (speakerId ? cards.get(speakerId) : undefined) ?? characters.find((c) => !absent.has(c.entity)) ?? null
     const type: GenerationType =
       speaker && played.has(speaker.entity) ? "impersonate" : ordinal > 0 ? "swipe" : "normal"
     const cast: Cast = { characters, personas, absent, speaker, type }
@@ -374,7 +383,16 @@ const macrosStage = sync("macros", (assembly) => {
     variables: need(assembly, "state").vars,
     summary: assembly.lcm?.summaries.length
       ? layerText(assembly.lcm.summaries, need(assembly, "mode").st)
-      : (summaryNote(assembly)?.doc.content ?? "")
+      : (summaryNote(assembly)?.doc.content ?? ""),
+    // Who the model writes as, and the direction (DESIGN §2.2); a summary has neither.
+    ...(assembly.request.summarizing
+      ? {}
+      : {
+          speaker: cast.speaker
+            ? modelName(cast.speaker.doc)
+            : namesFor(need(assembly, "state"), cast, need(assembly, "mode")).char,
+          direction: need(assembly, "target").direction ?? ""
+        })
   })
 })
 
@@ -620,9 +638,15 @@ const cardText = (assembly: Assembly, card: CardInput, field: keyof CardInput["d
   return { text: env.text(piece), piece }
 }
 
-const presetText = (assembly: Assembly, id: string, text: string, names: Partial<Names> = {}): Text => {
+const presetText = (
+  assembly: Assembly,
+  id: string,
+  text: string,
+  names: Partial<Names> = {},
+  condition?: Exclude<PromptCondition, "always">
+): Text => {
   const env = need(assembly, "macros")
-  const piece = env.piece(`preset:${id}`, presetSource(assembly, id), text, { names })
+  const piece = env.piece(`preset:${id}`, presetSource(assembly, id, condition), text, { names })
   const expanded = env.text(piece)
   if (
     assembly.lcm?.summaries.length &&
@@ -633,12 +657,30 @@ const presetText = (assembly: Assembly, id: string, text: string, names: Partial
   return { text: expanded, piece, volatile: env.isVolatile(piece) }
 }
 
+/** Whether a prompt's condition holds for this generation (DESIGN §2.2). */
+const conditionHolds = (assembly: Assembly, condition: PromptCondition) => {
+  // A summary isn't written as anyone, and has no direction: only prompts sent always.
+  if (assembly.request.summarizing) return condition === "always"
+  const { speaker, personas } = need(assembly, "cast")
+  switch (condition) {
+    case "always":
+      return true
+    case "as_user":
+      return speaker !== null && personas.includes(speaker)
+    case "as_character":
+      return speaker !== null && !personas.includes(speaker)
+    case "with_direction":
+      return Boolean(need(assembly, "target").direction?.trim())
+  }
+}
+
 /**
- * The prompt collection, as ST's PromptManager builds it: the order's enabled prompts that
- * trigger for this generation type, prepared (macros expanded); a disabled `main` stays as
- * an empty prompt.
+ * The prompt collection, as ST's PromptManager builds it: the order's enabled prompts whose
+ * condition holds and whose ST triggers allow this generation type, prepared (macros
+ * expanded); a disabled `main` stays as an empty prompt. A conditioned prompt after the
+ * history changes from turn to turn, so it's never inside the cached part.
  */
-const collectionOf = (assembly: Assembly): Array<StPrompt> => {
+const collectionOf = (assembly: Assembly): { collection: Array<StPrompt>; readsDirection: boolean } => {
   const doc = need(assembly, "preset").doc
   const type = need(assembly, "cast").type
   const prompts = new Map(
@@ -648,16 +690,29 @@ const collectionOf = (assembly: Assembly): Array<StPrompt> => {
     ])
   )
   const collection: Array<StPrompt> = []
+  let afterHistory = false
+  let direction = false
   for (const entry of presetOrder(doc.prompts, doc.order)) {
     const prompt = prompts.get(entry.identifier)
     if (!prompt) continue
-    const allowed = entry.enabled && triggers(prompt, type)
+    const condition = conditionOf(prompt)
+    const allowed = entry.enabled && triggersFor(prompt, type) && conditionHolds(assembly, condition)
+    if (entry.identifier === "chatHistory") afterHistory = true
     if (!allowed && entry.identifier !== "main") continue
-    const text = allowed && prompt.content ? presetText(assembly, prompt.identifier, prompt.content) : null
+    if (allowed && readsDirection(prompt.content)) direction = true
+    const text =
+      allowed && prompt.content
+        ? presetText(assembly, prompt.identifier, prompt.content, {}, condition === "always" ? undefined : condition)
+        : null
+    const summary = text !== null && hasSummary(assembly, text.piece)
     collection.push({
       identifier: prompt.identifier,
-      role: text && !need(assembly, "mode").st && hasSummary(assembly, text.piece) ? "system" : prompt.role,
-      ...(text && hasSummary(assembly, text.piece) ? { kind: "summary" as const } : {}),
+      role: text && !need(assembly, "mode").st && summary ? "system" : prompt.role,
+      ...(summary
+        ? { kind: "summary" as const }
+        : afterHistory && condition !== "always"
+          ? { kind: "volatile" as const }
+          : {}),
       content: text?.text ?? "",
       piece: text?.piece ?? null,
       system_prompt: prompt.system_prompt,
@@ -667,7 +722,7 @@ const collectionOf = (assembly: Assembly): Array<StPrompt> => {
       forbid_overrides: prompt.forbid_overrides
     })
   }
-  return collection
+  return { collection, readsDirection: direction }
 }
 
 /** Puts a prompt where its marker is, or at the end when the order has none (preparePromptsForChatCompletion). */
@@ -1223,11 +1278,36 @@ const composeStage = sync("compose", (assembly) => {
       const block = cardBlock(assembly, card, cardText, cardNotes(assembly, card, card))
       control.push({ role: "system", content: block.text, pieces: [block.piece], kind: "volatile" })
     }
-    const said = assembly.request.summarizing ? "" : directive(assembly, presetText)
-    if (said) control.push({ role: "system", content: said.text, pieces: [said.piece], kind: "volatile" })
   }
 
-  const collection = collectionOf(assembly)
+  const { collection, readsDirection: directionSent } = collectionOf(assembly)
+  // A direction is never dropped: without a prompt of the preset to carry it, the default
+  // direction prompt goes last, and the reply says so (DESIGN §2.2).
+  const direction = need(assembly, "target").direction
+  if (direction?.trim() && !assembly.request.summarizing && !directionSent) {
+    const piece = env.piece(
+      "direction:default",
+      { kind: "assembler", what: "default direction prompt" },
+      DIRECTION_TEXT
+    )
+    collection.push({
+      identifier: "direction:default",
+      role: "user",
+      content: env.text(piece),
+      piece,
+      system_prompt: false,
+      injection_position: "relative",
+      injection_depth: 0,
+      injection_order: 100,
+      forbid_overrides: true,
+      kind: "volatile"
+    })
+    assembly.issues.push({
+      kind: "direction_prompt_missing",
+      message:
+        "The preset has no prompt that sends the direction ({{direction}}), so the default direction prompt was added at the end. Add one in the preset editor to place it yourself."
+    })
+  }
   const lore = assembly.lore ?? []
   const loreBlock = (id: string, entries: typeof lore, format = false): Text | null => {
     if (!entries.length) return null
@@ -1297,30 +1377,12 @@ const composeStage = sync("compose", (assembly) => {
   place(collection, "charDescription", "system", markers.description)
   place(collection, "charPersonality", "system", markers.personality)
   place(collection, "scenario", "system", markers.scenario)
-  const impersonate =
-    mode.st && cast.type === "impersonate"
-      ? optional("utility.impersonation_prompt", utility.impersonation_prompt)
-      : null
-  place(collection, "impersonate", "system", impersonate)
   place(collection, "quietPrompt", "system", null)
   place(collection, "bias", "assistant", null)
   if (markers.persona) place(collection, "personaDescription", "system", markers.persona)
   if (mode.st) {
     override(assembly, collection, disabled, "main", overrides!.main)
     override(assembly, collection, disabled, "jailbreak", overrides!.jailbreak)
-  }
-  if (impersonate) {
-    const prompt = collection.find((p) => p.identifier === "impersonate")!
-    control.unshift({ role: prompt.role, content: prompt.content, pieces: [impersonate.piece], kind: "volatile" })
-  }
-  const direction = need(assembly, "target").direction
-  if (direction && !assembly.request.summarizing) {
-    const piece = env.verbatim(
-      "direction",
-      { kind: "direction", version: need(assembly, "target").versionId },
-      direction
-    )
-    control.push({ role: "system", content: direction, pieces: [piece], kind: "volatile" })
   }
 
   const previous =
@@ -1874,6 +1936,27 @@ const messagesStage = sync("messages", (assembly) => {
   messages = messages.filter((m) => m.content)
   if (doc.squash) messages = squash(messages)
   messages = postProcess(messages, doc.postprocess, need(assembly, "postNames"))
+  // The request ends on a user turn (DESIGN §2.2): after an assistant message, whatever system
+  // text follows it, the model is asked for the speaker's message. A prefill continues the
+  // model's own turn instead.
+  if (
+    !assembly.request.summarizing &&
+    !assembly.prefill &&
+    messages.findLast((m) => m.role !== "system")?.role === "assistant"
+  ) {
+    const env = need(assembly, "macros")
+    const piece = env.piece(
+      "assembler:last-turn",
+      { kind: "assembler", what: "user turn so the request ends on one" },
+      LAST_TURN_TEXT
+    )
+    messages.push({ role: "user", content: env.text(piece), pieces: [piece], kind: "volatile" })
+    assembly.issues.push({
+      kind: "last_turn_filled",
+      message:
+        "The request would have ended on an assistant message, so a user turn asking for the next message was added. Check the end of the preset's prompt order in the preset editor."
+    })
+  }
   assembly.messages = messages.map(({ role, content, name, pieces, kind }) => ({
     role,
     content,

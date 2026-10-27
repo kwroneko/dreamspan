@@ -10,6 +10,7 @@ import { ComposerChoice, TextTooLong } from "./composerApi.ts"
 import { Draft, DraftKey } from "./drafts.ts"
 import { NextContext } from "./inspectorApi.ts"
 import { ModelChoice } from "./lcmSettings.ts"
+import { RefId } from "./library.ts"
 
 /** Generation needs a generator, and this server has none (only tests run one without). */
 export class GenerationUnavailable extends Schema.TaggedError<GenerationUnavailable>()("GenerationUnavailable", {
@@ -43,7 +44,9 @@ const displayFields = {
   reasoning: ReasoningDisplay,
   portraitSize: Schema.Literals(["small", "default", "large", "largest"]),
   timeline: Schema.Literals(["originals", "summaries"]),
-  coverageRail: Schema.Boolean
+  coverageRail: Schema.Boolean,
+  /** The composer's text is guidance for the next generation, not a message (DESIGN §2.2). */
+  guidance: Schema.Boolean
 }
 export const DisplayPrefs = Schema.Struct(displayFields)
 /** Writes merge only the named choices, so independent controls never reset each other. */
@@ -51,14 +54,16 @@ export const DisplayPrefsChange = Schema.Struct({
   reasoning: Schema.optionalKey(displayFields.reasoning),
   portraitSize: Schema.optionalKey(displayFields.portraitSize),
   timeline: Schema.optionalKey(displayFields.timeline),
-  coverageRail: Schema.optionalKey(displayFields.coverageRail)
+  coverageRail: Schema.optionalKey(displayFields.coverageRail),
+  guidance: Schema.optionalKey(displayFields.guidance)
 })
 export type DisplayPrefsChange = typeof DisplayPrefsChange.Type
 export const DEFAULT_DISPLAY_PREFS: DisplayPrefs = {
   reasoning: "expanded",
   portraitSize: "default",
   timeline: "originals",
-  coverageRail: false
+  coverageRail: false,
+  guidance: false
 }
 export type DisplayPrefs = typeof DisplayPrefs.Type
 
@@ -340,7 +345,9 @@ export class ChatApi extends RpcGroup.make(
       slotId: SlotId,
       expectedRowVersion: Schema.Int,
       /** "Retry with…" or "Regenerate with…": this swipe uses another model of the user's, recorded on it. */
-      model: Schema.optionalKey(ModelChoice)
+      model: Schema.optionalKey(ModelChoice),
+      /** A one-turn direction for this version (the composer's text with guidance on); none is reused. */
+      direction: Schema.optionalKey(Schema.String)
     },
     success: PathEntry,
     error: Schema.Union([...WriteErrors, GenerationUnavailable])
@@ -352,7 +359,12 @@ export class ChatApi extends RpcGroup.make(
    * fails saying so. The version continued stays as it was (DESIGN §3.1).
    */
   Rpc.make("ContinueVersion", {
-    payload: { versionId: VersionId, expectedRowVersion: Schema.Int },
+    payload: {
+      versionId: VersionId,
+      expectedRowVersion: Schema.Int,
+      /** A one-turn direction for the continued version; the continued one's isn't reused. */
+      direction: Schema.optionalKey(Schema.String)
+    },
     success: PathEntry,
     error: Schema.Union([...WriteErrors, GenerationUnavailable, NotContinuable])
   }),
@@ -447,6 +459,16 @@ export class ChatApi extends RpcGroup.make(
   Rpc.make("GetDisplayPrefs", { payload: {}, success: DisplayPrefs, error: ServerError }),
   /** Changes the user's display choices; answers with them as now stored. */
   Rpc.make("SetDisplayPrefs", { payload: { prefs: DisplayPrefsChange }, success: DisplayPrefs, error: ServerError }),
+  /**
+   * Asked as the user generates as a card they play (DESIGN §2.2): whether to say, once for
+   * this account and its current preset, that a preset with no prompt conditioned on writing
+   * as `{{user}}` may need its rules against writing for `{{user}}` marked. Asking marks it shown.
+   */
+  Rpc.make("ImpersonationNotice", {
+    payload: {},
+    success: Schema.Struct({ show: Schema.Boolean, preset: Schema.NullOr(RefId) }),
+    error: ServerError
+  }),
   /** The alternates at `slotId`'s place (it and its siblings a path can reach), oldest first. */
   Rpc.make("ListBranches", {
     payload: { slotId: SlotId },

@@ -1,4 +1,5 @@
 import { LegacyPresetDoc as PresetDoc } from "@rp/shared/docs/preset.ts"
+import { conditionOf, editedDoc, triggersFor, withConditions } from "@rp/shared/presetConditions.ts"
 import { Schema } from "effect"
 import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
@@ -41,13 +42,21 @@ describe("importing an ST chat-completion preset", () => {
       "dialogueExamples",
       "chatHistory",
       "newestMessage",
-      "jailbreak"
+      "groupNudge",
+      "impersonationPrompt",
+      "jailbreak",
+      "direction"
     ])
     expect(doc.order.find((e) => e.identifier === "enhanceDefinitions")?.enabled).toBe(false)
     expect(issue(result, "preset.prompt_orders_dropped")?.message).toContain("100000")
     expect(prompt(doc, "main")).toMatchObject({ content: "You narrate a story starring {{char}} and {{user}}." })
     expect(prompt(doc, "chatHistory")).toMatchObject({ marker: true, system_prompt: true, role: "system" })
-    expect(doc.utility_prompts.impersonation_prompt).toBe("[Reply as {{user}} this time.]")
+    // ST's impersonation prompt is a conditioned prompt now, with {{user}} as {{speaker}}.
+    expect(doc.utility_prompts.impersonation_prompt).toBe("")
+    expect(prompt(doc, "impersonationPrompt")).toMatchObject({
+      content: "[Reply as {{speaker}} this time.]",
+      condition: "as_user"
+    })
     // Fields left at ST's defaults, or with no effect on what's sent, raise no warnings.
     expect(codes(result, "warning")).toEqual([])
     expect(doc.unsupported).toEqual({
@@ -125,7 +134,7 @@ describe("importing an ST chat-completion preset", () => {
     expect(codes(result).filter((c) => c === "preset.unknown_field")).toHaveLength(2)
     expect(
       doc.order
-        .filter((e) => e.identifier !== "newestMessage")
+        .filter((e) => !["newestMessage", "groupNudge", "impersonationPrompt", "direction"].includes(e.identifier))
         .slice(12)
         .map((e) => e.enabled)
     ).toEqual([true, true, false, true])
@@ -200,7 +209,12 @@ describe("ST's prompt and order sanitizing", () => {
     for (const doc of [fromEmpty, fromPartial])
       expect(doc.prompts.map((p) => p.identifier)).toEqual(expect.arrayContaining(builtIns))
     expect(prompt(fromPartial, "main")?.content).toBe("Hi")
-    expect(fromPartial.order.filter((e) => e.enabled)).toEqual([{ identifier: "newestMessage", enabled: true }])
+    expect(fromPartial.order.filter((e) => e.enabled).map((e) => e.identifier)).toEqual([
+      "newestMessage",
+      "groupNudge",
+      "impersonationPrompt",
+      "direction"
+    ])
     expect(fromPartial.order).toHaveLength(fromPartial.prompts.length)
   })
 
@@ -269,7 +283,8 @@ describe("ST's prompt and order sanitizing", () => {
 
   it("uses ST's default order when the preset has no global order", () => {
     const result = load({ prompts: [], prompt_order: [{ character_id: 100000, order: [] }] })
-    expect(result.doc.order).toHaveLength(13)
+    // ST's twelve, the newest-message marker, the group nudge, the impersonation prompt and the direction.
+    expect(result.doc.order).toHaveLength(16)
     expect(codes(result, "warning")).toContain("preset.no_global_order")
     expect(issue(result, "preset.prompt_orders_dropped")?.message).toContain("100000")
   })
@@ -373,7 +388,7 @@ describe("exporting to an ST chat-completion preset", () => {
         expect(
           (file.prompt_order as Array<{ character_id: number; order: Array<{ identifier: string }> }>).map((o) => ({
             ...o,
-            order: o.order.filter((e) => e.identifier !== "newestMessage")
+            order: o.order.filter((e) => e.identifier !== "newestMessage" && e.identifier !== "direction")
           }))
         ).toEqual([global])
       } else if (key === "extensions") {
@@ -400,7 +415,8 @@ describe("exporting to an ST chat-completion preset", () => {
     const { doc } = load(fixture("default"))
     const file = exportStPreset({ ...doc, unsupported: { ...doc.unsupported, temperature: 2, prompts: [] } })
     expect(file.temperature).toBe(1)
-    expect(file.prompts).toHaveLength(doc.prompts.length)
+    // The group nudge and impersonation prompt go back to ST's utility prompts.
+    expect(file.prompts).toHaveLength(doc.prompts.length - 2)
   })
 
   it("writes the document's enums back as ST's values", () => {
@@ -679,7 +695,7 @@ describe("cases where ST's behaviour is easy to miss", () => {
 
   it("says where a global order without a list differs from ST", () => {
     const result = load({ prompts: [], prompt_order: [{ character_id: 100001 }] })
-    expect(result.doc.order).toHaveLength(13)
+    expect(result.doc.order).toHaveLength(16)
     expect(issue(result, "preset.no_global_order")?.message).toContain("ST would send none")
   })
 
@@ -736,5 +752,186 @@ describe("the document order", () => {
       ]
     }
     expect(load(exportStPreset(moved)).doc.order).toEqual(moved.order)
+  })
+})
+
+describe("conditions (DESIGN §2.2)", () => {
+  const withTriggers = (injection_trigger: ReadonlyArray<string>) =>
+    load(
+      preset({
+        prompts: [{ identifier: "t", name: "Triggered", content: "x", system_prompt: false, injection_trigger }],
+        prompt_order: [{ character_id: 100001, order: [{ identifier: "t", enabled: true }] }]
+      })
+    )
+
+  it.each([
+    [[], undefined],
+    [["impersonate"], "as_user"],
+    [["normal"], "as_character"],
+    [["swipe"], "as_character"],
+    [["regenerate"], "as_character"],
+    [["normal", "swipe", "regenerate"], "as_character"],
+    [["normal", "impersonate"], undefined],
+    [["continue"], undefined],
+    [["quiet"], undefined],
+    [["continue", "quiet"], undefined],
+    [["impersonate", "continue"], "as_user"],
+    [["normal", "quiet"], "as_character"]
+  ] as const)("maps ST triggers %j to the condition %s", (triggers, condition) => {
+    const result = withTriggers(triggers)
+    const p = prompt(result.doc, "t")!
+    expect(p.condition).toBe(condition)
+    // The triggers stay, for export and for Continue and summaries.
+    expect(p.injection_trigger).toEqual(triggers)
+    expect(conditionOf(p)).toBe(condition ?? "always")
+    const reported = result.report.issues.filter((i) => i.code === "preset.trigger_mapped")
+    expect(reported).toHaveLength(triggers.length === 0 ? 0 : 1)
+  })
+
+  it("limits only the prompts naming Continue or summaries to those, as ST does", () => {
+    const p = (injection_trigger: ReadonlyArray<string>) => prompt(withTriggers(injection_trigger).doc, "t")!
+    // A normal-only prompt is now sent on swipes too: the condition replaces the trigger there.
+    expect(["normal", "swipe", "impersonate"].map((type) => triggersFor(p(["normal"]), type))).toEqual([
+      true,
+      true,
+      true
+    ])
+    expect(["continue", "quiet"].map((type) => triggersFor(p(["normal"]), type))).toEqual([false, false])
+    expect(["normal", "swipe", "continue", "quiet"].map((type) => triggersFor(p(["continue"]), type))).toEqual([
+      false,
+      false,
+      true,
+      false
+    ])
+    expect(["normal", "quiet"].map((type) => triggersFor(p(["quiet"]), type))).toEqual([false, true])
+    expect(["normal", "continue", "quiet"].map((type) => triggersFor(p([]), type))).toEqual([true, true, true])
+  })
+
+  it("turns ST's group nudge and impersonation prompt into conditioned prompts after the history", () => {
+    const result = load(
+      preset({
+        group_nudge_prompt: "[Only {{char}} speaks; not {{ CHAR }}'s rival.]",
+        impersonation_prompt: "[Write as {{user}}.]",
+        prompt_order: [
+          {
+            character_id: 100001,
+            order: ["main", "chatHistory", "jailbreak"].map((identifier) => ({ identifier, enabled: true }))
+          }
+        ]
+      })
+    )
+    const { doc } = result
+    expect(prompt(doc, "groupNudge")).toMatchObject({
+      role: "system",
+      condition: "as_character",
+      system_prompt: false,
+      content: "[Only {{speaker}} speaks; not {{speaker}}'s rival.]"
+    })
+    expect(prompt(doc, "impersonationPrompt")).toMatchObject({
+      role: "system",
+      condition: "as_user",
+      content: "[Write as {{speaker}}.]"
+    })
+    expect(doc.utility_prompts.group_nudge_prompt).toBe("")
+    expect(doc.utility_prompts.impersonation_prompt).toBe("")
+    const ids = doc.order.map((e) => e.identifier)
+    expect(ids.slice(ids.indexOf("chatHistory"), ids.indexOf("chatHistory") + 4)).toEqual([
+      "chatHistory",
+      "newestMessage",
+      "groupNudge",
+      "impersonationPrompt"
+    ])
+    expect(codes(result)).toEqual(
+      expect.arrayContaining(["preset.group_nudge_prompt", "preset.impersonation_prompt", "preset.direction_prompt"])
+    )
+    // Empty ones add nothing.
+    const none = load(preset({ group_nudge_prompt: "", impersonation_prompt: "" })).doc
+    expect(none.prompts.map((p) => p.identifier)).not.toContain("groupNudge")
+    expect(none.prompts.map((p) => p.identifier)).not.toContain("impersonationPrompt")
+  })
+
+  it("appends the default direction prompt last, once, and not again on a reimport", () => {
+    const { doc } = load(fixture("full"))
+    expect(doc.order.at(-1)).toEqual({ identifier: "direction", enabled: true })
+    expect(prompt(doc, "direction")).toMatchObject({
+      role: "user",
+      condition: "with_direction",
+      added_on_import: true,
+      content:
+        "[The user has written a direction for {{speaker}}'s next message. It is not part of the story; follow it closely: {{direction}}]"
+    })
+    const again = load(exportStPreset(doc)).doc
+    expect(again.prompts.filter((p) => p.identifier === "direction")).toHaveLength(1)
+    expect(again).toEqual(doc)
+    // Converted already, it comes back as it is.
+    expect(withConditions(doc).doc).toBe(doc)
+  })
+
+  it("exports conditions as ST has them, and reimports the same document", () => {
+    const { doc } = load(
+      preset({
+        group_nudge_prompt: "[Only {{char}}.]",
+        impersonation_prompt: "[As {{user}}.]",
+        prompts: [
+          { identifier: "a", content: "a", system_prompt: false, injection_trigger: ["normal"] },
+          { identifier: "b", content: "b", system_prompt: false }
+        ],
+        prompt_order: [
+          {
+            character_id: 100001,
+            order: [
+              { identifier: "a", enabled: true },
+              { identifier: "b", enabled: true },
+              { identifier: "chatHistory", enabled: true }
+            ]
+          }
+        ]
+      })
+    )
+    const edited = {
+      ...doc,
+      prompts: doc.prompts.map((p) => (p.identifier === "b" ? { ...p, condition: "as_user" as const } : p))
+    }
+    const file = exportStPreset(edited)
+    expect(file.group_nudge_prompt).toBe("[Only {{char}}.]")
+    expect(file.impersonation_prompt).toBe("[As {{user}}.]")
+    const prompts = file.prompts as Array<Record<string, unknown>>
+    expect(prompts.map((p) => p.identifier)).not.toContain("groupNudge")
+    expect(prompts.find((p) => p.identifier === "a")!.injection_trigger).toEqual(["normal"])
+    expect(prompts.find((p) => p.identifier === "b")!.injection_trigger).toEqual(["impersonate"])
+    // ST would send a direction prompt every turn: it goes out off.
+    const order = (file.prompt_order as Array<{ order: Array<{ identifier: string; enabled: boolean }> }>)[0]!.order
+    expect(order.find((e) => e.identifier === "direction")?.enabled).toBe(false)
+    expect(order.map((e) => e.identifier)).not.toContain("impersonationPrompt")
+    expect(load(file).doc).toEqual({
+      ...edited,
+      prompts: edited.prompts.map((p) => (p.identifier === "b" ? { ...p, injection_trigger: ["impersonate"] } : p))
+    })
+    // A nudge turned off is no nudge in ST.
+    const off = exportStPreset({
+      ...edited,
+      order: edited.order.map((e) => (e.identifier === "groupNudge" ? { ...e, enabled: false } : e))
+    })
+    expect(off.group_nudge_prompt).toBe("")
+  })
+
+  it("reads a preset saved before conditions as the import would make it now, without rewriting it", () => {
+    const fresh = load(preset({ group_nudge_prompt: "[Only {{char}}.]", impersonation_prompt: "[As {{user}}.]" })).doc
+    const moved = new Set(["groupNudge", "impersonationPrompt", "direction"])
+    const stored = {
+      ...fresh,
+      prompts: fresh.prompts.filter((p) => !moved.has(p.identifier)),
+      order: fresh.order.filter((e) => !moved.has(e.identifier)),
+      utility_prompts: {
+        ...fresh.utility_prompts,
+        group_nudge_prompt: "[Only {{char}}.]",
+        impersonation_prompt: "[As {{user}}.]"
+      }
+    }
+    const before = JSON.stringify(stored)
+    expect(withConditions(stored).doc).toEqual(fresh)
+    expect(editedDoc("preset", stored)).toEqual(fresh)
+    expect(editedDoc("card", stored)).toBe(stored)
+    expect(JSON.stringify(stored)).toBe(before)
   })
 })

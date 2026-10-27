@@ -12,6 +12,7 @@ import { CardDoc } from "@rp/shared/docs/card.ts"
 import { LorebookDoc } from "@rp/shared/docs/lorebook.ts"
 import { NoteDoc } from "@rp/shared/docs/note.ts"
 import { LegacyPresetDoc as PresetDoc } from "@rp/shared/docs/preset.ts"
+import { withConditions } from "@rp/shared/presetConditions.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { NotFound } from "@rp/shared/errors.ts"
 import type { Summary } from "@rp/shared/lcm.ts"
@@ -215,7 +216,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
         decodePreset({ ...builtinPreset, ...JSON.parse(row.doc_json) }),
         "The preset"
       )
-      return { ref: row.ref, revision: row.revision, scope, doc } satisfies PresetInput
+      return { ref: row.ref, revision: row.revision, scope, doc: withConditions(doc).doc } satisfies PresetInput
     })
 
   let layerPins: SourcePins["lcm"]
@@ -861,7 +862,7 @@ const replaySources = (
           revision,
           scope,
           doc: withModelSettings(
-            doc,
+            withConditions(doc).doc,
             inputs.model?.settings ?? {},
             inputs.model?.context ?? 8192,
             inputs.model?.maxOutput ?? 4096

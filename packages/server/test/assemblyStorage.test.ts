@@ -1074,10 +1074,12 @@ describe("context assembly from the database", () => {
       assert.notInclude(texts(off).join("\n"), "flooded twice")
       yield* state({ key: "note.activate", value: { note: summary.entityId as EntityId } })
       const on = yield* assemble()
-      assert.deepStrictEqual(texts(on).slice(-3), [
+      // ST's default preset's group nudge follows, as for any reply a character writes.
+      assert.deepStrictEqual(texts(on).slice(-4), [
         "assistant: *Mira looks up.* Late again, Tobin.",
         "system: [Summary: The road flooded twice.]",
-        "user: The road flooded."
+        "user: The road flooded.",
+        "system: [Write the next reply only as Mira.]"
       ])
     }).pipe(Effect.provide(database()))
   )
@@ -1197,7 +1199,7 @@ describe("context assembly from the database", () => {
       })
       yield* state({ key: "model.binding", value: { connection: connectionId, model: model.id } })
       const snapshot = yield* assemble()
-      assert.strictEqual(texts(snapshot).at(-1), "system: Mira never guesses.")
+      assert.strictEqual(texts(snapshot).at(-2), "system: Mira never guesses.")
       assert.deepInclude(snapshot.inputs.model!, {
         kind: "anthropic",
         api: "anthropic-messages",

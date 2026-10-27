@@ -1617,6 +1617,15 @@ export class WriteOps extends RpcGroup.make(
     success: DisplayPrefs,
     error: StorageError
   }),
+  /**
+   * Records that a one-time notice was shown for `key` (the impersonation notice: a preset's
+   * ref). Answers whether this call recorded it, so of two tabs only one shows it.
+   */
+  Rpc.make("MarkNoticeShown", {
+    payload: { userId: UserId, notice: Schema.Literal("impersonation"), key: Schema.String },
+    success: Schema.Boolean,
+    error: StorageError
+  }),
   // --- Branches (DESIGN §3.2).
   /**
    * Moves the chat's active leaf to one of its live slots, if the chat is still at the row

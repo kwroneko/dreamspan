@@ -1021,7 +1021,7 @@ export class ChatSession {
 
   /**
    * The user's message at the leaf, as `speaker` (Send as X), then a reply to it by
-   * `replySpeaker`. Onto a reply still being written, it's queued and the server posts it,
+   * `replySpeaker`, unless there's no one to reply. Onto a reply still being written, it's queued and the server posts it,
    * with its reply, when that one ends (DESIGN §2.2). `sent` says whether the message went,
    * and `draft` is the composer draft as the send left it.
    */
@@ -1060,6 +1060,8 @@ export class ChatSession {
     const { draft, recovered } = result.value
     if (result.value._tag === "Queued") return { sent: true, outcome: result, draft, recovered }
     this.appended(result.value.entry, result.value.chat)
+    // No one to reply (every character muted, DESIGN §3.5): the message is posted, and that's all.
+    if (replySpeaker === null) return { sent: true, outcome: result, draft, recovered }
     return { sent: true, outcome: await this.generate(result.value.entry.slotId, replySpeaker), draft, recovered }
   }
 
@@ -1139,27 +1141,62 @@ export class ChatSession {
     return result
   }
 
-  /** A swipe; with a `model`, "Retry with…" or "Regenerate with…" that one instead of the chat's. */
+  /** Whether to say, once for this preset, that its anti-impersonation rules may need a condition. */
+  impersonationNotice() {
+    return this.call((client) => client("ImpersonationNotice", {}))
+  }
+
+  /** What the composer holds as guidance; nothing while guidance is off or no composer is open. */
+  private guidanceText: () => string = () => ""
+
+  /**
+   * The composer says what its guidance is (DESIGN §2.2): its text while the guidance toggle is
+   * on, else nothing. A swipe and Continue read it as they're asked for. Returns the undo.
+   */
+  provideGuidance(read: () => string): () => void {
+    this.guidanceText = read
+    return () => {
+      if (this.guidanceText === read) this.guidanceText = () => ""
+    }
+  }
+
+  /** The direction a swipe or Continue asked for now carries: the composer's guidance, if any. */
+  guidance(): string {
+    return this.guidanceText().trim() === "" ? "" : this.guidanceText()
+  }
+
+  /**
+   * A swipe; with a `model`, "Retry with…" or "Regenerate with…" that one instead of the chat's.
+   * It carries the composer's guidance as its direction; nothing else is reused.
+   */
   async regenerate(
     entry: PathEntry,
     model?: { readonly connection: Connection["id"]; readonly model: Model["id"] }
   ): Promise<Outcome<unknown>> {
+    const direction = this.guidance()
     return this.slotWrite(entry.slotId, (client) =>
       client("Regenerate", {
         slotId: entry.slotId,
         expectedRowVersion: entry.rowVersion,
-        ...(model ? { model } : {})
+        ...(model ? { model } : {}),
+        ...(direction ? { direction } : {})
       })
     )
   }
 
   /**
    * Continue (ST's): a new version that starts as this one's text and streams on from its
-   * end, sent as the start of the reply to models that take one (DESIGN §7.5).
+   * end, sent as the start of the reply to models that take one (DESIGN §7.5), with the
+   * composer's guidance as its direction.
    */
   async continueVersion(entry: PathEntry): Promise<Outcome<unknown>> {
+    const direction = this.guidance()
     return this.slotWrite(entry.slotId, (client) =>
-      client("ContinueVersion", { versionId: entry.version.id, expectedRowVersion: entry.rowVersion })
+      client("ContinueVersion", {
+        versionId: entry.version.id,
+        expectedRowVersion: entry.rowVersion,
+        ...(direction ? { direction } : {})
+      })
     )
   }
 

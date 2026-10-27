@@ -275,18 +275,21 @@ export function SelectField<Value extends string>({
   store,
   path,
   label,
-  items
+  items,
+  fallback
 }: {
   store: EditorStore
   path: FieldPath
   label: string
   items: ReadonlyArray<{ readonly value: Value; readonly label: string }>
+  /** What an absent value means (a prompt's condition, from its ST triggers). */
+  fallback?: Value
 }) {
   const value = useValue<Value>(store, path)
   const field = valueField(path)
   return (
     <Field label={<FieldLabel store={store} field={field} label={label} />}>
-      <Select items={items} value={value ?? null} onValueChange={(next) => store.setValue(path, next)} />
+      <Select items={items} value={value ?? fallback ?? null} onValueChange={(next) => store.setValue(path, next)} />
     </Field>
   )
 }

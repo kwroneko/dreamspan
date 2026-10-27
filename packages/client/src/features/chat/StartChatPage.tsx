@@ -14,7 +14,7 @@ import type { CardForChat, ChatGroup } from "@rp/shared/chatSetupApi.ts"
 import type { FrozenValues } from "@rp/shared/macros/expand.ts"
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router"
 import { Effect } from "effect"
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ErrorAlert, useAction } from "../../actions.tsx"
 import { CharacterPanel } from "../characters/CharacterPanel.tsx"
 import { rememberPanel, useWide } from "./ChatPanels.tsx"
@@ -23,7 +23,11 @@ import { type ReactNode } from "react"
 import { AutoGrowTextarea } from "../../ui/AutoGrowTextarea.tsx"
 import { SquareIconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import { composerKeyDown } from "./composerKeys.ts"
-import { SendIcon } from "./icons.tsx"
+import { RegenerateIcon, SendIcon } from "./icons.tsx"
+import { SpeakerSwitcher } from "./SpeakerSwitcher.tsx"
+import { CastContext, castView } from "./cast.ts"
+import { Switch } from "../../ui/Choice.tsx"
+import { useViewPrefs } from "../../ui/viewPrefs.ts"
 import { Avatar } from "../../ui/Avatar.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Field } from "../../ui/Field.tsx"
@@ -126,11 +130,14 @@ function Greeting({
 function Pending({
   card,
   personas,
+  cards,
   group = null
 }: {
   /** The card that greets: the chat's card, or the group's first character. */
   card: CardForChat
   personas: ReadonlyArray<CastCard>
+  /** Every card that could be the persona (any card can be, DESIGN §2.2). */
+  cards: ReadonlyArray<CastCard>
   group?: PendingGroup | null
 }) {
   const action = useAction()
@@ -138,8 +145,11 @@ function Pending({
   const navigationSearch = useSearch({ strict: false }) as { panel?: string; character?: string }
   const [persona, setPersona] = useState<string>(() => {
     const saved = savedPersona()
-    return personas.find((p) => p.entityId === saved)?.entityId ?? personas[0]?.entityId ?? NONE
+    return cards.find((p) => p.entityId === saved)?.entityId ?? personas[0]?.entityId ?? NONE
   })
+  const listCards = useCallback(() => Promise.resolve({ ok: true as const, value: cards }), [cards])
+  // No chat yet: the switcher names cards from the list, and there are no members to join.
+  const pendingView = useMemo(() => castView(null, cards), [cards])
   // Who greets: the card, or each of the group's characters in turn; the greeting picked of each.
   const greeters = group?.cards ?? [card]
   const [picks, setPicks] = useState<ReadonlyArray<number>>(() =>
@@ -217,7 +227,10 @@ function Pending({
       current = false
     }
   }, [userId, copyKey])
-  const playing = personas.find((p) => p.entityId === persona) ?? null
+  const playing = cards.find((p) => p.entityId === persona) ?? null
+  // The guidance toggle, as in the chat's composer (DESIGN §2.2).
+  const viewPrefs = useViewPrefs()
+  const guidance = viewPrefs.prefs.guidance
   const name = card.card.name
   /** What the chat is with: the card, or the group. */
   const title = group?.group.name ?? name
@@ -247,11 +260,14 @@ function Pending({
   const start = async (first: "send" | "generate") => {
     if (action.pending || (first === "send" && text.trim() === "")) return
     const personaId = playing?.entityId ?? null
-    // The text leaves the box as it's sent; whatever is typed while the chat is being made
-    // goes along to its composer, and a failure puts the sent text back.
+    // A sent message leaves the box as it's sent; whatever is typed while the chat is being
+    // made goes along to its composer, and a failure puts the sent text back. Generating
+    // leaves the text where it is, and it goes along too: with guidance on it's the first
+    // reply's direction, with guidance off it isn't used.
     const submitted = text
-    sending.current = submitted
-    setText("")
+    const sent = first === "send"
+    sending.current = sent ? submitted : ""
+    if (sent) setText("")
     const shownFrozen = card.greetings.length > 0 ? frozen[0]!.get(greeting) : undefined
     const result = await action.run(
       (client) =>
@@ -282,7 +298,7 @@ function Pending({
             first:
               first === "send"
                 ? { _tag: "Send", content: submitted, speakerEntityId: personaId }
-                : { _tag: "Generate", speakerEntityId: replyId, direction: submitted }
+                : { _tag: "Generate", speakerEntityId: replyId, direction: guidance ? submitted : "" }
           })
           // A message gets its reply, as after any send; a server without a generator still keeps the message.
           if (first === "send") {
@@ -301,7 +317,7 @@ function Pending({
     )
     sending.current = null
     if (!result.ok) {
-      if (submitted !== "") {
+      if (sent && submitted !== "") {
         const restored = typed.current === "" ? submitted : `${submitted}\n\n${typed.current}`
         setText(restored)
         void keep(restored)
@@ -359,22 +375,31 @@ function Pending({
         </div>
         {/* A group's chat picks who replies too: both fields on a row of their own. */}
         <div className={`flex gap-3 ${members === null ? "w-full sm:w-56" : "w-full"}`}>
-          <Field label="Playing as" className={members === null ? "w-full" : "flex-1 sm:w-56 sm:flex-none"}>
-            <Select
-              items={[
-                ...personas.map((p) => ({
-                  value: p.entityId as string,
-                  label: `${p.name}${p.subtitle ? ` · ${p.subtitle}` : ""}`
-                })),
-                { value: NONE, label: "No persona" }
-              ]}
-              value={persona}
-              onValueChange={(next) => {
-                setPersona(next)
-                savePersona(next)
-              }}
-            />
-          </Field>
+          {/* The same persona control as the chat's Cast tab, on Personas (DESIGN §2.2). */}
+          <div
+            role="group"
+            aria-label="Your persona"
+            className={`flex flex-col gap-1 ${members === null ? "w-full" : "flex-1 sm:w-56 sm:flex-none"}`}
+          >
+            <span className="text-sm font-medium">Playing as</span>
+            <CastContext value={pendingView}>
+              <SpeakerSwitcher
+                listCards={listCards}
+                speaker={playing?.entityId ?? null}
+                recent={[]}
+                persona
+                pending
+                onPick={(picked) => {
+                  setPersona(picked.entityId)
+                  savePersona(picked.entityId)
+                }}
+                onNone={() => {
+                  setPersona(NONE)
+                  savePersona(NONE)
+                }}
+              />
+            </CastContext>
+          </div>
           {members !== null && (
             <Field label="Reply from" className="flex-1 sm:w-56 sm:flex-none">
               <Select
@@ -415,55 +440,89 @@ function Pending({
         )}
       </div>
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-2 border-t border-border pt-2 pb-2">
-        <div className="flex min-w-0 items-end gap-1 rounded-lg border border-border bg-surface p-1 focus-within:border-focus focus-within:ring-2 focus-within:ring-focus/40">
-          <label htmlFor="composer" className="sr-only">
-            Message
-          </label>
-          <AutoGrowTextarea
-            id="composer"
-            value={text}
-            // Short, so it fits one line on a phone, as the chat's composer does.
-            placeholder="Write a message…"
-            aria-describedby={text.trim() !== "" ? "composer-hint" : undefined}
-            onKeyDown={(event) => composerKeyDown(() => start("send"))(event)}
-            onChange={(event) => {
-              const value = event.currentTarget.value
-              typed.current = value
-              setText(value)
-              // While the first send is out, the copy keeps both, as a failed send leaves them.
-              const out = sending.current
-              void keep(out === null || out === "" ? value : value === "" ? out : `${out}\n\n${value}`)
-            }}
-          />
-          <Tooltip
-            label={
-              text.trim() !== ""
-                ? `${replyName} writes the next turn, with your text as a one-turn direction`
-                : `${replyName} writes the next turn`
-            }
+        <div className="flex justify-end text-sm">
+          <Switch
+            checked={guidance}
+            disabled={!viewPrefs.ready}
+            onCheckedChange={(next) => void viewPrefs.change({ guidance: next })}
           >
-            <Button
-              aria-label={`Generate ${replyName}`}
-              disabled={action.pending}
+            Guidance
+          </Switch>
+        </div>
+        <div
+          data-guidance={guidance || undefined}
+          className={`flex min-w-0 items-end gap-1 rounded-lg border p-1 focus-within:ring-2 ${
+            guidance
+              ? "border-guidance bg-guidance-surface focus-within:ring-guidance/40"
+              : "border-border bg-surface focus-within:border-focus focus-within:ring-focus/40"
+          }`}
+        >
+          <div className="flex min-w-0 flex-1 flex-col">
+            {guidance && (
+              <span aria-hidden className="px-2 pt-0.5 text-xs font-medium text-guidance">
+                Guidance
+              </span>
+            )}
+            <label htmlFor="composer" className="sr-only">
+              {guidance ? "Guidance" : "Message"}
+            </label>
+            <AutoGrowTextarea
+              id="composer"
+              value={text}
+              // Short, so it fits one line on a phone, as the chat's composer does.
+              placeholder={guidance ? "Direction for the next message…" : "Write a message…"}
+              aria-describedby={text.trim() !== "" || guidance ? "composer-hint" : undefined}
+              onKeyDown={(event) => composerKeyDown(() => start(guidance ? "generate" : "send"))(event)}
+              onChange={(event) => {
+                const value = event.currentTarget.value
+                typed.current = value
+                setText(value)
+                // While the first send is out, the copy keeps both, as a failed send leaves them.
+                const out = sending.current
+                void keep(out === null || out === "" ? value : value === "" ? out : `${out}\n\n${value}`)
+              }}
+            />
+          </div>
+          {guidance ? (
+            // Guidance is never sent as a message: Send gives way to generating.
+            <SquareIconButton
+              label={`Generate ${replyName}`}
+              hint={`${replyName} writes the first reply${text.trim() !== "" ? ", following the guidance" : ""} (Enter)`}
+              variant="primary"
+              pending={action.pending}
               onClick={() => void start("generate")}
             >
-              Generate
-            </Button>
-          </Tooltip>
-          <SquareIconButton
-            label={playing ? `Send as ${playing.name}` : "Send"}
-            hint={`${playing ? `Send as ${playing.name}` : "Send"} (Enter; Shift+Enter for a new line)`}
-            variant="primary"
-            pending={action.pending}
-            disabled={text.trim() === ""}
-            onClick={() => void start("send")}
-          >
-            {!action.pending && <SendIcon />}
-          </SquareIconButton>
+              {!action.pending && <RegenerateIcon />}
+            </SquareIconButton>
+          ) : (
+            <>
+              <Tooltip label={`${replyName} writes the next turn`}>
+                <Button
+                  aria-label={`Generate ${replyName}`}
+                  disabled={action.pending}
+                  onClick={() => void start("generate")}
+                >
+                  Generate
+                </Button>
+              </Tooltip>
+              <SquareIconButton
+                label={playing ? `Send as ${playing.name}` : "Send"}
+                hint={`${playing ? `Send as ${playing.name}` : "Send"} (Enter; Shift+Enter for a new line)`}
+                variant="primary"
+                pending={action.pending}
+                disabled={text.trim() === ""}
+                onClick={() => void start("send")}
+              >
+                {!action.pending && <SendIcon />}
+              </SquareIconButton>
+            </>
+          )}
         </div>
-        {text.trim() !== "" && (
+        {(guidance || text.trim() !== "") && (
           <p id="composer-hint" className="text-xs text-muted">
-            Generate instead makes this text a one-turn direction for {replyName}'s turn.
+            {guidance
+              ? `Guidance: a one-turn direction for ${replyName}'s first reply. It stays in the box.`
+              : "Generate doesn't use this text: turn guidance on to direct the reply with it."}
           </p>
         )}
         <ErrorAlert error={action.error} />
@@ -476,7 +535,11 @@ function Pending({
 export function StartChatPage() {
   const { entityId } = useParams({ strict: false }) as { entityId: EntityId }
   const action = useAction()
-  const [loaded, setLoaded] = useState<{ card: CardForChat; personas: ReadonlyArray<CastCard> } | null>(null)
+  const [loaded, setLoaded] = useState<{
+    card: CardForChat
+    personas: ReadonlyArray<CastCard>
+    cards: ReadonlyArray<CastCard>
+  } | null>(null)
   useTitle(loaded ? loaded.card.card.name : "New chat")
   useEffect(() => {
     void action
@@ -488,8 +551,8 @@ export function StartChatPage() {
       )
       .then((result) => {
         if (result.ok) {
-          const personas = result.value.cards.filter((c) => c.persona && c.entityId !== entityId)
-          setLoaded({ card: result.value.card, personas })
+          const cards = result.value.cards.filter((c) => c.entityId !== entityId)
+          setLoaded({ card: result.value.card, personas: cards.filter((c) => c.persona), cards })
         }
       })
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once per card
@@ -498,7 +561,7 @@ export function StartChatPage() {
     <PendingLayout entityId={entityId}>
       <div data-fill className="flex min-h-0 flex-1 flex-col px-4 pt-4">
         {loaded ? (
-          <Pending key={entityId} card={loaded.card} personas={loaded.personas} />
+          <Pending key={entityId} card={loaded.card} personas={loaded.personas} cards={loaded.cards} />
         ) : action.error ? (
           <ErrorAlert error={action.error} />
         ) : (
@@ -517,6 +580,7 @@ export function StartGroupChatPage() {
     group: ChatGroup
     cards: ReadonlyArray<CardForChat>
     personas: ReadonlyArray<CastCard>
+    all: ReadonlyArray<CastCard>
   } | null>(null)
   useTitle(loaded ? `New chat: ${loaded.group.name}` : "New chat")
   useEffect(() => {
@@ -543,7 +607,8 @@ export function StartGroupChatPage() {
         if (!result.ok) return
         const { group, greeters, cards } = result.value
         const inGroup = new Set<string>(group.members.map((member) => member.entityId))
-        setLoaded({ group, cards: greeters, personas: cards.filter((c) => c.persona && !inGroup.has(c.entityId)) })
+        const all = cards.filter((c) => !inGroup.has(c.entityId))
+        setLoaded({ group, cards: greeters, personas: all.filter((c) => c.persona), all })
       })
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once per group
   }, [chatId])
@@ -554,6 +619,7 @@ export function StartGroupChatPage() {
           key={chatId}
           card={loaded.cards[0]!}
           personas={loaded.personas}
+          cards={loaded.all}
           group={{ group: loaded.group, chatId, cards: loaded.cards }}
         />
       ) : action.error ? (

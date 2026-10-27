@@ -167,6 +167,8 @@ export const assembleFixture = (
     readonly frozen?: ContextSnapshot["frozen"]
     readonly random?: () => number
     readonly loreFallback?: ContextSnapshot["loreFallback"]
+    /** A summary's request: written as no one, with no direction. */
+    readonly summarizing?: boolean
   } = {}
 ) =>
   assembler()
@@ -175,6 +177,7 @@ export const assembleFixture = (
       timeZone: "UTC",
       frozen: options.frozen ?? {},
       ...(options.loreFallback ? { loreFallback: options.loreFallback } : {}),
+      ...(options.summarizing ? { summarizing: true } : {}),
       random: options.random ?? (() => 0.5)
     })
     .pipe(Effect.provide(fixtureSources(fixture)))

@@ -320,6 +320,60 @@ describe("chats", () => {
     }).pipe(Effect.scoped, withGenerator(config, fast))
   })
 
+  it.live("a swipe or Continue carries only the direction given with it (DESIGN §2.2)", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const { chat, slots } = yield* linearChat(api, 1)
+      const events = yield* subscribe(api, chat.id)
+      const { entry } = yield* posted(
+        api.Generate({ chatId: chat.id, parentSlotId: slots[0]!, branch: false, direction: "Make it rain." })
+      )
+      const done = (id: VersionId) => eventually(() => finished(events, id)?.status === "complete")
+      yield* done(entry.version.id)
+      const tip = () => Effect.map(read(api, chat.id, { _tag: "Bottom" }, 1), (w) => w.entries[0]!)
+      // Without a direction, a swipe has none: the replaced version's isn't reused.
+      const plain = yield* api.Regenerate({ slotId: entry.slotId, expectedRowVersion: (yield* tip()).rowVersion })
+      assert.isNull(plain.version.direction)
+      yield* done(plain.version.id)
+      const directed = yield* api.Regenerate({
+        slotId: entry.slotId,
+        expectedRowVersion: (yield* tip()).rowVersion,
+        direction: "Have the bell ring."
+      })
+      assert.strictEqual(directed.version.direction, "Have the bell ring.")
+      yield* done(directed.version.id)
+      // A blank direction is none.
+      const blank = yield* api.Regenerate({
+        slotId: entry.slotId,
+        expectedRowVersion: (yield* tip()).rowVersion,
+        direction: "  "
+      })
+      assert.isNull(blank.version.direction)
+      yield* done(blank.version.id)
+      // Continue, likewise: not the continued version's direction, only one given now.
+      const directedTip = yield* tip()
+      const continued = yield* api.ContinueVersion({
+        versionId: directed.version.id,
+        expectedRowVersion: directedTip.rowVersion
+      })
+      assert.isNull(continued.version.direction)
+      yield* done(continued.version.id)
+      const guided = yield* api.ContinueVersion({
+        versionId: continued.version.id,
+        expectedRowVersion: (yield* tip()).rowVersion,
+        direction: "Then the tide turns."
+      })
+      assert.strictEqual(guided.version.direction, "Then the tide turns.")
+      // Each version keeps its own.
+      const versions = yield* api.ListVersions({ slotId: entry.slotId })
+      assert.deepStrictEqual(
+        versions.map((v) => v.direction),
+        ["Make it rain.", null, "Have the bell ring.", null, null, "Then the tide turns."]
+      )
+    }).pipe(Effect.scoped, withGenerator(config, fast))
+  })
+
   it.live("a delete whose caller goes away still stops what it deleted", () => {
     const config = testConfig()
     const slow = FakeGenerator.layer({ tokensPerSecond: 100, tokens: 5000 })

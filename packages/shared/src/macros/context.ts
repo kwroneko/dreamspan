@@ -71,6 +71,10 @@ export interface MacroContext {
   readonly input?: string
   /** The text a character's prompt override replaces: `{{original}}`, once. */
   readonly original?: string
+  /** Who the model writes as in this generation (its in-chat name): `{{speaker}}` (DESIGN §2.2). */
+  readonly speaker?: string
+  /** The generation's one-turn direction, verbatim: `{{direction}}` (DESIGN §2.2). */
+  readonly direction?: string
   /** The chat's summary, as ST's Summarize extension keeps it: `{{summary}}`. */
   readonly summary?: string
   /** World-info outlets by key: `{{outlet::key}}`. */

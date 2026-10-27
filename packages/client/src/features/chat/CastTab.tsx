@@ -1,15 +1,16 @@
-// The chat's Cast tab (DESIGN §2.1, §2.2, §3.5, §4): everyone in the chat, as ST's group panel
-// and character panel show them. Each can be made to speak now, written as, set absent
-// (ST's mute), have their card shown or edited, here only or everywhere, and be removed;
-// and any card can be added. Changes to who's here are state events at the leaf shown, so
-// they apply from the latest message on, on this branch.
+// The chat's Cast tab (DESIGN §2.1, §2.2, §3.5, §4): who the user plays (the persona, who
+// `{{user}}` is), then everyone in the chat, as ST's group panel and character panel show
+// them. Each can be made to speak now, written as, muted (never picked to reply; its card
+// stays in the context), have their card shown or edited, here only or everywhere, be made
+// the persona, and be removed; and any card can be added. Changes to who's here are state
+// events at the leaf shown, so they apply from the latest message on, on this branch.
 import { useAtomValue } from "@effect/atom-react"
 import type { CastCard, EntityId } from "@rp/shared/chat.ts"
 import type { CastChange, ChatCard } from "@rp/shared/chatSetupApi.ts"
 import type { RefId } from "@rp/shared/library.ts"
 import { Link, useNavigate } from "@tanstack/react-router"
 import { AsyncResult } from "effect/reactivity"
-import { useId, useMemo, useState, useSyncExternalStore } from "react"
+import { useCallback, useId, useMemo, useState, useSyncExternalStore } from "react"
 import { useAction } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"
 import { AppClient } from "../../rpc.ts"
@@ -23,9 +24,10 @@ import { Popover } from "../../ui/Popover.tsx"
 import { Badge } from "../../ui/Surface.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { useOpenCharacter } from "../characters/shellData.tsx"
-import { castView } from "./cast.ts"
+import { castView, CastContext } from "./cast.ts"
 import { MoreIcon, PlusIcon } from "./icons.tsx"
 import type { ChatSession } from "./session.ts"
+import { SpeakerSwitcher } from "./SpeakerSwitcher.tsx"
 import { writeAs } from "./speaker.ts"
 
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`
@@ -282,23 +284,23 @@ function Member({
   session,
   card,
   info,
-  present,
+  muted,
   played,
   writing,
   onChange,
-  onPlayed,
+  onPersona,
   onEdit,
   onError
 }: {
   session: ChatSession
   card: CastCard
   info: ChatCard | undefined
-  present: boolean
+  muted: boolean
   played: boolean
   /** The model is writing their turn at the end of the chat. */
   writing: boolean
   onChange: (change: CastChange) => void
-  onPlayed: (on: boolean) => void
+  onPersona: () => void
   onEdit: () => void
   onError: (error: AppError | null) => void
 }) {
@@ -317,7 +319,7 @@ function Member({
   const small = "h-8! px-2!"
   return (
     <li aria-label={name} className="flex flex-col gap-2 py-3 first:pt-0 last:pb-0">
-      <div className={`flex items-start gap-3 ${present ? "" : "opacity-60"}`}>
+      <div className={`flex items-start gap-3 ${muted ? "opacity-60" : ""}`}>
         <Avatar id={card.entityId} name={name} mediaId={card.avatarMediaId} size="lg" preview />
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <button
@@ -329,9 +331,9 @@ function Member({
           </button>
           {card.subtitle && <span className="truncate text-xs text-muted">{card.subtitle}</span>}
           <span className="flex flex-wrap items-center gap-1">
-            {played && <Badge tone="accent">played by you</Badge>}
+            {played && <Badge tone="accent">your persona</Badge>}
             {writing && <Badge tone="success">writing…</Badge>}
-            {!present && <Badge tone="warning">absent</Badge>}
+            {muted && <Badge tone="warning">muted</Badge>}
             {edited && (
               <Link
                 to="/library/$refId"
@@ -344,22 +346,19 @@ function Member({
             {card.inBin && <Badge tone="danger">in the bin</Badge>}
           </span>
         </div>
+        {/* Muting stops them being picked to reply (DESIGN §3.5); they can still be made to speak. */}
         <Switch
-          checked={present}
-          onCheckedChange={(next) => onChange({ _tag: "Presence", entityId: card.entityId, present: next })}
+          checked={muted}
+          onCheckedChange={(next) => onChange({ _tag: "Presence", entityId: card.entityId, present: !next })}
         >
-          <span className="sr-only">{name} is </span>Present
+          <span className="sr-only">{name} is </span>Muted
         </Switch>
         <span className="-mt-1 -mr-2">
           <ActionMenu
             label={`More for ${name}`}
             trigger={<MoreIcon />}
             items={[
-              {
-                label: "I play them",
-                checked: played,
-                onCheckedChange: onPlayed
-              },
+              ...(played ? [] : [{ label: "Use as my persona", onSelect: onPersona }]),
               {
                 label: "Remove from chat",
                 tone: "danger",
@@ -451,19 +450,52 @@ export function CastTab({ session }: { session: ChatSession }) {
     setError(outcome.ok ? null : outcome.error)
   }
   const playedByMe = cast?.playedByMe ?? []
-  const togglePlayed = (id: EntityId, on: boolean) =>
-    change({ _tag: "PlayedByMe", entityIds: on ? [...playedByMe, id] : playedByMe.filter((x) => x !== id) })
-  const absent = cast?.absent.length ?? 0
+  const muted = cast?.absent.filter((id) => participants.includes(id) && !playedByMe.includes(id)).length ?? 0
+  /**
+   * Who `{{user}}` is from here on (DESIGN §2.2): one persona. A card not in the chat joins;
+   * a persona-folder card played until now leaves, since it isn't one of the characters.
+   */
+  const choosePersona = async (card: CastCard) => {
+    if (cast === null || (playedByMe.length === 1 && playedByMe[0] === card.entityId)) return
+    const steps: Array<CastChange> = [
+      ...(participants.includes(card.entityId) ? [] : [{ _tag: "Join" as const, entityId: card.entityId }]),
+      { _tag: "PlayedByMe", entityIds: [card.entityId] },
+      ...playedByMe
+        .filter((id) => id !== card.entityId && participants.includes(id) && view.cards.get(id)?.persona === true)
+        .map((id) => ({ _tag: "Leave" as const, entityId: id }))
+    ]
+    for (const step of steps) {
+      const outcome = await session.changeCast(step)
+      setError(outcome.ok ? null : outcome.error)
+      if (!outcome.ok) return
+    }
+  }
+  const listCards = useCallback(() => session.listCards(), [session])
+  const persona = playedByMe[0] ?? null
   const editingCard = editing === null ? undefined : view.cards.get(editing)
 
   if (cast === null) return <p className="text-sm text-muted">Loading who's here…</p>
   return (
     <div className="flex flex-col gap-3">
       <p className="text-xs text-muted">Changes here apply from the latest message on, on this branch.</p>
+      {/* Who you are ({{user}}): set here, not by who you write as (DESIGN §2.2). */}
+      <div className="flex flex-wrap items-center gap-2" aria-label="Your persona" role="group">
+        <span className="text-sm font-medium">You:</span>
+        <CastContext value={view}>
+          <SpeakerSwitcher
+            listCards={listCards}
+            speaker={persona}
+            recent={[]}
+            persona
+            onPick={(card) => void choosePersona(card)}
+          />
+        </CastContext>
+        <span className="text-xs text-muted">{"{{user}}"} in prompts. Writing as someone else doesn't change it.</span>
+      </div>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-sm font-semibold">
           {plural(participants.length, "character", "characters")}
-          {absent > 0 && <span className="font-normal text-muted"> · {absent} absent</span>}
+          {muted > 0 && <span className="font-normal text-muted"> · {muted} muted</span>}
         </h2>
         <AddCharacter
           session={session}
@@ -484,11 +516,11 @@ export function CastTab({ session }: { session: ChatSession }) {
                 session={session}
                 card={card}
                 info={info.get(id)}
-                present={!cast.absent.includes(id)}
+                muted={cast.absent.includes(id)}
                 played={playedByMe.includes(id)}
                 writing={writing === id}
                 onChange={(next) => void change(next)}
-                onPlayed={(on) => void togglePlayed(id, on)}
+                onPersona={() => void choosePersona(card)}
                 onEdit={() => setEditing(id)}
                 onError={setError}
               />

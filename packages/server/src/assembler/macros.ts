@@ -5,6 +5,9 @@ import type { VariableEffect } from "@rp/shared/macros/variables.ts"
 import type { Assembly } from "./pipeline.ts"
 import type { CardInput, HistoryEntry, Source } from "./types.ts"
 
+/** Macros that read this generation's speaker or direction (conservatively, by name). */
+const PER_TURN = /\{\{[^}]*\b(?:speaker|direction)\b/i
+
 export interface Names {
   readonly user: string
   readonly char: string
@@ -100,6 +103,9 @@ export const makeMacroEnvironment = (
     readonly chatId: string
     readonly variables: Readonly<Record<string, unknown>>
     readonly summary: string
+    /** `{{speaker}}` and `{{direction}}` (DESIGN §2.2); absent, they stay as written. */
+    readonly speaker?: string | undefined
+    readonly direction?: string | undefined
   }
 ): MacroEnvironment => {
   const { request } = assembly
@@ -127,7 +133,9 @@ export const makeMacroEnvironment = (
     lastGenerationType: setup.type,
     isMobile: false,
     pickSeed: setup.chatId,
-    summary: setup.summary
+    summary: setup.summary,
+    ...(setup.speaker !== undefined ? { speaker: setup.speaker } : {}),
+    ...(setup.direction !== undefined ? { direction: setup.direction } : {})
   }
 
   const run = (
@@ -204,6 +212,8 @@ export const makeMacroEnvironment = (
       const expanded = run(id, text, origin, context, "context")
       const piece = record(id, source, expanded.text)
       if (variableBarrier && expanded.readsVariables) volatilePieces.add(piece)
+      // Who writes and the direction change from turn to turn: never inside the cached prefix.
+      if (PER_TURN.test(text)) volatilePieces.add(piece)
       return piece
     },
     verbatim: (id, source, text, parts) => record(id, source, text, parts),
@@ -211,8 +221,11 @@ export const makeMacroEnvironment = (
       const id = `message:${entry.versionId}`
       const source: Source = { kind: "message", slot: entry.slotId, version: entry.versionId }
       if (entry.macroMode !== "template") return record(id, source, entry.content)
+      // A message of the chat keeps `{{speaker}}` and `{{direction}}` as written: they're this
+      // generation's, not the message's.
+      const { speaker: _speaker, direction: _direction, ...chat } = base
       const context: MacroContext = {
-        ...base,
+        ...chat,
         ...(at ? { card: at.card } : {}),
         messages: before,
         names: at?.names ?? setup.names,

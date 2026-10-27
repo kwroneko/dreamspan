@@ -801,6 +801,13 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
         assert.deepStrictEqual(yield* actor.api.GetDisplayPrefs({}), before)
       })
   },
+  ImpersonationNotice: {
+    // It reads only the caller's own current preset, and marks only the caller's notices.
+    probe: (actor) =>
+      Effect.map(actor.api.ImpersonationNotice({}), (answer) =>
+        assert.deepStrictEqual(answer, { show: false, preset: null })
+      )
+  },
   SetDisplayPrefs: {
     probe: (actor, owner) =>
       Effect.gen(function* () {

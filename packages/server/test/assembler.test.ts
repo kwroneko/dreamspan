@@ -49,9 +49,13 @@ const card = (name: string, fields: Partial<Record<keyof CardDoc, unknown>> = {}
 const presetFile = (name: string) =>
   importStPreset(readFileSync(new URL(`fixtures/presets/${name}.json`, import.meta.url), "utf8")).document!
 
-/** ST's default preset with these fields changed (ST's names, as a preset file has them). */
+/**
+ * ST's default preset with these fields changed (ST's names, as a preset file has them). Its
+ * group nudge is off unless a test names it: it's a prompt after the history, sent whenever
+ * the model writes as a character (DESIGN §2.2), which the tests of other things don't read.
+ */
 const preset = (fields: Record<string, unknown> = {}): PresetDoc =>
-  importStPreset(JSON.stringify({ frequency_penalty: 0, ...fields })).document!
+  importStPreset(JSON.stringify({ frequency_penalty: 0, group_nudge_prompt: "", ...fields })).document!
 
 const model = (fields: Partial<ModelInput> = {}): ModelInput => ({
   connectionId: "connection",
@@ -143,7 +147,9 @@ describe("the context assembler", () => {
       "system: A flood.",
       "system: [A new story begins]",
       "assistant: You're late.",
-      "user: The road flooded."
+      "user: The road flooded.",
+      // The group nudge is sent whenever the model writes as a character, one or many (DESIGN §2.2).
+      "system: [Only Mira speaks next.]"
     ])
     expect(snapshot.inputs.mode).toBe("st")
     // Every piece names where it came from and which message it went into.
@@ -451,7 +457,13 @@ describe("the context assembler", () => {
       const snapshot = await assembled(
         chat({ notes: [authorNote({ mode: "tail", role: "assistant" })], events: on("note-z-author") })
       )
-      expect(contents(snapshot).slice(-2)).toEqual(["user: The road flooded.", "assistant: Tobin is soaked."])
+      // An assistant note last: the request still ends on a user turn (DESIGN §2.2).
+      expect(contents(snapshot).slice(-3)).toEqual([
+        "user: The road flooded.",
+        "assistant: Tobin is soaked.",
+        "user: [Write Mira's next message.]"
+      ])
+      expect(snapshot.issues.map((i) => i.kind)).toEqual(["last_turn_filled"])
     })
 
     it("puts notes beside the main prompt in turn, as ST's injectToMain does", async () => {
@@ -1129,7 +1141,7 @@ describe("the context assembler", () => {
     expect(slow.issues.map((i) => i.message)).toContain(
       "The regex scripts ran out of time (200 ms for one context): the rest of the messages are sent without them."
     )
-    expect(contents(slow).at(-1)).toBe(`assistant: ${"a".repeat(43_000)}`)
+    expect(contents(slow).at(-2)).toBe(`assistant: ${"a".repeat(43_000)}`)
     // Another turn could leave them the time they lacked: what it didn't cover isn't cached as stable.
     expect(slow.request.breakpoints.map((b) => b.reason)).not.toContain("history")
 
@@ -1210,16 +1222,22 @@ describe("the context assembler", () => {
     })
     const snapshot = await assembled(chat({ messages, preset: { ...doc, regex_approved: true } }))
     expect(contents(snapshot).filter((m) => m.startsWith("assistant: reply ")).length).toBe(400)
-    expect(snapshot.issues).toEqual([])
+    expect(snapshot.issues.map((i) => i.kind)).toEqual(["last_turn_filled"])
   })
 
-  it("ends with the one-turn direction, as typed (DESIGN §2.2)", async () => {
-    const snapshot = await assembled(chat({ target: { direction: "Have {{char}} leave." } }))
-    expect(contents(snapshot).at(-1)).toBe("system: Have {{char}} leave.")
-    expect(snapshot.pieces.find((p) => p.id === "direction")!.source).toEqual({
-      kind: "direction",
-      version: "version-2"
+  it("sends the one-turn direction through the preset's direction prompt, as typed (DESIGN §2.2)", async () => {
+    const snapshot = await assembled(chat({ target: { direction: "Have {{char}} leave. {{random::a::b}}" } }))
+    expect(contents(snapshot).at(-1)).toBe(
+      "user: [The user has written a direction for Mira's next message. It is not part of the story; follow it closely: Have {{char}} leave. {{random::a::b}}]"
+    )
+    expect(snapshot.pieces.find((p) => p.id === "preset:direction")!.source).toEqual({
+      kind: "preset",
+      ref: "ref-preset",
+      revision: "rev-preset",
+      identifier: "direction",
+      condition: "with_direction"
     })
+    expect(snapshot.issues).toEqual([])
   })
 
   it("places cache breakpoints before what changes next turn (DESIGN §5.5)", async () => {
@@ -1305,6 +1323,7 @@ describe("our layouts (DESIGN §5.2–§5.4)", () => {
         { side: "user", content: "Both of you, listen." }
       ],
       target: { speaker: "oren" },
+      preset: preset({ group_nudge_prompt: "[Write the next reply only as {{char}}.]" }),
       ...fields
     })
 
@@ -1312,6 +1331,7 @@ describe("our layouts (DESIGN §5.2–§5.4)", () => {
     const snapshot = await assembled(
       group({
         preset: preset({
+          group_nudge_prompt: "[Write the next reply only as {{char}}.]",
           prompts: [{ identifier: "main", role: "system", content: "Write for {{char}}; {{user}} is the user." }]
         })
       })
@@ -1338,8 +1358,8 @@ describe("our layouts (DESIGN §5.2–§5.4)", () => {
     const messages = contents(snapshot)
     expect(messages.join("\n")).not.toContain('<character name="Mira">')
     expect(messages.slice(-2)).toEqual([
-      'system: <character name="Oren">\nOren runs the ferry.\n</character>',
-      "system: [Write the next reply only as Oren.]"
+      "system: [Write the next reply only as Oren.]",
+      'system: <character name="Oren">\nOren runs the ferry.\n</character>'
     ])
   })
 
@@ -1730,3 +1750,252 @@ it.each([undefined, "", "Captain Aria"])(
     if (nickname) expect(text).not.toContain("Aria Vance")
   }
 )
+
+describe("conditioned prompts, {{speaker}} and {{direction}} (DESIGN §2.2)", () => {
+  /**
+   * ST's default preset (no group nudge, no impersonation prompt, no direction prompt) with a
+   * prompt after the history for each condition, each naming who it was sent for.
+   */
+  const conditioned = (direction = true): PresetDoc => {
+    const base = preset({ impersonation_prompt: "" })
+    const template = base.prompts.find((p) => p.identifier === "main")!
+    const own = (["always", "as_character", "as_user", "with_direction"] as const).map((condition) => ({
+      ...template,
+      identifier: `c-${condition}`,
+      name: condition,
+      system_prompt: false,
+      content: `[${condition}: {{speaker}}${condition === "with_direction" && direction ? " / {{direction}}" : ""}]`,
+      condition
+    }))
+    const prompts = [...base.prompts.filter((p) => p.identifier !== "direction"), ...own]
+    const order = base.order.filter((e) => e.identifier !== "direction")
+    const at = order.findIndex((e) => e.identifier === "newestMessage") + 1
+    return {
+      ...base,
+      prompts,
+      order: [
+        ...order.slice(0, at),
+        ...own.map((p) => ({ identifier: p.identifier, enabled: true })),
+        ...order.slice(at)
+      ]
+    }
+  }
+  const sent = (snapshot: ContextSnapshot) =>
+    snapshot.request.messages.flatMap((m) => m.content.split("\n")).filter((line) => /^\[(always|as_|with_)/.test(line))
+  const group = { participants: ["mira", "oren"] }
+
+  for (const [mode, cast] of [
+    ["ST mode", {}],
+    ["concat", group]
+  ] as const)
+    describe(mode, () => {
+      it("sends each prompt only when its condition holds", async () => {
+        const run = (target: NonNullable<AssemblyFixture["target"]>, summarizing = false) =>
+          assembled(chat({ ...cast, preset: conditioned(), target }), { summarizing }).then(sent)
+        expect(await run({ speaker: "mira" })).toEqual(["[always: Mira]", "[as_character: Mira]"])
+        expect(await run({ speaker: "mira", direction: "Rain." })).toEqual([
+          "[always: Mira]",
+          "[as_character: Mira]",
+          "[with_direction: Mira / Rain.]"
+        ])
+        expect(await run({ speaker: "tobin" })).toEqual(["[always: Tobin]", "[as_user: Tobin]"])
+        expect(await run({ speaker: "tobin", direction: "Rain." })).toEqual([
+          "[always: Tobin]",
+          "[as_user: Tobin]",
+          "[with_direction: Tobin / Rain.]"
+        ])
+        // A blank direction is none.
+        expect(await run({ speaker: "mira", direction: "  " })).toEqual(["[always: Mira]", "[as_character: Mira]"])
+        // A summary is written as no one, with no direction: only what's always sent.
+        const summary = await run({ speaker: "mira", direction: "Rain." }, true)
+        expect(summary).toEqual(["[always: {{speaker}}]"])
+      })
+
+      it("says which condition admitted a prompt, and keeps per-turn prompts out of the cached part", async () => {
+        const snapshot = await assembled(chat({ ...cast, preset: conditioned(), target: { speaker: "mira" } }))
+        expect(snapshot.pieces.find((p) => p.id === "preset:c-as_character")!.source).toMatchObject({
+          kind: "preset",
+          identifier: "c-as_character",
+          condition: "as_character"
+        })
+        expect(snapshot.pieces.find((p) => p.id === "preset:c-always")!.source).not.toHaveProperty("condition")
+        const messages = contents(snapshot)
+        const history = snapshot.request.breakpoints.find((b) => b.reason === "history")!.message
+        const first = messages.findIndex((m) => m.includes("[always: Mira]"))
+        expect(first).toBeGreaterThan(history)
+      })
+    })
+
+  it("adds the default direction prompt when the preset has none that reads the direction, and says so", async () => {
+    const snapshot = await assembled(
+      chat({ preset: conditioned(false), target: { speaker: "mira", direction: "Have {{char}} leave." } })
+    )
+    expect(contents(snapshot).at(-1)).toBe(
+      "user: [The user has written a direction for Mira's next message. It is not part of the story; follow it closely: Have {{char}} leave.]"
+    )
+    expect(snapshot.pieces.find((p) => p.id === "direction:default")!.source).toEqual({
+      kind: "assembler",
+      what: "default direction prompt"
+    })
+    expect(snapshot.issues.map((i) => i.kind)).toEqual(["direction_prompt_missing"])
+    // Without a direction, nothing is added and nothing is said.
+    const plain = await assembled(chat({ preset: conditioned(false), target: { speaker: "mira" } }))
+    expect(plain.issues).toEqual([])
+    expect(contents(plain).join("\n")).not.toContain("has written a direction")
+  })
+
+  it("imports ST's group nudge and impersonation prompt as the prompts that say who writes", async () => {
+    const doc = preset({
+      group_nudge_prompt: "[Only {{char}} next.]",
+      impersonation_prompt: "[Write as {{user}}.]"
+    })
+    const character = await assembled(chat({ ...group, preset: doc, target: { speaker: "oren" } }))
+    expect(contents(character)).toContain("system: [Only Oren next.]")
+    expect(contents(character).join("\n")).not.toContain("[Write as")
+    const persona = await assembled(chat({ ...group, preset: doc, target: { speaker: "tobin" } }))
+    expect(contents(persona)).toContain("system: [Write as Tobin.]")
+    expect(contents(persona).join("\n")).not.toContain("[Only")
+    // One character: sent all the same (ST sends its nudge in groups only).
+    const one = await assembled(chat({ preset: doc, target: { speaker: "mira" } }))
+    expect(contents(one).at(-1)).toBe("system: [Only Mira next.]")
+  })
+
+  it("keeps the messages before the history breakpoint byte-identical across speakers and directions", async () => {
+    // Send as the persona, send as a member, generate as a member with a direction: each
+    // request's cached part is the start of the next one's.
+    const doc = preset({ group_nudge_prompt: "[Only {{char}} next.]", impersonation_prompt: "[Write as {{user}}.]" })
+    const turns: Array<{ messages: Array<FixtureMessage>; target: NonNullable<AssemblyFixture["target"]> }> = [
+      {
+        messages: [
+          { side: "assistant", content: "The tide is out.", speaker: "mira" },
+          { side: "user", content: "Then we walk.", speaker: "tobin" }
+        ],
+        target: { speaker: "mira" }
+      },
+      {
+        messages: [
+          { side: "assistant", content: "The tide is out.", speaker: "mira" },
+          { side: "user", content: "Then we walk.", speaker: "tobin" },
+          { side: "assistant", content: "Mind the shoal.", speaker: "mira" },
+          // Written by the user, as a member.
+          { side: "user", content: "Ferry's closed anyway.", speaker: "oren" }
+        ],
+        target: { speaker: "mira" }
+      },
+      {
+        messages: [
+          { side: "assistant", content: "The tide is out.", speaker: "mira" },
+          { side: "user", content: "Then we walk.", speaker: "tobin" },
+          { side: "assistant", content: "Mind the shoal.", speaker: "mira" },
+          { side: "user", content: "Ferry's closed anyway.", speaker: "oren" },
+          { side: "assistant", content: "Since when?", speaker: "mira" }
+        ],
+        target: { speaker: "oren", direction: "Oren admits he sank it." }
+      },
+      {
+        messages: [
+          { side: "assistant", content: "The tide is out.", speaker: "mira" },
+          { side: "user", content: "Then we walk.", speaker: "tobin" },
+          { side: "assistant", content: "Mind the shoal.", speaker: "mira" },
+          { side: "user", content: "Ferry's closed anyway.", speaker: "oren" },
+          { side: "assistant", content: "Since when?", speaker: "mira" },
+          { side: "assistant", content: "Since I sank it.", speaker: "oren" }
+        ],
+        target: { speaker: "tobin" }
+      }
+    ]
+    const requests = await Promise.all(
+      turns.map(({ messages, target }) => assembled(chat({ ...group, preset: doc, messages, target })))
+    )
+    for (let i = 0; i + 1 < requests.length; i++) {
+      const before = requests[i]!.request
+      const history = before.breakpoints.find((b) => b.reason === "history")!.message
+      expect(requests[i + 1]!.request.messages.slice(0, history + 1)).toEqual(before.messages.slice(0, history + 1))
+    }
+  })
+
+  it("ends the request on a user turn, whatever the projection, unless the model is prefilled", async () => {
+    const ending = (fields: Partial<AssemblyFixture>) =>
+      assembled(
+        chat({
+          ...group,
+          messages: [
+            { side: "assistant", content: "Ledger's open.", speaker: "mira" },
+            { side: "user", content: "Both of you, listen.", speaker: "tobin" },
+            { side: "assistant", content: "Ferry's shut.", speaker: "oren" }
+          ],
+          target: { speaker: "mira" },
+          ...fields
+        })
+      )
+    // By writer, a group chat ending on another character, with a system prompt after it.
+    const byWriter = await ending({ preset: preset({ group_nudge_prompt: "[Only {{char}} next.]" }) })
+    expect(contents(byWriter).slice(-3)).toEqual([
+      "assistant: Oren: Ferry's shut.",
+      "system: [Only Mira next.]",
+      "user: [Write Mira's next message.]"
+    ])
+    expect(byWriter.issues.map((i) => i.kind)).toEqual(["last_turn_filled"])
+    expect(byWriter.pieces.find((p) => p.id === "assembler:last-turn")!.source).toEqual({
+      kind: "assembler",
+      what: "user turn so the request ends on one"
+    })
+    // Alternation by depth (even depths are the assistant's): three messages end on an
+    // assistant one, four on a user one.
+    const alternate = at(null, { key: "roles.projection", value: "alternate" })
+    expect(contents(await ending({ events: [alternate] })).at(-1)).toBe("user: [Write Mira's next message.]")
+    const four = await ending({
+      events: [alternate],
+      messages: [
+        { side: "user", content: "Hello.", speaker: "tobin" },
+        { side: "assistant", content: "Ledger's open.", speaker: "mira" },
+        { side: "user", content: "Both of you, listen.", speaker: "tobin" },
+        { side: "assistant", content: "Ferry's shut.", speaker: "oren" }
+      ]
+    })
+    expect(contents(four).at(-1)).toBe("user: Oren: Ferry's shut.")
+    expect(four.issues).toEqual([])
+    // By perspective: the speaker's own last message is the assistant's.
+    const perspective = await ending({
+      events: [at(null, { key: "roles.projection", value: "perspective" })],
+      target: { speaker: "oren" }
+    })
+    expect(contents(perspective).at(-1)).toBe("user: [Write Oren's next message.]")
+    // A prefill continues the model's own turn: nothing is added.
+    const prefilled = await ending({
+      preset: preset({ assistant_prefill: "Mira:" }),
+      model: model({ prefill: "assistant" })
+    })
+    expect(contents(prefilled).at(-1)).toBe("assistant: Oren: Ferry's shut.")
+    expect(prefilled.request.prefill).toBe("Mira:")
+    expect(prefilled.issues).toEqual([])
+  })
+
+  it("keeps a muted character's card and notes in the context, and never picks it to speak (DESIGN §3.5)", async () => {
+    const orenNote: NoteInput = { ...note("Oren hates the rain.", 2, "system"), entity: "note-oren" }
+    const muted = await assembled(
+      chat({
+        ...group,
+        preset: preset({ group_nudge_prompt: "[Only {{char}} next.]" }),
+        notes: [{ ...orenNote, doc: { ...orenNote.doc, owner: { card: "oren" as never } } }],
+        events: [at(null, { key: "presence.set", value: { entity: "mira" as EntityId, present: false } })],
+        target: {}
+      })
+    )
+    const text = contents(muted).join("\n")
+    expect(text).toContain('<character name="Mira">')
+    expect(text).toContain("Oren hates the rain.")
+    // No speaker named: the first character not muted writes.
+    expect(contents(muted)).toContain("system: [Only Oren next.]")
+    const mutedNote = await assembled(
+      chat({
+        ...group,
+        notes: [{ ...orenNote, doc: { ...orenNote.doc, owner: { card: "oren" as never } } }],
+        events: [at(null, { key: "presence.set", value: { entity: "oren" as EntityId, present: false } })],
+        target: { speaker: "mira" }
+      })
+    )
+    expect(contents(mutedNote).join("\n")).toContain("Oren hates the rain.")
+    expect(contents(mutedNote).join("\n")).toContain('<character name="Oren">')
+  })
+})

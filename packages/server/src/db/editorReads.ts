@@ -2,6 +2,7 @@
 import { EditorSnapshot, NoteEntry } from "@rp/shared/editorApi.ts"
 import type { EntityId } from "@rp/shared/chat.ts"
 import type { Doc } from "@rp/shared/library.ts"
+import { editedDoc } from "@rp/shared/presetConditions.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { makeDraftStore } from "./drafts.ts"
@@ -31,7 +32,7 @@ export const makeEditorReadHandlers = Effect.gen(function* () {
         const variants = yield* lib.refsWhere("r.entity_id = ? AND r.ref_kind <> 'chat_override'", [ref.entity_id])
         return new EditorSnapshot({
           ref: toLibraryRef(ref),
-          doc: resolved?.doc ?? (yield* lib.loadDoc(ref.head_revision_id)),
+          doc: editedDoc(ref.kind, resolved?.doc ?? (yield* lib.loadDoc(ref.head_revision_id))),
           usedByChats,
           drafts: draftRows.map((row) => drafts.toDraft(row)),
           variants: variants.map(toLibraryRef)

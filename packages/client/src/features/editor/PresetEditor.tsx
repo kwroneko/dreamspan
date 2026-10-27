@@ -11,7 +11,7 @@ import { Button } from "../../ui/Button.tsx"
 import { Checkbox } from "../../ui/Choice.tsx"
 import { ConfirmDialog } from "../../ui/Dialog.tsx"
 import { Fieldset } from "../../ui/Field.tsx"
-import { PromptDocument } from "./PromptDocument.tsx"
+import { PresetWarnings, PromptDocument } from "./PromptDocument.tsx"
 import type { PresetContext } from "@rp/shared/inspectorApi.ts"
 import { Alert, Badge, Card, CardHeader, EmptyState } from "../../ui/Surface.tsx"
 import type { Caller } from "./caller.ts"
@@ -25,13 +25,12 @@ const POSTFIXES = [
   { value: "\n\n", label: "Two new lines" }
 ] as const
 
+// The group nudge and impersonation prompt are prompts in the list, with conditions (DESIGN §2.2).
 const UTILITY: ReadonlyArray<readonly [key: string, label: string]> = [
-  ["impersonation_prompt", "Impersonation"],
   ["new_chat_prompt", "New chat"],
   ["new_group_chat_prompt", "New group chat"],
   ["new_example_chat_prompt", "New example chat"],
   ["continue_nudge_prompt", "Continue nudge"],
-  ["group_nudge_prompt", "Group nudge"],
   ["send_if_empty", "Sent when you send nothing"],
   ["wi_format", "Lorebook format ({0} is the entries)"],
   ["scenario_format", "Scenario format"],
@@ -235,6 +234,7 @@ export function PresetEditor({
 }) {
   return (
     <>
+      <PresetWarnings store={store} />
       <Card>
         <CardHeader
           title="Prompts"

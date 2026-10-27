@@ -7,6 +7,7 @@ import type { ChatId, SlotId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { NotFound } from "@rp/shared/errors.ts"
 import { type ContextSource, RunContext } from "@rp/shared/inspectorApi.ts"
+import { CONDITION_LABELS } from "@rp/shared/presetConditions.ts"
 import { Effect } from "effect"
 import { SqlClient, type SqlError } from "effect/sql"
 import type { ContextSnapshot, Source, WireContext, InspectionInputs } from "../assembler/types.ts"
@@ -83,10 +84,11 @@ export const describer = (
           const name = promptNames.get(`${source.revision}:${source.identifier}`)
           // Its other text (`utility.new_chat_prompt`, `prefill.assistant`) by what it is.
           const other = source.identifier.replace(/^utility\./, "").replaceAll("_", " ")
+          const when = source.condition ? ` (sent ${CONDITION_LABELS[source.condition].toLowerCase()})` : ""
           return {
             ...common,
             kind: "preset",
-            label: name ? `Preset prompt “${name}”` : `Preset: ${other}`,
+            label: (name ? `Preset prompt “${name}”` : `Preset: ${other}`) + when,
             slotId: null
           }
         }

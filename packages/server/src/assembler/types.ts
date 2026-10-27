@@ -9,7 +9,7 @@ import type { CardDoc } from "@rp/shared/docs/card.ts"
 import type { LorebookDoc } from "@rp/shared/docs/lorebook.ts"
 import type { matchLorebooks } from "./lorebook.ts"
 import type { NoteDoc } from "@rp/shared/docs/note.ts"
-import type { LegacyPresetDoc as PresetDoc } from "@rp/shared/docs/preset.ts"
+import type { LegacyPresetDoc as PresetDoc, PromptCondition } from "@rp/shared/docs/preset.ts"
 import { Schema } from "effect"
 
 /** Bump whenever identical inputs would assemble differently. Missing means version 0. */
@@ -41,6 +41,8 @@ export type Source =
       readonly ref: string | null
       readonly revision: string | null
       readonly identifier: string
+      /** The condition that admitted a conditioned prompt (DESIGN §2.2); absent for one sent always. */
+      readonly condition?: Exclude<PromptCondition, "always">
     }
   | { readonly kind: "card"; readonly entity: string; readonly revision: string; readonly field: string }
   | {

@@ -1,12 +1,11 @@
 import { modelName } from "@rp/shared/cardNames.ts"
-// Our layouts' card blocks and tail directive (DESIGN §5.2, §5.3; ARCHITECTURE §15).
+// Our layouts' card blocks (DESIGN §5.2, §5.3; ARCHITECTURE §15).
 import type { Names } from "./macros.ts"
 import { type Assembly, need } from "./pipeline.ts"
 import type { Text } from "./st.ts"
 import type { CardInput } from "./types.ts"
 
 type CardText = (assembly: Assembly, card: CardInput, field: keyof CardInput["doc"], names?: Partial<Names>) => Text
-type PresetText = (assembly: Assembly, id: string, text: string, names?: Partial<Names>) => Text
 
 const label = (name: string) => name.replace(/"/g, "'")
 
@@ -53,22 +52,4 @@ export const personaBlock = (
       : [cardText(assembly, card, "description", { user: modelName(card.doc) })])
   ]
   return parts.some((part) => part.text) ? block(assembly, "persona", card, parts) : null
-}
-
-/**
- * The tail directive (DESIGN §5.3): the preset's own group nudge naming the speaker, or,
- * when the speaker is a character the user plays, its impersonation prompt naming them,
- * which is what lets the model write for them despite the preset's rules against it.
- */
-export const directive = (assembly: Assembly, presetText: PresetText): Text | null => {
-  const cast = need(assembly, "cast")
-  const utility = need(assembly, "preset").doc.utility_prompts
-  const speaker = cast.speaker
-  if (!speaker) return null
-  if (cast.personas.includes(speaker)) {
-    const text = utility.impersonation_prompt
-    return text ? presetText(assembly, "utility.impersonation_prompt", text, { user: modelName(speaker.doc) }) : null
-  }
-  const text = utility.group_nudge_prompt
-  return text ? presetText(assembly, "utility.group_nudge_prompt", text, { char: modelName(speaker.doc) }) : null
 }

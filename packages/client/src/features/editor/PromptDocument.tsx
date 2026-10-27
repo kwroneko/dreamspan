@@ -2,6 +2,13 @@ import { writePresetOrder } from "./presetDraft.ts"
 import type { PresetPrompt, PromptOrderEntry } from "@rp/shared/docs/preset.ts"
 import type { PresetContext } from "@rp/shared/inspectorApi.ts"
 import { newestMessage, presetOrder } from "@rp/shared/presetOrder.ts"
+import {
+  CONDITION_LABELS,
+  conditionFromTriggers,
+  conditionOf,
+  directionPrompt,
+  readsDirection
+} from "@rp/shared/presetConditions.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import { type ReactNode, useEffect, useRef, useState } from "react"
 import { Button } from "../../ui/Button.tsx"
@@ -17,6 +24,16 @@ const positions = [
   { value: "relative", label: "In order" },
   { value: "absolute", label: "Depth" }
 ]
+/** When a prompt is sent (DESIGN §2.2). */
+const conditions = (["always", "as_character", "as_user", "with_direction"] as const).map((value) => ({
+  value,
+  label: CONDITION_LABELS[value]
+}))
+const conditionBadges = {
+  as_character: "as a character",
+  as_user: "as {{user}}",
+  with_direction: "with a direction"
+} as const
 
 function Block({
   store,
@@ -39,6 +56,7 @@ function Block({
   const prompt = useValue<PresetPrompt | undefined>(store, path) ?? newestMessage
   const name = useText(store, [...path, "name"]) || prompt.name
   const content = useText(store, [...path, "content"])
+  const condition = conditionOf(prompt)
   const filled = context?.blocks.find((b) => b.identifier === entry.identifier)
   return (
     <section
@@ -69,6 +87,8 @@ function Block({
           <>
             <Badge>{prompt.role}</Badge>
             <Badge>{prompt.injection_position === "absolute" ? `depth ${prompt.injection_depth}` : "in order"}</Badge>
+            {condition !== "always" && <Badge tone="accent">{conditionBadges[condition]}</Badge>}
+            {prompt.added_on_import && <Badge>added on import</Badge>}
           </>
         )}
         {prompt.marker && !entry.enabled && <Badge>off</Badge>}
@@ -112,6 +132,13 @@ function Block({
             <SelectField store={store} path={[...path, "role"]} label="Role" items={roles} />
             <SelectField store={store} path={[...path, "injection_position"]} label="Position" items={positions} />
           </div>
+          <SelectField
+            store={store}
+            path={[...path, "condition"]}
+            label="Condition"
+            items={conditions}
+            fallback={conditionFromTriggers(prompt.injection_trigger)}
+          />
           {prompt.injection_position === "absolute" && (
             <div className="grid grid-cols-2 gap-2">
               <NumberField
@@ -133,7 +160,8 @@ function Block({
           />
           <div className="flex flex-wrap items-center justify-between gap-2">
             <SwitchField store={store} path={[...path, "forbid_overrides"]} label="A card can't replace it" />
-            {!prompt.system_prompt && (
+            {/* Added on import, it would come back on the next read: it's turned off instead. */}
+            {!prompt.system_prompt && !prompt.added_on_import && (
               <Button variant="ghost" onClick={remove}>
                 Delete the prompt
               </Button>
@@ -334,6 +362,75 @@ export function PromptDocument({
           {!newestAfterTail && slot("End of tail notes", (p) => p.mode === "section" && p.section === "tail_end")}
         </div>
       </div>
+    </div>
+  )
+}
+
+/**
+ * What would go wrong when sending with this preset (DESIGN §2.2): its prompts after the
+ * history ending on an assistant prompt without a prefill (the app then adds a user turn), and
+ * no prompt carrying a direction (the default direction prompt is then added). Each links to
+ * the prompt it's about, or adds the missing one.
+ */
+export function PresetWarnings({ store }: { store: EditorStore }) {
+  const prompts = useValue<ReadonlyArray<PresetPrompt>>(store, ["prompts"]) ?? []
+  const savedOrder = useValue<ReadonlyArray<PromptOrderEntry>>(store, ["order"]) ?? []
+  const prefill = useValue<string>(store, ["prefill", "assistant"]) ?? ""
+  const order = presetOrder(prompts, savedOrder)
+  const byId = new Map(prompts.map((p) => [p.identifier, p]))
+  const history = order.findIndex((e) => e.identifier === "chatHistory")
+  const sent = order.flatMap((e) => {
+    const prompt = byId.get(e.identifier)
+    return e.enabled && prompt && !prompt.marker && prompt.content.trim() !== "" ? [{ e, prompt }] : []
+  })
+  const last = sent
+    .filter(({ e, prompt }) => order.indexOf(e) > history && prompt.injection_position === "relative")
+    .findLast(({ prompt }) => prompt.role !== "system")
+  const endsOnAssistant = history >= 0 && last?.prompt.role === "assistant" && prefill.trim() === ""
+  const direction = sent.some(({ prompt }) => readsDirection(prompt.content))
+  const jump = (identifier: string) =>
+    document.querySelector<HTMLElement>(`[data-prompt="${CSS.escape(identifier)}"]`)?.scrollIntoView({ block: "start" })
+  const addDirection = () => {
+    const { added_on_import: _added, ...prompt } = directionPrompt
+    const identifier = byId.has(prompt.identifier) ? uuidv7() : prompt.identifier
+    store.setValue(at(identifier), { ...prompt, identifier })
+    writePresetOrder(store, [...order, { identifier, enabled: true }])
+  }
+  if (!endsOnAssistant && direction) return null
+  return (
+    <div className="flex flex-col gap-2" aria-label="Preset warnings" role="group">
+      {endsOnAssistant && (
+        <div role="alert" className="rounded-md border border-warning/40 px-3 py-2 text-sm">
+          The prompts after the chat history end on an assistant prompt, “{last.prompt.name || last.prompt.identifier}”,
+          and the preset doesn't prefill: a user turn asking for the next message will be added after it.{" "}
+          <button
+            type="button"
+            className="text-accent underline-offset-4 hover:underline"
+            onClick={() => jump(last.prompt.identifier)}
+          >
+            Go to the prompt
+          </button>
+        </div>
+      )}
+      {!direction && (
+        <div role="alert" className="rounded-md border border-warning/40 px-3 py-2 text-sm">
+          No prompt that&apos;s on sends the direction ({"{{direction}}"}): a direction you give will be sent with the
+          default direction prompt at the end.{" "}
+          {byId.get("direction") ? (
+            <button
+              type="button"
+              className="text-accent underline-offset-4 hover:underline"
+              onClick={() => jump("direction")}
+            >
+              Go to the direction prompt
+            </button>
+          ) : (
+            <button type="button" className="text-accent underline-offset-4 hover:underline" onClick={addDirection}>
+              Add the direction prompt
+            </button>
+          )}
+        </div>
+      )}
     </div>
   )
 }

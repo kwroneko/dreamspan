@@ -91,6 +91,25 @@ export const characterMacros: ReadonlyArray<MacroSpec> = [
       return summary
     }
   },
+  {
+    // Who the model writes as, and the direction it was given (DESIGN §2.2). Outside a
+    // generation there's neither, and they stay as written. A macro's output is never expanded
+    // again, so the direction is sent exactly as typed.
+    name: "speaker",
+    handler: (call) => {
+      const { speaker } = call.context
+      if (speaker === undefined) throw new Error("No speaker")
+      return speaker
+    }
+  },
+  {
+    name: "direction",
+    handler: (call) => {
+      const { direction } = call.context
+      if (direction === undefined) throw new Error("No direction")
+      return direction
+    }
+  },
   { name: "isMobile", handler: (call) => String(call.context.isMobile ?? false) },
   { name: "lastGenerationType", handler: (call) => call.context.lastGenerationType ?? "" },
   // ST extensions don't exist here (DESIGN §1.5).
