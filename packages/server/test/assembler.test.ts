@@ -12,7 +12,7 @@ import { describe, expect, it } from "vitest"
 import type { PositionedEvent } from "../src/assembler/pipeline.ts"
 import type { ContextSnapshot, ModelInput, NoteInput } from "../src/assembler/types.ts"
 import { matchLorebooks } from "../src/assembler/lorebook.ts"
-import { chatCompletionsFields } from "../src/assembler/wire.ts"
+import { chatCompletionsFields, providerRequest } from "../src/assembler/wire.ts"
 import { importCard } from "../src/formats/cardImport.ts"
 import { forbidCardOverrides, importStPreset } from "../src/formats/preset.ts"
 import { placeBreakpoints } from "../src/assembler/breakpoints.ts"
@@ -2176,5 +2176,89 @@ describe("cache breakpoints with pinned lore (DESIGN §1.3, §5.5)", () => {
     )
     expect(snapshot.request.breakpoints.map((b) => b.reason)).toEqual(["history", "prefix", "pinned"])
     expect(snapshot.issues.some((i) => i.kind === "cache_breakpoints")).toBe(false)
+  })
+  it("ends Anthropic's system prompt before the pinned lore, so pi-ai's marker there keeps the prefix", async () => {
+    const pinning = {
+      id: "pinning",
+      entity: "pinning-entity",
+      revision: "pinning-rev",
+      doc: loreBook([loreEntry({ keys: ["flooded"], content: "PINNED", position: "before_char" })]).document
+    }
+    const claude = model({ kind: "anthropic", api: "anthropic-messages", cacheBreakpoints: "explicit" })
+    const fixture = chat({
+      preset: preset({ use_sysprompt: true }),
+      lorebooks: [pinning],
+      model: claude,
+      events: [at(null, { key: "lorebook.attach", value: { ref: "pinning" as never } }), loreByPosition]
+    })
+    const snapshot = await assembled(fixture)
+    const prefix = snapshot.request.breakpoints.find((b) => b.reason === "prefix")!
+    const pinned = snapshot.request.breakpoints.find((b) => b.reason === "pinned")!
+    const lore = snapshot.request.messages.findIndex((m) => m.content.includes("PINNED"))
+    expect(lore).toBeGreaterThan(prefix.message)
+    expect(lore).toBeLessThanOrEqual(pinned.message)
+    const wire = providerRequest(snapshot.request, claude)
+    const system = (wire.context as { systemPrompt?: string }).systemPrompt ?? ""
+    // The system prompt is the prefix up to (a), and the pinned lore after it keeps its own marker.
+    expect(system).not.toContain("PINNED")
+    expect(system).toContain(snapshot.request.messages[prefix.message]!.content)
+    expect(wire.breakpoints).toContain(pinned.message - prefix.message - 1)
+    // Without pinned lore the system prompt takes the whole leading run, as before.
+    const plain = await assembled({ ...fixture, lorebooks: [], events: [] })
+    const plainWire = providerRequest(plain.request, claude)
+    const leading = plain.request.messages.findIndex((m) => m.role !== "system")
+    expect((plainWire.context as { messages: ReadonlyArray<unknown> }).messages.length).toBe(
+      plain.request.messages.length - leading
+    )
+  })
+})
+
+describe("author's-note lore with the setting off (DESIGN §1.3)", () => {
+  it("leaves the author's note beside the main prompt out of the prefix, so (a) holds when its lore goes", async () => {
+    const book = {
+      id: "an",
+      entity: "an-entity",
+      revision: "an-rev",
+      doc: loreBook([loreEntry({ keys: ["flooded"], content: "AN_LORE", position: "an_top" }, 0)]).document
+    }
+    const author: NoteInput = {
+      entity: "note-author",
+      revision: "r",
+      first: false,
+      doc: {
+        schema_version: 1,
+        title: "author",
+        content: "{{user}} is soaked.",
+        placement: { mode: "section", section: "after_main_prompt" },
+        owner: { chat: "chat-1" as never },
+        exportable: false,
+        kind: "author_note"
+      } as NoteDoc
+    }
+    const first = chat({
+      lorebooks: [book],
+      notes: [author],
+      events: [
+        at(null, { key: "lorebook.attach", value: { ref: "an" as never } }),
+        at(null, { key: "note.activate", value: { note: "note-author" as never } }),
+        loreByPosition
+      ]
+    })
+    const one = await assembled(first)
+    expect(contents(one).join("\n")).toContain("AN_LORE")
+    const two = await assembled({
+      ...first,
+      messages: [
+        ...first.messages,
+        { side: "assistant", content: "Then wait." },
+        { side: "user", content: "It's sunny now." }
+      ],
+      historyStart: one.historyStart ?? null
+    })
+    expect(two.historyMove).toBe("unchanged")
+    expect(contents(two).join("\n")).not.toContain("AN_LORE")
+    const prefixAt = one.request.breakpoints.find((b) => b.reason === "prefix")!.message
+    expect(contents(two).slice(0, prefixAt + 1)).toEqual(contents(one).slice(0, prefixAt + 1))
+    expect(contents(one)[prefixAt]).not.toContain("is soaked")
   })
 })

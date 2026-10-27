@@ -1474,10 +1474,24 @@ const composeStage = sync("compose", (assembly) => {
       ? authorBlock("lore:author-note", [...top, expanded, ...bottom], "author's note with lore and personas")!
       : expanded
   }
+  // Lore on the author's note is never pinned: out of the chat, the note changes whenever an
+  // entry that can ride on it comes or goes, so it is volatile even on a turn with none.
+  const authorLore = need(assembly, "lorebooks").some((b) =>
+    b.doc.entries.some((e) => e.enabled && (e.position === "an_top" || e.position === "an_bottom"))
+  )
   const notes = pendingNotes.placed.flatMap(({ text, place, id, baseline, rank, author }) => {
     const expanded = text()
     if (!expanded) return []
-    return [{ text: author ? around(expanded) : expanded, place, id, baseline, rank }]
+    const riding = author && authorLore && !belowHistory && place.at !== "chat"
+    return [
+      {
+        text: author ? around(expanded) : expanded,
+        place: riding ? { ...place, volatile: true } : place,
+        id,
+        baseline,
+        rank
+      }
+    ]
   })
   // A chat without an author's note has ST's default one: empty, in-chat at depth 4 as the
   // system, every message. What rides on it (a persona at its top or bottom, lore) is still sent.
