@@ -168,7 +168,12 @@ for (const width of [1440, 390])
       await page.getByRole("button", { name: "Regenerate the latest reply", exact: true }).click()
       await expect.poll(() => provider.completions.length).toBe(sent + 3)
       await expect.poll(async () => (await newestVersion()).direction).toBeNull()
-      expect(provider.completions.at(-1)!.messages.map((m) => m.content).join("\n")).not.toContain(direction)
+      expect(
+        provider.completions
+          .at(-1)!
+          .messages.map((m) => m.content)
+          .join("\n")
+      ).not.toContain(direction)
       await expectTextBox(composerBox(page), direction)
       await composerBox(page).fill("")
 
@@ -210,9 +215,12 @@ for (const width of [1440, 390])
       const impersonated = provider.completions.length
       await page.getByRole("button", { name: `Write for ${personaName}`, exact: true }).click()
       await expect.poll(() => provider.completions.length).toBe(impersonated + 1)
-      expect(provider.completions.at(-1)!.messages.map((m) => m.content).join("\n")).toContain(
-        `[Write ${personaName}'s next reply in their voice`
-      )
+      expect(
+        provider.completions
+          .at(-1)!
+          .messages.map((m) => m.content)
+          .join("\n")
+      ).toContain(`[Write ${personaName}'s next reply in their voice`)
       await expect.poll(async () => (await newestVersion()).status).toBe("complete")
       // Night RP 3.1 has its impersonation prompt: no notice.
       await expect(page.getByText(/may need “not when writing as/)).toHaveCount(0)
@@ -259,7 +267,10 @@ for (const width of [1440, 390])
         await page.getByRole("button", { name: `Edit ${label}`, exact: true }).click()
         await editor.locator('[data-prompt="impersonationPrompt"]').getByRole("switch").click()
         await editor.getByRole("button", { name: /^Save \(/ }).click()
-        await page.getByRole("dialog", { name: "Save a revision" }).getByRole("button", { name: "Save revision" }).click()
+        await page
+          .getByRole("dialog", { name: "Save a revision" })
+          .getByRole("button", { name: "Save revision" })
+          .click()
         await editor.getByRole("button", { name: "Close preset editor", exact: true }).click()
         await page.goto(`${server().url}/chats/${inn}`)
         const write = page.getByRole("button", { name: `Write for ${personaName}`, exact: true })

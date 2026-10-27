@@ -156,7 +156,8 @@ it.effect("a card override that removes the summary cannot falsely claim its cov
 it.effect("rendered layer framing stays inside the example-prefix allowance", () =>
   Effect.gen(function* () {
     const make = (count: number, raw: number) => {
-      const input = fixture({ mode: "none" }, { openai_max_context: 512, openai_max_tokens: 1 })
+      // Room for the default group nudge after the history (DESIGN §2.2) as well.
+      const input = fixture({ mode: "none" }, { openai_max_context: 540, openai_max_tokens: 1 })
       return assembleFixture({
         ...input,
         notes: [],
@@ -250,7 +251,8 @@ for (const placement of [null, "before_main_prompt", "after_main_prompt"] as con
 
 it.effect("the first ST summary keeps framing inside the example reservation", () =>
   Effect.gen(function* () {
-    const input = fixture({ mode: "none" }, { openai_max_context: 512, openai_max_tokens: 1 })
+    // Room for the default group nudge after the history (DESIGN §2.2) as well.
+    const input = fixture({ mode: "none" }, { openai_max_context: 540, openai_max_tokens: 1 })
     const make = (count: number) =>
       assembleFixture({
         ...input,

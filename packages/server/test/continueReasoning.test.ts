@@ -98,8 +98,10 @@ describe("continue and reasoning", () => {
       const sent = mock.requests().filter((r) => r.path === "/v1/chat/completions")
       assert.strictEqual(sent.length, 2)
       const messages = messagesOf(sent[1]!)
-      assert.deepStrictEqual(messages.slice(-2), [
+      assert.deepStrictEqual(messages.slice(-3), [
         { role: "user", content: "The road flooded." },
+        // ST's default group nudge: Continue writes as a character too.
+        { role: "system", content: "[Write the next reply only as Mira.]" },
         { role: "assistant", content: "The ledger says otherwise," }
       ])
       for (const request of sent) assert.notInclude(JSON.stringify(request.body), "wary")

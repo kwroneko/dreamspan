@@ -552,7 +552,7 @@ describe("send queue", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), gated)))
   )
 
-  it.live("Regenerate keeps the speaker and direction of the version it replaces", () =>
+  it.live("Regenerate keeps the speaker of the version it replaces, and only a direction given with it", () =>
     Effect.gen(function* () {
       const api = yield* client()
       const chat = yield* api.CreateChat({ title: "Directions" })
@@ -564,8 +564,13 @@ describe("send queue", () => {
       yield* release(reply.entry.version.id)
       yield* pathBecomes(api, chat.id, ["you: m0", "model (complete)"])
       const [, current] = yield* path(api, chat.id)
-      const swipe = yield* api.Regenerate({ slotId: current!.slotId, expectedRowVersion: current!.rowVersion })
-      assert.strictEqual(swipe.version.direction, "Whisper.")
+      // Nothing is reused (DESIGN §2.2, the guidance toggle): a swipe has the direction it's given.
+      const swipe = yield* api.Regenerate({
+        slotId: current!.slotId,
+        expectedRowVersion: current!.rowVersion,
+        direction: "Shout."
+      })
+      assert.strictEqual(swipe.version.direction, "Shout.")
       // A later turn doesn't inherit it.
       yield* release(swipe.version.id)
       yield* pathBecomes(api, chat.id, ["you: m0", "model (complete)"])

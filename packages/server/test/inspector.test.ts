@@ -65,11 +65,12 @@ describe("the request inspector", () => {
           [["Card “Mira”: description"], null],
           [["Preset: new chat prompt"], "prefix"],
           [["Message 1"], null],
-          [["Message 2"], "history"]
+          [["Message 2"], "history"],
+          [["Preset prompt “Group nudge” (sent when writing as a character)"], null]
         ]
       )
       assert.deepStrictEqual(
-        run.messages.slice(4).map((m) => m.sources[0]!.slotId),
+        run.messages.slice(4, 6).map((m) => m.sources[0]!.slotId),
         [greeting!.slotId, sent!.slotId]
       )
       assert.strictEqual(run.messages[5]!.tokens, Math.ceil("The road flooded.".length / 4) + 3)

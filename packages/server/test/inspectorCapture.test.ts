@@ -71,7 +71,11 @@ it.live("review: unchanged prefix stays warm with an ordinary short header value
     const run = yield* api.GetRunContext({ versionId: entry.version.id })
     assert.include(run.messages.map((m) => m.content).join(" "), "[redacted]")
     assert.notInclude(JSON.stringify(run), "digest")
-    const previousSent = mock.requests().at(-1)!.body!.messages as Message[]
+    // What follows the chat changes every turn (the group nudge, the user turn that ends the
+    // request, DESIGN §2.2): the rest must come back as it was.
+    const previousSent = (mock.requests().at(-1)!.body!.messages as Message[]).filter(
+      (m) => !m.content.startsWith("[Write ")
+    )
     const again = yield* api.GetChat({ chatId: chat.id })
     const third = yield* posted(api.Generate({ chatId: chat.id, parentSlotId: again.activeLeafSlotId, branch: false }))
     yield* eventually(() => finished(events, third.entry.version.id) !== undefined)

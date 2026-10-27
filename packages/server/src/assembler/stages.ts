@@ -1665,8 +1665,20 @@ const composeStage = sync("compose", (assembly) => {
       reason: "budget",
       message: `The source prefix and requested continuation need about ${doc.samplers.openai_max_tokens + prefixOutput} output tokens, beyond ${assembly.model!.key}'s ${assembly.model!.maxOutput}-token output limit. Choose a model with a larger output limit or reduce the model's response length.`
     })
+  // The user turn `messages` adds when the chat ends on the model's side (DESIGN §2.2) is
+  // budgeted here, so it never takes the request past its target. (A tail prompt or note in the
+  // assistant's role can also need it; that rare case isn't reserved.)
+  const lastTurn =
+    !assembly.request.summarizing && !assembly.prefill && projected.at(-1)?.role === "assistant"
+      ? tokensOf({
+          content: LAST_TURN_TEXT.replace("{{speaker}}", cast.speaker ? modelName(cast.speaker.doc) : names.char)
+        })
+      : 0
   const reserve =
-    prefillInput + prefixOutput + (!mode.st && assembly.lorebooks?.length ? loreAllowance(assembly) - loreCost : 0)
+    lastTurn +
+    prefillInput +
+    prefixOutput +
+    (!mode.st && assembly.lorebooks?.length ? loreAllowance(assembly) - loreCost : 0)
   let maximum = contextBudget(assembly) - reserve
   let desiredTarget = targetBudget(assembly) - reserve
   let admittedExamples = examples
