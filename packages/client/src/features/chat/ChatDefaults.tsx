@@ -140,8 +140,8 @@ export function ChatDefaultsPage() {
     <div className="flex flex-col gap-6">
       <Card>
         <CardHeader
-          title="New chats and chats without their own"
-          description="A chat uses these unless it sets its own model or preset, in its side panel's This chat tab."
+          title="Current model and prompt preset"
+          description="These account settings apply to every chat. You can also switch them in the composer."
         />
         <div className="flex flex-col gap-4">
           <Field
@@ -149,7 +149,7 @@ export function ChatDefaultsPage() {
             description={
               models.length === 0
                 ? "Add a connection with models first, in Connections."
-                : "Without one, a chat that sets no model can't generate."
+                : "Choose a model to generate replies."
             }
           >
             <Select
@@ -161,15 +161,15 @@ export function ChatDefaultsPage() {
           </Field>
           <Field
             label="Default preset"
-            description="Without one, SillyTavern's built-in default. A connection's own preset takes precedence over this."
+            description="Without one, the built-in prompt preset named Default is used. Switching connections may select a locked preset."
           >
             <Select
               items={[
-                { value: NONE, label: "SillyTavern's default preset" },
+                { value: NONE, label: "Default" },
                 ...presets.map((ref) => ({ value: ref.id as string, label: ref.label }))
               ]}
               value={defaults ? (defaults.preset ?? NONE) : null}
-              placeholder="SillyTavern's default preset"
+              placeholder="Default"
               onValueChange={(value) => void change({ preset: value === NONE ? null : (value as LibraryRef["id"]) })}
             />
           </Field>

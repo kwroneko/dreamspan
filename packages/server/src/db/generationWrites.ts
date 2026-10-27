@@ -65,6 +65,18 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
       : sql`INSERT INTO user_settings (user_id, key, value_json) VALUES (${userId}, ${key}, ${JSON.stringify(value)})
           ON CONFLICT (user_id, key) DO UPDATE SET value_json = excluded.value_json`
 
+  const connectionLock = (userId: UserId, model: { connection: string } | null) =>
+    Effect.gen(function* () {
+      if (!model) return null
+      const previous = yield* readDefaults(sql, userId)
+      if (previous.model?.connection === model.connection) return null
+      const [row] = yield* sql<{
+        preset_override_ref_id: string | null
+      }>`SELECT preset_override_ref_id FROM connections WHERE id = ${model.connection} AND owner_user_id = ${userId}`
+      const ref = row?.preset_override_ref_id
+      return ref && (yield* ownedPreset(sql, userId, ref)) ? ref : null
+    })
+
   const handlers = {
     ...(yield* makeDisplayPrefsWriteHandlers),
     StartRollout: ({
@@ -197,8 +209,9 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
         for (const choice of [defaults.judge, fallback])
           if (choice && !(yield* ownedModel(sql, userId, choice.connection, choice.model)))
             return yield* new NotFound({ entity: "model", id: choice.model })
+        const locked = yield* connectionLock(userId, model)
         yield* putSetting(userId, DEFAULT_MODEL, model)
-        yield* putSetting(userId, DEFAULT_PRESET, preset)
+        yield* putSetting(userId, DEFAULT_PRESET, locked ?? preset)
         if (defaults.lcm !== undefined) yield* putSetting(userId, DEFAULT_LCM, defaults.lcm)
         if (defaults.judge !== undefined) yield* putSetting(userId, DEFAULT_JUDGE, defaults.judge)
         return yield* readDefaults(sql, userId)
@@ -215,6 +228,8 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
         for (const choice of [change.judge, change.fallback])
           if (choice && !(yield* ownedModel(sql, userId, choice.connection, choice.model)))
             return yield* new NotFound({ entity: "model", id: choice.model })
+        const locked = yield* connectionLock(userId, change.model ?? null)
+        if (locked && change.preset === undefined) yield* putSetting(userId, DEFAULT_PRESET, locked)
         if (change.model !== undefined) yield* putSetting(userId, DEFAULT_MODEL, change.model)
         if (change.preset !== undefined) yield* putSetting(userId, DEFAULT_PRESET, change.preset)
         if (change.judge !== undefined) yield* putSetting(userId, DEFAULT_JUDGE, change.judge)

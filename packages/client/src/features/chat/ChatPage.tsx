@@ -113,7 +113,7 @@ function MessageList({
   const droppedReason = history?.historyStart
     ? `Not sent to the model: the history sent starts at #${history.historyStart.depth + 1}${
         budget
-          ? `, to fit the preset “${budget.presetName}”${budget.builtinPreset ? " (ST’s built-in default)" : ""} (at most ${budget.maximum.toLocaleString()} tokens; when it's full, older messages leave until it's down to ${budget.target.toLocaleString()})`
+          ? `, to fit the model’s context budget (at most ${budget.maximum.toLocaleString()} tokens; when it's full, older messages leave until it's down to ${budget.target.toLocaleString()})`
           : ""
       }.${lcm === null && through === null ? " Summaries are off, so nothing stands in for it." : ""}`
     : "Not sent to the model: it's before where the history sent starts."
@@ -416,9 +416,8 @@ function MessageList({
                   />
                 ) : row.kind === "history" ? (
                   <Alert>
-                    Messages above this aren&rsquo;t sent to the model: the preset “{budget!.presetName}”
-                    {budget!.builtinPreset ? " (ST’s built-in default)" : ""} allows {budget!.maximum.toLocaleString()}{" "}
-                    tokens, targets {budget!.target.toLocaleString()}, reserves{" "}
+                    Messages above this aren&rsquo;t sent to the model: the model’s context budget allows{" "}
+                    {budget!.maximum.toLocaleString()} tokens, targets {budget!.target.toLocaleString()}, reserves{" "}
                     {budget!.responseReserve.toLocaleString()} for the reply, and the card, prompts and other fixed
                     content take ~{budget!.nonHistoryTokens.toLocaleString()}.
                   </Alert>
@@ -662,7 +661,7 @@ function ChatSurface({
               />
             )}
             <CacheIndicator warmth={view.cache} />
-            <Composer session={session} view={view} />
+            <Composer session={session} view={view} onSettings={show} />
           </div>
           {/* Mounted only while open: the surface re-renders with every page of history. */}
           {panelOpen && (

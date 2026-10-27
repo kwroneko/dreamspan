@@ -1,3 +1,6 @@
+import type { LibraryRef } from "@rp/shared/library.ts"
+import { Effect } from "effect"
+import { useEffect } from "react"
 // One connection's page. Its sections are entries in the `connection.sections` slot, so a
 // plugin's provider can add its own.
 import type { Connection, Credential, CredentialId, ProviderKindInfo, ProxyMode } from "@rp/shared/providers.ts"
@@ -32,9 +35,11 @@ interface SettingsDraft {
   readonly cacheTtlS: string
   /** The version the edit started from, so a change made elsewhere meanwhile is a StaleWrite. */
   readonly rowVersion: number
+  readonly preset: string
 }
 
 const draftOf = (connection: Connection): SettingsDraft => ({
+  preset: connection.presetOverrideRefId ?? "none",
   name: connection.name,
   baseUrl: connection.baseUrl ?? "",
   maxConcurrent: connection.maxConcurrent?.toString() ?? "",
@@ -44,6 +49,10 @@ const draftOf = (connection: Connection): SettingsDraft => ({
 
 export function SettingsSection({ connection, kinds }: ConnectionSectionProps) {
   const action = useAction()
+  const [presets, setPresets] = useState<ReadonlyArray<LibraryRef>>([])
+  useEffect(() => {
+    void action.run((client) => Effect.map(client("ListLibrary", { kind: "preset" }), setPresets))
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
   const [draft, setDraft] = useState<SettingsDraft | null>(null)
   const [submitted, setSubmitted] = useState(false)
   const values = draft ?? draftOf(connection)
@@ -78,7 +87,7 @@ export function SettingsSection({ connection, kinds }: ConnectionSectionProps) {
             compat: connection.compat,
             cacheTtlS: ttl.value,
             maxConcurrent: concurrency.value,
-            presetOverrideRefId: connection.presetOverrideRefId
+            presetOverrideRefId: values.preset === "none" ? null : (values.preset as LibraryRef["id"])
           }
         }),
       ["connections"]
@@ -114,6 +123,19 @@ export function SettingsSection({ connection, kinds }: ConnectionSectionProps) {
             inputMode="url"
             autoCapitalize="none"
             spellCheck={false}
+          />
+        </Field>
+        <Field
+          label="Lock a prompt preset"
+          description="Switching to this connection selects this preset. You can still switch the preset afterward."
+        >
+          <Select
+            items={[
+              { value: "none", label: "No lock" },
+              ...presets.map((preset) => ({ value: preset.id as string, label: preset.label }))
+            ]}
+            value={values.preset}
+            onValueChange={(preset) => edit({ preset })}
           />
         </Field>
         <div className="grid gap-5 sm:grid-cols-2">

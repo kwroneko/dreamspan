@@ -1,3 +1,4 @@
+import { StSettingsImport } from "@rp/shared/modelSettings.ts"
 // The format workers' operations (ARCHITECTURE.md §11.2): parsing an uploaded file and
 // writing an export, both CPU work on untrusted or large data, kept off the main thread.
 import { ImportReport } from "@rp/shared/importReport.ts"
@@ -162,6 +163,10 @@ export class StLibraryFile extends Schema.Class<StLibraryFile>("StLibraryFile")(
 }) {}
 
 export class FormatOps extends RpcGroup.make(
+  Rpc.make("PreviewStSettings", {
+    payload: { text: Schema.String, surface: Schema.Literals(["model", "connection"]) },
+    success: StSettingsImport
+  }),
   Rpc.make("Thumbnail", {
     payload: { dataDir: Schema.String, path: Schema.String, width: Schema.Literals(MEDIA_WIDTHS) },
     success: ThumbnailResult,

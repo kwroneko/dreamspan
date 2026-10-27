@@ -65,7 +65,7 @@ function OverrideChat({ chatId, prefix = "" }: { chatId: ChatId; prefix?: string
   )
 }
 
-function Editor({ refId }: { refId: RefId }) {
+export function Editor({ refId }: { refId: RefId }) {
   const call = useCaller()
   const userId = useSession().user.id
   const [store] = useState(() => new EditorStore(refId, userId, call))
@@ -133,7 +133,12 @@ function Editor({ refId }: { refId: RefId }) {
           </Badge>
         </div>
         {ref.subtitle && <p className="text-muted [overflow-wrap:anywhere]">{ref.subtitle}</p>}
-        {ref.chatId !== null ? (
+        {ref.kind === "preset" ? (
+          <p className="text-sm">
+            Saving updates this prompt preset everywhere. Choose the current prompt preset in the composer; it applies
+            across your chats.
+          </p>
+        ) : ref.chatId !== null ? (
           // A chat override (DESIGN §4): this chat's own version of the entry.
           <p className="text-sm">
             <strong>Edited for this chat.</strong> This version of the {KINDS[ref.kind]} is used only in{" "}

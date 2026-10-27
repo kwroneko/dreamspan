@@ -1,3 +1,4 @@
+import { withModelSettings } from "@rp/shared/modelSettings.ts"
 import { contextExcluded } from "./lcmVisibility.ts"
 import { selectSummaryLayer, selectFailedRanges } from "./lcmLayer.ts"
 import { readSummary } from "./lcmReads.ts"
@@ -10,7 +11,7 @@ import type { ChatId } from "@rp/shared/chat.ts"
 import { CardDoc } from "@rp/shared/docs/card.ts"
 import { LorebookDoc } from "@rp/shared/docs/lorebook.ts"
 import { NoteDoc } from "@rp/shared/docs/note.ts"
-import { PresetDoc } from "@rp/shared/docs/preset.ts"
+import { LegacyPresetDoc as PresetDoc } from "@rp/shared/docs/preset.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { NotFound } from "@rp/shared/errors.ts"
 import type { Summary } from "@rp/shared/lcm.ts"
@@ -210,7 +211,10 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
             )
           : undefined
       if (!row) return null
-      const doc = yield* decoded<PresetDoc>(decodePreset(JSON.parse(row.doc_json)), "The preset")
+      const doc = yield* decoded<PresetDoc>(
+        decodePreset({ ...builtinPreset, ...JSON.parse(row.doc_json) }),
+        "The preset"
+      )
       return { ref: row.ref, revision: row.revision, scope, doc } satisfies PresetInput
     })
 
@@ -577,11 +581,10 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
         return count
       }),
 
-    model: (binding) =>
+    model: () =>
       Effect.gen(function* () {
-        const chosen = settings.modelOverride ?? binding ?? (yield* defaults).model
-        if (!settings.modelOverride)
-          chosenModel = chosen === null ? null : { ...chosen, scope: binding ? "chat" : "user" }
+        const chosen = settings.modelOverride ?? (yield* defaults).model
+        if (!settings.modelOverride) chosenModel = chosen === null ? null : { ...chosen, scope: "user" }
         if (chosen === null) return null
         const [connection] = yield* sql<ConnectionRow>`
           SELECT ${sql.literal(connectionColumns)} FROM ${sql.literal(connectionFrom)}
@@ -603,6 +606,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
           connectionId: c.id,
           connectionRevision: connection.cache_revision,
           mapping: mappingCapabilities(effective),
+          settings: effective.settings,
           cacheTtlOverride: effective.cacheTtlS.source === "user" || c.cacheTtlS !== null,
           cacheTtlS:
             effective.cacheTtlS.source === "user"
@@ -621,8 +625,12 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
             c.baseUrl
           ),
           cacheBreakpoints: effective.cacheBreakpoints.value,
-          context: effective.context.source === "unknown" ? null : effective.context.value,
-          maxOutput: effective.maxOutput.source === "unknown" ? null : effective.maxOutput.value,
+          context:
+            effective.settings.samplers?.openai_max_context ??
+            (effective.context.source === "unknown" ? null : effective.context.value),
+          maxOutput:
+            effective.settings.samplers?.openai_max_tokens ??
+            (effective.maxOutput.source === "unknown" ? null : effective.maxOutput.value),
           presetOverride: c.presetOverrideRefId
         }
         return resolvedModel
@@ -631,26 +639,28 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
     // The scope chain (DATA-MODEL §5.4): the chat's role binding, the chat's own, the
     // connection's override, the user's default, the instance's, then ST's default. A level
     // that names something deleted is passed over.
-    preset: (chain) =>
+    preset: () =>
       Effect.gen(function* () {
-        if (chain.role) {
-          const found = yield* presetFrom(chain.role, "role")
-          if (found) return found
-        }
-        if (chain.chat) {
-          const found = yield* presetFrom(chain.chat, "chat")
-          if (found) return found
-        }
-        if (chain.connection) {
-          const found = yield* presetFrom(chain.connection, "connection")
-          if (found) return found
-        }
         const user = (yield* defaults).preset
         if (user !== null) {
           const found = yield* presetFrom(user, "user")
-          if (found) return found
+          if (found)
+            return {
+              ...found,
+              doc: withModelSettings(
+                found.doc,
+                resolvedModel?.settings ?? {},
+                resolvedModel?.context ?? 8192,
+                resolvedModel?.maxOutput ?? 4096
+              )
+            }
         }
-        return { ref: null, revision: null, scope: "builtin", doc: builtinPreset } satisfies PresetInput
+        return {
+          ref: null,
+          revision: null,
+          scope: "builtin",
+          doc: withModelSettings(builtinPreset, {}, 8192, 4096)
+        } satisfies PresetInput
       })
   })
 
@@ -828,11 +838,35 @@ const replaySources = (
     preset: () =>
       Effect.gen(function* () {
         const { ref, revision, scope } = inputs.preset
-        if (revision === null) return { ref, revision, scope, doc: builtinPreset } satisfies PresetInput
+        if (revision === null)
+          return {
+            ref,
+            revision,
+            scope,
+            doc: withModelSettings(
+              builtinPreset,
+              inputs.model?.settings ?? {},
+              inputs.model?.context ?? 8192,
+              inputs.model?.maxOutput ?? 4096
+            )
+          } satisfies PresetInput
         const row = yield* revisionDoc(revision, "preset")
         if (!row) return yield* unpinned("the preset")
-        const doc = yield* decoded<PresetDoc>(decodePreset(JSON.parse(row.doc_json)), "The preset")
-        return { ref, revision, scope, doc } satisfies PresetInput
+        const doc = yield* decoded<PresetDoc>(
+          decodePreset({ ...builtinPreset, ...JSON.parse(row.doc_json) }),
+          "The preset"
+        )
+        return {
+          ref,
+          revision,
+          scope,
+          doc: withModelSettings(
+            doc,
+            inputs.model?.settings ?? {},
+            inputs.model?.context ?? 8192,
+            inputs.model?.maxOutput ?? 4096
+          )
+        } satisfies PresetInput
       })
   }
 }

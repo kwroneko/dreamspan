@@ -139,7 +139,8 @@ export const layer = Layer.effect(
             emitted = next
             return Effect.succeed(delta)
           }
-          return providers
+          const showStreaming = model.settings?.stream !== false
+          const chunks = providers
             .stream({
               userId,
               connectionId: model.connectionId as ConnectionId,
@@ -147,9 +148,11 @@ export const layer = Layer.effect(
               context: wire.context,
               inspection: { request: generation.request, model, display: generation.inspection },
               options: {
+                ...(model.settings?.cacheRetention ? { cacheRetention: model.settings.cacheRetention } : {}),
                 ...(prefix !== null ? { replyTool: REPLY_TOOL } : {}),
                 ...(wire.temperature !== undefined ? { temperature: wire.temperature } : {}),
                 ...(wire.maxTokens !== undefined ? { maxTokens: wire.maxTokens } : {}),
+                ...(wire.reasoning ? { reasoning: wire.reasoning } : {}),
                 sessionId: chatId,
                 payload: wire.payload,
                 breakpoints: wire.breakpoints
@@ -211,6 +214,9 @@ export const layer = Layer.effect(
                     : new GenerationFailed({ class: "server", message: error.message })
               )
             )
+          return showStreaming
+            ? chunks
+            : Stream.fromEffect(Stream.runCollect(chunks)).pipe(Stream.flatMap((items) => Stream.fromIterable(items)))
         })
       )
 

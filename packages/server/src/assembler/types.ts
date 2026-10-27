@@ -9,11 +9,11 @@ import type { CardDoc } from "@rp/shared/docs/card.ts"
 import type { LorebookDoc } from "@rp/shared/docs/lorebook.ts"
 import type { matchLorebooks } from "./lorebook.ts"
 import type { NoteDoc } from "@rp/shared/docs/note.ts"
-import type { PresetDoc } from "@rp/shared/docs/preset.ts"
+import type { LegacyPresetDoc as PresetDoc } from "@rp/shared/docs/preset.ts"
 import { Schema } from "effect"
 
 /** Bump whenever identical inputs would assemble differently. Missing means version 0. */
-export const ASSEMBLER_VERSION = 22
+export const ASSEMBLER_VERSION = 23
 
 export type Role = "system" | "user" | "assistant"
 
@@ -469,6 +469,7 @@ export interface ModelInput {
   /** A reported output ceiling; absent on older snapshots. */
   readonly maxOutput?: number | null
   /** The connection's one-way preset override (DESIGN §9). */
+  readonly settings?: import("@rp/shared/modelSettings.ts").ModelSettings
   readonly presetOverride: string | null
 }
 

@@ -251,7 +251,7 @@ function Inspector({ run }: { run: RunContext }) {
           <dd>{run.model ? `${run.model.model} on ${run.model.connection} (${run.model.kind})` : "none"}</dd>
           <dt className="text-muted">Preset</dt>
           <dd>
-            {run.preset.label ?? "SillyTavern's default"} ({run.preset.scope})
+            {run.preset.label ?? "Default"} ({run.preset.scope})
           </dd>
           <dt className="text-muted">Generation</dt>
           <dd>

@@ -9,7 +9,7 @@ import {
   PRESET_SCHEMA_VERSION,
   PromptRole,
   RegexScript,
-  type PresetDoc,
+  type LegacyPresetDoc as PresetDoc,
   type PresetPrompt,
   type PresetSamplers,
   type PromptOrderEntry,
@@ -166,6 +166,7 @@ const CONNECTION_FIELDS = new Set([
 ])
 const isConnectionField = (key: string) =>
   CONNECTION_FIELDS.has(key) ||
+  /(?:api[_-]?key|password|secret|credential)/i.test(key) ||
   /(_model|_models|_endpoint)$/.test(key) ||
   /^(openrouter|vertexai|azure|nanogpt)_/.test(key)
 

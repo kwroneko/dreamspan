@@ -1,3 +1,4 @@
+import { importStSettings } from "../formats/presetSettings.ts"
 // Format worker entry point (ARCHITECTURE.md §11.3). The parsers are synchronous and take
 // up to about a second on a hostile file, so they run here, one request at a time.
 import { NodeRuntime, NodeWorkerRunner } from "@effect/platform-node"
@@ -17,6 +18,7 @@ RpcServer.layer(FormatOps, { concurrency: 1, disableFatalDefects: true }).pipe(
       Effect.map(Importers.Importers, (registry) =>
         FormatOps.of({
           Thumbnail: thumbnail,
+          PreviewStSettings: ({ text, surface }) => Effect.sync(() => importStSettings(text, surface)),
           Parse: ({ bytes, fileName }) =>
             Importers.parseFile(bytes, fileName).pipe(Effect.provideService(Importers.Importers, registry)),
           Export: (input) => Effect.map(exportFile(input), ownBuffer),

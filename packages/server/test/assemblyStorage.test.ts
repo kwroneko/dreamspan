@@ -69,8 +69,14 @@ const setup = (handle = "ana") =>
         origin: "greeting"
       })
     })
-    const state = (data: StateEventData, slotId: SlotId | null = null) =>
-      writer.AddStateEvent({ userId, chatId: chat.id, slotId, versionId: null, scope: null, data })
+    const state = (data: StateEventData, slotId: SlotId | null = null) => {
+      if (data.key === "preset.binding")
+        return writer.ChangeGenerationDefaults({ userId, change: { preset: data.value.ref as never } })
+      if (data.key === "preset.unbind") return writer.ChangeGenerationDefaults({ userId, change: { preset: null } })
+      if (data.key === "model.binding")
+        return writer.ChangeGenerationDefaults({ userId, change: { model: data.value as never } })
+      return writer.AddStateEvent({ userId, chatId: chat.id, slotId, versionId: null, scope: null, data })
+    }
     yield* state({ key: "played_by_me.set", value: { entities: [tobin.entityId] } })
     const sent = yield* writer.AppendMessage({
       userId,
@@ -149,7 +155,12 @@ describe("context assembly from the database", () => {
           },
           credential: { existing: null }
         })
-        const model = yield* writer.AddUserModel({ userId, connectionId, key: "unicode", overrides: {} })
+        const model = yield* writer.AddUserModel({
+          userId,
+          connectionId,
+          key: "unicode",
+          overrides: { context: 500, maxOutput: 40 }
+        })
         yield* state({ key: "model.binding", value: { connection: connectionId, model: model.id } })
         const append = (parentSlotId: SlotId, content: string, generating = false) =>
           writer.AppendMessage({
@@ -259,7 +270,12 @@ describe("context assembly from the database", () => {
           },
           credential: { existing: null }
         })
-        const model = yield* writer.AddUserModel({ userId, connectionId, key: "steps", overrides: {} })
+        const model = yield* writer.AddUserModel({
+          userId,
+          connectionId,
+          key: "steps",
+          overrides: { context: 500, maxOutput: 40 }
+        })
         yield* state({ key: "model.binding", value: { connection: connectionId, model: model.id } })
         const snapshots: Array<ContextSnapshot> = []
         const users: Array<{ id: VersionId; slot: SlotId }> = []
@@ -378,26 +394,19 @@ describe("context assembly from the database", () => {
         const shortened = yield* generate((yield* send(last.slot, true)).slotId)
         assert.isBelow(shortened.snapshot.historyStart!.depth, last.snapshot.historyStart!.depth)
         assert.strictEqual(shortened.snapshot.historyMove, "restore")
-        yield* writer.EditRef({
+        yield* writer.EditModel({
           userId,
-          refId: chosen.ref.id,
-          expectedRowVersion: chosen.ref.rowVersion,
-          doc: {
-            ...document,
-            samplers: { ...document.samplers, openai_max_context: 10000 }
-          } as never,
-          message: null,
-          commitDraft: null
+          modelId: model.id,
+          expectedRowVersion: model.rowVersion,
+          overrides: { context: 10000, maxOutput: 40 }
         })
         const raised = yield* generate((yield* send(shortened.slot)).slotId)
         assert.strictEqual(raised.snapshot.historyStart!.depth, 0)
-        yield* writer.EditRef({
+        yield* writer.EditModel({
           userId,
-          refId: chosen.ref.id,
-          expectedRowVersion: chosen.ref.rowVersion + 1,
-          doc: document as never,
-          message: null,
-          commitDraft: null
+          modelId: model.id,
+          expectedRowVersion: model.rowVersion + 1,
+          overrides: { context: 500, maxOutput: 40 }
         })
         const variable = yield* entity("note", "Full instructions", {
           schema_version: 1,
@@ -421,13 +430,11 @@ describe("context assembly from the database", () => {
             value.length + 22
           )
         }
-        yield* writer.EditRef({
+        yield* writer.EditModel({
           userId,
-          refId: chosen.ref.id,
-          expectedRowVersion: chosen.ref.rowVersion + 2,
-          doc: { ...document, samplers: { ...document.samplers, openai_max_context: 20 } } as never,
-          message: null,
-          commitDraft: null
+          modelId: model.id,
+          expectedRowVersion: model.rowVersion + 2,
+          overrides: { context: 20, maxOutput: 40 }
         })
         const fallback = yield* reader.CacheWarmth({ userId, chatId: chat.id })
         assert.deepStrictEqual(fallback.historyStart, {
@@ -981,7 +988,7 @@ describe("context assembly from the database", () => {
       assert.deepStrictEqual(bound.inputs.preset, {
         ref: preset.ref.id,
         revision: preset.ref.headRevisionId,
-        scope: "chat"
+        scope: "user"
       })
       assert.strictEqual(texts(bound)[0], "system: You narrate a story starring Mira and Tobin.")
 
@@ -1158,10 +1165,9 @@ describe("context assembly from the database", () => {
         key: "claude-test",
         prefill: "assistant"
       })
-      // A binding to a connection that went is a visible failure, not "no model".
+      // A deleted account model reads as unset; stale chat events cannot revive it.
       yield* writer.DeleteConnection({ userId, connectionId })
-      const gone = yield* Effect.flip(assemble())
-      assert.deepInclude(gone, { _tag: "AssemblyFailed", reason: "no_model" })
+      assert.isNull((yield* assemble()).inputs.model)
     }).pipe(Effect.provide(database()))
   )
 

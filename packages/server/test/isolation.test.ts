@@ -361,6 +361,7 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
     adminOnly: (actor, owner) =>
       refused(actor.api.SetUserDisabled({ userId: owner.user.id, disabled: true }), "Forbidden")
   },
+  PreviewStSettings: { global: "pure preview of the supplied file; no stored user data is read or changed" },
   ListProviderKinds: { global: "the instance's provider registry, the same for every user" },
   ListConnections: {
     probe: (actor, owner) =>

@@ -146,7 +146,7 @@ const uniqueBy =
     return undefined
   }
 
-export const PresetDoc = Schema.Struct({
+export const LegacyPresetDoc = Schema.Struct({
   schema_version: Schema.Literal(PRESET_SCHEMA_VERSION),
   prompts: Schema.Array(PresetPrompt).check(
     Schema.makeFilter(uniqueBy((p: PresetPrompt) => p.identifier, "identifier"))
@@ -194,4 +194,35 @@ export const PresetDoc = Schema.Struct({
     return i === -1 ? undefined : { path: ["order", i], issue: "names no prompt" }
   })
 )
+export type LegacyPresetDoc = typeof LegacyPresetDoc.Type
+
+/** Prompt content only. Legacy revisions retain their original model settings in history. */
+export const PresetDoc = LegacyPresetDoc.mapFields((fields) => {
+  const { samplers, context_target, names_behavior, squash, postprocess, use_sysprompt, ...prompts } = fields
+  void [samplers, context_target, names_behavior, squash, postprocess, use_sysprompt]
+  return prompts
+})
 export type PresetDoc = typeof PresetDoc.Type
+
+export const promptPreset = (doc: LegacyPresetDoc): PresetDoc => {
+  const prompt = Schema.decodeUnknownSync(PresetDoc)(doc)
+  const modelKeys = new Set([
+    "stop",
+    "stopping_strings",
+    "logit_bias",
+    "stream_openai",
+    "reasoning_effort",
+    "verbosity",
+    "cache_control",
+    "cacheRetention",
+    "provider"
+  ])
+  return {
+    ...prompt,
+    unsupported: Object.fromEntries(
+      Object.entries(prompt.unsupported).filter(
+        ([key]) => !modelKeys.has(key) && !/^(openrouter|vertexai|azure|nanogpt)_/.test(key)
+      )
+    )
+  }
+}

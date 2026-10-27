@@ -1,3 +1,4 @@
+import { PresetDoc } from "@rp/shared/docs/preset.ts"
 import { getAt, parseField } from "@rp/shared/editing.ts"
 // Library write handlers (DATA-MODEL §3.2). They run in the writer worker, each as one
 // transaction. Every change to a ref flows on to the refs that follow it.
@@ -16,7 +17,7 @@ import {
 } from "@rp/shared/editing.ts"
 import { CardOverrideOpened } from "@rp/shared/chatSetupApi.ts"
 import { InvalidDocument } from "@rp/shared/editorApi.ts"
-import { Effect, Predicate } from "effect"
+import { Schema, Effect, Predicate } from "effect"
 import { SqlClient } from "effect/sql"
 import type { Bin } from "./bin.ts"
 import { docHash, searchText } from "./documents.ts"
@@ -41,11 +42,11 @@ export interface EncodedDoc {
   readonly searchText: string
 }
 
-const encode = (doc: Doc): EncodedDoc => ({
-  json: JSON.stringify(doc),
-  hash: docHash(doc),
-  searchText: searchText(doc)
-})
+const encode = (input: Doc): EncodedDoc => {
+  const doc =
+    Array.isArray(input.prompts) && Array.isArray(input.order) ? Schema.decodeUnknownSync(PresetDoc)(input) : input
+  return { json: JSON.stringify(doc), hash: docHash(doc), searchText: searchText(doc) }
+}
 
 /** The URIs a card document's `assets` name. */
 const assetUris = (assets: unknown) =>

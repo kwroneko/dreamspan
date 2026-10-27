@@ -144,7 +144,7 @@ export function ImportPage() {
           description={
             into
               ? "Pick its new version. Your own edits and variants are merged with it; anything that conflicts is left as it was."
-              : "Character cards (PNG, JSON or CHARX), SillyTavern World Info files and chat-completion presets. The format is read from the file itself."
+              : "Character cards (PNG, JSON or CHARX), SillyTavern World Info files and prompt presets. Preset imports take prompt text, order, prefill and regex scripts. Import model settings on a model’s settings screen; import connection settings in Connections."
           }
         />
         <FileDrop
