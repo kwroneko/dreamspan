@@ -48,7 +48,8 @@ for (const width of [1440, 390]) {
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
     await admin((api) => api.SetDisplayPrefs({ prefs: { timeline: "originals", coverageRail: false } }))
     const chat = await fixture(`Timeline ${width}`)
-    await page.goto(`${server().url}/chats/${chat.id}?slot=${chat.entries[5]!.slotId}`)
+    // Use an uncovered link: covered links deliberately expand their summary.
+    await page.goto(`${server().url}/chats/${chat.id}?slot=${chat.entries[6]!.slotId}`)
     await expect(originals(page, chat.entries[5]!)).toBeVisible()
     await expect(page.locator("[data-timeline-summary]")).toHaveCount(0)
     const composer = page.getByLabel("Message", { exact: true })

@@ -106,7 +106,8 @@ for (const width of [1440, 390])
       const path = await admin((api) =>
         api.ReadPath({ chatId, leafSlotId: null, range: { _tag: "Bottom" }, limit: 500 })
       )
-      const slot = path.entries[119]!.slotId
+      // Start at the first uncovered original so the walkthrough expands manually.
+      const slot = path.entries[120]!.slotId
       const base = `${server().url}/chats/${chatId}?slot=${slot}`
       await page.goto(base)
       await expect(page.getByTestId("lcm-boundary")).toBeVisible()

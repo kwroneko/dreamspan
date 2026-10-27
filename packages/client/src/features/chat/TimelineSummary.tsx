@@ -1,8 +1,8 @@
 // The selected layer in the timeline, with lazy, recursive expansion. ReadPath stays
 // paged even for an imported summary spanning thousands of original messages.
-import type { PathEntry } from "@rp/shared/chat.ts"
+import type { PathEntry, SlotId } from "@rp/shared/chat.ts"
 import type { LcmSummary, Summary } from "@rp/shared/lcm.ts"
-import { type ReactNode, useEffect, useState } from "react"
+import { type ReactNode, useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { Button } from "../../ui/Button.tsx"
 import { Markdown } from "../../ui/Markdown.tsx"
 import { Badge } from "../../ui/Surface.tsx"
@@ -17,16 +17,26 @@ type Row = Pick<
 export function TimelineSummary({
   session,
   summary,
-  renderMessage
+  renderMessage,
+  target = null
 }: {
   session: ChatSession
   summary: Row
+  target?: PathEntry | null
   renderMessage: (entry: PathEntry) => ReactNode
 }) {
-  const [open, setOpen] = useState(false)
+  const targetId = target?.slotId ?? null
+  const [expansion, setExpansion] = useState({ targetId, open: targetId !== null })
+  // A new message link reveals its original even if this summary was collapsed.
+  if (expansion.targetId !== targetId) setExpansion({ targetId, open: targetId !== null })
+  const open = expansion.open
+  const pathRevision = useSyncExternalStore(session.subscribe, () => session.snapshot().pathRevision)
+  // Keep every page already expanded when an edit, swipe, hide or reconnect invalidates it.
+  const loaded = useRef<{ first: number; last: SlotId; targetId: SlotId | null } | null>(null)
   const [children, setChildren] = useState<ReadonlyArray<Summary> | null>(null)
   const [messages, setMessages] = useState<ReadonlyArray<PathEntry> | null>(null)
   const [before, setBefore] = useState<PathEntry["slotId"] | null>(null)
+  const [after, setAfter] = useState<SlotId | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
   const [retry, setRetry] = useState(0)
@@ -71,18 +81,39 @@ export function TimelineSummary({
         if (failed && !failed.ok) return setError(failed.error.message)
         setChildren(results.flatMap((r) => (r.ok ? [r.value] : [])))
       } else {
-        const result = await session.call((client) =>
-          client("ReadPath", {
-            chatId: session.id,
-            leafSlotId: summary.lastSlotId,
-            range: { _tag: "Older", from: summary.lastSlotId },
-            limit: 100
-          })
-        )
-        if (!live) return
-        if (!result.ok) return setError(result.error.message)
-        setMessages(result.value.entries.filter((e) => e.depth >= summary.from - 1 && e.depth < summary.to))
-        setBefore((result.value.entries[0]?.depth ?? -1) > summary.from - 1 ? result.value.older : null)
+        const previous = loaded.current?.targetId === targetId ? loaded.current : null
+        const rows: PathEntry[] = []
+        let from = previous?.last ?? summary.lastSlotId
+        let firstPage = true
+        let older: SlotId | null = null
+        let newer: SlotId | null = null
+        do {
+          const result = await session.call((client) =>
+            client("ReadPath", {
+              chatId: session.id,
+              leafSlotId: summary.lastSlotId,
+              range:
+                firstPage && previous === null && targetId !== null
+                  ? { _tag: "Around", slot: targetId }
+                  : { _tag: "Older", from },
+              limit: 100
+            })
+          )
+          if (!live) return
+          if (!result.ok) return setError(result.error.message)
+          if (firstPage) newer = result.value.newer
+          rows.unshift(...result.value.entries.filter((e) => e.depth >= summary.from - 1 && e.depth < summary.to))
+          older = (result.value.entries[0]?.depth ?? -1) > summary.from - 1 ? result.value.older : null
+          if (older === null || previous === null || (rows[0]?.depth ?? -1) <= previous.first) break
+          from = older
+          firstPage = false
+        } while (true)
+        const first = rows[0]
+        const last = rows.at(-1)
+        if (first && last) loaded.current = { first: first.depth, last: last.slotId, targetId }
+        setMessages(rows)
+        setBefore(older)
+        setAfter((last?.depth ?? summary.to) < summary.to - 1 ? newer : null)
       }
     }
     void load()
@@ -98,24 +129,37 @@ export function TimelineSummary({
     summary.to,
     summary.lastSlotId,
     open,
-    retry
+    retry,
+    pathRevision,
+    targetId
   ])
 
-  const earlier = async () => {
-    if (before === null) return
+  const page = async (direction: "earlier" | "later") => {
+    const from = direction === "earlier" ? before : after
+    if (from === null) return
+    const revision = session.snapshot().pathRevision
     setPending(true)
     const result = await session.call((client) =>
       client("ReadPath", {
         chatId: session.id,
         leafSlotId: summary.lastSlotId,
-        range: { _tag: "Older", from: before },
+        range: direction === "earlier" ? { _tag: "Older", from } : { _tag: "Newer", after: from },
         limit: 100
       })
     )
     setPending(false)
+    if (session.snapshot().pathRevision !== revision) return
     if (!result.ok) return setError(result.error.message)
-    setMessages((rows) => [...result.value.entries.filter((e) => e.depth >= summary.from - 1), ...(rows ?? [])])
-    setBefore((result.value.entries[0]?.depth ?? -1) > summary.from - 1 ? result.value.older : null)
+    const entries = result.value.entries.filter((e) => e.depth >= summary.from - 1 && e.depth < summary.to)
+    const bounds = loaded.current
+    if (bounds && entries.length > 0) {
+      if (direction === "earlier") bounds.first = entries[0]!.depth
+      else bounds.last = entries.at(-1)!.slotId
+    }
+    setMessages((rows) => (direction === "earlier" ? [...entries, ...(rows ?? [])] : [...(rows ?? []), ...entries]))
+    if (direction === "earlier")
+      setBefore((result.value.entries[0]?.depth ?? -1) > summary.from - 1 ? result.value.older : null)
+    else setAfter((result.value.entries.at(-1)?.depth ?? summary.to) < summary.to - 1 ? result.value.newer : null)
   }
   return (
     <section
@@ -130,7 +174,12 @@ export function TimelineSummary({
         {!summary.fresh && <Badge tone="warning">Stale</Badge>}
       </div>
       <Markdown text={summary.content ?? ""} streaming={false} />
-      <Button variant="ghost" className="self-start" aria-expanded={open} onClick={() => setOpen(!open)}>
+      <Button
+        variant="ghost"
+        className="self-start"
+        aria-expanded={open}
+        onClick={() => setExpansion({ targetId, open: !open })}
+      >
         {open ? "Collapse" : summary.level > 1 ? "Expand to summaries" : "Expand to messages"}
       </Button>
       {open && (
@@ -149,7 +198,13 @@ export function TimelineSummary({
               !error && <p className="text-sm text-muted">Loading summaries…</p>
             ) : (
               children.map((child) => (
-                <TimelineSummary key={child.id} session={session} summary={child} renderMessage={renderMessage} />
+                <TimelineSummary
+                  key={child.id}
+                  session={session}
+                  summary={child}
+                  renderMessage={renderMessage}
+                  target={target && target.depth >= child.from - 1 && target.depth < child.to ? target : null}
+                />
               ))
             )
           ) : messages === null ? (
@@ -157,13 +212,18 @@ export function TimelineSummary({
           ) : (
             <>
               {before !== null && (
-                <Button pending={pending} onClick={() => void earlier()}>
+                <Button pending={pending} onClick={() => void page("earlier")}>
                   Load earlier messages in this summary
                 </Button>
               )}
               {messages.map((entry) => (
                 <div key={entry.slotId}>{renderMessage(entry)}</div>
               ))}
+              {after !== null && (
+                <Button pending={pending} onClick={() => void page("later")}>
+                  Load later messages in this summary
+                </Button>
+              )}
             </>
           )}
         </div>

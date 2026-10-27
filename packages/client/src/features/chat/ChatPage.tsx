@@ -225,6 +225,38 @@ function MessageList({
     requestAnimationFrame(() => requestAnimationFrame(() => (settled.current = true)))
   })
 
+  // Expansions load asynchronously, possibly through several summary levels. Position
+  // the actual linked article once it exists, after the virtualizer measures the row.
+  useEffect(() => {
+    const list = parent.current
+    if (!summaries || anchor === null || list === null) return
+    let frame = 0
+    const reveal = () => {
+      const article = list.querySelector(`article[data-slot="${anchor}"]`)
+      if (!article) return
+      observer.disconnect()
+      frame = requestAnimationFrame(() => {
+        frame = requestAnimationFrame(() => {
+          // Replace the pending summary-row scroll with an offset inside that row.
+          // Otherwise its measurement pass can scroll back to the summary's edge.
+          const offset =
+            list.scrollTop +
+            article.getBoundingClientRect().top -
+            list.getBoundingClientRect().top -
+            (list.clientHeight - article.getBoundingClientRect().height) / 2
+          virtualizer.scrollToOffset(Math.max(0, offset))
+        })
+      })
+    }
+    const observer = new MutationObserver(reveal)
+    observer.observe(list, { childList: true, subtree: true })
+    reveal()
+    return () => {
+      observer.disconnect()
+      cancelAnimationFrame(frame)
+    }
+  }, [anchor, summaries, view.opened, virtualizer])
+
   // An end scroll remains pending by row index while the virtualizer measures it.
   // Appending or inserting the summary divider can move the last message to another
   // index. Retarget before the next frame, even if we're still exactly at the end:
@@ -358,7 +390,16 @@ function MessageList({
                 {row.kind === "lcm" ? (
                   <LcmBoundary lcm={lcm!} onOpen={() => onOpenSummaries(null)} />
                 ) : row.kind === "summary" ? (
-                  <TimelineSummary session={session} summary={row.summary} renderMessage={renderMessage} />
+                  <TimelineSummary
+                    session={session}
+                    summary={row.summary}
+                    renderMessage={renderMessage}
+                    target={
+                      entries.find(
+                        (e) => e.slotId === anchor && e.depth >= row.summary.from - 1 && e.depth < row.summary.to
+                      ) ?? null
+                    }
+                  />
                 ) : row.kind === "history" ? (
                   <Alert>
                     Messages above this aren&rsquo;t sent to the model: the preset “{budget!.presetName}”
