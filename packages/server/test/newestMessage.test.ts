@@ -103,7 +103,12 @@ describe("Newest message", () => {
         messages: [{ content: "LATEST", side: "user" }]
       })
     )
-    expect(result.request.messages.map((m) => m.content).slice(-3)).toEqual(["LATEST", "DESCRIPTION", "SCENARIO"])
+    // Each character's part in the preset's join wrapper (DESIGN §5.0), here the default.
+    expect(result.request.messages.map((m) => m.content).slice(-3)).toEqual([
+      "LATEST",
+      "<Mira>\nDESCRIPTION\n</Mira>",
+      "<Mira>\nSCENARIO\n</Mira>"
+    ])
   })
   for (const position of ["context_start", "tail_start", "tail_end"] as const) {
     it(`keeps several notes at ${position} in their order`, async () => {

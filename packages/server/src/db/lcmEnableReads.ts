@@ -11,7 +11,7 @@ import { makeAssembler } from "../assembler/assembler.ts"
 import { AssemblySources, type PositionedEvent } from "../assembler/pipeline.ts"
 import { AssemblyFailed } from "../assembler/types.ts"
 import { estimateTokens, tokensOf } from "../assembler/st.ts"
-import { backfillSeconds, estimateBackfill } from "../lcm/backfill.ts"
+import { backfillSeconds, estimateBackfill, layerTokens } from "../lcm/backfill.ts"
 import { sqlSources } from "./assemblySources.ts"
 import { backfillOf, overCap, spentSince } from "./lcmBackfill.ts"
 import { importedSummary } from "./lcmImported.ts"
@@ -179,7 +179,7 @@ export const makeLcmEnableReadHandlers = Effect.gen(function* () {
         const speed = yield* recentSpeed(sql, userId, model.modelId)
         const [priced] = yield* sql<{ write: number | null }>`
           SELECT json_extract(upstream_json, '$.price.cacheWrite') AS write FROM models WHERE id = ${model.modelId}`
-        const layerTokens = summaries.summaries.reduce((n, s) => n + s.tokens, 0)
+        const sizes = summaries.summaries.map((s) => s.tokens)
         const work = (after: number, shownThrough: number, layerBefore: number) =>
           Effect.gen(function* () {
             const rest = yield* tail(leafSlotId, after, shownThrough)
@@ -214,12 +214,12 @@ export const makeLcmEnableReadHandlers = Effect.gen(function* () {
             } satisfies BackfillCounts
           })
         // Without the imported summary, the run is shown and summarized with the rest.
-        const fromScratch = yield* work(summaries.cursorDepth, adoptable ? lastRow.depth : -1, layerTokens)
+        const fromScratch = yield* work(summaries.cursorDepth, adoptable ? lastRow.depth : -1, layerTokens(sizes))
         const adopted = adoptable
           ? yield* work(
               Math.max(summaries.cursorDepth, lastRow.depth),
               -1,
-              layerTokens + estimateTokens(imported.content)
+              layerTokens([...sizes, estimateTokens(imported.content)])
             )
           : null
         return { enabled, imported: offer, fromScratch, adopted }

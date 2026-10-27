@@ -5,11 +5,20 @@
 // quarters of it, a pass plans at most `MAX_JOBS_PER_PLAN` chunks, a chunk takes whole messages
 // until it holds `leafInput` tokens, and `fanout` summaries of a level are condensed into one.
 
+import { estimateTokens } from "../assembler/st.ts"
 import { MAX_CHUNK_SLOTS } from "../db/lcmLimits.ts"
 import { MAX_JOBS_PER_PLAN } from "../db/lcmMaintain.ts"
 
 /** The summarization instruction after the chunk, in estimated tokens. */
 const TAIL_TOKENS = 80
+
+/** The tags the layer puts around each summary and around them all (`layerText`), in estimated tokens. */
+const SUMMARY_TAGS = estimateTokens('<summary level="1" from="1000" to="1100">\n\n</summary>\n')
+const LAYER_TAGS = estimateTokens("<summaries>\n</summaries>")
+
+/** A layer of summaries of these sizes as it is sent, tags included. */
+export const layerTokens = (summaries: ReadonlyArray<number>) =>
+  summaries.length ? LAYER_TAGS + summaries.reduce((n, tokens) => n + tokens + SUMMARY_TAGS, 0) : 0
 
 export interface BackfillInput {
   /** The tokens and messages after the summaries' cursor, as the planner costs them. */
@@ -20,7 +29,7 @@ export interface BackfillInput {
   readonly layerMax: number
   /** The preset and cards that open every request. */
   readonly prefix: number
-  /** What the layer holds before the work starts, in tokens. */
+  /** What the layer holds before the work starts, in tokens, tags included (`layerTokens`). */
   readonly layer: number
   readonly leafInput: number
   readonly leafTarget: number
@@ -102,10 +111,12 @@ export const estimateBackfill = (input: BackfillInput): BackfillTotals => {
 
   // The layer as the jobs build it: counts of summaries per level.
   const counts: Array<number> = [0]
-  const size = (level: number) => (level === 1 ? input.leafTarget : input.condenseTarget)
+  // A summary as the layer sends it, in its tags.
+  const size = (level: number) => (level === 1 ? input.leafTarget : input.condenseTarget) + SUMMARY_TAGS
   const layerNow = () => {
     let tokens = input.layer
     for (let level = 1; level < counts.length; level++) tokens += (counts[level] ?? 0) * size(level)
+    if (input.layer === 0 && tokens > 0) tokens += LAYER_TAGS
     return Math.min(tokens, input.layerMax)
   }
   const plannedRequests: PlannedRequest[] = []
@@ -145,7 +156,7 @@ export const estimateBackfill = (input: BackfillInput): BackfillTotals => {
     })
     output += input.leafTarget
     counts[1] = (counts[1] ?? 0) + 1
-    fresh = input.leafTarget
+    fresh = size(1)
     // Condense whenever a level holds `fanout` summaries; a condensation can fill the level above.
     for (let level = 1; (counts[level] ?? 0) >= fanout; level++) {
       const previous = [uncached, read, write]
@@ -172,7 +183,7 @@ export const estimateBackfill = (input: BackfillInput): BackfillTotals => {
       output += input.condenseTarget
       counts[level] = (counts[level] ?? 0) - fanout
       counts[level + 1] = (counts[level + 1] ?? 0) + 1
-      fresh = input.condenseTarget
+      fresh = size(level + 1)
     }
   }
   return {
