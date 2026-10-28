@@ -317,6 +317,15 @@ test("search and replace runs across fields, and a pattern that backtracks forev
   await dialog.getByRole("button", { name: "Find" }).click()
   await expect(dialog.getByRole("status")).toHaveText("2 matches.")
   await dialog.getByRole("textbox", { name: "Replace with" }).fill("warden")
+  // Changing the replacement invalidates the old preview; Find again before applying it.
+  await expect(dialog.getByRole("list", { name: "Matches", exact: true })).toHaveCount(0)
+  await expect(dialog.getByRole("button", { name: "Replace all" })).toBeDisabled()
+  await dialog.getByRole("button", { name: "Find" }).click()
+  await expect(dialog.getByRole("status")).toHaveText("2 matches.")
+  await expect(dialog.getByRole("list", { name: "Matches", exact: true }).getByRole("listitem")).toHaveText([
+    /→ warden/,
+    /→ warden/
+  ])
   await dialog.getByRole("button", { name: "Replace all" }).click()
   await expect(dialog.getByRole("status")).toHaveText("No matches.")
 
