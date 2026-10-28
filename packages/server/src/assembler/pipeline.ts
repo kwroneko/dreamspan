@@ -203,8 +203,6 @@ export interface Assembly {
   cardOverrides?: Array<CardOverride>
   notes?: ReadonlyArray<NoteInput>
   skippedNotes?: ReadonlyArray<NoteInput>
-  /** The personas whose description a note places, so the persona description marker leaves them out. */
-  placedPersonas?: ReadonlySet<string>
   /**
    * The chat's author's note while it's switched off: what rides on it still goes where it
    * sits, without its own text (owner question 6 of DESIGN §4.1's notes).

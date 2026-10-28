@@ -44,7 +44,6 @@ const fixture = (placement: NoteDoc["placement"], presetFields: Record<string, u
     {
       entity: "imported",
       revision: "note-revision",
-      first: false,
       doc: {
         schema_version: 1,
         title: "Imported",

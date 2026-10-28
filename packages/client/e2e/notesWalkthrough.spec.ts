@@ -283,8 +283,19 @@ for (const width of [1440, 390])
       await notes.scrollIntoViewIfNeeded()
       await shoot("card-notes")
       await notes.getByRole("button", { name: /^Character author's note/ }).click()
-      await expect(page.getByRole("region", { name: "Note Character author's note" })).toBeVisible()
+      const characterNote = page.getByRole("region", { name: "Note Character author's note" })
+      await expect(characterNote).toBeVisible()
+      // Its place says what it means: it joins the chat's author's note (DESIGN §4.1, no hidden kinds).
+      await expect(characterNote.getByText(/It joins the chat's author's note/)).toBeVisible()
       await shoot("card-note-open")
+      // A card's note "with the definitions" goes inside its card's part.
+      await characterNote.getByRole("combobox", { name: "Position" }).click()
+      await expect(page.getByRole("option", { name: "With the definitions (in the card's part)" })).toBeVisible()
+      await expect(
+        page.getByRole("option", { name: "Just before the chat's author's note (imported from ST)" })
+      ).toBeVisible()
+      await shoot("card-note-positions")
+      await page.keyboard.press("Escape")
 
       // The request inspector: on Aria's turn the note is in the request, with its condition;
       // on Tobias's it isn't (a skipped note sends nothing, so nothing names it).

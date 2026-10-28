@@ -147,10 +147,14 @@ const regexScript = (id: string, fields: Record<string, unknown>) => ({
 
 const at = (depth: number | null, data: StateEventData): PositionedEvent => ({ depth, event: { scope: null, data } })
 
-const note = (content: string, depth: number, role: "system" | "user" | "assistant", first = true): NoteInput => ({
+const note = (
+  content: string,
+  depth: number,
+  role: "system" | "user" | "assistant",
+  onByDefault = true
+): NoteInput => ({
   entity: `note-${content.length}`,
   revision: "note-revision",
-  first,
   doc: {
     schema_version: 1,
     title: "Character's Note",
@@ -158,9 +162,12 @@ const note = (content: string, depth: number, role: "system" | "user" | "assista
     placement: { mode: "depth", depth, role },
     owner: { card: "mira" as never },
     exportable: true,
-    ...(first ? { on_by_default: true } : {})
+    ...(onByDefault ? { on_by_default: true } : {})
   }
 })
+
+/** The default fixture, for a block that changes what `chat` gives. */
+const chatOf = chat
 
 describe("the context assembler", () => {
   it("lays out ST's default preset for one character as ST does, without the join wrapper", async () => {
@@ -325,7 +332,6 @@ describe("the context assembler", () => {
     const summary = (placement: NoteDoc["placement"], template = "[Summary: {{summary}}]"): NoteInput => ({
       entity: "note-summary",
       revision: "summary-revision",
-      first: false,
       doc: {
         schema_version: 1,
         title: "Summary",
@@ -396,7 +402,6 @@ describe("the context assembler", () => {
     ): NoteInput => ({
       entity,
       revision: `${entity}-revision`,
-      first: false,
       doc: {
         schema_version: 1,
         title: entity,
@@ -531,11 +536,12 @@ describe("the context assembler", () => {
       ])
     })
 
-    describe("a persona placed by its note (ARCHITECTURE §13)", () => {
+    describe("a persona's description in an ordinary note on its card (ARCHITECTURE §13)", () => {
+      // What an ST import makes of a persona placed anywhere but the persona description: the
+      // text in an ordinary note on the persona's card, whose description is empty.
       const persona = (placement: NoteDoc["placement"]): NoteInput => ({
         entity: "note-persona",
         revision: "note-persona-revision",
-        first: true,
         doc: {
           schema_version: 1,
           title: "Persona description",
@@ -543,10 +549,12 @@ describe("the context assembler", () => {
           placement,
           owner: { card: "tobin" as never },
           exportable: true,
-          on_by_default: true,
-          kind: "persona_description"
+          on_by_default: true
         }
       })
+      const imported = { entity: "tobin", doc: { ...tobin, description: "" } }
+      const chat = (fields: Partial<AssemblyFixture> = {}) =>
+        chatOf({ cards: [...chatOf().cards.filter((c) => c.entity !== "tobin"), imported], ...fields })
       const top = persona({ mode: "section", section: "author_note_top" })
       const bottom = persona({ mode: "section", section: "author_note_bottom" })
       const inChat = { mode: "depth", depth: 1, role: "system" } as const
@@ -607,61 +615,20 @@ describe("the context assembler", () => {
         expect(sent(due)).toEqual(["system: Tobin draws maps.\nTobin is soaked."])
       })
 
-      {
-        const layout = "the Definitions marker"
-        for (const legacy of [false, true]) {
-          const description = (placement: NoteDoc["placement"]) => {
-            const note = persona(placement)
-            if (!legacy) return note
-            const { kind: _, ...doc } = note.doc
-            return { ...note, doc }
-          }
-          it(`keeps a ${legacy ? "legacy" : "current"} persona description placed with its card in ${layout}`, async () => {
-            const snapshot = await assembled(
-              chat({
-                notes: [description({ mode: "section", section: "card" })],
-                preset: withDefinitions(preset())
-              })
-            )
-            expect(sent(snapshot)).toEqual([
-              'system: <character name="Mira">\nMira keeps the ledger for Tobin.\n\nExact.\n\nA flood.\n</character>\n\n<persona name="Tobin">\nTobin draws maps.\n</persona>'
-            ])
-            expect(contents(snapshot).join("\n").split("Tobin draws maps.")).toHaveLength(2)
-          })
-          it(`keeps ordinary card notes beside a relocated ${legacy ? "legacy" : "current"} persona in ${layout}`, async () => {
-            const cardNote = persona({ mode: "section", section: "card" })
-            const { kind: _, ...ordinaryDoc } = cardNote.doc
-            const extra: NoteInput = {
-              ...cardNote,
-              entity: "ordinary-note",
-              first: false,
-              doc: {
-                ...ordinaryDoc,
-                title: "Scene",
-                content: "ORDINARY_CARD_NOTE"
-              }
-            }
-            const snapshot = await assembled(
-              chat({
-                notes: [description({ mode: "depth", depth: 0, role: "user" }), extra],
-                events: on("ordinary-note"),
-                preset: withDefinitions(preset())
-              })
-            )
-            expect(sent(snapshot)).toEqual(["user: Tobin draws maps."])
-            expect(contents(snapshot).filter((line) => line.includes("ORDINARY_CARD_NOTE"))).toEqual([
-              'system: <character name="Mira">\nMira keeps the ledger for Tobin.\n\nExact.\n\nA flood.\n</character>\n\n<persona name="Tobin">\nORDINARY_CARD_NOTE\n</persona>'
-            ])
-            const empty = await assembled(
-              chat({
-                notes: [description({ mode: "depth", depth: 0, role: "user" })],
-                preset: withDefinitions(preset())
-              })
-            )
-            expect(contents(empty).join("\n")).not.toContain("<persona")
-          })
-        }
-      }
+      it("sends its note placed with the card inside the persona's part of the Definitions marker", async () => {
+        const snapshot = await assembled(
+          chat({ notes: [persona({ mode: "section", section: "card" })], preset: withDefinitions(preset()) })
+        )
+        expect(sent(snapshot)).toEqual([
+          "system: <Mira>\nMira keeps the ledger for Tobin.\n\nExact.\n\nA flood.\n</Mira>\n\n<Tobin>\nTobin draws maps.\n</Tobin>"
+        ])
+        // Placed elsewhere, the persona's part is empty and left out.
+        const deep = await assembled(
+          chat({ notes: [persona({ mode: "depth", depth: 0, role: "user" })], preset: withDefinitions(preset()) })
+        )
+        expect(sent(deep)).toEqual(["user: Tobin draws maps."])
+        expect(contents(deep).join("\n")).not.toContain("<Tobin>")
+      })
 
       for (const layout of [null, "below the history"] as const) {
         for (const attachment of [top, bottom]) {
@@ -710,20 +677,34 @@ describe("the context assembler", () => {
         expect(snapshot.pieces.some((p) => p.id === "lore:author-note")).toBe(true)
       })
 
-      it("places it at depth or nowhere by its note, never also in the persona's description", async () => {
+      it("places it at depth or nowhere by its note", async () => {
         const deep = await assembled(chat({ notes: [persona({ mode: "depth", depth: 0, role: "user" })] }))
         expect(sent(deep)).toEqual(["user: Tobin draws maps."])
         const none = await assembled(chat({ notes: [persona({ mode: "none" })] }))
         expect(sent(none)).toEqual([])
-        const plain = await assembled(chat())
-        expect(sent(plain)).toEqual(["system: Tobin draws maps."])
+        // Switched off in a chat, it sends nothing anywhere.
+        const off = await assembled(
+          chat({
+            notes: [persona({ mode: "depth", depth: 0, role: "user" })],
+            events: [at(null, { key: "note.deactivate", value: { note: "note-persona" as never } })]
+          })
+        )
+        expect(sent(off)).toEqual([])
       })
 
-      it("keeps a persona whose note isn't its description's placement in the prompt", async () => {
-        const { kind: _, ...plain } = top.doc
-        const other: NoteInput = { ...top, doc: { ...plain, title: "Scene", content: "Rain." } }
-        const snapshot = await assembled(chat({ notes: [other] }))
-        expect(sent(snapshot)).toEqual(["system: Tobin draws maps."])
+      it("never takes the card's description away, whatever the note's kind or title (no hidden kinds)", async () => {
+        // An old revision's kind, or a first note titled so, used to drop the description from the
+        // persona's place even with the note off. The description is sent where the persona goes.
+        for (const doc of [{ kind: "persona_description" as const }, {}]) {
+          const note = persona({ mode: "depth", depth: 0, role: "user" })
+          const snapshot = await assembled(
+            chatOf({
+              notes: [{ ...note, doc: { ...note.doc, ...doc } }],
+              events: [at(null, { key: "note.deactivate", value: { note: "note-persona" as never } })]
+            })
+          )
+          expect(sent(snapshot)).toEqual(["system: <Tobin>\nTobin draws maps.\n</Tobin>"])
+        }
       })
     })
 
@@ -1368,7 +1349,7 @@ describe("several characters (DESIGN §5.0–§5.4)", () => {
     expect(text).not.toContain("Selene sails.")
   })
 
-  it("puts each card in a labelled block at the Definitions marker, with stable bindings and the speaker named at the tail", async () => {
+  it("puts each card, wrapped as <Name>, at the Definitions marker, with stable bindings and the speaker named at the tail", async () => {
     const snapshot = await assembled(
       group({
         preset: withDefinitions(
@@ -1383,7 +1364,7 @@ describe("several characters (DESIGN §5.0–§5.4)", () => {
     expect(snapshot.inputs.mode).toBe("layouts")
     expect(messages[0]).toBe("system: Write for Mira, Oren; Tobin is the user.")
     expect(messages).toContain(
-      'system: <character name="Mira">\nMira keeps the ledger for Tobin.\n\nExact.\n\nA flood.\n</character>\n\n<character name="Oren">\nOren runs the ferry.\n</character>\n\n<persona name="Tobin">\nTobin draws maps.\n</persona>'
+      "system: <Mira>\nMira keeps the ledger for Tobin.\n\nExact.\n\nA flood.\n</Mira>\n\n<Oren>\nOren runs the ferry.\n</Oren>\n\n<Tobin>\nTobin draws maps.\n</Tobin>"
     )
     // Definitions wins: the per-field markers stay empty.
     expect(messages.filter((m) => m.includes("Mira keeps the ledger"))).toHaveLength(1)
@@ -1393,7 +1374,7 @@ describe("several characters (DESIGN §5.0–§5.4)", () => {
     expect(messages.at(-1)).toBe("system: [Write the next reply only as Oren.]")
     // The card blocks keep pointing at the fields they hold.
     expect(snapshot.pieces.find((p) => p.id === "card:oren:description")!.messages).toEqual([
-      messages.findIndex((m) => m.includes('<character name="Mira">'))
+      messages.findIndex((m) => m.includes("<Mira>\nMira keeps"))
     ])
   })
 
@@ -2147,6 +2128,90 @@ describe("card definitions the way the preset says (DESIGN §5.0)", () => {
     )
   })
 
+  it("wraps the persona's part as <Name> too, one persona or several (owner, 2026-10-28)", async () => {
+    // There is never only one character: the persona is a cast card, wrapped like the others.
+    const one = await assembled(cast(["mira"]))
+    expect(marker(one, "personaDescription")).toBe("<Tobin>\nTobin draws maps.\n</Tobin>")
+    const definitions = await assembled(cast(["mira"], { preset: withDefinitions(preset()) }))
+    expect(marker(definitions, "charDefinitions")).toContain("\n\n<Tobin>\nTobin draws maps.\n</Tobin>")
+  })
+
+  it("puts a card's note placed with the definitions inside its own part, and a chat's after the main prompt", async () => {
+    const definitions = { mode: "section", section: "after_main_prompt", role: "system" } as const
+    const outfit: NoteInput = {
+      ...note("The blue coat.", 1, "system"),
+      entity: "note-oren",
+      doc: { ...note("The blue coat.", 1, "system").doc, owner: { card: "oren" as never }, placement: definitions }
+    }
+    const own: NoteInput = {
+      ...note("CHAT NOTE", 1, "system"),
+      entity: "note-chat",
+      doc: { ...note("CHAT NOTE", 1, "system").doc, owner: { chat: "chat-1" as never }, placement: definitions }
+    }
+    const events = [at(null, { key: "note.activate", value: { note: "note-chat" as never } })]
+    const snapshot = await assembled(cast(["mira", "oren"], { notes: [outfit, own], events }))
+    expect(marker(snapshot, "charDescription")).toBe(
+      "<Mira>\nMira keeps the ledger for Tobin.\n</Mira>\n<Oren>\nThe blue coat.\nOren runs the ferry.\n</Oren>"
+    )
+    expect(contents(snapshot).filter((line) => line.includes("blue coat"))).toHaveLength(1)
+    const main = contents(snapshot).findIndex((line) => line.startsWith("system: Write"))
+    expect(contents(snapshot)[main + 1]).toBe("system: CHAT NOTE")
+    // A persona's goes inside the persona's part; at the Definitions marker, inside its block.
+    const tobin = { ...outfit, entity: "note-tobin", doc: { ...outfit.doc, owner: { card: "tobin" as never } } }
+    const persona = await assembled(cast(["mira"], { notes: [tobin] }))
+    expect(marker(persona, "personaDescription")).toBe("<Tobin>\nThe blue coat.\nTobin draws maps.\n</Tobin>")
+    const block = await assembled(cast(["mira", "oren"], { notes: [outfit], preset: withDefinitions(preset()) }))
+    expect(marker(block, "charDefinitions")).toContain("<Oren>\nThe blue coat.\n\nOren runs the ferry.\n</Oren>")
+  })
+
+  it("allows a conditioned note in a card's part, which comes and goes there and is never cached", async () => {
+    const outfit = (when: "always" | "turn"): NoteInput => ({
+      ...note("The blue coat.", 1, "system"),
+      entity: "note-oren",
+      doc: {
+        ...note("The blue coat.", 1, "system").doc,
+        owner: { card: "oren" as never },
+        placement: { mode: "section", section: "after_main_prompt", role: "system" },
+        ...(when === "turn" ? { condition: { when: "turn", card: "oren" as never } } : {})
+      }
+    })
+    const definitions = (snapshot: ContextSnapshot) =>
+      contents(snapshot).findIndex((line) => line.includes("Oren runs the ferry"))
+    const steady = await assembled(cast(["mira", "oren"], { notes: [outfit("always")], target: { speaker: "mira" } }))
+    expect(steady.request.breakpoints.some((b) => b.message >= definitions(steady))).toBe(true)
+    for (const speaker of ["mira", "oren"]) {
+      const snapshot = await assembled(cast(["mira", "oren"], { notes: [outfit("turn")], target: { speaker } }))
+      expect(marker(snapshot, "charDescription")!.includes("The blue coat."), speaker).toBe(speaker === "oren")
+      expect(
+        snapshot.request.breakpoints.every((b) => b.message < definitions(snapshot)),
+        speaker
+      ).toBe(true)
+    }
+  })
+
+  it("reads a card's notes that are on in the chat as ST's Character's Note, whatever made them", async () => {
+    const depthPrompt = preset({
+      prompts: [{ identifier: "main", role: "system", content: "DP[{{charDepthPrompt}}]" }]
+    })
+    const made = (entity: string, content: string, fields: Partial<NoteDoc>): NoteInput => ({
+      ...note(content, 1, "system"),
+      entity,
+      doc: { ...note(content, 1, "system").doc, ...fields }
+    })
+    const snapshot = await assembled(
+      cast(["mira"], {
+        preset: depthPrompt,
+        notes: [
+          made("note-a", "FROM A MODULE", { module_id: "outfit" }),
+          made("note-b", "ST'S CHARACTER AUTHOR'S NOTE", { kind: "character_author_note" }),
+          made("note-c", "OFF", { on_by_default: false }),
+          made("note-d", "WITH THE DEFINITIONS", { placement: { mode: "section", section: "card" } })
+        ]
+      })
+    )
+    expect(contents(snapshot)[0]).toBe("system: DP[FROM A MODULE\nST'S CHARACTER AUTHOR'S NOTE]")
+  })
+
   it("doesn't change the definitions with the number of characters beyond the group rules", async () => {
     const silent = card("Silent")
     const nudge = preset({ group_nudge_prompt: "[Write the next reply only as {{char}}.]" })
@@ -2168,7 +2233,7 @@ describe("card definitions the way the preset says (DESIGN §5.0)", () => {
   it("puts every card whole at the Definitions marker, which wins over the per-field markers", async () => {
     const snapshot = await assembled(cast(["mira", "oren"], { preset: withDefinitions(preset()) }))
     expect(marker(snapshot, "charDefinitions")).toBe(
-      '<character name="Mira">\nMira keeps the ledger for Tobin.\n\nExact.\n\nA flood.\n</character>\n\n<character name="Oren">\nOren runs the ferry.\n</character>\n\n<persona name="Tobin">\nTobin draws maps.\n</persona>'
+      "<Mira>\nMira keeps the ledger for Tobin.\n\nExact.\n\nA flood.\n</Mira>\n\n<Oren>\nOren runs the ferry.\n</Oren>\n\n<Tobin>\nTobin draws maps.\n</Tobin>"
     )
     for (const id of ["charDescription", "charPersonality", "scenario", "personaDescription"])
       expect(marker(snapshot, id)).toBeUndefined()
@@ -2527,7 +2592,6 @@ describe("author's-note lore with the setting off (DESIGN §1.3)", () => {
     const author: NoteInput = {
       entity: "note-author",
       revision: "r",
-      first: false,
       doc: {
         schema_version: 1,
         title: "author",

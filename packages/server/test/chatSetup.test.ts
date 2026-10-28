@@ -475,6 +475,20 @@ describe("chat setup", () => {
 
       const scene = yield* api.CreateChatNote({ chatId, title: "  Scene  " })
       assert.strictEqual(scene.label, "Scene")
+      // The chat's author's note, which notes at its top or bottom join, says so (no hidden kinds).
+      const authorNotes = Effect.map(api.ListChatNotes({ chatId, slotId: at }), (notes) =>
+        notes.filter((n) => n.authorNote).map((n) => n.ref.label)
+      )
+      assert.deepStrictEqual(yield* authorNotes, [])
+      yield* writer.AddStateEvent({
+        userId: me.id as UserId,
+        chatId,
+        slotId: null,
+        versionId: null,
+        scope: null,
+        data: { key: "author_note.set", value: { note: scene.entityId } }
+      })
+      assert.deepStrictEqual(yield* authorNotes, ["Scene"])
       assert.deepStrictEqual(yield* listed(at), ["Scene (chat): off", "Outfit: on", "Mood: off", "Persona note: off"])
       const change = (entityId: EntityId, active: boolean) =>
         api.ChangeCast({ chatId, slotId: at, change: { _tag: "Note", entityId, active } })

@@ -56,7 +56,6 @@ const chat = (fields: Partial<AssemblyFixture> = {}): AssemblyFixture => ({
 const chatNote = (entity: string, content: string, fields: Partial<NoteDoc> = {}): NoteInput => ({
   entity,
   revision: `${entity}-revision`,
-  first: false,
   doc: {
     schema_version: 1,
     title: entity,
@@ -340,10 +339,9 @@ describe("the lorebook scan switch (DESIGN §4.1)", () => {
 })
 
 describe("on in every chat (DESIGN §4.1)", () => {
-  const cardNote = (entity: string, content: string, fields: Partial<NoteDoc> = {}, first = false): NoteInput => ({
+  const cardNote = (entity: string, content: string, fields: Partial<NoteDoc> = {}): NoteInput => ({
     entity,
     revision: `${entity}-revision`,
-    first,
     doc: {
       schema_version: 1,
       title: entity,
@@ -356,7 +354,7 @@ describe("on in every chat (DESIGN §4.1)", () => {
   })
 
   it("puts a card's note marked so on without the chat, and no other: the first note isn't special", async () => {
-    const first = cardNote("first", "FIRST NOTE", {}, true)
+    const first = cardNote("first", "FIRST NOTE")
     const later = cardNote("later", "ON EVERYWHERE", { on_by_default: true })
     const snapshot = await assembled(chat({ notes: [first, later] }))
     expect(sends(snapshot, "FIRST NOTE")).toBe(false)

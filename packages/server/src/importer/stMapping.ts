@@ -92,6 +92,8 @@ export interface FolderContext {
   readonly cards: ReadonlyMap<string, CardInfo>
   /** Persona cards by avatar file. */
   readonly personas: ReadonlyMap<string, EntityId>
+  /** A persona card's note placed at the author's note's top or bottom, as ST placed its description. */
+  readonly personaNotes?: ReadonlyMap<string, EntityId>
   /** Personas' avatar files by name. */
   readonly personaNames: ReadonlyMap<string, ReadonlyArray<string>>
   /** Lorebooks by name. */
@@ -454,7 +456,26 @@ export const chatStateChange = (
   for (const note of characterNotesOff) {
     if (!previous?.characterNotesOff?.includes(note)) events.push({ key: "note.deactivate", value: { note } })
   }
-  if (characterNotesOff.length > 0) state.characterNotesOff = characterNotesOff
+  // ST sends nothing at the author's note's top or bottom while it's disabled (frequency 0,
+  // `setFloatingPrompt`): there the persona's and the card's notes placed on it are switched
+  // off in this chat. An empty note that's due still carries them, as in ST.
+  const disabled = (file.header?.authorNote ?? folder.settings?.defaultAuthorNote ?? null)?.interval
+  const ridersOff =
+    disabled !== undefined && disabled <= 0
+      ? [
+          ...mapped.played.flatMap((entity) => {
+            const note = folder.personaNotes?.get(entity)
+            return note ? [note] : []
+          }),
+          ...(file.link.group ? [] : [file.link.card?.characterNote ?? null]).flatMap((note) =>
+            note && !characterNotesOff.includes(note) ? [note] : []
+          )
+        ]
+      : []
+  for (const note of ridersOff) {
+    if (!previous?.characterNotesOff?.includes(note)) events.push({ key: "note.deactivate", value: { note } })
+  }
+  if (characterNotesOff.length + ridersOff.length > 0) state.characterNotesOff = [...characterNotesOff, ...ridersOff]
   // ST would have sent the character's note in place of the chat's own, which isn't empty.
   const chara = file.link.group ? null : (file.link.card?.file ?? null)
   const replacing = folder.settings?.characterNotes.find((n) => n.card === chara && n.useChara && n.position === 0)

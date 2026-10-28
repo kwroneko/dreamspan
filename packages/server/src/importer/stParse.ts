@@ -93,9 +93,10 @@ export const parseLibraryFile = (bytes: Uint8Array, fileName: string, expect: En
   })
 
 /**
- * Where ST put a persona's description (`persona_description_positions`), as a note on the
- * persona's card; null for the prompt's persona description, where the card's description
- * goes anyway.
+ * Where ST put a persona's description (`persona_description_positions`) when not at the
+ * prompt's persona description: an ordinary note on the persona's card at that place, which
+ * then holds the only copy of the text (DESIGN §4.1, owner 2026-10-28). Null for the prompt's
+ * persona description, where the card's description goes.
  */
 const personaNote = (persona: StPersona): Omit<NoteDoc, "owner"> | null => {
   const placement: NoteDoc["placement"] | null =
@@ -115,7 +116,6 @@ const personaNote = (persona: StPersona): Omit<NoteDoc, "owner"> | null => {
       content: persona.description,
       placement,
       exportable: true,
-      kind: "persona_description",
       // ST sends it in every chat with the persona (DESIGN §4.1).
       on_by_default: true
     }
@@ -131,7 +131,9 @@ export const buildPersona = (bytes: Uint8Array, fileName: string, persona: StPer
     depth: 2,
     role: 0
   }
-  const doc = personaCard(named)
+  const note = personaNote(named)
+  // One copy of the text: the note's, when ST placed it anywhere but the persona description.
+  const doc = note ? { ...personaCard(named), description: "" } : personaCard(named)
   const imported: Imported = {
     report: new ImportReport({ format: "st-persona", issues: [] }),
     library: {
@@ -139,7 +141,7 @@ export const buildPersona = (bytes: Uint8Array, fileName: string, persona: StPer
       label: named.name.trim() === "" ? "Unnamed persona" : named.name,
       doc,
       schemaVersion: doc.schema_version,
-      note: personaNote(named)
+      note
     },
     files: [{ role: "avatar", uri: "ccdefault:", bytes }]
   }

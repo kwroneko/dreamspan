@@ -98,10 +98,10 @@ export const NoteDoc = Schema.Struct({
   agent_editable: Schema.optionalKey(Schema.Boolean),
   /**
    * [P] What an imported note was in ST: a chat's author's note, or the Summarize
-   * extension's summary (DESIGN §8.1), kept in its own note; or a persona's description
-   * placed anywhere but the prompt's persona description (ARCHITECTURE §13), which the
-   * assembler sends from this note instead of from the persona card's description; or a
-   * card's Character Author's Note from ST's settings (`extension_settings.note.chara`).
+   * extension's summary (DESIGN §8.1), kept in its own note; or a card's Character Author's
+   * Note from ST's settings (`extension_settings.note.chara`), which a re-import finds by it.
+   * `persona_description` is still decoded in old revisions, never written and ignored:
+   * migration 0050 made those notes ordinary (DESIGN §4.1: no hidden note kinds).
    */
   kind: Schema.optionalKey(
     Schema.Literals(["author_note", "imported_summary", "persona_description", "character_author_note"])
@@ -125,6 +125,14 @@ export const NoteDoc = Schema.Struct({
   source_slot_id: Schema.optionalKey(SlotId)
 })
 export type NoteDoc = typeof NoteDoc.Type
+
+/**
+ * Whether a chat's note is its author's note, which what is placed at the author's note's top
+ * or bottom joins (ST's floating prompt): the note the chat names with `author_note.set`, or an
+ * imported one of kind `author_note`. The chat's notes show it ("author's note").
+ */
+export const isAuthorNote = (doc: Pick<NoteDoc, "kind">, entity: string, chatAuthorNote: string | null) =>
+  doc.kind === "author_note" || entity === chatAuthorNote
 
 /** A note's condition, absent read as always. */
 export const noteCondition = (doc: Pick<NoteDoc, "condition">): NoteCondition => doc.condition ?? { when: "always" }

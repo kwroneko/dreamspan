@@ -121,7 +121,6 @@ describe("Newest message", () => {
       const note = (entity: string) => ({
         entity,
         revision: `revision-${entity}`,
-        first: true,
         doc: {
           schema_version: 1 as const,
           title: entity,
@@ -177,7 +176,6 @@ describe("Newest message", () => {
             {
               entity: "note",
               revision: "revision",
-              first: true,
               doc: {
                 schema_version: 1,
                 title: "Note",
