@@ -1,3 +1,4 @@
+import { defaultReplyStrategy, type ReplyStrategy } from "./chat/replyStrategy.ts"
 import { Context, Effect, Layer, Option } from "effect"
 import { makeRegistry, type Registry } from "./registry.ts"
 import { defaultReplyOutput, type ReplyOutputStrategy } from "./chat/replyOutput.ts"
@@ -13,6 +14,7 @@ import {
 export class ExecutionRegistry extends Context.Service<
   ExecutionRegistry,
   {
+    readonly replyStrategies: Registry<ReplyStrategy>
     readonly replies: Registry<ReplyOutputStrategy>
     readonly summaries: Registry<SummaryStrategy>
     readonly summaryTools: Registry<SummaryToolFactory>
@@ -21,6 +23,8 @@ export class ExecutionRegistry extends Context.Service<
   static readonly layer = Layer.effect(
     ExecutionRegistry,
     Effect.gen(function* () {
+      const replyStrategies = makeRegistry<ReplyStrategy>()
+      yield* replyStrategies.register(defaultReplyStrategy)
       const replies = makeRegistry<ReplyOutputStrategy>()
       const summaries = makeRegistry<SummaryStrategy>()
       const summaryTools = makeRegistry<SummaryToolFactory>()
@@ -28,7 +32,7 @@ export class ExecutionRegistry extends Context.Service<
       yield* summaries.register(directSummary)
       yield* summaries.register(toolSummary)
       yield* summaryTools.register(summaryToolFactory)
-      return { replies, summaries, summaryTools }
+      return { replyStrategies, replies, summaries, summaryTools }
     })
   )
 }

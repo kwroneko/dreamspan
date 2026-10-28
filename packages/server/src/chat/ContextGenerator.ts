@@ -6,7 +6,6 @@ import type { SlotId, VersionId } from "@rp/shared/chat.ts"
 import type { ConnectionId, ModelId } from "@rp/shared/providers.ts"
 import { Cause, Effect, Exit, Layer, Option, Stream } from "effect"
 import type { Generation } from "../assembler/types.ts"
-import { providerRequest } from "../assembler/wire.ts"
 import { Reader, Writer } from "../db/Database.ts"
 import { Providers } from "../providers/Providers.ts"
 import { GenerationFailed, type GenerationRequest, Generator } from "./Generator.ts"
@@ -125,7 +124,6 @@ export const layer = Layer.effect(
             ),
             Effect.catchTag(["StorageError", "RpcClientError"], serverFailure("StartRollout"))
           )
-          const wire = providerRequest(generation.request, model)
           const outputStrategy = execution.replies.get("reply")
           if (!outputStrategy)
             return yield* new GenerationFailed({
@@ -138,45 +136,10 @@ export const layer = Layer.effect(
             generation,
             rolloutId
           })
-          const showStreaming = model.settings?.stream !== false
-          const chunks = providers
-            .stream({
-              userId,
-              connectionId: model.connectionId as ConnectionId,
-              modelId: model.modelId as ModelId,
-              context: wire.context,
-              inspection: { request: generation.request, model, display: generation.inspection },
-              options: {
-                ...(model.settings?.cacheRetention ? { cacheRetention: model.settings.cacheRetention } : {}),
-                ...(output.replyTool ? { replyTool: output.replyTool } : {}),
-                ...(wire.temperature !== undefined ? { temperature: wire.temperature } : {}),
-                ...(wire.maxTokens !== undefined ? { maxTokens: wire.maxTokens } : {}),
-                ...(wire.reasoning ? { reasoning: wire.reasoning } : {}),
-                sessionId: chatId,
-                payload: wire.payload,
-                breakpoints: wire.breakpoints
-              },
-              attribution: { purpose: "generation", chatId, rolloutId, versionId }
-            })
-            .pipe(
-              Stream.tap((event) =>
-                Effect.sync(() => {
-                  if (event.type === "waiting-cache") request.onWaitingCache?.(event.waiting)
-                })
-              ),
-              Stream.mapEffect(output.decode),
-              Stream.filterMap((chunk) => chunk),
-              Stream.mapError((error) =>
-                error._tag === "GenerationFailed"
-                  ? error
-                  : error._tag === "ProviderError"
-                    ? new GenerationFailed({ class: error.reason, message: error.message })
-                    : new GenerationFailed({ class: "server", message: error.message })
-              )
-            )
-          return showStreaming
-            ? chunks
-            : Stream.fromEffect(Stream.runCollect(chunks)).pipe(Stream.flatMap((items) => Stream.fromIterable(items)))
+          const strategy = execution.replyStrategies.get("reply")
+          if (!strategy)
+            return yield* new GenerationFailed({ class: "unavailable", message: "Reply strategy is unavailable." })
+          return strategy.run({ request, generation, rolloutId, output, providers })
         })
       )
 

@@ -1,3 +1,6 @@
+import type { Registry } from "../registry.ts"
+import type { SummaryInstruction } from "./instructionPolicies.ts"
+import { AssemblyFailed } from "../assembler/types.ts"
 import { Effect } from "effect"
 import { summaryWords } from "@rp/shared/lcmSettings.ts"
 import type { AssemblyTransform } from "../assembler/pipeline.ts"
@@ -110,23 +113,27 @@ const summaryRequest = (snapshot: ContextSnapshot): ContextSnapshot =>
     : summaryTail(applySummaryPrefix(snapshot, snapshot.summaryJob?.prefix))
 
 /** The registered default owns instruction rendering, prefix reuse and raw/full shaping. */
-export const summaryRequestTransform: AssemblyTransform = {
+export const makeSummaryRequestTransform = (instructions: Registry<SummaryInstruction>): AssemblyTransform => ({
   id: "summary-request",
   run: (snapshot, request) =>
-    Effect.sync(() => {
+    Effect.gen(function* () {
       if (!snapshot.summaryJob) return snapshot
       const job = snapshot.summaryJob
       const instruction = request.summaryInstruction
       if (instruction) {
-        const count = job.children?.length ?? 0
-        const range = instruction.range ? `(messages ${instruction.range.from} to ${instruction.range.to})` : ""
-        const text = count
-          ? job.withPreset === false
-            ? `Condense the last ${count} summaries ${range} into one summary of at most ${summaryWords(instruction.target)} words. Keep their language and voice, names, events and unresolved details. Any summaries before them are continuity, not material to condense again.`
-            : `Condense the last ${count} summaries above ${range} into one summary of at most ${summaryWords(instruction.target)} words. Keep its language and voice, names, events and unresolved details. The earlier summaries are continuity, not material to condense again.`
-          : job.tail
+        const id = job.children?.length ? "condensation" : "leaf"
+        const policy = instructions.get(id)
+        if (!policy && instruction.base === undefined)
+          return yield* new AssemblyFailed({
+            reason: "invalid_document",
+            message: `Summary instruction ${id} is unavailable.`
+          })
+        const text = instruction.base ?? policy!.render({ job, ...instruction })
         snapshot = {
           ...snapshot,
+          ...(snapshot.summaryAssembly
+            ? { summaryAssembly: { ...snapshot.summaryAssembly, instruction: { ...instruction, base: text } } }
+            : {}),
           summaryJob: {
             ...job,
             tail:
@@ -141,4 +148,4 @@ export const summaryRequestTransform: AssemblyTransform = {
       }
       return summaryRequest(snapshot)
     })
-}
+})

@@ -25,9 +25,15 @@ const CurrentModules = Context.Reference<ReadonlyArray<ModuleSource>>("rp/assemb
   defaultValue: () => []
 })
 
+const AppliedAssemblers = Context.Reference<ReadonlyArray<Assembler>>("rp/assembler/AppliedAssemblers", {
+  defaultValue: () => []
+})
+
 export const withAssemblyModules = <A, E, R>(assembler: Assembler, effect: Effect.Effect<A, E, R>) =>
   Effect.scoped(
     Effect.gen(function* () {
+      const applied = yield* AppliedAssemblers
+      if (applied.includes(assembler)) return yield* effect
       const modules = yield* CurrentModules
       for (const source of modules) {
         const exports = yield* Effect.promise(() => import(source.module) as Promise<Record<string, unknown>>)
@@ -36,7 +42,7 @@ export const withAssemblyModules = <A, E, R>(assembler: Assembler, effect: Effec
           throw new Error(`Assembly module ${source.id}: missing export ${source.exportName}`)
         yield* (install as InstallAssemblyModule)(assembler)
       }
-      return yield* effect
+      return yield* Effect.provideService(effect, AppliedAssemblers, [...applied, assembler])
     })
   )
 

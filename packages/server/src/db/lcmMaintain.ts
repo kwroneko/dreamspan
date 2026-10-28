@@ -1,3 +1,4 @@
+import type { MaintenancePlanner } from "../lcm/planning.ts"
 import { rerunRequests, summaryChoices } from "./lcmFork.ts"
 import { viewAt } from "./forkState.ts"
 import { MAX_CHUNK_SLOTS } from "./lcmLimits.ts"
@@ -8,7 +9,7 @@ import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import { summaryBlock } from "../assembler/lcm.ts"
 import { tokensOf } from "../assembler/st.ts"
-import { type Candidate, planMaintenance } from "../lcm/maintenance.ts"
+import { type Candidate } from "../lcm/maintenance.ts"
 import type { ModelChoice } from "@rp/shared/lcmSettings.ts"
 import { type PlannedJob } from "./lcmJobs.ts"
 import { lineageValidator } from "./lcmLayer.ts"
@@ -32,6 +33,7 @@ export const maintain = (
   leaf: string,
   layer: { readonly summaries: ReadonlyArray<Summary> },
   options: {
+    readonly planner: MaintenancePlanner
     readonly reason: "reply" | "completion"
     readonly fanout?: number | undefined
     readonly condenseTarget?: number | undefined
@@ -235,7 +237,7 @@ export const maintain = (
     if (authorized)
       for (const s of candidates)
         if (s.fresh && s.origin === "generated" && previous?.signatures[s.id] === undefined) authorized.add(s.id)
-    const plan = planMaintenance({
+    const plan = options.planner.plan({
       ...(authorized ? { authorized } : {}),
       summaries: candidates,
       layer: layer.summaries,

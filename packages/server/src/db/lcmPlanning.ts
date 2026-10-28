@@ -1,6 +1,7 @@
 import { inJobFork } from "./lcmFork.ts"
 import { viewAt } from "./forkState.ts"
-import { MAX_CHUNK_SLOTS } from "./lcmLimits.ts"
+import { slotCost } from "../lcm/planning.ts"
+import { withAssemblyModules } from "../assembler/modules.ts"
 import type { SummaryPrefix } from "../lcm/prefix.ts"
 import { inFork } from "./forkState.ts"
 import { completedCoverage, failedHold } from "./lcmCoverage.ts"
@@ -95,8 +96,16 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
         // A chunk that doesn't fit twice in the band plans nothing: the Summaries section says so
         // under the chunk size, and it's the user's setting, not a failure.
         if (leafInput < 1 || leafInput * 2 > recent.maximum - recent.target) return empty
+        const leafPlanner = assembler.leafPlanners.get("leaf")
+        const maintenancePlanner = assembler.maintenancePlanners.get("maintenance")
+        if (!leafPlanner || !maintenancePlanner)
+          return yield* new AssemblyFailed({
+            reason: "invalid_document",
+            message: "Summary planning strategy is unavailable."
+          })
         const maintenance = reason
           ? yield* maintain(sql, userId, chatId, leafSlotId, layer, {
+              planner: maintenancePlanner,
               reason,
               fanout: state.lcm.fanout,
               condenseTarget: state.lcm.condenseTarget,
@@ -106,7 +115,7 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
             })
           : { condensations: [], refresh: [], flagged: [] }
         const raw = path.filter((s) => s.depth > layer.cursorDepth)
-        const cost = (s: (typeof path)[number]) => (s.content ? Math.ceil(s.content.length / 4) + 3 : 0)
+        const cost = slotCost
         const total = raw.reduce((n, s) => n + cost(s), 0)
         const partialBatch = total > windowMax
         const available = partialBatch ? yield* selectSummaryLayer(sql, userId, chatId, leafSlotId, true) : layer
@@ -129,44 +138,24 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
           over: remaining.reduce((n, s) => n + cost(s), 0) > windowMax,
           jobs: active.filter((j) => j.firstSlotId === remaining[0]?.id)
         }
-        if (active.length || total <= (recent.target + recent.maximum) / 2)
-          return { ...result, backfill: settled(result) }
-        let keep = 0,
-          end = raw.length
-        while (end > 0 && keep < recent.target) keep += cost(raw[--end]!)
-        // A failed summary holds its range while its inputs are unchanged (spec/LCM.md §2.8).
+        if (active.length) return { ...result, backfill: settled(result) }
         const held = yield* failedHold(sql, userId, chatId, path)
-        const chunks: Array<{ inputs: ReturnType<typeof slotInput>[]; target: number; clipTokens: number }> = []
-        let chunk: (typeof path)[number][] = [],
-          tokens = 0
         const covered = yield* completedCoverage(sql, userId, chatId, path)
-        const flush = () => {
-          if (chunk.length)
-            chunks.push({
-              inputs: chunk.map(slotInput),
-              target: resolveLcm(state.lcm, defaults.lcm).leafTarget,
-              clipTokens: Math.max(1, Math.floor(leafInput * 1.5))
-            })
-          chunk = []
-          tokens = 0
-        }
-        for (const s of raw.slice(0, end)) {
-          // A bounded batch: the rest is planned once this one has run (a write must stay short).
-          if (chunks.length >= MAX_JOBS_PER_PLAN) break
-          if (covered.has(s.id) || held.has(s.id)) {
-            flush()
-            continue
-          }
-          if (s.generating || s.merged) break
-          chunk.push(s)
-          tokens += cost(s)
-          if (chunk.length >= MAX_CHUNK_SLOTS || tokens >= leafInput || (s.children >= 2 && tokens >= leafInput / 4)) {
-            flush()
-          }
-        }
-        if (chunks.length < MAX_JOBS_PER_PLAN) flush()
+        const chunks = [
+          ...leafPlanner.plan({
+            raw,
+            recent,
+            leafInput,
+            target: resolveLcm(state.lcm, defaults.lcm).leafTarget,
+            covered,
+            held,
+            limit: MAX_JOBS_PER_PLAN
+          })
+        ].slice(0, MAX_JOBS_PER_PLAN)
         return { ...result, chunks, backfill: settled({ ...result, chunks }) }
-      }).pipe(inFork(sql, chatId, forkId, leafSlotId), query("PlanSummaries")),
+      }).pipe(inFork(sql, chatId, forkId, leafSlotId), query("PlanSummaries"), (effect) =>
+        withAssemblyModules(assembler, effect)
+      ),
     AssembleSummary: ({ userId, jobId, attempt, instructions }) =>
       Effect.gen(function* () {
         const [job] = yield* sql.unsafe<SummaryJob>(
@@ -235,7 +224,13 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
           prefix_json: string | null
         }>`SELECT prefix_json FROM summarization_jobs WHERE id=${jobId}`
         const prefix = pinned?.prefix_json ? (JSON.parse(pinned.prefix_json) as SummaryPrefix) : undefined
-        const style = state.lcm.style ?? "direct"
+        const selector = assembler.summaryStyles.get("settings")
+        if (!selector)
+          return yield* new AssemblyFailed({
+            reason: "invalid_document",
+            message: "Summary style selection is unavailable."
+          })
+        const style = selector.select(state.lcm.style)
         const outputInstruction = instructions === undefined ? undefined : instructions[style]
         if (instructions !== undefined && (!Object.hasOwn(instructions, style) || outputInstruction === undefined))
           return yield* new AssemblyFailed({
@@ -305,6 +300,6 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
             inspection: yield* inspectionInputs(sql, userId, taken)
           })
         }
-      }).pipe(inJobFork(sql, jobId), query("AssembleSummary"))
+      }).pipe(inJobFork(sql, jobId), query("AssembleSummary"), (effect) => withAssemblyModules(assembler, effect))
   } satisfies Partial<Parameters<typeof ReadOps.of>[0]>
 })

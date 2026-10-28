@@ -1,3 +1,16 @@
+import {
+  defaultLeafPlanner,
+  defaultMaintenancePlanner,
+  type LeafPlanner,
+  type MaintenancePlanner
+} from "../lcm/planning.ts"
+import {
+  defaultSummaryStyle,
+  leafInstruction,
+  condensationInstruction,
+  type SummaryInstruction,
+  type SummaryStyleSelector
+} from "../lcm/instructionPolicies.ts"
 // The assembler with its built-in stages and macros registered (ARCHITECTURE §15).
 import { withAssemblyModules } from "./modules.ts"
 import { registerBuiltinMacros } from "@rp/shared/macros/builtins.ts"
@@ -11,12 +24,16 @@ import {
   type ProjectionRegistry,
   type StageRegistry
 } from "./pipeline.ts"
-import { makeRegistry } from "../registry.ts"
-import { summaryRequestTransform } from "../lcm/request.ts"
+import { makeRegistry, type Registry } from "../registry.ts"
+import { makeSummaryRequestTransform } from "../lcm/request.ts"
 import type { AssemblyTransform, TransformRegistry } from "./pipeline.ts"
 import { registerBuiltinProjections, registerBuiltinStages } from "./stages.ts"
 
 export interface Assembler {
+  readonly leafPlanners: Registry<LeafPlanner>
+  readonly maintenancePlanners: Registry<MaintenancePlanner>
+  readonly summaryInstructions: Registry<SummaryInstruction>
+  readonly summaryStyles: Registry<SummaryStyleSelector>
   readonly stages: StageRegistry
   readonly transforms: TransformRegistry
   readonly macros: MacroRegistry
@@ -34,12 +51,25 @@ export const makeAssembler: Effect.Effect<Assembler, never, Scope.Scope> = Effec
   const stages = makeStageRegistry()
   const macros = makeMacroRegistry()
   const transforms = makeRegistry<AssemblyTransform>()
-  yield* transforms.register(summaryRequestTransform)
+  const leafPlanners = makeRegistry<LeafPlanner>()
+  const maintenancePlanners = makeRegistry<MaintenancePlanner>()
+  const summaryInstructions = makeRegistry<SummaryInstruction>()
+  const summaryStyles = makeRegistry<SummaryStyleSelector>()
+  yield* leafPlanners.register(defaultLeafPlanner)
+  yield* maintenancePlanners.register(defaultMaintenancePlanner)
+  yield* summaryInstructions.register(leafInstruction)
+  yield* summaryInstructions.register(condensationInstruction)
+  yield* summaryStyles.register(defaultSummaryStyle)
+  yield* transforms.register(makeSummaryRequestTransform(summaryInstructions))
   const projections = makeProjectionRegistry()
   yield* registerBuiltinStages(stages)
   yield* registerBuiltinProjections(projections)
   yield* registerBuiltinMacros(macros)
   const assembler: Assembler = {
+    leafPlanners,
+    maintenancePlanners,
+    summaryInstructions,
+    summaryStyles,
     stages,
     transforms,
     macros,

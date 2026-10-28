@@ -49,7 +49,7 @@ const ordered = Schema.makeFilter(
 export const LcmSettings = Schema.Struct({
   enabled: Schema.Boolean,
   ...sizes,
-  style: Schema.optionalKey(Schema.Literals(["direct", "tool"])),
+  style: Schema.optionalKey(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200))),
   /** Same-level summaries condensed into one (reference-harness's condense_fanout, 5). */
   fanout: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(2))),
   /** The output target of a condensation, in tokens (condense_target_tokens, 800). */

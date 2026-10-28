@@ -1,3 +1,4 @@
+import { Commands } from "./commands.ts"
 import { makeHistoryHandlers } from "./api/history.ts"
 import { ExecutionRegistry } from "./execution.ts"
 import { RefusalJudge } from "./decision/RefusalJudge.ts"
@@ -439,6 +440,7 @@ export const serverWith = <E>(
       )
     ),
     Layer.provideMerge(ExecutionRegistry.layer),
+    Layer.provideMerge(Commands.layer),
     Layer.provideMerge(Notices.layer),
     Layer.provide(ProvidersLive),
     Layer.provideMerge(HttpServerLive),

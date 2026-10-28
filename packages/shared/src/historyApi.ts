@@ -121,18 +121,20 @@ export const historyWriteRpcs = [
     error: Schema.Union([NotFound, HistoryRejected, ServerError])
   })
 ] as const
+export const RenameHistoryInput = Schema.Struct({
+  entityId: EntityId,
+  oldName: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(2000)),
+  newName: Schema.String.check(Schema.isMaxLength(10000)),
+  scope: Schema.Literals(["none", "this", "all"]),
+  chatId: ChatId,
+  forkId: ForkId
+})
+
 export const HistoryApi = RpcGroup.make(
   ...historyReadRpcs,
   ...historyWriteRpcs,
   Rpc.make("RenameHistory", {
-    payload: {
-      entityId: EntityId,
-      oldName: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(2000)),
-      newName: Schema.String.check(Schema.isMaxLength(10000)),
-      scope: Schema.Literals(["none", "this", "all"]),
-      chatId: ChatId,
-      forkId: ForkId
-    },
+    payload: RenameHistoryInput,
     success: Schema.Int,
     error: Schema.Union([NotFound, HistoryRejected, ServerError])
   })

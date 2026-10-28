@@ -233,6 +233,8 @@ export interface ContextSnapshot {
     readonly job: NonNullable<ContextSnapshot["summaryJob"]>
     readonly instruction?: {
       readonly target: number
+      /** Rendered registered base instruction, frozen for replay after scope exit. */
+      readonly base?: string
       readonly output?: string
       readonly range?: { readonly from: number; readonly to: number }
     }
@@ -245,7 +247,7 @@ export interface ContextSnapshot {
     /** A condensation's parts, each at the revision the request rendered. */
     readonly children?: ReadonlyArray<import("@rp/shared/lcm.ts").Summary["children"][number]>
     readonly tail: string
-    readonly style: "direct" | "tool"
+    readonly style: string
     /** False: sent without the preset, the instruction and messages only (DESIGN §8); absent is with it. */
     readonly withPreset?: boolean
     readonly prefix?: SummaryPrefix
