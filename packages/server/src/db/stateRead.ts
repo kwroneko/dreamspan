@@ -24,3 +24,24 @@ export const stateEventsOnPath = (
       AND ${attachedApplies(sql, view, "s", "ev.version_id")}
     ORDER BY ${sql.literal(eventOrder("ev"))}`
 }
+
+/**
+ * A card fork carries every note switch on the path, including switches on unselected
+ * versions and deleted slots: swiping or restoring later must retain those settings.
+ * Keep this positional projection separate from stateEventsOnPath's public row shape.
+ */
+export const noteSwitchesOnPath = (
+  sql: SqlClient.SqlClient,
+  chatId: ChatId,
+  slotId: SlotId | null,
+  fork: string
+) => sql<{
+  key: "note.activate" | "note.deactivate"
+  value_json: string
+  slot_id: string | null
+  version_id: string | null
+}>`
+  ${pathEvents(sql, chatId, slotId)}
+  SELECT ev.key, ev.value_json, ev.slot_id, ev.version_id FROM path_events ev
+  WHERE ev.key IN ('note.activate', 'note.deactivate') AND ${eventApplies(sql, fork, "ev")}
+  ORDER BY ${sql.literal(eventOrder("ev"))}`

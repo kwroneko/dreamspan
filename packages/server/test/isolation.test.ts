@@ -1638,6 +1638,39 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
         assert.isTrue(opened.drafts.some((d) => d.id === owner.editor.draftId && d.status === "active"))
       })
   },
+  ForkCardForChat: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const names = { name: "Taken for chat", nickname: "", characterVersion: "", moveDrafts: true }
+        yield* refused(
+          actor.api.ForkCardForChat({
+            ...names,
+            chatId: owner.chat.chatId,
+            slotId: owner.chat.slotId,
+            entityId: owner.editor.cardEntityId
+          }),
+          "NotFound"
+        )
+        yield* refused(
+          actor.api.ForkCardForChat({
+            ...names,
+            chatId: actor.chat.chatId,
+            slotId: actor.chat.slotId,
+            entityId: owner.editor.cardEntityId
+          }),
+          "NotFound"
+        )
+        yield* refused(
+          actor.api.ForkCardForChat({
+            ...names,
+            chatId: actor.chat.chatId,
+            slotId: owner.chat.slotId,
+            entityId: actor.editor.cardEntityId
+          }),
+          "NotFound"
+        )
+      })
+  },
   CardFamily: {
     probe: (actor, owner) => refused(actor.api.CardFamily({ entityId: owner.editor.cardEntityId }), "NotFound")
   },

@@ -225,7 +225,11 @@ export function NotesTab({
         {(notes) => {
           // Every cast card has a group, with notes or not, then any other card a note belongs to.
           const owners = [
-            ...new Set([...cast.cards.keys(), ...notes.flatMap((n) => (n.card === null ? [] : [n.card]))])
+            ...new Set([
+              ...(cast.cast?.participants ?? []),
+              ...(cast.cast?.playedByMe ?? []),
+              ...notes.flatMap((n) => (n.card === null ? [] : [n.card]))
+            ])
           ] as Array<EntityId>
           const named: ReadonlyArray<NoteCard> = owners.map((entity) => ({
             entity,

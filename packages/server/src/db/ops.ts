@@ -1686,6 +1686,21 @@ export class WriteOps extends RpcGroup.make(
     success: LibraryRef,
     error: Schema.Union([NotFound, RefOperationRefused, StorageError])
   }),
+  Rpc.make("ForkCardForChat", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
+      slotId: Schema.NullOr(SlotId),
+      entityId: EntityId,
+      name: Schema.String,
+      nickname: Schema.String,
+      characterVersion: Schema.String,
+      moveDrafts: Schema.Boolean
+    },
+    success: Schema.Struct({ ref: LibraryRef, choices: Schema.Array(ComposerChoice) }),
+    error: Schema.Union([NotFound, RefOperationRefused, StorageError])
+  }),
   /** "Mark as a fork of…" an existing card, or with null "Unlink"; neither card's content changes. */
   Rpc.make("SetCardParent", {
     payload: { userId: UserId, entityId: EntityId, parentEntityId: Schema.NullOr(EntityId) },
