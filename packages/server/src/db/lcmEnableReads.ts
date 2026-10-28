@@ -9,7 +9,7 @@ import { inFork, shownIn, shownVersionDeletedIn, slotDeletedIn, viewAt } from ".
 import type { BackfillCounts } from "@rp/shared/lcm.ts"
 import { Effect, Layer } from "effect"
 import { SqlClient } from "effect/sql"
-import { makeAssembler } from "../assembler/assembler.ts"
+import { WorkerAssembler } from "../assembler/assembler.ts"
 import { AssemblySources, type PositionedEvent } from "../assembler/pipeline.ts"
 import { AssemblyFailed } from "../assembler/types.ts"
 import { estimateTokens, tokensOf } from "../assembler/st.ts"
@@ -40,7 +40,7 @@ const recentSpeed = (sql: SqlClient.SqlClient, userId: string, modelId: string) 
 
 export const makeLcmEnableReadHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
-  const assembler = yield* makeAssembler
+  const assembler = yield* WorkerAssembler
 
   /** The messages after depth `after` that the planner would count, and their tokens. */
   const tail = (chatId: string, leafSlotId: string, after: number, shownThrough: number) =>

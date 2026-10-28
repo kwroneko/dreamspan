@@ -5,16 +5,15 @@ import type { SummaryPrefix } from "../lcm/prefix.ts"
 import { inFork } from "./forkState.ts"
 import { completedCoverage, failedHold } from "./lcmCoverage.ts"
 import { maintain, MAX_JOBS_PER_PLAN } from "./lcmMaintain.ts"
-import { tokensOf } from "../assembler/st.ts"
+import { fitSummaryOutput } from "../lcm/requestBudget.ts"
 import { foldState } from "@rp/shared/state.ts"
-import { BUILTIN_SUMMARY_INSTRUCTION, chunkSize, resolveLcm, summaryWords } from "@rp/shared/lcmSettings.ts"
+import { BUILTIN_SUMMARY_INSTRUCTION, chunkSize, resolveLcm } from "@rp/shared/lcmSettings.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { AssemblySources } from "../assembler/pipeline.ts"
-import { makeAssembler } from "../assembler/assembler.ts"
+import { WorkerAssembler } from "../assembler/assembler.ts"
 import { AssemblyFailed, generationOf, type ContextSnapshot } from "../assembler/types.ts"
 import { wireContext } from "../assembler/wire.ts"
-import { summaryRequest } from "../lcm/request.ts"
 import { sqlSources } from "./assemblySources.ts"
 import { readDefaults } from "./generationSettings.ts"
 import { backfillOf, overCap, spentSince } from "./lcmBackfill.ts"
@@ -29,7 +28,7 @@ import { inspectionInputs } from "./inspectorReads.ts"
 
 export const makeLcmPlanningHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
-  const assembler = yield* makeAssembler
+  const assembler = yield* WorkerAssembler
   return {
     PlanSummaries: ({ userId, chatId, leafSlotId, forkId, reason }) =>
       Effect.gen(function* () {
@@ -236,6 +235,8 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
           prefix_json: string | null
         }>`SELECT prefix_json FROM summarization_jobs WHERE id=${jobId}`
         const prefix = pinned?.prefix_json ? (JSON.parse(pinned.prefix_json) as SummaryPrefix) : undefined
+        const style = state.lcm.style ?? "direct"
+        const settings = resolveLcm(state.lcm, defaults.lcm)
         const clipTokens = job.clipTokens
         const built = yield* assembler
           .assemble({
@@ -244,7 +245,23 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
             frozen: prefix?.frozen ?? {},
             random: Math.random,
             summarizing: true,
-            summaryClipTokens: clipTokens
+            summaryClipTokens: clipTokens,
+            summaryInstruction: {
+              target: job.target,
+              ...(children.length ? { range: { from: children[0]!.from, to: children.at(-1)!.to } } : {})
+            },
+            summaryJob: {
+              id: jobId,
+              clipTokens,
+              inputs: job.level > 1 ? [] : chain.map(slotInput),
+              ...(job.level > 1
+                ? { children: children.map((c) => ({ summaryId: c.id, revisionId: c.revisionId })) }
+                : {}),
+              tail: settings.tail ?? BUILTIN_SUMMARY_INSTRUCTION,
+              style,
+              ...(settings.withPreset ? {} : { withPreset: false }),
+              ...(prefix ? { prefix } : {})
+            }
           })
           .pipe(Effect.provide(sources.layer))
         const rendered = new Set(
@@ -271,59 +288,8 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
             reason: "budget",
             message: "The summary request cannot render its whole declared chunk."
           })
-        const style = state.lcm.style ?? "direct"
-        const settings = resolveLcm(state.lcm, defaults.lcm)
-        const range = job.level > 1 ? `(messages ${children[0]!.from} to ${children.at(-1)!.to})` : ""
-        // Without the preset the parts follow the instruction instead of preceding it.
-        const instruction =
-          job.level > 1
-            ? settings.withPreset
-              ? `Condense the last ${children.length} summaries above ${range} into one summary of at most ${summaryWords(job.target)} words. Keep its language and voice, names, events and unresolved details. The earlier summaries are continuity, not material to condense again.`
-              : `Condense the last ${children.length} summaries ${range} into one summary of at most ${summaryWords(job.target)} words. Keep their language and voice, names, events and unresolved details. Any summaries before them are continuity, not material to condense again.`
-            : (settings.tail ?? BUILTIN_SUMMARY_INSTRUCTION)
-        const tail =
-          instruction.replace(/\{\{words\}\}/gi, String(summaryWords(job.target))) +
-          (style === "tool"
-            ? "\nWrite the summary with summary_tool. Create a draft and finalize it; assistant prose is not the summary."
-            : "\nReturn only the summary, without commentary.")
-        const snapshot: ContextSnapshot = summaryRequest({
-          ...built,
-          sources: sources.pins(),
-          summaryJob: {
-            id: jobId,
-            clipTokens,
-            inputs: job.level > 1 ? [] : chain.map(slotInput),
-            ...(job.level > 1
-              ? { children: children.map((c) => ({ summaryId: c.id, revisionId: c.revisionId })) }
-              : {}),
-            tail,
-            style,
-            ...(settings.withPreset ? {} : { withPreset: false }),
-            ...(prefix ? { prefix } : {})
-          },
-          request: {
-            ...built.request,
-            samplers: { ...built.request.samplers, max_tokens: Math.ceil(job.target * 2.5) }
-          }
-        })
-        const availableOutput = Math.floor(
-          (snapshot.inputs.model?.context ?? Infinity) - snapshot.request.messages.reduce((n, m) => n + tokensOf(m), 0)
-        )
-        if (availableOutput < 1)
-          return yield* new AssemblyFailed({
-            reason: "budget",
-            message: "The pinned summary prefix and chunk exceed the model context."
-          })
-        const taken = {
-          ...snapshot,
-          request: {
-            ...snapshot.request,
-            samplers: {
-              ...snapshot.request.samplers,
-              max_tokens: Math.min(snapshot.request.samplers.max_tokens, availableOutput)
-            }
-          }
-        }
+        const snapshot: ContextSnapshot = { ...built, sources: sources.pins() }
+        const taken = yield* fitSummaryOutput(snapshot)
         const wire = taken.inputs.model ? wireContext(taken.request, taken.inputs.model) : undefined
         return {
           snapshot: JSON.stringify({ ...taken, ...(wire ? { wire } : {}) }),

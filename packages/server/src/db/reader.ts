@@ -1,3 +1,4 @@
+import { makeAssembler, WorkerAssembler } from "../assembler/assembler.ts"
 import { makeLcmPlanningHandlers } from "./lcmPlanning.ts"
 import { makeLcmReadHandlers } from "./lcmReads.ts"
 import { makeLcmEnableReadHandlers } from "./lcmEnableReads.ts"
@@ -27,53 +28,55 @@ const { dbPath } = workerData as { readonly dbPath: string }
 RpcServer.layer(ReadOps, { concurrency: 1, disableFatalDefects: true }).pipe(
   Layer.provide(
     ReadOps.toLayer(
-      Effect.map(
-        Effect.all([
-          makeReadHandlers,
-          makeProviderReadHandlers,
-          makeAccountReadHandlers,
-          makeImportReadHandlers,
-          makeChatSetupReadHandlers,
-          // --- ST data folder import (ARCHITECTURE.md §13)
-          makeStImportReadHandlers,
-          makeEditorReadHandlers,
-          makeAssemblyReadHandlers,
-          makeInspectorReadHandlers,
-          makeLcmPlanningHandlers,
-          makeLcmReadHandlers,
-          makeLcmUiReadHandlers,
-          makeLcmEnableReadHandlers
-        ]),
-        ([
-          core,
-          providers,
-          accounts,
-          imports,
-          chatSetup,
-          stImport,
-          editor,
-          assembly,
-          inspector,
-          planning,
-          lcm,
-          lcmUi,
-          lcmEnable
-        ]) =>
-          ReadOps.of({
-            ...core,
-            ...providers,
-            ...accounts,
-            ...imports,
-            ...chatSetup,
-            ...stImport,
-            ...editor,
-            ...assembly,
-            ...inspector,
-            ...planning,
-            ...lcm,
-            ...lcmUi,
-            ...lcmEnable
-          })
+      Effect.flatMap(makeAssembler, (assembler) =>
+        Effect.map(
+          Effect.all([
+            makeReadHandlers,
+            makeProviderReadHandlers,
+            makeAccountReadHandlers,
+            makeImportReadHandlers,
+            makeChatSetupReadHandlers,
+            // --- ST data folder import (ARCHITECTURE.md §13)
+            makeStImportReadHandlers,
+            makeEditorReadHandlers,
+            makeAssemblyReadHandlers,
+            makeInspectorReadHandlers,
+            makeLcmPlanningHandlers,
+            makeLcmReadHandlers,
+            makeLcmUiReadHandlers,
+            makeLcmEnableReadHandlers
+          ]),
+          ([
+            core,
+            providers,
+            accounts,
+            imports,
+            chatSetup,
+            stImport,
+            editor,
+            assembly,
+            inspector,
+            planning,
+            lcm,
+            lcmUi,
+            lcmEnable
+          ]) =>
+            ReadOps.of({
+              ...core,
+              ...providers,
+              ...accounts,
+              ...imports,
+              ...chatSetup,
+              ...stImport,
+              ...editor,
+              ...assembly,
+              ...inspector,
+              ...planning,
+              ...lcm,
+              ...lcmUi,
+              ...lcmEnable
+            })
+        ).pipe(Effect.provideService(WorkerAssembler, assembler))
       )
     )
   ),
