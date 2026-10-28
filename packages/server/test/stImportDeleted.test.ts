@@ -116,7 +116,7 @@ layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "180 seco
           const leaf = (yield* api.GetChat({ chatId: chat.id })).activeLeafSlotId
           const draft = yield* typeInto(api, chat.id, null, "Outside deleted subtree")
           const unchanged = yield* importStFolder(folder(tag, 3), { partBytes: 160 })
-          assert.strictEqual(unchanged.answers.get(`chats/Alice/${tag}.jsonl`)!.outcome, "unchanged")
+          assert.strictEqual(unchanged.answers.get(`chats/Alice/${tag}.jsonl`)!.outcome, "skipped")
           yield* importStFolder(folder(tag, 5), { partBytes: 160 })
           yield* importStFolder(folder(tag, 6), { partBytes: 160 })
           assert.strictEqual((yield* api.GetChat({ chatId: chat.id })).activeLeafSlotId, leaf)

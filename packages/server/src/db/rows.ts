@@ -57,6 +57,7 @@ export interface ForkRow {
   readonly base_slot_id: string | null
   readonly tip_slot_id: string | null
   readonly name: string | null
+  readonly name_user: number
   readonly pinned_at: number | null
   readonly created_at: number
   readonly last_chatted_at: number | null

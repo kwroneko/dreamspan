@@ -1,7 +1,6 @@
-// An ST re-import that copies a recorded suffix (stImportFork.ts) keeps what the current fork
-// shows there, its amends included: before forks owned copies, an amend changed the version
-// itself, so the copied suffix carried it. Another fork's copies stay with that fork.
+// ST re-import changes only the recorded fork selection and retains shared suffix slots.
 import { assert, layer } from "@effect/vitest"
+import { foldState } from "@rp/shared/state.ts"
 import { Effect } from "effect"
 import type { ForkId, SlotId } from "@rp/shared/chat.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
@@ -44,8 +43,8 @@ const setup = (config: ReturnType<typeof testConfig>) =>
         s.chats.find((r) => r.source === "chats/Alice/branch.jsonl")!
       )
     const path = () =>
-      Effect.flatMap(record(), ({ end }) =>
-        api.ReadPath({ chatId: chat.id, leafSlotId: end, range: { _tag: "Around", slot: root }, limit: 100 })
+      Effect.flatMap(record(), ({ end, forkId }) =>
+        api.ReadPath({ chatId: chat.id, forkId, leafSlotId: end, range: { _tag: "Around", slot: root }, limit: 100 })
       )
     const childBefore = yield* path()
     // The branch's line, opened by the switcher as the user would.
@@ -77,6 +76,7 @@ const setup = (config: ReturnType<typeof testConfig>) =>
           chatId: chat.id,
           slotId: entry.slotId,
           versionId: amended.id,
+          forkId,
           scope: null,
           data: { key: "var.set", value: { name: "mood", value: "amended" } }
         })
@@ -115,55 +115,68 @@ const setup = (config: ReturnType<typeof testConfig>) =>
         api.ReadPath({ chatId: chat.id, forkId, leafSlotId: null, range: { _tag: "Bottom" }, limit: 1 }),
         (w) => w.entries.at(-1)!.version.content
       )
-    return { api, side, checkpoint, path, amend, reimport, eventsAt, shownAt }
+    const moodAt = (forkId: ForkId, slotId: SlotId) =>
+      Effect.map(
+        reader.StateEventsAt({ userId: user.id, chatId: chat.id, forkId, slotId }),
+        (events) => foldState(events).vars.mood
+      )
+    return { api, side, checkpoint, path, amend, reimport, eventsAt, shownAt, moodAt }
   })
 
 const current = testConfig()
-layer(serverLayer(current), { excludeTestServices: true, timeout: "180 seconds" })("fork copies on re-import", (it) => {
-  it.effect("a copied suffix keeps the current fork's amend of a message another fork shows", () =>
-    Effect.gen(function* () {
-      const { api, checkpoint, path, amend, reimport, eventsAt, shownAt } = yield* setup(current)
-      const entry = yield* amend(checkpoint, "Amended in the checkpoint")
-      yield* reimport()
-      const after = yield* path()
-      assert.strictEqual(after.entries[4]!.version.content, "Only the ST branch chose this")
-      assert.notStrictEqual(after.entries[9]!.slotId, entry.slotId)
-      // The copied suffix shows the amend, as it did when an amend changed the version.
-      assert.strictEqual(after.entries[9]!.version.content, "Amended in the checkpoint")
-      const copied = yield* api.ListVersions({ slotId: after.entries[9]!.slotId })
-      assert.deepStrictEqual(
-        copied.map((v) => [v.content, v.rowVersion]),
-        [["Amended in the checkpoint", 2]]
-      )
-      assert.deepStrictEqual(yield* eventsAt(after.entries[9]!.slotId), [{ version: copied[0]!.id }])
-      // Where the import didn't copy, each fork still shows its own.
-      assert.strictEqual(yield* shownAt(checkpoint), "Amended in the checkpoint")
-    })
-  )
-})
+layer(serverLayer(current), { excludeTestServices: true, timeout: "180 seconds" })(
+  "fork amendments on re-import",
+  (it) => {
+    it.effect("the recorded branch keeps its original while the current checkpoint keeps its amend", () =>
+      Effect.gen(function* () {
+        const { api, side, checkpoint, path, amend, reimport, eventsAt, shownAt, moodAt } = yield* setup(current)
+        const entry = yield* amend(checkpoint, "Amended in the checkpoint")
+        yield* reimport()
+        const after = yield* path()
+        assert.strictEqual(after.entries[4]!.version.content, "Only the ST branch chose this")
+        assert.strictEqual(after.entries[9]!.slotId, entry.slotId)
+        // Re-import addresses the file's fork even while its checkpoint is current.
+        assert.strictEqual(after.entries[9]!.version.content, "branch 9")
+        const copied = yield* api.ListVersions({ slotId: after.entries[9]!.slotId, forkId: side })
+        assert.deepStrictEqual(
+          copied.map((v) => [v.content, v.rowVersion]),
+          [["branch 9", 1]]
+        )
+        assert.deepStrictEqual(yield* eventsAt(after.entries[9]!.slotId), [{ version: entry.versionId }])
+        assert.isUndefined(yield* moodAt(side, entry.slotId))
+        assert.strictEqual(yield* moodAt(checkpoint, entry.slotId), "amended")
+        assert.strictEqual(yield* shownAt(checkpoint), "Amended in the checkpoint")
+      })
+    )
+  }
+)
 
 const other = testConfig()
-layer(serverLayer(other), { excludeTestServices: true, timeout: "180 seconds" })("fork copies on re-import", (it) => {
-  it.effect("another fork's copy and its events stay with that fork, out of the copied suffix", () =>
-    Effect.gen(function* () {
-      const { api, side, checkpoint, path, amend, reimport, eventsAt, shownAt } = yield* setup(other)
-      // The branch's fork amends message 9 while the checkpoint is current.
-      const entry = yield* amend(side, "Amended in the branch")
-      yield* reimport()
-      const after = yield* path()
-      assert.strictEqual(after.entries[4]!.version.content, "Only the ST branch chose this")
-      assert.notStrictEqual(after.entries[9]!.slotId, entry.slotId)
-      // The suffix is copied as the current fork shows it: without the branch fork's amend.
-      assert.strictEqual(after.entries[9]!.version.content, "branch 9")
-      const copied = yield* api.ListVersions({ slotId: after.entries[9]!.slotId })
-      assert.deepStrictEqual(
-        copied.map((v) => v.content),
-        ["branch 9"]
-      )
-      assert.deepStrictEqual(yield* eventsAt(after.entries[9]!.slotId), [])
-      // The amend and the event on it stay at the old message, where the checkpoint shows the original.
-      assert.deepStrictEqual(yield* eventsAt(entry.slotId), [{ version: entry.versionId }])
-      assert.strictEqual(yield* shownAt(checkpoint), "branch 9")
-    })
-  )
-})
+layer(serverLayer(other), { excludeTestServices: true, timeout: "180 seconds" })(
+  "fork amendments on re-import",
+  (it) => {
+    it.effect("the recorded branch retains its own amend and events while another fork is current", () =>
+      Effect.gen(function* () {
+        const { api, side, checkpoint, path, amend, reimport, eventsAt, shownAt, moodAt } = yield* setup(other)
+        // The branch's fork amends message 9 while the checkpoint is current.
+        const entry = yield* amend(side, "Amended in the branch")
+        yield* reimport()
+        const after = yield* path()
+        assert.strictEqual(after.entries[4]!.version.content, "Only the ST branch chose this")
+        assert.strictEqual(after.entries[9]!.slotId, entry.slotId)
+        // The file's fork retains its amend even while another fork is current.
+        assert.strictEqual(after.entries[9]!.version.content, "Amended in the branch")
+        const copied = yield* api.ListVersions({ slotId: after.entries[9]!.slotId, forkId: side })
+        assert.deepStrictEqual(
+          copied.map((v) => v.content),
+          ["Amended in the branch"]
+        )
+        assert.strictEqual(yield* moodAt(side, entry.slotId), "amended")
+        assert.isUndefined(yield* moodAt(checkpoint, entry.slotId))
+        // The checkpoint still shows the original at the same shared message.
+        assert.deepStrictEqual(yield* eventsAt(entry.slotId), [{ version: entry.versionId }])
+        assert.strictEqual(yield* shownAt(checkpoint), "branch 9")
+      })
+    )
+  }
+)

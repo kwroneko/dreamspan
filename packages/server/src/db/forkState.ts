@@ -270,27 +270,6 @@ export const writeSelect = (
 ) => writeOverride(sql, fork, { kind: "select", targetId: slotId, slotId, valueId: versionId, flag: null }, origin)
 
 /**
- * Every fork of the chat that shows `from` at `slotId`, deleted forks included, shows `to`
- * instead. For what still changes a slot in every fork at once: deleting a swipe, until
- * deletion is per fork (§2.4), and an ST re-import following its file (§5 step 6).
- */
-export const reselectEverywhere = (
-  sql: SqlClient.SqlClient,
-  chatId: string,
-  slotId: string,
-  from: string,
-  to: string,
-  origin: "user" | "import" = "user"
-) =>
-  Effect.gen(function* () {
-    const forks = yield* sql<{ id: string }>`
-      SELECT f.id FROM forks f JOIN slots s ON s.id = ${slotId}
-      WHERE f.chat_id = ${chatId} AND ${selectedIn(sql, sql.literal("f.id"), "s")} = ${from}`
-    for (const fork of forks) yield* writeSelect(sql, { id: fork.id, chatId }, slotId, to, origin)
-    return forks.length
-  })
-
-/**
  * A new fork of `parent`, made now: its lineage is itself, then the parent up to the chat's
  * state seq now, then the parent's lineage. Entries bounded at 0 are left out (no row has seq
  * 0). Past `LINEAGE_CAP` forks, the parent's effective rows are copied into the new fork,

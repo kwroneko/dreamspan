@@ -1340,6 +1340,9 @@ export const baseline: ReadonlyArray<string> = [
   `CREATE TRIGGER forks_lineage_fixed BEFORE UPDATE OF lineage_json ON forks
     WHEN OLD.lineage_json IS NOT NULL AND NEW.lineage_json IS NOT OLD.lineage_json
     BEGIN SELECT RAISE(ABORT, 'a fork keeps its lineage'); END`,
+  `CREATE TRIGGER slots_branch_name_frozen BEFORE UPDATE OF branch_name, branch_name_user ON slots
+    WHEN NEW.branch_name IS NOT OLD.branch_name OR NEW.branch_name_user IS NOT OLD.branch_name_user
+    BEGIN SELECT RAISE(ABORT, 'branch names belong to forks'); END`,
   `CREATE TRIGGER slots_selection_frozen BEFORE UPDATE OF selected_version_id ON slots
     WHEN NEW.selected_version_id IS NOT OLD.selected_version_id
     BEGIN SELECT RAISE(ABORT, 'a slot keeps the selection it was inserted with; a fork selects with an override'); END`,

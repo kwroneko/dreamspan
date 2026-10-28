@@ -1785,6 +1785,12 @@
     },
     {
       "type": "trigger",
+      "name": "slots_branch_name_frozen",
+      "tbl_name": "slots",
+      "sql": "CREATE TRIGGER slots_branch_name_frozen BEFORE UPDATE OF branch_name, branch_name_user ON slots WHEN NEW.branch_name IS NOT OLD.branch_name OR NEW.branch_name_user IS NOT OLD.branch_name_user BEGIN SELECT RAISE(ABORT, 'branch names belong to forks'); END"
+    },
+    {
+      "type": "trigger",
       "name": "slots_chain_assigned",
       "tbl_name": "slots",
       "sql": "CREATE TRIGGER slots_chain_assigned AFTER INSERT ON slots BEGIN UPDATE slots SET chain_id = coalesce( (SELECT p.chain_id FROM slots p WHERE p.id = NEW.parent_slot_id AND p.lane_id = NEW.lane_id AND NOT EXISTS (SELECT 1 FROM slots c WHERE c.chain_id = p.chain_id AND c.depth = NEW.depth AND c.id <> NEW.id)), NEW.id) WHERE id = NEW.id; END"
