@@ -5,7 +5,7 @@ import { uuidv7 } from "@rp/shared/id.ts"
 import { NotFound } from "@rp/shared/errors.ts"
 import { Effect, Schema } from "effect"
 import { SqlClient } from "effect/sql"
-import { effectiveOverride, nextSeq, writeOverride } from "./forkState.ts"
+import { effectiveOverride, nextSeq, writeOverride, slotDeletedIn, versionDeletedIn } from "./forkState.ts"
 import { historyCurrent, historyFork } from "./historyShared.ts"
 import { recordHistoryReduction, recordReduction } from "./historyChanges.ts"
 import { transaction } from "./tx.ts"
@@ -58,6 +58,7 @@ export const makeHistoryWriteHandlers = Effect.gen(function* () {
         for (const application of applications) {
           const { chatId, forkId, edits } = application
           const fork = yield* historyFork(sql, userId, chatId, forkId)
+          const applicationId = uuidv7()
           if (!edits.length) continue
           // One application per fork, even when a panel adds later replacements to its group.
           let [record] = yield* sql<{
@@ -93,7 +94,9 @@ export const makeHistoryWriteHandlers = Effect.gen(function* () {
             if (edit.before === edit.after) continue
             let afterId: string
             if (edit.kind === "version_replace") {
-              const [live] = yield* sql`SELECT 1 FROM versions v JOIN slots s ON s.id=v.slot_id WHERE v.id=${current.id}
+              const [live] = yield* sql`SELECT 1 FROM versions v JOIN slots s ON s.id=v.slot_id
+              JOIN versions o ON o.id=${edit.targetId} WHERE v.id=${current.id}
+              AND NOT ${slotDeletedIn(sql, forkId, "s")} AND NOT ${versionDeletedIn(sql, forkId, "o")}
               AND v.status <> 'generating' AND v.deleted_at IS NULL AND v.purged_at IS NULL AND s.deleted_at IS NULL AND s.purged_at IS NULL`
               if (!live) return yield* new HistoryRejected({ message: "A target is no longer editable." })
               const copyKey = `${current.id}:${edit.after}`
@@ -190,7 +193,26 @@ export const makeHistoryWriteHandlers = Effect.gen(function* () {
                   }>`SELECT json_object('scope',scope,'data',json_object('key',key,'value',json(value_json))) AS content FROM state_events WHERE id=${afterId}`)[0]!
                     .content
                 : edit.after
-            const after = JSON.stringify({ id: afterId, content: afterContent })
+            // Preserve only inputs connected by edits that also covered summaries. A
+            // later rename must not bless an earlier amend or messages-only rewrite.
+            let preservedInputs: Array<{ id: string; amends: number }> = []
+            if (edit.kind === "version_replace" && application.summariesIncluded) {
+              const [amends] = yield* sql<{
+                n: number
+              }>`SELECT count(*) AS n FROM version_history WHERE version_id=${current.id}`
+              const [previousProof] =
+                prior?.summaries_done === 1
+                  ? yield* sql<{ after_json: string }>`SELECT after_json FROM changeset_items
+                  WHERE changeset_id=${prior.changeset_id} AND target_kind='version_replace'
+                    AND target_id=${edit.targetId} AND after_json ->> '$.id'=${current.id}`
+                  : []
+              const inherited = previousProof
+                ? ((JSON.parse(previousProof.after_json) as { preservedInputs?: typeof preservedInputs })
+                    .preservedInputs ?? [])
+                : []
+              preservedInputs = [...inherited.filter((p) => p.id !== current.id), { id: current.id, amends: amends!.n }]
+            }
+            const after = JSON.stringify({ id: afterId, content: afterContent, preservedInputs, applicationId })
             if (previous) yield* sql`UPDATE changeset_items SET after_json=${after} WHERE id=${previous.id}`
             else
               yield* sql`INSERT INTO changeset_items(changeset_id, target_kind, target_id, before_json, after_json)

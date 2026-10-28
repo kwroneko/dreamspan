@@ -58,7 +58,11 @@ export const readSummary = (
         replaced_with_summaries: number
       }>`
         SELECT i.*, EXISTS(SELECT 1 FROM fork_overrides o WHERE o.id=${effectiveOverride(sql, "replace", fork, "CASE WHEN iv.fork_id IS NULL THEN i.version_id ELSE iv.source_version_id END")}
-          AND o.value_id=v.id AND o.summaries_done=1) AS replaced_with_summaries, CASE WHEN NOT ${slotDeletedIn(sql, fork, "s")} AND ${contextExcludedIn(sql, fork)} = 0
+          AND o.value_id=v.id AND o.summaries_done=1 AND EXISTS (
+            SELECT 1 FROM changeset_items ci, json_each(ci.after_json, '$.preservedInputs') p
+            WHERE ci.changeset_id=o.changeset_id AND ci.target_kind='version_replace'
+              AND ci.target_id=o.target_id AND ci.after_json ->> '$.id'=v.id
+              AND p.value ->> '$.id'=i.version_id AND p.value ->> '$.amends'=i.amend_count)) AS replaced_with_summaries, CASE WHEN NOT ${slotDeletedIn(sql, fork, "s")} AND ${contextExcludedIn(sql, fork)} = 0
           AND NOT ${shownVersionDeletedIn(sql, fork, "v")} AND v.status NOT IN ('generating', 'failed') AND length(v.content) > 0
           THEN v.id ELSE NULL END AS effective, (SELECT count(*) FROM version_history h WHERE h.version_id = v.id) AS current_amends
         FROM summary_inputs i JOIN slots s ON s.id = i.slot_id LEFT JOIN versions iv ON iv.id=i.version_id LEFT JOIN versions v ON v.id = ${shownIn(sql, fork, "s")}
@@ -89,7 +93,8 @@ export const readSummary = (
           FROM changeset_items a JOIN changesets ac ON ac.id=a.changeset_id
           JOIN changeset_items b ON b.target_kind='summary_revision' JOIN changesets bc ON bc.id=b.changeset_id
           WHERE a.target_kind='summary_revision' AND a.target_id=${row.id} AND a.after_json ->> '$.id'=${row.revision_id}
-            AND b.target_id=${parent.id} AND b.after_json ->> '$.id'=${parent.revisionId} AND ac.group_id=bc.group_id LIMIT 1`
+            AND b.target_id=${parent.id} AND b.after_json ->> '$.id'=${parent.revisionId} AND ac.group_id=bc.group_id
+            AND a.after_json ->> '$.applicationId'=b.after_json ->> '$.applicationId' LIMIT 1`
             : []
         fresh &&= parent.fresh && (parent.revisionId === child.parent_revision_id || sameGroup !== undefined)
       }

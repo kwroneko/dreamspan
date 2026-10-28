@@ -13,7 +13,13 @@ export const scanHistory = (texts: ReadonlyArray<string>, search: HistorySearch)
     const expressions = search.pairs.map(pair => {
       if (!pair.find) throw new Error('Find cannot be empty.');
       const source = search.regex ? pair.find : escape(pair.find);
-      return new RegExp(search.wholeWord ? '\\b(?:' + source + ')\\b' : source, search.matchCase ? 'g' : 'gi');
+      const flags = search.matchCase ? 'g' : 'gi';
+      try {
+        return new RegExp(search.wholeWord ? '(?<![\\p{L}\\p{N}_])(?:' + source + ')(?![\\p{L}\\p{N}_])' : source, flags + 'u');
+      } catch {
+        // Match the editor's fallback for escapes only accepted outside Unicode mode.
+        return new RegExp(search.wholeWord ? '(?<!\\w)(?:' + source + ')(?!\\w)' : source, flags);
+      }
     });
     const results = texts.map(before => {
 
@@ -39,7 +45,7 @@ export const scanHistory = (texts: ReadonlyArray<string>, search: HistorySearch)
             const first = Number(key[0]);
             return key.length === 2 && first > 0 && first < args.length ? (args[first] ?? '') + key[1] : token;
           }) : pair.replace;
-          if (search.preserveCase && whole) {
+          if (search.preserveCase && whole && whole.toLowerCase() !== whole.toUpperCase()) {
             if (whole === whole.toUpperCase()) replacement = replacement.toUpperCase();
             else if (whole === whole.toLowerCase()) replacement = replacement.toLowerCase();
             else if (whole[0] === whole[0].toUpperCase() && whole.slice(1) === whole.slice(1).toLowerCase()) replacement = replacement ? replacement[0].toUpperCase() + replacement.slice(1).toLowerCase() : '';

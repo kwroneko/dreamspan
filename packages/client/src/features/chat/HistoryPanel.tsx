@@ -1,5 +1,5 @@
 import { HistoryDiff, HistoryPreviewContext } from "./historyPreview.tsx"
-import { useCallback, useContext, useEffect, useRef, useState } from "react"
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react"
 import type { HistoryHit, HistoryRecord, HistorySearch, HistoryCursor } from "@rp/shared/historyApi.ts"
 import type { SlotId } from "@rp/shared/chat.ts"
 import { Button } from "../../ui/Button.tsx"
@@ -7,6 +7,7 @@ import { showToast } from "../../ui/Toast.tsx"
 import type { ChatSession, ChatView } from "./session.ts"
 
 type Record = typeof HistoryRecord.Type
+const keyOf = (hit: HistoryHit) => `${hit.kind}:${hit.targetId}`
 const initial: HistorySearch = {
   pairs: [{ find: "", replace: "" }],
   matchCase: false,
@@ -44,7 +45,6 @@ export function HistoryPanel({
   const revision = useRef(0)
   const forkId = view.forkId ?? view.chat?.currentForkId
   const target = forkId ? { chatId: session.id, forkId } : null
-  const keyOf = (hit: HistoryHit) => `${hit.kind}:${hit.targetId}`
   const history = useCallback(async () => {
     if (!forkId) return
     const result = await session.call((c) => c("ListHistoryEdits", { chatId: session.id, forkId }))
@@ -94,7 +94,6 @@ export function HistoryPanel({
         }
       } while (cursor)
       setHits(all)
-      if (active) publish(all)
       const raw = all.filter((h) => h.kind === "version_replace" && h.selected)
       const summaries = view.lcm?.layer ?? []
       const firstSummary = summaries.findIndex((s) =>
@@ -121,11 +120,17 @@ export function HistoryPanel({
       if (revision.current === request) revision.current = request + 1
     }
   }, [search, session, forkId, active, publish, view.lcm, view.history])
-  const undo = async (record: Record, slotId?: string) => {
+  useEffect(() => () => publish([]), [publish])
+  const undo = async (record: Record, slotId?: string, itemIds?: ReadonlyArray<number>) => {
     if (!target) return
     setPending(true)
     const result = await session.call((c) =>
-      c("UndoHistoryEdit", { ...target, changesetId: record.id, ...(slotId ? { slotId } : {}) })
+      c("UndoHistoryEdit", {
+        ...target,
+        changesetId: record.id,
+        ...(slotId ? { slotId } : {}),
+        ...(itemIds ? { itemIds } : {})
+      })
     )
     setPending(false)
     if (!result.ok) setError(result.error.message)
@@ -135,23 +140,28 @@ export function HistoryPanel({
       setSearch((s) => ({ ...s }))
     }
   }
-  const selectedHits = () =>
-    hits
-      .filter((h) => !skipped.has(keyOf(h)))
-      .flatMap((h) => {
-        const matches = h.matches.filter((_, i) => !skipped.has(`${keyOf(h)}:${i}`))
-        if (!matches.length) return []
-        let after = "",
-          end = 0
-        for (const match of matches) {
-          after += h.before.slice(end, match.start) + match.replacement
-          end = match.end
-        }
-        return [{ ...h, matches, after: after + h.before.slice(end) }]
-      })
+  const included = useMemo(
+    () =>
+      hits
+        .filter((h) => !skipped.has(keyOf(h)))
+        .flatMap((h) => {
+          const matches = h.matches.filter((_, i) => !skipped.has(`${keyOf(h)}:${i}`))
+          if (!matches.length) return []
+          let after = "",
+            end = 0
+          for (const match of matches) {
+            after += h.before.slice(end, match.start) + match.replacement
+            end = match.end
+          }
+          return [{ ...h, matches, after: after + h.before.slice(end) }]
+        }),
+    [hits, skipped]
+  )
+  useEffect(() => {
+    publish(active && completedSearch === JSON.stringify(search) ? included : [])
+  }, [active, completedSearch, search, included, publish])
   const apply = async (one: boolean) => {
     if (!target || JSON.stringify(search) !== completedSearch) return
-    const included = selectedHits()
     let edits = included
     if (one) {
       const matches = included.flatMap((hit) => hit.matches.map((match) => ({ hit, match })))
@@ -197,7 +207,6 @@ export function HistoryPanel({
     }
     setSearch((s) => ({ ...s }))
   }
-  const included = selectedHits()
   const counts = (test: (h: HistoryHit) => boolean) => hits.filter(test).reduce((n, h) => n + h.matches.length, 0)
   const step = (back: boolean) => {
     const matches = included.flatMap((hit) => hit.matches.map((match) => ({ hit, match })))
@@ -373,7 +382,7 @@ export function HistoryPanel({
                   ))}
                 </div>
                 <div className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words font-mono text-xs">
-                  <HistoryDiff hit={hit} />
+                  <HistoryDiff hit={included.find((h) => keyOf(h) === keyOf(hit)) ?? { ...hit, matches: [] }} />
                 </div>
               </article>
             ))}
@@ -401,8 +410,19 @@ export function HistoryPanel({
                 <div className="my-2 whitespace-pre-wrap break-words font-mono text-xs">
                   <del>{item.before}</del> → <ins>{item.after}</ins>
                 </div>
-                <Button disabled={pending || !item.applied} onClick={() => void undo(record, item.slotId ?? undefined)}>
-                  Undo this message and covering summaries
+                <Button
+                  disabled={pending || !item.applied}
+                  onClick={() =>
+                    void (item.kind === "version_replace" && item.slotId
+                      ? undo(record, item.slotId)
+                      : undo(record, undefined, [item.id]))
+                  }
+                >
+                  {item.kind === "summary_revision"
+                    ? "Undo this summary"
+                    : item.kind === "state_event"
+                      ? "Undo this state change"
+                      : "Undo this message and covering summaries"}
                 </Button>
               </details>
             ))}
