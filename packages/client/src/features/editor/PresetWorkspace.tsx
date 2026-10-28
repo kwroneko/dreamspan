@@ -64,7 +64,7 @@ export function PresetOverlayHost({ page = false }: { page?: boolean }) {
   return (
     <ColumnOverlay page={page} onClose={workspace.close}>
       <div
-        className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3 sm:p-4"
+        className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-(--scroll-pad) [--scroll-pad:0.75rem] sm:[--scroll-pad:1rem]"
         data-testid="preset-scroll"
         data-preset-scroll
       >

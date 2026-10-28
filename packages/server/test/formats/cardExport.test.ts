@@ -151,6 +151,19 @@ describe("card export", () => {
     expect(back.card.extensions).not.toHaveProperty("rp_harness")
   })
 
+  it("gives a note without an id one no other note in the file has", async () => {
+    const plain = { ...imported(stCardV2()), extensions: {} }
+    const exported = await exportNotes(plain, null, [
+      cardNote({ title: "First", content: "One." }),
+      cardNote({ title: "Kept", content: "Two.", module_id: "note-1" }),
+      cardNote({ title: "Third", content: "Three." })
+    ])
+    const data = (JSON.parse(new TextDecoder().decode(exported)) as { data: CardDoc }).data
+    const ids = (data.extensions["rp_harness"] as { notes: Array<{ id: string }> }).notes.map((n) => n.id)
+    expect(ids).toEqual(["note-2", "note-1", "note-3"])
+    expect(new Set(ids).size).toBe(3)
+  })
+
   it("keeps a depth note that isn't on in every chat out of depth_prompt, so an import doesn't switch it on everywhere", async () => {
     const { extensions: _dropped, ...rest } = imported(stCardV2())
     const off = cardNote({

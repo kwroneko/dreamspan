@@ -60,11 +60,21 @@ const withNotes = (card: CardDoc, noteDocJson: string | null, notesDocJson: Read
       } else others.push(note)
     }
     for (const json of notesDocJson) others.push(yield* decode(NoteDoc, "card's note")(json))
-    const notes = others
-      .filter((note) => note.exportable)
+    const exportable = others.filter((note) => note.exportable)
+    // A note without an id takes the first `note-N` (from its place in the list) no other note
+    // already has, so an id kept from an earlier export is never taken twice.
+    const taken = new Set(exportable.flatMap((note) => (note.module_id === undefined ? [] : [note.module_id])))
+    const idOf = (note: NoteDoc, i: number) => {
+      if (note.module_id !== undefined) return note.module_id
+      let n = i + 1
+      while (taken.has(`note-${n}`)) n++
+      taken.add(`note-${n}`)
+      return `note-${n}`
+    }
+    const notes = exportable
       // `agent_editable` stays behind: a file never grants the agent anything (DESIGN §11).
       .map((note, i) => ({
-        id: note.module_id ?? `note-${i + 1}`,
+        id: idOf(note, i),
         title: note.title,
         content: note.content,
         placement: note.placement,

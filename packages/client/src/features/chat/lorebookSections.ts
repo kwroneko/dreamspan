@@ -7,6 +7,8 @@ export interface LorebookRow {
   readonly on: boolean
   /** Also one of the user's global books. */
   readonly global: boolean
+  /** Also added to this chat by hand. */
+  readonly attached: boolean
 }
 
 export const lorebookSections = (input: {
@@ -18,12 +20,18 @@ export const lorebookSections = (input: {
   readonly globalsOff: ReadonlyArray<string>
 }) => {
   const globals = input.globals ?? []
-  const added = [...input.attached, ...input.detached.filter((id) => !input.attached.includes(id))]
+  const added = [...input.attached, ...input.detached.filter((id) => !input.attached.includes(id))].filter(
+    (id) => !globals.includes(id)
+  )
   return {
-    added: added.map((id): LorebookRow => ({ id, on: input.attached.includes(id), global: globals.includes(id) })),
-    // A global book attached here is listed once, with the books added to this chat.
-    global: globals
-      .filter((id) => !input.attached.includes(id))
-      .map((id): LorebookRow => ({ id, on: !input.globalsOff.includes(id), global: true }))
+    added: added.map((id): LorebookRow => ({ id, on: input.attached.includes(id), global: false, attached: true })),
+    // A global book is listed once, here, even when it's also attached to this chat: attached,
+    // it's used whatever the global switch says, so it's on while either holds.
+    global: globals.map((id): LorebookRow => ({
+      id,
+      on: input.attached.includes(id) || !input.globalsOff.includes(id),
+      global: true,
+      attached: input.attached.includes(id)
+    }))
   }
 }

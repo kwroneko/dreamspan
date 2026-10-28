@@ -10,13 +10,14 @@ it("lists attached books on, detached ones off, and each global book once with i
     globalsOff: ["tides"]
   })
   expect(sections.added).toEqual([
-    { id: "harbor", on: true, global: false },
-    { id: "almanac", on: true, global: true },
-    { id: "old", on: false, global: false }
+    { id: "harbor", on: true, global: false, attached: true },
+    { id: "old", on: false, global: false, attached: true }
   ])
+  // A global book also attached here is listed once, here, and stays on while it's attached.
   expect(sections.global).toEqual([
-    { id: "world", on: true, global: true },
-    { id: "tides", on: false, global: true }
+    { id: "almanac", on: true, global: true, attached: true },
+    { id: "world", on: true, global: true, attached: false },
+    { id: "tides", on: false, global: true, attached: false }
   ])
 })
 

@@ -333,7 +333,7 @@ function Member({
           <span className="flex flex-wrap items-center gap-1">
             {played && <Badge tone="accent">your persona</Badge>}
             {writing && <Badge tone="success">writing…</Badge>}
-            {muted && <Badge tone="warning">muted</Badge>}
+            {muted && !played && <Badge tone="warning">muted</Badge>}
             {edited && (
               <Link
                 to="/library/$refId"
@@ -347,12 +347,15 @@ function Member({
           </span>
         </div>
         {/* Muting stops them being picked to reply (DESIGN §3.5); they can still be made to speak. */}
-        <Switch
-          checked={muted}
-          onCheckedChange={(next) => onChange({ _tag: "Presence", entityId: card.entityId, present: !next })}
-        >
-          <span className="sr-only">{name} is </span>Muted
-        </Switch>
+        {/* Not on the card you play: the model never writes it, so muting means nothing. */}
+        {!played && (
+          <Switch
+            checked={muted}
+            onCheckedChange={(next) => onChange({ _tag: "Presence", entityId: card.entityId, present: !next })}
+          >
+            <span className="sr-only">{name} is </span>Muted
+          </Switch>
+        )}
         <span className="-mt-1 -mr-2">
           <ActionMenu
             label={`More for ${name}`}
@@ -483,7 +486,11 @@ export function CastTab({ session }: { session: ChatSession }) {
       </div>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-sm font-semibold">
-          {plural(participants.length, "character", "characters")}
+          {plural(
+            participants.length - playedByMe.filter((id) => participants.includes(id)).length,
+            "character",
+            "characters"
+          )}
           {muted > 0 && <span className="font-normal text-muted"> · {muted} muted</span>}
         </h2>
         <AddCharacter

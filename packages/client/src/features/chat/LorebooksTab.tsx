@@ -280,7 +280,7 @@ export function LorebooksTab({ session, active }: { session: ChatSession; active
           <p className="text-sm text-muted">None yet.</p>
         ) : (
           <ul aria-label="Added to this chat" className="flex flex-col divide-y divide-border">
-            {sections.added.map(({ id, on, global: isGlobal }) => {
+            {sections.added.map(({ id, on }) => {
               const name = nameOf(id)
               return (
                 <Row
@@ -288,7 +288,7 @@ export function LorebooksTab({ session, active }: { session: ChatSession; active
                   actions={
                     <>
                       {openLink(id, name)}
-                      {byId.has(id) && !isGlobal && (
+                      {byId.has(id) && (
                         <Button
                           variant="ghost"
                           className="h-8 px-2"
@@ -309,7 +309,6 @@ export function LorebooksTab({ session, active }: { session: ChatSession; active
                     }}
                     description={[
                       on ? "Added to this chat" : "Taken off this chat",
-                      ...(isGlobal ? ["also used in every chat"] : []),
                       ...(byId.get(id)?.subtitle ? [byId.get(id)!.subtitle] : [])
                     ].join(" · ")}
                   >
@@ -349,7 +348,7 @@ export function LorebooksTab({ session, active }: { session: ChatSession; active
           </p>
         ) : (
           <ul aria-label="Global lorebooks" className="flex flex-col divide-y divide-border">
-            {sections.global.map(({ id, on }) => {
+            {sections.global.map(({ id, on, attached: alsoAdded }) => {
               const name = nameOf(id)
               return (
                 <Row
@@ -370,10 +369,19 @@ export function LorebooksTab({ session, active }: { session: ChatSession; active
                 >
                   <Switch
                     checked={on}
-                    onCheckedChange={(next) =>
-                      void change({ _tag: "GlobalLorebook", ref: id as LibraryRef["id"], on: next })
+                    onCheckedChange={async (next) => {
+                      // Added by hand too, it's used until that's taken off as well.
+                      if (!next && alsoAdded)
+                        await change({ _tag: "Lorebook", ref: id as LibraryRef["id"], active: false })
+                      await change({ _tag: "GlobalLorebook", ref: id as LibraryRef["id"], on: next })
+                    }}
+                    description={
+                      on
+                        ? alsoAdded
+                          ? "Used in every chat · also added to this chat"
+                          : "Used in every chat"
+                        : "Used in every chat, but off in this one"
                     }
-                    description={on ? "Used in every chat" : "Used in every chat, but off in this one"}
                   >
                     {name}
                   </Switch>

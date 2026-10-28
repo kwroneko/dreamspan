@@ -1,4 +1,5 @@
 import { mkdirSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { expect, test } from "@playwright/test"
 import { Effect } from "effect"
@@ -10,7 +11,7 @@ import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "60" })
 const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)
 let data: ShellLibrary
-const shots = resolve(process.env.SCREENSHOT_DIR ?? "unit-e-work/screenshots")
+const shots = resolve(process.env.SCREENSHOT_DIR ?? join(tmpdir(), "rp-unit-e-screenshots"))
 test.setTimeout(240_000)
 test.beforeAll(async ({ browser }) => {
   mkdirSync(shots, { recursive: true })

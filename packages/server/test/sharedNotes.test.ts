@@ -130,6 +130,32 @@ it.live("a slot linked in two chats shows one shared note; unlinking copies it, 
   }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
 )
 
+it.live("a chat note saved as a shared note at its own position counts as a place that uses it", () =>
+  Effect.gen(function* () {
+    const { api, start } = yield* setup
+    const chat = yield* start("Morning.")
+    const own = yield* api.CreateChatNote({ chatId: chat.chat.id, title: "Weather" })
+    const shared = yield* api.CreateSharedNote({
+      title: "",
+      content: "",
+      fromNoteRefId: own.id,
+      chatNote: { chatId: chat.chat.id, slotId: chat.entry.slotId }
+    })
+    // The slot's library head stays unlinked: only the chat's binding links.
+    assert.isUndefined((yield* api.OpenEditor({ refId: own.id })).doc["link"])
+    const [listed] = yield* api.ListSharedNotes({})
+    assert.strictEqual(listed!.usedBy, 1)
+    const linked = (yield* api.ListChatNotes({ chatId: chat.chat.id, slotId: chat.entry.slotId })).find(
+      (n) => n.ref.entityId === own.entityId
+    )
+    assert.strictEqual(linked!.linked!.usedBy, 1)
+    assert.strictEqual(linked!.linked!.refId, shared.id)
+    // Once the message it was bound at is deleted, that chat no longer uses it.
+    yield* api.DeleteMessage({ slotId: chat.entry.slotId })
+    assert.strictEqual((yield* api.ListSharedNotes({}))[0]!.usedBy, 0)
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
+)
+
 it.live("a card's note saved as a shared note links to it; in the bin it sends nothing until unlinked", () =>
   Effect.gen(function* () {
     const { api, userId, mira, start } = yield* setup

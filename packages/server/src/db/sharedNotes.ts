@@ -7,15 +7,32 @@ import type { RefId } from "@rp/shared/library.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 
-/** How many live note slots' library heads link to each of `entities`. */
+/**
+ * How many live note slots link to each of `entities`: a slot counts once when its library head
+ * links, or when a live chat's binding, on a message still there, is a revision that does (a chat note saved as shared, or
+ * linked, at a position of its own: the head keeps the older text).
+ */
 export const linkCounts = (sql: SqlClient.SqlClient, userId: UserId, entities: ReadonlyArray<string>) =>
   sql<{ link: string; n: number }>`
-    SELECT json_extract(h.doc_json, '$.link') AS link, count(*) AS n
-    FROM entities e JOIN entity_refs r ON r.entity_id = e.id AND r.ref_kind = 'upstream'
-    JOIN entity_revisions h ON h.id = r.head_revision_id
-    WHERE e.owner_user_id = ${userId} AND e.kind = 'note' AND e.deleted_at IS NULL
-      AND json_extract(h.doc_json, '$.link') IN (SELECT value FROM json_each(${JSON.stringify(entities)}))
-    GROUP BY 1`.pipe(Effect.map((rows) => new Map(rows.map((row) => [row.link, row.n]))))
+    WITH wanted(link) AS (SELECT value FROM json_each(${JSON.stringify(entities)})),
+    links(note, link) AS (
+      SELECT e.id, json_extract(h.doc_json, '$.link')
+      FROM entities e JOIN entity_refs r ON r.entity_id = e.id AND r.ref_kind = 'upstream'
+      JOIN entity_revisions h ON h.id = r.head_revision_id
+      WHERE e.owner_user_id = ${userId} AND e.kind = 'note' AND e.deleted_at IS NULL
+      UNION
+      SELECT e.id, json_extract(b.doc_json, '$.link')
+      FROM entities e JOIN state_events ev ON ev.key = 'note.binding'
+        AND json_extract(ev.value_json, '$.note') = e.id AND ev.superseded_by_changeset IS NULL
+      JOIN chats c ON c.id = ev.chat_id AND c.deleted_at IS NULL
+      LEFT JOIN slots s ON s.id = ev.slot_id
+      JOIN entity_revisions b ON b.id = json_extract(ev.value_json, '$.revision') AND b.entity_id = e.id
+      WHERE e.owner_user_id = ${userId} AND e.kind = 'note' AND e.deleted_at IS NULL
+        AND (ev.slot_id IS NULL OR (s.deleted_at IS NULL AND (ev.version_id IS NULL OR ev.version_id = s.selected_version_id)))
+    )
+    SELECT link, count(DISTINCT note) AS n FROM links WHERE link IN (SELECT link FROM wanted) GROUP BY link`.pipe(
+    Effect.map((rows) => new Map(rows.map((row) => [row.link, row.n])))
+  )
 
 /**
  * A shared note of the user's by its entity: its upstream ref and head, binned or not (a

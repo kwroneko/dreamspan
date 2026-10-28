@@ -99,4 +99,22 @@ test("attach a lorebook, send a keyword, and detach it from the provider request
   await inChat.getByRole("switch", { name: "Lantern lore" }).click()
   await expect(inChat.getByRole("switch", { name: "Lantern lore" })).not.toBeChecked()
   expect(await send(page, "And the lantern now?")).not.toContain("The watch lights seven lanterns.")
+
+  // A book that's both added here and global is listed once, under Global, with the switch for this chat.
+  await inChat.getByRole("switch", { name: "Lantern lore" }).click()
+  await expect(inChat.getByRole("switch", { name: "Lantern lore" })).toBeChecked()
+  await tab.getByRole("button", { name: "Use Lantern lore in every chat" }).click()
+  const globals = tab.getByRole("list", { name: "Global lorebooks" })
+  await expect(globals.getByRole("switch", { name: "Lantern lore" })).toBeChecked()
+  await expect(tab.getByRole("switch", { name: "Lantern lore" })).toHaveCount(1)
+  await expect(globals).toContainText("also added to this chat")
+  expect(await send(page, "The lantern, again?")).toContain("The watch lights seven lanterns.")
+  // Off in this chat takes both off; on brings the global use back.
+  await globals.getByRole("switch", { name: "Lantern lore" }).click()
+  await expect(globals.getByRole("switch", { name: "Lantern lore" })).not.toBeChecked()
+  await expect(tab.getByRole("switch", { name: "Lantern lore" })).toHaveCount(1)
+  expect(await send(page, "The lantern, off?")).not.toContain("The watch lights seven lanterns.")
+  await globals.getByRole("switch", { name: "Lantern lore" }).click()
+  await expect(globals.getByRole("switch", { name: "Lantern lore" })).toBeChecked()
+  expect(await send(page, "The lantern, on?")).toContain("The watch lights seven lanterns.")
 })

@@ -1276,7 +1276,6 @@ const composeStage = sync("compose", (assembly) => {
   const disabled = disabledIn(doc)
   const optional = (id: string, text: string, options?: Partial<Names>) =>
     text ? presetText(assembly, id, text, options) : null
-  const control: Array<StMessage> = []
   const characters = cast.characters
   const group = characters.length > 1
   // The speaking card, a card the user plays included (owner 2026-10-28: its prompts apply on an
@@ -1920,7 +1919,6 @@ const composeStage = sync("compose", (assembly) => {
       newChat,
       newExampleChat,
       sendIfEmpty: cast.type === "normal" ? null : sendIfEmpty,
-      control,
       budget
     })
   }

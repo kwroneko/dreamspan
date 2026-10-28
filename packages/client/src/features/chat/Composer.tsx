@@ -496,13 +496,13 @@ export function Composer({
         </div>
         <div
           data-guidance={guidance || undefined}
-          className={`flex min-w-0 flex-1 items-end gap-1 rounded-lg border p-1 focus-within:ring-2 ${
+          className={`flex min-w-0 flex-1 flex-wrap items-end gap-1 rounded-lg border p-1 focus-within:ring-2 @min-[640px]:flex-nowrap ${
             guidance
               ? "border-guidance bg-guidance-surface focus-within:ring-guidance/40"
               : "border-border bg-surface focus-within:border-focus focus-within:ring-focus/40"
           }`}
         >
-          <div className="grid min-w-0 flex-1">
+          <div className="grid w-full min-w-0 @min-[640px]:flex-1">
             {guidance && (
               <span aria-hidden className="px-2 pt-0.5 text-xs font-medium text-guidance">
                 Guidance
@@ -531,54 +531,57 @@ export function Composer({
               onKeyDown={onKeyDown}
             />
           </div>
-          <span className="hidden @min-[640px]:inline-flex">
-            <History draft={draft} />
-          </span>
-          {leaf?.version.writer === "model" && !leafGenerating && (
-            <SquareIconButton
-              label="Regenerate the latest reply"
-              hint="Regenerate the latest reply: a new version of it, in its place"
-              variant="ghost"
-              onClick={async () => report(await session.regenerate(leaf))}
-            >
-              <RegenerateIcon />
-            </SquareIconButton>
-          )}
-          {leafGenerating && (
-            <SquareIconButton
-              label="Stop the reply"
-              variant="ghost"
-              onClick={async () => report(await session.stop(leaf.version.id))}
-            >
-              <StopIcon />
-            </SquareIconButton>
-          )}
-          {/* With guidance on, it's the primary action: guidance is never sent as a message by mistake. */}
-          <Tooltip label={generateHint}>
-            <Button
-              variant={guidance ? "primary" : "secondary"}
-              pending={guidance && busy}
-              aria-label={generateText}
-              disabled={busy || !ready}
-              onClick={generate}
-              className="max-w-52 sm:max-w-56"
-            >
-              {guidance && !busy && <GenerateIcon />}
-              <span className="truncate">{generateText}</span>
-            </Button>
-          </Tooltip>
-          {!guidance && (
-            <SquareIconButton
-              label={sendLabel}
-              hint={sendHint}
-              variant="primary"
-              pending={busy}
-              disabled={!ready || (!hasText && replier === null)}
-              onClick={hasText ? send : replyNow}
-            >
-              {!busy && <SendIcon />}
-            </SquareIconButton>
-          )}
+          {/* Under the text box when it's narrow, beside it otherwise. */}
+          <div className="ml-auto flex items-end gap-1">
+            <span className="hidden @min-[640px]:inline-flex">
+              <History draft={draft} />
+            </span>
+            {leaf?.version.writer === "model" && !leafGenerating && (
+              <SquareIconButton
+                label="Regenerate the latest reply"
+                hint="Regenerate the latest reply: a new version of it, in its place"
+                variant="ghost"
+                onClick={async () => report(await session.regenerate(leaf))}
+              >
+                <RegenerateIcon />
+              </SquareIconButton>
+            )}
+            {leafGenerating && (
+              <SquareIconButton
+                label="Stop the reply"
+                variant="ghost"
+                onClick={async () => report(await session.stop(leaf.version.id))}
+              >
+                <StopIcon />
+              </SquareIconButton>
+            )}
+            {/* With guidance on, it's the primary action: guidance is never sent as a message by mistake. */}
+            <Tooltip label={generateHint}>
+              <Button
+                variant={guidance ? "primary" : "secondary"}
+                pending={guidance && busy}
+                aria-label={generateText}
+                disabled={busy || !ready}
+                onClick={generate}
+                className="max-w-52 sm:max-w-56"
+              >
+                {guidance && !busy && <GenerateIcon />}
+                <span className="truncate">{generateText}</span>
+              </Button>
+            </Tooltip>
+            {!guidance && (
+              <SquareIconButton
+                label={sendLabel}
+                hint={sendHint}
+                variant="primary"
+                pending={busy}
+                disabled={!ready || (!hasText && replier === null)}
+                onClick={hasText ? send : replyNow}
+              >
+                {!busy && <SendIcon />}
+              </SquareIconButton>
+            )}
+          </div>
         </div>
       </div>
       {/* The guidance toggle, under the input so it never narrows it (DESIGN §2.2). */}
@@ -613,7 +616,7 @@ export function Composer({
           role="status"
           className="flex flex-wrap items-center gap-2 rounded-md border border-warning/40 px-3 py-2 text-sm"
         >
-          <span className="min-w-0 flex-1">
+          <span className="min-w-0 flex-1 basis-60 wrap-break-word">
             This preset's rules against writing for {"{{user}}"} may need “not when writing as {"{{user}}"}”: in the
             preset, set their condition to “When writing as a character”.
           </span>

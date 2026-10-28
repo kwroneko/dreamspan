@@ -3,6 +3,7 @@
 // impersonation notice, on the realistic synthetic ST folder through a fake provider, so the
 // requests are the assembler's own. Every card, chat and preset here is made up.
 import { mkdirSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { expect, type Page, test } from "@playwright/test"
 import type { ChatId } from "@rp/shared/chat.ts"
@@ -20,7 +21,7 @@ const server = serverPerFile(withAdmin)
 let cookie: string | null = null
 const admin = async <A>(use: Parameters<typeof withCookie<A>>[2]) =>
   withCookie(server(), (cookie ??= await loginCookie(server(), ADMIN.handle, ADMIN.password)), use)
-const shots = resolve(process.env.SCREENSHOT_DIR ?? "p1-1-work/screenshots")
+const shots = resolve(process.env.SCREENSHOT_DIR ?? join(tmpdir(), "rp-loop-screenshots"))
 let provider: FakeProvider
 let presets: ReadonlyArray<LibraryRef>
 /** The Lantern Inn: a group chat with one member muted, as ST's disabled members import. */

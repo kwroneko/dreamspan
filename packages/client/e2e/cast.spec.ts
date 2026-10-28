@@ -90,6 +90,10 @@ test("the Cast tab: mute, speak now, write as, the card, add and remove", async 
   await expect(page.getByText("Changes here apply from the latest message on, on this branch.")).toBeVisible()
   await expect(members(page).getByRole("listitem")).toHaveCount(2)
   await expect(member(page, "Bo")).toContainText("your persona")
+  // The card you play isn't a character to mute or count: Mira is the one character.
+  await expect(member(page, "Bo").getByRole("switch")).toHaveCount(0)
+  await expect(member(page, "Mira").getByRole("switch")).toHaveCount(1)
+  await expect(page.getByRole("heading", { level: 2, name: "1 character" })).toBeVisible()
 
   // Absent from here on, like ST's mute; and back.
   await member(page, "Mira").getByRole("switch").click()

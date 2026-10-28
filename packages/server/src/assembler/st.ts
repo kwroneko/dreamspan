@@ -245,7 +245,8 @@ export const compose = (input: {
   readonly newExampleChat: Text | null
   /** A context-only filler for impersonation or swipe, after injections as ST adds it. */
   readonly sendIfEmpty: Text | null
-  readonly control: ReadonlyArray<StMessage>
+  /** Prompts that go last (nothing in production sends one; the tests do). */
+  readonly control?: ReadonlyArray<StMessage>
   /** Extension prompts (the summary, notes) put before or after the main prompt in turn (injectToMain). */
   readonly beside: ReadonlyArray<{ readonly message: StMessage; readonly at: "start" | "end" }>
   readonly layer?: ReadonlyArray<StMessage>
@@ -286,7 +287,7 @@ export const compose = (input: {
     relative(id)
   }
   relative("personaDescription")
-  const control = input.control
+  const control = input.control ?? []
   spend(control.reduce((n, m) => n + tokensOf(m), 0))
   const userRelative = collection
     .filter((p) => p.system_prompt === false && p.injection_position !== "absolute")

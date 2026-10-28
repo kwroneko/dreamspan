@@ -162,7 +162,7 @@ function Block({
           ) : forbids ? (
             "A card can't replace it"
           ) : (
-            "A card's own prompt replaces it"
+            "A card's own prompt can replace it"
           )}
         </p>
       )}
@@ -328,12 +328,23 @@ export function PromptDocument({
           ? "context unavailable"
           : context.notes
               .filter((n) => predicate(n.placement))
-              .map((n) => n.title + (n.due === false ? " (not due this turn)" : ""))
+              .map(
+                (n) =>
+                  n.title +
+                  (n.placement.mode === "depth" ? ` (depth ${n.placement.depth})` : "") +
+                  (n.due === false ? " (not due this turn)" : "")
+              )
               .join(", ") || "no active notes"}
     </div>
   )
   const history = order.findIndex((e) => e.identifier === "chatHistory")
   const afterHistory = order[history + 1]?.identifier === "newestMessage" ? history + 2 : history + 1
+  const tailStarts = (
+    <>
+      <p className="border-y border-border py-1 text-xs font-medium text-accent">Tail starts</p>
+      {slot("Start of tail notes", (p) => p.mode === "section" && p.section === "tail_start")}
+    </>
+  )
   const newestAfterTail = order.findIndex((e) => e.identifier === "newestMessage") > history + 1
   return (
     <div ref={root} className="flex min-w-0 flex-col gap-3">
@@ -382,21 +393,14 @@ export function PromptDocument({
                   <>
                     <p className="border-y border-border py-1 text-xs font-medium text-accent">History starts</p>
                     {slot("At depth N", (p) => p.mode === "depth")}
-                    {context?.notes
-                      .filter((n) => n.placement.mode === "depth")
-                      .map((n, i) => (
-                        <p key={i} className="text-xs text-muted">
-                          {n.title}: depth {n.placement.mode === "depth" ? n.placement.depth : 0}
-                        </p>
-                      ))}
+                    {slot("Top of the author's note", (p) => p.mode === "section" && p.section === "author_note_top")}
+                    {slot(
+                      "Bottom of the author's note",
+                      (p) => p.mode === "section" && p.section === "author_note_bottom"
+                    )}
                   </>
                 )}
-                {order.indexOf(entry) === afterHistory && (
-                  <>
-                    <p className="border-y border-border py-1 text-xs font-medium text-accent">Tail starts</p>
-                    {slot("Start of tail notes", (p) => p.mode === "section" && p.section === "tail_start")}
-                  </>
-                )}
+                {history >= 0 && order.indexOf(entry) === afterHistory && tailStarts}
                 {entry.identifier === "newestMessage" &&
                   newestAfterTail &&
                   slot("End of tail notes", (p) => p.mode === "section" && p.section === "tail_end")}
@@ -447,6 +451,7 @@ export function PromptDocument({
               </>
             )}
           </SortableList>
+          {history >= 0 && afterHistory >= order.length && tailStarts}
           {!newestAfterTail && slot("End of tail notes", (p) => p.mode === "section" && p.section === "tail_end")}
         </div>
       </div>

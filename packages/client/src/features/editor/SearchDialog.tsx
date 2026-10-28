@@ -1,6 +1,6 @@
 // Search and replace across an editor's text fields, as plain text or a regular expression
 // (DESIGN §6.2, §5.3). Replacing edits each field through its draft, like typing would.
-import { type FormEvent, type ReactNode, useState } from "react"
+import { type FormEvent, type ReactNode, useMemo, useState } from "react"
 import { Button } from "../../ui/Button.tsx"
 import { Checkbox } from "../../ui/Choice.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
@@ -8,7 +8,7 @@ import { Field, Input } from "../../ui/Field.tsx"
 import { Alert } from "../../ui/Surface.tsx"
 import { type Searchable, searchable } from "./fields.ts"
 import { runSearch, type SearchResponse } from "./search.ts"
-import type { EditorStore } from "./store.ts"
+import { type EditorStore, useWorkingDoc } from "./store.ts"
 
 /** Matches listed at most; Replace all still replaces every one. */
 const MAX_MATCHES = 500
@@ -17,7 +17,16 @@ const AROUND = 40
 interface Found {
   readonly fields: ReadonlyArray<Searchable>
   readonly response: SearchResponse
+  /** What was asked: the matches show only while the question and the text are still these. */
+  readonly asked: string
 }
+
+/** Whether two reads of the editor's text fields hold the same text at the same places. */
+const sameFields = (a: ReadonlyArray<Searchable>, b: ReadonlyArray<Searchable>) =>
+  a.length === b.length &&
+  a.every(
+    (field, index) => field.text === b[index]!.text && JSON.stringify(field.path) === JSON.stringify(b[index]!.path)
+  )
 
 /** Puts a field's new text back, as a draft of the field or of the list it's in. */
 const write = (store: EditorStore, field: Searchable, text: string) => {
@@ -48,6 +57,10 @@ export function SearchDialog({
   const [found, setFound] = useState<Found | null>(null)
   const [pending, setPending] = useState(false)
 
+  const working = useWorkingDoc(store)
+  const current = useMemo(() => searchable(store.snapshot!.ref.kind, working), [store, working])
+  const asked = JSON.stringify([find, replace, wholeWord, preserveCase, regex, caseSensitive])
+
   const search = async (replacement: string | null) => {
     const fields = searchable(store.snapshot!.ref.kind, store.working().doc)
     setPending(true)
@@ -62,7 +75,7 @@ export function SearchDialog({
       max: MAX_MATCHES
     })
     setPending(false)
-    return { fields, response }
+    return { fields, response, asked }
   }
 
   const submit = async (event: FormEvent) => {
@@ -73,15 +86,11 @@ export function SearchDialog({
   /** Replaces in the fields `only` names, or in every field. */
   const replaceIn = async (only: number | null) => {
     const result = await search(replace)
-    const current = searchable(store.snapshot!.ref.kind, store.working().doc)
-    if (
-      result.fields.some(
-        (field, index) =>
-          field.text !== current[index]?.text || JSON.stringify(field.path) !== JSON.stringify(current[index]?.path)
-      )
-    ) {
+    const now = searchable(store.snapshot!.ref.kind, store.working().doc)
+    if (!sameFields(result.fields, now)) {
       setFound({
-        fields: result.fields,
+        asked,
+        fields: now,
         response: {
           ok: false,
           error: "Text changed while the search was running. Find again to preview the current text."
@@ -98,7 +107,10 @@ export function SearchDialog({
     setFound(result.response.ok ? await search(replace) : result)
   }
 
-  const response = found?.response
+  // A list from before the question or the text changed isn't shown: its matches and previews
+  // are for text that's gone. (The error that asks to find again is shown, with its own say.)
+  const shown = found !== null && found.asked === asked && sameFields(found.fields, current) ? found : null
+  const response = shown?.response
   const actions = (children: ReactNode) =>
     inline ? (
       <div className="col-span-2 flex items-center justify-end gap-2 sm:col-span-1">{children}</div>
