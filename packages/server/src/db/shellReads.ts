@@ -74,7 +74,8 @@ export const makeShellReadHandlers = Effect.gen(function* () {
         }>(shellEventsQuery, [userId])
         const events = (yield* withoutPurged(
           sql,
-          raw.map((e) => ({ ...e, data: { key: e.key, value: JSON.parse(e.value_json) } })) as Array<Event>
+          raw.map((e) => ({ ...e, data: { key: e.key, value: JSON.parse(e.value_json) } })) as Array<Event>,
+          (event) => event.chat_id
         )) as Array<Event>
         const eventsAt = new Map<string, Array<Event>>()
         for (const e of events) {
@@ -260,7 +261,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
             (r) => r.chat_id
           )
         )
-        for (const e of events) if (e.data.key === "card.swap") independent.add(e.chat_id)
+        for (const e of raw) if (e.key === "card.swap") independent.add(e.chat_id)
         const chatTitles = new Map(chats.map((c) => [c.id, c.title]))
         // Fork-scoped state cannot be propagated down the shared slot tree: two forks
         // may end at the same slot and have different casts. Resolve each endpoint in its fork.

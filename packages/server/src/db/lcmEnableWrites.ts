@@ -195,7 +195,7 @@ export const makeLcmEnableWriteHandlers = (bin: Bin) =>
             if (
               payload.choice !== choice ||
               payload.leafSlotId !== leafSlotId ||
-              (forkId != null && payload.forkId !== forkId)
+              payload.forkId !== (yield* viewAt(sql, chatId, leafSlotId))
             )
               return yield* reject("EnableLcm", "The enable choice changed.")
             unhidden = payload.imported?.hidden ?? 0

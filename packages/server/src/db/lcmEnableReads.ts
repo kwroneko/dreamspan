@@ -1,4 +1,3 @@
-import { inFork } from "./forkState.ts"
 import { contextExcludedIn } from "./lcmVisibility.ts"
 // What enabling LCM on a chat takes (spec/LCM.md §2.7, §2.11), measured in one read: the
 // imported summary that could stand in for its hidden run, and the work the planner would do

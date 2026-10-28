@@ -603,7 +603,7 @@ export class ChatApi extends RpcGroup.make(
   }),
   /** Next request at the displayed leaf; Cache events invalidate this read. */
   Rpc.make("GetNextContext", {
-    payload: { chatId: ChatId, leafSlotId: Schema.NullOr(SlotId) },
+    payload: { chatId: ChatId, forkId: Schema.optionalKey(Schema.NullOr(ForkId)), leafSlotId: Schema.NullOr(SlotId) },
     success: NextContext,
     error: Schema.Union([...Errors])
   }),

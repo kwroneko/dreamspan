@@ -140,7 +140,11 @@ export const checkStateReferences = (
  * them back into a chat's state. A deleted entity still counts: it can be restored.
  * Connections stay: a binding to a purged one should fail visibly, not fall back.
  */
-export const withoutPurged = (sql: SqlClient.SqlClient, events: ReadonlyArray<FoldableEvent>) =>
+export const withoutPurged = <E extends FoldableEvent>(
+  sql: SqlClient.SqlClient,
+  events: ReadonlyArray<E>,
+  partition: (event: E) => string = () => ""
+) =>
   Effect.gen(function* () {
     const ids = { entity: new Set<string>(), ref: new Set<string>(), revision: new Set<string>() }
     for (const event of events) {
@@ -166,12 +170,59 @@ export const withoutPurged = (sql: SqlClient.SqlClient, events: ReadonlyArray<Fo
       for (const id of set) if (!present.has(id)) gone.add(id)
     }
     if (gone.size === 0) return events
+    // A purged card may still be the routing identity of an independent live fork.
+    // Keep only the cast fields that reach a live card through the remaining swaps;
+    // neither its definitions nor its dormant bindings survive the purge.
+    const groups = new Map<string, Array<E>>()
+    for (const event of events) {
+      const key = partition(event)
+      const group = groups.get(key) ?? []
+      group.push(event)
+      groups.set(key, group)
+    }
+    const routingByGroup = new Map<string, Set<string>>()
+    const keptSwaps = new Set<E>()
+    for (const [key, group] of groups) {
+      const destinations = new Map<string, string>()
+      for (const event of [...group].reverse()) {
+        const { data } = event
+        if (data.key !== "card.swap") continue
+        // A purged incoming card still makes its event disappear, as before.
+        // It can remain only as an intermediate on the way to a live card.
+        if (gone.has(data.value.entity) && !destinations.has(data.value.entity)) continue
+        keptSwaps.add(event)
+        destinations.set(data.value.replaces, destinations.get(data.value.entity) ?? data.value.entity)
+      }
+      routingByGroup.set(
+        key,
+        new Set(
+          [...gone].filter((id) => {
+            const destination = destinations.get(id)
+            return destination !== undefined && !gone.has(destination)
+          })
+        )
+      )
+    }
     return events.flatMap((event): ReadonlyArray<FoldableEvent> => {
+      const routing = routingByGroup.get(partition(event))!
       if (scopeReferences(event.scope).some((reference) => gone.has(reference.id))) return []
       if (!references(event.data).some((reference) => gone.has(reference.id))) return [event]
+      const { data } = event
+      if (data.key === "card.swap") {
+        return keptSwaps.has(event) ? [event] : []
+      }
+      if (
+        ["participant.join", "participant.leave", "presence.set", "lorebook.binding", "lorebook.embedded"].includes(
+          data.key
+        ) &&
+        references(data).every(
+          (r) => !gone.has(r.id) || (r.table === "entity" && r.kind === "card" && routing.has(r.id))
+        )
+      )
+        return [event]
       // Only this key names several entities; the rest of the set still applies.
       if (event.data.key === "played_by_me.set") {
-        const entities = event.data.value.entities.filter((id) => !gone.has(id))
+        const entities = event.data.value.entities.filter((id) => !gone.has(id) || routing.has(id))
         return [{ ...event, data: { key: event.data.key, value: { entities } } }]
       }
       return []

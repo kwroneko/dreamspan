@@ -257,12 +257,18 @@ export class ChatSession {
 
   private async refreshLcm() {
     const read = ++this.lcmReads
+    const forkId = this.view.forkId
     const leafSlotId = this.view.leafSlotId
     if (leafSlotId === null || this.disposed) return
-    const result = await this.call((client) =>
-      client("GetLcmState", { chatId: this.chatId, forkId: this.view.forkId, leafSlotId })
+    const result = await this.call((client) => client("GetLcmState", { chatId: this.chatId, forkId, leafSlotId }))
+    if (
+      !result.ok ||
+      this.disposed ||
+      read < this.lcmApplied ||
+      forkId !== this.view.forkId ||
+      leafSlotId !== this.view.leafSlotId
     )
-    if (!result.ok || this.disposed || read < this.lcmApplied || leafSlotId !== this.view.leafSlotId) return
+      return
     this.lcmApplied = read
     for (const listener of this.lcmListeners) listener()
     // The same layer again (the leaf moved on, a reply streamed) changes nothing on screen.
@@ -284,10 +290,18 @@ export class ChatSession {
 
   private async refreshContext() {
     const read = ++this.contextReads
+    const forkId = this.view.forkId
     const leafSlotId = this.view.leafSlotId
     if (leafSlotId === null) return
-    const result = await this.call((client) => client("GetNextContext", { chatId: this.chatId, leafSlotId }))
-    if (!result.ok || this.disposed || read !== this.contextReads || leafSlotId !== this.view.leafSlotId) return
+    const result = await this.call((client) => client("GetNextContext", { chatId: this.chatId, leafSlotId, forkId }))
+    if (
+      !result.ok ||
+      this.disposed ||
+      read !== this.contextReads ||
+      forkId !== this.view.forkId ||
+      leafSlotId !== this.view.leafSlotId
+    )
+      return
     this.apply({ _tag: "Cache", ...result.value }, null)
   }
 
@@ -846,7 +860,7 @@ export class ChatSession {
         // An edit, a swipe, a delete or a hide can make a summary stale; the estimate follows
         // every such change, so the layer is read again with it.
         this.scheduleLcm()
-        if (event.leafSlotId !== this.view.leafSlotId) {
+        if (event.leafSlotId !== this.view.leafSlotId || (event.forkId != null && event.forkId !== this.view.forkId)) {
           void this.refreshContext()
           return
         }

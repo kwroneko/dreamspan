@@ -543,7 +543,6 @@ export class WriteOps extends RpcGroup.make(
       chatId: ChatId,
       forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       leafSlotId: SlotId,
-      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       choice: EnableChoice,
       approved: BackfillApproval,
       runId: Schema.optionalKey(Schema.String),
@@ -2509,7 +2508,12 @@ export class ReadOps extends RpcGroup.make(
     error: Schema.Union([NotFound, StorageError])
   }),
   Rpc.make("CacheWarmth", {
-    payload: { userId: UserId, chatId: ChatId, leafSlotId: Schema.optionalKey(Schema.NullOr(SlotId)) },
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
+      leafSlotId: Schema.optionalKey(Schema.NullOr(SlotId))
+    },
     success: NextContext,
     error: Schema.Union([NotFound, StorageError])
   }),

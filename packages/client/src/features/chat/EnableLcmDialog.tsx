@@ -131,7 +131,6 @@ export function EnableLcmDialog({
     setPending(true)
     const result = await session.call((client) =>
       client("EnableLcm", {
-        forkId: session.snapshot().forkId,
         chatId: session.id,
         leafSlotId: offer.leafSlotId,
         forkId,

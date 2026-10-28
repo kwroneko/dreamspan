@@ -1,12 +1,12 @@
 import { presetContext } from "./presetContext.ts"
 import { cacheExpiry } from "./cacheExpiry.ts"
 import { summaryRequest } from "../lcm/request.ts"
-import { atLeaf, inFork } from "./forkState.ts"
+import { inFork, viewAt } from "./forkState.ts"
 // Context assembly and rebuilding in the reader workers (ARCHITECTURE §15).
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { makeAssembler } from "../assembler/assembler.ts"
-import type { ChatId } from "@rp/shared/chat.ts"
+import type { ChatId, ForkId } from "@rp/shared/chat.ts"
 import { BUILTIN_PRESET_LABEL } from "@rp/shared/generation.ts"
 import type { EffectivePreset } from "@rp/shared/inspectorApi.ts"
 import { wireContext } from "../assembler/wire.ts"
@@ -119,7 +119,7 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
     // The cache-warmth estimate (DESIGN §5.5): the chat's last request that reached its
     // provider and the next request's TTL eligibility and prefix at the end of the active path
     // compared up to its last breakpoint. Null when there's nothing to estimate.
-    CacheWarmth: ({ userId, chatId, leafSlotId }) =>
+    CacheWarmth: ({ userId, chatId, leafSlotId, forkId }) =>
       Effect.gen(function* () {
         const [chat] = yield* sql<{ id: string }>`
           SELECT id FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`
@@ -172,6 +172,7 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
                 AND c.deleted_at IS NULL AND c.purged_at IS NULL`
           : []
         const boundary = {
+          forkId: (yield* viewAt(sql, chatId, sources.pins().target.parentSlotId)) as ForkId | null,
           presetContext: next instanceof AssemblyFailed ? null : yield* presetContext(sql, userId, next),
           ...(chosen === undefined
             ? {}
@@ -241,7 +242,7 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
                   changed
                 }
         }
-      }).pipe(atLeaf(sql, chatId, leafSlotId ?? null), query("CacheWarmth")),
+      }).pipe(inFork(sql, chatId, forkId, leafSlotId ?? null), query("CacheWarmth")),
 
     GetGenerationDefaults: ({ userId }) => readDefaults(sql, userId).pipe(query("GetGenerationDefaults")),
     GetGlobalLorebooks: ({ userId }) => readGlobalLorebooks(sql, userId).pipe(query("GetGlobalLorebooks")),

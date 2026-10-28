@@ -251,7 +251,6 @@ export const makeLcmHandlers = Effect.gen(function* () {
           userId: id,
           chatId,
           leafSlotId,
-          ...(forkId != null ? { forkId } : {}),
           choice,
           approved: approval(approved!),
           ...(refreshed.summaryNotesOn?.length ? { switchOff: refreshed.summaryNotesOn } : {})

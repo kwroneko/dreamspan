@@ -626,10 +626,10 @@ export const makeChatHandlers = Effect.gen(function* () {
     PinFork: ({ forkId, pinned }) =>
       Effect.flatMap(userId, (id) => writer.SetForkPinned({ userId: id, forkId, pinned })).pipe(internal("PinFork")),
 
-    GetNextContext: ({ chatId, leafSlotId }) =>
-      Effect.flatMap(userId, (id) => reader.CacheWarmth({ userId: id, chatId, leafSlotId })).pipe(
-        internal("GetNextContext")
-      ),
+    GetNextContext: ({ chatId, leafSlotId, forkId }) =>
+      Effect.flatMap(userId, (id) =>
+        reader.CacheWarmth({ userId: id, chatId, leafSlotId, forkId: forkId ?? null })
+      ).pipe(internal("GetNextContext")),
 
     SubscribeChat: ({ chatId }) =>
       Stream.unwrap(

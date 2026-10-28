@@ -116,7 +116,9 @@ export const makeChatSetupReadHandlers = Effect.gen(function* () {
       )
       // Filter purged references once for all chats, including participant scopes, just
       // as StateEventsAt does. The per-event chat id survives a PlayedByMe replacement.
-      const kept = (yield* withoutPurged(sql, decoded.flat())) as Array<FoldableEvent & { chatId: string }>
+      const kept = (yield* withoutPurged(sql, decoded.flat(), (event) => event.chatId)) as Array<
+        FoldableEvent & { chatId: string }
+      >
       const eventsByChat = new Map<string, Array<FoldableEvent>>()
       for (const event of kept) {
         const events = eventsByChat.get(event.chatId) ?? []

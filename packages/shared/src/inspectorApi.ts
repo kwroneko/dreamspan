@@ -3,7 +3,7 @@ import { Placement } from "./docs/note.ts"
 import { SelectiveLogic } from "./docs/lorebook.ts"
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
-import { ChatId, ContextIssue, SlotId, VersionId } from "./chat.ts"
+import { ChatId, ContextIssue, ForkId, SlotId, VersionId } from "./chat.ts"
 import { NotFound, ServerError } from "./errors.ts"
 import { LlmRequestId, RequestStatus, UsageSource } from "./usage.ts"
 
@@ -272,6 +272,8 @@ export type PresetContext = typeof PresetContext.Type
 
 /** The next request boundary, also available before a first send or without a cache TTL. */
 export const NextContext = Schema.Struct({
+  /** Which fork the estimate describes, including when two forks share a tip. */
+  forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
   presetContext: Schema.optionalKey(Schema.NullOr(PresetContext)),
   /** Null when neither the chat nor the user's defaults name a model. */
   model: Schema.optionalKey(Schema.NullOr(EffectiveModel)),

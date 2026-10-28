@@ -1,3 +1,4 @@
+import { stateEventsOnPath } from "./stateRead.ts"
 import { recordHistoryReduction } from "./historyChanges.ts"
 // What the writer's chat operations share (writes.ts, chatSetupWrites.ts): ownership
 // checks, inserting versions, slots and state events, and appending a message. Each runs
@@ -5,7 +6,7 @@ import { recordHistoryReduction } from "./historyChanges.ts"
 import type { ChatId, EntityId, ForkId, NewVersion, SlotId, VersionId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
-import { branchOwned, type FoldableEvent, type StateEventData } from "@rp/shared/state.ts"
+import { branchOwned, foldState, type FoldableEvent, type StateEventData } from "@rp/shared/state.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import type { Bin } from "./bin.ts"
@@ -14,7 +15,7 @@ import { AppendResult, LeafMoved, NotFound, StaleWrite } from "./ops.ts"
 import { forkThrough, onPath } from "./forks.ts"
 import { forkAt, nextSeq, insertFork, originalSql, replacedIn, selectionIn, writeSelect } from "./forkState.ts"
 import { versionExtras, type ChatRow, type ForkRow, toChat, toVersion, type VersionRow } from "./rows.ts"
-import { checkStateReferences } from "./stateRefs.ts"
+import { checkStateReferences, withoutPurged } from "./stateRefs.ts"
 
 export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"]) => {
   /** Fails with NotFound unless `query` counts exactly one row. */
@@ -166,6 +167,55 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
           UNION SELECT e.id, e.forked_from_entity_id FROM entities e JOIN other a ON e.id = a.parent
         ) SELECT 1 FROM ancestors a JOIN other b ON a.id = b.id LIMIT 1`
         if (!family) return yield* new NotFound({ entity: "card family", id: data.value.entity })
+      }
+      // These fields follow the cast position through a swap. Store a later change
+      // against its pre-swap identity, since branch-owned swaps fold after positions.
+      // Card bindings deliberately keep their own identity (the replaced binding sleeps).
+      if (
+        [
+          "participant.join",
+          "participant.leave",
+          "presence.set",
+          "played_by_me.set",
+          "lorebook.binding",
+          "lorebook.embedded"
+        ].includes(data.key)
+      ) {
+        const rows = yield* stateEventsOnPath(sql, chatId as ChatId, slotId as SlotId | null, fork)
+        const events = yield* withoutPurged(
+          sql,
+          rows.map((e) => ({
+            scope: e.scope,
+            data: { key: e.key, value: JSON.parse(e.value_json) }
+          })) as Array<FoldableEvent>
+        )
+        const originals = new Map(
+          foldState(events.filter((e) => !branchOwned.has(e.data.key))).participants.map((id) => [id, id])
+        )
+        for (const { data: e } of events) {
+          if (e.key !== "card.swap" || e.value.entity === e.value.replaces) continue
+          const original = originals.get(e.value.replaces)
+          if (original === undefined) continue
+          originals.delete(e.value.replaces)
+          originals.set(e.value.entity, original)
+        }
+        const original = (id: EntityId) => (originals.get(id) ?? id) as EntityId
+        const rekey = <A extends { readonly value: { readonly entity: EntityId } }>(event: A): A => ({
+          ...event,
+          value: { ...event.value, entity: original(event.value.entity) }
+        })
+        switch (data.key) {
+          case "participant.join":
+          case "participant.leave":
+          case "presence.set":
+          case "lorebook.binding":
+          case "lorebook.embedded":
+            data = rekey(data)
+            break
+          case "played_by_me.set":
+            data = { ...data, value: { entities: data.value.entities.map(original) } }
+            break
+        }
       }
       const forkSeq = yield* nextSeq(sql, chatId)
       const [next] = yield* sql<{ n: number }>`

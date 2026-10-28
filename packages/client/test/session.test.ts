@@ -1,6 +1,7 @@
 // A chat session's window against events that arrive while a read is in flight: the
 // server may answer the read from before them, and the reply mustn't undo them.
-import type { Chat, ChatId, PathEntry, QueuedMessage, SlotId, Version, VersionId } from "@rp/shared/chat.ts"
+import type { Chat, ChatId, ForkId, PathEntry, QueuedMessage, SlotId, Version, VersionId } from "@rp/shared/chat.ts"
+import type { LcmState } from "@rp/shared/lcm.ts"
 import type { ChatEvent, PathWindow } from "@rp/shared/chatApi.ts"
 import { AtomRegistry } from "effect/reactivity"
 import { describe, expect, it, vi } from "vitest"
@@ -91,6 +92,49 @@ const reply = version("v2", "s2", "generating", "The tide")
 const second = entry("s2", "s1", reply)
 
 describe("ChatSession", () => {
+  it("drops an LCM read from another fork sharing the same tip", async () => {
+    const { s } = session()
+    const internals = s as unknown as {
+      view: ReturnType<typeof s.snapshot>
+      refreshLcm: () => Promise<void>
+      call: () => Promise<unknown>
+    }
+    const answers: Array<(value: unknown) => void> = []
+    internals.call = () => new Promise((answer) => answers.push(answer))
+    const leafSlotId = "shared-tip" as SlotId
+    internals.view = { ...s.snapshot(), forkId: "old" as ForkId, leafSlotId }
+    const old = internals.refreshLcm()
+    internals.view = { ...s.snapshot(), forkId: "new" as ForkId, leafSlotId }
+    const current = internals.refreshLcm()
+    answers[0]!({ ok: true, value: { enabled: false, leafSlotId } as LcmState })
+    await old
+    expect(s.snapshot().lcm).toBeNull()
+    answers[1]!({ ok: true, value: { enabled: true, leafSlotId } as LcmState })
+    await current
+    expect(s.snapshot().lcm?.enabled).toBe(true)
+    s.dispose()
+  })
+
+  it("reads its own context instead of applying another fork's Cache event at the same tip", () => {
+    const { s, receive } = session()
+    const internals = s as unknown as { view: ReturnType<typeof s.snapshot>; refreshContext: () => Promise<void> }
+    const leafSlotId = "shared-tip" as SlotId
+    internals.view = { ...s.snapshot(), forkId: "viewed" as ForkId, leafSlotId }
+    const refresh = vi.fn(async () => {})
+    internals.refreshContext = refresh
+    receive({
+      _tag: "Cache",
+      forkId: "other" as ForkId,
+      leafSlotId,
+      warmth: null,
+      historyStart: null,
+      summarizedThrough: null
+    })
+    expect(s.snapshot().history).toBeNull()
+    expect(refresh).toHaveBeenCalledOnce()
+    s.dispose()
+  })
+
   it("retains preset annotations from Cache events, including changed counts", () => {
     const { s, receive } = session()
     const base = { _tag: "Cache", leafSlotId: null, warmth: null, historyStart: null, summarizedThrough: null } as const

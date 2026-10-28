@@ -1130,10 +1130,19 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
           actor.api.GetNextContext({ chatId: actor.chat.chatId, leafSlotId: owner.chat.slotId }),
           "NotFound"
         )
+        yield* refused(
+          actor.api.GetNextContext({
+            chatId: actor.chat.chatId,
+            leafSlotId: actor.chat.slotId,
+            forkId: owner.chat.forkId
+          }),
+          "NotFound"
+        )
         const own = yield* owner.api.GetNextContext({ chatId: owner.chat.chatId, leafSlotId: owner.chat.slotId })
         assert.strictEqual(own.leafSlotId, owner.chat.slotId)
         assert.deepStrictEqual(Object.keys(own).sort(), [
           "budget",
+          "forkId",
           "historyStart",
           "leafSlotId",
           "model",
@@ -2852,6 +2861,10 @@ const storage: Record<
       yield* refused(reader.CacheWarmth({ userId: actor.user.id, chatId: owner.chat.chatId }), "NotFound")
       yield* refused(
         reader.CacheWarmth({ userId: actor.user.id, chatId: actor.chat.chatId, leafSlotId: owner.chat.slotId }),
+        "NotFound"
+      )
+      yield* refused(
+        reader.CacheWarmth({ userId: actor.user.id, chatId: actor.chat.chatId, forkId: owner.chat.forkId }),
         "NotFound"
       )
       const own = yield* reader.CacheWarmth({ userId: owner.user.id, chatId: owner.chat.chatId })

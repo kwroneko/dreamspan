@@ -1,3 +1,5 @@
+import type { NextContext } from "@rp/shared/inspectorApi.ts"
+import { newChatNote } from "@rp/shared/editing.ts"
 import { assert, layer } from "@effect/vitest"
 import { type ForkId, NewVersion, type SlotId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
@@ -388,6 +390,210 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
         }
       ])
       assert.deepStrictEqual((yield* state(current, a.slotId)).participants, [parent.entityId])
+    })
+  )
+  it.effect("cast changes after a swap address the card the fork now uses", () =>
+    Effect.gen(function* () {
+      const { api, main, b, parent, card, add, swap, state, fork, chatId } = yield* setup
+      const sibling = yield* fork(main, b.slotId)
+      yield* add(main, b.slotId, { key: "presence.set", value: { entity: parent.entityId, present: false } })
+      yield* add(main, b.slotId, { key: "lorebook.embedded", value: { entity: parent.entityId, on: false } })
+      yield* swap(main)
+      yield* api.ChangeCast({
+        chatId,
+        forkId: main,
+        slotId: b.slotId,
+        change: { _tag: "Presence", entityId: card.entityId, present: true }
+      })
+      assert.notInclude((yield* state(main)).absent, card.entityId)
+      yield* add(main, b.slotId, { key: "lorebook.embedded", value: { entity: card.entityId, on: true } })
+      assert.strictEqual((yield* state(main)).embeddedLorebooks[card.entityId], true)
+      yield* api.ChangeCast({
+        chatId,
+        forkId: main,
+        slotId: b.slotId,
+        change: { _tag: "PlayedByMe", entityIds: [card.entityId] }
+      })
+      assert.deepStrictEqual((yield* state(main)).playedByMe, [card.entityId])
+      yield* api.ChangeCast({ chatId, forkId: main, slotId: b.slotId, change: { _tag: "PlayedByMe", entityIds: [] } })
+      assert.deepStrictEqual((yield* state(main)).playedByMe, [])
+      yield* api.ChangeCast({
+        chatId,
+        forkId: main,
+        slotId: b.slotId,
+        change: { _tag: "Leave", entityId: card.entityId }
+      })
+      assert.deepStrictEqual((yield* state(main)).participants, [])
+      yield* api.ChangeCast({
+        chatId,
+        forkId: main,
+        slotId: b.slotId,
+        change: { _tag: "Join", entityId: card.entityId }
+      })
+      assert.deepStrictEqual((yield* state(main)).participants, [card.entityId])
+      yield* api.ChangeCast({
+        chatId,
+        forkId: main,
+        slotId: b.slotId,
+        change: { _tag: "Swap", entityId: parent.entityId, replaces: card.entityId }
+      })
+      assert.deepStrictEqual((yield* state(main)).participants, [parent.entityId])
+      assert.deepStrictEqual((yield* state(sibling)).participants, [parent.entityId])
+    })
+  )
+
+  it.effect("purging a replaced card keeps the independent replacement in the cast", () =>
+    Effect.gen(function* () {
+      const { api, main, parent, card, swap, state, writer, userId } = yield* setup
+      yield* swap(main)
+      const item = yield* writer.DeleteEntity({ userId, entityId: parent.entityId })
+      yield* api.PurgeBinItem({ itemId: item.id })
+      assert.deepStrictEqual((yield* state(main)).participants, [card.entityId])
+    })
+  )
+
+  it.effect("purged intermediates route to live cards and purged incoming swaps stay ignored", () =>
+    Effect.gen(function* () {
+      const { api, main, b, parent, card, swap, state, writer, userId, add, fork } = yield* setup
+      const next = yield* writer.ForkCard({
+        userId,
+        refId: card.id,
+        name: "Third card",
+        nickname: "Mira",
+        characterVersion: "3",
+        moveDrafts: false
+      })
+      yield* add(main, b.slotId, { key: "presence.set", value: { entity: parent.entityId, present: false } })
+      yield* swap(main)
+      yield* add(main, b.slotId, { key: "card.swap", value: { entity: next.entityId, replaces: card.entityId } })
+      const later = yield* fork(main, b.slotId)
+      // This fork goes back to the original, which will be purged.
+      yield* add(later, b.slotId, { key: "card.swap", value: { entity: parent.entityId, replaces: next.entityId } })
+      for (const entityId of [parent.entityId, card.entityId]) {
+        const item = yield* writer.DeleteEntity({ userId, entityId })
+        yield* api.PurgeBinItem({ itemId: item.id })
+      }
+      assert.deepStrictEqual((yield* state(main)).participants, [next.entityId])
+      assert.deepStrictEqual((yield* state(later)).participants, [next.entityId])
+      yield* add(later, b.slotId, { key: "presence.set", value: { entity: next.entityId, present: true } })
+      assert.notInclude((yield* state(later)).absent, next.entityId)
+      assert.include((yield* state(main)).absent, next.entityId)
+    })
+  )
+
+  it.effect("batched group and shell reads retain live replacements after purging originals", () =>
+    Effect.gen(function* () {
+      const { api, main, b, parent, card, swap, writer, reader, userId, add, chatId } = yield* setup
+      const steady = yield* writer.CreateEntity({
+        userId,
+        kind: "card",
+        label: "Tomas",
+        subtitle: "",
+        doc: cardDoc("Tomas"),
+        schemaVersion: 1,
+        origin: "user",
+        sourcePath: null
+      })
+      yield* add(main, b.slotId, { key: "participant.join", value: { entity: steady.entityId } })
+      yield* swap(main)
+      const other = yield* writer.CreateChat({
+        userId,
+        kind: "rp",
+        status: "active",
+        title: "Other routing",
+        participants: [parent.entityId, steady.entityId],
+        greeting: null
+      })
+      for (const value of [
+        { entity: card.entityId, replaces: parent.entityId },
+        { entity: parent.entityId, replaces: card.entityId }
+      ])
+        yield* writer.AddStateEvent({
+          userId,
+          chatId: other.id,
+          forkId: other.currentForkId,
+          slotId: null,
+          versionId: null,
+          scope: null,
+          data: { key: "card.swap", value }
+        })
+      const item = yield* writer.DeleteEntity({ userId, entityId: parent.entityId })
+      yield* api.PurgeBinItem({ itemId: item.id })
+      const group = (yield* reader.ChatGroups({ userId })).find((g) => g.latestChatId === chatId)
+      assert.isDefined(group)
+      assert.sameMembers(
+        group!.members.map((m) => m.entityId),
+        [card.entityId, steady.entityId]
+      )
+      const shell = yield* reader.ShellLibrary({ userId })
+      assert.sameMembers([...shell.forks.find((f) => f.chat.id === chatId)!.cast], [card.entityId, steady.entityId])
+      assert.sameMembers([...shell.forks.find((f) => f.chat.id === other.id)!.cast], [card.entityId, steady.entityId])
+    })
+  )
+
+  it.effect("the next-context preview reads the viewed fork at a shared tip", () =>
+    Effect.gen(function* () {
+      const mock = yield* Effect.acquireRelease(
+        Effect.promise(() =>
+          startMockProvider((_request, res) =>
+            sse(res, completionChunks(["Reply."], { prompt_tokens: 10, completion_tokens: 2 }))
+          )
+        ),
+        (m) => Effect.promise(() => m.close())
+      )
+      const api = yield* client()
+      const writer = yield* Writer
+      const userId = (yield* api.Whoami()).id as UserId
+      const { chat, version } = yield* generateReply(api, {
+        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+        model: {}
+      })
+      const main = chat.currentForkId!
+      const other = (yield* writer.CreateFork({ userId, chatId: chat.id, fromForkId: main, atSlotId: version.slotId }))
+        .fork.id
+      const note = yield* writer.CreateEntity({
+        userId,
+        kind: "note",
+        label: "Fork note",
+        subtitle: "",
+        doc: { ...newChatNote(chat.id, "Fork note"), content: "Only in this fork." },
+        schemaVersion: 1,
+        origin: "user",
+        sourcePath: null
+      })
+      yield* writer.AddStateEvent({
+        userId,
+        chatId: chat.id,
+        forkId: main,
+        slotId: version.slotId,
+        versionId: null,
+        scope: null,
+        data: { key: "note.activate", value: { note: note.entityId } }
+      })
+      const params = { chatId: chat.id, forkId: main, leafSlotId: version.slotId }
+      const names = (next: NextContext) => next.presetContext?.notes.map((n) => n.title) ?? []
+      assert.include(names(yield* api.GetNextContext(params)), "Fork note")
+      assert.notInclude(names(yield* api.GetNextContext({ ...params, forkId: other })), "Fork note")
+    }).pipe(Effect.scoped)
+  )
+
+  it.effect("an enable run cannot unhide one fork and enable another after current changes", () =>
+    Effect.gen(function* () {
+      const { main, b, writer, reader, userId, chatId, fork } = yield* setup
+      yield* writer.ChangeLcmSettings({ userId, chatId, forkId: main, change: { enabled: false } })
+      const params = {
+        userId,
+        chatId,
+        leafSlotId: b.slotId,
+        choice: "scratch" as const,
+        approved: { jobs: 0, tokens: 0, cost: null, currency: null },
+        imported: null
+      }
+      const run = yield* writer.StageLcmEnable(params)
+      const other = yield* fork(main, b.slotId)
+      assert.strictEqual(yield* outcome(writer.EnableLcm({ ...params, runId: run.runId })), "StorageError:constraint")
+      assert.isFalse((yield* reader.GetLcmState({ userId, chatId, forkId: other, leafSlotId: b.slotId })).enabled)
+      assert.isFalse((yield* reader.GetLcmState({ userId, chatId, forkId: main, leafSlotId: b.slotId })).enabled)
     })
   )
 })
