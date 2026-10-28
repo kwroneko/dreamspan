@@ -4,7 +4,7 @@ import { completedCoverage, failedHold } from "./lcmCoverage.ts"
 import { maintain, MAX_JOBS_PER_PLAN } from "./lcmMaintain.ts"
 import { tokensOf } from "../assembler/st.ts"
 import { foldState } from "@rp/shared/state.ts"
-import { BUILTIN_SUMMARY_INSTRUCTION, chunkSize, resolveLcm } from "@rp/shared/lcmSettings.ts"
+import { BUILTIN_SUMMARY_INSTRUCTION, chunkSize, resolveLcm, summaryWords } from "@rp/shared/lcmSettings.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { AssemblySources } from "../assembler/pipeline.ts"
@@ -89,12 +89,9 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
         const recent = built.lcm?.recentBudget ?? { target: 0, maximum: 0 }
         const windowMax = recent.maximum
         const leafInput = chunkSize(resolveLcm(state.lcm, defaults.lcm).leafInput, recent)
-        if (leafInput < 1 || leafInput * 2 > recent.maximum - recent.target)
-          return yield* new AssemblyFailed({
-            reason: "budget",
-            message:
-              "Two summary chunks must fit between the recent messages' target and maximum; widen the pair or reduce the chunk size."
-          })
+        // A chunk that doesn't fit twice in the band plans nothing: the Summaries section says so
+        // under the chunk size, and it's the user's setting, not a failure.
+        if (leafInput < 1 || leafInput * 2 > recent.maximum - recent.target) return empty
         const maintenance = reason
           ? yield* maintain(sql, userId, chatId, leafSlotId, layer, {
               reason,
@@ -277,11 +274,11 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
         const instruction =
           job.level > 1
             ? settings.withPreset
-              ? `Condense the last ${children.length} summaries above ${range} into one summary of at most ${job.target} words. Keep its language and voice, names, events and unresolved details. The earlier summaries are continuity, not material to condense again.`
-              : `Condense the last ${children.length} summaries ${range} into one summary of at most ${job.target} words. Keep their language and voice, names, events and unresolved details. Any summaries before them are continuity, not material to condense again.`
+              ? `Condense the last ${children.length} summaries above ${range} into one summary of at most ${summaryWords(job.target)} words. Keep its language and voice, names, events and unresolved details. The earlier summaries are continuity, not material to condense again.`
+              : `Condense the last ${children.length} summaries ${range} into one summary of at most ${summaryWords(job.target)} words. Keep their language and voice, names, events and unresolved details. Any summaries before them are continuity, not material to condense again.`
             : (settings.tail ?? BUILTIN_SUMMARY_INSTRUCTION)
         const tail =
-          instruction.replace(/\{\{words\}\}/gi, String(job.target)) +
+          instruction.replace(/\{\{words\}\}/gi, String(summaryWords(job.target))) +
           (style === "tool"
             ? "\nWrite the summary with summary_tool. Create a draft and finalize it; assistant prose is not the summary."
             : "\nReturn only the summary, without commentary.")

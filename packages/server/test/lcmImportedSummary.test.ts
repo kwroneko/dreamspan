@@ -170,7 +170,7 @@ lcmTest("enabling summaries switches the imported note off for both choices; re-
       // Imported chats copy the account default, off.
       const settings = yield* h.api.GetLcmSettings({ chatId: chat.chatId, leafSlotId: chat.leaf })
       assert.isFalse(settings.stored!.enabled)
-      assert.strictEqual(settings.stored!.recentMax, 24_000)
+      assert.strictEqual(settings.stored!.recentMax, 20_000)
       const offer = yield* h.api.GetLcmEnableOffer({ chatId: chat.chatId, leafSlotId: chat.leaf })
       assert.isTrue(offer.summaryNoteOn)
       yield* h.api.EnableLcm({

@@ -201,7 +201,7 @@ const EffectiveModel = Schema.Struct({
 
 export const SummaryFill = Schema.Struct({
   prompts: Schema.Array(Schema.String),
-  kind: Schema.Literals(["summaries", "notes", "none"]),
+  kind: Schema.Literals(["notes", "none"]),
   count: Schema.Int,
   tokens: Schema.Int,
   titles: Schema.Array(Schema.String)

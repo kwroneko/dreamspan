@@ -6,20 +6,19 @@
 // until it holds `leafInput` tokens, and `fanout` summaries of a level are condensed into one by
 // the next pass, after its chunks.
 
-import { estimateTokens } from "../assembler/st.ts"
+import { tokensOf } from "../assembler/st.ts"
 import { MAX_CHUNK_SLOTS } from "../db/lcmLimits.ts"
 import { MAX_JOBS_PER_PLAN } from "../db/lcmMaintain.ts"
 
 /** The summarization instruction after the chunk, in estimated tokens. */
 const TAIL_TOKENS = 80
 
-/** The tags the layer puts around each summary and around them all (`layerText`), in estimated tokens. */
-const SUMMARY_TAGS = estimateTokens('<summary level="1" from="1000" to="1100">\n\n</summary>\n')
-const LAYER_TAGS = estimateTokens("<summaries>\n</summaries>")
+/** What each summary's own message adds around its text (`summaryBlock`, message overhead), in estimated tokens. */
+const SUMMARY_TAGS = tokensOf({ content: '<summary level="1" from="1000" to="1100">\n\n</summary>' })
 
 /** A layer of summaries of these sizes as it is sent, tags included. */
 export const layerTokens = (summaries: ReadonlyArray<number>) =>
-  summaries.length ? LAYER_TAGS + summaries.reduce((n, tokens) => n + tokens + SUMMARY_TAGS, 0) : 0
+  summaries.reduce((n, tokens) => n + tokens + SUMMARY_TAGS, 0)
 
 export interface BackfillInput {
   /** The tokens and messages after the summaries' cursor, as the planner costs them. */
@@ -144,7 +143,7 @@ export const estimateBackfill = (input: BackfillInput): BackfillTotals => {
   let summarized = 0
   const sentLayer = (parts: ReadonlyArray<Simulated>) => {
     const tokens = parts.reduce((n, s) => n + s.tokens, input.layer)
-    return Math.min(input.layer === 0 && parts.length ? tokens + LAYER_TAGS : tokens, input.layerMax)
+    return Math.min(tokens, input.layerMax)
   }
   const request = (body: number, parts: ReadonlyArray<Simulated>, returned: number) => {
     const before = [uncached, read, write]

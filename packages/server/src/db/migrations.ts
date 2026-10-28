@@ -1,5 +1,6 @@
 import { cardNamesMigration } from "./cardNamesMigration.ts"
 import { notesMigration } from "./notesMigration.ts"
+import { lcmDefaultsMigration } from "./lcmDefaultsMigration.ts"
 import { promptPreset, LegacyPresetDoc } from "@rp/shared/docs/preset.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import { Schema } from "effect"
@@ -308,7 +309,9 @@ export const migrations = {
   "0048_queued_no_reply": runAll([
     `ALTER TABLE queued_messages ADD COLUMN no_reply INTEGER NOT NULL DEFAULT 0 CHECK (no_reply IN (0, 1))`
   ]),
-  "0049_notes": notesMigration
+  "0049_notes": notesMigration,
+  // Chats that never changed the copied built-in summarization sizes take the new ones (DESIGN §8).
+  "0055_lcm_new_defaults": lcmDefaultsMigration
 }
 
 export const Migrations = SqliteMigrator.layer({ loader: SqliteMigrator.fromRecord(migrations) })

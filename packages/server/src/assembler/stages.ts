@@ -11,7 +11,7 @@ import {
   triggersFor
 } from "@rp/shared/presetConditions.ts"
 import { schemaPrefillBudget } from "./prefill.ts"
-import { layerText, lcmStage } from "./lcm.ts"
+import { lcmStage, summaryBlock } from "./lcm.ts"
 import { configurationOf, previousStart } from "./cutState.ts"
 import { contextBudget, targetBudget, loreAllowance, loreBudget } from "./budget.ts"
 // The built-in assembler stages, in registration order (ARCHITECTURE §15 lists them).
@@ -300,6 +300,15 @@ const notesStage: AssemblerStage = {
           return card !== null && placesDescription(note) && personas.some((p) => p.entity === card) ? [card] : []
         })
       )
+      // A summary request sends no notes unless the chat says so: they can tell of events after
+      // the chunk (DESIGN §8).
+      if (
+        assembly.request.summarizing &&
+        !resolveLcm(state.lcm, sources.lcmDefaults ? yield* sources.lcmDefaults() : null).withNotes
+      ) {
+        assembly.notes = []
+        return assembly
+      }
       const off = notes.find((note) => isAuthorNote(state, note) && !active.includes(note))
       if (off) assembly.offAuthorNote = off
       assembly.notes = active
@@ -390,18 +399,16 @@ const macroCard = (cast: Cast, notes: ReadonlyArray<NoteInput> | undefined) => {
 const macrosStage = sync("macros", (assembly) => {
   const cast = need(assembly, "cast")
   const preset = need(assembly, "preset").doc
-  const layer = assembly.lcm?.summaries.filter((s) => s.content !== "") ?? []
+  const written = summaryNotes(assembly).filter((note) => note.doc.content.trim() !== "")
   // The note gate comes later; a summary note not due by its condition fills nothing, as it sends nothing.
-  const switchedOn = summaryNotes(assembly).filter(
-    (note) => note.doc.content.trim() !== "" && noteConditionHolds(note, cast)
-  )
-  const filled = layer.length ? layerText(layer) : switchedOn.map((note) => note.doc.content.trim()).join("\n\n")
+  const switchedOn = written.filter((note) => noteConditionHolds(note, cast))
+  const filled = switchedOn.map((note) => note.doc.content.trim()).join("\n\n")
   assembly.summaryFill = {
     prompts: summaryMacroPrompts(preset),
-    kind: layer.length ? "summaries" : switchedOn.length ? "notes" : "none",
-    count: layer.length || switchedOn.length,
+    kind: switchedOn.length ? "notes" : "none",
+    count: switchedOn.length,
     tokens: estimateTokens(filled),
-    titles: layer.length ? [] : switchedOn.map((note) => note.doc.title)
+    titles: switchedOn.map((note) => note.doc.title)
   }
   assembly.macros = makeMacroEnvironment(assembly, {
     names: namesFor(need(assembly, "state"), cast),
@@ -413,10 +420,11 @@ const macrosStage = sync("macros", (assembly) => {
     type: cast.type,
     chatId: need(assembly, "target").chatId,
     variables: need(assembly, "state").vars,
-    // `{{summary}}` is explicit (DESIGN §8 [P]): the summaries when summarization is on and has
-    // some, else the chat's switched-on summary notes on this path that are due by their condition,
-    // in note order; a note that is off sends nothing anywhere.
+    // `{{summary}}` is ST's one summary (DESIGN §8): the chat's switched-on summary notes on this
+    // path that are due by their condition, in note order, never the summaries; a note that is off
+    // sends nothing anywhere. A condition can change from turn to turn, so then it's never cached.
     summary: filled,
+    summaryVolatile: written.some((note) => noteCondition(note.doc).when !== "always"),
     // Who the model writes as, and the direction (DESIGN §2.2); a summary has neither.
     ...(assembly.request.summarizing
       ? {}
@@ -679,12 +687,6 @@ const presetText = (
   const env = need(assembly, "macros")
   const piece = env.piece(`preset:${id}`, presetSource(assembly, id, condition), text, { names })
   const expanded = env.text(piece)
-  if (
-    assembly.lcm?.summaries.length &&
-    /\{\{\s*summary\s*\}\}/i.test(text) &&
-    expanded.includes(layerText(assembly.lcm.summaries))
-  )
-    assembly.pieces[piece] = { ...assembly.pieces[piece]!, parts: assembly.lcmPieces ?? [] }
   return { text: expanded, piece, volatile: env.isVolatile(piece) }
 }
 
@@ -1685,13 +1687,9 @@ const composeStage = sync("compose", (assembly) => {
     })
   const placement = (placed: typeof notes) => {
     const collection = [...baseCollection]
-    const layer: Array<StMessage> = placed.flatMap(({ text, place }) =>
-      place.at === "chat" && hasSummary(assembly, text.piece)
-        ? [{ role: place.role, content: text.text, pieces: [text.piece], kind: "summary" as const }]
-        : []
-    )
+    const layer: Array<StMessage> = []
     const injections: Array<Injection> = placed.flatMap(({ text, place }) =>
-      place.at === "chat" && !hasSummary(assembly, text.piece) ? [{ depth: place.depth, role: place.role, text }] : []
+      place.at === "chat" ? [{ depth: place.depth, role: place.role, text }] : []
     )
     for (const e of positioned.filter((e) => e.entry.position === "at_depth"))
       injections.push({
@@ -1769,67 +1767,18 @@ const composeStage = sync("compose", (assembly) => {
         barrier: true
       })
     }
-    for (let i = collection.length - 1; i >= 0; i--) {
-      const prompt = collection[i]!
-      if (prompt.piece === null || !hasSummary(assembly, prompt.piece) || disabled(prompt.identifier)) continue
-      if (prompt.injection_position === "absolute") {
-        layer.unshift({ role: prompt.role, content: prompt.content, pieces: [prompt.piece], kind: "summary" })
-        collection.splice(i, 1)
-      } else if (i > collection.findIndex((p) => p.identifier === "chatHistory")) {
-        collection.splice(i, 1)
-        collection.splice(
-          Math.max(
-            0,
-            collection.findIndex((p) => p.identifier === "chatHistory")
-          ),
-          0,
-          prompt
-        )
-      }
-    }
-    if (
-      collection.findIndex((p) => p.identifier === "main") > collection.findIndex((p) => p.identifier === "chatHistory")
-    ) {
-      for (let i = beside.length - 1; i >= 0; i--) {
-        const { message } = beside[i]!
-        if (!message.pieces.some((p) => hasSummary(assembly, p))) continue
-        layer.unshift({ ...message, kind: "summary" })
-        beside.splice(i, 1)
-      }
-    }
-    const hasSummaryPrompt = collection.some(
-      (p) =>
-        p.piece !== null &&
-        !disabled(p.identifier) &&
-        hasSummary(assembly, p.piece) &&
-        (p.system_prompt === false || ["main", "nsfw", "jailbreak", "enhanceDefinitions"].includes(p.identifier))
-    )
-    if (
-      assembly.lcm?.summaries.length &&
-      !hasSummaryPrompt &&
-      !layer.length &&
-      !beside.some(({ message }) => message.pieces.some((p) => hasSummary(assembly, p)))
-    )
-      layer.push({
-        role: "system",
-        content: layerText(assembly.lcm.summaries),
-        pieces: [...(assembly.lcmPieces ?? [])],
-        kind: "summary"
-      })
-    const renderedLayer = assembly.lcm ? layerText(assembly.lcm.summaries) : ""
-    const embeddedCost = (content: string) =>
-      renderedLayer ? tokensOf({ content }) - tokensOf({ content: content.split(renderedLayer).join("") }) : 0
-    const layerCost =
-      layer.reduce((n, message) => n + tokensOf(message), 0) +
-      collection.reduce(
-        (n, prompt) =>
-          n + (prompt.piece !== null && hasSummary(assembly, prompt.piece) ? embeddedCost(prompt.content) : 0),
-        0
-      ) +
-      beside.reduce(
-        (n, { message }) => n + (message.pieces.some((p) => hasSummary(assembly, p)) ? tokensOf(message) : 0),
-        0
-      )
+    // Each summary is its own message just before the history, oldest first, as the history's
+    // messages are: a new summary leaves the earlier ones' cached prefix as it was (DESIGN §8).
+    assembly.lcm?.summaries.forEach((summary, i) => {
+      if (summary.content !== "")
+        layer.push({
+          role: "system",
+          content: summaryBlock(summary),
+          pieces: [assembly.lcmPieces![i]!],
+          kind: "summary"
+        })
+    })
+    const layerCost = layer.reduce((n, message) => n + tokensOf(message), 0)
     return { collection, beside, injections, layer, layerCost }
   }
   for (const prompt of collection) {

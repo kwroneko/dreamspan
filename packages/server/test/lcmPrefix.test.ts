@@ -38,6 +38,9 @@ for (const style of ["direct", "tool"] as const) {
           user = yield* api.Whoami(),
           writer = yield* Writer,
           reader = yield* Reader
+        // The summaries' sizes the example's room was measured with: on this small model, the
+        // built-in 14,000/18,000 reserves too much of it.
+        yield* api.ChangeGenerationDefaults({ change: { lcm: { layerTarget: 8_000, layerMax: 12_000 } } })
         const { chat, connection, model, version } = yield* generateReply(api, {
           connection: { kind: "openai-chat", baseUrl: mock.url + "/v1", cacheTtlS: 300 },
           model: { context: 4096, maxOutput: 512, tools: true },

@@ -33,10 +33,11 @@ lcmTest("a new chat copies the account default, its fields fall back to it, and 
     assert.deepStrictEqual(copied.stored, {
       enabled: true,
       withPreset: false,
+      withNotes: false,
       recentTarget: 10_000,
       recentMax: 20_000,
-      layerTarget: 8_000,
-      layerMax: 12_000,
+      layerTarget: 14_000,
+      layerMax: 18_000,
       when: "after-reply",
       leafTarget: 600
     })
@@ -57,7 +58,7 @@ lcmTest("a new chat copies the account default, its fields fall back to it, and 
     const follows = yield* read(legacy.id)
     assert.strictEqual(follows.resolved.recentMax, 30_000)
     assert.strictEqual(follows.resolved.from.recentMax, "account")
-    assert.strictEqual(follows.resolved.layerMax, 12_000)
+    assert.strictEqual(follows.resolved.layerMax, 18_000)
     assert.strictEqual(follows.resolved.from.layerMax, "builtin")
     // One field at a time, the others kept; null makes it follow the default again.
     yield* h.api.ChangeLcmSettings({ chatId: chat.id, change: { layerMax: 15_000 } })
@@ -89,6 +90,23 @@ lcmTest("a new chat copies the account default, its fields fall back to it, and 
     // The switch for new chats.
     yield* h.api.ChangeGenerationDefaults({ change: { lcm: { enabled: false } } })
     assert.isFalse((yield* read((yield* made()).id)).resolved.enabled)
+  })
+)
+
+lcmTest("a chunk that doesn't fit twice in the recent band plans nothing, without failing", (server) =>
+  Effect.gen(function* () {
+    // A band of 1,000 tokens and a chunk of 800: the Summaries section says so under the chunk size.
+    const h = yield* lcmHarness(server, {
+      messages: 0,
+      settings: { recentTarget: 2_000, recentMax: 3_000, layerTarget: 1_000, layerMax: 1_500, leafInput: 800 }
+    })
+    for (let n = 0; n < 40; n++) yield* h.append(message(n))
+    const plan = yield* h.reader.PlanSummaries({
+      userId: h.userId,
+      chatId: h.chat.id,
+      leafSlotId: h.rows.at(-1)!.slotId
+    })
+    assert.lengthOf(plan.chunks, 0)
   })
 )
 
@@ -229,7 +247,7 @@ lcmTest("without the preset a summary is the instruction, the earlier summaries,
     )
     assert.lengthOf(sent, 3)
     const instruction =
-      BUILTIN_SUMMARY_INSTRUCTION.replace("{{words}}", "100") + "\nReturn only the summary, without commentary."
+      BUILTIN_SUMMARY_INSTRUCTION.replace("{{words}}", "75") + "\nReturn only the summary, without commentary."
     for (const messages of sent) {
       assert.deepStrictEqual(messages[0], { role: "system", content: instruction })
       // Nothing of the preset: its main prompt is not there.
@@ -291,7 +309,7 @@ lcmTest("with the full preset the instruction follows the chat as before", (serv
     assert.notStrictEqual(messages![0]!.content.slice(0, 20), BUILTIN_SUMMARY_INSTRUCTION.slice(0, 20))
     assert.strictEqual(
       messages!.at(-1)!.content,
-      BUILTIN_SUMMARY_INSTRUCTION.replace("{{words}}", "100") + "\nReturn only the summary, without commentary."
+      BUILTIN_SUMMARY_INSTRUCTION.replace("{{words}}", "75") + "\nReturn only the summary, without commentary."
     )
   })
 )

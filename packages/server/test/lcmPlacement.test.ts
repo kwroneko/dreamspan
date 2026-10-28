@@ -136,7 +136,7 @@ it.effect("absolute preset summary prompts survive the raw budget in our layouts
     const layer = snapshot.request.messages.filter((m) => m.content.includes("LAYER CONTENT"))
     assert.lengthOf(layer, 1)
     assert.strictEqual(layer[0]!.role, "system")
-    assert.include(layer[0]!.content, "<summaries>")
+    assert.strictEqual(layer[0]!.content, '<summary level="1" from="1" to="1">\nLAYER CONTENT 0\n</summary>')
   })
 )
 
@@ -363,24 +363,41 @@ it.effect("unused layer allowance never rejects fixed content that fits", () =>
   })
 )
 
-it.effect("a summary note switched on is sent beside the summaries, and {{summary}} reads the summaries", () =>
+it.effect("{{summary}} reads only the summary note; each summary is its own message before the history", () =>
   Effect.gen(function* () {
     const input = fixture(
       { mode: "depth", depth: 1, role: "system" },
       { prompts: [{ identifier: "main", role: "system", content: "Story: {{summary}}", system_prompt: true }] }
     )
-    const on = yield* assembleFixture({
-      ...input,
-      events: [
-        ...input.events!,
-        { depth: null, event: { scope: null, data: { key: "note.activate", value: { note: "imported" as never } } } }
-      ]
-    })
-    const text = on.request.messages.map((m) => m.content).join("\n")
-    assert.include(text, "Summary: old summary")
-    // One assembly path: `{{summary}}` reads the `<summaries>` block.
-    assert.match(text, /Story: <summaries>\n<summary level="1"[^>]*>\nLAYER CONTENT 0/)
+    const events = [
+      ...input.events!,
+      {
+        depth: null,
+        event: { scope: null, data: { key: "note.activate" as const, value: { note: "imported" as never } } }
+      }
+    ]
+    const on = yield* assembleFixture({ ...input, events })
+    const contents = on.request.messages.map((m) => m.content)
+    // The note, switched on: at its own depth, and through `{{summary}}`, never the summaries (DESIGN §8).
+    assert.include(contents.join("\n"), "Summary: old summary")
+    assert.include(contents.join("\n"), "Story: old summary")
+    assert.notInclude(contents.join("\n"), "<summaries>")
+    const block = '<summary level="1" from="1" to="1">\nLAYER CONTENT 0\n</summary>'
+    const first = contents.indexOf(block)
+    assert.isAtLeast(first, 0)
+    assert.strictEqual(on.request.messages[first]!.role, "system")
+    assert.isBelow(
+      first,
+      contents.findIndex((m) => m.includes("RAW FIRST"))
+    )
+    // A new summary is a message of its own after the earlier one, which stays as it was sent.
+    const two = yield* assembleFixture({ ...input, events, summaries: [summary(0), summary(1)] })
+    const after = two.request.messages.map((m) => m.content)
+    assert.deepStrictEqual(after.slice(0, first + 1), contents.slice(0, first + 1))
+    assert.strictEqual(after[first + 1], '<summary level="1" from="2" to="2">\nLAYER CONTENT 1\n</summary>')
     const off = yield* assembleFixture(input)
-    assert.notInclude(off.request.messages.map((m) => m.content).join("\n"), "old summary")
+    const sent = off.request.messages.map((m) => m.content)
+    assert.notInclude(sent.join("\n"), "old summary")
+    assert.include(sent, block)
   })
 )
