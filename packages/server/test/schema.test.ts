@@ -574,8 +574,13 @@ describe("references across chats", () => {
          VALUES ('ro', ?, 'generation', 'running', 'narrator', 'interactive', 1, 1)`,
       ours.chatId
     )
+    run(`INSERT INTO forks(id,chat_id,created_at) VALUES ('cs-fork',?,1)`, ours.chatId)
     run(
-      `INSERT INTO changesets (id, chat_id, title, origin, status, created_at) VALUES ('cs', ?, 'Edit', 'user', 'applied', 1)`,
+      `INSERT INTO changeset_groups(id,owner_user_id,title,origin,created_at) VALUES ('cs-group',?,'Edit','user',1)`,
+      ana
+    )
+    run(
+      `INSERT INTO changesets (id, chat_id, fork_id, seq, group_id, title, origin, status, created_at) VALUES ('cs', ?, 'cs-fork', 1, 'cs-group', 'Edit', 'user', 'applied', 1)`,
       ours.chatId
     )
     run(`UPDATE versions SET rollout_id = 'ro', changeset_id = 'cs' WHERE id = ?`, s.versionId)

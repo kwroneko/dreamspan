@@ -1,3 +1,4 @@
+import { historyReadRpcs, historyWriteRpcs, HistoryRejected } from "@rp/shared/historyApi.ts"
 import { PlannedJob, SummaryJob, SummaryChunk, SummaryPlan } from "./lcmJobs.ts"
 import { ShellLibrary } from "@rp/shared/chatSetupApi.ts"
 import { LcmSettingsChange, ModelChoice } from "@rp/shared/lcmSettings.ts"
@@ -374,6 +375,12 @@ const StChatRecord = Schema.Struct({
 })
 
 export class WriteOps extends RpcGroup.make(
+  historyWriteRpcs[0]
+    .setPayload(Schema.Struct({ ...historyWriteRpcs[0].payloadSchema.fields, userId: UserId }))
+    .setError(Schema.Union([NotFound, HistoryRejected, StorageError])),
+  historyWriteRpcs[1]
+    .setPayload(Schema.Struct({ ...historyWriteRpcs[1].payloadSchema.fields, userId: UserId }))
+    .setError(Schema.Union([NotFound, HistoryRejected, StorageError])),
   Rpc.make("SetChatPin", {
     payload: {
       userId: UserId,
@@ -1927,6 +1934,18 @@ export class WriteOps extends RpcGroup.make(
 ) {}
 
 export class ReadOps extends RpcGroup.make(
+  historyReadRpcs[3]
+    .setPayload(Schema.Struct({ ...historyReadRpcs[3].payloadSchema.fields, userId: UserId }))
+    .setError(Schema.Union([NotFound, HistoryRejected, StorageError])),
+  historyReadRpcs[0]
+    .setPayload(Schema.Struct({ ...historyReadRpcs[0].payloadSchema.fields, userId: UserId }))
+    .setError(Schema.Union([NotFound, HistoryRejected, StorageError])),
+  historyReadRpcs[1]
+    .setPayload(Schema.Struct({ ...historyReadRpcs[1].payloadSchema.fields, userId: UserId }))
+    .setError(Schema.Union([NotFound, HistoryRejected, StorageError])),
+  historyReadRpcs[2]
+    .setPayload(Schema.Struct({ ...historyReadRpcs[2].payloadSchema.fields, userId: UserId }))
+    .setError(Schema.Union([NotFound, HistoryRejected, StorageError])),
   Rpc.make("ShellLibrary", {
     payload: { userId: UserId },
     success: ShellLibrary,

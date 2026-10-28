@@ -1,3 +1,4 @@
+import { HistoryDiff, HistoryPreviewContext } from "./historyPreview.tsx"
 // One message: who wrote it (avatar, name, time, its number on the path, the model of a
 // generated version), its versions (swipe through them, pick one in the version picker, or
 // generate another, on any message: DESIGN §3.1), its text, whether it's sent to the
@@ -15,6 +16,7 @@ import {
   type PointerEvent,
   type ReactNode,
   useCallback,
+  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -515,6 +517,9 @@ export const Message = memo(function Message({
   /** Switches to another of the alternate branches at this message. */
   onBranch: (entry: PathEntry, index: number) => void
 }) {
+  const historyPreview = useContext(HistoryPreviewContext).hits.find(
+    (hit) => hit.kind === "version_replace" && hit.beforeId === entry.version.id
+  )
   useRenderCount("rowRenders")
   const cast = useCast()
   const { version } = entry
@@ -881,6 +886,11 @@ export const Message = memo(function Message({
           <p role="note" className="text-sm text-muted">
             Another version is selected. Your edit still belongs to the version you opened.
           </p>
+        )}
+        {historyPreview && (
+          <div className="my-2 rounded-md border border-accent/40 p-2">
+            <HistoryDiff hit={historyPreview} />
+          </div>
         )}
         {editor !== undefined ? (
           <Editor

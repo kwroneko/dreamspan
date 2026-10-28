@@ -56,15 +56,17 @@ export const readSummary = (
         amend_count: number
         effective: string | null
         current_amends: number
-        replacement: string | null
-        summaries_done: number
-        original: string | null
+        replaced_with_summaries: number
       }>`
-        SELECT i.*, repl.value_id AS replacement, v.source_version_id AS original, coalesce(repl.summaries_done,0) AS summaries_done, CASE WHEN NOT ${slotDeletedIn(sql, fork, "s")} AND ${contextExcludedIn(sql, fork)} = 0
+        SELECT i.*, EXISTS(SELECT 1 FROM fork_overrides o WHERE o.id=${effectiveOverride(sql, "replace", fork, "CASE WHEN iv.fork_id IS NULL THEN i.version_id ELSE iv.source_version_id END")}
+          AND o.value_id=v.id AND o.summaries_done=1 AND EXISTS (
+            SELECT 1 FROM changeset_items ci, json_each(ci.after_json, '$.preservedInputs') p
+            WHERE ci.changeset_id=o.changeset_id AND ci.target_kind='version_replace'
+              AND ci.target_id=o.target_id AND ci.after_json ->> '$.id'=v.id
+              AND p.value ->> '$.id'=i.version_id AND p.value ->> '$.amends'=i.amend_count)) AS replaced_with_summaries, CASE WHEN NOT ${slotDeletedIn(sql, fork, "s")} AND ${contextExcludedIn(sql, fork)} = 0
           AND NOT ${shownVersionDeletedIn(sql, fork, "v")} AND v.status NOT IN ('generating', 'failed') AND length(v.content) > 0
           THEN v.id ELSE NULL END AS effective, (SELECT count(*) FROM version_history h WHERE h.version_id = v.id) AS current_amends
-        FROM summary_inputs i JOIN slots s ON s.id = i.slot_id LEFT JOIN versions v ON v.id = ${shownIn(sql, fork, "s")}
-        LEFT JOIN fork_overrides repl ON repl.id=${effectiveOverride(sql, "replace", fork, "i.version_id")}
+        FROM summary_inputs i JOIN slots s ON s.id = i.slot_id LEFT JOIN versions iv ON iv.id=i.version_id LEFT JOIN versions v ON v.id = ${shownIn(sql, fork, "s")}
         WHERE i.summary_id = ${summaryId} ORDER BY i.ordinal`
       const children = yield* sql<{
         parent_id: string
@@ -74,11 +76,7 @@ export const readSummary = (
       let fresh = inputs.every(
         (i) =>
           (i.version_id === i.effective && (i.version_id === null || i.amend_count === i.current_amends)) ||
-          (i.effective !== null &&
-            i.original === i.version_id &&
-            i.replacement === i.effective &&
-            i.summaries_done === 1 &&
-            i.amend_count === i.current_amends)
+          (i.effective !== null && i.replaced_with_summaries === 1 && i.current_amends === 0)
       )
       // An explicit rerun establishes an active generated replacement. Old lineage remains
       // pinned for replay, while live generated ancestors must incorporate the replacement.
@@ -91,7 +89,16 @@ export const readSummary = (
       if (choice || (replacement && row.origin === "generated")) fresh = false
       for (const child of children) {
         const parent = yield* read(child.parent_id)
-        fresh &&= parent.fresh && parent.revisionId === child.parent_revision_id
+        const [sameGroup] =
+          row.origin === "changeset" && parent.origin === "changeset"
+            ? yield* sql`SELECT 1
+          FROM changeset_items a JOIN changesets ac ON ac.id=a.changeset_id
+          JOIN changeset_items b ON b.target_kind='summary_revision' JOIN changesets bc ON bc.id=b.changeset_id
+          WHERE a.target_kind='summary_revision' AND a.target_id=${row.id} AND a.after_json ->> '$.id'=${row.revision_id}
+            AND b.target_id=${parent.id} AND b.after_json ->> '$.id'=${parent.revisionId} AND ac.group_id=bc.group_id
+            AND a.after_json ->> '$.applicationId'=b.after_json ->> '$.applicationId' LIMIT 1`
+            : []
+        fresh &&= parent.fresh && (parent.revisionId === child.parent_revision_id || sameGroup !== undefined)
       }
       const summary = Schema.decodeUnknownSync(Summary)({
         id: row.id,

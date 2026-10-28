@@ -1,3 +1,4 @@
+import { makeHistoryHandlers } from "./api/history.ts"
 import { RefusalJudge } from "./decision/RefusalJudge.ts"
 import { SummaryChecks } from "./lcm/OutputChecks.ts"
 import { Summarizer } from "./lcm/Summarizer.ts"
@@ -92,6 +93,7 @@ const Handlers = AppApi.toLayer(
       ...notices,
       ...inspector,
       ...(yield* makeLcmHandlers),
+      ...(yield* makeHistoryHandlers),
       Health: () =>
         eventLoop.sample.pipe(
           Effect.map(

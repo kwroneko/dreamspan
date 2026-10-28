@@ -302,12 +302,18 @@ export const baseline: ReadonlyArray<string> = [
     created_at INTEGER NOT NULL,
     PRIMARY KEY (rollout_id, branch_no)
   ) STRICT, WITHOUT ROWID`,
+  `CREATE TABLE changeset_groups (
+    id TEXT PRIMARY KEY, owner_user_id TEXT NOT NULL REFERENCES users(id), title TEXT NOT NULL,
+    origin TEXT NOT NULL CHECK (origin IN ('user', 'agent')), created_at INTEGER NOT NULL
+  ) STRICT`,
   `CREATE TABLE changesets (
     id TEXT PRIMARY KEY,
     chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
     title TEXT NOT NULL,
     origin TEXT NOT NULL CHECK (origin IN ('user', 'agent')),
     rollout_id TEXT REFERENCES rollouts(id),
+    fork_id TEXT NOT NULL REFERENCES forks(id), seq INTEGER NOT NULL,
+    group_id TEXT NOT NULL REFERENCES changeset_groups(id),
     status TEXT NOT NULL CHECK (status IN ('applying', 'applied', 'reverted', 'partially_reverted')),
     created_at INTEGER NOT NULL
   ) STRICT`,
@@ -315,13 +321,43 @@ export const baseline: ReadonlyArray<string> = [
   `CREATE TABLE changeset_items (
     id INTEGER PRIMARY KEY,
     changeset_id TEXT NOT NULL REFERENCES changesets(id) ON DELETE CASCADE,
-    target_kind TEXT NOT NULL CHECK (target_kind IN ('slot_selection', 'summary_revision', 'state_event', 'ref_head')),
+    target_kind TEXT NOT NULL CHECK (target_kind IN ('version_replace', 'summary_revision', 'state_event')),
     target_id TEXT NOT NULL,
     before_json TEXT CHECK (before_json IS NULL OR json_valid(before_json)),
     after_json TEXT CHECK (after_json IS NULL OR json_valid(after_json)),
     reverted_at INTEGER
   ) STRICT`,
   `CREATE INDEX changeset_items_changeset ON changeset_items(changeset_id)`,
+  `CREATE INDEX changeset_items_before_version ON changeset_items(before_json ->> '$.id') WHERE target_kind='version_replace'`,
+  `CREATE INDEX changeset_items_after_version ON changeset_items(after_json ->> '$.id') WHERE target_kind='version_replace'`,
+  `CREATE TABLE changeset_reverts (
+    changeset_id TEXT NOT NULL REFERENCES changesets(id) ON DELETE CASCADE,
+    fork_id TEXT NOT NULL REFERENCES forks(id) ON DELETE CASCADE,
+    item_id INTEGER NOT NULL REFERENCES changeset_items(id) ON DELETE CASCADE,
+    seq INTEGER NOT NULL, PRIMARY KEY (fork_id, item_id)
+  ) STRICT`,
+  `CREATE INDEX changesets_group ON changesets(group_id)`,
+  `CREATE INDEX changesets_fork ON changesets(fork_id)`,
+  `CREATE INDEX changeset_reverts_item ON changeset_reverts(item_id)`,
+  `CREATE INDEX changeset_reverts_changeset ON changeset_reverts(changeset_id)`,
+  `CREATE TRIGGER changeset_text_purged AFTER UPDATE OF purged_at ON versions
+    WHEN NEW.purged_at IS NOT NULL AND OLD.purged_at IS NULL BEGIN
+      UPDATE changeset_items SET before_json=json_set(before_json, '$.content', '')
+        WHERE target_kind='version_replace' AND before_json ->> '$.id'=NEW.id;
+      UPDATE changeset_items SET after_json=json_set(after_json, '$.content', '')
+        WHERE target_kind='version_replace' AND after_json ->> '$.id'=NEW.id;
+    END`,
+  `CREATE TRIGGER changeset_state_deleted AFTER DELETE ON state_events BEGIN
+      UPDATE changeset_items SET before_json=json_set(before_json, '$.content', '')
+        WHERE target_kind='state_event' AND before_json ->> '$.id'=OLD.id;
+      UPDATE changeset_items SET after_json=json_set(after_json, '$.content', '')
+        WHERE target_kind='state_event' AND after_json ->> '$.id'=OLD.id;
+    END`,
+
+  `CREATE TRIGGER changesets_fork_owner BEFORE INSERT ON changesets WHEN NOT EXISTS (
+    SELECT 1 FROM forks f JOIN chats c ON c.id = f.chat_id JOIN changeset_groups g ON g.id = NEW.group_id
+    WHERE f.id = NEW.fork_id AND c.id = NEW.chat_id AND c.owner_user_id = g.owner_user_id)
+    BEGIN SELECT RAISE(ABORT, 'changeset fork and group must belong to its chat owner'); END`,
   `CREATE TRIGGER entity_revisions_immutable BEFORE UPDATE ON entity_revisions
     BEGIN SELECT RAISE(ABORT, 'entity revisions are immutable'); END`,
   `CREATE TRIGGER rollout_snapshot_frozen BEFORE UPDATE OF context_snapshot_json ON rollout_payloads

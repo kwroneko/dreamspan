@@ -1,3 +1,4 @@
+import { HistoryPanel } from "./HistoryPanel.tsx"
 import { GenerationSettingsPanel } from "./GenerationControls.tsx"
 import { PresetTab } from "./PresetTab.tsx"
 import { useAtomValue } from "@effect/atom-react"
@@ -66,7 +67,8 @@ const PANEL_TABS = [
   { value: "chat", label: "This chat", icon: "sliders" },
   { value: "lorebooks", label: "Lorebooks", icon: "book" },
   { value: "notes", label: "Notes", icon: "note" },
-  { value: "summaries", label: "Summaries", icon: "summary" }
+  { value: "summaries", label: "Summaries", icon: "summary" },
+  { value: "history", label: "History edits", icon: "edit" }
 ] as const
 
 export type PanelTab = (typeof PANEL_TABS)[number]["value"] | `card:${string}`
@@ -244,6 +246,8 @@ function TabContent({
       />
     )
   switch (tab) {
+    case "history":
+      return <HistoryPanel session={session} view={view} active={active} onJump={onJump} />
     case "model":
       return <GenerationSettingsPanel session={session} kind={tab} />
     case "portrait":

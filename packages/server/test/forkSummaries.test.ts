@@ -99,10 +99,18 @@ const setup = Effect.gen(function* () {
 
 const summarized = Effect.gen(function* () {
   const h = yield* setup
-  const summary = yield* completeFixture(config.dataDir, h.writer, h.userId, h.chatId, [
-    { slotId: h.m0.slotId, versionId: h.m0.version.id, amendCount: 0 },
-    { slotId: h.m1.slotId, versionId: h.one, amendCount: 0 }
-  ])
+  const summary = yield* completeFixture(
+    config.dataDir,
+    h.writer,
+    h.userId,
+    h.chatId,
+    [
+      { slotId: h.m0.slotId, versionId: h.m0.version.id, amendCount: 0 },
+      { slotId: h.m1.slotId, versionId: h.one, amendCount: 0 }
+    ],
+    [],
+    " m0 one"
+  )
   const read = (forkId: ForkId) => h.api.GetSummary({ summaryId: summary.id, forkId })
   const edit = (forkId: ForkId, content: string, expectedRowVersion?: number) =>
     Effect.gen(function* () {
@@ -257,22 +265,47 @@ describe("summary fork overrides", () => {
     Effect.gen(function* () {
       const h = yield* summarized
       const g = yield* h.fork(h.main, h.m1.slotId)
-      // Synthetic future changeset: its replacement and the summary were edited together.
-      const copy = "changeset-copy"
-      yield* fixtureSql(config.dataDir, [
-        {
-          sql: "INSERT INTO versions(id,slot_id,ordinal,status,speaker_entity_id,writer,content,macro_mode,origin,source_version_id,fork_id,created_at,updated_at) SELECT ?,slot_id,2,status,speaker_entity_id,'human','coordinated rename',macro_mode,'changeset',id,?,1,1 FROM versions WHERE id=?",
-          params: [copy, h.main, h.one]
-        },
-        { sql: "UPDATE chats SET state_seq=state_seq+1 WHERE id=?", params: [h.chatId] },
-        {
-          sql: "INSERT INTO fork_overrides(id,chat_id,fork_id,seq,kind,target_id,slot_id,slot_depth,value_id,summaries_done) SELECT 'replacement',?,?,state_seq,'replace',?,?,1,?,0 FROM chats WHERE id=?",
-          params: [h.chatId, h.main, h.one, h.m1.slotId, copy, h.chatId]
+      const preview = yield* h.api.PreviewHistory({
+        chatId: h.chatId,
+        forkId: h.main,
+        search: {
+          pairs: [{ find: "m0", replace: "coordinated rename" }],
+          matchCase: true,
+          wholeWord: false,
+          regex: false,
+          preserveCase: false,
+          messages: true,
+          swipes: false,
+          summaries: true
         }
-      ])
+      })
+      const applied = yield* h.api.ApplyHistoryEdits({
+        title: "Coordinated replacement",
+        applications: [
+          {
+            chatId: h.chatId,
+            forkId: h.main,
+            summariesIncluded: false,
+            edits: preview.hits.map(({ kind, targetId, beforeId, before, after }) => ({
+              kind,
+              targetId,
+              beforeId,
+              before,
+              after
+            }))
+          }
+        ]
+      })
+      const copy = (yield* h.shown(h.m0.slotId, h.main)).versionId
       assert.isFalse((yield* h.read(h.main)).fresh)
       assert.isTrue((yield* h.read(g)).fresh)
-      yield* fixtureSql(config.dataDir, [{ sql: "UPDATE fork_overrides SET summaries_done=1 WHERE id='replacement'" }])
+      yield* fixtureSql(config.dataDir, [
+        { sql: "UPDATE fork_overrides SET summaries_done=1 WHERE changeset_id=?", params: [applied.changesetIds[0]!] },
+        {
+          sql: "UPDATE changeset_items SET after_json=json_set(after_json, '$.preservedInputs', json(?)) WHERE changeset_id=? AND target_kind='version_replace'",
+          params: [JSON.stringify([{ id: h.m0.version.id, amends: 0 }]), applied.changesetIds[0]!]
+        }
+      ])
       assert.isTrue((yield* h.read(h.main)).fresh)
       yield* fixtureSql(config.dataDir, [
         { sql: "UPDATE versions SET content='amended afterwards' WHERE id=?", params: [copy] }
@@ -281,6 +314,77 @@ describe("summary fork overrides", () => {
       assert.isTrue((yield* h.read(g)).fresh)
     }).pipe(Effect.provide(server.layer))
   )
+
+  for (const edited of [false, true]) {
+    it.live(
+      edited
+        ? "a fork's edited summary remains its own after history replacement"
+        : "a coordinated history replacement leaves the sibling summary and freshness untouched",
+      () =>
+        Effect.gen(function* () {
+          const h = yield* summarized
+          const g = yield* h.fork(h.main, h.m1.slotId)
+          const sibling = yield* h.read(g)
+          if (edited) yield* h.edit(h.main, "m0 in F's own summary")
+          const before = yield* h.read(h.main)
+          const preview = yield* h.api.PreviewHistory({
+            chatId: h.chatId,
+            forkId: h.main,
+            search: {
+              pairs: [{ find: "m0", replace: "renamed" }],
+              matchCase: true,
+              wholeWord: false,
+              regex: false,
+              preserveCase: false,
+              messages: true,
+              swipes: true,
+              summaries: true
+            }
+          })
+          const summaryHit = preview.hits.find((hit) => hit.kind === "summary_revision")!
+          assert.strictEqual(summaryHit.beforeId, before.revisionId)
+          assert.strictEqual(summaryHit.before, before.content)
+          yield* h.api.ApplyHistoryEdits({
+            title: "Replace with summaries",
+            applications: [
+              {
+                chatId: h.chatId,
+                forkId: h.main,
+                summariesIncluded: true,
+                edits: preview.hits.map(({ kind, targetId, beforeId, before, after }) => ({
+                  kind,
+                  targetId,
+                  beforeId,
+                  before,
+                  after
+                }))
+              }
+            ]
+          })
+          const replaced = yield* h.read(h.main)
+          assert.strictEqual(replaced.content, summaryHit.after)
+          assert.isTrue(replaced.fresh)
+          assert.deepStrictEqual(yield* h.read(g), sibling)
+          if (edited) assert.strictEqual(replaced.content, "renamed in F's own summary")
+          const state = yield* h.api.GetLcmState({ chatId: h.chatId, forkId: h.main, leafSlotId: h.m1.slotId })
+          assert.strictEqual(state.layer[0]!.revisionId, replaced.revisionId)
+          const message = yield* h.reader.GetSlot({
+            userId: h.userId,
+            slotId: h.m0.slotId,
+            forkId: h.main
+          })
+          yield* h.writer.AmendVersion({
+            userId: h.userId,
+            forkId: h.main,
+            versionId: message.entry.version.id,
+            expectedRowVersion: message.entry.version.rowVersion,
+            content: "Amended after replacement"
+          })
+          assert.isFalse((yield* h.read(h.main)).fresh)
+          assert.deepStrictEqual(yield* h.read(g), sibling)
+        }).pipe(Effect.provide(server.layer))
+    )
+  }
 
   it.live("foreign forks are rejected on summary reads, edits, revisions and requests", () =>
     Effect.gen(function* () {

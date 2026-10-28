@@ -1,3 +1,4 @@
+import { HistoryApi } from "./historyApi.ts"
 import { StSettingsImport } from "./modelSettings.ts"
 import { LcmApi, LcmSettingsInvalid } from "./lcm.ts"
 // The client-facing contract. Every UI action is an RPC in this group (DESIGN §7.7).
@@ -318,4 +319,5 @@ export class AppApi extends RpcGroup.make(
   // --- The request inspector (inspectorApi.ts).
   .merge(InspectorApi)
   .merge(LcmApi)
+  .merge(HistoryApi)
   .middleware(Authentication) {}
