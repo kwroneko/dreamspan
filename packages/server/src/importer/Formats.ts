@@ -1,3 +1,4 @@
+import * as StParsers from "./stParserRegistry.ts"
 import type { StSettingsImport } from "@rp/shared/modelSettings.ts"
 // Main-thread access to the format workers (ARCHITECTURE.md §11.3). The pool is the
 // database readers' (db/readerPool.ts): a worker is busy until it answers, a crashed one
@@ -122,6 +123,8 @@ export const layer = (options: FormatsOptions) =>
     Effect.gen(function* () {
       // The newest thread of each worker id, so a job past its deadline can be stopped.
       const threads = new Map<number, Worker>()
+      const parsers = yield* StParsers.StParserRegistry
+      const parser = (id: Parameters<typeof parsers.get>[0]) => parsers.get(id) ?? null
       const bundleDir = options.workers === "bundle" ? (options.bundleDir ?? defaultBundleDir) : undefined
       const entry =
         options.entry ??
@@ -142,13 +145,37 @@ export const layer = (options: FormatsOptions) =>
                 })
               ),
             st: {
-              chatPart: (input) => workerFailures(client.ParseStChatPart({ ...input, bytes: ownBuffer(input.bytes) })),
-              settings: (bytes) => workerFailures(client.ParseStSettings({ bytes: ownBuffer(bytes) })),
-              group: (bytes, fileName) => workerFailures(client.ParseStGroup({ bytes: ownBuffer(bytes), fileName })),
+              chatPart: (input) =>
+                Effect.suspend(() =>
+                  workerFailures(
+                    client.ParseStChatPart({ ...input, bytes: ownBuffer(input.bytes), parser: parser("chat-part") })
+                  )
+                ),
+              settings: (bytes) =>
+                Effect.suspend(() =>
+                  workerFailures(client.ParseStSettings({ bytes: ownBuffer(bytes), parser: parser("settings") }))
+                ),
+              group: (bytes, fileName) =>
+                Effect.suspend(() =>
+                  workerFailures(client.ParseStGroup({ bytes: ownBuffer(bytes), fileName, parser: parser("group") }))
+                ),
               libraryFile: (bytes, fileName, expect) =>
-                workerFailures(client.ParseStLibraryFile({ bytes: ownBuffer(bytes), fileName, expect })),
+                Effect.suspend(() =>
+                  workerFailures(
+                    client.ParseStLibraryFile({
+                      bytes: ownBuffer(bytes),
+                      fileName,
+                      expect,
+                      parser: parser("library-file")
+                    })
+                  )
+                ),
               persona: (bytes, fileName, persona) =>
-                workerFailures(client.BuildStPersona({ bytes: ownBuffer(bytes), fileName, persona }))
+                Effect.suspend(() =>
+                  workerFailures(
+                    client.BuildStPersona({ bytes: ownBuffer(bytes), fileName, persona, parser: parser("persona") })
+                  )
+                )
             }
           })
         )
@@ -171,4 +198,4 @@ export const layer = (options: FormatsOptions) =>
         )
       )
     })
-  )
+  ).pipe(Layer.provideMerge(StParsers.layer))

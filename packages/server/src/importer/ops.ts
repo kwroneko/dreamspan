@@ -170,6 +170,11 @@ export class StLibraryFile extends Schema.Class<StLibraryFile>("StLibraryFile")(
   )
 }) {}
 
+/** Trusted server registrations only: never selected from uploaded file contents. */
+export const StParserSource = Schema.Struct({ module: Schema.String, exportName: Schema.String })
+export type StParserSource = typeof StParserSource.Type
+const parser = Schema.NullOr(StParserSource)
+
 export class FormatOps extends RpcGroup.make(
   Rpc.make("PreviewStSettings", {
     payload: { text: Schema.String, surface: Schema.Literals(["model", "connection"]) },
@@ -189,6 +194,7 @@ export class FormatOps extends RpcGroup.make(
   Rpc.make("ParseStChatPart", {
     payload: {
       bytes: Transferable.Uint8Array,
+      parser,
       first: Schema.Boolean,
       firstIndex: Schema.Int,
       carryAt: Schema.NullOr(Schema.Number)
@@ -196,21 +202,21 @@ export class FormatOps extends RpcGroup.make(
     success: StChatPart
   }),
   Rpc.make("ParseStSettings", {
-    payload: { bytes: Transferable.Uint8Array },
+    payload: { bytes: Transferable.Uint8Array, parser },
     success: Schema.Struct({ report: ImportReport, settings: Schema.NullOr(StSettings) })
   }),
   Rpc.make("ParseStGroup", {
-    payload: { bytes: Transferable.Uint8Array, fileName: Schema.String },
+    payload: { bytes: Transferable.Uint8Array, fileName: Schema.String, parser },
     success: Schema.Struct({ report: ImportReport, group: Schema.NullOr(StGroup) })
   }),
   /** A card, World Info file or preset of the folder; `expect` is the kind its folder holds. */
   Rpc.make("ParseStLibraryFile", {
-    payload: { bytes: Transferable.Uint8Array, fileName: Schema.String, expect: EntityKind },
+    payload: { bytes: Transferable.Uint8Array, fileName: Schema.String, expect: EntityKind, parser },
     success: StLibraryFile
   }),
   /** A persona as a card with its avatar; null for an avatar ST lists under no name. */
   Rpc.make("BuildStPersona", {
-    payload: { bytes: Transferable.Uint8Array, fileName: Schema.String, persona: Schema.NullOr(StPersona) },
+    payload: { bytes: Transferable.Uint8Array, fileName: Schema.String, persona: Schema.NullOr(StPersona), parser },
     success: ParsedFile
   })
 ) {}

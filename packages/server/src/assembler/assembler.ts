@@ -1,4 +1,5 @@
 // The assembler with its built-in stages and macros registered (ARCHITECTURE §15).
+import { withAssemblyModules } from "./modules.ts"
 import { registerBuiltinMacros } from "@rp/shared/macros/builtins.ts"
 import { makeMacroRegistry, type MacroRegistry } from "@rp/shared/macros/registry.ts"
 import { Effect, type Scope } from "effect"
@@ -16,6 +17,9 @@ export interface Assembler {
   readonly stages: StageRegistry
   readonly macros: MacroRegistry
   readonly projections: ProjectionRegistry
+  readonly projectionOptions: Effect.Effect<
+    ReadonlyArray<{ readonly id: string; readonly label: string; readonly description?: string }>
+  >
   readonly assemble: (request: Omit<AssemblyRequest, "macros" | "projections">) => ReturnType<typeof assemble>
 }
 
@@ -27,5 +31,21 @@ export const makeAssembler: Effect.Effect<Assembler, never, Scope.Scope> = Effec
   yield* registerBuiltinStages(stages)
   yield* registerBuiltinProjections(projections)
   yield* registerBuiltinMacros(macros)
-  return { stages, macros, projections, assemble: (request) => assemble(stages, { ...request, macros, projections }) }
+  const assembler: Assembler = {
+    stages,
+    macros,
+    projections,
+    projectionOptions: Effect.suspend(() =>
+      withAssemblyModules(
+        assembler,
+        Effect.sync(() =>
+          projections
+            .list()
+            .map(({ id, label, description }) => ({ id, label, ...(description === undefined ? {} : { description }) }))
+        )
+      )
+    ),
+    assemble: (request) => withAssemblyModules(assembler, assemble(stages, { ...request, macros, projections }))
+  }
+  return assembler
 })

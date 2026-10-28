@@ -216,7 +216,7 @@ export class StImportFailed extends Schema.TaggedError<StImportFailed>()("StImpo
 }
 
 /** One uploaded file of the folder, as its kind's handler receives it. */
-interface StFolderCall<F extends StFile = StFile> {
+export interface StFolderCall<F extends StFile = StFile> {
   readonly session: Session
   readonly user: User
   readonly importId: string
@@ -1062,8 +1062,14 @@ export class StImports extends Context.Service<
           const session = yield* sessionOf(user, importId)
           const kind = classifyStPath(path)
           const handler = kind === null ? undefined : handlers.get(kind.kind)
-          if (kind === null || handler === undefined) {
+          if (kind === null || kind.kind === "unsupported") {
             return result("failed", "This file isn't one the import reads.")
+          }
+          if (handler === undefined) {
+            const message = `The ${kind.kind} folder import handler is disabled.`
+            session.report.issue(path, "error", "st.handler_disabled", message)
+            session.report.count(kind.kind, "failed")
+            return result("failed", message)
           }
           return yield* handler.run({ session, user, importId, path, file: kind, bytes, request })
         })

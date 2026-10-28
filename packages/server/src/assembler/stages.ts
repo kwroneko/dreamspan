@@ -688,7 +688,7 @@ const rolesStage = sync("roles", (assembly) => {
       message: `This chat's role projection "${chosen}" isn't installed (a plugin may be off); roles are by writer instead.`
     })
   }
-  const projection = found ?? assembly.request.projections.get("by_writer") ?? builtinProjections[0]!
+  const projection = found ?? assembly.request.projections.get("by_writer")
   const names = need(assembly, "macros").names
   assembly.projected = need(assembly, "resolved").map(({ entry, piece }): ProjectedEntry => {
     const speaker = speakerOf(entry, cast)
@@ -697,7 +697,7 @@ const rolesStage = sync("roles", (assembly) => {
     // A speaker who has left still names its own messages; otherwise the side's first card does.
     const named =
       (entry.speaker && !recorded(entry, cast) ? assembly.departed?.get(entry.speaker) : undefined) ?? speaker
-    const role = projection.role({ entry, cast, speaker, side })
+    const role = projection?.role({ entry, cast, speaker, side }) ?? side
     return {
       entry,
       role,

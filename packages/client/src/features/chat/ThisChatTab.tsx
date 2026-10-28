@@ -165,8 +165,8 @@ function SummariesSetting({ session }: { session: ChatSession }) {
 export function ThisChatTab({ session }: { session: ChatSession; active: boolean }) {
   const { cast } = useCast()
   const rolesProjection = cast?.rolesProjection ?? "by_writer"
-  // A plugin's projection the chat chose that isn't installed now: shown, not hidden.
-  const unknownRoles = ["by_writer", "alternate", "perspective"].includes(rolesProjection) ? null : rolesProjection
+  const roleOptions = cast?.roleProjections ?? []
+  const unknownRoles = cast && !roleOptions.some((option) => option.id === rolesProjection) ? rolesProjection : null
   const action = useAction()
   const [error, setError] = useState<AppError | null>(null)
   const change = async (next: CastChange) => {
@@ -195,17 +195,7 @@ export function ThisChatTab({ session }: { session: ChatSession; active: boolean
                   }
                 ]
               : []),
-            { value: "by_writer", label: "By writer", description: "Yours as user, the model's as assistant." },
-            {
-              value: "alternate",
-              label: "Alternating",
-              description: "Strictly alternating by position, for models that require it."
-            },
-            {
-              value: "perspective",
-              label: "By perspective",
-              description: "The replying character's own turns as assistant, everyone else's as user."
-            }
+            ...roleOptions.map(({ id, label, description }) => ({ value: id, label, description }))
           ]}
         />
       </section>

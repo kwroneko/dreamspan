@@ -1433,16 +1433,22 @@ describe("several characters (DESIGN §5.0–§5.4)", () => {
       Effect.scoped(
         Effect.gen(function* () {
           const own = yield* makeAssembler
-          const fixture = group({ notes: [] })
-          const normal = yield* assembleFixture(fixture, { assembler: own })
+          const withNote = group({ notes: [note("A scoped note is present.", 1, "system")] })
+          const normal = yield* assembleFixture(group({ notes: [] }), { assembler: own })
+          expect(contents(yield* assembleFixture(withNote, { assembler: own })).join("\n")).toContain(
+            "A scoped note is present."
+          )
           yield* Effect.scoped(
             Effect.gen(function* () {
               yield* own.stages.disable("notes")
               expect(own.stages.get("notes")).toBeUndefined()
-              expect(contents(yield* assembleFixture(fixture, { assembler: own }))).toEqual(contents(normal))
+              expect(contents(yield* assembleFixture(withNote, { assembler: own }))).toEqual(contents(normal))
             })
           )
           expect(own.stages.get("notes")).toBeDefined()
+          expect(contents(yield* assembleFixture(withNote, { assembler: own })).join("\n")).toContain(
+            "A scoped note is present."
+          )
         })
       )
     )

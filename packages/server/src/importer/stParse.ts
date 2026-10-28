@@ -6,15 +6,14 @@ import { CardDoc } from "@rp/shared/docs/card.ts"
 import { NOTE_SCHEMA_VERSION, noteDepth, type NoteDoc } from "@rp/shared/docs/note.ts"
 import { ImportReport, ReportBuilder } from "@rp/shared/importReport.ts"
 import type { EntityKind } from "@rp/shared/library.ts"
-import { Context, Effect, Layer, Schema } from "effect"
-import { makeRegistry, type Registry } from "../registry.ts"
+import { Effect, Schema } from "effect"
 import { attempt } from "../formats/safety.ts"
 import { parseStChatPart, stChatLimits } from "../formats/stChat.ts"
 import { parseStGroup, parseStSettings, personaCard, stRole } from "../formats/stData.ts"
 import { failed, type Imported, parseFile, parsedFile, sha256 } from "./importers.ts"
 import { ParsedFile, StChatPart, StGroup, type StPersona, StLibraryFile, StSettings } from "./ops.ts"
 
-export const parseChatPart = (input: {
+const parseChatPart = (input: {
   readonly bytes: Uint8Array
   readonly first: boolean
   readonly firstIndex: number
@@ -180,40 +179,14 @@ export interface StParsers {
   readonly persona: typeof buildPersona
 }
 
-export type StParser = {
-  readonly [K in keyof StParsers]: { readonly id: K; readonly run: StParsers[K] }
-}[keyof StParsers]
-
-/**
- * The ST import's parsers (PLUGINS §8), in the format worker beside the library importers:
- * what a chat part, settings.json, a group or a persona is read as. A plugin's parser
- * registers under the same id to replace or (`get` first) wrap one. It runs in the worker
- * like the built-ins, one request at a time, and returns the typed values the main thread
- * hands to the kernel's write operations; it never writes.
- */
-export class StParserRegistry extends Context.Service<StParserRegistry, Registry<StParser>>()(
-  "rp/importer/StParserRegistry"
-) {}
-
-export const layer = Layer.effect(
-  StParserRegistry,
-  Effect.gen(function* () {
-    const registry = makeRegistry<StParser>()
-    const builtins: ReadonlyArray<StParser> = [
-      { id: "chat-part", run: parseChatPart },
-      { id: "settings", run: parseSettings },
-      { id: "group", run: parseGroup },
-      { id: "library-file", run: parseLibraryFile },
-      { id: "persona", run: buildPersona }
-    ]
-    for (const parser of builtins) yield* registry.register(parser)
-    return registry
-  })
-)
-
-/** The run function in effect for a parser id; undefined while it is disabled. */
-export const stParser = <K extends keyof StParsers>(registry: Registry<StParser>, id: K) =>
-  registry.get(id)?.run as StParsers[K] | undefined
+/** Implementations supplied by the built-in worker module. Plugins may import these to wrap them. */
+export const builtinParsers: StParsers = {
+  "chat-part": parseChatPart,
+  settings: parseSettings,
+  group: parseGroup,
+  "library-file": parseLibraryFile,
+  persona: buildPersona
+}
 
 /** A disabled parser reads nothing: the file is reported, not imported. */
 export const disabled = (id: string) => failed(`st-${id}`, "st.parser_disabled", `The ${id} parser is disabled.`)

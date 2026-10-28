@@ -1,3 +1,4 @@
+import { moduleHandlers } from "../assembler/modules.ts"
 import { makeHistoryReadHandlers } from "./historyReads.ts"
 import { makeLcmPlanningHandlers } from "./lcmPlanning.ts"
 import { makeLcmReadHandlers } from "./lcmReads.ts"
@@ -62,22 +63,24 @@ RpcServer.layer(ReadOps, { concurrency: 1, disableFatalDefects: true }).pipe(
           lcmUi,
           lcmEnable
         ]) =>
-          ReadOps.of({
-            ...history,
-            ...core,
-            ...providers,
-            ...accounts,
-            ...imports,
-            ...chatSetup,
-            ...stImport,
-            ...editor,
-            ...assembly,
-            ...inspector,
-            ...planning,
-            ...lcm,
-            ...lcmUi,
-            ...lcmEnable
-          })
+          ReadOps.of(
+            moduleHandlers({
+              ...history,
+              ...core,
+              ...providers,
+              ...accounts,
+              ...imports,
+              ...chatSetup,
+              ...stImport,
+              ...editor,
+              ...assembly,
+              ...inspector,
+              ...planning,
+              ...lcm,
+              ...lcmUi,
+              ...lcmEnable
+            })
+          )
       )
     )
   ),
