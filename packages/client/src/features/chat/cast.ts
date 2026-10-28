@@ -1,3 +1,4 @@
+export { nextInTurn, type NextInTurn } from "./replyPolicy.ts"
 // Who's in the open chat, as message rows and the composer read it: names by card, and who
 // the user plays. Rows read it from context; it only changes when the cast does.
 import type { CastCard, EntityId, PathEntry } from "@rp/shared/chat.ts"
@@ -33,19 +34,6 @@ export const useCast = () => useContext(CastContext)
 export const nameOf = (view: CastView, id: EntityId | null) => (id === null ? null : (view.cards.get(id)?.name ?? null))
 
 /**
- * Who can reply to the composer's next send: the participants present that the user doesn't
- * play, in the cast's order, less the composer's own speaker (one writing as a character
- * isn't answered by that character), unless no one else is there.
- */
-const replyCandidates = (cast: Cast | null, speaker: EntityId | null): Array<EntityId> => {
-  const present = (cast?.participants ?? []).filter(
-    (id) => !cast!.playedByMe.includes(id) && !cast!.absent.includes(id)
-  )
-  const others = present.filter((id) => id !== speaker)
-  return others.length > 0 ? others : present
-}
-
-/**
  * The faces Reply from offers: the candidates and the muted characters, who are never next in
  * turn but can still be picked to reply (DESIGN §3.5), in the cast's order.
  */
@@ -53,38 +41,6 @@ export const replyFaces = (cast: Cast | null, speaker: EntityId | null): Array<E
   const characters = (cast?.participants ?? []).filter((id) => !cast!.playedByMe.includes(id))
   const others = characters.filter((id) => id !== speaker)
   return others.length > 0 ? others : characters
-}
-
-/** The next reply in turn, and whose turn it follows (null: no one's spoken yet). */
-export interface NextInTurn {
-  readonly id: EntityId
-  readonly after: EntityId | null
-}
-
-/**
- * Turns go round the cast in its order (a round-robin default, one reply a turn): the candidate
- * after the character who spoke last on the path, or the first when none has.
- */
-export const nextInTurn = (
-  cast: Cast | null,
-  entries: ReadonlyArray<PathEntry>,
-  speaker: EntityId | null
-): NextInTurn | null => {
-  const candidates = replyCandidates(cast, speaker)
-  if (cast === null || candidates.length === 0) return null
-  const characters = cast.participants.filter((id) => !cast.playedByMe.includes(id))
-  let after: EntityId | null = null
-  for (let i = entries.length - 1; i >= 0 && after === null; i--) {
-    const id = entries[i]!.version.speakerEntityId
-    if (id !== null && characters.includes(id)) after = id
-  }
-  if (after === null) return { id: candidates[0]!, after: null }
-  const from = cast.participants.indexOf(after)
-  for (let step = 1; step <= cast.participants.length; step++) {
-    const id = cast.participants[(from + step) % cast.participants.length]!
-    if (candidates.includes(id)) return { id, after }
-  }
-  return { id: candidates[0]!, after }
 }
 
 /**
