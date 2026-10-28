@@ -62,7 +62,11 @@ export const ContextSource = Schema.Struct({
   label: Schema.String,
   activation: Schema.NullOr(SourceActivation),
   /** A message of the chat, to link to. */
-  slotId: Schema.NullOr(SlotId)
+  slotId: Schema.NullOr(SlotId),
+  /** A history message's version, by its place among the slot's versions when it was sent, from 1. */
+  version: Schema.optionalKey(Schema.Int),
+  /** The library item it came from (a card, lorebook or preset), to link to; absent in older captures. */
+  ref: Schema.optionalKey(Schema.String)
 })
 export type ContextSource = typeof ContextSource.Type
 
@@ -82,6 +86,29 @@ export const ContextMessage = Schema.Struct({
   /** The assembler's estimate: a token per four characters, plus three per message. */
   tokens: Schema.Int,
   sources: Schema.Array(ContextSource),
+  /**
+   * Where each source's text sits in `content`: character offsets, in order, not overlapping, with
+   * `source` an index into `sources`. Text between parts is the assembler's joins and wrappers.
+   * Absent in captures from before parts were recorded.
+   */
+  parts: Schema.optionalKey(
+    Schema.Array(
+      Schema.Struct({
+        start: Schema.Int,
+        end: Schema.Int,
+        source: Schema.Int,
+        /** A wrapper its block's owner added, such as a card join prefix: framing, not content. */
+        frame: Schema.optionalKey(Schema.Literal(true))
+      })
+    )
+  ),
+  /**
+   * The labelled blocks around the parts (a card's wrapped field, the characters' definitions, a
+   * preset prompt that read cards through a macro, a lorebook block), same offsets, nested ones
+   * inside their outer ones; text in a group outside its parts is its framing. Absent in older
+   * captures and when no part sits in a block.
+   */
+  groups: Schema.optionalKey(Schema.Array(Schema.Struct({ start: Schema.Int, end: Schema.Int, source: Schema.Int }))),
   breakpoint: Schema.NullOr(BreakpointReason)
 })
 export type ContextMessage = typeof ContextMessage.Type
@@ -116,7 +143,12 @@ export const ContextDisplay = Schema.Struct({
   messages: Schema.Array(ContextMessage),
   /** Effective numeric samplers after provider mapping. */
   samplers: Schema.Record(Schema.String, Schema.Number),
-  issues: Schema.Array(ContextIssue)
+  issues: Schema.Array(ContextIssue),
+  /**
+   * What this turn left out: notes and preset prompts whose condition didn't hold, lorebook
+   * entries skipped. Absent in captures from before it was recorded.
+   */
+  notSent: Schema.optionalKey(Schema.Array(ContextSource))
 })
 export type ContextDisplay = typeof ContextDisplay.Type
 

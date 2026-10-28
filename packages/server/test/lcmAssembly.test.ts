@@ -143,6 +143,16 @@ for (const [mode, anthropic] of [
         const sources = display.messages.flatMap((m) => m.sources).filter((s) => s.kind === "summary")
         assert.isTrue(sources.some((s) => s.label === "Summary, level 1, messages 1–2, revision 2"))
         assert.isTrue(sources.every((s) => s.summary?.changed === false))
+        // The summary's own text is marked where it sits in the sent message.
+        assert.isTrue(
+          display.messages.some((m) =>
+            (m.parts ?? []).some(
+              (p) =>
+                m.sources[p.source]!.kind === "summary" &&
+                m.content.slice(p.start, p.end).includes("{{incvar::never}} stays literal.")
+            )
+          )
+        )
         assert.isTrue(
           display.messages.some(
             (m) => m.content.includes("{{incvar::never}}") && m.sources.some((s) => s.kind === "summary")

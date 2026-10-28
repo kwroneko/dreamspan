@@ -723,12 +723,15 @@ const collectionOf = (assembly: Assembly): { collection: Array<StPrompt>; readsD
   const collection: Array<StPrompt> = []
   let afterHistory = false
   let direction = false
+  const skipped: Array<Source> = []
   for (const entry of presetOrder(doc.prompts, doc.order)) {
     const prompt = prompts.get(entry.identifier)
     if (!prompt) continue
     const condition = conditionOf(prompt)
     const allowed = entry.enabled && triggersFor(prompt, type) && conditionHolds(assembly, condition)
     if (entry.identifier === "chatHistory") afterHistory = true
+    if (entry.enabled && triggersFor(prompt, type) && !allowed && condition !== "always")
+      skipped.push(presetSource(assembly, prompt.identifier, condition))
     if (!allowed && entry.identifier !== "main") continue
     if (allowed && readsDirection(prompt.content)) direction = true
     const text =
@@ -753,6 +756,7 @@ const collectionOf = (assembly: Assembly): { collection: Array<StPrompt>; readsD
       forbid_overrides: prompt.forbid_overrides
     })
   }
+  assembly.skippedPrompts = skipped
   return { collection, readsDirection: direction }
 }
 

@@ -164,13 +164,15 @@ export interface WireContext {
   /** Actual request cache policy after transforms; server-only. */
   readonly cache?: { readonly ttlS: number | null; readonly fixed: boolean; readonly source: string | null }
   /** Complete sanitized historical display, present only after final capture. */
-  readonly display?: Pick<ContextDisplay, "model" | "preset" | "issues">
+  readonly display?: Pick<ContextDisplay, "model" | "preset" | "issues" | "notSent">
   readonly mapping?: ModelInput["mapping"]
   readonly messages: ReadonlyArray<
     Omit<RequestMessage, "role"> & {
       readonly role: Role | "developer" | "model"
       readonly prefill?: ContextMessage["prefill"]
       readonly sources?: ContextMessage["sources"]
+      readonly parts?: ContextMessage["parts"]
+      readonly groups?: ContextMessage["groups"]
       readonly breakpoint?: ContextMessage["breakpoint"]
       /** Digest of final, unredacted text/role/name. Never projected into an RPC DTO. */
       readonly digest?: string
@@ -283,6 +285,8 @@ export interface ContextSnapshot {
   }
   /** The speaker's card prompts and what became of them; absent when it has none. */
   readonly cardOverrides?: ReadonlyArray<CardOverride>
+  /** Enabled preset prompts their condition left out this turn; absent in older snapshots. */
+  readonly skippedPrompts?: ReadonlyArray<Source>
   /** What the sources read, by id and revision, so the context can be read again exactly. */
   readonly wire?: WireContext
   readonly sources?: SourcePins
@@ -363,6 +367,17 @@ export interface SourcePins {
 /** Raw metadata from the assembly transaction, scrubbed only at final capture on the main thread. */
 export interface InspectionInputs extends Pick<ContextDisplay, "model" | "preset" | "issues"> {
   readonly sources: ReadonlyArray<ReadonlyArray<ContextSource>>
+  /** Per request message, its pieces' text by source id, to find where each sits in the sent text. */
+  readonly texts?: ReadonlyArray<ReadonlyArray<InspectionNode>>
+  readonly notSent?: ReadonlyArray<ContextSource>
+}
+
+/** A piece's text by source id and, for a labelled block, the pieces it holds (`partsOf`). */
+export interface InspectionNode {
+  readonly source: string
+  readonly text: string
+  readonly frame?: boolean
+  readonly parts?: ReadonlyArray<InspectionNode>
 }
 
 /** What generating needs of a snapshot, sent to the main thread apart from it. */

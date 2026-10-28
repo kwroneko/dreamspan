@@ -27,6 +27,7 @@ import type {
   Piece,
   PresetInput,
   RequestMessage,
+  Source,
   SummaryLayer,
   Target
 } from "./types.ts"
@@ -203,6 +204,8 @@ export interface Assembly {
   cardOverrides?: Array<CardOverride>
   notes?: ReadonlyArray<NoteInput>
   skippedNotes?: ReadonlyArray<NoteInput>
+  /** Enabled preset prompts left out by their condition this turn, for the request inspector. */
+  skippedPrompts?: Array<Source>
   /** The personas whose description a note places, so the persona description marker leaves them out. */
   placedPersonas?: ReadonlySet<string>
   /**
@@ -300,6 +303,7 @@ export const assemble = (stages: StageRegistry, request: AssemblyRequest) =>
       effects: assembly.effects,
       ...(assembly.loreFallback ? { loreFallback: assembly.loreFallback } : {}),
       ...(assembly.cardOverrides?.length ? { cardOverrides: assembly.cardOverrides } : {}),
+      ...(assembly.skippedPrompts?.length ? { skippedPrompts: assembly.skippedPrompts } : {}),
       templateWrites: assembly.templateWrites,
       ...(assembly.lcm
         ? {

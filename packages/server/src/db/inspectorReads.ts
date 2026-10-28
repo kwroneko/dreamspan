@@ -10,7 +10,7 @@ import { type ContextSource, RunContext } from "@rp/shared/inspectorApi.ts"
 import { CONDITION_LABELS } from "@rp/shared/presetConditions.ts"
 import { Effect } from "effect"
 import { SqlClient, type SqlError } from "effect/sql"
-import type { ContextSnapshot, Source, WireContext, InspectionInputs } from "../assembler/types.ts"
+import type { ContextSnapshot, Source, WireContext, InspectionInputs, InspectionNode } from "../assembler/types.ts"
 import { builtinPreset } from "./assemblySources.ts"
 import type { ReadOps } from "./ops.ts"
 import type { LlmRequestRow } from "./providers.ts"
@@ -30,19 +30,40 @@ export const describer = (
   snapshots: ReadonlyArray<ContextSnapshot>
 ): Effect.Effect<(source: Source) => ContextSource, SqlError.SqlError> =>
   Effect.gen(function* () {
-    const sources = snapshots.flatMap((s) => s.pieces.map((p) => p.source))
+    const sources = snapshots.flatMap((s) => [...s.pieces.map((p) => p.source), ...(s.skippedPrompts ?? [])])
     const revisions = unique(
       sources.flatMap((s) => (s.kind === "card" || s.kind === "note" || s.kind === "lorebook" ? [s.revision] : []))
     )
     const entities =
       revisions.length === 0
         ? []
-        : yield* sql<{ id: string; name: string | null; label: string | null }>`
-            SELECT v.id, json_extract(v.doc_json, '$.name') AS name,
-              (SELECT r.label FROM entity_refs r WHERE r.entity_id = e.id AND r.ref_kind = 'upstream') AS label
+        : yield* sql<{ id: string; name: string | null; label: string | null; ref: string | null }>`
+            SELECT v.id, COALESCE(json_extract(v.doc_json, '$.name'), json_extract(v.doc_json, '$.title')) AS name,
+              (SELECT r.label FROM entity_refs r WHERE r.entity_id = e.id AND r.ref_kind = 'upstream') AS label,
+              (SELECT r.id FROM entity_refs r WHERE r.entity_id = e.id AND r.ref_kind = 'upstream') AS ref
             FROM entity_revisions v JOIN entities e ON e.id = v.entity_id
             WHERE v.id IN ${sql.in(revisions)} AND e.owner_user_id = ${userId}`
-    const names = new Map(entities.map((row) => [row.id, row.name ?? row.label ?? "unnamed"]))
+    const names = new Map(entities.map((row) => [row.id, row.name || row.label || "unnamed"]))
+    const refs = new Map(entities.flatMap((row) => (row.ref === null ? [] : [[row.id, row.ref] as const])))
+    // A lorebook entry by its title (ST's comment), as the book's revision has it.
+    const books = unique(sources.flatMap((s) => (s.kind === "lorebook" ? [s.revision] : [])))
+    const entries =
+      books.length === 0
+        ? []
+        : yield* sql<{ revision: string; uid: number; comment: string | null }>`
+            SELECT v.id AS revision, json_extract(x.value, '$.uid') AS uid, json_extract(x.value, '$.comment') AS comment
+            FROM entity_revisions v JOIN entities e ON e.id = v.entity_id, json_each(v.doc_json, '$.entries') x
+            WHERE v.id IN ${sql.in(books)} AND e.owner_user_id = ${userId}`
+    const titles = new Map(entries.map((row) => [`${row.revision}:${row.uid}`, row.comment?.trim() ?? ""]))
+    // A history message's version by its place among its slot's versions.
+    const versions = unique(sources.flatMap((s) => (s.kind === "message" ? [s.version] : [])))
+    const ordinals =
+      versions.length === 0
+        ? []
+        : yield* sql<{ id: string; ordinal: number }>`
+            SELECT v.id, v.ordinal FROM versions v JOIN slots s ON s.id = v.slot_id JOIN chats c ON c.id = s.chat_id
+            WHERE v.id IN ${sql.in(versions)} AND c.id = ${chatId} AND c.owner_user_id = ${userId}`
+    const ordinalOf = new Map(ordinals.map((row) => [row.id, row.ordinal]))
     const presets = unique(sources.flatMap((s) => (s.kind === "preset" && s.revision !== null ? [s.revision] : [])))
     const prompts =
       presets.length === 0
@@ -62,6 +83,11 @@ export const describer = (
             SELECT s.id, s.depth FROM slots s JOIN chats c ON c.id = s.chat_id
             WHERE s.id IN ${sql.in(slots)} AND c.id = ${chatId} AND c.owner_user_id = ${userId}`
     const depthOf = new Map(depths.map((row) => [row.id, row.depth]))
+
+    const linkOf = (revision: string) => {
+      const ref = refs.get(revision)
+      return ref === undefined ? {} : { ref }
+    }
 
     return (source: Source): ContextSource => {
       const identity =
@@ -89,7 +115,8 @@ export const describer = (
             ...common,
             kind: "preset",
             label: (name ? `Preset prompt “${name}”` : `Preset: ${other}`) + when,
-            slotId: null
+            slotId: null,
+            ...(source.ref ? { ref: source.ref } : {})
           }
         }
         case "card":
@@ -97,15 +124,19 @@ export const describer = (
             ...common,
             kind: "card",
             label: `Card “${names.get(source.revision) ?? "unnamed"}”: ${source.field}`,
-            slotId: null
+            slotId: null,
+            ...linkOf(source.revision)
           }
-        case "lorebook":
+        case "lorebook": {
+          const title = titles.get(`${source.revision}:${source.uid}`)
           return {
             ...common,
             kind: "lorebook",
-            label: `Lorebook “${names.get(source.revision) ?? "unnamed"}”: entry ${source.uid}`,
-            slotId: null
+            label: `Lorebook “${names.get(source.revision) ?? "unnamed"}”: entry ${source.uid}${title ? ` “${title}”` : ""}`,
+            slotId: null,
+            ...linkOf(source.revision)
           }
+        }
         case "note":
           return { ...common, kind: "note", label: `Note “${names.get(source.revision) ?? "unnamed"}”`, slotId: null }
         case "summary":
@@ -118,10 +149,12 @@ export const describer = (
           }
         case "message": {
           const depth = depthOf.get(source.slot)
+          const ordinal = ordinalOf.get(source.version)
           return {
             ...common,
             kind: "message",
             label: depth === undefined ? "A message" : `Message ${depth + 1}`,
+            ...(ordinal === undefined ? {} : { version: ordinal + 1 }),
             slotId: source.slot as SlotId
           }
         }
@@ -173,11 +206,58 @@ export const inspectionInputs = (sql: SqlClient.SqlClient, userId: UserId, snaps
       WHERE r.id = ${preset.ref} AND e.owner_user_id = ${userId}`
       : []
     const sources = snapshot.request.messages.map((): Array<ContextSource> => [])
-    for (const piece of snapshot.pieces) {
+    const texts = snapshot.request.messages.map((): Array<InspectionNode> => [])
+    // What `{{description}}`, `{{personality}}` and `{{scenario}}` read: the joined, wrapped fields,
+    // recorded though not sent as pieces of their own. A prompt holding one holds its parts.
+    const macros = snapshot.pieces.flatMap((piece, index) =>
+      piece.id.startsWith("cards:macro:") && piece.text.trim() !== "" ? [index] : []
+    )
+    const childrenOf = (index: number, inBlock: boolean): ReadonlyArray<number> => {
+      const piece = snapshot.pieces[index]!
+      if (piece.parts?.length) return piece.parts
+      return piece.source.kind === "preset" && !inBlock
+        ? macros.filter((m) => piece.text.includes(snapshot.pieces[m]!.text))
+        : []
+    }
+    // A labelled block's text is found by its parts: the card fields, the entries, the wrappers.
+    const nodeOf = (index: number, i: number, inBlock: boolean): InspectionNode => {
+      const piece = snapshot.pieces[index]!
+      const source = describe(piece.source)
+      if (!sources[i]!.some((s) => s.id === source.id)) sources[i]!.push(source)
+      const parts = childrenOf(index, inBlock).map((part) => nodeOf(part, i, true))
+      const frame =
+        inBlock &&
+        piece.source.kind === "preset" &&
+        /^utility\.card_join_(prefix|suffix)$/.test(piece.source.identifier)
+      return { source: source.id, text: piece.text, ...(frame ? { frame } : {}), ...(parts.length ? { parts } : {}) }
+    }
+    // Each message's outermost pieces, in recording order: those not held by another piece in it.
+    const placed = snapshot.request.messages.map((): Array<number> => [])
+    for (const [index, piece] of snapshot.pieces.entries()) {
       const source = describe(piece.source)
       for (const i of piece.messages) {
+        placed[i]?.push(index)
         if (!sources[i]!.some((s) => s.id === source.id)) sources[i]!.push(source)
       }
+    }
+    for (const [i, indices] of placed.entries()) {
+      const inner = new Set(indices.flatMap((index) => snapshot.pieces[index]!.parts ?? []))
+      for (const index of indices) if (!inner.has(index)) texts[i]!.push(nodeOf(index, i, false))
+    }
+    // What this turn left out: notes and prompts by their condition, lorebook entries skipped.
+    const notSent: Array<ContextSource> = []
+    for (const source of [
+      ...snapshot.pieces
+        .map((piece) => piece.source)
+        .filter(
+          (source) =>
+            (source.kind === "note" && source.activation?.due === false) ||
+            (source.kind === "lorebook" && source.activation.status === "skipped")
+        ),
+      ...(snapshot.skippedPrompts ?? [])
+    ]) {
+      const described = describe(source)
+      if (!notSent.some((s) => s.id === described.id)) notSent.push(described)
     }
     // Continue's prefill, the message after the assembled ones, is the text it continues.
     const target = snapshot.sources?.target
@@ -203,6 +283,8 @@ export const inspectionInputs = (sql: SqlClient.SqlClient, userId: UserId, snaps
       },
       preset: { label: presetRef?.label ?? null, scope: preset.scope },
       sources,
+      texts,
+      notSent,
       issues: snapshot.issues
     } satisfies InspectionInputs
   })
@@ -270,6 +352,8 @@ export const makeInspectorReadHandlers = Effect.gen(function* () {
                     }
                   }
                 }),
+                ...(message.parts ? { parts: message.parts } : {}),
+                ...(message.groups ? { groups: message.groups } : {}),
                 breakpoint: message.breakpoint ?? null
               }))
             : [],
