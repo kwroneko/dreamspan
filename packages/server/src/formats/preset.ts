@@ -20,11 +20,11 @@ import { type ImportReport, ReportBuilder, shownList, shownText } from "@rp/shar
 import { Schema } from "effect"
 import { newestMessage, presetOrder, sentOutsideTheOrder } from "@rp/shared/presetOrder.ts"
 import {
-  conditionFromTriggers,
   conditionOf,
   fromSpeaker,
   GROUP_NUDGE,
   IMPERSONATION_PROMPT,
+  triggersWithCondition,
   withConditions
 } from "@rp/shared/presetConditions.ts"
 import { defaultLimits, FormatError, parseJson } from "./safety.ts"
@@ -659,31 +659,13 @@ const readPrompt = (p: Json, path: Path, ids: FreshIds, r: ReportBuilder): Prese
   }
 }
 
-const CONDITION_WORDS: Readonly<Record<PromptCondition, string>> = {
-  always: "always",
-  as_character: "only when the model writes as a character",
-  as_user: "only when the model writes as {{user}}",
-  with_direction: "only when there's a direction"
-}
-
 /**
- * ST's triggers, group nudge and impersonation prompt as conditioned prompts, and the default
- * direction prompt last (DESIGN §2.2), each reported.
+ * ST's group nudge and impersonation prompt as conditioned prompts, and the default direction
+ * prompt last (DESIGN §2.2), each reported. ST's triggers stay as they are: they're a filter of
+ * their own beside the condition (owner 2026-10-28).
  */
 const conditioned = (doc: PresetDoc, r: ReportBuilder): PresetDoc => {
-  const prompts = doc.prompts.map((p) => {
-    if (p.condition !== undefined || p.injection_trigger.length === 0) return p
-    const condition = conditionFromTriggers(p.injection_trigger)
-    const limited = p.injection_trigger.every((t) => t === "continue" || t === "quiet")
-    r.add(
-      "info",
-      "preset.trigger_mapped",
-      `Prompt \`${shownText(p.name || p.identifier)}\` (triggers ${shownList(p.injection_trigger)}) is sent ${CONDITION_WORDS[condition]}${limited ? ", and still only for those generation types" : ""}.`,
-      ["prompts"]
-    )
-    return condition === "always" ? p : { ...p, condition }
-  })
-  const { doc: converted, changes } = withConditions({ ...doc, prompts })
+  const { doc: converted, changes } = withConditions(doc)
   for (const change of changes)
     r.add(
       "info",
@@ -691,7 +673,7 @@ const conditioned = (doc: PresetDoc, r: ReportBuilder): PresetDoc => {
       change.kind === "group_nudge"
         ? "The group nudge is now the prompt “Group nudge” after the chat history, sent when the model writes as a character, with {{char}} as {{speaker}}."
         : change.kind === "impersonation"
-          ? "The impersonation prompt is now the prompt “Impersonation prompt” after the chat history, sent when the model writes as {{user}}, with {{user}} as {{speaker}}."
+          ? "The impersonation prompt is now the prompt “Impersonation prompt” at the end, sent when the model writes as {{user}}, with {{user}} as {{speaker}}."
           : "The default direction prompt was added at the end, sent only when you give a direction.",
       ["prompts"]
     )
@@ -888,8 +870,8 @@ const readRegex = (raw: unknown, r: ReportBuilder): Array<RegexScript> => {
  */
 export const exportStPreset = (stored: PresetDoc): Json => {
   // Conditions back to what ST has (DESIGN §2.2): the group nudge and impersonation prompt
-  // to its utility prompts, with their macros; a condition to the triggers that mean it; a
-  // prompt sent only with a direction, which ST would send every turn, off.
+  // to its utility prompts, with their macros; a condition to the triggers that mean it, with
+  // the prompt's own; a prompt sent only with a direction, which ST would send every turn, off.
   const doc = withConditions(stored).doc
   const enabled = new Map(doc.order.map((e) => [e.identifier, e.enabled]))
   const utility = (identifier: string, macro: "char" | "user") => {
@@ -902,16 +884,6 @@ export const exportStPreset = (stored: PresetDoc): Json => {
     impersonation_prompt: utility(IMPERSONATION_PROMPT, "user")
   }
   const moved = new Set([GROUP_NUDGE, IMPERSONATION_PROMPT])
-  const triggersOf = (p: PresetPrompt): Array<string> => {
-    const condition = conditionOf(p)
-    if (condition === "with_direction" || conditionFromTriggers(p.injection_trigger) === condition)
-      return [...p.injection_trigger]
-    return condition === "as_user"
-      ? ["impersonate"]
-      : condition === "as_character"
-        ? ["normal", "swipe", "regenerate", "continue"]
-        : []
-  }
   const prompts = doc.prompts
     .filter((p) => !moved.has(p.identifier))
     .map((p) => ({
@@ -925,12 +897,12 @@ export const exportStPreset = (stored: PresetDoc): Json => {
       injection_position: p.injection_position === "absolute" ? 1 : 0,
       injection_depth: p.injection_depth,
       injection_order: p.injection_order,
-      injection_trigger: triggersOf(p),
+      injection_trigger: triggersWithCondition(p),
       forbid_overrides: p.forbid_overrides,
-      // ST has no conditions: the prompt goes out off, and a reimport turns it back on.
-      ...(conditionOf(p) === "with_direction"
-        ? { condition: "with_direction", sent_with_direction: enabled.get(p.identifier) === true }
-        : {}),
+      // ST ignores the condition; a reimport restores it. A prompt sent only with a direction
+      // goes out off, and a reimport turns it back on.
+      ...(conditionOf(p) !== "always" ? { condition: conditionOf(p) } : {}),
+      ...(conditionOf(p) === "with_direction" ? { sent_with_direction: enabled.get(p.identifier) === true } : {}),
       ...(p.added_on_import ? { added_on_import: true } : {})
     }))
   const directed = new Set(doc.prompts.filter((p) => conditionOf(p) === "with_direction").map((p) => p.identifier))

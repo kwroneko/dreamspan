@@ -1,9 +1,10 @@
-// The composer's speaker, always visible; it opens Members / Personas / All cards (DESIGN
-// §2.2) with a search field on top, focused as it opens: typing filters the open tab by
-// name, the arrow keys move through what's left, Enter picks, Escape closes. With nothing
-// typed, the speakers used last come first, then the chat's members. A library of hundreds
-// of cards is filtered in memory and only the first rows are drawn. The same switcher picks
-// the persona (who `{{user}}` is), opening on Personas.
+// The composer's speaker, always visible; it opens the chat's cast, the persona and the cards
+// in the chat (DESIGN §2.2: to speak as another card, add it to the chat first), with a search
+// field on top, focused as it opens: typing filters by name, the arrow keys move through
+// what's left, Enter picks, Escape closes. With nothing typed, the speakers used last come
+// first, then the cast. The same switcher picks the persona (who `{{user}}` is) from
+// Members / Personas / All cards, opening on Personas: a library of hundreds of cards is
+// filtered in memory and only the first rows are drawn.
 import type { CastCard, EntityId } from "@rp/shared/chat.ts"
 import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual"
 import { type KeyboardEvent, memo, useEffect, useId, useMemo, useRef, useState } from "react"
@@ -16,25 +17,7 @@ import { nameOf, useCast } from "./cast.ts"
 import { ChevronIcon } from "./icons.tsx"
 import type { Outcome } from "./session.ts"
 
-export type SwitcherTab = "members" | "personas" | "all"
-const TAB_KEY = "rp.speakerSwitcherTab"
-
-/** The tab the switcher opened on last time; storage can be unavailable, which is fine. */
-const savedTab = (): SwitcherTab => {
-  try {
-    const value = localStorage.getItem(TAB_KEY)
-    return value === "personas" || value === "all" ? value : "members"
-  } catch {
-    return "members"
-  }
-}
-const saveTab = (tab: SwitcherTab) => {
-  try {
-    localStorage.setItem(TAB_KEY, tab)
-  } catch {
-    // Not remembered, then.
-  }
-}
+type SwitcherTab = "members" | "personas" | "all"
 
 const fold = (text: string) => text.normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase()
 
@@ -86,7 +69,7 @@ function CardOptions({
   active: number
   current: EntityId | null
   currentLabel: string
-  /** The chat's members, when picking a card that isn't one makes it join; null on a pending chat. */
+  /** The chat's members, when picking a card that isn't one makes it join; null when none can join. */
   members: ReadonlySet<EntityId> | null
   empty: string
   onActive: (index: number) => void
@@ -162,15 +145,16 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
   pending = false,
   onNone
 }: {
-  listCards: () => Promise<Outcome<ReadonlyArray<CastCard>>>
+  /** The library's cards, which the persona is picked from. */
+  listCards?: () => Promise<Outcome<ReadonlyArray<CastCard>>>
   /** The card speaking, or with `persona`, the one the user plays. */
   speaker: EntityId | null
   /** The speakers of the latest messages, most recent first: listed first. */
   recent: ReadonlyArray<EntityId>
   onPick: (card: CastCard) => void
   /**
-   * Picks the persona instead (DESIGN §2.2: who `{{user}}` is): it opens on Personas every
-   * time, and leaves the speaker switcher's remembered tab alone.
+   * Picks the persona instead (DESIGN §2.2: who `{{user}}` is), from the library: it opens on
+   * Personas every time.
    */
   persona?: boolean
   /** A chat not made yet: there are no members to join. */
@@ -180,7 +164,7 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
 }) {
   const view = useCast()
   const [open, setOpen] = useState(false)
-  const [tab, setTab] = useState<SwitcherTab>(() => (persona ? "personas" : savedTab()))
+  const [tab, setTab] = useState<SwitcherTab>("personas")
   const [all, setAll] = useState<ReadonlyArray<CastCard> | null>(null)
   const [query, setQuery] = useState("")
   const [active, setActive] = useState(0)
@@ -190,7 +174,10 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
   const name =
     nameOf(view, speaker) ?? (speaker ? names.get(speaker)?.name : undefined) ?? (persona ? "No persona" : "You")
   const participants = view.cast?.participants
+  const played = view.cast?.playedByMe
   const memberIds = useMemo(() => participants ?? [], [participants])
+  // Who can speak: the persona and the cards in the chat.
+  const castIds = useMemo(() => [...new Set([...(played ?? []), ...(participants ?? [])])], [played, participants])
   const members = useMemo(
     () =>
       memberIds.flatMap((id) => {
@@ -202,16 +189,23 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
   // A card in the chat by the name the chat uses for it (its own version's, say).
   const cards = useMemo(() => (all ?? []).map((card) => view.cards.get(card.entityId) ?? card), [all, view.cards])
   const shown = useMemo(() => {
-    const source = tab === "members" ? members : tab === "personas" ? cards.filter((card) => card.persona) : cards
-    return ranked(source, query, recent, memberIds)
-  }, [tab, members, cards, query, recent, memberIds])
+    const source = !persona
+      ? castIds.flatMap((id) => view.cards.get(id) ?? [])
+      : tab === "members"
+        ? members
+        : tab === "personas"
+          ? cards.filter((card) => card.persona)
+          : cards
+    return ranked(source, query, recent, persona ? memberIds : castIds)
+  }, [persona, castIds, view.cards, tab, members, cards, query, recent, memberIds])
 
   const openChange = (next: boolean) => {
     setOpen(next)
     setQuery("")
     setActive(0)
-    if (next && persona) setTab("personas")
-    if (next && all === null)
+    if (!next || !persona) return
+    setTab("personas")
+    if (all === null && listCards)
       void listCards().then((result) => {
         setAll(result.ok ? result.value : [])
         if (result.ok) setNames(new Map(result.value.map((card) => [card.entityId, card])))
@@ -241,17 +235,19 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
     }
   }
   const memberSet = useMemo(() => new Set(memberIds), [memberIds])
-  const loading = all === null && tab !== "members"
+  const loading = persona && all === null && tab !== "members"
   const empty =
     query.trim() !== ""
       ? `No card's name has “${query.trim()}”.`
-      : tab === "members"
-        ? "No one has joined yet."
-        : loading
-          ? "Loading…"
-          : tab === "personas"
-            ? "No cards in the persona folder."
-            : "No cards yet."
+      : !persona
+        ? "No one is in the chat yet. Add cards in the Cast tab."
+        : tab === "members"
+          ? "No one has joined yet."
+          : loading
+            ? "Loading…"
+            : tab === "personas"
+              ? "No cards in the persona folder."
+              : "No cards yet."
   const options = (
     <CardOptions
       id={listId}
@@ -259,7 +255,7 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
       active={active}
       current={speaker}
       currentLabel={persona ? "your persona" : "speaking"}
-      members={pending ? null : memberSet}
+      members={pending || !persona ? null : memberSet}
       empty={empty}
       onActive={setActive}
       onPick={pick}
@@ -310,23 +306,26 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
         onKeyDown={onKeyDown}
         className="shrink-0"
       />
-      <Tabs
-        label={persona ? "Cards to play as" : "Cards to speak as"}
-        value={tab}
-        onValueChange={(next) => {
-          setTab(next)
-          setActive(0)
-          if (!persona) saveTab(next)
-        }}
-        onPointerActivate={() => search.current?.focus()}
-        tabs={[
-          ...(pending
-            ? []
-            : [{ value: "members" as const, label: "Members", panel: tab === "members" ? options : null }]),
-          { value: "personas", label: "Personas", panel: tab === "personas" ? options : null },
-          { value: "all", label: "All cards", panel: tab === "all" ? options : null }
-        ]}
-      />
+      {persona ? (
+        <Tabs
+          label="Cards to play as"
+          value={tab}
+          onValueChange={(next) => {
+            setTab(next)
+            setActive(0)
+          }}
+          onPointerActivate={() => search.current?.focus()}
+          tabs={[
+            ...(pending
+              ? []
+              : [{ value: "members" as const, label: "Members", panel: tab === "members" ? options : null }]),
+            { value: "personas", label: "Personas", panel: tab === "personas" ? options : null },
+            { value: "all", label: "All cards", panel: tab === "all" ? options : null }
+          ]}
+        />
+      ) : (
+        options
+      )}
       {onNone && (
         <button
           type="button"

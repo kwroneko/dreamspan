@@ -95,30 +95,37 @@ for (const [width, height] of [
     })
   }
 
-  test(`clicking a remembered tab keeps search ready; keyboard tabs retain focus (${width}px)`, async ({ page }) => {
+  test(`the switcher lists only the chat's cast, and picking never adds a card (${width}px)`, async ({ page }) => {
     await page.setViewportSize({ width, height })
     const chatId = await chatWith(["Mira", "Tobin"])
+    // A library card that isn't in the chat: to speak as it, it has to be added first (DESIGN §2.2).
+    await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+      Effect.gen(function* () {
+        if (!(yield* api.ListCards()).some((card) => card.name === "Harbor Guard"))
+          yield* api.CreateCard({ label: "Harbor Guard", name: "Harbor Guard" })
+      })
+    )
     await page.goto(`${server().url}/chats/${chatId}`)
     const search = page.getByRole("combobox", { name: "Find a card to speak as" })
     await speakerChip(page).click()
-    await page.getByRole("tab", { name: "All cards" }).click()
     await expect(search).toBeFocused()
-    await search.press("Escape")
-    await speakerChip(page).click()
-    await expect(search).toBeFocused()
-    await page.getByRole("tab", { name: "All cards" }).click()
-    await expect(search).toBeFocused()
-    await page.keyboard.type("Bo")
-    await expect(search).toHaveValue("Bo")
+    await expect(page.getByRole("tab")).toHaveCount(0)
+    await expect(page.getByRole("option")).toHaveText(
+      ["Ana", "Bo", "Mira", "Tobin"].map((name) => new RegExp(name)),
+      {
+        useInnerText: true
+      }
+    )
+    await expect(page.getByText("joins the chat")).toHaveCount(0)
+    if (process.env.RP_SCREENS) await page.screenshot({ path: `${process.env.RP_SCREENS}/speaker-cast-${width}.png` })
+    await page.keyboard.type("Harbor")
+    await expect(page.getByRole("option")).toHaveCount(0)
+    await expect(page.getByText("No card's name has “Harbor”.")).toBeVisible()
+    await search.fill("Bo")
     await search.press("Enter")
     await expect(speakerChip(page)).toHaveAccessibleName(/^Speaking as Bo/)
-    await speakerChip(page).click()
-    await search.press("Tab")
-    await expect(page.getByRole("tab", { name: "All cards" })).toBeFocused()
-    await page.keyboard.press("ArrowLeft")
-    await expect(page.getByRole("tab", { name: "Personas" })).toBeFocused()
-    await page.keyboard.press("ArrowLeft")
-    await expect(page.getByRole("tab", { name: "Members" })).toBeFocused()
+    const cast = await asUser(server(), ADMIN.handle, ADMIN.password, (api) => api.GetCast({ chatId, slotId: null }))
+    expect(cast.participants).toHaveLength(4)
   })
 }
 
@@ -163,7 +170,6 @@ test("the speaker stays chosen through a reload and in every tab; the switcher s
 
   // The search field has focus as the switcher opens; type part of a name, then Enter.
   await speakerChip(page).click()
-  await page.getByRole("tab", { name: "All cards" }).click()
   const search = page.getByRole("combobox", { name: "Find a card to speak as" })
   await expect(search).toBeFocused()
   await page.keyboard.type("bo")
@@ -206,9 +212,11 @@ test("a one-card chat has no Reply from, and an empty Send asks its character", 
   await expect(lastHeader(page)).toContainText("Mira")
 })
 
-test("hundreds of cards stay searchable and reachable by keyboard on a phone", async ({ page }) => {
+test("hundreds of cards stay searchable and reachable by keyboard on a phone, picking the persona", async ({
+  page
+}) => {
   await page.setViewportSize({ width: 390, height: 844 })
-  const chatId = await chatWith(["Mira"])
+  await chatWith(["Mira"])
   const cardCount = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
     Effect.gen(function* () {
       for (let index = 0; index < 240; index++) {
@@ -218,12 +226,15 @@ test("hundreds of cards stay searchable and reachable by keyboard on a phone", a
       return (yield* api.ListCards()).length
     })
   )
-  await page.goto(`${server().url}/chats/${chatId}`)
-  await speakerChip(page).click()
+  // The persona is picked from the library; the speaker only from the chat's cast.
+  await page.goto(`${server().url}/library`)
+  await page.getByRole("link", { name: "Start a chat with Mira" }).first().click()
+  await page.getByRole("button", { name: /^Playing as / }).click()
   await page.getByRole("tab", { name: "All cards" }).click()
-  const search = page.getByRole("combobox", { name: "Find a card to speak as" })
+  const search = page.getByRole("combobox", { name: "Find a card to play as" })
   await expect(search).toBeFocused()
-  await expect(page.getByRole("option").first()).toHaveAttribute("aria-setsize", String(cardCount))
+  // The library, less the card the chat starts with.
+  await expect(page.getByRole("option").first()).toHaveAttribute("aria-setsize", String(cardCount - 1))
   expect(await page.getByRole("option").count()).toBeLessThan(30)
   // The file shares a library with other scenarios; isolate the rows this test created.
   await search.fill("Visitor")
@@ -235,9 +246,7 @@ test("hundreds of cards stay searchable and reachable by keyboard on a phone", a
   await search.fill("239")
   await expect(page.getByRole("option")).toHaveCount(1)
   await search.press("Enter")
-  await expect(speakerChip(page)).toHaveAccessibleName(/^Speaking as Visitor 239/)
-  await page.reload()
-  await expect(speakerChip(page)).toHaveAccessibleName(/^Speaking as Visitor 239/)
+  await expect(page.getByRole("button", { name: /^Playing as Visitor 239/ })).toBeVisible()
 })
 
 test("a phone shows the full named Write for action and keeps an empty input compact", async ({ page }) => {
@@ -245,7 +254,6 @@ test("a phone shows the full named Write for action and keeps an empty input com
   const chatId = await chatWith(["Mira", "Captain Rhee"])
   await page.goto(`${server().url}/chats/${chatId}`)
   await speakerChip(page).click()
-  await page.getByRole("tab", { name: "All cards" }).click()
   await page.getByRole("combobox", { name: "Find a card to speak as" }).fill("rhee")
   await page.keyboard.press("Enter")
   await expect(speakerChip(page)).toHaveAccessibleName(/^Speaking as Captain Rhee/)

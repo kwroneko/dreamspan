@@ -497,13 +497,10 @@ describe("the context assembler", () => {
       const snapshot = await assembled(
         chat({ notes: [authorNote({ mode: "tail", role: "assistant" })], events: on("note-z-author") })
       )
-      // An assistant note last: the request still ends on a user turn (DESIGN §2.2).
-      expect(contents(snapshot).slice(-3)).toEqual([
-        "user: The road flooded.",
-        "assistant: Tobin is soaked.",
-        "user: [Write Mira's next message.]"
-      ])
-      expect(snapshot.issues.map((i) => i.kind)).toEqual(["last_turn_filled"])
+      // The chat ends on the user's message, so nothing is added after the assistant note
+      // (owner 2026-10-28: the closing user turn only follows a chat that ends on the model's side).
+      expect(contents(snapshot).slice(-2)).toEqual(["user: The road flooded.", "assistant: Tobin is soaked."])
+      expect(snapshot.issues).toEqual([])
     })
 
     it("puts notes beside the main prompt in turn, as ST's injectToMain does", async () => {
@@ -1245,7 +1242,7 @@ describe("the context assembler", () => {
     })
     const snapshot = await assembled(chat({ messages, preset: { ...doc, regex_approved: true } }))
     expect(contents(snapshot).filter((m) => m.startsWith("assistant: reply ")).length).toBe(400)
-    expect(snapshot.issues.map((i) => i.kind)).toEqual(["last_turn_filled"])
+    expect(snapshot.issues).toEqual([])
   })
 
   it("sends the one-turn direction through the preset's direction prompt, as typed (DESIGN §2.2)", async () => {
@@ -1349,6 +1346,27 @@ describe("several characters (DESIGN §5.0–§5.4)", () => {
       preset: preset({ group_nudge_prompt: "[Write the next reply only as {{char}}.]" }),
       ...fields
     })
+
+  it("keeps the name of a speaker who left on its messages, as after a persona change (owner 2026-10-28)", async () => {
+    const selene = card("Selene", { description: "{{char}} sails." })
+    const snapshot = await assembled(
+      group({
+        cards: [...chat().cards, { entity: "selene", doc: selene }],
+        messages: [
+          { side: "user", content: "I was Selene then.", speaker: "selene" },
+          { side: "assistant", content: "Ferry's shut.", speaker: "oren" },
+          { side: "user", content: "Now I'm Tobin." }
+        ],
+        preset: preset({ group_nudge_prompt: "[Write the next reply only as {{char}}.]", names_behavior: 2 })
+      })
+    )
+    // With names in the message content (ST's names_behavior 2), every message says who wrote it.
+    const text = contents(snapshot).join("\n")
+    expect(text).toContain("user: Selene: I was Selene then.")
+    expect(text).toContain("user: Tobin: Now I'm Tobin.")
+    // The definitions are the cast's: the departed persona's card isn't sent.
+    expect(text).not.toContain("Selene sails.")
+  })
 
   it("puts each card in a labelled block at the Definitions marker, with stable bindings and the speaker named at the tail", async () => {
     const snapshot = await assembled(
@@ -1948,7 +1966,7 @@ describe("conditioned prompts, {{speaker}} and {{direction}} (DESIGN §2.2)", ()
     }
   })
 
-  it("ends the request on a user turn, whatever the projection, unless the model is prefilled", async () => {
+  it("adds a user turn right after a chat ending on the model's side, unless a user prompt follows or the model is prefilled", async () => {
     const ending = (fields: Partial<AssemblyFixture>) =>
       assembled(
         chat({
@@ -1962,14 +1980,16 @@ describe("conditioned prompts, {{speaker}} and {{direction}} (DESIGN §2.2)", ()
           ...fields
         })
       )
-    // By writer, a group chat ending on another character, with a system prompt after it.
+    // By writer, a group chat ending on another character, with a system prompt after it: the
+    // turn goes right after the last chat message, so the preset's tail stays last, and it's
+    // no issue on the reply (owner 2026-10-28).
     const byWriter = await ending({ preset: preset({ group_nudge_prompt: "[Only {{char}} next.]" }) })
     expect(contents(byWriter).slice(-3)).toEqual([
       "assistant: Oren: Ferry's shut.",
-      "system: [Only Mira next.]",
-      "user: [Write Mira's next message.]"
+      "user: [Write Mira's next message.]",
+      "system: [Only Mira next.]"
     ])
-    expect(byWriter.issues.map((i) => i.kind)).toEqual(["last_turn_filled"])
+    expect(byWriter.issues).toEqual([])
     expect(byWriter.pieces.find((p) => p.id === "assembler:last-turn")!.source).toEqual({
       kind: "assembler",
       what: "user turn so the request ends on one"
@@ -2003,6 +2023,13 @@ describe("conditioned prompts, {{speaker}} and {{direction}} (DESIGN §2.2)", ()
     expect(contents(prefilled).at(-1)).toBe("assistant: Oren: Ferry's shut.")
     expect(prefilled.request.prefill).toBe("Mira:")
     expect(prefilled.issues).toEqual([])
+    // A user-role prompt after the history asks for the message itself: nothing is added.
+    const asked = await ending({
+      preset: preset({ group_nudge_prompt: "[Only {{char}} next.]" }),
+      target: { speaker: "mira", direction: "Mira laughs." }
+    })
+    expect(contents(asked).slice(-3, -1)).toEqual(["assistant: Oren: Ferry's shut.", "system: [Only Mira next.]"])
+    expect(contents(asked).at(-1)).toMatch(/^user: \[The user has written a direction for Mira's next message\./)
   })
 
   it("keeps a muted character's card and notes in the context, and never picks it to speak (DESIGN §3.5)", async () => {
@@ -2226,6 +2253,22 @@ describe("card definitions the way the preset says (DESIGN §5.0)", () => {
       )
       expect(contents(empty)[0]).toBe("system: MAIN")
       expect(empty.cardOverrides).toBeUndefined()
+    })
+
+    it("takes the speaking card's prompts on an impersonation turn too, and none for a persona without them (owner 2026-10-28)", async () => {
+      const played = await assembled(
+        overriding(
+          { events: [at(null, { key: "played_by_me.set", value: { entities: ["strict"] } as never })] },
+          allow(base, true)
+        )
+      )
+      expect(played.inputs.type).toBe("impersonate")
+      expect(contents(played)[0]).toBe("system: Strict first. MAIN ")
+      expect(played.cardOverrides?.map((o) => o.status)).toEqual(["replaced", "replaced"])
+      const persona = await assembled(overriding({ target: { speaker: "tobin" } }, allow(base, true)))
+      expect(persona.inputs.type).toBe("impersonate")
+      expect(contents(persona)[0]).toBe("system: MAIN")
+      expect(persona.cardOverrides).toBeUndefined()
     })
 
     it("lets no card prompt replace a prompt of a preset made here, while an imported one keeps its file's value", async () => {

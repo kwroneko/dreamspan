@@ -228,6 +228,8 @@ export interface Assembly {
   historyMove?: ContextSnapshot["historyMove"]
   /** The messages of `history` that enter the context, with the pieces recording their text. */
   resolved?: ReadonlyArray<{ readonly entry: HistoryEntry; readonly piece: number }>
+  /** Speakers of those messages who have left the cast, by entity: their messages keep their names. */
+  departed?: ReadonlyMap<string, CardInput>
   projected?: ReadonlyArray<ProjectedEntry>
   composition?: Composition
   messages?: Array<RequestMessage & { readonly pieces: ReadonlyArray<number>; readonly kind: Stability }>

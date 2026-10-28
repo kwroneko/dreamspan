@@ -1,7 +1,8 @@
 // Conditioned prompts (DESIGN §2.2, owner 2026-10-27): who the model writes as and the
 // one-turn direction reach the model through ordinary preset prompts with conditions. ST's
-// prompt triggers, group nudge and impersonation prompt map onto them; the import and the
-// read of a preset saved before conditions existed go through the same conversion.
+// group nudge and impersonation prompt map onto them; the import and the read of a preset
+// saved before conditions existed go through the same conversion. ST's per-prompt triggers
+// (generation types) stay a filter of their own beside the condition (owner 2026-10-28).
 import type { PresetDoc, PresetPrompt, PromptCondition, PromptOrderEntry } from "./docs/preset.ts"
 import { newestMessage, presetOrder } from "./presetOrder.ts"
 
@@ -33,35 +34,44 @@ export const directionPrompt: PresetPrompt = {
   added_on_import: true
 }
 
-const CHARACTER_TYPES = ["normal", "swipe", "regenerate"]
+/** ST's generation types, in the order its prompt editor lists them, with the editor's names. */
+export const TRIGGERS = [
+  { value: "normal", label: "Normal" },
+  { value: "continue", label: "Continue" },
+  { value: "impersonate", label: "Impersonate" },
+  { value: "swipe", label: "Swipe" },
+  { value: "regenerate", label: "Regenerate" },
+  { value: "quiet", label: "Quiet" }
+] as const
+
+/** The prompt's condition; absent is always. */
+export const conditionOf = (prompt: PresetPrompt): PromptCondition => prompt.condition ?? "always"
 
 /**
- * ST's triggers as a condition: none is always; impersonation alone is writing as `{{user}}`;
- * normal, swipe or regenerate without impersonation is writing as a character; both are always,
- * and so are triggers naming only Continue or summarization, which keep limiting the prompt to
- * those (`triggersFor`).
- */
-export const conditionFromTriggers = (triggers: ReadonlyArray<string>): PromptCondition => {
-  const user = triggers.includes("impersonate")
-  const character = triggers.some((t) => CHARACTER_TYPES.includes(t))
-  return user && !character ? "as_user" : character && !user ? "as_character" : "always"
-}
-
-/** The prompt's condition: its own, else as its ST triggers map. */
-export const conditionOf = (prompt: PresetPrompt): PromptCondition =>
-  prompt.condition ?? conditionFromTriggers(prompt.injection_trigger)
-
-/**
- * Whether the prompt's ST triggers let it be sent for this generation type. The condition
- * replaces them for normal generations, swipes and impersonation; a prompt naming only
- * Continue or summarization (`quiet`) is still sent only for those, and those types send
- * only the prompts that name them, as in ST.
+ * Whether the prompt's ST triggers let it be sent for this generation type, as ST's
+ * `shouldTrigger`: none is every type. Our types are ST's, except that a new version of a reply
+ * is both ST's swipe and its regenerate (there's no regenerate that deletes the reply), and a
+ * summary is ST's quiet generation.
  */
 export const triggersFor = (prompt: PresetPrompt, type: string): boolean => {
   const triggers = prompt.injection_trigger
   if (triggers.length === 0) return true
-  if (type === "continue" || type === "quiet") return triggers.includes(type)
-  return triggers.some((t) => t === "impersonate" || CHARACTER_TYPES.includes(t))
+  return type === "swipe" ? triggers.includes("swipe") || triggers.includes("regenerate") : triggers.includes(type)
+}
+
+/**
+ * The triggers that carry a condition to ST, which has none: the generation types the prompt
+ * is sent for under its condition and its own triggers. A condition triggers can't express
+ * (with a direction) keeps the prompt's own.
+ */
+export const triggersWithCondition = (prompt: PresetPrompt): Array<string> => {
+  const condition = conditionOf(prompt)
+  if (condition === "always" || condition === "with_direction") return [...prompt.injection_trigger]
+  const types: ReadonlyArray<string> =
+    condition === "as_user" ? ["impersonate"] : ["normal", "swipe", "regenerate", "continue"]
+  if (prompt.injection_trigger.length === 0) return [...types]
+  const both = prompt.injection_trigger.filter((t) => types.includes(t))
+  return both.length > 0 ? both : [...prompt.injection_trigger]
 }
 
 /** A prompt's text reads the direction, so it carries one wherever it's sent. */
@@ -80,10 +90,11 @@ export interface ConditionChange {
 type ConditionedDoc = Pick<PresetDoc, "prompts" | "order" | "utility_prompts">
 
 /**
- * The preset with ST's group nudge and impersonation prompt as conditioned prompts right after
- * the history (where ST sends them), their utility fields emptied so the conversion happens
- * once, and the default direction prompt last, unless it has one. Pure: a preset already
- * converted comes back as it is.
+ * The preset with ST's group nudge and impersonation prompt as conditioned prompts where ST
+ * sends them: the nudge right after the history, the impersonation prompt last ("always
+ * positioned last", openai.js), before the direction prompt. Their utility fields are emptied
+ * so the conversion happens once, and the default direction prompt goes last, unless it has
+ * one. Pure: a preset already converted comes back as it is.
  */
 export const withConditions = <D extends ConditionedDoc>(doc: D): { doc: D; changes: Array<ConditionChange> } => {
   const changes: Array<ConditionChange> = []
@@ -138,7 +149,12 @@ export const withConditions = <D extends ConditionedDoc>(doc: D): { doc: D; chan
     // Before the direction prompt, as a fresh import lists them, so an export reimports the same.
     const at = prompts.findIndex((p) => p.identifier === DIRECTION_PROMPT)
     prompts.splice(at < 0 ? prompts.length : at, 0, ...added)
-    order.splice(after, 0, ...added.map((p) => ({ identifier: p.identifier, enabled: true })))
+    const entry = (p: PresetPrompt) => ({ identifier: p.identifier, enabled: true })
+    const nudges = added.filter((p) => p.identifier === GROUP_NUDGE)
+    order.splice(after, 0, ...nudges.map(entry))
+    const last = added.filter((p) => p.identifier === IMPERSONATION_PROMPT)
+    const direction = order.findIndex((e) => e.identifier === DIRECTION_PROMPT)
+    order.splice(direction < 0 ? order.length : direction, 0, ...last.map(entry))
   }
   if (direction) {
     prompts.push(directionPrompt)

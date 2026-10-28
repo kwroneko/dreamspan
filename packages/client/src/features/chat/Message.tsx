@@ -49,7 +49,7 @@ import { usePresetWorkspace } from "../editor/PresetWorkspace.tsx"
 import type { RefId } from "@rp/shared/library.ts"
 
 /** Issues the preset's prompt order causes, which the preset editor fixes (DESIGN §2.2). */
-const PRESET_ISSUES: ReadonlySet<string> = new Set(["last_turn_filled", "direction_prompt_missing"])
+const PRESET_ISSUES: ReadonlySet<string> = new Set(["direction_prompt_missing"])
 
 /** Opens the current preset in the editor beside the chat, where there is one to edit. */
 function OpenPreset({ session }: { session: ChatSession }) {

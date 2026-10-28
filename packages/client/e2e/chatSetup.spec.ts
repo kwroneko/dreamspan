@@ -158,14 +158,27 @@ test("a new chat from a card: the greeting follows the persona until the first s
   await expect(page.getByRole("complementary", { name: "Chat panel" })).toHaveCount(0)
 })
 
-test("Send as another card, and Generate with guidance that a swipe takes only while it's on", async ({ page }) => {
+test("Send as a card added to the chat, and Generate with guidance that a swipe takes only while it's on", async ({
+  page
+}) => {
   await login(page)
   await chatWithMira(page)
-  // The speaker is always visible; picking a card that isn't in the chat adds it.
+  // The speaker is always visible; it lists only the chat's cast (DESIGN §2.2).
   await page.getByRole("button", { name: /^Speaking as Bo/ }).click()
-  await page.getByRole("tab", { name: "All cards" }).click()
+  await expect(page.getByRole("option", { name: /^Mira/ })).toBeVisible()
+  await expect(page.getByRole("option", { name: /^Tobin/ })).toHaveCount(0)
   await shoot(page, "speaker-switcher")
-  await page.getByRole("option", { name: /^Tobin/ }).click()
+  await page.keyboard.press("Escape")
+  // To speak as another card, add it to the chat first.
+  await page.getByRole("group", { name: "Chat panel" }).getByRole("button", { name: "Cast", exact: true }).click()
+  await page.getByRole("button", { name: "Add character" }).click()
+  await page.getByRole("searchbox", { name: "Search your cards" }).fill("tob")
+  await page
+    .getByRole("list", { name: "Cards to add" })
+    .getByRole("button", { name: /^Tobin/ })
+    .click()
+  await page.getByRole("button", { name: "Write as Tobin" }).click()
+  await page.keyboard.press("Escape")
   await composer(page).fill("Tobin pushes off from the dock.")
   await page.getByRole("button", { name: "Send as Tobin" }).click()
   // A cast member the user doesn't play speaks on the model's side, whoever wrote it.
@@ -173,10 +186,7 @@ test("Send as another card, and Generate with guidance that a swipe takes only w
   await expect(mine.locator("header")).toContainText("Tobin")
   await expect(mine).toHaveAttribute("aria-label", "Reply")
   await expect(generating(page)).toHaveCount(0, { timeout: 20_000 })
-  // The switcher remembers its tab; recent speakers are one tap away.
-  await page.getByRole("button", { name: /^Speaking as Tobin/ }).click()
-  await expect(page.getByRole("tab", { name: "All cards" })).toHaveAttribute("aria-selected", "true")
-  await page.keyboard.press("Escape")
+  // Recent speakers are one tap away.
   await page.getByRole("button", { name: "Speak as Mira" }).click()
 
   // With guidance on, the box is a one-turn direction, and it stays (DESIGN §2.2).

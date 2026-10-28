@@ -517,8 +517,12 @@ export const makeChatHandlers = Effect.gen(function* () {
         const enabled = new Set(
           ((doc.order ?? []) as ReadonlyArray<PromptOrderEntry>).filter((e) => e.enabled).map((e) => e.identifier)
         )
+        // A prompt only for writing as {{user}}: by its condition, or its ST triggers.
         const marked = ((doc.prompts ?? []) as ReadonlyArray<PresetPrompt>).some(
-          (p) => enabled.has(p.identifier) && conditionOf(p) === "as_user"
+          (p) =>
+            enabled.has(p.identifier) &&
+            (conditionOf(p) === "as_user" ||
+              (p.injection_trigger.length > 0 && p.injection_trigger.every((t) => t === "impersonate")))
         )
         if (marked) return { show: false, preset }
         return { show: yield* writer.MarkNoticeShown({ userId: id, notice: "impersonation", key: preset }), preset }

@@ -619,6 +619,16 @@ const resolveStage: AssemblerStage = {
       env.setMessages(messages)
       if (written.length > 0) env.rebase(foldState(withWritten().map((e) => e.event)).vars)
       assembly.resolved = resolved
+      // A speaker who has left (an earlier persona, say) still names its messages (owner 2026-10-28).
+      const inCast = new Set([...cast.characters, ...cast.personas].map((c) => c.entity))
+      const gone = [
+        ...new Set(
+          resolved.flatMap(({ entry }) => (entry.speaker && !inCast.has(entry.speaker) ? [entry.speaker] : []))
+        )
+      ]
+      const departed =
+        gone.length > 0 ? yield* (yield* AssemblySources).cards(gone, need(assembly, "state").cardBindings) : []
+      assembly.departed = new Map(departed.map((card) => [card.entity, card]))
       return assembly
     })
 }
@@ -636,6 +646,9 @@ const rolesStage = sync("roles", (assembly) => {
     const speaker = speakerOf(entry, cast)
     const side = sideOf(entry, cast)
     const persona = speaker ? cast.personas.includes(speaker) : side === "user"
+    // A speaker who has left still names its own messages; otherwise the side's first card does.
+    const named =
+      (entry.speaker && !recorded(entry, cast) ? assembly.departed?.get(entry.speaker) : undefined) ?? speaker
     const role =
       projection === "alternate"
         ? entry.depth % 2 === 0
@@ -649,7 +662,7 @@ const rolesStage = sync("roles", (assembly) => {
     return {
       entry,
       role,
-      name: (speaker ? modelName(speaker.doc) : undefined) ?? (persona ? names.user : names.char),
+      name: (named ? modelName(named.doc) : undefined) ?? (persona ? names.user : names.char),
       persona,
       piece
     }
@@ -1234,7 +1247,9 @@ const composeStage = sync("compose", (assembly) => {
   const control: Array<StMessage> = []
   const characters = cast.characters
   const group = characters.length > 1
-  const speaker = cast.speaker && !cast.personas.includes(cast.speaker) ? cast.speaker : null
+  // The speaking card, a card the user plays included (owner 2026-10-28: its prompts apply on an
+  // impersonation turn, as ST passes the character's prompts for every generation type).
+  const speaker = cast.speaker
   const own = (card: CardInput) => ({ char: modelName(card.doc) })
 
   // The speaker's card prompts, as ST's group generation takes them, expanded with the card's
@@ -2225,13 +2240,18 @@ const messagesStage = sync("messages", (assembly) => {
   messages = messages.filter((m) => m.content)
   if (doc.squash) messages = squash(messages)
   messages = postProcess(messages, doc.postprocess, need(assembly, "postNames"))
-  // The request ends on a user turn (DESIGN §2.2): after an assistant message, whatever system
-  // text follows it, the model is asked for the speaker's message. A prefill continues the
-  // model's own turn instead.
+  // The model is asked for the speaker's message (DESIGN §2.2) when the chat ends on the model's
+  // side and no user-role prompt follows the history: a user turn right after the last chat
+  // message, so the preset's own tail stays last. A prefill continues the model's own turn
+  // instead. Only the request inspector shows it.
+  const lastChat = messages.findLastIndex((m) => m.pieces.some((p) => assembly.pieces[p]?.source.kind === "message"))
+  const tail = lastChat < 0 ? messages : messages.slice(lastChat + 1)
   if (
     !assembly.request.summarizing &&
     !assembly.prefill &&
-    messages.findLast((m) => m.role !== "system")?.role === "assistant"
+    (lastChat < 0
+      ? messages.findLast((m) => m.role !== "system")?.role === "assistant"
+      : messages[lastChat]!.role === "assistant" && !tail.some((m) => m.role === "user"))
   ) {
     const env = need(assembly, "macros")
     const piece = env.piece(
@@ -2239,11 +2259,11 @@ const messagesStage = sync("messages", (assembly) => {
       { kind: "assembler", what: "user turn so the request ends on one" },
       LAST_TURN_TEXT
     )
-    messages.push({ role: "user", content: env.text(piece), pieces: [piece], kind: "volatile" })
-    assembly.issues.push({
-      kind: "last_turn_filled",
-      message:
-        "The request would have ended on an assistant message, so a user turn asking for the next message was added. Check the end of the preset's prompt order in the preset editor."
+    messages.splice(lastChat < 0 ? messages.length : lastChat + 1, 0, {
+      role: "user",
+      content: env.text(piece),
+      pieces: [piece],
+      kind: "volatile"
     })
   }
   assembly.messages = messages.map(({ role, content, name, pieces, kind }) => ({

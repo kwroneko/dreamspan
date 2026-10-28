@@ -295,6 +295,53 @@ export function SelectField<Value extends string>({
   )
 }
 
+/**
+ * ST's per-prompt Triggers: the generation types a prompt is sent for, written in the order
+ * of `items`; none ticked is every type.
+ */
+export function TriggersField({
+  store,
+  path,
+  label,
+  items
+}: {
+  store: EditorStore
+  path: FieldPath
+  label: string
+  items: ReadonlyArray<{ readonly value: string; readonly label: string }>
+}) {
+  const value = useValue<ReadonlyArray<string> | undefined>(store, path) ?? []
+  const field = valueField(path)
+  return (
+    <fieldset className="flex min-w-0 flex-col gap-1.5">
+      <legend className="mb-1.5 text-sm font-medium text-text">
+        <FieldLabel store={store} field={field} label={label} />
+      </legend>
+      <div className="flex flex-wrap gap-x-4 gap-y-1.5">
+        {items.map((item) => (
+          <Checkbox
+            key={item.value}
+            checked={value.includes(item.value)}
+            onCheckedChange={(checked) => {
+              const next = new Set(value.filter((t) => t !== item.value))
+              if (checked) next.add(item.value)
+              // Types this list doesn't name (an ST file's own) stay, after the known ones.
+              const known = items.flatMap((i) => (next.has(i.value) ? [i.value] : []))
+              store.setValue(path, [...known, ...[...next].filter((t) => !items.some((i) => i.value === t))])
+            }}
+          >
+            {item.label}
+          </Checkbox>
+        ))}
+      </div>
+      <p className="text-xs text-muted">
+        {value.length === 0 ? "Sent for every type." : "Sent only for the types ticked."} A new version is a swipe or a
+        regenerate; a summary is quiet.
+      </p>
+    </fieldset>
+  )
+}
+
 /** Says that changes kept in this browser when a page closed came back (backup.ts). */
 /** Text a save of a revision put in the bin's recovered texts, with the way there (DESIGN §6.2). */
 export function RecoveredNotice({ count }: { count: number }) {

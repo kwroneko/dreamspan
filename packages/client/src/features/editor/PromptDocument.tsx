@@ -4,10 +4,10 @@ import type { PresetContext } from "@rp/shared/inspectorApi.ts"
 import { charDefinitions, newestMessage, perFieldMarkers, presetOrder } from "@rp/shared/presetOrder.ts"
 import {
   CONDITION_LABELS,
-  conditionFromTriggers,
   conditionOf,
   directionPrompt,
-  presetWarnings
+  presetWarnings,
+  TRIGGERS
 } from "@rp/shared/presetConditions.ts"
 import { Link } from "@tanstack/react-router"
 import { uuidv7 } from "@rp/shared/id.ts"
@@ -17,7 +17,7 @@ import { Switch } from "../../ui/Choice.tsx"
 import { Menu, MenuItem } from "../../ui/Menu.tsx"
 import { SortableList } from "../../ui/SortableList.tsx"
 import { Badge } from "../../ui/Surface.tsx"
-import { NumberField, SelectField, SwitchField, TextField } from "./controls.tsx"
+import { NumberField, SelectField, SwitchField, TextField, TriggersField } from "./controls.tsx"
 import { summaryBadge } from "./summaryBadge.ts"
 import { type EditorStore, useText, useValue } from "./store.ts"
 
@@ -97,6 +97,13 @@ function Block({
             <Badge>{prompt.role}</Badge>
             <Badge>{prompt.injection_position === "absolute" ? `depth ${prompt.injection_depth}` : "in order"}</Badge>
             {condition !== "always" && <Badge tone="accent">{conditionBadges[condition]}</Badge>}
+            {prompt.injection_trigger.length > 0 && (
+              <Badge tone="accent">
+                {TRIGGERS.filter((t) => prompt.injection_trigger.includes(t.value))
+                  .map((t) => t.label.toLowerCase())
+                  .join(", ") || "never"}
+              </Badge>
+            )}
             {prompt.added_on_import && <Badge>added on import</Badge>}
           </>
         )}
@@ -184,7 +191,14 @@ function Block({
             path={[...path, "condition"]}
             label="Condition"
             items={conditions}
-            fallback={conditionFromTriggers(prompt.injection_trigger)}
+            fallback="always"
+          />
+          {/* ST's generation types (ST's Triggers), beside the condition (DESIGN §2.2). */}
+          <TriggersField
+            store={store}
+            path={[...path, "injection_trigger"]}
+            label="Generation types"
+            items={TRIGGERS}
           />
           {prompt.injection_position === "absolute" && (
             <div className="grid grid-cols-2 gap-2">

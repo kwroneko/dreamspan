@@ -154,7 +154,11 @@ for (const width of [1440, 390])
       await guidance.fill(direction)
       await shot("04-composer-guidance-text")
 
-      // Enter generates the reply-from character's turn with the text as its direction; the text stays.
+      // Enter generates the selected speaker's turn (the persona's here, not the reply-from
+      // character's) with the text as its direction, under the primary Write for; the text stays.
+      const chip = await page.getByRole("button", { name: /^Speaking as / }).getAttribute("aria-label")
+      const speaker = chip!.replace(/^Speaking as /, "").replace(/\. Change the speaker$/, "")
+      await expect(page.getByRole("button", { name: `Write for ${speaker}` })).toHaveClass(/bg-accent/)
       const sent = provider.completions.length
       await guidance.press("Enter")
       await expect.poll(() => provider.completions.length).toBe(sent + 1)
@@ -162,6 +166,7 @@ for (const width of [1440, 390])
       expect(request.at(-1)!.role).toBe("user")
       expect(request.at(-1)!.content).toContain(direction)
       await expect(lastMessage(page)).toContainText(`Direction: ${direction}`)
+      await expect(lastMessage(page).locator("header").first()).toContainText(speaker)
       await expectTextBox(guidance, direction)
       await shot("05-after-generate-text-stays")
 
@@ -231,7 +236,6 @@ for (const width of [1440, 390])
       await expect(replyFrom.getByRole("status")).toContainText("Next in turn")
       // Writing as a member (the muted one, explicitly) doesn't change who {{user}} is.
       await page.getByRole("button", { name: /^Speaking as / }).click()
-      await page.getByRole("tab", { name: "Members", exact: true }).click()
       await page.getByRole("option", { name: mutedName, exact: true }).click()
       await expect(page.getByRole("button", { name: `Speaking as ${mutedName}. Change the speaker` })).toBeVisible()
       const castAgain = await openPanel(page, "Cast")
@@ -242,7 +246,6 @@ for (const width of [1440, 390])
 
       // Writing for the persona: an impersonation, with the preset's impersonation prompt.
       await page.getByRole("button", { name: /^Speaking as / }).click()
-      await page.getByRole("tab", { name: "Personas", exact: true }).click()
       const personaName = personaLabel!.replace(/^Playing as /, "").replace(/\. Change your persona$/, "")
       await page.getByRole("option", { name: personaName, exact: true }).click()
       const impersonated = provider.completions.length
@@ -271,8 +274,12 @@ for (const width of [1440, 390])
       await expect(direct).toContainText("with a direction")
       await expect(direct.getByRole("button", { name: "Delete the prompt" })).toHaveCount(0)
       const style = editor.locator('[data-prompt="night-impersonation-style"]')
-      await expect(style).toContainText("as {{user}}")
-      await expect(style.getByRole("combobox", { name: "Condition" })).toContainText("When writing as {{user}}")
+      // ST's triggers stay a per-prompt option of their own beside the condition (owner 2026-10-28).
+      await expect(style).toContainText("impersonate")
+      await expect(style.getByRole("combobox", { name: "Condition" })).toContainText("Always")
+      const types = style.getByRole("group", { name: "Generation types" })
+      await expect(types.getByRole("checkbox", { name: "Impersonate" })).toBeChecked()
+      await expect(types.getByRole("checkbox", { name: "Normal" })).not.toBeChecked()
       await style.scrollIntoViewIfNeeded()
       await shot("11-editor-conditions")
       const nudge = editor.locator('[data-prompt="groupNudge"]')

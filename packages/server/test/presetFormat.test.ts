@@ -43,8 +43,8 @@ describe("importing an ST chat-completion preset", () => {
       "chatHistory",
       "newestMessage",
       "groupNudge",
-      "impersonationPrompt",
       "jailbreak",
+      "impersonationPrompt",
       "direction"
     ])
     expect(doc.order.find((e) => e.identifier === "enhanceDefinitions")?.enabled).toBe(false)
@@ -779,49 +779,35 @@ describe("conditions (DESIGN §2.2)", () => {
     )
 
   it.each([
-    [[], undefined],
-    [["impersonate"], "as_user"],
-    [["normal"], "as_character"],
-    [["swipe"], "as_character"],
-    [["regenerate"], "as_character"],
-    [["normal", "swipe", "regenerate"], "as_character"],
-    [["normal", "impersonate"], undefined],
-    [["continue"], undefined],
-    [["quiet"], undefined],
-    [["continue", "quiet"], undefined],
-    [["impersonate", "continue"], "as_user"],
-    [["normal", "quiet"], "as_character"]
-  ] as const)("maps ST triggers %j to the condition %s", (triggers, condition) => {
-    const result = withTriggers(triggers)
-    const p = prompt(result.doc, "t")!
-    expect(p.condition).toBe(condition)
-    // The triggers stay, for export and for Continue and summaries.
+    [[]],
+    [["impersonate"]],
+    [["normal"]],
+    [["regenerate"]],
+    [["continue", "quiet"]],
+    [["normal", "impersonate"]]
+  ] as const)("keeps ST triggers %j as they are, beside an Always condition (owner 2026-10-28)", (triggers) => {
+    const p = prompt(withTriggers(triggers).doc, "t")!
+    expect(p.condition).toBeUndefined()
+    expect(conditionOf(p)).toBe("always")
     expect(p.injection_trigger).toEqual(triggers)
-    expect(conditionOf(p)).toBe(condition ?? "always")
-    const reported = result.report.issues.filter((i) => i.code === "preset.trigger_mapped")
-    expect(reported).toHaveLength(triggers.length === 0 ? 0 : 1)
   })
 
-  it("limits only the prompts naming Continue or summaries to those, as ST does", () => {
+  it("sends a prompt only for the generation types its triggers name, as ST's shouldTrigger", () => {
     const p = (injection_trigger: ReadonlyArray<string>) => prompt(withTriggers(injection_trigger).doc, "t")!
-    // A normal-only prompt is now sent on swipes too: the condition replaces the trigger there.
-    expect(["normal", "swipe", "impersonate"].map((type) => triggersFor(p(["normal"]), type))).toEqual([
-      true,
-      true,
-      true
-    ])
-    expect(["continue", "quiet"].map((type) => triggersFor(p(["normal"]), type))).toEqual([false, false])
-    expect(["normal", "swipe", "continue", "quiet"].map((type) => triggersFor(p(["continue"]), type))).toEqual([
-      false,
-      false,
-      true,
-      false
-    ])
-    expect(["normal", "quiet"].map((type) => triggersFor(p(["quiet"]), type))).toEqual([false, true])
-    expect(["normal", "continue", "quiet"].map((type) => triggersFor(p([]), type))).toEqual([true, true, true])
+    const types = ["normal", "swipe", "impersonate", "continue", "quiet"]
+    const sentFor = (triggers: ReadonlyArray<string>) => types.filter((type) => triggersFor(p(triggers), type))
+    // A normal-only prompt isn't sent on swipes, as in ST.
+    expect(sentFor(["normal"])).toEqual(["normal"])
+    // A new version of a reply is ST's swipe and its regenerate alike.
+    expect(sentFor(["swipe"])).toEqual(["swipe"])
+    expect(sentFor(["regenerate"])).toEqual(["swipe"])
+    expect(sentFor(["impersonate"])).toEqual(["impersonate"])
+    expect(sentFor(["continue"])).toEqual(["continue"])
+    expect(sentFor(["quiet"])).toEqual(["quiet"])
+    expect(sentFor([])).toEqual(types)
   })
 
-  it("turns ST's group nudge and impersonation prompt into conditioned prompts after the history", () => {
+  it("turns ST's group nudge and impersonation prompt into conditioned prompts where ST sends them", () => {
     const result = load(
       preset({
         group_nudge_prompt: "[Only {{char}} speaks; not {{ CHAR }}'s rival.]",
@@ -848,13 +834,16 @@ describe("conditions (DESIGN §2.2)", () => {
     })
     expect(doc.utility_prompts.group_nudge_prompt).toBe("")
     expect(doc.utility_prompts.impersonation_prompt).toBe("")
+    // The nudge at the end of the history; the impersonation prompt last, after the
+    // post-history instructions (ST: "always positioned last"), before the direction prompt.
     const ids = doc.order.map((e) => e.identifier)
     expect(ids.slice(ids.indexOf("chatHistory"), ids.indexOf("chatHistory") + 4)).toEqual([
       "chatHistory",
       "newestMessage",
       "groupNudge",
-      "impersonationPrompt"
+      "jailbreak"
     ])
+    expect(ids.slice(-2)).toEqual(["impersonationPrompt", "direction"])
     expect(codes(result)).toEqual(
       expect.arrayContaining(["preset.group_nudge_prompt", "preset.impersonation_prompt", "preset.direction_prompt"])
     )
@@ -917,10 +906,23 @@ describe("conditions (DESIGN §2.2)", () => {
     const order = (file.prompt_order as Array<{ order: Array<{ identifier: string; enabled: boolean }> }>)[0]!.order
     expect(order.find((e) => e.identifier === "direction")?.enabled).toBe(false)
     expect(order.map((e) => e.identifier)).not.toContain("impersonationPrompt")
+    expect(prompts.find((p) => p.identifier === "b")!.condition).toBe("as_user")
     expect(load(file).doc).toEqual({
       ...edited,
       prompts: edited.prompts.map((p) => (p.identifier === "b" ? { ...p, injection_trigger: ["impersonate"] } : p))
     })
+    // A condition and the prompt's own triggers both limit it: ST gets the types where both hold.
+    const both = exportStPreset({
+      ...edited,
+      prompts: edited.prompts.map((p) =>
+        p.identifier === "a"
+          ? { ...p, condition: "as_character" as const, injection_trigger: ["normal", "impersonate"] }
+          : p
+      )
+    })
+    const a = (both.prompts as Array<Record<string, unknown>>).find((p) => p.identifier === "a")!
+    expect(a.injection_trigger).toEqual(["normal"])
+    expect(a.condition).toBe("as_character")
     // A nudge turned off is no nudge in ST.
     const off = exportStPreset({
       ...edited,

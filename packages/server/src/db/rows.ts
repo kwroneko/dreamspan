@@ -91,6 +91,12 @@ const toVersionError = (json: string | null) => {
   return { class: String(error.class ?? "unknown"), message: String(error.message ?? "") }
 }
 
+/**
+ * Issues a version doesn't show: a cut history is normal, and the added closing user turn is
+ * visible only in the request inspector (contexts assembled before version 30 recorded it).
+ */
+const UNSHOWN: ReadonlySet<string> = new Set(["history_truncated", "last_turn_filled"])
+
 export const toVersion = (row: VersionRow) =>
   new Version({
     id: row.id as VersionId,
@@ -116,9 +122,7 @@ export const toVersion = (row: VersionRow) =>
       ? null
       : {
           issues: row.context_issues
-            ? (JSON.parse(row.context_issues) as Array<ContextIssue>).filter(
-                (issue) => issue.kind !== "history_truncated"
-              )
+            ? (JSON.parse(row.context_issues) as Array<ContextIssue>).filter((issue) => !UNSHOWN.has(issue.kind))
             : []
         },
     rowVersion: 1 + (row.amend_count ?? 0)

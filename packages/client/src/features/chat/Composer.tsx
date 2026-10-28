@@ -291,9 +291,10 @@ export function Composer({
   const recent = useMemo(
     () =>
       recentSpeakers(view.entries, 4)
-        .filter((id) => id !== speaker && castView.cards.has(id))
+        // Only the chat's cast can speak (DESIGN §2.2): a card that left isn't offered.
+        .filter((id) => id !== speaker && (cast?.participants.includes(id) || cast?.playedByMe.includes(id)))
         .slice(0, 3),
-    [view.entries, speaker, castView.cards]
+    [view.entries, speaker, cast]
   )
   // Listed first in the switcher, with nothing typed: who spoke last, the speaker too.
   const switcherRecent = useMemo(() => recentSpeakers(view.entries, 8), [view.entries])
@@ -331,23 +332,14 @@ export function Composer({
   }, [draft])
 
   /**
-   * A card that isn't in the chat joins it from here on (DESIGN §2.2). Picking a speaker only
-   * picks who writes: who `{{user}}` is (the persona) stays as it is, so the cached prefix does.
+   * Picking a speaker only picks who writes, from the chat's cast (DESIGN §2.2): who `{{user}}`
+   * is (the persona) stays as it is, so the cached prefix does.
    */
-  const pick = useCallback(
-    async (card: CastCard) => {
-      if (cast !== null && !cast.participants.includes(card.entityId)) {
-        const outcome = await session.changeCast({ _tag: "Join", entityId: card.entityId })
-        setError(outcome.ok ? null : outcome.error)
-        if (!outcome.ok) return
-      }
-      const picked = await choices.change({ speaker: card.entityId })
-      setError(picked.ok ? null : picked.error)
-    },
-    [cast, choices, session]
+  const onPick = useCallback(
+    (card: CastCard) =>
+      void choices.change({ speaker: card.entityId }).then((picked) => setError(picked.ok ? null : picked.error)),
+    [choices]
   )
-  const onPick = useCallback((card: CastCard) => void pick(card), [pick])
-  const listCards = useCallback(() => session.listCards(), [session])
 
   /**
    * The text leaves the box as it's submitted, so whatever is typed while the request is out
@@ -401,28 +393,24 @@ export function Composer({
   }
 
   /**
-   * The model writes a turn: with guidance on, the text is its one-turn direction and stays
-   * in the box, so a swipe can use it again; with guidance off, the text isn't used.
+   * The model writes the speaker's turn (an impersonation when it's a card the user plays). With
+   * guidance on, it's Enter and the primary action, and the text is its one-turn direction and
+   * stays in the box, so a swipe can use it again; with guidance off, the text isn't used.
+   * Guidance changes who writes, never which character (DESIGN §2.2).
    */
-  const generateFor = async (who: EntityId | null, consumePick: boolean) => {
+  const generate = async () => {
     if (busy || !ready) return
     setBusy(true)
-    const draftId = choice.draftId
-    const outcome = await session.generate(session.snapshot().leafSlotId, who, guidance ? text : "")
+    const outcome = await session.generate(session.snapshot().leafSlotId, speaker, guidance ? text : "")
     report(outcome)
-    if (outcome.ok && consumePick && draftId !== null) replied(draftId)
     setBusy(false)
-    if (outcome.ok && who !== null && cast?.playedByMe.includes(who)) {
+    if (outcome.ok && speaker !== null && cast?.playedByMe.includes(speaker)) {
       const notice = await session.impersonationNotice()
       if (notice.ok && notice.value.show) setImpersonationNotice(true)
     }
   }
-  /** Write for the speaker (an impersonation when it's a card the user plays). */
-  const generate = () => generateFor(speaker, false)
-  /** With guidance on, Enter and the primary action: the reply-from character's turn, directed. */
-  const replyDirected = () => (replier === null ? Promise.resolve() : generateFor(replier, true))
 
-  const onKeyDown = composerKeyDown(guidance ? replyDirected : send)
+  const onKeyDown = composerKeyDown(guidance ? generate : send)
 
   const hasText = text.trim() !== ""
   const sendLabel = hasText ? (name ? `Send as ${name}` : "Send") : replierName ? `${replierName} replies` : "Send"
@@ -439,11 +427,7 @@ export function Composer({
       : speakerPlayed
         ? `The model writes ${name}'s turn for you`
         : `The model writes ${name}'s turn`
-  }${guidance && hasText ? ", with the guidance as a one-turn direction" : ""}`
-  const directedLabel = replierName ? `${replierName} replies` : "Reply"
-  const directedHint = `${replierName ? `${replierName} replies` : "No one to reply: every character is muted"}${
-    hasText ? ", following the guidance" : ""
-  } (Enter). The guidance stays here.`
+  }${guidance && hasText ? ", following the guidance" : ""}${guidance ? " (Enter). The guidance stays here." : ""}`
   const shownError = error ?? saveError
 
   return (
@@ -490,7 +474,7 @@ export function Composer({
       <div className="flex flex-col gap-1.5 @min-[640px]:flex-row @min-[640px]:items-end">
         {/* Who's speaking, and the speakers used last: one tap each (DESIGN §2.2). */}
         <div className="flex min-w-0 items-center gap-1 @min-[640px]:h-11">
-          <SpeakerSwitcher listCards={listCards} speaker={speaker} recent={switcherRecent} onPick={onPick} />
+          <SpeakerSwitcher speaker={speaker} recent={switcherRecent} onPick={onPick} />
           {recent.map((id) => {
             const who = nameOf(castView, id) ?? "?"
             return (
@@ -569,29 +553,21 @@ export function Composer({
               <StopIcon />
             </SquareIconButton>
           )}
+          {/* With guidance on, it's the primary action: guidance is never sent as a message by mistake. */}
           <Tooltip label={generateHint}>
             <Button
+              variant={guidance ? "primary" : "secondary"}
+              pending={guidance && busy}
               aria-label={generateText}
               disabled={busy || !ready}
               onClick={generate}
               className="max-w-52 sm:max-w-56"
             >
+              {guidance && !busy && <GenerateIcon />}
               <span className="truncate">{generateText}</span>
             </Button>
           </Tooltip>
-          {guidance ? (
-            // Guidance is never sent as a message by mistake: Send gives way to generating.
-            <SquareIconButton
-              label={directedLabel}
-              hint={directedHint}
-              variant="primary"
-              pending={busy}
-              disabled={!ready || replier === null}
-              onClick={replyDirected}
-            >
-              {!busy && <GenerateIcon />}
-            </SquareIconButton>
-          ) : (
+          {!guidance && (
             <SquareIconButton
               label={sendLabel}
               hint={sendHint}
@@ -619,7 +595,7 @@ export function Composer({
         {(guidance || hasText) && (
           <p id="composer-hint" className="min-w-0 flex-1 basis-60 pt-0.5 text-xs text-muted">
             {guidance
-              ? "A one-turn direction for the next reply, Write for, a new version or Continue. It stays here until you change it."
+              ? `A one-turn direction for ${name ? `${name}'s` : "the"} next message (Enter), a new version or Continue. It stays here until you change it.`
               : `${generateText} doesn't use this text: turn guidance on to direct the next message with it.`}
           </p>
         )}
