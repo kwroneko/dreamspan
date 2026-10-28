@@ -17,6 +17,7 @@ const event = <K extends string, V extends Schema.Top>(key: K, value: V) =>
  */
 export const StateEventData = Schema.Union([
   event("lcm.settings", LcmSettings),
+  event("card.swap", Schema.Struct({ entity: EntityId, replaces: EntityId })),
   event("participant.join", Schema.Struct({ entity: EntityId })),
   event("participant.leave", Schema.Struct({ entity: EntityId })),
   event("presence.set", Schema.Struct({ entity: EntityId, present: Schema.Boolean })),
@@ -61,7 +62,7 @@ export type StateEventData = typeof StateEventData.Type
  */
 /** `chatOwned` also checks a note document's owner.chat when present. */
 type IdField<F extends string> =
-  | { readonly table: "entity"; readonly kind: EntityKind; readonly chatOwned?: true }
+  | { readonly table: "entity"; readonly kind: EntityKind; readonly chatOwned?: true; readonly allowDeleted?: true }
   | { readonly table: "ref"; readonly kind: EntityKind; readonly entity?: F }
   | { readonly table: "revision"; readonly kind: EntityKind; readonly entity?: F; readonly ref?: F }
   | { readonly table: "connection" }
@@ -91,6 +92,9 @@ export const stateKeyIds: { readonly [K in StateEventData["key"]]: StateKeyIds<V
   "participant.leave": { ids: { entity: { table: "entity", kind: "card" } }, removes: true },
   "presence.set": { ids: { entity: { table: "entity", kind: "card" } }, removes: true },
   "played_by_me.set": { ids: { entities: { table: "entity", kind: "card" } } },
+  "card.swap": {
+    ids: { entity: { table: "entity", kind: "card" }, replaces: { table: "entity", kind: "card", allowDeleted: true } }
+  },
   "card.binding": {
     ids: {
       entity: { table: "entity", kind: "card" },
@@ -305,6 +309,23 @@ const apply = (state: ChatState, { data, scope }: FoldableEvent): ChatState => {
       }
     case "played_by_me.set":
       return { ...state, playedByMe: [...data.value.entities] }
+    case "card.swap": {
+      const { entity, replaces } = data.value
+      if (!state.participants.includes(replaces) || entity === replaces) return state
+      const swap = (items: ReadonlyArray<string>) => [...new Set(items.map((id) => (id === replaces ? entity : id)))]
+      const move = <V>(items: Readonly<Record<string, V>>) => {
+        const { [replaces]: value, ...rest } = items
+        return value === undefined ? rest : { ...rest, [entity]: value }
+      }
+      return {
+        ...state,
+        participants: swap(state.participants),
+        absent: swap(state.absent),
+        playedByMe: swap(state.playedByMe),
+        lorebookBindings: move(state.lorebookBindings),
+        embeddedLorebooks: move(state.embeddedLorebooks)
+      }
+    }
     case "card.binding":
       return {
         ...state,
@@ -385,4 +406,20 @@ export const foldState = (events: Iterable<FoldableEvent>, initial: ChatState = 
   let state = initial
   for (const e of events) state = apply(state, e)
   return state
+}
+
+/** These keys belong to the fork, independently of the message position being read. */
+export const branchOwned: ReadonlySet<StateEventData["key"]> = new Set(["card.swap"])
+
+/** The card writing a new turn after the fork's swaps; existing messages keep their author. */
+export const swappedCard = (events: Iterable<FoldableEvent>, entity: string | null): string | null => {
+  let state = emptyChatState
+  let current = entity
+  for (const event of events) {
+    const { data } = event
+    if (data.key === "card.swap" && state.participants.includes(data.value.replaces) && current === data.value.replaces)
+      current = data.value.entity
+    state = apply(state, event)
+  }
+  return current
 }

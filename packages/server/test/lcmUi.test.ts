@@ -241,11 +241,12 @@ it.live("the layer, coverage, revisions, reruns, the switch and the edit draft",
         params: [chat.id, JSON.stringify({ enabled: true, tail: "Be brief.", leafTarget: 300 })]
       }
     ])
-    yield* api.SetLcmEnabled({ chatId: chat.id, enabled: false })
+    yield* api.SetLcmEnabled({ chatId: chat.id, forkId: chat.currentForkId, enabled: false })
     const off = yield* state()
     assert.isFalse(off.enabled)
+    assert.isTrue((yield* api.GetLcmState({ chatId: chat.id, leafSlotId: side.slotId })).enabled)
     assert.deepStrictEqual([off.layer.length, off.jobs.length], [0, 0])
-    yield* api.SetLcmEnabled({ chatId: chat.id, enabled: true })
+    yield* api.SetLcmEnabled({ chatId: chat.id, forkId: chat.currentForkId, enabled: true })
     const settings = yield* fixtureSql(config.dataDir, [
       {
         sql: "SELECT value_json FROM state_events WHERE chat_id=? AND key='lcm.settings' ORDER BY seq DESC LIMIT 1",

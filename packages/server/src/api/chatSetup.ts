@@ -4,7 +4,7 @@ import type { RevisionId } from "@rp/shared/library.ts"
 // Every handler acts as the authenticated user; storage enforces ownership, so another
 // user's ids are NotFound. Changes are published to the chat's subscribers.
 import { type AppApi, CurrentUser } from "@rp/shared/api.ts"
-import type { ChatId, EntityId, SlotId } from "@rp/shared/chat.ts"
+import type { ChatId, EntityId, ForkId, SlotId } from "@rp/shared/chat.ts"
 import { GenerationUnavailable } from "@rp/shared/chatApi.ts"
 import { Cast, type CastChange, ChatNote } from "@rp/shared/chatSetupApi.ts"
 import { isAuthorNote, type NoteDoc } from "@rp/shared/docs/note.ts"
@@ -21,6 +21,8 @@ import { internal } from "./internal.ts"
 /** A cast change as the state event it records (DATA-MODEL §5.3), chat-wide. */
 const toEvent = (change: Exclude<CastChange, { readonly _tag: "Persona" }>): StateEventData => {
   switch (change._tag) {
+    case "Swap":
+      return { key: "card.swap", value: { entity: change.entityId, replaces: change.replaces } }
     case "Join":
       return { key: "participant.join", value: { entity: change.entityId } }
     case "Leave":
@@ -75,9 +77,9 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
    * The fold of the chat's state after `slotId`, with every card it names, by the name and
    * avatar of the version the chat uses there (its own version's, say).
    */
-  const castAt = (user: UserId, chatId: ChatId, slotId: SlotId | null) =>
+  const castAt = (user: UserId, chatId: ChatId, slotId: SlotId | null, forkId?: ForkId | null) =>
     Effect.gen(function* () {
-      const state = foldState(yield* reader.StateEventsAt({ userId: user, chatId, slotId }))
+      const state = foldState(yield* reader.StateEventsAt({ userId: user, chatId, slotId, forkId: forkId ?? null }))
       const ids = [...new Set([...state.participants, ...state.playedByMe])]
       const cards = yield* reader.CastCards({
         userId: user,
@@ -217,14 +219,14 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
         return { entry, chat: result.chat }
       }).pipe(Effect.uninterruptible, internal("StartChat")),
 
-    GetCast: ({ chatId, slotId }) =>
-      Effect.flatMap(userId, (id) => castAt(id, chatId, slotId)).pipe(internal("GetCast")),
+    GetCast: ({ chatId, slotId, forkId }) =>
+      Effect.flatMap(userId, (id) => castAt(id, chatId, slotId, forkId)).pipe(internal("GetCast")),
 
     // The cards as the next request reads them after `slotId`: the bindings there decide.
-    ListChatCards: ({ chatId, slotId, entityIds }) =>
+    ListChatCards: ({ chatId, slotId, entityIds, forkId }) =>
       Effect.gen(function* () {
         const id = yield* userId
-        const state = foldState(yield* reader.StateEventsAt({ userId: id, chatId, slotId }))
+        const state = foldState(yield* reader.StateEventsAt({ userId: id, chatId, slotId, forkId: forkId ?? null }))
         return yield* reader.ChatCards({ userId: id, chatId, entityIds, bindings: bindingsOf(state) })
       }).pipe(internal("ListChatCards")),
 
@@ -240,11 +242,11 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
         return opened
       }).pipe(internal("EditCardForChat")),
 
-    ChangeCast: ({ chatId, slotId, change }) =>
+    ChangeCast: ({ chatId, slotId, change, forkId }) =>
       Effect.gen(function* () {
         const id = yield* userId
         if (["Model", "Preset", "DefaultModel", "DefaultPreset"].includes(change._tag)) {
-          yield* reader.StateEventsAt({ userId: id, chatId, slotId })
+          yield* reader.StateEventsAt({ userId: id, chatId, slotId, forkId: forkId ?? null })
           const selection =
             change._tag === "Model"
               ? { model: { connection: change.connection, model: change.model } }
@@ -259,11 +261,12 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
             .pipe(Effect.catchTag("LcmSettingsInvalid", (error) => Effect.die(error)))
           yield* warmth.refreshUser(id)
         } else if (change._tag === "Persona") {
-          const before = yield* castAt(id, chatId, slotId)
+          const before = yield* castAt(id, chatId, slotId, forkId)
           const persona = new Set(before.cards.flatMap((card) => (card.persona ? [card.entityId] : [])))
           yield* writer.AddStateEvents({
             userId: id,
             chatId,
+            forkId: forkId ?? null,
             slotId,
             data: [
               ...(before.participants.includes(change.entityId)
@@ -279,6 +282,7 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
           yield* writer.AddStateEvent({
             userId: id,
             chatId,
+            forkId: forkId ?? null,
             slotId,
             versionId: null,
             scope: null,
@@ -286,14 +290,14 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
           })
         }
         hub.publish(chatId, { _tag: "State" })
-        return yield* castAt(id, chatId, slotId)
+        return yield* castAt(id, chatId, slotId, forkId)
       }).pipe(internal("ChangeCast")),
 
     // The notes the context assembler reads at this position: the chat's own and its characters'.
-    ListChatNotes: ({ chatId, slotId }) =>
+    ListChatNotes: ({ chatId, slotId, forkId }) =>
       Effect.gen(function* () {
         const id = yield* userId
-        const events = yield* reader.StateEventsAt({ userId: id, chatId, slotId })
+        const events = yield* reader.StateEventsAt({ userId: id, chatId, slotId, forkId: forkId ?? null })
         const state = foldState(events)
         // Every card of the cast, the ones the user plays included: a persona note is a card's note.
         const cards = [...state.participants, ...state.playedByMe.filter((e) => !state.participants.includes(e))]

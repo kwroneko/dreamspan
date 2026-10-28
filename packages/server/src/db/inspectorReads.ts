@@ -1,3 +1,4 @@
+import { eventApplies, forkAt } from "./forkState.ts"
 import { selectSummaryLayer } from "./lcmLayer.ts"
 import { tokensOf } from "../assembler/st.ts"
 // The request inspector's reads (DESIGN §7.4; ARCHITECTURE §15): a version's context as it
@@ -321,8 +322,8 @@ export const makeInspectorReadHandlers = Effect.gen(function* () {
         if (snapshot.lcm?.selected.length) {
           const [settings] = yield* sql<{
             enabled: number
-          }>`SELECT json_extract(value_json, '$.enabled') AS enabled FROM state_events
-            WHERE chat_id = ${chatId} AND slot_id IS NULL AND scope IS NULL AND key = 'lcm.settings' ORDER BY seq DESC LIMIT 1`
+          }>`SELECT json_extract(value_json, '$.enabled') AS enabled FROM state_events e
+            WHERE chat_id = ${chatId} AND slot_id IS NULL AND scope IS NULL AND key = 'lcm.settings' AND ${eventApplies(sql, yield* forkAt(sql, chatId, null), "e")} ORDER BY seq DESC LIMIT 1`
           if (settings?.enabled)
             for (const summary of (yield* selectSummaryLayer(sql, userId, chatId, snapshot.inputs.leafSlotId))
               .summaries)

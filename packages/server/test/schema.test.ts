@@ -1009,3 +1009,57 @@ describe("connections and the usage ledger", () => {
     })
   })
 })
+
+describe("fork-scoped state events", () => {
+  it("keeps event provenance paired, positive, immutable and inside its chat", () => {
+    const owner = user()
+    const c = chat(owner)
+    const other = chat(owner)
+    const insert = (eventId: string, fork: string | null, seq: number | null) =>
+      run(
+        `INSERT INTO state_events(id,chat_id,slot_id,seq,key,value_json,origin,created_at,fork_id,fork_seq)
+       VALUES (?, ?, NULL, 0, 'var.set', '{"name":"x","value":1}', 'user', 1, ?, ?)`,
+        eventId,
+        c.chatId,
+        fork,
+        seq
+      )
+    expect(() => insert("bad-chat", other.chatId, 1)).toThrow(/fork of its chat/)
+    expect(() => insert("no-seq", c.chatId, null)).toThrow(/CHECK/)
+    expect(() => insert("no-fork", null, 1)).toThrow(/CHECK/)
+    expect(() => insert("zero", c.chatId, 0)).toThrow(/CHECK/)
+    insert("scoped", c.chatId, 1)
+    expect(() => run("UPDATE state_events SET fork_seq = 2 WHERE id = 'scoped'")).toThrow(/immutable/)
+    expect(() => run("INSERT INTO fork_event_snapshots VALUES (?, 'scoped')", other.chatId)).toThrow(/fork chat/)
+    run("INSERT INTO fork_event_snapshots VALUES (?, 'scoped')", c.chatId)
+    expect(() => run("UPDATE fork_event_snapshots SET fork_id = ?", other.chatId)).toThrow(/immutable/)
+    expect(() =>
+      run(
+        `INSERT INTO fork_overrides(id,chat_id,fork_id,seq,kind,target_id,flag)
+      VALUES ('wrong-event', ?, ?, 1, 'suppress_event', 'missing', 1)`,
+        c.chatId,
+        c.chatId
+      )
+    ).toThrow(/suppression/)
+  })
+
+  it("stores card swaps without a message, version or scope, and with a fork", () => {
+    const c = chat(user())
+    const s = slot(c, null)
+    const insert = (slotId: string | null, scope: string | null, forkId: string | null) =>
+      run(
+        `INSERT INTO state_events(id,chat_id,slot_id,seq,key,scope,value_json,origin,created_at,fork_id,fork_seq)
+       VALUES (?, ?, ?, 0, 'card.swap', ?, '{}', 'user', 1, ?, ?)`,
+        id("event"),
+        c.chatId,
+        slotId,
+        scope,
+        forkId,
+        forkId === null ? null : 1
+      )
+    expect(() => insert(s.slotId, null, c.chatId)).toThrow(/CHECK/)
+    expect(() => insert(null, "narrator", c.chatId)).toThrow(/CHECK/)
+    expect(() => insert(null, null, null)).toThrow(/CHECK/)
+    insert(null, null, c.chatId)
+  })
+})

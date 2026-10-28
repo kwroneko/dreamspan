@@ -248,6 +248,9 @@ export const baseline: ReadonlyArray<string> = [
     origin_ref TEXT,
     created_at INTEGER NOT NULL,
     superseded_by_changeset TEXT REFERENCES changesets(id), slot_chain_id TEXT, slot_depth INTEGER,
+    fork_id TEXT REFERENCES forks(id), fork_seq INTEGER,
+    CHECK ((fork_id IS NULL AND fork_seq IS NULL) OR (fork_id IS NOT NULL AND fork_seq IS NOT NULL AND fork_seq > 0)),
+    CHECK (key <> 'card.swap' OR (slot_id IS NULL AND version_id IS NULL AND scope IS NULL AND fork_id IS NOT NULL)),
     CHECK (version_id IS NULL OR slot_id IS NOT NULL)
   ) STRICT`,
   `CREATE INDEX state_events_position ON state_events(chat_id, slot_id, seq)`,
@@ -333,7 +336,7 @@ export const baseline: ReadonlyArray<string> = [
     WHEN NEW.id IS NOT OLD.id OR NEW.slot_id IS NOT OLD.slot_id OR NEW.ordinal IS NOT OLD.ordinal
       OR NEW.writer IS NOT OLD.writer OR NEW.origin IS NOT OLD.origin
     BEGIN SELECT RAISE(ABORT, 'a version''s identity, slot, writer and origin never change'); END`,
-  `CREATE TRIGGER state_events_immutable BEFORE UPDATE OF chat_id, slot_id, version_id, seq, key, scope, value_json, origin ON state_events
+  `CREATE TRIGGER state_events_immutable BEFORE UPDATE OF chat_id, slot_id, version_id, seq, key, scope, value_json, origin, fork_id, fork_seq ON state_events
     BEGIN SELECT RAISE(ABORT, 'state events are immutable; supersede them with a changeset'); END`,
   `CREATE TRIGGER slots_parent_same_chat BEFORE INSERT ON slots
     WHEN NEW.parent_slot_id IS NOT NULL AND NOT EXISTS (
@@ -1124,7 +1127,7 @@ export const baseline: ReadonlyArray<string> = [
       AND NOT EXISTS (SELECT 1 FROM chain c JOIN slot_parents p ON p.slot_id = c.id)
     ) BEGIN SELECT RAISE(ABORT, 'summary endpoints must form its declared primary-parent chain'); END`,
   `CREATE INDEX state_events_participants ON state_events(json_extract(value_json, '$.entity'), chat_id)
-      WHERE key = 'participant.join' AND superseded_by_changeset IS NULL`,
+      WHERE key IN ('participant.join', 'card.swap') AND superseded_by_changeset IS NULL`,
   `CREATE INDEX drafts_speaker_entity_id ON drafts(speaker_entity_id) WHERE speaker_entity_id IS NOT NULL`,
   `CREATE TRIGGER drafts_speaker_entity_id_owner BEFORE INSERT ON drafts
       WHEN NEW.speaker_entity_id IS NOT NULL
@@ -1426,5 +1429,25 @@ export const baseline: ReadonlyArray<string> = [
   `CREATE TRIGGER fork_overrides_delete_version_own BEFORE INSERT ON fork_overrides WHEN NEW.kind = 'delete_version'
     AND (NEW.flag IS NULL OR NOT EXISTS (SELECT 1 FROM versions o JOIN slots s ON s.id = o.slot_id
       WHERE o.id = NEW.target_id AND o.fork_id IS NULL AND s.id = NEW.slot_id AND s.depth = NEW.slot_depth))
-    BEGIN ${raise("a deleted swipe is one of its message's own versions")}; END`
+    BEGIN ${raise("a deleted swipe is one of its message's own versions")}; END`,
+  `CREATE INDEX state_events_fork ON state_events(fork_id, fork_seq) WHERE fork_id IS NOT NULL`,
+  `CREATE TABLE fork_event_snapshots (
+    fork_id TEXT NOT NULL REFERENCES forks(id) ON DELETE CASCADE,
+    event_id TEXT NOT NULL REFERENCES state_events(id) ON DELETE CASCADE,
+    PRIMARY KEY (fork_id, event_id)
+  ) STRICT, WITHOUT ROWID`,
+  `CREATE TRIGGER fork_event_snapshots_immutable BEFORE UPDATE ON fork_event_snapshots
+    BEGIN SELECT RAISE(ABORT, 'a fork event snapshot is immutable'); END`,
+  `CREATE INDEX fork_event_snapshots_event ON fork_event_snapshots(event_id)`,
+  `CREATE TRIGGER state_events_fork_same_chat BEFORE INSERT ON state_events
+    WHEN NEW.fork_id IS NOT NULL AND (SELECT chat_id FROM forks WHERE id = NEW.fork_id) IS NOT NEW.chat_id
+    BEGIN SELECT RAISE(ABORT, 'a state event belongs to a fork of its chat'); END`,
+  `CREATE TRIGGER fork_event_snapshots_same_chat BEFORE INSERT ON fork_event_snapshots
+    WHEN (SELECT chat_id FROM forks WHERE id = NEW.fork_id) IS NOT
+      (SELECT chat_id FROM state_events WHERE id = NEW.event_id)
+    BEGIN SELECT RAISE(ABORT, 'a snapshot event belongs to its fork chat'); END`,
+  `CREATE TRIGGER fork_overrides_event_own BEFORE INSERT ON fork_overrides WHEN NEW.kind = 'suppress_event'
+    AND (NEW.flag IS NULL OR NOT EXISTS (SELECT 1 FROM state_events e
+      WHERE e.id = NEW.target_id AND e.chat_id = NEW.chat_id AND e.slot_id IS NEW.slot_id))
+    BEGIN SELECT RAISE(ABORT, 'a suppression names an event in its chat'); END`
 ]

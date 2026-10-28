@@ -8,7 +8,7 @@ import { TextTooLong } from "@rp/shared/composerApi.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import type { PresetPrompt, PromptOrderEntry } from "@rp/shared/docs/preset.ts"
 import { conditionOf } from "@rp/shared/presetConditions.ts"
-import { foldState } from "@rp/shared/state.ts"
+import { foldState, swappedCard } from "@rp/shared/state.ts"
 import { Effect, Option, Stream } from "effect"
 import { CacheWarmth } from "../chat/CacheWarmth.ts"
 import { ChatHub } from "../chat/ChatHub.ts"
@@ -65,12 +65,29 @@ export const makeChatHandlers = Effect.gen(function* () {
    */
   const speakerOf = (user: UserId, chatId: ChatId, entry: PathEntry) =>
     Effect.gen(function* () {
-      const versions = yield* reader.ListVersions({ userId: user, slotId: entry.slotId })
+      const versions = yield* reader.ListVersions({
+        userId: user,
+        slotId: entry.slotId,
+        forkId: entry.shownForkId ?? null
+      })
       const named = versions.find((v) => v.speakerEntityId !== null)?.speakerEntityId ?? entry.firstSpeakerEntityId
       if (named !== null || entry.side !== "user") return named
-      const state = foldState(yield* reader.StateEventsAt({ userId: user, chatId, slotId: entry.parentSlotId }))
+      const state = foldState(
+        yield* reader.StateEventsAt({
+          userId: user,
+          chatId,
+          slotId: entry.parentSlotId,
+          forkId: entry.shownForkId ?? null
+        })
+      )
       return (state.playedByMe[0] as EntityId | undefined) ?? null
     })
+
+  const speakerNow = (user: UserId, chatId: ChatId, entry: PathEntry, speaker: EntityId | null) =>
+    Effect.map(
+      reader.StateEventsAt({ userId: user, chatId, slotId: entry.parentSlotId, forkId: entry.shownForkId ?? null }),
+      (events) => swappedCard(events, speaker) as EntityId | null
+    )
 
   /**
    * A slot as it is now in a fork (null: the fork through it), published to its chat. Tabs
@@ -279,7 +296,12 @@ export const makeChatHandlers = Effect.gen(function* () {
           forkId: forkId ?? null,
           version: {
             ...generating,
-            speakerEntityId: before.version.speakerEntityId ?? (yield* speakerOf(id, chatId, before)),
+            speakerEntityId: yield* speakerNow(
+              id,
+              chatId,
+              before,
+              before.version.speakerEntityId ?? (yield* speakerOf(id, chatId, before))
+            ),
             ...(direction?.trim() ? { direction } : {})
           },
           expectedRowVersion,
@@ -310,6 +332,11 @@ export const makeChatHandlers = Effect.gen(function* () {
         if (source.writer !== "model") return yield* refuse("Only a reply the model wrote can be continued.")
         if (source.status === "generating") return yield* refuse("It's still being written.")
         if (source.content.trim() === "") return yield* refuse("It has no text to continue.")
+        const { chatId, entry: before } = yield* reader.GetSlot({
+          userId: id,
+          slotId: source.slotId,
+          forkId: forkId ?? null
+        })
         const added = yield* writer.AddSelectedVersion({
           userId: id,
           slotId: source.slotId,
@@ -317,7 +344,7 @@ export const makeChatHandlers = Effect.gen(function* () {
           version: {
             ...generating,
             content: source.content,
-            speakerEntityId: source.speakerEntityId,
+            speakerEntityId: yield* speakerNow(id, chatId, before, source.speakerEntityId),
             sourceVersionId: source.id,
             ...(direction?.trim() ? { direction } : {}),
             ...(source.reasoning ? { reasoning: source.reasoning } : {})

@@ -18,7 +18,13 @@ import type { SqlClient } from "effect/sql"
 import { NotFound } from "./ops.ts"
 
 type Reference =
-  | { readonly table: "entity"; readonly id: string; readonly kind: EntityKind; readonly chatOwned?: true }
+  | {
+      readonly table: "entity"
+      readonly id: string
+      readonly kind: EntityKind
+      readonly chatOwned?: true
+      readonly allowDeleted?: true
+    }
   /** A ref of `entity` when given; a chat override only of this chat. */
   | { readonly table: "ref"; readonly id: string; readonly kind: EntityKind; readonly entity: string | undefined }
   /** A revision of `entity`, or of the entity of `ref`, when given. */
@@ -52,7 +58,13 @@ const referencesOf = (declared: Declared, of: unknown): ReadonlyArray<Reference>
     return ids.map((id): Reference => {
       switch (declaration.table) {
         case "entity":
-          return { table: "entity", id, kind: declaration.kind, ...(declaration.chatOwned ? { chatOwned: true } : {}) }
+          return {
+            table: "entity",
+            id,
+            kind: declaration.kind,
+            ...(declaration.chatOwned ? { chatOwned: true } : {}),
+            ...(declaration.allowDeleted ? { allowDeleted: true } : {})
+          }
         case "ref":
           return { table: "ref", id, kind: declaration.kind, entity: field(declaration.entity) }
         case "revision":
@@ -88,7 +100,7 @@ export const checkStateReferences = (
         switch (reference.table) {
           case "entity":
             return sql<{ n: number }>`SELECT count(*) AS n FROM entities WHERE id = ${reference.id}
-              AND owner_user_id = ${userId} AND kind = ${reference.kind} AND (${live} = 0 OR deleted_at IS NULL)
+              AND owner_user_id = ${userId} AND kind = ${reference.kind} AND (${reference.allowDeleted ? 0 : live} = 0 OR deleted_at IS NULL)
               AND (${reference.chatOwned ? 1 : 0} = 0 OR NOT EXISTS (
                 SELECT 1 FROM entity_refs r JOIN entity_revisions v ON v.id = r.head_revision_id
                 WHERE r.entity_id = ${reference.id} AND r.ref_kind = 'upstream'

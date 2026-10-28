@@ -265,7 +265,7 @@ export const makeWriteHandlers = (bin: Bin) =>
           return { changed: true }
         }).pipe(transaction("SetSlotHidden")),
 
-      AddStateEvent: ({ userId, chatId, slotId, versionId, scope, data }) =>
+      AddStateEvent: ({ userId, chatId, slotId, versionId, scope, data, forkId }) =>
         Effect.gen(function* () {
           yield* ownedPosition(userId, chatId, slotId)
           if (versionId !== null) {
@@ -275,13 +275,13 @@ export const makeWriteHandlers = (bin: Bin) =>
               versionId
             )
           }
-          return yield* insertStateEvent(userId, chatId, slotId, versionId, scope, data)
+          return yield* insertStateEvent(userId, chatId, slotId, versionId, scope, data, forkId ?? null)
         }).pipe(transaction("AddStateEvent")),
 
-      AddStateEvents: ({ userId, chatId, slotId, data }) =>
+      AddStateEvents: ({ userId, chatId, slotId, data, forkId }) =>
         Effect.gen(function* () {
           yield* ownedPosition(userId, chatId, slotId)
-          for (const event of data) yield* insertStateEvent(userId, chatId, slotId, null, null, event)
+          for (const event of data) yield* insertStateEvent(userId, chatId, slotId, null, null, event, forkId ?? null)
         }).pipe(transaction("AddStateEvents")),
 
       // --- Chats

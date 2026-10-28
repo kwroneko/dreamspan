@@ -1,3 +1,5 @@
+import { stateEventsOnPath } from "./stateRead.ts"
+import { forkAt } from "./forkState.ts"
 // Graph metadata and bounded excerpts at visible endpoints. Runs in a reader worker.
 import { type CastCard, type ChatId, type EntityId, type SlotId } from "@rp/shared/chat.ts"
 import { chatName } from "@rp/shared/chatName.ts"
@@ -31,7 +33,7 @@ type Slot = {
 }
 type Event = FoldableEvent & { chat_id: string; slot_id: string | null; version_id: string | null }
 // Built plainly during the walk; each becomes a ShellFork once, with its excerpt.
-type Fork = Omit<ShellFork, "cast"> & { cast: Array<CastCard> }
+type Fork = { -readonly [K in keyof Omit<ShellFork, "cast">]: Omit<ShellFork, "cast">[K] } & { cast: Array<CastCard> }
 
 export const makeShellReadHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
@@ -246,6 +248,55 @@ export const makeShellReadHandlers = Effect.gen(function* () {
               [...visible].sort((a, b) => b.recentAt - a.recentAt)[0]!
             forks[forks.indexOf(fallback)] = { ...fallback, current: true }
           }
+        }
+        // A single fork with no swaps or suppression uses exactly the state already
+        // folded by the tree walk. Only chats that need independent views are reread.
+        const independent = new Set(
+          (yield* sql<{ chat_id: string }>`
+          SELECT f.chat_id FROM forks f JOIN chats c ON c.id = f.chat_id
+          WHERE c.owner_user_id = ${userId} AND c.deleted_at IS NULL AND f.parent_fork_id IS NOT NULL
+          UNION SELECT o.chat_id FROM fork_overrides o JOIN chats c ON c.id = o.chat_id
+          WHERE c.owner_user_id = ${userId} AND c.deleted_at IS NULL AND o.kind = 'suppress_event'`).map(
+            (r) => r.chat_id
+          )
+        )
+        for (const e of events) if (e.data.key === "card.swap") independent.add(e.chat_id)
+        const chatTitles = new Map(chats.map((c) => [c.id, c.title]))
+        // Fork-scoped state cannot be propagated down the shared slot tree: two forks
+        // may end at the same slot and have different casts. Resolve each endpoint in its fork.
+        for (const f of forks) {
+          if (!independent.has(f.chat.id)) continue
+          const fork = yield* forkAt(sql, f.chat.id, f.leaf)
+          const rows = yield* stateEventsOnPath(sql, f.chat.id, f.leaf, fork)
+          const events = yield* withoutPurged(
+            sql,
+            rows.map((e) => ({
+              scope: e.scope,
+              data: { key: e.key, value: JSON.parse(e.value_json) }
+            })) as Array<FoldableEvent>
+          )
+          const state = foldState(events)
+          f.cast = state.participants
+            .filter((id) => !state.playedByMe.includes(id))
+            .flatMap((id) => byCard.get(id) ?? [])
+          const joined = new Set(
+            events.flatMap(({ data }) =>
+              data.key === "participant.join" || data.key === "card.swap" ? [data.value.entity] : []
+            )
+          )
+          f.joined = [...joined] as Array<EntityId>
+          f.departed = [...joined].filter((id) => !state.participants.includes(id)) as Array<EntityId>
+          f.activity = f.activity.map((a) => ({
+            ...a,
+            category: !state.participants.includes(a.entityId)
+              ? "was"
+              : state.participants.some(
+                    (id) => id !== a.entityId && !state.playedByMe.includes(id) && !state.absent.includes(id)
+                  )
+                ? "with"
+                : "just"
+          }))
+          if (!f.named) f.name = chatName(importState(chatTitles.get(f.chat.id)!).title, f.cast).name
         }
         // Only the visible endpoints need text, and only a bounded excerpt.
         const previewByLeaf = new Map<string, string>()

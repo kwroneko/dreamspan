@@ -246,6 +246,7 @@ export const makeLcmHandlers = Effect.gen(function* () {
         if (!finalCounts) return yield* new NotFound({ entity: "imported summary", id: chatId })
         yield* validateApproval(approved, yield* priced(id, finalCounts))
         const done = yield* writer.EnableLcm({
+          forkId: forkId ?? null,
           runId: staged.runId,
           userId: id,
           chatId,
@@ -282,24 +283,24 @@ export const makeLcmHandlers = Effect.gen(function* () {
         return yield* backfillOf(id, chatId, leafSlotId)
       }).pipe(internal("SetLcmBackfill")),
     // One write of the chat's settings, the others kept (DESIGN §8); nothing is planned by it.
-    ChangeLcmSettings: ({ chatId, change }) =>
+    ChangeLcmSettings: ({ chatId, change, forkId }) =>
       Effect.gen(function* () {
         const id = yield* userId
-        yield* writer.ChangeLcmSettings({ userId: id, chatId, change })
+        yield* writer.ChangeLcmSettings({ userId: id, chatId, change, forkId: forkId ?? null })
         hub.publish(chatId, { _tag: "State" })
         yield* changed(chatId, id)
       }).pipe(internal("ChangeLcmSettings")),
-    GetLcmSettings: ({ chatId, leafSlotId }) =>
-      Effect.flatMap(userId, (id) => reader.LcmSettingsAt({ userId: id, chatId, leafSlotId })).pipe(
-        internal("GetLcmSettings")
-      ),
-    SetLcmEnabled: ({ chatId, enabled }) =>
+    GetLcmSettings: ({ chatId, leafSlotId, forkId }) =>
+      Effect.flatMap(userId, (id) =>
+        reader.LcmSettingsAt({ userId: id, chatId, leafSlotId, forkId: forkId ?? null })
+      ).pipe(internal("GetLcmSettings")),
+    SetLcmEnabled: ({ chatId, enabled, forkId }) =>
       Effect.gen(function* () {
         const id = yield* userId
         // The other settings stay as they are; only the switch moves.
         // The switch alone can't put a target above its maximum.
         yield* writer
-          .ChangeLcmSettings({ userId: id, chatId, change: { enabled } })
+          .ChangeLcmSettings({ userId: id, chatId, forkId: forkId ?? null, change: { enabled } })
           .pipe(Effect.catchTag("LcmSettingsInvalid", (error) => Effect.die(error)))
         hub.publish(chatId, { _tag: "State" })
         yield* changed(chatId, id)

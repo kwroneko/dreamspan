@@ -3,7 +3,7 @@
 // anything else is NotFound.
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
-import { CastCard, Chat, ChatId, EntityId, FrozenMacros, PathEntry, QueuedMessage, SlotId } from "./chat.ts"
+import { CastCard, Chat, ChatId, EntityId, ForkId, FrozenMacros, PathEntry, QueuedMessage, SlotId } from "./chat.ts"
 import { ChatNameInput, GenerationUnavailable } from "./chatApi.ts"
 import { NotFound, ServerError, StaleWrite } from "./errors.ts"
 import { Doc, LibraryRef, RefId, RevisionId } from "./library.ts"
@@ -151,6 +151,7 @@ export type FirstTurn = typeof FirstTurn.Type
 
 /** A change to who's in a chat, or to its settings, from a position on. */
 export const CastChange = Schema.Union([
+  Schema.TaggedStruct("Swap", { entityId: EntityId, replaces: EntityId }),
   Schema.TaggedStruct("Join", { entityId: EntityId }),
   Schema.TaggedStruct("Leave", { entityId: EntityId }),
   Schema.TaggedStruct("Presence", { entityId: EntityId, present: Schema.Boolean }),
@@ -372,7 +373,7 @@ export class ChatSetupApi extends RpcGroup.make(
   }),
   /** Who's in the chat, and its settings, after `slotId` (null: at the start). */
   Rpc.make("GetCast", {
-    payload: { chatId: ChatId, slotId: Schema.NullOr(SlotId) },
+    payload: { chatId: ChatId, forkId: Schema.optionalKey(Schema.NullOr(ForkId)), slotId: Schema.NullOr(SlotId) },
     success: Cast,
     error: Schema.Union([...Errors])
   }),
@@ -381,7 +382,12 @@ export class ChatSetupApi extends RpcGroup.make(
    * Another user's chat or slot, or a card that isn't the user's live card, is NotFound.
    */
   Rpc.make("ListChatCards", {
-    payload: { chatId: ChatId, slotId: Schema.NullOr(SlotId), entityIds: Schema.Array(EntityId) },
+    payload: {
+      chatId: ChatId,
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
+      slotId: Schema.NullOr(SlotId),
+      entityIds: Schema.Array(EntityId)
+    },
     success: Schema.Array(ChatCard),
     error: Schema.Union([...Errors])
   }),
@@ -408,7 +414,12 @@ export class ChatSetupApi extends RpcGroup.make(
   /** What the preset in use does with a card's own prompts, for the card editor. */
   Rpc.make("GetCardPromptUse", { success: CardPromptUse, error: Schema.Union([...Errors]) }),
   Rpc.make("ChangeCast", {
-    payload: { chatId: ChatId, slotId: Schema.NullOr(SlotId), change: CastChange },
+    payload: {
+      chatId: ChatId,
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
+      slotId: Schema.NullOr(SlotId),
+      change: CastChange
+    },
     success: Cast,
     error: Schema.Union([...Errors])
   }),
@@ -417,7 +428,7 @@ export class ChatSetupApi extends RpcGroup.make(
    * with whether it's on after `slotId` (null: at the start).
    */
   Rpc.make("ListChatNotes", {
-    payload: { chatId: ChatId, slotId: Schema.NullOr(SlotId) },
+    payload: { chatId: ChatId, forkId: Schema.optionalKey(Schema.NullOr(ForkId)), slotId: Schema.NullOr(SlotId) },
     success: Schema.Array(ChatNote),
     error: Schema.Union([...Errors])
   }),

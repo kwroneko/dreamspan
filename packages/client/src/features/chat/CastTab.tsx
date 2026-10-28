@@ -426,6 +426,7 @@ export function CastTab({ session }: { session: ChatSession }) {
   const chatId = session.id
   // The leaf shown: what the next request reads depends on the state there.
   const leafSlotId = useSyncExternalStore(session.subscribe, () => session.snapshot().leafSlotId)
+  const forkId = useSyncExternalStore(session.subscribe, () => session.snapshot().forkId)
   // Cards in the bin, or purged, have no definition to read.
   const key = participants.filter((id) => view.cards.get(id)?.inBin === false).join(" ")
   // The library entry, "used by N chats", this chat's own version and the definition the
@@ -435,10 +436,15 @@ export function CastTab({ session }: { session: ChatSession }) {
     () =>
       AppClient.query(
         "ListChatCards",
-        { chatId, slotId: leafSlotId, entityIds: key === "" ? [] : (key.split(" ") as Array<EntityId>) },
+        {
+          chatId,
+          forkId,
+          slotId: leafSlotId,
+          entityIds: key === "" ? [] : (key.split(" ") as Array<EntityId>)
+        },
         { reactivityKeys: ["library", `chat-cards:${chatId}`] }
       ),
-    [chatId, leafSlotId, key]
+    [chatId, leafSlotId, forkId, key]
   )
   const infoResult = useAtomValue(infoAtom)
   const info = useMemo(

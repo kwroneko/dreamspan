@@ -67,6 +67,7 @@ for (const count of [10, 205]) {
           yield* writer.AddStateEvent({
             userId: user.id,
             chatId: chat.id,
+            forkId: childBefore.forkId,
             slotId: local.slotId,
             versionId: local.version.id,
             scope: null,

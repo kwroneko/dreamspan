@@ -541,6 +541,7 @@ export class WriteOps extends RpcGroup.make(
     payload: {
       userId: UserId,
       chatId: ChatId,
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       leafSlotId: SlotId,
       forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       choice: EnableChoice,
@@ -1205,6 +1206,7 @@ export class WriteOps extends RpcGroup.make(
     payload: {
       userId: UserId,
       chatId: ChatId,
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       slotId: Schema.NullOr(SlotId),
       versionId: Schema.NullOr(VersionId),
       scope: FoldableEvent.fields.scope,
@@ -1221,6 +1223,7 @@ export class WriteOps extends RpcGroup.make(
     payload: {
       userId: UserId,
       chatId: ChatId,
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       slotId: Schema.NullOr(SlotId),
       data: Schema.Array(StateEventData)
     },
@@ -1845,7 +1848,12 @@ export class WriteOps extends RpcGroup.make(
    * new chat-wide `lcm.settings` event in one transaction; null removes a field.
    */
   Rpc.make("ChangeLcmSettings", {
-    payload: { userId: UserId, chatId: ChatId, change: LcmSettingsChange },
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
+      change: LcmSettingsChange
+    },
     success: Schema.Void,
     error: Schema.Union([NotFound, StorageError, LcmSettingsInvalid])
   }),
@@ -1904,7 +1912,7 @@ export class ReadOps extends RpcGroup.make(
   }),
   /** The layer in use on the path to a leaf, with the failed summaries and unfinished jobs on it. */
   Rpc.make("GetLcmState", {
-    payload: { userId: UserId, chatId: ChatId, leafSlotId: SlotId },
+    payload: { userId: UserId, chatId: ChatId, forkId: Schema.optionalKey(Schema.NullOr(ForkId)), leafSlotId: SlotId },
     success: LcmState,
     error: Schema.Union([StorageError, NotFound])
   }),
@@ -2012,6 +2020,8 @@ export class ReadOps extends RpcGroup.make(
     payload: {
       userId: UserId,
       chatId: ChatId,
+      /** The viewed leaf when reading an earlier position; forkId takes precedence. */
+      leafSlotId: Schema.optionalKey(Schema.NullOr(SlotId)),
       slotId: Schema.NullOr(SlotId),
       /** Whose selections decide the version-attached events (absent or null: the fork through the slot, forkAt). */
       forkId: Schema.optionalKey(Schema.NullOr(ForkId))
@@ -2489,7 +2499,12 @@ export class ReadOps extends RpcGroup.make(
   }),
   /** A chat's summarization settings, resolved and fitted to the next context at the leaf. */
   Rpc.make("LcmSettingsAt", {
-    payload: { userId: UserId, chatId: ChatId, leafSlotId: Schema.NullOr(SlotId) },
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
+      leafSlotId: Schema.NullOr(SlotId)
+    },
     success: LcmSettingsView,
     error: Schema.Union([NotFound, StorageError])
   }),

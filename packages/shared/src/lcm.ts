@@ -344,7 +344,7 @@ export class LcmApi extends RpcGroup.make(
     error: Schema.Union([NotFound, StaleWrite, ServerError])
   }),
   Rpc.make("GetLcmState", {
-    payload: { chatId: ChatId, leafSlotId: SlotId },
+    payload: { chatId: ChatId, forkId: Schema.optionalKey(Schema.NullOr(ForkId)), leafSlotId: SlotId },
     success: LcmState,
     error: Schema.Union([NotFound, ServerError])
   }),
@@ -426,7 +426,7 @@ export class LcmApi extends RpcGroup.make(
   }),
   /** The chat's summarization settings, at the leaf whose next context they are measured against. */
   Rpc.make("GetLcmSettings", {
-    payload: { chatId: ChatId, leafSlotId: Schema.NullOr(SlotId) },
+    payload: { chatId: ChatId, forkId: Schema.optionalKey(Schema.NullOr(ForkId)), leafSlotId: Schema.NullOr(SlotId) },
     success: LcmSettingsView,
     error: Schema.Union([NotFound, ServerError])
   }),
@@ -435,13 +435,13 @@ export class LcmApi extends RpcGroup.make(
    * again. Turning summarizing on for a chat with messages goes through `EnableLcm`.
    */
   Rpc.make("ChangeLcmSettings", {
-    payload: { chatId: ChatId, change: LcmSettingsChange },
+    payload: { chatId: ChatId, forkId: Schema.optionalKey(Schema.NullOr(ForkId)), change: LcmSettingsChange },
     success: Schema.Void,
     error: Schema.Union([NotFound, ServerError, LcmSettingsInvalid])
   }),
   /** Turns LCM on or off for the whole chat; it keeps its other settings. `ChangeLcmSettings` with `enabled` only. */
   Rpc.make("SetLcmEnabled", {
-    payload: { chatId: ChatId, enabled: Schema.Boolean },
+    payload: { chatId: ChatId, forkId: Schema.optionalKey(Schema.NullOr(ForkId)), enabled: Schema.Boolean },
     success: Schema.Void,
     error: Schema.Union([NotFound, ServerError])
   }),

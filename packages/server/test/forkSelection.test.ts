@@ -313,6 +313,7 @@ describe("per-fork selection", () => {
       yield* writer.AddStateEvent({
         userId,
         chatId,
+        forkId: main,
         slotId: m1.slotId,
         versionId: two,
         scope: null,

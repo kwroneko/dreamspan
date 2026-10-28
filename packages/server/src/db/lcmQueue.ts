@@ -1,3 +1,4 @@
+import { eventAppliesSql } from "./forkState.ts"
 import { completeEmpty } from "./lcmEmpty.ts"
 import { summaryIsWarm } from "./lcmWarmth.ts"
 import { inFork } from "./forkState.ts"
@@ -312,7 +313,7 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
         // is its old name). With the next reply, nothing runs ahead but a driven backfill's work.
         const spends = (job: string) =>
           `(coalesce((SELECT json_extract(e.value_json,'$.when') FROM state_events e
-              WHERE e.chat_id = ${job}.chat_id AND e.slot_id IS NULL AND e.scope IS NULL AND e.key = 'lcm.settings'
+              WHERE e.chat_id = ${job}.chat_id AND e.slot_id IS NULL AND e.scope IS NULL AND e.key = 'lcm.settings' AND ${eventAppliesSql("(SELECT current_fork_id FROM chats WHERE id = " + job + ".chat_id)", "e")}
               ORDER BY e.seq DESC LIMIT 1),
             (SELECT coalesce(json_extract(value_json,'$.when'),
                 CASE json_extract(value_json,'$.spendAhead') WHEN 0 THEN 'next-reply' END)
@@ -443,7 +444,7 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
         SELECT c.owner_user_id AS userId, c.id AS chatId, c.active_leaf_slot_id AS leafSlotId FROM chats c
         WHERE c.deleted_at IS NULL AND c.active_leaf_slot_id IS NOT NULL AND
           (EXISTS (SELECT 1 FROM summarization_jobs j WHERE j.chat_id = c.id AND j.status = 'pending') OR
-           json_extract((SELECT value_json FROM state_events e WHERE e.chat_id = c.id AND e.key = 'lcm.settings'
+           json_extract((SELECT value_json FROM state_events e WHERE e.chat_id = c.id AND e.key = 'lcm.settings' AND ${sql.literal(eventAppliesSql("c.current_fork_id", "e"))}
              AND e.slot_id IS NULL ORDER BY e.seq DESC LIMIT 1),'$.enabled') = 1)`
       }).pipe(transaction(sql, "ResetSummaryJobs")),
     EscalateSummaryJob: ({ userId, jobId }) =>

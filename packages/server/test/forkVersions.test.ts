@@ -315,6 +315,7 @@ describe("amending a shared message", () => {
       yield* writer.AddStateEvent({
         userId,
         chatId,
+        forkId: main,
         slotId: m0.slotId,
         versionId: hello,
         scope: null,
@@ -325,7 +326,7 @@ describe("amending a shared message", () => {
           reader.StateEventsAt({ userId, chatId, slotId: m0.slotId, forkId }),
           (events) => events.filter((e) => e.data.key === "var.set").length
         )
-      assert.deepStrictEqual([yield* vars(main), yield* vars(g)], [1, 1])
+      assert.deepStrictEqual([yield* vars(main), yield* vars(g)], [1, 0])
       // A fork's tip text, and the alternates' first words, are the copy's in main.
       const fromMain = yield* fork(main, m0.slotId)
       const fromG = yield* fork(g, m0.slotId)

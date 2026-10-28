@@ -1,10 +1,12 @@
+import { stateEventsOnPath } from "./stateRead.ts"
+import { forkAt } from "./forkState.ts"
 import { type FoldableEvent, foldState } from "@rp/shared/state.ts"
 import { withoutPurged } from "./stateRefs.ts"
 import { cardNames } from "@rp/shared/cardNames.ts"
 // Cards as chats see them: display name, model name, version and greetings from the
 // selected card revision, and whether it is a persona. Shared by
 // the readers and the writer (chatSetupReads.ts, chatSetupWrites.ts).
-import { CastCard, type ChatId, type EntityId } from "@rp/shared/chat.ts"
+import { CastCard, type ChatId, type EntityId, type SlotId } from "@rp/shared/chat.ts"
 import { makeLibraryQueries } from "./library.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { Effect } from "effect"
@@ -114,30 +116,6 @@ export const castCardAt = (sql: SqlClient.SqlClient, card: CastCard, revisionId:
     })
   )
 
-/** Card bindings on the active path, for names in chat lists and search results. */
-const cardBindingsAt = (sql: SqlClient.SqlClient, chatId: string, leaf: string | null) =>
-  Effect.gen(function* () {
-    const rows = yield* sql<{ scope: string | null; value_json: string }>`
-      WITH RECURSIVE path(id) AS (
-        SELECT ${leaf} WHERE ${leaf} IS NOT NULL
-        UNION ALL SELECT s.parent_slot_id FROM slots s JOIN path p ON p.id = s.id WHERE s.parent_slot_id IS NOT NULL
-      )
-      SELECT e.scope, e.value_json FROM state_events e
-      LEFT JOIN path p ON p.id = e.slot_id LEFT JOIN slots s ON s.id = p.id
-      WHERE e.chat_id = ${chatId} AND e.key = 'card.binding' AND e.superseded_by_changeset IS NULL
-        AND (e.slot_id IS NULL OR (p.id IS NOT NULL AND s.deleted_at IS NULL))
-        AND (${leaf} IS NULL OR e.version_id IS NULL OR e.version_id = s.selected_version_id)
-      ORDER BY coalesce(s.depth, -1), e.seq`
-    const kept = yield* withoutPurged(
-      sql,
-      rows.map((row) => ({
-        scope: row.scope,
-        data: { key: "card.binding", value: JSON.parse(row.value_json) }
-      })) as ReadonlyArray<FoldableEvent>
-    )
-    return foldState(kept).cardBindings
-  })
-
 /** The same selected revisions for chat-list metadata and chat search. */
 export const chatCast = Effect.fnUntraced(function* (
   sql: SqlClient.SqlClient,
@@ -145,13 +123,19 @@ export const chatCast = Effect.fnUntraced(function* (
   chatId: ChatId,
   leaf: string | null
 ) {
-  const joined = yield* sql<{ entity: string }>`
-    SELECT json_extract(value_json, '$.entity') AS entity FROM state_events
-    WHERE chat_id = ${chatId} AND key = 'participant.join' AND superseded_by_changeset IS NULL
-    GROUP BY entity ORDER BY min(seq)`
-  const ids = joined.map((row) => row.entity as EntityId)
-  const cards = ids.length === 0 ? [] : yield* loadCards(sql, userId, ids)
-  const bindings = yield* cardBindingsAt(sql, chatId, leaf)
+  const events = yield* stateEventsOnPath(sql, chatId, leaf as SlotId | null, yield* forkAt(sql, chatId, leaf))
+  const state = foldState(
+    yield* withoutPurged(
+      sql,
+      events.map((e) => ({
+        scope: e.scope,
+        data: { key: e.key, value: JSON.parse(e.value_json) }
+      })) as Array<FoldableEvent>
+    )
+  )
+  const ids = state.participants as ReadonlyArray<EntityId>
+  const cards = yield* loadCards(sql, userId, ids)
+  const bindings = state.cardBindings
   const lib = makeLibraryQueries(sql)
   const resolved = yield* Effect.forEach(cards, ({ card }) =>
     Effect.gen(function* () {

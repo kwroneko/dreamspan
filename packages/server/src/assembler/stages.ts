@@ -18,7 +18,7 @@ import { contextBudget, targetBudget, loreAllowance, loreBudget } from "./budget
 import type { ChatMessage } from "@rp/shared/macros/context.ts"
 import type { CardFields } from "@rp/shared/macros/context.ts"
 import type { VariableEffect } from "@rp/shared/macros/variables.ts"
-import { type ChatState, foldState, noteSwitches } from "@rp/shared/state.ts"
+import { branchOwned, type ChatState, foldState, noteSwitches, swappedCard } from "@rp/shared/state.ts"
 import { isAuthorNote as isChatAuthorNote, noteCondition } from "@rp/shared/docs/note.ts"
 import { Effect, type Scope } from "effect"
 import { loreActivationStage, lorebooksStage } from "./loreStages.ts"
@@ -175,7 +175,14 @@ const castStage: AssemblerStage = {
   run: (assembly) =>
     Effect.gen(function* () {
       const target = need(assembly, "target")
-      assembly.cast = yield* castOf(need(assembly, "state"), target.speaker, target.ordinal)
+      assembly.cast = yield* castOf(
+        need(assembly, "state"),
+        swappedCard(
+          need(assembly, "events").map((e) => e.event),
+          target.speaker
+        ),
+        target.ordinal
+      )
       if (assembly.request.summarizing) assembly.cast = { ...assembly.cast, type: "quiet" }
       // ST's Continue: its own generation type, which a preset prompt's trigger can name.
       else if (target.continues) assembly.cast = { ...assembly.cast, type: "continue" }
@@ -571,7 +578,13 @@ const resolveStage: AssemblerStage = {
       // Writes of templates not expanded before, as events at their positions.
       const written: Array<PositionedEvent> = []
       const withWritten = () =>
-        written.length === 0 ? events : [...events, ...written].sort((a, b) => (a.depth ?? -1) - (b.depth ?? -1))
+        written.length === 0
+          ? events
+          : [...events, ...written].sort(
+              (a, b) =>
+                Number(branchOwned.has(a.event.data.key)) - Number(branchOwned.has(b.event.data.key)) ||
+                (a.depth ?? -1) - (b.depth ?? -1)
+            )
       for (const entry of need(assembly, "history")) {
         if (!entry.inContext) {
           messages.push(omitted)
