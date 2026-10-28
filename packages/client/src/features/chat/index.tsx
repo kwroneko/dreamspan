@@ -1,3 +1,7 @@
+import { registerComposerControls } from "./registerComposerControls.tsx"
+import { registerMessageActions } from "./registerMessageActions.tsx"
+import { registerHistoryCommands } from "./historyContributions.ts"
+import { registerPanels } from "./registerPanels.tsx"
 import { lazy, Suspense } from "react"
 import { routes } from "../../routes.tsx"
 import { Loading } from "../../ui/Spinner.tsx"
@@ -45,6 +49,10 @@ function LazyStartChatPage() {
 }
 
 export const register = () => {
+  registerComposerControls()
+  registerMessageActions()
+  registerPanels()
+  registerHistoryCommands()
   routes.register({
     id: "chats",
     parent: "app",

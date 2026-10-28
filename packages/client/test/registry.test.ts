@@ -1,8 +1,34 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { makeRegistry } from "../src/registry.ts"
 import { fullPath, navEntries, routes } from "../src/routes.tsx"
 
 describe("registry", () => {
+  it("publishes stable captured entries and disablements before notifying mounted subscribers", () => {
+    const registry = makeRegistry<{ id: string }>()
+    const empty = registry.snapshot()
+    expect(registry.snapshot()).toBe(empty)
+    const seen = vi.fn(() => registry.snapshot())
+    const unsubscribe = registry.subscribe(seen)
+    const remove = registry.register({ id: "a" })
+    const added = registry.snapshot()
+    expect(seen.mock.results.at(-1)?.value).toBe(added)
+    expect(added.entries).toEqual([{ id: "a" }])
+    expect(added).not.toBe(empty)
+    const restore = registry.disable("a")
+    const disabled = registry.snapshot()
+    expect(disabled.entries).toEqual([])
+    expect(disabled.disabled.has("a")).toBe(true)
+    expect(added.entries).toEqual([{ id: "a" }])
+    expect(added.disabled.has("a")).toBe(false)
+    restore()
+    expect(registry.snapshot().entries).toEqual(added.entries)
+    expect(registry.snapshot().disabled.has("a")).toBe(false)
+    remove()
+    remove()
+    expect(seen).toHaveBeenCalledTimes(4)
+    unsubscribe()
+  })
+
   it("overrides by id, and undoing a registration in any order restores what it hid", () => {
     const registry = makeRegistry<{ id: string; value: number }>()
     const undoA = registry.register({ id: "a", value: 1 })
