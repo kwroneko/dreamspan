@@ -730,12 +730,24 @@ const collectionOf = (assembly: Assembly): { collection: Array<StPrompt>; readsD
   const collection: Array<StPrompt> = []
   let afterHistory = false
   let direction = false
+  const skipped: Array<Source> = []
   for (const entry of presetOrder(doc.prompts, doc.order)) {
     const prompt = prompts.get(entry.identifier)
     if (!prompt) continue
     const condition = conditionOf(prompt)
     const allowed = entry.enabled && triggersFor(prompt, type) && conditionHolds(assembly, condition)
     if (entry.identifier === "chatHistory") afterHistory = true
+    if (entry.enabled && !allowed) {
+      if (!triggersFor(prompt, type))
+        skipped.push({
+          kind: "preset",
+          ref: need(assembly, "preset").ref,
+          revision: need(assembly, "preset").revision,
+          identifier: prompt.identifier,
+          triggers: [...prompt.injection_trigger]
+        })
+      else if (condition !== "always") skipped.push(presetSource(assembly, prompt.identifier, condition))
+    }
     if (!allowed && entry.identifier !== "main") continue
     if (allowed && readsDirection(prompt.content)) direction = true
     const text =
@@ -760,6 +772,7 @@ const collectionOf = (assembly: Assembly): { collection: Array<StPrompt>; readsD
       forbid_overrides: prompt.forbid_overrides
     })
   }
+  assembly.skippedPrompts = skipped
   return { collection, readsDirection: direction }
 }
 
@@ -1800,13 +1813,16 @@ const composeStage = sync("compose", (assembly) => {
     // Each summary is its own message just before the history, oldest first, as the history's
     // messages are: a new summary leaves the earlier ones' cached prefix as it was (DESIGN §8).
     assembly.lcm?.summaries.forEach((summary, i) => {
-      if (summary.content !== "")
-        layer.push({
-          role: "system",
-          content: summaryBlock(summary),
-          pieces: [assembly.lcmPieces![i]!],
-          kind: "summary"
-        })
+      if (summary.content === "") return
+      // Its own piece around the summary's text, so the inspector titles the turn as a group.
+      const content = summaryBlock(summary)
+      const block = need(assembly, "macros").verbatim(
+        `layout:summary:${summary.firstSlotId}:${summary.lastSlotId}`,
+        { kind: "assembler", what: `Summary of messages ${summary.from}–${summary.to}` },
+        content,
+        [assembly.lcmPieces![i]!]
+      )
+      layer.push({ role: "system", content, pieces: [block], kind: "summary" })
     })
     const layerCost = layer.reduce((n, message) => n + tokensOf(message), 0)
     return { collection, beside, injections, layer, layerCost }

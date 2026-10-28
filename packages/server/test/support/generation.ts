@@ -15,8 +15,8 @@ import { type client, posted } from "./config.ts"
 
 type Api = Effect.Success<ReturnType<typeof client>>
 
-const cardDoc = (name: string, description: string): CardDoc =>
-  run(importCard(json({ spec: "chara_card_v2", spec_version: "2.0", data: { name, description } }))).card
+const cardDoc = (name: string, description: string, personality = ""): CardDoc =>
+  run(importCard(json({ spec: "chara_card_v2", spec_version: "2.0", data: { name, description, personality } }))).card
 
 const presetDoc = (fields: Record<string, unknown>) =>
   importStPreset(JSON.stringify({ frequency_penalty: 0, ...fields })).document!
@@ -48,6 +48,7 @@ export const generateReply = (
     readonly preset?: Record<string, unknown>
     readonly example?: string
     readonly greeting?: string
+    readonly personality?: string
   }
 ) =>
   Effect.gen(function* () {
@@ -91,7 +92,7 @@ export const generateReply = (
         sourcePath: null
       })
     const mira = yield* entity("card", "Mira", {
-      ...cardDoc("Mira", "{{char}} keeps the ledger for {{user}}."),
+      ...cardDoc("Mira", "{{char}} keeps the ledger for {{user}}.", options.personality),
       mes_example: options.example ?? ""
     })
     const tobin = yield* entity("card", "Tobin", cardDoc("Tobin", "{{user}} draws maps."))

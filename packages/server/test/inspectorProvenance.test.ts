@@ -1,0 +1,293 @@
+import { importStPreset } from "../src/formats/preset.ts"
+// The inspector's "debug symbols" (ARCHITECTURE §15): every part of a sent request says what it
+// is and where it came from, recorded at send time, and a capture from before parts were
+// recorded still opens with its text. Synthetic cards, notes and lore through a mock provider.
+import { assert, it } from "@effect/vitest"
+import type { EntityId, SlotId, VersionId } from "@rp/shared/chat.ts"
+import type { ContextMessage, RunContext } from "@rp/shared/inspectorApi.ts"
+import type { StateEventData } from "@rp/shared/state.ts"
+import { Effect } from "effect"
+import { Writer } from "../src/db/Database.ts"
+import { client, posted, serverLayer, testConfig } from "./support/config.ts"
+import { eventually, finished, generateReply } from "./support/generation.ts"
+import { fixtureSql } from "./support/lcmFixtures.ts"
+import { loreBook, loreEntry } from "./support/loreFixtures.ts"
+import { completionChunks, sse, startMockProvider } from "./support/mockProvider.ts"
+
+/** The text of each part whose source matches, as the inspector marks it in its message. */
+const partTexts = (run: RunContext, match: (label: string) => boolean) =>
+  run.messages.flatMap((m: ContextMessage) =>
+    (m.parts ?? []).flatMap((p) => (match(m.sources[p.source]!.label) ? [m.content.slice(p.start, p.end)] : []))
+  )
+
+const sourceOf = (run: RunContext, match: (label: string) => boolean) =>
+  run.messages.flatMap((m) => m.sources).find((s) => match(s.label))
+
+it.live(
+  "every part of a request records what it is and where it came from, sent or not",
+  () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const mock = yield* Effect.acquireRelease(
+        Effect.promise(() =>
+          startMockProvider((_req, res) =>
+            sse(res, completionChunks(["The lamp gutters."], { prompt_tokens: 10, completion_tokens: 3 }))
+          )
+        ),
+        (m) => Effect.promise(() => m.close())
+      )
+      const api = yield* client()
+      const writer = yield* Writer
+      const me = yield* api.Whoami()
+      const {
+        chat,
+        events,
+        version: first
+      } = yield* generateReply(api, {
+        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+        model: {},
+        personality: "Dry and careful.",
+        preset: {
+          personality_format: "[Mira's manner:\n{{personality}}]",
+          prompts: [
+            {
+              identifier: "fresh",
+              name: "Fresh only",
+              content: "Begin.",
+              system_prompt: false,
+              injection_trigger: ["normal"]
+            }
+          ],
+          prompt_order: [
+            {
+              character_id: 100001,
+              order: [
+                { identifier: "fresh", enabled: true },
+                ...importStPreset('{"frequency_penalty":0}').document!.order.map((e) => ({
+                  identifier: e.identifier,
+                  enabled: e.enabled
+                }))
+              ]
+            }
+          ]
+        }
+      })
+      const cards = yield* api.ListCards()
+      const tobin = cards.find((c) => c.label === "Tobin")!.entityId as EntityId
+      const create = (kind: "lorebook" | "note", label: string, doc: Record<string, unknown>) =>
+        writer.CreateEntity({
+          userId: me.id,
+          kind,
+          label,
+          subtitle: "",
+          doc: doc as never,
+          schemaVersion: 1,
+          origin: "user",
+          sourcePath: null
+        })
+      const note = (title: string, content: string, extra: Record<string, unknown> = {}) =>
+        create("note", title, {
+          schema_version: 1,
+          title,
+          content,
+          placement: { mode: "depth", depth: 0, role: "system" },
+          owner: { chat: chat.id },
+          exportable: false,
+          ...extra
+        })
+      const book = yield* create(
+        "lorebook",
+        "Harbor",
+        loreBook(
+          [
+            loreEntry(
+              { keys: ["lighthouse"], comment: "The lighthouse", content: "The lighthouse burns whale oil." },
+              3
+            )
+          ],
+          { name: "Harbor" }
+        ).document
+      )
+      const weather = yield* note("Weather", "Rain all week.")
+      const leg = yield* note("Tobin's leg", "Tobin limps.", { condition: { when: "turn", card: tobin } })
+      const state = (data: StateEventData) =>
+        writer.AddStateEvent({ userId: me.id, chatId: chat.id, slotId: null, versionId: null, scope: null, data })
+      yield* state({ key: "note.activate", value: { note: weather.entityId } })
+      yield* state({ key: "note.activate", value: { note: leg.entityId } })
+      yield* state({ key: "lorebook.attach", value: { ref: book.ref.id } })
+
+      const done = (versionId: VersionId) =>
+        Effect.andThen(
+          eventually(() => finished(events, versionId) !== undefined),
+          () => api.GetRunContext({ versionId })
+        )
+      const leaf = () => Effect.map(api.GetChat({ chatId: chat.id }), (c) => c.activeLeafSlotId as SlotId)
+
+      // A swipe of the first reply opens its own request.
+      const path = yield* api.ReadPath({ chatId: chat.id, leafSlotId: null, range: { _tag: "Bottom" }, limit: 10 })
+      const reply = path.entries.find((e) => e.version.id === first.id)!
+      const swipe = yield* api.Regenerate({ slotId: reply.slotId, expectedRowVersion: reply.rowVersion })
+      const swiped = yield* done(swipe.version.id)
+      assert.strictEqual(swiped.type, "swipe")
+      assert.strictEqual(swiped.capture, "captured")
+      // A prompt its ST triggers leave out of a swipe is listed like one its condition left out.
+      assert.isTrue(
+        swiped.notSent!.some(
+          (s) => s.kind === "preset" && s.label === "Preset prompt “Fresh only” (sent only for normal generations)"
+        )
+      )
+
+      const sent = yield* posted(
+        api.SendMessage({
+          chatId: chat.id,
+          parentSlotId: yield* leaf(),
+          branch: false,
+          content: "The lighthouse is dark."
+        })
+      )
+      const next = yield* posted(api.Generate({ chatId: chat.id, parentSlotId: sent.entry.slotId, branch: false }))
+      const run = yield* done(next.entry.version.id)
+
+      // A preset prompt by its name, linked to the preset.
+      const main = sourceOf(run, (l) => l === "Preset prompt “Main Prompt”")!
+      assert.strictEqual(main.kind, "preset")
+      assert.isString(main.ref)
+      assert.lengthOf(
+        partTexts(run, (l) => l === "Preset prompt “Main Prompt”"),
+        1
+      )
+      // A card field, its text as sent, linked to the card.
+      const mira = sourceOf(run, (l) => l === "Card “Mira”: description")!
+      assert.isString(mira.ref)
+      assert.deepStrictEqual(
+        partTexts(run, (l) => l === "Card “Mira”: description"),
+        ["Mira keeps the ledger for Tobin."]
+      )
+      // A note.
+      assert.deepStrictEqual(
+        partTexts(run, (l) => l === "Note “Weather”"),
+        ["Rain all week."]
+      )
+      // A lorebook entry by its book, uid and title.
+      const lore = sourceOf(run, (l) => l.startsWith("Lorebook “Harbor”"))!
+      assert.strictEqual(lore.label, "Lorebook “Harbor”: entry 3 “The lighthouse”")
+      assert.strictEqual(lore.ref, book.ref.id)
+      assert.deepStrictEqual(
+        partTexts(run, (l) => l === lore.label),
+        ["The lighthouse burns whale oil."]
+      )
+      // A history message and the version of it that was sent: the swipe, the second.
+      const history = run.messages.flatMap((m) => m.sources).find((s) => s.slotId === reply.slotId)!
+      assert.strictEqual(history.kind, "message")
+      assert.strictEqual(history.version, 2)
+      assert.deepStrictEqual(
+        partTexts(run, (l) => l === history.label),
+        ["The lamp gutters."]
+      )
+      // The note whose condition didn't hold is listed as not sent, with why.
+      const skipped = run.notSent!.find((s) => s.label === "Note “Tobin's leg”")!
+      assert.deepStrictEqual(skipped.activation, {
+        kind: "note",
+        activation: "explicit",
+        interval: null,
+        userMessages: null,
+        condition: "on Tobin's turn",
+        due: false
+      })
+      assert.isFalse(run.messages.some((m) => m.content.includes("Tobin limps.")))
+      // Parts sit in the blocks they belong to: the card's wrapped field in the characters'
+      // definitions, its wrappers as framing; a format prompt holds the card it read by macro.
+      const blocks = (label: string) =>
+        run.messages.flatMap((m) =>
+          (m.groups ?? []).flatMap((g) => (m.sources[g.source]!.label === label ? [{ m, g }] : []))
+        )
+      const inside = (label: string) => {
+        const [found] = blocks(label)
+        assert.isDefined(found, label)
+        const { m, g } = found!
+        return {
+          parts: (m.parts ?? [])
+            .filter((p) => p.start >= g.start && p.end <= g.end)
+            .map((p) => [m.sources[p.source]!.label, m.content.slice(p.start, p.end), p.frame ?? false]),
+          groups: (m.groups ?? [])
+            .filter((o) => o !== g && o.start >= g.start && o.end <= g.end)
+            .map((o) => m.sources[o.source]!.label)
+        }
+      }
+      // The persona's wrapped description is its own turn before the character's.
+      const persona = blocks("Tobin's persona")
+      assert.lengthOf(persona, 1)
+      assert.strictEqual(persona[0]!.m.content, "<Tobin>\nTobin draws maps.\n</Tobin>")
+      assert.include(
+        blocks("The characters' definitions").flatMap(({ m, g }) =>
+          (m.groups ?? [])
+            .filter((o) => o !== g && o.start >= g.start && o.end <= g.end)
+            .map((o) => m.sources[o.source]!.label)
+        ),
+        "Mira's description"
+      )
+      assert.deepStrictEqual(
+        inside("Mira's description").parts.map(([label, , frame]) => [label, frame]),
+        [
+          ["Preset: card join prefix", true],
+          ["Card “Mira”: description", false],
+          ["Preset: card join suffix", true]
+        ]
+      )
+      const format = inside("Preset: personality format")
+      assert.deepStrictEqual(format.groups, ["The characters' definitions", "Mira's personality"])
+      assert.deepStrictEqual(
+        format.parts.filter(([, , frame]) => !frame),
+        [["Card “Mira”: personality", "Dry and careful.", false]]
+      )
+      // Parts never overlap, and each is the text at its offsets.
+      for (const m of run.messages) {
+        const parts = m.parts ?? []
+        for (let i = 1; i < parts.length; i++) assert.isAtLeast(parts[i]!.start, parts[i - 1]!.end)
+      }
+
+      // Generating again after the reply: the request gets a user turn to end on.
+      const again = yield* posted(api.Generate({ chatId: chat.id, parentSlotId: yield* leaf(), branch: false }))
+      const closing = yield* done(again.entry.version.id)
+      const last = closing.messages.findLast((m) => m.role === "user")!
+      assert.isTrue(last.sources.some((s) => s.kind === "assembler" && s.label.startsWith("User turn")))
+
+      // Writing as the user's card: the prompt conditioned on a character's turn isn't sent.
+      const own = yield* posted(
+        api.Generate({ chatId: chat.id, parentSlotId: yield* leaf(), branch: false, speakerEntityId: tobin })
+      )
+      const impersonated = yield* done(own.entry.version.id)
+      assert.strictEqual(impersonated.type, "impersonate")
+      assert.isTrue(
+        impersonated.notSent!.some(
+          (s) => s.kind === "preset" && s.label === "Preset prompt “Group nudge” (sent when writing as a character)"
+        )
+      )
+      // ...and the note conditioned on Tobin's turn is sent.
+      assert.deepStrictEqual(
+        partTexts(impersonated, (l) => l === "Note “Tobin's leg”"),
+        ["Tobin limps."]
+      )
+
+      // A capture from before parts were recorded still opens, verbatim, with its sources.
+      yield* fixtureSql(config.dataDir, [
+        {
+          sql: `UPDATE rollout_payloads SET sent_context_json = (
+              SELECT json_set(json_remove(sent_context_json, '$.display.notSent'), '$.messages',
+                (SELECT json_group_array(json_remove(m.value, '$.parts')) FROM json_each(sent_context_json, '$.messages') m))
+            ) WHERE rollout_id = (SELECT rollout_id FROM versions WHERE id = ?)`,
+          params: [next.entry.version.id]
+        }
+      ])
+      const old = yield* api.GetRunContext({ versionId: next.entry.version.id })
+      assert.strictEqual(old.capture, "captured")
+      assert.deepStrictEqual(
+        old.messages.map((m) => [m.content, m.sources.map((s) => s.label)]),
+        run.messages.map((m) => [m.content, m.sources.map((s) => s.label)])
+      )
+      assert.isTrue(old.messages.every((m) => m.parts === undefined))
+      assert.isUndefined(old.notSent)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  },
+  { timeout: 180_000 }
+)

@@ -722,6 +722,19 @@ export const Message = memo(function Message({
         />
       )}
       <ContinueAction entry={entry} session={session} report={report} />
+      {version.context !== null && (
+        // Every generated version, a swipe included, opens the request that produced it.
+        <Tooltip label="Request it was generated from">
+          <Link
+            to="/chats/$chatId/context/$versionId"
+            params={{ chatId: session.id, versionId: version.id }}
+            aria-label="Request it was generated from"
+            className={iconButtonClass()}
+          >
+            <Icon name="layers" />
+          </Link>
+        </Tooltip>
+      )}
       <IconButton
         label={deleteLabel}
         icon="trash"

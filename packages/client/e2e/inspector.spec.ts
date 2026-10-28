@@ -126,13 +126,73 @@ test("a reply's context opens from the reply, with its sources and the cache bre
   await expect(page.getByText("fake-small on Local model server (openai-chat)")).toBeVisible()
   // What the provider reported: 100 tokens read from its cache, 6 written.
   await expect(page.getByRole("row", { name: /complete/ })).toContainText("100")
-  // A message opens to its full text, shown as text.
-  await messages.getByText("Card “Mira”: description").click()
-  await expect(messages.getByText("Mira keeps the harbor ledger.").last()).toBeVisible()
+  // A short context opens with every turn's text showing, each part in a box naming its source.
+  const card = messages.getByRole("region", { name: "Card “Mira”: description" })
+  await expect(card.getByText("Mira keeps the harbor ledger.", { exact: true })).toBeVisible()
+  await expect(card.getByRole("link", { name: "Card “Mira”: description" })).toHaveAttribute("href", /\/library\//)
   await shoot(page, "inspector")
   // The message sources link back to the chat.
   await messages.getByRole("link", { name: "Message 2" }).click()
   await expect(page).toHaveURL(new RegExp(`/chats/${chat.id}\\?slot=`))
+})
+
+test("an earlier reply and a swipe each open their own request from the message's button", async ({ page }) => {
+  const made = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+    Effect.gen(function* () {
+      const mira = (yield* api.ListCards()).find((card) => card.label === "Mira")!
+      const started = yield* api.StartChat({
+        cards: [mira.entityId as EntityId],
+        persona: null,
+        greeting: 0,
+        first: { _tag: "Send", content: "The bell rang twice.", speakerEntityId: null }
+      })
+      const chatId = started.chat.id
+      /** Waits for the latest reply to finish, so the next message isn't queued behind it. */
+      const settled = Effect.gen(function* () {
+        for (;;) {
+          const path = yield* api.ReadPath({ chatId, leafSlotId: null, range: { _tag: "Bottom" }, limit: 10 })
+          if (path.entries.at(-1)!.version.status !== "generating") return
+          yield* Effect.sleep(50)
+        }
+      })
+      const first = yield* api.Generate({ chatId, parentSlotId: started.entry.slotId, branch: false })
+      if (first._tag !== "Posted") return yield* Effect.die(new Error("the reply was queued"))
+      yield* settled
+      const sent = yield* api.SendMessage({
+        chatId,
+        parentSlotId: first.entry.slotId,
+        branch: false,
+        content: "Nobody answered."
+      })
+      if (sent._tag !== "Posted") return yield* Effect.die(new Error("the message was queued"))
+      const second = yield* api.Generate({ chatId, parentSlotId: sent.entry.slotId, branch: false })
+      if (second._tag !== "Posted") return yield* Effect.die(new Error("the reply was queued"))
+      yield* settled
+      const path = yield* api.ReadPath({ chatId, leafSlotId: null, range: { _tag: "Bottom" }, limit: 10 })
+      const last = path.entries.at(-1)!
+      const swipe = yield* api.Regenerate({ slotId: last.slotId, expectedRowVersion: last.rowVersion })
+      return { id: chatId, first: first.entry.version.id, swipe: swipe.version.id }
+    })
+  )
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${server().url}/chats/${made.id}`)
+  const replies = page.getByRole("article", { name: "Reply" }).filter({ hasText: REPLY })
+  await expect(replies).toHaveCount(2)
+  // The swipe, the second version of the last reply.
+  await showActions(replies.last())
+  await replies.last().getByRole("link", { name: "Request it was generated from" }).click()
+  await expect(page).toHaveURL(new RegExp(`/chats/${made.id}/context/${made.swipe}$`))
+  await expect(page.getByText(/^swipe, /)).toBeVisible()
+  const messages = page.getByRole("region", { name: "Messages" })
+  // The earlier reply is in its history, by message and version.
+  await expect(messages.getByRole("link", { name: "Message 3, version 1" })).toBeVisible()
+  await page.getByRole("link", { name: "← Back to the reply" }).click()
+  // The earlier reply opens its own request.
+  await showActions(replies.first())
+  await replies.first().getByRole("link", { name: "Request it was generated from" }).click()
+  await expect(page).toHaveURL(new RegExp(`/chats/${made.id}/context/${made.first}$`))
+  await expect(page.getByText(/^normal, /)).toBeVisible()
+  await expect(messages.getByText("The bell rang twice.", { exact: true })).toBeVisible()
 })
 
 test("the cache indicator is warm after a reply, and cold once an earlier message is edited", async ({ page }) => {
@@ -187,6 +247,8 @@ test("a long context opens collapsed: 200 messages, about 100,000 tokens", async
         first: { _tag: "Send", content: "The tide log begins.", speakerEntityId: null }
       })
       const chatId = started.chat.id
+      // New chats summarize; this one measures 200 raw messages.
+      yield* api.SetLcmEnabled({ chatId, enabled: false })
       yield* api.ChangeCast({ chatId, slotId: null, change: { _tag: "Preset", ref: preset } })
       yield* api.ChangeCast({
         chatId,
