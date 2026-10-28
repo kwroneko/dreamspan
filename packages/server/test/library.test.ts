@@ -2,13 +2,14 @@
 // DATA-MODEL §3.2): edits, variants, chat overrides, re-imports and merges.
 import { assert, describe, it } from "@effect/vitest"
 import { DraftKey } from "@rp/shared/drafts.ts"
+import { newSharedNote } from "@rp/shared/editing.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import type { Doc, EntityKind, RefId } from "@rp/shared/library.ts"
 import { Effect } from "effect"
 import * as Database from "../src/db/Database.ts"
 import { docHash, searchText } from "../src/db/documents.ts"
 import { promptPreset } from "@rp/shared/docs/preset.ts"
-import { cardDoc, presetDoc } from "./support/docs.ts"
+import { cardDoc, docFor, presetDoc } from "./support/docs.ts"
 import { tempDir } from "./support/tempDir.ts"
 
 const database = () =>
@@ -276,6 +277,80 @@ describe("library", () => {
       assert.strictEqual((yield* reader.ListLibrary({ userId, kind: "preset", tag: null, archived: false })).length, 3)
     }).pipe(Effect.provide(database()))
   )
+
+  for (const kind of ["lorebook", "note"] as const)
+    it.live(`${kind} re-imports still merge through variants and chat overrides after removing card following`, () =>
+      Effect.gen(function* () {
+        const writer = yield* Database.Writer
+        const reader = yield* Database.Reader
+        const userId = (yield* writer.EnsureUser({ handle: "owner", displayName: "Owner" })).id
+        const textField = kind === "note" ? "content" : "description"
+        const nameField = kind === "note" ? "title" : "name"
+        const original = {
+          ...(kind === "note" ? newSharedNote("Synthetic", "") : docFor(kind, "Synthetic")),
+          [textField]: "Original text."
+        }
+        const { ref: upstream } = yield* writer.CreateEntity({
+          userId,
+          kind,
+          label: "Synthetic",
+          subtitle: "",
+          doc: original,
+          schemaVersion: 1,
+          origin: "import",
+          sourcePath: "synthetic.json"
+        })
+        const variant = yield* writer.ForkRef({ userId, refId: upstream.id, label: "Variant", subtitle: "" })
+        const chat = yield* writer.CreateChat({
+          userId,
+          kind: "rp",
+          status: "active",
+          title: "Synthetic",
+          participants: [],
+          greeting: null
+        })
+        const override = yield* writer.CreateChatOverride({ userId, refId: variant.id, chatId: chat.id })
+        yield* writer.EditRef({
+          userId,
+          refId: override.id,
+          expectedRowVersion: override.rowVersion,
+          doc: { ...original, [nameField]: "Local name" },
+          message: null,
+          commitDraft: null
+        })
+        const result = yield* importInto(writer, userId, upstream.id, kind, {
+          ...original,
+          [textField]: "Changed file text."
+        })
+        assert.deepStrictEqual(
+          result.change.followers.map((f) => [f.refId, f.outcome]),
+          [
+            [variant.id, "fast_forward"],
+            [override.id, "merged"]
+          ]
+        )
+        const merged = yield* reader.GetRef({ userId, refId: override.id })
+        assert.strictEqual(merged.doc[textField], "Changed file text.")
+        assert.strictEqual(merged.doc[nameField], "Local name")
+        assert.strictEqual(merged.ref.followsRefId, variant.id)
+        assert.isFalse(merged.ref.updateAvailable)
+        assert.deepStrictEqual(
+          (yield* reader.ListChatOverrides({ userId, chatId: chat.id })).map((ref) => ref.id),
+          [override.id]
+        )
+        const promoted = yield* writer.PromoteOverride({
+          userId,
+          refId: override.id,
+          label: "Promoted",
+          subtitle: "",
+          expectedRowVersion: merged.ref.rowVersion
+        })
+        assert.strictEqual(promoted.refKind, "variant")
+        assert.isNull(promoted.chatId)
+        assert.strictEqual(promoted.followsRefId, variant.id)
+        assert.strictEqual((yield* reader.ListLibrary({ userId, kind, tag: null, archived: false })).length, 3)
+      }).pipe(Effect.provide(database()))
+    )
 
   it.live("refuses operations that don't apply, stale edits, and other users' refs", () =>
     Effect.gen(function* () {

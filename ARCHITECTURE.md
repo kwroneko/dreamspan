@@ -300,7 +300,7 @@ Contracts are in `db/ops.ts`, writes in `db/writes.ts` (writer worker), reads in
 
 ### 3.9 Library operations
 
-Layered, versioned documents (DESIGN §4, DATA-MODEL §3) for cards, presets, lorebooks, notes and preset overlays, one mechanism for all of them. Contracts are in `db/ops.ts`, writes in `db/libraryWrites.ts`, reads in `db/reads.ts`, and the logic both share in `db/library.ts`. Domain types are in `@rp/shared/library.ts`; the merge is in `@rp/shared/merge.ts`.
+Versioned documents (DESIGN §4, DATA-MODEL §3) for cards, presets, lorebooks, notes and preset overlays. Cards fork into independent entities; the other kinds retain layered variants and chat overrides. Contracts are in `db/ops.ts`, writes in `db/libraryWrites.ts`, reads in `db/reads.ts`, and the logic both share in `db/library.ts`. Domain types are in `@rp/shared/library.ts`; the merge is in `@rp/shared/merge.ts`.
 
 **The model.**
 - **Revisions** are immutable snapshots with parents, like git commits.

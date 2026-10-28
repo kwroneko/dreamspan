@@ -80,7 +80,7 @@ export function ForkDialog({ store, onClose }: { store: EditorStore; onClose: ()
         {dirty && (
           <Checkbox checked={moveDrafts} onCheckedChange={setMoveDrafts}>
             Take my unsaved changes to the {ref.kind === "card" ? "fork" : "variant"}
-            {ref.kind === "card" ? " (name and version drafts stay here)" : ""}
+            {ref.kind === "card" ? " (display name, in-character name and version drafts stay here)" : ""}
           </Checkbox>
         )}
         {clash && (

@@ -437,8 +437,9 @@ describe("edits are non-destructive (invariant 1)", () => {
         run(
           `INSERT INTO entity_refs
         (id, entity_id, ref_kind, head_revision_id, follows_ref_id, chat_id, label, created_at, updated_at)
-        VALUES ('extra', 'card', ?, 'rev', 'base', ?, 'Card', 1, 1)`,
+        VALUES ('extra', 'card', ?, 'rev', ?, ?, 'Card', 1, 1)`,
           kind,
+          kind === "upstream" ? null : "base",
           kind === "chat_override" ? c.chatId : null
         )
       ).toThrow(/one independent upstream ref/)
