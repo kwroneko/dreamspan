@@ -41,8 +41,7 @@ const DOCUMENTED: ReadonlyArray<{
     // Unit P1-1's owner question 3; ARCHITECTURE §15 "Conditions".
     why: "the group nudge is a prompt after the history, sent whenever the model writes as a character, one or many (ST: in group chats only)",
     matches: (line) =>
-      line.startsWith("messages") &&
-      /\[Write the next reply only as |speaks next\.\]|\[As [^\]]+ only\.\]|Write only [^"]+'s next reply/.test(line)
+      line.startsWith("messages") && /\[Write the next reply only as |speaks next\.\]|\[As [^\]]+ only\.\]/.test(line)
   },
   { why: "no multi-swipe requests (ST sends the preset's n above 1)", matches: (line) => line.startsWith("n:") },
   {
@@ -58,6 +57,18 @@ const DOCUMENTED: ReadonlyArray<{
       config.authorNote !== undefined && config.authorNote.interval === 0 && line.startsWith("messages")
   },
   {
+    // Unit P1-1 (fb-rp), owner: "on an impersonation turn the speaking card's prompt override
+    // applies (impersonating the persona: none)". ST applies the chat character's.
+    why: "on an impersonation the override is the speaking card's (the persona: none); ST applies the chat's character's",
+    matches: (line, config) =>
+      config.generate === "impersonate" && /^messages\[\d+\]\.content: ".*replies short and dry\.".* ≠ /.test(line)
+  },
+  {
+    why: "on an impersonation the post-history instruction is the speaking card's (the persona: none), so the preset's own stands where ST puts the chat character's in its place",
+    matches: (line, config) =>
+      config.generate === "impersonate" && /^messages\[\d+\]\.content: "Write only [^"]+'s next reply\./.test(line)
+  },
+  {
     why: "the preset's send_if_empty is expanded when it fills the user's turn (ST sends it as written before an impersonation)",
     matches: (line, config, settings) =>
       config.generate === "impersonate" &&
@@ -65,6 +76,108 @@ const DOCUMENTED: ReadonlyArray<{
       line.includes(`: ${JSON.stringify(settings.send_if_empty)} ≠ `)
   }
 ]
+
+/** The messages of a request body, when it has them. */
+type Messages = ReadonlyArray<{ role: string; content: string; name?: string }>
+const messagesOf = (body: unknown): Messages | undefined => (body as { messages?: Messages } | null)?.messages
+
+/** The group nudge's wording in the fixture presets, whole or inside a longer message. */
+const NUDGE_TEXT = /\[(?:Write the next reply only as [^\]]+|As [^\]]+ only|[^\]]*speaks next)\.\]/
+// The poison preset appends its marker to every prompt it holds, the nudge included.
+const NUDGE_SEGMENT = new RegExp(`\\n?(?:${NUDGE_TEXT.source})(?: \\[poison\\])?`, "g")
+const CLOSING_TURN = /^\[Write .+'s next message\.\]$/
+
+type Message = Messages[number]
+
+/**
+ * Differences that add a message, or text inside one. Taking them out of our request before
+ * the diff keeps every later message at the index ST has it, so an extra message isn't
+ * reported as a shift of all that follow. Each is recorded with its explanation, as the line
+ * matchers' are. Something of ours is taken out only when ST has no message left that equals
+ * ours as it stands (or, for text inside a message, as it would be without that text).
+ */
+const STRUCTURAL: ReadonlyArray<{
+  readonly why: string
+  /** Our message without the difference, or null when the message goes entirely. `undefined`: not this difference. */
+  readonly without: (message: Message) => Message | null | undefined
+}> = [
+  {
+    // Unit P1-1's owner question 3; ARCHITECTURE §15 "Conditions".
+    why: "the group nudge is in every chat's request, whenever the model writes as a character: a message of its own, or a line of the post-history message it joins (ST: in group chats only)",
+    without: (message) => {
+      const content = message.content.replace(NUDGE_SEGMENT, "")
+      return content === message.content ? undefined : content.trim() === "" ? null : { ...message, content }
+    }
+  },
+  {
+    // Unit P1-1 (fb-rp); ARCHITECTURE §15 "Conditions".
+    why: "a chat ending on the model's side gets a closing user turn right after the last chat message, impersonation included (ST adds none)",
+    without: (message) => (message.role === "user" && CLOSING_TURN.test(message.content) ? null : undefined)
+  }
+]
+
+const messageKey = (message: Message) => JSON.stringify([message.role, message.content, message.name])
+
+/** Our body without the differences that add to a message list, and what was taken out. */
+const dropExtras = (
+  st: unknown,
+  ours: unknown
+): { readonly body: unknown; readonly dropped: ReadonlyArray<string> } => {
+  const stMessages = messagesOf(st)
+  const ourMessages = messagesOf(ours)
+  if (!stMessages || !ourMessages) return { body: ours, dropped: [] }
+  const available = new Map<string, number>()
+  const take = (message: Message) => {
+    const left = available.get(messageKey(message)) ?? 0
+    if (left > 0) available.set(messageKey(message), left - 1)
+    return left > 0
+  }
+  for (const message of stMessages) available.set(messageKey(message), (available.get(messageKey(message)) ?? 0) + 1)
+  const dropped: Array<string> = []
+  // A message equal to one of ST's is never touched; the rest are checked against the list.
+  const equal = ourMessages.map(take)
+  const kept = ourMessages.flatMap((message, i) => {
+    if (equal[i]) return [message]
+    for (const difference of STRUCTURAL) {
+      const without = difference.without(message)
+      if (without === undefined) continue
+      if (without !== null && !take(without)) continue
+      dropped.push(
+        `messages: our ${message.role} message ${JSON.stringify(message.content)} ${without === null ? "has no counterpart in ST" : "carries text ST doesn't"} [${difference.why}]`
+      )
+      return without === null ? [] : [without]
+    }
+    return [message]
+  })
+  return { body: { ...(ours as object), messages: kept }, dropped }
+}
+
+const CARD_POST_HISTORY = /^Write only .+'s next reply\.$/
+
+/**
+ * ST's request without the chat character's post-history instruction on an impersonation: the
+ * speaking card's applies there (owner, fb-rp; the persona: none), so we send none. Taken out
+ * only when we have no message equal to it.
+ */
+const dropMissing = (
+  st: unknown,
+  ours: unknown,
+  config: Config
+): { readonly body: unknown; readonly dropped: ReadonlyArray<string> } => {
+  const stMessages = messagesOf(st)
+  const ourMessages = messagesOf(ours)
+  if (config.generate !== "impersonate" || !stMessages || !ourMessages) return { body: st, dropped: [] }
+  const ourContents = new Set(ourMessages.map((m) => m.content))
+  const dropped: Array<string> = []
+  const kept = stMessages.filter((m) => {
+    if (!CARD_POST_HISTORY.test(m.content) || ourContents.has(m.content)) return true
+    dropped.push(
+      `messages: ST's ${m.role} message ${JSON.stringify(m.content)} has no counterpart here [on an impersonation the post-history instruction is the speaking card's (the persona: none); ST sends the chat character's]`
+    )
+    return false
+  })
+  return { body: { ...(st as object), messages: kept }, dropped }
+}
 
 interface Config {
   readonly overMaximum?: boolean
@@ -610,7 +723,10 @@ export const compareAssembly = async (
           )
       }
       let unexpected = 0
-      for (const line of diffJson(body, ours.body)) {
+      const missing = dropMissing(body, ours.body, config)
+      const aligned = dropExtras(missing.body, ours.body)
+      for (const line of [...missing.dropped, ...aligned.dropped]) documented.push(`${label}: ${line}`)
+      for (const line of diffJson(missing.body, aligned.body)) {
         const known = DOCUMENTED.find((difference) => difference.matches(line, config, settings))
         if (known) documented.push(`${label}: ${line} [${known.why}]`)
         else differences.push(`${label}: ${line}`)
@@ -631,7 +747,11 @@ export const compareAssembly = async (
     },
     {
       title: "Context assembler: documented differences",
-      notes: DOCUMENTED.map((difference) => difference.why),
+      notes: [
+        ...STRUCTURAL.map((difference) => difference.why),
+        "on an impersonation the post-history instruction is the speaking card's (the persona: none); ST sends the chat character's",
+        ...DOCUMENTED.map((difference) => difference.why)
+      ],
       differences: documented,
       expected: "ARCHITECTURE §15 documents each"
     }
