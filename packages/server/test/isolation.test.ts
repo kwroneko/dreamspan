@@ -157,6 +157,77 @@ const ownModel = (party: Party) =>
   )
 
 const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry } = {
+  RenameHistory: {
+    probe: (actor, owner) =>
+      refused(
+        actor.api.RenameHistory({
+          entityId: owner.cardId,
+          oldName: "Aria",
+          newName: "Ari",
+          scope: "all",
+          chatId: owner.chat.chatId,
+          forkId: owner.chat.forkId
+        }),
+        "NotFound"
+      )
+  },
+  HistoryEditCost: {
+    probe: (actor, owner) =>
+      refused(
+        actor.api.HistoryEditCost({
+          chatId: owner.chat.chatId,
+          forkId: owner.chat.forkId,
+          fromDepth: 0,
+          retainedDepth: 0,
+          summaryIds: []
+        }),
+        "NotFound"
+      )
+  },
+  PreviewHistory: {
+    probe: (actor, owner) =>
+      refused(
+        actor.api.PreviewHistory({
+          chatId: owner.chat.chatId,
+          forkId: owner.chat.forkId,
+          search: {
+            pairs: [{ find: "hello", replace: "bye" }],
+            matchCase: false,
+            wholeWord: false,
+            regex: false,
+            preserveCase: false,
+            messages: true,
+            swipes: true,
+            summaries: true
+          }
+        }),
+        "NotFound"
+      )
+  },
+  ListHistoryEdits: {
+    probe: (actor, owner) =>
+      refused(actor.api.ListHistoryEdits({ chatId: owner.chat.chatId, forkId: owner.chat.forkId }), "NotFound")
+  },
+  RenameHistoryTargets: {
+    probe: (actor, owner) => refused(actor.api.RenameHistoryTargets({ entityId: owner.cardId }), "NotFound")
+  },
+  ApplyHistoryEdits: {
+    probe: (actor, owner) =>
+      refused(
+        actor.api.ApplyHistoryEdits({
+          title: "Forbidden",
+          applications: [{ chatId: owner.chat.chatId, forkId: owner.chat.forkId, edits: [] }]
+        }),
+        "NotFound"
+      )
+  },
+  UndoHistoryEdit: {
+    probe: (actor, owner) =>
+      refused(
+        actor.api.UndoHistoryEdit({ chatId: owner.chat.chatId, forkId: owner.chat.forkId, changesetId: "missing" }),
+        "NotFound"
+      )
+  },
   GetShellLibrary: {
     probe: (actor, owner) =>
       Effect.gen(function* () {

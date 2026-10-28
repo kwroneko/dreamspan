@@ -659,6 +659,8 @@ Stepped history, dropped-message display and rewrite warnings without a TTL are 
 - **[D]** **Every request carries at most the last N images**, N configurable, because many models have a hard limit (Xiaomi MiMo: 4). This applies everywhere images go to a model: replies, summaries and anything else (owner, 2026-10-13). **[P]** N is set per model, with a default from the model catalog where it states one.
 
 ### 10.3 Chat-wide edits
+
+Implementation: fork independence unit 8 (ARCHITECTURE §3.13) builds message/swipe/summary search and replace, history diffs and undo, state changesets, and the rename-history RPCs. The proposed notes/card-override and cross-thread scope extensions remain unimplemented. The decided search panel is implemented; no UI decision in this section blocks it.
 - **[D]** Large edits across a whole conversation, summaries included, such as search and replace to rename a character, and agentic editing to instructions.
 - **[P]** A **changeset** is one atomic batch of new versions across slots and summaries, with a title and one entry in the chat's history.
 - **[D]** It's applied directly, with no review gate since everything is reversible. Afterwards you can inspect the diff and revert all of it or individual messages. (The earlier "draft, then review" proposal was rejected.)
