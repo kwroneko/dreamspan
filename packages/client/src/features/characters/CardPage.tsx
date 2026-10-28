@@ -163,7 +163,7 @@ function CharacterChats({ card, forks }: { card: CardUsage; forks: ReadonlyArray
       />
       <ul aria-label="Chats" className="flex flex-col gap-2">
         {rows.slice(0, limit).map((fork) => (
-          <li key={`${fork.chat.id}/${fork.leaf}`}>
+          <li key={`${fork.chat.id}/${fork.forkId}`}>
             <ForkRow fork={fork} details />
           </li>
         ))}

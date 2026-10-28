@@ -1,5 +1,7 @@
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
+import { forkAt } from "./forkState.ts"
+import { onPath } from "./forks.ts"
 import { NotFound, type WriteOps } from "./ops.ts"
 import { transaction } from "./tx.ts"
 
@@ -11,29 +13,13 @@ export const makeShellWriteHandlers = Effect.gen(function* () {
         const [chat] =
           yield* sql`SELECT id FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`
         if (!chat) return yield* new NotFound({ entity: "chat", id: chatId })
-        // Unpin the row's identity even when deletion moved its navigable leaf to an ancestor.
-        if (!pinned && forkId !== undefined) {
-          yield* sql`DELETE FROM chat_pins WHERE user_id = ${userId} AND chat_id = ${chatId} AND fork_id = ${forkId}`
-          return
-        }
-        // The stable fork id is its first divergent slot, not its moving tip.
-        let fork = ""
-        if (leaf !== null) {
-          const [slot] =
-            yield* sql`SELECT id FROM slots WHERE id = ${leaf} AND chat_id = ${chatId} AND deleted_at IS NULL`
-          if (!slot) return yield* new NotFound({ entity: "slot", id: leaf })
-          const path = yield* sql<{ id: string }>`WITH RECURSIVE path AS (
-          SELECT * FROM slots WHERE id = ${leaf}
-          UNION ALL SELECT s.* FROM slots s JOIN path p ON s.id = p.parent_slot_id
-        ) SELECT p.id FROM path p WHERE EXISTS (
-          SELECT 1 FROM slots s WHERE s.chat_id = ${chatId} AND s.parent_slot_id IS p.parent_slot_id
-          AND s.id < p.id
-        ) ORDER BY p.depth DESC LIMIT 1`
-          fork = path[0]?.id ?? ""
-        }
-        if (pinned)
-          yield* sql`INSERT OR IGNORE INTO chat_pins(user_id, chat_id, fork_id) VALUES (${userId}, ${chatId}, ${fork})`
-        else yield* sql`DELETE FROM chat_pins WHERE user_id = ${userId} AND chat_id = ${chatId} AND fork_id = ${fork}`
+        const fork = forkId ?? (yield* forkAt(sql, chatId, leaf))
+        const [record] = yield* sql<{ tip_slot_id: string | null }>`SELECT tip_slot_id FROM forks
+          WHERE id = ${fork} AND chat_id = ${chatId} AND deleted_at IS NULL`
+        if (!record || (leaf !== null && !(yield* onPath(sql, chatId, record.tip_slot_id, leaf))))
+          return yield* new NotFound({ entity: "fork", id: fork ?? "" })
+        yield* sql`UPDATE forks SET pinned_at = ${pinned ? Date.now() : null}, row_version = row_version + 1
+          WHERE id = ${fork} AND (pinned_at IS NOT NULL) <> ${pinned ? 1 : 0}`
       }).pipe(transaction(sql, "SetChatPin")),
     SetHomePinsCollapsed: ({ userId, collapsed }) =>
       sql`INSERT INTO shell_preferences(user_id, pins_collapsed) VALUES (${userId}, ${collapsed ? 1 : 0}) ON CONFLICT(user_id) DO UPDATE SET pins_collapsed = excluded.pins_collapsed`.pipe(

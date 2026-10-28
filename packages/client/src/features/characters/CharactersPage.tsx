@@ -72,7 +72,7 @@ function Home({ data }: { data: ShellLibrary }) {
       ) : filter === "groups" ? (
         <div aria-label="Groups" className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5">
           {groups.map((f) => (
-            <GroupTile key={`${f.chat.id}/${f.leaf}`} fork={f} />
+            <GroupTile key={`${f.chat.id}/${f.forkId}`} fork={f} />
           ))}
           {!groups.length && <p className="text-muted">No chats with several characters yet.</p>}
         </div>
