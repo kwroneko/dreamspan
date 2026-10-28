@@ -1,4 +1,4 @@
-import { contextExcluded } from "./lcmVisibility.ts"
+import { contextExcludedIn } from "./lcmVisibility.ts"
 // The ST summary an imported chat carries (ARCHITECTURE §13) as LCM can adopt it (spec/LCM.md
 // §2.7): the note's text on the path shown, and the run of messages hidden from the first
 // message that it covers. Shared by the offer (a read) and the adoption (the write).
@@ -63,7 +63,7 @@ export const importedSummary = (sql: SqlClient.SqlClient, userId: UserId, chatId
           coalesce(sum(c.id = ${first} AND c.parent IS NULL), 0) AS root,
           coalesce(sum(EXISTS (SELECT 1 FROM slot_parents m WHERE m.slot_id = c.id)), 0) AS merged,
           coalesce(sum(coalesce(v.status = 'generating', 0)), 0) AS generating,
-          coalesce(sum(${sql.literal(contextExcluded())}), 0) AS hidden
+          coalesce(sum(${contextExcludedIn(sql, fork)}), 0) AS hidden
           FROM chain c JOIN slots s ON s.id = c.id LEFT JOIN versions v ON v.id = ${shownIn(sql, fork, "s")}`
       if (!run || run.n < 1 || run.root !== 1 || run.merged > 0 || run.generating > 0) continue
       return {

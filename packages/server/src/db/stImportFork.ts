@@ -2,7 +2,7 @@ import { uuidv7 } from "@rp/shared/id.ts"
 import { Effect } from "effect"
 import { currentForkSql, replacedIn, selectedInSql } from "./forkState.ts"
 import type { SqlClient } from "effect/sql"
-import { contextExcluded } from "./lcmVisibility.ts"
+import { contextExcludedIn } from "./lcmVisibility.ts"
 
 type Row = Record<string, string | number | null>
 
@@ -12,7 +12,8 @@ type Row = Record<string, string | number | null>
 export const forkImportSlot = (sql: SqlClient.SqlClient, source: string, parent: string | null) =>
   Effect.gen(function* () {
     // The copy is inserted with the selection the chat's current fork shows (forkState.ts).
-    const [slot] = yield* sql<Row>`SELECT s.*, ${sql.literal(contextExcluded())} AS shown_excluded,
+    const [slot] =
+      yield* sql<Row>`SELECT s.*, ${contextExcludedIn(sql, sql.literal(currentForkSql("s.chat_id")))} AS shown_excluded,
         ${sql.literal(selectedInSql(currentForkSql("s.chat_id"), "s"))} AS shown_version_id
       FROM slots s WHERE s.id = ${source}`
     // The message's own versions, each with the text the current fork shows in its place: a

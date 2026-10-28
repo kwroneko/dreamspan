@@ -1,6 +1,6 @@
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
-import { ChatId, EntityId, SlotId, VersionId } from "./chat.ts"
+import { ChatId, EntityId, ForkId, SlotId, VersionId } from "./chat.ts"
 import { TextTooLong } from "./composerApi.ts"
 import { Draft, DraftRestore, DraftState } from "./drafts.ts"
 import { NotFound, ServerError, StaleWrite } from "./errors.ts"
@@ -382,7 +382,7 @@ export class LcmApi extends RpcGroup.make(
   }),
   /** What enabling LCM on this chat would do and cost, for the dialog. Reads only. */
   Rpc.make("GetLcmEnableOffer", {
-    payload: { chatId: ChatId, leafSlotId: SlotId },
+    payload: { chatId: ChatId, forkId: Schema.optionalKey(Schema.NullOr(ForkId)), leafSlotId: SlotId },
     success: LcmEnableOffer,
     error: Schema.Union([NotFound, ServerError])
   }),
@@ -395,6 +395,7 @@ export class LcmApi extends RpcGroup.make(
   Rpc.make("EnableLcm", {
     payload: {
       chatId: ChatId,
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       leafSlotId: SlotId,
       choice: EnableChoice,
       approved: Schema.optionalKey(BackfillEstimate)

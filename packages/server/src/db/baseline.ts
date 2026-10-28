@@ -833,16 +833,16 @@ export const baseline: ReadonlyArray<string> = [
     chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
     depth INTEGER NOT NULL,
     revision INTEGER NOT NULL,
-    -- The chat's state_seq of the newest reduction, for the forks made from the fork.
+    -- The chat's state_seq of this reduction, retained for descendant lineage bounds.
     seq INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (slot_id, fork_id)
+    PRIMARY KEY (slot_id, fork_id, seq)
   ) STRICT`,
   `CREATE INDEX history_changes_depth ON history_changes(chat_id, depth)`,
   `CREATE TRIGGER history_reduced_slot AFTER UPDATE OF deleted_at ON slots
-    WHEN OLD.deleted_at IS NULL AND NEW.deleted_at IS NOT NULL
+    WHEN OLD.deleted_at IS NULL AND NEW.deleted_at IS NOT NULL AND NOT ${namesFork("NEW.bin_item_id")}
     BEGIN
       INSERT INTO history_changes(slot_id, fork_id, chat_id, depth, revision) VALUES (NEW.id, '', NEW.chat_id, NEW.depth, 1)
-      ON CONFLICT(slot_id, fork_id) DO UPDATE SET revision = revision + 1;
+      ON CONFLICT(slot_id, fork_id, seq) DO UPDATE SET revision = revision + 1;
     END`,
   `CREATE TABLE summaries (
     id TEXT PRIMARY KEY,
@@ -1291,7 +1291,7 @@ export const baseline: ReadonlyArray<string> = [
     fork_id TEXT NOT NULL REFERENCES forks(id) ON DELETE CASCADE,
     -- The chat's state_seq when written; a row updated in place takes the newer one.
     seq INTEGER NOT NULL CHECK (seq > 0),
-    kind TEXT NOT NULL CHECK (kind IN ('select', 'replace', 'delete_slot', 'delete_version', 'hide', 'star',
+    kind TEXT NOT NULL CHECK (kind IN ('select', 'replace', 'delete_slot', 'delete_version', 'hide', 'hide_range', 'star',
       'picker_hide', 'summary_revision', 'summary_choice', 'suppress_event')),
     target_id TEXT NOT NULL,
     -- The slot the row is about, and its depth, for reading a window of a path.
@@ -1341,13 +1341,13 @@ export const baseline: ReadonlyArray<string> = [
     WHEN NEW.selected_version_id IS NOT OLD.selected_version_id
     BEGIN SELECT RAISE(ABORT, 'a slot keeps the selection it was inserted with; a fork selects with an override'); END`,
   `CREATE TRIGGER history_reduced_version AFTER UPDATE OF deleted_at ON versions
-    WHEN OLD.deleted_at IS NULL AND NEW.deleted_at IS NOT NULL
+    WHEN OLD.deleted_at IS NULL AND NEW.deleted_at IS NOT NULL AND NOT ${namesFork("NEW.bin_item_id")}
     BEGIN
       INSERT INTO history_changes(slot_id, fork_id, chat_id, depth, revision)
         SELECT id, '', chat_id, depth, 1 FROM slots WHERE id = NEW.slot_id AND (selected_version_id = NEW.id
           OR EXISTS (SELECT 1 FROM fork_overrides o WHERE o.target_id = NEW.slot_id AND o.kind = 'select'
             AND o.value_id = NEW.id))
-      ON CONFLICT(slot_id, fork_id) DO UPDATE SET revision = revision + 1;
+      ON CONFLICT(slot_id, fork_id, seq) DO UPDATE SET revision = revision + 1;
     END`,
   `CREATE INDEX versions_fork ON versions(fork_id) WHERE fork_id IS NOT NULL`,
   `CREATE TRIGGER versions_fork_copy BEFORE INSERT ON versions WHEN NEW.fork_id IS NOT NULL
@@ -1419,6 +1419,10 @@ export const baseline: ReadonlyArray<string> = [
     AND (NEW.flag IS NULL OR NEW.slot_id IS NOT NEW.target_id
       OR NEW.slot_depth IS NOT (SELECT depth FROM slots WHERE id = NEW.target_id))
     BEGIN ${raise("a deletion or hide has a flag and names its slot")}; END`,
+  `CREATE TRIGGER fork_overrides_hide_range BEFORE INSERT ON fork_overrides WHEN NEW.kind = 'hide_range'
+    AND (NEW.flag IS NOT 0 OR NEW.slot_id IS NOT NULL OR NOT EXISTS (
+      SELECT 1 FROM lcm_enable_runs r WHERE r.id = NEW.target_id AND r.chat_id = NEW.chat_id))
+    BEGIN ${raise("a visibility range names its chat's enable run and shows it")}; END`,
   `CREATE TRIGGER fork_overrides_delete_version_own BEFORE INSERT ON fork_overrides WHEN NEW.kind = 'delete_version'
     AND (NEW.flag IS NULL OR NOT EXISTS (SELECT 1 FROM versions o JOIN slots s ON s.id = o.slot_id
       WHERE o.id = NEW.target_id AND o.fork_id IS NULL AND s.id = NEW.slot_id AND s.depth = NEW.slot_depth))

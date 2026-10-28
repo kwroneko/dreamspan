@@ -3,7 +3,7 @@
 // it covers (or the run is just shown), the switch is written, and the backfill is recorded. It
 // never generates; the next reply, or "Summarize now", plans the work.
 import type { UserId } from "@rp/shared/domain.ts"
-import { shownIn, shownVersionDeletedIn, slotDeletedIn, viewAt } from "./forkState.ts"
+import { inFork, nextSeq, shownIn, shownVersionDeletedIn, slotDeletedIn, viewAt } from "./forkState.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
@@ -50,7 +50,7 @@ export const makeLcmEnableWriteHandlers = (bin: Bin) =>
       sql`UPDATE jobs SET payload_json = ${JSON.stringify(payload)}, updated_at = ${Date.now()} WHERE id = ${id}`
 
     return {
-      StageLcmEnable: ({ userId, chatId, leafSlotId, choice, approved, imported, runId }) =>
+      StageLcmEnable: ({ userId, chatId, leafSlotId, forkId, choice, approved, imported, runId }) =>
         Effect.gen(function* () {
           yield* ownedChat(userId, chatId, leafSlotId)
           if (!runId) {
@@ -58,8 +58,9 @@ export const makeLcmEnableWriteHandlers = (bin: Bin) =>
               return yield* reject("StageLcmEnable", "This chat has no imported summary to adopt.")
             yield* sql`UPDATE lcm_enable_runs SET phase = 'cancelled' WHERE chat_id = ${chatId} AND published = 0 AND phase <> 'cancelled'`
             const id = uuidv7()
+            const targetForkId = yield* viewAt(sql, chatId, leafSlotId)
             yield* sql`INSERT INTO lcm_enable_runs(id, chat_id, payload_json, cursor, phase)
-              VALUES (${id}, ${chatId}, ${JSON.stringify({ leafSlotId, choice, approved, imported })},
+              VALUES (${id}, ${chatId}, ${JSON.stringify({ leafSlotId, choice, approved, imported, forkId: targetForkId })},
                 ${imported?.lastSlotId ?? null}, ${imported ? "gather" : "ready"})`
             return { runId: id, ready: !imported }
           }
@@ -72,7 +73,9 @@ export const makeLcmEnableWriteHandlers = (bin: Bin) =>
           }>`
             SELECT * FROM lcm_enable_runs WHERE id = ${runId} AND chat_id = ${chatId} AND published = 0`
           if (!run || run.phase === "cancelled") return yield* new NotFound({ entity: "enable run", id: runId })
-          const payload = JSON.parse(run.payload_json) as { imported: ImportedSummary; choice: string }
+          const payload = JSON.parse(run.payload_json) as { imported: ImportedSummary; choice: string; forkId: string }
+          if (payload.forkId !== (yield* viewAt(sql, chatId, leafSlotId)))
+            return yield* reject("StageLcmEnable", "The enable fork changed.")
           const source = payload.imported
           if (run.phase === "gather") {
             // The range as the fork it was offered in shows it.
@@ -140,7 +143,7 @@ export const makeLcmEnableWriteHandlers = (bin: Bin) =>
           }
           const [updated] = yield* sql<{ phase: string }>`SELECT phase FROM lcm_enable_runs WHERE id = ${runId}`
           return { runId, ready: updated!.phase === "ready" }
-        }).pipe(transaction(sql, "StageLcmEnable")),
+        }).pipe(inFork(sql, chatId, forkId, leafSlotId), transaction(sql, "StageLcmEnable")),
 
       ChangeLcmSettings: ({ userId, chatId, change }) =>
         Effect.gen(function* () {
@@ -164,7 +167,7 @@ export const makeLcmEnableWriteHandlers = (bin: Bin) =>
           })
         }).pipe(transaction(sql, "ChangeLcmSettings")),
 
-      EnableLcm: ({ userId, chatId, leafSlotId, choice, approved, runId, switchOff }) =>
+      EnableLcm: ({ userId, chatId, leafSlotId, forkId, choice, approved, runId, switchOff }) =>
         Effect.gen(function* () {
           yield* ownedChat(userId, chatId, leafSlotId)
           let unhidden = 0
@@ -178,14 +181,22 @@ export const makeLcmEnableWriteHandlers = (bin: Bin) =>
               imported: ImportedSummary | null
               choice: string
               leafSlotId: string
+              forkId: string
             }
-            if (payload.choice !== choice || payload.leafSlotId !== leafSlotId)
+            if (
+              payload.choice !== choice ||
+              payload.leafSlotId !== leafSlotId ||
+              (forkId != null && payload.forkId !== forkId)
+            )
               return yield* reject("EnableLcm", "The enable choice changed.")
             unhidden = payload.imported?.hidden ?? 0
             if (choice === "adopt") {
               summaryId = runId
               yield* sql`UPDATE summaries SET sealed = 1 WHERE id = ${summaryId}`
             }
+            const seq = yield* nextSeq(sql, chatId)
+            yield* sql`INSERT INTO fork_overrides (id, chat_id, fork_id, seq, kind, target_id, flag)
+              VALUES (${uuidv7()}, ${chatId}, ${payload.forkId}, ${seq}, 'hide_range', ${runId}, 0)`
             yield* sql`UPDATE lcm_enable_runs SET published = 1 WHERE id = ${runId}`
           } else if (choice === "adopt") return yield* reject("EnableLcm", "Adoption needs a prepared range.")
           const now = Date.now()
@@ -234,7 +245,7 @@ export const makeLcmEnableWriteHandlers = (bin: Bin) =>
             })}`
           }
           return { unhidden, summaryId }
-        }).pipe(transaction(sql, "EnableLcm")),
+        }).pipe(inFork(sql, chatId, forkId, leafSlotId), transaction(sql, "EnableLcm")),
 
       SetBackfill: ({ userId, chatId, action, approved }) =>
         Effect.gen(function* () {

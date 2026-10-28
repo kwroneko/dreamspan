@@ -528,6 +528,7 @@ export class WriteOps extends RpcGroup.make(
       userId: UserId,
       chatId: ChatId,
       leafSlotId: SlotId,
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       choice: EnableChoice,
       approved: BackfillApproval,
       imported: Schema.NullOr(ImportedLcmSummary),
@@ -541,6 +542,7 @@ export class WriteOps extends RpcGroup.make(
       userId: UserId,
       chatId: ChatId,
       leafSlotId: SlotId,
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       choice: EnableChoice,
       approved: BackfillApproval,
       runId: Schema.optionalKey(Schema.String),
@@ -800,13 +802,21 @@ export class WriteOps extends RpcGroup.make(
   }),
   /** Deletes an item for good. The UI confirms this one. */
   Rpc.make("PurgeBinItem", {
-    payload: { userId: UserId, itemId: Schema.String },
-    success: Schema.Void,
-    error: Schema.Union([NotFound, StorageError])
+    payload: {
+      userId: UserId,
+      itemId: Schema.String,
+      expectedForkIds: Schema.optionalKey(Schema.Array(Schema.String))
+    },
+    success: Schema.Array(Schema.String),
+    error: Schema.Union([NotFound, BinChanged, StorageError])
   }),
   Rpc.make("EmptyBin", {
-    payload: { userId: UserId, itemIds: Schema.Array(Schema.String) },
-    success: Schema.Struct({ purged: Schema.Int }),
+    payload: {
+      userId: UserId,
+      itemIds: Schema.Array(Schema.String),
+      expectedForkIds: Schema.optionalKey(Schema.Array(Schema.String))
+    },
+    success: Schema.Struct({ purged: Schema.Int, chatIds: Schema.Array(Schema.String) }),
     error: Schema.Union([BinChanged, StorageError])
   }),
   Rpc.make("DeleteRecoveredText", {
@@ -1625,7 +1635,12 @@ export class WriteOps extends RpcGroup.make(
   }),
   /** Un-hides the hidden messages on the path from the chat's first message to `throughSlotId`. */
   Rpc.make("StImportUnhide", {
-    payload: { userId: UserId, chatId: ChatId, throughSlotId: SlotId },
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
+      throughSlotId: SlotId
+    },
     success: Schema.Struct({ unhidden: Schema.Int }),
     error: Schema.Union([NotFound, StorageError])
   }),
@@ -1913,12 +1928,12 @@ export class ReadOps extends RpcGroup.make(
   }),
   /** The imported summary a chat could adopt and the work enabling LCM would do, measured (priced by the caller). */
   Rpc.make("ReadLcmImported", {
-    payload: { userId: UserId, chatId: ChatId, leafSlotId: SlotId },
+    payload: { userId: UserId, chatId: ChatId, forkId: Schema.optionalKey(Schema.NullOr(ForkId)), leafSlotId: SlotId },
     success: Schema.NullOr(ImportedLcmSummary),
     error: Schema.Union([StorageError, NotFound])
   }),
   Rpc.make("EstimateBackfill", {
-    payload: { userId: UserId, chatId: ChatId, leafSlotId: SlotId },
+    payload: { userId: UserId, chatId: ChatId, forkId: Schema.optionalKey(Schema.NullOr(ForkId)), leafSlotId: SlotId },
     success: BackfillBasis,
     error: Schema.Union([StorageError, NotFound])
   }),

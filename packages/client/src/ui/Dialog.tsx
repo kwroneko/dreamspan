@@ -56,6 +56,7 @@ export function ConfirmDialog({
   title,
   description,
   confirmLabel,
+  confirmDisabled,
   pending,
   onConfirm,
   children
@@ -65,6 +66,7 @@ export function ConfirmDialog({
   title: ReactNode
   description: ReactNode
   confirmLabel: string
+  confirmDisabled?: boolean
   pending?: boolean | undefined
   onConfirm: () => void
   /** Extra content, such as an error from the last attempt. */
@@ -82,7 +84,7 @@ export function ConfirmDialog({
           {children}
           <DialogActions>
             <BaseAlertDialog.Close render={<Button />}>Cancel</BaseAlertDialog.Close>
-            <Button variant="danger" pending={pending} onClick={onConfirm}>
+            <Button variant="danger" disabled={confirmDisabled} pending={pending} onClick={onConfirm}>
               {confirmLabel}
             </Button>
           </DialogActions>

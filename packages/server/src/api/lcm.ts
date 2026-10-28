@@ -176,10 +176,15 @@ export const makeLcmHandlers = Effect.gen(function* () {
         yield* writer.SetSummaryRerun({ userId: id, ...params })
         yield* changed(params.chatId, id)
       }).pipe(internal("SetSummaryRerun")),
-    GetLcmEnableOffer: ({ chatId, leafSlotId }) =>
+    GetLcmEnableOffer: ({ chatId, leafSlotId, forkId }) =>
       Effect.gen(function* () {
         const id = yield* userId
-        const basis = yield* reader.EstimateBackfill({ userId: id, chatId, leafSlotId })
+        const basis = yield* reader.EstimateBackfill({
+          userId: id,
+          chatId,
+          leafSlotId,
+          ...(forkId != null ? { forkId } : {})
+        })
         return new LcmEnableOffer({
           chatId,
           leafSlotId,
@@ -190,20 +195,31 @@ export const makeLcmHandlers = Effect.gen(function* () {
           ...(basis.summaryNotesOn?.length ? { summaryNoteOn: true } : {})
         })
       }).pipe(internal("GetLcmEnableOffer")),
-    EnableLcm: ({ chatId, leafSlotId, choice, approved }) =>
+    EnableLcm: ({ chatId, leafSlotId, forkId, choice, approved }) =>
       Effect.gen(function* () {
         const id = yield* userId
         // Revalidation never grants a higher allowance than the figures the caller saw.
-        const basis = yield* reader.EstimateBackfill({ userId: id, chatId, leafSlotId })
+        const basis = yield* reader.EstimateBackfill({
+          userId: id,
+          chatId,
+          leafSlotId,
+          ...(forkId != null ? { forkId } : {})
+        })
         const counts = choice === "adopt" ? basis.adopted : basis.fromScratch
         if (counts === null) return yield* new NotFound({ entity: "imported summary", id: chatId })
         const current = yield* priced(id, counts)
         yield* validateApproval(approved, current)
-        const imported = yield* reader.ReadLcmImported({ userId: id, chatId, leafSlotId })
+        const imported = yield* reader.ReadLcmImported({
+          userId: id,
+          chatId,
+          leafSlotId,
+          ...(forkId != null ? { forkId } : {})
+        })
         let staged = yield* writer.StageLcmEnable({
           userId: id,
           chatId,
           leafSlotId,
+          ...(forkId != null ? { forkId } : {}),
           choice,
           approved: approval(approved!),
           imported
@@ -213,13 +229,19 @@ export const makeLcmHandlers = Effect.gen(function* () {
             userId: id,
             chatId,
             leafSlotId,
+            ...(forkId != null ? { forkId } : {}),
             choice,
             approved: approval(approved!),
             imported,
             runId: staged.runId
           })
         // Pricing/settings may also change while a very long range is being staged.
-        const refreshed = yield* reader.EstimateBackfill({ userId: id, chatId, leafSlotId })
+        const refreshed = yield* reader.EstimateBackfill({
+          userId: id,
+          chatId,
+          leafSlotId,
+          ...(forkId != null ? { forkId } : {})
+        })
         const finalCounts = choice === "adopt" ? refreshed.adopted : refreshed.fromScratch
         if (!finalCounts) return yield* new NotFound({ entity: "imported summary", id: chatId })
         yield* validateApproval(approved, yield* priced(id, finalCounts))
@@ -228,6 +250,7 @@ export const makeLcmHandlers = Effect.gen(function* () {
           userId: id,
           chatId,
           leafSlotId,
+          ...(forkId != null ? { forkId } : {}),
           choice,
           approved: approval(approved!),
           ...(refreshed.summaryNotesOn?.length ? { switchOff: refreshed.summaryNotesOn } : {})

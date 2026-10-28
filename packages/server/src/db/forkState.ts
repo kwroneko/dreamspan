@@ -30,11 +30,24 @@ type ForkRef = string | null | Statement.Fragment
  * outside, since SQLite 3.53 (Node 24.22) otherwise takes `fork_overrides_target`, which reads
  * every fork's overrides of the target.
  */
-export const effectiveOverrideSql = (kind: string, fork: string, target: string) => `(
-  SELECT eo.id FROM forks ef CROSS JOIN json_each(ef.lineage_json) el CROSS JOIN fork_overrides eo
-  WHERE ef.id = ${fork} AND eo.fork_id = el.value ->> 0 AND eo.kind = '${kind}'
-    AND eo.target_id = ${target} AND eo.seq <= coalesce(el.value ->> 1, 9223372036854775807)
-  ORDER BY el.key, eo.seq DESC LIMIT 1)`
+export const effectiveOverrideSql = (kind: string, fork: string, target: string) => {
+  const own = `SELECT eo.id, el.key AS position, eo.seq
+    FROM forks ef CROSS JOIN json_each(ef.lineage_json) el CROSS JOIN fork_overrides eo
+    WHERE ef.id = ${fork} AND eo.fork_id = el.value ->> 0 AND eo.kind = '${kind}'
+      AND eo.target_id = ${target} AND eo.seq <= coalesce(el.value ->> 1, 9223372036854775807)`
+  // Separate lookups retain the point index even with thousands of individual hides.
+  const ranges =
+    kind === "hide"
+      ? `UNION ALL
+    SELECT eo.id, el.key AS position, eo.seq
+    FROM forks ef CROSS JOIN json_each(ef.lineage_json) el CROSS JOIN fork_overrides eo
+    WHERE ef.id = ${fork} AND eo.fork_id = el.value ->> 0 AND eo.kind = 'hide_range'
+      AND eo.seq <= coalesce(el.value ->> 1, 9223372036854775807) AND EXISTS (
+        SELECT 1 FROM lcm_enable_slots es JOIN lcm_enable_runs er ON er.id = es.run_id
+        WHERE es.run_id = eo.target_id AND es.slot_id = ${target} AND es.shown = 1 AND er.published = 1)`
+      : ""
+  return `(SELECT id FROM (${own} ${ranges}) ORDER BY position, seq DESC LIMIT 1)`
+}
 
 /**
  * SQL: whether slot `s` is deleted in the fork `fork`: marked on the slot (before forks, or
@@ -319,18 +332,26 @@ export const insertFork = (
       }>`
         SELECT kind, target_id, slot_id, slot_depth, value_id, flag, bin_item_id, changeset_id, summaries_done, origin
         FROM (
-          SELECT o.*, row_number() OVER (PARTITION BY o.kind, o.target_id ORDER BY l.key, o.seq DESC) AS n
+          SELECT o.*, l.key AS lineage_order, row_number() OVER (PARTITION BY o.kind, o.target_id ORDER BY l.key, o.seq DESC) AS n
           FROM json_each(${JSON.stringify(inherited)}) l
             JOIN fork_overrides o ON o.fork_id = l.value ->> 0 AND o.seq <= l.value ->> 1
-        ) WHERE n = 1`
+        ) WHERE n = 1 ORDER BY lineage_order DESC, seq`
+      let copiedSeq = branchedAt
       for (const row of rows)
         yield* sql`INSERT INTO fork_overrides ${sql.insert({
           id: uuidv7(),
           chat_id: fork.chatId,
           fork_id: id,
-          seq: branchedAt,
+          seq: ++copiedSeq,
           ...row
         })}`
+      copiedSeq++
+      yield* sql`INSERT INTO history_changes(slot_id, fork_id, chat_id, depth, revision, seq)
+        SELECT h.slot_id, ${id}, h.chat_id, h.depth, sum(h.revision), ${copiedSeq}
+        FROM json_each(${JSON.stringify(inherited)}) l JOIN history_changes h
+          ON h.fork_id = l.value ->> 0 AND h.seq <= l.value ->> 1
+        WHERE h.chat_id = ${fork.chatId} GROUP BY h.slot_id`
+      yield* sql`UPDATE chats SET state_seq = ${copiedSeq} WHERE id = ${fork.chatId}`
     }
     const [row] = yield* sql<ForkRow>`SELECT * FROM forks WHERE id = ${id}`
     return row!

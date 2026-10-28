@@ -37,7 +37,7 @@ export const recordReduction = (sql: SqlClient.SqlClient, slotId: string, forkId
     const seq = forkId === null ? 0 : yield* nextSeq(sql, slot!.chat_id)
     yield* sql`INSERT INTO history_changes(slot_id, fork_id, chat_id, depth, revision, seq)
       SELECT id, ${forkId ?? ""}, chat_id, depth, 1, ${seq} FROM slots WHERE id = ${slotId}
-      ON CONFLICT(slot_id, fork_id) DO UPDATE SET revision = revision + 1, seq = excluded.seq`
+      ON CONFLICT(slot_id, fork_id, seq) DO UPDATE SET revision = revision + 1`
   })
 
 /**

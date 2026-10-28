@@ -721,10 +721,19 @@ describe("window reads", () => {
         // Each slot's selection, the replacement shown for it, the two flags on it, its
         // deletion and hide, and the deletion of each of its swipes (in the count) each read the
         // fork's lineage (its own JSON, a few entries) and look each entry's override up by
-        // index (forkState.ts).
+        // index (forkState.ts). Hiding also looks up range overrides by fork/kind and
+        // membership by slot/run. SQLite scans the small union of matching candidates.
         assert.deepStrictEqual(
-          plan.filter((step) => step.startsWith("SCAN") && !["SCAN d", "SCAN deleted_chain"].includes(step)),
-          ["SCAN g", "SCAN g", ...Array<string>(7).fill("SCAN el VIRTUAL TABLE INDEX 1:")],
+          plan
+            .filter((step) => step.startsWith("SCAN") && !["SCAN d", "SCAN deleted_chain"].includes(step))
+            .map((step) => step.replace(/^SCAN \(subquery-\d+\)$/, "SCAN visibility candidates")),
+          [
+            "SCAN g",
+            "SCAN g",
+            ...Array<string>(4).fill("SCAN el VIRTUAL TABLE INDEX 1:"),
+            "SCAN visibility candidates",
+            ...Array<string>(4).fill("SCAN el VIRTUAL TABLE INDEX 1:")
+          ],
           plan.join("\n")
         )
         assert.lengthOf(
@@ -738,6 +747,8 @@ describe("window reads", () => {
         assert.includeMembers(
           plan,
           [
+            "SEARCH eo USING INDEX fork_overrides_point (fork_id=? AND kind=?)",
+            "SEARCH es USING COVERING INDEX lcm_enable_slots_slot (slot_id=? AND shown=? AND run_id=?)",
             "SEARCH s USING INDEX sqlite_autoindex_slots_1 (id=?)",
             "SEARCH ph USING INDEX sqlite_autoindex_slots_1 (id=?)",
             "SEARCH s USING INDEX slots_chain (chain_id=? AND depth>? AND depth<?)"

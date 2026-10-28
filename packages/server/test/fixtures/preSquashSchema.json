@@ -833,7 +833,7 @@
       "type": "table",
       "name": "fork_overrides",
       "tbl_name": "fork_overrides",
-      "sql": "CREATE TABLE fork_overrides ( id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, fork_id TEXT NOT NULL REFERENCES forks(id) ON DELETE CASCADE, -- The chat's state_seq when written; a row updated in place takes the newer one. seq INTEGER NOT NULL CHECK (seq > 0), kind TEXT NOT NULL CHECK (kind IN ('select', 'replace', 'delete_slot', 'delete_version', 'hide', 'star', 'picker_hide', 'summary_revision', 'summary_choice', 'suppress_event')), target_id TEXT NOT NULL, -- The slot the row is about, and its depth, for reading a window of a path. slot_id TEXT, slot_depth INTEGER, value_id TEXT, flag INTEGER CHECK (flag IS NULL OR flag IN (0, 1)), bin_item_id TEXT REFERENCES bin_items(id) ON DELETE SET NULL, changeset_id TEXT REFERENCES changesets(id) ON DELETE SET NULL, summaries_done INTEGER NOT NULL DEFAULT 0 CHECK (summaries_done IN (0, 1)), -- Who chose it: the user, or an ST re-import following the file (which the user's choice -- then overrules: stImportWrites.ts). origin TEXT NOT NULL DEFAULT 'user' CHECK (origin IN ('user', 'import')) ) STRICT"
+      "sql": "CREATE TABLE fork_overrides ( id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, fork_id TEXT NOT NULL REFERENCES forks(id) ON DELETE CASCADE, -- The chat's state_seq when written; a row updated in place takes the newer one. seq INTEGER NOT NULL CHECK (seq > 0), kind TEXT NOT NULL CHECK (kind IN ('select', 'replace', 'delete_slot', 'delete_version', 'hide', 'hide_range', 'star', 'picker_hide', 'summary_revision', 'summary_choice', 'suppress_event')), target_id TEXT NOT NULL, -- The slot the row is about, and its depth, for reading a window of a path. slot_id TEXT, slot_depth INTEGER, value_id TEXT, flag INTEGER CHECK (flag IS NULL OR flag IN (0, 1)), bin_item_id TEXT REFERENCES bin_items(id) ON DELETE SET NULL, changeset_id TEXT REFERENCES changesets(id) ON DELETE SET NULL, summaries_done INTEGER NOT NULL DEFAULT 0 CHECK (summaries_done IN (0, 1)), -- Who chose it: the user, or an ST re-import following the file (which the user's choice -- then overrules: stImportWrites.ts). origin TEXT NOT NULL DEFAULT 'user' CHECK (origin IN ('user', 'import')) ) STRICT"
     },
     {
       "type": "table",
@@ -845,7 +845,7 @@
       "type": "table",
       "name": "history_changes",
       "tbl_name": "history_changes",
-      "sql": "CREATE TABLE history_changes ( slot_id TEXT NOT NULL REFERENCES slots(id) ON DELETE CASCADE, -- The fork the reduction was made in; '' for every fork (a message nobody shows). fork_id TEXT NOT NULL DEFAULT '', chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, depth INTEGER NOT NULL, revision INTEGER NOT NULL, -- The chat's state_seq of the newest reduction, for the forks made from the fork. seq INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (slot_id, fork_id) ) STRICT"
+      "sql": "CREATE TABLE history_changes ( slot_id TEXT NOT NULL REFERENCES slots(id) ON DELETE CASCADE, -- The fork the reduction was made in; '' for every fork (a message nobody shows). fork_id TEXT NOT NULL DEFAULT '', chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, depth INTEGER NOT NULL, revision INTEGER NOT NULL, -- The chat's state_seq of this reduction, retained for descendant lineage bounds. seq INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (slot_id, fork_id, seq) ) STRICT"
     },
     {
       "type": "table",
@@ -1389,6 +1389,12 @@
     },
     {
       "type": "trigger",
+      "name": "fork_overrides_hide_range",
+      "tbl_name": "fork_overrides",
+      "sql": "CREATE TRIGGER fork_overrides_hide_range BEFORE INSERT ON fork_overrides WHEN NEW.kind = 'hide_range' AND (NEW.flag IS NOT 0 OR NEW.slot_id IS NOT NULL OR NOT EXISTS ( SELECT 1 FROM lcm_enable_runs r WHERE r.id = NEW.target_id AND r.chat_id = NEW.chat_id)) BEGIN SELECT RAISE(ABORT, 'a visibility range names its chat''s enable run and shows it'); END"
+    },
+    {
+      "type": "trigger",
       "name": "fork_overrides_identity_fixed",
       "tbl_name": "fork_overrides",
       "sql": "CREATE TRIGGER fork_overrides_identity_fixed BEFORE UPDATE OF id, chat_id, fork_id, kind, target_id, slot_id, slot_depth ON fork_overrides BEGIN SELECT RAISE(ABORT, 'an override keeps its fork, kind and target'); END"
@@ -1499,13 +1505,13 @@
       "type": "trigger",
       "name": "history_reduced_slot",
       "tbl_name": "slots",
-      "sql": "CREATE TRIGGER history_reduced_slot AFTER UPDATE OF deleted_at ON slots WHEN OLD.deleted_at IS NULL AND NEW.deleted_at IS NOT NULL BEGIN INSERT INTO history_changes(slot_id, fork_id, chat_id, depth, revision) VALUES (NEW.id, '', NEW.chat_id, NEW.depth, 1) ON CONFLICT(slot_id, fork_id) DO UPDATE SET revision = revision + 1; END"
+      "sql": "CREATE TRIGGER history_reduced_slot AFTER UPDATE OF deleted_at ON slots WHEN OLD.deleted_at IS NULL AND NEW.deleted_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM bin_items b WHERE b.id = NEW.bin_item_id AND b.origin_json ->> '$.forkId' IS NOT NULL) BEGIN INSERT INTO history_changes(slot_id, fork_id, chat_id, depth, revision) VALUES (NEW.id, '', NEW.chat_id, NEW.depth, 1) ON CONFLICT(slot_id, fork_id, seq) DO UPDATE SET revision = revision + 1; END"
     },
     {
       "type": "trigger",
       "name": "history_reduced_version",
       "tbl_name": "versions",
-      "sql": "CREATE TRIGGER history_reduced_version AFTER UPDATE OF deleted_at ON versions WHEN OLD.deleted_at IS NULL AND NEW.deleted_at IS NOT NULL BEGIN INSERT INTO history_changes(slot_id, fork_id, chat_id, depth, revision) SELECT id, '', chat_id, depth, 1 FROM slots WHERE id = NEW.slot_id AND (selected_version_id = NEW.id OR EXISTS (SELECT 1 FROM fork_overrides o WHERE o.target_id = NEW.slot_id AND o.kind = 'select' AND o.value_id = NEW.id)) ON CONFLICT(slot_id, fork_id) DO UPDATE SET revision = revision + 1; END"
+      "sql": "CREATE TRIGGER history_reduced_version AFTER UPDATE OF deleted_at ON versions WHEN OLD.deleted_at IS NULL AND NEW.deleted_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM bin_items b WHERE b.id = NEW.bin_item_id AND b.origin_json ->> '$.forkId' IS NOT NULL) BEGIN INSERT INTO history_changes(slot_id, fork_id, chat_id, depth, revision) SELECT id, '', chat_id, depth, 1 FROM slots WHERE id = NEW.slot_id AND (selected_version_id = NEW.id OR EXISTS (SELECT 1 FROM fork_overrides o WHERE o.target_id = NEW.slot_id AND o.kind = 'select' AND o.value_id = NEW.id)) ON CONFLICT(slot_id, fork_id, seq) DO UPDATE SET revision = revision + 1; END"
     },
     {
       "type": "trigger",

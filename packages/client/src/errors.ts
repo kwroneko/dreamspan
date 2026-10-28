@@ -60,7 +60,7 @@ const describeError = (error: unknown): AppError => {
   if (error instanceof BinChanged)
     return make(
       "BinChanged",
-      "The bin changed since you opened this confirmation. Close it to reload the bin, then check and confirm again."
+      "The bin or affected forks changed since you opened this confirmation. Close it to reload the bin, then check and confirm again."
     )
   if (error instanceof NotFound) return make("NotFound", `This ${error.entity} doesn't exist any more.`)
   if (error instanceof StaleWrite) return stale(error.entity)

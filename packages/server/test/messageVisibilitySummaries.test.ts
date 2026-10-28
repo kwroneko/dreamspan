@@ -51,6 +51,14 @@ it.live("hiding makes covering L1 and L2 summaries stale, unhiding makes them fr
       {
         sql: "INSERT INTO lcm_enable_slots(run_id,ordinal,slot_id,version_id,amend_count,shown) VALUES('review-overlay',1,?,?,0,1)",
         params: [entries[1]!.slotId, entries[1]!.version.id]
+      },
+      {
+        sql: "UPDATE chats SET state_seq = state_seq + 1 WHERE id = ?",
+        params: [chat.id]
+      },
+      {
+        sql: "INSERT INTO fork_overrides (id,chat_id,fork_id,seq,kind,target_id,flag) SELECT 'review-overlay-choice',id,current_fork_id,state_seq,'hide_range','review-overlay',0 FROM chats WHERE id = ?",
+        params: [chat.id]
       }
     ])
     assert.isTrue((yield* state()).layer[0]!.fresh)

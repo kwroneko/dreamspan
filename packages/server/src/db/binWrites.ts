@@ -29,12 +29,10 @@ export const makeBinWriteHandlers = (bin: Bin) =>
       DeleteConnection: ({ userId, connectionId }) =>
         deleting("DeleteConnection", userId, bin.deleteConnection(userId, connectionId)),
       RestoreBinItem: ({ userId, itemId }) => bin.restore(userId, itemId).pipe(transaction(sql, "RestoreBinItem")),
-      PurgeBinItem: ({ userId, itemId }) => bin.purge(userId, itemId).pipe(transaction(sql, "PurgeBinItem")),
-      EmptyBin: ({ userId, itemIds }) =>
-        bin.emptyBin(userId, itemIds).pipe(
-          Effect.map((purged) => ({ purged })),
-          transaction(sql, "EmptyBin")
-        ),
+      PurgeBinItem: ({ userId, itemId, expectedForkIds }) =>
+        bin.purge(userId, itemId, expectedForkIds).pipe(transaction(sql, "PurgeBinItem")),
+      EmptyBin: ({ userId, itemIds, expectedForkIds }) =>
+        bin.emptyBin(userId, itemIds, expectedForkIds).pipe(transaction(sql, "EmptyBin")),
       DeleteRecoveredText: ({ userId, id }) =>
         Effect.gen(function* () {
           const rows = yield* sql`DELETE FROM recovered_texts WHERE id = ${id} AND user_id = ${userId} RETURNING id`

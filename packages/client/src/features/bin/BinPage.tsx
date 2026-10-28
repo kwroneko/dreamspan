@@ -69,23 +69,39 @@ const purgeEffect = (item: BinItem) => {
  * warning's list, which the user reads before confirming (owner, 2026-10-27). Reads when the
  * dialog opens, and says nothing while it has nobody to name.
  */
-function ForksShowing({ itemIds, open }: { itemIds: ReadonlyArray<string>; open: boolean }) {
+function ForksShowing({
+  itemIds,
+  open,
+  onReady
+}: {
+  itemIds: ReadonlyArray<string>
+  open: boolean
+  onReady: (forkIds: ReadonlyArray<string> | null) => void
+}) {
   const read = useAction()
   // What was read for which items: a list for other items isn't this dialog's.
   const [loaded, setRead] = useState<{ key: string; forks: ReadonlyArray<BinForkShown> } | null>(null)
   const key = itemIds.join(",")
   useEffect(() => {
     if (!open || itemIds.length === 0) return
+    let active = true
     void read
       .run((client) => client("BinItemForks", { itemIds }))
       .then((result) => {
-        if (result.ok) setRead({ key, forks: result.value })
+        if (active && result.ok) {
+          setRead({ key, forks: result.value })
+          onReady([...new Set(result.value.map((fork) => fork.forkId))])
+        }
       })
+    return () => {
+      active = false
+    }
     // `read` is a new function each render; the items are what the list is for.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, key])
+  }, [open, key, onReady])
   const shown = loaded !== null && loaded.key === key ? loaded.forks : null
-  if (shown === null) return read.error ? <ErrorAlert error={read.error} /> : null
+  if (read.error) return <ErrorAlert error={read.error} />
+  if (shown === null || read.pending) return <p role="status">Checking affected forks…</p>
   const forks = [...new Map(shown.map((fork) => [fork.forkId, fork])).values()]
   if (forks.length === 0) return null
   return (
@@ -96,7 +112,7 @@ function ForksShowing({ itemIds, open }: { itemIds: ReadonlyArray<string>; open:
           : `${forks.length} forks still show this text, and lose it too:`}
       </p>
       <ul className="mt-1 list-disc pl-5">
-        {forks.slice(0, 8).map((fork) => (
+        {forks.map((fork) => (
           <li key={fork.forkId} className="[overflow-wrap:anywhere]">
             {fork.name !== null && fork.name !== "" ? `“${fork.name}”` : "Unnamed fork"}
             {fork.tipExcerpt !== "" ? <span className="text-muted"> ending “{fork.tipExcerpt}”</span> : null}
@@ -105,7 +121,6 @@ function ForksShowing({ itemIds, open }: { itemIds: ReadonlyArray<string>; open:
           </li>
         ))}
       </ul>
-      {forks.length > 8 && <p className="mt-1 text-muted">and {forks.length - 8} more</p>}
     </div>
   )
 }
@@ -137,6 +152,7 @@ function ItemRow({ item, onGone }: { item: BinItem; onGone: (item: BinItem) => v
   const [restored, setRestored] = useState(false)
   const [error, setError] = useState<AppError | null>(null)
   const [confirming, setConfirming] = useState(false)
+  const [expectedForkIds, setExpectedForkIds] = useState<ReadonlyArray<string> | null>(null)
   const chatTitle = typeof item.origin.chatTitle === "string" ? readableChatTitle(item.origin.chatTitle) : null
   const title = binTitle(item)
   return (
@@ -176,7 +192,13 @@ function ItemRow({ item, onGone }: { item: BinItem; onGone: (item: BinItem) => v
           >
             Restore
           </Button>
-          <Button variant="ghost" onClick={() => setConfirming(true)}>
+          <Button
+            variant="ghost"
+            onClick={() => {
+              setExpectedForkIds(null)
+              setConfirming(true)
+            }}
+          >
             Delete for good
           </Button>
         </div>
@@ -189,15 +211,19 @@ function ItemRow({ item, onGone }: { item: BinItem; onGone: (item: BinItem) => v
         description={`${purgeEffect(item)} This can't be undone.`}
         confirmLabel="Delete for good"
         pending={purge.pending}
+        confirmDisabled={expectedForkIds === null}
         onConfirm={async () => {
-          const result = await purge.run((client) => client("PurgeBinItem", { itemId: item.id }))
+          if (expectedForkIds === null) return
+          const result = await purge.run((client) => client("PurgeBinItem", { itemId: item.id, expectedForkIds }))
           if (result.ok) {
             setConfirming(false)
             onGone(item)
+          } else if (result.error.tag === "BinChanged") {
+            setExpectedForkIds(null)
           }
         }}
       >
-        <ForksShowing itemIds={[item.id]} open={confirming} />
+        <ForksShowing itemIds={[item.id]} open={confirming} onReady={setExpectedForkIds} />
         <ErrorAlert error={purge.error} />
       </ConfirmDialog>
     </li>
@@ -210,6 +236,7 @@ function DeletedItems({ first }: { first: ReadonlyArray<BinItem> }) {
   const [more, setMore] = useState<ReadonlyArray<BinItem>>([])
   const [gone, setGone] = useState<ReadonlySet<string>>(new Set())
   const [end, setEnd] = useState(first.length < PAGE)
+  const [expectedForkIds, setExpectedForkIds] = useState<ReadonlyArray<string> | null>(null)
   const [emptying, setEmptying] = useState<ReadonlyArray<string> | null>(null)
   const items = [...first, ...more]
   const loadMore = async () => {
@@ -232,7 +259,14 @@ function DeletedItems({ first }: { first: ReadonlyArray<BinItem> }) {
   return (
     <div className="flex flex-col gap-3">
       <div className="flex justify-end">
-        <Button variant="ghost" disabled={!end} onClick={() => setEmptying(shown.map((item) => item.id))}>
+        <Button
+          variant="ghost"
+          disabled={!end}
+          onClick={() => {
+            setExpectedForkIds(null)
+            setEmptying(shown.map((item) => item.id))
+          }}
+        >
           Empty the bin
         </Button>
       </div>
@@ -260,13 +294,17 @@ function DeletedItems({ first }: { first: ReadonlyArray<BinItem> }) {
         description={`${emptying?.length ?? 0} deleted items go for good: chats and entries entirely, messages as empty placeholders. Recovered text stays. This can't be undone.`}
         confirmLabel="Empty the bin"
         pending={action.pending}
+        confirmDisabled={expectedForkIds === null}
         onConfirm={async () => {
-          if (emptying === null) return
-          const result = await action.run((client) => client("EmptyBin", { itemIds: emptying }), RESTORED_KEYS)
+          if (emptying === null || expectedForkIds === null) return
+          const result = await action.run(
+            (client) => client("EmptyBin", { itemIds: emptying, expectedForkIds }),
+            RESTORED_KEYS
+          )
           if (result.ok) setEmptying(null)
         }}
       >
-        <ForksShowing itemIds={emptying ?? []} open={emptying !== null} />
+        <ForksShowing itemIds={emptying ?? []} open={emptying !== null} onReady={setExpectedForkIds} />
         <ErrorAlert error={action.error} />
       </ConfirmDialog>
     </div>

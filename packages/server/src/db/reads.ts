@@ -9,9 +9,9 @@ import { FoldableEvent } from "@rp/shared/state.ts"
 import { Effect, Schema } from "effect"
 import { SqlClient } from "effect/sql"
 import { toBinItem, toRecoveredText } from "./bin.ts"
-import { BinForkShown } from "@rp/shared/bin.ts"
+import { binItemForks } from "./binForks.ts"
 import { reachableSlot } from "./graphReachability.ts"
-import { forkColumns, forkRecency, forksShowing, forkThrough } from "./forks.ts"
+import { forkColumns, forkRecency, forkThrough } from "./forks.ts"
 import {
   attachedApplies,
   effectiveOverride,
@@ -351,45 +351,7 @@ export const makeReadHandlers = Effect.gen(function* () {
         query("ListBin")
       ),
 
-    BinItemForks: ({ userId, itemIds }) =>
-      Effect.gen(function* () {
-        const shown: Array<BinForkShown> = []
-        const items =
-          itemIds.length === 0
-            ? []
-            : yield* sql<{ id: string; kind: string; target_id: string; chat_id: string; origin_json: string }>`
-                SELECT id, kind, target_id, chat_id, origin_json FROM bin_items
-                WHERE user_id = ${userId} AND kind IN ('message', 'version') AND chat_id IS NOT NULL
-                  AND ${sql.in("id", itemIds)}`
-        for (const item of items) {
-          const origin = JSON.parse(item.origin_json) as { forkId?: string; slotId?: string; chatTitle?: string }
-          if (origin.forkId === undefined || origin.slotId === undefined) continue
-          const forks = yield* forksShowing(
-            sql,
-            item.chat_id,
-            origin.slotId,
-            item.kind === "version" ? item.target_id : null,
-            origin.forkId,
-            false
-          )
-          for (const fork of forks) {
-            const [tip] = yield* sql<{ excerpt: string }>`
-              SELECT substr(v.content, 1, 80) AS excerpt FROM slots t JOIN versions v ON v.id = ${shownIn(sql, fork.id, "t")}
-              WHERE t.id = ${fork.tip_slot_id}`
-            shown.push(
-              new BinForkShown({
-                itemId: item.id,
-                forkId: fork.id,
-                chatTitle: origin.chatTitle ?? "",
-                name: fork.name,
-                tipExcerpt: tip?.excerpt ?? "",
-                deleted: fork.deleted_at !== null
-              })
-            )
-          }
-        }
-        return shown
-      }).pipe(query("BinItemForks")),
+    BinItemForks: ({ userId, itemIds }) => binItemForks(sql, userId, itemIds).pipe(query("BinItemForks")),
 
     ListRecoveredTexts: ({ userId, source, limit, before }) =>
       sql<Parameters<typeof toRecoveredText>[0]>`

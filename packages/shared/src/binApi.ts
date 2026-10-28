@@ -26,9 +26,9 @@ export class BinApi extends RpcGroup.make(
   }),
   /** Deletes an item for good. The client asks first; this can't be undone. */
   Rpc.make("PurgeBinItem", {
-    payload: { itemId: Schema.String },
+    payload: { itemId: Schema.String, expectedForkIds: Schema.optionalKey(Schema.Array(Schema.String)) },
     success: Schema.Void,
-    error: Schema.Union([...Errors])
+    error: Schema.Union([...Errors, BinChanged])
   }),
   /**
    * The forks, other than the one that deleted it, that still show what a message or swipe in
@@ -40,7 +40,7 @@ export class BinApi extends RpcGroup.make(
     error: ServerError
   }),
   Rpc.make("EmptyBin", {
-    payload: { itemIds: Schema.Array(Schema.String) },
+    payload: { itemIds: Schema.Array(Schema.String), expectedForkIds: Schema.optionalKey(Schema.Array(Schema.String)) },
     success: Schema.Struct({ purged: Schema.Int }),
     error: Schema.Union([BinChanged, ServerError])
   }),

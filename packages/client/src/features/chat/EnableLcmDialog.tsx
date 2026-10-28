@@ -108,12 +108,13 @@ export function EnableLcmDialog({
   const [choice, setChoice] = useState<EnableChoice>("adopt")
   const [pending, setPending] = useState(false)
   // The branch shown when the dialog opened: what is asked and enabled is about its path.
+  const [forkId] = useState(() => session.snapshot().forkId)
   const [leafSlotId] = useState(() => session.snapshot().leafSlotId)
   useEffect(() => {
     if (leafSlotId === null) return
     let live = true
     void session
-      .call((client) => client("GetLcmEnableOffer", { chatId: session.id, leafSlotId }))
+      .call((client) => client("GetLcmEnableOffer", { chatId: session.id, leafSlotId, forkId }))
       .then((result) => {
         if (!live) return
         if (result.ok) {
@@ -124,7 +125,7 @@ export function EnableLcmDialog({
     return () => {
       live = false
     }
-  }, [session, leafSlotId])
+  }, [session, leafSlotId, forkId])
   const enable = async () => {
     if (offer === null) return
     setPending(true)
@@ -132,6 +133,7 @@ export function EnableLcmDialog({
       client("EnableLcm", {
         chatId: session.id,
         leafSlotId: offer.leafSlotId,
+        forkId,
         choice,
         approved: choice === "adopt" ? offer.adopted! : offer.fromScratch
       })
@@ -142,7 +144,7 @@ export function EnableLcmDialog({
       setError(result.error)
       if (result.error.tag === "LcmEstimateChanged") {
         const updated = await session.call((client) =>
-          client("GetLcmEnableOffer", { chatId: session.id, leafSlotId: offer.leafSlotId })
+          client("GetLcmEnableOffer", { chatId: session.id, leafSlotId: offer.leafSlotId, forkId })
         )
         if (updated.ok) {
           setOffer(updated.value)

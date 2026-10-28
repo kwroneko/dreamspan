@@ -2,6 +2,7 @@
 // user; storage enforces ownership, so another user's items are NotFound. Restoring
 // something inside a chat tells its open tabs to read it again.
 import { type AppApi, CurrentUser } from "@rp/shared/api.ts"
+import type { UserId } from "@rp/shared/domain.ts"
 import type { ChatId } from "@rp/shared/chat.ts"
 import { Effect } from "effect"
 import { CacheWarmth } from "../chat/CacheWarmth.ts"
@@ -16,6 +17,19 @@ export const makeBinHandlers = Effect.gen(function* () {
   const warmth = yield* CacheWarmth
 
   const userId = Effect.map(CurrentUser, (user) => user.id)
+
+  const afterPurge = (id: UserId, chatIds: ReadonlyArray<string>) =>
+    Effect.gen(function* () {
+      for (const chatId of chatIds) {
+        const chat = yield* reader.GetChat({ userId: id, chatId: chatId as ChatId }).pipe(Effect.option)
+        if (chat._tag === "Some") {
+          hub.publish(chatId as ChatId, { _tag: "Reload" })
+          hub.publish(chatId as ChatId, { _tag: "State" })
+          hub.publish(chatId as ChatId, { _tag: "Chat", chat: chat.value })
+        } else hub.close(chatId as ChatId, { _tag: "Deleted" })
+      }
+      yield* warmth.refreshUser(id)
+    })
 
   const handlers = {
     ListBin: ({ limit, before }) =>
@@ -41,15 +55,24 @@ export const makeBinHandlers = Effect.gen(function* () {
         return item
       }).pipe(Effect.uninterruptible, internal("RestoreBinItem")),
 
-    PurgeBinItem: ({ itemId }) =>
-      Effect.flatMap(userId, (id) =>
-        writer.PurgeBinItem({ userId: id, itemId }).pipe(Effect.tap(() => warmth.refreshUser(id)))
-      ).pipe(internal("PurgeBinItem")),
+    PurgeBinItem: ({ itemId, expectedForkIds }) =>
+      Effect.gen(function* () {
+        const id = yield* userId
+        const chatIds = yield* writer.PurgeBinItem({
+          userId: id,
+          itemId,
+          ...(expectedForkIds ? { expectedForkIds } : {})
+        })
+        yield* afterPurge(id, chatIds)
+      }).pipe(Effect.uninterruptible, internal("PurgeBinItem")),
 
-    EmptyBin: ({ itemIds }) =>
-      Effect.flatMap(userId, (id) =>
-        writer.EmptyBin({ userId: id, itemIds }).pipe(Effect.tap(() => warmth.refreshUser(id)))
-      ).pipe(internal("EmptyBin")),
+    EmptyBin: ({ itemIds, expectedForkIds }) =>
+      Effect.gen(function* () {
+        const id = yield* userId
+        const result = yield* writer.EmptyBin({ userId: id, itemIds, ...(expectedForkIds ? { expectedForkIds } : {}) })
+        yield* afterPurge(id, result.chatIds)
+        return { purged: result.purged }
+      }).pipe(Effect.uninterruptible, internal("EmptyBin")),
 
     ListRecoveredTexts: ({ limit, before }) =>
       Effect.flatMap(userId, (id) => reader.ListRecoveredTexts({ userId: id, source: null, limit, before })).pipe(

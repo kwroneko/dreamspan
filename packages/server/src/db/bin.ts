@@ -11,10 +11,10 @@ import type { SqlClient } from "effect/sql"
 import { reachableSlot } from "./graphReachability.ts"
 import { forkRecency, forksShowing, onPath, sharedDepth } from "./forks.ts"
 import {
+  effectiveOverride,
   forkAt,
   insertFork,
   originalSql,
-  reselectEverywhere,
   selectedIn,
   shownInSql,
   shownIn,
@@ -26,6 +26,7 @@ import {
 import { recordReduction } from "./historyChanges.ts"
 import { pathSegments } from "./pathSegments.ts"
 import type { ForkRow } from "./rows.ts"
+import { binItemForks } from "./binForks.ts"
 import { makeDraftStore } from "./drafts.ts"
 import { NotFound } from "./ops.ts"
 import type { QueuedRow } from "./queueRows.ts"
@@ -291,7 +292,7 @@ export const makeBin = (sql: SqlClient.SqlClient, limits: BinLimits, now: () => 
         { kind: "delete_slot", targetId: slotId, slotId, valueId: null, flag: 1, binItemId: itemId }
       )
       yield* recordReduction(sql, slotId, slot.fork.id)
-      const shown = yield* forksShowing(sql, slot.chat_id, slotId, null, slot.fork.id, true)
+      const shown = yield* forksShowing(sql, slot.chat_id, slotId, null, slot.fork.id, false)
       if (shown.length === 0)
         yield* sql`UPDATE slots SET deleted_at = ${Date.now()}, bin_item_id = ${itemId} WHERE id = ${slotId}`
       yield* relocateLeaf(slot.chat_id)
@@ -311,9 +312,9 @@ export const makeBin = (sql: SqlClient.SqlClient, limits: BinLimits, now: () => 
         SELECT f.*, c.title AS chat_title FROM forks f JOIN chats c ON c.id = f.chat_id
         WHERE f.id = ${forkId} AND c.owner_user_id = ${userId} AND f.deleted_at IS NULL AND c.deleted_at IS NULL`
       if (!fork) return yield* new NotFound({ entity: "fork", id: forkId })
-      const others = yield* sql<{ tip_slot_id: string | null }>`
-        SELECT tip_slot_id FROM forks WHERE chat_id = ${fork.chat_id} AND deleted_at IS NULL AND id <> ${forkId}`
-      if (others.length === 0) return yield* new CannotDeleteLastFork()
+      const others = yield* sql<{ tip_slot_id: string | null; deleted_at: number | null }>`
+        SELECT tip_slot_id, deleted_at FROM forks WHERE chat_id = ${fork.chat_id} AND purged_at IS NULL AND id <> ${forkId}`
+      if (!others.some((other) => other.deleted_at === null)) return yield* new CannotDeleteLastFork()
       const below =
         fork.tip_slot_id === null
           ? Number.MAX_SAFE_INTEGER
@@ -438,15 +439,9 @@ export const makeBin = (sql: SqlClient.SqlClient, limits: BinLimits, now: () => 
         yield* writeSelect(sql, { id: fork.id, chatId: slot.chat_id }, slot.id, previous.id)
         yield* recordReduction(sql, slot.id, fork.id)
       }
-      const shown = yield* forksShowing(sql, slot.chat_id, slot.id, versionId, fork.id, true)
+      const shown = yield* forksShowing(sql, slot.chat_id, slot.id, versionId, fork.id, false)
       if (shown.length === 0) {
         yield* sql`UPDATE versions SET deleted_at = ${Date.now()}, bin_item_id = ${itemId} WHERE id = ${versionId}`
-        // Forks in the bin that selected it select a neighbour, as every fork did before.
-        const base = yield* sql<{ id: string; ordinal: number }>`
-          SELECT id, ordinal FROM versions WHERE slot_id = ${slot.id} AND id <> ${versionId} AND fork_id IS NULL
-            AND deleted_at IS NULL AND purged_at IS NULL ORDER BY ordinal`
-        const neighbour = base.filter((o) => o.ordinal < version.ordinal).at(-1) ?? base[0]
-        if (neighbour) yield* reselectEverywhere(sql, slot.chat_id, slot.id, versionId, neighbour.id)
       }
       return itemId
     })
@@ -581,15 +576,38 @@ export const makeBin = (sql: SqlClient.SqlClient, limits: BinLimits, now: () => 
              AND purged_at IS NULL AND bin_item_id IN (${forkItems})`,
           [target]
         )
-        if (item.kind === "message" && fork && fork.deleted_at === null) {
+        let restoredMessage = item.kind === "message"
+        if (item.kind === "version" && fork) {
+          // A global purge can remove this fork's last available alternative. Its automatic
+          // slot deletion records the purged selection in value_id, unlike a user's deletion.
+          const [automatic] = yield* sql`SELECT 1 FROM slots s JOIN fork_overrides o
+            ON o.id = ${effectiveOverride(sql, "delete_slot", fork.id, "s.id")}
+            WHERE s.id = ${slotId} AND o.flag = 1 AND o.value_id IS NOT NULL`
+          if (automatic) {
+            yield* writeOverride(
+              sql,
+              { id: fork.id, chatId },
+              {
+                kind: "delete_slot",
+                targetId: slotId,
+                slotId,
+                valueId: null,
+                flag: 0
+              }
+            )
+            yield* writeSelect(sql, { id: fork.id, chatId }, slotId, target)
+            restoredMessage = true
+          }
+        }
+        if (restoredMessage && fork && fork.deleted_at === null) {
           // The fork's tip followed the delete up. If it's still where it went, it follows the
           // message back down. If the fork went on, the message isn't on its path any more, and
           // comes back as a fork of its own, from the fork, at its parent (§2.4).
           const [slot] = yield* sql<{
             parent_slot_id: string | null
-          }>`SELECT parent_slot_id FROM slots WHERE id = ${target}`
-          if (!(yield* onPath(sql, chatId, fork.tip_slot_id, target))) {
-            const tip = yield* latestBelow(chatId, target)
+          }>`SELECT parent_slot_id FROM slots WHERE id = ${slotId}`
+          if (!(yield* onPath(sql, chatId, fork.tip_slot_id, slotId))) {
+            const tip = slotId
             if (fork.tip_slot_id === (slot?.parent_slot_id ?? null)) {
               yield* sql`UPDATE forks SET tip_slot_id = ${tip}, row_version = row_version + 1 WHERE id = ${fork.id}`
             } else {
@@ -666,7 +684,7 @@ export const makeBin = (sql: SqlClient.SqlClient, limits: BinLimits, now: () => 
           yield* writeOverride(
             sql,
             { id: fork.id, chatId },
-            { kind: "delete_slot", targetId: slotId, slotId, valueId: null, flag: 1 }
+            { kind: "delete_slot", targetId: slotId, slotId, valueId: versionId, flag: 1 }
           )
       }
       yield* relocateLeaf(chatId)
@@ -716,10 +734,13 @@ export const makeBin = (sql: SqlClient.SqlClient, limits: BinLimits, now: () => 
           params
         )
       const erasedMessages = yield* forkOwned("message")
-      for (const item of erasedMessages)
+      for (const item of erasedMessages) {
+        yield* recordReduction(sql, item.target_id, null)
         yield* sql`UPDATE slots SET deleted_at = coalesce(deleted_at, ${now}), bin_item_id = ${item.id}
           WHERE id = ${item.target_id} AND purged_at IS NULL`
+      }
       for (const item of yield* forkOwned("version")) {
+        yield* recordReduction(sql, item.slot_id, null)
         yield* sql`UPDATE versions SET deleted_at = coalesce(deleted_at, ${now}), bin_item_id = ${item.id}
           WHERE id = ${item.target_id} AND purged_at IS NULL`
         yield* dropSelections(item.chat_id, item.slot_id, item.target_id)
@@ -789,19 +810,43 @@ export const makeBin = (sql: SqlClient.SqlClient, limits: BinLimits, now: () => 
       for (const chatId of new Set(erasedMessages.map((item) => item.chat_id))) yield* relocateLeaf(chatId)
     })
 
-  const purge = (userId: UserId, itemId: string) =>
-    Effect.flatMap(loadItem(userId, itemId), (item) => purgeWhere("id = ?", [item.id]))
-
-  const emptyBin = (userId: UserId, itemIds: ReadonlyArray<string>) =>
+  const confirmForks = (
+    userId: UserId,
+    itemIds: ReadonlyArray<string>,
+    expectedForkIds: ReadonlyArray<string> | undefined
+  ) =>
     Effect.gen(function* () {
-      const rows = yield* sql<{ id: string }>`SELECT id FROM bin_items WHERE user_id = ${userId}`
+      if (expectedForkIds === undefined) return
+      const actual = new Set((yield* binItemForks(sql, userId, itemIds)).map((fork) => fork.forkId))
+      const expected = new Set(expectedForkIds)
+      if (actual.size !== expected.size || [...actual].some((id) => !expected.has(id))) return yield* new BinChanged()
+    })
+
+  const purge = (userId: UserId, itemId: string, expectedForkIds?: ReadonlyArray<string>) =>
+    Effect.gen(function* () {
+      const item = yield* loadItem(userId, itemId)
+      yield* confirmForks(userId, [itemId], expectedForkIds)
+      yield* purgeWhere("id = ?", [item.id])
+      return item.chat_id === null ? [] : [item.chat_id]
+    })
+
+  const emptyBin = (userId: UserId, itemIds: ReadonlyArray<string>, expectedForkIds?: ReadonlyArray<string>) =>
+    Effect.gen(function* () {
+      const rows = yield* sql<{
+        id: string
+        chat_id: string | null
+      }>`SELECT id, chat_id FROM bin_items WHERE user_id = ${userId}`
       const confirmed = new Set(itemIds)
       if (rows.length !== confirmed.size || !rows.every((row) => confirmed.has(row.id))) {
         return yield* new BinChanged()
       }
+      yield* confirmForks(userId, itemIds, expectedForkIds)
       // The comparison and purge share this writer transaction: every current item was confirmed.
       yield* purgeWhere("user_id = ?", [userId])
-      return rows.length
+      return {
+        purged: rows.length,
+        chatIds: [...new Set(rows.flatMap((row) => (row.chat_id === null ? [] : [row.chat_id])))]
+      }
     })
 
   /**
@@ -832,24 +877,39 @@ export const makeBin = (sql: SqlClient.SqlClient, limits: BinLimits, now: () => 
                 ORDER BY deleted_at, id LIMIT 1`
               if (!oldest) return yield* new NoRoom()
               after = oldest
+              // Another deletion of the same content must remain restorable.
+              const [protectedItem] = yield* sql`SELECT 1 FROM bin_items
+                WHERE id <> ${oldest.id} AND chat_id = ${oldest.chat_id} AND (
+                  (kind = ${oldest.kind} AND target_id = ${oldest.target_id}) OR
+                  (kind IN ('message', 'version') AND origin_json ->> '$.slotId' = ${JSON.parse(oldest.origin_json).slotId ?? null}
+                    AND (${oldest.kind} = 'message' OR kind = 'message')))`
+              if (protectedItem && (oldest.kind === "message" || oldest.kind === "version")) continue
               // Making room never erases what another fork still shows: its deletion in its own
               // fork becomes permanent, and the item goes.
               const origin = JSON.parse(oldest.origin_json) as { forkId?: string; slotId?: string }
               if (
                 origin.forkId !== undefined &&
                 (oldest.kind === "message" || oldest.kind === "version") &&
-                oldest.chat_id !== null &&
-                (yield* forksShowing(
-                  sql,
-                  oldest.chat_id,
-                  origin.slotId!,
-                  oldest.kind === "version" ? oldest.target_id : null,
-                  origin.forkId,
-                  false
-                )).length > 0
+                oldest.chat_id !== null
               ) {
-                yield* sql`DELETE FROM bin_items WHERE id = ${oldest.id}`
-                continue
+                // A deleted fork, or a locally deleted message, can become visible again. Its
+                // path still retains the content even when forksShowing quite correctly omits it.
+                const others = yield* sql<{ tip_slot_id: string }>`SELECT tip_slot_id FROM forks
+                  WHERE chat_id = ${oldest.chat_id} AND id <> ${origin.forkId} AND purged_at IS NULL
+                    AND tip_slot_id IS NOT NULL`
+                let retained = false
+                for (const other of others) {
+                  if (yield* onPath(sql, oldest.chat_id, other.tip_slot_id, origin.slotId!)) {
+                    retained = true
+                    break
+                  }
+                }
+                if (retained) {
+                  const [marked] = yield* sql`SELECT 1 FROM slots WHERE bin_item_id = ${oldest.id}
+                    UNION ALL SELECT 1 FROM versions WHERE bin_item_id = ${oldest.id} LIMIT 1`
+                  if (!marked) yield* sql`DELETE FROM bin_items WHERE id = ${oldest.id}`
+                  continue
+                }
               }
               yield* sql
                 .withTransaction(purgeWhere("id = ?", [oldest.id]))

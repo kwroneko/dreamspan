@@ -1,6 +1,6 @@
-import { contextExcluded, contextExcludedIn } from "./lcmVisibility.ts"
+import { contextExcludedIn } from "./lcmVisibility.ts"
 import { recordHistoryReduction } from "./historyChanges.ts"
-import { currentForkSql, forkAt, reselectEverywhere, selectedInSql, writeOverride } from "./forkState.ts"
+import { currentForkSql, inFork, viewAt, reselectEverywhere, selectedInSql, writeOverride } from "./forkState.ts"
 import { forkImportSlot } from "./stImportFork.ts"
 import { onPath } from "./forks.ts"
 // Write handlers for the ST data folder import (ARCHITECTURE.md §13). Each is one
@@ -453,7 +453,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
                 locally_changed: number
               }>`
                 SELECT s.id AS slot_id, v.id AS version_id, s.depth, s.branch_name, s.branch_name_user,
-                  ${sql.literal(contextExcluded())} AS hidden,
+                  ${contextExcludedIn(sql, sql.literal(currentForkSql("s.chat_id")))} AS hidden,
                   v.id = ${sql.literal(shownSql)} AS selected,
                   v.content, v.created_at, v.writer, v.ordinal,
                   s.purged_at IS NOT NULL AS slot_purged, v.purged_at IS NOT NULL AS version_purged,
@@ -885,11 +885,11 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
 
     // The import's hidden messages up to a slot shown again, in the fork through it (a `hide`
     // row of its own, spec/FORK-INDEPENDENCE-DELTA.md §2.4): other forks keep their hides.
-    StImportUnhide: ({ userId, chatId, throughSlotId }) =>
+    StImportUnhide: ({ userId, chatId, throughSlotId, forkId }) =>
       Effect.gen(function* () {
         yield* ownedChat(userId, chatId)
         yield* ownedSlot(chatId, throughSlotId)
-        const fork = yield* forkAt(sql, chatId, throughSlotId)
+        const fork = yield* viewAt(sql, chatId, throughSlotId)
         if (fork === null) return { unhidden: 0 }
         const rows = yield* sql<{ id: string }>`
           WITH RECURSIVE path(id, parent) AS (
@@ -905,7 +905,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
             { kind: "hide", targetId: row.id, slotId: row.id, valueId: null, flag: 0 }
           )
         return { unhidden: rows.length }
-      }).pipe(transaction(sql, "StImportUnhide")),
+      }).pipe(inFork(sql, chatId, forkId, throughSlotId), transaction(sql, "StImportUnhide")),
 
     StImportClaim: ({ userId, recordId, lease, parentRecordId }) =>
       Effect.gen(function* () {

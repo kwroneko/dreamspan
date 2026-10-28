@@ -43,7 +43,7 @@ const seeded = (title: string) =>
       yield* api.NameFork({ forkId: side.startsForkId!, name: "Side road" })
       const first = (yield* api.ListForks({ chatId: chat.id })).find((fork) => fork.name === null)!
       yield* api.DeleteMessage({ slotId: shared, forkId: first.id })
-      return { chatId: chat.id, old: old.startsForkId!, side: side.startsForkId! }
+      return { chatId: chat.id, shared, old: old.startsForkId!, side: side.startsForkId! }
     })
   )
 
@@ -72,6 +72,10 @@ for (const width of [1440, 390]) {
     await expect(page.getByTestId("messages").getByText("A shared message")).toBeVisible()
     await expect(page.getByTestId("messages").getByText("Down the side road")).toBeVisible()
 
+    // Another tab already showing the affected fork must hear about the global purge.
+    const watching = await page.context().newPage()
+    await watching.goto(`${server().url}/chats/${chatId}?fork=${side}`)
+    await expect(watching.getByTestId("messages").getByText("A shared message")).toBeVisible()
     // The bin names the fork and the message, and warns before deleting the message for good.
     await page.goto(`${server().url}/bin`)
     await expect(page.getByRole("listitem", { name: `Fork “Old road” in “${title}”` })).toBeVisible()
@@ -86,6 +90,9 @@ for (const width of [1440, 390]) {
     await dialog.getByRole("button", { name: "Delete for good" }).click()
     await expect(page.getByRole("listitem", { name: `Message in “${title}”` })).toHaveCount(0)
 
+    await expect(watching.getByTestId("messages").getByText("A shared message")).toHaveCount(0)
+    await expect(watching.getByTestId("messages").getByText("Down the side road")).toBeVisible()
+    await watching.close()
     // Erased everywhere: the side fork lost the message too.
     await page.goto(`${server().url}/chats/${chatId}?fork=${side}`)
     await expect(page.getByTestId("messages").getByText("Down the side road")).toBeVisible()
@@ -93,3 +100,58 @@ for (const width of [1440, 390]) {
     await shot(page, "side-fork-after", width)
   })
 }
+
+test("destructive actions wait for the affected-forks warning", async ({ page }) => {
+  const { chatId } = await seeded("Delayed fork warning")
+  let release: (() => void) | null = null
+  await page.routeWebSocket("**/rpc", (socket) => {
+    const upstream = socket.connectToServer()
+    socket.onMessage((message) => {
+      if (String(message).includes('"tag":"BinItemForks"')) release = () => upstream.send(message)
+      else upstream.send(message)
+    })
+    upstream.onMessage((message) => socket.send(message))
+  })
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${server().url}/bin`)
+  const row = page.getByRole("listitem", { name: "Message in “Delayed fork warning”" })
+  await row.getByRole("button", { name: "Delete for good" }).click()
+  const dialog = page.getByRole("alertdialog")
+  await expect.poll(() => release !== null).toBe(true)
+  await expect(dialog.getByRole("button", { name: "Delete for good" })).toBeDisabled()
+  release!()
+  await expect(dialog.getByText("“Side road”")).toBeVisible()
+  await expect(dialog.getByRole("button", { name: "Delete for good" })).toBeEnabled()
+  await dialog.getByRole("button", { name: "Cancel", exact: true }).click()
+  release = null
+  await page.getByRole("button", { name: "Empty the bin", exact: true }).click()
+  await expect.poll(() => release !== null).toBe(true)
+  await expect(dialog.getByRole("button", { name: "Empty the bin", exact: true })).toBeDisabled()
+  release!()
+  await expect(dialog.getByText("“Side road”")).toBeVisible()
+  await expect(dialog.getByRole("button", { name: "Empty the bin", exact: true })).toBeEnabled()
+  await dialog.getByRole("button", { name: "Cancel", exact: true }).click()
+  await page.goto(`${server().url}/chats/${chatId}`)
+})
+
+test("the warning names every affected fork, including the ninth", async ({ page }) => {
+  const { chatId, side, shared } = await seeded("Many forks")
+  await admin((api) =>
+    Effect.gen(function* () {
+      for (let i = 0; i < 9; i++) {
+        const made = yield* api.CreateFork({ chatId, fromForkId: side, atSlotId: shared })
+        yield* api.NameFork({ forkId: made.fork.id, name: `Affected ${i + 1}` })
+      }
+    })
+  )
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${server().url}/bin`)
+  await page
+    .getByRole("listitem", { name: "Message in “Many forks”" })
+    .getByRole("button", { name: "Delete for good" })
+    .click()
+  const dialog = page.getByRole("alertdialog")
+  for (let i = 0; i < 9; i++) await expect(dialog.getByText(`“Affected ${i + 1}”`, { exact: false })).toBeAttached()
+  await expect(dialog.getByText("“Old road”")).toBeAttached()
+  await expect(dialog.getByText("“Side road”")).toBeAttached()
+})

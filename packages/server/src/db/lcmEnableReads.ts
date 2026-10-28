@@ -5,7 +5,7 @@ import { contextExcludedIn } from "./lcmVisibility.ts"
 // the cost formulas are.
 import { foldState, noteSwitches } from "@rp/shared/state.ts"
 import type { EntityId } from "@rp/shared/chat.ts"
-import { atLeaf, shownIn, shownVersionDeletedIn, slotDeletedIn, viewAt } from "./forkState.ts"
+import { inFork, shownIn, shownVersionDeletedIn, slotDeletedIn, viewAt } from "./forkState.ts"
 import type { BackfillCounts } from "@rp/shared/lcm.ts"
 import { Effect, Layer } from "effect"
 import { SqlClient } from "effect/sql"
@@ -112,14 +112,14 @@ export const makeLcmEnableReadHandlers = Effect.gen(function* () {
         ),
         query("LcmSettingsAt")
       ),
-    ReadLcmImported: ({ userId, chatId, leafSlotId }) =>
+    ReadLcmImported: ({ userId, chatId, leafSlotId, forkId }) =>
       Effect.gen(function* () {
         const [owned] = yield* sql`SELECT 1 FROM slots s JOIN chats c ON c.id = s.chat_id
         WHERE s.id = ${leafSlotId} AND c.id = ${chatId} AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL`
         if (!owned) return yield* new NotFound({ entity: "chat", id: chatId })
         const [existing] = yield* sql`SELECT 1 FROM summaries WHERE chat_id = ${chatId} AND sealed = 1 LIMIT 1`
         return existing ? null : yield* importedSummary(sql, userId, chatId, leafSlotId)
-      }).pipe(atLeaf(sql, chatId, leafSlotId), query("ReadLcmImported")),
+      }).pipe(inFork(sql, chatId, forkId, leafSlotId), query("ReadLcmImported")),
     GetBackfill: ({ userId, chatId }) =>
       Effect.gen(function* () {
         const [owned] =
@@ -154,7 +154,7 @@ export const makeLcmEnableReadHandlers = Effect.gen(function* () {
         }
       }).pipe(query("GetBackfill")),
 
-    EstimateBackfill: ({ userId, chatId, leafSlotId }) =>
+    EstimateBackfill: ({ userId, chatId, leafSlotId, forkId }) =>
       Effect.gen(function* () {
         yield* lcmPath(sql, userId, chatId, leafSlotId, leafSlotId)
         const sources = sqlSources(sql, { userId, chatId, next: true, cut: leafSlotId })
@@ -301,7 +301,7 @@ export const makeLcmEnableReadHandlers = Effect.gen(function* () {
           : null
         return { enabled, imported: offer, fromScratch, adopted, ...noted }
       }).pipe(
-        atLeaf(sql, chatId, leafSlotId),
+        inFork(sql, chatId, forkId, leafSlotId),
         // A document the sources can't read means nothing can be assembled to measure.
         Effect.catchTag("AssemblyFailed", (error) =>
           Effect.fail(new StorageError({ operation: "EstimateBackfill", reason: "constraint", message: error.message }))

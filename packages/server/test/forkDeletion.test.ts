@@ -11,6 +11,7 @@ import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { databaseFile } from "../src/db/connection.ts"
 import * as Database from "../src/db/Database.ts"
+import { LINEAGE_CAP } from "../src/db/forkState.ts"
 import { historyRevision } from "../src/db/historyChanges.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
 import { tempDir } from "./support/tempDir.ts"
@@ -417,4 +418,219 @@ describe("hiding in a fork", () => {
       assert.isFalse(yield* hidden(main))
     }).pipe(Effect.provide(database(dir)))
   })
+})
+
+describe("fork deletion review regressions", () => {
+  it.live("a deleted fork is named before erasing a message it will show on restore", () => {
+    const dir = tempDir("fork-deletion-review")
+    return Effect.gen(function* () {
+      const { writer, reader, userId, main, side, a1 } = yield* setup(dir)
+      yield* writer.DeleteFork({ userId, forkId: side })
+      const item = yield* writer.DeleteMessage({ userId, slotId: a1.slotId, forkId: main })
+      assert.deepStrictEqual(
+        (yield* reader.BinItemForks({ userId, itemIds: [item.id] })).map((f) => f.forkId),
+        [side]
+      )
+    }).pipe(Effect.provide(database(dir)))
+  })
+
+  it.live("purging a parent fork keeps the history of its deleted descendant", () => {
+    const dir = tempDir("fork-deletion-review")
+    return Effect.gen(function* () {
+      const { writer, userId, chatId, main, side, h2, texts } = yield* setup(dir)
+      const child = (yield* writer.CreateFork({ userId, chatId, fromForkId: main, atSlotId: h2.slotId })).fork.id
+      const childItem = yield* writer.DeleteFork({ userId, forkId: child })
+      const parentItem = yield* writer.DeleteFork({ userId, forkId: main })
+      yield* writer.PurgeBinItem({ userId, itemId: parentItem.id })
+      yield* writer.RestoreBinItem({ userId, itemId: childItem.id })
+      assert.deepStrictEqual(yield* texts(child), ["root", "h1", "a1", "h2"])
+      assert.deepStrictEqual(yield* texts(side), ["root", "h1", "a1", "g1"])
+    }).pipe(Effect.provide(database(dir)))
+  })
+
+  it.live("restoring a tip never follows another fork's replies", () => {
+    const dir = tempDir("fork-deletion-review")
+    return Effect.gen(function* () {
+      const { writer, userId, chatId, main, h2, texts, append } = yield* setup(dir)
+      const child = (yield* writer.CreateFork({ userId, chatId, fromForkId: main, atSlotId: h2.slotId })).fork.id
+      yield* append(child, h2.slotId, "child only")
+      const item = yield* writer.DeleteMessage({ userId, slotId: h2.slotId, forkId: main })
+      yield* writer.RestoreBinItem({ userId, itemId: item.id })
+      assert.deepStrictEqual(yield* texts(main), ["root", "h1", "a1", "h2"])
+      assert.deepStrictEqual(yield* texts(child), ["root", "h1", "a1", "h2", "child only"])
+    }).pipe(Effect.provide(database(dir)))
+  })
+
+  it.live("automatic eviction keeps a swipe deleted locally in another fork available there for restore", () => {
+    const dir = tempDir("fork-deletion-review")
+    return Effect.gen(function* () {
+      const { writer, userId, main, side, again, h2, rows } = yield* setup(dir)
+      yield* writer.DeleteVersion({ userId, versionId: again, forkId: main })
+      const sideItem = yield* writer.DeleteVersion({ userId, versionId: again, forkId: side })
+      yield* writer.DeleteMessage({ userId, slotId: h2.slotId, forkId: main })
+      yield* writer.RestoreBinItem({ userId, itemId: sideItem.id })
+      assert.deepStrictEqual((yield* rows("SELECT content FROM versions WHERE id = ?", again))[0], {
+        content: "a1 again"
+      })
+    }).pipe(
+      Effect.provide(database(dir, { deletedItems: 2, deletedBytes: 1e9, recoveredTexts: 10, recoveredBytes: 1e9 }))
+    )
+  })
+
+  it.live("later reductions in the parent preserve a child's inherited history revision", () => {
+    const dir = tempDir("fork-deletion-review")
+    return Effect.gen(function* () {
+      const { writer, userId, chatId, main, h1, h2 } = yield* setup(dir)
+      yield* writer.SetSlotHidden({ userId, slotId: h1.slotId, forkId: main, hidden: true })
+      const child = (yield* writer.CreateFork({ userId, chatId, fromForkId: main, atSlotId: h2.slotId })).fork.id
+      const revision = () =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          return (yield* historyRevision(sql, userId, chatId, h2.slotId, 10, child))[0]!.revision
+        }).pipe(Effect.provide(SqliteClient.layer({ filename: databaseFile(dir), readonly: true })))
+      const before = yield* revision()
+      yield* writer.SetSlotHidden({ userId, slotId: h1.slotId, forkId: main, hidden: false })
+      yield* writer.SetSlotHidden({ userId, slotId: h1.slotId, forkId: main, hidden: true })
+      assert.strictEqual(yield* revision(), before)
+      let descendant = child
+      for (let i = 0; i < LINEAGE_CAP; i++)
+        descendant = (yield* writer.CreateFork({ userId, chatId, fromForkId: descendant, atSlotId: h2.slotId })).fork.id
+      const inheritedRevision = yield* Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        return (yield* historyRevision(sql, userId, chatId, h2.slotId, 10, descendant))[0]!.revision
+      }).pipe(Effect.provide(SqliteClient.layer({ filename: databaseFile(dir), readonly: true })))
+      assert.strictEqual(inheritedRevision, before)
+    }).pipe(Effect.provide(database(dir)))
+  })
+
+  it.live("LCM enable shows the imported range only in its fork and forks made afterwards", () => {
+    const dir = tempDir("fork-deletion-review")
+    return Effect.gen(function* () {
+      const { writer, reader, userId, chatId, main, side, root, h1, h2 } = yield* setup(dir)
+      yield* fixtureSql(dir, [
+        { sql: "DROP TRIGGER slots_hide_frozen" },
+        { sql: "UPDATE slots SET context_excluded = 1 WHERE id = ?", params: [root.slotId] }
+      ])
+      const approved = { jobs: 0, tokens: 0, cost: 0, currency: "USD" }
+      const params = {
+        userId,
+        chatId,
+        forkId: main,
+        leafSlotId: h2.slotId,
+        choice: "scratch" as const,
+        approved,
+        imported: {
+          noteEntity: "synthetic-note",
+          content: "Synthetic summary",
+          firstSlotId: root.slotId,
+          lastSlotId: h1.slotId,
+          slotCount: 2,
+          hidden: 1
+        }
+      }
+      yield* writer.SetSlotHidden({ userId, slotId: h1.slotId, forkId: main, hidden: true })
+      yield* writer.SetSlotHidden({ userId, slotId: h1.slotId, forkId: side, hidden: true })
+      const checkpoint = (yield* writer.CreateFork({ userId, chatId, fromForkId: main, atSlotId: h2.slotId })).fork.id
+      let stage = yield* writer.StageLcmEnable(params)
+      while (!stage.ready) stage = yield* writer.StageLcmEnable({ ...params, runId: stage.runId })
+      yield* writer.EnableLcm({ ...params, runId: stage.runId })
+      const hidden = (forkId: ForkId) =>
+        Effect.map(
+          reader.GetPath({ userId, chatId, forkId, leafSlotId: null, limit: 100 }),
+          (path) => path.entries.find((e) => e.slotId === h1.slotId)!.contextExcluded
+        )
+      assert.isFalse(yield* hidden(main))
+      assert.isTrue(yield* hidden(side))
+      assert.isTrue(yield* hidden(checkpoint))
+      const rootHidden = (forkId: ForkId) =>
+        Effect.map(
+          reader.GetPath({ userId, chatId, forkId, leafSlotId: null, limit: 100 }),
+          (path) => path.entries.find((e) => e.slotId === root.slotId)!.contextExcluded
+        )
+      assert.isFalse(yield* rootHidden(main))
+      assert.isTrue(yield* rootHidden(side))
+      assert.isTrue(yield* rootHidden(checkpoint))
+      const child = (yield* writer.CreateFork({ userId, chatId, fromForkId: main, atSlotId: h2.slotId })).fork.id
+      yield* writer.SetSlotHidden({ userId, slotId: h1.slotId, forkId: main, hidden: true })
+      assert.isFalse(yield* hidden(child))
+      assert.isTrue(yield* hidden(main))
+      // Compaction must preserve both the range and the relative precedence of later hides.
+      let descendant = child
+      for (let i = 0; i < LINEAGE_CAP; i++) {
+        yield* writer.SetSlotHidden({ userId, slotId: h2.slotId, forkId: descendant, hidden: i % 2 === 0 })
+        descendant = (yield* writer.CreateFork({ userId, chatId, fromForkId: descendant, atSlotId: h2.slotId })).fork.id
+      }
+      assert.isFalse(yield* hidden(descendant))
+      assert.isFalse(yield* rootHidden(descendant))
+    }).pipe(Effect.provide(database(dir)))
+  })
+})
+
+it.live("a new fork after the warning prevents both purge and empty-bin until reviewed", () => {
+  const dir = tempDir("fork-deletion-review")
+  return Effect.gen(function* () {
+    const { writer, reader, userId, chatId, main, side, a1, g1, texts, bin } = yield* setup(dir)
+    const item = yield* writer.DeleteMessage({ userId, slotId: a1.slotId, forkId: main })
+    const expectedForkIds = (yield* reader.BinItemForks({ userId, itemIds: [item.id] })).map((f) => f.forkId)
+    const child = (yield* writer.CreateFork({ userId, chatId, fromForkId: side, atSlotId: g1.slotId })).fork.id
+    assert.strictEqual(
+      (yield* writer.PurgeBinItem({ userId, itemId: item.id, expectedForkIds }).pipe(Effect.flip))._tag,
+      "BinChanged"
+    )
+    assert.strictEqual(
+      (yield* writer.EmptyBin({ userId, itemIds: (yield* bin).map((b) => b.id), expectedForkIds }).pipe(Effect.flip))
+        ._tag,
+      "BinChanged"
+    )
+    assert.deepStrictEqual(yield* texts(child), ["root", "h1", "a1", "g1"])
+    const reviewed = (yield* reader.BinItemForks({ userId, itemIds: [item.id] })).map((f) => f.forkId)
+    yield* writer.PurgeBinItem({ userId, itemId: item.id, expectedForkIds: reviewed })
+    assert.deepStrictEqual(yield* texts(child), ["root", "h1", "g1"])
+  }).pipe(Effect.provide(database(dir)))
+})
+
+it.live("a swipe restored after another fork purged its last alternative restores its message", () => {
+  const dir = tempDir("fork-deletion-review")
+  return Effect.gen(function* () {
+    const { writer, userId, main, side, a1, again, texts } = yield* setup(dir)
+    const original = yield* writer.DeleteVersion({ userId, versionId: a1.version.id, forkId: side })
+    const alternative = yield* writer.DeleteVersion({ userId, versionId: again, forkId: main })
+    yield* writer.PurgeBinItem({ userId, itemId: alternative.id })
+    yield* writer.RestoreBinItem({ userId, itemId: original.id })
+    assert.deepStrictEqual(yield* texts(side), ["root", "h1", "a1", "g1"])
+  }).pipe(Effect.provide(database(dir)))
+})
+
+it.live("evicting a swipe cannot empty another fork's deleted message", () => {
+  const dir = tempDir("fork-deletion-review")
+  return Effect.gen(function* () {
+    const { writer, reader, userId, main, side, a1, again, h2 } = yield* setup(dir)
+    yield* writer.DeleteVersion({ userId, versionId: again, forkId: main })
+    const message = yield* writer.DeleteMessage({ userId, slotId: a1.slotId, forkId: side })
+    yield* writer.DeleteMessage({ userId, slotId: h2.slotId, forkId: main })
+    yield* writer.RestoreBinItem({ userId, itemId: message.id })
+    assert.deepStrictEqual(
+      (yield* reader.ListVersions({ userId, slotId: a1.slotId, forkId: side })).map((v) => v.content),
+      ["a1", "a1 again"]
+    )
+  }).pipe(
+    Effect.provide(database(dir, { deletedItems: 2, deletedBytes: 1e9, recoveredTexts: 10, recoveredBytes: 1e9 }))
+  )
+})
+
+it.live("ST unhide addresses the named fork even when another fork has the same tip", () => {
+  const dir = tempDir("fork-deletion-review")
+  return Effect.gen(function* () {
+    const { writer, reader, userId, chatId, main, h1, h2 } = yield* setup(dir)
+    yield* writer.SetSlotHidden({ userId, forkId: main, slotId: h1.slotId, hidden: true })
+    const child = (yield* writer.CreateFork({ userId, chatId, fromForkId: main, atSlotId: h2.slotId })).fork.id
+    yield* writer.StImportUnhide({ userId, chatId, forkId: main, throughSlotId: h2.slotId })
+    const hidden = (forkId: ForkId) =>
+      Effect.map(
+        reader.GetPath({ userId, chatId, forkId, leafSlotId: null, limit: 100 }),
+        (path) => path.entries.find((e) => e.slotId === h1.slotId)!.contextExcluded
+      )
+    assert.isFalse(yield* hidden(main))
+    assert.isTrue(yield* hidden(child))
+  }).pipe(Effect.provide(database(dir)))
 })
