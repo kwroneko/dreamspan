@@ -2,9 +2,85 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Effect } from "effect"
 import { Reader } from "../src/db/Database.ts"
+import type { ContextSnapshot } from "../src/assembler/types.ts"
 import { client, outcome, testConfig, withServer } from "./support/config.ts"
 
 describe("snippets", () => {
+  it.live("assembles linked snippets from the viewed fork and rebuilds the pinned text", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const reader = yield* Reader
+      const userId = (yield* api.Whoami()).id
+      const chat = yield* api.CreateChat({ title: "Scoped note assembly" })
+      const scope = { chatId: chat.id, forkId: chat.currentForkId }
+      const sent = yield* api.SendMessage({ ...scope, parentSlotId: null, branch: false, content: "At the quay." })
+      assert.strictEqual(sent._tag, "Posted")
+      if (sent._tag !== "Posted") return
+      const made = yield* api.CreateSnippet({ ...scope, title: "Weather", content: "SNIPPET_RAIN" })
+      const slot = yield* api.CreateChatNote({ ...scope, title: "Weather", link: made.ref.entityId })
+      yield* api.ChangeCast({
+        ...scope,
+        slotId: null,
+        change: { _tag: "Note", entityId: slot.entityId, active: true }
+      })
+      const child = (yield* api.CreateFork({ ...scope, fromForkId: scope.forkId, atSlotId: sent.entry.slotId })).fork
+      const inspect = (forkId: typeof scope.forkId) =>
+        reader.AssembleContext({
+          ...scope,
+          forkId,
+          userId,
+          slotId: sent.entry.slotId,
+          versionId: sent.entry.version.id,
+          now: 1000,
+          timeZone: "UTC",
+          frozen: null
+        })
+      const frozen = yield* inspect(scope.forkId)
+      const text = (json: string) =>
+        (JSON.parse(json) as ContextSnapshot).request.messages.map((message) => message.content).join("\n")
+      assert.include(text(frozen.snapshot), "SNIPPET_RAIN")
+      yield* api.SaveSnippet({
+        ...scope,
+        refId: made.ref.id,
+        expectedRevision: made.revision,
+        title: "Weather",
+        content: "SNIPPET_SUNRISE"
+      })
+      assert.include(text((yield* inspect(scope.forkId)).snapshot), "SNIPPET_SUNRISE")
+      const sibling = text((yield* inspect(child.id)).snapshot)
+      assert.include(sibling, "SNIPPET_RAIN")
+      assert.notInclude(sibling, "SNIPPET_SUNRISE")
+      const rebuilt = yield* reader.RebuildContext({ userId, snapshot: frozen.snapshot })
+      assert.strictEqual(rebuilt._tag, "Rebuilt")
+      if (rebuilt._tag === "Rebuilt") assert.strictEqual(text(rebuilt.snapshot), text(frozen.snapshot))
+    }).pipe(Effect.scoped, withServer(testConfig()))
+  )
+  it.live("unlinking in a viewed fork copies that fork's snippet text", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const chat = yield* api.CreateChat({ title: "Unlink in another fork" })
+      const scope = { chatId: chat.id, forkId: chat.currentForkId }
+      const made = yield* api.CreateSnippet({ ...scope, title: "Weather", content: "Rain." })
+      const slot = yield* api.CreateChatNote({ ...scope, title: "Weather", link: made.ref.entityId })
+      const child = (yield* api.CreateFork({ chatId: chat.id, fromForkId: scope.forkId, atSlotId: null })).fork
+      yield* api.SaveSnippet({
+        ...scope,
+        forkId: child.id,
+        refId: made.ref.id,
+        expectedRevision: made.revision,
+        title: "Child weather",
+        content: "Snow."
+      })
+      // Creating a fork makes it current. Unlink the original fork while viewing it instead.
+      yield* api.UnlinkNote({ noteRefId: slot.id, chatNote: { ...scope, slotId: null } })
+      const original = yield* api.ListChatNotes({ ...scope, slotId: null })
+      assert.strictEqual(original[0]!.doc.content, "Rain.")
+      assert.isNull(original[0]!.linked)
+      const sibling = yield* api.ListChatNotes({ ...scope, forkId: child.id, slotId: null })
+      assert.strictEqual(sibling[0]!.doc.content, "Snow.")
+      assert.isNotNull(sibling[0]!.linked)
+    }).pipe(Effect.scoped, withServer(testConfig()))
+  )
   it.live("shares one store, inherits from any fork point, and keeps existing forks independent", () =>
     Effect.gen(function* () {
       const api = yield* client()

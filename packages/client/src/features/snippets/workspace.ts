@@ -110,79 +110,85 @@ export class SnippetWorkspace {
     })
     // Recovered browser copies remain local until the user explicitly retries them.
   }
-  create = (content = "") =>
-    this.enqueue(async () => {
-      const result = await this.call(
-        (api) => api("CreateSnippet", { ...this.scope, title: "Untitled snippet", content }),
-        ["library"]
-      )
-      if (!result.ok) {
-        this.update({ error: result.error.message })
-        return
-      }
-      this.update({ items: [...this.state.items, result.value], selected: result.value.ref.id, error: null })
-    })
+  create = (content = "") => this.enqueue(() => this.createNow(content))
+  private createNow = async (content: string) => {
+    const result = await this.call(
+      (api) => api("CreateSnippet", { ...this.scope, title: "Untitled snippet", content }),
+      ["library"]
+    )
+    if (!result.ok) {
+      this.update({ error: result.error.message })
+      return
+    }
+    this.update({ items: [...this.state.items, result.value], selected: result.value.ref.id, error: null })
+  }
   change = (ref: RefId, fields: { title?: string; content?: string }) => {
+    if (this.edit(ref, fields)) void this.save(ref)
+  }
+  private edit(ref: RefId, fields: { title?: string; content?: string }) {
     const item = this.state.items.find((i) => i.ref.id === ref)
-    if (!item) return
+    if (!item) return false
     const next = { ...item, ...fields }
     this.dirty.add(ref)
     this.backup(next)
     this.update({ items: this.state.items.map((i) => (i.ref.id === ref ? next : i)) })
-    void this.save(ref)
+    return true
   }
-  save = (ref: RefId) =>
-    this.enqueue(async () => {
-      if (!this.dirty.has(ref)) return
-      const item = this.state.items.find((i) => i.ref.id === ref)
-      if (!item) return
-      this.update({ saving: true })
-      const result = await this.call(
-        (api) =>
-          api("SaveSnippet", {
-            ...this.scope,
-            refId: ref,
-            title: item.title,
-            content: item.content,
-            expectedRevision: item.revision
-          }),
-        ["library"]
-      )
-      if (!result.ok) {
-        this.update({
-          saving: false,
-          error: `${result.error.message} Your text is kept here. Copy it or save it as a new snippet.`
-        })
-        return
-      }
-      const latest = this.state.items.find((i) => i.ref.id === ref)!
-      const unchanged = latest.title === item.title && latest.content === item.content
-      if (unchanged) {
-        this.dirty.delete(ref)
-        try {
-          localStorage.removeItem(this.key(ref))
-        } catch {
-          /* Server copy is safe. */
-        }
-      }
+  save = (ref: RefId) => this.enqueue(() => this.saveNow(ref))
+  private saveNow = async (ref: RefId) => {
+    if (!this.dirty.has(ref)) return
+    const item = this.state.items.find((i) => i.ref.id === ref)
+    if (!item) return
+    this.update({ saving: true })
+    const result = await this.call(
+      (api) =>
+        api("SaveSnippet", {
+          ...this.scope,
+          refId: ref,
+          title: item.title,
+          content: item.content,
+          expectedRevision: item.revision
+        }),
+      ["library"]
+    )
+    if (!result.ok) {
       this.update({
         saving: false,
-        error: null,
-        items: this.state.items.map((i) =>
-          i.ref.id !== ref
-            ? i
-            : unchanged
-              ? result.value
-              : { ...result.value, title: latest.title, content: latest.content }
-        )
+        error: `${result.error.message} Your text is kept here. Copy it or save it as a new snippet.`
       })
+      return
+    }
+    const latest = this.state.items.find((i) => i.ref.id === ref)!
+    const unchanged = latest.title === item.title && latest.content === item.content
+    if (unchanged) {
+      this.dirty.delete(ref)
+      try {
+        localStorage.removeItem(this.key(ref))
+      } catch {
+        /* Server copy is safe. */
+      }
+    }
+    this.update({
+      saving: false,
+      error: null,
+      items: this.state.items.map((i) =>
+        i.ref.id !== ref
+          ? i
+          : unchanged
+            ? result.value
+            : { ...result.value, title: latest.title, content: latest.content }
+      )
     })
+  }
   send = (text: string) => {
     this.open()
     void this.enqueue(async () => {
       const item = this.state.items.find((i) => i.ref.id === this.state.selected)
-      if (item) this.change(item.ref.id, { content: `${item.content}${item.content ? "\n" : ""}${text}` })
-      else void this.create(text)
+      // Finish this transfer in the same queue entry, before another send or scope change.
+      if (item) {
+        this.edit(item.ref.id, { content: `${item.content}${item.content ? "\n" : ""}${text}` })
+        await this.saveNow(item.ref.id)
+      } else await this.createNow(text)
     })
   }
   makeGlobal = (ref: RefId) => {

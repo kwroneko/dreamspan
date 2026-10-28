@@ -16,8 +16,9 @@ const snippet = (content: string, revision = "r0"): Snippet =>
     draft: null
   }) as Snippet
 const tick = () => new Promise((done) => setTimeout(done, 0))
-const setup = () => {
+const setup = (empty = false) => {
   let saved = snippet("First")
+  let exists = !empty
   let conflict = false
   let pause: Promise<void> | null = null
   let n = 0
@@ -25,7 +26,12 @@ const setup = () => {
   const rpc = (tag: string, args: Record<string, unknown>) =>
     Effect.promise(async () => {
       calls.push({ tag, args })
-      if (tag === "ListSnippets") return [saved]
+      if (tag === "ListSnippets") return exists ? [saved] : []
+      if (tag === "CreateSnippet") {
+        exists = true
+        saved = snippet(args.content as string)
+        return saved
+      }
       if (tag === "SaveSnippet") {
         if (pause) await pause
         if (conflict) throw new Error("simulated stale revision")
@@ -111,5 +117,29 @@ describe("snippet workspace", () => {
     await h.store.save(id)
     expect(h.store.snapshot().items[0]!.content).toBe("First\nCarried passage")
     expect(h.calls.filter((c) => c.tag === "SaveSnippet")[0]!.args.chatId).toBe("next-chat")
+  })
+  it("saves a sent passage before a following scope change", async () => {
+    const h = setup()
+    await h.store.refresh()
+    h.store.send("Carry this passage")
+    h.store.setScope({ chatId: "next-chat" as never, forkId: "next-fork" as never })
+    await h.store.refresh()
+    expect(h.calls.filter((c) => c.tag === "SaveSnippet").map((c) => c.args.content)).toEqual([
+      "First\nCarry this passage"
+    ])
+    expect(h.calls.find((c) => c.tag === "SaveSnippet")!.args.chatId).toBeNull()
+    expect(h.store.snapshot().items[0]!.content).toBe("First\nCarry this passage")
+  })
+  it("creates once and appends rapid sends before leaving the empty workspace's scope", async () => {
+    const h = setup(true)
+    await h.store.refresh()
+    h.store.send("First passage")
+    h.store.send("Second passage")
+    h.store.setScope({ chatId: "next-chat" as never, forkId: "next-fork" as never })
+    await h.store.refresh()
+    const writes = h.calls.filter((c) => c.tag !== "ListSnippets")
+    expect(writes.map((c) => c.tag)).toEqual(["CreateSnippet", "SaveSnippet"])
+    expect(writes.map((c) => c.args.chatId)).toEqual([null, null])
+    expect(h.store.snapshot().items[0]!.content).toBe("First passage\nSecond passage")
   })
 })

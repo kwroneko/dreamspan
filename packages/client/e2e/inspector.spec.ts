@@ -533,15 +533,18 @@ test("a namespaced provenance source renders its title and library link", async 
   try {
     await save(JSON.stringify(changed))
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
-    for (const width of [1440, 390]) {
-      await page.setViewportSize({ width, height: 900 })
-      await page.goto(`${server().url}/chats/${chat.id}/context/${chat.reply}`)
-      const link = page.getByRole("link", { name: "Plugin scene reference", exact: true }).first()
-      await expect(link).toBeVisible()
-      await expect(link).toHaveAttribute("href", `/library/${ref}`)
-      await link.scrollIntoViewIfNeeded()
-      await shoot(page, `custom-source-${width}`)
-    }
+    for (const width of [1440, 390])
+      for (const theme of ["light", "dark"] as const) {
+        await page.setViewportSize({ width, height: 900 })
+        await page.emulateMedia({ colorScheme: theme })
+        await page.goto(`${server().url}/chats/${chat.id}/context/${chat.reply}`)
+        const link = page.getByRole("link", { name: "Plugin scene reference", exact: true }).first()
+        await expect(link).toBeVisible()
+        await expect(link).toHaveAttribute("href", `/library/${ref}`)
+        expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
+        await link.scrollIntoViewIfNeeded()
+        await shoot(page, `custom-source-${width}-${theme}`)
+      }
   } finally {
     await save(original)
   }

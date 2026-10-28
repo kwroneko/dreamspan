@@ -118,6 +118,18 @@ for (const width of [1440, 390])
       await panel.getByRole("button", { name: "Insert", exact: true }).click()
       await openPanel(page, "Notes")
       await expect(content).toContainText("SThe tide is rising.")
+      // Ordinary fields and CodeMirror text can also be sent into the open snippet.
+      const title = notes.getByRole("textbox", { name: /^Name\b/ })
+      await title.fill("Harbour note")
+      await title.press("Control+a")
+      await title.press("Control+Shift+S")
+      await expect(editor).toContainText("Harbour note")
+      await openPanel(page, "Notes")
+      await content.fill("A foghorn sounds.")
+      await content.press("Control+Home")
+      await content.press("Control+Shift+End")
+      await content.press("Control+Shift+S")
+      await expect(editor).toContainText("A foghorn sounds.")
       // Select a different swipe, then send its displayed passage to the same snippet.
       const path = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
         api.ReadPath({ chatId, forkId: null, leafSlotId: null, range: { _tag: "Bottom" }, limit: 10 })
@@ -147,3 +159,31 @@ for (const width of [1440, 390])
       )
     })
   }
+
+test("a library field creates a global snippet outside a chat", async ({ page }) => {
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  const globals = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+    api.ListSnippets({ chatId: null, forkId: null })
+  )
+  for (const item of globals)
+    await asUser(server(), ADMIN.handle, ADMIN.password, (api) => api.DeleteNote({ noteRefId: item.ref.id }))
+  const card = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+    api.CreateCard({ label: "Synthetic keeper", name: "Keeper" })
+  )
+  await page.goto(`${server().url}/library/${card.id}`)
+  const description = page.getByRole("textbox", { name: "Description", exact: true })
+  await description.fill("A keeper watches the harbour.")
+  await description.press("Control+Home")
+  await description.press("Control+Shift+End")
+  await description.press("Control+Shift+S")
+  const workspace = page.getByRole("region", { name: "Snippet workspace" })
+  await expect(workspace.getByRole("textbox", { name: "Snippet text" })).toHaveText("A keeper watches the harbour.")
+  await expect(workspace.getByRole("list", { name: "Snippets" })).toContainText("Global")
+  await expect
+    .poll(async () =>
+      (
+        await asUser(server(), ADMIN.handle, ADMIN.password, (api) => api.ListSnippets({ chatId: null, forkId: null }))
+      ).map((snippet) => snippet.content)
+    )
+    .toEqual(["A keeper watches the harbour."])
+})

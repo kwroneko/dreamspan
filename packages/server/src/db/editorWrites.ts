@@ -430,7 +430,10 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps) => {
           "Unlinked from the shared note"
         )
         return change.ref
-      }).pipe(transaction(sql, "UnlinkNote"))
+      }).pipe(
+        chatNote ? inFork(sql, chatNote.chatId, chatNote.forkId, chatNote.slotId) : (effect) => effect,
+        transaction(sql, "UnlinkNote")
+      )
   } satisfies Partial<Parameters<typeof WriteOps.of>[0]>
   return handlers
 }
