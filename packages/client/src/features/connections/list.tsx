@@ -1,3 +1,4 @@
+import { useUserDraft, UserDraftStatus } from "../editor/userDraft.tsx"
 import { StSettingsImporter } from "./StSettingsImport.tsx"
 import { Dialog } from "../../ui/Dialog.tsx"
 // The connection list and the form for a new connection.
@@ -126,13 +127,21 @@ function NewConnectionForm({
   const navigate = useNavigate()
   const action = useAction()
   const keyModeLabel = useId()
-  const [kindId, setKindId] = useState(kinds[0]?.id ?? "")
-  const [name, setName] = useState("")
-  const [baseUrl, setBaseUrl] = useState("")
+  const durable = useUserDraft(
+    "connection:new",
+    "Settings",
+    JSON.stringify({ name: "", baseUrl: "", kindId: kinds[0]?.id ?? "", maxConcurrent: "" })
+  )
+  const values = JSON.parse(durable.text) as { name: string; baseUrl: string; kindId: string; maxConcurrent: string }
+  const { name, baseUrl, kindId, maxConcurrent } = values
+  const edit = (change: Partial<typeof values>) => durable.setText(JSON.stringify({ ...values, ...change }))
+  const setName = (name: string) => edit({ name })
+  const setBaseUrl = (baseUrl: string) => edit({ baseUrl })
+  const setKindId = (kindId: string) => edit({ kindId })
+  const setMaxConcurrent = (maxConcurrent: string) => edit({ maxConcurrent })
   const [keyMode, setKeyMode] = useState<KeyMode>("typed")
   const [keyEmpty, setKeyEmpty] = useState(true)
   const [credentialId, setCredentialId] = useState<CredentialId | null>(credentials[0]?.id ?? null)
-  const [maxConcurrent, setMaxConcurrent] = useState("")
   const [submitted, setSubmitted] = useState(false)
 
   const kind = kinds.find((entry) => entry.id === kindId)
@@ -151,30 +160,34 @@ function NewConnectionForm({
     setSubmitted(true)
     if (Object.values(problems).some((problem) => problem !== null)) return focusFirstInvalid(event.currentTarget)
     const apiKey = formText(event.currentTarget, "apiKey")
-    const result = await action.run(
-      (client) =>
-        client("CreateConnection", {
-          kind: kindId,
-          settings: {
-            name: name.trim(),
-            baseUrl: baseUrl.trim() || null,
-            compat: {},
-            cacheTtlS: null,
-            maxConcurrent: concurrency.value,
-            presetOverrideRefId: null
-          },
-          ...(keyMode === "typed" ? { apiKey } : keyMode === "saved" ? { credentialId } : {})
-        }),
-      ["connections", "credentials"]
-    )
-    if (result.ok) {
-      void navigate({ to: "/settings/connections/$connectionId", params: { connectionId: result.value.id } })
-    }
+    await durable.commit(durable.text, async () => {
+      const result = await action.run(
+        (client) =>
+          client("CreateConnection", {
+            kind: kindId,
+            settings: {
+              name: name.trim(),
+              baseUrl: baseUrl.trim() || null,
+              compat: {},
+              cacheTtlS: null,
+              maxConcurrent: concurrency.value,
+              presetOverrideRefId: null
+            },
+            ...(keyMode === "typed" ? { apiKey } : keyMode === "saved" ? { credentialId } : {})
+          }),
+        ["connections", "credentials"]
+      )
+      if (result.ok) {
+        void navigate({ to: "/settings/connections/$connectionId", params: { connectionId: result.value.id } })
+      }
+      return result.ok
+    })
   }
 
   const shown = (problem: string | null) => (submitted ? problem : null)
   return (
     <form onSubmit={submit} className="flex flex-col gap-5" noValidate>
+      <UserDraftStatus draft={durable} />
       <Field label="Provider">
         <Select
           items={kinds.map((entry) => ({ value: entry.id, label: entry.label }))}

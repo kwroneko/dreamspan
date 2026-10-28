@@ -9,6 +9,7 @@ export const DraftTargetKind = Schema.Literals([
   "version_edit",
   "scratchpad",
   "entity_field",
+  "user_field",
   "summary_edit"
 ])
 

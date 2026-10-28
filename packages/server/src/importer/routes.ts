@@ -11,6 +11,7 @@ import { RefId } from "@rp/shared/library.ts"
 import { DraftKey } from "@rp/shared/drafts.ts"
 import { EditorDraftSave } from "@rp/shared/editorApi.ts"
 import { ComposerBeacon } from "@rp/shared/composerApi.ts"
+import { UserDraftSave } from "@rp/shared/editorApi.ts"
 import { SummaryDraftSave } from "@rp/shared/lcm.ts"
 import { MessageDraftSave, messageDraftKey } from "@rp/shared/chatApi.ts"
 import { parseField } from "@rp/shared/editing.ts"
@@ -110,6 +111,7 @@ const LeavingDrafts = Schema.Struct({
   /** Chats' composers (DESIGN §6.2): one per open chat at most, in practice. */
   composers: Schema.optionalKey(Schema.Array(ComposerBeacon).check(Schema.isMaxLength(50))),
   /** Summaries' edits, from this browser's copies (`summaryDraft.ts`). */
+  userDrafts: Schema.optionalKey(Schema.Array(UserDraftSave).check(Schema.isMaxLength(50))),
   summaries: Schema.optionalKey(Schema.Array(SummaryDraftSave).check(Schema.isMaxLength(50))),
   /** Message editors' text, from this browser's copies (`messageDraft.ts`). */
   messages: Schema.optionalKey(Schema.Array(MessageDraftSave).check(Schema.isMaxLength(50)))
@@ -611,6 +613,16 @@ export const layer = Layer.unwrap(
           baseRevision: draft.baseRevisionId
         })
         recovered += saved.recovered
+      }
+      for (const { ownerId, targetId, field, ...save } of input.value.userDrafts ?? []) {
+        if (ownerId !== user.id) return jsonError(404, "there is no such draft owner")
+        const draft = yield* writer.SaveDraft({
+          userId: user.id,
+          key: { targetKind: "user_field", targetId, field },
+          ...save,
+          baseRevision: null
+        })
+        recovered += draft.recovered
       }
       for (const summary of input.value.summaries ?? []) {
         const saved = yield* writer.SaveDraft({

@@ -158,7 +158,122 @@ const ownModel = (party: Party) =>
     list.find((m) => m.id === party.modelId)!
   )
 
+const userDraftOf = (owner: Party) =>
+  owner.api.SaveUserDraft({
+    ownerId: owner.user.id,
+    targetId: owner.cardId,
+    field: "Instruction",
+    content: "Private instruction",
+    draftId: null,
+    expectedRowVersion: null,
+    expectedSession: null
+  })
+
 const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry } = {
+  GetUserDraft: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        yield* userDraftOf(owner)
+        yield* refused(
+          actor.api.GetUserDraft({ ownerId: owner.user.id, targetId: owner.cardId, field: "Instruction" }),
+          "NotFound"
+        )
+        assert.isNull(
+          yield* actor.api.GetUserDraft({ ownerId: actor.user.id, targetId: owner.cardId, field: "Instruction" })
+        )
+      })
+  },
+  SaveUserDraft: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const draft = yield* userDraftOf(owner)
+        // A queued first save still names the old account even after login switches.
+        yield* refused(
+          actor.api.SaveUserDraft({
+            ownerId: owner.user.id,
+            targetId: draft.key.targetId,
+            field: draft.key.field,
+            content: "Old account's delayed text",
+            draftId: null,
+            expectedRowVersion: null,
+            expectedSession: null
+          }),
+          "NotFound"
+        )
+        assert.isNull(
+          yield* actor.api.GetUserDraft({
+            ownerId: actor.user.id,
+            targetId: draft.key.targetId,
+            field: draft.key.field
+          })
+        )
+
+        yield* refused(
+          actor.api.SaveUserDraft({
+            ownerId: actor.user.id,
+            targetId: draft.key.targetId,
+            field: draft.key.field,
+            content: "Intrusion",
+            draftId: draft.id,
+            expectedRowVersion: draft.rowVersion,
+            expectedSession: draft.session
+          }),
+          "NotFound"
+        )
+        assert.strictEqual(
+          (yield* owner.api.GetUserDraft({
+            ownerId: owner.user.id,
+            targetId: draft.key.targetId,
+            field: draft.key.field
+          }))?.content,
+          "Private instruction"
+        )
+      })
+  },
+  UserDraftHistory: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        yield* userDraftOf(owner)
+        yield* refused(
+          actor.api.UserDraftHistory({ ownerId: actor.user.id, targetId: owner.cardId, field: "Instruction" }),
+          "NotFound"
+        )
+      })
+  },
+  RestoreUserDraft: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const draft = yield* userDraftOf(owner)
+        yield* refused(
+          actor.api.RestoreUserDraft({
+            ownerId: actor.user.id,
+            targetId: draft.key.targetId,
+            field: draft.key.field,
+            draftId: draft.id,
+            expectedRowVersion: draft.rowVersion,
+            seq: 0
+          }),
+          "NotFound"
+        )
+      })
+  },
+  EndUserDraft: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const draft = yield* userDraftOf(owner)
+        yield* refused(
+          actor.api.EndUserDraft({
+            ownerId: actor.user.id,
+            targetId: draft.key.targetId,
+            field: draft.key.field,
+            draftId: draft.id,
+            expectedRowVersion: draft.rowVersion,
+            outcome: "committed"
+          }),
+          "NotFound"
+        )
+      })
+  },
   RenameHistory: {
     probe: (actor, owner) =>
       refused(
@@ -2149,6 +2264,32 @@ const routes: Record<string, Probe> = {
       )
       assert.strictEqual(linked.status, 200)
       assert.strictEqual(((yield* Effect.promise(() => linked.json())) as { outcome: string }).outcome, "failed")
+    }),
+  "POST /library/drafts, with user drafts": (actor, owner) =>
+    Effect.gen(function* () {
+      const response = yield* http(
+        actor,
+        "/library/drafts",
+        JSON.stringify({
+          drafts: [],
+          userDrafts: [
+            {
+              ownerId: owner.user.id,
+              targetId: "connection:new",
+              field: "Settings",
+              content: "Old account's closing text",
+              draftId: null,
+              expectedRowVersion: null,
+              expectedSession: null
+            }
+          ]
+        }),
+        "application/json"
+      )
+      assert.strictEqual(response.status, 404)
+      assert.isNull(
+        yield* actor.api.GetUserDraft({ ownerId: actor.user.id, targetId: "connection:new", field: "Settings" })
+      )
     }),
   "POST /library/drafts, with composers": (actor, owner) =>
     Effect.gen(function* () {

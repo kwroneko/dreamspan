@@ -99,6 +99,7 @@ function Page({ group, chats }: { group: ChatGroup; chats: ReadonlyArray<Chat> }
         </Card>
       </div>
       <NameDialog
+        draftTarget={`group:${chatId}:rename`}
         open={renaming}
         onOpenChange={setRenaming}
         title="Rename group"
@@ -112,6 +113,7 @@ function Page({ group, chats }: { group: ChatGroup; chats: ReadonlyArray<Chat> }
         onSave={async (name) => {
           const result = await rename.run((client) => client("RenameGroup", { chatId, name }), ["chats"])
           if (result.ok) setRenaming(false)
+          return result.ok
         }}
       />
     </div>

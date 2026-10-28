@@ -42,6 +42,7 @@ export const recoveredSource = (text: Pick<RecoveredText, "sourceKind" | "source
     version_edit: "Edit of a message in ",
     scratchpad: "Scratchpad in ",
     summary_edit: "Summary in ",
+    user_field: null,
     entity_field: null
   }
   const prefix = prefixes[text.sourceKind]

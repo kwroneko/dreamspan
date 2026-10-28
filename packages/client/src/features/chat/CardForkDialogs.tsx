@@ -1,3 +1,4 @@
+import { useUserDraft, UserDraftStatus } from "../editor/userDraft.tsx"
 import { useAtomValue } from "@effect/atom-react"
 import type { CastCard } from "@rp/shared/chat.ts"
 import type { ChatCard } from "@rp/shared/chatSetupApi.ts"
@@ -81,9 +82,16 @@ function ChatCardForkDialog({
 }) {
   // Keep the position the dialog was opened at even if another tab moves the chat.
   const [position] = useState(() => ({ slotId: session.snapshot().leafSlotId, forkId: session.snapshot().forkId }))
-  const [name, setName] = useState(card.name)
-  const [nickname, setNickname] = useState(card.modelName ?? card.name)
-  const [version, setVersion] = useState(card.subtitle ?? "")
+  const durable = useUserDraft(
+    `chat:${session.id}:fork:${position.forkId}:card:${card.entityId}:new-fork`,
+    "Names",
+    JSON.stringify({ name: card.name, nickname: card.modelName ?? card.name, version: card.subtitle ?? "" })
+  )
+  const names = JSON.parse(durable.text) as { name: string; nickname: string; version: string }
+  const { name, nickname, version } = names
+  const setName = (name: string) => durable.setText(JSON.stringify({ ...names, name }))
+  const setNickname = (nickname: string) => durable.setText(JSON.stringify({ ...names, nickname }))
+  const setVersion = (version: string) => durable.setText(JSON.stringify({ ...names, version }))
   const [moveDrafts, setMoveDrafts] = useState(false)
   const clash = useCardNameCheck(name.trim(), version.trim())
   const action = useAction()
@@ -100,28 +108,32 @@ function ChatCardForkDialog({
         onSubmit={(event) => {
           event.preventDefault()
           if (clash || !name.trim() || action.pending) return
-          void action
-            .run(
-              (client) =>
-                client("ForkCardForChat", {
-                  chatId: session.id,
-                  ...position,
-                  entityId: card.entityId,
-                  name: name.trim(),
-                  nickname: nickname.trim(),
-                  characterVersion: version.trim(),
-                  moveDrafts
-                }),
-              ["library", "chats", `chat-cards:${session.id}`, `chat-notes:${session.id}`]
-            )
-            .then((result) => {
-              if (result.ok) {
-                onClose()
-                void navigate({ to: "/library/$refId", params: { refId: result.value.id } })
-              }
-            })
+          void durable.commit(durable.text, () =>
+            action
+              .run(
+                (client) =>
+                  client("ForkCardForChat", {
+                    chatId: session.id,
+                    ...position,
+                    entityId: card.entityId,
+                    name: name.trim(),
+                    nickname: nickname.trim(),
+                    characterVersion: version.trim(),
+                    moveDrafts
+                  }),
+                ["library", "chats", `chat-cards:${session.id}`, `chat-notes:${session.id}`]
+              )
+              .then((result) => {
+                if (result.ok) {
+                  onClose()
+                  void navigate({ to: "/library/$refId", params: { refId: result.value.id } })
+                }
+                return result.ok
+              })
+          )
         }}
       >
+        <UserDraftStatus draft={durable} />
         <Field label="Display name">
           <Input required value={name} onChange={(event) => setName(event.currentTarget.value)} />
         </Field>
