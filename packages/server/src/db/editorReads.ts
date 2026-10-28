@@ -40,11 +40,16 @@ export const makeEditorReadHandlers = Effect.gen(function* () {
         })
       }).pipe(query("OpenEditor")),
 
+    CardFamily: ({ userId, entityId }) =>
+      Effect.flatMap(lib.cardFamily(userId, entityId), (family) =>
+        family === null ? Effect.fail(new NotFound({ entity: "card", id: entityId })) : Effect.succeed(family)
+      ).pipe(query("CardFamily")),
+
     GetRevisionDoc: ({ userId, refId, revisionId }) =>
       Effect.gen(function* () {
         const ref = yield* lib.ownedRef(userId, refId)
-        const [row] = yield* sql<{ doc_json: string }>`
-          SELECT doc_json FROM entity_revisions WHERE id = ${revisionId} AND entity_id = ${ref.entity_id}`
+        // A draft's base may be the parent's, for a draft moved along with a fork.
+        const row = yield* lib.draftBase(ref.entity_id, revisionId)
         if (!row) return yield* new NotFound({ entity: "revision", id: revisionId })
         return JSON.parse(row.doc_json) as Doc
       }).pipe(query("GetRevisionDoc")),

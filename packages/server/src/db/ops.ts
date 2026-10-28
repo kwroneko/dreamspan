@@ -56,6 +56,7 @@ import { Draft, DraftKey, DraftRestore, DraftState } from "@rp/shared/drafts.ts"
 import { ComposerChoice } from "@rp/shared/composerApi.ts"
 import { AccountRejected, LeafMoved, ModelKeyTaken, NotFound, StaleWrite } from "@rp/shared/errors.ts"
 import {
+  CardFamily,
   Doc,
   EntityKind,
   LibraryRef,
@@ -1654,6 +1655,29 @@ export class WriteOps extends RpcGroup.make(
     success: LibraryRef,
     error: Schema.Union([NotFound, RefOperationRefused, StorageError])
   }),
+  /**
+   * A card of its own forked from the ref's head (spec/CARD-FORKS-DELTA.md §2): its content
+   * with the three names given, its tags and its notes copied, optionally the ref's unsaved
+   * drafts moved to it. Refused for a display name and version another card has.
+   */
+  Rpc.make("ForkCard", {
+    payload: {
+      userId: UserId,
+      refId: RefId,
+      name: Schema.String,
+      nickname: Schema.String,
+      characterVersion: Schema.String,
+      moveDrafts: Schema.Boolean
+    },
+    success: LibraryRef,
+    error: Schema.Union([NotFound, RefOperationRefused, StorageError])
+  }),
+  /** "Mark as a fork of…" an existing card, or with null "Unlink"; neither card's content changes. */
+  Rpc.make("SetCardParent", {
+    payload: { userId: UserId, entityId: EntityId, parentEntityId: Schema.NullOr(EntityId) },
+    success: CardFamily,
+    error: Schema.Union([NotFound, RefOperationRefused, StorageError])
+  }),
   Rpc.make("RenameRef", {
     payload: {
       userId: UserId,
@@ -2326,6 +2350,12 @@ export class ReadOps extends RpcGroup.make(
   Rpc.make("OpenEditor", {
     payload: { userId: UserId, refId: RefId, chatNote: Schema.optionalKey(ChatNotePosition) },
     success: EditorSnapshot,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** Every card connected to a live card of the user's by forking (`cardFamily` in library.ts). */
+  Rpc.make("CardFamily", {
+    payload: { userId: UserId, entityId: EntityId },
+    success: CardFamily,
     error: Schema.Union([NotFound, StorageError])
   }),
   /** A revision of the ref's own entity. */

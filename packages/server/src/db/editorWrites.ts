@@ -71,6 +71,7 @@ export interface LibrarySteps {
     readonly originRef: string | null
     readonly sourcePath: string | null
     readonly sourceHash: string | null
+    readonly message?: string | null
   }) => Sql<RefRow>
   readonly checkReferences: (userId: string, doc: Doc) => Effect.Effect<void, NotFound | SqlError.SqlError>
 }
@@ -206,7 +207,7 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps) => {
           if (row.base_revision === null || row.base_revision === ref.head_revision_id || field === null) continue
           if (orphans.has(row.field)) continue
           if (!bases.has(row.base_revision)) {
-            const base = yield* entityRevision(ref, row.base_revision)
+            const base = yield* lib.draftBase(ref.entity_id, row.base_revision)
             bases.set(row.base_revision, base === null ? {} : editedDoc(ref.kind, JSON.parse(base.doc_json) as Doc))
           }
           const saved = getAt(head, field.path)

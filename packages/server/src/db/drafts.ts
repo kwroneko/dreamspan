@@ -476,7 +476,9 @@ export const makeDraftStore = (
       if (options.baseRevision !== null && options.key.targetKind === "entity_field") {
         const [revision] = yield* sql<{
           id: string
-        }>`SELECT r.id FROM entity_revisions r JOIN entity_refs f ON f.entity_id = r.entity_id JOIN entities e ON e.id = r.entity_id WHERE r.id = ${options.baseRevision} AND f.id = ${options.key.targetId} AND e.owner_user_id = ${options.userId}`
+        }>`SELECT r.id FROM entity_refs f JOIN entities e ON e.id = f.entity_id
+             JOIN entity_revisions r ON r.id = ${options.baseRevision} AND r.entity_id IN (e.id, e.forked_from_entity_id)
+           WHERE f.id = ${options.key.targetId} AND e.owner_user_id = ${options.userId}`
         if (!revision) return yield* new NotFound({ entity: "revision", id: options.baseRevision })
       }
       const existing = yield* find(options.userId, options.key)

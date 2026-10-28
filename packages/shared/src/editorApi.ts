@@ -7,7 +7,7 @@ import { ChatId, EntityId, SlotId } from "./chat.ts"
 import { BinItem } from "./bin.ts"
 import { Draft, DraftRestore, DraftState } from "./drafts.ts"
 import { NotFound, ServerError, StaleWrite } from "./errors.ts"
-import { Doc, LibraryRef, MergeOutcome, MergePreview, RefId, Revision, RevisionId } from "./library.ts"
+import { CardFamily, Doc, LibraryRef, MergeOutcome, MergePreview, RefId, Revision, RevisionId } from "./library.ts"
 
 /** The document wouldn't be valid with these changes; nothing was saved. */
 export class InvalidDocument extends Schema.TaggedError<InvalidDocument>()("InvalidDocument", {
@@ -187,6 +187,32 @@ export class EditorApi extends RpcGroup.make(
   Rpc.make("ForkVariant", {
     payload: { refId: RefId, label: Label, subtitle: Subtitle, moveDrafts: Schema.Boolean },
     success: LibraryRef,
+    error: Schema.Union([...Writes])
+  }),
+  // --- Card forks (spec/CARD-FORKS-DELTA.md §2): each fork is a card of its own.
+  /**
+   * A new card from this card ref's head, with the three names given (display name, in-character
+   * name, version), its tags and notes copied, optionally taking the ref's unsaved drafts but
+   * its names. `EditRefused` for a display name and version another card has.
+   */
+  Rpc.make("ForkCard", {
+    payload: { refId: RefId, name: Label, nickname: Subtitle, characterVersion: Subtitle, moveDrafts: Schema.Boolean },
+    success: LibraryRef,
+    error: Schema.Union([...Writes])
+  }),
+  /** Every card connected to this one by forking: the same tree from any member. */
+  Rpc.make("CardFamily", {
+    payload: { entityId: EntityId },
+    success: CardFamily,
+    error: Schema.Union([...Errors])
+  }),
+  /**
+   * "Mark as a fork of…" another card (an ST duplicate), or with null "Unlink". Neither card's
+   * content changes. `EditRefused` for itself or a card already forked from this one.
+   */
+  Rpc.make("SetCardParent", {
+    payload: { entityId: EntityId, parentEntityId: Schema.NullOr(EntityId) },
+    success: CardFamily,
     error: Schema.Union([...Writes])
   }),
   Rpc.make("RenameRef", {

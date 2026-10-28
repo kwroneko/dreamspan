@@ -2,6 +2,8 @@
 
 **Status**: Proposed, 2026-10-26. Delta from master acb40f3 to the owner's decided card-fork model. **[D]** = traceable to an owner decision (cited); **[P]** = proposed here or in a proposal doc, not confirmed. Assumes unit C (branch `unit-c-card-names`) has landed: a card's display name, in-character name and subtitle are its document's `name`, `nickname` and `character_version`, and nothing below reads a ref's `label` or `subtitle`.
 
+**Unit 1 built** (§9, "Fork relationship and ForkCard"), 2026-10-27: migration `0056_card_forks`, `ForkCard`, `SetCardParent`, `cardFamily` and the `CardFamily` RPC, as ARCHITECTURE.md §3.9 "Card forks" now documents. Units 2 to 5 are not built; until unit 4, variants and chat overrides still exist beside forks.
+
 Scope is cards (personas included, since they are cards). Presets, lorebooks and notes keep today's ref model until the owner decides otherwise (§8, question 3).
 
 ## 1. What's built today

@@ -16,6 +16,7 @@ import {
   secretBindings,
   users
 } from "../src/db/schema/index.ts"
+import { cardForks } from "../src/db/schema/cardForks.ts"
 
 let db: DatabaseSync
 let n = 0
@@ -142,9 +143,81 @@ beforeEach(() => {
     ...binIndex,
     ...graphIntegrity,
     ...ownership,
-    ...queue
+    ...queue,
+    ...cardForks
   ])
     db.exec(statement)
+})
+
+describe("card forks", () => {
+  const entity = (id: string, owner: string, kind = "card") => {
+    run(`INSERT INTO entities (id, owner_user_id, kind, created_at) VALUES (?, ?, ?, 1)`, id, owner, kind)
+    run(
+      `INSERT INTO entity_revisions (id, entity_id, doc_json, doc_hash, schema_version, origin, created_at)
+       VALUES (?, ?, '{}', 'h', 1, 'user', 1)`,
+      `${id}-rev`,
+      id
+    )
+  }
+  const fork = (id: string, owner: string, parent: string | null, revision: string | null, chatId: string | null) =>
+    run(
+      `INSERT INTO entities (id, owner_user_id, kind, created_at, forked_from_entity_id, forked_from_revision_id, forked_in_chat_id, forked_at)
+       VALUES (?, ?, 'card', 1, ?, ?, ?, 1)`,
+      id,
+      owner,
+      parent,
+      revision,
+      chatId
+    )
+  const setParent = (id: string, parent: string | null) =>
+    run(`UPDATE entities SET forked_from_entity_id = ? WHERE id = ?`, parent, id)
+
+  it("keeps a fork's parent another entity of the same owner and kind", () => {
+    const ana = user()
+    const bob = user()
+    entity("mira", ana)
+    entity("theirs", bob)
+    entity("note", ana, "note")
+    expect(() => fork("f1", ana, "theirs", null, null)).toThrow(/a fork's parent/)
+    expect(() => fork("f2", ana, "note", null, null)).toThrow(/a fork's parent/)
+    expect(() => fork("f3", ana, "f3", null, null)).toThrow(/a fork's parent/)
+    fork("f4", ana, "mira", "mira-rev", null)
+    expect(() => setParent("f4", "theirs")).toThrow(/a fork's parent/)
+    expect(() => setParent("f4", "note")).toThrow(/a fork's parent/)
+    expect(() => setParent("f4", "f4")).toThrow(/a fork's parent/)
+    expect(() => run(`UPDATE entities SET kind = 'note' WHERE id = 'f4'`)).toThrow(/a fork's parent/)
+  })
+
+  it("keeps the revision copied the parent's, and the chat made for the owner's", () => {
+    const ana = user()
+    const bob = user()
+    entity("mira", ana)
+    entity("ana", ana)
+    const theirs = chat(bob)
+    expect(() => fork("f1", ana, "mira", "ana-rev", null)).toThrow(/a fork's parent/)
+    expect(() => fork("f2", ana, null, "mira-rev", null)).toThrow(/a fork's parent/)
+    expect(() => fork("f3", ana, "mira", null, theirs.chatId)).toThrow(/a fork's parent/)
+    fork("f4", ana, "mira", "mira-rev", null)
+    expect(() => run(`UPDATE entities SET forked_from_revision_id = 'ana-rev' WHERE id = 'f4'`)).toThrow(
+      /a fork's parent/
+    )
+    expect(() => run(`UPDATE entities SET forked_in_chat_id = ? WHERE id = 'f4'`, theirs.chatId)).toThrow(
+      /a fork's parent/
+    )
+  })
+
+  it("keeps the fork when its parent's revisions or its chat are deleted for good", () => {
+    const ana = user()
+    entity("mira", ana)
+    const own = chat(ana)
+    fork("f1", ana, "mira", "mira-rev", own.chatId)
+    run(`DELETE FROM entity_revisions WHERE entity_id = 'mira'`)
+    tx(() => run(`DELETE FROM chats WHERE id = ?`, own.chatId))
+    expect(
+      get(`SELECT forked_from_entity_id AS parent, forked_from_revision_id AS revision, forked_in_chat_id AS chat
+           FROM entities WHERE id = 'f1'`)
+    ).toEqual({ parent: "mira", revision: null, chat: null })
+  })
 })
 
 describe("graph shape", () => {

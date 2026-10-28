@@ -21,6 +21,7 @@ import { Schema, Effect, Predicate } from "effect"
 import { SqlClient } from "effect/sql"
 import type { Bin } from "./bin.ts"
 import { docHash, searchText } from "./documents.ts"
+import { makeCardForkWriteHandlers } from "./cardForkWrites.ts"
 import { makeEditorWriteHandlers } from "./editorWrites.ts"
 import { makeGraphWrites } from "./graphWrites.ts"
 import { makeLibraryQueries, type RefRow, toLibraryRef } from "./library.ts"
@@ -315,6 +316,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
       readonly sourcePath: string | null
       readonly sourceHash: string | null
       readonly createdAt?: number
+      readonly message?: string | null
     }) =>
       Effect.gen(function* () {
         const at = Date.now()
@@ -328,7 +330,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
           parents: [],
           origin: options.origin,
           originRef: options.originRef,
-          message: null
+          message: options.message ?? null
         })
         yield* sql`INSERT INTO entity_refs ${sql.insert({
           id: refId,
@@ -815,8 +817,8 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
           })
         }).pipe(transaction(sql, "ImportFile"))
     } satisfies Partial<Parameters<typeof WriteOps.of>[0]>
-    // The editors' writes (editorWrites.ts) work through the same steps.
-    const editor = makeEditorWriteHandlers({
+    // The editors' writes (editorWrites.ts) and card forks (cardForkWrites.ts) work through the same steps.
+    const steps = {
       sql,
       lib,
       drafts,
@@ -831,6 +833,6 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
       createUpstream,
       namedCardRevision,
       checkReferences
-    })
-    return { ...handlers, ...editor }
+    }
+    return { ...handlers, ...makeEditorWriteHandlers(steps), ...makeCardForkWriteHandlers(steps) }
   })

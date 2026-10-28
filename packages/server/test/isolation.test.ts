@@ -1619,6 +1619,42 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
         "NotFound"
       )
   },
+  ForkCard: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const before = yield* owner.api.CardFamily({ entityId: owner.editor.cardEntityId })
+        yield* refused(
+          actor.api.ForkCard({
+            refId: owner.editor.cardRefId,
+            name: "Taken",
+            nickname: "",
+            characterVersion: "",
+            moveDrafts: true
+          }),
+          "NotFound"
+        )
+        assert.deepStrictEqual(yield* owner.api.CardFamily({ entityId: owner.editor.cardEntityId }), before)
+        const opened = yield* owner.api.OpenEditor({ refId: owner.editor.cardRefId })
+        assert.isTrue(opened.drafts.some((d) => d.id === owner.editor.draftId && d.status === "active"))
+      })
+  },
+  CardFamily: {
+    probe: (actor, owner) => refused(actor.api.CardFamily({ entityId: owner.editor.cardEntityId }), "NotFound")
+  },
+  SetCardParent: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const before = yield* owner.api.CardFamily({ entityId: owner.editor.cardEntityId })
+        const mine = actor.editor.cardEntityId
+        const theirs = owner.editor.cardEntityId
+        // Their card as my card's parent, mine as theirs', and unlinking theirs.
+        yield* refused(actor.api.SetCardParent({ entityId: mine, parentEntityId: theirs }), "NotFound")
+        yield* refused(actor.api.SetCardParent({ entityId: theirs, parentEntityId: mine }), "NotFound")
+        yield* refused(actor.api.SetCardParent({ entityId: theirs, parentEntityId: null }), "NotFound")
+        assert.deepStrictEqual(yield* owner.api.CardFamily({ entityId: theirs }), before)
+        assert.strictEqual((yield* actor.api.CardFamily({ entityId: mine })).members.length, 1)
+      })
+  },
   RenameRef: {
     probe: (actor, owner) =>
       Effect.flatMap(owner.api.OpenEditor({ refId: owner.editor.cardRefId }), (theirs) =>

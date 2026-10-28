@@ -6,6 +6,7 @@ import { promptPreset, LegacyPresetDoc } from "@rp/shared/docs/preset.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import { Schema } from "effect"
 import { docHash, searchText } from "./documents.ts"
+import { cardForks } from "./schema/cardForks.ts"
 import { lcmEnableSchema } from "./schema/lcmEnable.ts"
 import { composerChoiceSchema } from "./schema/composerChoice.ts"
 import { historyChangesSchema } from "./historyChanges.ts"
@@ -339,7 +340,9 @@ export const migrations = {
   // What a fork changes is a row of its own: selections first (schema/forkOverrides.ts).
   "0054_fork_overrides": runAll(forkOverrides),
   // Copies a fork amends in place of a message's own version, and per-fork flags (schema/forkVersions.ts).
-  "0055_fork_versions": runAll(forkVersions)
+  "0055_fork_versions": runAll(forkVersions),
+  // A card fork's parent, the revision it copied, the chat it was made for (schema/cardForks.ts).
+  "0056_card_forks": runAll(cardForks)
 }
 
 export const Migrations = SqliteMigrator.layer({ loader: SqliteMigrator.fromRecord(migrations) })

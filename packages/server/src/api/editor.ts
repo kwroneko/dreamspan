@@ -186,6 +186,19 @@ export const makeEditorHandlers = Effect.gen(function* () {
         settle("ForkVariant")
       ),
 
+    ForkCard: ({ refId, name, nickname, characterVersion, moveDrafts }) =>
+      Effect.flatMap(userId, (id) =>
+        writer.ForkCard({ userId: id, refId, name, nickname, characterVersion, moveDrafts })
+      ).pipe(settle("ForkCard")),
+
+    CardFamily: ({ entityId }) =>
+      Effect.flatMap(userId, (id) => reader.CardFamily({ userId: id, entityId })).pipe(settle("CardFamily")),
+
+    SetCardParent: ({ entityId, parentEntityId }) =>
+      Effect.flatMap(userId, (id) => writer.SetCardParent({ userId: id, entityId, parentEntityId })).pipe(
+        settle("SetCardParent")
+      ),
+
     RenameRef: ({ refId, label, subtitle, expectedRowVersion }) =>
       Effect.flatMap(userId, (id) => writer.RenameRef({ userId: id, refId, label, subtitle, expectedRowVersion })).pipe(
         settle("RenameRef")

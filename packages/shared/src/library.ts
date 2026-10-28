@@ -71,3 +71,34 @@ export class MergePreview extends Schema.Class<MergePreview>("MergePreview")({
   /** The followed ref's head that this preview merged in. */
   theirsRevisionId: RevisionId
 }) {}
+
+/** Where a card stands: in the library (live or archived), in the bin, or deleted for good. */
+export const FamilyMemberState = Schema.Literals(["live", "archived", "binned", "purged"])
+export type FamilyMemberState = typeof FamilyMemberState.Type
+
+/** One card of a family (spec/CARD-FORKS.md surface 4): connected to the others by forking. */
+export class FamilyMember extends Schema.Class<FamilyMember>("FamilyMember")({
+  entityId: EntityId,
+  /** The card it was forked from (or marked a fork of); null for the family's root. */
+  parentEntityId: Schema.NullOr(EntityId),
+  /** The ref it opens in, the card's library entry; null once deleted for good. */
+  refId: Schema.NullOr(RefId),
+  /** Display name and version, from its head's standard card fields; empty once deleted for good. */
+  label: Schema.String,
+  subtitle: Schema.String,
+  state: FamilyMemberState,
+  /** The parent's revision it copied; null when marked a fork of an existing card, or that revision is gone. */
+  forkedFromRevisionId: Schema.NullOr(RevisionId),
+  /** The chat it was forked for, while that chat exists. */
+  forkedInChatId: Schema.NullOr(ChatId),
+  forkedAt: Schema.NullOr(Schema.Number),
+  /** The user's live chats it joined, and the last message among them. */
+  chats: Schema.Int,
+  lastMessageAt: Schema.NullOr(Schema.Number)
+}) {}
+
+/** Every card connected to one by forking, the same from any member, oldest first. */
+export class CardFamily extends Schema.Class<CardFamily>("CardFamily")({
+  rootEntityId: EntityId,
+  members: Schema.Array(FamilyMember)
+}) {}
