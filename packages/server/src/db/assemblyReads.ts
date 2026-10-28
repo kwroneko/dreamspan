@@ -1,11 +1,11 @@
+import { fitSummaryOutput } from "../lcm/requestBudget.ts"
 import { presetContext } from "./presetContext.ts"
 import { cacheExpiry } from "./cacheExpiry.ts"
-import { summaryRequest } from "../lcm/request.ts"
 import { inFork, viewAt } from "./forkState.ts"
 // Context assembly and rebuilding in the reader workers (ARCHITECTURE §15).
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
-import { makeAssembler } from "../assembler/assembler.ts"
+import { WorkerAssembler } from "../assembler/assembler.ts"
 import type { ChatId, ForkId } from "@rp/shared/chat.ts"
 import { BUILTIN_PRESET_LABEL } from "@rp/shared/generation.ts"
 import type { EffectivePreset } from "@rp/shared/inspectorApi.ts"
@@ -30,7 +30,7 @@ import { query } from "./tx.ts"
 
 export const makeAssemblyReadHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
-  const assembler = yield* makeAssembler
+  const assembler = yield* WorkerAssembler
   const handlers = {
     ...(yield* makeDisplayPrefsReadHandlers),
     AssembleContext: ({ userId, chatId, slotId, versionId, forkId, now, timeZone, frozen, partialBatch, model }) =>
@@ -94,22 +94,24 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
             ...(taken.summaryJob
               ? {
                   summarizing: true,
-                  summaryClipTokens: taken.summaryJob.clipTokens
+                  summaryClipTokens: taken.summaryJob.clipTokens,
+                  summaryJob: taken.summaryAssembly?.job ?? taken.summaryJob,
+                  ...(taken.summaryAssembly?.instruction
+                    ? { summaryInstruction: taken.summaryAssembly.instruction }
+                    : {}),
+                  summarySamplers: taken.summaryAssembly?.samplers ?? taken.request.samplers
                 }
               : {}),
             ...(taken.loreFallback ? { loreFallback: taken.loreFallback } : {})
           })
           .pipe(Effect.provide(sources.layer))
+        const rebuilt = taken.summaryJob ? yield* fitSummaryOutput(built) : built
         return {
           _tag: "Rebuilt" as const,
           snapshot: JSON.stringify({
-            ...(taken.summaryJob
-              ? summaryRequest({
-                  ...built,
-                  summaryJob: taken.summaryJob,
-                  request: { ...built.request, samplers: taken.request.samplers }
-                })
-              : built),
+            ...rebuilt,
+            // Earlier snapshots predate frozen transform inputs; retain their original shape.
+            ...(!taken.summaryAssembly && rebuilt.summaryAssembly ? { summaryAssembly: undefined } : {}),
             sources: sources.pins(),
             ...(taken.wire ? { wire: taken.wire } : {})
           })

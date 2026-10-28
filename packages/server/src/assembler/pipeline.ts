@@ -110,6 +110,11 @@ export class AssemblySources extends Context.Service<
 
 /** What a caller asks for, beyond what the sources say. */
 export interface AssemblyRequest {
+  readonly summaryJob?: ContextSnapshot["summaryJob"]
+  /** Instruction parameters frozen for replay; earlier snapshots use their frozen job tail. */
+  readonly summaryInstruction?: NonNullable<ContextSnapshot["summaryAssembly"]>["instruction"]
+  /** Frozen sampler inputs when rebuilding. Applied before registered transforms. */
+  readonly summarySamplers?: AssembledRequest["samplers"]
   readonly summarizing?: boolean
   readonly summaryClipTokens?: number
   readonly now: number
@@ -259,12 +264,22 @@ export interface AssemblerStage {
   readonly run: (assembly: Assembly) => Effect.Effect<Assembly, SourceError, AssemblySources>
 }
 
+/** Final request shaping, inside assembly, after stages have produced source-indexed messages. */
+export interface AssemblyTransform {
+  readonly id: string
+  readonly run: (
+    snapshot: ContextSnapshot,
+    request: AssemblyRequest
+  ) => Effect.Effect<ContextSnapshot, SourceError, AssemblySources>
+}
+
+export type TransformRegistry = Registry<AssemblyTransform>
 export type StageRegistry = Registry<AssemblerStage>
 
 export const makeStageRegistry = (): StageRegistry => makeRegistry<AssemblerStage>()
 
 /** Runs every stage in effect, in order, and returns the context as built. */
-export const assemble = (stages: StageRegistry, request: AssemblyRequest) =>
+export const assemble = (stages: StageRegistry, request: AssemblyRequest, transforms: TransformRegistry) =>
   Effect.gen(function* () {
     let assembly: Assembly = { request, pieces: [], frozen: {}, effects: [], templateWrites: [], issues: [] }
     for (const stage of stages.list()) assembly = yield* stage.run(assembly)
@@ -274,7 +289,7 @@ export const assemble = (stages: StageRegistry, request: AssemblyRequest) =>
     const historyStart = need(assembly, "historyStart")
     const sources = yield* AssemblySources
     const revision = yield* sources.historyRevision(target.parentSlotId, historyStart.depth)
-    const snapshot: ContextSnapshot = {
+    let snapshot: ContextSnapshot = {
       schema: 1,
       ...(assembly.contextBudget ? { contextBudget: assembly.contextBudget } : {}),
       ...(assembly.summaryFill ? { summaryFill: assembly.summaryFill } : {}),
@@ -296,7 +311,19 @@ export const assemble = (stages: StageRegistry, request: AssemblyRequest) =>
         cards: [...cast.characters, ...cast.personas].map(({ entity, ref, revision }) => ({ entity, ref, revision })),
         model: assembly.model ?? null
       },
-      request: need(assembly, "result"),
+      ...(request.summaryJob
+        ? {
+            summaryJob: request.summaryJob,
+            summaryAssembly: {
+              job: request.summaryJob,
+              ...(request.summaryInstruction ? { instruction: request.summaryInstruction } : {}),
+              samplers: request.summarySamplers ?? need(assembly, "result").samplers
+            }
+          }
+        : {}),
+      request: request.summarySamplers
+        ? { ...need(assembly, "result"), samplers: request.summarySamplers }
+        : need(assembly, "result"),
       pieces: assembly.pieces,
       issues: assembly.issues,
       frozen: assembly.frozen,
@@ -327,5 +354,6 @@ export const assemble = (stages: StageRegistry, request: AssemblyRequest) =>
           }
         : {})
     }
+    for (const transform of transforms.list()) snapshot = yield* transform.run(snapshot, request)
     return snapshot
   })

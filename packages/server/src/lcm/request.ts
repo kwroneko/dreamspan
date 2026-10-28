@@ -1,4 +1,8 @@
+import { Effect } from "effect"
+import { summaryWords } from "@rp/shared/lcmSettings.ts"
+import type { AssemblyTransform } from "../assembler/pipeline.ts"
 import type { ContextSnapshot, Piece, RequestMessage } from "../assembler/types.ts"
+import { DIRECT_INSTRUCTION, TOOL_INSTRUCTION } from "./instructions.ts"
 import { applySummaryPrefix } from "./prefix.ts"
 
 const summaryTail = (snapshot: ContextSnapshot): ContextSnapshot => {
@@ -100,7 +104,41 @@ const rawSummary = (snapshot: ContextSnapshot): ContextSnapshot => {
 }
 
 /** The request a summary job sends: with the chat's preset and its pinned prefix, or without the preset. */
-export const summaryRequest = (snapshot: ContextSnapshot): ContextSnapshot =>
+const summaryRequest = (snapshot: ContextSnapshot): ContextSnapshot =>
   snapshot.summaryJob?.withPreset === false
     ? rawSummary(snapshot)
     : summaryTail(applySummaryPrefix(snapshot, snapshot.summaryJob?.prefix))
+
+/** The registered default owns instruction rendering, prefix reuse and raw/full shaping. */
+export const summaryRequestTransform: AssemblyTransform = {
+  id: "summary-request",
+  run: (snapshot, request) =>
+    Effect.sync(() => {
+      if (!snapshot.summaryJob) return snapshot
+      const job = snapshot.summaryJob
+      const instruction = request.summaryInstruction
+      if (instruction) {
+        const count = job.children?.length ?? 0
+        const range = instruction.range ? `(messages ${instruction.range.from} to ${instruction.range.to})` : ""
+        const text = count
+          ? job.withPreset === false
+            ? `Condense the last ${count} summaries ${range} into one summary of at most ${summaryWords(instruction.target)} words. Keep their language and voice, names, events and unresolved details. Any summaries before them are continuity, not material to condense again.`
+            : `Condense the last ${count} summaries above ${range} into one summary of at most ${summaryWords(instruction.target)} words. Keep its language and voice, names, events and unresolved details. The earlier summaries are continuity, not material to condense again.`
+          : job.tail
+        snapshot = {
+          ...snapshot,
+          summaryJob: {
+            ...job,
+            tail:
+              text.replace(/\{\{words\}\}/gi, String(summaryWords(instruction.target))) +
+              (instruction.output ?? (job.style === "tool" ? TOOL_INSTRUCTION : DIRECT_INSTRUCTION))
+          },
+          request: {
+            ...snapshot.request,
+            samplers: { ...snapshot.request.samplers, max_tokens: Math.ceil(instruction.target * 2.5) }
+          }
+        }
+      }
+      return summaryRequest(snapshot)
+    })
+}
