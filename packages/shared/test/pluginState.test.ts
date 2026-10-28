@@ -8,6 +8,8 @@ import {
   type PluginStateKey,
   registerStateKey,
   stateKeyDeclaration,
+  stateKeys,
+  StateEventData,
   WritableStateEvent
 } from "../src/state.ts"
 
@@ -58,6 +60,67 @@ describe("plugin state keys", () => {
     expect(foldState([event("mood/now", "calm"), event("mood/now", "tense")]).plugin).toEqual({ "mood/now": "tense" })
     await Effect.runPromise(Scope.close(scope, Exit.void))
     expect(branchOwned.has("mood/now")).toBe(false)
+  })
+
+  it("registers every built-in and honors scoped overrides and disablement through the same API", async () => {
+    expect(
+      stateKeys
+        .list()
+        .map((key) => key.id)
+        .sort()
+    ).toEqual(StateEventData.members.map((m) => m.fields.key.literal).sort())
+    const data = event("var.set", { name: "score", value: 7 })
+    const original = stateKeys.get("var.set")!
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          yield* registerStateKey({
+            ...original,
+            apply: (state, value, scope) => ({
+              ...original.apply!(state, value, scope),
+              rolesProjection: "synthetic/roles"
+            })
+          })
+          expect(foldState([data]).rolesProjection).toBe("synthetic/roles")
+          yield* Effect.scoped(
+            Effect.gen(function* () {
+              yield* stateKeys.disable("var.set")
+              expect(decodes(data.data)).toBe(false)
+              expect(stateKeyDeclaration("var.set")).toBeUndefined()
+              expect(foldState([data]).vars).toEqual({})
+            })
+          )
+          expect(foldState([data]).vars).toEqual({ score: 7 })
+        })
+      )
+    )
+    expect(foldState([data]).rolesProjection).toBeNull()
+    expect(foldState([data]).vars).toEqual({ score: 7 })
+  })
+
+  it("keeps incompatible stored values inert after a schema override", async () => {
+    const events = [event("tally/total", { amount: 2 }), event("var.set", { name: "kept", value: true })]
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          yield* registerStateKey(tally)
+          yield* Effect.scoped(
+            Effect.gen(function* () {
+              yield* registerStateKey({
+                ...tally,
+                value: Schema.String,
+                reduce: () => {
+                  throw new Error("invalid old value reached reducer")
+                }
+              })
+              expect(foldState(events).plugin).toBeUndefined()
+              expect(foldState(events).vars).toEqual({ kept: true })
+            })
+          )
+          expect(foldState(events).plugin).toEqual({ "tally/total": 2 })
+        })
+      )
+    )
   })
 
   it("declares ids that the writer checks, and refuses a declaration stateKeyProblems rejects", async () => {

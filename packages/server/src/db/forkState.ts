@@ -4,6 +4,7 @@
 // `lineage_json` lists them. The effective value of a key in G is the first lineage entry
 // with a row for it, the newest row there; without one, the base column. Reads cost the
 // lineage's length per key, never the path's or the chat's.
+import { stateKeys } from "@rp/shared/state.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import { NotFound } from "@rp/shared/errors.ts"
 import { Context, Effect } from "effect"
@@ -396,6 +397,13 @@ export const eventAppliesSql = (fork: string, e: string) => `(${eventVisibleSql(
 export const eventApplies = (sql: SqlClient.SqlClient, fork: ForkRef, e: string) =>
   withFork(sql, fork, (f) => eventAppliesSql(f, e))
 
-/** Positional events first; branch-owned swaps last, in chat sequence order. */
-export const eventOrder = (e: string) => `CASE WHEN ${e}.key = 'card.swap' THEN 1 ELSE 0 END,
-  coalesce(${e}.slot_depth, -1), CASE WHEN ${e}.key = 'card.swap' THEN coalesce(${e}.fork_seq, ${e}.seq) ELSE ${e}.seq END`
+/** Positional events first; every registered branch-owned key last, in chat sequence order. */
+export const eventOrder = (e: string) => {
+  const keys = stateKeys
+    .list()
+    .filter((key) => key.scope === "branch")
+    .map((key) => `'${key.id.replaceAll("'", "''")}'`)
+  const branch = keys.length === 0 ? "0" : `${e}.key IN (${keys.join(",")})`
+  return `CASE WHEN ${branch} THEN 1 ELSE 0 END,
+    coalesce(${e}.slot_depth, -1), CASE WHEN ${branch} THEN coalesce(${e}.fork_seq, ${e}.seq) ELSE ${e}.seq END`
+}
