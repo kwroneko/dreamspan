@@ -228,6 +228,16 @@ export interface ContextSnapshot {
   readonly historyStart?: HistoryStart
   readonly historyMove?: "initial" | "maximum" | "budget" | "restore" | "unchanged"
   readonly historyBudget?: number
+  /** Frozen inputs to registered summary transforms, before they shape the outgoing request. */
+  readonly summaryAssembly?: {
+    readonly job: NonNullable<ContextSnapshot["summaryJob"]>
+    readonly instruction?: {
+      readonly target: number
+      readonly output?: string
+      readonly range?: { readonly from: number; readonly to: number }
+    }
+    readonly samplers: AssembledRequest["samplers"]
+  }
   readonly summaryJob?: {
     readonly id: string
     readonly clipTokens: number

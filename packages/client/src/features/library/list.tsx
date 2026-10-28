@@ -1,7 +1,7 @@
 import { PresetWorkspace, PresetOverlayHost, usePresetWorkspace } from "../editor/PresetWorkspace.tsx"
 // The library: cards, lorebooks and presets by label, each exportable as a file.
 import type { LibraryRef } from "@rp/shared/library.ts"
-import { type ExportFormat, exportFormats } from "@rp/shared/libraryImport.ts"
+import { type ExportFormat, type ExportFormatInfo } from "@rp/shared/libraryImport.ts"
 import { Link } from "@tanstack/react-router"
 import { useState } from "react"
 import { AsyncView, useAction } from "../../actions.tsx"
@@ -12,7 +12,7 @@ import { Select } from "../../ui/Select.tsx"
 import { Badge, Card, CardHeader, EmptyState } from "../../ui/Surface.tsx"
 import { NewCardButton } from "../editor/NewCard.tsx"
 import { useTitle } from "../shell.tsx"
-import { FORMAT_LABELS, LISTED, libraryAtom } from "./data.ts"
+import { LISTED, libraryAtom } from "./data.ts"
 import { downloadExport } from "./files.ts"
 
 /** In the persona folder or not (DESIGN §2.2): personas are what the user plays. */
@@ -37,10 +37,19 @@ function PersonaToggle({ entry, persona }: { entry: LibraryRef; persona: boolean
   )
 }
 
-function LibraryRow({ entry, persona }: { entry: LibraryRef; persona?: boolean | undefined }) {
+function LibraryRow({
+  entry,
+  persona,
+  exporters
+}: {
+  entry: LibraryRef
+  persona?: boolean | undefined
+  exporters: ReadonlyArray<ExportFormatInfo>
+}) {
   const workspace = usePresetWorkspace()
-  const formats = exportFormats[entry.kind] ?? []
-  const [format, setFormat] = useState<ExportFormat | null>(formats[0] ?? null)
+  const formats = exporters.filter((format) => format.kind === entry.kind)
+  const [selectedFormat, setFormat] = useState<ExportFormat | null>(null)
+  const format = formats.find((entry) => entry.id === selectedFormat)?.id ?? formats[0]?.id ?? null
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -109,13 +118,18 @@ function LibraryRow({ entry, persona }: { entry: LibraryRef; persona?: boolean |
         {formats.length > 1 && (
           <Field label={<span className="sr-only">Export format for {entry.label}</span>} className="w-28">
             <Select
-              items={formats.map((value) => ({ value, label: FORMAT_LABELS[value] }))}
+              items={formats.map(({ id, label }) => ({ value: id, label }))}
               value={format}
               onValueChange={setFormat}
             />
           </Field>
         )}
-        <Button pending={pending} onClick={() => void exportEntry()} aria-label={`Export ${entry.label}`}>
+        <Button
+          disabled={format === null}
+          pending={pending}
+          onClick={() => void exportEntry()}
+          aria-label={`Export ${entry.label}`}
+        >
           Export
         </Button>
       </div>
@@ -151,6 +165,7 @@ function LibraryContent() {
                     <LibraryRow
                       key={entry.id}
                       entry={entry}
+                      exporters={lists.exportFormats}
                       persona={
                         kind === "card"
                           ? lists.castCards.some((card) => card.entityId === entry.entityId && card.persona)

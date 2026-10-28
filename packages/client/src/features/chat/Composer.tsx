@@ -24,7 +24,8 @@ import { Switch } from "../../ui/Choice.tsx"
 import { useViewPrefs } from "../../ui/viewPrefs.ts"
 import { Badge } from "../../ui/Surface.tsx"
 import { SquareIconButton, Tooltip } from "../../ui/Tooltip.tsx"
-import { defaultSpeaker, nameOf, nextInTurn, recentSpeakers, replyFaces, useCast } from "./cast.ts"
+import { defaultSpeaker, nameOf, recentSpeakers, replyFaces, useCast } from "./cast.ts"
+import { planReply } from "./replyPolicy.ts"
 import { GenerateIcon, HistoryIcon, RegenerateIcon, SendIcon, StopIcon } from "./icons.tsx"
 import { composerChoice, useComposerChoice } from "./speaker.ts"
 import { ReplyFrom } from "./ReplyFrom.tsx"
@@ -273,17 +274,14 @@ export function Composer({
   const name = nameOf(castView, speaker)
   const speakerPlayed = speaker !== null && (cast?.playedByMe.includes(speaker) ?? false)
   // Who replies to the next send: the face picked for it, else the next in turn (ReplyFrom.tsx).
-  const next = useMemo(
-    () => (turnEntries === null ? null : nextInTurn(cast, turnEntries, speaker)),
-    [cast, turnEntries, speaker]
-  )
-  // Every character muted (DESIGN §3.5): Send posts the message and asks for no reply.
-  const characters = (cast?.participants ?? []).filter((id) => !cast!.playedByMe.includes(id))
-  const everyoneMuted = characters.length > 0 && characters.every((id) => cast!.absent.includes(id))
   // A muted character is never next in turn, but can be picked for one reply.
   const faces = useMemo(() => replyFaces(cast, speaker), [cast, speaker])
   const pickedReply = choice.replyFrom !== null && faces.includes(choice.replyFrom) ? choice.replyFrom : null
-  const replier = pickedReply ?? next?.id ?? null
+  const replyPlan = useMemo(
+    () => planReply(cast, turnEntries, speaker, pickedReply),
+    [cast, turnEntries, speaker, pickedReply]
+  )
+  const { next, replier } = replyPlan
   const replierName = nameOf(castView, replier)
   // Only known when the window reaches the leaf; otherwise the server takes the message anyway.
   const leaf = view.newer === null ? view.entries.at(-1) : undefined
@@ -374,7 +372,7 @@ export function Composer({
             speaker,
             replier,
             from,
-            !everyoneMuted || pickedReply !== null
+            replyPlan.reply
           )
           report(outcome)
           if (sent) replied(from.draftId)

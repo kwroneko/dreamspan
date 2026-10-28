@@ -1,4 +1,5 @@
 import { HistoryApi } from "./historyApi.ts"
+import { ExportFormatInfo } from "./libraryImport.ts"
 import { StSettingsImport } from "./modelSettings.ts"
 import { LcmApi, LcmSettingsInvalid } from "./lcm.ts"
 // The client-facing contract. Every UI action is an RPC in this group (DESIGN §7.7).
@@ -274,6 +275,8 @@ export class AppApi extends RpcGroup.make(
   }),
   // --- Library import (ARCHITECTURE.md §11). Files go in and out over HTTP
   // (POST /library/import, /library/export), since RPC messages are JSON.
+  /** Data from the worker exporter registry, in preference order. */
+  Rpc.make("ListExportFormats", { success: Schema.Array(ExportFormatInfo), error: ServerError }),
   /** The user's upstream refs and variants of one kind, by label. */
   Rpc.make("ListLibrary", {
     payload: { kind: EntityKind, archived: Schema.optionalKey(Schema.Boolean) },

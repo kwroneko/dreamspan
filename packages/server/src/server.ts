@@ -1,4 +1,5 @@
 import { makeHistoryHandlers } from "./api/history.ts"
+import { ExecutionRegistry } from "./execution.ts"
 import { RefusalJudge } from "./decision/RefusalJudge.ts"
 import { SummaryChecks } from "./lcm/OutputChecks.ts"
 import { Summarizer } from "./lcm/Summarizer.ts"
@@ -410,7 +411,8 @@ export const serverWith = <E>(
     E,
     AppConfig | Database.Reader | Database.Writer | Providers.Providers | Summarizer
   >,
-  summaries = Summarizer.layer
+  summaries = Summarizer.layer,
+  formats = FormatsLive
 ) =>
   HttpRouter.serve(
     Layer.mergeAll(
@@ -435,11 +437,12 @@ export const serverWith = <E>(
         Layer.provideMerge(ChatHub.layer)
       )
     ),
+    Layer.provideMerge(ExecutionRegistry.layer),
     Layer.provideMerge(Notices.layer),
     Layer.provide(ProvidersLive),
     Layer.provideMerge(HttpServerLive),
     Layer.provideMerge(Accounts.layer),
-    Layer.provideMerge(Layer.mergeAll(DatabaseLive, EventLoopMonitor.layer, FormatsLive)),
+    Layer.provideMerge(Layer.mergeAll(DatabaseLive, EventLoopMonitor.layer, formats)),
     Layer.provide(InFlightRpcs.layer)
   )
 
