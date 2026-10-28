@@ -12,6 +12,7 @@ import { describe, expect, it } from "vitest"
 import type { PositionedEvent } from "../src/assembler/pipeline.ts"
 import type { ContextSnapshot, ModelInput, NoteInput } from "../src/assembler/types.ts"
 import { matchLorebooks } from "../src/assembler/lorebook.ts"
+import { makeAssembler } from "../src/assembler/assembler.ts"
 import { chatCompletionsFields, providerRequest } from "../src/assembler/wire.ts"
 import { importCard } from "../src/formats/cardImport.ts"
 import { forbidCardOverrides, importStPreset } from "../src/formats/preset.ts"
@@ -1393,6 +1394,58 @@ describe("several characters (DESIGN §5.0–§5.4)", () => {
         .map((m) => m.role)
     expect(await roles("alternate")).toEqual(["assistant", "user", "assistant"])
     expect(await roles("perspective")).toEqual(["user", "assistant", "user"])
+  })
+
+  it("takes a role projection from the registry, and falls back to by writer when it's gone (S8)", async () => {
+    const roles = (snapshot: ContextSnapshot) =>
+      snapshot.request.messages.filter((m) => /Ledger|Ferry|listen/.test(m.content)).map((m) => m.role)
+    const fixture = group({ events: [at(null, { key: "roles.projection", value: "all_user" })] })
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const own = yield* makeAssembler
+          // Nothing registers "all_user" yet: by writer, and the chat is told.
+          const before = yield* assembleFixture(fixture, { assembler: own })
+          expect(roles(before)).toEqual(["assistant", "assistant", "user"])
+          expect(before.issues.map((i) => i.kind)).toEqual(["role_projection_missing"])
+          yield* Effect.scoped(
+            Effect.gen(function* () {
+              yield* own.projections.register({ id: "all_user", label: "All user", role: () => "user" })
+              const during = yield* assembleFixture(fixture, { assembler: own })
+              expect(roles(during)).toEqual(["user", "user", "user"])
+              expect(during.issues).toEqual([])
+              // An override of a built-in id runs.
+              yield* own.projections.register({ id: "by_writer", label: "Mine", role: () => "user" })
+              const plain = yield* assembleFixture(group(), { assembler: own })
+              expect(roles(plain)).toEqual(["user", "user", "user"])
+            })
+          )
+          const after = yield* assembleFixture(fixture, { assembler: own })
+          expect(roles(after)).toEqual(["assistant", "assistant", "user"])
+          expect(after.issues.map((i) => i.kind)).toEqual(["role_projection_missing"])
+        })
+      )
+    )
+  })
+
+  it("assembles with the notes stage disabled: no notes, nothing else changes (M2)", async () => {
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const own = yield* makeAssembler
+          const fixture = group({ notes: [] })
+          const normal = yield* assembleFixture(fixture, { assembler: own })
+          yield* Effect.scoped(
+            Effect.gen(function* () {
+              yield* own.stages.disable("notes")
+              expect(own.stages.get("notes")).toBeUndefined()
+              expect(contents(yield* assembleFixture(fixture, { assembler: own }))).toEqual(contents(normal))
+            })
+          )
+          expect(own.stages.get("notes")).toBeDefined()
+        })
+      )
+    )
   })
 
   it("lets the user's character speak, with the impersonation prompt naming them", async () => {

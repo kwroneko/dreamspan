@@ -164,6 +164,9 @@ function SummariesSetting({ session }: { session: ChatSession }) {
 
 export function ThisChatTab({ session }: { session: ChatSession; active: boolean }) {
   const { cast } = useCast()
+  const rolesProjection = cast?.rolesProjection ?? "by_writer"
+  // A plugin's projection the chat chose that isn't installed now: shown, not hidden.
+  const unknownRoles = ["by_writer", "alternate", "perspective"].includes(rolesProjection) ? null : rolesProjection
   const action = useAction()
   const [error, setError] = useState<AppError | null>(null)
   const change = async (next: CastChange) => {
@@ -180,9 +183,18 @@ export function ThisChatTab({ session }: { session: ChatSession; active: boolean
         <p className="text-sm text-muted">Which messages are sent as the user's and which as the model's.</p>
         <RadioGroup
           aria-labelledby="roles-label"
-          value={cast?.rolesProjection ?? "by_writer"}
+          value={rolesProjection}
           onValueChange={(projection) => void change({ _tag: "Roles", projection })}
           options={[
+            ...(unknownRoles
+              ? [
+                  {
+                    value: unknownRoles,
+                    label: `${unknownRoles} (not installed)`,
+                    description: "Sent by writer until it is back."
+                  }
+                ]
+              : []),
             { value: "by_writer", label: "By writer", description: "Yours as user, the model's as assistant." },
             {
               value: "alternate",

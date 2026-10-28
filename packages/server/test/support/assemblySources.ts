@@ -161,9 +161,11 @@ export const assembleFixture = (
     readonly loreFallback?: ContextSnapshot["loreFallback"]
     /** A summary's request: written as no one, with no direction. */
     readonly summarizing?: boolean
+    /** An assembler of the test's own, to register plugin parts in a scope of its own. */
+    readonly assembler?: Assembler
   } = {}
 ) =>
-  assembler()
+  (options.assembler ?? assembler())
     .assemble({
       now: fixture.now ?? Date.UTC(2026, 0, 1),
       timeZone: "UTC",

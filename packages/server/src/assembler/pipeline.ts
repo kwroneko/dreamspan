@@ -120,6 +120,8 @@ export interface AssemblyRequest {
   readonly random: () => number
   readonly loreFallback?: ContextSnapshot["loreFallback"]
   readonly macros: MacroLookup
+  /** The role projections in effect, by id (`roles` stage). */
+  readonly projections: ProjectionRegistry
 }
 
 /** The cast of a chat at the position being generated. */
@@ -139,7 +141,8 @@ export interface Cast {
  * preset's (DESIGN §5.0): `layout.cards` events are ignored.
  */
 export interface Mode {
-  readonly projection: "by_writer" | "alternate" | "perspective"
+  /** A registered projection's id; the chat's choice, resolved by the `roles` stage. */
+  readonly projection: string
   /** Lorebook entries only below the history (DESIGN §1.3): the chat's setting, on unless turned off. */
   readonly loreBelowHistory: boolean
 }
@@ -202,6 +205,7 @@ export interface Assembly {
   /** What the history's cut state is valid for (preset, model, cards, notes, books, settings). */
   configuration?: string
   cardOverrides?: Array<CardOverride>
+  /** Absent when the `notes` stage is disabled: downstream stages read that as no notes (ARCHITECTURE §15). */
   notes?: ReadonlyArray<NoteInput>
   skippedNotes?: ReadonlyArray<NoteInput>
   /** Enabled preset prompts left out by their condition this turn, for the request inspector. */
@@ -260,6 +264,31 @@ export interface AssemblerStage {
 }
 
 export type StageRegistry = Registry<AssemblerStage>
+
+/**
+ * How a message takes its role. The `roles` stage dispatches to the projection the chat names
+ * (`roles.projection`, an open id); the built-ins are registered with the stages, and a plugin
+ * registers others the same way. Naming a projection nothing registers falls back to
+ * `by_writer` with a `role_projection_missing` issue.
+ */
+export interface RoleProjection {
+  readonly id: string
+  /** Shown where the chat's projection is chosen. */
+  readonly label: string
+  readonly description?: string
+  readonly role: (message: {
+    readonly entry: HistoryEntry
+    readonly cast: Cast
+    /** The message's card, if it has one. */
+    readonly speaker: CardInput | undefined
+    /** The side the message is on (its writer's, as ST takes it). */
+    readonly side: "user" | "assistant"
+  }) => "user" | "assistant"
+}
+
+export type ProjectionRegistry = Registry<RoleProjection>
+
+export const makeProjectionRegistry = (): ProjectionRegistry => makeRegistry<RoleProjection>()
 
 export const makeStageRegistry = (): StageRegistry => makeRegistry<AssemblerStage>()
 
