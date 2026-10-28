@@ -1,3 +1,4 @@
+import { EditRefused } from "@rp/shared/editorApi.ts"
 import { CacheWarmth } from "../chat/CacheWarmth.ts"
 import type { RevisionId } from "@rp/shared/library.ts"
 // RPC handlers for chat setup, speakers and the send queue (@rp/shared/chatSetupApi.ts).
@@ -79,8 +80,14 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
    */
   const castAt = (user: UserId, chatId: ChatId, slotId: SlotId | null, forkId?: ForkId | null) =>
     Effect.gen(function* () {
-      const state = foldState(yield* reader.StateEventsAt({ userId: user, chatId, slotId, forkId: forkId ?? null }))
-      const ids = [...new Set([...state.participants, ...state.playedByMe])]
+      const events = yield* reader.StateEventsAt({ userId: user, chatId, slotId, forkId: forkId ?? null })
+      const state = foldState(events)
+      // Swapped-out cards still name the messages they wrote. Include them for message
+      // rendering after a reload, without putting them back in the active cast.
+      const previous = events.flatMap(({ data }) =>
+        data.key === "card.swap" ? [data.value.replaces, data.value.entity] : []
+      )
+      const ids = [...new Set([...state.participants, ...state.playedByMe, ...previous])]
       const cards = yield* reader.CastCards({
         userId: user,
         entityIds: ids as Array<Cast["participants"][number]>,
@@ -241,6 +248,24 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
         if (opened.bound) hub.publish(chatId, { _tag: "State" })
         return opened
       }).pipe(internal("EditCardForChat")),
+
+    ForkCardForChat: (input) =>
+      Effect.gen(function* () {
+        const id = yield* userId
+        const made = yield* writer
+          .ForkCardForChat({ userId: id, ...input })
+          .pipe(
+            Effect.catchTag("RefOperationRefused", (error) => Effect.fail(new EditRefused({ message: error.reason })))
+          )
+        hub.publish(input.chatId, { _tag: "State" })
+        for (const choice of made.choices) hub.publish(input.chatId, { _tag: "ComposerChoice", choice })
+        hub.publish(input.chatId, {
+          _tag: "Queue",
+          queue: yield* reader.ListQueued({ userId: id, chatId: input.chatId })
+        })
+        yield* warmth.refreshUser(id)
+        return made.ref
+      }).pipe(internal("ForkCardForChat")),
 
     ChangeCast: ({ chatId, slotId, change, forkId }) =>
       Effect.gen(function* () {

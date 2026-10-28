@@ -145,79 +145,14 @@ test("the Cast tab: mute, speak now, write as, the card, add and remove", async 
   await expect(members(page).getByRole("listitem")).toHaveCount(2)
 })
 
-test("a card edited only in this chat, and everywhere", async ({ page }) => {
-  const other = await chatWithMira(page)
+test("Edit opens the card used everywhere", async ({ page }) => {
   await chatWithMira(page)
   await openCast(page)
-  await page.getByRole("button", { name: "Edit Mira" }).click()
-  const scope = page.getByRole("dialog", { name: "Edit Mira" })
-  await expect(scope.getByRole("button", { name: /^Everywhere \(used by \d+ chats\)$/ })).toBeVisible()
-  await shoot(page, "cast-edit-scope")
-  await scope.getByRole("button", { name: /^Only in this chat/ }).click()
-
-  // The editor says it's this chat's own version, and how to get back.
+  await expect(member(page, "Mira")).toContainText(/used by \d+ chats?/)
+  await page.getByRole("button", { name: "Edit Mira", exact: true }).click()
   await expect(page).toHaveURL(/\/library\/[^/?]+$/)
-  await expect(page.getByText("Edited for this chat.")).toBeVisible()
-  const description = page.getByRole("textbox", { name: "Description" })
-  await expectTextBox(description, "A harbor pilot who reads the tides.")
-  await description.fill("A river pilot who reads the tides.")
-  await page.getByRole("button", { name: /^Save/ }).first().click()
-  await page.getByRole("dialog", { name: "Save a revision" }).getByRole("button", { name: "Save revision" }).click()
-  await expect(page.getByText("Saved a revision.")).toBeVisible()
-  await page.getByRole("link", { name: /^← Back to / }).click()
-
-  // The row says so and opens it again; the card shown is this chat's.
-  await openCast(page)
-  const edited = member(page, "Mira").getByRole("link", { name: "Edited for this chat" })
-  await expect(edited).toBeVisible()
-  await page.getByRole("button", { name: "Show card: Mira" }).click()
-  await expect(page.getByRole("region", { name: "Mira's card" })).toContainText("A river pilot")
-  await page.getByRole("button", { name: "Edit Mira" }).click()
-  await expect(page.getByRole("dialog", { name: "Edit Mira" })).toContainText("Opens this chat's own version")
-  await page.getByRole("button", { name: "Cancel" }).click()
-
-  // Another chat with Mira still has the original.
-  await page.goto(other)
-  await openCast(page)
-  await expect(member(page, "Mira").getByRole("link", { name: "Edited for this chat" })).toHaveCount(0)
-  await page.getByRole("button", { name: "Show card: Mira" }).click()
-  await expect(page.getByRole("region", { name: "Mira's card" })).toContainText("A harbor pilot")
-
-  // Everywhere opens the library's card, which says how many chats use it.
-  await page.getByRole("button", { name: "Edit Mira" }).click()
-  await page.getByRole("button", { name: /^Everywhere/ }).click()
   await expect(page.getByText(/used by \d+ chats/)).toBeVisible()
   await expectTextBox(page.getByRole("textbox", { name: "Description" }), "A harbor pilot who reads the tides.")
-})
-
-test("a name edited only in this chat is the name the chat shows, in the Cast and the composer", async ({ page }) => {
-  await chatWithMira(page)
-  await openCast(page)
-  await page.getByRole("button", { name: "Edit Mira" }).click()
-  await page.getByRole("button", { name: /^Only in this chat/ }).click()
-  await expect(page.getByText("Edited for this chat.")).toBeVisible()
-  await page.getByRole("textbox", { name: "Display name", exact: true }).fill("Harbor Mira")
-  await page.getByRole("button", { name: /^Save/ }).first().click()
-  await page.getByRole("dialog", { name: "Save a revision" }).getByRole("button", { name: "Save revision" }).click()
-  await expect(page.getByText("Saved a revision.")).toBeVisible()
-  await page.getByRole("link", { name: /^← Back to / }).click()
-
-  // The row has the chat's name, and the library label beside it.
-  await openCast(page)
-  const row = member(page, "Harbor Mira")
-  await expect(row).toBeVisible()
-  await expect(row).toContainText("Mira")
-  await shoot(page, "cast-local-rename-row")
-  await page.getByRole("button", { name: "Close the panel" }).click()
-  await expect(members(page)).toHaveCount(0)
-
-  // The composer's recent speakers, then the speaker chip, Send and Generate.
-  await page.getByRole("button", { name: "Speak as Harbor Mira" }).click()
-  await expect(page.getByRole("button", { name: "Speaking as Harbor Mira. Change the speaker" })).toBeVisible()
-  await expect(page.getByRole("button", { name: "Write for Harbor Mira" })).toBeVisible()
-  await page.getByLabel("Message", { exact: true }).fill("Harbor Mira checks the tide.")
-  await expect(page.getByRole("button", { name: "Send as Harbor Mira" })).toBeVisible()
-  await shoot(page, "cast-local-rename-composer")
 })
 
 test("the composer regenerates the latest reply, apart from Generate", async ({ page }) => {

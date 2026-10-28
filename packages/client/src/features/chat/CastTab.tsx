@@ -1,23 +1,20 @@
 // The chat's Cast tab (DESIGN §2.1, §2.2, §3.5, §4): who the user plays (the persona, who
 // `{{user}}` is), then everyone in the chat, as ST's group panel and character panel show
 // them. Each can be made to speak now, written as, muted (never picked to reply; its card
-// stays in the context), have their card shown or edited, here only or everywhere, be made
+// stays in the context), have their card shown, edited or forked, be made
 // the persona, and be removed; and any card can be added. Changes to who's here are state
 // events at the leaf shown, so they apply from the latest message on, on this branch.
 import { useAtomValue } from "@effect/atom-react"
 import type { CastCard, EntityId } from "@rp/shared/chat.ts"
 import type { CastChange, ChatCard } from "@rp/shared/chatSetupApi.ts"
-import type { RefId } from "@rp/shared/library.ts"
-import { Link, useNavigate } from "@tanstack/react-router"
+import { useNavigate } from "@tanstack/react-router"
 import { AsyncResult } from "effect/reactivity"
 import { useCallback, useId, useMemo, useState, useSyncExternalStore } from "react"
-import { useAction } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"
 import { AppClient } from "../../rpc.ts"
 import { Avatar } from "../../ui/Avatar.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Switch } from "../../ui/Choice.tsx"
-import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { Input } from "../../ui/Field.tsx"
 import { ActionMenu } from "../../ui/Menu.tsx"
 import { Popover } from "../../ui/Popover.tsx"
@@ -28,6 +25,7 @@ import { castView, CastContext } from "./cast.ts"
 import { MoreIcon, PlusIcon } from "./icons.tsx"
 import type { ChatSession } from "./session.ts"
 import { SpeakerSwitcher } from "./SpeakerSwitcher.tsx"
+import { ChatCardForkDialog, CardVersionDialog } from "./CardForkDialogs.tsx"
 import { writeAs } from "./speaker.ts"
 
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`
@@ -111,90 +109,6 @@ function Definition({ name, info }: { name: string; info: ChatCard }) {
           .join(" ")}
       </p>
     </section>
-  )
-}
-
-/** "Only in this chat" or "Everywhere" (DESIGN §4), with how many chats the card is in. */
-function EditScope({
-  session,
-  card,
-  info,
-  onClose
-}: {
-  session: ChatSession
-  card: CastCard
-  info: ChatCard | undefined
-  onClose: () => void
-}) {
-  const navigate = useNavigate()
-  const action = useAction()
-  const open = (refId: RefId) => void navigate({ to: "/library/$refId", params: { refId } })
-  // Where the chat reads another version (a variant or an earlier one), its own version
-  // starts from that one and is used instead, from the latest message on.
-  const pinned = info !== undefined && info.binding !== "default" && !info.usesOverride
-  const here = async () => {
-    if (info?.usesOverride && info.overrideRefId) return open(info.overrideRefId)
-    const made = await action.run(
-      (client) =>
-        client("EditCardForChat", {
-          chatId: session.id,
-          slotId: session.snapshot().leafSlotId,
-          entityId: card.entityId
-        }),
-      [`chat-cards:${session.id}`]
-    )
-    if (made.ok) open(made.value.ref.id)
-  }
-  const option =
-    "flex w-full flex-col items-start gap-0.5 rounded-lg border border-border bg-surface px-3 py-2.5 text-left outline-none hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus disabled:opacity-50"
-  const chats = info ? plural(info.usedByChats, "chat", "chats") : null
-  return (
-    <Dialog
-      open
-      onOpenChange={(next) => !next && onClose()}
-      title={`Edit ${card.name}`}
-      description="Where should the change apply?"
-    >
-      <div className="flex flex-col gap-2">
-        <button type="button" className={option} disabled={action.pending || !info} onClick={() => void here()}>
-          <span className="font-medium">Only in this chat</span>
-          <span className="text-sm text-muted">
-            {pinned
-              ? info.overrideRefId
-                ? "This chat uses another version of the card here. Its own version, edited before, is used instead from the latest message on."
-                : "This chat uses another version of the card here. Makes this chat's own version from that one, used from the latest message on. Other chats keep theirs."
-              : info?.overrideRefId
-                ? "Opens this chat's own version of the card, edited before."
-                : "Makes a version of the card for this chat. Other chats keep the original."}
-          </span>
-        </button>
-        <button
-          type="button"
-          className={option}
-          disabled={!info}
-          aria-label={chats ? `Everywhere (used by ${chats})` : "Everywhere"}
-          onClick={() => info && open(info.refId)}
-        >
-          <span className="font-medium">Everywhere{chats && ` (used by ${chats})`}</span>
-          <span className="text-sm text-muted">
-            Changes the card in your library, for every chat it's in
-            {info?.usesOverride
-              ? "; this chat's own version takes the change where you haven't edited it."
-              : pinned
-                ? "; this chat uses another version of it here."
-                : "."}
-          </span>
-        </button>
-      </div>
-      {action.error && (
-        <p role="alert" className="text-sm text-danger">
-          {action.error.message}
-        </p>
-      )}
-      <DialogActions>
-        <Button onClick={onClose}>Cancel</Button>
-      </DialogActions>
-    </Dialog>
   )
 }
 
@@ -290,6 +204,8 @@ function Member({
   onChange,
   onPersona,
   onEdit,
+  onFork,
+  onVersion,
   onError
 }: {
   session: ChatSession
@@ -302,13 +218,14 @@ function Member({
   onChange: (change: CastChange) => void
   onPersona: () => void
   onEdit: () => void
+  onFork: () => void
+  onVersion: () => void
   onError: (error: AppError | null) => void
 }) {
   const [showCard, setShowCard] = useState(false)
   const [speaking, setSpeaking] = useState(false)
   const name = card.name
   const openCharacter = useOpenCharacter()
-  const edited = info?.usesOverride === true && info.overrideRefId !== null
   const speak = async () => {
     setSpeaking(true)
     // The composer's Generate for this speaker, without a direction: the model writes their turn.
@@ -330,19 +247,11 @@ function Member({
             {name}
           </button>
           {card.subtitle && <span className="truncate text-xs text-muted">{card.subtitle}</span>}
+          {info && <span className="text-xs text-muted">used by {plural(info.usedByChats, "chat", "chats")}</span>}
           <span className="flex flex-wrap items-center gap-1">
             {played && <Badge tone="accent">your persona</Badge>}
             {writing && <Badge tone="success">writing…</Badge>}
             {muted && !played && <Badge tone="warning">muted</Badge>}
-            {edited && (
-              <Link
-                to="/library/$refId"
-                params={{ refId: info.overrideRefId! }}
-                className="text-xs text-accent underline-offset-4 hover:underline"
-              >
-                Edited for this chat
-              </Link>
-            )}
             {card.inBin && <Badge tone="danger">in the bin</Badge>}
           </span>
         </div>
@@ -405,6 +314,24 @@ function Member({
         <Button variant="ghost" className={small} aria-label={`Edit ${name}`} onClick={onEdit}>
           Edit
         </Button>
+        <Button
+          variant="ghost"
+          className={small}
+          disabled={!info || card.inBin}
+          aria-label={`Fork for this chat: ${name}`}
+          onClick={onFork}
+        >
+          Fork for this chat
+        </Button>
+        <Button
+          variant="ghost"
+          className={small}
+          disabled={!info || card.inBin}
+          aria-label={`Use another version: ${name}`}
+          onClick={onVersion}
+        >
+          Use another version
+        </Button>
       </div>
       {showCard &&
         (info ? <Definition name={name} info={info} /> : <p className="text-sm text-muted">Loading the card…</p>)}
@@ -429,9 +356,9 @@ export function CastTab({ session }: { session: ChatSession }) {
   const forkId = useSyncExternalStore(session.subscribe, () => session.snapshot().forkId)
   // Cards in the bin, or purged, have no definition to read.
   const key = participants.filter((id) => view.cards.get(id)?.inBin === false).join(" ")
-  // The library entry, "used by N chats", this chat's own version and the definition the
+  // The library entry, "used by N chats", and the definition the
   // next request reads; read again at a new leaf, after any library change (an editor
-  // save), or an override made here.
+  // save), or a card fork made here.
   const infoAtom = useMemo(
     () =>
       AppClient.query(
@@ -453,7 +380,9 @@ export function CastTab({ session }: { session: ChatSession }) {
     [infoResult]
   )
   const [error, setError] = useState<AppError | null>(null)
-  const [editing, setEditing] = useState<EntityId | null>(null)
+  const navigate = useNavigate()
+  const [forking, setForking] = useState<EntityId | null>(null)
+  const [switching, setSwitching] = useState<EntityId | null>(null)
   const change = async (next: CastChange) => {
     const outcome = await session.changeCast(next)
     setError(outcome.ok ? null : outcome.error)
@@ -470,7 +399,8 @@ export function CastTab({ session }: { session: ChatSession }) {
   }
   const listCards = useCallback(() => session.listCards(), [session])
   const persona = playedByMe[0] ?? null
-  const editingCard = editing === null ? undefined : view.cards.get(editing)
+  const forkingCard = forking === null ? undefined : view.cards.get(forking)
+  const switchingCard = switching === null ? undefined : view.cards.get(switching)
 
   if (cast === null) return <p className="text-sm text-muted">Loading who's here…</p>
   return (
@@ -523,7 +453,12 @@ export function CastTab({ session }: { session: ChatSession }) {
                 writing={writing === id}
                 onChange={(next) => void change(next)}
                 onPersona={() => void choosePersona(card)}
-                onEdit={() => setEditing(id)}
+                onEdit={() => {
+                  const refId = info.get(id)?.refId
+                  if (refId) void navigate({ to: "/library/$refId", params: { refId } })
+                }}
+                onFork={() => setForking(id)}
+                onVersion={() => setSwitching(id)}
                 onError={setError}
               />
             )
@@ -540,14 +475,15 @@ export function CastTab({ session }: { session: ChatSession }) {
           {error.message}
         </p>
       )}
-      {editingCard && (
-        <EditScope
+      {forkingCard && info.get(forkingCard.entityId) && (
+        <ChatCardForkDialog
           session={session}
-          card={editingCard}
-          info={info.get(editingCard.entityId)}
-          onClose={() => setEditing(null)}
+          card={forkingCard}
+          info={info.get(forkingCard.entityId)!}
+          onClose={() => setForking(null)}
         />
       )}
+      {switchingCard && <CardVersionDialog session={session} card={switchingCard} onClose={() => setSwitching(null)} />}
     </div>
   )
 }

@@ -6,6 +6,7 @@ import { Rpc, RpcGroup } from "effect/rpc"
 import { CastCard, Chat, ChatId, EntityId, ForkId, FrozenMacros, PathEntry, QueuedMessage, SlotId } from "./chat.ts"
 import { ChatNameInput, GenerationUnavailable } from "./chatApi.ts"
 import { NotFound, ServerError, StaleWrite } from "./errors.ts"
+import { EditRefused } from "./editorApi.ts"
 import { Doc, LibraryRef, RefId, RevisionId } from "./library.ts"
 import { ConnectionId, ModelId } from "./providers.ts"
 
@@ -138,7 +139,7 @@ export class Cast extends Schema.Class<Cast>("Cast")({
   /** Lorebook entries only below the history (DESIGN §1.3); on unless the chat turned it off. */
   loreBelowHistory: Schema.Boolean,
   rolesProjection: Schema.NullOr(RolesProjection),
-  /** Every card named above. */
+  /** Active cards plus swapped-out cards, to retain historical message names and portraits. */
   cards: Schema.Array(CastCard)
 }) {}
 
@@ -401,6 +402,20 @@ export class ChatSetupApi extends RpcGroup.make(
     payload: { chatId: ChatId, slotId: Schema.NullOr(SlotId), entityId: EntityId },
     success: CardOverrideOpened,
     error: Schema.Union([...Errors])
+  }),
+  Rpc.make("ForkCardForChat", {
+    payload: {
+      chatId: ChatId,
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
+      slotId: Schema.NullOr(SlotId),
+      entityId: EntityId,
+      name: Schema.String.check(Schema.isMinLength(1)),
+      nickname: Schema.String,
+      characterVersion: Schema.String,
+      moveDrafts: Schema.Boolean
+    },
+    success: LibraryRef,
+    error: Schema.Union([...Errors, EditRefused])
   }),
   /** Changes the cast or a setting from `slotId` on, on that branch (DESIGN §3.4). */
   /** The user's global lorebooks (DESIGN §5.0), in every chat unless a chat turns one off. */

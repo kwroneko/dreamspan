@@ -244,10 +244,12 @@ export function ChatSidePanel({
     void loadNotes().catch(() => undefined)
   }, [])
   if (!visited.has(tab)) setVisited(new Set([...visited, tab]))
-  const characterTabs = (content.view.cast?.cards ?? []).map((c) => ({
-    value: `card:${c.entityId}` as PanelTab,
-    label: c.label
-  }))
+  const activeCast = content.view.cast
+  const characterTabs = (activeCast?.cards ?? [])
+    .filter(
+      (card) => activeCast!.participants.includes(card.entityId) || activeCast!.playedByMe.includes(card.entityId)
+    )
+    .map((c) => ({ value: `card:${c.entityId}` as PanelTab, label: c.label }))
   if (tab.startsWith("card:") && !characterTabs.some((t) => t.value === tab))
     characterTabs.push({ value: tab, label: "Character" })
   const tabs = [...PANEL_TABS, ...characterTabs].map((t) => ({
