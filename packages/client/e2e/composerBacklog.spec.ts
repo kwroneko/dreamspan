@@ -158,6 +158,21 @@ for (const [width, theme, model, asCard] of [
       )
       .toBe(speakerId as EntityId)
     await page.getByRole("button", { name: "Stop", exact: true }).first().click()
+    await toggle(page, false)
+    const written = `A saved-chat message from ${selected}.`
+    await page.getByRole("textbox", { name: "Message", exact: true }).fill(written)
+    await page.getByRole("textbox", { name: "Message", exact: true }).press("Enter")
+    await expect
+      .poll(() =>
+        rpc((api) => api.ReadPath({ chatId, leafSlotId: null, range: { _tag: "Bottom" }, limit: 20 })).then((path) => {
+          const sent = path.entries.find((entry) => entry.version.content === written)
+          return sent ? { speaker: sent.version.speakerEntityId, writer: sent.version.writer } : null
+        })
+      )
+      .toEqual({ speaker: speakerId, writer: "human" })
+    await expect(page.getByRole("button", { name: new RegExp(`^Speaking as ${selected}`) })).toBeVisible()
+    await expect(page.getByRole("button", { name: "Stop", exact: true }).first()).toBeVisible()
+    await page.getByRole("button", { name: "Stop", exact: true }).first().click()
   })
 }
 
@@ -193,4 +208,34 @@ test("a running swipe outside the selected version can still be selected and sto
     )
     .toEqual(["stopped", "stopped"])
   await expect(page.getByRole("button", { name: "Stop the reply", exact: true })).toHaveCount(0)
+})
+
+test("a pending guidance action fits a long speaker name on a phone and desktop", async ({ page }) => {
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  const name = "Keeper of the Northern Lighthouse and the Harbor of Many Returning Ships"
+  const cardId = await importCard(page, name)
+  await page.goto(`${server().url}/cards/${cardId}/chat`)
+  await page.getByRole("button", { name: /^Speaking as / }).click()
+  await page.getByRole("dialog", { name: "Speak as", exact: true }).getByRole("option", { name, exact: true }).click()
+  await toggle(page, true)
+  const generate = page.getByRole("button", { name: `Generate ${name}`, exact: true })
+  for (const width of [390, 1440]) {
+    await page.setViewportSize({ width, height: 1000 })
+    for (const theme of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme: theme })
+      await page.evaluate((value) => {
+        localStorage.setItem("rp.theme", value)
+        document.documentElement.dataset.theme = value
+      }, theme)
+      const bounds = await generate.boundingBox()
+      expect(bounds).not.toBeNull()
+      expect(bounds!.x).toBeGreaterThanOrEqual(0)
+      expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width)
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
+      await expect(page.getByRole("switch", { name: "Guidance", exact: true })).toBeInViewport()
+      const shots = process.env.SCREENSHOT_DIR
+      if (shots)
+        await page.screenshot({ animations: "disabled", path: join(shots, `pending-long-${width}-${theme}.png`) })
+    }
+  }
 })
