@@ -149,7 +149,7 @@ test("an open Notes tab follows another connection's State changes", async ({ pa
 })
 
 test("editing at a displayed leaf keeps the sibling branch's note revision", async ({ page }) => {
-  const { chat, left, right, note } = await admin((api) =>
+  const { chat, left, leftFork, rightFork, note } = await admin((api) =>
     Effect.gen(function* () {
       const card = yield* api.CreateCard({ label: "Branch Mira", name: "Mira" })
       const start = yield* api.StartChat({
@@ -193,17 +193,23 @@ test("editing at a displayed leaf keeps the sibling branch's note revision", asy
         content: "Right."
       })
       if (left._tag !== "Posted" || right._tag !== "Posted") throw new Error("synthetic messages queued")
-      return { chat: start.chat, left: left.entry.slotId, right: right.entry.slotId, note }
+      return {
+        chat: start.chat,
+        left: left.entry.slotId,
+        leftFork: left.chat.currentForkId!,
+        rightFork: right.chat.currentForkId!,
+        note
+      }
     })
   )
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   const editor = page.getByRole("region", { name: "Note Weather" })
-  const openAt = async (leaf: string) => {
+  const openAt = async (fork: string) => {
     // A link can open the panel at a tab.
-    await page.goto(`${server().url}/chats/${chat.id}?leaf=${leaf}&panel=notes`)
+    await page.goto(`${server().url}/chats/${chat.id}?fork=${fork}&panel=notes`)
     await page.getByRole("button", { name: /^Weather/ }).click()
   }
-  await openAt(left)
+  await openAt(leftFork)
   await expectTextBox(editor.getByRole("textbox", { name: "Content" }), "RAIN")
   await editor.getByRole("textbox", { name: "Content" }).fill("SUN")
   await editor.getByRole("button", { name: "Save the note" }).click()
@@ -211,8 +217,8 @@ test("editing at a displayed leaf keeps the sibling branch's note revision", asy
   await expect(editor.getByText("unsaved changes")).toHaveCount(0)
   const listed = await admin((api) => api.ListChatNotes({ chatId: chat.id, slotId: left }))
   expect(listed.find((n) => n.ref.id === note.id)?.doc.content).toBe("SUN")
-  await openAt(right)
+  await openAt(rightFork)
   await expectTextBox(editor.getByRole("textbox", { name: "Content" }), "RAIN")
-  await openAt(left)
+  await openAt(leftFork)
   await expectTextBox(editor.getByRole("textbox", { name: "Content" }), "SUN")
 })

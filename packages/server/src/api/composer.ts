@@ -1,4 +1,4 @@
-// The composer's drafts (@rp/shared/composerApi.ts): one per branch tip of a chat, on the
+// The composer's drafts (@rp/shared/composerApi.ts): one per fork of a chat, on the
 // draft store every text field shares (ARCHITECTURE §3.10). A closing page sends its unsaved
 // text to POST /library/drafts with the editors' (importer/routes.ts).
 import { type AppApi, CurrentUser } from "@rp/shared/api.ts"
@@ -19,15 +19,15 @@ export const makeComposerHandlers = Effect.gen(function* () {
   const handlers = {
     // Only for a live chat of the caller's: a draft is never more than its chat. A composer
     // already there is read in a reader; only a new one, or a copy, takes the writer.
-    OpenComposer: ({ chatId, tipSlotId, copyFrom }) =>
+    OpenComposer: ({ chatId, forkId, copyFrom }) =>
       Effect.gen(function* () {
         const id = yield* userId
         if (copyFrom === undefined) {
-          yield* reader.GetChat({ userId: id, chatId })
-          const there = yield* reader.GetDraft({ userId: id, key: composerKey(chatId, tipSlotId) })
+          const chat = yield* reader.GetChat({ userId: id, chatId })
+          const there = yield* reader.GetDraft({ userId: id, key: composerKey(chatId, forkId ?? chat.currentForkId) })
           if (there !== null) return there
         }
-        return yield* writer.OpenComposer({ userId: id, chatId, tipSlotId, copyFrom: copyFrom ?? null })
+        return yield* writer.OpenComposer({ userId: id, chatId, forkId, copyFrom: copyFrom ?? null })
       }).pipe(internal("OpenComposer")),
 
     SaveComposer: (payload) =>

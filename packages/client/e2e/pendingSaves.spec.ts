@@ -151,7 +151,7 @@ test("two offline composer tabs retain independent pending copies and acknowledg
   await expect.poll(() => copies(opened)).toEqual([])
   const recovered = await admin((api) =>
     Effect.gen(function* () {
-      const draft = yield* api.OpenComposer({ chatId: chat.id, tipSlotId: null })
+      const draft = yield* api.OpenComposer({ chatId: chat.id, forkId: null })
       yield* api.SendMessage({
         chatId: chat.id,
         parentSlotId: null,
@@ -234,14 +234,14 @@ test("typing during a save deletes exactly the acknowledged copy and never recov
   block = true
   await message(page).fill("hello")
   await expect
-    .poll(async () => (await admin((api) => api.OpenComposer({ chatId: chat.id, tipSlotId: null }))).content)
+    .poll(async () => (await admin((api) => api.OpenComposer({ chatId: chat.id, forkId: null }))).content)
     .toBe("hello")
   await message(page).fill("hello plus")
   await expect.poll(async () => (await copies(page)).map(text)).toContain("hello plus")
   block = false
   for (const send of waiting.splice(0)) send()
   await expect
-    .poll(async () => (await admin((api) => api.OpenComposer({ chatId: chat.id, tipSlotId: null }))).content)
+    .poll(async () => (await admin((api) => api.OpenComposer({ chatId: chat.id, forkId: null }))).content)
     .toBe("hello plus")
   await expect.poll(() => copies(page)).toEqual([])
   await page.getByRole("button", { name: "Send", exact: true }).click()
@@ -277,11 +277,11 @@ test("a keepalive and its later live save acknowledge the same pending operation
   await message(page).fill("kept once")
   await page.evaluate(() => window.dispatchEvent(new Event("pagehide")))
   await expect
-    .poll(async () => (await admin((api) => api.OpenComposer({ chatId: chat.id, tipSlotId: null }))).content)
+    .poll(async () => (await admin((api) => api.OpenComposer({ chatId: chat.id, forkId: null }))).content)
     .toBe("kept once")
   await expect.poll(() => copies(page)).toEqual([])
   await expect.poll(() => ids.length).toBe(1)
-  const kept = await admin((api) => api.OpenComposer({ chatId: chat.id, tipSlotId: null }))
+  const kept = await admin((api) => api.OpenComposer({ chatId: chat.id, forkId: null }))
   await admin((api) =>
     api.SendMessage({
       chatId: chat.id,
@@ -332,12 +332,12 @@ test("a send of text a replayed save answered for keeps another tab's newer text
   // The page closing delivers that same save while the socket's copy waits.
   await page.evaluate(() => window.dispatchEvent(new Event("pagehide")))
   await expect
-    .poll(async () => (await admin((api) => api.OpenComposer({ chatId: chat.id, tipSlotId: null }))).content)
+    .poll(async () => (await admin((api) => api.OpenComposer({ chatId: chat.id, forkId: null }))).content)
     .toBe("alpha")
   const newer = "alpha and the other tab's unsent rest"
   await admin((api) =>
     Effect.gen(function* () {
-      const draft = yield* api.OpenComposer({ chatId: chat.id, tipSlotId: null })
+      const draft = yield* api.OpenComposer({ chatId: chat.id, forkId: null })
       yield* api.SaveComposer({
         next: false,
         operationId: crypto.randomUUID(),
@@ -352,8 +352,7 @@ test("a send of text a replayed save answered for keeps another tab's newer text
   hold.release()
   await expect(page.getByRole("article", { name: "Your message" })).toContainText("alpha")
   await expectTextBox(message(page), newer)
-  const chatNow = await admin((api) => api.GetChat({ chatId: chat.id }))
-  const draft = await admin((api) => api.OpenComposer({ chatId: chat.id, tipSlotId: chatNow.activeLeafSlotId }))
+  const draft = await admin((api) => api.OpenComposer({ chatId: chat.id, forkId: null }))
   expect([draft.status, draft.content]).toEqual(["active", newer])
 })
 
@@ -365,7 +364,7 @@ test("typing on another branch keeps the copy of a branch's text the server refu
       const parent = root._tag === "Posted" ? root.entry.slotId : null
       const a = yield* api.SendMessage({ chatId: chat.id, parentSlotId: parent, branch: false, content: "branch A" })
       yield* api.SendMessage({ chatId: chat.id, parentSlotId: parent, branch: true, content: "branch B" })
-      return { chat, a: a._tag === "Posted" ? a.entry.slotId : null }
+      return { chat, a: a._tag === "Posted" ? a.chat.currentForkId : null }
     })
   )
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
@@ -379,7 +378,7 @@ test("typing on another branch keeps the copy of a branch's text the server refu
   await expectTextBox(message(page), "")
   await message(page).fill("new text on branch A")
   await expect
-    .poll(async () => (await admin((api) => api.OpenComposer({ chatId: seeded.chat.id, tipSlotId: seeded.a }))).content)
+    .poll(async () => (await admin((api) => api.OpenComposer({ chatId: seeded.chat.id, forkId: seeded.a }))).content)
     .toBe("new text on branch A")
   expect((await copies(page)).some((copy) => text(copy) === huge)).toBe(true)
   // Back on branch B, the text is in the box again.

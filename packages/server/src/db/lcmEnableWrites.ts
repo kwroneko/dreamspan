@@ -3,6 +3,7 @@
 // it covers (or the run is just shown), the switch is written, and the backfill is recorded. It
 // never generates; the next reply, or "Summarize now", plans the work.
 import type { UserId } from "@rp/shared/domain.ts"
+import { shownIn, viewAt } from "./forkState.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
@@ -73,6 +74,8 @@ export const makeLcmEnableWriteHandlers = (bin: Bin) =>
           const payload = JSON.parse(run.payload_json) as { imported: ImportedSummary; choice: string }
           const source = payload.imported
           if (run.phase === "gather") {
+            // The range as the fork it was offered in shows it.
+            const fork = yield* viewAt(sql, chatId, leafSlotId)
             const rows = yield* sql<{
               id: string
               parent: string | null
@@ -90,7 +93,8 @@ export const makeLcmEnableWriteHandlers = (bin: Bin) =>
                 CASE WHEN ${sql.literal(EFFECTIVE)} THEN (SELECT count(*) FROM version_history h WHERE h.version_id = v.id) ELSE 0 END AS amend_count,
                 EXISTS(SELECT 1 FROM slot_parents p WHERE p.slot_id = c.id) AS merged,
                 coalesce(v.status = 'generating', 0) AS generating
-              FROM chain c JOIN slots s ON s.id = c.id LEFT JOIN versions v ON v.id = s.selected_version_id ORDER BY c.depth DESC`
+              FROM chain c JOIN slots s ON s.id = c.id LEFT JOIN versions v ON v.id = ${shownIn(sql, fork, "s")}
+              ORDER BY c.depth DESC`
             if (
               !rows.length ||
               rows.some((r, n) => r.depth !== source.slotCount - 1 - run.gathered - n || r.merged || r.generating)

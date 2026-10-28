@@ -9,6 +9,8 @@ export interface QueuedRow {
   readonly id: string
   readonly chat_id: string
   readonly reply_slot_id: string
+  /** The fork it posts in; null for one queued before forks. */
+  readonly fork_id: string | null
   readonly seq: number
   readonly kind: "message" | "generate"
   readonly content: string

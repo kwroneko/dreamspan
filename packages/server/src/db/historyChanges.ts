@@ -1,5 +1,6 @@
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
+import { shownIn } from "./forkState.ts"
 
 /** Sparse durable reductions; ordinary appends never enter this index. */
 export const historyRevision = (
@@ -21,16 +22,30 @@ export const historyRevision = (
   )
   SELECT coalesce(sum(revision), 0) AS revision FROM changes WHERE slot_id IN (SELECT id FROM path)`
 
-/** Use the assembler's UTF-16 length, including astral characters and embedded NULs. */
+/**
+ * A shorter text where a fork shows the slot: the version `forkId` (null: the chat's
+ * current fork) shows there (its selection, or the copy standing in for it); with
+ * `versionId`, that version, if `forkId` shows it, or with no fork named, if any fork does. Uses the assembler's UTF-16 length, including astral
+ * characters and embedded NULs.
+ */
 export const recordHistoryReduction = Effect.fnUntraced(function* (
   sql: SqlClient.SqlClient,
   slotId: string,
   content: string,
-  versionId: string | null = null
+  versionId: string | null = null,
+  forkId: string | null = null
 ) {
-  const [previous] = yield* sql<{ content: Uint8Array }>`
-    SELECT CAST(v.content AS BLOB) AS content FROM slots s JOIN versions v ON v.id = s.selected_version_id
-    WHERE s.id = ${slotId} AND (${versionId} IS NULL OR v.id = ${versionId})`
+  const fork = forkId ?? sql.literal("(SELECT current_fork_id FROM chats WHERE id = s.chat_id)")
+  const [previous] =
+    versionId !== null && forkId === null
+      ? yield* sql<{ content: Uint8Array }>`
+          SELECT CAST(v.content AS BLOB) AS content FROM slots s JOIN versions v ON v.id = ${versionId}
+          WHERE s.id = ${slotId} AND (s.selected_version_id = v.id OR EXISTS (SELECT 1 FROM fork_overrides o
+            WHERE o.target_id = s.id AND o.kind = 'select' AND o.value_id = v.id) OR EXISTS (SELECT 1
+            FROM fork_overrides o WHERE o.target_id = v.source_version_id AND o.kind = 'replace' AND o.value_id = v.id))`
+      : yield* sql<{ content: Uint8Array }>`
+          SELECT CAST(v.content AS BLOB) AS content FROM slots s JOIN versions v ON v.id = ${shownIn(sql, fork, "s")}
+          WHERE s.id = ${slotId} AND (${versionId} IS NULL OR v.id = ${versionId})`
   if (previous && content.length < Buffer.from(previous.content).toString("utf8").length)
     yield* sql`INSERT INTO history_changes SELECT id, chat_id, depth, 1 FROM slots WHERE id = ${slotId}
       ON CONFLICT(slot_id) DO UPDATE SET revision = revision + 1`

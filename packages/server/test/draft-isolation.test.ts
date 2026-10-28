@@ -31,7 +31,7 @@ it.live("foreign draft and revision metadata are rejected independently of the t
       content: "BOB PROVIDED"
     }
     const save = yield* outcome(b.SaveComposer(payload))
-    const copy = yield* outcome(b.OpenComposer({ chatId: bc.id, tipSlotId: null, copyFrom: ad.id }))
+    const copy = yield* outcome(b.OpenComposer({ chatId: bc.id, forkId: null, copyFrom: ad.id }))
     const editor = yield* outcome(
       b.SaveEditorDraft({
         refId: br.id,
@@ -55,7 +55,7 @@ it.live("foreign draft and revision metadata are rejected independently of the t
         copy,
         editor,
         keepalive: keepalive.status,
-        aliceComposer: (yield* a.OpenComposer({ chatId: ac.id, tipSlotId: null })).content,
+        aliceComposer: (yield* a.OpenComposer({ chatId: ac.id, forkId: null })).content,
         bobOriginal: bd.content
       })
     )

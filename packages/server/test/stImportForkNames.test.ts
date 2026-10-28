@@ -11,6 +11,10 @@ import { databaseFile } from "../src/db/connection.ts"
 import { stForkName } from "../src/importer/stMapping.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"
 import { sendStFile } from "./support/stUpload.ts"
+import { currentForkSql, selectedInSql } from "../src/db/forkState.ts"
+
+/** The version slot `s` shows in its chat's current fork. */
+const SHOWN = selectedInSql(currentForkSql("s.chat_id"), "s")
 
 const config = testConfig()
 const jsonl = (...lines: ReadonlyArray<unknown>) =>
@@ -33,7 +37,7 @@ const query = (sql: string, ...args: Array<string | number>) => {
 /** The slot showing `text`: its id and branch name. */
 const slotOf = (text: string) =>
   query(
-    "SELECT s.id, s.branch_name AS name FROM slots s JOIN versions v ON v.id = s.selected_version_id WHERE v.content = ?",
+    `SELECT s.id, s.branch_name AS name FROM slots s JOIN versions v ON v.id = ${SHOWN} WHERE v.content = ?`,
     text
   )[0] as { id: SlotId; name: string | null }
 /** A statement on the test's database from another connection, off this thread. */
@@ -160,9 +164,11 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
       assert.strictEqual(versionAfter.row_version, versionAfter.st_import_row_version)
       assert.isAbove(Number(versionAfter.row_version), Number(versionBefore!.row_version))
 
-      // A name given here stays.
-      const api = yield* client()
-      yield* api.NameBranch({ slotId: slot.id, name: "My own name" })
+      // A name given here stays (as SetBranchName gave them before forks: on the slot, the user's).
+      const nameHere = (name: string) =>
+        exec(`UPDATE slots SET branch_name = nullif('${name}', ''), branch_name_user = 1, row_version = row_version + 1
+          WHERE id = '${slot.id}'`)
+      yield* nameHere("My own name")
       yield* importRun(files)
       assert.strictEqual(slotOf("woods").name, "My own name")
       // Even from a record that never placed its name.
@@ -171,7 +177,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
       assert.strictEqual(slotOf("woods").name, "My own name")
 
       // And a name taken off here stays off.
-      yield* api.NameBranch({ slotId: slot.id, name: "" })
+      yield* nameHere("")
       yield* importRun(files)
       assert.isNull(slotOf("woods").name)
     })

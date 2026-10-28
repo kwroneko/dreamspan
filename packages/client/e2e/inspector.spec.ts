@@ -477,10 +477,10 @@ test("a held branch reply says waiting for the cache, including after reload", a
       // The two branches format the same reusable prefix.
       const follower = yield* api.Generate({ chatId: chat.id, parentSlotId, branch: true })
       if (follower._tag !== "Posted") return yield* Effect.die(new Error("follower queued"))
-      return follower.entry.slotId
+      return follower.chat.currentForkId!
     })
   )
-  await page.goto(`${server().url}/chats/${chat.id}?leaf=${held}`)
+  await page.goto(`${server().url}/chats/${chat.id}?fork=${held}`)
   await expect(page.getByText("Waiting for the cache…", { exact: true })).toBeVisible()
   await page.reload()
   await expect(page.getByText("Waiting for the cache…", { exact: true })).toBeVisible()

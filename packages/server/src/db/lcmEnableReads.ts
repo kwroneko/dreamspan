@@ -5,6 +5,7 @@ import { contextExcluded } from "./lcmVisibility.ts"
 // the cost formulas are.
 import { foldState, noteSwitches } from "@rp/shared/state.ts"
 import type { EntityId } from "@rp/shared/chat.ts"
+import { atLeaf, shownIn, viewAt } from "./forkState.ts"
 import type { BackfillCounts } from "@rp/shared/lcm.ts"
 import { Effect, Layer } from "effect"
 import { SqlClient } from "effect/sql"
@@ -42,16 +43,19 @@ export const makeLcmEnableReadHandlers = Effect.gen(function* () {
   const assembler = yield* makeAssembler
 
   /** The messages after depth `after` that the planner would count, and their tokens. */
-  const tail = (leafSlotId: string, after: number, shownThrough: number) =>
-    sql<{ n: number; tokens: number }>`WITH RECURSIVE path(id, parent, depth) AS (
+  const tail = (chatId: string, leafSlotId: string, after: number, shownThrough: number) =>
+    Effect.flatMap(
+      viewAt(sql, chatId, leafSlotId),
+      (fork) => sql<{ n: number; tokens: number }>`WITH RECURSIVE path(id, parent, depth) AS (
         SELECT id, parent_slot_id, depth FROM slots WHERE id = ${leafSlotId} AND depth > ${after}
         UNION ALL SELECT s.id, s.parent_slot_id, s.depth FROM slots s JOIN path p ON s.id = p.parent
           WHERE s.depth > ${after}
       ) SELECT count(*) AS n, coalesce(sum((length(v.content) + 3) / 4 + 3), 0) AS tokens
-        FROM path p JOIN slots s ON s.id = p.id JOIN versions v ON v.id = s.selected_version_id
+        FROM path p JOIN slots s ON s.id = p.id JOIN versions v ON v.id = ${shownIn(sql, fork, "s")}
         WHERE s.deleted_at IS NULL AND s.purged_at IS NULL AND (${sql.literal(contextExcluded())} = 0 OR s.depth <= ${shownThrough})
           AND v.deleted_at IS NULL AND v.purged_at IS NULL AND v.status NOT IN ('generating', 'failed')
-          AND length(v.content) > 0`.pipe(Effect.map(([row]) => row ?? { n: 0, tokens: 0 }))
+          AND length(v.content) > 0`
+    ).pipe(Effect.map(([row]) => row ?? { n: 0, tokens: 0 }))
 
   return {
     // The settings panel (DESIGN §8): what the chat stores, what applies, and the fit, measured on
@@ -115,7 +119,7 @@ export const makeLcmEnableReadHandlers = Effect.gen(function* () {
         if (!owned) return yield* new NotFound({ entity: "chat", id: chatId })
         const [existing] = yield* sql`SELECT 1 FROM summaries WHERE chat_id = ${chatId} AND sealed = 1 LIMIT 1`
         return existing ? null : yield* importedSummary(sql, userId, chatId, leafSlotId)
-      }).pipe(query("ReadLcmImported")),
+      }).pipe(atLeaf(sql, chatId, leafSlotId), query("ReadLcmImported")),
     GetBackfill: ({ userId, chatId }) =>
       Effect.gen(function* () {
         const [owned] =
@@ -253,7 +257,7 @@ export const makeLcmEnableReadHandlers = Effect.gen(function* () {
         const sizes = summaries.summaries.map((s) => s.tokens)
         const work = (after: number, shownThrough: number, layerBefore: number) =>
           Effect.gen(function* () {
-            const rest = yield* tail(leafSlotId, after, shownThrough)
+            const rest = yield* tail(chatId, leafSlotId, after, shownThrough)
             const totals = estimateBackfill({
               tokens: rest.tokens,
               messages: rest.n,
@@ -297,6 +301,7 @@ export const makeLcmEnableReadHandlers = Effect.gen(function* () {
           : null
         return { enabled, imported: offer, fromScratch, adopted, ...noted }
       }).pipe(
+        atLeaf(sql, chatId, leafSlotId),
         // A document the sources can't read means nothing can be assembled to measure.
         Effect.catchTag("AssemblyFailed", (error) =>
           Effect.fail(new StorageError({ operation: "EstimateBackfill", reason: "constraint", message: error.message }))

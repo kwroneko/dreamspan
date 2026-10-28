@@ -7,7 +7,8 @@ import { importState } from "@rp/shared/stImportApi.ts"
 import { foldState, type FoldableEvent } from "@rp/shared/state.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
-import { shellSlotsQuery, shellEventsQuery } from "./shellQueries.ts"
+import { shownInSql } from "./forkState.ts"
+import { shellSlotsQuery, shellEventsQuery, tipForkSql } from "./shellQueries.ts"
 import { loadCards } from "./cards.ts"
 import type { ReadOps } from "./ops.ts"
 import type { ChatRow } from "./rows.ts"
@@ -53,9 +54,13 @@ export const makeShellReadHandlers = Effect.gen(function* () {
         FROM entities e JOIN entity_refs r ON r.id = (SELECT id FROM entity_refs WHERE entity_id = e.id AND ref_kind <> 'chat_override' ORDER BY ref_kind = 'upstream' DESC, created_at, id LIMIT 1)
         JOIN entity_revisions rev ON rev.id = r.head_revision_id
         WHERE e.owner_user_id = ${userId} AND e.kind = 'card' AND e.deleted_at IS NULL AND e.purged_at IS NULL AND e.archived_at IS NULL`
-        const chats = yield* sql<
+        // The chat's current fork ends at its active leaf (schema/forks.ts), which is where the shell's current is.
+        const chats = (yield* sql<
           ChatRow & { current_leaf_slot_id: string | null }
-        >`SELECT * FROM chats WHERE owner_user_id = ${userId} AND deleted_at IS NULL`
+        >`SELECT * FROM chats WHERE owner_user_id = ${userId} AND deleted_at IS NULL`).map((row) => ({
+          ...row,
+          current_leaf_slot_id: row.active_leaf_slot_id
+        }))
         const slots = yield* sql.unsafe<Slot>(shellSlotsQuery, [userId])
         const raw = yield* sql.unsafe<{
           chat_id: string
@@ -81,6 +86,19 @@ export const makeShellReadHandlers = Effect.gen(function* () {
           fork_id: string
         }>`SELECT chat_id, fork_id FROM chat_pins WHERE user_id = ${userId}`
         const pinned = new Set(pins.map((p) => `${p.chat_id}/${p.fork_id}`))
+        // A fork's own name and pin (SetForkName, SetForkPinned) belong to the fork ending at this leaf.
+        const named = yield* sql<{
+          chat_id: string
+          tip_slot_id: string
+          name: string | null
+          pinned: number
+        }>`SELECT f.chat_id, f.tip_slot_id, f.name, f.pinned_at IS NOT NULL AS pinned FROM forks f JOIN chats c ON c.id = f.chat_id
+          WHERE c.owner_user_id = ${userId} AND c.deleted_at IS NULL AND f.deleted_at IS NULL AND f.tip_slot_id IS NOT NULL
+            AND (f.name IS NOT NULL OR f.pinned_at IS NOT NULL)`
+        const forkNames = new Map(
+          named.flatMap((f) => (f.name === null ? [] : [[`${f.chat_id}/${f.tip_slot_id}`, f.name]]))
+        )
+        const forkPins = new Set(named.filter((f) => f.pinned === 1).map((f) => `${f.chat_id}/${f.tip_slot_id}`))
         const slotById = new Map(slots.map((s) => [s.id, s]))
         const children = new Map<string, Array<Slot>>()
         for (const s of slots) {
@@ -191,18 +209,19 @@ export const makeShellReadHandlers = Effect.gen(function* () {
               const cast = state.participants
                 .filter((id) => !state.playedByMe.includes(id))
                 .flatMap((id) => byCard.get(id) ?? [])
+              const given = liveLeaf === null ? undefined : forkNames.get(`${row.id}/${liveLeaf}`)
               forks.push({
                 forkId: fork,
                 preview: "",
                 messages: liveLeaf ? (slotById.get(liveLeaf)?.depth ?? -1) + 1 : 0,
                 chat,
                 leaf: liveLeaf as SlotId | null,
-                name: name ?? chatName(importState(row.title).title, cast).name,
-                named: name !== null,
+                name: given ?? name ?? chatName(importState(row.title).title, cast).name,
+                named: given !== undefined || name !== null,
                 current:
                   s.id === row.current_leaf_slot_id ||
                   (row.current_leaf_slot_id === null && s.id === row.active_leaf_slot_id),
-                pinned: pinned.has(`${row.id}/${fork}`),
+                pinned: pinned.has(`${row.id}/${fork}`) || (liveLeaf !== null && forkPins.has(`${row.id}/${liveLeaf}`)),
                 createdAt: fork !== item.fork ? s.created_at : item.created,
                 recentAt: recent,
                 cast,
@@ -235,7 +254,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
           const rows = yield* sql<{
             id: string
             preview: string
-          }>`SELECT s.id, substr(v.content,1,160) AS preview FROM slots s JOIN versions v ON v.id = s.selected_version_id WHERE s.id IN ${sql.in(leaves.slice(at, at + 200))} AND s.deleted_at IS NULL`
+          }>`SELECT s.id, substr(v.content,1,160) AS preview FROM slots s JOIN versions v ON v.id = ${sql.literal(shownInSql(tipForkSql, "s"))} WHERE s.id IN ${sql.in(leaves.slice(at, at + 200))} AND s.deleted_at IS NULL`
           for (const row of rows) previewByLeaf.set(row.id, row.preview)
         }
         const people = new Map<string, CastCard>()

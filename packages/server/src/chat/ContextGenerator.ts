@@ -36,17 +36,27 @@ export const layer = Layer.effect(
       Stream.unwrap(
         Effect.gen(function* () {
           const { userId, chatId, slotId, versionId } = request
+          // Read in the fork it was started in: the chat's current fork may be another by now.
+          const forkId = request.forkId ?? null
           const slot = yield* reader
-            .GetSlot({ userId, slotId })
+            .GetSlot({ userId, slotId, forkId })
             .pipe(Effect.catchTag(["StorageError", "RpcClientError", "NotFound"], serverFailure("GetSlot")))
           const parent = slot.entry.parentSlotId
-          const partialBatch = parent ? yield* summaries.beforeReply({ userId, chatId, leafSlotId: parent }) : false
+          const partialBatch = parent
+            ? yield* summaries.beforeReply({
+                userId,
+                chatId,
+                leafSlotId: parent,
+                ...(forkId === null ? {} : { forkId })
+              })
+            : false
           const assembled = yield* reader
             .AssembleContext({
               userId,
               chatId,
               slotId,
               versionId,
+              forkId,
               now: Date.now(),
               timeZone: "UTC",
               frozen: null,
@@ -99,6 +109,7 @@ export const layer = Layer.effect(
               versionId,
               rolloutId,
               leafSlotId: generation.leafSlotId as SlotId | null,
+              forkId,
               connectionId: model.connectionId as ConnectionId,
               modelId: model.modelId as ModelId,
               snapshot: assembled.snapshot,

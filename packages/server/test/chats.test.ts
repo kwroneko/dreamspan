@@ -416,7 +416,7 @@ describe("chats", () => {
       const selected = yield* api.SelectVersion({
         slotId,
         versionId: original!.id,
-        expectedRowVersion: written.rowVersion
+        expectedVersionId: written.version.id
       })
       assert.strictEqual(selected.version.id, original!.id)
       const edited = yield* api.EditVersion({

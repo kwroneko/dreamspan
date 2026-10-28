@@ -135,7 +135,7 @@ for (const action of ["retry", "logout", "logout retry", "logout unsaved"] as co
       Effect.gen(function* () {
         const me = yield* api.Whoami()
         const chat = yield* api.CreateChat({ title: "Recovered by retry" })
-        const empty = yield* api.OpenComposer({ chatId: chat.id, tipSlotId: null })
+        const empty = yield* api.OpenComposer({ chatId: chat.id, forkId: null })
         const saved = yield* api.SaveComposer({
           chatId: chat.id,
           draftId: empty.id,

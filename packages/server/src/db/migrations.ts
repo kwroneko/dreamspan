@@ -10,6 +10,10 @@ import { lcmEnableSchema } from "./schema/lcmEnable.ts"
 import { composerChoiceSchema } from "./schema/composerChoice.ts"
 import { historyChangesSchema } from "./historyChanges.ts"
 import { lcm } from "./schema/lcm.ts"
+import { chains } from "./schema/chains.ts"
+import { forksMigration } from "./forkMigration.ts"
+import { forkOverrides } from "./schema/forkOverrides.ts"
+import { forkVersions } from "./schema/forkVersions.ts"
 import { SqliteMigrator } from "@effect/sql-sqlite-node"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
@@ -45,6 +49,19 @@ const providersMigration = Effect.gen(function* () {
   }>`SELECT (SELECT count(*) FROM connections) + (SELECT count(*) FROM models) AS n`
   if (rows[0]!.n > 0) return yield* Effect.die(new Error("0005_providers: connections or models already hold rows"))
   yield* runAll(providers)
+})
+
+/**
+ * 0044 indexes the graph by chain. The writer has never made a second lane, so a slot
+ * outside its chat's first lane is corrupted data, not a case to handle.
+ */
+const chainsMigration = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient
+  const [row] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM slots s
+    WHERE s.lane_id IS NOT (SELECT l.id FROM lanes l WHERE l.chat_id = s.chat_id ORDER BY l.created_at, l.id LIMIT 1)`
+  if (row!.n > 0)
+    return yield* Effect.die(new Error(`0044_chains: ${row!.n} slots are outside their chat's first lane`))
+  yield* runAll(chains)
 })
 
 /** 0006 retires per-connection keys, which is only safe while no connection holds one. */
@@ -314,7 +331,15 @@ export const migrations = {
   // A persona's description note is an ordinary note, and the card keeps one copy of the text (DESIGN §4.1).
   "0050_persona_notes": personaNotesMigration,
   // Chats that never changed the copied built-in summarization sizes take the new ones (DESIGN §8).
-  "0051_lcm_new_defaults": lcmDefaultsMigration
+  "0051_lcm_new_defaults": lcmDefaultsMigration,
+  // Paths are read by chain segment, not by walking up parents (schema/chains.ts).
+  "0052_chains": chainsMigration,
+  // A fork per line of each chat, the current one from the active leaf (forkMigration.ts).
+  "0053_forks": forksMigration,
+  // What a fork changes is a row of its own: selections first (schema/forkOverrides.ts).
+  "0054_fork_overrides": runAll(forkOverrides),
+  // Copies a fork amends in place of a message's own version, and per-fork flags (schema/forkVersions.ts).
+  "0055_fork_versions": runAll(forkVersions)
 }
 
 export const Migrations = SqliteMigrator.layer({ loader: SqliteMigrator.fromRecord(migrations) })

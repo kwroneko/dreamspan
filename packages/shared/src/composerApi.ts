@@ -1,13 +1,12 @@
 // The composer's text on the server (DESIGN §6.2, DATA-MODEL §10), merged into AppApi. Each
-// branch tip of a chat has its own composer, a draft with server-side undo history: saved
-// while the user types, read back on a reload or another device, committed with the send.
+// fork of a chat has its own composer, a draft with server-side undo history: saved while
+// the user types, read back on a reload or another device, committed with the send.
 //
-// A composer's draft moves with its tip when a message is appended there, so the client
-// names the draft its text was typed into (its id, row version and session), never just
-// the tip: the server saves the text onto that draft wherever it is now (ARCHITECTURE §3.10).
+// The client names the draft its text was typed into (its id, row version and session),
+// never just the fork: the server saves the text onto that draft (ARCHITECTURE §3.10).
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
-import { ChatId, EntityId, SlotId } from "./chat.ts"
+import { ChatId, EntityId, ForkId } from "./chat.ts"
 import { Draft, DraftRestore, DraftState } from "./drafts.ts"
 import { NotFound, ServerError, StaleWrite } from "./errors.ts"
 
@@ -54,12 +53,12 @@ export const ComposerBeacon = Schema.Struct({
 
 export class ComposerApi extends RpcGroup.make(
   /**
-   * The composer at a tip of the chat (null: before the first message), made empty if
-   * there's none. `copyFrom` (a composer draft's id) starts a branch: its text is copied
-   * in, unless this tip has text of its own (DESIGN §6.2).
+   * The composer of a fork of the chat (null: its current fork), made empty if there's
+   * none. `copyFrom` (a composer draft's id) starts a branch: its text is copied in, unless
+   * this fork has text of its own (DESIGN §6.2).
    */
   Rpc.make("OpenComposer", {
-    payload: { chatId: ChatId, tipSlotId: Schema.NullOr(SlotId), copyFrom: Schema.optionalKey(Schema.String) },
+    payload: { chatId: ChatId, forkId: Schema.NullOr(ForkId), copyFrom: Schema.optionalKey(Schema.String) },
     success: Draft,
     error: Schema.Union([...Errors])
   }),

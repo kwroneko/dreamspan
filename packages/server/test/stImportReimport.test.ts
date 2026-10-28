@@ -93,7 +93,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
           )
           expectedLeaf = sent.entry.slotId
         }
-        const draft = yield* typeInto(api, chat.id, expectedLeaf, "Keep this composer")
+        const draft = yield* typeInto(api, chat.id, null, "Keep this composer")
         const changed = lines(kind, kind === "swipe-edit-append" ? 12 : 10)
         if (kind === "swipe" || kind === "swipe-edit-append") changed[4] = swipe(original[4]!, `${kind} new swipe`)
         if (kind !== "swipe") changed[4] = edit(changed[4]!, `${kind} edited text`)
@@ -169,7 +169,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
           assert.strictEqual(end.parent, after.find((r) => r.content === changed[10]!.mes)!.id)
         }
         assert.strictEqual(current.activeLeafSlotId, expectedLeaf)
-        const composer = yield* api.OpenComposer({ chatId: chat.id, tipSlotId: expectedLeaf })
+        const composer = yield* api.OpenComposer({ chatId: chat.id, forkId: null })
         assert.strictEqual(composer.id, draft.id)
         assert.strictEqual(composer.content, draft.content)
         // Same changed file again: no extra version, slot, leaf or composer movement.
@@ -177,7 +177,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
         assert.strictEqual(repeated.answers.get(path)?.outcome, "unchanged")
         assert.deepStrictEqual(yield* graph(chat.id), after)
         assert.strictEqual((yield* api.GetChat({ chatId: chat.id })).activeLeafSlotId, expectedLeaf)
-        assert.strictEqual((yield* api.OpenComposer({ chatId: chat.id, tipSlotId: expectedLeaf })).id, draft.id)
+        assert.strictEqual((yield* api.OpenComposer({ chatId: chat.id, forkId: null })).id, draft.id)
         // Another ST edit must still follow the import's own selection revision.
         changed[4] = edit(changed[4]!, `${kind} edited again`)
         const third = yield* importStFolder(folder(kind, changed, true))
@@ -210,7 +210,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
         let expectedText = target.version.content
         if (local === "selection") {
           const alt = (yield* api.ListVersions({ slotId: target.slotId }))[1]!
-          yield* api.SelectVersion({ slotId: target.slotId, versionId: alt.id, expectedRowVersion: target.rowVersion })
+          yield* api.SelectVersion({ slotId: target.slotId, versionId: alt.id, expectedVersionId: target.version.id })
           expectedText = alt.content
         } else if (local === "edit") {
           yield* api.WriteVersion({

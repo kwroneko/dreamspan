@@ -255,17 +255,20 @@ describe("generation", () => {
       )
       const switched = yield* api.SwitchBranch({ chatId: chat.id, slotId: other.entry.slotId, index: 0 })
       assert.strictEqual(switched.slotId, message!.slotId)
-      assert.strictEqual(switched.chat.activeLeafSlotId, version.slotId)
+      assert.strictEqual(switched.fork.tipSlotId, version.slotId)
 
       // A reply there, held; a Generate from the composer onto it queues and commits the composer.
       let release = () => {}
       const held = new Promise<void>((resolve) => (release = resolve))
       mock.setHandler((request, res) => void held.then(() => completion(request, res)))
-      const { entry } = yield* posted(api.Generate({ chatId: chat.id, parentSlotId: version.slotId, branch: false }))
+      const { entry } = yield* posted(
+        api.Generate({ chatId: chat.id, forkId: switched.fork.id, parentSlotId: version.slotId, branch: false })
+      )
       yield* eventually(() => mock.requests().length === 2)
-      const draft = yield* typeInto(api, chat.id, entry.slotId, "Make it rain.")
+      const draft = yield* typeInto(api, chat.id, switched.fork.id, "Make it rain.")
       const queued = yield* api.Generate({
         chatId: chat.id,
+        forkId: switched.fork.id,
         parentSlotId: entry.slotId,
         branch: false,
         direction: "Make it rain.",
@@ -293,7 +296,7 @@ describe("generation", () => {
       )
       assert.strictEqual(path.at(-1)!.slotId, leaf)
       assert.strictEqual(path.at(-1)!.version.direction, "Make it rain.")
-      const moved = yield* api.OpenComposer({ chatId: chat.id, tipSlotId: leaf })
+      const moved = yield* api.OpenComposer({ chatId: chat.id, forkId: switched.fork.id })
       assert.deepStrictEqual([moved.id, moved.status, moved.content], [draft.id, "committed", ""])
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })

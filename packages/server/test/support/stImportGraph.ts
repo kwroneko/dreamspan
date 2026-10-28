@@ -1,5 +1,6 @@
 import { Effect } from "effect"
 import { fixtureSql } from "./lcmFixtures.ts"
+import { currentForkSql, selectedInSql } from "../../src/db/forkState.ts"
 
 export interface ImportGraphRow {
   readonly id: string
@@ -19,7 +20,7 @@ export const stImportGraph = (dataDir: string, chatId: string) =>
     dataDir,
     [
       {
-        sql: `SELECT s.id, s.parent_slot_id AS parent, s.selected_version_id AS selected,
+        sql: `SELECT s.id, s.parent_slot_id AS parent, ${selectedInSql(currentForkSql("s.chat_id"), "s")} AS selected,
       v.content, v.reasoning, v.created_at AS at, v.origin, v.macro_mode AS macroMode, v.status
       FROM slots s JOIN versions v ON v.slot_id = s.id WHERE s.chat_id = ? ORDER BY s.depth, s.id, v.ordinal`,
         params: [chatId]

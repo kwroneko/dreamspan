@@ -78,7 +78,7 @@ it.live(
         userId: user.id,
         slotId: a.slotId,
         versionId: a.version.id,
-        expectedRowVersion: 2
+        expectedVersionId: swipe.id
       })
       yield* fresh(true)
       const bin = yield* writer.DeleteMessage({ userId: user.id, slotId: b.slotId })
@@ -131,17 +131,16 @@ it.live(
         ),
         "NotFound"
       )
-      yield* writer.AmendVersion({
+      // The other branch's fork, current now, shows it too: the amend gives that fork a copy.
+      const amended = yield* writer.AmendVersion({
         userId: user.id,
         versionId: a.version.id,
         content: "amended",
         expectedRowVersion: 1
       })
+      const amendedInput = { slotId: a.slotId, versionId: amended.id, amendCount: 1 }
       yield* fresh(false)
-      const updated = yield* completeFixture(config.dataDir, writer, user.id, chat.id, [
-        { ...input(a), amendCount: 1 },
-        input(b)
-      ])
+      const updated = yield* completeFixture(config.dataDir, writer, user.id, chat.id, [amendedInput, input(b)])
       assert.isTrue(updated.fresh)
       const job = yield* summaryJob(config.dataDir, chat.id, a.slotId, b.slotId)
       const counts = () =>
@@ -178,7 +177,7 @@ it.live(
             ...job,
             content: "Fails after inserts",
             status: "complete",
-            inputs: [{ ...input(a), amendCount: 1 }, input(b)],
+            inputs: [amendedInput, input(b)],
             children: []
           }),
           () => "allowed"

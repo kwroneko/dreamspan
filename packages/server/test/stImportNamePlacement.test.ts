@@ -7,6 +7,19 @@ import { fixtureSql } from "./support/lcmFixtures.ts"
 import { sendStFile } from "./support/stUpload.ts"
 
 const config = testConfig()
+
+/**
+ * A name given in the app on the slot that starts a branch, as SetBranchName gave them before
+ * forks (now SetForkName names a fork; ST imports place names on slots until imports map to
+ * forks, spec/FORK-INDEPENDENCE-DELTA.md unit 9): marked as the user's, a local change.
+ */
+const nameHere = ({ slotId, name }: { slotId: SlotId; name: string }) =>
+  fixtureSql(config.dataDir, [
+    {
+      sql: `UPDATE slots SET branch_name = nullif(?, ''), branch_name_user = 1, row_version = row_version + 1 WHERE id = ?`,
+      params: [name.trim(), slotId]
+    }
+  ])
 const bytes = (lines: unknown[]) => new TextEncoder().encode(lines.map((x) => JSON.stringify(x)).join("\n"))
 const msg = (mes: string, n: number, extra = {}) => ({
   name: n % 2 ? "User" : "Bot",
@@ -76,7 +89,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
             let source = files[1]![0]
             const api = yield* run(files)
             const base = yield* snapshot(api, source)
-            yield* api.NameBranch({ slotId: base.entries[2]!.slotId, name: choice })
+            yield* nameHere({ slotId: base.entries[2]!.slotId, name: choice })
             // Automatic records created before placement bookkeeping have neither field.
             if (mode === "legacy-writer")
               yield* fixtureSql(config.dataDir, [
@@ -180,7 +193,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
           ]
           const api = yield* run(files)
           const base = yield* snapshot(api, files[2]![0])
-          if (choice !== null) yield* api.NameBranch({ slotId: base.entries[3]!.slotId, name: choice })
+          if (choice !== null) yield* nameHere({ slotId: base.entries[3]!.slotId, name: choice })
           const before = yield* snapshot(api, files[2]![0])
           const changedOuter = bytes([
             { chat_metadata: { main_chat: "main" } },
@@ -499,7 +512,7 @@ const replayTrace = (seed: number, edits: readonly Edit[]) =>
           const before = yield* graph(folder)
           const placement = before.records.get(source(edit.file))?.nameSlot
           if (placement)
-            yield* api.NameBranch({
+            yield* nameHere({
               slotId: placement,
               name: edit.kind === "clear" ? "" : `Local ${edit.file} ${step}`
             })
@@ -616,7 +629,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
             const outer = [...common, msg(folder + " fork", 2), msg(folder + " reply", 3)]
             const api = yield* run(files)
             const base = yield* snapshot(api, files[1]![0])
-            if (choice !== null) yield* api.NameBranch({ slotId: base.entries[2]!.slotId, name: choice })
+            if (choice !== null) yield* nameHere({ slotId: base.entries[2]!.slotId, name: choice })
             const before = yield* snapshot(api, files[1]![0])
             let childBefore: Snapshot | undefined
             const childSource = `chats/${folder}/Inner road.jsonl`
@@ -723,7 +736,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
             const source = `chats/${folder}/Outer road.jsonl`
             const api = yield* run([mainFile, [source, bytes([{ chat_metadata: { main_chat: "main" } }, ...outer])]])
             const base = yield* snapshot(api, source)
-            if (choice !== null) yield* api.NameBranch({ slotId: base.entries[2]!.slotId, name: choice })
+            if (choice !== null) yield* nameHere({ slotId: base.entries[2]!.slotId, name: choice })
             if (deeper === "migrated-hide") {
               // A local change from before the upgrade, then migration 0043's statement.
               yield* api.SetMessageHidden({ slotId: base.entries[5]!.slotId, hidden: true })
@@ -733,7 +746,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
                   params: [base.entries[5]!.slotId]
                 }
               ])
-            } else yield* api.NameBranch({ slotId: base.entries[4]!.slotId, name: "Later scene" })
+            } else yield* nameHere({ slotId: base.entries[4]!.slotId, name: "Later scene" })
             const before = yield* snapshot(api, source)
             yield* fixtureSql(config.dataDir, [
               {
@@ -789,7 +802,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
             [childSource, bytes([{ chat_metadata: { main_chat: "Outer road" } }, ...child])]
           ])
           const base = yield* snapshot(api, files[1]![0])
-          if (choice !== null) yield* api.NameBranch({ slotId: base.entries[2]!.slotId, name: choice })
+          if (choice !== null) yield* nameHere({ slotId: base.entries[2]!.slotId, name: choice })
           const extended = [...child.slice(0, -1), msg(folder + " outer tail", 5)]
           yield* run([files[0]!, [files[1]![0], bytes([{ chat_metadata: { main_chat: "main" } }, ...extended])]])
           const before = yield* snapshot(api, files[1]![0])
@@ -860,7 +873,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
               ]
               const api = yield* run([...files, childFile()])
               const initial = yield* snapshot(api, source)
-              if (choice !== null) yield* api.NameBranch({ slotId: initial.entries[3]!.slotId, name: choice })
+              if (choice !== null) yield* nameHere({ slotId: initial.entries[3]!.slotId, name: choice })
               const before = yield* snapshot(api, source)
               if (legacy)
                 yield* fixtureSql(config.dataDir, [

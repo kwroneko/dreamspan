@@ -1,5 +1,6 @@
 import { contextExcluded } from "./lcmVisibility.ts"
 import { Summary } from "@rp/shared/lcm.ts"
+import { shownIn, viewAt } from "./forkState.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { Effect, Schema } from "effect"
 import { SqlClient } from "effect/sql"
@@ -42,6 +43,8 @@ export const readSummary = (
           JOIN slots a ON a.id = s.first_slot_id JOIN slots b ON b.id = s.last_slot_id
           WHERE s.id = ${summaryId} AND s.sealed = 1 AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL`
       if (!row) return yield* new NotFound({ entity: "summary", id: summaryId })
+      // Fresh in the fork in view: its inputs are what that fork shows (spec/FORK-INDEPENDENCE-DELTA.md §3).
+      const fork = yield* viewAt(sql, row.chat_id, null)
       const inputs = yield* sql<{
         slot_id: string
         version_id: string | null
@@ -52,7 +55,7 @@ export const readSummary = (
         SELECT i.*, CASE WHEN s.deleted_at IS NULL AND s.purged_at IS NULL AND ${sql.literal(contextExcluded())} = 0
           AND v.deleted_at IS NULL AND v.purged_at IS NULL AND v.status NOT IN ('generating', 'failed') AND length(v.content) > 0
           THEN v.id ELSE NULL END AS effective, (SELECT count(*) FROM version_history h WHERE h.version_id = v.id) AS current_amends
-        FROM summary_inputs i JOIN slots s ON s.id = i.slot_id LEFT JOIN versions v ON v.id = s.selected_version_id
+        FROM summary_inputs i JOIN slots s ON s.id = i.slot_id LEFT JOIN versions v ON v.id = ${shownIn(sql, fork, "s")}
         WHERE i.summary_id = ${summaryId} ORDER BY i.ordinal`
       const children = yield* sql<{
         parent_id: string

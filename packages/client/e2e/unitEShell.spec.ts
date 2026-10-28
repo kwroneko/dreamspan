@@ -153,14 +153,22 @@ for (const width of [1440, 390]) {
       })
     )
     if (appended._tag !== "Posted") throw new Error("unexpected queue")
-    await page.goto(`${server().url}/chats/${group.chat.id}?leaf=${newLeaf}`)
+    // A fork is opened by its id (`?fork=`); the tip names it.
+    const forkEndingAt = (slotId: string) =>
+      admin((api) => api.ListForks({ chatId: group.chat.id })).then(
+        (forks) => forks.find((f) => f.tipSlotId === slotId)!.id
+      )
+    const newFork = await forkEndingAt(newLeaf)
+    await page.goto(`${server().url}/chats/${group.chat.id}?fork=${newFork}`)
     await expect(page.getByLabel("Message", { exact: true })).toBeEditable()
     await expect(page.getByRole("button", { name: /switch branch/ })).toBeVisible()
     await expect(page.getByRole("button", { name: /not the latest/ })).toHaveCount(0)
-    await page.goto(`${server().url}/chats/${group.chat.id}?leaf=${appended.entry.slotId}`)
+    await page.goto(`${server().url}/chats/${group.chat.id}?fork=${await forkEndingAt(appended.entry.slotId)}`)
     await page.getByRole("button", { name: /not the latest/ }).click()
     await page.getByRole("menuitem", { name: "Back to the latest branch", exact: true }).click()
-    await expect.poll(() => new URL(page.url()).searchParams.get("leaf")).toBe(newLeaf)
+    // The link names no fork: the chat's current one, which is where the newest branch went.
+    await expect.poll(() => new URL(page.url()).searchParams.get("fork")).toBeNull()
+    await expect(page.getByRole("button", { name: /not the latest/ })).toHaveCount(0)
     data = await admin((api) => api.GetShellLibrary())
   })
 

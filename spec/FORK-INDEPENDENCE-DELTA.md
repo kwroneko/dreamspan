@@ -1,6 +1,6 @@
 # Forks that don't influence each other: delta from the build
 
-**Status**: Proposed, 2026-10-26. Delta from master c1081db, and from reference-harness (`reference-harness`: `src/agent/fork.ts`, `src/agent/recovery.ts`, its ARCHITECTURE §7 and "Redo and branches"). **[D]** = the owner's decision, cited; **[P]** = proposed here, not confirmed.
+**Status**: Proposed, 2026-10-26. Delta from master c1081db, and from reference-harness (`reference-harness`: `src/agent/fork.ts`, `src/agent/recovery.ts`, its ARCHITECTURE §7 and "Redo and branches"). **[D]** = the owner's decision, cited; **[P]** = proposed here, not confirmed. Built: unit 1 (chains and segments; ARCHITECTURE §3.7, §3.8), unit 2 (fork rows and migration; ARCHITECTURE §3.7, §3.8, §3.10, §3.11, §12), unit 3 (the overlay and per-fork selection; ARCHITECTURE §3.7, §3.8, §12, §15, §16), unit 4 (fork-owned versions, amend and flags, with swipes in every fork per Q1 (b); ARCHITECTURE §3.7, §3.8, §3.11, §12, §16).
 
 The decisions this implements:
 - **[D]** For the user, forks are separate chats that don't influence each other. They are connected by history, in the data model and as siblings when browsing; nothing done in one silently changes another (CHATS.md "Forks"; UX-REWORK §3 "Forks of chats", 2026-10-26).

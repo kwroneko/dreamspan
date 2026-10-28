@@ -1,5 +1,5 @@
 import type { AssistantMessage, Message } from "@earendil-works/pi-ai"
-import type { ChatId, SlotId, VersionId } from "@rp/shared/chat.ts"
+import type { ChatId, ForkId, SlotId, VersionId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import type { ConnectionId, ModelId } from "@rp/shared/providers.ts"
@@ -45,6 +45,8 @@ type Position = {
   readonly userId: UserId
   readonly chatId: ChatId
   readonly leafSlotId: SlotId
+  /** The fork whose choices it plans with (a reply's own); absent: the fork through the leaf. */
+  readonly forkId?: ForkId
   readonly triggerVersionId?: VersionId
 }
 export class Summarizer extends Context.Service<

@@ -44,7 +44,7 @@ describe("the composer's choice", () => {
       )
       yield* eventually(() => events.length > 0)
 
-      const draft = yield* api.OpenComposer({ chatId: chat.id, tipSlotId: null })
+      const draft = yield* api.OpenComposer({ chatId: chat.id, forkId: null })
       const none = yield* api.GetComposerChoice({ chatId: chat.id, draftId: draft.id })
       assert.deepStrictEqual([none.speakerEntityId, none.replyFromEntityId], [null, null])
 
@@ -56,9 +56,9 @@ describe("the composer's choice", () => {
       assert.deepStrictEqual([both.speakerEntityId, both.replyFromEntityId], [bo, mira])
       yield* eventually(() => events.some((e) => e._tag === "ComposerChoice" && e.choice.replyFromEntityId === mira))
       // The text's row version, which saves name, isn't changed by a choice.
-      assert.strictEqual((yield* api.OpenComposer({ chatId: chat.id, tipSlotId: null })).rowVersion, draft.rowVersion)
+      assert.strictEqual((yield* api.OpenComposer({ chatId: chat.id, forkId: null })).rowVersion, draft.rowVersion)
 
-      // Sent: the draft moves to the new tip, and its speaker with it.
+      // Sent: the draft stays with its fork, and its speaker with it.
       const typed = yield* typeInto(api, chat.id, null, "Hello.", draft)
       const sent = yield* posted(
         api.SendMessage({
@@ -70,26 +70,27 @@ describe("the composer's choice", () => {
           composer: takenFrom(typed)
         })
       )
-      const moved = yield* api.OpenComposer({ chatId: chat.id, tipSlotId: sent.entry.slotId })
+      const moved = yield* api.OpenComposer({ chatId: chat.id, forkId: sent.chat.currentForkId })
       assert.strictEqual(moved.id, draft.id)
       assert.strictEqual((yield* api.GetComposerChoice({ chatId: chat.id, draftId: moved.id })).speakerEntityId, bo)
 
-      // A branch from the first message's parent starts speaking as the composer it came from.
-      const branch = yield* api.OpenComposer({ chatId: chat.id, tipSlotId: null, copyFrom: moved.id })
+      // A fork from before the first message starts speaking as the composer it came from.
+      const { fork } = yield* api.CreateFork({ chatId: chat.id, fromForkId: null, atSlotId: null })
+      const branch = yield* api.OpenComposer({ chatId: chat.id, forkId: fork.id, copyFrom: moved.id })
       assert.notStrictEqual(branch.id, moved.id)
       assert.strictEqual((yield* api.GetComposerChoice({ chatId: chat.id, draftId: branch.id })).speakerEntityId, bo)
       assert.strictEqual(
         (yield* api.GetComposerChoice({ chatId: chat.id, draftId: branch.id })).replyFromEntityId,
         mira
       )
-      // ...unless that tip had a speaker of its own.
+      // ...unless that fork had a speaker of its own.
       yield* api.SetComposerChoice({
         chatId: chat.id,
         draftId: branch.id,
         speakerEntityId: ana,
         replyFromEntityId: null
       })
-      yield* api.OpenComposer({ chatId: chat.id, tipSlotId: null, copyFrom: moved.id })
+      yield* api.OpenComposer({ chatId: chat.id, forkId: fork.id, copyFrom: moved.id })
       assert.strictEqual((yield* api.GetComposerChoice({ chatId: chat.id, draftId: branch.id })).speakerEntityId, ana)
       assert.strictEqual(
         (yield* api.GetComposerChoice({ chatId: chat.id, draftId: branch.id })).replyFromEntityId,

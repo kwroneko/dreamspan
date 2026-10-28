@@ -10,7 +10,7 @@ import { readFileSync } from "node:fs"
 import { assert, describe, it, layer } from "@effect/vitest"
 import { AppApi } from "@rp/shared/api.ts"
 import { BUILTIN_PRESET_LABEL } from "@rp/shared/generation.ts"
-import type { ChatId, EntityId, SlotId, VersionId } from "@rp/shared/chat.ts"
+import { type ChatId, type EntityId, type ForkId, NewVersion, type SlotId, type VersionId } from "@rp/shared/chat.ts"
 import type { User } from "@rp/shared/domain.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import type { ConnectionSettings, ConnectionId, CredentialId, ModelId } from "@rp/shared/providers.ts"
@@ -94,6 +94,8 @@ interface OwnEditor {
 /** A chat with the user's message and a model reply still generating under it, and a note of its own. */
 interface OwnChat {
   readonly chatId: ChatId
+  /** Its current fork, the one its messages are in. */
+  readonly forkId: ForkId
   readonly slotId: SlotId
   readonly versionId: VersionId
   readonly replySlotId: SlotId
@@ -744,10 +746,22 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
         ] as const) {
           yield* refused(actor.api.ReadPath({ chatId: mine, leafSlotId: null, range, limit: 10 }), "NotFound")
         }
+        // Someone else's fork, in their chat or one's own.
+        for (const chatId of [owner.chat.chatId, mine]) {
+          yield* refused(
+            actor.api.ReadPath({ chatId, forkId: owner.chat.forkId, leafSlotId: null, range: bottom, limit: 10 }),
+            "NotFound"
+          )
+        }
       })
   },
   ListVersions: {
-    probe: (actor, owner) => refused(actor.api.ListVersions({ slotId: owner.chat.slotId }), "NotFound")
+    probe: (actor, owner) =>
+      Effect.all([
+        refused(actor.api.ListVersions({ slotId: owner.chat.slotId }), "NotFound"),
+        // One's own message as another user's fork shows it.
+        refused(actor.api.ListVersions({ slotId: actor.chat.slotId, forkId: owner.chat.forkId }), "NotFound")
+      ]).pipe(Effect.asVoid)
   },
   SendMessage: {
     probe: (actor, owner) =>
@@ -770,6 +784,19 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
           }),
           "NotFound"
         )
+        // In their fork, from one's own chat, posted or queued.
+        for (const parentSlotId of [actor.chat.slotId, actor.chat.replySlotId]) {
+          yield* refused(
+            actor.api.SendMessage({
+              chatId: actor.chat.chatId,
+              forkId: owner.chat.forkId,
+              parentSlotId,
+              branch: true,
+              content: "planted"
+            }),
+            "NotFound"
+          )
+        }
         // As their card, posted or queued (the actor's reply is still generating).
         for (const parentSlotId of [actor.chat.slotId, actor.chat.replySlotId]) {
           yield* refused(
@@ -794,6 +821,15 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
         )
         yield* refused(
           actor.api.Generate({ chatId: actor.chat.chatId, parentSlotId: owner.chat.slotId, branch: true }),
+          "NotFound"
+        )
+        yield* refused(
+          actor.api.Generate({
+            chatId: actor.chat.chatId,
+            forkId: owner.chat.forkId,
+            parentSlotId: actor.chat.slotId,
+            branch: true
+          }),
           "NotFound"
         )
         yield* refused(
@@ -825,11 +861,29 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
           }),
           "NotFound"
         )
+        // A swipe of one's own message in the other's fork.
+        yield* refused(
+          actor.api.Regenerate({
+            slotId: actor.chat.slotId,
+            forkId: owner.chat.forkId,
+            expectedRowVersion: mine.rowVersion
+          }),
+          "NotFound"
+        )
       })
   },
   SetVersionFlags: {
     probe: (actor, owner) =>
-      refused(actor.api.SetVersionFlags({ versionId: owner.chat.versionId, starred: true, hidden: true }), "NotFound")
+      Effect.all([
+        refused(
+          actor.api.SetVersionFlags({ versionId: owner.chat.versionId, starred: true, hidden: true }),
+          "NotFound"
+        ),
+        refused(
+          actor.api.SetVersionFlags({ versionId: actor.chat.versionId, forkId: owner.chat.forkId, starred: true }),
+          "NotFound"
+        )
+      ]).pipe(Effect.asVoid)
   },
   ContinueVersion: {
     probe: (actor, owner) =>
@@ -887,7 +941,7 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
           actor.api.SelectVersion({
             slotId: owner.chat.slotId,
             versionId: owner.chat.versionId,
-            expectedRowVersion: theirs.rowVersion
+            expectedVersionId: theirs.version.id
           }),
           "NotFound"
         )
@@ -896,7 +950,17 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
           actor.api.SelectVersion({
             slotId: actor.chat.slotId,
             versionId: owner.chat.versionId,
-            expectedRowVersion: mine.rowVersion
+            expectedVersionId: mine.version.id
+          }),
+          "NotFound"
+        )
+        // One's own message, selected in the other's fork.
+        yield* refused(
+          actor.api.SelectVersion({
+            slotId: actor.chat.slotId,
+            versionId: mine.version.id,
+            forkId: owner.chat.forkId,
+            expectedVersionId: mine.version.id
           }),
           "NotFound"
         )
@@ -929,8 +993,9 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
   },
   WriteVersion: {
     probe: (actor, owner) =>
-      Effect.flatMap(ownSlot(owner), (theirs) =>
-        refused(
+      Effect.gen(function* () {
+        const theirs = yield* ownSlot(owner)
+        yield* refused(
           actor.api.WriteVersion({
             slotId: owner.chat.slotId,
             content: "planted",
@@ -938,14 +1003,35 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
           }),
           "NotFound"
         )
-      )
+        const mine = yield* ownSlot(actor)
+        yield* refused(
+          actor.api.WriteVersion({
+            slotId: actor.chat.slotId,
+            forkId: owner.chat.forkId,
+            content: "planted",
+            expectedRowVersion: mine.rowVersion
+          }),
+          "NotFound"
+        )
+      })
   },
   AmendVersion: {
     probe: (actor, owner) =>
-      refused(
-        actor.api.AmendVersion({ versionId: owner.chat.versionId, content: "planted", expectedRowVersion: 1 }),
-        "NotFound"
-      )
+      Effect.all([
+        refused(
+          actor.api.AmendVersion({ versionId: owner.chat.versionId, content: "planted", expectedRowVersion: 1 }),
+          "NotFound"
+        ),
+        refused(
+          actor.api.AmendVersion({
+            versionId: actor.chat.versionId,
+            forkId: owner.chat.forkId,
+            content: "planted",
+            expectedRowVersion: 1
+          }),
+          "NotFound"
+        )
+      ]).pipe(Effect.asVoid)
   },
   MessageDrafts: {
     probe: (actor, owner) => refused(actor.api.MessageDrafts({ chatId: owner.chat.chatId }), "NotFound")
@@ -994,10 +1080,38 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
     probe: (actor, owner) => refused(actor.api.RenameChat({ chatId: owner.chat.chatId, name: "x" }), "NotFound")
   },
   ListBranches: {
-    probe: (actor, owner) => refused(actor.api.ListBranches({ slotId: owner.chat.slotId }), "NotFound")
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        yield* refused(actor.api.ListBranches({ slotId: owner.chat.slotId }), "NotFound")
+        yield* refused(actor.api.ListBranches({ slotId: actor.chat.slotId, forkId: owner.chat.forkId }), "NotFound")
+      })
   },
-  NameBranch: {
-    probe: (actor, owner) => refused(actor.api.NameBranch({ slotId: owner.chat.slotId, name: "x" }), "NotFound")
+  ListForks: {
+    probe: (actor, owner) => refused(actor.api.ListForks({ chatId: owner.chat.chatId }), "NotFound")
+  },
+  CreateFork: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        yield* refused(
+          actor.api.CreateFork({ chatId: owner.chat.chatId, fromForkId: null, atSlotId: owner.chat.slotId }),
+          "NotFound"
+        )
+        // From their fork, or at their message, in one's own chat.
+        yield* refused(
+          actor.api.CreateFork({ chatId: actor.chat.chatId, fromForkId: owner.chat.forkId, atSlotId: null }),
+          "NotFound"
+        )
+        yield* refused(
+          actor.api.CreateFork({ chatId: actor.chat.chatId, fromForkId: null, atSlotId: owner.chat.slotId }),
+          "NotFound"
+        )
+      })
+  },
+  NameFork: {
+    probe: (actor, owner) => refused(actor.api.NameFork({ forkId: owner.chat.forkId, name: "x" }), "NotFound")
+  },
+  PinFork: {
+    probe: (actor, owner) => refused(actor.api.PinFork({ forkId: owner.chat.forkId, pinned: true }), "NotFound")
   },
   DeleteBranch: {
     probe: (actor, owner) => refused(actor.api.DeleteBranch({ slotId: owner.chat.slotId }), "NotFound")
@@ -1652,9 +1766,18 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
           actor.api.SwitchBranch({ chatId: owner.chat.chatId, slotId: owner.chat.slotId, index: 0 }),
           "NotFound"
         )
-        // Their slot, from the actor's own chat.
+        // Their slot, or their fork as the one shown, from the actor's own chat.
         yield* refused(
           actor.api.SwitchBranch({ chatId: actor.chat.chatId, slotId: owner.chat.slotId, index: 0 }),
+          "NotFound"
+        )
+        yield* refused(
+          actor.api.SwitchBranch({
+            chatId: actor.chat.chatId,
+            slotId: actor.chat.slotId,
+            index: 0,
+            forkId: owner.chat.forkId
+          }),
           "NotFound"
         )
       })
@@ -1714,13 +1837,14 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
   OpenComposer: {
     probe: (actor, owner) =>
       Effect.gen(function* () {
+        yield* refused(actor.api.OpenComposer({ chatId: owner.chat.chatId, forkId: null }), "NotFound")
         for (const chatId of [owner.chat.chatId, actor.chat.chatId]) {
-          yield* refused(actor.api.OpenComposer({ chatId, tipSlotId: owner.chat.replySlotId }), "NotFound")
+          yield* refused(actor.api.OpenComposer({ chatId, forkId: owner.chat.forkId }), "NotFound")
         }
         yield* refused(
           actor.api.OpenComposer({
             chatId: actor.chat.chatId,
-            tipSlotId: actor.chat.slotId,
+            forkId: actor.chat.forkId,
             copyFrom: owner.composerId
           }),
           "NotFound"
@@ -2214,7 +2338,7 @@ const seed = Effect.gen(function* () {
         })
       )
       const [recovered] = yield* api.ListRecoveredTexts({ limit: 1, before: null })
-      const composer = yield* typeInto(api, chat.id, reply.entry.slotId, "half typed")
+      const composer = yield* typeInto(api, chat.id, null, "half typed")
       const notices = yield* Notices
       return {
         binItemId: binItem.id,
@@ -2232,6 +2356,7 @@ const seed = Effect.gen(function* () {
         summaryJob: yield* summaryJob(config.dataDir, chat.id, sent.entry.slotId, sent.entry.slotId),
         chat: {
           chatId: chat.id,
+          forkId: reply.chat.currentForkId!,
           slotId: sent.entry.slotId,
           versionId: sent.entry.version.id,
           replySlotId: reply.entry.slotId,
@@ -2299,10 +2424,121 @@ const storage: Record<
       }),
       "NotFound"
     ),
-  SetBranchName: (_reader, actor, owner, writer) =>
-    refused(writer.SetBranchName({ userId: actor.user.id, slotId: owner.chat.slotId, name: "foreign" }), "NotFound"),
+  SetForkName: (_reader, actor, owner, writer) =>
+    refused(writer.SetForkName({ userId: actor.user.id, forkId: owner.chat.forkId, name: "foreign" }), "NotFound"),
+  SetForkPinned: (_reader, actor, owner, writer) =>
+    refused(writer.SetForkPinned({ userId: actor.user.id, forkId: owner.chat.forkId, pinned: true }), "NotFound"),
+  ListForks: (reader, actor, owner) =>
+    refused(reader.ListForks({ userId: actor.user.id, chatId: owner.chat.chatId }), "NotFound"),
+  GetPath: (reader, actor, owner) =>
+    Effect.gen(function* () {
+      for (const chatId of [owner.chat.chatId, actor.chat.chatId])
+        yield* refused(
+          reader.GetPath({ userId: actor.user.id, chatId, forkId: owner.chat.forkId, leafSlotId: null, limit: 10 }),
+          "NotFound"
+        )
+    }),
+  CreateFork: (_reader, actor, owner, writer) =>
+    Effect.gen(function* () {
+      yield* refused(
+        writer.CreateFork({ userId: actor.user.id, chatId: owner.chat.chatId, fromForkId: null, atSlotId: null }),
+        "NotFound"
+      )
+      yield* refused(
+        writer.CreateFork({
+          userId: actor.user.id,
+          chatId: actor.chat.chatId,
+          fromForkId: owner.chat.forkId,
+          atSlotId: null
+        }),
+        "NotFound"
+      )
+    }),
+  SwitchBranch: (_reader, actor, owner, writer) =>
+    refused(
+      writer.SwitchBranch({
+        userId: actor.user.id,
+        chatId: actor.chat.chatId,
+        slotId: actor.chat.slotId,
+        index: 0,
+        forkId: owner.chat.forkId
+      }),
+      "NotFound"
+    ),
+  AppendMessage: (_reader, actor, owner, writer) =>
+    refused(
+      writer.AppendMessage({
+        userId: actor.user.id,
+        chatId: actor.chat.chatId,
+        forkId: owner.chat.forkId,
+        parentSlotId: null,
+        branch: true,
+        version: new NewVersion({
+          speakerEntityId: null,
+          writer: "human",
+          content: "planted",
+          status: "complete",
+          macroMode: "verbatim",
+          origin: "user_written"
+        }),
+        commitDraft: null
+      }),
+      "NotFound"
+    ),
   ListBranches: (reader, actor, owner) =>
     refused(reader.ListBranches({ userId: actor.user.id, slotId: owner.chat.slotId }), "NotFound"),
+  // A fork named for a read or a write of one's own chat must be one of its forks.
+  GetSlot: (reader, actor, owner) =>
+    Effect.gen(function* () {
+      yield* refused(reader.GetSlot({ userId: actor.user.id, slotId: owner.chat.slotId }), "NotFound")
+      yield* refused(
+        reader.GetSlot({ userId: actor.user.id, slotId: actor.chat.slotId, forkId: owner.chat.forkId }),
+        "NotFound"
+      )
+    }),
+  StateEventsAt: (reader, actor, owner) =>
+    refused(
+      reader.StateEventsAt({
+        userId: actor.user.id,
+        chatId: actor.chat.chatId,
+        slotId: actor.chat.slotId,
+        forkId: owner.chat.forkId
+      }),
+      "NotFound"
+    ),
+  AddVersion: (_reader, actor, owner, writer) =>
+    refused(
+      writer.AddVersion({
+        userId: actor.user.id,
+        slotId: actor.chat.slotId,
+        forkId: owner.chat.forkId,
+        version: new NewVersion({
+          speakerEntityId: null,
+          writer: "human",
+          content: "planted",
+          status: "complete",
+          macroMode: "verbatim",
+          origin: "user_written"
+        }),
+        select: true,
+        commitDraft: null
+      }),
+      "NotFound"
+    ),
+  AssembleContext: (reader, actor, owner) =>
+    refused(
+      reader.AssembleContext({
+        userId: actor.user.id,
+        chatId: actor.chat.chatId,
+        slotId: actor.chat.slotId,
+        versionId: actor.chat.versionId,
+        forkId: owner.chat.forkId,
+        now: 0,
+        timeZone: "UTC",
+        frozen: null
+      }),
+      "NotFound"
+    ),
   StImportDefaultPreset: (_reader, actor, owner, writer) =>
     Effect.gen(function* () {
       const { importId } = yield* owner.api.StartStImport({ unsupported: [] })
@@ -2625,7 +2861,14 @@ const snapshot = (owner: Party) =>
     outcome(owner.api.ListLibrary({ kind: "card" }), JSON.stringify),
     outcome(owner.api.ListBin({ limit: 500, before: null }), JSON.stringify),
     outcome(owner.api.ListRecoveredTexts({ limit: 500, before: null }), JSON.stringify),
-    outcome(owner.api.OpenComposer({ chatId: owner.chat.chatId, tipSlotId: owner.chat.replySlotId }), JSON.stringify),
+    outcome(owner.api.OpenComposer({ chatId: owner.chat.chatId, forkId: owner.chat.forkId }), JSON.stringify),
+    // Without the tip's text, which the owner's reply is still streaming into.
+    outcome(
+      Effect.map(owner.api.ListForks({ chatId: owner.chat.chatId }), (forks) =>
+        forks.map(({ tipExcerpt: _, ...fork }) => fork)
+      ),
+      JSON.stringify
+    ),
     outcome(owner.api.GetComposerChoice({ chatId: owner.chat.chatId, draftId: owner.composerId }), JSON.stringify)
   ])
 

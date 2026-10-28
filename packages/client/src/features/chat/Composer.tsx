@@ -300,13 +300,13 @@ export function Composer({
   const switcherRecent = useMemo(() => recentSpeakers(view.entries, 8), [view.entries])
   const report = (outcome: Outcome<unknown>) => setError(outcome.ok ? null : outcome.error)
 
-  /** The composer belongs to the tip of the path shown (DESIGN §6.2). */
-  const syncTip = useCallback(() => {
-    const { loading, leafSlotId } = session.snapshot()
+  /** The composer belongs to the fork shown (DESIGN §6.2). */
+  const syncFork = useCallback(() => {
+    const { loading, forkId } = session.snapshot()
     if (loading) return
-    draft.setTip(leafSlotId, session.movedByAppend(draft.tip ?? null, leafSlotId), session.takeBranchStart(leafSlotId))
+    draft.setFork(forkId, session.takeBranchStart(forkId))
   }, [draft, session])
-  useEffect(syncTip, [syncTip, view.leafSlotId, view.loading])
+  useEffect(syncFork, [syncFork, view.forkId, view.leafSlotId, view.loading])
 
   // Leaving the chat saves what's typed; closing or reloading the tab with text not on the
   // server asks first, and sends it as the page goes (the editors' rules, editor/store.ts).
@@ -343,15 +343,15 @@ export function Composer({
 
   /**
    * The text leaves the box as it's submitted, so whatever is typed while the request is out
-   * stays. It's sent from the draft it was typed into, at that draft's tip, which commits it,
-   * so a reload never shows it; if the chat view went to another branch since, it isn't
+   * stays. It's sent from the draft it was typed into, in that draft's fork, which commits
+   * it, so a reload never shows it; if the chat view went to another fork since, it isn't
    * sent. Text that isn't sent comes back, ahead of anything typed since (composerDraft.ts).
    */
   const submit = async (run: (from: ComposerSource) => Promise<Sent>) => {
     if (busy || !ready) return
     setBusy(true)
     await draft.submit((from) => {
-      if (from.tip !== session.snapshot().leafSlotId) {
+      if (from.fork !== session.snapshot().forkId) {
         setError(BRANCH_CHANGED)
         return Promise.resolve({ sent: false })
       }

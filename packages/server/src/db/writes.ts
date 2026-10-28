@@ -1,7 +1,7 @@
 import { recordHistoryReduction } from "./historyChanges.ts"
 import { contextExcluded } from "./lcmVisibility.ts"
 // Write operation handlers. They run inside the writer worker, each as one transaction.
-import type { ChatId, SlotId, VersionId } from "@rp/shared/chat.ts"
+import type { ChatId, ForkId, SlotId, VersionId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import { Effect } from "effect"
@@ -13,8 +13,33 @@ import { NotAmendable } from "@rp/shared/chatApi.ts"
 import { makeGraphWrites } from "./graphWrites.ts"
 import { NotFound, StaleWrite, WriteOps } from "./ops.ts"
 import { newChatLcmSettings, ownedModel } from "./generationSettings.ts"
-import { type ChatRow, toChat, toVersion } from "./rows.ts"
+import { forkColumns, forkThrough, shownElsewhere } from "./forks.ts"
+import { forkAt, insertFork, versionAsShown, writeOverride, writeSelect } from "./forkState.ts"
+import { reachableSlot } from "./graphReachability.ts"
+import { type ChatRow, type ForkRow, toChat, toFork, toVersion } from "./rows.ts"
 import { transaction as runTransaction } from "./tx.ts"
+
+/**
+ * The columns a fork's copy of a version doesn't take from it: its identity, text and
+ * provenance, and what belongs to the original (its generation, its place in the bin).
+ */
+const copiedFresh = new Set([
+  "seq",
+  "id",
+  "ordinal",
+  "content",
+  "origin",
+  "source_version_id",
+  "fork_id",
+  "created_at",
+  "updated_at",
+  "rollout_id",
+  "changeset_id",
+  "usage_json",
+  "deleted_at",
+  "bin_item_id",
+  "purged_at"
+])
 
 type Count = Effect.Effect<ReadonlyArray<{ readonly n: number }>, SqlError.SqlError>
 
@@ -29,10 +54,14 @@ export const makeWriteHandlers = (bin: Bin) =>
 
     const {
       found,
+      slotInFork,
       selectVersion,
       ownedChat,
       ownedSlot,
       ownedVersion,
+      ownedFork,
+      createFork,
+      chatIn,
       checkSpeaker,
       insertVersion,
       insertSlot,
@@ -42,12 +71,9 @@ export const makeWriteHandlers = (bin: Bin) =>
 
     /** A draft's target must belong to the user. */
     const draftTargets: Record<DraftKey["targetKind"], (userId: UserId, key: DraftKey) => Count> = {
-      composer: (userId, key) =>
-        key.field === ""
-          ? sql`SELECT count(*) AS n FROM chats WHERE id = ${key.targetId} AND owner_user_id = ${userId} AND deleted_at IS NULL`
-          : sql`SELECT count(*) AS n FROM slots s JOIN chats c ON c.id = s.chat_id
-              WHERE s.id = ${key.field} AND c.id = ${key.targetId} AND c.owner_user_id = ${userId}
-                AND s.deleted_at IS NULL AND c.deleted_at IS NULL`,
+      composer: (userId, key) => sql`SELECT count(*) AS n FROM forks f JOIN chats c ON c.id = f.chat_id
+        WHERE f.id = ${key.field} AND c.id = ${key.targetId} AND c.owner_user_id = ${userId}
+          AND f.deleted_at IS NULL AND c.deleted_at IS NULL`,
       version_edit: (userId, key) => sql`SELECT count(*) AS n FROM versions v JOIN slots s ON s.id = v.slot_id
         JOIN chats c ON c.id = s.chat_id WHERE v.id = ${key.targetId} AND c.owner_user_id = ${userId}
           AND v.deleted_at IS NULL AND s.deleted_at IS NULL AND c.deleted_at IS NULL`,
@@ -74,6 +100,31 @@ export const makeWriteHandlers = (bin: Bin) =>
         }
       })
 
+    /** A live fork of a live chat of the user's. */
+    const ownedForkById = (userId: UserId, forkId: ForkId) =>
+      sql<ForkRow>`SELECT f.* FROM forks f JOIN chats c ON c.id = f.chat_id
+        WHERE f.id = ${forkId} AND c.owner_user_id = ${userId} AND f.deleted_at IS NULL AND c.deleted_at IS NULL`.pipe(
+        Effect.flatMap(([row]) =>
+          row ? Effect.succeed(row) : Effect.fail(new NotFound({ entity: "fork", id: forkId }))
+        )
+      )
+
+    /** The fork named, else the one through the slot (`forkAt`), as a read there would be. */
+    const forkOf = (slotId: string, forkId: ForkId | null | undefined) =>
+      forkId != null
+        ? Effect.succeed(forkId)
+        : Effect.gen(function* () {
+            const [slot] = yield* sql<{ chat_id: string }>`SELECT chat_id FROM slots WHERE id = ${slotId}`
+            return (yield* forkAt(sql, slot!.chat_id, slotId)) as ForkId | null
+          })
+
+    const forkOut = (forkId: string) =>
+      sql<
+        Parameters<typeof toFork>[0]
+      >`SELECT ${sql.literal(forkColumns("f"))} FROM forks f WHERE f.id = ${forkId}`.pipe(
+        Effect.map(([row]) => toFork(row!))
+      )
+
     const handlers = {
       Ready: () => Effect.void,
 
@@ -94,7 +145,7 @@ export const makeWriteHandlers = (bin: Bin) =>
           if (greeting) {
             yield* checkSpeaker(userId, greeting.speakerEntityId)
             const { slotId } = yield* insertSlot(chatId, laneId, null, greeting, at)
-            yield* sql`UPDATE chats SET active_leaf_slot_id = ${slotId}, current_leaf_slot_id = ${slotId} WHERE id = ${chatId}`
+            yield* sql`UPDATE chats SET active_leaf_slot_id = ${slotId} WHERE id = ${chatId}`
           }
           const [row] = yield* sql<ChatRow>`SELECT * FROM chats WHERE id = ${chatId}`
           return toChat(row!)
@@ -113,10 +164,10 @@ export const makeWriteHandlers = (bin: Bin) =>
           })
           .pipe(transaction("SaveDraft")),
 
-      OpenComposer: ({ userId, chatId, tipSlotId, copyFrom }) =>
+      OpenComposer: ({ userId, chatId, forkId, copyFrom }) =>
         Effect.gen(function* () {
-          const key = composerKey(chatId, tipSlotId)
-          yield* draftTarget(userId, key)
+          const fork = yield* ownedFork(userId, chatId, forkId)
+          const key = composerKey(chatId, fork.id)
           yield* drafts.checkIdentity(userId, copyFrom)
           const from = copyFrom === null ? null : yield* drafts.findComposer(userId, chatId, copyFrom)
           if (copyFrom !== null && from === null) return yield* new NotFound({ entity: "draft", id: copyFrom })
@@ -163,19 +214,21 @@ export const makeWriteHandlers = (bin: Bin) =>
 
       AppendMessage: (params) => appendMessage(params).pipe(transaction("AppendMessage")),
 
-      AddVersion: ({ userId, slotId, version, select, commitDraft }) =>
+      AddVersion: ({ userId, slotId, forkId, version, select, commitDraft }) =>
         Effect.gen(function* () {
           const at = Date.now()
-          yield* ownedSlot(userId, slotId)
+          const { slot, fork } = yield* slotInFork(userId, slotId, forkId ?? null)
           yield* checkSpeaker(userId, version.speakerEntityId)
           const [next] = yield* sql<{
             n: number
           }>`SELECT coalesce(max(ordinal), -1) + 1 AS n FROM versions WHERE slot_id = ${slotId}`
           const row = yield* insertVersion(slotId, next!.n, version, at)
           if (select) {
-            yield* recordHistoryReduction(sql, slotId, row.content)
-            yield* sql`UPDATE slots SET selected_version_id = ${row.id}, row_version = row_version + 1 WHERE id = ${slotId}`
+            yield* recordHistoryReduction(sql, slotId, row.content, null, fork.id)
+            yield* writeSelect(sql, { id: fork.id, chatId: slot.chat_id }, slotId, row.id)
           }
+          // A new version is chatting in the fork (UX-REWORK §3, owner 2026-10-27).
+          yield* chatIn(fork.id, at)
           yield* drafts.commit(userId, commitDraft, {
             targetKind: "version_edit",
             targetId: version.sourceVersionId ?? "",
@@ -184,9 +237,9 @@ export const makeWriteHandlers = (bin: Bin) =>
           return toVersion(row)
         }).pipe(transaction("AddVersion")),
 
-      SelectVersion: ({ userId, slotId, versionId, expectedRowVersion }) =>
-        selectVersion(userId, slotId, versionId, expectedRowVersion).pipe(
-          Effect.map(({ rowVersion }) => ({ rowVersion })),
+      SelectVersion: ({ userId, slotId, versionId, forkId, expectedVersionId }) =>
+        selectVersion(userId, slotId, versionId, forkId ?? null, expectedVersionId).pipe(
+          Effect.map(({ forkId }) => ({ forkId })),
           transaction("SelectVersion")
         ),
 
@@ -231,15 +284,16 @@ export const makeWriteHandlers = (bin: Bin) =>
 
       // --- Chats
 
-      AddSelectedVersion: ({ userId, slotId, version, expectedRowVersion, model, commitDraft }) =>
+      AddSelectedVersion: ({ userId, slotId, forkId, version, expectedRowVersion, model, commitDraft }) =>
         Effect.gen(function* () {
-          const slot = yield* ownedSlot(userId, slotId)
-          if (slot.row_version !== expectedRowVersion) {
+          // The row version the user saw is the slot's as their fork shows it (slotInFork).
+          const { slot, fork, rowVersion } = yield* slotInFork(userId, slotId, forkId ?? null)
+          if (rowVersion !== expectedRowVersion) {
             return yield* new StaleWrite({
               entity: "slot",
               id: slotId,
               expected: expectedRowVersion,
-              actual: slot.row_version
+              actual: rowVersion
             })
           }
           yield* checkSpeaker(userId, version.speakerEntityId)
@@ -254,10 +308,10 @@ export const makeWriteHandlers = (bin: Bin) =>
             yield* sql`UPDATE versions SET connection_id = ${model.connection}, model_id = ${model.model}
               WHERE id = ${inserted.id}`
           const row = model ? yield* ownedVersion(userId, inserted.id as VersionId, true) : inserted
-          yield* recordHistoryReduction(sql, slotId, row.content)
-          yield* sql`UPDATE slots SET selected_version_id = ${row.id}, row_version = row_version + 1 WHERE id = ${slotId}`
-          if (version.origin === "generated")
-            yield* sql`UPDATE chats SET current_leaf_slot_id = ${slotId} WHERE id = ${slot.chat_id}`
+          yield* recordHistoryReduction(sql, slotId, row.content, null, fork.id)
+          yield* writeSelect(sql, { id: fork.id, chatId: slot.chat_id }, slotId, row.id)
+          // A swipe, a continue or an edit is chatting in the fork (UX-REWORK §3, owner 2026-10-27).
+          yield* chatIn(fork.id, Date.now())
           // An edit's text was typed into the edit of its source; a version of one's own, into the slot's.
           yield* drafts.commit(
             userId,
@@ -266,15 +320,20 @@ export const makeWriteHandlers = (bin: Bin) =>
               ? { targetKind: "version_edit", targetId: version.sourceVersionId, content: row.content }
               : { targetKind: "scratchpad", targetId: slotId, content: row.content }
           )
-          return { chatId: slot.chat_id as ChatId, version: toVersion(row) }
+          return { chatId: slot.chat_id as ChatId, forkId: fork.id as ForkId, version: toVersion(row) }
         }).pipe(transaction("AddSelectedVersion")),
 
-      AmendVersion: ({ userId, versionId, content, expectedRowVersion, commitDraft }) =>
+      AmendVersion: ({ userId, versionId, forkId, content, expectedRowVersion, commitDraft }) =>
         Effect.gen(function* () {
           const row = yield* ownedVersion(userId, versionId, true)
           if (row.writer !== "human") return yield* new NotAmendable({ versionId })
-          const rowVersion = 1 + (row.amend_count ?? 0)
-          if (rowVersion !== expectedRowVersion) {
+          const { slot, fork } = yield* slotInFork(userId, row.slot_id as SlotId, yield* forkOf(row.slot_id, forkId))
+          const original = (row.fork_id === null ? row.id : row.source_version_id)!
+          // The tab amends what it saw the fork show there; the fork showing another text in
+          // its place since (an amend in another tab) makes it stale, as an amend in place does.
+          const shown = (yield* versionAsShown(sql, fork.id, versionId))!
+          const rowVersion = 1 + (shown.amend_count ?? 0)
+          if (shown.id !== versionId || rowVersion !== expectedRowVersion) {
             return yield* new StaleWrite({
               entity: "version",
               id: versionId,
@@ -287,11 +346,42 @@ export const makeWriteHandlers = (bin: Bin) =>
             targetId: versionId,
             content
           })
-          if (content === row.content) return toVersion(row)
-          // The trigger keeps the previous text in version_history (DESIGN §3.1).
-          yield* recordHistoryReduction(sql, row.slot_id, content, versionId)
-          yield* sql`UPDATE versions SET content = ${content}, updated_at = ${Date.now()} WHERE id = ${versionId}`
-          return toVersion(yield* ownedVersion(userId, versionId, true))
+          if (content === row.content) return toVersion(shown)
+          if (!(yield* shownElsewhere(sql, slot.chat_id, fork.id, row.slot_id, original, versionId))) {
+            // No other fork shows it: the trigger keeps the previous text in version_history (DESIGN §3.1).
+            yield* recordHistoryReduction(sql, row.slot_id, content, versionId)
+            yield* sql`UPDATE versions SET content = ${content}, updated_at = ${Date.now()} WHERE id = ${versionId}`
+            return toVersion((yield* versionAsShown(sql, fork.id, versionId))!)
+          }
+          // Another fork shows it, so this fork gets a copy with the new text, standing in for
+          // the message's own version, with its history as an amend in place would have it
+          // (spec/FORK-INDEPENDENCE-DELTA.md §2.2).
+          const at = Date.now()
+          const copy = uuidv7()
+          const columns = (yield* sql<{ name: string }>`SELECT name FROM pragma_table_info('versions')`)
+            .map((c) => c.name)
+            .filter((name) => !copiedFresh.has(name))
+          yield* sql.unsafe(
+            `INSERT INTO versions (id, ordinal, content, origin, source_version_id, fork_id, created_at, updated_at,
+               ${columns.join(", ")})
+             SELECT ?, (SELECT max(ordinal) + 1 FROM versions WHERE slot_id = v.slot_id), ?, 'edited', ?, ?, ?, ?,
+               ${columns.map((c) => `v.${c}`).join(", ")}
+             FROM versions v WHERE v.id = ?`,
+            [copy, content, original, fork.id, at, at, versionId]
+          )
+          yield* sql`INSERT INTO version_history (version_id, content, replaced_at)
+            SELECT ${copy}, content, replaced_at FROM version_history WHERE version_id = ${versionId} ORDER BY id`
+          yield* sql`INSERT INTO version_history (version_id, content, replaced_at) VALUES (${copy}, ${row.content}, ${at})`
+          yield* sql`INSERT INTO version_attachments (version_id, ordinal, media_id, kind, alt_text)
+            SELECT ${copy}, ordinal, media_id, kind, alt_text FROM version_attachments WHERE version_id = ${versionId}`
+          // Shorter than what the fork showed, before the fork shows the copy.
+          yield* recordHistoryReduction(sql, row.slot_id, content, null, fork.id)
+          yield* writeOverride(
+            sql,
+            { id: fork.id, chatId: slot.chat_id },
+            { kind: "replace", targetId: original, slotId: row.slot_id, valueId: copy, flag: null }
+          )
+          return toVersion((yield* versionAsShown(sql, fork.id, copy))!)
         }).pipe(transaction("AmendVersion")),
 
       SaveGeneration: ({ userId, versionId, content, reasoning, status, error }) =>
@@ -309,16 +399,27 @@ export const makeWriteHandlers = (bin: Bin) =>
           return toVersion(yield* ownedVersion(userId, versionId, false))
         }).pipe(transaction("SaveGeneration")),
 
-      SetVersionFlags: ({ userId, versionId, starred, hidden }) =>
+      // Flags are the fork's, on the message's own version a copy stands in for (§2.2).
+      SetVersionFlags: ({ userId, versionId, forkId, starred, hidden }) =>
         Effect.gen(function* () {
           const row = yield* ownedVersion(userId, versionId, true)
-          const flag = (value: boolean | undefined, now: number) => (value === undefined ? now : value ? 1 : 0)
-          yield* sql`UPDATE versions SET starred = ${flag(starred, row.starred)}, hidden = ${flag(hidden, row.hidden)}
-            WHERE id = ${versionId}`
-          const [slot] = yield* sql<{ chat_id: string }>`SELECT chat_id FROM slots WHERE id = ${row.slot_id}`
+          const { slot, fork } = yield* slotInFork(userId, row.slot_id as SlotId, yield* forkOf(row.slot_id, forkId))
+          const original = (row.fork_id === null ? row.id : row.source_version_id)!
+          const shown = (yield* versionAsShown(sql, fork.id, versionId))!
+          const set = (kind: "star" | "picker_hide", value: boolean | undefined, now: number) =>
+            value === undefined || (value ? 1 : 0) === now
+              ? Effect.void
+              : writeOverride(
+                  sql,
+                  { id: fork.id, chatId: slot.chat_id },
+                  { kind, targetId: original, slotId: row.slot_id, valueId: null, flag: value ? 1 : 0 }
+                )
+          yield* set("star", starred, shown.starred)
+          yield* set("picker_hide", hidden, shown.hidden)
           return {
-            chatId: slot!.chat_id as ChatId,
-            version: toVersion(yield* ownedVersion(userId, versionId, true))
+            chatId: slot.chat_id as ChatId,
+            forkId: fork.id as ForkId,
+            version: toVersion((yield* versionAsShown(sql, fork.id, versionId))!)
           }
         }).pipe(transaction("SetVersionFlags")),
 
@@ -346,37 +447,83 @@ export const makeWriteHandlers = (bin: Bin) =>
           return renamed
         }).pipe(transaction("RenameChats")),
 
-      // --- Branches (DESIGN §3.2)
+      // --- Branches (DESIGN §3.2) and forks
 
-      SetBranchName: ({ userId, slotId, name }) =>
+      SetForkName: ({ userId, forkId, name }) =>
         Effect.gen(function* () {
-          yield* ownedSlot(userId, slotId)
+          const fork = yield* ownedForkById(userId, forkId)
           const clean = cleanName(name)
-          yield* sql`UPDATE slots SET branch_name = ${clean === "" ? null : clean}, branch_name_user = 1,
-            row_version = row_version + 1 WHERE id = ${slotId}`
-        }).pipe(transaction("SetBranchName")),
+          yield* sql`UPDATE forks SET name = ${clean === "" ? null : clean}, name_user = 1,
+            row_version = row_version + 1 WHERE id = ${fork.id}`
+          const [start] = yield* sql<{ id: SlotId }>`UPDATE slots SET row_version = row_version + 1
+            WHERE fork_id = ${fork.id} AND parent_slot_id IS ${fork.base_slot_id} RETURNING id`
+          return { fork: yield* forkOut(fork.id), startSlotId: start?.id ?? null }
+        }).pipe(transaction("SetForkName")),
 
-      SetActiveLeaf: ({ userId, chatId, slotId, expectedRowVersion }) =>
+      SetForkPinned: ({ userId, forkId, pinned }) =>
         Effect.gen(function* () {
-          const chat = yield* ownedChat(userId, chatId)
-          if (chat.row_version !== expectedRowVersion) {
-            return yield* new StaleWrite({
-              entity: "chat",
-              id: chatId,
-              expected: expectedRowVersion,
-              actual: chat.row_version
+          const fork = yield* ownedForkById(userId, forkId)
+          if ((fork.pinned_at !== null) !== pinned)
+            yield* sql`UPDATE forks SET pinned_at = ${pinned ? Date.now() : null}, row_version = row_version + 1
+              WHERE id = ${fork.id}`
+          return yield* forkOut(fork.id)
+        }).pipe(transaction("SetForkPinned")),
+
+      CreateFork: ({ userId, chatId, fromForkId, atSlotId }) =>
+        Effect.gen(function* () {
+          const from = yield* ownedFork(userId, chatId, fromForkId)
+          if (atSlotId !== null)
+            yield* found(
+              sql`SELECT count(*) AS n FROM slots WHERE id = ${atSlotId} AND chat_id = ${chatId} AND deleted_at IS NULL`,
+              "slot",
+              atSlotId
+            )
+          const fork = yield* createFork(chatId, from, atSlotId, Date.now())
+          const [chat] = yield* sql<ChatRow>`SELECT * FROM chats WHERE id = ${chatId}`
+          return { fork: yield* forkOut(fork.id), chat: toChat(chat!) }
+        }).pipe(transaction("CreateFork")),
+
+      SwitchBranch: ({ userId, chatId, slotId, index, forkId }) =>
+        Effect.gen(function* () {
+          const shown = yield* ownedFork(userId, chatId, forkId)
+          const [slot] = yield* sql<{ parent_slot_id: string | null; lane_id: string }>`
+            SELECT parent_slot_id, lane_id FROM slots WHERE id = ${slotId} AND chat_id = ${chatId}`
+          if (!slot) return yield* new NotFound({ entity: "slot", id: slotId })
+          const [sibling] =
+            slot.parent_slot_id === null
+              ? yield* sql<{ id: SlotId }>`
+                  SELECT x.id FROM slots x INDEXED BY slots_chat_depth WHERE x.chat_id = ${chatId} AND x.depth = 0
+                    AND x.lane_id = ${slot.lane_id} AND ${sql.literal(reachableSlot("x"))}
+                  ORDER BY x.id LIMIT 1 OFFSET ${index}`
+              : yield* sql<{ id: SlotId }>`
+                  SELECT x.id FROM slots x INDEXED BY slots_parent WHERE x.parent_slot_id = ${slot.parent_slot_id}
+                    AND x.lane_id = ${slot.lane_id} AND ${sql.literal(reachableSlot("x"))}
+                  ORDER BY x.id LIMIT 1 OFFSET ${index}`
+          if (!sibling) return yield* new NotFound({ entity: "branch", id: `${slotId}#${index}` })
+          let fork: ForkRow | null = yield* forkThrough(sql, chatId, sibling.id, shown.id)
+          if (fork === null) {
+            // A line no fork follows (a restored message's): one is made for it, from the
+            // fork shown, ending on its newest replies, as a path opened there did before.
+            const [tip] = yield* sql<{ id: string }>`
+              WITH RECURSIVE down(id, n) AS (
+                SELECT ${sibling.id}, 0
+                UNION ALL
+                SELECT (SELECT c.id FROM slots c WHERE c.parent_slot_id = d.id AND ${sql.literal(reachableSlot("c"))}
+                    ORDER BY c.id DESC LIMIT 1), d.n + 1
+                FROM down d WHERE d.id IS NOT NULL
+              )
+              SELECT id FROM down WHERE id IS NOT NULL ORDER BY n DESC LIMIT 1`
+            fork = yield* insertFork(sql, {
+              chatId,
+              parent: shown,
+              baseSlotId: slot.parent_slot_id,
+              tipSlotId: tip!.id,
+              at: Date.now()
             })
           }
-          yield* found(
-            sql`SELECT count(*) AS n FROM slots WHERE id = ${slotId} AND chat_id = ${chatId} AND deleted_at IS NULL`,
-            "slot",
-            slotId
-          )
-          const [row] = yield* sql<ChatRow>`
-            UPDATE chats SET active_leaf_slot_id = ${slotId}, row_version = row_version + 1
-            WHERE id = ${chatId} RETURNING *`
-          return toChat(row!)
-        }).pipe(transaction("SetActiveLeaf"))
+          const [chat] = yield* sql<ChatRow>`SELECT * FROM chats WHERE id = ${chatId}`
+          return { slotId: sibling.id, fork: yield* forkOut(fork!.id), chat: toChat(chat!) }
+        }).pipe(transaction("SwitchBranch"))
     } satisfies Partial<WriteHandlers>
     return handlers
   })

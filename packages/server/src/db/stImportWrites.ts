@@ -1,6 +1,8 @@
 import { contextExcluded } from "./lcmVisibility.ts"
 import { recordHistoryReduction } from "./historyChanges.ts"
+import { currentForkSql, reselectEverywhere, selectedInSql } from "./forkState.ts"
 import { forkImportSlot } from "./stImportFork.ts"
+import { onPath } from "./forks.ts"
 // Write handlers for the ST data folder import (ARCHITECTURE.md §13). Each is one
 // transaction in the writer, and a chat goes in over several: its start, its messages in
 // batches, its state. Nothing here reads a file: the format worker parsed them, and the main
@@ -14,12 +16,14 @@ import { unfinishedTitle } from "@rp/shared/stImportApi.ts"
 import type { StateEventData } from "@rp/shared/state.ts"
 import { Effect, Schema } from "effect"
 import { SqlClient } from "effect/sql"
-import type { makeBin } from "./bin.ts"
 import { docHash, searchText } from "./documents.ts"
 import { ImportLeaseLost, NotFound, ST_CHAT_RECORD, ST_IMPORT_RUN, type StImportNote, WriteOps } from "./ops.ts"
 import { checkStateReferences } from "./stateRefs.ts"
 import { transaction } from "./tx.ts"
 import { DEFAULT_PRESET, newChatLcmSettings, ownedPreset } from "./generationSettings.ts"
+
+/** What a slot `s` shows in its chat's current fork: what an import matches against (unit 9 makes it per file's fork). */
+const shownSql = selectedInSql(currentForkSql("s.chat_id"), "s")
 
 /** A message as the format worker wrote it (formats/stChat.ts). */
 const Message = Schema.Struct({
@@ -71,7 +75,7 @@ interface RecordPayload {
   readonly parentRecordId?: string
 }
 
-export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: ReturnType<typeof makeBin>) {
+export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
   const sql = yield* SqlClient.SqlClient
 
   const ownedChat = (userId: UserId, chatId: ChatId) =>
@@ -297,7 +301,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
       Effect.flatMap(Schema.decodeEffect(Messages)(input.messagesJson).pipe(Effect.orDie), (messages) =>
         Effect.gen(function* () {
           const { userId, chatId, speakers } = input
-          const chat = yield* ownedChat(userId, chatId)
+          yield* ownedChat(userId, chatId)
           const payload = yield* leased(userId, input.recordId, chatId, input.lease)
           // Every speaker must be one of the user's live cards.
           const named = [...new Set(Object.values(speakers).filter((id): id is EntityId => id !== null))]
@@ -449,17 +453,23 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
                 locally_changed: number
               }>`
                 SELECT s.id AS slot_id, v.id AS version_id, s.depth, s.branch_name, s.branch_name_user,
-                  ${sql.literal(contextExcluded())} AS hidden, v.id = s.selected_version_id AS selected,
+                  ${sql.literal(contextExcluded())} AS hidden,
+                  v.id = ${sql.literal(shownSql)} AS selected,
                   v.content, v.created_at, v.writer, v.ordinal,
                   s.purged_at IS NOT NULL AS slot_purged, v.purged_at IS NOT NULL AS version_purged,
                   s.branch_deleted,
                   s.deleted_at IS NOT NULL AS deleted, v.deleted_at IS NOT NULL AS version_deleted,
                   s.row_version <> s.st_import_row_version OR EXISTS (
-                    SELECT 1 FROM version_history h WHERE h.version_id = s.selected_version_id
+                    SELECT 1 FROM version_history h WHERE h.version_id = ${sql.literal(shownSql)}
+                  ) OR EXISTS (
+                    SELECT 1 FROM fork_overrides o WHERE o.target_id = s.id AND o.kind = 'select' AND o.origin = 'user'
+                  ) OR EXISTS (
+                    SELECT 1 FROM versions r JOIN fork_overrides o ON o.target_id = r.id AND o.kind = 'replace'
+                    WHERE r.slot_id = s.id
                   ) AS locally_changed,
                   coalesce((SELECT h.content FROM version_history h WHERE h.version_id = v.id ORDER BY h.id LIMIT 1),
                     v.content) AS original
-                FROM slots s JOIN versions v ON v.slot_id = s.id
+                FROM slots s JOIN versions v ON v.slot_id = s.id AND v.fork_id IS NULL
                 WHERE ${parent === null ? sql`s.chat_id = ${chatId} AND s.depth = 0` : sql`s.parent_slot_id = ${parent.id}`}
                 ORDER BY s.id, v.ordinal`
               const same = (row: (typeof children)[number], version: (typeof message.versions)[number]) =>
@@ -592,7 +602,12 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
                     !(yield* shared(match.slot_id))
                   ) {
                     yield* recordHistoryReduction(sql, match.slot_id, shown.content)
-                    yield* sql`UPDATE slots SET selected_version_id = ${selected}, row_version = row_version + 1,
+                    // No fork chose here (locally_changed), so every fork shows what the
+                    // import chose last: each moves to the file's choice, as the import's.
+                    const before = own.find((row) => row.selected === 1)?.version_id
+                    if (before !== undefined)
+                      yield* reselectEverywhere(sql, chatId, match.slot_id, before, selected, "import")
+                    yield* sql`UPDATE slots SET row_version = row_version + 1,
                       st_import_row_version = row_version + 1 WHERE id = ${match.slot_id}`
                     showsSelected = true
                     changed = true
@@ -638,14 +653,13 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
           if (input.advanceLeaf && !branchDeleted && slotIds.length > 0) {
             const moved = yield* sql<{
               id: string
-            }>`UPDATE chats SET active_leaf_slot_id = ${slotIds.at(-1)!}, current_leaf_slot_id = ${slotIds.at(-1)!}
+            }>`UPDATE chats SET active_leaf_slot_id = ${slotIds.at(-1)!}
               WHERE id = ${chatId} AND (active_leaf_slot_id IS NULL OR active_leaf_slot_id = ${advanced ?? ""})
               AND EXISTS (SELECT 1 FROM slots WHERE id = ${slotIds.at(-1)!} AND deleted_at IS NULL)
               RETURNING id`
-            if (moved.length > 0) {
-              yield* bin.drafts.moveComposer(userId, chatId, chat.active_leaf_slot_id, slotIds.at(-1)!)
-              advanced = slotIds.at(-1)!
-            }
+            // The leaf is the current fork's tip (schema/forks.ts), which takes the fork's
+            // composer along.
+            if (moved.length > 0) advanced = slotIds.at(-1)!
           }
           const progress: RecordPayload = {
             ...payload,
@@ -668,7 +682,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
         const payload = yield* leased(userId, input.recordId, chatId, input.lease)
         if (input.position !== null) yield* ownedSlot(chatId, input.position)
         const target = input.leaf === null ? null : yield* ownedSlot(chatId, input.leaf)
-        if (input.end !== null) yield* ownedSlot(chatId, input.end)
+        const end = input.end === null ? null : yield* ownedSlot(chatId, input.end)
         const notes: Record<string, EntityId> = {
           ...input.previousNotes,
           ...(payload.notes as Record<string, EntityId> | undefined)
@@ -729,11 +743,23 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (bin: Retur
         }
         yield* sql`UPDATE chats SET status = CASE WHEN status = 'pending' THEN 'active' ELSE status END,
             active_leaf_slot_id = ${moveLeaf ? input.leaf : leaf},
-            current_leaf_slot_id = CASE WHEN ${moveLeaf ? 1 : 0} THEN ${input.leaf} ELSE current_leaf_slot_id END,
             last_message_at = max(coalesce(last_message_at, 0), coalesce(${input.lastMessageAt}, 0)),
             row_version = row_version + 1
           WHERE id = ${chatId}`
-        if (moveLeaf) yield* bin.drafts.moveComposer(userId, chatId, leaf, input.leaf)
+        // Other forks that ended where this file did follow what it appended, as the current
+        // fork's tip does above: otherwise those messages would be on no fork's path, where
+        // the switcher used to open the branch on them. A fork the user went on in has
+        // another tip, and a file that went another way leaves its forks where they were.
+        if (
+          !blocked &&
+          end !== null &&
+          end.deleted_at === null &&
+          previousLeaf !== null &&
+          end.id !== previousLeaf &&
+          (yield* onPath(sql, chatId, end.id, previousLeaf))
+        )
+          yield* sql`UPDATE forks SET tip_slot_id = ${end.id}, row_version = row_version + 1
+            WHERE chat_id = ${chatId} AND deleted_at IS NULL AND tip_slot_id = ${previousLeaf}`
         // Naming invariant (also ARCHITECTURE.md §13): a recorded fork owns one naming
         // choice (branch_name, branch_name_user), including (null, 1) for a local clear.
         // Keep its remembered slot while reachable on this file's path, even if its

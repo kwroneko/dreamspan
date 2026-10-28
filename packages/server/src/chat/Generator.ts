@@ -1,7 +1,7 @@
 // What produces a version's text. The real one will be the context assembler in front of
 // the provider layer (PLAN phase 2); until it exists, only tests, the development server
 // and the performance harness have one: the fake (fakeGenerator.ts).
-import type { ChatId, SlotId, VersionId } from "@rp/shared/chat.ts"
+import type { ChatId, ForkId, SlotId, VersionId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import type { ConnectionId, ModelId } from "@rp/shared/providers.ts"
 import { Context, Layer, Option, Schema, type Stream } from "effect"
@@ -12,6 +12,11 @@ export interface GenerationRequest {
   readonly chatId: ChatId
   readonly slotId: SlotId
   readonly versionId: VersionId
+  /**
+   * The fork it's generated in, whose choices the context is read with. Absent: the fork
+   * through the slot when it's read (the current one if its path holds the slot).
+   */
+  readonly forkId?: ForkId
   /** "Retry with…": generates with this model instead of the chat's. */
   readonly model?: { readonly connection: ConnectionId; readonly model: ModelId }
   readonly onWaitingCache?: (waiting: boolean) => void

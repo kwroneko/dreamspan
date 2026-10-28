@@ -3,6 +3,7 @@
 // that differ from their parent only in a swipe or a hidden flag, greeting-only chats split
 // across parts, hostile dates, and what one import may hold or write at once.
 import { DatabaseSync } from "node:sqlite"
+import { currentForkSql, selectedInSql } from "../src/db/forkState.ts"
 import { Worker } from "node:worker_threads"
 import { assert, layer } from "@effect/vitest"
 import type { ChatId, SlotId, VersionId } from "@rp/shared/chat.ts"
@@ -44,17 +45,19 @@ const chatOf = (path: string) =>
     "SELECT json_extract(payload_json, '$.chatId') AS id FROM jobs WHERE json_extract(payload_json, '$.source') = ?",
     path
   )[0]?.id as ChatId
+/** The version slot `s` shows in its chat's current fork. */
+const SHOWN = selectedInSql(currentForkSql("s.chat_id"), "s")
+const shownAt = (slotId: string) => query(`SELECT ${SHOWN} AS id FROM slots s WHERE s.id = ?`, slotId)[0]!.id
 const textOf = (slotId: string | null) =>
-  query("SELECT v.content FROM slots s JOIN versions v ON v.id = s.selected_version_id WHERE s.id = ?", slotId ?? "")[0]
-    ?.content
+  query(`SELECT v.content FROM slots s JOIN versions v ON v.id = ${SHOWN} WHERE s.id = ?`, slotId ?? "")[0]?.content
 /** The path ending at the slot showing `text`: each slot's selected text and whether it's hidden. */
 const pathTo = (text: string) =>
   query(
     `WITH RECURSIVE p(id, parent, depth) AS (
-       SELECT s.id, s.parent_slot_id, s.depth FROM slots s JOIN versions v ON v.id = s.selected_version_id WHERE v.content = ?
+       SELECT s.id, s.parent_slot_id, s.depth FROM slots s JOIN versions v ON v.id = ${SHOWN} WHERE v.content = ?
        UNION ALL SELECT s.id, s.parent_slot_id, s.depth FROM slots s JOIN p ON s.id = p.parent)
      SELECT v.content, s.context_excluded AS hidden FROM p JOIN slots s ON s.id = p.id
-       JOIN versions v ON v.id = s.selected_version_id ORDER BY p.depth`,
+       JOIN versions v ON v.id = ${SHOWN} ORDER BY p.depth`,
     text
   ) as Array<{ content: string; hidden: number }>
 const notesOf = (chatId: ChatId) =>
@@ -157,7 +160,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
       )
       const user = yield* second.api.Whoami()
       const childSlot = query(
-        "SELECT s.id FROM slots s JOIN versions v ON v.id = s.selected_version_id WHERE v.content = 'child'"
+        `SELECT s.id FROM slots s JOIN versions v ON v.id = ${SHOWN} WHERE v.content = 'child'`
       )[0]!.id as never
       const state = foldState(yield* (yield* Reader).StateEventsAt({ userId: user.id, chatId, slotId: childSlot }))
       // On the branch, its own note applies, not its parent's.
@@ -598,7 +601,13 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
       })
       const alt = versionOf("kept-alt")
       const greeting = slotOf("kept-g")
-      yield* writer.SelectVersion({ userId: user.id, slotId: greeting, versionId: alt, expectedRowVersion: 1 })
+      const shown = shownAt(greeting)
+      yield* writer.SelectVersion({
+        userId: user.id,
+        slotId: greeting,
+        versionId: alt,
+        expectedVersionId: shown as VersionId
+      })
       const key = new DraftKey({ targetKind: "version_edit", targetId: versionOf("kept-r"), field: "" })
       yield* writer.SaveDraft({
         draftId: null,
@@ -623,7 +632,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
       assert.strictEqual((yield* second.api.GetChat({ chatId })).title, "kept")
       assert.strictEqual(present("kept-u amended"), 1)
       assert.lengthOf(query("SELECT id FROM version_history WHERE version_id = ?", versionOf("kept-u amended")), 1)
-      assert.strictEqual(query("SELECT selected_version_id AS id FROM slots WHERE id = ?", greeting)[0]!.id, alt)
+      assert.strictEqual(shownAt(greeting), alt)
       assert.isNotNull(yield* (yield* Reader).GetDraft({ userId: user.id, key }))
       assert.lengthOf(query("SELECT id FROM slots WHERE id = ? AND deleted_at IS NOT NULL", slotOf("kept-u2")), 1)
     })
@@ -885,22 +894,18 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
           const user = yield* first.api.Whoami()
           const slot = query("SELECT slot_id FROM versions WHERE content = ?", `${tag}-reply`)[0]!.slot_id as SlotId
           const alt = query("SELECT id FROM versions WHERE content = ?", `${tag}-alt`)[0]!.id as VersionId
-          // The file's name names the branch at this slot, which counts as a write.
-          const rowVersion = Number(query("SELECT row_version FROM slots WHERE id = ?", slot)[0]!.row_version)
+          const shown = shownAt(slot)
           yield* (yield* Writer).SelectVersion({
             userId: user.id,
             slotId: slot,
             versionId: alt,
-            expectedRowVersion: rowVersion
+            expectedVersionId: shown as VersionId
           })
           const binned = query("SELECT slot_id FROM versions WHERE content = ?", `${tag}-bin`)[0]!.slot_id as SlotId
           yield* first.api.DeleteMessage({ slotId: binned })
           const next = yield* begin
           yield* sendStFile(next.importId, branch, jsonl(header, ...lines, message(`${tag}-tail`, 4)), { card: "none" })
-          assert.strictEqual(
-            query("SELECT selected_version_id FROM slots WHERE id = ?", slot)[0]!.selected_version_id,
-            alt
-          )
+          assert.strictEqual(shownAt(slot), alt)
           assert.strictEqual(present(`${tag}-reply`), 1)
           const rows = query(
             "SELECT s.deleted_at FROM slots s JOIN versions v ON v.slot_id = s.id WHERE v.content = ?",

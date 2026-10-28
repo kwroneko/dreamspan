@@ -48,10 +48,10 @@ const setup = (handle = "ana") =>
         macroMode: "verbatim",
         origin: writer === "human" ? "user_written" : "generated"
       })
-    // The client's view: the branch tip it's on, and the composer row version it last saw.
+    // The client's view: the fork's tip it's on, and the composer row version it last saw.
     let tip: SlotId | null = null
     let rowVersion: number | null = null
-    const composer = () => composerKey(chat.id, tip)
+    const composer = () => composerKey(chat.id, chat.currentForkId)
     /** Saves like a client does: passing the row version it last saw. */
     const type = (content: string) =>
       writer
@@ -200,11 +200,11 @@ describe("drafts", () => {
       yield* type("Who rang the bell?")
       const sent = yield* send("Who rang the bell?")
       // The committed text lives in the message now: the draft is emptied and its
-      // history deleted, and the (empty) composer is at the new tip.
+      // history deleted, and the (empty) composer stays with its fork.
       assert.strictEqual(sent.draft?.status, "committed")
       assert.strictEqual(sent.draft?.content, "")
       assert.strictEqual(sent.draft?.historyLength, 0)
-      assert.strictEqual(sent.draft?.key.field, sent.slotId)
+      assert.strictEqual(sent.draft?.key.field, sent.forkId)
       assert.deepStrictEqual(yield* reader.ListRecoveredTexts({ userId, source: null, limit: 10, before: null }), [])
       assert.deepStrictEqual(yield* reader.ListActiveDrafts({ userId }), [])
 
@@ -214,12 +214,12 @@ describe("drafts", () => {
       assert.strictEqual(reopened.historyLength, 1)
 
       // Another tab kept typing after this one took the text: the newer text stays as a
-      // draft, and moves to the new tip with the conversation.
+      // draft, in the fork the conversation goes on in.
       yield* type("And then? Tell me more.")
       const second = yield* send("And then?")
       assert.strictEqual(second.draft?.status, "active")
       assert.strictEqual(second.draft?.content, "And then? Tell me more.")
-      assert.strictEqual(second.draft?.key.field, second.slotId)
+      assert.strictEqual(second.draft?.key.field, second.forkId)
     }).pipe(Effect.provide(database()))
   )
 
@@ -301,7 +301,7 @@ describe("drafts", () => {
     }).pipe(Effect.provide(database()))
   )
 
-  it.live("a reply appended at the tip carries the composer forward", () =>
+  it.live("a reply appended at the tip leaves the fork's composer as it was", () =>
     Effect.gen(function* () {
       const { writer, reader, userId, chat, say, type, send } = yield* setup()
       const first = yield* send("Hello?")
@@ -314,9 +314,9 @@ describe("drafts", () => {
         version: say("Mira looks up.", "model"),
         commitDraft: null
       })
-      const atNewTip = yield* reader.GetDraft({ userId, key: composerKey(chat.id, reply.slotId) })
-      assert.strictEqual(atNewTip?.content, "While she answers, I")
-      assert.isNull(yield* reader.GetDraft({ userId, key: composerKey(chat.id, first.slotId) }))
+      assert.strictEqual(reply.forkId, first.forkId)
+      const kept = yield* reader.GetDraft({ userId, key: composerKey(chat.id, reply.forkId) })
+      assert.strictEqual(kept?.content, "While she answers, I")
     }).pipe(Effect.provide(database()))
   )
 
@@ -328,25 +328,31 @@ describe("drafts", () => {
       yield* type("Draft on branch A")
 
       // Branching from the root takes the composer along; branch A keeps its own copy.
-      const fromA = (yield* reader.GetDraft({ userId, key: composerKey(chat.id, a.slotId) }))!
-      const branchStart = { userId, chatId: chat.id, tipSlotId: root.slotId, copyFrom: fromA.id }
+      const fromA = (yield* reader.GetDraft({ userId, key: composerKey(chat.id, a.forkId) }))!
+      const { fork } = yield* writer.CreateFork({
+        userId,
+        chatId: chat.id,
+        fromForkId: a.forkId,
+        atSlotId: root.slotId
+      })
+      const branchStart = { userId, chatId: chat.id, forkId: fork.id, copyFrom: fromA.id }
       const copied = yield* writer.OpenComposer(branchStart)
       assert.strictEqual(copied.content, "Draft on branch A")
-      const get = (tip: SlotId) =>
-        reader.GetDraft({ userId, key: composerKey(chat.id, tip) }).pipe(Effect.map((d) => d?.content))
-      assert.strictEqual(yield* get(a.slotId), "Draft on branch A")
+      const get = (forkId: string) =>
+        reader.GetDraft({ userId, key: composerKey(chat.id, forkId) }).pipe(Effect.map((d) => d?.content))
+      assert.strictEqual(yield* get(a.forkId), "Draft on branch A")
 
       // Editing on the new branch leaves branch A alone...
       yield* writer.SaveDraft({
         draftId: copied.id,
         expectedSession: copied.session,
         userId,
-        key: composerKey(chat.id, root.slotId),
+        key: composerKey(chat.id, fork.id),
         content: "A different take",
         expectedRowVersion: copied.rowVersion,
         baseRevision: null
       })
-      assert.strictEqual(yield* get(a.slotId), "Draft on branch A")
+      assert.strictEqual(yield* get(a.forkId), "Draft on branch A")
       // ...and copying again never overwrites text already typed there.
       const again = yield* writer.OpenComposer(branchStart)
       assert.strictEqual(again.content, "A different take")

@@ -19,6 +19,7 @@ import { chatQueue } from "./queueRows.ts"
 import { type ChatRow, toChat } from "./rows.ts"
 import { query } from "./tx.ts"
 import { withoutPurged } from "./stateRefs.ts"
+import { currentForkSql, selectedInSql, shownInSql } from "./forkState.ts"
 
 /** A card's binding from the payload's, without the nulls; undefined for none. */
 const bindingOf = (
@@ -71,7 +72,9 @@ export const makeChatSetupReadHandlers = Effect.gen(function* () {
             WHERE e.chat_id = c.id AND e.key IN ('participant.join', 'participant.leave', 'played_by_me.set', 'card.binding')
               AND e.superseded_by_changeset IS NULL
               AND (e.slot_id IS NULL OR (p.id IS NOT NULL AND s.deleted_at IS NULL))
-              AND (c.active_leaf_slot_id IS NULL OR e.version_id IS NULL OR e.version_id = s.selected_version_id)
+              AND (c.active_leaf_slot_id IS NULL OR e.version_id IS NULL
+                OR e.version_id = ${sql.literal(selectedInSql("c.current_fork_id", "s"))}
+                OR e.version_id = ${sql.literal(shownInSql("c.current_fork_id", "s"))})
             ORDER BY coalesce(s.depth, -1), e.seq)) AS events
         FROM chats c WHERE c.owner_user_id = ${userId} AND c.deleted_at IS NULL
         ORDER BY c.last_message_at IS NOT NULL DESC, coalesce(c.last_message_at, c.created_at) DESC, c.id DESC`
@@ -282,7 +285,7 @@ export const makeChatSetupReadHandlers = Effect.gen(function* () {
               ? []
               : yield* sql<{ depth: number; speaker: string | null; writer: string; text: string }>`
                   SELECT s.depth, v.speaker_entity_id AS speaker, v.writer, substr(v.content, 1, 240) AS text
-                  FROM slots s JOIN versions v ON v.id = s.selected_version_id
+                  FROM slots s JOIN versions v ON v.id = ${sql.literal(shownInSql(currentForkSql("s.chat_id"), "s"))}
                   WHERE s.id = ${chat.leaf} AND s.chat_id = ${chatId}`
           summaries.push(
             new ChatSummary({

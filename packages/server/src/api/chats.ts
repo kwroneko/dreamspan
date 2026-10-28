@@ -2,7 +2,7 @@
 // storage enforces ownership, so another user's ids are NotFound. Each change is published
 // to the chat's subscribers, from every tab of the user, after it's committed.
 import { type AppApi, CurrentUser } from "@rp/shared/api.ts"
-import type { ChatId, EntityId, NewVersion, PathEntry, SlotId } from "@rp/shared/chat.ts"
+import type { ChatId, EntityId, ForkId, NewVersion, PathEntry, SlotId } from "@rp/shared/chat.ts"
 import { BranchSwitch, GenerationUnavailable, messageDraftKey, NotContinuable } from "@rp/shared/chatApi.ts"
 import { TextTooLong } from "@rp/shared/composerApi.ts"
 import type { UserId } from "@rp/shared/domain.ts"
@@ -72,9 +72,12 @@ export const makeChatHandlers = Effect.gen(function* () {
       return (state.playedByMe[0] as EntityId | undefined) ?? null
     })
 
-  /** A slot as it is now, published to its chat. */
-  const publishSlot = (user: UserId, slotId: SlotId) =>
-    Effect.map(reader.GetSlot({ userId: user, slotId }), ({ chatId, entry }) => {
+  /**
+   * A slot as it is now in a fork (null: the fork through it), published to its chat. Tabs
+   * showing another fork read it again as theirs shows it (`PathEntry.shownForkId`).
+   */
+  const publishSlot = (user: UserId, slotId: SlotId, forkId: ForkId | null = null) =>
+    Effect.map(reader.GetSlot({ userId: user, slotId, forkId }), ({ chatId, entry }) => {
       hub.publish(chatId, { _tag: "Slot", entry })
       return entry
     })
@@ -119,6 +122,7 @@ export const makeChatHandlers = Effect.gen(function* () {
     user: UserId,
     params: {
       readonly chatId: ChatId
+      readonly forkId: ForkId | null
       readonly parentSlotId: SlotId | null
       readonly branch: boolean
       readonly kind: "message" | "generate"
@@ -155,7 +159,8 @@ export const makeChatHandlers = Effect.gen(function* () {
           userId: user,
           chatId: params.chatId,
           slotId: result.slotId,
-          versionId: result.version.id
+          versionId: result.version.id,
+          forkId: result.forkId
         })
       }
       const entry = yield* publishSlot(user, result.slotId)
@@ -204,18 +209,31 @@ export const makeChatHandlers = Effect.gen(function* () {
     GetChat: ({ chatId }) =>
       Effect.flatMap(userId, (id) => reader.GetChat({ userId: id, chatId })).pipe(internal("GetChat")),
 
-    ReadPath: ({ chatId, leafSlotId, range, limit }) =>
-      Effect.flatMap(userId, (id) => reader.ReadPath({ userId: id, chatId, leafSlotId, range, limit })).pipe(
-        internal("ReadPath")
+    ReadPath: ({ chatId, forkId, leafSlotId, range, limit }) =>
+      Effect.flatMap(userId, (id) =>
+        reader.ReadPath({ userId: id, chatId, forkId: forkId ?? null, leafSlotId, range, limit })
+      ).pipe(internal("ReadPath")),
+
+    ListVersions: ({ slotId, forkId }) =>
+      Effect.flatMap(userId, (id) => reader.ListVersions({ userId: id, slotId, forkId: forkId ?? null })).pipe(
+        internal("ListVersions")
       ),
 
-    ListVersions: ({ slotId }) =>
-      Effect.flatMap(userId, (id) => reader.ListVersions({ userId: id, slotId })).pipe(internal("ListVersions")),
-
-    SendMessage: ({ chatId, parentSlotId, branch, content, speakerEntityId, replySpeakerEntityId, reply, composer }) =>
+    SendMessage: ({
+      chatId,
+      forkId,
+      parentSlotId,
+      branch,
+      content,
+      speakerEntityId,
+      replySpeakerEntityId,
+      reply,
+      composer
+    }) =>
       Effect.flatMap(userId, (id) =>
         sendOrQueue(id, {
           chatId,
+          forkId: forkId ?? null,
           parentSlotId,
           branch,
           kind: "message",
@@ -230,12 +248,13 @@ export const makeChatHandlers = Effect.gen(function* () {
 
     // Once the version is written, its generation starts even if the caller has gone:
     // otherwise it would stay `generating` with nothing behind it.
-    Generate: ({ chatId, parentSlotId, branch, speakerEntityId, direction, composer }) =>
+    Generate: ({ chatId, forkId, parentSlotId, branch, speakerEntityId, direction, composer }) =>
       Effect.gen(function* () {
         yield* needGenerator
         const id = yield* userId
         return yield* sendOrQueue(id, {
           chatId,
+          forkId: forkId ?? null,
           parentSlotId,
           branch,
           kind: "generate",
@@ -247,16 +266,17 @@ export const makeChatHandlers = Effect.gen(function* () {
         })
       }).pipe(Effect.uninterruptible, internal("Generate")),
 
-    Regenerate: ({ slotId, expectedRowVersion, model, direction }) =>
+    Regenerate: ({ slotId, forkId, expectedRowVersion, model, direction }) =>
       Effect.gen(function* () {
         yield* needGenerator
         const id = yield* userId
         // A swipe keeps the speaker of the version it replaces. Its direction is only the one
         // given now (DESIGN §2.2, the guidance toggle): nothing is reused implicitly.
-        const { chatId, entry: before } = yield* reader.GetSlot({ userId: id, slotId })
+        const { chatId, entry: before } = yield* reader.GetSlot({ userId: id, slotId, forkId: forkId ?? null })
         const added = yield* writer.AddSelectedVersion({
           userId: id,
           slotId,
+          forkId: forkId ?? null,
           version: {
             ...generating,
             speakerEntityId: before.version.speakerEntityId ?? (yield* speakerOf(id, chatId, before)),
@@ -270,9 +290,10 @@ export const makeChatHandlers = Effect.gen(function* () {
           chatId: added.chatId,
           slotId,
           versionId: added.version.id,
+          forkId: added.forkId,
           ...(model ? { model } : {})
         })
-        const { entry } = yield* reader.GetSlot({ userId: id, slotId })
+        const { entry } = yield* reader.GetSlot({ userId: id, slotId, forkId: added.forkId })
         hub.publish(added.chatId, { _tag: "Slot", entry })
         return entry
       }).pipe(Effect.uninterruptible, internal("Regenerate")),
@@ -280,7 +301,7 @@ export const makeChatHandlers = Effect.gen(function* () {
     // Continue (ST's, DESIGN §7.5): a new version that starts as the text continued and
     // streams on from its end, the old version left as it was. The slot is published before
     // the generation starts, so every tab has the starting text before the first delta.
-    ContinueVersion: ({ versionId, expectedRowVersion, direction }) =>
+    ContinueVersion: ({ versionId, forkId, expectedRowVersion, direction }) =>
       Effect.gen(function* () {
         yield* needGenerator
         const id = yield* userId
@@ -292,6 +313,7 @@ export const makeChatHandlers = Effect.gen(function* () {
         const added = yield* writer.AddSelectedVersion({
           userId: id,
           slotId: source.slotId,
+          forkId: forkId ?? null,
           version: {
             ...generating,
             content: source.content,
@@ -302,12 +324,13 @@ export const makeChatHandlers = Effect.gen(function* () {
           },
           expectedRowVersion
         })
-        const entry = yield* publishSlot(id, source.slotId)
+        const entry = yield* publishSlot(id, source.slotId, added.forkId)
         yield* generations.start({
           userId: id,
           chatId: added.chatId,
           slotId: source.slotId,
           versionId: added.version.id,
+          forkId: added.forkId,
           initial: { text: added.version.content, reasoning: added.version.reasoning ?? "" }
         })
         return entry
@@ -332,26 +355,38 @@ export const makeChatHandlers = Effect.gen(function* () {
       ),
 
     // Selecting a finished version lets what was queued behind the slot post (DESIGN §2.2).
-    SelectVersion: ({ slotId, versionId, expectedRowVersion }) =>
+    SelectVersion: ({ slotId, versionId, forkId, expectedVersionId }) =>
       Effect.gen(function* () {
         const id = yield* userId
-        const outcome = yield* writer.SelectAndDrain({ userId: id, slotId, versionId, expectedRowVersion })
+        const outcome = yield* writer.SelectAndDrain({
+          userId: id,
+          slotId,
+          versionId,
+          forkId: forkId ?? null,
+          expectedVersionId
+        })
         // The queue event first, in commit order (Generations.continueQueue).
         yield* generations.continueQueue(id, outcome)
-        return yield* publishSlot(id, slotId)
+        return yield* publishSlot(id, slotId, forkId ?? null)
       }).pipe(Effect.uninterruptible, internal("SelectVersion")),
 
     // Starring and hiding a version change only the picker and the arrows, never the context.
-    SetVersionFlags: ({ versionId, starred, hidden }) =>
+    // They're the fork's (spec/FORK-INDEPENDENCE-DELTA.md §2.2): tabs on another fork leave the event.
+    SetVersionFlags: ({ versionId, forkId, starred, hidden }) =>
       Effect.gen(function* () {
         const id = yield* userId
-        const { chatId, version } = yield* writer.SetVersionFlags({
+        const {
+          chatId,
+          forkId: fork,
+          version
+        } = yield* writer.SetVersionFlags({
           userId: id,
           versionId,
+          forkId: forkId ?? null,
           ...(starred === undefined ? {} : { starred }),
           ...(hidden === undefined ? {} : { hidden })
         })
-        hub.publish(chatId, { _tag: "Version", version })
+        hub.publish(chatId, { _tag: "Version", version, forkId: fork })
         return version
       }).pipe(Effect.uninterruptible, internal("SetVersionFlags")),
 
@@ -366,34 +401,36 @@ export const makeChatHandlers = Effect.gen(function* () {
 
     // An edit or a version the user writes is still the message's speaker's, as a swipe is:
     // an edit its source's, a written version the one shown's.
-    EditVersion: ({ slotId, sourceVersionId, content, expectedRowVersion, draft }) =>
+    EditVersion: ({ slotId, forkId, sourceVersionId, content, expectedRowVersion, draft }) =>
       Effect.gen(function* () {
         const id = yield* userId
         const source = yield* reader.GetVersion({ userId: id, versionId: sourceVersionId })
         const version = userText(content, "edited", source.speakerEntityId, sourceVersionId)
-        yield* writer.AddSelectedVersion({
+        const added = yield* writer.AddSelectedVersion({
           userId: id,
           slotId,
+          forkId: forkId ?? null,
           version,
           expectedRowVersion,
           commitDraft: draft ?? null
         })
-        return yield* publishSlot(id, slotId)
+        return yield* publishSlot(id, slotId, added.forkId)
       }).pipe(internal("EditVersion")),
 
-    WriteVersion: ({ slotId, content, expectedRowVersion, draft }) =>
+    WriteVersion: ({ slotId, forkId, content, expectedRowVersion, draft }) =>
       Effect.gen(function* () {
         const id = yield* userId
-        const { entry } = yield* reader.GetSlot({ userId: id, slotId })
+        const { entry } = yield* reader.GetSlot({ userId: id, slotId, forkId: forkId ?? null })
         const version = userText(content, "user_written", entry.version.speakerEntityId)
-        yield* writer.AddSelectedVersion({
+        const added = yield* writer.AddSelectedVersion({
           userId: id,
           slotId,
+          forkId: forkId ?? null,
           version,
           expectedRowVersion,
           commitDraft: draft ?? null
         })
-        return yield* publishSlot(id, slotId)
+        return yield* publishSlot(id, slotId, added.forkId)
       }).pipe(internal("WriteVersion")),
 
     MessageDrafts: ({ chatId }) =>
@@ -434,18 +471,29 @@ export const makeChatHandlers = Effect.gen(function* () {
         })
       ).pipe(internal("DiscardMessageDraft")),
 
-    AmendVersion: ({ versionId, content, expectedRowVersion, draft }) =>
+    // An amend another fork shows gives this fork a copy in its place: its message changed
+    // here only, and tabs on other forks read it again as theirs shows it.
+    AmendVersion: ({ versionId, forkId, content, expectedRowVersion, draft }) =>
       Effect.gen(function* () {
         const id = yield* userId
         const version = yield* writer.AmendVersion({
           userId: id,
           versionId,
+          forkId: forkId ?? null,
           content,
           expectedRowVersion,
           commitDraft: draft ?? null
         })
-        const { chatId } = yield* reader.GetSlot({ userId: id, slotId: version.slotId })
-        hub.publish(chatId, { _tag: "Version", version })
+        const { chatId, entry } = yield* reader.GetSlot({ userId: id, slotId: version.slotId, forkId: forkId ?? null })
+        if (version.id === versionId) hub.publish(chatId, { _tag: "Version", version })
+        else {
+          hub.publish(chatId, { _tag: "Slot", entry })
+          hub.publish(chatId, {
+            _tag: "Version",
+            version,
+            ...(entry.shownForkId === undefined ? {} : { forkId: entry.shownForkId })
+          })
+        }
         return version
       }).pipe(internal("AmendVersion")),
 
@@ -484,21 +532,13 @@ export const makeChatHandlers = Effect.gen(function* () {
         return item
       }).pipe(Effect.uninterruptible, internal("DeleteVersion")),
 
-    // The tip is read, and the leaf moved there only if the chat hasn't changed since: a
-    // message arriving in between gets the tip read again.
-    SwitchBranch: ({ chatId, slotId, index }) =>
+    // Opens a fork; only one made for a line no fork followed is news to other tabs.
+    SwitchBranch: ({ chatId, slotId, index, forkId }) =>
       Effect.gen(function* () {
         const id = yield* userId
-        const target = yield* reader.BranchTip({ userId: id, chatId, slotId, index })
-        const chat = yield* writer.SetActiveLeaf({
-          userId: id,
-          chatId,
-          slotId: target.tipSlotId,
-          expectedRowVersion: target.chatRowVersion
-        })
-        hub.publish(chatId, { _tag: "Chat", chat })
-        return new BranchSwitch({ slotId: target.slotId, chat })
-      }).pipe(Effect.retry({ times: 2, while: (error) => error._tag === "StaleWrite" }), internal("SwitchBranch")),
+        const target = yield* writer.SwitchBranch({ userId: id, chatId, slotId, index, forkId: forkId ?? null })
+        return new BranchSwitch(target)
+      }).pipe(internal("SwitchBranch")),
 
     GetDisplayPrefs: () =>
       Effect.flatMap(userId, (id) => reader.GetDisplayPrefs({ userId: id })).pipe(internal("GetDisplayPrefs")),
@@ -530,15 +570,34 @@ export const makeChatHandlers = Effect.gen(function* () {
         Effect.catchTag("NotFound", () => Effect.succeed({ show: false, preset: null })),
         internal("ImpersonationNotice")
       ),
-    ListBranches: ({ slotId }) =>
-      Effect.flatMap(userId, (id) => reader.ListBranches({ userId: id, slotId })).pipe(internal("ListBranches")),
+    ListBranches: ({ slotId, forkId }) =>
+      Effect.flatMap(userId, (id) => reader.ListBranches({ userId: id, slotId, forkId: forkId ?? null })).pipe(
+        internal("ListBranches")
+      ),
 
-    NameBranch: ({ slotId, name }) =>
+    ListForks: ({ chatId }) =>
+      Effect.flatMap(userId, (id) => reader.ListForks({ userId: id, chatId })).pipe(internal("ListForks")),
+
+    CreateFork: ({ chatId, fromForkId, atSlotId }) =>
       Effect.gen(function* () {
         const id = yield* userId
-        yield* writer.SetBranchName({ userId: id, slotId, name })
-        return yield* publishSlot(id, slotId)
-      }).pipe(internal("NameBranch")),
+        const made = yield* writer.CreateFork({ userId: id, chatId, fromForkId, atSlotId })
+        hub.publish(chatId, { _tag: "Chat", chat: made.chat })
+        return made
+      }).pipe(internal("CreateFork")),
+
+    // The fork's first message shows its name among the alternates: subscribers get it again.
+    NameFork: ({ forkId, name }) =>
+      Effect.gen(function* () {
+        const id = yield* userId
+        const named = yield* writer.SetForkName({ userId: id, forkId, name })
+        if (named.startSlotId !== null)
+          yield* publishSlot(id, named.startSlotId).pipe(Effect.catchTag("NotFound", () => Effect.void))
+        return named.fork
+      }).pipe(internal("NameFork")),
+
+    PinFork: ({ forkId, pinned }) =>
+      Effect.flatMap(userId, (id) => writer.SetForkPinned({ userId: id, forkId, pinned })).pipe(internal("PinFork")),
 
     GetNextContext: ({ chatId, leafSlotId }) =>
       Effect.flatMap(userId, (id) => reader.CacheWarmth({ userId: id, chatId, leafSlotId })).pipe(

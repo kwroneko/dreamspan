@@ -1,6 +1,7 @@
 // What the summary UI reads (ARCHITECTURE §16): the layer in use with the failures and
 // unfinished work on the path, a window of coverage for the rail, and a summary's revisions.
 import type { UserId } from "@rp/shared/domain.ts"
+import { atLeaf } from "./forkState.ts"
 import type { LcmJob, LcmSummary, Summary } from "@rp/shared/lcm.ts"
 import { LcmCoverage, LcmState } from "@rp/shared/lcm.ts"
 import { Effect } from "effect"
@@ -241,7 +242,7 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
           })),
           cursorDepth: layer.cursorDepth
         })
-      }).pipe(query("GetLcmState")),
+      }).pipe(atLeaf(sql, chatId, leafSlotId), query("GetLcmState")),
 
     GetLcmCoverage: ({ userId, chatId, leafSlotId, fromDepth, toDepth, includeResolved }) =>
       Effect.gen(function* () {
@@ -270,6 +271,6 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
             }))
             .filter((s) => includeResolved || !s.resolved)
         })
-      }).pipe(query("GetLcmCoverage"))
+      }).pipe(atLeaf(sql, chatId, leafSlotId), query("GetLcmCoverage"))
   } satisfies Partial<Parameters<typeof ReadOps.of>[0]>
 })

@@ -132,15 +132,12 @@ describe("independent shell reads", () => {
           branch: true
         })
       )
-      yield* api.NameBranch({ slotId: second.entry.slotId, name: "The other road" })
-      const writer = yield* Writer
-      const me = yield* api.Whoami()
-      yield* writer.SetActiveLeaf({
-        userId: me.id,
-        chatId,
-        slotId: first.entry.slotId,
-        expectedRowVersion: (yield* api.GetChat({ chatId })).rowVersion
+      const forksNow = yield* api.ListForks({ chatId })
+      yield* api.NameFork({
+        forkId: forksNow.find((f) => f.tipSlotId === second.entry.slotId)!.id,
+        name: "The other road"
       })
+      // Opening the first fork is the client's view alone (no SetActiveLeaf since forks): the current one stays.
       let rows = (yield* api.GetShellLibrary()).forks.filter((f) => f.chat.id === chatId)
       assert.strictEqual(rows.find((f) => f.current)!.leaf, second.entry.slotId)
       assert.strictEqual(rows.find((f) => f.pinned)!.leaf, first.entry.slotId)
@@ -148,6 +145,8 @@ describe("independent shell reads", () => {
       const continued = yield* posted(
         api.SendMessage({
           chatId,
+          // The first fork, opened as the client does: it names its fork.
+          forkId: forksNow.find((f) => f.tipSlotId === first.entry.slotId)!.id,
           parentSlotId: first.entry.slotId,
           speakerEntityId: card.entityId,
           content: "Continue the pinned road",

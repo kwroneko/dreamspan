@@ -177,29 +177,25 @@ test("deleting a named branch from the middle of a long chat follows the survivi
         content: "Common root"
       })
       if (root._tag !== "Posted") throw new Error("expected a posted message")
+      yield* api.SendMessage({
+        chatId: chat.id,
+        parentSlotId: root.entry.slotId,
+        branch: false,
+        content: "Surviving tip"
+      })
+      // The long road is a fork made at the root, chatted in last, so the chat opens on it.
       let tip = root.entry.slotId
-      let fork = tip
       for (let i = 0; i < 90; i++) {
         const sent = yield* api.SendMessage({
           chatId: chat.id,
           parentSlotId: tip,
-          branch: false,
+          branch: i === 0,
           content: `Long path ${i}`
         })
         if (sent._tag !== "Posted") throw new Error("expected a posted message")
         tip = sent.entry.slotId
-        if (i === 0) {
-          fork = tip
-          yield* api.NameBranch({ slotId: tip, name: "Long road" })
-        }
+        if (i === 0) yield* api.NameFork({ forkId: sent.entry.startsForkId!, name: "Long road" })
       }
-      yield* api.SendMessage({
-        chatId: chat.id,
-        parentSlotId: root.entry.slotId,
-        branch: true,
-        content: "Surviving tip"
-      })
-      yield* api.SwitchBranch({ chatId: chat.id, slotId: fork, index: 0 })
       return chat.id
     })
   )

@@ -67,7 +67,7 @@ for (const mode of ["selected", "unselected", "racing"] as const) {
     if (mode === "unselected") {
       const versions = await admin((api) => api.ListVersions({ slotId: entry.slotId }))
       await admin((api) =>
-        api.SelectVersion({ slotId: entry.slotId, versionId: versions[0]!.id, expectedRowVersion: entry.rowVersion })
+        api.SelectVersion({ slotId: entry.slotId, versionId: versions[0]!.id, expectedVersionId: entry.version.id })
       )
       await expect(row.getByRole("note")).toContainText("Another version is selected")
     }

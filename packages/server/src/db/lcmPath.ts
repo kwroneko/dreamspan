@@ -1,5 +1,6 @@
 import { contextExcluded } from "./lcmVisibility.ts"
 import type { UserId } from "@rp/shared/domain.ts"
+import { shownIn, viewAt } from "./forkState.ts"
 import { NotFound } from "@rp/shared/errors.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
@@ -17,8 +18,9 @@ export interface LcmSlot {
   children: number
 }
 /**
- * The slots from `first` (or the root) to `leaf`, oldest first. `limit` stops the walk after that
- * many slots, so asking for a range that isn't a chain can't read a whole path.
+ * The slots from `first` (or the root) to `leaf`, oldest first, with the versions the fork in
+ * view shows (ForkView; else the fork through `leaf`). `limit` stops the walk after that many
+ * slots, so asking for a range that isn't a chain can't read a whole path.
  */
 export const lcmPath = (
   sql: SqlClient.SqlClient,
@@ -32,6 +34,7 @@ export const lcmPath = (
     const [owned] = yield* sql`SELECT s.id FROM slots s JOIN chats c ON c.id = s.chat_id
       WHERE s.id = ${leaf} AND c.id = ${chatId} AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL`
     if (!owned) return yield* new NotFound({ entity: "chat path", id: leaf })
+    const fork = yield* viewAt(sql, chatId, leaf)
     return yield* sql<LcmSlot>`WITH RECURSIVE path AS (
       SELECT id, parent_slot_id, depth, 1 AS n FROM slots WHERE id = ${leaf}
       UNION ALL SELECT s.id, s.parent_slot_id, s.depth, p.n + 1 FROM slots s JOIN path p ON s.id = p.parent_slot_id
@@ -45,7 +48,8 @@ export const lcmPath = (
       coalesce(v.status = 'generating',0) AS generating,
       EXISTS(SELECT 1 FROM slot_parents m WHERE m.slot_id = p.id) AS merged,
       (SELECT count(*) FROM slots child WHERE child.parent_slot_id = p.id AND child.deleted_at IS NULL) AS children
-      FROM path p JOIN slots s ON s.id = p.id LEFT JOIN versions v ON v.id = s.selected_version_id ORDER BY p.depth`
+      FROM path p JOIN slots s ON s.id = p.id LEFT JOIN versions v ON v.id = ${shownIn(sql, fork, "s")}
+      ORDER BY p.depth`
   })
 export const slotInput = (s: LcmSlot): Summary["inputs"][number] => ({
   slotId: s.id,

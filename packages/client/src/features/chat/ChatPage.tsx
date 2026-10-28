@@ -3,7 +3,7 @@ import { PortraitProvider } from "../../ui/Portrait.tsx"
 // A chat (DESIGN §10.1): a URL per chat and per message, the path in a virtualized list
 // anchored at the bottom, and the composer. Nothing here locks while replies generate.
 import { RegistryContext } from "@effect/atom-react"
-import type { ChatId, PathEntry, SlotId } from "@rp/shared/chat.ts"
+import type { ChatId, ForkId, PathEntry, SlotId } from "@rp/shared/chat.ts"
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import {
@@ -373,7 +373,7 @@ function MessageList({
       entry={entry}
       session={session}
       highlighted={entry.slotId === anchor}
-      branchLeaf={view.leafSlotId === view.chat?.activeLeafSlotId ? null : view.leafSlotId}
+      branchFork={view.forkId === view.chat?.currentForkId ? null : view.forkId}
       onBranch={onBranch}
     />
   )
@@ -436,18 +436,18 @@ function MessageList({
 
 function OpenChat({
   chatId,
-  leaf,
+  fork,
   slot,
   panel
 }: {
   chatId: ChatId
-  leaf: SlotId | null
+  fork: ForkId | null
   slot: SlotId | null
   panel: PanelTab | null
 }) {
   const registry = useContext(RegistryContext)
   const userId = useSession().user.id
-  const [session] = useState(() => new ChatSession(chatId, leaf, registry, userId))
+  const [session] = useState(() => new ChatSession(chatId, fork, registry, userId))
   useLookingAt(chatId)
   // The slot the chat opened at; a deep link within the open chat moves the window instead.
   const [initialSlot] = useState(slot)
@@ -455,7 +455,7 @@ function OpenChat({
     session.start(initialSlot)
     return () => session.dispose()
   }, [session, initialSlot])
-  return <ChatSurface session={session} leaf={leaf} slot={slot} panel={panel} />
+  return <ChatSurface session={session} fork={fork} slot={slot} panel={panel} />
 }
 
 /**
@@ -494,12 +494,12 @@ function usePanel(urlPanel: PanelTab | null) {
 
 function ChatSurface({
   session,
-  leaf,
+  fork,
   slot,
   panel: urlPanel
 }: {
   session: ChatSession
-  leaf: SlotId | null
+  fork: ForkId | null
   slot: SlotId | null
   panel: PanelTab | null
 }) {
@@ -511,31 +511,28 @@ function ChatSurface({
     (search: Record<string, string>) => (panel === null ? search : { ...search, panel }),
     [panel]
   )
-  const shown = useRef({ leaf, slot })
-  // Another message or branch of the open chat moves the window; a URL catching up with
+  const shown = useRef({ fork, slot })
+  // Another message or fork of the open chat moves the window; a URL catching up with
   // where the window already is doesn't.
   useEffect(() => {
     const before = shown.current
-    shown.current = { leaf, slot }
-    const current = view.leafSlotId
-    const already = leaf === null ? current !== null && current === view.chat?.activeLeafSlotId : leaf === current
-    if (leaf !== before.leaf && !already) session.showBranch(leaf, slot)
+    shown.current = { fork, slot }
+    const current = view.forkId
+    const already = fork === null ? current !== null && current === view.chat?.currentForkId : fork === current
+    if (fork !== before.fork && !already) session.showFork(fork, slot)
     else if (slot !== before.slot) void session.open(slot)
-  }, [session, leaf, slot, view.leafSlotId, view.chat])
-  // Sending on another branch makes it the chat's latest: once the window moves on from the
-  // URL's leaf to the active one, the URL drops the old leaf.
+  }, [session, fork, slot, view.forkId, view.chat])
   // Deleted while open, here or elsewhere: there's nothing left to show.
   useEffect(() => {
     if (view.deleted) void navigate({ to: "/chats", replace: true })
   }, [navigate, view.deleted])
-  const viewLeaf = useRef(view.leafSlotId)
+  // The URL names a fork only while it isn't the chat's current one: once sending there
+  // made it current, the URL drops it.
   useEffect(() => {
-    const from = viewLeaf.current
-    viewLeaf.current = view.leafSlotId
-    if (leaf !== null && from === leaf && view.leafSlotId !== leaf && view.leafSlotId === view.chat?.activeLeafSlotId) {
+    if (fork !== null && view.forkId === fork && view.chat?.currentForkId === fork) {
       void navigate({ to: ".", search: withPanel(slot === null ? {} : { slot }), replace: true })
     }
-  }, [navigate, withPanel, leaf, slot, view.leafSlotId, view.chat])
+  }, [navigate, withPanel, fork, slot, view.forkId, view.chat])
   // Rows read the cast from context: it's the same object until the cast changes.
   const cast = useMemo(() => castView(view.cast), [view.cast])
   /** Turning summaries on, which asks first what it costs. */
@@ -551,8 +548,8 @@ function ChatSurface({
     },
     [show]
   )
-  // Another branch (DESIGN §3.2): the chat's leaf moves to it, and the window opens at the
-  // message switched to, which the URL then names.
+  // Another branch (DESIGN §3.2): the window opens the fork through it, at the message
+  // switched to, which the URL then names, with the fork unless it's the current one.
   const [branchError, setBranchError] = useState<string | null>(null)
   const onBranch = useCallback(
     async (entry: PathEntry, index: number) => {
@@ -560,25 +557,32 @@ function ChatSurface({
       if (!result.ok) return setBranchError(result.error.message)
       setBranchError(null)
       const sibling = result.value.slotId
-      if (sibling === slot && leaf === null) void session.open(sibling)
-      else void navigate({ to: ".", search: withPanel({ slot: sibling }) })
+      const target = result.value.fork.id
+      if (sibling === slot && target === session.snapshot().forkId) void session.open(sibling)
+      else
+        void navigate({
+          to: ".",
+          search: withPanel(
+            target === result.value.chat.currentForkId ? { slot: sibling } : { fork: target, slot: sibling }
+          )
+        })
     },
-    [session, navigate, withPanel, slot, leaf]
+    [session, navigate, withPanel, slot]
   )
   const switchBranch = useCallback((entry: PathEntry, index: number) => void onBranch(entry, index), [onBranch])
   // A summary's range opens the window at its first message, as a link to that message does.
-  const branchLeaf = view.leafSlotId === view.chat?.activeLeafSlotId ? null : view.leafSlotId
+  const branchFork = view.forkId === view.chat?.currentForkId ? null : view.forkId
   // Beside the chat the panel stays open; a phone's sheet closes to show the message.
   const jump = useCallback(
     (target: SlotId) => {
       if (!wide) rememberPanel(userId, null)
-      const at = branchLeaf === null ? { slot: target } : { leaf: branchLeaf, slot: target }
+      const at = branchFork === null ? { slot: target } : { fork: branchFork, slot: target }
       if (target === slot) {
         if (!wide) show(null)
         void session.open(target)
       } else void navigate({ to: ".", search: wide ? withPanel(at) : at })
     },
-    [session, navigate, show, withPanel, wide, slot, branchLeaf, userId]
+    [session, navigate, show, withPanel, wide, slot, branchFork, userId]
   )
   const title = chatDisplayName(view)
   const panelOpen = panel !== null
@@ -696,16 +700,16 @@ function ChatSurface({
   )
 }
 
-/** /chats/$chatId, with `leaf` for a branch other than the active one and `slot` for a message. */
+/** /chats/$chatId, with `fork` for a fork other than the current one and `slot` for a message. */
 export function ChatPage() {
   const { chatId } = useParams({ strict: false }) as { chatId: ChatId }
-  const search = useSearch({ strict: false }) as { leaf?: unknown; slot?: unknown; panel?: unknown }
-  const leaf = typeof search.leaf === "string" && search.leaf !== "" ? (search.leaf as SlotId) : null
+  const search = useSearch({ strict: false }) as { fork?: unknown; slot?: unknown; panel?: unknown }
+  const fork = typeof search.fork === "string" && search.fork !== "" ? (search.fork as ForkId) : null
   const slot = typeof search.slot === "string" ? (search.slot as SlotId) : null
   const panel = isPanelTab(search.panel) ? search.panel : null
   return (
     <div data-fill className="flex min-h-0 flex-1 flex-col">
-      <OpenChat key={chatId} chatId={chatId} leaf={leaf} slot={slot} panel={panel} />
+      <OpenChat key={chatId} chatId={chatId} fork={fork} slot={slot} panel={panel} />
     </div>
   )
 }

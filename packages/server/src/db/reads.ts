@@ -1,7 +1,7 @@
 import { chatCast } from "./cards.ts"
 import { contextExcluded } from "./lcmVisibility.ts"
 // Read operation handlers. They run inside the reader workers on read-only connections.
-import type { ChatId, SlotId, VersionId } from "@rp/shared/chat.ts"
+import type { ChatId, ForkId, SlotId, VersionId } from "@rp/shared/chat.ts"
 import { Branch, PathWindow } from "@rp/shared/chatApi.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { MergePreview, Revision, type RevisionId } from "@rp/shared/library.ts"
@@ -10,14 +10,19 @@ import { Effect, Schema } from "effect"
 import { SqlClient } from "effect/sql"
 import { toBinItem, toRecoveredText } from "./bin.ts"
 import { reachableSlot } from "./graphReachability.ts"
+import { forkColumns, forkRecency, forkThrough } from "./forks.ts"
+import { attachedApplies, effectiveOverride, forkAt, shownIn, shownJoin, shownVersionColumns } from "./forkState.ts"
+import { pathEvents, pathSegments } from "./pathSegments.ts"
 import { makeDraftStore } from "./drafts.ts"
 import { makeLibraryQueries, toLibraryRef } from "./library.ts"
 import { NotFound, ReadOps, RefOperationRefused, StorageError } from "./ops.ts"
 import {
   versionExtras,
   type ChatRow,
+  type ForkRow,
   type PathRow,
   toChat,
+  toFork,
   toPathEntry,
   toUser,
   toVersion,
@@ -28,15 +33,6 @@ import { withoutPurged } from "./stateRefs.ts"
 import { query } from "./tx.ts"
 
 const decodeStateEvent = Schema.decodeUnknownEffect(FoldableEvent)
-
-/** The slots from `leaf` up to the root (DATA-MODEL §4.4), or up to `limit` of them. */
-const pathCte = (sql: SqlClient.SqlClient, chatId: ChatId, leaf: SlotId, limit: number | null) => sql`
-  WITH RECURSIVE path(id, n) AS (
-    SELECT id, 1 FROM slots WHERE id = ${leaf} AND chat_id = ${chatId}
-    UNION ALL
-    SELECT s.parent_slot_id, p.n + 1 FROM slots s JOIN path p ON s.id = p.id
-    WHERE s.parent_slot_id IS NOT NULL AND (${limit} IS NULL OR p.n < ${limit})
-  )`
 
 /**
  * The alternate branches at slot `s` (DESIGN §3.2), with `also` on top: its siblings in
@@ -52,25 +48,89 @@ const siblingCount = (also = "") => {
     ELSE (SELECT count(*) FROM slots x INDEXED BY slots_parent WHERE x.parent_slot_id = s.parent_slot_id AND ${reachable}) END`
 }
 
-/** A path entry's columns: the slot's, and its selected version's under their own names. */
-const pathColumns = `v.id, v.slot_id, v.ordinal, v.status, v.speaker_entity_id, v.writer, v.content,
-  v.macro_mode, v.origin, v.source_version_id, v.direction, v.hidden, v.starred, v.created_at, v.error_json, v.mark,
-  v.frozen_macros, v.rollout_id, v.reasoning,
-  ${versionExtras("v")}, s.lane_id, s.parent_slot_id, s.depth, s.row_version, ${contextExcluded()} AS context_excluded, s.hidden_by_user, s.branch_name,
-  s.deleted_at IS NOT NULL AS slot_deleted,
-  (SELECT count(*) FROM versions c WHERE c.slot_id = s.id AND c.deleted_at IS NULL) AS version_count,
-  ${siblingCount()} AS branch_count, ${siblingCount("AND x.id < s.id")} AS branch_index,
-  (SELECT f.writer = 'human' AND f.origin <> 'greeting' FROM versions f WHERE f.slot_id = s.id
-    ORDER BY f.ordinal LIMIT 1) AS user_side,
-  (SELECT f.speaker_entity_id FROM versions f WHERE f.slot_id = s.id ORDER BY f.ordinal LIMIT 1) AS first_speaker`
+/** The fork whose first message slot `s` is: it was appended there by a fork made at its parent. */
+const startsFork = (s: string) =>
+  `(SELECT f.id FROM forks f WHERE f.id = ${s}.fork_id AND f.base_slot_id IS ${s}.parent_slot_id)`
 
-/** The window of at most `limit` slots ending at `leaf`, root first, deleted ones included. */
-export const pathWindow = (sql: SqlClient.SqlClient, chatId: ChatId, leaf: SlotId, limit: number) =>
+/**
+ * The name a slot shows among its alternates: a name the user gave (or took off) the fork it
+ * starts, else its own label (an ST import's, or a continuation's name from before forks),
+ * else its fork's name.
+ */
+const branchLabel = (s: string) => `nullif(coalesce((SELECT CASE WHEN f.name_user = 1 THEN coalesce(f.name, '')
+    ELSE coalesce(${s}.branch_name, f.name) END
+  FROM forks f WHERE f.id = ${s}.fork_id AND f.base_slot_id IS ${s}.parent_slot_id), ${s}.branch_name), '')`
+
+/**
+ * A path entry's columns: the slot's, and its shown version's under their own names. The
+ * version is `v`, the one the fork shows (`viewJoin`), its selection `o`, and the fork's
+ * selection and replacement overrides `so` and `ro`: the entry's row version is the slot's
+ * plus the newer of their seqs, so it moves when the fork's choice does and never when
+ * another fork's does. The count of versions is the message's own: a fork's copies stand in
+ * for them.
+ */
+export const pathColumns = `${shownVersionColumns}, s.lane_id, s.parent_slot_id, s.depth,
+  s.row_version + max(coalesce(so.seq, 0), coalesce(ro.seq, 0)) AS row_version,
+  ${contextExcluded()} AS context_excluded, s.hidden_by_user,
+  ${branchLabel("s")} AS branch_name, s.fork_id AS slot_fork_id, ${startsFork("s")} AS starts_fork_id,
+  s.deleted_at IS NOT NULL AS slot_deleted,
+  (SELECT count(*) FROM versions c WHERE c.slot_id = s.id AND c.deleted_at IS NULL AND c.fork_id IS NULL)
+    AS version_count,
+  ${siblingCount()} AS branch_count, ${siblingCount("AND x.id < s.id")} AS branch_index,
+  (SELECT f.writer = 'human' AND f.origin <> 'greeting' FROM versions f WHERE f.slot_id = s.id AND f.fork_id IS NULL
+    ORDER BY f.ordinal LIMIT 1) AS user_side,
+  (SELECT f.speaker_entity_id FROM versions f WHERE f.slot_id = s.id AND f.fork_id IS NULL ORDER BY f.ordinal LIMIT 1)
+    AS first_speaker`
+
+/**
+ * Joins slot `s` to the version fork `fork` selects (`o`) and the override that chose it
+ * (`so`), and to what it shows for it (`shownJoin`).
+ */
+const viewJoin = (sql: SqlClient.SqlClient, fork: string | null) => sql`
+  LEFT JOIN fork_overrides so ON so.id = ${effectiveOverride(sql, "select", fork, "s.id")}
+  JOIN versions o ON o.id = coalesce(so.value_id, s.selected_version_id)
+  ${shownJoin(sql, fork)}`
+
+/**
+ * The window of at most `limit` slots ending at `leaf`, root first, deleted ones included,
+ * as fork `fork` shows them (null: as inserted): a range of depths from each chain segment
+ * it overlaps, the segments driving the join. Each slot's selection costs one lookup per
+ * fork in the fork's lineage, whatever the chat's length or number of forks.
+ */
+export const pathWindow = (
+  sql: SqlClient.SqlClient,
+  chatId: ChatId,
+  leaf: SlotId,
+  limit: number,
+  fork: string | null = null
+) =>
   sql<PathRow>`
-    ${pathCte(sql, chatId, leaf, limit)}
-    SELECT ${sql.literal(pathColumns)}
-    FROM path JOIN slots s ON s.id = path.id JOIN versions v ON v.id = s.selected_version_id
+    ${pathSegments(sql, chatId, leaf, limit)}
+    SELECT ${sql.literal(pathColumns)}, ${fork} AS shown_fork_id
+    FROM segments g CROSS JOIN slots s ON s.chain_id = g.chain_id AND s.depth BETWEEN max(g.lo, g.floor) AND g.hi
+    ${viewJoin(sql, fork)}
     ORDER BY s.depth`
+
+/**
+ * The state events that apply at `slotId` (StateEventsAt) in fork `fork` (null: by the
+ * selections slots were inserted with), in fold order: chat-wide ones, then by depth. An
+ * event attached to a version applies while the fork shows it. Its cost is the path's
+ * segments and events, not its length.
+ */
+export const stateEventsOnPath = (
+  sql: SqlClient.SqlClient,
+  chatId: ChatId,
+  slotId: SlotId,
+  fork: string | null = null
+) =>
+  sql<{ key: string; scope: string | null; value_json: string }>`
+    ${pathEvents(sql, chatId, slotId)}
+    SELECT ev.key, ev.scope, ev.value_json
+    FROM path_events ev LEFT JOIN slots s ON s.id = ev.slot_id
+    WHERE ev.superseded_by_changeset IS NULL
+      AND (ev.slot_id IS NULL OR s.deleted_at IS NULL)
+      AND ${attachedApplies(sql, fork, "s", "ev.version_id")}
+    ORDER BY coalesce(ev.slot_depth, -1), ev.seq`
 
 interface SlotPosition {
   readonly id: SlotId
@@ -155,7 +215,8 @@ export const makeReadHandlers = Effect.gen(function* () {
       Effect.flatMap(([row]) => (row ? Effect.succeed(row) : Effect.fail(new NotFound({ entity: "chat", id: chatId }))))
     )
 
-  const windowEndingAt = (chatId: ChatId, leaf: SlotId, limit: number) => pathWindow(sql, chatId, leaf, limit)
+  const windowEndingAt = (chatId: ChatId, leaf: SlotId, limit: number, fork: string | null) =>
+    pathWindow(sql, chatId, leaf, limit, fork)
 
   /** A slot of this chat, deleted or not: paths walk through deleted messages. */
   const slotIn = (chatId: ChatId, slotId: SlotId) =>
@@ -186,6 +247,15 @@ export const makeReadHandlers = Effect.gen(function* () {
       Effect.flatMap(([row]) => (row ? Effect.void : Effect.fail(new NotFound({ entity: "slot", id: slotId }))))
     )
 
+  /** A live fork of the chat: `forkId`, or its current one when null. */
+  const liveFork = (chat: ChatRow, forkId: ForkId | null) =>
+    sql<ForkRow>`SELECT * FROM forks WHERE id = ${forkId ?? chat.current_fork_id} AND chat_id = ${chat.id}
+      AND deleted_at IS NULL`.pipe(
+      Effect.flatMap(([row]) =>
+        row ? Effect.succeed(row) : Effect.fail(new NotFound({ entity: "fork", id: forkId ?? chat.id }))
+      )
+    )
+
   const handlers = {
     FindUserByHandle: ({ handle }) =>
       sql<UserRow>`SELECT * FROM users WHERE handle = ${handle}`.pipe(
@@ -195,12 +265,13 @@ export const makeReadHandlers = Effect.gen(function* () {
 
     GetChat: ({ userId, chatId }) => ownedChat(userId, chatId).pipe(Effect.map(toChat), query("GetChat")),
 
-    GetPath: ({ userId, chatId, leafSlotId, limit }) =>
+    GetPath: ({ userId, chatId, forkId, leafSlotId, limit }) =>
       Effect.gen(function* () {
         const chat = yield* ownedChat(userId, chatId)
-        const leaf = (leafSlotId ?? chat.active_leaf_slot_id) as SlotId | null
+        const fork = yield* liveFork(chat, forkId ?? null)
+        const leaf = (leafSlotId ?? fork.tip_slot_id) as SlotId | null
         if (leaf === null) return { entries: [], olderLeafSlotId: null }
-        const rows = yield* pathWindow(sql, chatId, leaf, limit)
+        const rows = yield* pathWindow(sql, chatId, leaf, limit, fork.id)
         if (rows.length === 0) return yield* new NotFound({ entity: "slot", id: leaf })
         // Deleted messages are walked through but not shown; their replies stay in place.
         return {
@@ -209,37 +280,37 @@ export const makeReadHandlers = Effect.gen(function* () {
         }
       }).pipe(query("GetPath")),
 
-    ListVersions: ({ userId, slotId }) =>
+    // The message's own versions, each as the fork shows it: a copy it amended in its
+    // original's place, with the fork's flags.
+    ListVersions: ({ userId, slotId, forkId }) =>
       Effect.gen(function* () {
+        const [owned] = yield* sql<{ chat_id: ChatId }>`
+          SELECT s.chat_id FROM slots s JOIN chats c ON c.id = s.chat_id
+          WHERE s.id = ${slotId} AND c.owner_user_id = ${userId} AND s.deleted_at IS NULL AND c.deleted_at IS NULL`
+        if (!owned) return yield* new NotFound({ entity: "slot", id: slotId })
+        const fork = forkId
+          ? (yield* liveFork(yield* ownedChat(userId, owned.chat_id), forkId)).id
+          : yield* forkAt(sql, owned.chat_id, slotId)
         const rows = yield* sql<VersionRow>`
-          SELECT v.*, ${sql.literal(versionExtras("v"))} FROM versions v JOIN slots s ON s.id = v.slot_id JOIN chats c ON c.id = s.chat_id
-          WHERE v.slot_id = ${slotId} AND c.owner_user_id = ${userId}
-            AND v.deleted_at IS NULL AND s.deleted_at IS NULL AND c.deleted_at IS NULL
-          ORDER BY v.ordinal`
+          SELECT ${sql.literal(shownVersionColumns)} FROM versions o ${shownJoin(sql, fork)}
+          WHERE o.slot_id = ${slotId} AND o.fork_id IS NULL AND o.deleted_at IS NULL
+          ORDER BY o.ordinal`
         if (rows.length === 0) return yield* new NotFound({ entity: "slot", id: slotId })
         return rows.map(toVersion)
       }).pipe(query("ListVersions")),
 
-    StateEventsAt: ({ userId, chatId, slotId }) =>
+    StateEventsAt: ({ userId, chatId, slotId, forkId }) =>
       Effect.gen(function* () {
-        yield* ownedChat(userId, chatId)
+        const chat = yield* ownedChat(userId, chatId)
         if (slotId !== null) yield* liveSlot(chatId, slotId)
+        const fork = forkId ? (yield* liveFork(chat, forkId)).id : yield* forkAt(sql, chatId, slotId)
         const rows =
           slotId === null
             ? yield* sql<{ key: string; scope: string | null; value_json: string }>`
                 SELECT key, scope, value_json FROM state_events
                 WHERE chat_id = ${chatId} AND slot_id IS NULL AND superseded_by_changeset IS NULL
                 ORDER BY seq`
-            : yield* sql<{ key: string; scope: string | null; value_json: string }>`
-                ${pathCte(sql, chatId, slotId, null)}
-                SELECT e.key, e.scope, e.value_json
-                FROM state_events e
-                LEFT JOIN path p ON p.id = e.slot_id
-                LEFT JOIN slots s ON s.id = p.id
-                WHERE e.chat_id = ${chatId} AND e.superseded_by_changeset IS NULL
-                  AND (e.slot_id IS NULL OR (p.id IS NOT NULL AND s.deleted_at IS NULL))
-                  AND (e.version_id IS NULL OR e.version_id = s.selected_version_id)
-                ORDER BY coalesce(s.depth, -1), e.seq`
+            : yield* stateEventsOnPath(sql, chatId, slotId, fork)
         const events = yield* Effect.forEach(rows, (row) =>
           decodeStateEvent({ scope: row.scope, data: { key: row.key, value: JSON.parse(row.value_json) } }).pipe(
             Effect.mapError(
@@ -468,15 +539,22 @@ export const makeReadHandlers = Effect.gen(function* () {
         return found.map(toChat)
       }).pipe(query("ListChats")),
 
-    ReadPath: ({ userId, chatId, leafSlotId, range, limit }) =>
+    ReadPath: ({ userId, chatId, forkId, leafSlotId, range, limit }) =>
       Effect.gen(function* () {
         const chat = yield* ownedChat(userId, chatId)
-        const leaf = (leafSlotId ?? chat.active_leaf_slot_id) as SlotId | null
-        if (leaf === null) return new PathWindow({ leafSlotId: null, entries: [], older: null, newer: null })
+        // By fork, unless a leaf is named: the path to it, which no fork need end at, as the
+        // fork named (or the current one) shows it.
+        const fork = yield* liveFork(chat, forkId ?? null)
+        const leaf = (leafSlotId ?? fork.tip_slot_id) as SlotId | null
+        let shownFork = (leafSlotId === null ? fork.id : null) as ForkId | null
+        let view: string = fork.id
+        if (leaf === null)
+          return new PathWindow({ leafSlotId: null, forkId: shownFork, entries: [], older: null, newer: null })
         // Deleted messages are walked through but not shown; their replies stay in place.
         const window = (leafSlotId: SlotId, rows: ReadonlyArray<PathRow>, newer: SlotId | null, withOlder = true) =>
           new PathWindow({
             leafSlotId,
+            forkId: shownFork,
             entries: rows.filter((row) => row.slot_deleted === 0).map(toPathEntry),
             older: withOlder ? ((rows[0]?.parent_slot_id ?? null) as SlotId | null) : null,
             newer
@@ -484,16 +562,16 @@ export const makeReadHandlers = Effect.gen(function* () {
         const leafSlot = yield* slotIn(chatId, leaf)
         switch (range._tag) {
           case "Bottom":
-            return window(leaf, yield* windowEndingAt(chatId, leaf, limit), null)
+            return window(leaf, yield* windowEndingAt(chatId, leaf, limit, view), null)
           case "Older": {
             yield* slotIn(chatId, range.from)
-            return window(leaf, yield* windowEndingAt(chatId, range.from, limit), null)
+            return window(leaf, yield* windowEndingAt(chatId, range.from, limit, view), null)
           }
           case "Newer": {
             const after = yield* slotIn(chatId, range.after)
             const last = yield* walkTowards(sql, leafSlot, after, limit)
             if (last === null) return window(leaf, [], null, false)
-            const rows = yield* windowEndingAt(chatId, last.id, last.depth - after.depth)
+            const rows = yield* windowEndingAt(chatId, last.id, last.depth - after.depth, view)
             return window(leaf, rows, last.id === leaf ? null : last.id, false)
           }
           case "Around": {
@@ -507,49 +585,47 @@ export const makeReadHandlers = Effect.gen(function* () {
             let found =
               anchor.depth <= pathLeaf.depth ? yield* ancestorsAt(sql, pathLeaf, [anchor.depth, lastDepth]) : null
             if (found?.get(anchor.depth) !== anchor.id) {
-              // A slot on another path opens the path through it, on its latest replies.
-              pathLeaf = yield* slotIn(chatId, yield* latestDescendant(anchor.id))
+              // A slot on another path opens the fork through it that was current most
+              // recently, or with none, the path through it on its latest replies.
+              const through = yield* forkThrough(sql, chatId, anchor.id)
+              shownFork = (through?.id ?? null) as ForkId | null
+              view = through?.id ?? view
+              pathLeaf = yield* slotIn(chatId, (through?.tip_slot_id ?? (yield* latestDescendant(anchor.id))) as SlotId)
               lastDepth = lastDepthOn(pathLeaf.depth)
               found = yield* ancestorsAt(sql, pathLeaf, [lastDepth])
             }
             const end = found.get(lastDepth)!
             const first = Math.max(0, lastDepth - limit + 1)
-            const rows = yield* windowEndingAt(chatId, end, lastDepth - first + 1)
+            const rows = yield* windowEndingAt(chatId, end, lastDepth - first + 1, view)
             return window(pathLeaf.id, rows, end === pathLeaf.id ? null : end)
           }
         }
       }).pipe(query("ReadPath")),
 
-    // --- Branches (DESIGN §3.2)
-    BranchTip: ({ userId, chatId, slotId, index }) =>
+    // --- Branches (DESIGN §3.2) and forks
+    ListForks: ({ userId, chatId }) =>
       Effect.gen(function* () {
-        const chat = yield* ownedChat(userId, chatId)
-        const [slot] = yield* sql<{ parent_slot_id: string | null; lane_id: string }>`
-          SELECT parent_slot_id, lane_id FROM slots WHERE id = ${slotId} AND chat_id = ${chatId}`
-        if (!slot) return yield* new NotFound({ entity: "slot", id: slotId })
-        const [sibling] =
-          slot.parent_slot_id === null
-            ? yield* sql<{ id: SlotId }>`
-                SELECT x.id FROM slots x INDEXED BY slots_chat_depth WHERE x.chat_id = ${chatId} AND x.depth = 0
-                  AND x.lane_id = ${slot.lane_id} AND ${sql.literal(reachableSlot("x"))}
-                ORDER BY x.id LIMIT 1 OFFSET ${index}`
-            : yield* sql<{ id: SlotId }>`
-                SELECT x.id FROM slots x INDEXED BY slots_parent WHERE x.parent_slot_id = ${slot.parent_slot_id}
-                  AND x.lane_id = ${slot.lane_id} AND ${sql.literal(reachableSlot("x"))}
-                ORDER BY x.id LIMIT 1 OFFSET ${index}`
-        if (!sibling) return yield* new NotFound({ entity: "branch", id: `${slotId}#${index}` })
-        return { slotId: sibling.id, tipSlotId: yield* latestDescendant(sibling.id), chatRowVersion: chat.row_version }
-      }).pipe(query("BranchTip")),
+        yield* ownedChat(userId, chatId)
+        const rows = yield* sql<Parameters<typeof toFork>[0]>`
+          SELECT ${sql.literal(forkColumns("f"))} FROM forks f WHERE f.chat_id = ${chatId} AND f.deleted_at IS NULL
+          ORDER BY ${sql.literal(forkRecency("f"))} DESC, f.id DESC`
+        return rows.map(toFork)
+      }).pipe(query("ListForks")),
 
-    // The siblings BranchTip counts, in its order, with each one's name and first words.
-    ListBranches: ({ userId, slotId }) =>
+    // The siblings SwitchBranch counts, in its order, with each one's name and first words.
+    ListBranches: ({ userId, slotId, forkId }) =>
       Effect.gen(function* () {
         const [slot] = yield* sql<{ chat_id: string; parent_slot_id: string | null; lane_id: string }>`
           SELECT s.chat_id, s.parent_slot_id, s.lane_id FROM slots s JOIN chats c ON c.id = s.chat_id
           WHERE s.id = ${slotId} AND c.owner_user_id = ${userId} AND s.deleted_at IS NULL AND c.deleted_at IS NULL`
         if (!slot) return yield* new NotFound({ entity: "slot", id: slotId })
-        const columns = sql.literal(`x.id, x.branch_name, CASE WHEN x.deleted_at IS NULL
-          THEN substr((SELECT v.content FROM versions v WHERE v.id = x.selected_version_id), 1, 160) ELSE '' END AS preview`)
+        // Each alternate's first words as the fork named shows them, else the fork through it.
+        const shown = forkId
+          ? (yield* liveFork(yield* ownedChat(userId, slot.chat_id as ChatId), forkId)).id
+          : yield* forkAt(sql, slot.chat_id, slotId)
+        const columns = sql`x.id, ${sql.literal(branchLabel("x"))} AS branch_name, CASE WHEN x.deleted_at IS NULL
+          THEN substr((SELECT v.content FROM versions v WHERE v.id = ${shownIn(sql, shown, "x")}), 1, 160)
+          ELSE '' END AS preview`
         const rows =
           slot.parent_slot_id === null
             ? yield* sql<{ id: SlotId; branch_name: string | null; preview: string }>`
@@ -565,18 +641,20 @@ export const makeReadHandlers = Effect.gen(function* () {
         )
       }).pipe(query("ListBranches")),
 
-    GetSlot: ({ userId, slotId }) =>
-      sql<PathRow & { chat_id: ChatId }>`
-        SELECT ${sql.literal(pathColumns)}, s.chat_id
-        FROM slots s JOIN chats c ON c.id = s.chat_id JOIN versions v ON v.id = s.selected_version_id
-        WHERE s.id = ${slotId} AND c.owner_user_id = ${userId} AND s.deleted_at IS NULL AND c.deleted_at IS NULL`.pipe(
-        Effect.flatMap(([row]) =>
-          row
-            ? Effect.succeed({ chatId: row.chat_id, entry: toPathEntry(row) })
-            : Effect.fail(new NotFound({ entity: "slot", id: slotId }))
-        ),
-        query("GetSlot")
-      ),
+    GetSlot: ({ userId, slotId, forkId }) =>
+      Effect.gen(function* () {
+        const [owned] = yield* sql<{ chat_id: ChatId }>`
+          SELECT s.chat_id FROM slots s JOIN chats c ON c.id = s.chat_id
+          WHERE s.id = ${slotId} AND c.owner_user_id = ${userId} AND s.deleted_at IS NULL AND c.deleted_at IS NULL`
+        if (!owned) return yield* new NotFound({ entity: "slot", id: slotId })
+        const fork = forkId
+          ? (yield* liveFork(yield* ownedChat(userId, owned.chat_id), forkId)).id
+          : yield* forkAt(sql, owned.chat_id, slotId)
+        const [row] = yield* sql<PathRow>`
+          SELECT ${sql.literal(pathColumns)}, ${fork} AS shown_fork_id FROM slots s ${viewJoin(sql, fork)}
+          WHERE s.id = ${slotId}`
+        return { chatId: owned.chat_id, entry: toPathEntry(row!) }
+      }).pipe(query("GetSlot")),
 
     GetVersion: ({ userId, versionId }) =>
       Effect.gen(function* () {

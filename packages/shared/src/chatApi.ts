@@ -4,7 +4,19 @@
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
 import { BinItem } from "./bin.ts"
-import { Chat, ChatId, ChatSummary, EntityId, PathEntry, QueuedMessage, SlotId, Version, VersionId } from "./chat.ts"
+import {
+  Chat,
+  ChatId,
+  ChatSummary,
+  EntityId,
+  Fork,
+  ForkId,
+  PathEntry,
+  QueuedMessage,
+  SlotId,
+  Version,
+  VersionId
+} from "./chat.ts"
 import { LeafMoved, NotFound, ServerError, StaleWrite } from "./errors.ts"
 import { ComposerChoice, TextTooLong } from "./composerApi.ts"
 import { Draft, DraftKey } from "./drafts.ts"
@@ -93,6 +105,8 @@ export class PathWindow extends Schema.Class<PathWindow>("PathWindow")({
    * through it instead, continuing on its latest replies, and this says which.
    */
   leafSlotId: Schema.NullOr(SlotId),
+  /** The fork read; for `Around`, the fork opened instead. Null for a path read by its leaf. */
+  forkId: Schema.NullOr(ForkId),
   entries: Schema.Array(PathEntry),
   /** Where the next older window ends; null at the root. */
   older: Schema.NullOr(SlotId),
@@ -121,8 +135,11 @@ export const ChatEvent = Schema.Union([
   Schema.TaggedStruct("WaitingCache", { versionId: VersionId, waiting: Schema.Boolean }),
   /** A slot was added, or its selection or versions changed. */
   Schema.TaggedStruct("Slot", { entry: PathEntry }),
-  /** A version's text or status changed: a generation ended, or it was amended. */
-  Schema.TaggedStruct("Version", { version: Version }),
+  /**
+   * A version's text, status or flags changed: a generation ended, it was amended, or starred.
+   * With `forkId`, as that fork shows it: tabs on another fork leave it.
+   */
+  Schema.TaggedStruct("Version", { version: Version, forkId: Schema.optionalKey(ForkId) }),
   /** The chat changed: its active leaf, title or last message. */
   Schema.TaggedStruct("Chat", { chat: Chat }),
   /** Something was deleted: windows read before it are out of date. */
@@ -185,9 +202,10 @@ export const MessageDraftSave = Schema.Struct({
 
 const DraftCommit = Schema.optionalKey(Schema.Struct({ draftId: Schema.String, session: Schema.Int }))
 
-/** Where a branch switch went: the sibling, and the chat with its leaf moved below it. */
+/** Where a branch switch went: the sibling, and the fork to open through it. */
 export class BranchSwitch extends Schema.Class<BranchSwitch>("BranchSwitch")({
   slotId: SlotId,
+  fork: Fork,
   chat: Chat
 }) {}
 
@@ -224,7 +242,7 @@ export const chatCursor = (chat: Pick<Chat, "id" | "createdAt" | "lastMessageAt"
 /** A name the user gives a chat or a group (RenameChat, RenameGroup); empty: the automatic name. */
 export const ChatNameInput = Schema.String.check(Schema.isMaxLength(200))
 
-/** A name the user gives a branch (NameBranch); empty: unnamed again. */
+/** A name the user gives a fork (NameFork); empty: unnamed again. */
 const BranchNameInput = Schema.String.check(Schema.isMaxLength(100))
 
 /** One of the alternates at a place the path branches, as the header's branch menu lists it. */
@@ -277,10 +295,14 @@ export class ChatApi extends RpcGroup.make(
     error: Schema.Union([...Errors])
   }),
   Rpc.make("GetChat", { payload: { chatId: ChatId }, success: Chat, error: Schema.Union([...Errors]) }),
-  /** A window of the path ending at `leafSlotId` (null: the chat's active leaf). */
+  /**
+   * A window of fork `forkId`'s path (absent or null: the chat's current fork), or, when
+   * `leafSlotId` is given, of the path ending there.
+   */
   Rpc.make("ReadPath", {
     payload: {
       chatId: ChatId,
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       leafSlotId: Schema.NullOr(SlotId),
       range: PathRange,
       limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: MAX_WINDOW }))
@@ -288,21 +310,27 @@ export class ChatApi extends RpcGroup.make(
     success: PathWindow,
     error: Schema.Union([...Errors])
   }),
-  /** A slot's versions, for the version picker. */
+  /**
+   * A slot's versions, for the version picker, as fork `forkId` shows them (absent or null:
+   * the fork through the slot): a copy it amended in its original's place, with its stars and
+   * picker flags.
+   */
   Rpc.make("ListVersions", {
-    payload: { slotId: SlotId },
+    payload: { slotId: SlotId, forkId: Schema.optionalKey(Schema.NullOr(ForkId)) },
     success: Schema.Array(Version),
     error: Schema.Union([...Errors])
   }),
   /**
-   * The user's message under `parentSlotId`, as `speakerEntityId` (Send as X). Without
-   * `branch`, that must be the chat's active leaf (LeafMoved otherwise); with it, any slot,
-   * starting a branch (DESIGN §3.2). Onto a reply still being written, it's queued and
-   * posts when that reply ends (DESIGN §2.2), followed by a reply of its own.
+   * The user's message under `parentSlotId` in fork `forkId` (absent or null: the current
+   * one), as `speakerEntityId` (Send as X); the fork becomes current. Without `branch`, the
+   * parent must be the fork's tip (LeafMoved otherwise); with it, any slot, starting a fork
+   * there (DESIGN §3.2). Onto a reply still being written, it's queued and posts when that
+   * reply ends (DESIGN §2.2), followed by a reply of its own.
    */
   Rpc.make("SendMessage", {
     payload: {
       chatId: ChatId,
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       parentSlotId: Schema.NullOr(SlotId),
       branch: Schema.Boolean,
       content: Schema.String,
@@ -331,6 +359,7 @@ export class ChatApi extends RpcGroup.make(
   Rpc.make("Generate", {
     payload: {
       chatId: ChatId,
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       parentSlotId: Schema.NullOr(SlotId),
       branch: Schema.Boolean,
       speakerEntityId: Schema.optionalKey(Schema.NullOr(EntityId)),
@@ -348,6 +377,8 @@ export class ChatApi extends RpcGroup.make(
   Rpc.make("Regenerate", {
     payload: {
       slotId: SlotId,
+      /** The fork it's done in, whose row version `expectedRowVersion` is (absent or null: the current one). */
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       expectedRowVersion: Schema.Int,
       /** "Retry with…" or "Regenerate with…": this swipe uses another model of the user's, recorded on it. */
       model: Schema.optionalKey(ModelChoice),
@@ -366,6 +397,8 @@ export class ChatApi extends RpcGroup.make(
   Rpc.make("ContinueVersion", {
     payload: {
       versionId: VersionId,
+      /** The fork it's done in, whose row version `expectedRowVersion` is (absent or null: the current one). */
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       expectedRowVersion: Schema.Int,
       /** A one-turn direction for the continued version; the continued one's isn't reused. */
       direction: Schema.optionalKey(Schema.String)
@@ -375,18 +408,29 @@ export class ChatApi extends RpcGroup.make(
   }),
   /** Stops one generation; its text so far is kept. Returns the stopped version. */
   Rpc.make("StopGeneration", { payload: { versionId: VersionId }, success: Version, error: Schema.Union([...Errors]) }),
+  /**
+   * Shows `versionId` at the slot in fork `forkId` (absent or null: the current one) from
+   * now on, if the fork still shows `expectedVersionId` there. Other forks keep theirs.
+   */
   Rpc.make("SelectVersion", {
-    payload: { slotId: SlotId, versionId: VersionId, expectedRowVersion: Schema.Int },
+    payload: {
+      slotId: SlotId,
+      versionId: VersionId,
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
+      expectedVersionId: VersionId
+    },
     success: PathEntry,
     error: Schema.Union([...WriteErrors])
   }),
   /**
    * Stars a version, or hides it from the arrows' cycle (the version picker, DESIGN §3.1),
-   * or undoes either. What's sent to the model doesn't change.
+   * or undoes either, in fork `forkId` (absent or null: the fork through its message). What's
+   * sent to the model doesn't change.
    */
   Rpc.make("SetVersionFlags", {
     payload: {
       versionId: VersionId,
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       starred: Schema.optionalKey(Schema.Boolean),
       hidden: Schema.optionalKey(Schema.Boolean)
     },
@@ -406,6 +450,9 @@ export class ChatApi extends RpcGroup.make(
   Rpc.make("EditVersion", {
     payload: {
       slotId: SlotId,
+      /** The fork it's done in, whose row version `expectedRowVersion` is (absent or null: the current one). */
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
+
       sourceVersionId: VersionId,
       content: Schema.String,
       expectedRowVersion: Schema.Int,
@@ -416,13 +463,30 @@ export class ChatApi extends RpcGroup.make(
   }),
   /** "Write your own version" of any message, selected. */
   Rpc.make("WriteVersion", {
-    payload: { slotId: SlotId, content: Schema.String, expectedRowVersion: Schema.Int, draft: DraftCommit },
+    payload: {
+      slotId: SlotId,
+      /** The fork it's done in, whose row version `expectedRowVersion` is (absent or null: the current one). */
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
+      content: Schema.String,
+      expectedRowVersion: Schema.Int,
+      draft: DraftCommit
+    },
     success: PathEntry,
     error: Schema.Union([...WriteErrors])
   }),
-  /** Changes a user-written version in place; its earlier text is kept in its history. */
+  /**
+   * Changes a user-written version as fork `forkId` shows it (absent or null: the fork through
+   * its message); its earlier text is kept in its history. When another fork shows it too, the
+   * fork gets a copy with the new text in its place, which is returned, and the others keep it.
+   */
   Rpc.make("AmendVersion", {
-    payload: { versionId: VersionId, content: Schema.String, expectedRowVersion: Schema.Int, draft: DraftCommit },
+    payload: {
+      versionId: VersionId,
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
+      content: Schema.String,
+      expectedRowVersion: Schema.Int,
+      draft: DraftCommit
+    },
     success: Version,
     error: Schema.Union([...WriteErrors, NotAmendable])
   }),
@@ -451,12 +515,18 @@ export class ChatApi extends RpcGroup.make(
   Rpc.make("DeleteBranch", { payload: { slotId: SlotId }, success: BinItem, error: Schema.Union([...Errors]) }),
   Rpc.make("DeleteVersion", { payload: { versionId: VersionId }, success: BinItem, error: Schema.Union([...Errors]) }),
   /**
-   * Switches to the branch at `index` (0: the oldest) among the alternates at `slotId`
-   * (DESIGN §3.2): the chat's active leaf moves to the tip below that sibling, following its
-   * newest replies. The composer stays where it was: each branch has its own.
+   * Where switching to the branch at `index` (0: the oldest) among the alternates at
+   * `slotId` goes (DESIGN §3.2): the fork through that sibling that was current most
+   * recently, made from `forkId` (the fork shown) if none is. It changes no fork and doesn't
+   * make one current: the client opens it (`?fork=`). Each fork has its own composer.
    */
   Rpc.make("SwitchBranch", {
-    payload: { chatId: ChatId, slotId: SlotId, index: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)) },
+    payload: {
+      chatId: ChatId,
+      slotId: SlotId,
+      index: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId))
+    },
     success: BranchSwitch,
     error: Schema.Union([...WriteErrors])
   }),
@@ -474,19 +544,43 @@ export class ChatApi extends RpcGroup.make(
     success: Schema.Struct({ show: Schema.Boolean, preset: Schema.NullOr(RefId) }),
     error: ServerError
   }),
-  /** The alternates at `slotId`'s place (it and its siblings a path can reach), oldest first. */
+  /**
+   * The alternates at `slotId`'s place (it and its siblings a path can reach), oldest first,
+   * each with its first words as `forkId` (absent or null: the fork through it) shows them.
+   */
   Rpc.make("ListBranches", {
-    payload: { slotId: SlotId },
+    payload: { slotId: SlotId, forkId: Schema.optionalKey(Schema.NullOr(ForkId)) },
     success: Schema.Array(Branch),
     error: Schema.Union([...Errors])
   }),
+  /** The chat's live forks, most recently current first, with names, pins and their tips' text. */
+  Rpc.make("ListForks", {
+    payload: { chatId: ChatId },
+    success: Schema.Array(Fork),
+    error: Schema.Union([...Errors])
+  }),
   /**
-   * Names the branch `slotId` starts (one of the alternates where the path branches); an
-   * empty name takes the name off. Returns the slot, which subscribers get as `Slot`.
+   * A fork of `fromForkId` (null: the current one) at `atSlotId`, a message on its path
+   * (null: before the first message): "Branch from here". It becomes the current fork.
    */
-  Rpc.make("NameBranch", {
-    payload: { slotId: SlotId, name: BranchNameInput },
-    success: PathEntry,
+  Rpc.make("CreateFork", {
+    payload: { chatId: ChatId, fromForkId: Schema.NullOr(ForkId), atSlotId: Schema.NullOr(SlotId) },
+    success: Schema.Struct({ fork: Fork, chat: Chat }),
+    error: Schema.Union([...Errors])
+  }),
+  /**
+   * Names a fork; an empty name takes the name off. Its first message, among the alternates
+   * where it branched, shows the name, and subscribers get that slot as `Slot`.
+   */
+  Rpc.make("NameFork", {
+    payload: { forkId: ForkId, name: BranchNameInput },
+    success: Fork,
+    error: Schema.Union([...Errors])
+  }),
+  /** Pins a fork, or unpins it: pinned forks are listed as the chat's peers (UX-REWORK §3). */
+  Rpc.make("PinFork", {
+    payload: { forkId: ForkId, pinned: Schema.Boolean },
+    success: Fork,
     error: Schema.Union([...Errors])
   }),
   /** Next request at the displayed leaf; Cache events invalidate this read. */

@@ -1,5 +1,6 @@
 import { completeEmpty } from "./lcmEmpty.ts"
 import { summaryIsWarm } from "./lcmWarmth.ts"
+import { inFork } from "./forkState.ts"
 import type { SummaryPrefix } from "../lcm/prefix.ts"
 import { lineageValidator } from "./lcmLayer.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
@@ -47,15 +48,15 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
       usage_cost = (SELECT sum(cost) FROM llm_requests WHERE rollout_id = ${rolloutId})
       WHERE id = ${rolloutId} AND status = 'running'`
   return {
-    SaveLcmMaintenance: ({ userId, chatId, leafSlotId, pins }) =>
+    SaveLcmMaintenance: ({ userId, chatId, leafSlotId, forkId, pins }) =>
       Effect.gen(function* () {
         yield* lcmPath(sql, userId, chatId, leafSlotId, leafSlotId)
         yield* sql`INSERT INTO lcm_reply_maintenance(chat_id,leaf_slot_id,pins_json) VALUES (${chatId},${leafSlotId},${pins})
           ON CONFLICT(chat_id,leaf_slot_id) DO UPDATE SET pins_json=excluded.pins_json`
-      }).pipe(transaction(sql, "SaveLcmMaintenance")),
+      }).pipe(inFork(sql, chatId, forkId, leafSlotId), transaction(sql, "SaveLcmMaintenance")),
     // Work here depends on the chunks and the jobs around them, never on the length of the chat: a
     // write holds the writer, and a long chat's first plan must not hold it for a noticeable time.
-    EnqueueSummaries: ({ userId, chatId, leafSlotId, chunks, requestClass, triggerVersionId }) =>
+    EnqueueSummaries: ({ userId, chatId, leafSlotId, forkId, chunks, requestClass, triggerVersionId }) =>
       Effect.gen(function* () {
         yield* lcmPath(sql, userId, chatId, leafSlotId, leafSlotId)
         if (chunks.length > 8)
@@ -174,8 +175,8 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
           result.push(yield* get(userId, id))
         }
         return result
-      }).pipe(transaction(sql, "EnqueueSummaries")),
-    EnqueueCondensations: ({ userId, chatId, leafSlotId, triggerVersionId, jobs: planned, requestClass }) =>
+      }).pipe(inFork(sql, chatId, forkId, leafSlotId), transaction(sql, "EnqueueSummaries")),
+    EnqueueCondensations: ({ userId, chatId, leafSlotId, forkId, triggerVersionId, jobs: planned, requestClass }) =>
       Effect.gen(function* () {
         yield* lcmPath(sql, userId, chatId, leafSlotId, leafSlotId)
         const onPath = (slotId: string) =>
@@ -277,7 +278,7 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
           result.push(yield* get(userId, id))
         }
         return result
-      }).pipe(transaction(sql, "EnqueueCondensations")),
+      }).pipe(inFork(sql, chatId, forkId, leafSlotId), transaction(sql, "EnqueueCondensations")),
     ReconcileSummaryJobs: ({ userId, running }) =>
       Effect.gen(function* () {
         const rows = yield* sql<{ id: string; claim_epoch: number; rollout_id: string | null }>`

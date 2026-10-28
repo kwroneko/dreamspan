@@ -26,17 +26,18 @@ const forked = (long = false) =>
       ) =>
         Effect.map(api.SendMessage({ chatId: chat.id, parentSlotId, content, branch }), (result) => {
           if (result._tag !== "Posted") throw new Error("expected posted")
-          return result.entry.slotId
+          return result.entry
         })
-      const root = yield* send(null, "Common root")
+      const root = (yield* send(null, "Common root")).slotId
       const first = yield* send(root, "Other branch")
       const second = yield* send(root, "The named road", true)
-      yield* api.NameBranch({ slotId: second, name: "Old road" })
-      let tip = second
+      yield* api.NameFork({ forkId: second.startsForkId!, name: "Old road" })
+      let tip = second.slotId
       if (long) {
-        for (let i = 0; i < 90; i++) tip = yield* send(tip, "Continuation " + i)
+        for (let i = 0; i < 90; i++) tip = (yield* send(tip, "Continuation " + i)).slotId
       }
-      return { chatId: chat.id, first, second }
+      // The forks the two lines are: the chat's first, and the one made for the named road.
+      return { chatId: chat.id, first: first.forkId!, second: second.startsForkId! }
     })
   )
 
@@ -112,9 +113,7 @@ for (const width of [1440, 390]) {
       const message = page.getByLabel("Message", { exact: true })
       await message.fill("Important unsent paragraph")
       await expect
-        .poll(() =>
-          admin((api) => Effect.map(api.OpenComposer({ chatId, tipSlotId: second }), (draft) => draft.content))
-        )
+        .poll(() => admin((api) => Effect.map(api.OpenComposer({ chatId, forkId: second }), (draft) => draft.content)))
         .toBe("Important unsent paragraph")
       const branch = page.getByRole("button", { name: /switch branch|branch actions/ })
       await branch.click()
@@ -132,9 +131,7 @@ for (const width of [1440, 390]) {
       await page.getByRole("menuitemradio", { name: /Branch 1/ }).click()
       await expect(message).toHaveValue("Draft typed on the surviving branch")
       await expect
-        .poll(() =>
-          admin((api) => Effect.map(api.OpenComposer({ chatId, tipSlotId: first }), (draft) => draft.content))
-        )
+        .poll(() => admin((api) => Effect.map(api.OpenComposer({ chatId, forkId: first }), (draft) => draft.content)))
         .toBe("Draft typed on the surviving branch")
       await shot(page, "survivor-draft-after-undo", width)
     }

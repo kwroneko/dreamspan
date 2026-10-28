@@ -103,7 +103,8 @@ test("a stopped reply keeps its text, and a message can be edited, linked to, br
 
   // A branch from the first message: the reply below it isn't on it.
   await messageMenu(page.getByRole("article", { name: "Your message" }).first(), "Branch from here")
-  await expect(page).toHaveURL(/leaf=/)
+  // A fork made by branching is the current one: the chat's own URL opens on it.
+  await expect(page).not.toHaveURL(/fork=/)
   await expect(replies(page)).toHaveCount(0)
   await send(page, "Walk away instead.")
   await expect(page.getByRole("article", { name: "Your message" })).toHaveCount(2)
@@ -161,7 +162,7 @@ test("a branch's URL follows the messages sent on it", async ({ page }) => {
   await expect(replies(page)).toHaveCount(0)
   await send(page, "Second, on the branch")
   await repliesDone(page, 1)
-  await expect(page).not.toHaveURL(/leaf=/)
+  await expect(page).not.toHaveURL(/fork=/)
   await page.reload()
   await expect(page.getByText("Second, on the branch")).toBeVisible()
   await expect(page.getByRole("article", { name: "Your message" })).toHaveCount(2)

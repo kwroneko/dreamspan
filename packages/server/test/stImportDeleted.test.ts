@@ -47,7 +47,7 @@ layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "180 seco
           const item = yield* api.DeleteMessage({ slotId: gone.slotId })
           if (purge) yield* api.PurgeBinItem({ itemId: item.id })
           const afterDelete = yield* api.GetChat({ chatId: chat.id })
-          const draft = yield* typeInto(api, chat.id, afterDelete.activeLeafSlotId, "Saved while ST continues")
+          const draft = yield* typeInto(api, chat.id, null, "Saved while ST continues")
           // Unchanged files must neither resurrect the deletion nor move the leaf/composer.
           const unchanged = yield* importStFolder(folder(tag, 3), { partBytes: 160 })
           assert.strictEqual(unchanged.answers.get(`chats/Alice/${tag}.jsonl`)!.outcome, "unchanged")
@@ -65,7 +65,7 @@ layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "180 seco
           )
           const moved = yield* api.GetChat({ chatId: chat.id })
           assert.strictEqual(moved.activeLeafSlotId, visible.entries.at(-1)!.slotId)
-          const composer = yield* api.OpenComposer({ chatId: chat.id, tipSlotId: moved.activeLeafSlotId })
+          const composer = yield* api.OpenComposer({ chatId: chat.id, forkId: null })
           assert.strictEqual(composer.id, draft.id)
           assert.strictEqual(composer.content, draft.content)
           // The deleted slot is still a placeholder on this path, not a replacement sibling.
@@ -113,14 +113,14 @@ layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "180 seco
           const item = yield* api.DeleteBranch({ slotId: original.entries[position]!.slotId })
           if (purge) yield* api.PurgeBinItem({ itemId: item.id })
           const leaf = (yield* api.GetChat({ chatId: chat.id })).activeLeafSlotId
-          const draft = yield* typeInto(api, chat.id, leaf, "Outside deleted subtree")
+          const draft = yield* typeInto(api, chat.id, null, "Outside deleted subtree")
           const unchanged = yield* importStFolder(folder(tag, 3), { partBytes: 160 })
           assert.strictEqual(unchanged.answers.get(`chats/Alice/${tag}.jsonl`)!.outcome, "unchanged")
           yield* importStFolder(folder(tag, 5), { partBytes: 160 })
           yield* importStFolder(folder(tag, 6), { partBytes: 160 })
           assert.strictEqual((yield* api.GetChat({ chatId: chat.id })).activeLeafSlotId, leaf)
           assert.deepStrictEqual(texts(yield* read(api, chat.id)), position === 0 ? [] : [`${tag} 0`])
-          assert.strictEqual((yield* api.OpenComposer({ chatId: chat.id, tipSlotId: leaf })).id, draft.id)
+          assert.strictEqual((yield* api.OpenComposer({ chatId: chat.id, forkId: null })).id, draft.id)
           // A new local branch must not offer the deleted subtree as an alternate.
           const sent = yield* posted(
             api.SendMessage({ chatId: chat.id, parentSlotId: leaf, branch: false, content: "Outside" })
@@ -144,7 +144,7 @@ layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "180 seco
       const visible = yield* read(api, chat.id)
       assert.deepStrictEqual(texts(visible), [`${tag} 3`, `${tag} 4`])
       assert.strictEqual(visible.entries[0]!.parentSlotId, original.entries[2]!.slotId)
-      assert.strictEqual((yield* api.OpenComposer({ chatId: chat.id, tipSlotId: visible.leafSlotId })).id, draft.id)
+      assert.strictEqual((yield* api.OpenComposer({ chatId: chat.id, forkId: null })).id, draft.id)
     })
   )
 
@@ -162,12 +162,11 @@ layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "180 seco
         const original = yield* read(api, chat.id)
         if (branch) yield* api.DeleteBranch({ slotId: original.entries[0]!.slotId })
         else yield* api.DeleteMessage({ slotId: original.entries[2]!.slotId })
-        const leaf = (yield* api.GetChat({ chatId: chat.id })).activeLeafSlotId
-        const draft = yield* typeInto(api, chat.id, leaf, "Unfinished import draft")
+        const draft = yield* typeInto(api, chat.id, null, "Unfinished import draft")
         yield* importStFolder(folder(tag, 5), { partBytes: 160 })
         const visible = yield* read(api, chat.id)
         assert.deepStrictEqual(texts(visible), branch ? [] : [0, 1, 3, 4].map((i) => `${tag} ${i}`))
-        assert.strictEqual((yield* api.OpenComposer({ chatId: chat.id, tipSlotId: visible.leafSlotId })).id, draft.id)
+        assert.strictEqual((yield* api.OpenComposer({ chatId: chat.id, forkId: null })).id, draft.id)
       })
     )
   }
@@ -182,11 +181,11 @@ layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "180 seco
       const sent = yield* posted(
         api.SendMessage({ chatId: chat.id, parentSlotId: leaf, branch: false, content: "Local continuation" })
       )
-      const draft = yield* typeInto(api, chat.id, sent.entry.slotId, "Local draft")
+      const draft = yield* typeInto(api, chat.id, null, "Local draft")
       yield* importStFolder(folder(tag, 4))
       assert.strictEqual((yield* api.GetChat({ chatId: chat.id })).activeLeafSlotId, sent.entry.slotId)
       assert.deepStrictEqual(texts(yield* read(api, chat.id)), [`${tag} 0`, `${tag} 1`, "Local continuation"])
-      assert.strictEqual((yield* api.OpenComposer({ chatId: chat.id, tipSlotId: sent.entry.slotId })).id, draft.id)
+      assert.strictEqual((yield* api.OpenComposer({ chatId: chat.id, forkId: null })).id, draft.id)
     })
   )
 })

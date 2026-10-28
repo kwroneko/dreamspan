@@ -56,8 +56,7 @@ for (const kind of ["composer", "editor"] as const) {
           rpc((api) =>
             kind === "composer"
               ? Effect.gen(function* () {
-                  const now = yield* api.GetChat({ chatId: chat.id })
-                  return yield* api.OpenComposer({ chatId: chat.id, tipSlotId: now.activeLeafSlotId })
+                  return yield* api.OpenComposer({ chatId: chat.id, forkId: null })
                 })
               : Effect.map(api.OpenEditor({ refId: card.id }), (editor) =>
                   editor.drafts.find((draft) => draft.key.field === field)!

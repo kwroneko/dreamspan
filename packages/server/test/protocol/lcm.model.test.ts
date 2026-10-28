@@ -1,6 +1,6 @@
 import type { SummaryJob } from "../../src/db/lcmJobs.ts"
 import { assert, it } from "@effect/vitest"
-import { NewVersion, type SlotId, type VersionId } from "@rp/shared/chat.ts"
+import { type ForkId, NewVersion, type SlotId, type VersionId } from "@rp/shared/chat.ts"
 import type { Summary } from "@rp/shared/lcm.ts"
 import { Cause, Effect, Exit } from "effect"
 import { Reader, Writer } from "../../src/db/Database.ts"
@@ -51,7 +51,8 @@ interface Node {
   readonly parent: SlotId | null
   readonly depth: number
   readonly versions: Array<VersionId>
-  selected: VersionId
+  /** The version it was inserted with; a fork's choice is in `choices` (spec/FORK-INDEPENDENCE-DELTA.md §2.2). */
+  readonly selected: VersionId
   rowVersion: number
   hidden: boolean
   deleted: boolean
@@ -210,6 +211,12 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
     const counts: Record<string, number> = {}
     let leaf: SlotId | null = null,
       enabled = true
+    // Selections are per fork: each fork's choices, a new fork starting with a copy of its
+    // parent's. Every step works in the current fork, whose tip is `leaf`.
+    let current: string = chat.currentForkId!
+    const choices = new Map<string, Map<SlotId, VersionId>>([[current, new Map()]])
+    const shown = (node: Node) => choices.get(current)!.get(node.id) ?? node.selected
+    const choose = (node: Node, versionId: VersionId) => choices.get(current)!.set(node.id, versionId)
     const path = (tip: SlotId | null) => {
       const result: Array<Node> = []
       while (tip !== null) {
@@ -220,11 +227,11 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
       return result
     }
     const effective = (node: Node) =>
-      node.deleted || node.hidden || !versions.get(node.selected)!.content ? null : node.selected
+      node.deleted || node.hidden || !versions.get(shown(node))!.content ? null : shown(node)
     const fresh = (summary: Artifact): boolean =>
       summary.inputs.every((i) => {
         const node = nodes.get(i.slotId)!,
-          version = versions.get(node.selected)!
+          version = versions.get(shown(node))!
         return effective(node) === i.versionId && (i.versionId === null || i.amendCount === version.amends)
       }) &&
       summary.children.every((p) => {
@@ -275,6 +282,14 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
           commitDraft: null
         })
       )
+      if (!choices.has(result.forkId)) {
+        // A branch made a fork, from the fork it was made in: it starts with that fork's choices.
+        const made = (await call(reader.ListForks({ userId: user.id, chatId: chat.id }))).find(
+          (f) => f.id === result.forkId
+        )!
+        choices.set(result.forkId, new Map(choices.get(made.parentForkId!)!))
+      }
+      current = result.forkId
       accept(result, parent)
     }
     const remember = (summary: Summary, inputs: Summary["inputs"], children: ReadonlyArray<Artifact>) => {
@@ -392,7 +407,9 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
           userId: user.id,
           chatId: chat.id,
           slotId: target.id,
-          versionId: target.selected,
+          versionId: shown(target),
+          // The model's choices are the current fork's, wherever the target is.
+          forkId: current as ForkId,
           now: 123456,
           timeZone: "UTC",
           frozen: null
@@ -537,7 +554,7 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
       const expected = chain.map((n) => ({
         slotId: n.id,
         versionId: effective(n),
-        amendCount: effective(n) === null ? 0 : versions.get(n.selected)!.amends
+        amendCount: effective(n) === null ? 0 : versions.get(shown(n))!.amends
       }))
       const assembly = await call(
         Effect.exit(reader.AssembleSummary({ userId: user.id, jobId: job.id, attempt: job.epoch }))
@@ -741,23 +758,22 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
             })
           )
           node.versions.push(version.id)
-          node.selected = version.id
+          choose(node, version.id)
           node.rowVersion++
           versions.set(version.id, { id: version.id, content: version.content, writer: version.writer, amends: 0 })
         } else if (step.kind === "select" && node) {
           const selected = pick(node.versions, step.b)!
-          const result = await call(
+          await call(
             writer.SelectVersion({
               userId: user.id,
               slotId: node.id,
               versionId: selected,
-              expectedRowVersion: node.rowVersion
+              expectedVersionId: shown(node)
             })
           )
-          node.selected = selected
-          node.rowVersion = result.rowVersion
-        } else if (step.kind === "amend" && node && versions.get(node.selected)!.writer === "human") {
-          const version = versions.get(node.selected)!
+          choose(node, selected)
+        } else if (step.kind === "amend" && node && versions.get(shown(node))!.writer === "human") {
+          const version = versions.get(shown(node))!
           await call(
             api.AmendVersion({
               versionId: version.id,
@@ -802,7 +818,7 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
             const inputs = history.slice(start, end).map((n) => ({
               slotId: n.id,
               versionId: effective(n),
-              amendCount: effective(n) === null ? 0 : versions.get(n.selected)!.amends
+              amendCount: effective(n) === null ? 0 : versions.get(shown(n))!.amends
             }))
             if (
               ![...jobs.values()].some(
@@ -827,7 +843,7 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
               inputs: chunk.map((n) => ({
                 slotId: n.id,
                 versionId: effective(n),
-                amendCount: effective(n) === null ? 0 : versions.get(n.selected)!.amends
+                amendCount: effective(n) === null ? 0 : versions.get(shown(n))!.amends
               }))
             }))
             const added = await call(
@@ -859,7 +875,7 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
           // one is queued already. Refusal steps then run it until its retries and its fallback are spent.
           if (step.kind !== "release-job" && leaf && enabled && !nodes.get(leaf)!.deleted) {
             const history = path(leaf)
-            const clean = (n: Node) => !n.deleted && !n.hidden && versions.get(n.selected)!.content !== ""
+            const clean = (n: Node) => !n.deleted && !n.hidden && versions.get(shown(n))!.content !== ""
             const start = Math.floor(step.b * history.length)
             const chain = history.slice(start, start + 1 + (index % 3)).filter(clean)
             const queued = [...jobs.values()].some((j) => ["pending", "processing"].includes(j.status))
@@ -876,7 +892,7 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
                       inputs: chain.map((n) => ({
                         slotId: n.id,
                         versionId: effective(n),
-                        amendCount: effective(n) === null ? 0 : versions.get(n.selected)!.amends
+                        amendCount: effective(n) === null ? 0 : versions.get(shown(n))!.amends
                       }))
                     }
                   ]
@@ -1012,7 +1028,9 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
           })
         )
       }
-      const live = [...nodes.values()].filter((n) => !n.deleted && n.parent !== null && !nodes.get(n.parent)!.deleted)
+      // On the current fork's path: planning at a message works in the fork through it, which the
+      // model's choices (the current fork's) are only sure to be there.
+      const live = path(leaf).filter((n) => !n.deleted && n.parent !== null && !nodes.get(n.parent)!.deleted)
       const targets = [leaf ? nodes.get(leaf) : undefined, pick(live, 0.25), pick(live, 0.6), pick(live, 0.9)]
       for (const target of targets)
         if (target && (await cascade(target))) {

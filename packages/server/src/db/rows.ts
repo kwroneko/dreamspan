@@ -4,6 +4,8 @@ import {
   type ChatId,
   type ContextIssue,
   type EntityId,
+  Fork,
+  type ForkId,
   type LaneId,
   PathEntry,
   type SlotId,
@@ -29,6 +31,7 @@ export interface ChatRow {
   readonly status: "pending" | "active" | "archived"
   readonly title: string
   readonly active_leaf_slot_id: string | null
+  readonly current_fork_id: string | null
   readonly row_version: number
   readonly created_at: number
   readonly last_message_at: number | null
@@ -41,9 +44,43 @@ export const toChat = (row: ChatRow) =>
     status: row.status,
     title: row.title,
     activeLeafSlotId: row.active_leaf_slot_id as SlotId | null,
+    currentForkId: row.current_fork_id as ForkId | null,
     rowVersion: row.row_version,
     createdAt: row.created_at,
     lastMessageAt: row.last_message_at
+  })
+
+export interface ForkRow {
+  readonly id: string
+  readonly chat_id: string
+  readonly parent_fork_id: string | null
+  readonly base_slot_id: string | null
+  readonly tip_slot_id: string | null
+  readonly name: string | null
+  readonly pinned_at: number | null
+  readonly created_at: number
+  readonly last_chatted_at: number | null
+  readonly deleted_at: number | null
+  readonly row_version: number
+  /** `[[fork, bound], …]`, itself first (forkState.ts). */
+  readonly lineage_json: string | null
+}
+
+/** A fork with its tip's text (`tip_excerpt`) and whether it's its chat's current one. */
+export const toFork = (row: ForkRow & { readonly tip_excerpt: string | null; readonly current: number }) =>
+  new Fork({
+    id: row.id as ForkId,
+    chatId: row.chat_id as ChatId,
+    parentForkId: row.parent_fork_id as ForkId | null,
+    baseSlotId: row.base_slot_id as SlotId | null,
+    tipSlotId: row.tip_slot_id as SlotId | null,
+    name: row.name,
+    pinnedAt: row.pinned_at,
+    createdAt: row.created_at,
+    lastChattedAt: row.last_chatted_at,
+    tipExcerpt: row.tip_excerpt ?? "",
+    current: row.current === 1,
+    rowVersion: row.row_version
   })
 
 export interface VersionRow {
@@ -57,6 +94,8 @@ export interface VersionRow {
   readonly macro_mode: Version["macroMode"]
   readonly origin: Version["origin"]
   readonly source_version_id: string | null
+  /** The fork whose copy it is, standing in for its source (schema/forkVersions.ts); absent where not selected. */
+  readonly fork_id?: string | null
   readonly direction: string | null
   readonly hidden: number
   readonly starred: number
@@ -137,6 +176,8 @@ export interface PathRow extends VersionRow {
   readonly context_excluded: number
   readonly hidden_by_user: number
   readonly branch_name: string | null
+  readonly slot_fork_id: string | null
+  readonly starts_fork_id: string | null
   readonly slot_deleted: number
   readonly version_count: number
   readonly branch_count: number
@@ -145,6 +186,8 @@ export interface PathRow extends VersionRow {
   readonly user_side: number
   /** The speaker of the slot's first version, deleted or not (`PathEntry.firstSpeakerEntityId`). */
   readonly first_speaker: string | null
+  /** The fork whose selections the row shows; null for a row read without one. */
+  readonly shown_fork_id?: string | null
 }
 
 export const toPathEntry = (row: PathRow) => {
@@ -163,6 +206,9 @@ export const toPathEntry = (row: PathRow) => {
     branchCount: row.branch_count,
     branchIndex: row.branch_index,
     ...(row.branch_name === null ? {} : { branchName: row.branch_name }),
+    ...(row.slot_fork_id === null ? {} : { forkId: row.slot_fork_id as ForkId }),
+    ...(row.starts_fork_id === null ? {} : { startsForkId: row.starts_fork_id as ForkId }),
+    ...(row.shown_fork_id == null ? {} : { shownForkId: row.shown_fork_id as ForkId }),
     side: row.user_side === 1 ? "user" : "assistant",
     firstSpeakerEntityId: row.first_speaker as EntityId | null,
     inContext: versionInContext(version.status, version.content, contextExcluded)

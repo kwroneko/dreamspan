@@ -133,14 +133,14 @@ it.live(
         })
       yield* upload(2)
       const chat = (yield* api.ListChats({ limit: 10, before: null }))[0]!
-      const original = yield* typeInto(api, chat.id, chat.activeLeafSlotId, "prefix")
+      const original = yield* typeInto(api, chat.id, null, "prefix")
       // This is the base on which the user starts typing; the save arrives after two imports.
       yield* upload(3)
       yield* upload(4)
       const moved = yield* api.GetChat({ chatId: chat.id })
-      const current = yield* api.OpenComposer({ chatId: chat.id, tipSlotId: moved.activeLeafSlotId })
+      const current = yield* api.OpenComposer({ chatId: chat.id, forkId: null })
       assert.equal(current.id, original.id)
-      yield* typeInto(api, chat.id, moved.activeLeafSlotId, "prefix other tab", current)
+      yield* typeInto(api, chat.id, null, "prefix other tab", current)
       const saved = yield* api.SaveComposer({
         chatId: chat.id,
         draftId: original.id,
@@ -150,7 +150,7 @@ it.live(
         operationId: crypto.randomUUID(),
         content: "prefix typed during imports"
       })
-      assert.equal(saved.draft?.key.field, moved.activeLeafSlotId)
+      assert.equal(saved.draft?.key.field, moved.currentForkId)
       const states = yield* api.ComposerHistory({ chatId: chat.id, draftId: original.id, limit: 10 })
       const restored = yield* api.RestoreComposer({
         chatId: chat.id,

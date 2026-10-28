@@ -151,7 +151,7 @@ describe("send queue", () => {
         const { chat, reply } = yield* generatingChat(api)
         const text = "committed queued message"
         const direction = "committed queued direction"
-        const draft = yield* typeInto(api, chat.id, reply.slotId, text)
+        const draft = yield* typeInto(api, chat.id, null, text)
         const first = yield* api.SendMessage({
           chatId: chat.id,
           parentSlotId: reply.slotId,
@@ -160,7 +160,7 @@ describe("send queue", () => {
           composer: takenFrom(draft)
         })
         assert.strictEqual(first._tag, "Queued")
-        const next = yield* typeInto(api, chat.id, reply.slotId, direction, first.draft!)
+        const next = yield* typeInto(api, chat.id, null, direction, first.draft!)
         assert.strictEqual(
           (yield* api.Generate({
             chatId: chat.id,
@@ -195,7 +195,7 @@ describe("send queue", () => {
       const chatId = yield* Effect.gen(function* () {
         const api = yield* client()
         const { chat, reply } = yield* generatingChat(api)
-        const draft = yield* typeInto(api, chat.id, reply.slotId, "queued message")
+        const draft = yield* typeInto(api, chat.id, null, "queued message")
         const first = yield* api.SendMessage({
           chatId: chat.id,
           parentSlotId: reply.slotId,
@@ -203,7 +203,7 @@ describe("send queue", () => {
           content: "queued message",
           composer: takenFrom(draft)
         })
-        const next = yield* typeInto(api, chat.id, reply.slotId, "restart direction", first.draft!)
+        const next = yield* typeInto(api, chat.id, null, "restart direction", first.draft!)
         yield* api.Generate({
           chatId: chat.id,
           parentSlotId: reply.slotId,
@@ -228,12 +228,13 @@ describe("send queue", () => {
     })
   })
 
-  it.live("background queue posting moves its branch's next composer to the new tip", () =>
+  it.live("background queue posting goes on in the fork it was sent in, with that fork's composer", () =>
     Effect.gen(function* () {
       const api = yield* client()
       const { chat, reply } = yield* generatingChat(api)
+      const fork = (yield* api.GetChat({ chatId: chat.id })).currentForkId!
       const [root] = yield* path(api, chat.id)
-      const draft = yield* typeInto(api, chat.id, reply.slotId, "queued")
+      const draft = yield* typeInto(api, chat.id, null, "queued")
       const sent = yield* api.SendMessage({
         chatId: chat.id,
         parentSlotId: reply.slotId,
@@ -241,18 +242,31 @@ describe("send queue", () => {
         content: "queued",
         composer: takenFrom(draft)
       })
-      const typing = yield* typeInto(api, chat.id, reply.slotId, "next turn", sent.draft!)
+      const typing = yield* typeInto(api, chat.id, null, "next turn", sent.draft!)
       const other = yield* posted(
         api.SendMessage({ chatId: chat.id, parentSlotId: root!.slotId, branch: true, content: "other" })
       )
+      assert.notStrictEqual(other.chat.currentForkId, fork)
       yield* gate(reply.version.id)
       yield* api.StopGeneration({ versionId: reply.version.id })
-      assert.strictEqual((yield* api.GetChat({ chatId: chat.id })).activeLeafSlotId, other.entry.slotId)
-      const switched = yield* api.SwitchBranch({ chatId: chat.id, slotId: other.entry.slotId, index: 0 })
-      const moved = yield* api.OpenComposer({ chatId: chat.id, tipSlotId: switched.chat.activeLeafSlotId })
-      assert.deepStrictEqual([moved.id, moved.content], [typing.id, "next turn"])
-      const left = yield* api.OpenComposer({ chatId: chat.id, tipSlotId: reply.slotId })
-      assert.deepStrictEqual([left.id === typing.id, left.content], [false, ""])
+      while ((yield* api.ListQueued({ chatId: chat.id })).length > 0) yield* Effect.sleep(10)
+      // Posted where it was sent; the chat stays where the user went since.
+      const shown = yield* api.ReadPath({
+        chatId: chat.id,
+        forkId: fork,
+        leafSlotId: null,
+        range: { _tag: "Bottom" },
+        limit: 50
+      })
+      assert.include(
+        shown.entries.map((e) => e.version.content),
+        "queued"
+      )
+      assert.strictEqual((yield* api.GetChat({ chatId: chat.id })).currentForkId, other.chat.currentForkId)
+      const kept = yield* api.OpenComposer({ chatId: chat.id, forkId: fork })
+      assert.deepStrictEqual([kept.id, kept.content], [typing.id, "next turn"])
+      const elsewhere = yield* api.OpenComposer({ chatId: chat.id, forkId: other.chat.currentForkId })
+      assert.deepStrictEqual([elsewhere.id === typing.id, elsewhere.content], [false, ""])
     }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), gated)))
   )
 
@@ -544,7 +558,7 @@ describe("send queue", () => {
       yield* api.SelectVersion({
         slotId: reply.slotId,
         versionId: finished!.version.id,
-        expectedRowVersion: swipe.rowVersion
+        expectedVersionId: swipe.version.id
       })
       const entries = yield* pathBecomes(api, chat.id, ["you: m0", "model (complete)", "you: m1", "model (generating)"])
       assert.lengthOf(yield* api.ListQueued({ chatId: chat.id }), 0)

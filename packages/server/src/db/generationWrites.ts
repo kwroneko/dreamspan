@@ -4,6 +4,7 @@ import { NotFound } from "@rp/shared/errors.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
+import { forkThrough } from "./forks.ts"
 import {
   DEFAULT_JUDGE,
   DEFAULT_LCM,
@@ -92,6 +93,7 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
       versionId,
       rolloutId,
       leafSlotId,
+      forkId,
       connectionId,
       modelId,
       snapshot,
@@ -110,9 +112,23 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
           return yield* new NotFound({ entity: "model", id: modelId })
         }
         const now = Date.now()
+        // The fork it writes in: the one named, else the current one when its path holds the
+        // leaf, as a send's does.
+        const [chat] = yield* sql<{
+          current_fork_id: string | null
+        }>`SELECT current_fork_id FROM chats WHERE id = ${chatId}`
+        const [named] =
+          forkId == null
+            ? []
+            : yield* sql<{ id: string }>`SELECT id FROM forks WHERE id = ${forkId} AND chat_id = ${chatId}`
+        if (forkId != null && named === undefined) return yield* new NotFound({ entity: "fork", id: forkId })
+        const fork =
+          named ??
+          (leafSlotId === null ? null : yield* forkThrough(sql, chatId, leafSlotId, chat?.current_fork_id ?? null))
         yield* sql`INSERT INTO rollouts ${sql.insert({
           id: rolloutId,
           chat_id: chatId,
+          fork_id: fork?.id ?? null,
           kind: "generation",
           status: "running",
           slot_id: slotId,

@@ -184,7 +184,7 @@ export const makeDraftStore = (
       SELECT d.*, (SELECT count(*) FROM draft_history h WHERE h.draft_id = d.id) AS history_length
       FROM drafts d WHERE d.id = ${id}`.pipe(Effect.map(([row]) => row ?? null))
 
-  /** A chat's composer draft by its id, wherever its tip is now. */
+  /** A chat's composer draft by its id, whichever fork it's in. */
   const findComposer = (userId: UserId, chatId: string, draftId: string) =>
     sql<DraftRow>`
       SELECT d.*, (SELECT count(*) FROM draft_history h WHERE h.draft_id = d.id) AS history_length
@@ -600,7 +600,7 @@ export const makeDraftStore = (
   const ownDraft = (userId: UserId, id: string) =>
     Effect.map(byId(id), (row) => (row !== null && row.user_id === userId ? toDraft(row) : null))
 
-  // --- The composer (DESIGN §6.2): a draft per branch tip, which moves with its tip.
+  // --- The composer (DESIGN §6.2): a draft per fork.
 
   /**
    * The composer at `key`, made empty if there's none, so every text typed in a composer
@@ -615,7 +615,7 @@ export const makeDraftStore = (
       if (here === null) yield* insert(userId, key, copied, null)
       else if (copied !== "" && shown(here) === "") recovered = yield* update(here, copied, "edit", null)
       const opened = (yield* find(userId, key))!
-      // Only a new branch inherits choices. Reopening an existing tip must keep even an
+      // Only a new branch inherits choices. Reopening an existing fork must keep even an
       // explicit reset to turn order (null), as switching branches keeps their text.
       if (from !== null && here === null)
         yield* sql`UPDATE drafts SET speaker_entity_id = ${from.speaker_entity_id},
@@ -677,7 +677,7 @@ export const makeDraftStore = (
 
   /**
    * Text typed into the composer draft `base` names, saved onto that draft wherever it is
-   * now (its tip may have moved on with a message appended there), by `saveOnto`'s rule.
+   * now, by `saveOnto`'s rule.
    * A draft that's gone sends the text to the recovered texts.
    */
   const saveComposer = (
@@ -748,32 +748,6 @@ export const makeDraftStore = (
       return saved
     })
 
-  const moveComposer = (userId: UserId, chatId: string, from: string | null, to: string | null) =>
-    Effect.gen(function* () {
-      if (from === to) return 0
-      const source = yield* find(userId, composerKey(chatId, from))
-      const there = yield* find(userId, composerKey(chatId, to))
-      if (source === null) {
-        if (there === null || there.content !== "") return 0
-        const ended = yield* end(there, "discarded")
-        yield* sql`DELETE FROM drafts WHERE id = ${there.id}`
-        return ended.recovered
-      }
-      if (there?.status === "active" && there.content !== "") {
-        const ended = yield* end(source, "discarded")
-        yield* sql`DELETE FROM drafts WHERE id = ${source.id}`
-        return ended.recovered
-      }
-      let recovered = 0
-      if (there !== null) {
-        recovered = (yield* end(there, "discarded")).recovered
-        yield* sql`DELETE FROM drafts WHERE id = ${there.id}`
-      }
-      yield* sql`UPDATE drafts SET field = ${to ?? ""}, row_version = row_version + 1
-        WHERE id = ${source.id}`
-      return recovered
-    })
-
   const restoreComposer = (
     userId: UserId,
     chatId: string,
@@ -791,7 +765,6 @@ export const makeDraftStore = (
   return {
     find,
     checkIdentity,
-    moveComposer,
     findComposer,
     get,
     toDraft,

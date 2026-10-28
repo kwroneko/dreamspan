@@ -639,7 +639,14 @@ describe("context assembly from the database", () => {
         message: null,
         commitDraft: null
       })
-      yield* writer.AmendVersion({ userId, versionId: sent.version.id, content: "Dry road.", expectedRowVersion: 1 })
+      // In the fork the context is assembled in: the peer branch, current now, keeps its text.
+      yield* writer.AmendVersion({
+        userId,
+        versionId: sent.version.id,
+        forkId: chat.currentForkId,
+        content: "Dry road.",
+        expectedRowVersion: 1
+      })
       yield* state({ key: "lorebook.detach", value: { ref: book.ref.id } }, sent.slotId)
       yield* state({ key: "lorebook.binding", value: { entity: mira.entityId, ref: null } }, sent.slotId)
       assert.notInclude(texts(yield* assemble()).join("\n"), "seven gates")

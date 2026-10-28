@@ -24,7 +24,7 @@
 // DRAFT_MODEL_SEED=<n> runs one seed.
 import { DatabaseSync } from "node:sqlite"
 import { assert, it } from "@effect/vitest"
-import type { ChatId, SlotId } from "@rp/shared/chat.ts"
+import type { ChatId, ForkId, SlotId } from "@rp/shared/chat.ts"
 import { applyPatch, invertPatch } from "@rp/shared/drafts.ts"
 import { getAt, textField } from "@rp/shared/editing.ts"
 import type { RefId } from "@rp/shared/library.ts"
@@ -255,8 +255,8 @@ class Page {
   readonly composer: ComposerDraft
   editor: EditorStore
   ref: RefId
-  tip: SlotId | null
-  /** The view follows the chat's active leaf as messages are appended. */
+  fork: ForkId | null
+  /** The view follows the chat's current fork as it changes. */
   follows: boolean
 
   /** The page's timers wait for the model to fire them; its keepalives go through the network. */
@@ -277,16 +277,16 @@ class Page {
   readonly world: World
   readonly tab: Tab
 
-  constructor(world: World, tab: Tab, ref: RefId, tip: SlotId | null, follows: boolean) {
+  constructor(world: World, tab: Tab, ref: RefId, fork: ForkId | null, follows: boolean) {
     this.world = world
     this.tab = tab
     const session = { id: world.chatId, call: (rpc: Rpc) => this.call(rpc) }
     this.composer = new ComposerDraft(session as never, USER, this.env)
     this.ref = ref
     this.editor = this.store(ref)
-    this.tip = tip
+    this.fork = fork
     this.follows = follows
-    this.composer.setTip(tip, false, false)
+    this.composer.setFork(fork, false)
     void this.editor.load()
   }
 
@@ -327,9 +327,9 @@ class Page {
     void this.editor.load()
   }
 
-  go(tip: SlotId | null, appended: boolean, branch: boolean) {
-    this.tip = tip
-    this.composer.setTip(tip, appended, branch)
+  go(fork: ForkId | null, branch: boolean) {
+    this.fork = fork
+    this.composer.setFork(fork, branch)
   }
 }
 
@@ -376,7 +376,6 @@ class World {
   port: number
   restart: () => Promise<void> = async () => undefined
   readonly writerClock = new BigInt64Array(new SharedArrayBuffer(8))
-  readonly branchPositions = new Set<string>()
   readonly copyHistory = new Map<string, Record<string, unknown>>()
   readonly db: DatabaseSync
 
@@ -464,17 +463,32 @@ class World {
     )[0]!.leaf
   }
 
+  /** The chat's current fork. */
+  currentFork() {
+    return this.all<{ fork: ForkId }>(`SELECT current_fork_id AS fork FROM chats WHERE id = ?`, this.chatId)[0]!.fork
+  }
+
+  /** A fork's tip; the current fork's for null. */
+  tipOf(fork: ForkId | null) {
+    return this.all<{ tip: SlotId | null }>(
+      `SELECT tip_slot_id AS tip FROM forks WHERE id = coalesce(?, (SELECT current_fork_id FROM chats WHERE id = ?))`,
+      fork,
+      this.chatId
+    )[0]!.tip
+  }
+
+  liveForks() {
+    return this.all<{ id: ForkId; tip: SlotId | null }>(
+      `SELECT id, tip_slot_id AS tip FROM forks WHERE chat_id = ? AND deleted_at IS NULL ORDER BY id`,
+      this.chatId
+    )
+  }
+
   liveSlots() {
     return this.all<{ id: SlotId; parent: SlotId | null }>(
       `SELECT id, parent_slot_id AS parent FROM slots WHERE chat_id = ? AND deleted_at IS NULL ORDER BY rowid`,
       this.chatId
     )
-  }
-
-  tipsOf() {
-    const slots = this.liveSlots()
-    const parents = new Set(slots.map((slot) => slot.parent))
-    return slots.filter((slot) => !parents.has(slot.id)).map((slot) => slot.id)
   }
 
   recoveredCount() {
@@ -680,12 +694,6 @@ class World {
             this.copyBase("composer", { draftId: after.id, rowVersion: after.rowVersion, session: after.session })
           )
       }
-      if (request.tag === "OpenComposer") this.branchPositions.add((payload.tipSlotId as string | null) ?? "")
-      if (
-        (request.tag === "SendMessage" || request.tag === "Generate") &&
-        (outcome.value as { _tag: string })._tag === "Posted"
-      )
-        this.branchPositions.delete((payload.parentSlotId as string | null) ?? "")
       this.checkCommit(request, draftsBefore, outcome.value as Record<string, unknown>)
       this.checkRecovered(request, recoveredBefore, outcome.value as Record<string, unknown>)
     }
@@ -776,7 +784,6 @@ class World {
     const history = this.all<{ draft: string; start: number; removed: string; inserted: string }>(
       `SELECT draft_id AS draft, start, removed, inserted FROM draft_history ORDER BY draft_id, seq DESC`
     )
-    const branchPositions = [...this.branchPositions]
     const shownDrafts = this.tabs.flatMap(({ page }) => {
       const base = (page.composer as unknown as { base: { id: string } | null }).base
       return base === null ? [] : [base.id]
@@ -784,11 +791,10 @@ class World {
     for (const draft of this.all<{ id: string; content: string }>(
       `SELECT d.id, d.content FROM drafts d WHERE
       (d.target_kind = 'composer' AND EXISTS (SELECT 1 FROM chats c WHERE c.id = d.target_id) AND
-        (d.id IN (SELECT value FROM json_each(?)) OR d.field IN (SELECT value FROM json_each(?)) OR d.field = coalesce((SELECT active_leaf_slot_id FROM chats WHERE id = d.target_id), '') OR
-          EXISTS (SELECT 1 FROM slots s WHERE s.id = d.field AND NOT EXISTS (SELECT 1 FROM slots child WHERE child.parent_slot_id = s.id AND child.deleted_at IS NULL)))) OR
+        (d.id IN (SELECT value FROM json_each(?)) OR
+          EXISTS (SELECT 1 FROM forks f WHERE f.id = d.field AND f.chat_id = d.target_id))) OR
       (d.target_kind = 'entity_field' AND EXISTS (SELECT 1 FROM entity_refs f WHERE f.id = d.target_id))`,
-      JSON.stringify(shownDrafts),
-      JSON.stringify(branchPositions)
+      JSON.stringify(shownDrafts)
     )) {
       let text = draft.content
       texts.push(text)
@@ -831,7 +837,7 @@ class World {
       const base = (page.composer as unknown as { base: { id: string; rowVersion: number; session: number } | null })
         .base
       this.log(
-        `    tab ${id} composer ${JSON.stringify(page.composer.snapshot().text)} on ${base?.id.slice(-6)}@${base?.rowVersion}/${base?.session} tip ${page.tip?.slice(-6)}`
+        `    tab ${id} composer ${JSON.stringify(page.composer.snapshot().text)} on ${base?.id.slice(-6)}@${base?.rowVersion}/${base?.session} fork ${page.fork?.slice(-6)}`
       )
     }
     for (const d of this.all<{ id: string; field: string; content: string; v: number; s: number; st: string }>(
@@ -1078,16 +1084,18 @@ const OPS: ReadonlyArray<Op> = [
       const generate = w.rng() < 0.3
       if (!ready || (!generate && text.trim() === "")) return null
       void page.composer.submit(async (from) => {
-        // The view went to another branch since: Composer.tsx doesn't send.
-        if (from.tip !== page.tip) return { sent: false }
+        // The view went to another fork since: Composer.tsx doesn't send.
+        if (from.fork !== page.fork) return { sent: false }
         const composer = { draftId: from.draftId, session: from.session }
-        const branch = from.tip !== w.leaf()
+        // At the tip the view shows, as it has it from the chat's events.
+        const tip = w.tipOf(from.fork)
         const result = generate
           ? await page.call((c: never) =>
               (c as (tag: string, p: unknown) => unknown)("Generate", {
                 chatId: w.chatId,
-                parentSlotId: from.tip,
-                branch,
+                forkId: from.fork,
+                parentSlotId: tip,
+                branch: false,
                 ...(from.text.trim() === "" ? {} : { direction: from.text }),
                 composer
               })
@@ -1095,8 +1103,9 @@ const OPS: ReadonlyArray<Op> = [
           : await page.call((c: never) =>
               (c as (tag: string, p: unknown) => unknown)("SendMessage", {
                 chatId: w.chatId,
-                parentSlotId: from.tip,
-                branch,
+                forkId: from.fork,
+                parentSlotId: tip,
+                branch: false,
                 content: from.text,
                 composer
               })
@@ -1108,10 +1117,8 @@ const OPS: ReadonlyArray<Op> = [
           draft: never
           recovered: number
         }
-        if (value._tag === "Posted" && page.tip === from.tip) {
-          page.follows = true
-          page.go(value.entry!.slotId, true, false)
-        }
+        // Chatting in a fork makes it the current one.
+        if (value._tag === "Posted" && page.fork === from.fork) page.follows = true
         return { sent: true, draft: value.draft, recovered: value.recovered }
       })
       return `${generate ? "generate" : "send"} ${JSON.stringify(text)}`
@@ -1121,22 +1128,39 @@ const OPS: ReadonlyArray<Op> = [
     name: "go to another branch",
     weight: 4,
     run: (w, { page }) => {
-      const tip = pick(w.rng, w.tipsOf())
-      if (tip === undefined) return null
-      page.follows = tip === w.leaf()
-      page.go(tip, false, false)
-      return tip
+      const fork = pick(w.rng, w.liveForks())
+      if (fork === undefined) return null
+      page.follows = fork.id === w.currentFork()
+      page.go(fork.id, false)
+      return fork.id
     }
   },
   {
     name: "start a branch",
     weight: 3,
     run: (w, { page }) => {
-      const slot = pick(w.rng, w.liveSlots())
+      // At a live message on the path of the fork shown, as Branch from here offers it.
+      const parents = new Map(w.liveSlots().map((slot) => [slot.id, slot.parent]))
+      const path: Array<SlotId> = []
+      for (let at = w.tipOf(page.fork); at !== null && at !== undefined; at = parents.get(at) ?? null)
+        if (parents.has(at)) path.push(at)
+      const slot = pick(w.rng, path)
       if (slot === undefined) return null
-      page.follows = slot.id === w.leaf()
-      page.go(slot.id, false, true)
-      return slot.id
+      void page
+        .call((c: never) =>
+          (c as (tag: string, p: unknown) => unknown)("CreateFork", {
+            chatId: w.chatId,
+            fromForkId: page.fork,
+            atSlotId: slot
+          })
+        )
+        .then((made) => {
+          if (!made.ok || !page.alive) return
+          // The fork made is the current one, and its composer starts as a copy.
+          page.follows = true
+          page.go((made.value as { fork: { id: ForkId } }).fork.id, true)
+        })
+      return slot
     }
   },
   {
@@ -1333,7 +1357,7 @@ const OPS: ReadonlyArray<Op> = [
       page.editor.beacon()
       page.alive = false
       w.net.pageGone(page, w.rng)
-      tab.page = new Page(w, tab, page.ref, page.tip, page.follows)
+      tab.page = new Page(w, tab, page.ref, page.fork, page.follows)
       return null
     }
   },
@@ -1422,15 +1446,10 @@ const settle = async (w: World) => {
   }
 }
 
-/** Views that follow the chat's leaf go where it went, as a session does on its events. */
-const follow = (w: World, leafBefore: SlotId | null) => {
-  const leaf = w.leaf()
-  if (leaf === leafBefore) return
-  const parents = new Map(w.liveSlots().map((slot) => [slot.id, slot.parent]))
-  for (const { page } of w.tabs) {
-    if (!page.follows || page.tip === leaf) continue
-    page.go(leaf, leaf !== null && parents.get(leaf) === page.tip, false)
-  }
+/** Views that follow the chat's current fork go to it when it changes, as a session does on a reload. */
+const follow = (w: World) => {
+  const current = w.currentFork()
+  for (const { page } of w.tabs) if (page.follows && page.fork !== current) page.go(current, false)
 }
 
 const runSteps = async (w: World, steps: ReadonlyArray<Step>) => {
@@ -1439,10 +1458,6 @@ const runSteps = async (w: World, steps: ReadonlyArray<Step>) => {
     const tab = pick(w.rng, w.tabs)!
     let roll = w.rng() * total
     const op = OPS.find((candidate) => (roll -= candidate.weight) < 0)!
-    const leafBefore = w.leaf()
-    const slotsBefore = new Set(
-      w.all<{ id: string }>(`SELECT id FROM slots WHERE chat_id = ?`, w.chatId).map((slot) => slot.id)
-    )
     w.log(`${step.index}: tab ${tab.id} ${op.name}`)
     const detail = op.run(w, tab)
     if (detail !== null) w.lines[w.lines.length - 1] += `: ${detail}`
@@ -1458,14 +1473,7 @@ const runSteps = async (w: World, steps: ReadonlyArray<Step>) => {
       w.net.reliable = reliable
       await settle(w)
     }
-    if (w.leaf() !== leafBefore) {
-      // Bin relocation and branch changes offer both endpoints in the UI.
-      // Actual appends remove their old endpoint again just below.
-      w.branchPositions.add(leafBefore ?? "")
-      w.branchPositions.add(w.leaf() ?? "")
-    }
-    for (const slot of w.liveSlots()) if (!slotsBefore.has(slot.id)) w.branchPositions.delete(slot.parent ?? "")
-    follow(w, leafBefore)
+    follow(w)
     await settle(w)
     if (process.env.DRAFT_MODEL_DEBUG !== undefined) w.dump()
     w.check(true)
@@ -1498,7 +1506,7 @@ const drain = async (w: World) => {
   const reload = async (tab: Tab, ref: RefId) => {
     tab.page.alive = false
     w.net.pageGone(tab.page, () => 0)
-    tab.page = new Page(w, tab, ref, tab.page.tip, tab.page.follows)
+    tab.page = new Page(w, tab, ref, tab.page.fork, tab.page.follows)
     await settle(w)
   }
   const refs = new Set(
@@ -1583,10 +1591,10 @@ const runOnce = (steps: ReadonlyArray<Step>, directed?: (w: World) => Promise<vo
       w.otherRef = (yield* api.CreateCardNote({ cardRefId: card.id, title: "Other account copy target" })).id
       // The tabs open the same way in every run.
       w.rng = mulberry(0)
-      const leaf = w.leaf()
+      const fork = w.currentFork()
       for (let id = 0; id < TABS; id++) {
         const tab = { id, offline: false } as Tab
-        tab.page = new Page(w, tab, w.noteRef, leaf, true)
+        tab.page = new Page(w, tab, w.noteRef, fork, true)
         w.tabs.push(tab)
       }
       const result = yield* Effect.promise(async () => {
@@ -1694,7 +1702,7 @@ const DIRECTED: ReadonlyArray<{ name: string; run: (w: World) => Promise<void> }
           await settle(w)
           await saving
         }
-        tab.page = new Page(w, tab, old.ref, old.tip, old.follows)
+        tab.page = new Page(w, tab, old.ref, old.fork, old.follows)
         await settle(w)
         const page = tab.page
         const conflict = () => (kind === "composer" ? page.composer.snapshot().conflict : page.editor.conflict(field))
@@ -1745,7 +1753,7 @@ const DIRECTED: ReadonlyArray<{ name: string; run: (w: World) => Promise<void> }
   {
     name: "a send in another chat leaves the source composer active",
     run: async (w) => {
-      const opened = await Effect.runPromise(w.api.OpenComposer({ chatId: w.chatId, tipSlotId: w.leaf() }))
+      const opened = await Effect.runPromise(w.api.OpenComposer({ chatId: w.chatId, forkId: null }))
       const saved = await Effect.runPromise(
         w.api.SaveComposer({
           chatId: w.chatId,
@@ -1765,7 +1773,7 @@ const DIRECTED: ReadonlyArray<{ name: string; run: (w: World) => Promise<void> }
         content: draft.content,
         composer: { draftId: draft.id, session: draft.session }
       })
-      const after = await Effect.runPromise(w.api.OpenComposer({ chatId: w.chatId, tipSlotId: w.leaf() }))
+      const after = await Effect.runPromise(w.api.OpenComposer({ chatId: w.chatId, forkId: null }))
       if (after.content !== draft.content || after.session !== draft.session)
         w.fail("I2: another chat committed the source draft")
     }
@@ -1853,7 +1861,7 @@ const DIRECTED: ReadonlyArray<{ name: string; run: (w: World) => Promise<void> }
       if (parent._tag !== "Posted") return w.fail("I2: queued-send parent did not post")
       const tip = parent.entry.slotId
       const save = async (content: string) => {
-        const d = await Effect.runPromise(w.api.OpenComposer({ chatId: chat.id, tipSlotId: tip }))
+        const d = await Effect.runPromise(w.api.OpenComposer({ chatId: chat.id, forkId: null }))
         return (
           await Effect.runPromise(
             w.api.SaveComposer({
@@ -1933,7 +1941,8 @@ const DIRECTED: ReadonlyArray<{ name: string; run: (w: World) => Promise<void> }
         const result = await page.call((c: never) =>
           (c as (tag: string, payload: unknown) => unknown)("SendMessage", {
             chatId: w.chatId,
-            parentSlotId: from.tip,
+            forkId: from.fork,
+            parentSlotId: w.tipOf(from.fork),
             branch: false,
             content: from.text,
             composer: { draftId: from.draftId, session: from.session }
@@ -1942,7 +1951,6 @@ const DIRECTED: ReadonlyArray<{ name: string; run: (w: World) => Promise<void> }
         if (!result.ok) return { sent: false }
         const value = result.value as { _tag: string; entry: { slotId: SlotId }; draft: never; recovered: number }
         if (value._tag !== "Posted") w.fail("directed send did not post")
-        page.go(value.entry.slotId, true, false)
         return { sent: true, draft: value.draft, recovered: value.recovered }
       })
       const next = `Next ${w.newToken()}`
@@ -2059,7 +2067,7 @@ const DIRECTED: ReadonlyArray<{ name: string; run: (w: World) => Promise<void> }
       await settle(w)
       const old = tab.page
       old.alive = false
-      tab.page = new Page(w, tab, old.ref, old.tip, old.follows)
+      tab.page = new Page(w, tab, old.ref, old.fork, old.follows)
       await settle(w)
       w.check(false)
     }
@@ -2068,7 +2076,7 @@ const DIRECTED: ReadonlyArray<{ name: string; run: (w: World) => Promise<void> }
     name: "commit session and stored destination",
     run: async (w) => {
       const leaf = w.leaf()
-      const draft = await Effect.runPromise(w.api.OpenComposer({ chatId: w.chatId, tipSlotId: leaf }))
+      const draft = await Effect.runPromise(w.api.OpenComposer({ chatId: w.chatId, forkId: null }))
       const text = "identical across sessions"
       await request(w, "SaveComposer", {
         chatId: w.chatId,
@@ -2079,14 +2087,14 @@ const DIRECTED: ReadonlyArray<{ name: string; run: (w: World) => Promise<void> }
         operationId: crypto.randomUUID(),
         content: text
       })
-      const posted = (await request(w, "SendMessage", {
+      await request(w, "SendMessage", {
         chatId: w.chatId,
         parentSlotId: leaf,
         branch: false,
         content: text,
         composer: { draftId: draft.id, session: draft.session }
-      })) as { entry: { slotId: SlotId } }
-      const next = await Effect.runPromise(w.api.OpenComposer({ chatId: w.chatId, tipSlotId: posted.entry.slotId }))
+      })
+      const next = await Effect.runPromise(w.api.OpenComposer({ chatId: w.chatId, forkId: null }))
       await request(w, "SaveComposer", {
         chatId: w.chatId,
         draftId: next.id,
@@ -2108,7 +2116,7 @@ const DIRECTED: ReadonlyArray<{ name: string; run: (w: World) => Promise<void> }
   {
     name: "receipts replay exactly once across server restart",
     run: async (w) => {
-      const draft = await Effect.runPromise(w.api.OpenComposer({ chatId: w.chatId, tipSlotId: w.leaf() }))
+      const draft = await Effect.runPromise(w.api.OpenComposer({ chatId: w.chatId, forkId: null }))
       const payload = {
         chatId: w.chatId,
         draftId: draft.id,
@@ -2133,7 +2141,7 @@ const DIRECTED: ReadonlyArray<{ name: string; run: (w: World) => Promise<void> }
   {
     name: "background append keeps full text reachable at the leaf",
     run: async (w) => {
-      const draft = await Effect.runPromise(w.api.OpenComposer({ chatId: w.chatId, tipSlotId: w.leaf() }))
+      const draft = await Effect.runPromise(w.api.OpenComposer({ chatId: w.chatId, forkId: null }))
       const text = "  unfinished paragraph\n"
       w.live.add(text)
       await request(w, "SaveComposer", {
@@ -2147,7 +2155,7 @@ const DIRECTED: ReadonlyArray<{ name: string; run: (w: World) => Promise<void> }
       })
       const before = w.leaf()
       await request(w, "SendMessage", { chatId: w.chatId, parentSlotId: before, branch: false, content: "background" })
-      follow(w, before)
+      follow(w)
       await settle(w)
       w.check(false)
     }
@@ -2157,7 +2165,7 @@ const DIRECTED: ReadonlyArray<{ name: string; run: (w: World) => Promise<void> }
   {
     name: "history retention reports recovery with the writer clock advanced",
     run: async (w) => {
-      const draft = await Effect.runPromise(w.api.OpenComposer({ chatId: w.chatId, tipSlotId: w.leaf() }))
+      const draft = await Effect.runPromise(w.api.OpenComposer({ chatId: w.chatId, forkId: null }))
       for (let index = 0; index < 1003; index++) {
         w.wait(61_000)
         await request(w, "SaveComposer", {

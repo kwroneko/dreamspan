@@ -3,6 +3,7 @@ import { contextExcluded } from "./lcmVisibility.ts"
 // §2.7): the note's text on the path shown, and the run of messages hidden from the first
 // message that it covers. Shared by the offer (a read) and the adoption (the write).
 import type { UserId } from "@rp/shared/domain.ts"
+import { shownIn, viewAt } from "./forkState.ts"
 import { NoteDoc } from "@rp/shared/docs/note.ts"
 import { Effect, Schema } from "effect"
 import type { SqlClient } from "effect/sql"
@@ -32,6 +33,7 @@ export interface ImportedSummary {
 export const importedSummary = (sql: SqlClient.SqlClient, userId: UserId, chatId: string, leafSlotId: string) =>
   Effect.gen(function* () {
     const lib = makeLibraryQueries(sql)
+    const fork = yield* viewAt(sql, chatId, leafSlotId)
     const rows = yield* lib.refsWhere(
       `e.owner_user_id = ? AND e.kind = 'note' AND e.deleted_at IS NULL AND r.ref_kind = 'upstream'
        AND EXISTS (SELECT 1 FROM entity_revisions h WHERE h.id = r.head_revision_id
@@ -62,7 +64,7 @@ export const importedSummary = (sql: SqlClient.SqlClient, userId: UserId, chatId
           coalesce(sum(EXISTS (SELECT 1 FROM slot_parents m WHERE m.slot_id = c.id)), 0) AS merged,
           coalesce(sum(coalesce(v.status = 'generating', 0)), 0) AS generating,
           coalesce(sum(${sql.literal(contextExcluded())}), 0) AS hidden
-          FROM chain c JOIN slots s ON s.id = c.id LEFT JOIN versions v ON v.id = s.selected_version_id`
+          FROM chain c JOIN slots s ON s.id = c.id LEFT JOIN versions v ON v.id = ${shownIn(sql, fork, "s")}`
       if (!run || run.n < 1 || run.root !== 1 || run.merged > 0 || run.generating > 0) continue
       return {
         noteEntity: row.entity_id,

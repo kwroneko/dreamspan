@@ -63,36 +63,34 @@ describe("the recycle bin's RPCs", () => {
     }).pipe(Effect.scoped, withServer(testConfig()))
   )
 
-  it.live("restores the first message from the empty root, with its path and composer", () =>
+  it.live("restores the first message from the empty root, with its path and its fork's composer", () =>
     Effect.gen(function* () {
       const api = yield* client()
       const chat = yield* api.CreateChat({ title: "Root restore" })
       const root = yield* send(api, chat.id, null, "only message")
-      const typed = yield* typeInto(api, chat.id, root, "unsent continuation")
+      const typed = yield* typeInto(api, chat.id, null, "unsent continuation")
       const item = yield* api.DeleteMessage({ slotId: root })
       assert.isNull((yield* api.GetChat({ chatId: chat.id })).activeLeafSlotId)
       yield* api.RestoreBinItem({ itemId: item.id })
       assert.strictEqual((yield* api.GetChat({ chatId: chat.id })).activeLeafSlotId, root)
       assert.deepStrictEqual(yield* contents(api, chat.id), ["only message"])
-      // The same draft went up to the empty root and came back down with its session intact.
-      const back = yield* api.OpenComposer({ chatId: chat.id, tipSlotId: root })
+      // The composer is the fork's: it stayed where it was, its session intact.
+      const back = yield* api.OpenComposer({ chatId: chat.id, forkId: null })
       assert.deepStrictEqual([back.id, back.content, back.session], [typed.id, "unsent continuation", typed.session])
-      const rootless = yield* api.OpenComposer({ chatId: chat.id, tipSlotId: null })
-      assert.deepStrictEqual([rootless.id === typed.id, rootless.content], [false, ""])
     }).pipe(Effect.scoped, withServer(testConfig()))
   )
 
-  it.live("puts the chat's last message back at its end, with the composer that went up with the leaf", () =>
+  it.live("puts the chat's last message back at its end, the fork's composer staying with it", () =>
     Effect.gen(function* () {
       const api = yield* client()
       const chat = yield* api.CreateChat({ title: "Harbor" })
       const m0 = yield* send(api, chat.id, null, "m0")
       const m1 = yield* send(api, chat.id, m0, "m1")
-      yield* typeInto(api, chat.id, m1, "half typed")
+      yield* typeInto(api, chat.id, null, "half typed")
       const events = yield* subscribe(api, chat.id)
       const item = yield* api.DeleteMessage({ slotId: m1 })
       assert.deepStrictEqual(yield* contents(api, chat.id), ["m0"])
-      assert.strictEqual((yield* api.OpenComposer({ chatId: chat.id, tipSlotId: m0 })).content, "half typed")
+      assert.strictEqual((yield* api.OpenComposer({ chatId: chat.id, forkId: null })).content, "half typed")
       assert.deepStrictEqual(
         (yield* api.ListBin({ limit: 10, before: null })).map((i) => i.id),
         [item.id]
@@ -102,7 +100,7 @@ describe("the recycle bin's RPCs", () => {
       yield* api.RestoreBinItem({ itemId: item.id })
       assert.deepStrictEqual(yield* contents(api, chat.id), ["m0", "m1"])
       assert.strictEqual((yield* api.GetChat({ chatId: chat.id })).activeLeafSlotId, m1)
-      assert.strictEqual((yield* api.OpenComposer({ chatId: chat.id, tipSlotId: m1 })).content, "half typed")
+      assert.strictEqual((yield* api.OpenComposer({ chatId: chat.id, forkId: null })).content, "half typed")
       assert.deepStrictEqual(yield* api.ListBin({ limit: 10, before: null }), [])
       // Open tabs read it again, and hear where the leaf is.
       yield* eventually(() => events.slice(seen).some((e) => e._tag === "Chat" && e.chat.activeLeafSlotId === m1))
@@ -182,8 +180,8 @@ describe("the recycle bin's RPCs", () => {
 
       // Text wiped and then sent goes to the recovered text, never to the deleted items.
       const long = "A long paragraph about the harbor at night. ".repeat(10)
-      const typed = yield* typeInto(api, chat.id, m0, long)
-      const wiped = yield* typeInto(api, chat.id, m0, "x", typed)
+      const typed = yield* typeInto(api, chat.id, null, long)
+      const wiped = yield* typeInto(api, chat.id, null, "x", typed)
       yield* posted(
         api.SendMessage({
           chatId: chat.id,

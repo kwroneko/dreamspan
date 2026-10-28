@@ -1,5 +1,6 @@
 import { MAX_CHUNK_SLOTS } from "./lcmLimits.ts"
 import type { SummaryPrefix } from "../lcm/prefix.ts"
+import { inFork } from "./forkState.ts"
 import { completedCoverage, failedHold } from "./lcmCoverage.ts"
 import { maintain, MAX_JOBS_PER_PLAN } from "./lcmMaintain.ts"
 import { tokensOf } from "../assembler/st.ts"
@@ -28,7 +29,7 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   const assembler = yield* makeAssembler
   return {
-    PlanSummaries: ({ userId, chatId, leafSlotId, reason }) =>
+    PlanSummaries: ({ userId, chatId, leafSlotId, forkId, reason }) =>
       Effect.gen(function* () {
         yield* lcmPath(sql, userId, chatId, leafSlotId, leafSlotId)
         const sources = sqlSources(sql, { userId, chatId, next: true, cut: leafSlotId })
@@ -163,7 +164,7 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
         }
         if (chunks.length < MAX_JOBS_PER_PLAN) flush()
         return { ...result, chunks, backfill: settled({ ...result, chunks }) }
-      }).pipe(query("PlanSummaries")),
+      }).pipe(inFork(sql, chatId, forkId, leafSlotId), query("PlanSummaries")),
     AssembleSummary: ({ userId, jobId, attempt }) =>
       Effect.gen(function* () {
         const [job] = yield* sql.unsafe<SummaryJob>(

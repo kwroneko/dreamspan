@@ -209,7 +209,8 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
             userId: id,
             chatId: result.chat.id,
             slotId: result.slotId,
-            versionId: result.version.id
+            versionId: result.version.id,
+            ...(result.chat.currentForkId === null ? {} : { forkId: result.chat.currentForkId })
           })
         }
         const { entry } = yield* reader.GetSlot({ userId: id, slotId: result.slotId })

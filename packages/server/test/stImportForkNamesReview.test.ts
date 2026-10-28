@@ -7,6 +7,10 @@ import { Reader } from "../src/db/Database.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
 import { sendStFile } from "./support/stUpload.ts"
+import { currentForkSql, selectedInSql } from "../src/db/forkState.ts"
+
+/** The version slot `s` shows in its chat's current fork. */
+const SHOWN = selectedInSql(currentForkSql("s.chat_id"), "s")
 
 const config = testConfig()
 const bytes = (lines: unknown[]) => new TextEncoder().encode(lines.map((x) => JSON.stringify(x)).join("\n"))
@@ -26,12 +30,24 @@ const run = Effect.fnUntraced(function* (files: [string, Uint8Array][]) {
   }
   return api
 })
+/**
+ * A name given in the app on the slot that starts a branch, as SetBranchName gave them before
+ * forks (now SetForkName names a fork; ST imports place names on slots until imports map to
+ * forks, spec/FORK-INDEPENDENCE-DELTA.md unit 9): marked as the user's, a local change.
+ */
+const nameHere = (slotId: SlotId, name: string) =>
+  fixtureSql(config.dataDir, [
+    {
+      sql: `UPDATE slots SET branch_name = nullif(?, ''), branch_name_user = 1, row_version = row_version + 1 WHERE id = ?`,
+      params: [name.trim(), slotId]
+    }
+  ])
 const nameOf = Effect.fnUntraced(function* (content: string) {
   const [rows] = yield* fixtureSql(
     config.dataDir,
     [
       {
-        sql: "SELECT s.id, s.branch_name AS name FROM slots s JOIN versions v ON v.id = s.selected_version_id WHERE v.content = ? ORDER BY s.id DESC",
+        sql: `SELECT s.id, s.branch_name AS name FROM slots s JOIN versions v ON v.id = ${SHOWN} WHERE v.content = ? ORDER BY s.id DESC`,
         params: [content]
       }
     ],
@@ -111,10 +127,10 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
     it.effect("does not restore an app-cleared name after ST renames the file", () =>
       Effect.gen(function* () {
         const files = pair("Cleared", "Old ST name")
-        const api = yield* run(files)
+        yield* run(files)
         const slot = yield* nameOf("Cleared fork")
-        yield* api.NameBranch({ slotId: slot.id, name: "My app name" })
-        yield* api.NameBranch({ slotId: slot.id, name: "" })
+        yield* nameHere(slot.id, "My app name")
+        yield* nameHere(slot.id, "")
         assert.isNull((yield* nameOf("Cleared fork")).name)
         yield* run([files[0]!, ["chats/Cleared/New ST name.jsonl", files[1]![1]]])
         assert.strictEqual((yield* nameOf("Cleared fork")).id, slot.id)
@@ -133,7 +149,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
           const api = yield* run(files)
           const old = yield* nameOf(`${folder} fork`)
           assert.strictEqual(old.name, "Named road")
-          if (localName !== null) yield* api.NameBranch({ slotId: old.id, name: localName })
+          if (localName !== null) yield* nameHere(old.id, localName)
           const expected = localName === "" ? undefined : (localName ?? "Named road")
           const user = yield* api.Whoami()
           const reader = yield* Reader
@@ -212,7 +228,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
           const files = pair(folder, "Named road")
           const api = yield* run(files)
           const old = yield* nameOf(`${folder} fork`)
-          if (localName !== null) yield* api.NameBranch({ slotId: old.id, name: localName })
+          if (localName !== null) yield* nameHere(old.id, localName)
           const user = yield* api.Whoami()
           const reader = yield* Reader
           const source = Effect.fnUntraced(function* () {
@@ -306,7 +322,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
             const inner = yield* nameOf(`${folder} inner reply`)
             assert.isNull(originalGreeting.name)
             assert.strictEqual(inner.name, "Inner road")
-            if (localName !== null) yield* api.NameBranch({ slotId: inner.id, name: localName })
+            if (localName !== null) yield* nameHere(inner.id, localName)
             const user = yield* api.Whoami()
             const reader = yield* Reader
             const paths = Effect.fnUntraced(function* () {
@@ -387,9 +403,9 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
     it.effect("keeps a nonempty app name after ST renames the fork", () =>
       Effect.gen(function* () {
         const files = pair("Kept", "Old name")
-        const api = yield* run(files)
+        yield* run(files)
         const slot = yield* nameOf("Kept fork")
-        yield* api.NameBranch({ slotId: slot.id, name: "App name" })
+        yield* nameHere(slot.id, "App name")
         yield* run([files[0]!, ["chats/Kept/New name.jsonl", files[1]![1]]])
         assert.strictEqual((yield* nameOf("Kept fork")).name, "App name")
       })
@@ -397,7 +413,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
     it.effect("import naming preserves the ST selection baseline and local naming preserves a mismatch", () =>
       Effect.gen(function* () {
         const files = pair("Baseline", "Baseline road")
-        const api = yield* run(files)
+        yield* run(files)
         const slot = yield* nameOf("Baseline fork")
         const select = (text: string) =>
           bytes([
@@ -418,7 +434,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
           { readOnly: true }
         )
         assert.strictEqual(aligned![0]!.row_version, aligned![0]!.st_import_row_version)
-        yield* api.NameBranch({ slotId: slot.id, name: "Local road" })
+        yield* nameHere(slot.id, "Local road")
         yield* run([files[0]!, [files[1]![0], select("ST choice two")]])
         assert.strictEqual((yield* nameOf("ST choice one")).id, slot.id)
         assert.strictEqual((yield* nameOf("ST choice one")).name, "Local road")

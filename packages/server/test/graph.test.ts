@@ -206,7 +206,7 @@ describe("message graph", () => {
         userId,
         slotId: turn.slotId,
         versionId: turn.version.id,
-        expectedRowVersion: slot!.rowVersion
+        expectedVersionId: slot!.version.id
       })
       assert.deepStrictEqual((yield* stateAt(turn.slotId)).absent, [])
       assert.deepStrictEqual((yield* stateAt(turn.slotId)).participants, [mira, me])
@@ -254,17 +254,18 @@ describe("message graph", () => {
       })
       const seen = (yield* path()).at(-1)!.rowVersion
 
-      const ok = yield* writer.SelectVersion({
+      yield* writer.SelectVersion({
         userId,
         slotId: turn.slotId,
         versionId: two.id,
-        expectedRowVersion: seen
+        expectedVersionId: turn.version.id
       })
-      assert.strictEqual(ok.rowVersion, seen + 1)
+      // The slot's row version as the fork shows it moves with the fork's choice.
+      assert.isAbove((yield* path()).at(-1)!.rowVersion, seen)
 
-      // A second tab still holding the old row version.
+      // A second tab still showing the old selection.
       const stale = yield* writer
-        .SelectVersion({ userId, slotId: turn.slotId, versionId: turn.version.id, expectedRowVersion: seen })
+        .SelectVersion({ userId, slotId: turn.slotId, versionId: turn.version.id, expectedVersionId: turn.version.id })
         .pipe(Effect.flip)
       assert.strictEqual(stale._tag, "StaleWrite")
       assert.strictEqual((yield* path()).at(-1)!.version.content, "two")
@@ -452,7 +453,7 @@ describe("message graph", () => {
 
   it.live("a swipe in the recycle bin can't be selected", () =>
     Effect.gen(function* () {
-      const { writer, userId, mira, chat, append, path } = yield* setup()
+      const { writer, userId, mira, chat, append } = yield* setup()
       const turn = yield* append(chat.activeLeafSlotId!, generated(mira, "one"))
       const two = yield* writer.AddVersion({
         userId,
@@ -462,9 +463,8 @@ describe("message graph", () => {
         commitDraft: null
       })
       yield* writer.DeleteVersion({ userId, versionId: two.id })
-      const rowVersion = (yield* path()).at(-1)!.rowVersion
       const select = yield* writer
-        .SelectVersion({ userId, slotId: turn.slotId, versionId: two.id, expectedRowVersion: rowVersion })
+        .SelectVersion({ userId, slotId: turn.slotId, versionId: two.id, expectedVersionId: turn.version.id })
         .pipe(Effect.flip)
       assert.strictEqual(select._tag, "NotFound")
     }).pipe(Effect.provide(database()))
@@ -684,7 +684,11 @@ describe("window reads", () => {
           let leaf = chat.activeLeafSlotId!
           const slots: Array<SlotId> = [leaf]
           for (let i = 0; i < 300; i++) {
-            leaf = (yield* append(leaf, i % 2 === 0 ? say(me, `line ${i}`) : generated(mira, `reply ${i}`))).slotId
+            // Below depths 100 and 200 the path takes a later child, so it starts a chain there.
+            const branch = i === 100 || i === 200
+            if (branch) yield* append(leaf, say(me, `side ${i}`))
+            leaf = (yield* append(leaf, i % 2 === 0 ? say(me, `line ${i}`) : generated(mira, `reply ${i}`), branch))
+              .slotId
             slots.push(leaf)
           }
           return { userId, chatId: chat.id, slots }
@@ -699,20 +703,46 @@ describe("window reads", () => {
         raw.close()
         // In a child process: an endless walk can't be stopped any other way.
         assert.strictEqual(yield* probeWindow(dataDir, userId, chatId, "50"), "50")
+        // The walk up chain heads must go strictly up too: the head at depth 201 now hangs
+        // below its own chain's depth 280. A 150-slot window reaches it and stops there.
+        const corrupt = new DatabaseSync(databaseFile(dataDir))
+        corrupt.prepare("UPDATE slots SET parent_slot_id = ? WHERE id = ?").run(slots[280]!, slots[201]!)
+        corrupt.close()
+        assert.strictEqual(yield* probeWindow(dataDir, userId, chatId, "150"), "100")
 
-        // Each step of the walk is an index lookup: only the walk itself is scanned.
+        // Each step of the walk up chain heads is an index lookup, and each segment's slots
+        // a range of the chain index: only the segments themselves are scanned.
         const plan = yield* Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const [text, params] = pathWindow(sql, chatId, slots.at(-1)!, 200).compile()
           const rows = yield* sql.unsafe<{ detail: string }>(`EXPLAIN QUERY PLAN ${text}`, params)
           return rows.map((row) => row.detail)
         }).pipe(Effect.provide(SqliteClient.layer({ filename: databaseFile(dataDir), readonly: true })))
+        // Each slot's selection, the replacement shown for it and the two flags on it each
+        // read the fork's lineage (its own JSON, a few entries) and look each entry's override
+        // up by index (forkState.ts).
         assert.deepStrictEqual(
           plan.filter((step) => step.startsWith("SCAN") && !["SCAN d", "SCAN deleted_chain"].includes(step)),
-          ["SCAN p", "SCAN path"],
+          ["SCAN g", "SCAN g", ...Array<string>(4).fill("SCAN el VIRTUAL TABLE INDEX 1:")],
           plan.join("\n")
         )
-        assert.include(plan, "SEARCH s USING INDEX sqlite_autoindex_slots_1 (id=?)", plan.join("\n"))
+        assert.lengthOf(
+          plan.filter(
+            (step) =>
+              step === "SEARCH eo USING INDEX fork_overrides_point (fork_id=? AND kind=? AND target_id=? AND seq<?)"
+          ),
+          4,
+          plan.join("\n")
+        )
+        assert.includeMembers(
+          plan,
+          [
+            "SEARCH s USING INDEX sqlite_autoindex_slots_1 (id=?)",
+            "SEARCH ph USING INDEX sqlite_autoindex_slots_1 (id=?)",
+            "SEARCH s USING INDEX slots_chain (chain_id=? AND depth>? AND depth<?)"
+          ],
+          plan.join("\n")
+        )
         // An entry's alternates are found by their parent, never by scanning the lane.
         assert.includeMembers(
           plan,

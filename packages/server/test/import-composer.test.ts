@@ -26,11 +26,11 @@ it.live("re-import appending to a chat carries its saved composer", () =>
     const first = yield* api.StartStImport({ unsupported: [] })
     yield* sendStFile(first.importId, path, file(false), { card: "none" })
     const chat = (yield* api.ListChats({ limit: 10, before: null }))[0]!
-    const d = yield* typeInto(api, chat.id, chat.activeLeafSlotId, "SAVED WHILE REIMPORT ARRIVES")
+    const d = yield* typeInto(api, chat.id, null, "SAVED WHILE REIMPORT ARRIVES")
     const second = yield* api.StartStImport({ unsupported: [] })
     const result = yield* sendStFile(second.importId, path, file(true), { card: "none" })
     const moved = yield* api.GetChat({ chatId: chat.id })
-    const c = yield* api.OpenComposer({ chatId: chat.id, tipSlotId: moved.activeLeafSlotId })
+    const c = yield* api.OpenComposer({ chatId: chat.id, forkId: null })
     console.log(
       "IMPORT_HTTP",
       JSON.stringify({

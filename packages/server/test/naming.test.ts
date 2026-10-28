@@ -184,23 +184,23 @@ describe("naming", () => {
     }).pipe(Effect.scoped, Effect.provide(layer))
   )
 
-  it.live("names a branch, lists the alternates with their names, and takes a name off", () =>
+  it.live("names a fork, lists the alternates with their names, and takes a name off", () =>
     Effect.gen(function* () {
       const api = yield* client()
       const chat = yield* api.CreateChat({ title: "Forks" })
       const send = (parentSlotId: SlotId | null, content: string, branch = false) =>
-        Effect.map(
-          posted(api.SendMessage({ chatId: chat.id, parentSlotId, branch, content })),
-          (sent) => sent.entry.slotId
-        )
+        Effect.map(posted(api.SendMessage({ chatId: chat.id, parentSlotId, branch, content })), (sent) => sent.entry)
       const root = yield* send(null, "root")
-      const a = yield* send(root, "the tavern")
-      const b = yield* send(root, "the road", true)
-      const named = yield* api.NameBranch({ slotId: b, name: "  Road\ttrip " })
-      assert.strictEqual(named.branchName, "Road trip")
+      const a = (yield* send(root.slotId, "the tavern")).slotId
+      const road = yield* send(root.slotId, "the road", true)
+      const b = road.slotId
+      assert.isDefined(road.startsForkId)
+      const named = yield* api.NameFork({ forkId: road.startsForkId!, name: "  Road\ttrip " })
+      assert.strictEqual(named.name, "Road trip")
       const leaf = (yield* path(api, chat.id)).at(-1)!
       assert.strictEqual(leaf.slotId, b)
       assert.strictEqual(leaf.branchName, "Road trip")
+      assert.isAbove(leaf.rowVersion, road.rowVersion)
       assert.deepStrictEqual(
         (yield* api.ListBranches({ slotId: a })).map((branch) => [
           branch.slotId,
@@ -213,9 +213,13 @@ describe("naming", () => {
           [b, 1, "Road trip", "the road"]
         ]
       )
-      const cleared = yield* api.NameBranch({ slotId: b, name: " " })
-      assert.isUndefined(cleared.branchName)
-      assert.isAbove(cleared.rowVersion, named.rowVersion)
+      assert.include(
+        (yield* api.ListForks({ chatId: chat.id })).map((fork) => fork.name),
+        "Road trip"
+      )
+      const cleared = yield* api.NameFork({ forkId: road.startsForkId!, name: " " })
+      assert.isNull(cleared.name)
+      assert.isUndefined((yield* path(api, chat.id)).at(-1)!.branchName)
       // A deleted branch is no longer among them.
       yield* api.DeleteBranch({ slotId: a })
       assert.deepStrictEqual(

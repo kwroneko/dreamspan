@@ -62,12 +62,10 @@ function useWrite() {
 function BranchMenu({
   session,
   view,
-  currentLeaf,
   onBranch,
   onJump
 }: {
   session: ChatSession
-  currentLeaf: SlotId | null
   view: ChatView
   onBranch: (entry: PathEntry, index: number) => void
   onJump: (slotId: SlotId) => void
@@ -81,7 +79,7 @@ function BranchMenu({
   const deleted = useDeletedToast()
   const navigate = useNavigate()
   const search = useSearch({ strict: false }) as { panel?: string }
-  const off = view.leafSlotId !== null && currentLeaf !== null && view.leafSlotId !== currentLeaf
+  const off = view.forkId !== null && view.chat !== null && view.forkId !== view.chat.currentForkId
   if (forks.length === 0 && !off) return null
   const last = forks.at(-1)
   const speaker = (entry: PathEntry) =>
@@ -113,15 +111,16 @@ function BranchMenu({
     const result = await session.deleteBranch(fork.slotId)
     if (!result.ok) return showToast({ title: "Couldn't delete the branch", description: result.error.message })
     deleted(result.value)
+    const keep = search.panel ? { panel: search.panel } : {}
     if (sibling) {
+      // The fork through the alternate left at that place opens, unless it's the current one.
       const switched = await session.switchBranch({ ...fork, slotId: sibling.slotId } as PathEntry, index)
       if (!switched.ok) showToast({ title: "Couldn't switch branches", description: switched.error.message })
-      // A deletion reload can still be reading the old tip. Reset and fence that window
-      // after the switch has committed, rather than opening around its deleted anchor.
-      session.showBranch(null, null)
+      else if (switched.value.fork.id !== switched.value.chat.currentForkId)
+        return void navigate({ to: ".", search: { ...keep, fork: switched.value.fork.id }, replace: true })
     }
-    // The old URL may name the deleted branch's tip or fork. Keep the panel, follow latest.
-    void navigate({ to: ".", search: search.panel ? { panel: search.panel } : {}, replace: true })
+    // The old URL may name a fork that went with it. Keep the panel, follow the current fork.
+    void navigate({ to: ".", search: keep, replace: true })
   }
   return (
     <>
@@ -164,7 +163,6 @@ function BranchMenu({
                 <Link
                   to="."
                   search={{
-                    ...(currentLeaf ? { leaf: currentLeaf } : {}),
                     ...(search.panel ? { panel: search.panel } : {})
                   }}
                 />
@@ -205,9 +203,11 @@ function BranchMenu({
                   })}
                 </MenuRadioGroup>
               )}
-              <MenuItem icon="edit" onClick={() => setNaming(fork)}>
-                {shownName === undefined ? `Name ${shownLabel}…` : `Rename “${shownLabel}”…`}
-              </MenuItem>
+              {fork.startsForkId !== undefined && (
+                <MenuItem icon="edit" onClick={() => setNaming(fork)}>
+                  {shownName === undefined ? `Name ${shownLabel}…` : `Rename “${shownLabel}”…`}
+                </MenuItem>
+              )}
               <MenuItem icon="trash" tone="danger" onClick={() => void remove(fork)}>
                 Delete this branch: {shownName === undefined ? shownLabel : `“${shownLabel}”`}
               </MenuItem>
@@ -240,7 +240,7 @@ function BranchMenu({
         error={write.error}
         onSave={async (name) => {
           if (naming === null) return
-          const result = await write.run(() => session.nameBranch(naming.slotId, name))
+          const result = await write.run(() => session.nameFork(naming, name))
           if (!result.ok) return
           setNaming(null)
         }}
@@ -372,11 +372,6 @@ export function ChatHeader({
   const fork = AsyncResult.isSuccess(shell)
     ? shell.value.forks.find((f) => f.chat.id === view.chat?.id && f.leaf === view.leafSlotId)
     : undefined
-  const currentLeaf = AsyncResult.isSuccess(shell)
-    ? (shell.value.forks.find((f) => f.chat.id === view.chat?.id && f.current)?.leaf ??
-      view.chat?.activeLeafSlotId ??
-      null)
-    : (view.chat?.activeLeafSlotId ?? null)
   const name = view.chat ? chatName(importState(view.chat.title).title, characters) : null
   useTitle(name?.name ?? "Chat")
   const names = characters.map((card) => card.name)
@@ -427,7 +422,7 @@ export function ChatHeader({
         </div>
         <div className="flex min-w-0 items-center justify-end gap-1.5 max-sm:w-full sm:gap-3">
           {fork && <PinButton fork={fork} />}
-          <BranchMenu session={session} view={view} currentLeaf={currentLeaf} onBranch={onBranch} onJump={onJump} />
+          <BranchMenu session={session} view={view} onBranch={onBranch} onJump={onJump} />
           <div className="flex min-w-0 flex-wrap items-center justify-end gap-0.5 max-sm:[&_button]:px-1.5 max-sm:[&_button]:text-xs">
             {actions}
           </div>

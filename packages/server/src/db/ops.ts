@@ -26,7 +26,19 @@ import {
 // Every operation on owned data takes the acting user and only touches rows that user
 // owns (DATA-MODEL §1, principle 6). Rows owned by someone else are reported as
 // NotFound, so their existence doesn't leak.
-import { Chat, ChatId, ChatKind, EntityId, NewVersion, PathEntry, SlotId, Version, VersionId } from "@rp/shared/chat.ts"
+import {
+  Chat,
+  ChatId,
+  ChatKind,
+  EntityId,
+  Fork,
+  ForkId,
+  NewVersion,
+  PathEntry,
+  SlotId,
+  Version,
+  VersionId
+} from "@rp/shared/chat.ts"
 import { ContextIssue, VersionError, VersionStatus } from "@rp/shared/chat.ts"
 import {
   Branch,
@@ -165,6 +177,8 @@ const CommitDraft = Schema.NullOr(Schema.Struct({ draftId: Schema.String, sessio
 
 export class AppendResult extends Schema.Class<AppendResult>("AppendResult")({
   slotId: SlotId,
+  /** The fork it went to: the one named, or one made for it (`branch`). */
+  forkId: ForkId,
   version: Version,
   chat: Chat,
   /** The named draft as the write left it: committed, or still active with newer text; null if none was given. */
@@ -279,12 +293,17 @@ export const ImportedMedia = Schema.Struct({
 /** A stored file, at `path` under the data directory. */
 const StoredFile = Schema.Struct({ path: Schema.String, mime: Schema.String, byteSize: Schema.Int })
 
+/** A reply the send queue posted, generating, for the caller to start in its fork. */
+const QueuedReply = Schema.Struct({ slotId: SlotId, versionId: VersionId, forkId: Schema.optionalKey(ForkId) })
+
 /** What the send queue did behind a slot (chatSetupWrites.ts). */
 export const QueueOutcome = Schema.Struct({
   chatId: ChatId,
   /** Slots the queue posted, in order, the next reply's last. */
   posted: Schema.Array(SlotId),
-  next: Schema.NullOr(Schema.Struct({ slotId: SlotId, versionId: VersionId })),
+  next: Schema.NullOr(QueuedReply),
+  /** Replies posted in other forks' queues behind the same slot, each to start as `next` does. */
+  more: Schema.optionalKey(Schema.Array(QueuedReply)),
   /** Entries withdrawn because their reply went to the bin. */
   withdrawn: Schema.Int,
   /** Whether the chat's queue changed, and what's left of it. */
@@ -370,7 +389,13 @@ export class WriteOps extends RpcGroup.make(
     error: StorageError
   }),
   Rpc.make("SaveLcmMaintenance", {
-    payload: { userId: UserId, chatId: ChatId, leafSlotId: SlotId, pins: Schema.String },
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      leafSlotId: SlotId,
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
+      pins: Schema.String
+    },
     error: Schema.Union([StorageError, NotFound])
   }),
   Rpc.make("EnqueueSummaries", {
@@ -378,6 +403,8 @@ export class WriteOps extends RpcGroup.make(
       userId: UserId,
       chatId: ChatId,
       leafSlotId: SlotId,
+      /** The fork it plans in (absent or null: the fork through the leaf, the current one first). */
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       triggerVersionId: Schema.optionalKey(VersionId),
       chunks: Schema.Array(SummaryChunk),
       requestClass: SummaryJob.fields.requestClass
@@ -395,6 +422,8 @@ export class WriteOps extends RpcGroup.make(
       userId: UserId,
       chatId: ChatId,
       leafSlotId: SlotId,
+      /** The fork it plans in (absent or null: the fork through the leaf, the current one first). */
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       triggerVersionId: Schema.optionalKey(VersionId),
       jobs: Schema.Array(PlannedJob),
       requestClass: SummaryJob.fields.requestClass
@@ -600,16 +629,16 @@ export class WriteOps extends RpcGroup.make(
     error: Schema.Union([NotFound, DraftTooLarge, StorageError])
   }),
   /**
-   * The composer at a tip, made empty if there's none, so text typed there has a draft to
-   * name. Starting a branch takes the composer along: `copyFrom`'s text is copied in, unless
-   * the tip already has text of its own. Switching between existing branches doesn't copy
-   * (owner, 2026-10-10).
+   * The composer of a fork (null: the chat's current one), made empty if there's none, so
+   * text typed there has a draft to name. Starting a branch takes the composer along:
+   * `copyFrom`'s text is copied in, unless the fork already has text of its own. Switching
+   * between existing branches doesn't copy (owner, 2026-10-10).
    */
   Rpc.make("OpenComposer", {
     payload: {
       userId: UserId,
       chatId: ChatId,
-      tipSlotId: Schema.NullOr(SlotId),
+      forkId: Schema.NullOr(ForkId),
       copyFrom: Schema.NullOr(Schema.String)
     },
     success: Draft,
@@ -699,10 +728,30 @@ export class WriteOps extends RpcGroup.make(
     success: Schema.Array(Chat),
     error: Schema.Union([NotFound, StorageError])
   }),
-  /** Names the branch a live slot of the user's starts; empty: no name. */
-  Rpc.make("SetBranchName", {
-    payload: { userId: UserId, slotId: SlotId, name: Schema.String },
-    success: Schema.Void,
+  /**
+   * Names a live fork of the user's; empty: no name. Its first message (`startSlotId`, null
+   * when it has none of its own), which shows the name among its alternates, gets a new row
+   * version, so open tabs take the name.
+   */
+  Rpc.make("SetForkName", {
+    payload: { userId: UserId, forkId: ForkId, name: Schema.String },
+    success: Schema.Struct({ fork: Fork, startSlotId: Schema.NullOr(SlotId) }),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** Pins a live fork of the user's, or unpins it: pinned forks are its chat's peers (UX-REWORK §3). */
+  Rpc.make("SetForkPinned", {
+    payload: { userId: UserId, forkId: ForkId, pinned: Schema.Boolean },
+    success: Fork,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * A fork of `fromForkId` (null: the current one) at `atSlotId`, a message on its path
+   * (null: before the first): its history is the path to there, and it becomes the chat's
+   * current fork (spec/FORK-INDEPENDENCE-DELTA.md §2.1).
+   */
+  Rpc.make("CreateFork", {
+    payload: { userId: UserId, chatId: ChatId, fromForkId: Schema.NullOr(ForkId), atSlotId: Schema.NullOr(SlotId) },
+    success: Schema.Struct({ fork: Fork, chat: Chat }),
     error: Schema.Union([NotFound, StorageError])
   }),
   Rpc.make("DeleteChat", {
@@ -1057,17 +1106,19 @@ export class WriteOps extends RpcGroup.make(
     error: Schema.Union([NotFound, StorageError])
   }),
   /**
-   * Adds a slot under `parentSlotId` (null: a root) and makes it the chat's active
-   * leaf. The first message turns a pending chat active.
+   * Adds a slot under `parentSlotId` (null: a root) in fork `forkId` (absent or null: the
+   * current one) and makes it the fork's tip; the fork becomes current. The first message
+   * turns a pending chat active.
    *
-   * A branch is explicit (DESIGN §3.2): without `branch`, the parent must be the chat's
-   * active leaf, so a tab that missed a newer message gets LeafMoved (with the current
-   * leaf) instead of silently forking the conversation.
+   * A branch is explicit (DESIGN §3.2): without `branch`, the parent must be the fork's
+   * tip, so a tab that missed a newer message gets LeafMoved (with the tip) instead of
+   * silently forking the conversation. With it, a new fork is made at the parent.
    */
   Rpc.make("AppendMessage", {
     payload: {
       userId: UserId,
       chatId: ChatId,
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       parentSlotId: Schema.NullOr(SlotId),
       branch: Schema.Boolean,
       version: NewVersion,
@@ -1082,14 +1133,32 @@ export class WriteOps extends RpcGroup.make(
    * version has no source.
    */
   Rpc.make("AddVersion", {
-    payload: { userId: UserId, slotId: SlotId, version: NewVersion, select: Schema.Boolean, commitDraft: CommitDraft },
+    payload: {
+      userId: UserId,
+      slotId: SlotId,
+      /** The fork it's added in, which `select` selects it in (absent or null: the current one). */
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
+      version: NewVersion,
+      select: Schema.Boolean,
+      commitDraft: CommitDraft
+    },
     success: Version,
     error: Schema.Union([NotFound, StorageError])
   }),
-  /** Changes which version a slot shows. Never touches any other slot (invariant 3). */
+  /**
+   * Changes which version a slot shows in a fork (absent or null: the current one), if it
+   * still shows `expectedVersionId` there. Never touches any other slot (invariant 3) or
+   * fork (spec/FORK-INDEPENDENCE-DELTA.md §2.2).
+   */
   Rpc.make("SelectVersion", {
-    payload: { userId: UserId, slotId: SlotId, versionId: VersionId, expectedRowVersion: Schema.Int },
-    success: Schema.Struct({ rowVersion: Schema.Int }),
+    payload: {
+      userId: UserId,
+      slotId: SlotId,
+      versionId: VersionId,
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
+      expectedVersionId: VersionId
+    },
+    success: Schema.Struct({ forkId: ForkId }),
     error: Schema.Union([NotFound, StaleWrite, StorageError])
   }),
   /**
@@ -1175,13 +1244,15 @@ export class WriteOps extends RpcGroup.make(
   }),
   // --- Chats: the chat RPCs beyond the graph operations above (writes.ts).
   /**
-   * A new version of a slot, selected, if the slot is still at the row version the user
-   * saw: a swipe, an edit saved as a new version, or the user's own version.
+   * A new version of a slot, selected in a fork (absent or null: the current one), if the
+   * slot is still at the row version the user saw there: a swipe, an edit saved as a new
+   * version, or the user's own version. The fork becomes current.
    */
   Rpc.make("AddSelectedVersion", {
     payload: {
       userId: UserId,
       slotId: SlotId,
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       version: NewVersion,
       expectedRowVersion: Schema.Int,
       /** For a swipe with a model chosen ("Regenerate with…"): that model, recorded on it at once. */
@@ -1193,14 +1264,20 @@ export class WriteOps extends RpcGroup.make(
        */
       commitDraft: Schema.optionalKey(CommitDraft)
     },
-    success: Schema.Struct({ chatId: ChatId, version: Version }),
+    success: Schema.Struct({ chatId: ChatId, forkId: ForkId, version: Version }),
     error: Schema.Union([NotFound, StaleWrite, StorageError])
   }),
-  /** Changes a finished user-written version in place; the trigger keeps the earlier text. */
+  /**
+   * Changes a finished user-written version, as fork `forkId` shows it (absent or null: the
+   * fork through its slot), in place when no other fork shows it: the trigger keeps the
+   * earlier text. Otherwise the fork gets a copy with the new text, standing in for the
+   * message's own version there (spec/FORK-INDEPENDENCE-DELTA.md §2.2), which is returned.
+   */
   Rpc.make("AmendVersion", {
     payload: {
       userId: UserId,
       versionId: VersionId,
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       content: Schema.String,
       expectedRowVersion: Schema.Int,
       /** The edit's draft (`version_edit`, this version), committed with it if it still holds that text. */
@@ -1227,15 +1304,20 @@ export class WriteOps extends RpcGroup.make(
     success: Version,
     error: Schema.Union([NotFound, StorageError])
   }),
-  /** Stars a live version or hides it from the arrows' cycle, or undoes either; one write. */
+  /**
+   * Stars a live version or hides it from the arrows' cycle, or undoes either, in fork
+   * `forkId` (absent or null: the fork through its slot); one write. Returns the version as
+   * that fork shows it.
+   */
   Rpc.make("SetVersionFlags", {
     payload: {
       userId: UserId,
       versionId: VersionId,
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       starred: Schema.optionalKey(Schema.Boolean),
       hidden: Schema.optionalKey(Schema.Boolean)
     },
-    success: Schema.Struct({ chatId: ChatId, version: Version }),
+    success: Schema.Struct({ chatId: ChatId, forkId: ForkId, version: Version }),
     error: Schema.Union([NotFound, StorageError])
   }),
   /** A judge model's finding on a finished model version: its text stays (spec/LCM.md §2.4). */
@@ -1291,6 +1373,8 @@ export class WriteOps extends RpcGroup.make(
     payload: {
       userId: UserId,
       chatId: ChatId,
+      /** The fork it's sent in, as AppendMessage takes it. */
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       parentSlotId: Schema.NullOr(SlotId),
       branch: Schema.Boolean,
       kind: Schema.Literals(["message", "generate"]),
@@ -1337,7 +1421,13 @@ export class WriteOps extends RpcGroup.make(
    * version that isn't generating lets it post, as a generation's end does.
    */
   Rpc.make("SelectAndDrain", {
-    payload: { userId: UserId, slotId: SlotId, versionId: VersionId, expectedRowVersion: Schema.Int },
+    payload: {
+      userId: UserId,
+      slotId: SlotId,
+      versionId: VersionId,
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
+      expectedVersionId: VersionId
+    },
     success: QueueOutcome,
     error: Schema.Union([NotFound, StaleWrite, StorageError])
   }),
@@ -1635,6 +1725,8 @@ export class WriteOps extends RpcGroup.make(
       versionId: VersionId,
       rolloutId: Schema.String,
       leafSlotId: Schema.NullOr(SlotId),
+      /** The fork it generates in (absent or null: the fork through the leaf, the current one first). */
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       connectionId: ConnectionId,
       modelId: ModelId,
       snapshot: Schema.String,
@@ -1730,14 +1822,22 @@ export class WriteOps extends RpcGroup.make(
   }),
   // --- Branches (DESIGN §3.2).
   /**
-   * Moves the chat's active leaf to one of its live slots, if the chat is still at the row
-   * version the caller read the slot at. The composer stays where it was: switching
-   * branches carries no text (DESIGN §6.2).
+   * The fork to open for the alternate at `index` among `slotId`'s (the reachable siblings,
+   * oldest first): the live fork through it that was current most recently. With none, one
+   * is made there, from `forkId` (the fork shown), with its tip on that alternate's newest
+   * replies. Switching changes no fork's history and doesn't make the fork current; nor
+   * does it carry composer text (DESIGN §6.2).
    */
-  Rpc.make("SetActiveLeaf", {
-    payload: { userId: UserId, chatId: ChatId, slotId: SlotId, expectedRowVersion: Schema.Int },
-    success: Chat,
-    error: Schema.Union([NotFound, StaleWrite, StorageError])
+  Rpc.make("SwitchBranch", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      slotId: SlotId,
+      index: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+      forkId: Schema.NullOr(ForkId)
+    },
+    success: Schema.Struct({ slotId: SlotId, fork: Fork, chat: Chat }),
+    error: Schema.Union([NotFound, StorageError])
   })
 ) {}
 
@@ -1833,14 +1933,20 @@ export class ReadOps extends RpcGroup.make(
     payload: {
       userId: UserId,
       chatId: ChatId,
+      /** Read the fork's path (absent or null: the current fork's), unless `leafSlotId` names a leaf. */
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       leafSlotId: Schema.NullOr(SlotId),
       limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: MAX_PATH_WINDOW }))
     },
     success: Schema.Struct({ entries: Schema.Array(PathEntry), olderLeafSlotId: Schema.NullOr(SlotId) }),
     error: Schema.Union([NotFound, StorageError])
   }),
+  /**
+   * A slot's own versions as fork `forkId` shows them (absent or null: the fork through it,
+   * forkAt): a copy it amended in its original's place, with the fork's stars and picker flags.
+   */
   Rpc.make("ListVersions", {
-    payload: { userId: UserId, slotId: SlotId },
+    payload: { userId: UserId, slotId: SlotId, forkId: Schema.optionalKey(Schema.NullOr(ForkId)) },
     success: Schema.Array(Version),
     error: Schema.Union([NotFound, StorageError])
   }),
@@ -1853,7 +1959,13 @@ export class ReadOps extends RpcGroup.make(
    * keeps its other entities).
    */
   Rpc.make("StateEventsAt", {
-    payload: { userId: UserId, chatId: ChatId, slotId: Schema.NullOr(SlotId) },
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      slotId: Schema.NullOr(SlotId),
+      /** Whose selections decide the version-attached events (absent or null: the fork through the slot, forkAt). */
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId))
+    },
     success: Schema.Array(FoldableEvent),
     error: Schema.Union([NotFound, StorageError])
   }),
@@ -2080,6 +2192,7 @@ export class ReadOps extends RpcGroup.make(
     payload: {
       userId: UserId,
       chatId: ChatId,
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       leafSlotId: Schema.NullOr(SlotId),
       range: PathRange,
       limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: MAX_PATH_WINDOW }))
@@ -2094,8 +2207,9 @@ export class ReadOps extends RpcGroup.make(
     error: Schema.Union([NotFound, StorageError])
   }),
   /** One live slot with its selected version, as a path shows it, and its chat. */
+  /** A slot as a fork shows it (absent or null: the fork through it, forkAt). */
   Rpc.make("GetSlot", {
-    payload: { userId: UserId, slotId: SlotId },
+    payload: { userId: UserId, slotId: SlotId, forkId: Schema.optionalKey(Schema.NullOr(ForkId)) },
     success: Schema.Struct({ chatId: ChatId, entry: PathEntry }),
     error: Schema.Union([NotFound, StorageError])
   }),
@@ -2245,6 +2359,8 @@ export class ReadOps extends RpcGroup.make(
       userId: UserId,
       chatId: ChatId,
       leafSlotId: SlotId,
+      /** The fork it plans in (absent or null: the fork through the leaf, the current one first). */
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       /** Without one, only new chunks are planned. A reply may start re-summarizing; a finished job only continues it. */
       reason: Schema.optionalKey(Schema.Literals(["reply", "completion"]))
     },
@@ -2265,6 +2381,8 @@ export class ReadOps extends RpcGroup.make(
       chatId: ChatId,
       slotId: SlotId,
       versionId: VersionId,
+      /** The fork whose path and choices it's assembled from (absent or null: the fork through the slot). */
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       now: Schema.Number,
       timeZone: Schema.String,
       frozen: Schema.NullOr(Schema.Record(Schema.String, Schema.Record(Schema.String, Schema.String)))
@@ -2330,25 +2448,16 @@ export class ReadOps extends RpcGroup.make(
   Rpc.make("GetCardPromptUse", { payload: { userId: UserId }, success: CardPromptUse, error: StorageError }),
   /** The user's display choices; the defaults where none are stored. */
   Rpc.make("GetDisplayPrefs", { payload: { userId: UserId }, success: DisplayPrefs, error: StorageError }),
-  // --- Branches (DESIGN §3.2).
-  /**
-   * Where switching to the branch at `index` among `slotId`'s alternates leads: that
-   * sibling, the tip below it on its newest replies (as ReadPath's Around opens it), and
-   * the chat's row version, for SetActiveLeaf.
-   */
-  Rpc.make("BranchTip", {
-    payload: {
-      userId: UserId,
-      chatId: ChatId,
-      slotId: SlotId,
-      index: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
-    },
-    success: Schema.Struct({ slotId: SlotId, tipSlotId: SlotId, chatRowVersion: Schema.Int }),
+  // --- Branches (DESIGN §3.2) and forks.
+  /** The live forks of a chat of the user's, most recently current first. */
+  Rpc.make("ListForks", {
+    payload: { userId: UserId, chatId: ChatId },
+    success: Schema.Array(Fork),
     error: Schema.Union([NotFound, StorageError])
   }),
-  /** The alternates at a live slot's place, as BranchTip counts them, oldest first, with names. */
+  /** The alternates at a live slot's place, as SwitchBranch counts them, oldest first, with names. */
   Rpc.make("ListBranches", {
-    payload: { userId: UserId, slotId: SlotId },
+    payload: { userId: UserId, slotId: SlotId, forkId: Schema.optionalKey(Schema.NullOr(ForkId)) },
     success: Schema.Array(Branch),
     error: Schema.Union([NotFound, StorageError])
   })

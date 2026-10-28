@@ -2,7 +2,7 @@ import { recordHistoryReduction } from "./historyChanges.ts"
 // What the writer's chat operations share (writes.ts, chatSetupWrites.ts): ownership
 // checks, inserting versions, slots and state events, and appending a message. Each runs
 // inside the calling operation's transaction.
-import type { ChatId, EntityId, NewVersion, SlotId, VersionId } from "@rp/shared/chat.ts"
+import type { ChatId, EntityId, ForkId, NewVersion, SlotId, VersionId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import type { FoldableEvent, StateEventData } from "@rp/shared/state.ts"
@@ -11,7 +11,9 @@ import type { SqlClient } from "effect/sql"
 import type { Bin } from "./bin.ts"
 import type { CommitDraft } from "./drafts.ts"
 import { AppendResult, LeafMoved, NotFound, StaleWrite } from "./ops.ts"
-import { versionExtras, type ChatRow, toChat, toVersion, type VersionRow } from "./rows.ts"
+import { forkThrough, onPath } from "./forks.ts"
+import { insertFork, originalSql, replacedIn, selectionIn, writeSelect } from "./forkState.ts"
+import { versionExtras, type ChatRow, type ForkRow, toChat, toVersion, type VersionRow } from "./rows.ts"
 import { checkStateReferences } from "./stateRefs.ts"
 
 export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"]) => {
@@ -88,27 +90,40 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
       })} RETURNING *`.pipe(Effect.map(([row]) => row!))
     )
 
-  /** A new slot under `parent` with its first version, selected; more versions may follow. */
+  /**
+   * A new slot under `parent` with its first version, and `more` after it; `selected` of
+   * them is its selection, which no write changes afterwards (a fork selects with an
+   * override). `forkId` is the fork appending it (provenance; null: the chat's current fork).
+   */
   const insertSlot = (
     chatId: string,
     laneId: string,
     parent: { id: string; depth: number } | null,
     version: NewVersion,
-    at: number
+    at: number,
+    forkId: string | null = null,
+    more: ReadonlyArray<NewVersion> = [],
+    selected = 0
   ) =>
     Effect.gen(function* () {
       const slotId = uuidv7()
-      const row = yield* insertVersion(slotId, 0, version, at)
+      const fork =
+        forkId ??
+        (yield* sql<{ id: string | null }>`SELECT current_fork_id AS id FROM chats WHERE id = ${chatId}`)[0]?.id ??
+        null
+      const rows = [yield* insertVersion(slotId, 0, version, at)]
+      for (const [i, next] of more.entries()) rows.push(yield* insertVersion(slotId, i + 1, next, at))
       yield* sql`INSERT INTO slots ${sql.insert({
         id: slotId,
         chat_id: chatId,
         lane_id: laneId,
         parent_slot_id: parent?.id ?? null,
         depth: parent ? parent.depth + 1 : 0,
-        selected_version_id: row.id,
+        selected_version_id: rows[selected]!.id,
+        fork_id: fork,
         created_at: at
       })}`
-      return { slotId, version: row }
+      return { slotId, version: rows[0]!, selected: rows[selected]! }
     })
 
   /** A user's state change, after checking everything its value names. */
@@ -142,25 +157,66 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
       return { id, seq: next!.n }
     })
 
+  /** A live fork of the user's chat: `forkId`, or the chat's current one when null. */
+  const ownedFork = (userId: UserId, chatId: ChatId, forkId: ForkId | null) =>
+    sql<ForkRow>`
+      SELECT f.* FROM forks f JOIN chats c ON c.id = f.chat_id
+      WHERE f.id = coalesce(${forkId}, c.current_fork_id) AND c.id = ${chatId} AND c.owner_user_id = ${userId}
+        AND c.deleted_at IS NULL AND f.deleted_at IS NULL`.pipe(
+      Effect.flatMap(([row]) =>
+        row ? Effect.succeed(row) : Effect.fail(new NotFound({ entity: "fork", id: forkId ?? chatId }))
+      )
+    )
+
   /**
-   * A new slot under `parentSlotId` (null: the first message), becoming the active leaf,
-   * unless `keepLeaf` (a message posted on a branch the user has moved away from).
-   * Without `branch` the parent must be the active leaf. `commitDraft` is committed with it.
+   * A new fork of `from` at `atSlotId` (null: before the first message), which must be on
+   * its path. Its tip is that message until something is sent in it, and it becomes the
+   * chat's current fork: the one created by forking (UX-REWORK §3).
+   */
+  const createFork = (chatId: string, from: ForkRow, atSlotId: string | null, at: number, checked = false) =>
+    Effect.gen(function* () {
+      if (!checked && atSlotId !== null && !(yield* onPath(sql, chatId, from.tip_slot_id, atSlotId)))
+        return yield* new NotFound({ entity: "slot", id: atSlotId })
+      const row = yield* insertFork(sql, { chatId, parent: from, baseSlotId: atSlotId, tipSlotId: atSlotId, at })
+      yield* sql`UPDATE chats SET current_fork_id = ${row.id}, row_version = row_version + 1 WHERE id = ${chatId}`
+      return row
+    })
+
+  /** The fork was chatted in: it's the chat's current fork now (UX-REWORK §3, owner 2026-10-27). */
+  const chatIn = (forkId: string, at: number) =>
+    Effect.gen(function* () {
+      yield* sql`UPDATE forks SET last_chatted_at = ${at}, row_version = row_version + 1 WHERE id = ${forkId}`
+      yield* sql`UPDATE chats SET current_fork_id = ${forkId}, row_version = row_version + 1
+        WHERE id = (SELECT chat_id FROM forks WHERE id = ${forkId})`
+    })
+
+  /**
+   * A new slot under `parentSlotId` (null: the first message) in fork `forkId` (null: the
+   * current one), becoming its tip. The fork is chatted in, so it becomes the chat's
+   * current fork, unless the queue posts it (`chatted: false`). Without `branch` the parent
+   * must be the fork's tip, and a tab that missed a newer message gets `LeafMoved` with the
+   * tip. With `branch` the parent can be any live slot: a new fork is made there first
+   * (CreateFork), from this fork if the parent is on its path, else from the most recent
+   * fork through it, unless the parent is that fork's tip, which it then just continues.
+   * `commitDraft` is committed with it.
    */
   const appendMessage = (params: {
     readonly userId: UserId
     readonly chatId: ChatId
+    readonly forkId?: ForkId | null
     readonly parentSlotId: SlotId | null
     readonly branch: boolean
     readonly version: NewVersion
     readonly commitDraft: CommitDraft | null
-    readonly keepLeaf?: boolean
+    /** False for the queue posting what was sent earlier: the fork was chatted in then. */
+    readonly chatted?: boolean
   }) =>
     Effect.gen(function* () {
       const { userId, chatId, parentSlotId, branch, version, commitDraft } = params
-      const keepLeaf = params.keepLeaf ?? false
+      const chatted = params.chatted ?? true
       const at = Date.now()
-      const current = yield* ownedChat(userId, chatId)
+      yield* ownedChat(userId, chatId)
+      let fork = yield* ownedFork(userId, chatId, params.forkId ?? null)
       yield* checkSpeaker(userId, version.speakerEntityId)
       let parent: { id: string; depth: number; lane_id: string } | null = null
       if (parentSlotId !== null) {
@@ -169,68 +225,108 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
         if (!row) return yield* new NotFound({ entity: "slot", id: parentSlotId })
         parent = row
       }
-      if (!branch && parentSlotId !== current.active_leaf_slot_id) {
-        return yield* new LeafMoved({ chatId, activeLeafSlotId: current.active_leaf_slot_id })
+      if (branch) {
+        const from =
+          parentSlotId === null || (yield* onPath(sql, chatId, fork.tip_slot_id, parentSlotId))
+            ? fork
+            : ((yield* forkThrough(sql, chatId, parentSlotId)) ?? fork)
+        // At a fork's own tip it just continues. Elsewhere it makes a fork, checked above: a
+        // parent no live fork's path holds (below a deleted branch) still takes a branch, as
+        // it did before forks.
+        fork = from.tip_slot_id === parentSlotId ? from : yield* createFork(chatId, from, parentSlotId, at, true)
+      } else if (parentSlotId !== fork.tip_slot_id) {
+        return yield* new LeafMoved({ chatId, activeLeafSlotId: fork.tip_slot_id })
       }
       const laneId =
         parent?.lane_id ??
         (yield* sql<{
           id: string
         }>`SELECT id FROM lanes WHERE chat_id = ${chatId} ORDER BY created_at, id LIMIT 1`)[0]!.id
-      const { slotId, version: row } = yield* insertSlot(chatId, laneId, parent, version, at)
+      const { slotId, version: row } = yield* insertSlot(chatId, laneId, parent, version, at, fork.id)
+      yield* sql`UPDATE forks SET tip_slot_id = ${slotId}, row_version = row_version + 1 WHERE id = ${fork.id}`
+      if (chatted) yield* chatIn(fork.id, at)
       const [chat] = yield* sql<ChatRow>`
-          UPDATE chats SET active_leaf_slot_id = ${keepLeaf ? current.active_leaf_slot_id : slotId}, current_leaf_slot_id = ${slotId}, last_message_at = ${at},
+          UPDATE chats SET last_message_at = ${at},
             status = CASE WHEN status = 'pending' THEN 'active' ELSE status END,
             row_version = row_version + 1
           WHERE id = ${chatId} RETURNING *`
+      // The composer is the fork's, so text typed while something else was appended stays
+      // in view without moving.
       const committed = yield* drafts.commit(userId, commitDraft, {
         targetKind: "composer",
         targetId: chatId,
         content: row.writer === "model" ? (row.direction ?? "") : row.content
       })
-      // The composer at the old tip moves to the new one: text typed while something
-      // else was appended stays in view, and a send's recovery text goes along with it.
-      const movedRecovery = yield* drafts.moveComposer(userId, chatId, parentSlotId, slotId)
       return new AppendResult({
         slotId: slotId as SlotId,
+        forkId: fork.id as ForkId,
         version: toVersion(row),
         chat: toChat(chat!),
-        // The named draft as the write left it, wherever its tip is now.
+        // The named draft as the write left it.
         draft: committed.draft === null ? null : yield* drafts.ownDraft(userId, committed.draft.id),
-        recovered: committed.recovered + movedRecovery
+        recovered: committed.recovered
       })
     })
 
-  /** Selects a live version of the slot, if the slot is still at the row version the user saw. */
-  const selectVersion = (userId: UserId, slotId: SlotId, versionId: VersionId, expectedRowVersion: number) =>
+  /**
+   * A fork of the slot's chat (`forkId`, null: the current one) and the slot as that fork
+   * shows it: its selection there, the version shown for it, and its row version there, which
+   * is the slot's plus the newer seq of the selection's and the replacement's overrides
+   * (`selectionIn`), so a choice made in another fork never makes this one's stale
+   * (spec/FORK-INDEPENDENCE-DELTA.md §2.2).
+   */
+  const slotInFork = (userId: UserId, slotId: SlotId, forkId: ForkId | null) =>
     Effect.gen(function* () {
       const slot = yield* ownedSlot(userId, slotId)
-      const [version] = yield* sql<{
-        id: string
-        content: string
-      }>`SELECT id, content FROM versions WHERE id = ${versionId} AND slot_id = ${slotId} AND deleted_at IS NULL`
-      if (!version) return yield* new NotFound({ entity: "version", id: versionId })
-      if (slot.row_version !== expectedRowVersion) {
-        return yield* new StaleWrite({
-          entity: "slot",
-          id: slotId,
-          expected: expectedRowVersion,
-          actual: slot.row_version
-        })
+      const fork = yield* ownedFork(userId, slot.chat_id as ChatId, forkId)
+      const selection = (yield* selectionIn(sql, fork.id, slotId))!
+      return {
+        slot,
+        fork,
+        selected: selection.version_id as VersionId,
+        shown: selection.shown_id as VersionId,
+        rowVersion: slot.row_version + selection.seq
       }
-      yield* recordHistoryReduction(sql, slotId, version.content)
-      const [updated] = yield* sql<{ row_version: number }>`
-          UPDATE slots SET selected_version_id = ${versionId}, row_version = row_version + 1
-          WHERE id = ${slotId} RETURNING row_version`
-      return { rowVersion: updated!.row_version, chatId: slot.chat_id as ChatId }
+    })
+
+  /**
+   * Fork `forkId` (null: the current one) shows a live version of the slot from now on, if
+   * the fork still showed the version the user saw there (`expectedVersionId`). Either may be
+   * a fork's copy standing in for one of the message's own versions: that one is selected.
+   */
+  const selectVersion = (
+    userId: UserId,
+    slotId: SlotId,
+    versionId: VersionId,
+    forkId: ForkId | null,
+    expectedVersionId: VersionId
+  ) =>
+    Effect.gen(function* () {
+      const { slot, fork, selected, shown, rowVersion } = yield* slotInFork(userId, slotId, forkId)
+      const [version] = yield* sql<{ id: string; content: string }>`
+        SELECT o.id, (SELECT content FROM versions WHERE id = ${replacedIn(sql, fork.id, "o.id")}) AS content
+        FROM versions v JOIN versions o ON o.id = ${sql.literal(originalSql("v"))}
+        WHERE v.id = ${versionId} AND v.slot_id = ${slotId} AND v.deleted_at IS NULL AND o.deleted_at IS NULL`
+      if (!version) return yield* new NotFound({ entity: "version", id: versionId })
+      if (selected !== expectedVersionId && shown !== expectedVersionId) {
+        return yield* new StaleWrite({ entity: "slot", id: slotId, expected: rowVersion, actual: rowVersion })
+      }
+      if (selected === version.id) return { chatId: slot.chat_id as ChatId, forkId: fork.id as ForkId }
+      yield* recordHistoryReduction(sql, slotId, version.content, null, fork.id)
+      yield* writeSelect(sql, { id: fork.id, chatId: slot.chat_id }, slotId, version.id)
+      return { chatId: slot.chat_id as ChatId, forkId: fork.id as ForkId }
     })
 
   return {
     found,
+    slotInFork,
     selectVersion,
     ownedChat,
     ownedSlot,
     ownedVersion,
+    ownedFork,
+    createFork,
+    chatIn,
     checkSpeaker,
     insertVersion,
     insertSlot,

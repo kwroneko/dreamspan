@@ -1,4 +1,4 @@
-// The composer's text as a server draft (DESIGN §6.2): one per branch tip, saved while the
+// The composer's text as a server draft (DESIGN §6.2): one per fork, saved while the
 // user types, read back on a reload or another device, with its undo history on the server.
 // It follows the editors' rules (features/editor/store.ts): a copy in this browser while a
 // change isn't on the server (backup.ts), a keepalive send as the page closes, a warning
@@ -6,9 +6,8 @@
 //
 // The rules that keep it lossless are ARCHITECTURE §3.10's invariants. Here:
 // - The box's text belongs to the draft it was typed into (`base`), which is kept apart from
-//   the tip the chat view asks for: a draft moves with its tip when a message is appended
-//   there, so every save names the draft (its id, row version and session), and the server
-//   puts the text wherever that draft is now.
+//   the fork the chat view asks for: every save names the draft (its id, row version and
+//   session), and the server puts the text on that draft.
 // - `base` is the draft as of a text this box showed or sent, never just a newer version:
 //   it changes only together with the text, or when the server answers with exactly the
 //   text this tab sent. So a save from here is typing on the draft only if the box's text
@@ -16,7 +15,7 @@
 // - A copy in this browser is deleted only once the server has acknowledged it, or when a
 //   newer copy of the same draft, typed from its text, replaces it.
 // Server calls run one at a time, in order.
-import type { SlotId } from "@rp/shared/chat.ts"
+import type { ForkId } from "@rp/shared/chat.ts"
 import type { SendResult } from "@rp/shared/chatApi.ts"
 import { Draft, type DraftState } from "@rp/shared/drafts.ts"
 import type { ReplayConflict } from "../editor/backup.ts"
@@ -44,7 +43,7 @@ const RETRY_MS = 2000
 
 export interface ComposerState {
   readonly text: string
-  /** The tip's text is loaded, so the box takes input. */
+  /** The fork's text is loaded, so the box takes input. */
   readonly ready: boolean
   /** A replay displaced text saved elsewhere; kept until acknowledged or switched. */
   readonly conflict: ReplayConflict | null
@@ -58,9 +57,9 @@ export interface ComposerState {
   readonly draftId: string | null
 }
 
-/** The draft a send takes its text from: its tip, and what commits it (chatApi.ts `composer`). */
+/** The draft a send takes its text from: its fork, and what commits it (chatApi.ts `composer`). */
 export interface ComposerSource {
-  readonly tip: SlotId | null
+  readonly fork: ForkId | null
   readonly draftId: string
   readonly session: number
   readonly text: string
@@ -75,11 +74,11 @@ const COPIES = "composer:"
 const copyTarget = (chatId: string) => `${COPIES}${chatId}`
 /** The draft's text as the box would show it: an ended draft holds none. */
 const shown = (draft: Draft | null) => (draft?.status === "active" ? draft.content : "")
-const tipOf = (draft: Draft) => (draft.key.field === "" ? null : (draft.key.field as SlotId))
+const forkOf = (draft: Draft) => (draft.key.field === "" ? null : (draft.key.field as ForkId))
 
 export class ComposerDraft {
-  /** The tip the chat view shows, which the box is on its way to. */
-  private requested: SlotId | null | undefined = undefined
+  /** The fork the chat view shows (null: the chat's current one), which the box is on its way to. */
+  private requested: ForkId | null | undefined = undefined
   /** The draft the text in the box was typed into, as of a text this tab showed or sent. */
   private base: Draft | null = null
   private text = ""
@@ -212,47 +211,46 @@ export class ComposerDraft {
     this.text = shown(draft)
   }
 
-  // --- The tip
+  // --- The fork
 
   /**
-   * The path's leaf, as the chat view has it. `appended`: messages were appended below the
-   * last tip, so its draft most likely moved here, and the box stays open while that's
-   * checked. `branch`: a branch is being started here, whose composer starts as a copy.
+   * The fork shown, as the chat view has it. `branch`: it's being started here, so its
+   * composer starts as a copy. The same fork again (its tip moved: a message was appended,
+   * or one deleted) reads its draft again with the box open, for text another tab typed.
    */
-  setTip(tip: SlotId | null, appended: boolean, branch: boolean) {
-    if (tip === this.requested) return
-    this.requested = tip
-    if (!appended || this.base === null) {
+  setFork(fork: ForkId | null, branch: boolean) {
+    if (fork !== this.requested) {
+      this.requested = fork
       this.ready = false
       this.emit()
-    }
-    void this.enqueue(() => this.goTo(tip, branch))
+    } else if (this.base === null) return
+    void this.enqueue(() => this.goTo(fork, branch))
   }
 
-  private async goTo(tip: SlotId | null, branch: boolean): Promise<void> {
-    if (this.requested !== tip) return
+  private async goTo(fork: ForkId | null, branch: boolean): Promise<void> {
+    if (this.requested !== fork) return
     // A send taken from the box before this step ran is answered first.
-    if (this.held) return void this.enqueue(() => this.goTo(tip, branch))
+    if (this.held) return void this.enqueue(() => this.goTo(fork, branch))
     // A branch starts from the composer as the server has it, so what's typed is saved first.
     if (branch) await this.save()
     const copyFrom = branch && this.base !== null ? { copyFrom: this.base.id } : {}
     const opened = await this.session.call((client) =>
-      client("OpenComposer", { chatId: this.chatId, tipSlotId: tip, ...copyFrom })
+      client("OpenComposer", { chatId: this.chatId, forkId: fork, ...copyFrom })
     )
-    // The chat view reports why a read failed. A chat or tip that's gone stays shut; anything
+    // The chat view reports why a read failed. A chat or fork that's gone stays shut; anything
     // else (the connection, say) is tried again.
     if (!opened.ok) {
       if (opened.error.tag !== "NotFound") {
-        this.env.setTimer(() => void this.enqueue(() => this.goTo(tip, branch)), RETRY_MS)
+        this.env.setTimer(() => void this.enqueue(() => this.goTo(fork, branch)), RETRY_MS)
       }
       return
     }
     const draft = opened.value
     if (this.base !== null && draft.id === this.base.id) {
-      // The draft came here itself: a message was appended at its tip, or the leaf went up
-      // from a deleted message or back down onto a restored one. The text stays.
+      // The same draft: the fork's tip moved, or the fork the view named is the current one
+      // it had already. The text stays, unless it's another tab's newer text and nothing was typed here.
       this.newer(draft)
-      if (this.requested === tip) this.ready = true
+      if (this.requested === fork) this.ready = true
       this.emit()
       return
     }
@@ -260,11 +258,11 @@ export class ComposerDraft {
     // stays in this browser, and comes back when that composer opens.
     await this.save()
     this.pending = null
-    if (this.requested === tip) await this.show(tip, draft)
+    if (this.requested === fork) await this.show(fork, draft)
   }
 
-  /** The tip's text in the box, with what this browser kept of it when a page closed. */
-  private async show(tip: SlotId | null, opened: Draft) {
+  /** The fork's text in the box, with what this browser kept of it when a page closed. */
+  private async show(fork: ForkId | null, opened: Draft) {
     this.error = null
     const { draft, restored, conflict, recovered, unsent } = await this.saveCopies(opened)
     this.take(draft)
@@ -282,7 +280,7 @@ export class ComposerDraft {
     // Stays for the page: text that went to the recovered texts as the box left its draft
     // was lost there, and this is where the user still is.
     this.recovered ||= recovered
-    if (this.requested !== tip) return
+    if (this.requested !== fork) return
     this.ready = true
     this.emit()
     if (this.unsaved) this.schedule(0)
@@ -371,8 +369,8 @@ export class ComposerDraft {
     this.take(draft)
   }
 
-  /** The tip the box is on, or on its way to. */
-  get tip() {
+  /** The fork the box is on, or on its way to. */
+  get fork() {
     return this.requested
   }
 
@@ -470,11 +468,11 @@ export class ComposerDraft {
     if (this.unsaved) this.schedule(0)
   }
 
-  /** The composer at the tip asked for, read again. */
+  /** The composer of the fork asked for, read again. */
   private async reopen() {
-    const tip = this.requested
-    if (tip === undefined) return null
-    const opened = await this.session.call((client) => client("OpenComposer", { chatId: this.chatId, tipSlotId: tip }))
+    const fork = this.requested
+    if (fork === undefined) return null
+    const opened = await this.session.call((client) => client("OpenComposer", { chatId: this.chatId, forkId: fork }))
     return opened.ok ? opened.value : null
   }
 
@@ -520,7 +518,7 @@ export class ComposerDraft {
         // send then names the text, which the draft no longer holds, and commits nothing.
         if (shown(result.value.draft) === text) saved = result.value.draft
       }
-      const outcome = await run({ tip: tipOf(saved), draftId: saved.id, session: saved.session, text })
+      const outcome = await run({ fork: forkOf(saved), draftId: saved.id, session: saved.session, text })
       if (!outcome.sent) return this.giveBack(text, saved)
       this.recovered ||= outcome.recovered > 0
       const after = outcome.draft

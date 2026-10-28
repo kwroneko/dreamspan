@@ -129,8 +129,9 @@ test("a changed prefix shows the rewrite estimate without a TTL or countdown", a
 
 test("two tabs and an inactive-path deep link keep their own context boundary", async ({ page, context }) => {
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
-  const longLeaf = entries.at(-1)!.slotId
-  const url = `${server().url}/chats/${chatId}?leaf=${longLeaf}&slot=${entries[1]!.slotId}`
+  const longFork = (await asUser(server(), ADMIN.handle, ADMIN.password, (api) => api.GetChat({ chatId })))
+    .currentForkId!
+  const url = `${server().url}/chats/${chatId}?fork=${longFork}&slot=${entries[1]!.slotId}`
   await page.goto(url)
   const dropped = page.locator(`article[data-slot="${entries[1]!.slotId}"]`)
   await expect(dropped).toHaveAttribute("data-out-of-context", "true")
@@ -140,7 +141,7 @@ test("two tabs and an inactive-path deep link keep their own context boundary", 
   expect(branch._tag).toBe("Posted")
   if (branch._tag !== "Posted") throw new Error("expected posted branch")
   const other = await context.newPage()
-  await other.goto(`${server().url}/chats/${chatId}?leaf=${branch.entry.slotId}`)
+  await other.goto(`${server().url}/chats/${chatId}?fork=${branch.chat.currentForkId}`)
   await expect(other.getByText("Short branch.", { exact: true })).toBeVisible()
   await expect(other.locator('[data-out-of-context="true"]')).toHaveCount(0)
   await page.reload()
@@ -184,7 +185,7 @@ test("summarized messages are distinct from dropped and hidden messages", async 
   )
   if (sent._tag !== "Posted") throw new Error("expected posted message")
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
-  await page.goto(`${server().url}/chats/${chatId}?leaf=${sent.entry.slotId}&slot=${entries[1]!.slotId}`)
+  await page.goto(`${server().url}/chats/${chatId}?fork=${sent.chat.currentForkId}&slot=${entries[1]!.slotId}`)
   const summarized = page.locator(`article[data-slot="${entries[1]!.slotId}"]`)
   await expect(summarized).toHaveAttribute("data-summarized", "true")
   await expect(summarized.getByText("Summarized", { exact: true })).toBeVisible()

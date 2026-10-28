@@ -1,5 +1,6 @@
 import type { ContextSnapshot } from "../assembler/types.ts"
 import { takeSummaryPrefix } from "../lcm/prefix.ts"
+import { shownIn, viewAt } from "./forkState.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { Effect } from "effect"
@@ -23,6 +24,7 @@ export interface JobError {
  */
 export const prefixAt = (sql: SqlClient.SqlClient, chatId: string, leafSlotId: string, triggerVersionId?: string) =>
   Effect.gen(function* () {
+    const fork = yield* viewAt(sql, chatId, leafSlotId)
     const [origin] = triggerVersionId
       ? yield* sql<{ snapshot: string }>`
           SELECT p.context_snapshot_json AS snapshot FROM versions v JOIN slots s ON s.id = v.slot_id
@@ -33,7 +35,7 @@ export const prefixAt = (sql: SqlClient.SqlClient, chatId: string, leafSlotId: s
           SELECT ${leafSlotId}, 1 UNION ALL SELECT s.parent_slot_id, p.n + 1 FROM slots s JOIN path p ON p.id = s.id
             WHERE s.parent_slot_id IS NOT NULL AND p.n < 400
         ) SELECT p.context_snapshot_json AS snapshot FROM path a JOIN slots s ON s.id = a.id
-          JOIN versions v ON v.id = s.selected_version_id JOIN rollouts r ON r.id = v.rollout_id
+          JOIN versions v ON v.id = ${shownIn(sql, fork, "s")} JOIN rollouts r ON r.id = v.rollout_id
           JOIN rollout_payloads p ON p.rollout_id = r.id WHERE r.chat_id = ${chatId} AND r.kind = 'generation'
           AND p.context_snapshot_json IS NOT NULL ORDER BY s.depth DESC LIMIT 1`
     return origin ? JSON.stringify(takeSummaryPrefix(JSON.parse(origin.snapshot) as ContextSnapshot)) : null

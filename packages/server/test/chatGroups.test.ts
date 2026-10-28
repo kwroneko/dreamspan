@@ -334,7 +334,7 @@ describe("group event validity", () => {
       yield* api.SelectVersion({
         slotId: root.entry.slotId,
         versionId: root.entry.version.id,
-        expectedRowVersion: alternate.rowVersion
+        expectedVersionId: alternate.version.id
       })
       const leaf = yield* api.SendMessage({
         chatId: chat.id,

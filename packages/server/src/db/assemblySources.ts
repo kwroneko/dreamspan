@@ -1,5 +1,7 @@
 import { withModelSettings } from "@rp/shared/modelSettings.ts"
 import { contextExcluded } from "./lcmVisibility.ts"
+import { pathEvents } from "./pathSegments.ts"
+import { attachedApplies, originalSql, shownIn, viewAt } from "./forkState.ts"
 import { selectSummaryLayer, selectFailedRanges } from "./lcmLayer.ts"
 import { readSummary } from "./lcmReads.ts"
 // The assembler's sources over the database, every read the acting user's, and the pins a
@@ -151,6 +153,13 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
   // Every read of the chat checks it's the user's, not only the target's: a stage that
   // replaced `path` couldn't read another user's chat through the others.
   const owned = sql`EXISTS (SELECT 1 FROM chats o WHERE o.id = ${chatId} AND o.owner_user_id = ${userId})`
+  // The versions read are those the fork in view shows (ForkView; else the fork through the
+  // leaf): its selections, as it replaces them.
+  const shown = (leaf: string | null, s: string) =>
+    Effect.map(viewAt(sql, chatId, leaf), (fork) => shownIn(sql, fork, s))
+  // Whether an event attached to a version applies there in that fork (`attachedApplies`).
+  const attached = (leaf: string | null, s: string, column: string) =>
+    Effect.map(viewAt(sql, chatId, leaf), (fork) => attachedApplies(sql, fork, s, column))
   /** A revision of an entity of this kind the user owns and hasn't deleted. */
   const revisionDoc = (revisionId: string, kind: string, entity?: string, binned = false) =>
     sql<{ entity_id: string; doc_json: string }>`
@@ -389,6 +398,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
     // The events at `at` (StateEventsAt's query), with the depth of the message each follows.
     events: (at) =>
       Effect.gen(function* () {
+        const applies = yield* attached(at, "s", "e.version_id")
         const rows = yield* sql<{
           id: string
           key: string
@@ -396,19 +406,13 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
           value_json: string
           depth: number | null
         }>`
-          WITH RECURSIVE path(id) AS (
-            SELECT id FROM slots WHERE id = ${at} AND chat_id = ${chatId} AND ${owned}
-            UNION ALL
-            SELECT s.parent_slot_id FROM slots s JOIN path p ON s.id = p.id WHERE s.parent_slot_id IS NOT NULL
-          )
-          SELECT e.id, e.key, e.scope, e.value_json, s.depth
-          FROM state_events e
-          LEFT JOIN path p ON p.id = e.slot_id
-          LEFT JOIN slots s ON s.id = p.id
-          WHERE e.chat_id = ${chatId} AND ${owned} AND e.superseded_by_changeset IS NULL
-            AND (e.slot_id IS NULL OR (p.id IS NOT NULL AND s.deleted_at IS NULL))
-            AND (e.version_id IS NULL OR e.version_id = s.selected_version_id)
-          ORDER BY coalesce(s.depth, -1), e.seq`
+          ${pathEvents(sql, chatId, at)}
+          SELECT e.id, e.key, e.scope, e.value_json, e.slot_depth AS depth
+          FROM path_events e LEFT JOIN slots s ON s.id = e.slot_id
+          WHERE ${owned} AND e.superseded_by_changeset IS NULL
+            AND (e.slot_id IS NULL OR s.deleted_at IS NULL)
+            AND ${applies}
+          ORDER BY coalesce(e.slot_depth, -1), e.seq`
         const events = yield* Effect.forEach(rows, (row) =>
           decodeEvent({ scope: row.scope, data: { key: row.key, value: JSON.parse(row.value_json) } }).pipe(
             Effect.map((event) => ({ ...event, depth: row.depth, id: row.id })),
@@ -422,6 +426,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
 
     history: (leaf, limit, after) =>
       Effect.gen(function* () {
+        const selected = yield* shown(leaf, "s")
         const rows = yield* sql<HistoryRow>`
           WITH RECURSIVE path(id, n) AS (
             SELECT id, 1 FROM slots WHERE id = ${leaf} AND id IS NOT ${after ?? null} AND chat_id = ${chatId} AND ${owned}
@@ -430,14 +435,16 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
             WHERE s.parent_slot_id IS NOT NULL AND s.parent_slot_id IS NOT ${after ?? null} AND p.n < ${limit}
           )
           SELECT s.id AS slot_id, s.parent_slot_id, s.depth, ${sql.literal(contextExcluded())} AS context_excluded,
-            s.deleted_at IS NOT NULL AS slot_deleted, v.id AS version_id, v.ordinal, v.status,
+            s.deleted_at IS NOT NULL AS slot_deleted, v.id AS version_id, o.ordinal, v.status,
             v.speaker_entity_id, v.content, v.macro_mode, v.frozen_macros, v.created_at,
-            (SELECT count(*) FROM versions c WHERE c.slot_id = s.id AND c.deleted_at IS NULL) AS version_count,
+            (SELECT count(*) FROM versions c WHERE c.slot_id = s.id AND c.deleted_at IS NULL AND c.fork_id IS NULL)
+              AS version_count,
             f.writer AS first_writer, f.origin AS first_origin,
             (SELECT count(*) FROM version_history h WHERE h.version_id = v.id) AS amend_count,
             v.macro_mode = 'template' AND EXISTS (SELECT 1 FROM state_events w WHERE w.version_id = v.id
               AND w.key = 'var.set' AND w.origin = 'rollout') AS written
-          FROM path JOIN slots s ON s.id = path.id JOIN versions v ON v.id = s.selected_version_id
+          FROM path JOIN slots s ON s.id = path.id JOIN versions v ON v.id = ${selected}
+          JOIN versions o ON o.id = ${sql.literal(originalSql("v"))}
           JOIN versions f ON f.id = (SELECT id FROM versions x WHERE x.slot_id = s.id ORDER BY x.ordinal LIMIT 1)
           ORDER BY s.depth`
         const read = rows
@@ -570,6 +577,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
 
     messageCount: (leaf) =>
       Effect.gen(function* () {
+        const selected = yield* shown(leaf, "s")
         const [row] = yield* sql<{ n: number }>`
         WITH RECURSIVE path(id) AS (
           SELECT id FROM slots WHERE id = ${leaf} AND chat_id = ${chatId} AND ${owned}
@@ -577,7 +585,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
           SELECT s.parent_slot_id FROM slots s JOIN path p ON s.id = p.id WHERE s.parent_slot_id IS NOT NULL
         )
         SELECT count(*) AS n FROM path JOIN slots s ON s.id = path.id
-        JOIN versions v ON v.id = s.selected_version_id
+        JOIN versions v ON v.id = ${selected}
         WHERE s.deleted_at IS NULL AND ${sql.literal(contextExcluded())} = 0 AND v.status <> 'failed' AND length(v.content) > 0`
         const count = row?.n ?? 0
         pins.messageCount.push({ key: keyOf(leaf), count })

@@ -1,6 +1,7 @@
 import { presetContext } from "./presetContext.ts"
 import { cacheExpiry } from "./cacheExpiry.ts"
 import { summaryRequest } from "../lcm/request.ts"
+import { atLeaf, inFork } from "./forkState.ts"
 // Context assembly and rebuilding in the reader workers (ARCHITECTURE §15).
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
@@ -32,7 +33,7 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
   const assembler = yield* makeAssembler
   const handlers = {
     ...(yield* makeDisplayPrefsReadHandlers),
-    AssembleContext: ({ userId, chatId, slotId, versionId, now, timeZone, frozen, partialBatch, model }) =>
+    AssembleContext: ({ userId, chatId, slotId, versionId, forkId, now, timeZone, frozen, partialBatch, model }) =>
       Effect.suspend(() => {
         const sources = sqlSources(sql, {
           userId,
@@ -59,7 +60,7 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
             })
           )
         )
-      }).pipe(query("AssembleContext")),
+      }).pipe(inFork(sql, chatId, forkId, slotId), query("AssembleContext")),
 
     RebuildContext: ({ userId, snapshot: json }) =>
       Effect.gen(function* () {
@@ -240,7 +241,7 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
                   changed
                 }
         }
-      }).pipe(query("CacheWarmth")),
+      }).pipe(atLeaf(sql, chatId, leafSlotId ?? null), query("CacheWarmth")),
 
     GetGenerationDefaults: ({ userId }) => readDefaults(sql, userId).pipe(query("GetGenerationDefaults")),
     GetGlobalLorebooks: ({ userId }) => readGlobalLorebooks(sql, userId).pipe(query("GetGlobalLorebooks")),

@@ -1,5 +1,6 @@
 import { uuidv7 } from "@rp/shared/id.ts"
 import { Effect } from "effect"
+import { currentForkSql, replacedIn, selectedInSql } from "./forkState.ts"
 import type { SqlClient } from "effect/sql"
 import { contextExcluded } from "./lcmVisibility.ts"
 
@@ -10,36 +11,53 @@ type Row = Record<string, string | number | null>
  */
 export const forkImportSlot = (sql: SqlClient.SqlClient, source: string, parent: string | null) =>
   Effect.gen(function* () {
-    const [slot] =
-      yield* sql<Row>`SELECT s.*, ${sql.literal(contextExcluded())} AS shown_excluded FROM slots s WHERE s.id = ${source}`
-    const versions = yield* sql<Row>`SELECT * FROM versions WHERE slot_id = ${source} ORDER BY ordinal`
+    // The copy is inserted with the selection the chat's current fork shows (forkState.ts).
+    const [slot] = yield* sql<Row>`SELECT s.*, ${sql.literal(contextExcluded())} AS shown_excluded,
+        ${sql.literal(selectedInSql(currentForkSql("s.chat_id"), "s"))} AS shown_version_id
+      FROM slots s WHERE s.id = ${source}`
+    // The message's own versions, each with the text the current fork shows in its place: a
+    // fork's copies stand in for them only in that fork, which this suffix isn't on, but the
+    // amend is the current fork's local change, kept as its selection is
+    // (spec/FORK-INDEPENDENCE-DELTA.md §5 step 6, unit 9).
+    const versions =
+      yield* sql<Row>`SELECT v.*, ${replacedIn(sql, sql.literal(currentForkSql("s.chat_id")), "v.id")} AS shown_id
+      FROM versions v JOIN slots s ON s.id = v.slot_id WHERE v.slot_id = ${source} AND v.fork_id IS NULL
+      ORDER BY v.ordinal`
     const id = uuidv7()
     const ids = new Map(versions.map((v) => [v.id, uuidv7()]))
+    // What referred to a copy (an event attached to it) refers to the version taking its text.
+    for (const v of versions) if (v.shown_id !== v.id) ids.set(v.shown_id, ids.get(v.id)!)
     for (const version of versions) {
-      const { seq: _seq, ...fields } = version
+      const { seq: _seq, shown_id: shownId, ...fields } = version
       const versionId = ids.get(version.id)!
+      const [copy] =
+        shownId === version.id ? [] : yield* sql<Row>`SELECT content, updated_at FROM versions WHERE id = ${shownId}`
       yield* sql`INSERT INTO versions ${sql.insert({
         ...fields,
+        ...copy,
         status: version.status === "generating" ? "interrupted" : version.status,
         id: versionId,
         slot_id: id,
         source_version_id: ids.get(version.source_version_id) ?? version.source_version_id
       })}`
       yield* sql`INSERT INTO version_history (version_id, content, replaced_at)
-        SELECT ${versionId}, content, replaced_at FROM version_history WHERE version_id = ${version.id} ORDER BY id`
+        SELECT ${versionId}, content, replaced_at FROM version_history WHERE version_id = ${shownId} ORDER BY id`
       yield* sql`INSERT INTO version_attachments (version_id, ordinal, media_id, kind, alt_text)
-        SELECT ${versionId}, ordinal, media_id, kind, alt_text FROM version_attachments WHERE version_id = ${version.id}`
+        SELECT ${versionId}, ordinal, media_id, kind, alt_text FROM version_attachments WHERE version_id = ${shownId}`
     }
-    const { shown_excluded, ...position } = slot!
+    // The copy's chain is the database's to assign (schema/chains.ts), as are its events'.
+    const { shown_excluded, shown_version_id, chain_id: _chain, ...position } = slot!
     yield* sql`INSERT INTO slots ${sql.insert({
       ...position,
       context_excluded: shown_excluded,
       id,
       parent_slot_id: parent,
-      selected_version_id: ids.get(slot!.selected_version_id)!
+      selected_version_id: ids.get(shown_version_id!)!
     })}`
     const events = yield* sql<Row>`SELECT * FROM state_events WHERE slot_id = ${source}`
-    for (const event of events) {
+    for (const { slot_chain_id: _chain, slot_depth: _depth, ...event } of events) {
+      // One on another fork's copy stays with that fork, at the slot its path keeps.
+      if (event.version_id !== null && !ids.has(event.version_id as string)) continue
       yield* sql`INSERT INTO state_events ${sql.insert({
         ...event,
         id: uuidv7(),

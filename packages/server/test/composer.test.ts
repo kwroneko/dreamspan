@@ -3,7 +3,7 @@
 // committed with the send that took their text (posted or queued), and saved by a closing
 // page through POST /library/drafts. Cross-user access is in the isolation matrix.
 import { assert, describe, it } from "@effect/vitest"
-import type { ChatId, SlotId } from "@rp/shared/chat.ts"
+import type { ChatId, ForkId, SlotId } from "@rp/shared/chat.ts"
 import { type Draft, DraftHistoryPolicy } from "@rp/shared/drafts.ts"
 import { Effect } from "effect"
 import * as FakeGenerator from "../src/dev/fakeGenerator.ts"
@@ -21,12 +21,12 @@ import {
 
 type Api = Effect.Success<ReturnType<typeof client>>
 
-const open = (api: Api, chatId: ChatId, tipSlotId: SlotId | null) => api.OpenComposer({ chatId, tipSlotId })
+const open = (api: Api, chatId: ChatId, forkId: ForkId | null) => api.OpenComposer({ chatId, forkId })
 
 /** The states of a draft's history, each restored and read back, newest first. */
-const states = (api: Api, chatId: ChatId, tipSlotId: SlotId | null) =>
+const states = (api: Api, chatId: ChatId, forkId: ForkId | null) =>
   Effect.gen(function* () {
-    let draft = yield* open(api, chatId, tipSlotId)
+    let draft = yield* open(api, chatId, forkId)
     const texts: Array<string> = []
     for (const state of yield* api.ComposerHistory({ chatId, draftId: draft.id, limit: 50 })) {
       const restored = yield* api.RestoreComposer({
@@ -42,7 +42,7 @@ const states = (api: Api, chatId: ChatId, tipSlotId: SlotId | null) =>
   })
 
 describe("the composer's drafts", () => {
-  it.live("are one per tip, saved with row versions, and undone from the server's history", () =>
+  it.live("are one per fork, saved with row versions, and undone from the server's history", () =>
     Effect.gen(function* () {
       const api = yield* client()
       const chat = yield* api.CreateChat({ title: "Harbor" })
@@ -106,7 +106,7 @@ describe("the composer's drafts", () => {
     }).pipe(Effect.scoped, withServer(testConfig()))
   )
 
-  it.live("is committed by the send that took its text, and goes on to the new tip", () =>
+  it.live("is committed by the send that took its text, and stays with its fork", () =>
     Effect.gen(function* () {
       const api = yield* client()
       const chat = yield* api.CreateChat({ title: "Chapel" })
@@ -122,14 +122,12 @@ describe("the composer's drafts", () => {
       )
       assert.deepStrictEqual(
         [sent.draft?.id, sent.draft?.status, sent.draft?.content, sent.draft?.key.field],
-        [draft.id, "committed", "", sent.entry.slotId]
+        [draft.id, "committed", "", sent.chat.currentForkId]
       )
-      assert.strictEqual((yield* open(api, chat.id, sent.entry.slotId)).id, draft.id)
-      assert.notStrictEqual((yield* open(api, chat.id, null)).id, draft.id)
+      assert.strictEqual((yield* open(api, chat.id, null)).id, draft.id)
 
-      // Typed on in another tab after the send left: that text stays, at the new tip, and the
-      // send says so.
-      const typing = yield* typeInto(api, chat.id, sent.entry.slotId, "Then wait.")
+      // Typed on in another tab after the send left: that text stays, and the send says so.
+      const typing = yield* typeInto(api, chat.id, null, "Then wait.")
       const next = yield* posted(
         api.SendMessage({
           chatId: chat.id,
@@ -140,12 +138,12 @@ describe("the composer's drafts", () => {
         })
       )
       assert.deepStrictEqual([next.draft?.status, next.draft?.content], ["active", "Then wait."])
-      const kept = yield* open(api, chat.id, next.entry.slotId)
+      const kept = yield* open(api, chat.id, next.chat.currentForkId)
       assert.deepStrictEqual([kept.id, kept.content], [draft.id, "Then wait."])
     }).pipe(Effect.scoped, withServer(testConfig()))
   )
 
-  it.live("saves text typed before the leaf moved on onto the moved draft, never behind it", () =>
+  it.live("saves text typed before another tab's message onto the fork's draft", () =>
     Effect.gen(function* () {
       const api = yield* client()
       const chat = yield* api.CreateChat({ title: "Late" })
@@ -153,9 +151,8 @@ describe("the composer's drafts", () => {
       // Another tab sends meanwhile, without this composer's text.
       const sent = yield* posted(api.SendMessage({ chatId: chat.id, parentSlotId: null, branch: false, content: "hi" }))
       const late = yield* typeInto(api, chat.id, null, "late typing", read)
-      assert.deepStrictEqual([late.id, late.key.field], [read.id, sent.entry.slotId])
-      assert.strictEqual((yield* open(api, chat.id, sent.entry.slotId)).content, "late typing")
-      assert.strictEqual((yield* open(api, chat.id, null)).content, "")
+      assert.deepStrictEqual([late.id, late.key.field], [read.id, sent.chat.currentForkId])
+      assert.strictEqual((yield* open(api, chat.id, null)).content, "late typing")
     }).pipe(Effect.scoped, withServer(testConfig()))
   )
 
@@ -166,7 +163,7 @@ describe("the composer's drafts", () => {
       const sent = yield* posted(api.SendMessage({ chatId: chat.id, parentSlotId: null, branch: false, content: "hi" }))
       const reply = yield* posted(api.Generate({ chatId: chat.id, parentSlotId: sent.entry.slotId, branch: false }))
       const tip = reply.entry.slotId
-      const draft = yield* typeInto(api, chat.id, tip, "wait")
+      const draft = yield* typeInto(api, chat.id, null, "wait")
       const queued = yield* api.SendMessage({
         chatId: chat.id,
         parentSlotId: tip,
@@ -192,7 +189,7 @@ describe("the composer's drafts", () => {
         ]
       })
       assert.strictEqual(late.status, 204)
-      const after = yield* open(api, chat.id, tip)
+      const after = yield* open(api, chat.id, null)
       assert.deepStrictEqual([after.status, after.content], ["committed", ""])
       // Never lost: it's in the recovered texts.
       const [recovered] = yield* api.ListRecoveredTexts({ limit: 10, before: null })
@@ -228,7 +225,7 @@ describe("the composer's drafts", () => {
       const kept = yield* open(api, chat.id, null)
       assert.strictEqual(kept.content, "typed after")
       // The send arrived: the next text starts the session after it.
-      const sent = yield* posted(
+      yield* posted(
         api.SendMessage({
           chatId: chat.id,
           parentSlotId: null,
@@ -238,7 +235,7 @@ describe("the composer's drafts", () => {
         })
       )
       assert.strictEqual((yield* next(kept, "the message after")).status, 204)
-      const after = yield* open(api, chat.id, sent.entry.slotId)
+      const after = yield* open(api, chat.id, null)
       assert.deepStrictEqual([after.status, after.content], ["active", "the message after"])
       const recovered = yield* api.ListRecoveredTexts({ limit: 10, before: null })
       assert.deepStrictEqual(
@@ -278,9 +275,9 @@ describe("the composer's drafts", () => {
         }
         const replay = () => post("/library/drafts", { drafts: [], composers: [request] })
         assert.strictEqual((yield* replay()).status, 204)
-        const next = yield* open(api, chat.id, tip)
+        const next = yield* open(api, chat.id, null)
         assert.strictEqual(next.content, "NEXT")
-        const sent = yield* posted(
+        yield* posted(
           api.SendMessage({
             chatId: chat.id,
             parentSlotId: tip,
@@ -291,7 +288,7 @@ describe("the composer's drafts", () => {
         )
         const before = yield* api.ListRecoveredTexts({ limit: 100, before: null })
         assert.strictEqual((yield* replay()).status, 204)
-        const after = yield* open(api, chat.id, sent.entry.slotId)
+        const after = yield* open(api, chat.id, null)
         assert.deepStrictEqual([after.status, after.content], ["committed", ""])
         assert.deepStrictEqual(yield* api.ListRecoveredTexts({ limit: 100, before: null }), before)
       }).pipe(Effect.scoped, withServer(testConfig()))
@@ -301,7 +298,7 @@ describe("the composer's drafts", () => {
   it.live("a pending next-message receipt survives a server and worker restart", () =>
     Effect.gen(function* () {
       const config = testConfig()
-      const { request, tip, recovered } = yield* Effect.gen(function* () {
+      const { request, recovered } = yield* Effect.gen(function* () {
         const api = yield* client()
         const chat = yield* api.CreateChat({ title: "Durable replay" })
         const first = yield* typeInto(api, chat.id, null, "FIRST")
@@ -333,7 +330,7 @@ describe("the composer's drafts", () => {
       yield* Effect.gen(function* () {
         const api = yield* client()
         assert.strictEqual((yield* post("/library/drafts", { drafts: [], composers: [request] })).status, 204)
-        const after = yield* open(api, request.chatId, tip)
+        const after = yield* open(api, request.chatId, null)
         assert.deepStrictEqual([after.status, after.content], ["committed", ""])
         assert.deepStrictEqual(yield* api.ListRecoveredTexts({ limit: 100, before: null }), recovered)
       }).pipe(Effect.scoped, withServer(config))
@@ -370,7 +367,7 @@ describe("the composer's drafts", () => {
 
       // Sent from one tab; a tab that read it before the send closes with text of its own.
       const before = yield* open(api, chat.id, null)
-      const sent = yield* posted(
+      yield* posted(
         api.SendMessage({
           chatId: chat.id,
           parentSlotId: null,
@@ -381,7 +378,7 @@ describe("the composer's drafts", () => {
       )
       assert.strictEqual((yield* leaving(before, "B unsent")).status, 204)
       assert.strictEqual((yield* open(api, chat.id, null)).content, "")
-      assert.strictEqual((yield* open(api, chat.id, sent.entry.slotId)).status, "committed")
+      assert.strictEqual((yield* open(api, chat.id, null)).status, "committed")
       const [recovered] = yield* api.ListRecoveredTexts({ limit: 10, before: null })
       assert.strictEqual((yield* api.GetRecoveredText({ id: recovered!.id })).content, "B unsent")
       assert.strictEqual((yield* leaving(read, "x", "nope")).status, 404)
@@ -399,7 +396,7 @@ describe("the composer's drafts", () => {
         const tip = queued
           ? (yield* posted(api.Generate({ chatId: chat.id, parentSlotId: null, branch: false }))).entry.slotId
           : null
-        const initial = yield* open(api, chat.id, tip)
+        const initial = yield* open(api, chat.id, null)
         const save = {
           next: false,
           chatId: chat.id,
@@ -410,7 +407,7 @@ describe("the composer's drafts", () => {
           content: "alpha"
         }
         const alpha = (yield* api.SaveComposer(save)).draft!
-        yield* typeInto(api, chat.id, tip, "alpha and more from the other tab", alpha)
+        yield* typeInto(api, chat.id, null, "alpha and more from the other tab", alpha)
         const replayed = (yield* api.SaveComposer(save)).draft!
         assert.strictEqual(replayed.content, "alpha and more from the other tab")
         const sent = yield* api.SendMessage({
@@ -432,33 +429,35 @@ describe("the composer's drafts", () => {
     )
   }
 
-  it.live("a send commits only the draft it names, never another one at its tip since", () =>
+  it.live("keeps separate composers for two forks at the same message, and a send commits only its own", () =>
     Effect.gen(function* () {
       const api = yield* client()
       const chat = yield* api.CreateChat({ title: "Replaced" })
       const root = yield* posted(
         api.SendMessage({ chatId: chat.id, parentSlotId: null, branch: false, content: "root" })
       )
-      const a = yield* typeInto(api, chat.id, root.entry.slotId, "tab A unsent")
-      // A message is appended below the root, so A moves with it; then B starts at the root.
-      yield* posted(
-        api.SendMessage({ chatId: chat.id, parentSlotId: root.entry.slotId, branch: false, content: "reply" })
-      )
-      const b = yield* typeInto(api, chat.id, root.entry.slotId, "tab B distinct text")
+      const main = root.chat.currentForkId!
+      // A fork made at the root, as ST's checkpoint: its tip is the root too.
+      const { fork } = yield* api.CreateFork({ chatId: chat.id, fromForkId: main, atSlotId: root.entry.slotId })
+      assert.strictEqual(fork.tipSlotId, root.entry.slotId)
+      const a = yield* typeInto(api, chat.id, main, "tab A unsent")
+      const b = yield* typeInto(api, chat.id, fork.id, "tab B distinct text")
       assert.notStrictEqual(a.id, b.id)
-      // Tab A, which hadn't heard, sends its text as a branch from the root.
+      assert.strictEqual((yield* open(api, chat.id, null)).id, b.id)
+      // Tab A sends its text in its own fork.
       const sent = yield* posted(
         api.SendMessage({
           chatId: chat.id,
+          forkId: main,
           parentSlotId: root.entry.slotId,
-          branch: true,
+          branch: false,
           content: a.content,
           composer: takenFrom(a)
         })
       )
       assert.deepStrictEqual([sent.draft?.id, sent.draft?.status], [a.id, "committed"])
-      // B moved with the branch's new message, its text intact.
-      const there = yield* open(api, chat.id, sent.entry.slotId)
+      // The other fork's composer kept its text, at the message it was made at.
+      const there = yield* open(api, chat.id, fork.id)
       assert.deepStrictEqual([there.id, there.content], [b.id, "tab B distinct text"])
     }).pipe(Effect.scoped, withServer(testConfig()))
   )

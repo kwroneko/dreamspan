@@ -160,6 +160,7 @@ export class Generations extends Context.Service<
               userId: request.userId,
               chatId: request.chatId,
               leafSlotId: request.slotId,
+              ...(request.forkId === undefined ? {} : { forkId: request.forkId }),
               triggerVersionId: request.versionId
             })
           yield* continueQueue(request.userId, finished)
@@ -175,14 +176,14 @@ export class Generations extends Context.Service<
         Effect.gen(function* () {
           if (!outcome.queueChanged) return
           hub.publish(outcome.chatId, { _tag: "Queue", queue: outcome.queue })
-          if (outcome.next !== null) {
+          for (const next of outcome.next === null ? [] : [outcome.next, ...(outcome.more ?? [])])
             yield* startGeneration({
               userId,
               chatId: outcome.chatId,
-              slotId: outcome.next.slotId,
-              versionId: outcome.next.versionId
+              slotId: next.slotId,
+              versionId: next.versionId,
+              ...(next.forkId === undefined ? {} : { forkId: next.forkId })
             })
-          }
           yield* publishPosted(userId, outcome.chatId, outcome.posted)
         })
 

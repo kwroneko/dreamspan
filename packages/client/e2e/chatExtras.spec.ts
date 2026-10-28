@@ -33,7 +33,7 @@ const box = (page: Page) => page.getByLabel("Message", { exact: true })
 const message = (page: Page, text: string) =>
   page.getByRole("article", { name: "Your message" }).filter({ hasText: text })
 
-test("switching between branches moves the chat to them, each with its own composer", async ({ page }) => {
+test("switching between branches opens the fork through each, with its own composer", async ({ page }) => {
   const chatId = await admin((api) =>
     Effect.gen(function* () {
       const chat = yield* api.CreateChat({ title: "Fork" })
@@ -51,10 +51,7 @@ test("switching between branches moves the chat to them, each with its own compo
   await expect(message(page, "The left road floods.")).toHaveCount(0)
   await box(page).fill("On the right, a toll.")
   await expect
-    .poll(async () => {
-      const tip = (await admin((api) => api.GetChat({ chatId }))).activeLeafSlotId
-      return (await admin((api) => api.OpenComposer({ chatId, tipSlotId: tip }))).content
-    })
+    .poll(async () => (await admin((api) => api.OpenComposer({ chatId, forkId: null }))).content)
     .toBe("On the right, a toll.")
 
   await right.getByRole("button", { name: "Previous branch" }).click()
@@ -62,13 +59,19 @@ test("switching between branches moves the chat to them, each with its own compo
   await expect(left.getByRole("group", { name: "Branches: 1 of 2" })).toBeVisible()
   await expect(message(page, "The left road floods.")).toBeVisible()
   await expect(box(page)).toHaveValue("")
-  // The chat opens on the branch switched to from now on.
-  await page.goto(`${server().url}/chats/${chatId}`)
+  // The URL names the fork shown, so a reload stays on it...
+  await expect(page).toHaveURL(/fork=/)
+  await page.reload()
   await expect(message(page, "The left road floods.")).toBeVisible()
   await expect(box(page)).toBeEditable()
   await expect(box(page)).toHaveValue("")
 
   await left.getByRole("button", { name: "Next branch" }).click()
+  await expect(message(page, "Take the right road.")).toBeVisible()
+  await expect(box(page)).toHaveValue("On the right, a toll.")
+  // ...while switching never moved where the chat opens: the fork last chatted in.
+  await expect(page).not.toHaveURL(/fork=/)
+  await page.goto(`${server().url}/chats/${chatId}`)
   await expect(message(page, "Take the right road.")).toBeVisible()
   await expect(box(page)).toHaveValue("On the right, a toll.")
 })

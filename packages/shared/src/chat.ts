@@ -10,6 +10,8 @@ export const SlotId = idSchema("SlotId", "slot")
 export type SlotId = typeof SlotId.Type
 export const VersionId = idSchema("VersionId", "version")
 export type VersionId = typeof VersionId.Type
+export const ForkId = idSchema("ForkId", "fork")
+export type ForkId = typeof ForkId.Type
 export const EntityId = idSchema("EntityId", "entity")
 export type EntityId = typeof EntityId.Type
 
@@ -34,10 +36,41 @@ export class Chat extends Schema.Class<Chat>("Chat")({
   kind: ChatKind,
   status: ChatStatus,
   title: Schema.String,
+  /** The current fork's tip (`currentForkId`). */
   activeLeafSlotId: Schema.NullOr(SlotId),
+  /**
+   * The fork the chat opens on: the one last chatted in or created by forking, whichever is
+   * more recent (spec/FORK-INDEPENDENCE-DELTA.md §2.1).
+   */
+  currentForkId: Schema.NullOr(ForkId),
   rowVersion: Schema.Int,
   createdAt: Schema.Number,
   lastMessageAt: Schema.NullOr(Schema.Number)
+}) {}
+
+/**
+ * One line of a chat as the user sees it: history from the first message to its tip
+ * (spec/FORK-INDEPENDENCE-DELTA.md §2.1). Forks share their history's messages; a fork made
+ * at a message has that message as its base and, until something is sent in it, its tip.
+ */
+export class Fork extends Schema.Class<Fork>("Fork")({
+  id: ForkId,
+  chatId: ChatId,
+  /** The fork it was made from; null for the chat's first. */
+  parentForkId: Schema.NullOr(ForkId),
+  /** The message it was made at; null when it starts at the first message. */
+  baseSlotId: Schema.NullOr(SlotId),
+  /** Where its path ends; null before its first message. */
+  tipSlotId: Schema.NullOr(SlotId),
+  name: Schema.NullOr(Schema.String),
+  pinnedAt: Schema.NullOr(Schema.Number),
+  createdAt: Schema.Number,
+  lastChattedAt: Schema.NullOr(Schema.Number),
+  /** The start of its tip's text; empty without one. */
+  tipExcerpt: Schema.String,
+  /** It's the chat's current fork (`Chat.currentForkId`). */
+  current: Schema.Boolean,
+  rowVersion: Schema.Int
 }) {}
 
 /**
@@ -154,8 +187,21 @@ export class PathEntry extends Schema.Class<PathEntry>("PathEntry")({
    */
   branchCount: Schema.Int,
   branchIndex: Schema.Int,
-  /** The name the user gave the branch this slot starts among its alternates (NameBranch); absent: unnamed. */
+  /**
+   * The name of the branch this slot starts among its alternates: its own label (from an
+   * ST import, or one given before forks), else the name of the fork it starts; absent: unnamed.
+   */
   branchName: Schema.optionalKey(Schema.String),
+  /** The fork that appended it; absent for one from before forks, or an ST import's. */
+  forkId: Schema.optionalKey(ForkId),
+  /** The fork whose first message this is (NameFork names it); absent when it starts none. */
+  startsForkId: Schema.optionalKey(ForkId),
+  /**
+   * The fork whose choices it shows: its version, row version and context are as that fork
+   * has them (spec/FORK-INDEPENDENCE-DELTA.md §2.2). A tab showing another fork reads the
+   * slot again instead of taking this one.
+   */
+  shownForkId: Schema.optionalKey(ForkId),
   /**
    * The side the message is on when its speaker isn't one of the cast, as the context reads
    * it (assemblySources.ts): its first version's, deleted or not, so which versions are

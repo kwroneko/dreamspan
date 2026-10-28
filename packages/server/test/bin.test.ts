@@ -127,14 +127,14 @@ describe("recycle bin", () => {
     }).pipe(Effect.provide(database()))
   )
 
-  it.live("deleting the message you're at moves the tip back, and the composer with it", () =>
+  it.live("deleting the message you're at moves the fork's tip back, its composer staying with it", () =>
     Effect.gen(function* () {
       const { writer, reader, userId, chat, b, c, path } = yield* setup()
       yield* writer.SaveDraft({
         draftId: null,
         expectedSession: null,
         userId,
-        key: composerKey(chat.id, c.slotId),
+        key: composerKey(chat.id, chat.currentForkId),
         content: "half-typed",
         expectedRowVersion: null,
         baseRevision: null
@@ -143,16 +143,16 @@ describe("recycle bin", () => {
       assert.strictEqual((yield* reader.GetChat({ userId, chatId: chat.id })).activeLeafSlotId, b.slotId)
       assert.deepStrictEqual(yield* path(), ["root", "a", "b"])
       assert.strictEqual(
-        (yield* reader.GetDraft({ userId, key: composerKey(chat.id, b.slotId) }))?.content,
+        (yield* reader.GetDraft({ userId, key: composerKey(chat.id, chat.currentForkId) }))?.content,
         "half-typed"
       )
     }).pipe(Effect.provide(database()))
   )
 
-  it.live("deleting and restoring a branch keeps its draft separate from surviving composers", () =>
+  it.live("deleting and restoring a branch keeps its forks and their drafts apart from surviving composers", () =>
     Effect.gen(function* () {
-      const { writer, reader, userId, chat, b, c } = yield* setup()
-      const key = composerKey(chat.id, c.slotId)
+      const { writer, reader, userId, chat, b, c, append } = yield* setup()
+      const key = composerKey(chat.id, chat.currentForkId)
       const draft = yield* writer.SaveDraft({
         draftId: null,
         expectedSession: null,
@@ -162,8 +162,15 @@ describe("recycle bin", () => {
         expectedRowVersion: null,
         baseRevision: null
       })
+      // Another fork, made at b, is the one chatted in last.
+      const d = yield* append(b.slotId, "d", true)
       const item = yield* writer.DeleteBranch({ userId, slotId: c.slotId })
       assert.strictEqual((yield* reader.GetDraft({ userId, key }))?.content, "Important unsent paragraph")
+      // The first fork went with the branch; the chat stays on the other.
+      assert.deepStrictEqual(
+        (yield* reader.ListForks({ userId, chatId: chat.id })).map((f) => f.id),
+        [d.forkId]
+      )
       // A save already in flight still names the deleted branch's draft.
       yield* writer.SaveDraft({
         draftId: draft.id,
@@ -178,26 +185,42 @@ describe("recycle bin", () => {
         draftId: null,
         expectedSession: null,
         userId,
-        key: composerKey(chat.id, b.slotId),
+        key: composerKey(chat.id, d.forkId),
         content: "Text typed after deletion",
         expectedRowVersion: null,
         baseRevision: null
       })
       yield* writer.RestoreBinItem({ userId, itemId: item.id })
-      assert.strictEqual((yield* reader.GetChat({ userId, chatId: chat.id })).activeLeafSlotId, c.slotId)
+      // The fork comes back as it was, tip and draft; the chat stays on the fork it's on.
+      const forks = yield* reader.ListForks({ userId, chatId: chat.id })
+      assert.strictEqual(forks.find((f) => f.id === chat.currentForkId)?.tipSlotId, c.slotId)
+      assert.strictEqual((yield* reader.GetChat({ userId, chatId: chat.id })).currentForkId, d.forkId)
       assert.strictEqual((yield* reader.GetDraft({ userId, key }))?.content, "Important unsent paragraph, continued")
       assert.strictEqual(
-        (yield* reader.GetDraft({ userId, key: composerKey(chat.id, b.slotId) }))?.content,
+        (yield* reader.GetDraft({ userId, key: composerKey(chat.id, d.forkId) }))?.content,
         "Text typed after deletion"
       )
     }).pipe(Effect.provide(database()))
   )
 
-  it.live("moving the tip back never deletes a composer's history without recovering its text", () =>
+  it.live("deleting a chat's last fork's branch keeps that fork, which Restore brings back down", () =>
+    Effect.gen(function* () {
+      const { writer, reader, userId, chat, b, c, path } = yield* setup()
+      const item = yield* writer.DeleteBranch({ userId, slotId: c.slotId })
+      const after = yield* reader.GetChat({ userId, chatId: chat.id })
+      assert.deepStrictEqual([after.currentForkId, after.activeLeafSlotId], [chat.currentForkId, b.slotId])
+      assert.deepStrictEqual(yield* path(), ["root", "a", "b"])
+      yield* writer.RestoreBinItem({ userId, itemId: item.id })
+      assert.strictEqual((yield* reader.GetChat({ userId, chatId: chat.id })).activeLeafSlotId, c.slotId)
+      assert.deepStrictEqual(yield* path(), ["root", "a", "b", "c"])
+    }).pipe(Effect.provide(database()))
+  )
+
+  it.live("moving a fork's tip back keeps its composer and its history", () =>
     Effect.gen(function* () {
       const { writer, reader, userId, chat, b, c, append } = yield* setup()
-      const d = yield* append(b.slotId, "d", true) // b → {c, d}, at d
-      const key = composerKey(chat.id, d.slotId)
+      const d = yield* append(b.slotId, "d", true) // b → {c, d}: a fork at d
+      const key = composerKey(chat.id, d.forkId)
       const typed = "A long reply typed at d, then wiped by a stray select-all."
       const draft = yield* writer.SaveDraft({
         draftId: null,
@@ -217,15 +240,18 @@ describe("recycle bin", () => {
         expectedRowVersion: draft.rowVersion,
         baseRevision: null
       })
-      yield* writer.DeleteMessage({ userId, slotId: d.slotId }) // the wiped composer moves to b
-      const e = yield* append(c.slotId, "e", true)
+      yield* writer.DeleteMessage({ userId, slotId: d.slotId }) // d's fork goes back to b
+      const e = yield* append(c.slotId, "e", true) // continues the first fork, at c
+      assert.strictEqual(e.forkId, chat.currentForkId)
       yield* writer.DeleteMessage({ userId, slotId: c.slotId })
-      yield* writer.DeleteMessage({ userId, slotId: e.slotId }) // back to b again
-      const texts = yield* reader.ListRecoveredTexts({ userId, source: null, limit: 10, before: null })
-      assert.deepStrictEqual(
-        texts.map((t) => t.content),
-        [typed]
-      )
+      yield* writer.DeleteMessage({ userId, slotId: e.slotId }) // back to b as well
+      // Nothing moved between composers, so nothing was lost or merged: the wiped text is
+      // one step back in its own draft's history.
+      assert.deepStrictEqual(yield* reader.ListRecoveredTexts({ userId, source: null, limit: 10, before: null }), [])
+      const history = yield* reader.DraftHistory({ userId, key, limit: 10 })
+      assert.isAtLeast(history.length, 2)
+      const [, before] = history
+      assert.strictEqual((yield* reader.GetDraftState({ userId, key, seq: before!.seq })).content, typed)
     }).pipe(Effect.provide(database()))
   )
 
@@ -335,9 +361,10 @@ describe("recycle bin", () => {
           draftId: null,
           expectedSession: null,
           userId,
-          key: composerKey(chat.id, null),
+          key: composerKey(chat.id, chat.currentForkId),
           content: text,
-          expectedRowVersion: (yield* reader.GetDraft({ userId, key: composerKey(chat.id, null) }))?.rowVersion ?? null,
+          expectedRowVersion:
+            (yield* reader.GetDraft({ userId, key: composerKey(chat.id, chat.currentForkId) }))?.rowVersion ?? null,
           baseRevision: null
         })
         yield* writer.ClearDraft({
@@ -577,7 +604,7 @@ describe("recycle bin", () => {
       const { writer, reader, userId, chat, a, b, c } = yield* setup()
       for (const slot of [a, b, c]) yield* writer.DeleteMessage({ userId, slotId: slot.slotId })
       for (const text of ["one", "two", "three"]) {
-        const key = composerKey(chat.id, null)
+        const key = composerKey(chat.id, chat.currentForkId)
         const draft = yield* writer.SaveDraft({
           draftId: null,
           expectedSession: null,

@@ -4,7 +4,7 @@
 // Then the races: a request held on its way to the server while the user goes on, each time
 // text has to stay where it was typed (ARCHITECTURE §3.10).
 import { expect, type Page, test } from "@playwright/test"
-import type { ChatId, SlotId } from "@rp/shared/chat.ts"
+import type { ChatId, ForkId, SlotId } from "@rp/shared/chat.ts"
 import type { SendResult } from "@rp/shared/chatApi.ts"
 import { Effect } from "effect"
 import { typeInto } from "./support/composer.ts"
@@ -34,11 +34,9 @@ const newChat = async (page: Page, title: string) => {
   return page.url().split("/chats/")[1]!.split("?")[0]! as ChatId
 }
 
-/** The composer's text on the server at a tip. */
-const onServer = (chatId: ChatId, tipSlotId: SlotId | null) =>
-  admin((api) => api.OpenComposer({ chatId, tipSlotId })).then((draft) =>
-    draft.status === "active" ? draft.content : ""
-  )
+/** The composer's text on the server, of a fork (null: the current one). */
+const onServer = (chatId: ChatId, forkId: ForkId | null) =>
+  admin((api) => api.OpenComposer({ chatId, forkId })).then((draft) => (draft.status === "active" ? draft.content : ""))
 
 const leaf = (chatId: ChatId) => admin((api) => api.GetChat({ chatId })).then((chat) => chat.activeLeafSlotId)
 
@@ -62,11 +60,11 @@ test("the composer's text is on the server: a reload and another tab show it, an
   await expect(page.getByText("generating", { exact: true })).toHaveCount(0, { timeout: 20_000 })
   // Typed while the reply came: it moves on with the chat, and stays after a reload.
   await box(page).fill("And then")
-  await expect.poll(async () => onServer(chatId, await leaf(chatId))).toBe("And then")
+  await expect.poll(async () => onServer(chatId, null)).toBe("And then")
   await page.reload()
   await expect(box(page)).toHaveValue("And then")
   await box(page).fill("")
-  await expect.poll(async () => onServer(chatId, await leaf(chatId))).toBe("")
+  await expect.poll(async () => onServer(chatId, null)).toBe("")
   await page.reload()
   await expect(box(page)).toHaveValue("")
 })
@@ -146,9 +144,13 @@ test("text too long to send as the page goes comes back from this browser on a r
 
 /** Sends `content` under `parent` (a branch when it isn't the leaf), and returns its slot. */
 const send = (api: Client, chatId: ChatId, parent: SlotId | null, content: string, branch = false) =>
+  Effect.map(sendIn(api, chatId, parent, content, branch), (sent) => sent.slot)
+
+/** Sends as `send` does, and returns its slot and the fork it went to. */
+const sendIn = (api: Client, chatId: ChatId, parent: SlotId | null, content: string, branch = false) =>
   Effect.map(api.SendMessage({ chatId, parentSlotId: parent, branch, content }), (result: SendResult) => {
     if (result._tag !== "Posted") throw new Error("expected it to post")
-    return result.entry.slotId
+    return { slot: result.entry.slotId, fork: result.chat.currentForkId! }
   })
 
 /**
@@ -201,7 +203,7 @@ test("a send takes the text as it was at the click; typing while it's saved is t
   await expect(message(page, "This is the message")).toContainText(long)
   await replied(page)
   await expect(box(page)).toHaveValue("x")
-  await expect.poll(async () => onServer(chatId, await leaf(chatId))).toBe("x")
+  await expect.poll(async () => onServer(chatId, null)).toBe("x")
 })
 
 test("a send whose branch changed before it went isn't sent, and stays in that branch's composer", async ({ page }) => {
@@ -209,8 +211,8 @@ test("a send whose branch changed before it went isn't sent, and stays in that b
     Effect.gen(function* () {
       const chat = yield* api.CreateChat({ title: "Switched" })
       const root = yield* send(api, chat.id, null, "root")
-      const a = yield* send(api, chat.id, root, "branch A")
-      const b = yield* send(api, chat.id, root, "branch B", true)
+      const a = (yield* sendIn(api, chat.id, root, "branch A")).fork
+      const b = (yield* sendIn(api, chat.id, root, "branch B", true)).fork
       yield* typeInto(api, chat.id, a, "saved draft A")
       yield* typeInto(api, chat.id, b, "saved draft B")
       return { chatId: chat.id, a, b }
@@ -239,7 +241,7 @@ test("a tab that typed nothing takes another tab's newer text when the leaf move
     Effect.gen(function* () {
       const chat = yield* api.CreateChat({ title: "Idle" })
       const root = yield* send(api, chat.id, null, "root")
-      return { chatId: chat.id, root, draft: yield* typeInto(api, chat.id, root, "alpha") }
+      return { chatId: chat.id, root, draft: yield* typeInto(api, chat.id, null, "alpha") }
     })
   )
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
@@ -247,14 +249,15 @@ test("a tab that typed nothing takes another tab's newer text when the leaf move
   await expect(box(page)).toHaveValue("alpha")
   const appended = await admin((api) =>
     Effect.gen(function* () {
-      yield* typeInto(api, setup.chatId, setup.root, "alpha plus", setup.draft)
+      yield* typeInto(api, setup.chatId, null, "alpha plus", setup.draft)
       return yield* send(api, setup.chatId, setup.root, "from the other tab")
     })
   )
   await expect(message(page, "from the other tab")).toBeVisible()
   await expect(box(page)).toHaveValue("alpha plus")
   await page.waitForTimeout(1000)
-  expect(await onServer(setup.chatId, appended)).toBe("alpha plus")
+  void appended
+  expect(await onServer(setup.chatId, null)).toBe("alpha plus")
 })
 
 test("going through branches quickly saves each text on the branch it was typed on", async ({ page }) => {
@@ -262,17 +265,17 @@ test("going through branches quickly saves each text on the branch it was typed 
     Effect.gen(function* () {
       const chat = yield* api.CreateChat({ title: "Quick" })
       const root = yield* send(api, chat.id, null, "common root")
-      const a = yield* send(api, chat.id, root, "branch A")
-      const b = yield* send(api, chat.id, root, "branch B", true)
-      const c = yield* send(api, chat.id, root, "branch C", true)
-      yield* api.SwitchBranch({ chatId: chat.id, slotId: c, index: 0 })
+      const a = (yield* sendIn(api, chat.id, root, "branch A")).fork
+      const b = (yield* sendIn(api, chat.id, root, "branch B", true)).fork
+      yield* send(api, chat.id, root, "branch C", true)
       return { chatId: chat.id, a, b }
     })
   )
-  const open = await holdRequest(page, "OpenComposer", (payload) => payload.tipSlotId === setup.b)
+  const open = await holdRequest(page, "OpenComposer", (payload) => payload.forkId === setup.b)
   open.arm()
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
-  await page.goto(`${server().url}/chats/${setup.chatId}`)
+  // On branch A's fork, which isn't the current one.
+  await page.goto(`${server().url}/chats/${setup.chatId}?fork=${setup.a}`)
   await expect(box(page)).toBeEditable()
   await box(page).fill("unsaved typing for A")
   await page.getByRole("button", { name: "Next branch" }).click()
@@ -302,7 +305,7 @@ test("a send that another tab typed past keeps that tab's text in the composer",
   await replied(page)
   await expect(box(page)).toHaveValue(newer)
   await page.waitForTimeout(1000)
-  expect(await onServer(chatId, await leaf(chatId))).toBe(newer)
+  expect(await onServer(chatId, null)).toBe(newer)
 })
 
 test("text typed while an earlier text is being restored stays, on top of it", async ({ page }) => {
@@ -334,12 +337,13 @@ test("going back to a branch's tip shows its own composer, not the one typed in 
   await expect(message(page, "a message made in this tab")).toBeVisible()
   await replied(page)
   await box(page).fill("draft at the tip")
-  await expect.poll(async () => onServer(chatId, await leaf(chatId))).toBe("draft at the tip")
+  await expect.poll(async () => onServer(chatId, null)).toBe("draft at the tip")
   await messageMenu(message(page, "a message made in this tab"), "Branch from here")
   await expect(box(page)).toBeEditable()
   await box(page).fill("draft for a branch from the first message")
-  await page.getByRole("button", { name: /switch branch/ }).click()
-  await page.getByRole("menuitem", { name: "Back to the latest branch" }).click()
+  // Back goes to the fork it was made from.
+  await page.goBack()
+  await expect(message(page, "a message made in this tab")).toBeVisible()
   await expect(box(page)).toBeEditable()
   await expect(box(page)).toHaveValue("draft at the tip")
 })
@@ -349,9 +353,9 @@ test("starting a branch copies the composer into it", async ({ page }) => {
     Effect.gen(function* () {
       const chat = yield* api.CreateChat({ title: "Copied" })
       const root = yield* send(api, chat.id, null, "root to branch from")
-      const tip = yield* send(api, chat.id, root, "the current end")
-      yield* typeInto(api, chat.id, tip, "half typed continuation")
-      return { chatId: chat.id, root, tip }
+      const tip = yield* sendIn(api, chat.id, root, "the current end")
+      yield* typeInto(api, chat.id, null, "half typed continuation")
+      return { chatId: chat.id, root, tip: tip.fork }
     })
   )
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
@@ -360,8 +364,9 @@ test("starting a branch copies the composer into it", async ({ page }) => {
   await messageMenu(message(page, "root to branch from"), "Branch from here")
   await expect(box(page)).toBeEditable()
   await expect(box(page)).toHaveValue("half typed continuation")
-  expect(await onServer(setup.chatId, setup.root)).toBe("half typed continuation")
-  // A copy: the branch it came from keeps its own.
+  // In the fork made, which is the current one now.
+  expect(await onServer(setup.chatId, null)).toBe("half typed continuation")
+  // A copy: the fork it came from keeps its own.
   expect(await onServer(setup.chatId, setup.tip)).toBe("half typed continuation")
 })
 
@@ -404,7 +409,7 @@ test("closing while a send is out keeps what was typed after it", async ({ page 
   cut = false
   await page.reload()
   await expect(box(page)).toHaveValue("the next message")
-  expect(await onServer(chatId, await leaf(chatId))).toBe("the next message")
+  expect(await onServer(chatId, null)).toBe("the next message")
 })
 
 test("a copy this browser kept of another chat's composer is saved when a composer opens", async ({ page }) => {

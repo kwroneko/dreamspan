@@ -7,8 +7,8 @@
 // re-renders the body.
 import { useAtomValue } from "@effect/atom-react"
 import type { BinItem } from "@rp/shared/bin.ts"
-import type { PathEntry, SlotId, Version } from "@rp/shared/chat.ts"
-import { Link } from "@tanstack/react-router"
+import type { ForkId, PathEntry, SlotId, Version } from "@rp/shared/chat.ts"
+import { Link, useNavigate } from "@tanstack/react-router"
 import {
   memo,
   type MouseEvent,
@@ -498,7 +498,7 @@ export const Message = memo(function Message({
   context,
   revealed,
   onReveal,
-  branchLeaf,
+  branchFork,
   onBranch
 }: {
   entry: PathEntry
@@ -510,8 +510,8 @@ export const Message = memo(function Message({
   revealed: boolean
   /** Shows its actions (or hides them, given null) on a narrow screen. */
   onReveal: (slotId: SlotId | null) => void
-  /** The leaf of the branch shown, when it isn't the chat's active one: links keep to it. */
-  branchLeaf: SlotId | null
+  /** The fork shown, when it isn't the chat's current one: links keep to it. */
+  branchFork: ForkId | null
   /** Switches to another of the alternate branches at this message. */
   onBranch: (entry: PathEntry, index: number) => void
 }) {
@@ -529,6 +529,7 @@ export const Message = memo(function Message({
   }, [revealed])
   const generating = version.status === "generating"
   const report = (outcome: Outcome<unknown>) => setError(outcome.ok ? null : outcome.error)
+  const navigate = useNavigate()
   const { versions, position, load, replace } = useVersions(session, entry, report)
   const [regenerateWith, setRegenerateWith] = useState(false)
   const editEditor = useSyncExternalStore(
@@ -619,7 +620,7 @@ export const Message = memo(function Message({
   // Every generated message has its arrows, to generate another; any with versions, to step through them.
   const showVersions = generated || entry.versionCount > 1
   const deleteLabel = entry.versionCount > 1 ? "Delete version" : "Delete message"
-  const linkSearch = branchLeaf === null ? { slot: entry.slotId } : { leaf: branchLeaf, slot: entry.slotId }
+  const linkSearch = branchFork === null ? { slot: entry.slotId } : { fork: branchFork, slot: entry.slotId }
 
   const hidden = entry.contextExcluded
   // Who hid it: the user here (SetMessageHidden), else it came hidden from an ST import.
@@ -662,12 +663,21 @@ export const Message = memo(function Message({
       <MenuItem icon="regenerate" onClick={() => setRegenerateWith(true)}>
         {generated ? "Regenerate with…" : "Generate a version with…"}
       </MenuItem>
-      <MenuLinkItem
+      <MenuItem
         icon="branch"
-        render={<Link to="." search={{ leaf: entry.slotId }} onClick={() => session.startBranch(entry.slotId)} />}
+        onClick={async () => {
+          const from = session.snapshot().forkId
+          // A fork made here is the chat's current one: the chat opens on it, and Back
+          // returns to the fork it was made from.
+          const made = await session.branchFrom(entry.slotId)
+          report(made)
+          if (!made.ok) return
+          if (from !== null) await navigate({ to: ".", search: { fork: from }, replace: true })
+          void navigate({ to: ".", search: {} })
+        }}
       >
         Branch from here
-      </MenuLinkItem>
+      </MenuItem>
       <MenuItem icon={hidden ? "eye" : "ghost"} onClick={async () => report(await session.setHidden(entry, !hidden))}>
         {hidden ? "Show to the model again" : "Hide from the model"}
       </MenuItem>

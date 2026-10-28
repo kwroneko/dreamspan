@@ -3,7 +3,7 @@ import * as ContextGenerator from "../../src/chat/ContextGenerator.ts"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { AppApi } from "@rp/shared/api.ts"
-import type { ChatId, SlotId } from "@rp/shared/chat.ts"
+import type { ChatId, ForkId } from "@rp/shared/chat.ts"
 import type { Draft } from "@rp/shared/drafts.ts"
 import { Effect, Layer, Option } from "effect"
 import { HttpServer } from "effect/http"
@@ -139,12 +139,12 @@ export const takenFrom = (draft: Draft) => ({
 })
 
 /**
- * Types into the composer at a tip as the client does: opens it, then saves onto the draft
+ * Types into the composer of a fork (null: the current one) as the client does: opens it, then saves onto the draft
  * that names (or onto `onto`, a draft read earlier). Returns the draft after the save.
  */
-export const typeInto = (api: Api, chatId: ChatId, tipSlotId: SlotId | null, content: string, onto?: Draft) =>
+export const typeInto = (api: Api, chatId: ChatId, forkId: ForkId | null, content: string, onto?: Draft) =>
   Effect.gen(function* () {
-    const draft = onto ?? (yield* api.OpenComposer({ chatId, tipSlotId }))
+    const draft = onto ?? (yield* api.OpenComposer({ chatId, forkId }))
     const saved = yield* api.SaveComposer({
       next: false,
       operationId: crypto.randomUUID(),

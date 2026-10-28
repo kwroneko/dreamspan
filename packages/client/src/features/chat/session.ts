@@ -10,6 +10,8 @@ import {
   type Chat,
   type ChatId,
   type EntityId,
+  type Fork,
+  type ForkId,
   type PathEntry,
   type QueuedMessage,
   type SlotId,
@@ -57,7 +59,9 @@ export const liveReasoning = Atom.family((_id: VersionId) => Atom.make<string | 
 
 export interface ChatView {
   readonly chat: Chat | null
-  /** The path's leaf, as the server resolved it. */
+  /** The fork shown, as the server resolved it (spec/FORK-INDEPENDENCE-DELTA.md §2.1). */
+  readonly forkId: ForkId | null
+  /** The path's leaf: the fork's tip, as the server resolved it. */
   readonly leafSlotId: SlotId | null
   readonly entries: ReadonlyArray<PathEntry>
   /** Live naming metadata, including fork points outside the message window. */
@@ -110,6 +114,7 @@ const withInContext = (entry: PathEntry, version: Version) =>
 export class ChatSession {
   private view: ChatView = {
     chat: null,
+    forkId: null,
     leafSlotId: null,
     entries: [],
     branchNames: new Map(),
@@ -156,8 +161,8 @@ export class ChatSession {
   private missed: Array<Replayable> = []
 
   private readonly chatId: ChatId
-  /** The leaf the URL asks for; null follows the chat's active leaf. */
-  private requestedLeaf: SlotId | null
+  /** The fork the URL asks for; null opens the chat's current fork. */
+  private requestedFork: ForkId | null
   private readonly registry: AtomRegistry.AtomRegistry
 
   /** The chat this session shows. */
@@ -167,14 +172,14 @@ export class ChatSession {
 
   constructor(
     chatId: ChatId,
-    requestedLeaf: SlotId | null,
+    requestedFork: ForkId | null,
     registry: AtomRegistry.AtomRegistry,
     /** The user signed in: whose browser copies of the message editors' text to replay. */
     userId: string
   ) {
     this.chatId = chatId
     this.userId = userId
-    this.requestedLeaf = requestedLeaf
+    this.requestedFork = requestedFork
     this.registry = registry
   }
 
@@ -481,9 +486,11 @@ export class ChatSession {
   private async read(
     range: PathRange,
     limit = PAGE,
-    leafSlotId = this.view.leafSlotId ?? this.requestedLeaf
+    forkId = this.view.forkId ?? this.requestedFork
   ): Promise<PathWindow | null> {
-    const result = await this.call((client) => client("ReadPath", { chatId: this.chatId, leafSlotId, range, limit }))
+    const result = await this.call((client) =>
+      client("ReadPath", { chatId: this.chatId, forkId, leafSlotId: null, range, limit })
+    )
     if (result.ok) return result.value
     if (!this.disposed) this.update({ error: result.error.message, loading: false })
     return null
@@ -507,8 +514,11 @@ export class ChatSession {
     }
   }
 
-  /** Replaces the window: at the bottom, or around a slot; `reposition` scrolls to it. */
-  open(anchor: SlotId | null, limit = PAGE, reposition = true, followActive = false) {
+  /**
+   * Replaces the window: at the bottom, or around a slot; `reposition` scrolls to it.
+   * `followCurrent` reads the chat's current fork rather than the one shown.
+   */
+  open(anchor: SlotId | null, limit = PAGE, reposition = true, followCurrent = false) {
     const generation = ++this.generation
     this.update({ loading: this.view.entries.length === 0 })
     return this.reading(async () => {
@@ -516,13 +526,14 @@ export class ChatSession {
         this.read(
           anchor === null ? { _tag: "Bottom" } : { _tag: "Around", slot: anchor },
           limit,
-          followActive ? null : undefined
+          followCurrent ? null : undefined
         ),
         this.call((client) => client("GetChat", { chatId: this.chatId }))
       ])
       if (window === null || this.disposed || generation !== this.generation) return
       this.update({
         chat: chat.ok ? chat.value : this.view.chat,
+        forkId: window.forkId,
         leafSlotId: window.leafSlotId,
         entries: window.entries,
         older: window.older,
@@ -696,10 +707,10 @@ export class ChatSession {
     })
   }
 
-  /** Shows another branch (null: the chat's active one), at a message or at its bottom. */
-  showBranch(leaf: SlotId | null, anchor: SlotId | null) {
-    this.requestedLeaf = leaf
-    this.update({ leafSlotId: leaf, entries: [], loading: true })
+  /** Shows another fork (null: the chat's current one), at a message or at its bottom. */
+  showFork(fork: ForkId | null, anchor: SlotId | null) {
+    this.requestedFork = fork
+    this.update({ forkId: fork, leafSlotId: null, entries: [], loading: true })
     void this.open(anchor)
   }
 
@@ -791,8 +802,11 @@ export class ChatSession {
         this.reload()
         return
       }
-      case "Slot":
       case "Version":
+        // Another fork's flags or copy aren't this one's (spec/FORK-INDEPENDENCE-DELTA.md §2.2).
+        if (event.forkId !== undefined && this.view.forkId !== null && event.forkId !== this.view.forkId) return
+      // falls through
+      case "Slot":
         this.update({ pathRevision: this.view.pathRevision + 1 })
         if (this.reads > 0) this.missed.push(event)
         return this.applyState(event)
@@ -868,11 +882,11 @@ export class ChatSession {
     this.scheduleLcm()
     const { entries, newer } = this.view
     const limit = Math.min(MAX_LOADED, Math.max(PAGE, entries.length))
-    // A restore can move the active tip. Follow it only if this tab was already there;
-    // tabs explicitly showing another path keep their own leaf.
-    const followActive = this.requestedLeaf === null && this.view.leafSlotId === this.view.chat?.activeLeafSlotId
-    if (newer === null || entries.length === 0) return void this.open(null, limit, entries.length === 0, followActive)
-    void this.open(entries[Math.floor(entries.length / 2)]!.slotId, limit, false, followActive)
+    // A deletion can replace the current fork. Follow it only if this tab was showing it;
+    // tabs explicitly showing another fork keep their own.
+    const followCurrent = this.requestedFork === null && this.view.forkId === this.view.chat?.currentForkId
+    if (newer === null || entries.length === 0) return void this.open(null, limit, entries.length === 0, followCurrent)
+    void this.open(entries[Math.floor(entries.length / 2)]!.slotId, limit, false, followCurrent)
   }
 
   /**
@@ -880,6 +894,19 @@ export class ChatSession {
    * continues the loaded bottom of the path.
    */
   private applySlot(entry: PathEntry): boolean {
+    const { entries } = this.view
+    const index = entries.findIndex((e) => e.slotId === entry.slotId)
+    // Another fork's choices (its selection, its row version) aren't this one's: a slot shown
+    // here is read again as this fork shows it.
+    if (
+      entry.shownForkId !== undefined &&
+      this.view.forkId !== null &&
+      entry.shownForkId !== this.view.forkId &&
+      index >= 0
+    ) {
+      void this.refreshSlot(entry.slotId)
+      return true
+    }
     const known = this.view.branchNames.get(entry.slotId)
     if (
       (entry.branchCount > 1 || entry.branchName !== undefined || known !== undefined) &&
@@ -892,8 +919,6 @@ export class ChatSession {
         })
       })
     }
-    const { entries } = this.view
-    const index = entries.findIndex((e) => e.slotId === entry.slotId)
     if (index >= 0) {
       const current = entries[index]!
       if (current.rowVersion > entry.rowVersion) return true
@@ -906,7 +931,9 @@ export class ChatSession {
       this.track(stored.version)
       return true
     }
-    if (this.view.newer !== null || entry.parentSlotId !== (entries.at(-1)?.slotId ?? null)) {
+    // A message another fork appended at the same tip isn't this fork's.
+    const otherFork = entry.forkId !== undefined && this.view.forkId !== null && entry.forkId !== this.view.forkId
+    if (this.view.newer !== null || otherFork || entry.parentSlotId !== (entries.at(-1)?.slotId ?? null)) {
       // A new alternate of a message shown: it counts one more branch (DESIGN §3.2).
       if (entries.some((e) => e.parentSlotId === entry.parentSlotId && e.branchCount < entry.branchCount)) {
         this.update({
@@ -917,14 +944,17 @@ export class ChatSession {
           )
         })
       }
-      // The path's leaf moves on below the window too, so the composer follows it.
-      if (this.view.newer !== null && entry.parentSlotId !== null && entry.parentSlotId === this.view.leafSlotId) {
-        this.lastAppend = { from: entry.parentSlotId, to: entry.slotId }
+      // The path's leaf moves on below the window too.
+      if (
+        this.view.newer !== null &&
+        !otherFork &&
+        entry.parentSlotId !== null &&
+        entry.parentSlotId === this.view.leafSlotId
+      ) {
         this.update({ leafSlotId: entry.slotId })
       }
       return false
     }
-    this.lastAppend = { from: entry.parentSlotId, to: entry.slotId }
     let next = [...entries, entry]
     let older = this.view.older
     if (next.length > MAX_LOADED) {
@@ -944,9 +974,9 @@ export class ChatSession {
     this.update({ chat })
     this.followAtBottom()
     if (this.applySlot(entry)) return
-    this.requestedLeaf = null
-    this.lastAppend = { from: entry.parentSlotId, to: entry.slotId }
-    this.update({ leafSlotId: entry.slotId })
+    // The fork it went to is the current one now.
+    this.requestedFork = null
+    this.update({ forkId: chat.currentForkId, leafSlotId: entry.slotId })
     void this.open(null)
   }
 
@@ -1013,15 +1043,10 @@ export class ChatSession {
 
   // --- Writes. Each applies the server's reply at once; its event, arriving too, changes nothing.
 
-  /** Whether the view is a branch other than the active one, where a new message must say so. */
-  private onOtherBranch() {
-    const { chat, leafSlotId } = this.view
-    return chat !== null && leafSlotId !== chat.activeLeafSlotId
-  }
-
   /**
-   * The user's message at the leaf, as `speaker` (Send as X), then a reply to it by
-   * `replySpeaker`, unless `reply` is false. Onto a reply still being written, it's queued and the server posts it,
+   * The user's message at the leaf of the fork shown (its composer's), as `speaker` (Send
+   * as X), which makes that fork current, then a reply to it by `replySpeaker`, unless
+   * `reply` is false. Onto a reply still being written, it's queued and the server posts it,
    * with its reply, when that one ends (DESIGN §2.2). `sent` says whether the message went,
    * and `draft` is the composer draft as the send left it.
    */
@@ -1039,13 +1064,13 @@ export class ChatSession {
     readonly draft: SendResult["draft"]
     readonly recovered: number
   }> {
-    const parentSlotId = composer === undefined ? this.view.leafSlotId : composer.tip
     const result = await this.queueSnapshot(
       this.call((client) =>
         client("SendMessage", {
           chatId: this.chatId,
-          parentSlotId,
-          branch: this.onOtherBranch(),
+          forkId: composer?.fork ?? this.view.forkId,
+          parentSlotId: this.view.leafSlotId,
+          branch: false,
           content,
           speakerEntityId: speaker,
           // If it's queued, the server asks for the reply when it posts, from the same speaker.
@@ -1078,13 +1103,13 @@ export class ChatSession {
     direction = "",
     composer?: ComposerSource
   ): Promise<Outcome<SendResult>> {
-    const branch = parentSlotId === this.view.leafSlotId && this.onOtherBranch()
     const result = await this.queueSnapshot(
       this.call((client) =>
         client("Generate", {
           chatId: this.chatId,
+          forkId: composer?.fork ?? this.view.forkId,
           parentSlotId,
-          branch,
+          branch: false,
           speakerEntityId: speaker,
           ...(direction.trim() === "" ? {} : { direction }),
           ...(composer === undefined ? {} : { composer: commitOf(composer) })
@@ -1180,6 +1205,7 @@ export class ChatSession {
     return this.slotWrite(entry.slotId, (client) =>
       client("Regenerate", {
         slotId: entry.slotId,
+        forkId: this.view.forkId,
         expectedRowVersion: entry.rowVersion,
         ...(model ? { model } : {}),
         ...(direction ? { direction } : {})
@@ -1197,17 +1223,26 @@ export class ChatSession {
     return this.slotWrite(entry.slotId, (client) =>
       client("ContinueVersion", {
         versionId: entry.version.id,
+        forkId: this.view.forkId,
         expectedRowVersion: entry.rowVersion,
         ...(direction ? { direction } : {})
       })
     )
   }
 
-  /** Shows another version at once, and puts the slot back as it was if the server refuses. */
+  /**
+   * Shows another version at once, in this fork only, and puts the slot back as it was if
+   * the server refuses.
+   */
   async select(entry: PathEntry, version: Version): Promise<Outcome<unknown>> {
     this.applySlot(withInContext(entry, version))
     const result = await this.slotWrite(entry.slotId, (client) =>
-      client("SelectVersion", { slotId: entry.slotId, versionId: version.id, expectedRowVersion: entry.rowVersion })
+      client("SelectVersion", {
+        slotId: entry.slotId,
+        versionId: version.id,
+        forkId: this.view.forkId,
+        expectedVersionId: entry.version.id
+      })
     )
     if (!result.ok && result.error.tag !== "StaleWrite") this.applySlot(entry)
     return result
@@ -1224,15 +1259,24 @@ export class ChatSession {
     const commit = draft === null ? {} : { draft }
     if (version.writer === "human" && version.status !== "generating") {
       const result = await this.call((client) =>
-        client("AmendVersion", { versionId: version.id, content, expectedRowVersion: version.rowVersion, ...commit })
+        client("AmendVersion", {
+          versionId: version.id,
+          forkId: this.view.forkId,
+          content,
+          expectedRowVersion: version.rowVersion,
+          ...commit
+        })
       )
-      if (result.ok) this.applyVersion(result.value)
+      // Another fork shows the version too: this fork shows a copy in its place now.
+      if (result.ok && result.value.id !== version.id) void this.refreshSlot(entry.slotId)
+      else if (result.ok) this.applyVersion(result.value)
       else if (result.error.tag === "StaleWrite") void this.refreshSlot(entry.slotId)
       return result
     }
     return this.slotWrite(entry.slotId, (client) =>
       client("EditVersion", {
         slotId: entry.slotId,
+        forkId: this.view.forkId,
         sourceVersionId: version.id,
         content,
         expectedRowVersion: entry.rowVersion,
@@ -1246,6 +1290,7 @@ export class ChatSession {
     return this.slotWrite(entry.slotId, (client) =>
       client("WriteVersion", {
         slotId: entry.slotId,
+        forkId: this.view.forkId,
         content,
         expectedRowVersion: entry.rowVersion,
         ...(draft === null ? {} : { draft })
@@ -1272,7 +1317,9 @@ export class ChatSession {
     version: Version,
     flags: { readonly starred?: boolean; readonly hidden?: boolean }
   ): Promise<Outcome<Version>> {
-    const result = await this.call((client) => client("SetVersionFlags", { versionId: version.id, ...flags }))
+    const result = await this.call((client) =>
+      client("SetVersionFlags", { versionId: version.id, forkId: this.view.forkId, ...flags })
+    )
     if (result.ok) this.applyVersion(result.value)
     return result
   }
@@ -1280,21 +1327,30 @@ export class ChatSession {
   /** Deletes the branch a message starts (it and everything below it) to the bin. */
   async deleteBranch(slotId: SlotId) {
     const result = await this.call((client) => client("DeleteBranch", { slotId }))
-    // A reload at the old window can still name a tip inside the deleted subtree.
-    // Follow the writer's surviving active path, fencing every earlier window read.
-    if (result.ok) this.showBranch(null, null)
+    // The fork shown may have gone with it. Follow the chat's current fork, fencing every
+    // earlier window read.
+    if (result.ok) this.showFork(null, null)
     return result
   }
 
   /** The alternates where `slotId` is one, with their names. */
   listBranches(slotId: SlotId) {
-    return this.call((client) => client("ListBranches", { slotId }))
+    return this.call((client) => client("ListBranches", { slotId, forkId: this.view.forkId }))
   }
 
-  /** Names the branch a message starts; the slot comes back with its name. */
-  async nameBranch(slotId: SlotId, name: string): Promise<Outcome<PathEntry>> {
-    const result = await this.call((client) => client("NameBranch", { slotId, name }))
-    if (result.ok) this.applySlot(result.value)
+  /**
+   * Names the fork that `entry` starts; that message, which shows the name among its
+   * alternates, is read again.
+   */
+  async nameFork(entry: PathEntry, name: string): Promise<Outcome<Fork>> {
+    const forkId = entry.startsForkId
+    if (forkId === undefined)
+      return {
+        ok: false,
+        error: { tag: "NotFound", message: "That message starts no fork.", problems: [], reason: null }
+      }
+    const result = await this.call((client) => client("NameFork", { forkId, name }))
+    if (result.ok) await this.refreshSlot(entry.slotId)
     return result
   }
 
@@ -1332,7 +1388,7 @@ export class ChatSession {
   }
 
   listVersions(slotId: SlotId) {
-    return this.call((client) => client("ListVersions", { slotId }))
+    return this.call((client) => client("ListVersions", { slotId, forkId: this.view.forkId }))
   }
 
   /** A write that returns the slot after it. A stale one reads the slot again. */
@@ -1347,44 +1403,41 @@ export class ChatSession {
   }
 
   /**
-   * Switches to the alternate at `index` of the message at `entry` (DESIGN §3.2): the chat's
-   * active leaf moves to that branch's tip, and the window follows it once the caller opens
-   * it where the user is.
+   * Finds the fork through the alternate at `index` of the message at `entry` (DESIGN §3.2).
+   * Nothing moves: the caller opens it (`?fork=`), where the user is.
    */
   async switchBranch(entry: PathEntry, index: number): Promise<Outcome<BranchSwitch>> {
     const result = await this.call((client) =>
-      client("SwitchBranch", { chatId: this.chatId, slotId: entry.slotId, index })
+      client("SwitchBranch", { chatId: this.chatId, slotId: entry.slotId, index, forkId: this.view.forkId })
+    )
+    if (result.ok) this.update({ chat: result.value.chat })
+    return result
+  }
+
+  /**
+   * "Branch from here": a fork of the one shown, at `at`, which becomes the chat's current
+   * fork. Its composer starts as a copy of this one's (DESIGN §6.2).
+   */
+  async branchFrom(at: SlotId) {
+    const result = await this.call((client) =>
+      client("CreateFork", { chatId: this.chatId, fromForkId: this.view.forkId, atSlotId: at })
     )
     if (result.ok) {
-      this.requestedLeaf = null
-      this.update({ chat: result.value.chat, leafSlotId: result.value.chat.activeLeafSlotId })
+      this.branchStart = result.value.fork.id
+      this.update({ chat: result.value.chat })
+      this.showFork(null, null)
     }
     return result
   }
 
-  // --- Where the leaf went, for the composer (composerDraft.ts).
+  // --- For the composer (composerDraft.ts).
 
-  /** The last time the leaf moved by a message appended below it. */
-  private lastAppend: { readonly from: SlotId | null; readonly to: SlotId } | null = null
+  /** A fork the user is starting with "Branch from here" (DESIGN §6.2: it takes the composer along). */
+  private branchStart: ForkId | null = null
 
-  /**
-   * Whether the leaf's last move was from `from` to `to` by a message appended below it (a
-   * send, a reply, the queue posting), rather than a jump elsewhere.
-   */
-  movedByAppend(from: SlotId | null, to: SlotId | null): boolean {
-    return this.lastAppend !== null && this.lastAppend.from === from && this.lastAppend.to === to
-  }
-
-  /** A branch the user is starting with "Branch from here" (DESIGN §6.2: it takes the composer along). */
-  private branchStart: SlotId | null = null
-
-  startBranch(at: SlotId) {
-    this.branchStart = at
-  }
-
-  /** Whether `tip` is the branch being started; it is only once. */
-  takeBranchStart(tip: SlotId | null): boolean {
-    if (tip === null || tip !== this.branchStart) return false
+  /** Whether `fork` is the fork being started; it is only once. */
+  takeBranchStart(fork: ForkId | null): boolean {
+    if (fork === null || fork !== this.branchStart) return false
     this.branchStart = null
     return true
   }

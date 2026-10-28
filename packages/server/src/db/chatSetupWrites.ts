@@ -10,13 +10,15 @@ import { recordHistoryReduction } from "./historyChanges.ts"
 // first entry posts after it, in the same transaction (FinishGeneration): a message, then
 // a reply to it, or the reply asked for. The rest wait for that reply. One rule covers
 // Send and Generate: whatever is aimed at a reply still being written waits for it.
-import { type ChatId, type EntityId, NewVersion, type SlotId, type VersionId } from "@rp/shared/chat.ts"
+import { type ChatId, type EntityId, type ForkId, NewVersion, type SlotId, type VersionId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import type { Bin } from "./bin.ts"
 import { loadCards } from "./cards.ts"
+import { forkRecency, forkThrough, onPath } from "./forks.ts"
+import { selectedIn } from "./forkState.ts"
 import { makeGraphWrites } from "./graphWrites.ts"
 import { LeafMoved, NotFound, StaleWrite, type WriteOps } from "./ops.ts"
 import { chatQueue, ownedQueued, type QueuedRow, toQueued } from "./queueRows.ts"
@@ -70,8 +72,8 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
     const nothing = { posted: [] as Array<SlotId>, next: null, withdrawn: 0, queueChanged: false, queue: [] }
 
     /**
-     * The queue behind a slot whose generation just ended. `reply`: the first entry posts
-     * and the rest wait for its reply. `restart` (no generation can start: the server is
+     * The queue behind a slot whose generation just ended, each fork's entries in that fork.
+     * `reply`: a fork's first entry posts and the rest wait for its reply. `restart` (no generation can start: the server is
      * starting up): every queued message posts in order, without replies, and queued
      * replies are dropped, so the server doesn't spend on a provider with nobody there.
      */
@@ -85,13 +87,9 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
           slot_deleted: number | null
           chat_deleted: number | null
           owner_user_id: string
-          active_leaf_slot_id: string | null
-          status: string
         }>`
-          SELECT s.chat_id, s.deleted_at AS slot_deleted, c.deleted_at AS chat_deleted, c.owner_user_id,
-            c.active_leaf_slot_id, v.status
-          FROM slots s JOIN chats c ON c.id = s.chat_id JOIN versions v ON v.id = s.selected_version_id
-          WHERE s.id = ${replySlotId}`
+          SELECT s.chat_id, s.deleted_at AS slot_deleted, c.deleted_at AS chat_deleted, c.owner_user_id
+          FROM slots s JOIN chats c ON c.id = s.chat_id WHERE s.id = ${replySlotId}`
         const chatId = slot!.chat_id as ChatId
         const owner = slot!.owner_user_id as UserId
         // The reply went to the bin (or its chat did): what waited for it is withdrawn.
@@ -105,26 +103,79 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
             queue: yield* chatQueue(sql, chatId)
           }
         }
-        // Still being written: another version of the slot is selected and generating.
-        if (slot!.status === "generating") return nothing
-        // The user moved to another branch while it waited: it posts where it was sent, and
-        // the chat stays where the user is. Silently moving them back would hide what they
-        // sent there since.
-        const keepLeaf = slot!.active_leaf_slot_id !== replySlotId
-        // A branch from a live slot of a live chat: neither NotFound nor LeafMoved can happen.
+        // Each fork's entries post in that fork: two forks can wait on one reply when a fork
+        // was made at it while it was being written. In the order each fork queued first.
+        const groups = new Map<string | null, Array<QueuedRow>>()
+        for (const entry of entries) groups.set(entry.fork_id, [...(groups.get(entry.fork_id) ?? []), entry])
+        const posted: Array<SlotId> = []
+        const replies: Array<{ slotId: SlotId; versionId: VersionId; forkId: ForkId }> = []
+        let changed = false
+        for (const [queuedIn, group] of groups) {
+          const done = yield* postQueued(owner, chatId, replySlotId, queuedIn, group, mode)
+          if (done === null) continue
+          changed = true
+          posted.push(...done.posted)
+          if (done.next !== null) replies.push(done.next)
+        }
+        if (!changed) return nothing
+        return {
+          posted,
+          next: replies[0] ?? null,
+          ...(replies.length > 1 ? { more: replies.slice(1) } : {}),
+          withdrawn: 0,
+          queueChanged: true,
+          queue: yield* chatQueue(sql, chatId)
+        }
+      })
+
+    /**
+     * The entries of one fork (`queuedIn`; null: queued before forks) waiting on a reply that
+     * isn't being written any more, posted; null while that fork's reply is still generating.
+     */
+    const postQueued = (
+      owner: UserId,
+      chatId: ChatId,
+      replySlotId: string,
+      queuedIn: string | null,
+      entries: ReadonlyArray<QueuedRow>,
+      mode: "reply" | "restart"
+    ) =>
+      Effect.gen(function* () {
+        const [slot] = yield* sql<{ status: string }>`
+          SELECT v.status FROM slots s JOIN chats c ON c.id = s.chat_id
+            JOIN versions v ON v.id = ${selectedIn(sql, queuedIn ?? sql.literal("c.current_fork_id"), "s")}
+          WHERE s.id = ${replySlotId}`
+        // Still being written: the fork it was sent in selects another version, generating.
+        if (slot!.status === "generating") return null
+        // It posts in the fork it was sent in, which was chatted in when it was sent: the
+        // chat stays where the user is now, since silently moving them back would hide what
+        // they sent there since. One queued before forks posts in a
+        // fork ending at its reply. Should that fork have gone on elsewhere, or be gone, the
+        // post makes a fork of its own there.
+        const [fork] = yield* sql<{ id: ForkId }>`
+          SELECT f.id FROM forks f WHERE f.chat_id = ${chatId} AND f.deleted_at IS NULL
+            AND (f.id = ${queuedIn} OR (${queuedIn} IS NULL AND f.tip_slot_id = ${replySlotId}))
+          ORDER BY f.id = ${queuedIn} DESC, ${sql.literal(forkRecency("f"))} DESC LIMIT 1`
+        let forkId: ForkId | null = fork?.id ?? null
+        // A live slot of a live chat: neither NotFound nor LeafMoved can happen.
         const append = (parentSlotId: string, version: NewVersion) =>
           graph
             .appendMessage({
               userId: owner,
               chatId,
+              forkId,
               parentSlotId: parentSlotId as SlotId,
               branch: true,
               version,
               commitDraft: null,
-              keepLeaf
+              chatted: false
             })
-            .pipe(Effect.catchTag(["NotFound", "LeafMoved"], (error) => Effect.die(error)))
+            .pipe(
+              Effect.tap((result) => Effect.sync(() => (forkId = result.forkId))),
+              Effect.catchTag(["NotFound", "LeafMoved"], (error) => Effect.die(error))
+            )
         const posted: Array<SlotId> = []
+        const ids = entries.map((entry) => entry.id)
         if (mode === "restart") {
           yield* bin.recoverQueued(
             owner,
@@ -141,8 +192,8 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
               parent = message.slotId
             }
           }
-          yield* sql`DELETE FROM queued_messages WHERE reply_slot_id = ${replySlotId}`
-          return { ...nothing, posted, queueChanged: true, queue: yield* chatQueue(sql, chatId) }
+          yield* sql`DELETE FROM queued_messages WHERE id IN ${sql.in(ids)}`
+          return { posted, next: null }
         }
         // Messages sent with no one to reply (every character muted, DESIGN §3.5) post at
         // once, one after another, as they would have then; the first entry that wants a
@@ -160,8 +211,8 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
           waiting = waiting.slice(1)
         }
         if (waiting.length === 0) {
-          yield* sql`DELETE FROM queued_messages WHERE reply_slot_id = ${replySlotId}`
-          return { ...nothing, posted, queueChanged: true, queue: yield* chatQueue(sql, chatId) }
+          yield* sql`DELETE FROM queued_messages WHERE id IN ${sql.in(ids)}`
+          return { posted, next: null }
         }
         const [first] = waiting
         // A message's reply comes from whoever was picked when it was sent, as for a send then.
@@ -177,16 +228,12 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
           first!.kind === "message" ? reply(replySpeaker, null) : reply(speaker, first!.direction)
         )
         posted.push(next.slotId)
-        yield* sql`DELETE FROM queued_messages WHERE id IN ${sql.in(entries.slice(0, entries.length - waiting.length + 1).map((e) => e.id))}`
-        yield* sql`UPDATE queued_messages SET reply_slot_id = ${next.slotId}, updated_at = ${Date.now()}
-          WHERE reply_slot_id = ${replySlotId}`
-        return {
-          posted,
-          next: { slotId: next.slotId, versionId: next.version.id as VersionId },
-          withdrawn: 0,
-          queueChanged: true,
-          queue: yield* chatQueue(sql, chatId)
-        }
+        yield* sql`DELETE FROM queued_messages WHERE id IN ${sql.in(ids.slice(0, entries.length - waiting.length + 1))}`
+        const rest = waiting.slice(1).map((entry) => entry.id)
+        if (rest.length > 0)
+          yield* sql`UPDATE queued_messages SET reply_slot_id = ${next.slotId}, fork_id = ${forkId}, updated_at = ${Date.now()}
+            WHERE id IN ${sql.in(rest)}`
+        return { posted, next: { slotId: next.slotId, versionId: next.version.id as VersionId, forkId: next.forkId } }
       })
 
     const handlers = {
@@ -253,14 +300,10 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
                 ...(frozen[i] && Object.keys(frozen[i]).length > 0 ? { frozenMacros: frozen[i] } : {})
               })
             const parent = root === null ? null : { id: root, depth }
-            const inserted = yield* graph.insertSlot(chatId, laneId, parent, greetingVersion(0), at)
+            const more = greeter.greetings.slice(1).map((_, i) => greetingVersion(i + 1))
+            const picked = greeting !== null && greeting > 0 && greeting < greeter.greetings.length ? greeting : 0
+            const inserted = yield* graph.insertSlot(chatId, laneId, parent, greetingVersion(0), at, null, more, picked)
             const slotId = inserted.slotId as SlotId
-            let selected = inserted.version.id
-            for (let i = 1; i < greeter.greetings.length; i++) {
-              const row = yield* graph.insertVersion(slotId, i, greetingVersion(i), at)
-              if (i === greeting) selected = row.id
-            }
-            yield* sql`UPDATE slots SET selected_version_id = ${selected} WHERE id = ${slotId}`
             yield* sql`UPDATE chats SET active_leaf_slot_id = ${slotId}, last_message_at = ${at} WHERE id = ${chatId}`
             root = slotId
             depth++
@@ -280,6 +323,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
       SendOrQueue: ({
         userId,
         chatId,
+        forkId,
         parentSlotId,
         branch,
         kind,
@@ -291,26 +335,40 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
         commitDraft
       }) =>
         Effect.gen(function* () {
-          const chat = yield* graph.ownedChat(userId, chatId)
+          yield* graph.ownedChat(userId, chatId)
+          let fork = yield* graph.ownedFork(userId, chatId, forkId ?? null)
           yield* graph.checkSpeaker(userId, speakerEntityId)
           if (kind === "message") yield* graph.checkSpeaker(userId, replySpeakerEntityId)
           if (parentSlotId !== null) {
             const [parent] = yield* sql<{ status: string }>`
-              SELECT v.status FROM slots s JOIN versions v ON v.id = s.selected_version_id
+              SELECT v.status FROM slots s JOIN versions v ON v.id = ${selectedIn(sql, fork.id, "s")}
               WHERE s.id = ${parentSlotId} AND s.chat_id = ${chatId} AND s.deleted_at IS NULL`
             if (!parent) return yield* new NotFound({ entity: "slot", id: parentSlotId })
             // A tab that missed a newer message hears about it, queued or not.
-            if (!branch && parentSlotId !== chat.active_leaf_slot_id) {
-              return yield* new LeafMoved({ chatId, activeLeafSlotId: chat.active_leaf_slot_id })
+            if (!branch && parentSlotId !== fork.tip_slot_id) {
+              return yield* new LeafMoved({ chatId, activeLeafSlotId: fork.tip_slot_id })
             }
             if (parent.status === "generating") {
               const at = Date.now()
+              // A branch queued onto a reply still being written waits in a fork of its own.
+              if (branch && parentSlotId !== fork.tip_slot_id) {
+                const through = (yield* onPath(sql, chatId, fork.tip_slot_id, parentSlotId))
+                  ? fork
+                  : ((yield* forkThrough(sql, chatId, parentSlotId)) ?? fork)
+                fork =
+                  through.tip_slot_id === parentSlotId
+                    ? through
+                    : yield* graph.createFork(chatId, through, parentSlotId, at, true)
+              }
               const [next] = yield* sql<{ n: number }>`
                 SELECT coalesce(max(seq), -1) + 1 AS n FROM queued_messages WHERE chat_id = ${chatId}`
+              // Sent now, posted later: the fork is chatted in now.
+              yield* graph.chatIn(fork.id, at)
               const [row] = yield* sql<QueuedRow>`INSERT INTO queued_messages ${sql.insert({
                 id: uuidv7(),
                 chat_id: chatId,
                 reply_slot_id: parentSlotId,
+                fork_id: fork.id,
                 seq: next!.n,
                 kind,
                 content: kind === "message" ? content : "",
@@ -339,6 +397,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
           const result = yield* graph.appendMessage({
             userId,
             chatId,
+            forkId: fork.id as ForkId,
             parentSlotId,
             branch,
             version: kind === "message" ? userMessage(content, speakerEntityId) : reply(speakerEntityId, direction),
@@ -416,9 +475,9 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
           return { version, chatId: slot!.chat_id as ChatId, ...queue }
         }).pipe(transaction("FinishGeneration")),
 
-      SelectAndDrain: ({ userId, slotId, versionId, expectedRowVersion }) =>
+      SelectAndDrain: ({ userId, slotId, versionId, forkId, expectedVersionId }) =>
         Effect.gen(function* () {
-          const { chatId } = yield* graph.selectVersion(userId, slotId, versionId, expectedRowVersion)
+          const { chatId } = yield* graph.selectVersion(userId, slotId, versionId, forkId ?? null, expectedVersionId)
           // Selecting a finished version ends the wait, as its generation's end would have.
           return { chatId, ...(yield* afterReply(slotId, "reply")) }
         }).pipe(transaction("SelectAndDrain")),

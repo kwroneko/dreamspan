@@ -24,7 +24,7 @@ it.live("a send must actually store the text it commits", () =>
         composer: takenFrom(d)
       })
     )
-    const after = yield* api.OpenComposer({ chatId: chat.id, tipSlotId: sent.entry.slotId })
+    const after = yield* api.OpenComposer({ chatId: chat.id, forkId: sent.chat.currentForkId })
 
     assert.strictEqual(after.content, d.content)
   }).pipe(Effect.scoped, withServer(testConfig()))
@@ -45,7 +45,7 @@ it.live("a send in B must not commit the draft in A", () =>
         composer: takenFrom(d)
       })
     )
-    const after = yield* api.OpenComposer({ chatId: a.id, tipSlotId: null })
+    const after = yield* api.OpenComposer({ chatId: a.id, forkId: null })
     assert.strictEqual(after.content, d.content)
   }).pipe(Effect.scoped, withServer(testConfig()))
 )
@@ -72,7 +72,7 @@ for (const kind of ["message", "generate"] as const) {
           origin: "generated"
         })
       })
-      const draft = yield* typeInto(api, chat.id, parent.slotId, "Text the queue does not store")
+      const draft = yield* typeInto(api, chat.id, parent.forkId, "Text the queue does not store")
       const result = yield* kind === "message"
         ? api.SendMessage({
             chatId: chat.id,
@@ -89,7 +89,7 @@ for (const kind of ["message", "generate"] as const) {
             composer: takenFrom(draft)
           })
       assert.strictEqual(result._tag, "Queued")
-      const after = yield* api.OpenComposer({ chatId: chat.id, tipSlotId: parent.slotId })
+      const after = yield* api.OpenComposer({ chatId: chat.id, forkId: parent.forkId })
       assert.strictEqual(after.content, draft.content)
       assert.strictEqual(after.session, draft.session)
     }).pipe(Effect.scoped, withServer(testConfig()))
@@ -132,8 +132,7 @@ it.live("import advancement must carry the empty-root composer", () =>
         }
       ])
     })
-    const c = yield* api.GetChat({ chatId: chat.id })
-    const atLeaf = yield* api.OpenComposer({ chatId: chat.id, tipSlotId: c.activeLeafSlotId })
+    const atLeaf = yield* api.OpenComposer({ chatId: chat.id, forkId: null })
     assert.strictEqual(atLeaf.id, d.id)
   }).pipe(Effect.scoped, withServer(testConfig()))
 )
@@ -175,7 +174,7 @@ it.live(
     Effect.gen(function* () {
       const api = yield* client()
       const chat = yield* api.CreateChat({ title: "Retention" })
-      const d = yield* api.OpenComposer({ chatId: chat.id, tipSlotId: null })
+      const d = yield* api.OpenComposer({ chatId: chat.id, forkId: null })
       let last
       for (let i = 0; i < 1003; i++)
         last = yield* api.SaveComposer({
@@ -334,7 +333,7 @@ it.live("the writer reports displacement facts, including a repeated composer re
   Effect.gen(function* () {
     const api = yield* client()
     const chat = yield* api.CreateChat({ title: "Replay conflict" })
-    const base = yield* api.OpenComposer({ chatId: chat.id, tipSlotId: null })
+    const base = yield* api.OpenComposer({ chatId: chat.id, forkId: null })
     const elsewhere = yield* typeInto(api, chat.id, null, "saved elsewhere")
     const payload = {
       chatId: chat.id,
@@ -349,7 +348,7 @@ it.live("the writer reports displacement facts, including a repeated composer re
     assert.deepEqual({ ...replay.draft?.displaced }, { at: elsewhere.updatedAt, content: elsewhere.content })
     const duplicate = yield* api.SaveComposer(payload)
     assert.deepEqual(duplicate.draft?.displaced, replay.draft?.displaced)
-    const read = yield* api.OpenComposer({ chatId: chat.id, tipSlotId: null })
+    const read = yield* api.OpenComposer({ chatId: chat.id, forkId: null })
     assert.isNull(read.displaced)
     const same = yield* api.SaveComposer({ ...payload, operationId: crypto.randomUUID() })
     assert.isNull(same.draft?.displaced)

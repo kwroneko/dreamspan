@@ -1,5 +1,6 @@
 // Resolve the editor through the same branch binding the assembler reads (DESIGN §3.4).
 import type { UserId } from "@rp/shared/domain.ts"
+import { attachedApplies, viewAt } from "./forkState.ts"
 import type { ChatNotePosition } from "@rp/shared/editorApi.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
@@ -27,6 +28,8 @@ export const noteAt = Effect.fnUntraced(function* (
     if (!slot) return yield* new NotFound({ entity: "slot", id: slotId })
   }
   const head = yield* lib.loadDoc(ref.head_revision_id)
+  // A binding attached to a version applies where the fork in view shows it.
+  const fork = yield* viewAt(sql, chatId, slotId)
   if (ref.kind !== "note" || (head.owner as { chat?: string } | undefined)?.chat !== chatId) {
     return yield* new NotFound({ entity: "note", id: ref.id })
   }
@@ -41,7 +44,7 @@ export const noteAt = Effect.fnUntraced(function* (
       WHERE e.chat_id = ${chatId} AND e.key = 'note.binding' AND json_extract(e.value_json, '$.note') = ${ref.entity_id}
         AND e.superseded_by_changeset IS NULL
         AND (e.slot_id IS NULL OR (p.id IS NOT NULL AND s.deleted_at IS NULL))
-        AND (e.version_id IS NULL OR e.version_id = s.selected_version_id)
+        AND ${attachedApplies(sql, fork, "s", "e.version_id")}
       ORDER BY coalesce(s.depth, -1) DESC, e.seq DESC LIMIT 1`
   const [revision] = yield* sql<{
     id: string
