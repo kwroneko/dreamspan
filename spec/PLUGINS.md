@@ -222,8 +222,7 @@ The rule that protects the main objective: a registry is added when a core featu
 - **Namespaced chat state keys,** before the first extension needs them (`@rp/shared/state.ts` is a closed union today).
   - **Ids inside values must be declared.** The writer checks every id in a core key's value against the acting user (ARCHITECTURE §3.8). A plugin key (`<plugin-id>/<key>`) must therefore register, with its value schema, which fields hold entity, ref, revision or connection ids, so the same check covers it. Any other field is treated as free-form data: a plugin that reads an id from one must check ownership itself.
 
-  **Built** (2026-10-11, ARCHITECTURE.md §3.8): the declaration (`StateKeyIds`), which every core key uses, and `stateKeyProblems`, which checks a declaration against its value schema. The writer's check reads only the declarations.
-  **Not built:** registering a plugin key, and accepting plugin keys in `StateEventData`. A plugin key will be named `<plugin-id>/<key>` (no core key has a slash), and registering it will run `stateKeyProblems` on its value schema and declaration.
+  **Built** (2026-10-28, ARCHITECTURE.md §3.8): `registerStateKey` registers a plugin key (`<plugin-id>/<key>`) with its schema, id declaration (checked by `stateKeyProblems`), positional or branch scope and optional reducer; the fold keeps its value in `ChatState.plugin`. **Not built:** running the registration in the writer and reader workers (the loader).
 - **Library documents keep `extensions` as a namespaced object,** matching the card spec, when the importers are built.
 - **The CSP restricts `connect-src` to our origin** from the first client release.
 

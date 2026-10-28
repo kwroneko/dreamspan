@@ -9,9 +9,9 @@ import {
   type FoldableEvent,
   isStateRole,
   scopeIds,
-  type StateEventData,
-  type StateKeyIds,
-  stateKeyIds
+  type WritableStateEvent,
+  type StateKeyDeclaration,
+  stateKeyDeclaration
 } from "@rp/shared/state.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
@@ -38,14 +38,17 @@ type Reference =
   | { readonly table: "connection"; readonly id: string }
   | { readonly table: "model"; readonly id: string; readonly connection: string | undefined }
 
-/** Any key's declaration, core or (later) a plugin's. */
-type Declared = StateKeyIds<Readonly<Record<string, string | ReadonlyArray<string>>>>
-
-const references = (data: StateEventData) => referencesOf(stateKeyIds[data.key], data.value)
+type Declared = StateKeyDeclaration
 
 /** A participant scope is checked like a value's ids; a role names nothing. */
 const scopeReferences = (scope: FoldableEvent["scope"]) =>
   scope === null || isStateRole(scope) ? [] : referencesOf(scopeIds, { scope })
+
+/** What a stored event names; a plugin key nobody registered now names nothing, so its events are kept. */
+const references = (data: FoldableEvent["data"]) => {
+  const declaration = stateKeyDeclaration(data.key)
+  return declaration === undefined ? [] : referencesOf(declaration, data.value)
+}
 
 const referencesOf = (declared: Declared, of: unknown): ReadonlyArray<Reference> => {
   // A value that isn't an object declares no fields, so this is only read for objects.
@@ -88,11 +91,14 @@ export const checkStateReferences = (
   sql: SqlClient.SqlClient,
   userId: UserId,
   chatId: string,
-  data: StateEventData,
+  data: WritableStateEvent,
   scope: FoldableEvent["scope"]
 ) => {
+  // A key nobody registered is refused, whatever its value holds.
+  const declaration = stateKeyDeclaration(data.key)
+  if (declaration === undefined) return Effect.fail(new NotFound({ entity: "state key", id: data.key }))
   // Keys that take something out of the state work on deleted and purged things too.
-  const live = stateKeyIds[data.key].removes ? 0 : 1
+  const live = declaration.removes ? 0 : 1
   return Effect.forEach(
     [...references(data), ...scopeReferences(scope)],
     (reference) => {
