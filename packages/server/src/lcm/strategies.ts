@@ -3,9 +3,12 @@ import type { ContextSnapshot } from "../assembler/types.ts"
 import type { SummaryJob } from "../db/lcmJobs.ts"
 import type { Registry } from "../registry.ts"
 import { summaryDraft, summaryTool } from "./summaryTool.ts"
+import { DIRECT_INSTRUCTION, TOOL_INSTRUCTION } from "./instructions.ts"
 
 export interface SummaryToolFactory {
   readonly id: string
+  /** How to use this factory's tool. Omitted: follow the offered tool's definition. */
+  readonly instruction?: string
   /** Definition and executor are instantiated together, once per job attempt. */
   readonly create: (input: SummaryExecutionInput) => {
     readonly definition: Tool
@@ -21,9 +24,11 @@ export interface SummaryExecutionInput {
 
 export interface SummaryStrategy {
   readonly id: string
+  /** Output instructions appended during worker assembly, before budgeting and freezing. */
+  readonly instruction?: (tools: SummaryTools) => string
   readonly create: (
     input: SummaryExecutionInput,
-    tools: Registry<SummaryToolFactory>
+    tools: SummaryTools
   ) => {
     readonly tools?: Tool[]
     readonly candidate: () => string
@@ -37,13 +42,17 @@ export interface SummaryStrategy {
   }
 }
 
+type SummaryTools = Pick<Registry<SummaryToolFactory>, "get" | "list">
+
 export const summaryToolFactory: SummaryToolFactory = {
   id: "summary_tool",
+  instruction: TOOL_INSTRUCTION,
   create: ({ job }) => ({ definition: summaryTool, ...summaryDraft(Math.ceil(job.target * 2.5)) })
 }
 
 export const directSummary: SummaryStrategy = {
   id: "direct",
+  instruction: () => DIRECT_INSTRUCTION,
   create: () => {
     let responseText = ""
     return {
@@ -68,6 +77,9 @@ export const directSummary: SummaryStrategy = {
 
 export const toolSummary: SummaryStrategy = {
   id: "tool",
+  instruction: (tools) =>
+    tools.get("summary_tool")?.instruction ??
+    "\nWrite the summary with the provided tool, following its definition; assistant prose is not the summary.",
   create: (input, tools) => {
     const factory = tools.get("summary_tool")
     if (!factory) throw new Error("Summary tool summary_tool is unavailable.")

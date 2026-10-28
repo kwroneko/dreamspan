@@ -14,6 +14,7 @@ import { ProviderError, Providers } from "../providers/Providers.ts"
 import { JudgeUnavailable } from "../decision/RefusalJudge.ts"
 import { SummaryChecks } from "./OutputChecks.ts"
 import { clipSummary } from "./summaryTool.ts"
+import { DIRECT_INSTRUCTION } from "./instructions.ts"
 
 /** A check refused the output; it is not saved, and the attempt fails. */
 class SummaryRefused {
@@ -100,7 +101,30 @@ export function makeSummarizer(pool: boolean) {
         let candidate = () => ""
         let rejected = false
         const work = Effect.gen(function* () {
-          const assembled = yield* reader.AssembleSummary({ userId: job.userId, jobId: job.id, attempt: job.epoch })
+          // Pin execution and instruction policy together before the worker read yields.
+          // Scope changes affect the next attempt, never half of an in-flight attempt.
+          const strategies = new Map(execution.summaries.list().map((entry) => [entry.id, entry]))
+          const factories = new Map(execution.summaryTools.list().map((entry) => [entry.id, entry]))
+          const tools = { get: (id: string) => factories.get(id), list: () => [...factories.values()] }
+          const instructionEntries = yield* Effect.forEach([...strategies], ([id, strategy]) =>
+            Effect.try(() => {
+              const instruction = strategy.instruction?.(tools) ?? DIRECT_INSTRUCTION
+              return [[id, instruction && !instruction.startsWith("\n") ? `\n${instruction}` : instruction] as const]
+            }).pipe(
+              Effect.catch((error) =>
+                Effect.logWarning(`Summary strategy ${id} instruction is unavailable`, error).pipe(Effect.as([]))
+              )
+            )
+          )
+          // A broken unselected strategy must not block the selected one. Missing
+          // instructions fail clearly only if the worker selects that strategy.
+          const instructions = Object.fromEntries(instructionEntries.flat())
+          const assembled = yield* reader.AssembleSummary({
+            userId: job.userId,
+            jobId: job.id,
+            attempt: job.epoch,
+            instructions
+          })
           const snapshot = JSON.parse(assembled.snapshot) as ContextSnapshot,
             generation = JSON.parse(assembled.generation) as Generation
           frozenInputs = snapshot.summaryJob
@@ -115,10 +139,10 @@ export function makeSummarizer(pool: boolean) {
             snapshot: assembled.snapshot
           })
           rolloutId = id
-          const strategy = execution.summaries.get(snapshot.summaryJob!.style)
+          const strategy = strategies.get(snapshot.summaryJob!.style)
           if (!strategy)
             return yield* Effect.fail(new Error(`Summary strategy ${snapshot.summaryJob!.style} is unavailable.`))
-          const output = yield* Effect.try(() => strategy.create({ job, snapshot }, execution.summaryTools))
+          const output = yield* Effect.try(() => strategy.create({ job, snapshot }, tools))
           const wire = providerRequest(generation.request, model)
           candidate = output.candidate
           let context = output.tools ? { ...wire.context, tools: output.tools } : wire.context

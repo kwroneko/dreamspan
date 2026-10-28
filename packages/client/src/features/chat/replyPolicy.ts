@@ -50,10 +50,16 @@ const roundRobin = (
 export interface ReplyPolicy {
   readonly id: string
   readonly next: (cast: Cast | null, entries: ReadonlyArray<PathEntry>, speaker: EntityId | null) => NextInTurn | null
+  /** Whether Send can request an unnamed reply when this policy selects no character. */
+  readonly unnamedReply?: (cast: Cast | null) => boolean
 }
 
 export const replyPolicies = makeRegistry<ReplyPolicy>()
-replyPolicies.register({ id: "round-robin", next: roundRobin })
+replyPolicies.register({
+  id: "round-robin",
+  next: roundRobin,
+  unnamedReply: (cast) => !(cast?.participants.some((id) => !cast.playedByMe.includes(id)) ?? false)
+})
 
 /** The same dispatch drives the preview and the speaker submitted by the composer. */
 export const nextInTurn = (
@@ -61,3 +67,20 @@ export const nextInTurn = (
   entries: ReadonlyArray<PathEntry>,
   speaker: EntityId | null
 ): NextInTurn | null => replyPolicies.get("round-robin")?.next(cast, entries, speaker) ?? null
+
+/** One decision for the preview, immediate sends and queued sends. A null speaker
+ * is a valid unnamed reply, so disabling automatic replies needs an explicit flag. */
+export const planReply = (
+  cast: Cast | null,
+  entries: ReadonlyArray<PathEntry> | null,
+  speaker: EntityId | null,
+  picked: EntityId | null
+) => {
+  const policy = replyPolicies.get("round-robin")
+  const next = entries === null ? null : nextInTurn(cast, entries, speaker)
+  return {
+    next,
+    replier: picked ?? next?.id ?? null,
+    reply: picked !== null || next !== null || policy?.unnamedReply?.(cast) === true
+  }
+}

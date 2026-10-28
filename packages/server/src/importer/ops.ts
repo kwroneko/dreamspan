@@ -63,6 +63,8 @@ const ExportedFile = Schema.Struct({ bytes: Transferable.Uint8Array, mime: Schem
 
 export const ExportInput = Schema.Struct({
   format: ExportFormat,
+  /** Metadata used to choose media and HTTP headers, checked again by the executing worker. */
+  expectedFormat: Schema.optionalKey(ExportFormatInfo),
   docJson: Schema.String,
   noteDocJson: Schema.NullOr(Schema.String),
   /** A card's other exportable notes, a linked one with its shared note's text. */

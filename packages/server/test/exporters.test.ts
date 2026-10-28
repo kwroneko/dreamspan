@@ -6,9 +6,13 @@ import { PasswordCost } from "../src/auth/passwords.ts"
 import * as ContextGenerator from "../src/chat/ContextGenerator.ts"
 import * as Formats from "../src/importer/Formats.ts"
 import { Summarizer } from "../src/lcm/Summarizer.ts"
+import { Reader } from "../src/db/Database.ts"
 import { serverWith } from "../src/server.ts"
 import { client, post, serverPort, testConfig } from "./support/config.ts"
 import { json, stCardV2 } from "./formats/support.ts"
+import { importCard } from "../src/formats/cardImport.ts"
+import { tempDir } from "./support/tempDir.ts"
+import { stalls } from "./support/liveness.ts"
 
 const config = testConfig()
 const server = serverWith(
@@ -24,6 +28,74 @@ const server = serverWith(
 const text = (response: Response) => Effect.promise(() => response.text())
 
 describe("exporter registration end to end", () => {
+  it.live(
+    "every pool worker and respawn installs the plugin; closing both scopes restores built-ins",
+    () =>
+      Effect.gen(function* () {
+        const formats = yield* Formats.Formats
+        const metadata = (yield* formats.listExports).find((entry) => entry.id === "card-v2-json")!
+        assert.strictEqual(metadata.mime, "text/plain")
+        assert.isFalse((yield* formats.listExports).some((entry) => entry.id === "card-png"))
+        const round = (action: string) => {
+          const directory = tempDir("export-barrier")
+          return Effect.all(
+            Array.from({ length: 2 }, () =>
+              formats
+                .export({
+                  format: metadata.id,
+                  expectedFormat: metadata,
+                  docJson: JSON.stringify({ directory, action }),
+                  noteDocJson: null,
+                  notesDocJson: [],
+                  avatar: null,
+                  assets: []
+                })
+                .pipe(Effect.result)
+            ),
+            { concurrency: 2 }
+          ).pipe(stalls(`export worker barrier: ${action}`))
+        }
+        const ids = (results: Effect.Success<ReturnType<typeof round>>) =>
+          results.map((result) => {
+            assert.strictEqual(result._tag, "Success")
+            if (result._tag !== "Success") throw new Error("export failed")
+            return new TextDecoder().decode(result.success)
+          })
+        const original = ids(yield* round("run"))
+        assert.strictEqual(new Set(original).size, 2)
+        for (const result of yield* round("crash")) {
+          assert.strictEqual(result._tag, "Failure")
+          if (result._tag === "Failure") assert.strictEqual(result.failure._tag, "FormatWorkerFailed")
+        }
+        const replacements = ids(yield* round("run"))
+        assert.strictEqual(new Set(replacements).size, 2)
+        assert.isTrue(replacements.every((id) => !original.includes(id)))
+        assert.deepStrictEqual(new Set(ids(yield* round("close"))), new Set(replacements))
+        const restored = yield* formats.listExports
+        assert.isTrue(restored.some((entry) => entry.id === "card-png"))
+        assert.strictEqual(restored.find((entry) => entry.id === "card-v2-json")!.mime, "application/json")
+        const card = yield* importCard(json(stCardV2()))
+        const bytes = yield* formats.export({
+          format: "card-v2-json",
+          docJson: JSON.stringify(card.card),
+          noteDocJson: null,
+          notesDocJson: [],
+          avatar: null,
+          assets: []
+        })
+        assert.strictEqual(JSON.parse(new TextDecoder().decode(bytes)).data.name, "Wren")
+      }).pipe(
+        Effect.provide(
+          Formats.layer({
+            workers: "source",
+            size: 2,
+            entry: new URL("./support/exportPoolWorker.ts", import.meta.url)
+          })
+        )
+      ),
+    60_000
+  )
+
   it.live(
     "offers and accepts a new format, runs an override, and restores built-ins when its scope closes",
     () =>
@@ -83,6 +155,24 @@ describe("exporter registration end to end", () => {
         assert.include(original.headers.get("content-type"), "application/json")
         assert.include(original.headers.get("content-disposition"), 'filename="Wren.json"')
         assert.strictEqual(JSON.parse(yield* text(original)).data.name, "Wren")
+        // A queued export may run after its catalog's plugin scope closed, including
+        // on another worker. It must refuse stale metadata instead of mislabelling bytes.
+        const formats = yield* Formats.Formats
+        const reader = yield* Reader
+        const user = yield* api.Whoami()
+        const source = yield* reader.ExportSource({ userId: user.id, refId })
+        const stale = {
+          format: "card-v2-json",
+          expectedFormat: catalog.find((entry) => entry.id === "card-v2-json")!,
+          docJson: source.docJson,
+          noteDocJson: null,
+          notesDocJson: [],
+          avatar: null,
+          assets: []
+        }
+        const changed = yield* formats.export(stale).pipe(Effect.flip)
+        assert.strictEqual(changed._tag, "ExportRefused")
+        assert.include(changed.message, "changed")
         const png = yield* post("/library/export", { refId, format: "card-png" })
         assert.strictEqual(png.status, 200)
         assert.include(png.headers.get("content-type"), "image/png")

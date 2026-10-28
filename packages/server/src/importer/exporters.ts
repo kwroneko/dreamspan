@@ -5,7 +5,7 @@ import { CardDoc } from "@rp/shared/docs/card.ts"
 import { LorebookDoc } from "@rp/shared/docs/lorebook.ts"
 import { NoteDoc } from "@rp/shared/docs/note.ts"
 import { LegacyPresetDoc as PresetDoc } from "@rp/shared/docs/preset.ts"
-import { Context, Effect, Layer, Predicate, Schema } from "effect"
+import { Context, Effect, Layer, Option, Predicate, Schema } from "effect"
 import { exportCardCharx, exportCardJson, exportCardPng } from "../formats/cardExport.ts"
 import { exportPromptPreset } from "../formats/presetSettings.ts"
 import { exportLorebook } from "../formats/worldInfo.ts"
@@ -212,18 +212,33 @@ export const layer = Layer.effect(
   })
 )
 
-/** Direct format callers get the built-ins; workers pass their scoped registry. */
+/** Honor the current service; standalone callers without one get scoped built-ins. */
 export const exportFile = (
   input: ExportInput,
   registry?: Registry<Exporter>
 ): Effect.Effect<Uint8Array, ExportRefused> =>
   registry === undefined
-    ? Effect.flatMap(Exporters, (registry) => exportFile(input, registry)).pipe(Effect.provide(layer))
+    ? Effect.gen(function* () {
+        const current = yield* Effect.serviceOption(Exporters)
+        if (Option.isSome(current)) return yield* exportFile(input, current.value)
+        return yield* Effect.flatMap(Exporters, (registry) => exportFile(input, registry)).pipe(Effect.provide(layer))
+      })
     : Effect.suspend(() => {
         const entry = registry.get(input.format)
-        return entry
-          ? entry.write(input)
-          : Effect.fail(new ExportRefused({ message: `Unknown export format: ${input.format}` }))
+        if (!entry) return Effect.fail(new ExportRefused({ message: `Unknown export format: ${input.format}` }))
+        // The catalog lookup and this request may use different pool workers or
+        // straddle a scope closing. Never write bytes with another entry's headers/media.
+        const expected = input.expectedFormat
+        if (
+          expected &&
+          (expected.id !== entry.id ||
+            expected.kind !== entry.kind ||
+            expected.mime !== entry.mime ||
+            expected.extension !== entry.extension ||
+            expected.media !== entry.media)
+        )
+          return Effect.fail(new ExportRefused({ message: "The export format changed; try exporting again." }))
+        return entry.write(input)
       })
 
 /** Never pass executable code across the worker boundary. */

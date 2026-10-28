@@ -2474,7 +2474,13 @@ export class ReadOps extends RpcGroup.make(
     error: Schema.Union([StorageError, NotFound, AssemblyFailed])
   }),
   Rpc.make("AssembleSummary", {
-    payload: { userId: UserId, jobId: Schema.String, attempt: Schema.Int },
+    payload: {
+      userId: UserId,
+      jobId: Schema.String,
+      attempt: Schema.Int,
+      /** Data from the attempt's registered strategies, applied before budget checks. */
+      instructions: Schema.optionalKey(Schema.Record(Schema.String, Schema.String))
+    },
     success: Schema.Struct({ snapshot: Schema.String, generation: Schema.String }),
     error: Schema.Union([StorageError, NotFound, AssemblyFailed])
   }),

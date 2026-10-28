@@ -19,7 +19,11 @@ import { client, serverLayer, testConfig } from "./config.ts"
 import { completionChunks, type Recorded, sse, startMockProvider } from "./mockProvider.ts"
 
 /** What a model answers: text, a provider's refusal, or an HTTP failure. */
-export type Reply = { readonly text: string } | { readonly refusal: true } | { readonly status: number }
+export type Reply =
+  | { readonly text: string }
+  | { readonly refusal: true }
+  | { readonly status: number }
+  | { readonly tool: { readonly name: string; readonly arguments: Record<string, string | boolean> } }
 
 export const PLANTED = "PLANTED-REFUSAL"
 
@@ -34,6 +38,40 @@ const reply = (res: ServerResponse, answer: Reply) => {
         object: "chat.completion.chunk",
         model: "synthetic",
         choices: [{ index: 0, delta: { role: "assistant", content: "" }, finish_reason: "content_filter" }]
+      }
+    ])
+  else if ("tool" in answer)
+    sse(res, [
+      {
+        id: "synthetic-tool",
+        object: "chat.completion.chunk",
+        model: "synthetic",
+        choices: [
+          {
+            index: 0,
+            delta: {
+              role: "assistant",
+              tool_calls: [
+                {
+                  index: 0,
+                  id: "synthetic-call",
+                  type: "function",
+                  function: {
+                    name: answer.tool.name,
+                    arguments: JSON.stringify(answer.tool.arguments)
+                  }
+                }
+              ]
+            },
+            finish_reason: null
+          }
+        ]
+      },
+      {
+        id: "synthetic-tool",
+        object: "chat.completion.chunk",
+        model: "synthetic",
+        choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }]
       }
     ])
   else sse(res, completionChunks([answer.text], { prompt_tokens: 100, completion_tokens: 12 }))

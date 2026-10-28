@@ -46,6 +46,7 @@ it.effect(
             })
           })
           const output = strategy.create(input, registry.summaryTools)
+          assert.notInclude(strategy.instruction!(registry.summaryTools), "summary_tool")
           assert.strictEqual(output.tools![0]!.name, "synthetic_tool")
           const denied = output.accept(reply("summary_tool", {}))
           assert.isFalse(denied.done)
@@ -57,6 +58,7 @@ it.effect(
         })
       )
       const restored = strategy.create(input, registry.summaryTools)
+      assert.include(strategy.instruction!(registry.summaryTools), "Write the summary with summary_tool.")
       assert.strictEqual(restored.tools![0]!.name, "summary_tool")
       assert.strictEqual(restored.candidate(), "")
       assert.strictEqual(

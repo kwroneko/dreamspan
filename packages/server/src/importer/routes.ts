@@ -338,6 +338,7 @@ export const layer = Layer.unwrap(
                 : []
             const bytes = yield* formats.export({
               format,
+              expectedFormat: exporter,
               docJson: source.docJson,
               noteDocJson: source.noteDocJson,
               notesDocJson: source.notesDocJson,
