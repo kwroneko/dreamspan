@@ -5,6 +5,7 @@ import type { LcmState } from "@rp/shared/lcm.ts"
 import type { ChatEvent, PathWindow } from "@rp/shared/chatApi.ts"
 import { AtomRegistry } from "effect/reactivity"
 import { describe, expect, it, vi } from "vitest"
+import { planReply, replyPolicies } from "../src/features/chat/replyPolicy.ts"
 
 // rpc.ts reads the page's location when imported.
 vi.stubGlobal("location", { protocol: "http:", host: "127.0.0.1" })
@@ -92,6 +93,38 @@ const reply = version("v2", "s2", "generating", "The tide")
 const second = entry("s2", "s1", reply)
 
 describe("ChatSession", () => {
+  for (const queued of [false, true]) {
+    it(`a disabled reply policy sends reply=false for ${queued ? "queued" : "immediate"} messages`, async () => {
+      const { s } = session()
+      const requests: Array<{ method: string; payload: Record<string, unknown> }> = []
+      type StubClient = (method: string, payload: Record<string, unknown>) => Promise<unknown>
+      const internals = s as unknown as {
+        call: (run: (client: StubClient) => Promise<unknown>) => Promise<unknown>
+        appended: () => void
+      }
+      internals.appended = () => {}
+      internals.call = async (run) => ({
+        ok: true,
+        value: await run(async (method, payload) => {
+          requests.push({ method, payload })
+          return { _tag: queued ? "Queued" : "Posted", queue: [], entry: first, chat, draft: null, recovered: 0 }
+        })
+      })
+      const undo = replyPolicies.disable("round-robin")
+      try {
+        const plan = planReply(null, [], null, null)
+        const outcome = await s.send("Synthetic message.", null, plan.replier, undefined, plan.reply)
+        expect(outcome.sent).toBe(true)
+        expect(requests).toHaveLength(1)
+        expect(requests[0]!.method).toBe("SendMessage")
+        expect(requests[0]!.payload.reply).toBe(false)
+      } finally {
+        undo()
+        s.dispose()
+      }
+    })
+  }
+
   it("drops an LCM read from another fork sharing the same tip", async () => {
     const { s } = session()
     const internals = s as unknown as {

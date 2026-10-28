@@ -3,7 +3,7 @@ import { StSettingsImport } from "@rp/shared/modelSettings.ts"
 // writing an export, both CPU work on untrusted or large data, kept off the main thread.
 import { ImportReport } from "@rp/shared/importReport.ts"
 import { EntityKind } from "@rp/shared/library.ts"
-import { ExportFormat } from "@rp/shared/libraryImport.ts"
+import { ExportFormat, ExportFormatInfo } from "@rp/shared/libraryImport.ts"
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
 import { Transferable } from "effect/workers"
@@ -63,6 +63,8 @@ const ExportedFile = Schema.Struct({ bytes: Transferable.Uint8Array, mime: Schem
 
 export const ExportInput = Schema.Struct({
   format: ExportFormat,
+  /** Metadata used to choose media and HTTP headers, checked again by the executing worker. */
+  expectedFormat: Schema.optionalKey(ExportFormatInfo),
   docJson: Schema.String,
   noteDocJson: Schema.NullOr(Schema.String),
   /** A card's other exportable notes, a linked one with its shared note's text. */
@@ -184,6 +186,7 @@ export class FormatOps extends RpcGroup.make(
     payload: { bytes: Transferable.Uint8Array, fileName: Schema.String },
     success: ParsedFile
   }),
+  Rpc.make("ListExportFormats", { success: Schema.Array(ExportFormatInfo) }),
   Rpc.make("Export", { payload: ExportInput, success: Transferable.Uint8Array, error: ExportRefused }),
   // --- ST data folder import
   Rpc.make("ParseStChatPart", {

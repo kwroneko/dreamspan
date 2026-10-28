@@ -3,11 +3,15 @@
 import { type AppApi, CurrentUser } from "@rp/shared/api.ts"
 import { ServerError } from "@rp/shared/errors.ts"
 import { Effect } from "effect"
+import { Formats } from "../importer/Formats.ts"
 import { Reader } from "../db/Database.ts"
 
 export const makeLibraryHandlers = Effect.gen(function* () {
   const reader = yield* Reader
+  const formats = yield* Formats
   return {
+    ListExportFormats: () =>
+      formats.listExports.pipe(Effect.mapError(() => new ServerError({ message: "ListExportFormats failed" }))),
     ListLibrary: ({ kind, archived }) =>
       Effect.flatMap(CurrentUser, (user) =>
         reader.ListLibrary({ userId: user.id, kind, tag: null, archived: archived ?? false })

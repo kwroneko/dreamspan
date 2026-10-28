@@ -15,6 +15,7 @@ import { makeAssembler } from "../assembler/assembler.ts"
 import { AssemblyFailed, generationOf, type ContextSnapshot } from "../assembler/types.ts"
 import { wireContext } from "../assembler/wire.ts"
 import { summaryRequest } from "../lcm/request.ts"
+import { DIRECT_INSTRUCTION, TOOL_INSTRUCTION } from "../lcm/instructions.ts"
 import { sqlSources } from "./assemblySources.ts"
 import { readDefaults } from "./generationSettings.ts"
 import { backfillOf, overCap, spentSince } from "./lcmBackfill.ts"
@@ -168,7 +169,7 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
         if (chunks.length < MAX_JOBS_PER_PLAN) flush()
         return { ...result, chunks, backfill: settled({ ...result, chunks }) }
       }).pipe(inFork(sql, chatId, forkId, leafSlotId), query("PlanSummaries")),
-    AssembleSummary: ({ userId, jobId, attempt }) =>
+    AssembleSummary: ({ userId, jobId, attempt, instructions }) =>
       Effect.gen(function* () {
         const [job] = yield* sql.unsafe<SummaryJob>(
           `SELECT ${jobColumns} FROM summarization_jobs j JOIN chats c ON c.id = j.chat_id WHERE j.id = ? AND c.owner_user_id = ? AND c.deleted_at IS NULL AND j.status = 'processing' AND j.claim_epoch = ?`,
@@ -272,6 +273,19 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
             message: "The summary request cannot render its whole declared chunk."
           })
         const style = state.lcm.style ?? "direct"
+        const outputInstruction =
+          instructions === undefined
+            ? style === "tool"
+              ? TOOL_INSTRUCTION
+              : DIRECT_INSTRUCTION
+            : Object.hasOwn(instructions, style)
+              ? instructions[style]
+              : undefined
+        if (outputInstruction === undefined)
+          return yield* new AssemblyFailed({
+            reason: "invalid_document",
+            message: `Summary strategy ${style} is unavailable.`
+          })
         const settings = resolveLcm(state.lcm, defaults.lcm)
         const range = job.level > 1 ? `(messages ${children[0]!.from} to ${children.at(-1)!.to})` : ""
         // Without the preset the parts follow the instruction instead of preceding it.
@@ -281,11 +295,7 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
               ? `Condense the last ${children.length} summaries above ${range} into one summary of at most ${summaryWords(job.target)} words. Keep its language and voice, names, events and unresolved details. The earlier summaries are continuity, not material to condense again.`
               : `Condense the last ${children.length} summaries ${range} into one summary of at most ${summaryWords(job.target)} words. Keep their language and voice, names, events and unresolved details. Any summaries before them are continuity, not material to condense again.`
             : (settings.tail ?? BUILTIN_SUMMARY_INSTRUCTION)
-        const tail =
-          instruction.replace(/\{\{words\}\}/gi, String(summaryWords(job.target))) +
-          (style === "tool"
-            ? "\nWrite the summary with summary_tool. Create a draft and finalize it; assistant prose is not the summary."
-            : "\nReturn only the summary, without commentary.")
+        const tail = instruction.replace(/\{\{words\}\}/gi, String(summaryWords(job.target))) + outputInstruction
         const snapshot: ContextSnapshot = summaryRequest({
           ...built,
           sources: sources.pins(),
