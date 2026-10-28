@@ -57,8 +57,8 @@ const PLACES = [
   { value: "tail", label: "After the newest message (older notes)" },
   { value: "section:card", label: "Beside the card's definition (older notes)" },
   { value: "section:before_main_prompt", label: "Before the main prompt (older notes)" },
-  { value: "section:author_note_top", label: "At the top of the author's note (imported from ST)" },
-  { value: "section:author_note_bottom", label: "At the bottom of the author's note (imported from ST)" },
+  { value: "section:author_note_top", label: "Just before the chat's author's note (imported from ST)" },
+  { value: "section:author_note_bottom", label: "Just after the chat's author's note (imported from ST)" },
   { value: "none", label: "Not placed: only a macro reads it" }
 ] as const
 
@@ -96,8 +96,8 @@ const shortPlace = (placement: Placement | undefined): string => {
         tail_end: "End of tail",
         card: "Beside the card",
         before_main_prompt: "Before the main prompt",
-        author_note_top: "Author's note top",
-        author_note_bottom: "Author's note bottom"
+        author_note_top: "Before the author's note",
+        author_note_bottom: "After the author's note"
       }[place.section]
   }
 }
@@ -114,8 +114,26 @@ const conditionText = (condition: NoteCondition | undefined, cards: ReadonlyArra
   return condition.when === "turn" ? `${name}'s turn` : `While ${name} isn't muted`
 }
 
+/** "With the definitions" for a card's note: inside its card's part (DESIGN §4.1). */
+const CARD_DEFINITIONS = "With the definitions (in the card's part)"
+
+/** What a place at the author's note means, said where it's chosen: nothing about it is hidden. */
+const AUTHOR_NOTE_PLACE =
+  "It joins the chat's author's note (the note marked “author's note” in the chat's notes), at its depth and role. In a chat without one, it goes in the history at depth 4 as the system, where ST's default author's note goes."
+
 /** Where a note goes, saved whole as one value. Fields of the placement this editor doesn't show stay as they are. */
-function PlacementField({ store, path, label }: { store: EditorStore; path: FieldPath; label: string }) {
+function PlacementField({
+  store,
+  path,
+  label,
+  card
+}: {
+  store: EditorStore
+  path: FieldPath
+  label: string
+  /** A card's note: "with the definitions" is inside its card's part. */
+  card: boolean
+}) {
   const placement = useValue<Placement | undefined>(store, path) ?? END_OF_TAIL
   const [depth, setDepth] = useState<string | null>(null)
   const role: Role = placement.mode === "none" ? "system" : (placement.role ?? "system")
@@ -132,7 +150,9 @@ function PlacementField({ store, path, label }: { store: EditorStore; path: Fiel
     store.setValue(path, next)
   }
   // An older or imported place still shows, when the note is there already.
-  const items = PLACES.filter((p) => DECIDED.includes(p.value) || p.value === placeOf(placement))
+  const items = PLACES.filter((p) => DECIDED.includes(p.value) || p.value === placeOf(placement)).map((p) =>
+    card && p.value === "section:after_main_prompt" ? { ...p, label: CARD_DEFINITIONS } : p
+  )
   return (
     // Three across when its container is wide enough, not the window: it's in the chat's side panel too.
     <div className="@container flex min-w-0 flex-col gap-2">
@@ -166,6 +186,10 @@ function PlacementField({ store, path, label }: { store: EditorStore; path: Fiel
           </Field>
         )}
       </div>
+      {placement.mode === "section" &&
+        (placement.section === "author_note_top" || placement.section === "author_note_bottom") && (
+          <p className="text-sm text-muted">{AUTHOR_NOTE_PLACE}</p>
+        )}
       <FieldTools store={store} field={valueField(path)} label={label} />
     </div>
   )
@@ -330,7 +354,7 @@ export function NoteFields({
       ) : (
         <SharedBanner link={link} onUnlink={() => onUnlink?.()} onRestore={() => onRestore?.()} />
       )}
-      <PlacementField store={store} path={["placement"]} label="Position" />
+      <PlacementField store={store} path={["placement"]} label="Position" card={card} />
       <ConditionField store={store} cards={cards} />
       <SwitchField
         store={store}
@@ -514,6 +538,7 @@ export function NoteRow({
   shared,
   detail,
   keepMounted = false,
+  authorNote = false,
   children
 }: {
   doc: Doc
@@ -532,6 +557,8 @@ export function NoteRow({
    * leaving and a copy kept in this browser comes back as the page opens.
    */
   keepMounted?: boolean
+  /** It's the chat's author's note, which notes and lore at its top or bottom join. */
+  authorNote?: boolean
   children: ReactNode
 }) {
   const { title, muted } = rowTitle(doc, label)
@@ -564,7 +591,7 @@ export function NoteRow({
             {!control && doc["on_by_default"] === true && <Badge>On in every chat</Badge>}
             {shared?.binned && <Badge tone="warning">linked note is in the bin</Badge>}
             {doc["exportable"] === false && "card" in Object(doc["owner"]) && <Badge>Private</Badge>}
-            {kind === "author_note" && <Badge>author's note</Badge>}
+            {authorNote && <Badge>author's note</Badge>}
             {kind === "imported_summary" && <Badge>summary</Badge>}
           </span>
         </button>
