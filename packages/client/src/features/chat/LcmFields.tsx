@@ -3,11 +3,19 @@
 // chats, each falling back to the built-in). Each field is one write: a number when it's left or
 // Enter is pressed, a choice when it's picked. The pairs and the fit problems are measured by
 // the server; this only shows them under the fields they are about.
-import { LCM_BUILTIN, type LcmField, type LcmSettingsChange, type LcmWhen, chunkSize } from "@rp/shared/lcmSettings.ts"
+import {
+  LCM_BUILTIN,
+  type LcmField,
+  type LcmSettingsChange,
+  type LcmWhen,
+  chunkSize,
+  loweredTarget,
+  summaryWords
+} from "@rp/shared/lcmSettings.ts"
 import type { LcmSettingsView } from "@rp/shared/lcm.ts"
 import { type ReactNode, useState } from "react"
 import { Button } from "../../ui/Button.tsx"
-import { RadioGroup } from "../../ui/Choice.tsx"
+import { RadioGroup, Switch } from "../../ui/Choice.tsx"
 import { Field, Fieldset, Input } from "../../ui/Field.tsx"
 import { Segmented } from "../../ui/Segmented.tsx"
 
@@ -196,6 +204,14 @@ function Pair({
   disabled: boolean
 }) {
   const shown = misfits.filter((m) => m.field === target || m.field === maximum)
+  // A maximum lowered to the target or below takes the target with it, and says so.
+  const [lowered, setLowered] = useState<number | null>(null)
+  const commit = async (field: typeof target | typeof maximum, value: number | null) => {
+    const below = field === maximum && value !== null ? loweredTarget(resolved[target], resolved[field], value) : null
+    const problem = await write(below === null ? { [field]: value } : { [field]: value, [target]: below })
+    setLowered(problem === null ? below : null)
+    return problem
+  }
   return (
     <Fieldset legend={legend} description={description}>
       <div className="flex flex-wrap items-end gap-3">
@@ -206,7 +222,7 @@ function Pair({
             value={resolved[field]}
             disabled={disabled}
             invalid={shown.length > 0}
-            onCommit={(value) => write({ [field]: value })}
+            onCommit={(value) => commit(field, value)}
           />
         ))}
         {now !== null && (
@@ -215,6 +231,11 @@ function Pair({
           </p>
         )}
       </div>
+      {lowered !== null && resolved[target] === lowered && (
+        <p role="status" className="text-sm text-muted">
+          Target lowered to {tokens(lowered)} to stay below the maximum.
+        </p>
+      )}
       {scaled?.clamped && (
         <p className="text-sm text-muted">
           Scaled down with the summary block to fit this model: target {tokens(scaled.target)}, maximum{" "}
@@ -297,6 +318,23 @@ export function LcmFields({
           onReset={() => void choose({ withPreset: null })}
         />
         {errorFor("withPreset") && <p className="text-sm text-danger">{errorFor("withPreset")}</p>}
+        <Switch
+          checked={resolved.withNotes}
+          disabled={disabled}
+          onCheckedChange={(withNotes) => void choose({ withNotes })}
+          description="Off, a summary request sends none of the chat's notes: they can tell of events after the messages it summarizes."
+        >
+          Include notes in summary requests
+        </Switch>
+        <Origin
+          scope={scope}
+          from={resolved.from.withNotes ?? "builtin"}
+          same={resolved.withNotes === (fallback.withNotes ?? LCM_BUILTIN.withNotes)}
+          fallback={(fallback.withNotes ?? LCM_BUILTIN.withNotes) ? "on" : "off"}
+          disabled={disabled}
+          onReset={() => void choose({ withNotes: null })}
+        />
+        {errorFor("withNotes") && <p className="text-sm text-danger">{errorFor("withNotes")}</p>}
       </Fieldset>
       {instruction}
       <Pair
@@ -390,7 +428,10 @@ export function LcmFields({
               invalid={false}
               onCommit={(value) => write({ leafTarget: value })}
             />
-            <p className="text-sm text-muted">Tokens per summary; the instruction's {"{{words}}"} is this number.</p>
+            <p className="text-sm text-muted">
+              Tokens per summary. The instruction asks for it in words, about 0.75 a token: its {"{{words}}"} is{" "}
+              {tokens(summaryWords(resolved.leafTarget))} now.
+            </p>
             <Origin
               scope={scope}
               from={resolved.from.leafTarget ?? "builtin"}

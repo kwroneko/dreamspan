@@ -23,20 +23,32 @@ import { AddNoteMenu, type NoteCard, NoteEditor, NoteRow, SharedNotePicker } fro
 import { useCast } from "./cast.ts"
 import type { ChatSession } from "./session.ts"
 
-/** How a summary note and the preset's `{{summary}}` meet (DESIGN §8 [P]). */
-function SummaryMacroLine({ note, summary }: { note: ChatNote; summary: SummaryFill }) {
+/**
+ * How a summary note, the preset's `{{summary}}` and the chat's summaries meet (DESIGN §8):
+ * `{{summary}}` sends the note's text, and the summaries go as their own blocks beside it.
+ */
+function SummaryMacroLine({
+  note,
+  summary,
+  summarizing
+}: {
+  note: ChatNote
+  summary: SummaryFill | undefined
+  summarizing: boolean
+}) {
   const placement = (note.doc["placement"] as Placement).mode
-  const text =
-    summary.prompts.length > 0
-      ? summary.kind === "summaries"
-        ? "Summaries are on: {{summary}} in your preset sends the summaries instead."
-        : note.active
-          ? "Your preset includes this through {{summary}}."
-          : "Your preset has {{summary}}; it sends nothing while this is off."
-      : note.active && placement === "none"
+  const macro = (summary?.prompts.length ?? 0) > 0
+  const lines = [
+    macro
+      ? note.active
+        ? "Your preset includes this through {{summary}}."
+        : "Your preset has {{summary}}; it sends nothing while this is off."
+      : summary && note.active && placement === "none"
         ? "Not placed, and your preset has no {{summary}}: nothing sends it."
-        : null
-  return text ? <p className="pl-12 text-sm text-muted">{text}</p> : null
+        : null,
+    summarizing && note.active && (macro || placement !== "none") ? "Also sent beside the summaries." : null
+  ].filter((line) => line !== null)
+  return lines.length ? <p className="pl-12 text-sm text-muted">{lines.join(" ")}</p> : null
 }
 
 const titleOf = (note: ChatNote) => (note.doc["title"] as string | undefined) || note.ref.label
@@ -56,12 +68,15 @@ function ChatNoteRow({
   onToggle,
   onDeleted,
   onRelinked,
-  summary
+  summary,
+  summarizing
 }: {
   note: ChatNote
   cards: ReadonlyArray<NoteCard>
   /** What `{{summary}}` fills in for the next reply, for a summary note's line about it. */
   summary: SummaryFill | undefined
+  /** Whether the chat summarizes: a summary note that's on is then sent beside the summaries. */
+  summarizing: boolean
   /** The card's name, for a card's note. */
   card: string | null
   open: boolean
@@ -85,7 +100,9 @@ function ChatNoteRow({
       shared={note.linked}
       authorNote={note.authorNote}
       detail={
-        note.doc["kind"] === "imported_summary" && summary ? <SummaryMacroLine note={note} summary={summary} /> : null
+        note.doc["kind"] === "imported_summary" && (summary || summarizing) ? (
+          <SummaryMacroLine note={note} summary={summary} summarizing={summarizing} />
+        ) : null
       }
       control={
         <Switch checked={note.active} onCheckedChange={onToggle}>
@@ -157,7 +174,9 @@ export function NotesTab({
   const [open, setOpen] = useState<string | null>(null)
   const [picking, setPicking] = useState<Group | null>(null)
   const [error, setError] = useState<AppError | null>(null)
-  const summaryFill = useSyncExternalStore(session.subscribe, session.snapshot).history?.presetContext?.summary
+  const view = useSyncExternalStore(session.subscribe, session.snapshot)
+  const summaryFill = view.history?.presetContext?.summary
+  const summarizing = view.lcm?.enabled === true
   const sections = useRef(new Map<string, HTMLElement>())
   useEffect(() => {
     if (focusCard !== null) sections.current.get(focusCard)?.scrollIntoView({ block: "start", behavior: "smooth" })
@@ -227,6 +246,7 @@ export function NotesTab({
                   onDeleted={onDeleted}
                   onRelinked={refresh}
                   summary={summaryFill}
+                  summarizing={summarizing}
                 />
               ))}
             </ul>

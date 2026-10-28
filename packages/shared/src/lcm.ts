@@ -183,6 +183,7 @@ export const LcmSettingsView = Schema.Struct({
   resolved: Schema.Struct({
     enabled: Schema.Boolean,
     withPreset: Schema.Boolean,
+    withNotes: Schema.Boolean,
     tail: Schema.NullOr(Schema.String),
     recentTarget: Schema.Int,
     recentMax: Schema.Int,

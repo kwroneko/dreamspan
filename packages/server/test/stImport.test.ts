@@ -499,7 +499,8 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
       )
       assert.strictEqual((yield* sendStFile(importId, "chats/Crowd/a.jsonl", crowd, { card: "none" })).outcome, "added")
       const report = yield* api.GetStImportReport({ importId })
-      assert.isTrue(report.issues.some((issue) => issue.code === "st_chat.speakers_dropped"))
+      // A file's own warnings are details the report doesn't list (DESIGN §1.4).
+      assert.isFalse(report.issues.some((issue) => issue.code === "st_chat.speakers_dropped"))
       // Group files can't pile up past the import's budget.
       const names = Array.from({ length: 900 }, (_, i) => `${i}`.padStart(1000, "x"))
       let refused = 0

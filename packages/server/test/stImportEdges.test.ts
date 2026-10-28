@@ -500,7 +500,8 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
         ["am-0", "am-2"]
       )
       const report = yield* api.GetStImportReport({ importId })
-      assert.isTrue(report.issues.some((issue) => issue.path === path && issue.code === "st.no_user_turn"))
+      // A detail, not something to act on: the report doesn't list it (DESIGN §1.4).
+      assert.isFalse(report.issues.some((issue) => issue.path === path))
       assert.strictEqual(report.greetingOnly, 0)
     })
   )
@@ -559,9 +560,9 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
         docs.map((doc) => [doc.template !== undefined, doc.covers !== undefined]),
         docs.map((_, i) => [i === 9, i === 9])
       )
-      // Without settings.json, the report says the summary is placed as ST's defaults place it.
+      // Without settings.json the summary is placed as ST's defaults place it, which the note shows: the report doesn't list it.
       const report = yield* api.GetStImportReport({ importId })
-      assert.isTrue(report.issues.some((issue) => issue.code === "st.summary_defaults"))
+      assert.isFalse(report.issues.some((issue) => issue.code === "st.summary_defaults"))
     })
   )
   it.effect("nothing an unfinished import wrote is ever removed, whatever the user did with it", () =>

@@ -14,6 +14,8 @@ export type LcmWhen = typeof LcmWhen.Type
 const sizes = {
   /** Send the summary request with the chat's full preset (ST's Classic), or the instruction and messages only (Raw). */
   withPreset: Schema.optionalKey(Schema.Boolean),
+  /** Send the chat's notes with a summary request: they may tell of events after the chunk. */
+  withNotes: Schema.optionalKey(Schema.Boolean),
   /** Recent messages kept as written: above the maximum the oldest are summarized back to the target. */
   recentTarget: Schema.optionalKey(Tokens),
   recentMax: Schema.optionalKey(Tokens),
@@ -25,7 +27,7 @@ const sizes = {
   tail: Schema.optionalKey(Schema.String),
   /** Chunk size: the tokens of messages one summary covers. */
   leafInput: Schema.optionalKey(Tokens),
-  /** Summary length, in tokens. */
+  /** Summary length, in tokens; the instruction asks for it in words (`summaryWords`). */
   leafTarget: Schema.optionalKey(Tokens)
 }
 
@@ -70,6 +72,7 @@ export type LcmDefaults = typeof LcmDefaults.Type
 export type LcmField =
   | "enabled"
   | "withPreset"
+  | "withNotes"
   | "tail"
   | "recentTarget"
   | "recentMax"
@@ -83,6 +86,7 @@ export type LcmField =
 export const LcmSettingsChange = Schema.Struct({
   enabled: Schema.optionalKey(Schema.Boolean),
   withPreset: Schema.optionalKey(Schema.NullOr(Schema.Boolean)),
+  withNotes: Schema.optionalKey(Schema.NullOr(Schema.Boolean)),
   tail: Schema.optionalKey(Schema.NullOr(Schema.String)),
   recentTarget: Schema.optionalKey(Schema.NullOr(Tokens)),
   recentMax: Schema.optionalKey(Schema.NullOr(Tokens)),
@@ -95,20 +99,33 @@ export const LcmSettingsChange = Schema.Struct({
 export type LcmSettingsChange = typeof LcmSettingsChange.Type
 
 /**
- * The built-in values (DESIGN §8; the sizes are reference-harness's compact 16,000/24,000 and its
- * typical summary pair 8,000/12,000 tokens). The chunk size has no fixed default: it is
- * min(4,000, half the recent band) once the pair is fitted to the model.
+ * The built-in values (DESIGN §8). Recent messages 12,000/20,000 and the summaries 14,000/18,000
+ * tokens: summaries cover all the older history, and recent chat grows faster, so it gets the
+ * wider band. The chunk size has no fixed default: it is min(4,000, half the recent band) once
+ * the pair is fitted to the model.
  */
 export const LCM_BUILTIN = {
   enabled: true,
   withPreset: true,
-  recentTarget: 16_000,
-  recentMax: 24_000,
-  layerTarget: 8_000,
-  layerMax: 12_000,
+  withNotes: false,
+  recentTarget: 12_000,
+  recentMax: 20_000,
+  layerTarget: 14_000,
+  layerMax: 18_000,
   when: "after-reply" as LcmWhen,
   leafTarget: 600
 } as const
+
+/** The built-in sizes before 2026-10-28, which chats created until then hold as copies (migration 0051). */
+export const LCM_OLD_BUILTIN_SIZES = {
+  recentTarget: 16_000,
+  recentMax: 24_000,
+  layerTarget: 8_000,
+  layerMax: 12_000
+} as const
+
+/** A summary length in tokens as the words an instruction asks for: about 0.75 words a token. */
+export const summaryWords = (tokens: number) => Math.max(1, Math.round(tokens * 0.75))
 
 /**
  * The level-1 instruction when neither the chat nor the account sets one: the owner's Sum2
@@ -121,6 +138,7 @@ export const BUILTIN_SUMMARY_INSTRUCTION =
 export interface ResolvedLcm {
   readonly enabled: boolean
   readonly withPreset: boolean
+  readonly withNotes: boolean
   /** Null: the built-in instruction. */
   readonly tail: string | null
   readonly recentTarget: number
@@ -166,6 +184,7 @@ export const resolveLcm = (
   return {
     enabled: pick("enabled", chat ? false : LCM_BUILTIN.enabled) as boolean,
     withPreset: pick("withPreset", LCM_BUILTIN.withPreset) as boolean,
+    withNotes: pick("withNotes", LCM_BUILTIN.withNotes) as boolean,
     tail: pick("tail", null) as string | null,
     recentTarget: pick("recentTarget", LCM_BUILTIN.recentTarget) as number,
     recentMax: pick("recentMax", LCM_BUILTIN.recentMax) as number,
@@ -188,6 +207,7 @@ export const newChatLcm = (defaults: LcmDefaults | null | undefined, enabled?: b
   return {
     enabled: enabled ?? r.enabled,
     withPreset: r.withPreset,
+    withNotes: r.withNotes,
     recentTarget: r.recentTarget,
     recentMax: r.recentMax,
     layerTarget: r.layerTarget,
@@ -204,6 +224,16 @@ export const fitPair = (target: number, maximum: number, room: number) => {
   const max = Math.max(0, Math.floor(Math.min(maximum, room)))
   const scaled = maximum > room ? Math.floor((target * max) / Math.max(1, maximum)) : target
   return { target: Math.max(0, Math.min(scaled, max)), maximum: max, clamped: maximum > room }
+}
+
+/**
+ * The target a new maximum at or below it takes with it (DESIGN §8): the same share of the
+ * maximum as before, in hundreds, and always below it; null when the target already fits.
+ */
+export const loweredTarget = (target: number, maximum: number, newMaximum: number): number | null => {
+  if (newMaximum > target) return null
+  const share = Math.floor((target * newMaximum) / Math.max(1, maximum) / 100) * 100
+  return Math.max(1, share > 0 && share < newMaximum ? share : newMaximum - 1)
 }
 
 /** The chunk size: the setting, else min(4,000, half the recent band). */

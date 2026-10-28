@@ -33,6 +33,7 @@ Where the owner corrected an earlier proposal, the corrected version is recorded
   - macros (§5.6)
   - prompt-only regex scripts, plus display regex as display rules
 - **[P]** The importer never runs code from a preset. It writes an import report listing anything it couldn't represent (pi-forge's ST importer is a good reference).
+- **[D]** The import report holds only what a user must act on; nobody reads it, so nothing the user needs may live only there (owner, 2026-10-28).
 - **[P]** Fidelity is tested by **differential testing against real ST**: a stock ST in a throwaway container, pointed at a mock endpoint that records its requests. Synthetic card, chat, preset and persona fixtures are fed to both, and the request bodies are diffed. This applies to the non-agentic assembler.
 - **[D]** Prefill must work where the provider supports it. Most frontier models don't. reference-harness's tool-schema prefill for GPT (`spec/OPENAI-PREFILL.md`) is worth porting as a separate capability.
 - **[P]** Where the provider doesn't support prefill, it's dropped and the request preview says so.
@@ -53,7 +54,7 @@ Where the owner corrected an earlier proposal, the corrected version is recorded
 ### 1.4 ST data folder import
 - **[D]** Point the importer at an ST data folder. It finds the chats and their cards and adds them seamlessly. Exporting chats back to ST is secondary.
 - **[D]** ST has a single hidden flag. If a long consecutive run of hidden messages starts at message 0 (the manual-summary pattern), the importer offers to un-hide them so LCM can take over. Other hidden messages stay excluded from context.
-- **[D]** Chats that have only the greeting and zero user turns are skipped (ST creates these just by opening a card). The import report gives the count.
+- **[D]** Chats that have only the greeting and zero user turns are skipped (ST creates these just by opening a card). The import report gave the count until the owner cut the report to what a user must act on (2026-10-28, §1.2).
 - **[P]** Mapping:
   - single and group chats → chats with N participants
   - ST branch files (linked by metadata) → one message graph
@@ -551,7 +552,14 @@ Stepped history, dropped-message display and rewrite warnings without a TTL are 
   - when it runs: with the next reply, or right after one while the cache is warm;
   - under Advanced: chunk size and summary length.
   - Rejected: a manual "summarize up to here". The point is automation, and it can't work with several levels.
-- **[P]** Imported ST summaries are plain notes: "Summary (from ST)", switched on if ST was sending it (injected or through `{{summary}}` in the active preset), controlled only by its switch. `{{summary}}` in a preset is explicit: it inserts the chat's switched-on summary notes, or the summaries when summarization is on; the preset editor marks each `{{summary}}` with what it fills in, and the note says the preset includes it.
+- **[P]** Imported ST summaries are plain notes: "Summary (from ST)", switched on if ST was sending it (injected or through `{{summary}}` in the active preset), controlled only by its switch. The preset editor marks each `{{summary}}` with what it fills in, and the note says the preset includes it.
+- **[D]** Default sizes (owner, 2026-10-28): recent messages target 12,000 and maximum 20,000 tokens; the summaries target 14,000 and maximum 18,000. Summaries cover unbounded history and recent chat grows faster, so recent messages get the wider gap. Chats that never changed the sizes they copied follow the new defaults; sizes a user set stay.
+- **[D]** Summaries are **separate blocks placed like the chat history**, usually just before it, so a new summary never invalidates the ones before it. `{{summary}}` exists only for an imported ST chat's single summary note text: it inserts the chat's switched-on summary notes, never the summaries (owner, 2026-10-28, correcting the build, where `{{summary}}` held the summaries).
+- **[D]** A summary request doesn't send the chat's notes: the current notes may describe events after the summarized range. A setting "include notes in summary requests", per chat over the account default, is **off by default**. A snapshot of the notes at the cutoff may come later (owner, 2026-10-28).
+- **[D]** Switching summarization on in a chat with an imported ST summary note switches the note off in the same step, visibly on the note; the user can switch it back on, and the note then says it's also sent beside the summaries (owner, 2026-10-28).
+- **[P]** The summary length is set in tokens and the instruction asks for it in words, about 0.75 words per token: models follow word counts more reliably (PHASE1-DECISIONS §5 default).
+- **[P]** An ST chat whose Summarize extension was disabled imports its summary note switched off, since ST sent nothing (PHASE1-DECISIONS §5 default: keep).
+- **[P]** Lowering a maximum to its target or below lowers the target with it, at the same share of the maximum, and says so (PHASE1-DECISIONS §7.33).
 
 ### 8.1 Imported summaries
 - **[D]** Importing a chat also imports its summary, if it has one. **This is required before the owner starts using the harness** (owner, 2026-10-12).

@@ -80,15 +80,8 @@ layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "90 secon
         assert.isBelow(next.budget!.nonHistoryTokens, chars / 4 + 200)
         const defaults = yield* api.GetGenerationDefaults()
         assert.isNotNull(defaults.preset)
-        assert.deepInclude(
-          report.issues.find((i) => i.code === "st.preset_default"),
-          {
-            path: "settings.json",
-            level: "info",
-            code: "st.preset_default",
-            message: "ST used preset “Roomy”; it is now your default preset."
-          }
-        )
+        // Nothing to act on: the report doesn't list it.
+        assert.isUndefined(report.issues.find((i) => i.code === "st.preset_default"))
       })
     )
   }
@@ -107,7 +100,7 @@ layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "90 secon
         report.issues.find((i) => i.code === "st.preset_kept"),
         {
           path: "settings.json",
-          level: "info",
+          level: "warning",
           code: "st.preset_kept",
           message: "ST used preset “Other”; your existing default preset was kept."
         }

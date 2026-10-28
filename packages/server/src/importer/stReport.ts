@@ -1,5 +1,6 @@
 // The report of an ST folder import (ARCHITECTURE.md §13), as it accumulates: counts per kind,
-// the files' own issues, the hidden-run offers and the link choices, each bounded.
+// what the user must act on (errors and warnings, never details: nobody reads those), the
+// hidden-run offers and the link choices, each bounded. Nothing a user needs lives only here.
 import { type ImportReport, shownText } from "@rp/shared/importReport.ts"
 import { StCount, type StHiddenRun, StImportReport, StIssue, type StLinkChoice } from "@rp/shared/stImportApi.ts"
 
@@ -26,15 +27,17 @@ export class Report {
     this.counts.set(kind, counter)
   }
 
+  /** Infos aren't kept: a detail is shown where it applies, or not at all. */
   issue(path: string, level: StIssue["level"], code: string, message: string) {
+    if (level === "info") return
     if (this.issues.length >= MAX_ISSUES) this.dropped++
     else this.issues.push(new StIssue({ path: shownText(path), level, code, message }))
   }
 
-  /** A file's own report, warnings and errors only: its infos are about details. */
+  /** A file's own report, its errors only: its warnings say what the import chose, and the entry shows it. */
   file(path: string, report: ImportReport) {
     for (const issue of report.issues) {
-      if (issue.level !== "info") this.issue(path, issue.level, issue.code, issue.message)
+      if (issue.level === "error") this.issue(path, issue.level, issue.code, issue.message)
     }
   }
 
@@ -48,8 +51,9 @@ export class Report {
     else this.links.set(choice.path, choice)
   }
 
-  build() {
-    const issues = [...this.issues, ...(this.selectedPreset ? [this.selectedPreset] : [])]
+  /** `more`: issues known only once the folder is in, measured again on each read. */
+  build(more: ReadonlyArray<StIssue> = []) {
+    const issues = [...this.issues, ...(this.selectedPreset?.level === "warning" ? [this.selectedPreset] : []), ...more]
     return new StImportReport({
       counts: Object.fromEntries([...this.counts].map(([kind, counter]) => [kind, new StCount(counter)])),
       messages: this.messages,

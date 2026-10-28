@@ -47,7 +47,8 @@ lcmTest("HTTP folder imports keep ST's instruction as an editable default used a
     yield* run()
     assert.strictEqual(
       lastText(requestsTo(h.mock, "primary-model").at(-1)!),
-      prompt.replace("{{words}}", "75") + "\nReturn only the summary, without commentary."
+      // A length of 75 tokens asks for 56 words (DESIGN §8).
+      prompt.replace("{{words}}", "56") + "\nReturn only the summary, without commentary."
     )
     yield* h.api.SetGenerationDefaults({
       defaults: { ...defaults, lcm: { ...defaults.lcm, tail: "My new instruction." } }

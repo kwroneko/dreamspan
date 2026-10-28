@@ -4,7 +4,8 @@ import type { UserId } from "@rp/shared/domain.ts"
 import type { Summary } from "@rp/shared/lcm.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
-import { layerText } from "../assembler/lcm.ts"
+import { summaryBlock } from "../assembler/lcm.ts"
+import { tokensOf } from "../assembler/st.ts"
 import { type Candidate, planMaintenance } from "../lcm/maintenance.ts"
 import type { ModelChoice } from "@rp/shared/lcmSettings.ts"
 import { type PlannedJob } from "./lcmJobs.ts"
@@ -250,7 +251,11 @@ export const maintain = (
         condenseTarget,
         eagerMinChildren: 2,
         absorbMaxChildren: fanout * 2,
-        layerCost: layer.summaries.length ? Math.ceil(layerText(layer.summaries).length / 4) + 3 : 0,
+        // Each summary is its own message (`summaryBlock`), as the assembly sends it.
+        layerCost: layer.summaries.reduce(
+          (n, summary) => n + (summary.content === "" ? 0 : tokensOf({ content: summaryBlock(summary) })),
+          0
+        ),
         layerTarget: options.budget.target,
         layerMax: options.budget.maximum,
         lastFinishedEager: last?.eager === 1

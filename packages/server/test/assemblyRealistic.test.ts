@@ -28,17 +28,29 @@ describe("assembly over a realistic ST folder", () => {
               return [relative(root, path), new Uint8Array(readFileSync(path))] as const
             })
         )
+        // A second global book the folder doesn't hold.
+        const settingsPath = [...files.keys()].find((path) => path.endsWith("settings.json"))!
+        const settings = JSON.parse(new TextDecoder().decode(files.get(settingsPath)))
+        settings.world_info_settings.world_info.globalSelect.push("Lost Atlas")
+        files.set(settingsPath, new TextEncoder().encode(JSON.stringify(settings)))
         const { report, api } = yield* importStFolder(files)
         const reader = yield* Reader
         const me = yield* api.Whoami()
         const userId = me.id as UserId
-        // ST's globalSelect: the book is the user's global, and the report says so.
+        // ST's globalSelect: the book is the user's global, which its switch shows; the report
+        // names only the book that wasn't in the folder (DESIGN §1.4).
         const books = yield* api.ListLibrary({ kind: "lorebook" })
         const almanac = books.find((b) => b.label === "Harbor Almanac")!
         assert.deepStrictEqual([...(yield* api.GetGlobalLorebooks())], [almanac.id])
-        assert.isTrue(
-          JSON.stringify(report).includes("marked “Use in every chat”"),
-          "the report names the global books as marked"
+        assert.deepStrictEqual(
+          report.issues.filter((i) => i.path === "settings.json").map((i) => [i.level, i.code, i.message]),
+          [
+            [
+              "warning",
+              "st.global_world_missing",
+              "ST applies the lorebook “Lost Atlas” to every chat, but it wasn't in the folder, so it isn't used here."
+            ]
+          ]
         )
         const usage = yield* api.ListCardUsage()
         const aria = usage.find((c) => c.name === "Aria Vance")!

@@ -16,7 +16,7 @@ import type { ChatId, EntityId, SlotId } from "@rp/shared/chat.ts"
 import type { User } from "@rp/shared/domain.ts"
 import { NotFound, ServerError } from "@rp/shared/errors.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
-import { shownList, shownText } from "@rp/shared/importReport.ts"
+import { shownText } from "@rp/shared/importReport.ts"
 import type { EntityKind, RefId } from "@rp/shared/library.ts"
 import { classifyStPath, type StFile, stParentPath } from "@rp/shared/stFolder.ts"
 import { StFileResult, StHiddenRun, type StImportReport, StIssue, StLinkChoice } from "@rp/shared/stImportApi.ts"
@@ -354,9 +354,9 @@ export class StImports extends Context.Service<
             report.count(countAs, "skipped")
             report.issue(
               path,
-              "info",
+              "warning",
               "st.in_bin",
-              "An earlier import of this file is in your recycle bin, so it wasn't imported again."
+              "An earlier import of this file is in your recycle bin, so it wasn't imported again: restore it there, or delete it for good and import the folder again."
             )
             return { outcome: result("skipped", "in the recycle bin"), entity: null, created: false, note: null }
           }
@@ -538,7 +538,8 @@ export class StImports extends Context.Service<
             })
             session.report.selectedPreset = new StIssue({
               path: "settings.json",
-              level: "info",
+              // Your chats use your default preset: one that isn't ST's is yours to switch.
+              level: adopted ? "info" : "warning",
               code: adopted ? "st.preset_default" : "st.preset_kept",
               message: adopted
                 ? `ST used preset “${shownText(name)}”; it is now your default preset.`
@@ -802,9 +803,9 @@ export class StImports extends Context.Service<
           report.count(file.kind, "skipped")
           report.issue(
             path,
-            "info",
+            "warning",
             "st.in_bin",
-            "The chat an earlier import made of this file is in your recycle bin, so it wasn't imported again."
+            "The chat an earlier import made of this file is in your recycle bin, so it wasn't imported again: restore it there, or delete it for good and import the folder again."
           )
           return result("skipped", "in the recycle bin")
         }
@@ -815,7 +816,7 @@ export class StImports extends Context.Service<
           if (group === undefined) {
             report.issue(
               path,
-              "warning",
+              "info",
               "st.no_group",
               "No group lists this chat; its speakers were matched by their avatars."
             )
@@ -1068,12 +1069,6 @@ export class StImports extends Context.Service<
                   const ref = session.worlds.get(name)
                   if (ref) yield* writer.SetGlobalLorebook({ userId: user.id, ref, global: true })
                 }
-                session.report.issue(
-                  path,
-                  "info",
-                  "st.global_worlds",
-                  `ST applies ${shownList(settings.globalWorlds)} to every chat; here they're marked “Use in every chat”, which each chat's Lorebooks tab can turn off.`
-                )
               }
               return result("added")
             }
@@ -1139,7 +1134,23 @@ export class StImports extends Context.Service<
               )
             )
           ),
-        report: (user, importId) => Effect.map(sessionOf(user, importId), (session) => session.report.build()),
+        report: (user, importId) =>
+          Effect.map(sessionOf(user, importId), (session) =>
+            session.report.build(
+              // A book ST applies to every chat that the folder didn't hold is used nowhere here.
+              (session.settings?.globalWorlds ?? [])
+                .filter((name) => !session.worlds.has(name) && !session.missingWorlds.has(name))
+                .map(
+                  (name) =>
+                    new StIssue({
+                      path: "settings.json",
+                      level: "warning",
+                      code: "st.global_world_missing",
+                      message: `ST applies the lorebook “${shownText(name)}” to every chat, but it wasn't in the folder, so it isn't used here.`
+                    })
+                )
+            )
+          ),
         file: (user, importId, path, bytes, request) =>
           file(user, importId, path, bytes, request).pipe(
             Effect.catch((error): Effect.Effect<never, NotFound | StImportFailed> =>

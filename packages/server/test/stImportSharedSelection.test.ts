@@ -172,7 +172,7 @@ for (const count of [10, 205]) {
             shape(graphBefore)
           )
           assert.strictEqual(new Set(graphAfter.map((r) => r.id)).size, 3 * count - 9)
-          assert.isTrue(second.report.issues.some((i) => i.code === "st.differing"))
+          assert.isFalse(second.report.issues.some((i) => i.code === "st.differing"))
           assert.deepStrictEqual(
             parentAfter.entries.map((e) => e.slotId),
             before.entries.map((e) => e.slotId)
@@ -189,7 +189,7 @@ for (const count of [10, 205]) {
             ])
           )
           assert.strictEqual(replay.answers.get("chats/Alice/branch.jsonl")?.outcome, "unchanged")
-          assert.isTrue(replay.report.issues.some((i) => i.code === "st.differing"))
+          assert.isFalse(replay.report.issues.some((i) => i.code === "st.differing"))
           assert.deepStrictEqual(yield* stImportGraph(config.dataDir, chat.id), graphAfter)
           assert.deepStrictEqual(
             (yield* api.ReadPath({

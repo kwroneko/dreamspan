@@ -1,6 +1,7 @@
 import { cardNamesMigration } from "./cardNamesMigration.ts"
 import { notesMigration } from "./notesMigration.ts"
 import { personaNotesMigration } from "./personaNotesMigration.ts"
+import { lcmDefaultsMigration } from "./lcmDefaultsMigration.ts"
 import { promptPreset, LegacyPresetDoc } from "@rp/shared/docs/preset.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import { Schema } from "effect"
@@ -311,7 +312,9 @@ export const migrations = {
   ]),
   "0049_notes": notesMigration,
   // A persona's description note is an ordinary note, and the card keeps one copy of the text (DESIGN §4.1).
-  "0050_persona_notes": personaNotesMigration
+  "0050_persona_notes": personaNotesMigration,
+  // Chats that never changed the copied built-in summarization sizes take the new ones (DESIGN §8).
+  "0051_lcm_new_defaults": lcmDefaultsMigration
 }
 
 export const Migrations = SqliteMigrator.layer({ loader: SqliteMigrator.fromRecord(migrations) })

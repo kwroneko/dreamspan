@@ -7,6 +7,8 @@ import type { CardInput, HistoryEntry, Source } from "./types.ts"
 
 /** Macros that read this generation's speaker or direction (conservatively, by name). */
 const PER_TURN = /\{\{[^}]*\b(?:speaker|direction)\b/i
+/** `{{summary}}`, which reads the summary notes. */
+const SUMMARY = /\{\{\s*summary\s*\}\}/i
 
 export interface Names {
   readonly user: string
@@ -107,6 +109,8 @@ export const makeMacroEnvironment = (
     readonly chatId: string
     readonly variables: Readonly<Record<string, unknown>>
     readonly summary: string
+    /** Whether `{{summary}}` can change from turn to turn: a summary note with a condition. */
+    readonly summaryVolatile?: boolean
     /** `{{speaker}}` and `{{direction}}` (DESIGN §2.2); absent, they stay as written. */
     readonly speaker?: string | undefined
     readonly direction?: string | undefined
@@ -219,7 +223,7 @@ export const makeMacroEnvironment = (
       const piece = record(id, source, expanded.text)
       if (variableBarrier && expanded.readsVariables) volatilePieces.add(piece)
       // Who writes and the direction change from turn to turn: never inside the cached prefix.
-      if (PER_TURN.test(text)) volatilePieces.add(piece)
+      if (PER_TURN.test(text) || (setup.summaryVolatile && SUMMARY.test(text))) volatilePieces.add(piece)
       return piece
     },
     verbatim: (id, source, text, parts) => record(id, source, text, parts),

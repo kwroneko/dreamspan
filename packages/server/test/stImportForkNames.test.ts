@@ -131,12 +131,10 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
     })
   )
 
-  it.effect("a fork with no message of its own names nothing, and says so", () =>
+  it.effect("a fork with no message of its own names nothing, and the report doesn't list it", () =>
     Effect.gen(function* () {
       const report = yield* importRun(parentAndBranch("Same", `Nothing new - ${DATE}`, null))
-      const issue = report.issues.find((i) => i.code === "st.fork_same")
-      assert.strictEqual(issue?.level, "info")
-      assert.include(issue?.message ?? "", "Nothing new")
+      assert.isFalse(report.issues.some((i) => i.code === "st.fork_same"))
       const named = query(
         "SELECT count(*) AS n FROM slots s JOIN versions v ON v.slot_id = s.id WHERE v.content LIKE 'Same %' AND s.branch_name IS NOT NULL"
       )[0]!.n

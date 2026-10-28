@@ -3,11 +3,9 @@ import type { Summary } from "@rp/shared/lcm.ts"
 import { resolveLcm } from "@rp/shared/lcmSettings.ts"
 import { AssemblySources, need, type AssemblerStage } from "./pipeline.ts"
 
-export const layerText = (summaries: ReadonlyArray<Summary>) => {
-  const visible = summaries.filter((s) => s.content !== "")
-  if (!visible.length) return ""
-  return `<summaries>\n${visible.map((s) => `<summary level="${s.level}" from="${s.from}" to="${s.to}">\n${s.content}\n</summary>`).join("\n")}\n</summaries>`
-}
+/** One summary as its own message's text (DESIGN §8: separate blocks placed like the history). */
+export const summaryBlock = (s: Pick<Summary, "level" | "from" | "to" | "content">) =>
+  `<summary level="${s.level}" from="${s.from}" to="${s.to}">\n${s.content}\n</summary>`
 
 export const lcmStage: AssemblerStage = {
   id: "lcm",
