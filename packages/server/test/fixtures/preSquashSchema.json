@@ -1,5 +1,4 @@
 {
-  "ledger": null,
   "schema": [
     {
       "type": "index",
@@ -297,6 +296,12 @@
     },
     {
       "type": "index",
+      "name": "lcm_reply_maintenance_fork",
+      "tbl_name": "lcm_reply_maintenance",
+      "sql": "CREATE INDEX lcm_reply_maintenance_fork ON lcm_reply_maintenance(fork_id)"
+    },
+    {
+      "type": "index",
       "name": "lcm_reply_maintenance_leaf",
       "tbl_name": "lcm_reply_maintenance",
       "sql": "CREATE INDEX lcm_reply_maintenance_leaf ON lcm_reply_maintenance(leaf_slot_id)"
@@ -591,6 +596,12 @@
     },
     {
       "type": "index",
+      "name": "summarization_jobs_fork",
+      "tbl_name": "summarization_jobs",
+      "sql": "CREATE INDEX summarization_jobs_fork ON summarization_jobs(fork_id)"
+    },
+    {
+      "type": "index",
       "name": "summarization_jobs_last_slot",
       "tbl_name": "summarization_jobs",
       "sql": "CREATE INDEX summarization_jobs_last_slot ON summarization_jobs(last_slot_id)"
@@ -603,9 +614,15 @@
     },
     {
       "type": "index",
+      "name": "summarization_jobs_legacy_segment",
+      "tbl_name": "summarization_jobs",
+      "sql": "CREATE UNIQUE INDEX summarization_jobs_legacy_segment ON summarization_jobs(chat_id,first_slot_id,last_slot_id,level) WHERE fork_id IS NULL AND status IN ('pending','processing')"
+    },
+    {
+      "type": "index",
       "name": "summarization_jobs_live_segment",
       "tbl_name": "summarization_jobs",
-      "sql": "CREATE UNIQUE INDEX summarization_jobs_live_segment ON summarization_jobs(chat_id, first_slot_id, last_slot_id, level) WHERE status IN ('pending', 'processing')"
+      "sql": "CREATE UNIQUE INDEX summarization_jobs_live_segment ON summarization_jobs(chat_id, fork_id, first_slot_id, last_slot_id, level) WHERE status IN ('pending', 'processing')"
     },
     {
       "type": "index",
@@ -671,13 +688,13 @@
       "type": "index",
       "name": "summary_reruns_job",
       "tbl_name": "summary_reruns",
-      "sql": "CREATE UNIQUE INDEX summary_reruns_job ON summary_reruns(job_id) WHERE job_id IS NOT NULL"
+      "sql": "CREATE INDEX summary_reruns_job ON summary_reruns(job_id) WHERE job_id IS NOT NULL"
     },
     {
       "type": "index",
       "name": "summary_reruns_summary",
       "tbl_name": "summary_reruns",
-      "sql": "CREATE UNIQUE INDEX summary_reruns_summary ON summary_reruns(summary_id) WHERE summary_id IS NOT NULL"
+      "sql": "CREATE INDEX summary_reruns_summary ON summary_reruns(summary_id) WHERE summary_id IS NOT NULL"
     },
     {
       "type": "index",
@@ -851,7 +868,7 @@
       "type": "table",
       "name": "fork_overrides",
       "tbl_name": "fork_overrides",
-      "sql": "CREATE TABLE fork_overrides ( id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, fork_id TEXT NOT NULL REFERENCES forks(id) ON DELETE CASCADE, -- The chat's state_seq when written; a row updated in place takes the newer one. seq INTEGER NOT NULL CHECK (seq > 0), kind TEXT NOT NULL CHECK (kind IN ('select', 'replace', 'delete_slot', 'delete_version', 'hide', 'hide_range', 'star', 'picker_hide', 'summary_revision', 'summary_choice', 'suppress_event')), target_id TEXT NOT NULL, -- The slot the row is about, and its depth, for reading a window of a path. slot_id TEXT, slot_depth INTEGER, value_id TEXT, flag INTEGER CHECK (flag IS NULL OR flag IN (0, 1)), bin_item_id TEXT REFERENCES bin_items(id) ON DELETE SET NULL, changeset_id TEXT REFERENCES changesets(id) ON DELETE SET NULL, summaries_done INTEGER NOT NULL DEFAULT 0 CHECK (summaries_done IN (0, 1)), -- Who chose it: the user, or an ST re-import following the file (which the user's choice -- then overrules: stImportWrites.ts). origin TEXT NOT NULL DEFAULT 'user' CHECK (origin IN ('user', 'import')) ) STRICT"
+      "sql": "CREATE TABLE fork_overrides ( id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, fork_id TEXT NOT NULL REFERENCES forks(id) ON DELETE CASCADE, -- The chat's state_seq when written; a row updated in place takes the newer one. seq INTEGER NOT NULL CHECK (seq > 0), kind TEXT NOT NULL CHECK (kind IN ('select', 'replace', 'delete_slot', 'delete_version', 'hide', 'hide_range', 'star', 'picker_hide', 'summary_revision', 'summary_choice', 'summary_rerun', 'summary_superseded', 'suppress_event')), target_id TEXT NOT NULL, -- The slot the row is about, and its depth, for reading a window of a path. slot_id TEXT, slot_depth INTEGER, value_id TEXT, flag INTEGER CHECK (flag IS NULL OR flag IN (0, 1)), bin_item_id TEXT REFERENCES bin_items(id) ON DELETE SET NULL, changeset_id TEXT REFERENCES changesets(id) ON DELETE SET NULL, summaries_done INTEGER NOT NULL DEFAULT 0 CHECK (summaries_done IN (0, 1)), -- Who chose it: the user, or an ST re-import following the file (which the user's choice -- then overrules: stImportWrites.ts). origin TEXT NOT NULL DEFAULT 'user' CHECK (origin IN ('user', 'import')) ) STRICT"
     },
     {
       "type": "table",
@@ -893,7 +910,7 @@
       "type": "table",
       "name": "lcm_reply_maintenance",
       "tbl_name": "lcm_reply_maintenance",
-      "sql": "CREATE TABLE lcm_reply_maintenance ( chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, leaf_slot_id TEXT NOT NULL REFERENCES slots(id) ON DELETE CASCADE, pins_json TEXT NOT NULL CHECK (json_valid(pins_json)), PRIMARY KEY (chat_id, leaf_slot_id) ) STRICT"
+      "sql": "CREATE TABLE lcm_reply_maintenance ( fork_id TEXT NOT NULL REFERENCES forks(id), chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, leaf_slot_id TEXT NOT NULL REFERENCES slots(id) ON DELETE CASCADE, pins_json TEXT NOT NULL CHECK (json_valid(pins_json)), PRIMARY KEY (chat_id, fork_id, leaf_slot_id) ) STRICT"
     },
     {
       "type": "table",
@@ -995,7 +1012,7 @@
       "type": "table",
       "name": "summarization_jobs",
       "tbl_name": "summarization_jobs",
-      "sql": "CREATE TABLE summarization_jobs ( id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, level INTEGER NOT NULL CHECK (level >= 1), first_slot_id TEXT NOT NULL REFERENCES slots(id), last_slot_id TEXT NOT NULL REFERENCES slots(id), status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'complete', 'failed')), request_class TEXT NOT NULL DEFAULT 'background' CHECK (request_class IN ('interactive', 'idle', 'background')), batch_id TEXT, leaf_slot_id TEXT REFERENCES slots(id), input_token_count INTEGER, target_token_count INTEGER NOT NULL, -- Level >= 2: the ordered child summary ids (JSON array). input_child_ids TEXT CHECK (input_child_ids IS NULL OR json_valid(input_child_ids)), absorbed_parent_id TEXT REFERENCES summaries(id), attempts INTEGER NOT NULL DEFAULT 0, max_retries INTEGER NOT NULL DEFAULT 2, best_effort_draft TEXT, error TEXT, result_summary_id TEXT REFERENCES summaries(id), created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL , clip_tokens INTEGER NOT NULL DEFAULT 6000 CHECK (clip_tokens > 0), claim_epoch INTEGER NOT NULL DEFAULT 0, rollout_id TEXT REFERENCES rollouts(id), prefix_json TEXT CHECK (prefix_json IS NULL OR json_valid(prefix_json)), model_json TEXT CHECK (model_json IS NULL OR json_valid(model_json)), fallback_used INTEGER NOT NULL DEFAULT 0 CHECK (fallback_used IN (0, 1)), eager INTEGER NOT NULL DEFAULT 0 CHECK (eager IN (0, 1)), source_summary_id TEXT REFERENCES summaries(id), source_revision_id TEXT REFERENCES summary_revisions(id), rerun_ids_json TEXT CHECK (rerun_ids_json IS NULL OR json_valid(rerun_ids_json)), explicit_requested INTEGER NOT NULL DEFAULT 0 CHECK (explicit_requested IN (0, 1))) STRICT"
+      "sql": "CREATE TABLE summarization_jobs ( id TEXT PRIMARY KEY, fork_id TEXT REFERENCES forks(id), chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, level INTEGER NOT NULL CHECK (level >= 1), first_slot_id TEXT NOT NULL REFERENCES slots(id), last_slot_id TEXT NOT NULL REFERENCES slots(id), status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'complete', 'failed')), request_class TEXT NOT NULL DEFAULT 'background' CHECK (request_class IN ('interactive', 'idle', 'background')), batch_id TEXT, leaf_slot_id TEXT REFERENCES slots(id), input_token_count INTEGER, target_token_count INTEGER NOT NULL, -- Level >= 2: the ordered child summary ids (JSON array). input_child_ids TEXT CHECK (input_child_ids IS NULL OR json_valid(input_child_ids)), absorbed_parent_id TEXT REFERENCES summaries(id), attempts INTEGER NOT NULL DEFAULT 0, max_retries INTEGER NOT NULL DEFAULT 2, best_effort_draft TEXT, error TEXT, result_summary_id TEXT REFERENCES summaries(id), created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL , clip_tokens INTEGER NOT NULL DEFAULT 6000 CHECK (clip_tokens > 0), claim_epoch INTEGER NOT NULL DEFAULT 0, rollout_id TEXT REFERENCES rollouts(id), prefix_json TEXT CHECK (prefix_json IS NULL OR json_valid(prefix_json)), model_json TEXT CHECK (model_json IS NULL OR json_valid(model_json)), fallback_used INTEGER NOT NULL DEFAULT 0 CHECK (fallback_used IN (0, 1)), eager INTEGER NOT NULL DEFAULT 0 CHECK (eager IN (0, 1)), source_summary_id TEXT REFERENCES summaries(id), source_revision_id TEXT REFERENCES summary_revisions(id), rerun_ids_json TEXT CHECK (rerun_ids_json IS NULL OR json_valid(rerun_ids_json)), explicit_requested INTEGER NOT NULL DEFAULT 0 CHECK (explicit_requested IN (0, 1))) STRICT"
     },
     {
       "type": "table",
@@ -1491,6 +1508,48 @@
     },
     {
       "type": "trigger",
+      "name": "fork_overrides_summary_choice",
+      "tbl_name": "fork_overrides",
+      "sql": "CREATE TRIGGER fork_overrides_summary_choice BEFORE INSERT ON fork_overrides WHEN NEW.kind IN ('summary_choice','summary_superseded') AND NOT EXISTS ( SELECT 1 FROM summaries s WHERE s.id=NEW.value_id AND s.chat_id=NEW.chat_id) BEGIN SELECT RAISE(ABORT, 'a summary choice stays in its chat'); END"
+    },
+    {
+      "type": "trigger",
+      "name": "fork_overrides_summary_choice_update",
+      "tbl_name": "fork_overrides",
+      "sql": "CREATE TRIGGER fork_overrides_summary_choice_update BEFORE UPDATE OF value_id ON fork_overrides WHEN NEW.kind IN ('summary_choice','summary_superseded') AND NOT EXISTS ( SELECT 1 FROM summaries s WHERE s.id=NEW.value_id AND s.chat_id=NEW.chat_id) BEGIN SELECT RAISE(ABORT, 'a summary choice stays in its chat'); END"
+    },
+    {
+      "type": "trigger",
+      "name": "fork_overrides_summary_rerun",
+      "tbl_name": "fork_overrides",
+      "sql": "CREATE TRIGGER fork_overrides_summary_rerun BEFORE INSERT ON fork_overrides WHEN NEW.kind='summary_rerun' AND (NEW.flag IS NULL OR (NEW.flag=1 AND NOT EXISTS ( SELECT 1 FROM summary_reruns r WHERE r.id=NEW.value_id AND r.chat_id=NEW.chat_id AND coalesce(r.summary_id,r.job_id)=NEW.target_id))) BEGIN SELECT RAISE(ABORT, 'a summary request names its own target'); END"
+    },
+    {
+      "type": "trigger",
+      "name": "fork_overrides_summary_rerun_update",
+      "tbl_name": "fork_overrides",
+      "sql": "CREATE TRIGGER fork_overrides_summary_rerun_update BEFORE UPDATE OF value_id,flag ON fork_overrides WHEN NEW.kind='summary_rerun' AND (NEW.flag IS NULL OR (NEW.flag=1 AND NOT EXISTS ( SELECT 1 FROM summary_reruns r WHERE r.id=NEW.value_id AND r.chat_id=NEW.chat_id AND coalesce(r.summary_id,r.job_id)=NEW.target_id))) BEGIN SELECT RAISE(ABORT, 'a summary request names its own target'); END"
+    },
+    {
+      "type": "trigger",
+      "name": "fork_overrides_summary_revision",
+      "tbl_name": "fork_overrides",
+      "sql": "CREATE TRIGGER fork_overrides_summary_revision BEFORE INSERT ON fork_overrides WHEN NEW.kind='summary_revision' AND NOT EXISTS ( SELECT 1 FROM summary_revisions r WHERE r.id=NEW.value_id AND r.summary_id=NEW.target_id) BEGIN SELECT RAISE(ABORT, 'a summary selection names its own revision'); END"
+    },
+    {
+      "type": "trigger",
+      "name": "fork_overrides_summary_revision_update",
+      "tbl_name": "fork_overrides",
+      "sql": "CREATE TRIGGER fork_overrides_summary_revision_update BEFORE UPDATE OF value_id ON fork_overrides WHEN NEW.kind='summary_revision' AND NOT EXISTS ( SELECT 1 FROM summary_revisions r WHERE r.id=NEW.value_id AND r.summary_id=NEW.target_id) BEGIN SELECT RAISE(ABORT, 'a summary selection names its own revision'); END"
+    },
+    {
+      "type": "trigger",
+      "name": "fork_overrides_summary_target",
+      "tbl_name": "fork_overrides",
+      "sql": "CREATE TRIGGER fork_overrides_summary_target BEFORE INSERT ON fork_overrides WHEN NEW.kind IN ('summary_revision','summary_choice','summary_superseded') AND NOT EXISTS ( SELECT 1 FROM summaries s WHERE s.id=NEW.target_id AND s.chat_id=NEW.chat_id AND s.first_slot_id=NEW.slot_id) BEGIN SELECT RAISE(ABORT, 'a summary override names a summary in its chat'); END"
+    },
+    {
+      "type": "trigger",
       "name": "forks_chat_fixed",
       "tbl_name": "forks",
       "sql": "CREATE TRIGGER forks_chat_fixed BEFORE UPDATE OF chat_id ON forks WHEN NEW.chat_id IS NOT OLD.chat_id BEGIN SELECT RAISE(ABORT, 'forks rows never move to another chat'); END"
@@ -1572,6 +1631,12 @@
       "name": "lcm_enable_explicit_visibility",
       "tbl_name": "slots",
       "sql": "CREATE TRIGGER lcm_enable_explicit_visibility AFTER UPDATE OF context_excluded ON slots BEGIN UPDATE lcm_enable_slots SET shown = 0 WHERE slot_id = NEW.id; END"
+    },
+    {
+      "type": "trigger",
+      "name": "lcm_reply_maintenance_fork",
+      "tbl_name": "lcm_reply_maintenance",
+      "sql": "CREATE TRIGGER lcm_reply_maintenance_fork BEFORE INSERT ON lcm_reply_maintenance WHEN (SELECT chat_id FROM forks WHERE id=NEW.fork_id) IS NOT NEW.chat_id BEGIN SELECT RAISE(ABORT, 'maintenance belongs to a fork of its chat'); END"
     },
     {
       "type": "trigger",
@@ -1983,6 +2048,12 @@
     },
     {
       "type": "trigger",
+      "name": "summaries_selection_frozen",
+      "tbl_name": "summaries",
+      "sql": "CREATE TRIGGER summaries_selection_frozen BEFORE UPDATE OF selected_revision_id ON summaries WHEN NEW.selected_revision_id IS NOT OLD.selected_revision_id BEGIN SELECT RAISE(ABORT, 'summary selections belong to a fork'); END"
+    },
+    {
+      "type": "trigger",
       "name": "summaries_selection_own_revision",
       "tbl_name": "summaries",
       "sql": "CREATE TRIGGER summaries_selection_own_revision BEFORE UPDATE OF selected_revision_id ON summaries WHEN (SELECT summary_id FROM summary_revisions WHERE id = NEW.selected_revision_id) IS NOT NEW.id BEGIN SELECT RAISE(ABORT, 'a summary can only select one of its own revisions'); END"
@@ -2028,6 +2099,18 @@
       "name": "summarization_jobs_first_slot_id_same_chat_update",
       "tbl_name": "summarization_jobs",
       "sql": "CREATE TRIGGER summarization_jobs_first_slot_id_same_chat_update BEFORE UPDATE OF first_slot_id, chat_id ON summarization_jobs WHEN NEW.first_slot_id IS NOT NULL AND (SELECT chat_id FROM slots WHERE id = NEW.first_slot_id) IS NOT NEW.chat_id BEGIN SELECT RAISE(ABORT, 'summarization_jobs.first_slot_id must be in the same chat'); END"
+    },
+    {
+      "type": "trigger",
+      "name": "summarization_jobs_fork_fixed",
+      "tbl_name": "summarization_jobs",
+      "sql": "CREATE TRIGGER summarization_jobs_fork_fixed BEFORE UPDATE OF fork_id ON summarization_jobs WHEN NEW.fork_id IS NOT OLD.fork_id BEGIN SELECT RAISE(ABORT, 'summary jobs keep their fork'); END"
+    },
+    {
+      "type": "trigger",
+      "name": "summarization_jobs_fork_same_chat",
+      "tbl_name": "summarization_jobs",
+      "sql": "CREATE TRIGGER summarization_jobs_fork_same_chat BEFORE INSERT ON summarization_jobs WHEN NEW.fork_id IS NOT NULL AND (SELECT chat_id FROM forks WHERE id=NEW.fork_id) IS NOT NEW.chat_id BEGIN SELECT RAISE(ABORT, 'summary jobs belong to a fork of their chat'); END"
     },
     {
       "type": "trigger",

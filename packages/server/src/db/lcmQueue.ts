@@ -1,3 +1,5 @@
+import { inJobFork, withdrawReruns } from "./lcmFork.ts"
+import { viewAt } from "./forkState.ts"
 import { eventAppliesSql } from "./forkState.ts"
 import { completeEmpty } from "./lcmEmpty.ts"
 import { summaryIsWarm } from "./lcmWarmth.ts"
@@ -52,8 +54,8 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
     SaveLcmMaintenance: ({ userId, chatId, leafSlotId, forkId, pins }) =>
       Effect.gen(function* () {
         yield* lcmPath(sql, userId, chatId, leafSlotId, leafSlotId)
-        yield* sql`INSERT INTO lcm_reply_maintenance(chat_id,leaf_slot_id,pins_json) VALUES (${chatId},${leafSlotId},${pins})
-          ON CONFLICT(chat_id,leaf_slot_id) DO UPDATE SET pins_json=excluded.pins_json`
+        yield* sql`INSERT INTO lcm_reply_maintenance(chat_id,fork_id,leaf_slot_id,pins_json) VALUES (${chatId},${yield* viewAt(sql, chatId, leafSlotId)},${leafSlotId},${pins})
+          ON CONFLICT(chat_id,fork_id,leaf_slot_id) DO UPDATE SET pins_json=excluded.pins_json`
       }).pipe(inFork(sql, chatId, forkId, leafSlotId), transaction(sql, "SaveLcmMaintenance")),
     // Work here depends on the chunks and the jobs around them, never on the length of the chat: a
     // write holds the writer, and a long chat's first plan must not hold it for a noticeable time.
@@ -74,13 +76,13 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
             SELECT EXISTS (SELECT 1 FROM versions v JOIN up ON up.id = v.slot_id WHERE v.id = ${triggerVersionId}) AS ok`
           if (!near?.ok) return yield* new NotFound({ entity: "summary trigger", id: triggerVersionId })
         }
+        const fork = yield* viewAt(sql, chatId, leafSlotId)
         const prefix = yield* prefixAt(sql, chatId, leafSlotId, triggerVersionId)
         const valid = lineageValidator(sql, userId)
         const batchId = uuidv7(),
           now = Date.now(),
           result: SummaryJob[] = []
-        const withdraw = (ids: ReadonlyArray<string> | undefined) =>
-          ids?.length ? sql`DELETE FROM summary_reruns WHERE chat_id = ${chatId} AND id IN ${sql.in(ids)}` : Effect.void
+        const withdraw = (ids: ReadonlyArray<string> | undefined) => withdrawReruns(sql, chatId, ids)
         for (const chunk of chunks) {
           if (chunk.sourceSummaryId) {
             const source = yield* readSummary(sql, userId, chunk.sourceSummaryId)
@@ -125,7 +127,7 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
             span: number
           }>`SELECT j.id,j.status,j.first_slot_id, j.last_slot_id, b.depth - a.depth + 1 AS span FROM summarization_jobs j
               JOIN slots a ON a.id = j.first_slot_id JOIN slots b ON b.id = j.last_slot_id
-            WHERE j.chat_id = ${chatId} AND j.level = 1 AND j.status IN ('pending', 'processing')
+            WHERE j.chat_id = ${chatId} AND j.fork_id IS ${fork} AND j.level = 1 AND j.status IN ('pending', 'processing')
               AND a.depth <= ${chain.at(-1)!.depth} AND b.depth >= ${chain[0]!.depth}`
           const answering = chunk.rerunIds?.length
             ? near.find((j) => j.status === "pending" && j.first_slot_id === first && j.last_slot_id === last)
@@ -153,6 +155,7 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
           yield* sql`INSERT INTO summarization_jobs ${sql.insert({
             id,
             chat_id: chatId,
+            fork_id: fork,
             level: 1,
             first_slot_id: chain[0]!.id,
             last_slot_id: chain.at(-1)!.id,
@@ -184,11 +187,11 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
           sql<{ n: number }>`WITH RECURSIVE path(id) AS (
             SELECT ${leafSlotId} UNION ALL SELECT s.parent_slot_id FROM slots s JOIN path p ON p.id = s.id WHERE s.parent_slot_id IS NOT NULL
           ) SELECT count(*) AS n FROM path WHERE id = ${slotId}`.pipe(Effect.map(([row]) => row!.n === 1))
+        const fork = yield* viewAt(sql, chatId, leafSlotId)
         const prefix = yield* prefixAt(sql, chatId, leafSlotId, triggerVersionId)
         const now = Date.now(),
           result: SummaryJob[] = []
-        const withdraw = (ids: ReadonlyArray<string> | undefined) =>
-          ids?.length ? sql`DELETE FROM summary_reruns WHERE chat_id = ${chatId} AND id IN ${sql.in(ids)}` : Effect.void
+        const withdraw = (ids: ReadonlyArray<string> | undefined) => withdrawReruns(sql, chatId, ids)
         for (const job of planned) {
           if (job.sourceSummaryId) {
             const source = yield* readSummary(sql, userId, job.sourceSummaryId)
@@ -227,7 +230,7 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
           // A live job of this level that starts on this chain at or before the last part and ends at or after the first.
           const [clash] = yield* sql<{ id: string; status: string; first_slot_id: string; last_slot_id: string }>`
             SELECT j.id,j.status,j.first_slot_id,j.last_slot_id FROM summarization_jobs j JOIN slots b ON b.id = j.last_slot_id
-            WHERE j.chat_id = ${chatId} AND j.level = ${job.level} AND j.status IN ('pending', 'processing')
+            WHERE j.chat_id = ${chatId} AND j.fork_id IS ${fork} AND j.level = ${job.level} AND j.status IN ('pending', 'processing')
               AND b.depth >= (SELECT depth FROM slots WHERE id = ${first.firstSlotId})
               AND j.first_slot_id IN (WITH RECURSIVE up(id) AS (
                 SELECT ${last.lastSlotId} UNION ALL SELECT s.parent_slot_id FROM slots s JOIN up u ON u.id = s.id WHERE s.parent_slot_id IS NOT NULL
@@ -254,6 +257,7 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
           yield* sql`INSERT INTO summarization_jobs ${sql.insert({
             id,
             chat_id: chatId,
+            fork_id: fork,
             level: job.level,
             first_slot_id: first.firstSlotId,
             last_slot_id: last.lastSlotId,
@@ -313,22 +317,23 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
         // is its old name). With the next reply, nothing runs ahead but a driven backfill's work.
         const spends = (job: string) =>
           `(coalesce((SELECT json_extract(e.value_json,'$.when') FROM state_events e
-              WHERE e.chat_id = ${job}.chat_id AND e.slot_id IS NULL AND e.scope IS NULL AND e.key = 'lcm.settings' AND ${eventAppliesSql("(SELECT current_fork_id FROM chats WHERE id = " + job + ".chat_id)", "e")}
+              WHERE e.chat_id = ${job}.chat_id AND e.slot_id IS NULL AND e.scope IS NULL AND e.key = 'lcm.settings' AND ${eventAppliesSql(`${job}.fork_id`, "e")}
               ORDER BY e.seq DESC LIMIT 1),
             (SELECT coalesce(json_extract(value_json,'$.when'),
                 CASE json_extract(value_json,'$.spendAhead') WHEN 0 THEN 'next-reply' END)
               FROM user_settings WHERE user_id = ? AND key = 'generation.lcm'),
-            'after-reply') <> 'next-reply' OR ${drivenSql(`${job}.chat_id`)})`
+            'after-reply') <> 'next-reply' OR ${drivenSql(`${job}.chat_id`, `${job}.fork_id`)})`
         const [next] = yield* sql.unsafe<{ id: string }>(
           `SELECT j.id FROM summarization_jobs j JOIN chats c ON c.id = j.chat_id
         JOIN slots start ON start.id = j.first_slot_id
         WHERE c.owner_user_id = ? AND c.deleted_at IS NULL AND j.status = 'pending'
-        AND NOT ${heldSql("j.chat_id")}
+        AND (j.fork_id IS NULL OR EXISTS(SELECT 1 FROM forks jf WHERE jf.id=j.fork_id AND jf.deleted_at IS NULL))
+        AND NOT ${heldSql("j.chat_id", "j.fork_id")}
         AND (j.request_class = 'interactive' OR j.explicit_requested = 1 OR ${spends("j")})
         AND (SELECT count(*) FROM summarization_jobs busy JOIN chats bc ON bc.id = busy.chat_id
           WHERE bc.owner_user_id = ? AND busy.status = 'processing') < 2
         AND (j.level > 1 OR NOT EXISTS (SELECT 1 FROM summarization_jobs busy JOIN slots bs ON bs.id = busy.first_slot_id
-          WHERE busy.chat_id = j.chat_id AND busy.level = 1 AND
+          WHERE busy.chat_id = j.chat_id AND busy.fork_id IS j.fork_id AND busy.level = 1 AND
             (busy.status = 'processing' OR (busy.status = 'pending'
              AND (busy.request_class = 'interactive' OR busy.explicit_requested = 1 OR ${spends("busy")}
                OR busy.last_slot_id IN (WITH RECURSIVE ancestors(id) AS (SELECT j.last_slot_id UNION ALL SELECT s.parent_slot_id FROM slots s JOIN ancestors a ON a.id=s.id WHERE s.parent_slot_id IS NOT NULL) SELECT id FROM ancestors))
@@ -365,6 +370,7 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
         yield* sql`INSERT INTO rollouts ${sql.insert({
           id: rolloutId,
           chat_id: j.chatId,
+          fork_id: j.forkId,
           kind: j.level === 1 ? "summarize" : "condense",
           status: "running",
           leaf_slot_id: j.lastSlotId,
@@ -423,7 +429,7 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
         yield* sql`UPDATE summarization_jobs SET status = 'failed', error = ${JSON.stringify(failure)},
           best_effort_draft = ${draft ?? null}, rollout_id = NULL, result_summary_id = ${summaryId}, updated_at = ${now}
           WHERE id = ${jobId}`
-      }).pipe(transaction(sql, "FailSummaryAttempt")),
+      }).pipe(inJobFork(sql, jobId), transaction(sql, "FailSummaryAttempt")),
     ReleaseSummaryJob: ({ userId, jobId, attempt }) =>
       Effect.gen(function* () {
         yield* get(userId, jobId, attempt, true)
@@ -440,12 +446,18 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
         WHERE status = 'running' AND id IN (SELECT rollout_id FROM summarization_jobs WHERE status = 'processing')`
         yield* sql`UPDATE summarization_jobs SET status = 'pending', attempts = max(0,attempts-1), rollout_id = NULL,
         updated_at = ${Date.now()} WHERE status = 'processing'`
-        return yield* sql<{ userId: UserId; chatId: SummaryJob["chatId"]; leafSlotId: SummaryJob["leafSlotId"] }>`
-        SELECT c.owner_user_id AS userId, c.id AS chatId, c.active_leaf_slot_id AS leafSlotId FROM chats c
-        WHERE c.deleted_at IS NULL AND c.active_leaf_slot_id IS NOT NULL AND
-          (EXISTS (SELECT 1 FROM summarization_jobs j WHERE j.chat_id = c.id AND j.status = 'pending') OR
-           json_extract((SELECT value_json FROM state_events e WHERE e.chat_id = c.id AND e.key = 'lcm.settings' AND ${sql.literal(eventAppliesSql("c.current_fork_id", "e"))}
-             AND e.slot_id IS NULL ORDER BY e.seq DESC LIMIT 1),'$.enabled') = 1)`
+        return yield* sql<{
+          userId: UserId
+          chatId: SummaryJob["chatId"]
+          forkId: SummaryJob["forkId"]
+          leafSlotId: SummaryJob["leafSlotId"]
+        }>`
+          SELECT c.owner_user_id AS userId,c.id AS chatId,f.id AS forkId,f.tip_slot_id AS leafSlotId
+          FROM chats c JOIN forks f ON f.chat_id=c.id WHERE c.deleted_at IS NULL AND f.deleted_at IS NULL
+          AND f.tip_slot_id IS NOT NULL AND (EXISTS(SELECT 1 FROM summarization_jobs j
+            WHERE j.chat_id=c.id AND j.fork_id=f.id AND j.status='pending') OR
+            json_extract((SELECT value_json FROM state_events e WHERE e.chat_id=c.id AND e.key='lcm.settings'
+              AND ${sql.literal(eventAppliesSql("f.id", "e"))} AND e.slot_id IS NULL ORDER BY e.seq DESC LIMIT 1),'$.enabled')=1)`
       }).pipe(transaction(sql, "ResetSummaryJobs")),
     EscalateSummaryJob: ({ userId, jobId }) =>
       Effect.gen(function* () {

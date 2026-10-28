@@ -1,8 +1,8 @@
-import { eventApplies, inFork, viewAt } from "./forkState.ts"
+import { inSummaryFork, rerunRequests, summaryChoices } from "./lcmFork.ts"
+import { effectiveOverride, eventApplies, inFork, viewAt } from "./forkState.ts"
 // What the summary UI reads (ARCHITECTURE §16): the layer in use with the failures and
 // unfinished work on the path, a window of coverage for the rail, and a summary's revisions.
 import type { UserId } from "@rp/shared/domain.ts"
-import { atLeaf } from "./forkState.ts"
 import type { LcmJob, LcmSummary, Summary } from "@rp/shared/lcm.ts"
 import { LcmCoverage, LcmState } from "@rp/shared/lcm.ts"
 import { Effect } from "effect"
@@ -27,7 +27,7 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
 
   /** Revision counts and rerun requests for some summaries, in one query each. */
-  const extras = (ids: ReadonlyArray<string>) =>
+  const extras = (ids: ReadonlyArray<string>, chatId: string) =>
     Effect.gen(function* () {
       const counts = new Map<string, number>()
       const reruns = new Set<string>()
@@ -39,11 +39,8 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
         ids
       ))
         counts.set(row.id, row.n)
-      for (const row of yield* sql.unsafe<{ id: string }>(
-        `SELECT summary_id AS id FROM summary_reruns WHERE summary_id IN (${marks})`,
-        ids
-      ))
-        reruns.add(row.id)
+      for (const row of yield* rerunRequests(sql, chatId))
+        if (row.summary_id && ids.includes(row.summary_id)) reruns.add(row.summary_id)
       for (const row of yield* sql.unsafe<{ id: string; n: number }>(
         `SELECT j.source_summary_id AS id,count(r.id) AS n FROM summarization_jobs j
           JOIN summaries s ON s.id=j.result_summary_id JOIN summary_revisions r ON r.summary_id=s.id
@@ -58,7 +55,10 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
 
   const toRows = (summaries: ReadonlyArray<Summary>, withContent: boolean) =>
     Effect.gen(function* () {
-      const { counts, reruns, replacements } = yield* extras(summaries.map((s) => s.id))
+      const { counts, reruns, replacements } = yield* extras(
+        summaries.map((s) => s.id),
+        summaries[0]?.chatId ?? ""
+      )
       return summaries.map((s): LcmSummary => ({
         id: s.id,
         level: s.level,
@@ -117,17 +117,17 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
   }
 
   return {
-    ListSummaryRevisions: ({ userId, summaryId }) =>
+    ListSummaryRevisions: ({ userId, summaryId, forkId }) =>
       Effect.gen(function* () {
-        const [head] = yield* sql<{
-          selected: string
-        }>`WITH RECURSIVE chosen(id,n) AS (
-          SELECT s.id,0 FROM summaries s JOIN chats c ON c.id=s.chat_id
-            WHERE s.id=${summaryId} AND s.sealed=1 AND c.owner_user_id=${userId} AND c.deleted_at IS NULL
-          UNION ALL SELECT x.chosen_id,p.n+1 FROM lcm_summary_choices x JOIN chosen p ON x.summary_id=p.id
-            WHERE x.chosen_id<>p.id AND p.n<64
-        ) SELECT s.selected_revision_id AS selected FROM chosen p JOIN summaries s ON s.id=p.id ORDER BY p.n DESC LIMIT 1`
-        if (!head) return yield* new NotFound({ entity: "summary", id: summaryId })
+        const initial = yield* readSummary(sql, userId, summaryId)
+        const choices = new Map((yield* summaryChoices(sql, initial.chatId)).map((c) => [c.summary_id, c.chosen_id]))
+        let id: string = summaryId
+        const seen = new Set<string>()
+        while (choices.has(id) && choices.get(id) !== id && !seen.has(id)) {
+          seen.add(id)
+          id = choices.get(id)!
+        }
+        const head = yield* readSummary(sql, userId, id)
         const rows = yield* sql<{
           id: string
           origin: "generated" | "user" | "changeset" | "imported"
@@ -144,9 +144,9 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
           tokens: r.token_count,
           content: r.content,
           createdAt: r.created_at,
-          selected: r.id === head.selected
+          selected: r.id === head.revisionId
         }))
-      }).pipe(query("ListSummaryRevisions")),
+      }).pipe(inSummaryFork(sql, userId, summaryId, forkId), query("ListSummaryRevisions")),
 
     GetLcmState: ({ userId, chatId, leafSlotId, forkId }) =>
       Effect.gen(function* () {
@@ -167,6 +167,7 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
           created_at: number
         }>`SELECT id, last_slot_id, created_at FROM summaries
           WHERE chat_id = ${chatId} AND status = 'failed' AND sealed = 1`
+        const fork = yield* viewAt(sql, chatId, leafSlotId)
         const jobRows = yield* sql<{
           id: string
           level: number
@@ -179,7 +180,7 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
           updated_at: number
         }>`SELECT j.updated_at,j.id, j.level, j.first_slot_id, j.last_slot_id, j.status, j.error, a.depth AS first_depth, b.depth AS last_depth
           FROM summarization_jobs j JOIN slots a ON a.id = j.first_slot_id JOIN slots b ON b.id = j.last_slot_id
-          WHERE j.chat_id = ${chatId} AND j.status IN ('pending', 'processing', 'failed')
+          WHERE j.chat_id = ${chatId} AND (j.fork_id IS NULL OR j.fork_id=${fork}) AND j.status IN ('pending', 'processing', 'failed')
           ORDER BY a.depth, j.level, j.id`
         const candidates = [
           ...new Set([...failedRows.map((r) => r.last_slot_id), ...jobRows.map((r) => r.last_slot_id)])
@@ -213,18 +214,7 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
             (r.status !== "failed" ||
               !resolved(r.first_depth + 1, r.last_depth + 1, fresh, { time: r.updated_at, id: r.id }))
         )
-        const { reruns } = yield* Effect.gen(function* () {
-          const found = new Set<string>()
-          if (jobIds.length > 0) {
-            const marks = jobIds.map(() => "?").join(",")
-            for (const row of yield* sql.unsafe<{ id: string }>(
-              `SELECT job_id AS id FROM summary_reruns WHERE job_id IN (${marks})`,
-              jobIds.map((j) => j.id)
-            ))
-              found.add(row.id)
-          }
-          return { reruns: found }
-        })
+        const reruns = new Set((yield* rerunRequests(sql, chatId)).map((r) => r.job_id))
         return new LcmState({
           chatId,
           leafSlotId,
@@ -245,7 +235,7 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
         })
       }).pipe(inFork(sql, chatId, forkId, leafSlotId), query("GetLcmState")),
 
-    GetLcmCoverage: ({ userId, chatId, leafSlotId, fromDepth, toDepth, includeResolved }) =>
+    GetLcmCoverage: ({ userId, chatId, forkId, leafSlotId, fromDepth, toDepth, includeResolved }) =>
       Effect.gen(function* () {
         yield* owned(sql, userId, chatId, leafSlotId)
         const ids = yield* sql<{ id: string; created_at: number }>`WITH RECURSIVE path(id, depth) AS (
@@ -255,12 +245,16 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
           ) SELECT s.id,s.created_at FROM path JOIN summaries s INDEXED BY summaries_last_slot ON s.last_slot_id = path.id
             JOIN slots first ON first.id = s.first_slot_id
             WHERE s.chat_id = ${chatId} AND s.sealed = 1 AND s.status <> 'superseded'
+              AND ${effectiveOverride(sql, "summary_superseded", yield* viewAt(sql, chatId, leafSlotId), "s.id")} IS NULL
               AND path.depth >= ${fromDepth} AND first.depth <= ${toDepth}
             ORDER BY s.level, first.depth LIMIT ${MAX_COVERAGE}`
         const memo = new Map<string, Summary>()
         const summaries = yield* Effect.forEach(ids, ({ id }) => readSummary(sql, userId, id, undefined, memo))
         const fresh = summaries.some((s) => s.status === "failed") ? yield* freshRanges(userId, chatId, leafSlotId) : []
-        const rows = yield* toRows(summaries, false)
+        const rows = yield* toRows(
+          summaries.filter((s) => s.status !== "superseded"),
+          false
+        )
         return new LcmCoverage({
           leafSlotId,
           summaries: rows
@@ -272,6 +266,6 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
             }))
             .filter((s) => includeResolved || !s.resolved)
         })
-      }).pipe(atLeaf(sql, chatId, leafSlotId), query("GetLcmCoverage"))
+      }).pipe(inFork(sql, chatId, forkId, leafSlotId), query("GetLcmCoverage"))
   } satisfies Partial<Parameters<typeof ReadOps.of>[0]>
 })

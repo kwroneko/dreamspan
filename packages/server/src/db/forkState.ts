@@ -168,7 +168,7 @@ export const viewAt = (sql: SqlClient.SqlClient, chatId: string, slotId: string 
   Effect.flatMap(ForkView, (fork) => (fork !== null ? Effect.succeed(fork) : forkAt(sql, chatId, slotId)))
 
 /** Runs `effect` in the fork a read of the path to `slotId` is in (`forkAt`), unless one is in view already. */
-export const atLeaf =
+const atLeaf =
   (sql: SqlClient.SqlClient, chatId: string, slotId: string | null) =>
   <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     Effect.gen(function* () {
@@ -220,13 +220,25 @@ export const selectionIn = (sql: SqlClient.SqlClient, forkId: string | null, slo
 /** A row of what a fork changes, by kind: what it's about and its value (schema/forkOverrides.ts). */
 interface OverrideValue {
   readonly kind:
-    "select" | "replace" | "star" | "picker_hide" | "delete_slot" | "delete_version" | "hide" | "suppress_event"
+    | "select"
+    | "replace"
+    | "star"
+    | "picker_hide"
+    | "delete_slot"
+    | "delete_version"
+    | "hide"
+    | "suppress_event"
+    | "summary_revision"
+    | "summary_choice"
+    | "summary_rerun"
+    | "summary_superseded"
   readonly targetId: string
   readonly slotId: string | null
   readonly valueId: string | null
   readonly flag: number | null
   /** The bin item of a deletion, which a restore names. */
   readonly binItemId?: string | null
+  readonly summariesDone?: boolean
 }
 
 /**
@@ -250,13 +262,13 @@ export const writeOverride = (
       ORDER BY o.seq DESC LIMIT 1`
     if (own !== undefined && own.forked === 0) {
       yield* sql`UPDATE fork_overrides SET value_id = ${value.valueId}, flag = ${value.flag}, seq = ${seq},
-        bin_item_id = ${value.binItemId ?? null}, origin = ${origin} WHERE id = ${own.id}`
+        bin_item_id = ${value.binItemId ?? null}, summaries_done = ${value.summariesDone ? 1 : 0}, origin = ${origin} WHERE id = ${own.id}`
       return seq
     }
     yield* sql`INSERT INTO fork_overrides (id, chat_id, fork_id, seq, kind, target_id, slot_id, slot_depth, value_id, flag,
-        bin_item_id, origin)
+        bin_item_id, summaries_done, origin)
       VALUES (${uuidv7()}, ${fork.chatId}, ${fork.id}, ${seq}, ${value.kind}, ${value.targetId}, ${value.slotId},
-        (SELECT depth FROM slots WHERE id = ${value.slotId}), ${value.valueId}, ${value.flag}, ${value.binItemId ?? null}, ${origin})`
+        (SELECT depth FROM slots WHERE id = ${value.slotId}), ${value.valueId}, ${value.flag}, ${value.binItemId ?? null}, ${value.summariesDone ? 1 : 0}, ${origin})`
     return seq
   })
 

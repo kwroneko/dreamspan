@@ -211,7 +211,10 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
       artifacts = new Map<Summary["id"], Artifact>()
     const jobs = new Map<string, SummaryJob>()
     // Absorbed summaries, the origin of each revision, and the failed rows whose inputs may still stand.
-    const superseded = new Set<string>(),
+    const superseded = {
+        has: (id: string) => supersededByFork.get(current)?.has(id) ?? false,
+        add: (id: string) => supersededByFork.get(current)!.add(id)
+      },
       origins = new Map<string, string>(),
       failedRows: Array<Artifact> = []
     const snapshots: Array<string> = []
@@ -221,6 +224,12 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
     // Selections are per fork: each fork's choices, a new fork starting with a copy of its
     // parent's. Every step works in the current fork, whose tip is `leaf`.
     let current: string = chat.currentForkId!
+    const summarySelections = new Map<string, Map<string, { revision: Summary["revisionId"]; rowVersion: number }>>([
+      [current, new Map()]
+    ])
+    const supersededByFork = new Map<string, Set<string>>([[current, new Set()]])
+    const revisionOf = (s: Artifact) => summarySelections.get(current)?.get(s.id)?.revision ?? s.revision
+    const rowVersionOf = (s: Artifact) => summarySelections.get(current)?.get(s.id)?.rowVersion ?? s.rowVersion
     const choices = new Map<string, Map<SlotId, VersionId>>([[current, new Map()]])
     // Settings, like selections, belong to each fork and are inherited at creation.
     const enabledByFork = new Map<string, boolean>([[current, true]])
@@ -260,7 +269,7 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
       }) &&
       summary.children.every((p) => {
         const child = artifacts.get(p.summaryId)!
-        return fresh(child) && child.revision === p.revisionId
+        return fresh(child) && revisionOf(child) === p.revisionId
       })
     const chain = (summary: Artifact) => {
       const full = path(summary.last)
@@ -311,6 +320,8 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
         const made = (await call(reader.ListForks({ userId: user.id, chatId: chat.id }))).find(
           (f) => f.id === result.forkId
         )!
+        summarySelections.set(result.forkId, new Map(summarySelections.get(made.parentForkId!) ?? []))
+        supersededByFork.set(result.forkId, new Set(supersededByFork.get(made.parentForkId!) ?? []))
         choices.set(result.forkId, new Map(choices.get(made.parentForkId!)!))
         deletions.set(result.forkId, new Map(deletions.get(made.parentForkId!) ?? []))
         enabledByFork.set(result.forkId, enabledByFork.get(made.parentForkId!) ?? true)
@@ -322,12 +333,12 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
       accept(result, parent)
     }
     const remember = (summary: Summary, inputs: Summary["inputs"], children: ReadonlyArray<Artifact>) => {
-      const lineage = children.map((s) => ({ summaryId: s.id, revisionId: s.revision }))
+      const lineage = children.map((s) => ({ summaryId: s.id, revisionId: revisionOf(s) }))
       const text = JSON.stringify(children.length ? lineage.map((s) => [s.summaryId, s.revisionId]) : inputs) + PAD
       if (summary.content === "") {
         assert.isTrue(
           children.length
-            ? children.every((c) => c.revisions.get(c.revision) === "")
+            ? children.every((c) => c.revisions.get(revisionOf(c)) === "")
             : inputs.every((i) => i.versionId === null && i.amendCount === 0),
           "empty coverage has only zero-content lineage"
         )
@@ -361,7 +372,9 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
         if (!artifacts.has(row.id as Summary["id"])) {
           assert.strictEqual(row.attempts, 0, "empty coverage starts no paid attempt")
           assert.isNull(row.rollout_id, "empty coverage creates no rollout")
-          const summary = await call(reader.GetSummary({ userId: user.id, summaryId: row.id as Summary["id"] }))
+          const summary = await call(
+            reader.GetSummary({ userId: user.id, forkId: current as ForkId, summaryId: row.id as Summary["id"] })
+          )
           remember(
             summary,
             summary.inputs,
@@ -374,7 +387,7 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
         selected: Array<Artifact> = []
       const available = (s: Artifact) =>
         !superseded.has(s.id) &&
-        !(s.revisions.get(s.revision) === "" && !fresh(s)) &&
+        !(s.revisions.get(revisionOf(s)) === "" && !fresh(s)) &&
         onPath.has(s.last) &&
         ![...jobs.values()].some(
           (j) => j.batchId === s.batchId && s.batchId !== null && ["pending", "processing"].includes(j.status)
@@ -382,11 +395,11 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
       const includesChoice = (s: Artifact, manual: Artifact): boolean =>
         s.children.some((child) =>
           child.summaryId === manual.id
-            ? child.revisionId === manual.revision
+            ? child.revisionId === revisionOf(manual)
             : includesChoice(artifacts.get(child.summaryId)!, manual)
         )
       const protectedRows = [...artifacts.values()].filter(
-        (s) => available(s) && origins.get(s.revision) !== "generated"
+        (s) => available(s) && origins.get(revisionOf(s)) !== "generated"
       )
       let at = history.length - 1
       while (at >= 0) {
@@ -395,7 +408,7 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
             (s) =>
               available(s) &&
               !(
-                origins.get(s.revision) === "generated" &&
+                origins.get(revisionOf(s)) === "generated" &&
                 protectedRows.some(
                   (manual) =>
                     manual.id !== s.id &&
@@ -412,8 +425,8 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
           )
           .sort(
             (a, b) =>
-              Number(["user", "imported"].includes(origins.get(b.revision)!)) -
-                Number(["user", "imported"].includes(origins.get(a.revision)!)) ||
+              Number(["user", "imported"].includes(origins.get(revisionOf(b))!)) -
+                Number(["user", "imported"].includes(origins.get(revisionOf(a))!)) ||
               Number(fresh(b)) - Number(fresh(a)) ||
               b.level - a.level ||
               b.id.localeCompare(a.id)
@@ -451,7 +464,7 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
       assert.deepStrictEqual(
         selected.map((s) => s.id),
         expected.map((s) => s.id),
-        "I1/I3: selection against graph oracle"
+        `I1/I3: selection against graph oracle ${JSON.stringify({ current, actual: selected.map((s) => s.id), expected: expected.map((s) => s.id), summaries: [...artifacts.values()].map((s) => ({ id: s.id, revision: revisionOf(s), origin: origins.get(revisionOf(s)), fresh: fresh(s), superseded: superseded.has(s.id), first: s.first, last: s.last, children: s.children })) })}`
       )
       for (const pin of selected) {
         const artifact = artifacts.get(pin.id as Summary["id"])!
@@ -470,7 +483,7 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
         }
         visit(artifact)
         const piece = snapshot.pieces.find((p) => p.source.kind === "summary" && p.source.id === pin.id)!
-        if (artifact.revisions.get(artifact.revision) === "")
+        if (artifact.revisions.get(revisionOf(artifact)) === "")
           assert.strictEqual(piece.text, "", "empty lineage emits no prose")
         else assert.isNotEmpty(piece.messages, "I2: selected summary is rendered")
         assert.isTrue(
@@ -570,7 +583,7 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
         )
       )[0]![0]!
     /** Runs a claimed job through the real summarizer and folds its outcome into the oracle. */
-    const runClaimed = async (job: SummaryJob, mode: Mode) => {
+    const runClaimedHere = async (job: SummaryJob, mode: Mode) => {
       jobs.set(job.id, job)
       const declared = await jobRow(job.id)
       const childIds = declared.input_child_ids ? (JSON.parse(declared.input_child_ids as string) as string[]) : []
@@ -594,7 +607,7 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
         else
           assert.deepStrictEqual(
             snapshot.summaryJob!.children,
-            kids.map((k) => ({ summaryId: k.id, revisionId: k.revision })),
+            kids.map((k) => ({ summaryId: k.id, revisionId: revisionOf(k) })),
             "I7: a condensation sends exactly its parts at their selected revisions"
           )
         snapshots.push(assembly.value.snapshot)
@@ -602,7 +615,7 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
       script =
         mode !== "ok"
           ? mode
-          : { text: JSON.stringify(job.level > 1 ? kids.map((k) => [k.id, k.revision]) : expected) + PAD }
+          : { text: JSON.stringify(job.level > 1 ? kids.map((k) => [k.id, revisionOf(k)]) : expected) + PAD }
       await call(summarizer.runJob(job))
       const row = await jobRow(job.id)
       jobs.set(job.id, { ...job, status: row.status as SummaryJob["status"], attempts: Number(row.attempts) })
@@ -611,7 +624,9 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
       if (row.status === "complete") {
         assert.strictEqual(mode, "ok", "I5: a refusal is never saved as a summary")
         remember(
-          await call(reader.GetSummary({ userId: user.id, summaryId: row.result_summary_id as never })),
+          await call(
+            reader.GetSummary({ userId: user.id, forkId: current as ForkId, summaryId: row.result_summary_id as never })
+          ),
           job.level > 1 ? [] : expected,
           kids
         )
@@ -626,7 +641,9 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
         }
       }
       if (row.status === "failed" && row.result_summary_id) {
-        const failed = await call(reader.GetSummary({ userId: user.id, summaryId: row.result_summary_id as never }))
+        const failed = await call(
+          reader.GetSummary({ userId: user.id, forkId: current as ForkId, summaryId: row.result_summary_id as never })
+        )
         assert.strictEqual(failed.status, "failed")
         assert.strictEqual(failed.content, "")
         assert.isFalse(artifacts.has(failed.id), "I5: a failed summary is not one the oracle may select")
@@ -655,6 +672,17 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
       )
       return row.status as string
     }
+    const runClaimed = async (job: SummaryJob, mode: Mode) => {
+      const previous = current
+      current = job.forkId ?? current
+      syncDeleted()
+      try {
+        return await runClaimedHere(job, mode)
+      } finally {
+        current = previous
+        syncDeleted()
+      }
+    }
     const claimAndRun = async (mode: Mode, limit = 60) => {
       await adoptEmptyCoverage()
       let ran = 0
@@ -669,7 +697,7 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
     // Why a stale summary may still be in a context after the planner is quiet: the user wrote it, or
     // it sits over one they wrote, or nothing in its range has content, or its rewrite failed and the
     // failure still stands (spec/LCM.md §2.2, §2.8).
-    const handWritten = (a: Artifact) => origins.get(a.revision) !== "generated"
+    const handWritten = (a: Artifact) => origins.get(revisionOf(a)) !== "generated"
     const heldByFailure = (a: Artifact) =>
       failedRows.some((f) => f.level === a.level && f.first === a.first && f.last === a.last && fresh(f))
     const hasFreshBelow = (c: Artifact, below: number) =>
@@ -959,13 +987,14 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
               // One level-1 job at a time per chat: another claim finds only condensations.
               const another = await call(writer.ClaimSummaryJob({ userId: user.id }))
               if (another) {
-                assert.isAbove(another.level, 1, "I7: one L1 per chat")
+                assert.isTrue(another.level > 1 || another.forkId !== job.forkId, "I7: one L1 per fork")
                 await call(writer.ReleaseSummaryJob({ userId: user.id, jobId: another.id, attempt: another.epoch }))
                 jobs.set(another.id, { ...another, status: "pending", attempts: another.attempts - 1 })
               }
               const earlier = [...jobs.values()].filter(
                 (j) =>
                   j.level === 1 &&
+                  j.forkId === job.forkId &&
                   j.status === "pending" &&
                   nodes.get(j.firstSlotId)!.depth < nodes.get(job.firstSlotId)!.depth
               )
@@ -992,7 +1021,7 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
               (s) =>
                 ({
                   id: s.id,
-                  revisionId: s.revision,
+                  revisionId: revisionOf(s),
                   firstSlotId: s.first,
                   lastSlotId: s.last,
                   level: s.level
@@ -1012,25 +1041,25 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
               api.EditSummary({
                 summaryId: summary.id,
                 content: text,
-                expectedRowVersion: summary.rowVersion,
+                expectedRowVersion: rowVersionOf(summary),
                 commitDraft: null
               })
             )
-            summary.revision = result.summary.revisionId
-            summary.rowVersion = result.summary.rowVersion
-            summary.revisions.set(summary.revision, text)
-            origins.set(summary.revision, "user")
+            summarySelections
+              .get(current)!
+              .set(summary.id, { revision: result.summary.revisionId, rowVersion: result.summary.rowVersion })
+            summary.revisions.set(result.summary.revisionId, text)
+            origins.set(result.summary.revisionId, "user")
           } else {
             const revision = pick([...summary.revisions.keys()], step.b)!
             const result = await call(
               api.SelectSummaryRevision({
                 summaryId: summary.id,
                 revisionId: revision,
-                expectedRowVersion: summary.rowVersion
+                expectedRowVersion: rowVersionOf(summary)
               })
             )
-            summary.revision = revision
-            summary.rowVersion = result.rowVersion
+            summarySelections.get(current)!.set(summary.id, { revision, rowVersion: result.rowVersion })
           }
         } else if (step.kind === "settings") {
           enabled = !enabled

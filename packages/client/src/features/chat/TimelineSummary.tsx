@@ -52,17 +52,21 @@ export function TimelineSummary({
     const load = async () => {
       setError(null)
       if (summary.level > 1) {
-        const result = await session.call((client) => client("GetSummary", { summaryId: summary.id }))
+        const result = await session.call((client) =>
+          client("GetSummary", { forkId: session.snapshot().forkId, summaryId: summary.id })
+        )
         if (!live) return
         if (!result.ok) return setError(result.error.message)
         const results = await Promise.all(
           result.value.children.map(async (child) => {
-            const current = await session.call((client) => client("GetSummary", { summaryId: child.summaryId }))
+            const current = await session.call((client) =>
+              client("GetSummary", { forkId: session.snapshot().forkId, summaryId: child.summaryId })
+            )
             if (!current.ok || current.value.revisionId === child.revisionId) return current
             // Condensation pins its inputs. An edit of a child must not rewrite what
             // this parent actually condensed when the user expands its provenance.
             const revisions = await session.call((client) =>
-              client("ListSummaryRevisions", { summaryId: child.summaryId })
+              client("ListSummaryRevisions", { forkId: session.snapshot().forkId, summaryId: child.summaryId })
             )
             if (!revisions.ok) return revisions
             const pinned = revisions.value.find((revision) => revision.id === child.revisionId)

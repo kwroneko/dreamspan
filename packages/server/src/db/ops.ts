@@ -471,7 +471,9 @@ export class WriteOps extends RpcGroup.make(
     error: Schema.Union([StorageError, NotFound])
   }),
   Rpc.make("ResetSummaryJobs", {
-    success: Schema.Array(Schema.Struct({ userId: UserId, chatId: ChatId, leafSlotId: SlotId })),
+    success: Schema.Array(
+      Schema.Struct({ userId: UserId, chatId: ChatId, forkId: Schema.NullOr(ForkId), leafSlotId: SlotId })
+    ),
     error: StorageError
   }),
   Rpc.make("EscalateSummaryJob", {
@@ -493,6 +495,7 @@ export class WriteOps extends RpcGroup.make(
   }),
   Rpc.make("EditSummary", {
     payload: {
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       userId: UserId,
       summaryId: SummaryId,
       content: Schema.String,
@@ -503,13 +506,20 @@ export class WriteOps extends RpcGroup.make(
     error: Schema.Union([StorageError, NotFound, StaleWrite])
   }),
   Rpc.make("SelectSummaryRevision", {
-    payload: { userId: UserId, summaryId: SummaryId, revisionId: SummaryRevisionId, expectedRowVersion: Schema.Int },
+    payload: {
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
+      userId: UserId,
+      summaryId: SummaryId,
+      revisionId: SummaryRevisionId,
+      expectedRowVersion: Schema.Int
+    },
     success: Summary,
     error: Schema.Union([StorageError, NotFound, StaleWrite])
   }),
   /** Asks for a summary or a failed job to be done again with the next reply, or withdraws the ask. */
   Rpc.make("SetSummaryRerun", {
     payload: {
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       userId: UserId,
       chatId: ChatId,
       target: RerunTarget,
@@ -559,6 +569,7 @@ export class WriteOps extends RpcGroup.make(
    */
   Rpc.make("SetBackfill", {
     payload: {
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       userId: UserId,
       chatId: ChatId,
       action: Schema.Literals(["pause", "continue", "begin", "drive", "finish"]),
@@ -1905,7 +1916,7 @@ export class ReadOps extends RpcGroup.make(
     error: Schema.Union([NotFound, StorageError])
   }),
   Rpc.make("GetSummary", {
-    payload: { userId: UserId, summaryId: SummaryId },
+    payload: { forkId: Schema.optionalKey(Schema.NullOr(ForkId)), userId: UserId, summaryId: SummaryId },
     success: Summary,
     error: Schema.Union([StorageError, NotFound])
   }),
@@ -1918,6 +1929,7 @@ export class ReadOps extends RpcGroup.make(
   /** Every summary on the path overlapping message depths `fromDepth`..`toDepth`, without their text. */
   Rpc.make("GetLcmCoverage", {
     payload: {
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       userId: UserId,
       chatId: ChatId,
       leafSlotId: SlotId,
@@ -1929,7 +1941,7 @@ export class ReadOps extends RpcGroup.make(
     error: Schema.Union([StorageError, NotFound])
   }),
   Rpc.make("ListSummaryRevisions", {
-    payload: { userId: UserId, summaryId: SummaryId },
+    payload: { forkId: Schema.optionalKey(Schema.NullOr(ForkId)), userId: UserId, summaryId: SummaryId },
     success: Schema.Array(SummaryRevision),
     error: Schema.Union([StorageError, NotFound])
   }),
@@ -1946,7 +1958,7 @@ export class ReadOps extends RpcGroup.make(
   }),
   /** The chat's newest backfill and what the ledger shows spent against it; null when it never had one. */
   Rpc.make("GetBackfill", {
-    payload: { userId: UserId, chatId: ChatId },
+    payload: { forkId: Schema.optionalKey(Schema.NullOr(ForkId)), userId: UserId, chatId: ChatId },
     success: Schema.NullOr(BackfillStatus),
     error: Schema.Union([StorageError, NotFound])
   }),

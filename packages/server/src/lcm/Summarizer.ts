@@ -304,7 +304,15 @@ export function makeSummarizer(pool: boolean) {
                   )
               }
               if (pool && !(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)))
-                schedule({ userId: job.userId, chatId: job.chatId, leafSlotId: job.leafSlotId }, "completion")
+                schedule(
+                  {
+                    userId: job.userId,
+                    chatId: job.chatId,
+                    leafSlotId: job.leafSlotId,
+                    ...(job.forkId ? { forkId: job.forkId } : {})
+                  },
+                  "completion"
+                )
             })
           )
         )
@@ -318,10 +326,12 @@ export function makeSummarizer(pool: boolean) {
           yield* writer.SaveLcmMaintenance({ ...position, pins: p.maintenancePins })
         // The chat's backfill (spec/LCM.md §2.11): a reply begins it, and it is over when nothing is left.
         const backfill = (action: "begin" | "finish") =>
-          writer.SetBackfill({ userId: position.userId, chatId: position.chatId, action }).pipe(
-            Effect.catch(() => Effect.void),
-            Effect.andThen(changed(position.chatId))
-          )
+          writer
+            .SetBackfill({ userId: position.userId, chatId: position.chatId, forkId: position.forkId ?? null, action })
+            .pipe(
+              Effect.catch(() => Effect.void),
+              Effect.andThen(changed(position.chatId))
+            )
         if (p.backfill?.armed && reason === "reply") yield* backfill("begin")
         if (p.backfill?.settled) yield* backfill("finish")
         const held = p.backfill?.held === true
@@ -349,9 +359,10 @@ export function makeSummarizer(pool: boolean) {
       })
     /** Plans for a chat after a delay that lets triggers coalesce; a reply's pass is not weakened by a job's. */
     const schedule = (position: Position, reason: PlanReason | undefined) => {
-      const prior = due.get(position.chatId)
+      const key = `${position.chatId}:${position.forkId ?? ""}`
+      const prior = due.get(key)
       const kept = prior?.reason === "reply"
-      due.set(position.chatId, {
+      due.set(key, {
         position: kept && reason !== "reply" ? prior.position : position,
         at: Date.now() + 250,
         reason: kept ? "reply" : reason
@@ -360,7 +371,10 @@ export function makeSummarizer(pool: boolean) {
     const startup = yield* writer.ResetSummaryJobs()
     for (const p of startup) {
       users.add(p.userId)
-      schedule(p, "completion")
+      schedule(
+        { userId: p.userId, chatId: p.chatId, leafSlotId: p.leafSlotId, ...(p.forkId ? { forkId: p.forkId } : {}) },
+        "completion"
+      )
     }
     if (pool)
       yield* Effect.forkIn(

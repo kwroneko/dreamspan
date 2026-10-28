@@ -627,7 +627,7 @@ export const layer = Layer.unwrap(
       for (const summary of input.value.summaries ?? []) {
         const saved = yield* writer.SaveDraft({
           userId: user.id,
-          key: new DraftKey({ targetKind: "summary_edit", targetId: summary.summaryId, field: "" }),
+          key: new DraftKey({ targetKind: "summary_edit", targetId: summary.summaryId, field: summary.forkId ?? "" }),
           draftId: summary.draftId,
           content: summary.content,
           expectedRowVersion: summary.expectedRowVersion,

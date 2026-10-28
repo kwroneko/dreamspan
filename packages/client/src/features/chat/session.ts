@@ -280,12 +280,22 @@ export class ChatSession {
 
   /** The summaries overlapping a range of message depths on the path shown, without their text. */
   async coverage(fromDepth: number, toDepth: number, includeResolved = false): Promise<LcmCoverage | null> {
+    const forkId = this.view.forkId
     const leafSlotId = this.view.leafSlotId
     if (leafSlotId === null) return null
     const result = await this.call((client) =>
-      client("GetLcmCoverage", { chatId: this.chatId, leafSlotId, fromDepth, toDepth, includeResolved })
+      client("GetLcmCoverage", {
+        forkId,
+        chatId: this.chatId,
+        leafSlotId,
+        fromDepth,
+        toDepth,
+        includeResolved
+      })
     )
-    return result.ok && !this.disposed ? result.value : null
+    return result.ok && !this.disposed && forkId === this.view.forkId && leafSlotId === this.view.leafSlotId
+      ? result.value
+      : null
   }
 
   private async refreshContext() {
