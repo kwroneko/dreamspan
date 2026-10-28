@@ -81,6 +81,20 @@ export const makeEditorHandlers = Effect.gen(function* () {
       Effect.tap(effect, () => warmth.refreshUser(id))
 
   const handlers = {
+    ListSnippets: (args) =>
+      Effect.flatMap(userId, (id) => reader.ListSnippets({ userId: id, ...args })).pipe(settle("ListSnippets")),
+    CreateSnippet: (args) =>
+      Effect.flatMap(userId, (id) => writer.CreateSnippet({ userId: id, ...args }).pipe(changed(id))).pipe(
+        settle("CreateSnippet")
+      ),
+    SaveSnippet: (args) =>
+      Effect.flatMap(userId, (id) => writer.SaveSnippet({ userId: id, ...args }).pipe(changed(id))).pipe(
+        settle("SaveSnippet")
+      ),
+    MakeSnippetGlobal: (args) =>
+      Effect.flatMap(userId, (id) => writer.MakeSnippetGlobal({ userId: id, ...args }).pipe(changed(id))).pipe(
+        settle("MakeSnippetGlobal")
+      ),
     OpenEditor: ({ refId, chatNote }) =>
       Effect.flatMap(userId, (id) => reader.OpenEditor({ userId: id, refId, ...(chatNote ? { chatNote } : {}) })).pipe(
         settle("OpenEditor")
@@ -227,17 +241,24 @@ export const makeEditorHandlers = Effect.gen(function* () {
     ListCardNotes: ({ cardRefId }) =>
       Effect.flatMap(userId, (id) => reader.ListCardNotes({ userId: id, cardRefId })).pipe(settle("ListCardNotes")),
 
-    CreateCardNote: ({ cardRefId, title, link }) =>
+    CreateCardNote: ({ cardRefId, title, link, chatNote }) =>
       Effect.flatMap(userId, (id) =>
         writer
-          .CreateCardNote({ userId: id, cardRefId, title, ...(link === undefined ? {} : { link }) })
+          .CreateCardNote({
+            userId: id,
+            cardRefId,
+            title,
+            ...(chatNote ? { chatNote } : {}),
+            ...(link === undefined ? {} : { link })
+          })
           .pipe(changed(id))
       ).pipe(settle("CreateCardNote")),
 
-    ListSharedNotes: ({ query, refId, entityId }) =>
+    ListSharedNotes: ({ query, refId, entityId, chatNote }) =>
       Effect.flatMap(userId, (id) =>
         reader.ListSharedNotes({
           userId: id,
+          ...(chatNote === undefined ? {} : { chatNote }),
           ...(query === undefined ? {} : { query }),
           ...(refId === undefined ? {} : { refId }),
           ...(entityId === undefined ? {} : { entityId })

@@ -256,7 +256,12 @@ export class EditorApi extends RpcGroup.make(
   }),
   /** A new note on the card, off in chats; with `link`, a slot showing that shared note. */
   Rpc.make("CreateCardNote", {
-    payload: { cardRefId: RefId, title: Schema.String, link: Schema.optionalKey(EntityId) },
+    payload: {
+      chatNote: Schema.optionalKey(ChatNotePosition),
+      cardRefId: RefId,
+      title: Schema.String,
+      link: Schema.optionalKey(EntityId)
+    },
     success: LibraryRef,
     error: Schema.Union([...Errors])
   }),
@@ -267,6 +272,7 @@ export class EditorApi extends RpcGroup.make(
    */
   Rpc.make("ListSharedNotes", {
     payload: {
+      chatNote: Schema.optionalKey(ChatNotePosition),
       query: Schema.optionalKey(Schema.String),
       refId: Schema.optionalKey(RefId),
       entityId: Schema.optionalKey(EntityId)

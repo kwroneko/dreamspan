@@ -941,6 +941,7 @@ export const makeBin = (sql: SqlClient.SqlClient, limits: BinLimits, now: () => 
           return `Scratchpad in ${yield* chatTitle(`SELECT c.title FROM slots s JOIN chats c ON c.id = s.chat_id WHERE s.id = ?`)}`
         case "summary_edit":
           return `Summary in ${yield* chatTitle(`SELECT c.title FROM summaries s JOIN chats c ON c.id = s.chat_id WHERE s.id = ?`)}`
+        case "snippet":
         case "entity_field": {
           const [ref] = yield* sql<{ label: string }>`SELECT label FROM entity_refs WHERE id = ${key.targetId}`
           return [ref?.label ?? "A library entry", key.field].filter(Boolean).join(" › ")

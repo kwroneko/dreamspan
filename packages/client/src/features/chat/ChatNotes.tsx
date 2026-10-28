@@ -203,8 +203,20 @@ export function NotesTab({
         reason: null
       })
     const made = refId
-      ? await call((client) => client("CreateCardNote", { cardRefId: refId, title: "Note", ...link }), ["library"])
-      : await call((client) => client("CreateChatNote", { chatId, title: "Note", ...link }), ["library"])
+      ? await call(
+          (client) =>
+            client("CreateCardNote", {
+              cardRefId: refId,
+              title: "Note",
+              chatNote: { chatId, forkId: view.forkId, slotId: leafSlotId },
+              ...link
+            }),
+          ["library"]
+        )
+      : await call(
+          (client) => client("CreateChatNote", { chatId, forkId: view.forkId, title: "Note", ...link }),
+          ["library"]
+        )
     if (!made.ok) return setError(made.error)
     const on = await session.changeCast({ _tag: "Note", entityId: made.value.entityId, active: true })
     setError(on.ok ? null : on.error)
@@ -296,6 +308,7 @@ export function NotesTab({
       </AsyncView>
       <ErrorAlert error={error} />
       <SharedNotePicker
+        chatNote={{ chatId, forkId: view.forkId, slotId: leafSlotId }}
         open={picking !== null}
         onOpenChange={(next) => !next && setPicking(null)}
         call={call}

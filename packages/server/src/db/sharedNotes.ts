@@ -1,4 +1,5 @@
-// Shared named notes (DESIGN §4.1): note entities with `owner: { shared: "global" }`, the text
+import { snippetRevision } from "./snippets.ts"
+// Shared named notes (DESIGN §4.1): note entities with a global or chat-scoped `owner.shared`, the text
 // a note slot can link to. Queries both workers use.
 import type { EntityId } from "@rp/shared/chat.ts"
 import type { LinkedNote } from "@rp/shared/chatSetupApi.ts"
@@ -39,13 +40,28 @@ export const linkCounts = (sql: SqlClient.SqlClient, userId: UserId, entities: R
  * purged one is gone). Null when it isn't one: another user's, another kind, a card's note.
  */
 export const sharedNote = (sql: SqlClient.SqlClient, userId: UserId, entityId: string) =>
-  sql<{ ref_id: string; head: string; title: string; content: string; deleted: number }>`
+  Effect.gen(function* () {
+    const [row] = yield* sql<{
+      ref_id: string
+      head: string
+      title: string
+      content: string
+      deleted: number
+      scope: string
+    }>`
     SELECT r.id AS ref_id, r.head_revision_id AS head, json_extract(h.doc_json, '$.title') AS title,
-      json_extract(h.doc_json, '$.content') AS content, e.deleted_at IS NOT NULL AS deleted
+      json_extract(h.doc_json, '$.content') AS content, e.deleted_at IS NOT NULL AS deleted, json_extract(h.doc_json, '$.owner.shared') AS scope
     FROM entities e JOIN entity_refs r ON r.entity_id = e.id AND r.ref_kind = 'upstream'
     JOIN entity_revisions h ON h.id = r.head_revision_id
     WHERE e.id = ${entityId} AND e.owner_user_id = ${userId} AND e.kind = 'note' AND e.purged_at IS NULL
-      AND json_extract(h.doc_json, '$.owner.shared') IS NOT NULL`.pipe(Effect.map(([row]) => row ?? null))
+      AND json_extract(h.doc_json, '$.owner.shared') IS NOT NULL`
+    if (!row || row.scope === "global") return row ?? null
+    const revision = yield* snippetRevision(sql, row.scope, entityId)
+    if (revision === null) return null
+    const [doc] = yield* sql<{ title: string; content: string }>`SELECT json_extract(doc_json, '$.title') AS title,
+    json_extract(doc_json, '$.content') AS content FROM entity_revisions WHERE id = ${revision} AND entity_id = ${entityId}`
+    return doc ? { ...row, ...doc, head: revision } : null
+  })
 
 /** The shared note a slot links to, as a chat's note list shows it; null when it's gone. */
 export const linkedNote = (sql: SqlClient.SqlClient, userId: UserId, entityId: string) =>

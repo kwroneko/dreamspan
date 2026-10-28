@@ -81,6 +81,13 @@ export const makeWriteHandlers = (bin: Bin) =>
         WHERE s.id = ${key.targetId} AND c.owner_user_id = ${userId} AND s.deleted_at IS NULL AND c.deleted_at IS NULL`,
       entity_field: (userId, key) => sql`SELECT count(*) AS n FROM entity_refs r JOIN entities e ON e.id = r.entity_id
         WHERE r.id = ${key.targetId} AND e.owner_user_id = ${userId} AND e.deleted_at IS NULL`,
+      snippet: (userId, key) => sql`SELECT count(*) AS n FROM entity_refs r JOIN entities e ON e.id = r.entity_id
+        JOIN entity_revisions h ON h.id = r.head_revision_id WHERE r.id = ${key.targetId}
+        AND e.owner_user_id = ${userId} AND e.kind = 'note' AND e.deleted_at IS NULL
+        AND ((json_extract(h.doc_json, '$.owner.shared') = 'global' AND ${key.field} = '') OR EXISTS (
+          SELECT 1 FROM forks f JOIN chats c ON c.id = f.chat_id WHERE f.id = ${key.field}
+          AND c.owner_user_id = ${userId} AND f.chat_id = json_extract(h.doc_json, '$.owner.shared')
+          AND f.deleted_at IS NULL AND c.deleted_at IS NULL))`,
       summary_edit: (userId, key) => sql`SELECT count(*) AS n FROM summaries s JOIN chats c ON c.id = s.chat_id
         WHERE s.id = ${key.targetId} AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL`
     }

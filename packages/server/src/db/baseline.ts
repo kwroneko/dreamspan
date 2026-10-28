@@ -23,7 +23,7 @@ export const baseline: ReadonlyArray<string> = [
   `CREATE TABLE drafts (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL REFERENCES users(id),
-    target_kind TEXT NOT NULL CHECK (target_kind IN ('composer', 'version_edit', 'scratchpad', 'entity_field', 'summary_edit')),
+    target_kind TEXT NOT NULL CHECK (target_kind IN ('composer', 'version_edit', 'scratchpad', 'snippet', 'entity_field', 'summary_edit')),
     target_id TEXT NOT NULL,
     field TEXT NOT NULL DEFAULT '',
     content TEXT NOT NULL,
@@ -452,7 +452,7 @@ export const baseline: ReadonlyArray<string> = [
       DELETE FROM drafts WHERE target_kind = 'composer' AND target_id = OLD.chat_id AND field = OLD.id;
     END`,
   `CREATE TRIGGER drafts_gc_ref AFTER DELETE ON entity_refs
-    BEGIN DELETE FROM drafts WHERE target_kind = 'entity_field' AND target_id = OLD.id; END`,
+    BEGIN DELETE FROM drafts WHERE target_kind IN ('entity_field', 'snippet') AND target_id = OLD.id; END`,
   `CREATE INDEX slots_bin_item ON slots(bin_item_id) WHERE bin_item_id IS NOT NULL`,
   `CREATE INDEX versions_bin_item ON versions(bin_item_id) WHERE bin_item_id IS NOT NULL`,
   `CREATE TABLE recovered_texts (
@@ -1345,7 +1345,7 @@ export const baseline: ReadonlyArray<string> = [
     -- The chat's state_seq when written; a row updated in place takes the newer one.
     seq INTEGER NOT NULL CHECK (seq > 0),
     kind TEXT NOT NULL CHECK (kind IN ('select', 'replace', 'delete_slot', 'delete_version', 'hide', 'hide_range', 'star',
-      'picker_hide', 'summary_revision', 'summary_choice', 'summary_rerun', 'summary_superseded', 'suppress_event')),
+      'picker_hide', 'snippet_revision', 'summary_revision', 'summary_choice', 'summary_rerun', 'summary_superseded', 'suppress_event')),
     target_id TEXT NOT NULL,
     -- The slot the row is about, and its depth, for reading a window of a path.
     slot_id TEXT,
@@ -1359,6 +1359,20 @@ export const baseline: ReadonlyArray<string> = [
     -- then overrules: stImportWrites.ts).
     origin TEXT NOT NULL DEFAULT 'user' CHECK (origin IN ('user', 'import'))
   ) STRICT`,
+  `CREATE TRIGGER fork_overrides_snippet BEFORE INSERT ON fork_overrides
+    WHEN NEW.kind = 'snippet_revision' AND NOT EXISTS (
+      SELECT 1 FROM entity_revisions r JOIN entities e ON e.id = r.entity_id JOIN chats c ON c.id = NEW.chat_id
+      WHERE r.id = NEW.value_id AND e.id = NEW.target_id AND e.kind = 'note' AND e.owner_user_id = c.owner_user_id
+        AND json_extract(r.doc_json, '$.owner.shared') = NEW.chat_id)
+    BEGIN SELECT RAISE(ABORT, 'a snippet binding names its chat note revision'); END`,
+  `CREATE TRIGGER fork_overrides_snippet_update BEFORE UPDATE OF value_id ON fork_overrides
+    WHEN NEW.kind = 'snippet_revision' AND NOT EXISTS (
+      SELECT 1 FROM entity_revisions r JOIN entities e ON e.id = r.entity_id JOIN chats c ON c.id = NEW.chat_id
+      WHERE r.id = NEW.value_id AND e.id = NEW.target_id AND e.kind = 'note' AND e.owner_user_id = c.owner_user_id
+        AND json_extract(r.doc_json, '$.owner.shared') = NEW.chat_id)
+    BEGIN SELECT RAISE(ABORT, 'a snippet binding names its chat note revision'); END`,
+  `CREATE TRIGGER snippet_bindings_gc AFTER DELETE ON entity_revisions
+    BEGIN DELETE FROM fork_overrides WHERE target_id = OLD.entity_id AND kind = 'snippet_revision' AND value_id = OLD.id; END`,
   `CREATE INDEX fork_overrides_chat ON fork_overrides(chat_id)`,
   `CREATE INDEX fork_overrides_point ON fork_overrides(fork_id, kind, target_id, seq)`,
   `CREATE INDEX fork_overrides_window ON fork_overrides(fork_id, slot_depth, seq)`,

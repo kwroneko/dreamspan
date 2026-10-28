@@ -8,6 +8,7 @@ export const DraftTargetKind = Schema.Literals([
   "composer",
   "version_edit",
   "scratchpad",
+  "snippet",
   "entity_field",
   "summary_edit"
 ])
@@ -17,7 +18,7 @@ export class DraftKey extends Schema.Class<DraftKey>("DraftKey")({
   targetKind: DraftTargetKind,
   targetId: Schema.String,
   /**
-   * Composer: the fork it's typed in (the recovered text of one whose fork isn't known has
+   * Composer and snippet: the fork it's typed in (the recovered text of one whose fork isn't known has
    * it empty). Entity fields: a JSON path into the document. Otherwise empty.
    */
   field: Schema.String

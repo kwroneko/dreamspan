@@ -229,6 +229,7 @@ interface OverrideValue {
     | "delete_version"
     | "hide"
     | "suppress_event"
+    | "snippet_revision"
     | "summary_revision"
     | "summary_choice"
     | "summary_rerun"

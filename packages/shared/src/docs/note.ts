@@ -62,11 +62,11 @@ export const NoteCondition = Schema.Union([
 ])
 export type NoteCondition = typeof NoteCondition.Type
 
-/** Who a note belongs to: a card, a chat, or no one (a shared named note, global for now). */
+/** Who a note belongs to: a card, a chat, or no one (a shared named note/snippet, global or chat-scoped). */
 const NoteOwner = Schema.Union([
   Schema.Struct({ card: EntityId }),
   Schema.Struct({ chat: ChatId }),
-  Schema.Struct({ shared: Schema.Literal("global") })
+  Schema.Struct({ shared: Schema.Union([Schema.Literal("global"), ChatId]) })
 ])
 
 export const NoteDoc = Schema.Struct({

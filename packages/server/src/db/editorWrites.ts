@@ -1,3 +1,6 @@
+import { snippetFork } from "./snippets.ts"
+import { inFork } from "./forkState.ts"
+import { makeSnippetWrites } from "./snippetWrites.ts"
 // The editors' write handlers (ARCHITECTURE.md "Editing the library"). They run in the
 // writer worker, each as one transaction, through the library's own steps (libraryWrites.ts),
 // so every change flows on to the refs that follow the edited one.
@@ -176,6 +179,7 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps) => {
     })
 
   const handlers = {
+    ...makeSnippetWrites(steps),
     CommitEditorDrafts: ({ userId, refId, expectedRowVersion, fields, message, chatNote }) =>
       Effect.gen(function* () {
         const owned = yield* lib.ownedRef(userId, refId)
@@ -343,11 +347,15 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps) => {
         return yield* userEdit(ref, { ...head, avatar_media_id: mediaId }, "Changed the avatar", null)
       }).pipe(transaction(sql, "SetCardAvatar")),
 
-    CreateCardNote: ({ userId, cardRefId, title, link }) =>
+    CreateCardNote: ({ userId, cardRefId, title, link, chatNote }) =>
       Effect.gen(function* () {
         const card = yield* lib.ownedRef(userId, cardRefId)
         if (card.kind !== "card") return yield* new NotFound({ entity: "card", id: cardRefId })
-        const label = (yield* linkTitle(userId, link)) ?? (title.trim().slice(0, 200) || "Note")
+        if (chatNote) yield* snippetFork(sql, userId, chatNote.chatId, chatNote.forkId ?? null)
+        const linkedTitle = yield* linkTitle(userId, link).pipe(
+          chatNote ? inFork(sql, chatNote.chatId, chatNote.forkId, chatNote.slotId) : (effect) => effect
+        )
+        const label = linkedTitle ?? (title.trim().slice(0, 200) || "Note")
         const note = yield* steps.createUpstream({
           userId,
           kind: "note",
@@ -363,7 +371,7 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps) => {
         return toLibraryRef(note)
       }).pipe(transaction(sql, "CreateCardNote")),
 
-    CreateChatNote: ({ userId, chatId, title, link }) =>
+    CreateChatNote: ({ userId, chatId, title, link, forkId }) =>
       Effect.gen(function* () {
         const [chat] = yield* sql<{ id: ChatId }>`
           SELECT id FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`
@@ -382,7 +390,7 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps) => {
           sourceHash: null
         })
         return toLibraryRef(note)
-      }).pipe(transaction(sql, "CreateChatNote")),
+      }).pipe(inFork(sql, chatId, forkId, null), transaction(sql, "CreateChatNote")),
 
     CreateSharedNote: ({ userId, title, content, fromNoteRefId, chatNote }) =>
       Effect.gen(function* () {
