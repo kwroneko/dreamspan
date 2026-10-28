@@ -59,6 +59,7 @@ export const toLibraryRef = (row: RefRow) =>
     headRevisionId: row.head_revision_id as RevisionId,
     followsRefId: row.follows_ref_id as RefId | null,
     chatId: row.chat_id as ChatId | null,
+    hasImport: row.ref_kind === "upstream" && row.followed_head !== null,
     updateAvailable: row.followed_head !== null && row.followed_head !== row.merge_base_revision_id,
     rowVersion: row.row_version,
     updatedAt: row.updated_at

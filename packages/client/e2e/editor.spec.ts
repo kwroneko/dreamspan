@@ -233,7 +233,7 @@ test("forking a card is one action, and takes the unsaved changes along", async 
   await open(page, refId)
   await field(page, "Description").fill("A keeper in the rain.")
   await kept(page)
-  await page.getByRole("button", { name: "Fork" }).click()
+  await page.getByRole("button", { name: "Fork", exact: true }).click()
   const dialog = page.getByRole("dialog", { name: "Fork card" })
   await dialog.getByRole("textbox", { name: "Display name", exact: true }).fill("Noir Wren")
   await expect(dialog.getByRole("checkbox", { name: "Take my unsaved changes to the fork" })).toBeChecked()

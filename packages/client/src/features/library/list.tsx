@@ -1,3 +1,4 @@
+import { CardSurface } from "../cardForks/surfaces.tsx"
 import { PresetWorkspace, PresetOverlayHost, usePresetWorkspace } from "../editor/PresetWorkspace.tsx"
 // The library: cards, lorebooks and presets by label, each exportable as a file.
 import type { LibraryRef } from "@rp/shared/library.ts"
@@ -59,9 +60,11 @@ function LibraryRow({ entry, persona }: { entry: LibraryRef; persona?: boolean |
           {entry.subtitle && (
             <span className="min-w-0 text-sm text-muted [overflow-wrap:anywhere]">{entry.subtitle}</span>
           )}
+          {entry.kind === "card" && <CardSurface placement="badge" entityId={entry.entityId} />}
           {entry.kind !== "card" && entry.refKind === "variant" && <Badge>variant</Badge>}
           {entry.updateAvailable && <Badge tone="warning">update available</Badge>}
         </div>
+        {entry.kind === "card" && <CardSurface placement="provenance" entityId={entry.entityId} />}
         {error && (
           <p role="alert" className="text-sm text-danger">
             {error}
@@ -69,6 +72,7 @@ function LibraryRow({ entry, persona }: { entry: LibraryRef; persona?: boolean |
         )}
       </div>
       <div className="flex flex-wrap items-center gap-2">
+        {entry.kind === "card" && <CardSurface placement="actions" entityId={entry.entityId} />}
         {persona !== undefined && <PersonaToggle entry={entry} persona={persona} />}
         {entry.kind === "card" && (
           <Link
@@ -96,7 +100,7 @@ function LibraryRow({ entry, persona }: { entry: LibraryRef; persona?: boolean |
             </Link>
           )
         )}
-        {entry.refKind === "upstream" && (
+        {entry.refKind === "upstream" && (entry.kind !== "card" || entry.hasImport) && (
           <Link
             to="/import"
             search={{ into: entry.id }}

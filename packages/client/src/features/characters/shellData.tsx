@@ -1,3 +1,4 @@
+import { CardSurface } from "../cardForks/surfaces.tsx"
 import { useAtomValue } from "@effect/atom-react"
 import type { CastCard, EntityId } from "@rp/shared/chat.ts"
 import type { ShellCard, ShellFork as ShellForkRow, ShellLibrary as ShellLibraryRows } from "@rp/shared/chatSetupApi.ts"
@@ -98,20 +99,23 @@ export function CharacterTile({ card }: { card: ShellCard }) {
   const open = useOpenCharacter()
   const c = card.card
   return (
-    <button
-      type="button"
-      onClick={() => open(c.entityId)}
-      aria-label={`Open ${c.label}${c.subtitle ? ` · ${c.subtitle}` : ""}`}
-      className="group flex min-w-0 flex-col overflow-hidden rounded-lg border border-border bg-surface text-left outline-none hover:border-focus focus-visible:ring-2 focus-visible:ring-focus"
-    >
-      <span className="aspect-[2/3] w-full overflow-hidden">
-        <Avatar id={c.entityId} name={c.name} mediaId={c.avatarMediaId} size="fill" />
-      </span>
-      <span className="flex w-full min-w-0 flex-col gap-0.5 p-2">
-        <span className="truncate text-sm font-medium">{c.label}</span>
-        {c.subtitle && <span className="truncate text-xs text-muted">{c.subtitle}</span>}
-        <span className="text-xs text-muted">{c.chats ? `${c.chats} chats` : "Never used"}</span>
-      </span>
-    </button>
+    <div className="relative flex min-w-0 flex-col">
+      <button
+        type="button"
+        onClick={() => open(c.entityId)}
+        aria-label={`Open ${c.label}${c.subtitle ? ` · ${c.subtitle}` : ""}`}
+        className="group flex min-w-0 flex-col overflow-hidden rounded-lg border border-border bg-surface text-left outline-none hover:border-focus focus-visible:ring-2 focus-visible:ring-focus"
+      >
+        <span className="aspect-[2/3] w-full overflow-hidden">
+          <Avatar id={c.entityId} name={c.name} mediaId={c.avatarMediaId} size="fill" />
+        </span>
+        <span className="flex w-full min-w-0 flex-col gap-0.5 p-2">
+          <span className="truncate text-sm font-medium">{c.label}</span>
+          {c.subtitle && <span className="truncate text-xs text-muted">{c.subtitle}</span>}
+          <span className="text-xs text-muted">{c.chats ? `${c.chats} chats` : "Never used"}</span>
+        </span>
+      </button>
+      <CardSurface placement="badge" entityId={c.entityId} />
+    </div>
   )
 }

@@ -1,6 +1,6 @@
 # Card forks: every surface
 
-**Status**: Proposal for discussion, 2026-10-16. Built on the owner's decisions in DESIGN §4 (three names; forking with parent and child; an easy way to find every variant; forks don't follow their parent). Everything below is **[P]** unless marked.
+**Status**: Proposal for discussion, 2026-10-16. Built on the owner's decisions in DESIGN §4 (three names; forking with parent and child; an easy way to find every variant; forks don't follow their parent). Everything below is **[P]** unless marked. Surfaces 1, 3, 4, 7, 8, 9 and the fork provenance/badges in 5 and 11 are built (2026-10-28; ARCHITECTURE §3.9, §12, §14); these implemented portions are obsolete as proposals. Remaining proposals and open questions retain their status.
 
 ## The model in one paragraph
 

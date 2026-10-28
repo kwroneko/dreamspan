@@ -153,6 +153,8 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
         [forked.kind, forked.refKind, forked.label, forked.subtitle],
         ["card", "upstream", "Mira", "noir"]
       )
+      assert.isTrue(head.ref.hasImport)
+      assert.isFalse(forked.hasImport)
       assert.isFalse(forked.updateAvailable)
       assert.strictEqual(forked.followsRefId, null)
       const opened = yield* api.OpenEditor({ refId: forked.id })
