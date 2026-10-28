@@ -1,3 +1,4 @@
+import { summaryChoices } from "./lcmFork.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import type { Summary } from "@rp/shared/lcm.ts"
 import { Effect } from "effect"
@@ -106,13 +107,17 @@ export const selectSummaryLayer = (
     for (const candidate of candidates) {
       if (!(yield* valid(candidate.id))) continue
       const summary = yield* readSummary(sql, userId, candidate.id, undefined, memo)
-      if (summary.to - summary.from + 1 !== summary.slotCount || (summary.content === "" && !summary.fresh)) continue
+      if (
+        summary.status === "superseded" ||
+        summary.to - summary.from + 1 !== summary.slotCount ||
+        (summary.content === "" && !summary.fresh)
+      )
+        continue
       const options = ending.get(summary.to) ?? []
       options.push(summary)
       ending.set(summary.to, options)
     }
-    const choices = yield* sql<{ summary_id: string; chosen_id: string }>`SELECT x.* FROM lcm_summary_choices x
-      JOIN summaries s ON s.id=x.summary_id WHERE s.chat_id=${chatId}`
+    const choices = yield* summaryChoices(sql, chatId)
     const redirects = new Map(choices.map((c) => [c.summary_id, c.chosen_id]))
     const activeChoice = (id: string): string => {
       const seen = new Set<string>()
@@ -122,8 +127,13 @@ export const selectSummaryLayer = (
       }
       return id
     }
-    const chosen = new Set(choices.map((c) => activeChoice(c.chosen_id)))
+    const chosen = new Set(choices.filter((c) => c.summary_id !== c.chosen_id).map((c) => activeChoice(c.chosen_id)))
     const dismissed = new Set(choices.filter((c) => c.summary_id !== c.chosen_id).map((c) => c.summary_id))
+    for (const [end, options] of ending) {
+      const allowed = options.filter((s) => !dismissed.has(s.id))
+      if (allowed.length) ending.set(end, allowed)
+      else ending.delete(end)
+    }
     const protectedChoice = (s: Summary) => !dismissed.has(s.id) && (s.origin === "user" || s.origin === "imported")
     const protectedSummaries = [...ending.values()].flat().filter(protectedChoice)
     const includesChoice = (s: Summary, manual: Summary): boolean =>

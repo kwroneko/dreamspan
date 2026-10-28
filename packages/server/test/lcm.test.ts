@@ -122,11 +122,19 @@ it.live(
         ),
         "StaleWrite"
       )
-      yield* api.SelectSummaryRevision({ summaryId: l1.id, revisionId: l1.revisionId, expectedRowVersion: 2 })
+      const selected = yield* api.SelectSummaryRevision({
+        summaryId: l1.id,
+        revisionId: l1.revisionId,
+        expectedRowVersion: edited.summary.rowVersion
+      })
       yield* fresh(true)
       assert.strictEqual(
         yield* outcome(
-          api.SelectSummaryRevision({ summaryId: l1.id, revisionId: l2.revisionId, expectedRowVersion: 3 }),
+          api.SelectSummaryRevision({
+            summaryId: l1.id,
+            revisionId: l2.revisionId,
+            expectedRowVersion: selected.rowVersion
+          }),
           () => "allowed"
         ),
         "NotFound"

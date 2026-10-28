@@ -1,3 +1,5 @@
+import { inJobFork, inSummaryFork, summaryChoices } from "./lcmFork.ts"
+import { viewAt, writeOverride } from "./forkState.ts"
 import type { ContextSnapshot } from "../assembler/types.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import type { UserId } from "@rp/shared/domain.ts"
@@ -20,6 +22,26 @@ export const makeLcmWriteHandlers = (bin: Bin) =>
         if (summary.rowVersion !== expected)
           return yield* new StaleWrite({ entity: "summary", id, expected, actual: summary.rowVersion })
         return summary
+      })
+    const choose = (
+      chatId: string,
+      id: string,
+      kind: "summary_revision" | "summary_choice" | "summary_superseded",
+      valueId: string
+    ) =>
+      Effect.gen(function* () {
+        const [row] = yield* sql<{ first_slot_id: string }>`SELECT first_slot_id FROM summaries WHERE id=${id}`
+        return yield* writeOverride(
+          sql,
+          { id: (yield* viewAt(sql, chatId, null))!, chatId },
+          {
+            kind,
+            targetId: id,
+            slotId: row!.first_slot_id,
+            valueId,
+            flag: null
+          }
+        )
       })
     return {
       CompleteSummary: ({ userId, jobId, rolloutId, content, status, inputs, children }) =>
@@ -139,12 +161,14 @@ export const makeLcmWriteHandlers = (bin: Bin) =>
           for (const summaryId of supersede) {
             const protectedSummary = yield* readSummary(sql, userId, summaryId)
             if (protectedSummary.origin === "user" || protectedSummary.origin === "imported") continue
-            yield* sql`UPDATE summaries SET status = 'superseded', row_version = row_version + 1 WHERE id = ${summaryId}`
+            yield* choose(job.chat_id, summaryId, "summary_superseded", id)
           }
           if (job.source_summary_id !== null) {
             const source = yield* readSummary(sql, userId, job.source_summary_id)
             if (source.origin === "generated" && source.revisionId === job.source_revision_id)
-              yield* sql`UPDATE lcm_summary_choices SET chosen_id=${id} WHERE chosen_id=${source.id}`
+              for (const choice of yield* summaryChoices(sql, job.chat_id))
+                if (choice.chosen_id === source.id && choice.summary_id !== choice.chosen_id)
+                  yield* choose(job.chat_id, choice.summary_id, "summary_choice", id)
           }
           const updated =
             yield* sql`UPDATE summarization_jobs SET status = 'complete', result_summary_id = ${id}, updated_at = ${now}
@@ -159,24 +183,24 @@ export const makeLcmWriteHandlers = (bin: Bin) =>
         usage_cache_write_tokens = (SELECT sum(cache_write) FROM llm_requests WHERE rollout_id = ${rolloutId})
         WHERE id = ${rolloutId}`
           return yield* readSummary(sql, userId, id)
-        }).pipe(transaction(sql, "CompleteSummary")),
-      EditSummary: ({ userId, summaryId, content, expectedRowVersion, commitDraft }) =>
+        }).pipe(inJobFork(sql, jobId), transaction(sql, "CompleteSummary")),
+      EditSummary: ({ userId, summaryId, forkId, content, expectedRowVersion, commitDraft }) =>
         Effect.gen(function* () {
-          yield* current(userId, summaryId, expectedRowVersion)
+          const before = yield* current(userId, summaryId, expectedRowVersion)
           const revisionId = uuidv7()
           yield* sql`INSERT INTO summary_revisions ${sql.insert({ id: revisionId, summary_id: summaryId, content, token_count: tokensOf({ content }), origin: "user", created_at: Date.now() })}`
-          yield* sql`UPDATE summaries SET selected_revision_id = ${revisionId}, row_version = row_version + 1 WHERE id = ${summaryId}`
-          yield* sql`DELETE FROM lcm_summary_choices WHERE summary_id=${summaryId}`
+          yield* choose(before.chatId, summaryId, "summary_revision", revisionId)
+          yield* choose(before.chatId, summaryId, "summary_choice", summaryId)
           const { recovered } = yield* bin.drafts.commit(userId, commitDraft, {
             targetKind: "summary_edit",
             targetId: summaryId,
             content
           })
           return { summary: yield* readSummary(sql, userId, summaryId), recovered }
-        }).pipe(transaction(sql, "EditSummary")),
-      SelectSummaryRevision: ({ userId, summaryId, revisionId, expectedRowVersion }) =>
+        }).pipe(inSummaryFork(sql, userId, summaryId, forkId), transaction(sql, "EditSummary")),
+      SelectSummaryRevision: ({ userId, summaryId, forkId, revisionId, expectedRowVersion }) =>
         Effect.gen(function* () {
-          yield* current(userId, summaryId, expectedRowVersion)
+          const before = yield* current(userId, summaryId, expectedRowVersion)
           const [revision] = yield* sql<{
             summary_id: string
           }>`SELECT summary_id FROM summary_revisions WHERE id=${revisionId}`
@@ -187,15 +211,13 @@ export const makeLcmWriteHandlers = (bin: Bin) =>
               WHERE source_summary_id=${summaryId} AND result_summary_id=${target} AND status='complete'`
             if (!replacement) return yield* new NotFound({ entity: "summary revision", id: revisionId })
             yield* readSummary(sql, userId, target, revisionId)
-            yield* sql`INSERT INTO lcm_summary_choices(summary_id,chosen_id) VALUES (${summaryId},${target})
-              ON CONFLICT(summary_id) DO UPDATE SET chosen_id=excluded.chosen_id`
-            yield* sql`UPDATE summaries SET row_version=row_version+1 WHERE id=${summaryId}`
+            yield* choose(before.chatId, summaryId, "summary_choice", target)
           } else {
             yield* readSummary(sql, userId, summaryId, revisionId)
-            yield* sql`DELETE FROM lcm_summary_choices WHERE summary_id=${summaryId}`
+            yield* choose(before.chatId, summaryId, "summary_choice", summaryId)
           }
-          yield* sql`UPDATE summaries SET selected_revision_id = ${revisionId}, row_version = row_version + 1 WHERE id = ${target}`
+          yield* choose(before.chatId, target, "summary_revision", revisionId)
           return yield* readSummary(sql, userId, target)
-        }).pipe(transaction(sql, "SelectSummaryRevision"))
+        }).pipe(inSummaryFork(sql, userId, summaryId, forkId), transaction(sql, "SelectSummaryRevision"))
     } satisfies Partial<Parameters<typeof WriteOps.of>[0]>
   })
