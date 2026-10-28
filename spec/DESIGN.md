@@ -33,6 +33,7 @@ Where the owner corrected an earlier proposal, the corrected version is recorded
   - macros (§5.6)
   - prompt-only regex scripts, plus display regex as display rules
 - **[P]** The importer never runs code from a preset. It writes an import report listing anything it couldn't represent (pi-forge's ST importer is a good reference).
+- **[D]** The import report holds only what a user must act on; nobody reads it, so nothing the user needs may live only there (owner, 2026-10-28).
 - **[P]** Fidelity is tested by **differential testing against real ST**: a stock ST in a throwaway container, pointed at a mock endpoint that records its requests. Synthetic card, chat, preset and persona fixtures are fed to both, and the request bodies are diffed. This applies to the non-agentic assembler.
 - **[D]** Prefill must work where the provider supports it. Most frontier models don't. reference-harness's tool-schema prefill for GPT (`spec/OPENAI-PREFILL.md`) is worth porting as a separate capability.
 - **[P]** Where the provider doesn't support prefill, it's dropped and the request preview says so.
@@ -53,7 +54,7 @@ Where the owner corrected an earlier proposal, the corrected version is recorded
 ### 1.4 ST data folder import
 - **[D]** Point the importer at an ST data folder. It finds the chats and their cards and adds them seamlessly. Exporting chats back to ST is secondary.
 - **[D]** ST has a single hidden flag. If a long consecutive run of hidden messages starts at message 0 (the manual-summary pattern), the importer offers to un-hide them so LCM can take over. Other hidden messages stay excluded from context.
-- **[D]** Chats that have only the greeting and zero user turns are skipped (ST creates these just by opening a card). The import report gives the count.
+- **[D]** Chats that have only the greeting and zero user turns are skipped (ST creates these just by opening a card). The import report gave the count until the owner cut the report to what a user must act on (2026-10-28, §1.2).
 - **[P]** Mapping:
   - single and group chats → chats with N participants
   - ST branch files (linked by metadata) → one message graph

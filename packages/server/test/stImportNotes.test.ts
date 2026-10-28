@@ -157,12 +157,8 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
       const group = yield* notesIn("group chats/Both - 1.jsonl")
       assert.isFalse(group.find((n) => n.title === "Character author's note" && n.active) !== undefined)
       assert.isTrue(group.find((n) => n.title === "Character's Note")!.active)
-      // The chat whose non-empty note ST replaced says so; the empty one doesn't.
-      const replaced = report.issues.filter((issue) => issue.code === "st.character_note_replaced")
-      assert.deepStrictEqual(
-        replaced.map((issue) => issue.path),
-        ["chats/Cato/Cato - two.jsonl"]
-      )
+      // Both notes are in the chat, so the report doesn't list ST's replacing one.
+      assert.isFalse(report.issues.some((issue) => issue.code === "st.character_note_replaced"))
 
       // Again, with Aria's unticked in ST: the same notes, updated, none added.
       const again = yield* importStFolder(folder(false))

@@ -45,12 +45,9 @@ const KINDS: ReadonlyArray<readonly [string, string]> = [
   ["group_chat", "Group chats"]
 ]
 
-const OUTCOMES = ["added", "updated", "unchanged", "skipped", "failed"] as const
+const OUTCOMES = ["added", "updated", "failed"] as const
 
 const TONES = { info: "neutral", warning: "warning", error: "danger" } as const
-
-/** "1 chat", "2 chats". */
-const count = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
 
 const megabytes = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(1)} MB`
 
@@ -62,36 +59,23 @@ interface Progress {
   readonly totalBytes: number
 }
 
+/** What the import did, in one line per kind: what changed and what failed. Details aren't listed. */
 function Counts({ report }: { report: StImportReport }) {
-  const rows = KINDS.filter(([kind]) => report.counts[kind] !== undefined)
-  return (
-    <div className="flex flex-col gap-3">
-      <ul aria-label="Imported" className="flex flex-col gap-1.5 text-sm">
-        {rows.map(([kind, label]) => {
-          const count = report.counts[kind]!
-          return (
-            <li key={kind}>
-              <span className="font-medium">{label}:</span>{" "}
-              <span className="text-muted">
-                {OUTCOMES.filter((outcome) => count[outcome] > 0)
-                  .map((outcome) => `${count[outcome]} ${outcome}`)
-                  .join(", ")}
-              </span>
-            </li>
-          )
-        })}
-      </ul>
-      <p className="text-sm text-muted">
-        {count(report.messages, "message")} read, {count(report.summaries, "summary", "summaries")} kept.{" "}
-        {count(report.greetingOnly, "chat")} with only a greeting skipped.
-      </p>
-      {report.unsupported.length > 0 && (
-        <p className="text-sm text-muted">
-          Not imported, since this app only does chat completion:{" "}
-          {report.unsupported.map((u) => `${u.count} ${u.what}${u.count === 1 ? "" : "s"}`).join(", ")}.
-        </p>
-      )}
-    </div>
+  const rows = KINDS.flatMap(([kind, label]) => {
+    const count = report.counts[kind]
+    const shown = count ? OUTCOMES.filter((outcome) => count[outcome] > 0) : []
+    return count && shown.length ? [{ kind, label, text: shown.map((o) => `${count[o]} ${o}`).join(", ") }] : []
+  })
+  return rows.length ? (
+    <ul aria-label="Imported" className="flex flex-col gap-1.5 text-sm">
+      {rows.map(({ kind, label, text }) => (
+        <li key={kind}>
+          <span className="font-medium">{label}:</span> <span className="text-muted">{text}</span>
+        </li>
+      ))}
+    </ul>
+  ) : (
+    <p className="text-sm text-muted">Nothing new: everything was imported as it is before.</p>
   )
 }
 
@@ -210,9 +194,9 @@ function ReportView({
       )}
       {report.issues.length > 0 && (
         <Card>
-          <CardHeader title="Notes on the files" />
+          <CardHeader title="Needs your attention" />
           <ul
-            aria-label="Notes on the files"
+            aria-label="Needs your attention"
             className="flex max-h-96 flex-col gap-1.5 overflow-y-auto rounded-md border border-border bg-canvas p-2 text-sm"
           >
             {report.issues.map((issue, index) => (

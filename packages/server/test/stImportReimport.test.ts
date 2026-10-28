@@ -242,7 +242,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
         }
         if (local !== "purge") {
           assert.isTrue((yield* graph(chat.id)).some((r) => r.id === target.slotId && r.content === "ST edited text"))
-          assert.isTrue(second.report.issues.some((i) => i.code === "st.differing"))
+          assert.isFalse(second.report.issues.some((i) => i.code === "st.differing"))
           assert.strictEqual(second.answers.get(`chats/Alice/${tag}.jsonl`)?.outcome, "updated")
         }
       })

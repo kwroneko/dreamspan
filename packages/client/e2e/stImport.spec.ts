@@ -130,9 +130,11 @@ test("import an ST folder, link a chat by choosing its card, and un-hide a summa
   const imported = page.getByRole("list", { name: "Imported" })
   await expect(imported).toContainText("Cards: 3 added")
   await expect(imported).toContainText("Personas: 1 added")
-  await expect(imported).toContainText("Chats: 1 added, 1 skipped")
-  await expect(page.getByText("1 chat with only a greeting skipped.")).toBeVisible()
-  await expect(page.getByText("1 instruct template.")).toBeVisible()
+  await expect(imported).toContainText("Chats: 1 added")
+  // The report holds only what to act on (DESIGN §1.4): no skipped files, greetings or files not read.
+  await expect(imported).not.toContainText("skipped")
+  await expect(page.getByText("with only a greeting")).toHaveCount(0)
+  await expect(page.getByText("instruct template")).toHaveCount(0)
 
   const hidden = page.getByRole("list", { name: "Hidden runs" })
   await expect(hidden).toContainText("12 messages hidden. Its summary covers them")
@@ -142,7 +144,7 @@ test("import an ST folder, link a chat by choosing its card, and un-hide a summa
 
   await links.getByRole("button", { name: "Import with this card" }).click()
   await expect(links).toHaveCount(0)
-  await expect(imported).toContainText("Chats: 2 added, 1 skipped")
+  await expect(imported).toContainText("Chats: 2 added")
 
   await hidden.getByRole("link", { name: "Bob - long" }).isVisible()
   await hidden.getByRole("button", { name: "Un-hide" }).click()
