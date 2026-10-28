@@ -66,6 +66,13 @@ for (const dbWorkers of ["source", "bundle"] as const) {
           })
         )
         assert.deepStrictEqual((yield* plan()).condensations, ordinary.condensations)
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            yield* modules.register(source("disableMaintenance"))
+            assert.strictEqual(yield* outcome(plan()), "AssemblyFailed:invalid_document")
+          })
+        )
+        assert.deepStrictEqual((yield* plan()).condensations, ordinary.condensations)
       }).pipe(Effect.provide(server.layer))
     },
     60_000
@@ -89,12 +96,14 @@ lcmTest("registered base instructions and style selection reach durable requests
     yield* Effect.scoped(
       Effect.gen(function* () {
         yield* modules.register(source("instructions"))
+        yield* modules.register({ ...source("wrappingInstruction"), id: "synthetic-wrapper" })
         yield* h.enqueue(0, 2)
         yield* h.runNext
         assert.include(
           JSON.stringify(h.mock.requests().at(-1)!.body?.messages),
           "Synthetic leaf instruction: 75 words."
         )
+        assert.lengthOf(JSON.stringify(h.mock.requests().at(-1)!.body?.messages).match(/Synthetic wrapper\./g) ?? [], 1)
         yield* h.enqueue(3, 5)
         yield* h.runNext
         const jobs = yield* h.plan()

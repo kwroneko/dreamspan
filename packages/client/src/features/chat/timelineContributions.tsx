@@ -47,6 +47,15 @@ export const messageRows = (entries: ReadonlyArray<PathEntry>): ReadonlyArray<Ti
     render: ({ renderMessage }) => renderMessage(entry)
   }))
 
+// Earlier transforms may insert rows, clone entries or project a range of messages.
+// Resolve a message boundary against the current rows' depth ranges, never its old index.
+const boundaryRow = (rows: ReadonlyArray<TimelineRow>, entries: ReadonlyArray<PathEntry>, index: number) => {
+  const depth = entries[index]?.depth
+  if (depth === undefined) return rows.length
+  const at = rows.findIndex((row) => row.from <= row.to && row.to >= depth)
+  return at < 0 ? rows.length : at
+}
+
 export const registerTimelineTransforms = () => [
   timelineTransforms.register({
     id: "timeline.history-budget",
@@ -55,7 +64,7 @@ export const registerTimelineTransforms = () => [
       const budget = view.history?.budget
       if (historyDivider < 0 || !budget) return rows
       const result = [...rows]
-      result.splice(historyDivider, 0, {
+      result.splice(boundaryRow(result, view.entries, historyDivider), 0, {
         key: "history-boundary",
         estimate: 64,
         from: Infinity,
@@ -79,8 +88,7 @@ export const registerTimelineTransforms = () => [
       const entries = view.entries
       const original = [...rows]
       if (divider >= 0 && lcm) {
-        let at =
-          divider === entries.length ? original.length : original.findIndex((row) => row.entry === entries[divider])
+        let at = boundaryRow(original, entries, divider)
         if (divider === historyDivider && original[at - 1]?.key === "history-boundary") at--
         original.splice(at, 0, {
           key: "lcm-boundary",

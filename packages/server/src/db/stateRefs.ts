@@ -9,13 +9,13 @@ import {
   type FoldableEvent,
   isStateRole,
   scopeIds,
-  type StateEventData,
-  type StateKeyIds,
-  stateKeyIds
+  type WritableStateEvent,
+  type StateKeyDeclaration,
+  stateKeys
 } from "@rp/shared/state.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
-import { NotFound } from "./ops.ts"
+import { NotFound, StorageError } from "./ops.ts"
 
 type Reference =
   | {
@@ -38,14 +38,18 @@ type Reference =
   | { readonly table: "connection"; readonly id: string }
   | { readonly table: "model"; readonly id: string; readonly connection: string | undefined }
 
-/** Any key's declaration, core or (later) a plugin's. */
-type Declared = StateKeyIds<Readonly<Record<string, string | ReadonlyArray<string>>>>
-
-const references = (data: StateEventData) => referencesOf(stateKeyIds[data.key], data.value)
+type Declared = StateKeyDeclaration
 
 /** A participant scope is checked like a value's ids; a role names nothing. */
 const scopeReferences = (scope: FoldableEvent["scope"]) =>
   scope === null || isStateRole(scope) ? [] : referencesOf(scopeIds, { scope })
+
+/** What a stored event names; a plugin key nobody registered now names nothing, so its events are kept. */
+const references = (data: FoldableEvent["data"]) => {
+  const key = stateKeys.get(data.key)
+  // Schema changes can leave older values that no longer have these id fields.
+  return key === undefined || !key.accepts(data.value) ? [] : referencesOf(key.ids, data.value)
+}
 
 const referencesOf = (declared: Declared, of: unknown): ReadonlyArray<Reference> => {
   // A value that isn't an object declares no fields, so this is only read for objects.
@@ -88,11 +92,23 @@ export const checkStateReferences = (
   sql: SqlClient.SqlClient,
   userId: UserId,
   chatId: string,
-  data: StateEventData,
+  data: WritableStateEvent,
   scope: FoldableEvent["scope"]
 ) => {
+  // A key nobody registered is refused, whatever its value holds.
+  const key = stateKeys.get(data.key)
+  if (key === undefined) return Effect.fail(new NotFound({ entity: "unavailable state key", id: data.key }))
+  const declaration = key.ids
+  if (!key.accepts(data.value))
+    return Effect.fail(
+      new StorageError({
+        reason: "constraint",
+        operation: "state event",
+        message: `Invalid value for state key "${data.key}"`
+      })
+    )
   // Keys that take something out of the state work on deleted and purged things too.
-  const live = stateKeyIds[data.key].removes ? 0 : 1
+  const live = declaration.removes ? 0 : 1
   return Effect.forEach(
     [...references(data), ...scopeReferences(scope)],
     (reference) => {

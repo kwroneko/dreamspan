@@ -6,7 +6,7 @@ import { recordHistoryReduction } from "./historyChanges.ts"
 import type { ChatId, EntityId, ForkId, NewVersion, SlotId, VersionId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
-import { branchOwned, foldState, type FoldableEvent, type StateEventData } from "@rp/shared/state.ts"
+import { branchOwned, foldState, type FoldableEvent, type WritableStateEvent } from "@rp/shared/state.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import type { Bin } from "./bin.ts"
@@ -134,7 +134,7 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
     slotId: string | null,
     versionId: string | null,
     scope: FoldableEvent["scope"],
-    data: StateEventData,
+    data: WritableStateEvent,
     forkId: string | null = null
   ) =>
     Effect.gen(function* () {

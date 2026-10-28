@@ -210,6 +210,44 @@ it("keeps the LCM divider before a coincident history divider and projects cover
   expect(rows[0]).toMatchObject({ from: 0, to: 0, lastSlotId: "slot-0" })
 })
 
+it("anchors built-in dividers to messages after an earlier plugin inserts a row", () => {
+  const entries = [0, 1, 2].map((depth) => ({ depth, slotId: `slot-${depth}` })) as unknown as ChatView["entries"]
+  disposers.push(
+    timelineTransforms.register({
+      id: "synthetic.introduction",
+      order: 5,
+      transform: (rows) => [{ key: "introduction", estimate: 40, from: -1, to: -1, render: () => null }, ...rows]
+    })
+  )
+  const view = { entries, history: { budget: {} } } as unknown as ChatView
+  const lcm = { cursorDepth: 0, layer: [] } as unknown as NonNullable<ChatView["lcm"]>
+  const rows = [...timelineTransforms.list()]
+    .sort((a, b) => a.order - b.order)
+    .reduce(
+      (rows, entry) => entry.transform(rows, { view, lcm, summaries: false, divider: 1, historyDivider: 1 }),
+      messageRows(entries)
+    )
+  expect(rows.map((row) => row.key)).toEqual([
+    "introduction",
+    "slot-0",
+    "lcm-boundary",
+    "history-boundary",
+    "slot-1",
+    "slot-2"
+  ])
+})
+
+it("anchors the LCM divider after a plugin clones message entries", () => {
+  const entries = [0, 1, 2].map((depth) => ({ depth, slotId: `slot-${depth}` })) as unknown as ChatView["entries"]
+  const view = { entries } as unknown as ChatView
+  const lcm = { cursorDepth: 0, layer: [] } as unknown as NonNullable<ChatView["lcm"]>
+  const rows = timelineTransforms.get("timeline.lcm")!.transform(
+    messageRows(entries).map((row) => ({ ...row, entry: { ...row.entry! } })),
+    { view, lcm, summaries: false, divider: 1, historyDivider: -1 }
+  )
+  expect(rows.map((row) => row.key)).toEqual(["slot-0", "lcm-boundary", "slot-1", "slot-2"])
+})
+
 it("the history preview uses its registered body and disappears when History is disabled", async () => {
   const { HistoryPreviewContext } = await import("../src/features/chat/historyPreview.tsx")
   const { chatPanels } = await import("../src/features/chat/panels.tsx")
