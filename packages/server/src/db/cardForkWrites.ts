@@ -10,6 +10,7 @@ import { FoldableEvent, foldState } from "@rp/shared/state.ts"
 import { ComposerChoice } from "@rp/shared/composerApi.ts"
 import { makeGraphWrites } from "./graphWrites.ts"
 import { noteSwitchesOnPath, stateEventsOnPath } from "./stateRead.ts"
+import { withoutPurged } from "./stateRefs.ts"
 import { onPath } from "./forks.ts"
 import type { LibrarySteps } from "./editorWrites.ts"
 import { toLibraryRef } from "./library.ts"
@@ -160,7 +161,7 @@ export const makeCardForkWriteHandlers = (steps: LibrarySteps) => {
             data: { key: row.key, value: JSON.parse(row.value_json) }
           }).pipe(Effect.orDie)
         )
-        const state = foldState(events)
+        const state = foldState(yield* withoutPurged(sql, events))
         if (!state.participants.includes(entityId)) return yield* new NotFound({ entity: "cast card", id: entityId })
         const library = yield* lib.cardLibraryRef(userId, entityId)
         const binding = state.cardBindings[entityId]

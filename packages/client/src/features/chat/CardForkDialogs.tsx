@@ -13,7 +13,57 @@ import { Field, Input } from "../../ui/Field.tsx"
 import { useCardNameCheck } from "../editor/cardNameCheck.ts"
 import type { ChatSession } from "./session.ts"
 
-export function ChatCardForkDialog({
+/** The same edit scope and fork actions in the Cast row and the card's chat panel. */
+export function ChatCardActions({
+  session,
+  card,
+  info
+}: {
+  session: ChatSession
+  card: CastCard
+  info: ChatCard | undefined
+}) {
+  const navigate = useNavigate()
+  const [dialog, setDialog] = useState<"fork" | "version" | null>(null)
+  const small = "h-8! px-2!"
+  return (
+    <>
+      <Button
+        variant="ghost"
+        className={small}
+        aria-label={`Edit ${card.name}`}
+        disabled={!info}
+        onClick={() => info && void navigate({ to: "/library/$refId", params: { refId: info.refId } })}
+      >
+        Edit
+      </Button>
+      <Button
+        variant="ghost"
+        className={small}
+        disabled={!info || card.inBin}
+        aria-label={`Fork for this chat: ${card.name}`}
+        onClick={() => setDialog("fork")}
+      >
+        Fork for this chat
+      </Button>
+      <Button
+        variant="ghost"
+        className={small}
+        disabled={!info || card.inBin}
+        aria-label={`Use another version: ${card.name}`}
+        onClick={() => setDialog("version")}
+      >
+        Use another version
+      </Button>
+      {dialog === "fork" && info && (
+        <ChatCardForkDialog session={session} card={card} info={info} onClose={() => setDialog(null)} />
+      )}
+      {dialog === "version" && <CardVersionDialog session={session} card={card} onClose={() => setDialog(null)} />}
+    </>
+  )
+}
+
+function ChatCardForkDialog({
   session,
   card,
   info,
@@ -104,15 +154,7 @@ export function ChatCardForkDialog({
   )
 }
 
-export function CardVersionDialog({
-  session,
-  card,
-  onClose
-}: {
-  session: ChatSession
-  card: CastCard
-  onClose: () => void
-}) {
+function CardVersionDialog({ session, card, onClose }: { session: ChatSession; card: CastCard; onClose: () => void }) {
   const query = useMemo(
     () => AppClient.query("CardFamily", { entityId: card.entityId }, { reactivityKeys: ["library"] }),
     [card.entityId]

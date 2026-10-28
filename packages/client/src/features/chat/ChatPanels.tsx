@@ -1,5 +1,9 @@
 import { GenerationSettingsPanel } from "./GenerationControls.tsx"
 import { PresetTab } from "./PresetTab.tsx"
+import { useAtomValue } from "@effect/atom-react"
+import { AsyncResult } from "effect/reactivity"
+import { AppClient } from "../../rpc.ts"
+import { ChatCardActions } from "./CardForkDialogs.tsx"
 // The chat's side panel (DESIGN §10.1): who's here, what the chat sends with, its lorebooks,
 // notes and summaries, beside the messages as ST's panels are, so the chat stays readable and
 // usable while it's open. On a phone it's a sheet over the chat. The open tab is in the URL
@@ -8,7 +12,7 @@ import { PresetTab } from "./PresetTab.tsx"
 import { CharacterPanel } from "../characters/CharacterPanel.tsx"
 import type { EntityId } from "@rp/shared/chat.ts"
 import type { SlotId } from "@rp/shared/chat.ts"
-import { Component, lazy, type ReactNode, Suspense, useEffect, useState, useSyncExternalStore } from "react"
+import { Component, lazy, type ReactNode, Suspense, useEffect, useMemo, useState, useSyncExternalStore } from "react"
 import { Button } from "../../ui/Button.tsx"
 import { useSession } from "../../session.ts"
 import { PortraitView } from "../../ui/Portrait.tsx"
@@ -153,6 +157,59 @@ export function PanelToggles({
   )
 }
 
+function ChatCharacterPanel({
+  session,
+  view,
+  entityId,
+  onNotes
+}: {
+  session: ChatSession
+  view: ChatView
+  entityId: EntityId
+  onNotes: () => void
+}) {
+  const card = view.cast?.participants.includes(entityId)
+    ? view.cast.cards.find((item) => item.entityId === entityId)
+    : undefined
+  const live = card !== undefined && !card.inBin
+  const query = useMemo(
+    () =>
+      AppClient.query(
+        "ListChatCards",
+        { chatId: session.id, slotId: view.leafSlotId, forkId: view.forkId, entityIds: live ? [entityId] : [] },
+        { reactivityKeys: ["library", `chat-cards:${session.id}`] }
+      ),
+    [session.id, view.leafSlotId, view.forkId, entityId, live]
+  )
+  const result = useAtomValue(query)
+  const info = AsyncResult.isSuccess(result) ? result.value[0] : undefined
+  return (
+    <CharacterPanel
+      entityId={entityId}
+      onNotes={onNotes}
+      actions={
+        card && (
+          <div className="flex flex-col gap-2">
+            {info && (
+              <p className="text-xs text-muted">
+                used by {info.usedByChats} {info.usedByChats === 1 ? "chat" : "chats"}
+              </p>
+            )}
+            <div className="flex flex-wrap gap-1">
+              <ChatCardActions key={entityId} session={session} card={card} info={info} />
+            </div>
+            {AsyncResult.isFailure(result) && (
+              <p role="alert" className="text-sm text-danger">
+                The card's details couldn't be read.
+              </p>
+            )}
+          </div>
+        )
+      }
+    />
+  )
+}
+
 function TabContent({
   tab,
   active,
@@ -178,7 +235,14 @@ function TabContent({
   onEnable: () => void
 }) {
   if (tab.startsWith("card:"))
-    return <CharacterPanel entityId={tab.slice(5) as EntityId} onNotes={() => onNotes(tab.slice(5) as EntityId)} />
+    return (
+      <ChatCharacterPanel
+        session={session}
+        view={view}
+        entityId={tab.slice(5) as EntityId}
+        onNotes={() => onNotes(tab.slice(5) as EntityId)}
+      />
+    )
   switch (tab) {
     case "model":
       return <GenerationSettingsPanel session={session} kind={tab} />

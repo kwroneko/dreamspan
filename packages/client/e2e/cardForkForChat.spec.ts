@@ -71,6 +71,13 @@ for (const width of [1440, 390])
       }
       await expect(cast(page)).toContainText("used by 1 chat")
       await shot("cast")
+      await expect(page.getByRole("button", { name: `Fork for this chat: ${name}`, exact: true })).toBeVisible()
+      // The card's own tab is also a chat surface, with the same editing scope and actions.
+      const details = await openPanel(page, name)
+      await shot("card-details")
+      await expect(details).toContainText("used by 1 chat")
+      await expect(details.getByRole("button", { name: `Edit ${name}`, exact: true })).toBeVisible()
+      await expect(details.getByRole("button", { name: `Use another version: ${name}`, exact: true })).toBeVisible()
       await page.getByRole("button", { name: `Fork for this chat: ${name}`, exact: true }).click()
       const dialog = page.getByRole("dialog", { name: "Fork for this chat", exact: true })
       await expect(dialog.getByRole("button", { name: "Fork and edit" })).toBeDisabled()

@@ -2,7 +2,7 @@ import { useAtomValue } from "@effect/atom-react"
 import type { EntityId } from "@rp/shared/chat.ts"
 import { Link } from "@tanstack/react-router"
 import { AsyncResult } from "effect/reactivity"
-import { useMemo } from "react"
+import { useMemo, type ReactNode } from "react"
 import { AsyncView } from "../../actions.tsx"
 import { AppClient } from "../../rpc.ts"
 import { Avatar } from "../../ui/Avatar.tsx"
@@ -27,7 +27,15 @@ function NotesLine({ refId, onOpen }: { refId: string; onOpen: () => void }) {
 }
 
 /** A card's details; in a chat's panel, `onNotes` opens the chat's notes at the card's. */
-export function CharacterPanel({ entityId, onNotes }: { entityId: EntityId; onNotes?: () => void }) {
+export function CharacterPanel({
+  entityId,
+  onNotes,
+  actions
+}: {
+  entityId: EntityId
+  onNotes?: () => void
+  actions?: ReactNode
+}) {
   const navigation = useShellNavigation()
   const data = useAtomValue(shellAtom)
   const refs = useAtomValue(refsAtom)
@@ -68,9 +76,11 @@ export function CharacterPanel({ entityId, onNotes }: { entityId: EntityId; onNo
       >
         New chat
       </Link>
-      <Link to="/library/$refId" params={{ refId: ref }} className={buttonClass()}>
-        Edit card
-      </Link>
+      {actions ?? (
+        <Link to="/library/$refId" params={{ refId: ref }} className={buttonClass()}>
+          Edit card
+        </Link>
+      )}
       {onNotes && <NotesLine refId={ref} onOpen={onNotes} />}
       <AsyncView atom={atom} loading="Loading the definition…">
         {(doc) => <Definition doc={doc} />}

@@ -264,4 +264,17 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
       assert.deepStrictEqual(yield* count(), before)
     })
   )
+
+  it.effect("forks the visible card after a swapped-in card is purged", () =>
+    Effect.gen(function* () {
+      const t = yield* setup
+      const removed = yield* t.fork("removed")
+      const item = yield* t.writer.DeleteEntity({ userId: t.userId, entityId: removed.entityId })
+      yield* t.api.PurgeBinItem({ itemId: item.id })
+      assert.deepStrictEqual((yield* t.cast(t.main)).participants, [t.parent.entityId])
+      const made = yield* t.fork("after purge")
+      assert.deepStrictEqual((yield* t.cast(t.main)).participants, [made.entityId])
+      assert.deepStrictEqual((yield* t.cast(t.other)).participants, [t.parent.entityId])
+    })
+  )
 })

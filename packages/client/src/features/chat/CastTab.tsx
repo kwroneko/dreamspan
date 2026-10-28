@@ -7,7 +7,6 @@
 import { useAtomValue } from "@effect/atom-react"
 import type { CastCard, EntityId } from "@rp/shared/chat.ts"
 import type { CastChange, ChatCard } from "@rp/shared/chatSetupApi.ts"
-import { useNavigate } from "@tanstack/react-router"
 import { AsyncResult } from "effect/reactivity"
 import { useCallback, useId, useMemo, useState, useSyncExternalStore } from "react"
 import type { AppError } from "../../errors.ts"
@@ -25,7 +24,7 @@ import { castView, CastContext } from "./cast.ts"
 import { MoreIcon, PlusIcon } from "./icons.tsx"
 import type { ChatSession } from "./session.ts"
 import { SpeakerSwitcher } from "./SpeakerSwitcher.tsx"
-import { ChatCardForkDialog, CardVersionDialog } from "./CardForkDialogs.tsx"
+import { ChatCardActions } from "./CardForkDialogs.tsx"
 import { writeAs } from "./speaker.ts"
 
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`
@@ -203,9 +202,6 @@ function Member({
   writing,
   onChange,
   onPersona,
-  onEdit,
-  onFork,
-  onVersion,
   onError
 }: {
   session: ChatSession
@@ -217,9 +213,6 @@ function Member({
   writing: boolean
   onChange: (change: CastChange) => void
   onPersona: () => void
-  onEdit: () => void
-  onFork: () => void
-  onVersion: () => void
   onError: (error: AppError | null) => void
 }) {
   const [showCard, setShowCard] = useState(false)
@@ -311,27 +304,7 @@ function Member({
         >
           {showCard ? "Hide card" : "Show card"}
         </Button>
-        <Button variant="ghost" className={small} aria-label={`Edit ${name}`} onClick={onEdit}>
-          Edit
-        </Button>
-        <Button
-          variant="ghost"
-          className={small}
-          disabled={!info || card.inBin}
-          aria-label={`Fork for this chat: ${name}`}
-          onClick={onFork}
-        >
-          Fork for this chat
-        </Button>
-        <Button
-          variant="ghost"
-          className={small}
-          disabled={!info || card.inBin}
-          aria-label={`Use another version: ${name}`}
-          onClick={onVersion}
-        >
-          Use another version
-        </Button>
+        <ChatCardActions session={session} card={card} info={info} />
       </div>
       {showCard &&
         (info ? <Definition name={name} info={info} /> : <p className="text-sm text-muted">Loading the card…</p>)}
@@ -380,9 +353,6 @@ export function CastTab({ session }: { session: ChatSession }) {
     [infoResult]
   )
   const [error, setError] = useState<AppError | null>(null)
-  const navigate = useNavigate()
-  const [forking, setForking] = useState<EntityId | null>(null)
-  const [switching, setSwitching] = useState<EntityId | null>(null)
   const change = async (next: CastChange) => {
     const outcome = await session.changeCast(next)
     setError(outcome.ok ? null : outcome.error)
@@ -399,8 +369,6 @@ export function CastTab({ session }: { session: ChatSession }) {
   }
   const listCards = useCallback(() => session.listCards(), [session])
   const persona = playedByMe[0] ?? null
-  const forkingCard = forking === null ? undefined : view.cards.get(forking)
-  const switchingCard = switching === null ? undefined : view.cards.get(switching)
 
   if (cast === null) return <p className="text-sm text-muted">Loading who's here…</p>
   return (
@@ -453,12 +421,6 @@ export function CastTab({ session }: { session: ChatSession }) {
                 writing={writing === id}
                 onChange={(next) => void change(next)}
                 onPersona={() => void choosePersona(card)}
-                onEdit={() => {
-                  const refId = info.get(id)?.refId
-                  if (refId) void navigate({ to: "/library/$refId", params: { refId } })
-                }}
-                onFork={() => setForking(id)}
-                onVersion={() => setSwitching(id)}
                 onError={setError}
               />
             )
@@ -475,15 +437,6 @@ export function CastTab({ session }: { session: ChatSession }) {
           {error.message}
         </p>
       )}
-      {forkingCard && info.get(forkingCard.entityId) && (
-        <ChatCardForkDialog
-          session={session}
-          card={forkingCard}
-          info={info.get(forkingCard.entityId)!}
-          onClose={() => setForking(null)}
-        />
-      )}
-      {switchingCard && <CardVersionDialog session={session} card={switchingCard} onClose={() => setSwitching(null)} />}
     </div>
   )
 }
