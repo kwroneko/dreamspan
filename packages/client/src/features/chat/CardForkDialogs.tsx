@@ -13,52 +13,57 @@ import { Field, Input } from "../../ui/Field.tsx"
 import { useCardNameCheck } from "../editor/cardNameCheck.ts"
 import type { ChatSession } from "./session.ts"
 
-/** The same edit scope and fork actions in the Cast row and the card's chat panel. */
-export function ChatCardActions({
-  session,
-  card,
-  info
-}: {
+export interface ChatCardActionProps {
   session: ChatSession
   card: CastCard
   info: ChatCard | undefined
-}) {
+}
+
+export function EditChatCard({ card, info }: ChatCardActionProps) {
   const navigate = useNavigate()
-  const [dialog, setDialog] = useState<"fork" | "version" | null>(null)
-  const small = "h-8! px-2!"
+  return (
+    <Button
+      variant="ghost"
+      className="h-8! px-2!"
+      aria-label={`Edit ${card.name}`}
+      disabled={!info}
+      onClick={() => info && void navigate({ to: "/library/$refId", params: { refId: info.refId } })}
+    >
+      Edit
+    </Button>
+  )
+}
+export function ForkChatCard({ session, card, info }: ChatCardActionProps) {
+  const [open, setOpen] = useState(false)
   return (
     <>
       <Button
         variant="ghost"
-        className={small}
-        aria-label={`Edit ${card.name}`}
-        disabled={!info}
-        onClick={() => info && void navigate({ to: "/library/$refId", params: { refId: info.refId } })}
-      >
-        Edit
-      </Button>
-      <Button
-        variant="ghost"
-        className={small}
+        className="h-8! px-2!"
         disabled={!info || card.inBin}
         aria-label={`Fork for this chat: ${card.name}`}
-        onClick={() => setDialog("fork")}
+        onClick={() => setOpen(true)}
       >
         Fork for this chat
       </Button>
+      {open && info && <ChatCardForkDialog session={session} card={card} info={info} onClose={() => setOpen(false)} />}
+    </>
+  )
+}
+export function ChooseChatCard({ session, card, info }: ChatCardActionProps) {
+  const [open, setOpen] = useState(false)
+  return (
+    <>
       <Button
         variant="ghost"
-        className={small}
+        className="h-8! px-2!"
         disabled={!info || card.inBin}
         aria-label={`Use another version: ${card.name}`}
-        onClick={() => setDialog("version")}
+        onClick={() => setOpen(true)}
       >
         Use another version
       </Button>
-      {dialog === "fork" && info && (
-        <ChatCardForkDialog session={session} card={card} info={info} onClose={() => setDialog(null)} />
-      )}
-      {dialog === "version" && <CardVersionDialog session={session} card={card} onClose={() => setDialog(null)} />}
+      {open && <CardVersionDialog session={session} card={card} onClose={() => setOpen(false)} />}
     </>
   )
 }

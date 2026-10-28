@@ -1,3 +1,5 @@
+import { SlotOutlet } from "../../slots.tsx"
+import { chatSettingSections, summarySettingFields } from "./presentation.tsx"
 // The side panel's "This chat" tab (DESIGN §5.4, §8; DATA-MODEL §5.3, §5.4): what the
 // next reply is sent with, each with its value and where it comes from, and the chat's own
 // settings. A change is a state event at the leaf shown, so from there on, on this branch.
@@ -16,7 +18,7 @@ import { Fieldset } from "../../ui/Field.tsx"
 import { Loading } from "../../ui/Spinner.tsx"
 import { useCast } from "./cast.ts"
 import { EnableLcmDialog } from "./EnableLcmDialog.tsx"
-import { LcmFields, type Write } from "./LcmFields.tsx"
+import { type Write } from "./LcmFields.tsx"
 import type { ChatSession } from "./session.ts"
 
 const link = "text-accent hover:underline"
@@ -86,7 +88,7 @@ function Instruction({ view, write, disabled }: { view: LcmSettingsView; write: 
  * settings, each the chat's own or the account default's. Turning it on for a chat with messages
  * asks how to start and what it costs first (spec/LCM.md §2.7, §2.11).
  */
-function SummariesSetting({ session }: { session: ChatSession }) {
+export function SummariesSetting({ session }: { session: ChatSession }) {
   const view = useSyncExternalStore(session.subscribe, session.snapshot)
   const [error, setError] = useState<AppError | null>(null)
   const [enabling, setEnabling] = useState(false)
@@ -148,13 +150,16 @@ function SummariesSetting({ session }: { session: ChatSession }) {
       {settings === null ? (
         <Loading />
       ) : (
-        <LcmFields
-          scope="chat"
-          view={settings}
-          fallback={resolveLcm(null, settings.account)}
-          write={write}
-          disabled={false}
-          instruction={<Instruction view={settings} write={write} disabled={false} />}
+        <SlotOutlet
+          slot={summarySettingFields}
+          props={{
+            scope: "chat",
+            view: settings,
+            fallback: resolveLcm(null, settings.account),
+            write,
+            disabled: false,
+            instruction: <Instruction view={settings} write={write} disabled={false} />
+          }}
         />
       )}
       <Problem error={error} />
@@ -162,7 +167,7 @@ function SummariesSetting({ session }: { session: ChatSession }) {
   )
 }
 
-export function ThisChatTab({ session }: { session: ChatSession; active: boolean }) {
+export function RolesSetting({ session }: { session: ChatSession }) {
   const { cast } = useCast()
   const rolesProjection = cast?.rolesProjection ?? "by_writer"
   const roleOptions = cast?.roleProjections ?? []
@@ -174,8 +179,7 @@ export function ThisChatTab({ session }: { session: ChatSession; active: boolean
     setError(outcome.ok ? null : outcome.error)
   }
   return (
-    <div className="flex flex-col gap-6">
-      <SummariesSetting session={session} />
+    <>
       <section aria-label="Roles" className="flex flex-col gap-2">
         <h3 id="roles-label" className="text-xs font-medium tracking-wide text-muted uppercase">
           Roles
@@ -208,6 +212,14 @@ export function ThisChatTab({ session }: { session: ChatSession; active: boolean
         .
       </p>
       <Problem error={error ?? action.error} />
+    </>
+  )
+}
+
+export function ThisChatTab({ session }: { session: ChatSession; active: boolean }) {
+  return (
+    <div className="flex flex-col gap-6">
+      <SlotOutlet slot={chatSettingSections} props={{ session }} />
     </div>
   )
 }

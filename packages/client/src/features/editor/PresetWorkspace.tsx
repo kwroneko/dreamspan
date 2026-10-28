@@ -16,7 +16,7 @@ interface Workspace {
   context: PresetContext | null | undefined
 }
 const Context = createContext<Workspace | null>(null)
-export const usePresetWorkspace = () => useContext(Context)!
+export const usePresetWorkspace = () => useContext(Context)
 
 export function PresetWorkspace({
   children,
@@ -59,7 +59,7 @@ export function PresetWorkspace({
 
 export function PresetOverlayHost({ page = false }: { page?: boolean }) {
   const workspace = usePresetWorkspace()
-  const selection = workspace.selection
+  const selection = workspace?.selection
   if (!selection) return null
   return (
     <ColumnOverlay page={page} onClose={workspace.close}>

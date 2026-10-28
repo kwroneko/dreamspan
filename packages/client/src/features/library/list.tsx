@@ -94,7 +94,7 @@ function LibraryRow({
           </Link>
         )}
         {entry.kind === "preset" ? (
-          <Button aria-label={`Edit ${entry.label}`} onClick={() => workspace.open(entry.id)}>
+          <Button aria-label={`Edit ${entry.label}`} onClick={() => workspace?.open(entry.id)}>
             Edit
           </Button>
         ) : (
