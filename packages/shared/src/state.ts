@@ -2,18 +2,20 @@ import { LcmSettings } from "./lcmSettings.ts"
 // Chat state on the graph (DESIGN §3.4, DATA-MODEL §5). Every change to chat state is
 // an event at a position; the state at a slot is the fold of the events on the path
 // to it. The fold is a pure function so the server and the client agree on it.
-import { Schema, type SchemaAST } from "effect"
+import { Data, Effect, Schema, type SchemaAST, type Scope } from "effect"
 import { EntityId } from "./chat.ts"
 import { ID_TABLE } from "./id.ts"
 import { type EntityKind, RefId, RevisionId } from "./library.ts"
 import { ConnectionId, ModelId } from "./providers.ts"
+import { makeRegistry } from "./registry.ts"
 
 const event = <K extends string, V extends Schema.Top>(key: K, value: V) =>
   Schema.Struct({ key: Schema.Literal(key), value })
 
 /**
- * The typed state-event keys (DATA-MODEL §5.3). Unknown keys are rejected on write. Ids
- * use the id schemas, never a plain string, so `stateKeyProblems` can find them.
+ * The core's typed state-event keys (DATA-MODEL §5.3). Ids use the id schemas, never a
+ * plain string, so `stateKeyProblems` can find them. A plugin's keys (`<plugin>/<key>`)
+ * are registered, not listed here (`pluginStateKeys`).
  */
 export const StateEventData = Schema.Union([
   event("lcm.settings", LcmSettings),
@@ -208,6 +210,77 @@ export const stateKeyProblems = (
   return problems
 }
 
+/** A declaration as the writer reads it, whoever's the key is. */
+export type StateKeyDeclaration = StateKeyIds<Readonly<Record<string, string | ReadonlyArray<string>>>>
+
+/**
+ * A plugin's state key: `<plugin>/<key>` (no core key has a slash, so a plugin can't
+ * shadow one). `ids` is checked by the writer against the acting user, like a core key's.
+ * `scope` is where its events live: `positional` events sit at a message position and
+ * follow the path; `branch` events belong to the fork whatever position is read, as
+ * `card.swap` does (and carry no version or scope). `reduce` folds an event into the key's
+ * value in `ChatState.plugin[id]`; without it the last event's value stands.
+ */
+export interface PluginStateKey {
+  readonly id: string
+  readonly value: Schema.Top
+  readonly ids: StateKeyDeclaration
+  readonly scope: "positional" | "branch"
+  readonly reduce?: (current: unknown, value: unknown, scope: string | null) => unknown
+}
+
+export class StateKeyRegistrationError extends Data.TaggedError("StateKeyRegistrationError")<{
+  readonly id: string
+  readonly problems: ReadonlyArray<string>
+}> {}
+
+const pluginStateKeys = makeRegistry<PluginStateKey>()
+
+const PLUGIN_KEY = /^[a-z0-9][a-z0-9-]*\/[A-Za-z0-9_.-]+$/
+
+/**
+ * Registers a plugin's state key for as long as the scope is open. The name must be
+ * `<plugin>/<key>` and the declaration must pass `stateKeyProblems` for the value schema;
+ * otherwise nothing is registered. Closing the scope unregisters it: events already
+ * stored stay in the database, are skipped by the fold, and nothing core changes.
+ */
+export const registerStateKey = (key: PluginStateKey): Effect.Effect<void, StateKeyRegistrationError, Scope.Scope> => {
+  const problems = [
+    ...(PLUGIN_KEY.test(key.id) ? [] : [`"${key.id}" isn't <plugin>/<key>`]),
+    ...stateKeyProblems(key.value.ast, key.ids)
+  ]
+  return problems.length > 0
+    ? Effect.fail(new StateKeyRegistrationError({ id: key.id, problems }))
+    : pluginStateKeys.register(key)
+}
+
+/** The id declaration of a core or registered key; undefined for an unregistered one. */
+export const stateKeyDeclaration = (key: string): StateKeyDeclaration | undefined =>
+  Object.hasOwn(stateKeyIds, key)
+    ? (stateKeyIds[key as StateEventData["key"]] as StateKeyDeclaration)
+    : pluginStateKeys.get(key)?.ids
+
+const pluginEvent = Schema.Struct({
+  key: Schema.TemplateLiteral([Schema.String, "/", Schema.String]),
+  value: Schema.Unknown
+})
+
+/** A plugin event on write: its key must be registered and its value fit the key's schema. */
+const RegisteredPluginEvent = pluginEvent.check(
+  Schema.makeFilter((e) => {
+    const key = pluginStateKeys.get(e.key)
+    if (key === undefined) return `state key "${e.key}" isn't registered`
+    return Schema.is(key.value as Schema.Schema<unknown>)(e.value) ? undefined : `the value doesn't fit "${e.key}"`
+  })
+)
+
+/** What can be written: a core key, or a plugin key that is registered now. */
+export const WritableStateEvent = Schema.Union([StateEventData, RegisteredPluginEvent])
+export type WritableStateEvent = typeof WritableStateEvent.Type
+
+/** What is read: any plugin key, registered or not, so a removed plugin never breaks a chat. */
+const StoredStateEventData = Schema.Union([StateEventData, pluginEvent])
+
 /** The roles an event can be scoped to (DATA-MODEL §5.3). */
 const StateRole = Schema.Literals(["narrator", "summarizer"])
 export const isStateRole = Schema.is(StateRole)
@@ -222,7 +295,7 @@ export const scopeIds: StateKeyIds<{ readonly scope: EntityId }> = {
 }
 
 /** A state event as the fold sees it: its data plus the optional scope. */
-export const FoldableEvent = Schema.Struct({ scope: Schema.NullOr(StateScope), data: StateEventData })
+export const FoldableEvent = Schema.Struct({ scope: Schema.NullOr(StateScope), data: StoredStateEventData })
 export type FoldableEvent = typeof FoldableEvent.Type
 
 interface Binding {
@@ -259,6 +332,8 @@ export interface ChatState {
   readonly loreBelowHistory: boolean | null
   readonly vars: Readonly<Record<string, unknown>>
   readonly authorNote: string | null
+  /** Plugin keys' values by key id (`<plugin>/<key>`); absent until a registered key has an event. */
+  readonly plugin?: Readonly<Record<string, unknown>>
 }
 
 const emptyChatState: ChatState = {
@@ -386,6 +461,13 @@ const apply = (state: ChatState, { data, scope }: FoldableEvent): ChatState => {
       return { ...state, vars: { ...state.vars, [data.value.name]: data.value.value } }
     case "author_note.set":
       return { ...state, authorNote: data.value.note }
+    default: {
+      // A plugin key. One that isn't registered (its plugin is gone) is skipped.
+      const key = pluginStateKeys.get(data.key)
+      if (key === undefined) return state
+      const next = key.reduce ? key.reduce(state.plugin?.[data.key], data.value, scope) : data.value
+      return { ...state, plugin: { ...state.plugin, [data.key]: next } }
+    }
   }
 }
 
@@ -410,7 +492,9 @@ export const foldState = (events: Iterable<FoldableEvent>, initial: ChatState = 
 }
 
 /** These keys belong to the fork, independently of the message position being read. */
-export const branchOwned: ReadonlySet<StateEventData["key"]> = new Set(["card.swap"])
+export const branchOwned: { readonly has: (key: string) => boolean } = {
+  has: (key) => key === "card.swap" || pluginStateKeys.get(key)?.scope === "branch"
+}
 
 /** The card writing a new turn after the fork's swaps; existing messages keep their author. */
 export const swappedCard = (events: Iterable<FoldableEvent>, entity: string | null): string | null => {
