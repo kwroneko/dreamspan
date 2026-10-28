@@ -1,3 +1,4 @@
+import { stateModuleHandlers } from "./stateModules.ts"
 import { makeHistoryWriteHandlers } from "./historyWrites.ts"
 import { makeLcmQueueHandlers } from "./lcmQueue.ts"
 import { makeLcmEnableWriteHandlers } from "./lcmEnableWrites.ts"
@@ -55,21 +56,23 @@ RpcServer.layer(WriteOps, { concurrency: 1 }).pipe(
         ])
         // --- ST data folder import (ARCHITECTURE.md §13)
         const stImport = yield* makeStImportWriteHandlers()
-        return WriteOps.of({
-          ...(yield* makeHistoryWriteHandlers),
-          ...graph,
-          ...library,
-          ...binOps,
-          ...providers,
-          ...accounts,
-          ...chatSetup,
-          ...stImport,
-          ...generation,
-          ...(yield* makeLcmWriteHandlers(bin)),
-          ...(yield* makeLcmQueueHandlers),
-          ...(yield* makeLcmUiWriteHandlers),
-          ...(yield* makeLcmEnableWriteHandlers(bin))
-        })
+        return WriteOps.of(
+          stateModuleHandlers({
+            ...(yield* makeHistoryWriteHandlers),
+            ...graph,
+            ...library,
+            ...binOps,
+            ...providers,
+            ...accounts,
+            ...chatSetup,
+            ...stImport,
+            ...generation,
+            ...(yield* makeLcmWriteHandlers(bin)),
+            ...(yield* makeLcmQueueHandlers),
+            ...(yield* makeLcmUiWriteHandlers),
+            ...(yield* makeLcmEnableWriteHandlers(bin))
+          })
+        )
       })
     )
   ),

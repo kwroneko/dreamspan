@@ -1,3 +1,4 @@
+import { stateModuleHandlers } from "./stateModules.ts"
 import { moduleHandlers } from "../assembler/modules.ts"
 import { makeHistoryReadHandlers } from "./historyReads.ts"
 import { makeAssembler, WorkerAssembler } from "../assembler/assembler.ts"
@@ -66,22 +67,24 @@ RpcServer.layer(ReadOps, { concurrency: 1, disableFatalDefects: true }).pipe(
             lcmEnable
           ]) =>
             ReadOps.of(
-              moduleHandlers({
-                ...history,
-                ...core,
-                ...providers,
-                ...accounts,
-                ...imports,
-                ...chatSetup,
-                ...stImport,
-                ...editor,
-                ...assembly,
-                ...inspector,
-                ...planning,
-                ...lcm,
-                ...lcmUi,
-                ...lcmEnable
-              })
+              stateModuleHandlers(
+                moduleHandlers({
+                  ...history,
+                  ...core,
+                  ...providers,
+                  ...accounts,
+                  ...imports,
+                  ...chatSetup,
+                  ...stImport,
+                  ...editor,
+                  ...assembly,
+                  ...inspector,
+                  ...planning,
+                  ...lcm,
+                  ...lcmUi,
+                  ...lcmEnable
+                })
+              )
             )
         ).pipe(Effect.provideService(WorkerAssembler, assembler))
       )

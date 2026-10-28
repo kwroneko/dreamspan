@@ -1,4 +1,5 @@
 // Main-thread access to the database workers. ARCHITECTURE.md §3.1 and §3.6.
+import { StateModules, stateModuleClient } from "./stateModules.ts"
 import { AssemblyModules, moduleClient } from "../assembler/modules.ts"
 import { existsSync } from "node:fs"
 import { join } from "node:path"
@@ -164,7 +165,11 @@ export const layer = (options: DatabaseOptions) => {
       const entries = yield* workerEntries(options)
       const draftClock = yield* DraftClock
       const modules = yield* AssemblyModules
-      const WriterLive = Layer.effect(Writer, RpcClient.make(WriteOps)).pipe(
+      const stateModules = yield* StateModules
+      const WriterLive = Layer.effect(
+        Writer,
+        Effect.map(RpcClient.make(WriteOps), (calls) => stateModuleClient(calls, stateModules))
+      ).pipe(
         Layer.provide(
           writerProtocol(
             workerThreads(
@@ -182,7 +187,9 @@ export const layer = (options: DatabaseOptions) => {
           yield* writer.Ready()
           return Layer.effect(
             Reader,
-            Effect.map(ReaderPool.client(ReadOps), (calls) => moduleClient(calls, modules))
+            Effect.map(ReaderPool.client(ReadOps), (calls) =>
+              stateModuleClient(moduleClient(calls, modules), stateModules)
+            )
           ).pipe(
             // Reads are idempotent, so one whose reader crashed can run again.
             Layer.provide(ReaderPool.layer(options.readers, { retryCrashed: true })),
@@ -194,5 +201,9 @@ export const layer = (options: DatabaseOptions) => {
     })
   )
 
-  return Workers.pipe(Layer.provide(Guards), Layer.provideMerge(AssemblyModules.layer))
+  return Workers.pipe(
+    Layer.provide(Guards),
+    Layer.provideMerge(AssemblyModules.layer),
+    Layer.provideMerge(StateModules.layer)
+  )
 }

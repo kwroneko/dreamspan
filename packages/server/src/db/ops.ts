@@ -92,7 +92,7 @@ import {
 } from "@rp/shared/providers.ts"
 import { GenerationDefaults, GenerationDefaultsChange } from "@rp/shared/generation.ts"
 import { NextContext, RunContext } from "@rp/shared/inspectorApi.ts"
-import { FoldableEvent, StateEventData } from "@rp/shared/state.ts"
+import { FoldableEvent, StateEventData, StoredStateEventData } from "@rp/shared/state.ts"
 import {
   Cost,
   LlmRequest,
@@ -1208,7 +1208,7 @@ export class WriteOps extends RpcGroup.make(
       slotId: Schema.NullOr(SlotId),
       versionId: Schema.NullOr(VersionId),
       scope: FoldableEvent.fields.scope,
-      data: StateEventData
+      data: StoredStateEventData
     },
     success: Schema.Struct({ id: Schema.String, seq: Schema.Int }),
     error: Schema.Union([NotFound, StorageError])
@@ -1223,7 +1223,7 @@ export class WriteOps extends RpcGroup.make(
       chatId: ChatId,
       forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       slotId: Schema.NullOr(SlotId),
-      data: Schema.Array(StateEventData)
+      data: Schema.Array(StoredStateEventData)
     },
     success: Schema.Void,
     error: Schema.Union([NotFound, StorageError])
