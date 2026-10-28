@@ -1,3 +1,5 @@
+import { rerunRequests, summaryChoices } from "./lcmFork.ts"
+import { viewAt } from "./forkState.ts"
 import { MAX_CHUNK_SLOTS } from "./lcmLimits.ts"
 import { createHash } from "node:crypto"
 import type { UserId } from "@rp/shared/domain.ts"
@@ -39,6 +41,7 @@ export const maintain = (
   }
 ) =>
   Effect.gen(function* () {
+    const fork = yield* viewAt(sql, chatId, leaf)
     const fanout = options.fanout ?? DEFAULT_FANOUT,
       condenseTarget = options.condenseTarget ?? DEFAULT_CONDENSE_TARGET
     const valid = lineageValidator(sql, userId)
@@ -50,15 +53,14 @@ export const maintain = (
     )`
     const liveBatches = new Set(
       (yield* sql<{ batch_id: string }>`SELECT DISTINCT batch_id FROM summarization_jobs
-        WHERE chat_id = ${chatId} AND status IN ('pending', 'processing') AND batch_id IS NOT NULL`).map(
+        WHERE chat_id = ${chatId} AND (fork_id IS NULL OR fork_id=${fork}) AND status IN ('pending', 'processing') AND batch_id IS NOT NULL`).map(
         (r) => r.batch_id
       )
     )
     const rows = yield* sql<{ id: string; status: string }>`${onPath}
       SELECT s.id, s.status FROM path JOIN summaries s INDEXED BY summaries_last_slot ON s.last_slot_id = path.id
       WHERE s.chat_id = ${chatId} AND s.sealed = 1 AND s.status IN ('complete', 'truncated', 'superseded', 'failed')`
-    const choices = yield* sql<{ summary_id: string; chosen_id: string }>`SELECT x.* FROM lcm_summary_choices x
-      JOIN summaries s ON s.id=x.summary_id WHERE s.chat_id=${chatId}`
+    const choices = yield* summaryChoices(sql, chatId)
     const dismissed = new Set(choices.filter((c) => c.summary_id !== c.chosen_id).map((c) => c.summary_id))
     const candidates: Array<Candidate> = []
     const held: Array<{ level: number; from: number; to: number }> = []
@@ -83,14 +85,14 @@ export const maintain = (
       SELECT j.level, a.depth + 1 AS "from", b.depth + 1 AS "to", j.input_child_ids
       FROM path JOIN summarization_jobs j ON j.last_slot_id = path.id
         JOIN slots a ON a.id = j.first_slot_id JOIN slots b ON b.id = j.last_slot_id
-      WHERE j.chat_id = ${chatId} AND j.status IN ('pending', 'processing')`
+      WHERE j.chat_id = ${chatId} AND (j.fork_id IS NULL OR j.fork_id=${fork}) AND j.status IN ('pending', 'processing')`
     // Rerun requests (SetSummaryRerun) are answered by a reply's pass, and only by it: a summary the
     // user asked for is made again whatever its state; a failed one or a job that gave up is retried.
     type Ask = { readonly id: string; readonly model: typeof ModelChoice.Type | undefined }
     const forced = new Map<string, Ask>()
     const retries: Array<{ ask: Ask; level: number; first: string; last: string; children: Array<string> }> = []
     const [episode] = yield* sql<{ pins_json: string }>`SELECT pins_json FROM lcm_reply_maintenance
-      WHERE chat_id = ${chatId} AND leaf_slot_id = ${leaf}`
+      WHERE chat_id = ${chatId} AND (fork_id IS NULL OR fork_id=${fork}) AND leaf_slot_id = ${leaf}`
     type Pins = {
       signatures: Record<string, string>
       asks: Array<string>
@@ -101,6 +103,7 @@ export const maintain = (
     const previous: Pins | undefined = episode ? (JSON.parse(episode.pins_json) as Pins) : undefined
     const askModels: Record<string, string | null> = {}
     if (options.reason === "reply" || previous) {
+      const requests = yield* rerunRequests(sql, chatId)
       const asks = yield* sql<{
         id: string
         summary_id: string | null
@@ -112,7 +115,7 @@ export const maintain = (
         job_result: string | null
       }>`SELECT r.id, r.summary_id, r.model_json, j.level AS job_level, j.first_slot_id AS job_first,
           j.last_slot_id AS job_last, j.input_child_ids AS job_children, j.result_summary_id AS job_result
-        FROM summary_reruns r LEFT JOIN summarization_jobs j ON j.id = r.job_id WHERE r.chat_id = ${chatId}`
+        FROM summary_reruns r LEFT JOIN summarization_jobs j ON j.id = r.job_id WHERE r.chat_id = ${chatId} AND r.id IN ${sql.in(requests.map((r) => r.id))}`
       for (const row of asks) {
         if (
           options.reason !== "reply" &&
@@ -155,7 +158,7 @@ export const maintain = (
       if (s.level === 1 && s.status !== "superseded" && (!s.fresh || forced.has(s.id)))
         chains.set(s.id, yield* chainOf(s))
     const [last] = yield* sql<{ eager: number }>`
-      SELECT eager FROM summarization_jobs WHERE chat_id = ${chatId} AND status IN ('complete', 'failed')
+      SELECT eager FROM summarization_jobs WHERE chat_id = ${chatId} AND (fork_id IS NULL OR fork_id=${fork}) AND status IN ('complete', 'failed')
       ORDER BY updated_at DESC, id DESC LIMIT 1`
     // Freeze effective message inputs and every selected child revision at the authorizing reply.
     // Completion can continue that exact episode; later edits do not inherit its permission.
@@ -202,7 +205,7 @@ export const maintain = (
       result: string
       rerun_ids_json: string | null
     }>`SELECT source_summary_id AS source,result_summary_id AS result,rerun_ids_json
-      FROM summarization_jobs WHERE chat_id=${chatId} AND source_summary_id IS NOT NULL AND status='complete'`
+      FROM summarization_jobs WHERE chat_id=${chatId} AND (fork_id IS NULL OR fork_id=${fork}) AND source_summary_id IS NOT NULL AND status='complete'`
     const completed = new Map<string, Array<Summary>>()
     for (const part of finishedParts) {
       const result = byId.get(part.result)

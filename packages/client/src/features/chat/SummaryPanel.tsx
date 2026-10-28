@@ -116,7 +116,7 @@ function Revisions({ session, summary }: { session: ChatSession; summary: LcmSum
   useEffect(() => {
     let live = true
     void session
-      .call((client) => client("ListSummaryRevisions", { summaryId: summary.id }))
+      .call((client) => client("ListSummaryRevisions", { forkId: session.snapshot().forkId, summaryId: summary.id }))
       .then((result) => {
         if (!live) return
         if (result.ok) setRevisions(result.value)
@@ -129,6 +129,7 @@ function Revisions({ session, summary }: { session: ChatSession; summary: LcmSum
   const use = async (revision: SummaryRevision) => {
     const result = await session.call((client) =>
       client("SelectSummaryRevision", {
+        forkId: session.snapshot().forkId,
         summaryId: summary.id,
         revisionId: revision.id,
         expectedRowVersion: summary.rowVersion
@@ -237,7 +238,7 @@ function SummaryRow({
     if (summary.content !== null) return
     let live = true
     void session
-      .call((client) => client("GetSummary", { summaryId: summary.id }))
+      .call((client) => client("GetSummary", { forkId: session.snapshot().forkId, summaryId: summary.id }))
       .then((result) => {
         if (live && result.ok) setLoaded(result.value.content)
       })
@@ -249,6 +250,7 @@ function SummaryRow({
   const rerun = async (requested: boolean) => {
     const result = await session.call((client) =>
       client("SetSummaryRerun", {
+        forkId: session.snapshot().forkId,
         chatId: session.id,
         target: { _tag: "Summary", summaryId: summary.id },
         requested
@@ -284,7 +286,12 @@ function SummaryRow({
         </p>
       )}
       {mode === "edit" ? (
-        <Editor session={session} summary={{ ...summary, content }} onDone={() => setMode("view")} />
+        <Editor
+          key={session.snapshot().forkId}
+          session={session}
+          summary={{ ...summary, content }}
+          onDone={() => setMode("view")}
+        />
       ) : (
         content !== null &&
         content !== "" && (
@@ -343,7 +350,12 @@ function JobRow({ session, job, onJump }: { session: ChatSession; job: LcmJob; o
   const [error, setError] = useState<AppError | null>(null)
   const ask = async (requested: boolean) => {
     const result = await session.call((client) =>
-      client("SetSummaryRerun", { chatId: session.id, target: { _tag: "Job", jobId: job.id }, requested })
+      client("SetSummaryRerun", {
+        forkId: session.snapshot().forkId,
+        chatId: session.id,
+        target: { _tag: "Job", jobId: job.id },
+        requested
+      })
     )
     setError(result.ok ? null : result.error)
   }
@@ -405,7 +417,13 @@ function Backfill({ session, lcm }: { session: ChatSession; lcm: LcmState }) {
     const load = () => {
       const mine = ++read
       void session
-        .call((client) => client("GetLcmBackfill", { chatId: session.id, leafSlotId: lcm.leafSlotId }))
+        .call((client) =>
+          client("GetLcmBackfill", {
+            forkId: session.snapshot().forkId,
+            chatId: session.id,
+            leafSlotId: lcm.leafSlotId
+          })
+        )
         .then((result) => {
           if (!live || mine < read) return
           if (result.ok) setBackfill(result.value)
@@ -423,6 +441,7 @@ function Backfill({ session, lcm }: { session: ChatSession; lcm: LcmState }) {
     setPending(action)
     const result = await session.call((client) =>
       client("SetLcmBackfill", {
+        forkId: session.snapshot().forkId,
         chatId: session.id,
         leafSlotId: lcm.leafSlotId,
         action,
@@ -437,7 +456,11 @@ function Backfill({ session, lcm }: { session: ChatSession; lcm: LcmState }) {
       setError(result.error)
       if (result.error.tag === "LcmEstimateChanged") {
         const updated = await session.call((client) =>
-          client("GetLcmBackfill", { chatId: session.id, leafSlotId: lcm.leafSlotId })
+          client("GetLcmBackfill", {
+            forkId: session.snapshot().forkId,
+            chatId: session.id,
+            leafSlotId: lcm.leafSlotId
+          })
         )
         if (updated.ok) setBackfill(updated.value)
       }
@@ -514,7 +537,9 @@ export function SummaryPanel({
     if (wanted === null) return
     let live = true
     void session
-      .call((client) => client("GetSummary", { summaryId: wanted as LcmSummary["id"] }))
+      .call((client) =>
+        client("GetSummary", { forkId: session.snapshot().forkId, summaryId: wanted as LcmSummary["id"] })
+      )
       .then(async (result) => {
         if (!live || !result.ok) return
         const s = result.value
@@ -580,7 +605,7 @@ export function SummaryPanel({
         <ul aria-label="Failed summaries" className="flex flex-col divide-y divide-border">
           {lcm.failed.map((summary) => (
             <SummaryRow
-              key={summary.id}
+              key={`${session.snapshot().forkId}:${summary.id}`}
               session={session}
               summary={summary}
               focused={summary.id === focus}
@@ -594,7 +619,7 @@ export function SummaryPanel({
         <ul aria-label="Summaries in use" className="flex flex-col divide-y divide-border">
           {lcm.layer.map((summary) => (
             <SummaryRow
-              key={summary.id}
+              key={`${session.snapshot().forkId}:${summary.id}`}
               session={session}
               summary={summary}
               focused={summary.id === focus}

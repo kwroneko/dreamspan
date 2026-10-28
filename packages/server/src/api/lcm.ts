@@ -1,3 +1,4 @@
+import type { ForkId } from "@rp/shared/chat.ts"
 import { type AppApi, CurrentUser } from "@rp/shared/api.ts"
 import { TextTooLong } from "@rp/shared/composerApi.ts"
 import { DraftKey } from "@rp/shared/drafts.ts"
@@ -24,8 +25,8 @@ import { internal } from "./internal.ts"
 /** Tokens billed for an estimate's work: what is sent, read from cache or written to it, and returned. */
 const billed = (e: BackfillCounts) => e.uncachedInput + e.cachedInput + e.cacheWrite + e.output
 
-const summaryDraftKey = (summaryId: string) =>
-  new DraftKey({ targetKind: "summary_edit", targetId: summaryId, field: "" })
+const summaryDraftKey = (summaryId: string, forkId?: ForkId | null) =>
+  new DraftKey({ targetKind: "summary_edit", targetId: summaryId, field: forkId ?? "" })
 
 export const makeLcmHandlers = Effect.gen(function* () {
   const reader = yield* Reader
@@ -103,9 +104,9 @@ export const makeLcmHandlers = Effect.gen(function* () {
     currency: e.cost?.currency ?? null
   })
   /** The chat's backfill as the UI shows it, with what is left priced; null when it never had one. */
-  const backfillOf = (id: UserId, chatId: ChatId, leafSlotId: SlotId) =>
+  const backfillOf = (id: UserId, chatId: ChatId, leafSlotId: SlotId, forkId?: ForkId | null) =>
     Effect.gen(function* () {
-      const status = yield* reader.GetBackfill({ userId: id, chatId })
+      const status = yield* reader.GetBackfill({ userId: id, chatId, forkId: forkId ?? null })
       if (status === null) return null
       const remaining =
         status.state === "done"
@@ -123,7 +124,10 @@ export const makeLcmHandlers = Effect.gen(function* () {
               blocked: null,
               seconds: null
             })
-          : yield* priced(id, (yield* reader.EstimateBackfill({ userId: id, chatId, leafSlotId })).fromScratch)
+          : yield* priced(
+              id,
+              (yield* reader.EstimateBackfill({ userId: id, chatId, leafSlotId, forkId: forkId ?? null })).fromScratch
+            )
       return new LcmBackfill({
         chatId,
         state: status.state,
@@ -258,28 +262,36 @@ export const makeLcmHandlers = Effect.gen(function* () {
         // The run is shown again: open tabs read the chat anew.
         hub.publish(chatId, done.unhidden > 0 ? { _tag: "Reload" } : { _tag: "State" })
         yield* changed(chatId, id)
-        return yield* backfillOf(id, chatId, leafSlotId)
+        return yield* backfillOf(id, chatId, leafSlotId, forkId)
       }).pipe(internal("EnableLcm")),
-    GetLcmBackfill: ({ chatId, leafSlotId }) =>
-      Effect.flatMap(userId, (id) => backfillOf(id, chatId, leafSlotId)).pipe(internal("GetLcmBackfill")),
-    SetLcmBackfill: ({ chatId, leafSlotId, action, approved }) =>
+    GetLcmBackfill: ({ chatId, leafSlotId, forkId }) =>
+      Effect.flatMap(userId, (id) => backfillOf(id, chatId, leafSlotId, forkId)).pipe(internal("GetLcmBackfill")),
+    SetLcmBackfill: ({ chatId, leafSlotId, forkId, action, approved }) =>
       Effect.gen(function* () {
         const id = yield* userId
         if (action === "continue") {
-          const basis = yield* reader.EstimateBackfill({ userId: id, chatId, leafSlotId })
+          const basis = yield* reader.EstimateBackfill({ userId: id, chatId, leafSlotId, forkId: forkId ?? null })
           const current = yield* priced(id, basis.fromScratch)
           yield* validateApproval(approved, current)
           yield* writer.SetBackfill({
             userId: id,
             chatId,
+            forkId: forkId ?? null,
             action,
             approved: approval(approved!)
           })
-        } else yield* writer.SetBackfill({ userId: id, chatId, action: action === "pause" ? "pause" : "drive" })
+        } else
+          yield* writer.SetBackfill({
+            userId: id,
+            chatId,
+            forkId: forkId ?? null,
+            action: action === "pause" ? "pause" : "drive"
+          })
         // "Summarize now" and Continue are the clicks that plan; the pool runs what they make.
-        if (action !== "pause") yield* summarizer.planNow({ userId: id, chatId, leafSlotId }, "completion")
+        if (action !== "pause")
+          yield* summarizer.planNow({ userId: id, chatId, leafSlotId, ...(forkId ? { forkId } : {}) }, "completion")
         yield* changed(chatId, id)
-        return yield* backfillOf(id, chatId, leafSlotId)
+        return yield* backfillOf(id, chatId, leafSlotId, forkId)
       }).pipe(internal("SetLcmBackfill")),
     // One write of the chat's settings, the others kept (DESIGN §8); nothing is planned by it.
     ChangeLcmSettings: ({ chatId, change, forkId }) =>
@@ -304,18 +316,18 @@ export const makeLcmHandlers = Effect.gen(function* () {
         hub.publish(chatId, { _tag: "State" })
         yield* changed(chatId, id)
       }).pipe(internal("SetLcmEnabled")),
-    GetSummaryDraft: ({ summaryId }) =>
+    GetSummaryDraft: ({ summaryId, forkId }) =>
       Effect.gen(function* () {
         const id = yield* userId
         // Drafts are the user's own already; the summary must be too, as for every other read.
-        yield* reader.GetSummary({ userId: id, summaryId })
-        return yield* reader.GetDraft({ userId: id, key: summaryDraftKey(summaryId) })
+        yield* reader.GetSummary({ userId: id, summaryId, forkId: forkId ?? null })
+        return yield* reader.GetDraft({ userId: id, key: summaryDraftKey(summaryId, forkId) })
       }).pipe(internal("GetSummaryDraft")),
-    SaveSummaryDraft: ({ summaryId, draftId, content, expectedRowVersion, expectedSession, baseRevisionId }) =>
+    SaveSummaryDraft: ({ summaryId, forkId, draftId, content, expectedRowVersion, expectedSession, baseRevisionId }) =>
       Effect.flatMap(userId, (id) =>
         writer.SaveDraft({
           userId: id,
-          key: summaryDraftKey(summaryId),
+          key: summaryDraftKey(summaryId, forkId),
           draftId,
           content,
           expectedRowVersion,
@@ -329,19 +341,19 @@ export const makeLcmHandlers = Effect.gen(function* () {
         ),
         internal("SaveSummaryDraft")
       ),
-    SummaryDraftHistory: ({ summaryId, limit }) =>
-      Effect.flatMap(userId, (id) => reader.DraftHistory({ userId: id, key: summaryDraftKey(summaryId), limit })).pipe(
-        internal("SummaryDraftHistory")
-      ),
-    RestoreSummaryDraft: ({ summaryId, ...restore }) =>
+    SummaryDraftHistory: ({ summaryId, forkId, limit }) =>
       Effect.flatMap(userId, (id) =>
-        writer.RestoreDraftState({ userId: id, key: summaryDraftKey(summaryId), ...restore })
+        reader.DraftHistory({ userId: id, key: summaryDraftKey(summaryId, forkId), limit })
+      ).pipe(internal("SummaryDraftHistory")),
+    RestoreSummaryDraft: ({ summaryId, forkId, ...restore }) =>
+      Effect.flatMap(userId, (id) =>
+        writer.RestoreDraftState({ userId: id, key: summaryDraftKey(summaryId, forkId), ...restore })
       ).pipe(internal("RestoreSummaryDraft")),
-    DiscardSummaryDraft: ({ summaryId, draftId, expectedRowVersion }) =>
+    DiscardSummaryDraft: ({ summaryId, forkId, draftId, expectedRowVersion }) =>
       Effect.flatMap(userId, (id) =>
         writer.ClearDraft({
           userId: id,
-          key: summaryDraftKey(summaryId),
+          key: summaryDraftKey(summaryId, forkId),
           draftId,
           outcome: "discarded",
           expectedRowVersion

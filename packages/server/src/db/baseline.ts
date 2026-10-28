@@ -891,6 +891,7 @@ export const baseline: ReadonlyArray<string> = [
   `CREATE INDEX summary_parents_parent ON summary_parents(parent_id)`,
   `CREATE TABLE summarization_jobs (
     id TEXT PRIMARY KEY,
+    fork_id TEXT REFERENCES forks(id),
     chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
     level INTEGER NOT NULL CHECK (level >= 1),
     first_slot_id TEXT NOT NULL REFERENCES slots(id),
@@ -911,10 +912,11 @@ export const baseline: ReadonlyArray<string> = [
     updated_at INTEGER NOT NULL
   , clip_tokens INTEGER NOT NULL DEFAULT 6000 CHECK (clip_tokens > 0), claim_epoch INTEGER NOT NULL DEFAULT 0, rollout_id TEXT REFERENCES rollouts(id), prefix_json TEXT CHECK (prefix_json IS NULL OR json_valid(prefix_json)), model_json TEXT CHECK (model_json IS NULL OR json_valid(model_json)), fallback_used INTEGER NOT NULL DEFAULT 0 CHECK (fallback_used IN (0, 1)), eager INTEGER NOT NULL DEFAULT 0 CHECK (eager IN (0, 1)), source_summary_id TEXT REFERENCES summaries(id), source_revision_id TEXT REFERENCES summary_revisions(id), rerun_ids_json TEXT CHECK (rerun_ids_json IS NULL OR json_valid(rerun_ids_json)), explicit_requested INTEGER NOT NULL DEFAULT 0 CHECK (explicit_requested IN (0, 1))) STRICT`,
   `CREATE INDEX summarization_jobs_queue ON summarization_jobs(status, created_at) WHERE status IN ('pending', 'processing')`,
-  `CREATE UNIQUE INDEX summarization_jobs_live_segment ON summarization_jobs(chat_id, first_slot_id, last_slot_id, level)
+  `CREATE UNIQUE INDEX summarization_jobs_live_segment ON summarization_jobs(chat_id, fork_id, first_slot_id, last_slot_id, level)
     WHERE status IN ('pending', 'processing')`,
   `CREATE INDEX summary_inputs_version ON summary_inputs(version_id)`,
   `CREATE INDEX summaries_first_slot ON summaries(first_slot_id)`,
+  `CREATE INDEX summarization_jobs_fork ON summarization_jobs(fork_id)`,
   `CREATE INDEX summarization_jobs_first_slot ON summarization_jobs(first_slot_id)`,
   `CREATE INDEX summarization_jobs_last_slot ON summarization_jobs(last_slot_id)`,
   `CREATE INDEX summaries_selected_revision ON summaries(selected_revision_id)`,
@@ -1068,8 +1070,8 @@ export const baseline: ReadonlyArray<string> = [
       CHECK ((summary_id IS NULL) <> (job_id IS NULL))
     ) STRICT`,
   `CREATE INDEX summary_reruns_chat ON summary_reruns(chat_id)`,
-  `CREATE UNIQUE INDEX summary_reruns_summary ON summary_reruns(summary_id) WHERE summary_id IS NOT NULL`,
-  `CREATE UNIQUE INDEX summary_reruns_job ON summary_reruns(job_id) WHERE job_id IS NOT NULL`,
+  `CREATE INDEX summary_reruns_summary ON summary_reruns(summary_id) WHERE summary_id IS NOT NULL`,
+  `CREATE INDEX summary_reruns_job ON summary_reruns(job_id) WHERE job_id IS NOT NULL`,
   `CREATE TRIGGER summary_reruns_same_chat BEFORE INSERT ON summary_reruns
       WHEN (NEW.summary_id IS NOT NULL AND (SELECT chat_id FROM summaries WHERE id = NEW.summary_id) IS NOT NEW.chat_id)
         OR (NEW.job_id IS NOT NULL AND (SELECT chat_id FROM summarization_jobs WHERE id = NEW.job_id) IS NOT NEW.chat_id)
@@ -1078,13 +1080,15 @@ export const baseline: ReadonlyArray<string> = [
       BEGIN SELECT RAISE(ABORT, 'a rerun request is withdrawn and asked again, never moved'); END`,
   `CREATE INDEX jobs_lcm_backfill ON jobs(json_extract(payload_json, '$.chatId')) WHERE kind = 'lcm-backfill'`,
   `CREATE TABLE lcm_reply_maintenance (
+      fork_id TEXT NOT NULL REFERENCES forks(id),
       chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
       leaf_slot_id TEXT NOT NULL REFERENCES slots(id) ON DELETE CASCADE,
       pins_json TEXT NOT NULL CHECK (json_valid(pins_json)),
-      PRIMARY KEY (chat_id, leaf_slot_id)
+      PRIMARY KEY (chat_id, fork_id, leaf_slot_id)
     ) STRICT`,
   `CREATE INDEX summarization_jobs_source ON summarization_jobs(source_summary_id)`,
   `CREATE INDEX summarization_jobs_source_revision ON summarization_jobs(source_revision_id)`,
+  `CREATE INDEX lcm_reply_maintenance_fork ON lcm_reply_maintenance(fork_id)`,
   `CREATE INDEX lcm_reply_maintenance_leaf ON lcm_reply_maintenance(leaf_slot_id)`,
   `CREATE TABLE lcm_summary_choices (
       summary_id TEXT PRIMARY KEY REFERENCES summaries(id) ON DELETE CASCADE,
@@ -1295,7 +1299,7 @@ export const baseline: ReadonlyArray<string> = [
     -- The chat's state_seq when written; a row updated in place takes the newer one.
     seq INTEGER NOT NULL CHECK (seq > 0),
     kind TEXT NOT NULL CHECK (kind IN ('select', 'replace', 'delete_slot', 'delete_version', 'hide', 'hide_range', 'star',
-      'picker_hide', 'summary_revision', 'summary_choice', 'suppress_event')),
+      'picker_hide', 'summary_revision', 'summary_choice', 'summary_rerun', 'summary_superseded', 'suppress_event')),
     target_id TEXT NOT NULL,
     -- The slot the row is about, and its depth, for reading a window of a path.
     slot_id TEXT,
@@ -1452,5 +1456,48 @@ export const baseline: ReadonlyArray<string> = [
   `CREATE TRIGGER fork_overrides_event_own BEFORE INSERT ON fork_overrides WHEN NEW.kind = 'suppress_event'
     AND (NEW.flag IS NULL OR NOT EXISTS (SELECT 1 FROM state_events e
       WHERE e.id = NEW.target_id AND e.chat_id = NEW.chat_id AND e.slot_id IS NEW.slot_id))
-    BEGIN SELECT RAISE(ABORT, 'a suppression names an event in its chat'); END`
+    BEGIN SELECT RAISE(ABORT, 'a suppression names an event in its chat'); END`,
+  `CREATE TRIGGER summaries_selection_frozen BEFORE UPDATE OF selected_revision_id ON summaries
+    WHEN NEW.selected_revision_id IS NOT OLD.selected_revision_id
+    BEGIN SELECT RAISE(ABORT, 'summary selections belong to a fork'); END`,
+  `CREATE TRIGGER summarization_jobs_fork_same_chat BEFORE INSERT ON summarization_jobs
+    WHEN NEW.fork_id IS NOT NULL AND (SELECT chat_id FROM forks WHERE id=NEW.fork_id) IS NOT NEW.chat_id
+    BEGIN SELECT RAISE(ABORT, 'summary jobs belong to a fork of their chat'); END`,
+  `CREATE TRIGGER summarization_jobs_fork_fixed BEFORE UPDATE OF fork_id ON summarization_jobs
+    WHEN NEW.fork_id IS NOT OLD.fork_id BEGIN SELECT RAISE(ABORT, 'summary jobs keep their fork'); END`,
+  `CREATE UNIQUE INDEX summarization_jobs_legacy_segment ON summarization_jobs(chat_id,first_slot_id,last_slot_id,level)
+    WHERE fork_id IS NULL AND status IN ('pending','processing')`,
+  `CREATE TRIGGER fork_overrides_summary_target BEFORE INSERT ON fork_overrides
+    WHEN NEW.kind IN ('summary_revision','summary_choice','summary_superseded') AND NOT EXISTS (
+      SELECT 1 FROM summaries s WHERE s.id=NEW.target_id AND s.chat_id=NEW.chat_id AND s.first_slot_id=NEW.slot_id)
+    BEGIN SELECT RAISE(ABORT, 'a summary override names a summary in its chat'); END`,
+  `CREATE TRIGGER fork_overrides_summary_revision BEFORE INSERT ON fork_overrides
+    WHEN NEW.kind='summary_revision' AND NOT EXISTS (
+      SELECT 1 FROM summary_revisions r WHERE r.id=NEW.value_id AND r.summary_id=NEW.target_id)
+    BEGIN SELECT RAISE(ABORT, 'a summary selection names its own revision'); END`,
+  `CREATE TRIGGER fork_overrides_summary_revision_update BEFORE UPDATE OF value_id ON fork_overrides
+    WHEN NEW.kind='summary_revision' AND NOT EXISTS (
+      SELECT 1 FROM summary_revisions r WHERE r.id=NEW.value_id AND r.summary_id=NEW.target_id)
+    BEGIN SELECT RAISE(ABORT, 'a summary selection names its own revision'); END`,
+  `CREATE TRIGGER fork_overrides_summary_choice BEFORE INSERT ON fork_overrides
+    WHEN NEW.kind IN ('summary_choice','summary_superseded') AND NOT EXISTS (
+      SELECT 1 FROM summaries s WHERE s.id=NEW.value_id AND s.chat_id=NEW.chat_id)
+    BEGIN SELECT RAISE(ABORT, 'a summary choice stays in its chat'); END`,
+  `CREATE TRIGGER fork_overrides_summary_choice_update BEFORE UPDATE OF value_id ON fork_overrides
+    WHEN NEW.kind IN ('summary_choice','summary_superseded') AND NOT EXISTS (
+      SELECT 1 FROM summaries s WHERE s.id=NEW.value_id AND s.chat_id=NEW.chat_id)
+    BEGIN SELECT RAISE(ABORT, 'a summary choice stays in its chat'); END`,
+  `CREATE TRIGGER fork_overrides_summary_rerun BEFORE INSERT ON fork_overrides
+    WHEN NEW.kind='summary_rerun' AND (NEW.flag IS NULL OR (NEW.flag=1 AND NOT EXISTS (
+      SELECT 1 FROM summary_reruns r WHERE r.id=NEW.value_id AND r.chat_id=NEW.chat_id
+        AND coalesce(r.summary_id,r.job_id)=NEW.target_id)))
+    BEGIN SELECT RAISE(ABORT, 'a summary request names its own target'); END`,
+  `CREATE TRIGGER fork_overrides_summary_rerun_update BEFORE UPDATE OF value_id,flag ON fork_overrides
+    WHEN NEW.kind='summary_rerun' AND (NEW.flag IS NULL OR (NEW.flag=1 AND NOT EXISTS (
+      SELECT 1 FROM summary_reruns r WHERE r.id=NEW.value_id AND r.chat_id=NEW.chat_id
+        AND coalesce(r.summary_id,r.job_id)=NEW.target_id)))
+    BEGIN SELECT RAISE(ABORT, 'a summary request names its own target'); END`,
+  `CREATE TRIGGER lcm_reply_maintenance_fork BEFORE INSERT ON lcm_reply_maintenance
+    WHEN (SELECT chat_id FROM forks WHERE id=NEW.fork_id) IS NOT NEW.chat_id
+    BEGIN SELECT RAISE(ABORT, 'maintenance belongs to a fork of its chat'); END`
 ]
