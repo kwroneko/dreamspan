@@ -1,0 +1,202 @@
+import { canonicalJson } from "@rp/shared/editing.ts"
+import type { ForkNote, ForkNoteSelection } from "@rp/shared/chatApi.ts"
+import { useNavigate } from "@tanstack/react-router"
+import { useEffect, useState } from "react"
+import type { AppError } from "../../errors.ts"
+import { ErrorAlert, useAction } from "../../actions.tsx"
+import { Button } from "../../ui/Button.tsx"
+import { Switch } from "../../ui/Choice.tsx"
+import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
+import { RevisionDiff } from "../../ui/RevisionDiff.tsx"
+import { Segmented } from "../../ui/Segmented.tsx"
+import type { MessageActionProps } from "./messageActions.tsx"
+
+const options = [
+  { value: "then", label: "As it was then" },
+  { value: "now", label: "As it is now" }
+] as const
+type Choice = "then" | "now"
+
+function NoteDiff({ note }: { note: ForkNote }) {
+  return (
+    <div className="flex min-w-0 flex-col gap-2">
+      <div className="grid grid-cols-2 gap-3 text-sm text-muted">
+        <span>Then · {note.then.enabled ? "On" : "Off"}</span>
+        <span>Now · {note.now.enabled ? "On" : "Off"}</span>
+      </div>
+      <RevisionDiff
+        before={note.then.content}
+        after={note.now.content}
+        sideBySide
+        beforeLabel="As it was then"
+        afterLabel="As it is now"
+      />
+    </div>
+  )
+}
+
+/** Registered by message.branch, replaceable together with its menu offer. */
+export function ForkNotesDialog({ session, entry, report, closeDialog }: MessageActionProps) {
+  const action = useAction()
+  const navigate = useNavigate()
+  const [source] = useState(() => session.snapshot().forkId)
+  const [notes, setNotes] = useState<ReadonlyArray<ForkNote> | null>(null)
+  const [choices, setChoices] = useState<Record<string, Choice>>({})
+  const [buttons, setButtons] = useState(false)
+  const [diff, setDiff] = useState<ForkNote | null>(null)
+  const [error, setError] = useState<AppError | null>(null)
+  const [pending, setPending] = useState(false)
+  const chooseAll = (choice: Choice) => setChoices(Object.fromEntries((notes ?? []).map((note) => [note.note, choice])))
+  const all = notes?.every((note) => (choices[note.note] ?? "then") === "then")
+    ? "then"
+    : notes?.every((note) => choices[note.note] === "now")
+      ? "now"
+      : "mixed"
+  const branch = async (reviewed = notes) => {
+    if (reviewed === null || pending) return
+    setPending(true)
+    const selection: ForkNoteSelection = {
+      comparison: canonicalJson(reviewed),
+      choices: reviewed.map((note) => ({ note: note.note, choice: choices[note.note] ?? "then" }))
+    }
+    const made = await session.branchFrom(entry.slotId, selection, source)
+    report(made)
+    setPending(false)
+    if (!made.ok) {
+      setError(made.error)
+      return
+    }
+    closeDialog()
+    if (source !== null) await navigate({ to: ".", search: { fork: source }, replace: true })
+    void navigate({ to: ".", search: {} })
+  }
+  useEffect(() => {
+    let live = true
+    void action
+      .run((client) =>
+        client("PreviewForkNotes", {
+          chatId: session.id,
+          fromForkId: source,
+          atSlotId: entry.slotId
+        })
+      )
+      .then((result) => {
+        if (live && result.ok) {
+          setNotes(result.value)
+          if (result.value.length === 0) void branch(result.value)
+        }
+      })
+    return () => {
+      live = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the comparison belongs to this mounted dialog
+  }, [session, source, entry.slotId])
+  return (
+    <>
+      <Dialog
+        open
+        wide
+        onOpenChange={(open) => !open && !pending && closeDialog()}
+        title="Branch from here"
+        description="Choose which notes this fork starts with. Each choice includes the note’s text and on/off state."
+      >
+        <ErrorAlert error={error ?? action.error} />
+        {notes === null ? (
+          <p role="status" className="text-sm text-muted">
+            Loading notes…
+          </p>
+        ) : notes.length === 0 ? (
+          <p className="text-sm text-muted">No notes changed after this message.</p>
+        ) : (
+          <>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-sm font-medium">Set all notes{all === "mixed" ? " · Mixed choices" : ""}</span>
+              <Segmented
+                label="Set all notes"
+                options={options}
+                value={all}
+                onValueChange={(choice) => {
+                  if (choice !== "mixed") chooseAll(choice)
+                }}
+                wrap
+              />
+            </div>
+            {import.meta.env.DEV && (
+              <Switch checked={buttons} onCheckedChange={setButtons}>
+                Development: open diffs with buttons
+              </Switch>
+            )}
+            <div className="flex flex-col gap-3">
+              {notes.map((note) => (
+                <div key={note.note} className="min-w-0 rounded-md border border-border p-3">
+                  <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium break-words">{note.title}</p>
+                      <p className="text-xs text-muted">{note.owner}</p>
+                    </div>
+                    <Segmented
+                      label={`Inherit ${note.title}`}
+                      options={options}
+                      value={choices[note.note] ?? "then"}
+                      onValueChange={(choice) => setChoices((current) => ({ ...current, [note.note]: choice }))}
+                      wrap
+                    />
+                  </div>
+                  <p className="mb-2 text-xs text-muted">
+                    Then: {note.then.enabled ? "on" : "off"} · Now: {note.now.enabled ? "on" : "off"}
+                  </p>
+                  {buttons ? (
+                    <Button onClick={() => setDiff(note)}>Compare {note.title}</Button>
+                  ) : (
+                    <details>
+                      <summary className="cursor-pointer text-sm text-muted outline-none focus-visible:ring-2 focus-visible:ring-focus">
+                        Compare text and switches
+                      </summary>
+                      <div className="mt-3">
+                        <NoteDiff note={note} />
+                      </div>
+                    </details>
+                  )}
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+        <DialogActions>
+          <Button disabled={pending} onClick={closeDialog}>
+            Cancel
+          </Button>
+          <Button
+            variant="primary"
+            disabled={notes === null || action.pending}
+            pending={pending}
+            onClick={() => void branch()}
+          >
+            Create fork
+          </Button>
+        </DialogActions>
+      </Dialog>
+      {diff && (
+        <Dialog
+          open
+          wide
+          onOpenChange={(open) => !open && setDiff(null)}
+          title={diff.title}
+          description="Compare the two versions before choosing what this fork inherits."
+        >
+          <NoteDiff note={diff} />
+          <Segmented
+            label={`Inherit ${diff.title}`}
+            options={options}
+            value={choices[diff.note] ?? "then"}
+            onValueChange={(choice) => setChoices((current) => ({ ...current, [diff.note]: choice }))}
+            wrap
+          />
+          <DialogActions>
+            <Button onClick={() => setDiff(null)}>Back to notes</Button>
+          </DialogActions>
+        </Dialog>
+      )}
+    </>
+  )
+}

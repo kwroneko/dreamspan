@@ -8,22 +8,48 @@ import { attachedApplies, eventApplies, eventOrder, slotDeletedIn } from "./fork
  * event attached to a version applies while the fork shows it. Its cost is the path's
  * segments and events, not its length.
  */
-export const stateEventsOnPath = (
+type StateEventRow = { key: string; scope: string | null; value_json: string }
+type ProvenancedEventRow = StateEventRow & {
+  readonly id: string
+  readonly origin: string
+  readonly version_id: string | null
+}
+
+const eventsOnPath = <A extends StateEventRow>(
   sql: SqlClient.SqlClient,
   chatId: ChatId,
   slotId: SlotId | null,
-  fork: string | null = null
+  fork: string | null,
+  columns: string
 ) => {
   const view = fork ?? sql`(SELECT current_fork_id FROM chats WHERE id = ${chatId})`
-  return sql<{ key: string; scope: string | null; value_json: string }>`
+  return sql<A>`
     ${pathEvents(sql, chatId, slotId)}
-    SELECT ev.key, ev.scope, ev.value_json
+    SELECT ${sql.literal(columns)}
     FROM path_events ev LEFT JOIN slots s ON s.id = ev.slot_id
     WHERE ${eventApplies(sql, view, "ev")}
       AND (ev.slot_id IS NULL OR NOT ${slotDeletedIn(sql, view, "s")})
       AND ${attachedApplies(sql, view, "s", "ev.version_id")}
     ORDER BY ${sql.literal(eventOrder("ev"))}`
 }
+
+/** The existing assembly/editor projection, without provenance columns. */
+export const stateEventsOnPath = (
+  sql: SqlClient.SqlClient,
+  chatId: ChatId,
+  slotId: SlotId | null,
+  fork: string | null = null
+) => eventsOnPath<StateEventRow>(sql, chatId, slotId, fork, "ev.key, ev.scope, ev.value_json")
+
+/** The fork preview additionally needs event identity and human/version provenance. */
+export const stateEventRowsOnPath = (sql: SqlClient.SqlClient, chatId: ChatId, slotId: SlotId | null, fork: string) =>
+  eventsOnPath<ProvenancedEventRow>(
+    sql,
+    chatId,
+    slotId,
+    fork,
+    "ev.id, ev.origin, ev.version_id, ev.key, ev.scope, ev.value_json"
+  )
 
 /**
  * A card fork carries every note switch on the path, including switches on unselected

@@ -1160,6 +1160,23 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
         yield* refused(actor.api.ListBranches({ slotId: actor.chat.slotId, forkId: owner.chat.forkId }), "NotFound")
       })
   },
+  PreviewForkNotes: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        yield* refused(
+          actor.api.PreviewForkNotes({ chatId: owner.chat.chatId, fromForkId: null, atSlotId: null }),
+          "NotFound"
+        )
+        yield* refused(
+          actor.api.PreviewForkNotes({ chatId: actor.chat.chatId, fromForkId: owner.chat.forkId, atSlotId: null }),
+          "NotFound"
+        )
+        yield* refused(
+          actor.api.PreviewForkNotes({ chatId: actor.chat.chatId, fromForkId: null, atSlotId: owner.chat.slotId }),
+          "NotFound"
+        )
+      })
+  },
   ListForks: {
     probe: (actor, owner) => refused(actor.api.ListForks({ chatId: owner.chat.chatId }), "NotFound")
   },
@@ -2616,6 +2633,31 @@ const storage: Record<
     refused(writer.SetForkName({ userId: actor.user.id, forkId: owner.chat.forkId, name: "foreign" }), "NotFound"),
   SetForkPinned: (_reader, actor, owner, writer) =>
     refused(writer.SetForkPinned({ userId: actor.user.id, forkId: owner.chat.forkId, pinned: true }), "NotFound"),
+  PreviewForkNotes: (reader, actor, owner) =>
+    Effect.gen(function* () {
+      yield* refused(
+        reader.PreviewForkNotes({ userId: actor.user.id, chatId: owner.chat.chatId, fromForkId: null, atSlotId: null }),
+        "NotFound"
+      )
+      yield* refused(
+        reader.PreviewForkNotes({
+          userId: actor.user.id,
+          chatId: actor.chat.chatId,
+          fromForkId: owner.chat.forkId,
+          atSlotId: null
+        }),
+        "NotFound"
+      )
+      yield* refused(
+        reader.PreviewForkNotes({
+          userId: actor.user.id,
+          chatId: actor.chat.chatId,
+          fromForkId: null,
+          atSlotId: owner.chat.slotId
+        }),
+        "NotFound"
+      )
+    }),
   ListForks: (reader, actor, owner) =>
     refused(reader.ListForks({ userId: actor.user.id, chatId: owner.chat.chatId }), "NotFound"),
   GetPath: (reader, actor, owner) =>

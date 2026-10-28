@@ -1,4 +1,5 @@
-import { Link, useNavigate } from "@tanstack/react-router"
+import { ForkNotesDialog } from "./ForkNotesDialog.tsx"
+import { Link } from "@tanstack/react-router"
 import { useSyncExternalStore } from "react"
 import { Button } from "../../ui/Button.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
@@ -9,7 +10,7 @@ import { showToast } from "../../ui/Toast.tsx"
 import { IconButton, iconButtonClass, Tooltip } from "../../ui/Tooltip.tsx"
 import { ContinueAction } from "./ContinueAction.tsx"
 import { parseModelValue, useModelChoices } from "./modelChoices.ts"
-import { messageActions, type MessageActionContext, type MessageActionProps } from "./messageActions.tsx"
+import { messageActions, type MessageActionProps } from "./messageActions.tsx"
 import type { ChatSession } from "./session.ts"
 
 const copy = async (text: string, what: string) => {
@@ -83,20 +84,9 @@ function PickModel({ session, entry, generated, report, closeDialog }: MessageAc
   )
 }
 
-function Branch({ session, entry, report }: MessageActionContext) {
-  const navigate = useNavigate()
+function Branch({ openDialog }: MessageActionProps) {
   return (
-    <MenuItem
-      icon="branch"
-      onClick={async () => {
-        const from = session.snapshot().forkId
-        const made = await session.branchFrom(entry.slotId)
-        report(made)
-        if (!made.ok) return
-        if (from !== null) await navigate({ to: ".", search: { fork: from }, replace: true })
-        void navigate({ to: ".", search: {} })
-      }}
-    >
+    <MenuItem icon="branch" onClick={() => openDialog("message.branch")}>
       Branch from here
     </MenuItem>
   )
@@ -203,7 +193,7 @@ export const registerMessageActions = () => [
     ),
     dialog: PickModel
   }),
-  messageActions.register({ id: "message.branch", order: 30, menu: Branch }),
+  messageActions.register({ id: "message.branch", order: 30, menu: Branch, dialog: ForkNotesDialog }),
   messageActions.register({
     id: "message.visibility",
     order: 35,

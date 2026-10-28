@@ -605,10 +605,15 @@ export const makeChatHandlers = Effect.gen(function* () {
     ListForks: ({ chatId }) =>
       Effect.flatMap(userId, (id) => reader.ListForks({ userId: id, chatId })).pipe(internal("ListForks")),
 
-    CreateFork: ({ chatId, fromForkId, atSlotId }) =>
+    PreviewForkNotes: (payload) =>
+      Effect.flatMap(userId, (id) => reader.PreviewForkNotes({ userId: id, ...payload })).pipe(
+        internal("PreviewForkNotes")
+      ),
+
+    CreateFork: ({ chatId, fromForkId, atSlotId, notes }) =>
       Effect.gen(function* () {
         const id = yield* userId
-        const made = yield* writer.CreateFork({ userId: id, chatId, fromForkId, atSlotId })
+        const made = yield* writer.CreateFork({ userId: id, chatId, fromForkId, atSlotId, ...(notes ? { notes } : {}) })
         hub.publish(chatId, { _tag: "Chat", chat: made.chat })
         return made
       }).pipe(internal("CreateFork")),

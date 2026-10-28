@@ -42,6 +42,9 @@ import {
 } from "@rp/shared/chat.ts"
 import { ContextIssue, VersionError, VersionStatus } from "@rp/shared/chat.ts"
 import {
+  ForkNote,
+  ForkNoteSelection,
+  ForkNotesChanged,
   Branch,
   ChatCursor,
   ChatSearch,
@@ -771,9 +774,15 @@ export class WriteOps extends RpcGroup.make(
    * current fork (spec/FORK-INDEPENDENCE-DELTA.md §2.1).
    */
   Rpc.make("CreateFork", {
-    payload: { userId: UserId, chatId: ChatId, fromForkId: Schema.NullOr(ForkId), atSlotId: Schema.NullOr(SlotId) },
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      fromForkId: Schema.NullOr(ForkId),
+      atSlotId: Schema.NullOr(SlotId),
+      notes: Schema.optionalKey(ForkNoteSelection)
+    },
     success: Schema.Struct({ fork: Fork, chat: Chat }),
-    error: Schema.Union([NotFound, StorageError])
+    error: Schema.Union([NotFound, StorageError, ForkNotesChanged])
   }),
   Rpc.make("DeleteChat", {
     payload: { userId: UserId, chatId: ChatId },
@@ -1914,6 +1923,11 @@ export class WriteOps extends RpcGroup.make(
 ) {}
 
 export class ReadOps extends RpcGroup.make(
+  Rpc.make("PreviewForkNotes", {
+    payload: { userId: UserId, chatId: ChatId, fromForkId: Schema.NullOr(ForkId), atSlotId: Schema.NullOr(SlotId) },
+    success: Schema.Array(ForkNote),
+    error: Schema.Union([NotFound, StorageError])
+  }),
   historyReadRpcs[3]
     .setPayload(Schema.Struct({ ...historyReadRpcs[3].payloadSchema.fields, userId: UserId }))
     .setError(Schema.Union([NotFound, HistoryRejected, StorageError])),

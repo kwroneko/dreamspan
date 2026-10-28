@@ -79,6 +79,9 @@
 - **D** Branching from an earlier point resets everything that follows the messages, which is less intuitive than it seems: many changes are wanted even in a fork that goes back earlier.
 - **D** For notes it depends on the note (background and story-level notes aren't tied to the message they were last edited at). Harder than for cards: there are many notes and they don't modify something that already existed. A per-note setting is possible but must not become confusing.
 
+- **D** (owner, 2026-10-28 23:30 and 23:33; implemented, obsolete as a proposal: ARCHITECTURE §3.4) Forking before human note edits asks per changed note, **As it was then** / **As it is now**, with the corresponding text and on/off state. **Then is the default**. A top-level switch sets all rows to then/now, with individual overrides afterwards. Accordion rows expand to side-by-side CodeMirror diffs; the button-to-diff alternative is behind a development-only toggle so both can be compared.
+- **P** Card-note activation in the chat follows the same per-note choice (coordinator fill-in, 2026-10-28; implemented). Card text keeps its card ownership.
+
 ### Snippets
 - **D** A text snippet system is wanted, separate from notes, needing major UI design. Snippets are reachable from and to anywhere: copy part of any field into a snippet edited beside it, and bring snippet text into any field. Replaces the owner's unsaved notepad tabs. Example: part of a message or swipe from another branch into this one.
 
@@ -106,7 +109,7 @@
 - Message-following card changes take a whole copy of the card at their first change, so nothing merges into them later (this also replaces DESIGN §4.1a's field patches over a moving card).
 
 **Notes and snippets**
-- A note belongs to the branch by default; each generation records which note revisions it used; forking from an earlier point lists the notes changed since, each with "as it was then" / "as it is now" (default now). Agent-made note changes always follow the messages.
+- Superseded by the decided 2026-10-28 fork-note choice above (implemented): ask per changed human note, default **then**, with a set-all switch and expandable side-by-side diff. Agent-made changes follow the messages.
 - Snippets kept on the server like drafts (live across tabs), scoped global or one chat including its forks; the composition scratchpad becomes one use of snippets; notes stay simple and can be filled from a snippet.
 
 ## 4a. Later, recorded 2026-10-26 (not part of the current design topics)

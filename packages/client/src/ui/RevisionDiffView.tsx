@@ -8,7 +8,19 @@ mergeLayout.replaceSync(
   ".cm-mergeView {max-height:min(60vh,32rem);overflow:auto} .cm-mergeView .cm-scroller {max-height:none}"
 )
 
-export default function RevisionDiffView({ before, after }: { before: string; after: string }) {
+export default function RevisionDiffView({
+  before,
+  after,
+  sideBySide = false,
+  beforeLabel = "Before",
+  afterLabel = "After"
+}: {
+  before: string
+  after: string
+  sideBySide?: boolean
+  beforeLabel?: string
+  afterLabel?: string
+}) {
   const host = useRef<HTMLDivElement>(null)
   const [narrow, setNarrow] = useState(() => matchMedia("(max-width: 639px)").matches)
   useEffect(() => {
@@ -29,7 +41,8 @@ export default function RevisionDiffView({ before, after }: { before: string; af
         "aria-label": label,
         "aria-multiline": "true"
       })
-    const view = narrow
+    const unified = narrow && !sideBySide
+    const view = unified
       ? new EditorView({
           root,
           parent: root,
@@ -48,24 +61,24 @@ export default function RevisionDiffView({ before, after }: { before: string; af
       : new MergeView({
           root,
           parent: root,
-          a: { doc: before, extensions: [...readOnlyProse, attributes("Before")] },
-          b: { doc: after, extensions: [...readOnlyProse, attributes("After")] },
+          a: { doc: before, extensions: [...readOnlyProse, attributes(beforeLabel)] },
+          b: { doc: after, extensions: [...readOnlyProse, attributes(afterLabel)] },
           diffConfig: { scanLimit: 2000, timeout: 50 }
         })
     return () => view.destroy()
-  }, [before, after, narrow])
+  }, [before, after, narrow, sideBySide, beforeLabel, afterLabel])
   return (
     <div className="min-w-0 overflow-hidden rounded-md border border-border bg-surface">
       <div
         className="grid grid-cols-2 border-b border-border bg-surface-raised px-3 py-1 text-xs text-muted"
         aria-hidden="true"
       >
-        {narrow ? (
+        {narrow && !sideBySide ? (
           <span className="col-span-2">Removed (−) and added (+)</span>
         ) : (
           <>
-            <span>Before</span>
-            <span>After</span>
+            <span>{beforeLabel}</span>
+            <span>{afterLabel}</span>
           </>
         )}
       </div>
