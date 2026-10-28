@@ -78,6 +78,7 @@ lcmTest("judge spend omitted even across refusal retries", (server) =>
     const ledger = (yield* h.api.ListLlmRequests({ limit: 1000, before: null })).filter((r) => r.chatId === p.chatId)
     const actual = ledger.reduce((s, r) => s + (r.cost?.amount ?? 0), 0)
     assert.isAtMost(actual, state!.capCost!)
-    assert.strictEqual(state!.spentCost, actual)
+    // Both sum the same costs, in different orders: equal up to float rounding.
+    assert.closeTo(state!.spentCost!, actual, 1e-9)
   }).pipe(Effect.scoped)
 )
