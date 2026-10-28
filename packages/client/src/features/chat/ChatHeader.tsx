@@ -356,13 +356,15 @@ export function ChatHeader({
   view,
   actions,
   onBranch,
-  onJump
+  onJump,
+  onHistory
 }: {
   session: ChatSession
   view: ChatView
   /** The chat's own buttons (its cast, notes, settings), at the end of the line. */
   actions: ReactNode
   onBranch: (entry: PathEntry, index: number) => void
+  onHistory: () => void
   onJump: (slotId: SlotId) => void
 }) {
   const characters = castCharacters(view)
@@ -421,6 +423,25 @@ export function ChatHeader({
         </div>
         <div className="flex min-w-0 items-center justify-end gap-1.5 max-sm:w-full sm:gap-3">
           {fork && <PinButton fork={fork} />}
+          <Menu
+            label="Chat actions"
+            trigger={
+              <button
+                type="button"
+                aria-label="Chat actions"
+                className="rounded-md px-2 py-1 text-muted hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus"
+              >
+                •••
+              </button>
+            }
+          >
+            <MenuItem icon="edit" onClick={onHistory}>
+              Search and replace
+            </MenuItem>
+            <MenuItem icon="edit" onClick={onHistory}>
+              History edits
+            </MenuItem>
+          </Menu>
           <BranchMenu session={session} view={view} onBranch={onBranch} onJump={onJump} />
           <div className="flex min-w-0 flex-wrap items-center justify-end gap-0.5 max-sm:[&_button]:px-1.5 max-sm:[&_button]:text-xs">
             {actions}

@@ -1,0 +1,623 @@
+import { cardDoc } from "./support/docs.ts"
+import { completeFixture } from "./support/lcmFixtures.ts"
+import { assert, describe, it } from "@effect/vitest"
+import { Effect } from "effect"
+import { NewVersion, type ForkId } from "@rp/shared/chat.ts"
+import type { HistorySearch } from "@rp/shared/historyApi.ts"
+import { Reader, Writer } from "../src/db/Database.ts"
+import { scanHistory } from "../src/db/historyScan.ts"
+import { client, outcome, serverLayer, testConfig } from "./support/config.ts"
+
+const search: HistorySearch = {
+  pairs: [{ find: "Aria", replace: "Ari" }],
+  matchCase: false,
+  wholeWord: true,
+  regex: false,
+  preserveCase: true,
+  messages: true,
+  swipes: true,
+  summaries: true
+}
+const said = (content: string) =>
+  new NewVersion({
+    speakerEntityId: null,
+    writer: "human",
+    content,
+    status: "complete",
+    macroMode: "verbatim",
+    origin: "user_written"
+  })
+const config = testConfig()
+const setup = Effect.gen(function* () {
+  const api = yield* client()
+  const userId = (yield* api.Whoami()).id
+  const writer = yield* Writer
+  const reader = yield* Reader
+  const chat = yield* writer.CreateChat({
+    userId,
+    kind: "rp",
+    status: "active",
+    title: "History",
+    participants: [],
+    greeting: null
+  })
+  const chatId = chat.id
+  const main = chat.currentForkId!
+  const first = yield* writer.AppendMessage({
+    userId,
+    chatId,
+    forkId: main,
+    parentSlotId: null,
+    branch: false,
+    version: said("Aria meets ARIA and aria."),
+    commitDraft: null
+  })
+  yield* writer.AddVersion({
+    userId,
+    slotId: first.slotId,
+    version: said("Aria alternative"),
+    select: false,
+    commitDraft: null
+  })
+  const sibling = (yield* writer.CreateFork({ userId, chatId, fromForkId: main, atSlotId: first.slotId })).fork.id
+  const text = (forkId: ForkId) =>
+    Effect.map(reader.GetPath({ userId, chatId, forkId, leafSlotId: null, limit: 100 }), (p) =>
+      p.entries.map((e) => e.version.content)
+    )
+  return { api, userId, writer, reader, chatId, main, first, sibling, text }
+})
+describe("history edits", () => {
+  it.effect("edits every swipe only here, inherits at earlier points, and undoes only here", () =>
+    Effect.gen(function* () {
+      const f = yield* setup
+      const preview = yield* f.api.PreviewHistory({ chatId: f.chatId, forkId: f.main, search })
+      assert.lengthOf(preview.hits, 2)
+      assert.strictEqual(preview.hits[0]!.after, "Ari meets ARI and ari.")
+      const applied = yield* f.api.ApplyHistoryEdits({
+        title: "Rename",
+        applications: [
+          {
+            chatId: f.chatId,
+            forkId: f.main,
+            edits: preview.hits.map(({ kind, targetId, beforeId, before, after }) => ({
+              kind,
+              targetId,
+              beforeId,
+              before,
+              after
+            }))
+          }
+        ]
+      })
+      assert.deepStrictEqual(yield* f.text(f.main), ["Ari meets ARI and ari."])
+      assert.deepStrictEqual(yield* f.text(f.sibling), ["Aria meets ARIA and aria."])
+      const later = (yield* f.writer.CreateFork({
+        userId: f.userId,
+        chatId: f.chatId,
+        fromForkId: f.main,
+        atSlotId: f.first.slotId
+      })).fork.id
+      assert.deepStrictEqual(yield* f.text(later), ["Ari meets ARI and ari."])
+      const inherited = yield* f.api.ListHistoryEdits({ chatId: f.chatId, forkId: later })
+      assert.isTrue(inherited[0]!.inherited)
+      assert.strictEqual(inherited[0]!.status, "applied")
+      const siblingEntry = (yield* f.reader.GetSlot({ userId: f.userId, slotId: f.first.slotId, forkId: f.sibling }))
+        .entry
+      yield* f.writer.AmendVersion({
+        userId: f.userId,
+        forkId: f.sibling,
+        versionId: siblingEntry.version.id,
+        expectedRowVersion: siblingEntry.version.rowVersion,
+        content: "Aria on a different path"
+      })
+      const undo = yield* f.api.UndoHistoryEdit({
+        chatId: f.chatId,
+        forkId: f.main,
+        changesetId: applied.changesetIds[0]!,
+        slotId: f.first.slotId
+      })
+      assert.strictEqual(undo.undone, 2)
+      assert.deepStrictEqual(yield* f.text(f.main), ["Aria meets ARIA and aria."])
+      assert.deepStrictEqual(yield* f.text(later), ["Ari meets ARI and ari."])
+      yield* f.api.UndoHistoryEdit({ chatId: f.chatId, forkId: later, changesetId: applied.changesetIds[0]! })
+      assert.deepStrictEqual(yield* f.text(later), ["Aria meets ARIA and aria."])
+    }).pipe(Effect.provide(serverLayer(config)))
+  )
+  it.effect("shares a renamed copy across forks and refuses a stale batch atomically", () =>
+    Effect.gen(function* () {
+      const f = yield* setup
+      const preview = yield* f.api.PreviewHistory({ chatId: f.chatId, forkId: f.main, search })
+      const result = yield* f.api.ApplyHistoryEdits({
+        title: "All chats",
+        applications: [f.main, f.sibling].map((forkId) => ({
+          chatId: f.chatId,
+          forkId,
+          edits: preview.hits.map(({ kind, targetId, beforeId, before, after }) => ({
+            kind,
+            targetId,
+            beforeId,
+            before,
+            after
+          }))
+        }))
+      })
+      const a = yield* f.reader.ListVersions({ userId: f.userId, slotId: f.first.slotId, forkId: f.main })
+      const b = yield* f.reader.ListVersions({ userId: f.userId, slotId: f.first.slotId, forkId: f.sibling })
+      assert.deepStrictEqual(
+        a.map((v) => v.id),
+        b.map((v) => v.id)
+      )
+      assert.lengthOf(result.changesetIds, 2)
+      assert.strictEqual(
+        yield* outcome(
+          f.api.ApplyHistoryEdits({
+            title: "Stale",
+            applications: [
+              {
+                chatId: f.chatId,
+                forkId: f.main,
+                edits: preview.hits.map(({ kind, targetId, beforeId, before, after }) => ({
+                  kind,
+                  targetId,
+                  beforeId,
+                  before,
+                  after
+                }))
+              }
+            ]
+          }),
+          () => "allowed"
+        ),
+        "HistoryRejected"
+      )
+      assert.lengthOf(yield* f.api.ListHistoryEdits({ chatId: f.chatId, forkId: f.main }), 1)
+    }).pipe(Effect.provide(serverLayer(config)))
+  )
+  it.effect("undo keeps a subsequent amend and reports its conflict", () =>
+    Effect.gen(function* () {
+      const f = yield* setup
+      const preview = yield* f.api.PreviewHistory({ chatId: f.chatId, forkId: f.main, search })
+      const result = yield* f.api.ApplyHistoryEdits({
+        title: "Rename",
+        applications: [
+          {
+            chatId: f.chatId,
+            forkId: f.main,
+            edits: preview.hits.map(({ kind, targetId, beforeId, before, after }) => ({
+              kind,
+              targetId,
+              beforeId,
+              before,
+              after
+            }))
+          }
+        ]
+      })
+      const entry = (yield* f.reader.GetSlot({ userId: f.userId, slotId: f.first.slotId, forkId: f.main })).entry
+      yield* f.writer.AmendVersion({
+        userId: f.userId,
+        forkId: f.main,
+        versionId: entry.version.id,
+        expectedRowVersion: entry.version.rowVersion,
+        content: "A later edit"
+      })
+      const undo = yield* f.api.UndoHistoryEdit({
+        chatId: f.chatId,
+        forkId: f.main,
+        changesetId: result.changesetIds[0]!
+      })
+      assert.lengthOf(undo.conflicts, 1)
+      assert.deepStrictEqual(yield* f.text(f.main), ["A later edit"])
+    }).pipe(Effect.provide(serverLayer(config)))
+  )
+  it.effect("edits summaries in this fork, keeps renames fresh, and undoes covering summaries together", () =>
+    Effect.gen(function* () {
+      const f = yield* setup
+      const summary = yield* completeFixture(
+        config.dataDir,
+        f.writer,
+        f.userId,
+        f.chatId,
+        [{ slotId: f.first.slotId, versionId: f.first.version.id, amendCount: 0 }],
+        [],
+        " Aria"
+      )
+      const preview = yield* f.api.PreviewHistory({ chatId: f.chatId, forkId: f.main, search })
+      assert.lengthOf(
+        preview.hits.filter((h) => h.kind === "summary_revision"),
+        1
+      )
+      const edits = preview.hits.map(({ kind, targetId, beforeId, before, after }) => ({
+        kind,
+        targetId,
+        beforeId,
+        before,
+        after
+      }))
+      const applied = yield* f.api.ApplyHistoryEdits({
+        title: "Rename with summaries",
+        applications: [{ chatId: f.chatId, forkId: f.main, summariesIncluded: true, edits }]
+      })
+      const state = yield* f.api.GetLcmState({ chatId: f.chatId, forkId: f.main, leafSlotId: f.first.slotId })
+      assert.isTrue(state.layer[0]!.fresh)
+      assert.include(state.layer[0]!.content!, "Ari")
+      const old = yield* f.api.GetLcmState({ chatId: f.chatId, forkId: f.sibling, leafSlotId: f.first.slotId })
+      assert.include(old.layer[0]!.content!, "Aria")
+      yield* f.api.UndoHistoryEdit({
+        chatId: f.chatId,
+        forkId: f.main,
+        changesetId: applied.changesetIds[0]!,
+        slotId: f.first.slotId
+      })
+      const restored = yield* f.api.GetLcmState({ chatId: f.chatId, forkId: f.main, leafSlotId: f.first.slotId })
+      assert.strictEqual(restored.layer[0]!.revisionId, summary.revisionId)
+      assert.isTrue(restored.layer[0]!.fresh)
+      const again = yield* f.api.PreviewHistory({ chatId: f.chatId, forkId: f.main, search })
+      yield* f.api.ApplyHistoryEdits({
+        title: "Again",
+        applications: [
+          {
+            chatId: f.chatId,
+            forkId: f.main,
+            summariesIncluded: true,
+            edits: again.hits.map(({ kind, targetId, beforeId, before, after }) => ({
+              kind,
+              targetId,
+              beforeId,
+              before,
+              after
+            }))
+          }
+        ]
+      })
+      const messageOnly = yield* f.api.PreviewHistory({
+        chatId: f.chatId,
+        forkId: f.main,
+        search: { ...search, summaries: false, pairs: [{ find: "Ari", replace: "Ada" }] }
+      })
+      const newer = yield* f.api.ApplyHistoryEdits({
+        title: "Messages only",
+        applications: [
+          {
+            chatId: f.chatId,
+            forkId: f.main,
+            edits: messageOnly.hits.map(({ kind, targetId, beforeId, before, after }) => ({
+              kind,
+              targetId,
+              beforeId,
+              before,
+              after
+            }))
+          }
+        ]
+      })
+      yield* f.api.UndoHistoryEdit({ chatId: f.chatId, forkId: f.main, changesetId: newer.changesetIds[0]! })
+      const backToFresh = yield* f.api.GetLcmState({ chatId: f.chatId, forkId: f.main, leafSlotId: f.first.slotId })
+      assert.isTrue(backToFresh.layer[0]!.fresh)
+      const entry = (yield* f.reader.GetSlot({ userId: f.userId, slotId: f.first.slotId, forkId: f.main })).entry
+      yield* f.writer.AmendVersion({
+        userId: f.userId,
+        forkId: f.main,
+        versionId: entry.version.id,
+        expectedRowVersion: entry.version.rowVersion,
+        content: "A new scene entirely"
+      })
+      const stale = yield* f.api.GetLcmState({ chatId: f.chatId, forkId: f.main, leafSlotId: f.first.slotId })
+      assert.isFalse(stale.layer[0]!.fresh)
+    }).pipe(Effect.provide(serverLayer(config)))
+  )
+  it.effect("scans beyond a window and FTS does not lose Unicode boundary matches", () =>
+    Effect.gen(function* () {
+      const f = yield* setup
+      for (let i = 0; i < 105; i++)
+        yield* f.writer.AddVersion({
+          userId: f.userId,
+          slotId: f.first.slotId,
+          version: said(i === 104 ? "éAria" : "Aria extra " + i),
+          select: false,
+          commitDraft: null
+        })
+      const first = yield* f.api.PreviewHistory({ chatId: f.chatId, forkId: f.main, search })
+      assert.lengthOf(first.hits, 100)
+      assert.isNotNull(first.next)
+      const last = yield* f.api.PreviewHistory({ chatId: f.chatId, forkId: f.main, search, cursor: first.next! })
+      assert.isTrue(last.hits.some((h) => h.before === "éAria"))
+      assert.isNull(last.next)
+    }).pipe(Effect.provide(serverLayer(config)))
+  )
+  it.effect("groups stay frozen for a fork made while the panel is open", () =>
+    Effect.gen(function* () {
+      const f = yield* setup
+      const preview = yield* f.api.PreviewHistory({ chatId: f.chatId, forkId: f.main, search })
+      const edits = preview.hits.map(({ kind, targetId, beforeId, before, after }) => ({
+        kind,
+        targetId,
+        beforeId,
+        before,
+        after
+      }))
+      const applied = yield* f.api.ApplyHistoryEdits({
+        title: "Rename",
+        applications: [{ chatId: f.chatId, forkId: f.main, edits }]
+      })
+      const child = (yield* f.writer.CreateFork({
+        userId: f.userId,
+        chatId: f.chatId,
+        fromForkId: f.main,
+        atSlotId: f.first.slotId
+      })).fork.id
+      const again = yield* f.api.PreviewHistory({
+        chatId: f.chatId,
+        forkId: f.main,
+        search: { ...search, pairs: [{ find: "Ari", replace: "Ada" }] }
+      })
+      yield* f.api.ApplyHistoryEdits({
+        title: "Rename",
+        groupId: applied.groupId,
+        applications: [
+          {
+            chatId: f.chatId,
+            forkId: f.main,
+            edits: again.hits.map(({ kind, targetId, beforeId, before, after }) => ({
+              kind,
+              targetId,
+              beforeId,
+              before,
+              after
+            }))
+          }
+        ]
+      })
+      assert.deepStrictEqual(yield* f.text(child), ["Ari meets ARI and ari."])
+      const history = yield* f.api.ListHistoryEdits({ chatId: f.chatId, forkId: child })
+      assert.lengthOf(history, 1)
+      assert.isTrue(history[0]!.items.every((i) => i.applied))
+    }).pipe(Effect.provide(serverLayer(config)))
+  )
+  it.effect("counts cast forks and applies or declines a rename in the requested scope", () =>
+    Effect.gen(function* () {
+      const f = yield* setup
+      const card = yield* f.writer.CreateEntity({
+        userId: f.userId,
+        kind: "card",
+        label: "Aria",
+        subtitle: "",
+        doc: cardDoc("Aria"),
+        schemaVersion: 1,
+        origin: "user",
+        sourcePath: null
+      })
+      yield* f.writer.AddStateEvent({
+        userId: f.userId,
+        chatId: f.chatId,
+        forkId: f.main,
+        slotId: null,
+        versionId: null,
+        scope: null,
+        data: { key: "participant.join", value: { entity: card.ref.entityId } }
+      })
+      const child = (yield* f.writer.CreateFork({
+        userId: f.userId,
+        chatId: f.chatId,
+        fromForkId: f.main,
+        atSlotId: f.first.slotId
+      })).fork.id
+      const other = yield* f.writer.CreateChat({
+        userId: f.userId,
+        kind: "rp",
+        status: "active",
+        title: "Other story",
+        participants: [],
+        greeting: null
+      })
+      yield* f.writer.AddStateEvent({
+        userId: f.userId,
+        chatId: other.id,
+        forkId: other.currentForkId!,
+        slotId: null,
+        versionId: null,
+        scope: null,
+        data: { key: "participant.join", value: { entity: card.ref.entityId } }
+      })
+      yield* f.writer.AppendMessage({
+        userId: f.userId,
+        chatId: other.id,
+        forkId: other.currentForkId!,
+        parentSlotId: null,
+        branch: false,
+        version: said("Aria in another story"),
+        commitDraft: null
+      })
+      const targets = yield* f.api.RenameHistoryTargets({ entityId: card.ref.entityId })
+      assert.lengthOf(targets, 3)
+      const params = { entityId: card.ref.entityId, oldName: "Aria", newName: "Ari", chatId: f.chatId, forkId: f.main }
+      assert.strictEqual(yield* f.api.RenameHistory({ ...params, scope: "none" }), 0)
+      assert.lengthOf(yield* f.api.ListHistoryEdits({ chatId: f.chatId, forkId: f.main }), 0)
+      assert.strictEqual(yield* f.api.RenameHistory({ ...params, scope: "all" }), 3)
+      assert.include((yield* f.text(f.main))[0]!, "Ari")
+      assert.include((yield* f.text(child))[0]!, "Ari")
+      assert.include((yield* f.text(f.sibling))[0]!, "Aria")
+    }).pipe(Effect.provide(serverLayer(config)))
+  )
+  it.effect("adds and replaces state through fork-local suppression and undoes it locally", () =>
+    Effect.gen(function* () {
+      const f = yield* setup
+      const first = JSON.stringify({
+        scope: null,
+        data: { key: "macro.binding", value: { name: "place", value: "garden" } }
+      })
+      const added = yield* f.api.ApplyHistoryEdits({
+        title: "State",
+        applications: [
+          {
+            chatId: f.chatId,
+            forkId: f.main,
+            edits: [
+              { kind: "state_event", targetId: "", beforeId: "", before: "", after: first },
+              {
+                kind: "state_event",
+                targetId: "",
+                beforeId: "",
+                before: "",
+                after: JSON.stringify({
+                  scope: null,
+                  data: { key: "var.set", value: { name: "weather", value: "rain" } }
+                })
+              }
+            ]
+          }
+        ]
+      })
+      const history = yield* f.api.ListHistoryEdits({ chatId: f.chatId, forkId: f.main })
+      const item = history[0]!.items[0]!
+      assert.isTrue(item.applied)
+      assert.lengthOf(history[0]!.items, 2)
+      const read = (forkId: ForkId) =>
+        f.reader.StateEventsAt({ userId: f.userId, chatId: f.chatId, forkId, slotId: f.first.slotId })
+      assert.strictEqual((yield* read(f.main)).filter((e) => e.data.key === "macro.binding").length, 1)
+      assert.strictEqual((yield* read(f.sibling)).filter((e) => e.data.key === "macro.binding").length, 0)
+      const replaced = yield* f.api.ApplyHistoryEdits({
+        title: "New place",
+        applications: [
+          {
+            chatId: f.chatId,
+            forkId: f.main,
+            edits: [
+              {
+                kind: "state_event",
+                targetId: item.targetId,
+                beforeId: item.targetId,
+                before: first,
+                after: JSON.stringify({
+                  scope: null,
+                  data: { key: "macro.binding", value: { name: "place", value: "tower" } }
+                })
+              }
+            ]
+          }
+        ]
+      })
+      const state = yield* read(f.main)
+      assert.strictEqual(state.filter((e) => e.data.key === "macro.binding").length, 1)
+      yield* f.api.UndoHistoryEdit({ chatId: f.chatId, forkId: f.main, changesetId: replaced.changesetIds[0]! })
+      yield* f.api.UndoHistoryEdit({ chatId: f.chatId, forkId: f.main, changesetId: added.changesetIds[0]! })
+      assert.strictEqual((yield* read(f.main)).filter((e) => e.data.key === "macro.binding").length, 0)
+    }).pipe(Effect.provide(serverLayer(config)))
+  )
+  it.effect("renames stay fresh when the summarized input was already a fork copy", () =>
+    Effect.gen(function* () {
+      const f = yield* setup
+      const edits = (yield* f.api.PreviewHistory({ chatId: f.chatId, forkId: f.main, search })).hits.map(
+        ({ kind, targetId, beforeId, before, after }) => ({ kind, targetId, beforeId, before, after })
+      )
+      yield* f.api.ApplyHistoryEdits({
+        title: "First rename",
+        applications: [{ chatId: f.chatId, forkId: f.main, edits }]
+      })
+      const input = (yield* f.reader.GetSlot({ userId: f.userId, slotId: f.first.slotId, forkId: f.main })).entry
+        .version
+      yield* completeFixture(
+        config.dataDir,
+        f.writer,
+        f.userId,
+        f.chatId,
+        [{ slotId: f.first.slotId, versionId: input.id, amendCount: 0 }],
+        [],
+        " Ari"
+      )
+      const again = (yield* f.api.PreviewHistory({
+        chatId: f.chatId,
+        forkId: f.main,
+        search: { ...search, pairs: [{ find: "Ari", replace: "Ada" }] }
+      })).hits.map(({ kind, targetId, beforeId, before, after }) => ({ kind, targetId, beforeId, before, after }))
+      yield* f.api.ApplyHistoryEdits({
+        title: "Second rename",
+        applications: [{ chatId: f.chatId, forkId: f.main, summariesIncluded: true, edits: again }]
+      })
+      const state = yield* f.api.GetLcmState({ chatId: f.chatId, forkId: f.main, leafSlotId: f.first.slotId })
+      assert.isTrue(state.layer[0]!.fresh)
+    }).pipe(Effect.provide(serverLayer(config)))
+  )
+  it.effect("a later unrelated summary changeset makes its previously renamed parent stale", () =>
+    Effect.gen(function* () {
+      const f = yield* setup
+      const child = yield* completeFixture(
+        config.dataDir,
+        f.writer,
+        f.userId,
+        f.chatId,
+        [{ slotId: f.first.slotId, versionId: f.first.version.id, amendCount: 0 }],
+        [],
+        " Aria"
+      )
+      yield* completeFixture(config.dataDir, f.writer, f.userId, f.chatId, [], [child], " Aria")
+      const edits = (yield* f.api.PreviewHistory({ chatId: f.chatId, forkId: f.main, search })).hits.map(
+        ({ kind, targetId, beforeId, before, after }) => ({ kind, targetId, beforeId, before, after })
+      )
+      yield* f.api.ApplyHistoryEdits({
+        title: "Rename all",
+        applications: [{ chatId: f.chatId, forkId: f.main, summariesIncluded: true, edits }]
+      })
+      const first = yield* f.api.GetLcmState({ chatId: f.chatId, forkId: f.main, leafSlotId: f.first.slotId })
+      assert.strictEqual(first.layer[0]!.level, 2)
+      assert.isTrue(first.layer[0]!.fresh)
+      const matches = yield* f.api.PreviewHistory({
+        chatId: f.chatId,
+        forkId: f.main,
+        search: { ...search, pairs: [{ find: "Ari", replace: "Ada" }] }
+      })
+      const hit = matches.hits.find((h) => h.targetId === child.id)!
+      const { kind, targetId, beforeId, before, after } = hit
+      yield* f.api.ApplyHistoryEdits({
+        title: "Only child summary",
+        applications: [{ chatId: f.chatId, forkId: f.main, edits: [{ kind, targetId, beforeId, before, after }] }]
+      })
+      const stale = yield* f.api.GetLcmState({ chatId: f.chatId, forkId: f.main, leafSlotId: f.first.slotId })
+      assert.isFalse(stale.layer.find((s) => s.level === 2)?.fresh ?? false)
+    }).pipe(Effect.provide(serverLayer(config)))
+  )
+  it.effect("literal punctuation, captures, empty matches, invalid patterns and runaway regex", () =>
+    Effect.gen(function* () {
+      const literal = yield* scanHistory(["a.b axb"], {
+        ...search,
+        wholeWord: false,
+        pairs: [{ find: "a.b", replace: "ok" }]
+      })
+      assert.strictEqual(literal[0]!.after, "ok axb")
+      const groups = yield* scanHistory(["Aria"], {
+        ...search,
+        regex: true,
+        preserveCase: false,
+        pairs: [{ find: "(Ar)(ia)", replace: "$2$1 $$ $&" }]
+      })
+      assert.strictEqual(groups[0]!.after, "iaAr $ Aria")
+      const empty = yield* scanHistory(["ab"], {
+        ...search,
+        regex: true,
+        wholeWord: false,
+        preserveCase: false,
+        pairs: [{ find: "(?=b)", replace: "!" }]
+      })
+      assert.strictEqual(empty[0]!.after, "a!b")
+      assert.strictEqual(
+        yield* outcome(
+          scanHistory(["abc"], { ...search, regex: true, pairs: [{ find: "(", replace: "" }] }),
+          () => "allowed"
+        ),
+        "HistoryRejected"
+      )
+      assert.strictEqual(
+        yield* outcome(
+          scanHistory(["a".repeat(20000) + "!"], {
+            ...search,
+            regex: true,
+            wholeWord: false,
+            pairs: [{ find: "(a+)+$", replace: "" }]
+          }),
+          () => "allowed"
+        ),
+        "HistoryRejected"
+      )
+    })
+  )
+})

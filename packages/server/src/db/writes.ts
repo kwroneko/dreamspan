@@ -349,7 +349,11 @@ export const makeWriteHandlers = (bin: Bin) =>
             content
           })
           if (content === row.content) return toVersion(shown)
-          if (!(yield* shownElsewhere(sql, slot.chat_id, fork.id, row.slot_id, original, versionId))) {
+          // Changeset before/after identities are durable snapshots too: a later undo may
+          // restore a version no fork currently shows. Preserve that row by copying here.
+          const [retained] = yield* sql`SELECT 1 FROM changeset_items WHERE target_kind='version_replace'
+            AND (before_json ->> '$.id'=${versionId} OR after_json ->> '$.id'=${versionId}) LIMIT 1`
+          if (!retained && !(yield* shownElsewhere(sql, slot.chat_id, fork.id, row.slot_id, original, versionId))) {
             // No other fork shows it: the trigger keeps the previous text in version_history (DESIGN §3.1).
             yield* recordHistoryReduction(sql, row.slot_id, content, versionId)
             yield* sql`UPDATE versions SET content = ${content}, updated_at = ${Date.now()} WHERE id = ${versionId}`

@@ -1,3 +1,4 @@
+import { makeHistoryWriteHandlers } from "./historyWrites.ts"
 import { makeLcmQueueHandlers } from "./lcmQueue.ts"
 import { makeLcmEnableWriteHandlers } from "./lcmEnableWrites.ts"
 import { makeLcmUiWriteHandlers } from "./lcmUiWrites.ts"
@@ -55,6 +56,7 @@ RpcServer.layer(WriteOps, { concurrency: 1 }).pipe(
         // --- ST data folder import (ARCHITECTURE.md §13)
         const stImport = yield* makeStImportWriteHandlers()
         return WriteOps.of({
+          ...(yield* makeHistoryWriteHandlers),
           ...graph,
           ...library,
           ...binOps,

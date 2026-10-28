@@ -1,3 +1,4 @@
+import { HistoryPanel } from "./HistoryPanel.tsx"
 import { GenerationSettingsPanel } from "./GenerationControls.tsx"
 import { PresetTab } from "./PresetTab.tsx"
 // The chat's side panel (DESIGN §10.1): who's here, what the chat sends with, its lorebooks,
@@ -62,7 +63,8 @@ const PANEL_TABS = [
   { value: "chat", label: "This chat", icon: "sliders" },
   { value: "lorebooks", label: "Lorebooks", icon: "book" },
   { value: "notes", label: "Notes", icon: "note" },
-  { value: "summaries", label: "Summaries", icon: "summary" }
+  { value: "summaries", label: "Summaries", icon: "summary" },
+  { value: "history", label: "History edits", icon: "edit" }
 ] as const
 
 export type PanelTab = (typeof PANEL_TABS)[number]["value"] | `card:${string}`
@@ -180,6 +182,8 @@ function TabContent({
   if (tab.startsWith("card:"))
     return <CharacterPanel entityId={tab.slice(5) as EntityId} onNotes={() => onNotes(tab.slice(5) as EntityId)} />
   switch (tab) {
+    case "history":
+      return <HistoryPanel session={session} view={view} active={active} onJump={onJump} />
     case "model":
       return <GenerationSettingsPanel session={session} kind={tab} />
     case "portrait":

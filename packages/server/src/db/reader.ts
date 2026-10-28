@@ -1,3 +1,4 @@
+import { makeHistoryReadHandlers } from "./historyReads.ts"
 import { makeLcmPlanningHandlers } from "./lcmPlanning.ts"
 import { makeLcmReadHandlers } from "./lcmReads.ts"
 import { makeLcmEnableReadHandlers } from "./lcmEnableReads.ts"
@@ -29,6 +30,7 @@ RpcServer.layer(ReadOps, { concurrency: 1, disableFatalDefects: true }).pipe(
     ReadOps.toLayer(
       Effect.map(
         Effect.all([
+          makeHistoryReadHandlers,
           makeReadHandlers,
           makeProviderReadHandlers,
           makeAccountReadHandlers,
@@ -45,6 +47,7 @@ RpcServer.layer(ReadOps, { concurrency: 1, disableFatalDefects: true }).pipe(
           makeLcmEnableReadHandlers
         ]),
         ([
+          history,
           core,
           providers,
           accounts,
@@ -60,6 +63,7 @@ RpcServer.layer(ReadOps, { concurrency: 1, disableFatalDefects: true }).pipe(
           lcmEnable
         ]) =>
           ReadOps.of({
+            ...history,
             ...core,
             ...providers,
             ...accounts,
