@@ -18,6 +18,8 @@ export interface Registry<A extends { readonly id: string }> {
   readonly disable: (id: string) => () => void
   /** The entry currently in effect for an id. */
   readonly get: (id: string) => A | undefined
+  readonly subscribe: (listener: () => void) => () => void
+  readonly snapshot: () => number
   /** Every entry in effect, in the order their ids were first registered. */
   readonly list: () => ReadonlyArray<A>
 }
@@ -25,6 +27,12 @@ export interface Registry<A extends { readonly id: string }> {
 export const makeRegistry = <A extends { readonly id: string }>(): Registry<A> => {
   // Each id keeps a stack of registrations; the newest is in effect. A registration
   // removes itself wherever it is in the stack, so they may be undone in any order.
+  const listeners = new Set<() => void>()
+  let version = 0
+  const changed = () => {
+    version++
+    for (const listener of listeners) listener()
+  }
   const stacks = new Map<string, Array<Registration<A>>>()
 
   const push = (id: string, value: A | typeof DISABLED) => {
@@ -32,9 +40,13 @@ export const makeRegistry = <A extends { readonly id: string }>(): Registry<A> =
     const stack = stacks.get(id) ?? []
     stack.push(registration)
     stacks.set(id, stack)
+    changed()
     return () => {
       const index = stack.indexOf(registration)
-      if (index >= 0) stack.splice(index, 1)
+      if (index >= 0) {
+        stack.splice(index, 1)
+        changed()
+      }
     }
   }
 
@@ -44,6 +56,13 @@ export const makeRegistry = <A extends { readonly id: string }>(): Registry<A> =
   }
 
   return {
+    subscribe: (listener) => {
+      listeners.add(listener)
+      return () => {
+        listeners.delete(listener)
+      }
+    },
+    snapshot: () => version,
     register: (entry) => push(entry.id, entry),
     disable: (id) => push(id, DISABLED),
     get,

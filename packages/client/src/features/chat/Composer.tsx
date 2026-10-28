@@ -1,4 +1,4 @@
-import { GenerationControls } from "./GenerationControls.tsx"
+import { ComposerControls, invokeComposerControl, type ComposerControlContext } from "./composerControls.tsx"
 // The composer (DESIGN §2.2): who's speaking, always visible, with a switcher and the
 // speakers used most recently; Send as them, or Generate a turn. With the guidance toggle
 // on, the text is guidance instead: a one-turn direction for Generate, a swipe or Continue,
@@ -16,19 +16,14 @@ import { useSession } from "../../session.ts"
 import type { AppError } from "../../errors.ts"
 import { AutoGrowTextarea } from "../../ui/AutoGrowTextarea.tsx"
 import { composerKeyDown } from "./composerKeys.ts"
-import { Avatar } from "../../ui/Avatar.tsx"
 import { Button, buttonClass } from "../../ui/Button.tsx"
 import { Textarea } from "../../ui/Field.tsx"
 import { Popover } from "../../ui/Popover.tsx"
-import { Switch } from "../../ui/Choice.tsx"
 import { useViewPrefs } from "../../ui/viewPrefs.ts"
 import { Badge } from "../../ui/Surface.tsx"
-import { SquareIconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import { defaultSpeaker, nameOf, nextInTurn, recentSpeakers, replyFaces, useCast } from "./cast.ts"
-import { GenerateIcon, HistoryIcon, RegenerateIcon, SendIcon, StopIcon } from "./icons.tsx"
+import { HistoryIcon } from "./icons.tsx"
 import { composerChoice, useComposerChoice } from "./speaker.ts"
-import { ReplyFrom } from "./ReplyFrom.tsx"
-import { SpeakerSwitcher } from "./SpeakerSwitcher.tsx"
 import { useComposerTurn } from "./composerTurn.ts"
 import { ReplayNotice } from "../editor/ReplayNotice.tsx"
 import { ComposerDraft, type ComposerSource, type Sent } from "./composerDraft.ts"
@@ -410,8 +405,6 @@ export function Composer({
     }
   }
 
-  const onKeyDown = composerKeyDown(guidance ? generate : send)
-
   const hasText = text.trim() !== ""
   const sendLabel = hasText ? (name ? `Send as ${name}` : "Send") : replierName ? `${replierName} replies` : "Send"
   const sendHint = hasText
@@ -430,9 +423,55 @@ export function Composer({
   }${guidance && hasText ? ", following the guidance" : ""}${guidance ? " (Enter). The guidance stays here." : ""}`
   const shownError = error ?? saveError
 
+  const controls: ComposerControlContext = {
+    session,
+    view,
+    onSettings,
+    speaker: { speaker, recent: switcherRecent, onPick },
+    recent: recent.map((id) => ({
+      id,
+      name: nameOf(castView, id) ?? "?",
+      mediaId: castView.cards.get(id)?.avatarMediaId ?? null
+    })),
+    onRecent: setPicked,
+    guidance,
+    prefsReady: viewPrefs.ready,
+    changeGuidance: (next) => {
+      void viewPrefs.change({ guidance: next })
+    },
+    hint: guidance
+      ? `A one-turn direction for ${name ? `${name}'s` : "the"} next message (Enter), a new version or Continue. It stays here until you change it.`
+      : `${generateText} doesn't use this text: turn guidance on to direct the next message with it.`,
+    reply: {
+      candidates: faces,
+      muted: cast?.absent ?? [],
+      next,
+      picked: pickedReply,
+      disabled: !ready,
+      onPick: (id) => void choices.change({ replyFrom: id }).then(report)
+    },
+    leaf,
+    leafGenerating,
+    busy,
+    ready,
+    hasText,
+    replier,
+    generateText,
+    generateHint,
+    sendLabel,
+    sendHint,
+    generate,
+    send,
+    replyNow,
+    report
+  }
+  const onKeyDown = composerKeyDown(() =>
+    invokeComposerControl(guidance ? "composer.generate" : "composer.send", controls, "keyboard")
+  )
+
   return (
     <div className="@container mx-auto flex w-full max-w-3xl flex-col gap-2 border-t border-border pt-2 pb-2">
-      <GenerationControls session={session} onSettings={onSettings} />
+      <ComposerControls placement="settings" context={controls} />
       {view.queue.length > 0 && (
         <ul className="flex flex-col gap-2" aria-label="Queued messages">
           {view.queue.map((queued) => (
@@ -474,22 +513,7 @@ export function Composer({
       <div className="flex flex-col gap-1.5 @min-[640px]:flex-row @min-[640px]:items-end">
         {/* Who's speaking, and the speakers used last: one tap each (DESIGN §2.2). */}
         <div className="flex min-w-0 items-center gap-1 @min-[640px]:h-11">
-          <SpeakerSwitcher speaker={speaker} recent={switcherRecent} onPick={onPick} />
-          {recent.map((id) => {
-            const who = nameOf(castView, id) ?? "?"
-            return (
-              <Tooltip key={id} label={`Speak as ${who}`}>
-                <button
-                  type="button"
-                  aria-label={`Speak as ${who}`}
-                  onClick={() => setPicked(id)}
-                  className="shrink-0 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-focus"
-                >
-                  <Avatar id={id} name={who} mediaId={castView.cards.get(id)?.avatarMediaId ?? null} size="md" />
-                </button>
-              </Tooltip>
-            )
-          })}
+          <ComposerControls placement="speaker" context={controls} />
           <span className="ml-auto @min-[640px]:hidden">
             <History draft={draft} />
           </span>
@@ -536,81 +560,12 @@ export function Composer({
             <span className="hidden @min-[640px]:inline-flex">
               <History draft={draft} />
             </span>
-            {leaf?.version.writer === "model" && !leafGenerating && (
-              <SquareIconButton
-                label="Regenerate the latest reply"
-                hint="Regenerate the latest reply: a new version of it, in its place"
-                variant="ghost"
-                onClick={async () => report(await session.regenerate(leaf))}
-              >
-                <RegenerateIcon />
-              </SquareIconButton>
-            )}
-            {leafGenerating && (
-              <SquareIconButton
-                label="Stop the reply"
-                variant="ghost"
-                onClick={async () => report(await session.stop(leaf.version.id))}
-              >
-                <StopIcon />
-              </SquareIconButton>
-            )}
-            {/* With guidance on, it's the primary action: guidance is never sent as a message by mistake. */}
-            <Tooltip label={generateHint}>
-              <Button
-                variant={guidance ? "primary" : "secondary"}
-                pending={guidance && busy}
-                aria-label={generateText}
-                disabled={busy || !ready}
-                onClick={generate}
-                className="max-w-52 sm:max-w-56"
-              >
-                {guidance && !busy && <GenerateIcon />}
-                <span className="truncate">{generateText}</span>
-              </Button>
-            </Tooltip>
-            {!guidance && (
-              <SquareIconButton
-                label={sendLabel}
-                hint={sendHint}
-                variant="primary"
-                pending={busy}
-                disabled={!ready || (!hasText && replier === null)}
-                onClick={hasText ? send : replyNow}
-              >
-                {!busy && <SendIcon />}
-              </SquareIconButton>
-            )}
+            <ComposerControls placement="actions" context={controls} />
           </div>
         </div>
       </div>
-      {/* The guidance toggle, under the input so it never narrows it (DESIGN §2.2). */}
-      <div className="flex flex-wrap items-start gap-x-3 gap-y-1">
-        <span className="shrink-0 text-sm">
-          <Switch
-            checked={guidance}
-            disabled={!viewPrefs.ready}
-            onCheckedChange={(next) => void viewPrefs.change({ guidance: next })}
-          >
-            Guidance
-          </Switch>
-        </span>
-        {(guidance || hasText) && (
-          <p id="composer-hint" className="min-w-0 flex-1 basis-60 pt-0.5 text-xs text-muted">
-            {guidance
-              ? `A one-turn direction for ${name ? `${name}'s` : "the"} next message (Enter), a new version or Continue. It stays here until you change it.`
-              : `${generateText} doesn't use this text: turn guidance on to direct the next message with it.`}
-          </p>
-        )}
-      </div>
-      <ReplyFrom
-        candidates={faces}
-        muted={cast?.absent ?? []}
-        next={next}
-        picked={pickedReply}
-        disabled={!ready}
-        onPick={(id) => void choices.change({ replyFrom: id }).then(report)}
-      />
+      <ComposerControls placement="guidance" context={controls} />
+      <ComposerControls placement="reply" context={controls} />
       {impersonationNotice && (
         <div
           role="status"

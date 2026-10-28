@@ -1,3 +1,5 @@
+import { useChatCommandKeys } from "./commands.tsx"
+import { resolvePanel, useChatPanels } from "./panels.tsx"
 import { HistoryPreviewProvider } from "./historyPreview.tsx"
 import { PresetWorkspace, PresetOverlayHost } from "../editor/PresetWorkspace.tsx"
 import { PortraitProvider } from "../../ui/Portrait.tsx"
@@ -463,14 +465,17 @@ function OpenChat({
  * The side panel's tab: the URL's, else on a wide screen the one this browser last had open
  * (a link to a message drops the URL's). A phone opens it only when asked: it covers the chat.
  */
-function usePanel(urlPanel: PanelTab | null) {
+function usePanel(urlPanel: PanelTab | null, view: ChatView) {
   const navigate = useNavigate()
   const wide = useWide()
   const userId = useSession().user.id
   // Each user's own, read again when another signs in.
   const [remembered, setRemembered] = useState(() => ({ userId, tab: rememberedPanel(userId) }))
   const rememberedTab = remembered.userId === userId ? remembered.tab : rememberedPanel(userId)
-  const panel = urlPanel ?? (wide ? rememberedTab : null)
+  useChatPanels()
+  const candidate = urlPanel ?? (wide ? rememberedTab : null)
+  const descriptor = candidate === null ? undefined : resolvePanel(candidate)
+  const panel = descriptor && descriptor.available?.(view) !== false ? candidate : null
   // The URL names the tab shown, so a refresh or a copied link keeps it.
   useEffect(() => {
     if (urlPanel === null && panel !== null)
@@ -506,17 +511,7 @@ function ChatSurface({
 }) {
   const view = useSyncExternalStore(session.subscribe, session.snapshot)
   const navigate = useNavigate()
-  const { panel, show, wide, userId } = usePanel(urlPanel)
-  useEffect(() => {
-    const find = (event: KeyboardEvent) => {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "h") {
-        event.preventDefault()
-        show("history")
-      }
-    }
-    window.addEventListener("keydown", find)
-    return () => window.removeEventListener("keydown", find)
-  }, [show])
+  const { panel, show, wide, userId } = usePanel(urlPanel, view)
   /** Search params that keep the panel's tab. */
   const withPanel = useCallback(
     (search: Record<string, string>) => (panel === null ? search : { ...search, panel }),
@@ -595,6 +590,7 @@ function ChatSurface({
     },
     [session, navigate, show, withPanel, wide, slot, branchFork, userId]
   )
+  useChatCommandKeys({ session, view, onHistory: () => show("history"), onJump: jump })
   const title = chatDisplayName(view)
   const panelOpen = panel !== null
   return (
@@ -631,6 +627,7 @@ function ChatSurface({
                   onHistory={() => show("history")}
                   actions={
                     <PanelToggles
+                      view={view}
                       userId={userId}
                       open={panel}
                       wide={wide}
@@ -716,6 +713,7 @@ function ChatSurface({
 
 /** /chats/$chatId, with `fork` for a fork other than the current one and `slot` for a message. */
 export function ChatPage() {
+  useChatPanels()
   const { chatId } = useParams({ strict: false }) as { chatId: ChatId }
   const search = useSearch({ strict: false }) as { fork?: unknown; slot?: unknown; panel?: unknown }
   const fork = typeof search.fork === "string" && search.fork !== "" ? (search.fork as ForkId) : null
