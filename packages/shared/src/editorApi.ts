@@ -3,7 +3,7 @@
 // saving commits the drafts as one revision. Writes carry the row version the client saw.
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
-import { ChatId, EntityId, SlotId } from "./chat.ts"
+import { ChatId, EntityId, ForkId, SlotId } from "./chat.ts"
 import { BinItem } from "./bin.ts"
 import { Draft, DraftRestore, DraftState } from "./drafts.ts"
 import { NotFound, ServerError, StaleWrite } from "./errors.ts"
@@ -82,7 +82,11 @@ const Errors = [NotFound, ServerError] as const
 const Writes = [NotFound, StaleWrite, EditRefused, ServerError] as const
 
 /** A chat note edits from the displayed position, on that branch. */
-export const ChatNotePosition = Schema.Struct({ chatId: ChatId, slotId: Schema.NullOr(SlotId) })
+export const ChatNotePosition = Schema.Struct({
+  chatId: ChatId,
+  forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
+  slotId: Schema.NullOr(SlotId)
+})
 export type ChatNotePosition = typeof ChatNotePosition.Type
 
 const DraftField = { refId: RefId, field: Schema.String }

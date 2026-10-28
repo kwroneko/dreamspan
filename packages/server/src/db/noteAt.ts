@@ -1,4 +1,4 @@
-import { eventApplies } from "./forkState.ts"
+import { eventApplies, inFork } from "./forkState.ts"
 // Resolve the editor through the same branch binding the assembler reads (DESIGN §3.4).
 import type { UserId } from "@rp/shared/domain.ts"
 import { attachedApplies, slotDeletedIn, viewAt } from "./forkState.ts"
@@ -30,7 +30,7 @@ export const noteAt = Effect.fnUntraced(function* (
   }
   const head = yield* lib.loadDoc(ref.head_revision_id)
   // A binding attached to a version applies where the fork in view shows it.
-  const fork = yield* viewAt(sql, chatId, slotId)
+  const fork = yield* viewAt(sql, chatId, slotId).pipe(inFork(sql, chatId, position.forkId, slotId))
   if (ref.kind !== "note" || (head.owner as { chat?: string } | undefined)?.chat !== chatId) {
     return yield* new NotFound({ entity: "note", id: ref.id })
   }

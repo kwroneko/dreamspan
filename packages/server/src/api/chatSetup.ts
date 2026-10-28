@@ -327,7 +327,13 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
         // Every card of the cast, the ones the user plays included: a persona note is a card's note.
         const cards = [...state.participants, ...state.playedByMe.filter((e) => !state.participants.includes(e))]
         const switches = noteSwitches(events)
-        const entries = yield* reader.ChatNoteEntries({ userId: id, chatId, slotId, cards: cards as Array<EntityId> })
+        const entries = yield* reader.ChatNoteEntries({
+          userId: id,
+          chatId,
+          forkId: forkId ?? null,
+          slotId,
+          cards: cards as Array<EntityId>
+        })
         return yield* Effect.forEach(entries, (entry) =>
           Effect.gen(function* () {
             const revisionId = state.noteRevisions[entry.ref.entityId] as RevisionId | undefined

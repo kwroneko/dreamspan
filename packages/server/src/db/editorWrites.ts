@@ -129,10 +129,15 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps) => {
         originRef: null,
         message
       })
-      yield* makeGraphWrites(sql, drafts).insertStateEvent(userId, position.chatId, position.slotId, null, null, {
-        key: "note.binding",
-        value: { note: ref.entity_id as EntityId, revision: revision as never }
-      })
+      yield* makeGraphWrites(sql, drafts).insertStateEvent(
+        userId,
+        position.chatId,
+        position.slotId,
+        null,
+        null,
+        { key: "note.binding", value: { note: ref.entity_id as EntityId, revision: revision as never } },
+        position.forkId ?? null
+      )
       return new RefChange({ ref: toLibraryRef({ ...ref, head_revision_id: revision }), followers: [] })
     })
 

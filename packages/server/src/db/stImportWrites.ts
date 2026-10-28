@@ -10,8 +10,10 @@ import {
   insertFork,
   effectiveOverride,
   slotDeletedIn,
-  versionDeletedIn
+  versionDeletedIn,
+  eventApplies
 } from "./forkState.ts"
+import { pathEvents, pathSegments } from "./pathSegments.ts"
 import { forkImportSlot } from "./stImportFork.ts"
 import type { ForkRow } from "./rows.ts"
 // Write handlers for the ST data folder import (ARCHITECTURE.md §13). Each is one
@@ -45,6 +47,32 @@ const Message = Schema.Struct({
 })
 const Messages = Schema.fromJsonString(Schema.Array(Message))
 
+/** State changed locally stays local, including the inverse of an imported switch. */
+const stateTargets = (data: StateEventData): ReadonlyArray<string> => {
+  switch (data.key) {
+    case "participant.join":
+      return [`participant:${data.value.entity}`, `presence:${data.value.entity}`]
+    case "participant.leave":
+      return [`participant:${data.value.entity}`]
+    case "presence.set":
+      return [`presence:${data.value.entity}`]
+    case "note.activate":
+    case "note.deactivate":
+    case "note.binding":
+      return [`note:${data.value.note}`]
+    case "lorebook.attach":
+    case "lorebook.detach":
+      return [`lorebook:${data.value.ref}`]
+    case "lorebook.binding":
+    case "lorebook.embedded":
+      return [`${data.key}:${data.value.entity}`]
+    case "var.set":
+      return [`var:${data.value.name}`]
+    default:
+      return [data.key]
+  }
+}
+
 /** What a record's payload holds. */
 interface RecordPayload {
   readonly source: string
@@ -76,6 +104,8 @@ interface RecordPayload {
   readonly forkPrior?: string | null
   /** This pass matched a deleted subtree root; later live additions remain behind it. */
   readonly branchDeleted?: boolean
+  /** A replacement ST path must not move the fork off locally changed history. */
+  readonly keepTip?: boolean
   /** A branch whose ST name the import has placed (or found a name where it would go). */
   readonly named?: boolean
   /** Last resolved parent, retained when a later header loses main_chat. */
@@ -412,6 +442,27 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
           let differing = 0
           let updated = 0
           let branchDeleted = payload.branchDeleted ?? false
+          let keepTip = payload.keepTip ?? false
+          const changedSuffix = Effect.fnUntraced(function* (depth: number) {
+            const prior = payload.prior ?? payload.end ?? payload.last ?? null
+            if (prior === null || (yield* ownedSlot(chatId, prior)).depth < depth) return false
+            const [row] = yield* sql<{ changed: number }>`
+              ${pathSegments(sql, chatId, prior, null)}, changed(slot_id) AS (
+                SELECT o.slot_id FROM forks f CROSS JOIN json_each(f.lineage_json) l
+                JOIN fork_overrides o ON o.fork_id = l.value ->> 0
+                  AND o.seq <= coalesce(l.value ->> 1, 9223372036854775807)
+                WHERE f.id = ${fileFork.id} AND o.origin = 'user' AND o.slot_depth >= ${depth}
+                UNION ALL
+                SELECT v.slot_id FROM version_history h JOIN versions v ON v.id = h.version_id
+                  JOIN slots s ON s.id = v.slot_id
+                WHERE s.chat_id = ${chatId} AND s.depth >= ${depth} AND v.fork_id IS NULL
+                UNION ALL
+                SELECT e.slot_id FROM state_events e WHERE e.chat_id = ${chatId} AND e.origin <> 'import'
+                  AND e.slot_depth >= ${depth} AND ${eventApplies(sql, fileFork.id, "e")}
+              ) SELECT EXISTS (SELECT 1 FROM changed c JOIN slots s ON s.id = c.slot_id
+                JOIN segments g ON g.chain_id = s.chain_id AND s.depth BETWEEN g.lo AND g.hi) AS changed`
+            return row?.changed === 1
+          })
           let firstAdded: string | null = null
           const slotIds: Array<SlotId> = []
           for (const message of messages) {
@@ -579,6 +630,11 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
                 slotIds.push(match.slot_id as SlotId)
                 continue
               }
+              // A writer change (or a new unmatched message) replaces the remaining
+              // path. Keep a fork with local choices on that suffix on its existing
+              // path, just as when it has a local continuation. Store ST's new path
+              // in the record without moving the user off their work.
+              keepTip ||= yield* changedSuffix(parent === null ? 0 : parent.depth + 1)
               matching = false
             }
             const slotId = uuidv7()
@@ -613,6 +669,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
           if (
             (input.advanceLeaf || payload.end == null || added > 0 || payload.advanced != null) &&
             !branchDeleted &&
+            !keepTip &&
             tip !== undefined &&
             fileFork.deleted_at === null &&
             (fileFork.tip_slot_id === null || fileFork.tip_slot_id === previousTip)
@@ -626,6 +683,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
             firstAdded: payload.firstAdded ?? firstAdded,
             advanced,
             branchDeleted,
+            keepTip,
             forkPrior,
             last: slotIds.at(-1) ?? payload.last ?? null
           }
@@ -644,12 +702,32 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
         if (input.position !== null) yield* ownedSlot(chatId, input.position)
         const target = input.leaf === null ? null : yield* ownedSlot(chatId, input.leaf)
         if (input.end !== null) yield* ownedSlot(chatId, input.end)
+        // Include dormant positional choices too: a later restore or swipe must retain
+        // them. The lineage and suppression rules keep other forks' choices out.
+        const local = yield* sql<{ key: StateEventData["key"]; value_json: string }>`
+          ${pathEvents(sql, chatId, fileFork.tip_slot_id)}
+          SELECT e.key, e.value_json FROM path_events e WHERE e.origin <> 'import'
+            AND e.scope IS NULL AND ${eventApplies(sql, fileFork.id, "e")}`
+        const localTargets = new Set(
+          local.flatMap((e) => stateTargets({ key: e.key, value: JSON.parse(e.value_json) } as StateEventData))
+        )
+        const keepNote = Effect.fnUntraced(function* (id: string | undefined, kind: StImportNote["kind"]) {
+          if (kind === "author_note" && localTargets.has("author_note.set")) return true
+          if (id === undefined) return false
+          if (localTargets.has(`note:${id}`)) return true
+          const [row] = yield* sql<{ changed: number }>`SELECT e.deleted_at IS NOT NULL OR EXISTS (
+            SELECT 1 FROM entity_refs r JOIN entity_revisions h ON h.id = r.head_revision_id
+            WHERE r.entity_id = e.id AND r.ref_kind = 'upstream' AND h.origin <> 'import'
+          ) AS changed FROM entities e WHERE e.id = ${id}`
+          return row?.changed === 1
+        })
         const notes: Record<string, EntityId> = {
           ...input.previousNotes,
           ...(payload.notes as Record<string, EntityId> | undefined)
         }
         for (const note of input.notes) {
           const replaced = notes[note.kind]
+          if (yield* keepNote(replaced, note.kind)) continue
           const entity = yield* insertNote(userId, chatId, payload.source, note)
           if (replaced !== undefined) {
             yield* insertEvent(
@@ -685,6 +763,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
         for (const kind of input.removedNotes) {
           const gone = notes[kind]
           if (gone === undefined) continue
+          if (yield* keepNote(gone, kind)) continue
           yield* insertEvent(
             userId,
             chatId,
@@ -694,10 +773,13 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
           )
           delete notes[kind]
         }
-        for (const event of input.events) yield* insertEvent(userId, chatId, input.position, event, fileFork.id)
+        for (const event of input.events)
+          if (!stateTargets(event).some((target) => localTargets.has(target)))
+            yield* insertEvent(userId, chatId, input.position, event, fileFork.id)
         // Advance only this file's fork, preserving a continuation made locally.
         if (
           fileFork.deleted_at === null &&
+          !payload.keepTip &&
           target?.deleted_at === null &&
           (fileFork.tip_slot_id === null ||
             fileFork.tip_slot_id === (yield* relocatedEnd(fileFork, payload.advanced ?? payload.end ?? null)))
@@ -728,7 +810,8 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
           advanced: null,
           lease: null,
           forkPrior: null,
-          prior: null
+          prior: null,
+          keepTip: false
         }
         yield* sql`UPDATE jobs SET status = 'complete', payload_json = ${JSON.stringify(updated)}, updated_at = ${Date.now()}
           WHERE id = ${input.recordId}`

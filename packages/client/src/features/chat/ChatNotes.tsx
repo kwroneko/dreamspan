@@ -111,7 +111,7 @@ function ChatNoteRow({
       }
     >
       <NoteEditor
-        key={`${card === null ? (position.slotId ?? "start") : note.ref.id}:${generation}`}
+        key={`${position.forkId ?? ""}:${card === null ? (position.slotId ?? "start") : note.ref.id}:${generation}`}
         noteRef={note.ref}
         call={call}
         cards={cards}
@@ -244,7 +244,7 @@ export function NotesTab({
                   cards={named}
                   card={card}
                   open={open === note.ref.id}
-                  position={{ chatId, slotId: leafSlotId }}
+                  position={{ chatId, forkId: view.forkId, slotId: leafSlotId }}
                   onOpenChange={(next) => setOpen(next ? note.ref.id : null)}
                   onToggle={(active) => void toggle(note, active)}
                   onDeleted={onDeleted}

@@ -2361,7 +2361,13 @@ export class ReadOps extends RpcGroup.make(
    * linked one with its shared note (whose text is in `doc.content`).
    */
   Rpc.make("ChatNoteEntries", {
-    payload: { userId: UserId, chatId: ChatId, slotId: Schema.NullOr(SlotId), cards: Schema.Array(EntityId) },
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
+      slotId: Schema.NullOr(SlotId),
+      cards: Schema.Array(EntityId)
+    },
     success: Schema.Array(
       Schema.Struct({ ref: LibraryRef, doc: Doc, card: Schema.NullOr(EntityId), linked: Schema.NullOr(LinkedNote) })
     ),

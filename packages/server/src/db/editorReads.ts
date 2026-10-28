@@ -68,7 +68,7 @@ export const makeEditorReadHandlers = Effect.gen(function* () {
         )
       }).pipe(query("ListCardNotes")),
 
-    ChatNoteEntries: ({ userId, chatId, slotId, cards }) =>
+    ChatNoteEntries: ({ userId, chatId, forkId, slotId, cards }) =>
       Effect.gen(function* () {
         const [chat] = yield* sql<{ n: number }>`
           SELECT count(*) AS n FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`
@@ -86,7 +86,7 @@ export const makeEditorReadHandlers = Effect.gen(function* () {
             Effect.gen(function* () {
               const doc = yield* lib.loadDoc(row.head_revision_id)
               if ((doc.owner as { chat?: string } | undefined)?.chat !== chatId) return { row, doc }
-              const resolved = yield* noteAt(sql, lib, userId, row, { chatId, slotId })
+              const resolved = yield* noteAt(sql, lib, userId, row, { chatId, forkId: forkId ?? null, slotId })
               return { row: resolved.ref, doc: resolved.doc }
             })
         )
