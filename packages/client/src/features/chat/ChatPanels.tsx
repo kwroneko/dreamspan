@@ -1,80 +1,17 @@
-import { HistoryPanel } from "./HistoryPanel.tsx"
-import { GenerationSettingsPanel } from "./GenerationControls.tsx"
-import { PresetTab } from "./PresetTab.tsx"
-import { useAtomValue } from "@effect/atom-react"
-import { AsyncResult } from "effect/reactivity"
-import { AppClient } from "../../rpc.ts"
-import { ChatCardActions } from "./CardForkDialogs.tsx"
-// The chat's side panel (DESIGN §10.1): who's here, what the chat sends with, its lorebooks,
-// notes and summaries, beside the messages as ST's panels are, so the chat stays readable and
-// usable while it's open. On a phone it's a sheet over the chat. The open tab is in the URL
-// (`?panel=`), and this browser remembers it, for each user, for the next chat opened on a
-// wide screen.
-import { CharacterPanel } from "../characters/CharacterPanel.tsx"
-import type { EntityId } from "@rp/shared/chat.ts"
-import type { SlotId } from "@rp/shared/chat.ts"
-import { Component, lazy, type ReactNode, Suspense, useEffect, useMemo, useState, useSyncExternalStore } from "react"
+// The chat panel host: descriptors own its tabs and bodies; the host owns layout and retention.
+import type { EntityId, SlotId } from "@rp/shared/chat.ts"
+import { useEffect, useState, useSyncExternalStore } from "react"
 import { Button } from "../../ui/Button.tsx"
 import { useSession } from "../../session.ts"
-import { PortraitView } from "../../ui/Portrait.tsx"
 import { ResizeHandle, usePanelWidth } from "../../ui/ResizeHandle.tsx"
 import { Sheet } from "../../ui/Sheet.tsx"
-import { Loading } from "../../ui/Spinner.tsx"
 import { Tabs } from "../../ui/Tabs.tsx"
 import { IconButton } from "../../ui/Tooltip.tsx"
-import { CastTab } from "./CastTab.tsx"
-import { LorebooksTab } from "./LorebooksTab.tsx"
 import type { ChatSession, ChatView } from "./session.ts"
-import { SummaryPanel } from "./SummaryPanel.tsx"
-import { ThisChatTab } from "./ThisChatTab.tsx"
-
-// Loaded with the panel, not with the chat: it carries the note editor. Fetched as the panel
-// opens, so a tab first shown while the server can't be reached still has it.
-const loadNotes = () => import("./ChatNotes.tsx").then((module) => ({ default: module.NotesTab }))
-let NotesTab = lazy(loadNotes)
-
-/** A tab's code that couldn't be fetched says so in the tab, the chat and other tabs unharmed. */
-class NotLoaded extends Component<{ children: ReactNode }, { failed: boolean }> {
-  override state = { failed: false }
-  static getDerivedStateFromError() {
-    return { failed: true }
-  }
-  override render() {
-    if (!this.state.failed) return this.props.children
-    return (
-      <div className="flex flex-col items-start gap-2">
-        <p role="alert" className="text-sm text-danger">
-          The notes couldn't be loaded: the server can't be reached.
-        </p>
-        <Button
-          onClick={() => {
-            NotesTab = lazy(loadNotes)
-            this.setState({ failed: false })
-          }}
-        >
-          Try again
-        </Button>
-      </div>
-    )
-  }
-}
-
-const PANEL_TABS = [
-  { value: "model", label: "Model", icon: "sliders" },
-  { value: "preset", label: "Prompt preset", icon: "sliders" },
-  { value: "portrait", label: "Portrait", icon: "people" },
-  { value: "cast", label: "Cast", icon: "people" },
-  { value: "chat", label: "This chat", icon: "sliders" },
-  { value: "lorebooks", label: "Lorebooks", icon: "book" },
-  { value: "notes", label: "Notes", icon: "note" },
-  { value: "summaries", label: "Summaries", icon: "summary" },
-  { value: "history", label: "History edits", icon: "edit" }
-] as const
-
-export type PanelTab = (typeof PANEL_TABS)[number]["value"] | `card:${string}`
-
-export const isPanelTab = (value: unknown): value is PanelTab =>
-  (typeof value === "string" && /^card:[0-9a-f-]{36}$/.test(value)) || PANEL_TABS.some((tab) => tab.value === value)
+import { chatPanels, isPanelTab, panelTabs, PanelContent, useChatPanels } from "./panels.tsx"
+export { isPanelTab } from "./panels.tsx"
+/** Panel URL values are open strings, validated against the descriptors at use. */
+export type PanelTab = string
 
 // --- Whether the panel is open and at which tab: each user's choice in this browser, kept in
 // its storage under keys naming the user, so another account signing in here has its own.
@@ -127,14 +64,20 @@ export function PanelToggles({
   userId,
   open,
   wide,
+  view,
   onToggle
 }: {
   userId: string
   open: PanelTab | null
   wide: boolean
+  view: ChatView
   /** Opens the panel at a tab, or closes it when that tab is the one open. */
   onToggle: (tab: PanelTab) => void
 }) {
+  useChatPanels()
+  const available = panelTabs(view, open)
+  const tabs = available.filter((tab) => tab.descriptor.header !== false)
+  if (available.length === 0) return null
   if (!wide || open !== null)
     return (
       <Button
@@ -144,7 +87,15 @@ export function PanelToggles({
           open === null ? "Open the chat panel: cast, settings, lorebooks, notes and summaries" : "Hide the chat panel"
         }
         className="h-8 px-2.5"
-        onClick={() => onToggle(open ?? read(tabKey(userId)) ?? "chat")}
+        onClick={() => {
+          const remembered = read(tabKey(userId))
+          onToggle(
+            open ??
+              available.find((tab) => tab.value === remembered)?.value ??
+              tabs.find((tab) => tab.descriptor.default)?.value ??
+              (tabs[0] ?? available[0])!.value
+          )
+        }}
       >
         {open === null ? "Chat panel" : "Hide panel"}
       </Button>
@@ -152,129 +103,11 @@ export function PanelToggles({
   return (
     // Icons, as ST's panel buttons are, so the header keeps room for the chat's name.
     <div role="group" aria-label="Chat panel" className="flex shrink-0 gap-0.5">
-      {PANEL_TABS.map((tab) => (
-        <IconButton key={tab.value} label={tab.label} icon={tab.icon} onClick={() => onToggle(tab.value)} />
+      {tabs.map((tab) => (
+        <IconButton key={tab.value} label={tab.label} icon={tab.descriptor.icon} onClick={() => onToggle(tab.value)} />
       ))}
     </div>
   )
-}
-
-function ChatCharacterPanel({
-  session,
-  view,
-  entityId,
-  onNotes
-}: {
-  session: ChatSession
-  view: ChatView
-  entityId: EntityId
-  onNotes: () => void
-}) {
-  const card = view.cast?.participants.includes(entityId)
-    ? view.cast.cards.find((item) => item.entityId === entityId)
-    : undefined
-  const live = card !== undefined && !card.inBin
-  const query = useMemo(
-    () =>
-      AppClient.query(
-        "ListChatCards",
-        { chatId: session.id, slotId: view.leafSlotId, forkId: view.forkId, entityIds: live ? [entityId] : [] },
-        { reactivityKeys: ["library", `chat-cards:${session.id}`] }
-      ),
-    [session.id, view.leafSlotId, view.forkId, entityId, live]
-  )
-  const result = useAtomValue(query)
-  const info = AsyncResult.isSuccess(result) ? result.value[0] : undefined
-  return (
-    <CharacterPanel
-      entityId={entityId}
-      onNotes={onNotes}
-      actions={
-        card && (
-          <div className="flex flex-col gap-2">
-            {info && (
-              <p className="text-xs text-muted">
-                used by {info.usedByChats} {info.usedByChats === 1 ? "chat" : "chats"}
-              </p>
-            )}
-            <div className="flex flex-wrap gap-1">
-              <ChatCardActions key={entityId} session={session} card={card} info={info} />
-            </div>
-            {AsyncResult.isFailure(result) && (
-              <p role="alert" className="text-sm text-danger">
-                The card's details couldn't be read.
-              </p>
-            )}
-          </div>
-        )
-      }
-    />
-  )
-}
-
-function TabContent({
-  tab,
-  active,
-  session,
-  view,
-  focus,
-  notesFocus,
-  onNotes,
-  onJump,
-  onEnable
-}: {
-  tab: PanelTab
-  /** The tab shown: one kept mounted while another is reads its lists again when shown. */
-  active: boolean
-  session: ChatSession
-  view: ChatView
-  focus: string | null
-  /** The card whose notes the Notes tab shows first. */
-  notesFocus: EntityId | null
-  /** Opens the Notes tab at a card's notes. */
-  onNotes: (card: EntityId) => void
-  onJump: (slot: SlotId) => void
-  onEnable: () => void
-}) {
-  if (tab.startsWith("card:"))
-    return (
-      <ChatCharacterPanel
-        session={session}
-        view={view}
-        entityId={tab.slice(5) as EntityId}
-        onNotes={() => onNotes(tab.slice(5) as EntityId)}
-      />
-    )
-  switch (tab) {
-    case "history":
-      return <HistoryPanel session={session} view={view} active={active} onJump={onJump} />
-    case "model":
-      return <GenerationSettingsPanel session={session} kind={tab} />
-    case "portrait":
-      return <PortraitView />
-    case "cast":
-      return <CastTab session={session} />
-    case "preset":
-      return <PresetTab view={view} />
-    case "chat":
-      return <ThisChatTab session={session} active={active} />
-    case "lorebooks":
-      return <LorebooksTab session={session} active={active} />
-    case "notes":
-      return (
-        <NotLoaded>
-          <Suspense fallback={<Loading label="Loading the notes…" />}>
-            <NotesTab session={session} leafSlotId={view.leafSlotId} focusCard={notesFocus} />
-          </Suspense>
-        </NotLoaded>
-      )
-    case "summaries":
-      return view.lcm === null ? (
-        <Loading label="Loading the summaries…" />
-      ) : (
-        <SummaryPanel session={session} lcm={view.lcm} focus={focus} onJump={onJump} onEnable={onEnable} />
-      )
-  }
 }
 
 /** The panel: beside the chat on a wide screen, a sheet over it on a phone. */
@@ -300,6 +133,7 @@ export function ChatSidePanel({
 }) {
   // A tab mounts when first shown and stays mounted, hidden, while the panel is open, so
   // switching tabs never ends what's in one: a summary's edit with its unsaved text, say.
+  useChatPanels()
   const userId = useSession().user.id
   const { ref, width, min, max, change, reset } = usePanelWidth(userId, "chat", 416, 260, 640, 426, wide)
   const [visited, setVisited] = useState<ReadonlySet<PanelTab>>(() => new Set([tab]))
@@ -309,23 +143,23 @@ export function ChatSidePanel({
     onTab("notes")
   }
   useEffect(() => {
-    void loadNotes().catch(() => undefined)
+    for (const descriptor of chatPanels.list()) descriptor.preload?.()
   }, [])
   if (!visited.has(tab)) setVisited(new Set([...visited, tab]))
-  const activeCast = content.view.cast
-  const characterTabs = (activeCast?.cards ?? [])
-    .filter(
-      (card) => activeCast!.participants.includes(card.entityId) || activeCast!.playedByMe.includes(card.entityId)
-    )
-    .map((c) => ({ value: `card:${c.entityId}` as PanelTab, label: c.label }))
-  if (tab.startsWith("card:") && !characterTabs.some((t) => t.value === tab))
-    characterTabs.push({ value: tab, label: "Character" })
-  const tabs = [...PANEL_TABS, ...characterTabs].map((t) => ({
+  const tabs = panelTabs(content.view, tab).map((t) => ({
     value: t.value,
     label: t.label,
     panel:
       visited.has(t.value) || t.value === tab ? (
-        <TabContent tab={t.value} active={t.value === tab} notesFocus={notesFocus} onNotes={notes} {...content} />
+        <PanelContent
+          key={t.descriptor.id}
+          descriptor={t.descriptor}
+          tab={t.value}
+          active={t.value === tab}
+          notesFocus={notesFocus}
+          onNotes={notes}
+          {...content}
+        />
       ) : null
   }))
   if (!wide)

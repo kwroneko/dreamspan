@@ -9,7 +9,6 @@ import { HistoryDiff, HistoryPreviewContext } from "./historyPreview.tsx"
 import { useAtomValue } from "@effect/atom-react"
 import type { BinItem } from "@rp/shared/bin.ts"
 import type { ForkId, PathEntry, SlotId, Version } from "@rp/shared/chat.ts"
-import { Link, useNavigate } from "@tanstack/react-router"
 import {
   memo,
   type MouseEvent,
@@ -29,16 +28,13 @@ import { Button } from "../../ui/Button.tsx"
 import { Textarea } from "../../ui/Field.tsx"
 import { Icon, type IconName } from "../../ui/Icon.tsx"
 import { Markdown } from "../../ui/Markdown.tsx"
-import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
-import { Menu, MenuItem, MenuLinkItem, MenuSeparator } from "../../ui/Menu.tsx"
 import { Select } from "../../ui/Select.tsx"
 import { Badge } from "../../ui/Surface.tsx"
-import { showToast } from "../../ui/Toast.tsx"
-import { IconButton, iconButtonClass, Tooltip } from "../../ui/Tooltip.tsx"
+import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import { useDeletedToast } from "../bin/deleted.ts"
 import { ReplayNotice } from "../editor/ReplayNotice.tsx"
 import { castView, modelNameOf, useCast } from "./cast.ts"
-import { ContinueAction } from "./ContinueAction.tsx"
+import { MessageActions } from "./messageActions.tsx"
 import { Reasoning } from "./Reasoning.tsx"
 import { formatWhen } from "./chatTitle.ts"
 import { displayText } from "./macros.ts"
@@ -134,57 +130,6 @@ function RetryWith({ onPick }: { onPick: (model: ReturnType<typeof parseModelVal
         onValueChange={(value) => void onPick(parseModelValue(value))}
       />
     </div>
-  )
-}
-
-/**
- * "Regenerate with…": a new version of the message from a model the user picks, from the
- * same list as "Retry with…". Mounted only while open, so rows don't follow the session.
- */
-function RegenerateWith({
-  session,
-  title,
-  onClose,
-  onPick
-}: {
-  session: ChatSession
-  title: string
-  onClose: () => void
-  onPick: (model: ReturnType<typeof parseModelValue>) => void
-}) {
-  const models = useModelChoices(true)
-  // The model the chat goes on using, named, so the choice here reads as a one-off.
-  const effective = useSyncExternalStore(session.subscribe, session.snapshot).history?.model
-  const chatModel =
-    effective?.connectionName && effective.modelKey
-      ? `${effective.connectionName} · ${effective.modelKey} (${effective.scope === "chat" ? "this chat's" : "your default"})`
-      : null
-  return (
-    <Dialog
-      open
-      onOpenChange={(open) => !open && onClose()}
-      title={title}
-      description={`A new version of this message, written by the model you pick. The chat keeps its own model${
-        chatModel ? `: ${chatModel}` : ""
-      }.`}
-    >
-      {models.length === 0 ? (
-        <p className="text-sm text-muted">Loading your models… None are listed until a connection has one.</p>
-      ) : (
-        <Select
-          items={models}
-          value={null}
-          placeholder="Pick a model…"
-          onValueChange={(value) => {
-            onClose()
-            onPick(parseModelValue(value))
-          }}
-        />
-      )}
-      <DialogActions>
-        <Button onClick={onClose}>Cancel</Button>
-      </DialogActions>
-    </Dialog>
   )
 }
 
@@ -473,15 +418,6 @@ function Mark({
   )
 }
 
-const copy = async (text: string, what: string) => {
-  try {
-    await navigator.clipboard.writeText(text)
-    showToast({ title: `${what} copied` })
-  } catch {
-    showToast({ title: `Couldn't copy the ${what.toLowerCase()}`, description: "The browser didn't allow it." })
-  }
-}
-
 /** The session's editor at `key`; the row re-renders only when that one opens or closes. */
 const useEditor = (session: ChatSession, key: MessageEditorKey) =>
   useSyncExternalStore(
@@ -534,9 +470,7 @@ export const Message = memo(function Message({
   }, [revealed])
   const generating = version.status === "generating"
   const report = (outcome: Outcome<unknown>) => setError(outcome.ok ? null : outcome.error)
-  const navigate = useNavigate()
   const { versions, position, load, replace } = useVersions(session, entry, report)
-  const [regenerateWith, setRegenerateWith] = useState(false)
   const editEditor = useSyncExternalStore(
     session.subscribeEditors,
     useCallback(
@@ -624,8 +558,6 @@ export const Message = memo(function Message({
 
   // Every generated message has its arrows, to generate another; any with versions, to step through them.
   const showVersions = generated || entry.versionCount > 1
-  const deleteLabel = entry.versionCount > 1 ? "Delete version" : "Delete message"
-  const linkSearch = branchFork === null ? { slot: entry.slotId } : { fork: branchFork, slot: entry.slotId }
 
   const hidden = entry.contextExcluded
   // Who hid it: the user here (SetMessageHidden), else it came hidden from an ST import.
@@ -641,127 +573,8 @@ export const Message = memo(function Message({
         ? "Empty: there's no text to send to the model."
         : null
 
-  const more = (
-    <Menu
-      align="end"
-      label="More actions"
-      trigger={
-        <Tooltip label="More actions">
-          <button type="button" aria-label="More actions" className={iconButtonClass()}>
-            <Icon name="more" />
-          </button>
-        </Tooltip>
-      }
-    >
-      <MenuItem
-        icon="write"
-        onClick={() => session.openEditor({ _tag: "Write", slotId: entry.slotId }, "", entry.slotId)}
-      >
-        Write your own version
-      </MenuItem>
-      {!generated && (
-        // A version of the user's own turn written by the model, as its speaker (DESIGN §3.1).
-        <MenuItem icon="regenerate" onClick={async () => report(await session.regenerate(entry))}>
-          Generate a version
-        </MenuItem>
-      )}
-      <MenuItem icon="regenerate" onClick={() => setRegenerateWith(true)}>
-        {generated ? "Regenerate with…" : "Generate a version with…"}
-      </MenuItem>
-      <MenuItem
-        icon="branch"
-        onClick={async () => {
-          const from = session.snapshot().forkId
-          // A fork made here is the chat's current one: the chat opens on it, and Back
-          // returns to the fork it was made from.
-          const made = await session.branchFrom(entry.slotId)
-          report(made)
-          if (!made.ok) return
-          if (from !== null) await navigate({ to: ".", search: { fork: from }, replace: true })
-          void navigate({ to: ".", search: {} })
-        }}
-      >
-        Branch from here
-      </MenuItem>
-      <MenuItem icon={hidden ? "eye" : "ghost"} onClick={async () => report(await session.setHidden(entry, !hidden))}>
-        {hidden ? "Show to the model again" : "Hide from the model"}
-      </MenuItem>
-      <MenuItem icon="copy" onClick={() => void copy(session.textOf(version), "Text")}>
-        Copy text
-      </MenuItem>
-      <MenuItem
-        icon="link"
-        onClick={() => {
-          const url = new URL(`/chats/${session.id}`, window.location.origin)
-          for (const [key, value] of Object.entries(linkSearch)) url.searchParams.set(key, value)
-          void copy(url.toString(), "Link")
-        }}
-      >
-        Copy link
-      </MenuItem>
-      {version.context !== null && (
-        <MenuLinkItem
-          icon="layers"
-          render={
-            <Link to="/chats/$chatId/context/$versionId" params={{ chatId: session.id, versionId: version.id }} />
-          }
-        >
-          Context it was generated from
-        </MenuLinkItem>
-      )}
-      {entry.versionCount > 1 && (
-        <>
-          <MenuSeparator />
-          <MenuItem icon="trash" tone="danger" onClick={async () => toast(await session.deleteMessage(entry.slotId))}>
-            Delete message (all {entry.versionCount} versions)
-          </MenuItem>
-        </>
-      )}
-    </Menu>
-  )
-
   const actions = (
-    <>
-      {!generating && (
-        <IconButton
-          label="Edit"
-          icon="edit"
-          onClick={() => session.openEditor({ _tag: "Edit", versionId: version.id }, version.content, entry.slotId)}
-        />
-      )}
-      {generated && (
-        <IconButton
-          label="Regenerate"
-          icon="regenerate"
-          onClick={async () => report(await session.regenerate(entry))}
-        />
-      )}
-      <ContinueAction entry={entry} session={session} report={report} />
-      {version.context !== null && (
-        // Every generated version, a swipe included, opens the request that produced it.
-        <Tooltip label="Request it was generated from">
-          <Link
-            to="/chats/$chatId/context/$versionId"
-            params={{ chatId: session.id, versionId: version.id }}
-            aria-label="Request it was generated from"
-            className={iconButtonClass()}
-          >
-            <Icon name="layers" />
-          </Link>
-        </Tooltip>
-      )}
-      <IconButton
-        label={deleteLabel}
-        icon="trash"
-        tone="danger"
-        onClick={async () =>
-          toast(
-            entry.versionCount > 1 ? await session.deleteVersion(version.id) : await session.deleteMessage(entry.slotId)
-          )
-        }
-      />
-      {more}
-    </>
+    <MessageActions context={{ entry, session, branchFork, generated, generating, hidden, report, toast }} />
   )
 
   let marks: ReactNode = null
@@ -996,14 +809,6 @@ export const Message = memo(function Message({
           <p role="alert" className="text-sm text-danger">
             {error.message}
           </p>
-        )}
-        {regenerateWith && (
-          <RegenerateWith
-            session={session}
-            title={generated ? "Regenerate with another model" : "Generate a version with a model"}
-            onClose={() => setRegenerateWith(false)}
-            onPick={async (choice) => report(await session.regenerate(entry, choice))}
-          />
         )}
       </div>
     </article>
