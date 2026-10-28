@@ -1,3 +1,5 @@
+import { AssemblyModules } from "../src/assembler/modules.ts"
+import type { Generation } from "../src/assembler/types.ts"
 import type { ContextSnapshot, WireContext } from "../src/assembler/types.ts"
 import type { AppConfigShape } from "../src/config.ts"
 import type { EntityKind } from "@rp/shared/library.ts"
@@ -115,7 +117,7 @@ const setupScenario = (config: AppConfigShape, failBeforeCapture: boolean, dupli
     const row = rows.find(
       (r) => (JSON.parse(r.context_snapshot_json) as ContextSnapshot).inputs.versionId === entry.version.id
     )!
-    return { api, writer, reader, me, chat, entry, run, row, mock, book, note }
+    return { api, writer, reader, me, chat, entry, run, row, mock, book, note, events }
   })
 }
 const scenario = <E>(
@@ -253,3 +255,88 @@ it.live("distinct lorebooks with equal names and entry UIDs retain distinct insp
     true
   )
 )
+
+for (const dbWorkers of ["source", "bundle"] as const) {
+  it.live(`custom source descriptors reach captured inspector output and restore in ${dbWorkers} workers`, () => {
+    const config = testConfig({ dbWorkers })
+    return Effect.gen(function* () {
+      const { api, reader, me, chat, entry, book, events } = yield* setupScenario(config, false, false)
+      const modules = yield* AssemblyModules
+      const module = (exportName: string) => ({
+        id: "synthetic-provenance",
+        module: new URL("./support/provenancePlugin.ts", import.meta.url).href,
+        exportName
+      })
+      const inspect = () =>
+        reader
+          .AssembleContext({
+            userId: me.id,
+            chatId: chat.id,
+            slotId: entry.slotId,
+            versionId: entry.version.id,
+            now: 1000,
+            timeZone: "UTC",
+            frozen: null
+          })
+          .pipe(Effect.map((result) => JSON.parse(result.generation) as Generation))
+      const before = yield* inspect()
+      const original = before.inspection!.sources
+      let captured: typeof entry.version.id | undefined
+      // The historical response survives closing both the stage and descriptor registrations.
+      const run = yield* Effect.scoped(
+        Effect.gen(function* () {
+          yield* modules.register(module("install"))
+          const during = yield* inspect()
+          assert.deepStrictEqual(during.inspection!.sources.slice(0, -1), original)
+          const custom = during.inspection!.sources.at(-1)![0]!
+          assert.equal(custom.kind, "synthetic/scene")
+          assert.equal(custom.label, "Scene reference")
+          assert.equal(custom.ref, book.ref.id)
+          const { entry: next } = yield* posted(
+            api.Generate({ chatId: chat.id, parentSlotId: entry.slotId, branch: false })
+          )
+          yield* eventually(() => finished(events, next.version.id) !== undefined)
+          captured = next.version.id
+          return yield* api.GetRunContext({ versionId: next.version.id })
+        })
+      )
+      assert.isTrue(
+        run.messages.some(
+          (m) =>
+            m.content === "Synthetic scene details" &&
+            m.sources.some(
+              (source) =>
+                source.kind === "synthetic/scene" && source.label === "Scene reference" && source.ref === book.ref.id
+            )
+        )
+      )
+      assert.deepStrictEqual(yield* api.GetRunContext({ versionId: captured! }), run)
+      assert.deepStrictEqual((yield* inspect()).inspection!.sources, original)
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          yield* modules.register(module("installStage"))
+          const fallback = (yield* inspect()).inspection!.sources.at(-1)![0]!
+          assert.equal(fallback.kind, "synthetic/scene")
+          assert.equal(fallback.label, "synthetic/scene")
+          assert.isUndefined(fallback.ref)
+        })
+      )
+      for (const [exportName, label] of [
+        ["override", "Plugin assembler title"],
+        ["disable", "assembler"]
+      ]) {
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            yield* modules.register(module(exportName!))
+            const sources = (yield* inspect())
+              .inspection!.sources.flat()
+              .filter((source) => source.kind === "assembler")
+            assert.isAbove(sources.length, 0)
+            assert.isTrue(sources.every((source) => source.label === label))
+          })
+        )
+        assert.deepStrictEqual((yield* inspect()).inspection!.sources, original)
+      }
+    }).pipe(Effect.scoped, Effect.provide(Layer.merge(serverLayer(config), ProviderBuiltins.layer)))
+  })
+}

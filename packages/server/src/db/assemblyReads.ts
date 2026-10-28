@@ -53,7 +53,7 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
                 sources: sources.pins(),
                 ...(built.inputs.model ? { wire: wireContext(built.request, built.inputs.model) } : {})
               }
-              const inspection = yield* inspectionInputs(sql, userId, snapshot)
+              const inspection = yield* inspectionInputs(sql, userId, snapshot, assembler)
               return {
                 snapshot: JSON.stringify(snapshot),
                 generation: JSON.stringify({ ...generationOf(snapshot), inspection })
@@ -229,7 +229,7 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
               ? previous.wire.cache.ttlS
               : next.inputs.model.cacheTtlS
             : next.inputs.model.cacheTtlS) ?? null
-        const changed = prefixChange(previous, next, yield* describer(sql, userId, chatId, [previous, next]))
+        const changed = prefixChange(previous, next, yield* describer(sql, userId, chatId, [previous, next], assembler))
         const expiresAt = yield* cacheExpiry(sql, userId, chatId, last, previous)
         return {
           ...boundary,

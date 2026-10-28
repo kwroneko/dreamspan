@@ -297,7 +297,7 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
           snapshot: JSON.stringify({ ...taken, ...(wire ? { wire } : {}) }),
           generation: JSON.stringify({
             ...generationOf(taken),
-            inspection: yield* inspectionInputs(sql, userId, taken)
+            inspection: yield* inspectionInputs(sql, userId, taken, assembler)
           })
         }
       }).pipe(inJobFork(sql, jobId), query("AssembleSummary"), (effect) => withAssemblyModules(assembler, effect))

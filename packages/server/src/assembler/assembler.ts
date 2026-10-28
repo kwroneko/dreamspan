@@ -1,3 +1,4 @@
+import { builtinSourceDescriptors, type SourceDescriptor } from "./sourceDescriptors.ts"
 import {
   defaultLeafPlanner,
   defaultMaintenancePlanner,
@@ -30,6 +31,7 @@ import type { AssemblyTransform, TransformRegistry } from "./pipeline.ts"
 import { registerBuiltinProjections, registerBuiltinStages } from "./stages.ts"
 
 export interface Assembler {
+  readonly sourceDescriptors: Registry<SourceDescriptor>
   readonly leafPlanners: Registry<LeafPlanner>
   readonly maintenancePlanners: Registry<MaintenancePlanner>
   readonly summaryInstructions: Registry<SummaryInstruction>
@@ -48,6 +50,8 @@ export class WorkerAssembler extends Context.Service<WorkerAssembler, Assembler>
 
 /** An assembler whose built-in stages and macros stay registered for the scope. */
 export const makeAssembler: Effect.Effect<Assembler, never, Scope.Scope> = Effect.gen(function* () {
+  const sourceDescriptors = makeRegistry<SourceDescriptor>()
+  for (const entry of builtinSourceDescriptors) yield* sourceDescriptors.register(entry)
   const stages = makeStageRegistry()
   const macros = makeMacroRegistry()
   const transforms = makeRegistry<AssemblyTransform>()
@@ -66,6 +70,7 @@ export const makeAssembler: Effect.Effect<Assembler, never, Scope.Scope> = Effec
   yield* registerBuiltinProjections(projections)
   yield* registerBuiltinMacros(macros)
   const assembler: Assembler = {
+    sourceDescriptors,
     leafPlanners,
     maintenancePlanners,
     summaryInstructions,

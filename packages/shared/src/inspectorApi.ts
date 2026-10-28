@@ -56,7 +56,11 @@ export const ContextSource = Schema.Struct({
       changed: Schema.optionalKey(Schema.Boolean)
     })
   ),
-  kind: Schema.Literals(["preset", "card", "lorebook", "note", "summary", "message", "direction", "assembler"]),
+  /** Built-in source kind or a namespaced plugin kind (<plugin-id>/<kind>). */
+  kind: Schema.Union([
+    Schema.Literals(["preset", "card", "lorebook", "note", "summary", "message", "direction", "assembler"]),
+    Schema.String.check(Schema.isPattern(/^[^/]+\/[^/]+$/))
+  ]),
   /** Stable identity from source references and revisions, independent of display text. */
   id: Schema.String,
   label: Schema.String,

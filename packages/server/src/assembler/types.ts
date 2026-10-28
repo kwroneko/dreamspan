@@ -25,7 +25,14 @@ export type Role = "system" | "user" | "assistant"
 export type GenerationType = "normal" | "swipe" | "impersonate" | "continue" | "quiet"
 
 /** Where a piece of the context came from, for the request inspector (DESIGN §7.4). */
+export interface PluginSource {
+  readonly kind: `${string}/${string}`
+  /** Plain JSON, pinned with the piece; descriptors never need live plugin state. */
+  readonly data: typeof Schema.Json.Type
+}
+
 export type Source =
+  | PluginSource
   | {
       readonly kind: "summary"
       readonly id: string

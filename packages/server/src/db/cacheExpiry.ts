@@ -1,10 +1,9 @@
-import type { ChatId } from "@rp/shared/chat.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import type { UserId } from "@rp/shared/domain.ts"
 import type { ContextSnapshot, WireContext } from "../assembler/types.ts"
 import { prefixChange } from "../assembler/warmth.ts"
-import { describer } from "./inspectorReads.ts"
+import { fallbackDescription } from "../assembler/sourceDescriptors.ts"
 
 /** A cache hit cannot extend a fixed lifetime established by the original write. */
 export const cacheExpiry = (
@@ -32,14 +31,13 @@ export const cacheExpiry = (
               AND q.started_at <= ${last.started_at} AND q.status = 'complete' AND p.context_snapshot_json IS NOT NULL
               AND (q.cache_read = 0 OR q.cache_write > 0)
             ORDER BY q.started_at DESC, q.id DESC LIMIT 100`
-      const descriptions = yield* describer(sql, userId, chatId as ChatId, [previous])
       let write: { startedAt: number; snapshot: ContextSnapshot } | undefined
       for (const row of candidates) {
         const snapshot = {
           ...(JSON.parse(row.snapshot) as ContextSnapshot),
           ...(row.sent ? { wire: JSON.parse(row.sent) as WireContext } : {})
         }
-        if (prefixChange(snapshot, previous, descriptions) === null) {
+        if (prefixChange(snapshot, previous, fallbackDescription) === null) {
           write = { startedAt: row.started_at, snapshot }
           break
         }

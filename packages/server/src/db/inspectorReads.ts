@@ -8,7 +8,9 @@ import type { ChatId, SlotId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { NotFound } from "@rp/shared/errors.ts"
 import { type ContextSource, RunContext } from "@rp/shared/inspectorApi.ts"
-import { CONDITION_LABELS } from "@rp/shared/presetConditions.ts"
+import type { Assembler } from "../assembler/assembler.ts"
+import { withAssemblyModules } from "../assembler/modules.ts"
+import { fallbackDescription } from "../assembler/sourceDescriptors.ts"
 import { Effect } from "effect"
 import { SqlClient, type SqlError } from "effect/sql"
 import type { ContextSnapshot, Source, WireContext, InspectionInputs, InspectionNode } from "../assembler/types.ts"
@@ -28,9 +30,15 @@ export const describer = (
   sql: SqlClient.SqlClient,
   userId: UserId,
   chatId: ChatId,
-  snapshots: ReadonlyArray<ContextSnapshot>
+  snapshots: ReadonlyArray<ContextSnapshot>,
+  assembler: Assembler
 ): Effect.Effect<(source: Source) => ContextSource, SqlError.SqlError> =>
   Effect.gen(function* () {
+    // Copy active entries while the trusted request's module scope is open.
+    const descriptors = yield* withAssemblyModules(
+      assembler,
+      Effect.sync(() => new Map(assembler.sourceDescriptors.list().map((entry) => [entry.id, entry])))
+    )
     const sources = snapshots.flatMap((s) => [...s.pieces.map((p) => p.source), ...(s.skippedPrompts ?? [])])
     const revisions = unique(
       sources.flatMap((s) => (s.kind === "card" || s.kind === "note" || s.kind === "lorebook" ? [s.revision] : []))
@@ -106,72 +114,12 @@ export const describer = (
               ? (source.activation ?? null)
               : null
       }
-      switch (source.kind) {
-        case "preset": {
-          const name = promptNames.get(`${source.revision}:${source.identifier}`)
-          // Its other text (`utility.new_chat_prompt`, `prefill.assistant`) by what it is.
-          const other = source.identifier.replace(/^utility\./, "").replaceAll("_", " ")
-          const when = source.condition
-            ? ` (sent ${CONDITION_LABELS[source.condition].toLowerCase()})`
-            : source.triggers
-              ? ` (sent only for ${source.triggers.join(", ")} generations)`
-              : ""
-          return {
-            ...common,
-            kind: "preset",
-            label: (name ? `Preset prompt “${name}”` : `Preset: ${other}`) + when,
-            slotId: null,
-            ...(source.ref ? { ref: source.ref } : {})
-          }
-        }
-        case "card":
-          return {
-            ...common,
-            kind: "card",
-            label: `Card “${names.get(source.revision) ?? "unnamed"}”: ${source.field}`,
-            slotId: null,
-            ...linkOf(source.revision)
-          }
-        case "lorebook": {
-          const title = titles.get(`${source.revision}:${source.uid}`)
-          return {
-            ...common,
-            kind: "lorebook",
-            label: `Lorebook “${names.get(source.revision) ?? "unnamed"}”: entry ${source.uid}${title ? ` “${title}”` : ""}`,
-            slotId: null,
-            ...linkOf(source.revision)
-          }
-        }
-        case "note":
-          return { ...common, kind: "note", label: `Note “${names.get(source.revision) ?? "unnamed"}”`, slotId: null }
-        case "summary":
-          return {
-            ...common,
-            kind: "summary",
-            label: `Summary, level ${source.level}, messages ${source.from}–${source.to}, revision ${source.revisionNumber}`,
-            slotId: null,
-            summary: { id: source.id, revision: source.revision, stale: source.stale }
-          }
-        case "message": {
-          const depth = depthOf.get(source.slot)
-          const ordinal = ordinalOf.get(source.version)
-          return {
-            ...common,
-            kind: "message",
-            label: depth === undefined ? "A message" : `Message ${depth + 1}`,
-            ...(ordinal === undefined ? {} : { version: ordinal + 1 }),
-            slotId: source.slot as SlotId
-          }
-        }
-        case "direction":
-          return { ...common, kind: "direction", label: "One-turn direction", slotId: null }
-        case "assembler":
-          return {
-            ...common,
-            kind: "assembler",
-            label: source.what.charAt(0).toUpperCase() + source.what.slice(1),
-            slotId: null
-          }
+      return {
+        ...common,
+        kind: source.kind,
+        ...(descriptors
+          .get(source.kind)
+          ?.describe(source, { names, titles, promptNames, depthOf, ordinalOf, linkOf }) ?? fallbackDescription(source))
       }
     }
   })
@@ -197,9 +145,14 @@ export const rolloutUsage = (sql: SqlClient.SqlClient, userId: UserId, rolloutId
     ORDER BY started_at, id`
 
 /** Raw display metadata leaves the reader only with generation, never through the public inspector. */
-export const inspectionInputs = (sql: SqlClient.SqlClient, userId: UserId, snapshot: ContextSnapshot) =>
+export const inspectionInputs = (
+  sql: SqlClient.SqlClient,
+  userId: UserId,
+  snapshot: ContextSnapshot,
+  assembler: Assembler
+) =>
   Effect.gen(function* () {
-    const describe = yield* describer(sql, userId, snapshot.inputs.chatId as ChatId, [snapshot])
+    const describe = yield* describer(sql, userId, snapshot.inputs.chatId as ChatId, [snapshot], assembler)
     const { model, preset } = snapshot.inputs
     const [connection] = model
       ? yield* sql<{ name: string }>`

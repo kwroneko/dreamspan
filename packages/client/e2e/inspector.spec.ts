@@ -1,3 +1,5 @@
+import { fixtureSql } from "../../server/test/support/lcmFixtures.ts"
+import type { WireContext } from "../../server/src/assembler/types.ts"
 // The request inspector and the cache-warmth indicator (DESIGN §5.5, §7.4), against the
 // production server, which generates through the context assembler and the provider
 // layer, here a fake OpenAI-compatible provider on loopback. The card is made up.
@@ -487,4 +489,60 @@ test("a held branch reply says waiting for the cache, including after reload", a
   provider.release()
   await expect(page.getByText("Waiting for the cache…", { exact: true })).toHaveCount(0)
   await expect(reply(page)).toBeVisible()
+})
+
+// The worker integration test exercises registration and capture; this pins the generic UI contract.
+test("a namespaced provenance source renders its title and library link", async ({ page }) => {
+  const [rows] = await Effect.runPromise(
+    fixtureSql(
+      server().dataDir,
+      [
+        {
+          sql: "SELECT p.rollout_id, p.sent_context_json FROM rollout_payloads p JOIN versions v ON v.rollout_id = p.rollout_id WHERE v.id = ?",
+          params: [chat.reply]
+        }
+      ],
+      { readOnly: true }
+    )
+  )
+  const row = rows![0]!
+  const original = row.sent_context_json as string
+  const wire = JSON.parse(original) as WireContext
+  const source = wire.messages.flatMap((message) => message.sources ?? []).find((source) => source.ref)!
+  const ref = source.ref!
+  const changed = {
+    ...wire,
+    messages: wire.messages.map((message) => ({
+      ...message,
+      sources: message.sources?.map((candidate) =>
+        candidate.id === source.id
+          ? { ...candidate, kind: "synthetic/scene", label: "Plugin scene reference" }
+          : candidate
+      )
+    }))
+  }
+  const save = (json: string) =>
+    Effect.runPromise(
+      fixtureSql(server().dataDir, [
+        {
+          sql: "UPDATE rollout_payloads SET sent_context_json = ? WHERE rollout_id = ?",
+          params: [json, row!.rollout_id as string]
+        }
+      ])
+    )
+  try {
+    await save(JSON.stringify(changed))
+    await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: 900 })
+      await page.goto(`${server().url}/chats/${chat.id}/context/${chat.reply}`)
+      const link = page.getByRole("link", { name: "Plugin scene reference", exact: true }).first()
+      await expect(link).toBeVisible()
+      await expect(link).toHaveAttribute("href", `/library/${ref}`)
+      await link.scrollIntoViewIfNeeded()
+      await shoot(page, `custom-source-${width}`)
+    }
+  } finally {
+    await save(original)
+  }
 })
