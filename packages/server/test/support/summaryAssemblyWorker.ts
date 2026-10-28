@@ -7,6 +7,7 @@ import { makeAssemblyReadHandlers } from "../../src/db/assemblyReads.ts"
 import { makeLcmPlanningHandlers } from "../../src/db/lcmPlanning.ts"
 import { makeLcmEnableReadHandlers } from "../../src/db/lcmEnableReads.ts"
 import { readerConnection } from "../../src/db/connection.ts"
+import type { ChatId, SlotId, VersionId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 
 const { dbPath, userId, jobId, attempt } = workerData as {
@@ -18,7 +19,7 @@ const { dbPath, userId, jobId, attempt } = workerData as {
 
 const program = Effect.gen(function* () {
   const assembler = yield* makeAssembler
-  const [planning, assembly] = yield* Effect.all([
+  const [planning, assembly, enabling] = yield* Effect.all([
     makeLcmPlanningHandlers,
     makeAssemblyReadHandlers,
     // This handler also requires the same service, rather than constructing private defaults.
@@ -26,16 +27,75 @@ const program = Effect.gen(function* () {
   ]).pipe(Effect.provideService(WorkerAssembler, assembler))
   const build = planning.AssembleSummary({ userId, jobId, attempt })
   const baseline = yield* build
+  const original = JSON.parse(baseline.snapshot) as ContextSnapshot
+  const target = original.summaryJob!.prefix!.inputs
+  const chatId = target.chatId as ChatId
+  const leafSlotId = original.inputs.leafSlotId as SlotId
+  const consumers = yield* Effect.scoped(
+    Effect.gen(function* () {
+      const visited: Array<string> = []
+      let caller = ""
+      yield* assembler.transforms.register({
+        id: "synthetic:consumer-probe",
+        run: (snapshot) =>
+          Effect.sync(() => {
+            visited.push(caller)
+            return snapshot
+          })
+      })
+      caller = "AssembleContext"
+      yield* assembly.AssembleContext({
+        userId,
+        chatId,
+        slotId: target.slotId as SlotId,
+        versionId: target.versionId as VersionId,
+        now: target.now,
+        timeZone: target.timeZone,
+        frozen: null
+      })
+      caller = "CacheWarmth"
+      yield* assembly.CacheWarmth({ userId, chatId, leafSlotId: target.leafSlotId as SlotId | null })
+      caller = "PlanSummaries"
+      yield* planning.PlanSummaries({ userId, chatId, leafSlotId })
+      caller = "EstimateBackfill"
+      yield* enabling.EstimateBackfill({
+        userId,
+        chatId,
+        leafSlotId
+      })
+      caller = "LcmSettingsAt"
+      yield* enabling.LcmSettingsAt({ userId, chatId, leafSlotId })
+      caller = "AssembleSummary"
+      yield* build
+      caller = "RebuildContext"
+      yield* assembly.RebuildContext({ userId, snapshot: baseline.snapshot })
+      return visited
+    })
+  )
   const legacySnapshot = JSON.stringify({ ...JSON.parse(baseline.snapshot), summaryAssembly: undefined })
   const legacy = yield* assembly.RebuildContext({ userId, snapshot: legacySnapshot })
   if (legacy._tag !== "Rebuilt") throw new Error("Cannot rebuild earlier summary snapshot")
   if (legacy.snapshot !== legacySnapshot) throw new Error("Earlier snapshot changed during rebuild")
   const changed = yield* Effect.scoped(
     Effect.gen(function* () {
+      let staged = false
+      yield* assembler.stages.register({
+        id: "synthetic:job-metadata",
+        run: (assembly) =>
+          Effect.sync(() => {
+            const job = assembly.request.summaryJob
+            if (job?.id !== jobId || job.inputs.length !== 3 || !job.prefix)
+              throw new Error("Missing summary metadata before transforms")
+            staged = true
+            return assembly
+          })
+      })
       yield* assembler.transforms.register({
         id: "summary-request",
         run: (snapshot) =>
           Effect.sync(() => {
+            if (!staged) throw new Error("Transform ran without the metadata stage")
+            staged = false
             const job = snapshot.summaryJob!
             if (job.id !== jobId || job.inputs.length !== 3 || !job.prefix) throw new Error("Missing summary metadata")
             const at = snapshot.request.messages.length
@@ -78,6 +138,7 @@ const program = Effect.gen(function* () {
   const restoredAgain = yield* build
   const parse = (json: string) => JSON.parse(json) as ContextSnapshot
   return {
+    consumers,
     baseline: parse(baseline.snapshot),
     changed: parse(changed.generated.snapshot),
     generation: JSON.parse(changed.generated.generation) as unknown,

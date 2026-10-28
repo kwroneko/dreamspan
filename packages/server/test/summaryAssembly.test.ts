@@ -9,6 +9,7 @@ import type { Generation } from "../src/assembler/types.ts"
 import { lcmHarness, lcmTest } from "./support/lcmHarness.ts"
 
 interface Probe {
+  consumers: Array<string>
   baseline: ContextSnapshot
   changed: ContextSnapshot
   generation: Generation
@@ -79,6 +80,15 @@ for (const withPreset of [true, false]) {
               })
             })
         )
+        assert.deepStrictEqual(probe.consumers, [
+          "AssembleContext",
+          "CacheWarmth",
+          "PlanSummaries",
+          "EstimateBackfill",
+          "LcmSettingsAt",
+          "AssembleSummary",
+          "RebuildContext"
+        ])
         const text = `Synthetic request for ${job!.id}: ${probe.changed.summaryAssembly!.job.tail}`
         assert.deepStrictEqual(probe.changed.request.messages.at(-1), { role: "system", content: text })
         assert.deepStrictEqual(probe.changed.pieces.at(-1), {
