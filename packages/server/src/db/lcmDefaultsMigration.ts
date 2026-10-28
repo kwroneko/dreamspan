@@ -43,7 +43,7 @@ export const lcmDefaultsMigration = Effect.gen(function* () {
     (yield* sql<{ user_id: string; value_json: string }>`
       SELECT user_id, value_json FROM user_settings WHERE key = 'generation.lcm'`).map((row) => [
       row.user_id,
-      JSON.parse(row.value_json) as Record<string, unknown>
+      (JSON.parse(row.value_json) ?? {}) as Record<string, unknown>
     ])
   )
   const rows = yield* sql<{ chat_id: string; owner_user_id: string; value_json: string }>`

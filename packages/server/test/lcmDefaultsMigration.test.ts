@@ -48,6 +48,14 @@ it.effect("0055 moves never-changed copies to the new sizes and keeps the user's
     // The user raised the recent target to 22,000 with the old maximum: the new maximum would be below it.
     yield* chat("tight", "u", copy, { ...copy, recentTarget: 22_000 })
     yield* chat("account", "v", copy)
+    // Both of a pair set by the user stay; the other pair, never changed, follows.
+    yield* chat("both", "u", copy, { ...copy, recentTarget: 10_000, recentMax: 15_000 })
+    // The summaries' maximum set below the new target: the pair stays whole.
+    yield* chat("squeezed", "u", copy, { ...copy, layerMax: 9000 })
+    // An account default that sets both summary sizes: the chat's copies of them stay.
+    yield* sql`INSERT INTO users(id,handle,display_name,role,created_at) VALUES('w','w','w','admin',1)`
+    yield* sql`INSERT INTO user_settings(user_id,key,value_json) VALUES('w','generation.lcm','{"layerTarget":8000,"layerMax":12000}')`
+    yield* chat("accountPair", "w", copy)
     yield* chat("old", "u", { enabled: true })
 
     yield* lcmDefaultsMigration
@@ -64,6 +72,9 @@ it.effect("0055 moves never-changed copies to the new sizes and keeps the user's
     assert.deepStrictEqual(sizes(yield* latest("changed")), [12_000, 30_000, 8000, 18_000])
     assert.deepStrictEqual(sizes(yield* latest("tight")), [22_000, 24_000, 14_000, 18_000])
     assert.deepStrictEqual(sizes(yield* latest("account")), [16_000, 20_000, 14_000, 18_000])
+    assert.deepStrictEqual(sizes(yield* latest("both")), [10_000, 15_000, 14_000, 18_000])
+    assert.deepStrictEqual(sizes(yield* latest("squeezed")), [12_000, 20_000, 8000, 9000])
+    assert.deepStrictEqual(sizes(yield* latest("accountPair")), [12_000, 20_000, 8000, 12_000])
     assert.deepStrictEqual(yield* latest("old"), { enabled: true })
 
     // Run again, it changes nothing.
