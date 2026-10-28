@@ -1092,7 +1092,7 @@ export const baseline: ReadonlyArray<string> = [
   `CREATE TABLE lcm_enable_runs (
     id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
     payload_json TEXT NOT NULL CHECK(json_valid(payload_json)), cursor TEXT, gathered INTEGER NOT NULL DEFAULT 0,
-    copied INTEGER NOT NULL DEFAULT 0, phase TEXT NOT NULL DEFAULT 'gather', published INTEGER NOT NULL DEFAULT 0, fork_id TEXT
+    copied INTEGER NOT NULL DEFAULT 0, phase TEXT NOT NULL DEFAULT 'gather', published INTEGER NOT NULL DEFAULT 0
   ) STRICT`,
   `CREATE UNIQUE INDEX lcm_enable_one_staging ON lcm_enable_runs(chat_id) WHERE published = 0 AND phase <> 'cancelled'`,
   `CREATE TABLE lcm_enable_slots (

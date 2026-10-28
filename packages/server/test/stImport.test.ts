@@ -57,12 +57,13 @@ const chatBySource = (source: string) => {
   return row?.chatId as ChatId
 }
 
-/** Every slot of a chat with its selected text, in creation order. */
+/** Every slot of a chat with its selected text, in creation order; `hidden` as its fork's `hide` row says, else as inserted. */
 const slots = (chatId: ChatId) => {
   const conn = db()
   const rows = conn
     .prepare(
-      `SELECT s.id, s.parent_slot_id AS parent, s.context_excluded AS hidden, v.content, v.speaker_entity_id AS speaker,
+      `SELECT s.id, s.parent_slot_id AS parent, coalesce((SELECT o.flag FROM fork_overrides o WHERE o.kind = 'hide' AND o.target_id = s.id
+           ORDER BY o.seq DESC LIMIT 1), s.context_excluded) AS hidden, v.content, v.speaker_entity_id AS speaker,
          v.writer, v.reasoning, (SELECT count(*) FROM versions w WHERE w.slot_id = s.id) AS versions
        FROM slots s JOIN versions v ON v.id = s.selected_version_id WHERE s.chat_id = ? ORDER BY s.depth, s.created_at, s.id`
     )

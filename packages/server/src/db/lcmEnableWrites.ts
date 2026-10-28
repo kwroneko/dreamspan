@@ -3,8 +3,7 @@
 // it covers (or the run is just shown), the switch is written, and the backfill is recorded. It
 // never generates; the next reply, or "Summarize now", plans the work.
 import type { UserId } from "@rp/shared/domain.ts"
-import { shownIn, shownVersionDeletedIn, slotDeletedIn, viewAt, writeOverride } from "./forkState.ts"
-import { contextExcludedIn } from "./lcmVisibility.ts"
+import { shownIn, shownVersionDeletedIn, slotDeletedIn, viewAt } from "./forkState.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
@@ -59,11 +58,9 @@ export const makeLcmEnableWriteHandlers = (bin: Bin) =>
               return yield* reject("StageLcmEnable", "This chat has no imported summary to adopt.")
             yield* sql`UPDATE lcm_enable_runs SET phase = 'cancelled' WHERE chat_id = ${chatId} AND published = 0 AND phase <> 'cancelled'`
             const id = uuidv7()
-            // The fork the run was staged in is the one its unhide applies to (below).
-            const stagedIn = leafSlotId ? yield* viewAt(sql, chatId, leafSlotId) : null
-            yield* sql`INSERT INTO lcm_enable_runs(id, chat_id, payload_json, cursor, phase, fork_id)
+            yield* sql`INSERT INTO lcm_enable_runs(id, chat_id, payload_json, cursor, phase)
               VALUES (${id}, ${chatId}, ${JSON.stringify({ leafSlotId, choice, approved, imported })},
-                ${imported?.lastSlotId ?? null}, ${imported ? "gather" : "ready"}, ${stagedIn})`
+                ${imported?.lastSlotId ?? null}, ${imported ? "gather" : "ready"})`
             return { runId: id, ready: !imported }
           }
           const [run] = yield* sql<{
@@ -173,8 +170,8 @@ export const makeLcmEnableWriteHandlers = (bin: Bin) =>
           let unhidden = 0
           let summaryId: string | null = null
           if (runId) {
-            const [run] = yield* sql<{ payload_json: string; phase: string; fork_id: string | null }>`
-              SELECT * FROM lcm_enable_runs WHERE id = ${runId} AND chat_id = ${chatId} AND published = 0`
+            const [run] = yield* sql<{ payload_json: string; phase: string }>`SELECT * FROM lcm_enable_runs
+              WHERE id = ${runId} AND chat_id = ${chatId} AND published = 0`
             if (!run || run.phase !== "ready")
               return yield* reject("EnableLcm", "The imported range is still being prepared.")
             const payload = JSON.parse(run.payload_json) as {
@@ -188,21 +185,6 @@ export const makeLcmEnableWriteHandlers = (bin: Bin) =>
             if (choice === "adopt") {
               summaryId = runId
               yield* sql`UPDATE summaries SET sealed = 1 WHERE id = ${summaryId}`
-            }
-            // The staged unhide is the fork's own (spec/FORK-INDEPENDENCE-DELTA.md §2.4): a `hide`
-            // row for each hidden message of the range, and the run's overlay, which showed
-            // them in every fork, ends. A run staged before forks keeps the overlay.
-            if (run.fork_id !== null) {
-              const hidden = yield* sql<{ slot_id: string }>`
-                SELECT es.slot_id FROM lcm_enable_slots es JOIN slots s ON s.id = es.slot_id
-                WHERE es.run_id = ${runId} AND es.shown = 1 AND ${contextExcludedIn(sql, run.fork_id)} = 1`
-              for (const row of hidden)
-                yield* writeOverride(
-                  sql,
-                  { id: run.fork_id, chatId },
-                  { kind: "hide", targetId: row.slot_id, slotId: row.slot_id, valueId: null, flag: 0 }
-                )
-              yield* sql`UPDATE lcm_enable_slots SET shown = 0 WHERE run_id = ${runId}`
             }
             yield* sql`UPDATE lcm_enable_runs SET published = 1 WHERE id = ${runId}`
           } else if (choice === "adopt") return yield* reject("EnableLcm", "Adoption needs a prepared range.")

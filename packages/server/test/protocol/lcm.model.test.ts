@@ -215,6 +215,18 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
     // parent's. Every step works in the current fork, whose tip is `leaf`.
     let current: string = chat.currentForkId!
     const choices = new Map<string, Map<SlotId, VersionId>>([[current, new Map()]])
+    // Deleting is per fork: each fork's deleted messages (slot to bin item), a branch's starting as its
+    // parent's, and restoring in the fork that deleted a message leaves a fork made after it as it was.
+    const deletions = new Map<string, Map<SlotId, string>>([[current, new Map()]])
+    const liveBins = new Set<string>()
+    const binFork = new Map<string, string>()
+    const syncDeleted = () => {
+      for (const node of nodes.values()) {
+        const bin = deletions.get(current)?.get(node.id) ?? null
+        node.deleted = bin !== null
+        node.bin = bin
+      }
+    }
     const shown = (node: Node) => choices.get(current)!.get(node.id) ?? node.selected
     const choose = (node: Node, versionId: VersionId) => choices.get(current)!.set(node.id, versionId)
     const path = (tip: SlotId | null) => {
@@ -288,8 +300,10 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
           (f) => f.id === result.forkId
         )!
         choices.set(result.forkId, new Map(choices.get(made.parentForkId!)!))
+        deletions.set(result.forkId, new Map(deletions.get(made.parentForkId!) ?? []))
       }
       current = result.forkId
+      syncDeleted()
       accept(result, parent)
     }
     const remember = (summary: Summary, inputs: Summary["inputs"], children: ReadonlyArray<Artifact>) => {
@@ -783,19 +797,25 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
           )
           version.amends++
           version.content = `amend-${index}`
-        } else if (step.kind === "delete" && node && node.id !== leaf) {
+        } else if (step.kind === "delete" && node && node.id !== leaf && path(leaf).includes(node)) {
+          // Only on the current fork's path, so that the fork a delete is made in is the current one.
           const bin = await call(writer.DeleteMessage({ userId: user.id, slotId: node.id }))
-          node.deleted = true
-          node.bin = bin.id
+          const forkId = String(bin.origin.forkId)
+          if (!deletions.has(forkId)) deletions.set(forkId, new Map())
+          deletions.get(forkId)!.set(node.id, bin.id)
+          liveBins.add(bin.id)
+          binFork.set(bin.id, forkId)
+          syncDeleted()
         } else if (step.kind === "restore") {
           const deleted = pick(
-            [...nodes.values()].filter((n) => n.deleted),
+            [...nodes.values()].filter((n) => n.deleted && liveBins.has(n.bin!)),
             step.a
           )
           if (deleted) {
             await call(writer.RestoreBinItem({ userId: user.id, itemId: deleted.bin! }))
-            deleted.deleted = false
-            deleted.bin = null
+            liveBins.delete(deleted.bin!)
+            deletions.get(binFork.get(deleted.bin!)!)!.delete(deleted.id)
+            syncDeleted()
           }
         } else if (step.kind === "hide" && node) {
           node.hidden = !node.hidden
