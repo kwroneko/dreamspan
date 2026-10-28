@@ -153,6 +153,10 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
         [forked.kind, forked.refKind, forked.label, forked.subtitle],
         ["card", "upstream", "Mira", "noir"]
       )
+      assert.strictEqual(head.ref.modelName, "Mira Vey")
+      assert.strictEqual(forked.modelName, "Captain Vey")
+      assert.isTrue(head.ref.hasImport)
+      assert.isFalse(forked.hasImport)
       assert.isFalse(forked.updateAvailable)
       assert.strictEqual(forked.followsRefId, null)
       const opened = yield* api.OpenEditor({ refId: forked.id })
@@ -318,6 +322,8 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
 
       // An archived member stays; one in the bin stays, marked, and its fork still names it.
       yield* writer.SetEntityArchived({ userId, entityId: d.entityId, archived: true })
+      const archived = yield* api.ListLibrary({ kind: "card", archived: true })
+      assert.strictEqual(archived.find((ref) => ref.id === d.id)?.modelName, "Root")
       const binned = yield* writer.DeleteEntity({ userId, entityId: c.entityId })
       const withBin = yield* from(a.entityId)
       assert.deepStrictEqual(

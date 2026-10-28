@@ -1,3 +1,4 @@
+import { cardNames } from "@rp/shared/cardNames.ts"
 import { Effect } from "effect"
 import { useCardNameCheck } from "./cardNameCheck.ts"
 import { checkCardNames } from "./checkCardNames.ts"
@@ -19,17 +20,24 @@ export function ForkDialog({ store, onClose }: { store: EditorStore; onClose: ()
   const action = useAction()
   const navigate = useNavigate()
   const dirty = state.dirty > 0
-  const [label, setLabel] = useState(`${ref.label} (${ref.kind === "card" ? "fork" : "variant"})`)
-  const [subtitle, setSubtitle] = useState("")
-  const [nickname, setNickname] = useState(String(state.snapshot!.doc.nickname ?? ""))
+  const [label, setLabel] = useState(ref.kind === "card" ? ref.label : `${ref.label} (variant)`)
+  const [subtitle, setSubtitle] = useState(ref.kind === "card" ? ref.subtitle : "")
+  const [nickname, setNickname] = useState(cardNames(state.snapshot!.doc).modelName)
   const nameCheck = useCardNameCheck(label.trim(), subtitle.trim())
   const clash = ref.kind === "card" ? nameCheck : null
   const [moveDrafts, setMoveDrafts] = useState(dirty)
+  const [preparing, setPreparing] = useState(false)
+  const pending = preparing || action.pending
 
   const submit = async (event: FormEvent) => {
     event.preventDefault()
-    if (clash) return
+    if (clash || pending) return
+    setPreparing(true)
     await store.flush()
+    if (moveDrafts && store.saveError) {
+      setPreparing(false)
+      return
+    }
     const result = await action.run(
       (client) =>
         Effect.gen(function* () {
@@ -51,17 +59,18 @@ export function ForkDialog({ store, onClose }: { store: EditorStore; onClose: ()
         }),
       ["library"]
     )
+    setPreparing(false)
     if (result.ok) void navigate({ to: "/library/$refId", params: { refId: result.value.id } })
   }
 
   return (
     <Dialog
       open
-      onOpenChange={(open) => !open && onClose()}
+      onOpenChange={(open) => !open && !pending && onClose()}
       title={ref.kind === "card" ? "Fork card" : "Make a variant"}
       description={
         ref.kind === "card"
-          ? `Creates an independent card from “${ref.label}”.`
+          ? `Creates an independent card and copies its notes from “${ref.label}”. Parent edits never reach it.`
           : `A named variant follows “${ref.label}”: its changes stay in the variant, and updates to “${ref.label}” still reach it.`
       }
     >
@@ -69,11 +78,18 @@ export function ForkDialog({ store, onClose }: { store: EditorStore; onClose: ()
         <Field label={ref.kind === "card" ? "Display name" : "Library label"}>
           <Input value={label} onChange={(event) => setLabel(event.currentTarget.value)} required />
         </Field>
-        <Field label={ref.kind === "card" ? "Version (shown as subtitle)" : "Subtitle (optional)"}>
-          <Input value={subtitle} onChange={(event) => setSubtitle(event.currentTarget.value)} />
+        <Field
+          label={ref.kind === "card" ? "Version (shown as subtitle)" : "Subtitle (optional)"}
+          description={ref.kind === "card" ? "Change the version or display name to tell this fork apart." : undefined}
+        >
+          <Input
+            autoFocus={ref.kind === "card"}
+            value={subtitle}
+            onChange={(event) => setSubtitle(event.currentTarget.value)}
+          />
         </Field>
         {ref.kind === "card" && (
-          <Field label="In-character name">
+          <Field label="In-character name" description="Used in prompts and {{char}}. Empty uses the display name.">
             <Input value={nickname} onChange={(event) => setNickname(event.currentTarget.value)} />
           </Field>
         )}
@@ -88,15 +104,12 @@ export function ForkDialog({ store, onClose }: { store: EditorStore; onClose: ()
             {clash}
           </p>
         )}
-        <ErrorAlert error={action.error} />
+        <ErrorAlert error={action.error ?? store.saveError} />
         <DialogActions>
-          <Button onClick={onClose}>Cancel</Button>
-          <Button
-            type="submit"
-            variant="primary"
-            pending={action.pending}
-            disabled={label.trim() === "" || clash !== null}
-          >
+          <Button onClick={onClose} disabled={pending}>
+            Cancel
+          </Button>
+          <Button type="submit" variant="primary" pending={pending} disabled={label.trim() === "" || clash !== null}>
             {ref.kind === "card" ? "Fork card" : "Make the variant"}
           </Button>
         </DialogActions>

@@ -1,3 +1,4 @@
+import { CardSurface } from "../cardForks/surfaces.tsx"
 import { useCardNameCheck } from "./cardNameCheck.ts"
 import type { PresetContext } from "@rp/shared/inspectorApi.ts"
 // A library entry's editor (ARCHITECTURE.md §14): which entry and scope you're editing, how
@@ -162,6 +163,7 @@ export function Editor({
             </Badge>
           )}
         </div>
+        {ref.kind === "card" && <CardSurface placement="provenance" entityId={ref.entityId} />}
         {ref.subtitle && <p className="text-muted [overflow-wrap:anywhere]">{ref.subtitle}</p>}
         {ref.kind === "preset" ? (
           <p className="text-sm">
@@ -219,8 +221,9 @@ export function Editor({
           </Button>
           {ref.kind !== "preset" && <Button onClick={() => setOpen("search")}>Search</Button>}
           <Button onClick={() => setOpen("history")}>History</Button>
-          {ref.kind !== "note" && ref.refKind !== "chat_override" && (
-            <Button onClick={() => setOpen("fork")}>{ref.kind === "card" ? "Fork" : "Make a variant"}</Button>
+          {ref.kind === "card" && <CardSurface placement="actions" entityId={ref.entityId} store={store} />}
+          {ref.kind !== "card" && ref.kind !== "note" && ref.refKind !== "chat_override" && (
+            <Button onClick={() => setOpen("fork")}>Make a variant</Button>
           )}
           {ref.kind !== "card" && (
             <Button variant="ghost" onClick={() => setOpen("rename")}>
@@ -279,6 +282,7 @@ export function Editor({
         </Alert>
       )}
 
+      {ref.kind === "card" && <CardSurface placement="family" entityId={ref.entityId} />}
       {ref.kind === "card" && <CardEditor store={store} call={call} onUpload={(file) => void upload(file)} />}
       {ref.kind === "preset" && <PresetEditor store={store} call={call} context={context} focus={focus} />}
       {ref.kind === "note" && (

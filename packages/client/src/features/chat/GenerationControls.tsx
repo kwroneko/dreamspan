@@ -12,7 +12,8 @@ import { Select } from "../../ui/Select.tsx"
 import { ModelSettingsEditor } from "../connections/models.tsx"
 import { Editor } from "../editor/EditorPage.tsx"
 import { modelValue, parseModelValue, useModelChoices } from "./modelChoices.ts"
-import type { ChatSession } from "./session.ts"
+import type { ChatSession, ChatView } from "./session.ts"
+import { useIsPanelTab } from "./panels.tsx"
 
 function useSelections(session: ChatSession) {
   const action = useAction()
@@ -47,11 +48,15 @@ function useSelections(session: ChatSession) {
 
 export function GenerationControls({
   session,
+  view,
   onSettings
 }: {
   session: ChatSession
+  view: ChatView
   onSettings: (tab: "model" | "preset") => void
 }) {
+  const modelPanel = useIsPanelTab("model", view)
+  const presetPanel = useIsPanelTab("preset", view)
   const { action, defaults, presets } = useSelections(session)
   const current = defaults?.model ? modelValue(defaults.model.connection, defaults.model.model) : null
   const models = useModelChoices(true, current)
@@ -74,9 +79,11 @@ export function GenerationControls({
               />
             </Field>
           </div>
-          <Button aria-label="Model settings" onClick={() => onSettings("model")}>
-            ⚙
-          </Button>
+          {modelPanel && (
+            <Button aria-label="Model settings" onClick={() => onSettings("model")}>
+              ⚙
+            </Button>
+          )}
         </div>
         <div className="flex min-w-0 items-end gap-1">
           <div className="min-w-0 flex-1">
@@ -99,9 +106,11 @@ export function GenerationControls({
               />
             </Field>
           </div>
-          <Button aria-label="Prompt preset settings" onClick={() => onSettings("preset")}>
-            ⚙
-          </Button>
+          {presetPanel && (
+            <Button aria-label="Prompt preset settings" onClick={() => onSettings("preset")}>
+              ⚙
+            </Button>
+          )}
         </div>
       </div>
       <ErrorAlert error={action.error} />

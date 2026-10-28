@@ -1,9 +1,11 @@
+import { registerCharacterPanels } from "./panels.tsx"
 import { routes } from "../../routes.tsx"
 import { CardPage } from "./CardPage.tsx"
 import { CharactersPage } from "./CharactersPage.tsx"
 import { GroupPage } from "./GroupPage.tsx"
 
 export const register = () => {
+  registerCharacterPanels()
   // The home screen: the character grid (DESIGN §2.1).
   routes.register({ id: "characters", parent: "app", path: "/", component: CharactersPage })
   // A card without entering a chat; its pending chat is `/cards/$entityId/chat` (chat feature).

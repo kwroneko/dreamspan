@@ -34,11 +34,15 @@ export class LibraryRef extends Schema.Class<LibraryRef>("LibraryRef")({
   /** For cards, label and subtitle derive from this revision’s name and character_version. */
   label: Schema.String,
   subtitle: Schema.String,
+  /** For cards, the saved nickname with its display-name fallback. */
+  modelName: Schema.optionalKey(Schema.String),
   headRevisionId: RevisionId,
   followsRefId: Schema.NullOr(RefId),
   chatId: Schema.NullOr(ChatId),
   /** The ref it follows has moved on since the last merge. */
   updateAvailable: Schema.Boolean,
+  /** Whether this entry has an import line to update from a file. */
+  hasImport: Schema.optionalKey(Schema.Boolean),
   rowVersion: Schema.Int,
   updatedAt: Schema.Number
 }) {}

@@ -17,6 +17,7 @@ import {
   type RevisionId
 } from "@rp/shared/library.ts"
 import { hasSchema, validateDoc } from "@rp/shared/editing.ts"
+import { modelName } from "@rp/shared/cardNames.ts"
 import { merge3 } from "@rp/shared/merge.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
@@ -46,6 +47,7 @@ export interface RefRow {
   readonly followed_head: string | null
   /** The followed ref's label; null for an upstream ref. */
   readonly followed_label: string | null
+  readonly card_nickname: unknown
 }
 
 export const toLibraryRef = (row: RefRow) =>
@@ -56,9 +58,18 @@ export const toLibraryRef = (row: RefRow) =>
     refKind: row.ref_kind,
     label: row.label,
     subtitle: row.subtitle,
+    ...(row.kind === "card"
+      ? {
+          modelName: modelName({
+            name: row.label,
+            nickname: typeof row.card_nickname === "string" ? row.card_nickname : ""
+          })
+        }
+      : {}),
     headRevisionId: row.head_revision_id as RevisionId,
     followsRefId: row.follows_ref_id as RefId | null,
     chatId: row.chat_id as ChatId | null,
+    hasImport: row.ref_kind === "upstream" && row.followed_head !== null,
     updateAvailable: row.followed_head !== null && row.followed_head !== row.merge_base_revision_id,
     rowVersion: row.row_version,
     updatedAt: row.updated_at
@@ -70,6 +81,9 @@ export const toLibraryRef = (row: RefRow) =>
 const refSelect = `
   SELECT r.id, r.entity_id, e.kind, r.ref_kind, r.label, r.subtitle, r.head_revision_id, r.follows_ref_id,
     r.merge_base_revision_id, r.chat_id, r.row_version, r.updated_at, f.label AS followed_label,
+    CASE WHEN e.kind = 'card' THEN
+      (SELECT json_extract(h.doc_json, '$.nickname') FROM entity_revisions h WHERE h.id = r.head_revision_id)
+      ELSE NULL END AS card_nickname,
     CASE WHEN r.ref_kind = 'upstream'
       THEN (SELECT i.id FROM entity_revisions i WHERE i.entity_id = r.entity_id AND i.origin = 'import'
             ORDER BY i.seq DESC LIMIT 1)
